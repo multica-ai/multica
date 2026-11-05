@@ -32,6 +32,7 @@ import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel } from "./task-run-labels";
 import { commentRunOutput, isActiveCommentRun, showCommentRunInHeader, type CommentRun } from "./comment-runs";
+import { ParticipantRing, useParticipantNameStyle } from "./participant-identity";
 
 import { useRunAnimationVisibility, useRunDisclosureMotion } from "./use-run-comment-motion";
 
@@ -78,6 +79,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const { t } = useT("issues");
   const { t: tAgents } = useT("agents");
   const { getActorName } = useActorName();
+  const nameStyle = useParticipantNameStyle("agent", task.agent_id);
   const locale = useLocale();
   const timeAgo = useTimeAgo();
   const name = getActorName("agent", task.agent_id);
@@ -180,9 +182,11 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
       className={cn("@container/run min-w-0 py-2", className)} data-run-id={task.id}>
       <div ref={animationVisibility.ref} className="flex min-h-7 min-w-0 items-center gap-2" data-run-summary-row>
         {showIdentity && <>
-          <ActorAvatar actorType="agent" actorId={task.agent_id} size="md" enableHoverCard showStatusDot />
+          <ParticipantRing actorType="agent" actorId={task.agent_id}>
+            <ActorAvatar actorType="agent" actorId={task.agent_id} size="md" enableHoverCard showStatusDot />
+          </ParticipantRing>
           <TruncatedTooltip content={name}>
-            <span className="max-w-[30%] shrink-0 truncate text-body font-medium">{name}</span>
+            <span className="max-w-[30%] shrink-0 truncate text-body font-medium" style={nameStyle}>{name}</span>
           </TruncatedTooltip>
           {!active && task.completed_at && <Tooltip>
             <TooltipTrigger render={<span className="shrink-0 cursor-default text-label text-muted-foreground @max-[32rem]/run:hidden">

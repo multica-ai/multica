@@ -47,6 +47,7 @@ import {
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useNavigation } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ParticipantRing } from "../../issues/components/participant-identity";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import {
   CollectionCreateButton,
@@ -227,13 +228,15 @@ function NameCell({ row }: { row: AgentListRow }) {
   return (
     <CollectionNameCell
       icon={
-        <ActorAvatar
-          actorType="agent"
-          actorId={agent.id}
-          size="sm"
-          className={`shrink-0 ${isArchived ? "opacity-50 grayscale" : ""}`}
-          showStatusDot
-        />
+        <ParticipantRing actorType="agent" actorId={agent.id}>
+          <ActorAvatar
+            actorType="agent"
+            actorId={agent.id}
+            size="sm"
+            className={`shrink-0 ${isArchived ? "opacity-50 grayscale" : ""}`}
+            showStatusDot
+          />
+        </ParticipantRing>
       }
       title={agent.name}
       muted={isArchived}

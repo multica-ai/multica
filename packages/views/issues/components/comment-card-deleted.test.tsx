@@ -126,7 +126,7 @@ describe("CommentCard — deleted comments", () => {
     expect(screen.getByText("This comment was deleted")).toBeTruthy();
     expect(screen.getByText("body bb")).toBeTruthy();
     expect(actionMenus()).toHaveLength(1);
-    expect(screen.getByText("Leave a reply...")).toBeTruthy();
+    expect(screen.getByText("Reply to this thread or instruct the agent...")).toBeTruthy();
   });
 
   it("tells the user the replies are kept when the server keeps them", async () => {

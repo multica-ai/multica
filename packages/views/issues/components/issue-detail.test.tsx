@@ -89,7 +89,7 @@ vi.mock("@multica/core/workspace/hooks", () => ({
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "members"],
-    queryFn: () => Promise.resolve([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
+    queryFn: () => Promise.resolve([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin", created_at: "2026-01-01T00:00:00Z" }]),
   }),
   agentListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "agents"],
@@ -345,7 +345,7 @@ const mockApiObj = vi.hoisted(() => ({
   listAttachments: vi.fn().mockResolvedValue([]),
   addCommentReaction: vi.fn(),
   removeCommentReaction: vi.fn(),
-  listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
+  listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin", created_at: "2026-01-01T00:00:00Z" }]),
   listAgents: vi.fn().mockResolvedValue([]),
   getAgent: vi.fn().mockResolvedValue(null),
   listRuntimes: vi.fn().mockResolvedValue([]),
@@ -743,7 +743,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listTaskMessages.mockResolvedValue([]);
     mockApiObj.rerunIssue.mockResolvedValue({ id: "task-rerun" });
     mockApiObj.listMembers.mockResolvedValue([
-      { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
+      { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin", created_at: "2026-01-01T00:00:00Z" },
     ]);
     mockApiObj.listAgents.mockResolvedValue([]);
     // Reset project mock — individual tests override per case. Default fixture
@@ -752,7 +752,7 @@ describe("IssueDetail (shared)", () => {
   });
 
   it("passes the issue's agent assignment to the local-directory hint", async () => {
-    const agent = { id: "agent-vue", name: "Vue developer", runtime_id: "runtime-vue" };
+    const agent = { id: "agent-vue", name: "Vue developer", runtime_id: "runtime-vue", created_at: "2026-01-02T00:00:00Z" };
     mockApiObj.getIssue.mockResolvedValue({
       ...mockIssue,
       project_id: "proj-1",
@@ -1311,7 +1311,7 @@ describe("IssueDetail (shared)", () => {
 
     await screen.findByText("Implement authentication");
     fireEvent.click(screen.getByTestId("comment-composer-shell"));
-    const editor = await screen.findByPlaceholderText("Leave a comment...");
+    const editor = await screen.findByPlaceholderText("Message the agent or give it an instruction — @ to choose who handles it...");
     fireEvent.change(editor, { target: { value: "A new update" } });
     const composer = editor.closest<HTMLElement>("[aria-busy], .relative.flex.flex-col.rounded-lg")!;
     fireEvent.click(within(composer).getByRole("button", { name: "Send" }));

@@ -1,3 +1,4 @@
+import type React from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
@@ -7,6 +8,12 @@ import { NavigationProvider } from "../../navigation";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enInbox from "../../locales/en/inbox.json";
 
+// Identity colours need workspace queries this test does not provide.
+vi.mock("../../issues/components/participant-identity", () => ({
+  ParticipantRing: ({ children }: { children: React.ReactNode }) => children,
+  ParticipantName: ({ children, className }: { children: React.ReactNode; className?: string }) => <span className={className}>{children}</span>,
+}));
+vi.mock("./inbox-project-label", () => ({ InboxProjectLabel: () => null }));
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   // The catalog is server state; these suites render leaves without a
   // QueryClientProvider, so it is stubbed like the other data hooks. Built-in

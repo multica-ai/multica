@@ -673,7 +673,7 @@
     "delete_failed": "댓글을 삭제하지 못했습니다",
     "reply_count_other": "답글 {{count}}개",
     "replying_to": "{{name}}에게 답글: {{preview}}",
-    "leave_comment_placeholder": "댓글 남기기...",
+    "leave_comment_placeholder": "에이전트에게 메시지나 지시를 보내세요 (@로 담당 지정)...",
     "send_tooltip": "보내기",
     "trigger_source_issue_assignee": "담당자",
     "trigger_source_mention_agent": "@멘션",
@@ -725,7 +725,7 @@
     "restart_failed": "현재 실행을 중지하지 못했습니다. 메시지는 보내지 않았습니다."
   },
   "reply": {
-    "placeholder": "답글 남기기...",
+    "placeholder": "이 토론에 답글을 달거나 에이전트에게 지시하세요...",
     "annotations": {
       "confirm_add": "주석 추가",
       "save": "주석 저장",

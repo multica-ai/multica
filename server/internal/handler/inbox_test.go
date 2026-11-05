@@ -60,6 +60,43 @@ func TestListInboxProjectsCurrentIssueStatusAndPriority(t *testing.T) {
 	}
 }
 
+// The inbox names an issue's project from issue_project_id.
+func TestListInboxProjectsIssueProjectID(t *testing.T) {
+	workspaceID := dbfx.Workspace(t, "Inbox project projection", "inbox-project-"+uuid.NewString())
+	dbfx.Member(t, workspaceID, testUserID, "owner")
+	projectID := dbfx.Project(t, "Inbox project", testutil.Cols{"workspace_id": workspaceID})
+	inProject := dbfx.Issue(t, "In a project", testutil.Cols{"workspace_id": workspaceID, "project_id": projectID})
+	noProject := dbfx.Issue(t, "No project", testutil.Cols{"workspace_id": workspaceID})
+	for _, issueID := range []string{inProject, noProject} {
+		dbfx.Insert(t, "inbox_item", testutil.Cols{
+			"workspace_id":   workspaceID,
+			"recipient_type": "member",
+			"recipient_id":   testUserID,
+			"type":           "status_changed",
+			"severity":       "info",
+			"issue_id":       issueID,
+			"title":          "Projected issue",
+		})
+	}
+
+	var items []InboxItemResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListInbox),
+		inboxRequest(http.MethodGet, "/api/inbox", workspaceID)).
+		Want(http.StatusOK).
+		JSON(&items)
+
+	got := map[string]*string{}
+	for _, item := range items {
+		got[*item.IssueID] = item.IssueProjectID
+	}
+	if p := got[inProject]; p == nil || *p != projectID {
+		t.Errorf("issue_project_id for project issue = %v, want %s", p, projectID)
+	}
+	if p, ok := got[noProject]; !ok || p != nil {
+		t.Errorf("issue_project_id for issue without project = %v (present %v), want null", p, ok)
+	}
+}
+
 func TestListArchivedInboxLimitsIssueGroupsNotRows(t *testing.T) {
 	workspaceID := dbfx.Workspace(t, "Archived inbox groups", "archived-groups-"+uuid.NewString())
 	dbfx.Member(t, workspaceID, testUserID, "owner")

@@ -673,7 +673,7 @@
     "delete_failed": "コメントを削除できませんでした",
     "reply_count_other": "返信 {{count}} 件",
     "replying_to": "{{name}} への返信: {{preview}}",
-    "leave_comment_placeholder": "コメントを残す...",
+    "leave_comment_placeholder": "エージェントにメッセージや指示を送る（@ で担当を指定）...",
     "send_tooltip": "送信",
     "trigger_source_issue_assignee": "担当",
     "trigger_source_mention_agent": "@メンション",
@@ -725,7 +725,7 @@
     "restart_failed": "現在の実行を停止できませんでした。メッセージは送信されていません。"
   },
   "reply": {
-    "placeholder": "返信を残す...",
+    "placeholder": "このスレッドに返信、またはエージェントに指示...",
     "annotations": {
       "confirm_add": "注釈を追加",
       "save": "注釈を保存",

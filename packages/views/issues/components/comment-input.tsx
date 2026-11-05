@@ -220,9 +220,10 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
   });
 
   return (
+    // Same visible box as the thread reply composer (see ReplyInput).
     <div
       {...dropZoneProps}
-      className="relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border"
+      className="relative flex flex-col rounded-lg border border-input bg-background pb-8 shadow-xs transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/20"
     >
       {attachmentsBlockSteer && <div className="px-3 pt-2">
         <SteerAttachmentNotice />

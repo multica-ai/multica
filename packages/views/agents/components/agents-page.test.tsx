@@ -54,6 +54,11 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
+// Identity colours need workspace queries this test does not provide.
+vi.mock("../../issues/components/participant-identity", () => ({
+  ParticipantRing: ({ children }: { children: React.ReactNode }) => children,
+  ParticipantName: ({ children, className }: { children: React.ReactNode; className?: string }) => <span className={className}>{children}</span>,
+}));
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey?: readonly unknown[] }) => {
     const key = options.queryKey?.[0];

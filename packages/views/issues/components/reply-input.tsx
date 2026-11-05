@@ -231,14 +231,17 @@ function ReplyInput({
         actorType={avatarType}
         actorId={avatarId}
         size={avatarSize}
-        className="mt-0.5 shrink-0"
+        className="mt-1.5 shrink-0"
       />
+      {/* A visible box (border, field background, focus ring) so
+          the reply composer never reads as plain thread text. */}
       <div
         {...dropZoneProps}
         ref={composerRef}
         className={cn(
-          "relative min-w-0 flex-1 flex flex-col",
-          (!isEmpty || annotations.length > 0) && "pb-9",
+          "relative min-w-0 flex-1 flex flex-col rounded-lg border border-input bg-background px-3 py-1.5 shadow-xs transition-[border-color,box-shadow]",
+          "focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/20",
+          (!isEmpty || annotations.length > 0) && "pb-10",
         )}
       >
         {attachmentsBlockSteer && <SteerAttachmentNotice />}
@@ -303,7 +306,7 @@ function ReplyInput({
             <p className="text-muted-foreground">{placeholderText}</p>
           </div>
         )}
-        <div className="absolute bottom-0 left-0 right-24 min-w-0">
+        <div className="absolute bottom-1 left-2 right-24 min-w-0">
           <CommentTriggerChips
             recipients={recipients}
             blocked={triggerPreview.blocked}
@@ -312,7 +315,7 @@ function ReplyInput({
             onActionChange={setAction}
           />
         </div>
-        <div className="absolute bottom-0 right-0 flex items-center gap-1">
+        <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
           <FileUploadButton
             size="sm"
             multiple

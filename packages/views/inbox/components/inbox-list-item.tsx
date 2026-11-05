@@ -22,6 +22,8 @@ import { handleRowActivationKey } from "../../common/row-actions-menu";
 import { useT } from "../../i18n";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { resolveClickIntent, useIntentNavigate } from "../../navigation";
+import { ParticipantRing } from "../../issues/components/participant-identity";
+import { InboxProjectLabel } from "./inbox-project-label";
 
 // Hook returning a localized relative-time formatter — the i18n equivalent
 // of the previous static `timeAgo` function. Returning a function (rather
@@ -132,12 +134,14 @@ export function InboxListItem({
           : "hover:bg-accent/50 data-[popup-open]:bg-accent/50"
       }`}
     >
-      <ActorAvatar
-        actorType={actorType}
-        actorId={item.actor_id ?? item.recipient_id}
-        size="lg"
-        enableHoverCard
-      />
+      <ParticipantRing actorType={actorType} actorId={item.actor_id ?? item.recipient_id}>
+        <ActorAvatar
+          actorType={actorType}
+          actorId={item.actor_id ?? item.recipient_id}
+          size="lg"
+          enableHoverCard
+        />
+      </ParticipantRing>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1.5">
@@ -175,9 +179,12 @@ export function InboxListItem({
           </div>
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground"}`}>
-            <InboxDetailLabel item={item} />
-          </p>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <InboxProjectLabel item={item} />
+            <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground"}`}>
+              <InboxDetailLabel item={item} />
+            </p>
+          </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {/* Badge only, no hover card (MUL-5189). "An agent is on this"
                 is worth showing while triaging; the card behind it adds only

@@ -237,6 +237,20 @@
     --chart-3: oklch(0.76 0.10 255);
     --chart-4: oklch(0.85 0.06 255);
     --chart-5: oklch(0.92 0.03 255);
+    /* Per-participant identity hues for comment threads. Spread
+       around the wheel and kept at ≥4.5:1 against the card so names stay
+       readable as text. Ordered so the first six are ≥60° apart on the
+       hue wheel; slots are handed out in roster order (participant-color.ts). */
+    --participant-0: oklch(0.52 0.13 25);
+    --participant-1: oklch(0.52 0.13 145);
+    --participant-2: oklch(0.52 0.13 265);
+    --participant-3: oklch(0.52 0.10 85);
+    --participant-4: oklch(0.52 0.10 205);
+    --participant-5: oklch(0.52 0.13 325);
+    --participant-6: oklch(0.52 0.13 55);
+    --participant-7: oklch(0.52 0.10 175);
+    /* How much of the speaker's colour tints their comment background. */
+    --participant-tint: 10%;
     --radius: 0.5rem;
     --issue-row-height: 36px;
     --sidebar: oklch(0.964435 0.001327 286.375);
@@ -318,6 +332,15 @@
     --chart-3: oklch(0.52 0.10 255);
     --chart-4: oklch(0.42 0.06 255);
     --chart-5: oklch(0.32 0.03 255);
+    --participant-0: oklch(0.76 0.12 25);
+    --participant-1: oklch(0.76 0.12 145);
+    --participant-2: oklch(0.76 0.12 265);
+    --participant-3: oklch(0.76 0.12 85);
+    --participant-4: oklch(0.76 0.12 205);
+    --participant-5: oklch(0.76 0.12 325);
+    --participant-6: oklch(0.76 0.12 55);
+    --participant-7: oklch(0.76 0.12 175);
+    --participant-tint: 14%;
     --sidebar: oklch(0.21 0.006 285.885);
     --sidebar-foreground: oklch(0.985 0 0);
     --sidebar-primary: oklch(0.488 0.243 264.376);

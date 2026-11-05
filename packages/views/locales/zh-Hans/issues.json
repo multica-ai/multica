@@ -673,7 +673,7 @@
     "delete_failed": "删除评论失败",
     "reply_count_other": "{{count}} 条回复",
     "replying_to": "回复 {{name}}：{{preview}}",
-    "leave_comment_placeholder": "留下评论...",
+    "leave_comment_placeholder": "给智能体发消息或下指令，@ 可指定由谁处理...",
     "send_tooltip": "发送",
     "trigger_source_issue_assignee": "负责人",
     "trigger_source_mention_agent": "@提及",
@@ -725,7 +725,7 @@
     "restart_failed": "没能停止当前运行，消息还没有发送。"
   },
   "reply": {
-    "placeholder": "回复...",
+    "placeholder": "回复这个讨论，或给智能体下指令...",
     "annotations": {
       "confirm_add": "添加批注",
       "save": "保存批注",

@@ -10,6 +10,7 @@ import type { Issue, Project,
 } from "@multica/core/types";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ParticipantRing } from "./participant-identity";
 import { PropertyIcon } from "../../common/property-icon";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useQuery } from "@tanstack/react-query";
@@ -186,12 +187,14 @@ function ListRowContent({
             </span>
           )}
           {showAssignee && (
-            <ActorAvatar
-              actorType={issue.assignee_type!}
-              actorId={issue.assignee_id!}
-              size="sm"
-              enableHoverCard
-            />
+            <ParticipantRing actorType={issue.assignee_type!} actorId={issue.assignee_id!}>
+              <ActorAvatar
+                actorType={issue.assignee_type!}
+                actorId={issue.assignee_id!}
+                size="sm"
+                enableHoverCard
+              />
+            </ParticipantRing>
           )}
         </AppLink>
       </div>

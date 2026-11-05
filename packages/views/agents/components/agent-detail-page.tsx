@@ -79,6 +79,7 @@ import {
   ObjectPage,
 } from "../../layout/object-page";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ParticipantName, ParticipantRing } from "../../issues/components/participant-identity";
 import { useT } from "../../i18n";
 import { availabilityConfig } from "../presence";
 import {
@@ -661,7 +662,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           <div className="space-y-4">
             <ObjectIdentity
               media={<AgentMark agent={agent} presence={presence} />}
-              title={agent.name}
+              title={<ParticipantName actorType="agent" actorId={agent.id}>{agent.name}</ParticipantName>}
               description={agent.description || undefined}
               trailing={
                 isArchived ? (
@@ -798,13 +799,15 @@ function AgentMark({
   const { t } = useT("agents");
   return (
     <span className="relative inline-flex [--avatar-slot-size:3rem]">
-      <ActorAvatar
-        actorType="agent"
-        actorId={agent.id}
-        size="2xl"
-        profileLink={false}
-        className="ring-1 ring-border"
-      />
+      <ParticipantRing actorType="agent" actorId={agent.id}>
+        <ActorAvatar
+          actorType="agent"
+          actorId={agent.id}
+          size="2xl"
+          profileLink={false}
+          className="ring-1 ring-border"
+        />
+      </ParticipantRing>
       {presence ? (
         <span
           role="img"

@@ -1,3 +1,4 @@
+import type React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
@@ -15,6 +16,12 @@ import { InboxListItem } from "./inbox-list-item";
 // exercises.
 let catalogEntries: IssueStatusEntry[] | undefined;
 
+// Identity colours need workspace queries this test does not provide.
+vi.mock("../../issues/components/participant-identity", () => ({
+  ParticipantRing: ({ children }: { children: React.ReactNode }) => children,
+  ParticipantName: ({ children, className }: { children: React.ReactNode; className?: string }) => <span className={className}>{children}</span>,
+}));
+vi.mock("./inbox-project-label", () => ({ InboxProjectLabel: () => null }));
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog(catalogEntries),
 }));

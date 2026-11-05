@@ -1,7 +1,8 @@
 -- name: ListInboxItems :many
 SELECT i.*,
        iss.status AS issue_status,
-       iss.priority AS issue_priority
+       iss.priority AS issue_priority,
+       iss.project_id AS issue_project_id
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
@@ -75,7 +76,8 @@ WITH eligible_archived AS MATERIALIZED (
 )
 SELECT i.*,
        iss.status AS issue_status,
-       iss.priority AS issue_priority
+       iss.priority AS issue_priority,
+       iss.project_id AS issue_project_id
 FROM inbox_item i
 JOIN selected_ids selected ON selected.id = i.id
 LEFT JOIN issue iss ON iss.id = i.issue_id

@@ -14,6 +14,7 @@ import { descriptionPreview } from "./description-preview";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { CalendarClock, CalendarDays } from "@multica/ui/icons";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ParticipantRing } from "./participant-identity";
 import { PropertyIcon } from "../../common/property-icon";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -163,14 +164,16 @@ export const BoardCardContent = memo(function BoardCardContent({
 
   const assigneeInner = hasAssignee ? (
     <span className="flex min-w-0 max-w-full items-center gap-1.5">
-      <ActorAvatar
-        actorType={issue.assignee_type!}
-        actorId={issue.assignee_id!}
-        size="sm"
-        enableHoverCard
-        profileLink={false}
-        className="shrink-0"
-      />
+      <ParticipantRing actorType={issue.assignee_type!} actorId={issue.assignee_id!}>
+        <ActorAvatar
+          actorType={issue.assignee_type!}
+          actorId={issue.assignee_id!}
+          size="sm"
+          enableHoverCard
+          profileLink={false}
+          className="shrink-0"
+        />
+      </ParticipantRing>
       {assigneeName && (
         <span className="min-w-0 truncate text-caption text-foreground">{assigneeName}</span>
       )}

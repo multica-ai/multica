@@ -690,7 +690,7 @@
     "reply_count_one": "{{count}} réponse",
     "reply_count_other": "{{count}} réponses",
     "replying_to": "En réponse à {{name}} : {{preview}}",
-    "leave_comment_placeholder": "Laisser un commentaire...",
+    "leave_comment_placeholder": "Écrire ou donner une consigne à l'agent — @ pour choisir qui s'en charge...",
     "send_tooltip": "Envoyer",
     "trigger_source_issue_assignee": "assigné",
     "trigger_source_mention_agent": "@mention",
@@ -747,7 +747,7 @@
     "restart_failed": "Impossible d'arrêter l'exécution en cours. Votre message n'a pas été envoyé."
   },
   "reply": {
-    "placeholder": "Laisser une réponse...",
+    "placeholder": "Répondre à cette discussion ou donner une consigne à l'agent...",
     "annotations": {
       "confirm_add": "Ajouter une annotation",
       "save": "Enregistrer l'annotation",

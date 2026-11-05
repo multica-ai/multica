@@ -63,14 +63,18 @@ import { useAttachmentVersions } from "./deliverables/attachment-versions";
 import { VersionBadge } from "./deliverables/version-badge";
 import { useRunCommentMotion } from "./use-run-comment-motion";
 import { WakeupSourceChip } from "./wakeup-source-chip";
+import { ParticipantName, ParticipantRing, ThreadSummary, participantBlockClassName, useParticipantBlockStyle } from "./participant-identity";
 
 const commentActionClassName =
   "text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50";
 
 const highlightedCommentBackgroundClass =
   "bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]";
+// Replies indent under the root author's avatar, so it is clear
+// which discussion each reply belongs to.
+const threadRepliesClassName = "ml-7 max-md:ml-4";
 const stickyHeaderFadeClass =
-  "after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-1 after:bg-[inherit] after:[mask-image:linear-gradient(to_bottom,#000,transparent)] after:[-webkit-mask-image:linear-gradient(to_bottom,#000,transparent)]";
+  "after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-1 after:bg-[inherit] after:[background-image:inherit] after:[mask-image:linear-gradient(to_bottom,#000,transparent)] after:[-webkit-mask-image:linear-gradient(to_bottom,#000,transparent)]";
 
 function StickyHeaderShell({
   className,
@@ -99,7 +103,7 @@ function StickyHeaderShell({
       className={cn(
         "sticky top-0 z-10 mb-1 transition-colors duration-700",
         !highlighted && stickyHeaderFadeClass,
-        highlighted ? highlightedCommentBackgroundClass : "bg-card",
+        highlighted ? highlightedCommentBackgroundClass : "bg-card bg-[linear-gradient(var(--comment-bg,transparent),var(--comment-bg,transparent))]",
         className,
       )}
     >
@@ -683,10 +687,12 @@ function CommentRow({
   // replies flat, in its place — a placeholder row would say nothing they do
   // not already say. Callers drop this row's chrome too, so the thread shows
   // no empty divider where it was.
+  const blockStyle = useParticipantBlockStyle(entry.actor_type, entry.actor_id);
   if (isDeletedComment(entry)) return null;
 
   return (
-    <div data-comment-block className="pb-3">
+    <div data-comment-block style={blockStyle}
+      className={cn("pb-3 transition-colors duration-700", blockStyle && participantBlockClassName(entry.actor_type), isHighlighted && highlightedCommentBackgroundClass)}>
       {/* Header pins to the timeline's scroll parent within this reply's own
           row box, so a LONG reply keeps its
           author + actions visible while you scroll its body, then releases once
@@ -696,19 +702,21 @@ function CommentRow({
         highlighted={isHighlighted}
         className="flex items-center gap-2.5 px-4 max-md:px-3 pt-3 pb-1"
       >
-        <ActorAvatar
-          actorType={entry.actor_type}
-          actorId={entry.actor_id}
-          name={entry.actor_name}
-          avatarUrl={entry.actor_avatar_url}
-          profileRequiresDirectoryEntry
-          size="md"
-          enableHoverCard
-          showStatusDot
-        />
-        <span className="cursor-pointer text-body font-medium">
+        <ParticipantRing actorType={entry.actor_type} actorId={entry.actor_id}>
+          <ActorAvatar
+            actorType={entry.actor_type}
+            actorId={entry.actor_id}
+            name={entry.actor_name}
+            avatarUrl={entry.actor_avatar_url}
+            profileRequiresDirectoryEntry
+            size="md"
+            enableHoverCard
+            showStatusDot
+          />
+        </ParticipantRing>
+        <ParticipantName actorType={entry.actor_type} actorId={entry.actor_id} className="cursor-pointer text-body font-medium">
           {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
-        </span>
+        </ParticipantName>
         <Tooltip>
           <TooltipTrigger
             render={
@@ -984,7 +992,7 @@ export function AgentRunComment({ run, standalone = false, commentProps, enterin
     <div ref={motionRef} data-run-slot-id={run.task.id}
       data-run-comment-id={!reply ? run.task.id : undefined}
       id={!standalone ? `comment-${slotEntry?.id ?? run.task.id}` : undefined}
-      className={cn("transition-colors duration-700", standalone ? !reply && "rounded-xl border" : "border-t border-border/50", !reply && "py-1.5",
+      className={cn("transition-colors duration-700", standalone ? !reply && "rounded-xl border" : ["border-t border-border/50", threadRepliesClassName], !reply && "py-1.5",
         highlighted ? highlightedCommentBackgroundClass : standalone && !reply && "bg-card")}>
       {commentProps && reply ? standalone ? (
         <CommentCard {...commentProps} runs={commentProps.runs ?? [run]} runViewState={viewState} />
@@ -1107,6 +1115,7 @@ function CommentCardImpl({
           id={`comment-${reply.id}`}
           className={cn(
             "border-t border-border/50 transition-colors duration-700",
+            threadRepliesClassName,
             highlightedCommentId === reply.id && highlightedCommentBackgroundClass,
           )}
         >
@@ -1139,6 +1148,10 @@ function CommentCardImpl({
   const reactions = entry.reactions ?? [];
 
   const isHighlighted = highlightedCommentId === entry.id;
+  const rootBlockStyle = useParticipantBlockStyle(entry.actor_type, entry.actor_id);
+  // A deep link to any comment in the thread outlines the whole discussion.
+  const threadHighlighted = !!highlightedCommentId
+    && (isHighlighted || allNestedReplies.some((reply) => reply.id === highlightedCommentId));
   const toggleLabel = open ? t(($) => $.comment.collapse_thread) : t(($) => $.comment.expand_thread);
 
   // Reply-resolution display. When a REPLY is the thread's resolution, the other
@@ -1179,7 +1192,9 @@ function CommentCardImpl({
     // overflow-clip (not -hidden) clips the rounded corners WITHOUT creating a
     // scroll container, so the sticky collapse affordances below resolve to the
     // timeline's scroll parent instead of this card. See PR #3623.
-    <Card ref={annotation.cardRef} {...annotation.captureProps} className="!py-0 !gap-0 overflow-clip transition-colors duration-700">
+    <Card ref={annotation.cardRef} {...annotation.captureProps} data-thread-highlighted={threadHighlighted || undefined}
+      className={cn("!py-0 !gap-0 overflow-clip border-foreground/20 shadow-sm transition-[background-color,border-color,box-shadow] duration-700 hover:border-foreground/40",
+        threadHighlighted && "border-brand/50 ring-1 ring-brand/30")}>
       {annotation.popup}
       {onCollapseResolved && (
         <button
@@ -1199,7 +1214,8 @@ function CommentCardImpl({
             That is what keeps exactly one header pinned at a time: without this
             wrapper the header's containing block is the whole thread and it
             stays stuck behind every reply. */}
-        <div data-comment-block className={cn("transition-colors duration-700", isHighlighted && highlightedCommentBackgroundClass)}>
+        <div data-comment-block style={deleted ? undefined : rootBlockStyle}
+          className={cn("transition-colors duration-700", !deleted && rootBlockStyle && participantBlockClassName(entry.actor_type), isHighlighted && highlightedCommentBackgroundClass)}>
           {/* Keep the author aligned with replies; thread controls sit on the right. */}
           <StickyHeaderShell
             sticky={stickyHeader}
@@ -1214,19 +1230,21 @@ function CommentCardImpl({
                 </span>
               ) : (
                 <>
-                  <ActorAvatar
-                    actorType={entry.actor_type}
-                    actorId={entry.actor_id}
-                    name={entry.actor_name}
-                    avatarUrl={entry.actor_avatar_url}
-                    profileRequiresDirectoryEntry
-                    size="md"
-                    enableHoverCard
-                    showStatusDot
-                  />
-                  <span className="shrink-0 cursor-pointer text-body font-medium">
+                  <ParticipantRing actorType={entry.actor_type} actorId={entry.actor_id}>
+                    <ActorAvatar
+                      actorType={entry.actor_type}
+                      actorId={entry.actor_id}
+                      name={entry.actor_name}
+                      avatarUrl={entry.actor_avatar_url}
+                      profileRequiresDirectoryEntry
+                      size="md"
+                      enableHoverCard
+                      showStatusDot
+                    />
+                  </ParticipantRing>
+                  <ParticipantName actorType={entry.actor_type} actorId={entry.actor_id} className="shrink-0 cursor-pointer text-body font-medium">
                     {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
-                  </span>
+                  </ParticipantName>
                   <Tooltip>
                     <TooltipTrigger
                       render={
@@ -1487,13 +1505,14 @@ function CommentCardImpl({
         {/* Replies + reply input — rendered OUTSIDE root-section so the root
             header's sticky containing block ends with the body. Gated on `open`
             to mirror the body Panel's collapse visibility. */}
+        {open && !deleted && <ThreadSummary root={entry} replies={visibleReplies} />}
         {open && (
           <>
           {replyFolded ? (
             <>
               {/* reply-mode folded: other replies behind a bar, resolution pinned below */}
               {foldedReplies.length > 0 && (
-                <div className="border-t border-border/50 px-4 max-md:px-3 py-2.5">
+                <div className={cn("border-t border-border/50 px-4 max-md:px-3 py-2.5", threadRepliesClassName)}>
                   <CommentsFoldBar
                     replies={foldedReplies}
                     onExpand={() => onResolvedExpandChange?.(entry.id, true)}

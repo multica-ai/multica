@@ -1,3 +1,4 @@
+import type React from "react";
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -19,6 +20,11 @@ import {
   type NavigationAdapter,
 } from "../../navigation";
 
+// Identity colours read workspace member/agent queries this test does not provide.
+vi.mock("../../issues/components/participant-identity", () => ({
+  ParticipantRing: ({ children }: { children: React.ReactNode }) => children,
+  ParticipantName: ({ children, className }: { children: React.ReactNode; className?: string }) => <span className={className}>{children}</span>,
+}));
 // The page-level tests exercise the header actions, the URL-driven dialogs and
 // the real permission rules (via auth + member fixtures). Each body section,
 // the properties panel and both dialogs have their own tests, so they're

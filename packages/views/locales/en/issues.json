@@ -690,7 +690,7 @@
     "reply_count_one": "{{count}} reply",
     "reply_count_other": "{{count}} replies",
     "replying_to": "Replying to {{name}}: {{preview}}",
-    "leave_comment_placeholder": "Leave a comment...",
+    "leave_comment_placeholder": "Message the agent or give it an instruction — @ to choose who handles it...",
     "send_tooltip": "Send",
     "trigger_source_issue_assignee": "assignee",
     "trigger_source_mention_agent": "@mention",
@@ -747,7 +747,7 @@
     "restart_failed": "Couldn't stop the current run. Your message wasn't sent."
   },
   "reply": {
-    "placeholder": "Leave a reply...",
+    "placeholder": "Reply to this thread or instruct the agent...",
     "annotations": {
       "confirm_add": "Add annotation",
       "save": "Save annotation",

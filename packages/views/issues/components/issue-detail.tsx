@@ -705,15 +705,20 @@ function ActivityBlock({
   if (!expanded) {
     const count = entries.length;
     return (
-      <div className="pb-3 px-4 max-md:px-3">
+      // A folded activity group reads as a quiet timeline marker
+      // between discussions, not as content: smaller, fainter, set between
+      // dashed rules.
+      <div className="pb-3 px-4 max-md:px-3 flex items-center gap-2" data-activity-fold>
+        <span aria-hidden className="h-px flex-1 border-t border-dashed border-border" />
         <button
           type="button"
           onClick={onToggle}
-          className="flex items-center gap-1.5 text-label text-muted-foreground transition-colors hover:text-foreground"
+          className="flex shrink-0 items-center gap-1 text-caption text-faint-foreground transition-colors hover:text-foreground"
         >
           <ChevronRight className="h-3 w-3 shrink-0" />
           <span>{t(($) => $.activity.activity_count, { count })}</span>
         </button>
+        <span aria-hidden className="h-px flex-1 border-t border-dashed border-border" />
       </div>
     );
   }
@@ -3113,7 +3118,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const renderItem = (_i: number, item: TimelineItem): React.ReactElement => {
     if (item.kind === "run") {
       const reply = item.entry;
-      return <div className="pb-3" id={`comment-${item.id}`}>
+      return <div className="pb-5" id={`comment-${item.id}`}>
         {reply?.resolved_at && !expandedResolved.has(reply.id) ? <ResolvedThreadBar
           entry={reply} replies={timelineView.threadReplies.get(reply.id) ?? EMPTY_REPLIES}
           onExpand={() => toggleResolvedExpand(reply.id, true)} /> : <AgentRunComment run={item.run} entering={enteringRunIds.has(item.run.task.id)} standalone
@@ -3134,7 +3139,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
     if (item.kind === "resolved-bar") {
       return (
-        <div className="pb-3" id={`comment-${item.id}`}>
+        <div className="pb-5" id={`comment-${item.id}`}>
           <ResolvedThreadBar
             entry={item.entry}
             replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
@@ -3146,7 +3151,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (item.kind === "comment") {
       const isResolved = !!item.entry.resolved_at;
       return (
-        <div className="pb-3" id={`comment-${item.id}`}>
+        <div className="pb-5" id={`comment-${item.id}`}>
           <CommentCard
             issueId={id}
             runs={commentRuns.get(item.id) ?? EMPTY_COMMENT_RUNS}

@@ -63,6 +63,8 @@ export interface InboxItem {
    * projection; null also covers notifications without a linked issue.
    */
   issue_priority?: IssuePriority | null;
+  /** Project of the linked issue, so the inbox can name it. */
+  issue_project_id?: string | null;
   read: boolean;
   archived: boolean;
   created_at: string;

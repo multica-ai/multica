@@ -673,7 +673,7 @@
     "delete_failed": "刪除評論失敗",
     "reply_count_other": "{{count}} 條回覆",
     "replying_to": "回覆 {{name}}：{{preview}}",
-    "leave_comment_placeholder": "留下評論...",
+    "leave_comment_placeholder": "給 AI 代理發訊息或下指令，@ 可指定由誰處理...",
     "send_tooltip": "傳送",
     "trigger_source_issue_assignee": "負責人",
     "trigger_source_mention_agent": "@提及",
@@ -725,7 +725,7 @@
     "restart_failed": "沒能停止當前執行，訊息還沒有傳送。"
   },
   "reply": {
-    "placeholder": "回覆...",
+    "placeholder": "回覆這個討論，或給 AI 代理下指令...",
     "annotations": {
       "confirm_add": "新增批註",
       "save": "儲存批註",

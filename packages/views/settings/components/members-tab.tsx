@@ -19,6 +19,7 @@ import {
   X,
 } from "@multica/ui/icons";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ParticipantName, ParticipantRing } from "../../issues/components/participant-identity";
 import { AppLink, useOptionalNavigation } from "../../navigation";
 import type {
   Invitation,
@@ -204,10 +205,12 @@ function MemberRow({
 
   return (
     <div className="flex items-center gap-3 px-4 py-3">
-      <ActorAvatar actorType="member" actorId={member.user_id} size="lg" />
+      <ParticipantRing actorType="member" actorId={member.user_id}>
+        <ActorAvatar actorType="member" actorId={member.user_id} size="lg" />
+      </ParticipantRing>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-body font-medium">{member.name}</span>
+          <ParticipantName actorType="member" actorId={member.user_id} className="truncate text-body font-medium">{member.name}</ParticipantName>
           {isSelf ? (
             <Badge variant="secondary" className="shrink-0">
               {t(($) => $.members.you)}
