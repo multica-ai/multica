@@ -80,7 +80,7 @@ export default function ProjectDetail() {
 
   const userId = useAuthStore((s) => s.user?.id ?? null);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: agents = [] } = useQuery(agentListOptions(wsId, { includeArchived: true }));
   const role = members.find((m) => m.user_id === userId)?.role ?? null;
   const canDelete = !!project && canDeleteProject(project, userId, role, agents);
   const { data: pins } = useQuery(pinListOptions(wsId, userId));
