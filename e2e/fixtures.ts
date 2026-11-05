@@ -5,6 +5,7 @@
  */
 
 import "./env";
+import { createHash, randomBytes } from "node:crypto";
 import pg from "pg";
 
 // `||` (not `??`) so an empty `NEXT_PUBLIC_API_URL=` in .env still falls
@@ -877,6 +878,100 @@ export class TestApiClient {
   }
 
   /** Clean up all issues created during this test. */
+  /**
+   * Seeds a running task for an agent in this workspace, with the `mat_` task token a
+   * claimed run carries, so requests can act as the agent exactly as a run does. The
+   * daemon never claims the task, so no model runs. The Go fixtures seed tasks the same
+   * way. The originator defaults to the signed-in user.
+   */
+  async seedRunningTask(agentId: string, opts: { chatSessionId?: string; originatorEmail?: string } = {}): Promise<{ id: string; token: string }> {
+    if (!this.workspaceId || !this.email) throw new Error("Select a workspace before seeding a task");
+    const token = `mat_${randomBytes(24).toString("hex")}`;
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      const result = await client.query(
+        `WITH u AS (SELECT id FROM "user" WHERE email = $2),
+         t AS (
+           INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, originator_user_id, accountable_user_id, started_at, chat_session_id)
+           SELECT a.id, a.runtime_id, 'running', 0, u.id, u.id, now(), $3 FROM agent a, u WHERE a.id = $1
+           RETURNING id, agent_id
+         )
+         INSERT INTO task_token (token_hash, task_id, agent_id, workspace_id, user_id, expires_at)
+         SELECT $4, t.id, t.agent_id, $5, u.id, now() + interval '1 day' FROM t, u
+         RETURNING task_id`,
+        [agentId, opts.originatorEmail ?? this.email, opts.chatSessionId ?? null, createHash("sha256").update(token).digest("hex"), this.workspaceId],
+      );
+      return { id: result.rows[0].task_id as string, token };
+    } finally {
+      await client.end();
+    }
+  }
+
+  /** Writes a user message in a chat session, bound to the run that the message triggered. */
+  async seedChatMessage(chatSessionId: string, taskId: string, content: string): Promise<string> {
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      const result = await client.query(
+        `INSERT INTO chat_message (chat_session_id, role, content, task_id) VALUES ($1, 'user', $2, $3) RETURNING id`,
+        [chatSessionId, content, taskId],
+      );
+      return result.rows[0].id as string;
+    } finally {
+      await client.end();
+    }
+  }
+
+  /** Makes the agent the workspace's Secretary, as company setup does. */
+  async setSecretary(agentId: string) {
+    if (!this.workspaceId) throw new Error("Select a workspace before naming a Secretary");
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      await client.query(`UPDATE workspace SET secretary_agent_id = $1 WHERE id = $2`, [agentId, this.workspaceId]);
+    } finally {
+      await client.end();
+    }
+  }
+
+  /** Creates a user who is not signed in here, so a test can act as a second person. */
+  async seedUser(email: string, name: string): Promise<void> {
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      await client.query(`INSERT INTO "user" (email, name) VALUES ($1, $2) ON CONFLICT (email) DO NOTHING`, [email, name]);
+    } finally {
+      await client.end();
+    }
+  }
+
+  /** Reads rows from the database, for checks the API does not expose. Test-only. */
+  async queryDb(sql: string, params: unknown[] = []): Promise<Record<string, unknown>[]> {
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      return (await client.query(sql, params)).rows as Record<string, unknown>[];
+    } finally {
+      await client.end();
+    }
+  }
+
+  /** Changes the signed-in user's role in this workspace. Test-only. */
+  async setOwnRole(role: "owner" | "admin" | "member") {
+    if (!this.workspaceId || !this.email) throw new Error("Select a workspace before changing a role");
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      await client.query(
+        `UPDATE member SET role = $1 WHERE workspace_id = $2 AND user_id = (SELECT id FROM "user" WHERE email = $3)`,
+        [role, this.workspaceId, this.email],
+      );
+    } finally {
+      await client.end();
+    }
+  }
+
   async cleanup() {
     if (this.seededIssueIds.length > 0 && this.workspaceId) {
       const client = new pg.Client(DATABASE_URL);

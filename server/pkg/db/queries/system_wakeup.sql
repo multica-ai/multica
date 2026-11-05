@@ -5,7 +5,7 @@ SELECT * FROM issue_wakeup WHERE issue_id= @issue_id AND system_rule= @system_ru
 -- A platform rule on one issue. Two writers ensuring it at once keep the first
 -- row; the loser reads it back with GetSystemWakeup.
 INSERT INTO issue_wakeup(id,workspace_id,issue_id,instruction,kind,mode,event_types,timezone,condition,condition_state,enabled,system_rule)
-VALUES(@id,@workspace_id,@issue_id,'','event','continuous',@event_types,'UTC',@condition,@condition_state,@enabled,@system_rule)
+VALUES(@id,@workspace_id,@issue_id,@instruction,'event','continuous',@event_types,'UTC',@condition,@condition_state,@enabled,@system_rule)
 ON CONFLICT (issue_id,system_rule) WHERE system_rule IS NOT NULL DO NOTHING
 RETURNING *;
 

@@ -91,6 +91,33 @@ func baselineChildDone(ctx context.Context, tx pgx.Tx, q *db.Queries, rule db.Is
 	return q.SetWakeupConditionState(ctx, db.SetWakeupConditionStateParams{ID: rule.ID, ConditionState: fingerprint})
 }
 
+// SecretaryRequestChildDoneInstruction is what the Secretary is woken to do when
+// the children of its request close (spec 13.3.1). It replaces the generic
+// delivery instruction for a Secretary request only; the issue's own instruction
+// wins over the workspace default, so this text holds for the request.
+const SecretaryRequestChildDoneInstruction = "The answers to this request have come in. Read each one critically: open what a claim rests on, challenge the weak ones on their child issues, and compare across squads. Then write the assessment, publish it as an ad hoc brief, and close this request. Follow the secretary-analysis skill."
+
+// secretaryRequestInstruction returns the children-done instruction a new rule
+// starts with: the Secretary's own text when the parent is a request in the
+// Secretary desk held by the workspace's Secretary, and empty otherwise.
+func secretaryRequestInstruction(ctx context.Context, q *db.Queries, ws db.Workspace, parent db.Issue) (string, error) {
+	if !ws.SecretaryAgentID.Valid || parent.AssigneeType.String != "agent" || !parent.ProjectID.Valid ||
+		util.UUIDToString(parent.AssigneeID) != util.UUIDToString(ws.SecretaryAgentID) {
+		return "", nil
+	}
+	project, err := q.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: parent.ProjectID, WorkspaceID: parent.WorkspaceID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if project.Title != SecretaryDeskProjectTitle {
+		return "", nil
+	}
+	return SecretaryRequestChildDoneInstruction, nil
+}
+
 // EnsureChildDoneRule returns the parent's rule, creating it when missing.
 // The new rule's baseline treats sub-issues whose closing is recorded but not
 // yet processed as still open, so that change still wakes the assignee,
@@ -126,9 +153,14 @@ func EnsureChildDoneRule(ctx context.Context, tx pgx.Tx, q *db.Queries, parent d
 	if !met {
 		fingerprint = ""
 	}
+	instruction, err := secretaryRequestInstruction(ctx, q, ws, parent)
+	if err != nil {
+		return rule, err
+	}
 	rule, err = q.CreateSystemWakeup(ctx, db.CreateSystemWakeupParams{
 		ID: dbid.NewV7(), WorkspaceID: parent.WorkspaceID, IssueID: parent.ID,
-		EventTypes: []string{"issue.status_changed"}, Condition: childDoneCondition, ConditionState: fingerprint,
+		Instruction: instruction,
+		EventTypes:  []string{"issue.status_changed"}, Condition: childDoneCondition, ConditionState: fingerprint,
 		Enabled: enabled, SystemRule: systemRuleText(SystemRuleChildDone),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {

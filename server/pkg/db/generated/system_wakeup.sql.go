@@ -146,7 +146,7 @@ func (q *Queries) CountCustomizedSystemWakeups(ctx context.Context, arg CountCus
 
 const createSystemWakeup = `-- name: CreateSystemWakeup :one
 INSERT INTO issue_wakeup(id,workspace_id,issue_id,instruction,kind,mode,event_types,timezone,condition,condition_state,enabled,system_rule)
-VALUES($1,$2,$3,'','event','continuous',$4,'UTC',$5,$6,$7,$8)
+VALUES($1,$2,$3,$4,'event','continuous',$5,'UTC',$6,$7,$8,$9)
 ON CONFLICT (issue_id,system_rule) WHERE system_rule IS NOT NULL DO NOTHING
 RETURNING id, workspace_id, issue_id, agent_id, created_by, source_task_id, parent_comment_id, instruction, kind, mode, event_types, filter_agent_id, filter_task_id, interval_seconds, cron_expression, timezone, next_fire_at, enabled, disabled_at, revision, last_task_id, last_error, created_at, updated_at, filter_actor_type, filter_actor_id, expires_at, expiry_seconds, on_timeout, timed_out_at, system_rule, customized_at, condition, condition_state, max_fires, fire_count, paused_reason
 `
@@ -155,6 +155,7 @@ type CreateSystemWakeupParams struct {
 	ID             pgtype.UUID     `json:"id"`
 	WorkspaceID    pgtype.UUID     `json:"workspace_id"`
 	IssueID        pgtype.UUID     `json:"issue_id"`
+	Instruction    string          `json:"instruction"`
 	EventTypes     []string        `json:"event_types"`
 	Condition      json.RawMessage `json:"condition"`
 	ConditionState string          `json:"condition_state"`
@@ -169,6 +170,7 @@ func (q *Queries) CreateSystemWakeup(ctx context.Context, arg CreateSystemWakeup
 		arg.ID,
 		arg.WorkspaceID,
 		arg.IssueID,
+		arg.Instruction,
 		arg.EventTypes,
 		arg.Condition,
 		arg.ConditionState,

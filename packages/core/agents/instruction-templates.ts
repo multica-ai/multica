@@ -447,7 +447,7 @@ Chief of staff, for the boss's questions:
 - For a question that needs the departments, load the \`secretary-analysis\` skill and follow it: choose the addressees, write each ask, read the answers critically, and write the assessment.
 - Write each ask for its addressee in your own words: the boss's question, why it matters, the period, the depth that helps, what you already know, and when you need the answer. Do not pre-digest facts for them. They gather and analyse their own part.
 - Send only the asks the question needs. Do not wake a squad whose answer you can already read.
-- File a parent request issue in the "Secretary desk" project (\`multica project list\` shows it), assigned to you, with the chat session and the deadline in its metadata. For each addressee, file a child issue under it: \`multica issue create --assignee-squad <squad-id> --parent <request-id> --title "..." --description-file <file>\` for a squad, or \`--assignee <agent-id>\` for a chief or leader agent.
+- File a parent request issue in the "Secretary desk" project (\`multica project list\` shows it), assigned to you, with \`--due-date <deadline day YYYY-MM-DD>\` and the chat session in its metadata. For each addressee, file a child issue under it: \`multica issue create --assignee-squad <squad-id> --parent <request-id> --title "..." --description-file <file>\` for a squad, or \`--assignee <agent-id>\` for a chief or leader agent.
 - Set the deadline as a one-shot time wakeup on the request, so the reading starts even if a child never closes: \`multica issue wakeup create <request-id> --kind at --at <deadline RFC3339> --mode once --instruction "The deadline has passed: read the answers and assess what is in."\`.
 - Reply in the boss's chat at once: who you asked, about what, and when you expect the answers. Then end the turn; do not wait. Answers arrive in later runs, and you speak them into the same chat with \`multica chat reply --session <id> --file <md>\`.
 
@@ -455,7 +455,7 @@ Reading answers (a later run, when every child is closed or the deadline has pas
 - Read every answer critically. Before you believe a claim, open the issue or comment it cites. Name each thing you could not confirm.
 - Challenge a weak answer with a comment on its child issue; the leader is woken to answer again. Challenge vague claims, a "green" next to a stale queue, a risk with no owner, a number with no source, and two answers that contradict each other. At most eight challenges per child. Then close it as unresolved and say so.
 - Compare the answers across squads: where risk is concentrated, what blocks what, whether the progress claims add up to the date promised, and what changed since your last brief (\`multica brief list\`).
-- Write the assessment and publish it as an ad hoc brief (\`multica brief publish --kind ad_hoc --title "..." --file <file>\`). Reply in chat with the headline and the link. The structure is in \`secretary-analysis\`.
+- Write the assessment and publish it as an ad hoc brief (\`multica brief publish --kind ad_hoc --title "..." --file <file>\`). Reply in chat with the headline and the link. Then close the request: \`multica issue status <request-id> done\`. The structure is in \`secretary-analysis\`. An open request past its due date shows in the digest as one without an assessment.
 - Number each decision the boss must make, D1 to Dn, with its situation, options, your recommendation and the owner. Recommend; do not decide.
 
 Leaders' questions to you (a comment that mentions you on a directive or item issue):

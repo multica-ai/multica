@@ -275,6 +275,8 @@ type Digest struct {
 	OverdueRequests []DigestOverdueRequest `json:"overdue_requests"`
 	// BlockedDirectives are directives blocked past their due date (spec 13.7.3).
 	BlockedDirectives []DigestBlockedDirective `json:"blocked_directives"`
+	// RequestsPastDeadline are Secretary requests still open after their due date (spec 13.7.3).
+	RequestsPastDeadline []DigestRequestPastDeadline `json:"requests_past_deadline"`
 	// People lists the reviews published since the window opened, with the
 	// organisation changes they recommended (spec 4.6).
 	People DigestPeople `json:"people"`
@@ -388,6 +390,15 @@ type DigestOverdueRequest struct {
 
 // DigestBlockedDirective is a directive the leader marked blocked after its due date.
 type DigestBlockedDirective struct {
+	IssueID     string `json:"issue_id"`
+	Identifier  string `json:"identifier"`
+	Title       string `json:"title"`
+	DaysOverdue int    `json:"days_overdue"`
+}
+
+// DigestRequestPastDeadline is a Secretary request still open after its due date,
+// so the boss has no assessment for it yet.
+type DigestRequestPastDeadline struct {
 	IssueID     string `json:"issue_id"`
 	Identifier  string `json:"identifier"`
 	Title       string `json:"title"`
@@ -711,6 +722,10 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 	if err != nil {
 		return Digest{}, err
 	}
+	requestsPastDeadline, err := s.computeRequestsPastDeadline(ctx, workspaceID, now, issuePrefix)
+	if err != nil {
+		return Digest{}, err
+	}
 
 	mode := DigestModeSquads
 	if floorsMode {
@@ -729,25 +744,26 @@ func (s *DigestService) Compute(ctx context.Context, workspaceID pgtype.UUID, si
 		Budgets: budgetCount, Goals: goalCount,
 	}
 	return Digest{
-		Since:             since.UTC().Format(time.RFC3339),
-		Until:             now.UTC().Format(time.RFC3339),
-		Workspace:         ws,
-		Squads:            squads,
-		OmittedSquadCount: omitted,
-		Quiet:             quiet,
-		Knowledge:         know,
-		Inquiries:         inquiries,
-		Pipeline:          pipeline,
-		OverdueRequests:   overdue,
-		BlockedDirectives: blockedDirectives,
-		People:            people,
-		AutoApproved:      autoApproved,
-		Budget:            budget,
-		Mode:              mode,
-		Scope:             scope,
-		Floors:            floors,
-		Goals:             goals,
-		SystemRisks:       risks,
+		Since:                since.UTC().Format(time.RFC3339),
+		Until:                now.UTC().Format(time.RFC3339),
+		Workspace:            ws,
+		Squads:               squads,
+		OmittedSquadCount:    omitted,
+		Quiet:                quiet,
+		Knowledge:            know,
+		Inquiries:            inquiries,
+		Pipeline:             pipeline,
+		OverdueRequests:      overdue,
+		BlockedDirectives:    blockedDirectives,
+		RequestsPastDeadline: requestsPastDeadline,
+		People:               people,
+		AutoApproved:         autoApproved,
+		Budget:               budget,
+		Mode:                 mode,
+		Scope:                scope,
+		Floors:               floors,
+		Goals:                goals,
+		SystemRisks:          risks,
 	}, nil
 }
 
@@ -905,6 +921,34 @@ func (s *DigestService) computeBlockedDirectives(ctx context.Context, workspaceI
 	out := make([]DigestBlockedDirective, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, DigestBlockedDirective{
+			IssueID:     util.UUIDToString(r.ID),
+			Identifier:  IssueIdentifier(prefix, r.Number),
+			Title:       r.Title,
+			DaysOverdue: int(now.Sub(r.DueDate.Time).Hours() / 24),
+		})
+	}
+	return out, nil
+}
+
+// computeRequestsPastDeadline lists the Secretary's open requests past their due
+// date. It is empty when the workspace has no Secretary desk.
+func (s *DigestService) computeRequestsPastDeadline(ctx context.Context, workspaceID pgtype.UUID, now time.Time, prefix string) ([]DigestRequestPastDeadline, error) {
+	desk, err := findSecretaryDesk(ctx, s.Queries, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("digest secretary desk: %w", err)
+	}
+	if !desk.Valid {
+		return []DigestRequestPastDeadline{}, nil
+	}
+	rows, err := s.Queries.ListSecretaryRequestsPastDeadline(ctx, db.ListSecretaryRequestsPastDeadlineParams{
+		WorkspaceID: workspaceID, ProjectID: desk, Now: pgtype.Timestamptz{Time: now, Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("digest requests past deadline: %w", err)
+	}
+	out := make([]DigestRequestPastDeadline, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, DigestRequestPastDeadline{
 			IssueID:     util.UUIDToString(r.ID),
 			Identifier:  IssueIdentifier(prefix, r.Number),
 			Title:       r.Title,

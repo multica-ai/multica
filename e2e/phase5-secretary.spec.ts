@@ -24,6 +24,9 @@ const LIVE_RUN = "needs a live run: a task token from a claimed run, with the da
 
 type Workspace = Awaited<ReturnType<TestApiClient["createWorkspace"]>>;
 
+/** The task token a claimed run carries, as the agent presents it. */
+const asRun = (run: { token: string }) => ({ Authorization: `Bearer ${run.token}` });
+
 const suffix = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 async function emptyWorkspace() {
@@ -168,16 +171,99 @@ test.describe("Secretary chief-of-staff plumbing", () => {
     }
   });
 
-  test("closing the last child wakes the parent's Secretary once, with the originator kept", async () => {
-    test.skip(true, "the wakeup is a queued run: it needs the company unpaused and a claimed run to observe. The rule itself is listed above; the firing is covered by the Go tests for child_done and the runbook.");
+  test("closing the last child is recorded on the parent's child_done rule and waits for the Secretary's queued run", async () => {
+    const { api, workspace, runtimeId } = await emptyWorkspace();
+    try {
+      const secretary = await api.createAgent("Secretary", runtimeId);
+      const leader = await api.createAgent("Wake leader", runtimeId);
+      const parent = (await api.createIssue("Eval: closing wakes", {
+        status: "in_progress",
+        assignee_type: "agent",
+        assignee_id: secretary.id,
+      })) as { id: string };
+      const child = (await api.createIssue("Eval: last child", {
+        status: "in_progress",
+        parent_issue_id: parent.id,
+        assignee_type: "agent",
+        assignee_id: leader.id,
+      })) as { id: string };
+      await json(await raw(api, workspace, "GET", `/api/issues/${parent.id}/system-wakeups`));
+      await json(await raw(api, workspace, "PUT", `/api/issues/${child.id}`, { status: "done" }));
+
+      // The scheduler evaluates the rule on its tick (every 30 seconds); the close is recorded
+      // as the condition being met. The wakeup is an input held behind the Secretary's queued
+      // run for the parent. With no daemon claiming that run here, it stays held, so no second
+      // run is written. Once a daemon claims it, the held input is delivered (see the Go tests).
+      await expect
+        .poll(async () => (await api.queryDb(
+          `SELECT condition_state FROM issue_wakeup WHERE issue_id = $1 AND system_rule = 'child_done'`,
+          [parent.id],
+        ))[0]?.condition_state, { timeout: 75_000, intervals: [2_000] })
+        .toBe("all");
+      const runs = await api.queryDb(
+        `SELECT id FROM agent_task_queue WHERE issue_id = $1 AND context->>'wakeup_system' = 'child_done'`,
+        [parent.id],
+      );
+      expect(runs.length).toBe(0);
+    } finally {
+      await api.cleanup();
+      await api.deleteWorkspace();
+    }
   });
 
   test("the deadline wakeup fires at its time", async () => {
-    test.skip(true, "the wakeup fires when the scheduler reaches its time; this suite has no fake clock to advance, so the firing is checked in the Go tests and the runbook.");
+    const { api, workspace, runtimeId } = await emptyWorkspace();
+    try {
+      await pauseCompany(api, workspace);
+      const secretary = await api.createAgent("Secretary", runtimeId);
+      const parent = (await api.createIssue("Eval: deadline fires", { status: "todo" })) as { id: string };
+      const wake = await json<{ id: string }>(
+        await raw(api, workspace, "POST", `/api/issues/${parent.id}/wakeups`, {
+          agent_id: secretary.id,
+          kind: "at",
+          at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+          instruction: "The deadline has passed: read the answers and assess what is in.",
+        }),
+      );
+      // The scheduler fires an at-wakeup at its time. The suite has no clock to advance, so
+      // the same run is started now by the trigger endpoint, which uses the wakeup's own rule.
+      expect((await raw(api, workspace, "POST", `/api/issues/${parent.id}/wakeups/${wake.id}/trigger`)).status).toBe(204);
+      const runs = await api.queryDb(
+        `SELECT id FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2`,
+        [parent.id, secretary.id],
+      );
+      expect(runs.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      await api.cleanup();
+      await api.deleteWorkspace();
+    }
   });
 
   test("the Secretary challenges a child issue with a comment that wakes the leader", async () => {
-    test.skip(true, `the challenge is a comment by the Secretary, which needs a task token: ${LIVE_RUN}`);
+    const { api, workspace, runtimeId } = await emptyWorkspace();
+    try {
+      const secretary = await api.createAgent("Secretary", runtimeId);
+      const leader = await api.createAgent("Challenge leader", runtimeId);
+      await api.setSecretary(secretary.id);
+      const parent = (await api.createIssue("Eval: challenge", { status: "todo", assignee_type: "agent", assignee_id: secretary.id })) as { id: string };
+      const child = (await api.createIssue("Eval: challenged child", {
+        status: "in_progress",
+        parent_issue_id: parent.id,
+        assignee_type: "agent",
+        assignee_id: leader.id,
+      })) as { id: string };
+      const run = await api.seedRunningTask(secretary.id);
+      const res = await raw(api, workspace, "POST", `/api/issues/${child.id}/comments`, { content: "Challenge: which figure is this based on?" }, asRun(run));
+      expect(res.status, await res.clone().text()).toBe(201);
+      const comments = await api.queryDb(
+        `SELECT id FROM comment WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2`,
+        [child.id, secretary.id],
+      );
+      expect(comments.length).toBe(1);
+    } finally {
+      await api.cleanup();
+      await api.deleteWorkspace();
+    }
   });
 
   test("the chat reply endpoint refuses a signed-in member", async () => {
@@ -213,11 +299,44 @@ test.describe("Secretary chief-of-staff plumbing", () => {
   });
 
   test("the Secretary's reply from a later run is written into the boss's chat", async () => {
-    test.skip(true, `a reply needs a task token from the Secretary's run: ${LIVE_RUN}`);
+    const { api, workspace, runtimeId } = await emptyWorkspace();
+    try {
+      const secretary = await api.createAgent("Secretary", runtimeId);
+      await api.setSecretary(secretary.id);
+      const session = await json<{ id: string }>(
+        await raw(api, workspace, "POST", "/api/chat/sessions", { agent_id: secretary.id, title: "Phase 5 later reply" }),
+      );
+      const run = await api.seedRunningTask(secretary.id, { chatSessionId: session.id });
+      await api.seedChatMessage(session.id, run.id, "Is research on track?");
+      const res = await raw(api, workspace, "POST", `/api/chat/sessions/${session.id}/reply`, { content: "Research is on track for the date." }, asRun(run));
+      expect(res.ok, await res.clone().text()).toBe(true);
+      const replies = await api.queryDb(
+        `SELECT content FROM chat_message WHERE chat_session_id = $1 AND role = 'assistant'`,
+        [session.id],
+      );
+      expect(replies.map((r) => r.content)).toContain("Research is on track for the date.");
+    } finally {
+      await api.cleanup();
+      await api.deleteWorkspace();
+    }
   });
 
   test("a non-Secretary agent with a live run is refused the chat reply", async () => {
-    test.skip(true, `needs a task token from a leader's run: ${LIVE_RUN}`);
+    const { api, workspace, runtimeId } = await emptyWorkspace();
+    try {
+      const secretary = await api.createAgent("Secretary", runtimeId);
+      const leader = await api.createAgent("Reply leader", runtimeId);
+      await api.setSecretary(secretary.id);
+      const session = await json<{ id: string }>(
+        await raw(api, workspace, "POST", "/api/chat/sessions", { agent_id: secretary.id, title: "Phase 5 refused reply" }),
+      );
+      const run = await api.seedRunningTask(leader.id, { chatSessionId: session.id });
+      const res = await raw(api, workspace, "POST", `/api/chat/sessions/${session.id}/reply`, { content: "Not mine to say." }, asRun(run));
+      expect(res.status).toBe(403);
+    } finally {
+      await api.cleanup();
+      await api.deleteWorkspace();
+    }
   });
 
   test("a directive is refused when a member creates it", async () => {
@@ -238,15 +357,75 @@ test.describe("Secretary chief-of-staff plumbing", () => {
   });
 
   test("a directive is accepted from a chat-triggered Secretary run", async () => {
-    test.skip(true, `a directive needs the Secretary's live run triggered by a boss chat message: ${LIVE_RUN}`);
+    const { api, workspace, runtimeId } = await emptyWorkspace();
+    try {
+      const secretary = await api.createAgent("Secretary", runtimeId);
+      await api.setSecretary(secretary.id);
+      const session = await json<{ id: string }>(
+        await raw(api, workspace, "POST", "/api/chat/sessions", { agent_id: secretary.id, title: "Phase 5 directive" }),
+      );
+      const run = await api.seedRunningTask(secretary.id, { chatSessionId: session.id });
+      const message = await api.seedChatMessage(session.id, run.id, "Launch the pilot in two regions.");
+      const res = await raw(api, workspace, "POST", "/api/issues", {
+        title: "Pilot the onboarding in two regions",
+        status: "todo",
+        origin_type: "directive",
+        origin_id: message,
+      }, asRun(run));
+      expect(res.status, await res.clone().text()).toBe(201);
+      const issue = (await res.json()) as { id: string };
+      const rows = await api.queryDb(`SELECT origin_type, origin_id FROM issue WHERE id = $1`, [issue.id]);
+      expect(rows[0].origin_type).toBe("directive");
+      expect(rows[0].origin_id).toBe(message);
+    } finally {
+      await api.cleanup();
+      await api.deleteWorkspace();
+    }
   });
 
   test("a directive is refused from a run started by a non-admin originator", async () => {
-    test.skip(true, `needs a run whose originator is a member: ${LIVE_RUN}`);
+    const { api, workspace, runtimeId } = await emptyWorkspace();
+    try {
+      const secretary = await api.createAgent("Secretary", runtimeId);
+      await api.setSecretary(secretary.id);
+      const session = await json<{ id: string }>(
+        await raw(api, workspace, "POST", "/api/chat/sessions", { agent_id: secretary.id, title: "Phase 5 member directive" }),
+      );
+      const run = await api.seedRunningTask(secretary.id, { chatSessionId: session.id });
+      const message = await api.seedChatMessage(session.id, run.id, "Launch the pilot.");
+      // The originator is the signed-in user; as a plain member they may not direct the Secretary.
+      await api.setOwnRole("member");
+      const res = await raw(api, workspace, "POST", "/api/issues", {
+        title: "Pilot from a member",
+        status: "todo",
+        origin_type: "directive",
+        origin_id: message,
+      }, asRun(run));
+      expect(res.status).toBe(403);
+    } finally {
+      await api.cleanup();
+      await api.deleteWorkspace();
+    }
   });
 
   test("a wakeup cannot create a directive", async () => {
-    test.skip(true, `needs a wakeup run: ${LIVE_RUN}`);
+    const { api, workspace, runtimeId } = await emptyWorkspace();
+    try {
+      const secretary = await api.createAgent("Secretary", runtimeId);
+      await api.setSecretary(secretary.id);
+      // A run with no chat session, as a wakeup starts: it cannot originate a directive.
+      const run = await api.seedRunningTask(secretary.id);
+      const res = await raw(api, workspace, "POST", "/api/issues", {
+        title: "Directive from a wakeup",
+        status: "todo",
+        origin_type: "directive",
+        origin_id: randomUUID(),
+      }, asRun(run));
+      expect(res.status).toBe(403);
+    } finally {
+      await api.cleanup();
+      await api.deleteWorkspace();
+    }
   });
 
   test("the org map lists the squads with their leaders", async () => {
@@ -283,6 +462,29 @@ test.describe("Secretary chief-of-staff plumbing", () => {
   });
 
   test("a leader's question on a directive wakes the Secretary", async () => {
-    test.skip(true, `the wakeup is a run that the leader's mention starts: ${LIVE_RUN}`);
+    const { api, workspace, runtimeId } = await emptyWorkspace();
+    try {
+      const secretary = await api.createAgent("Secretary", runtimeId);
+      const leader = await api.createAgent("Question leader", runtimeId);
+      await api.setSecretary(secretary.id);
+      const directive = (await api.createIssue("Eval: leader question", {
+        status: "todo",
+        assignee_type: "agent",
+        assignee_id: leader.id,
+      })) as { id: string };
+      const run = await api.seedRunningTask(leader.id);
+      const res = await raw(api, workspace, "POST", `/api/issues/${directive.id}/comments`, {
+        content: `[@Secretary](mention://agent/${secretary.id}) Is the date still right, or should I wait for the vendor?`,
+      }, asRun(run));
+      expect(res.status, await res.clone().text()).toBe(201);
+      const runs = await api.queryDb(
+        `SELECT id FROM agent_task_queue WHERE agent_id = $1 AND issue_id = $2`,
+        [secretary.id, directive.id],
+      );
+      expect(runs.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      await api.cleanup();
+      await api.deleteWorkspace();
+    }
   });
 });

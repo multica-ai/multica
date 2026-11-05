@@ -3454,6 +3454,22 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// Determine creator identity: agent (via X-Agent-ID header) or member.
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
 
+	// Request caps (spec 13.7.1): the Secretary's requests and addressees, and the
+	// hop limit below a request for any creator.
+	isSecretary := creatorType == "agent" && h.isWorkspaceSecretary(r, workspaceID, actualCreatorID)
+	if isSecretary || parentIssueID.Valid {
+		if err := service.CheckSecretaryRequestCaps(r.Context(), h.Queries, wsUUID, projectID, parentIssueID, isSecretary); err != nil {
+			var guard *service.GuardrailError
+			if errors.As(err, &guard) {
+				writeError(w, http.StatusTooManyRequests, err.Error())
+				return
+			}
+			slog.Error("check secretary request caps", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to check the request limits")
+			return
+		}
+	}
+
 	// Optional origin stamping (quick-create / autopilot). Only the
 	// allowed origin types are accepted; anything else is rejected so a
 	// rogue caller can't mint arbitrary origin labels. Both fields must

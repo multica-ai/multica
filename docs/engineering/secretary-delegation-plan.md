@@ -155,4 +155,17 @@ the boss's machine can answer.
 |---|---|---|
 | Spec | Rewritten around agents doing the analysis; D1 to D7 accepted | [secretary-delegation.md](secretary-delegation.md); the boss accepted the recommended choices. |
 | 13.0 Spikes | Done except S5 | See the table above. |
-| 13.1 to 13.9 | Open | Nothing built. |
+| 13.1 to 13.9 | Built, merged in PR #36 | Exceptions are listed in the next table. |
+
+### Status after the completion pass
+
+| Step | Status |
+|---|---|
+| S5 (Hermes through the daemon on the boss's machine) | Blocked here. The daemon on this machine is configured for `http://10.70.39.196:30000`, which does not answer; pointing it at this API would change a live daemon's config, so it was not done. Runbook 1.1 to 1.2 and the timing in section 2 need the boss's own question and sign-off. |
+| 13.3.1 request contract | Done. `TestSecretaryRequestContract_DeadlineAndChildDone` files a request, a child and a one-shot deadline wakeup as the Secretary, closes the child, and checks that the children-done run carries the request's own instruction and the boss's originator. A request's children-done rule now starts with `SecretaryRequestChildDoneInstruction` (`service/issue_wakeup_system.go`); the Secretary cannot set an issue's rule instruction itself, because that endpoint accepts members only. |
+| 13.4.3 paused company holds leader runs | Done. `TestPausedCompanyHoldsLeaderRunsStartedBySecretary`: delegated and reply runs are refused at claim with `company_paused`; a person's run is admitted; resuming releases them. |
+| 13.7.1 caps | Done. Open requests (8 per workspace) and addressees (20 per request) are enforced at issue creation for the Secretary. Delegation depth is enforced for any creator inside a request tree: a child is one hop, a grandchild two, and a third hop is refused (`CheckSecretaryRequestCaps`, `TestSecretaryRequestCaps_OpenRequestsAddresseesAndHops`). Issues outside a request tree are not limited. The challenge cap was already enforced. |
+| 13.7.3 digest: requests past deadline | Done. A request is open in the Secretary desk past its due date; the Secretary sets `--due-date` when it files the request and closes it when it publishes the assessment (`digest.RequestsPastDeadline`, `TestDigest_SecretaryRequestPastDeadlineIsListed`). Blocked directives were already listed. |
+| 13.8.5 performance | Measured in a handler test on the dev database (one run, not a benchmark): org map for 50 squads returned all 50 in about 5 ms; filing a 20-addressee request took about 126 ms in total (about 6 ms per addressee). The Secretary's reading with a live model is not measured; it needs a live run. |
+| E2E (`e2e/phase5-secretary.spec.ts`) | 17 pass, 1 skipped. The skipped one is the paused company's partial answer, whose wording is a live model's output. Runs and task tokens are seeded as `mat_` task tokens, which is what a claimed run carries. The child close is checked as the rule's condition being met and the wakeup held behind the Secretary's queued run, which only a daemon can release. |
+| Flaky `TestListIssuesPropertyFilterAndSort` | Cause: the test's "no value" queries had no select scope, so on the shared test workspace they matched more rows than the 200-row limit and the target was cut off. Fixed by scoping those queries to the test's own select value. |

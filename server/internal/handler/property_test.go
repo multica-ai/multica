@@ -658,6 +658,9 @@ func TestListIssuesPropertyFilterAndSort(t *testing.T) {
 	if w := setIssuePropertyRaw(t, numLow, num.ID, 1); w.Code != http.StatusOK {
 		t.Fatalf("seed low: %d %s", w.Code, w.Body.String())
 	}
+	if w := setIssuePropertyRaw(t, numLow, sel.ID, hitID); w.Code != http.StatusOK {
+		t.Fatalf("seed low select: %d %s", w.Code, w.Body.String())
+	}
 	if w := setIssuePropertyRaw(t, numHigh, num.ID, 9.5); w.Code != http.StatusOK {
 		t.Fatalf("seed high: %d %s", w.Code, w.Body.String())
 	}
@@ -763,11 +766,13 @@ func TestListIssuesPropertyFilterAndSort(t *testing.T) {
 	}
 
 	// "No value" filter (the "__none__" sentinel): issues without the property
-	// match, the one explicitly set to `true` does not. limit=200 so the ~55
-	// matching issues (54 pad + numLow/numHigh, all without the checkbox) fit
-	// on one page — the 50-row default would hide numLow behind windowing.
+	// match, the one explicitly set to `true` does not. The workspace is shared
+	// with every other handler test, and each of their issues has no checkbox, so
+	// an unscoped "no value" query matches hundreds of rows and a page limit
+	// cannot reliably hold the target. Scoping by the select value this test
+	// alone sets keeps the match set to the seeded issues.
 	noValueQuery := func(values ...string) string {
-		buf, _ := json.Marshal(map[string][]string{box.ID: values})
+		buf, _ := json.Marshal(map[string][]string{box.ID: values, sel.ID: {hitID}})
 		return "?limit=200&properties=" + url.QueryEscape(string(buf))
 	}
 	noneGot := ids(listIssues(noValueQuery("__none__")))
