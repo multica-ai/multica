@@ -15,14 +15,16 @@ import (
 
 // fakeCloud is the workspace API for cloud agent turns.
 type fakeCloud struct {
-	mu       sync.Mutex
-	calls    []string
-	bodies   map[string]any
-	replied  bool
-	sessions int
-	cancel   bool
-	uploads  int
-	avatar   string
+	mu           sync.Mutex
+	calls        []string
+	bodies       map[string]any
+	replied      bool
+	sessions     int
+	cancel       bool
+	uploads      int
+	avatar       string
+	taskMessages []any
+	taskStatus   string
 }
 
 func (c *fakeCloud) Search(context.Context, string, string, int) (any, error) { return nil, nil }
@@ -55,6 +57,9 @@ func (c *fakeCloud) Request(_ context.Context, method, path string, body any) (a
 	case strings.HasSuffix(path, "/messages") && method == "POST":
 		return map[string]any{"task_id": "task-1"}, nil
 	case strings.HasPrefix(path, "/api/tasks/") && strings.HasSuffix(path, "/messages"):
+		if c.taskMessages != nil {
+			return c.taskMessages, nil
+		}
 		return []any{
 			map[string]any{"seq": float64(1), "type": "tool_use", "tool": "search", "call_id": "c1", "input": map[string]any{"q": "x"}},
 			map[string]any{"seq": float64(2), "type": "tool_result", "tool": "search", "call_id": "c1", "output": "found"},
@@ -66,6 +71,9 @@ func (c *fakeCloud) Request(_ context.Context, method, path string, body any) (a
 		}
 		return map[string]any{"messages": []any{map[string]any{"role": "assistant", "task_id": "task-1", "content": "Done: found it."}}}, nil
 	case strings.HasPrefix(path, "/api/agents/"):
+		if c.taskStatus != "" {
+			return []any{map[string]any{"id": "task-1", "chat_session_id": "chat-1", "status": c.taskStatus, "error": "remote execution ended"}}, nil
+		}
 		return []any{}, nil
 	case strings.HasSuffix(path, "/cancel"):
 		if c.cancel {
@@ -231,5 +239,103 @@ func TestAgentTurnsResumeAfterRestart(t *testing.T) {
 	})
 	if sends := cloud.count("POST /api/chat/sessions/chat-1/messages"); sends != 1 {
 		t.Fatalf("the restart sent the message again (%d sends)", sends)
+	}
+}
+
+func TestAgentReasoningSurvivesTurnEndAndRestart(t *testing.T) {
+	for _, status := range []string{"completed", "failed", "cancelled"} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			cloud := &fakeCloud{bodies: map[string]any{}, taskMessages: []any{
+				map[string]any{"seq": float64(1), "type": "thinking", "content": "First part. "},
+				map[string]any{"seq": float64(2), "type": "tool_use", "tool": "search", "call_id": "c1", "input": map[string]any{"q": "x"}},
+				map[string]any{"seq": float64(3), "type": "tool_result", "tool": "search", "call_id": "c1", "output": "found"},
+				map[string]any{"seq": float64(4), "type": "thinking", "content": "Second part."},
+				map[string]any{"seq": float64(5), "type": "tool_use", "tool": "read", "call_id": "c2", "input": map[string]any{"path": "x"}},
+			}}
+			path := filepath.Join(t.TempDir(), "c.sqlite")
+			opts := Options{Cloud: func(store.Scope, string) contextmcp.Cloud { return cloud }}
+			f := newServiceFixtureWith(t, path, opts)
+			f.create(t, "conv-1", "claude")
+			result, err := f.svc.SendToAgents(ctx, SendCommand{ScopeID: f.scopeID, ConversationID: "conv-1", RequestID: "r1", Text: "go"}, []RemoteAgent{{ID: "agent-1", Name: "Writer"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			turnID := result.TurnIDs[0]
+			eventually(t, "thinking to persist and the same messages to be polled again", func() bool {
+				turn, err := f.svc.Store().Turn(ctx, "conv-1", turnID)
+				if err != nil {
+					return false
+				}
+				remote := remoteOf(turn)
+				return remote != nil && remote.MirroredSeq == 5 && cloud.count("GET /api/tasks/task-1/messages") >= 2
+			})
+			if err := f.svc.Close(ctx); err != nil {
+				t.Fatal(err)
+			}
+			cloud.mu.Lock()
+			cloud.taskMessages = append(cloud.taskMessages, map[string]any{"seq": float64(6), "type": "thinking", "content": " After restart."})
+			if status == "completed" {
+				cloud.replied = true
+			} else {
+				cloud.taskStatus = status
+			}
+			cloud.mu.Unlock()
+			again := newServiceFixtureWith(t, path, opts)
+			eventually(t, "the resumed turn to end", func() bool {
+				turn, err := again.svc.Store().Turn(ctx, "conv-1", turnID)
+				return err == nil && turn.Status == status
+			})
+			checkSnapshot := func(svc *Service) {
+				t.Helper()
+				snapshot, err := svc.Store().Snapshot(ctx, "conv-1", 10)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var reasoning, finishedTool, unfinishedTool int
+				for _, turn := range snapshot.Turns {
+					for _, e := range turn.Events {
+						var p map[string]any
+						if err := json.Unmarshal([]byte(e.Payload), &p); err != nil {
+							t.Fatal(err)
+						}
+						switch {
+						case p["kind"] == "reasoning":
+							reasoning++
+							if e.Type != "item.completed" || e.Final != 1 || p["status"] != status || p["text"] != "First part. Second part. After restart." {
+								t.Errorf("reasoning after %s = %s (%s, final=%d)", status, e.Payload, e.Type, e.Final)
+							}
+						case strings.HasSuffix(e.ItemID.String, "-c1"):
+							finishedTool++
+							if p["status"] != "completed" || p["output"] != "found" {
+								t.Errorf("finished tool changed: %s", e.Payload)
+							}
+						case strings.HasSuffix(e.ItemID.String, "-c2"):
+							unfinishedTool++
+							want := "cancelled"
+							if status == "failed" {
+								want = "failed"
+							}
+							if p["status"] != want || p["tool"] != "read" || p["output"] != "" {
+								t.Errorf("unfinished tool = %s; want status %s", e.Payload, want)
+							}
+						}
+					}
+				}
+				if reasoning != 1 || finishedTool != 1 || unfinishedTool != 1 {
+					t.Errorf("snapshot item counts: reasoning=%d finishedTool=%d unfinishedTool=%d", reasoning, finishedTool, unfinishedTool)
+				}
+			}
+			checkSnapshot(again.svc)
+			if err := again.svc.Close(ctx); err != nil {
+				t.Fatal(err)
+			}
+			reloaded := newServiceFixtureWith(t, path, opts)
+			checkSnapshot(reloaded.svc)
+			if sends := cloud.count("POST /api/chat/sessions/chat-1/messages"); sends != 1 {
+				t.Errorf("restarts sent the message again (%d sends)", sends)
+			}
+		})
 	}
 }

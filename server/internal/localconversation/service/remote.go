@@ -502,8 +502,12 @@ func (s *Service) finishRemote(conversationID, turnID, status, failure, reply st
 		if payload["kind"] == "assistant_text" {
 			textItem = e.ItemID.String
 		}
-		if open[e.ItemID.String] == nil {
+		if current := open[e.ItemID.String]; current == nil {
 			open[e.ItemID.String] = payload
+		} else if e.Type == "item.delta" && current["kind"] == "reasoning" && payload["field"] == "text" {
+			previous, _ := current["text"].(string)
+			delta, _ := payload["text"].(string)
+			current["text"] = previous + delta
 		}
 	}
 	b := store.Batch{ConversationID: conversationID}
@@ -522,7 +526,7 @@ func (s *Service) finishRemote(conversationID, turnID, status, failure, reply st
 		state := map[string]any{"kind": payload["kind"], "status": itemStatus}
 		switch payload["kind"] {
 		case "reasoning":
-			state["text"] = ""
+			state["text"], state["status"] = payload["text"], status
 		case "tool_call":
 			state["tool"], state["input"], state["output"] = payload["tool"], payload["input"], ""
 		}
