@@ -61,6 +61,8 @@
     "i18next": "catalog:",
     "input-otp-native": "^0.5.0",
     "marked": "^18.0.3",
+    "micromark-util-decode-string": "2.0.1",
+    "micromark-util-sanitize-uri": "2.0.1",
     "nativewind": "^4.1.23",
     "react": "19.2.3",
     "react-dom": "19.2.3",

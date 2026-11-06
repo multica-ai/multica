@@ -90,12 +90,13 @@ beforeEach(() => {
 
 describe("RichContent image preview sequence", () => {
   it.each([
-    ["reference attachment", "![Reference][shot]", `[shot]: /api/attachments/${ID}/download`, [attachment], attachment.markdown_url],
-    ["external reference", "![Reference][shot]", "[shot]: https://cdn.example/chart.png", [], "https://cdn.example/chart.png"],
-    ["angle destination", "![Reference](</chart v2.png>)", "", [], "/chart%20v2.png"],
-    ["escaped destination", String.raw`![Reference](/chart\(v2\).png)`, "", [], "/chart(v2).png"],
-    ["parenthesized URL", "![Reference](/chart(v2).png)", "", [], "/chart(v2).png"],
-  ] as const)("opens the %s in the shared viewer and pages through rendered images", (_name, image, definition, attachments, expectedSrc) => {
+    ["reference attachment", "![Reference][shot]", `[shot]: /api/attachments/${ID}/download`, [attachment], attachment.markdown_url, "Reference"],
+    ["external reference", "![Reference][shot]", "[shot]: https://cdn.example/chart.png", [], "https://cdn.example/chart.png", "Reference"],
+    ["indented file-card image", "    !file[photo.png](https://cdn.example/photo.png)", "", [], "https://cdn.example/photo.png", "photo.png"],
+    ["angle destination", "![Reference](</chart v2.png>)", "", [], "/chart%20v2.png", "Reference"],
+    ["escaped destination", String.raw`![Reference](/chart\(v2\).png)`, "", [], "/chart(v2).png", "Reference"],
+    ["parenthesized URL", "![Reference](/chart(v2).png)", "", [], "/chart(v2).png", "Reference"],
+  ] as const)("opens the %s in the shared viewer and pages through rendered images", (_name, image, definition, attachments, expectedSrc, imageAlt) => {
     const content = [
       "![First](/first.png)",
       image,
@@ -116,11 +117,11 @@ describe("RichContent image preview sequence", () => {
       </QueryClientProvider>,
     );
     expect(screen.getAllByRole("img")).toHaveLength(3);
-    const reference = screen.getByRole("img", { name: "Reference" });
+    const reference = screen.getByRole("img", { name: imageAlt });
     expect(reference).toHaveAttribute("src", expectedSrc);
     fireEvent.click(reference);
     const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveAttribute("aria-label", attachments.length ? "reference.png" : "Reference");
+    expect(dialog).toHaveAttribute("aria-label", attachments.length ? "reference.png" : imageAlt);
     expect(within(dialog).getByText("2 / 3")).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Next" }));
     expect(within(dialog).getByText("3 / 3")).toBeInTheDocument();

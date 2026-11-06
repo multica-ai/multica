@@ -85,10 +85,10 @@ function matchesAttachmentURL(
   attachmentURL?: string,
 ): boolean {
   if (!embeddedURL || !attachmentURL) return false;
-  if (embeddedURL === attachmentURL) return true;
+  if (normalizeUri(embeddedURL) === normalizeUri(attachmentURL)) return true;
   const embeddedStable = stripQueryAndFragment(embeddedURL);
   const attachmentStable = stripQueryAndFragment(attachmentURL);
-  return embeddedStable !== "" && embeddedStable === attachmentStable;
+  return embeddedStable !== "" && normalizeUri(embeddedStable) === normalizeUri(attachmentStable);
 }
 
 /**
@@ -258,9 +258,13 @@ function extractInlineRefs(rawContent: string): InlineRef[] {
         }
       }
     } else if (node.type === "code" || node.type === "inlineCode") {
-      // Custom file cards are scanned separately; code must not create cards.
-      const end = node.position?.end.offset ?? index;
-      codeRanges.push({ start: index, end });
+      // File-card preprocessing trims indentation and renders indented cards.
+      // Fenced blocks and code spans still display their contents literally.
+      const fenced = node.type === "code" && /^ {0,3}(?:`{3}|~{3})/.test(rawContent.slice(index));
+      if (node.type === "inlineCode" || fenced) {
+        const end = node.position?.end.offset ?? index;
+        codeRanges.push({ start: index, end });
+      }
     }
   }
 
@@ -292,7 +296,7 @@ export interface ImageSequenceItem {
   /**
    * Identity used to open the sequence at the clicked attachment. The
    * attachment id when the reference resolves to a record, otherwise the URL
-   * as written in the body — matching what the renderer knows at click time.
+   * passed to the image/card renderer after Markdown decoding/normalization.
    */
   key: string;
   /** Best-known URL. Callers holding `attachment` should prefer re-resolving. */

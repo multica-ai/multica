@@ -60,3 +60,19 @@ describe("preprocessMobileMarkdown — !file file cards", () => {
     expect(preprocessMobileMarkdown(input)).toBe(output);
   });
 });
+
+describe("preprocessMobileMarkdown — angle-bracket image destinations", () => {
+  it.each([
+    "![image](<https://cdn.example/a b.png>)",
+    "![image](</uploads/a b.png>)",
+    "![image](</chart v2.png>)",
+    "![image][shot]\n\n[shot]: <https://cdn.example/a b.png>",
+  ])("preserves %s", (content) => {
+    expect(preprocessMobileMarkdown(content)).toBe(content);
+  });
+
+  it("still strips HTML tags while preserving text and hard breaks", () => {
+    expect(preprocessMobileMarkdown('<div class="note">A<br/><b>B</b></div>'))
+      .toBe("A  \nB");
+  });
+});

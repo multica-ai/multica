@@ -73,6 +73,20 @@ describe("matchAttachmentByURL", () => {
     expect(matchAttachmentByURL("/uploads/k?exp=9&sig=9", [legacy])).toBe(legacy);
   });
 
+  it("matches encoded Markdown destinations to raw metadata without changing signed URLs", () => {
+    const legacy = attachment({
+      id: UUID_B,
+      url: "https://cdn.example/图 v2.png",
+      download_url: "https://cdn.example/signed.png?Signature=raw%2Bvalue",
+    });
+    const content = "![shot](<https://cdn.example/图 v2.png>)";
+    const items = collectImageSequence([{ content, attachments: [legacy], standalone: false }]);
+    expect(items).toHaveLength(1);
+    expect(items[0]?.attachment).toBe(legacy);
+    expect(items[0]?.key).toBe(UUID_B);
+    expect(items[0]?.url).toBe(legacy.download_url);
+  });
+
   it("returns undefined for unrelated URLs", () => {
     expect(matchAttachmentByURL("https://example.com/x.png", [a])).toBeUndefined();
   });
@@ -252,6 +266,12 @@ describe("collectImageSequence", () => {
     "![undefined][missing]",
   ])("does not collect non-rendered images in %s", (content) => {
     expect(collectImageSequence([{ content }])).toEqual([]);
+  });
+
+  it("includes indented file cards that the renderer trims into images", () => {
+    const content = "    !file[photo.png](https://cdn.example/photo.png)";
+    expect(collectImageSequence([{ content }]).map((item) => item.key))
+      .toEqual(["https://cdn.example/photo.png"]);
   });
 
   it("returns an empty sequence for empty input", () => {

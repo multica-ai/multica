@@ -7,6 +7,17 @@
  * renderer to preserve its surrounding Markdown structure.
  */
 import { marked, type Tokens } from "marked";
+import { decodeString } from "micromark-util-decode-string";
+import { normalizeUri } from "micromark-util-sanitize-uri";
+
+function imageUri(href: string): string {
+  // Marked already unescapes backslashes, but leaves character references in
+  // href. Decode only those, once, then use the sequence's URL encoding.
+  return normalizeUri(href.replace(
+    /&(?:#(?:x[\da-f]+|\d+)|[a-z][a-z\d]*);/gi,
+    (entity) => decodeString(entity),
+  ));
+}
 
 export type MarkdownSegment =
   | { type: "prose"; content: string }
@@ -70,7 +81,7 @@ export function splitMarkdown(input: string): MarkdownSegment[] {
           const img = t as Tokens.Image;
           out.push({
             type: "image",
-            uri: img.href,
+            uri: imageUri(img.href),
             alt: img.text ?? "",
           });
         } else {
