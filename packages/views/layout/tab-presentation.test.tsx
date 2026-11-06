@@ -300,6 +300,24 @@ describe("useTabPresentation — live from cache", () => {
 });
 
 describe("useTabPresentation — pending / fallback", () => {
+  it.each([undefined, "Saved session"])("keeps an unresolved chat selection pending with fallback %s", async (fallback) => {
+    const qc = makeClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(
+      () => useTabPresentation("/acme/chat?session=s7", fallback), { wrapper },
+    );
+
+    expect(result.current).toMatchObject({ title: fallback ?? "Chat", titleResolved: false });
+    act(() => qc.setQueryData(chatSessionsOptions("ws1").queryKey, [
+      { id: "s7", title: "Loaded session" },
+    ] as never));
+    await waitFor(() => expect(result.current).toMatchObject({
+      title: "Loaded session", titleResolved: true,
+    }));
+  });
+
   it("pending issue keeps the issue-status slot and uses the persisted fallback", () => {
     expect(presentationOf("/acme/issues/unloaded", "MUL-7: Prior")).toEqual({
       visual: { kind: "issue-status", status: null },
@@ -330,14 +348,15 @@ describe("useTabPresentation — pending / fallback", () => {
 });
 
 describe("ResourceLeadingVisual", () => {
-  it("uses a distinct glyph from ToDo when the status has not loaded", () => {
+  it("uses a neutral skeleton while the status has not loaded", () => {
     const { container, rerender } = render(
       <ResourceLeadingVisual visual={{ kind: "issue-status", status: null }} />,
     );
-    const pendingGlyph = container.querySelector("svg")?.innerHTML;
-    expect(pendingGlyph).toBeTruthy();
+    expect(container.querySelector("svg")).toBeNull();
+    expect(container.querySelector('[data-slot="skeleton"]')).toBeVisible();
     rerender(<ResourceLeadingVisual visual={{ kind: "issue-status", status: "todo" }} />);
-    expect(container.querySelector("svg")?.innerHTML).not.toBe(pendingGlyph);
+    expect(container.querySelector('[data-slot="skeleton"]')).toBeNull();
+    expect(container.querySelector("svg")).not.toBeNull();
   });
 
   it("renders a project icon with its emoji", () => {

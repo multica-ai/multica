@@ -32,7 +32,7 @@ import {
 } from "@multica/core/inbox/queries";
 import { useInboxFilters } from "@multica/core/inbox/filter-store";
 import { cn } from "@multica/ui/lib/utils";
-import { FileQuestion } from "@multica/ui/icons";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { StatusIcon } from "../issues/components";
 import { ProjectIcon } from "../projects/components/project-icon";
 import { ActorAvatar } from "../common/actor-avatar";
@@ -276,11 +276,12 @@ export function useTabPresentation(
   }).data;
   const catalog = useMemo(() => buildIssueStatusCatalog(statuses), [statuses]);
   const { visual, title: titleSpec } = resolveTabPresentation(subject, data);
-  // A selected notification whose identity has not resolved from cache yet is
+  // A selected notification or chat session not resolved from cache yet is
   // pending in exactly the sense a not-yet-loaded issue is — keep the tab's
   // persisted title instead of collapsing it to the bare container label.
   const selectionPending =
-    subject.kind === "inbox" && !!subject.selectedKey && !data.inboxSelection;
+    (subject.kind === "inbox" && !!subject.selectedKey && !data.inboxSelection) ||
+    (subject.kind === "chat" && !!subject.sessionId && !data.chatSessionTitle);
   const title = useTabTitle(titleSpec, fallbackTitle, selectionPending);
 
   // The actor avatar resolves through workspace directory queries and throws
@@ -335,7 +336,7 @@ export function ResourceLeadingVisual({
     }
     case "issue-status":
       inner = visual.status === null ? (
-        <FileQuestion className="size-3.5 text-muted-foreground" />
+        <Skeleton aria-hidden className="size-3 rounded-sm" />
       ) : (
         <StatusIcon
           status={visual.status}
