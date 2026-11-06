@@ -143,6 +143,8 @@ multica issue comment add MUL-123 --content-file note.md --steer-active
 
 同一專案、同一父任務下已有標題相同（不區分大小寫，忽略多餘空格）且未關閉的任務時，`issue create` 會拒絕建立並給出那個任務。確實要再建一個，加 `--allow-duplicate`；要把一個任務標為另一個的重複，用 `multica issue status MUL-124 cancelled --duplicate-of MUL-123`。
 
+一個任務要依次提交多個 PR 時，用 `issue create --title "..." --pr-auto-complete off` 或 `issue update <id> --pr-auto-complete off`，讓這個任務在 PR 合併後保持原狀態。用 `--pr-auto-complete on` 恢復工作區規則，從下一次 PR 事件起生效。`issue pull-requests <id>` 會顯示任務開關、工作區開關、目標狀態和判斷結果，沒有關聯 PR 時也會顯示。支援該欄位的伺服器會在建立交易內儲存開關；舊伺服器會補呼叫一次 PUT，失敗時 CLI 會提供已建立的任務 ID 和重試用的 update 命令，請勿重複建立。
+
 ### 時間線
 
 `issue get` 給出任務現在的狀態；`issue timeline` 按時間順序列出狀態、優先順序、負責人、標題、日期的改動和執行結果，並混排評論，用來回答"什麼時候進入 in_review""卡在當前狀態多久了"：
@@ -362,7 +364,7 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | --- | --- | --- | --- |
 | `issue` | `list` | 列出任務 | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（可重複）、`--property`（可重複，`"名稱=值"` 或 `"Score>=3"`、`"Due<2026-01-01"`、`"Notes~=text"` 這樣的比較；`__none__` 匹配未設定）、`--limit`、`--offset`、`--sort`（支援 `property:<名稱或 id>`）、`--full-id`、`--fields`（僅 JSON；逗號分隔，只輸出這些欄位）、`--resolve-properties`（僅 JSON；在儲存的 id 旁附上屬性、選項和成員名稱） |
 | | `get <id>` | 檢視單個任務 | `--resolve-properties`（僅 JSON；在儲存的 id 旁附上屬性、選項和成員名稱） |
-| | `create` | 建立任務 | `--title`（必填）、`--description` / `--description-stdin` / `--description-file`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（可重複）、`--property`（可重複）、`--allow-duplicate`（已有同名未關閉任務時仍建立） |
+| | `create` | 建立任務 | `--title`（必填）、`--description` / `--description-stdin` / `--description-file`、`--pr-auto-complete on/off`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（可重複）、`--property`（可重複）、`--allow-duplicate`（已有同名未關閉任務時仍建立） |
 | | `update <id>` | 更新任務欄位 | 與 `create` 同類欄位，另有 `--position`、`--no-start`、`--duplicate-of` |
 | | `assign <id>` | 指派或取消指派 | `--to`（名稱模糊匹配成員、AI 代理或小隊）、`--to-id`、`--unassign`、`--no-start` |
 | | `status <id> <status>` | 修改狀態 | `--no-start`、`--duplicate-of` |

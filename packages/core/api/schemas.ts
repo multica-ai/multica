@@ -1547,6 +1547,7 @@ export const ListIssuesResponseSchema = z.object({
 export const CreateIssueResponseSchema = IssueSchema.extend({
   id: z.string().min(1),
   labels: z.array(LabelSchema).optional().catch(undefined),
+  pr_auto_complete_disabled: z.boolean().optional().catch(undefined),
 }).loose();
 
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {

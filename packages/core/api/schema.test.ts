@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ApiClient, ApiError } from "./client";
 import { parseWithFallback } from "./schema";
+import { CreateIssueResponseSchema } from "./schemas";
 
 // Helper: stub fetch with a single JSON response. Status defaults to 200.
 function stubFetchJson(body: unknown, status = 200) {
@@ -314,6 +315,11 @@ describe("ApiClient schema fallback", () => {
       const issue = await client.createIssue({ title: "Created" });
       expect(issue.id).toBe("issue-1");
       expect(issue.labels).toBeUndefined();
+    });
+
+    it.each([true, false, undefined, null, "off"])("validates the create PR override %s without breaking older responses", (value) => {
+      const parsed = CreateIssueResponseSchema.parse({ ...validIssue, pr_auto_complete_disabled: value });
+      expect(parsed.pr_auto_complete_disabled).toBe(typeof value === "boolean" ? value : undefined);
     });
 
     it("validates a well-formed labels array", async () => {
