@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Copy, FolderGit2, GitBranch, MoreHorizontal, RefreshCw, Unplug } from "lucide-react";
+import { Copy, FolderGit2, GitBranch, MoreHorizontal, RefreshCw, Unplug } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";

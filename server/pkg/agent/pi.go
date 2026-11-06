@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,7 +18,7 @@ import (
 )
 
 // piBackend implements Backend by spawning the Pi CLI in non-interactive
-// JSON mode (`pi -p --mode json --session <path>`) and parsing its event
+// JSON mode (or RPC mode for negotiated steering) and parsing its event
 // stream on stdout.
 //
 // It also backs the "omp" (oh-my-pi) provider — omp is a separate CLI
@@ -37,6 +38,9 @@ type piBackend struct {
 	// error. Production uses defaultPiTurnErrorGrace; tests shorten it without
 	// changing concurrent executions through package-global state.
 	turnErrorGrace time.Duration
+	terminateGrace time.Duration
+	// Tests inject unsupported kernels per backend without changing global state.
+	cleanupPreflight func() error
 }
 
 var (
@@ -370,7 +374,15 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	if err != nil {
 		return nil, fmt.Errorf("%s executable not found at %q: %w", label, execName, err)
 	}
+	checkCleanup := b.cleanupPreflight
+	if checkCleanup == nil {
+		checkCleanup = checkPiCleanupSupport
+	}
+	if err := checkCleanup(); err != nil {
+		return nil, fmt.Errorf("%s process cleanup unavailable before start: %w", label, err)
+	}
 
+	rpcMode := label == "pi" && opts.EnableTaskSupplement
 	timeout := opts.Timeout
 
 	// The persisted JSONL path is our opaque session identifier. OMP's
@@ -444,6 +456,8 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		args = buildPiArgs(sessionPath, opts, b.cfg.Logger)
 	}
 	cmd, _, _ := b.cfg.commandAt(execName).execVia(processCtx, choosePiInvocation, lookedUp, args, b.cfg.Logger)
+	// The joined cleanup below owns TERM, escalation and pipe release.
+	cmd.Cancel = func() error { return nil }
 	hideAgentWindow(cmd)
 	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
 	cmd.WaitDelay = 10 * time.Second
@@ -459,7 +473,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		cancel()
 		return nil, fmt.Errorf("%s stdout pipe: %w", label, err)
 	}
-	// Pi reads piped stdin to EOF as its initial prompt in print/JSON mode.
+	// Print/JSON mode reads its initial prompt to EOF; RPC uses JSONL commands.
 	// Keeping user-controlled text off argv prevents the npm PowerShell shim
 	// from re-tokenising embedded quotes into CLI flags on Windows (#6457).
 	// The explicit close remains part of the #2188 contract too: under systemd,
@@ -471,6 +485,10 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		cancelProcess()
 		cancel()
 		return nil, fmt.Errorf("%s stdin pipe: %w", label, err)
+	}
+	var supplements *piSupplementSession
+	if rpcMode {
+		supplements = newPiSupplementSession(stdin)
 	}
 	var closeStdinOnce sync.Once
 	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
@@ -505,6 +523,16 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		_, _ = io.Copy(stderrWatch, stderrRead)
 		close(stderrDone)
 	}()
+	cleanup := newPiRunCleanup(cmd)
+	grace := b.terminateGrace
+	if grace <= 0 {
+		grace = 2 * time.Second
+	}
+	closePipes := func() {
+		closePiReadPipe(stdout)
+		closePiReadPipe(stderrRead)
+	}
+	finishCleanup := func() error { return cleanup.finish(cmd, closeStdin, closePipes, grace) }
 
 	b.cfg.Logger.Info(label+" started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -516,38 +544,53 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	}
 	turnErrors := newPiTurnErrorGuard(turnErrorGrace, func() {
 		b.cfg.Logger.Info(label + " turn error recovery grace expired; stopping runtime")
-		// CommandContext owns process-tree cancellation for every runtime
-		// command. An escaped descendant can nevertheless retain stdout/stderr
-		// write ends after that group dies, so close the adapter-owned pipes too:
-		// finalization must not depend on an unowned process eventually exiting.
 		cancelProcess()
-		closeStdin()
-		closePiReadPipe(stdout)
-		closePiReadPipe(stderrRead)
 	})
 
 	// Write concurrently with stdout consumption. A large prompt can fill the
 	// stdin pipe while the child fills stdout; serialising those operations can
-	// deadlock both processes. Closing stdin signals the end of Pi's prompt.
+	// deadlock both processes. RPC keeps stdin open until agent_settled; print
+	// mode closes it to signal the end of the initial prompt.
 	writeErrCh := make(chan error, 1)
 	go func() {
-		_, err := io.WriteString(stdin, prompt)
-		closeStdin()
+		var err error
+		if rpcMode {
+			err = supplements.write(processCtx, map[string]string{"id": "initial-prompt", "type": "prompt", "message": prompt})
+		} else {
+			_, err = io.WriteString(stdin, prompt)
+			closeStdin()
+		}
+		if err != nil {
+			cancelProcess()
+		}
 		writeErrCh <- err
 	}()
 
-	// Close every adapter-owned pipe when the context is cancelled. Closing stdin
-	// releases a writer blocked on a child that stopped reading; closing the read
-	// pipes releases the stdout scanner and stderr copier.
 	go func() {
-		<-runCtx.Done()
-		closeStdin()
-		closePiReadPipe(stdout)
-		closePiReadPipe(stderrRead)
+		select {
+		case <-processCtx.Done():
+			_ = finishCleanup()
+		case <-cleanup.exited:
+			// Descendants can inherit stdout after a successful parent exit. Allow
+			// buffered protocol events to drain before ending that read. In-flight
+			// tool accounting below decides whether termination is required.
+			if pipe, ok := stdout.(interface{ SetReadDeadline(time.Time) error }); ok {
+				_ = pipe.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
+			}
+			select {
+			case <-processCtx.Done():
+				_ = finishCleanup()
+			case <-cleanup.done:
+			}
+		case <-cleanup.done:
+		}
 	}()
 
 	releaseExtension = nil
 	go func() {
+		if rpcMode {
+			defer supplements.stop()
+		}
 		defer removePiMcpExtension(extensionPath)
 		defer func() { releasePiSessionFileLock(sessionLock) }()
 		defer cancelProcess()
@@ -575,9 +618,36 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			if err := json.Unmarshal([]byte(line), &evt); err != nil {
 				continue
 			}
+			if rpcMode {
+				if response := piExtensionDialogResponse([]byte(line)); response != nil {
+					// A dialog can arrive while the initial prompt is still being
+					// written. Keep stdout draining independently of stdin writes.
+					go func() {
+						if err := supplements.write(processCtx, response); err != nil {
+							cancelProcess()
+						}
+					}()
+				}
+				if err := supplements.observe([]byte(line)); err != nil {
+					finalStatus = "failed"
+					finalError = err.Error()
+					supplements.stop()
+					closeStdin()
+				}
+			}
+			if rpcMode && supplements.isSettled() {
+				supplements.stop()
+				closeStdin()
+			}
 			turnErrors.observeEvent(evt.Type)
+			cleanup.observe(evt.Type)
 
 			switch evt.Type {
+			case "agent_settled":
+				if rpcMode && evt.Aborted && finalStatus == "completed" {
+					finalStatus = "aborted"
+					finalError = "pi execution aborted"
+				}
 			case "agent_start":
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
 
@@ -695,6 +765,19 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			}
 		}
 		scanErr := scanner.Err()
+		if rpcMode && scanErr == nil && !supplements.isSettled() && processCtx.Err() == nil && finalStatus == "completed" {
+			finalStatus = "failed"
+			finalError = "pi RPC exited before agent_settled"
+		}
+		if errors.Is(scanErr, os.ErrDeadlineExceeded) {
+			select {
+			case <-cleanup.exited:
+				// This deadline only releases an inherited pipe after the runtime's
+				// own exit; all available events were consumed before the deadline.
+				scanErr = nil
+			default:
+			}
+		}
 		if scanErr != nil {
 			// Scanner stopped consuming stdout. Close the pipe before Wait so Pi,
 			// still writing an oversized event, cannot deadlock on the full OS
@@ -706,23 +789,29 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			trySend(msgCh, Message{Type: MessageText, Content: d})
 		}
 
-		// Finish the user-owned stderr read before Wait closes StderrPipe. Normal
-		// exit gets the same 10s backstop cmd.WaitDelay used to provide when
-		// os/exec owned the copier. Cancellation and error-grace expiry close
-		// stderrRead above, so their finalization does not pay it.
-		stderrTimer := time.NewTimer(cmd.WaitDelay)
-		select {
-		case <-stderrDone:
-			stderrTimer.Stop()
-		case <-stderrTimer.C:
-			closePiReadPipe(stderrRead)
-			<-stderrDone
+		// Do not reap the root before the cancellation owner releases its numeric
+		// process group: an unreaped root prevents PGID reuse during cleanup.
+		if scanErr == nil && cleanup.tools.Load() == 0 && processCtx.Err() == nil && piCanObserveRuntimeExit && !piRuntimeExited(cmd) {
+			select {
+			case <-cleanup.exited:
+			case <-processCtx.Done():
+			}
 		}
+		var cleanupErr error
+		if scanErr != nil || cleanup.tools.Load() > 0 || processCtx.Err() != nil {
+			cleanupErr = finishCleanup()
+		} else {
+			cleanupErr = cleanup.complete(closeStdin, closePipes)
+		}
+		<-stderrDone
 
 		waitErr := cmd.Wait()
 		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 		lastTurnError, turnErrorGraceExpired := turnErrors.finish()
+		if cleanupErr == nil && cleanup.tools.Load() > 0 && cleanup.unobserved {
+			cleanupErr = fmt.Errorf("runtime exited before tool process ownership could be recorded")
+		}
 
 		// Wait closes the process pipes, so a prompt write still blocked when the
 		// child exited has returned by now. The writer sends exactly once.
@@ -800,6 +889,11 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 				finalError = fmt.Sprintf("omp session file: %v", sessionErr)
 			}
 		}
+		if cleanupErr != nil {
+			finalStatus = "cleanup_unconfirmed"
+			finalError = fmt.Sprintf("%s process cleanup unconfirmed: %v; background processes may still be running. Check them before manually rerunning this task. %s", label, cleanupErr, finalError)
+			authoritativeTerminal = true
+		}
 
 		b.cfg.Logger.Info(label+" finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 		// Publish the authoritative terminal boundary before Result. The daemon
@@ -830,11 +924,17 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		}
 	}()
 
-	return &Session{
+	session := &Session{
+		CleanupRequired:  true,
 		Messages:         msgCh,
 		Result:           resCh,
 		TerminalObserved: turnErrors.terminalObserved,
-	}, nil
+	}
+	if rpcMode {
+		session.Supplement = supplements.send
+		session.SupplementReady = supplements.ready
+	}
+	return session, nil
 }
 
 func piSessionBusyResult(label, sessionPath string) *Session {
@@ -915,7 +1015,8 @@ func (w *piStderrWatcher) resumeRefused() bool {
 // (e.g. `message`, `result`) are held as json.RawMessage and decoded on
 // demand by the switch arms.
 type piStreamEvent struct {
-	Type string `json:"type"`
+	Type    string `json:"type"`
+	Aborted bool   `json:"aborted,omitempty"`
 
 	// message_update
 	AssistantMessageEvent *piAssistantMessageEvent `json:"assistantMessageEvent,omitempty"`
@@ -1021,7 +1122,7 @@ func decodePiResult(raw json.RawMessage) string {
 var piBlockedArgs = map[string]blockedArgMode{
 	"-p":         blockedStandalone, // non-interactive mode
 	"--print":    blockedStandalone, // alias for -p
-	"--mode":     blockedWithValue,  // "json" event stream protocol
+	"--mode":     blockedWithValue,  // JSON/RPC event stream protocol
 	"--session":  blockedWithValue,  // daemon manages the session path
 	"--thinking": blockedWithValue,  // owned by agent.thinking_level
 }
@@ -1084,23 +1185,28 @@ var piCustomArgModes = map[string]blockedArgMode{
 	"--offline":              blockedStandalone,
 }
 
-// buildPiArgs assembles the argv for a one-shot Pi invocation.
+// buildPiArgs assembles the argv for a Pi task invocation.
 //
 // Flags:
 //
 //	-p                          non-interactive mode (prompt arrives on stdin)
 //	--mode json                 emit one JSON event per line on stdout
+//	--mode rpc                  use RPC instead when task supplements are enabled
 //	--session <path>            session log file (created upfront, reused on resume)
 //	--model <selector>          model selector, passed through verbatim
 //	--thinking <level>          per-agent reasoning level override
 //
-// The prompt is deliberately absent from argv. Pi reads a non-TTY stdin in
-// print/JSON mode; using that supported path prevents Windows PowerShell's npm
-// shim from re-tokenising prompt content into options.
+// The prompt is deliberately absent from argv. It arrives on stdin as text
+// in print/JSON mode or a prompt command in RPC mode, preventing Windows
+// PowerShell's npm shim from re-tokenising prompt content into options.
 func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []string {
-	args := []string{
-		"-p",
-		"--mode", "json",
+	return buildPiArgsFor("pi", sessionPath, opts, logger)
+}
+
+func buildPiArgsFor(label, sessionPath string, opts ExecOptions, logger *slog.Logger) []string {
+	args := []string{"-p", "--mode", "json"}
+	if opts.EnableTaskSupplement {
+		args = []string{"--mode", "rpc"}
 	}
 	if sessionPath != "" {
 		args = append(args, "--session", sessionPath)
@@ -1120,6 +1226,14 @@ func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []st
 	}
 	if opts.ThinkingLevel != "" {
 		args = append(args, "--thinking", opts.ThinkingLevel)
+	}
+	// Explicitly load only this dispatch's managed skill files. Scanning the
+	// project directory would also opt user-owned skills into untrusted runs.
+	// OMP retains its native .omp/skills discovery.
+	if label == "pi" {
+		for _, path := range opts.PiSkillPaths {
+			args = append(args, "--skill", path)
+		}
 	}
 	// Note: we intentionally do NOT pass --tools here. Omitting it lets
 	// Pi use its full tool registry, including user-installed extension

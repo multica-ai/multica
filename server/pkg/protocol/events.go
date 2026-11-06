@@ -8,6 +8,8 @@ const (
 	EventIssueDeleted            = "issue:deleted"
 	EventIssueMetadataChanged    = "issue_metadata:changed"
 	EventIssueAttachmentsChanged = "issue_attachments:changed"
+	// Personal: one member's unread mark on an issue changed (MUL-8438).
+	EventIssueUnreadChanged = "issue_unread:changed"
 
 	// Comment events
 	EventCommentCreated       = "comment:created"
@@ -27,15 +29,17 @@ const (
 	EventAgentRestored = "agent:restored"
 
 	// Task events (server <-> daemon).
-	// Each event maps to a status transition on agent_task_queue. Front-end
+	// Events describe task lifecycle or recorded usage changes. Front-end
 	// subscribes by `task:` prefix and invalidates the workspace task
 	// snapshot, so the granularity here is "what does the user want to see
 	// change" — not "every internal status flip".
 	EventTaskQueued                = "task:queued"                  // ∅ → queued (enqueue / retry create)
+	EventTaskCoalesced             = "task:coalesced"               // status unchanged (a comment folded into a run not yet claimed, which now answers it)
 	EventTaskDispatch              = "task:dispatch"                // queued → dispatched (daemon claim)
 	EventTaskRunning               = "task:running"                 // dispatched → running (daemon started)
 	EventTaskWaitingLocalDirectory = "task:waiting_local_directory" // dispatched → waiting_local_directory (daemon parked on a busy local_directory path)
 	EventTaskProgress              = "task:progress"
+	EventTaskUsage                 = "task:usage"
 	EventTaskCompleted             = "task:completed" // running → completed
 	EventTaskFailed                = "task:failed"    // running → failed
 	EventTaskMessage               = "task:message"
@@ -124,6 +128,15 @@ const (
 	// way — re-read it. A project switching workflows publishes
 	// project:updated instead.
 	EventIssueWorkflowChanged = "issue_workflow:changed"
+
+	// Saved issue views. One event for create, edit and delete: every client
+	// answers by re-reading the views it can see. A view that is private on
+	// both sides of the write reaches its owner only.
+	EventIssueViewChanged = "issue_view:changed"
+
+	// A member's own view and sidebar preferences. Always private to that
+	// member: it exists so their other devices follow along.
+	EventIssueViewPreferenceChanged = "issue_view_preference:changed"
 
 	// Pin events
 	EventPinCreated   = "pin:created"

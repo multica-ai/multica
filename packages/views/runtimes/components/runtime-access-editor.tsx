@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ComponentProps } from "react";
-import { Globe, Lock, Users } from "lucide-react";
+import { Globe, Lock, Users } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import type { AgentRuntime } from "@multica/core/types";

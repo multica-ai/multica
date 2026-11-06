@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enIssues from "../locales/en/issues.json";
@@ -29,7 +29,12 @@ vi.mock("@multica/core/plugins", () => ({
   pluginInstallationsOptions: () => ({ queryKey: ["plugins"] }),
   pluginSurfaceLaunchOptions: () => ({ queryKey: ["surface"] }),
 }));
-vi.mock("@multica/core/paths", () => ({ useCurrentWorkspace: () => ({ id: "workspace-1", name: "Acme", slug: "acme" }) }));
+const settingsPush = vi.hoisted(() => vi.fn());
+vi.mock("../navigation", () => ({ useNavigation: () => ({ push: settingsPush }) }));
+vi.mock("@multica/core/paths", () => ({
+  useWorkspacePaths: () => ({ settings: () => "/acme/settings" }),
+  useCurrentWorkspace: () => ({ id: "workspace-1", name: "Acme", slug: "acme" }),
+}));
 vi.mock("@multica/core/config", () => ({ useFeatureEnabled: () => data.flagEnabled }));
 vi.mock("../platform/local-directory", () => ({ isDesktopShell: () => false }));
 
@@ -87,6 +92,27 @@ describe("PluginPanelSection", () => {
     const srcdoc = frame.getAttribute("srcdoc") ?? "";
     expect(srcdoc).toContain('child.setAttribute("sandbox", "allow-scripts")');
     expect(srcdoc).not.toContain('child.setAttribute("sandbox", "allow-scripts allow-same-origin")');
+  });
+
+  it("keeps the section header free of settings-only menus", () => {
+    data.installed.plugins = [installation()];
+    render(<PluginPanelSection issueId="issue-1" />, { wrapper: Wrapper });
+    expect(screen.getByRole("button", { name: "Plugins 1" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Plugins options" })).not.toBeInTheDocument();
+  });
+
+  it("preserves the mounted plugin frame across disclosure changes", () => {
+    data.installed.plugins = [installation()];
+    render(<PluginPanelSection issueId="issue-1" />, { wrapper: Wrapper });
+    const frame = screen.getByTitle("Hello Panel — Hello");
+    const disclosure = screen.getByRole("button", { expanded: true });
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByTitle("Hello Panel — Hello")).toBe(frame);
+    expect(frame).not.toBeVisible();
+    fireEvent.click(disclosure);
+    expect(screen.getByTitle("Hello Panel — Hello")).toBe(frame);
+    expect(frame).toBeVisible();
   });
 
   it("does not mount a disabled installation", () => {

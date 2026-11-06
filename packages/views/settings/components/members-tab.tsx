@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Check,
   Copy,
   Crown,
   Link,
@@ -14,8 +15,9 @@ import {
   Trash2,
   User,
   UserMinus,
+  Users,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, useOptionalNavigation } from "../../navigation";
 import type {
@@ -66,6 +68,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -86,6 +89,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { api, errorCode } from "@multica/core/api";
 import { useLocale, useT } from "../../i18n";
+import { ObjectSectionEmpty } from "../../layout/object-page";
 import {
   SettingsCard,
   SettingsReadOnlyNotice,
@@ -273,7 +277,7 @@ function MemberRow({
                             </span>
                           </div>
                           {member.role === role && (
-                            <span className="ml-auto text-caption text-muted-foreground">{"✓"}</span>
+                            <Check className="ml-auto size-3.5 text-muted-foreground" />
                           )}
                         </DropdownMenuItem>
                       );
@@ -375,12 +379,13 @@ function ShareLinkRow({
           <span>{t(($) => $.members.share_link_uses, { used: link.use_count, max: link.max_uses ?? "∞" })}</span>
           {link.expires_at && <span>· {t(($) => $.members.share_link_expires, { date: new Date(link.expires_at).toLocaleDateString(locale) })}</span>}
         </div>
-        <div
-          className="truncate font-mono text-caption text-muted-foreground"
-          title={joinUrl}
-        >
-          {joinUrl}
-        </div>
+        <TruncatedTooltip content={joinUrl}>
+          <div
+            className="truncate font-mono text-caption text-muted-foreground"
+          >
+            {joinUrl}
+          </div>
+        </TruncatedTooltip>
       </div>
       <span className="w-24 shrink-0 text-body">{rc.label}</span>
       <IconButton
@@ -474,6 +479,18 @@ export function MembersTab() {
 
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
+
+  // The Team panel's invite button links here with `?invite=1`; it waits for
+  // the member list so only managers get the dialog.
+  const inviteRequested = navigation?.searchParams.has("invite") ?? false;
+  useEffect(() => {
+    if (!inviteRequested || !navigation || !currentMember) return;
+    if (canManageWorkspace) setInviteOpen(true);
+    const params = new URLSearchParams(navigation.searchParams);
+    params.delete("invite");
+    navigation.replace(`${navigation.pathname}?${params}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- consume the intent once the role is known
+  }, [inviteRequested, currentMember?.role]);
   const isOwner = currentMember?.role === "owner";
   const ownerCount = members.filter((m) => m.role === "owner").length;
   // Only owners/admins may list share links; skip the request for plain
@@ -975,9 +992,10 @@ export function MembersTab() {
               ))}
             </SettingsCard>
           ) : (
-            <EmptyList>
-              {needle ? t(($) => $.members.no_results) : t(($) => $.members.no_members)}
-            </EmptyList>
+            <ObjectSectionEmpty
+              icon={needle ? Search : Users}
+              description={needle ? t(($) => $.members.no_results) : t(($) => $.members.no_members)}
+            />
           )
         ) : activeView === "invitations" ? (
           invitations.length > 0 ? (
@@ -994,7 +1012,7 @@ export function MembersTab() {
               ))}
             </SettingsCard>
           ) : (
-            <EmptyList>{t(($) => $.members.no_invitations)}</EmptyList>
+            <ObjectSectionEmpty icon={Mail} description={t(($) => $.members.no_invitations)} />
           )
         ) : shareLinks.length > 0 ? (
           <SettingsCard>
@@ -1010,7 +1028,7 @@ export function MembersTab() {
             ))}
           </SettingsCard>
         ) : (
-          <EmptyList>{t(($) => $.members.no_share_links)}</EmptyList>
+          <ObjectSectionEmpty icon={Link} description={t(($) => $.members.no_share_links)} />
         )}
       </section>
 
@@ -1301,13 +1319,5 @@ export function MembersTab() {
         </AlertDialogContent>
       </AlertDialog>
     </SettingsTab>
-  );
-}
-
-function EmptyList({ children }: { children: ReactNode }) {
-  return (
-    <div className="rounded-xl border border-dashed border-surface-border px-4 py-10 text-center text-body text-muted-foreground">
-      {children}
-    </div>
   );
 }

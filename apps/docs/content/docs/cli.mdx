@@ -125,11 +125,20 @@ multica issue comment add MUL-123 --content-stdin < review.md
 multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
-View the messages of a single run, or stop one:
+Inspect, stop, or retry a single run:
 
 ```bash
 multica issue run-messages <task-id> --issue MUL-123
 multica issue cancel-task <task-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123 --fresh
+```
+
+Add a comment to a run that is still working, instead of queueing a follow-up run (only runs that accept additional messages; you can steer an agent exactly when your comment could start it):
+
+```bash
+multica issue comment add MUL-123 --content-file note.md --steer <task-id>
+multica issue comment add MUL-123 --content-file note.md --steer-active
 ```
 
 If an open issue with the same title (case-insensitive, extra spaces ignored) already exists under the same project and parent, `issue create` refuses and points to that issue. To create another one anyway, add `--allow-duplicate`. To mark an issue as a duplicate of another, run `multica issue status MUL-124 cancelled --duplicate-of MUL-123`.
@@ -162,6 +171,15 @@ multica issue comment list MUL-123 --thread <comment-id> --tail 5 --output json 
 - Resolved threads are folded to their root and conclusion by default; add `--full` for the complete text.
 
 Lists can be trimmed to the fields you need, too: `multica issue list --output json --fields id,identifier,title,status`. The filtering happens in the CLI, so it shrinks output and context, not the request.
+
+To list issues by their last update time, pass both `--updated-since` and `--updated-until` as RFC3339 timestamps. The server returns issues whose current `updated_at` is at or after `since` and before `until`: `[since, until)`. These flags work with existing filters, sorting, and pagination. Keep the same bounds across pages; concurrent updates can change the result set because pagination does not provide a snapshot.
+
+```bash
+multica issue list --updated-since 2026-11-05T10:00:00Z \
+  --updated-until 2026-11-05T10:01:00Z \
+  --sort created_at --direction asc --limit 100 --offset 0 \
+  --output json --fields id,workspace_id,project_id,title
+```
 
 ### Wakeups
 
@@ -291,8 +309,10 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Europ
 | Command | Purpose |
 | --- | --- |
 | `issue` | Create, update, assign, and search issues; manage comments, subscribers, labels, properties, wakeups, the timeline, and runs |
-| `project` | Manage projects and their resources |
+| `project` | Manage projects, their resources, and the workflow they use |
+| `workflow` | Manage issue workflows: statuses and who handles each one |
 | `label`, `property` | Manage workspace labels and custom properties |
+| `view` | Read saved issue views and list the issues a view shows |
 | `agent`, `skill`, `squad` | Manage agents, skills, and squads |
 | `autopilot` | Manage automations, triggers, and run history |
 | `workspace` | Create, view, and switch workspaces, and invite members |
@@ -356,11 +376,17 @@ CLI configuration files contain tokens that can access Multica as you. Don't com
 
 The tables below cover every current top-level command, grouped the way the CLI itself groups them. All commands accept the global flags `--server-url`, `--workspace-id`, `--profile`, and `--debug`. `--output` is registered per command, and the default format varies: `list` commands default to a table, while `get` and `create` commands mostly default to JSON. Full flags are defined by `multica <command> --help`.
 
+### Issue attachments
+
+For `issue create`, `issue update`, and `issue comment add`, each `--attachment` takes one literal file path, including any commas or double quotes in the filename. Repeat the flag for multiple files: `--attachment 'report,final.csv' --attachment notes.txt`. Omitting the flag attaches no files; an explicitly empty path is an error. All local paths are checked before any file is uploaded.
+
+Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --attachment b` to attach two files. The former now selects a single file named `a,b`. Remove extra CSV quotes from the old workaround `--attachment '"report,final.csv"'`; use `--attachment 'report,final.csv'` unless the filename itself contains those double quotes.
+
 ### Core
 
 | Command | Subcommand | Purpose | Key flags |
 | --- | --- | --- | --- |
-| `issue` | `list` | List issues | `--status`, `--priority`, `--assignee`, `--project`, `--metadata` (repeatable), `--property` (repeatable, `"Name=Value"` or a comparison such as `"Score>=3"`, `"Due<2026-01-01"`, `"Notes~=text"`; `__none__` matches unset), `--limit`, `--offset`, `--sort` (incl. `property:<name-or-id>`), `--full-id`, `--fields` (JSON only; comma-separated fields to keep), `--resolve-properties` (JSON only; rows with property, option and member names beside the stored ids) |
+| `issue` | `list` | List issues | `--status`, `--priority`, `--assignee`, `--project`, `--updated-since` / `--updated-until` (paired RFC3339 bounds), `--metadata` (repeatable), `--property` (repeatable, `"Name=Value"` or a comparison such as `"Score>=3"`, `"Due<2026-01-01"`, `"Notes~=text"`; `__none__` matches unset), `--limit`, `--offset`, `--sort` (incl. `property:<name-or-id>`), `--full-id`, `--fields` (JSON only; comma-separated fields to keep), `--resolve-properties` (JSON only; rows with property, option and member names beside the stored ids) |
 | | `get <id>` | Show a single issue | `--resolve-properties` (JSON only; rows with property, option and member names beside the stored ids) |
 | | `create` | Create an issue | `--title` (required), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (repeatable), `--property` (repeatable), `--allow-duplicate` (create even when an open issue with the same title exists) |
 | | `update <id>` | Update issue fields | Same fields as `create`, plus `--position`, `--no-start`, `--duplicate-of` |
@@ -380,13 +406,17 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `runs <issue-id>` | View run history | `--full-id` |
 | | `run-messages <task-id>` | View the messages of a single run | `--since`, `--issue` |
 | | `usage <issue-id>` | View aggregated token usage | |
-| | `rerun <id>` | Re-enqueue a run for the current assignee | |
+| | `rerun-task <run-id>` | Repeat a specific run with its original agent and trigger context | `--issue`, `--fresh` |
 | | `cancel-task <task-id>` | Cancel a running or queued run | `--issue` |
 | `project` | `list/get/create/update/delete` | Manage projects | `create`: `--title` (required), `--lead`, `--status`, `--icon`, `--start-date`, `--due-date`, `--repo` (repeatable) |
 | | `status <id> <status>` | Change project status | |
 | | `resource list/add/update/remove` | Manage project resources | `--type`, `--url`, `--default-branch-hint`, `--ref`, `--local-path`, `--daemon-id`, `--execution-mode` (`in_place` / `worktree` for a local directory) |
+| | `workflow get/set <project-id>` | Show the project's effective workflow, or switch it | `set <project-id> <workflow\|default>`: `--map old=new` (repeatable), `--dry-run` prints the status migration plan; the switch neither reassigns issues nor starts runs. Admins and the project lead only |
+| `workflow` | `list/get/create/update/delete` | Manage workflows; `get` and other commands accept an ID, ID prefix, exact name, or `default` | `create` / `update`: `--name`, `--description`, `--steps-file` (JSON array of steps; replaces all steps); `update`: `--map old=new` (repeatable), `--dry-run`. Edits and deletes are limited to the workflow owner and workspace admins; a workflow still used by a project cannot be deleted |
+| | `handoff set <workflow> <status-key>` | Set one step's handler, instructions, and next/back status; unchanged fields are kept | `--handler` (`none`, `project_lead`, `creator`, or a member/agent/squad name or UUID), `--instructions` / `--instructions-file`, `--next`, `--back`, `--copy-for-project` |
 | `label` | `list/get/create/update/delete` | Manage workspace labels | `list`: `--resource-type` (`issue` or `skill`), `--full-id`; `create`: `--name`, `--color`, `--resource-type` (`issue` or `skill`), `--description` |
 | `property` | `list/get/create/update/archive/unarchive` | Manage workspace custom properties | `create`: `--name`, `--type` (`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`, `multi_text`, `multi_url`), `--option` (repeatable, select types only); `list`: `--include-archived`; the type cannot be changed after creation |
+| `view` | `list/get/issues` | Read the saved views you can open (your own and workspace-shared ones); `issues` lists what a view shows, in its saved order, with every saved filter applied by the server. Inside an agent run, the views and any "my" conditions are the runtime owner's | `<view>` accepts an ID, ID prefix, or exact name; `list`: `--scope` (`workspace`, `my`, `project`), `--project`, `--full-id`; `issues`: `--limit` (at most 100), `--cursor` (the previous page's `next_cursor`), `--today` (the day relative due-date filters resolve against; default today), `--fields` (JSON only), `--full-id` |
 | `agent` | `list/get/create/update/archive/restore` | Manage agents | `--name`, `--runtime-id` (required for `create`), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--custom-env` / `--custom-env-file` / `--custom-env-stdin` (`create` only), `--custom-args`, `--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`, `--permission-mode`, `--visibility` (older form), `--max-concurrent-tasks` |
 | | `copy <agent-id>` | Copy into a new agent; the original is untouched | `--name` (defaults to the original name plus ` (copy)`), `--runtime-id` (copying to another runtime also requires `--model`), `--no-skills`; secret configuration such as `custom_env`, `mcp_config`, and `runtime_config` is not copied — re-provide it with the same flags as `create` |
 | | `tasks <id>` | View an agent's runs | |

@@ -123,6 +123,10 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 
 `S3_BUCKET` が未設定の場合、Multica はローカルディスクを使います。
 
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `MULTICA_MAX_PREVIEW_SIZE` | `2MiB` | テキストと HTML のオンラインプレビュー本文の上限。最大 `16MiB`。正の整数のバイト数、`KB`/`KiB`、`MB`/`MiB`（二進単位）を指定できます。`16MiB` を超える有効な値は `16MiB` に制限され、不正な値はデフォルトに戻ります。上限を増やすと、特に構文ハイライトや Markdown の描画でブラウザーのプレビューが遅くなる場合があります。変更後は API を再起動してください。アップロードとダウンロードの制限は変わりません。 |
+
 ### S3 または互換ストレージ
 
 | 変数 | デフォルト | 説明 |
@@ -135,6 +139,8 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | `S3_USE_PATH_STYLE` | カスタム endpoint 時は `true` | path-style アドレスを使うか |
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`、`cloudfront`、`presign`、`proxy` |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | 署名付きダウンロード URL の有効期間 |
+
+`AWS_ENDPOINT_URL` が Google Cloud Storage を指す場合、`Accept-Encoding` はリクエスト署名から自動的に除外されます。
 
 内部ネットワークの MinIO など、ブラウザから endpoint に直接到達できない場合は `ATTACHMENT_DOWNLOAD_MODE=proxy` を使ってください。
 

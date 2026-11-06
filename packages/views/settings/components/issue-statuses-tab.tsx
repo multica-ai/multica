@@ -13,7 +13,7 @@ import {
   Pencil,
   Plus,
   Zap,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import {
   DndContext,

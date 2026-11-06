@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { Users } from "lucide-react";
+import { Users } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import {
   CoachMark,

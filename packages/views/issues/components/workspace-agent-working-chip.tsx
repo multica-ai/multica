@@ -18,6 +18,8 @@ interface WorkspaceAgentWorkingChipProps {
   /** Agents working inside the surface this header belongs to, already narrowed
    *  by its scope and every active filter. `undefined` = not resolved yet. */
   agents: readonly WorkingAgentSummary[] | undefined;
+  /** Avatars and the number only, for a header that has run out of room. */
+  compact?: boolean;
 }
 
 /** What the projection says about activity in this surface. `unknown` is a
@@ -144,6 +146,7 @@ export function WorkspaceAgentWorkingChip({
   value,
   onToggle,
   agents,
+  compact = false,
 }: WorkspaceAgentWorkingChipProps) {
   const { t } = useT("issues");
   const activity = chipActivity(agents);
@@ -166,10 +169,12 @@ export function WorkspaceAgentWorkingChip({
       {activity === "some" && (
         <AgentAvatarStack agentIds={agentIds} size="sm" max={3} />
       )}
-      <span className="tabular-nums md:hidden">
+      <span className={compact ? "tabular-nums" : "tabular-nums md:hidden @max-3xl/issue-header:inline"}>
         {activity === "unknown" ? "—" : agentIds.length}
       </span>
-      <span className="hidden tabular-nums md:inline">{label}</span>
+      {!compact && (
+        <span className="hidden tabular-nums md:inline @max-3xl/issue-header:hidden">{label}</span>
+      )}
     </Button>
   );
 

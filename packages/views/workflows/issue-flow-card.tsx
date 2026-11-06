@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Settings, Workflow } from "lucide-react";
+import { Settings, Workflow } from "@multica/ui/icons";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useProjectWithWorkflow } from "@multica/core/issue-workflows";

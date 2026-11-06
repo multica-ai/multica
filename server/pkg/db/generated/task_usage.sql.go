@@ -90,7 +90,7 @@ func (q *Queries) GetIssueUsageSummary(ctx context.Context, issueID pgtype.UUID)
 }
 
 const getTaskUsage = `-- name: GetTaskUsage :many
-SELECT id, task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at, updated_at, cost_usd_ticks FROM task_usage
+SELECT id, task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at, updated_at, cost_usd_ticks, credits_micros FROM task_usage
 WHERE task_id = $1
 ORDER BY model
 `
@@ -116,6 +116,7 @@ func (q *Queries) GetTaskUsage(ctx context.Context, taskID pgtype.UUID) ([]TaskU
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.CostUsdTicks,
+			&i.CreditsMicros,
 		); err != nil {
 			return nil, err
 		}
@@ -136,7 +137,8 @@ SELECT
     tu.output_tokens,
     tu.cache_read_tokens,
     tu.cache_write_tokens,
-    tu.cost_usd_ticks
+    tu.cost_usd_ticks,
+    tu.credits_micros
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.agent_id = $1
@@ -158,6 +160,7 @@ type ListAgentTaskUsageRow struct {
 	CacheReadTokens  int64       `json:"cache_read_tokens"`
 	CacheWriteTokens int64       `json:"cache_write_tokens"`
 	CostUsdTicks     pgtype.Int8 `json:"cost_usd_ticks"`
+	CreditsMicros    pgtype.Int8 `json:"credits_micros"`
 }
 
 // Per-(task, provider, model) usage rows for one agent's explicitly requested
@@ -182,6 +185,7 @@ func (q *Queries) ListAgentTaskUsage(ctx context.Context, arg ListAgentTaskUsage
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
 			&i.CostUsdTicks,
+			&i.CreditsMicros,
 		); err != nil {
 			return nil, err
 		}
@@ -710,7 +714,8 @@ SELECT
     tu.output_tokens,
     tu.cache_read_tokens,
     tu.cache_write_tokens,
-    tu.cost_usd_ticks
+    tu.cost_usd_ticks,
+    tu.credits_micros
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id = $1
@@ -726,6 +731,7 @@ type ListIssueTaskUsageRow struct {
 	CacheReadTokens  int64       `json:"cache_read_tokens"`
 	CacheWriteTokens int64       `json:"cache_write_tokens"`
 	CostUsdTicks     pgtype.Int8 `json:"cost_usd_ticks"`
+	CreditsMicros    pgtype.Int8 `json:"credits_micros"`
 }
 
 // Per-(task, provider, model) usage rows for every task on one issue — the
@@ -758,6 +764,7 @@ func (q *Queries) ListIssueTaskUsage(ctx context.Context, issueID pgtype.UUID) (
 			&i.CacheReadTokens,
 			&i.CacheWriteTokens,
 			&i.CostUsdTicks,
+			&i.CreditsMicros,
 		); err != nil {
 			return nil, err
 		}
@@ -770,8 +777,8 @@ func (q *Queries) ListIssueTaskUsage(ctx context.Context, issueID pgtype.UUID) (
 }
 
 const upsertTaskUsage = `-- name: UpsertTaskUsage :exec
-INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, credits_micros, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
 ON CONFLICT (task_id, provider, model)
 DO UPDATE SET
     input_tokens = EXCLUDED.input_tokens,
@@ -779,6 +786,7 @@ DO UPDATE SET
     cache_read_tokens = EXCLUDED.cache_read_tokens,
     cache_write_tokens = EXCLUDED.cache_write_tokens,
     cost_usd_ticks = EXCLUDED.cost_usd_ticks,
+    credits_micros = EXCLUDED.credits_micros,
     updated_at = now()
 `
 
@@ -791,6 +799,7 @@ type UpsertTaskUsageParams struct {
 	CacheReadTokens  int64       `json:"cache_read_tokens"`
 	CacheWriteTokens int64       `json:"cache_write_tokens"`
 	CostUsdTicks     pgtype.Int8 `json:"cost_usd_ticks"`
+	CreditsMicros    pgtype.Int8 `json:"credits_micros"`
 }
 
 // Bumps `updated_at` on INSERT and on conflict so the hourly-rollup worker
@@ -800,6 +809,7 @@ type UpsertTaskUsageParams struct {
 // cost_usd_ticks is the provider's own price for this usage (1e-10 USD), NULL
 // when it reports none. It is overwritten like the token counters so a
 // corrected report replaces the previous figure rather than accumulating.
+// credits_micros follows the same rule for providers that bill in credits.
 func (q *Queries) UpsertTaskUsage(ctx context.Context, arg UpsertTaskUsageParams) error {
 	_, err := q.db.Exec(ctx, upsertTaskUsage,
 		arg.TaskID,
@@ -810,6 +820,7 @@ func (q *Queries) UpsertTaskUsage(ctx context.Context, arg UpsertTaskUsageParams
 		arg.CacheReadTokens,
 		arg.CacheWriteTokens,
 		arg.CostUsdTicks,
+		arg.CreditsMicros,
 	)
 	return err
 }

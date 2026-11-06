@@ -28,6 +28,13 @@ export interface NavigationAdapter {
     title?: string,
     opts?: { activate?: boolean },
   ) => void;
+  /**
+   * Desktop only: show a workspace in its own window, or focus the window
+   * that already shows it.
+   */
+  openWorkspaceInNewWindow?: (slug: string) => void;
+  /** Desktop only: slugs of the workspaces other windows currently show. */
+  workspacesInOtherWindows?: () => readonly string[];
   /** Return a shareable URL for a path. Web: origin + path. Desktop: public web URL of the connected environment. */
   getShareableUrl: (path: string) => string;
   /**
