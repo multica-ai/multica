@@ -1,6 +1,6 @@
 //go:build windows
 
-package execenv
+package filelock
 
 import (
 	"errors"
@@ -9,13 +9,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// lockFileExclusiveNonBlocking takes an exclusive lock on f without waiting.
-// ok is false when another process already holds it.
-//
-// Windows releases the lock when the handle closes, including on abnormal
-// process termination, giving the same crash-safe liveness answer as flock on
-// unix — see the unix build of this file for why that property matters.
-// openLockFile opens (creating if needed) the lock file with
+// Open opens (creating if needed) the lock file with
 // FILE_SHARE_DELETE, which os.OpenFile does not request.
 //
 // Without it Windows refuses to delete a file that anyone still has open, so a
@@ -23,7 +17,7 @@ import (
 // directory, and neither could a test's temp-dir teardown. Unix already allows
 // unlinking an open file, and this is what makes Windows behave the same. The
 // lock coordinates executions; it is not meant to pin the directory.
-func openLockFile(path string) (*os.File, error) {
+func Open(path string) (*os.File, error) {
 	p, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, err
@@ -43,7 +37,8 @@ func openLockFile(path string) (*os.File, error) {
 	return os.NewFile(uintptr(h), path), nil
 }
 
-func lockFileExclusiveNonBlocking(f *os.File) (ok bool, err error) {
+// TryFile takes an exclusive, non-blocking lock, released on close or crash.
+func TryFile(f *os.File) (ok bool, err error) {
 	overlapped := new(windows.Overlapped)
 	err = windows.LockFileEx(
 		windows.Handle(f.Fd()),
@@ -59,8 +54,8 @@ func lockFileExclusiveNonBlocking(f *os.File) (ok bool, err error) {
 	return false, err
 }
 
-// unlockFile drops the lock.
-func unlockFile(f *os.File) error {
+// Unlock drops the lock.
+func Unlock(f *os.File) error {
 	overlapped := new(windows.Overlapped)
 	return windows.UnlockFileEx(windows.Handle(f.Fd()), 0, 1, 0, overlapped)
 }
