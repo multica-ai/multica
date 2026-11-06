@@ -1,8 +1,18 @@
 # Contribution validation
 
 Initial base: `multica-ai/multica` main, `98846ce56`.
-Synchronized base: `61e7e8f96` on 2026-11-06.
+Synchronized base: `7c75b34a2` on 2026-11-06.
 Initial verification: 2026-11-05.
+
+## Submission synchronization, 2026-11-06
+
+Merged the next twelve main commits without conflicts. Main now owns migration
+615, so the unpublished CodeGraph migrations moved from 615–630 to 616–631,
+including the concurrent-index recovery registration. Earlier database evidence
+below refers to the original filenames. The existing review database was preserved;
+the renamed migrations have not been replayed over its old migration history.
+On this synchronized tree, API/CLI compilation, all nine workspace typechecks,
+31 pure core checks and concurrent-index recovery contract checks passed.
 
 ## Usage scopes and contribution review, 2026-11-06
 
@@ -66,8 +76,8 @@ suite. Model-backed execution and native desktop interaction remain unverified.
 
 The permission checks exercise real PostgreSQL, HTTP and authenticated MCP paths.
 They do not execute a model. Run-availability UI has typechecking coverage but has
-not been exercised in a model-backed run. Only a personal-fork review is prepared;
-the upstream PR remains pending human review and the checks listed below.
+not been exercised in a model-backed run. Submission does not establish merge
+readiness; the acceptance gaps below remain explicit.
 
 ## UI alignment and base synchronization
 
@@ -138,9 +148,10 @@ for public repositories remains available and is separate from query access.
 Browser interaction verified the repository details and symbol-search result
 view against the real API. No browser console errors occurred on that page.
 
-## Remaining checks before an upstream PR
+## Remaining acceptance checks
 
 - Full `make check` and the complete repository test suites have not run.
+- A fresh database replay after the final migration renumbering has not run.
 - A model-backed agent run through the rebuilt CLI has not run. The HTTP/MCP
   authorization and configuration checks do not establish end-to-end provider use.
 - Private remote Git token authentication and multi-replica restart/recovery
