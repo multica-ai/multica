@@ -1,9 +1,16 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { codeGraphAssignmentChanges, type AssignmentOption } from "./codegraph-assignments";
+import { canManageCodeGraphAgent, codeGraphAssignmentChanges, type AssignmentOption } from "./codegraph-assignments";
 import { AgentRuntimeSchema } from "../runtimes/schema";
 
 describe("graph assignment changes", () => {
+  it("permits agent owners and workspace writers but never archived targets", () => {
+    const owned = { owner_id: "member", archived_at: null };
+    expect(canManageCodeGraphAgent(owned, false, "member")).toBe(true);
+    expect(canManageCodeGraphAgent(owned, false, "other")).toBe(false);
+    expect(canManageCodeGraphAgent(owned, true, "other")).toBe(true);
+    expect(canManageCodeGraphAgent({...owned, archived_at: "2026-11-06"}, true, "member")).toBe(false);
+  });
   const option = (id: string, assigned = false, editable = true, supported = true): AssignmentOption => ({ id, label: id, assigned, editable, supported });
   it("adds and removes several explicit choices without touching inaccessible bindings", () => {
     expect(codeGraphAssignmentChanges([option("keep", true), option("remove", true), option("new"), option("other-owner", true, false)], new Set(["keep", "new"])))

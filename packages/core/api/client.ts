@@ -3,6 +3,7 @@ import { z } from "zod";
 import { GraphCredentialsSchema, GraphSavedSchema, GraphReadableSchema, GraphAuthSavedSchema, type GraphAuthInput } from "./codegraph-auth";
 import { CodeGraphRepositoryAssignmentSchema, CodeGraphRepositoryListResponseSchema, CodeGraphRepositorySchema, CodeGraphQuerySchema, EMPTY_CODE_GRAPH_REPOSITORY, EMPTY_CODE_GRAPH_REPOSITORY_LIST_RESPONSE } from "./schemas";
 import type { CodeGraphRepository, CodeGraphRepositoryAssignment, CodeGraphRepositoryListResponse } from "../types";
+import { CodeGraphAvailableSchema } from "./schemas";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
@@ -920,6 +921,19 @@ export class ApiClient {
   }
 
 
+  async setCodeGraphWorkspaceScope(wsId: string, repositoryId: string, shared: boolean): Promise<void> {
+    await this.fetchRaw(`/api/workspaces/${wsId}/code-graphs/${repositoryId}/workspace-scope`, {method: "PATCH", body: JSON.stringify({is_workspace_shared: shared})});
+  }
+
+  async setCodeGraphProject(wsId: string, repositoryId: string, projectId: string, assigned: boolean): Promise<void> {
+    await this.fetchRaw(`/api/workspaces/${wsId}/code-graphs/${repositoryId}/projects/${projectId}`, {method: assigned ? "PUT" : "DELETE"});
+  }
+
+  async availableCodeGraphs(wsId: string, taskId: string) {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${wsId}/code-graphs/available?task_id=${encodeURIComponent(taskId)}`);
+    return parseWithFallback(raw, CodeGraphAvailableSchema, CodeGraphAvailableSchema.parse([]), {endpoint: "GET code-graphs/available"});
+  }
+
   async queryCodeGraph(workspaceId: string, repositoryId: string, params: Record<string, string>) {
     const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/code-graphs/${encodeURIComponent(repositoryId)}/query?${new URLSearchParams(params)}`);
     const result = parseWithFallback(raw, CodeGraphQuerySchema, { repository_id: "", repository_name: "", build_id: "", commit: "", engine_commit: "", operation: "", data: null as unknown }, { endpoint: "GET /api/workspaces/{id}/code-graphs/{id}/query" });
@@ -928,10 +942,6 @@ export class ApiClient {
   }
 
 
-  async setCodeGraphSharing(workspaceId: string, repositoryId: string, enabled: boolean) {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/code-graphs/${encodeURIComponent(repositoryId)}/sharing`, { method: "PATCH", body: JSON.stringify({ enabled }) });
-    return parseWithFallback(raw, CodeGraphRepositorySchema, EMPTY_CODE_GRAPH_REPOSITORY, { endpoint: "PATCH /api/workspaces/{id}/code-graphs/{id}/sharing" });
-  }
 
 
 

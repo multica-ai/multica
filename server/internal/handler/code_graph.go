@@ -18,29 +18,30 @@ import (
 )
 
 type CodeGraphRepositoryResponse struct {
-	AuthMode          string                   `json:"auth_mode"`
-	CredentialID      *string                  `json:"credential_id,omitempty"`
-	Progress          *CodeGraphBuildResponse  `json:"progress,omitempty"`
-	Builds            []CodeGraphBuildResponse `json:"builds,omitempty"`
-	ActiveBuildID     *string                  `json:"active_build_id,omitempty"`
-	PublicReadEnabled bool                     `json:"public_read_enabled"`
-	SymbolCount       int32                    `json:"symbol_count"`
-	EdgeCount         int32                    `json:"edge_count"`
-	Agents            []CodeGraphAssignedAgent `json:"agents,omitempty"`
-	ID                string                   `json:"id"`
-	WorkspaceID       string                   `json:"workspace_id"`
-	RepoURL           string                   `json:"repo_url"`
-	RepoName          string                   `json:"repo_name"`
-	Branch            string                   `json:"branch"`
-	Status            string                   `json:"status"`
-	InternalStatus    *string                  `json:"internal_status,omitempty"`
-	CommitHash        *string                  `json:"commit_hash,omitempty"`
-	FileCount         int32                    `json:"file_count"`
-	SyncError         *string                  `json:"sync_error,omitempty"`
-	LastIndexedAt     *string                  `json:"last_indexed_at,omitempty"`
-	CreatedBy         *string                  `json:"created_by,omitempty"`
-	CreatedAt         string                   `json:"created_at"`
-	UpdatedAt         string                   `json:"updated_at"`
+	IsWorkspaceShared bool                       `json:"is_workspace_shared"`
+	Projects          []CodeGraphAssignedProject `json:"projects"`
+	AuthMode          string                     `json:"auth_mode"`
+	CredentialID      *string                    `json:"credential_id,omitempty"`
+	Progress          *CodeGraphBuildResponse    `json:"progress,omitempty"`
+	Builds            []CodeGraphBuildResponse   `json:"builds,omitempty"`
+	ActiveBuildID     *string                    `json:"active_build_id,omitempty"`
+	SymbolCount       int32                      `json:"symbol_count"`
+	EdgeCount         int32                      `json:"edge_count"`
+	Agents            []CodeGraphAssignedAgent   `json:"agents,omitempty"`
+	ID                string                     `json:"id"`
+	WorkspaceID       string                     `json:"workspace_id"`
+	RepoURL           string                     `json:"repo_url"`
+	RepoName          string                     `json:"repo_name"`
+	Branch            string                     `json:"branch"`
+	Status            string                     `json:"status"`
+	InternalStatus    *string                    `json:"internal_status,omitempty"`
+	CommitHash        *string                    `json:"commit_hash,omitempty"`
+	FileCount         int32                      `json:"file_count"`
+	SyncError         *string                    `json:"sync_error,omitempty"`
+	LastIndexedAt     *string                    `json:"last_indexed_at,omitempty"`
+	CreatedBy         *string                    `json:"created_by,omitempty"`
+	CreatedAt         string                     `json:"created_at"`
+	UpdatedAt         string                     `json:"updated_at"`
 }
 
 type CodeGraphBuildResponse struct {
@@ -95,10 +96,10 @@ type CodeGraphRepositoryAssignmentResponse struct {
 }
 
 type codeGraphRepositoryRow struct {
+	IsWorkspaceShared bool
 	AuthMode          string
 	CredentialID      pgtype.UUID
 	ActiveBuildID     pgtype.UUID
-	PublicReadEnabled bool
 	SymbolCount       int32
 	EdgeCount         int32
 	ID                pgtype.UUID
@@ -119,8 +120,9 @@ type codeGraphRepositoryRow struct {
 
 func codeGraphRepositoryToResponse(row codeGraphRepositoryRow) CodeGraphRepositoryResponse {
 	return CodeGraphRepositoryResponse{
+		IsWorkspaceShared: row.IsWorkspaceShared, Projects: []CodeGraphAssignedProject{},
 		AuthMode: row.AuthMode, CredentialID: uuidToPtr(row.CredentialID),
-		ActiveBuildID: uuidToPtr(row.ActiveBuildID), PublicReadEnabled: row.PublicReadEnabled, SymbolCount: row.SymbolCount, EdgeCount: row.EdgeCount,
+		ActiveBuildID: uuidToPtr(row.ActiveBuildID), SymbolCount: row.SymbolCount, EdgeCount: row.EdgeCount,
 		ID:             uuidToString(row.ID),
 		WorkspaceID:    uuidToString(row.WorkspaceID),
 		RepoURL:        row.RepoURL,
@@ -155,14 +157,15 @@ func scanCodeGraphRepository(row pgx.Row) (codeGraphRepositoryRow, error) {
 		&out.CreatedBy,
 		&out.CreatedAt,
 		&out.UpdatedAt,
-		&out.ActiveBuildID, &out.PublicReadEnabled, &out.SymbolCount, &out.EdgeCount,
+		&out.ActiveBuildID, &out.SymbolCount, &out.EdgeCount,
 		&out.AuthMode, &out.CredentialID,
+		&out.IsWorkspaceShared,
 	)
 	return out, err
 }
 
 func codeGraphSelectColumns() string {
-	return `id, workspace_id, repo_url, repo_name, branch, status, internal_status, commit_hash, file_count, sync_error, last_indexed_at, created_by, created_at, updated_at, active_build_id, public_read_enabled, symbol_count, edge_count, auth_mode, credential_id`
+	return `id, workspace_id, repo_url, repo_name, branch, status, internal_status, commit_hash, file_count, sync_error, last_indexed_at, created_by, created_at, updated_at, active_build_id, symbol_count, edge_count, auth_mode, credential_id, is_workspace_shared`
 }
 
 func (h *Handler) requireCodeGraphWriter(w http.ResponseWriter, r *http.Request, workspaceID string) bool {
@@ -236,8 +239,14 @@ func (h *Handler) ListWorkspaceCodeGraphs(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed to load assigned agents")
 		return
 	}
+	projects, err := h.codeGraphProjectSummaries(r, idUUID)
+	if err != nil {
+		writeError(w, 500, "failed to load assigned projects")
+		return
+	}
 	for i := range items {
 		items[i].Agents = assignments[items[i].ID]
+		items[i].Projects = projects[items[i].ID]
 	}
 	progressRows, err := h.DB.Query(r.Context(), `SELECT DISTINCT ON (repository_id) repository_id,id,status,commit_hash,created_at,error,phase,cancel_requested,started_at,finished_at,phase_started_at FROM code_graph_build WHERE workspace_id=$1 ORDER BY repository_id,created_at DESC`, idUUID)
 	if err != nil {
@@ -474,12 +483,19 @@ func (h *Handler) GetWorkspaceCodeGraph(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to load assigned agents")
 		return
 	}
+	rows.Close()
+	projects, err := h.codeGraphProjectSummaries(r, idUUID)
+	if err != nil {
+		writeError(w, 500, "failed to load assigned projects")
+		return
+	}
+	response.Projects = projects[response.ID]
 	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *Handler) UnassignWorkspaceCodeGraphAgent(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
-	if !h.requireCodeGraphWriter(w, r, workspaceID) {
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
 		return
 	}
 	ws, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
@@ -596,6 +612,10 @@ func (h *Handler) DeleteWorkspaceCodeGraph(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "failed to delete code graph repository")
 		return
 	}
+	if _, err := tx.Exec(r.Context(), `DELETE FROM project_code_graph_repository WHERE repository_id IN (SELECT id FROM code_graph_repository WHERE id=$1 AND workspace_id=$2)`, repoUUID, idUUID); err != nil {
+		writeError(w, 500, "failed to remove project assignments")
+		return
+	}
 	tag, err := tx.Exec(r.Context(), `DELETE FROM code_graph_repository WHERE id = $1 AND workspace_id = $2`, repoUUID, idUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete code graph repository")
@@ -619,7 +639,7 @@ func (h *Handler) AssignWorkspaceCodeGraphToAgent(w http.ResponseWriter, r *http
 	if !ok {
 		return
 	}
-	if !h.requireCodeGraphWriter(w, r, workspaceID) {
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
 		return
 	}
 	repoUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "codeGraphId"), "code graph id")

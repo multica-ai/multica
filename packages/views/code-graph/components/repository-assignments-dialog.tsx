@@ -1,4 +1,5 @@
 "use client";
+import { useAuthStore } from "@multica/core/auth";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { CodeGraphRepository } from "@multica/core/types";
@@ -37,6 +38,7 @@ export function RepositoryAssignmentsDialog({
   const { t } = useT("layout");
   const [busy, setBusy] = useState(false);
   const writer = useGraphAssignmentWriter(wsId);
+  const userId = useAuthStore((state) => state.user?.id);
   const details = useQuery(codeGraphRepositoryOptions(wsId, repo.id));
   const agents = useQuery(agentListOptions(wsId));
   const runtimes = useQuery(runtimeListOptions(wsId));
@@ -49,7 +51,7 @@ export function RepositoryAssignmentsDialog({
       id: agent.id,
       label: agent.name,
       assigned: assigned.has(agent.id),
-      editable: canManageCodeGraphAgent(agent, writer),
+      editable: canManageCodeGraphAgent(agent, writer, userId),
       supported: agentSupportsCodeGraph(agent, runtimes.data ?? []),
     }));
   // Binding names may remain visible even when this client cannot edit their configuration.

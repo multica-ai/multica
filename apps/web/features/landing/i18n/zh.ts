@@ -196,7 +196,7 @@ export function createZhDict(
       {
         question: "智能体不在本地克隆仓库，也能查询代码吗？",
         answer:
-          "启用 CodeGraph 后，支持图谱工具的智能体可以搜索已分配的仓库快照、查看调用关系，并按 Git 提交读取源码行。工作区所有者和管理员管理仓库导入与分配。部署和权限说明见 [CodeGraph 指南](/docs/zh/codegraph)。",
+          "启用 CodeGraph 后，支持图谱工具的智能体可以搜索仓库快照、查看调用关系，并按 Git 提交读取源码行。在团队的资源中导入仓库后，可以指定智能体、指定项目，或向工作区全部智能体开放。智能体所有者可以管理自己的直接分配，工作区所有者和管理员管理仓库导入及更大范围的授权。部署和权限说明见 [CodeGraph 指南](/docs/zh/codegraph)。",
       },
       {
         question: "Multica \u652f\u6301\u54ea\u4e9b\u7f16\u7801 智能体\uff1f",

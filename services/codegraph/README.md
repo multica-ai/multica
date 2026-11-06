@@ -60,9 +60,33 @@ receives Git tokens.
 
 ## Third-party source
 
-The image builds [CodeGraph](https://github.com/colbymchenry/codegraph) at the
-revision pinned in `source-revision.txt`. That project is MIT licensed,
-copyright (c) 2026 Colby Mchenry. Its original license remains at
-`/opt/codegraph/LICENSE` in the image. See `THIRD_PARTY_NOTICES.md`.
+The source-code extraction and graph-query engine is
+[CodeGraph by Colby Mchenry](https://github.com/colbymchenry/codegraph).
+The adapter directly uses its `CodeGraph` library for indexing, symbol search
+and call relationships. Credit for that engine belongs to its original authors.
 
-This integration does not provide Skill export.
+The image builds the fixed
+[19813544766f74a10f403c9e474306c0f7b61a18 revision](https://github.com/colbymchenry/codegraph/tree/19813544766f74a10f403c9e474306c0f7b61a18),
+recorded in `source-revision.txt`, rather than following a moving branch.
+That revision is [MIT licensed](https://github.com/colbymchenry/codegraph/blob/19813544766f74a10f403c9e474306c0f7b61a18/LICENSE),
+copyright (c) 2026 Colby Mchenry. The original license remains at
+`/opt/codegraph/LICENSE` in the image; the full notice is also retained in
+`THIRD_PARTY_NOTICES.md`.
+
+This contribution adds Multica workspace authorization, Git credential
+management, build scheduling/cancellation, validated snapshot publication,
+Markdown/YAML document structure, task-authenticated MCP delivery, and shared
+web/desktop configuration screens around that engine. It exposes a subset of
+the pinned library's APIs; it does not imply support for every feature in the
+original project's current CLI or main branch.
+
+All queries require workspace membership or an authorized agent task token.
+Agent authorization combines direct assignments, workspace sharing, and the
+authenticated task's current project assignments. New scopes default off.
+Agent owners can manage direct assignments to their agents; only workspace
+owners and administrators can change project and workspace scopes. The server
+derives the project from database task relationships and rechecks grants for
+every tool call, including file reads. Revocation cannot erase code already in
+the agent's conversation. Graph assignment is separate from runtime tool support.
+Anonymous Git fetching is available for public repositories; anonymous graph
+querying and Skill export are not included.

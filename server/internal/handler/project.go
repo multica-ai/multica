@@ -687,6 +687,10 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete project views")
 		return
 	}
+	if _, err := tx.Exec(r.Context(), `DELETE FROM project_code_graph_repository WHERE project_id=$1`, project.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to remove project graph assignments")
+		return
+	}
 	if err := qtx.DeleteProject(r.Context(), db.DeleteProjectParams{
 		ID:          project.ID,
 		WorkspaceID: project.WorkspaceID,

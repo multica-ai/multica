@@ -1,5 +1,4 @@
 ALTER TABLE code_graph_repository ADD COLUMN IF NOT EXISTS active_build_id uuid;
-ALTER TABLE code_graph_repository ADD COLUMN IF NOT EXISTS public_read_enabled boolean NOT NULL DEFAULT false;
 ALTER TABLE code_graph_repository ADD COLUMN IF NOT EXISTS symbol_count integer NOT NULL DEFAULT 0;
 ALTER TABLE code_graph_repository ADD COLUMN IF NOT EXISTS edge_count integer NOT NULL DEFAULT 0;
 CREATE TABLE IF NOT EXISTS code_graph_build (

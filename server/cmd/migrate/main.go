@@ -149,6 +149,7 @@ var concurrentIndexCleanups = map[string]string{
 	"626_code_graph_repository_status":                          "code_graph_repository_workspace_status_idx",
 	"627_code_graph_repository_search":                          "code_graph_repository_workspace_search_idx",
 	"628_code_graph_assignment_repository":                      "idx_agent_code_graph_repository_repository",
+	"630_code_graph_project_assignment":                         "idx_project_code_graph_repository",
 	"613_skill_version_index":                                   "idx_skill_version_skill_version",
 	"606_agent_task_queue_runtime_active_index":                 "idx_agent_task_queue_runtime_active",
 	"604_wecom_install_session_begin_rate_idx":                  "idx_wecom_install_session_begin_rate",

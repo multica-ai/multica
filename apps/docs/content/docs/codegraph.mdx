@@ -9,7 +9,7 @@ without checking out the repository on their own computer.
 
 ## Add a repository
 
-Open **Work → CodeGraph → Register repository**. Enter an HTTPS Git URL and branch.
+Open **Team → Resources → CodeGraph → Register repository**. Enter an HTTPS Git URL and branch.
 Choose a saved Git credential for a private repository, or explicitly choose
 anonymous access for a public one. Verify access, then register.
 
@@ -36,25 +36,60 @@ commit. Pin the returned build ID when comparing several results; inspect the
 source before treating a relationship as evidence. Missing results do not prove
 that code or behavior is absent.
 
-## Connect an agent
+## Choose the usage scope
 
-In repository details, open **Agents** and assign a tool-capable runtime's agent.
-You can also manage assignments from that agent's configuration.
+Open **Team → Resources → CodeGraph**. In repository details, open **Usage scope**.
+
+| Scope | When an agent can use the graph | Who can manage it |
+| --- | --- | --- |
+| Direct agent assignment | In any task or conversation for that agent | Agent owner, workspace owner or administrator |
+| Project | Only in a task or conversation belonging to the selected project | Workspace owner or administrator |
+| All workspace agents | For current and future agents in the workspace | Workspace owner or administrator |
+
+New graphs have no agent access by default. Scopes are combined: removing one
+assignment does not revoke access granted by another. Workspace members can
+manually query all workspace graphs; these settings control agent tools, not
+member visibility. Git credentials remain on the server and are never given to agents.
+
+Project pages show project-assigned and workspace-shared graphs. Agent configuration
+shows direct assignments and workspace sharing. An execution's transcript shows
+the graphs currently available to that run and their authorization sources. This
+is a current permission view, not an audit log of code previously read.
+
+The server derives the project from the authenticated task's issue or project
+conversation. Mentioning another project in a prompt does not grant access.
+Moving an issue to another project changes project access on the next tool call.
+Ordinary conversations without a project receive only direct and workspace access.
+
+## Use the tools
+
+Assignment does not install tools or bring an offline runtime online. A graph
+also needs a successful build before it can be queried.
 The daemon injects CodeGraph MCP tools into supported local providers.
 Use a CLI/daemon build that includes this integration and restart older daemons
 after upgrading; backend support alone does not inject tools into older CLIs.
 Cloud providers that cannot receive local tools are not supported by this path.
 
-Each tool call checks the current repository assignment. Removing an assignment
+Each tool call checks all current authorization sources. Removing every source
 revokes future calls, including calls from an already running task. This does
 not erase source content already included in a conversation.
 
-## Optional anonymous queries
+## Query access
 
-Anonymous access is off by default. Enabling it exposes indexed source and
-document content to anyone who has the query URL, including content fetched
-from a private repository. Only enable it for content approved for public access.
-Disabling it prevents further anonymous queries. Skill export is not included.
+Graph queries require workspace membership or an authorized agent task token.
+Importing a public Git repository anonymously does not make its graph public.
+Anonymous graph queries and Skill export are not included.
+
+## Engine and attribution
+
+Source-code indexing, symbol search and call relationships use
+[CodeGraph by Colby Mchenry](https://github.com/colbymchenry/codegraph).
+This integration pins
+[revision 19813544766f](https://github.com/colbymchenry/codegraph/tree/19813544766f74a10f403c9e474306c0f7b61a18),
+which is [MIT licensed](https://github.com/colbymchenry/codegraph/blob/19813544766f74a10f403c9e474306c0f7b61a18/LICENSE).
+Multica adds workspace access control, repository management, snapshot builds
+and authenticated agent tools around that library. This integration uses a
+subset of its APIs; the original project's latest features are not implied.
 
 ## Self-hosting
 

@@ -196,7 +196,7 @@ export function createEnDict(
       {
         question: "Can agents query repository context without a local checkout?",
         answer:
-          "With CodeGraph enabled, supported agents can search assigned repository snapshots, inspect call relationships, and read source lines tied to a Git commit. Workspace owners and administrators control repository imports and assignments. See the [CodeGraph guide](/docs/codegraph) for setup and access rules.",
+          "With CodeGraph enabled, supported agents can search repository snapshots, inspect call relationships, and read source lines tied to a Git commit. Import repositories under Team → Resources, then assign selected agents or projects, or share with all workspace agents. Agent owners can manage their direct assignments; workspace owners and administrators manage imports and wider access. See the [CodeGraph guide](/docs/codegraph) for setup and access rules.",
       },
       {
         question: "What coding agents does Multica support?",

@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_project_code_graph_repository;

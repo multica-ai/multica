@@ -656,11 +656,11 @@ type CodeGraphRepository struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 	ActiveBuildID     pgtype.UUID        `json:"active_build_id"`
-	PublicReadEnabled bool               `json:"public_read_enabled"`
 	SymbolCount       int32              `json:"symbol_count"`
 	EdgeCount         int32              `json:"edge_count"`
 	AuthMode          string             `json:"auth_mode"`
 	CredentialID      pgtype.UUID        `json:"credential_id"`
+	IsWorkspaceShared bool               `json:"is_workspace_shared"`
 }
 
 type Comment struct {
@@ -1445,6 +1445,13 @@ type Project struct {
 	WorkflowID  pgtype.UUID        `json:"workflow_id"`
 	CreatorType pgtype.Text        `json:"creator_type"`
 	CreatorID   pgtype.UUID        `json:"creator_id"`
+}
+
+type ProjectCodeGraphRepository struct {
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	RepositoryID pgtype.UUID        `json:"repository_id"`
+	CreatedBy    pgtype.UUID        `json:"created_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
 type ProjectResource struct {

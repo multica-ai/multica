@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3, BookOpenText, Bot, Monitor, Plus, User, UserPlus, Users } from "@multica/ui/icons";
+import { BarChart3, BookOpenText, Bot, Layers, Monitor, Plus, User, UserPlus, Users } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -270,6 +270,12 @@ export function TeamPanel() {
 
         <PanelSection label={t(($) => $.panels.team.resources)}>
           <PanelList>
+            <PanelLink
+              href={p.codeGraph()}
+              icon={<Layers />}
+              label={t(($) => $.nav.code_graph)}
+              active={isPathWithin(pathname, p.codeGraph())}
+            />
             <PanelLink
               href={p.skills()}
               icon={<BookOpenText />}

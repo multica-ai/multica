@@ -9,12 +9,13 @@ import (
 )
 
 type Repository struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Branch        string `json:"branch"`
-	Status        string `json:"status"`
-	Commit        string `json:"commit"`
-	ActiveBuildID string `json:"active_build_id,omitempty"`
+	Sources       []string `json:"sources"`
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Branch        string   `json:"branch"`
+	Status        string   `json:"status"`
+	Commit        string   `json:"commit"`
+	ActiveBuildID string   `json:"active_build_id,omitempty"`
 }
 
 // Store must resolve current grants for every call, including file access.

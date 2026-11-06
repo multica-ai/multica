@@ -1,11 +1,47 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
 import {
-  codeGraphRepositoriesOptions,
-  codeGraphRepositoryOptions,
-} from "./queries";
+  queryOptions,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { api } from "../api";
 export * from "./codegraph-assignments";
 export * from "./git-credentials";
+
+export function availableCodeGraphsOptions(wsId: string, taskId: string) {
+  return queryOptions({
+    queryKey: ["workspaces", wsId, "code-graphs", "available", taskId],
+    queryFn: () => api.availableCodeGraphs(wsId, taskId),
+    staleTime: 0,
+  });
+}
+
+export function useCodeGraphScope(wsId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      change: { repositoryId: string } & (
+        | { shared: boolean }
+        | { projectId: string; assigned: boolean }
+      ),
+    ) =>
+      "shared" in change
+        ? api.setCodeGraphWorkspaceScope(
+            wsId,
+            change.repositoryId,
+            change.shared,
+          )
+        : api.setCodeGraphProject(
+            wsId,
+            change.repositoryId,
+            change.projectId,
+            change.assigned,
+          ),
+    onSettled: () =>
+      client.invalidateQueries({
+        queryKey: ["workspaces", wsId, "code-graphs"],
+      }),
+  });
+}
 
 export type CodeGraphAssignmentChange = {
   repositoryId: string;
@@ -60,23 +96,5 @@ export function useCodeGraphQuery(wsId: string, repositoryId: string) {
   return useMutation({
     mutationFn: (params: Record<string, string>) =>
       api.queryCodeGraph(wsId, repositoryId, params),
-  });
-}
-
-export function useCodeGraphSharing(wsId: string, repositoryId: string) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (enabled: boolean) =>
-      api.setCodeGraphSharing(wsId, repositoryId, enabled),
-    onSuccess: async () => {
-      await Promise.all([
-        client.invalidateQueries({
-          queryKey: codeGraphRepositoryOptions(wsId, repositoryId).queryKey,
-        }),
-        client.invalidateQueries({
-          queryKey: codeGraphRepositoriesOptions(wsId).queryKey,
-        }),
-      ]);
-    },
   });
 }

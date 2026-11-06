@@ -1,4 +1,5 @@
 "use client";
+import { useAuthStore } from "@multica/core/auth";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
@@ -32,10 +33,11 @@ export function AgentCodeGraphsTab({
     enabled: Boolean(wsId),
   });
   const writer = useGraphAssignmentWriter(wsId);
+  const userId = useAuthStore((state) => state.user?.id);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const supported = runtime?.supports_code_graph === true;
-  const editable = canManageCodeGraphAgent(agent, writer);
+  const editable = canManageCodeGraphAgent(agent, writer, userId);
   const options = (repos.data?.items ?? []).map((repo) => ({
     id: repo.id,
     label: `${repo.repo_name} · ${repo.branch}`,
@@ -43,7 +45,12 @@ export function AgentCodeGraphsTab({
     editable,
     supported,
   }));
-  const assigned = options.filter((option) => option.assigned);
+  const assigned = options.filter(
+    (option) =>
+      option.assigned ||
+      repos.data?.items.find((repo) => repo.id === option.id)
+        ?.is_workspace_shared,
+  );
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -79,9 +86,31 @@ export function AgentCodeGraphsTab({
         {assigned.map((option) => (
           <li className="break-words p-3 text-body" key={option.id}>
             {option.label}
+            <p className="text-caption text-muted-foreground">
+              {[
+                option.assigned
+                  ? t(($) => $.code_graph.scope.source_agent)
+                  : "",
+                repos.data?.items.find((repo) => repo.id === option.id)
+                  ?.is_workspace_shared
+                  ? t(($) => $.code_graph.scope.source_workspace)
+                  : "",
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+            {!repos.data?.items.find((repo) => repo.id === option.id)
+              ?.active_build_id && (
+              <p className="text-caption text-muted-foreground">
+                {t(($) => $.code_graph.scope.awaiting_build)}
+              </p>
+            )}
           </li>
         ))}
       </ul>
+      <p className="text-caption text-muted-foreground">
+        {t(($) => $.code_graph.scope.project_help)}
+      </p>
       <Dialog
         open={editing}
         onOpenChange={(open) => {

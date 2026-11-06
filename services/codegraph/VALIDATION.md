@@ -1,7 +1,54 @@
 # Contribution validation
 
-Base: `multica-ai/multica` main, `98846ce56`.
-Date: 2026-11-05.
+Initial base: `multica-ai/multica` main, `98846ce56`.
+Synchronized base: `61e7e8f96` on 2026-11-06.
+Initial verification: 2026-11-05.
+
+## Usage scopes and contribution review, 2026-11-06
+
+- Applied incremental migrations 629–630 to the isolated managed database,
+  preserving existing repositories and direct assignments. Regenerated sqlc.
+- Passed seven real database/MCP handler checks, including agent-owner binding,
+  union/provenance, workspace sharing, task-derived issue/project-chat access,
+  project moves, cross-workspace rejection and revocation during an MCP session.
+- Repeated API/CLI compilation, all nine workspace typechecks, concurrent-index
+  cleanup checks, 31 pure core checks and targeted CodeGraph UI lint.
+- Generated the documentation MDX successfully. Full docs production build was
+  not run.
+- Real HTTP scope writes returned 204 for workspace owner/admin, 403 for an
+  ordinary member and 404 for a nonmember. Missing sharing booleans returned 400;
+  unknown projects/tasks returned 404. Anonymous query/sharing routes returned 404.
+- Repeated real-engine symbol, callers, callees, impact, document and source
+  boundary queries on the successful public repository snapshot.
+- Browser checks exercised workspace sharing and project assignment, the project
+  resource section, and the empty-collection introduction. At 420px, the usage
+  dialog measured 388px with no horizontal overflow and reachable bottom actions.
+  The authenticated review pages reported no console errors; development preload
+  warnings remain.
+
+The permission checks exercise real PostgreSQL, HTTP and authenticated MCP paths.
+They do not execute a model. Run-availability UI has typechecking coverage but has
+not been exercised in a model-backed run. Only a personal-fork review is prepared;
+the upstream PR remains pending human review and the checks listed below.
+
+## UI alignment and base synchronization
+
+The three later main commits were merged without conflicts or migration changes.
+On the synchronized code, API/CLI compilation, all nine workspace typechecks,
+targeted UI lint, 17 route-space checks and concurrent-index recovery contracts
+passed. The UI reuses Field, Select, Alert and Dialog primitives; registration
+uses a native form and DialogTrigger. CodeGraph is under Team → Resources in
+both applications' shared shell.
+
+Real browser checks covered dark theme, desktop and 420px layouts, registration
+authentication selection and a successful anonymous access check against
+`expressjs/serve-static`. The narrow dialog had no horizontal overflow and its
+footer stayed inside the viewport. Git credentials retain a visible
+missing-encryption state rather than allowing an unsavable new credential.
+
+The initial checks below predate the three-commit synchronization unless
+explicitly repeated above. Complete repository and model-backed acceptance
+remain outstanding.
 
 ## Executed
 
@@ -46,9 +93,10 @@ identities: members can list/query; only owners and administrators can manage
 credentials and verify repository access; nonmembers receive 404. Path escapes,
 Git metadata reads and unsupported operations were rejected.
 
-Anonymous queries returned 404 while disabled, 200 after explicit activation,
-then 404 again after revocation. Sharing was left disabled.
-Skill export handlers and UI controls were removed.
+Public graph sharing was exercised in the initial review, then removed from
+the contribution together with its routes, UI, API fields and migration flag.
+Skill export handlers and UI controls were also removed. Anonymous Git fetching
+for public repositories remains available and is separate from query access.
 Browser interaction verified the repository details and symbol-search result
 view against the real API. No browser console errors occurred on that page.
 
@@ -62,3 +110,5 @@ view against the real API. No browser console errors occurred on that page.
 - Desktop typechecking passed; native desktop interaction was not tested.
 - English and Simplified Chinese guides were added. New strings in other
   supported locales include English fallback copy and need language review.
+- Several cross-query build/credential flows still live in HTTP handler files.
+  Service-layer extraction needs further architecture review.

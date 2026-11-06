@@ -46,7 +46,7 @@ func (q *Queries) CountCodeGraphRepositoriesByStatus(ctx context.Context, worksp
 const createCodeGraphRepository = `-- name: CreateCodeGraphRepository :one
 INSERT INTO code_graph_repository (workspace_id, repo_url, repo_name, branch, created_by)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, workspace_id, repo_url, repo_name, branch, status, internal_status, commit_hash, file_count, sync_error, last_indexed_at, created_by, created_at, updated_at, active_build_id, public_read_enabled, symbol_count, edge_count, auth_mode, credential_id
+RETURNING id, workspace_id, repo_url, repo_name, branch, status, internal_status, commit_hash, file_count, sync_error, last_indexed_at, created_by, created_at, updated_at, active_build_id, symbol_count, edge_count, auth_mode, credential_id, is_workspace_shared
 `
 
 type CreateCodeGraphRepositoryParams struct {
@@ -82,11 +82,11 @@ func (q *Queries) CreateCodeGraphRepository(ctx context.Context, arg CreateCodeG
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ActiveBuildID,
-		&i.PublicReadEnabled,
 		&i.SymbolCount,
 		&i.EdgeCount,
 		&i.AuthMode,
 		&i.CredentialID,
+		&i.IsWorkspaceShared,
 	)
 	return i, err
 }
@@ -110,7 +110,7 @@ func (q *Queries) DeleteCodeGraphRepository(ctx context.Context, arg DeleteCodeG
 }
 
 const getCodeGraphRepository = `-- name: GetCodeGraphRepository :one
-SELECT id, workspace_id, repo_url, repo_name, branch, status, internal_status, commit_hash, file_count, sync_error, last_indexed_at, created_by, created_at, updated_at, active_build_id, public_read_enabled, symbol_count, edge_count, auth_mode, credential_id FROM code_graph_repository
+SELECT id, workspace_id, repo_url, repo_name, branch, status, internal_status, commit_hash, file_count, sync_error, last_indexed_at, created_by, created_at, updated_at, active_build_id, symbol_count, edge_count, auth_mode, credential_id, is_workspace_shared FROM code_graph_repository
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -138,17 +138,17 @@ func (q *Queries) GetCodeGraphRepository(ctx context.Context, arg GetCodeGraphRe
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ActiveBuildID,
-		&i.PublicReadEnabled,
 		&i.SymbolCount,
 		&i.EdgeCount,
 		&i.AuthMode,
 		&i.CredentialID,
+		&i.IsWorkspaceShared,
 	)
 	return i, err
 }
 
 const getCodeGraphRepositoryByIdentity = `-- name: GetCodeGraphRepositoryByIdentity :one
-SELECT id, workspace_id, repo_url, repo_name, branch, status, internal_status, commit_hash, file_count, sync_error, last_indexed_at, created_by, created_at, updated_at, active_build_id, public_read_enabled, symbol_count, edge_count, auth_mode, credential_id FROM code_graph_repository
+SELECT id, workspace_id, repo_url, repo_name, branch, status, internal_status, commit_hash, file_count, sync_error, last_indexed_at, created_by, created_at, updated_at, active_build_id, symbol_count, edge_count, auth_mode, credential_id, is_workspace_shared FROM code_graph_repository
 WHERE workspace_id = $1 AND repo_url = $2 AND branch = $3
 `
 
@@ -177,17 +177,17 @@ func (q *Queries) GetCodeGraphRepositoryByIdentity(ctx context.Context, arg GetC
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ActiveBuildID,
-		&i.PublicReadEnabled,
 		&i.SymbolCount,
 		&i.EdgeCount,
 		&i.AuthMode,
 		&i.CredentialID,
+		&i.IsWorkspaceShared,
 	)
 	return i, err
 }
 
 const listCodeGraphRepositories = `-- name: ListCodeGraphRepositories :many
-SELECT id, workspace_id, repo_url, repo_name, branch, status, internal_status, commit_hash, file_count, sync_error, last_indexed_at, created_by, created_at, updated_at, active_build_id, public_read_enabled, symbol_count, edge_count, auth_mode, credential_id FROM code_graph_repository
+SELECT id, workspace_id, repo_url, repo_name, branch, status, internal_status, commit_hash, file_count, sync_error, last_indexed_at, created_by, created_at, updated_at, active_build_id, symbol_count, edge_count, auth_mode, credential_id, is_workspace_shared FROM code_graph_repository
 WHERE workspace_id = $1::uuid
   AND (
     $2::text = ''
@@ -234,11 +234,11 @@ func (q *Queries) ListCodeGraphRepositories(ctx context.Context, arg ListCodeGra
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ActiveBuildID,
-			&i.PublicReadEnabled,
 			&i.SymbolCount,
 			&i.EdgeCount,
 			&i.AuthMode,
 			&i.CredentialID,
+			&i.IsWorkspaceShared,
 		); err != nil {
 			return nil, err
 		}
@@ -257,7 +257,7 @@ SET status = 'failed',
     sync_error = $4,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, repo_url, repo_name, branch, status, internal_status, commit_hash, file_count, sync_error, last_indexed_at, created_by, created_at, updated_at, active_build_id, public_read_enabled, symbol_count, edge_count, auth_mode, credential_id
+RETURNING id, workspace_id, repo_url, repo_name, branch, status, internal_status, commit_hash, file_count, sync_error, last_indexed_at, created_by, created_at, updated_at, active_build_id, symbol_count, edge_count, auth_mode, credential_id, is_workspace_shared
 `
 
 type MarkCodeGraphRepositoryFailedParams struct {
@@ -291,11 +291,11 @@ func (q *Queries) MarkCodeGraphRepositoryFailed(ctx context.Context, arg MarkCod
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ActiveBuildID,
-		&i.PublicReadEnabled,
 		&i.SymbolCount,
 		&i.EdgeCount,
 		&i.AuthMode,
 		&i.CredentialID,
+		&i.IsWorkspaceShared,
 	)
 	return i, err
 }
@@ -307,7 +307,7 @@ SET status = 'processing',
     sync_error = NULL,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, repo_url, repo_name, branch, status, internal_status, commit_hash, file_count, sync_error, last_indexed_at, created_by, created_at, updated_at, active_build_id, public_read_enabled, symbol_count, edge_count, auth_mode, credential_id
+RETURNING id, workspace_id, repo_url, repo_name, branch, status, internal_status, commit_hash, file_count, sync_error, last_indexed_at, created_by, created_at, updated_at, active_build_id, symbol_count, edge_count, auth_mode, credential_id, is_workspace_shared
 `
 
 type MarkCodeGraphRepositoryProcessingParams struct {
@@ -335,11 +335,11 @@ func (q *Queries) MarkCodeGraphRepositoryProcessing(ctx context.Context, arg Mar
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ActiveBuildID,
-		&i.PublicReadEnabled,
 		&i.SymbolCount,
 		&i.EdgeCount,
 		&i.AuthMode,
 		&i.CredentialID,
+		&i.IsWorkspaceShared,
 	)
 	return i, err
 }
@@ -354,7 +354,7 @@ SET status = 'ready',
     last_indexed_at = now(),
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, repo_url, repo_name, branch, status, internal_status, commit_hash, file_count, sync_error, last_indexed_at, created_by, created_at, updated_at, active_build_id, public_read_enabled, symbol_count, edge_count, auth_mode, credential_id
+RETURNING id, workspace_id, repo_url, repo_name, branch, status, internal_status, commit_hash, file_count, sync_error, last_indexed_at, created_by, created_at, updated_at, active_build_id, symbol_count, edge_count, auth_mode, credential_id, is_workspace_shared
 `
 
 type MarkCodeGraphRepositoryReadyParams struct {
@@ -390,11 +390,11 @@ func (q *Queries) MarkCodeGraphRepositoryReady(ctx context.Context, arg MarkCode
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ActiveBuildID,
-		&i.PublicReadEnabled,
 		&i.SymbolCount,
 		&i.EdgeCount,
 		&i.AuthMode,
 		&i.CredentialID,
+		&i.IsWorkspaceShared,
 	)
 	return i, err
 }

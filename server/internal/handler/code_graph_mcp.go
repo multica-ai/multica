@@ -3,81 +3,58 @@ package handler
 import (
 	"context"
 	"errors"
-	"net/http"
-
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/pkg/codegraph"
+	"net/http"
 )
 
 type agentCodeGraphStore struct {
 	h           *Handler
 	workspaceID pgtype.UUID
 	agentID     pgtype.UUID
+	taskID      pgtype.UUID
 }
 
+func (s agentCodeGraphStore) access() service.CodeGraphAccessService {
+	return service.CodeGraphAccessService{DB: s.h.DB, WorkspaceID: s.workspaceID, AgentID: s.agentID, TaskID: s.taskID}
+}
 func (s agentCodeGraphStore) List(ctx context.Context) ([]codegraph.Repository, error) {
 	if err := s.h.reconcileCodeGraphCheckouts(ctx, s.workspaceID); err != nil {
 		return nil, errors.New("failed to check repository storage")
 	}
-	rows, err := s.h.DB.Query(ctx, `SELECT r.id::text, r.repo_name, r.branch, r.status, COALESCE(r.commit_hash, ''), COALESCE(r.active_build_id::text,'')
- FROM code_graph_repository r
- JOIN agent_code_graph_repository b ON b.repository_id = r.id
- JOIN agent a ON a.id = b.agent_id AND a.workspace_id = r.workspace_id AND a.archived_at IS NULL
- WHERE r.workspace_id = $1 AND a.id = $2 ORDER BY r.repo_name, r.id`, s.workspaceID, s.agentID)
-	if err != nil {
-		return nil, errors.New("failed to load repository assignments")
-	}
-	defer rows.Close()
-	repos := make([]codegraph.Repository, 0)
-	for rows.Next() {
-		var repo codegraph.Repository
-		if err := rows.Scan(&repo.ID, &repo.Name, &repo.Branch, &repo.Status, &repo.Commit, &repo.ActiveBuildID); err != nil {
-			return nil, err
-		}
-		repos = append(repos, repo)
-	}
-	return repos, rows.Err()
+	return s.access().Repositories(ctx, "")
 }
-
 func (s agentCodeGraphStore) Checkout(ctx context.Context, repositoryID string) (string, error) {
 	if err := s.h.reconcileCodeGraphCheckouts(ctx, s.workspaceID); err != nil {
 		return "", errors.New("failed to check repository storage")
 	}
-	// Compare as text so untrusted tool arguments cannot trigger UUID parser panics.
-	var id, status string
-	var build pgtype.UUID
-	err := s.h.DB.QueryRow(ctx, `SELECT r.id::text, r.status, r.active_build_id FROM code_graph_repository r
- JOIN agent_code_graph_repository b ON b.repository_id = r.id
- JOIN agent a ON a.id = b.agent_id AND a.workspace_id = r.workspace_id AND a.archived_at IS NULL
- WHERE r.workspace_id = $1 AND a.id = $2 AND r.id::text = $3`, s.workspaceID, s.agentID, repositoryID).Scan(&id, &status, &build)
-	if err != nil {
-		return "", errors.New("repository unavailable or not assigned to this agent")
+	repos, err := s.access().Repositories(ctx, repositoryID)
+	if err != nil || len(repos) != 1 {
+		return "", errors.New("repository unavailable or not assigned to this run")
 	}
-	if status != "ready" && !build.Valid {
-		return "", errors.New("repository is not ready; synchronize it before querying")
+	repo := repos[0]
+	if repo.ActiveBuildID == "" {
+		return "", errors.New("repository has no successful build; synchronize it before querying")
 	}
-	if build.Valid {
-		return codeGraphBuildDir(uuidToString(s.workspaceID), id, uuidToString(build)), nil
-	}
-	return codeGraphCheckoutDir(uuidToString(s.workspaceID), id), nil
+	return codeGraphBuildDir(uuidToString(s.workspaceID), repo.ID, repo.ActiveBuildID), nil
 }
-
 func (s agentCodeGraphStore) Query(ctx context.Context, input codegraph.QueryInput) (codegraph.QueryResult, error) {
-	var row codeGraphRepositoryRow
-	err := s.h.DB.QueryRow(ctx, `SELECT r.id,r.repo_name,r.active_build_id FROM code_graph_repository r
- WHERE r.workspace_id=$1 AND r.id::text=$3 AND EXISTS (
- SELECT 1 FROM agent_code_graph_repository b JOIN agent a ON a.id=b.agent_id
- WHERE b.repository_id=r.id AND a.id=$2 AND a.workspace_id=r.workspace_id AND a.archived_at IS NULL)`, s.workspaceID, s.agentID, input.RepositoryID).Scan(&row.ID, &row.RepoName, &row.ActiveBuildID)
-	if err != nil {
-		return codegraph.QueryResult{}, errors.New("Repository unavailable or not assigned to this agent")
+	repos, err := s.access().Repositories(ctx, input.RepositoryID)
+	if err != nil || len(repos) != 1 {
+		return codegraph.QueryResult{}, errors.New("repository unavailable or not assigned to this run")
 	}
-	row.WorkspaceID = s.workspaceID
+	repo := repos[0]
+	row := codeGraphRepositoryRow{ID: parseUUID(repo.ID), WorkspaceID: s.workspaceID, RepoName: repo.Name}
+	if repo.ActiveBuildID != "" {
+		row.ActiveBuildID = parseUUID(repo.ActiveBuildID)
+	}
 	result, _, err := s.h.executeCodeGraphQuery(ctx, row, input)
 	return result, err
 }
 
-// Mounted behind Auth: identities below are stamped from the task token, never tool input.
+// Mounted behind Auth: identities are stamped from the task token, never tool input.
 func (h *Handler) CodeGraphMCP(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("X-Actor-Source") != "task_token" {
 		writeError(w, http.StatusForbidden, "CodeGraph MCP requires an agent task token")
@@ -91,7 +68,11 @@ func (h *Handler) CodeGraphMCP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	store := agentCodeGraphStore{h: h, workspaceID: workspaceID, agentID: agentID}
+	taskID, ok := parseUUIDOrBadRequest(w, r.Header.Get("X-Task-ID"), "task id")
+	if !ok {
+		return
+	}
+	store := agentCodeGraphStore{h: h, workspaceID: workspaceID, agentID: agentID, taskID: taskID}
 	server := codegraph.NewServer(store, codegraph.RegisterGraphQueries(store.Query))
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true}).ServeHTTP(w, r)

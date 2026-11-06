@@ -1,12 +1,17 @@
 "use client";
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { CodeGraphRepository } from "@multica/core/types";
-import {
-  useCodeGraphQuery,
-  useCodeGraphSharing,
-} from "@multica/core/workspace/codegraph";
+import { useCodeGraphQuery } from "@multica/core/workspace/codegraph";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
+import { Label } from "@multica/ui/components/ui/label";
 import {
   Tabs,
   TabsList,
@@ -126,20 +131,35 @@ function QueryResult({ data }: { data: unknown }) {
 export function CodeGraphTools({
   wsId,
   repo,
-  mode = "query",
 }: {
   wsId: string;
   repo: CodeGraphRepository;
-  mode?: "query" | "sharing";
 }) {
   const { t } = useT("layout");
   const [query, setQuery] = useState("");
+  const versionId = useId();
   const [symbol, setSymbol] = useState("");
   const [path, setPath] = useState("");
   const [start, setStart] = useState("1");
   const [selectedBuild, setSelectedBuild] = useState("");
   const result = useCodeGraphQuery(wsId, repo.id);
   const build = selectedBuild || repo.active_build_id;
+  const builds = (repo.builds ?? [])
+    .filter((entry) => entry.status === "ready")
+    .map((entry) => ({
+      value: entry.id,
+      label:
+        (entry.commit.slice(0, 12) || entry.id.slice(0, 8)) +
+        (entry.id === repo.active_build_id
+          ? " · " + t(($) => $.code_graph.git_auth.current)
+          : ""),
+    }));
+  if (build && !builds.some((entry) => entry.value === build)) {
+    builds.push({
+      value: build,
+      label: repo.commit_hash?.slice(0, 12) || build.slice(0, 8),
+    });
+  }
   const run = (op: string) => {
     const params: Record<string, string> = {
       op,
@@ -152,7 +172,6 @@ export function CodeGraphTools({
     if (build) params.build_id = build;
     result.mutate(params);
   };
-  if (mode === "sharing") return <CodeGraphSharing wsId={wsId} repo={repo} />;
   if (!repo.active_build_id)
     return (
       <p role="status" className="text-muted-foreground">
@@ -163,33 +182,39 @@ export function CodeGraphTools({
     <section className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="font-medium">{t(($) => $.code_graph.graph_tools)}</h3>
-        <label className="flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
-          {t(($) => $.code_graph.git_auth.query_version)}
-          <select
-            className="min-w-0 max-w-64 rounded-md border bg-background px-2 py-1 font-mono text-caption text-foreground"
-            value={build}
-            onChange={(e) => {
-              setSelectedBuild(e.target.value);
-              result.reset();
+        <div className="flex min-w-0 items-center gap-2">
+          <Label
+            htmlFor={versionId}
+            className="text-caption text-muted-foreground"
+          >
+            {t(($) => $.code_graph.git_auth.query_version)}
+          </Label>
+          <Select
+            value={build ?? null}
+            items={builds}
+            onValueChange={(value) => {
+              if (value) {
+                setSelectedBuild(value);
+                result.reset();
+              }
             }}
           >
-            {(repo.builds ?? [])
-              .filter((entry) => entry.status === "ready")
-              .map((entry) => (
-                <option value={entry.id} key={entry.id}>
-                  {entry.commit.slice(0, 12) || entry.id.slice(0, 8)}
-                  {entry.id === repo.active_build_id
-                    ? " · " + t(($) => $.code_graph.git_auth.current)
-                    : ""}
-                </option>
+            <SelectTrigger
+              id={versionId}
+              size="sm"
+              className="min-w-0 max-w-64 font-mono text-caption"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {builds.map((entry) => (
+                <SelectItem key={entry.value} value={entry.value}>
+                  {entry.label}
+                </SelectItem>
               ))}
-            {!(repo.builds ?? []).some((entry) => entry.id === build) && (
-              <option value={build}>
-                {repo.commit_hash?.slice(0, 12) || build?.slice(0, 8)}
-              </option>
-            )}
-          </select>
-        </label>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
       <Tabs defaultValue="search" className="gap-5">
         <TabsList>
@@ -300,54 +325,6 @@ export function CodeGraphTools({
             {t(($) => $.code_graph.git_auth.query_empty)}
           </p>
         )
-      )}
-    </section>
-  );
-}
-function CodeGraphSharing({
-  wsId,
-  repo,
-}: {
-  wsId: string;
-  repo: CodeGraphRepository;
-}) {
-  const { t } = useT("layout");
-  const [confirmed, setConfirmed] = useState(false);
-  const sharing = useCodeGraphSharing(wsId, repo.id);
-  return (
-    <section className="space-y-4">
-      <h3 className="font-medium">{t(($) => $.code_graph.git_auth.sharing)}</h3>
-      <p className="text-caption text-muted-foreground">
-        {t(($) => $.code_graph.git_auth.public_hint)}
-      </p>
-      {!repo.public_read_enabled && (
-        <label className="flex items-start gap-2 text-body">
-          <input
-            type="checkbox"
-            checked={confirmed}
-            onChange={(e) => setConfirmed(e.target.checked)}
-          />
-          {t(($) => $.code_graph.public_warning)}
-        </label>
-      )}
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={
-          !repo.active_build_id ||
-          sharing.isPending ||
-          (!repo.public_read_enabled && !confirmed)
-        }
-        onClick={() => sharing.mutate(!repo.public_read_enabled)}
-      >
-        {repo.public_read_enabled
-          ? t(($) => $.code_graph.revoke_read)
-          : t(($) => $.code_graph.enable_read)}
-      </Button>
-      {sharing.error && (
-        <p role="alert" className="text-destructive">
-          {sharing.error.message}
-        </p>
       )}
     </section>
   );

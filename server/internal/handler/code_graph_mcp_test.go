@@ -109,6 +109,31 @@ func TestCodeGraphMCPDynamicAssignments(t *testing.T) {
 		t.Fatal("revoked repository listed")
 	}
 	// Spoofed agent headers without a task credential must not reach the tools.
+	if _, err := testPool.Exec(ctx, `UPDATE code_graph_repository SET is_workspace_shared=true WHERE id=$1`, repo.ID); err != nil {
+		t.Fatal(err)
+	}
+	if result := call("codegraph_read_file", args); !strings.Contains(result, "BoundExample") {
+		t.Fatalf("workspace scope unreadable: %s", result)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE code_graph_repository SET is_workspace_shared=false WHERE id=$1`, repo.ID); err != nil {
+		t.Fatal(err)
+	}
+	project := dbfx.Project(t, "MCP project scope")
+	issue := dbfx.Issue(t, "MCP project task", testutil.Cols{"project_id": project})
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET issue_id=$2 WHERE id=$1`, taskID, issue); err != nil {
+		t.Fatal(err)
+	}
+	dbfx.InsertNoID(t, "project_code_graph_repository", testutil.Cols{"repository_id": repo.ID, "project_id": project}, "repository_id=$1 AND project_id=$2", repo.ID, project)
+	if result := call("codegraph_read_file", args); !strings.Contains(result, "BoundExample") {
+		t.Fatalf("project scope unreadable: %s", result)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET project_id=NULL WHERE id=$1`, issue); err != nil {
+		t.Fatal(err)
+	}
+	if result := call("codegraph_read_file", args); !strings.Contains(result, `"isError":true`) || strings.Contains(result, "BoundExample") {
+		t.Fatalf("moved project still readable: %s", result)
+	}
+	// Spoofed agent headers without a task credential must not reach the tools.
 	forged := httptest.NewRequest(http.MethodPost, "/api/codegraph/mcp", nil)
 	forged.Header.Set("X-Agent-ID", agentID)
 	forged.Header.Set("X-Actor-Source", "task_token")

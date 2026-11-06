@@ -26,10 +26,14 @@ export function codeGraphAssignmentChanges(
 }
 
 export function canManageCodeGraphAgent(
-  agent: Agent,
+  agent: Pick<Agent, "owner_id" | "archived_at">,
   workspaceWriter: boolean,
+  userId?: string,
 ) {
-  return workspaceWriter && !agent.archived_at;
+  return (
+    !agent.archived_at &&
+    (workspaceWriter || Boolean(userId && agent.owner_id === userId))
+  );
 }
 
 export function agentSupportsCodeGraph(agent: Agent, runtimes: AgentRuntime[]) {

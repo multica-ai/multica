@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, forwardRef } from "react";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { RunCodeGraphs } from "../../code-graph/components/run-code-graphs";
 import { useTraceIssueLabels } from "./use-trace-issue-labels";
 import { Virtuoso, type VirtuosoHandle, type Components } from "react-virtuoso";
 import {
@@ -1099,6 +1100,7 @@ export function AgentTranscriptDialog({
 
         {/* ── What the run produced ──────────────────────────────────── */}
         <RunOutcomeRow outcome={outcome} branch={task.branch_name} />
+        {open && <RunCodeGraphs taskId={task.id} />}
 
         {/* ── Where the time went ────────────────────────────────────── */}
         {lanes && (

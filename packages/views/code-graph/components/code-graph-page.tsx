@@ -1,9 +1,9 @@
 "use client";
+import { useAuthStore } from "@multica/core/auth";
 
 import { useEffect, useMemo, useState } from "react";
 import {
   GitBranch,
-  Plus,
   RefreshCw,
   Search,
   Trash2,
@@ -17,7 +17,6 @@ import {
   codeGraphRepositoryOptions,
 } from "@multica/core/workspace/queries";
 import {
-  useCreateCodeGraphRepository,
   useDeleteCodeGraphRepository,
   useCancelCodeGraphRepository,
   useSyncCodeGraphRepository,
@@ -39,7 +38,6 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -57,12 +55,14 @@ import { useT } from "../../i18n";
 import { CodeGraphTools } from "./code-graph-tools";
 import {
   GitCredentialManager,
-  GitAuthFields,
-  GitNotice,
   RepositoryGitAuth,
   useCanManageGit,
 } from "./git-credentials";
-import type { GraphAuthInput } from "@multica/core/workspace/codegraph";
+import { RegisterRepositoryDialog } from "./register-repository-dialog";
+import { RepositoryUsageScope } from "./repository-usage-scope";
+import { CodeGraphIntro } from "./code-graph-intro";
+import { featureDocsHref } from "../../layout/feature-intro";
+import { useLocale } from "../../i18n";
 import { RepositoryAssignmentsDialog } from "./repository-assignments-dialog";
 import { useGraphAssignmentWriter } from "./assignment-editor";
 import { canManageCodeGraphAgent } from "@multica/core/workspace/codegraph";
@@ -87,24 +87,16 @@ function statusVariant(status: CodeGraphRepositoryStatus) {
 export function CodeGraphPage() {
   const { t } = useT("layout");
   const wsId = useWorkspaceId();
+  const locale = useLocale();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<"" | CodeGraphRepositoryStatus>("");
-  const [open, setOpen] = useState(false);
   const [assigningRepo, setAssigningRepo] =
     useState<CodeGraphRepository | null>(null);
-  const [repoUrl, setRepoUrl] = useState("");
-  const [branch, setBranch] = useState("main");
-  const [auth, setAuth] = useState<GraphAuthInput>({
-    auth_mode: "token",
-    repo_url: "",
-    branch: "main",
-  });
   const canManage = useCanManageGit();
   const filters = useMemo(() => ({ search, status }), [search, status]);
   const { data, isLoading } = useQuery(
     codeGraphRepositoriesOptions(wsId, filters),
   );
-  const createRepo = useCreateCodeGraphRepository(wsId);
   const syncRepo = useSyncCodeGraphRepository(wsId);
 
   const items = data?.items ?? [];
@@ -116,31 +108,12 @@ export function CodeGraphPage() {
     failed: 0,
     files: 0,
   };
-  const canSubmit =
-    repoUrl.trim() !== "" &&
-    branch.trim() !== "" &&
-    (auth.auth_mode === "anonymous" || !!auth.credential_id);
-
-  async function submitRepository() {
-    if (!canSubmit) return;
-    try {
-      await createRepo.mutateAsync({
-        repo_url: repoUrl.trim(),
-        branch: branch.trim(),
-        auth_mode: auth.auth_mode,
-        credential_id: auth.credential_id,
-      });
-    } catch {
-      return;
-    }
-    setRepoUrl("");
-    setBranch("main");
-    setOpen(false);
-  }
-
   function openAssignDialog(repo: CodeGraphRepository) {
     setAssigningRepo(repo);
   }
+
+  if (data && stats.total === 0 && !search && !status)
+    return <CodeGraphIntro wsId={wsId} canManage={canManage} />;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -155,21 +128,21 @@ export function CodeGraphPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <a
+              href={featureDocsHref("codegraph", locale)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="self-center px-2 text-caption underline underline-offset-4"
+            >
+              {t(($) => $.feature_intro.read_docs)}
+            </a>
             <GitCredentialManager />
-            {canManage && (
-              <Button onClick={() => setOpen(true)}>
-                <Plus className="size-4" />
-                {t(($) => $.code_graph.register)}
-              </Button>
-            )}
+            {canManage && <RegisterRepositoryDialog wsId={wsId} />}
           </div>
         </div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-auto px-6 py-6">
-        {canManage && (
-          <GitNotice>{t(($) => $.code_graph.git_auth.sync_hint)}</GitNotice>
-        )}
         {syncRepo.error ? (
           <p role="alert" className="text-destructive">
             {syncRepo.error.message}
@@ -261,58 +234,6 @@ export function CodeGraphPage() {
           </Table>
         </div>
       </div>
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{t(($) => $.code_graph.register_title)}</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-2">
-            <label className="grid gap-2 text-body font-medium">
-              {t(($) => $.code_graph.git_url)}{" "}
-              <span className="text-destructive">*</span>
-              <Input
-                value={repoUrl}
-                onChange={(event) => setRepoUrl(event.target.value)}
-                placeholder="https://gitlab.example.com/namespace/repo.git"
-              />
-            </label>
-            <label className="grid gap-2 text-body font-medium">
-              {t(($) => $.code_graph.branch)}{" "}
-              <span className="text-destructive">*</span>
-              <Input
-                value={branch}
-                onChange={(event) => setBranch(event.target.value)}
-              />
-            </label>
-            <GitAuthFields
-              value={{
-                ...auth,
-                repo_url: repoUrl.trim(),
-                branch: branch.trim(),
-              }}
-              onChange={setAuth}
-            />
-            <GitNotice>{t(($) => $.code_graph.git_auth.import_hint)}</GitNotice>
-            {createRepo.error && (
-              <p role="alert" className="text-destructive">
-                {createRepo.error.message}
-              </p>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              {t(($) => $.code_graph.cancel)}
-            </Button>
-            <Button
-              disabled={!canSubmit || createRepo.isPending}
-              onClick={submitRepository}
-            >
-              {t(($) => $.code_graph.register)}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {assigningRepo && (
         <RepositoryAssignmentsDialog
@@ -566,6 +487,7 @@ function RepositoryDetails({ repo }: { repo: CodeGraphRepository }) {
   const { t } = useT("layout");
   const wsId = useWorkspaceId();
   const writer = useGraphAssignmentWriter(wsId);
+  const userId = useAuthStore((state) => state.user?.id);
   const agents = useQuery(agentListOptions(wsId));
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<string>("overview");
@@ -608,12 +530,16 @@ function RepositoryDetails({ repo }: { repo: CodeGraphRepository }) {
                 {current.branch}
               </span>
               <Badge
-                variant={current.progress?.phase === "cancelled" ? "secondary" : statusVariant(current.status)}
+                variant={
+                  current.progress?.phase === "cancelled"
+                    ? "secondary"
+                    : statusVariant(current.status)
+                }
               >
                 {t(($) =>
                   current.progress?.phase === "cancelled"
                     ? $.code_graph.build_cancelled
-                    : $.code_graph[current.status]
+                    : $.code_graph[current.status],
                 )}
               </Badge>
             </div>
@@ -633,6 +559,9 @@ function RepositoryDetails({ repo }: { repo: CodeGraphRepository }) {
                 </TabsTrigger>
                 <TabsTrigger value="access">
                   {t(($) => $.code_graph.git_auth.access)}
+                </TabsTrigger>
+                <TabsTrigger value="usage">
+                  {t(($) => $.code_graph.scope.title)}
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -770,7 +699,7 @@ function RepositoryDetails({ repo }: { repo: CodeGraphRepository }) {
                           {agents.data?.some(
                             (row) =>
                               row.id === agent.id &&
-                              canManageCodeGraphAgent(row, writer),
+                              canManageCodeGraphAgent(row, writer, userId),
                           ) && (
                             <Button
                               variant="outline"
@@ -825,13 +754,21 @@ function RepositoryDetails({ repo }: { repo: CodeGraphRepository }) {
                 </details>
               </TabsContent>
               <TabsContent value="query">
-                <CodeGraphTools wsId={wsId} repo={current} mode="query" />
+                <CodeGraphTools wsId={wsId} repo={current} />
               </TabsContent>
               <TabsContent value="access" className="space-y-7">
                 <RepositoryGitAuth repo={current} />
-                <div className="border-t pt-6">
-                  <CodeGraphTools wsId={wsId} repo={current} mode="sharing" />
-                </div>
+              </TabsContent>
+              <TabsContent value="usage" className="space-y-5">
+                <RepositoryUsageScope wsId={wsId} repo={current} />
+                <Button variant="outline" onClick={() => setAssigning(true)}>
+                  {t(($) => $.code_graph.scope.agents)}
+                </Button>
+                {!current.active_build_id && (
+                  <p className="text-caption text-muted-foreground">
+                    {t(($) => $.code_graph.scope.awaiting_build)}
+                  </p>
+                )}
               </TabsContent>
             </div>
           </Tabs>

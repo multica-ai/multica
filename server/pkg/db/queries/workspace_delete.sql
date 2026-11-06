@@ -706,6 +706,11 @@ deleted_code_graph_assignments AS (
         SELECT id FROM agent WHERE agent.workspace_id = $1
     )
 ),
+deleted_project_code_graph_assignments AS (
+    DELETE FROM project_code_graph_repository
+    WHERE repository_id IN (SELECT id FROM code_graph_repository WHERE workspace_id=$1)
+       OR project_id IN (SELECT id FROM project WHERE workspace_id=$1)
+),
 deleted_code_graph_builds AS (
     DELETE FROM code_graph_build WHERE code_graph_build.workspace_id = $1
 ),

@@ -48,12 +48,13 @@ export interface WorkspaceMcpServer {
 export type CodeGraphRepositoryStatus = "pending" | "processing" | "ready" | "failed";
 
 export interface CodeGraphRepository {
+  is_workspace_shared?: boolean;
+  projects?: { id: string; name: string }[];
  auth_mode?:"token"|"anonymous";
  credential_id?:string;
   progress?: { id: string; status: string; phase: string; cancel_requested: boolean; created_at: string; started_at?: string; finished_at?: string; phase_started_at: string; error?: string };
 	builds?: { id: string; status: string; commit: string; created_at: string; error?: string }[];
 	active_build_id?: string;
-	public_read_enabled?: boolean;
 	symbol_count?: number;
 	edge_count?: number;
   agents?: { id: string; name: string; created_at: string }[];

@@ -3835,13 +3835,20 @@ export const CodeGraphBuildSchema = z.object({
   phase:z.string().default("unknown"), cancel_requested:z.boolean().default(false),
   started_at:z.string().optional(), finished_at:z.string().optional(), phase_started_at:z.string().default(""),
 });
+export const CodeGraphAvailableSchema = z.array(z.object({
+  id: z.string(), name: z.string(), branch: z.string(), status: z.string(),
+  active_build_id: z.string().optional(),
+  sources: z.array(z.enum(["workspace", "agent", "project", "unknown"]).catch("unknown")).default([]),
+}));
+
 export const CodeGraphRepositorySchema = z.object({
+  is_workspace_shared: z.boolean().default(false),
+  projects: z.array(z.object({ id: z.string(), name: z.string() })).nullish().transform(value => value ?? []),
  auth_mode:z.enum(["token","anonymous"]).optional().catch(undefined),
  credential_id:z.string().nullish().transform(value=>value??undefined),
 	builds: z.array(CodeGraphBuildSchema).default([]),
   progress: CodeGraphBuildSchema.optional(),
 	active_build_id: z.string().optional(),
-	public_read_enabled: z.boolean().default(false),
 	symbol_count: z.number().default(0),
 	edge_count: z.number().default(0),
   agents: z.array(z.object({

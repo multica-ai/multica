@@ -1499,7 +1499,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Health / readiness checks
 	r.Get("/health", health.liveHandler)
-	r.Get("/api/codegraphs/public/{codeGraphId}/query", h.QueryPublicCodeGraph)
 	r.Get("/readyz", health.readyHandler)
 	r.Get("/healthz", health.readyHandler)
 
@@ -1795,6 +1794,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// entries are write-only.
 					r.Get("/mcp-servers", h.ListWorkspaceMcpServers)
 					r.Get("/code-graphs", h.ListWorkspaceCodeGraphs)
+					r.Get("/code-graphs/available", h.AvailableCodeGraphs)
+					r.Post("/code-graphs/{codeGraphId}/agents", h.AssignWorkspaceCodeGraphToAgent)
+					r.Delete("/code-graphs/{codeGraphId}/agents/{agentId}", h.UnassignWorkspaceCodeGraphAgent)
 					r.Get("/code-graphs/{codeGraphId}", h.GetWorkspaceCodeGraph)
 					r.Get("/code-graphs/{codeGraphId}/query", h.QueryWorkspaceCodeGraph)
 					// Installed Plugins are member-visible so a member can
@@ -1832,9 +1834,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/code-graphs/{codeGraphId}/authentication", h.UpdateCodeGraphAuth)
 					r.Post("/code-graphs/{codeGraphId}/sync", h.SyncWorkspaceCodeGraph)
 					r.Post("/code-graphs/{codeGraphId}/cancel", h.CancelWorkspaceCodeGraph)
-					r.Patch("/code-graphs/{codeGraphId}/sharing", h.SetCodeGraphSharing)
-					r.Post("/code-graphs/{codeGraphId}/agents", h.AssignWorkspaceCodeGraphToAgent)
-					r.Delete("/code-graphs/{codeGraphId}/agents/{agentId}", h.UnassignWorkspaceCodeGraphAgent)
+					r.Patch("/code-graphs/{codeGraphId}/workspace-scope", h.UpdateCodeGraphWorkspaceScope)
+					r.Put("/code-graphs/{codeGraphId}/projects/{projectId}", h.SetCodeGraphProjectAssignment)
+					r.Delete("/code-graphs/{codeGraphId}/projects/{projectId}", h.SetCodeGraphProjectAssignment)
 					r.Delete("/code-graphs/{codeGraphId}", h.DeleteWorkspaceCodeGraph)
 					r.Post("/share-links", h.CreateShareLink)
 					r.Delete("/share-links/{linkId}", h.RevokeShareLink)
