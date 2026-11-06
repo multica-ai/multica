@@ -81,6 +81,10 @@ export function projectLocalSession(
     has_unread: false,
     pinned: summary.pinned,
     project_id: summary.project_id,
+    localConversation: {
+      sideSourceId: summary.side_source_id,
+      lastTurnSentAt: summary.last_turn_sent_at
+    },
     last_message: summary.last_message_preview
       ? {
           content: summary.last_message_preview,

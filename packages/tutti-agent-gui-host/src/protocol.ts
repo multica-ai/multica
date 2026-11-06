@@ -63,6 +63,11 @@ export function executionTargets(
 
 export interface AgentGuiSession extends ChatSession {
   localDirectory?: { cwd: string; projectPath: string | null };
+  localConversation?: {
+    sideSourceId?: string;
+    /** Latest user turn's send time; null for no turns, absent on older daemons. */
+    lastTurnSentAt?: string | null;
+  };
 }
 
 export interface AgentGuiWorkspaceState {

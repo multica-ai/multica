@@ -213,6 +213,25 @@ afterEach(() => {
 });
 
 describe("local conversation parent service over v2", () => {
+  it("preserves Side and turn send metadata without removing Side sessions", async () => {
+    routes.unshift((_method, path) => path.startsWith("/sessions?") ? {
+      scope_seq: 4,
+      summaries: [
+        summary("side", { side_source_id: "main", last_turn_sent_at: at }),
+        summary("empty", { last_turn_sent_at: null }),
+        summary("older-daemon")
+      ],
+      has_more: false
+    } : undefined);
+    const { service } = setup();
+    const state = await service.load();
+    expect(state.sessions.map(({ id, localConversation }) => ({ id, localConversation }))).toEqual([
+      { id: "side", localConversation: { sideSourceId: "main", lastTurnSentAt: at } },
+      { id: "empty", localConversation: { sideSourceId: undefined, lastTurnSentAt: null } },
+      { id: "older-daemon", localConversation: { sideSourceId: undefined, lastTurnSentAt: undefined } }
+    ]);
+  });
+
   it("reads attachment metadata without downloading content and rejects malformed responses", async () => {
     const { service } = setup();
     let response: unknown = { name: "clip.mp4", mime_type: "video/mp4", size: 123 };

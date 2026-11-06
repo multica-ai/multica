@@ -9,11 +9,29 @@ import type {
 AgentGuiContextItem,
 AgentGuiHostServices,
 AgentGuiInitSnapshot,
+AgentGuiSession,
 AgentGuiWorkspaceState
 } from "./protocol";
 import { CREATE_TASK_MENTION_ID } from "./task-creation-mention";
 
 const executionToolNames = new Set(["codex", "claudecode"]);
+
+function sessionMentionCandidates(sessions: AgentGuiSession[], local: boolean) {
+  if (!local) return sessions;
+  const time = (value: string | null | undefined) => {
+    const parsed = Date.parse(value ?? "");
+    return Number.isNaN(parsed) ? -Infinity : parsed;
+  };
+  return sessions
+    .filter((session) => !session.localConversation?.sideSourceId)
+    .sort(
+      (left, right) =>
+        time(right.localConversation?.lastTurnSentAt) -
+          time(left.localConversation?.lastTurnSentAt) ||
+        time(right.created_at) - time(left.created_at) ||
+        left.id.localeCompare(right.id)
+    );
+}
 
 export function createMulticaContextMentions(
   client: AgentGuiHostServices,
@@ -107,7 +125,10 @@ export function createMulticaContextMentions(
                       canInvoke && runtimeBound ? "available" : "unavailable"
                   })
                 )
-            : state.sessions.map((session) => ({
+            : sessionMentionCandidates(
+                state.sessions,
+                initial.local === true
+              ).map((session) => ({
                 id: session.id,
                 label: session.title,
                 userId: session.creator_id,

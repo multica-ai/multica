@@ -7,7 +7,7 @@ import type { RichTextMentionIdentity } from "@tutti-os/ui-rich-text/types";
 import { expect,it,vi } from "vitest";
 import { fakeHostServices } from "../e2e-harness/fake-host-services";
 import { createMulticaContextMentions } from "./context-mentions";
-import type { AgentGuiHostServices,AgentGuiWorkspaceState } from "./protocol";
+import type { AgentGuiHostServices,AgentGuiSession,AgentGuiWorkspaceState } from "./protocol";
 import { CREATE_TASK_MENTION_ID } from "./task-creation-mention";
 
 function workspaceSource(state: AgentGuiWorkspaceState) {
@@ -71,6 +71,142 @@ function avatarWorkspace() {
     ]
   } as unknown as AgentGuiWorkspaceState;
 }
+
+function localSession(
+  id: string,
+  lastTurnSentAt?: string | null,
+  fields: Partial<AgentGuiSession> = {}
+): AgentGuiSession {
+  return {
+    ...avatarWorkspace().sessions[0],
+    id,
+    title: `Chat ${id}`,
+    created_at: "2026-11-06T00:00:00Z",
+    localConversation: { lastTurnSentAt },
+    ...fields
+  };
+}
+
+it("filters Side and sorts local session mentions before search and truncation, preserving Side resolution", async () => {
+  const sessions = [
+    localSession("side", "2026-11-06T10:00:00Z", {
+      localConversation: {
+        sideSourceId: "main",
+        lastTurnSentAt: "2026-11-06T10:00:00Z"
+      }
+    }),
+    localSession("older", "2026-11-06T08:00:00Z", { pinned: true }),
+    localSession("newer", "2026-11-06T09:00:00Z", {
+      title: "Chat normal · Side"
+    })
+  ];
+  const source = workspaceSource({ ...avatarWorkspace(), sessions });
+  const service = createMulticaContextMentions(
+    fakeHostServices(vi.fn()) as unknown as AgentGuiHostServices,
+    { workspaceId: "ws", local: true },
+    source
+  );
+  try {
+    const provider = service.getProvider("agent-session")!;
+    for (const keyword of ["", "Chat"]) {
+      const input = { keyword, trigger: "@" as const, context: {} };
+      expect(
+        (await provider.query(input)).map(item => provider.getItemKey(item))
+      ).toEqual(["newer", "older"]);
+      expect(
+        (await provider.query({ ...input, maxResults: 1 })).map(item =>
+          provider.getItemKey(item)
+        )
+      ).toEqual(["newer"]);
+    }
+    expect(
+      (await service.resolve({
+        providerId: "agent-session",
+        entityId: "side",
+        label: "old",
+        scope: { workspaceId: "ws" }
+      })).resolved?.label
+    ).toBe("Chat side");
+    expect(source.getWorkspaceState().sessions).toBe(sessions);
+    expect(sessions.map(({ id }) => id)).toEqual(["side", "older", "newer"]);
+  } finally {
+    service.dispose();
+  }
+});
+
+it("reorders local mentions on a new turn, while replies, renames and array moves do not change send order", async () => {
+  const older = localSession("older", "2026-11-06T08:00:00Z");
+  const newer = localSession("newer", "2026-11-06T09:00:00Z");
+  const source = workspaceSource({ ...avatarWorkspace(), sessions: [older, newer] });
+  const service = createMulticaContextMentions(
+    fakeHostServices(vi.fn()) as unknown as AgentGuiHostServices,
+    { workspaceId: "ws", local: true },
+    source
+  );
+  const provider = service.getProvider("agent-session")!;
+  const query = async () =>
+    (await provider.query({ keyword: "", trigger: "@", context: {} }))
+      .map(item => provider.getItemKey(item));
+  try {
+    expect(await query()).toEqual(["newer", "older"]);
+    source.update({
+      ...source.getWorkspaceState(),
+      sessions: [newer, {
+        ...older,
+        title: "Renamed",
+        updated_at: "2026-11-06T11:00:00Z",
+        last_message: {
+          content: "New assistant output",
+          role: "assistant",
+          created_at: "2026-11-06T11:00:00Z"
+        }
+      }]
+    });
+    expect(await query()).toEqual(["newer", "older"]);
+    source.update({
+      ...source.getWorkspaceState(),
+      sessions: [newer, {
+        ...older,
+        localConversation: { lastTurnSentAt: "2026-11-06T12:00:00Z" }
+      }]
+    });
+    expect(await query()).toEqual(["older", "newer"]);
+  } finally {
+    service.dispose();
+  }
+});
+
+it("orders unknown turn times last with stable creation and ID ties, leaving cloud order unchanged", async () => {
+  const sessions = [
+    localSession("unknown", undefined, { updated_at: "2026-11-07T00:00:00Z" }),
+    localSession("empty", null, { created_at: "2026-11-06T02:00:00Z" }),
+    localSession("b", "2026-11-06T09:00:00+01:00"),
+    localSession("a", "2026-11-06T08:00:00Z"),
+    localSession("created-later", "2026-11-06T08:00:00Z", {
+      created_at: "2026-11-06T01:00:00Z"
+    })
+  ];
+  for (const local of [true, false]) {
+    const service = createMulticaContextMentions(
+      fakeHostServices(vi.fn()) as unknown as AgentGuiHostServices,
+      { workspaceId: "ws", local },
+      workspaceSource({ ...avatarWorkspace(), local, sessions })
+    );
+    try {
+      const provider = service.getProvider("agent-session")!;
+      const items = await provider.query({
+        keyword: "", trigger: "@", context: {}
+      });
+      expect(items.map(item => provider.getItemKey(item))).toEqual(
+        local
+          ? ["created-later", "a", "b", "empty", "unknown"]
+          : sessions.map(({ id }) => id)
+      );
+    } finally {
+      service.dispose();
+    }
+  }
+});
 
 it.each(["agent-target", "agent-session"])(
   "restores %s avatars after sending and reopening a local conversation",

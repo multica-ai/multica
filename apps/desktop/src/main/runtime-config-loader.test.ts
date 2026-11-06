@@ -2,10 +2,18 @@
 import { mkdtemp, writeFile } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
-import { describe, expect, it } from "vitest";
-import { loadRuntimeConfig } from "./runtime-config-loader";
+import { describe, expect, it, vi } from "vitest";
+import { desktopConfigPath, loadRuntimeConfig } from "./runtime-config-loader";
+
+const electron = vi.hoisted(() => ({ getPath: vi.fn(() => "/test-owned/home") }));
+vi.mock("electron", () => ({ app: { getPath: electron.getPath } }));
 
 describe("loadRuntimeConfig", () => {
+  it("resolves desktop.json under the Electron home directory", () => {
+    expect(desktopConfigPath()).toBe(join("/test-owned/home", ".multica", "desktop.json"));
+    expect(electron.getPath).toHaveBeenCalledWith("home");
+  });
+
   it("uses dev env and ignores desktop.json during electron-vite dev", async () => {
     const dir = await mkdtemp(join(tmpdir(), "multica-desktop-config-"));
     const configPath = join(dir, "desktop.json");
