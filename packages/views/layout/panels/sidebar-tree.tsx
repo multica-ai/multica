@@ -136,7 +136,7 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
       ) : (
         icon
       )}
-      <TruncatedTooltip content={label} side="right">
+      <TruncatedTooltip content={label}>
         <AppLink
           ref={linkRef}
           href={href}
@@ -497,7 +497,7 @@ const SidebarIssueRow = memo(function SidebarIssueRow({
           label={statusLabel}
           className="size-3"
         />
-        <TruncatedTooltip content={issue.title} side="right">
+        <TruncatedTooltip content={issue.title}>
           <AppLink
             href={unreadIssueHref(href, unread)}
             newTabTitle={issue.title}

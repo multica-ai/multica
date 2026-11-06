@@ -204,7 +204,6 @@ describe("SidebarIssueList", () => {
   });
 });
 
-
 // jsdom does not lay out the sidebar: model clipping at the existing label.
 function clipLabel(el: HTMLElement) {
   el.style.overflowX = "hidden";
