@@ -13,7 +13,11 @@ it.each([
   ["C:\\project\\report.html", "C:/project/report.html", undefined],
 ])("resolves preview location %s", (href, path, line) => {
   expect(localResourceTarget(href)).toEqual({ path, ...(line ? { line } : {}) });
-  expect(localResourceTarget(previewResourceHref(href)!)).toEqual(localResourceTarget(href));
+  if (/^(?:\/|[a-z]:[\\/])/i.test(path)) {
+    expect(localResourceTarget(previewResourceHref(href)!)).toEqual(localResourceTarget(href));
+  } else {
+    expect(previewResourceHref(href)).toBeNull();
+  }
 });
 
 it.each(["file://server/project/a.html", "file:///project/%00.html", "file:///project/a.html?query=1", "javascript:alert(1)", "data:text/html,x", "//example.org/a.html", "https://example.org/a.html", "cat /project/a.html", "file:///project/%zz.html", "/project/a\n.html"])("does not treat %s as a local resource", (href) => {
@@ -38,10 +42,25 @@ it("links prose and standalone inline paths, preserves punctuation, and leaves c
   remarkMessageResourceLinks()(tree);
   const nodes = tree.children![0]!.children!;
   expect(nodes.filter((node) => node.type === "link").map((node) => node.url)).toEqual([
-    "/project/report(1).html", "/project/a.ts:12", "output/review.html", "output/review.html", "/project/explicit.html",
+    "/project/report(1).html", "/project/a.ts:12", "/project/explicit.html",
   ]);
-  expect(nodes.filter((node) => node.type === "text").map((node) => node.value).join("")).toBe("确认：。 源码（）。 , javascript:/project/no.html");
+  expect(nodes.filter((node) => node.type === "text").map((node) => node.value).join("")).toBe("确认：。 源码（）。 output/review.html, javascript:/project/no.html");
   expect(nodes).toContainEqual(command); expect(nodes).toContainEqual(image); expect(tree.children!.at(-1)).toBe(code);
+});
+
+it.each(["AGENTS.md", "notes.txt", "src/example.ts", "./AGENTS.md", "../output/report.html", "目录/说明.md", "C:notes.txt"])("keeps %s out of automatic message links", (value) => {
+  const code = { type: "inlineCode", value };
+  const tree = { type: "root", children: [{ type: "paragraph", children: [code] }] };
+  remarkMessageResourceLinks()(tree);
+  expect(tree.children[0]!.children).toEqual([code]);
+  expect(previewResourceHref(value)).toBeNull();
+});
+
+it.each(["/project/房间.md:12", "C:\\project\\房间.md", "file:///project/房间%20report.md#L12"])("links absolute inline paths: %s", (value) => {
+  const code = { type: "inlineCode", value };
+  const tree = { type: "root", children: [{ type: "paragraph", children: [code] }] };
+  remarkMessageResourceLinks()(tree);
+  expect(tree.children[0]!.children).toEqual([{ type: "link", url: previewResourceHref(value), children: [code] }]);
 });
 
 it("leaves bare slash commands as text while linking rooted paths", () => {

@@ -51,7 +51,17 @@ export function previewResourceHref(value: string): string | null {
     catch { return null; }
   }
   const target = localResourceTarget(value);
-  return target ? encodeURI(target.path) + (target.line === undefined ? "" : `:${target.line}`) : null;
+  return target && /^(?:\/|[a-z]:\/)/i.test(target.path)
+    ? encodeURI(target.path) + (target.line === undefined ? "" : `:${target.line}`)
+    : null;
+}
+
+/** Relative file lookup remains available to explicit file-opening workflows. */
+export function isRelativeResourceHref(value: string): boolean {
+  const target = localResourceTarget(value);
+  if (target) return !/^(?:\/|[a-z]:\/)/i.test(target.path);
+  const href = value.trim();
+  return /^[a-z]:(?![\\/])/i.test(href) || !/^(?:\/|#|[a-z][\w+.-]*:)/i.test(href);
 }
 
 // Code fences, existing links and image destinations are not scanned as prose.

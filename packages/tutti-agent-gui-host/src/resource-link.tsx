@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { MentionPill } from "@tutti-os/ui-system/components";
 import { createContext, useContext, useEffect, type ReactNode } from "react";
-import { previewResourceHref } from "./message-resource-links";
+import { isRelativeResourceHref, previewResourceHref } from "./message-resource-links";
 import type { AgentGuiHostServices, AgentGuiWorkspaceState } from "./protocol";
 import {
   resolveResourceReference,
@@ -119,6 +119,7 @@ function ResourceMarkdownLinkRender({
   const resource =
     context && href ? resolveResourceReference(href, context.scope) : null;
   if (!context || !resource) {
+    if (previewEnabled && href && isRelativeResourceHref(href)) return <span>{children}</span>;
     const preview = previewEnabled && href ? previewResourceHref(href) : null;
     return preview ? (
       <a href={preview} data-multica-preview-link="true">
