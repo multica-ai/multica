@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/integrations/notifydebounce"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -24,6 +25,7 @@ const (
 	notifierWorkspaceID = "00000000-0000-4000-8000-000000000001"
 	notifierRecipientID = "00000000-0000-4000-8000-000000000002"
 	notifierIssueID     = "00000000-0000-4000-8000-000000000003"
+	notifierInboxID     = "00000000-0000-4000-8000-000000000004"
 )
 
 type fakeNotifierQueries struct {
@@ -32,6 +34,7 @@ type fakeNotifierQueries struct {
 	preferences   map[string]string
 	workspace     db.Workspace
 	issue         db.Issue
+	inbox         map[string]db.InboxItem
 }
 
 func (f *fakeNotifierQueries) GetMemberByUserAndWorkspace(context.Context, db.GetMemberByUserAndWorkspaceParams) (db.Member, error) {
@@ -52,6 +55,14 @@ func (f *fakeNotifierQueries) GetWorkspace(context.Context, pgtype.UUID) (db.Wor
 
 func (f *fakeNotifierQueries) GetIssue(context.Context, pgtype.UUID) (db.Issue, error) {
 	return f.issue, nil
+}
+
+func (f *fakeNotifierQueries) GetInboxItem(_ context.Context, id pgtype.UUID) (db.InboxItem, error) {
+	item, ok := f.inbox[util.UUIDToString(id)]
+	if !ok {
+		return db.InboxItem{}, pgx.ErrNoRows
+	}
+	return item, nil
 }
 
 type recordingSender struct {
@@ -82,17 +93,36 @@ func notifierEvent(recipientType string) events.Event {
 		Type:        protocol.EventInboxNew,
 		WorkspaceID: notifierWorkspaceID,
 		Payload: map[string]any{"item": map[string]any{
+			"id":             notifierInboxID,
 			"workspace_id":   notifierWorkspaceID,
 			"recipient_type": recipientType,
 			"recipient_id":   notifierRecipientID,
-			"issue_id":       notifierIssueID,
-			"title":          "Checkout needs review",
-			"body":           "Please check <totals>",
 		}},
 	}
 }
 
-func TestNotifierDeliversConfiguredMemberNotification(t *testing.T) {
+func notifierInboxItem(title, body string) db.InboxItem {
+	return db.InboxItem{
+		ID:            util.MustParseUUID(notifierInboxID),
+		WorkspaceID:   util.MustParseUUID(notifierWorkspaceID),
+		RecipientType: "member",
+		RecipientID:   util.MustParseUUID(notifierRecipientID),
+		IssueID:       util.MustParseUUID(notifierIssueID),
+		Title:         title,
+		Body:          pgtype.Text{String: body, Valid: body != ""},
+	}
+}
+
+func notifierBatch(recipientType string, items ...db.InboxItem) notifydebounce.Batch {
+	return notifydebounce.Batch{
+		WorkspaceID:   notifierWorkspaceID,
+		RecipientType: recipientType,
+		RecipientID:   notifierRecipientID,
+		Items:         items,
+	}
+}
+
+func TestNotifierDeliversConfiguredMemberBatch(t *testing.T) {
 	t.Parallel()
 
 	workspaceID := util.MustParseUUID(notifierWorkspaceID)
@@ -112,17 +142,19 @@ func TestNotifierDeliversConfiguredMemberNotification(t *testing.T) {
 	}
 	sender := &recordingSender{}
 	notifier := NewNotifier(queries, sender, "https://app.example.com", slog.Default())
-	notifier.spawn = func(run func()) { run() }
-	bus := events.New()
-	notifier.Register(bus)
 
-	bus.Publish(notifierEvent("member"))
+	notifier.DeliverInboxBatch(context.Background(), notifierBatch(
+		"member",
+		notifierInboxItem("Checkout needs review", "Please check <totals>"),
+		notifierInboxItem("Confirm the fix", ""),
+	))
 
 	if sender.url != testWebhookURL {
 		t.Fatalf("webhook URL = %q", sender.url)
 	}
-	want := "*1 new notification in Acme*\n" +
-		"• <https://app.example.com/acme/issues/ACME-12|ACME-12: Checkout needs review> — Please check &lt;totals&gt;"
+	want := "*2 new notifications in Acme*\n" +
+		"• <https://app.example.com/acme/issues/ACME-12|ACME-12: Checkout needs review> — Please check &lt;totals&gt;\n" +
+		"• <https://app.example.com/acme/issues/ACME-12|ACME-12: Confirm the fix>"
 	if sender.message != want {
 		t.Fatalf("message =\n%s\nwant\n%s", sender.message, want)
 	}
@@ -147,11 +179,14 @@ func TestNotifierOmitsIssueLinkWhenAppURLIsEmpty(t *testing.T) {
 			Number:      12,
 		},
 	}, sender, "", slog.Default())
-	notifier.spawn = func(run func()) { run() }
-	bus := events.New()
-	notifier.Register(bus)
 
-	bus.Publish(notifierEvent("member"))
+	notifier.DeliverInboxBatch(
+		context.Background(),
+		notifierBatch(
+			"member",
+			notifierInboxItem("Checkout needs review", "Please check <totals>"),
+		),
+	)
 
 	want := "*1 new notification in Acme*\n" +
 		"• ACME-12: Checkout needs review — Please check &lt;totals&gt;"
@@ -180,10 +215,10 @@ func TestNotifierSkipsAgentsFormerMembersAndMissingPreferences(t *testing.T) {
 				memberErr:     test.memberErr,
 				preferenceErr: test.preferenceErr,
 			}, sender, "", slog.Default())
-			notifier.spawn = func(run func()) { run() }
-			bus := events.New()
-			notifier.Register(bus)
-			bus.Publish(notifierEvent(test.recipientType))
+			notifier.DeliverInboxBatch(
+				context.Background(),
+				notifierBatch(test.recipientType, notifierInboxItem("Title", "")),
+			)
 			if sender.message != "" {
 				t.Fatalf("unexpected delivery: %q", sender.message)
 			}
@@ -191,14 +226,14 @@ func TestNotifierSkipsAgentsFormerMembersAndMissingPreferences(t *testing.T) {
 	}
 }
 
-func TestNotifierNeverBlocksPublish(t *testing.T) {
+func TestNotifierWiringNeverBlocksPublish(t *testing.T) {
 	t.Parallel()
 
 	release := make(chan struct{})
 	started := make(chan struct{})
 	sender := &recordingSender{block: release, sent: started}
 	workspaceID := util.MustParseUUID(notifierWorkspaceID)
-	notifier := NewNotifier(&fakeNotifierQueries{
+	queries := &fakeNotifierQueries{
 		preferences: map[string]string{"google_chat_webhook": testWebhookURL},
 		workspace: db.Workspace{
 			ID:          workspaceID,
@@ -211,9 +246,15 @@ func TestNotifierNeverBlocksPublish(t *testing.T) {
 			WorkspaceID: workspaceID,
 			Number:      12,
 		},
-	}, sender, "https://app.example.com", slog.Default())
+		inbox: map[string]db.InboxItem{
+			notifierInboxID: notifierInboxItem("Checkout needs review", "Please check <totals>"),
+		},
+	}
+	notifier := NewNotifier(queries, sender, "https://app.example.com", slog.Default())
+	delivery := notifydebounce.New(queries, notifydebounce.Config{Delay: 0})
+	delivery.AddChannel(notifier)
 	bus := events.New()
-	notifier.Register(bus)
+	delivery.Register(bus)
 
 	published := make(chan struct{})
 	go func() {
@@ -256,11 +297,11 @@ func TestNotifierNeverLogsWebhookCredentials(t *testing.T) {
 			Number:      12,
 		},
 	}, sender, "https://app.example.com", logger)
-	notifier.spawn = func(run func()) { run() }
-	bus := events.New()
-	notifier.Register(bus)
 
-	bus.Publish(notifierEvent("member"))
+	notifier.DeliverInboxBatch(
+		context.Background(),
+		notifierBatch("member", notifierInboxItem("Checkout needs review", "")),
+	)
 
 	output := logs.String()
 	if strings.Contains(output, "test-key") || strings.Contains(output, "test-token") {

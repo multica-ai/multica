@@ -189,6 +189,10 @@ type GoogleChatSender interface {
 	Send(ctx context.Context, webhookURL, text string) error
 }
 
+type NotificationDeliveryCloser interface {
+	Close(ctx context.Context) bool
+}
+
 // DaemonPendingWorkNotifier pushes a runtime-scoped "heartbeat now" hint to the
 // daemon so a queued heartbeat-carried request (model discovery, capability
 // discovery, or local-skill import) is picked up immediately instead of on the
@@ -244,6 +248,7 @@ type Handler struct {
 	SeatCapacityWorker    *seatcapacity.Worker
 	EmailService          *service.EmailService
 	GoogleChatSender      GoogleChatSender
+	NotificationDelivery  NotificationDeliveryCloser
 	UpdateStore           UpdateStore
 	ModelListStore        ModelListStore
 	LocalSkillListStore   LocalSkillListStore

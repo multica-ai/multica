@@ -7,16 +7,14 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/notifydebounce"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type notifierQueries interface {
@@ -32,10 +30,9 @@ type Notifier struct {
 	sender  Sender
 	appURL  string
 	logger  *slog.Logger
-	spawn   func(func())
 }
 
-// NewNotifier builds an EventInboxNew subscriber.
+// NewNotifier builds the Google Chat channel for the shared inbox delivery buffer.
 func NewNotifier(queries notifierQueries, sender Sender, appURL string, logger *slog.Logger) *Notifier {
 	if logger == nil {
 		logger = slog.Default()
@@ -46,31 +43,16 @@ func NewNotifier(queries notifierQueries, sender Sender, appURL string, logger *
 		sender:  sender,
 		appURL:  appURL,
 		logger:  logger,
-		spawn:   func(run func()) { go run() },
 	}
 }
 
-// Register subscribes without adding work to the synchronous Publish path.
-func (n *Notifier) Register(bus *events.Bus) {
-	bus.Subscribe(protocol.EventInboxNew, func(event events.Event) {
-		n.spawn(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			n.deliver(ctx, event)
-		})
-	})
-}
-
-func (n *Notifier) deliver(ctx context.Context, event events.Event) {
-	item, ok := eventItem(event.Payload)
-	if !ok || stringValue(item["recipient_type"]) != "member" {
+// DeliverInboxBatch sends one message for a recipient's surviving inbox items.
+func (n *Notifier) DeliverInboxBatch(ctx context.Context, batch notifydebounce.Batch) {
+	if batch.RecipientType != "member" || len(batch.Items) == 0 {
 		return
 	}
-	recipientIDText := stringValue(item["recipient_id"])
-	workspaceIDText := stringValue(item["workspace_id"])
-	if workspaceIDText == "" {
-		workspaceIDText = event.WorkspaceID
-	}
+	recipientIDText := batch.RecipientID
+	workspaceIDText := batch.WorkspaceID
 	recipientID, err := util.ParseUUID(recipientIDText)
 	if err != nil || !recipientID.Valid {
 		return
@@ -130,13 +112,16 @@ func (n *Notifier) deliver(ctx context.Context, event events.Event) {
 		return
 	}
 
-	notification := NotificationItem{
-		Title: stringValue(item["title"]),
-		Body:  stringValue(item["body"]),
-	}
-	if issueIDText := stringValue(item["issue_id"]); issueIDText != "" {
-		if issueID, parseErr := util.ParseUUID(issueIDText); parseErr == nil && issueID.Valid {
-			if issue, issueErr := n.queries.GetIssue(ctx, issueID); issueErr == nil && issue.WorkspaceID == workspaceID {
+	notifications := make([]NotificationItem, 0, len(batch.Items))
+	for _, item := range batch.Items {
+		notification := NotificationItem{
+			Title: item.Title,
+		}
+		if item.Body.Valid {
+			notification.Body = item.Body.String
+		}
+		if item.IssueID.Valid {
+			if issue, issueErr := n.queries.GetIssue(ctx, item.IssueID); issueErr == nil && issue.WorkspaceID == workspaceID {
 				notification.IssueIdentifier = fmt.Sprintf("%s-%d", workspace.IssuePrefix, issue.Number)
 				notification.IssueURL = channel.IssueWebLink(
 					n.appURL,
@@ -145,12 +130,13 @@ func (n *Notifier) deliver(ctx context.Context, event events.Event) {
 				)
 			}
 		}
+		notifications = append(notifications, notification)
 	}
 
 	if err := n.sender.Send(
 		ctx,
 		webhookURL,
-		FormatNotifications(workspace.Name, []NotificationItem{notification}),
+		FormatNotifications(workspace.Name, notifications),
 	); err != nil {
 		n.logger.WarnContext(ctx, "google chat: notification delivery failed",
 			"workspace_id", workspaceIDText,
@@ -158,25 +144,4 @@ func (n *Notifier) deliver(ctx context.Context, event events.Event) {
 			"space_id", SpaceID(webhookURL),
 			"error", err)
 	}
-}
-
-func eventItem(payload any) (map[string]any, bool) {
-	value, ok := payload.(map[string]any)
-	if !ok {
-		return nil, false
-	}
-	item, ok := value["item"].(map[string]any)
-	return item, ok
-}
-
-func stringValue(value any) string {
-	switch typed := value.(type) {
-	case string:
-		return typed
-	case *string:
-		if typed != nil {
-			return *typed
-		}
-	}
-	return ""
 }

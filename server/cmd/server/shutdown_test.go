@@ -19,23 +19,24 @@ func TestShutdownSequence_RunsInTheDocumentedOrder(t *testing.T) {
 		return func() { ran = append(ran, name) }
 	}
 	shutdownSequence{
-		StopAutopilot:         record("autopilot"),
-		DrainMaintenance:      record("maintenance"),
-		DrainHTTP:             record("http"),
-		StopOutboundRelay:     record("relay"),
-		CancelWorkers:         record("cancel"),
-		StopHeartbeats:        record("heartbeats"),
-		JoinWebhookWorker:     record("webhooks"),
-		JoinTelegram:          record("telegram"),
-		JoinChannelSupervisor: record("supervisor"),
-		DrainChannelRouter:    record("router"),
-		StopMetricsServer:     record("metrics"),
-		StopProfiling:         record("pprof"),
+		StopAutopilot:             record("autopilot"),
+		DrainMaintenance:          record("maintenance"),
+		DrainHTTP:                 record("http"),
+		StopOutboundRelay:         record("relay"),
+		CancelWorkers:             record("cancel"),
+		StopHeartbeats:            record("heartbeats"),
+		JoinWebhookWorker:         record("webhooks"),
+		JoinTelegram:              record("telegram"),
+		JoinChannelSupervisor:     record("supervisor"),
+		DrainChannelRouter:        record("router"),
+		FlushNotificationDelivery: record("notifications"),
+		StopMetricsServer:         record("metrics"),
+		StopProfiling:             record("pprof"),
 	}.run()
 
 	want := []string{
 		"autopilot", "maintenance", "http", "relay", "cancel", "heartbeats",
-		"webhooks", "telegram", "supervisor", "router", "metrics", "pprof",
+		"webhooks", "telegram", "supervisor", "router", "notifications", "metrics", "pprof",
 	}
 	if !slices.Equal(ran, want) {
 		t.Fatalf("shutdown order = %v, want %v", ran, want)
