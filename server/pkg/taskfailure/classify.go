@@ -61,6 +61,40 @@ func isUsageLimit403(lower string) bool {
 	return httpForbiddenCodeRe.MatchString(lower) && strings.Contains(lower, "usage limit")
 }
 
+// tokenRateLimitRe matches the per-minute quota labels a gateway prints on a
+// rejection: TPM (tokens per minute) and RPM (requests per minute).
+var tokenRateLimitRe = regexp.MustCompile(`(^|[^0-9a-z])(tpm|rpm)([^0-9a-z]|$)`)
+
+// isTokenRateLimit reports a per-minute quota rejection. It shares the "token"
+// and "limit" words that rule 1 matches ("Token usage exceeds the current model
+// TPM (tokens per minute) limit 1000000"), but it is a rate limit to wait out,
+// not a full context window.
+func isTokenRateLimit(lower string) bool {
+	return containsAny(lower, "per minute", "rate limit", "rate_limit_error") ||
+		tokenRateLimitRe.MatchString(lower)
+}
+
+// isTokenQuotaRejection is the quota case of rule 1's token + limit match.
+// Shared by Classify and NormalizeDaemonReason, like isUsageLimit403, so new
+// and old daemons land on the same reason.
+func isTokenQuotaRejection(lower string) bool {
+	return strings.Contains(lower, "token") && strings.Contains(lower, "limit") &&
+		isTokenRateLimit(lower)
+}
+
+// explicitContextOverflow reports wording that names the context window or the
+// prompt size outright. It wins over the quota guard, so a real overflow that
+// also mentions a limit still lands in context_overflow.
+func explicitContextOverflow(lower string) bool {
+	return containsAny(lower,
+		"context length",
+		"context_length_exceeded",
+		"maximum context",
+		"prompt is too long",
+		"context size has been exceeded",
+	) || containsAny(lower, contextWindowExceededWitnesses...)
+}
+
 // Classify maps a free-form error string from the agent runtime / CLI
 // to one of the 14 agent_error.* sub-reasons. Always returns a valid
 // Reason; falls back to ReasonAgentUnknown when no rule matches and for
@@ -128,22 +162,21 @@ func Classify(rawError string) Reason {
 	case isUsageLimit403(lower):
 		return ReasonAgentProviderQuotaLimit
 
+	// 1a. Per-minute token or request quota (TPM / RPM). Rule 1's token +
+	//     limit clause matches this wording too, so the quota guard must come
+	//     first. The quota is a rate limit to wait out, not a full context
+	//     window; explicit overflow wording still wins.
+	case isTokenQuotaRejection(lower) && !explicitContextOverflow(lower):
+		return ReasonAgentProviderCapacityOrRateLimit
+
 	// 1. Context / token window overflow. Checked early so "token
 	//    limit" doesn't get swallowed by the broader "limit" / "quota"
 	//    rule below.
-	case containsAny(lower,
-		"context length",
-		"context_length_exceeded",
-		"maximum context",
-		"prompt is too long",
-		"context size has been exceeded",
-	),
-		containsAny(lower, contextWindowExceededWitnesses...),
+	case explicitContextOverflow(lower),
 		// SQL had `%token%limit%` — ILIKE wildcard between tokens. We
-		// approximate with both substrings present, which catches
-		// "token limit", "tokens per minute limit", etc., without the
-		// false positives a naive `Contains("token") || Contains("limit")`
-		// would generate.
+		// approximate with both substrings present, which catches "token
+		// limit" and similar wording. Per-minute quota wording goes to rule
+		// 1a above, so it never reaches this clause.
 		strings.Contains(lower, "token") && strings.Contains(lower, "limit"):
 		return ReasonAgentContextOverflow
 
@@ -650,6 +683,13 @@ var legacyUsageLimit403Reasons = map[string]bool{
 	"agent_error":                           true,
 }
 
+// legacyTokenRateLimitReasons are the buckets an older daemon lands a
+// per-minute token quota rejection in: context_overflow, from the token + limit
+// clause of its rule 1 before isTokenQuotaRejection existed.
+var legacyTokenRateLimitReasons = map[string]bool{
+	string(ReasonAgentContextOverflow): true,
+}
+
 // NormalizeDaemonReason upgrades a failure_reason reported by an older daemon
 // onto the taxonomy this server understands, using the raw error text as the
 // witness. It returns the reason unchanged when nothing applies.
@@ -672,6 +712,13 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	}
 	if legacyUsageLimit403Reasons[reason] && isUsageLimit403(strings.ToLower(rawError)) {
 		return ReasonAgentProviderQuotaLimit
+	}
+	// An older daemon whose rule 1 predates the quota guard reports a TPM or RPM
+	// rejection as context_overflow. Relabel it unless the text also names the
+	// context window outright.
+	if rawLower := strings.ToLower(rawError); legacyTokenRateLimitReasons[reason] &&
+		isTokenQuotaRejection(rawLower) && !explicitContextOverflow(rawLower) {
+		return ReasonAgentProviderCapacityOrRateLimit
 	}
 	if legacySkillBundleReasons[reason] &&
 		strings.HasPrefix(strings.TrimSpace(rawError), legacySkillBundlePrefix) {
