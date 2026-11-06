@@ -6,6 +6,10 @@
  * centre-lines with a constant stroke, and the star as the dot on its i. Lifted
  * out on its own, that star is the icon. Units are the 100×100 star grid unless
  * stated otherwise; do not tweak these numbers by eye, they are the spec.
+ *
+ * After changing anything here, run `pnpm generate:brand` (scripts/brand/README.md):
+ * the icons, favicons, OG image, README logos, the mobile wordmark and the CLI
+ * login page are all generated from this file.
  */
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
