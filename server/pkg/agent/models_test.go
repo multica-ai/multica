@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -130,6 +131,205 @@ func TestParseKimiProviderThinking(t *testing.T) {
 	}
 	if k3Short.DefaultLevel != "" {
 		t.Errorf("unsupported default = %q, want empty", k3Short.DefaultLevel)
+	}
+}
+
+func TestParseKimiProviderThinkingCapabilities(t *testing.T) {
+	t.Parallel()
+	type fixture struct {
+		capabilities  any
+		efforts       []string
+		defaultEffort string
+	}
+	cases := []struct {
+		name        string
+		fixture     fixture
+		modelID     string
+		model       string
+		wantLevels  []string
+		wantLabels  []string
+		wantDefault string
+		wantNoEntry bool
+	}{
+		{
+			name: "thinking and always_thinking keeps efforts and rejects off",
+			fixture: fixture{
+				capabilities:  []string{"thinking", "always_thinking"},
+				efforts:       []string{"low", "high", "max"},
+				defaultEffort: "high",
+			},
+			wantLevels:  []string{"low", "high", "max"},
+			wantLabels:  []string{"Low", "High", "Max"},
+			wantDefault: "high",
+		},
+		{
+			name: "thinking only offers off leading the set",
+			fixture: fixture{
+				capabilities:  []string{"thinking"},
+				efforts:       []string{"low", "high", "max"},
+				defaultEffort: "max",
+			},
+			wantLevels:  []string{"off", "low", "high", "max"},
+			wantLabels:  []string{"Off", "Low", "High", "Max"},
+			wantDefault: "max",
+		},
+		{
+			name: "always_thinking with no efforts hides the single-option control",
+			fixture: fixture{
+				capabilities: []string{"thinking", "always_thinking"},
+				efforts:      nil,
+			},
+			wantNoEntry: true,
+		},
+		{
+			name: "thinking with no efforts renders off and on",
+			fixture: fixture{
+				capabilities: []string{"thinking"},
+				efforts:      nil,
+			},
+			wantLevels: []string{"off", "on"},
+			wantLabels: []string{"Off", "On"},
+		},
+		{
+			name:    "name-inferred reasoning model keeps efforts despite other capabilities",
+			modelID: "custom/reasoning-model",
+			model:   "reasoning-model",
+			fixture: fixture{
+				capabilities:  []string{"tool_use"},
+				efforts:       []string{"low", "high"},
+				defaultEffort: "high",
+			},
+			wantLevels:  []string{"low", "high"},
+			wantLabels:  []string{"Low", "High"},
+			wantDefault: "high",
+		},
+		{
+			name:    "allow-listed model keeps efforts without thinking capability",
+			modelID: "kimi-code/kimi-for-coding",
+			model:   "kimi-for-coding",
+			fixture: fixture{
+				capabilities:  []string{"tool_use"},
+				efforts:       []string{"low", "high"},
+				defaultEffort: "high",
+			},
+			wantLevels:  []string{"low", "high"},
+			wantLabels:  []string{"Low", "High"},
+			wantDefault: "high",
+		},
+		{
+			name: "missing capabilities falls back to efforts only",
+			fixture: fixture{
+				capabilities:  nil,
+				efforts:       []string{"low", "high", "max"},
+				defaultEffort: "high",
+			},
+			wantLevels:  []string{"low", "high", "max"},
+			wantLabels:  []string{"Low", "High", "Max"},
+			wantDefault: "high",
+		},
+		{
+			name: "explicit empty capabilities on an unrecognized model hides the control",
+			fixture: fixture{
+				capabilities: []string{},
+				efforts:      []string{"low", "high", "max"},
+			},
+			wantNoEntry: true,
+		},
+		{
+			name: "capabilities without thinking hides the control",
+			fixture: fixture{
+				capabilities: []string{"tools", "vision"},
+				efforts:      []string{"low", "high", "max"},
+			},
+			wantNoEntry: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			modelID := tc.modelID
+			if modelID == "" {
+				modelID = "kimi-code/k3"
+			}
+			var fixtureMap map[string]any
+			if tc.fixture.capabilities == nil {
+				fixtureMap = map[string]any{
+					"supportEfforts": tc.fixture.efforts,
+				}
+			} else {
+				fixtureMap = map[string]any{
+					"supportEfforts": tc.fixture.efforts,
+					"capabilities":   tc.fixture.capabilities,
+				}
+			}
+			if tc.fixture.defaultEffort != "" {
+				fixtureMap["defaultEffort"] = tc.fixture.defaultEffort
+			}
+			if tc.model != "" {
+				fixtureMap["model"] = tc.model
+			}
+			raw, err := json.Marshal(map[string]any{"models": map[string]any{modelID: fixtureMap}})
+			if err != nil {
+				t.Fatalf("marshal fixture: %v", err)
+			}
+
+			got, err := parseKimiProviderThinking(raw)
+			if err != nil {
+				t.Fatalf("parseKimiProviderThinking: %v", err)
+			}
+			entry, ok := got[modelID]
+			if tc.wantNoEntry {
+				if ok {
+					t.Fatalf("entry = %+v, want no entry at all", entry)
+				}
+				return
+			}
+			if !ok {
+				t.Fatalf("%s thinking catalog is nil", modelID)
+			}
+			if values := thinkingValues(entry); !reflect.DeepEqual(values, tc.wantLevels) {
+				t.Errorf("levels = %v, want %v", values, tc.wantLevels)
+			}
+			labels := make([]string, 0, len(entry.SupportedLevels))
+			for _, level := range entry.SupportedLevels {
+				labels = append(labels, level.Label)
+			}
+			if !reflect.DeepEqual(labels, tc.wantLabels) {
+				t.Errorf("labels = %v, want %v", labels, tc.wantLabels)
+			}
+			if entry.DefaultLevel != tc.wantDefault {
+				t.Errorf("default = %q, want %q", entry.DefaultLevel, tc.wantDefault)
+			}
+		})
+	}
+}
+
+func TestParseKimiProviderThinkingPreservesNameInferredSavedLevel(t *testing.T) {
+	t.Parallel()
+	got, err := parseKimiProviderThinking([]byte(`{"models":{"custom/reasoning-model":{"model":"reasoning-model","capabilities":["tool_use"],"supportEfforts":["low","high"],"defaultEffort":"high"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	check, err := CheckThinkingLevelWith(func() (Catalog, error) {
+		return Catalog{Models: []Model{{ID: "custom/reasoning-model", Thinking: got["custom/reasoning-model"]}}}, nil
+	}, "kimi", "custom/reasoning-model", "high")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !check.Valid {
+		t.Fatalf("saved high is rejected although Kimi ACP offers it: %s", check.Reason)
+	}
+}
+
+func TestParseKimiProviderThinkingOfficialAlwaysOnStaysHidden(t *testing.T) {
+	t.Parallel()
+	got, err := parseKimiProviderThinking([]byte(`{"models":{"kimi-code/kimi-for-coding":{"model":"kimi-for-coding","capabilities":["thinking","always_thinking"]}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thinking := got["kimi-code/kimi-for-coding"]; thinking != nil {
+		t.Fatalf("always-on model exposes a one-option control: %v", thinkingValues(thinking))
 	}
 }
 
