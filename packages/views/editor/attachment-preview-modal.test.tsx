@@ -173,6 +173,7 @@ vi.mock("../i18n", () => ({
 
 import {
   AttachmentPreviewModal,
+  AttachmentPreviewStandalone,
   useAttachmentPreview,
 } from "./attachment-preview-modal";
 import { withFragmentNavShim } from "./utils/iframe-fragment-nav";
@@ -222,6 +223,7 @@ function ClosablePreview({ attachment }: { attachment: Attachment }) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  downloadMock.mockReset();
   // Drops any body a test queued but never consumed (a media kind skips the
   // text fetch), so it cannot answer the next test's request.
   getAttachmentTextContentMock.mockReset();
@@ -797,6 +799,112 @@ describe("AttachmentPreviewModal — URL-only source", () => {
     fireEvent.click(button);
     expect(openExternalMock).toHaveBeenCalledWith(url);
     expect(downloadMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("attachment preview download feedback", () => {
+  it("shows pending feedback in the viewer header and restores the button on completion", async () => {
+    const pending = Promise.withResolvers<void>();
+    downloadMock.mockReturnValueOnce(pending.promise);
+    const attachment = makeAttachment({ filename: "manual.pdf", content_type: "application/pdf" });
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment }} open onClose={() => {}} />);
+    const button = screen.getByRole("button", { name: "Download" });
+
+    fireEvent.click(button);
+
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button.querySelector(".animate-spin")).toBeInTheDocument();
+    fireEvent.click(button);
+    expect(downloadMock).toHaveBeenCalledExactlyOnceWith(attachment.id);
+
+    await act(async () => pending.resolve());
+
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute("aria-busy", "false");
+    expect(button.querySelector(".animate-spin")).toBeNull();
+  });
+
+  it("shares pending state between the unsupported-file action and the header", async () => {
+    const pending = Promise.withResolvers<void>();
+    downloadMock.mockReturnValueOnce(pending.promise);
+    const attachment = makeAttachment();
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment }} open onClose={() => {}} />);
+    const [header, fallback] = screen.getAllByRole("button", { name: "Download" });
+
+    fireEvent.click(fallback!);
+
+    for (const button of [header!, fallback!]) {
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("aria-busy", "true");
+      expect(button.querySelector(".animate-spin")).toBeInTheDocument();
+      fireEvent.click(button);
+    }
+    expect(downloadMock).toHaveBeenCalledExactlyOnceWith(attachment.id);
+    await act(async () => pending.resolve());
+  });
+
+  it("shows pending feedback on the download action after a text preview fails", async () => {
+    getAttachmentTextContentMock.mockRejectedValueOnce(new FakePreviewTooLargeError());
+    const pending = Promise.withResolvers<void>();
+    downloadMock.mockReturnValueOnce(pending.promise);
+    const attachment = makeAttachment({ filename: "large.md", content_type: "text/markdown" });
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment }} open onClose={() => {}} />);
+    await screen.findByText("File is too large to preview. Please download.");
+    const [, fallback] = screen.getAllByRole("button", { name: "Download" });
+
+    fireEvent.click(fallback!);
+
+    expect(fallback).toBeDisabled();
+    expect(fallback).toHaveAttribute("aria-busy", "true");
+    await act(async () => pending.resolve());
+  });
+
+  it("shows the same pending feedback on the standalone preview page", async () => {
+    const pending = Promise.withResolvers<void>();
+    downloadMock.mockReturnValueOnce(pending.promise);
+    const attachment = makeAttachment({ filename: "manual.pdf", content_type: "application/pdf" });
+    render(<AttachmentPreviewStandalone attachment={attachment} />);
+    const button = screen.getByRole("button", { name: "Download" });
+
+    fireEvent.click(button);
+
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button.querySelector(".animate-spin")).toBeInTheDocument();
+    await act(async () => pending.resolve());
+  });
+
+  it("allows downloading another file while the previous preview's download is pending", async () => {
+    const first = makeAttachment({ filename: "first.pdf", content_type: "application/pdf" });
+    const second = makeAttachment({ id: "att-2", filename: "second.pdf", content_type: "application/pdf" });
+    const firstDownload = Promise.withResolvers<void>();
+    const secondDownload = Promise.withResolvers<void>();
+    downloadMock.mockReturnValueOnce(firstDownload.promise).mockReturnValueOnce(secondDownload.promise);
+    function PreviewSequence() {
+      const [index, setIndex] = useState(0);
+      return (
+        <AttachmentPreviewModal
+          source={{ kind: "full", attachment: index === 0 ? first : second }}
+          open
+          onClose={() => {}}
+          sequence={{ index, total: 2, onNext: () => setIndex(1), onPrev: () => setIndex(0) }}
+        />
+      );
+    }
+    render(<PreviewSequence />);
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+
+    fireEvent.keyDown(document, { key: "ArrowRight" });
+    const button = screen.getByRole("button", { name: "Download" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+
+    expect(downloadMock.mock.calls).toEqual([[first.id], [second.id]]);
+    await act(async () => firstDownload.resolve());
+    expect(button).toBeDisabled();
+    await act(async () => secondDownload.resolve());
+    expect(button).toBeEnabled();
   });
 });
 

@@ -11,7 +11,7 @@
  * file so these stay single-purpose UI.
  */
 
-import { useRef, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { Download, Eye, FileText, Loader2, Trash2 } from "@multica/ui/icons";
 import { useT } from "../i18n";
@@ -19,34 +19,7 @@ import { DeferredTooltip } from "../common/deferred-tooltip";
 import { formatBytes } from "../common/format-bytes";
 import { fileIcon } from "./utils/file-icon";
 import { canOpenPreview, fileTypeLabel, getPreviewKind } from "./utils/preview";
-
-export function useAttachmentDownloadState(
-  onDownload: () => void | Promise<unknown>,
-) {
-  const active = useRef(false);
-  const [downloading, setDownloading] = useState(false);
-  const handleDownload = () => {
-    if (active.current) return;
-    active.current = true;
-    const reset = () => {
-      active.current = false;
-      setDownloading(false);
-    };
-    try {
-      const result = onDownload();
-      if (result && typeof result.then === "function") {
-        setDownloading(true);
-        void result.then(reset, reset);
-      } else {
-        active.current = false;
-      }
-    } catch (error) {
-      reset();
-      throw error;
-    }
-  };
-  return { downloading, handleDownload };
-}
+import { useAttachmentDownloadState } from "./hooks/use-attachment-download-state";
 
 interface AttachmentCardChromeProps {
   filename: string;

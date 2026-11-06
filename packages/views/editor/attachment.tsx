@@ -52,11 +52,8 @@ import {
   useResignedInlineMedia,
 } from "./hooks/use-inline-media-url";
 import { useDownloadAttachment } from "./use-download-attachment";
-import {
-  AttachmentCard,
-  AttachmentFileCard,
-  useAttachmentDownloadState,
-} from "./attachment-card";
+import { AttachmentCard, AttachmentFileCard } from "./attachment-card";
+import { useAttachmentDownloadState } from "./hooks/use-attachment-download-state";
 import { canOpenPreview, getPreviewKind, type PreviewKind } from "./utils/preview";
 import "./styles/attachment.css";
 

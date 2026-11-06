@@ -1194,26 +1194,42 @@ describe("Attachment — blob URL GC (MUL-7741)", () => {
   });
 });
 
-
 describe("image download feedback", () => {
-  it("tracks the download promise and blocks repeat clicks only for the pending image", async () => {
-    let finish!: () => void;
-    downloadMock.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+  it("shows pending feedback and blocks repeat clicks until completion", async () => {
+    const pending = Promise.withResolvers<void>();
+    downloadMock.mockReturnValueOnce(pending.promise);
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: makeRecord() }} />);
+    const button = screen.getByRole("button", { name: "Download" });
+
+    fireEvent.click(button);
+
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button.querySelector(".animate-spin")).toBeInTheDocument();
+    expect(button.closest(".image-toolbar")).toHaveStyle({ opacity: "1" });
+    fireEvent.click(button);
+    expect(downloadMock).toHaveBeenCalledExactlyOnceWith("att-1");
+
+    await act(async () => pending.resolve());
+
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute("aria-busy", "false");
+    expect(button.querySelector(".animate-spin")).toBeNull();
+  });
+
+  it("keeps sibling images available while preparing a download", async () => {
+    const pending = Promise.withResolvers<void>();
+    downloadMock.mockReturnValueOnce(pending.promise);
     renderWithQuery(<>
       <Attachment attachment={{ kind: "record", attachment: makeRecord() }} />
       <Attachment attachment={{ kind: "record", attachment: makeRecord({ id: "att-2" }) }} />
     </>);
     const [first, second] = screen.getAllByRole("button", { name: "Download" });
-    fireEvent.click(first!);
-    expect(first!.getAttribute("aria-busy")).toBe("true");
-    expect(first!.querySelector(".animate-spin")).not.toBeNull();
+
     fireEvent.click(first!);
     fireEvent.click(second!);
+
     expect(downloadMock.mock.calls).toEqual([["att-1"], ["att-2"]]);
-    await act(async () => finish());
-    expect(first!.getAttribute("aria-busy")).toBe("false");
-    expect(first!.querySelector(".animate-spin")).toBeNull();
-    fireEvent.click(first!);
-    expect(downloadMock).toHaveBeenCalledTimes(3);
+    await act(async () => pending.resolve());
   });
 });
