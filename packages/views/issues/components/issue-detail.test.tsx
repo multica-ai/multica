@@ -6,6 +6,7 @@ import type { AgentTask, Attachment, Issue, IssueStatusEntry, Label, TimelineEnt
 import { issueKeys } from "@multica/core/issues/queries";
 import { issueStatusKeys } from "@multica/core/issue-statuses";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { ApiError } from "@multica/core/api/client";
 import { toast } from "sonner";
 import { useResolvedExpandStore } from "@multica/core/issues/stores/resolved-expand-store";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
@@ -1242,7 +1243,7 @@ describe("IssueDetail (shared)", () => {
   });
 
   it("keeps the peek's host controls when the issue cannot be loaded", async () => {
-    mockApiObj.getIssue.mockRejectedValue(new Error("Not found"));
+    mockApiObj.getIssue.mockRejectedValue(new ApiError("Not found", 404, "Not Found"));
     renderPeek("nonexistent-id");
     await waitFor(() => {
       expect(
@@ -1836,8 +1837,31 @@ describe("IssueDetail (shared)", () => {
     ).toBeTruthy();
   });
 
+  it("keeps an unsaved comment mounted when the primary background refresh fails", async () => {
+    const queryClient = createTestQueryClient();
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={queryClient}>
+          <IssueDetail issueId="issue-1" />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+    await screen.findByText("Implement authentication");
+    fireEvent.click(screen.getByTestId("comment-composer-shell"));
+    const editor = await screen.findByPlaceholderText("Leave a comment...");
+    fireEvent.change(editor, { target: { value: "Unsaved synthetic comment" } });
+    mockApiObj.getIssue.mockRejectedValue(new ApiError("unavailable", 503, "Unavailable"));
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: issueKeys.detail("ws-1", "issue-1"), exact: true });
+    });
+    expect(queryClient.getQueryState(issueKeys.detail("ws-1", "issue-1"))?.status).toBe("error");
+    expect(editor).toBeInTheDocument();
+    expect(editor).toHaveValue("Unsaved synthetic comment");
+    expect(screen.queryByText("Could not load issue.")).not.toBeInTheDocument();
+  });
+
   it("shows 'not found' message when issue does not exist", async () => {
-    mockApiObj.getIssue.mockRejectedValue(new Error("Not found"));
+    mockApiObj.getIssue.mockRejectedValue(new ApiError("Not found", 404, "Not Found"));
 
     renderIssueDetail("nonexistent-id");
 
@@ -1849,7 +1873,7 @@ describe("IssueDetail (shared)", () => {
   });
 
   it("shows 'Back' button when issue is not found and no onDelete prop", async () => {
-    mockApiObj.getIssue.mockRejectedValue(new Error("Not found"));
+    mockApiObj.getIssue.mockRejectedValue(new ApiError("Not found", 404, "Not Found"));
 
     renderIssueDetail("nonexistent-id");
 

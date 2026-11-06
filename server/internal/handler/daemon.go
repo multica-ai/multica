@@ -3208,7 +3208,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		leaderWorkflow := leaderNoWorkflow
 		if projectWorkflow != nil {
 			leaderWorkflow = leaderWorkflowCurrentDaemon
-			if legacyRuntimeRules {
+			if projectWorkflow.stepMoved {
+				leaderWorkflow = leaderWorkflowStepMoved
+			} else if legacyRuntimeRules {
 				leaderWorkflow = leaderWorkflowLegacyDaemon
 			}
 		}
@@ -3646,6 +3648,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			resp.ChatType = delivery.ChatType
 			resp.ChatChannelDeliversFiles = h.channelDeliversFiles(delivery.ChannelType)
 			if delivery.ChannelType == string(slack.TypeSlack) {
+				if reader, ok := h.SlackHistory.(slackTaskSourceReader); ok {
+					resp.ChatSource = reader.TaskSource(r.Context(), delivery, cs.WorkspaceID)
+				}
+
 				resp.ChatInThread = delivery.ChannelThreadID.Valid &&
 					delivery.ChannelThreadID.String != "" &&
 					delivery.ChannelThreadID.String != delivery.ChannelMessageID.String

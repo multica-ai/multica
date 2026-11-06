@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "./api";
@@ -9,6 +10,21 @@ vi.hoisted(() => {
 
 // The real store pulls in expo-secure-store; the client only needs the slug.
 vi.mock("@/data/workspace-store", () => ({ getCurrentSlug: () => null }));
+
+describe("api.listAgents", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([
+    [undefined, "/api/agents"],
+    [{ includeArchived: false }, "/api/agents"],
+    [{ includeArchived: true }, "/api/agents?include_archived=true"],
+  ])("with %j requests %s", async (opts, path) => {
+    const fetchMock = vi.fn(async () => Response.json([]));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(api.listAgents(opts)).resolves.toEqual([]);
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(`https://api.example.test${path}`, expect.any(Object));
+  });
+});
 
 describe("api.deleteComment", () => {
   const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));

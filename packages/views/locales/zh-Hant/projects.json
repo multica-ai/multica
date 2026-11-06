@@ -153,6 +153,7 @@
     "ref_default_tooltip": "未設定分支 —— 任務使用倉庫當時的預設分支。"
   },
   "delete_dialog": {
+    "offline_error": "目前處於離線狀態，請連線後重試刪除。",
     "title": "刪除專案",
     "description": "將刪除這個專案。任務不會被刪除，只會從專案中解除關聯。",
     "confirm": "刪除",
