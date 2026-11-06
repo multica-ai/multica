@@ -1473,6 +1473,46 @@ func TestLoadConfig_UsesNestedChatGPTCodexCLIPath(t *testing.T) {
 	}
 }
 
+// Regression for #8943: current ChatGPT builds relocate the bundled CLI again,
+// to Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex. The production
+// candidate list must cover that layout — ahead of the codex-cli/bin and flat
+// Resources/codex layouts, so the newest install wins while older installs
+// still resolve.
+func TestCodexDesktopAppBundlePathsCoversCodexCLIAppBundle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the Codex Desktop app bundle fallback is macOS-only")
+	}
+	paths := codexDesktopAppBundlePaths()
+	indexOf := func(want string) int {
+		for i, p := range paths {
+			if p == want {
+				return i
+			}
+		}
+		return -1
+	}
+	const newest = "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"
+	if idx := indexOf(newest); idx < 0 {
+		t.Fatalf("candidate list missing the CodexCLI.app bundle path %q: %v", newest, paths)
+	} else {
+		for _, older := range []string{
+			"/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+			"/Applications/ChatGPT.app/Contents/Resources/codex",
+			"/Applications/Codex.app/Contents/Resources/codex",
+		} {
+			if oi := indexOf(older); oi >= 0 && oi < idx {
+				t.Fatalf("older candidate %q ordered ahead of the CodexCLI.app bundle path", older)
+			}
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		homeVariant := filepath.Join(home, "Applications", "ChatGPT.app", "Contents", "Resources", "codex-cli", "CodexCLI.app", "Contents", "MacOS", "codex")
+		if indexOf(homeVariant) < 0 {
+			t.Fatalf("candidate list missing the per-user CodexCLI.app bundle path %q", homeVariant)
+		}
+	}
+}
+
 // A bundled CLI that exists but cannot be spawned must stay unregistered:
 // registering it would advertise a healthy runtime whose every task fails.
 func TestProbeAgentCLIsIgnoresNonExecutableCodexBundle(t *testing.T) {
