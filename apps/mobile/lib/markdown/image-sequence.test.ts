@@ -61,6 +61,19 @@ describe("mobile Markdown image sequence wiring", () => {
     ["legacy attachment URL", "![middle](<https://cdn.example/图 v2.png>)", attachment.download_url!, [attachment]],
     ["space entity", "![middle](https://cdn.example/a&#32;b.png)", "https://cdn.example/a%20b.png", []],
     ["named entity", "![middle](https://cdn.example/a.png?a=1&amp;b=2)", "https://cdn.example/a.png?a=1&b=2", []],
+    ["escaped entity", String.raw`![middle](https://cdn.example/a.png?a=1\&amp;b=2)`, "https://cdn.example/a.png?a=1&amp;b=2", []],
+    ["escaped nested entity", String.raw`![middle](https://cdn.example/a.png?a=1\&amp;amp;b=2)`, "https://cdn.example/a.png?a=1&amp;amp;b=2", []],
+    ["escaped reference entity", String.raw`![middle][shot]
+
+[shot]: https://cdn.example/a.png?a=1\&amp;amp;b=2`, "https://cdn.example/a.png?a=1&amp;amp;b=2", []],
+    ["escaped collapsed reference entity", String.raw`![shot][]
+
+[shot]: https://cdn.example/a.png?a=1\&amp;amp;b=2`, "https://cdn.example/a.png?a=1&amp;amp;b=2", []],
+    ["escaped shortcut reference entity", String.raw`![shot]
+
+[shot]: https://cdn.example/a.png?a=1\&amp;amp;b=2`, "https://cdn.example/a.png?a=1&amp;amp;b=2", []],
+    ["escaped backslash before entity", String.raw`![middle](https://cdn.example/a.png?a=1\\&amp;b=2)`, "https://cdn.example/a.png?a=1%5C&b=2", []],
+    ["entity-generated backslash", "![middle](https://cdn.example/a.png?a=1&bsol;&amp;b=2)", "https://cdn.example/a.png?a=1%5C&b=2", []],
     ["nested entity", "![middle](https://cdn.example/a.png?a=1&amp;amp;b=2)", "https://cdn.example/a.png?a=1&amp;b=2", []],
     ["reference", "![middle][shot]\n\n[shot]: https://cdn.example/图.png", "https://cdn.example/%E5%9B%BE.png", []],
     ["attachment", `![middle](/api/attachments/${ID}/download)`, attachment.download_url!, [attachment]],

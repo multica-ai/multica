@@ -469,9 +469,9 @@ importers:
       marked:
         specifier: ^18.0.3
         version: 18.0.3
-      micromark-util-decode-string:
-        specifier: 2.0.1
-        version: 2.0.1
+      mdast-util-from-markdown:
+        specifier: 2.0.3
+        version: 2.0.3
       micromark-util-sanitize-uri:
         specifier: 2.0.1
         version: 2.0.1
