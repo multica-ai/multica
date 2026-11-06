@@ -227,7 +227,7 @@ describe("sidebar title disclosure", () => {
     await waitFor(() => expect(document.querySelector("[data-slot=tooltip-content]")).toBeNull());
   });
 
-  it("reveals a clipped issue title after hover while retaining its navigation target", async () => {
+  it("shows no tooltip on a clipped issue title", async () => {
     renderList();
     const link = screen.getByRole("link", { name: "Issue 1" });
     clipLabel(screen.getByText("Issue 1"));
@@ -238,7 +238,7 @@ describe("sidebar title disclosure", () => {
     } finally {
       vi.useRealTimers();
     }
-    expect(document.querySelector("[data-slot=tooltip-content]")).toHaveTextContent("Issue 1");
+    expect(document.querySelector("[data-slot=tooltip-content]")).toBeNull();
     expect(link).toHaveAttribute("href", "/acme/issues/issue-1");
   });
 });
