@@ -34,13 +34,7 @@ func (h *Handler) hydrateChatSupplements(ctx context.Context, workspaceID pgtype
 	}
 	byID := make(map[string]ChatSupplementReceipt, len(rows))
 	for _, s := range rows {
-		status := s.Status
-		// Once claimed, lack of an engine acknowledgement cannot prove delivery.
-		// It must never be presented as accepted, or silently retried.
-		if status == "delivering" {
-			status = "unknown"
-		}
-		byID[uuidToString(s.MessageID)] = ChatSupplementReceipt{uuidToString(s.TaskID), status, textToPtr(s.FailureReason)}
+		byID[uuidToString(s.MessageID)] = ChatSupplementReceipt{uuidToString(s.TaskID), s.Status, textToPtr(s.FailureReason)}
 	}
 	for i := range messages {
 		if s, ok := byID[messages[i].ID]; ok {

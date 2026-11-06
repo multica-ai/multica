@@ -73,6 +73,10 @@ test("direct chat adds guidance explicitly and preserves a rejected draft", asyn
     const claim = await page.request.post(`${base}/api/daemon/tasks/${taskId}/supplements/claim`, { headers, data: {} });
     expect(claim.status()).toBe(200);
     expect((await claim.json()).comment_id).toBe(message.id);
+    await expect(page.getByText("Sending to current run", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Delivery uncertain", { exact: true })).toHaveCount(0);
+    const uncertain = await page.request.post(`${base}/api/daemon/tasks/${taskId}/supplements/${message.id}/ack`, { headers, data: { delivered: false, error: "delivery_unknown" } });
+    expect(uncertain.status()).toBe(200);
     await expect(page.getByText("Delivery uncertain")).toBeVisible({ timeout: 30_000 });
     await page.screenshot({ path: testInfo.outputPath("guidance-uncertain-live.png") });
     const ack = await page.request.post(`${base}/api/daemon/tasks/${taskId}/supplements/${message.id}/ack`, { headers, data: { delivered: true } });
