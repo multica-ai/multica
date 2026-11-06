@@ -1,9 +1,10 @@
 # Contributing Guide
 
-This guide documents the local development workflow for contributors working on the Multica codebase.
+This guide documents pull request requirements and the local development workflow for contributors working on the Multica codebase.
 
 It covers:
 
+- pull request requirements and review evidence
 - first-time setup
 - environments: starting, inspecting, stopping and deleting them
 - day-to-day development in the main checkout
@@ -27,6 +28,38 @@ other work — you agree to condition 2 of the [Multica License](LICENSE):
   as deemed necessary.
 
 See the [LICENSE](LICENSE) file for the full terms.
+
+## Pull Request Requirements
+
+Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md). Every PR must make the
+problem and design decisions clear enough for a reviewer to assess:
+
+1. **Problem:** Describe the concrete problem, who is affected, and the expected
+   behavior. Include reproduction steps or a specific example where relevant.
+2. **Proposal and tradeoffs:** Explain what you propose, why it solves the
+   problem, and why you chose this approach. Describe the alternatives you
+   considered and why you rejected each one, including leaving the behavior
+   unchanged where relevant. If there is no meaningful alternative, explain why.
+3. **Screenshots for UI or interaction changes:** Attach screenshots from the
+   running app showing the affected screens and states. Before/after comparisons
+   are strongly preferred. For a new screen with no before state, explain that
+   and include the after screenshot. Recordings may supplement screenshots, but
+   do not replace them. If there is no UI or interaction impact, write "N/A" in
+   the screenshot section and explain why.
+
+**UI or interaction PRs without screenshots are rejected by default.** Reviewers
+should request changes or close the PR until screenshots are provided. PRs
+missing the problem, proposal, or explanation of alternatives are also not ready
+for review.
+
+Include verification steps, the commands actually run, and their results. State
+what was not tested and why. Screenshots help reviewers assess the design and
+provide evidence that the affected UI was exercised; they complement tests.
+
+AI-assisted contributions are welcome. The author remains responsible for
+understanding the change, explaining its design, and verifying it. Generated
+code, a file list, passing CI, or an AI transcript does not replace the required
+problem statement, rationale, or evidence.
 
 ## Development Model
 

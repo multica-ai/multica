@@ -193,6 +193,18 @@ make start
 - 使用 `feat(scope)`、`fix(scope)`、`docs` 等 conventional commit；
 - 在 PR 中写清行为变化和实际运行的验证命令。
 
+### PR 提交要求
+
+使用 [PR 模板](https://github.com/multica-ai/multica/blob/main/.github/PULL_REQUEST_TEMPLATE.md)，并遵守[贡献要求](https://github.com/multica-ai/multica/blob/main/CONTRIBUTING.md#pull-request-requirements)：
+
+1. **问题：** 说明要解决的具体问题、受影响的人和预期行为。适用时提供复现步骤或具体例子。
+2. **方案与取舍：** 说明方案是什么、为什么选择它、考虑过哪些替代方案，以及分别舍弃它们的原因。如果没有有意义的替代方案，也要解释原因。
+3. **UI 或交互验证：** 必须附上实际运行应用的截图，展示受影响的页面和状态，强烈建议提供 before/after 对比。新页面没有改动前的状态时，说明原因并提供改动后的截图。录屏可以补充，但不能替代截图。不涉及 UI 或交互影响时，填写 "N/A" 并说明原因。
+
+**涉及 UI 或交互改动却没有截图的 PR，默认拒绝。** 在补齐截图前，评审者应要求修改或关闭 PR。缺少问题描述、方案或替代方案取舍说明的 PR，同样不具备评审条件。
+
+写清验证步骤、实际运行的命令、结果，以及未验证的内容和原因。AI 辅助贡献遵循相同要求：作者必须理解改动、解释设计并完成验证。生成的代码或 AI 对话记录不能替代方案理由与验证证据。
+
 ## 接下来
 
 - [开发规范](/developers/conventions) — 命名、术语和中文文案的仓库契约。
