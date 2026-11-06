@@ -240,20 +240,38 @@ describe("ProjectsPage deletion lifecycle", () => {
     },
   );
 
-  it("keeps the batch confirmation busy and selection intact while offline", async () => {
-    onlineManager.setOnline(false);
+  it("stops a batch if connectivity is lost between projects and retries only after confirmation", async () => {
+    const other = { ...project, id: "project-2", title: "Another project" };
+    qc.setQueryData(listKey, { projects: [project, other], total: 2 });
+    qc.setQueryData(projectKeys.detail("workspace-1", other.id), other);
+    listProjects.mockResolvedValue({ projects: [other], total: 1 });
+    deleteProject.mockImplementationOnce(async () => {
+      onlineManager.setOnline(false);
+    });
     renderPage();
-    const checkbox = screen.getByRole("checkbox", { name: "Select row" });
-    await submitBatch();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("checkbox", { name: "Select all" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByRole("button", { name: "Delete" })).toBeDisabled();
-    expect(checkbox).toBeChecked();
-    expect(deleteProject).not.toHaveBeenCalled();
-    act(() => onlineManager.setOnline(true));
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+      "You're offline. Reconnect and try deleting again.",
+    ));
+    const confirm = within(dialog).getByRole("button", { name: "Delete" });
+    expect(confirm).toBeEnabled();
+    expect(qc.getQueryData(listKey)).toEqual({ projects: [other], total: 1 });
+    expect(qc.getQueryData(projectKeys.detail("workspace-1", other.id))).toEqual(other);
+    await act(async () => {
+      onlineManager.setOnline(true);
+      await qc.resumePausedMutations();
+    });
+    expect(deleteProject).toHaveBeenCalledWith(project.id);
     await waitFor(() => expect(deleteProject).toHaveBeenCalledOnce());
+    deleteProject.mockResolvedValue(undefined);
     listProjects.mockResolvedValue({ projects: [], total: 0 });
-    await act(async () => pending.resolve());
+    await user.click(confirm);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(deleteProject.mock.calls.map(([id]) => id)).toEqual([project.id, other.id]);
   });
 
   it.each(["row", "batch"])(
@@ -291,26 +309,58 @@ describe("ProjectsPage deletion lifecycle", () => {
     },
   );
 
-  it.each(["compact", "comfortable"] as const)("keeps a %s row visible offline until server success", async (mode) => {
+  it.each(["compact", "comfortable"] as const)("retains a %s row after offline rejection and allows an explicit retry", async (mode) => {
     useProjectViewStore.setState({ viewMode: mode });
     onlineManager.setOnline(false);
     renderPage();
     await confirmDeletion();
-    await waitFor(() =>
-      expect(qc.getMutationCache().getAll()[0]?.state.isPaused).toBe(true),
-    );
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+      "You're offline. Reconnect and try deleting again.",
+    ));
     expect(deleteProject).not.toHaveBeenCalled();
-    expect(screen.getByText(project.title)).toBeInTheDocument();
     expect(qc.getQueryData(detailKey)).toEqual(project);
-    act(() => onlineManager.setOnline(true));
+    const user = userEvent.setup();
+    const confirm = within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" });
+    expect(confirm).toBeEnabled();
+    await act(async () => {
+      onlineManager.setOnline(true);
+      await qc.resumePausedMutations();
+    });
+    expect(deleteProject).not.toHaveBeenCalled();
+    await user.click(confirm);
     await waitFor(() => expect(deleteProject).toHaveBeenCalledOnce());
-    expect(screen.getByText(project.title)).toBeInTheDocument();
     listProjects.mockResolvedValue({ projects: [], total: 0 });
     await act(async () => pending.resolve());
     await waitFor(() =>
       expect(screen.queryByText(project.title)).not.toBeInTheDocument(),
     );
     expect(qc.getQueryState(detailKey)).toBeUndefined();
+  });
+
+  it.each(["row", "batch"])("allows cancelling an offline %s deletion without executing it on reconnect", async (source) => {
+    onlineManager.setOnline(false);
+    renderPage();
+    if (source === "row") await confirmDeletion();
+    else await submitBatch();
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+      "You're offline. Reconnect and try deleting again.",
+    ));
+    expect(deleteProject).not.toHaveBeenCalled();
+    expect(qc.getQueryData(detailKey)).toEqual(project);
+    const dialog = screen.getByRole("dialog");
+    const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+    expect(cancel).toBeEnabled();
+    await userEvent.setup().click(cancel);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText(project.title)).toBeInTheDocument();
+    if (source === "batch") {
+      expect(screen.getByRole("checkbox", { name: "Select row" })).toBeChecked();
+    }
+    await act(async () => {
+      onlineManager.setOnline(true);
+      await qc.resumePausedMutations();
+    });
+    expect(deleteProject).not.toHaveBeenCalled();
   });
 
   it("cleans confirmed deletion caches after the list page unmounts", async () => {

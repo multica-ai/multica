@@ -16,6 +16,7 @@ import {
   projectListOptions,
   useUpdateProject,
   useDeleteProject,
+  ProjectDeletionOfflineError,
   useProjectViewStore,
   type ProjectColumnKey,
   type ProjectListFilters,
@@ -175,7 +176,11 @@ function DeleteProjectsDialog({
       onOpenChange(false);
       onDeleted?.();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err));
+      toast.error(
+        err instanceof ProjectDeletionOfflineError
+          ? t(($) => $.delete_dialog.offline_error)
+          : err instanceof Error ? err.message : String(err),
+      );
     } finally {
       setDeleting(false);
     }

@@ -1,7 +1,7 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { projectKeys } from "@multica/core/projects/queries";
@@ -286,7 +286,10 @@ beforeEach(() => {
   mocks.toastError.mockReset();
 });
 
-afterEach(() => qc.clear());
+afterEach(() => {
+  onlineManager.setOnline(true);
+  qc.clear();
+});
 
 describe("ProjectDetail sharing", () => {
   it("copies the platform shareable URL instead of the renderer URL", async () => {
@@ -305,6 +308,31 @@ describe("ProjectDetail sharing", () => {
 });
 
 describe("ProjectDetail project deletion", () => {
+  it("allows cancelling an offline detail deletion without executing it on reconnect", async () => {
+    onlineManager.setOnline(false);
+    renderProjectDetail();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Delete project" }));
+    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(
+      "You're offline. Reconnect and try deleting again.",
+    ));
+    expect(mocks.deleteProject).not.toHaveBeenCalled();
+    expect(qc.getQueryData(projectKeys.detail("workspace-1", PROJECT.id))).toEqual(PROJECT);
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByRole("button", { name: "Delete" })).toBeEnabled();
+    const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+    expect(cancel).toBeEnabled();
+    await user.click(cancel);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    await act(async () => {
+      onlineManager.setOnline(true);
+      await qc.resumePausedMutations();
+    });
+    expect(mocks.deleteProject).not.toHaveBeenCalled();
+    expect(mocks.push).not.toHaveBeenCalled();
+  });
+
   it("requires confirmation and navigates only after deletion succeeds", async () => {
     const user = userEvent.setup();
     renderProjectDetail();

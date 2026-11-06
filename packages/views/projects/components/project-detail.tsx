@@ -13,7 +13,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { Spinner } from "@multica/ui/components/ui/spinner";
-import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
+import { useUpdateProject, useDeleteProject, ProjectDeletionOfflineError } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
@@ -241,7 +241,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         router.push(wsPaths.projects());
       },
       onError: (err) =>
-        toast.error(err instanceof Error ? err.message : String(err)),
+        toast.error(
+          err instanceof ProjectDeletionOfflineError
+            ? t(($) => $.delete_dialog.offline_error)
+            : err instanceof Error ? err.message : String(err),
+        ),
     });
   }, [project, deleteProject, router, wsPaths, t]);
 

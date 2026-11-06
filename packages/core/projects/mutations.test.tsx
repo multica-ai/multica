@@ -21,7 +21,7 @@ import {
   pruneIssueSurfaceViewStates,
 } from "../issues/stores/surface-view-store";
 import { issueKeys } from "../issues/queries";
-import { useDeleteProject, useUpdateProject } from "./mutations";
+import { ProjectDeletionOfflineError, useDeleteProject, useUpdateProject } from "./mutations";
 
 vi.mock("../hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -113,23 +113,30 @@ describe("useDeleteProject", () => {
     },
   );
 
-  it("keeps an offline deletion visible until reconnection and server confirmation", async () => {
+  it("rejects offline deletion without queuing it and requires an explicit retry", async () => {
     seed();
+    qc.setDefaultOptions({ mutations: { retry: 2, retryDelay: 0 } });
     onlineManager.setOnline(false);
-    const pending = deferred<void>();
-    deleteProject.mockReturnValue(pending.promise);
     const { result } = renderHook(() => useDeleteProject(), {
       wrapper: createWrapper(qc),
     });
     act(() => result.current.mutate("p1"));
-    await waitFor(() => expect(result.current.isPaused).toBe(true));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error).toBeInstanceOf(ProjectDeletionOfflineError);
+    expect(result.current.isPaused).toBe(false);
     expect(deleteProject).not.toHaveBeenCalled();
     expectRetained();
 
-    act(() => onlineManager.setOnline(true));
-    await waitFor(() => expect(deleteProject).toHaveBeenCalledOnce());
+    await act(async () => {
+      onlineManager.setOnline(true);
+      await qc.resumePausedMutations();
+    });
+    expect(deleteProject).not.toHaveBeenCalled();
     expectRetained();
-    await act(async () => pending.resolve());
+    await act(async () => {
+      await result.current.mutateAsync("p1");
+    });
+    expect(deleteProject).toHaveBeenCalledOnce();
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(qc.getQueryData(listKey)).toEqual({ projects: [other], total: 1 });
     expect(qc.getQueryState(detailKey)).toBeUndefined();

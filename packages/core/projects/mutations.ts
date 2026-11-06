@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { onlineManager, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { projectKeys } from "./queries";
 import { issueKeys } from "../issues/queries";
@@ -62,11 +62,24 @@ export function useUpdateProject() {
   });
 }
 
+export class ProjectDeletionOfflineError extends Error {
+  constructor() {
+    super("You're offline. Reconnect and try deleting again.");
+    this.name = "ProjectDeletionOfflineError";
+  }
+}
+
 export function useDeleteProject() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: (id: string) => api.deleteProject(id),
+    // Fail offline deletions instead of queuing a destructive action behind a modal.
+    networkMode: "always",
+    retry: false,
+    mutationFn: (id: string) => {
+      if (!onlineManager.isOnline()) throw new ProjectDeletionOfflineError();
+      return api.deleteProject(id);
+    },
     onSuccess: async (_data, id) => {
       // Reads started during DELETE may still contain the removed project.
       await qc.cancelQueries({ queryKey: projectKeys.list(wsId) });
