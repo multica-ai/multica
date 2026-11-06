@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { Attachment } from "../types/attachment";
 import {
@@ -199,6 +200,58 @@ describe("collectImageSequence", () => {
       "https://cdn/raw.png",
       `/api/attachments/${UUID_A}/download`,
     ]);
+  });
+
+  it.each([
+    ["full reference", "![A][shot]", "[shot]: /a.png", "/a.png"],
+    ["collapsed reference", "![shot][]", "[shot]: /a.png", "/a.png"],
+    ["shortcut reference", "![shot]", "[shot]: /a.png", "/a.png"],
+    ["normalized reference", "![A][ShOt  Name]", "[shot name]: /a.png", "/a.png"],
+    ["angle destination", "![A](</chart v2.png>)", "", "/chart%20v2.png"],
+    ["Unicode destination", "![A](/图.png)", "", "/%E5%9B%BE.png"],
+    ["balanced parentheses", "![A](/chart(v2).png)", "", "/chart(v2).png"],
+    ["escaped destination", String.raw`![A](/chart\(v2\).png)`, "", "/chart(v2).png"],
+    ["encoded destination", "![A](/chart.png?a=1&amp;b=2)", "", "/chart.png?a=1&b=2"],
+  ])("collects %s using Markdown semantics", (_name, image, definition, url) => {
+    const content = `${image}\n\n${definition}`;
+    expect(collectImageSequence([{ content }]).map((item) => item.key)).toEqual([url]);
+  });
+
+  it("uses the first definition and keeps definitions local to each block", () => {
+    const content = "![A][shot]\n\n[shot]: /first.png\n\n[shot]: /second.png";
+    expect(collectImageSequence([{ content }, { content: "![B][shot]" }]).map((item) => item.key))
+      .toEqual(["/first.png"]);
+  });
+
+  it("ignores HTML and file-card examples inside code", () => {
+    const content = [
+      "```html", '<img src="/hidden.png">', "!file[hidden.png](/hidden.png)", "```",
+      "!file[visible.png](/visible.png)",
+    ].join("\n");
+    expect(collectImageSequence([{ content }]).map((item) => item.key)).toEqual(["/visible.png"]);
+  });
+
+  it("resolves reference attachments in occurrence order, not definition order", () => {
+    const a = attachment({ id: UUID_A });
+    const b = attachment({ id: UUID_B });
+    const content = [
+      "![B][second]", "![A][first]", "![again][second]",
+      `[first]: /api/attachments/${UUID_A}/download`,
+      `[second]: /api/attachments/${UUID_B}/download`,
+    ].join("\n\n");
+    const items = collectImageSequence([{ content, attachments: [a, b], standalone: false }]);
+    expect(items.map((item) => item.key)).toEqual([UUID_B, UUID_A]);
+    expect(items.map((item) => item.attachment)).toEqual([b, a]);
+  });
+
+  it.each([
+    String.raw`\![literal](/hidden.png)`,
+    "    ![indented](/hidden.png)",
+    "> ```md\n> ![quoted](/hidden.png)\n> ```",
+    "`![multiline](/hidden.png)\ncode`",
+    "![undefined][missing]",
+  ])("does not collect non-rendered images in %s", (content) => {
+    expect(collectImageSequence([{ content }])).toEqual([]);
   });
 
   it("returns an empty sequence for empty input", () => {

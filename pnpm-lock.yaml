@@ -57,6 +57,12 @@ catalogs:
     katex:
       specifier: ^0.16.45
       version: 0.16.45
+    mdast-util-from-markdown:
+      specifier: ^2.0.3
+      version: 2.0.3
+    micromark-util-sanitize-uri:
+      specifier: ^2.0.1
+      version: 2.0.1
     mermaid:
       specifier: ^11.14.0
       version: 11.14.0
@@ -651,6 +657,12 @@ importers:
       i18next:
         specifier: 'catalog:'
         version: 26.0.8(@typescript/typescript6@6.0.2)
+      mdast-util-from-markdown:
+        specifier: 'catalog:'
+        version: 2.0.3
+      micromark-util-sanitize-uri:
+        specifier: 'catalog:'
+        version: 2.0.1
       posthog-js:
         specifier: 'catalog:'
         version: 1.369.3

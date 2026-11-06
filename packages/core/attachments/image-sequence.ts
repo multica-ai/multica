@@ -18,6 +18,8 @@
  * apps/mobile/CLAUDE.md: pure functions from @multica/core are importable).
  */
 
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { normalizeUri } from "micromark-util-sanitize-uri";
 import type { Attachment } from "../types/attachment";
 import {
   attachmentIdFromDownloadURL,
@@ -177,47 +179,6 @@ export function orderStandaloneAttachments<T extends Pick<Attachment, "content_t
 
 // Inline image references
 
-function blankOut(text: string): string {
-  // Newlines survive so line-anchored patterns below keep their line numbers.
-  return text.replace(/[^\n]/g, " ");
-}
-
-/**
- * Blank every code span and fenced block, preserving offsets and line breaks.
- *
- * Without this, an `![shot](url)` shown as an EXAMPLE inside a fenced block —
- * common in agent replies explaining markdown — would be counted as a real
- * image and the reader would page onto something that was never rendered.
- *
- * Line scanner rather than one multiline regex: a backreferenced
- * `(`{3,})[\s\S]*?\1` over agent output is a ReDoS shape, and this runs on
- * every issue/chat render.
- */
-function maskCode(content: string): string {
-  const lines = content.split("\n");
-  let fence: string | null = null;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    const fenceMatch = /^[ \t]{0,3}(`{3,}|~{3,})/.exec(line);
-    if (fence !== null) {
-      lines[i] = blankOut(line);
-      const closes =
-        fenceMatch !== null &&
-        fenceMatch[1]![0] === fence[0] &&
-        fenceMatch[1]!.length >= fence.length;
-      if (closes) fence = null;
-      continue;
-    }
-    if (fenceMatch !== null) {
-      fence = fenceMatch[1]!;
-      lines[i] = blankOut(line);
-      continue;
-    }
-    lines[i] = line.replace(/(`+)[^`\n]*?\1/g, blankOut);
-  }
-  return lines.join("\n");
-}
-
 interface InlineRef {
   index: number;
   url: string;
@@ -231,12 +192,6 @@ interface InlineRef {
    */
   isFileCard: boolean;
 }
-
-// `![alt](url "title")`. The URL char class stops at whitespace and `)` so a
-// title never leaks into it; the optional <> wrapper is CommonMark's escape
-// for URLs containing spaces.
-const MARKDOWN_IMAGE_RE =
-  /!\[([^\]\n]*)\]\(\s*<([^>\n]*)>[^)]*\)|!\[([^\]\n]*)\]\(\s*([^)\s]+)[^)]*\)/g;
 
 // Raw `<img src=...>` — reachable because the readonly renderer runs
 // rehypeRaw + rehypeSanitize, and the sanitize schema keeps img.
@@ -254,34 +209,69 @@ function unescapeLabel(label: string): string {
 
 function extractInlineRefs(rawContent: string): InlineRef[] {
   if (!rawContent) return [];
-  const content = maskCode(rawContent);
+  const tree = fromMarkdown(rawContent);
   const refs: InlineRef[] = [];
-
-  for (const m of content.matchAll(MARKDOWN_IMAGE_RE)) {
-    // Two alternations: `<...>`-wrapped URL (groups 1/2) or bare (groups 3/4).
-    const alt = m[1] ?? m[3] ?? "";
-    const url = (m[2] ?? m[4] ?? "").trim();
-    if (!url) continue;
-    refs.push({
-      index: m.index ?? 0,
-      url,
-      filename: unescapeLabel(alt),
-      isFileCard: false,
-    });
+  type Node = typeof tree | (typeof tree.children)[number];
+  const nodes: Node[] = [];
+  const pending: Node[] = [tree];
+  while (pending.length) {
+    const node = pending.pop()!;
+    nodes.push(node);
+    if ("children" in node) {
+      for (let i = node.children.length - 1; i >= 0; i--) {
+        pending.push(node.children[i]!);
+      }
+    }
   }
 
-  for (const m of content.matchAll(HTML_IMAGE_RE)) {
-    const url = (m[1] ?? m[2] ?? m[3] ?? "").trim();
-    if (!url) continue;
-    refs.push({
-      index: m.index ?? 0,
-      url,
-      filename: "",
-      isFileCard: false,
-    });
+  // The parser normalizes reference identifiers (case and whitespace). The
+  // first definition wins, as in react-markdown's remark-parse pipeline.
+  const definitions = new Map<string, string>();
+  for (const node of nodes) {
+    if (node.type === "definition" && !definitions.has(node.identifier)) {
+      definitions.set(node.identifier, node.url);
+    }
   }
 
-  for (const m of content.matchAll(FILE_CARD_LINE_RE)) {
+  const codeRanges: Array<{ start: number; end: number }> = [];
+  for (const node of nodes) {
+    const index = node.position?.start.offset ?? 0;
+    if (node.type === "image" || node.type === "imageReference") {
+      const destination = node.type === "image"
+        ? node.url
+        : definitions.get(node.identifier);
+      // mdast-util-to-hast applies the same normalization before RichContent's
+      // img renderer sees the URL (spaces, Unicode, existing percent escapes).
+      if (destination) {
+        refs.push({
+          index,
+          url: normalizeUri(destination),
+          filename: node.alt ?? "",
+          isFileCard: false,
+        });
+      }
+    } else if (node.type === "html") {
+      for (const m of node.value.matchAll(HTML_IMAGE_RE)) {
+        const url = (m[1] ?? m[2] ?? m[3] ?? "").trim();
+        if (url) {
+          refs.push({ index: index + m.index, url, filename: "", isFileCard: false });
+        }
+      }
+    } else if (node.type === "code" || node.type === "inlineCode") {
+      // Custom file cards are scanned separately; code must not create cards.
+      const end = node.position?.end.offset ?? index;
+      codeRanges.push({ start: index, end });
+    }
+  }
+
+  let codeIndex = 0;
+  for (const m of rawContent.matchAll(FILE_CARD_LINE_RE)) {
+    const index = m.index;
+    while (codeIndex < codeRanges.length && codeRanges[codeIndex]!.end <= index) {
+      codeIndex++;
+    }
+    const code = codeRanges[codeIndex];
+    if (code && index + m[0].length > code.start) continue;
     const url = (m[2] ?? "").trim();
     if (!url) continue;
     refs.push({

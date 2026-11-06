@@ -217,6 +217,19 @@ function findInlineLinkEnd(text: string, openParenIndex: number): number {
  */
 export function findMarkdownLinkRanges(text: string): CodeRange[] {
   const ranges: CodeRange[] = []
+  // Reference destinations are already links. Wrapping their URLs again
+  // corrupts the definition before the Markdown renderer resolves images.
+  const pending: Nodes[] = [fromMarkdown(text)]
+  while (pending.length > 0) {
+    const node = pending.pop()!
+    if (node.type === 'definition') {
+      const start = node.position?.start.offset
+      const end = node.position?.end.offset
+      if (start !== undefined && end !== undefined) ranges.push({ start, end })
+    } else if ('children' in node) {
+      for (let i = node.children.length - 1; i >= 0; i--) pending.push(node.children[i]!)
+    }
+  }
 
   for (let i = 0; i < text.length; i++) {
     if (text[i] !== '[' || isEscaped(text, i)) continue
