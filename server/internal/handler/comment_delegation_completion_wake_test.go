@@ -217,18 +217,30 @@ func leaderTaskCountForIssue(t *testing.T, issueID, leaderAgentID string) int {
 	return dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2`, issueID, leaderAgentID)
 }
 
-// TestExplicitMentionDoesNotDoubleWake pins that an explicit @coordinator
-// mention keeps exactly its mention-route task and the zero-route completion
-// wake never fires a second leader task beside it. Non-vacuous: with the same
-// seed minus the mention (TestDelegatedWorkerZeroRouteCommentWakesDelegator)
-// the wake fires, so the mention route is what suppresses it here.
+// TestExplicitMentionDoesNotDoubleWake pins the handler's zero-route guard: a
+// completed delegated worker that mentions its coordinator routes through the
+// mention path (non-empty triggers), so the wake must never fire beside it.
+// The worker is seeded 'completed' deliberately: with the zero-route guard
+// removed, loadDelegatedCompletionWakeTarget would otherwise return nil on
+// worker status and the test would pass vacuously — 'completed' makes
+// completionWakeCount == 0 genuinely pin the guard, and
+// tasksCarryingComment == 1 pins that the mention route still enqueues
+// exactly one leader task. A terminal authoring task resolves no human
+// originator (invokeOriginatorFromRequest), which would make the private
+// leader deny the mention outright, so the leader is seeded workspace-invoked
+// (public_to + workspace target) — the agent-principal exception — purely so
+// the mention route stays exercisable from a completed run.
 func TestExplicitMentionDoesNotDoubleWake(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
 	issueID := seedWakeIssue(t, "9720 mention no double wake")
-	seed := seedDelegationPair(t, issueID, "completed", "running", true)
+	seed := seedDelegationPair(t, issueID, "completed", "completed", true)
 	dbfx.Exec(t, `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, issueID, seed.leaderAgent)
+	dbfx.Exec(t, `UPDATE agent SET permission_mode = 'public_to' WHERE id = $1`, seed.leaderAgent)
+	dbfx.InsertNoID(t, "agent_invocation_target", testutil.Cols{
+		"agent_id": seed.leaderAgent, "target_type": "workspace", "target_id": testWorkspaceID,
+	}, `agent_id = $1 AND target_type = 'workspace'`, seed.leaderAgent)
 
 	var leaderName string
 	dbfx.QueryRow(t, `SELECT name FROM agent WHERE id = $1`, seed.leaderAgent).Scan(&leaderName)
