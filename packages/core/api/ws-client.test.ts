@@ -8,6 +8,7 @@ import type { WSMessage } from "../types/events";
 class FakeWebSocket {
   static lastUrl: string | null = null;
   static lastInstance: FakeWebSocket | null = null;
+  static instances: FakeWebSocket[] = [];
   // Fields read by WSClient.connect()/disconnect(), all no-op here.
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: string }) => void) | null = null;
@@ -17,6 +18,7 @@ class FakeWebSocket {
   constructor(url: string) {
     FakeWebSocket.lastUrl = url;
     FakeWebSocket.lastInstance = this;
+    FakeWebSocket.instances.push(this);
   }
   close() {}
   sent: string[] = [];
@@ -29,6 +31,7 @@ describe("WSClient", () => {
   beforeEach(() => {
     FakeWebSocket.lastUrl = null;
     FakeWebSocket.lastInstance = null;
+    FakeWebSocket.instances = [];
     vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
   });
 
@@ -404,6 +407,44 @@ describe("WSClient", () => {
       expect(onReconnect).toHaveBeenCalledTimes(1);
     });
 
+    it("publishes connection state transitions", () => {
+      const ws = new WSClient("ws://example.test/ws");
+      ws.setAuth("tok", "acme");
+      const states: string[] = [];
+      ws.subscribeToConnectionState(() => {
+        states.push(ws.getConnectionState());
+      });
+
+      ws.connect();
+      simulateAuthAck();
+      simulateDisconnect();
+      vi.runOnlyPendingTimers();
+      simulateAuthAck();
+
+      expect(states).toEqual([
+        "connecting",
+        "connected",
+        "disconnected",
+        "reconnecting",
+        "connected",
+      ]);
+    });
+
+    it("manual reconnect cancels backoff without creating duplicate sockets", () => {
+      const ws = new WSClient("ws://example.test/ws");
+      ws.connect();
+      simulateDisconnect();
+
+      expect(FakeWebSocket.instances).toHaveLength(1);
+      ws.reconnect();
+      expect(FakeWebSocket.instances).toHaveLength(2);
+      expect(ws.getConnectionState()).toBe("reconnecting");
+
+      ws.reconnect();
+      vi.runOnlyPendingTimers();
+      expect(FakeWebSocket.instances).toHaveLength(2);
+    });
+
     it("keeps retrying indefinitely with capped delay", () => {
       vi.stubGlobal(
         "Math",
@@ -510,6 +551,7 @@ describe("WSClient session renewal", () => {
     // Session renewed between connections.
     current = "token-v2";
 
+    ws.disconnect();
     ws.connect();
     FakeWebSocket.lastInstance!.onopen!();
     expect(JSON.parse(FakeWebSocket.lastInstance!.sent[0]!)).toEqual({

@@ -9,7 +9,10 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { WSClient } from "../api/ws-client";
+import {
+  WSClient,
+  type WSConnectionState,
+} from "../api/ws-client";
 import type { WSEventType, StorageAdapter } from "../types";
 import type { ClientIdentity } from "../platform/types";
 import type { StoreApi, UseBoundStore } from "zustand";
@@ -28,6 +31,8 @@ type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => 
 interface WSContextValue {
   subscribe: (event: WSEventType, handler: EventHandler) => () => void;
   onReconnect: (callback: () => void) => () => void;
+  connectionState: WSConnectionState;
+  reconnect: () => void;
 }
 
 const WSContext = createContext<WSContextValue | null>(null);
@@ -70,6 +75,8 @@ export function WSProvider({
   );
   const wsId = useSyncExternalStore(subscribeToCurrentSlug, getCurrentWsId, () => null);
   const [wsClient, setWsClient] = useState<WSClient | null>(null);
+  const [connectionState, setConnectionState] =
+    useState<WSConnectionState>("disconnected");
 
   // Depend on identity primitives instead of the object reference so a parent
   // re-render that passes a new `{ platform, version, os }` literal does not
@@ -105,11 +112,17 @@ export function WSProvider({
     });
     ws.setAuth(token, wsSlug);
     setWsClient(ws);
+    const unsubscribeConnectionState = ws.subscribeToConnectionState(() => {
+      setConnectionState(ws.getConnectionState());
+    });
     ws.connect();
+    setConnectionState(ws.getConnectionState());
 
     return () => {
+      unsubscribeConnectionState();
       ws.disconnect();
       setWsClient(null);
+      setConnectionState("disconnected");
     };
   }, [
     user,
@@ -146,8 +159,19 @@ export function WSProvider({
     [wsClient],
   );
 
+  const reconnect = useCallback(() => {
+    wsClient?.reconnect();
+  }, [wsClient]);
+
   return (
-    <WSContext.Provider value={{ subscribe, onReconnect: onReconnectCb }}>
+    <WSContext.Provider
+      value={{
+        subscribe,
+        onReconnect: onReconnectCb,
+        connectionState,
+        reconnect,
+      }}
+    >
       {children}
     </WSContext.Provider>
   );

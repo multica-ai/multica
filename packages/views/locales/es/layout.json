@@ -42,6 +42,11 @@
     "loading_workspace": "Cargando espacio de trabajo…",
     "loading_named_prefix": "Cargando"
   },
+  "realtime": {
+    "disconnected": "Actualizaciones en tiempo real desconectadas",
+    "reconnecting": "Reconectando las actualizaciones en tiempo real…",
+    "reconnect": "Reconectar"
+  },
   "sidebar": {
     "unpin_tooltip": "Dejar de fijar",
     "workspaces_label": "Espacios de trabajo",
