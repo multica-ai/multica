@@ -34,7 +34,6 @@ import {
   Pin,
   PinOff,
   Plus,
-  Search,
   Square
 } from "lucide-react";
 import { toast } from "sonner";
@@ -110,6 +109,7 @@ import {
   sessionEntry,
   type LocalSessionEntry
 } from "../platform/local-conversation-projects";
+import { LocalConversationSearch } from "./local-conversation-search";
 import { LocalConversationImportButton } from "./local-conversation-import";
 import {
   LocalSideWorkspace,
@@ -275,7 +275,6 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
   const setProjectHidden = useProjectVisibilityStore(
     (state) => state.setProjectHidden
   );
-  const [search, setSearch] = useState("");
   const [archived, setArchived] = useState(false);
   const [showList, setShowList] = useState(false);
   const [newConversation, setNewConversation] = useState<{
@@ -375,6 +374,10 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
       ),
     [hiddenProjectPreferences, folderProjects]
   );
+  const searchProjects = useMemo(
+    () => folderProjects.filter((project) => !hiddenProjectIds.includes(project.id)),
+    [folderProjects, hiddenProjectIds]
+  );
   const selectedId = searchParams.get("session");
   const sessions = useLocalConversationPages(
     transport,
@@ -382,7 +385,7 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
     folderProjects,
     hiddenProjectIds,
     archived,
-    search,
+    "",
     !!workspace && !!userId
   );
   // The list already knows every conversation; only an ID it lacks needs its snapshot read here.
@@ -443,7 +446,6 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
         currentIntent.current !== startedIntent
       )
         return;
-      setSearch("");
       setArchived(entry.archived);
       const project = projectForDirectory(folderProjects, entry.cwd);
       setCollapsedProjects((previous) => {
@@ -670,7 +672,6 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
         queryKey: localConversationKey(scope, device.id)
       });
       if (currentIntent.current === startedIntent) {
-        setSearch("");
         setArchived(false);
         setProjectHidden(scope, project.id, false);
         setCollapsedProjects((previous) => {
@@ -690,7 +691,6 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
   const addProjectCallback = usePersistCallback(addProject);
   const restoreProject = (projectId: string) => {
     setProjectHidden(scope, projectId, false);
-    setSearch("");
     setArchived(false);
     setCollapsedProjects((previous) => {
       const next = new Set(previous);
@@ -730,7 +730,6 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
             ?.path ?? null
       }
     });
-    setSearch("");
     setArchived(false);
     setFocusSequence(sequence);
     latest.current.select(null, target.id);
@@ -827,7 +826,6 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
       v2.receiveSummary(summary);
       const created = sessionEntry(summary);
       if (currentIntent.current === startedIntent) {
-        setSearch("");
         setArchived(false);
         setFocusSequence(++focusIntentSequence.current);
         latest.current.select(created.id, created.provider);
@@ -1045,6 +1043,18 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
                 {labels.sessions}
               </h1>
               <div className="flex shrink-0 items-center gap-1">
+                <LocalConversationSearch
+                  key={`${scope.userId}:${scope.workspaceId}:${device.id}`}
+                  sessions={sessions.data}
+                  projects={searchProjects}
+                  archived={archived}
+                  pending={sessions.isPending}
+                  error={sessions.error}
+                  retry={sessions.refetch}
+                  select={selectCallback}
+                  labels={labels}
+                  unassigned={projectLabels.unassigned}
+                />
                 <LocalConversationImportButtonBinding14
                   key={`${scope.userId}:${scope.workspaceId}`}
                   scope={scope}
@@ -1068,17 +1078,7 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
                 />
               </div>
             </div>
-            <div className="px-3 py-3">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" />
-                <InputBinding17
-                  labels={labels}
-                  search={search}
-                  setSearch={setSearch}
-                />
-              </div>
-            </div>
-            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto px-3 pb-2">
+            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto px-3 pb-2 pt-3">
               {providers.isError && (
                 <div
                   role="status"
@@ -1116,8 +1116,7 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
               ) : groups.length ? (
                 groups.map((group) => {
                   const key = group.id ?? "unassigned";
-                  const expanded =
-                    Boolean(search.trim()) || !collapsedProjects.has(key);
+                  const expanded = !collapsedProjects.has(key);
                   const title =
                     group.id === null
                       ? projectLabels.unassigned
@@ -1192,7 +1191,7 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
                 })
               ) : (
                 <p className="px-3 py-8 text-center text-body text-muted-foreground">
-                  {search ? labels.noResults : labels.empty}
+                  {labels.empty}
                 </p>
               )}
             </div>
@@ -2062,91 +2061,6 @@ const IconButtonBinding16 = observer(function IconButtonBinding16({
     >
       <Plus />
     </IconButton>
-  );
-});
-
-const InputBinding17 = observer(function InputBinding17({
-  labels,
-  search,
-  setSearch,
-  ...slotProps
-}: {
-  labels: {
-    sessions: string;
-    new: string;
-    search: string;
-    empty: string;
-    noResults: string;
-    retry: string;
-    loading: string;
-    archive: string;
-    history: string;
-    pinned: string;
-    unpin: string;
-    directory: string;
-    newTitle: string;
-    storage: string;
-    directoryLocked: string;
-    unavailable: string;
-    failed: string;
-    fork: string;
-    forking: string;
-    forkHint: string;
-    forkWaiting: string;
-    forkEmpty: string;
-  };
-  search: string;
-  setSearch: import("react").Dispatch<import("react").SetStateAction<string>>;
-} & Omit<
-  React.ComponentProps<typeof Slot.Root>,
-  keyof {
-    labels: {
-      sessions: string;
-      new: string;
-      search: string;
-      empty: string;
-      noResults: string;
-      retry: string;
-      loading: string;
-      archive: string;
-      history: string;
-      pinned: string;
-      unpin: string;
-      directory: string;
-      newTitle: string;
-      storage: string;
-      directoryLocked: string;
-      unavailable: string;
-      failed: string;
-      fork: string;
-      forking: string;
-      forkHint: string;
-      forkWaiting: string;
-      forkEmpty: string;
-    };
-    search: string;
-    setSearch: import("react").Dispatch<import("react").SetStateAction<string>>;
-  }
->) {
-  const onChangeProp20 = usePersistCallback<
-    NonNullable<React.ComponentProps<typeof Input>["onChange"]>
-  >((event) => setSearch(event.target.value));
-  const onKeyDownProp21 = usePersistCallback<
-    NonNullable<React.ComponentProps<typeof Input>["onKeyDown"]>
-  >((event) => {
-    if (event.key === "Escape") setSearch("");
-  });
-  return (
-    <Slot.Root {...slotProps}>
-      <Input
-        aria-label={labels.search}
-        placeholder={labels.search}
-        className="pl-9"
-        value={search}
-        onChange={onChangeProp20}
-        onKeyDown={onKeyDownProp21}
-      />
-    </Slot.Root>
   );
 });
 

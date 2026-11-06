@@ -139,6 +139,7 @@ beforeEach(() => {
   mock.folders = [];
   mock.folderError = null;
   mock.folderPending = null;
+  Element.prototype.scrollIntoView = vi.fn();
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   source = { id: "source", title: "Original", provider: "codex", cwd: "/owned/work", providerSessionId: "native", model: null, pinned: false, archived: false, createdAt: "2026-01-01", updatedAt: "2026-01-01", messages: [{ id: "message", role: "assistant", content: "Result", turnId: "turn", createdAt: "2026-01-01" }], turns: [] };
   mock.request.mockImplementation(async (_scope, method) => method === "listPage" ? [source] : method === "providers" ? [{ id: "codex", available: true }] : undefined);
@@ -365,9 +366,15 @@ describe("project conversation pagination", () => {
     fireEvent.click(a.getByRole("button", { name: "加载更多" }));
     await waitFor(() => expect(a.getAllByRole("link")).toHaveLength(16));
     expect(b.getAllByRole("link")).toHaveLength(8);
-    fireEvent.change(screen.getByRole("textbox", { name: "搜索会话" }), { target: { value: "Paged conversation 16" } });
-    expect(await screen.findByRole("link", { name: /Paged conversation 16/ })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "加载更多" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "搜索会话" }));
+    fireEvent.change(await screen.findByRole("combobox", { name: "搜索会话" }), { target: { value: "Paged conversation 16" } });
+    const result = await screen.findByRole("option", { name: /Paged conversation 16/ });
+    expect(result).toBeVisible();
+    fireEvent.click(result);
+    expect(mock.replace).toHaveBeenCalledWith("/test/conversations?provider=codex&session=row-16");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(a.getAllByRole("link")).toHaveLength(16);
+    expect(b.getAllByRole("link")).toHaveLength(8);
   });
   it("opens a deep link outside the first page without loading intervening pages or clearing selection", async () => {
     const entries = rows(); mock.selected = entries[16]!.id;
@@ -609,7 +616,6 @@ describe("removing projects from the local conversation list", () => {
     expect(mock.request.mock.calls.every((call) => ["listPage", "read", "providers", "sideWorkspaceSync"].includes(call[1]))).toBe(true);
     expect(mock.replace).not.toHaveBeenCalled();
     expect(draft).toHaveValue("Keep this draft");
-    fireEvent.change(screen.getByRole("textbox", { name: "搜索会话" }), { target: { value: "Original" } });
     expect(screen.queryByRole("region", { name: "Removable project" })).not.toBeInTheDocument();
     await activateWithPointer(screen.getByRole("button", { name: "已移除项目（1）" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "恢复项目：Removable project" }));
@@ -660,13 +666,11 @@ describe("local conversation project creation", () => {
     await screen.findByRole("link", { name: /Original/ });
     const draft = screen.getByRole("textbox", { name: "Conversation draft" });
     fireEvent.change(draft, { target: { value: "Keep my draft" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "搜索会话" }), { target: { value: "Original" } });
     fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
     const group = await screen.findByRole("region", { name: "local-repository" });
     expect(mock.request).toHaveBeenCalledWith({ userId: "user", workspaceId: "workspace" }, "folderProjectAdd", {});
     expect(mock.replace).not.toHaveBeenCalled();
     expect(draft).toHaveValue("Keep my draft");
-    expect(screen.getByRole("textbox", { name: "搜索会话" })).toHaveValue("");
     expect(within(group).getByText("暂无会话")).toBeVisible();
     expect(within(group).getByRole("button", { name: "local-repository" })).toHaveAttribute("title", "/owned/local-repository");
     expect(screen.queryByRole("region", { name: "Cloud task project" })).not.toBeInTheDocument();
@@ -683,17 +687,15 @@ describe("local conversation project creation", () => {
     fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
     await waitFor(() => expect(mock.request).toHaveBeenCalledWith({ userId: "user", workspaceId: "workspace" }, "folderProjectAdd", {}));
   });
-  it.each([false, true])("keeps the current search and conversation when folder selection fails=%s or is cancelled", async (failed) => {
+  it.each([false, true])("keeps the conversation when folder selection fails=%s or is cancelled", async (failed) => {
     mock.request.mockImplementation(async (_scope, method) => {
       if (method === "folderProjectAdd") { if (failed) throw new Error("Could not open folder picker"); return null; }
       return method === "listPage" ? [source] : [{ id: "codex", available: true }];
     });
     render(page());
     await screen.findByRole("link", { name: /Original/ });
-    fireEvent.change(screen.getByRole("textbox", { name: "搜索会话" }), { target: { value: "Original" } });
     fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "新建项目" })).toBeEnabled());
-    expect(screen.getByRole("textbox", { name: "搜索会话" })).toHaveValue("Original");
     expect(mock.replace).not.toHaveBeenCalled();
     if (failed) expect(mock.error).toHaveBeenCalledWith("Could not open folder picker");
     else expect(mock.error).not.toHaveBeenCalled();
@@ -897,9 +899,11 @@ describe("Side conversations in the main session list", () => {
     expect(within(list.getByRole("button", { name: "未分配项目" })).getByText("1")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /旁支 · Side exploration ·/ })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("Quoted source text")).toBeVisible();
-    fireEvent.change(list.getByRole("textbox", { name: "搜索会话" }), { target: { value: "Side" } });
-    expect(await list.findByText("没有匹配的会话")).toBeVisible();
-    fireEvent.change(list.getByRole("textbox", { name: "搜索会话" }), { target: { value: "" } });
+    fireEvent.click(list.getByRole("button", { name: "搜索会话" }));
+    fireEvent.change(await screen.findByRole("combobox", { name: "搜索会话" }), { target: { value: "Side" } });
+    expect(await screen.findByText("没有匹配的会话")).toBeVisible();
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     fireEvent.click(list.getByRole("button", { name: "归档" }));
     expect(await list.findByRole("link", { name: /Archived main/ })).toBeVisible();
     expect(list.queryAllByRole("link", { name: /Side/ })).toHaveLength(0);
@@ -982,7 +986,7 @@ describe("local conversation fork entry", () => {
     expect(within(screen.getByRole("button", { name: "未分配项目" })).getByText("2")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Older unsent draft/ })).not.toBeInTheDocument();
   });
-  it("collapses folder groups, reveals search matches, and opens a draft inside the folder", async () => {
+  it("keeps collapsed folder groups while searching and opens a draft inside the folder", async () => {
     mock.folders = [folder("project-a", "Multica Project")];
     const rows = [source];
     mock.request.mockImplementation(async (_scope, method) => {
@@ -993,9 +997,13 @@ describe("local conversation fork entry", () => {
     fireEvent.click(group);
     expect(group).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("link", { name: /Original/ })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByRole("textbox", { name: "搜索会话" }), { target: { value: "Multica Project" } });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Multica Project" })).toHaveAttribute("aria-expanded", "true"));
-    expect(screen.getByRole("link", { name: /Original/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "搜索会话" }));
+    fireEvent.change(await screen.findByRole("combobox", { name: "搜索会话" }), { target: { value: "Multica Project" } });
+    expect(await screen.findByRole("option", { name: /Original/ })).toBeVisible();
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(group).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("link", { name: /Original/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "新建项目会话：Multica Project" }));
     expect(mock.replace).toHaveBeenCalledWith("/test/conversations?provider=codex");
     expect(JSON.parse(screen.getByRole("textbox", { name: "Conversation draft" }).getAttribute("data-new-conversation")!)).toMatchObject({ projectPath: "/owned/work" });
