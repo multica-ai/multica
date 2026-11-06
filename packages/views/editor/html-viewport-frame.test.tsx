@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import { renderWithI18n } from "../test/i18n";
 import { fitViewport, HtmlViewportFrame } from "./html-viewport-frame";
+import { HTML_PREVIEW_WIDTH_KEY } from "./utils/iframe-width-bridge";
 
 describe("fitViewport", () => {
   it("keeps the device width and scales it down into a narrower area", () => {
@@ -58,6 +59,73 @@ describe("HtmlViewportFrame", () => {
     const layout = screen.getByTitle("doc").parentElement!;
     expect(layout.style.transform).toBe("");
     expect(screen.getByText("390 × 800")).toBeTruthy();
+  });
+
+  function report(data: Record<string, unknown>, source = screen.getByTitle("doc")) {
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: { [HTML_PREVIEW_WIDTH_KEY]: 1, type: "width", ...data },
+          source: (source as HTMLIFrameElement).contentWindow,
+        }),
+      );
+    });
+  }
+
+  describe("fit", () => {
+    it("lays a document wider than the stage out at its own width and scales it to fit", () => {
+      renderWithI18n(<HtmlViewportFrame viewport="fill">{frame}</HtmlViewportFrame>);
+      report({ doc: "a", viewport: 1100, needed: 1320 });
+
+      expect(screen.getByTestId("html-viewport").style.width).toBe("1100px");
+      const layout = screen.getByTitle("doc").parentElement!;
+      expect(layout.style.width).toBe("1320px");
+      expect(layout.style.transform).toBe(`scale(${1100 / 1320})`);
+      expect(screen.getByText(/1320 × 960/)).toHaveTextContent("1320 × 960 · Scaled to 83%");
+    });
+
+    it("keeps the width once the widened document stops overflowing", () => {
+      renderWithI18n(<HtmlViewportFrame viewport="fill">{frame}</HtmlViewportFrame>);
+      report({ doc: "a", viewport: 1100, needed: 1320 });
+      report({ doc: "a", viewport: 1320, needed: 1320 });
+
+      expect(screen.getByTitle("doc").parentElement!.style.width).toBe("1320px");
+    });
+
+    it("starts over for a new document", () => {
+      renderWithI18n(<HtmlViewportFrame viewport="fill">{frame}</HtmlViewportFrame>);
+      report({ doc: "a", viewport: 1100, needed: 1320 });
+      report({ doc: "b", viewport: 1320, needed: 1320 });
+
+      expect(screen.getByTestId("html-viewport").style.width).toBe("100%");
+      expect(screen.queryByText(/×/)).toBeNull();
+    });
+
+    it("stops widening at twice the desktop width", () => {
+      renderWithI18n(<HtmlViewportFrame viewport="fill">{frame}</HtmlViewportFrame>);
+      report({ doc: "a", viewport: 1100, needed: 9000 });
+
+      expect(screen.getByTitle("doc").parentElement!.style.width).toBe("2880px");
+    });
+
+    it("ignores reports from any other window", () => {
+      renderWithI18n(
+        <>
+          <HtmlViewportFrame viewport="fill">{frame}</HtmlViewportFrame>
+          <iframe title="other" />
+        </>,
+      );
+      report({ doc: "a", viewport: 1100, needed: 1320 }, screen.getByTitle("other"));
+
+      expect(screen.getByTestId("html-viewport").style.width).toBe("100%");
+    });
+
+    it("leaves device widths alone", () => {
+      renderWithI18n(<HtmlViewportFrame viewport="phone">{frame}</HtmlViewportFrame>);
+      report({ doc: "a", viewport: 390, needed: 600 });
+
+      expect(screen.getByTestId("html-viewport").style.width).toBe("390px");
+    });
   });
 
   it("localizes the scale", () => {

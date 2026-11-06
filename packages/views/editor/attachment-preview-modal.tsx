@@ -107,6 +107,7 @@ import {
   HtmlViewportFrame,
   type HtmlViewport,
 } from "./html-viewport-frame";
+import { withWidthBridge } from "./utils/iframe-width-bridge";
 
 // Preview source — full attachment, or URL-only (media types only)
 //
@@ -1461,7 +1462,7 @@ function PreviewContent({
             ) : (
               <HtmlViewportFrame viewport={view.htmlViewport}>
                 {view.renderHtmlFrame({
-                  html: text,
+                  html: withWidthBridge(text),
                   title: state.filename,
                   location: view.htmlLocation,
                 })}
