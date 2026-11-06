@@ -58,6 +58,8 @@ import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { RuntimeAccessEditor, RuntimeAccessReadout } from "./runtime-access-editor";
 import { RuntimeConcurrencyField } from "./runtime-concurrency-field";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
+import { Button } from "@multica/ui/components/ui/button";
+import { EmptyBuilderRecovery } from "./empty-builder-recovery";
 import { runtimeRowLabel } from "./runtime-machines";
 import { useT, useTimeAgo } from "../../i18n";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
@@ -113,6 +115,7 @@ export function RuntimeDetail({
   const now = useNowTick();
 
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
 
   const health = deriveRuntimeHealth(runtime, now);
   const ownerMember = runtime.owner_id
@@ -219,6 +222,26 @@ export function RuntimeDetail({
             }
             description={summary}
           />
+
+          {runtime.profile_id && (
+            recoveryOpen ? (
+              <EmptyBuilderRecovery
+                key={`${wsId}:${runtime.profile_id}`}
+                wsId={wsId}
+                profileId={runtime.profile_id}
+                initiallyEnabled
+              />
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setRecoveryOpen(true)}
+              >
+                {t(($) => $.profiles.recovery.check)}
+              </Button>
+            )
+          )}
 
           <ObjectSection
             title={t(($) => $.page.columns.agents)}

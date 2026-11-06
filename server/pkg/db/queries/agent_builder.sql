@@ -29,3 +29,27 @@ WHERE chat_session_id IN (
     JOIN agent a ON a.id = cs.agent_id
     WHERE a.runtime_id = $1 AND a.kind = 'system'
 );
+
+-- name: ListEmptyAgentBuilderSessions :many
+-- Metadata only. Ordinary unfinished drafts intentionally exclude these rows.
+-- Call again with session_id under session -> agent locks before discarding.
+SELECT cs.id, a.runtime_id, ar.profile_id, cs.created_at,
+       cs.updated_at AS session_updated_at, a.updated_at AS agent_updated_at,
+       COALESCE(NULLIF(btrim(ar.custom_name), ''), ar.name)::text AS machine_label
+FROM chat_session cs
+JOIN agent a ON a.id = cs.agent_id AND a.workspace_id = cs.workspace_id
+JOIN agent_runtime ar ON ar.id = a.runtime_id AND ar.workspace_id = cs.workspace_id
+JOIN runtime_profile rp ON rp.id = ar.profile_id AND rp.workspace_id = cs.workspace_id
+WHERE cs.workspace_id = @workspace_id AND cs.creator_id = @creator_id
+  AND ar.profile_id = @profile_id
+  AND cs.status = 'active' AND a.archived_at IS NULL
+  AND a.kind = 'system' AND starts_with(a.system_key, 'agent_builder:')
+  AND (sqlc.narg('session_id')::uuid IS NULL OR cs.id = sqlc.narg('session_id'))
+  AND cs.id > @after_id::uuid
+  AND NOT EXISTS (SELECT 1 FROM chat_message m WHERE m.chat_session_id = cs.id)
+  AND NOT EXISTS (SELECT 1 FROM agent_builder_draft d WHERE d.chat_session_id = cs.id)
+  AND NOT EXISTS (SELECT 1 FROM chat_draft_restore d WHERE d.chat_session_id = cs.id)
+  AND NOT EXISTS (SELECT 1 FROM agent_task_queue t WHERE t.chat_session_id = cs.id OR t.agent_id = a.id)
+  AND NOT EXISTS (SELECT 1 FROM chat_session other WHERE other.agent_id = a.id AND other.id <> cs.id)
+ORDER BY cs.id
+LIMIT @page_limit;

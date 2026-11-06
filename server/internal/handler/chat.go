@@ -681,14 +681,29 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 // the FK ON DELETE SET NULL on agent_task_queue.chat_session_id. Cancel
 // failure aborts the delete; events fire only after commit.
 func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
+	h.deleteChatSession(w, r, nil)
+}
+
+// Both explicit deletion and empty-builder recovery share the transaction,
+// cleanup and post-commit events. Recovery adds a locked precondition; it must
+// never fall back to the unconditional delete endpoint.
+func (h *Handler) deleteChatSession(w http.ResponseWriter, r *http.Request, empty *DiscardEmptyAgentBuilderSessionRequest) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
+	if empty != nil {
+		workspaceID = h.resolveWorkspaceID(r)
+	}
 	sessionID := chi.URLParam(r, "sessionId")
 
-	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	var session db.ChatSession
+	if empty == nil {
+		session, ok = h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	} else {
+		session, ok = h.loadBuilderRecoverySession(w, r, userID, workspaceID, sessionID)
+	}
 	if !ok {
 		return
 	}
@@ -707,7 +722,11 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 	// fails its FK check, so it can't land an orphaned task.
 	if _, err := qtx.LockChatSessionForDelete(r.Context(), session.ID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Already gone — treat as idempotent success.
+			// Only an explicit delete treats disappearance after loading as success.
+			if empty != nil {
+				writeError(w, http.StatusNotFound, "chat session not found")
+				return
+			}
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -720,6 +739,10 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 	// otherwise a builder-agent delete can deadlock with a concurrent claim.
 	if _, err := qtx.GetAgentForClaimUpdate(r.Context(), session.AgentID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to lock chat agent")
+		return
+	}
+
+	if empty != nil && !h.checkEmptyBuilderDiscard(w, r, qtx, session, userID, *empty) {
 		return
 	}
 

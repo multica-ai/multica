@@ -16,6 +16,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../../i18n";
+import { EmptyBuilderRecovery } from "./empty-builder-recovery";
 
 // Confirmation dialog for deleting a custom runtime profile. The server
 // refuses with a 409 when agents are still bound to the profile; we surface
@@ -84,7 +85,7 @@ export function DeleteRuntimeProfileDialog({
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
       <AlertDialogContent
-        className="w-[calc(100vw-2rem)] !max-w-[440px] gap-0 overflow-hidden p-0"
+        className="w-[calc(100vw-2rem)] !max-w-[440px] max-h-[calc(100dvh-2rem)] gap-0 overflow-y-auto p-0"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 pb-4 pt-5">
@@ -108,6 +109,7 @@ export function DeleteRuntimeProfileDialog({
               <span className="text-foreground">{boundMessage}</span>
             </div>
           )}
+          {boundMessage && <EmptyBuilderRecovery key={`${wsId}:${profile.id}`} wsId={wsId} profileId={profile.id} />}
         </div>
         <div className="border-t bg-muted/25 px-5 py-3">
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
