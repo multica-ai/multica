@@ -2,6 +2,7 @@ package execenv
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -196,6 +197,8 @@ type LocalWorktree struct {
 	// continued branch: that one has to survive even a turn that produced
 	// nothing, because it carries every turn before it.
 	createdBranch bool
+	// incarnation identifies this creation of the branch independently of its commits.
+	incarnation string
 	// userState is the commit describing the user's directory as this task saw
 	// it: their tracked edits and untracked files in one tree. Recorded against
 	// the branch once it actually carries them, so the next turn replays only
@@ -243,6 +246,7 @@ func (w *LocalWorktree) MarshalJSON() ([]byte, error) {
 	type wire LocalWorktree
 	return json.Marshal(struct {
 		*wire
+		Incarnation     string      `json:"incarnation"`
 		CreatedBranch   bool        `json:"created_branch"`
 		UserState       string      `json:"user_state"`
 		PriorState      string      `json:"prior_state"`
@@ -252,6 +256,7 @@ func (w *LocalWorktree) MarshalJSON() ([]byte, error) {
 		TaskID          string      `json:"task_id"`
 	}{
 		wire:            (*wire)(w),
+		Incarnation:     w.incarnation,
 		CreatedBranch:   w.createdBranch,
 		UserState:       w.userState,
 		PriorState:      w.priorState,
@@ -266,6 +271,7 @@ func (w *LocalWorktree) UnmarshalJSON(data []byte) error {
 	type wire LocalWorktree
 	aux := struct {
 		*wire
+		Incarnation     string      `json:"incarnation"`
 		CreatedBranch   bool        `json:"created_branch"`
 		UserState       string      `json:"user_state"`
 		PriorState      string      `json:"prior_state"`
@@ -277,6 +283,7 @@ func (w *LocalWorktree) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
+	w.incarnation = aux.Incarnation
 	w.createdBranch = aux.CreatedBranch
 	w.userState = aux.UserState
 	w.priorState = aux.PriorState
@@ -406,7 +413,7 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	}
 
 	plan := resolveTaskBranch(gitRoot, params, headSHA, logger)
-	actualBranch, createdBranch, err := addLocalWorktree(gitRoot, worktreePath, plan, params.TaskID)
+	actualBranch, createdBranch, incarnation, err := addLocalWorktree(gitRoot, worktreePath, plan, params.TaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -419,6 +426,7 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 		BaseCommit:    plan.base,
 		Continued:     plan.continues,
 		createdBranch: createdBranch,
+		incarnation:   incarnation,
 		userState:     userState,
 		priorState:    plan.priorState,
 		owner:         plan.owner,
@@ -438,7 +446,7 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	rollback := func() {
 		removeLocalWorktreeDir(gitRoot, worktreePath, logger)
 		if createdBranch {
-			dropBranch(gitRoot, actualBranch, logger)
+			dropBranch(gitRoot, actualBranch, incarnation, logger)
 		}
 	}
 
@@ -479,15 +487,8 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 			rollback()
 			return nil, fmt.Errorf("execenv: could not inspect the prepared worktree for %q: %w", gitRoot, dirtyErr)
 		}
-		// A branch this prepare created gets its baseline even when there was
-		// nothing to replay. Two things need it. The empty case is the one that
-		// used to be skipped, and it is the one where the branch sits exactly on
-		// the user's own HEAD — so the branch had no commit of its own, and
-		// nothing distinguished it from a branch the user creates there
-		// themselves. And `git diff <baseline>..<branch>` is then the agent's
-		// work on every branch, not only on the ones that started dirty.
-		if dirty || !plan.continues {
-			baseline, baseErr := commitBaseline(worktreePath, plan.continues, dirty)
+		if dirty {
+			baseline, baseErr := commitBaseline(worktreePath, plan.continues)
 			if baseErr != nil {
 				// Without a baseline the task cannot tell the user's work from the
 				// agent's, so it would later commit the user's files as if the agent
@@ -598,6 +599,12 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 			w.Branch, w.aborted, w.Path, w.GitRoot)
 	}
 
+	if err := w.verifyIncarnation(); err != nil {
+		outcome.Branch = ""
+		outcome.PreservedPath = w.Path
+		return outcome, fmt.Errorf("refusing to deliver branch %s: %w; the task worktree is preserved at %s", w.Branch, err, w.Path)
+	}
+
 	// An unresolved merge is never committed. The worktree may be carrying the
 	// user's edits from before this turn (replayUserState hands the conflict to
 	// the agent rather than dropping it), and `git add -A` would turn conflict
@@ -693,19 +700,19 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 	// line of work, stranding what this turn produced. Ordering it first is what
 	// makes that recoverable — the worktree is still there to preserve, exactly
 	// as for a commit that could not be made.
-	if !dropped {
-		if verifyErr := w.verifyDeliveryPoint(tip); verifyErr != nil {
-			outcome.Branch = ""
-			outcome.PreservedPath = w.Path
-			if logger != nil {
-				logger.Error("execenv: the run's delivery point cannot be recorded as this conversation's; nothing recorded, worktree kept",
-					"path", w.Path, "branch", w.Branch, "git_root", w.GitRoot, "tip", tip, "base", w.BaseCommit, "error", verifyErr)
-			}
-			return outcome, fmt.Errorf(
-				"refusing to record branch %s: %w; the task worktree is preserved at %s (listed by `git worktree list` in %s) — "+
-					"recover the work from there, and let the run keep the commit the worktree started from instead of resetting past it",
-				w.Branch, verifyErr, w.Path, w.GitRoot)
+	if verifyErr := w.verifyDeliveryPoint(tip); verifyErr != nil {
+		outcome.Branch = ""
+		outcome.PreservedPath = w.Path
+		if logger != nil {
+			logger.Error("execenv: the run's delivery point cannot be recorded as this conversation's; nothing recorded, worktree kept",
+				"path", w.Path, "branch", w.Branch, "git_root", w.GitRoot, "tip", tip, "base", w.BaseCommit, "error", verifyErr)
 		}
+		return outcome, fmt.Errorf(
+			"refusing to record branch %s: %w; the task worktree is preserved at %s (listed by `git worktree list` in %s) — "+
+				"recover the work from there, and let the run keep the commit the worktree started from instead of resetting past it",
+			w.Branch, verifyErr, w.Path, w.GitRoot)
+	}
+	if !dropped {
 		// Saved only once the delivery is known to be recordable: a refused one
 		// keeps the whole worktree anyway, leftovers included, and a ref saved
 		// for it would only be a second copy. Saved BEFORE the record, so a save
@@ -747,7 +754,7 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 	}
 
 	if dropped {
-		dropBranch(w.GitRoot, w.Branch, logger)
+		dropBranch(w.GitRoot, w.Branch, w.incarnation, logger)
 		outcome.Branch = ""
 	}
 
@@ -786,11 +793,17 @@ func (w *LocalWorktree) Discard(logger *slog.Logger) {
 		return
 	}
 	defer unlock()
+	if err := w.verifyIncarnation(); err != nil {
+		if logger != nil {
+			logger.Warn("execenv: refusing to discard a worktree whose branch incarnation changed", "branch", w.Branch, "error", err)
+		}
+		return
+	}
 	removeLocalWorktreeDir(w.GitRoot, w.Path, logger)
 	// Same rule as every other teardown: a branch this prepare did not create
 	// belongs to the turns before it and outlives this task.
 	if w.createdBranch {
-		dropBranch(w.GitRoot, w.Branch, logger)
+		dropBranch(w.GitRoot, w.Branch, w.incarnation, logger)
 	}
 	if logger != nil {
 		logger.Info("execenv: local worktree discarded before the agent ran",
@@ -816,20 +829,12 @@ func (w *LocalWorktree) AbortWithReason(err error) {
 // commit on the task branch, returning the new tip. On a continued branch that
 // state is the increment since the previous turn, so the message says so rather
 // than claiming to be the branch's baseline.
-//
-// A new branch gets one even with nothing to record. The commit is then empty,
-// and that is the point: it is the branch's first commit of its own, the thing
-// that makes it distinguishable later from a branch the user creates at the
-// same place — see LocalWorktree.BaseCommit.
-func commitBaseline(worktreePath string, continued, dirty bool) (string, error) {
+func commitBaseline(worktreePath string, continued bool) (string, error) {
 	message := "chore(agent): baseline — uncommitted work from the local directory"
-	switch {
-	case continued:
+	if continued {
 		message = "chore(agent): uncommitted work from the local directory since the previous turn"
-	case !dirty:
-		message = "chore(agent): baseline — the task worktree started here"
 	}
-	if _, err := commitEverything(worktreePath, message, !dirty); err != nil {
+	if _, err := commitEverything(worktreePath, message, false); err != nil {
 		return "", err
 	}
 	tip, err := runGitTrimmed(worktreePath, "rev-parse", "--verify", "HEAD")
@@ -1264,25 +1269,24 @@ const (
 	ownerTrailerWorkspace    = "Multica-Workspace"
 	ownerTrailerAgent        = "Multica-Agent"
 	ownerTrailerConversation = "Multica-Conversation"
+	incarnationTrailer       = "Multica-Branch-Incarnation"
+	incarnationMarker        = "multica: branch-incarnation "
 )
 
 // branchRecord is what refs/multica/local-state/<branch> holds: a commit whose
 // TREE is the user's directory as the branch last carried it, whose SECOND
 // PARENT is the branch tip at that moment, and whose message names the owner.
 //
-// The checkpoint is what makes the record about this BRANCH rather than merely
-// about its name. Owner alone proved only that Multica once wrote a branch
-// called this, and that stayed true after the user deleted it and created their
-// own under the same name — the next task then continued into their work
-// (MUL-6881 review). Requiring the checkpoint to still be an ancestor of the
-// tip is the continuity proof: a branch deleted and recreated, force-moved onto
-// unrelated history, or rebased no longer contains the commit recorded here.
+// The incarnation binds the record to this creation of the branch, even when
+// a replacement branch starts at exactly the same checkpoint. Checkpoint
+// ancestry additionally prevents continuing after a rewind or unrelated reset.
 type branchRecord struct {
 	// state is the commit whose tree is the user snapshot the branch carries.
 	state string
 	// checkpoint is the branch tip this record was written against.
-	checkpoint string
-	owner      branchOwner
+	checkpoint  string
+	owner       branchOwner
+	incarnation string
 }
 
 // writeBranchRecord records the branch as carrying userState at checkpoint, and
@@ -1293,12 +1297,12 @@ type branchRecord struct {
 // and can move between the delivery and this write. Recording what we delivered
 // means a branch that moved in that window simply fails the ancestor test next
 // time, which is the safe direction.
-func writeBranchRecord(gitRoot, branch, userState, checkpoint string, owner branchOwner) (string, error) {
+func writeBranchRecord(gitRoot, branch, userState, checkpoint string, owner branchOwner, incarnation string) (string, error) {
 	if checkpoint == "" {
 		return "", fmt.Errorf("no checkpoint to record for branch %s", branch)
 	}
 	args := append(commitIdentityArgs(gitRoot), "commit-tree", userState+"^{tree}",
-		"-p", userState, "-p", checkpoint, "-m", branchRecordMessage(owner))
+		"-p", userState, "-p", checkpoint, "-m", branchRecordMessage(owner, incarnation))
 	record, err := runGitTrimmed(gitRoot, args...)
 	if err != nil {
 		return "", fmt.Errorf("git commit-tree: %w", err)
@@ -1309,7 +1313,7 @@ func writeBranchRecord(gitRoot, branch, userState, checkpoint string, owner bran
 	return record, nil
 }
 
-func branchRecordMessage(owner branchOwner) string {
+func branchRecordMessage(owner branchOwner, incarnation string) string {
 	var b strings.Builder
 	b.WriteString("multica: task branch record\n\n")
 	b.WriteString("Written by Multica for a local_directory task running in worktree mode. Its\n")
@@ -1320,12 +1324,12 @@ func branchRecordMessage(owner branchOwner) string {
 	fmt.Fprintf(&b, "%s: %s\n", ownerTrailerWorkspace, owner.WorkspaceID)
 	fmt.Fprintf(&b, "%s: %s\n", ownerTrailerAgent, owner.AgentID)
 	fmt.Fprintf(&b, "%s: %s\n", ownerTrailerConversation, owner.ConversationID)
+	fmt.Fprintf(&b, "%s: %s\n", incarnationTrailer, incarnation)
 	return b.String()
 }
 
-// readBranchRecord reads back what a branch is recorded as carrying. A commit
-// without all three trailers or without a second parent — anything not written
-// by writeBranchRecord — yields a record that can never match a valid owner.
+// readBranchRecord reads back what a branch is recorded as carrying. Missing
+// owner trailers, incarnation or second parent leave ownership unprovable.
 func readBranchRecord(gitRoot, commit string) (branchRecord, error) {
 	body, err := runGitTrimmed(gitRoot, "log", "-1", "--format=%B", commit)
 	if err != nil {
@@ -1339,6 +1343,8 @@ func readBranchRecord(gitRoot, commit string) (branchRecord, error) {
 		}
 		value = strings.TrimSpace(value)
 		switch key {
+		case incarnationTrailer:
+			record.incarnation = value
 		case ownerTrailerWorkspace:
 			record.owner.WorkspaceID = value
 		case ownerTrailerAgent:
@@ -1353,9 +1359,6 @@ func readBranchRecord(gitRoot, commit string) (branchRecord, error) {
 	return record, nil
 }
 
-// addLocalWorktree creates the worktree, retrying once under a suffixed branch
-// name when the branch already exists (a re-dispatched task keeps its id, so
-// its branch can survive from the previous run).
 // taskBranchPlan is the decision about which branch a task's worktree checks
 // out and which commit it starts from.
 type taskBranchPlan struct {
@@ -1385,7 +1388,8 @@ type taskBranchPlan struct {
 	// therefore has to record what the user's directory looked like.
 	tracksState bool
 	// owner is the identity the branch is recorded under.
-	owner branchOwner
+	owner       branchOwner
+	incarnation string
 }
 
 // altName disambiguates a branch a live sibling already holds.
@@ -1459,6 +1463,7 @@ func planForConversationBranch(gitRoot, name, headSHA string, owner branchOwner,
 	if !owned {
 		return taskBranchPlan{}, false
 	}
+	plan.incarnation = record.incarnation
 	// The user merged it: the branch tip carries nothing HEAD does not, so
 	// continuing from it would strand this task behind their own commits.
 	if _, mergedErr := runGit(gitRoot, "merge-base", "--is-ancestor", name, "HEAD"); mergedErr == nil {
@@ -1479,22 +1484,16 @@ func planForConversationBranch(gitRoot, name, headSHA string, owner branchOwner,
 // branchOwnedBy reports whether a branch is still the one this conversation
 // recorded, returning the user snapshot it carries.
 //
-// Two questions, and both have to hold. Is the record ours — workspace, agent
-// and conversation ids. And is the branch still the one it was written against
-// — the recorded checkpoint has to be an ancestor of the current tip. The
-// second is not pedantry: a branch the user deleted and recreated under the
-// same name still satisfies the first, and continuing it would append this
-// conversation onto their unrelated work.
-//
-// A branch with no record is not ours by definition: every branch this code
-// creates writes one before its task is allowed to run.
+// Owner identity, branch incarnation and checkpoint ancestry must all match.
+// Tokenless historical records and missing or expired reflogs fail closed;
+// matching commits cannot establish ownership of a recreated branch.
 func branchOwnedBy(gitRoot, branch string, owner branchOwner, logger *slog.Logger) (branchRecord, bool) {
 	ref, err := readUserStateRef(gitRoot, branch)
 	if err != nil || ref == "" {
 		return branchRecord{}, false
 	}
 	record, err := readBranchRecord(gitRoot, ref)
-	if err != nil || record.owner != owner || record.checkpoint == "" {
+	if err != nil || record.owner != owner || record.checkpoint == "" || !branchHasIncarnation(gitRoot, branch, record.incarnation) {
 		return branchRecord{}, false
 	}
 	if _, err := runGit(gitRoot, "merge-base", "--is-ancestor", record.checkpoint, "refs/heads/"+branch); err != nil {
@@ -1508,41 +1507,33 @@ func branchOwnedBy(gitRoot, branch string, owner branchOwner, logger *slog.Logge
 }
 
 // addLocalWorktree materialises the planned branch as a worktree and reports
-// the branch actually used, plus whether this call is the one that put it
-// there — the caller may only delete a branch it created itself.
+// the branch actually used, whether this call put it there, and its incarnation.
+// The caller may only delete a branch it created and can still identify.
 //
 // The fallback covers a sibling task already holding the conversation's branch:
 // git allows one worktree per branch, and refusing to run is worse than
 // delivering onto a task-scoped branch. It forks from the same base, so the
 // sibling still stands on the conversation's latest work.
-func addLocalWorktree(gitRoot, worktreePath string, plan taskBranchPlan, taskID string) (string, bool, error) {
-	var args []string
+func addLocalWorktree(gitRoot, worktreePath string, plan taskBranchPlan, taskID string) (string, bool, string, error) {
+	var out string
+	var err error
+	incarnation := plan.incarnation
 	switch {
 	case plan.continues:
-		args = []string{"worktree", "add", worktreePath, plan.name}
+		out, err = runGit(gitRoot, "worktree", "add", worktreePath, plan.name)
 	case plan.reset:
-		// -B moves the branch to base. Nothing is lost: this path only runs
-		// once the branch has been proven an ancestor of HEAD.
-		args = []string{"worktree", "add", "-B", plan.name, worktreePath, plan.base}
+		// Keep Git's checked-out-branch protection: never move a live sibling's ref.
+		out, err = runGit(gitRoot, "worktree", "add", "-B", plan.name, worktreePath, plan.base)
 	default:
-		args = []string{"worktree", "add", "-b", plan.name, worktreePath, plan.base}
+		incarnation, out, err = createBranchWorktree(gitRoot, worktreePath, plan.name, plan.base)
 	}
-	out, err := runGit(gitRoot, args...)
 	if err == nil {
-		return plan.name, !plan.continues, nil
+		return plan.name, !plan.continues, incarnation, nil
 	}
 	if !branchUnavailable(out) {
-		return "", false, fmt.Errorf("execenv: git worktree add: %s: %w", strings.TrimSpace(out), err)
+		return "", false, "", fmt.Errorf("execenv: git worktree add: %s: %w", strings.TrimSpace(out), err)
 	}
-	// The fallback name can itself be taken — by this same task. The
-	// conversation fallback is deterministic (<branch>-<task key>) and the
-	// task-scoped one is only second-granular, so a task re-dispatched under
-	// the same id while the branch is still busy finds its own earlier
-	// fallback branch already there. Failing on it made every re-dispatch of
-	// that task fail the same way (GH #9198). Those branches may hold earlier
-	// attempts' partial work, so none is reused or reset: keep picking the
-	// next unused name, forked from the same base. Bounded so a git that keeps
-	// answering "already exists" for some other reason cannot loop forever.
+	// Redispatch may find its earlier fallback still busy. Never reuse or reset it.
 	alt := plan.altName(taskID)
 	stamp := time.Now().Unix()
 	for i := 0; i < maxFallbackBranchAttempts; i++ {
@@ -1553,15 +1544,65 @@ func addLocalWorktree(gitRoot, worktreePath string, plan taskBranchPlan, taskID 
 		case i > 1:
 			name = fmt.Sprintf("%s-%d-%d", alt, stamp, i)
 		}
-		out, err = runGit(gitRoot, "worktree", "add", "-b", name, worktreePath, plan.base)
+		incarnation, out, err = createBranchWorktree(gitRoot, worktreePath, name, plan.base)
 		if err == nil {
-			return name, true, nil
+			return name, true, incarnation, nil
 		}
 		if !branchUnavailable(out) {
 			break
 		}
 	}
-	return "", false, fmt.Errorf("execenv: git worktree add: %s: %w", strings.TrimSpace(out), err)
+	return "", false, "", fmt.Errorf("execenv: git worktree add: %s: %w", strings.TrimSpace(out), err)
+}
+
+// createBranchWorktree atomically creates a new ref with its ownership marker.
+// A same-value update after creation would not reliably append a reflog entry.
+func createBranchWorktree(gitRoot, path, branch, base string) (incarnation, out string, err error) {
+	var token [32]byte
+	if _, err = rand.Read(token[:]); err != nil {
+		return "", "", err
+	}
+	incarnation = hex.EncodeToString(token[:])
+	args := append(commitIdentityArgs(gitRoot), "update-ref", "--no-deref", "--create-reflog",
+		"-m", incarnationMarker+incarnation, "refs/heads/"+branch, base, "")
+	if out, err = runGit(gitRoot, args...); err != nil {
+		return "", out, err
+	}
+	out, err = runGit(gitRoot, "worktree", "add", path, branch)
+	if err != nil {
+		// Only our positively identified creation can be removed on attachment failure.
+		dropBranch(gitRoot, branch, incarnation, nil)
+	}
+	return incarnation, out, err
+}
+
+// branchHasIncarnation fails closed when the creation marker has expired or
+// the reflog was copied/renamed onto this name. Commits alone cannot distinguish
+// a branch recreated at exactly the recorded checkpoint.
+func branchHasIncarnation(gitRoot, branch, incarnation string) bool {
+	if incarnation == "" {
+		return false
+	}
+	out, err := runGitTrimmed(gitRoot, "reflog", "show", "--format=%gs", "refs/heads/"+branch)
+	if err != nil {
+		return false
+	}
+	for _, message := range strings.Split(out, "\n") {
+		if strings.HasPrefix(message, incarnationMarker) {
+			return message == incarnationMarker+incarnation
+		}
+		if strings.HasPrefix(message, "Branch: ") || strings.HasPrefix(message, "branch: Created from ") {
+			return false
+		}
+	}
+	return false
+}
+
+func (w *LocalWorktree) verifyIncarnation() error {
+	if !branchHasIncarnation(w.GitRoot, w.Branch, w.incarnation) {
+		return fmt.Errorf("branch %s no longer has this task's branch incarnation", w.Branch)
+	}
+	return nil
 }
 
 // maxFallbackBranchAttempts caps how many fallback names addLocalWorktree tries
@@ -1846,18 +1887,13 @@ func quotedPaths(paths []string) string {
 // verifyDeliveryPoint checks that tip is a commit this conversation can put its
 // name on before it becomes the branch's recorded checkpoint.
 //
-// Two things are asserted, and they are the two ways a delivery can be
-// something other than what this task built. The tip has to BE the task's
-// branch — a run that checked out something else, or a branch someone moved
-// underneath it, delivers a commit this record has no business describing. And
-// it has to still contain the commit this turn started from — this turn's own
-// baseline when it made one, otherwise the branch tip it continued. A run that
-// resets its worktree back to the user's own HEAD passes neither test but the
-// second is the one that matters, twice over: recording a plain user commit as
-// the checkpoint is what makes a branch they later recreate there look like
-// ours, and a tip without this turn's starting point no longer carries the
-// snapshot about to be recorded as delivered (MUL-6881 review).
+// The branch incarnation must still match, its tip must equal the worktree's
+// delivered tip, and that tip must contain this turn's BaseCommit. The last
+// check protects replayed user edits from a reset that drops their baseline.
 func (w *LocalWorktree) verifyDeliveryPoint(tip string) error {
+	if err := w.verifyIncarnation(); err != nil {
+		return err
+	}
 	if !w.tracksState {
 		// Nothing will be recorded for this branch, so there is nothing to prove.
 		return nil
@@ -1874,7 +1910,7 @@ func (w *LocalWorktree) verifyDeliveryPoint(tip string) error {
 			shortID(tip), w.Branch, shortID(branchTip))
 	}
 	if w.BaseCommit == "" {
-		return fmt.Errorf("branch %s has no commit of this task's own to prove it by", w.Branch)
+		return fmt.Errorf("branch %s has no starting commit to prove its delivery against", w.Branch)
 	}
 	if _, err := runGit(w.GitRoot, "merge-base", "--is-ancestor", w.BaseCommit, tip); err != nil {
 		return fmt.Errorf("the delivered commit %s no longer contains %s, the commit this turn started from",
@@ -1980,6 +2016,9 @@ func (p *DeliveryProblem) RepairSteps() [][]string {
 // dropped the baseline, or work committed onto another branch.
 func (w *LocalWorktree) CheckDelivery() *DeliveryProblem {
 	if w == nil || w.aborted != nil || !w.tracksState || w.BaseCommit == "" {
+		return nil
+	}
+	if w.verifyIncarnation() != nil {
 		return nil
 	}
 	// An unresolved merge fails Finalize before the delivery point is ever
@@ -2268,18 +2307,17 @@ func readUserStateRef(gitRoot, branch string) (string, error) {
 // replays from its tree, and every later task proves the branch is still its
 // own from its owner and checkpoint.
 //
-// The checkpoint must be a commit the branch could not plausibly be sitting at
-// WITHOUT this conversation's work — that is the whole proof. A tip that is
-// still the user's own HEAD is not one: it is exactly where a branch they
-// delete and recreate lands, and recording it would authorise a later turn to
-// append onto their unrelated work. Prepare therefore records only once the
-// branch carries a commit of ours, and Finalize records the tip it actually
-// delivered.
+// The incarnation must be the one Prepare created or validated, never inferred
+// from the current branch. Checkpoint ancestry additionally protects the replayed
+// snapshot when a run rewinds its history.
 func (w *LocalWorktree) recordState(checkpoint string, logger *slog.Logger) error {
 	if w == nil || !w.tracksState || w.Branch == "" || w.userState == "" {
 		return nil
 	}
-	if _, err := writeBranchRecord(w.GitRoot, w.Branch, w.userState, checkpoint, w.owner); err != nil {
+	if err := w.verifyIncarnation(); err != nil {
+		return err
+	}
+	if _, err := writeBranchRecord(w.GitRoot, w.Branch, w.userState, checkpoint, w.owner, w.incarnation); err != nil {
 		return err
 	}
 	if logger != nil {
@@ -2292,8 +2330,8 @@ func (w *LocalWorktree) recordState(checkpoint string, logger *slog.Logger) erro
 // dropBranch deletes a task branch that carries nothing worth keeping, together
 // with its recorded snapshot and any leftovers saved on it — they are
 // meaningless apart.
-func dropBranch(gitRoot, branch string, logger *slog.Logger) {
-	if branch == "" {
+func dropBranch(gitRoot, branch, incarnation string, logger *slog.Logger) {
+	if !branchHasIncarnation(gitRoot, branch, incarnation) {
 		return
 	}
 	deleteBranch(gitRoot, branch, logger)
