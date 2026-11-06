@@ -16,6 +16,8 @@ import (
 
 const SubmissionLifecycleCapability = "submission-lifecycle-v1"
 
+var errSubmissionStopped = errors.New("local conversation: submission stopped")
+
 type SubmissionResult struct {
 	StoreGeneration string           `json:"store_generation"`
 	SnapshotSeq     int64            `json:"snapshot_seq"`
@@ -35,7 +37,7 @@ type SubmissionStatuses struct {
 
 type submissionRun struct {
 	attemptID string
-	cancel    context.CancelFunc
+	cancel    context.CancelCauseFunc
 }
 
 func attemptID() string {
@@ -116,6 +118,10 @@ func (s *Service) Submit(ctx context.Context, scopeID int64, id string, raw json
 		return SubmissionResult{}, ErrQueueFull
 	}
 	change := store.QueueChange{Revision: state.Revision + 1, Paused: state.Paused, Error: state.Error, Append: &store.QueueItem{RequestID: item.RequestID, Item: raw, OriginPeerID: origin.PeerID, OriginClientKind: origin.ClientKind}}
+	// A fresh send resumes a user pause; failed or restored queues still need explicit recovery.
+	if state.Error == "" {
+		change.Paused = false
+	}
 	batch := s.queueBatch(id, state, change, len(state.Items)+1, "enqueued")
 	var claim *store.SubmissionAttempt
 	busy, err := s.executionBusy(ctx, id)
@@ -123,7 +129,7 @@ func (s *Service) Submit(ctx context.Context, scopeID int64, id string, raw json
 		unlock()
 		return SubmissionResult{}, err
 	}
-	if !busy && s.acceptTurn() == nil && !state.Paused && state.Error == "" && len(state.Items) == 0 {
+	if !busy && s.acceptTurn() == nil && !change.Paused && change.Error == "" && len(state.Items) == 0 {
 		claim, err = s.newClaim(ctx, conv, item)
 		if err != nil {
 			unlock()
@@ -137,14 +143,16 @@ func (s *Service) Submit(ctx context.Context, scopeID int64, id string, raw json
 	}
 	result, err := s.submissionResult(ctx, id, item.RequestID)
 	var runCtx context.Context
-	var cancel context.CancelFunc
+	var cancel context.CancelCauseFunc
 	if claim != nil {
-		runCtx, cancel = context.WithCancel(context.Background())
+		runCtx, cancel = context.WithCancelCause(context.Background())
 		s.setSubmissionRun(id, claim.AttemptID, cancel)
 	}
 	unlock()
 	if claim != nil {
 		s.goBackground(func() { s.runSubmission(runCtx, conv, item, raw, *claim, origin) })
+	} else {
+		s.goBackground(func() { s.dispatchQueue(id) })
 	}
 	return result, err
 }
@@ -225,7 +233,7 @@ func (s *Service) newClaim(ctx context.Context, conv sqlitedb.Conversation, item
 	return &store.SubmissionAttempt{AttemptID: attemptID(), RequestID: req, TurnIDs: []string{}, Settings: encoded, Delivery: "not_sent"}, nil
 }
 
-func (s *Service) setSubmissionRun(id, attempt string, cancel context.CancelFunc) {
+func (s *Service) setSubmissionRun(id, attempt string, cancel context.CancelCauseFunc) {
 	s.queues.mu.Lock()
 	defer s.queues.mu.Unlock()
 	if s.queues.preparing == nil {
@@ -238,7 +246,7 @@ func (s *Service) cancelSubmissionRun(id string) {
 	run := s.queues.preparing[id]
 	s.queues.mu.Unlock()
 	if run.cancel != nil {
-		run.cancel()
+		run.cancel(nil)
 	}
 }
 func (s *Service) clearSubmissionRun(id, attempt string) {
@@ -250,7 +258,13 @@ func (s *Service) clearSubmissionRun(id, attempt string) {
 }
 
 func (s *Service) runSubmission(ctx context.Context, conv sqlitedb.Conversation, item queueItem, raw json.RawMessage, claim store.SubmissionAttempt, origin TurnOrigin) {
-	defer s.clearSubmissionRun(conv.ID, claim.AttemptID)
+	reschedule := false
+	defer func() {
+		s.clearSubmissionRun(conv.ID, claim.AttemptID)
+		if reschedule {
+			s.goBackground(func() { s.dispatchQueue(conv.ID) })
+		}
+	}()
 	s.queues.setDispatching(conv.ID, item.RequestID)
 	defer func() {
 		s.queues.mu.Lock()
@@ -277,6 +291,7 @@ func (s *Service) runSubmission(ctx context.Context, conv sqlitedb.Conversation,
 		change.Delivery = "intent_recorded"
 	}
 	batch := store.Batch{ConversationID: conv.ID}
+	stopped := false
 	if err != nil {
 		if errors.Is(err, ErrOutcomeUnknown) {
 			change.State = "recovery_required"
@@ -288,6 +303,13 @@ func (s *Service) runSubmission(ctx context.Context, conv sqlitedb.Conversation,
 			change.Delivery = "not_sent"
 			change.Release = true
 			q := store.QueueChange{Revision: state.Revision + 1, Paused: true, Error: err.Error()}
+			reason := "failed"
+			if errors.Is(context.Cause(ctx), errSubmissionStopped) {
+				// Stop already committed the pause; a later send or pause owns the current state.
+				q.Paused, q.Error = state.Paused, state.Error
+				change.Reason = ""
+				reason, stopped = "enqueued", true
+			}
 			found := false
 			for _, v := range state.Items {
 				found = found || v.RequestID == item.RequestID
@@ -300,13 +322,15 @@ func (s *Service) runSubmission(ctx context.Context, conv sqlitedb.Conversation,
 			if !found {
 				count++
 			}
-			batch = s.queueBatch(conv.ID, state, q, count, "failed")
+			batch = s.queueBatch(conv.ID, state, q, count, reason)
 		}
 	}
 	batch.Submissions = []store.SubmissionChange{change}
 	if _, e := s.batcher.AppendWait(context.Background(), batch); e != nil {
 		s.opts.Logger.Warn("could not record submission outcome", "conversation_id", conv.ID, "error", e)
+		return
 	}
+	reschedule = stopped
 }
 func (s *Service) sendClaimed(ctx context.Context, conv sqlitedb.Conversation, item queueItem, claim store.SubmissionAttempt, origin TurnOrigin) error {
 	var settings store.ConversationSettings
@@ -357,11 +381,11 @@ func (s *Service) directExecution(ctx context.Context, cmd SendCommand, remote .
 		unlock()
 		return ctx, nil, executionError(err)
 	}
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancelCause(ctx)
 	s.setSubmissionRun(cmd.ConversationID, claim.AttemptID, cancel)
 	unlock()
 	return runCtx, func(outcome error) {
-		defer cancel()
+		defer cancel(nil)
 		s.clearSubmissionRun(cmd.ConversationID, claim.AttemptID)
 		delivery := "confirmed"
 		if len(remote) > 0 && remote[0] {
@@ -477,7 +501,7 @@ func (s *Service) interruptExecution(ctx context.Context, scopeID int64, id stri
 	run := s.queues.preparing[id]
 	s.queues.mu.Unlock()
 	if run.attemptID == slot.AttemptID && run.cancel != nil {
-		run.cancel()
+		run.cancel(errSubmissionStopped)
 	}
 	a, err := s.store.Attempt(ctx, id, slot.AttemptID)
 	if err != nil {

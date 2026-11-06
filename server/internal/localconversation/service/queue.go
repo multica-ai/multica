@@ -529,7 +529,7 @@ func (s *Service) dispatchQueue(conversationID string) {
 	if once {
 		s.queues.setOnce(conversationID, "")
 	}
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancelCause(ctx)
 	s.setSubmissionRun(conversationID, claim.AttemptID, cancel)
 	unlock()
 	s.runSubmission(runCtx, conv, item, first.Item, *claim, TurnOrigin{PeerID: first.OriginPeerID, ClientKind: first.OriginClientKind})

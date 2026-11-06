@@ -7,7 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -126,6 +128,77 @@ func TestVerificationFakeProviderDrivesTheNormalQueue(t *testing.T) {
 	status, _ = v2Do(t, server, http.MethodGet, "/local/v2/verification/capabilities", nil, renderer)
 	if status != http.StatusNotFound {
 		t.Fatal("renderer reached observer route", status)
+	}
+}
+
+func TestVerificationStopThenSubmitResumesQueue(t *testing.T) {
+	verificationEnv(t)
+	for _, pending := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pending=%t", pending), func(t *testing.T) {
+			server, _ := newV2Server(t)
+			headers := v2Headers("user-1")
+			base := "/local/v2/sessions/stop-resume"
+			status, body := v2Do(t, server, http.MethodPost, "/local/v2/sessions", map[string]any{"id": "stop-resume", "provider": "claude"}, headers)
+			if status != http.StatusCreated {
+				t.Fatalf("create: %d %v", status, body)
+			}
+			item := func(id string) map[string]any {
+				return map[string]any{"requestId": id, "content": id, "display": map[string]any{"id": id}}
+			}
+			command := func(body map[string]any) map[string]any {
+				t.Helper()
+				status, result := v2Do(t, server, http.MethodPost, base+"/commands", body, headers)
+				if status != http.StatusOK && status != http.StatusAccepted {
+					t.Fatalf("command: %d %v", status, result)
+				}
+				return result
+			}
+			waitReceived := func(want []any) {
+				t.Helper()
+				eventuallyV2(t, func() bool {
+					_, stats := v2Do(t, server, http.MethodGet, "/local/v2/verification/fixture?conversationId=stop-resume", nil, headers)
+					return reflect.DeepEqual(stats["received"], want) && stats["pending"] == true
+				})
+			}
+			release := func(id string) {
+				t.Helper()
+				status, result := v2Do(t, server, http.MethodPost, "/local/v2/verification/fixture", map[string]any{"conversationId": "stop-resume", "action": "release", "text": "done " + id, "expectedRequestId": id}, headers)
+				if status != http.StatusOK {
+					t.Fatalf("release %s: %d %v", id, status, result)
+				}
+			}
+			command(map[string]any{"type": "submit", "item": item("first")})
+			waitReceived([]any{"first"})
+			if pending {
+				command(map[string]any{"type": "queue_enqueue", "item": item("old"), "paused": true})
+			}
+			command(map[string]any{"type": "queue_update", "action": "stop", "operation_id": "stop-first"})
+			result := command(map[string]any{"type": "submit", "item": item("new")})
+			if result["queue"].(map[string]any)["paused"] != false {
+				t.Fatalf("submit did not resume: %v", result)
+			}
+			want := []any{"first", "new"}
+			if pending {
+				want = []any{"first", "old"}
+			}
+			waitReceived(want)
+			_, snapshot := v2Do(t, server, http.MethodGet, base+"/snapshot", nil, headers)
+			turns := snapshot["turns"].([]any)
+			if len(turns) != 2 || turns[0].(map[string]any)["status"] != "cancelled" || turns[1].(map[string]any)["status"] != "running" {
+				t.Fatalf("stopped turn did not hand off execution: %v", snapshot)
+			}
+			if pending {
+				release("old")
+				want = []any{"first", "old", "new"}
+				waitReceived(want)
+			}
+			release("new")
+			eventuallyV2(t, func() bool {
+				_, snapshot = v2Do(t, server, http.MethodGet, base+"/snapshot", nil, headers)
+				turns := snapshot["turns"].([]any)
+				return len(turns) == len(want) && turns[len(turns)-1].(map[string]any)["status"] == "completed" && len(snapshot["submissions"].([]any)) == 0
+			})
+		})
 	}
 }
 

@@ -266,7 +266,7 @@ func (s *Service) Close(ctx context.Context) error {
 	s.mu.Unlock()
 	s.queues.mu.Lock()
 	for _, run := range s.queues.preparing {
-		run.cancel()
+		run.cancel(nil)
 	}
 	s.queues.mu.Unlock()
 	s.computers.mu.Lock()

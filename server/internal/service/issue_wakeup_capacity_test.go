@@ -59,6 +59,10 @@ func TestIssueWakeupBusyRuleDoesNotBlockOtherWorkspace(t *testing.T) {
 			if ctx.Err() != nil {
 				t.Fatal("busy rule consumed batch deadline")
 			}
+			// Release the probe lock before assertions so queued DDL in other test packages can finish.
+			if err := holder.Rollback(context.Background()); err != nil {
+				t.Fatal(err)
+			}
 			if got := other.Count(t, "SELECT count(*) FROM agent_task_queue WHERE context->>'wakeup_id'=$1", util.UUIDToString(second.ID)); got != 1 {
 				t.Fatalf("unrelated rule not dispatched: %d", got)
 			}

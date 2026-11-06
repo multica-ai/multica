@@ -85,6 +85,8 @@ func (a *verificationAdapter) Request(_ context.Context, typ string, fields map[
 	}
 	if typ == "interrupt" {
 		a.pending = false
+		// Let the runner finish cancellation and release the stopped turn's execution slot.
+		return json.RawMessage(`{"outcome":"closed"}`), nil
 	}
 	return json.RawMessage(`{}`), nil
 }

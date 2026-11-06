@@ -772,21 +772,31 @@ func TestV2SubmissionLifecycleAcrossLocalAndPhoneTransport(t *testing.T) {
 	}
 	validateLocalV2(t, "submission_result", body)
 	value := body["submission"].(map[string]any)
-	if value["state"] != "queued" {
-		t.Fatalf("pause not preserved: %+v", body)
+	if value["state"] != "starting" || body["queue"].(map[string]any)["paused"] != false {
+		t.Fatalf("fresh submit did not resume: %+v", body)
 	}
 	status, replay := v2Do(t, srv, http.MethodPost, "/local/v2/sessions/conv-submission/commands", command, headers)
-	if status != http.StatusAccepted || replay["submission"].(map[string]any)["revision"] != value["revision"] {
+	if status != http.StatusAccepted || replay["submission"].(map[string]any)["attempt"].(map[string]any)["attempt_id"] != value["attempt"].(map[string]any)["attempt_id"] {
 		t.Fatalf("cross-transport replay=%d %+v", status, replay)
+	}
+	var snapshot map[string]any
+	eventuallyV2(t, func() bool {
+		_, snapshot = v2Do(t, srv, http.MethodGet, "/local/v2/sessions/conv-submission/snapshot", nil, headers)
+		turns := snapshot["turns"].([]any)
+		return len(turns) == 1 && turns[0].(map[string]any)["status"] == "completed" && len(snapshot["submissions"].([]any)) == 0
+	})
+	messages := snapshot["turns"].([]any)[0].(map[string]any)["messages"].([]any)
+	if len(messages) != 2 || messages[0].(map[string]any)["content"] != "Persist me" || messages[1].(map[string]any)["content"] != "done" {
+		t.Fatalf("completed snapshot lost messages: %+v", snapshot)
 	}
 	status, states := v2Do(t, phone, http.MethodPost, "/local/v2/sessions/conv-submission/queue/status", map[string]any{"request_ids": []string{"phone-message"}}, remoteHeaders("phone-client"))
 	if status != http.StatusOK {
 		t.Fatalf("status=%d %+v", status, states)
 	}
 	validateLocalV2(t, "submission_statuses", states)
-	_, snapshot := v2Do(t, srv, http.MethodGet, "/local/v2/sessions/conv-submission/snapshot", nil, headers)
-	if len(snapshot["submissions"].([]any)) != 1 {
-		t.Fatalf("snapshot lost submission: %+v", snapshot)
+	known := states["submissions"].([]any)
+	if len(known) != 1 || known[0].(map[string]any)["state"] != "attached" || known[0].(map[string]any)["attempt"].(map[string]any)["attempt_id"] != value["attempt"].(map[string]any)["attempt_id"] {
+		t.Fatalf("completed submission identity changed: %+v", states)
 	}
 }
 

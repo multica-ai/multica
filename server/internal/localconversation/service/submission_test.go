@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/multica-ai/multica/server/internal/localconversation/provider/claude"
-	"github.com/multica-ai/multica/server/internal/localconversation/store"
+	"fmt"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/localconversation/provider/claude"
+	"github.com/multica-ai/multica/server/internal/localconversation/store"
 )
 
 func TestSubmitReservesBeforeSlowPreparationAndQueuesOtherDevices(t *testing.T) {
@@ -57,26 +60,110 @@ func TestSubmitReservesBeforeSlowPreparationAndQueuesOtherDevices(t *testing.T) 
 	}
 }
 
-func TestSubmitPreservesPauseAndRemovedIdentity(t *testing.T) {
+func TestSubmitResumesUserPausedQueue(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pending=%t", pending), func(t *testing.T) {
+			f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
+			f.create(t, "conv", "claude")
+			ctx := context.Background()
+			if _, err := f.svc.UpdateQueue(ctx, f.scopeID, "conv", "pause", ""); err != nil {
+				t.Fatal(err)
+			}
+			if pending {
+				if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv", queued("old", "old"), true, TurnOrigin{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			result, err := f.svc.Submit(ctx, f.scopeID, "conv", queued("new", "new"), TurnOrigin{})
+			if err != nil || result.Queue.Paused || result.Queue.Error != "" {
+				t.Fatalf("submit did not resume: %+v %v", result, err)
+			}
+			wantState, wantFirst := "starting", "[new]"
+			if pending {
+				wantState, wantFirst = "queued", "[old]"
+			}
+			if result.Submission.State != wantState {
+				t.Fatalf("state=%s; want %s", result.Submission.State, wantState)
+			}
+			eventually(t, "first input", func() bool { return fmt.Sprint(f.sends(t)) == wantFirst })
+			if pending {
+				f.allAdapters()[0].emit(t, turnDone)
+				eventually(t, "new input after old input", func() bool { return fmt.Sprint(f.sends(t)) == "[old new]" })
+			}
+		})
+	}
+}
+
+func TestSubmitResumesAfterStopWithoutOverlappingTurns(t *testing.T) {
+	for _, completed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("completed=%t", completed), func(t *testing.T) {
+			f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
+			f.create(t, "conv", "claude")
+			ctx := context.Background()
+			if _, err := f.svc.Submit(ctx, f.scopeID, "conv", queued("first", "first"), TurnOrigin{}); err != nil {
+				t.Fatal(err)
+			}
+			eventually(t, "first attached", func() bool {
+				v, err := f.svc.Submissions(ctx, f.scopeID, "conv", []string{"first"})
+				return err == nil && len(v.Submissions) == 1 && v.Submissions[0].State == "attached"
+			})
+			eventually(t, "first input", func() bool { return fmt.Sprint(f.sends(t)) == "[first]" })
+			if _, err := f.svc.ControlQueue(ctx, f.scopeID, "conv", "stop", "", "stop-first"); err != nil {
+				t.Fatal(err)
+			}
+			adapter := f.allAdapters()[0]
+			if !slices.Contains(adapter.sent(), "interrupt") {
+				t.Fatal("stop did not interrupt the running turn")
+			}
+			finish := func() {
+				adapter.emit(t, `{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["interrupted"]}`)
+			}
+			if completed {
+				finish()
+				eventually(t, "first stopped", func() bool { busy, err := f.svc.executionBusy(ctx, "conv"); return err == nil && !busy })
+			}
+			result, err := f.svc.Submit(ctx, f.scopeID, "conv", queued("second", "second"), TurnOrigin{})
+			if err != nil || result.Queue.Paused {
+				t.Fatalf("submit after stop=%+v %v", result, err)
+			}
+			if !completed {
+				if result.Submission.State != "queued" || fmt.Sprint(f.sends(t)) != "[first]" {
+					t.Fatalf("new input overlapped stopping turn: %+v, %v", result, f.sends(t))
+				}
+				finish()
+			}
+			eventually(t, "second input", func() bool { return fmt.Sprint(f.sends(t)) == "[first second]" })
+		})
+	}
+}
+
+func TestSubmitReplayPreservesPauseAndRemovedIdentity(t *testing.T) {
 	f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
 	f.create(t, "conv", "claude")
 	ctx := context.Background()
-	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv", queued("old", "old"), true, TurnOrigin{}); err != nil {
+	if _, err := f.svc.Send(ctx, SendCommand{ScopeID: f.scopeID, ConversationID: "conv", RequestID: "running", Text: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.Submit(ctx, f.scopeID, "conv", queued("new", "new"), TurnOrigin{}); err != nil {
+		t.Fatal(err)
+	}
+	paused, err := f.svc.UpdateQueue(ctx, f.scopeID, "conv", "pause", "")
+	if err != nil {
 		t.Fatal(err)
 	}
 	result, err := f.svc.Submit(ctx, f.scopeID, "conv", queued("new", "new"), TurnOrigin{})
-	if err != nil || result.Submission.State != "queued" || !result.Queue.Paused {
-		t.Fatalf("paused submit=%+v %v", result, err)
+	if err != nil || result.Submission.State != "queued" || !result.Queue.Paused || result.QueueRevision != paused.Revision {
+		t.Fatalf("replay changed pause=%+v %v", result, err)
 	}
 	if _, err := f.svc.UpdateQueue(ctx, f.scopeID, "conv", "remove", "new"); err != nil {
 		t.Fatal(err)
 	}
 	result, err = f.svc.Submit(ctx, f.scopeID, "conv", queued("new", "new"), TurnOrigin{})
-	if err != nil || result.Submission.State != "removed" || string(result.Submission.Item) != "{}" {
+	if err != nil || result.Submission.State != "removed" || string(result.Submission.Item) != "{}" || !result.Queue.Paused {
 		t.Fatalf("removed retry=%+v %v", result, err)
 	}
-	if len(f.sends(t)) != 0 {
-		t.Fatal("paused input ran")
+	if fmt.Sprint(f.sends(t)) != "[running]" {
+		t.Fatal("replayed input ran")
 	}
 }
 
@@ -103,6 +190,10 @@ func TestSubmitPreparingFailureKeepsOriginalDisplayAndCanRetry(t *testing.T) {
 	if states.Submissions[0].State != "queued" {
 		t.Fatalf("state=%+v", states)
 	}
+	next, err := f.svc.Submit(ctx, f.scopeID, "conv", queued("next", "next"), TurnOrigin{})
+	if err != nil || !next.Queue.Paused || next.Queue.Error != v.Error || next.Submission.State != "queued" {
+		t.Fatalf("new submit retried preparation failure: %+v %v", next, err)
+	}
 	if _, err := f.svc.UpdateQueue(ctx, f.scopeID, "conv", "resume", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +208,10 @@ func TestSubmissionSurvivesRestartWithoutResending(t *testing.T) {
 	f := newServiceFixture(t, path)
 	f.create(t, "conv", "claude")
 	ctx := context.Background()
-	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv", queued("waiting", "body"), true, TurnOrigin{}); err != nil {
+	if _, err := f.svc.Send(ctx, SendCommand{ScopeID: f.scopeID, ConversationID: "conv", RequestID: "running", Text: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv", queued("waiting", "body"), false, TurnOrigin{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.svc.Close(ctx); err != nil {
@@ -131,6 +225,14 @@ func TestSubmissionSurvivesRestartWithoutResending(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	if len(again.sends(t)) != 0 {
 		t.Fatal("restart replayed queue")
+	}
+	next, err := again.svc.Submit(ctx, again.scopeID, "conv", queued("new", "new"), TurnOrigin{})
+	if err != nil || !next.Queue.Paused || next.Queue.Error != queuePausedByRestart || next.Submission.State != "queued" {
+		t.Fatalf("new submit resumed a restart hold: %+v %v", next, err)
+	}
+	again.svc.dispatchQueue("conv")
+	if len(again.sends(t)) != 0 {
+		t.Fatal("new submit replayed restored messages")
 	}
 }
 
@@ -202,6 +304,18 @@ func TestUnknownSubmissionStaysVisibleAndExplicitRemovalReleasesIt(t *testing.T)
 	}
 	if _, err := f.svc.Store().Execution(ctx, "conv"); err != nil {
 		t.Fatalf("unknown result released execution: %v", err)
+	}
+	next, err := f.svc.Submit(ctx, f.scopeID, "conv", queued("next", "next"), TurnOrigin{})
+	if err != nil || next.Submission.State != "queued" {
+		t.Fatalf("new submit bypassed unknown outcome: %+v %v", next, err)
+	}
+	f.svc.dispatchQueue("conv")
+	slot, err := f.svc.Store().Execution(ctx, "conv")
+	if err != nil || slot.RequestID != "r" || len(f.sends(t)) != 1 {
+		t.Fatalf("new submit released unknown execution: %+v %v, sends=%v", slot, err, f.sends(t))
+	}
+	if _, err := f.svc.UpdateQueue(ctx, f.scopeID, "conv", "remove", "next"); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := f.svc.ControlQueue(ctx, f.scopeID, "conv", "remove", "r", "remove-unknown"); err != nil {
 		t.Fatal(err)
