@@ -672,6 +672,11 @@ jobs:
         # in the log instead of passing as "ok".
         run: go test ./cmd/multica -v -run '^TestFileWithinWorkingDirWindows' -count=1 -timeout=5m
 
+      - name: Test Windows attachment download file names in the CLI
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        working-directory: server
+        run: go test ./cmd/multica -v -run '^TestRunAttachmentDownloadWindowsReservedCharacters$' -count=1 -timeout=5m
+
       - name: Test Windows link-target classification in internal/util
         if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
