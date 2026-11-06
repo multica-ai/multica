@@ -72,7 +72,8 @@ export function AssignmentEditor({
                     failure.change.assigned,
                   );
                   return (
-                    candidate.agentId === failure.change.agentId &&
+                    candidate.target === failure.change.target &&
+                    candidate.targetId === failure.change.targetId &&
                     candidate.repositoryId === failure.change.repositoryId
                   );
                 })?.label ?? ""
@@ -88,8 +89,8 @@ export function AssignmentEditor({
   return (
     <div className="space-y-4">
       <Input
-        aria-label={t(($) => $.code_graph.search)}
-        placeholder={t(($) => $.code_graph.search)}
+        aria-label={t(($) => $.code_graph.scope.search_selection)}
+        placeholder={t(($) => $.code_graph.scope.search_selection)}
         value={search}
         disabled={mutation.isPending}
         onChange={(event) => setSearch(event.target.value)}

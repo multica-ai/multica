@@ -30,7 +30,7 @@ Queue waiting does not consume the execution timeout. You can cancel a pending
 or running build, or rebuild after a source change. A failed rebuild leaves the
 last successful snapshot available.
 
-Open **Details → Query** to search symbols or documents, inspect callers,
+For diagnostics, open **Details → Advanced → Query checks** to search symbols or documents, inspect callers,
 callees and impact, or read source lines. Results identify the build and Git
 commit. Pin the returned build ID when comparing several results; inspect the
 source before treating a relationship as evidence. Missing results do not prove
@@ -38,7 +38,11 @@ that code or behavior is absent.
 
 ## Choose the usage scope
 
-Open **Team → Resources → CodeGraph**. In repository details, open **Usage scope**.
+Open **Team → Resources → CodeGraph**, then open the repository details and
+choose **Configure access**. The three scope sections show current selections
+and counts. **Select agents** and **Select projects** open a selection list;
+save to apply the changes. **Enable sharing** makes the graph available to all
+workspace agents, including agents created later.
 
 | Scope | When an agent can use the graph | Who can manage it |
 | --- | --- | --- |
@@ -62,6 +66,10 @@ Moving an issue to another project changes project access on the next tool call.
 Ordinary conversations without a project receive only direct and workspace access.
 
 ## Use the tools
+
+Once a graph is assigned and built, ask an agent in a task or conversation to
+find the relevant code, follow calls and check the source. You do not need to
+enter symbol IDs or source line ranges in the management page.
 
 Assignment does not install tools or bring an offline runtime online. A graph
 also needs a successful build before it can be queried.

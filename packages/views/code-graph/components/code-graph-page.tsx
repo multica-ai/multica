@@ -1,5 +1,4 @@
 "use client";
-import { useAuthStore } from "@multica/core/auth";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -12,7 +11,6 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
-  agentListOptions,
   codeGraphRepositoriesOptions,
   codeGraphRepositoryOptions,
 } from "@multica/core/workspace/queries";
@@ -20,7 +18,6 @@ import {
   useDeleteCodeGraphRepository,
   useCancelCodeGraphRepository,
   useSyncCodeGraphRepository,
-  useUnassignCodeGraphRepositoryAgent,
 } from "@multica/core/workspace/mutations";
 import type {
   CodeGraphRepository,
@@ -64,8 +61,6 @@ import { CodeGraphIntro } from "./code-graph-intro";
 import { featureDocsHref } from "../../layout/feature-intro";
 import { useLocale } from "../../i18n";
 import { RepositoryAssignmentsDialog } from "./repository-assignments-dialog";
-import { useGraphAssignmentWriter } from "./assignment-editor";
-import { canManageCodeGraphAgent } from "@multica/core/workspace/codegraph";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -339,8 +334,8 @@ function RepositoryRow({
             variant="ghost"
             size="icon-sm"
             onClick={onAssign}
-            title={t(($) => $.code_graph.assign)}
-            aria-label={t(($) => $.code_graph.assign)}
+            title={t(($) => $.code_graph.scope.choose_agents)}
+            aria-label={t(($) => $.code_graph.scope.choose_agents)}
           >
             <UserPlus className="size-4" />
           </Button>
@@ -486,16 +481,11 @@ function BuildProgress({ repo }: { repo: CodeGraphRepository }) {
 function RepositoryDetails({ repo }: { repo: CodeGraphRepository }) {
   const { t } = useT("layout");
   const wsId = useWorkspaceId();
-  const writer = useGraphAssignmentWriter(wsId);
-  const userId = useAuthStore((state) => state.user?.id);
-  const agents = useQuery(agentListOptions(wsId));
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<string>("overview");
-  const [assigning, setAssigning] = useState(false);
   const details = useQuery(
     codeGraphRepositoryOptions(wsId, open ? repo.id : ""),
   );
-  const unassign = useUnassignCodeGraphRepositoryAgent(wsId);
   const sync = useSyncCodeGraphRepository(wsId);
   const canManage = useCanManageGit();
   const current = details.data ?? repo;
@@ -554,14 +544,14 @@ function RepositoryDetails({ repo }: { repo: CodeGraphRepository }) {
                 <TabsTrigger value="overview">
                   {t(($) => $.code_graph.git_auth.overview)}
                 </TabsTrigger>
-                <TabsTrigger value="query">
-                  {t(($) => $.code_graph.git_auth.query)}
+                <TabsTrigger value="usage">
+                  {t(($) => $.code_graph.scope.title)}
                 </TabsTrigger>
                 <TabsTrigger value="access">
                   {t(($) => $.code_graph.git_auth.access)}
                 </TabsTrigger>
-                <TabsTrigger value="usage">
-                  {t(($) => $.code_graph.scope.title)}
+                <TabsTrigger value="advanced">
+                  {t(($) => $.code_graph.scope.advanced)}
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -649,28 +639,12 @@ function RepositoryDetails({ repo }: { repo: CodeGraphRepository }) {
                     </p>
                   )}
                 </section>
-                <section>
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <h3 className="font-medium">
-                      {t(($) => $.code_graph.assigned_agents)}
-                    </h3>
-                    {canManage && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setAssigning(true)}
-                      >
-                        {t(($) => $.code_graph.assign)}
-                      </Button>
-                    )}
-                  </div>
-                  {details.isPending ? (
-                    <p role="status">{t(($) => $.code_graph.loading)}</p>
-                  ) : details.isError ? (
-                    <div
-                      role="alert"
-                      className="flex items-center gap-2 text-destructive"
-                    >
+                <section className="space-y-2">
+                  <h3 className="font-medium">
+                    {t(($) => $.code_graph.scope.title)}
+                  </h3>
+                  {details.isError ? (
+                    <div role="alert" className="text-caption text-destructive">
                       {t(($) => $.code_graph.load_failed)}
                       <Button
                         variant="outline"
@@ -680,52 +654,35 @@ function RepositoryDetails({ repo }: { repo: CodeGraphRepository }) {
                         {t(($) => $.code_graph.retry)}
                       </Button>
                     </div>
-                  ) : !details.data?.agents?.length ? (
-                    <p className="text-body text-muted-foreground">
-                      {t(($) => $.code_graph.no_assignments)}
-                    </p>
                   ) : (
-                    <ul className="divide-y divide-border">
-                      {details.data.agents.map((agent) => (
-                        <li
-                          key={agent.id}
-                          className="flex items-center justify-between gap-3 py-3"
-                        >
-                          <div className="min-w-0 text-left">
-                            <p className="break-words text-body font-medium">
-                              {agent.name}
-                            </p>
-                          </div>
-                          {agents.data?.some(
-                            (row) =>
-                              row.id === agent.id &&
-                              canManageCodeGraphAgent(row, writer, userId),
-                          ) && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="shrink-0"
-                              disabled={unassign.isPending}
-                              onClick={() =>
-                                unassign.mutate({
-                                  repositoryId: repo.id,
-                                  agentId: agent.id,
-                                })
-                              }
-                            >
-                              {t(($) => $.code_graph.unassign)}
-                            </Button>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {unassign.isError ? (
-                    <p role="alert" className="text-body text-destructive">
-                      {t(($) => $.code_graph.unassign_failed)}
+                    <p className="text-body text-muted-foreground">
+                      {current.is_workspace_shared
+                        ? t(($) => $.code_graph.scope.sharing_on)
+                        : (current.agents?.length ?? 0) +
+                              (current.projects?.length ?? 0) >
+                            0
+                          ? t(($) => $.code_graph.scope.assignment_summary, {
+                              agents: current.agents?.length ?? 0,
+                              projects: current.projects?.length ?? 0,
+                            })
+                          : t(($) => $.code_graph.scope.unassigned_help)}
                     </p>
-                  ) : null}
+                  )}
+                  <p className="text-caption text-muted-foreground">
+                    {t(($) => $.code_graph.scope.task_help)}
+                  </p>
                 </section>
+              </TabsContent>
+              <TabsContent value="advanced" className="space-y-5">
+                <details className="rounded-lg border p-4">
+                  <summary className="cursor-pointer text-body font-medium">
+                    {t(($) => $.code_graph.scope.query_checks)}
+                  </summary>
+                  <p className="my-3 text-caption text-muted-foreground">
+                    {t(($) => $.code_graph.scope.query_checks_help)}
+                  </p>
+                  <CodeGraphTools wsId={wsId} repo={current} />
+                </details>
                 <details className="border-t pt-4">
                   <summary className="cursor-pointer text-caption text-muted-foreground">
                     {t(($) => $.code_graph.git_auth.history)}
@@ -753,22 +710,11 @@ function RepositoryDetails({ repo }: { repo: CodeGraphRepository }) {
                   </div>
                 </details>
               </TabsContent>
-              <TabsContent value="query">
-                <CodeGraphTools wsId={wsId} repo={current} />
-              </TabsContent>
               <TabsContent value="access" className="space-y-7">
                 <RepositoryGitAuth repo={current} />
               </TabsContent>
               <TabsContent value="usage" className="space-y-5">
                 <RepositoryUsageScope wsId={wsId} repo={current} />
-                <Button variant="outline" onClick={() => setAssigning(true)}>
-                  {t(($) => $.code_graph.scope.agents)}
-                </Button>
-                {!current.active_build_id && (
-                  <p className="text-caption text-muted-foreground">
-                    {t(($) => $.code_graph.scope.awaiting_build)}
-                  </p>
-                )}
               </TabsContent>
             </div>
           </Tabs>
@@ -790,8 +736,19 @@ function RepositoryDetails({ repo }: { repo: CodeGraphRepository }) {
                   {t(($) => $.code_graph.sync)}
                 </Button>
               )}
-              <Button onClick={() => setTab("query")}>
-                {t(($) => $.code_graph.git_auth.query_graph)}
+              <Button
+                onClick={() => {
+                  if (tab === "usage") {
+                    setOpen(false);
+                    setTab("overview");
+                  } else setTab("usage");
+                }}
+              >
+                {t(($) =>
+                  tab === "usage"
+                    ? $.code_graph.scope.done
+                    : $.code_graph.scope.configure,
+                )}
               </Button>
             </div>
             {sync.error && (
@@ -802,13 +759,6 @@ function RepositoryDetails({ repo }: { repo: CodeGraphRepository }) {
           </div>
         </DialogContent>
       </Dialog>
-      {assigning && (
-        <RepositoryAssignmentsDialog
-          wsId={wsId}
-          repo={current}
-          onClose={() => setAssigning(false)}
-        />
-      )}
     </>
   );
 }

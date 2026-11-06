@@ -45,7 +45,8 @@ export function useCodeGraphScope(wsId: string) {
 
 export type CodeGraphAssignmentChange = {
   repositoryId: string;
-  agentId: string;
+  target: "agent" | "project";
+  targetId: string;
   assigned: boolean;
 };
 
@@ -55,17 +56,24 @@ export function useCodeGraphAssignmentChanges(wsId: string) {
     mutationFn: async (changes: CodeGraphAssignmentChange[]) => {
       const results = await Promise.allSettled(
         changes.map((change) =>
-          change.assigned
-            ? api.assignCodeGraphRepositoryToAgent(
+          change.target === "project"
+            ? api.setCodeGraphProject(
                 wsId,
                 change.repositoryId,
-                change.agentId,
+                change.targetId,
+                change.assigned,
               )
-            : api.unassignCodeGraphRepositoryAgent(
-                wsId,
-                change.repositoryId,
-                change.agentId,
-              ),
+            : change.assigned
+              ? api.assignCodeGraphRepositoryToAgent(
+                  wsId,
+                  change.repositoryId,
+                  change.targetId,
+                )
+              : api.unassignCodeGraphRepositoryAgent(
+                  wsId,
+                  change.repositoryId,
+                  change.targetId,
+                ),
         ),
       );
       return results.flatMap((result, index) =>

@@ -6,6 +6,26 @@ Initial verification: 2026-11-05.
 
 ## Usage scopes and contribution review, 2026-11-06
 
+### Usage-first interface follow-up
+
+Repository details now lead to Configure access. The three scope cards are
+parallel on desktop and stacked on narrow screens; agent/project selection uses
+the same select-and-save editor. Query checks and build diagnostics are collapsed
+under Advanced. Source reading is named by its purpose, with the 100-line limit
+explained beside the control.
+
+Repeated nine workspace typechecks, 31 pure core checks, targeted CodeGraph UI
+lint and documentation MDX generation. Real-browser checks against the local API
+covered project save, cancel preserving the server selection, project removal,
+workspace-sharing enable/disable, Escape/focus restoration and diagnostic symbol
+search against the existing engine snapshot. At 420px the dialog measured 388px,
+had no horizontal overflow and kept the footer inside the viewport. The desktop
+cards shared the same row. Temporary project data was removed afterward.
+
+No backend schema or permission behavior changed in this follow-up. The real
+database/MCP checks below are earlier evidence, not a newly repeated backend
+suite. Model-backed execution and native desktop interaction remain unverified.
+
 - Applied incremental migrations 629–630 to the isolated managed database,
   preserving existing repositories and direct assignments. Regenerated sqlc.
 - Passed seven real database/MCP handler checks, including agent-owner binding,

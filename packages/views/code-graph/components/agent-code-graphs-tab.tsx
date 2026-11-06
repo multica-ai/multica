@@ -132,7 +132,8 @@ export function AgentCodeGraphsTab({
               options={options}
               toChange={(repositoryId, selected) => ({
                 repositoryId,
-                agentId: agent.id,
+                target: "agent",
+                targetId: agent.id,
                 assigned: selected,
               })}
               onDone={() => setEditing(false)}

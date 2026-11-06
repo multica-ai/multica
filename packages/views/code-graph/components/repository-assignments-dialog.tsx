@@ -74,7 +74,9 @@ export function RepositoryAssignmentsDialog({
     >
       <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>{t(($) => $.code_graph.assign_title)}</DialogTitle>
+          <DialogTitle>
+            {t(($) => $.code_graph.scope.choose_agents)}
+          </DialogTitle>
           <DialogDescription>{repo.repo_name}</DialogDescription>
         </DialogHeader>
         {!ready && !failed && (
@@ -101,7 +103,8 @@ export function RepositoryAssignmentsDialog({
             options={options}
             toChange={(agentId, selected) => ({
               repositoryId: repo.id,
-              agentId,
+              target: "agent",
+              targetId: agentId,
               assigned: selected,
             })}
             onDone={onClose}

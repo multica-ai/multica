@@ -260,6 +260,9 @@ export function CodeGraphTools({
           </div>
         </TabsContent>
         <TabsContent value="source" className="space-y-4">
+          <p className="text-caption text-muted-foreground">
+            {t(($) => $.code_graph.scope.read_limit)}
+          </p>
           <label className="grid gap-2">
             {t(($) => $.code_graph.source_path)}
             <Input value={path} onChange={(e) => setPath(e.target.value)} />
