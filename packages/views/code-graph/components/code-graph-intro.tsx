@@ -1,14 +1,11 @@
 "use client";
 
-import { GitBranch, Layers, Search, Users } from "@multica/ui/icons";
-import {
-  FeatureIntro,
-  FeatureIntroCarousel,
-  IntroArtCard,
-} from "../../layout/feature-intro";
+import { Layers } from "@multica/ui/icons";
+import { FeatureIntro, FeatureIntroCarousel } from "../../layout/feature-intro";
 import { useT } from "../../i18n";
 import { RegisterRepositoryDialog } from "./register-repository-dialog";
 import { GitCredentialManager } from "./git-credentials";
+import { CodeGraphIntroArt } from "./code-graph-intro-art";
 
 export function CodeGraphIntro({
   wsId,
@@ -21,23 +18,20 @@ export function CodeGraphIntro({
   const slides = [
     {
       id: "import",
-      icon: GitBranch,
       title: t(($) => $.code_graph.intro.import_title),
       description: t(($) => $.code_graph.intro.import_help),
     },
     {
       id: "scope",
-      icon: Users,
       title: t(($) => $.code_graph.intro.scope_title),
       description: t(($) => $.code_graph.intro.scope_help),
     },
     {
       id: "query",
-      icon: Search,
       title: t(($) => $.code_graph.intro.query_title),
       description: t(($) => $.code_graph.intro.query_help),
     },
-  ];
+  ] as const;
   return (
     <FeatureIntro
       icon={Layers}
@@ -70,13 +64,8 @@ export function CodeGraphIntro({
         label={t(($) => $.code_graph.intro.title)}
         slides={slides.map((slide) => ({
           ...slide,
-          art: (
-            <IntroArtCard>
-              <div className="flex min-h-40 items-center justify-center">
-                <slide.icon className="size-16 text-brand" aria-hidden="true" />
-              </div>
-            </IntroArtCard>
-          ),
+          interactiveArt: true,
+          art: <CodeGraphIntroArt step={slide.id} title={slide.title} />,
         }))}
       />
     </FeatureIntro>

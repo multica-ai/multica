@@ -181,7 +181,8 @@
       "scope_help": "Attribuez des agents ou des projets, ou partagez avec tous les agents de l’espace.",
       "query_title": "Consulter et vérifier le code",
       "query_help": "Utilisez un agent compatible ou consultez le graphe ici. Les résultats indiquent la version du code.",
-      "admin_help": "Un propriétaire ou administrateur peut importer le premier dépôt."
+      "admin_help": "Un propriétaire ou administrateur peut importer le premier dépôt.",
+      "enlarge": "Agrandir la capture : {{title}}"
     }
   },
   "nav": {

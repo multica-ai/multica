@@ -8,6 +8,16 @@ Initial verification: 2026-11-05.
 
 ### Usage-first interface follow-up
 
+The introduction now uses actual cropped registration, scope and symbol-result
+captures, with English/Chinese and light/dark variants (12 PNGs, about 226 KiB).
+The source is the public `expressjs/serve-static` review repository; captures do
+not include account/navigation/host details or credential values. PNG metadata
+contains no text/EXIF chunks. Scope thumbnails rearrange crops for readability;
+the accessible image dialog shows the original capture. Browser checks loaded
+and enlarged all three slides in both themes, verified Escape focus restoration,
+and checked a 420px image dialog without horizontal overflow. Shared package
+typechecks and targeted lint passed; native desktop interaction remains untested.
+
 First-import credential discovery was also checked against the real API/browser:
 the empty welcome page has credential management, and the registration form has
 an inline manager next to the credential selector. Closing the nested manager

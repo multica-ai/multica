@@ -173,6 +173,7 @@ export interface FeatureIntroSlide {
   title: string;
   description: string;
   art: ReactNode;
+  interactiveArt?: boolean;
 }
 
 /** Manually paged value cards; the next card peeks in from the right. */
@@ -230,7 +231,7 @@ export function FeatureIntroCarousel({
             >
               <div className="h-full overflow-hidden rounded-xl bg-surface shadow-[var(--menu-shadow)] ring-1 ring-surface-border">
                 <div
-                  aria-hidden="true"
+                  aria-hidden={slide.interactiveArt ? undefined : true}
                   className="flex h-64 items-center justify-center overflow-hidden border-b bg-brand/5 bg-[radial-gradient(var(--border)_1px,transparent_1px)] [background-size:16px_16px] px-5 py-4"
                 >
                   {slide.art}

@@ -181,7 +181,8 @@
       "scope_help": "Assign selected agents or projects, or share with all workspace agents.",
       "query_title": "Query and check the source",
       "query_help": "Use an agent with CodeGraph tools, or query here. Results identify the code version.",
-      "admin_help": "A workspace owner or administrator can import the first repository."
+      "admin_help": "A workspace owner or administrator can import the first repository.",
+      "enlarge": "Enlarge screenshot: {{title}}"
     }
   },
   "nav": {
