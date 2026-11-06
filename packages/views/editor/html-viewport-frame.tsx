@@ -8,7 +8,9 @@
  *               a browser window that size. A document wider than the stage
  *               (the width bridge in utils/iframe-width-bridge.ts reports it)
  *               is laid out at its own width and scaled down to fit, so
- *               nothing hides past the right edge. The default.
+ *               nothing hides past the right edge — when that width holds
+ *               it; a document that only grows with its viewport keeps
+ *               filling the stage. The default.
  *   - desktop / tablet / phone : the iframe is exactly 1440 / 768 / 390 CSS px
  *               wide, so the document's media queries see that device. When
  *               the stage is narrower the frame scales down to fit — layout
@@ -23,7 +25,11 @@
 import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
-import { readHtmlPreviewWidthMessage } from "./utils/iframe-width-bridge";
+import {
+  HTML_PREVIEW_WIDTH_KEY,
+  readHtmlPreviewWidthMessage,
+  type HtmlPreviewWidthMessage,
+} from "./utils/iframe-width-bridge";
 
 export type HtmlViewport = "fill" | "desktop" | "tablet" | "phone";
 
@@ -40,7 +46,7 @@ export const VIEWPORT_WIDTHS: Record<Exclude<HtmlViewport, "fill">, number> = {
   phone: 390,
 };
 
-/** The widest layout Fit will scale down from; past it the document scrolls. */
+/** The widest layout Fit will scale down from; past it the document fills the stage and scrolls. */
 export const FIT_MAX_WIDTH = VIEWPORT_WIDTHS.desktop * 2;
 
 export interface ViewportFit {
@@ -85,35 +91,78 @@ function useLayoutSize(node: HTMLElement | null) {
   return size;
 }
 
-// The width the document in the frame needs, from the width bridge's
-// reports. It only grows while the same document is loaded: once the frame
-// is widened the document no longer overflows, and that must not shrink it
-// back. A new document starts over.
-function useDocumentWidth(area: HTMLElement | null) {
-  const [learned, setLearned] = useState<{ doc: string; width: number } | null>(null);
+/**
+ * Fit's one try at widening a document, for one document at one stage width.
+ * `failed` once the document still overflowed at `width`: its overflow grows
+ * with the viewport (a `width: 100%` box with padding, a breakpoint that
+ * jumps wider), so widening cannot settle it and Fit fills the stage instead.
+ */
+export interface FitAttempt {
+  doc: string;
+  stage: number;
+  width: number;
+  failed: boolean;
+}
+
+// Widths are whole CSS px on both sides, but the stage's offsetWidth and the
+// frame's innerWidth may round a fractional box differently.
+const near = (a: number, b: number) => Math.abs(a - b) <= 1;
+
+/**
+ * The attempt after a width report. Only a report measured at the stage's
+ * own width starts an attempt; only one measured at the attempt's width
+ * settles it. Anything else — a device width's layout, a report in flight
+ * while the frame resizes — is not about the layout Fit is deciding on.
+ */
+export function nextFitAttempt(
+  previous: FitAttempt | null,
+  report: HtmlPreviewWidthMessage,
+  stage: number,
+): FitAttempt | null {
+  const current =
+    previous?.doc === report.doc && previous.stage === stage ? previous : null;
+  if (!current) {
+    if (!near(report.viewport, stage)) return null;
+    if (report.needed <= report.viewport || report.needed > FIT_MAX_WIDTH) return null;
+    return { doc: report.doc, stage, width: report.needed, failed: false };
+  }
+  if (current.failed || !near(report.viewport, current.width)) return current;
+  return report.needed > report.viewport ? { ...current, failed: true } : current;
+}
+
+// The width Fit lays the document out at when that is wider than the stage,
+// from the width bridge's reports; null fills the stage. Leaving Fit forgets
+// the attempt, so coming back measures afresh against the stage.
+function useFitWidth(area: HTMLElement | null, active: boolean, stage: number | null) {
+  const [attempt, setAttempt] = useState<FitAttempt | null>(null);
+  const [wasActive, setWasActive] = useState(active);
+  if (wasActive !== active) {
+    setWasActive(active);
+    setAttempt(null);
+  }
+
   useEffect(() => {
-    if (!area) return;
+    if (!area || !active || stage === null) return;
+    const frame = () => area.querySelector("iframe")?.contentWindow ?? null;
     const onMessage = (event: MessageEvent) => {
-      const frame = area.querySelector("iframe");
-      if (!frame || event.source !== frame.contentWindow) return;
+      if (!event.source || event.source !== frame()) return;
       const report = readHtmlPreviewWidthMessage(event.data);
-      if (!report) return;
-      setLearned((previous) => {
-        const known = previous?.doc === report.doc ? previous.width : 0;
-        const width =
-          report.needed > report.viewport
-            ? Math.min(FIT_MAX_WIDTH, Math.max(known, report.needed))
-            : known;
-        if (width === 0) return null;
-        return previous?.doc === report.doc && previous.width === width
-          ? previous
-          : { doc: report.doc, width };
-      });
+      if (report) setAttempt((previous) => nextFitAttempt(previous, report, stage));
     };
     window.addEventListener("message", onMessage);
+    // The frame may already be at the stage's width (back from a device
+    // width the same size), and then no resize inside it reports.
+    frame()?.postMessage({ [HTML_PREVIEW_WIDTH_KEY]: 1, type: "measure" }, "*");
     return () => window.removeEventListener("message", onMessage);
-  }, [area]);
-  return learned?.width ?? null;
+  }, [area, active, stage]);
+
+  return active &&
+    attempt &&
+    !attempt.failed &&
+    attempt.stage === stage &&
+    attempt.width > attempt.stage
+    ? attempt.width
+    : null;
 }
 
 export function HtmlViewportFrame({
@@ -127,15 +176,10 @@ export function HtmlViewportFrame({
   const { t } = useT("editor");
   const [area, setArea] = useState<HTMLDivElement | null>(null);
   const size = useLayoutSize(area);
-  const documentWidth = useDocumentWidth(area);
+  const fitWidth = useFitWidth(area, viewport === "fill", size?.width || null);
 
   // The width the document lays out at; null fills the stage.
-  const layoutWidth =
-    viewport !== "fill"
-      ? VIEWPORT_WIDTHS[viewport]
-      : documentWidth !== null && size && documentWidth > size.width
-        ? documentWidth
-        : null;
+  const layoutWidth = viewport === "fill" ? fitWidth : VIEWPORT_WIDTHS[viewport];
   // Until the area has a size (first layout, or a host without layout such
   // as a test DOM) a device frame shows unscaled at full height.
   const fit =

@@ -46,15 +46,36 @@ describe("the bridge script", () => {
     document.documentElement.style.overflowX = "";
   });
 
+  let listeners: Array<[string, EventListener]> = [];
+
   function run(layout: { viewport: number; client: number; scroll: number }) {
     const postMessage = vi.spyOn(window, "postMessage").mockImplementation(() => {});
     vi.spyOn(window, "innerWidth", "get").mockReturnValue(layout.viewport);
     vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(layout.client);
     vi.spyOn(document.documentElement, "scrollWidth", "get").mockReturnValue(layout.scroll);
-    vi.spyOn(window, "addEventListener").mockImplementation(() => {});
+    listeners = [];
+    vi.spyOn(window, "addEventListener").mockImplementation((type: string, listener) => {
+      listeners.push([type, listener as EventListener]);
+    });
     new Function(__WIDTH_BRIDGE_SCRIPT__)();
     return postMessage.mock.calls.map(([m]) => readHtmlPreviewWidthMessage(m));
   }
+
+  function fire(type: string, event: Event) {
+    for (const [t, listener] of listeners) if (t === type) listener(event);
+  }
+
+  it("reports again only when the layout changed, unless the parent asks", () => {
+    run({ viewport: 1000, client: 1000, scroll: 1000 });
+    const postMessage = vi.mocked(window.postMessage);
+    fire("resize", new Event("resize"));
+    expect(postMessage).toHaveBeenCalledTimes(1);
+
+    fire("message", new MessageEvent("message", { data: { [K]: 1, type: "measure" }, source: window }));
+    expect(postMessage).toHaveBeenCalledTimes(2);
+    fire("message", new MessageEvent("message", { data: { [K]: 1, type: "measure" }, source: null }));
+    expect(postMessage).toHaveBeenCalledTimes(2);
+  });
 
   it("reports a document that fits as needing its viewport", () => {
     const [report] = run({ viewport: 1000, client: 1000, scroll: 1000 });

@@ -14,7 +14,9 @@
  * document that clips its own overflow (`overflow-x: hidden` / `clip` on
  * the root or body — the usual guard for decorative bleed) needs no more
  * than its viewport. `doc` is fresh for every document load, so the parent
- * can forget a width learned from a document that is gone.
+ * can forget a width learned from a document that is gone. It reports on
+ * load, resize and layout changes, and on a `measure` request from the
+ * parent even when nothing changed.
  *
  * It runs in the iframe's opaque origin with the capabilities the author's
  * scripts already have. The parent treats every message as untrusted (see
@@ -32,13 +34,16 @@ const SCRIPT = [
   `var K=${JSON.stringify(HTML_PREVIEW_WIDTH_KEY)},D=document.documentElement,`,
   "ID=Math.random().toString(36).slice(2),last='';",
   "function clips(el){if(!el)return false;var o=getComputedStyle(el).overflowX;return o==='hidden'||o==='clip'}",
-  "function report(){var b=document.body,vw=window.innerWidth,cw=D.clientWidth;",
+  "function measure(force){var b=document.body,vw=window.innerWidth,cw=D.clientWidth;",
   "var sw=clips(D)||clips(b)?cw:Math.max(D.scrollWidth,b?b.scrollWidth:0);",
-  "var need=vw+Math.max(0,Math.ceil(sw-cw));var key=vw+'/'+need;if(key===last)return;last=key;",
+  "var need=vw+Math.max(0,Math.ceil(sw-cw));var key=vw+'/'+need;if(!force&&key===last)return;last=key;",
   "var m={type:'width',doc:ID,viewport:vw,needed:need};m[K]=1;try{parent.postMessage(m,'*')}catch(_){}}",
+  "function report(){measure(false)}",
   "report();window.addEventListener('load',report);window.addEventListener('resize',report);",
   "if(document.fonts&&document.fonts.ready)document.fonts.ready.then(report);",
   "if(typeof ResizeObserver==='function'){var ro=new ResizeObserver(report);ro.observe(D);if(document.body)ro.observe(document.body)}",
+  "window.addEventListener('message',function(e){if(e.source!==parent)return;var d=e.data;",
+  "if(d&&d[K]===1&&d.type==='measure')measure(true)});",
   "})();",
 ].join("");
 
