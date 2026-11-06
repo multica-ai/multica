@@ -2057,23 +2057,6 @@ func (q *Queries) CompleteAgentTask(ctx context.Context, arg CompleteAgentTaskPa
 	return i, err
 }
 
-const countDelegatedFailureRecoveryTasks = `-- name: CountDelegatedFailureRecoveryTasks :one
-SELECT count(*)
-FROM agent_task_queue
-WHERE trigger_evidence_kind = 'delegated_failure'
-  AND trigger_evidence_ref_id = $1
-`
-
-// Counts dedicated coordinator wakeups for one failed delegated task. Merged
-// recovery signals do not create a new row and therefore do not consume an
-// automatic attempt until they need a standalone successor.
-func (q *Queries) CountDelegatedFailureRecoveryTasks(ctx context.Context, failedTaskID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countDelegatedFailureRecoveryTasks, failedTaskID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countDelegatedRecoveryTasks = `-- name: CountDelegatedRecoveryTasks :one
 SELECT count(*)
 FROM agent_task_queue
