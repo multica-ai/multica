@@ -729,6 +729,9 @@
   "reply": {
     "placeholder": "답글 남기기...",
     "annotations": {
+      "direct_reply": "답글",
+      "direct_comment": "댓글 게시",
+      "direct_target_deleted": "답글 대상이 삭제되었습니다. 입력한 내용은 유지됩니다. 다른 댓글을 선택해 답글을 작성하세요.",
       "confirm_add": "주석 추가",
       "save": "주석 저장",
       "add_comment": "댓글에 추가",

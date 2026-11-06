@@ -1626,6 +1626,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   useMarkIssueInboxReadWhileViewing(wsId, issue?.id ?? "", readsInbox);
   const descriptionSourceId = `description:${id}`;
   const descriptionAnnotations = useCommentAnnotations({
+    issueId: id,
+    reply: {
+      onSubmit: (_sourceId, content, suppressAgentIds, steerTaskIds) => submitComment(content, undefined, suppressAgentIds, steerTaskIds),
+      onAccepted: (commentId) => scrollToTimelineBottom(commentId),
+      steerByDefault: (task) => !task.trigger_comment_id,
+    },
     draftKey: `new:${id}`,
     sources: [{ id: descriptionSourceId, name: "Description", revision: issue?.revision }],
     enabled: !!user && !!issue,

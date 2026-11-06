@@ -729,6 +729,9 @@
   "reply": {
     "placeholder": "回覆...",
     "annotations": {
+      "direct_reply": "回覆",
+      "direct_comment": "發表評論",
+      "direct_target_deleted": "回覆對象已刪除，意見已保留。請選擇其他評論回覆。",
       "confirm_add": "新增批註",
       "save": "儲存批註",
       "add_comment": "加入評論",
