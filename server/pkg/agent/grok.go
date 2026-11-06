@@ -629,7 +629,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 }
 
 // Grok's ACP `authenticate` method ids (from `initialize`.authMethods).
-// `xai.api_key` consumes XAI_API_KEY from the environment; `cached_token`
+// `xai.api_key` accepts environment or per-model config credentials; `cached_token`
 // reuses the credentials written by `grok login`.
 const (
 	grokAuthMethodAPIKey      = "xai.api_key"
@@ -639,7 +639,8 @@ const (
 // selectGrokAuthMethod chooses which advertised ACP auth method to use,
 // following xAI's documented headless flow: prefer the API key when
 // XAI_API_KEY is present in the child env and the CLI offers it, otherwise
-// fall back to the cached login token. Grok requires an explicit authenticate
+// fall back to the cached login token, then an advertised API-key method
+// backed by credentials Grok resolves itself. Grok requires an explicit authenticate
 // step: an empty or unknown method list is a protocol/authentication failure,
 // not permission to continue directly to session/new.
 func selectGrokAuthMethod(methods []string, haveAPIKey bool) (string, error) {
@@ -656,7 +657,10 @@ func selectGrokAuthMethod(methods []string, haveAPIKey bool) (string, error) {
 		return grokAuthMethodCachedToken, nil
 	}
 	if offered[grokAuthMethodAPIKey] {
-		return "", fmt.Errorf("Grok advertised only API-key authentication, but XAI_API_KEY is not set")
+		// Grok also advertises this method for per-model api_key/env_key
+		// credentials in config.toml. Let authenticate validate those without
+		// copying secrets or changing the selected provider.
+		return grokAuthMethodAPIKey, nil
 	}
 	advertised := make([]string, 0, len(offered))
 	for method := range offered {
