@@ -296,3 +296,52 @@ func TestListTimeline_EmptyIssue(t *testing.T) {
 		t.Fatalf("entries = %d, want 0", got)
 	}
 }
+
+func TestListTimeline_Direction(t *testing.T) {
+	issueID := dbfx.Issue(t, "Timeline direction")
+	first := dbfx.Insert(t, "comment", testutil.Cols{
+		"id": "10000000-0000-0000-0000-000000000001", "issue_id": issueID,
+		"workspace_id": testWorkspaceID, "author_type": "member", "author_id": testUserID,
+		"content": "First", "type": "comment", "created_at": "2026-01-01T00:00:00Z",
+	})
+	second := dbfx.Insert(t, "comment", testutil.Cols{
+		"id": "10000000-0000-0000-0000-000000000002", "issue_id": issueID,
+		"workspace_id": testWorkspaceID, "author_type": "member", "author_id": testUserID,
+		"content": "Second", "type": "comment", "created_at": "2026-01-01T00:00:00Z",
+	})
+	activity := dbfx.Insert(t, "activity_log", testutil.Cols{
+		"issue_id": issueID, "workspace_id": testWorkspaceID,
+		"actor_type": "member", "actor_id": testUserID,
+		"action": "status_changed", "created_at": "2026-01-02T00:00:00Z",
+	})
+	for _, tc := range []struct {
+		name, query string
+		want        []string
+	}{
+		{"default", "", []string{first, second, activity}},
+		{"ascending", "?direction=asc", []string{first, second, activity}},
+		{"descending", "?direction=desc", []string{activity, second, first}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var entries []TimelineEntry
+			req := withURLParam(newRequest(http.MethodGet, "/api/issues/"+issueID+"/timeline"+tc.query, nil), "id", issueID)
+			testutil.Call(t, testHandler.ListTimeline, req).Want(http.StatusOK).JSON(&entries)
+			if len(entries) != len(tc.want) {
+				t.Fatalf("entries = %d, want %d", len(entries), len(tc.want))
+			}
+			for i, want := range tc.want {
+				if entries[i].ID != want {
+					t.Errorf("entry %d = %s, want %s", i, entries[i].ID, want)
+				}
+			}
+		})
+	}
+	req := withURLParam(newRequest(http.MethodGet, "/api/issues/"+issueID+"/timeline?direction=invalid", nil), "id", issueID)
+	testutil.Call(t, testHandler.ListTimeline, req).Want(http.StatusBadRequest)
+	var wrapped timelinePaginatedResponse
+	req = withURLParam(newRequest(http.MethodGet, "/api/issues/"+issueID+"/timeline?limit=10&direction=asc", nil), "id", issueID)
+	testutil.Call(t, testHandler.ListTimeline, req).Want(http.StatusOK).JSON(&wrapped)
+	if len(wrapped.Entries) != 3 || wrapped.Entries[0].ID != activity {
+		t.Fatalf("legacy order changed: %+v", wrapped.Entries)
+	}
+}

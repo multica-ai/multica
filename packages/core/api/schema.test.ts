@@ -63,6 +63,16 @@ describe("ApiClient schema fallback", () => {
   });
 
   describe("listTimeline", () => {
+    it("passes the requested timeline direction and preserves server order", async () => {
+      const entries = [
+        { type: "comment", id: "new", actor_type: "member", actor_id: "u", created_at: "2026-01-02T00:00:00Z" },
+        { type: "comment", id: "old", actor_type: "member", actor_id: "u", created_at: "2026-01-01T00:00:00Z" },
+      ];
+      stubFetchJson(entries);
+      const client = new ApiClient("https://api.example.test");
+      expect((await client.listTimeline("issue-1", "desc")).map((entry) => entry.id)).toEqual(["new", "old"]);
+      expect(fetch).toHaveBeenCalledWith("https://api.example.test/api/issues/issue-1/timeline?direction=desc", expect.any(Object));
+    });
     it("falls back to an empty array when the body is null", async () => {
       stubFetchJson(null);
       const client = new ApiClient("https://api.example.test");

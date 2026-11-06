@@ -34,6 +34,7 @@ import {
   issueTimelineOptions,
 } from "@multica/core/issues/queries";
 import { useRetryIssueRun, useToggleIssueSubscriber } from "@multica/core/issues/mutations";
+import { selectIssueTimelineDirection, useIssueActivityStore } from "@multica/core/issues/stores/issue-activity-store";
 import { useCommentCollapseStore, useResolvedExpandStore } from "@multica/core/issues/stores";
 import { quickActionListOptions } from "@multica/core/quick-actions";
 import type { AgentTask, Issue } from "@multica/core/types";
@@ -64,6 +65,7 @@ export function useIssueCommandGroup(
   const wsId = useWorkspaceId();
   const palette = usePalette();
   const queryClient = useQueryClient();
+  const direction = useIssueActivityStore(selectIssueTimelineDirection);
   const userId = useAuthStore((s) => s.user?.id ?? null);
 
   const single: Issue | null = target?.kind === "single" ? target.issue : null;
@@ -285,7 +287,7 @@ export function useIssueCommandGroup(
             // still can't load, no comments are on screen — dropping the
             // action matches the visible state.
             void queryClient
-              .ensureQueryData(issueTimelineOptions(single.id))
+              .ensureQueryData(issueTimelineOptions(single.id, direction))
               .then((entries) => {
                 useCommentCollapseStore.getState().collapseAll(single.id, rootCommentIds(entries));
                 useResolvedExpandStore.getState().collapseAll(single.id);
@@ -300,7 +302,7 @@ export function useIssueCommandGroup(
           keywords: ["unfold", "expand", "comments", "展开", "评论"],
           run: () => {
             void queryClient
-              .ensureQueryData(issueTimelineOptions(single.id))
+              .ensureQueryData(issueTimelineOptions(single.id, direction))
               .then((entries) => {
                 useCommentCollapseStore.getState().expandAll(single.id);
                 useResolvedExpandStore
@@ -360,6 +362,7 @@ export function useIssueCommandGroup(
     };
   }, [
     actions,
+    direction,
     activeQuickActions.length,
     onDeletedFallbackPath,
     palette,

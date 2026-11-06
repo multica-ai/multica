@@ -54,6 +54,7 @@ vi.mock("@multica/core/issues/queries", () => ({
   }),
   issueKeys: {
     timeline: (id: string) => ["issues", "timeline", id],
+    timelineSorted: (id: string, direction: string) => direction === "desc" ? ["issues", "timeline", id, "desc"] : ["issues", "timeline", id],
   },
 }));
 
@@ -108,10 +109,12 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
+import { useIssueActivityStore } from "@multica/core/issues/stores/issue-activity-store";
 import { useIssueTimeline } from "./use-issue-timeline";
 
 describe("useIssueTimeline", () => {
   beforeEach(() => {
+    useIssueActivityStore.setState({ order: "oldest_first" });
     wsHandlers.clear();
     stableHandles.createMutateAsync.mockClear();
     stableHandles.updateMutateAsync.mockClear();
@@ -122,6 +125,24 @@ describe("useIssueTimeline", () => {
     queryState.isLoading = false;
     cacheUpdates.last = null;
     cacheUpdates.invalidations = 0;
+  });
+
+  it.each([
+    { createdAt: "2026-01-03T00:00:00Z", expected: ["incoming", "new", "old"] },
+    { createdAt: "2026-01-01T12:00:00Z", expected: ["new", "incoming", "old"] },
+    { createdAt: "2026-01-02T00:00:00Z", expected: ["new", "incoming", "old"] },
+    { createdAt: "2025-12-31T00:00:00Z", expected: ["new", "old", "incoming"] },
+  ])("inserts live comments into the selected descending timeline: $createdAt", ({ createdAt, expected }) => {
+    useIssueActivityStore.getState().setOrder("newest_first");
+    queryState.data = [
+      { type: "comment", id: "new", actor_type: "member", actor_id: "u", created_at: "2026-01-02T00:00:00Z" },
+      { type: "comment", id: "old", actor_type: "member", actor_id: "u", created_at: "2026-01-01T00:00:00Z" },
+    ];
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    act(() => wsHandlers.get("comment:created")!({ comment: {
+      id: "incoming", issue_id: "issue-1", author_type: "member", author_id: "u", content: "Incoming", created_at: createdAt, updated_at: "2026-01-03T00:00:00Z", type: "comment", parent_id: null,
+    } }));
+    expect((cacheUpdates.last as { id: string }[]).map((entry) => entry.id)).toEqual(expected);
   });
 
   // CommentCard is wrapped in React.memo (perf fix for long timelines, see

@@ -7,6 +7,8 @@ export interface AssigneeFrequencyEntry {
   frequency: number;
 }
 
+export type TimelineDirection = "asc" | "desc";
+
 export interface TimelineEntry {
   type: "activity" | "comment";
   id: string;

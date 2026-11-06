@@ -27,6 +27,7 @@ import {
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
+import { useIssueActivityStore, type IssueActivityOrder } from "@multica/core/issues/stores/issue-activity-store";
 import { useChatStore } from "@multica/core/chat";
 import {
   useCommentComposerStore,
@@ -93,6 +94,7 @@ export function PreferencesTab() {
         anchor="comments"
       >
         <SettingsCard>
+          <IssueActivityOrderRow />
           <StickyCommentBarRow />
           <RunningAgentReplyRow />
           <FloatingChatRow />
@@ -181,6 +183,28 @@ function LanguageRow() {
           ))}
         </SelectContent>
       </Select>
+    </SettingsRow>
+  );
+}
+
+function IssueActivityOrderRow() {
+  const { t } = useT("settings");
+  const order = useIssueActivityStore((s) => s.order);
+  const setOrder = useIssueActivityStore((s) => s.setOrder);
+  const label = t(($) => $.preferences.activity_order.title);
+  return (
+    <SettingsRow anchor="issue-activity-order" label={label} size="select-wide">
+      <div role="group" aria-label={label}>
+        <SegmentedToggle<IssueActivityOrder>
+          value={order}
+          onChange={setOrder}
+          buttonClassName="px-3 py-1 text-label"
+          options={[
+            ["oldest_first", t(($) => $.preferences.activity_order.oldest_first)],
+            ["newest_first", t(($) => $.preferences.activity_order.newest_first)],
+          ]}
+        />
+      </div>
     </SettingsRow>
   );
 }

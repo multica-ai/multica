@@ -139,6 +139,15 @@ describe("groupCommentRuns", () => {
       .toBe(latest.id);
   });
 
+  it.each(["asc", "desc"] as const)("keeps the latest same-time input as the run anchor in %s server order", (direction) => {
+    const root = comment("root");
+    const first = comment("first", { parent_id: root.id });
+    const latest = comment("latest", { parent_id: root.id });
+    const run = task("run", { trigger_comment_id: root.id, delivered_comment_ids: [first.id, latest.id] });
+    const timeline = direction === "asc" ? [root, first, latest] : [latest, first, root];
+    expect(buildCommentRunView([run], timeline, new Map(), direction).runs.get(root.id)?.[0]?.anchorCommentId).toBe(latest.id);
+  });
+
   it("projects chained answers while preserving an assignment reply's thread", () => {
     const first = task("first", { trigger_comment_id: "root" });
     const second = task("second", { trigger_comment_id: "answer-a" });

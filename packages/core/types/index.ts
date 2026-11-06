@@ -160,6 +160,7 @@ export {
 } from "./quick-action";
 export type {
   TimelineEntry,
+  TimelineDirection,
   AssigneeFrequencyEntry,
 } from "./activity";
 export type { IssueSubscriber } from "./subscriber";

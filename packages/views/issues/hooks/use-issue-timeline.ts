@@ -9,6 +9,7 @@ import {
 import type { QueryClient } from "@tanstack/react-query";
 import type {
   Comment,
+  TimelineDirection,
   TimelineEntry,
   Reaction,
 } from "@multica/core/types";
@@ -34,7 +35,8 @@ import {
   useToggleCommentReaction,
   type ToggleCommentReactionVars,
 } from "@multica/core/issues/mutations";
-import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
+import { selectIssueTimelineDirection, useIssueActivityStore } from "@multica/core/issues/stores/issue-activity-store";
+import { insertTimelineEntry } from "@multica/core/issues/timeline-sort";
 import {
   unhandledCommentTriggerOutcomes,
   mentionLabelsByTarget,
@@ -88,9 +90,10 @@ function applyCommentSnapshot(
   qc: QueryClient,
   issueId: string,
   comment: Comment,
+  direction: TimelineDirection,
 ) {
   let missingRevision = false;
-  qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+  qc.setQueryData<TLCache>(issueKeys.timelineSorted(issueId, direction), (old) =>
     old?.map((entry) => {
       if (entry.id !== comment.id) return entry;
       if (entry.revision !== undefined && comment.revision === undefined) {
@@ -110,7 +113,7 @@ function applyCommentSnapshot(
     // During a rolling deployment, an old server may emit an unversioned
     // snapshot after this cache has already observed a versioned one. Never
     // overwrite the ordered value; refetch from the authoritative API instead.
-    qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+    qc.invalidateQueries({ queryKey: issueKeys.timelineSorted(issueId, direction) });
   }
 }
 
@@ -118,7 +121,8 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   const { t } = useT("issues");
   const qc = useQueryClient();
 
-  const query = useQuery(issueTimelineOptions(issueId));
+  const direction = useIssueActivityStore(selectIssueTimelineDirection);
+  const query = useQuery(issueTimelineOptions(issueId, direction));
   const { data, isLoading: loading } = query;
 
   const timeline = useMemo<TimelineEntry[]>(() => data ?? [], [data]);
@@ -138,8 +142,8 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   // timeline. Cheaper than diffing across a possibly-long disconnect.
   useWSReconnect(
     useCallback(() => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
-    }, [qc, issueId]),
+      qc.invalidateQueries({ queryKey: issueKeys.timelineSorted(issueId, direction) });
+    }, [qc, issueId, direction]),
   );
 
   // --- WS event handlers ---
@@ -150,14 +154,14 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { comment } = payload as CommentCreatedPayload;
         if (comment.issue_id !== issueId) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) => {
+        qc.setQueryData<TLCache>(issueKeys.timelineSorted(issueId, direction), (old) => {
           const entry = commentToTimelineEntry(comment);
           if (!old) return [entry];
           if (old.some((e) => e.id === comment.id)) return old;
-          return sortTimelineEntriesAsc([...old, entry]);
+          return insertTimelineEntry(old, entry, direction);
         });
       },
-      [qc, issueId],
+      [qc, issueId, direction],
     ),
   );
 
@@ -167,9 +171,9 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { comment } = payload as CommentUpdatedPayload;
         if (comment.issue_id !== issueId) return;
-        applyCommentSnapshot(qc, issueId, comment);
+        applyCommentSnapshot(qc, issueId, comment, direction);
       },
-      [qc, issueId],
+      [qc, issueId, direction],
     ),
   );
 
@@ -185,9 +189,9 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { comment } = payload as CommentResolvedPayload;
         if (comment.issue_id !== issueId) return;
-        applyCommentSnapshot(qc, issueId, comment);
+        applyCommentSnapshot(qc, issueId, comment, direction);
       },
-      [qc, issueId],
+      [qc, issueId, direction],
     ),
   );
 
@@ -197,9 +201,9 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       (payload: unknown) => {
         const { comment } = payload as CommentUnresolvedPayload;
         if (comment.issue_id !== issueId) return;
-        applyCommentSnapshot(qc, issueId, comment);
+        applyCommentSnapshot(qc, issueId, comment, direction);
       },
-      [qc, issueId],
+      [qc, issueId, direction],
     ),
   );
 
@@ -212,11 +216,11 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         // A comment with replies is tombstoned (comment:updated), never
         // removed, so any cached reply of a removed comment is stale: older
         // servers cascaded the delete to every descendant.
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+        qc.setQueryData<TLCache>(issueKeys.timelineSorted(issueId, direction), (old) =>
           old ? removeCommentSubtree(old, comment_id) : old,
         );
       },
-      [qc, issueId],
+      [qc, issueId, direction],
     ),
   );
 
@@ -228,13 +232,13 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         if (p.issue_id !== issueId) return;
         const entry = p.entry;
         if (!entry || !entry.id) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) => {
+        qc.setQueryData<TLCache>(issueKeys.timelineSorted(issueId, direction), (old) => {
           if (!old) return [entry];
           if (old.some((e) => e.id === entry.id)) return old;
-          return sortTimelineEntriesAsc([...old, entry]);
+          return insertTimelineEntry(old, entry, direction);
         });
       },
-      [qc, issueId],
+      [qc, issueId, direction],
     ),
   );
 
@@ -245,7 +249,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         const { reaction, issue_id, comment_revision } = payload as ReactionAddedPayload;
         if (issue_id !== issueId) return;
         let missingRevision = false;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+        qc.setQueryData<TLCache>(issueKeys.timelineSorted(issueId, direction), (old) =>
           old?.map((e) => {
             if (e.id !== reaction.comment_id) return e;
             if (comment_revision === undefined && e.revision !== undefined) {
@@ -267,10 +271,10 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           }),
         );
         if (missingRevision) {
-          qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+          qc.invalidateQueries({ queryKey: issueKeys.timelineSorted(issueId, direction) });
         }
       },
-      [qc, issueId],
+      [qc, issueId, direction],
     ),
   );
 
@@ -281,7 +285,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         const p = payload as ReactionRemovedPayload;
         if (p.issue_id !== issueId) return;
         let missingRevision = false;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
+        qc.setQueryData<TLCache>(issueKeys.timelineSorted(issueId, direction), (old) =>
           old?.map((e) => {
             if (e.id !== p.comment_id) return e;
             if (p.comment_revision === undefined && e.revision !== undefined) {
@@ -308,10 +312,10 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           }),
         );
         if (missingRevision) {
-          qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+          qc.invalidateQueries({ queryKey: issueKeys.timelineSorted(issueId, direction) });
         }
       },
-      [qc, issueId],
+      [qc, issueId, direction],
     ),
   );
 
