@@ -219,6 +219,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var sessionID string
 		var lastUsageResult *claudeSDKMessage
 		sawAsyncLaunch := false
+		backgroundTasks := 0
 		usage := make(map[string]TokenUsage)
 		seenUsage := make(map[string]struct{})
 		eventCount := 0
@@ -323,6 +324,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
 				}
+				if msg.Subtype == "background_tasks_changed" {
+					backgroundTasks = len(msg.Tasks)
+				}
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 			case "result":
 				sawResult = true
@@ -353,9 +357,13 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 				// Keep draining stdout while accepted control replies finish writing.
 				// Once those replies drain, stdin closes; requests arriving after that
-				// cannot be answered.
-				closeAfterControls()
-				if resultIsError || terminalReasonError != "" {
+				// cannot be answered. So stdin stays open past a result that Claude
+				// follows with another turn; that turn's result closes it.
+				failed := resultIsError || terminalReasonError != ""
+				if failed || supplements == nil || !supplements.hooksAwaitLaterTurn(backgroundTasks) {
+					closeAfterControls()
+				}
+				if failed {
 					stopAfterErrorResultOnce.Do(func() { go stopAfterErrorResult() })
 				}
 			case "log":
@@ -742,6 +750,9 @@ type claudeSDKMessage struct {
 
 	// log fields
 	Log *claudeLogEntry `json:"log,omitempty"`
+
+	// system/background_tasks_changed: the background tasks still running
+	Tasks []json.RawMessage `json:"tasks,omitempty"`
 
 	// control request fields
 	RequestID string          `json:"request_id,omitempty"`
