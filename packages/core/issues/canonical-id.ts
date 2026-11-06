@@ -50,11 +50,17 @@ export interface CanonicalIssue {
  * canonical query never observes an empty cache and never fires a fetch of its
  * own. Seeding the cache from an effect instead would run after that decision
  * and leave the single-request property resting on hook ordering.
+ *
+ * `enabled: false` keeps the cache subscriptions without starting requests.
  */
-export function useCanonicalIssue(wsId: string, routeId: string): CanonicalIssue {
+export function useCanonicalIssue(
+  wsId: string,
+  routeId: string,
+  { enabled = true }: { enabled?: boolean } = {},
+): CanonicalIssue {
   const qc = useQueryClient();
   const isUuid = isIssueUuid(routeId);
-  const resolveEnabled = !isUuid && !!wsId && !!routeId;
+  const resolveEnabled = enabled && !isUuid && !!wsId && !!routeId;
 
   const resolve = useQuery({
     ...issueDetailOptions(wsId, routeId),
@@ -65,7 +71,7 @@ export function useCanonicalIssue(wsId: string, routeId: string): CanonicalIssue
 
   const detail = useQuery({
     ...issueDetailOptions(wsId, canonicalId ?? ""),
-    enabled: !!canonicalId && !!wsId,
+    enabled: enabled && !!canonicalId && !!wsId,
     // Ignored once the entry holds data, so a row already patched by a realtime
     // event is never overwritten by this older resolution response.
     initialData: isUuid ? undefined : resolve.data,
