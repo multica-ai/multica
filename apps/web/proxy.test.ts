@@ -84,21 +84,21 @@ describe("proxy legacy workspace route redirects", () => {
     ).toBe("https://app.multica.test/acme/squads/squad-123?view=members");
   });
 
-  it("sends logged-out legacy URLs to login", () => {
-    expect(redirectLocation("/usage?tab=billing")).toBe(
-      "https://app.multica.test/login?tab=billing",
-    );
-  });
+  it.each([undefined, "previous-account"])(
+    "sends logged-out legacy URLs to login with the original path and query (last workspace %s)",
+    (lastSlug) => {
+      const cookies: Record<string, string> = lastSlug ? { last_workspace_slug: lastSlug } : {};
+      const location = new URL(redirectLocation("/usage?tab=billing", cookies)!);
+      expect(location.pathname).toBe("/login");
+      expect(location.searchParams.get("next")).toBe("/usage?tab=billing");
+      expect(location.searchParams.has("tab")).toBe(false);
+    },
+  );
 
-  it("sends logged-in legacy URLs without a last workspace cookie to login", () => {
-    // Not root: the root-path rule below leaves "/" on the public site for the
-    // official marketing hosts even with a session, so bouncing there would
-    // dead-end on the landing page. /login resolves against the workspace list
-    // instead. The deep-link query is dropped because feeding a legacy path
-    // back through `next` would return here and loop.
+  it("passes an authenticated legacy link to login for workspace resolution", () => {
     expect(
       redirectLocation("/squads?view=members", { multica_logged_in: "1" }),
-    ).toBe("https://app.multica.test/login");
+    ).toBe("https://app.multica.test/login?next=%2Fsquads%3Fview%3Dmembers");
   });
 
   it.each(["multica.ai", "www.multica.ai"])(
@@ -106,7 +106,7 @@ describe("proxy legacy workspace route redirects", () => {
     (host) => {
       expect(
         redirectLocation("/inbox", { multica_logged_in: "1" }, host),
-      ).toBe(`https://${host}/login`);
+      ).toBe(`https://${host}/login?next=%2Finbox`);
     },
   );
 

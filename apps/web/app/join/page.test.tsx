@@ -152,15 +152,20 @@ describe("JoinPage", () => {
   it("sends unauthenticated users to login when they click join", async () => {
     const user = userEvent.setup();
     authStateRef.state.user = null;
-    render(<JoinPage />, { wrapper: createWrapper() });
+    const original = window.location.href;
+    const target = "/join?code=abc123&source=shared#invite";
+    window.history.replaceState(null, "", target);
 
-    await user.click(
-      await screen.findByRole("button", { name: "Log In to Join" }),
-    );
-    expect(mockPush).toHaveBeenCalledWith(
-      "/login?next=" + encodeURIComponent("/join?code=abc123"),
-    );
-    expect(mockJoinByShareLink).not.toHaveBeenCalled();
+    try {
+      render(<JoinPage />, { wrapper: createWrapper() });
+      await user.click(
+        await screen.findByRole("button", { name: "Log In to Join" }),
+      );
+      expect(mockPush).toHaveBeenCalledWith(`/login?next=${encodeURIComponent(target)}`);
+      expect(mockJoinByShareLink).not.toHaveBeenCalled();
+    } finally {
+      window.history.replaceState(null, "", original);
+    }
   });
 
   it("joins only when an authenticated user clicks the button", async () => {

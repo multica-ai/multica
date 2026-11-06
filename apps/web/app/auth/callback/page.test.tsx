@@ -5,6 +5,7 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import { paths } from "@multica/core/paths";
 import { RESOURCES } from "@multica/views/locales";
 import { ApiError } from "@multica/core/api";
+import { rememberGoogleReturnTo, takeGoogleReturnTo } from "@/features/auth/return-to";
 
 const {
   mockPush,
@@ -320,13 +321,13 @@ describe("CallbackPage", () => {
     expect(mockListMyInvitations).not.toHaveBeenCalled();
   });
 
-  it.each(["https://evil.example", "%2F%2Fevil.example", "%2F%"])(
+  it.each(["next:https://evil.example", "next://evil.example", "next_ref:missing"])(
     "ignores unsafe or malformed OAuth return targets (%s)",
-    async (next) => {
+    async (state) => {
       mockLoginWithGoogle.mockResolvedValue(
         makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),
       );
-      mockSearchParams.set("state", `next:${next}`);
+      mockSearchParams.set("state", state);
 
       renderCallback();
 
@@ -334,16 +335,18 @@ describe("CallbackPage", () => {
     },
   );
 
-  it("returns from Google login to the complete issue URL", async () => {
-    const next = "/acme/issues/ACME-12?labels=one,two&view=a%2Fb#comment-123";
+  it("returns from Google login to the complete workspace URL", async () => {
+    const next = "/acme/projects/project-1?filter=one,two&view=a%2Fb#activity";
     mockLoginWithGoogle.mockResolvedValue(
       makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),
     );
-    mockSearchParams.set("state", `next:${encodeURIComponent(next)}`);
+    const ref = rememberGoogleReturnTo(next)!;
+    mockSearchParams.set("state", `next_ref:${ref}`);
 
     renderCallback();
 
     await waitFor(() => expect(mockPush).toHaveBeenCalledExactlyOnceWith(next));
+    expect(takeGoogleReturnTo(ref)).toBeNull();
   });
 
   it("onboarded user honors a safe next= target (e.g. /invite/{id})", async () => {

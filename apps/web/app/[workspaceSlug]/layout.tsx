@@ -11,6 +11,7 @@ import { NoAccessPage } from "@multica/views/workspace/no-access-page";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { useWorkspaceSeen } from "@multica/views/workspace/use-workspace-seen";
 import { workspaceSlugFromPathname } from "@/lib/workspace-slug-from-pathname";
+import { returnToCurrentPage } from "@/features/auth/return-to";
 
 export default function WorkspaceLayout({
   children,
@@ -24,23 +25,17 @@ export default function WorkspaceLayout({
   const isAuthLoading = useAuthStore((s) => s.isLoading);
   const router = useRouter();
   const pathname = usePathname();
-  const isIssueDetail = /^\/[^/]+\/issues\/[^/]+\/?$/.test(pathname);
+  const ownsPath = workspaceSlug === workspaceSlugFromPathname(pathname);
 
   // Workspace routes require auth. If user is unauthenticated (initial visit
   // without a session, token expired, another tab logged out, etc.), bounce
   // to /login. Without this, the layout renders null and the user sees a
   // blank page stuck on /{slug}/...
   useEffect(() => {
-    if (isAuthLoading || user) return;
-    const login = paths.login();
-    if (!isIssueDetail) {
-      router.replace(login);
-      return;
+    if (!isAuthLoading && !user && ownsPath) {
+      router.replace(returnToCurrentPage());
     }
-    if (workspaceSlug !== workspaceSlugFromPathname(pathname)) return;
-    const { pathname: issuePath, search, hash } = window.location;
-    router.replace(`${login}?next=${encodeURIComponent(issuePath + search + hash)}`);
-  }, [isAuthLoading, isIssueDetail, user, router, pathname, workspaceSlug]);
+  }, [isAuthLoading, user, router, ownsPath, pathname]);
 
   // Hard onboarding gate. Authenticated user but onboarded_at NULL means
   // they bypassed /onboarding (typed the URL, deeplink, etc.). Redirect
@@ -49,10 +44,10 @@ export default function WorkspaceLayout({
   // /onboarding bounce out to their workspace. Together those two effects
   // make `onboarded_at` the single source of truth for "may access /<slug>/*".
   useEffect(() => {
-    if (user && user.onboarded_at == null) {
-      router.replace(paths.onboarding());
+    if (user && user.onboarded_at == null && ownsPath) {
+      router.replace(returnToCurrentPage(paths.onboarding()));
     }
-  }, [user, router]);
+  }, [user, router, ownsPath, pathname]);
 
   // Resolve workspace by slug through the shared workspace-list query. A
   // warm auth bootstrap reuses its cache; a cold route fetches it directly.
@@ -66,7 +61,7 @@ export default function WorkspaceLayout({
   // the correct workspace header. Gate this global write on the live pathname:
   // App Router can retain old layouts whose rerenders would otherwise switch the
   // singleton and realtime connection back to a stale workspace.
-  if (workspace && workspaceSlug === workspaceSlugFromPathname(pathname)) {
+  if (workspace && ownsPath) {
     setCurrentWorkspace(workspaceSlug, workspace.id);
   }
 
@@ -91,7 +86,7 @@ export default function WorkspaceLayout({
     </div>
   );
 
-  if (isAuthLoading || (isIssueDetail && !user)) return loadingIndicator;
+  if (isAuthLoading || !user) return loadingIndicator;
   // Don't render children until workspace is resolved. useWorkspaceId()
   // throws when the list hasn't populated or the slug is unknown — gating
   // here makes that invariant hold for every descendant.

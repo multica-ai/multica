@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { configStore } from "@multica/core/config";
+import { takeGoogleReturnTo } from "@/features/auth/return-to";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "@multica/views/locales/en/common.json";
@@ -128,8 +129,8 @@ describe("LoginPage", () => {
   // packages/views/auth/login-page.test.tsx. This wrapper suite only owns web
   // platform handoff and redirect behavior.
 
-  it("encodes the complete issue return address in Google OAuth state", async () => {
-    const next = "/acme/issues/ACME-12?labels=one,two&view=a%2Fb#comment-123";
+  it("keeps the complete return address in the tab when starting Google OAuth", async () => {
+    const next = "/acme/settings?tab=billing&session_id=example-secret#receipt";
     searchParamsState.params = new URLSearchParams({ next });
     configStore.getState().setAuthConfig({ allowSignup: true, googleClientId: "test-client" });
     const originalLocation = window.location;
@@ -146,11 +147,40 @@ describe("LoginPage", () => {
       });
       expect(navigate).toHaveBeenCalledOnce();
       const oauth = new URL(navigate.mock.calls[0]![0]);
-      expect(oauth.searchParams.get("state")).toBe(`next:${encodeURIComponent(next)}`);
+      const state = oauth.searchParams.get("state") ?? "";
+      expect(state).toMatch(/^next_ref:[a-f0-9]{32}$/);
+      expect(oauth.href).not.toContain("example-secret");
+      expect(takeGoogleReturnTo(state.slice("next_ref:".length))).toBe(next);
     } finally {
       Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
       configStore.getState().setAuthConfig({ allowSignup: true });
     }
+  });
+
+  it("resolves a legacy bookmark and its inherited fragment after login", async () => {
+    const original = window.location.href;
+    const params = new URLSearchParams({ next: "/projects/project-1?view=members" });
+    searchParamsState.params = params;
+    authStateRef.state.user = { id: "u1", email: "test@example.invalid", onboarded_at: "2026-01-01T00:00:00Z" };
+    mockListWorkspaces.mockResolvedValue([{ id: "ws-1", slug: "acme" }]);
+    window.history.replaceState(null, "", `/login?${params}#activity`);
+
+    try {
+      render(<LoginPage />, { wrapper: createWrapper() });
+      await waitFor(() => {
+        expect(mockReplace).toHaveBeenCalledWith("/acme/projects/project-1?view=members#activity");
+      });
+    } finally {
+      window.history.replaceState(null, "", original);
+    }
+  });
+
+  it("uses the normal landing page when a legacy bookmark has no workspace", async () => {
+    searchParamsState.params = new URLSearchParams({ next: "/projects/project-1?view=members" });
+    authStateRef.state.user = { id: "u1", email: "test@example.invalid", onboarded_at: "2026-01-01T00:00:00Z" };
+
+    render(<LoginPage />, { wrapper: createWrapper() });
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledExactlyOnceWith("/workspaces/new"));
   });
 
   // Regression: MUL-1080 — if the user is already authenticated on the web

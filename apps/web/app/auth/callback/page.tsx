@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
@@ -20,6 +20,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "@multica/views/i18n";
 import { Loader2 } from "@multica/ui/icons";
 import { CliCallbackError } from "@/features/auth/cli-callback-error";
+import { resolveReturnTo, takeGoogleReturnTo } from "@/features/auth/return-to";
 import { callbackErrorFrom, type CallbackError } from "./callback-error";
 
 const authLogger = createLogger("auth.callback");
@@ -32,6 +33,7 @@ function CallbackContent() {
   const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle);
   const [error, setError] = useState<CallbackError | null>(null);
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
+  const exchangedCode = useRef<string | null>(null);
 
   useEffect(() => {
     const code = searchParams.get("code");
@@ -51,20 +53,15 @@ function CallbackContent() {
       return;
     }
 
+    if (exchangedCode.current === code) return;
+    exchangedCode.current = code;
+
     const state = searchParams.get("state") || "";
     const stateParts = state.split(",");
     const isDesktop = stateParts.includes("platform:desktop");
     const nextPart = stateParts.find((p) => p.startsWith("next:"))?.slice("next:".length);
-    // In-flight sign-ins can still carry a raw path. Encoded paths keep
-    // commas in the original URL from becoming OAuth state separators.
-    let nextUrl = sanitizeNextUrl(nextPart ?? null);
-    if (nextPart?.startsWith("%2F")) {
-      try {
-        nextUrl = sanitizeNextUrl(decodeURIComponent(nextPart));
-      } catch {
-        // A malformed return address can fall back to the normal landing page.
-      }
-    }
+    const nextRef = stateParts.find((p) => p.startsWith("next_ref:"))?.slice("next_ref:".length);
+    const nextUrl = nextRef === undefined ? sanitizeNextUrl(nextPart ?? null) : takeGoogleReturnTo(nextRef);
 
     // CLI callback params — carried across the Google OAuth round-trip so
     // headless/WSL2 `multica login` can receive the JWT after browser-based
@@ -126,8 +123,9 @@ function CallbackContent() {
           // 1. nextUrl wins: a `next=/invite/<id>` always survives the OAuth
           //    round-trip — the user clicked a specific link and we should
           //    honor exactly that destination.
-          if (nextUrl) {
-            router.push(nextUrl);
+          const returnTo = resolveReturnTo(nextUrl, wsList);
+          if (returnTo) {
+            router.push(returnTo);
             return;
           }
 
