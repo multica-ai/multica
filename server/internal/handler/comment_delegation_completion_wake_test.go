@@ -25,7 +25,9 @@ type delegatedWakeSeed struct {
 // is delegated_from the leader's task. When withDelegationComment is set, the
 // leader's delegation comment exists and is the worker task's trigger, so
 // worker replies must thread under it (the comment-triggered top-level guard).
-func seedDelegationPair(t *testing.T, issueID, leaderStatus, workerStatus string, withDelegationComment bool) delegatedWakeSeed {
+// extraWorkerCols carry per-case worker-task overrides (e.g. autopilot_run_id)
+// so negative guards reuse the same seed shape.
+func seedDelegationPair(t *testing.T, issueID, leaderStatus, workerStatus string, withDelegationComment bool, extraWorkerCols ...testutil.Cols) delegatedWakeSeed {
 	t.Helper()
 	leaderAgent := dbfx.Agent(t, "9720 wake coordinator", testRuntimeID)
 	workerAgent := dbfx.Agent(t, "9720 wake worker", testRuntimeID)
@@ -44,6 +46,11 @@ func seedDelegationPair(t *testing.T, issueID, leaderStatus, workerStatus string
 			"author_type": "agent", "author_id": leaderAgent, "source_task_id": leaderTask,
 		})
 		workerCols["trigger_comment_id"] = delegationComment
+	}
+	for _, extra := range extraWorkerCols {
+		for k, v := range extra {
+			workerCols[k] = v
+		}
 	}
 	workerTask := dbfx.Task(t, workerAgent, workerCols)
 	dbfx.Cleanup(t, `DELETE FROM comment WHERE issue_id = $1`, issueID)
@@ -200,5 +207,191 @@ func TestWorkerTopLevelResultCommentWakesDelegator(t *testing.T) {
 	}
 	if got := completionWakeCount(t, seed.workerTask); got != 1 {
 		t.Fatalf("delegated_completion wake tasks = %d, want 1", got)
+	}
+}
+
+// leaderTaskCountForIssue counts leader-agent task rows on the issue — the
+// duplicate-detection probe for the pending case.
+func leaderTaskCountForIssue(t *testing.T, issueID, leaderAgentID string) int {
+	t.Helper()
+	return dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2`, issueID, leaderAgentID)
+}
+
+// TestExplicitMentionDoesNotDoubleWake pins that an explicit @coordinator
+// mention keeps exactly its mention-route task and the zero-route completion
+// wake never fires a second leader task beside it. Non-vacuous: with the same
+// seed minus the mention (TestDelegatedWorkerZeroRouteCommentWakesDelegator)
+// the wake fires, so the mention route is what suppresses it here.
+func TestExplicitMentionDoesNotDoubleWake(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	issueID := seedWakeIssue(t, "9720 mention no double wake")
+	seed := seedDelegationPair(t, issueID, "completed", "running", true)
+	dbfx.Exec(t, `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, issueID, seed.leaderAgent)
+
+	var leaderName string
+	dbfx.QueryRow(t, `SELECT name FROM agent WHERE id = $1`, seed.leaderAgent).Scan(&leaderName)
+	_, replyID := postCommentAsAgent(t, issueID, seed.workerAgent, seed.workerTask,
+		"done — [@"+leaderName+"](mention://agent/"+seed.leaderAgent+") please review", seed.delegationComment)
+
+	if got := tasksCarryingComment(t, issueID, seed.leaderAgent, replyID); got != 1 {
+		t.Fatalf("leader tasks triggered by the mentioned reply = %d, want exactly 1 (the mention route's; never two)", got)
+	}
+	if got := completionWakeCount(t, seed.workerTask); got != 0 {
+		t.Fatalf("delegated_completion wake tasks = %d, want 0 (mention must not double-wake)", got)
+	}
+}
+
+// TestAlreadyPendingDelegatorNotWokenAgain pins the fold-or-skip contract: a
+// queued leader task already covers the wake, so the worker's zero-route
+// closing comment must fold into it, never enqueue a second leader row.
+// Non-vacuous: without the pending row the same comment enqueues a wake
+// (positive tests), and the fold still records the comment receipt.
+func TestAlreadyPendingDelegatorNotWokenAgain(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	issueID := seedWakeIssue(t, "9720 pending delegator no second task")
+	seed := seedDelegationPair(t, issueID, "running", "completed", true)
+	dbfx.Exec(t, `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, issueID, seed.leaderAgent)
+	// The leader's original delegator task is 'running' (dispatched); add a
+	// queued leader row pending on the delegation thread (migration 516's
+	// trigger derives comment_thread_id from trigger_comment_id) — the pending
+	// slot the wake must merge into.
+	dbfx.Task(t, seed.leaderAgent, testutil.Cols{
+		"runtime_id": testRuntimeID, "issue_id": issueID, "status": "queued",
+		"trigger_comment_id":  seed.delegationComment,
+		"originator_user_id":  testUserID,
+		"accountable_user_id": testUserID,
+	})
+	before := leaderTaskCountForIssue(t, issueID, seed.leaderAgent)
+	if before != 2 {
+		t.Fatalf("setup: leader tasks before comment = %d, want 2 (running + queued)", before)
+	}
+
+	_, replyID := postCommentAsAgent(t, issueID, seed.workerAgent, seed.workerTask,
+		"closing report: done, no mention", seed.delegationComment)
+
+	if got := leaderTaskCountForIssue(t, issueID, seed.leaderAgent); got != before {
+		t.Fatalf("leader tasks after comment = %d, want %d (fold-or-skip, never a second task)", got, before)
+	}
+	if got := tasksCarryingComment(t, issueID, seed.leaderAgent, replyID); got != 1 {
+		t.Fatalf("leader tasks carrying the reply = %d, want 1 (the pending fold receipt)", got)
+	}
+	if got := completionWakeCount(t, seed.workerTask); got != 0 {
+		t.Fatalf("delegated_completion wake tasks = %d, want 0 (pending task covers the wake)", got)
+	}
+}
+
+// TestFailedWorkerTaskDoesNotWake pins that a failed delegated worker's
+// zero-route comment does not take the completion wake: the failure side owns
+// that handoff via the recovery outbox. Non-vacuous: the identical seed with
+// worker status 'completed' (positive tests) produces exactly one wake, so the
+// status check in loadDelegatedCompletionWakeTarget is the only gate being
+// exercised here.
+func TestFailedWorkerTaskDoesNotWake(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	issueID := seedWakeIssue(t, "9720 failed worker no completion wake")
+	seed := seedDelegationPair(t, issueID, "running", "failed", true)
+	dbfx.Exec(t, `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, issueID, seed.leaderAgent)
+
+	_, replyID := postCommentAsAgent(t, issueID, seed.workerAgent, seed.workerTask,
+		"failed mid-run, handing back", seed.delegationComment)
+
+	if got := tasksCarryingComment(t, issueID, seed.leaderAgent, replyID); got != 0 {
+		t.Fatalf("leader tasks triggered by the failed worker's reply = %d, want 0", got)
+	}
+	if got := completionWakeCount(t, seed.workerTask); got != 0 {
+		t.Fatalf("delegated_completion wake tasks = %d, want 0", got)
+	}
+}
+
+// TestArchivedDelegatorNotWoken pins the delegator-availability guard: an
+// archived leader agent cannot receive the wake. Non-vacuous: archiving is the
+// only difference from the positive seed (unarchived leader gets exactly one
+// wake), so the ArchivedAt check in loadDelegatedCompletionWakeTarget is what
+// this exercises.
+func TestArchivedDelegatorNotWoken(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	issueID := seedWakeIssue(t, "9720 archived delegator no wake")
+	seed := seedDelegationPair(t, issueID, "running", "completed", true)
+	dbfx.Exec(t, `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, issueID, seed.leaderAgent)
+	dbfx.Exec(t, `UPDATE agent SET archived_at = now() WHERE id = $1`, seed.leaderAgent)
+
+	_, replyID := postCommentAsAgent(t, issueID, seed.workerAgent, seed.workerTask,
+		"closing report: done, no mention", seed.delegationComment)
+
+	if got := tasksCarryingComment(t, issueID, seed.leaderAgent, replyID); got != 0 {
+		t.Fatalf("leader tasks triggered by the reply = %d, want 0 (archived delegator)", got)
+	}
+	if got := completionWakeCount(t, seed.workerTask); got != 0 {
+		t.Fatalf("delegated_completion wake tasks = %d, want 0", got)
+	}
+}
+
+// TestDelegatorWithoutRuntimeNotWoken pins the runtime guard: a leader agent
+// with no runtime cannot execute a wake task. Non-vacuous: nulling runtime_id
+// is the only difference from the positive seed, so the RuntimeID check in
+// loadDelegatedCompletionWakeTarget is what this exercises.
+func TestDelegatorWithoutRuntimeNotWoken(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	issueID := seedWakeIssue(t, "9720 runtime-less delegator no wake")
+	seed := seedDelegationPair(t, issueID, "running", "completed", true)
+	dbfx.Exec(t, `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, issueID, seed.leaderAgent)
+	dbfx.Exec(t, `UPDATE agent SET runtime_id = NULL WHERE id = $1`, seed.leaderAgent)
+
+	_, replyID := postCommentAsAgent(t, issueID, seed.workerAgent, seed.workerTask,
+		"closing report: done, no mention", seed.delegationComment)
+
+	if got := tasksCarryingComment(t, issueID, seed.leaderAgent, replyID); got != 0 {
+		t.Fatalf("leader tasks triggered by the reply = %d, want 0 (delegator without runtime)", got)
+	}
+	if got := completionWakeCount(t, seed.workerTask); got != 0 {
+		t.Fatalf("delegated_completion wake tasks = %d, want 0", got)
+	}
+}
+
+// TestAutopilotDelegatedRunDoesNotWake pins the autopilot guard: when an
+// autopilot run owns the delegated worker task, its closing comment must not
+// spawn a coordinator wake (autopilot owns the follow-up). agent_task_queue.
+// autopilot_run_id still carries a legacy FK to autopilot_run (migration 042
+// predates the no-FK rule), so a real autopilot + autopilot_run pair is
+// seeded. Non-vacuous: the autopilot_run_id column is the only difference
+// from the positive seed, so the AutopilotRunID check in
+// loadDelegatedCompletionWakeTarget is what this exercises.
+func TestAutopilotDelegatedRunDoesNotWake(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	issueID := seedWakeIssue(t, "9720 autopilot run no wake")
+	// autopilot.assignee_id references agent(id); any live agent satisfies it.
+	autopilotOwner := dbfx.Agent(t, "9720 autopilot owner", testRuntimeID)
+	autopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
+		"workspace_id": testWorkspaceID, "title": "9720 wake autopilot",
+		"assignee_id": autopilotOwner, "created_by_type": "member", "created_by_id": testUserID,
+	})
+	runID := dbfx.Insert(t, "autopilot_run", testutil.Cols{
+		"autopilot_id": autopilotID, "source": "manual", "status": "running",
+	})
+	seed := seedDelegationPair(t, issueID, "running", "completed", true, testutil.Cols{
+		"autopilot_run_id": runID,
+	})
+	dbfx.Exec(t, `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, issueID, seed.leaderAgent)
+
+	_, replyID := postCommentAsAgent(t, issueID, seed.workerAgent, seed.workerTask,
+		"closing report: done, no mention", seed.delegationComment)
+
+	if got := tasksCarryingComment(t, issueID, seed.leaderAgent, replyID); got != 0 {
+		t.Fatalf("leader tasks triggered by the reply = %d, want 0 (autopilot-owned run)", got)
+	}
+	if got := completionWakeCount(t, seed.workerTask); got != 0 {
+		t.Fatalf("delegated_completion wake tasks = %d, want 0", got)
 	}
 }
