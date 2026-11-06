@@ -741,7 +741,7 @@ func isDuplicatePendingTaskErr(err error) bool {
 		return false
 	}
 	switch pgErr.ConstraintName {
-	case "idx_one_pending_task_per_issue_agent", "idx_one_pending_task_per_issue_agent_v2", "idx_one_pending_task_per_issue_agent_thread":
+	case "idx_one_pending_task_per_issue_agent", "idx_one_pending_task_per_issue_agent_v2", "idx_one_pending_task_per_issue_agent_thread", "idx_native_oracle_event_one_active_issue":
 		return true
 	default:
 		return false
@@ -7432,7 +7432,14 @@ func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQ
 // become claimable because an agent-capacity or serialization barrier cleared.
 func (s *TaskService) NotifyTaskFinished(task db.AgentTaskQueue) {
 	s.forgetTaskReclaim(task)
+	// Existing daemon notification continues to control actual Oracle slots.
 	s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
+	if task.IssueID.Valid && task.Status == "completed" && s.Queries != nil && s.TxStarter != nil {
+		// Native completed Task event directly requests its Issue successor.
+		// A failure uses original Task retry rules; the leased Tick recovers
+		// any missed continuation after a crash or process restart.
+		go s.dispatchNativeIssueSuccessor(task.IssueID)
+	}
 }
 
 // NotifyRuntimeCapacityChanged wakes a runtime's daemon after its

@@ -797,6 +797,22 @@ WHERE id = (
             AND COALESCE(r.last_seen_at, r.updated_at) >=
                 now() - make_interval(secs => @runtime_stale_secs::double precision)
       )
+      -- Event tasks never claim a terminal Issue or bypass a disabled workspace.
+      AND (atq.context->>'oracle_issue_event' IS DISTINCT FROM 'true'
+           OR EXISTS (SELECT 1 FROM issue ev_i JOIN workspace ev_w
+                      ON ev_w.id=ev_i.workspace_id WHERE ev_i.id=atq.issue_id
+                        AND issue_effective_status(ev_i.workspace_id,ev_i.status)
+                            NOT IN ('done','cancelled')
+                        AND ev_w.settings->'oracle_issue_events'->>'enabled'='true'))
+      -- Preserve normal parallel agents unless either side participates in the
+      -- single-consumer Oracle Issue event flow.
+      AND NOT EXISTS (
+          SELECT 1 FROM agent_task_queue event_busy
+          WHERE event_busy.issue_id=atq.issue_id AND event_busy.id<>atq.id
+            AND event_busy.status IN ('dispatched','running','waiting_local_directory')
+            AND (atq.context->>'oracle_issue_event'='true'
+                 OR event_busy.context->>'oracle_issue_event'='true')
+      )
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id

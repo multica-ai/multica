@@ -248,8 +248,8 @@ func wakeupIssueActive(ctx context.Context, q *db.Queries, i db.Issue) (bool, er
 }
 
 // StopClosedIssueWakeups applies the close rule after a status write: once an
-// issue is done or closed, every wakeup on it is disabled and wakeup runs that
-// have not started are cancelled. Running work keeps its ordinary Stop
+// issue is done or closed, every wakeup on it is disabled and its unstarted
+// wakeup AND native oracle_issue_event tasks are cancelled. Running work keeps its ordinary Stop
 // control. Call it in the transaction that wrote the status, after that write
 // locked the issue row, so the close and this cleanup commit together. The
 // returned runs are for the caller's post-commit broadcast.
@@ -646,7 +646,9 @@ func (s *IssueWakeupService) authorize(ctx context.Context, q *db.Queries, ws, m
 // Tick uses the existing scheduler lease. Each config has a row lock as well,
 // so a manual retry or a second server cannot dispatch the same receipt twice.
 func (s *IssueWakeupService) Tick(ctx context.Context) error {
-	return s.tick(ctx, nil)
+	// Reuse the same leased native scheduler, never a second controller.
+	// The unfinished-Issue event pool is opt-in per workspace.
+	return errors.Join(s.tick(ctx, nil), s.RecoverOrphanedNativeEventTasks(ctx), s.RefillNativeIssueEvents(ctx))
 }
 
 // TickWorkspaces is one Tick pass over the given workspaces' ready wakeups.
