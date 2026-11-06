@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({
     onboarded_at: "2026-01-01T00:00:00Z",
   } as { id: string; onboarded_at: string | null } | null,
   isAuthLoading: false,
+  expired: false,
   workspace: null as { id: string; slug: string } | null,
   workspacesBySlug: {} as Record<string, { id: string; slug: string } | null>,
   workspaceError: false,
@@ -27,8 +28,9 @@ vi.mock("@multica/core/auth", () => ({
     selector: (auth: {
       user: typeof state.user;
       isLoading: boolean;
+      expired: boolean;
     }) => unknown,
-  ) => selector({ user: state.user, isLoading: state.isAuthLoading }),
+  ) => selector({ user: state.user, isLoading: state.isAuthLoading, expired: state.expired }),
 }));
 
 vi.mock("@multica/core/workspace", () => ({
@@ -109,6 +111,7 @@ beforeEach(() => {
     onboarded_at: "2026-01-01T00:00:00Z",
   };
   state.isAuthLoading = false;
+  state.expired = false;
   state.workspace = null;
   state.workspacesBySlug = {};
   state.workspaceError = false;
@@ -117,6 +120,32 @@ beforeEach(() => {
 });
 
 describe("WorkspaceLayout", () => {
+  it.each([false, true])("only retains the destination when the session expires (%s)", (expired) => {
+    const href = "/acme/issues/ACME-12?label=a#comment-123";
+    const original = window.location.href;
+    window.history.replaceState(null, "", href);
+    state.pathname = "/acme/issues/ACME-12";
+
+    try {
+      const { rerender } = renderLayout();
+      state.user = null;
+      state.expired = expired;
+      rerender(
+        <Suspense fallback={<div data-testid="route-loading" />}>
+          <WorkspaceLayout params={makeParams("acme")}>
+            <div data-testid="workspace-content" />
+          </WorkspaceLayout>
+        </Suspense>,
+      );
+
+      expect(state.replace).toHaveBeenCalledExactlyOnceWith(
+        expired ? `/login?next=${encodeURIComponent(href)}` : "/login",
+      );
+    } finally {
+      window.history.replaceState(null, "", original);
+    }
+  });
+
   it.each([
     "/acme/issues/ACME-12?label=a,b&label=c%2Fd#comment-123",
     "/acme/projects/project-1?view=members#activity",

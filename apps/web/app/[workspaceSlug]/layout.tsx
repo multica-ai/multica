@@ -12,6 +12,7 @@ import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { useWorkspaceSeen } from "@multica/views/workspace/use-workspace-seen";
 import { workspaceSlugFromPathname } from "@/lib/workspace-slug-from-pathname";
 import { returnToCurrentPage } from "@/features/auth/return-to";
+import { useLoginRedirect } from "@/features/auth/use-login-redirect";
 
 export default function WorkspaceLayout({
   children,
@@ -31,11 +32,7 @@ export default function WorkspaceLayout({
   // without a session, token expired, another tab logged out, etc.), bounce
   // to /login. Without this, the layout renders null and the user sees a
   // blank page stuck on /{slug}/...
-  useEffect(() => {
-    if (!isAuthLoading && !user && ownsPath) {
-      router.replace(returnToCurrentPage());
-    }
-  }, [isAuthLoading, user, router, ownsPath, pathname]);
+  useLoginRedirect(ownsPath);
 
   // Hard onboarding gate. Authenticated user but onboarded_at NULL means
   // they bypassed /onboarding (typed the URL, deeplink, etc.). Redirect
