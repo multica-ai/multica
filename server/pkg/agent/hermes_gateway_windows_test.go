@@ -23,6 +23,9 @@ func TestHermesGatewayProcessHelper(t *testing.T) {
 		time.Sleep(time.Minute)
 		os.Exit(0)
 	}
+	if os.Getenv("PYTHONIOENCODING") != "utf-8" || os.Getenv("HERMES_GATEWAY_DETACHED") != "1" {
+		t.Fatal("gateway launch environment does not match the Windows contract")
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)

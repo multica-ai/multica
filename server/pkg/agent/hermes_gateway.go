@@ -32,7 +32,7 @@ func startHermesTaskGateway(ctx context.Context, cfg Config, home string, reserv
 	cmd := cfg.commandAt(cfg.ExecutablePath).exec(runCtx, "--profile", "default", "gateway", "run", "--quiet", "--external-supervisor")
 	hideAgentWindow(cmd)
 	cmd.Env = buildEnv(cfg.Env)
-	cmd.Env = append(cmd.Env, "HERMES_DISABLE_LAZY_INSTALLS=1")
+	cmd.Env = append(cmd.Env, "HERMES_DISABLE_LAZY_INSTALLS=1", "PYTHONIOENCODING=utf-8", "HERMES_GATEWAY_DETACHED=1")
 	cmd.WaitDelay = 2 * time.Second
 	cmd.Cancel = func() error {
 		signalProcessGroup(cmd, syscall.SIGKILL)
