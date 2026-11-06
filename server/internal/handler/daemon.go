@@ -3208,7 +3208,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		leaderWorkflow := leaderNoWorkflow
 		if projectWorkflow != nil {
 			leaderWorkflow = leaderWorkflowCurrentDaemon
-			if legacyRuntimeRules {
+			if projectWorkflow.stepMoved {
+				leaderWorkflow = leaderWorkflowStepMoved
+			} else if legacyRuntimeRules {
 				leaderWorkflow = leaderWorkflowLegacyDaemon
 			}
 		}
