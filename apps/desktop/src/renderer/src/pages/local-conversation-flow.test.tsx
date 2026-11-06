@@ -893,7 +893,7 @@ describe("Side conversations in the main session list", () => {
     }
   });
 
-  it.each(["codex", "claude"] as const)("keeps %s Sides in the right workspace while excluding them from the list, search, archives and counts", async (provider) => {
+  it.each(["codex", "claude"] as const)("keeps %s Sides in the right workspace while excluding them from the list, search and archives", async (provider) => {
     mock.folders = [folder("project-a", "Main project")];
     const side: LocalConversation = { ...source, id: "side", title: "Side exploration", provider, side: { sourceId: source.id, turnId: "turn", quote: "Quoted source text", requestId: "side-request", context: [] } };
     const fork = { ...source, id: "fork", title: "Independent fork", cwd: "/other", forkedFrom: source.id };
@@ -906,8 +906,8 @@ describe("Side conversations in the main session list", () => {
     expect(await list.findByRole("link", { name: /Original/ })).toBeVisible();
     expect(list.getByRole("link", { name: /Independent fork/ })).toBeVisible();
     expect(list.queryAllByRole("link", { name: /Side/ })).toHaveLength(0);
-    expect(within(list.getByRole("button", { name: "Main project" })).getByText("1")).toBeInTheDocument();
-    expect(within(list.getByRole("button", { name: "未分配项目" })).getByText("1")).toBeInTheDocument();
+    expect(list.getByRole("button", { name: "Main project" }).textContent).toBe("Main project");
+    expect(list.getByRole("button", { name: "未分配项目" }).textContent).toBe("未分配项目");
     expect(screen.getByRole("tab", { name: /旁支 · Side exploration ·/ })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("Quoted source text")).toBeVisible();
     fireEvent.click(list.getByRole("button", { name: "搜索会话" }));
@@ -948,6 +948,30 @@ describe("local conversation directory label", () => {
   });
 });
 
+describe("local conversation project headings", () => {
+  it("omits counts for project and unassigned headings when expanded, collapsed and archived", async () => {
+    const title = "Multica project with a long name for checking truncation";
+    mock.folders = [folder("project-a", title)];
+    const unassigned = { ...source, id: "unassigned", cwd: "/other" };
+    const rows = [source, unassigned, ...[source, unassigned].map((entry) => ({ ...entry, id: `archived-${entry.id}`, archived: true }))];
+    mock.request.mockImplementation(async (_scope, method) => method === "listPage" ? rows : [{ id: "codex", available: true }]);
+    render(page());
+    await screen.findAllByRole("link", { name: /Original/ });
+    const headings = [title, "未分配项目"].map((name) => screen.getByRole("button", { name }));
+    for (const [index, heading] of headings.entries()) {
+      expect(heading.textContent).toBe([title, "未分配项目"][index]);
+      fireEvent.click(heading);
+      expect(heading).toHaveAttribute("aria-expanded", "false");
+      expect(heading.textContent).toBe([title, "未分配项目"][index]);
+      fireEvent.click(heading);
+      expect(heading).toHaveAttribute("aria-expanded", "true");
+    }
+    fireEvent.click(screen.getByRole("button", { name: "归档" }));
+    await waitFor(() => expect(listedIds()).toEqual(["archived-source", "archived-unassigned"]));
+    for (const name of [title, "未分配项目"]) expect(screen.getByRole("button", { name }).textContent).toBe(name);
+  });
+});
+
 describe("local conversation fork entry", () => {
   it.each([
     ["zh-Hans", false, false], ["zh-Hans", true, true],
@@ -965,7 +989,7 @@ describe("local conversation fork entry", () => {
     expect(screen.getByRole("button", { name: locale === "en" ? "Open right workspace" : "打开右侧面板" })).toBeVisible();
     if (compact) expect(screen.getByRole("button", { name: locale === "en" ? "Local sessions" : "本机会话" })).toBeVisible();
   });
-  it.each(["codex", "claude"] as const)("keeps unsent %s drafts out of the list and counts until the first message is accepted", async (provider) => {
+  it.each(["codex", "claude"] as const)("keeps unsent %s drafts out of the list until the first message is accepted", async (provider) => {
     const draft = { ...source, id: "draft", title: "Unsent draft", provider, providerSessionId: undefined, messages: [], turns: [] };
     let rows: LocalConversation[] = [source, { ...draft, id: "old-draft", title: "Older unsent draft" }];
     mock.request.mockImplementation(async (_scope, method) => {
@@ -987,14 +1011,14 @@ describe("local conversation fork entry", () => {
     expect(mock.request.mock.calls.some((call) => call[1] === "create")).toBe(false);
     fireEvent.change(screen.getByRole("textbox", { name: "Conversation draft" }), { target: { value: "Not sent yet" } });
     expect(screen.queryAllByRole("link", { name: /Unsent draft|Older unsent draft/ })).toHaveLength(0);
-    expect(within(screen.getByRole("button", { name: "未分配项目" })).getByText("1")).toBeInTheDocument();
+    expect(listedIds()).toEqual(["source"]);
     expect(screen.getByRole("textbox", { name: "Conversation draft" })).toHaveValue("Not sent yet");
 
     const at = "2026-10-24T18:00:00Z";
     rows = [...rows, { ...draft, title: "First submitted message", messages: [{ id: "first-message", role: "user", content: "First submitted message", turnId: "first-turn", createdAt: at }], turns: [{ id: "first-turn", status: "running", createdAt: at, events: [] }] }];
     await act(async () => { await publishList(); });
     expect(await screen.findByRole("link", { name: /First submitted message/ })).toBeInTheDocument();
-    expect(within(screen.getByRole("button", { name: "未分配项目" })).getByText("2")).toBeInTheDocument();
+    expect(listedIds().sort()).toEqual(["draft", "source"]);
     expect(screen.queryByRole("link", { name: /Older unsent draft/ })).not.toBeInTheDocument();
   });
   it("keeps collapsed folder groups while searching and opens a draft inside the folder", async () => {

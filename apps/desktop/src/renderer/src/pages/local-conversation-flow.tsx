@@ -2403,9 +2403,6 @@ const ButtonBinding21 = observer(function ButtonBinding21({
         )}
         <FolderOpen className="size-3.5 shrink-0" />
         <span className="truncate">{title}</span>
-        <span className="ml-auto text-micro tabular-nums text-faint-foreground">
-          {group.sessions.length}
-        </span>
       </Button>
     </Slot.Root>
   );
