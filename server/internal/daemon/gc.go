@@ -733,18 +733,18 @@ func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *exece
 
 	switch status.Status {
 	case "active":
-		// An active chat session's directory must never be reclaimed by mtime
-		// — that would silently kill a user's idle session and break
-		// "PriorWorkDir" resume on their next message.
-		//
-		// This protects the session's own data, not the daemon's regenerable
-		// caches. shouldCleanTaskDir layers applyManagedArtifactFallback on top
-		// of this skip, so a session idle past GCArtifactTTL gives back
-		// codex-home/.sandbox-bin and the next message re-provisions it. That
-		// costs a ~285 MiB Codex bootstrap on resume and is the same trade-off
-		// gcDecisionIssueResult already makes for a completed task whose issue
-		// is still open — without it an active session pins the cache forever
-		// (#6782).
+		// Keep the workdir for the next message. In-place chats keep using
+		// the exact daemon-managed cache fallback.
+		if !meta.LocalDirectory && d.cfg.GCArtifactTTL > 0 &&
+			!meta.CompletedAt.IsZero() && time.Since(meta.CompletedAt) > d.cfg.GCArtifactTTL {
+			d.logger.Info("gc: eligible for artifact cleanup",
+				"dir", filepath.Base(taskDir),
+				"kind", "chat",
+				"chat_session", meta.ChatSessionID,
+				"completed_at", meta.CompletedAt.Format(time.RFC3339),
+			)
+			return gcActionCleanArtifacts
+		}
 		return gcActionSkip
 	case "archived":
 		if time.Since(status.UpdatedAt) > d.cfg.GCTTL {

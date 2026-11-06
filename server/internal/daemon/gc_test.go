@@ -2521,17 +2521,8 @@ func TestShouldCleanTaskDir_ChatHardDeletedFreshMtime(t *testing.T) {
 	}
 }
 
-// TestShouldCleanTaskDir_ChatActiveResistsOldMtime is the explicit acceptance
-// criterion #2: an active chat session whose workdir is older than
-// GCOrphanTTL must NOT be reclaimed. The only path to clean an active
-// session's workdir is for the user to archive or hard-delete the session.
-//
-// #6782 narrowed this from "the GC does nothing" to "the GC never removes the
-// directory": a session idle past GCArtifactTTL now gives back the regenerable
-// codex-home/.sandbox-bin cache, which the next message re-provisions. The
-// acceptance criterion is unchanged — the session's own data survives — so
-// this asserts the surviving contents rather than the bare action value.
-// TestManagedArtifact_IdleActiveChatReclaimsSandboxBin covers the carve-out.
+// An unarchived chat keeps its workdir even after the orphan TTL.
+// Artifact cleanup can reclaim regenerable caches while preserving its data.
 func TestShouldCleanTaskDir_ChatActiveResistsOldMtime(t *testing.T) {
 	t.Parallel()
 	chatID := "ffffffff-ffff-ffff-ffff-ffffffffff01"
