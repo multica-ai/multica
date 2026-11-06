@@ -24,14 +24,23 @@ export default function WorkspaceLayout({
   const isAuthLoading = useAuthStore((s) => s.isLoading);
   const router = useRouter();
   const pathname = usePathname();
+  const isIssueDetail = /^\/[^/]+\/issues\/[^/]+\/?$/.test(pathname);
 
   // Workspace routes require auth. If user is unauthenticated (initial visit
   // without a session, token expired, another tab logged out, etc.), bounce
   // to /login. Without this, the layout renders null and the user sees a
   // blank page stuck on /{slug}/...
   useEffect(() => {
-    if (!isAuthLoading && !user) router.replace(paths.login());
-  }, [isAuthLoading, user, router]);
+    if (isAuthLoading || user) return;
+    const login = paths.login();
+    if (!isIssueDetail) {
+      router.replace(login);
+      return;
+    }
+    if (workspaceSlug !== workspaceSlugFromPathname(pathname)) return;
+    const { pathname: issuePath, search, hash } = window.location;
+    router.replace(`${login}?next=${encodeURIComponent(issuePath + search + hash)}`);
+  }, [isAuthLoading, isIssueDetail, user, router, pathname, workspaceSlug]);
 
   // Hard onboarding gate. Authenticated user but onboarded_at NULL means
   // they bypassed /onboarding (typed the URL, deeplink, etc.). Redirect
@@ -82,7 +91,7 @@ export default function WorkspaceLayout({
     </div>
   );
 
-  if (isAuthLoading) return loadingIndicator;
+  if (isAuthLoading || (isIssueDetail && !user)) return loadingIndicator;
   // Don't render children until workspace is resolved. useWorkspaceId()
   // throws when the list hasn't populated or the slug is unknown — gating
   // here makes that invariant hold for every descendant.

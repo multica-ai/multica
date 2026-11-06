@@ -117,6 +117,24 @@ beforeEach(() => {
 });
 
 describe("WorkspaceLayout", () => {
+  it.each([
+    ["/acme/issues/ACME-12?label=a,b&label=c%2Fd#comment-123", true],
+    ["/acme/issues?view=all", false],
+  ])("sets a login return target for issue links (%s)", (href, isIssue) => {
+    const original = window.location.href;
+    state.user = null;
+    state.pathname = new URL(href, original).pathname;
+    window.history.replaceState(null, "", href);
+
+    try {
+      renderLayout();
+      const destination = isIssue ? `/login?next=${encodeURIComponent(href)}` : "/login";
+      expect(state.replace).toHaveBeenCalledExactlyOnceWith(destination);
+    } finally {
+      window.history.replaceState(null, "", original);
+    }
+  });
+
   it("keeps loading instead of showing NoAccess when the initial list request fails", async () => {
     state.workspaceError = true;
     const { queryClient } = renderLayout();

@@ -54,10 +54,17 @@ function CallbackContent() {
     const state = searchParams.get("state") || "";
     const stateParts = state.split(",");
     const isDesktop = stateParts.includes("platform:desktop");
-    const nextPart = stateParts.find((p) => p.startsWith("next:"));
-    // Strip "next:" prefix, then drop anything that isn't a safe relative path
-    // so an attacker-controlled `state=next:https://evil` cannot redirect here.
-    const nextUrl = sanitizeNextUrl(nextPart ? nextPart.slice(5) : null);
+    const nextPart = stateParts.find((p) => p.startsWith("next:"))?.slice("next:".length);
+    // In-flight sign-ins can still carry a raw path. Encoded paths keep
+    // commas in the original URL from becoming OAuth state separators.
+    let nextUrl = sanitizeNextUrl(nextPart ?? null);
+    if (nextPart?.startsWith("%2F")) {
+      try {
+        nextUrl = sanitizeNextUrl(decodeURIComponent(nextPart));
+      } catch {
+        // A malformed return address can fall back to the normal landing page.
+      }
+    }
 
     // CLI callback params — carried across the Google OAuth round-trip so
     // headless/WSL2 `multica login` can receive the JWT after browser-based

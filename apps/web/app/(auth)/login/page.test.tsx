@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { configStore } from "@multica/core/config";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "@multica/views/locales/en/common.json";
@@ -126,6 +127,31 @@ describe("LoginPage", () => {
   // Shared LoginPage behavior is canonical in
   // packages/views/auth/login-page.test.tsx. This wrapper suite only owns web
   // platform handoff and redirect behavior.
+
+  it("encodes the complete issue return address in Google OAuth state", async () => {
+    const next = "/acme/issues/ACME-12?labels=one,two&view=a%2Fb#comment-123";
+    searchParamsState.params = new URLSearchParams({ next });
+    configStore.getState().setAuthConfig({ allowSignup: true, googleClientId: "test-client" });
+    const originalLocation = window.location;
+    const navigate = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...originalLocation, set href(value: string) { navigate(value); } },
+    });
+
+    try {
+      render(<LoginPage />, { wrapper: createWrapper() });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Continue with Google" }));
+      });
+      expect(navigate).toHaveBeenCalledOnce();
+      const oauth = new URL(navigate.mock.calls[0]![0]);
+      expect(oauth.searchParams.get("state")).toBe(`next:${encodeURIComponent(next)}`);
+    } finally {
+      Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
+      configStore.getState().setAuthConfig({ allowSignup: true });
+    }
+  });
 
   // Regression: MUL-1080 — if the user is already authenticated on the web
   // and the Desktop app redirects them to /login?platform=desktop, the web

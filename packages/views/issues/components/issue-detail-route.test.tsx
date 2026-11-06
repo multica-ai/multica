@@ -32,13 +32,19 @@ vi.mock("@multica/core/paths", async () => {
 const replace = vi.fn();
 const push = vi.fn();
 
-function wrapper({ children }: { children: ReactNode }) {
+function wrapper({
+  children,
+  searchParams = new URLSearchParams(),
+}: {
+  children: ReactNode;
+  searchParams?: URLSearchParams;
+}) {
   const adapter: NavigationAdapter = {
     push,
     replace,
     back: vi.fn(),
     pathname: "/acme/issues/x",
-    searchParams: new URLSearchParams(),
+    searchParams,
     hash: "",
     getShareableUrl: (p: string) => `https://app.multica.com${p}`,
   };
@@ -92,16 +98,19 @@ describe("useCanonicalIssueUrl", () => {
     expect(replace).toHaveBeenCalledWith("/acme/issues/TRS-134");
   });
 
-  it("preserves a source-comment deep link while canonicalizing a UUID", () => {
+  it("preserves the query and comment anchor while canonicalizing a UUID", () => {
+    const searchParams = new URLSearchParams("source=shared&label=a&label=b");
+    const IssueLinkWrapper = ({ children }: { children: ReactNode }) =>
+      wrapper({ children, searchParams });
     renderHook(
       () => useCanonicalIssueUrl(
         "cb240efb-154c-42a8-ae92-42b02676feca",
         "TRS-134",
         "#comment-comment-7",
       ),
-      { wrapper },
+      { wrapper: IssueLinkWrapper },
     );
-    expect(replace).toHaveBeenCalledWith("/acme/issues/TRS-134#comment-comment-7");
+    expect(replace).toHaveBeenCalledWith("/acme/issues/TRS-134?source=shared&label=a&label=b#comment-comment-7");
   });
 });
 

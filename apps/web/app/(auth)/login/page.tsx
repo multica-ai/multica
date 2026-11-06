@@ -158,7 +158,7 @@ function LoginPageContent() {
   // HTTP listener (critical for headless / WSL2 environments).
   const googleState = [
     platform === "desktop" ? "platform:desktop" : "",
-    nextUrl ? `next:${nextUrl}` : "",
+    nextUrl ? `next:${encodeURIComponent(nextUrl)}` : "",
     cliCallbackRaw && validateCliCallback(cliCallbackRaw)
       ? `cli_callback:${encodeURIComponent(cliCallbackRaw)}`
       : "",
