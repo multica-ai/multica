@@ -12,7 +12,8 @@ import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/type
 import { useAuthStore } from "@multica/core/auth";
 import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
 import { projectDetailOptions } from "@multica/core/projects/queries";
-import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
+import { Spinner } from "@multica/ui/components/ui/spinner";
+import { useUpdateProject, useDeleteProject, ProjectDeletionOfflineError } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
@@ -120,7 +121,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const userId = useAuthStore((s) => s.user?.id);
-  const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
+  const deleteProject = useDeleteProject();
+  const deleted = deleteProject.isSuccess && deleteProject.variables === projectId;
+  const { data: project, isLoading } = useQuery({
+    ...projectDetailOptions(wsId, projectId),
+    enabled: !deleted,
+  });
   useRegisterCommandBarContext(
     useMemo(() => (project ? { kind: "project", project } : null), [project]),
   );
@@ -146,7 +152,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { getActorName } = useActorName();
   const updateProject = useUpdateProject();
-  const deleteProject = useDeleteProject();
+  const deleting = deleteProject.isPending;
   const { data: pinnedItems = [] } = useQuery({
     ...pinListOptions(wsId, userId ?? ""),
     enabled: !!userId,
@@ -228,16 +234,23 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   );
 
   const handleDelete = useCallback(() => {
-    if (!project) return;
+    if (!project || deleteProject.isPending) return;
     deleteProject.mutate(project.id, {
       onSuccess: () => {
+        setDeleteDialogOpen(false);
         toast.success(t(($) => $.detail.toast_project_deleted));
         router.push(wsPaths.projects());
       },
+      onError: (err) =>
+        toast.error(
+          err instanceof ProjectDeletionOfflineError
+            ? t(($) => $.delete_dialog.offline_error)
+            : err instanceof Error ? err.message : String(err),
+        ),
     });
   }, [project, deleteProject, router, wsPaths, t]);
 
-  if (isLoading) {
+  if (isLoading || deleted) {
     return (
       <div className="mx-auto w-full max-w-4xl px-8 py-10 space-y-4">
         <Skeleton className="h-5 w-32" />
@@ -551,9 +564,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               variant="destructive"
+                              disabled={deleting}
+                              aria-busy={deleting}
                               onClick={() => setDeleteDialogOpen(true)}
                             >
-                              <Trash2 className="h-3.5 w-3.5" />
+                              {deleting ? <Spinner className="size-3.5" aria-hidden="true" /> : <Trash2 className="h-3.5 w-3.5" />}
                               {t(($) => $.detail.delete_action)}
                             </DropdownMenuItem>
                           </>
@@ -615,7 +630,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
       {/* Delete confirmation */}
       {canDelete && (
-        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialog
+          open={deleteDialogOpen}
+          onOpenChange={(open) => {
+            if (!deleting) setDeleteDialogOpen(open);
+          }}
+        >
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>{t(($) => $.delete_dialog.title)}</AlertDialogTitle>
@@ -624,8 +644,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>{t(($) => $.delete_dialog.cancel)}</AlertDialogCancel>
-              <AlertDialogAction onClick={handleDelete} className="bg-destructive text-white hover:bg-destructive/90">
+              <AlertDialogCancel disabled={deleting}>
+                {t(($) => $.delete_dialog.cancel)}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={deleting}
+                aria-busy={deleting}
+                onClick={handleDelete}
+                className="bg-destructive text-white hover:bg-destructive/90"
+              >
+                {deleting && <Spinner className="size-3.5" aria-hidden="true" />}
                 {t(($) => $.delete_dialog.confirm)}
               </AlertDialogAction>
             </AlertDialogFooter>

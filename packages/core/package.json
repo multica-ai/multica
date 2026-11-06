@@ -42,6 +42,7 @@
     "./issues": "./issues/index.ts",
     "./issues/use-issue-deletion": "./issues/use-issue-deletion.ts",
     "./issues/batch": "./issues/batch.ts",
+    "./issues/read-state": "./issues/read-state.ts",
     "./issues/canonical-id": "./issues/canonical-id.ts",
     "./issues/queries": "./issues/queries.ts",
     "./issues/wakeups": "./issues/wakeups.ts",

@@ -788,6 +788,69 @@ describe("Attachment — image dispatch", () => {
   });
 });
 
+describe("Attachment — lazy images and reserved box (MUL-8182)", () => {
+  it("loads the original lazily in the recorded box", () => {
+    const att = makeRecord({ width: 3200, height: 2000 });
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
+    const img = document.querySelector("img")!;
+    expect(img.getAttribute("src")).toBe(att.download_url);
+    expect(img.getAttribute("loading")).toBe("lazy");
+    expect(img.getAttribute("decoding")).toBe("async");
+    expect(img.getAttribute("width")).toBe("3200");
+    const figure = img.closest(".image-figure") as HTMLElement;
+    expect(figure.hasAttribute("data-sized")).toBe(true);
+    expect(figure.hasAttribute("data-pending")).toBe(false);
+    expect(figure.style.getPropertyValue("--image-width")).toBe("3200px");
+    expect(figure.style.getPropertyValue("--image-aspect")).toBe("1.6");
+  });
+
+  it("takes dimensions from the resolved record for markdown images", () => {
+    const att = makeRecord({ width: 1170, height: 2532 });
+    resolverState.attachments = [att];
+    renderWithQuery(<Attachment attachment={{ kind: "url", url: att.url, filename: "", forceKind: "image" }} />);
+    expect(document.querySelector("img")?.getAttribute("height")).toBe("2532");
+  });
+
+  it("ignores malformed dimensions on an unparsed record", () => {
+    const att = makeRecord({ width: -1, height: "big" as unknown as number });
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
+    expect(document.querySelector("img")?.hasAttribute("width")).toBe(false);
+  });
+
+  it("holds an unknown-size placeholder until load or error", () => {
+    const att = makeRecord();
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
+    const img = document.querySelector("img")!;
+    const figure = img.closest(".image-figure") as HTMLElement;
+    expect(figure.hasAttribute("data-pending")).toBe(true);
+    fireEvent.load(img);
+    expect(figure.hasAttribute("data-pending")).toBe(false);
+    expect(img.hasAttribute("data-loaded")).toBe(true);
+  });
+
+  it("restores the placeholder when a reused image changes source", () => {
+    const att = makeRecord();
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    const { rerender } = render(
+      <QueryClientProvider client={client}>
+        <Attachment attachment={{ kind: "record", attachment: att }} />
+      </QueryClientProvider>,
+    );
+    fireEvent.load(document.querySelector("img")!);
+    rerender(
+      <QueryClientProvider client={client}>
+        <Attachment attachment={{
+          kind: "record",
+          attachment: { ...att, id: "att-2", download_url: "https://cdn.example.test/second.png" },
+        }} />
+      </QueryClientProvider>,
+    );
+    expect(document.querySelector(".image-figure")?.hasAttribute("data-pending")).toBe(true);
+  });
+});
+
 describe("Attachment — html dispatch", () => {
   // An HTML file is a file (MUL-7649): the row opens it in the viewer, and
   // nothing is fetched to embed it inline.
