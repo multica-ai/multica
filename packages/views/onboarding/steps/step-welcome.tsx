@@ -175,8 +175,6 @@ export function StepWelcome({
       <div className="relative hidden border-l bg-muted/40 lg:flex lg:flex-1 lg:flex-col lg:overflow-hidden">
         <MulticaStarRow
           count={9}
-          enter="center"
-          delay={0.5}
           className="pointer-events-none absolute -bottom-10 left-1/2 w-[130%] -translate-x-1/2 text-muted"
         />
         <DragStrip />
