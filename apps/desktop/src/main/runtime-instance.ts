@@ -37,7 +37,8 @@ const healthSchema = z.object({
   daemon_id: z.string().optional(), device_name: z.string().optional(),
   active_task_count: z.number().int().nonnegative().optional(),
   local_busy_count: z.number().int().nonnegative().optional(),
-  agents: z.array(z.string()).optional(), workspaces: z.array(z.unknown()).optional(),
+  // A daemon that has registered no workspaces (e.g. a verification runtime) reports null.
+  agents: z.array(z.string()).optional(), workspaces: z.array(z.unknown()).nullable().optional(),
 }).passthrough();
 export type RuntimeHealth = z.infer<typeof healthSchema>;
 

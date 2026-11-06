@@ -6,7 +6,25 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { createVerificationHost, type VerificationHost } from "./host.js";
+import { HostStorage } from "./storage.js";
+import { JobService } from "./jobs.js";
+
+type Ledger = { jobs: JobService; close(): Promise<void> };
+// Receipts and jobs persist in one host state directory; reopening it is a restart.
+async function ledger(options: {
+  projectRoot: string;
+  stateRoot: string;
+}): Promise<Ledger> {
+  const storage = await HostStorage.open(options);
+  const jobs = await JobService.open(storage);
+  return {
+    jobs,
+    close: async () => {
+      await jobs.close();
+      await storage.close();
+    },
+  };
+}
 import type { CommandResult, Job } from "../contracts/index.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
@@ -17,7 +35,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "verification-jobs-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const options = { projectRoot: root, stateRoot: join(root, "state") };
-  const host = await createVerificationHost(options);
+  const host = await ledger(options);
   cleanups.push(() => host.close());
   return { root, options, host };
 }
@@ -26,11 +44,7 @@ function accepted(result: CommandResult): string {
     throw new Error(`Expected accepted, got ${result.kind}`);
   return result.jobId;
 }
-async function until(
-  host: VerificationHost,
-  jobId: string,
-  state: Job["state"],
-) {
+async function until(host: Ledger, jobId: string, state: Job["state"]) {
   for (let i = 0; i < 200; i++) {
     const job = await host.jobs.get(jobId);
     if (job.state === state) return job;
@@ -66,7 +80,7 @@ describe("durable verification commands", () => {
 
   it("retains job resources and completed receipts across host restarts", async () => {
     const { host, options, root } = await fixture();
-    const register = (target: VerificationHost) =>
+    const register = (target: Ledger) =>
       target.jobs.register("test.create", {
         input: z.object({ title: z.string() }).strict(),
         output: z.object({ id: z.uuid() }).strict(),
@@ -92,7 +106,7 @@ describe("durable verification commands", () => {
         0o777,
     ).toBe(0o600);
     await host.close();
-    const restarted = await createVerificationHost(options);
+    const restarted = await ledger(options);
     cleanups.push(() => restarted.close());
     register(restarted);
     const retry = await restarted.jobs.submit(
@@ -175,7 +189,7 @@ describe("durable verification commands", () => {
     );
     await running;
     await host.close();
-    const restarted = await createVerificationHost(options);
+    const restarted = await ledger(options);
     cleanups.push(() => restarted.close());
     restarted.jobs.register("test.interrupt", operation);
     expect(
@@ -196,7 +210,7 @@ describe("durable verification commands", () => {
     await host.close();
     const path = join(root, "state", "jobs", `${randomUUID()}.json`);
     await writeFile(path, '{"state":"completed"}');
-    await expect(createVerificationHost(options)).rejects.toThrow();
+    await expect(ledger(options)).rejects.toThrow();
     expect(await readFile(path, "utf8")).toBe('{"state":"completed"}');
   });
 });

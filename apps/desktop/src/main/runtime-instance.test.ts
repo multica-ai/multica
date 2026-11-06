@@ -51,6 +51,12 @@ describe("single Desktop runtime registration", () => {
     expect((await next.launch()).ownerId).toBe(next.ownerId);
   });
 
+  it("accepts a runtime that reports no registered workspaces as null", async () => {
+    const r = await runtime(); await publish(r);
+    const request = vi.fn(async () => Response.json({ ...health(r), workspaces: null }));
+    expect(await registry.endpoint(apiUrl, request)).toEqual({ base: `127.0.0.1:${r.port}`, token });
+  });
+
   it("uses the shared Go wire fixture and returns only a verified private endpoint", async () => {
     const r = await runtime(); await publish(r);
     const request = vi.fn(async () => Response.json(health(r)));

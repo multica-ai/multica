@@ -133,7 +133,7 @@ beforeAll(async () => {
   });
   environmentId = randomUUID();
   await writeFile(
-    join(directory, "host/environments", `${environmentId}.json`),
+    join(host.stateDirectory, "environments", `${environmentId}.json`),
     JSON.stringify(
       environmentSchema.parse({
         schemaVersion: 1,
@@ -457,7 +457,7 @@ describe("manual verification protocol integration", () => {
     const receipt = await host.jobs.submit(
       "env.start",
       {
-        gitRef: "HEAD",
+        branch: "main",
         mode: "desktop",
         dataMode: "liveReadOnly",
         sourceRef: readOnly.ref,

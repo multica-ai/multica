@@ -360,7 +360,7 @@ MULTICA_DEV_POSTGRES_CONTAINER=verification-pg \
   bash -c 'source "$1"; POSTGRES_DB=verification_db ensure_database' _ \
   "$root_dir/scripts/dev-env.sh" > "$out" 2>&1 \
   || { cat "$out" >&2; fail "container database creation failed"; }
-require_contains "$docker_log" "exec verification-pg pg_isready -U multica -d postgres"
+require_contains "$docker_log" "exec verification-pg pg_isready -h 127.0.0.1 -U multica -d postgres"
 require_contains "$docker_log" 'CREATE DATABASE "verification_db"'
 if grep -q "compose" "$docker_log"; then fail "the shared container was started"; fi
 rm "$fake_bin/docker"

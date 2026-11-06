@@ -169,6 +169,23 @@ export const verificationDev = {
           setTimeout(() => app.quit(), 50);
           return;
         }
+        if (request.method === "POST" && url.pathname === "/login") {
+          // The verification host signs in through the same token handoff a
+          // browser login uses, so no human types credentials.
+          const chunks: Buffer[] = [];
+          let size = 0;
+          for await (const chunk of request) {
+            size += (chunk as Buffer).length;
+            if (size > 16384) throw new Error("Login body too large");
+            chunks.push(chunk as Buffer);
+          }
+          const { token } = z
+            .object({ token: z.string().min(1).max(8192) })
+            .parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+          options.deliverToken(token);
+          response.end(JSON.stringify({ accepted: true }));
+          return;
+        }
         if (request.method !== "GET") {
           response.writeHead(405).end();
           return;
@@ -307,7 +324,12 @@ export const verificationDev = {
           return;
         }
         response.writeHead(404).end();
-      } catch {
+      } catch (error) {
+        // The private desktop log is the only place this cause is visible.
+        console.error(
+          `[verification-dev] ${request.method} ${request.url} failed:`,
+          error instanceof Error ? error.message : error,
+        );
         response
           .writeHead(503)
           .end(JSON.stringify({ error: "source_unavailable" }));

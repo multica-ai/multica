@@ -199,7 +199,7 @@ interface HealthPayload {
   local_busy_count?: number;
   active_task_count?: number;
   agents?: string[];
-  workspaces?: unknown[];
+  workspaces?: unknown[] | null;
 }
 
 async function fetchHealthAtPort(

@@ -10,8 +10,9 @@
 | 接口互不依赖，异步为 start/query | `src/mcp/server.ts`、`src/host/jobs.ts` | 18 个工具各自独立；`env.start`、`env.stop`、`data.snapshot`、`data.restore` 经任务账本，其余同步返回 |
 | 设备自检与环境准备 | `setup/inspect.ts`、`device-inspect.ts`、`prerequisites.ts`、`environments.ts` | 工具、磁盘、图形会话、端口/数据库目标、构建前提、现存 Desktop；登录前任务为 awaitingUser |
 | 固定版本与构建复用 | `setup/source-identity.ts`、`build-cache.ts` | SHA/工作变更、锁文件/工具/构建环境缓存键、同键互斥、原子工件清单与校验；启动前拒绝源码漂移 |
-| 设备互斥与中断 | `setup/device-lease.ts`、`environments.ts`、`read-only-web.ts` | 跨项目设备锁；宿主重启后环境和任务标为 interrupted；清理未确认时保留占用 |
-| 与已安装 Multica 并存 | `setup/environments.ts`、`production-guard.ts` | 运行时进程树使用私有 HOME 和独立健康端口；环境自带 `multica-dev` 命令；已安装运行时文件变化即停止验证环境 |
+| 常驻守护进程 | `daemon/`、`scripts/verification/install-daemon.sh` | launchd 常驻；固定端口提供 MCP 与管理台；健康巡检与空闲回收；重启回收遗留环境 |
+| 按分支验证与多环境 | `setup/environments.ts` | 守护进程自有镜像拉取远端分支并固定 commit；环境名额上限，满额失败并列出占用者 |
+| 与已安装 Multica 并存 | `setup/environments.ts`、`production-guard.ts` | 运行时进程树使用私有 HOME 和独立健康端口；已安装运行时文件变化即停止验证环境 |
 | 与其他开发环境隔离 | `setup/environments.ts`、`scripts/dev-env.sh` | 专属 PostgreSQL 容器和空闲端口；`make up`/`make down` 使用环境内私有登记表，不回收其他环境 |
 | 真实数据与模板 | `data/service.ts`、`workspace.ts`、`manifest.ts`，Go `verificationworkspace`、`handler/verification_dev.go` | 选定会话/项目内容导出、关系和附件清单、按命名空间幂等导入、ID 映射；两个版本化模板 |
 | 事件读取 | Go `daemon/localhost/verification_dev.go`、Desktop `main/verification-dev` | 按 cursor 分页，原样返回 generation、cursor、保留范围；无推送通道 |
@@ -23,7 +24,7 @@
 | 检查 | 结果 |
 | --- | --- |
 | 验证包 TypeScript、lint | 通过 |
-| `test:manual` | 24 项通过，含已安装运行时文件摘要和 `multica-dev` 命令 |
+| `test:manual` | 26 项通过，含远端分支拉取、环境名额、守护进程 MCP 与管理台 |
 | `test:integration` | 8 项中 7 项通过，覆盖真实 Go service/SQLite/Local API、受控 provider 和 Chromium 页面操作。会话历史复制用例失败：SQLite 导出器只识别 schema 4、5，而会话库已升级到 7；未修改的 origin/main 上同样失败 |
 | Go `verificationdev` 测试（`internal/daemon/localhost`） | 通过 |
 | Desktop `typecheck:node` | 通过 |

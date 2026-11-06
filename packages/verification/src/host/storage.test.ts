@@ -1,12 +1,13 @@
 // @vitest-environment node
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { afterEach, describe, expect, it } from "vitest";
 import { createVerificationHost } from "./host.js";
+import { HostStorage } from "./storage.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -25,26 +26,34 @@ async function kill(child: ChildProcess) {
 }
 
 describe("host ownership and crash recovery", () => {
-  it("refuses live owners even with recovery, and rejects another project's binding", async () => {
+  it("refuses a live owner of one state directory and rejects another project's binding", async () => {
     const options = await fixture();
-    const first = await createVerificationHost(options);
-    cleanups.push(() => first.close());
-    await expect(createVerificationHost(options)).rejects.toMatchObject({
+    const first = await HostStorage.open(options);
+    await expect(HostStorage.open(options)).rejects.toMatchObject({
       problem: { code: "instanceBusy" },
     });
-    await expect(
-      createVerificationHost({ ...options, recoverLock: true }),
-    ).rejects.toMatchObject({ problem: { code: "instanceBusy" } });
     await first.close();
     const other = await fixture();
     await expect(
-      createVerificationHost({ ...options, projectRoot: other.root }),
+      HostStorage.open({ ...options, projectRoot: other.root }),
     ).rejects.toMatchObject({ problem: { code: "identityMismatch" } });
-    const reopened = await createVerificationHost(options);
+    const reopened = await HostStorage.open(options);
     cleanups.push(() => reopened.close());
   });
 
-  it("retains crash resources and receipts, admits one recovery owner, and never replays the operation", async () => {
+  it("lets concurrent hosts share a project and removes a closed host's directory", async () => {
+    const options = await fixture();
+    const [first, second] = await Promise.all([
+      createVerificationHost(options),
+      createVerificationHost(options),
+    ]);
+    expect(await readdir(join(options.stateRoot, "hosts"))).toHaveLength(2);
+    await first.close();
+    await second.close();
+    expect(await readdir(join(options.stateRoot, "hosts"))).toEqual([]);
+  });
+
+  it("collects a killed host's directory once without replaying its operation", async () => {
     const options = await fixture();
     const builtEntry = new URL("../../dist/index.js", import.meta.url).href;
     const childPath = join(options.root, "crash.mjs");
@@ -52,13 +61,10 @@ describe("host ownership and crash recovery", () => {
       childPath,
       `
 import { createVerificationHost, jsonSchema } from ${JSON.stringify(builtEntry)};
-import { writeFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { appendFile } from 'node:fs/promises';
 const host = await createVerificationHost(${JSON.stringify({ projectRoot: options.projectRoot, stateRoot: options.stateRoot })});
-host.jobs.register('test.crash', { input: jsonSchema, output: jsonSchema, outputSchema: 'test/v1', run: async (_input, ctx) => {
-  const id = randomUUID();
-  await ctx.addResource(id);
-  await writeFile(${JSON.stringify(join(options.root, "effect.json"))}, JSON.stringify({ id }));
+host.jobs.register('test.crash', { input: jsonSchema, output: jsonSchema, outputSchema: 'test/v1', run: async () => {
+  await appendFile(${JSON.stringify(join(options.root, "effect.log"))}, 'ran\\n');
   process.stdout.write(JSON.stringify({ ready: true }) + '\\n');
   await new Promise(() => {});
   return null;
@@ -87,32 +93,18 @@ setInterval(() => {}, 1000);
     } finally {
       lines.close();
     }
+    const [abandoned] = await readdir(join(options.stateRoot, "hosts"));
     await kill(child);
-    await expect(createVerificationHost(options)).rejects.toMatchObject({
-      problem: { code: "instanceBusy" },
-    });
-    const attempts = await Promise.allSettled([
-      createVerificationHost({ ...options, recoverLock: true }),
-      createVerificationHost({ ...options, recoverLock: true }),
+    const hosts = await Promise.all([
+      createVerificationHost(options),
+      createVerificationHost(options),
     ]);
-    const owners = attempts.filter((result) => result.status === "fulfilled");
-    expect(owners).toHaveLength(1);
-    const owner = owners[0]!;
-    if (owner.status !== "fulfilled") throw new Error("Missing recovered host");
-    const host = owner.value;
-    cleanups.push(() => host.close());
-    const { job } = await host.jobs.byRequest("crash-request");
-    const effect = JSON.parse(
-      await readFile(join(options.root, "effect.json"), "utf8"),
+    for (const host of hosts) cleanups.push(() => host.close());
+    const remaining = await readdir(join(options.stateRoot, "hosts"));
+    expect(remaining).toHaveLength(2);
+    expect(remaining).not.toContain(abandoned);
+    expect(await readFile(join(options.root, "effect.log"), "utf8")).toBe(
+      "ran\n",
     );
-    expect(job).toMatchObject({
-      state: "interrupted",
-      resourceRefs: [effect.id],
-      problem: { code: "outcomeUnknown" },
-    });
-    expect(job.output).toBeUndefined();
-    expect(
-      attempts.filter((result) => result.status === "rejected"),
-    ).toHaveLength(1);
   });
 });

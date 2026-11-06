@@ -28,7 +28,7 @@ export function launch(
       truncated = false;
     const child: ChildProcess = spawn(executable, args, {
       cwd: options.cwd,
-      env: { ...process.env, ...options.env },
+      env: { ...inheritedEnvironment(), ...options.env },
       detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -162,4 +162,18 @@ export async function run(
         "inspect",
       ),
     );
+}
+
+/**
+ * The host often runs inside an installed Multica session, whose identity,
+ * daemon endpoints and model credentials must not reach anything it launches.
+ */
+export function inheritedEnvironment(): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key]) =>
+        !/^(MULTICA_|ANTHROPIC_|OPENAI_|CLAUDE_|CODEX_)/.test(key) &&
+        key !== "DESKTOP_APP_SUFFIX",
+    ),
+  );
 }

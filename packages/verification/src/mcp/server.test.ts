@@ -1,15 +1,27 @@
 // @vitest-environment node
 import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:net";
+import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createVerificationHost } from "../host/host.js";
 import { createVerificationMcpServer } from "./server.js";
+import { HealthMonitor } from "../daemon/health.js";
+import { serveDaemon } from "../daemon/server.js";
+
+async function freePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("No port");
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return address.port;
+}
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -29,20 +41,6 @@ async function directory() {
   const root = await mkdtemp(join(tmpdir(), "verification-mcp-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   return root;
-}
-async function stdio(root: string) {
-  const client = new Client({ name: "verification-test", version: "1" });
-  const entry = fileURLToPath(
-    new URL("../../dist/mcp/stdio.js", import.meta.url),
-  );
-  const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: [entry, "--project", root, "--state-root", join(root, "state")],
-    stderr: "pipe",
-  });
-  cleanups.push(() => client.close());
-  await client.connect(transport);
-  return client;
 }
 async function snapshotRestore(client: Client, requestId: string) {
   return payload(
@@ -117,41 +115,75 @@ describe("verification MCP transport", () => {
     expect(unsupported.isError).toBe(true);
   });
 
-  it("runs over real stdio and reuses a job receipt after reconnect", async () => {
+  it("serves MCP and the console from one loopback daemon without credentials", async () => {
     const root = await directory();
-    const first = await stdio(root);
-    const receipt = acceptedSchema.parse(
-      await snapshotRestore(first, "stdio-restore"),
-    );
-    const job = z
-      .object({ kind: z.literal("ok"), value: z.object({ jobId: z.uuid() }) })
-      .parse(
-        payload(
-          await first.callTool({
-            name: "job_query",
-            arguments: {
-              target: { kind: "request", requestId: "stdio-restore" },
-            },
-          }),
-        ),
-      );
-    expect(job.value.jobId).toBe(receipt.jobId);
-    await first.close();
-    const second = await stdio(root);
-    expect(await snapshotRestore(second, "stdio-restore")).toMatchObject({
-      receiptId: receipt.receiptId,
+    const host = await createVerificationHost({
+      projectRoot: root,
+      stateRoot: join(root, "state"),
     });
-    const conflict = await second.callTool({
-      name: "data_restore",
-      arguments: {
-        environmentId: "00000000-0000-4000-8000-000000000000",
-        content: { kind: "workspaceTemplate", issueCount: 2 },
-        requestId: "stdio-restore",
+    cleanups.push(() => host.close());
+    const monitor = new HealthMonitor(host, {
+      stateRoot: root,
+      intervalMs: 60_000,
+      maxEnvironments: 2,
+    });
+    const port = await freePort();
+    const daemon = await serveDaemon({
+      host,
+      monitor,
+      port,
+      info: {
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        commit: "test",
       },
     });
-    expect(payload(conflict)).toMatchObject({
-      kind: "error",
-      problem: { code: "requestConflict" },
+    cleanups.push(() => daemon.close());
+    const base = `http://127.0.0.1:${port}`;
+    expect(
+      (await fetch(`${base}/mcp`, { method: "POST", body: "{}" })).status,
+    ).toBe(400);
+    const misdirected = await new Promise<number>((resolve, reject) =>
+      request(
+        {
+          host: "127.0.0.1",
+          port,
+          path: "/console/api/overview",
+          headers: { Host: `evil.test:${port}` },
+        },
+        (response) => {
+          response.resume();
+          resolve(response.statusCode ?? 0);
+        },
+      )
+        .on("error", reject)
+        .end(),
+    );
+    expect(misdirected).toBe(421);
+    const client = new Client({ name: "agent", version: "1" });
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(daemon.info.mcpUrl)),
+    );
+    cleanups.push(() => client.close());
+    expect((await client.listTools()).tools).toHaveLength(18);
+    const receipt = acceptedSchema.parse(
+      await snapshotRestore(client, "http-restore"),
+    );
+    expect(await snapshotRestore(client, "http-restore")).toMatchObject({
+      receiptId: receipt.receiptId,
     });
+    const overview = await fetch(`${base}/console/api/overview`);
+    expect(await overview.json()).toMatchObject({
+      daemon: { mcpUrl: `${base}/mcp` },
+      environments: [],
+    });
+    const forged = await fetch(
+      `${base}/console/api/environments/00000000-0000-4000-8000-000000000000/stop`,
+      {
+        method: "POST",
+        headers: { Origin: "http://evil.test" },
+      },
+    );
+    expect(forged.status).toBe(403);
   });
 });

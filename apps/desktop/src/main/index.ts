@@ -1144,6 +1144,7 @@ if (!gotTheLock) {
       endpoint: () => desktopRuntimeRegistry().endpoint(runtimeConfigResult.ok ? runtimeConfigResult.config.apiUrl : ""),
       identity: () => desktopRuntimeRegistry().runtime(),
       backendToken: async () => (await readDesktopProfileCredentials(desktopRuntimeProfile()))?.token ?? null,
+      deliverToken: (token) => dispatchToMainRenderer("auth:token", token),
     });
 
     app.on("activate", () => {

@@ -7,14 +7,16 @@
 - **只提供操作和取数。** 宿主准备和启停环境、导入数据、控制 fake provider、操作页面，并原样返回环境、应用、事件和页面数据。它不计算"通过/失败"，不维护验证计划、结论或报告，也不评估采集是否完整。这些判断属于调用方。
 - **接口互不依赖。** 每个工具只要求自身参数，不要求先建立验证记录、开始步骤或先观察页面。资源 ID（environmentId、dataSnapshotId）是参数，不是调用顺序约束。
 - **异步采用 start/query。** 需要较长时间的操作返回 job，调用方用 `job_query` 读取；其余操作同步返回结果。
+- **只有 MCP。** 一个 24 小时常驻的守护进程在固定地址 `http://127.0.0.1:47311/mcp` 提供 MCP（Streamable HTTP），不提供 CLI 或其他 API；根路径是给人看的管理台。两者不需要凭据，只服务发往该本机地址的请求，管理台的写操作要求来自管理台页面。
 
 ## 2. 模块
 
 | 模块 | 代码 | 职责 |
 | --- | --- | --- |
+| 守护进程 | `src/daemon/` | 固定端口的 HTTP 服务（`/mcp` 与管理台）、健康巡检、空闲回收 |
 | MCP | `src/mcp/` | 工具注册与协议转换，不持有业务状态 |
 | 任务 | `src/host/jobs.ts` | 异步操作的收据、requestId 去重、状态和取消 |
-| 环境 | `src/setup/` | 设备自检、固定版本 worktree、构建缓存、进程生命周期、设备互斥 |
+| 环境 | `src/setup/` | 设备自检、远端分支镜像与 worktree、构建缓存、进程生命周期、环境名额 |
 | 数据 | `src/data/` | 来源导出快照、导入副本、模板数据、fake provider 控制 |
 | 状态 | `src/state/` | 按来源读取当前状态和事件 |
 | 页面 | `src/page/` | 通过 CDP 连接同一应用的窗口，观察、读取、操作和截图 |
@@ -51,13 +53,17 @@ interface Problem {
 
 | 操作 | 输入 | 输出 |
 | --- | --- | --- |
-| `env.start` | gitRef、mode、dataMode、includeWorkingChanges、可选 sourceRef、apiOrigin | 环境记录 |
+| `env.start` | branch、mode、dataMode，可选 owner、idleTimeoutMinutes、sourceRef、apiOrigin | 环境记录 |
 | `env.stop` | environmentId | 环境记录 |
 | `data.snapshot` | sourceRef、selection | 快照清单（不含内容） |
 | `data.restore` | environmentId、content（snapshot / conversationTemplate / workspaceTemplate） | 副本：datasetId、映射、转换列表 |
 
 - job 的 `resourceRefs` 在创建资源时立即写入。`env.start` 在准备开始时写入 environmentId，调用方无需等任务完成即可读环境状态和日志。
-- `env.start` 需要登录时进入 `awaitingUser`，登录完成后继续；`env.stop` 会取消同一环境未完成的 `env.start`。
+- `env.start` 在应用启动后自动登录本地测试账号并进入 `verification` 工作区，不需要人工操作；`env.stop` 会取消同一环境未完成的 `env.start`。
+- `branch` 是远端分支名或可达 commit。守护进程在自己的部分克隆 `<state-root>/repository.git` 中拉取并固定 commit，再建独立 worktree；只验证已推送的代码。
+- 守护进程是唯一宿主，所有 MCP 会话共享环境、任务和快照。环境持续到 `env_stop`、管理台停止或空闲超时（默认 120 分钟无 MCP 调用，`idleTimeoutMinutes` 可覆盖）；任何带 `environmentId` 的调用都刷新使用时间。
+- 同时运行的环境数有上限（默认 2）。满额时 `env.start` 失败为 `instanceBusy`，并列出占用环境及其 owner；启动阶段按顺序执行。
+- 守护进程重启或被强制结束后，下一次启动回收上一个进程遗留的环境、worktree 和分支。
 - 宿主重启后，未完成的任务标为 `interrupted`，不自动重放。响应丢失时按原 requestId 查询，不换 ID 重放。
 - `job_cancel` 请求协作取消，不撤销已产生的资源。
 
@@ -111,8 +117,8 @@ interface Problem {
 
 - 来源由宿主启动参数绑定（`--bindings-file`），工具输入不接收 token、任意路径或 SQL。
 - 只读来源（`access: readOnly`）拒绝写请求；导入和 fake provider 控制只作用于宿主自己启动的测试环境。
-- 设备锁保证同一台设备只运行一个完整 Desktop 验证环境，不接管未知进程。
-- 验证运行时与已安装的 Multica 并存：开发 Electron、bundled daemon 和环境的 `multica-dev` 命令使用环境私有 HOME 和独立健康端口（`MULTICA_DEV_ISOLATED`、`MULTICA_DEV_HEALTH_PORT`），并剔除模型提供方凭据环境变量。宿主持续核对已安装 Multica 的 `launch.json`、`daemon.pid`、CLI 链接、`desktop-runtime` profile 配置和 Codex 配置，发生变化即停止验证环境。
+- 环境名额限制同时运行的环境数量；回收只针对守护进程自己创建的进程和容器，不接管未知进程。
+- 验证运行时与已安装的 Multica 并存：开发 Electron 和 bundled daemon 使用环境私有 HOME 和独立健康端口（`MULTICA_DEV_ISOLATED`、`MULTICA_DEV_HEALTH_PORT`），并剔除模型提供方凭据环境变量。宿主持续核对已安装 Multica 的 `launch.json`、`daemon.pid`、CLI 链接、`desktop-runtime` profile 配置和 Codex 配置，发生变化即停止验证环境。
 - 生产 Electron 构建移除 main/preload/renderer 验证实现；Go 端由 `verificationdev` 标签控制，设置环境变量不能在生产构建中重新打开。
 
 ## 8. 与既有代码的接入点

@@ -59,6 +59,23 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
         "Operate dev-only Multica environments and read their data. Every tool is independent. Asynchronous tools return a job; read it with job_query. Tools report what they did and observed; deciding whether behaviour is correct is the caller's job.",
     },
   );
+  // Any call naming an environment counts as use, so the daemon does not
+  // reclaim an environment an agent is still working with.
+  const register = server.registerTool.bind(server);
+  server.registerTool = ((
+    name: string,
+    config: unknown,
+    callback: (args: { environmentId?: unknown }, extra: unknown) => unknown,
+  ) =>
+    register(
+      name,
+      config as never,
+      ((args: { environmentId?: unknown }, extra: unknown) => {
+        if (typeof args?.environmentId === "string")
+          host.environments.touch(args.environmentId);
+        return callback(args, extra);
+      }) as never,
+    )) as typeof server.registerTool;
 
   server.registerTool(
     "env_inspect",
@@ -74,7 +91,7 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
     "env_start",
     {
       description:
-        "Start: prepare an owned worktree at a Git commit, build it, and launch its backend and dev Electron (or a read-only web page for liveReadOnly). Returns a job; its resourceRefs carry the environmentId as soon as preparation begins. The job waits in awaitingUser until the application is logged in. The runtime uses its own HOME and daemon health port, so it can run beside an installed Multica.",
+        "Start: prepare an owned worktree at a Git commit, build it, and launch its backend and dev Electron (or a read-only web page for liveReadOnly). Returns a job; its resourceRefs carry the environmentId as soon as preparation begins. The host signs the application into a local test account and workspace by itself. The runtime uses its own HOME and daemon health port, so it can run beside an installed Multica.",
       inputSchema: { ...prepareInput.shape, requestId: requestIdSchema },
       annotations: command,
     },

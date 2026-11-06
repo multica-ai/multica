@@ -16,6 +16,7 @@ declare module "#verification-dev/main" {
             cliCommit: string;
           }>;
           backendToken(): Promise<string | null>;
+          deliverToken(token: string): void;
         }): Promise<void>;
       }
     | undefined;

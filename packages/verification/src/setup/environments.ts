@@ -1,15 +1,14 @@
 import { execFile } from "node:child_process";
-import { randomBytes, randomUUID, createHash } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import {
-  copyFile,
+  appendFile,
   lstat,
   mkdir,
   readFile,
-  realpath,
   writeFile,
 } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -25,7 +24,12 @@ import type { HostStorage } from "../host/storage.js";
 import { redactLogText } from "../host/redact.js";
 import { digest } from "../host/storage.js";
 import type { JobService, OperationContext } from "../host/jobs.js";
-import { problem, toProblem, VerificationError } from "../host/problem.js";
+import {
+  isMissing,
+  problem,
+  toProblem,
+  VerificationError,
+} from "../host/problem.js";
 import {
   launchReadOnlyPages,
   type ReadOnlyPageRuntime,
@@ -34,22 +38,53 @@ import { sourceIdentity } from "./source-identity.js";
 import { awaitPrerequisites } from "./prerequisites.js";
 import { BuildCache, manifestSchema, verifyBuildFiles } from "./build-cache.js";
 import { probeTool } from "./inspect.js";
-import { DeviceLease } from "./device-lease.js";
 import { prepareToolchain } from "./toolchain.js";
-import { launch, run, type RunningProcess } from "./process.js";
+import {
+  inheritedEnvironment,
+  launch,
+  run,
+  type RunningProcess,
+} from "./process.js";
 import { productionRuntimeDigest } from "./production-guard.js";
 import type { Bindings } from "../sources/bindings.js";
 
 export const prepareInput = z
   .object({
-    gitRef: z.string().min(1).max(200),
+    /** A branch on the daemon's remote, or a commit SHA reachable from it. */
+    branch: z
+      .string()
+      .min(1)
+      .max(200)
+      .regex(/^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]+$/),
     mode: z.enum(["renderer", "desktop"]),
     dataMode: z.enum(["liveReadOnly", "realSnapshot", "fixture"]),
     apiOrigin: z.url().optional(),
     sourceRef: z.string().optional(),
-    includeWorkingChanges: z.boolean().default(false),
+    /** Who the environment is for; shown in the console. */
+    owner: z.string().max(200).optional(),
+    /** Reclaim the environment after this long without MCP calls naming it. */
+    idleTimeoutMinutes: z.number().int().min(1).max(10080).optional(),
   })
   .strict();
+
+export type EnvironmentPolicy = {
+  /** Project-level directory shared by every host: toolchains, build cache, repository mirror. */
+  sharedRoot: string;
+  /** Remote the repository mirror fetches branches from. */
+  repositoryUrl: string;
+  maxEnvironments: number;
+  defaultIdleMinutes: number;
+  /** Runs before admitting a start so a crashed host's environments do not hold capacity. */
+  beforeStart?: () => Promise<void>;
+};
+/** States that occupy one of the daemon's environment slots. */
+export const slotStates = new Set([
+  "preparing",
+  "starting",
+  "awaitingUser",
+  "ready",
+  "stopping",
+]);
 const sessionSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -78,7 +113,12 @@ export const descriptorSchema = z
 export type Descriptor = z.infer<typeof descriptorSchema>;
 type Tools = Awaited<ReturnType<typeof prepareToolchain>>;
 
-export const git = (cwd: string, args: string[], raw = false) =>
+export const git = (
+  cwd: string,
+  args: string[],
+  raw = false,
+  timeout = 30_000,
+) =>
   new Promise<string>((resolve, reject) =>
     execFile(
       "git",
@@ -86,7 +126,7 @@ export const git = (cwd: string, args: string[], raw = false) =>
       {
         cwd,
         maxBuffer: 32 * 1024 * 1024,
-        timeout: 30_000,
+        timeout,
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
       },
       (error, stdout) =>
@@ -122,18 +162,21 @@ export class Environments {
   private readonly processes = new Map<string, RunningProcess[]>();
   private readonly tools = new Map<string, Tools>();
   private readonly guards = new Map<string, ReturnType<typeof setInterval>>();
+  private readonly activity = new Map<string, number>();
   private lifecycle: Promise<unknown> = Promise.resolve();
   constructor(
     private readonly storage: HostStorage,
     jobs: JobService,
     readonly bindings: Bindings,
-    private readonly deviceLease: DeviceLease,
+    private readonly policy: EnvironmentPolicy,
   ) {
     jobs.register("env.start", {
       input: prepareInput,
       output: jsonSchema,
       outputSchema: "environment/v1",
       run: async (input, context) => {
+        await this.policy.beforeStart?.();
+        await this.assertCapacity();
         const prepared = await this.prepare(prepareInput.parse(input), context);
         const id = prepared.environmentId;
         let result = await this.serializeLifecycle(async () => {
@@ -156,6 +199,7 @@ export class Environments {
             );
           result = await this.readiness(retained);
         }
+        this.touch(id);
         return toJson(result);
       },
     });
@@ -186,6 +230,107 @@ export class Environments {
         );
       },
     });
+  }
+  private repository() {
+    return join(this.policy.sharedRoot, "repository.git");
+  }
+  private repositoryLock: Promise<unknown> = Promise.resolve();
+  /**
+   * Fetches a branch (or reachable commit) from the remote into the daemon's
+   * own partial mirror and pins the commit; nobody's working copy is used.
+   */
+  fetchCommit(branch: string): Promise<string> {
+    const next = this.repositoryLock
+      .catch(() => undefined)
+      .then(async () => {
+        const repository = this.repository();
+        try {
+          await lstat(join(repository, "HEAD"));
+        } catch {
+          await mkdir(this.policy.sharedRoot, { recursive: true, mode: 0o700 });
+          await git(
+            this.policy.sharedRoot,
+            [
+              "clone",
+              "--bare",
+              "--filter=blob:none",
+              "--",
+              this.policy.repositoryUrl,
+              repository,
+            ],
+            false,
+            900_000,
+          );
+        }
+        try {
+          await git(
+            repository,
+            ["fetch", "--no-tags", "origin", branch],
+            false,
+            600_000,
+          );
+        } catch {
+          throw new VerificationError(
+            problem(
+              "invalidInput",
+              `The branch or commit ${branch} could not be fetched from ${this.policy.repositoryUrl}`,
+            ),
+          );
+        }
+        const commit = await git(repository, [
+          "rev-parse",
+          "--verify",
+          "FETCH_HEAD^{commit}",
+        ]);
+        if (!/^[a-f0-9]{40}$/.test(commit))
+          throw new VerificationError(
+            problem("invalidInput", "The fetched ref is not a commit"),
+          );
+        return commit;
+      });
+    this.repositoryLock = next;
+    return next;
+  }
+  /** Fails when the configured number of environments is already running. */
+  private async assertCapacity(except?: string): Promise<void> {
+    const running = (await this.list()).filter(
+      (item) =>
+        item.environmentId !== except &&
+        slotStates.has(item.state) &&
+        item.components.referenceOnly !== true,
+    );
+    if (running.length >= this.policy.maxEnvironments)
+      throw new VerificationError(
+        problem(
+          "instanceBusy",
+          `All ${this.policy.maxEnvironments} verification environment slots are in use (${running
+            .map(
+              (item) =>
+                `${item.environmentId.slice(0, 8)}${item.components.owner ? ` for ${String(item.components.owner)}` : ""}`,
+            )
+            .join(", ")}); stop one or wait for its idle timeout`,
+          "inspect",
+          running.map((item) => item.environmentId),
+        ),
+      );
+  }
+  /** Records use by a caller; idle environments are reclaimed by the daemon. */
+  touch(id: string): void {
+    this.activity.set(id, Date.now());
+  }
+  lastActivity(id: string): number | undefined {
+    return this.activity.get(id);
+  }
+  async list(): Promise<Environment[]> {
+    const environments: Environment[] = [];
+    for (const name of await this.storage.list("environments")) {
+      const environment = await this.storage.read(
+        `environments/${name}`,
+        environmentSchema,
+      );
+      if (environment) environments.push(environment);
+    }
+    return environments;
   }
   async get(id: string): Promise<Environment> {
     resourceIdSchema.parse(id);
@@ -382,21 +527,6 @@ export class Environments {
     context: OperationContext,
   ): Promise<Environment> {
     await this.assertTaskBoundary();
-    const commit = await git(this.storage.projectRoot, [
-      "rev-parse",
-      "--verify",
-      "--end-of-options",
-      `${input.gitRef}^{commit}`,
-    ]);
-    if (!/^[a-f0-9]{40}$/.test(commit))
-      throw new VerificationError(
-        problem("invalidInput", "A full commit is required"),
-      );
-    const id = randomUUID();
-    await context.addResource(id);
-    const checkout = join(this.storage.root, "worktrees", id),
-      directory = this.directory(id);
-    await mkdir(directory, { mode: 0o700 });
     const source = input.sourceRef
       ? this.bindings.get(input.sourceRef)
       : undefined;
@@ -417,6 +547,13 @@ export class Environments {
           "Read-only application pages require renderer mode and an authorized backend binding; daemon data remains readable through source snapshots",
         ),
       );
+    await context.progress("fetch");
+    const commit = await this.fetchCommit(input.branch);
+    const id = randomUUID();
+    await context.addResource(id);
+    const checkout = join(this.storage.root, "worktrees", id),
+      directory = this.directory(id);
+    await mkdir(directory, { mode: 0o700 });
     const apiOrigin =
       source?.scope.apiOrigin ??
       input.apiOrigin ??
@@ -431,6 +568,12 @@ export class Environments {
           "Copies and fixtures require a local test backend",
         ),
       );
+    const identity = {
+      branch: input.branch,
+      owner: input.owner ?? null,
+      idleTimeoutMinutes:
+        input.idleTimeoutMinutes ?? this.policy.defaultIdleMinutes,
+    };
     let environment: Environment = {
       schemaVersion: 1,
       environmentId: id,
@@ -442,7 +585,7 @@ export class Environments {
       state: "preparing",
       apiOrigin,
       ...(input.sourceRef ? { sourceRef: input.sourceRef } : {}),
-      components: { runtimeAttempted: false },
+      components: { ...identity, runtimeAttempted: false },
     };
     await this.save(environment);
     try {
@@ -457,87 +600,19 @@ export class Environments {
         },
       );
       await context.progress("checkout");
-      await git(this.storage.projectRoot, [
-        "worktree",
-        "add",
-        "-b",
-        `codex/verification-${id.slice(0, 8)}`,
-        checkout,
-        commit,
-      ]);
-      let overlay = "";
-      if (input.includeWorkingChanges) {
-        if (
-          commit !==
-          (await git(this.storage.projectRoot, ["rev-parse", "HEAD"]))
-        )
-          throw new VerificationError(
-            problem(
-              "invalidInput",
-              "Working changes can only overlay the current HEAD",
-            ),
-          );
-        const patch = await git(
-          this.storage.projectRoot,
-          [
-            "diff",
-            "--binary",
-            "HEAD",
-            "--",
-            ".",
-            ":(exclude).env*",
-            ":(exclude)**/.env*",
-            ":(exclude)**/*.pem",
-            ":(exclude)**/*.key",
-            ":(exclude)**/*.token",
-          ],
-          true,
-        );
-        if (patch) {
-          const path = join(directory, "source.patch");
-          await writeFile(path, patch, { mode: 0o600 });
-          await git(checkout, ["apply", path]);
-        }
-        overlay = patch;
-        const untracked = (
-          await git(
-            this.storage.projectRoot,
-            ["ls-files", "--others", "--exclude-standard", "-z"],
-            true,
-          )
-        )
-          .split("\0")
-          .filter(Boolean)
-          .sort();
-        for (const path of untracked) {
-          if (
-            !/^(apps|packages|server|scripts|verification|docs)\//.test(path) ||
-            path
-              .split("/")
-              .some(
-                (part) => part.startsWith(".env") || part === "node_modules",
-              )
-          )
-            continue;
-          const from = join(this.storage.projectRoot, path),
-            resolved = await realpath(from),
-            rel = relative(this.storage.projectRoot, resolved);
-          if (
-            rel.startsWith("..") ||
-            isAbsolute(rel) ||
-            !(await lstat(from)).isFile()
-          )
-            throw new VerificationError(
-              problem("forbidden", "A working source file escapes the project"),
-            );
-          const to = join(checkout, path);
-          await mkdir(dirname(to), { recursive: true });
-          await copyFile(from, to);
-          overlay += `${path}:${createHash("sha256")
-            .update(await readFile(from))
-            .digest("hex")}\n`;
-        }
-      }
+      await git(
+        this.repository(),
+        [
+          "worktree",
+          "add",
+          "-b",
+          `codex/verification-${id.slice(0, 8)}`,
+          checkout,
+          commit,
+        ],
+        false,
+        600_000,
+      );
       try {
         await lstat(
           join(checkout, "apps/desktop/src/main/verification-dev/index.ts"),
@@ -546,11 +621,11 @@ export class Environments {
         throw new VerificationError(
           problem(
             "unsupportedVersion",
-            "This source version predates the dev verification protocol; select an instrumented version or explicitly overlay the current implementation",
+            "This branch predates the dev verification protocol; verify a branch that contains it",
           ),
         );
       }
-      const sourceDigest = digest(commit + overlay);
+      const sourceDigest = digest(commit);
       const sourceTreeDigest = await sourceIdentity(checkout);
       const session = sessionSchema.parse({
         schemaVersion: 1,
@@ -573,7 +648,7 @@ export class Environments {
       await context.progress("toolchain");
       const tools = await prepareToolchain(
         checkout,
-        join(this.storage.root, "tools"),
+        join(this.policy.sharedRoot, "tools"),
         context.signal,
       );
       this.tools.set(id, tools);
@@ -626,6 +701,7 @@ export class Environments {
           ...environment,
           state: "prepared",
           components: {
+            ...identity,
             runtimeAttempted: false,
             sourceDigest,
             sourceTreeDigest,
@@ -679,7 +755,8 @@ export class Environments {
           execFile(
             "go",
             ["version"],
-            { cwd: checkout, env: tools.env },
+            // Same environment as launch/run: Go needs HOME for its module cache.
+            { cwd: checkout, env: { ...inheritedEnvironment(), ...tools.env } },
             (error, stdout) => (error ? reject(error) : resolve(stdout.trim())),
           ),
         ),
@@ -692,7 +769,7 @@ export class Environments {
           ),
         ).version;
       const build = await new BuildCache(
-        join(this.storage.root, "build-cache"),
+        join(this.policy.sharedRoot, "build-cache"),
       ).materialize(
         checkout,
         {
@@ -766,6 +843,7 @@ export class Environments {
         ...environment,
         state: "prepared",
         components: {
+          ...identity,
           runtimeAttempted: false,
           sourceDigest,
           sourceTreeDigest,
@@ -777,6 +855,7 @@ export class Environments {
       await this.save(environment);
       return environment;
     } catch (error) {
+      await this.recordFailure(id, "prepare", error);
       await this.save({
         ...environment,
         state: "failed",
@@ -1082,7 +1161,7 @@ export class Environments {
       this.tools.get(id) ??
       (await prepareToolchain(
         environment.checkout,
-        join(this.storage.root, "tools"),
+        join(this.policy.sharedRoot, "tools"),
         context.signal,
       ));
     const webPort = await freePort(),
@@ -1167,6 +1246,7 @@ export class Environments {
       await this.save(environment);
       return environment;
     } catch (error) {
+      await this.recordFailure(id, "desktop", error);
       await child.stop();
       this.processes.delete(id);
       await this.save({
@@ -1281,7 +1361,8 @@ export class Environments {
         await this.save(environment);
       },
     );
-    await this.deviceLease.acquire(id);
+    await this.policy.beforeStart?.();
+    await this.assertCapacity(id);
     environment = {
       ...environment,
       state: "starting",
@@ -1293,7 +1374,7 @@ export class Environments {
         this.tools.get(id) ??
         (await prepareToolchain(
           environment.checkout,
-          join(this.storage.root, "tools"),
+          join(this.policy.sharedRoot, "tools"),
           context.signal,
         ));
     this.tools.set(id, tools);
@@ -1356,14 +1437,8 @@ export class Environments {
         healthPort = await freePort(),
         productionDigest = await productionRuntimeDigest(homedir());
       await mkdir(runtimeHome, { recursive: true, mode: 0o700 });
-      const cliCommand = await writeDevCli(
-        directory,
-        runtimeHome,
-        healthPort,
-        join(environment.checkout, "apps/desktop/resources/bin/multica"),
-      );
       const runtimeEnv: Record<string, string | undefined> = {
-        ...withoutProviderCredentials(tools.env),
+        ...tools.env,
         // The whole runtime tree gets its own home so it never shares the
         // installed Multica's registry, CLI link, prefs, health port or agent configs.
         HOME: runtimeHome,
@@ -1378,7 +1453,6 @@ export class Environments {
         ...environment.components,
         runtimeHome,
         healthPort,
-        cliCommand,
         productionRuntimeDigest: productionDigest,
       };
       await this.save(environment);
@@ -1452,6 +1526,7 @@ export class Environments {
           };
           await this.save(environment);
           this.guardProductionRuntime(id, productionDigest);
+          if (!snapshot.userId) await this.signIn(environment);
           return this.readiness(environment);
         } catch {
           await new Promise((resolve) => setTimeout(resolve, 500));
@@ -1465,6 +1540,7 @@ export class Environments {
         ),
       );
     } catch (error) {
+      await this.recordFailure(id, "desktop", error);
       await Promise.allSettled(components.map((child) => child.stop()));
       await this.save({
         ...environment,
@@ -1509,7 +1585,12 @@ export class Environments {
             })
             .passthrough()
             .parse(await response.json());
-          if (!response.ok || health.commit !== environment.commit)
+          // The backend reports an abbreviated commit.
+          if (
+            !response.ok ||
+            health.commit.length < 7 ||
+            !environment.commit.startsWith(health.commit)
+          )
             throw new VerificationError(
               problem(
                 "identityMismatch",
@@ -1618,10 +1699,7 @@ export class Environments {
       await this.save(environment);
       return environment;
     }
-    if (environment.state === "stopped") {
-      await this.deviceLease.releaseConfirmed(id);
-      return environment;
-    }
+    if (environment.state === "stopped") return environment;
     if (
       environment.state === "prepared" ||
       environment.components.referenceOnly === true
@@ -1660,7 +1738,8 @@ export class Environments {
         redirect: "error",
       });
       if (!shutdown.ok) throw new Error("Owned daemon shutdown failed");
-      for (let i = 0; i < 50; i++) {
+      // Graceful daemon and Electron shutdowns can take several seconds.
+      for (let i = 0; i < 150; i++) {
         try {
           process.kill(health.pid, 0);
           await new Promise((resolve) => setTimeout(resolve, 100));
@@ -1695,7 +1774,7 @@ export class Environments {
     try {
       const descriptor = await this.descriptor(id);
       await this.desktopRequest(id, "/shutdown", {});
-      for (let attempt = 0; attempt < 50; attempt++) {
+      for (let attempt = 0; attempt < 150; attempt++) {
         try {
           process.kill(descriptor.pid, 0);
           await new Promise((resolve) => setTimeout(resolve, 100));
@@ -1721,21 +1800,31 @@ export class Environments {
     if (!applicationAbsent) {
       try {
         const descriptor = await this.descriptor(id);
-        process.kill(descriptor.pid, 0);
-      } catch (error) {
-        if (error instanceof Error && "code" in error && error.code === "ESRCH")
-          applicationAbsent = true;
+        for (let attempt = 0; attempt < 100; attempt++) {
+          applicationAbsent = await processGone(descriptor.pid);
+          if (applicationAbsent) break;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      } catch {
+        /* Without a readable descriptor the application cannot be confirmed gone. */
       }
     }
-    if (daemonPid) {
-      try {
-        process.kill(daemonPid, 0);
-        daemonAbsent = false;
-      } catch (error) {
-        daemonAbsent =
-          error instanceof Error && "code" in error && error.code === "ESRCH";
+    if (daemonPid && !(await processGone(daemonPid))) {
+      // Without its Desktop the daemon's Local API is unreachable; terminate it
+      // only when its executable belongs to this environment's checkout.
+      if (
+        (await processCommand(daemonPid)).startsWith(
+          join(environment.checkout, "apps/desktop/resources/bin/"),
+        )
+      ) {
+        process.kill(daemonPid, "SIGTERM");
+        for (let attempt = 0; attempt < 150; attempt++) {
+          if (await processGone(daemonPid)) break;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
       }
     }
+    if (daemonPid) daemonAbsent = await processGone(daemonPid);
     if (environment.dataMode !== "liveReadOnly") {
       try {
         const tools =
@@ -1795,9 +1884,121 @@ export class Environments {
           }),
     };
     await this.save(environment);
-    if (environment.state === "stopped")
-      await this.deviceLease.releaseConfirmed(id);
     return environment;
+  }
+  /**
+   * Signs the test application in without a person: the local test backend
+   * accepts its development verification code, and the token reaches the
+   * renderer through the same handoff a browser login uses.
+   */
+  private async signIn(environment: Environment): Promise<void> {
+    const text = await readFile(
+        join(environment.checkout, ".env.worktree"),
+        "utf8",
+      ),
+      code =
+        /^MULTICA_DEV_VERIFICATION_CODE=(\d{6})$/m.exec(text)?.[1] ?? "888888",
+      email = "verification@localhost",
+      slug = "verification";
+    const call = async (
+      path: string,
+      init: {
+        method?: string;
+        body?: unknown;
+        token?: string;
+        workspace?: string;
+      },
+    ) => {
+      const response = await fetch(`${environment.apiOrigin}${path}`, {
+        method: init.method ?? (init.body === undefined ? "GET" : "POST"),
+        headers: {
+          "Content-Type": "application/json",
+          ...(init.token ? { Authorization: `Bearer ${init.token}` } : {}),
+          ...(init.workspace ? { "X-Workspace-ID": init.workspace } : {}),
+        },
+        ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+        signal: AbortSignal.timeout(10000),
+        redirect: "error",
+      });
+      return {
+        ok: response.ok,
+        value: (await response.json().catch(() => null)) as unknown,
+      };
+    };
+    const signInFailed = () =>
+      new VerificationError(
+        problem(
+          "dependencyMissing",
+          "The test backend did not accept the development sign-in",
+          "inspect",
+        ),
+      );
+    if (!(await call("/auth/send-code", { body: { email } })).ok)
+      throw signInFailed();
+    const verified = await call("/auth/verify-code", { body: { email, code } });
+    const token = z
+      .object({ token: z.string().min(1) })
+      .safeParse(verified.value);
+    if (!verified.ok || !token.success) throw signInFailed();
+    const jwt = token.data.token;
+    const workspaceSchema = z.object({ id: z.string(), slug: z.string() });
+    const created = await call("/api/workspaces", {
+      body: { name: "Verification", slug },
+      token: jwt,
+    });
+    const workspace = created.ok
+      ? workspaceSchema.parse(created.value)
+      : z
+          .array(workspaceSchema.passthrough())
+          .parse((await call("/api/workspaces", { token: jwt })).value)
+          .find((item) => item.slug === slug);
+    if (!workspace) throw signInFailed();
+    // A new account is otherwise routed to onboarding instead of the workspace.
+    await call("/api/me/onboarding/complete", {
+      body: { exit: "existing" },
+      token: jwt,
+      workspace: workspace.id,
+    });
+    // The dev renderer can still reload (Vite re-optimizes dependencies on
+    // first start) and drop a token delivered too early, so hand it off until
+    // the application reports the signed-in user.
+    for (let attempt = 0; attempt < 30; attempt++) {
+      await this.desktopRequest(environment.environmentId, "/login", {
+        token: jwt,
+      });
+      if (await this.signedInWithin(environment.environmentId, 5000)) break;
+    }
+    environment.components = {
+      ...environment.components,
+      signedIn: { email, workspaceSlug: slug },
+    };
+    await this.save(environment);
+  }
+  private async signedInWithin(id: string, timeoutMs: number) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const status = z
+        .object({ userId: z.string().nullable() })
+        .passthrough()
+        .parse(await this.desktopRequest(id, "/capabilities"));
+      if (status.userId) return true;
+    }
+    return false;
+  }
+  /** Keeps the original failure in the environment's private log; tool results stay generic. */
+  private async recordFailure(
+    id: string,
+    log: "prepare" | "desktop",
+    error: unknown,
+  ) {
+    const detail =
+      error instanceof Error ? (error.stack ?? error.message) : String(error);
+    await appendFile(
+      join(this.directory(id), `${log}.log`),
+      `\n[verification host] ${detail}\n`,
+      { mode: 0o600 },
+    ).catch(() => undefined);
   }
   /**
    * The managed environment script keeps its registry, profiles and scratch
@@ -1910,50 +2111,54 @@ export class Environments {
     if (timer) clearInterval(timer);
     this.guards.delete(id);
   }
-  async close(): Promise<void> {
+  /**
+   * Stops every environment this host owns and removes its worktree and
+   * branch. Returns false when any cleanup is unconfirmed, so the host
+   * directory is kept for the next host to retry.
+   */
+  async close(): Promise<boolean> {
     for (const id of [...this.guards.keys()]) this.unguard(id);
-    for (const id of this.processes.keys())
-      await this.serializeLifecycle(() => this.stop(id)).catch(() => undefined);
+    let clean = true;
+    for (const name of await this.storage.list("environments")) {
+      const environment = await this.storage.read(
+        `environments/${name}`,
+        environmentSchema,
+      );
+      if (!environment) continue;
+      const id = environment.environmentId;
+      if (environment.state !== "stopped") {
+        const stopped = await this.serializeLifecycle(() =>
+          this.stop(id),
+        ).catch(() => null);
+        if (stopped?.state !== "stopped") {
+          clean = false;
+          continue;
+        }
+      }
+      try {
+        await lstat(environment.checkout);
+        await git(this.repository(), [
+          "worktree",
+          "remove",
+          "--force",
+          environment.checkout,
+        ]);
+      } catch (error) {
+        if (!isMissing(error)) clean = false;
+      }
+      await git(this.repository(), [
+        "branch",
+        "-D",
+        `codex/verification-${id.slice(0, 8)}`,
+      ]).catch(() => undefined);
+    }
+    return clean;
   }
   private serializeLifecycle<T>(run: () => Promise<T>): Promise<T> {
     const next = this.lifecycle.catch(() => undefined).then(run);
     this.lifecycle = next;
     return next;
   }
-}
-
-function withoutProviderCredentials(env: NodeJS.ProcessEnv) {
-  return Object.fromEntries(
-    Object.entries(env).filter(
-      ([key]) => !/^(ANTHROPIC_|OPENAI_|CLAUDE_|CODEX_)/.test(key),
-    ),
-  );
-}
-
-/** Writes the environment's `multica-dev` command; it never touches the user's PATH. */
-export async function writeDevCli(
-  directory: string,
-  runtimeHome: string,
-  healthPort: number,
-  cliPath: string,
-): Promise<string> {
-  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-  const bin = join(directory, "bin"),
-    command = join(bin, "multica-dev");
-  await mkdir(bin, { recursive: true, mode: 0o700 });
-  await writeFile(
-    command,
-    [
-      "#!/bin/sh",
-      `export HOME=${quote(runtimeHome)}`,
-      "export MULTICA_DEV_ISOLATED=1",
-      `export MULTICA_DEV_HEALTH_PORT=${healthPort}`,
-      `exec ${quote(cliPath)} --profile desktop-runtime "$@"`,
-      "",
-    ].join("\n"),
-    { mode: 0o700 },
-  );
-  return command;
 }
 
 function databaseContainer(id: string) {
@@ -1973,4 +2178,21 @@ async function removeContainer(
       .catch(() => false);
     if (exists) throw error;
   }
+}
+
+async function processGone(pid: number): Promise<boolean> {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code === "ESRCH";
+  }
+}
+
+function processCommand(pid: number): Promise<string> {
+  return new Promise((resolve) =>
+    execFile("ps", ["-p", String(pid), "-o", "command="], (error, stdout) =>
+      resolve(error ? "" : stdout.trim()),
+    ),
+  );
 }

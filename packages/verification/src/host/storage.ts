@@ -76,7 +76,6 @@ export class HostStorage {
   static async open(options: {
     stateRoot: string;
     projectRoot: string;
-    recoverLock?: boolean;
   }): Promise<HostStorage> {
     const projectRoot = await realpath(options.projectRoot);
     await mkdir(options.stateRoot, { recursive: true, mode: 0o700 });
@@ -94,14 +93,8 @@ export class HostStorage {
         !(error instanceof Error && "code" in error && error.code === "EEXIST")
       )
         throw error;
-      if (!options.recoverLock)
-        throw new VerificationError(
-          problem(
-            "instanceBusy",
-            "This state directory is locked; inspect its host before using --recover-lock",
-            "inspect",
-          ),
-        );
+      // MCP clients routinely kill their stdio servers, so a lock whose recorded
+      // process is gone is taken over; a live owner is never displaced.
       const recoveryDir = join(root, "host-recovery.lock");
       try {
         await mkdir(recoveryDir, { mode: 0o700 });
@@ -142,15 +135,17 @@ export class HostStorage {
           throw new VerificationError(
             problem(
               "instanceBusy",
-              "The recorded host process is still present; its lock cannot be recovered",
+              "Another verification host is running with this state directory",
               "inspect",
             ),
           );
-        // Retain the abandoned owner and serialize recovery so it cannot rename a new host's lock.
-        await rename(
-          lockDir,
-          join(root, `abandoned-lock-${previous.ownerId}-${randomUUID()}`),
+        // Rename before removing so recovery cannot delete a new host's lock.
+        const abandoned = join(
+          root,
+          `abandoned-lock-${previous.ownerId}-${randomUUID()}`,
         );
+        await rename(lockDir, abandoned);
+        await rm(abandoned, { recursive: true, force: true });
         await mkdir(lockDir, { mode: 0o700 });
       } finally {
         await rm(recoveryDir, { recursive: true });

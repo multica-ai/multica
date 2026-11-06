@@ -1,6 +1,8 @@
 # Multica 自动化验证基础能力
 
-独立于被测应用运行的验证宿主，只提供两类能力：**操作**（准备和启停环境、导入数据、控制 fake provider、操作页面）和**取数**（环境状态、日志、应用状态、事件、页面元素、截图）。宿主不判断被测行为是否正确，也不产出结论；完整性、对错和报告由调用方的智能体决定。
+一个 24 小时常驻的本机守护进程，只通过 MCP 对外提供两类能力：**操作**（准备和启停环境、导入数据、控制 fake provider、操作页面）和**取数**（环境状态、日志、应用状态、事件、页面元素、截图）。宿主不判断被测行为是否正确，也不产出结论；完整性、对错和报告由调用方的智能体决定。
+
+守护进程固定监听 `http://127.0.0.1:47311`：智能体连接 `/mcp`（MCP Streamable HTTP），浏览器打开 `/` 是管理台。两者都不需要凭据，只接受发往本机这个地址的请求。
 
 工具 schema 位于 [MCP 适配器](src/mcp/server.ts)，资源 schema 位于 [contracts](src/contracts/resources.ts)，接口约定见[接口契约](../../docs/engineering/verification-foundation-contracts.md)。
 
@@ -11,7 +13,7 @@
 | 工具 | 方式 | 说明 |
 | --- | --- | --- |
 | `env_inspect` | 同步 | 本机工具链、磁盘、图形会话、构建依赖、数据库目标、端口和 CU 前提 |
-| `env_start` | 异步 | 从指定 commit 准备 worktree、构建，并启动后端和开发 Electron；`liveReadOnly` 启动只读 Web 页面。job 的 `resourceRefs` 在准备开始后即包含 environmentId；等待登录时 job 为 `awaitingUser` |
+| `env_start` | 异步 | 从远端拉取指定分支（或 commit），建独立 worktree、构建，并启动后端和开发 Electron；`liveReadOnly` 启动只读 Web 页面。job 的 `resourceRefs` 在准备开始后即包含 environmentId；应用启动后宿主自动登录测试账号 `verification@localhost` 并进入 `verification` 工作区，无需人工操作 |
 | `env_stop` | 异步 | 停止该环境自己的进程和 daemon，数据保留 |
 | `env_status` | 同步 | 环境记录及当前观察到的应用、daemon、后端身份 |
 | `env_log_read` | 同步 | 分页读取 prepare/backend/desktop/stop 日志，凭据样式文本会脱敏 |
@@ -32,42 +34,57 @@
 
 异步工具的 requestId 用于去重：同一 requestId 只对应一种输入，响应丢失时用 `job_query` 按 requestId 查询原任务，不要换 ID 重放。同步工具不经过任务账本。
 
-## 准备一台 Mac
+## 安装守护进程
 
-设备需要 Git、Xcode Command Line Tools，以及仓库托管环境可用的 PostgreSQL/Docker 前提，参见[贡献指南](../../CONTRIBUTING.md)。
-
-```sh
-bash scripts/verification/bootstrap.sh
-```
-
-脚本将官方 Node 24 下载到 `~/.multica/verification-tools` 并核对 SHA-256，安装仓库指定的 pnpm，过滤安装和构建验证包。它不修改 shell 配置或智能体的全局 MCP 配置。可用 `MULTICA_VERIFICATION_TOOLS_ROOT` 指定工具目录。
-
-已有 Node 24 和指定 pnpm 的设备也可以手动运行：
+设备需要 Git、Xcode Command Line Tools，以及可用的 Docker，参见[贡献指南](../../CONTRIBUTING.md)。
 
 ```sh
-pnpm install --filter @multica/verification... --frozen-lockfile --ignore-scripts
-pnpm --filter @multica/verification build:manual
-node packages/verification/dist/mcp/stdio.js --project /absolute/path/to/checkout
+bash scripts/verification/install-daemon.sh
 ```
 
-最后一条是等待 stdin 协议消息的 MCP 服务；stdout 只输出协议，错误到 stderr。MCP 客户端也可配置 `bash /absolute/path/to/scripts/verification/mcp.sh`，wrapper 已绑定其 checkout，可追加 `--state-root`、`--bindings-file`、`--recover-lock`。
+脚本先运行 `bootstrap.sh`（把官方 Node 24 下载到 `~/.multica/verification-tools` 并核对 SHA-256，安装仓库指定的 pnpm，构建验证包），再写入用户级 launchd 服务 `ai.multica.verification`：登录后自动启动，退出后自动拉起，日志在 `~/.multica/verification/daemon/daemon.log`。守护进程运行安装脚本所在 checkout 的代码。可用环境变量调整：
+
+| 变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `MULTICA_VERIFICATION_PORT` | `47311` | 固定端口；被占用时守护进程启动失败，不会换端口 |
+| `MULTICA_VERIFICATION_MAX_ENVIRONMENTS` | `2` | 同时运行的环境上限，满额时 `env_start` 返回 `instanceBusy` 并列出占用者 |
+| `MULTICA_VERIFICATION_IDLE_MINUTES` | `120` | 环境连续这么久没有 MCP 调用就自动停止并清理；`env_start` 可按环境覆盖 |
+| `MULTICA_VERIFICATION_BINDINGS_FILE` | 无 | 真实数据来源绑定文件，见下文 |
+
+安装后在 AI 会话使用的 MCP 客户端里登记一次即可，地址之后不会变化：
+
+```sh
+claude mcp add --scope user --transport http multica-verification http://127.0.0.1:47311/mcp
+```
+
+`scripts/verification/uninstall-daemon.sh` 停止守护进程（它会停止并清理所有环境）并移除 launchd 服务；工具链、构建缓存和仓库镜像保留。
+
+## 守护进程与环境生命周期
+
+- 守护进程是唯一的验证宿主。所有 MCP 会话共用它的环境、任务和数据快照，会话断开不影响环境；`job_query` 能查到其他会话提交的任务。
+- 环境属于守护进程，直到有人调用 `env_stop`、在管理台停止，或者超过空闲时间。任何带 `environmentId` 的工具调用都会刷新最近使用时间。
+- 守护进程重启时会回收上一个进程留下的环境；被强制结束时，下一次启动同样回收。
+- 管理台每 10 秒采样一次：磁盘、Docker、已安装的 Multica、环境名额，以及每个环境的应用、daemon、后端、数据库容器是否存活和探测延迟，保留约 15 分钟历史；也可以查看任务、日志末尾和停止环境。
 
 ## 环境
 
-`env_start` 的参数是 `gitRef`、`mode`（`desktop` 或 `renderer`）、`dataMode`（`fixture`、`realSnapshot` 或 `liveReadOnly`）、`includeWorkingChanges` 和可选的 `sourceRef`。
+`fixture` 和 `realSnapshot` 环境的登录全自动：宿主用本地测试后端的开发验证码（`.env.worktree` 中的 `MULTICA_DEV_VERIFICATION_CODE`）为 `verification@localhost` 换取令牌，创建 `verification` 工作区并完成引导，再通过开发 Electron 诊断接口的 `/login` 把令牌交给渲染进程，与浏览器登录走同一条 `auth:token` 路径。
+
+`env_start` 的参数是 `branch`（远端分支名或可达的 commit SHA）、`mode`（`desktop` 或 `renderer`）、`dataMode`（`fixture`、`realSnapshot` 或 `liveReadOnly`），以及可选的 `owner`（是谁的环境，显示在管理台）、`idleTimeoutMinutes` 和 `sourceRef`。
+
+守护进程在 `<state-root>/repository.git` 维护一份只属于自己的部分克隆（远端默认是安装 checkout 的 `origin`），每次 `env_start` 拉取指定分支并固定到当时的 commit，再从这份镜像建独立 worktree，不使用任何人的工作目录。只能验证已推送到远端的代码。
 
 - `fixture` 和 `realSnapshot` 先为环境启动一个专属 PostgreSQL 容器（`pgvector/pgvector:pg17`，空闲端口，容器名 `multica-verification-<environmentId>`），把该 worktree 的 `.env.worktree` 指向它，再运行 `make up C=api,web`，然后启动开发 Electron，由它启动同构建的 bundled daemon。`make up`/`make down` 使用环境目录下的私有登记表，不会回收或改动本机其他开发环境，也不使用共享的 5432 数据库。`env_stop` 运行 `make down` 后删除该容器。
 - `liveReadOnly` 要求 `mode=renderer` 和 backend 来源，启动独立 Chromium 页面显示真实 API 数据；写请求、WebSocket 和其他外部请求被拦截。
-- `includeWorkingChanges` 只能覆盖当前 HEAD，并记录源码摘要。目标版本必须已有开发验证接点，否则返回 `unsupportedVersion`。
-- 同一台设备同时只运行一个完整 Desktop 验证环境；设备锁在 `~/.multica/verification-device.lock`。
-- 验证环境可以和已安装的 Multica 同时运行：开发 Electron、bundled daemon 和 CLI 使用环境私有的 HOME（`<环境目录>/runtime-home`）和独立的 daemon 健康端口，不读写已安装 Multica 的运行时注册、CLI 链接、偏好设置和 Codex 配置，并剔除 `ANTHROPIC_`、`OPENAI_`、`CLAUDE_`、`CODEX_` 开头的环境变量。宿主每秒核对已安装 Multica 的运行时文件，发生变化就停止该验证环境。
-- `env_status` 的 `components.cliCommand` 是该环境的 `multica-dev` 命令，绑定环境的 HOME 和健康端口，可直接操作环境内的 CLI 和 daemon；它不安装到用户 PATH。
+- 分支必须已包含开发验证接点，否则返回 `unsupportedVersion`。
+- 多个环境可同时运行，上限由守护进程配置；启动按顺序执行，避免端口分配冲突。
+- 验证环境可以和已安装的 Multica 同时运行：开发 Electron 和 bundled daemon 使用环境私有的 HOME（`<环境目录>/runtime-home`）和独立的 daemon 健康端口，不读写已安装 Multica 的运行时注册、CLI 链接、偏好设置和 Codex 配置，并且宿主启动的所有子进程都不继承 `MULTICA_`、`ANTHROPIC_`、`OPENAI_`、`CLAUDE_`、`CODEX_` 开头的变量和 `DESKTOP_APP_SUFFIX`，因此宿主运行在正式 Multica 会话里时，会话身份、daemon 端点和模型凭据都不会传给验证环境。宿主每秒核对已安装 Multica 的运行时文件，发生变化就停止该验证环境。
 
 构建缓存以源码、锁文件、工具/OS/架构版本和构建环境为键，复用 CLI 和原生 helper；Electron/Next 开发服务按本轮源码编译。
 
 ## 绑定真实来源
 
-来源由宿主启动参数绑定，不接受模型输入 token 或任意 SQL。以下是 `--bindings-file` 私有 JSON 的结构示例，替换为设备实际来源；文件和 token 文件均需 `chmod 600`：
+来源由守护进程启动参数绑定（安装时设置 `MULTICA_VERIFICATION_BINDINGS_FILE`），不接受模型输入 token 或任意 SQL。以下是绑定文件私有 JSON 的结构示例，替换为设备实际来源；文件和 token 文件均需 `chmod 600`：
 
 ```json
 {
@@ -130,7 +147,7 @@ node scripts/verification/check-production.mjs
 
 `test:integration` 构建临时 Go harness，使用真实 SQLite、service、Local API 和 fake provider，并启动受控 Chromium 测试页面适配器；缺少浏览器缓存时先运行 `pnpm --filter @multica/verification exec playwright install chromium`。它不能代替完整 Electron GUI 的验收。
 
-`test:desktop` 是显式原生验收入口，默认不执行。它启动真实 Electron/bundled daemon，等待测试应用完成正常登录和工作区选择，再发送 A/B、检查队列和导航边界、保存截图并停止环境，结果写到本轮状态目录的 `desktop-acceptance.json`。判断逻辑在这个脚本里，宿主只提供操作和数据。
+`test:desktop` 是显式原生验收入口，默认不执行。它启动真实 Electron/bundled daemon，由宿主自动登录并进入工作区，再发送 A/B、检查队列和导航边界、保存截图并停止环境，结果写到本轮状态目录的 `desktop-acceptance.json`。判断逻辑在这个脚本里，宿主只提供操作和数据。
 
 后端 workspace 导入的检查需先用本 checkout 的托管环境准备数据库：
 

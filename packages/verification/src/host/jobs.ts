@@ -184,6 +184,18 @@ export class JobService {
     return job;
   }
 
+  /** Most recently updated jobs first. */
+  async recent(limit = 50): Promise<Job[]> {
+    const jobs: Job[] = [];
+    for (const file of await this.storage.list("jobs")) {
+      const job = await this.storage.read(`jobs/${file}`, jobSchema);
+      if (job) jobs.push(job);
+    }
+    return jobs
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, limit);
+  }
+
   async getReceipt(receiptId: string): Promise<{ receipt: Receipt; job: Job }> {
     resourceIdSchema.parse(receiptId);
     for (const file of await this.storage.list("receipts")) {

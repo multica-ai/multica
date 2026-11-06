@@ -128,10 +128,9 @@ export async function desktopAcceptance() {
         host,
         "env.start",
         {
-          gitRef: process.env.MULTICA_VERIFICATION_GIT_REF ?? "HEAD",
+          branch: process.env.MULTICA_VERIFICATION_BRANCH ?? "main",
           mode: "desktop",
           dataMode: "fixture",
-          includeWorkingChanges: true,
         },
         40 * 60 * 1000,
       ),

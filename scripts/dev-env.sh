@@ -394,14 +394,16 @@ diagnose_database() {
 
 ensure_container_database() {
   local user="${POSTGRES_USER:-multica}" attempt
+  # The image initializes behind a temporary socket-only server and then
+  # restarts; only the final server listens on TCP, so probe and connect there.
   for attempt in $(seq 1 60); do
-    docker exec "$DEV_POSTGRES_CONTAINER" pg_isready -U "$user" -d postgres >/dev/null 2>&1 && break
+    docker exec "$DEV_POSTGRES_CONTAINER" pg_isready -h 127.0.0.1 -U "$user" -d postgres >/dev/null 2>&1 && break
     [ "$attempt" -lt 60 ] || die "PostgreSQL in container $DEV_POSTGRES_CONTAINER did not become ready."
     sleep 1
   done
-  if ! docker exec "$DEV_POSTGRES_CONTAINER" psql -U "$user" -d postgres -tAc \
+  if ! docker exec "$DEV_POSTGRES_CONTAINER" psql -h 127.0.0.1 -U "$user" -d postgres -tAc \
     "SELECT 1 FROM pg_database WHERE datname='${POSTGRES_DB}'" | grep -q 1; then
-    docker exec "$DEV_POSTGRES_CONTAINER" psql -U "$user" -d postgres -v ON_ERROR_STOP=1 \
+    docker exec "$DEV_POSTGRES_CONTAINER" psql -h 127.0.0.1 -U "$user" -d postgres -v ON_ERROR_STOP=1 \
       -c "CREATE DATABASE \"${POSTGRES_DB}\"" >/dev/null
     info "Created database ${POSTGRES_DB} in container $DEV_POSTGRES_CONTAINER."
   fi
