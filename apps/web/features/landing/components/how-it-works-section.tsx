@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useAuthStore } from "@multica/core/auth";
+import { SmartLink } from "./docs-link";
 import { docsHrefForLocale, useLocale } from "../i18n";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
 import { GitHubMark, githubUrl, heroButtonClassName } from "./shared";
@@ -46,12 +47,12 @@ export function HowItWorksSection() {
           <Link href={ctaHref} className={heroButtonClassName("solid")}>
             {user ? t.header.dashboard : t.howItWorks.cta}
           </Link>
-          <Link
+          <SmartLink
             href={docsHrefForLocale(locale)}
             className={heroButtonClassName("ghost")}
           >
             {t.howItWorks.ctaDocs}
-          </Link>
+          </SmartLink>
           <Link
             href={githubUrl}
             target="_blank"

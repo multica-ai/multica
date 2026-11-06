@@ -6,6 +6,8 @@ import { cn } from "@multica/ui/lib/utils";
 import { LandingHeader } from "@/features/landing/components/landing-header";
 import { LandingFooter } from "@/features/landing/components/landing-footer";
 import { Screenshot } from "@/features/landing/components/mdx/screenshot";
+import { SmartLink } from "@/features/landing/components/docs-link";
+import { isDocsHref } from "@/lib/docs-href";
 import { getUseCasePageForLocale } from "@/lib/use-cases-source";
 import {
   docsHrefForLocale,
@@ -73,7 +75,7 @@ function MDXCTA({
   href: string;
 }) {
   return (
-    <Link
+    <SmartLink
       href={href}
       className={cn(
         "inline-flex items-center gap-2 rounded-(--landing-radius-action) px-5 py-3 text-body font-semibold not-italic transition-colors",
@@ -83,7 +85,7 @@ function MDXCTA({
       )}
     >
       {label}
-    </Link>
+    </SmartLink>
   );
 }
 
@@ -182,8 +184,12 @@ function createMdxComponents(locale: SupportedLocale) {
     a: ({ href, ...props }: ComponentPropsWithoutRef<"a">) => {
       const className =
         "underline decoration-[#0a0d12]/25 underline-offset-4 transition-colors hover:text-[#0a0d12] hover:decoration-[#0a0d12]/70";
-      // Internal links should keep SPA navigation (next/link); external links
-      // (mailto:, https://, etc.) stay as native anchors.
+      // Same-app links keep SPA navigation (next/link); the docs site is a
+      // separate app under /docs and other external targets (mailto:,
+      // https://) stay as native anchors.
+      if (href && isDocsHref(href)) {
+        return <a href={href} className={className} {...props} />;
+      }
       if (href && href.startsWith("/")) {
         return <Link href={href} className={className} {...props} />;
       }
