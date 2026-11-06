@@ -282,7 +282,7 @@ export function RailWorkspaces() {
                 <span className="min-w-0 flex-1 truncate">{ws.name}</span>
                 {isCurrent && <Check />}
                 <span className="relative flex size-5 shrink-0 items-center justify-center">
-                  <span className="group-hover/workspace:opacity-0 group-data-highlighted/workspace:opacity-0">
+                  <span className="flex group-hover/workspace:opacity-0 group-data-highlighted/workspace:opacity-0">
                     {ws.pinned_at ? (
                       <Pin className={cn("size-4 fill-current", !isCurrent && unreadIds.has(ws.id) ? "text-brand" : "text-muted-foreground")} />
                     ) : !isCurrent && unreadIds.has(ws.id) ? <UnreadDot /> : null}

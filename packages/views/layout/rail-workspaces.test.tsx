@@ -200,10 +200,15 @@ describe("RailWorkspaces", () => {
       state.workspaces = [ws(1), ws(2), ws(3)];
     });
 
-    it("opens a workspace in a new window from its row button without following the row link", async () => {
+    it("keeps pin and new-window actions separate without following the row link", async () => {
       renderWithI18n(<RailWorkspaces />);
       const menu = await openMenu();
-      const button = within(row(menu, /WS 3/)).getByRole("button", { name: "Open in new window" });
+      const target = row(menu, /WS 3/);
+      fireEvent.click(within(target).getByRole("button", { name: "Pin workspace" }));
+      expect(state.setPinned).toHaveBeenCalledWith({ workspaceId: "ws-3", pinned: true });
+      expect(state.openWorkspaceInNewWindow).not.toHaveBeenCalled();
+      expect(menu).toBeInTheDocument();
+      const button = within(target).getByRole("button", { name: "Open in new window" });
       const notPrevented = fireEvent.click(button);
 
       expect(state.openWorkspaceInNewWindow).toHaveBeenCalledWith("ws3");
