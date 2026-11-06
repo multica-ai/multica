@@ -57,15 +57,17 @@ Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md) with these five sections
    implementation details to a minimum.
 4. **Alternatives (optional):** When useful, briefly describe other approaches
    and why you did not choose them.
-5. **Screenshots:** For UI or interaction changes, attach screenshots from the
-   running app showing the affected screens and states. Before/after comparisons
-   are strongly preferred; for a new screen, include the after screenshot. If
-   there is no UI or interaction impact, write "N/A" and explain why.
+5. **Screenshots:** For UI or interaction changes, attach screenshots or a
+   screen recording from the running app showing the affected screens and
+   states. Before/after comparisons are strongly preferred; for a new screen,
+   show the after state. If there is no UI or interaction impact, write "N/A"
+   and explain why.
 
 End the description with `Closes #<issue>` when the PR resolves an issue.
 
-**UI or interaction PRs without screenshots are rejected by default.** Reviewers
-should request changes or close the PR until screenshots are provided. PRs
+**UI or interaction PRs without screenshots or a recording are rejected by
+default.** Reviewers should request changes or close the PR until one is
+provided. PRs
 missing the problem, goal, or high-level proposal are also not ready for review.
 
 ## Development Model
