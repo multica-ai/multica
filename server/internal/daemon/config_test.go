@@ -23,7 +23,7 @@ func TestResolveAgentExecutablePath_PreservesDispatchShimName(t *testing.T) {
 		t.Skip("creating symlinks requires elevated privileges on Windows")
 	}
 
-	for _, shimName := range []string{"volta-shim", "vp"} {
+	for _, shimName := range []string{"volta-shim", "vp", "mise"} {
 		t.Run(shimName, func(t *testing.T) {
 			managerDir := t.TempDir()
 			manager := filepath.Join(managerDir, shimName)
@@ -58,6 +58,68 @@ func TestResolveAgentExecutablePath_PreservesDispatchShimName(t *testing.T) {
 				t.Fatalf("dispatcher observed command name %q, want claude", got)
 			}
 		})
+	}
+}
+
+// TestResolveAgentExecutablePath_MiseShimKeepsAgentName reproduces GH #9185 in
+// mise's real on-disk layout: `~/.local/share/mise/shims/claude` is a symlink
+// to the mise binary, and mise picks the tool from argv[0]. Canonicalizing that
+// symlink yields a path named `mise`, which still answers `--version` — so the
+// runtime registers and the failure only lands at launch, where the agent's own
+// `-p` reaches mise's argument parser.
+func TestResolveAgentExecutablePath_MiseShimKeepsAgentName(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mise uses executable shims, not symlinks, on Windows")
+	}
+
+	root := t.TempDir()
+	miseBinDir := filepath.Join(root, ".local", "bin")
+	shimsDir := filepath.Join(root, ".local", "share", "mise", "shims")
+	for _, dir := range []string{miseBinDir, shimsDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	// Stands in for the mise dispatcher: it reports a version for any argv[0],
+	// but rejects the agent's -p exactly as mise's own parser does unless it was
+	// invoked under the tool's name.
+	mise := filepath.Join(miseBinDir, "mise")
+	script := "#!/bin/sh\n" +
+		"name=\"${0##*/}\"\n" +
+		"if [ \"$name\" = mise ] && [ \"$1\" != --version ]; then\n" +
+		"  echo \"error: unexpected argument '$1' found\" >&2\n" +
+		"  echo 'Usage: mise [FLAGS] [TASK] [SUBCOMMAND]' >&2\n" +
+		"  exit 2\n" +
+		"fi\n" +
+		"printf '%s\\n' \"$name\"\n"
+	if err := os.WriteFile(mise, []byte(script), 0o755); err != nil {
+		t.Fatalf("write mise dispatcher: %v", err)
+	}
+	if err := os.Symlink(mise, filepath.Join(shimsDir, "claude")); err != nil {
+		t.Fatalf("symlink mise shim: %v", err)
+	}
+	t.Setenv("PATH", shimsDir)
+
+	got, err := resolveAgentExecutablePath("claude")
+	if err != nil {
+		t.Fatalf("resolveAgentExecutablePath: %v", err)
+	}
+	realShimsDir, err := filepath.EvalSymlinks(shimsDir)
+	if err != nil {
+		t.Fatalf("resolve shims directory: %v", err)
+	}
+	if want := filepath.Join(realShimsDir, "claude"); got != want {
+		t.Fatalf("resolved path = %q, want mise shim %q", got, want)
+	}
+
+	// The launch flags Claude Code is always spawned with must survive.
+	output, err := exec.Command(got, "-p", "--output-format", "stream-json").CombinedOutput()
+	if err != nil {
+		t.Fatalf("launch through resolved shim: %v: %s", err, output)
+	}
+	if name := strings.TrimSpace(string(output)); name != "claude" {
+		t.Fatalf("mise dispatched on argv[0] %q, want claude", name)
 	}
 }
 

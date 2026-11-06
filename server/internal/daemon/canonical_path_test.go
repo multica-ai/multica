@@ -15,9 +15,11 @@ func TestIsNameDispatchingAgentShim_RequiresExactDispatcherName(t *testing.T) {
 	}{
 		{name: "Volta", path: filepath.Join("manager", "volta-shim"), want: true},
 		{name: "Vite Plus", path: filepath.Join("manager", "vp"), want: true},
+		{name: "mise", path: filepath.Join("manager", "mise"), want: true},
 		{name: "case insensitive", path: filepath.Join("manager", "VP"), want: true},
 		{name: "short name prefix", path: filepath.Join("manager", "vpn"), want: false},
 		{name: "short name word", path: filepath.Join("manager", "vproxy"), want: false},
+		{name: "mise name prefix", path: filepath.Join("manager", "mise-en-place"), want: false},
 		{name: "extension is not stripped", path: filepath.Join("manager", "volta-shim.exe"), want: false},
 		{name: "ordinary version target", path: filepath.Join("manager", "claude-2.1.216"), want: false},
 	}
