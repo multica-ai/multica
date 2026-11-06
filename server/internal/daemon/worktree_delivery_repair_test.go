@@ -215,7 +215,7 @@ func gitOK(t *testing.T, dir string, args ...string) string {
 }
 
 // squashedWorktree builds the #9404 shape-one state: a worktree turn whose
-// agent committed, then squashed its baseline away.
+// agent committed, then squashed its starting source commit away.
 func squashedWorktree(t *testing.T) (string, *execenv.LocalWorktree) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -234,6 +234,11 @@ func squashedWorktree(t *testing.T) (string, *execenv.LocalWorktree) {
 	}
 	gitOK(t, repo, "add", "-A")
 	gitOK(t, repo, "commit", "-q", "-m", "initial")
+	// Clean preparation reuses HEAD, so give the squash a real ancestor.
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("source update\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitOK(t, repo, "commit", "-q", "-am", "source update")
 
 	wt, err := execenv.PrepareLocalWorktree(execenv.LocalWorktreeParams{
 		LocalPath:       repo,
