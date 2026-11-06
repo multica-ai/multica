@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Issue } from "../types";
 import { issueDetailOptions, issueKeys } from "./queries";
+import { useIssueReadState } from "./read-state";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -20,7 +21,7 @@ export interface CanonicalIssue {
   issue: Issue | undefined;
   isResolving: boolean;
   /**
-   * Terminal: this identifier does not name an issue in this workspace.
+   * Terminal: the primary read returned an opaque unavailable response.
    *
    * Callers MUST branch on this and render a not-found state rather than
    * handing the unresolved segment to a view that will query it again. A
@@ -30,6 +31,11 @@ export interface CanonicalIssue {
    * that never settles on "not found".
    */
   notFound: boolean;
+  loadFailed: boolean;
+  /** A successful primary read completed during this mount. */
+  hasLoaded: boolean;
+  isRetrying: boolean;
+  retry: () => Promise<void>;
 }
 
 /**
@@ -97,16 +103,21 @@ export function useCanonicalIssue(
     );
   }, [qc, wsId, loadedIdentifier, loadedIssue, routeId]);
 
-  // Read the resolution query's own settled state rather than "pending and no
-  // data": a failed resolution must present as terminally not-found, never as
-  // still-resolving, or the caller flips back to a loading frame and the
-  // remount loop described on `notFound` starts.
-  const failed = resolveEnabled && resolve.isError;
+  // A failed identifier must settle here without mounting a second observer.
+  // Once resolved, the UUID entry owns both the data and background failures.
+  const readState = useIssueReadState(
+    wsId,
+    canonicalId ?? routeId,
+    canonicalId ? detail : resolve,
+  );
 
   return {
     canonicalId,
+    hasLoaded:
+      (resolve.isSuccess && resolve.isFetchedAfterMount) ||
+      (detail.isSuccess && detail.isFetchedAfterMount),
     issue: detail.data,
-    isResolving: resolveEnabled && !failed && resolve.data === undefined,
-    notFound: failed,
+    isResolving: resolveEnabled && !canonicalId && !readState.notFound && !readState.loadFailed,
+    ...readState,
   };
 }
