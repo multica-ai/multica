@@ -497,23 +497,21 @@ const SidebarIssueRow = memo(function SidebarIssueRow({
           label={statusLabel}
           className="size-3"
         />
-        <TruncatedTooltip content={issue.title}>
-          <AppLink
-            href={unreadIssueHref(href, unread)}
-            newTabTitle={issue.title}
-            aria-current={active ? "page" : undefined}
-            onKeyDown={onKeyDown}
-            className={ISSUE_ROW_LINK_CLASS}
+        <AppLink
+          href={unreadIssueHref(href, unread)}
+          newTabTitle={issue.title}
+          aria-current={active ? "page" : undefined}
+          onKeyDown={onKeyDown}
+          className={ISSUE_ROW_LINK_CLASS}
+        >
+          <ShimmerText
+            active={!!agents?.running}
+            className={cn("min-w-0 flex-1 truncate", SIDEBAR_SHIMMER_CLASS, !agents && unread && "text-foreground")}
           >
-            <ShimmerText
-              active={!!agents?.running}
-              className={cn("min-w-0 flex-1 truncate", SIDEBAR_SHIMMER_CLASS, !agents && unread && "text-foreground")}
-            >
-              {issue.title}
-            </ShimmerText>
-            {agents ? <IssueAgentBadge agents={agents} /> : unread && <IssueUnreadDot unread={unread} />}
-          </AppLink>
-        </TruncatedTooltip>
+            {issue.title}
+          </ShimmerText>
+          {agents ? <IssueAgentBadge agents={agents} /> : unread && <IssueUnreadDot unread={unread} />}
+        </AppLink>
       </div>
     </IssueActionsContextMenu>
   );
