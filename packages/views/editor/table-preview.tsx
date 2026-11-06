@@ -65,11 +65,17 @@ export function textWidth(value: string, fontPx: number): number {
   return ems * fontPx;
 }
 
-function toNumber(value: string): number | null {
+function toNumericValue(value: string): number | bigint | null {
   const trimmed = value.trim();
   if (trimmed === "") return null;
   const number = Number(trimmed);
-  return Number.isFinite(number) ? number : null;
+  if (!Number.isFinite(number)) return null;
+  // Preserve decimal integer digits outside Number's exact range. Other
+  // numeric spellings retain the existing Number interpretation.
+  if (!Number.isSafeInteger(number) && /^[+-]?\d+$/.test(trimmed)) {
+    return BigInt(trimmed);
+  }
+  return number;
 }
 
 const collator = new Intl.Collator(undefined, {
@@ -81,9 +87,9 @@ const collator = new Intl.Collator(undefined, {
 // column. Empty cells never reach here — `sortUndefined: "last"` keeps them at
 // the bottom in both directions.
 export function compareCells(a: string, b: string): number {
-  const x = toNumber(a);
-  const y = toNumber(b);
-  if (x !== null && y !== null) return x - y;
+  const x = toNumericValue(a);
+  const y = toNumericValue(b);
+  if (x !== null && y !== null) return x < y ? -1 : x > y ? 1 : 0;
   if (x !== null) return -1;
   if (y !== null) return 1;
   return collator.compare(a, b);
@@ -105,7 +111,7 @@ function describeColumns(header: string[], rows: string[][]): ColumnInfo[] {
       widest = Math.max(widest, textWidth(value, BODY_FONT_PX));
       if (value.trim() === "") continue;
       filled += 1;
-      if (toNumber(value) !== null) numbers += 1;
+      if (toNumericValue(value) !== null) numbers += 1;
     }
     const width = Math.ceil(widest + CELL_PADDING);
     return {
