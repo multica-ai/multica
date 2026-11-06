@@ -2009,6 +2009,19 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 		enqueued[agentID] = result
 	}
 	outcomes := commentTriggerOutcomes(targets, enqueued)
+	if len(triggers) == 0 && len(targets) == 0 && actorType == "agent" && comment.SourceTaskID.Valid {
+		// A delegated worker's closing comment that routed to nobody is the
+		// exact moment a delegation chain silently stalls (#9720): wake the
+		// direct delegator once. The empty triggers/targets guard keeps every
+		// already-routing case (explicit mention, squad fallback, guest-squad
+		// reply) on its current path so this can never double-wake.
+		if _, err := h.TaskService.WakeDelegatorForZeroRouteComment(ctx, comment); err != nil {
+			// The comment itself is committed; a failed wake is also logged by
+			// the service and must not fail the comment request.
+			slog.WarnContext(ctx, "delegated completion wake failed",
+				"issue_id", uuidToString(issue.ID), "comment_id", uuidToString(comment.ID), "error", err)
+		}
+	}
 	h.noteCommentInvocationDenied(ctx, issue, comment, outcomes)
 	return outcomes
 }
