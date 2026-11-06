@@ -27,6 +27,7 @@ export function ListLoadMoreFooter({
   onLoadMore,
   isError = false,
   onRetry,
+  errorLabel,
 }: {
   hasMore: boolean;
   isLoading: boolean;
@@ -34,6 +35,7 @@ export function ListLoadMoreFooter({
   onLoadMore: () => void;
   isError?: boolean;
   onRetry?: () => void;
+  errorLabel?: string;
 }) {
   const { t } = useT("issues");
 
@@ -44,7 +46,7 @@ export function ListLoadMoreFooter({
         className="w-full py-2 text-caption text-destructive hover:underline"
         onClick={onRetry}
       >
-        {t(($) => $.table.load_more_failed_retry)}
+        {errorLabel ?? t(($) => $.table.load_more_failed_retry)}
       </button>
     );
   }
