@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
@@ -34,6 +34,15 @@ function Wrapper({ children }: { children: ReactNode }) {
 describe("TOTPDisableDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // input-otp schedules 1-5 s timers (password-manager badge detection)
+    // that can fire after this file's jsdom is torn down. Fake timers that
+    // still advance in real time keep the test behaving normally, and
+    // switching back drops the leftovers instead of letting them fire late.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("names the code input and explains a lockout instead of an invalid code", async () => {
@@ -49,7 +58,7 @@ describe("TOTPDisableDialog", () => {
     const input = screen.getByRole("textbox", {
       name: enSettings.security.two_factor.disable_prompt,
     });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     await user.type(input, "123456");
     await user.click(screen.getByRole("button", { name: enSettings.security.two_factor.confirm }));
 
