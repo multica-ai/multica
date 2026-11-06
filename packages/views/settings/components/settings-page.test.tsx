@@ -455,6 +455,19 @@ describe("SettingsPage search", () => {
     );
   });
 
+  it("finds the Google Chat delivery setting", () => {
+    renderWithI18n(<SettingsPage />);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search settings" }), {
+      target: { value: "Google Chat" },
+    });
+    const results = screen.getByRole("listbox", { name: "Search settings" });
+    const option = within(results).getByRole("option", { name: /Google Chat/ });
+    fireEvent.click(option);
+    expect(push).toHaveBeenCalledWith(
+      "/acme/settings?tab=notifications&section=google-chat",
+    );
+  });
+
   it("does not offer pages hidden by feature flags", () => {
     renderWithI18n(<SettingsPage />);
     fireEvent.change(

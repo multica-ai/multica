@@ -264,4 +264,46 @@ describe("useUpdateNotificationPreferences", () => {
       expect(invalidateQueries).toHaveBeenCalledTimes(1);
     });
   });
+
+  it("sends a raw Google Chat webhook without exposing it in the optimistic cache", async () => {
+    const pending = deferred<NotificationPreferenceResponse>();
+    updateNotificationPreferences.mockImplementationOnce(() => pending.promise);
+    queryClient.setQueryData(notificationPreferenceKeys.all(WORKSPACE_ID), {
+      workspace_id: WORKSPACE_ID,
+      preferences: {},
+    });
+    const { result } = renderHook(
+      () => useUpdateNotificationPreferences(),
+      { wrapper: createWrapper(queryClient) },
+    );
+    const webhook =
+      "https://chat.googleapis.com/v1/spaces/AAAA/messages?key=k&token=t";
+
+    act(() => {
+      result.current.mutate({ google_chat_webhook: webhook });
+    });
+
+    await waitFor(() => {
+      expect(updateNotificationPreferences).toHaveBeenCalledWith(
+        { google_chat_webhook: webhook },
+        WORKSPACE_SLUG,
+      );
+    });
+    expect(
+      queryClient.getQueryData<NotificationPreferenceResponse>(
+        notificationPreferenceKeys.all(WORKSPACE_ID),
+      )?.preferences.google_chat_webhook,
+    ).toBe("••••");
+
+    pending.resolve({
+      workspace_id: WORKSPACE_ID,
+      preferences: {
+        google_chat_webhook:
+          "https://chat.googleapis.com/v1/spaces/AAAA…/messages?key=••••&token=••••",
+      },
+    });
+    await waitFor(() => {
+      expect(result.current.isPending).toBe(false);
+    });
+  });
 });
