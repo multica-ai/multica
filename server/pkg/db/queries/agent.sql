@@ -1939,6 +1939,17 @@ FROM agent_task_queue
 WHERE trigger_evidence_kind = 'delegated_failure'
   AND trigger_evidence_ref_id = @failed_task_id;
 
+-- name: CountDelegatedRecoveryTasks :one
+-- Counts dedicated coordinator wakeups for one delegated worker task, keyed by
+-- evidence kind (delegated_failure recovery attempts, or delegated_completion
+-- wakes capped at one per worker task — #9720). Merged-into-pending folds do
+-- not create a row and therefore do not consume an attempt until they need a
+-- standalone successor.
+SELECT count(*)
+FROM agent_task_queue
+WHERE trigger_evidence_kind = @evidence_kind
+  AND trigger_evidence_ref_id = @ref_id;
+
 -- name: AcknowledgeExhaustedDelegatedFailureRecovery :one
 -- Once the bounded automatic attempts are exhausted, record a terminal
 -- acknowledgement on the newest recovery task. The outbox treats this receipt

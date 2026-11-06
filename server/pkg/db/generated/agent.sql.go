@@ -2074,6 +2074,30 @@ func (q *Queries) CountDelegatedFailureRecoveryTasks(ctx context.Context, failed
 	return count, err
 }
 
+const countDelegatedRecoveryTasks = `-- name: CountDelegatedRecoveryTasks :one
+SELECT count(*)
+FROM agent_task_queue
+WHERE trigger_evidence_kind = $1
+  AND trigger_evidence_ref_id = $2
+`
+
+type CountDelegatedRecoveryTasksParams struct {
+	EvidenceKind pgtype.Text `json:"evidence_kind"`
+	RefID        pgtype.UUID `json:"ref_id"`
+}
+
+// Counts dedicated coordinator wakeups for one delegated worker task, keyed by
+// evidence kind (delegated_failure recovery attempts, or delegated_completion
+// wakes capped at one per worker task — #9720). Merged-into-pending folds do
+// not create a row and therefore do not consume an attempt until they need a
+// standalone successor.
+func (q *Queries) CountDelegatedRecoveryTasks(ctx context.Context, arg CountDelegatedRecoveryTasksParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countDelegatedRecoveryTasks, arg.EvidenceKind, arg.RefID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRunningTasks = `-- name: CountRunningTasks :one
 SELECT count(*) FROM agent_task_queue
 WHERE agent_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')

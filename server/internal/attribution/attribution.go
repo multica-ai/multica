@@ -114,6 +114,12 @@ const (
 	// EvidenceDelegatedFailure points at the terminal worker task that handed
 	// control back to its source coordinator.
 	EvidenceDelegatedFailure EvidenceKind = "delegated_failure"
+	// EvidenceDelegatedCompletion points at the completed worker task whose
+	// zero-route closing comment woke this coordinator (#9720). It doubles as
+	// the loop guard: counting tasks by (kind, ref) bounds wakeups to one per
+	// worker task, and suppressing propagation from a task carrying this kind
+	// caps every delegation chain at one completion hop.
+	EvidenceDelegatedCompletion EvidenceKind = "delegated_completion"
 	// EvidenceChat points the uniform evidence pair at the chat session that
 	// triggered the run — the chat analogue of autopilot_run/issue_assignment.
 	// The dedicated chat_session_id column still exists for its own consumers;
