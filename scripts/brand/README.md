@@ -7,8 +7,10 @@ After editing that file, regenerate and commit what changed:
 pnpm generate:brand
 ```
 
-The output is deterministic: on an unchanged `multica-brand.ts` the command
-leaves the working tree clean, byte for byte.
+On an unchanged `multica-brand.ts` the command normally leaves the working
+tree clean, byte for byte. GPU rasterisation occasionally moves a single pixel
+by one step in one channel. A bitmap showing up as modified when the geometry
+didn't change is that noise. Discard it with `git checkout -- <file>`.
 
 ## Prerequisites
 
@@ -17,8 +19,9 @@ are untested, and they skip `icon.icns` because `iconutil` is macOS-only.
 
 - Node 22.18 or later, for `.ts` type stripping, with `pnpm install` done.
 - Playwright's Chromium: `pnpm exec playwright install chromium`. The script
-  uses the full Chrome for Testing build (`channel: "chromium"`), not the
-  headless shell, which antialiases differently.
+  uses the full Chrome for Testing build (`channel: "chromium"`), which
+  rasterises on the GPU. The default headless shell, or `--disable-gpu`,
+  rasterises in software and changes every bitmap.
 - Python 3 with Pillow (`pip install pillow`), for `icon.ico` and the GIFs.
 - `oxipng` (`brew install oxipng`).
 - `iconutil` for `icon.icns`, which ships with macOS.
@@ -59,3 +62,8 @@ keyframes in `packages/ui/styles/base.css`. Change all three together.
 Frames are captured by pausing every animation and seeking it to each frame's
 time. Do not use CDP virtual time instead: transform animations, like the star
 spinning in, do not advance under it, so the star never appears.
+
+After each seek, wait two animation frames before taking the screenshot. The
+star's transform reaches the compositor late. Captured sooner, a few frames of
+the spin keep pixels from the previous frame, and the GIF differs from run to
+run.

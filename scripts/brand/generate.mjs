@@ -34,8 +34,9 @@ if (updated.length) console.log(`updated ${updated.join(", ")}`);
 const inter = createRequire(repo("apps/desktop/package.json")).resolve("@fontsource-variable/inter/files/inter-latin-wght-normal.woff2");
 const fonts = `@font-face{font-family:"Inter";font-weight:100 900;src:url(data:font/woff2;base64,${readFileSync(inter).toString("base64")}) format("woff2")}`;
 
-// Full Chrome for Testing, not the default headless shell: the shell antialiases
-// differently, so every committed bitmap would change.
+// Full Chrome for Testing, which rasterises on the GPU like the committed bitmaps.
+// The default headless shell (and --disable-gpu) rasterises in software and
+// antialiases differently, so every bitmap would change.
 const browser = await chromium.launch({ channel: "chromium" });
 try {
   const page = await browser.newPage({ deviceScaleFactor: 1 });
@@ -83,7 +84,9 @@ try {
 
   // README hero: the write-on from MulticaWordmark (timings in multica-wordmark.tsx,
   // keyframes in packages/ui/styles/base.css). Transform animations do not advance
-  // under CDP virtual time, so every animation is paused and seeked per frame.
+  // under CDP virtual time, so every animation is paused and seeked per frame. The
+  // seeked transform reaches the compositor a frame or two later; capturing sooner
+  // leaves a few star pixels from the previous frame, differently on every run.
   const W = 720, H = 256, FPS = 30, TOTAL_MS = 2500, START_MS = 100, LETTER_MS = 150, STAR_AFTER_MS = 6 * LETTER_MS + 420;
   const css = `@keyframes write { from { stroke-dashoffset: 1; } }
 @keyframes star-in { from { transform: scale(0) rotate(-135deg); } }
@@ -97,7 +100,10 @@ try {
     await gif.setContent(`<html><head><style>*{margin:0}html,body{width:${W}px;height:${H}px;background:${bg};overflow:hidden}body{display:grid;place-items:center}${css}</style></head><body>${writeOn(fg)}</body></html>`);
     await gif.evaluate(() => document.getAnimations().forEach((a) => a.pause()));
     for (let k = 0; k < Math.round((TOTAL_MS / 1000) * FPS); k++) {
-      await gif.evaluate((t) => document.getAnimations().forEach((a) => { a.currentTime = t; }), (k * 1000) / FPS);
+      await gif.evaluate(async (t) => {
+        document.getAnimations().forEach((a) => { a.currentTime = t; });
+        for (let i = 0; i < 2; i++) await new Promise(requestAnimationFrame);
+      }, (k * 1000) / FPS);
       await gif.screenshot({ path: join(dir, `f${String(k).padStart(4, "0")}.png`) });
     }
     await gif.close();

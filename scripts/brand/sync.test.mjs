@@ -21,22 +21,37 @@ test("the committed copies match multica-brand.ts", async () => {
   assert.deepEqual(await sync(repo, { check: true }), []);
 });
 
-test("moving a coordinate without regenerating fails the check, and regenerating fixes it", async (t) => {
-  const root = copyOfRepo(t);
-  for (const [rel] of await targets(repo)) {
-    mkdirSync(dirname(join(root, rel)), { recursive: true });
-    cpSync(join(repo, rel), join(root, rel));
-  }
-  const source = readFileSync(join(repo, SOURCE), "utf8");
-  assert.match(source, /const gap = 12;/);
-  writeFileSync(join(root, SOURCE), source.replace("const gap = 12;", "const gap = 13;"));
+for (const { name, from, to, drift, stay } of [
+  {
+    name: "a wordmark coordinate",
+    from: "const gap = 12;",
+    to: "const gap = 13;",
+    drift: ["apps/mobile/components/brand/multica-logo.tsx", "server/cmd/multica/cmd_auth.go", "docs/assets/logo-light.svg"],
+    stay: ["apps/web/public/favicon.svg"],
+  },
+  {
+    name: "the tile radius",
+    from: "export const ICON_TILE_RADIUS = 22.5;",
+    to: "export const ICON_TILE_RADIUS = 30;",
+    drift: ["apps/web/public/favicon.svg", "apps/docs/app/icon.svg"],
+    stay: ["apps/web/public/icons/icon.svg", "server/cmd/multica/cmd_auth.go"],
+  },
+]) {
+  test(`changing ${name} without regenerating fails the check, and regenerating fixes it`, async (t) => {
+    const root = copyOfRepo(t);
+    for (const [rel] of await targets(repo)) {
+      mkdirSync(dirname(join(root, rel)), { recursive: true });
+      cpSync(join(repo, rel), join(root, rel));
+    }
+    const source = readFileSync(join(repo, SOURCE), "utf8");
+    assert.ok(source.includes(from), `${SOURCE} should contain ${from}`);
+    writeFileSync(join(root, SOURCE), source.replace(from, to));
 
-  const drifted = await sync(root, { check: true });
-  for (const rel of ["apps/mobile/components/brand/multica-logo.tsx", "server/cmd/multica/cmd_auth.go", "docs/assets/logo-light.svg"]) {
-    assert.ok(drifted.includes(rel), `${rel} should drift`);
-  }
-  assert.ok(!drifted.includes("apps/web/public/favicon.svg"), "the icon does not use the wordmark");
+    const drifted = await sync(root, { check: true });
+    for (const rel of drift) assert.ok(drifted.includes(rel), `${rel} should drift`);
+    for (const rel of stay) assert.ok(!drifted.includes(rel), `${rel} should not drift`);
 
-  assert.deepEqual((await sync(root)).sort(), [...drifted].sort());
-  assert.deepEqual(await sync(root, { check: true }), []);
-});
+    assert.deepEqual((await sync(root)).sort(), [...drifted].sort());
+    assert.deepEqual(await sync(root, { check: true }), []);
+  });
+}
