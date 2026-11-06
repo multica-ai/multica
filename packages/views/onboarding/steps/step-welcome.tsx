@@ -5,7 +5,7 @@ import { useState } from "react";
 import { ArrowRight, Download, Loader2 } from "@multica/ui/icons";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { MulticaWordmark } from "@multica/ui/components/common/multica-wordmark";
-import { MulticaArcade } from "@multica/ui/components/common/multica-graphics";
+import { MulticaStarRow } from "@multica/ui/components/common/multica-graphics";
 import { cn } from "@multica/ui/lib/utils";
 import { DragStrip } from "@multica/views/platform";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
@@ -82,7 +82,7 @@ export function StepWelcome({
             <MulticaWordmark
               writeDelayMs={200}
               title={t(($) => $.welcome.wordmark)}
-              className="h-8 self-start text-foreground"
+              className="h-[35px] self-start text-foreground"
             />
 
             <h1 className="text-balance font-serif text-5xl font-medium leading-[1.04] tracking-tight sm:text-6xl">
@@ -173,12 +173,11 @@ export function StepWelcome({
           centers the mock cards vertically, mirroring the left
           column's copy-center layout. */}
       <div className="relative hidden border-l bg-muted/40 lg:flex lg:flex-1 lg:flex-col lg:overflow-hidden">
-        <MulticaArcade
+        <MulticaStarRow
           count={9}
-          legs={120}
-          rise="center"
+          enter="center"
           delay={0.5}
-          className="pointer-events-none absolute -bottom-6 left-1/2 w-[130%] -translate-x-1/2 text-muted"
+          className="pointer-events-none absolute -bottom-10 left-1/2 w-[130%] -translate-x-1/2 text-muted"
         />
         <DragStrip />
         <div className="relative flex flex-1 flex-col items-center justify-center gap-7 px-8 py-8">
