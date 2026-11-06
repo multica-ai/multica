@@ -326,6 +326,7 @@
       "description": "変更できません。ズームとタブの操作はデスクトップ版のみです。",
       "open_settings": "設定を開く",
       "close_tab": "アクティブなタブを閉じる",
+      "reopen_closed_tab": "閉じたタブを開く",
       "select_tab_1_to_8": "1〜8番目のタブを選択",
       "select_last_tab": "最後のタブを選択",
       "zoom_in": "拡大",
@@ -1252,6 +1253,7 @@
       "unpin": "タブのピン留めを解除",
       "close": "タブを閉じる",
       "close_others": "他のタブを閉じる",
+      "reopen_closed": "閉じたタブを開く",
       "open_window": "新しいウィンドウで開く",
       "new": "新しいタブ",
       "pinned_name": "{{title}}（ピン留め）"

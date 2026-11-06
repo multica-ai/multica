@@ -50,7 +50,11 @@ Desktop saves tabs per workspace. For example, if you open three issues in works
 
 <DesktopTabsDemo />
 
-A given resource opens only once in the current workspace. Tabs can be reordered, pinned, and closed, and each keeps its own forward/back history and scroll position. Pinned tabs sit at the left end and have no close button; unpin a tab to close it. Opening another page from a pinned tab opens a new tab, and the pinned tab stays where it is. Clicking or pasting an app link for this deployment opens it directly in a tab instead of jumping to the browser.
+A given resource opens only once in the current workspace. Tabs can be reordered, pinned, and closed, and each keeps its own forward/back history and scroll position. Pinned tabs sit at the left end and have no close button; unpin a tab to use the tab-strip close controls. Opening another page from a pinned tab opens a new tab, and the pinned tab stays where it is. Clicking or pasting an app link for this deployment opens it directly in a tab instead of jumping to the browser.
+
+To recover an accidentally closed tab, right-click a tab and choose **Reopen closed tab**, or press `⌘⇧T` on macOS (`Ctrl+Shift+T` on Windows and Linux) with focus outside an editor, menu, or dialog. Each workspace keeps its 20 most recent closed destinations in the current window until logout, session expiry, or restart. Reopening returns to the saved URL in a fresh tab, subject to current access. If that resource is already open, Desktop activates its current tab. Close Other Tabs can be undone repeatedly from left to right.
+
+The reopen history covers ordinary unpinned tabs closed by X, middle-click, the tab menu, or `⌘W` / `Ctrl+W` while multiple tabs are open. Closing a pinned tab with `⌘W` / `Ctrl+W`, closing the final OS window, and error-recovery closes do not add destinations to this history.
 
 Logging out clears every tab saved on the machine, so the next person to sign in never sees pages left behind by the previous account.
 

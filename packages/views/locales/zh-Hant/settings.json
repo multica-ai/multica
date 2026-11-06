@@ -326,6 +326,7 @@
       "description": "不可自定義；縮放和標籤頁快捷鍵僅用於桌面端。",
       "open_settings": "開啟設定",
       "close_tab": "關閉當前標籤頁",
+      "reopen_closed_tab": "重新開啟已關閉的分頁",
       "select_tab_1_to_8": "選擇第 1–8 個標籤頁",
       "select_last_tab": "選擇最後一個標籤頁",
       "zoom_in": "放大",
@@ -1252,6 +1253,7 @@
       "unpin": "取消固定標籤頁",
       "close": "關閉標籤頁",
       "close_others": "關閉其他標籤頁",
+      "reopen_closed": "重新開啟已關閉的分頁",
       "open_window": "在新視窗開啟",
       "new": "新建標籤頁",
       "pinned_name": "{{title}}（已固定）"

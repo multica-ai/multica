@@ -328,6 +328,7 @@
       "description": "Not customizable. Zoom and tab shortcuts apply only to Desktop.",
       "open_settings": "Open Settings",
       "close_tab": "Close active tab",
+      "reopen_closed_tab": "Reopen closed tab",
       "select_tab_1_to_8": "Select tab 1–8",
       "select_last_tab": "Select last tab",
       "zoom_in": "Zoom in",
@@ -1258,6 +1259,7 @@
       "unpin": "Unpin tab",
       "close": "Close tab",
       "close_others": "Close other tabs",
+      "reopen_closed": "Reopen closed tab",
       "open_window": "Open as new window",
       "new": "New tab",
       "pinned_name": "{{title}} (pinned)"
