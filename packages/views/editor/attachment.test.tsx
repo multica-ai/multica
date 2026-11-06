@@ -1193,3 +1193,42 @@ describe("Attachment — blob URL GC (MUL-7741)", () => {
     expect(revokeObjectURLMock).not.toHaveBeenCalled();
   });
 });
+
+
+describe("inline image dimensions and loading", () => {
+  it("reserves the record dimensions while retaining the original viewer URL", () => {
+    const record = makeRecord({ width: 3200, height: 2000 });
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: record }} />);
+    const img = screen.getByRole("img");
+    expect(img).toHaveAttribute("loading", "lazy");
+    expect(img).toHaveAttribute("decoding", "async");
+    expect(img).toHaveAttribute("width", "3200");
+    expect(img.parentElement?.style.getPropertyValue("--image-width")).toBe("3200px");
+    expect(img.parentElement?.style.getPropertyValue("--image-aspect")).toBe("1.6");
+    expect(img).toHaveAttribute("src", record.download_url);
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    expect(screen.getByRole("dialog").querySelector("img")).toHaveAttribute("src", record.download_url);
+  });
+
+  it("uses resolved dimensions unless the editor supplies its own size", () => {
+    const record = makeRecord({ width: 3200, height: 2000 });
+    resolverState.attachments = [record];
+    const view = renderWithQuery(<Attachment attachment={{ kind: "url", filename: "shot.png", url: record.url }} />);
+    expect(screen.getByRole("img")).toHaveAttribute("width", "3200");
+    view.rerender(<QueryClientProvider client={new QueryClient()}><Attachment attachment={{ kind: "url", filename: "shot.png", url: record.url, width: 640, height: 400 }} /></QueryClientProvider>);
+    expect(screen.getByRole("img")).toHaveAttribute("width", "640");
+  });
+
+  it("keeps a placeholder until load or failure and restores it for a new source", () => {
+    const view = renderWithQuery(<Attachment attachment={{ kind: "url", filename: "shot.png", url: "/a.png" }} />);
+    let img = screen.getByRole("img");
+    expect(img.parentElement).toHaveAttribute("data-pending");
+    fireEvent.load(img);
+    expect(img.parentElement).not.toHaveAttribute("data-pending");
+    view.rerender(<QueryClientProvider client={new QueryClient()}><Attachment attachment={{ kind: "url", filename: "shot.png", url: "/b.png" }} /></QueryClientProvider>);
+    img = screen.getByRole("img");
+    expect(img.parentElement).toHaveAttribute("data-pending");
+    fireEvent.error(img);
+    expect(img.parentElement).not.toHaveAttribute("data-pending");
+  });
+});

@@ -33,7 +33,7 @@ import {
   Maximize2,
   Trash2,
 } from "@multica/ui/icons";
-import type { ReactNode } from "react";
+import { useCallback, useState, type CSSProperties, type ReactNode } from "react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -53,6 +53,7 @@ import {
 import { useDownloadAttachment } from "./use-download-attachment";
 import { AttachmentCard, AttachmentFileCard } from "./attachment-card";
 import { canOpenPreview, getPreviewKind, type PreviewKind } from "./utils/preview";
+import { imageDimensions } from "./utils/image-metadata";
 import "./styles/attachment.css";
 
 // Public API
@@ -137,9 +138,12 @@ function normalize(
       attachmentId: input.attachment.id,
       record: input.attachment,
       uploading: false,
+      ...imageDimensions(input.attachment),
     };
   }
   const record = input.url ? resolve(input.url) : undefined;
+  const dimensions = record ? imageDimensions(record) : undefined;
+  const ownSize = input.width !== undefined || input.height !== undefined;
   return {
     filename: input.filename || record?.filename || "",
     contentType: input.contentType || record?.content_type || "",
@@ -170,8 +174,8 @@ function normalize(
     attachmentId: record?.id,
     record,
     uploading: !!input.uploading,
-    width: input.width,
-    height: input.height,
+    width: ownSize ? input.width : dimensions?.width,
+    height: ownSize ? input.height : dimensions?.height,
   };
 }
 
@@ -481,6 +485,22 @@ function ImageAttachmentView({
   // cursor: zoom-in }` keys off this same flag for the cursor affordance.
   const clickable = !editable && !uploading;
 
+  // Reusing this view for a different source must restore its placeholder.
+  const [loadedSource, setLoadedSource] = useState<string>();
+  const loaded = loadedSource === src;
+  const imgRef = useCallback((img: HTMLImageElement | null) => {
+    if (img?.complete && img.naturalWidth > 0) setLoadedSource(src);
+  }, [src]);
+  const dimensions = imageDimensions({ width, height });
+  const sized = !!dimensions;
+  const pending = !loaded && !sized && !uploading;
+  const sizeStyle = dimensions
+    ? ({
+        "--image-width": `${dimensions.width}px`,
+        "--image-aspect": `${dimensions.width / dimensions.height}`,
+      } as CSSProperties)
+    : undefined;
+
   // DOM mirrors the original ReadonlyImage (span-only chain so it stays
   // valid HTML5 when rendered inside a markdown <p>). In editor surfaces
   // the NodeViewWrapper still emits its own outer .image-node div around
@@ -494,14 +514,23 @@ function ImageAttachmentView({
           className,
         )}
         data-clickable={clickable || undefined}
+        data-sized={sized || undefined}
+        data-pending={pending || undefined}
+        style={sizeStyle}
         contentEditable={false}
         onClick={clickable ? onView : undefined}
       >
         <img
+          ref={imgRef}
           src={src || undefined}
           alt={alt}
           width={width}
           height={height}
+          loading="lazy"
+          decoding="async"
+          data-loaded={loaded || undefined}
+          onLoad={() => setLoadedSource(src)}
+          onError={() => setLoadedSource(src)}
           className={cn("image-content", uploading && "image-uploading")}
           draggable={false}
         />

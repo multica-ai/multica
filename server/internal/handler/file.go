@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/imagepreview"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -98,6 +99,8 @@ type AttachmentResponse struct {
 	MarkdownURL string `json:"markdown_url"`
 	ContentType string `json:"content_type"`
 	SizeBytes   int64  `json:"size_bytes"`
+	Width       *int32 `json:"width,omitempty"`
+	Height      *int32 `json:"height,omitempty"`
 	CreatedAt   string `json:"created_at"`
 }
 
@@ -186,6 +189,10 @@ func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) 
 	if a.ChatMessageID.Valid {
 		s := uuidToString(a.ChatMessageID)
 		resp.ChatMessageID = &s
+	}
+	if a.Width.Valid && a.Height.Valid {
+		resp.Width = &a.Width.Int32
+		resp.Height = &a.Height.Int32
 	}
 	return resp
 }
@@ -417,6 +424,14 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Metadata reads are bounded and never decode pixels. Rewind even when the
+	// format is unsupported so uploads preserve every original byte.
+	width, height := imagepreview.Dimensions(file)
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read file")
+		return
+	}
+
 	data, err := io.ReadAll(file)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "failed to read file")
@@ -455,6 +470,8 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			Filename:     header.Filename,
 			ContentType:  contentType,
 			SizeBytes:    int64(len(data)),
+			Width:        pgtype.Int4{Int32: int32(width), Valid: width > 0},
+			Height:       pgtype.Int4{Int32: int32(height), Valid: height > 0},
 		}
 
 		if issueID := r.FormValue("issue_id"); issueID != "" {
