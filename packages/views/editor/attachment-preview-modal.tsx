@@ -87,6 +87,7 @@ import { parseStructured } from "./utils/parse-structured";
 import { formatBytes } from "../common/format-bytes";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useDownloadAttachment } from "./use-download-attachment";
+import { useAttachmentDownloadState } from "./hooks/use-attachment-download-state";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
 import { useResignedInlineMedia } from "./hooks/use-inline-media-url";
 import { useZoomCanvas, type ZoomCanvasApi } from "./hooks/use-zoom-canvas";
@@ -500,10 +501,9 @@ export function AttachmentPreviewModal({
     const attachmentId =
       state.attachmentId ?? attachmentIdFromStorageURL(state.mediaUrl, cdnDomain);
     if (attachmentId) {
-      download(attachmentId);
-    } else {
-      openExternal(state.mediaUrl);
+      return download(attachmentId);
     }
+    return openExternal(state.mediaUrl);
   };
 
   // Open-in-new-tab: the full-page route (/attachments/{id}/preview) shows
@@ -691,7 +691,7 @@ function PreviewPanel({
   source: PreviewSource;
   state: PreviewState;
   onClose?: () => void;
-  onDownload: () => void;
+  onDownload: () => void | Promise<unknown>;
   onOpenInNewTab?: () => void;
   sequence?: PreviewSequence;
   onImageError?: () => void;
@@ -707,6 +707,11 @@ function PreviewPanel({
   onHtmlAddressChange?: (attachmentId: string, address: string) => void;
 }) {
   const { t } = useT("editor");
+
+  const { downloading, handleDownload } = useAttachmentDownloadState(
+    onDownload,
+    state.attachmentId ?? state.mediaUrl,
+  );
 
   // How the file is shown. Held here rather than in the stage so a choice
   // carries over as the reader pages through the sequence: the next HTML
@@ -973,8 +978,17 @@ function PreviewPanel({
               <Copy className="size-4" />
             </ChromeButton>
           )}
-          <ChromeButton label={t(($) => $.image.download)} onClick={onDownload}>
-            <Download className="size-4" />
+          <ChromeButton
+            label={t(($) => $.image.download)}
+            onClick={handleDownload}
+            disabled={downloading}
+            busy={downloading}
+          >
+            {downloading ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Download className="size-4" />
+            )}
           </ChromeButton>
           {(onOpenOverview || info) && <ChromeDivider />}
           {onOpenOverview && (
@@ -1035,7 +1049,8 @@ function PreviewPanel({
                 source={source}
                 state={state}
                 view={view}
-                onDownload={onDownload}
+                onDownload={handleDownload}
+                downloading={downloading}
                 onBackdropClick={closeOnBackdrop}
               />
             )}
@@ -1066,6 +1081,7 @@ function ChromeButton({
   shortcut,
   pressed,
   disabled,
+  busy,
   onClick,
   children,
 }: {
@@ -1075,6 +1091,7 @@ function ChromeButton({
   /** Toggle buttons pass their state; plain actions leave it unset. */
   pressed?: boolean;
   disabled?: boolean;
+  busy?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -1097,6 +1114,7 @@ function ChromeButton({
         aria-label={label}
         aria-keyshortcuts={shortcut}
         aria-pressed={pressed}
+        aria-busy={busy}
         disabled={disabled}
         onClick={onClick}
       >
@@ -1337,6 +1355,7 @@ function PreviewContent({
   state,
   view,
   onDownload,
+  downloading,
   onBackdropClick,
 }: {
   kind: Exclude<PreviewKind, "image"> | null;
@@ -1344,6 +1363,7 @@ function PreviewContent({
   state: PreviewState;
   view: StageView;
   onDownload: () => void;
+  downloading: boolean;
   onBackdropClick: (e: React.MouseEvent) => void;
 }) {
   const { t } = useT("editor");
@@ -1353,6 +1373,7 @@ function PreviewContent({
       <UnsupportedFallback
         message={t(($) => $.attachment.preview_unsupported)}
         onDownload={onDownload}
+        downloading={downloading}
       />
     );
   }
@@ -1367,6 +1388,7 @@ function PreviewContent({
       <UnsupportedFallback
         message={t(($) => $.attachment.preview_unsupported)}
         onDownload={onDownload}
+        downloading={downloading}
       />
     );
   }
@@ -1415,6 +1437,7 @@ function PreviewContent({
         <TextBackedPreview
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
+          downloading={downloading}
           render={(text) => (
             <DocumentSheet width="prose" onBackdropClick={onBackdropClick}>
               <ReadonlyContent
@@ -1431,6 +1454,7 @@ function PreviewContent({
         <TextBackedPreview
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
+          downloading={downloading}
           render={(text) =>
             view.htmlSource ? (
               code(text, "xml")
@@ -1451,6 +1475,7 @@ function PreviewContent({
         <TextBackedPreview
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
+          downloading={downloading}
           render={(text) => (
             // Keyed on the file: sort order and column widths belong to it.
             <TablePreview
@@ -1466,6 +1491,7 @@ function PreviewContent({
         <TextBackedPreview
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
+          downloading={downloading}
           render={(text) => {
             const parse = view.structuredParse;
             if (parse?.ok && view.structuredView === "tree") {
@@ -1501,6 +1527,7 @@ function PreviewContent({
         <TextBackedPreview
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
+          downloading={downloading}
           render={(text) => code(text, extensionToLanguage(state.filename))}
         />
       );
@@ -1543,10 +1570,12 @@ function DocumentSheet({
 function TextBackedPreview({
   attachmentId,
   onDownload,
+  downloading,
   render,
 }: {
   attachmentId: string;
   onDownload: () => void;
+  downloading: boolean;
   render: (text: string) => ReactNode;
 }) {
   const { t } = useT("editor");
@@ -1566,6 +1595,7 @@ function TextBackedPreview({
         <UnsupportedFallback
           message={t(($) => $.attachment.preview_too_large)}
           onDownload={onDownload}
+          downloading={downloading}
         />
       );
     }
@@ -1574,6 +1604,7 @@ function TextBackedPreview({
         <UnsupportedFallback
           message={t(($) => $.attachment.preview_unsupported)}
           onDownload={onDownload}
+          downloading={downloading}
         />
       );
     }
@@ -1581,6 +1612,7 @@ function TextBackedPreview({
       <UnsupportedFallback
         message={t(($) => $.attachment.preview_failed)}
         onDownload={onDownload}
+        downloading={downloading}
       />
     );
   }
@@ -1593,9 +1625,11 @@ function TextBackedPreview({
 function UnsupportedFallback({
   message,
   onDownload,
+  downloading,
 }: {
   message: string;
   onDownload: () => void;
+  downloading: boolean;
 }) {
   const { t } = useT("editor");
   return (
@@ -1606,8 +1640,14 @@ function UnsupportedFallback({
         type="button"
         className="inline-flex items-center gap-2 rounded-md border border-input bg-secondary px-3 py-1.5 text-body text-foreground transition-colors hover:bg-muted"
         onClick={onDownload}
+        disabled={downloading}
+        aria-busy={downloading}
       >
-        <Download className="size-4" />
+        {downloading ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <Download className="size-4" />
+        )}
         {t(($) => $.image.download)}
       </button>
     </div>

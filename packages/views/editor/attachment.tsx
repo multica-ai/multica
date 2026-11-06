@@ -29,6 +29,7 @@
 
 import {
   Download,
+  Loader2,
   Link as LinkIcon,
   Maximize2,
   Trash2,
@@ -52,6 +53,7 @@ import {
 } from "./hooks/use-inline-media-url";
 import { useDownloadAttachment } from "./use-download-attachment";
 import { AttachmentCard, AttachmentFileCard } from "./attachment-card";
+import { useAttachmentDownloadState } from "./hooks/use-attachment-download-state";
 import { canOpenPreview, getPreviewKind, type PreviewKind } from "./utils/preview";
 import { imageDimensions } from "./utils/image-metadata";
 import "./styles/attachment.css";
@@ -371,10 +373,9 @@ export function Attachment({
     const attachmentId =
       state.attachmentId ?? attachmentIdFromStorageURL(shareUrl, cdnDomain);
     if (attachmentId) {
-      download(attachmentId);
-      return;
+      return download(attachmentId);
     }
-    if (shareUrl) openByUrl(shareUrl);
+    if (shareUrl) return openByUrl(shareUrl);
   };
 
   if (kind === "image") {
@@ -460,7 +461,7 @@ interface ImageAttachmentViewProps {
   editable?: boolean;
   selected?: boolean;
   onView: () => void;
-  onDownload: () => void;
+  onDownload: () => void | Promise<unknown>;
   onDelete?: () => void;
   className?: string;
 }
@@ -480,6 +481,7 @@ function ImageAttachmentView({
   className,
 }: ImageAttachmentViewProps) {
   const { t } = useT("editor");
+  const { downloading, handleDownload } = useAttachmentDownloadState(onDownload);
 
   const handleCopyLink = async () => {
     if (await copyText(linkUrl)) {
@@ -550,6 +552,7 @@ function ImageAttachmentView({
         {!uploading && src && (
           <span
             className="image-toolbar"
+            style={downloading ? { opacity: 1 } : undefined}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
@@ -564,8 +567,18 @@ function ImageAttachmentView({
             <DeferredTooltip
               content={t(($) => $.image.download)}
               trigger={
-                <button type="button" onClick={onDownload} aria-label={t(($) => $.image.download)}>
-                  <Download className="size-3.5" />
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  disabled={downloading}
+                  aria-busy={downloading}
+                  aria-label={t(($) => $.image.download)}
+                >
+                  {downloading ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Download className="size-3.5" />
+                  )}
                 </button>
               }
             />
