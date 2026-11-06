@@ -75,7 +75,7 @@ Changes take effect after restarting the backend / compose stack. The web UI rea
 | `ALLOWED_EMAIL_DOMAINS` | Optional comma-separated allowlist of email domains |
 | `ALLOWED_EMAILS` | Optional comma-separated allowlist of exact email addresses |
 | `DISABLE_WORKSPACE_CREATION` | Set to `true` to make `POST /api/workspaces` return 403 for every caller — users can only join workspaces they were invited to |
-| `WORKSPACE_CREATION_ALLOWED_EMAILS` | Optional comma-separated list of exact email addresses allowed to create workspaces. When set, everyone else gets 403 from `POST /api/workspaces`. Ignored when `DISABLE_WORKSPACE_CREATION=true` |
+| `WORKSPACE_CREATION_ALLOWED_EMAILS` | Optional comma-separated list of exact email addresses allowed to create workspaces. When set, everyone else gets 403 from `POST /api/workspaces`, and the error names the listed addresses so the caller knows who to ask. Ignored when `DISABLE_WORKSPACE_CREATION=true` |
 
 Changes take effect after restarting the backend / compose stack. The web UI reads `ALLOW_SIGNUP` and `DISABLE_WORKSPACE_CREATION` from `/api/config` at runtime, so no web rebuild is needed.
 
@@ -106,7 +106,8 @@ WORKSPACE_CREATION_ALLOWED_EMAILS=alice@example.com,bob@example.com
 Things to know:
 
 - The list only controls who can create a workspace. It is not an instance-admin role: listed users get no visibility into, or management rights over, workspaces they are not a member of. Keeping new workspaces visible to the people who run the instance still depends on inviting them.
-- The UI does not hide the "Create workspace" entry points for unlisted users. They see the server's error message when they try.
+- The UI does not hide the "Create workspace" entry points for unlisted users. They see the server's error message when they try, and that message lists the allowlisted email addresses so they know who to ask.
+- The allowlist is therefore visible to any signed-in user who attempts a create. Only list addresses you are comfortable showing to the rest of the instance.
 - This list is separate from `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`, which only control who can sign up.
 
 > Note: setting `ALLOW_SIGNUP=false` enables invite-only account creation. A new user with a live pending workspace invitation can create an account with the invited email; users without an allowlist match or a valid invitation remain blocked. Invitations also permit emails outside configured allowlists when `ALLOW_SIGNUP=true`. Revocation does not delete accounts already created using an invitation or prevent those accounts from signing in. Combine this with `DISABLE_WORKSPACE_CREATION=true` when invitees must join an existing workspace instead of creating their own.
