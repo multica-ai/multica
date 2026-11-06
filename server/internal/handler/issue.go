@@ -2475,9 +2475,76 @@ ORDER BY
 	writeJSON(w, http.StatusOK, GroupedIssuesResponse{Groups: groups})
 }
 
+// DeletedIssueTombstoneResponse answers the identifier form of
+// GET /api/issues/{id} for a hard-deleted issue (#9070). The shape is
+// deliberately minimal — the caller needs to know the number was once issued
+// and when it went away — and the contract is machine-readable: a never-issued
+// number keeps returning 404, so callers never parse free-text error strings
+// to tell the two apart.
+type DeletedIssueTombstoneResponse struct {
+	Identifier string    `json:"identifier"`
+	Number     int32     `json:"number"`
+	Status     string    `json:"status"`
+	DeletedAt  time.Time `json:"deleted_at"`
+}
+
+// loadIssueForDetail is the GET-detail loader. It mirrors loadIssueForUser and
+// adds one branch: when an identifier-shaped key misses the live lookup, a
+// tombstone from deleted_issue answers with the deleted state (#9070). Only
+// the detail route gets tombstones — every other loadIssueForUser caller is a
+// mutation or a sub-resource, and a deleted identifier must keep answering
+// those with a plain 404 so it can never be mistaken for a writable target.
+//
+// Identifier-shaped keys resolve here first so a live hit pays exactly the
+// queries loadIssueForUser would have paid (prefix + GetIssueByNumber); only
+// a live miss spends the extra tombstone lookup, on the cold 404 path. Any
+// miss falls through to loadIssueForUser so auth, workspace, and 404
+// semantics stay byte-identical with every other route.
+func (h *Handler) loadIssueForDetail(w http.ResponseWriter, r *http.Request, issueID string) (db.Issue, bool) {
+	if _, ok := requireUserID(w, r); !ok {
+		return db.Issue{}, false
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return db.Issue{}, false
+	}
+	if parts := splitIdentifier(issueID); parts != nil {
+		if wsUUID, err := util.ParseUUID(workspaceID); err == nil {
+			prefix := h.getIssuePrefix(r.Context(), wsUUID)
+			if prefix != "" && strings.EqualFold(parts.prefix, prefix) {
+				issue, err := h.Queries.GetIssueByNumber(r.Context(), db.GetIssueByNumberParams{
+					WorkspaceID: wsUUID,
+					Number:      parts.number,
+				})
+				if err == nil {
+					return issue, true
+				}
+				// The live lookup missed. A tombstone row means this number
+				// was once issued and the issue was deleted; no tombstone
+				// row means the number was never issued — fall through to
+				// loadIssueForUser for its usual 404.
+				if tombstone, terr := h.Queries.GetDeletedIssueNumber(r.Context(), db.GetDeletedIssueNumberParams{
+					WorkspaceID: wsUUID,
+					Number:      parts.number,
+				}); terr == nil {
+					writeJSON(w, http.StatusOK, DeletedIssueTombstoneResponse{
+						Identifier: fmt.Sprintf("%s-%d", prefix, tombstone.Number),
+						Number:     tombstone.Number,
+						Status:     "deleted",
+						DeletedAt:  tombstone.DeletedAt.Time.UTC(),
+					})
+					return db.Issue{}, false
+				}
+			}
+		}
+	}
+	return h.loadIssueForUser(w, r, issueID)
+}
+
 func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	issue, ok := h.loadIssueForUser(w, r, id)
+	issue, ok := h.loadIssueForDetail(w, r, id)
 	if !ok {
 		return
 	}

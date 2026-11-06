@@ -182,10 +182,34 @@ func resolveIssueRef(ctx context.Context, client *cli.APIClient, input string) (
 	)
 }
 
+// DeletedIssueError reports an issue reference that resolved to a tombstone:
+// the identifier was issued once and the issue has since been deleted (#9070).
+// Detail carries the server's tombstone JSON (identifier, number, status,
+// deleted_at) so `issue get` can print it verbatim instead of re-deriving the
+// shape. Every other issue-aware command treats this like any other resolve
+// failure — it just names the real reason now.
+type DeletedIssueError struct {
+	Detail map[string]any
+}
+
+func (e *DeletedIssueError) Error() string {
+	identifier := strVal(e.Detail, "identifier")
+	if deletedAt := strVal(e.Detail, "deleted_at"); deletedAt != "" {
+		return fmt.Sprintf("issue %s was deleted at %s", identifier, deletedAt)
+	}
+	return fmt.Sprintf("issue %s was deleted", identifier)
+}
+
 func fetchIssueRef(ctx context.Context, client *cli.APIClient, ref string) (resolvedID, error) {
 	var issue map[string]any
 	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(ref), &issue); err != nil {
 		return resolvedID{}, err
+	}
+	// A live issue response always carries "id"; only the tombstone omits it,
+	// so the id check is what keeps a workspace whose status happens to be
+	// named "deleted" from being misread as a tombstone.
+	if issue["id"] == nil && strVal(issue, "status") == "deleted" {
+		return resolvedID{}, &DeletedIssueError{Detail: issue}
 	}
 	c := issueCandidate(issue)
 	if c.Display == "" {
