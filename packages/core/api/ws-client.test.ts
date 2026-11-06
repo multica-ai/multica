@@ -8,6 +8,9 @@ import type { WSMessage } from "../types/events";
 class FakeWebSocket {
   static lastUrl: string | null = null;
   static lastInstance: FakeWebSocket | null = null;
+  static instances: FakeWebSocket[] = [];
+  static readonly OPEN = 1;
+  static readonly CLOSED = 3;
   // Fields read by WSClient.connect()/disconnect(), all no-op here.
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: string }) => void) | null = null;
@@ -17,6 +20,7 @@ class FakeWebSocket {
   constructor(url: string) {
     FakeWebSocket.lastUrl = url;
     FakeWebSocket.lastInstance = this;
+    FakeWebSocket.instances.push(this);
   }
   close() {}
   sent: string[] = [];
@@ -29,6 +33,7 @@ describe("WSClient", () => {
   beforeEach(() => {
     FakeWebSocket.lastUrl = null;
     FakeWebSocket.lastInstance = null;
+    FakeWebSocket.instances = [];
     vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
   });
 
@@ -255,13 +260,13 @@ describe("WSClient", () => {
       expect(ws.getStatus()).toBe("connected");
 
       simulateDisconnect();
-      expect(ws.getStatus()).toBe("reconnecting");
+      expect(ws.getStatus()).toBe("disconnected");
       vi.runOnlyPendingTimers();
       expect(ws.getStatus()).toBe("reconnecting");
 
       simulateAuthAck();
       expect(ws.getStatus()).toBe("connected");
-      expect(listener).toHaveBeenCalledTimes(3);
+      expect(listener).toHaveBeenCalledTimes(4);
     });
 
     it("uses ~1000ms base delay for the first reconnect attempt", () => {
@@ -425,6 +430,45 @@ describe("WSClient", () => {
       expect(onReconnect).toHaveBeenCalledTimes(1);
     });
 
+    it("publishes connection state transitions", () => {
+      const ws = new WSClient("ws://example.test/ws");
+      ws.setAuth("tok", "acme");
+      const states: string[] = [];
+      ws.onStatusChange(() => {
+        states.push(ws.getStatus());
+      });
+
+      ws.connect();
+      simulateAuthAck();
+      simulateDisconnect();
+      vi.runOnlyPendingTimers();
+      simulateAuthAck();
+
+      expect(states).toEqual([
+        "connecting",
+        "connected",
+        "disconnected",
+        "reconnecting",
+        "connected",
+      ]);
+    });
+
+    it("manual reconnect cancels backoff without creating duplicate sockets", () => {
+      const ws = new WSClient("ws://example.test/ws");
+      ws.connect();
+      simulateAuthAck();
+      simulateDisconnect();
+
+      expect(FakeWebSocket.instances).toHaveLength(1);
+      ws.reconnect();
+      expect(FakeWebSocket.instances).toHaveLength(2);
+      expect(ws.getStatus()).toBe("reconnecting");
+
+      ws.reconnect();
+      vi.runOnlyPendingTimers();
+      expect(FakeWebSocket.instances).toHaveLength(2);
+    });
+
     it("keeps retrying indefinitely with capped delay", () => {
       vi.stubGlobal(
         "Math",
@@ -497,6 +541,126 @@ describe("WSClient", () => {
       expect(lastTimerDelay()).toBe(1000);
     });
   });
+
+  describe("half-open heartbeat", () => {
+    interface OpenSocket {
+      client: WSClient;
+      ws: FakeWebSocket;
+    }
+
+    function openSocket(): OpenSocket {
+      const client = new WSClient("ws://example.test/ws");
+      client.connect();
+      const ws = FakeWebSocket.lastInstance!;
+      ws.readyState = FakeWebSocket.OPEN;
+      ws.onopen?.();
+      return { client, ws };
+    }
+
+    function pingCount(ws: FakeWebSocket): number {
+      return ws.sent.filter((frame) => frame === JSON.stringify({ type: "ping" }))
+        .length;
+    }
+
+    function spyClose(ws: FakeWebSocket) {
+      return vi
+        .spyOn(ws, "close")
+        .mockImplementation(() => {
+          ws.readyState = FakeWebSocket.CLOSED;
+        });
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("sends an app-level ping every 45s on an authenticated socket", () => {
+      const { ws } = openSocket();
+      expect(pingCount(ws)).toBe(0);
+      vi.advanceTimersByTime(45_000);
+      expect(pingCount(ws)).toBe(1);
+      vi.advanceTimersByTime(45_000);
+      expect(pingCount(ws)).toBe(2);
+    });
+
+    it("force-closes a silent socket after 135s and reconnects via the normal path", () => {
+      vi.stubGlobal(
+        "Math",
+        new Proxy(Math, {
+          get(target, prop) {
+            if (prop === "random") return () => 0.5;
+            return (target as any)[prop];
+          },
+        }),
+      );
+
+      const { ws } = openSocket();
+      const closeSpy = spyClose(ws);
+
+      vi.advanceTimersByTime(90_000);
+      expect(closeSpy).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(45_000);
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+
+      ws.onclose?.();
+      vi.advanceTimersByTime(1_000);
+      expect(FakeWebSocket.lastInstance).not.toBe(ws);
+    });
+
+    it("keeps a healthy connection alive while business frames keep arriving", () => {
+      const { ws } = openSocket();
+      const closeSpy = spyClose(ws);
+
+      for (let i = 0; i < 4; i++) {
+        vi.advanceTimersByTime(40_000);
+        ws.onmessage?.({
+          data: JSON.stringify({ type: "issue:updated", payload: {} }),
+        });
+      }
+      expect(closeSpy).not.toHaveBeenCalled();
+    });
+
+    it("counts pong replies alone as proof of life on an otherwise idle socket", () => {
+      const { ws } = openSocket();
+      const closeSpy = spyClose(ws);
+
+      for (let i = 0; i < 4; i++) {
+        vi.advanceTimersByTime(45_000);
+        ws.onmessage?.({ data: JSON.stringify({ type: "pong" }) });
+      }
+      expect(closeSpy).not.toHaveBeenCalled();
+    });
+
+    it("stops probing once disconnect() has been called", () => {
+      const { client, ws } = openSocket();
+      client.disconnect();
+      const sentAfterDisconnect = ws.sent.slice();
+
+      vi.advanceTimersByTime(300_000);
+      expect(ws.sent).toEqual(sentAfterDisconnect);
+      expect(FakeWebSocket.lastInstance).toBe(ws);
+    });
+
+    it("checkHealth() is a safe manual probe: silent inside the window, closes past it", () => {
+      const { client, ws } = openSocket();
+      const closeSpy = spyClose(ws);
+
+      vi.advanceTimersByTime(130_000);
+      client.checkHealth();
+      expect(closeSpy).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(6_000);
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+
+      client.checkHealth();
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 
 // A socket can be reconnecting hours after the provider built this client —
@@ -531,6 +695,7 @@ describe("WSClient session renewal", () => {
     // Session renewed between connections.
     current = "token-v2";
 
+    ws.disconnect();
     ws.connect();
     FakeWebSocket.lastInstance!.onopen!();
     expect(JSON.parse(FakeWebSocket.lastInstance!.sent[0]!)).toEqual({
