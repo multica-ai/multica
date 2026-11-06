@@ -96,6 +96,7 @@
     "tailwindSourceRoot": "."
   },
   "devDependencies": {
+    "@testing-library/react": "catalog:",
     "@types/lodash": "4.17.24",
     "@types/node": "24.12.4",
     "@types/react": "19.2.15",

@@ -10,3 +10,4 @@ export { PromptService, type PromptDisplay, type PromptError, type PromptInput, 
 export type { PromptTurnReader, TurnCancelRecord, TurnCancelStatus } from "./turn-cancels";
 export type { InteractionResponseInput, InteractionResponseRecord, InteractionResponseStatus } from "./interaction-responses";
 export type { EditRetryAvailability, EditRetryOperation, EditRetryReasonCode, EditRetryRecoveryAction, EditRetryRecoveryState, EditRetryResult, EditRetryStatus, PromptSessionReconcile } from "./edit-retries";
+export { CompletionReadService, type CompletionReadStorage } from "./completion-read-service";

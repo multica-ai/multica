@@ -130,6 +130,7 @@ const AgentTranscriptRow = observer(function AgentTranscriptRow({
       <div
         className="agent-gui-transcript-row"
         data-agent-transcript-row={key}
+        data-agent-transcript-turn-completed={model.isCompleted(groupKey) ? "true" : undefined}
         data-agent-transcript-row-kind={row.kind}
         data-agent-transcript-row-speaker={row.kind === "message" ? row.speaker : undefined}
         data-agent-transcript-row-thinking-first={row.kind === "message" && row.speaker === "assistant" && row.thinking.length > 0 ? "true" : undefined}

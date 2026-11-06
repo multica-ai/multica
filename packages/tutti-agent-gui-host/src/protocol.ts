@@ -377,6 +377,7 @@ export type AgentGuiHostEvent =
  * conversations outlive the GUI, which projects them while it is mounted.
  */
 export interface LocalConversationSource {
+  completions?: import("@multica/conversation-client/services").CompletionReadService;
   submissionStorage?: import("@multica/core/local-conversation/submission-storage").SubmissionStorage;
   submissionContext?(): Promise<{ generation: string; lifecycle: boolean }>;
   inspectSubmissions?(

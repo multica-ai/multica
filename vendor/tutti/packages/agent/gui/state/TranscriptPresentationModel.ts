@@ -157,6 +157,11 @@ export class TranscriptPresentationModel {
       return Boolean(id && id === this.source.base()?.sourceDetail.session.activeTurnId && this.source.turn(id)?.phase !== "settled");
     });
   }
+  isCompleted(key: string): boolean {
+    const id = this.group(key)?.turnId;
+    const turn = id ? this.source.turn(id) : null;
+    return turn?.phase === "settled" && turn.outcome === "completed";
+  }
   workSection(key: string): Section {
     return this.read(this.sections, key, () => {
       const [group, turn, active, imported] = this.read(this.inputs, key, () => {

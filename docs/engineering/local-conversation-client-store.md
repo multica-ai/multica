@@ -191,7 +191,7 @@ Store 中一个会话就是一个 `V2Conversation`，它保存：
 | `local.storedSnapshot` 及其写入 | 读写都归 Store；只用于 P2P 设备，作为内存中没有内容时的首屏 |
 | `v2-projection.ts` | 保留，已是纯函数 |
 
-切走期间完成的轮次不产生未读标记，这和现在一致，不在本方案范围内。
+后台完成提示由客户端 `CompletionReadService` 补齐：比较已观测轮次的变化，通过已有快照/历史接口核实成功完成的位置。查看位置独立保存在 IndexedDB；重启后对账，详见 [本地会话视图状态](conversation-view-state.md#完成结果与已读位置)。
 
 本机会话不持久化到磁盘。读本机 daemon 的成本低，渲染进程重启后走快照。
 

@@ -1,4 +1,4 @@
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { ConversationListModel } from "@multica/conversation-client/models";
@@ -36,7 +36,7 @@ it("updates only selected rows and lets a preview update bypass activity control
     model, sessionLinks: { current: new Map() }, flowPath: "/test/conversations",
     select: vi.fn(), updatingId: null, labels: { pinned: "Pinned", storage: "Saved locally" },
     projectLabels: { actions: "Actions" },
-    t: ((selector: (messages: object) => string) => selector({})) as ComponentProps<typeof LocalConversationSessionRow>["t"],
+    t: ((selector: (messages: object) => string) => selector({ window: { unread: "Unread" } })) as ComponentProps<typeof LocalConversationSessionRow>["t"],
     renderSessionActions: () => <></>, setContextSelection: vi.fn(), chinese: false, remote: true,
     v2: { list } as ComponentProps<typeof LocalConversationSessionRow>["v2"],
   };
@@ -55,4 +55,11 @@ it("updates only selected rows and lets a preview update bypass activity control
   act(() => list.upsert([summary("a", 3, "New preview", "2026-11-05T00:00:00Z")]));
   expect(counters.links.size).toBe(0);
   expect(counters.activity).not.toHaveBeenCalled();
+  act(() => list.completions.set("b", {
+    version: 1, generation: "g", baselineTurnIndex: 0, summarySeq: 2, turnCount: 1, activeTurnId: null, status: "idle",
+    completedTurnIndex: 0, completedTurnId: "t0", readTurnIndex: -1,
+  }));
+  expect(screen.getByRole("status")).toHaveClass("bg-info");
+  act(() => list.completions.set("b", { ...list.completions.get("b")!, readTurnIndex: 0 }));
+  expect(screen.queryByRole("status")).toBeNull();
 });

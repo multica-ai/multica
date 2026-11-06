@@ -1,8 +1,10 @@
 import { action, makeObservable, observable } from "mobx";
 import type { LocalV2Device, LocalV2Summary } from "@multica/core/local-conversation/v2";
+import { CompletionReadModel } from "./completion-read-model";
 
 /** One workspace's conversations on one device: the complete list, and who else is using each. */
 export class ConversationListModel {
+  readonly completions = new CompletionReadModel();
   private readonly byId = observable.map<string, LocalV2Summary>([], { deep: false });
   private readonly devices = observable.map<string, LocalV2Device[]>([], { deep: false });
   /** Every conversation; a new array on each change. */

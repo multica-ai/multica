@@ -234,7 +234,7 @@ class ItemModel {
 | `sessionMutations` | 3176 | `PromptService`、`ConversationService` |
 | `sessionReconcile` | 1767 | **要迁：** 水合、加载状态和打开未知会话进 `ConversationService` |
 | `engineRuntime` | 1641 | 删除，但 `workspaceReconcile` 和重连后重新加载工作区要先迁走 |
-| `attentionReadState` | 1507 | 删除：Desktop 的会话列表不显示未读，读它的只有已不挂载的 vendor rail，`session.markRead` 在本地也是空操作 |
+| `attentionReadState` | 1507 | 删除：Desktop 完成提示由原生 `CompletionReadService` 和列表 Model 管理，查看位置独立保存在 IndexedDB，不恢复旧 vendor rail 或 `session.markRead` |
 | `composerOptions` | 1503 | `ComposerService` |
 | `editRetry` | 894 | `PromptService` |
 | `sessionEntities` | 784 | `ConversationListModel` |

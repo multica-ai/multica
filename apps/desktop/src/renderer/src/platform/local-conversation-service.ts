@@ -200,6 +200,7 @@ export function localConversationSource(
         store.deviceId,
       ]),
     ),
+    completions: store.completions,
     submissionContext: () => store.submissionContext(),
     async inspectSubmissions(id, requestIds) {
       if (!(await store.submissionContext()).lifecycle) return null;

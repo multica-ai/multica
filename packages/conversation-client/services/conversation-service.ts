@@ -8,6 +8,7 @@ import {
 import { LOCAL_V2_FOCUS_CAPABILITY, LocalV2FocusTracker } from "@multica/core/local-conversation/focus";
 import { ConversationListModel, ConversationModel } from "../models";
 import { ConversationNavigation } from "./conversation-navigation";
+import { CompletionReadService, type CompletionReadStorage } from "./completion-read-service";
 
 /** Conversations of other devices as last read, shown while the current state travels. */
 export interface ConversationSnapshotStore {
@@ -61,6 +62,7 @@ interface ContentEntry {
 }
 
 export interface ConversationServiceOptions {
+  completionStorage?: CompletionReadStorage;
   /** Told each store generation the daemon reports. */
   onGeneration(generation: string): void;
   /** Told a conversation's content is in use, to retain it. */
@@ -82,6 +84,7 @@ export interface ConversationServiceOptions {
 export class ConversationService {
   /** The list, complete and current; views read it directly. */
   readonly list = new ConversationListModel();
+  readonly completions?: CompletionReadService;
   private summaryLoad?: Promise<void>;
   private lastGeneration = "";
   private scopeSeq = 0;
@@ -101,7 +104,18 @@ export class ConversationService {
     } catch { return false; }
   });
 
-  constructor(private transport: LocalV2Transport, readonly scope: LocalV2Scope, private options: ConversationServiceOptions) {}
+  constructor(private transport: LocalV2Transport, readonly scope: LocalV2Scope, private options: ConversationServiceOptions) {
+    if (options.completionStorage) this.completions = new CompletionReadService(this.list.completions, {
+      storage: options.completionStorage,
+      generation: async () => {
+        const generation = await this.transport.storeGeneration?.() ?? this.lastGeneration;
+        if (!this.disposed) this.noteGeneration(generation);
+        return generation;
+      },
+      snapshot: (id) => this.snapshot(id, 5),
+      history: (id, before) => this.request("GET", `/sessions/${encodeURIComponent(id)}/history?before_index=${before}&turn_limit=20`),
+    });
+  }
 
   /** Someone is looking at a conversation until the returned function is called. Only views call this: it keeps the provider's process warm. */
   get deviceId(): string {
@@ -196,6 +210,7 @@ export class ConversationService {
   receiveSummary(summary: LocalV2Summary): void { this.store([summary]); }
 
   private store(summaries: readonly LocalV2Summary[]) {
+    for (const summary of summaries) this.completions?.observe(summary);
     for (const summary of this.list.upsert(summaries)) this.entries.get(summary.conversation_id)?.conversation?.setSummary(summary);
   }
 
@@ -540,6 +555,7 @@ export class ConversationService {
       return;
     }
     this.focused.reconnected();
+    for (const summary of this.list.summaries) this.completions?.observe(summary);
     void this.transport.storeGeneration?.().then((generation) => this.noteGeneration(generation)).catch(() => {});
     if (this.summaryLoad || this.list.read) this.reloadSummaries();
     for (const [id, entry] of this.entries) {
@@ -554,6 +570,7 @@ export class ConversationService {
 
   /** The daemon's database was replaced: nothing here describes it any more. */
   invalidate(): void {
+    this.completions?.reset();
     this.invalidations++;
     this.scopeSeq = 0;
     this.list.clear();
@@ -571,6 +588,7 @@ export class ConversationService {
 
   /** Stops all work for good; a late answer changes nothing and nothing reconnects. */
   dispose(): void {
+    this.completions?.dispose();
     this.disposed = true;
     clearTimeout(this.listTimer);
     this.entries.clear();

@@ -1582,6 +1582,16 @@ export function createMulticaAgentGuiRuntime(
 
   const rowModels = new Map<string, ConversationRowsModel>();
   const runtime: ConversationServices = {
+    completions: source.completions ? {
+      pending: (id) => {
+        const resolved = resolvedServerId(id);
+        return resolved ? source.completions!.pending(resolved) : undefined;
+      },
+      markRead: (id, position) => {
+        const resolved = resolvedServerId(id);
+        if (resolved) source.completions!.markRead(resolved, position);
+      },
+    } : undefined,
     navigation: source.navigation ? (id) => {
       const resolved = resolvedServerId(id);
       return resolved ? source.navigation!(resolved) : undefined;

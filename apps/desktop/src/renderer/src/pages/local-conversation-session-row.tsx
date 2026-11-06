@@ -111,6 +111,9 @@ export const LocalConversationSessionRow = observer(function LocalConversationSe
             />
           )
         )}
+        {entry.hasUnreadCompletion && (
+          <span role="status" aria-label={t(($) => $.window.unread)} className="size-2 shrink-0 rounded-full bg-info" />
+        )}
         {!remote &&
           (() => {
             const users = v2.list
@@ -184,7 +187,7 @@ const LocalConversationSummary = observer(function LocalConversationSummary({
       href={`${flowPath}?${new URLSearchParams({ provider: entry.provider, session: id })}`}
       aria-current={selected ? "true" : undefined}
       onClick={selectConversation}
-      className={`flex min-w-0 items-start gap-3 rounded-lg px-3 py-3 text-body outline-none focus-visible:ring-2 focus-visible:ring-ring ${entryRunning || background ? "pr-16" : `group-hover:pr-11 group-focus-within:pr-11 ${updating ? "pr-11" : ""}`} ${selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/60"}`}
+      className={`flex min-w-0 items-start gap-3 rounded-lg px-3 py-3 text-body outline-none focus-visible:ring-2 focus-visible:ring-ring ${entryRunning || background || entry.hasUnreadCompletion ? "pr-16" : `group-hover:pr-11 group-focus-within:pr-11 ${updating ? "pr-11" : ""}`} ${selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/60"}`}
     >
       <span
         role="img"

@@ -2,8 +2,8 @@ import type { ConversationListModel } from "@multica/conversation-client/models"
 import { comparer, computed, makeObservable, type IComputedValue } from "mobx";
 import { sessionEntry, type LocalSessionEntry } from "./local-conversation-projects";
 
-type Summary = Pick<LocalSessionEntry, "id" | "title" | "provider" | "pinned" | "preview" | "waitingForAnswer" | "running" | "backgroundTasks">;
-type Activity = Pick<Summary, "id" | "title" | "provider" | "waitingForAnswer" | "running" | "backgroundTasks">;
+type Summary = Pick<LocalSessionEntry, "id" | "title" | "provider" | "pinned" | "preview" | "waitingForAnswer" | "running" | "backgroundTasks"> & { hasUnreadCompletion: boolean };
+type Activity = Pick<Summary, "id" | "title" | "provider" | "waitingForAnswer" | "running" | "backgroundTasks"> & { hasUnreadCompletion: boolean };
 
 /** List ordering and each visible row observe separate projections of the existing list model. */
 export class LocalConversationListModel {
@@ -34,7 +34,7 @@ export class LocalConversationListModel {
       const entry = this.entry(id);
       if (!entry) return;
       const { title, provider, pinned, preview, waitingForAnswer, running, backgroundTasks } = entry;
-      return { id, title, provider, pinned, preview, waitingForAnswer, running, backgroundTasks };
+      return { id, title, provider, pinned, preview, waitingForAnswer, running, backgroundTasks, hasUnreadCompletion: !!this.source.completions.pending(id) };
     });
   }
 
@@ -43,7 +43,7 @@ export class LocalConversationListModel {
       const entry = this.entry(id);
       if (!entry) return;
       const { title, provider, waitingForAnswer, running, backgroundTasks } = entry;
-      return { id, title, provider, waitingForAnswer, running, backgroundTasks };
+      return { id, title, provider, waitingForAnswer, running, backgroundTasks, hasUnreadCompletion: !!this.source.completions.pending(id) };
     });
   }
 

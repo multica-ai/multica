@@ -21,6 +21,7 @@ await build({
       index: fileURLToPath(new URL("../e2e-harness/index.html", import.meta.url)),
       performance: fileURLToPath(new URL("../e2e-harness/performance.html", import.meta.url)),
       direct: fileURLToPath(new URL("../e2e-harness/direct.html", import.meta.url)),
+      completionRead: fileURLToPath(new URL("../e2e-harness/completion-read.html", import.meta.url)),
     } },
   },
 });

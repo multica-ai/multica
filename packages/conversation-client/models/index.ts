@@ -10,3 +10,4 @@ export { PromptQueueModel } from "./prompt-queue-model";
 export { TranscriptModel } from "./transcript-model";
 export { TurnModel, type TurnError, type TurnStatus } from "./turn-model";
 export { UserMessageModel } from "./user-message-model";
+export { CompletionReadModel, completionReadRecordSchema, type CompletionReadRecord, type CompletionPosition } from "./completion-read-model";

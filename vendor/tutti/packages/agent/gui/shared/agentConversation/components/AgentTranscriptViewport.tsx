@@ -39,6 +39,8 @@ import { useAgentConversationNavigation } from "./useAgentConversationNavigation
 import { Button } from "@multica/ui/components/ui/button";
 import { RotateCw } from "lucide-react";
 import { useTranslation } from "../../../i18n";
+import { useOptionalConversationServices } from "../../../conversationServices";
+import { useCompletionRead } from "./useCompletionRead";
 
 const FALLBACK_TURN_COUNT = 3;
 type DisclosureMotionChange = ReturnType<typeof useTurnDisclosureMotion>[1];
@@ -124,6 +126,8 @@ export const AgentTranscriptViewport = observer(function AgentTranscriptViewport
     navigation, loadedItems: userMessageLocatorItems, turnGroups,
     virtualizer: rowVirtualizer, shouldVirtualize, isVisible, label: userMessageLocatorLabel,
   });
+  const services = useOptionalConversationServices();
+  useCompletionRead(services?.completions, agentSessionId, isVisible, directory.containerRef);
   const handleLocateUserMessage = useCallback(
     (item: AgentMessageLocatorItem) => {
       if (directory.locate(item)) return;

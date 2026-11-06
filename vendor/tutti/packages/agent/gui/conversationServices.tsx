@@ -355,6 +355,10 @@ export interface ConversationDataService {
 }
 
 export interface ConversationServices extends AgentConversationServices {
+  completions?: {
+    pending(id: string): import("@multica/conversation-client/models").CompletionPosition | undefined;
+    markRead(id: string, position: import("@multica/conversation-client/models").CompletionPosition): void;
+  };
   navigation?(id: string): import("@multica/conversation-client/services").ConversationNavigation | undefined;
   conversations: ConversationDataService;
 
