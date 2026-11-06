@@ -135,7 +135,7 @@ export async function inspectDevice(
         `${name}Dependencies`,
         "blocked",
         "Dependency is not installed",
-        "setup_prepare installs locked dependencies",
+        "env_start installs locked dependencies",
       );
     }
   }
@@ -199,7 +199,7 @@ export async function inspectDevice(
       "databaseTarget",
       "unknown",
       "No managed worktree database has been allocated",
-      "setup_prepare and setup_start prepare the managed database",
+      "env_start prepares the managed database",
     );
   for (const name of ["PORT", "FRONTEND_PORT", "DESKTOP_RENDERER_PORT"]) {
     const value = new RegExp(`^${name}=(\\d+)$`, "m").exec(env)?.[1];
@@ -238,7 +238,7 @@ export async function inspectDevice(
     mode === "desktop"
       ? "Native helper presence checked; external agent CU is independently configured"
       : "Not required in renderer mode",
-    "setup_prepare builds the helper; configure the external agent's computer-use capability",
+    "env_start builds the helper; configure the external agent's computer-use capability",
   );
   add(
     "externalComputerUse",

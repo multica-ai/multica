@@ -60,13 +60,21 @@ func TestVerificationWorkspaceImportIsIdempotentAndIsolated(t *testing.T) {
 	sum := sha256.Sum256(bytes)
 	content.Attachments = []verificationworkspace.Attachment{{ID: attachment, Filename: "notes.txt", ContentType: "text/plain", SizeBytes: len(bytes), IssueID: &issue, CommentID: &comment, Data: base64.StdEncoding.EncodeToString(bytes), SHA256: hex.EncodeToString(sum[:])}}
 	content.Comments[0]["author_id"] = uuid.NewString()
-	unrelated := dbfx.Issue(t, "Unrelated test content", testutil.Cols{"id": testUserID, "number": 1000000})
 	input := verificationWorkspaceRequest{RestoreID: uuid.NewString() + ":1", Content: content}
 	var first, second struct {
 		Mapping map[string]string `json:"mapping"`
 	}
 	call("/api/verification/import", input).Want(200).JSON(&first)
-	t.Cleanup(func() { call("/api/verification/reset", map[string]string{"restoreId": input.RestoreID}).Want(200) })
+	t.Cleanup(func() {
+		issues := []string{first.Mapping[issue], first.Mapping[parent]}
+		dbfx.Exec(t, "DELETE FROM issue_to_label WHERE issue_id=ANY($1::uuid[])", issues)
+		dbfx.Exec(t, "DELETE FROM attachment WHERE id=$1", first.Mapping[attachment])
+		dbfx.Exec(t, "DELETE FROM comment WHERE id=$1", first.Mapping[comment])
+		dbfx.Exec(t, "DELETE FROM issue WHERE id=ANY($1::uuid[])", issues)
+		dbfx.Exec(t, "DELETE FROM project WHERE id=$1", first.Mapping[project])
+		dbfx.Exec(t, "DELETE FROM issue_workflow WHERE id=$1", first.Mapping[workflow])
+		dbfx.Exec(t, "DELETE FROM issue_label WHERE id=$1", first.Mapping[label])
+	})
 	call("/api/verification/import", input).Want(200).JSON(&second)
 	if first.Mapping[issue] == issue || first.Mapping[issue] != second.Mapping[issue] {
 		t.Fatalf("import mapping changed or retained source ID: %#v", second.Mapping)
@@ -108,22 +116,6 @@ func TestVerificationWorkspaceImportIsIdempotentAndIsolated(t *testing.T) {
 	}
 	input.Content.Issues[0]["title"] = "Conflicting payload"
 	call("/api/verification/import", input).Want(409)
-	outsideChild := dbfx.Issue(t, "Additional reference", testutil.Cols{"number": 1000001, "parent_issue_id": first.Mapping[issue]})
-	call("/api/verification/reset", map[string]string{"restoreId": input.RestoreID}).Want(409)
-	dbfx.QueryRow(t, "SELECT count(*) FROM issue WHERE id=$1", first.Mapping[issue]).Scan(&count)
-	if count != 1 {
-		t.Fatal("rejected reset changed the imported graph")
-	}
-	dbfx.Exec(t, "UPDATE issue SET parent_issue_id=NULL WHERE id=$1", outsideChild)
-	call("/api/verification/reset", map[string]string{"restoreId": input.RestoreID}).Want(200)
-	dbfx.QueryRow(t, "SELECT count(*) FROM attachment WHERE id=$1", first.Mapping[attachment]).Scan(&count)
-	if count != 0 {
-		t.Fatal("reset retained an owned attachment row")
-	}
-	dbfx.QueryRow(t, "SELECT count(*) FROM issue WHERE id=$1", unrelated).Scan(&count)
-	if count != 1 {
-		t.Fatal("reset removed a resource outside the imported graph")
-	}
 }
 func TestVerificationBackendRequiresLoopbackCapability(t *testing.T) {
 	t.Setenv("MULTICA_VERIFICATION_BACKEND", uuid.NewString())

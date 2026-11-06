@@ -59,34 +59,6 @@ async function operation(name: string, input: Json) {
   if (job.state !== "completed") throw new Error(JSON.stringify(job.problem));
   return object.parse(job.output?.value);
 }
-async function record(title: string, page = false) {
-  const value = await operation("verification.create", {
-    title,
-    kind: "smoke",
-    plan: {
-      scenario: "integration/v1",
-      scope: [title],
-      providerScript: "controlled/v1",
-      checks: [
-        {
-          key: "target",
-          purpose: "target",
-          kind: page ? "page.text" : "queue.itemCount",
-          operator: "eq",
-          expected: page ? "Saved" : 0,
-          temporal: "eventually",
-        },
-      ],
-      ui: {
-        required: page,
-        colorSchemes: page ? ["light", "dark"] : ["light"],
-      },
-    },
-  });
-  const verificationId = z.uuid().parse(value.verificationId);
-  await host.evidence.bindEnvironment(verificationId, environmentId, "smoke");
-  return verificationId;
-}
 async function request(path: string, body?: unknown) {
   return host.environments.bindings.request(
     binding.ref,
@@ -232,8 +204,7 @@ describe("manual verification protocol integration", () => {
             .status === "completed",
       );
     }
-    const before = await snapshot("original"),
-      source = await host.data.bind(binding.ref);
+    const before = await snapshot("original");
     const apiBinding = {
       ...binding,
       ref: "api-only",
@@ -241,8 +212,7 @@ describe("manual verification protocol integration", () => {
       filesRoot: undefined,
     };
     host.environments.bindings.add(apiBinding);
-    const apiSource = await host.data.bind(apiBinding.ref);
-    const exported = await host.data.snapshot(apiSource.sourceId, {
+    const exported = await host.data.snapshot(apiBinding.ref, {
       conversationIds: ["original"],
     });
     const contents = object.parse(exported.content),
@@ -252,7 +222,7 @@ describe("manual verification protocol integration", () => {
         .array(z.unknown())
         .parse(object.parse(conversations[0]!.snapshot).turns),
     ).toHaveLength(23);
-    const consistent = await host.data.snapshot(source.sourceId, {
+    const consistent = await host.data.snapshot(binding.ref, {
       conversationIds: ["original"],
     });
     expect(
@@ -265,46 +235,44 @@ describe("manual verification protocol integration", () => {
         },
       ],
     });
-    const restored = await host.data.restore(
+    const restored = await operation("data.restore", {
       environmentId,
-      consistent.dataSnapshotId,
-    );
-    expect(restored.state).toBe("ready");
-    expect(restored.refs.original).not.toBe("original");
-    const copy = await snapshot(restored.refs.original!);
+      content: { kind: "snapshot", dataSnapshotId: consistent.dataSnapshotId },
+    });
+    const refs = z.record(z.string(), z.string()).parse(restored.refs);
+    expect(refs.original).not.toBe("original");
+    const copy = await snapshot(refs.original!);
     expect(copy.queue).toMatchObject({ paused: true });
     expect(
       (
         await host.environments.bindings.bytes(
           binding.ref,
-          `/local/v2/attachments/${restored.refs["ffffffffffffffffffffffffffffffff"]}`,
+          `/local/v2/attachments/${refs["ffffffffffffffffffffffffffffffff"]}`,
         )
       ).toString(),
     ).toBe("source attachment bytes");
-    expect(await snapshot("original")).toEqual(before);
-    const reset = await host.data.reset(restored.datasetId);
-    expect(reset.restoreVersion).toBe(2);
-    expect(reset.refs.original).not.toBe(restored.refs.original);
+    const again = await operation("data.restore", {
+      environmentId,
+      content: { kind: "snapshot", dataSnapshotId: consistent.dataSnapshotId },
+    });
     expect(
-      object.parse((await snapshot(restored.refs.original!)).conversation)
-        .archived,
-    ).toBe(true);
+      z.record(z.string(), z.string()).parse(again.refs).original,
+    ).not.toBe(refs.original);
     expect(await snapshot("original")).toEqual(before);
   });
 
-  it("observes real queue dispatch over WS and durable cursors, checks exactly-once receipt, and archives reports", async () => {
-    const verificationId = await record("Queue dispatch with a fake provider");
+  it("reads queue dispatch through raw state and durable event pages", async () => {
     const dataset = await host.data.fixture(environmentId, 3),
       subjectRef = dataset.refs.conversationId!;
-    const step = await host.sources.begin({
-      verificationId,
+    const start = await host.state.read({
       environmentId,
+      source: "daemon",
       subjectRef,
-      description: "A completes, B dispatches exactly once",
-      driver: "api",
-      sources: ["daemon"],
     });
-    expect(step.coverage).toBe("complete");
+    const startSeq = z
+      .object({ snapshot_seq: z.number() })
+      .passthrough()
+      .parse(start.payload).snapshot_seq;
     await request(`/local/v2/sessions/${subjectRef}/commands`, {
       type: "send",
       request_id: "queue-a",
@@ -315,110 +283,73 @@ describe("manual verification protocol integration", () => {
       item: { requestId: "queue-b", content: "B", display: { id: "queue-b" } },
     });
     await host.data.control(
-      dataset.datasetId,
+      environmentId,
+      subjectRef,
       "release",
       "Answer A",
       "queue-a",
     );
     await eventually(
-      () => host.data.control(dataset.datasetId, "inspect"),
+      () => host.data.control(environmentId, subjectRef, "inspect"),
       (value) =>
         z.array(z.string()).parse(object.parse(value).received).length === 2,
     );
     await host.data.control(
-      dataset.datasetId,
+      environmentId,
+      subjectRef,
       "release",
       "Answer B",
       "queue-b",
     );
-    await eventually(
-      () => snapshot(subjectRef),
+    const final = await eventually(
+      () => host.state.read({ environmentId, source: "daemon", subjectRef }),
       (value) =>
-        object.parse(z.array(z.unknown()).parse(value.turns).at(-1)).status ===
-        "completed",
+        object.parse(
+          z.array(z.unknown()).parse(object.parse(value.payload).turns).at(-1),
+        ).status === "completed",
     );
-    const ended = await host.sources.end(step.stepId);
-    expect(ended.coverage, ended.gaps.join(",")).toBe("complete");
-    expect(ended.events.length).toBeGreaterThan(3);
-    const checked = await host.checks.check({
-      verificationId,
-      environmentId,
-      subjectRef,
-      predicate: {
-        kind: "providerFixture.receivedCount",
-        operator: "eq",
-        expected: 1,
-        target: "queue-b",
-      },
-      temporal: { mode: "throughout", stepId: step.stepId },
-    });
-    expect(checked).toMatchObject({ status: "passed", actual: 1 });
-    const final = await host.checks.check({
-      verificationId,
-      environmentId,
-      subjectRef,
-      stepId: step.stepId,
-      comparisonKey: "target",
-      predicate: { kind: "queue.itemCount", operator: "eq", expected: 0 },
-      temporal: { mode: "eventually", timeoutMs: 2000 },
-    });
-    expect(final.status).toBe("passed");
-    const report = await host.evidence.finalize({
-      verificationId,
-      conclusion: "passed",
-      explanation: "Observed the normal queue and two controlled completions.",
-      uncovered: [],
-    });
-    const exported = await host.evidence.export(
-      verificationId,
-      report.reportRevision,
-      "html",
+    expect(object.parse(object.parse(final.payload).queue).items).toEqual([]);
+    expect(
+      object.parse(
+        await host.data.control(environmentId, subjectRef, "inspect"),
+      ).received,
+    ).toEqual(["queue-a", "queue-b"]);
+    const page = z
+      .object({
+        generation: z.string(),
+        cursor: z.number(),
+        highWater: z.number(),
+        events: z.array(z.object({ seq: z.number() }).passthrough()),
+      })
+      .passthrough()
+      .parse(
+        (
+          await host.state.events({
+            environmentId,
+            source: "daemon",
+            subjectRef,
+            after: startSeq,
+          })
+        ).payload,
+      );
+    expect(page.generation).toBe(object.parse(final.payload).store_generation);
+    expect(page.events.map((event) => event.seq)).toEqual(
+      Array.from({ length: page.events.length }, (_, i) => startSeq + i + 1),
     );
-    expect(await readFile(exported.path, "utf8")).toContain(
-      "providerFixture.receivedCount",
-    );
-    const artifact = report.evidence[0]!;
-    await writeFile(join(directory, "host", artifact.path), "tampered");
-    await expect(host.evidence.read(artifact.evidenceId)).rejects.toMatchObject(
-      { problem: { code: "identityMismatch" } },
-    );
-    await expect(
-      host.evidence.export(verificationId, report.reportRevision, "html"),
-    ).rejects.toMatchObject({ problem: { code: "identityMismatch" } });
+    expect(page.events.length).toBeGreaterThan(3);
   });
 
-  it("keeps missing observations unavailable and refuses a passing conclusion", async () => {
-    const verificationId = await record("Missing subject");
-    const step = await host.sources.begin({
-      verificationId,
-      environmentId,
-      subjectRef: "missing",
-      description: "Unavailable source",
-      driver: "api",
-      sources: ["daemon"],
-    });
-    expect(step.coverage).toBe("partial");
-    await host.sources.end(step.stepId);
-    const check = await host.checks.check({
-      verificationId,
-      environmentId,
-      subjectRef: "missing",
-      comparisonKey: "target",
-      predicate: { kind: "queue.itemCount", operator: "eq", expected: 0 },
-      temporal: { mode: "now" },
-    });
-    expect(check.status).toBe("unavailable");
+  it("reports an unknown conversation as a read error instead of empty state", async () => {
     await expect(
-      host.evidence.finalize({
-        verificationId,
-        conclusion: "passed",
-        explanation: "",
-        uncovered: [],
+      host.state.read({
+        environmentId,
+        source: "daemon",
+        subjectRef: "missing",
       }),
-    ).rejects.toMatchObject({ problem: { code: "coverageIncomplete" } });
+    ).rejects.toBeInstanceOf(VerificationError);
   });
 
-  it("reconciles a lost import response using the original dataset and restore namespace", async () => {
+  it("leaves a lost import response unknown with its dataset id discoverable", async () => {
     const fixture = await host.data.fixture(environmentId, 2);
     const original = host.environments.bindings.request.bind(
       host.environments.bindings,
@@ -438,7 +369,10 @@ describe("manual verification protocol integration", () => {
       });
     const receipt = await host.jobs.submit(
       "data.restore",
-      { environmentId, dataSnapshotId: fixture.dataSnapshotId! },
+      {
+        environmentId,
+        content: { kind: "snapshot", dataSnapshotId: fixture.dataSnapshotId },
+      },
       randomUUID(),
     );
     if (receipt.kind !== "accepted") throw new Error("No import receipt");
@@ -448,39 +382,27 @@ describe("manual verification protocol integration", () => {
     );
     interceptor.mockRestore();
     expect(job.resourceRefs).toContain(environmentId);
-    const datasets = job.resourceRefs.filter((ref) => ref !== environmentId);
-    expect(datasets).toHaveLength(1);
-    const datasetId = datasets[0]!;
-    expect(await host.data.get(datasetId)).toMatchObject({
-      state: "partial",
-      restoreVersion: 1,
-    });
-    const resumed = await host.data.resume(datasetId);
-    expect(resumed).toMatchObject({
-      datasetId,
-      state: "ready",
-      restoreVersion: 1,
-    });
-    expect(resumed.refs).toMatchObject(
-      object.parse(object.parse(copied).mapping),
-    );
-    expect((await host.jobs.byRequest(receipt.requestId)).job.state).toBe(
-      "unknown",
-    );
+    expect(
+      job.resourceRefs.filter((ref) => ref !== environmentId),
+    ).toHaveLength(1);
+    const mapping = z
+      .record(z.string(), z.string())
+      .parse(object.parse(copied).mapping);
+    const copiedId = mapping["fixture-conversation"]!;
+    expect(
+      (
+        await host.state.read({
+          environmentId,
+          source: "daemon",
+          subjectRef: copiedId,
+        })
+      ).subjectRef,
+    ).toBe(copiedId);
   });
 
-  it("records event generation gaps and rejects stale fake-provider completions", async () => {
-    const verificationId = await record("Generation and dispatch guards");
+  it("rejects stale fake-provider completions and returns event generations unchanged", async () => {
     const dataset = await host.data.fixture(environmentId),
       subjectRef = dataset.refs.conversationId!;
-    const step = await host.sources.begin({
-      verificationId,
-      environmentId,
-      subjectRef,
-      description: "Collect one request",
-      driver: "api",
-      sources: ["daemon"],
-    });
     await request(`/local/v2/sessions/${subjectRef}/commands`, {
       type: "send",
       request_id: "guard-a",
@@ -488,15 +410,16 @@ describe("manual verification protocol integration", () => {
     });
     await expect(
       host.data.control(
-        dataset.datasetId,
+        environmentId,
+        subjectRef,
         "release",
         "Wrong request",
         "guard-b",
       ),
     ).rejects.toBeInstanceOf(VerificationError);
-    expect(await host.data.control(dataset.datasetId, "inspect")).toMatchObject(
-      { pending: true, pendingRequestId: "guard-a" },
-    );
+    expect(
+      await host.data.control(environmentId, subjectRef, "inspect"),
+    ).toMatchObject({ pending: true, pendingRequestId: "guard-a" });
     const original = host.environments.bindings.request.bind(
       host.environments.bindings,
     );
@@ -508,23 +431,16 @@ describe("manual verification protocol integration", () => {
           ? { ...object.parse(result), generation: "replaced-database" }
           : result;
       });
-    const ended = await host.sources.end(step.stepId);
+    const page = await host.state.events({
+      environmentId,
+      source: "daemon",
+      subjectRef,
+    });
     interceptor.mockRestore();
-    expect(ended.coverage).toBe("partial");
-    const checked = await host.checks.check({
-      verificationId,
+    expect(page.payload).toMatchObject({ generation: "replaced-database" });
+    await host.data.control(
       environmentId,
       subjectRef,
-      predicate: {
-        kind: "providerFixture.receivedCount",
-        operator: "eq",
-        expected: 1,
-      },
-      temporal: { mode: "throughout", stepId: step.stepId },
-    });
-    expect(checked.status).toBe("unavailable");
-    await host.data.control(
-      dataset.datasetId,
       "release",
       "Answer A",
       "guard-a",
@@ -539,7 +455,7 @@ describe("manual verification protocol integration", () => {
     };
     host.environments.bindings.add(readOnly);
     const receipt = await host.jobs.submit(
-      "setup.prepare",
+      "env.start",
       {
         gitRef: "HEAD",
         mode: "desktop",
@@ -560,7 +476,7 @@ describe("manual verification protocol integration", () => {
     expect(await request("/health")).toMatchObject({ status: "running" });
   });
 
-  it("operates actual CDP pages, rejects used references, waits for semantic locators and reads real screenshot bytes", async () => {
+  it("operates actual CDP pages by locator, reads elements and returns real screenshot bytes", async () => {
     const port = await freePort();
     browser = await chromium.launch({
       headless: true,
@@ -568,7 +484,7 @@ describe("manual verification protocol integration", () => {
     });
     const page = await browser.newPage();
     await page.setContent(
-      '<button data-testid="save" onclick="this.textContent=\'Saved\'">Save</button><input type="password" value="private-password">',
+      '<button data-testid="save" onclick="this.textContent=\'Saved\'">Save</button><button>Twin</button><button>Twin</button><input type="password" value="private-password">',
     );
     vi.spyOn(host.environments, "descriptor").mockResolvedValue({
       schemaVersion: 1,
@@ -584,78 +500,61 @@ describe("manual verification protocol integration", () => {
     vi.spyOn(host.environments, "desktopRequest").mockResolvedValue({
       environmentId,
     });
-    const verificationId = await record("Page adapter protocol smoke", true),
-      dataset = await host.data.fixture(environmentId),
-      subjectRef = dataset.refs.conversationId!;
-    const step = await host.sources.begin({
-      verificationId,
-      environmentId,
-      subjectRef,
-      description: "Click Save",
-      driver: "playwright",
-      sources: ["daemon"],
-    });
     const windows = await host.pages.windows(environmentId);
-    const windowRef = windows[0]!.windowRef;
-    const observed = await host.pages.observe(environmentId, windowRef);
+    expect(windows).toHaveLength(1);
+    const windowId = windows[0]!.windowId;
+    expect((await host.pages.windows(environmentId))[0]!.windowId).toBe(
+      windowId,
+    );
+    const observed = await host.pages.observe(environmentId);
     expect(JSON.stringify(observed)).not.toContain("private-password");
-    const targetRef = observed.elements.find(
-      (item) => item.testId === "save",
-    )!.ref;
-    const action = {
-      verificationId,
-      environmentId,
-      stepId: step.stepId,
-      windowRef,
-      observationId: observed.observationId,
-      targetRef,
-      action: { kind: "click" as const },
+    expect(observed.elements.some((item) => item.testId === "save")).toBe(true);
+    const save = {
+      windowId,
+      locator: { kind: "testId" as const, value: "save" },
     };
-    expect(await host.pages.perform(action)).toMatchObject({
-      actionCompleted: true,
-      businessOutcome: "notChecked",
-    });
-    await expect(host.pages.perform(action)).rejects.toMatchObject({
-      problem: { code: "staleReference" },
-    });
-    const checked = await host.checks.check({
-      verificationId,
-      environmentId,
-      subjectRef,
-      stepId: step.stepId,
-      comparisonKey: "target",
-      predicate: {
-        kind: "page.text",
-        operator: "eq",
-        expected: "Saved",
-        target: { windowRef, locator: { kind: "testId", value: "save" } },
-      },
-      temporal: { mode: "eventually", timeoutMs: 1000 },
-    });
-    expect(checked.status).toBe("passed");
-    const hidden = await host.pages.readCondition(
-      environmentId,
-      { windowRef, locator: { kind: "testId", value: "absent" } },
-      "page.visible",
-    );
-    expect(hidden).toBe(false);
-    await page.emulateMedia({ colorScheme: "dark" });
-    await host.pages.capture(
-      verificationId,
-      environmentId,
-      step.stepId,
-      windowRef,
-    );
-    await page.emulateMedia({ colorScheme: "light" });
-    const image = await host.pages.capture(
-      verificationId,
-      environmentId,
-      step.stepId,
-      windowRef,
-    );
     expect(
-      (await host.evidence.read(image.evidenceId)).bytes.subarray(0, 8),
-    ).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+      await host.pages.perform(environmentId, save, { kind: "click" }),
+    ).toEqual({ performed: true });
+    expect(await host.pages.read(environmentId, save)).toMatchObject({
+      count: 1,
+      items: [{ index: 0, visible: true, enabled: true, text: "Saved" }],
+    });
+    expect(
+      await host.pages.read(environmentId, {
+        locator: { kind: "testId", value: "absent" },
+      }),
+    ).toEqual({ count: 0, items: [] });
+    const twin = {
+      locator: {
+        kind: "role" as const,
+        role: "button",
+        name: "Twin",
+        exact: true,
+      },
+    };
+    await expect(
+      host.pages.perform(environmentId, twin, { kind: "click" }),
+    ).rejects.toMatchObject({ problem: { code: "invalidInput" } });
+    expect(
+      await host.pages.perform(
+        environmentId,
+        { ...twin, index: 1 },
+        {
+          kind: "click",
+        },
+      ),
+    ).toEqual({ performed: true });
+    await page.emulateMedia({ colorScheme: "dark" });
+    expect(
+      (await host.pages.screenshot(environmentId, windowId)).colorScheme,
+    ).toBe("dark");
+    await page.emulateMedia({ colorScheme: "light" });
+    const shot = await host.pages.screenshot(environmentId);
+    expect(shot.colorScheme).toBe("light");
+    expect(shot.png.subarray(0, 8)).toEqual(
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    );
     const server = createVerificationMcpServer(host),
       client = new Client({ name: "image-consumer", version: "1" });
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
@@ -663,10 +562,8 @@ describe("manual verification protocol integration", () => {
       await server.connect(serverSide);
       await client.connect(clientSide);
       const result = await client.callTool({
-        name: "verification_evidence",
-        arguments: {
-          action: { operation: "read", evidenceId: image.evidenceId },
-        },
+        name: "page_screenshot",
+        arguments: { environmentId, windowId },
       });
       const returned = z
         .object({
@@ -680,80 +577,12 @@ describe("manual verification protocol integration", () => {
             .parse(result.content)
             .find((item) => item.type === "image"),
         );
-      expect(returned.data).toBe(
-        (await host.evidence.read(image.evidenceId)).bytes.toString("base64"),
+      expect(Buffer.from(returned.data, "base64").subarray(0, 8)).toEqual(
+        Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
       );
     } finally {
       await client.close();
       await server.close();
     }
-    await host.sources.end(step.stepId);
-    const report = await host.evidence.finalize({
-      verificationId,
-      conclusion: "passed",
-      explanation: "Actual page operation and screenshot",
-      uncovered: [],
-    });
-    const bundle = await host.evidence.export(
-      verificationId,
-      report.reportRevision,
-      "bundle",
-    );
-    expect(JSON.parse(await readFile(bundle.path, "utf8"))).toMatchObject({
-      verificationId,
-      reportRevision: report.reportRevision,
-    });
-  });
-  it("prunes expired finalized archives while retaining pinned evidence and data snapshots", async () => {
-    const fixture = await host.data.fixture(environmentId),
-      entries = [];
-    for (let index = 0; index < 2; index++) {
-      const created = await operation("verification.create", {
-        title: `Retention ${index}`,
-        kind: "smoke",
-      });
-      const verificationId = z.uuid().parse(created.verificationId);
-      const evidence = await host.evidence.attach({
-        verificationId,
-        kind: "log",
-        source: "test-created-log",
-        mediaType: "text/plain",
-        bytes: Buffer.from("Retention fixture"),
-      });
-      await host.evidence.finalize({
-        verificationId,
-        conclusion: "inconclusive",
-        explanation: "Retention fixture",
-        uncovered: ["No product verification attempted"],
-      });
-      const path = join(
-          directory,
-          "host/verifications",
-          `${verificationId}.json`,
-        ),
-        metadata = JSON.parse(await readFile(path, "utf8"));
-      metadata.createdAt = new Date(Date.now() - 10 * 86400000).toISOString();
-      await writeFile(path, JSON.stringify(metadata), { mode: 0o600 });
-      entries.push({ verificationId, evidence });
-    }
-    await host.evidence.pin(entries[0]!.verificationId, true);
-    expect((await host.evidence.prune()).removed).toEqual([
-      entries[1]!.verificationId,
-    ]);
-    expect(
-      (
-        await host.evidence.read(entries[0]!.evidence.evidenceId)
-      ).bytes.toString(),
-    ).toBe("Retention fixture");
-    expect(await host.records.read(entries[1]!.verificationId)).toMatchObject({
-      state: "pruned",
-      revisions: [],
-    });
-    await expect(
-      host.evidence.read(entries[1]!.evidence.evidenceId),
-    ).rejects.toMatchObject({ problem: { code: "notFound" } });
-    expect(await host.data.getSnapshot(fixture.dataSnapshotId!)).toMatchObject({
-      complete: true,
-    });
   });
 });

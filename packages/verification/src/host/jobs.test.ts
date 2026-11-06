@@ -64,40 +64,47 @@ describe("durable verification commands", () => {
     ).rejects.toMatchObject({ problem: { code: "requestConflict" } });
   });
 
-  it("retains verification identity and completed receipts across host restarts", async () => {
+  it("retains job resources and completed receipts across host restarts", async () => {
     const { host, options, root } = await fixture();
-    const command = await host.records.create(
-      { title: "Queue regression", kind: "bug" },
+    const register = (target: VerificationHost) =>
+      target.jobs.register("test.create", {
+        input: z.object({ title: z.string() }).strict(),
+        output: z.object({ id: z.uuid() }).strict(),
+        outputSchema: "test/v1",
+        run: async (_input, context) => {
+          const id = randomUUID();
+          await context.addResource(id);
+          return { id };
+        },
+      });
+    register(host);
+    const command = await host.jobs.submit(
+      "test.create",
+      { title: "Queue regression" },
       "create-queue",
     );
     const job = await until(host, accepted(command), "completed");
     expect(job.resourceRefs).toHaveLength(1);
-    const record = await host.records.read(job.resourceRefs[0]!);
-    expect(record).toMatchObject({
-      title: "Queue regression",
-      kind: "bug",
-      state: "open",
-    });
+    const id = job.resourceRefs[0]!;
+    expect(job.output?.value).toEqual({ id });
     expect(
-      (
-        await stat(
-          join(root, "state", "verifications", `${record.verificationId}.json`),
-        )
-      ).mode & 0o777,
+      (await stat(join(root, "state", "jobs", `${job.jobId}.json`))).mode &
+        0o777,
     ).toBe(0o600);
     await host.close();
     const restarted = await createVerificationHost(options);
     cleanups.push(() => restarted.close());
-    const retry = await restarted.records.create(
-      { title: "Queue regression", kind: "bug" },
+    register(restarted);
+    const retry = await restarted.jobs.submit(
+      "test.create",
+      { title: "Queue regression" },
       "create-queue",
     );
     expect(retry).toMatchObject({
       kind: "completed",
       receiptId: command.receiptId,
-      value: { verificationId: record.verificationId },
+      value: { id },
     });
-    expect(await restarted.records.read(record.verificationId)).toEqual(record);
     expect((await restarted.jobs.byRequest("create-queue")).job.state).toBe(
       "completed",
     );

@@ -195,7 +195,7 @@ export class SetupInspector {
             name: check.name,
             status: check.status,
             action: ["node", "pnpm", "go"].includes(check.name)
-              ? "setup_prepare installs the declared toolchain in private storage"
+              ? "env_start installs the declared toolchain in private storage"
               : "Install the missing system prerequisite",
           })),
         ...deviceChecks

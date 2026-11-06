@@ -1,8 +1,10 @@
 # 面向 agent 的自动化验证能力实施方案
 
+> **已被取代的部分：** 宿主已改为只提供操作和取数、接口互不依赖（见[接口契约 v2](verification-foundation-contracts.md)）。本文中的确定性检查、验证计划与通过门槛、验证记录、步骤采集与覆盖计算、证据归档与报告等设计不再实现，判断由调用方智能体完成。
+
 本文给出首版的范围、模块、工具协议、数据准备、诊断与证据契约，以及实施和验收顺序。七个模块的首版代码已落地，实际可用范围、工具 schema、使用方法和验收边界见[验证包说明](../../packages/verification/README.md)。本文保留架构目标及设计示例，不能将所有示意字段当成当前工具参数；运行时 schema 是调用依据。专用干净 Mac 的完整 Electron GUI 验收尚未执行。
 
-七个模块逐项确认后的底层接口、公共结果、对象身份、调用顺序与实施切片见[接口与实施契约 v1](verification-foundation-contracts.md)。本文负责总体范围，该契约细化模块交互；文档描述架构与语义目标，实际调用参数以运行时 schema 为准。
+当前接口见[接口契约 v2](verification-foundation-contracts.md)。本文负责总体范围，该契约细化模块交互；文档描述架构与语义目标，实际调用参数以运行时 schema 为准。
 
 设计分析基线为 `origin/main` 的 `be88001167e7316d5516105547747846721b82e8`，源码证据表保留该基线；实现分支 `codex/verification-tooling` 已对齐 `origin/main` 的 `5f8d2ccf5` 并复核接入。已有问题评估见 [Bug 验证基础能力评估](bug-verification-foundation.md)。
 

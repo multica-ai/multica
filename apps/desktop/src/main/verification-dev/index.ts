@@ -4,7 +4,6 @@ import { timingSafeEqual, randomUUID } from "node:crypto";
 import { lstatSync, readFileSync, mkdirSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { WebSocketServer, WebSocket } from "ws";
 import { z } from "zod";
 import { redactDiagnosticText } from "../developer-runtime-logs";
 import { desktopRuntimeRegistry } from "../desktop-runtime-instance";
@@ -73,7 +72,6 @@ export const verificationDev = {
       string,
       { sender: number; resolve(value: unknown): void }
     >();
-    const sockets = new WebSocketServer({ noServer: true, maxPayload: 65536 });
     function record(type: string, payload: unknown) {
       const event = {
         cursor: ++cursor,
@@ -83,9 +81,6 @@ export const verificationDev = {
       };
       events.push(event);
       if (events.length > 2000) events.shift();
-      for (const client of sockets.clients)
-        if (client.readyState === WebSocket.OPEN)
-          client.send(JSON.stringify(event));
     }
     const attach = (window: Electron.BrowserWindow) => {
       const id = window.id;
@@ -337,21 +332,6 @@ export const verificationDev = {
         timingSafeEqual(presented, expected)
       );
     }
-    server.on("upgrade", (request, socket, head) => {
-      if (!authorized(request.headers) || request.url !== "/events/ws") {
-        socket.destroy();
-        return;
-      }
-      sockets.handleUpgrade(request, socket, head, (ws) => {
-        ws.send(
-          JSON.stringify({
-            type: "observation.ready",
-            cursor,
-            earliestCursor: events[0]?.cursor ?? cursor + 1,
-          }),
-        );
-      });
-    });
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
       server.listen(0, "127.0.0.1", resolve);
@@ -390,10 +370,6 @@ export const verificationDev = {
       { mode: 0o600 },
     );
     await rename(temporary, join(session.directory, "desktop.json"));
-    app.once("will-quit", () => {
-      for (const socket of sockets.clients) socket.terminate();
-      sockets.close();
-      server.close();
-    });
+    app.once("will-quit", () => server.close());
   },
 };

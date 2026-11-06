@@ -28,14 +28,12 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.27.1",
     "playwright": "1.58.2",
-    "ws": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@multica/eslint-config": "workspace:*",
     "@multica/tsconfig": "workspace:*",
     "@types/node": "catalog:",
-    "@types/ws": "catalog:",
     "eslint": "^9.28.0",
     "typescript": "catalog:",
     "vitest": "catalog:"

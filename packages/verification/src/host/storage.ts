@@ -186,17 +186,7 @@ export class HostStorage {
       for (const directory of [
         "receipts",
         "jobs",
-        "verifications",
         "environments",
-        "sources",
-        "data-snapshots",
-        "datasets",
-        "steps",
-        "state-snapshots",
-        "checks",
-        "evidence",
-        "reports",
-        "artifacts",
         "worktrees",
       ])
         await mkdir(join(root, directory), { recursive: true, mode: 0o700 });

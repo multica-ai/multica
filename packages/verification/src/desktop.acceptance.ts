@@ -96,9 +96,7 @@ export async function desktopAcceptance() {
     process.env.MULTICA_VERIFICATION_STATE ??
     join(homedir(), ".multica", "verification-acceptance", randomUUID());
   const host = await createVerificationHost({ projectRoot, stateRoot });
-  let browser: Browser | undefined,
-    environmentId: string | undefined,
-    verificationId: string | undefined;
+  let browser: Browser | undefined, environmentId: string | undefined;
   const startedAt = new Date().toISOString(),
     started = performance.now(),
     timings: Record<string, number> = {};
@@ -129,21 +127,18 @@ export async function desktopAcceptance() {
     const environment = environmentSchema.parse(
       await operation(
         host,
-        "setup.prepare",
+        "env.start",
         {
           gitRef: process.env.MULTICA_VERIFICATION_GIT_REF ?? "HEAD",
           mode: "desktop",
           dataMode: "fixture",
           includeWorkingChanges: true,
         },
-        20 * 60 * 1000,
+        40 * 60 * 1000,
       ),
     );
     environmentId = environment.environmentId;
-    timings.prepareMs = performance.now() - phase;
-    phase = performance.now();
-    await operation(host, "setup.start", { environmentId }, 20 * 60 * 1000);
-    timings.startAndLoginMs = performance.now() - phase;
+    timings.prepareStartAndLoginMs = performance.now() - phase;
     const descriptor = await host.environments.descriptor(environmentId);
     sampler.addRoot(descriptor.pid);
     const daemon = host.environments.bindings.get(
@@ -173,215 +168,85 @@ export async function desktopAcceptance() {
       );
     const page = pages[0]!;
     const dataset = datasetSchema.parse(
-      await operation(host, "data.fixture", {
+      await operation(host, "data.restore", {
         environmentId,
-        historyMessageCount: 2,
+        content: { kind: "conversationTemplate", historyMessageCount: 2 },
       }),
     );
     const subjectRef = z.string().parse(dataset.refs.conversationId);
-    const created = object.parse(
-      await operation(host, "verification.create", {
-        title: "Native Electron queue and navigation acceptance",
-        kind: "smoke",
-        requireScreenshots: true,
-        plan: {
-          scenario: "electron.queue-once/v1",
-          scope: [
-            "Normal Desktop login and bundled daemon",
-            "Playwright sends A and queued B",
-            "Navigation does not repeat provider receipt",
-          ],
-          dataSnapshotId: dataset.dataSnapshotId!,
-          providerScript: "controlled/v1",
-          checks: [
-            {
-              key: "queued",
-              purpose: "target",
-              kind: "queue.itemCount",
-              operator: "eq",
-              expected: 1,
-              temporal: "eventually",
-            },
-            {
-              key: "drained",
-              purpose: "target",
-              kind: "queue.itemCount",
-              operator: "eq",
-              expected: 0,
-              temporal: "eventually",
-            },
-            {
-              key: "receivedOnce",
-              purpose: "target",
-              kind: "providerFixture.receivedCount",
-              operator: "eq",
-              expected: 1,
-              temporal: "throughout",
-            },
-            {
-              key: "navigationBoundary",
-              purpose: "boundary",
-              kind: "providerFixture.receivedCount",
-              operator: "eq",
-              expected: 0,
-              temporal: "throughout",
-            },
-          ],
-          ui: { required: true, colorSchemes: ["light"] },
-        },
-      }),
-    );
-    verificationId = z.uuid().parse(created.verificationId);
-    await operation(host, "evidence.bindEnvironment", {
-      verificationId,
-      environmentId,
-      role: "smoke",
-    });
-    await selectConversation(page, subjectRef);
-    const windows = await host.pages.windows(environmentId);
-    if (windows.length !== 1)
-      throw new Error("Application window reference is ambiguous");
-    const windowRef = windows[0]!.windowRef;
-    const step = await host.sources.begin({
-      verificationId,
-      environmentId,
-      subjectRef,
-      description: "Send A and enqueue B through the real composer",
-      driver: "playwright",
-      sources: ["daemon", "main", "renderer"],
-    });
-    if (step.coverage !== "complete")
-      throw new Error(
-        `Incomplete native source coverage: ${step.gaps.join(",")}`,
-      );
-    await page.emulateMedia({ colorScheme: "light" });
-    await host.pages.capture(
-      verificationId,
-      environmentId,
-      step.stepId,
-      windowRef,
-    );
-    phase = performance.now();
-    await send(page, `Verification A ${randomUUID()}`);
+    const id = environmentId;
+    const screenshots: string[] = [];
+    const capture = async (name: string) => {
+      const shot = await host.pages.screenshot(id);
+      const path = join(stateRoot, "screenshots", `${name}.png`);
+      await mkdir(join(stateRoot, "screenshots"), {
+        recursive: true,
+        mode: 0o700,
+      });
+      await writeFile(path, shot.png, { mode: 0o600 });
+      screenshots.push(path);
+    };
+    const queueCount = async () =>
+      z
+        .array(z.unknown())
+        .parse(
+          object.parse(
+            object.parse(
+              (
+                await host.state.read({
+                  environmentId: id,
+                  source: "daemon",
+                  subjectRef,
+                })
+              ).payload,
+            ).queue,
+          ).items,
+        ).length;
     const received = () =>
       host.data
-        .control(dataset.datasetId, "inspect")
+        .control(id, subjectRef, "inspect")
         .then((value) =>
           z.array(z.string()).parse(object.parse(value).received),
         );
+    await selectConversation(page, subjectRef);
+    await page.emulateMedia({ colorScheme: "light" });
+    await capture("before-send");
+    phase = performance.now();
+    await send(page, `Verification A ${randomUUID()}`);
     const first = await until(received, (ids) => ids.length === 1, 30000);
     await send(page, `Verification B ${randomUUID()}`);
-    const check = async (
-      comparisonKey: string,
-      kind: "queue.itemCount" | "providerFixture.receivedCount",
-      expected: number,
-      stepId: string,
-      interval = false,
-      target?: string,
-    ) => {
-      const result = await host.checks.check({
-        verificationId: verificationId!,
-        environmentId: environmentId!,
-        subjectRef,
-        comparisonKey,
-        stepId,
-        predicate: {
-          kind,
-          operator: "eq",
-          expected,
-          ...(target ? { target } : {}),
-        },
-        temporal: interval
-          ? { mode: "throughout", stepId }
-          : { mode: "eventually", timeoutMs: 30000 },
-      });
-      if (result.status !== "passed")
-        throw new Error(
-          `Acceptance check failed: ${comparisonKey} (${result.status})`,
-        );
-    };
-    await check("queued", "queue.itemCount", 1, step.stepId);
-    await host.pages.capture(
-      verificationId,
-      environmentId,
-      step.stepId,
-      windowRef,
-    );
-    await host.data.control(dataset.datasetId, "release", "Answer A", first[0]);
+    await until(queueCount, (count) => count === 1, 30000);
+    await capture("queued");
+    await host.data.control(id, subjectRef, "release", "Answer A", first[0]);
     const both = await until(received, (ids) => ids.length === 2, 30000);
-    await host.data.control(dataset.datasetId, "release", "Answer B", both[1]);
-    await check("drained", "queue.itemCount", 0, step.stepId);
-    await host.pages.capture(
-      verificationId,
-      environmentId,
-      step.stepId,
-      windowRef,
-    );
-    await host.sources.end(step.stepId);
-    await check(
-      "receivedOnce",
-      "providerFixture.receivedCount",
-      1,
-      step.stepId,
-      true,
-      both[1],
-    );
-    const boundary = await host.sources.begin({
-      verificationId,
-      environmentId,
-      subjectRef,
-      description: "Navigate away and return without dispatching B again",
-      driver: "playwright",
-      sources: ["daemon", "main", "renderer"],
-    });
+    await host.data.control(id, subjectRef, "release", "Answer B", both[1]);
+    await until(queueCount, (count) => count === 0, 30000);
+    await capture("drained");
+    if (both.filter((value) => value === both[1]).length !== 1)
+      throw new Error("The queued request reached the provider more than once");
     const issueLink = page.locator('a[href$="/issues"]:visible');
     if ((await issueLink.count()) !== 1)
       throw new Error("The issues navigation link is ambiguous");
     await issueLink.click();
     await selectConversation(page, subjectRef);
-    await host.pages.capture(
-      verificationId,
-      environmentId,
-      boundary.stepId,
-      windowRef,
-    );
-    await host.sources.end(boundary.stepId);
-    await check(
-      "navigationBoundary",
-      "providerFixture.receivedCount",
-      0,
-      boundary.stepId,
-      true,
-      both[1],
-    );
+    await capture("after-navigation");
+    const afterNavigation = await received();
+    if (afterNavigation.length !== 2)
+      throw new Error("Navigation dispatched a provider request again");
     timings.scenarioMs = performance.now() - phase;
     await browser.close();
     browser = undefined;
     phase = performance.now();
-    await operation(host, "setup.stop", { environmentId });
+    await operation(host, "env.stop", { environmentId });
     stopped = true;
     timings.stopMs = performance.now() - phase;
-    const report = await host.evidence.finalize({
-      verificationId,
-      conclusion: "passed",
-      explanation:
-        "The real development Electron/main/preload/renderer and bundled CLI completed the declared queue and navigation scenario using a controlled provider. No real model was called.",
-      uncovered: [],
-    });
-    const exported = await host.evidence.export(
-      verificationId,
-      report.reportRevision,
-      "bundle",
-    );
     const disk = await statfs(stateRoot);
     const result = {
       schemaVersion: 1,
       status: "passed",
       startedAt,
       environmentId,
-      verificationId,
-      reportRevision: report.reportRevision,
-      artifact: exported,
+      screenshots,
       timings: { ...timings, totalMs: performance.now() - started },
       hostResourceUsage: process.resourceUsage(),
       hostHeap: process.memoryUsage(),
@@ -402,7 +267,6 @@ export async function desktopAcceptance() {
       status: "inconclusive",
       startedAt,
       environmentId,
-      verificationId,
       problem: toProblem(error),
       timings,
       elapsedMs: performance.now() - started,
@@ -418,7 +282,7 @@ export async function desktopAcceptance() {
     await sampler?.stop();
     await browser?.close().catch(() => undefined);
     if (environmentId && !stopped)
-      await operation(host, "setup.stop", { environmentId }).catch(
+      await operation(host, "env.stop", { environmentId }).catch(
         () => undefined,
       );
     await host.close();

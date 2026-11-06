@@ -44,30 +44,17 @@ async function stdio(root: string) {
   await client.connect(transport);
   return client;
 }
-async function completed(client: Client, jobId: string) {
-  const schema = z.object({
-    kind: z.literal("ok"),
-    value: z.object({
-      state: z.string(),
-      output: z
-        .object({ value: z.object({ verificationId: z.uuid() }) })
-        .optional(),
+async function snapshotRestore(client: Client, requestId: string) {
+  return payload(
+    await client.callTool({
+      name: "data_restore",
+      arguments: {
+        environmentId: "00000000-0000-4000-8000-000000000000",
+        content: { kind: "workspaceTemplate", issueCount: 1 },
+        requestId,
+      },
     }),
-  });
-  for (let i = 0; i < 100; i++) {
-    const result = schema.parse(
-      payload(
-        await client.callTool({
-          name: "setup_status",
-          arguments: { target: { kind: "job", jobId } },
-        }),
-      ),
-    );
-    if (result.value.state === "completed")
-      return result.value.output!.value.verificationId;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error("Verification creation did not complete");
+  );
 }
 
 describe("verification MCP transport", () => {
@@ -86,34 +73,32 @@ describe("verification MCP transport", () => {
     cleanups.push(() => client.close());
     cleanups.push(() => server.close());
     expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
-      "setup_inspect",
-      "setup_status",
-      "setup_cancel",
-      "verification_record",
-      "setup_prepare",
-      "setup_start",
-      "setup_stop",
-      "setup_data",
-      "setup_reset",
-      "setup_fixture_control",
-      "verification_snapshot",
-      "verification_step",
-      "verification_events",
-      "verification_check",
-      "verification_evidence",
-      "verification_export",
+      "env_inspect",
+      "env_start",
+      "env_stop",
+      "env_status",
+      "env_log_read",
+      "job_query",
+      "job_cancel",
+      "data_snapshot",
+      "data_snapshot_read",
+      "data_restore",
+      "fixture_control",
+      "state_read",
+      "events_read",
       "page_windows",
       "page_observe",
+      "page_read",
       "page_action",
       "page_screenshot",
     ]);
     const missing = await client.callTool({
-      name: "setup_status",
+      name: "job_query",
       arguments: { target: { kind: "job", jobId: "not-a-job" } },
     });
     expect(missing.isError).toBe(true);
     const notFound = await client.callTool({
-      name: "setup_status",
+      name: "job_query",
       arguments: { target: { kind: "request", requestId: "missing" } },
     });
     expect(payload(notFound)).toMatchObject({
@@ -122,56 +107,47 @@ describe("verification MCP transport", () => {
     });
     expect(JSON.stringify(notFound)).not.toContain(root);
     const unsupported = await client.callTool({
-      name: "verification_record",
+      name: "page_action",
       arguments: {
-        action: { operation: "finalize", verificationId: "not-supported" },
+        environmentId: "00000000-0000-4000-8000-000000000000",
+        target: { locator: { kind: "xpath", value: "//button" } },
+        action: { kind: "click" },
       },
     });
     expect(unsupported.isError).toBe(true);
   });
 
-  it("runs over real stdio, persists a record and reuses the receipt after reconnect", async () => {
+  it("runs over real stdio and reuses a job receipt after reconnect", async () => {
     const root = await directory();
     const first = await stdio(root);
-    const args = {
-      action: {
-        operation: "create",
-        title: "Independent MCP",
-        kind: "smoke",
-        requestId: "stdio-create",
-      },
-    };
     const receipt = acceptedSchema.parse(
-      payload(
-        await first.callTool({ name: "verification_record", arguments: args }),
-      ),
+      await snapshotRestore(first, "stdio-restore"),
     );
-    const verificationId = await completed(first, receipt.jobId);
-    expect(
-      payload(
-        await first.callTool({
-          name: "verification_record",
-          arguments: { action: { operation: "read", verificationId } },
-        }),
-      ),
-    ).toMatchObject({
-      kind: "ok",
-      value: { verificationId, title: "Independent MCP" },
-    });
+    const job = z
+      .object({ kind: z.literal("ok"), value: z.object({ jobId: z.uuid() }) })
+      .parse(
+        payload(
+          await first.callTool({
+            name: "job_query",
+            arguments: {
+              target: { kind: "request", requestId: "stdio-restore" },
+            },
+          }),
+        ),
+      );
+    expect(job.value.jobId).toBe(receipt.jobId);
     await first.close();
     const second = await stdio(root);
-    expect(
-      payload(
-        await second.callTool({ name: "verification_record", arguments: args }),
-      ),
-    ).toMatchObject({
-      kind: "completed",
+    expect(await snapshotRestore(second, "stdio-restore")).toMatchObject({
       receiptId: receipt.receiptId,
-      value: { verificationId },
     });
     const conflict = await second.callTool({
-      name: "verification_record",
-      arguments: { action: { ...args.action, title: "Changed" } },
+      name: "data_restore",
+      arguments: {
+        environmentId: "00000000-0000-4000-8000-000000000000",
+        content: { kind: "workspaceTemplate", issueCount: 2 },
+        requestId: "stdio-restore",
+      },
     });
     expect(payload(conflict)).toMatchObject({
       kind: "error",

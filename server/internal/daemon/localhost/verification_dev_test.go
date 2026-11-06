@@ -112,13 +112,13 @@ func TestVerificationFakeProviderDrivesTheNormalQueue(t *testing.T) {
 	}
 	v2Do(t, server, http.MethodPost, "/local/v2/verification/fixture", map[string]any{"conversationId": "queue-test", "action": "release", "text": "Answer B", "expectedRequestId": "request-b"}, headers)
 	_, snapshot := v2Do(t, server, http.MethodGet, "/local/v2/sessions/queue-test/snapshot", nil, headers)
-	status, _ = v2Do(t, server, http.MethodGet, "/local/v2/verification/events?conversationId=queue-test&after=0&generation=wrong", nil, headers)
-	if status != http.StatusBadRequest {
-		t.Fatal("generation not checked", status)
-	}
-	status, events := v2Do(t, server, http.MethodGet, "/local/v2/verification/events?conversationId=queue-test&after=0&generation="+snapshot["store_generation"].(string), nil, headers)
-	if status != http.StatusOK || len(events["events"].([]any)) == 0 {
+	status, events := v2Do(t, server, http.MethodGet, "/local/v2/verification/events?conversationId=queue-test&after=0", nil, headers)
+	if status != http.StatusOK || len(events["events"].([]any)) == 0 || events["generation"] != snapshot["store_generation"] {
 		t.Fatalf("events: %d %v", status, events)
+	}
+	status, beyond := v2Do(t, server, http.MethodGet, "/local/v2/verification/events?conversationId=queue-test&after=1000000", nil, headers)
+	if status != http.StatusOK || len(beyond["events"].([]any)) != 0 || beyond["highWater"] != snapshot["snapshot_seq"] {
+		t.Fatalf("events beyond high water: %d %v", status, beyond)
 	}
 	renderer := headers.Clone()
 	renderer.Set("Authorization", "Bearer "+RendererToken(v2Token))

@@ -10,7 +10,6 @@ function argumentsFrom(argv: string[]) {
   let stateRoot: string | undefined;
   let recoverLock = false;
   let bindingsFile: string | undefined;
-  let attachmentRoot: string | undefined;
   const seen = new Set<string>();
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]!;
@@ -20,25 +19,17 @@ function argumentsFrom(argv: string[]) {
       recoverLock = true;
       continue;
     }
-    if (
-      ![
-        "--project",
-        "--state-root",
-        "--bindings-file",
-        "--attachment-root",
-      ].includes(flag)
-    )
+    if (!["--project", "--state-root", "--bindings-file"].includes(flag))
       throw new Error("Unknown argument");
     const value = argv[++i];
     if (!value || value.startsWith("--"))
       throw new Error("Missing argument value");
     if (flag === "--project") projectRoot = value;
     else if (flag === "--state-root") stateRoot = value;
-    else if (flag === "--bindings-file") bindingsFile = value;
-    else attachmentRoot = value;
+    else bindingsFile = value;
   }
   if (!projectRoot) throw new Error("--project is required");
-  return { projectRoot, stateRoot, recoverLock, bindingsFile, attachmentRoot };
+  return { projectRoot, stateRoot, recoverLock, bindingsFile };
 }
 
 async function main() {
@@ -47,7 +38,7 @@ async function main() {
     options = argumentsFrom(process.argv.slice(2));
   } catch {
     process.stderr.write(
-      "usage: multica verification --project <checkout> [--state-root <private-directory>] [--bindings-file <private-json>] [--attachment-root <authorized-directory>] [--recover-lock]\n",
+      "usage: multica verification --project <checkout> [--state-root <private-directory>] [--bindings-file <private-json>] [--recover-lock]\n",
     );
     process.exitCode = 2;
     return;
@@ -56,9 +47,6 @@ async function main() {
     ...options,
     ...(options.bindingsFile
       ? { bindings: await readBindings(options.bindingsFile) }
-      : {}),
-    ...(options.attachmentRoot
-      ? { attachmentRoots: [options.attachmentRoot] }
       : {}),
   });
   const server = createVerificationMcpServer(host);

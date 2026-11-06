@@ -127,61 +127,63 @@ export class Environments {
     readonly bindings: Bindings,
     private readonly deviceLease: DeviceLease,
   ) {
-    jobs.register("setup.prepare", {
+    jobs.register("env.start", {
       input: prepareInput,
       output: jsonSchema,
       outputSchema: "environment/v1",
-      run: (input, context) =>
-        this.prepare(prepareInput.parse(input), context).then(toJson),
-    });
-    for (const operation of ["start", "stop"] as const)
-      jobs.register(`setup.${operation}`, {
-        input: z.object({ environmentId: resourceIdSchema }).strict(),
-        output: jsonSchema,
-        outputSchema: "environment/v1",
-        run: async (input, context) => {
-          const id = z
-            .object({ environmentId: resourceIdSchema })
-            .parse(input).environmentId;
-          await context.addResource(id);
-          if (operation === "stop") {
-            for (const name of await this.storage.list("jobs")) {
-              const pending = await this.storage.read(
-                `jobs/${name}`,
-                jobSchema,
-              );
-              if (
-                pending &&
-                ["setup.start", "setup.prepare"].includes(pending.operation) &&
-                pending.resourceRefs.includes(id) &&
-                ["queued", "running", "awaitingUser"].includes(pending.state)
-              )
-                await jobs.cancel(pending.jobId, `stop.${id}.${pending.jobId}`);
-            }
-          }
-          let result = await this.serializeLifecycle(async () => {
-            context.signal.throwIfAborted();
-            return this[operation](id, context);
-          });
-          while (operation === "start" && result.state === "awaitingUser") {
-            await context.awaitingUser(
-              String(result.components.readiness ?? "loginRequired"),
+      run: async (input, context) => {
+        const prepared = await this.prepare(prepareInput.parse(input), context);
+        const id = prepared.environmentId;
+        let result = await this.serializeLifecycle(async () => {
+          context.signal.throwIfAborted();
+          return this.start(id, context);
+        });
+        while (result.state === "awaitingUser") {
+          await context.awaitingUser(
+            String(result.components.readiness ?? "loginRequired"),
+          );
+          await new Promise((done) => setTimeout(done, 1000));
+          context.signal.throwIfAborted();
+          const retained = await this.get(id);
+          if (!["ready", "awaitingUser"].includes(retained.state))
+            throw new VerificationError(
+              problem(
+                "interrupted",
+                "The environment was stopped while waiting for user action",
+              ),
             );
-            await new Promise((done) => setTimeout(done, 1000));
+          result = await this.readiness(retained);
+        }
+        return toJson(result);
+      },
+    });
+    jobs.register("env.stop", {
+      input: z.object({ environmentId: resourceIdSchema }).strict(),
+      output: jsonSchema,
+      outputSchema: "environment/v1",
+      run: async (input, context) => {
+        const id = z
+          .object({ environmentId: resourceIdSchema })
+          .parse(input).environmentId;
+        await context.addResource(id);
+        for (const name of await this.storage.list("jobs")) {
+          const pending = await this.storage.read(`jobs/${name}`, jobSchema);
+          if (
+            pending &&
+            pending.operation === "env.start" &&
+            pending.resourceRefs.includes(id) &&
+            ["queued", "running", "awaitingUser"].includes(pending.state)
+          )
+            await jobs.cancel(pending.jobId, `stop.${id}.${pending.jobId}`);
+        }
+        return toJson(
+          await this.serializeLifecycle(async () => {
             context.signal.throwIfAborted();
-            const retained = await this.get(id);
-            if (!["ready", "awaitingUser"].includes(retained.state))
-              throw new VerificationError(
-                problem(
-                  "interrupted",
-                  "The environment was stopped while waiting for user action",
-                ),
-              );
-            result = await this.readiness(retained);
-          }
-          return toJson(result);
-        },
-      });
+            return this.stop(id, context);
+          }),
+        );
+      },
+    });
   }
   async get(id: string): Promise<Environment> {
     resourceIdSchema.parse(id);
@@ -194,13 +196,6 @@ export class Environments {
         problem("notFound", "The environment is not owned by this project"),
       );
     return environment;
-  }
-  async advanceDataGeneration(id: string): Promise<void> {
-    const environment = await this.get(id);
-    await this.save({
-      ...environment,
-      components: { ...environment.components, dataGeneration: randomUUID() },
-    });
   }
   async recover(): Promise<void> {
     for (const name of await this.storage.list("environments")) {
@@ -346,7 +341,6 @@ export class Environments {
       nextOffset: Math.min(text.length, offset + limit),
       hasMore: offset + limit < text.length,
       truncated,
-      coverage: "unknown",
     };
   }
   async assertTaskBoundary(): Promise<void> {
@@ -1162,7 +1156,7 @@ export class Environments {
         components: {
           ...environment.components,
           applicationKind: "webBrowser",
-          coverage: "readOnlyWebWithAuthorizedBackend",
+          runtimeScope: "readOnlyWebWithAuthorizedBackend",
           webOrigin,
           debugPort,
           applicationPid: child.pid,

@@ -19,7 +19,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/verificationworkspace"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 type verificationWorkspaceContent = verificationworkspace.Content
@@ -28,19 +27,10 @@ type verificationWorkspaceRequest struct {
 	RestoreID string                       `json:"restoreId"`
 	Content   verificationWorkspaceContent `json:"content"`
 }
-type verificationWorkspaceOwned struct {
-	Projects    []string `json:"projects"`
-	Issues      []string `json:"issues"`
-	Comments    []string `json:"comments"`
-	Workflows   []string `json:"workflows"`
-	Labels      []string `json:"labels"`
-	Attachments []string `json:"attachments"`
-}
 type verificationWorkspaceReceipt struct {
-	Owned       *verificationWorkspaceOwned `json:"owned"`
-	Digest      string                      `json:"digest"`
-	WorkspaceID string                      `json:"workspaceId"`
-	Mapping     map[string]string           `json:"mapping"`
+	Digest      string            `json:"digest"`
+	WorkspaceID string            `json:"workspaceId"`
+	Mapping     map[string]string `json:"mapping"`
 }
 
 func verificationText(row map[string]any, key string) string {
@@ -68,7 +58,6 @@ func (h *Handler) RegisterVerificationRoutes(r chi.Router) {
 			writeJSON(w, http.StatusOK, map[string]any{"schemaVersion": 1, "environmentId": os.Getenv("MULTICA_VERIFICATION_BACKEND"), "format": "multica.workspace/v1", "restorePhase": "onlineAfterServiceReady"})
 		})
 		r.Post("/api/verification/import", h.importVerificationWorkspace)
-		r.Post("/api/verification/reset", h.resetVerificationWorkspace)
 	})
 }
 func verificationReceiptPath(restoreID string) string {
@@ -148,17 +137,6 @@ func (h *Handler) importVerificationWorkspace(w http.ResponseWriter, r *http.Req
 		}
 		mapping[attachment.ID] = uuid.NewSHA1(namespace, []byte(attachment.ID)).String()
 	}
-	ownedIDs := func(rows []map[string]any) []string {
-		ids := make([]string, 0, len(rows))
-		for _, row := range rows {
-			ids = append(ids, mapping[verificationText(row, "id")])
-		}
-		return ids
-	}
-	owned := &verificationWorkspaceOwned{Projects: ownedIDs(input.Content.Projects), Issues: ownedIDs(input.Content.Issues), Comments: ownedIDs(input.Content.Comments), Workflows: ownedIDs(input.Content.Workflows), Labels: ownedIDs(input.Content.Labels), Attachments: make([]string, 0, len(input.Content.Attachments))}
-	for _, attachment := range input.Content.Attachments {
-		owned.Attachments = append(owned.Attachments, mapping[attachment.ID])
-	}
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, 500, "begin import failed")
@@ -170,7 +148,7 @@ func (h *Handler) importVerificationWorkspace(w http.ResponseWriter, r *http.Req
 		return
 	}
 	path := verificationReceiptPath(input.RestoreID)
-	receipt := verificationWorkspaceReceipt{Digest: hash, WorkspaceID: workspaceID, Mapping: mapping, Owned: owned}
+	receipt := verificationWorkspaceReceipt{Digest: hash, WorkspaceID: workspaceID, Mapping: mapping}
 	if raw, err := os.ReadFile(path); err == nil {
 		var prior verificationWorkspaceReceipt
 		if json.Unmarshal(raw, &prior) != nil || prior.Digest != hash || prior.WorkspaceID != workspaceID {
@@ -331,108 +309,4 @@ func (h *Handler) importVerificationWorkspace(w http.ResponseWriter, r *http.Req
 	receipt.Mapping = mapping
 	_ = writeVerificationReceipt(path, receipt)
 	writeJSON(w, 200, map[string]any{"schemaVersion": 1, "mapping": mapping, "policy": "isolatedWorkspaceCopy", "transformations": []string{"authors mapped to the test identity; assignees and leads cleared", "workflow handoffs disabled; imported workflows are not workspace defaults", "workflow and label names namespaced; entity and attachment references remapped", "external URLs remain reference content; page write operations must target the local test API"}})
-}
-func (h *Handler) resetVerificationWorkspace(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		RestoreID string `json:"restoreId"`
-	}
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input) != nil {
-		writeError(w, 400, "invalid reset")
-		return
-	}
-	raw, err := os.ReadFile(verificationReceiptPath(input.RestoreID))
-	var receipt verificationWorkspaceReceipt
-	if err != nil || json.Unmarshal(raw, &receipt) != nil || receipt.WorkspaceID != h.resolveWorkspaceID(r) {
-		writeError(w, 403, "unknown owned restore")
-		return
-	}
-	if receipt.Owned == nil {
-		writeError(w, 409, "import receipt has no typed ownership ledger; inspect before cleanup")
-		return
-	}
-	owned := receipt.Owned
-	tx, err := h.TxStarter.Begin(r.Context())
-	if err != nil {
-		writeError(w, 500, "begin reset failed")
-		return
-	}
-	defer tx.Rollback(r.Context())
-	namespace := uuid.NewSHA1(uuid.NameSpaceOID, []byte(os.Getenv("MULTICA_VERIFICATION_BACKEND")+":"+input.RestoreID))
-	if _, err = tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", namespace.String()); err != nil {
-		writeError(w, 500, "reset lock failed")
-		return
-	}
-	var extra bool
-	err = tx.QueryRow(r.Context(), `SELECT
- EXISTS(SELECT 1 FROM issue WHERE workspace_id=$1 AND NOT(id=ANY($2::uuid[])) AND (project_id=ANY($3::uuid[]) OR parent_issue_id=ANY($2::uuid[])))
- OR EXISTS(SELECT 1 FROM project WHERE workspace_id=$1 AND NOT(id=ANY($3::uuid[])) AND workflow_id=ANY($5::uuid[]))
- OR EXISTS(SELECT 1 FROM issue_to_label WHERE label_id=ANY($4::uuid[]) AND NOT(issue_id=ANY($2::uuid[])))
- OR EXISTS(SELECT 1 FROM issue WHERE workspace_id=$1 AND NOT(id=ANY($2::uuid[])) AND duplicate_of_issue_id=ANY($2::uuid[]))
- OR EXISTS(SELECT 1 FROM chat_session WHERE project_id=ANY($3::uuid[]))
- OR EXISTS(SELECT 1 FROM project_resource WHERE project_id=ANY($3::uuid[]))
- OR EXISTS(SELECT 1 FROM issue_view WHERE scope_type='project' AND scope_id=ANY($3::uuid[]))
- OR EXISTS(SELECT 1 FROM agent_task_queue WHERE issue_id=ANY($2::uuid[]))
- OR EXISTS(SELECT 1 FROM issue_source_context WHERE issue_id=ANY($2::uuid[]))
- OR EXISTS(SELECT 1 FROM issue_dependency WHERE (issue_id=ANY($2::uuid[]) AND NOT(depends_on_issue_id=ANY($2::uuid[]))) OR (depends_on_issue_id=ANY($2::uuid[]) AND NOT(issue_id=ANY($2::uuid[]))))`, receipt.WorkspaceID, owned.Issues, owned.Projects, owned.Labels, owned.Workflows).Scan(&extra)
-	if err != nil {
-		writeError(w, 500, "owned graph inspection failed")
-		return
-	}
-	if extra {
-		writeError(w, 409, "the copy has additional execution or cross-graph relationships; inspect before resetting")
-		return
-	}
-	for _, statement := range []struct {
-		query string
-		ids   []string
-	}{
-		{"DELETE FROM issue_to_label WHERE issue_id=ANY($1::uuid[])", owned.Issues},
-		{"DELETE FROM issue_dependency WHERE issue_id=ANY($1::uuid[]) OR depends_on_issue_id=ANY($1::uuid[])", owned.Issues},
-		{"DELETE FROM issue_reaction WHERE issue_id=ANY($1::uuid[])", owned.Issues},
-		{"DELETE FROM issue_subscriber WHERE issue_id=ANY($1::uuid[])", owned.Issues},
-		{"DELETE FROM comment_reaction WHERE comment_id IN(SELECT id FROM comment WHERE workspace_id=$2 AND issue_id=ANY($1::uuid[]))", owned.Issues},
-		{"DELETE FROM attachment WHERE workspace_id=$2 AND (issue_id=ANY($1::uuid[]) OR comment_id IN(SELECT id FROM comment WHERE workspace_id=$2 AND issue_id=ANY($1::uuid[])))", owned.Issues},
-		{"DELETE FROM comment WHERE workspace_id=$2 AND issue_id=ANY($1::uuid[])", owned.Issues},
-		{"DELETE FROM issue_pull_request WHERE issue_id=ANY($1::uuid[])", owned.Issues},
-		{"DELETE FROM attachment WHERE workspace_id=$2 AND id=ANY($1::uuid[])", owned.Attachments},
-	} {
-		args := []any{statement.ids, receipt.WorkspaceID}
-		if !strings.Contains(statement.query, "$2") {
-			args = args[:1]
-		}
-		if _, err = tx.Exec(r.Context(), statement.query, args...); err != nil {
-			writeError(w, 500, "owned cleanup requires inspection")
-			return
-		}
-	}
-	qtx := h.Queries.WithTx(tx)
-	// Use the domain deletion query for wakeups, supplements and VCS links.
-	for _, id := range owned.Issues {
-		if err = qtx.DeleteIssue(r.Context(), db.DeleteIssueParams{ID: parseUUID(id), WorkspaceID: parseUUID(receipt.WorkspaceID)}); err != nil {
-			writeError(w, 500, "owned issue cleanup requires inspection")
-			return
-		}
-	}
-	for _, statement := range []struct {
-		query string
-		ids   []string
-	}{
-		{"DELETE FROM project WHERE workspace_id=$2 AND id=ANY($1::uuid[])", owned.Projects},
-		{"DELETE FROM issue_workflow WHERE workspace_id=$2 AND id=ANY($1::uuid[])", owned.Workflows},
-		{"DELETE FROM issue_label WHERE workspace_id=$2 AND id=ANY($1::uuid[])", owned.Labels},
-	} {
-		args := []any{statement.ids, receipt.WorkspaceID}
-		if !strings.Contains(statement.query, "$2") {
-			args = args[:1]
-		}
-		if _, err = tx.Exec(r.Context(), statement.query, args...); err != nil {
-			writeError(w, 500, "owned cleanup requires inspection")
-			return
-		}
-	}
-	if err = tx.Commit(r.Context()); err != nil {
-		writeError(w, 500, "reset outcome unknown")
-		return
-	}
-	writeJSON(w, 200, map[string]any{"stopped": true, "retained": []string{"shared status catalog", "attachment objects", "import receipt"}})
 }

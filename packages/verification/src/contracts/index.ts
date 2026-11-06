@@ -53,8 +53,6 @@ export const problemSchema = z
       "unsupportedCapability",
       "sourceUnavailable",
       "coverageIncomplete",
-      "dataPartial",
-      "staleReference",
       "deadlineExceeded",
       "outcomeUnknown",
       "interrupted",
@@ -67,7 +65,6 @@ export const problemSchema = z
       "none",
       "inspect",
       "sameRequest",
-      "reobserve",
       "userAction",
     ]),
     relatedRefs: z.array(z.string()),
@@ -139,105 +136,8 @@ export const jobSchema = z
   });
 export type Job = z.infer<typeof jobSchema>;
 
-export const predicateKindSchema = z.enum([
-  "queue.itemCount",
-  "queue.paused",
-  "turn.status",
-  "providerFixture.receivedCount",
-  "diagnostic.errorCount",
-  "page.visible",
-  "page.text",
-  "page.controlState",
-]);
-export const verificationPlanSchema = z
-  .object({
-    scenario: z.string().trim().min(1).max(200),
-    scope: z.array(z.string().trim().min(1).max(500)).min(1).max(100),
-    dataSnapshotId: resourceIdSchema.optional(),
-    providerScript: z.enum(["controlled/v1", "none"]),
-    checks: z
-      .array(
-        z
-          .object({
-            key: z.string().min(1).max(160),
-            purpose: z.enum(["target", "boundary"]),
-            kind: predicateKindSchema,
-            operator: z.enum(["eq", "contains", "gte", "lte"]),
-            expected: jsonSchema,
-            temporal: z.enum(["now", "eventually", "throughout"]),
-          })
-          .strict(),
-      )
-      .min(1)
-      .max(100),
-    ui: z
-      .object({
-        required: z.boolean(),
-        colorSchemes: z
-          .array(z.enum(["light", "dark"]))
-          .min(1)
-          .max(2),
-      })
-      .strict(),
-  })
-  .strict()
-  .superRefine((plan, ctx) => {
-    if (
-      plan.checks.every((check) => check.kind.startsWith("page.")) &&
-      (!plan.ui.colorSchemes.includes("light") ||
-        !plan.ui.colorSchemes.includes("dark"))
-    )
-      ctx.addIssue({
-        code: "custom",
-        message: "Pure UI plans require light and dark screenshots",
-      });
-    if (
-      new Set(plan.checks.map((item) => item.key)).size !== plan.checks.length
-    )
-      ctx.addIssue({
-        code: "custom",
-        message: "Plan check keys must be unique",
-      });
-  });
-
-export const createVerificationInputSchema = z
-  .object({
-    title: z.string().trim().min(1).max(500),
-    kind: z.enum(["smoke", "bug"]),
-    requireScreenshots: z.boolean().default(false),
-    plan: verificationPlanSchema.optional(),
-  })
-  .strict();
-export const verificationSchema = z
-  .object({
-    schemaVersion: z.literal(1),
-    verificationId: resourceIdSchema,
-    projectRef: z.string().regex(/^[a-f0-9]{64}$/),
-    title: z.string().min(1).max(500),
-    kind: z.enum(["smoke", "bug"]),
-    state: z.enum(["open", "finalized", "pruned"]),
-    pinned: z.boolean().default(false),
-    createdAt: z.iso.datetime(),
-    requireScreenshots: z.boolean().default(false),
-    plan: verificationPlanSchema.optional(),
-    environments: z
-      .array(
-        z
-          .object({
-            environmentId: resourceIdSchema,
-            role: z.enum(["baseline", "candidate", "smoke"]),
-          })
-          .strict(),
-      )
-      .default([]),
-    revisions: z.array(resourceIdSchema).default([]),
-  })
-  .strict();
-export type VerificationRecord = z.infer<typeof verificationSchema>;
-
 export type ReadResult<T> = { schemaVersion: 1; observedAt: string } & (
-  | { kind: "ok"; value: T }
-  | { kind: "error"; problem: Problem }
+  { kind: "ok"; value: T } | { kind: "error"; problem: Problem }
 );
 export type CommandResult<T extends Json = Json> = {
   schemaVersion: 1;

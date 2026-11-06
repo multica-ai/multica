@@ -1246,9 +1246,6 @@ importers:
       playwright:
         specifier: 1.58.2
         version: 1.58.2
-      ws:
-        specifier: 'catalog:'
-        version: 8.21.0
       zod:
         specifier: 'catalog:'
         version: 4.3.6
@@ -1262,9 +1259,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 25.5.0
-      '@types/ws':
-        specifier: 'catalog:'
-        version: 8.18.1
       eslint:
         specifier: ^9.28.0
         version: 9.39.4(jiti@2.7.0)
