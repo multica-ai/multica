@@ -55,6 +55,7 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import type { UseIssueActionsResult } from "./use-issue-actions";
 import { PluginHookMenuItems, PluginModalMenuItems } from "../../plugins";
 import { useT } from "../../i18n";
+import { IssueConversationAction } from "../../platform/issue-conversation-action";
 
 // Both Dropdown and Context menu wrappers expose an API-compatible surface
 // (variant, inset, onClick, etc.). We bundle the primitives we need into a
@@ -87,6 +88,7 @@ export const contextPrimitives: MenuPrimitives = {
 };
 
 interface IssueActionsMenuItemsProps {
+  showConversationAction?: boolean;
   issue: Issue;
   actions: UseIssueActionsResult;
   primitives: MenuPrimitives;
@@ -108,6 +110,7 @@ export function IssueActionsMenuItems({
   primitives: P,
   onOpenAssignee,
   onDeletedFallbackPath,
+  showConversationAction,
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
@@ -348,6 +351,8 @@ export function IssueActionsMenuItems({
           ? t(($) => $.actions.copy_project_directory_path)
           : t(($) => $.actions.copy_workdir_path)}
       </P.Item>
+
+      {showConversationAction && <IssueConversationAction issue={issue} />}
 
       <P.Separator />
 

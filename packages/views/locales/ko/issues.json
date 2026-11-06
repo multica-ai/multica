@@ -869,7 +869,12 @@
     "remove_parent_issue_success": "상위 태스크를 제거했습니다",
     "add_sub_issue": "하위 태스크 추가...",
     "delete_issue": "태스크 삭제",
-    "mark_duplicate": "중복으로 표시..."
+    "mark_duplicate": "중복으로 표시...",
+    "open_ai_conversation": "AI 대화에서 실행",
+    "conversation_local_device": "로컬",
+    "conversation_unavailable": "이 기기에서 사용할 수 있는 에이전트가 없습니다.",
+    "conversation_create_failed": "대화를 만들지 못했습니다: {{message}}",
+    "conversation_devices_failed": "기기를 불러오지 못했습니다. 메뉴를 다시 열어 주세요."
   },
   "pickers": {
     "custom_property": {

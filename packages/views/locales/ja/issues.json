@@ -869,7 +869,12 @@
     "remove_parent_issue_success": "親タスクを解除しました",
     "add_sub_issue": "サブタスクを追加...",
     "delete_issue": "タスクを削除",
-    "mark_duplicate": "重複としてマーク..."
+    "mark_duplicate": "重複としてマーク...",
+    "open_ai_conversation": "AI 会話で実行",
+    "conversation_local_device": "ローカル",
+    "conversation_unavailable": "このデバイスで利用できるエージェントがありません。",
+    "conversation_create_failed": "会話を作成できませんでした：{{message}}",
+    "conversation_devices_failed": "デバイスを読み込めませんでした。メニューを開き直してください。"
   },
   "pickers": {
     "custom_property": {

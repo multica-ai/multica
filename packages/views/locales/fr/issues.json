@@ -910,7 +910,12 @@
     "remove_parent_issue_success": "Tâche parente retirée",
     "add_sub_issue": "Ajouter une sous-tâche...",
     "delete_issue": "Supprimer la tâche",
-    "mark_duplicate": "Marquer comme doublon..."
+    "mark_duplicate": "Marquer comme doublon...",
+    "open_ai_conversation": "Ouvrir une conversation IA",
+    "conversation_local_device": "Local",
+    "conversation_unavailable": "Aucun agent disponible sur cet appareil.",
+    "conversation_create_failed": "Impossible de créer la conversation : {{message}}",
+    "conversation_devices_failed": "Impossible de charger les appareils. Rouvrez le menu pour réessayer."
   },
   "pickers": {
     "custom_property": {

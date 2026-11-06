@@ -868,7 +868,12 @@
     "remove_parent_issue_success": "已移除父任務",
     "add_sub_issue": "新增子任務...",
     "delete_issue": "刪除任務",
-    "mark_duplicate": "標記為重複..."
+    "mark_duplicate": "標記為重複...",
+    "open_ai_conversation": "前往 AI 對話執行",
+    "conversation_local_device": "本機",
+    "conversation_unavailable": "此裝置上沒有可用的智慧體。",
+    "conversation_create_failed": "建立對話失敗：{{message}}",
+    "conversation_devices_failed": "讀取裝置失敗，請重新開啟選單重試。"
   },
   "pickers": {
     "custom_property": {

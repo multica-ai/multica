@@ -17,15 +17,18 @@ const POLL_MS = 5_000;
  * The account's other devices that are connected and share their
  * conversations over Device link, as this device's daemon sees them.
  */
-export function useLinkedDevices(enabled = true): LinkedDevice[] {
-  const query = useQuery({
+export function useLinkedDevicesQuery(enabled = true) {
+  return useQuery({
     queryKey: ["device-link", "devices"],
-    queryFn: async () => parseWithFallback(await localV2Transport().devices(), linkedDevicesSchema, { devices: [] }, { endpoint: "local.devices" }).devices,
+    queryFn: async () => parseWithFallback<z.infer<typeof linkedDevicesSchema>>(await localV2Transport().devices(), linkedDevicesSchema, { devices: [] }, { endpoint: "local.devices" }).devices,
     enabled,
     refetchInterval: POLL_MS,
     retry: false,
   });
-  return query.data ?? NO_DEVICES;
+}
+
+export function useLinkedDevices(enabled = true): LinkedDevice[] {
+  return useLinkedDevicesQuery(enabled).data ?? NO_DEVICES;
 }
 
 /** A device's display name, falling back to a short form of its ID. */

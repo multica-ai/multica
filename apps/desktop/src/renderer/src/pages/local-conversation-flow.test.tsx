@@ -9,6 +9,7 @@ import layout from "../../../../../../packages/views/locales/zh-Hans/layout.json
 import { LocalConversationFlowPage } from "./local-conversation-flow";
 import { useProjectVisibilityStore } from "../stores/local-conversation-project-visibility";
 import { useConversationLayoutStore } from "../stores/local-conversation-layout";
+import { issueConversationDraftKey, useIssueConversationStore } from "../stores/issue-conversation-store";
 import type { TuttiAgentGuiPanel } from "../components/tutti-agent-gui-panel";
 import type { ComponentProps } from "react";
 import type { LocalHostAvailability } from "../../../shared/local-host-availability";
@@ -28,6 +29,7 @@ vi.mock("sonner", () => ({ toast: { error: mock.error, success: mock.success, in
 vi.mock("@multica/core/auth", () => ({ useAuthStore: (selector: (state: unknown) => unknown) => selector({ user: { id: "user" } }) }));
 vi.mock("@multica/core/paths", () => ({ useCurrentWorkspace: () => ({ id: "workspace" }), useRequiredWorkspaceSlug: () => "test", useWorkspacePaths: () => ({ conversationFlow: () => "/test/conversations", conversationFlowDevice: (id: string) => `/test/conversations/devices/${id}` }) }));
 vi.mock("@multica/core/platform", () => ({ getCurrentSlug: () => "test" }));
+vi.mock("@multica/core/api", () => ({ api: { getBaseUrl: () => "https://api.test" } }));
 vi.mock("@multica/views/navigation", () => ({
   useNavigation: () => { mock.useRoute(); return { pathname: mock.pathname, searchParams: new URLSearchParams({ session: mock.selected }), replace: mock.replace }; },
   AppLink: ({ href, children, ...props }: { href: string; children: ReactNode }) => <a href={href} {...props}>{children}</a>,
@@ -131,6 +133,7 @@ function installDaemon() {
 let qc: QueryClient;
 let source: LocalConversation;
 beforeEach(() => {
+  useIssueConversationStore.setState({ drafts: {}, pending: {} });
   useConversationLayoutStore.setState({ sessionListWidth: 268 });
   useProjectVisibilityStore.setState({ hiddenByScope: {} });
   vi.clearAllMocks(); mock.selected = "source"; mock.pathname = "/test/conversations";
@@ -287,6 +290,22 @@ describe("reading only what the page needs", () => {
 });
 
 describe("Device link", () => {
+  it("passes a task draft only to its target device and clears it after composer acknowledgement", async () => {
+    const scope = { userId: "user", workspaceId: "workspace" };
+    const key = issueConversationDraftKey(scope, "peer-1", "source");
+    const draft = { id: "issue-draft", sessionId: "source", content: "[CHOV-85](mention://workspace-issue/task?workspaceId=workspace) " };
+    useIssueConversationStore.getState().offer(key, draft);
+    const view = render(page());
+    await waitFor(() => expect(mock.panel).toHaveBeenCalled());
+    expect(mock.panel.mock.lastCall?.[0].restoreDraftRequest).toBeNull();
+    mock.pathname = "/test/conversations/devices/peer-1";
+    view.rerender(page());
+    await waitFor(() => expect(mock.panel.mock.lastCall?.[0].restoreDraftRequest).toEqual(draft));
+    act(() => mock.panel.mock.lastCall?.[0].onRestoreDraftApplied(draft.id));
+    await waitFor(() => expect(mock.panel.mock.lastCall?.[0].restoreDraftRequest).toBeNull());
+    expect(useIssueConversationStore.getState().drafts[key]).toBeUndefined();
+  });
+
   it("shows another device's conversations under its own route and title", async () => {
     mock.pathname = "/test/conversations/devices/peer-1"; mock.selected = "";
     transportFor.calls = [];

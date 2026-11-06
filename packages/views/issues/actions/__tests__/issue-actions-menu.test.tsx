@@ -5,6 +5,7 @@ import type { AgentTask, Issue } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enIssues from "../../../locales/en/issues.json";
+import { IssueConversationActionProvider } from "../../../platform/issue-conversation-action";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
@@ -194,6 +195,31 @@ beforeEach(() => {
 });
 
 describe("IssueActionsDropdown", () => {
+  it("inserts the platform action after workdir only for the detail menu", async () => {
+    const Action = ({ issue }: { issue: Issue }) => <div data-testid="conversation-action">{issue.id}</div>;
+    const view = render(wrap(
+      <IssueConversationActionProvider action={Action}>
+        <IssueActionsDropdown issue={mockIssue} showConversationAction trigger={<button data-testid="trigger">Menu</button>} />
+      </IssueConversationActionProvider>,
+    ));
+    fireEvent.click(screen.getByTestId("trigger"));
+    const action = await screen.findByTestId("conversation-action");
+    expect(action).toHaveTextContent(mockIssue.id);
+    const copy = screen.getByText("Copy local workdir path");
+    const child = screen.getByText("Create sub-issue");
+    expect(copy.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(action.compareDocumentPosition(child) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    view.unmount();
+    render(wrap(
+      <IssueConversationActionProvider action={Action}>
+        <IssueActionsDropdown issue={mockIssue} trigger={<button data-testid="trigger">Menu</button>} />
+      </IssueConversationActionProvider>,
+    ));
+    fireEvent.click(screen.getByTestId("trigger"));
+    expect(await screen.findByText("Create sub-issue")).toBeVisible();
+    expect(screen.queryByTestId("conversation-action")).not.toBeInTheDocument();
+  });
+
   it("renders the top-level items when the trigger is clicked", async () => {
     render(
       wrap(

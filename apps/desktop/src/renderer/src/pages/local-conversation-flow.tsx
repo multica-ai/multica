@@ -140,6 +140,7 @@ import {
   type LocalDevice
 } from "../platform/local-device";
 import { deviceName, useLinkedDevices } from "../platform/linked-devices";
+import { issueConversationDraftKey, useIssueConversationStore } from "../stores/issue-conversation-store";
 import { pickRemoteFolder, RemoteFolderPicker } from "./remote-folder-picker";
 import { LocalConversationSessionRow } from "./local-conversation-session-row";
 import { useDocumentTitle } from "../hooks/use-document-title";
@@ -380,6 +381,8 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
     [folderProjects, hiddenProjectIds]
   );
   const selectedId = searchParams.get("session");
+  const issueDraftKey = issueConversationDraftKey(scope, device.id, selectedId ?? "");
+  const issueDraft = useIssueConversationStore((state) => state.drafts[issueDraftKey]);
   const sessions = useLocalConversationPages(
     transport,
     scope,
@@ -1280,7 +1283,7 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
             sideOpen={sideOpen}
             remote={remote}
             locateRequest={locateRequest}
-            referenceDraft={referenceDraft}
+            referenceDraft={referenceDraft ?? issueDraft ?? null}
             factory={factoryCallback}
             focusSequence={focusSequence}
             newConversationRequest={newConversationRequest}
@@ -3205,11 +3208,17 @@ const TuttiAgentGuiPanelBinding33 = observer(
     };
     push: (path: string) => void;
   }) {
+    const device = useLocalDevice();
     const onRestoreDraftAppliedProp40 = usePersistCallback<
       NonNullable<
         React.ComponentProps<typeof TuttiAgentGuiPanel>["onRestoreDraftApplied"]
       >
-    >(() => setReferenceDraft(null));
+    >((id) => {
+      setReferenceDraft(null);
+      if (selectedId) useIssueConversationStore.getState().applied(
+        issueConversationDraftKey({ userId, workspaceId: workspace.id }, device.id, selectedId), id,
+      );
+    });
     const onOpenTaskProp41 = usePersistCallback<
       NonNullable<React.ComponentProps<typeof TuttiAgentGuiPanel>["onOpenTask"]>
     >((id) => {

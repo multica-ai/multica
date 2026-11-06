@@ -869,7 +869,12 @@
     "remove_parent_issue_success": "已移除父任务",
     "add_sub_issue": "添加子任务...",
     "delete_issue": "删除任务",
-    "mark_duplicate": "标记为重复..."
+    "mark_duplicate": "标记为重复...",
+    "open_ai_conversation": "去 AI 会话执行",
+    "conversation_local_device": "本地",
+    "conversation_unavailable": "此设备上没有可用的智能体。",
+    "conversation_create_failed": "创建会话失败：{{message}}",
+    "conversation_devices_failed": "读取设备失败，请重新打开菜单重试。"
   },
   "pickers": {
     "custom_property": {

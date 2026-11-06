@@ -3271,6 +3271,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <TooltipContent side="bottom">{actions.isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}</TooltipContent>
             </Tooltip>
             <IssueActionsDropdown
+              showConversationAction
               issue={issue}
               align="end"
               // When a parent passes `onDelete`, we detect deletion via effect

@@ -911,7 +911,12 @@
     "remove_parent_issue_success": "Removed parent issue",
     "add_sub_issue": "Add sub-issue...",
     "delete_issue": "Delete issue",
-    "mark_duplicate": "Mark as duplicate..."
+    "mark_duplicate": "Mark as duplicate...",
+    "open_ai_conversation": "Go to AI conversation",
+    "conversation_local_device": "Local",
+    "conversation_unavailable": "No available agent on this device.",
+    "conversation_create_failed": "Could not create the conversation: {{message}}",
+    "conversation_devices_failed": "Could not load devices. Reopen the menu to retry."
   },
   "pickers": {
     "custom_property": {

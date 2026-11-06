@@ -27,6 +27,8 @@ import {
 } from "@multica/views/navigation";
 import { getCurrentSlug, subscribeToCurrentSlug } from "@multica/core/platform";
 import { useDesktopUnreadBadge } from "@multica/views/platform";
+import { IssueConversationActionProvider } from "@multica/views/platform";
+import { DesktopIssueConversationAction } from "./issue-conversation-action";
 import { useT } from "@multica/views/i18n";
 import {
   DesktopNavigationProvider,
@@ -258,6 +260,7 @@ export function DesktopShell() {
           window-level overlay (new-workspace flow) triggered by
           IndexRedirect, not a route. */}
       <WorkspaceSlugProvider slug={slug}>
+        <IssueConversationActionProvider action={DesktopIssueConversationAction}>
         <DesktopInboxBridge />
         <div className="flex h-screen bg-app-shell">
           {/* bg-app-shell is the wrapper's non-inset fill, so it also owns the
@@ -297,6 +300,7 @@ export function DesktopShell() {
         {slug && <ModalRegistry />}
         {slug && <SearchCommand showConversationFlow />}
         <WindowOverlay />
+        </IssueConversationActionProvider>
       </WorkspaceSlugProvider>
     </DesktopNavigationProvider>
   );

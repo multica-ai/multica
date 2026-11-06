@@ -63,6 +63,7 @@ vi.mock("@multica/views/navigation", () => ({
 }));
 
 vi.mock("@multica/views/platform", () => ({
+  IssueConversationActionProvider: ({ children }: { children: React.ReactNode }) => children,
   useDesktopUnreadBadge: () => {},
 }));
 

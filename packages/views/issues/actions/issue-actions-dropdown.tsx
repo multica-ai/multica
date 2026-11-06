@@ -15,6 +15,7 @@ import {
 import { AssigneePicker } from "../components/pickers";
 
 interface IssueActionsDropdownProps {
+  showConversationAction?: boolean;
   issue: Issue;
   /** A single React element cloned by Base UI as the trigger (via `render` prop). */
   trigger: ReactElement;
@@ -29,6 +30,7 @@ export function IssueActionsDropdown({
   trigger,
   align = "end",
   onDeletedFallbackPath,
+  showConversationAction,
 }: IssueActionsDropdownProps) {
   const actions = useIssueActions(issue);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
@@ -48,6 +50,7 @@ export function IssueActionsDropdown({
             primitives={dropdownPrimitives}
             onOpenAssignee={() => setAssigneeOpen(true)}
             onDeletedFallbackPath={onDeletedFallbackPath}
+            showConversationAction={showConversationAction}
           />
         </DropdownMenuContent>
       </DropdownMenu>

@@ -1468,11 +1468,13 @@ describe("Multica Agent GUI runtime with native conversation services", () => {
     expect(enqueuedItem(data.request)).not.toHaveProperty("model");
   });
 
-  it("sends selected reference identities to the parent and rejects a foreign workspace before submission", async () => {
+  it.each(["mention picker", "issue menu"])("sends selected reference identities from %s and rejects a foreign workspace before submission", async (source) => {
     const { handle, request } = await setup();
     const content = ["workspace-issue", "agent-session", "agent-target"]
       .map((providerId) =>
-        createRichTextMentionMarkdown({
+        source === "issue menu" && providerId === "workspace-issue"
+          ? `[CHOV-85](mention://workspace-issue/${providerId}-id?${new URLSearchParams({ workspaceId: init.workspaceId })})`
+          : createRichTextMentionMarkdown({
           providerId,
           entityId:
             providerId === "agent-target" ? agent.id : `${providerId}-id`,
