@@ -78,16 +78,10 @@ export function __resetInlineMediaBlobCacheForTests(): void {
 // picked URL, which this client may be unable to load. A caller that treats a
 // load failure as meaningful (the viewer skips broken images) waits it out
 // instead of rendering it.
-//
-// `variant: "preview"` runs the same upgrade for an image's downscaled copy
-// (`preview_url`, `?variant=preview` on the download endpoint): the fresh
-// metadata's `preview_url` replaces `download_url`, and the byte fallback
-// fetches the preview.
 export function useResignedInlineMedia(
   attachmentId: string | undefined,
   pickedUrl: string,
   blobFallback: boolean,
-  variant?: "preview",
 ): { url: string; pending: boolean } {
   const idFromPickedUrl = attachmentIdFromDownloadURL(pickedUrl);
   const resignAttachmentId = attachmentId ?? idFromPickedUrl;
@@ -116,7 +110,7 @@ export function useResignedInlineMedia(
     gcTime: RESIGN_STALE_MS,
   });
 
-  const dl = (variant === "preview" ? fresh?.preview_url : fresh?.download_url) ?? "";
+  const dl = fresh?.download_url ?? "";
   // Accept the fresh URL only when it is an actual upgrade — absolute and no
   // longer the auth-gated API shape (i.e. a signed storage URL the renderer
   // can load natively).
@@ -129,15 +123,14 @@ export function useResignedInlineMedia(
   // signed to give — firing the byte fetch earlier would double-download on
   // every CloudFront / presign client.
   const { data: blob, isError: blobFailed } = useQuery({
-    queryKey: ["attachment-inline-blob", resignAttachmentId, variant ?? "original"],
-    queryFn: () => api.getAttachmentBlob(resignAttachmentId as string, variant),
+    queryKey: ["attachment-inline-blob", resignAttachmentId],
+    queryFn: () => api.getAttachmentBlob(resignAttachmentId as string),
     enabled: needsResign && blobFallback && !!fresh && signedUrl === "",
     staleTime: Infinity,
     gcTime: INLINE_BLOB_GC_MS,
   });
   const isAuthenticated = !!fresh;
-  const blobKey = resignAttachmentId && variant ? `${resignAttachmentId}:${variant}` : resignAttachmentId;
-  const blobUrl = useObjectURL(blobKey, blob, isAuthenticated);
+  const blobUrl = useObjectURL(resignAttachmentId, blob, isAuthenticated);
 
   if (!needsResign) return { url: pickedUrl, pending: false };
   if (signedUrl) return { url: signedUrl, pending: false };
@@ -148,9 +141,9 @@ export function useResignedInlineMedia(
   // previous account's private blob: URL without coupling to logout code.
   if (
     blobUrl &&
-    blobKey &&
+    resignAttachmentId &&
     isAuthenticated &&
-    blobUrlCache.get(blobKey) === blobUrl
+    blobUrlCache.get(resignAttachmentId) === blobUrl
   ) {
     return { url: blobUrl, pending: false };
   }

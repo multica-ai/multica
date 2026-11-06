@@ -46,7 +46,8 @@ const SCENARIOS = {
       ["layout_shift", "Layout shift (sum)"],
       ["images_mounted", "Images mounted"],
       ["originals_served", "Originals fetched"],
-      ["previews_served", "Previews fetched"],
+      ["keystrokes_over_frame", "Keystrokes over 16.7 ms"],
+      ["key_frame_p95_ms", "Keydown to frame p95 (ms)"],
       ["image_bytes_served", "Image bytes fetched"],
       ["js_heap_mb", "JS heap (MB)"],
     ],
@@ -255,7 +256,8 @@ async function measure(ref, label) {
     const measureStart = Date.now();
     let scenarioExit = 0;
     try {
-      run("pnpm", ["exec", "playwright", "test", "--config=playwright.perf.config.ts", ...(scenario.spec ? [scenario.spec] : [])], {
+      run("pnpm", ["exec", "playwright", "test", "--config=playwright.perf.config.ts",
+        `--repeat-each=${process.env.PERF_REPEATS ?? "1"}`, ...(scenario.spec ? [scenario.spec] : [])], {
         cwd: repoRoot,
         env: {
           ...process.env,

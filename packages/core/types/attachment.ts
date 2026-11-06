@@ -52,10 +52,4 @@ export interface Attachment {
    */
   width?: number;
   height?: number;
-  /**
-   * Inline-load URL of a downscaled copy of a large image, with the same
-   * semantics as `download_url` (may be signed and short-lived; never
-   * persist). Absent when the image has no preview — show the original.
-   */
-  preview_url?: string;
 }

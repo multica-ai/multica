@@ -5,7 +5,6 @@ import type { Attachment } from "@multica/core/types";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { cn } from "@multica/ui/lib/utils";
 import { useResignedInlineMedia } from "../../../editor/hooks/use-inline-media-url";
-import { imagePreviewURL } from "../../../editor/utils/image-metadata";
 import { fileTypeLabel, getPreviewKind } from "../../../editor/utils/preview";
 import { fileIcon } from "../../../editor/utils/file-icon";
 
@@ -61,9 +60,8 @@ function FileFace({
   );
 }
 
-// Loads the image's preview when it has one, otherwise the original, so
-// callers keep these few (the sidebar shows three) or lazy (the overview's
-// grid).
+// Loads the original — there is no thumbnail endpoint yet — so callers keep
+// these few (the sidebar shows three) or lazy (the overview's grid).
 function ImageThumbnail({
   attachment,
   className,
@@ -71,14 +69,12 @@ function ImageThumbnail({
   attachment: Attachment;
   className?: string;
 }) {
-  const previewUrl = imagePreviewURL(attachment);
   const picked =
-    previewUrl || attachment.download_url || attachment.markdown_url || attachment.url;
+    attachment.download_url || attachment.markdown_url || attachment.url;
   const { url, pending } = useResignedInlineMedia(
     attachment.id,
     resolvePublicFileUrl(picked) ?? picked,
     true,
-    previewUrl ? "preview" : undefined,
   );
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
 

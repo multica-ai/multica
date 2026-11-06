@@ -89,15 +89,27 @@ The image-heavy thread scenario (MUL-8182) types a comment while a long thread
 of large screenshots loads in the viewport. Image responses are held until the
 first keystroke, so fetching, decoding and laying out the images all land in
 the measured window, which runs with the CPU throttled 4× — a fast workstation
-absorbs this page without dropping a frame. Besides the typing numbers it reports the summed layout
-shift, how many images mounted, and how many originals and previews were
-fetched. It shares the report path with the live-runs scenario, so it only
+absorbs this page without dropping a frame. It reports keydown-to-next-frame
+p95/max, keystrokes over 16.7 ms, long tasks, layout shift, mounted images,
+and fetched bytes. This frame measurement is not INP. It shares the report path with the live-runs scenario, so it only
 runs when selected:
 
 ```bash
 PERF_SCENARIO=image-thread pnpm exec playwright test --config=playwright.perf.config.ts image-heavy-thread.spec.ts
 node scripts/perf-compare.mjs --base origin/main --head HEAD --out perf-report --scenario image-thread
 ```
+
+For a review comparison, set `PERF_SCREENSHOT_PATH` to a real 2880×1800 PNG
+(kept locally, outside Git), `PERF_IMAGE_MODE=known|missing|none`, and
+`PERF_IMAGE_POSITION=start|loaded`. All modes keep the same 37 comments.
+The `loaded` position scrolls through every image before typing at the thread
+bottom. The `missing` mode omits dimensions to represent existing attachments;
+its 16:10 placeholder can shift when the true aspect ratio becomes known.
+`none` is the no-image control. Defaults use generated pixels for CI.
+
+Use `PERF_REPEATS=3` with `perf-compare.mjs` to retain every sample in
+`base.json` / `head.json` and report the median of each numeric metric.
+Use a separate output directory per mode/position.
 
 The floating-chat lifetime regression runs against the same production build:
 

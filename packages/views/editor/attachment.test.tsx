@@ -557,7 +557,7 @@ describe("Attachment — image dispatch", () => {
     await waitFor(() => {
       expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL);
     });
-    expect(getAttachmentBlobMock).toHaveBeenCalledWith(id, undefined);
+    expect(getAttachmentBlobMock).toHaveBeenCalledWith(id);
     expect(createObjectURLMock).toHaveBeenCalledWith(blob);
 
     // The bytes are scheduled for release 5 min after last unmount.
@@ -788,15 +788,12 @@ describe("Attachment — image dispatch", () => {
   });
 });
 
-describe("Attachment — image preview and reserved box (MUL-8182)", () => {
-  const PREVIEW = "https://cdn.example.test/att-1.png.preview.png?Signature=p";
-
-  it("renders the preview inline, lazily, in the box of the original size", () => {
-    const att = makeRecord({ width: 3200, height: 2000, preview_url: PREVIEW });
+describe("Attachment — lazy images and reserved box (MUL-8182)", () => {
+  it("loads the original lazily in the recorded box", () => {
+    const att = makeRecord({ width: 3200, height: 2000 });
     renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
-
     const img = document.querySelector("img")!;
-    expect(img.getAttribute("src")).toBe(PREVIEW);
+    expect(img.getAttribute("src")).toBe(att.download_url);
     expect(img.getAttribute("loading")).toBe("lazy");
     expect(img.getAttribute("decoding")).toBe("async");
     expect(img.getAttribute("width")).toBe("3200");
@@ -807,97 +804,28 @@ describe("Attachment — image preview and reserved box (MUL-8182)", () => {
     expect(figure.style.getPropertyValue("--image-aspect")).toBe("1.6");
   });
 
-  it("opens the original in the viewer, not the preview", () => {
-    const att = makeRecord({ width: 3200, height: 2000, preview_url: PREVIEW });
-    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "View" }));
-
-    const srcs = [...document.querySelectorAll("img")].map((i) => i.getAttribute("src"));
-    expect(srcs).toEqual([PREVIEW, att.download_url]);
-  });
-
-  it("falls back to the original when the preview fails to load", () => {
-    const att = makeRecord({ width: 3200, height: 2000, preview_url: PREVIEW });
-    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
-
-    fireEvent.error(document.querySelector("img")!);
-
-    expect(document.querySelector("img")?.getAttribute("src")).toBe(att.download_url);
-  });
-
-  it("takes size and preview from the resolved record for a markdown image", () => {
-    const att = makeRecord({ width: 1170, height: 2532, preview_url: PREVIEW });
+  it("takes dimensions from the resolved record for markdown images", () => {
+    const att = makeRecord({ width: 1170, height: 2532 });
     resolverState.attachments = [att];
-    renderWithQuery(
-      <Attachment
-        attachment={{ kind: "url", url: att.url, filename: "", forceKind: "image" }}
-      />,
-    );
-
-    const img = document.querySelector("img")!;
-    expect(img.getAttribute("src")).toBe(PREVIEW);
-    expect(img.getAttribute("height")).toBe("2532");
+    renderWithQuery(<Attachment attachment={{ kind: "url", url: att.url, filename: "", forceKind: "image" }} />);
+    expect(document.querySelector("img")?.getAttribute("height")).toBe("2532");
   });
 
-  it("ignores malformed image metadata on an unparsed record", () => {
-    const att = makeRecord({
-      width: -1,
-      height: "big" as unknown as number,
-      preview_url: 42 as unknown as string,
-    });
+  it("ignores malformed dimensions on an unparsed record", () => {
+    const att = makeRecord({ width: -1, height: "big" as unknown as number });
     renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
-
-    const img = document.querySelector("img")!;
-    expect(img.getAttribute("src")).toBe(att.download_url);
-    expect(img.hasAttribute("width")).toBe(false);
+    expect(document.querySelector("img")?.hasAttribute("width")).toBe(false);
   });
 
-  it("holds a placeholder box for an image of unknown size until it loads", () => {
-    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: makeRecord() }} />);
-
+  it("holds an unknown-size placeholder until load or error", () => {
+    const att = makeRecord();
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
     const img = document.querySelector("img")!;
     const figure = img.closest(".image-figure") as HTMLElement;
     expect(figure.hasAttribute("data-pending")).toBe(true);
-    expect(img.hasAttribute("data-loaded")).toBe(false);
-
     fireEvent.load(img);
-
     expect(figure.hasAttribute("data-pending")).toBe(false);
     expect(img.hasAttribute("data-loaded")).toBe(true);
-  });
-
-  it("pulls the preview's bytes, not the original's, when nothing can be signed", async () => {
-    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
-    const id = "11111111-2222-3333-4444-555555555555";
-    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
-    const att = makeRecord({
-      id,
-      url: "https://minio:9000/multica/uploads/ws/shot.png",
-      markdown_url: markdownUrl,
-      download_url: "",
-      width: 3200,
-      height: 2000,
-      preview_url: `/api/attachments/${id}/download?variant=preview`,
-    });
-    resolverState.attachments = [att];
-    getAttachmentMock.mockResolvedValue({ ...att, download_url: `/api/attachments/${id}/download` });
-    getAttachmentBlobMock.mockResolvedValue(new Blob(["preview"], { type: "image/png" }));
-
-    renderWithQuery(
-      <Attachment
-        attachment={{ kind: "url", url: markdownUrl, filename: "shot.png", forceKind: "image" }}
-      />,
-    );
-
-    // Until the upgrade lands, the auth-gated preview path is not loaded —
-    // its 401 would read as a broken preview.
-    expect(document.querySelector("img")?.hasAttribute("src")).toBe(false);
-    await waitFor(() => {
-      expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL);
-    });
-    expect(getAttachmentBlobMock).toHaveBeenCalledTimes(1);
-    expect(getAttachmentBlobMock).toHaveBeenCalledWith(id, "preview");
   });
 });
 

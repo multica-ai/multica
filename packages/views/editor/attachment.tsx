@@ -53,7 +53,7 @@ import {
 import { useDownloadAttachment } from "./use-download-attachment";
 import { AttachmentCard, AttachmentFileCard } from "./attachment-card";
 import { canOpenPreview, getPreviewKind, type PreviewKind } from "./utils/preview";
-import { imageDimensions, imagePreviewURL } from "./utils/image-metadata";
+import { imageDimensions } from "./utils/image-metadata";
 import "./styles/attachment.css";
 
 // Public API
@@ -120,20 +120,16 @@ interface Normalized {
   uploading: boolean;
   width?: number;
   height?: number;
-  /** Downscaled copy an inline image renders instead of the original. */
-  previewUrl?: string;
 }
 
 function recordImageFields(
   record: AttachmentRecord | undefined,
-): Pick<Normalized, "width" | "height" | "previewUrl"> {
+): Pick<Normalized, "width" | "height"> {
   if (!record) return {};
   const dims = imageDimensions(record);
-  const previewUrl = imagePreviewURL(record);
   return {
     width: dims?.width,
     height: dims?.height,
-    previewUrl: previewUrl ? absolutizeMediaURL(previewUrl) : undefined,
   };
 }
 
@@ -191,7 +187,6 @@ function normalize(
     uploading: !!input.uploading,
     width: ownSize ? input.width : fromRecord.width,
     height: ownSize ? input.height : fromRecord.height,
-    previewUrl: input.uploading ? undefined : fromRecord.previewUrl,
   };
 }
 
@@ -321,26 +316,12 @@ export function Attachment({
   // freshly signed URL on clients that can't load the endpoint natively, or —
   // on deployments that have no signed URL to give — to an object URL built
   // from the authenticated byte fetch. Only the image branch renders a native
-  // resource load, so only it opts into that byte fetch — and only for the
-  // bytes it paints: the preview when the image has one, the original once
-  // the preview fails to load.
-  const [previewFailed, setPreviewFailed] = useState(false);
-  const previewUrl =
-    kind === "image" && !previewFailed ? state.previewUrl : undefined;
+  // resource load, so only it opts into that byte fetch.
   const { url: mediaUrl } = useResignedInlineMedia(
     state.attachmentId,
     state.url,
-    kind === "image" && !previewUrl,
+    kind === "image",
   );
-  const previewMedia = useResignedInlineMedia(
-    state.attachmentId,
-    previewUrl ?? "",
-    true,
-    "preview",
-  );
-  // A preview that has not finished upgrading would only fail to load and be
-  // mistaken for a broken preview.
-  const imageSrc = previewUrl ? (previewMedia.pending ? "" : previewMedia.url) : mediaUrl;
   // Object URLs are session-local, so anything that hands a URL to the user or
   // to another surface keeps the durable pick instead.
   const shareUrl = isObjectURL(mediaUrl) ? state.url : mediaUrl;
@@ -400,8 +381,7 @@ export function Attachment({
     return (
       <>
         <ImageAttachmentView
-          src={imageSrc}
-          onError={previewUrl ? () => setPreviewFailed(true) : undefined}
+          src={mediaUrl}
           linkUrl={shareUrl}
           alt={state.filename}
           uploading={state.uploading}
@@ -467,8 +447,6 @@ export function Attachment({
 
 interface ImageAttachmentViewProps {
   src: string;
-  /** Called instead of showing the broken image when `src` fails to load. */
-  onError?: () => void;
   /**
    * URL handed to the user by Copy Link. Splits from `src` only when `src` is
    * a session-local object URL (proxy-mode byte fallback) — pasting a `blob:`
@@ -489,7 +467,6 @@ interface ImageAttachmentViewProps {
 
 function ImageAttachmentView({
   src,
-  onError,
   linkUrl,
   alt,
   uploading,
@@ -523,10 +500,11 @@ function ImageAttachmentView({
   // to it), so its box is reserved up front: from its pixel size when known,
   // otherwise as a fixed-ratio placeholder. Once anything has painted the box
   // follows the image.
-  const [loaded, setLoaded] = useState(false);
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const loaded = !!src && loadedSrc === src;
   const imgRef = useCallback((img: HTMLImageElement | null) => {
-    if (img?.complete && img.naturalWidth > 0) setLoaded(true);
-  }, []);
+    if (img?.complete && img.naturalWidth > 0) setLoadedSrc(src);
+  }, [src]);
   const sized = !!width && !!height;
   const pending = !loaded && !sized && !uploading;
   const sizeStyle = sized
@@ -566,8 +544,8 @@ function ImageAttachmentView({
           data-loaded={loaded || undefined}
           className={cn("image-content", uploading && "image-uploading")}
           draggable={false}
-          onLoad={() => setLoaded(true)}
-          onError={() => (onError ? onError() : setLoaded(true))}
+          onLoad={() => setLoadedSrc(src)}
+          onError={() => setLoadedSrc(src)}
         />
         {!uploading && src && (
           <span

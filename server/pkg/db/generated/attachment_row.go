@@ -20,6 +20,5 @@ func (r CreateAttachmentRow) Attachment() Attachment {
 		TaskID:        r.TaskID,
 		Width:         r.Width,
 		Height:        r.Height,
-		PreviewUrl:    r.PreviewUrl,
 	}
 }

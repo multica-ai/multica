@@ -207,7 +207,6 @@ type Attachment struct {
 	SourceContextID pgtype.UUID        `json:"source_context_id"`
 	Width           pgtype.Int4        `json:"width"`
 	Height          pgtype.Int4        `json:"height"`
-	PreviewUrl      pgtype.Text        `json:"preview_url"`
 }
 
 type Autopilot struct {

@@ -16,7 +16,7 @@
  * report path, and the two must not overwrite each other.
  */
 import { expect, test, type Page } from "@playwright/test";
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import * as fx from "./fixtures/image-heavy-thread";
 
@@ -115,7 +115,17 @@ function emit(report: Record<string, unknown>) {
   const out = process.env.PERF_REPORT_PATH;
   if (out) {
     mkdirSync(dirname(resolve(out)), { recursive: true });
-    writeFileSync(resolve(out), JSON.stringify(report, null, 2));
+    let samples: Record<string, unknown>[] = [];
+    try { samples = JSON.parse(readFileSync(resolve(out), "utf8")).samples ?? []; } catch { /* first sample */ }
+    samples.push(report);
+    const combined = { ...report, samples };
+    for (const key of Object.keys(report)) {
+      if (typeof report[key] !== "number") continue;
+      const values = samples.map((sample) => sample[key]).filter((v): v is number => typeof v === "number").sort((a, b) => a - b);
+      combined[key] = values[Math.floor(values.length / 2)];
+    }
+    combined.status = samples.every((sample) => sample.status === "ok") ? "ok" : "invalid";
+    writeFileSync(resolve(out), JSON.stringify(combined, null, 2));
   }
   test.info().annotations.push({ type: "perf", description: JSON.stringify(report) });
   // eslint-disable-next-line no-console
@@ -127,7 +137,7 @@ test("comment typing stays responsive beside an image-heavy thread", async ({ pa
   const unknownRequests: string[] = [];
   const pageErrors: string[] = [];
   const external: string[] = [];
-  const served = { originals: 0, previews: 0, bytes: 0 };
+  const served = { originals: 0, bytes: 0 };
   const media = fx.mediaBytes();
 
   page.on("pageerror", (error) => pageErrors.push(error.message));
@@ -142,10 +152,17 @@ test("comment typing stays responsive beside an image-heavy thread", async ({ pa
   await context.addInitScript(() => {
     const tasks: number[] = [];
     let shift = 0;
+    const keyFrames: number[] = [];
+    document.addEventListener("keydown", (event) => {
+      if (event.key.length !== 1) return;
+      requestAnimationFrame(() => keyFrames.push(performance.now() - event.timeStamp));
+    });
+
     const w = window as unknown as Record<string, unknown>;
     w.__perfLongTasks = tasks;
+    w.__perfKeyFrames = keyFrames;
     w.__perfShift = () => shift;
-    w.__perfReset = () => { tasks.length = 0; shift = 0; };
+    w.__perfReset = () => { tasks.length = 0; keyFrames.length = 0; shift = 0; };
     const longTasks = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) tasks.push(entry.duration);
     });
@@ -172,9 +189,8 @@ test("comment typing stays responsive beside an image-heavy thread", async ({ pa
     }
     if (url.pathname.startsWith(fx.MEDIA_PREFIX)) {
       await mediaGate;
-      const preview = url.pathname.endsWith(".preview.png");
-      const body = preview ? media.preview : media.original;
-      if (preview) served.previews += 1; else served.originals += 1;
+      const body = media.original;
+      served.originals += 1;
       served.bytes += body.length;
       return route.fulfill({ status: 200, contentType: "image/png", body });
     }
@@ -228,6 +244,21 @@ test("comment typing stays responsive beside an image-heavy thread", async ({ pa
     scroller.scrollTop += offset + 200;
   });
   await nextFrame(page);
+
+  // Load every image in sequence before the second scenario's typing window.
+  // This exercises the decoded images that remain mounted within a long thread.
+  if (fx.POSITION === "loaded") {
+    releaseMedia();
+    if (fx.IMAGE_MODE !== "none") {
+      for (let i = 0; i < fx.IMAGE_COUNT; i += 1) {
+        const image = page.locator(`img[src^="${fx.MEDIA_PREFIX}"]`).nth(i);
+        await image.scrollIntoViewIfNeeded();
+        await expect.poll(() => image.evaluate((img) => (img as HTMLImageElement).complete)).toBe(true);
+      }
+    }
+    await page.locator(`[id="comment-${fx.commentIds.at(-1)}"]`).scrollIntoViewIfNeeded();
+    await nextFrame(page);
+  }
 
   // ---- 2. Focus the composer -------------------------------------------------
   const shell = page.getByTestId("comment-composer-shell");
@@ -319,15 +350,16 @@ test("comment typing stays responsive beside an image-heavy thread", async ({ pa
   };
   const observed = await collect(page.evaluate((prefix) => {
     const w = window as unknown as {
-      __perfDrain: () => void; __perfLongTasks: number[]; __perfShift: () => number;
+      __perfDrain: () => void; __perfLongTasks: number[]; __perfShift: () => number; __perfKeyFrames: number[];
     };
     w.__perfDrain();
     return {
       longTasks: [...w.__perfLongTasks],
       shift: w.__perfShift(),
+      keyFrames: [...w.__perfKeyFrames],
       mounted: [...document.images].filter((img) => img.currentSrc.includes(prefix)).length,
     };
-  }, fx.MEDIA_PREFIX), { longTasks: [] as number[], shift: 0, mounted: 0 });
+  }, fx.MEDIA_PREFIX), { longTasks: [] as number[], keyFrames: [] as number[], shift: 0, mounted: 0 });
   const after = await collect(readMetrics(), {} as Record<string, number>);
   const metricsRead = Object.keys(after).length > 0;
   const deltaMs = (name: string) =>
@@ -338,13 +370,20 @@ test("comment typing stays responsive beside an image-heavy thread", async ({ pa
   if (external.length) invalid.push(`external requests: ${external.join(", ")}`);
   if (pageErrors.length) invalid.push(`page errors: ${pageErrors.join(" | ")}`);
   if (!timedOutAt && !metricsRead) invalid.push("performance metrics unavailable");
-  if (!timedOutAt && served.originals + served.previews === 0) invalid.push("no image was requested");
+  if (!timedOutAt && fx.IMAGE_MODE !== "none" && served.originals === 0) invalid.push("no image was requested");
+  if (observed.keyFrames.length !== fx.TYPING_TEXT.length) invalid.push("missing keydown frame samples");
   const status = timedOutAt ? "timeout" : invalid.length ? "invalid" : "ok";
 
   const longTasks = observed.longTasks;
   emit({
     status, invalid,
     scenario: "image-thread",
+    image_mode: fx.IMAGE_MODE,
+    position: fx.POSITION,
+    real_screenshot: !!process.env.PERF_SCREENSHOT_PATH,
+    keystrokes_over_frame: observed.keyFrames.filter((ms) => ms > 1000 / 60).length,
+    key_frame_p95_ms: Math.round([...observed.keyFrames].sort((a, b) => a - b)[Math.ceil(observed.keyFrames.length * 0.95) - 1] ?? 0),
+    key_frame_max_ms: Math.round(Math.max(0, ...observed.keyFrames)),
     timed_out_at: timedOutAt,
     aborted_after_ms: abortedAfterMs,
     fixture: fx.fixtureDigest(),
@@ -359,7 +398,6 @@ test("comment typing stays responsive beside an image-heavy thread", async ({ pa
     layout_shift: Math.round(observed.shift * 1000) / 1000,
     images_mounted: observed.mounted,
     originals_served: served.originals,
-    previews_served: served.previews,
     image_bytes_served: served.bytes,
     dom_nodes: metricsRead ? Math.round(after.Nodes ?? 0) : null,
     js_heap_mb: metricsRead ? Math.round((after.JSHeapUsedSize ?? 0) / 1e6) : null,
