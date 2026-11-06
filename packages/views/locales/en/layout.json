@@ -92,6 +92,8 @@
     "autopilots": "Auto",
     "switch_workspace": "Switch workspace",
     "invitation_from": "{{name}} invited you",
+    "pin_workspace": "Pin workspace",
+    "unpin_workspace": "Unpin workspace",
     "open_in_new_window": "Open in new window",
     "open_in_new_window_click": "Click",
     "open_in_other_window": "Already open in another window",

@@ -19,6 +19,13 @@ on:
       head:
         description: "Head ref (branch, tag or SHA)"
         required: true
+      scenario:
+        description: "Scenario to measure"
+        type: choice
+        options:
+          - typing-under-live-runs
+          - image-thread
+        default: typing-under-live-runs
 
 # Read-only and without secrets: it builds and runs whatever refs it is given.
 permissions:
@@ -56,7 +63,7 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Compare
-        run: node scripts/perf-compare.mjs --base "${{ inputs.base }}" --head "${{ inputs.head }}" --out perf-report
+        run: node scripts/perf-compare.mjs --base "${{ inputs.base }}" --head "${{ inputs.head }}" --out perf-report --scenario "${{ inputs.scenario }}"
 
       - name: Publish to the job summary
         if: always()

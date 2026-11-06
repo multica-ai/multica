@@ -1,5 +1,6 @@
 "use client";
 
+import { subIssueCreateDefaults } from "@multica/core/issues";
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -194,21 +195,13 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
 
   const openCreateSubIssue = useCallback(() => {
     if (!issueId) return;
-    openModal("create-issue", {
-      parent_issue_id: issueId,
-      parent_issue_identifier: issueIdentifier,
-      ...(issueProjectId ? { project_id: issueProjectId } : {}),
-      // Inherit the parent's assignee (member/agent/squad) so a sub-issue
-      // created from the "Add sub-issue" entry starts with the same owner
-      // (discussion #1728). The modal keys off whether these fields are
-      // present, not their value, so a seed overrides the sticky last-used
-      // assignee it would otherwise fall back to, while omitting both for
-      // an unassigned parent leaves that fallback intact. Seed the two
-      // together — assignee_type is meaningless without assignee_id.
-      ...(issueAssigneeType && issueAssigneeId
-        ? { assignee_type: issueAssigneeType, assignee_id: issueAssigneeId }
-        : {}),
-    });
+    openModal("create-issue", subIssueCreateDefaults({
+      id: issueId,
+      identifier: issueIdentifier,
+      project_id: issueProjectId,
+      assignee_type: issueAssigneeType,
+      assignee_id: issueAssigneeId,
+    }));
   }, [
     openModal,
     issueId,

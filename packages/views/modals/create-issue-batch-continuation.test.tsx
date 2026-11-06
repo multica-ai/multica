@@ -88,6 +88,16 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-test",
 }));
 
+vi.mock("@multica/core/auth", () => {
+  const state = { user: { id: "user-1" } };
+  return {
+    useAuthStore: Object.assign(
+      (selector: (s: typeof state) => unknown) => selector(state),
+      { getState: () => state },
+    ),
+  };
+});
+
 vi.mock("./use-issue-limit-upgrade-prompt", () => ({
   useIssueLimitUpgradePrompt: () => vi.fn(),
 }));
@@ -150,6 +160,14 @@ vi.mock("@multica/core/api", async () => {
   return {
     api: {
       listProperties: mockListProperties,
+      listAgents: async () => [
+        { id: "agent-default", name: "Default Agent", owner_id: "user-1", runtime_id: "runtime-1", archived_at: null },
+        { id: "agent-x", name: "Agent X", owner_id: "user-1", runtime_id: "runtime-1", archived_at: null },
+      ],
+      listMembers: async () => [{ user_id: "user-1", role: "admin" }],
+      listSquads: async () => [],
+      listRuntimes: async () => [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }],
+      listProjects: async () => ({ projects: [] }),
       uploadFile: vi.fn(),
     },
     ApiError,
@@ -186,6 +204,7 @@ vi.mock("../editor", async () => {
         setValue("");
       },
       hasActiveUploads: () => false,
+      focus: vi.fn(),
       insertUploadPlaceholder: () => true,
       settleUploadPlaceholder: () => false,
     }));
@@ -253,8 +272,17 @@ vi.mock("../issues/components", () => ({
   PriorityPicker: ({ onUpdate }: { onUpdate: (u: { priority: string }) => void }) => (
     <button type="button" data-testid="priority-picker" onClick={() => onUpdate({ priority: "high" })} />
   ),
+  PriorityIcon: () => null,
   StagePicker: () => <div data-testid="stage-picker" />,
-  AssigneePicker: () => <div data-testid="assignee-picker" />,
+  AssigneePicker: ({ assigneeId, onUpdate }: {
+    assigneeId: string | null;
+    onUpdate: (u: { assignee_type: "member" | null; assignee_id: string | null }) => void;
+  }) => (
+    <div data-testid="assignee-picker" data-assignee-id={assigneeId ?? "none"}>
+      <button type="button" onClick={() => onUpdate({ assignee_type: null, assignee_id: null })}>Clear assignee</button>
+      <button type="button" onClick={() => onUpdate({ assignee_type: "member", assignee_id: "alice" })}>Assign Alice</button>
+    </div>
+  ),
   StartDatePicker: () => <div data-testid="start-date-picker" />,
   DueDatePicker: () => <div data-testid="due-date-picker" />,
   LabelPicker: () => <div data-testid="label-picker" />,
@@ -407,7 +435,7 @@ beforeEach(() => {
     lastAssigneeType: undefined,
     lastAssigneeId: undefined,
   });
-  useQuickCreateStore.setState({ keepOpen: false });
+  useQuickCreateStore.setState({ keepOpen: false, lastActorType: null, lastActorId: null });
   mockListProperties.mockResolvedValue({ properties: [] });
   const createdIssue = {
     id: "issue-1",
@@ -448,6 +476,49 @@ async function submitAndKeepOpen(user: ReturnType<typeof userEvent.setup>) {
   await waitFor(() => expect(draftState().batchContinuationBaseline).toBeDefined());
   expect(screen.getByPlaceholderText("Issue title")).toHaveValue("");
 }
+
+describe("assignee across create-mode switches", () => {
+  it("prefills the selected agent when manual create started without an assignee", async () => {
+    const user = userEvent.setup();
+    renderUi(<CreateIssueDialog onClose={vi.fn()} initialMode="manual" />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Review payment callback");
+    await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
+    await user.click(await screen.findByRole("button", { name: /Created by/ }));
+    await user.click(await screen.findByRole("button", { name: /^Agent X$/ }));
+    await user.click(screen.getByRole("button", { name: /Switch to Manual/i }));
+    expect(screen.getByTestId("assignee-picker")).toHaveAttribute("data-assignee-id", "agent-x");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({
+      assignee_type: "agent", assignee_id: "agent-x",
+    })));
+  });
+
+  it("preserves an explicit clear over repeated switches and allows assigning again", async () => {
+    const user = userEvent.setup();
+    renderUi(<CreateIssueDialog onClose={vi.fn()} initialMode="manual" data={{ assignee_type: "member", assignee_id: "alice" }} />);
+    await user.click(screen.getByRole("button", { name: "Clear assignee" }));
+    for (let i = 0; i < 2; i++) {
+      await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
+      await screen.findByRole("button", { name: /Created by.*Default Agent/ });
+      await user.click(screen.getByRole("button", { name: /Switch to Manual/i }));
+      expect(screen.getByTestId("assignee-picker")).toHaveAttribute("data-assignee-id", "none");
+    }
+    await user.click(screen.getByRole("button", { name: "Assign Alice" }));
+    await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
+    await user.click(screen.getByRole("button", { name: /Switch to Manual/i }));
+    expect(screen.getByTestId("assignee-picker")).toHaveAttribute("data-assignee-id", "alice");
+  });
+
+  it("keeps an existing manual assignee when another filing agent is selected", async () => {
+    const user = userEvent.setup();
+    renderUi(<CreateIssueDialog onClose={vi.fn()} initialMode="manual" data={{ assignee_type: "member", assignee_id: "alice" }} />);
+    await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
+    await user.click(await screen.findByRole("button", { name: /Created by/ }));
+    await user.click(await screen.findByRole("button", { name: /^Agent X$/ }));
+    await user.click(screen.getByRole("button", { name: /Switch to Manual/i }));
+    expect(screen.getByTestId("assignee-picker")).toHaveAttribute("data-assignee-id", "alice");
+  });
+});
 
 describe("keep-open continuation cleanup", () => {
   it("closes a continuation that was only switched to agent mode as a fresh todo create", async () => {

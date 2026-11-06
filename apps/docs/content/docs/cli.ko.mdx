@@ -172,6 +172,15 @@ multica issue comment list MUL-123 --thread <comment-id> --tail 5 --output json 
 
 목록도 필요한 필드만 받을 수 있습니다: `multica issue list --output json --fields id,identifier,title,status`. 필터링은 CLI에서 이루어지므로 줄어드는 것은 출력과 컨텍스트이고 요청량은 그대로입니다.
 
+마지막 업데이트 시각으로 태스크를 필터링하려면 RFC3339 타임스탬프로 `--updated-since`와 `--updated-until`을 함께 지정하세요. 서버는 현재 `updated_at`이 `since` 이상, `until` 미만인 태스크를 반환합니다: `[since, until)`. 기존 필터, 정렬, 페이지네이션과 함께 사용할 수 있습니다. 페이지를 넘길 때 같은 범위를 유지하세요. 페이지네이션은 스냅샷을 제공하지 않으므로 동시에 업데이트가 발생하면 결과가 달라질 수 있습니다.
+
+```bash
+multica issue list --updated-since 2026-11-05T10:00:00Z \
+  --updated-until 2026-11-05T10:01:00Z \
+  --sort created_at --direction asc --limit 100 --offset 0 \
+  --output json --fields id,workspace_id,project_id,title
+```
+
 ### 깨우기
 
 깨우기는 이벤트가 생기거나 조건이 충족되거나 지정한 시각이 되면 에이전트의 일반 실행을 시작합니다. 전체 규칙은 [태스크 깨우기](/issue-wakeups)를 참고하세요.
@@ -347,7 +356,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 
 | 명령 | 하위 명령 | 용도 | 주요 flag |
 | --- | --- | --- | --- |
-| `issue` | `list` | 태스크 목록 | `--status`, `--priority`, `--assignee`, `--project`, `--metadata`(반복 가능), `--property`(반복 가능, `"이름=값"` 또는 `"Score>=3"`, `"Due<2026-01-01"`, `"Notes~=text"` 같은 비교; `__none__`은 미설정과 일치), `--limit`, `--offset`, `--sort`(`property:<이름 또는 id>` 지원), `--full-id`, `--resolve-properties`(JSON 전용; 저장된 id와 함께 속성, 옵션, 멤버 이름을 반환), `--fields`(JSON 전용. 남길 필드를 쉼표로 구분) |
+| `issue` | `list` | 태스크 목록 | `--status`, `--priority`, `--assignee`, `--project`, `--updated-since` / `--updated-until`(RFC3339 범위, 함께 지정), `--metadata`(반복 가능), `--property`(반복 가능, `"이름=값"` 또는 `"Score>=3"`, `"Due<2026-01-01"`, `"Notes~=text"` 같은 비교; `__none__`은 미설정과 일치), `--limit`, `--offset`, `--sort`(`property:<이름 또는 id>` 지원), `--full-id`, `--resolve-properties`(JSON 전용; 저장된 id와 함께 속성, 옵션, 멤버 이름을 반환), `--fields`(JSON 전용. 남길 필드를 쉼표로 구분) |
 | | `get <id>` | 태스크 하나 확인 | `--resolve-properties`(JSON 전용; 저장된 id와 함께 속성, 옵션, 멤버 이름을 반환) |
 | | `create` | 태스크 생성 | `--title`(필수), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment`(반복 가능), `--property`(반복 가능), `--allow-duplicate`(같은 제목의 닫히지 않은 태스크가 있어도 생성) |
 | | `update <id>` | 태스크 필드 업데이트 | `create`와 같은 종류의 필드에 `--position`, `--no-start`, `--duplicate-of` 추가 |
