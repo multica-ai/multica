@@ -22,7 +22,7 @@ export const ISSUE_IDENTIFIER = "PERF-1";
 export const REPLY_COMMENT_COUNT = 36;
 /** Every fourth reply carries a second screenshot. */
 export const IMAGE_COUNT = 1 + REPLY_COMMENT_COUNT + Math.ceil(REPLY_COMMENT_COUNT / 4);
-/** A desktop screenshot at 2x, and the preview the server derives from it. */
+/** A desktop screenshot at 2x. */
 export const ORIGINAL = { width: 2880, height: 1800 };
 export const TYPING_TEXT = "abcdefghijklmnopqrstuvwxyz".repeat(7).slice(0, 172);
 export const KEY_DELAY_MS = 25;
@@ -142,23 +142,25 @@ function screenshotPNG(width: number, height: number): Buffer {
   ]);
 }
 
-let media: { original: Buffer } | undefined;
-export function mediaBytes(): { original: Buffer } {
+let media: { original: Buffer; alternate?: Buffer } | undefined;
+export function mediaBytes(): { original: Buffer; alternate?: Buffer } {
   media ??= {
     original: process.env.PERF_SCREENSHOT_PATH
       ? readFileSync(process.env.PERF_SCREENSHOT_PATH)
       : screenshotPNG(ORIGINAL.width, ORIGINAL.height),
+    alternate: process.env.PERF_SCREENSHOT_ALT_PATH ? readFileSync(process.env.PERF_SCREENSHOT_ALT_PATH) : undefined,
   };
-  if (media.original.readUInt32BE(16) !== ORIGINAL.width || media.original.readUInt32BE(20) !== ORIGINAL.height) {
+  if ([media.original, media.alternate].filter((b): b is Buffer => !!b).some((b) => b.readUInt32BE(16) !== ORIGINAL.width || b.readUInt32BE(20) !== ORIGINAL.height)) {
     throw new Error("PERF_SCREENSHOT_PATH must be a 2880x1800 PNG screenshot");
   }
   return media;
 }
 
 export function fixtureDigest(): { version: string; sha256: string; bytes: number } {
-  const { original } = mediaBytes();
+  const { original, alternate } = mediaBytes();
   const hash = createHash("sha256")
     .update(JSON.stringify({ version: FIXTURE_VERSION, timeline: buildTimelineEntries(), typing: TYPING_TEXT, position: POSITION }))
-    .update(original);
-  return { version: FIXTURE_VERSION, sha256: hash.digest("hex").slice(0, 16), bytes: original.length };
+    .update(original)
+    .update(alternate ?? Buffer.alloc(0));
+  return { version: FIXTURE_VERSION, sha256: hash.digest("hex").slice(0, 16), bytes: original.length + (alternate?.length ?? 0) };
 }

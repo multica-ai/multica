@@ -8,6 +8,7 @@ function pixelSize(value: unknown): number | undefined {
     ? Math.round(value)
     : undefined;
 }
+
 /** The image's displayed pixel size, when the server recorded it. */
 export function imageDimensions(
   record: Pick<Attachment, "width" | "height">,
@@ -16,4 +17,3 @@ export function imageDimensions(
   const height = pixelSize(record.height);
   return width && height ? { width, height } : undefined;
 }
-

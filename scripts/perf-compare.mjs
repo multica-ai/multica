@@ -33,6 +33,7 @@ const flag = (name, fallback) => {
 const baseRef = flag("base");
 const headRef = flag("head", "HEAD");
 const outDir = resolve(flag("out", join(repoRoot, "perf-report")));
+const buildCache = join(repoRoot, ".turbo", "perf-build-cache");
 const SCENARIOS = {
   "typing-under-live-runs": {
     title: "Comment typing under live runs (MUL-7227)",
@@ -228,7 +229,7 @@ async function measure(ref, label) {
     const buildStart = Date.now();
     const buildLog = execFileSync(
       "pnpm",
-      ["exec", "turbo", "build", "--filter=@multica/web"],
+      ["exec", "turbo", "build", "--filter=@multica/web", `--cache-dir=${buildCache}`],
       { cwd: checkout, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
     );
     process.stdout.write(buildLog);
@@ -325,7 +326,7 @@ function markdown(base, head) {
     `## ${scenario.title}`,
     "",
     usable
-      ? "One sample per ref. This is a report, not a merge gate — read a small difference as noise until a second run says otherwise."
+      ? `${head.samples?.length ?? 1} sample(s) per ref; numeric metrics are medians. This is a report, not a merge gate — small differences may be noise.`
       : `**Not a usable comparison.** base: \`${base.status}\`, head: \`${head.status}\`.`,
     "",
     "| Metric | base | head | Δ | ratio |",

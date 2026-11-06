@@ -827,6 +827,28 @@ describe("Attachment — lazy images and reserved box (MUL-8182)", () => {
     expect(figure.hasAttribute("data-pending")).toBe(false);
     expect(img.hasAttribute("data-loaded")).toBe(true);
   });
+
+  it("restores the placeholder when a reused image changes source", () => {
+    const att = makeRecord();
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    const { rerender } = render(
+      <QueryClientProvider client={client}>
+        <Attachment attachment={{ kind: "record", attachment: att }} />
+      </QueryClientProvider>,
+    );
+    fireEvent.load(document.querySelector("img")!);
+    rerender(
+      <QueryClientProvider client={client}>
+        <Attachment attachment={{
+          kind: "record",
+          attachment: { ...att, id: "att-2", download_url: "https://cdn.example.test/second.png" },
+        }} />
+      </QueryClientProvider>,
+    );
+    expect(document.querySelector(".image-figure")?.hasAttribute("data-pending")).toBe(true);
+  });
 });
 
 describe("Attachment — html dispatch", () => {

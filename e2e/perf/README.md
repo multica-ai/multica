@@ -100,7 +100,8 @@ node scripts/perf-compare.mjs --base origin/main --head HEAD --out perf-report -
 ```
 
 For a review comparison, set `PERF_SCREENSHOT_PATH` to a real 2880×1800 PNG
-(kept locally, outside Git), `PERF_IMAGE_MODE=known|missing|none`, and
+(kept locally, outside Git; `PERF_SCREENSHOT_ALT_PATH` optionally alternates a
+second screenshot), `PERF_IMAGE_MODE=known|missing|none`, and
 `PERF_IMAGE_POSITION=start|loaded`. All modes keep the same 37 comments.
 The `loaded` position scrolls through every image before typing at the thread
 bottom. The `missing` mode omits dimensions to represent existing attachments;

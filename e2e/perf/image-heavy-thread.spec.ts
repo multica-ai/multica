@@ -67,6 +67,13 @@ function responseFor(pathname: string): unknown | undefined {
     case "/api/me": return me;
     case "/api/workspaces": return [workspace];
     case "/api/client-usage": return {};
+    case "/api/issue-view-preferences": return { prefs: { hidden: [], order: [] } };
+    case "/api/issue-views": case "/api/agent-run-counts": case "/api/agent-activity-30d": return [];
+    case "/api/skills": return { skills: [], total: 0 };
+    case "/api/autopilots": return { autopilots: [], total: 0 };
+    case "/api/issues/unread": return { items: [], next_cursor: null };
+    case "/api/inbox/archived/page": return { items: [], next_cursor: null };
+    case `/api/inbox/issues/${fx.ISSUE_ID}/read`: return { count: 0 };
     case "/api/agents": case "/api/runtimes": case "/api/squads":
     case "/api/agent-task-snapshot": case "/api/invitations": case "/api/inbox":
     case "/api/inbox/unread-summary": case "/api/pins": case "/api/chat/sessions":
@@ -118,7 +125,7 @@ function emit(report: Record<string, unknown>) {
     let samples: Record<string, unknown>[] = [];
     try { samples = JSON.parse(readFileSync(resolve(out), "utf8")).samples ?? []; } catch { /* first sample */ }
     samples.push(report);
-    const combined = { ...report, samples };
+    const combined: Record<string, unknown> = { ...report, samples };
     for (const key of Object.keys(report)) {
       if (typeof report[key] !== "number") continue;
       const values = samples.map((sample) => sample[key]).filter((v): v is number => typeof v === "number").sort((a, b) => a - b);
@@ -162,7 +169,13 @@ test("comment typing stays responsive beside an image-heavy thread", async ({ pa
     w.__perfLongTasks = tasks;
     w.__perfKeyFrames = keyFrames;
     w.__perfShift = () => shift;
-    w.__perfReset = () => { tasks.length = 0; keyFrames.length = 0; shift = 0; };
+    w.__perfReset = () => {
+      longTasks.takeRecords();
+      shifts.takeRecords();
+      tasks.length = 0;
+      keyFrames.length = 0;
+      shift = 0;
+    };
     const longTasks = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) tasks.push(entry.duration);
     });
@@ -189,7 +202,8 @@ test("comment typing stays responsive beside an image-heavy thread", async ({ pa
     }
     if (url.pathname.startsWith(fx.MEDIA_PREFIX)) {
       await mediaGate;
-      const body = media.original;
+      const index = Number(/eeee(\d+)/.exec(url.pathname)?.[1] ?? 0);
+      const body = index % 2 && media.alternate ? media.alternate : media.original;
       served.originals += 1;
       served.bytes += body.length;
       return route.fulfill({ status: 200, contentType: "image/png", body });
@@ -217,6 +231,7 @@ test("comment typing stays responsive beside an image-heavy thread", async ({ pa
     fixture: fx.fixtureDigest(),
     page_errors: pageErrors,
     unmocked_requests: unknownRequests,
+    external_requests: external,
     typing_elapsed_ms: null,
     scenario_elapsed_ms: null,
   });
@@ -250,11 +265,14 @@ test("comment typing stays responsive beside an image-heavy thread", async ({ pa
   if (fx.POSITION === "loaded") {
     releaseMedia();
     if (fx.IMAGE_MODE !== "none") {
-      for (let i = 0; i < fx.IMAGE_COUNT; i += 1) {
-        const image = page.locator(`img[src^="${fx.MEDIA_PREFIX}"]`).nth(i);
+      const images = page.locator(`img[src^="${fx.MEDIA_PREFIX}"]`);
+      const count = await images.count();
+      for (let i = 0; i < count; i += 1) {
+        const image = images.nth(i);
         await image.scrollIntoViewIfNeeded();
         await expect.poll(() => image.evaluate((img) => (img as HTMLImageElement).complete)).toBe(true);
       }
+      expect(await images.evaluateAll((nodes) => nodes.every((img) => (img as HTMLImageElement).complete))).toBe(true);
     }
     await page.locator(`[id="comment-${fx.commentIds.at(-1)}"]`).scrollIntoViewIfNeeded();
     await nextFrame(page);
@@ -357,7 +375,7 @@ test("comment typing stays responsive beside an image-heavy thread", async ({ pa
       longTasks: [...w.__perfLongTasks],
       shift: w.__perfShift(),
       keyFrames: [...w.__perfKeyFrames],
-      mounted: [...document.images].filter((img) => img.currentSrc.includes(prefix)).length,
+      mounted: [...document.images].filter((img) => img.src.includes(prefix)).length,
     };
   }, fx.MEDIA_PREFIX), { longTasks: [] as number[], keyFrames: [] as number[], shift: 0, mounted: 0 });
   const after = await collect(readMetrics(), {} as Record<string, number>);
