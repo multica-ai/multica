@@ -2353,7 +2353,9 @@ type CreateAgentTaskParams struct {
 // head_sha stamps the commit under review into the task's context JSONB so the
 // reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run
 // against an OLD head apart from a fresh request against a NEW head (TEN-356).
-// Empty/absent head_sha leaves context NULL unless fresh_rerun is requested.
+// Empty/absent head_sha leaves context NULL unless fresh_rerun or retry_route
+// is requested. retry_route snapshots the exact comment revision and route
+// used by Codex overload recovery; missing evidence fails closed.
 // fresh_rerun disables source session/workdir reuse without losing rerun lineage.
 // Issue-linked tasks never hit quick-create context
 // parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
