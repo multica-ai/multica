@@ -78,6 +78,14 @@ When the previous assignee is an agent with a run underway or waiting to start, 
 
 You can see the handoff and its instructions in the issue's timeline. Open the workflow menu on the project board to view the full flow.
 
+### When an issue moves during a run
+
+An ordinary new run is bound to the issue's status when it is queued. Its own successful status changes update that binding. If someone else moves the issue, the run keeps its previous binding. In a named workflow, or **Default** with handoffs, a status change from that old run is refused with `workflow_step_moved`.
+
+When the run's briefing finds this difference, it shows both the issue's **current step** and the **task's bound step**. It omits the current step's instructions and status-move commands. The run should leave its results or remaining concerns in a comment rather than try another status change. A missing binding on an older task does not mean it is bound to the current step.
+
+If new work is needed, a member with permission to invoke the agent should read the latest issue and decide on a new request. Member-created wakeups and manual reruns still follow their existing permission and queue rules: a wakeup can join an existing run, and a manual rerun can reuse a provider session. Neither is a universal command to accept a move and rebind an old run. The actual task binding determines which step the run works on; starting a fresh session does not change it. See [wakeup continuation](/issue-wakeups#after-wake) for how continued work inherits a binding.
+
 ## Adjust a workflow
 
 A workflow can be shared by several projects. Changes saved in **Settings → Workflows** apply to every project using it. To give one project a different process, duplicate the workflow and select the copy in that project.

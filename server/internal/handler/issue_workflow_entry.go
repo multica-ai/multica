@@ -361,13 +361,20 @@ func (h *Handler) claimProjectWorkflow(ctx context.Context, issue db.Issue, task
 	}
 	in := h.workflowBriefInput(ctx, issue, *def, project)
 	in.LegacyRuntimeRules = legacyRuntimeRules
+	if task != nil && task.WorkflowStep.Valid {
+		in.TaskWorkflowStep = &task.WorkflowStep.String
+	}
 	if !taskRunsForAssignee(issue, task) {
 		in.Observer = true
 		if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
 			in.AssigneeName = h.actorDisplayName(ctx, issue.WorkspaceID, issue.AssigneeType.String, issue.AssigneeID)
 		}
 	}
-	return &TaskProjectWorkflowData{Brief: issueworkflow.Brief(in)}
+	return &TaskProjectWorkflowData{
+		Brief:            issueworkflow.Brief(in),
+		CurrentStatusKey: issue.Status,
+		TaskWorkflowStep: in.TaskWorkflowStep,
+	}
 }
 
 // taskRunsForAssignee reports whether a run works on the issue as its

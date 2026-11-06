@@ -189,11 +189,26 @@ reference (`in_progress` on start, `in_review` on delivery) do not apply.
   assignee and queues no run. If you move the issue into such a step and its
   work is still yours, keep working in this run; ending the run there leaves
   the issue waiting for someone to pick it up.
-- **A run works one step.** A run is bound to the status the issue was at when
-  it was queued, and moves along with your own status changes. If someone else
-  moves the issue while you work, your status changes are refused with
-  `workflow_step_moved`, naming who moved it. Do not retry; comment if
-  something still needs attention.
+- **Read the task's binding as well as the current step.** An ordinary new
+  task binds to the issue's status when queued, and its own successful moves
+  update that binding. An agent-created independent wakeup inherits the
+  registering task's binding (NULL falls back to current status); an automatic
+  retry keeps the parent's binding. A member-created independent wakeup binds
+  to current status, but a joined wakeup keeps its receiving task's binding.
+  In named workflows and Default with handoffs, a known mismatch refuses
+  status changes with `workflow_step_moved`. The claim exposes
+  `project_workflow.current_status_key` and nullable `task_workflow_step`; NULL
+  or an older server's absent field is not proof of a current-step binding.
+  A mismatch brief shows both steps and has no status-move commands. Do not
+  retry the move or execute current-step instructions; comment with results
+  within your task's scope. Ownership of the issue does not override this.
+- **New work needs a new member decision.** Hand off the facts to a member
+  permitted to invoke the agent, who must read the latest issue and decide on
+  a new request. Member wakeups and manual reruns retain existing permission
+  and queue checks. A manual rerun goes through ordinary current-status
+  enqueue and may reuse the provider session; a wakeup may join an old task.
+  Neither is a universal accept-and-rebind command. Use the returned task's
+  actual binding; fresh sessions and workdirs grant no workflow authority.
 - **The assignee owns the step.** Only the issue's assignee gets the step's
   instructions and commands. Any other agent on the issue — mentioned in a
   comment, say — sees the statuses and leaves them to the assignee unless

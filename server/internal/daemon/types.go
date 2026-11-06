@@ -69,7 +69,9 @@ type IssueStatusData struct {
 // Brief is rendered by the server for this run — the assignee's or an
 // observer's — and goes into the per-turn prompt as is.
 type ProjectWorkflowData struct {
-	Brief string `json:"brief"`
+	Brief            string  `json:"brief"`
+	CurrentStatusKey string  `json:"current_status_key"`
+	TaskWorkflowStep *string `json:"task_workflow_step"`
 }
 
 // Task represents a claimed task from the server.

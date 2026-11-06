@@ -732,6 +732,9 @@ type BriefInput struct {
 	ProjectName     string
 	StatusKey       string
 	IssueIdentifier string
+	// TaskWorkflowStep is the claim's saved task binding. Nil means no known
+	// binding (or a preview/timeline without a task), not the current status.
+	TaskWorkflowStep *string
 	// StatusName resolves a catalog key to its display name.
 	StatusName func(key string) string
 	// HandlerName describes who a step hands off to, e.g. "Sentinel" or
@@ -768,14 +771,15 @@ type BriefInput struct {
 // names are kept to one line.
 func Brief(in BriefInput) string {
 	step, _ := in.Workflow.Step(in.StatusKey)
+	stepMoved := in.TaskWorkflowStep != nil && *in.TaskWorkflowStep != in.StatusKey
 	name := func(key string) string {
 		if in.StatusName == nil {
-			return key
+			return briefLine(key)
 		}
 		if n := briefLine(in.StatusName(key)); n != "" {
 			return n
 		}
-		return key
+		return briefLine(key)
 	}
 	var b strings.Builder
 	title := briefLine(in.Workflow.Name)
@@ -798,17 +802,27 @@ func Brief(in BriefInput) string {
 	// An older daemon still states the built-in rules itself, so its brief
 	// keeps the per-step wording rather than add a second in_progress rule.
 	var span handlerlessSpan
-	if !in.Observer && !in.LegacyRuntimeRules {
+	if !stepMoved && !in.Observer && !in.LegacyRuntimeRules {
 		span = in.Workflow.handlerlessSpan(in.StatusKey)
 	}
-	if in.LegacyRuntimeRules {
+	if in.LegacyRuntimeRules && stepMoved {
+		b.WriteString("This workflow replaces the status rules in your runtime instructions: do not set a status to mark progress or delivery in this run.\n")
+	} else if in.LegacyRuntimeRules {
 		b.WriteString("This workflow replaces the status rules in your runtime instructions: use only the status keys below")
 		if !in.Workflow.Has(issuestatus.InReview) {
 			fmt.Fprintf(&b, ", never `%s`", issuestatus.InReview)
 		}
 		b.WriteString(".\n")
 	}
-	if in.Observer {
+	if stepMoved {
+		fmt.Fprintf(&b, "%s — issue current step: %s; this task's bound step: %s.\n",
+			in.IssueIdentifier, statusLabel(name(in.StatusKey), briefLine(in.StatusKey)),
+			statusLabel(name(*in.TaskWorkflowStep), briefLine(*in.TaskWorkflowStep)))
+		b.WriteString("The task binding differs from the issue's current step. Do not change the issue's status in this run or follow the current step's instructions. Leave a comment with results or anything still needing attention within this task's scope.\n")
+		if in.Observer {
+			b.WriteString("You are not its assignee; this mismatch does not grant permission to move the issue.\n")
+		}
+	} else if in.Observer {
 		assignee := "is unassigned"
 		if who := briefLine(in.AssigneeName); who != "" {
 			assignee = "is assigned to " + who
@@ -852,6 +866,11 @@ func Brief(in BriefInput) string {
 			b.WriteString("   ← current")
 		}
 		b.WriteString("\n")
+	}
+	if stepMoved {
+		b.WriteString("\nThe statuses above are workflow background, not moves for this run. A task's own successful status change updates its binding; another actor's move does not. Agent-created wakeups and automatic retries can inherit a source task's binding. This difference alone does not identify what created this task or who moved the issue.\n")
+		b.WriteString("If new work is needed at the current step, hand off the facts to a member permitted to invoke the agent, so they can decide from the latest issue. A new provider session does not authorize a different workflow step.\n")
+		return b.String()
 	}
 	if in.Observer {
 		b.WriteString("\nMoving the issue into a step that hands off reassigns it to that step's handler and starts their run.\n")
