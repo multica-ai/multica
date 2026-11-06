@@ -356,6 +356,7 @@ SET status = 'dispatched',
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
+      AND atq.execution_policy = 'unrestricted'
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
@@ -392,6 +393,7 @@ WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.runtime_id = $1
       AND atq.status = 'dispatched'
+      AND atq.execution_policy = 'unrestricted'
       AND atq.started_at IS NULL
       AND atq.dispatched_at < now() - make_interval(secs => @claim_recovery_secs::double precision)
       AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
@@ -430,6 +432,7 @@ SET status = 'running',
     prepare_lease_expires_at = NULL,
     running_lease_expires_at = now() + make_interval(secs => @running_lease_secs::double precision)
 WHERE id = $1 AND status IN ('dispatched', 'waiting_local_directory')
+  AND execution_policy = 'unrestricted'
 RETURNING *;
 
 -- name: ExtendAgentTaskRunningLease :one
@@ -839,6 +842,7 @@ ORDER BY priority DESC, created_at ASC;
 -- idx_agent_task_queue_claim_candidates so the warm path is cheap.
 SELECT * FROM agent_task_queue
 WHERE runtime_id = $1 AND status = 'queued'
+  AND execution_policy = 'unrestricted'
 ORDER BY priority DESC, created_at ASC;
 
 -- name: ListActiveTasksByIssue :many

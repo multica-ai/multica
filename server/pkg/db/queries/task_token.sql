@@ -5,7 +5,8 @@ RETURNING *;
 
 -- name: GetTaskTokenByHash :one
 SELECT * FROM task_token
-WHERE token_hash = $1 AND expires_at > now();
+WHERE token_hash = $1 AND expires_at > now()
+  AND EXISTS (SELECT 1 FROM agent_task_queue WHERE id = task_token.task_id AND execution_policy = 'unrestricted');
 
 -- name: DeleteTaskTokensByTask :exec
 DELETE FROM task_token WHERE task_id = $1;

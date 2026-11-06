@@ -366,6 +366,11 @@ type RenewTokenResponse struct {
 // so this is safe to call on any cadence; the only thing extra calls cost is
 // one round trip and one cheap SELECT.
 func (c *Client) RenewToken(ctx context.Context) (*RenewTokenResponse, error) {
+	// Dedicated daemon credentials have a fixed operator-managed lifetime and
+	// cannot use the human PAT renewal endpoint.
+	if strings.HasPrefix(c.token, "mdt_") {
+		return &RenewTokenResponse{}, nil
+	}
 	var resp RenewTokenResponse
 	if err := c.postJSON(ctx, "/api/tokens/current/renew", map[string]any{}, &resp); err != nil {
 		return nil, err
@@ -376,7 +381,11 @@ func (c *Client) RenewToken(ctx context.Context) (*RenewTokenResponse, error) {
 // ListWorkspaces fetches all workspaces the authenticated user belongs to.
 func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 	var workspaces []WorkspaceInfo
-	if err := c.getJSON(ctx, "/api/workspaces", &workspaces); err != nil {
+	path := "/api/workspaces"
+	if strings.HasPrefix(c.token, "mdt_") {
+		path = "/api/daemon/workspaces"
+	}
+	if err := c.getJSON(ctx, path, &workspaces); err != nil {
 		return nil, err
 	}
 	return workspaces, nil

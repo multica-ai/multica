@@ -151,6 +151,36 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 }
 
 func cleanupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) error {
+	// The owner-binding delete guard requires its agent to be retired first.
+	var hasBindingTable bool
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.aido_owner_binding') IS NOT NULL`).Scan(&hasBindingTable); err != nil {
+		return err
+	}
+	if hasBindingTable {
+		rows, err := pool.Query(ctx, `SELECT id::text FROM agent WHERE workspace_id = (SELECT id FROM workspace WHERE slug = $1)`, integrationTestWorkspaceSlug)
+		if err != nil {
+			return err
+		}
+		var agentIDs []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			agentIDs = append(agentIDs, id)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		for _, id := range agentIDs {
+			if _, err := pool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, id); err != nil {
+				return err
+			}
+		}
+	}
 	if _, err := pool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, integrationTestWorkspaceSlug); err != nil {
 		return err
 	}

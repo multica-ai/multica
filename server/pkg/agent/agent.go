@@ -22,8 +22,9 @@ type Backend interface {
 
 // ExecOptions configures a single execution.
 type ExecOptions struct {
-	Cwd   string
-	Model string
+	ExecutionPolicy *ExecutionPolicy
+	Cwd             string
+	Model           string
 	// SystemPrompt is consumed only by providers that can pass or safely inline
 	// developer/system instructions. Hermes ACP intentionally ignores it and
 	// relies on cwd-scoped context files such as AGENTS.md instead.

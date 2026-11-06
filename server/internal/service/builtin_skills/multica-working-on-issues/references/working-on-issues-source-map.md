@@ -149,3 +149,12 @@ grep -n 'extractIdentifiers(\|extractClosingIdentifiers(\|derivePRState(' intern
 grep -n 'prevIssue.Status == "backlog"\|func (h \*Handler) shouldEnqueueAgentTask' internal/handler/issue.go
 grep -n 'func notifyParentOfChildDone'       internal/handler/issue_child_done.go
 ```
+
+## External relay quarantine (NEX-1565 candidate)
+
+- `server/migrations/134_external_relay.up.sql`: immutable credential/session origin and `enforce_relay_provenance` sticky task policy trigger.
+- `server/pkg/db/queries/agent.sql`: `ClaimAgentTask`, `ReclaimStaleDispatchedTaskForRuntime`, `StartAgentTask`, `ListQueuedClaimCandidatesByRuntime` exclude restricted work.
+- `server/pkg/db/queries/task_token.sql`: `GetTaskTokenByHash` denies restricted task credentials.
+- `server/internal/middleware/auth.go`: authenticated relay stamp and `externalRelayRoute` allowlist; `daemon_auth.go` and `server/cmd/server/router.go` reject relay PAT before shared human PAT cache insertion.
+- `server/internal/handler/chat.go`: fresh relay sessions, `loadChatSessionForUser` trust boundary and attachment binding denial.
+- `server/internal/handler/external_relay_test.go`, `server/cmd/server/external_relay_test.go`: authenticated source, claim/start, stored-content boundary and alternate authentication regression.

@@ -7,13 +7,12 @@ import (
 	"os"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 const testResolverSlug = "middleware-resolver-test"
-
-const testPendingApplicantEmail = "middleware-pending-applicant@multica.ai"
 
 // openPool returns a connected pgxpool, or skips the test if the database is
 // unreachable. Mirrors the handler package's fixture approach so tests don't
@@ -207,7 +206,7 @@ func TestRequireWorkspaceMemberDistinguishesPendingJoinApplicants(t *testing.T) 
 	var applicantID string
 	if err := pool.QueryRow(ctx,
 		`INSERT INTO "user" (name, email) VALUES ('Middleware Pending Applicant', $1) RETURNING id`,
-		testPendingApplicantEmail,
+		"middleware-pending-applicant-"+uuid.NewString()+"@multica.ai",
 	).Scan(&applicantID); err != nil {
 		t.Fatalf("insert applicant: %v", err)
 	}

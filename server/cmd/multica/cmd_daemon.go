@@ -28,6 +28,31 @@ var daemonCmd = &cobra.Command{
 	Short: "Control the local agent runtime daemon",
 }
 
+var daemonProvisionOwnerCmd = &cobra.Command{
+	Use: "provision-owner", Short: "Create an owner-bound runtime and issue its one-time daemon token",
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		client, err := newAPIClient(cmd)
+		if err != nil {
+			return err
+		}
+		workspaceID, _ := cmd.Flags().GetString("workspace-id")
+		daemonID, _ := cmd.Flags().GetString("daemon-id")
+		provider, _ := cmd.Flags().GetString("provider")
+		name, _ := cmd.Flags().GetString("name")
+		deviceName, _ := cmd.Flags().GetString("device-name")
+		ctx, cancel := cli.APIContext(context.Background())
+		defer cancel()
+		var result map[string]any
+		if err := client.PostJSON(ctx, "/api/daemon/provision-owner", map[string]string{
+			"workspace_id": workspaceID, "daemon_id": daemonID, "provider": provider,
+			"name": name, "device_name": deviceName,
+		}, &result); err != nil {
+			return err
+		}
+		return cli.PrintJSON(os.Stdout, result)
+	},
+}
+
 var daemonStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the local agent runtime daemon",
@@ -76,6 +101,15 @@ var daemonDiskUsageCmd = &cobra.Command{
 }
 
 func init() {
+	pf := daemonProvisionOwnerCmd.Flags()
+	pf.String("workspace-id", "", "Workspace UUID (required)")
+	pf.String("daemon-id", "", "Dedicated daemon UUID (required)")
+	pf.String("provider", "claude", "Runtime provider: claude or codex")
+	pf.String("name", "AIDO dedicated runtime", "Runtime display name")
+	pf.String("device-name", "AIDO dedicated host", "Runtime device label")
+	_ = daemonProvisionOwnerCmd.MarkFlagRequired("workspace-id")
+	_ = daemonProvisionOwnerCmd.MarkFlagRequired("daemon-id")
+	daemonCmd.AddCommand(daemonProvisionOwnerCmd)
 	f := daemonStartCmd.Flags()
 	f.Bool("foreground", false, "Run in the foreground instead of background")
 	f.String("daemon-id", "", "Unique daemon identifier (env: MULTICA_DAEMON_ID)")

@@ -5,14 +5,92 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/redis/go-redis/v9"
 )
+
+func TestRevokePATInvalidatesRESTDaemonAndWebSocketAuth(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test database unavailable")
+	}
+	redisURL := os.Getenv("REDIS_TEST_URL")
+	if redisURL == "" {
+		t.Skip("REDIS_TEST_URL not set")
+	}
+	opts, err := redis.ParseURL(redisURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.DB = 12
+	rdb := redis.NewClient(opts)
+	ctx := context.Background()
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		t.Skipf("redis unavailable: %v", err)
+	}
+	if err := rdb.FlushDB(ctx).Err(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = rdb.FlushDB(context.Background()); _ = rdb.Close() })
+	cache := auth.NewPATCache(rdb)
+	oldCache := testHandler.PATCache
+	testHandler.PATCache = cache
+	t.Cleanup(func() { testHandler.PATCache = oldCache })
+	raw, id := insertTestPAT(t, time.Now().Add(time.Hour))
+	hash := auth.HashToken(raw)
+	cache.Set(ctx, hash, testUserID, time.Hour)
+	req := newRequest(http.MethodDelete, "/api/tokens/"+id, nil)
+	req = withURLParam(req, "id", id)
+	w := httptest.NewRecorder()
+	testHandler.RevokePersonalAccessToken(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("revoke status=%d body=%s", w.Code, w.Body.String())
+	}
+	for _, tc := range []struct {
+		name       string
+		middleware func(http.Handler) http.Handler
+	}{
+		{"REST", middleware.Auth(testHandler.Queries, cache, nil)},
+		{"daemon", middleware.DaemonAuth(testHandler.Queries, cache, nil, nil)},
+		{"WebSocket", middleware.DaemonAuth(testHandler.Queries, cache, nil, nil)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+			r.Header.Set("Authorization", "Bearer "+raw)
+			w := httptest.NewRecorder()
+			tc.middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })).ServeHTTP(w, r)
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestRevokePATCannotRevokeAnotherUsersToken(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test database unavailable")
+	}
+	_, id := insertTestPAT(t, time.Now().Add(time.Hour))
+	req := newRequest(http.MethodDelete, "/api/tokens/"+id, nil)
+	req.Header.Set("X-User-ID", "00000000-0000-4000-8000-000000000001")
+	req = withURLParam(req, "id", id)
+	w := httptest.NewRecorder()
+	testHandler.RevokePersonalAccessToken(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("foreign revoke status=%d body=%s", w.Code, w.Body.String())
+	}
+	var revoked bool
+	if err := testPool.QueryRow(context.Background(), `SELECT revoked FROM personal_access_token WHERE id=$1`, id).Scan(&revoked); err != nil || revoked {
+		t.Fatalf("foreign PAT changed: revoked=%v err=%v", revoked, err)
+	}
+}
 
 // insertTestPAT creates a PAT row for the shared test user with the given
 // expiry and returns (rawToken, patID). Each call generates a fresh raw token

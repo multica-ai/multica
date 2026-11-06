@@ -439,6 +439,10 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
+			if session.IsExternalRelay {
+				writeError(w, http.StatusForbidden, "attachments are unavailable in quarantined relay sessions")
+				return
+			}
 			params.ChatSessionID = session.ID
 		}
 

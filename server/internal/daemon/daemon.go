@@ -3303,8 +3303,19 @@ func skillRefFromBundle(bundle SkillData) SkillRefData {
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
 	secrets := task.ChatSecrets
 	defer func() {
-		for i := range secrets { secrets[i].Value = "" }
+		for i := range secrets {
+			secrets[i].Value = ""
+		}
 	}()
+	// Reject before repo checkout, hooks, credentials, or backend discovery.
+	if err := agent.CheckExecutionPolicy(task.ExecutionPolicy); err != nil {
+		taskLog.Warn("task admission denied", "task_id", task.ID, "reason", "execution_policy_denied")
+		return TaskResult{
+			Status:        "blocked",
+			Comment:       "execution_policy_denied: " + err.Error(),
+			FailureReason: taskfailure.ReasonAgentBlocked.String(),
+		}, nil
+	}
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
 	// CLI would otherwise silently fall back to the user-global config — a
@@ -3725,6 +3736,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 	execOpts := agent.ExecOptions{
+		ExecutionPolicy:           task.ExecutionPolicy,
 		Cwd:                       env.WorkDir,
 		Model:                     model,
 		ThreadName:                deriveTaskThreadName(task),
@@ -3980,6 +3992,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 // executeAndDrain runs a backend, drains its message stream (forwarding to the
 // server), and waits for the final result.
 func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID string) (agent.Result, int32, error) {
+	// Keep the same gate on retries and session fallback, independent of provider.
+	if err := agent.CheckExecutionPolicy(opts.ExecutionPolicy); err != nil {
+		return agent.Result{}, 0, err
+	}
 	// Wrap the caller's ctx so the idle watchdog (below) can interrupt both
 	// the agent subprocess (via the ctx passed to backend.Execute) AND the
 	// drain loop with a single cancel. Without this layer the backend would
