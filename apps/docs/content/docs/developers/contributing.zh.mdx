@@ -184,6 +184,13 @@ make start
 
 `make db-reset` 会删除并重建当前 `POSTGRES_DB`，且会拒绝连接远程数据库。操作前检查 `.env` 或 `.env.worktree`，确认目标数据库正确。
 
+## 提交 GitHub Issue
+
+- **[功能建议](https://github.com/multica-ai/multica/blob/main/.github/ISSUE_TEMPLATE/feature_request.yml)：** 说明**问题（Problem）**和**目标（Goal）**。高层方案（Proposal）、替代方案（Alternatives）和截图（Screenshots）均为可选；无需先设计好解决方案。
+- **[Bug 报告](https://github.com/multica-ai/multica/blob/main/.github/ISSUE_TEMPLATE/bug_report.yml)：** 分别说明**问题**、**预期行为**和**复现步骤**。如果偶发，说明尝试过的操作和发生频率。截图、日志和环境信息均为可选。
+
+选择受影响的功能区域，方便分派报告；Bug 报告还需选择部署方式。提交 Issue 时截图可选，UI 或交互 PR 的强制截图规则不适用于问题报告。
+
 ## 提交前检查
 
 - 阅读根目录 `AGENTS.md` 和相关子目录说明；
@@ -191,7 +198,18 @@ make start
 - 代码注释使用英文；
 - 不提交 `.env`、令牌、构建产物或本机路径；
 - 使用 `feat(scope)`、`fix(scope)`、`docs` 等 conventional commit；
-- 在 PR 中写清行为变化和实际运行的验证命令。
+
+### PR 提交要求
+
+使用 [PR 模板](https://github.com/multica-ai/multica/blob/main/.github/PULL_REQUEST_TEMPLATE.md)，并遵守[贡献要求](https://github.com/multica-ai/multica/blob/main/CONTRIBUTING.md#pull-request-requirements)：
+
+1. **问题（Problem）：** 说明要解决的具体问题、受影响的人，以及问题为什么重要。
+2. **目标（Goal）：** 说明改动希望达成的结果。
+3. **方案（Proposal）：** 说明高层设计，以及它为什么能达成目标。让没有太多项目背景的读者也能看懂，尽量少写实现细节。
+4. **替代方案（Alternatives，可选）：** 有助于理解方案时，简要说明其他方案和未选择它们的原因。
+5. **截图（Screenshots）：** UI 或交互改动必须附上实际运行应用的截图，展示受影响的页面和状态，强烈建议提供 before/after 对比；新页面提供改动后的截图。不涉及 UI 或交互影响时，填写 "N/A" 并说明原因。
+
+**涉及 UI 或交互改动却没有截图的 PR，默认拒绝。** 在补齐截图前，评审者应要求修改或关闭 PR。缺少问题、目标或高层方案说明的 PR，同样不具备评审条件。
 
 ## 接下来
 
