@@ -1696,8 +1696,7 @@ func isACPSessionErrorCode(code int) bool {
 
 // isACPSessionNotFound reports whether err is the agent rejecting a
 // session id it no longer knows. Runtimes signal this with codes and
-// wording that vary — Hermes says "Session not found" under -32603
-// (Internal error), Kiro puts "No session found with id ..." in
+// wording that vary — Kiro puts "No session found with id ..." in
 // `data` under -32603, and kimi-cli raises invalid_params (-32602)
 // with {"session_id": "Session not found"} in `data` for every
 // unknown-session path (src/kimi_cli/acp/server.py), Reasonix says
@@ -1707,6 +1706,8 @@ func isACPSessionErrorCode(code int) bool {
 // wording is discriminating and all of them are matched. The wording check
 // still carries the decision: -32000 is a generic server-error code, and a
 // transient failure reported under it must not read as a lost session.
+// Hermes no longer reports a lost session in words: at resume time see
+// acpDataDetailsNotFound, at prompt time hermesResumeSessionLost.
 func isACPSessionNotFound(err error) bool {
 	var rpcErr *acpRPCError
 	if !errors.As(err, &rpcErr) {
