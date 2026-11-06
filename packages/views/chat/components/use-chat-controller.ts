@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { getCurrentWsId } from "@multica/core/platform";
-import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
+import { agentListOptions, memberListOptions, workspaceListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { canAssignAgent } from "../../issues/components/pickers/assignee-picker";
 import { api, dispatchReasonCode } from "@multica/core/api";
@@ -34,7 +34,7 @@ import {
   useSetChatSessionProject,
   useSetChatSessionArchived,
 } from "@multica/core/chat/mutations";
-import { useChatStore } from "@multica/core/chat";
+import { useChatStore, resolveChatAgent, workspaceDefaultChatAgentId } from "@multica/core/chat";
 import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
 import {
   enqueuePendingChatTask,
@@ -203,7 +203,7 @@ const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
  * currently on screen — which gates auto-mark-read so a background overlay
  * doesn't silently clear unread state the user hasn't actually seen.
  */
-export function useChatController(opts?: { isActive?: boolean }) {
+export function useChatController(opts?: { isActive?: boolean; intentSessionId?: string | null; intentAgentId?: string | null }) {
   const isActive = opts?.isActive ?? true;
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
@@ -329,11 +329,13 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const setSessionProject = useSetChatSessionProject();
   const setArchived = useSetChatSessionArchived();
 
+  const { data: workspaces = [], isSuccess: workspacesLoaded } = useQuery(workspaceListOptions());
+  const workspace = workspaces.find((item) => item.id === wsId);
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
-  const availableAgents = agents.filter(
+  const availableAgents = agentsLoaded && membersLoaded ? agents.filter(
     (a) => !a.archived_at && canAssignAgent(a, user?.id, memberRole),
-  );
+  ) : [];
   // `availableAgents` is only trustworthy once BOTH queries above succeeded:
   // the permission filter reads the member role, so agents-without-members
   // misreports a public_to agent as unavailable. Consumers that must tell
@@ -355,13 +357,18 @@ export function useChatController(opts?: { isActive?: boolean }) {
     : null;
   const isAgentArchived = !!sessionAgent?.archived_at;
 
-  // Resolve selected agent: open session's agent → stored preference → first
-  // available. New chats have no session, so they fall through to the picker.
-  const activeAgent =
-    sessionAgent ??
-    availableAgents.find((a) => a.id === selectedAgentId) ??
-    availableAgents[0] ??
-    null;
+  const resolutionSessionId = activeSessionId ?? opts?.intentSessionId ?? null;
+  const resolutionSession = sessions.find((session) => session.id === resolutionSessionId);
+  const activeAgent = resolveChatAgent({
+    agents,
+    availableAgents,
+    agentsSettled: agentsLoaded && membersLoaded,
+    sessionId: resolutionSessionId,
+    sessionAgentId: resolutionSession?.agent_id ?? null,
+    explicitAgentId: opts?.intentAgentId,
+    selectedAgentId,
+    defaultAgentId: workspacesLoaded ? workspaceDefaultChatAgentId(workspace?.settings) : null,
+  });
   const isAgentRuntimeBound = !!activeAgent && hasAgentRuntime(activeAgent);
 
   // A session outlives the permission that created it. The agent can be flipped

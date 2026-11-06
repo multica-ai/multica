@@ -57,6 +57,7 @@ import {
   SettingsTab,
   type SettingsSaveStatus,
 } from "./settings-layout";
+import { WorkspaceDefaultChatAgent } from "./workspace-default-chat-agent";
 import { useAutoSave } from "./use-auto-save";
 
 interface WorkspaceDetailsDraft {
@@ -449,6 +450,8 @@ export function WorkspaceTab() {
               </IconButton>
             </span>
           </SettingsRow>
+
+          <WorkspaceDefaultChatAgent workspace={workspace} userId={user?.id ?? null} role={currentMember?.role} />
 
           <SettingsRow
             anchor="issue-prefix"

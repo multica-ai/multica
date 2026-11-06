@@ -438,24 +438,45 @@ UPDATE workspace SET
     name = COALESCE($2, name),
     description = COALESCE($3, description),
     context = COALESCE($4, context),
-    settings = COALESCE($5, settings),
-    repos = COALESCE($6, repos),
-    issue_prefix = COALESCE($7, issue_prefix),
-    avatar_url = COALESCE($8, avatar_url),
+    -- The top-level field is the only default-agent write intent. Old clients
+    -- replace other settings, but cannot overwrite this key with a stale copy.
+    -- Every RHS reads the locked row, including after a concurrent writer.
+    settings = CASE
+        WHEN $5::boolean OR $6::jsonb IS NOT NULL THEN
+            (CASE WHEN $6::jsonb IS NOT NULL
+                THEN $6::jsonb
+                WHEN jsonb_typeof(settings) = 'object' THEN settings
+                ELSE '{}'::jsonb
+            END - 'default_chat_agent_id')
+            || CASE WHEN $5::boolean THEN
+                CASE WHEN $7::text IS NULL THEN '{}'::jsonb
+                    ELSE jsonb_build_object('default_chat_agent_id', $7::text)
+                END
+                WHEN jsonb_typeof(settings) = 'object' AND settings ? 'default_chat_agent_id'
+                    THEN jsonb_build_object('default_chat_agent_id', settings->'default_chat_agent_id')
+                ELSE '{}'::jsonb
+            END
+        ELSE settings
+    END,
+    repos = COALESCE($8, repos),
+    issue_prefix = COALESCE($9, issue_prefix),
+    avatar_url = COALESCE($10, avatar_url),
     updated_at = now()
 WHERE id = $1
 RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed
 `
 
 type UpdateWorkspaceParams struct {
-	ID          pgtype.UUID `json:"id"`
-	Name        pgtype.Text `json:"name"`
-	Description pgtype.Text `json:"description"`
-	Context     pgtype.Text `json:"context"`
-	Settings    []byte      `json:"settings"`
-	Repos       []byte      `json:"repos"`
-	IssuePrefix pgtype.Text `json:"issue_prefix"`
-	AvatarUrl   pgtype.Text `json:"avatar_url"`
+	ID                      pgtype.UUID `json:"id"`
+	Name                    pgtype.Text `json:"name"`
+	Description             pgtype.Text `json:"description"`
+	Context                 pgtype.Text `json:"context"`
+	DefaultChatAgentPresent bool        `json:"default_chat_agent_present"`
+	Settings                []byte      `json:"settings"`
+	DefaultChatAgentID      pgtype.Text `json:"default_chat_agent_id"`
+	Repos                   []byte      `json:"repos"`
+	IssuePrefix             pgtype.Text `json:"issue_prefix"`
+	AvatarUrl               pgtype.Text `json:"avatar_url"`
 }
 
 func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams) (Workspace, error) {
@@ -464,7 +485,9 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		arg.Name,
 		arg.Description,
 		arg.Context,
+		arg.DefaultChatAgentPresent,
 		arg.Settings,
+		arg.DefaultChatAgentID,
 		arg.Repos,
 		arg.IssuePrefix,
 		arg.AvatarUrl,

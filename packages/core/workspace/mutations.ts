@@ -168,3 +168,18 @@ export function useRemoveAgentMcpServer(agentId: string) {
   return useAgentMcpMutation(agentId, (serverId: string) =>
     api.removeAgentMcpServer(agentId, serverId));
 }
+
+export function useSetDefaultChatAgent(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (agentId: string | null) => api.updateWorkspace(workspaceId, {
+      default_chat_agent_id: agentId,
+    }),
+    onSuccess: (updated) => {
+      qc.setQueryData<Workspace[]>(workspaceKeys.list(), (old) =>
+        old?.map((workspace) => workspace.id === updated.id ? updated : workspace),
+      );
+    },
+    onError: () => { void qc.invalidateQueries({ queryKey: workspaceKeys.list() }); },
+  });
+}

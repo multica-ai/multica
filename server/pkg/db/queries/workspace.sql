@@ -49,7 +49,26 @@ UPDATE workspace SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
     context = COALESCE(sqlc.narg('context'), context),
-    settings = COALESCE(sqlc.narg('settings'), settings),
+    -- The top-level field is the only default-agent write intent. Old clients
+    -- replace other settings, but cannot overwrite this key with a stale copy.
+    -- Every RHS reads the locked row, including after a concurrent writer.
+    settings = CASE
+        WHEN sqlc.arg('default_chat_agent_present')::boolean OR sqlc.narg('settings')::jsonb IS NOT NULL THEN
+            (CASE WHEN sqlc.narg('settings')::jsonb IS NOT NULL
+                THEN sqlc.narg('settings')::jsonb
+                WHEN jsonb_typeof(settings) = 'object' THEN settings
+                ELSE '{}'::jsonb
+            END - 'default_chat_agent_id')
+            || CASE WHEN sqlc.arg('default_chat_agent_present')::boolean THEN
+                CASE WHEN sqlc.narg('default_chat_agent_id')::text IS NULL THEN '{}'::jsonb
+                    ELSE jsonb_build_object('default_chat_agent_id', sqlc.narg('default_chat_agent_id')::text)
+                END
+                WHEN jsonb_typeof(settings) = 'object' AND settings ? 'default_chat_agent_id'
+                    THEN jsonb_build_object('default_chat_agent_id', settings->'default_chat_agent_id')
+                ELSE '{}'::jsonb
+            END
+        ELSE settings
+    END,
     repos = COALESCE(sqlc.narg('repos'), repos),
     issue_prefix = COALESCE(sqlc.narg('issue_prefix'), issue_prefix),
     avatar_url = COALESCE(sqlc.narg('avatar_url'), avatar_url),

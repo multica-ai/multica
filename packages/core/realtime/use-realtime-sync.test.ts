@@ -608,7 +608,7 @@ describe("applyWorkspaceUpdatedToCache", () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: issueKeys.all(wsId),
     });
-    expect(invalidate).not.toHaveBeenCalledWith({
+    expect(invalidate).toHaveBeenCalledWith({
       queryKey: workspaceKeys.list(),
     });
     expect(
@@ -619,20 +619,21 @@ describe("applyWorkspaceUpdatedToCache", () => {
   it("does not invalidate issue cache when only non-prefix fields change", () => {
     const qc = createQueryClient();
     qc.setQueryData<Workspace[]>(workspaceKeys.list(), [
-      workspace({ issue_prefix: "TES", name: "Old name" }),
+      workspace({ issue_prefix: "TES", name: "Old name", settings: { default_chat_agent_id: "authorized-default", old: true } }),
     ]);
     const invalidate = vi.spyOn(qc, "invalidateQueries");
 
     applyWorkspaceUpdatedToCache(qc, {
-      workspace: workspace({ issue_prefix: "TES", name: "New name" }),
+      workspace: workspace({ issue_prefix: "TES", name: "New name", settings: { newer: true } }),
     });
 
     expect(invalidate).not.toHaveBeenCalledWith({
       queryKey: issueKeys.all(wsId),
     });
-    expect(invalidate).not.toHaveBeenCalledWith({
+    expect(invalidate).toHaveBeenCalledWith({
       queryKey: workspaceKeys.list(),
     });
+    expect(qc.getQueryData<Workspace[]>(workspaceKeys.list())?.[0]?.settings).toEqual({ default_chat_agent_id: "authorized-default", newer: true });
     expect(qc.getQueryData<Workspace[]>(workspaceKeys.list())?.[0]?.name).toBe(
       "New name",
     );

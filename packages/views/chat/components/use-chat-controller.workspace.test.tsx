@@ -1,14 +1,20 @@
 import { useLayoutEffect, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, render, screen, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createChatStore, registerChatStore } from "@multica/core/chat";
+import { createChatStore, registerChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { setCurrentWorkspace } from "@multica/core/platform";
-import type { ChatSession, Project, StorageAdapter } from "@multica/core/types";
+import type { Agent, Attachment, Workspace, ChatSession, Project, StorageAdapter } from "@multica/core/types";
+import { ChatWindow } from "./chat-window";
 import { useChatController } from "./use-chat-controller";
 
 const route = vi.hoisted(() => ({ workspaceId: "ws-source", isActive: true }));
 const data = vi.hoisted(() => ({
+  agents: [] as Agent[],
+  workspaces: [] as Workspace[],
+  agentsLoaded: true,
+  membersLoaded: true,
+  sessionsLoaded: true,
   sessions: {} as Record<string, ChatSession[]>,
   projects: {} as Record<string, Project[]>,
 }));
@@ -21,7 +27,7 @@ vi.mock("@multica/core/auth", () => ({
     selector({ user: { id: "user-1" } }),
 }));
 vi.mock("@multica/core/agents", () => ({
-  isAgentRuntimeBound: () => false,
+  isAgentRuntimeBound: () => true,
   useAgentPresenceDetail: () => ({ availability: "online" }),
   useCustomizeConversationStartersHref: () => null,
   useWorkspaceAgentAvailability: () => "available",
@@ -29,13 +35,23 @@ vi.mock("@multica/core/agents", () => ({
 vi.mock("../../common/use-app-foreground", () => ({
   useAppForeground: () => true,
 }));
-vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "x" }) }));
+vi.mock("../../i18n", () => ({ useLocale: () => "en", useT: () => ({ t: () => "x" }) }));
+vi.mock("./chat-input", () => ({ ChatInput: ({ agentName }: { agentName?: string }) => <input data-testid="quick-agent" data-agent={agentName ?? "none"} /> }));
+vi.mock("./chat-empty-state", () => ({ EmptyState: () => null }));
+vi.mock("./chat-window-messages", () => ({ ChatWindowMessages: () => null }));
+vi.mock("./use-chat-context-items", () => ({ useChatContextItems: () => [] }));
+vi.mock("./use-chat-open-reveal", () => ({ useChatOpenReveal: () => ({ contentReady: true, markContentReady: () => {} }) }));
+vi.mock("./use-chat-resize", () => ({ useChatResize: () => ({ renderWidth: 400, renderHeight: 500, boundsReady: true }) }));
+vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
   useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
     const wsId = queryKey[1] as string;
+    if (queryKey[0] === "workspaces" && queryKey[1] === "list") return { data: data.workspaces, isSuccess: true };
+    if (queryKey.includes("agents")) return { data: data.agents, isSuccess: data.agentsLoaded };
+    if (queryKey.includes("members")) return { data: [{ user_id: "user-1", role: "owner" }], isSuccess: data.membersLoaded };
     if (queryKey.includes("sessions")) {
-      return { data: data.sessions[wsId] ?? [], isSuccess: true };
+      return { data: data.sessions[wsId] ?? [], isSuccess: data.sessionsLoaded };
     }
     if (queryKey[0] === "projects") {
       return { data: data.projects[wsId] ?? [], isSuccess: true };
@@ -84,6 +100,11 @@ describe("useChatController workspace rehydration", () => {
   }
 
   beforeEach(async () => {
+    data.agents = [];
+    data.workspaces = [];
+    data.agentsLoaded = true;
+    data.membersLoaded = true;
+    data.sessionsLoaded = true;
     route.workspaceId = "ws-source";
     route.isActive = true;
     data.sessions = { "ws-source": [sourceSession], "ws-target": [targetSession] };
@@ -164,4 +185,92 @@ describe("useChatController workspace rehydration", () => {
     expect(storage.getItem("multica:chat:selectedProjectId:target")).toBeNull();
     expect(storage.getItem("multica:chat:activeSessionId:source")).toBe(sourceSession.id);
   });
+  function prepareDefaults() {
+    data.agents = ["first", "chosen", "other"].map((id) => ({ id, name: id, owner_id: "user-1", runtime_id: "runtime" } as Agent));
+    data.workspaces = [
+      { id: "ws-source", settings: { default_chat_agent_id: "chosen" } },
+      { id: "ws-target", settings: { default_chat_agent_id: "other" } },
+    ] as unknown as Workspace[];
+    store.getState().setActiveSession(null);
+    store.getState().setOpen(true);
+    store.getState().setInputDraft(DRAFT_NEW_SESSION, "unsent text");
+    store.getState().addInputDraftAttachment(DRAFT_NEW_SESSION, { id: "attachment", filename: "draft.txt" } as Attachment);
+  }
+
+  it("wires the same fallback into main Chat and quick-chat without changing drafts, preferences or sessions", () => {
+    prepareDefaults();
+    data.projects["ws-source"] = [{ id: "kept-project", workspace_id: "ws-source" } as Project];
+    store.getState().setSelectedProjectId("kept-project");
+    const draft = store.getState().inputDrafts;
+    const attachments = store.getState().inputDraftAttachments;
+    const { result, rerender } = renderHook(() => useChatController(), { wrapper });
+    const window = render(<ChatWindow />, { wrapper });
+    expect(result.current.activeAgent?.id).toBe("chosen");
+    expect(screen.getByTestId("quick-agent")).toHaveAttribute("data-agent", "chosen");
+    screen.getByTestId("quick-agent").focus();
+    data.workspaces[0] = { ...data.workspaces[0]!, settings: { default_chat_agent_id: "other" } };
+    rerender(); window.rerender(<ChatWindow />);
+    expect(screen.getByTestId("quick-agent")).toHaveFocus();
+    expect(result.current.activeAgent?.id).toBe("other");
+    expect(screen.getByTestId("quick-agent")).toHaveAttribute("data-agent", "other");
+    expect(store.getState().selectedAgentId).toBeNull();
+    expect(store.getState().selectedProjectId).toBe("kept-project");
+    expect(store.getState().activeSessionId).toBeNull();
+    expect(store.getState().inputDrafts).toBe(draft);
+    expect(store.getState().inputDraftAttachments).toBe(attachments);
+    act(() => store.getState().setSelectedAgentId("chosen"));
+    expect(result.current.activeAgent?.id).toBe("chosen");
+    expect(screen.getByTestId("quick-agent")).toHaveAttribute("data-agent", "chosen");
+    data.sessions["ws-source"] = [session("live", "ws-source")];
+    data.agents.push({ ...data.agents[0]!, id: "agent-1", name: "session agent" });
+    act(() => store.getState().setActiveSession("live"));
+    expect(result.current.activeAgent?.id).toBe("agent-1");
+    const beforeURLSync = renderHook(() => useChatController({ intentSessionId: null }), { wrapper });
+    expect(beforeURLSync.result.current.activeAgent?.id).toBe("agent-1");
+    expect(screen.getByTestId("quick-agent")).toHaveAttribute("data-agent", "session agent");
+    data.workspaces[0] = { ...data.workspaces[0]!, settings: {} };
+    rerender(); window.rerender(<ChatWindow />);
+    expect(store.getState().activeSessionId).toBe("live");
+    expect(result.current.activeAgent?.id).toBe("agent-1");
+    expect(store.getState().inputDrafts).toBe(draft);
+  });
+
+  it("waits for member qualification and pending session/URL intent even when the default is already loaded", () => {
+    prepareDefaults();
+    data.membersLoaded = false;
+    const { result, rerender } = renderHook(() => useChatController(), { wrapper });
+    const window = render(<ChatWindow />, { wrapper });
+    expect(result.current.activeAgent).toBeNull();
+    expect(screen.getByTestId("quick-agent")).toHaveAttribute("data-agent", "none");
+    data.membersLoaded = true;
+    data.sessionsLoaded = false;
+    act(() => store.getState().setActiveSession("pending"));
+    expect(result.current.activeAgent).toBeNull();
+    expect(screen.getByTestId("quick-agent")).toHaveAttribute("data-agent", "none");
+    act(() => store.getState().setActiveSession(null));
+    const explicit = renderHook(() => useChatController({ intentAgentId: "loading-url" }), { wrapper });
+    expect(explicit.result.current.activeAgent).toBeNull();
+    const pendingURLSession = renderHook(() => useChatController({ intentSessionId: "pending-url" }), { wrapper });
+    expect(pendingURLSession.result.current.activeAgent).toBeNull();
+    data.agentsLoaded = false;
+    rerender(); window.rerender(<ChatWindow />);
+    expect(result.current.activeAgent).toBeNull();
+    expect(screen.getByTestId("quick-agent")).toHaveAttribute("data-agent", "none");
+  });
+
+  it("resolves workspace defaults in the current workspace and safely falls back after access loss", async () => {
+    prepareDefaults();
+    const { result, rerender } = renderHook(() => useChatController(), { wrapper });
+    expect(result.current.activeAgent?.id).toBe("chosen");
+    await act(async () => setCurrentWorkspace("target", "ws-target"));
+    route.workspaceId = "ws-target";
+    act(() => store.getState().setActiveSession(null));
+    rerender();
+    expect(result.current.activeAgent?.id).toBe("other");
+    data.agents = data.agents.filter((agent) => agent.id !== "other");
+    rerender();
+    expect(result.current.activeAgent?.id).toBe("first");
+    expect(store.getState().selectedAgentId).toBeNull();
+  });
+
 });
