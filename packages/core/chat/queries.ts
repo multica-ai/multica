@@ -23,6 +23,11 @@ import type {
  */
 export const QUICK_ACTIONS_PENDING_TIMEOUT_MS = 12_000;
 
+// Sessions, pinned agents, pending tasks, and the running indicator explicitly
+// bind requests to the workspace UUID in their query key. Other session/task
+// queries still use ApiClient's current workspace header, which callers must
+// keep aligned with the resource's workspace and any wsId in the query key.
+
 export const chatKeys = {
   all: (wsId: string) => ["chat", wsId] as const,
   /** Full sessions list (active + archived); the dropdown splits locally. */
