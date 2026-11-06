@@ -1,10 +1,10 @@
 # Contributing Guide
 
-This guide documents pull request requirements and the local development workflow for contributors working on the Multica codebase.
+This guide documents issue and pull request requirements and the local development workflow for contributors working on the Multica codebase.
 
 It covers:
 
-- pull request requirements and review evidence
+- issue templates, pull request requirements, and review evidence
 - first-time setup
 - environments: starting, inspecting, stopping and deleting them
 - day-to-day development in the main checkout
@@ -28,6 +28,23 @@ other work — you agree to condition 2 of the [Multica License](LICENSE):
   as deemed necessary.
 
 See the [LICENSE](LICENSE) file for the full terms.
+
+## Opening an Issue
+
+Choose the form that fits your report:
+
+- **[Feature request](.github/ISSUE_TEMPLATE/feature_request.yml):** Explain the
+  **Problem** and **Goal**. A high-level **Proposal**, **Alternatives**, and
+  **Screenshots** are optional; you can raise a problem without designing its
+  solution.
+- **[Bug report](.github/ISSUE_TEMPLATE/bug_report.yml):** Describe the
+  **Problem**, **Expected behavior**, and **Steps to reproduce**. For intermittent
+  bugs, explain what you tried and how often it happens. Screenshots, logs, and
+  environment details are optional supporting information.
+
+Select the affected area so we can route the report. Bug reports also ask for
+the deployment type. Screenshots are optional for issues; the mandatory
+screenshot rule below applies to PRs that change UI or interactions.
 
 ## Pull Request Requirements
 
