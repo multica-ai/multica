@@ -208,7 +208,14 @@ function unescapeLabel(label: string): string {
 }
 
 function extractInlineRefs(rawContent: string): InlineRef[] {
-  if (!rawContent) return [];
+  // Every supported image or file-card form has one of these markers. Most
+  // timeline comments have none, so rebuilding a sequence need not parse them.
+  if (
+    !rawContent ||
+    (!rawContent.includes("![") &&
+      !rawContent.includes("!file[") &&
+      !/<img\b/i.test(rawContent))
+  ) return [];
   const tree = fromMarkdown(rawContent);
   const refs: InlineRef[] = [];
   type Node = typeof tree | (typeof tree.children)[number];

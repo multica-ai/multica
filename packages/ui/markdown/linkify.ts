@@ -219,7 +219,8 @@ export function findMarkdownLinkRanges(text: string): CodeRange[] {
   const ranges: CodeRange[] = []
   // Reference destinations are already links. Wrapping their URLs again
   // corrupts the definition before the Markdown renderer resolves images.
-  const pending: Nodes[] = [fromMarkdown(text)]
+  // Even multiline labels and definitions in containers must contain `]:`.
+  const pending: Nodes[] = text.includes(']:') ? [fromMarkdown(text)] : []
   while (pending.length > 0) {
     const node = pending.pop()!
     if (node.type === 'definition') {
