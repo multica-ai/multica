@@ -1,10 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { createChatStore, registerChatStore, useChatStore } from "@multica/core/chat";
 import { chatKeys } from "@multica/core/chat/queries";
 import type { Attachment, TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
+import enIssues from "../../locales/en/issues.json";
 import enChat from "../../locales/en/chat.json";
 import zhHansAgents from "../../locales/zh-Hans/agents.json";
 import zhHansChat from "../../locales/zh-Hans/chat.json";
@@ -50,7 +52,11 @@ vi.mock("react-virtuoso", () => ({
 
 import { ChatMessageList } from "./chat-message-list";
 
-const TEST_RESOURCES = { en: { chat: enChat } };
+beforeEach(() => registerChatStore(createChatStore({ storage: {
+  getItem: () => null, setItem: () => {}, removeItem: () => {},
+} })));
+
+const TEST_RESOURCES = { en: { chat: enChat, issues: enIssues } };
 const TASK_ID = "6af44cbe-80ab-4dfe-b07d-bd3cfd588f4d";
 
 function taskMsg(
@@ -957,5 +963,99 @@ describe("ChatMessageList onboarding starter cards", () => {
       await screen.findByRole("button", { name: "Get a board up in minutes" }),
     ).toBeEnabled();
     expect(screen.getByRole("button", { name: "Later chip" })).toBeEnabled();
+  });
+});
+
+
+describe("ChatMessageList reply selections", () => {
+  function fixture() {
+    Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: 1024 });
+    Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: 768 });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 10, 600, 400));
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", { configurable: true, value: () => new DOMRect(20, 20, 100, 20) });
+    const saved = () => useChatStore.getState().inputDraftAnnotations.session ?? [];
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList messages={[
+            { id: "source", chat_session_id: "session", task_id: null, created_at: "2026-11-05T00:00:00Z", role: "assistant", content: "First **bold line**\n\nSecond `code` line" },
+            { id: "user", chat_session_id: "session", task_id: null, created_at: "2026-11-05T00:00:00Z", role: "user", content: "User draft" },
+          ]} pendingTask={null} availability={undefined} annotationDraftKey="session" />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+    return { ...view, saved };
+  }
+
+  function select(first: Node, last = first) {
+    const range = document.createRange();
+    range.setStart(first, 0); range.setEnd(last, last.textContent!.length);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges(); selection.addRange(range);
+    fireEvent.pointerUp(last.parentElement!);
+  }
+
+  it("edits notes beside visible multiline selections before confirming consecutive annotations", async () => {
+    const { container, saved } = fixture();
+    const first = container.querySelector('strong')!.firstChild!;
+    const last = container.querySelector('code')!.nextSibling!;
+    select(first, last);
+    expect(window.getSelection()!.toString()).toContain("bold line");
+    fireEvent.click(screen.getByText("Add to reply"));
+    expect(saved()).toEqual([]);
+    const note = (await screen.findByRole("textbox", { name: "Comment" }));
+    expect(screen.getByRole("button", { name: "Add annotation" })).toBeDisabled();
+    fireEvent.change(note, { target: { value: "First note\nwith details" } });
+    fireEvent(document, new Event("selectionchange"));
+    expect(note).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
+    expect(saved()[0]).toMatchObject({ quote: "bold line\n\nSecond code line", note: "First note\nwith details" });
+    const user = container.querySelector('[data-chat-reply-content="user"] p')!.firstChild!;
+    select(user);
+    fireEvent.click(screen.getByText("Add to reply"));
+    fireEvent.change((await screen.findByRole("textbox", { name: "Comment" })), { target: { value: "Second note" } });
+    fireEvent.keyDown((await screen.findByRole("textbox", { name: "Comment" })), { key: "Enter" });
+    expect(saved()).toHaveLength(2);
+    expect(saved()[1]).toMatchObject({ quote: "User draft", note: "Second note" });
+    fireEvent.click(screen.getByRole("button", { name: "Edit annotation 1" }));
+    const edit = await screen.findByRole("textbox", { name: "Comment" });
+    expect(edit).toHaveValue("First note\nwith details");
+    fireEvent.change(edit, { target: { value: "Revised first note" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save annotation" }));
+    expect(saved()[0]!.note).toBe("Revised first note");
+  });
+
+  it("cancels an unconfirmed note with Escape or outside press and keeps IME Enter in the editor", async () => {
+    const { container, saved } = fixture();
+    const first = container.querySelector('strong')!.firstChild!;
+    select(first);
+    fireEvent.click(screen.getByText("Add to reply"));
+    const input = (await screen.findByRole("textbox", { name: "Comment" }));
+    fireEvent.change(input, { target: { value: "Unconfirmed" } });
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    expect(saved()).toEqual([]);
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByRole("textbox", { name: "Comment" })).toBeNull();
+    select(first);
+    fireEvent.click(screen.getByText("Add to reply"));
+    expect((await screen.findByRole("textbox", { name: "Comment" }))).toHaveValue("");
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("textbox", { name: "Comment" })).toBeNull();
+    expect(saved()).toEqual([]);
+  });
+
+  it("dismisses on Escape, collapsed selection, and outside press; rejects cross-message selections", () => {
+    const { container, saved } = fixture();
+    const first = container.querySelector('strong')!.firstChild!;
+    const user = container.querySelector('[data-chat-reply-content="user"] p')!.firstChild!;
+    const button = () => screen.queryByText("Add to reply");
+    select(first); expect(button()).not.toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" }); expect(button()).toBeNull();
+    select(first); window.getSelection()!.removeAllRanges();
+    fireEvent(document, new Event("selectionchange")); expect(button()).toBeNull();
+    select(first); fireEvent.pointerDown(document.body); expect(button()).toBeNull();
+    select(first, user); expect(button()).toBeNull();
+    expect(saved()).toEqual([]);
   });
 });

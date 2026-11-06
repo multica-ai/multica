@@ -1,6 +1,6 @@
 import { render, screen, waitFor, cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CommentSelectionBubble } from "./comment-selection-bubble";
+import { TextSelectionBubble } from "./text-selection-bubble";
 
 beforeEach(() => {
   Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: 1024 });
@@ -23,14 +23,14 @@ function fixture(tops: number[], right = 1024) {
     return range;
   });
   const view = render(<>{ranges.map((range, i) =>
-    <CommentSelectionBubble key={i} range={range} source={source} owner="test" markerRanges={ranges}>
+    <TextSelectionBubble key={i} range={range} source={source} owner="test" markerRanges={ranges}>
       <button>{i + 1}</button>
-    </CommentSelectionBubble>,
+    </TextSelectionBubble>,
   )}</>);
   return { geometry, source, dispose: () => { view.unmount(); source.remove(); } };
 }
 
-// Real Floating UI middleware, with only browser geometry supplied by jsdom.
+// 使用真实 Floating UI 中间件，仅补齐 jsdom 缺少的浏览器几何信息。
 describe("annotation marker layout", () => {
   it("keeps a visible quote's marker visible at the viewport's right edge", async () => {
     const { dispose } = fixture([100]);
@@ -81,13 +81,13 @@ describe("annotation editor layout", () => {
     range.selectNodeContents(source);
     range.getBoundingClientRect = () => new DOMRect(420, 100, 100, 20);
     vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(320);
-    const view = render(<CommentSelectionBubble range={range} source={source} owner="test">
+    const view = render(<TextSelectionBubble range={range} source={source} owner="test">
       <textarea aria-label="Annotation note" />
-    </CommentSelectionBubble>);
+    </TextSelectionBubble>);
     try {
       const input = await screen.findByRole("textbox", { name: "Annotation note" });
-      // Centering on the quote alone would put the editor at x=310, over
-      // Inbox's list. Its reference clipping ancestors provide the boundary.
+      // 只按选区居中会把编辑器放到 x=310，盖住收件箱列表。
+      // 使用原文所在裁剪容器作为浮层边界。
       await waitFor(() => expect(parseFloat(input.parentElement!.style.left)).toBe(408));
     } finally { view.unmount(); panel.remove(); }
   });

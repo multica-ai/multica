@@ -4,14 +4,14 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { autoUpdate, computePosition, flip, hide, offset, shift } from "@floating-ui/dom";
 
-/** Match the description's EditorBubbleMenu geometry for readonly selections. */
-export function CommentSelectionBubble({ range, source, children, owner, markerRanges, onPositioned }: {
+/** 只读选区沿用任务描述中 EditorBubbleMenu 的定位方式。 */
+export function TextSelectionBubble({ range, source, children, owner, markerRanges, onPositioned }: {
   range: Range;
   source: HTMLElement;
   children: ReactNode;
   owner: string;
   markerRanges?: Range[];
-  /** Called after the popup has a visible, usable position. */
+  /** 浮层定位完成且可见后调用。 */
   onPositioned?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -27,9 +27,8 @@ export function CommentSelectionBubble({ range, source, children, owner, markerR
     let revision = 0;
     const update = () => {
       const currentRevision = ++revision;
-      // Keep visibility tied to the real quote, not a zero-width point outside
-      // the scroll container. Markers move horizontally but never clamp/flip
-      // vertically: doing so piles unrelated annotations at the viewport edge.
+      // 根据原文选区判断可见性，避免把滚动区域外的批注挤到视口边缘。
+      // 标记只调整横向位置，纵向仍跟随各自的原文。
       computePosition(anchor, element, {
         strategy: "fixed",
         placement: marker ? "right-start" : "top",
@@ -59,15 +58,14 @@ export function CommentSelectionBubble({ range, source, children, owner, markerR
         if (element.style.visibility === "visible") onPositioned?.();
       });
     };
-    // Sidebar transitions and font/content reflow can move a Range without
-    // resizing its source element or triggering a window resize.
+    // 侧栏动画和字体重排可能移动选区，却不会触发元素或窗口尺寸变化。
     const cleanup = autoUpdate(anchor, element, update, { animationFrame: true });
     return () => { active = false; cleanup(); };
   }, [range, source, marker, markerRanges, onPositioned]);
 
   return createPortal(
     <div ref={ref} data-reply-annotation-overlay={owner}
-      style={{ position: "fixed", zIndex: marker ? 20 : 50, visibility: "hidden", width: "max-content" }}>
+      style={{ position: "fixed", zIndex: 50, visibility: "hidden", width: "max-content" }}>
       {children}
     </div>,
     document.body,

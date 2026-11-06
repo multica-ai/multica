@@ -20,12 +20,13 @@ const TEST_RESOURCES = { en: { common: enCommon, chat: enChat } };
 // a ref-driven fake the tests can steer. The thread-list stub stays
 // interactive: selecting a thread is the user action that must supersede a
 // pending `?agent=` intent.
+const annotationReadiness = vi.hoisted(() => ({ hasMessages: false }));
 vi.mock("./components/chat-message-list", () => ({
-  ChatMessageList: () => <div>chat-message-list</div>,
+  ChatMessageList: ({ onRevealed }: { onRevealed?: () => void }) => <div>chat-message-list<button onClick={onRevealed}>reveal-messages</button></div>,
   ChatMessageSkeleton: () => <div>chat-message-skeleton</div>,
 }));
 vi.mock("./components/chat-input", () => ({
-  ChatInput: () => <div>chat-input</div>,
+  ChatInput: ({ onEditAnnotation }: { onEditAnnotation?: unknown }) => <div>chat-input<button disabled={!onEditAnnotation}>edit-annotation</button></div>,
 }));
 vi.mock("./components/chat-thread-list", () => ({
   ChatThreadList: ({
@@ -145,7 +146,7 @@ vi.mock("./components/use-chat-controller", async () => {
       pendingTask: null,
       pendingTaskId: null,
       showSkeleton: false,
-      hasMessages: false,
+      hasMessages: annotationReadiness.hasMessages,
       firstItemIndex: 0,
       hasOlderMessages: false,
       isFetchingOlderMessages: false,
@@ -243,6 +244,7 @@ function renderPage(search: string, { strict = false } = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  annotationReadiness.hasMessages = false;
   storeRef.current = { activeSessionId: null };
   storeListeners.clear();
   availableAgentsRef.current = [agent];
@@ -437,6 +439,18 @@ describe("ChatPage ?agent= deep link", () => {
     expect(mockStartNewChat).toHaveBeenCalledTimes(1);
     expect(replace).toHaveBeenCalledWith("/acme/chat");
     expect(screen.getByText("chat-input")).toBeInTheDocument();
+  });
+});
+
+
+describe("ChatPage annotation source readiness", () => {
+  it("waits for the conversation to be revealed before offering source editing", () => {
+    storeRef.current = { activeSessionId: "session-a" };
+    annotationReadiness.hasMessages = true;
+    renderPage("session=session-a");
+    expect(screen.getByRole("button", { name: "edit-annotation" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "reveal-messages" }));
+    expect(screen.getByRole("button", { name: "edit-annotation" })).toBeEnabled();
   });
 });
 
