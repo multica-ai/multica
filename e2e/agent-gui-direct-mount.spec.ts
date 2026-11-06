@@ -392,3 +392,30 @@ test("slash host commands survive capability refresh and use the existing settin
     await page.screenshot({ path: `.tmp/agent-gui-direct/slash-${theme}.png` });
   }
 });
+
+for (const theme of ["light", "dark"] as const) {
+  test(`initialization leaves loading presentation to the host (${theme})`, async ({
+    page
+  }) => {
+    await page.goto("/tutti-agent-gui/direct.html?holdStartup");
+    if (theme === "dark") await page.locator("#theme").click();
+    await page.locator("#toggle").click();
+    const roots = page.getByTestId("agent-gui-root");
+    await expect(roots).toHaveCount(2);
+    await expect(roots.first()).toHaveAttribute("data-theme", theme);
+    // Both main and side hosts reserve their size without a second loading UI.
+    for (const root of await roots.all()) {
+      await expect(root).toHaveJSProperty("childElementCount", 0);
+      expect((await root.boundingBox())!.height).toBeGreaterThan(800);
+    }
+    await page.evaluate(() =>
+      (window as unknown as { releaseStartup(): void }).releaseStartup()
+    );
+    await expect(page.getByText("Reply in main-conversation")).toBeVisible();
+    await expect(page.getByText("Reply in side-conversation")).toBeVisible();
+    await page.locator("#toggle").click();
+    await expect(roots).toHaveCount(0);
+    await page.locator("#toggle").click();
+    await expect(page.getByText("Reply in main-conversation")).toBeVisible();
+  });
+}

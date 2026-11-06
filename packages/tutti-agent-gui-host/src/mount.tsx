@@ -4,7 +4,6 @@ import "@fontsource-variable/inter";
 import "@fontsource-variable/inter/wght-italic.css";
 import "@fontsource-variable/source-serif-4";
 import "@fontsource-variable/source-serif-4/wght-italic.css";
-import { AgentGUIStartupShell } from "@tutti-os/agent-gui/startup-shell";
 import { Button } from "@tutti-os/ui-system/components";
 import {
   Component,
@@ -164,6 +163,7 @@ function AgentGuiMountRender({
     if (element && !element.dataset.theme)
       applyAgentGuiAppearance(element, initial);
   });
+  // The host owns loading until onRendered; reserve space without standalone navigation skeletons.
   return (
     <div
       ref={refProp1}
@@ -193,9 +193,7 @@ function AgentGuiMountRender({
             />
           </AgentGuiErrorBoundary>
         </Rendered>
-      ) : (
-        <AgentGUIStartupShell loadingLabel="Loading Agent GUI" />
-      )}
+      ) : null}
     </div>
   );
 }

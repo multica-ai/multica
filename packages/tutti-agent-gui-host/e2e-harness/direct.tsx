@@ -60,6 +60,15 @@ function snapshot(
     ]
   } as unknown as AgentGuiInitSnapshot;
 }
+// Hold real initialization so the startup phase can be inspected deterministically.
+let releaseStartup: (() => void) | undefined;
+const startupGate = new URLSearchParams(location.search).has("holdStartup")
+  ? new Promise<void>((resolve) => {
+      releaseStartup = resolve;
+    })
+  : Promise.resolve();
+Object.assign(window, { releaseStartup: () => releaseStartup?.() });
+
 const storage = new Map<string, string>();
 const hostActions: { instance: string; method: string; params: unknown }[] = [];
 Object.assign(window, { hostActions });
@@ -98,6 +107,7 @@ function service(id: string, theme: "light" | "dark", sidePane: boolean) {
           pending: {}
         };
       case "storage.read":
+        await startupGate;
         return storage.get(params.key!) ?? null;
       case "storage.write":
         storage.set(params.key!, params.value!);
