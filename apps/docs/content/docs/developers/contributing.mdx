@@ -205,19 +205,18 @@ make start
 - Write code comments in English.
 - Do not commit `.env`, tokens, build artifacts, or local paths.
 - Use conventional commits such as `feat(scope)`, `fix(scope)`, or `docs`.
-- Describe behavior changes and the verification commands actually run in the PR.
 
 ### Pull request requirements
 
 Use the [PR template](https://github.com/multica-ai/multica/blob/main/.github/PULL_REQUEST_TEMPLATE.md) and follow the [contribution requirements](https://github.com/multica-ai/multica/blob/main/CONTRIBUTING.md#pull-request-requirements):
 
-1. **Problem:** Explain the concrete problem, who is affected, and the expected behavior. Include reproduction steps or a specific example where relevant.
-2. **Proposal and tradeoffs:** Describe the approach, why you chose it, the alternatives considered, and why you rejected each one. If there is no meaningful alternative, explain why.
-3. **UI or interaction evidence:** Attach screenshots from the running app showing the affected screens and states. Before/after comparisons are strongly preferred. For a new screen with no before state, explain that and include the after screenshot. Recordings may supplement screenshots, but do not replace them. If there is no UI or interaction impact, write "N/A" and explain why.
+1. **Problem:** Describe the concrete problem, who is affected, and why it matters.
+2. **Goal:** State the intended outcome of the change.
+3. **Proposal:** Explain the high-level design and why it achieves the goal. Make it understandable to a reader without much project background. Keep implementation details to a minimum.
+4. **Alternatives (optional):** When useful, briefly describe other approaches and why you did not choose them.
+5. **Screenshots:** For UI or interaction changes, attach screenshots from the running app showing the affected screens and states. Before/after comparisons are strongly preferred; for a new screen, include the after screenshot. If there is no UI or interaction impact, write "N/A" and explain why.
 
-**UI or interaction PRs without screenshots are rejected by default.** Reviewers should request changes or close the PR until screenshots are provided. Missing problem statements, proposals, or explanations of alternatives also make a PR unready for review.
-
-Include verification steps, commands actually run, results, and anything not tested with the reason. AI-assisted contributions follow the same requirements: the author must understand the change, explain the design, and verify it. Generated code or an AI transcript does not replace the rationale or evidence.
+**UI or interaction PRs without screenshots are rejected by default.** Reviewers should request changes or close the PR until screenshots are provided. Missing problem statements, goals, or high-level proposals also make a PR unready for review.
 
 ## Next steps
 

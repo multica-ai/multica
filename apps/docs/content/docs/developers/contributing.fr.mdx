@@ -205,19 +205,18 @@ make start
 - Rédigez les commentaires de code en anglais.
 - Ne committez pas `.env`, des jetons, des artefacts de build ni des chemins locaux.
 - Utilisez des conventional commits tels que `feat(scope)`, `fix(scope)` ou `docs`.
-- Dans la PR, décrivez les changements de comportement et les commandes de vérification réellement exécutées.
 
 ### Exigences pour les pull requests
 
 Utilisez le [modèle de PR](https://github.com/multica-ai/multica/blob/main/.github/PULL_REQUEST_TEMPLATE.md) et respectez les [exigences de contribution](https://github.com/multica-ai/multica/blob/main/CONTRIBUTING.md#pull-request-requirements) :
 
-1. **Problème :** Décrivez le problème concret, les personnes concernées et le comportement attendu. Ajoutez les étapes de reproduction ou un exemple précis si nécessaire.
-2. **Proposition et compromis :** Expliquez l'approche proposée, pourquoi vous l'avez choisie, les alternatives envisagées et pourquoi chacune a été écartée. S'il n'existe pas d'alternative pertinente, expliquez pourquoi.
-3. **Vérification de l'interface ou des interactions :** Joignez des captures d'écran de l'application en cours d'exécution montrant les écrans et états concernés. Une comparaison avant/après est fortement recommandée. Pour un nouvel écran sans état antérieur, expliquez-le et joignez la capture après modification. Une vidéo peut compléter les captures, mais ne les remplace pas. Si l'interface et les interactions ne sont pas affectées, indiquez "N/A" et expliquez pourquoi.
+1. **Problème (Problem) :** Décrivez le problème concret, les personnes concernées et pourquoi il compte.
+2. **Objectif (Goal) :** Indiquez le résultat attendu du changement.
+3. **Proposition (Proposal) :** Présentez les grandes lignes de la conception et expliquez comment elle atteint l'objectif. Le texte doit rester compréhensible sans connaissance approfondie du projet, avec un minimum de détails d'implémentation.
+4. **Alternatives (facultatif) :** Si cela aide à comprendre la proposition, décrivez brièvement les autres approches et pourquoi vous ne les avez pas retenues.
+5. **Captures d'écran (Screenshots) :** Pour toute modification de l'interface ou des interactions, joignez des captures de l'application en cours d'exécution montrant les écrans et états concernés. Une comparaison avant/après est fortement recommandée ; pour un nouvel écran, joignez la capture après modification. Si l'interface et les interactions ne sont pas affectées, indiquez "N/A" et expliquez pourquoi.
 
-**Les PR modifiant l'interface ou les interactions sans captures d'écran sont rejetées par défaut.** Les personnes chargées de la revue doivent demander des modifications ou fermer la PR jusqu'à l'ajout des captures. Une PR sans description du problème, proposition ou explication des alternatives n'est pas non plus prête pour la revue.
-
-Indiquez les étapes de vérification, les commandes réellement exécutées, leurs résultats et ce qui n'a pas été testé, avec la raison. Les contributions assistées par IA suivent les mêmes exigences : l'auteur doit comprendre le changement, expliquer sa conception et le vérifier. Le code généré ou une conversation avec une IA ne remplace ni la justification ni les éléments de vérification.
+**Les PR modifiant l'interface ou les interactions sans captures d'écran sont rejetées par défaut.** Les personnes chargées de la revue doivent demander des modifications ou fermer la PR jusqu'à l'ajout des captures. Une PR sans description du problème, de l'objectif ou des grandes lignes de la conception n'est pas non plus prête pour la revue.
 
 ## Étapes suivantes
 

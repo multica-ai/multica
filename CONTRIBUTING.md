@@ -31,35 +31,23 @@ See the [LICENSE](LICENSE) file for the full terms.
 
 ## Pull Request Requirements
 
-Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md). Every PR must make the
-problem and design decisions clear enough for a reviewer to assess:
+Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md) with these five sections:
 
-1. **Problem:** Describe the concrete problem, who is affected, and the expected
-   behavior. Include reproduction steps or a specific example where relevant.
-2. **Proposal and tradeoffs:** Explain what you propose, why it solves the
-   problem, and why you chose this approach. Describe the alternatives you
-   considered and why you rejected each one, including leaving the behavior
-   unchanged where relevant. If there is no meaningful alternative, explain why.
-3. **Screenshots for UI or interaction changes:** Attach screenshots from the
+1. **Problem:** Describe the concrete problem, who is affected, and why it matters.
+2. **Goal:** State the intended outcome of the change.
+3. **Proposal:** Explain the high-level design and why it achieves the goal.
+   Make it understandable to a reader without much project background. Keep
+   implementation details to a minimum.
+4. **Alternatives (optional):** When useful, briefly describe other approaches
+   and why you did not choose them.
+5. **Screenshots:** For UI or interaction changes, attach screenshots from the
    running app showing the affected screens and states. Before/after comparisons
-   are strongly preferred. For a new screen with no before state, explain that
-   and include the after screenshot. Recordings may supplement screenshots, but
-   do not replace them. If there is no UI or interaction impact, write "N/A" in
-   the screenshot section and explain why.
+   are strongly preferred; for a new screen, include the after screenshot. If
+   there is no UI or interaction impact, write "N/A" and explain why.
 
 **UI or interaction PRs without screenshots are rejected by default.** Reviewers
 should request changes or close the PR until screenshots are provided. PRs
-missing the problem, proposal, or explanation of alternatives are also not ready
-for review.
-
-Include verification steps, the commands actually run, and their results. State
-what was not tested and why. Screenshots help reviewers assess the design and
-provide evidence that the affected UI was exercised; they complement tests.
-
-AI-assisted contributions are welcome. The author remains responsible for
-understanding the change, explaining its design, and verifying it. Generated
-code, a file list, passing CI, or an AI transcript does not replace the required
-problem statement, rationale, or evidence.
+missing the problem, goal, or high-level proposal are also not ready for review.
 
 ## Development Model
 
