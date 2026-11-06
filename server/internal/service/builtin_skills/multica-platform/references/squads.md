@@ -79,6 +79,13 @@ the PARENT issue, so record against the parent, not the child you just read;
 passing an unrelated issue id is rejected and the error names the issue you
 should have used.
 
+A successful `no_action` after delivered delegated-worker replies also registers
+one-shot wakeups for those worker runs to end. This covers a worker posting its
+result before its runtime finishes, including replies merged into one leader
+turn. The wakeup requests a new evaluation under the latest human instructions;
+it does not repeat the delegation. Existing wakeup permissions and disable/delete
+controls apply. Retrying the same turn does not rearm its waits.
+
 If the call fails, do not exit silently — the comment prohibition on `no_action`
 only applies once the recording succeeded. Post one short comment with the
 outcome instead, and only when this turn has not already commented: on the

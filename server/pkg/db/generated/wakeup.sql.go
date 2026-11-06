@@ -689,20 +689,28 @@ func (q *Queries) FindPendingWakeupTask(ctx context.Context, wakeupID string) (A
 
 const findWaitingIssueRun = `-- name: FindWaitingIssueRun :one
 SELECT id FROM agent_task_queue WHERE issue_id= $1 AND agent_id= $2 AND status='queued'
- AND originator_user_id= $3::uuid ORDER BY created_at,id LIMIT 1
+ AND originator_user_id= $3::uuid
+ AND ($4::uuid IS NULL OR (is_leader_task AND squad_id=$4::uuid))
+ ORDER BY created_at,id LIMIT 1
 `
 
 type FindWaitingIssueRunParams struct {
 	IssueID          pgtype.UUID `json:"issue_id"`
 	AgentID          pgtype.UUID `json:"agent_id"`
 	OriginatorUserID pgtype.UUID `json:"originator_user_id"`
+	LeaderSquadID    pgtype.UUID `json:"leader_squad_id"`
 }
 
 // A run of the agent on the issue that has not been claimed and runs as this
 // person. A rule that fires meanwhile keeps its inputs for that run instead
 // of queuing another.
 func (q *Queries) FindWaitingIssueRun(ctx context.Context, arg FindWaitingIssueRunParams) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, findWaitingIssueRun, arg.IssueID, arg.AgentID, arg.OriginatorUserID)
+	row := q.db.QueryRow(ctx, findWaitingIssueRun,
+		arg.IssueID,
+		arg.AgentID,
+		arg.OriginatorUserID,
+		arg.LeaderSquadID,
+	)
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
@@ -1221,6 +1229,115 @@ func (q *Queries) ListPendingWakeupReceipts(ctx context.Context, arg ListPending
 			&i.ProcessedAt,
 			&i.CreatedAt,
 			&i.CoalesceKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSquadCompletionWorkers = `-- name: ListSquadCompletionWorkers :many
+SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for, t.branch_name, t.durable_work_dir, t.channel_context_revision, t.comment_thread_id, t.cancelled_by_type, t.cancelled_by_id, t.cancelled_by_name, t.issue_snapshot, t.workflow_step FROM agent_task_queue t
+JOIN agent a ON a.id=t.agent_id AND a.workspace_id= $1
+JOIN agent_task_queue source ON source.id=t.delegated_from_task_id
+WHERE t.issue_id= $2 AND NOT t.is_leader_task AND t.autopilot_run_id IS NULL
+ AND t.agent_id<> $3 AND source.agent_id= $3 AND source.issue_id= $2
+ AND source.is_leader_task AND source.squad_id= $4
+ AND EXISTS(SELECT 1 FROM comment c WHERE c.id=ANY($5::uuid[])
+  AND c.issue_id=t.issue_id AND c.source_task_id=t.id AND c.author_type='agent' AND c.author_id=t.agent_id)
+ORDER BY t.id FOR UPDATE OF t NOWAIT
+`
+
+type ListSquadCompletionWorkersParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	IssueID     pgtype.UUID   `json:"issue_id"`
+	AgentID     pgtype.UUID   `json:"agent_id"`
+	SquadID     pgtype.UUID   `json:"squad_id"`
+	CommentIds  []pgtype.UUID `json:"comment_ids"`
+}
+
+// Attribution can change when replies coalesce. Wait for every delegated
+// worker whose authenticated comment this leader actually received.
+func (q *Queries) ListSquadCompletionWorkers(ctx context.Context, arg ListSquadCompletionWorkersParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, listSquadCompletionWorkers,
+		arg.WorkspaceID,
+		arg.IssueID,
+		arg.AgentID,
+		arg.SquadID,
+		arg.CommentIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+			&i.SessionRolloutMissing,
+			&i.RetiredSessionID,
+			&i.QuickActionsDisabled,
+			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
+			&i.DurableWorkDir,
+			&i.ChannelContextRevision,
+			&i.CommentThreadID,
+			&i.CancelledByType,
+			&i.CancelledByID,
+			&i.CancelledByName,
+			&i.IssueSnapshot,
+			&i.WorkflowStep,
 		); err != nil {
 			return nil, err
 		}

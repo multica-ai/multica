@@ -156,6 +156,9 @@ func TestIssueWakeupTerminalStateAndScope(t *testing.T) {
 	f, s, issue, agent := wakeFixture(t)
 	source := f.Task(t, agent, testutil.Cols{"issue_id": issue, "status": "completed", "runtime_id": testutil.Raw("(SELECT runtime_id FROM agent WHERE id='" + agent + "')")})
 	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", EventTypes: []string{"task.completed"}, FilterTaskID: source, Instruction: "inspect output"})
+	if w.Enabled {
+		t.Fatal("already-terminal once wakeup response must match its disabled persisted state")
+	}
 	if n := f.Count(t, "SELECT count(*) FROM issue_wakeup_receipt WHERE wakeup_id=$1", w.ID); n != 1 {
 		t.Fatal("missed already-terminal run")
 	}

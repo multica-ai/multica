@@ -3,16 +3,19 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -1099,21 +1102,52 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 		"reason":   req.Reason,
 	})
 
-	activity, err := h.Queries.CreateActivity(r.Context(), db.CreateActivityParams{
-		ID:          dbid.NewV7(),
-		WorkspaceID: issue.WorkspaceID,
-		IssueID:     issue.ID,
-		ActorType:   pgtype.Text{String: "agent", Valid: true},
-		// task.AgentID, not squad.LeaderID: the no_action comment suppression
-		// lookup matches actor_id against task.agent_id
-		// (service.HasSquadLeaderNoActionEvaluationForTask), so this column has
-		// to carry the task's agent for suppression to find the row at all.
-		ActorID: task.AgentID,
-		Action:  "squad_leader_evaluated",
-		Details: details,
-	})
+	record := func() (db.ActivityLog, error) {
+		tx, err := h.TxStarter.Begin(r.Context())
+		if err != nil {
+			return db.ActivityLog{}, err
+		}
+		defer tx.Rollback(r.Context())
+		q := h.Queries.WithTx(tx)
+		if req.Outcome == "no_action" {
+			// Match wakeup registration's workspace-before-issue lock order.
+			if _, err := q.LockWorkspaceForChatSessionCreate(r.Context(), issue.WorkspaceID); err != nil {
+				return db.ActivityLog{}, err
+			}
+			if err := (&service.IssueWakeupService{Tasks: h.TaskService}).RegisterSquadCompletionWakeup(r.Context(), q, task); err != nil {
+				return db.ActivityLog{}, err
+			}
+		}
+		activity, err := q.CreateActivity(r.Context(), db.CreateActivityParams{
+			ID: dbid.NewV7(), WorkspaceID: issue.WorkspaceID, IssueID: issue.ID,
+			ActorType: pgtype.Text{String: "agent", Valid: true}, ActorID: task.AgentID,
+			Action: "squad_leader_evaluated", Details: details,
+		})
+		if err != nil {
+			return db.ActivityLog{}, err
+		}
+		return activity, tx.Commit(r.Context())
+	}
+	var activity db.ActivityLog
+	for attempt := 0; attempt < 3; attempt++ {
+		activity, err = record()
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "55P03" || attempt == 2 {
+			break
+		}
+		// Completion may hold a worker row while waiting for the issue lock.
+		// Release this transaction before retrying so completion can commit.
+		select {
+		case <-r.Context().Done():
+			err = r.Context().Err()
+		case <-time.After(25 * time.Millisecond):
+		}
+		if r.Context().Err() != nil {
+			break
+		}
+	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to record evaluation")
+		wakeupError(w, err)
 		return
 	}
 

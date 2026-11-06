@@ -286,7 +286,9 @@ ORDER BY w.updated_at DESC LIMIT 200;
 -- person. A rule that fires meanwhile keeps its inputs for that run instead
 -- of queuing another.
 SELECT id FROM agent_task_queue WHERE issue_id= @issue_id AND agent_id= @agent_id AND status='queued'
- AND originator_user_id= @originator_user_id::uuid ORDER BY created_at,id LIMIT 1;
+ AND originator_user_id= @originator_user_id::uuid
+ AND (sqlc.narg('leader_squad_id')::uuid IS NULL OR (is_leader_task AND squad_id=sqlc.narg('leader_squad_id')::uuid))
+ ORDER BY created_at,id LIMIT 1;
 
 -- name: ListWaitingWakeups :many
 -- Rules on the issue with inputs a run of this agent can take along: the
@@ -320,3 +322,16 @@ WHERE id= @id AND status='dispatched' AND dispatched_at= @dispatched_at RETURNIN
 -- not finished: the run that made a change still knows about it.
 SELECT count(*) FROM agent_task_queue WHERE id=ANY(@ids::uuid[]) AND agent_id= @agent_id AND issue_id= @issue_id
  AND status IN ('dispatched','running','waiting_local_directory');
+
+-- name: ListSquadCompletionWorkers :many
+-- Attribution can change when replies coalesce. Wait for every delegated
+-- worker whose authenticated comment this leader actually received.
+SELECT t.* FROM agent_task_queue t
+JOIN agent a ON a.id=t.agent_id AND a.workspace_id= @workspace_id
+JOIN agent_task_queue source ON source.id=t.delegated_from_task_id
+WHERE t.issue_id= @issue_id AND NOT t.is_leader_task AND t.autopilot_run_id IS NULL
+ AND t.agent_id<> @agent_id AND source.agent_id= @agent_id AND source.issue_id= @issue_id
+ AND source.is_leader_task AND source.squad_id= @squad_id
+ AND EXISTS(SELECT 1 FROM comment c WHERE c.id=ANY(@comment_ids::uuid[])
+  AND c.issue_id=t.issue_id AND c.source_task_id=t.id AND c.author_type='agent' AND c.author_id=t.agent_id)
+ORDER BY t.id FOR UPDATE OF t NOWAIT;
