@@ -24,6 +24,20 @@ afterEach(() => {
 // app in past incidents. The contract is: a malformed response degrades to
 // an empty/safe shape, never throws into React.
 describe("ApiClient schema fallback", () => {
+  describe("workspace pin responses", () => {
+    it("defaults missing or malformed pinned_at to null and falls back on malformed lists", async () => {
+      const ws = { id: "ws-1", name: "One", slug: "one", description: null, context: null, settings: {}, repos: [], issue_prefix: "ONE", avatar_url: null, created_at: "2026-01-01", updated_at: "2026-01-01" };
+      const client = new ApiClient("https://api.example.test");
+      stubFetchJson([ws, { ...ws, id: "ws-2", pinned_at: 123 }]);
+      expect((await client.listWorkspaces()).map((item) => item.pinned_at)).toEqual([null, null]);
+      stubFetchJson({ invalid: true });
+      await expect(client.listWorkspaces()).resolves.toEqual([]);
+      stubFetchJson({ pinned_at: 123 });
+      await expect(client.setWorkspacePinned("ws-1", true)).resolves.toEqual({ pinned_at: null });
+      expect(vi.mocked(fetch).mock.calls[0]?.[1]).toMatchObject({ method: "PUT", body: JSON.stringify({ pinned: true }) });
+    });
+  });
+
   describe("GitHub repository import", () => {
     it("falls back safely when installation or repository responses are malformed", async () => {
       stubFetchJson({ installations: "not-an-array", configured: true });

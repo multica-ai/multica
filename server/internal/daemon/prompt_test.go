@@ -2208,3 +2208,75 @@ func TestPromptCarriesJoinedWakeups(t *testing.T) {
 		t.Errorf("prompt without joined wakeups mentions them:\n%s", out)
 	}
 }
+
+// A sub-issue's run is pointed at its parent whatever started it (MUL-8441).
+// The claim JSON decodes into the block, a resumed session gets the short form
+// that still names the commands, and a run without a parent is unchanged.
+func TestPromptPointsSubIssueRunsAtTheirParent(t *testing.T) {
+	t.Parallel()
+
+	var decoded Task
+	if err := json.Unmarshal([]byte(`{
+		"issue_id":"issue-1",
+		"parent_issue":{"id":"parent-uuid","identifier":"MUL-9","title":"Merge PRs from Multica","status":"in_progress"}
+	}`), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	parent := decoded.ParentIssue
+
+	header := "[Parent issue]\nThis issue is a sub-issue of MUL-9 \"Merge PRs from Multica\" (status: in_progress)."
+	readCmds := []string{
+		"`multica issue get parent-uuid --output json`",
+		"`multica issue comment list parent-uuid --roots-only --summary --compact --output json`",
+	}
+	full := []string{
+		"this issue's description is only the part handed to you",
+		"Before starting work, read the parent",
+		"`multica issue children parent-uuid --output json`",
+		"If they conflict, ask on this issue instead of picking one.",
+	}
+
+	for name, task := range map[string]Task{
+		"assignment": decoded,
+		"comment":    {IssueID: "issue-1", TriggerCommentID: "c1", TriggerCommentContent: "please look", ParentIssue: parent},
+		"wakeup":     {IssueID: "issue-1", WakeupID: "w1", HandoffNote: "check CI", ParentIssue: parent},
+	} {
+		out := BuildPrompt(task, "claude")
+		for _, want := range append(append([]string{header}, readCmds...), full...) {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s prompt lacks %q:\n%s", name, want, out)
+			}
+		}
+	}
+
+	resumed := BuildPrompt(Task{IssueID: "issue-1", PriorSessionID: "s1", ParentIssue: parent}, "claude")
+	for _, want := range append([]string{header, "If you have not read the parent in this session"}, readCmds...) {
+		if !strings.Contains(resumed, want) {
+			t.Errorf("resumed prompt lacks %q:\n%s", want, resumed)
+		}
+	}
+	if strings.Contains(resumed, "Before starting work, read the parent") {
+		t.Errorf("resumed prompt repeats the full parent instruction:\n%s", resumed)
+	}
+
+	// A resume the server could only serve from an older session reconstructs,
+	// so it gets the full instruction.
+	fallback := BuildPrompt(Task{IssueID: "issue-1", PriorSessionID: "s0", PriorSessionResumeUnavailable: true, ParentIssue: parent}, "claude")
+	if !strings.Contains(fallback, "Before starting work, read the parent") {
+		t.Errorf("fallback-session prompt lacks the full parent instruction:\n%s", fallback)
+	}
+
+	noIdentifier := BuildPrompt(Task{IssueID: "issue-1", ParentIssue: &ParentIssueData{ID: "parent-uuid", Title: "T", Status: "todo"}}, "claude")
+	if !strings.Contains(noIdentifier, "sub-issue of parent-uuid \"T\" (status: todo).") {
+		t.Errorf("parent without identifier must be named by ID:\n%s", noIdentifier)
+	}
+
+	for name, task := range map[string]Task{
+		"no parent": {IssueID: "issue-1"},
+		"chat":      {ChatSessionID: "chat-1", ParentIssue: parent},
+	} {
+		if out := BuildPrompt(task, "claude"); strings.Contains(out, "[Parent issue]") {
+			t.Errorf("%s prompt renders a parent block:\n%s", name, out)
+		}
+	}
+}

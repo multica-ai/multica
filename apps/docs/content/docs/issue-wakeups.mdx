@@ -78,6 +78,22 @@ When the issue's assignee is an agent, members' comments already trigger it. A "
 - If the same agent already has a run waiting to start on the issue, the wakeup joins that run instead of starting another one.
 - While a wakeup is waiting, the issue header shows what the issue is waiting for, such as "Ops helper: Waiting for a reply". Click it to jump to the Wakeups section.
 
+## Workflow steps on continued work [#workflow-steps]
+
+A run has a workflow step binding as well as an execution ID. A new execution ID or a reused agent conversation does not decide which step it can advance.
+
+| How work starts | Step binding |
+|---|---|
+| A wakeup created by an agent during a run | Inherits the source run's step, when it has one. |
+| A wakeup created by a member that starts a new run | The issue's current status when the wakeup fires. |
+| An automatic retry | Keeps the parent run's binding. |
+| A member explicitly reruns the work | The issue's current status when the new run is queued. |
+| A wakeup joins an existing run waiting to start | Keeps that waiting run's binding. |
+
+Named workflows and **Default** workflows with handoffs protect against stale status changes. If another actor moves the issue away from a run's bound step, that run cannot advance the issue. Its brief shows both steps and asks it to leave the current status unchanged and comment if attention is needed. A rejected status change returns `409 workflow_step_moved`; retrying it does not refresh the binding.
+
+To continue from the new state, a member should review the external move and explicitly rerun the work from the execution log. The old run is not automatically rebound.
+
 ## View and manage wakeups [#manage]
 
 The Wakeups section of the issue sidebar lists the issue's rules: the condition, who is woken, when it fires next, and how long is left. Click a rule for its details, including its source, its deadline, its instruction, and its **trigger history** (the latest runs, whether each posted a comment, and what each silent check found).

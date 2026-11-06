@@ -17,12 +17,13 @@ import { createSafeId } from "../../utils";
 
 /** How the viewer relates to an issue. Unlike the "my issues" scope axis this
  *  is an ordinary filter dimension: OR within, AND with everything else. */
-export type IssueRelationFilter = "assigned" | "created" | "my_agents";
+export type IssueRelationFilter = "assigned" | "created" | "my_agents" | "subscribed";
 
 export const ISSUE_RELATION_FILTERS: readonly IssueRelationFilter[] = [
   "assigned",
   "created",
   "my_agents",
+  "subscribed",
 ];
 
 /** Relative due-date buckets. A view stores the bucket, never a date, so it
@@ -560,6 +561,20 @@ export function advancedFilterUsesField(
   if (!group) return false;
   return group.children.some((child) =>
     child.type === "group" ? advancedFilterUsesField(child, field) : child.field === field && child.values.length > 0,
+  );
+}
+
+/** Whether a (pruned) tree tests this value of a dimension anywhere. */
+export function advancedFilterUsesValue(
+  group: AdvancedFilterGroup | null | undefined,
+  field: NegatableFilterDimension,
+  value: string,
+): boolean {
+  if (!group) return false;
+  return group.children.some((child) =>
+    child.type === "group"
+      ? advancedFilterUsesValue(child, field, value)
+      : child.field === field && (child.values as readonly unknown[]).includes(value),
   );
 }
 

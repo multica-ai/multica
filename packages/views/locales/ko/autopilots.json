@@ -1,7 +1,6 @@
 {
   "page": {
     "new_autopilot": "새 오토파일럿",
-    "start_blank": "처음부터 시작",
     "table": {
       "name": "이름",
       "agent": "에이전트",
@@ -15,10 +14,6 @@
       "created": "생성일"
     },
     "last_run_empty": "--",
-    "empty": {
-      "title": "아직 오토파일럿이 없습니다",
-      "hint": "AI 에이전트의 반복 작업을 예약하세요. 템플릿을 고르거나 처음부터 시작할 수 있습니다."
-    },
     "no_matches": "일치하는 자동화가 없습니다",
     "retry": "다시 시도"
   },
@@ -66,6 +61,8 @@
   },
   "detail": {
     "not_found": "오토파일럿을 찾을 수 없습니다",
+    "not_found_description": "삭제되었거나 접근 권한이 없을 수 있습니다.",
+    "back_to_list": "모든 오토파일럿",
     "pause_aria": "오토파일럿 일시 중지",
     "activate_aria": "오토파일럿 활성화",
     "paused_runtime_required": "담당 에이전트의 런타임이 없어 자동화가 일시 중지되었습니다. 런타임을 연결한 후 다시 활성화하세요.",
@@ -484,7 +481,6 @@
     "select_page": "활성 항목 모두 선택",
     "load_error": "깨우기를 불러오지 못했습니다",
     "loading": "불러오는 중…",
-    "empty": "깨우기 규칙이 없습니다",
     "disable_selected": "선택 항목 끄기",
     "confirm_title": "깨우기 {{count}}개를 끄시겠습니까?",
     "confirm_body": "이후 깨우기를 중지하고 아직 에이전트에게 전달되지 않은 대기 중 실행을 취소합니다. 전달된 실행은 계속되며 실행 로그에서 중지할 수 있습니다.",
@@ -501,7 +497,6 @@
     },
     "target_agent": "깨울 에이전트",
     "empty_filtered": "일치하는 깨우기가 없습니다",
-    "clear_filters": "필터 지우기",
     "batch_success": "깨우기 규칙 {{count}}개를 껐습니다",
     "batch_partial": "{{succeeded}}개를 껐고 {{failed}}개는 실패했습니다. 실패 항목은 선택된 상태로 남아 다시 시도할 수 있습니다.",
     "source": "만든 곳",
@@ -521,6 +516,37 @@
     "banner_view": "보기",
     "create": "깨우기 추가",
     "create_pick_issue": "깨우기를 추가할 태스크 선택",
-    "create_pick_issue_description": "깨우기는 이 태스크에 속하며 태스크가 끝나면 함께 끝납니다."
+    "create_pick_issue_description": "깨우기는 이 태스크에 속하며 태스크가 끝나면 함께 끝납니다.",
+    "intro": {
+      "title": "필요한 순간에 에이전트를 다시 부르세요",
+      "description": "깨우기는 작업에 붙습니다. PR이 병합되거나, 누군가 답하거나, 시간이 되면 에이전트를 다시 불러 이어서 일하게 합니다. 작업이 끝나면 깨우기도 자동으로 멈춥니다.",
+      "slides": {
+        "event": {
+          "title": "일이 생길 때까지 기다리기",
+          "description": "에이전트를 헛돌게 하며 기다릴 필요가 없습니다. 조건이 충족되면 Multica가 자동으로 깨웁니다."
+        },
+        "time": {
+          "title": "시간을 정해도 됩니다",
+          "description": "1회 예약은 ‘내일 오후에 다시 보기’에, 반복은 매일 하는 점검에 알맞습니다."
+        },
+        "ends": {
+          "title": "작업이 끝나면 멈춤",
+          "description": "깨우기는 작업에 속합니다. 작업이 완료되거나 취소되면 자동으로 꺼져 남는 규칙이 없습니다."
+        }
+      },
+      "art": {
+        "issue_inbox": "받은편지함 그룹의 빈 상태",
+        "issue_board": "보드 열 너비 드래그 조절",
+        "issue_paste": "댓글에 이미지 붙여넣기",
+        "reply": "“PR이 병합되었습니다. 문서를 업데이트하고 작업을 닫겠습니다.”",
+        "event_examples": "PR 병합, 새 댓글"
+      }
+    }
+  },
+  "intro": {
+    "label": "오토파일럿",
+    "title": "에이전트가 제때 알아서 일을 시작하게 하세요",
+    "description": "일정이나 Webhook을 설정하면 실행될 때마다 태스크를 만들어 에이전트에게 맡기거나 에이전트를 바로 실행합니다. 템플릿을 골라 조금만 고치면 됩니다.",
+    "templates": "템플릿으로 시작"
   }
 }

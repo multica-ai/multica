@@ -1,14 +1,15 @@
 import { cloneElement, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 import { issueKeys } from "@multica/core/issues/queries";
-import type { AgentTask, Issue, ListIssuesParams } from "@multica/core/types";
+import { issueUnreadOptions } from "@multica/core/issues/unread";
+import type { AgentTask, Issue, IssueUnread, ListIssuesParams } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { IssueContextMenuProvider } from "../../issues/actions";
-import { SidebarIssueList } from "./sidebar-tree";
+import { SidebarIssueList, TreeRow } from "./sidebar-tree";
 
 vi.mock("../../issues/actions/issue-actions-menu-items", () => ({
   contextPrimitives: {},
@@ -57,6 +58,9 @@ vi.mock("../../navigation", () => ({
   ),
 }));
 vi.mock("../../issues/components/status-icon", () => ({ StatusIcon: () => <span /> }));
+vi.mock("@multica/core/workspace/hooks", () => ({
+  useActorName: () => ({ getActorName: () => "Lambda" }),
+}));
 vi.mock("../../agents/components/agent-avatar-stack", () => ({
   AgentAvatarStack: ({ agentIds }: { agentIds: string[] }) => <span data-testid="agents">{agentIds.join(",")}</span>,
 }));
@@ -74,11 +78,13 @@ function renderList({
   total = 18,
   params = PARAMS,
   tasks = [],
+  unread = [],
   onCollapse = vi.fn(),
 }: {
   total?: number;
   params?: ListIssuesParams | null;
   tasks?: Partial<AgentTask>[];
+  unread?: IssueUnread[];
   onCollapse?: () => void;
 } = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
@@ -87,6 +93,7 @@ function renderList({
     qc.setQueryData(issueKeys.sidebar("ws-1", SOURCE, PARAMS, limit), { issues: all.slice(0, limit), total });
   }
   qc.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, tasks as AgentTask[]);
+  qc.setQueryData(issueUnreadOptions("ws-1").queryKey, unread);
   renderWithI18n(
     <QueryClientProvider client={qc}>
       <IssueContextMenuProvider variant="sidebar">
@@ -107,6 +114,24 @@ function renderList({
 const rows = () => screen.getAllByRole("link");
 
 describe("SidebarIssueList", () => {
+  it("opens an unread issue on what its run left", () => {
+    const run = { outcome: "completed", agent_id: "agent-1", created_at: "2026-11-03T10:00:00Z" };
+    renderList({
+      unread: [
+        { ...run, issue_id: "issue-1", task_id: "task-1", comment_id: "comment-1" },
+        { ...run, issue_id: "issue-3", outcome: "failed", task_id: "task-3", comment_id: null },
+        { ...run, issue_id: "issue-4", outcome: "manual", agent_id: null, task_id: null, comment_id: null },
+      ],
+    });
+    expect(rows().map((row) => row.getAttribute("href"))).toEqual([
+      "/acme/issues/issue-1#comment-comment-1",
+      "/acme/issues/issue-2",
+      "/acme/issues/issue-3#comment-task-3",
+      "/acme/issues/issue-4",
+      "/acme/issues/issue-5",
+    ]);
+  });
+
   it("loads more in steps, then shows less", () => {
     renderList();
     expect(rows()).toHaveLength(5);
@@ -176,5 +201,44 @@ describe("SidebarIssueList", () => {
     fireEvent.click(status);
     fireEvent.click(screen.getByRole("button", { name: "Pick Done" }));
     expect(updateField).toHaveBeenCalledWith({ status: "done" });
+  });
+});
+
+// jsdom does not lay out the sidebar: model clipping at the existing label.
+function clipLabel(el: HTMLElement) {
+  el.style.overflowX = "hidden";
+  Object.defineProperties(el, {
+    scrollWidth: { configurable: true, value: 320 },
+    clientWidth: { configurable: true, value: 100 },
+  });
+}
+
+describe("sidebar title disclosure", () => {
+  it("reveals a clipped project title on keyboard focus without replacing the link", async () => {
+    const label = "A project title longer than the sidebar";
+    renderWithI18n(<TreeRow href="/acme/projects/p1" label={label} icon={<span />} active={false} />);
+    const link = screen.getByRole("link", { name: label });
+    clipLabel(link);
+    await act(async () => link.focus());
+    expect(document.querySelector("[data-slot=tooltip-content]")).toHaveTextContent(label);
+    expect(screen.getByRole("link", { name: label })).toBe(link);
+    expect(link).toHaveAttribute("href", "/acme/projects/p1");
+    await act(async () => link.blur());
+    await waitFor(() => expect(document.querySelector("[data-slot=tooltip-content]")).toBeNull());
+  });
+
+  it("reveals a clipped issue title after hover while retaining its navigation target", async () => {
+    renderList();
+    const link = screen.getByRole("link", { name: "Issue 1" });
+    clipLabel(screen.getByText("Issue 1"));
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerEnter(link, { pointerType: "mouse" });
+      await act(async () => { vi.advanceTimersByTime(550); });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(document.querySelector("[data-slot=tooltip-content]")).toHaveTextContent("Issue 1");
+    expect(link).toHaveAttribute("href", "/acme/issues/issue-1");
   });
 });

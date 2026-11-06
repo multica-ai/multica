@@ -79,8 +79,8 @@ expect_fail_naming "components/ui/option-card.tsx" \
   "a same-named file elsewhere must not mark a dead ui component as used"
 rm -f "$collide"
 
-# 5. Two dead components importing only each other are still dead. Liveness is
-#    reachability from outside the guarded directories, not a reference count.
+# 5. An unreachable A -> B chain is still dead. Liveness is reachability
+#    from outside the guarded directories, not a reference count.
 pair_a="$ui_dir/zz-cycle-a.tsx"
 pair_b="$ui_dir/zz-cycle-b.tsx"
 track "$pair_a"
@@ -96,9 +96,9 @@ export function CycleB() {
   return null;
 }
 EOF
-expect_fail_naming "zz-cycle-a.tsx" "a mutually-importing dead pair must not vouch for itself"
+expect_fail_naming "zz-cycle-a.tsx" "an unreachable import chain must not vouch for itself"
 if ! grep -Fq "zz-cycle-b.tsx" "$out"; then
-  fail "both halves of a dead import cycle should be reported"
+  fail "both files in an unreachable import chain should be reported"
 fi
 rm -f "$pair_a" "$pair_b"
 
@@ -125,4 +125,75 @@ rm -f "$comment_probe" "$mention"
 
 expect_pass "check should pass again once every probe is removed"
 
-echo "PASS: check-ui-wildcard-exports parses real imports, survives name collisions, dead cycles, and commented-out imports"
+# 7. Vitest discovers *.test.{ts,tsx} without product imports. Such files in
+#    wildcard directories are exempt from reporting, but cannot vouch for
+#    unused production files. Non-contract *.spec files remain guarded.
+for entry in components/ui:tsx components/common:tsx markdown:tsx hooks:ts; do
+  dir="${entry%:*}"
+  ext="${entry#*:}"
+  test_file="$root_dir/packages/ui/$dir/zz-unused-runtime.test.$ext"
+  product="$root_dir/packages/ui/$dir/zz-unused-runtime.$ext"
+  spec="$root_dir/packages/ui/$dir/zz-not-discovered.spec.$ext"
+  track "$test_file"
+  track "$product"
+  track "$spec"
+  cat >"$test_file" <<'EOF'
+import { it, expect } from "vitest";
+it("discovered", () => { expect(true).toBe(true); });
+EOF
+  expect_pass "Vitest-discovered tests in $dir should not require product imports"
+  cat >"$product" <<'EOF'
+export function RuntimeProbe() { return null; }
+EOF
+  cat >"$test_file" <<'EOF'
+import { RuntimeProbe } from "./zz-unused-runtime";
+import { it, expect } from "vitest";
+it("probe", () => { expect(RuntimeProbe()).toBe(null); });
+EOF
+  expect_fail_naming "$dir/zz-unused-runtime.$ext" \
+    "a colocated test in $dir must not vouch for an unused product"
+  cat >"$importer" <<EOF
+export { RuntimeProbe } from "@multica/ui/$dir/zz-unused-runtime";
+EOF
+  expect_pass "a real external consumer should make the product in $dir live"
+  rm -f "$importer" "$test_file" "$product"
+  cat >"$spec" <<'EOF'
+export function StillGuarded() { return null; }
+EOF
+  expect_fail_naming "$dir/zz-not-discovered.spec.$ext" \
+    "non-contract spec files in $dir must remain guarded"
+  rm -f "$spec"
+done
+
+# 8. A true A <-> B cycle stays dead until an external consumer reaches it.
+cat >"$pair_a" <<'EOF'
+import { B } from "./zz-cycle-b"; export const A = () => B;
+EOF
+cat >"$pair_b" <<'EOF'
+import { A } from "./zz-cycle-a"; export const B = () => A;
+EOF
+expect_fail_naming "zz-cycle-a.tsx" "a true dead cycle must not vouch for itself"
+if ! grep -Fq "zz-cycle-b.tsx" "$out"; then
+  fail "both halves of a true dead cycle should be reported"
+fi
+cat >"$importer" <<'EOF'
+export { A } from "@multica/ui/components/ui/zz-cycle-a";
+EOF
+expect_pass "an external consumer should make both halves of a cycle live"
+rm -f "$pair_a" "$pair_b" "$importer"
+
+# 9. Mock-only mentions do not import a product module.
+mock_probe="$ui_dir/zz-mock-only.tsx"
+track "$mock_probe"
+cat >"$mock_probe" <<'EOF'
+export function MockOnly() { return null; }
+EOF
+cat >"$importer" <<'EOF'
+import { vi } from "vitest"; vi.mock("@multica/ui/components/ui/zz-mock-only");
+EOF
+expect_fail_naming "zz-mock-only.tsx" "a mock-only mention must not vouch for a product"
+rm -f "$mock_probe" "$importer"
+
+expect_pass "check should pass again once every additional probe is removed"
+
+echo "PASS: check-ui-wildcard-exports preserves product reachability and Vitest test discovery boundaries"

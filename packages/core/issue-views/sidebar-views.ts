@@ -9,8 +9,14 @@ import { issueViewEverywhereOptions } from "./queries";
 import { issueViewPreferenceOptions, useUpdateIssueViewPreference } from "./preferences";
 
 /** The views every workspace has without saving anything. */
-export type BuiltinViewKey = "my_issues" | "my_agents" | "all_issues";
-export const BUILTIN_VIEW_KEYS: readonly BuiltinViewKey[] = ["my_issues", "my_agents", "all_issues"];
+export type BuiltinViewKey = "my_issues" | "my_agents" | "all_issues" | "unread";
+export const BUILTIN_VIEW_KEYS: readonly BuiltinViewKey[] = ["my_issues", "my_agents", "all_issues", "unread"];
+
+/**
+ * The built-ins starred before the user arranges the list. Unread is opt-in
+ * while it overlaps with Inbox.
+ */
+const DEFAULT_STARRED_BUILTINS: readonly BuiltinViewKey[] = ["my_issues", "my_agents", "all_issues"];
 
 export const builtinViewItemId = (key: BuiltinViewKey) => `builtin:${key}`;
 export const savedViewItemId = (viewId: string) => `view:${viewId}`;
@@ -25,15 +31,16 @@ const EMPTY_VIEWS: IssueView[] = [];
 const EMPTY_PINS: PinnedItem[] = [];
 
 /**
- * The starred list before the user has arranged it: the built-ins, the
- * user's own views, then views they had pinned under the old Pinned section.
+ * The starred list before the user has arranged it: the default built-ins,
+ * the user's own views, then views they had pinned under the old Pinned
+ * section.
  */
 export function defaultSidebarViewOrder(
   views: readonly IssueView[],
   userId: string | undefined,
   pinnedViewIds: readonly string[],
 ): string[] {
-  const ids = BUILTIN_VIEW_KEYS.map(builtinViewItemId);
+  const ids = DEFAULT_STARRED_BUILTINS.map(builtinViewItemId);
   for (const view of views) {
     if (view.owner_id === userId) ids.push(savedViewItemId(view.id));
   }

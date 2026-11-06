@@ -48,14 +48,35 @@ func TestQuickCreateFailureDetail(t *testing.T) {
 		}
 	})
 
-	t.Run("literal backslash-n is decoded to real newlines", func(t *testing.T) {
+	t.Run("escaped paragraph breaks are decoded to real newlines", func(t *testing.T) {
 		t.Parallel()
-		// The daemon may deliver an Output carrying 2-char `\n` sequences; they
-		// must render as real line breaks, matching the comment-fallback path.
-		result := []byte(`{"output":"line one\\nline two"}`)
+		// The daemon may deliver an Output that is one escaped blob with 2-char
+		// `\n\n` paragraph breaks; they must render as real line breaks,
+		// matching the comment-fallback path.
+		result := []byte(`{"output":"Error: duplicate issue.\\n\\nSee JKY-30."}`)
 		got := quickCreateFailureDetail(result)
-		if got != "line one\nline two" {
-			t.Fatalf("expected decoded newline, got %q", got)
+		if got != "Error: duplicate issue.\n\nSee JKY-30." {
+			t.Fatalf("expected decoded newlines, got %q", got)
+		}
+	})
+
+	t.Run("single-line path is not decoded", func(t *testing.T) {
+		t.Parallel()
+		out := `Error: cannot read C:\\tools\\node_modules\\repo`
+		want := `Error: cannot read C:\tools\node_modules\repo`
+		if got := quickCreateFailureDetail([]byte(`{"output":"` + out + `"}`)); got != want {
+			t.Fatalf("expected verbatim path\n got: %q\nwant: %q", got, want)
+		}
+	})
+
+	t.Run("backslashes in multi-line output pass through", func(t *testing.T) {
+		t.Parallel()
+		// GH #8845: once the output has real line breaks, `\t` and `\r` are
+		// content (here a Windows path), not escapes to decode.
+		result := []byte(`{"output":"Error: cannot read\nC:\\tools\\repo\\task.md"}`)
+		want := "Error: cannot read\nC:\\tools\\repo\\task.md"
+		if got := quickCreateFailureDetail(result); got != want {
+			t.Fatalf("expected verbatim output\n got: %q\nwant: %q", got, want)
 		}
 	})
 
