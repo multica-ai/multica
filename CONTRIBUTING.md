@@ -62,6 +62,8 @@ Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md) with these five sections
    are strongly preferred; for a new screen, include the after screenshot. If
    there is no UI or interaction impact, write "N/A" and explain why.
 
+End the description with `Closes #<issue>` when the PR resolves an issue.
+
 **UI or interaction PRs without screenshots are rejected by default.** Reviewers
 should request changes or close the PR until screenshots are provided. PRs
 missing the problem, goal, or high-level proposal are also not ready for review.

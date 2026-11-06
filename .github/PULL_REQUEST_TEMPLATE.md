@@ -17,3 +17,6 @@
 ## Screenshots
 
 <!-- Required for UI or interaction changes: attach screenshots from the running app showing the affected screens and states. Without screenshots, these PRs are rejected by default. Before/after comparisons are strongly preferred; for a new screen, include the after screenshot. If there is no UI or interaction impact, write "N/A" and explain why. -->
+
+<!-- Link the issue this PR resolves so it closes on merge. -->
+Closes #
