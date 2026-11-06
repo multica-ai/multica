@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -820,12 +822,30 @@ func TestCreateComment_NoteMentionDoesNotQueueAgent(t *testing.T) {
 
 	agentID := createHandlerTestAgent(t, "Create Note Agent", nil)
 	issueID := createCommentTriggerPreviewIssue(t, "comment trigger create note", "agent", agentID)
+	svc := service.IssueWakeupService{Tasks: testHandler.TaskService}
+	w, err := svc.Create(context.Background(), parseUUID(issueID), parseUUID(testUserID), pgtype.UUID{}, service.WakeupInput{
+		AgentID: agentID, Kind: "event", EventTypes: []string{"comment.created"}, Instruction: "React to comments",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		dbfx.Exec(t, "DELETE FROM issue_wakeup_receipt WHERE wakeup_id=$1", w.ID)
+		dbfx.Exec(t, "DELETE FROM issue_wakeup WHERE id=$1", w.ID)
+	})
 	content := fmt.Sprintf("/note [@Agent](mention://agent/%s) human-only context", agentID)
+	preview := previewCommentTriggersForTest(t, issueID, map[string]any{"content": content})
+	if len(preview.Agents) != 0 {
+		t.Fatalf("note with a wakeup previews agents: %+v", preview.Agents)
+	}
 
 	postCommentForTriggerPreviewTest(t, issueID, map[string]any{"content": content})
 
 	if got := countQueuedCommentTriggerTasks(t, issueID, agentID); got != 0 {
 		t.Fatalf("note create queued tasks = %d, want 0", got)
+	}
+	if got := dbfx.Count(t, "SELECT count(*) FROM issue_wakeup_receipt WHERE wakeup_id=$1", w.ID); got != 0 {
+		t.Fatalf("note create captured %d wakeup receipts, want 0", got)
 	}
 }
 
