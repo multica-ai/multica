@@ -1254,7 +1254,8 @@
       "close_others": "他のタブを閉じる",
       "open_window": "新しいウィンドウで開く",
       "new": "新しいタブ",
-      "pinned_name": "{{title}}（ピン留め）"
+      "pinned_name": "{{title}}（ピン留め）",
+      "attention": "更新あり"
     },
     "updates": {
       "title": "アップデート",
