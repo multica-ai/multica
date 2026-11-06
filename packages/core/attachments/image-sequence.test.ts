@@ -281,6 +281,39 @@ describe("collectImageSequence", () => {
 });
 
 describe("collectAttachmentSequence", () => {
+  it("resolves current attachments, filters, and block ids when reusing body refs", () => {
+    const content = "!file[report.pdf](https://cdn.example/report.pdf)";
+    const blocks = [{ id: "first", content, standalone: false }];
+    expect(collectImageSequence(blocks)).toEqual([]);
+    expect(collectAttachmentSequence(blocks, () => true)).toEqual([
+      expect.objectContaining({
+        key: "https://cdn.example/report.pdf",
+        blockId: "first",
+        filename: "report.pdf",
+      }),
+    ]);
+
+    const record = attachment({
+      id: UUID_A,
+      filename: "report.pdf",
+      content_type: "application/pdf",
+      url: "https://cdn.example/report.pdf",
+      download_url: "https://cdn.example/report.pdf?signature=first",
+    });
+    const withRecord = [{ ...blocks[0]!, id: "second", attachments: [record] }];
+    expect(collectAttachmentSequence(withRecord, () => true)).toEqual([
+      expect.objectContaining({ key: UUID_A, url: record.download_url, attachment: record, blockId: "second" }),
+    ]);
+
+    const refreshed = { ...record, download_url: "https://cdn.example/report.pdf?signature=refreshed" };
+    const result = collectAttachmentSequence([{ ...withRecord[0]!, attachments: [refreshed] }], () => true);
+    expect(result[0]?.url).toBe(refreshed.download_url);
+    expect(result[0]?.attachment).toBe(refreshed);
+    result[0]!.filename = "changed by caller";
+    expect(collectAttachmentSequence(blocks, () => true)[0]?.filename).toBe("report.pdf");
+    expect(collectImageSequence(withRecord)).toEqual([]);
+  });
+
   // The web / desktop rule: anything the viewer can open.
   const previewable = ({ contentType, filename }: { contentType: string; filename: string }) =>
     isImageAttachment(contentType, filename) ||

@@ -193,6 +193,11 @@ interface InlineRef {
   isFileCard: boolean;
 }
 
+const INLINE_REF_CACHE_LIMIT = 500;
+// Cache only content-derived refs, never resolved attachments or their signed URLs.
+// Timeline updates can then resolve current metadata without reparsing old bodies.
+const inlineRefCache = new Map<string, ReadonlyArray<InlineRef>>();
+
 // Raw `<img src=...>` — reachable because the readonly renderer runs
 // rehypeRaw + rehypeSanitize, and the sanitize schema keeps img.
 const HTML_IMAGE_RE =
@@ -207,7 +212,7 @@ function unescapeLabel(label: string): string {
   return label.replace(/\\([[\]\\()])/g, "$1");
 }
 
-function extractInlineRefs(rawContent: string): InlineRef[] {
+function extractInlineRefs(rawContent: string): ReadonlyArray<InlineRef> {
   // Every supported image or file-card form has one of these markers. Most
   // timeline comments have none, so rebuilding a sequence need not parse them.
   if (
@@ -216,6 +221,12 @@ function extractInlineRefs(rawContent: string): InlineRef[] {
       !rawContent.includes("!file[") &&
       !/<img\b/i.test(rawContent))
   ) return [];
+  const cached = inlineRefCache.get(rawContent);
+  if (cached) {
+    inlineRefCache.delete(rawContent);
+    inlineRefCache.set(rawContent, cached);
+    return cached;
+  }
   const tree = fromMarkdown(rawContent);
   const refs: InlineRef[] = [];
   type Node = typeof tree | (typeof tree.children)[number];
@@ -293,7 +304,12 @@ function extractInlineRefs(rawContent: string): InlineRef[] {
     });
   }
 
-  return refs.sort((a, b) => a.index - b.index);
+  refs.sort((a, b) => a.index - b.index);
+  inlineRefCache.set(rawContent, refs);
+  if (inlineRefCache.size > INLINE_REF_CACHE_LIMIT) {
+    inlineRefCache.delete(inlineRefCache.keys().next().value!);
+  }
+  return refs;
 }
 
 // Sequence
