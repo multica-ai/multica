@@ -172,6 +172,15 @@ multica issue comment list MUL-123 --thread <comment-id> --tail 5 --output json 
 
 Les listes peuvent aussi se limiter aux champs utiles : `multica issue list --output json --fields id,identifier,title,status`. Le filtrage a lieu dans la CLI : il réduit la sortie et le contexte, pas la requête.
 
+Pour lister les tâches selon leur dernière mise à jour, fournissez ensemble `--updated-since` et `--updated-until` au format RFC3339. Le serveur renvoie les tâches dont la valeur actuelle de `updated_at` est supérieure ou égale à `since` et strictement inférieure à `until` : `[since, until)`. Ces options se combinent avec les filtres, le tri et la pagination existants. Gardez les mêmes bornes entre les pages ; des mises à jour simultanées peuvent modifier les résultats, car la pagination ne fournit pas d'instantané.
+
+```bash
+multica issue list --updated-since 2026-11-05T10:00:00Z \
+  --updated-until 2026-11-05T10:01:00Z \
+  --sort created_at --direction asc --limit 100 --offset 0 \
+  --output json --fields id,workspace_id,project_id,title
+```
+
 ### Réveils
 
 Un réveil lance une exécution ordinaire d'un agent quand un événement se produit, qu'une condition devient vraie ou qu'une heure arrive. Les règles complètes figurent dans [Réveils de tâche](/issue-wakeups).
@@ -355,7 +364,7 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 
 | Commande | Sous-commande | Rôle | Options principales |
 | --- | --- | --- | --- |
-| `issue` | `list` | Lister les tâches | `--status`, `--priority`, `--assignee`, `--project`, `--metadata` (répétable), `--property` (répétable, `"Name=Value"` ; `__none__` correspond à une valeur non définie), `--limit`, `--offset`, `--sort` (y compris `property:<name-or-id>`), `--full-id`, `--resolve-properties` (JSON uniquement ; lignes avec les noms de propriété, d'option et de membre à côté des ID enregistrés), `--fields` (JSON uniquement ; champs à conserver, séparés par des virgules) |
+| `issue` | `list` | Lister les tâches | `--status`, `--priority`, `--assignee`, `--project`, `--updated-since` / `--updated-until` (bornes RFC3339 à fournir ensemble), `--metadata` (répétable), `--property` (répétable, `"Name=Value"` ; `__none__` correspond à une valeur non définie), `--limit`, `--offset`, `--sort` (y compris `property:<name-or-id>`), `--full-id`, `--resolve-properties` (JSON uniquement ; lignes avec les noms de propriété, d'option et de membre à côté des ID enregistrés), `--fields` (JSON uniquement ; champs à conserver, séparés par des virgules) |
 | | `get <id>` | Afficher une tâche | `--resolve-properties` (JSON uniquement ; lignes avec les noms de propriété, d'option et de membre à côté des ID enregistrés) |
 | | `create` | Créer une tâche | `--title` (obligatoire), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (répétable), `--property` (répétable), `--allow-duplicate` (crée même si une tâche ouverte porte le même titre) |
 | | `update <id>` | Mettre à jour les champs d'une tâche | Mêmes champs que `create`, plus `--position`, `--no-start`, `--duplicate-of` |
