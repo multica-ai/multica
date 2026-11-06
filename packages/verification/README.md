@@ -78,6 +78,7 @@ claude mcp add --scope user --transport http multica-verification http://127.0.0
 - `liveReadOnly` 要求 `mode=renderer` 和 backend 来源，启动独立 Chromium 页面显示真实 API 数据；写请求、WebSocket 和其他外部请求被拦截。
 - 分支必须已包含开发验证接点，否则返回 `unsupportedVersion`。
 - 多个环境可同时运行，上限由守护进程配置；启动按顺序执行，避免端口分配冲突。
+- 正常运行的环境只占配置名额；已失败、中断或停止的环境若仍有残留应用或守护进程，须先确认清理，再启动新环境。
 - 验证环境可以和已安装的 Multica 同时运行：开发 Electron 和 bundled daemon 使用环境私有的 HOME（`<环境目录>/runtime-home`）和独立的 daemon 健康端口，不读写已安装 Multica 的运行时注册、CLI 链接、偏好设置和 Codex 配置，并且宿主启动的所有子进程都不继承 `MULTICA_`、`ANTHROPIC_`、`OPENAI_`、`CLAUDE_`、`CODEX_` 开头的变量和 `DESKTOP_APP_SUFFIX`，因此宿主运行在正式 Multica 会话里时，会话身份、daemon 端点和模型凭据都不会传给验证环境。宿主每秒核对已安装 Multica 的运行时文件，发生变化就停止该验证环境。
 
 构建缓存以源码、锁文件、工具/OS/架构版本和构建环境为键，复用 CLI 和原生 helper；Electron/Next 开发服务按本轮源码编译。

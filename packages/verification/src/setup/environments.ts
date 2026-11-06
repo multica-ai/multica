@@ -1325,26 +1325,14 @@ export class Environments {
         environmentSchema,
       );
       if (
-        other &&
-        other.environmentId !== id &&
-        other.components.referenceOnly !== true &&
-        ["starting", "ready", "awaitingUser", "stopping"].includes(other.state)
-      ) {
-        throw new VerificationError(
-          problem(
-            "instanceBusy",
-            "Stop the previous verification environment before starting another",
-            "inspect",
-            [other.environmentId],
-          ),
-        );
-      }
-      if (
         !other ||
         other.environmentId === id ||
-        other.components.referenceOnly === true
+        other.components.referenceOnly === true ||
+        slotStates.has(other.state)
       )
         continue;
+      // Active environments share the configured capacity; only processes
+      // retained outside that lifecycle require cleanup before another start.
       for (const file of [
         "desktop.json",
         "runtime-home/.multica/desktop-runtime/runtime.json",
