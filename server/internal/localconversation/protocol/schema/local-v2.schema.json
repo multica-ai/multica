@@ -1226,6 +1226,17 @@
         },
         "updated_at": {
           "$ref": "#/$defs/timestamp"
+        },
+        "last_turn_sent_at": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Send time of the latest user turn; null before any user turn. Hidden turns and steering do not advance it."
         }
       }
     },

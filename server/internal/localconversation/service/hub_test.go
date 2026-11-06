@@ -274,7 +274,7 @@ func TestScopeSubscriptionRecoversALatePublish(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.commit(t, 1, true)
-	conv2, _ := f.store.Conversation(ctx, "conv-2")
+	conv2, _ := f.store.Summary(ctx, "conv-2")
 	f.hub.Publish("conv-2", store.Committed{Summary: &conv2})
 
 	seen := map[string]bool{}

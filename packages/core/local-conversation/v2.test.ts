@@ -1,10 +1,10 @@
-import { localSubmissionSchema } from "./submission";
 // @vitest-environment node
+import { localSubmissionSchema } from "./submission";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ZodType } from "zod";
-import { localV2ClientMessageSchema, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionGroupsSchema, localV2SessionPageSchema, localV2SnapshotSchema, localV2PromptStatusesSchema, localV2NavigationSchema, localV2NavigationPath } from "./v2";
+import { localV2ClientMessageSchema, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionGroupsSchema, localV2SessionPageSchema, localV2SnapshotSchema, localV2PromptStatusesSchema, localV2NavigationSchema, localV2NavigationPath, localV2SummarySchema } from "./v2";
 
 const root = join(__dirname, "../../../server/internal/localconversation/protocol/testdata/local-v2");
 const schemas: Record<string, ZodType> = { submission:localSubmissionSchema, server_message: localV2ServerMessageSchema, client_message: localV2ClientMessageSchema, hello: localV2HelloSchema, session_groups: localV2SessionGroupsSchema, session_page: localV2SessionPageSchema, navigation: localV2NavigationSchema };
@@ -60,6 +60,16 @@ describe("local conversation v2 wire schemas", () => {
     });
     expect(snapshot.pending_interactions).toEqual([]);
     expect(snapshot.conversation.project_id).toBeNull();
+  });
+
+  it("decodes send time separately from activity and rejects malformed timestamps", () => {
+    const summary = { conversation_id: "c", summary_seq: 1, provider: "codex", title: "", status: "idle", pinned: false, archived: false, updated_at: "2026-11-03T09:02:00Z" };
+    expect(localV2SummarySchema.parse(summary).last_turn_sent_at).toBeUndefined();
+    expect(localV2SummarySchema.parse({ ...summary, last_turn_sent_at: null }).last_turn_sent_at).toBeNull();
+    expect(localV2SummarySchema.parse({ ...summary, last_turn_sent_at: "2026-11-03T09:00:00Z" }).last_turn_sent_at).toBe("2026-11-03T09:00:00Z");
+    for (const value of [42, "yesterday", ""]) {
+      expect(localV2SummarySchema.safeParse({ ...summary, last_turn_sent_at: value }).success).toBe(false);
+    }
   });
 });
 

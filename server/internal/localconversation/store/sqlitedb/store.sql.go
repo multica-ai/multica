@@ -39,7 +39,30 @@ func (q *Queries) AdvanceTurnSeq(ctx context.Context, arg AdvanceTurnSeqParams) 
 }
 
 const browseSessionPage = `-- name: BrowseSessionPage :many
-SELECT c.id, c.scope_id, c.provider, c.provider_session_id, c.title, c.title_mode, c.title_generation, c.cwd, c.model, c.reasoning_effort, c.permission_mode, c.project_id, c.side_source_id, c.side, c.forked_from_id, c.forked_from_turn_id, c.imported_from_session_id, c.pinned, c.archived, c.status, c.last_seq, c.turn_count, c.summary_seq, c.last_message_preview, c.pending_interactions, c.queue_count, c.created_at, c.updated_at, c.background_tasks FROM conversation AS c
+WITH recency AS (
+    SELECT c.id, c.created_at, CAST(COALESCE((
+    SELECT m.created_at FROM message m
+    WHERE m.conversation_id = c.id AND m.role = 'user' AND m.steered = 0
+      AND m.turn_id = (
+          SELECT t.id FROM turn t WHERE t.conversation_id = c.id
+            AND EXISTS (SELECT 1 FROM message input WHERE input.conversation_id = t.conversation_id
+                        AND input.turn_id = t.id AND input.role = 'user' AND input.steered = 0)
+          ORDER BY t.turn_index DESC LIMIT 1
+      )
+    ORDER BY m.created_at, m.id LIMIT 1
+), '') AS TEXT) AS last_turn_sent_at FROM conversation AS c
+    WHERE c.scope_id = ?1
+), sort_keys AS (
+    -- Stored instants are UTC RFC3339Nano. Fixed-width fractions preserve
+    -- nanoseconds in TEXT comparisons, including whole-second timestamps.
+    SELECT id, last_turn_sent_at,
+        substr(COALESCE(NULLIF(last_turn_sent_at, ''), created_at), 1, 19) || '.' ||
+        substr(rtrim(replace(substr(COALESCE(NULLIF(last_turn_sent_at, ''), created_at), 20), '.', ''), 'Z') || '000000000', 1, 9) || 'Z' AS sort_at
+    FROM recency
+)
+SELECT c.id, c.scope_id, c.provider, c.provider_session_id, c.title, c.title_mode, c.title_generation, c.cwd, c.model, c.reasoning_effort, c.permission_mode, c.project_id, c.side_source_id, c.side, c.forked_from_id, c.forked_from_turn_id, c.imported_from_session_id, c.pinned, c.archived, c.status, c.last_seq, c.turn_count, c.summary_seq, c.last_message_preview, c.pending_interactions, c.queue_count, c.created_at, c.updated_at, c.background_tasks, CAST(r.last_turn_sent_at AS TEXT) AS last_turn_sent_at
+FROM conversation AS c
+JOIN sort_keys AS r ON r.id = c.id
 LEFT JOIN folder_project AS f ON f.scope_id = c.scope_id
   AND rtrim(f.path, '/\') = rtrim(c.cwd, '/\')
   AND (rtrim(f.path, '/\') <> '' OR f.path = c.cwd)
@@ -53,27 +76,32 @@ WHERE c.scope_id = ?1 AND c.archived = ?2
     OR instr(lower(COALESCE(f.title, '')), lower(?7)) > 0
     OR instr(lower(COALESCE(f.path, '')), lower(?7)) > 0)
   AND (?8 = '' OR c.pinned < ?9
-    OR (c.pinned = ?9 AND c.updated_at < ?10)
-    OR (c.pinned = ?9 AND c.updated_at = ?10 AND c.id > ?8))
-ORDER BY c.pinned DESC, c.updated_at DESC, c.id
+    OR (c.pinned = ?9 AND r.sort_at < CAST(?10 AS TEXT))
+    OR (c.pinned = ?9 AND r.sort_at = CAST(?10 AS TEXT) AND c.id > ?8))
+ORDER BY c.pinned DESC, r.sort_at DESC, c.id
 LIMIT ?11
 `
 
 type BrowseSessionPageParams struct {
-	ScopeID         int64
-	Archived        int64
-	FilterGroup     interface{}
-	GroupID         string
-	ExcludeID       string
-	SourceID        interface{}
-	Search          interface{}
-	CursorID        interface{}
-	CursorPinned    int64
-	CursorUpdatedAt string
-	RowLimit        int64
+	ScopeID      int64
+	Archived     int64
+	FilterGroup  interface{}
+	GroupID      string
+	ExcludeID    string
+	SourceID     interface{}
+	Search       interface{}
+	CursorID     interface{}
+	CursorPinned int64
+	CursorSortAt string
+	RowLimit     int64
 }
 
-func (q *Queries) BrowseSessionPage(ctx context.Context, arg BrowseSessionPageParams) ([]Conversation, error) {
+type BrowseSessionPageRow struct {
+	Conversation   Conversation
+	LastTurnSentAt string
+}
+
+func (q *Queries) BrowseSessionPage(ctx context.Context, arg BrowseSessionPageParams) ([]BrowseSessionPageRow, error) {
 	rows, err := q.db.QueryContext(ctx, browseSessionPage,
 		arg.ScopeID,
 		arg.Archived,
@@ -84,46 +112,47 @@ func (q *Queries) BrowseSessionPage(ctx context.Context, arg BrowseSessionPagePa
 		arg.Search,
 		arg.CursorID,
 		arg.CursorPinned,
-		arg.CursorUpdatedAt,
+		arg.CursorSortAt,
 		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Conversation{}
+	items := []BrowseSessionPageRow{}
 	for rows.Next() {
-		var i Conversation
+		var i BrowseSessionPageRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.ScopeID,
-			&i.Provider,
-			&i.ProviderSessionID,
-			&i.Title,
-			&i.TitleMode,
-			&i.TitleGeneration,
-			&i.Cwd,
-			&i.Model,
-			&i.ReasoningEffort,
-			&i.PermissionMode,
-			&i.ProjectID,
-			&i.SideSourceID,
-			&i.Side,
-			&i.ForkedFromID,
-			&i.ForkedFromTurnID,
-			&i.ImportedFromSessionID,
-			&i.Pinned,
-			&i.Archived,
-			&i.Status,
-			&i.LastSeq,
-			&i.TurnCount,
-			&i.SummarySeq,
-			&i.LastMessagePreview,
-			&i.PendingInteractions,
-			&i.QueueCount,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.BackgroundTasks,
+			&i.Conversation.ID,
+			&i.Conversation.ScopeID,
+			&i.Conversation.Provider,
+			&i.Conversation.ProviderSessionID,
+			&i.Conversation.Title,
+			&i.Conversation.TitleMode,
+			&i.Conversation.TitleGeneration,
+			&i.Conversation.Cwd,
+			&i.Conversation.Model,
+			&i.Conversation.ReasoningEffort,
+			&i.Conversation.PermissionMode,
+			&i.Conversation.ProjectID,
+			&i.Conversation.SideSourceID,
+			&i.Conversation.Side,
+			&i.Conversation.ForkedFromID,
+			&i.Conversation.ForkedFromTurnID,
+			&i.Conversation.ImportedFromSessionID,
+			&i.Conversation.Pinned,
+			&i.Conversation.Archived,
+			&i.Conversation.Status,
+			&i.Conversation.LastSeq,
+			&i.Conversation.TurnCount,
+			&i.Conversation.SummarySeq,
+			&i.Conversation.LastMessagePreview,
+			&i.Conversation.PendingInteractions,
+			&i.Conversation.QueueCount,
+			&i.Conversation.CreatedAt,
+			&i.Conversation.UpdatedAt,
+			&i.Conversation.BackgroundTasks,
+			&i.LastTurnSentAt,
 		); err != nil {
 			return nil, err
 		}
@@ -613,6 +642,65 @@ func (q *Queries) GetConversation(ctx context.Context, id string) (Conversation,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.BackgroundTasks,
+	)
+	return i, err
+}
+
+const getConversationSummary = `-- name: GetConversationSummary :one
+SELECT conversation.id, conversation.scope_id, conversation.provider, conversation.provider_session_id, conversation.title, conversation.title_mode, conversation.title_generation, conversation.cwd, conversation.model, conversation.reasoning_effort, conversation.permission_mode, conversation.project_id, conversation.side_source_id, conversation.side, conversation.forked_from_id, conversation.forked_from_turn_id, conversation.imported_from_session_id, conversation.pinned, conversation.archived, conversation.status, conversation.last_seq, conversation.turn_count, conversation.summary_seq, conversation.last_message_preview, conversation.pending_interactions, conversation.queue_count, conversation.created_at, conversation.updated_at, conversation.background_tasks, CAST(COALESCE((
+    SELECT m.created_at FROM message m
+    WHERE m.conversation_id = conversation.id AND m.role = 'user' AND m.steered = 0
+      AND m.turn_id = (
+          SELECT t.id FROM turn t WHERE t.conversation_id = conversation.id
+            AND EXISTS (SELECT 1 FROM message input WHERE input.conversation_id = t.conversation_id
+                        AND input.turn_id = t.id AND input.role = 'user' AND input.steered = 0)
+          ORDER BY t.turn_index DESC LIMIT 1
+      )
+    ORDER BY m.created_at, m.id LIMIT 1
+), '') AS TEXT) AS last_turn_sent_at FROM conversation WHERE conversation.id = ?
+`
+
+type GetConversationSummaryRow struct {
+	Conversation   Conversation
+	LastTurnSentAt string
+}
+
+// Select the last user turn through turn_order before reading its messages.
+// A history-wide join would sort every message on each summary update.
+func (q *Queries) GetConversationSummary(ctx context.Context, id string) (GetConversationSummaryRow, error) {
+	row := q.db.QueryRowContext(ctx, getConversationSummary, id)
+	var i GetConversationSummaryRow
+	err := row.Scan(
+		&i.Conversation.ID,
+		&i.Conversation.ScopeID,
+		&i.Conversation.Provider,
+		&i.Conversation.ProviderSessionID,
+		&i.Conversation.Title,
+		&i.Conversation.TitleMode,
+		&i.Conversation.TitleGeneration,
+		&i.Conversation.Cwd,
+		&i.Conversation.Model,
+		&i.Conversation.ReasoningEffort,
+		&i.Conversation.PermissionMode,
+		&i.Conversation.ProjectID,
+		&i.Conversation.SideSourceID,
+		&i.Conversation.Side,
+		&i.Conversation.ForkedFromID,
+		&i.Conversation.ForkedFromTurnID,
+		&i.Conversation.ImportedFromSessionID,
+		&i.Conversation.Pinned,
+		&i.Conversation.Archived,
+		&i.Conversation.Status,
+		&i.Conversation.LastSeq,
+		&i.Conversation.TurnCount,
+		&i.Conversation.SummarySeq,
+		&i.Conversation.LastMessagePreview,
+		&i.Conversation.PendingInteractions,
+		&i.Conversation.QueueCount,
+		&i.Conversation.CreatedAt,
+		&i.Conversation.UpdatedAt,
+		&i.Conversation.BackgroundTasks,
+		&i.LastTurnSentAt,
 	)
 	return i, err
 }
@@ -1917,7 +2005,17 @@ func (q *Queries) ListScopeConversations(ctx context.Context, scopeID int64) ([]
 }
 
 const listSummariesAfter = `-- name: ListSummariesAfter :many
-SELECT id, scope_id, provider, provider_session_id, title, title_mode, title_generation, cwd, model, reasoning_effort, permission_mode, project_id, side_source_id, side, forked_from_id, forked_from_turn_id, imported_from_session_id, pinned, archived, status, last_seq, turn_count, summary_seq, last_message_preview, pending_interactions, queue_count, created_at, updated_at, background_tasks FROM conversation
+SELECT conversation.id, conversation.scope_id, conversation.provider, conversation.provider_session_id, conversation.title, conversation.title_mode, conversation.title_generation, conversation.cwd, conversation.model, conversation.reasoning_effort, conversation.permission_mode, conversation.project_id, conversation.side_source_id, conversation.side, conversation.forked_from_id, conversation.forked_from_turn_id, conversation.imported_from_session_id, conversation.pinned, conversation.archived, conversation.status, conversation.last_seq, conversation.turn_count, conversation.summary_seq, conversation.last_message_preview, conversation.pending_interactions, conversation.queue_count, conversation.created_at, conversation.updated_at, conversation.background_tasks, CAST(COALESCE((
+    SELECT m.created_at FROM message m
+    WHERE m.conversation_id = conversation.id AND m.role = 'user' AND m.steered = 0
+      AND m.turn_id = (
+          SELECT t.id FROM turn t WHERE t.conversation_id = conversation.id
+            AND EXISTS (SELECT 1 FROM message input WHERE input.conversation_id = t.conversation_id
+                        AND input.turn_id = t.id AND input.role = 'user' AND input.steered = 0)
+          ORDER BY t.turn_index DESC LIMIT 1
+      )
+    ORDER BY m.created_at, m.id LIMIT 1
+), '') AS TEXT) AS last_turn_sent_at FROM conversation
 WHERE scope_id = ?1 AND summary_seq > ?2
 ORDER BY summary_seq
 LIMIT ?3
@@ -1929,45 +2027,51 @@ type ListSummariesAfterParams struct {
 	RowLimit      int64
 }
 
-func (q *Queries) ListSummariesAfter(ctx context.Context, arg ListSummariesAfterParams) ([]Conversation, error) {
+type ListSummariesAfterRow struct {
+	Conversation   Conversation
+	LastTurnSentAt string
+}
+
+func (q *Queries) ListSummariesAfter(ctx context.Context, arg ListSummariesAfterParams) ([]ListSummariesAfterRow, error) {
 	rows, err := q.db.QueryContext(ctx, listSummariesAfter, arg.ScopeID, arg.AfterScopeSeq, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Conversation{}
+	items := []ListSummariesAfterRow{}
 	for rows.Next() {
-		var i Conversation
+		var i ListSummariesAfterRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.ScopeID,
-			&i.Provider,
-			&i.ProviderSessionID,
-			&i.Title,
-			&i.TitleMode,
-			&i.TitleGeneration,
-			&i.Cwd,
-			&i.Model,
-			&i.ReasoningEffort,
-			&i.PermissionMode,
-			&i.ProjectID,
-			&i.SideSourceID,
-			&i.Side,
-			&i.ForkedFromID,
-			&i.ForkedFromTurnID,
-			&i.ImportedFromSessionID,
-			&i.Pinned,
-			&i.Archived,
-			&i.Status,
-			&i.LastSeq,
-			&i.TurnCount,
-			&i.SummarySeq,
-			&i.LastMessagePreview,
-			&i.PendingInteractions,
-			&i.QueueCount,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.BackgroundTasks,
+			&i.Conversation.ID,
+			&i.Conversation.ScopeID,
+			&i.Conversation.Provider,
+			&i.Conversation.ProviderSessionID,
+			&i.Conversation.Title,
+			&i.Conversation.TitleMode,
+			&i.Conversation.TitleGeneration,
+			&i.Conversation.Cwd,
+			&i.Conversation.Model,
+			&i.Conversation.ReasoningEffort,
+			&i.Conversation.PermissionMode,
+			&i.Conversation.ProjectID,
+			&i.Conversation.SideSourceID,
+			&i.Conversation.Side,
+			&i.Conversation.ForkedFromID,
+			&i.Conversation.ForkedFromTurnID,
+			&i.Conversation.ImportedFromSessionID,
+			&i.Conversation.Pinned,
+			&i.Conversation.Archived,
+			&i.Conversation.Status,
+			&i.Conversation.LastSeq,
+			&i.Conversation.TurnCount,
+			&i.Conversation.SummarySeq,
+			&i.Conversation.LastMessagePreview,
+			&i.Conversation.PendingInteractions,
+			&i.Conversation.QueueCount,
+			&i.Conversation.CreatedAt,
+			&i.Conversation.UpdatedAt,
+			&i.Conversation.BackgroundTasks,
+			&i.LastTurnSentAt,
 		); err != nil {
 			return nil, err
 		}

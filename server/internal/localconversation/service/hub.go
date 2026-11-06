@@ -23,7 +23,7 @@ var (
 type Source interface {
 	LastSeq(ctx context.Context, conversationID string) (int64, error)
 	EventsAfter(ctx context.Context, conversationID string, afterSeq, throughSeq int64, limit int) ([]sqlitedb.Event, error)
-	SummariesAfter(ctx context.Context, scopeID, afterScopeSeq int64, limit int) ([]sqlitedb.Conversation, int64, error)
+	SummariesAfter(ctx context.Context, scopeID, afterScopeSeq int64, limit int) ([]store.ConversationSummary, int64, error)
 }
 
 // HubOptions bounds subscriptions. Zero values use the plan's starting
@@ -66,7 +66,7 @@ type Subscription struct {
 // ScopeSubscription delivers changed conversation summaries of one scope.
 // A summary replaces any earlier summary of the same conversation.
 type ScopeSubscription struct {
-	stream[sqlitedb.Conversation]
+	stream[store.ConversationSummary]
 	scopeID int64
 }
 
@@ -119,8 +119,8 @@ func (h *Hub) SubscribeScope(ctx context.Context, scopeID, afterScopeSeq int64) 
 		h.mu.Unlock()
 		return nil, 0, ErrSnapshotRequired
 	}
-	sub.init(afterScopeSeq, high, h.opts.MaxBufferedBytes, func(c sqlitedb.Conversation) (int64, int) { return c.SummarySeq, 512 })
-	sub.reload = func(after int64) ([]sqlitedb.Conversation, error) {
+	sub.init(afterScopeSeq, high, h.opts.MaxBufferedBytes, func(c store.ConversationSummary) (int64, int) { return c.SummarySeq, 512 })
+	sub.reload = func(after int64) ([]store.ConversationSummary, error) {
 		rows, _, err := h.source.SummariesAfter(context.Background(), scopeID, after, h.opts.PageSize)
 		return rows, err
 	}
@@ -131,7 +131,7 @@ func (h *Hub) SubscribeScope(ctx context.Context, scopeID, afterScopeSeq int64) 
 	sub.onEnd = func() { h.removeScope(sub) }
 	h.mu.Unlock()
 
-	go sub.catchUp(func(after int64) ([]sqlitedb.Conversation, error) {
+	go sub.catchUp(func(after int64) ([]store.ConversationSummary, error) {
 		rows, _, err := h.source.SummariesAfter(context.Background(), scopeID, after, h.opts.PageSize)
 		// Summaries changed after the mark arrive live.
 		for i, row := range rows {
@@ -162,7 +162,7 @@ func (h *Hub) Publish(conversationID string, committed store.Committed) {
 		sub.live(committed.Events)
 	}
 	for _, sub := range scopeSubs {
-		sub.live([]sqlitedb.Conversation{*committed.Summary})
+		sub.live([]store.ConversationSummary{*committed.Summary})
 	}
 }
 

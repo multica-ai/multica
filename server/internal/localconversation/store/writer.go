@@ -77,7 +77,7 @@ type SummaryPatch struct {
 	QueueCount          *int64
 	BackgroundTasks     *int64
 	UpdatedAt           time.Time
-	// KeepRecency leaves updated_at, which orders the list, unchanged.
+	// KeepRecency leaves the activity timestamp unchanged.
 	KeepRecency bool
 }
 
@@ -160,7 +160,7 @@ type Committed struct {
 	// ScopeSeq is the new scope sequence when the summary changed, else 0.
 	ScopeSeq int64
 	// Summary is the conversation row after the batch when the summary changed.
-	Summary *sqlitedb.Conversation
+	Summary *ConversationSummary
 }
 
 // WriterOptions bounds the writer.
@@ -585,7 +585,11 @@ func applyBatch(ctx context.Context, q *sqlitedb.Queries, b Batch) (Committed, e
 			return Committed{}, err
 		}
 		committed.ScopeSeq = scopeSeq
-		committed.Summary = &next
+		row, err := q.GetConversationSummary(ctx, conv.ID)
+		if err != nil {
+			return Committed{}, err
+		}
+		committed.Summary = &ConversationSummary{Conversation: row.Conversation, LastTurnSentAt: row.LastTurnSentAt}
 	}
 	return committed, nil
 }

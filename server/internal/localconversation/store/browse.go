@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/localconversation/store/sqlitedb"
 )
@@ -19,9 +20,9 @@ type SessionBrowseFilter struct {
 }
 
 type SessionBrowsePosition struct {
-	ID        string `json:"id"`
-	Pinned    int64  `json:"pinned"`
-	UpdatedAt string `json:"updated_at"`
+	ID     string `json:"id"`
+	Pinned int64  `json:"pinned"`
+	SortAt string `json:"sort_at"`
 }
 
 type SessionBrowseGroup struct {
@@ -73,9 +74,18 @@ func (s *Store) SessionGroups(ctx context.Context, scopeID int64, filter Session
 
 // SessionPage uses a seek position so tied timestamps and changing counts do
 // not turn the page number into a different offset. Read one lookahead row.
-func (s *Store) SessionPage(ctx context.Context, scopeID int64, filter SessionBrowseFilter, after SessionBrowsePosition, limit int) ([]sqlitedb.Conversation, int64, bool, error) {
+func (s *Store) SessionPage(ctx context.Context, scopeID int64, filter SessionBrowseFilter, after SessionBrowsePosition, limit int) ([]ConversationSummary, int64, bool, error) {
 	if limit < 1 || limit > 100 {
 		return nil, 0, false, errors.New("invalid session page size")
+	}
+	sortAt := ""
+	if after.ID != "" {
+		at, err := time.Parse(time.RFC3339Nano, after.SortAt)
+		if err != nil {
+			return nil, 0, false, errors.New("invalid session cursor time")
+		}
+		// Match the fixed-width UTC key used by BrowseSessionPage.
+		sortAt = at.UTC().Format("2006-01-02T15:04:05.000000000Z")
 	}
 	tx, err := s.read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -94,7 +104,7 @@ func (s *Store) SessionPage(ctx context.Context, scopeID int64, filter SessionBr
 	if filter.GroupID != nil {
 		groupID = *filter.GroupID
 	}
-	rows, err := q.BrowseSessionPage(ctx, sqlitedb.BrowseSessionPageParams{ScopeID: scopeID, Archived: boolInt(filter.Archived), FilterGroup: boolInt(filter.GroupID != nil), GroupID: groupID, ExcludeID: filter.ExcludeID, SourceID: filter.SourceID, Search: filter.Search, CursorID: after.ID, CursorPinned: after.Pinned, CursorUpdatedAt: after.UpdatedAt, RowLimit: int64(limit + 1)})
+	rows, err := q.BrowseSessionPage(ctx, sqlitedb.BrowseSessionPageParams{ScopeID: scopeID, Archived: boolInt(filter.Archived), FilterGroup: boolInt(filter.GroupID != nil), GroupID: groupID, ExcludeID: filter.ExcludeID, SourceID: filter.SourceID, Search: filter.Search, CursorID: after.ID, CursorPinned: after.Pinned, CursorSortAt: sortAt, RowLimit: int64(limit + 1)})
 	if err != nil {
 		return nil, 0, false, err
 	}
@@ -102,5 +112,9 @@ func (s *Store) SessionPage(ctx context.Context, scopeID int64, filter SessionBr
 	if hasMore {
 		rows = rows[:limit]
 	}
-	return rows, seq, hasMore, tx.Commit()
+	summaries := make([]ConversationSummary, len(rows))
+	for i, row := range rows {
+		summaries[i] = ConversationSummary{Conversation: row.Conversation, LastTurnSentAt: row.LastTurnSentAt}
+	}
+	return summaries, seq, hasMore, tx.Commit()
 }

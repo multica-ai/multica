@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalConversationSearch } from "./local-conversation-search";
 
 const labels = { search: "Search conversations", noResults: "No matching conversations", loading: "Loading...", retry: "Retry" };
-const entry = { id: "one", title: "First conversation", preview: "Latest reply", provider: "claude" as const, cwd: "/work", pinned: false, archived: false, projectId: null, running: false, waitingForAnswer: false, backgroundTasks: 0, turnCount: 1, updatedAt: "2026-11-06" };
+const entry = { id: "one", title: "First conversation", preview: "Latest reply", provider: "claude" as const, cwd: "/work", pinned: false, archived: false, projectId: null, running: false, waitingForAnswer: false, backgroundTasks: 0, turnCount: 1, lastTurnSentAt: "2026-11-06T00:00:00Z", updatedAt: "2026-11-06" };
 const props = () => ({ sessions: [entry], projects: [], archived: false, pending: false, error: null, retry: vi.fn(), select: vi.fn(), labels, unassigned: "Unassigned" });
 async function open() {
   fireEvent.click(screen.getByRole("button", { name: labels.search }));

@@ -75,6 +75,42 @@ func TestV2HistoryPagesWithoutCrossingWorkspace(t *testing.T) {
 	}
 }
 
+func TestV2SummaryKeepsTurnSendTimeAfterLateOutput(t *testing.T) {
+	t.Parallel()
+	srv, svc := newV2Server(t)
+	h := v2Headers("user-1")
+	status, _ := v2Do(t, srv, http.MethodPost, "/local/v2/sessions", map[string]any{"id": "recency", "provider": "claude"}, h)
+	if status != http.StatusCreated {
+		t.Fatal(status)
+	}
+	ctx := context.Background()
+	w := svc.Store().NewWriter(store.WriterOptions{})
+	defer w.Close()
+	sent := time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC)
+	late := sent.Add(2 * time.Minute)
+	for _, batch := range []store.Batch{
+		{ConversationID: "recency", StartTurn: &store.NewTurn{ID: "recency-turn", StartedAt: sent},
+			Messages: []store.NewMessage{{ID: "recency-user", TurnID: "recency-turn", Role: "user", Content: "hello", CreatedAt: sent}},
+			Summary:  &store.SummaryPatch{UpdatedAt: sent}},
+		{ConversationID: "recency", Messages: []store.NewMessage{{ID: "recency-reply", TurnID: "recency-turn", Role: "assistant", Content: "late reply", CreatedAt: late}},
+			CompleteTurn: &store.TurnCompletion{TurnID: "recency-turn", Status: "completed", CompletedAt: late},
+			Summary:      &store.SummaryPatch{UpdatedAt: late}},
+	} {
+		if _, err := w.Submit(ctx, batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, list := v2Do(t, srv, http.MethodGet, "/local/v2/sessions", nil, h)
+	row := list["summaries"].([]any)[0].(map[string]any)
+	if row["last_turn_sent_at"] != sent.Format(time.RFC3339Nano) || row["updated_at"] != late.Format(time.RFC3339Nano) {
+		t.Fatalf("summary must separate send and activity times: %v", row)
+	}
+	_, snap := v2Do(t, srv, http.MethodGet, "/local/v2/sessions/recency/snapshot", nil, h)
+	if snap["conversation"].(map[string]any)["last_turn_sent_at"] != row["last_turn_sent_at"] {
+		t.Fatalf("snapshot disagrees with list: %v", snap)
+	}
+}
+
 func TestV2AttachmentMetadataIsScoped(t *testing.T) {
 	t.Parallel()
 	srv, svc := newV2Server(t)

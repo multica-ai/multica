@@ -101,12 +101,12 @@ func (s *Service) Create(ctx context.Context, cmd CreateCommand) (sqlitedb.Conve
 // publishCreated announces a conversation created outside the writer to
 // live list subscribers and returns it.
 func (s *Service) publishCreated(ctx context.Context, id string) (sqlitedb.Conversation, error) {
-	conv, err := s.store.Conversation(ctx, id)
+	summary, err := s.store.Summary(ctx, id)
 	if err != nil {
-		return conv, err
+		return sqlitedb.Conversation{}, err
 	}
-	s.hub.Publish(id, store.Committed{Summary: &conv})
-	return conv, nil
+	s.hub.Publish(id, store.Committed{Summary: &summary})
+	return summary.Conversation, nil
 }
 
 // MetadataUpdate changes how a conversation is listed. Nil fields keep

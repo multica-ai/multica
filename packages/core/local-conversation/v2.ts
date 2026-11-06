@@ -52,6 +52,8 @@ export const localV2SummarySchema = z.object({
   turn_count: z.number().int().default(0),
   created_at: z.string().optional(),
   updated_at: z.string(),
+  /** Latest user turn's send time; null before any user turn, absent on older daemons. */
+  last_turn_sent_at: z.string().datetime({ offset: true }).nullable().optional(),
 });
 export type LocalV2Summary = z.infer<typeof localV2SummarySchema>;
 

@@ -30,9 +30,24 @@ type ItemStart struct {
 	CreatedAt string
 }
 
+// ConversationSummary adds derived list metadata without changing stored activity time.
+type ConversationSummary struct {
+	sqlitedb.Conversation
+	LastTurnSentAt string
+}
+
+// Summary reads a conversation and its latest user turn's send time together.
+func (s *Store) Summary(ctx context.Context, conversationID string) (ConversationSummary, error) {
+	row, err := sqlitedb.New(s.read).GetConversationSummary(ctx, conversationID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ConversationSummary{}, fmt.Errorf("%w: conversation %s", ErrNotFound, conversationID)
+	}
+	return ConversationSummary{Conversation: row.Conversation, LastTurnSentAt: row.LastTurnSentAt}, err
+}
+
 // Snapshot is a bounded first screen of a conversation.
 type Snapshot struct {
-	Conversation        sqlitedb.Conversation
+	Conversation        ConversationSummary
 	Turns               []TurnView
 	PendingInteractions []sqlitedb.InteractionRequest
 	// SnapshotSeq is the last event included; subscribe with after_seq set to it.
@@ -57,7 +72,7 @@ func (s *Store) Snapshot(ctx context.Context, conversationID string, turnLimit i
 	defer tx.Rollback()
 	q := sqlitedb.New(tx)
 
-	conv, err := q.GetConversation(ctx, conversationID)
+	row, err := q.GetConversationSummary(ctx, conversationID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Snapshot{}, fmt.Errorf("%w: conversation %s", ErrNotFound, conversationID)
 	}
@@ -106,6 +121,7 @@ func (s *Store) Snapshot(ctx context.Context, conversationID string, turnLimit i
 		}
 		submissions = append(submissions, v)
 	}
+	conv := ConversationSummary{Conversation: row.Conversation, LastTurnSentAt: row.LastTurnSentAt}
 	snap := Snapshot{Queue: queue, Submissions: submissions, Conversation: conv, Turns: views, PendingInteractions: pending, SnapshotSeq: conv.LastSeq, OpenBackgroundItems: openOutside}
 	if len(turns) > 0 {
 		snap.HasOlderTurns = turns[len(turns)-1].TurnIndex > 0
@@ -142,7 +158,7 @@ func (s *Store) EventsAfter(ctx context.Context, conversationID string, afterSeq
 
 // SummariesAfter returns conversation summaries changed after afterScopeSeq,
 // oldest change first, and the scope's current sequence.
-func (s *Store) SummariesAfter(ctx context.Context, scopeID, afterScopeSeq int64, limit int) ([]sqlitedb.Conversation, int64, error) {
+func (s *Store) SummariesAfter(ctx context.Context, scopeID, afterScopeSeq int64, limit int) ([]ConversationSummary, int64, error) {
 	tx, err := s.read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, 0, err
@@ -160,7 +176,11 @@ func (s *Store) SummariesAfter(ctx context.Context, scopeID, afterScopeSeq int64
 	if err != nil {
 		return nil, 0, err
 	}
-	return rows, scopeSeq, tx.Commit()
+	summaries := make([]ConversationSummary, len(rows))
+	for i, row := range rows {
+		summaries[i] = ConversationSummary{Conversation: row.Conversation, LastTurnSentAt: row.LastTurnSentAt}
+	}
+	return summaries, scopeSeq, tx.Commit()
 }
 
 // RunningTurns lists turns still marked running, for restart reconciliation.

@@ -1,6 +1,6 @@
 import type { ConversationListModel } from "@multica/conversation-client/models";
 import { comparer, computed, makeObservable, type IComputedValue } from "mobx";
-import { sessionEntry, type LocalSessionEntry } from "./local-conversation-projects";
+import { compareLocalConversations, sessionEntry, type LocalSessionEntry } from "./local-conversation-projects";
 
 type Summary = Pick<LocalSessionEntry, "id" | "title" | "provider" | "pinned" | "preview" | "waitingForAnswer" | "running" | "backgroundTasks"> & { hasUnreadCompletion: boolean };
 type Activity = Pick<Summary, "id" | "title" | "provider" | "waitingForAnswer" | "running" | "backgroundTasks"> & { hasUnreadCompletion: boolean };
@@ -19,7 +19,7 @@ export class LocalConversationListModel {
     return this.source.summaries
       .filter((summary) => !summary.side_source_id && summary.turn_count > 0)
       .map((summary) => this.entry(summary.conversation_id)!)
-      .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt.localeCompare(a.updatedAt));
+      .sort(compareLocalConversations);
   }
 
   entry(id: string): LocalSessionEntry | undefined {

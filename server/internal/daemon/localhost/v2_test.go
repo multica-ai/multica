@@ -310,6 +310,7 @@ func TestV2ScopeSubscriptionStreamsSummaries(t *testing.T) {
 
 	_ = ws.SetReadDeadline(time.Now().Add(5 * time.Second))
 	seen := map[string]bool{}
+	var sentAt string
 	for !seen["idle"] || !seen["running"] {
 		var raw json.RawMessage
 		if err := ws.ReadJSON(&raw); err != nil {
@@ -321,13 +322,24 @@ func TestV2ScopeSubscriptionStreamsSummaries(t *testing.T) {
 		}
 		var msg struct {
 			Summaries []struct {
-				Status string `json:"status"`
+				Status         string `json:"status"`
+				TurnCount      int64  `json:"turn_count"`
+				LastTurnSentAt string `json:"last_turn_sent_at"`
 			} `json:"summaries"`
 		}
 		_ = json.Unmarshal(raw, &msg)
 		for _, s := range msg.Summaries {
+			if s.TurnCount > 0 {
+				if s.LastTurnSentAt == "" || (sentAt != "" && sentAt != s.LastTurnSentAt) {
+					t.Fatalf("scope stream changed send time: %q -> %q", sentAt, s.LastTurnSentAt)
+				}
+				sentAt = s.LastTurnSentAt
+			}
 			seen[s.Status] = true
 		}
+	}
+	if sentAt == "" {
+		t.Fatal("scope stream omitted the user turn send time")
 	}
 }
 

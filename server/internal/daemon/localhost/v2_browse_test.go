@@ -2,6 +2,8 @@ package localhost
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -187,5 +189,78 @@ func TestV2ScopedHelloStartsLiveListingWithoutReplayingTheDirectory(t *testing.T
 	bad.Set(headerUserID, "other-user")
 	if status, _ := v2Do(t, srv, http.MethodGet, "/local/v2/hello?scoped=true", nil, bad); status != http.StatusForbidden {
 		t.Fatalf("foreign scoped hello = %d", status)
+	}
+}
+
+func TestV2SessionBrowseKeepsLateOutputBehindTheSendTimeCursor(t *testing.T) {
+	t.Parallel()
+	srv, svc := newV2Server(t)
+	h := v2Headers("user-1")
+	ctx := context.Background()
+	w := svc.Store().NewWriter(store.WriterOptions{})
+	defer w.Close()
+	at := time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC)
+	for i, id := range []string{"a", "b", "c"} {
+		status, _ := v2Do(t, srv, http.MethodPost, "/local/v2/sessions", map[string]any{"id": id, "provider": "claude"}, h)
+		if status != http.StatusCreated {
+			t.Fatal(status)
+		}
+		sent := at.Add(time.Duration(i) * time.Minute)
+		_, err := w.Submit(ctx, store.Batch{ConversationID: id, StartTurn: &store.NewTurn{ID: id + "-turn", StartedAt: sent},
+			Messages: []store.NewMessage{{ID: id + "-user", TurnID: id + "-turn", Role: "user", CreatedAt: sent}}, Summary: &store.SummaryPatch{UpdatedAt: sent}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	cursor := ""
+	for i, want := range []string{"c", "b", "a"} {
+		status, page := v2Do(t, srv, http.MethodGet, "/local/v2/sessions/browse?limit=1&cursor="+url.QueryEscape(cursor), nil, h)
+		if status != http.StatusOK {
+			t.Fatalf("page = %d %v", status, page)
+		}
+		rows := page["summaries"].([]any)
+		if len(rows) != 1 || rows[0].(map[string]any)["conversation_id"] != want {
+			t.Fatalf("page %d = %v, want %s", i, rows, want)
+		}
+		if i < 2 {
+			next, ok := page["next_cursor"].(string)
+			if !ok || next == "" {
+				t.Fatalf("page %d lost the remaining user turns: %v", i, page)
+			}
+			cursor = next
+		} else if page["next_cursor"] != nil {
+			t.Fatalf("last page = %v", page)
+		}
+		if i == 0 {
+			data, err := base64.RawURLEncoding.DecodeString(cursor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var old sessionBrowseCursor
+			if err := json.Unmarshal(data, &old); err != nil {
+				t.Fatal(err)
+			}
+			old.Version = 1
+			data, err = json.Marshal(old)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status, _ := v2Do(t, srv, http.MethodGet, "/local/v2/sessions/browse?cursor="+base64.RawURLEncoding.EncodeToString(data), nil, h); status != http.StatusBadRequest {
+				t.Fatalf("activity-based cursor accepted: %d", status)
+			}
+			old.Version = 2
+			old.Position.SortAt = "not-a-timestamp"
+			data, err = json.Marshal(old)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status, _ := v2Do(t, srv, http.MethodGet, "/local/v2/sessions/browse?cursor="+base64.RawURLEncoding.EncodeToString(data), nil, h); status != http.StatusBadRequest {
+				t.Fatalf("malformed cursor time accepted: %d", status)
+			}
+			_, err = w.Submit(ctx, store.Batch{ConversationID: "a", CompleteTurn: &store.TurnCompletion{TurnID: "a-turn", Status: "completed", CompletedAt: at.Add(time.Hour)}, Summary: &store.SummaryPatch{UpdatedAt: at.Add(time.Hour)}})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 }

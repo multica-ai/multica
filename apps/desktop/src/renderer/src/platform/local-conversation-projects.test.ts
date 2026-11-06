@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { LocalFolderProject } from "@multica/core/local-conversation/protocol";
-import { groupLocalConversations, projectForDirectory, type LocalSessionEntry } from "./local-conversation-projects";
+import { localV2SummarySchema } from "@multica/core/local-conversation/v2";
+import { compareLocalConversations, groupLocalConversations, projectForDirectory, sessionEntry, type LocalSessionEntry } from "./local-conversation-projects";
 
 const projects = [{ id: "a", title: "Shared title", path: "/repo-a" }, { id: "b", title: "Shared title", path: "/repo-b" }] as LocalFolderProject[];
 const session = (id: string, cwd = "/unregistered", archived = false) => ({ id, title: id, provider: "codex", cwd, archived, pinned: false, projectId: null, running: false, waitingForAnswer: false, preview: "", turnCount: 0, updatedAt: "" }) as LocalSessionEntry;
@@ -19,6 +20,46 @@ describe("local conversation folder grouping", () => {
     expect(groups.map((group) => [group.id, group.sessions.map((entry) => entry.id)])).toEqual([["a", ["explicit"]], ["b", []], [null, ["default", "legacy"]]]);
     expect(groups.at(-1)?.project).toBe(defaultProject);
     expect(rows).toEqual(original);
+  });
+  it("orders by send time through late output, completion, and a new turn while keeping pinned and archive boundaries", () => {
+    const row = (id: string, sent: string, activity = sent, pinned = false, archived = false) => sessionEntry(localV2SummarySchema.parse({
+      conversation_id: id, summary_seq: 1, provider: "codex", title: id, cwd: "/repo-a", status: "idle", pinned, archived,
+      turn_count: 1, last_turn_sent_at: sent, updated_at: activity,
+    }));
+    const a = row("a", "2026-11-03T09:00:00Z", "2026-11-03T09:02:00Z");
+    const b = row("b", "2026-11-03T09:01:00Z");
+    const pinned = row("pinned", "2026-11-02T00:00:00Z", undefined, true);
+    const archived = row("archived", "2026-11-03T10:00:00Z", undefined, false, true);
+    const ids = (rows: LocalSessionEntry[], archive = false) => groupLocalConversations(rows.sort(compareLocalConversations), projects, archive, "")[0]!.sessions.map((entry) => entry.id);
+    expect(ids([a, b, pinned, archived])).toEqual(["pinned", "b", "a"]);
+    expect(ids([a, b, pinned, archived], true)).toEqual(["archived"]);
+    expect(ids([{ ...a, lastTurnSentAt: "2026-11-03T09:03:00Z" }, b, pinned])).toEqual(["pinned", "a", "b"]);
+  });
+  it("compares instants with fractional seconds and offsets, with deterministic ties", () => {
+    const rows = [
+      { ...session("a"), lastTurnSentAt: "2026-11-03T09:00:00Z" },
+      { ...session("b"), lastTurnSentAt: "2026-11-03T09:00:00.100Z" },
+      { ...session("c"), lastTurnSentAt: "2026-11-03T10:00:00.100+01:00" },
+    ];
+    expect(rows.sort(compareLocalConversations).map((entry) => entry.id)).toEqual(["b", "c", "a"]);
+  });
+  it("preserves nanosecond send order within a millisecond", () => {
+    const rows = [
+      { ...session("a"), lastTurnSentAt: "2026-11-06T09:00:00Z" },
+      { ...session("b"), lastTurnSentAt: "2026-11-06T09:00:00.000000001Z" },
+      { ...session("c"), lastTurnSentAt: "2026-11-06T09:00:00.000000100Z" },
+    ];
+    expect(rows.sort(compareLocalConversations).map((entry) => entry.id)).toEqual(["c", "b", "a"]);
+    expect(compareLocalConversations(
+      { ...session("a"), lastTurnSentAt: "2026-11-06T09:00:00.1Z" },
+      { ...session("b"), lastTurnSentAt: "2026-11-06T10:00:00.100000000+01:00" },
+    )).toBeLessThan(0);
+  });
+  it("uses activity time only for older daemons and creation time for an explicit empty user history", () => {
+    const summary = localV2SummarySchema.parse({ conversation_id: "c", summary_seq: 1, provider: "claude", title: "", status: "idle", pinned: false, archived: false,
+      created_at: "2026-11-01T00:00:00Z", updated_at: "2026-11-03T00:00:00Z" });
+    expect(sessionEntry(summary).lastTurnSentAt).toBe(summary.updated_at);
+    expect(sessionEntry({ ...summary, last_turn_sent_at: null }).lastTurnSentAt).toBe(summary.created_at);
   });
   it("groups by working directory, preserves session ordering, and puts unregistered directories last", () => {
     const groups = groupLocalConversations([session("b-pinned", "/repo-b"), session("legacy"), session("a", "/repo-a"), session("b-recent", "/repo-b/"), session("cleared"), session("archived", "/repo-a", true)], projects, false, "");

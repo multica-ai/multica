@@ -1,0 +1,24 @@
+{
+  "version": 2,
+  "type": "scope.summaries",
+  "scope_seq": 88,
+  "summaries": [
+    {
+      "conversation_id": "conv-1",
+      "summary_seq": 88,
+      "provider": "claude",
+      "title": "排查崩溃",
+      "status": "running",
+      "cwd": "/repo",
+      "project_id": null,
+      "pinned": false,
+      "archived": false,
+      "last_message_preview": "测试全部通过。",
+      "pending_interactions": 1,
+      "queue_count": 0,
+      "background_tasks": 1,
+      "updated_at": "2026-10-29T12:00:00Z",
+      "last_turn_sent_at": null
+    }
+  ]
+}

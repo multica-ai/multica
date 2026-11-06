@@ -478,7 +478,7 @@ func (v *V2) createSession(w http.ResponseWriter, r *http.Request, scopeID int64
 		writeV2Error(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, summaryDTO(conv))
+	v.writeConversationSummary(w, r, http.StatusCreated, conv.ID)
 }
 
 func (v *V2) snapshot(w http.ResponseWriter, r *http.Request, scopeID int64, id string) {
@@ -723,14 +723,14 @@ func (v *V2) command(w http.ResponseWriter, r *http.Request, scopeID int64, id s
 			writeV2Error(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, summaryDTO(conv))
+		v.writeConversationSummary(w, r, http.StatusOK, conv.ID)
 	case "set_directory":
 		conv, err := v.svc.SetDirectory(r.Context(), scopeID, id, body.Cwd)
 		if err != nil {
 			writeV2Error(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, summaryDTO(conv))
+		v.writeConversationSummary(w, r, http.StatusOK, conv.ID)
 	case "side_workspace_sync":
 		var ws service.SideWorkspace
 		if err := json.Unmarshal(body.Workspace, &ws); err != nil {
@@ -750,21 +750,21 @@ func (v *V2) command(w http.ResponseWriter, r *http.Request, scopeID int64, id s
 			writeV2Error(w, err)
 			return
 		}
-		writeJSON(w, http.StatusCreated, summaryDTO(conv))
+		v.writeConversationSummary(w, r, http.StatusCreated, conv.ID)
 	case "queue_side":
 		conv, err := v.svc.QueueToSide(r.Context(), scopeID, id, body.RequestID)
 		if err != nil {
 			writeV2Error(w, err)
 			return
 		}
-		writeJSON(w, http.StatusCreated, summaryDTO(conv))
+		v.writeConversationSummary(w, r, http.StatusCreated, conv.ID)
 	case "fork":
 		conv, err := v.svc.Fork(r.Context(), service.ForkCommand{ScopeID: scopeID, SourceID: id, TurnID: body.TurnID, RequestID: body.RequestID})
 		if err != nil {
 			writeV2Error(w, err)
 			return
 		}
-		writeJSON(w, http.StatusCreated, summaryDTO(conv))
+		v.writeConversationSummary(w, r, http.StatusCreated, conv.ID)
 	case "submit":
 		result, err := v.svc.Submit(r.Context(), scopeID, id, body.Item, callerOf(r.Context()).origin())
 		if err != nil {
@@ -780,7 +780,7 @@ func (v *V2) command(w http.ResponseWriter, r *http.Request, scopeID int64, id s
 		}
 		writeJSON(w, http.StatusOK, queue)
 	case "queue_update":
-		queue, err := v.svc.ControlQueue(r.Context(), scopeID, id, body.Action, body.RequestID, body.OperationID,body.TurnID)
+		queue, err := v.svc.ControlQueue(r.Context(), scopeID, id, body.Action, body.RequestID, body.OperationID, body.TurnID)
 		if err != nil {
 			writeV2Error(w, err)
 			return
@@ -1040,13 +1040,25 @@ func eventDTO(e store.CommittedEvent) map[string]any {
 	return dto
 }
 
-func summaryDTO(c sqlitedb.Conversation) map[string]any {
+func (v *V2) writeConversationSummary(w http.ResponseWriter, r *http.Request, status int, id string) {
+	summary, err := v.svc.Store().Summary(r.Context(), id)
+	if err != nil {
+		writeV2Error(w, err)
+		return
+	}
+	writeJSON(w, status, summaryDTO(summary))
+}
+
+func summaryDTO(c store.ConversationSummary) map[string]any {
 	dto := map[string]any{
 		"conversation_id": c.ID, "summary_seq": c.SummarySeq, "provider": c.Provider, "title": c.Title, "status": c.Status,
 		"cwd": c.Cwd, "project_id": nil, "pinned": c.Pinned == 1, "archived": c.Archived == 1,
 		"last_message_preview": c.LastMessagePreview, "pending_interactions": c.PendingInteractions, "queue_count": c.QueueCount, "background_tasks": c.BackgroundTasks,
 		"turn_count": c.TurnCount, "created_at": c.CreatedAt,
-		"updated_at": c.UpdatedAt,
+		"updated_at": c.UpdatedAt, "last_turn_sent_at": nil,
+	}
+	if c.LastTurnSentAt != "" {
+		dto["last_turn_sent_at"] = c.LastTurnSentAt
 	}
 	if c.ProjectID.Valid {
 		dto["project_id"] = c.ProjectID.String
@@ -1357,7 +1369,7 @@ func nonNilSlice[T any](s []T) []T {
 
 // summaries are list rows with each running conversation's active turn, so
 // lists can show running work without loading the conversation.
-func (v *V2) summaries(ctx context.Context, rows []sqlitedb.Conversation) []map[string]any {
+func (v *V2) summaries(ctx context.Context, rows []store.ConversationSummary) []map[string]any {
 	running := map[string]string{}
 	for _, row := range rows {
 		if row.Status == "running" {
