@@ -109,9 +109,8 @@ export async function desktopAcceptance() {
     const inspection = await host.setup.inspect("desktop");
     const blockers = inspection.deviceChecks.filter(
       (item) =>
-        ["platform", "graphicalSession", "desktopRuntime"].includes(
-          item.name,
-        ) && item.status !== "ready",
+        ["platform", "graphicalSession"].includes(item.name) &&
+        item.status !== "ready",
     );
     if (blockers.length)
       throw new VerificationError(

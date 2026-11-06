@@ -33,6 +33,10 @@ LOCK_DIR="$DEV_HOME/lock.d"
 DEV_WORKSPACES_PARENT="${MULTICA_DEV_WORKSPACES_PARENT:-$HOME}"
 DEV_DESKTOP_APP_DATA="${MULTICA_DEV_DESKTOP_APP_DATA:-}"
 DEV_PROFILES_HOME="${MULTICA_DEV_PROFILES_HOME:-$HOME/.multica/profiles}"
+# A caller that owns a dedicated PostgreSQL container (the verification host)
+# names it here; the database is then created inside that container and the
+# shared one is never started.
+DEV_POSTGRES_CONTAINER="${MULTICA_DEV_POSTGRES_CONTAINER:-}"
 
 DEV_EMAIL="${MULTICA_DEV_EMAIL:-dev@localhost}"
 DEV_CODE_DEFAULT=888888
@@ -388,8 +392,27 @@ diagnose_database() {
   info "Either stop it (brew services stop postgresql@17) or point DATABASE_URL at it."
 }
 
+ensure_container_database() {
+  local user="${POSTGRES_USER:-multica}" attempt
+  for attempt in $(seq 1 60); do
+    docker exec "$DEV_POSTGRES_CONTAINER" pg_isready -U "$user" -d postgres >/dev/null 2>&1 && break
+    [ "$attempt" -lt 60 ] || die "PostgreSQL in container $DEV_POSTGRES_CONTAINER did not become ready."
+    sleep 1
+  done
+  if ! docker exec "$DEV_POSTGRES_CONTAINER" psql -U "$user" -d postgres -tAc \
+    "SELECT 1 FROM pg_database WHERE datname='${POSTGRES_DB}'" | grep -q 1; then
+    docker exec "$DEV_POSTGRES_CONTAINER" psql -U "$user" -d postgres -v ON_ERROR_STOP=1 \
+      -c "CREATE DATABASE \"${POSTGRES_DB}\"" >/dev/null
+    info "Created database ${POSTGRES_DB} in container $DEV_POSTGRES_CONTAINER."
+  fi
+}
+
 ensure_database() {
   local admin_url=""
+  if [ -n "$DEV_POSTGRES_CONTAINER" ]; then
+    ensure_container_database
+    return
+  fi
   if command -v psql >/dev/null 2>&1 && [ -n "${DATABASE_URL:-}" ]; then
     admin_url="$(admin_database_url "$DATABASE_URL")"
   fi

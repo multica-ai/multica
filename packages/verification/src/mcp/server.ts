@@ -74,7 +74,7 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
     "env_start",
     {
       description:
-        "Start: prepare an owned worktree at a Git commit, build it, and launch its backend and dev Electron (or a read-only web page for liveReadOnly). Returns a job; its resourceRefs carry the environmentId as soon as preparation begins. The job waits in awaitingUser until the application is logged in.",
+        "Start: prepare an owned worktree at a Git commit, build it, and launch its backend and dev Electron (or a read-only web page for liveReadOnly). Returns a job; its resourceRefs carry the environmentId as soon as preparation begins. The job waits in awaitingUser until the application is logged in. The runtime uses its own HOME and daemon health port, so it can run beside an installed Multica.",
       inputSchema: { ...prepareInput.shape, requestId: requestIdSchema },
       annotations: command,
     },

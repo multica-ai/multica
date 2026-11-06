@@ -344,4 +344,25 @@ printf 'n\n' | dev_env destroy orphan-902 > "$out" 2>&1 || fail "declining destr
 require_contains "$out" "Cancelled."
 [ -d "$MULTICA_DEV_HOME/envs/orphan-902" ] || fail "declined destroy removed the environment anyway"
 
+# A caller-owned PostgreSQL container gets the database created inside it, and
+# the shared compose container is never started.
+docker_log="$tmp_dir/docker.log"
+cat > "$fake_bin/docker" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$docker_log"
+case " \$* " in
+  *" compose "*) exit 1 ;;
+  *" SELECT 1 FROM pg_database "*) exit 0 ;;
+esac
+EOF
+chmod +x "$fake_bin/docker"
+MULTICA_DEV_POSTGRES_CONTAINER=verification-pg \
+  bash -c 'source "$1"; POSTGRES_DB=verification_db ensure_database' _ \
+  "$root_dir/scripts/dev-env.sh" > "$out" 2>&1 \
+  || { cat "$out" >&2; fail "container database creation failed"; }
+require_contains "$docker_log" "exec verification-pg pg_isready -U multica -d postgres"
+require_contains "$docker_log" 'CREATE DATABASE "verification_db"'
+if grep -q "compose" "$docker_log"; then fail "the shared container was started"; fi
+rm "$fake_bin/docker"
+
 echo "✓ dev-env.sh registry behaviour verified"

@@ -57,11 +57,11 @@ export async function inspectDevice(
   }
   add(
     "desktopRuntime",
-    occupied ? "blocked" : "ready",
+    "ready",
     occupied
-      ? "Another Desktop runtime is present"
-      : "No active normal Desktop runtime was found",
-    "Use a dedicated clean Mac; this tool does not stop unrelated applications",
+      ? "The installed Desktop runtime is running; verification runtimes use their own home and health port and stop if its files change"
+      : "No active installed Desktop runtime was found",
+    "No action is required",
   );
   const disk = await statfs(projectRoot);
   const availableBytes = disk.bavail * disk.bsize;
@@ -78,7 +78,6 @@ export async function inspectDevice(
     run("make", ["--version"]),
     run("docker", ["compose", "version", "--short"]),
     run("docker", ["info", "--format", "{{.ServerVersion}}"]),
-    run("docker", ["compose", "exec", "-T", "postgres", "pg_isready"]),
     process.platform === "darwin"
       ? run("launchctl", ["print-disabled", `gui/${process.getuid?.()}`])
       : Promise.resolve({ kind: "missing" } as const),
@@ -88,7 +87,6 @@ export async function inspectDevice(
     "make",
     "dockerCompose",
     "dockerEngine",
-    "postgres",
     "graphicalSession",
   ].entries()) {
     const result = results[index]!;
@@ -110,7 +108,6 @@ export async function inspectDevice(
         make: "Install the project build prerequisites",
         dockerCompose: "Install Docker with Compose",
         dockerEngine: "Start Docker through its normal application",
-        postgres: "The managed make up flow prepares shared PostgreSQL",
         graphicalSession: "Log in to a graphical macOS session",
       }[name],
     );
