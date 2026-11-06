@@ -6,6 +6,27 @@ Initial verification: 2026-11-05.
 
 ## Submission synchronization, 2026-11-06
 
+### CI follow-up
+
+The first PR run exposed missing route-diagnostic coverage, Spanish locale keys,
+test-provider/query setup, daemon test credentials, workspace-deletion manifest
+entries and three bare radius utilities. Those contracts were repaired without
+relaxing CI gates. The Spanish keys currently use English fallback text pending
+language review. MCP Go SDK moved to 1.4.1 (and segmentio/encoding to 0.5.4) to
+address GO-2026-5771, GO-2026-4773 and GO-2026-4770.
+
+After repair, production Web/Desktop build, typechecks and lint passed (existing
+warnings remain). All six non-Views frontend test tasks passed, including 215
+core files / 2760 tests and 72 desktop files / 839 tests. All 567 Views files /
+7294 tests passed. Radius-token and UI-export checks passed. Targeted daemon
+workdir/MCP checks and real database/MCP permission and workspace-manifest checks
+passed with the race detector. Existing mock-based suites are regression evidence,
+not a substitute for model-backed execution.
+
+Local vulnerability scanning on Go 1.27.2 reports no remaining dependency
+advisories but reports standard-library GO-2026-6809 in crypto/x509. The exact
+CI toolchain scan remains pending; it must not be described as passed.
+
 Merged the next twelve main commits without conflicts. Main now owns migration
 615, so the unpublished CodeGraph migrations moved from 615–630 to 616–631,
 including the concurrent-index recovery registration. Earlier database evidence

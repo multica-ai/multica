@@ -102,7 +102,7 @@ export function CodeGraphIntroArt({
         ) : (
           pictures("h-full w-full object-contain")
         )}
-        <span className="pointer-events-none absolute right-1 bottom-1 rounded bg-surface/90 p-1 shadow-sm">
+        <span className="pointer-events-none absolute right-1 bottom-1 rounded-md bg-surface/90 p-1 shadow-sm">
           <Maximize2 className="size-3.5" aria-hidden="true" />
         </span>
       </DialogTrigger>

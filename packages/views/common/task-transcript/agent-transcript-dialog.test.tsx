@@ -4,11 +4,12 @@ import { act, cleanup, fireEvent, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { AgentRuntime, AgentTask } from "@multica/core/types/agent";
 import { useTranscriptViewStore } from "@multica/core/agents/stores";
-import { renderWithI18n } from "../../test/i18n";
+import { renderWithI18n as renderI18n } from "../../test/i18n";
 import { AgentTranscriptDialog } from "./agent-transcript-dialog";
 import type { TimelineItem } from "./build-timeline";
 
@@ -23,6 +24,7 @@ vi.mock("@multica/core/api", () => ({
   api: {
     getAgent: vi.fn().mockResolvedValue(null),
     listRuntimes: vi.fn().mockResolvedValue([]),
+    availableCodeGraphs: vi.fn().mockResolvedValue([]),
   },
 }));
 
@@ -212,6 +214,14 @@ const items: TimelineItem[] = [
     input: { command: "pnpm test" },
   },
 ];
+
+function renderWithI18n(ui: ReactNode, options?: Parameters<typeof renderI18n>[1]) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  return renderI18n(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+    options,
+  );
+}
 
 function renderDialog(
   dialogItems: TimelineItem[] = items,
@@ -666,6 +676,8 @@ describe("AgentTranscriptDialog", () => {
 
       unmount();
 
+      // Drain Query notification delivery without advancing the copy-feedback delay.
+      await act(() => vi.advanceTimersByTimeAsync(0));
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.clearAllTimers();

@@ -516,7 +516,7 @@ function RepositoryDetails({ repo }: { repo: CodeGraphRepository }) {
               {current.repo_url}
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-3">
-              <span className="rounded border px-2 py-0.5 font-mono text-caption">
+              <span className="rounded-md border px-2 py-0.5 font-mono text-caption">
                 {current.branch}
               </span>
               <Badge
@@ -692,7 +692,7 @@ function RepositoryDetails({ repo }: { repo: CodeGraphRepository }) {
                     {current.builds?.map((build) => (
                       <div
                         key={build.id}
-                        className="rounded border p-3 text-caption"
+                        className="rounded-md border p-3 text-caption"
                       >
                         <p>
                           {build.status} · {build.commit.slice(0, 12)}

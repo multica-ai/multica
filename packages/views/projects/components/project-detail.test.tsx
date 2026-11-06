@@ -44,6 +44,10 @@ vi.mock("@multica/core/workspace/queries", () => ({
     queryFn: async () => [{ user_id: "user-1", name: "User One", role: mocks.role }],
   }),
   agentListOptions: () => ({ queryKey: ["agents"], queryFn: async () => [] }),
+  codeGraphRepositoriesOptions: () => ({
+    queryKey: ["code-graphs"],
+    queryFn: async () => ({ items: [] }),
+  }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({

@@ -129,6 +129,7 @@ func TestRunTask_StartTaskCalledAfterWorkdirOnDisk(t *testing.T) {
 		runtimeIndex:   map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
 		activeEnvRoots: make(map[string]int),
 		cfg: Config{
+			ServerBaseURL:  srv.URL,
 			WorkspacesRoot: workspacesRoot,
 			Agents: map[string]AgentEntry{
 				"claude": {Path: missingBin, Model: ""},
@@ -137,6 +138,7 @@ func TestRunTask_StartTaskCalledAfterWorkdirOnDisk(t *testing.T) {
 	}
 
 	task := Task{
+		AuthToken:   "mat_workdir_regression",
 		ID:          taskID,
 		WorkspaceID: workspaceID,
 		RuntimeID:   "rt-1",
@@ -617,6 +619,7 @@ func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 		activeEnvRoots:      make(map[string]int),
 		prepareLeaseRefresh: 10 * time.Millisecond,
 		cfg: Config{
+			ServerBaseURL:  srv.URL,
 			WorkspacesRoot: workspacesRoot,
 			Agents: map[string]AgentEntry{
 				"claude": {Path: missingBin, Model: ""},
@@ -625,6 +628,7 @@ func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 	}
 
 	task := Task{
+		AuthToken:           "mat_workdir_regression",
 		ID:                  taskID,
 		WorkspaceID:         workspaceID,
 		RuntimeID:           "rt-1",
@@ -737,6 +741,7 @@ func prepareTimeoutStopsLeaseDuringBlockedStart(t *testing.T, budget time.Durati
 		taskPrepareTimeout:  budget,
 		prepareLeaseRefresh: leaseRefresh,
 		cfg: Config{
+			ServerBaseURL:  srv.URL,
 			WorkspacesRoot: workspacesRoot,
 			Agents: map[string]AgentEntry{
 				"claude": {Path: fakeBin},
@@ -746,6 +751,7 @@ func prepareTimeoutStopsLeaseDuringBlockedStart(t *testing.T, budget time.Durati
 
 	task := Task{
 		ID:                  "task-runtask-start-timeout",
+		AuthToken:           "mat_workdir_timeout_regression",
 		StartClaimSupported: true,
 		DispatchedAt:        "2026-09-17T09:00:00.123456Z",
 		WorkspaceID:         "ws-runtask-start-timeout",
