@@ -100,6 +100,9 @@ func (f *fakePatcherQueries) GetChatSession(ctx context.Context, id pgtype.UUID)
 func (f *fakePatcherQueries) GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error) {
 	return f.agent, f.agentErr
 }
+func (f *fakePatcherQueries) GetWorkspace(context.Context, pgtype.UUID) (db.Workspace, error) {
+	return db.Workspace{}, pgx.ErrNoRows
+}
 func (f *fakePatcherQueries) GetLarkInstallation(ctx context.Context, id pgtype.UUID) (Installation, error) {
 	return f.installation, f.installationErr
 }

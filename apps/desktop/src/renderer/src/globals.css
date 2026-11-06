@@ -6,20 +6,6 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Tab strip hairlines sit on each tab's own left edge, so the hairline between
-   two tabs belongs to the tab on the right. Hovering the left tab has to fade
-   it out as well, which no ancestor-based variant can reach — hence the
-   adjacent-sibling selector. The (hover: hover) gate mirrors what Tailwind
-   already wraps group-hover in, so both halves of the fade stay in step on
-   devices without a pointer. */
-@custom-variant prev-tab-hover {
-  @media (hover: hover) {
-    [data-tab-frame]:hover + [data-tab-frame] & {
-      @slot;
-    }
-  }
-}
-
 /* Font stack: Inter for Latin UI text + system CJK fonts for localized content.
    Web app uses the same stack via next/font/google in apps/web/app/layout.tsx —
    keep the CJK fallback tail in sync across both files. The Inter primary family
@@ -65,12 +51,18 @@ html[lang|="ja"] {
                "Noto Sans CJK KR", sans-serif;
 }
 
+/* Traditional Chinese: same problem one level down — the default stack is
+   Simplified-first, so zh-TW users get Simplified glyph shapes for shared
+   ideographs. App.tsx maps zh-Hant to `zh-TW`. Mirrors apps/web/app/globals.css. */
+html[lang="zh-TW"] {
+  --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "PingFang TC", "Microsoft JhengHei",
+               "Noto Sans CJK TC", "PingFang SC", "Microsoft YaHei",
+               "Noto Sans CJK SC", "Apple SD Gothic Neo", "Malgun Gothic",
+               "Noto Sans CJK KR", sans-serif;
+}
+
 @source "../../../../../packages/ui/**/*.tsx";
 @source "../../../../../packages/core/**/*.{ts,tsx}";
 @source "../../../../../packages/views/**/*.{ts,tsx}";
 @source "./**/*.tsx";
-
-/* Desktop-specific: override sidebar container padding for traffic light layout */
-[data-slot="sidebar-container"] {
-  padding: 0 !important;
-}

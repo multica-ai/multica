@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { ArrowRight, AtSign, Bot, Check, CircleCheck, ListPlus, Monitor, Sparkles, Users } from "lucide-react";
+import { ArrowRight, AtSign, Bot, Check, CircleCheck, ListPlus, Monitor, Sparkles, Users } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { CoachMark, DemoFrame, useDemoCopy, useDemoTimers, useStartWhenVisible } from "./demo-kit";

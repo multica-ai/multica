@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { MessageSquare, X } from "lucide-react";
+import { MessageSquare, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";

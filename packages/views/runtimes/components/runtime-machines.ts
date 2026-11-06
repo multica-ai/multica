@@ -180,6 +180,11 @@ export function filterRuntimeMachines(
   });
 }
 
+/** Number of machines `buildRuntimeMachines` would group these runtimes into. */
+export function countRuntimeMachines(runtimes: AgentRuntime[]): number {
+  return new Set(runtimes.map(runtimeMachineId)).size;
+}
+
 export function runtimeMachineCounts(machines: RuntimeMachine[]): {
   all: number;
   online: number;

@@ -123,6 +123,10 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 
 没有设置 `S3_BUCKET` 时，Multica 使用本地磁盘。
 
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `MULTICA_MAX_PREVIEW_SIZE` | `2MiB` | 文本和 HTML 在线预览的正文大小上限，最大 `16MiB`。支持正整数字节数或 `KB`/`KiB`、`MB`/`MiB`（均按二进制单位计算）。超过 `16MiB` 的有效值截断为 `16MiB`，非法值回退到默认值。调大上限可能拖慢浏览器预览，尤其是语法高亮和 Markdown 渲染。修改后需重启 API；不改变上传或下载限制。 |
+
 ### S3 或兼容存储
 
 | 变量 | 默认值 | 说明 |
@@ -135,6 +139,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `S3_USE_PATH_STYLE` | 自定义 endpoint 时为 `true` | 是否使用 path-style 地址 |
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`、`cloudfront`、`presign` 或 `proxy` |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | 签名下载地址的有效期 |
+
+当 `AWS_ENDPOINT_URL` 指向 Google Cloud Storage 时，会自动将 `Accept-Encoding` 排除在请求签名之外。
 
 内网 MinIO 等 endpoint 无法被浏览器直接访问时，使用 `ATTACHMENT_DOWNLOAD_MODE=proxy`。
 

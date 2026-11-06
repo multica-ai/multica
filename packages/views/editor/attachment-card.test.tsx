@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("../i18n", () => ({
   useT: () => ({
@@ -214,5 +214,93 @@ describe("AttachmentFileCard — a file in a grid of cards (MUL-7649)", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Remove attachment" }));
     expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe.each([
+  {
+    layout: "row",
+    activate: fireEvent.mouseDown,
+    attachment: (onDownload: () => void | Promise<unknown>) => (
+      <AttachmentCard
+        filename="bundle.zip"
+        href="https://example.test/bundle.zip"
+        onPreview={vi.fn()}
+        onDownload={onDownload}
+      />
+    ),
+  },
+  {
+    layout: "card",
+    activate: fireEvent.click,
+    attachment: (onDownload: () => void | Promise<unknown>) => (
+      <AttachmentFileCard
+        filename="bundle.zip"
+        canPreview={false}
+        canDownload
+        onPreview={vi.fn()}
+        onDownload={onDownload}
+      />
+    ),
+  },
+])("$layout download feedback", ({ attachment, activate }) => {
+  it("shows pending feedback and blocks repeat activation until completion", async () => {
+    const pending = Promise.withResolvers<void>();
+    const onDownload = vi.fn(() => pending.promise);
+    render(attachment(onDownload));
+    const button = screen.getByRole("button", { name: "Download" });
+
+    activate(button);
+
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button.querySelector(".animate-spin")).toBeInTheDocument();
+    activate(button);
+    expect(onDownload).toHaveBeenCalledOnce();
+
+    await act(async () => pending.resolve());
+
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute("aria-busy", "false");
+    expect(button.querySelector(".animate-spin")).toBeNull();
+  });
+
+  it("keeps sibling attachments available while preparing a download", async () => {
+    const pending = Promise.withResolvers<void>();
+    const onOtherDownload = vi.fn();
+    render(<>{attachment(() => pending.promise)}{attachment(onOtherDownload)}</>);
+    const [button, other] = screen.getAllByRole("button", { name: "Download" });
+
+    activate(button!);
+    activate(other!);
+
+    expect(onOtherDownload).toHaveBeenCalledOnce();
+    await act(async () => pending.resolve());
+  });
+});
+
+describe("AttachmentFileCard — whole-card download", () => {
+  it("shares the download button's pending guard with the whole-card action", async () => {
+    const pending = Promise.withResolvers<void>();
+    const onDownload = vi.fn(() => pending.promise);
+    render(
+      <AttachmentFileCard
+        filename="bundle.zip"
+        canPreview={false}
+        canDownload
+        onPreview={vi.fn()}
+        onDownload={onDownload}
+      />,
+    );
+    const card = screen.getByRole("button", { name: "bundle.zip" });
+    const button = screen.getByRole("button", { name: "Download" });
+
+    fireEvent.click(card);
+
+    expect(card).toBeDisabled();
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(onDownload).toHaveBeenCalledOnce();
+    await act(async () => pending.resolve());
   });
 });

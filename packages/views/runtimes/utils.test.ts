@@ -13,7 +13,10 @@ import {
   computeCostInWindow,
   estimateCost,
   estimateCostBreakdown,
+  formatCredits,
+  formatSpend,
   formatTokens,
+  hasTokenFigure,
   isModelPriced,
   isSelfHealingRuntime,
   sliceWindow,
@@ -377,20 +380,21 @@ describe("estimateCost", () => {
   });
 
   it("prices current Codex models per OpenAI's official cache-aware rates", () => {
-    // Official announcement rates. 5.6 is the first OpenAI generation to bill
+    // OpenAI's standard short-context rates. 5.6 is the first OpenAI generation to bill
     // cache writes separately: cacheRead generally = 0.1x input (GPT-6.1
-    // Sol uses 0.05x), cacheWrite = 1.25x
+    // Sol and Terra use 0.05x), cacheWrite = 1.25x
     // input. Cover every model x every token category so a wrong cache rate
     // can't hide behind an input-only assertion. `total` is 1M of each of the
     // four categories priced at its own rate.
     const cases = [
       { model: "gpt-6-astra", input: 10, cacheRead: 1, cacheWrite: 12.5, output: 50, total: 73.5 },
       { model: "gpt-6.1-sol", input: 2, cacheRead: 0.1, cacheWrite: 2.5, output: 10, total: 14.6 },
+      { model: "gpt-6.1-terra", input: 1, cacheRead: 0.05, cacheWrite: 1.25, output: 5, total: 7.3 },
       { model: "gpt-6-sol", input: 2, cacheRead: 0.2, cacheWrite: 2.5, output: 10, total: 14.7 },
       { model: "gpt-6-luna", input: 0.1, cacheRead: 0.01, cacheWrite: 0.125, output: 0.5, total: 0.735 },
       { model: "gpt-5.6-sol", input: 5, cacheRead: 0.5, cacheWrite: 6.25, output: 30, total: 41.75 },
-      { model: "gpt-5.6-terra", input: 2.5, cacheRead: 0.25, cacheWrite: 3.125, output: 15, total: 20.875 },
-      { model: "gpt-5.6-luna", input: 1, cacheRead: 0.1, cacheWrite: 1.25, output: 6, total: 8.35 },
+      { model: "gpt-5.6-terra", input: 2, cacheRead: 0.2, cacheWrite: 2.5, output: 12, total: 16.7 },
+      { model: "gpt-5.6-luna", input: 0.2, cacheRead: 0.02, cacheWrite: 0.25, output: 1.2, total: 1.67 },
     ];
     for (const c of cases) {
       const breakdown = estimateCostBreakdown({
@@ -513,18 +517,24 @@ describe("estimateCost", () => {
     }
   });
 
-  it("uses the current routed Flash rate for Cursor 3.5 and 3.6 aliases", () => {
-    for (const model of ["gemini-3.5-flash-high", "gemini-3.6-flash-high"]) {
-      expect(estimateCost({ ...zeroUsage, provider: "cursor", model,
+  it("prices Cursor's 3.5 and 3.6 Flash at Cursor's sheet, not Google's routed rate", () => {
+    const cost = (model: string) =>
+      estimateCost({ ...zeroUsage, provider: "cursor", model,
         input_tokens: 1_000_000, output_tokens: 1_000_000, cache_read_tokens: 1_000_000,
-      })).toBeCloseTo(0.75 + 3.75 + 0.075, 5);
-    }
+      });
+    expect(cost("gemini-3.5-flash")).toBeCloseTo(1.5 + 9 + 0.15, 5);
+    expect(cost("gemini-3.6-flash-high")).toBeCloseTo(1.5 + 7.5 + 0.15, 5);
+    expect(cost("gemini-3.7-flash-high")).toBeCloseTo(0.75 + 3.75 + 0.075, 5);
   });
 
   it("resolves current Codex routing prefixes and context tags", () => {
     for (const model of ["openai:gpt-6.1-sol", "openai/gpt-6.1-sol", "gpt-6.1-sol[1m]"]) {
       expect(isModelPriced(model, "codex")).toBe(true);
       expect(estimateCost({ ...zeroUsage, provider: "codex", model, cache_read_tokens: 1_000_000 })).toBeCloseTo(0.1, 5);
+    }
+    for (const model of ["openai:gpt-6.1-terra", "openai/gpt-6.1-terra", "gpt-6.1-terra[1m]"]) {
+      expect(isModelPriced(model, "codex")).toBe(true);
+      expect(estimateCost({ ...zeroUsage, provider: "codex", model, cache_read_tokens: 1_000_000 })).toBeCloseTo(0.05, 5);
     }
   });
 
@@ -558,6 +568,8 @@ describe("estimateCost", () => {
     expect(isModelPriced("gpt-6-astra-pro")).toBe(false);
     expect(isModelPriced("gpt-6.1-sol-pro")).toBe(false);
     expect(isModelPriced("gpt-6-1-sol")).toBe(false);
+    expect(isModelPriced("gpt-6.1-terra-pro")).toBe(false);
+    expect(isModelPriced("gpt-6-1-terra")).toBe(false);
     expect(isModelPriced("gpt-6-sol-high")).toBe(false);
     expect(isModelPriced("gpt-6-luna-pro")).toBe(false);
     expect(
@@ -738,7 +750,7 @@ describe("estimateCost", () => {
     // Thinking after the effort level, and the older `claude-4.6-sonnet` naming.
     expect(cost("claude-4.6-sonnet-medium-thinking")).toBeCloseTo(3 + 15 + 0.3 + 3.75, 5);
     expect(cost("gpt-5.5-extra-high")).toBeCloseTo(5 + 30 + 0.5, 5);
-    expect(cost("gpt-5.6-sol-none")).toBeCloseTo(4 + 20 + 0.4 + 5, 5);
+    expect(cost("gpt-5.6-sol-none")).toBeCloseTo(5 + 30 + 0.5 + 6.25, 5);
     expect(cost("cursor-grok-4.6-high")).toBeCloseTo(2 + 6 + 0.5, 5);
     expect(cost("grok-4.7-medium")).toBeCloseTo(2 + 6 + 0.5, 5);
     expect(cost("gemini-4-argon-medium")).toBeCloseTo(2 + 10 + 0.1, 5);
@@ -750,7 +762,7 @@ describe("estimateCost", () => {
     );
   });
 
-  it("prices Cursor Fast variants only where Cursor publishes a Fast rate", () => {
+  it("prices Cursor Fast variants only where a Fast rate is published", () => {
     const cost = (model: string) =>
       estimateCost({
         ...zeroUsage,
@@ -760,17 +772,38 @@ describe("estimateCost", () => {
         output_tokens: 1_000_000,
       });
 
-    expect(cost("gpt-5.6-sol-medium-fast")).toBeCloseTo(8 + 40, 5);
+    expect(cost("gpt-5.6-sol-medium-fast")).toBeCloseTo(10 + 60, 5);
     expect(cost("cursor-grok-4.5-high-fast")).toBeCloseTo(4 + 18, 5);
     expect(cost("claude-opus-4-7-thinking-high-fast")).toBeCloseTo(30 + 150, 5);
     expect(cost("claude-opus-4-8[effort=high,fast=true]")).toBeCloseTo(10 + 50, 5);
+    // Cursor's sheet doesn't price these Fast variants; the vendor sheet does.
+    expect(cost("claude-opus-5-5-xhigh-fast")).toBeCloseTo(8 + 40, 5);
+    expect(cost("claude-opus-5-5[fast=true]")).toBeCloseTo(8 + 40, 5);
+    expect(cost("claude-opus-5-thinking-high-fast")).toBeCloseTo(10 + 50, 5);
+    expect(cost("gpt-5.5-extra-high-fast")).toBeCloseTo(12.5 + 75, 5);
+    expect(cost("gpt-5.3-codex-xhigh-fast")).toBeCloseTo(3.5 + 28, 5);
+    expect(cost("gpt-5.2-fast")).toBeCloseTo(3.5 + 28, 5);
     // No published Fast rate: unmapped, never the cheaper standard rate.
-    expect(isModelPriced("claude-opus-5-5-high-fast", "cursor")).toBe(false);
-    expect(isModelPriced("gpt-5.5-medium-fast", "cursor")).toBe(false);
-    expect(isModelPriced("claude-opus-5-5[fast=true]", "cursor")).toBe(false);
+    expect(isModelPriced("claude-sonnet-5-5-high-fast", "cursor")).toBe(false);
+    expect(isModelPriced("kimi-k3-fast", "cursor")).toBe(false);
+    expect(isModelPriced("claude-sonnet-5[fast=true]", "cursor")).toBe(false);
     expect(collectUnmappedModels([
-      { ...zeroUsage, provider: "cursor", model: "claude-opus-5-5-high-fast", input_tokens: 1 },
-    ])).toEqual(["cursor/claude-opus-5-5-high-fast"]);
+      { ...zeroUsage, provider: "cursor", model: "claude-sonnet-5-5-high-fast", input_tokens: 1 },
+    ])).toEqual(["cursor/claude-sonnet-5-5-high-fast"]);
+  });
+
+  it("prices Cursor catalog ids missing from the base table", () => {
+    const cost = (model: string) =>
+      estimateCost({
+        ...zeroUsage,
+        provider: "cursor",
+        model,
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      });
+    expect(cost("gpt-5.1-high")).toBeCloseTo(1.25 + 10 + 0.125, 5);
+    expect(cost("deepseek-v41-flash-1017-max")).toBeCloseTo(0.3 + 1.2 + 0.006, 5);
   });
 
   it("keeps Cursor variant stripping scoped to Cursor rows", () => {
@@ -1957,7 +1990,7 @@ describe("summarizeTaskUsage", () => {
     cache_read_tokens: 712_000,
     cache_write_tokens: 50_000,
   };
-  // gpt-5.6-terra: 2.50 / 15 / 0.25 / 3.125 per million.
+  // gpt-5.6-terra: 2 / 12 / 0.20 / 2.50 per million.
   const terra = {
     provider: "openai",
     model: "gpt-5.6-terra",
@@ -1976,10 +2009,10 @@ describe("summarizeTaskUsage", () => {
   });
 
   it("prices each model slice at its own rate, not the combined total", () => {
-    // Priced separately: 1.9985 (opus) + 0.331375 (terra).
+    // Priced separately: 1.9985 (opus) + 0.2651 (terra).
     // Priced as one blob at either rate, the answer would be wrong.
     const s = summarizeTaskUsage([opus, terra]);
-    expect(s?.cost).toBeCloseTo(1.9985 + 0.331375, 5);
+    expect(s?.cost).toBeCloseTo(1.9985 + 0.2651, 5);
     expect(s?.models).toEqual(["claude-opus-5", "gpt-5.6-terra"]);
   });
 
@@ -2046,5 +2079,55 @@ describe("formatTokens", () => {
     expect(formatTokens(999_949)).toBe("999.9K");
     expect(formatTokens(999_950)).toBe("1M");
     expect(formatTokens(999_999_999)).toBe("1B");
+  });
+});
+
+describe("credits usage", () => {
+  const qoder = {
+    provider: "qoder_cloud",
+    model: "",
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    credits_micros: 1_250_000,
+  };
+  const label = (credits: string, provider: string) => `${credits} ${provider} credits`;
+
+  it("sums credits across slices and leaves token cost at zero", () => {
+    const s = summarizeTaskUsage([qoder, { ...qoder, credits_micros: 500_000 }]);
+    expect(s?.credits).toEqual(new Map([["qoder_cloud", 1.75]]));
+    expect(s?.cost).toBe(0);
+    expect(s?.models).toEqual([]);
+  });
+
+  it("reports no credits when no slice was billed in credits", () => {
+    const { credits_micros: _, ...tokensOnly } = qoder;
+    expect(summarizeTaskUsage([tokensOnly])?.credits.size).toBe(0);
+  });
+
+  it("keeps different providers' credit units separate", () => {
+    const s = summarizeTaskUsage([qoder, { ...qoder, provider: "other", credits_micros: 500_000 }]);
+    expect(s?.credits).toEqual(new Map([["qoder_cloud", 1.25], ["other", 0.5]]));
+    expect(formatSpend(s!, label)).toBe("1.25 qoder_cloud credits + 0.5 other credits");
+  });
+
+  it("shows credits alone, USD alone, or both", () => {
+    expect(formatSpend({ cost: 0, credits: new Map([["qoder_cloud", 1.75]]) }, label)).toBe("1.75 qoder_cloud credits");
+    expect(formatSpend({ cost: 1.5, credits: new Map() }, label)).toBe("$1.50");
+    expect(formatSpend({ cost: 1.5, credits: new Map([["qoder_cloud", 2]]) }, label)).toBe("$1.50 + 2 qoder_cloud credits");
+    expect(formatSpend({ cost: 0, credits: new Map([["qoder_cloud", 0]]) }, label)).toBe("0 qoder_cloud credits");
+  });
+
+  it("formats credits by magnitude", () => {
+    expect(formatCredits(0.125)).toBe("0.13");
+    expect(formatCredits(250.4)).toBe("250");
+    expect(formatCredits(12_500)).toBe(formatTokens(12_500));
+  });
+
+  it("hides the token figure only for credits-only usage", () => {
+    expect(hasTokenFigure({ tokens: 0, credits: new Map([["qoder_cloud", 1]]) })).toBe(false);
+    expect(hasTokenFigure({ tokens: 10, credits: new Map([["qoder_cloud", 1]]) })).toBe(true);
+    expect(hasTokenFigure({ tokens: 0, credits: new Map() })).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Globe, Lock, Users } from "lucide-react";
+import { Globe, Lock, Users } from "@multica/ui/icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { ModelDropdown } from "./model-dropdown";
 import { RuntimePicker } from "./runtime-picker";

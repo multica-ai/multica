@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Bot, CircleDashed } from "lucide-react";
+import { Bot, CircleDashed } from "@multica/ui/icons";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { isAgentRuntimeBound } from "@multica/core/agents";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";

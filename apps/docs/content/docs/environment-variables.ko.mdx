@@ -123,6 +123,10 @@ allowlist의 정확한 판단 순서는 [로그인과 가입](/auth-setup#가입
 
 `S3_BUCKET`을 설정하지 않으면 Multica가 로컬 디스크를 사용합니다.
 
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `MULTICA_MAX_PREVIEW_SIZE` | `2MiB` | 텍스트 및 HTML 온라인 미리보기 본문의 최대 크기이며 상한은 `16MiB`입니다. 양의 정수 바이트 수 또는 `KB`/`KiB`, `MB`/`MiB`(이진 단위)를 지원합니다. `16MiB`를 초과하는 유효한 값은 `16MiB`로 제한되며 잘못된 값은 기본값을 사용합니다. 상한을 높이면 특히 구문 강조와 Markdown 렌더링 시 브라우저 미리보기가 느려질 수 있습니다. 변경 후 API를 재시작해야 하며 업로드 및 다운로드 제한은 바뀌지 않습니다. |
+
 ### S3 또는 호환 저장소
 
 | 변수 | 기본값 | 설명 |
@@ -135,6 +139,8 @@ allowlist의 정확한 판단 순서는 [로그인과 가입](/auth-setup#가입
 | `S3_USE_PATH_STYLE` | 사용자 지정 endpoint에서는 `true` | path-style 주소 사용 여부 |
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`, `cloudfront`, `presign`, `proxy` 중 하나 |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | 서명된 다운로드 주소의 유효 기간 |
+
+`AWS_ENDPOINT_URL`이 Google Cloud Storage를 가리키면 `Accept-Encoding`이 요청 서명에서 자동으로 제외됩니다.
 
 내부 네트워크의 MinIO처럼 브라우저에서 endpoint에 직접 접근할 수 없다면 `ATTACHMENT_DOWNLOAD_MODE=proxy`를 사용하세요.
 

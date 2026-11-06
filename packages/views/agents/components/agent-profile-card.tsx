@@ -14,7 +14,10 @@ import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
+import { Settings2 } from "@multica/ui/icons";
+import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { AppLink } from "../../navigation";
 import { HealthIcon } from "../../runtimes/components/shared";
 import { availabilityConfig } from "../presence";
@@ -128,6 +131,20 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
         )}
         {owner && <MetaRow label={t(($) => $.profile_card.owner_label)} value={owner.name} />}
       </div>
+
+      {!isArchived && (
+        <div className="border-t pt-3">
+          <Button
+            variant="outline"
+            size="xs"
+            render={<AppLink href={`${p.agentDetail(agent.id)}?view=general`} />}
+            nativeButton={false}
+          >
+            <Settings2 />
+            {t(($) => $.detail.settings)}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -192,9 +209,11 @@ function RuntimeRow({
     <div className="flex items-center gap-1.5">
       <span className="w-12 shrink-0 text-muted-foreground">{t(($) => $.profile_card.runtime_label)}</span>
       <HealthIcon health={health} className="h-3 w-3 shrink-0" />
-      <span className="min-w-0 truncate" title={label}>
-        {label}
-      </span>
+      <TruncatedTooltip content={label}>
+        <span className="min-w-0 truncate">
+          {label}
+        </span>
+      </TruncatedTooltip>
     </div>
   );
 }
@@ -225,9 +244,11 @@ function ModelRow({
         {t(($) => $.profile_card.model_label)}
       </span>
       {hasModel ? (
-        <span className="min-w-0 truncate font-mono text-micro" title={model}>
-          {model}
-        </span>
+        <TruncatedTooltip content={model}>
+          <span className="min-w-0 truncate font-mono text-micro">
+            {model}
+          </span>
+        </TruncatedTooltip>
       ) : (
         <span className="min-w-0 truncate text-muted-foreground">
           {t(($) => $.profile_card.model_unset)}
@@ -254,9 +275,11 @@ function MetaRow({
   return (
     <div className="flex items-center gap-1.5">
       <span className="w-12 shrink-0 text-muted-foreground">{label}</span>
-      <span className={`truncate ${mono ? "font-mono text-micro" : ""}`} title={value}>
-        {value}
-      </span>
+      <TruncatedTooltip content={value}>
+        <span className={`truncate ${mono ? "font-mono text-micro" : ""}`}>
+          {value}
+        </span>
+      </TruncatedTooltip>
     </div>
   );
 }
@@ -276,13 +299,13 @@ function SkillsRow({ skills }: { skills: string[] }) {
       <span className="w-12 shrink-0 pt-0.5 text-muted-foreground">{t(($) => $.profile_card.skills_label)}</span>
       <div className="flex min-w-0 flex-wrap gap-1">
         {visible.map((s) => (
-          <span
-            key={s}
-            className="max-w-full truncate rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground"
-            title={s}
-          >
-            {s}
-          </span>
+          <TruncatedTooltip key={s} content={s}>
+            <span
+              className="max-w-full truncate rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground"
+            >
+              {s}
+            </span>
+          </TruncatedTooltip>
         ))}
         {overflow > 0 && (
           <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">

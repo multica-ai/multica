@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -41,6 +42,13 @@ func TestPiCleanupUnconfirmedOutranksCancellation(t *testing.T) {
 			cancel()
 			if err != nil || result.Status != "cleanup_unconfirmed" {
 				t.Fatalf("manual=%v omitted=%v result=%+v err=%v", manual, omitted, result, err)
+			}
+			// A drained task may still leave processes behind; even a later
+			// empty shutdown drain must retain that uncertainty.
+			var tasks sync.WaitGroup
+			d.waitForTaskCleanup(&tasks, time.Second)
+			if d.ShutdownCleanupConfirmed() {
+				t.Fatal("shutdown forgot the provider's unconfirmed cleanup")
 			}
 			if shouldRetryWithFreshSession(result, "existing-session", 0, "pi") {
 				t.Fatal("unconfirmed cleanup allowed an in-turn retry")

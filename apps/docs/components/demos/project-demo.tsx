@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, FolderKanban } from "lucide-react";
+import { ChevronDown, FolderKanban } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { CoachMark, DemoAvatar, DemoFrame, useDemoCopy, useStartWhenVisible } from "./demo-kit";
 

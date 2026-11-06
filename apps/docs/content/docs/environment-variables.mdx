@@ -123,6 +123,10 @@ For the exact allowlist evaluation order, see [Sign-in and signup](/auth-setup#s
 
 When `S3_BUCKET` is unset, Multica uses local disk.
 
+| Variable | Default | Description |
+|---|---|---|
+| `MULTICA_MAX_PREVIEW_SIZE` | `2MiB` | Maximum body size for online text/HTML previews, up to `16MiB`. Accepts positive integer bytes or `KB`/`KiB`, `MB`/`MiB` (binary units). Valid values above `16MiB` are clamped to `16MiB`; invalid values use the default. Larger limits can slow browser previews, especially syntax highlighting and Markdown rendering. Restart the API after changing it. Upload and download limits are unchanged. |
+
 ### S3 or compatible storage
 
 | Variable | Default | Description |
@@ -135,6 +139,8 @@ When `S3_BUCKET` is unset, Multica uses local disk.
 | `S3_USE_PATH_STYLE` | `true` with a custom endpoint | Whether to use path-style addressing |
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`, `cloudfront`, `presign`, or `proxy` |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | Lifetime of signed download URLs |
+
+When `AWS_ENDPOINT_URL` points to Google Cloud Storage, `Accept-Encoding` is automatically excluded from request signing.
 
 Use `ATTACHMENT_DOWNLOAD_MODE=proxy` when the endpoint — an internal MinIO, for example — is not reachable from the browser.
 

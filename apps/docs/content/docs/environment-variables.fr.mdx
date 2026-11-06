@@ -123,6 +123,10 @@ Pour l'ordre exact d'évaluation des listes d'autorisation, consultez [Connexion
 
 Lorsque `S3_BUCKET` n'est pas défini, Multica utilise le disque local.
 
+| Variable | Défaut | Description |
+|---|---|---|
+| `MULTICA_MAX_PREVIEW_SIZE` | `2MiB` | Taille maximale du contenu des aperçus texte et HTML, plafonnée à `16MiB`. Accepte un entier positif en octets ou `KB`/`KiB`, `MB`/`MiB` (unités binaires). Les valeurs valides supérieures à `16MiB` sont ramenées à `16MiB` ; les valeurs invalides utilisent la valeur par défaut. Une limite plus élevée peut ralentir l’aperçu dans le navigateur, notamment la coloration syntaxique et le rendu Markdown. Redémarrer l’API après modification. Les limites de téléversement et de téléchargement restent inchangées. |
+
 ### S3 ou stockage compatible
 
 | Variable | Valeur par défaut | Description |
@@ -135,6 +139,8 @@ Lorsque `S3_BUCKET` n'est pas défini, Multica utilise le disque local.
 | `S3_USE_PATH_STYLE` | `true` avec un point de terminaison personnalisé | Utiliser ou non l'adressage de type chemin (path-style) |
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`, `cloudfront`, `presign` ou `proxy` |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | Durée de vie des URL de téléchargement signées |
+
+Lorsque `AWS_ENDPOINT_URL` pointe vers Google Cloud Storage, `Accept-Encoding` est automatiquement exclu de la signature des requêtes.
 
 Utilisez `ATTACHMENT_DOWNLOAD_MODE=proxy` lorsque le point de terminaison — un MinIO interne, par exemple — n'est pas accessible depuis le navigateur.
 

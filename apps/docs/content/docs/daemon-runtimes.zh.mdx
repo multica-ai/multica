@@ -165,6 +165,10 @@ CodeBuddy、Kimi CLI 和 Pi 启动时会自己加载用户级配置，并与 Mul
 | Hermes 记忆（每个智能体一份） | 同一目录下的 `hermes-state/` | 90 天未使用后删除 |
 | 每次运行的私有临时目录（`TMPDIR`） | 系统临时目录下的 `multica-task-*` | 运行结束后删除，守护进程被强制结束时由之后的清理补删 |
 
+Hermes 在任务和聊天中的运行会将会话持久目录作为隔离的 `HERMES_HOME`，`state.db` 及其 SQLite 日志文件均为目录内的普通文件。这个布局同时支持旧版进程内 ACP 和新版由 Gateway 执行的 ACP。已有会话记录会直接复用，旧运行目录中的会话历史会在下次运行前迁移。
+
+Multica 每次运行都会刷新其中的 skill 和派生配置。模型服务认证会保留，托管运行的消息平台适配器和 HTTP 入口会关闭。宿主的 Gateway 状态、日志、会话和定时任务各自隔离。运行结束时会停止本次运行的 Gateway，确保后续运行使用自己的执行环境。
+
 ### Codex 原生记忆与子智能体 [#codex-memory]
 
 守护进程管理的 Codex 运行默认关闭 Codex 原生记忆，避免本机或前一次运行留下的记忆带进别的工作区。设置只写入这次运行专用的 `CODEX_HOME/config.toml`（`features.memories` 和 `memories.generate_memories`、`memories.use_memories` 均为 `false`），不改你的 `~/.codex/config.toml`。需要保留原生记忆时，在守护进程的环境中设置 `MULTICA_CODEX_MEMORY=1`。
@@ -229,6 +233,8 @@ Codex 原生子智能体同样默认关闭：父线程结束时，Multica 就把
 
 这里填写的是可执行文件和参数，不是 shell 脚本。可以使用普通参数、引号和反斜杠转义，但不能使用管道、重定向、`&&`、`;`、反引号或环境变量展开。需要这些行为时，把它们放进 wrapper script，再把该脚本作为命令填写。
 
+版本检查和 Pi 模型探测会在空临时目录中运行，以兼容禁止从主目录启动的沙箱包装器。主目录环境和用户级配置仍然可用。固定参数中的脚本或配置文件请使用绝对路径；探测不再读取相对于 daemon 启动目录的配置。任务执行仍使用任务的工作目录。
+
 ### 参数的排列顺序
 
 命令字段里填写的内容会紧跟在可执行文件之后，排在 Multica 追加的参数之前：
@@ -291,7 +297,7 @@ Qoder Cloud Agents 通过远端会话执行分配的任务。Multica 服务端�
 
 超出并发上限的任务会排队等待。同一任务的后续运行会在上一会话空闲时继续使用该 Qoder 会话。智能体可以设置默认仓库，在任务所属项目未绑定仓库时使用。智能体会被要求以任务标识命名分支，并在 PR 标题前加上任务标识，以便 PR 自动关联到任务。
 
-首版支持任务运行、进度同步、取消和基于持久化记录的恢复。模型、工具和 skill 在 Qoder 中配置；暂不支持交互聊天、本地目录、附件，也不支持从 Multica 创建远端 Qoder Cloud Agents 智能体。运行时页面分别展示远端运行时和电脑。
+首版支持任务运行、聊天、担任小队队长、通过智能体创建任务、进度同步、取消和基于持久化记录的恢复。模型、工具和 skill 在 Qoder 中配置。任务和聊天消息里的附件和图片会交给远端会话，包括 PDF 和 Office 文档，每个文件不超过 5 MB；更大的文件不会传过去，智能体只知道有这些文件。聊天中智能体用 DeliverArtifacts 交付的文件（每个不超过 10 MB）会作为附件随回复发出。暂不支持本地目录，也不支持从 Multica 创建远端 Qoder Cloud Agents 智能体。运行时页面分别展示远端运行时和电脑。
 
 独立桥接进程的配置与限制见 [Qoder runtime README](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md)。
 
