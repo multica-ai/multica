@@ -116,6 +116,7 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 - Views tests must not mock `next/*` or `react-router-dom`. Mock stores with their Zustand callable shape plus `getState`; mock API calls at `@multica/core/api`.
 - E2E setup/teardown uses `TestApiClient`.
 - DB-backed Go tests use `server/internal/testutil` fixtures (`dbfx.Issue`, `dbfx.Task`, `dbfx.Insert`) and `testutil.Call(h, req).Want(status).JSON(&out)`. Keep product assertions and case-specific diagnostics in the test, not fixture helpers.
+- DB-backed Go tests share one database with packages running in parallel. When code under test reads across workspaces (sweeps, outbox scans, GC), assert on your fixture's rows (task state, `pending` / `settled` for your IDs), never on the call's totals or result length.
 - Default tests must not resolve or execute user-installed agent CLIs; pass test-created fake or missing executable paths. New default agent commands go in `scripts/agent-cli-command-names.txt`.
 - Only run real-agent smoke tests when explicitly authorized. Gate them behind `agentintegration` and check `MULTICA_RUN_REAL_AGENT_SMOKE=1` before executable lookup/account access. Run the specific test: `(cd server && MULTICA_RUN_REAL_AGENT_SMOKE=1 go test -tags=agentintegration ./pkg/agent -run '<test-name>' -count=1 -v)`.
 
