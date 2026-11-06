@@ -502,7 +502,7 @@ function renderPanel(props: React.ComponentProps<typeof AgentCreatePanel>) {
 describe("AgentCreatePanel", () => {
   it("does not replace an explicitly cleared manual assignee with the filing agent", async () => {
     const user = userEvent.setup();
-    renderPanel({ onClose: vi.fn(), onSwitchMode: vi.fn(), isExpanded: false, setIsExpanded: vi.fn(), data: { manual_draft_started: true } });
+    renderPanel({ onClose: vi.fn(), onSwitchMode: vi.fn(), isExpanded: false, setIsExpanded: vi.fn(), data: { manual_assignee_cleared: true } });
     await user.click(screen.getByRole("button", { name: /Switch to Manual/i }));
     expect(mockIssueDraftStore.draft.manual.assigneeId).toBeUndefined();
     expect(mockSetManual.mock.calls.some(([patch]) => "assigneeId" in patch)).toBe(false);

@@ -296,6 +296,7 @@ export function ManualCreatePanel({
     }
     return draft.manual.assigneeId;
   });
+  const [assigneeCleared, setAssigneeCleared] = useState(data?.manual_assignee_cleared === true);
   const [startDate, setStartDate] = useState<string | null>(draft.manual.startDate);
   const [dueDate, setDueDate] = useState<string | null>(
     (data?.due_date as string | undefined) ?? draft.shared.dueDate,
@@ -409,6 +410,7 @@ export function ManualCreatePanel({
   const updatePriority = (v: IssuePriority) => { setPriority(v); setShared({ priority: v }); };
   const updateAssignee = (type?: IssueAssigneeType, id?: string) => {
     setAssigneeType(type); setAssigneeId(id);
+    setAssigneeCleared(!id);
     setManual({ assigneeType: type, assigneeId: id });
   };
   const updateProject = (id?: string) => { setProjectId(id); setShared({ projectId: id }); };
@@ -894,6 +896,7 @@ export function ManualCreatePanel({
     const carry: Record<string, unknown> = {};
     if (parentIssueId) carry.parent_issue_id = parentIssueId;
     if (carryParentIdentifier) carry.parent_issue_identifier = carryParentIdentifier;
+    if (assigneeCleared) carry.manual_assignee_cleared = true;
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
   };
 

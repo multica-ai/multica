@@ -126,7 +126,6 @@ function CreateIssueDialogBody({
   const effectiveData = {
     ...(panelData ?? {}),
     ...sourceContextData,
-    manual_draft_started: manualOpened,
   };
 
   const switchTo = (next: CreateMode) => (carry?: Record<string, unknown> | null) => {
