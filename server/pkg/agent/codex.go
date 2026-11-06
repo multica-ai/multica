@@ -1052,6 +1052,11 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			case result.codexStartupRefreshRetrySafe && startupRetries < 1:
 				retryReason = "model_catalog_refresh"
 			}
+			if attemptOpts.CodexRetryMustResume && retryReason == "model_catalog_refresh" {
+				// This retry would clear ResumeSessionID after turn/start.
+				// An overload child must keep the verified parent thread.
+				retryReason = ""
+			}
 			if retryReason == "" {
 				flushHeldPins()
 				result.Usage = mergeCodexAttemptUsage(priorUsage, result.Usage)
@@ -2082,12 +2087,16 @@ func codexTurnInput(prompt string, resumeExpected, resumed bool, notice string) 
 // startOrResumeThread picks between Codex's thread/resume and thread/start
 // based on opts.ResumeSessionID. When a prior thread ID is provided it first
 // tries thread/resume; recoverable protocol errors (unknown thread, schema
-// mismatch) fall back to thread/start so the task still executes, while
-// transport/process failures fail fast because the app-server can no longer
+// mismatch) fall back to thread/start for ordinary runs. An overload retry
+// marked CodexRetryMustResume fails instead, preserving its conversation.
+// Transport/process failures fail fast because the app-server can no longer
 // answer a fresh start request. The returned threadID is what subsequent
 // turn/start calls must reference, and resumed indicates whether the prior
 // thread was picked up (only useful for logging).
 func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions, logger *slog.Logger) (string, bool, error) {
+	if opts.CodexRetryMustResume && opts.ResumeSessionID == "" {
+		return "", false, errors.New("codex thread/resume required but no prior session ID was provided")
+	}
 	if priorThreadID := opts.ResumeSessionID; priorThreadID != "" {
 		// thread/resume reuses the thread's persisted model and reasoning
 		// effort; only override fields the daemon actually cares about.
@@ -2136,8 +2145,14 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 				)
 				return threadID, true, nil
 			}
+			if opts.CodexRetryMustResume {
+				return "", false, errors.New("codex thread/resume returned no thread ID for required resume")
+			}
 			logger.Warn("codex thread/resume returned no thread ID; falling back to thread/start", "prior_thread_id", priorThreadID)
 		} else {
+			if opts.CodexRetryMustResume {
+				return "", false, fmt.Errorf("codex thread/resume failed: %w", err)
+			}
 			if isCodexTransportError(err) {
 				logger.Warn("codex thread/resume failed due to transport error; not falling back to thread/start", "prior_thread_id", priorThreadID, "error", err)
 				return "", false, fmt.Errorf("codex thread/resume failed: %w", err)

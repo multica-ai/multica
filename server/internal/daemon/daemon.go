@@ -8956,6 +8956,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		TurnInterruptTimeout:       d.cfg.CodexTurnInterruptTimeout,
 		ThreadHandshakeTimeout:     d.cfg.CodexThreadHandshakeTimeout,
 		ResumeSessionID:            task.PriorSessionID,
+		CodexRetryMustResume:       task.CodexRetryMustResume,
 		// Post-gate intent: PriorSessionID here already reflects the pre-flight
 		// resume gates (a dropped resume is surfaced via the prompt instead). If it
 		// survived to here, the backend must disclose the loss when the live
@@ -9076,7 +9077,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 
-	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
+	if !task.CodexRetryMustResume && shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
 		firstResult := result
 		firstUsage := result.Usage
 		firstTools := tools
