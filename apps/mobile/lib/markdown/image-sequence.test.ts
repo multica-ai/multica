@@ -60,6 +60,7 @@ describe("mobile Markdown image sequence wiring", () => {
     ["relative angle URL with space", "![middle](</uploads/a b.png>)", "/uploads/a%20b.png", []],
     ["legacy attachment URL", "![middle](<https://cdn.example/图 v2.png>)", attachment.download_url!, [attachment]],
     ["space entity", "![middle](https://cdn.example/a&#32;b.png)", "https://cdn.example/a%20b.png", []],
+    ["CRLF image label with entity", "![mid\r\ndle](https://cdn.example/a.png?a=1&amp;b=2)", "https://cdn.example/a.png?a=1&b=2", []],
     ["named entity", "![middle](https://cdn.example/a.png?a=1&amp;b=2)", "https://cdn.example/a.png?a=1&b=2", []],
     ["escaped entity", String.raw`![middle](https://cdn.example/a.png?a=1\&amp;b=2)`, "https://cdn.example/a.png?a=1&amp;b=2", []],
     ["escaped nested entity", String.raw`![middle](https://cdn.example/a.png?a=1\&amp;amp;b=2)`, "https://cdn.example/a.png?a=1&amp;amp;b=2", []],

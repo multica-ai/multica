@@ -38,7 +38,9 @@ function imageUrisBySource(input: string): Map<string, string> {
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
     if (url !== undefined && start !== undefined && end !== undefined) {
-      uris.set(input.slice(start, end), normalizeUri(url));
+      // Marked normalizes CRLF and bare CR before creating token.raw.
+      const source = input.slice(start, end).replace(/\r\n?/g, "\n");
+      uris.set(source, normalizeUri(url));
     }
   }
   return uris;
