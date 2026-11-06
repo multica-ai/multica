@@ -385,38 +385,10 @@ func TestDeleteRuntimeProfile_MikaBlockerGetsItsOwnRemedy(t *testing.T) {
 	}
 }
 
-// A builder carrier is hidden from the agent list entirely, so neither
-// "reassign" nor "archive" is reachable. The way out is its Builder session.
-func TestDeleteRuntimeProfile_BuilderCarrierBlockerPointsAtItsSession(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	profileID := insertRuntimeProfileFixture(t, ctx, "Builder Held Profile", "codex", "builder-held")
-	runtimeID := insertProfileRuntimeFixture(t, ctx, profileID, "BUILDER-HOST", "codex")
-	createSystemFixtureAgent(t, ctx, runtimeID,
-		".multica-agent-builder-flow1", "system", "agent_builder:flow1")
-
-	body := deleteProfileExpectingConflict(t, ctx, profileID)
-	msg := conflictMessage(t, body)
-
-	if strings.Contains(msg, "can be reassigned or archived") || strings.Contains(msg, "Reassign or archive them first.") {
-		t.Fatalf("a builder carrier is not in the agent list; refusal must not say so: %s", msg)
-	}
-	if !strings.Contains(msg, "Agent Builder session") {
-		t.Fatalf("refusal must point at the Builder session, got: %s", msg)
-	}
-
-	agents, _ := body["active_agents"].([]any)
-	entry, _ := agents[0].(map[string]any)
-	if got, _ := entry["system_key"].(string); got != "agent_builder:flow1" {
-		t.Fatalf("system_key = %q", got)
-	}
-}
-
-// With both kinds present each needs its own clause: the user agent is
-// actionable, the carrier is not, and collapsing them loses one or the other.
+// With both an ordinary agent and Mika present each needs its own clause: the
+// user agent is archivable, Mika is not, and collapsing them loses one or the
+// other. A hidden builder carrier on the same runtime is not a blocker at all
+// (GH #9762), so it must not be counted, named, or given a remedy.
 func TestDeleteRuntimeProfile_MixedBlockersGiveEachItsOwnRemedy(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -435,15 +407,24 @@ func TestDeleteRuntimeProfile_MixedBlockersGiveEachItsOwnRemedy(t *testing.T) {
 
 	for _, want := range []string{
 		"not marked as built into Multica can be reassigned or archived",
-		"Agent Builder session",
 		"Mika is built into Multica, so it cannot be archived",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("mixed refusal missing %q, got: %s", want, msg)
 		}
 	}
-	if got, _ := body["active_agent_count"].(float64); int(got) != 3 {
-		t.Fatalf("active_agent_count = %v, want 3", got)
+	if strings.Contains(msg, "Agent Builder") || strings.Contains(msg, "multica-agent-builder") {
+		t.Fatalf("a builder carrier is not a blocker and must not appear in the refusal: %s", msg)
+	}
+	if got, _ := body["active_agent_count"].(float64); int(got) != 2 {
+		t.Fatalf("active_agent_count = %v, want 2 (the carrier does not count)", got)
+	}
+	agents, _ := body["active_agents"].([]any)
+	for _, a := range agents {
+		entry, _ := a.(map[string]any)
+		if kind, _ := entry["kind"].(string); kind != "user" {
+			t.Fatalf("listed blocker %v has kind %q; only user agents block a profile delete", entry["name"], kind)
+		}
 	}
 }
 
@@ -574,34 +555,16 @@ func TestDeleteRuntimeProfile_RemedyCoversBlockersBeyondTheSample(t *testing.T) 
 	}
 }
 
-// Same boundary for a builder carrier: its remedy is a different surface
-// entirely, so losing it past the cap strands the user just as badly.
-func TestDeleteRuntimeProfile_BuilderCarrierBeyondTheSampleStillReported(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	profileID := insertRuntimeProfileFixture(t, ctx, "Beyond Sample Builder", "codex", "beyond-builder")
-	runtimeID := insertProfileRuntimeFixture(t, ctx, profileID, "BEYOND-BUILD-HOST", "codex")
-	for i := 0; i < maxReportedBlockingAgents; i++ {
-		_ = createCascadeFixtureAgent(t, ctx, runtimeID, fmt.Sprintf("Agent %03d", i))
-	}
-	// "zzz-" sorts last, so the carrier lands past the cap.
-	createSystemFixtureAgent(t, ctx, runtimeID,
-		"zzz-multica-agent-builder-flow9", "system", "agent_builder:flow9")
-
-	msg := conflictMessage(t, deleteProfileExpectingConflict(t, ctx, profileID))
-	if !strings.Contains(msg, "Agent Builder session") {
-		t.Fatalf("builder carrier is blocker #21 and must still be reported, got: %s", msg)
-	}
-}
-
 // The class mapping exists twice — the SQL CASE in ListActiveAgentsByProfile,
 // because per-class counts have to cover rows the LIMIT excludes, and
 // classifyBlockingAgent in Go for the instance path, which reads plain agent
 // rows. This pins them to each other: if a future system_key is added to one
 // and not the other, the refusal would name a remedy for the wrong blocker.
+//
+// It also pins the kind filter both paths share: kind='system' rows — the
+// hidden Agent Builder carriers, and anything else that is runtime-local
+// infrastructure — never appear, because TeardownRuntime deletes them with the
+// runtime instead of leaving them to block it (GH #9762).
 func TestBlockingAgentClassMatchesSQLClassification(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -613,14 +576,10 @@ func TestBlockingAgentClassMatchesSQLClassification(t *testing.T) {
 
 	_ = createCascadeFixtureAgent(t, ctx, runtimeID, "Pin Ordinary")
 	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Mika", "user", "mika")
+	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Future", "user", "some_future_facility")
+	// Excluded by kind, whatever their system_key says.
 	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Builder", "system", "agent_builder:pinflow")
-	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Future", "system", "some_future_facility")
-	// Near misses for the builder prefix. '_' is a single-character wildcard in
-	// SQL LIKE, so a LIKE-based CASE classifies both of these as carriers while
-	// Go's HasPrefix does not — and the refusal would then send the user to an
-	// Agent Builder session that does not exist.
-	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Dash", "system", "agent-builder:not-a-carrier")
-	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Wildcard", "system", "agentXbuilder:not-a-carrier")
+	createSystemFixtureAgent(t, ctx, runtimeID, "Pin System Future", "system", "some_system_facility")
 
 	rows, err := testHandler.Queries.ListActiveAgentsByProfile(ctx, db.ListActiveAgentsByProfileParams{
 		ProfileID:   parseUUID(profileID),
@@ -630,11 +589,14 @@ func TestBlockingAgentClassMatchesSQLClassification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list blockers: %v", err)
 	}
-	if len(rows) != 6 {
-		t.Fatalf("expected 6 blockers, got %d", len(rows))
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 blockers (kind='system' rows excluded), got %d", len(rows))
 	}
 
 	for _, row := range rows {
+		if row.Kind != "user" {
+			t.Fatalf("%q has kind %q; only user agents block a profile delete", row.Name, row.Kind)
+		}
 		fromSQL := blockingAgentClassFromKey(row.BlockerClass)
 		fromGo := classifyBlockingAgent(row.SystemKey)
 		if fromSQL != fromGo {
@@ -645,6 +607,9 @@ func TestBlockingAgentClassMatchesSQLClassification(t *testing.T) {
 
 	// And the per-class counts have to agree with the rows they summarise.
 	summary := rows[0]
+	if summary.TotalCount != int64(len(rows)) {
+		t.Fatalf("total_count = %d, rows = %d", summary.TotalCount, len(rows))
+	}
 	for _, tc := range []struct {
 		name  string
 		got   int64
@@ -652,7 +617,6 @@ func TestBlockingAgentClassMatchesSQLClassification(t *testing.T) {
 	}{
 		{"user", summary.UserCount, blockingAgentUser},
 		{"mika", summary.MikaCount, blockingAgentMika},
-		{"agent_builder", summary.AgentBuilderCount, blockingAgentBuilderCarrier},
 		{"other_system", summary.OtherSystemCount, blockingAgentOtherSystem},
 	} {
 		var want int64
@@ -667,8 +631,9 @@ func TestBlockingAgentClassMatchesSQLClassification(t *testing.T) {
 	}
 }
 
-// Retention GC needs both no bound agents AND no unfinished task. An agent
-// rebound to another machine can leave a deferred run pinned to the old
+// Retention GC needs both no bound agents AND no unfinished task. A rebind
+// moves the agent's pending runs along, but a run enqueued concurrently with
+// the rebind, or left from before that move existed, can still sit on the old
 // runtime, so "no agents bound" alone is not a cleanup promise this server can
 // keep. Regression contributed by review.
 func TestDeleteAgentRuntime_OfflineInstanceWithUnfinishedTaskDoesNotPromiseCleanup(t *testing.T) {
@@ -679,10 +644,6 @@ func TestDeleteAgentRuntime_OfflineInstanceWithUnfinishedTaskDoesNotPromiseClean
 	runtimeID, _ := createProfileBackedRuntime(t, ctx, "Review Retired Host")
 	agentID := createCascadeFixtureAgent(t, ctx, runtimeID, "Review Moved Agent")
 	issueID := dbfx.Issue(t, "Review deferred task")
-	taskID := dbfx.Task(t, agentID, testutil.Cols{
-		"runtime_id": runtimeID, "issue_id": issueID, "status": "deferred",
-		"fire_at": testutil.Raw("now() + interval '30 days'"),
-	})
 	targetID := newTestRuntime(t, "Review New Host", "online")
 	w := httptest.NewRecorder()
 	testHandler.UpdateAgent(w, withURLParam(newRequest("PATCH", "/api/agents/"+agentID,
@@ -690,6 +651,10 @@ func TestDeleteAgentRuntime_OfflineInstanceWithUnfinishedTaskDoesNotPromiseClean
 	if w.Code != http.StatusOK {
 		t.Fatalf("rebind: %d %s", w.Code, w.Body.String())
 	}
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID, "issue_id": issueID, "status": "deferred",
+		"fire_at": testutil.Raw("now() + interval '30 days'"),
+	})
 	dbfx.Exec(t, `UPDATE agent_runtime SET status='offline', last_seen_at=now()-interval '8 days' WHERE id=$1`, runtimeID)
 	var taskRuntime, taskStatus string
 	dbfx.QueryRow(t, `SELECT runtime_id::text, status FROM agent_task_queue WHERE id=$1`, taskID).Scan(&taskRuntime, &taskStatus)
@@ -730,10 +695,13 @@ func TestDeleteAgentRuntime_OfflineInstanceWithUnfinishedTaskDoesNotPromiseClean
 }
 
 // Builder sessions are creator-scoped reads, so an admin who is not the
-// creator gets 403 from list, switch and discard alike. Telling that admin to
-// reopen the session is another instruction they cannot carry out.
-// Regression contributed by review.
-func TestDeleteRuntimeProfile_BuilderRemedyAddressesTheSessionCreator(t *testing.T) {
+// creator cannot list, switch or discard another member's Builder. When that
+// carrier blocked the profile delete, the admin was stuck with no action they
+// could take (GH #9762). It no longer blocks: the delete goes through and takes
+// the carrier, its session and its saved draft with it. Losing another member's
+// half-finished draft is the accepted cost — its runtime is gone, so it could
+// not run again anyway.
+func TestDeleteRuntimeProfile_OtherMembersBuilderDraftDoesNotBlock(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -754,29 +722,156 @@ func TestDeleteRuntimeProfile_BuilderRemedyAddressesTheSessionCreator(t *testing
 	dbfx.Exec(t, `INSERT INTO agent_builder_draft (chat_session_id, workspace_id, draft) VALUES ($1, $2, '{"name":"Saved draft"}'::jsonb)`, session.SessionID, testWorkspaceID)
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent_builder_draft WHERE chat_session_id=$1`, session.SessionID)
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id=$1`, session.BuilderAgentID)
 	})
-	msg := conflictMessage(t, deleteProfileExpectingConflict(t, ctx, profileID))
-	w = httptest.NewRecorder()
-	testHandler.ListAgentBuilderSessions(w, newRequest("GET", "/api/agent-builder/sessions", nil))
-	if w.Code != http.StatusOK {
-		t.Fatalf("list: %d %s", w.Code, w.Body.String())
-	}
-	if strings.Contains(w.Body.String(), session.SessionID) {
-		t.Fatal("other member's private session unexpectedly visible")
-	}
+
+	// The admin really cannot reach it, which is why it must not block them.
 	w = switchBuilderRuntime(t, session.SessionID, runtimeID)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("switch: %d %s", w.Code, w.Body.String())
 	}
-	w = httptest.NewRecorder()
-	r := withURLParam(newRequest("DELETE", "/api/chat/sessions/"+session.SessionID, nil), "sessionId", session.SessionID)
-	testHandler.DeleteChatSession(w, withChatTestWorkspaceCtx(t, r))
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("discard: %d %s", w.Code, w.Body.String())
+
+	w = deleteProfile(t, profileID)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
 	}
-	if strings.Contains(msg, "reopen the session") && !strings.Contains(msg, "creator") && !strings.Contains(msg, "owner") {
-		t.Fatalf("admin cannot see, switch, or discard the member's Builder, but guidance tells the admin to reopen it: %s", msg)
+	assertBuilderSessionGone(t, ctx, session)
+	assertProfileGone(t, ctx, profileID, runtimeID)
+}
+
+// deleteProfile runs the profile delete as the fixture admin and returns the
+// raw response.
+func deleteProfile(t *testing.T, profileID string) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles/"+profileID, nil)
+	req = withURLParams(req, "id", testWorkspaceID, "profileId", profileID)
+	h := *testHandler
+	h.DaemonRuntimeGone = &recordingRuntimeGoneNotifier{}
+	h.DeleteRuntimeProfile(w, req)
+	return w
+}
+
+// assertBuilderSessionGone checks that a Builder's carrier and everything
+// hanging off it without a foreign key were removed in the same delete.
+func assertBuilderSessionGone(t *testing.T, ctx context.Context, session CreateAgentBuilderSessionResponse) {
+	t.Helper()
+	for _, c := range []struct {
+		what, query, id string
+	}{
+		{"carrier agent", `SELECT count(*) FROM agent WHERE id = $1`, session.BuilderAgentID},
+		{"chat session", `SELECT count(*) FROM chat_session WHERE id = $1`, session.SessionID},
+		{"chat messages", `SELECT count(*) FROM chat_message WHERE chat_session_id = $1`, session.SessionID},
+		{"builder draft", `SELECT count(*) FROM agent_builder_draft WHERE chat_session_id = $1`, session.SessionID},
+		{"chat draft restores", `SELECT count(*) FROM chat_draft_restore WHERE chat_session_id = $1`, session.SessionID},
+		{"carrier tasks", `SELECT count(*) FROM agent_task_queue WHERE agent_id = $1`, session.BuilderAgentID},
+	} {
+		var n int
+		if err := testPool.QueryRow(ctx, c.query, c.id).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", c.what, err)
+		}
+		if n != 0 {
+			t.Fatalf("%s: %d row(s) left behind after the profile delete", c.what, n)
+		}
 	}
+}
+
+func assertProfileGone(t *testing.T, ctx context.Context, profileID, runtimeID string) {
+	t.Helper()
+	var profiles, runtimes int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM runtime_profile WHERE id = $1`, profileID).Scan(&profiles); err != nil {
+		t.Fatalf("count profile: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&runtimes); err != nil {
+		t.Fatalf("count runtime: %v", err)
+	}
+	if profiles != 0 || runtimes != 0 {
+		t.Fatalf("profile rows = %d, runtime rows = %d after a successful delete; want 0/0", profiles, runtimes)
+	}
+}
+
+// GH #9762. The two ways a Builder carrier is left behind with no surface that
+// can release it, neither of which may block the profile delete any more:
+//
+//   - finished: the agent was created and the studio archived the session
+//     (archiveAfterCreate). The carrier stays active and the archived session
+//     drops out of the Builder list.
+//   - untouched: the flow was opened and left before any message or saved
+//     draft, so the Builder list never showed it.
+//
+// A queued Builder turn rides along on the finished one, so the delete also
+// has to cancel and remove in-flight carrier work rather than refuse on it.
+func TestDeleteRuntimeProfile_DeletesLeftoverBuilderCarriers(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	profileID := insertRuntimeProfileFixture(t, ctx, "Builder Leftover Profile", "codex", "builder-leftover")
+	runtimeID := insertProfileRuntimeFixture(t, ctx, profileID, "BUILDER-LEFTOVER-HOST", "codex")
+
+	newSession := func() CreateAgentBuilderSessionResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		testHandler.CreateAgentBuilderSession(w, newRequest(http.MethodPost, "/api/agent-builder/sessions", map[string]any{
+			"runtime_id": runtimeID,
+		}))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create builder: %d %s", w.Code, w.Body.String())
+		}
+		var s CreateAgentBuilderSessionResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &s); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM agent_builder_draft WHERE chat_session_id=$1`, s.SessionID)
+			testPool.Exec(context.Background(), `DELETE FROM chat_draft_restore WHERE chat_session_id=$1`, s.SessionID)
+			testPool.Exec(context.Background(), `DELETE FROM agent WHERE id=$1`, s.BuilderAgentID)
+		})
+		return s
+	}
+
+	finished := newSession()
+	insertChatMessage(t, finished.SessionID, "user", "make me a release agent")
+	insertChatMessage(t, finished.SessionID, "assistant", "here is the draft")
+	dbfx.Exec(t, `INSERT INTO agent_builder_draft (chat_session_id, workspace_id, draft) VALUES ($1, $2, '{"name":"Release"}'::jsonb)`, finished.SessionID, testWorkspaceID)
+	dbfx.Task(t, finished.BuilderAgentID, testutil.Cols{
+		"runtime_id": runtimeID, "chat_session_id": finished.SessionID, "status": "queued",
+	})
+	req := newRequest("PATCH", "/api/chat/sessions/"+finished.SessionID+"/archive", map[string]any{"archived": true})
+	req = withChatTestWorkspaceCtx(t, withURLParam(req, "sessionId", finished.SessionID))
+	w := httptest.NewRecorder()
+	testHandler.SetChatSessionArchived(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("archive builder session: %d %s", w.Code, w.Body.String())
+	}
+
+	untouched := newSession()
+
+	// Precondition: both are exactly the reported shape — an active carrier
+	// whose session the creator cannot get back to.
+	var activeCarriers int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent WHERE id = ANY($1::uuid[]) AND archived_at IS NULL
+	`, []string{finished.BuilderAgentID, untouched.BuilderAgentID}).Scan(&activeCarriers); err != nil {
+		t.Fatal(err)
+	}
+	if activeCarriers != 2 {
+		t.Fatalf("expected both carriers still active, got %d", activeCarriers)
+	}
+	for _, s := range listBuilderSessions(t).Sessions {
+		if s.SessionID == finished.SessionID || s.SessionID == untouched.SessionID {
+			t.Fatalf("session %s is listed; the regression needs it unreachable", s.SessionID)
+		}
+	}
+
+	w = deleteProfile(t, profileID)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+	assertBuilderSessionGone(t, ctx, finished)
+	assertBuilderSessionGone(t, ctx, untouched)
+	assertProfileGone(t, ctx, profileID, runtimeID)
 }
 
 // Forces the archive path's task-cancellation transaction to fail, which is

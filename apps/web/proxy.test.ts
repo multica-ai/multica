@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { NextRequest } from "next/server";
 import { MULTICA_LOCALE_HEADER } from "./lib/locale-routing";
 import { config, proxy } from "./proxy";
@@ -287,4 +288,17 @@ describe("proxy root and locale handling", () => {
       res.headers.get(`x-middleware-request-${MULTICA_LOCALE_HEADER}`),
     ).toBe("zh-Hans");
   });
+});
+
+
+describe("upload route bypasses the buffering proxy", () => {
+  it.each(["/api/upload-file", "/api/upload-file/"])(
+    "excludes %s from Proxy matching",
+    (url) => expect(unstable_doesMiddlewareMatch({ config, url })).toBe(false),
+  );
+
+  it.each(["/api", "/api/config", "/api/upload-file-extra", "/v1/issues", "/auth/token", "/docs/intro", "/login"])(
+    "keeps the existing proxy behavior for %s",
+    (url) => expect(unstable_doesMiddlewareMatch({ config, url })).toBe(true),
+  );
 });

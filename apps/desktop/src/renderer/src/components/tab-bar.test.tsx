@@ -12,7 +12,6 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
-import { SIDEBAR_WRAPPER_FILL_CLASS } from "@multica/ui/components/ui/sidebar";
 
 type MockTab = {
   id: string;
@@ -85,19 +84,21 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
 // (overflow, pin, close, context menu) don't need the whole query stack. By
 // default `title` mirrors the persisted tab title (matching the real hook's
 // fallback); a test can set `pres.title` to simulate a resolved title that
-// differs, to exercise the active-tab persist effect.
-const pres = vi.hoisted(() => ({ title: null as string | null }));
+// differs, to exercise resolved-title persistence.
+const pres = vi.hoisted(() => ({ title: null as string | null, titleResolved: true }));
 vi.mock("@multica/views/layout", () => ({
-  useTabPresentation: (_url: string, fallbackTitle?: string) => ({
+  useTabPresentation: vi.fn((_url: string, fallbackTitle?: string) => ({
     visual: { kind: "icon", icon: "ListTodo" },
     title: pres.title ?? fallbackTitle ?? "",
-  }),
+    titleResolved: pres.titleResolved,
+  })),
   ResourceLeadingVisual: ({ visual }: { visual: { kind: string; icon?: string } }) => (
     <span data-testid="tab-leading" data-visual-kind={visual.kind} data-icon={visual.icon} />
   ),
 }));
 
 import { TabBar } from "./tab-bar";
+import { useTabPresentation } from "@multica/views/layout";
 
 function render(
   ui: ReactElement,
@@ -138,6 +139,8 @@ function reset() {
   state.updateTab.mockReset();
   state.openIssueWindow.mockReset();
   pres.title = null;
+  pres.titleResolved = true;
+  vi.mocked(useTabPresentation).mockClear();
 }
 
 beforeEach(() => {
@@ -248,8 +251,8 @@ describe("TabBar hover action buttons", () => {
   });
 });
 
-describe("TabBar active-tab title persistence", () => {
-  it("persists the resolved title only for the active tab", () => {
+describe("TabBar title persistence", () => {
+  it("loads tab identities and persists resolved titles for background tabs too", () => {
     pres.title = "MUL-1: Fixed";
     state.byWorkspace.acme.tabs = [
       { id: "tA", url: "/acme/issues/i1", title: "Issues", pinned: false },
@@ -258,89 +261,48 @@ describe("TabBar active-tab title persistence", () => {
     state.byWorkspace.acme.activeTabId = "tA";
     render(<TabBar />);
     expect(state.updateTab).toHaveBeenCalledWith("tA", { title: "MUL-1: Fixed" });
-    expect(state.updateTab).not.toHaveBeenCalledWith("tB", expect.anything());
-    expect(state.updateTab).toHaveBeenCalledTimes(1);
+    expect(state.updateTab).toHaveBeenCalledWith("tB", { title: "MUL-1: Fixed" });
+    expect(state.updateTab).toHaveBeenCalledTimes(2);
+    expect(useTabPresentation).toHaveBeenCalledWith("/acme/issues/i1", "Issues", { fetch: true });
+  });
+
+  it("does not persist loading placeholders for active or background tabs", () => {
+    pres.title = "Issue";
+    pres.titleResolved = false;
+    state.byWorkspace.acme.tabs = [
+      { id: "tA", url: "/acme/issues/i1", title: "Saved", pinned: false },
+      { id: "tB", url: "/acme/issues/i2", title: "", pinned: false },
+    ];
+    render(<TabBar />);
+    expect(state.updateTab).not.toHaveBeenCalled();
   });
 
   it("does not re-persist when the resolved title already matches (no loop)", () => {
-    // Active tab's persisted title equals the resolved title.
-    pres.title = "Issues";
-    state.byWorkspace.acme.activeTabId = "tA"; // tA.title === "Issues"
     render(<TabBar />);
     expect(state.updateTab).not.toHaveBeenCalled();
   });
 });
 
-describe("TabBar merged-tab chrome", () => {
-  // Keep the fill inside the translucent keyline so the merged border is even.
-  it("keeps the active tab's page-canvas fill out from under its keyline", () => {
-    const { getByLabelText } = render(<TabBar />);
-    const cap = getByLabelText("Issues")
-      .closest("[data-tab-frame]")
-      ?.querySelector(".rounded-t-lg");
+describe("TabBar pill chrome", () => {
+  const pillOf = (label: string, getByLabelText: (text: string) => HTMLElement) =>
+    getByLabelText(label).closest("[data-tab-frame]")?.querySelector(".rounded-lg");
 
-    expect(cap).toHaveClass(
-      "border-surface-border",
+  // The active pill is the content card's material, so it reads as that
+  // card's tab while standing apart from it on the title bar.
+  it("paints the active tab with the content card's surface", () => {
+    const { getByLabelText } = render(<TabBar />);
+    expect(pillOf("Issues", getByLabelText)).toHaveClass(
       "bg-page-canvas",
-      "bg-clip-padding",
+      "ring-surface-border",
+      "shadow-[var(--surface-shadow)]",
     );
   });
 
-  // The opaque backing keeps the flare and card keylines from stacking, and has
-  // to equal the strip's backdrop at every width. It reads that colour off the
-  // sidebar wrapper's published fill rather than naming a token, so no token may
-  // appear here or in the gradient — a pinned one is exactly the regression this
-  // covers. The wrapper's end of the contract is covered in packages/views.
-  it("paints each flare on the sidebar wrapper's own fill", () => {
+  it("keeps inactive tabs as lighter pills without the card's edge", () => {
     const { getByLabelText } = render(<TabBar />);
-    const flares = getByLabelText("Issues")
-      .closest("[data-tab-frame]")
-      ?.querySelectorAll('[style*="radial-gradient"]');
-
-    expect(flares).toHaveLength(2);
-    for (const flare of flares ?? []) {
-      expect(flare).toHaveClass(SIDEBAR_WRAPPER_FILL_CLASS);
-      expect(flare.getAttribute("style")).toContain("var(--page-canvas) 10.2px)");
-      expect(flare.getAttribute("style")).not.toContain("var(--sidebar)");
-      expect(flare.getAttribute("style")).not.toContain("var(--app-shell)");
-      expect(flare.className).not.toContain("bg-app-shell");
-      expect(flare.className).not.toContain("bg-sidebar");
-    }
-  });
-
-  // A flare overhangs the neighbouring tab by 9px, so the backing above may only
-  // cover the arc and the canvas fill: left over the notch it prints a square of
-  // strip colour on top of whatever the neighbour draws there, which is how the
-  // hover pill lost its corner to a dark bite (MUL-6160). The notch is therefore
-  // masked out of the flare entirely, and the mask has to close before the arc's
-  // anti-aliasing starts (r - 1.2) or the arc loses the backing it needs.
-  it("punches the notch out rather than filling it with strip colour", () => {
-    const { getByLabelText } = render(<TabBar />);
-    const flares = getByLabelText("Issues")
-      .closest("[data-tab-frame]")
-      ?.querySelectorAll<HTMLElement>('[style*="radial-gradient"]');
-
-    expect(flares).toHaveLength(2);
-    for (const flare of flares ?? []) {
-      const corner = /circle at top (left|right), transparent 8\.8px/.exec(
-        flare.style.backgroundImage,
-      )?.[1];
-      const mask = flare.style.maskImage;
-
-      expect(corner).toBeDefined();
-      expect(mask).toContain(`radial-gradient(circle at top ${corner}, transparent 8.4px`);
-      expect(mask).toMatch(/ 8\.8px\)$/);
-      expect(flare.style.getPropertyValue("-webkit-mask-image")).toBe(mask);
-    }
-  });
-
-  it("draws the merged cap only on the active tab", () => {
-    const { getByLabelText } = render(<TabBar />);
-    expect(
-      getByLabelText("Projects")
-        .closest("[data-tab-frame]")
-        ?.querySelector(".rounded-t-lg"),
-    ).toBeNull();
+    const pill = pillOf("Projects", getByLabelText);
+    expect(pill).toHaveClass("bg-page-canvas/50");
+    expect(pill).not.toHaveClass("ring-surface-border");
   });
 });
 
@@ -365,7 +327,7 @@ describe("TabBar overflow", () => {
       "overflow-y-hidden",
     );
     expect(getByLabelText("Tab 1").closest("[data-tab-frame]")).toHaveClass(
-      "w-40",
+      "w-56",
       "min-w-32",
     );
 
@@ -652,6 +614,15 @@ describe("TabBar locale", () => {
       openWindow: "Ouvrir dans une nouvelle fenêtre",
       newTab: "Nouvel onglet",
       pinned: "Issues (épinglé)",
+    },
+    es: {
+      pin: "Fijar pestaña",
+      unpin: "Dejar de fijar pestaña",
+      close: "Cerrar pestaña",
+      closeOthers: "Cerrar las demás pestañas",
+      openWindow: "Abrir en ventana nueva",
+      newTab: "Pestaña nueva",
+      pinned: "Issues (fijada)",
     },
   } as const satisfies Record<
     Exclude<SupportedLocale, "en">,

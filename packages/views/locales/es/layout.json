@@ -1,0 +1,216 @@
+{
+  "nav": {
+    "inbox": "Bandeja de entrada",
+    "chat": "Chat",
+    "my_issues": "Mis tareas",
+    "issues": "Tareas",
+    "projects": "Proyectos",
+    "autopilots": "Automatizaciones",
+    "agents": "Agentes",
+    "squads": "Squads",
+    "usage": "Analítica",
+    "runtimes": "Runtimes",
+    "skills": "Skills",
+    "settings": "Ajustes",
+    "views": "Vistas"
+  },
+  "tab": {
+    "issue": "Tarea",
+    "project": "Proyecto",
+    "autopilot": "Automatización",
+    "agent": "Agente",
+    "member": "Miembro",
+    "squad": "Squad",
+    "skill": "Skill",
+    "machine": "Máquina",
+    "runtime": "Runtime",
+    "attachment": "Adjunto",
+    "create_agent": "Crear agente",
+    "unknown": "Página desconocida",
+    "my_agents": "Trabajo de mis agentes"
+  },
+  "help": {
+    "trigger": "Ayuda",
+    "download_desktop": "App de escritorio",
+    "docs": "Documentación",
+    "changelog": "Registro de cambios",
+    "discord": "Discord",
+    "feedback": "Comentarios",
+    "server_version": "Versión del servidor {{version}}"
+  },
+  "workspace_loader": {
+    "loading_workspace": "Cargando espacio de trabajo…",
+    "loading_named_prefix": "Cargando"
+  },
+  "sidebar": {
+    "unpin_tooltip": "Dejar de fijar",
+    "workspaces_label": "Espacios de trabajo",
+    "create_workspace": "Crear espacio de trabajo",
+    "pending_invitations_label": "Invitaciones pendientes",
+    "invitation_workspace_fallback": "Espacio de trabajo",
+    "invitation_join": "Unirse",
+    "invitation_decline": "Rechazar",
+    "log_out": "Cerrar sesión",
+    "new_issue": "Nueva tarea",
+    "pinned_label": "Fijados",
+    "show_more_pins": "Mostrar {{count}} más…",
+    "show_fewer_pins": "Mostrar menos"
+  },
+  "window": {
+    "go_back": "Atrás",
+    "go_forward": "Adelante",
+    "hold_for_history": "Mantén pulsado para ver el historial",
+    "back_history": "Historial hacia atrás",
+    "forward_history": "Historial hacia delante"
+  },
+  "whats_new": {
+    "trigger": "Novedades",
+    "panel": {
+      "title": "Novedades",
+      "close": "Cerrar",
+      "new": "Nuevo",
+      "release_notes": "Notas de la versión v{{version}}",
+      "full_changelog": "Registro completo de cambios"
+    },
+    "action": {
+      "try": "Probar",
+      "open": "Abrir",
+      "learn_more": "Más información"
+    }
+  },
+  "spaces": {
+    "work": "Trabajo",
+    "team": "Equipo"
+  },
+  "rail": {
+    "label": "Navegación de la app",
+    "sheet_description": "Cambia de sección y de espacio de trabajo.",
+    "inbox": "Bandeja de entrada",
+    "work": "Trabajo",
+    "team": "Equipo",
+    "chat": "Chat",
+    "autopilots": "Auto",
+    "switch_workspace": "Cambiar de espacio de trabajo",
+    "invitation_from": "{{name}} te ha invitado",
+    "pin_workspace": "Fijar espacio de trabajo",
+    "unpin_workspace": "Desfijar espacio de trabajo",
+    "open_in_new_window": "Abrir en una ventana nueva",
+    "open_in_new_window_click": "Clic",
+    "open_in_other_window": "Ya está abierto en otra ventana",
+    "in_other_window": "Otra ventana",
+    "all_workspaces_open": "Todos los espacios de trabajo ya están abiertos en una ventana"
+  },
+  "panels": {
+    "work": {
+      "my_agents": "Trabajo de mis agentes",
+      "all_issues": "Todas las tareas",
+      "unread": "Sin leer",
+      "views": "Vistas",
+      "new_project": "Nuevo proyecto",
+      "new_issue_in_project": "Nueva tarea en {{name}}",
+      "all_projects_one": "{{count}} proyecto en total",
+      "all_projects_other": "{{count}} proyectos en total",
+      "project_issues": "Tareas en {{name}}",
+      "project_issues_empty": "Sin tareas",
+      "project_issues_error": "No se han podido cargar las tareas",
+      "project_issues_retry": "Reintentar",
+      "project_issues_settings": "Tareas en proyectos",
+      "settings_status": "Estado",
+      "settings_assignee": "Asignado",
+      "assignee_anyone": "Cualquiera",
+      "assignee_me": "Yo",
+      "assignee_my_agents": "Mis agentes",
+      "assignee_me_and_my_agents": "Yo y mis agentes",
+      "reset": "Restablecer",
+      "load_more": "Cargar más",
+      "show_less": "Mostrar menos",
+      "projects_settings": "Visualización de proyectos",
+      "projects_ordering": "Ordenación",
+      "projects_order_manual": "Manual",
+      "projects_order_name": "Nombre",
+      "projects_order_updated": "Actualizados recientemente",
+      "projects_order_created": "Creados recientemente",
+      "projects_show": "Mostrar",
+      "projects_only_mine": "Solo los proyectos que dirijo",
+      "projects_show_count": "Número de tareas abiertas",
+      "new_view": "Nueva vista",
+      "all_views": "Todas las vistas",
+      "view_actions": "Acciones de {{name}}",
+      "view_copy_link": "Copiar enlace",
+      "view_remove": "Quitar de la barra lateral",
+      "view_rename": "Renombrar",
+      "view_duplicate": "Duplicar",
+      "view_delete": "Eliminar vista"
+    },
+    "team": {
+      "new_agent": "Nuevo agente",
+      "needs_attention": "Necesita atención",
+      "stuck_one": "{{count}} ejecución esperando un runtime desconectado",
+      "stuck_other": "{{count}} ejecuciones esperando un runtime desconectado",
+      "working_now": "Trabajando ahora",
+      "running_tasks_one": "{{count}} ejecución en curso",
+      "running_tasks_other": "{{count}} ejecuciones en curso",
+      "all_agents": "Todos los agentes",
+      "my_agents": "Mis agentes",
+      "squads_and_members": "Squads y miembros",
+      "members_one": "{{count}} miembro",
+      "members_other": "{{count}} miembros",
+      "resources": "Recursos",
+      "runtimes_online_one": "{{count}} en línea",
+      "runtimes_online_other": "{{count}} en línea",
+      "invite_member": "Invitar miembro"
+    },
+    "autopilots": {
+      "all": "Todas las automatizaciones",
+      "list": "Automatizaciones",
+      "templates": "Desde una plantilla"
+    }
+  },
+  "account": {
+    "trigger": "Cuenta",
+    "profile": "Perfil",
+    "theme": "Tema",
+    "themes": {
+      "light": "Claro",
+      "dark": "Oscuro",
+      "system": "Sistema"
+    },
+    "language": "Idioma",
+    "shortcuts": "Atajos de teclado"
+  },
+  "collection": {
+    "filter": "Filtrar",
+    "filter_count_one": "{{count}} filtro",
+    "filter_count_other": "{{count}} filtros",
+    "reset": "Restablecer",
+    "clear_search": "Borrar búsqueda",
+    "clear_filters": "Limpiar filtros",
+    "clear_filters_and_search": "Borrar filtros y búsqueda",
+    "display": "Opciones de visualización",
+    "selected_one": "{{count}} seleccionado",
+    "selected_other": "{{count}} seleccionados",
+    "clear_selection": "Limpiar selección",
+    "select_all": "Seleccionar todo",
+    "select_row": "Seleccionar fila",
+    "row_actions": "Acciones de fila",
+    "sort_by": "Ordenar por",
+    "direction_asc": "Ascendente",
+    "direction_desc": "Descendente",
+    "section_columns": "Columnas",
+    "load_more": "Cargar más",
+    "loading_more": "Cargando…"
+  },
+  "object_page": {
+    "toggle_panel": "Mostrar u ocultar la barra lateral derecha",
+    "properties": "Propiedades"
+  },
+  "feature_intro": {
+    "read_docs": "Leer la documentación",
+    "carousel": "carrusel",
+    "slide": "diapositiva",
+    "slide_position": "{{current}} de {{total}}",
+    "go_to_slide": "Ir a la diapositiva {{index}}",
+    "previous": "Anterior",
+    "next": "Siguiente"
+  }
+}

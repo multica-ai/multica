@@ -1,5 +1,6 @@
 "use client";
 
+import { subIssueCreateDefaults } from "@multica/core/issues";
 import {
   issueBehavesAs,
   issueBehavesAsAny,
@@ -15,6 +16,7 @@ import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
 import { IssueDuplicateBanner, IssueDuplicatesSection, isDuplicateIssue } from "./issue-duplicates";
 import {
+  AlertTriangle,
   Archive,
   Calendar,
   CalendarClock,
@@ -23,6 +25,8 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleCheck,
+  FileQuestion,
+  Loader2,
   Milestone,
   MoreHorizontal,
   PanelRight,
@@ -91,7 +95,7 @@ import { AssigneePicker } from "./pickers/assignee-picker";
 import { LabelPicker } from "./pickers/label-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { IssueActionsDropdown, useIssueActions, IssueActionsContextMenu, IssueContextMenuProvider } from "../actions";
+import { IssueActionsDropdown, useIssueActions, useArchivedInboxItemId, IssueActionsContextMenu, IssueContextMenuProvider } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
@@ -112,7 +116,6 @@ import { ThreadMinimap, type ThreadMinimapThread } from "./thread-minimap";
 import { collectThreadParticipants, collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { IssueWakeupHeaderChip } from "./issue-wakeup-header-chip";
-import { IssueInboxRestoreButton } from "./issue-inbox-restore-button";
 import { ExecutionLogSection } from "./execution-log-section";
 import { WakeupsSection } from "./wakeups-section";
 import { QuickActionsSection } from "./quick-actions-section";
@@ -129,6 +132,7 @@ import {
 import { collectDeliverableFiles } from "@multica/core/attachments/deliverables";
 import { AttachmentVersionsProvider } from "./deliverables/attachment-versions";
 import { useQuery } from "@tanstack/react-query";
+import { useIssueReadState } from "@multica/core/issues/read-state";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -165,6 +169,8 @@ import {
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
+import { useMarkIssueReadWhileViewing } from "../hooks/use-mark-issue-read-while-viewing";
+import { useMarkIssueInboxReadWhileViewing } from "../hooks/use-mark-issue-inbox-read-while-viewing";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { useLocale, useTimeAgo } from "../../i18n";
 import {
@@ -175,6 +181,7 @@ import {
 } from "../../platform";
 import { cn } from "@multica/ui/lib/utils";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
+import { CollectionPageState } from "../../layout/collection-page";
 import { PAGE_GUTTER } from "../../layout/page-header";
 
 import { ProgressRing } from "./progress-ring";
@@ -1185,6 +1192,14 @@ interface IssueDetailProps {
   variant?: "page" | "peek";
   /** Peek only: host controls at the end of the header (open full page, close). */
   trailingActions?: ReactNode;
+  /**
+   * Read the viewer's inbox notifications on this issue while it is on screen
+   * (MUL-8588). The inbox turns this off for the issue it has open: it reads
+   * the notification it selected itself, and keeps one marked unread there.
+   */
+  readsInbox?: boolean;
+  /** The route already completed the authoritative detail read this mount. */
+  skipInitialRefetch?: boolean;
 }
 
 // Not found
@@ -1223,15 +1238,67 @@ export function IssueNotFound({
           {trailing && <div className="ml-auto flex shrink-0 items-center gap-1">{trailing}</div>}
         </div>
       )}
-      <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-body text-muted-foreground">
-        <p>{t(($) => $.detail.not_found)}</p>
-        {showBackLink && (
-          <Button variant="outline" size="sm" onClick={() => backOrReplace(paths.issues())}>
-            <ChevronLeft className="mr-1 h-3.5 w-3.5" />
-            {t(($) => $.detail.back)}
-          </Button>
-        )}
-      </div>
+      <CollectionPageState
+        icon={FileQuestion}
+        title={t(($) => $.detail.not_found_title)}
+        description={t(($) => $.detail.not_found)}
+        actions={
+          showBackLink ? (
+            <Button variant="outline" size="sm" onClick={() => backOrReplace(paths.issues())}>
+              <ChevronLeft aria-hidden="true" />
+              {t(($) => $.detail.back)}
+            </Button>
+          ) : undefined
+        }
+      />
+    </div>
+  );
+}
+
+/** Safe primary-read failure; host navigation remains available during retry. */
+export function IssueLoadError({
+  showBackLink = true,
+  leading,
+  trailing,
+  onRetry,
+  isRetrying,
+}: {
+  showBackLink?: boolean;
+  leading?: ReactNode;
+  trailing?: ReactNode;
+  onRetry: () => Promise<void>;
+  isRetrying: boolean;
+}) {
+  const { t } = useT("issues");
+  const backOrReplace = useBackOrReplace();
+  const paths = useWorkspacePaths();
+
+  return (
+    <div className="flex flex-1 min-h-0 flex-col">
+      {(leading || trailing) && (
+        <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>
+          {leading}
+          {trailing && <div className="ml-auto flex shrink-0 items-center gap-1">{trailing}</div>}
+        </div>
+      )}
+      <CollectionPageState
+        icon={AlertTriangle}
+        title={t(($) => $.detail.load_failed)}
+        actions={
+          <>
+            <Button size="sm" disabled={isRetrying} aria-busy={isRetrying} onClick={() => { void onRetry(); }}>
+              {isRetrying && <Loader2 aria-hidden="true" className="animate-spin" />}
+              {t(($) => $.detail.load_retry)}
+            </Button>
+            {showBackLink && (
+              <Button variant="outline" size="sm" onClick={() => backOrReplace(paths.issues())}>
+                <ChevronLeft aria-hidden="true" />
+                {t(($) => $.detail.back)}
+              </Button>
+            )}
+          </>
+        }
+      />
     </div>
   );
 }
@@ -1313,7 +1380,7 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction, variant = "page", trailingActions }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -1540,19 +1607,23 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Issue data from TQ — uses detail query, seeded from list cache if available.
   // Only seed when description is present; the list API omits it, so a partial
   // list row must not masquerade as a hydrated issue detail.
-  const { data: issue = null, isLoading: issueLoading, refetch: refetchIssue } = useQuery({
+  const issueQuery = useQuery({
     ...issueDetailOptions(wsId, id),
     // List rows and issue-created realtime payloads intentionally omit the
     // detail-only source-context snapshot. They can still seed this query via
-    // initialData, so always reconcile with the authoritative detail endpoint
-    // when the detail view mounts. Without this, the global Infinity staleTime
+    // initialData, so reconcile with the authoritative detail endpoint when
+    // mounting unless the route already completed that read. Without this, the global Infinity staleTime
     // hides source context until a full page refresh.
-    refetchOnMount: "always",
+    refetchOnMount: skipInitialRefetch ? false : "always",
     initialData: () => {
       const cached = allIssues.find((i) => i.id === id);
       return cached?.description != null ? cached : undefined;
     },
   });
+  const { data: issue = null, isLoading: issueLoading, refetch: refetchIssue } = issueQuery;
+  const issueReadState = useIssueReadState(wsId, id, issueQuery);
+  useMarkIssueReadWhileViewing(wsId, issue?.id ?? "");
+  useMarkIssueInboxReadWhileViewing(wsId, issue?.id ?? "", readsInbox);
   const descriptionSourceId = `description:${id}`;
   const descriptionAnnotations = useCommentAnnotations({
     draftKey: `new:${id}`,
@@ -1568,13 +1639,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const openCommentSubIssue = useCallback((commentId: string) => {
     if (!issue) return;
     openModal("quick-create-issue", {
+      ...subIssueCreateDefaults(issue),
       anchor_comment_id: commentId,
-      parent_issue_id: issue.id,
-      parent_issue_identifier: issue.identifier,
-      ...(issue.project_id ? { project_id: issue.project_id } : {}),
-      ...(issue.assignee_type && issue.assignee_id
-        ? { assignee_type: issue.assignee_type, assignee_id: issue.assignee_id }
-        : {}),
     });
   }, [issue, openModal]);
 
@@ -1819,16 +1885,29 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return map;
   }, [timelineView.threadReplies]);
 
+  // Thread root of a deep-link target. A run that left no comment is addressed
+  // by its task id and sits in a slot inside the thread it answers, so it
+  // unfolds and scrolls with that thread exactly like a reply does.
+  const highlightRootId = useMemo(() => {
+    if (!highlightCommentId) return undefined;
+    const replyRoot = replyToRoot.get(highlightCommentId);
+    if (replyRoot) return replyRoot;
+    for (const [rootId, runs] of commentRuns) {
+      if (runs.some((run) => run.task.id === highlightCommentId)) return rootId;
+    }
+    return undefined;
+  }, [highlightCommentId, replyToRoot, commentRuns]);
+
   // Deep-link target index in the flat items array. For root comments this is
-  // a direct findIndex hit; for reply ids we look up the enclosing root.
+  // a direct findIndex hit; for replies and threaded runs we look up the
+  // enclosing root.
   const targetIdx = useMemo(() => {
     if (!highlightCommentId) return -1;
     const direct = items.findIndex((it) => it.id === highlightCommentId);
     if (direct >= 0) return direct;
-    const rootId = replyToRoot.get(highlightCommentId);
-    if (!rootId) return -1;
-    return items.findIndex((it) => it.id === rootId);
-  }, [items, highlightCommentId, replyToRoot]);
+    if (!highlightRootId) return -1;
+    return items.findIndex((it) => it.id === highlightRootId);
+  }, [items, highlightCommentId, highlightRootId]);
 
   // One entry per comment thread (folded resolved bars included), activity
   // groups skipped. Derived from the same flat `items` array Virtuoso renders
@@ -2260,9 +2339,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // virtualization), so every comment id is in the DOM by the time this
   // effect runs after commit.
   //
-  // For a reply inside a folded resolved thread, the reply is not in items
-  // (only the resolved-bar root is). Auto-expand the thread first; the
-  // effect re-runs once items re-flatten.
+  // For a reply or threaded run inside a folded resolved thread, the target
+  // is not in items (only the resolved-bar root is). Auto-expand the thread
+  // first; the effect re-runs once items re-flatten.
   //
   // `scrollContainerEl` is in deps because the component early-returns a
   // loading skeleton while the issue query is pending. The scroll-container
@@ -2287,7 +2366,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       return;
     }
 
-    const rootId = replyToRoot.get(highlightCommentId);
+    const rootId = highlightRootId;
     if (rootId && rootId !== highlightCommentId) {
       // Root resolved → the whole thread is a folded bar.
       const rootItem = items[targetIdx];
@@ -2366,7 +2445,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       cancelAnimationFrame(rafId);
       clearTimeout(fade);
     };
-  }, [highlightCommentId, highlightRequestToken, id, writeViewState, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
+  }, [highlightCommentId, highlightRequestToken, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const descriptionEditingRef = useRef(false);
@@ -2558,6 +2637,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
+  // The inbox passes `onDone` and owns archive and restore there.
+  const archivedInboxItemId = useArchivedInboxItemId(id, !onDone);
 
   // Labels live in their own query (not on the issue body) — fetch the count
   // here so seeding can decide whether the "Labels" optional row should be
@@ -2722,6 +2803,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         : null,
     [resolvedIssueId, resolvedIssueIdentifier],
   );
+
+  if (issueReadState.loadFailed) {
+    return (
+      <IssueLoadError
+        showBackLink={!onDelete}
+        leading={leadingAction}
+        trailing={trailingActions}
+        onRetry={issueReadState.retry}
+        isRetrying={issueReadState.isRetrying}
+      />
+    );
+  }
 
   if (loading) {
     // The host's trailing controls hold the peek's only close button, so the
@@ -3078,11 +3171,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   // Shared row renderer for both timeline render modes (flat / virtualized).
   // The wrapper `id="comment-..."` is the deep-link target — equivalent to
-  // a native `<a href="#comment-...">` anchor.
+  // a native `<a href="#comment-...">` anchor. A run that left no comment is
+  // addressed by its task id, which the sidebar's unread link lands on.
   const renderItem = (_i: number, item: TimelineItem): React.ReactElement => {
     if (item.kind === "run") {
       const reply = item.entry;
-      return <div className="pb-3" id={reply ? `comment-${reply.id}` : undefined}>
+      return <div className="pb-3" id={`comment-${item.id}`}>
         {reply?.resolved_at && !expandedResolved.has(reply.id) ? <ResolvedThreadBar
           entry={reply} replies={timelineView.threadReplies.get(reply.id) ?? EMPTY_REPLIES}
           onExpand={() => toggleResolvedExpand(reply.id, true)} /> : <AgentRunComment run={item.run} entering={enteringRunIds.has(item.run.task.id)} standalone
@@ -3232,8 +3326,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 It self-hides when no agent is active. */}
             <IssueAgentHeaderChip issueId={id} onJumpToRun={jumpToRun} />
             <IssueWakeupHeaderChip issueId={id} onOpen={openWakeups} />
-            {/* The inbox passes `onDone` and owns archive and restore there. */}
-            {!onDone && <IssueInboxRestoreButton issueId={id} />}
             {onDone && !issueBehavesAsAny(issue, ["done", "closed"]) && (
               <Tooltip>
                 <TooltipTrigger
@@ -3290,6 +3382,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               // above and skip navigation. Otherwise the modal takes us back
               // to the list we came from, falling back to all issues.
               onDeletedFallbackPath={onDelete ? undefined : paths.issues()}
+              archivedInboxItemId={archivedInboxItemId}
               trigger={
                 <IconButton
                   label={tCommon(($) => $.more_actions)}
@@ -3931,8 +4024,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               spans the timeline — at column level `sticky bottom-0` can pin
               the composer across the whole scroll range.
 
-              Sticky treatment mirrors list-grid's sticky header, bottom
-              edge: opaque bg-background under/around the card (its rounded
+              Sticky treatment, bottom edge: opaque bg-background
+              under/around the card (its rounded
               corners would otherwise leak scrolled text), a 16px gradient
               fade above (exactly the mt-4 gap, so at rest it sits over the
               page background and is invisible), and pb-4 so the card floats

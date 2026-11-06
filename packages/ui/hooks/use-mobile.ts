@@ -2,7 +2,7 @@ import * as React from "react"
 
 const MOBILE_BREAKPOINT = 768
 // Tailwind `md`. Below it the nav is a sheet and list/detail surfaces fold to
-// one column. From here up to `xl` the nav stays a docked column but starts
+// one column. From here up to `lg` the nav stays a docked column but starts
 // collapsed (see SIDEBAR_AUTO_COLLAPSE_QUERY), which leaves a foldable's inner
 // screen or a tablet enough reading width for both panes.
 const COMPACT_BREAKPOINT = 768

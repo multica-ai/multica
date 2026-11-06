@@ -9,11 +9,12 @@ import {
 } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Check, ChevronRight, Copy, Terminal } from "@multica/ui/icons";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { runtimeKeys } from "@multica/core/runtimes/queries";
+import { runtimeKeys, runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useDaemonSetupCommands } from "@multica/core/runtimes";
-import { useWSEvent } from "@multica/core/realtime";
+import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import {
   Dialog,
@@ -40,30 +41,89 @@ import { useT } from "../../i18n";
 type Step = "instructions" | "success";
 
 export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
-  const [step, setStep] = useState<Step>("instructions");
   const wsId = useWorkspaceId();
+  const currentUserId = useAuthStore((state) => state.user?.id);
+  return (
+    <WorkspaceConnectDialog
+      key={`${wsId}:${currentUserId ?? ""}`}
+      wsId={wsId}
+      currentUserId={currentUserId}
+      onClose={onClose}
+    />
+  );
+}
+
+function WorkspaceConnectDialog({ wsId, currentUserId, onClose }: {
+  wsId: string;
+  currentUserId: string | undefined;
+  onClose: () => void;
+}) {
+  const [step, setStep] = useState<Step>("instructions");
   const slug = useWorkspaceSlug();
   const qc = useQueryClient();
   const navigation = useNavigation();
   const shouldReduceMotion = useReducedMotion() ?? false;
   const newRuntimeIdRef = useRef<string | null>(null);
+  const initialDaemonIds = useRef<Set<string> | null>(null);
+  const pendingInitialRefresh = useRef(false);
+  const { data: runtimes, isSuccess, isFetchedAfterMount, isFetching } = useQuery({
+    ...runtimeListOptions(wsId, "me", slug ?? undefined),
+    enabled: !!currentUserId && step === "instructions",
+    refetchOnMount: "always",
+  });
 
-  // `multica setup` is one blocking command that handles config + login
-  // + daemon start; the dialog passively listens for the resulting
-  // `daemon:register` WS event and auto-advances to success.
-  const handleDaemonRegister = useCallback(
-    (payload: unknown) => {
-      if (step !== "instructions") return;
-      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
-      const p = payload as Record<string, unknown> | null;
-      if (p?.runtime_id && typeof p.runtime_id === "string") {
-        newRuntimeIdRef.current = p.runtime_id;
-      }
-      setStep("success");
-    },
-    [step, qc, wsId],
-  );
+  // Registration, configuration updates and offline sweeps share this event.
+  // Only the refreshed runtime list can confirm a newly connected computer.
+  const handleDaemonRegister = useCallback(() => {
+    if (step !== "instructions") return;
+    // Invalidating an uncached in-flight query only joins its stale snapshot.
+    if (!initialDaemonIds.current && qc.isFetching({ queryKey: runtimeKeys.listMine(wsId), exact: true })) {
+      pendingInitialRefresh.current = true;
+      return;
+    }
+    return qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+  }, [step, qc, wsId]);
   useWSEvent("daemon:register", handleDaemonRegister);
+  useWSReconnect(handleDaemonRegister);
+
+  useEffect(() => {
+    if (
+      step !== "instructions" ||
+      !currentUserId ||
+      !isSuccess ||
+      !isFetchedAfterMount ||
+      isFetching ||
+      !runtimes
+    ) return;
+    // A fresh initial response avoids treating an old, uncached machine as new.
+    const knownDaemonIds = initialDaemonIds.current;
+    if (!knownDaemonIds) {
+      initialDaemonIds.current = new Set(
+        runtimes.flatMap((runtime) => runtime.daemon_id ? [runtime.daemon_id] : []),
+      );
+      return;
+    }
+    const runtime = runtimes.find((runtime) =>
+      runtime.workspace_id === wsId &&
+      runtime.owner_id === currentUserId &&
+      runtime.runtime_mode === "local" &&
+      runtime.status === "online" &&
+      runtime.daemon_id &&
+      !knownDaemonIds.has(runtime.daemon_id) &&
+      runtime.metadata.pending_custom_runtime !== true &&
+      runtime.metadata.runtime_profile_registration_error !== true,
+    );
+    if (!runtime) return;
+    newRuntimeIdRef.current = runtime.id;
+    setStep("success");
+  }, [step, currentUserId, isSuccess, isFetchedAfterMount, isFetching, runtimes, wsId]);
+
+  useEffect(() => {
+    if (step !== "instructions" || isFetching || !pendingInitialRefresh.current) return;
+    // Establish the initial baseline above before fetching queued notifications.
+    pendingInitialRefresh.current = false;
+    void qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+  }, [step, isFetching, qc, wsId]);
 
   const handleGoToAgents = () => {
     onClose();

@@ -932,13 +932,14 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 	}
 
 	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
-		WorkspaceID: rt.WorkspaceID,
-		CreatorID:   creatorUUID,
-		Name:        name,
-		Description: description,
-		Content:     body.Skill.Content,
-		Config:      config,
-		Files:       files,
+		VersionSource: skillVersionSourceImport,
+		WorkspaceID:   rt.WorkspaceID,
+		CreatorID:     creatorUUID,
+		Name:          name,
+		Description:   description,
+		Content:       body.Skill.Content,
+		Config:        config,
+		Files:         files,
 	})
 	if err != nil {
 		// A unique-violation here means another import won the race between our

@@ -132,6 +132,9 @@
     "issue_actions": "任务操作"
   },
   "delete": {
+    "failed_title": "无法删除任务",
+    "permission_denied": "你没有删除此任务的权限。",
+    "failed": "任务未能删除，请重试。",
     "title": "删除任务？",
     "message": "{{identifier}} 及其评论、表情和附件将被永久删除，且无法撤销。"
   },
@@ -146,7 +149,10 @@
     "title": "取消运行？",
     "message": "智能体会在当前步骤结束后停止。",
     "keep_running": "继续运行",
-    "cancel_task": "取消运行"
+    "cancel_task": "取消运行",
+    "waiting_for_connection": "等待网络连接...",
+    "stopping": "正在停止...",
+    "failed": "无法停止运行，请重试。"
   },
   "form": {
     "discard_title": "放弃修改？",

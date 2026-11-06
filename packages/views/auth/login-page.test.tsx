@@ -916,6 +916,13 @@ describe("validateCliCallback", () => {
     expect(validateCliCallback("http://192.169.1.1:9876/callback")).toBe(false);
   });
 
+  it.each(["198.18.0.1", "100.64.0.1", "169.254.1.1", "[::1]", "[fd00::1]"])(
+    "rejects unsupported callback address %s",
+    (host) => {
+      expect(validateCliCallback(`http://${host}:9876/callback`)).toBe(false);
+    },
+  );
+
   it("rejects invalid URLs", () => {
     expect(validateCliCallback("not-a-url")).toBe(false);
   });

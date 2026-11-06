@@ -307,6 +307,12 @@ func (f *fanoutRelay) register(r *RelayOutbound) {
 }
 
 func (f *fanoutRelay) PublishWithID(_, scopeID, _ string, frame []byte, id string) error {
+	if scopeID == "" {
+		// What the shard reader does with it (ShardedStreamRelay.deliverMessage):
+		// the frame is written and nobody ever reads it. A fake that delivered
+		// it anyway hid that every relayed seal was lost this way.
+		return nil
+	}
 	var decoded relayFrame
 	if err := json.Unmarshal(frame, &decoded); err != nil {
 		return err

@@ -2,11 +2,11 @@
   "page": {
     "title": "프로젝트",
     "new_project": "새 프로젝트",
-    "empty": "아직 프로젝트가 없습니다",
-    "create_first": "첫 프로젝트 만들기",
+    "scope_all": "전체 프로젝트",
+    "scope_active": "진행 중인 프로젝트",
+    "scope_closed": "종료된 프로젝트",
     "view_compact": "간결하게",
     "view_comfortable": "넓게",
-    "search_placeholder": "프로젝트 검색...",
     "no_search_results": "검색 결과가 없습니다",
     "view_table": "테이블",
     "view_cards": "카드",
@@ -14,9 +14,7 @@
     "pin": "사이드바에 고정",
     "unpin": "고정 해제",
     "delete": "삭제",
-    "no_matches": "일치하는 프로젝트가 없습니다",
-    "selected_other": "{{count}}개 선택됨",
-    "clear_selection": "선택 해제"
+    "no_matches": "일치하는 프로젝트가 없습니다"
   },
   "table": {
     "name": "이름",
@@ -56,6 +54,8 @@
   },
   "detail": {
     "not_found": "프로젝트를 찾을 수 없습니다",
+    "not_found_description": "삭제되었거나 접근 권한이 없을 수 있습니다.",
+    "back_to_list": "모든 프로젝트",
     "breadcrumb_fallback": "프로젝트",
     "title_placeholder": "프로젝트 제목",
     "icon_tooltip": "아이콘 변경",
@@ -73,9 +73,10 @@
     "no_due_date": "마감일 없음",
     "description_placeholder": "설명 추가...",
     "description_hint": "이 프로젝트의 모든 실행에서 컨텍스트로 에이전트에게 공유됩니다.",
-    "empty_issues_title": "연결된 태스크가 없습니다",
-    "empty_issues_hint": "기존 태스크를 이 프로젝트에 추가할 수도 있습니다.",
+    "empty_issues_title": "이 프로젝트에는 아직 태스크가 없습니다",
+    "empty_issues_hint": "새로 만들거나 기존 태스크를 여기로 옮기세요.",
     "empty_issues_new_button": "새 태스크",
+    "empty_issues_add_existing": "기존 태스크 추가",
     "no_issues_yet": "아직 태스크가 없습니다",
     "toast_link_copied": "링크를 복사했습니다",
     "toast_project_deleted": "프로젝트를 삭제했습니다",
@@ -152,6 +153,7 @@
     "ref_default_tooltip": "브랜치가 설정되지 않음 — 작업은 그 시점의 저장소 기본 브랜치를 사용합니다."
   },
   "delete_dialog": {
+    "offline_error": "오프라인 상태입니다. 다시 연결한 후 삭제를 재시도하세요.",
     "title": "프로젝트 삭제",
     "description": "프로젝트가 삭제됩니다. 태스크는 삭제되지 않지만 프로젝트 연결은 해제됩니다.",
     "confirm": "삭제",
@@ -167,18 +169,40 @@
     "fallback_label": "프로젝트"
   },
   "toolbar": {
-    "result_count_title": "일치하는 프로젝트 / 전체 프로젝트",
-    "filter_label": "필터",
-    "filter_active_count_other": "필터 {{count}}개",
-    "clear_filters": "필터 지우기",
     "section_status": "상태",
     "section_priority": "우선순위",
     "section_lead": "리드",
-    "display": "표시",
-    "sort_by": "정렬",
-    "direction_asc": "오름차순",
-    "direction_desc": "내림차순",
-    "section_columns": "열",
     "view": "보기"
+  },
+  "intro": {
+    "title": "큰일은 프로젝트로 나눠 진행하세요",
+    "description": "프로젝트는 관련 태스크를 한데 모아 진행 상황을 함께 보게 해 줍니다. 프로젝트 설명과 연결된 저장소는 에이전트가 실행될 때마다 컨텍스트로 전달됩니다.",
+    "slides": {
+      "progress": {
+        "title": "진행 상황을 한눈에",
+        "description": "상태, 리드, 목표일, 완료율이 카드 한 장에 모여 있어 태스크를 하나씩 열어 볼 필요가 없습니다."
+      },
+      "context": {
+        "title": "실행마다 컨텍스트가 따라갑니다",
+        "description": "설명은 한 번만 쓰고 저장소도 한 번만 연결하세요. 프로젝트 안 태스크의 모든 실행이 이를 가져갑니다."
+      },
+      "sidebar": {
+        "title": "사이드바에 고정",
+        "description": "자주 쓰는 프로젝트를 사이드바에 고정하고, 펼치면 안의 태스크가 보입니다."
+      }
+    },
+    "art": {
+      "project_website": "웹사이트 개편",
+      "project_mobile": "모바일 1.0",
+      "project_onboarding": "온보딩",
+      "context_label": "프로젝트 설명",
+      "context_body": "Next.js와 Tailwind로 만드는 새 웹사이트. 문구는 docs/brand를 따르고 모든 페이지에서 다크 모드를 지원한다.",
+      "run_started": "실행 시작",
+      "context_loaded": "프로젝트 컨텍스트와 저장소 2개를 불러왔습니다",
+      "issue_count": "태스크 {{done}} / {{total}}",
+      "issue_hero": "홈페이지 히어로 애니메이션",
+      "issue_pricing": "요금제 비교표",
+      "issue_blog": "블로그 목록 페이지네이션"
+    }
   }
 }

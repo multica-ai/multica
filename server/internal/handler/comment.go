@@ -62,6 +62,10 @@ type CommentResponse struct {
 	// replies.
 	ReplyCount     *int    `json:"reply_count,omitempty"`
 	LastActivityAt *string `json:"last_activity_at,omitempty"`
+	// Populated on roots_only for reply-resolved threads.
+	ResolutionID               *string `json:"resolution_id,omitempty"`
+	ResolutionContent          *string `json:"resolution_content,omitempty"`
+	ResolutionContentTruncated *bool   `json:"resolution_content_truncated,omitempty"`
 	// ContentTruncated is set only under summary=true: true when Content was
 	// clipped to the summary budget, false when it fit. nil (omitted) means the
 	// caller did not request a summary projection, so Content is verbatim.
@@ -353,14 +357,11 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 
 	var sinceTime pgtype.Timestamptz
 	if v := q.Get("since"); v != "" {
+		// RFC3339Nano parsing also accepts timestamps without fractional seconds.
 		t, err := time.Parse(time.RFC3339Nano, v)
 		if err != nil {
-			// Fall back to RFC3339 for backwards-compat with the original CLI.
-			t, err = time.Parse(time.RFC3339, v)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "invalid since parameter; expected RFC3339 format")
-				return
-			}
+			writeError(w, http.StatusBadRequest, "invalid since parameter; expected RFC3339 format")
+			return
 		}
 		sinceTime = pgtype.Timestamptz{Time: t, Valid: true}
 	}
@@ -489,11 +490,8 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	if beforeTimeStr != "" {
 		t, err := time.Parse(time.RFC3339Nano, beforeTimeStr)
 		if err != nil {
-			t, err = time.Parse(time.RFC3339, beforeTimeStr)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "invalid before parameter; expected RFC3339 format")
-				return
-			}
+			writeError(w, http.StatusBadRequest, "invalid before parameter; expected RFC3339 format")
+			return
 		}
 		beforeCursor = pgtype.Timestamptz{Time: t, Valid: true}
 		uuid, perr := util.ParseUUID(beforeIDStr)
@@ -598,6 +596,20 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 				la := timestampToString(st.LastActivityAt)
 				resp[i].LastActivityAt = &la
 			}
+			if c.ResolvedAt.Valid || st.ResolutionID.Valid {
+				resolved := true
+				resp[i].ThreadResolved = &resolved
+			}
+			if !c.ResolvedAt.Valid && st.ResolutionID.Valid {
+				resp[i].ResolutionID = uuidToPtr(st.ResolutionID)
+				content := st.ResolutionContent.String
+				if summary {
+					clipped, truncated := summarizeContent(content)
+					content = clipped
+					resp[i].ResolutionContentTruncated = &truncated
+				}
+				resp[i].ResolutionContent = &content
+			}
 		}
 		// Attach fold annotations on a resolved thread's root (nil map elsewhere;
 		// keyed by root id, so only root comments match).
@@ -678,8 +690,10 @@ type fetchCommentsResult struct {
 // rootStat is the per-thread orientation metadata attached to each root comment
 // on the roots_only path. See CommentResponse.ReplyCount / LastActivityAt.
 type rootStat struct {
-	ReplyCount     int
-	LastActivityAt pgtype.Timestamptz
+	ReplyCount        int
+	LastActivityAt    pgtype.Timestamptz
+	ResolutionID      pgtype.UUID
+	ResolutionContent pgtype.Text
 }
 
 var (
@@ -1001,7 +1015,12 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 					SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, Revision: r.Revision,
 					DeletedAt: r.DeletedAt,
 				}
-				stats[uuidToString(r.ID)] = rootStat{ReplyCount: int(r.ReplyCount), LastActivityAt: r.LastActivityAt}
+				stats[uuidToString(r.ID)] = rootStat{
+					ReplyCount:        int(r.ReplyCount),
+					LastActivityAt:    r.LastActivityAt,
+					ResolutionID:      r.ResolutionID,
+					ResolutionContent: r.ResolutionContent,
+				}
 			}
 			return fetchCommentsResult{
 				Comments: comments, RootStats: stats, CommentsTruncated: truncated,
@@ -1032,7 +1051,12 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, Revision: r.Revision,
 				DeletedAt: r.DeletedAt,
 			}
-			stats[uuidToString(r.ID)] = rootStat{ReplyCount: int(r.ReplyCount), LastActivityAt: r.LastActivityAt}
+			stats[uuidToString(r.ID)] = rootStat{
+				ReplyCount:        int(r.ReplyCount),
+				LastActivityAt:    r.LastActivityAt,
+				ResolutionID:      r.ResolutionID,
+				ResolutionContent: r.ResolutionContent,
+			}
 		}
 		return fetchCommentsResult{
 			Comments: comments, RootStats: stats, CommentsTruncated: truncated,
@@ -2456,6 +2480,9 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 	// The fold re-attributes the queued run to this comment's author; record that
 	// human's action now, since the run row keeps no history of who acted.
 	h.TaskService.RecordHumanDelegation(ctx, attr)
+	// The run's status is unchanged, so no lifecycle event tells clients that it
+	// now answers this comment.
+	h.TaskService.BroadcastTaskCoalesced(ctx, row)
 	return commentMergeSucceeded
 }
 

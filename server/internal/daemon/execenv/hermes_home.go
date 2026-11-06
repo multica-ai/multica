@@ -15,8 +15,9 @@ import (
 )
 
 // Hermes discovers skills in HERMES_HOME/skills before skills.external_dirs;
-// it does not scan the task workspace. Bound skills therefore use a task-local
-// home overlay, while skill-less tasks keep the original home.
+// it does not scan the task workspace. Bound skills therefore use an isolated
+// home overlay, while skill-less tasks keep the original home. Conversation
+// stores are the effective home so state.db stays inside its owning profile.
 //
 // Mirror host-home entries except task-owned overrides. The local skills directory
 // contains bound skills; external_dirs preserves shared skills and configured
@@ -29,13 +30,12 @@ import (
 // Setup does not modify the shared home. Mirrored auth and other entries remain
 // writable symlinks, so runtime updates through them intentionally reach the host.
 
-// hermesOverriddenEntries are the fixed top-level entries of the shared
-// ~/.hermes/ that the overlay supplies its own task-local version of, so they
-// are NOT mirrored from the shared home and are preserved across reuse
-// reconciliation:
+// hermesOverriddenEntries are the fixed top-level entries managed explicitly by
+// the overlay, outside generic shared-home mirroring and reuse reconciliation:
 //   - skills/       task-local, only the bound skills
 //   - config.yaml   derived config with absolutized external_dirs
 //   - memories/     link to the agent's persistent store, isolated from the host
+//   - installs/     managed separately: reuse source dependencies or retain local ones
 //   - marker below  records that legacy shared SQLite state was detached
 //
 // The state.db SQLite family is classified dynamically by
@@ -65,14 +65,19 @@ var hermesOverriddenEntries = map[string]struct{}{
 	"skills":                   {},
 	"config.yaml":              {},
 	"memories":                 {},
+	"installs":                 {},
 	"active_profile":           {},
 	"profiles":                 {},
 	".env":                     {},
+	"logs":                     {},
+	"sessions":                 {},
+	"cron":                     {},
+	hermesGatewayStateMarker:   {},
 	hermesTaskLocalStateMarker: {},
 }
 
-// isHermesOverlayOwnedEntry reports whether name belongs to the per-task
-// overlay rather than the shared Hermes home. Hermes' state.db is the canonical
+// isHermesOverlayOwnedEntry reports whether name is explicitly managed by the
+// overlay rather than generic shared-home mirroring. Hermes' state.db is the canonical
 // session store and uses WAL mode; mirroring its main file and journal sidecars
 // separately can produce an inconsistent snapshot, exposes host conversation
 // history, and fails on Windows when SQLite byte-range-locks state.db-shm.
@@ -80,7 +85,7 @@ func isHermesOverlayOwnedEntry(name string) bool {
 	if _, owned := hermesOverriddenEntries[name]; owned {
 		return true
 	}
-	return isHermesTaskLocalStateEntry(name)
+	return isHermesTaskLocalStateEntry(name) || isHermesGatewayStateEntry(name)
 }
 
 func isHermesTaskLocalStateEntry(name string) bool {
@@ -310,7 +315,7 @@ func hermesProfileDir(root, name string) (home string, mustExist bool, err error
 }
 
 // prepareHermesHome builds the per-task HERMES_HOME compatibility overlay
-// described above. The daemon exports the given path as HERMES_HOME on the
+// described above. The daemon exports the returned Home as HERMES_HOME on the
 // hermes subprocess so the CLI discovers the bound skills natively.
 //
 // Callers gate this on the agent having skills bound; it is a full rebuild each
@@ -328,10 +333,10 @@ func hermesProfileDir(root, name string) (home string, mustExist bool, err error
 // what the Hermes child sees. memoryStore is the agent's persistent memory store
 // (execenv.HermesMemoryStorePath) that memories/ is linked to; empty keeps
 // memories/ task-local for this task. sessionStore is the conversation's
-// persistent session store (execenv.HermesSessionStorePath) that state.db is
-// linked to; empty — or a host that cannot create the link — keeps the session
-// database task-local. The returned hermesSessionMount reports both what got
-// mounted and whether the store actually holds a transcript, so the caller never
+// persistent session store (execenv.HermesSessionStorePath), used as the
+// effective home; empty keeps the session database task-local.
+// The returned hermesSessionMount reports the effective home and whether the
+// store actually holds a transcript, so the caller never
 // tells a task it can resume history that is not there.
 func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, workspaceSkills []SkillContextForEnv, env map[string]string, memoryStore, sessionStore string, logger *slog.Logger) (sessions hermesSessionMount, err error) {
 	sharedHome := strings.TrimSpace(sourceHome)
@@ -344,6 +349,14 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 		}
 	}
 
+	if sessionStore != "" {
+		sessions, err = prepareHermesSessionHome(hermesHome, sessionStore, logger)
+		if err != nil {
+			return hermesSessionMount{}, fmt.Errorf("prepare conversation home: %w", err)
+		}
+		hermesHome = sessions.Home
+	}
+	sessions.Home = hermesHome
 	if err := os.MkdirAll(hermesHome, 0o700); err != nil {
 		return hermesSessionMount{}, fmt.Errorf("create hermes-home dir: %w", err)
 	}
@@ -352,19 +365,14 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 	if err := os.Chmod(hermesHome, 0o700); err != nil {
 		return hermesSessionMount{}, fmt.Errorf("chmod hermes-home dir: %w", err)
 	}
+	if err := prepareHermesInstalls(sharedHome, hermesHome); err != nil {
+		return hermesSessionMount{}, fmt.Errorf("prepare hermes installs: %w", err)
+	}
 	if err := prepareHermesTaskLocalState(hermesHome); err != nil {
 		return hermesSessionMount{}, fmt.Errorf("prepare task-local state: %w", err)
 	}
-	// Sessions: link state.db at the conversation's persistent store so the
-	// transcript survives the task. A store that cannot be mounted leaves the
-	// database task-local — the pre-existing behaviour — rather than failing the
-	// task. See hermes_sessions.go.
-	if sessionStore != "" {
-		mounted, err := mountHermesSessionDB(hermesHome, sessionStore, logger)
-		if err != nil {
-			return hermesSessionMount{}, fmt.Errorf("mount conversation sessions: %w", err)
-		}
-		sessions = mounted
+	if err := prepareHermesGatewayState(hermesHome); err != nil {
+		return hermesSessionMount{}, fmt.Errorf("prepare gateway state: %w", err)
 	}
 	// Memory: link memories/ at the agent's persistent store so it survives the
 	// task, or fall back to a fresh task-local dir when there is no store (no
@@ -390,6 +398,46 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 		return hermesSessionMount{}, err
 	}
 	return sessions, nil
+}
+
+// Reuse the source environment when available, including links created by older
+// daemons. Without one, preserve PM's local environment across preparation.
+func prepareHermesInstalls(sharedHome, hermesHome string) error {
+	src := filepath.Join(sharedHome, "installs")
+	dst := filepath.Join(hermesHome, "installs")
+	if fi, err := os.Stat(src); err == nil {
+		if !fi.IsDir() {
+			return fmt.Errorf("source installs is not a directory: %s", src)
+		}
+		// Source dependencies take precedence even if PM initialized a local
+		// directory first. The linking helper intentionally removes that local
+		// directory before replacing it with a link to the source environment.
+		return linkSharedHermesEntry(src, dst)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat source installs: %w", err)
+	}
+
+	// Preserve a working directory link even if it points to another home;
+	// PM updates through that link intentionally reach the target home.
+	if fi, err := os.Stat(dst); err == nil {
+		if !fi.IsDir() {
+			return fmt.Errorf("installs is not a directory: %s", dst)
+		}
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat installs: %w", err)
+	}
+	if fi, err := os.Lstat(dst); err == nil {
+		if fi.Mode()&os.ModeSymlink == 0 {
+			return fmt.Errorf("installs is not a directory link: %s", dst)
+		}
+		// Only unlink a dangling entry; never remove its shared target. PM can
+		// then initialize this home normally on the next launch.
+		return os.Remove(dst)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("lstat installs: %w", err)
+	}
+	return nil
 }
 
 // writeDerivedHermesEnv writes the task-local .env: the source home's .env
@@ -426,6 +474,7 @@ func writeDerivedHermesEnv(sharedHome, hermesHome string) error {
 	// treats it literally (no escaping / var expansion) — task home paths can
 	// contain spaces or other characters under the workspaces root.
 	fmt.Fprintf(&buf, "HERMES_HOME='%s'\n", hermesHome)
+	buf.WriteString("GATEWAY_MULTIPLEX_PROFILES=false\n")
 
 	return writeFileAtomic(dst, []byte(buf.String()), 0o600)
 }
@@ -587,9 +636,8 @@ func linkSharedHermesEntry(src, dst string) error {
 // with `skills.external_dirs` set to their existing external dirs plus the shared
 // ~/.hermes/skills, all as absolute paths. When the user has no config we still
 // write a minimal one so their global skills stay reachable via the external
-// root. If the config can't be parsed we copy it verbatim so auth/model settings
-// survive — the bound skills still load from the task-local skills/ dir, which is
-// the point of the fix; only the user's global skills would be missing. The file
+// root. Invalid config fails closed because Hermes could otherwise fall back to
+// environment credentials and enable the host's messaging adapters. The file
 // is written 0600 (it can hold inline api_key secrets) via atomic replace, so
 // reuse also repairs a prior file's permissions. The terminal passthrough
 // allowlist preserves task credentials in tool shells without storing values.
@@ -626,23 +674,27 @@ func writeDerivedHermesConfig(sharedHome, hermesHome string, env map[string]stri
 		if err := setHermesTerminalEnvPassthrough(doc); err != nil {
 			return err
 		}
+		if err := disableHermesGatewayIngress(doc); err != nil {
+			return err
+		}
 		return marshalYAMLToFile(doc, dstConfig)
 	}
 
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		logger.Warn("execenv: hermes-home config parse failed; copying verbatim", "error", err)
-		return writeFileAtomic(dstConfig, data, 0o600)
+		return fmt.Errorf("parse hermes config: %w", err)
 	}
 	dirs := computeHermesExternalDirs(sharedHome, existingHermesExternalDirs(&doc), env)
 	if err := setHermesExternalDirs(&doc, dirs); err != nil {
-		logger.Warn("execenv: hermes-home set external_dirs failed; copying verbatim", "error", err)
-		return writeFileAtomic(dstConfig, data, 0o600)
+		return err
 	}
 	// Disable any host-configured external memory backend (memory.provider) so a
 	// Supermemory/Hindsight/etc. bank isn't shared across managed tasks; the
 	// built-in per-task memories/ dir is already isolated above.
 	disableHermesMemoryProvider(&doc)
+	if err := disableHermesGatewayIngress(&doc); err != nil {
+		return err
+	}
 	if err := setHermesTerminalEnvPassthrough(&doc); err != nil {
 		logger.Warn("execenv: hermes-home set terminal passthrough failed; keeping other derived settings", "error", err)
 	}
@@ -668,6 +720,8 @@ func HermesTaskEnvPassthroughNames() []string {
 		"MULTICA_AUTOPILOT_ID",
 		"MULTICA_QUICK_CREATE_TASK_ID",
 		"MULTICA_QUICK_CREATE_ATTACHMENT_IDS",
+		"MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_TYPE",
+		"MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_ID",
 	}
 }
 
@@ -847,8 +901,7 @@ func writeHermesBoundSkills(hermesHome string, workspaceSkills []SkillContextFor
 		// only source, matching un-redirected behavior.
 		return os.MkdirAll(skillsDir, 0o700)
 	}
-	// Skills live under env.RootDir/hermes-home, which the GC loop (cloud) or
-	// env teardown (local_directory) wipes wholesale — no sidecar manifest.
+	// This directory is owned by the isolated home and replaced on every run.
 	return writeSkillFiles(skillsDir, workspaceSkills, nil)
 }
 

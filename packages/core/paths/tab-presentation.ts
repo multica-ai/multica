@@ -16,7 +16,7 @@
  * loaded yet renders a stable type icon and a type label, never a wrong or
  * empty identity, and never borrows the Issues icon.
  */
-import type { IssueStatus, IssueStatusCategory } from "../types";
+import type { Issue, IssueStatus, IssueStatusCategory } from "../types";
 import { issueStatusCategory } from "../issues/status-category";
 import {
   WORKSPACE_PAGES,
@@ -51,6 +51,7 @@ export type TabLabelKey =
   | "runtime"
   | "attachment"
   | "create_agent"
+  | "my_agents"
   | "unknown";
 
 /** How a tab's title should be produced. */
@@ -78,7 +79,7 @@ export type InboxSelectionData =
  * pending (type-label + type-icon) presentation.
  */
 export interface TabEntityData {
-  issue?: { identifier: string; title: string; status: IssueStatus };
+  issue?: Pick<Issue, "identifier" | "title" | "status" | "status_category">;
   project?: { icon: string | null; title: string };
   autopilot?: { title: string };
   /** Resolved display name for an actor subject. */
@@ -155,6 +156,11 @@ export function resolveTabPresentation(
         title: { kind: "nav", navKey: page.navKey },
       };
     }
+    case "myAgents":
+      return {
+        visual: { kind: "icon", icon: "Bot" },
+        title: { kind: "tab", tabKey: "my_agents" },
+      };
     case "issue":
       return {
         visual: {

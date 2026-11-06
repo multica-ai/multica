@@ -279,6 +279,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Codex](https://github.com/openai/codex) | `codex` | OpenAI's coding agent |
 | [GitHub Copilot CLI](https://docs.github.com/en/copilot) | `copilot` | GitHub's coding agent (model routed by your GitHub entitlement) |
 | OpenCode | `opencode` | Open-source coding agent |
+| [ZCode](https://zcode.z.ai/) | `zcode` / ZCode Desktop | Native NDJSON app-server, sessions, model discovery, thinking levels, MCP and yolo execution |
 | OpenClaw | `openclaw` | Open-source coding agent |
 | Hermes | `hermes` | Nous Research coding agent |
 | [Pi](https://pi.dev/) | `pi` | Pi coding agent |
@@ -299,6 +300,17 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | `dsh` | DeepSeek Harness (`dsh --profile multica --stdio`; requires the Multica runtime profile to be installed; reads AGENTS.md and .dsh/skills/) |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
+
+Pi and Oh-My-Pi require kernel support for process identity signalling to clean
+up detached tools safely: on Linux, `pidfd_open` and `pidfd_send_signal` (kernel
+5.3 or newer); on macOS, kernel-checked process identity signalling. Each run
+checks these operations before launching the runtime. An unsupported or denied
+probe operation, including one blocked by a sandbox, fails startup with a
+compatibility error instead of allowing work to start without the required cleanup
+capability. This is a capability check, not a kernel version check, and a passing
+probe does not guarantee permission to signal every descendant process. Existing runs blocked by
+unconfirmed cleanup still require inspection and a manual rerun; the startup check
+does not clear those blocks or establish that earlier background processes exited.
 
 ### How It Works
 

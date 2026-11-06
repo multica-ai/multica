@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach, onTestFinished } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { Issue } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enModals from "../locales/en/modals.json";
@@ -30,6 +31,7 @@ function I18nWrapper({ children }: { children: ReactNode }) {
   );
 }
 
+const mockParentIssue = vi.hoisted(() => ({ value: null as Issue | null }));
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
 const mockCreateCommentSubIssue = vi.hoisted(() => vi.fn());
@@ -231,7 +233,7 @@ vi.mock("./use-issue-limit-upgrade-prompt", () => ({
 vi.mock("@multica/core/issues/queries", () => ({
   issueDetailOptions: (wsId: string, id: string) => ({
     queryKey: ["issues", wsId, "detail", id],
-    queryFn: () => Promise.resolve(null),
+    queryFn: () => Promise.resolve(mockParentIssue.value),
   }),
   childIssuesOptions: (wsId: string, id: string) => ({
     queryKey: ["issues", wsId, "children", id],
@@ -650,6 +652,7 @@ function renderModal(element: React.ReactElement) {
 describe("CreateIssueModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockParentIssue.value = null;
     mockQuickCreateStore.keepOpen = false;
     mockCreateSettingsStore.manualCreateFields = DEFAULT_MANUAL_FIELDS;
     mockSetKeepOpen.mockImplementation((v: boolean) => {
@@ -775,6 +778,29 @@ describe("CreateIssueModal", () => {
     mockSetIssueProperty.mockResolvedValue({
       properties: { "property-tier": "option-enterprise" },
     });
+  });
+
+  it("applies selected parent fields to the submitted issue without replacing its scope", async () => {
+    const user = userEvent.setup();
+    mockParentIssue.value = {
+      id: "parent-copy", identifier: "TES-10", priority: "high", labels: [],
+      start_date: "2026-11-05", due_date: "2026-11-20", description: "Parent scope",
+      properties: { "property-tier": "option-enterprise" },
+    } as unknown as Issue;
+    mockDraftStore.draft.manual.title = "Child scope";
+    mockDraftStore.draft.manual.description = "Only implement validation";
+    renderModal(<CreateIssueModal onClose={vi.fn()} data={{ parent_issue_id: "parent-copy" }} />);
+    await user.click(await screen.findByRole("button", { name: "Copy parent fields" }));
+    await user.click(screen.getByRole("checkbox", { name: /Priority/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Start date/ }));
+    await user.click(await screen.findByRole("checkbox", { name: /Customer tier/ }));
+    await user.click(screen.getByRole("button", { name: "Copy 3 fields" }));
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Child scope", description: "Only implement validation", status: "todo",
+      priority: "high", start_date: "2026-11-05", due_date: undefined,
+      properties: { "property-tier": "option-enterprise" }, parent_issue_id: "parent-copy",
+    }));
   });
 
   it("uses the same compact attachment control as agent mode", () => {

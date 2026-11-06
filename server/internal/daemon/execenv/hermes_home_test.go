@@ -839,6 +839,7 @@ func TestHermesTerminalEnvPassthrough(t *testing.T) {
 		"MULTICA_AGENT_NAME", "MULTICA_AGENT_ID", "MULTICA_TASK_ID", "MULTICA_TASK_SLOT",
 		"MULTICA_AUTOPILOT_RUN_ID", "MULTICA_AUTOPILOT_ID",
 		"MULTICA_QUICK_CREATE_TASK_ID", "MULTICA_QUICK_CREATE_ATTACHMENT_IDS",
+		"MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_TYPE", "MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_ID",
 	}
 	for _, tc := range []struct {
 		name, config string
@@ -870,12 +871,14 @@ func TestHermesTerminalEnvPassthrough(t *testing.T) {
 				Provider:         "hermes",
 				HermesSourceHome: shared,
 				HermesEnv: map[string]string{
-					"MULTICA_TOKEN":                       "mat_fixture_not_for_config",
-					"MULTICA_AUTOPILOT_RUN_ID":            "autopilot_run_fixture",
-					"MULTICA_AUTOPILOT_ID":                "autopilot_fixture",
-					"MULTICA_QUICK_CREATE_TASK_ID":        "quick_create_fixture",
-					"MULTICA_QUICK_CREATE_ATTACHMENT_IDS": `["attachment_fixture"]`,
-					"UNRELATED_SECRET":                    "unrelated_fixture",
+					"MULTICA_TOKEN":                              "mat_fixture_not_for_config",
+					"MULTICA_AUTOPILOT_RUN_ID":                   "autopilot_run_fixture",
+					"MULTICA_AUTOPILOT_ID":                       "autopilot_fixture",
+					"MULTICA_QUICK_CREATE_TASK_ID":               "quick_create_fixture",
+					"MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_TYPE": "squad",
+					"MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_ID":   "aaaa1111-2222-3333-4444-555555555555",
+					"MULTICA_QUICK_CREATE_ATTACHMENT_IDS":        `["attachment_fixture"]`,
+					"UNRELATED_SECRET":                           "unrelated_fixture",
 				},
 				Task: task,
 			}, testLogger())
@@ -968,15 +971,8 @@ func TestHermesTerminalConfigInvalidAliases(t *testing.T) {
 	} {
 		source, overlay := t.TempDir(), t.TempDir()
 		mustWrite(t, filepath.Join(source, "config.yaml"), config)
-		if err := writeDerivedHermesConfig(source, overlay, nil, testLogger()); err != nil {
-			t.Fatal(err)
-		}
-		data, err := os.ReadFile(filepath.Join(overlay, "config.yaml"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(data) != config {
-			t.Errorf("invalid alias config was not preserved: got %q, want %q", data, config)
+		if err := writeDerivedHermesConfig(source, overlay, nil, testLogger()); err == nil {
+			t.Fatal("malformed config must fail closed before gateway ingress can start")
 		}
 	}
 	cycle := &yaml.Node{Kind: yaml.AliasNode}
