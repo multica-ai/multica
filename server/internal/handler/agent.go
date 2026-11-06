@@ -372,7 +372,11 @@ type TaskIssueStatusData struct {
 // Brief is the server-rendered text (issueworkflow.Brief); the daemon puts it
 // in the per-turn prompt, never in the cached runtime brief.
 type TaskProjectWorkflowData struct {
-	Brief string `json:"brief"`
+	Brief            string `json:"brief"`
+	CurrentStatusKey string `json:"current_status_key"`
+	// TaskWorkflowStep is the saved binding, not a fallback to the issue's
+	// current status. Older tasks can have no binding.
+	TaskWorkflowStep *string `json:"task_workflow_step"`
 }
 
 // ClaimParentIssue points a sub-issue's run at its parent issue, where the

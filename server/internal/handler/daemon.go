@@ -3211,6 +3211,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			if legacyRuntimeRules {
 				leaderWorkflow = leaderWorkflowLegacyDaemon
 			}
+			if projectWorkflow.TaskWorkflowStep != nil && *projectWorkflow.TaskWorkflowStep != projectWorkflow.CurrentStatusKey {
+				leaderWorkflow = leaderWorkflowStepMoved
+			}
 		}
 		if task.IsLeaderTask {
 			injected := false

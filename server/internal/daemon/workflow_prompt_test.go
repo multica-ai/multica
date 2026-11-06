@@ -1,9 +1,43 @@
 package daemon
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
+
+func TestProjectWorkflowBindingWireCompatibility(t *testing.T) {
+	for _, raw := range []string{
+		`{"project_workflow":{"brief":"Legacy server brief"}}`,
+		`{"project_workflow":{"brief":"Legacy server brief","current_status_key":"blocked","task_workflow_step":null}}`,
+	} {
+		var task Task
+		if err := json.Unmarshal([]byte(raw), &task); err != nil {
+			t.Fatal(err)
+		}
+		if task.ProjectWorkflow == nil || task.ProjectWorkflow.TaskWorkflowStep != nil {
+			t.Fatalf("absent/NULL binding became known: %+v", task.ProjectWorkflow)
+		}
+		if !strings.Contains(BuildPrompt(task, "codex"), "[Project workflow]\nLegacy server brief") {
+			t.Fatal("old brief was lost")
+		}
+	}
+	var task Task
+	if err := json.Unmarshal([]byte(`{"project_workflow":{"brief":"Server rendered","current_status_key":"blocked","task_workflow_step":"removed"}}`), &task); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored Task
+	if err := json.Unmarshal(encoded, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored.ProjectWorkflow.CurrentStatusKey != "blocked" || restored.ProjectWorkflow.TaskWorkflowStep == nil || *restored.ProjectWorkflow.TaskWorkflowStep != "removed" {
+		t.Fatalf("binding lost: %s", encoded)
+	}
+}
 
 const deliveryBrief = "This project's workflow — Delivery\nYou are handling the \"Code review\" step of MUL-1.\n"
 

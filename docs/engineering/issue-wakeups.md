@@ -93,6 +93,47 @@ every historical tick. Runs keep normal comment delivery, except that a run an
 every/cron rule started may end with a check-in instead (see below). Linked pull
 request conditions read the stored PR snapshot; there is no separate CI event.
 
+## Workflow-step bindings on continuation
+
+`agent_task_queue.workflow_step` records the task's effective step independently
+of provider-session reuse. The existing enqueue paths have different semantics:
+
+| Path | Binding on the resulting task |
+| --- | --- |
+| Ordinary `CreateAgentTask` | Issue status at enqueue |
+| Agent-created independent wakeup | Registering task's binding; NULL source binding falls back to current issue status |
+| Member-created independent wakeup | Current issue status at enqueue |
+| Joined wakeup | Receiving task's existing binding, unchanged |
+| System automatic `CreateRetryTask` | Parent binding, including NULL, with either retained or dropped provider session |
+| Authorized member `RerunIssue` | Ordinary enqueue's current-status binding; session reuse is a separate claim decision |
+
+A task's own successful move updates its binding through `SetTaskWorkflowStep`;
+another actor's move does not. Named workflows and Default-with-handoffs retain
+the existing 409 `workflow_step_moved` guard and its `step` / `current_status`
+keys. Default without handoffs and issues without a project keep their existing
+exceptions. No binding is invented for a NULL task row.
+
+For existing workflow-bearing claims, `project_workflow.current_status_key` is
+the actual issue status and nullable `project_workflow.task_workflow_step` is
+the saved task binding. `brief` remains the server-rendered prompt text. Older
+servers can omit the new fields, and older daemons can ignore them. Only claim
+rendering supplies a task binding to `BriefInput`; editor previews and timeline
+handoff text still describe the issue without a particular task.
+
+A known mismatch displays both steps, including a removed step's raw key when
+there is no catalog name, and omits current-step instructions and transition
+commands. The owning-squad claim briefing also omits its unconditional delivery
+move in this case. This changes presentation only, without rebinding, retrying,
+cancelling or altering status authorization. The mismatch does not identify the
+task's origin or the actor that moved the issue.
+
+An old run should comment with its results and hand off any new work to a member
+permitted to invoke the target agent. That member must decide from the latest
+issue under existing invocation, rerun and wakeup queue rules. Member wakeups
+can join an existing task; manual reruns can retain a provider session. Neither
+is a universal accept-and-rebind operation, and a fresh session grants no new
+workflow authorization. Inspect the returned task's actual binding.
+
 ## Event catalog
 
 `multica issue wakeup events` lists the 25 supported issue-scoped subscriptions:
