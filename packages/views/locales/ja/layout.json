@@ -146,6 +146,8 @@
       "needs_attention": "要対応",
       "stuck_other": "{{count}} 件のタスクがオフラインのランタイムを待機中",
       "working_now": "作業中",
+      "show_more_agents": "さらに {{count}} 件を表示…",
+      "show_fewer_agents": "表示を減らす",
       "running_tasks_other": "{{count}} 件のタスクを実行中",
       "all_agents": "すべてのエージェント",
       "my_agents": "マイエージェント",

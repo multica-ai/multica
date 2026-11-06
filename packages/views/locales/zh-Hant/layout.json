@@ -146,6 +146,8 @@
       "needs_attention": "需要處理",
       "stuck_other": "{{count}} 個任務在等待離線的執行時",
       "working_now": "正在工作",
+      "show_more_agents": "再顯示 {{count}} 項...",
+      "show_fewer_agents": "收起",
       "running_tasks_other": "{{count}} 個任務執行中",
       "all_agents": "全部 AI 代理",
       "my_agents": "我的 AI 代理",
