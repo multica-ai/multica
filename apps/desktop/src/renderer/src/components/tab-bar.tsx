@@ -161,7 +161,7 @@ function SortableTabItem({
   // query cache — a resource's own icon/status/avatar and its real title,
   // updated as the cache updates. `tab.title` is only a persisted first-frame
   // fallback. See @multica/views useTabPresentation.
-  const { visual, title } = useTabPresentation(tab.url, tab.title);
+  const { visual, title, titleResolved } = useTabPresentation(tab.url, tab.title, { fetch: true });
   const pinLabel = tab.pinned
     ? t(($) => $.desktop.tab_bar.unpin)
     : t(($) => $.desktop.tab_bar.pin);
@@ -172,15 +172,15 @@ function SortableTabItem({
     ? t(($) => $.desktop.tab_bar.pinned_name, { title })
     : title;
 
-  // Persist the active tab's resolved title so it survives as the next
+  // Persist each tab's resolved title so it survives as the next
   // session's first-frame fallback. The tab strip itself always renders the
   // live resolved `title`; `tab.title` is just the persisted seed. This
   // replaces the old document.title → MutationObserver → tab.title path (the OS
   // window title stays page-driven via useDocumentTitle).
   useEffect(() => {
-    if (!isActive) return;
+    if (!titleResolved) return;
     if (tab.title !== title) updateTab(tab.id, { title });
-  }, [isActive, title, tab.id, tab.title, updateTab]);
+  }, [titleResolved, title, tab.id, tab.title, updateTab]);
 
   const {
     attributes,

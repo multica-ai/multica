@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useRef, type ReactNode } from "react";
+import {useQuery} from "@tanstack/react-query";
+import {runtimeModelsOptions} from "@multica/core/runtimes";
+import {findModelCapabilityEntry,thinkingLevelRequiredForProvider} from "../components/inspector/model-capability";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
   applyDraftModelChange,
@@ -436,6 +439,15 @@ export function AgentExecutionOverrides({
 }) {
   const { t } = useT("agents");
   const runtimeOnline = runtime?.status === "online";
+  const modelsQuery = useQuery(runtimeModelsOptions(runtimeOnline && thinkingLevelRequiredForProvider(runtime?.provider ?? "") ? runtime?.id ?? null : null));
+  useEffect(() => {
+    if (disabled || !thinkingLevelRequiredForProvider(runtime?.provider ?? "")) return;
+    if (draft.thinkingLevel || !draft.model || !modelsQuery.isSuccess || !modelsQuery.data?.supported) return;
+    const entry = findModelCapabilityEntry(modelsQuery.data.models, draft.model, runtime?.provider ?? "");
+    const level = entry?.thinking?.default_level ?? entry?.thinking?.supported_levels[0]?.value;
+    if (level) onChange({ ...draft, thinkingLevel: level });
+  }, [disabled, draft, modelsQuery.data, modelsQuery.isSuccess, onChange, runtime?.provider]);
+
   return (
     <>
       <ThinkingSettingField

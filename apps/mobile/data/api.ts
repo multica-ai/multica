@@ -579,8 +579,9 @@ class ApiClient {
     });
   }
 
-  async listAgents(opts?: { signal?: AbortSignal }): Promise<Agent[]> {
-    const raw = await this.fetch<unknown>("/api/agents", {
+  async listAgents(opts?: { signal?: AbortSignal; includeArchived?: boolean }): Promise<Agent[]> {
+    const path = opts?.includeArchived ? "/api/agents?include_archived=true" : "/api/agents";
+    const raw = await this.fetch<unknown>(path, {
       signal: opts?.signal,
     });
     return parseWithFallback(raw, AgentListSchema, EMPTY_AGENT_LIST, {

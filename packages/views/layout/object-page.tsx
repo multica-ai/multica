@@ -7,6 +7,7 @@ import {
   useState,
   type ComponentProps,
   type ReactNode,
+  type Ref,
 } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { ChevronRight, PanelRight, type IconComponent } from "@multica/ui/icons";
@@ -53,6 +54,8 @@ interface ObjectPageProps {
    * keeps its place while the body changes.
    */
   children: ReactNode;
+  /** The body scroll owner, for sections that virtualize their rows. */
+  scrollRef?: Ref<HTMLDivElement>;
 }
 
 /**
@@ -61,7 +64,7 @@ interface ObjectPageProps {
  * right panel the header toggles — the layout the issue page already uses.
  * There are no tabs: what a tab would hold is a section of the body.
  */
-export function ObjectPage({ segments, leaf, actions, panel, layoutId, children }: ObjectPageProps) {
+export function ObjectPage({ segments, leaf, actions, panel, layoutId, children, scrollRef }: ObjectPageProps) {
   const { t } = useT("layout");
   const isMobile = useIsMobile();
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id: layoutId });
@@ -126,7 +129,7 @@ export function ObjectPage({ segments, leaf, actions, panel, layoutId, children 
     />
   );
 
-  const body = <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>;
+  const body = <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</div>;
 
   if (!panel) {
     return (
@@ -283,6 +286,41 @@ export function ObjectSectionCard({ children, className }: { children: ReactNode
   return (
     <div className={cn("divide-y overflow-hidden rounded-lg border bg-card", className)}>
       {children}
+    </div>
+  );
+}
+
+/**
+ * A section with nothing in it yet. The section's heading already names the
+ * object, so this is a quiet row rather than a centered page state: what will
+ * appear here, or what to do first, with the action at its end.
+ */
+export function ObjectSectionEmpty({
+  icon: Icon,
+  title,
+  description,
+  action,
+  className,
+}: {
+  icon?: IconComponent;
+  title?: ReactNode;
+  description: ReactNode;
+  action?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex min-h-13 items-center gap-3 rounded-lg border border-dashed border-input py-2.5 pr-2.5 pl-3.5 text-muted-foreground",
+        className,
+      )}
+    >
+      {Icon ? <Icon aria-hidden="true" className="size-4.5 shrink-0 text-faint-foreground" /> : null}
+      <div className="min-w-0 flex-1 text-label">
+        {title ? <p className="text-body font-medium text-foreground">{title}</p> : null}
+        <p>{description}</p>
+      </div>
+      {action ? <div className="flex shrink-0 items-center gap-1">{action}</div> : null}
     </div>
   );
 }

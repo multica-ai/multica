@@ -7,7 +7,11 @@ import {
   EMPTY_AGENT_FILTERS,
   type AgentListFilters,
 } from "@multica/core/agents/stores";
-import { rowMatchesFilters, type AgentListRow } from "./agents-page";
+import {
+  matchesAgentSearch,
+  rowMatchesFilters,
+  type AgentListRow,
+} from "./agents-page";
 
 function makeRow(
   overrides: Partial<AgentListRow["agent"]> = {},
@@ -219,5 +223,37 @@ describe("rowMatchesFilters — access dimension", () => {
         label,
       ).toBe(expected);
     }
+  });
+});
+
+describe("matchesAgentSearch", () => {
+  const reviewer = makeRow({
+    name: "PR Reviewer",
+    description: "Reviews pull requests before merge",
+  });
+  const chinese = makeRow({ name: "审核助手", description: "代码审查" });
+  const noDescription = makeRow({ name: "Docs Bot", description: "" });
+
+  it("matches every row while the query is empty or whitespace", () => {
+    expect(matchesAgentSearch(reviewer, "")).toBe(true);
+    expect(matchesAgentSearch(reviewer, "   ")).toBe(true);
+  });
+
+  it("matches the name, ignoring case and surrounding spaces", () => {
+    expect(matchesAgentSearch(reviewer, "  reviewer ")).toBe(true);
+    expect(matchesAgentSearch(reviewer, "PR REV")).toBe(true);
+    expect(matchesAgentSearch(reviewer, "deploy")).toBe(false);
+  });
+
+  it("matches the description", () => {
+    expect(matchesAgentSearch(reviewer, "pull requests")).toBe(true);
+    expect(matchesAgentSearch(noDescription, "pull")).toBe(false);
+  });
+
+  it("matches Chinese names and descriptions by pinyin", () => {
+    expect(matchesAgentSearch(chinese, "shenhe")).toBe(true);
+    expect(matchesAgentSearch(chinese, "shzs")).toBe(true);
+    expect(matchesAgentSearch(chinese, "daima")).toBe(true);
+    expect(matchesAgentSearch(chinese, "fabu")).toBe(false);
   });
 });

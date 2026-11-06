@@ -672,5 +672,29 @@
       "cancel": "Annuler",
       "done": "Qoder déconnecté"
     }
+  },
+  "intro": {
+    "title": "Donnez à vos agents un ordinateur pour travailler",
+    "description": "Un runtime, c'est là où les agents exécutent vraiment leurs tâches : votre ordinateur, un serveur ou un service cloud.",
+    "slides": {
+      "local": {
+        "title": "Cet ordinateur se connecte tout seul",
+        "description": "Téléchargez l'app de bureau et connectez-vous : Claude Code, Codex et les autres CLI de cet ordinateur apparaissent d'eux-mêmes."
+      },
+      "remote": {
+        "title": "Une autre machine, deux commandes",
+        "description": "Installez la CLI sur un serveur ou un autre ordinateur, puis lancez multica setup pour le connecter."
+      },
+      "cloud": {
+        "title": "Ou un nœud cloud",
+        "description": "Pas envie de gérer des machines ? Créez un nœud cloud hébergé par Multica."
+      }
+    },
+    "art": {
+      "this_computer": "Cet ordinateur · Bureau",
+      "detected": "Harness détectés",
+      "run_there": "À lancer sur cette machine",
+      "connected": "{{name}} connecté à Multica"
+    }
   }
 }

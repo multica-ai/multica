@@ -1,7 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Multica">
-  <rect width="100" height="100" rx="20" fill="#ffffff"/>
-  <polygon
-    fill="#111827"
-    points="45,62.1 45,100 55,100 55,62.1 81.8,88.9 88.9,81.8 62.1,55 100,55 100,45 62.1,45 88.9,18.2 81.8,11.1 55,37.9 55,0 45,0 45,37.9 18.2,11.1 11.1,18.2 37.9,45 0,45 0,55 37.9,55 11.1,81.8 18.2,88.9"
-  />
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Multica"><style>.t{fill:#0b0b0c}.m{fill:#ffffff}@media (prefers-color-scheme:dark){.t{fill:#ffffff}.m{fill:#0b0b0c}}</style><defs><clipPath id="c"><rect x="4.166666666666667" y="4.166666666666667" width="91.66666666666667" height="91.66666666666667" rx="18.333333333333332"/></clipPath></defs><rect class="t" width="100" height="100" rx="22.5"/><g clip-path="url(#c)"><path class="m" transform="translate(-4.72 22) scale(0.96)" d="M0 85.25V34A34 34 0 0 1 68 34V85.25H46V34A12 12 0 0 0 22 34V85.25ZM46 85.25V34A34 34 0 0 1 114 34V85.25H92V34A12 12 0 0 0 68 34V85.25Z"/></g></svg>

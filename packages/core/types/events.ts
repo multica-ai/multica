@@ -249,6 +249,9 @@ export interface IssueUnreadChangedPayload {
 export interface InboxBatchReadPayload {
   recipient_id: string;
   count: number;
+  /** Set when the batch is one issue's notifications, read by viewing the
+   *  issue outside the inbox. Absent for "mark all as read". */
+  issue_id?: string;
 }
 
 export interface InboxBatchArchivedPayload {

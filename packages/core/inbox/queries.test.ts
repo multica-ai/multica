@@ -151,6 +151,21 @@ describe("archived inbox options", () => {
       archivedInboxFacetsOptions("ws", EMPTY_INBOX_FILTERS).queryKey,
     );
   });
+
+  it("carries the previous result across a filter change but never across workspaces", () => {
+    const todo: InboxFilters = { ...EMPTY_INBOX_FILTERS, statuses: ["todo"] };
+    for (const options of [archivedInboxPagesOptions, archivedInboxFacetsOptions]) {
+      const placeholder = options("ws", todo).placeholderData as (
+        previousData: unknown,
+        previousQuery: { queryKey: readonly unknown[] } | undefined,
+      ) => unknown;
+      const previous = { cached: true };
+
+      expect(placeholder(previous, { queryKey: options("ws", EMPTY_INBOX_FILTERS).queryKey })).toBe(previous);
+      expect(placeholder(previous, { queryKey: options("other-ws", todo).queryKey })).toBeUndefined();
+      expect(placeholder(undefined, undefined)).toBeUndefined();
+    }
+  });
 });
 
 describe("hasOtherWorkspaceUnread", () => {

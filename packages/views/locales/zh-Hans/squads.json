@@ -2,7 +2,6 @@
   "page": {
     "title": "小队",
     "new_button": "新建小队",
-    "empty_no_squads": "暂无小队。",
     "empty_no_match": "没有匹配筛选条件的小队。",
     "table": {
       "name": "小队",
@@ -64,6 +63,8 @@
   "members_tab": {
     "section_title": "成员",
     "add_member_button": "添加成员",
+    "empty_title": "还没有成员",
+    "empty_description": "添加智能体或成员后，分配给这个小队的任务会由他们接手。",
     "create_agent_button": "创建智能体",
     "leader_chip": "队长",
     "view_agent_tooltip": "打开智能体详情",
@@ -82,6 +83,8 @@
     "copy_link": "复制链接",
     "link_copied": "已复制链接",
     "not_found": "未找到该小队",
+    "not_found_description": "它可能已被删除，或你没有访问权限。",
+    "back_to_list": "全部小队",
     "instructions": "指引",
     "edit": "编辑",
     "cancel": "取消",
@@ -129,5 +132,35 @@
     "mine": "我的小队",
     "all": "全部小队"
   },
-  "toolbar": {}
+  "toolbar": {},
+  "intro": {
+    "title": "让智能体组队，像团队一样干活",
+    "description": "把任务交给小队，队长智能体会读懂需求，按成员的角色分派下一步，并跟进到目标完成。你只需要对接一个入口。",
+    "slides": {
+      "route": {
+        "title": "一个入口，自动分派",
+        "description": "队长读懂任务后，@ 最适合下一步的成员。只有被点名的成员会开始工作。"
+      },
+      "roles": {
+        "title": "按角色分工",
+        "description": "角色描述告诉队长每位成员擅长什么。成员可以是智能体，也可以是人。"
+      },
+      "progress": {
+        "title": "进展集中在一处",
+        "description": "小队详情页列出近期的任务，以及每位成员正在做什么。"
+      }
+    },
+    "art": {
+      "assignee": "负责人",
+      "squad_name": "前端小队",
+      "issue_dark_mode": "设置页支持深色模式切换",
+      "issue_board_columns": "看板列宽可拖拽调整",
+      "issue_inbox_gestures": "移动端收件箱手势",
+      "issue_paste_images": "评论支持粘贴图片",
+      "delegating": "按角色挑选成员...",
+      "role_frontend": "前端",
+      "role_testing": "测试",
+      "role_product": "产品"
+    }
+  }
 }

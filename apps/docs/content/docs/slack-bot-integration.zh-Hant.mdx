@@ -1,0 +1,215 @@
+---
+title: Slack Bot
+description: 為 AI 代理建立一個 Slack Bot，在私聊、頻道以及 /issue、/new、/clear 命令中使用它。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+Multica 使用你自己的 Slack app。連線後，團隊成員可以私聊 Bot、在頻道里 @ 它，也可以用 `/issue` 建立任務、`/new` 新建 Multica Chat、`/clear` 重置當前 Chat 的 AI 代理上下文。
+
+一個 Slack app 對應一個 Multica AI 代理。需要接入多個 AI 代理時，為每個 AI 代理分別建立 app。
+
+## 開始前
+
+連線需要工作區 owner 或 admin 完成，最終把兩個憑據填入 Multica：
+
+- Bot User OAuth Token，以 `xoxb-` 開頭；
+- App-level Token，以 `xapp-` 開頭。
+
+## 連線 Bot
+
+<Steps>
+<Step>
+
+### 從 manifest 建立 Slack app [#1-從-manifest-建立-slack-app]
+
+開啟 [Slack API Apps](https://api.slack.com/apps)，點選 **Create New App → From a manifest**，選擇 Slack workspace，然後在 **YAML** 中貼上以下內容：
+
+```yaml
+display_information:
+  name: Multica
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: Multica
+    always_online: true
+  slash_commands:
+    - command: /issue
+      description: Create a Multica issue
+      usage_hint: "[description]"
+    - command: /new
+      description: Start a new Multica chat
+      usage_hint: "[message]"
+    - command: /clear
+      description: Clear the current Multica chat context
+      usage_hint: "[message]"
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - channels:history
+      - files:read
+      - groups:history
+      - im:history
+      - mpim:history
+      - chat:write
+      - reactions:write
+      - users:read
+      - commands
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.im
+      - message.channels
+      - message.groups
+      - message.mpim
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false
+```
+
+建立前可以把兩個 `Multica` 改成 AI 代理的名字。不要刪除 manifest 中的權限或事件，否則私聊、頻道提及、回覆、`/issue`、`/new` 或 `/clear` 可能無法工作。
+
+<Callout type="warning">
+Slack slash command 名稱在整個 workspace 中共享。如果其他已安裝 app 佔用了 `/new` 或 `/clear`，Slack 會在建立或更新 app 時拒絕衝突命令。可以先解決名稱衝突，也可以傳送訊息形式的 `@Multica /new [訊息]` 或 `@Multica /clear [訊息]`，繞過原生 slash command 攔截。
+</Callout>
+
+<Callout type="warning">
+如果這個 Slack app 是在附件支援上線前安裝的，請新增 `files:read` Bot scope，並將 app 重新安裝到 workspace。在重新安裝 app 前，新增 scope 不會應用到現有 Bot token。
+</Callout>
+
+Bot 使用 Socket Mode 主動連線 Slack，不需要配置公網 Request URL 或 OAuth Redirect URL。
+
+</Step>
+<Step>
+
+### 獲取兩個 token [#2-獲取兩個-token]
+
+#### Bot token
+
+1. 在 Slack app 中開啟 **Install App**。
+2. 點選 **Install to Workspace** 並批准權限。
+3. 複製 **Bot User OAuth Token**，它以 `xoxb-` 開頭。
+
+#### App-level token
+
+1. 開啟 **Basic Information → App-Level Tokens**。
+2. 點選 **Generate Token and Scopes**。
+3. 新增 `connections:write` scope。
+4. 生成並複製以 `xapp-` 開頭的 token。
+
+</Step>
+<Step>
+
+### 連線到 AI 代理 [#3-連線到 AI 代理]
+
+1. 在 Multica 中開啟 **AI 代理**，選擇要接入 Slack 的 AI 代理。
+2. 進入 **整合**，點選 **連線 Slack**。
+3. 填入 Bot token 和 App-level token。
+4. 點選 **連線**。
+
+Multica 會驗證兩個 token 是否來自同一個 app。連線成功後，頁面會顯示 **已連線到 Slack**。
+
+<Callout type="warning">
+兩個 token 會加密儲存在 Multica 伺服器上。Token 即憑據，不要寫進任務、評論或程式碼倉庫。已連線到其他 AI 代理或工作區的 app 不能直接重複使用，需先斷開原連線。
+</Callout>
+
+</Step>
+</Steps>
+
+## 第一次使用
+
+成員第一次私聊或 @ Bot 時，會收到一個帳號繫結連結。用該工作區的 Multica 帳號登入後，再回到 Slack 傳送訊息。
+
+連結只能使用一次，並會在 15 分鐘後過期。過期後再給 Bot 發一條訊息即可獲得新連結。同一 Multica 工作區中的多個 Bot 如果來自同一個 Slack workspace，通常可以重複使用已有繫結。
+
+只有當前 Multica 工作區的成員可以使用 Bot。
+
+## 在 Slack 中交代工作
+
+### 私聊
+
+從 Slack 側欄的 **Apps** 開啟 Bot，直接傳送訊息，不需要 @。
+
+### 頻道和群聊
+
+先執行 `/invite @your-bot` 把 Bot 加入頻道，再傳送 `@your-bot 你的要求`。每個 thread 會形成獨立會話；追問時繼續在原 thread 中 @ Bot。
+
+Bot 只會響應明確 @ 它的頻道訊息。執行時，它會在權限允許的範圍內讀取該 thread 的近期上下文。
+
+### 傳送檔案
+
+在私聊裡，或者在 @ 提及 Bot 的頻道訊息裡直接帶上檔案。檔案會作為附件交給 AI 代理，和訊息一起處理。
+
+這需要 `files:read` 權限；應用如果是在附件支援之前安裝的，見第 1 步的提示。單個檔案不超過 20 MiB，一條訊息最多帶 10 個。超出大小、仍在上傳，或者存放在 Slack 之外（比如 Google Drive、Dropbox 連結）的檔案會被跳過，訊息文字仍然會交給 AI 代理。
+
+### 用 `/issue` 建立任務
+
+在頻道或私聊中輸入：
+
+```text
+/issue Safari 登入成功後仍然停留在登入頁
+```
+
+這條命令不需要 @ Bot。Multica 會把描述交給當前 Bot 對應的 AI 代理，由它整理標題和正文並建立任務。Slack 會先顯示一條僅你可見的接收提示；建立完成後，你會在 Multica 收件箱中收到通知。
+
+### 用 `/new` 新建 Chat
+
+在與 Bot 的私聊中，傳送 `/new` 會立即建立一個空的、可見的新 Chat；傳送 `/new <訊息>` 會把訊息作為新 Chat 的第一輪。裸 `/new` 建立的 Chat 在收到第一條有效訊息前顯示為"新對話"，之後按首條訊息生成標題。
+
+舊 Chat 仍保留在 Multica 中，可以繼續從 Web、桌面端或移動端發訊息；切換到新 Chat 的只有 Slack 這條外部會話的後續訊息。
+
+在頻道或 thread 中，Slack 原生 slash command 的 payload 不包含目標 thread。請在目標 thread 裡傳送 `@Multica /new [訊息]`。
+
+### 用 `/clear` 清空當前 Chat 上下文
+
+在與 Bot 的私聊中，`/clear` 會保留當前 Multica Chat，只重置 AI 代理可見的上下文。完整 Chat 歷史仍儲存在 Multica 中。`/clear <訊息>` 會把訊息作為新上下文的第一輪；裸 `/clear` 會把邊界應用到下一條真實訊息。
+
+在頻道或 thread 中，請在目標 thread 裡傳送 `@Multica /clear [訊息]`，讓 Multica 把邊界應用到正確的會話。
+
+## 管理連線
+
+開啟 **設定 → 訊息渠道 → Slack** 可以檢視所有已連線的 Slack Bot。工作區 owner 和 admin 可以斷開連線。
+
+斷開後，Socket Mode 連線會停止，Bot 不再接收新訊息。已有的對話和審計記錄不會隨之刪除。
+
+## 自託管配置
+
+Multica Cloud 無需額外配置。自託管部署需要先設定一個用於加密 Slack token 的金鑰：
+
+```dotenv
+MULTICA_SLACK_SECRET_KEY=<base64 編碼的 32 位元組金鑰>
+```
+
+可以這樣生成：
+
+```bash
+openssl rand -base64 32
+```
+
+重啟 API 服務後，再連線 Slack app。該金鑰需要長期儲存：更換或丟失後，已有 token 無法解密，需要重新連線。
+
+帳號繫結連結使用 `MULTICA_APP_URL`，未設定時回退到 `FRONTEND_ORIGIN`；它需要指向成員可以訪問的 Multica 地址。
+
+## 常見問題
+
+- **連線時提示 token 無效**：檢查字首，並確認兩個 token 來自同一個 app。
+- **無法驗證 app**：確認 manifest 包含 `users:read`，更新權限後重新安裝 app。
+- **私聊沒有入口**：確認 `app_home.messages_tab_enabled` 為 `true`。
+- **頻道里沒有回覆**：確認 Bot 已被邀請進頻道，並在訊息中 @ 了它。
+- **`/issue`、`/new` 或 `/clear` 不存在**：確認 manifest 包含這三個 slash command 和 `commands` scope，隨後重新安裝 app。如果 Slack 提示 `/new` 或 `/clear` 已被佔用，請改用 `@Multica` 訊息形式，或先解決 workspace 級命令衝突。
+- **檔案沒有送達 AI 代理**：確認 manifest 裡包含 `files:read`，並且在新增該權限後重新安裝過應用，同時確認檔案不超過 20 MiB。
+- **Bot 不執行**：檢查 AI 代理是否已歸檔，以及它使用的[執行時](/daemon-runtimes)是否線上。
+
+## 接下來
+
+- [聊天整合](/channels) — 平臺對比、會話隔離和帳號繫結機制。
+- [與 AI 代理對話](/chat) — Bot 背後的對話與執行模型。
+- [任務](/issues) — `/issue` 建立的工作單位。

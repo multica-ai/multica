@@ -38,10 +38,17 @@
   "working_filter_error": {
     "title": "エージェントが作業中のタスクを読み込めませんでした"
   },
+  "unread_filter_error": {
+    "title": "未読のタスクを読み込めませんでした"
+  },
   "status_catalog_error": {
     "title": "ステータス一覧を読み込めませんでした",
     "hint": "ステータスを読み込むまでタスクを表示できません。",
     "retry": "再試行"
+  },
+  "relation_filter_error": {
+    "title": "「自分との関係」フィルターを読み込めませんでした",
+    "hint": "「自分が購読中」または「自分のエージェントが担当」で絞り込んだタスクは、購読とエージェントを読み込むまで表示できません。"
   },
   "source_context": {
     "create_action": "このコメントからサブタスクを作成",
@@ -117,6 +124,9 @@
     "breadcrumb_title": "タスク",
     "breadcrumb_workspace_fallback": "ワークスペース",
     "empty_title": "まだタスクがありません",
+    "empty_description": "タスクはメンバーやエージェントに任せる具体的な作業です。エージェントに割り当てると、ランタイム上で自動的に始まります。",
+    "break_down_with_chat": "チャットで分解する",
+    "break_down_prompt": "次のことを進めたいです。必要なことを質問してから、このワークスペースのタスクに分解してください：\n\n",
     "move_failed": "タスクを移動できませんでした"
   },
   "status": {
@@ -176,8 +186,11 @@
     "relation_assigned": "自分が担当",
     "relation_created": "自分が作成",
     "relation_my_agents": "自分のエージェントが担当",
+    "relation_subscribed": "自分が購読中",
     "section_agent_status": "エージェントの状態",
     "agent_status_running": "実行中",
+    "section_read_state": "既読状態",
+    "read_state_unread": "未読",
     "operator_label": "条件",
     "operator_is": "一致",
     "operator_is_not": "除外",
@@ -406,7 +419,7 @@
       }
     },
     "search_placeholder": "タスクを検索...",
-    "search_empty": "検索条件に一致するタスクがありません。"
+    "search_empty": "検索条件に一致するタスクがありません"
   },
   "list": {
     "empty_status": "タスクなし",
@@ -446,6 +459,9 @@
     "metadata_description": "エージェントや連携機能がワークフローを引き継ぐために記録するキーと値のデータ。",
     "section_load_failed_retry": "読み込めませんでした。再試行",
     "not_found": "このタスクはこのワークスペースに存在しないか、削除されています。",
+    "load_failed": "タスクを読み込めませんでした。",
+    "load_retry": "再試行",
+    "not_found_title": "タスクが見つかりません",
     "breadcrumb_project_unknown": "不明なプロジェクト",
     "back": "戻る",
     "title_placeholder": "タスクのタイトル",
@@ -525,7 +541,6 @@
     "agents_group": "エージェント",
     "mark_done_tooltip": "完了にする",
     "archive_tooltip": "アーカイブ",
-    "restore_to_inbox_tooltip": "インボックスに戻す",
     "pin_tooltip": "サイドバーにピン留め",
     "unpin_tooltip": "サイドバーのピン留めを解除",
     "quick_jump_label": "クイックナビゲーション",
@@ -751,6 +766,7 @@
   },
   "filtered_empty": {
     "title": "フィルター条件に一致するタスクがありません",
+    "unread_title": "未読のタスクはありません",
     "clear_button": "フィルターを解除"
   },
   "agent_live": {
@@ -865,6 +881,7 @@
     "col_tokens": "トークン",
     "col_cost": "費用",
     "tokens_count": "{{tokens}} トークン",
+    "credits_count": "{{credits}} {{provider}} クレジット",
     "details_toggle": "実行の詳細",
     "detail_breakdown": "費用の内訳",
     "detail_total": "合計",
@@ -883,6 +900,7 @@
     "confirm": "実行を停止"
   },
   "batch": {
+    "delete_restricted": "自分または所有するエージェントが作成したタスクを削除できます。ワークスペースの owner と admin はすべてのタスクを削除できます。",
     "selected": "{{count}} 件選択中",
     "status": "ステータス",
     "priority": "優先度",
@@ -895,7 +913,6 @@
     "delete_failed": "タスクを削除できませんでした",
     "delete_dialog_title_other": "タスク {{count}} 件を削除しますか？",
     "delete_dialog_desc_other": "この操作は元に戻せません。選択したタスクと関連データがすべて完全に削除されます。",
-    "delete_dialog_warning": "ワークスペースのメンバーであれば誰でもタスクを削除できます。",
     "cancel": "キャンセル"
   },
   "card": {
@@ -921,6 +938,7 @@
     "open_in_new_tab": "新しいタブで開く",
     "pin_to_sidebar": "サイドバーにピン留め",
     "unpin_from_sidebar": "サイドバーのピン留めを解除",
+    "restore_to_inbox": "インボックスに戻す",
     "mark_read": "既読にする",
     "mark_unread": "未読にする",
     "copy_link": "リンクをコピー",
@@ -1717,7 +1735,8 @@
     "builtin": {
       "my_issues": "マイタスク",
       "my_agents": "マイエージェントの作業",
-      "all_issues": "すべてのタスク"
+      "all_issues": "すべてのタスク",
+      "unread": "未読"
     },
     "untitled": "無題のビュー",
     "copy_name": "{{name}}（コピー）",
@@ -1749,6 +1768,9 @@
     "save_as_new": "新しいビューとして保存",
     "save_as_new_hint": "「{{name}}」は変更されません",
     "save_as_view": "ビューとして保存",
+    "save_view": "ビューを保存",
+    "add_filter": "フィルターを追加",
+    "setup_hint": "このビューにはまだ条件がないため、すべてのタスクを表示しています",
     "set_by_view": "このビューで設定",
     "new_issue": "新規タスク",
     "unavailable": "このビューは利用できなくなりました",
@@ -1772,7 +1794,8 @@
       "star": "{{name}} をサイドバーに追加",
       "unstar": "{{name}} をサイドバーから削除",
       "row_actions": "{{name}} の操作",
-      "no_matches": "一致するビューはありません"
+      "empty_title": "保存したビューはまだありません",
+      "empty_description": "タスク一覧でフィルターと表示方法を調整し、ビューとして保存します。"
     }
   }
 }

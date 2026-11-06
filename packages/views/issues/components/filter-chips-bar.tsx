@@ -10,6 +10,7 @@ import {
   CircleDashed,
   CircleDot,
   CircleUser,
+  Eye,
   FolderKanban,
   SignalHigh,
   Tag,
@@ -232,6 +233,7 @@ export function useFilterChips(
   const negatedFilters = useViewStore((s) => s.negatedFilters);
   const propertyFilters = useViewStore((s) => s.propertyFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+  const unreadFilter = useViewStore((s) => s.unreadFilter);
   const store = useViewStoreApi();
   const negated = new Set(negatedFilters);
 
@@ -321,6 +323,7 @@ export function useFilterChips(
       propertyFilters: s.propertyFilters,
       advancedFilter: s.advancedFilter,
       agentRunningFilter: s.agentRunningFilter,
+      unreadFilter: s.unreadFilter,
     };
     switch (dimension) {
       case "status":
@@ -454,6 +457,18 @@ export function useFilterChips(
       onRemove: () => {
         const s = store.getState();
         if (s.agentRunningFilter) s.toggleAgentRunningFilter();
+      },
+    });
+  }
+  if (unreadFilter && !baseline?.unread) {
+    chips.push({
+      key: "unread",
+      icon: <Eye className={CHIP_ICON_CLASS} />,
+      label: t(($) => $.filters.section_read_state),
+      value: t(($) => $.filters.read_state_unread),
+      onRemove: () => {
+        const s = store.getState();
+        if (s.unreadFilter) s.toggleUnreadFilter();
       },
     });
   }
