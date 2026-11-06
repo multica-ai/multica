@@ -149,6 +149,7 @@
     "view_log": "檢視執行日誌",
     "log_unavailable": "執行日誌無法使用",
     "log_load_failed": "無法載入執行日誌。",
+    "log_waiting_connection": "正在等待網路連線…",
     "no_log": "此執行沒有日誌。",
     "retry": "重試",
     "skipped_group": {

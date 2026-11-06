@@ -8,7 +8,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { VirtuosoMockContext } from "react-virtuoso";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiClient, setApiInstance } from "@multica/core/api";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { autopilotKeys } from "@multica/core/autopilots/queries";
@@ -179,6 +179,7 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
+  onlineManager.setOnline(true);
   client?.clear();
   vi.unstubAllGlobals();
   setCurrentWorkspace(null, null);
@@ -495,6 +496,9 @@ describe("autopilot run log URL", () => {
       expect(screen.queryByTitle("synthetic-denied-cache.txt")).toBeNull();
       expect(screen.queryByText("1 file")).toBeNull();
       expect(client.getQueryData(key)).toEqual([message(), write]);
+      expect(screen.getByRole("status")).toHaveTextContent("Loading");
+      expect(screen.queryByText("No execution data recorded.")).toBeNull();
+      expect(screen.queryByText("0 steps")).toBeNull();
       await act(async () => release(response({ error: "private transcript detail" }, status)));
       await screen.findByText(status === 503 ? "Could not load execution log." : "Execution log unavailable");
       expect(screen.getByRole("dialog")).not.toHaveTextContent("Synthetic cached file content");
@@ -505,6 +509,14 @@ describe("autopilot run log URL", () => {
         await waitFor(() => expect(client.getQueryState(key)?.fetchStatus).toBe("fetching"));
         expect(screen.getByRole("dialog")).not.toHaveTextContent("Synthetic log");
         expect(screen.queryByTitle("synthetic-denied-cache.txt")).toBeNull();
+        const retry = screen.getByRole("button", { name: "Try again" });
+        expect(retry).toBeDisabled();
+        expect(retry).toHaveAttribute("aria-busy", "true");
+        expect(screen.getByRole("status")).toHaveTextContent("Loading");
+        const pendingReads = calls.filter((path) => path.endsWith("/messages")).length;
+        fireEvent.click(retry);
+        fireEvent.click(retry);
+        expect(calls.filter((path) => path.endsWith("/messages"))).toHaveLength(pendingReads);
         await act(async () => release(response([message(), write])));
         await screen.findByText("2 steps");
         expect(screen.getByTitle("synthetic-denied-cache.txt")).toBeInTheDocument();
@@ -517,5 +529,31 @@ describe("autopilot run log URL", () => {
       }
     },
   );
+
+  it("shows an offline terminal read as paused and resumes without exposing cached events", async () => {
+    mount();
+    const key = autopilotKeys.transcript("ws", "ap", "old-run", taskA);
+    client.setQueryDefaults(key, { gcTime: Infinity, staleTime: Infinity });
+    client.setQueryDefaults(autopilotKeys.run("ws", "ap", "old-run"), {
+      gcTime: Infinity,
+    });
+    await screen.findByText(/Synthetic log/);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: autopilotKeys.all("ws") });
+      onlineManager.setOnline(false);
+    });
+    const reads = calls.filter((path) => path.endsWith("/messages")).length;
+    act(() => navigate.push("/ws/autopilots/ap?run=old-run"));
+    await waitFor(() => expect(client.getQueryState(key)?.fetchStatus).toBe("paused"));
+    expect(screen.getByRole("status")).toHaveTextContent("Waiting for connection");
+    expect(screen.queryByText("No execution data recorded.")).toBeNull();
+    expect(screen.getByRole("dialog")).not.toHaveTextContent("Synthetic log");
+    expect(calls.filter((path) => path.endsWith("/messages"))).toHaveLength(reads);
+    act(() => onlineManager.setOnline(true));
+    await screen.findByText(/Synthetic log/);
+    expect(calls.filter((path) => path.endsWith("/messages"))).toHaveLength(reads + 1);
+  });
 
 });

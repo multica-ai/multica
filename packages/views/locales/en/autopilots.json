@@ -149,6 +149,7 @@
     "view_log": "View execution log",
     "log_unavailable": "Execution log unavailable",
     "log_load_failed": "Could not load execution log.",
+    "log_waiting_connection": "Waiting for connection…",
     "no_log": "This run has no execution log.",
     "retry": "Try again",
     "skipped_group": {

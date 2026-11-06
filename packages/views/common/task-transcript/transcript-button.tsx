@@ -32,6 +32,8 @@ interface TranscriptButtonProps {
    * cache so the dialog keeps growing as new events arrive.
    */
   items?: TimelineItem[];
+  /** Current read state for a parent-owned timeline. */
+  contentState?: React.ReactNode;
   isLive?: boolean;
   className?: string;
   title?: string;
@@ -82,6 +84,7 @@ export function TranscriptButton({
   task,
   agentName,
   items: providedItems,
+  contentState,
   isLive = false,
   className,
   title = "View transcript",
@@ -222,6 +225,7 @@ export function TranscriptButton({
             onOpenChange={setOpen}
             task={task}
             items={items}
+            contentState={contentState}
             agentName={agentName}
             isLive={isLive}
             finalFocus={returnFocus}

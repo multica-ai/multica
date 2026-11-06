@@ -58,8 +58,21 @@ function LogState({
   );
 }
 
-function LogError({ error, retry }: { error: unknown; retry: () => void }) {
+function LogError({
+  error,
+  retry,
+  pending = false,
+  paused = false,
+}: {
+  error: unknown;
+  retry: () => void | Promise<unknown>;
+  pending?: boolean;
+  paused?: boolean;
+}) {
   const { t } = useT("autopilots");
+  const { t: tCommon } = useT("common");
+  const [retrying, setRetrying] = useState(false);
+  const busy = pending || retrying;
   const unavailable =
     error instanceof ApiError && [403, 404].includes(error.status);
   return (
@@ -70,9 +83,29 @@ function LogError({ error, retry }: { error: unknown; retry: () => void }) {
           : t(($) => $.run.log_load_failed)}
       </p>
       {!unavailable && (
-        <Button variant="outline" onClick={retry}>
-          {t(($) => $.run.retry)}
-        </Button>
+        <>
+          {busy && (
+            <p role="status">
+              {paused
+                ? t(($) => $.run.log_waiting_connection)
+                : tCommon(($) => $.loading)}
+            </p>
+          )}
+          <Button
+            variant="outline"
+            onClick={() => {
+              setRetrying(true);
+              void Promise.resolve(retry()).then(
+                () => setRetrying(false),
+                () => setRetrying(false),
+              );
+            }}
+            disabled={busy}
+            aria-busy={busy}
+          >
+            {t(($) => $.run.retry)}
+          </Button>
+        </>
       )}
     </div>
   );
@@ -102,14 +135,23 @@ export function AutopilotRunLog({
   if (query.isPending) {
     return (
       <LogState close={close}>
-        <p role="status">{tCommon(($) => $.loading)}</p>
+        <p role="status">
+          {query.isPaused
+            ? t(($) => $.run.log_waiting_connection)
+            : tCommon(($) => $.loading)}
+        </p>
       </LogState>
     );
   }
   if (query.isError) {
     return (
       <LogState close={close}>
-        <LogError error={query.error} retry={() => void query.refetch()} />
+        <LogError
+          error={query.error}
+          retry={() => query.refetch({ cancelRefetch: false })}
+          pending={query.fetchStatus !== "idle"}
+          paused={query.isPaused}
+        />
       </LogState>
     );
   }
@@ -143,6 +185,7 @@ function RunTranscript({
   agentName: string;
   close: () => void;
 }) {
+  const { t } = useT("autopilots");
   const { t: tCommon } = useT("common");
   const wsId = useWorkspaceId();
   const live = run.status === "running";
@@ -188,14 +231,23 @@ function RunTranscript({
   if (!startedLive && query.isPending) {
     return (
       <LogState close={close}>
-        <p role="status">{tCommon(($) => $.loading)}</p>
+        <p role="status">
+          {query.isPaused
+            ? t(($) => $.run.log_waiting_connection)
+            : tCommon(($) => $.loading)}
+        </p>
       </LogState>
     );
   }
   if (!startedLive && query.isError) {
     return (
       <LogState close={close}>
-        <LogError error={query.error} retry={() => void query.refetch()} />
+        <LogError
+          error={query.error}
+          retry={() => query.refetch({ cancelRefetch: false })}
+          pending={query.fetchStatus !== "idle"}
+          paused={query.isPaused}
+        />
       </LogState>
     );
   }
@@ -204,6 +256,15 @@ function RunTranscript({
       task={task}
       agentName={agentName}
       items={startedLive ? undefined : items}
+      contentState={
+        !startedLive && query.fetchStatus !== "idle" ? (
+          <p role="status">
+            {query.isPaused
+              ? t(($) => $.run.log_waiting_connection)
+              : tCommon(($) => $.loading)}
+          </p>
+        ) : undefined
+      }
       isLive={live}
       renderButton={false}
       closeOnNavigate={false}

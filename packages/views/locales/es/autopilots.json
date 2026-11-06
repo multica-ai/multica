@@ -149,6 +149,7 @@
     "view_log": "Ver log de ejecución",
     "log_unavailable": "Registro de ejecución no disponible",
     "log_load_failed": "No se pudo cargar el registro de ejecución.",
+    "log_waiting_connection": "Esperando conexión…",
     "no_log": "Esta ejecución no tiene registro.",
     "retry": "Reintentar",
     "skipped_group": {
