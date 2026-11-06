@@ -143,6 +143,8 @@ multica issue comment add MUL-123 --content-file note.md --steer-active
 
 같은 프로젝트, 같은 상위 태스크 아래에 제목이 같은(대소문자와 여분의 공백은 구분하지 않음) 닫히지 않은 태스크가 이미 있으면 `issue create`는 생성을 거부하고 그 태스크를 알려 줍니다. 그래도 만들려면 `--allow-duplicate`를 붙이세요. 한 태스크를 다른 태스크의 중복으로 표시하려면 `multica issue status MUL-124 cancelled --duplicate-of MUL-123`을 실행합니다.
 
+여러 PR을 순서대로 만드는 태스크는 `issue create --title "..." --pr-auto-complete off` 또는 `issue update <id> --pr-auto-complete off`로 병합 후에도 상태를 유지할 수 있습니다. `--pr-auto-complete on`으로 워크스페이스 규칙을 복원하면 다음 PR 이벤트부터 적용됩니다. `issue pull-requests <id>`는 연결된 PR이 없어도 태스크 설정, 워크스페이스 설정, 대상 상태와 판단 결과를 표시합니다. 지원 서버는 생성 트랜잭션 안에서 설정을 저장하고, 이전 서버에는 추가 PUT을 보냅니다. 실패하면 생성된 태스크 ID와 재시도할 update 명령이 표시되므로 create를 반복하지 마세요.
+
 ### 타임라인
 
 `issue get`은 태스크의 현재 상태를 보여 줍니다. `issue timeline`은 상태, 우선순위, 담당자, 제목, 날짜 변경과 실행 결과를 시간순으로 나열하고 댓글도 섞어 보여 줍니다. "언제 in_review로 바뀌었나", "지금 상태에 얼마나 머물러 있나"를 확인할 때 씁니다.
@@ -358,7 +360,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | --- | --- | --- | --- |
 | `issue` | `list` | 태스크 목록 | `--status`, `--priority`, `--assignee`, `--project`, `--updated-since` / `--updated-until`(RFC3339 범위, 함께 지정), `--metadata`(반복 가능), `--property`(반복 가능, `"이름=값"` 또는 `"Score>=3"`, `"Due<2026-01-01"`, `"Notes~=text"` 같은 비교; `__none__`은 미설정과 일치), `--limit`, `--offset`, `--sort`(`property:<이름 또는 id>` 지원), `--full-id`, `--resolve-properties`(JSON 전용; 저장된 id와 함께 속성, 옵션, 멤버 이름을 반환), `--fields`(JSON 전용. 남길 필드를 쉼표로 구분) |
 | | `get <id>` | 태스크 하나 확인 | `--resolve-properties`(JSON 전용; 저장된 id와 함께 속성, 옵션, 멤버 이름을 반환) |
-| | `create` | 태스크 생성 | `--title`(필수), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment`(반복 가능), `--property`(반복 가능), `--allow-duplicate`(같은 제목의 닫히지 않은 태스크가 있어도 생성) |
+| | `create` | 태스크 생성 | `--title`(필수), `--description` / `--description-stdin` / `--description-file`, `--pr-auto-complete on/off`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment`(반복 가능), `--property`(반복 가능), `--allow-duplicate`(같은 제목의 닫히지 않은 태스크가 있어도 생성) |
 | | `update <id>` | 태스크 필드 업데이트 | `create`와 같은 종류의 필드에 `--position`, `--no-start`, `--duplicate-of` 추가 |
 | | `assign <id>` | 할당 또는 할당 해제 | `--to`(이름으로 멤버, 에이전트, 스쿼드 fuzzy match), `--to-id`, `--unassign`, `--no-start` |
 | | `status <id> <status>` | 상태 변경 | `--no-start`, `--duplicate-of` |

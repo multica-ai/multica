@@ -982,8 +982,14 @@ const ReactionSchema = z.object({
 // Nested attachments embedded in timeline/comment responses stay lenient on
 // purpose: a single malformed attachment must not knock the whole timeline
 // into the fallback `[]`.
+const AttachmentImageFields = {
+  width: z.number().int().positive().optional().catch(undefined),
+  height: z.number().int().positive().optional().catch(undefined),
+};
+
 const AttachmentSchema = z.object({
   id: z.string(),
+  ...AttachmentImageFields,
 }).loose();
 
 const ChatQuickActionSchema = z.object({
@@ -1049,6 +1055,9 @@ export const AttachmentResponseSchema = z.object({
   filename: z.string(),
   chat_session_id: z.string().nullable().optional(),
   chat_message_id: z.string().nullable().optional(),
+  // Image metadata is optional and degrades on its own: a malformed value
+  // means "unknown dimensions", never a lost attachment.
+  ...AttachmentImageFields,
 }).loose();
 
 export const EMPTY_ATTACHMENT: Attachment = {
@@ -1541,6 +1550,7 @@ export const ListIssuesResponseSchema = z.object({
 export const CreateIssueResponseSchema = IssueSchema.extend({
   id: z.string().min(1),
   labels: z.array(LabelSchema).optional().catch(undefined),
+  pr_auto_complete_disabled: z.boolean().optional().catch(undefined),
 }).loose();
 
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
@@ -4094,3 +4104,17 @@ export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsRespon
   installations: [],
   configured: false,
 };
+
+// Only `pinned_at` is new here; every other field keeps its pre-schema
+// leniency so one odd workspace can never empty the whole switcher.
+export const WorkspaceListItemSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  created_at: z.string(),
+  pinned_at: z.iso.datetime({ offset: true }).nullable().optional().catch(null).default(null),
+}).loose();
+
+export const WorkspacePinnedSchema = z.object({
+  pinned_at: z.iso.datetime({ offset: true }).nullable().catch(null),
+});

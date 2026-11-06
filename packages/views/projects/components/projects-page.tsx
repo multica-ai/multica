@@ -16,6 +16,7 @@ import {
   projectListOptions,
   useUpdateProject,
   useDeleteProject,
+  ProjectDeletionOfflineError,
   useProjectViewStore,
   type ProjectColumnKey,
   type ProjectListFilters,
@@ -42,6 +43,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { Spinner } from "@multica/ui/components/ui/spinner";
 import {
   Dialog,
   DialogContent,
@@ -149,6 +151,82 @@ function ProgressRing({ project }: { project: Project }) {
   );
 }
 
+function DeleteProjectsDialog({
+  rows,
+  open,
+  onOpenChange,
+  onDeleted,
+}: {
+  rows: Project[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onDeleted?: () => void;
+}) {
+  const { t } = useT("projects");
+  const deleteProject = useDeleteProject();
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      for (const project of rows) {
+        await deleteProject.mutateAsync(project.id);
+      }
+      onOpenChange(false);
+      onDeleted?.();
+    } catch (err) {
+      toast.error(
+        err instanceof ProjectDeletionOfflineError
+          ? t(($) => $.delete_dialog.offline_error)
+          : err instanceof Error ? err.message : String(err),
+      );
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!deleting) onOpenChange(nextOpen);
+      }}
+    >
+      <DialogContent className="sm:max-w-md" showCloseButton={!deleting}>
+        <DialogHeader>
+          <DialogTitle>{t(($) => $.delete_dialog.title)}</DialogTitle>
+          <DialogDescription>
+            {t(($) => $.delete_dialog.description)}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={deleting}
+            onClick={() => onOpenChange(false)}
+          >
+            {t(($) => $.delete_dialog.cancel)}
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={deleting}
+            aria-busy={deleting}
+            onClick={handleDelete}
+          >
+            {deleting && <Spinner className="size-3.5" aria-hidden="true" />}
+            {t(($) => $.delete_dialog.confirm)}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // Shared by table rows (⋯ and right-click) and cards.
 function ProjectRowActions({
   project,
@@ -165,7 +243,6 @@ function ProjectRowActions({
   const intentNavigate = useIntentNavigate();
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
-  const deleteProject = useDeleteProject();
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const togglePin = () => {
@@ -211,42 +288,11 @@ function ProjectRowActions({
         )}
       </CollectionRowMenu>
 
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t(($) => $.delete_dialog.title)}</DialogTitle>
-            <DialogDescription>
-              {t(($) => $.delete_dialog.description)}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setDeleteOpen(false)}
-            >
-              {t(($) => $.delete_dialog.cancel)}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              onClick={() => {
-                deleteProject.mutate(project.id, {
-                  onError: (err) =>
-                    toast.error(
-                      err instanceof Error ? err.message : String(err),
-                    ),
-                });
-                setDeleteOpen(false);
-              }}
-            >
-              {t(($) => $.delete_dialog.confirm)}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeleteProjectsDialog
+        rows={[project]}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+      />
     </>
   );
 }
@@ -412,7 +458,6 @@ function ProjectBatchToolbar({
 }) {
   const { t } = useT("projects");
   const createPin = useCreatePin();
-  const deleteProject = useDeleteProject();
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const anyUnpinned = rows.some((p) => !pinnedIds.has(p.id));
@@ -450,31 +495,12 @@ function ProjectBatchToolbar({
         )}
       </CollectionBatchBar>
 
-      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t(($) => $.delete_dialog.title)}</DialogTitle>
-            <DialogDescription>{t(($) => $.delete_dialog.description)}</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button type="button" variant="outline" size="sm" onClick={() => setConfirmDelete(false)}>
-              {t(($) => $.delete_dialog.cancel)}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              onClick={() => {
-                for (const p of rows) deleteProject.mutate(p.id);
-                setConfirmDelete(false);
-                onClear();
-              }}
-            >
-              {t(($) => $.delete_dialog.confirm)}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeleteProjectsDialog
+        rows={rows}
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        onDeleted={onClear}
+      />
     </>
   );
 }

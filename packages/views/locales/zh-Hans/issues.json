@@ -459,6 +459,8 @@
     "metadata_description": "智能体和集成记录的键值数据，用于衔接工作流程。",
     "section_load_failed_retry": "加载失败，点击重试",
     "not_found": "这个任务不存在或已在该工作区被删除。",
+    "load_failed": "无法加载任务。",
+    "load_retry": "重试",
     "not_found_title": "未找到该任务",
     "breadcrumb_project_unknown": "未知项目",
     "back": "返回",

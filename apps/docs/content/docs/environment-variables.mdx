@@ -284,7 +284,7 @@ The daemon periodically cleans up run directories, repository caches, session re
 | `MULTICA_GC_TTL` | `24h` | How long after an issue enters the `done` or `closed` category, or a chat session is archived, its run directories are removed |
 | `MULTICA_GC_COMPLETED_TASK_TTL` | Multica Cloud `14d`; self-hosted `0` | How long after an issue run completes its whole directory is removed, whether or not the issue is closed; `0` turns this off. Does not apply to runs on a project's local directory |
 | `MULTICA_GC_ORPHAN_TTL` | `72h` | How long a directory with no owner found must go unchanged before it is removed |
-| `MULTICA_GC_ARTIFACT_TTL` | `12h` | How long after a run completes regenerable content is removed (the directories in the next row plus the cache the daemon prepares for Codex); `0` keeps it |
+| `MULTICA_GC_ARTIFACT_TTL` | `12h` | How long after a run ends before the daemon cleans regenerable content. The patterns in the next row apply to open issues and to unarchived chats with managed work directories. The same duration applies to the daemon-managed Codex cache. `0` keeps these caches |
 | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` | Directory names treated as regenerable, comma-separated. Setting it **replaces** the default list, so include the defaults if you still want them; entries containing `/` or `\` are ignored |
 | `MULTICA_GC_REPO_TTL` | `30d` | How long a bare repository cache that is no longer referenced and has no worktrees must go without a checkout before it is removed; `0` keeps it |
 | `MULTICA_GC_REPO_MAINTENANCE_ENABLED` | `true` | Whether to run `git reflog expire` and `git gc` on a repository cache after stale agent branches are removed; `false` turns off only this step |

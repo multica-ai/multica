@@ -153,6 +153,7 @@
     "ref_default_tooltip": "Aucune branche définie — les tâches utilisent la branche par défaut du dépôt au moment voulu."
   },
   "delete_dialog": {
+    "offline_error": "Vous êtes hors ligne. Reconnectez-vous, puis réessayez la suppression.",
     "title": "Supprimer le projet",
     "description": "Le projet sera supprimé. Les tâches ne seront pas supprimées, mais elles seront détachées.",
     "confirm": "Supprimer",

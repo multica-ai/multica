@@ -168,3 +168,17 @@ it.each(['x', ''])('scans repeated list prefixes without backtracking (%j)', (su
   )
   expect(performance.now() - start).toBeLessThan(250)
 })
+
+describe('reference definitions during linkification', () => {
+  it.each([
+    '[shot]: https://cdn.example/chart.png',
+    '[shot]: <https://cdn.example/chart(v2).png> "https://title.example"',
+    '[shot]:\n  https://cdn.example/chart.png',
+    '> [shot]: https://cdn.example/chart.png',
+  ])('preserves %s while still linking bare prose URLs', (definition) => {
+    const source = `![A][shot]\n\n${definition}\n\nhttps://outside.example`
+    expect(preprocessLinks(source)).toBe(
+      `![A][shot]\n\n${definition}\n\n[https://outside.example](https://outside.example)`,
+    )
+  })
+})

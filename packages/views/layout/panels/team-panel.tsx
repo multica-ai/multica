@@ -230,22 +230,9 @@ export function TeamPanel() {
               href={p.squads()}
               icon={<Users />}
               label={t(($) => $.nav.squads)}
-              active={pathname === p.squads()}
+              active={isPathWithin(pathname, p.squads())}
               trailing={<PanelCount value={liveSquads.length} />}
             />
-            {liveSquads.map((squad) => {
-              const href = p.squadDetail(squad.id);
-              return (
-                <PanelLink
-                  key={squad.id}
-                  href={href}
-                  label={squad.name}
-                  active={isPathWithin(pathname, href)}
-                  icon={<span className="size-4" aria-hidden />}
-                  className="text-caption"
-                />
-              );
-            })}
             <PanelLink
               href={`${p.settings()}?tab=members`}
               label={t(($) => $.panels.team.members, { count: members.length })}
