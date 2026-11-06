@@ -28,7 +28,7 @@
       "token_label": "Git Token",
       "manage": "Git 凭据",
       "ownership": "这里的 Git 凭据供当前工作区使用，仅所有者和管理员可管理。Token 保存后不再显示。",
-      "not_configured": "此环境尚未配置凭据加密密钥，请联系平台管理员。",
+      "not_configured": "此环境未配置凭据加密密钥，暂不能保存 Token。请联系平台管理员。",
       "used": "已绑定 {{count}} 个仓库",
       "delete_blocked": "此凭据仍被 {{count}} 个仓库使用，请先为这些仓库更换凭据。",
       "delete_hint": "此凭据没有绑定仓库。删除后无法恢复，需要重新填写 Token。",
@@ -53,7 +53,9 @@
       "change": "更换凭据",
       "binding_hint": "后续同步使用此凭据，已有图谱不受影响。",
       "sync_hint": "同步代码时使用这里选择的认证方式。",
-      "import_hint": "导入内容供当前工作区成员及已分配的智能体查询，请确认你有权共享。"
+      "import_hint": "导入内容供当前工作区成员及已分配的智能体查询，请确认你有权共享。",
+      "manage_inline": "管理凭据",
+      "first_credential": "私有仓库需要先添加 Git 凭据。"
     },
     "document_search": "文档结构",
     "document_refs": "文档引用",

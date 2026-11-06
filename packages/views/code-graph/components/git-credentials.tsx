@@ -60,7 +60,11 @@ export function useCanManageGit() {
     ) === true
   );
 }
-export function GitCredentialManager() {
+export function GitCredentialManager({
+  compact = false,
+}: {
+  compact?: boolean;
+}) {
   const fieldId = useId();
   const { t } = useT("layout");
   const wsId = useWorkspaceId();
@@ -106,8 +110,20 @@ export function GitCredentialManager() {
         }
       }}
     >
-      <DialogTrigger render={<Button variant="outline" />}>
-        {t(($) => $.code_graph.git_auth.manage)}
+      <DialogTrigger
+        render={
+          <Button
+            type="button"
+            variant={compact ? "ghost" : "outline"}
+            size={compact ? "sm" : "default"}
+          />
+        }
+      >
+        {t(($) =>
+          compact
+            ? $.code_graph.git_auth.manage_inline
+            : $.code_graph.git_auth.manage,
+        )}
       </DialogTrigger>
       <DialogContent
         className="flex max-h-[85dvh] min-h-0 flex-col gap-0 overflow-hidden p-0 sm:max-w-xl"
@@ -449,9 +465,12 @@ export function GitAuthFields({
       </Field>
       {value.auth_mode === "token" && (
         <Field>
-          <FieldLabel htmlFor={fieldId + "-credential"}>
-            {t(($) => $.code_graph.git_auth.credential)}
-          </FieldLabel>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <FieldLabel htmlFor={fieldId + "-credential"}>
+              {t(($) => $.code_graph.git_auth.credential)}
+            </FieldLabel>
+            <GitCredentialManager compact />
+          </div>
           <Select
             value={value.credential_id ?? null}
             items={credentials}
@@ -486,6 +505,11 @@ export function GitAuthFields({
           {list.data?.configured === false && (
             <FieldDescription>
               {t(($) => $.code_graph.git_auth.not_configured)}
+            </FieldDescription>
+          )}
+          {list.data?.configured === true && list.data.items.length === 0 && (
+            <FieldDescription>
+              {t(($) => $.code_graph.git_auth.first_credential)}
             </FieldDescription>
           )}
         </Field>

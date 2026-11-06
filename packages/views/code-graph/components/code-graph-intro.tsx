@@ -8,6 +8,7 @@ import {
 } from "../../layout/feature-intro";
 import { useT } from "../../i18n";
 import { RegisterRepositoryDialog } from "./register-repository-dialog";
+import { GitCredentialManager } from "./git-credentials";
 
 export function CodeGraphIntro({
   wsId,
@@ -49,7 +50,14 @@ export function CodeGraphIntro({
         t(($) => $.code_graph.branch),
         t(($) => $.code_graph.status),
       ]}
-      action={canManage ? <RegisterRepositoryDialog wsId={wsId} /> : null}
+      action={
+        canManage ? (
+          <>
+            <RegisterRepositoryDialog wsId={wsId} />
+            <GitCredentialManager />
+          </>
+        ) : null
+      }
       footer={
         !canManage ? (
           <p className="text-caption text-muted-foreground">

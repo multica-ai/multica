@@ -28,7 +28,7 @@
       "token_label": "Git Token",
       "manage": "Git credentials",
       "ownership": "Credentials belong to this workspace. Only owners and administrators can manage them. Saved Tokens are never shown again.",
-      "not_configured": "Credential encryption is not configured. Contact the platform administrator.",
+      "not_configured": "此環境未設定憑證加密金鑰，暫時無法儲存 Token。請聯絡平台管理員。",
       "used": "Used by {{count}} repositories",
       "delete_blocked": "Used by {{count}} repositories. Change their credentials before deletion.",
       "delete_hint": "No repositories use this credential. Restore access by entering the Token again after deletion.",
@@ -53,7 +53,9 @@
       "change": "Change credential",
       "binding_hint": "Future syncs use this credential. Existing graphs are unchanged.",
       "sync_hint": "Sync uses the selected authentication.",
-      "import_hint": "Workspace members and assigned agents can query imported contents. Import only code you may share with this workspace."
+      "import_hint": "Workspace members and assigned agents can query imported contents. Import only code you may share with this workspace.",
+      "manage_inline": "管理憑證",
+      "first_credential": "私有儲存庫需要先新增 Git 憑證。"
     },
     "document_search": "Document structure",
     "document_refs": "Document references",

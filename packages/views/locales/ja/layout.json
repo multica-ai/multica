@@ -28,7 +28,7 @@
       "token_label": "Git Token",
       "manage": "Git credentials",
       "ownership": "Credentials belong to this workspace. Only owners and administrators can manage them. Saved Tokens are never shown again.",
-      "not_configured": "Credential encryption is not configured. Contact the platform administrator.",
+      "not_configured": "認証情報の暗号化キーが未設定のため、トークンを保存できません。プラットフォーム管理者に連絡してください。",
       "used": "Used by {{count}} repositories",
       "delete_blocked": "Used by {{count}} repositories. Change their credentials before deletion.",
       "delete_hint": "No repositories use this credential. Restore access by entering the Token again after deletion.",
@@ -53,7 +53,9 @@
       "change": "Change credential",
       "binding_hint": "Future syncs use this credential. Existing graphs are unchanged.",
       "sync_hint": "Sync uses the selected authentication.",
-      "import_hint": "Workspace members and assigned agents can query imported contents. Import only code you may share with this workspace."
+      "import_hint": "Workspace members and assigned agents can query imported contents. Import only code you may share with this workspace.",
+      "manage_inline": "認証情報を管理",
+      "first_credential": "非公開リポジトリには Git 認証情報の追加が必要です。"
     },
     "document_search": "ドキュメント構造",
     "document_refs": "ドキュメント参照",

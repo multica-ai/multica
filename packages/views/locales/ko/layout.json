@@ -28,7 +28,7 @@
       "token_label": "Git Token",
       "manage": "Git credentials",
       "ownership": "Credentials belong to this workspace. Only owners and administrators can manage them. Saved Tokens are never shown again.",
-      "not_configured": "Credential encryption is not configured. Contact the platform administrator.",
+      "not_configured": "이 환경에 자격 증명 암호화 키가 없어 토큰을 저장할 수 없습니다. 플랫폼 관리자에게 문의하세요.",
       "used": "Used by {{count}} repositories",
       "delete_blocked": "Used by {{count}} repositories. Change their credentials before deletion.",
       "delete_hint": "No repositories use this credential. Restore access by entering the Token again after deletion.",
@@ -53,7 +53,9 @@
       "change": "Change credential",
       "binding_hint": "Future syncs use this credential. Existing graphs are unchanged.",
       "sync_hint": "Sync uses the selected authentication.",
-      "import_hint": "Workspace members and assigned agents can query imported contents. Import only code you may share with this workspace."
+      "import_hint": "Workspace members and assigned agents can query imported contents. Import only code you may share with this workspace.",
+      "manage_inline": "자격 증명 관리",
+      "first_credential": "비공개 저장소에는 Git 자격 증명을 먼저 추가해야 합니다."
     },
     "document_search": "문서 구조",
     "document_refs": "문서 참조",

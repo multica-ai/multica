@@ -8,6 +8,14 @@ Initial verification: 2026-11-05.
 
 ### Usage-first interface follow-up
 
+First-import credential discovery was also checked against the real API/browser:
+the empty welcome page has credential management, and the registration form has
+an inline manager next to the credential selector. Closing the nested manager
+preserved the repository URL/branch and restored focus to its trigger. The local
+environment's missing encryption key remained explicit and Token saves stayed
+disabled. No encryption configuration or actual private Git credential changed.
+Typechecks, targeted lint and MDX generation were repeated for this entry fix.
+
 Repository details now lead to Configure access. The three scope cards are
 parallel on desktop and stacked on narrow screens; agent/project selection uses
 the same select-and-save editor. Query checks and build diagnostics are collapsed
