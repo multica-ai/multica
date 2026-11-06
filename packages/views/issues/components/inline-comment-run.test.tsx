@@ -15,7 +15,7 @@ const dispatchReasonCodeMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/api", () => ({ api: {
   getIssue: vi.fn(), listTaskMessages: vi.fn(), cancelTask: vi.fn(), rerunIssue: vi.fn(),
-  listTasksByIssue: vi.fn(),
+  listTasksByIssue: vi.fn(), listRuntimes: vi.fn().mockResolvedValue([]),
 }, dispatchReasonCode: dispatchReasonCodeMock }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace" }));
 vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: () => "Reviewer" }) }));
@@ -39,6 +39,7 @@ const messages: TaskMessagePayload[] = [
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.mocked(api.listRuntimes).mockResolvedValue([]);
 });
 
 function setup(initialTask: AgentTask, hasReply = false, presentation: "inline" | "header" = "inline") {
@@ -51,6 +52,58 @@ function setup(initialTask: AgentTask, hasReply = false, presentation: "inline" 
 }
 
 describe("InlineCommentRun", () => {
+  it("explains an empty OpenClaw run until final output arrives, preserving elapsed time", async () => {
+    vi.mocked(api.listRuntimes).mockResolvedValue([{ id: "runtime", provider: "openclaw" } as Awaited<ReturnType<typeof api.listRuntimes>>[number]]);
+    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+    const { client, rerender } = setup(task({ started_at: new Date(Date.now() - 65000).toISOString() }));
+    const copy = "OpenClaw does not provide live logs. The reply appears when the run finishes.";
+    await screen.findByText(copy);
+    expect(screen.getByText(/1m/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    expect(screen.getAllByText(copy)).toHaveLength(1);
+    act(() => client.setQueryData(chatKeys.taskMessages(id), [{ task_id: id, seq: 1, type: "text", content: "Final reply" }]));
+    await screen.findAllByText("Final reply");
+    expect(screen.queryByText(copy)).not.toBeInTheDocument();
+    rerender(task({ status: "completed" }));
+    expect(screen.queryByText(copy)).not.toBeInTheDocument();
+  });
+
+  it("uses the task runtime id rather than another OpenClaw runtime", async () => {
+    vi.mocked(api.listRuntimes).mockResolvedValue([{ id: "other-runtime", provider: "openclaw" } as Awaited<ReturnType<typeof api.listRuntimes>>[number]]);
+    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+    setup(task());
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    await screen.findByText("No activity recorded yet.");
+    expect(screen.queryByText(/OpenClaw does not provide/)).not.toBeInTheDocument();
+  });
+
+  it.each(["loading", "error"])("preserves the %s state for OpenClaw", async (state) => {
+    vi.mocked(api.listRuntimes).mockResolvedValue([{ id: "runtime", provider: "openclaw" } as Awaited<ReturnType<typeof api.listRuntimes>>[number]]);
+    vi.mocked(api.listTaskMessages).mockImplementation(() => state === "loading" ? new Promise(() => {}) : Promise.reject(new Error("offline")));
+    setup(task());
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    if (state === "loading") await screen.findByText("Loading activity...");
+    else await screen.findByRole("alert");
+    expect(screen.queryByText(/OpenClaw does not provide/)).not.toBeInTheDocument();
+  });
+
+  it.each(["claude", "unknown", undefined])("keeps the fallback for provider %s", async (provider) => {
+    vi.mocked(api.listRuntimes).mockResolvedValue(provider ? [{ id: "runtime", provider } as Awaited<ReturnType<typeof api.listRuntimes>>[number]] : []);
+    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+    setup(task());
+    await waitFor(() => expect(api.listTaskMessages).toHaveBeenCalled());
+    expect(screen.queryByText(/OpenClaw does not provide/)).not.toBeInTheDocument();
+  });
+
+  it.each(["queued", "dispatched", "completed", "failed", "cancelled"] as const)("does not explain OpenClaw logs for %s tasks", async (status) => {
+    vi.mocked(api.listRuntimes).mockResolvedValue([{ id: "runtime", provider: "openclaw" } as Awaited<ReturnType<typeof api.listRuntimes>>[number]]);
+    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+    setup(task({ status }));
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    await screen.findByText("No activity recorded yet.");
+    expect(screen.queryByText(/OpenClaw does not provide/)).not.toBeInTheDocument();
+  });
+
   it("places a delivered steer between the steps it arrived between", async () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue([
       { task_id: id, issue_id: "issue", seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat login.tsx" }, created_at: "2026-09-07T00:00:05Z" },

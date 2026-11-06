@@ -325,6 +325,33 @@ describe("AgentTranscriptDialog", () => {
     expect(screen.queryByText("A finished", { selector: "pre" })).not.toBeInTheDocument();
   });
 
+  it("replaces the OpenClaw explanation with incoming output and forgets the previous runtime", async () => {
+    vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor("openclaw")]);
+    const view = (task: AgentTask, items: TimelineItem[] = []) => <AgentTranscriptDialog open onOpenChange={vi.fn()} task={task} items={items} agentName="Agent" isLive />;
+    const rendered = renderWithI18n(view(liveTask));
+    const copy = "OpenClaw does not provide live logs. The reply appears when the run finishes.";
+    await screen.findByText(copy);
+    rendered.rerender(view(liveTask, [{ seq: 1, type: "text", content: "Final reply" }]));
+    expect(screen.queryByText(copy)).not.toBeInTheDocument();
+    expect(screen.getByText("Final reply")).toBeInTheDocument();
+    rendered.rerender(view({ ...liveTask, runtime_id: "missing" }));
+    expect(screen.queryByText(copy)).not.toBeInTheDocument();
+    expect(screen.getByText("Waiting for events...")).toBeInTheDocument();
+  });
+
+  it.each(["queued", "dispatched", "completed", "failed", "cancelled"] as const)("does not show the OpenClaw explanation for %s", async (status) => {
+    vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor("openclaw")]);
+    renderDialog([], { task: { ...liveTask, status }, isLive: status === "queued" || status === "dispatched" });
+    await act(async () => {});
+    expect(screen.queryByText(/OpenClaw does not provide/)).not.toBeInTheDocument();
+  });
+
+  it.each(["en", "zh-Hans", "ja", "ko", "fr"] as const)("localizes the OpenClaw explanation in %s", async (locale) => {
+    vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor("openclaw")]);
+    renderDialog([], { task: liveTask, isLive: true, locale });
+    expect(await screen.findByText(/^OpenClaw/)).toBeInTheDocument();
+  });
+
   it("waits for live events from Antigravity", async () => {
     vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor("antigravity")]);
 
