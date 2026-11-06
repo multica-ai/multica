@@ -59,8 +59,6 @@
 @keyframes multica-arm-fade { from { opacity: 1; } to { opacity: 0.16; } }
 @keyframes multica-star-in { from { transform: scale(0) rotate(-135deg); } }
 @keyframes multica-star-enter { from { transform: rotate(-45deg) scale(0.6); opacity: 0; } }
-@keyframes multica-fade-in { from { opacity: 0; } }
-@keyframes multica-fade-out { to { opacity: 0; } }
 @keyframes multica-hop { 40% { transform: translateY(-14%); } }
 
 .multica-pop {
@@ -96,8 +94,6 @@
   transform-origin: 50% 50%;
   animation: multica-star-enter 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-.multica-fade-in { animation: multica-fade-in 0.24s ease both; }
-.multica-fade-out { animation: multica-fade-out 0.24s ease both; }
 /* Website nav only — the product never animates the wordmark on hover. */
 .multica-hop-on-hover > g { transform-box: fill-box; transform-origin: 50% 100%; }
 .multica-hop-on-hover:hover > g {
@@ -393,8 +389,6 @@ html[data-sidebar-resizing="true"] {
   .multica-arm-fade,
   .multica-star-in,
   .multica-star-enter,
-  .multica-fade-in,
-  .multica-fade-out,
   .multica-hop-on-hover:hover > g,
   .animate-onboarding-enter,
   .animate-chat-impulse,
