@@ -25,6 +25,20 @@ export function classifyScheduleRejection(err: ApiError): ScheduleRejection {
   };
 }
 
+export function isCronPreviewUnsupported(err: unknown): err is ApiError {
+  if (!(err instanceof ApiError)) return false;
+  if (err.status === 404 || err.status === 405) return true;
+  if (err.status !== 400) return false;
+
+  const body = typeof err.body === "object" && err.body !== null ? err.body : {};
+  const code = (body as { code?: unknown }).code;
+  const bodyError = (body as { error?: unknown }).error;
+  const signals = [err.message, code, bodyError].filter(
+    (value): value is string => typeof value === "string",
+  );
+  return signals.some((value) => /invalid[_\s-]+autopilot[_\s-]+id/i.test(value));
+}
+
 /**
  * Ask the server whether it accepts this schedule, and return its rejection
  * (or null when it accepts).
@@ -48,6 +62,7 @@ export async function findScheduleRejection(
     await queryClient.fetchQuery(cronPreviewOptions(wsId, toCron(config), config.timezone));
     return null;
   } catch (err) {
+    if (isCronPreviewUnsupported(err)) return null;
     if (!(err instanceof ApiError) || err.status !== 400) return null;
     return classifyScheduleRejection(err);
   }
