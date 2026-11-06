@@ -324,7 +324,9 @@ LIMIT @page_limit;
 -- head_sha stamps the commit under review into the task's context JSONB so the
 -- reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run
 -- against an OLD head apart from a fresh request against a NEW head (TEN-356).
--- Empty/absent head_sha leaves context NULL unless fresh_rerun is requested.
+-- Empty/absent head_sha leaves context NULL unless fresh_rerun or retry_route
+-- is requested. retry_route snapshots the exact comment revision and route
+-- used by Codex overload recovery; missing evidence fails closed.
 -- fresh_rerun disables source session/workdir reuse without losing rerun lineage.
 -- Issue-linked tasks never hit quick-create context
 -- parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
@@ -359,7 +361,20 @@ SELECT
         WHEN COALESCE(sqlc.narg('fresh_rerun')::boolean, FALSE)
         THEN '{"fresh_rerun":true}'::jsonb
         ELSE '{}'::jsonb
-    END, '{}'::jsonb),
+    END || CASE WHEN COALESCE(sqlc.narg('retry_route')::text, '') <> ''
+        THEN jsonb_build_object('codex_retry_source', COALESCE((
+            SELECT jsonb_build_object(
+                'route', sqlc.narg('retry_route')::text,
+                'comment_id', c.id, 'revision', c.revision,
+                'parent_id', c.parent_id, 'parent_revision', parent.revision,
+                'root_id', root.id, 'root_revision', root.revision)
+            FROM comment c
+            LEFT JOIN comment parent ON parent.id = c.parent_id
+            LEFT JOIN comment root ON root.id = comment_thread_root_id(c.id)
+            WHERE c.id = sqlc.narg(trigger_comment_id)::uuid
+              AND c.issue_id = $3 AND c.deleted_at IS NULL
+        ), jsonb_build_object('route', sqlc.narg('retry_route')::text)))
+        ELSE '{}'::jsonb END, '{}'::jsonb),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
     sqlc.narg(runtime_mcp_overlay),
@@ -402,7 +417,8 @@ SELECT
     sqlc.narg(squad_id),
     jsonb_strip_nulls(jsonb_build_object(
         'head_sha', NULLIF(COALESCE(sqlc.narg('head_sha')::text, ''), ''),
-        'channel_issue_media_pending', TRUE
+        'channel_issue_media_pending', TRUE,
+        'codex_retry_source', jsonb_build_object('route', 'issue_assignee')
     )),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
@@ -547,8 +563,24 @@ WHERE p.id = $1
   AND (p.failure_reason IS DISTINCT FROM 'agent_error.codex_server_overloaded' OR (
     p.context->>'codex_retry_model' IS NOT NULL
     AND (p.context->>'codex_retry_deadline')::timestamptz > COALESCE(sqlc.narg(fire_at)::timestamptz, now())
-    AND EXISTS (SELECT 1 FROM agent a WHERE a.id = p.agent_id AND a.runtime_id = p.runtime_id AND a.model = p.context->>'codex_retry_model')
-    AND (p.issue_id IS NULL OR EXISTS (SELECT 1 FROM issue i WHERE i.id = p.issue_id AND i.status IN ('todo', 'in_progress') AND i.assignee_type = 'agent' AND i.assignee_id = p.agent_id))
+    AND EXISTS (SELECT 1 FROM agent a WHERE a.id = p.agent_id AND a.archived_at IS NULL AND a.runtime_id = p.runtime_id AND a.model = p.context->>'codex_retry_model')
+    AND (p.issue_id IS NULL OR (
+        EXISTS (SELECT 1 FROM issue i WHERE i.id = p.issue_id AND i.status IN ('todo', 'in_progress'))
+        AND (p.trigger_comment_id IS NULL OR EXISTS (SELECT 1 FROM comment c
+            WHERE c.id = p.trigger_comment_id AND c.issue_id = p.issue_id AND c.deleted_at IS NULL
+              AND c.id::text = p.context #>> '{codex_retry_source,comment_id}'
+              AND c.revision::text = p.context #>> '{codex_retry_source,revision}'))
+        AND (
+            (p.context #>> '{codex_retry_source,route}' = 'issue_assignee'
+             AND EXISTS (SELECT 1 FROM issue i WHERE i.id = p.issue_id AND (
+                 (i.assignee_type = 'agent' AND i.assignee_id = p.agent_id)
+                 OR (i.assignee_type = 'squad' AND i.assignee_id = p.squad_id
+                     AND EXISTS (SELECT 1 FROM squad s
+                         WHERE s.id = i.assignee_id AND s.leader_id = p.agent_id AND s.archived_at IS NULL)))))
+            OR (p.context #>> '{codex_retry_source,route}' IN ('mention_agent', 'mention_squad_leader', 'thread_parent', 'conversation', 'conversation_continuation')
+                AND p.trigger_comment_id IS NOT NULL)
+        )
+    ))
   ))
   AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
 ON CONFLICT DO NOTHING
@@ -1798,6 +1830,19 @@ SET coalesced_comment_ids = (
         WHERE e IS NOT NULL AND e <> @new_trigger_comment_id::uuid
     ),
     trigger_comment_id = @new_trigger_comment_id::uuid,
+    context = jsonb_set(COALESCE(context, '{}'::jsonb), '{codex_retry_source}',
+        COALESCE((
+            SELECT jsonb_build_object(
+                'route', sqlc.narg('retry_route')::text,
+                'comment_id', c.id, 'revision', c.revision,
+                'parent_id', c.parent_id, 'parent_revision', parent.revision,
+                'root_id', root.id, 'root_revision', root.revision)
+            FROM comment c
+            LEFT JOIN comment parent ON parent.id = c.parent_id
+            LEFT JOIN comment root ON root.id = comment_thread_root_id(c.id)
+            WHERE c.id = @new_trigger_comment_id::uuid
+              AND c.issue_id = @issue_id AND c.deleted_at IS NULL
+        ), jsonb_build_object('route', 'unknown')), true),
     trigger_summary = COALESCE(sqlc.narg('new_trigger_summary'), trigger_summary),
     -- Re-attribution is ATOMIC (MUL-4302): folding a newly-arrived comment moves the
     -- WHOLE attribution snapshot to that comment's human — person columns, source

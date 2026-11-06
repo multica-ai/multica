@@ -18,7 +18,7 @@ func TestCodexOverloadTaskRetryEndToEnd(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
 	q := db.New(pool)
-	_, _, agentID, issueID := seedAttributionFixture(t, pool)
+	_, userID, agentID, issueID := seedAttributionFixture(t, pool)
 	if _, err := pool.Exec(ctx, `UPDATE issue SET status='in_progress' WHERE id=$1`, issueID); err != nil {
 		t.Fatal(err)
 	}
@@ -26,15 +26,22 @@ func TestCodexOverloadTaskRetryEndToEnd(t *testing.T) {
 	if err := pool.QueryRow(ctx, `UPDATE agent SET model='gpt-6-sol' WHERE id=$1 RETURNING runtime_id::text`, agentID).Scan(&runtimeID); err != nil {
 		t.Fatal(err)
 	}
-	var parentID pgtype.UUID
-	if err := pool.QueryRow(ctx, `INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts, session_id, work_dir)
-		VALUES ($1,$2,$3,'running',0,1,2,'codex-session','/tmp/codex-work') RETURNING id`, agentID, runtimeID, issueID).Scan(&parentID); err != nil {
+	svc := NewTaskService(q, pool, nil, events.New())
+	issue, err := q.GetIssue(ctx, util.MustParseUUID(issueID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := svc.EnqueueTaskForIssue(ctx, issue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentID := parent.ID
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET status='running',attempt=1,max_attempts=2,session_id='codex-session',work_dir='/tmp/codex-work' WHERE id=$1`, parentID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE parent_task_id=$1 OR id=$1`, parentID)
 	})
-	svc := NewTaskService(q, pool, nil, events.New())
 	failed, transitioned, err := svc.FailTaskWithTransition(ctx, parentID, "busy", "codex-session", "/tmp/codex-work", "", "agent_error.codex_server_overloaded", false, "", "", "gpt-6-sol")
 	if err != nil || !transitioned || failed == nil || failed.Status != "failed" {
 		t.Fatalf("fail parent: task=%v transitioned=%v err=%v", failed, transitioned, err)
@@ -61,6 +68,15 @@ func TestCodexOverloadTaskRetryEndToEnd(t *testing.T) {
 	}
 	if codex, problem := svc.CodexRetryClaimProblem(ctx, child, currentAgent); !codex || problem != "" {
 		t.Fatalf("valid child claim: codex=%v problem=%q", codex, problem)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE issue SET assignee_type='member',assignee_id=$2 WHERE id=$1`, issueID, userID); err != nil {
+		t.Fatal(err)
+	}
+	if codex, problem := svc.CodexRetryClaimProblem(ctx, child, currentAgent); !codex || problem == "" {
+		t.Fatalf("assignment changed after enqueue: codex=%v problem=%q", codex, problem)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE issue SET assignee_type='agent',assignee_id=$2 WHERE id=$1`, issueID, agentID); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE agent SET model='gpt-6-other' WHERE id=$1`, agentID); err != nil {
 		t.Fatal(err)
