@@ -45,7 +45,7 @@ export function LandingHeader({
             <MulticaWordmark
               hop
               className={cn(
-                "h-[22px] sm:h-6",
+                "h-6 sm:h-[26px]",
                 variant === "dark" ? "text-white" : "text-[#0a0d12]",
               )}
             />

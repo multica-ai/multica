@@ -1,98 +1,85 @@
 import { cn } from "../../lib/utils";
-import { ICON_ARCH, ICON_STROKE, archPath } from "../../lib/multica-brand";
+import { STAR_GRAPHIC_STROKE, starPath } from "../../lib/multica-brand";
 
-const ARCH_STAGGER_S = 0.11;
-const BLEED_HEIGHT = 140;
-const M_WIDTH = 2 * ICON_ARCH - ICON_STROKE;
+const STAR_STAGGER_S = 0.11;
+/** Space between stars in a row, as a share of one star's width. */
+const ROW_GAP = 0.4;
+const THIN_STAR = starPath(STAR_GRAPHIC_STROKE);
 
-interface MulticaArcadeProps extends React.ComponentProps<"svg"> {
-  /** Number of arches; each one stands for a teammate. */
+interface MulticaStarRowProps extends React.ComponentProps<"svg"> {
+  /** Number of stars; each one stands for a teammate. */
   count: number;
-  /** Leg length in arch units (an arch is 68 wide). */
-  legs?: number;
   /**
-   * `center`: arches rise from the middle outwards (backgrounds).
-   * `join`: arches rise left to right, and the last one rises after a beat
-   * (someone just joined). Omit for a static row.
+   * `center`: stars turn into place from the middle outwards (backgrounds).
+   * `join`: left to right, and the last one arrives after a beat (someone just
+   * joined). Omit for a static row.
    */
-  rise?: "center" | "join";
-  /** Seconds before the first arch moves. */
+  enter?: "center" | "join";
+  /** Seconds before the first star moves. */
   delay?: number;
-  /** Classes for the last arch, e.g. to highlight the newest teammate. */
+  /** Classes for the last star, e.g. to light up the newest teammate. */
   lastClassName?: string;
 }
 
 /**
- * A row of arches built from the icon's module — the graphic extension of the
- * m. Decorative and low-contrast; fill follows `currentColor`.
+ * A row of thin stars, one per teammate — the star-field graphic from the
+ * brand guidelines. Decorative and low-contrast; fill follows `currentColor`.
  */
-export function MulticaArcade({
+export function MulticaStarRow({
   count,
-  legs = 76,
-  rise,
+  enter,
   delay = 0,
   lastClassName,
   className,
   ...props
-}: MulticaArcadeProps) {
-  const step = ICON_ARCH - ICON_STROKE;
-  const width = step * (count - 1) + ICON_ARCH;
+}: MulticaStarRowProps) {
+  const step = 100 * (1 + ROW_GAP);
+  const width = step * (count - 1) + 100;
   const mid = (count - 1) / 2;
   const delayOf = (i: number) => {
-    if (rise === "center") return delay + Math.abs(i - mid) * ARCH_STAGGER_S;
-    if (i === count - 1) return delay + i * ARCH_STAGGER_S + 0.3;
-    return delay + i * ARCH_STAGGER_S;
+    if (enter === "center") return delay + Math.abs(i - mid) * STAR_STAGGER_S;
+    if (i === count - 1) return delay + i * STAR_STAGGER_S + 0.3;
+    return delay + i * STAR_STAGGER_S;
   };
   return (
     <svg
-      viewBox={`0 0 ${width} ${legs}`}
+      viewBox={`0 0 ${width} 100`}
       fill="currentColor"
       aria-hidden="true"
       className={cn("block", className)}
       {...props}
     >
       {Array.from({ length: count }, (_, i) => (
-        <path
-          key={i}
-          d={archPath(step * i, 0, legs, ICON_ARCH, ICON_STROKE)}
-          className={cn(rise && "multica-arch-rise", i === count - 1 && lastClassName)}
-          style={rise ? { animationDelay: `${delayOf(i)}s` } : undefined}
-        />
+        <g key={i} transform={`translate(${step * i} 0)`}>
+          <path
+            d={THIN_STAR}
+            className={cn(enter && "multica-star-enter", i === count - 1 && lastClassName)}
+            style={enter ? { animationDelay: `${delayOf(i)}s` } : undefined}
+          />
+        </g>
       ))}
     </svg>
   );
 }
 
 interface MulticaBleedMarkProps extends React.ComponentProps<"svg"> {
-  /** Rise into place once, after this many seconds. Omit for static. */
-  riseDelay?: number;
+  /** Turn into place once, after this many seconds. Omit for static. */
+  enterDelay?: number;
 }
 
 /**
- * A large m meant to bleed off the bottom and right of its container — the
- * icon's "too big to fit" idea as a surface graphic. Position it with
- * `className`; fill follows `currentColor`.
+ * A large thin star meant to bleed off the edges of its container — the big
+ * graphic from the brand guidelines. Position it with `className`; fill
+ * follows `currentColor`.
  */
-export function MulticaBleedMark({ riseDelay, className, ...props }: MulticaBleedMarkProps) {
+export function MulticaBleedMark({ enterDelay, className, ...props }: MulticaBleedMarkProps) {
   return (
-    <svg
-      viewBox={`0 0 ${M_WIDTH} ${BLEED_HEIGHT}`}
-      fill="currentColor"
-      aria-hidden="true"
-      className={cn("block", className)}
-      {...props}
-    >
-      <g
-        className={riseDelay != null ? "multica-arch-rise" : undefined}
-        style={riseDelay != null ? { animationDelay: `${riseDelay}s` } : undefined}
-      >
-        <path
-          d={
-            archPath(0, 0, BLEED_HEIGHT, ICON_ARCH, ICON_STROKE) +
-            archPath(ICON_ARCH - ICON_STROKE, 0, BLEED_HEIGHT, ICON_ARCH, ICON_STROKE)
-          }
-        />
-      </g>
+    <svg viewBox="0 0 100 100" fill="currentColor" aria-hidden="true" className={cn("block", className)} {...props}>
+      <path
+        d={THIN_STAR}
+        className={enterDelay != null ? "multica-star-enter" : undefined}
+        style={enterDelay != null ? { animationDelay: `${enterDelay}s` } : undefined}
+      />
     </svg>
   );
 }
