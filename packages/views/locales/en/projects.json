@@ -153,6 +153,7 @@
     "ref_default_tooltip": "No branch set — tasks use whatever the repository's default branch is at the time."
   },
   "delete_dialog": {
+    "offline_error": "You're offline. Reconnect and try deleting again.",
     "title": "Delete project",
     "description": "This will delete the project. Issues will not be deleted but will be unlinked.",
     "confirm": "Delete",

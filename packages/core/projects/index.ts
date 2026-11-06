@@ -1,6 +1,6 @@
 export { canDeleteProject } from "./deletion-permissions";
 export { projectKeys, projectListOptions, projectDetailOptions } from "./queries";
-export { useCreateProject, useUpdateProject, useDeleteProject } from "./mutations";
+export { useCreateProject, useUpdateProject, useDeleteProject, ProjectDeletionOfflineError } from "./mutations";
 export { useProjectDraftStore } from "./draft-store";
 export {
   useProjectViewStore,

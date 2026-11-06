@@ -271,5 +271,13 @@
     "toast_failed": "无法标记为重复",
     "error_target_is_duplicate": "{{identifier}} 本身是重复任务，请选择它的原始任务",
     "error_has_duplicates": "已有任务被标记为此任务的重复，请先解除这些标记"
+  },
+  "copy_parent_fields": {
+    "trigger": "复制父任务字段",
+    "title": "复制父任务字段",
+    "description": "从 {{identifier}} 复制所选字段，覆盖当前值；后续不联动。",
+    "apply": "复制所选 {{count}} 项",
+    "no_labels": "无标签",
+    "manual_only": "标签、开始日期和自定义属性仅用于手动创建。"
   }
 }
