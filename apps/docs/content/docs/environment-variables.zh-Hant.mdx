@@ -271,7 +271,7 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 | `MULTICA_GC_TTL` | `24h` | 任務進入 `done` 或 `closed` 分類、或聊天會話歸檔後，再過多久刪除對應執行目錄 |
 | `MULTICA_GC_COMPLETED_TASK_TTL` | Multica Cloud `14d`；自託管 `0` | 任務執行完成多久後刪除整個目錄，不論任務是否關閉；`0` 表示關閉。不作用於專案本地目錄上的執行 |
 | `MULTICA_GC_ORPHAN_TTL` | `72h` | 找不到歸屬的目錄多久沒有改動後刪除 |
-| `MULTICA_GC_ARTIFACT_TTL` | `12h` | 從執行結束到守護程序清理可重新生成內容的時間。使用受管理工作目錄的未歸檔聊天適用下一行的目錄名稱規則。守護程序管理的 Codex 快取也適用相同時長。設為 `0` 可保留這些快取 |
+| `MULTICA_GC_ARTIFACT_TTL` | `12h` | 從執行結束到守護程序清理可重新生成內容的時間。下一行的目錄名稱規則適用於未關閉的任務，以及使用受管理工作目錄的未歸檔聊天。守護程序管理的 Codex 快取也適用相同時長。設為 `0` 可保留這些快取 |
 | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` | 按目錄名匹配的可再生成內容，逗號分隔。設定後**替換**預設列表，要保留預設項就一併寫上；含 `/` 或 `\` 的項會被忽略 |
 | `MULTICA_GC_REPO_TTL` | `30d` | 不再被引用、也沒有 worktree 的裸倉庫快取，多久沒有檢出後刪除；`0` 表示不刪 |
 | `MULTICA_GC_REPO_MAINTENANCE_ENABLED` | `true` | 刪掉過期的 AI 代理分支後，是否對倉庫快取執行 `git reflog expire` 和 `git gc`；設為 `false` 只關掉這一步 |

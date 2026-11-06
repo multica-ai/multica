@@ -1243,8 +1243,7 @@ func TestShouldCleanTaskDir_CompletedTaskTTLPreservesActiveEnv(t *testing.T) {
 		Kind: execenv.GCKindIssue, IssueID: issueID, WorkspaceID: "ws1",
 		CompletedAt: time.Now().Add(-2 * time.Hour),
 	})
-	d.markActiveEnvRoot(taskDir)
-	defer d.unmarkActiveEnvRoot(taskDir)
+	defer d.markActiveEnvRoot(taskDir)()
 
 	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
 		t.Fatalf("expected active env to remain despite completed-task TTL, got %d", action)
@@ -1334,8 +1333,7 @@ func TestShouldCleanTaskDir_ActiveEnvRootSkipsArtifactCleanup(t *testing.T) {
 		CompletedAt: time.Now().Add(-24 * time.Hour),
 	})
 
-	d.markActiveEnvRoot(taskDir)
-	defer d.unmarkActiveEnvRoot(taskDir)
+	defer d.markActiveEnvRoot(taskDir)()
 
 	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip while task is active, got %d", action)
@@ -1367,8 +1365,7 @@ func TestShouldCleanTaskDir_ActiveEnvRootSkipsFullCleanup(t *testing.T) {
 		CompletedAt: time.Now().Add(-30 * 24 * time.Hour),
 	})
 
-	d.markActiveEnvRoot(taskDir)
-	defer d.unmarkActiveEnvRoot(taskDir)
+	defer d.markActiveEnvRoot(taskDir)()
 
 	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip on active env root with done+stale issue, got %d", action)
@@ -1393,8 +1390,7 @@ func TestShouldCleanTaskDir_ActiveEnvRootSkipsOrphan404(t *testing.T) {
 		CompletedAt: time.Now(),
 	})
 
-	d.markActiveEnvRoot(taskDir)
-	defer d.unmarkActiveEnvRoot(taskDir)
+	defer d.markActiveEnvRoot(taskDir)()
 
 	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip on active env root with 404 issue, got %d", action)
@@ -1408,8 +1404,7 @@ func TestShouldCleanTaskDir_ActiveEnvRootSkipsNoMetaOrphan(t *testing.T) {
 	d.cfg.GCOrphanTTL = 0
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "active-no-meta", nil)
 
-	d.markActiveEnvRoot(taskDir)
-	defer d.unmarkActiveEnvRoot(taskDir)
+	defer d.markActiveEnvRoot(taskDir)()
 
 	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip on active env root with no-meta orphan, got %d", action)
@@ -1712,16 +1707,16 @@ func TestActiveEnvRootRefcount(t *testing.T) {
 	if d.isActiveEnvRoot(root) {
 		t.Fatal("expected inactive before mark")
 	}
-	d.markActiveEnvRoot(root)
-	d.markActiveEnvRoot(root) // second mark from reuse path
+	releaseFirst := d.markActiveEnvRoot(root)
+	releaseSecond := d.markActiveEnvRoot(root) // second mark from reuse path
 	if !d.isActiveEnvRoot(root) {
 		t.Fatal("expected active after mark")
 	}
-	d.unmarkActiveEnvRoot(root)
+	releaseFirst()
 	if !d.isActiveEnvRoot(root) {
 		t.Fatal("expected still active after one unmark")
 	}
-	d.unmarkActiveEnvRoot(root)
+	releaseSecond()
 	if d.isActiveEnvRoot(root) {
 		t.Fatal("expected inactive after both unmarks")
 	}
@@ -1733,11 +1728,11 @@ func TestReserveEnvRootForGCIsExclusive(t *testing.T) {
 	d := newGCTestDaemon(t, http.NewServeMux())
 	root := "/tmp/fake/gc-reservation"
 
-	d.markActiveEnvRoot(root)
+	releaseActive := d.markActiveEnvRoot(root)
 	if _, ok := d.reserveEnvRootForGC(root); ok {
 		t.Fatal("GC reservation must fail while a task is active")
 	}
-	d.unmarkActiveEnvRoot(root)
+	releaseActive()
 
 	release, ok := d.reserveEnvRootForGC(root)
 	if !ok {

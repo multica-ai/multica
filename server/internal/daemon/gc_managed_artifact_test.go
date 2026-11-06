@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -96,6 +98,133 @@ func TestGC_IdleActiveChatReclaimsArtifacts(t *testing.T) {
 	if got := stats.byPattern[managedArtifactPatternPrefix+sandboxBinRel]; got != 1 {
 		t.Fatalf("managed pattern count = %d, want 1", got)
 	}
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected no second sweep after removing the caches, got %v", action)
+	}
+}
+
+func TestGC_IdleChatSweepsOncePerCompletionAndPatternSet(t *testing.T) {
+	t.Parallel()
+	chatID := "aaaaaaaa-0000-0000-0000-000000000008"
+	d := newGCTestDaemon(t, chatGCMux(chatID, "active"))
+	meta := execenv.GCMeta{
+		Kind: execenv.GCKindChat, ChatSessionID: chatID, WorkspaceID: "ws",
+		CompletedAt: time.Now().Add(-24 * time.Hour),
+	}
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "idle-chat", &meta)
+	ctx := context.Background()
+
+	// A successful sweep with no matches must also be remembered across restarts.
+	d.gcWorkspace(ctx, filepath.Dir(taskDir), &gcStats{})
+	restarted := New(d.cfg, d.logger)
+	restarted.client = d.client
+	writeFile(t, filepath.Join(taskDir, chatCacheFile), 32)
+	writeFile(t, filepath.Join(taskDir, sandboxBinRel, "codex"), 32)
+	if action := restarted.shouldCleanTaskDir(ctx, taskDir); action != gcActionCleanManagedArtifacts {
+		t.Fatalf("expected only exact-cache cleanup for an already swept run, got %v", action)
+	}
+	restarted.gcWorkspace(ctx, filepath.Dir(taskDir), &gcStats{})
+	assertKept(t, taskDir, chatCacheFile)
+	assertGone(t, taskDir, sandboxBinRel)
+
+	// Equivalent pattern configurations must not cause another sweep.
+	restarted.cfg.GCArtifactPatterns = []string{".turbo", ".next", "node_modules", ".next"}
+	if action := restarted.shouldCleanTaskDir(ctx, taskDir); action != gcActionSkip {
+		t.Fatalf("expected no cleanup for an already swept run, got %v", action)
+	}
+	restarted.gcWorkspace(ctx, filepath.Dir(taskDir), &gcStats{})
+	assertKept(t, taskDir, chatCacheFile)
+
+	// A new effective pattern must be considered for this same completed run.
+	restarted.cfg.GCArtifactPatterns = append(restarted.cfg.GCArtifactPatterns, ".cache")
+	writeFile(t, filepath.Join(taskDir, "workdir/repo/.cache/data"), 32)
+	restarted.gcWorkspace(ctx, filepath.Dir(taskDir), &gcStats{})
+	assertGone(t, taskDir, "workdir/repo/.cache")
+	assertGone(t, taskDir, "workdir/repo/node_modules")
+
+	// A later completed run can create fresh artifacts under the same workdir.
+	meta.CompletedAt = meta.CompletedAt.Add(time.Hour)
+	createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "idle-chat", &meta)
+	writeFile(t, filepath.Join(taskDir, chatCacheFile), 32)
+	restarted.gcWorkspace(ctx, filepath.Dir(taskDir), &gcStats{})
+	assertGone(t, taskDir, "workdir/repo/node_modules")
+}
+
+func TestGC_IdleChatSkipsChangedCompletion(t *testing.T) {
+	t.Parallel()
+	chatID := "aaaaaaaa-0000-0000-0000-000000000009"
+	d := newGCTestDaemon(t, chatGCMux(chatID, "active"))
+	meta := execenv.GCMeta{
+		Kind: execenv.GCKindChat, ChatSessionID: chatID, WorkspaceID: "ws",
+		CompletedAt: time.Now().Add(-24 * time.Hour),
+	}
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "resumed-chat", &meta)
+	writeFile(t, filepath.Join(taskDir, chatCacheFile), 32)
+	ctx := context.Background()
+	action, checked := d.taskDirGCDecision(ctx, taskDir)
+	if action != gcActionCleanChatArtifacts {
+		t.Fatalf("expected initial completion to be eligible, got %v", action)
+	}
+
+	// Even if the new completion would otherwise be eligible, it was not
+	// the completion associated with the chat status request.
+	meta.CompletedAt = meta.CompletedAt.Add(time.Hour)
+	createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "resumed-chat", &meta)
+	d.applyGCActionWithChatMeta(ctx, taskDir, action, &gcStats{}, checked)
+	assertKept(t, taskDir, chatCacheFile)
+	assertGone(t, taskDir, chatArtifactSweepFile)
+	d.gcWorkspace(ctx, filepath.Dir(taskDir), &gcStats{})
+	assertGone(t, taskDir, "workdir/repo/node_modules")
+}
+
+func TestGC_IdleChatRetriesIncompleteSweep(t *testing.T) {
+	t.Parallel()
+	chatID := "aaaaaaaa-0000-0000-0000-00000000000a"
+	for _, reason := range []string{"git lookup failure", "cancelled after first removal"} {
+		t.Run(reason, func(t *testing.T) {
+			d := newGCTestDaemon(t, chatGCMux(chatID, "active"))
+			taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "idle-chat", &execenv.GCMeta{
+				Kind: execenv.GCKindChat, ChatSessionID: chatID, WorkspaceID: "ws",
+				CompletedAt: time.Now().Add(-24 * time.Hour),
+			})
+			writeFile(t, filepath.Join(taskDir, chatCacheFile), 32)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			gitFile := filepath.Join(taskDir, "workdir/repo/.git")
+			if reason == "git lookup failure" {
+				writeFile(t, gitFile, 32) // malformed checkout metadata makes Git refuse the lookup
+			} else {
+				writeFile(t, filepath.Join(taskDir, "workdir/repo/.next/data"), 32)
+				d.logger = slog.New(cancelAfterArtifactRemoval{slog.NewTextHandler(io.Discard, nil), cancel})
+			}
+			d.gcWorkspace(ctx, filepath.Dir(taskDir), &gcStats{})
+			assertKept(t, taskDir, chatCacheFile)
+			assertGone(t, taskDir, chatArtifactSweepFile)
+			if reason == "git lookup failure" {
+				if err := os.Remove(gitFile); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				assertGone(t, taskDir, "workdir/repo/.next")
+			}
+
+			d.gcWorkspace(context.Background(), filepath.Dir(taskDir), &gcStats{})
+			assertGone(t, taskDir, "workdir/repo/node_modules")
+			assertKept(t, taskDir, chatArtifactSweepFile)
+		})
+	}
+}
+
+type cancelAfterArtifactRemoval struct {
+	slog.Handler
+	cancel context.CancelFunc
+}
+
+func (h cancelAfterArtifactRemoval) Handle(ctx context.Context, record slog.Record) error {
+	if record.Message == "gc: artifact removed" {
+		h.cancel()
+	}
+	return h.Handler.Handle(ctx, record)
 }
 
 // A chat session that completed recently keeps its cache — resuming inside the
