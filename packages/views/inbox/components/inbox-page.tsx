@@ -354,16 +354,22 @@ export function InboxPage() {
   // re-opening the row later marks it read again like any other open.
   const manualUnreadIdRef = useRef<string | null>(null);
 
-  // Auto-mark-read whenever a selected item is unread — covers both click-
-  // to-select and URL-param-select (e.g. OS notification click on desktop).
-  // The mutation flips `read: true` optimistically, so this effect settles
-  // in one pass and can't loop. Kept in a `useEffect` rather than inlined
-  // in handleSelect so URL-driven selection triggers it too.
+  // Read once on opening, even if the visible row is already read: older
+  // unread notifications can still be hidden under it. Also read new unread
+  // arrivals while the row stays open. Track the opening separately from the
+  // optimistic cache patch so a read row cannot cause a request loop.
+  const openedItemIdRef = useRef<string | null>(null);
   const markReadMutate = markReadMutation.mutate;
   const selectedId = selected?.id;
   const selectedRead = selected?.read;
   useEffect(() => {
-    if (!selectedId || selectedRead) return;
+    if (!selectedId) {
+      openedItemIdRef.current = null;
+      return;
+    }
+    const justOpened = openedItemIdRef.current !== selectedId;
+    openedItemIdRef.current = selectedId;
+    if (!justOpened && selectedRead) return;
     if (manualUnreadIdRef.current === selectedId) return;
     if (filters.unreadOnly) {
       pinnedUnreadKeyRef.current = selectedKey;
@@ -1074,8 +1080,8 @@ export function InboxPage() {
             {inboxZeroCount === 0 ? (
               <MulticaBleedMark
                 key={inboxZeroRises ? "rise" : "rest"}
-                riseDelay={inboxZeroRises ? 0.2 : undefined}
-                className="pointer-events-none absolute -right-[8%] -bottom-[32%] w-[min(560px,58%)] text-muted"
+                enterDelay={inboxZeroRises ? 0.2 : undefined}
+                className="pointer-events-none absolute -right-[14%] -bottom-[26%] w-[min(560px,58%)] text-muted"
               />
             ) : (
               <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />

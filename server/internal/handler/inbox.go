@@ -220,6 +220,9 @@ func (h *Handler) ListArchivedInbox(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// MarkInboxRead reads the item and, when it belongs to an issue, every other
+// unread active item the caller has on that issue: selecting a row in the inbox
+// opens the whole issue (MUL-8618, see the query comment).
 func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	prev, ok := h.loadInboxItemForUser(w, r, id)
@@ -248,7 +251,8 @@ func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
 // act on: the inbox auto-marks an item read the moment it is selected, which
 // otherwise makes "opened" and "handled" the same signal.
 //
-// Scope is the single item, matching MarkInboxRead — see the query comment.
+// Scope is the single item, the newest one the row shows, unlike MarkInboxRead
+// — see the query comment.
 func (h *Handler) MarkInboxUnread(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	prev, ok := h.loadInboxItemForUser(w, r, id)
@@ -437,10 +441,10 @@ func (h *Handler) MarkAllInboxRead(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"count": count})
 }
 
-// MarkIssueInboxRead marks the caller's unread informational notifications on
-// one issue read; items that need handling stay unread (see
-// MarkInboxReadByIssue). The client calls it while the issue is on screen outside the inbox, so
-// reading an issue anywhere also reads it in the inbox (MUL-8588). The update
+// MarkIssueInboxRead marks every unread active notification the caller has on
+// one issue read (see MarkInboxReadByIssue). The client calls it while the
+// issue is on screen outside the inbox, so reading an issue anywhere also
+// reads it in the inbox (MUL-8588). The update
 // is scoped to the caller's own rows, so an issue id from another workspace
 // matches nothing.
 func (h *Handler) MarkIssueInboxRead(w http.ResponseWriter, r *http.Request) {

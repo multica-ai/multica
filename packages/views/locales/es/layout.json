@@ -65,14 +65,6 @@
   },
   "whats_new": {
     "trigger": "Novedades",
-    "card": {
-      "eyebrow": "Multica se ha actualizado · {{range}}",
-      "title_one": "{{count}} función nueva desde tu última visita",
-      "title_other": "{{count}} funciones nuevas desde tu última visita",
-      "dismiss": "Descartar",
-      "view_details": "Ver detalles",
-      "got_it": "Entendido"
-    },
     "panel": {
       "title": "Novedades",
       "close": "Cerrar",
@@ -100,6 +92,8 @@
     "autopilots": "Auto",
     "switch_workspace": "Cambiar de espacio de trabajo",
     "invitation_from": "{{name}} te ha invitado",
+    "pin_workspace": "Fijar espacio de trabajo",
+    "unpin_workspace": "Desfijar espacio de trabajo",
     "open_in_new_window": "Abrir en una ventana nueva",
     "open_in_new_window_click": "Clic",
     "open_in_other_window": "Ya está abierto en otra ventana",

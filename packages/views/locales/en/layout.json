@@ -40,14 +40,6 @@
   },
   "whats_new": {
     "trigger": "What's new",
-    "card": {
-      "eyebrow": "Multica updated · {{range}}",
-      "title_one": "{{count}} new feature since your last visit",
-      "title_other": "{{count}} new features since your last visit",
-      "dismiss": "Dismiss",
-      "view_details": "View details",
-      "got_it": "Got it"
-    },
     "panel": {
       "title": "What's new",
       "close": "Close",
@@ -100,6 +92,8 @@
     "autopilots": "Auto",
     "switch_workspace": "Switch workspace",
     "invitation_from": "{{name}} invited you",
+    "pin_workspace": "Pin workspace",
+    "unpin_workspace": "Unpin workspace",
     "open_in_new_window": "Open in new window",
     "open_in_new_window_click": "Click",
     "open_in_other_window": "Already open in another window",

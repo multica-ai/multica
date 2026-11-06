@@ -13,8 +13,8 @@ vi.mock("../platform/local-directory", () => ({
   isDesktopShell: vi.fn(() => false),
 }));
 
-// The What's new entry is covered with the real menu in whats-new-launcher.test.tsx.
-vi.mock("../whats-new/whats-new-launcher", () => ({
+// The What's new entry is covered with the real menu in whats-new-menu-panel.test.tsx.
+vi.mock("../whats-new/whats-new-menu-panel", () => ({
   useWhatsNewMenuPanel: () => ({ available: false }),
   WhatsNewMenuPanel: () => null,
 }));

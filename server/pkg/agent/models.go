@@ -1137,6 +1137,13 @@ func discoverPiModelsWithin(ctx context.Context, runtimeCmd Command, rpcTimeout,
 // will choose when Multica omits --model; its thinking level is the runtime's
 // effective default for that selected model.
 func discoverPiModelsRPC(ctx context.Context, runtimeCmd Command, lookedUp string) ([]Model, bool) {
+	runtimeCmd.Path = lookedUp
+	probeCmd, cleanup, err := runtimeCmd.withProbeDirectory()
+	if err != nil {
+		return nil, false
+	}
+	defer cleanup()
+	runtimeCmd = probeCmd
 	args := []string{
 		"--mode", "rpc",
 		"--no-session",
@@ -1147,7 +1154,7 @@ func discoverPiModelsRPC(ctx context.Context, runtimeCmd Command, lookedUp strin
 		"--no-prompt-templates",
 		"--no-context-files",
 	}
-	cmd, _, _ := runtimeCmd.execVia(ctx, choosePiInvocation, lookedUp, args, slog.Default())
+	cmd, _, _ := runtimeCmd.execVia(ctx, choosePiInvocation, runtimeCmd.Path, args, slog.Default())
 	hideAgentWindow(cmd)
 	cmd.WaitDelay = time.Second
 	cmd.Stderr = io.Discard
@@ -1305,6 +1312,12 @@ func piThinkingSupports(thinking *ModelThinking, value string) bool {
 // capture both and parse whichever is non-empty. The fallback intentionally
 // leaves Thinking nil because the table exposes only a yes/no capability bit.
 func discoverPiModelsTable(ctx context.Context, runtimeCmd Command) ([]Model, error) {
+	probeCmd, cleanup, err := runtimeCmd.withProbeDirectory()
+	if err != nil {
+		return nil, fmt.Errorf("pi model discovery: %w", err)
+	}
+	defer cleanup()
+	runtimeCmd = probeCmd
 	// Newer pi fetches its catalog from each configured provider over the
 	// network, so discovery time scales with provider count — a multi-provider
 	// setup measured ~4.6-4.8s, right at the old 5s cap. When jitter pushed it
@@ -1340,6 +1353,7 @@ func parsePiModels(output string) []Model {
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	var models []Model
 	seen := map[string]bool{}
+	tableColumns := 0
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -1358,16 +1372,21 @@ func parsePiModels(output string) []Model {
 			continue
 		}
 		first := fields[0]
-		if strings.EqualFold(first, "provider") {
+		if len(fields) >= 3 && strings.EqualFold(first, "provider") && strings.EqualFold(fields[1], "model") {
+			tableColumns = len(fields)
 			continue
 		}
 		var id string
-		if strings.ContainsAny(first, ":/") {
-			// Legacy `provider:model` format — normalize colon to slash.
-			// Restricted to this branch so a model name with a `:` in
-			// the table format's column 1 is not silently rewritten.
-			id = strings.Replace(first, ":", "/", 1)
-		} else if len(fields) >= 2 {
+		if len(fields) == 1 && strings.ContainsAny(first, ":/") {
+			// The first delimiter separates the provider. Legacy model IDs
+			// can contain slashes (provider:org/model), while later colons in
+			// provider/model:version belong to the model and stay unchanged.
+			id = first
+			colon, slash := strings.IndexByte(first, ':'), strings.IndexByte(first, '/')
+			if colon >= 0 && (slash < 0 || colon < slash) {
+				id = strings.Replace(first, ":", "/", 1)
+			}
+		} else if tableColumns >= 3 && len(fields) == tableColumns && piModelContextPattern.MatchString(fields[2]) {
 			id = first + "/" + fields[1]
 		} else {
 			continue
@@ -1390,6 +1409,11 @@ func parsePiModels(output string) []Model {
 	}
 	return models
 }
+
+// The table's context window is numeric, optionally abbreviated (128K, 1M).
+// Requiring its structure as well as the header keeps wrapper prose out even
+// when it appears between real catalog rows. Custom provider IDs stay valid.
+var piModelContextPattern = regexp.MustCompile(`(?i)^\d+(?:\.\d+)?[kmg]?$`)
 
 // isPiDiscoveryNoise reports whether a `pi --list-models` line is a diagnostic
 // message rather than a catalog row. pi prints these alongside the table when

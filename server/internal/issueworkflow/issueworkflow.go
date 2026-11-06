@@ -732,6 +732,12 @@ type BriefInput struct {
 	ProjectName     string
 	StatusKey       string
 	IssueIdentifier string
+	// BoundStep is the task's effective step when its binding must be respected.
+	// A different StatusKey renders a continuation brief without status moves.
+	// Empty preserves the normal handoff, preview and unbound-run brief.
+	BoundStep string
+	// MovedBy names whoever last changed the status, when known.
+	MovedBy string
 	// StatusName resolves a catalog key to its display name.
 	StatusName func(key string) string
 	// HandlerName describes who a step hands off to, e.g. "Sentinel" or
@@ -768,6 +774,7 @@ type BriefInput struct {
 // names are kept to one line.
 func Brief(in BriefInput) string {
 	step, _ := in.Workflow.Step(in.StatusKey)
+	stepMoved := in.BoundStep != "" && in.BoundStep != in.StatusKey
 	name := func(key string) string {
 		if in.StatusName == nil {
 			return key
@@ -798,17 +805,25 @@ func Brief(in BriefInput) string {
 	// An older daemon still states the built-in rules itself, so its brief
 	// keeps the per-step wording rather than add a second in_progress rule.
 	var span handlerlessSpan
-	if !in.Observer && !in.LegacyRuntimeRules {
+	if !stepMoved && !in.Observer && !in.LegacyRuntimeRules {
 		span = in.Workflow.handlerlessSpan(in.StatusKey)
 	}
-	if in.LegacyRuntimeRules {
+	if in.LegacyRuntimeRules && !stepMoved {
 		b.WriteString("This workflow replaces the status rules in your runtime instructions: use only the status keys below")
 		if !in.Workflow.Has(issuestatus.InReview) {
 			fmt.Fprintf(&b, ", never `%s`", issuestatus.InReview)
 		}
 		b.WriteString(".\n")
 	}
-	if in.Observer {
+	if stepMoved {
+		mover := briefLine(in.MovedBy)
+		if mover == "" {
+			mover = "someone else"
+		}
+		fmt.Fprintf(&b, "This run remains bound to %s, but %s is now at %s (last moved by %s).\n",
+			statusLabel(name(in.BoundStep), in.BoundStep), in.IssueIdentifier, statusLabel(name(in.StatusKey), in.StatusKey), mover)
+		b.WriteString("Do not change the issue's status in this run, including when starting or finishing work; this overrides the status rules in your runtime instructions. Do not retry a refused status change. Leave a comment if something needs attention. A member can review the current state and explicitly rerun the work.\n")
+	} else if in.Observer {
 		assignee := "is unassigned"
 		if who := briefLine(in.AssigneeName); who != "" {
 			assignee = "is assigned to " + who
@@ -852,6 +867,9 @@ func Brief(in BriefInput) string {
 			b.WriteString("   ← current")
 		}
 		b.WriteString("\n")
+	}
+	if stepMoved {
+		return b.String()
 	}
 	if in.Observer {
 		b.WriteString("\nMoving the issue into a step that hands off reassigns it to that step's handler and starts their run.\n")

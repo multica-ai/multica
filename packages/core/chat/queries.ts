@@ -23,12 +23,10 @@ import type {
  */
 export const QUICK_ACTIONS_PENDING_TIMEOUT_MS = 12_000;
 
-// NOTE on workspace scoping:
-// `wsId` is used only as part of queryKey for cache isolation per workspace.
-// The actual workspace context comes from ApiClient's X-Workspace-Slug header,
-// which is set by the URL-driven [workspaceSlug] layout. Callers must ensure
-// the header is in sync with the wsId they pass here — otherwise cache writes
-// will be misattributed during a workspace switch race window.
+// Sessions, pinned agents, pending tasks, and the running indicator explicitly
+// bind requests to the workspace UUID in their query key. Other session/task
+// queries still use ApiClient's current workspace header, which callers must
+// keep aligned with the resource's workspace and any wsId in the query key.
 
 export const chatKeys = {
   all: (wsId: string) => ["chat", wsId] as const,
@@ -79,7 +77,7 @@ export function isTaskMessageTaskId(taskId: string | null | undefined): taskId i
 export function chatSessionsOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.sessions(wsId),
-    queryFn: () => api.listChatSessions({ status: "all" }),
+    queryFn: () => api.listChatSessions({ status: "all" }, { workspaceId: wsId }),
     staleTime: Infinity,
   });
 }
@@ -145,7 +143,7 @@ export function countUnreadChatSessions(sessions: ChatSession[]): number {
 export function chatPinnedAgentsOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.pinnedAgents(wsId),
-    queryFn: () => api.listChatPinnedAgents(),
+    queryFn: () => api.listChatPinnedAgents({ workspaceId: wsId }),
     staleTime: Infinity,
   });
 }
@@ -359,7 +357,7 @@ export function isTaskMessageTimelineHeld(
 export function pendingChatTasksOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.pendingTasks(wsId),
-    queryFn: () => api.listPendingChatTasks(),
+    queryFn: () => api.listPendingChatTasks({ workspaceId: wsId }),
     staleTime: Infinity,
   });
 }
@@ -374,7 +372,7 @@ export function pendingChatTasksOptions(wsId: string) {
 export function hasPendingChatTasksOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.pendingTasksHasAny(wsId),
-    queryFn: () => api.hasAnyPendingChatTasks(),
+    queryFn: () => api.hasAnyPendingChatTasks({ workspaceId: wsId }),
     staleTime: Infinity,
   });
 }

@@ -273,5 +273,13 @@
     "toast_failed": "Failed to mark as duplicate",
     "error_target_is_duplicate": "{{identifier}} is itself a duplicate. Pick its original instead.",
     "error_has_duplicates": "Other issues are marked as duplicates of this one. Remove those marks first."
+  },
+  "copy_parent_fields": {
+    "trigger": "Copy parent fields",
+    "title": "Copy parent fields",
+    "description": "From {{identifier}}. Replaces selected draft values once; later changes do not sync.",
+    "apply": "Copy {{count}} fields",
+    "no_labels": "No labels",
+    "manual_only": "Labels, start date and custom properties apply only to manual creation."
   }
 }

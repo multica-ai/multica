@@ -656,6 +656,16 @@ function StatusAccordionItem({
           ) : (
             rows
           )
+        ) : page.isError ? (
+          <ListLoadMoreFooter
+            hasMore={page.hasMore}
+            isLoading={page.isLoading || page.isFetching}
+            total={page.total}
+            onLoadMore={page.loadMore}
+            isError
+            onRetry={page.retry}
+            errorLabel={t(($) => $.detail.section_load_failed_retry)}
+          />
         ) : (
           <p className="py-6 text-center text-caption text-muted-foreground">
             {t(($) => $.list.empty_status)}

@@ -40,13 +40,6 @@
   },
   "whats_new": {
     "trigger": "新機能",
-    "card": {
-      "eyebrow": "Multica が更新されました · {{range}}",
-      "title_other": "前回の訪問以降、{{count}} 件の新機能が追加されました",
-      "dismiss": "閉じる",
-      "view_details": "詳細を見る",
-      "got_it": "了解"
-    },
     "panel": {
       "title": "新機能",
       "close": "閉じる",
@@ -99,6 +92,8 @@
     "autopilots": "自動化",
     "switch_workspace": "ワークスペースを切り替え",
     "invitation_from": "{{name}} さんから招待されています",
+    "pin_workspace": "ワークスペースをピン留め",
+    "unpin_workspace": "ピン留めを解除",
     "open_in_new_window": "新しいウィンドウで開く",
     "open_in_new_window_click": "クリック",
     "open_in_other_window": "別のウィンドウで開いています",

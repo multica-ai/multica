@@ -62,7 +62,6 @@ vi.mock("./panels/team-status", () => ({
 }));
 vi.mock("./rail-workspaces", () => ({ RailWorkspaces: () => null }));
 vi.mock("./help-launcher", () => ({ HelpLauncher: () => null }));
-vi.mock("../whats-new/whats-new-launcher", () => ({ WhatsNewLauncher: () => null }));
 vi.mock("./account-menu", () => ({ AccountMenu: () => null }));
 vi.mock("@multica/ui/components/common/tooltip-hint", () => ({
   TooltipHint: ({ children }: { children: ReactNode }) => <>{children}</>,

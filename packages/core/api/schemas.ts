@@ -61,6 +61,8 @@ import type {
   InboxWorkspaceUnread,
   IssueUnread,
   Label,
+  Project,
+  ListProjectsResponse,
   MemberWithUser,
   IssueProperty,
   ListPropertiesResponse,
@@ -979,8 +981,14 @@ const ReactionSchema = z.object({
 // Nested attachments embedded in timeline/comment responses stay lenient on
 // purpose: a single malformed attachment must not knock the whole timeline
 // into the fallback `[]`.
+const AttachmentImageFields = {
+  width: z.number().int().positive().optional().catch(undefined),
+  height: z.number().int().positive().optional().catch(undefined),
+};
+
 const AttachmentSchema = z.object({
   id: z.string(),
+  ...AttachmentImageFields,
 }).loose();
 
 const ChatQuickActionSchema = z.object({
@@ -1046,6 +1054,9 @@ export const AttachmentResponseSchema = z.object({
   filename: z.string(),
   chat_session_id: z.string().nullable().optional(),
   chat_message_id: z.string().nullable().optional(),
+  // Image metadata is optional and degrades on its own: a malformed value
+  // means "unknown dimensions", never a lost attachment.
+  ...AttachmentImageFields,
 }).loose();
 
 export const EMPTY_ATTACHMENT: Attachment = {
@@ -1538,6 +1549,7 @@ export const ListIssuesResponseSchema = z.object({
 export const CreateIssueResponseSchema = IssueSchema.extend({
   id: z.string().min(1),
   labels: z.array(LabelSchema).optional().catch(undefined),
+  pr_auto_complete_disabled: z.boolean().optional().catch(undefined),
 }).loose();
 
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
@@ -1560,7 +1572,7 @@ export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
   issues: [],
 };
 
-const ProjectSchema = z.object({
+export const ProjectSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
   title: z.string(),
@@ -1570,6 +1582,8 @@ const ProjectSchema = z.object({
   priority: z.string(),
   lead_type: z.string().nullable(),
   lead_id: z.string().nullable(),
+  creator_type: z.string().nullable().default(null).catch(null),
+  creator_id: z.string().nullable().default(null).catch(null),
   // .default(null) so a project from an older backend (frontend deploys before
   // backend) that omits these keys parses to null instead of failing the whole
   // object — which would degrade a search/list batch to the empty fallback.
@@ -1582,6 +1596,20 @@ const ProjectSchema = z.object({
   resource_count: z.number().default(0),
   workflow_id: z.string().nullable().default(null),
 }).loose();
+
+export const EMPTY_PROJECT: Project = {
+  id: "", workspace_id: "", title: "", description: null, icon: null,
+  status: "planned", priority: "none", lead_type: null, lead_id: null,
+  creator_type: null, creator_id: null, start_date: null, due_date: null,
+  created_at: "", updated_at: "", issue_count: 0, done_count: 0, resource_count: 0,
+};
+
+export const ListProjectsResponseSchema = z.object({
+  projects: z.array(ProjectSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_PROJECTS_RESPONSE: ListProjectsResponse = { projects: [], total: 0 };
 
 const SearchProjectResultSchema = ProjectSchema.extend({
   match_source: z.string(),
@@ -4044,3 +4072,17 @@ export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsRespon
   installations: [],
   configured: false,
 };
+
+// Only `pinned_at` is new here; every other field keeps its pre-schema
+// leniency so one odd workspace can never empty the whole switcher.
+export const WorkspaceListItemSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  created_at: z.string(),
+  pinned_at: z.iso.datetime({ offset: true }).nullable().optional().catch(null).default(null),
+}).loose();
+
+export const WorkspacePinnedSchema = z.object({
+  pinned_at: z.iso.datetime({ offset: true }).nullable().catch(null),
+});

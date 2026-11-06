@@ -1,7 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ReactNode } from "react";
-import { render, renderHook } from "@testing-library/react";
+import { act, render, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ApiError, setApiInstance, type ApiClient } from "@multica/core/api";
+import { createQueryClient } from "@multica/core/query-client";
+import type { Issue, ListIssueStatusesResponse } from "@multica/core/types";
+import { onIssueUpdated } from "@multica/core/issues";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { issueStatusListOptions } from "@multica/core/issue-statuses/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
@@ -103,8 +107,8 @@ function presentationOf(url: string, fallback?: string) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={qc}>{children}</QueryClientProvider>
   );
-  return renderHook(() => useTabPresentation(url, fallback), { wrapper }).result
-    .current;
+  const { visual, title } = renderHook(() => useTabPresentation(url, fallback), { wrapper }).result.current;
+  return { visual, title };
 }
 
 beforeEach(() => {
@@ -294,6 +298,24 @@ describe("useTabPresentation — live from cache", () => {
 });
 
 describe("useTabPresentation — pending / fallback", () => {
+  it.each([undefined, "Saved session"])("keeps an unresolved chat selection pending with fallback %s", async (fallback) => {
+    const qc = makeClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(
+      () => useTabPresentation("/acme/chat?session=s7", fallback), { wrapper },
+    );
+
+    expect(result.current).toMatchObject({ title: fallback ?? "Chat", titleResolved: false });
+    act(() => qc.setQueryData(chatSessionsOptions("ws1").queryKey, [
+      { id: "s7", title: "Loaded session" },
+    ] as never));
+    await waitFor(() => expect(result.current).toMatchObject({
+      title: "Loaded session", titleResolved: true,
+    }));
+  });
+
   it("pending issue keeps the issue-status slot and uses the persisted fallback", () => {
     expect(presentationOf("/acme/issues/unloaded", "MUL-7: Prior")).toEqual({
       visual: { kind: "issue-status", status: null },
@@ -324,6 +346,17 @@ describe("useTabPresentation — pending / fallback", () => {
 });
 
 describe("ResourceLeadingVisual", () => {
+  it("uses a neutral skeleton while the status has not loaded", () => {
+    const { container, rerender } = render(
+      <ResourceLeadingVisual visual={{ kind: "issue-status", status: null }} />,
+    );
+    expect(container.querySelector("svg")).toBeNull();
+    expect(container.querySelector('[data-slot="skeleton"]')).toBeVisible();
+    rerender(<ResourceLeadingVisual visual={{ kind: "issue-status", status: "todo" }} />);
+    expect(container.querySelector('[data-slot="skeleton"]')).toBeNull();
+    expect(container.querySelector("svg")).not.toBeNull();
+  });
+
   it("renders a project icon with its emoji", () => {
     const { getByText } = render(
       <ResourceLeadingVisual visual={{ kind: "project-icon", icon: "🚀" }} />,
@@ -352,5 +385,151 @@ describe("ResourceLeadingVisual", () => {
       <ResourceLeadingVisual visual={{ kind: "icon", icon: "Inbox" }} />,
     );
     expect(container.querySelector("svg")).toBeTruthy();
+  });
+});
+
+describe("useTabPresentation — restored issue tabs", () => {
+  const issue: Issue = {
+    id: "cb240efb-154c-42a8-ae92-42b02676feca", workspace_id: "ws1",
+    number: 7, identifier: "MUL-7", title: "Restore tabs", description: null,
+    status: "in_progress", status_category: "started", priority: "medium",
+    assignee_type: null, assignee_id: null, creator_type: "member", creator_id: "u1",
+    parent_issue_id: null, project_id: null, position: 0, stage: null,
+    start_date: null, due_date: null, metadata: {}, properties: {}, labels: [],
+    created_at: "2026-11-06T00:00:00Z", updated_at: "2026-11-06T00:00:00Z",
+  };
+  let qc: QueryClient;
+  let getIssue: ReturnType<typeof vi.fn>;
+  let listIssueStatuses: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    qc = createQueryClient();
+    qc.setDefaultOptions({ queries: { ...qc.getDefaultOptions().queries, retry: false } });
+    getIssue = vi.fn(async () => issue);
+    listIssueStatuses = vi.fn(async (): Promise<ListIssueStatusesResponse> => ({
+      statuses: [], categories: ["unstarted", "started", "done", "closed"], total: 0,
+    }));
+    setApiInstance({ getIssue, listIssueStatuses } as unknown as ApiClient);
+  });
+
+  afterEach(() => qc.clear());
+
+  function wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  }
+
+  it("loads an identifier tab once and follows UUID realtime patches without opening its page", async () => {
+    const { result } = renderHook(
+      () => useTabPresentation("/acme/issues/MUL-7", "Prior title", { fetch: true }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.title).toBe("MUL-7: Restore tabs"));
+    expect(result.current.titleResolved).toBe(true);
+    expect(qc.getQueryData(issueDetailOptions("ws1", issue.id).queryKey)).toEqual(issue);
+    expect(getIssue).toHaveBeenCalledExactlyOnceWith("MUL-7");
+
+    act(() => onIssueUpdated(qc, "ws1", { ...issue, status: "done", status_category: "done", title: "Fixed" }));
+    await waitFor(() => expect(result.current.visual).toMatchObject({ status: "done", category: "done" }));
+    expect(result.current.title).toBe("MUL-7: Fixed");
+    expect(getIssue).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares the detail and catalog requests between tabs for the same issue", async () => {
+    const { result } = renderHook(() => [
+      useTabPresentation(`/acme/issues/${issue.id}`, undefined, { fetch: true }),
+      useTabPresentation(`/acme/issues/${issue.id}`, undefined, { fetch: true }),
+    ], { wrapper });
+    await waitFor(() => expect(result.current.every((tab) => tab.title === "MUL-7: Restore tabs")).toBe(true));
+    expect(getIssue).toHaveBeenCalledExactlyOnceWith(issue.id);
+    expect(listIssueStatuses).toHaveBeenCalledExactlyOnceWith(true);
+  });
+
+  it("preserves server categories and loads custom colors without a custom icon", async () => {
+    getIssue.mockResolvedValue({ ...issue, status: "qa" });
+    listIssueStatuses.mockResolvedValue({
+      statuses: [{ id: "qa", workspace_id: "ws1", key: "qa", name: "QA", description: "",
+        category: "started", color: "#123456", icon: null, is_system: false,
+        position: 0, archived_at: null, created_at: "", updated_at: "" }],
+      categories: ["unstarted", "started", "done", "closed"], total: 1,
+    });
+    const { result } = renderHook(
+      () => useTabPresentation(`/acme/issues/${issue.id}`, undefined, { fetch: true }), { wrapper },
+    );
+    await waitFor(() => expect(result.current.visual).toMatchObject({
+      status: "qa", category: "started", color: "#123456", icon: null,
+    }));
+  });
+
+  it("keeps the server category when the catalog is unavailable", async () => {
+    getIssue.mockResolvedValue({ ...issue, status: "qa" });
+    listIssueStatuses.mockRejectedValue(new Error("offline"));
+    const { result } = renderHook(
+      () => useTabPresentation(`/acme/issues/${issue.id}`, undefined, { fetch: true }), { wrapper },
+    );
+    await waitFor(() => expect(result.current.visual).toMatchObject({ status: "qa", category: "started" }));
+  });
+
+  it("stays cache-only unless fetching is requested", async () => {
+    const { result } = renderHook(() => useTabPresentation(`/acme/issues/${issue.id}`, "Saved"), { wrapper });
+    await act(async () => {});
+    expect(getIssue).not.toHaveBeenCalled();
+    expect(listIssueStatuses).not.toHaveBeenCalled();
+    expect(result.current.title).toBe("Saved");
+  });
+
+  it("waits for the workspace before starting requests", async () => {
+    ws.current = null;
+    const { result, rerender } = renderHook(
+      () => useTabPresentation(`/acme/issues/${issue.id}`, "Saved", { fetch: true }), { wrapper },
+    );
+    await act(async () => {});
+    expect(getIssue).not.toHaveBeenCalled();
+    expect(listIssueStatuses).not.toHaveBeenCalled();
+    ws.current = { id: "ws1", slug: "acme" };
+    rerender();
+    await waitFor(() => expect(result.current.title).toBe("MUL-7: Restore tabs"));
+    expect(getIssue).toHaveBeenCalledTimes(1);
+  });
+
+  it("only fetches inbox selections known to reference an issue", async () => {
+    qc.setQueryData(inboxListOptions("ws1").queryKey, [{
+      id: "n1", workspace_id: "ws1", recipient_type: "member", recipient_id: "u1",
+      actor_type: null, actor_id: null, type: "issue_assigned", severity: "info",
+      issue_id: issue.id, title: "Assigned to you", body: null, issue_status: "in_progress",
+      read: false, archived: false, created_at: issue.created_at, details: null,
+    }]);
+    const { result } = renderHook(
+      () => useTabPresentation(`/acme/inbox?issue=${issue.id}`, "Saved", { fetch: true }), { wrapper },
+    );
+    await waitFor(() => expect(result.current.title).toBe("MUL-7: Restore tabs"));
+    expect(getIssue).toHaveBeenCalledExactlyOnceWith(issue.id);
+  });
+
+  it.each(["n2", "unknown-notification"])("does not query an issue for the notification %s", async (key) => {
+    seed(qc);
+    renderHook(() => useTabPresentation(`/acme/inbox?issue=${key}`, "Saved", { fetch: true }), { wrapper });
+    await act(async () => {});
+    expect(getIssue).not.toHaveBeenCalled();
+  });
+
+  it.each([new Error("offline"), new ApiError("Not found", 404, "Not Found")])("preserves the title and unresolved status when the request fails: %s", async (error) => {
+    getIssue.mockRejectedValue(error);
+    const { result } = renderHook(
+      () => useTabPresentation(`/acme/issues/${issue.id}`, "Saved", { fetch: true }), { wrapper },
+    );
+    await waitFor(() => expect(qc.getQueryState(issueDetailOptions("ws1", issue.id).queryKey)?.status).toBe("error"));
+    expect(result.current).toMatchObject({ title: "Saved", titleResolved: false, visual: { status: null } });
+    expect(getIssue).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes a background tab after reconnect invalidation", async () => {
+    const { result } = renderHook(
+      () => useTabPresentation(`/acme/issues/${issue.id}`, undefined, { fetch: true }), { wrapper },
+    );
+    await waitFor(() => expect(result.current.title).toBe("MUL-7: Restore tabs"));
+    getIssue.mockResolvedValue({ ...issue, title: "Changed while offline", status: "done", status_category: "done" });
+    await act(() => qc.invalidateQueries({ queryKey: ["issues", "ws1"] }));
+    await waitFor(() => expect(result.current.title).toBe("MUL-7: Changed while offline"));
+    expect(result.current.visual).toMatchObject({ status: "done", category: "done" });
   });
 });

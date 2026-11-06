@@ -40,13 +40,6 @@
   },
   "whats_new": {
     "trigger": "新功能",
-    "card": {
-      "eyebrow": "Multica 已更新 · {{range}}",
-      "title_other": "自你上次造訪以來，新增了 {{count}} 項功能",
-      "dismiss": "關閉",
-      "view_details": "查看詳情",
-      "got_it": "知道了"
-    },
     "panel": {
       "title": "新功能",
       "close": "關閉",
@@ -99,6 +92,8 @@
     "autopilots": "自動化",
     "switch_workspace": "切換工作區",
     "invitation_from": "{{name}} 邀請你加入",
+    "pin_workspace": "置頂工作區",
+    "unpin_workspace": "取消置頂",
     "open_in_new_window": "在新視窗開啟",
     "open_in_new_window_click": "點擊",
     "open_in_other_window": "已在其他視窗開啟",
