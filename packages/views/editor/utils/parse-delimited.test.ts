@@ -105,6 +105,32 @@ describe("sniffDelimiter", () => {
     expect(sniffDelimiter('5" screen;Owner\nlarge;Ada')).toBe(";");
   });
 
+  it.each([
+    [",", ";"], [",", "\t"],
+    [";", ","], [";", "\t"],
+    ["\t", ","], ["\t", ";"],
+  ] as const)(
+    "detects %j with literal quotes after non-delimiter %j",
+    (delimiter, punctuation) => {
+      const title = `5${punctuation}" screen`;
+      const text = `${title}${delimiter}Owner${delimiter}Value\nlarge${delimiter}Ada${delimiter}10`;
+      expect(sniffDelimiter(text)).toBe(delimiter);
+      expect(parseDelimited(text, sniffDelimiter(text))).toEqual([
+        [title, "Owner", "Value"],
+        ["large", "Ada", "10"],
+      ]);
+    },
+  );
+
+  it.each([",", ";", "\t"] as const)(
+    "prefers well-formed %j quoting over more punctuation in a later field",
+    (delimiter) => {
+      const other = delimiter === "," ? ";" : ",";
+      const text = `id${delimiter}"a${other}b${other}c${other}d"${delimiter}Owner\n1${delimiter}ok${delimiter}Ada`;
+      expect(sniffDelimiter(text)).toBe(delimiter);
+    },
+  );
+
   it("handles empty quoted fields and trailing empty fields", () => {
     expect(sniffDelimiter('"";"";\n1;2;3')).toBe(";");
   });
@@ -120,9 +146,12 @@ describe("sniffDelimiter", () => {
     },
   );
 
-  it("handles a missing final newline and an unterminated quote", () => {
+  it("handles a missing final newline", () => {
     expect(sniffDelimiter('id;"a,b,c"')).toBe(";");
-    expect(sniffDelimiter('id;"a,b,c')).toBe(";");
+  });
+
+  it("uses separator counts when all interpretations have malformed quotes", () => {
+    expect(sniffDelimiter('id;"a,b,c')).toBe(",");
   });
 
   it("keeps candidate precedence on ties and defaults for empty input", () => {

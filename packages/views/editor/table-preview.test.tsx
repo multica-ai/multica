@@ -104,6 +104,20 @@ describe("TablePreview", () => {
     expect(screen.getByText(/1 row/)).toHaveTextContent("1 row · 2 columns");
   });
 
+  it("preserves literal quotes after a non-delimiter in CSV headers", () => {
+    renderWithI18n(
+      <TablePreview text={'5;" screen,Owner,Value\nlarge,Ada,10'} delimiter="," />,
+    );
+
+    expect(header('5;" screen')).toBeTruthy();
+    expect(header("Owner")).toBeTruthy();
+    expect(header("Value")).toBeTruthy();
+    expect(columnValues("c0")).toEqual(["large"]);
+    expect(columnValues("c1")).toEqual(["Ada"]);
+    expect(columnValues("c2")).toEqual(["10"]);
+    expect(screen.getByText(/1 row/)).toHaveTextContent("1 row · 3 columns");
+  });
+
   it("says so when there are no rows", () => {
     renderWithI18n(<TablePreview text={"only,a,header\n"} delimiter="," />);
     expect(screen.getByText("No rows")).toBeTruthy();
