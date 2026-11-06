@@ -101,6 +101,27 @@ func TestChatSupplementHistoryIdempotenceAndNoReplay(t *testing.T) {
 	}
 }
 
+func TestChatSupplementHistoryDistinguishesSendingAndUncertain(t *testing.T) {
+	f := newChatSupplementFixture(t, "codex", true)
+	var sent ChatMessageResponse
+	chatSupplementRequest(t, f, "0199a4e8-22ce-7b01-bba5-111111111111", "guidance").Want(201).JSON(&sent)
+	assertHistory := func(want string) {
+		t.Helper()
+		var history []ChatMessageResponse
+		testutil.Call(t, testHandler.ListChatMessages, withURLParam(chatSupplementAPIRequest(t, "GET", "/messages", nil), "sessionId", f.session)).Want(200).JSON(&history)
+		if len(history) != 1 || history[0].Supplement == nil || history[0].Supplement.Status != want {
+			t.Fatalf("history=%+v, want receipt status %s", history, want)
+		}
+	}
+	assertHistory("pending")
+	testutil.Call(t, testHandler.ClaimTaskSupplement, withURLParam(newOwnerDaemonRequest("POST", "/claim", map[string]any{}), "taskId", f.task)).Want(200)
+	assertHistory("delivering")
+	testutil.Call(t, testHandler.AckTaskSupplement, withURLParams(newOwnerDaemonRequest("POST", "/ack", map[string]any{"delivered": false, "error": "delivery_unknown"}), "taskId", f.task, "commentId", sent.ID)).Want(200)
+	assertHistory("unknown")
+	testutil.Call(t, testHandler.AckTaskSupplement, withURLParams(newOwnerDaemonRequest("POST", "/ack", map[string]bool{"delivered": true}), "taskId", f.task, "commentId", sent.ID)).Want(200)
+	assertHistory("delivered")
+}
+
 func TestChatSupplementLostAckAndTerminalSettlement(t *testing.T) {
 	for _, terminal := range []string{"completed", "failed", "cancelled"} {
 		t.Run(terminal, func(t *testing.T) {

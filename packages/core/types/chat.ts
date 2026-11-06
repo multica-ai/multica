@@ -133,7 +133,7 @@ export interface HasPendingChatTasksResponse {
 }
 
 export interface ChatMessage {
-  supplement?: { task_id: string; status: "pending" | "delivered" | "failed" | "unknown"; failure_reason?: string | null };
+  supplement?: { task_id: string; status: "pending" | "delivering" | "delivered" | "failed" | "unknown"; failure_reason?: string | null };
   id: string;
   chat_session_id: string;
   role: "user" | "assistant";

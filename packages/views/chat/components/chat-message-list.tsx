@@ -481,7 +481,7 @@ const MessageBubble = memo(function MessageBubble({
   quickActionsPendingMessageId: string | null;
   starterCardsMessageId: string | null;
 }) {
-  const [t] = useT("chat");
+  const { t } = useT("chat");
   // The live row and the persisted assistant row both land here under one key,
   // and both render <AssistantMessage> — same component type, same position —
   // so React reconciles rather than remounts at task completion.

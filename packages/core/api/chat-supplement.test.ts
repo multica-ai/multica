@@ -6,6 +6,9 @@ import { ChatMessageSchema, ChatPendingTaskSchema } from "./schemas";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Chat supplement API compatibility", () => {
+  it.each(["pending", "delivering", "delivered", "failed", "unknown"])("preserves the %s receipt state", (status) => {
+    expect(ChatMessageSchema.parse({ id: "m", chat_session_id: "s", supplement: { task_id: "t", status } }).supplement?.status).toBe(status);
+  });
   it("fails closed for absent or malformed capabilities", () => {
     expect(ChatPendingTaskSchema.parse({}).can_supplement).toBeUndefined();
     expect(ChatPendingTaskSchema.parse({ can_supplement: "true" }).can_supplement).toBe(false);

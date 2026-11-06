@@ -257,6 +257,7 @@
     "unarchive": "アーカイブを解除"
   },
   "supplement": {
+    "delivering": "現在の実行に送信中",
     "pending": "現在の実行への送信待ち",
     "delivered": "エンジンが受理",
     "failed": "未配信",

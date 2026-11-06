@@ -257,6 +257,7 @@
     "unarchive": "取消归档"
   },
   "supplement": {
+    "delivering": "正在发送到当前运行",
     "pending": "等待发送到当前运行",
     "delivered": "引擎已接受",
     "failed": "未送达",

@@ -261,6 +261,7 @@
     "delete": "Delete chat"
   },
   "supplement": {
+    "delivering": "Sending to current run",
     "pending": "Waiting to send to current run",
     "delivered": "Accepted by engine",
     "failed": "Not delivered",

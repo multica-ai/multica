@@ -257,6 +257,7 @@
     "unarchive": "채팅 보관 해제"
   },
   "supplement": {
+    "delivering": "현재 실행에 전송 중",
     "pending": "현재 실행에 전송 대기 중",
     "delivered": "엔진에서 수락함",
     "failed": "전달되지 않음",

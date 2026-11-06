@@ -261,6 +261,7 @@
     "delete": "Supprimer la discussion"
   },
   "supplement": {
+    "delivering": "Envoi à l’exécution actuelle",
     "pending": "En attente d’envoi à l’exécution actuelle",
     "delivered": "Accepté par le moteur",
     "failed": "Non livré",

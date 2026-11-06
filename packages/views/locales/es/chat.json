@@ -261,6 +261,7 @@
     "agent_settings": "Ajustes del agente"
   },
   "supplement": {
+    "delivering": "Enviando a la ejecución actual",
     "pending": "Pendiente de envío a la ejecución actual",
     "delivered": "Aceptado por el motor",
     "failed": "No entregado",

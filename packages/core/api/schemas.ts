@@ -998,7 +998,7 @@ const ChatQuickActionSchema = z.object({
 export const ChatMessageSchema = z.object({
   supplement: z.object({
     task_id: z.string(),
-    status: z.enum(["pending", "delivered", "failed", "unknown"]).catch("unknown"),
+    status: z.enum(["pending", "delivering", "delivered", "failed", "unknown"]).catch("unknown"),
     failure_reason: z.string().nullish(),
   }).optional().catch(undefined),
   id: z.string(),

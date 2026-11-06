@@ -963,6 +963,7 @@ describe("ChatMessageList onboarding starter cards", () => {
 describe("Chat guidance receipts", () => {
   it.each([
     ["pending", "Waiting to send to current run"],
+    ["delivering", "Sending to current run"],
     ["delivered", "Accepted by engine"],
     ["failed", "Not delivered"],
     ["unknown", "Delivery uncertain"],
