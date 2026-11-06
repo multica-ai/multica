@@ -1412,7 +1412,8 @@
       "pinned_name": "{{title}} (fijada)",
       "copy_link": "Copiar enlace",
       "link_copied": "Enlace copiado",
-      "close_right": "Cerrar las pestañas a la derecha"
+      "close_right": "Cerrar las pestañas a la derecha",
+      "attention": "Actualizado"
     },
     "updates": {
       "title": "Actualizaciones",

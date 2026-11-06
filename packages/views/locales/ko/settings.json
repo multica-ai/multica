@@ -1144,7 +1144,8 @@
       "pinned_name": "{{title}} (고정됨)",
       "copy_link": "링크 복사",
       "link_copied": "링크를 복사했습니다",
-      "close_right": "오른쪽 탭 닫기"
+      "close_right": "오른쪽 탭 닫기",
+      "attention": "업데이트됨"
     },
     "updates": {
       "title": "업데이트",

@@ -1412,7 +1412,8 @@
       "pinned_name": "{{title}} (pinned)",
       "copy_link": "Copy link",
       "link_copied": "Link copied",
-      "close_right": "Close tabs to the right"
+      "close_right": "Close tabs to the right",
+      "attention": "Updated"
     },
     "updates": {
       "title": "Updates",
