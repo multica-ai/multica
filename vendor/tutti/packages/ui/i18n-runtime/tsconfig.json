@@ -1,5 +1,5 @@
 {
-  "extends": "@tutti-os/config-tsconfig/base.json",
+  "extends": "../../configs/tsconfig/base.json",
   "compilerOptions": {
     "rootDir": "src"
   },
