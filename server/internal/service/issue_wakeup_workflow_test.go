@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -75,5 +76,50 @@ func TestRetryKeepsWorkflowHandoffBrief(t *testing.T) {
 	}
 	if got := retry(testutil.Cols{"handoff_note": "retired assignment note"}); got.HandoffNote.Valid {
 		t.Fatalf("retry revived a retired note: %q", got.HandoffNote.String)
+	}
+}
+
+func TestManualRerunBindsToCurrentWorkflowStep(t *testing.T) {
+	f, _, issue, agent := wakeFixture(t)
+	ctx := context.Background()
+	source := f.Task(t, agent, testutil.Cols{
+		"issue_id": issue, "status": "failed", "workflow_step": "in_progress",
+		"session_id": "existing-provider-session",
+		"runtime_id": testutil.Raw("(SELECT runtime_id FROM agent WHERE id='" + agent + "')"),
+	})
+	f.Exec(t, "UPDATE issue SET status='blocked',assignee_type='agent',assignee_id=$2 WHERE id=$1", issue, agent)
+	rerun, err := f.svc.TaskSvc.RerunIssue(ctx, issue, parseTestUUID(t, source), pgtype.UUID{}, parseTestUUID(t, f.UserID), false, func(db.Agent) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rerun.WorkflowStep.String != "blocked" || rerun.RerunOfTaskID != parseTestUUID(t, source) {
+		t.Fatalf("manual rerun must bind to the current step while retaining its source: step=%q source=%v", rerun.WorkflowStep.String, rerun.RerunOfTaskID)
+	}
+	original, err := f.q.GetAgentTask(ctx, parseTestUUID(t, source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if original.WorkflowStep.String != "in_progress" {
+		t.Fatalf("manual rerun rebound its source to %q", original.WorkflowStep.String)
+	}
+}
+
+func TestJoinedWakeupKeepsTheWaitingRunsWorkflowStep(t *testing.T) {
+	f, s, issue, agent := wakeFixture(t)
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", EventTypes: []string{"comment.created"}, Instruction: "Inspect the reply"})
+	waiting := wakeWaitingRun(t, f, issue, agent, f.UserID)
+	f.Exec(t, "UPDATE agent_task_queue SET workflow_step='todo' WHERE id=$1", waiting)
+	f.Exec(t, "UPDATE issue SET status='blocked' WHERE id=$1", issue)
+	f.Comment(t, util.UUIDToString(issue), "a reply")
+	wakeDispatch(t, s, w)
+	if notes := wakeClaim(t, f, s, waiting); notes == "" {
+		t.Fatal("wakeup did not join the waiting run")
+	}
+	task, err := f.q.GetAgentTask(context.Background(), parseTestUUID(t, waiting))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.WorkflowStep.String != "todo" {
+		t.Fatalf("joined wakeup rebound its waiting run to %q", task.WorkflowStep.String)
 	}
 }

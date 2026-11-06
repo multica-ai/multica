@@ -92,6 +92,8 @@
     "autopilots": "自动化",
     "switch_workspace": "切换工作区",
     "invitation_from": "{{name}} 邀请你加入",
+    "pin_workspace": "置顶工作区",
+    "unpin_workspace": "取消置顶",
     "open_in_new_window": "在新窗口打开",
     "open_in_new_window_click": "点击",
     "open_in_other_window": "已在其他窗口打开",

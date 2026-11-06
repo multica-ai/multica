@@ -7,6 +7,7 @@ import { renderWithI18n } from "../test/i18n";
 const uploadMock = vi.hoisted(() => vi.fn());
 const toastError = vi.hoisted(() => vi.fn());
 const toastSuccess = vi.hoisted(() => vi.fn());
+const cropDismiss = vi.hoisted(() => ({ request: (_open: boolean) => {} }));
 
 vi.mock("sonner", () => ({
   toast: { error: toastError, success: toastSuccess },
@@ -26,15 +27,19 @@ vi.mock("./avatar-crop-dialog", () => ({
   AvatarCropDialog: ({
     open,
     onCropped,
+    onOpenChange,
   }: {
     open: boolean;
     onCropped: (file: File) => void;
-  }) =>
-    open ? (
+    onOpenChange: (open: boolean) => void;
+  }) => {
+    cropDismiss.request = onOpenChange;
+    return open ? (
       <button type="button" onClick={() => onCropped(imageFile())}>
         crop
       </button>
-    ) : null,
+    ) : null;
+  },
 }));
 
 import { AvatarUploadControl } from "./avatar-upload-control";
@@ -249,6 +254,29 @@ describe("AvatarUploadControl", () => {
     uploadImage(container);
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("network down"));
+  });
+
+  it("blocks dismissal before the upload busy state commits and releases it on failure", async () => {
+    let rejectUpload!: (reason: Error) => void;
+    uploadMock.mockImplementationOnce(() => {
+      // A close request can reach the previous render's handler before busy
+      // commits, while the cropper is handing off to the upload.
+      cropDismiss.request(false);
+      return new Promise((_, reject) => { rejectUpload = reject; });
+    });
+    const { container } = renderWithI18n(
+      <AvatarUploadControl variant="agent" value={null} onUploaded={vi.fn()} />,
+    );
+
+    uploadImage(container);
+    expect(uploadMock).toHaveBeenCalledTimes(1);
+    const dialogStayedOpen = screen.queryByRole("button", { name: "crop" }) !== null;
+
+    await act(async () => rejectUpload(new Error("network down")));
+    expect(dialogStayedOpen).toBe(true);
+    expect(toastError).toHaveBeenCalledWith("network down");
+    act(() => cropDismiss.request(false));
+    expect(screen.queryByRole("button", { name: "crop" })).not.toBeInTheDocument();
   });
 
   it("cannot be opened when the caller lacks edit permission", () => {

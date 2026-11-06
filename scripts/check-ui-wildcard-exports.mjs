@@ -204,6 +204,9 @@ while (queue.length > 0) {
 }
 
 const dead = [...guarded]
+  // UI Vitest discovers these tests without a product import. Keep them in
+  // guarded so their imports cannot become new reachability roots.
+  .filter((file) => !/\.test\.(ts|tsx)$/.test(file))
   .filter((file) => !reached.has(file))
   .map((file) => relative(repoRoot, file).split(sep).join("/"))
   .sort();
