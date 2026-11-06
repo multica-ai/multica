@@ -1080,8 +1080,8 @@ export function InboxPage() {
             {inboxZeroCount === 0 ? (
               <MulticaBleedMark
                 key={inboxZeroRises ? "rise" : "rest"}
-                riseDelay={inboxZeroRises ? 0.2 : undefined}
-                className="pointer-events-none absolute -right-[8%] -bottom-[32%] w-[min(560px,58%)] text-muted"
+                enterDelay={inboxZeroRises ? 0.2 : undefined}
+                className="pointer-events-none absolute -right-[14%] -bottom-[26%] w-[min(560px,58%)] text-muted"
               />
             ) : (
               <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
