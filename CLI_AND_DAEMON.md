@@ -301,6 +301,14 @@ The daemon auto-detects these AI CLIs on your PATH:
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
+On macOS, Pi and Oh-My-Pi require kernel support for process identity signalling
+to clean up detached tools safely. Each run checks this operation before launching
+the runtime. An unsupported or denied operation fails startup with a compatibility
+error instead of allowing work to start without the required cleanup capability.
+This is a capability check, not a macOS version check. Existing runs blocked by
+unconfirmed cleanup still require inspection and a manual rerun; the startup check
+does not clear those blocks or establish that earlier background processes exited.
+
 ### How It Works
 
 1. On start, the daemon detects installed agent CLIs and registers a runtime for each agent in each watched workspace
