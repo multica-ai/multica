@@ -10,7 +10,7 @@ import { ProjectsPage } from "./projects-page";
 const mocks = vi.hoisted(() => ({
   projects: [] as Project[],
   members: [] as Array<{ user_id: string; name: string; role: string }>,
-  agents: [] as Array<{ id: string; name: string; archived_at: string | null }>,
+  agents: [] as Array<{ id: string; name: string; archived_at: string | null; owner_id?: string }>,
   pins: [] as Array<{ item_type: string; item_id: string }>,
   updateProject: vi.fn(),
   deleteProject: vi.fn(),
@@ -55,7 +55,7 @@ vi.mock("@tanstack/react-query", () => ({
 vi.mock("@multica/core/projects", () => ({
   projectListOptions: () => ({ queryKey: ["projects"] }),
   useUpdateProject: () => ({ mutate: mocks.updateProject }),
-  useDeleteProject: () => ({ mutate: mocks.deleteProject }),
+  useDeleteProject: () => ({ mutateAsync: mocks.deleteProject }),
   useProjectViewStore: (selector: (state: unknown) => unknown) =>
     selector(mocks.projectViewState),
 }));
@@ -94,6 +94,10 @@ vi.mock("@multica/core/workspace/hooks", () => ({
     getActorInitials: () => "TL",
     getActorAvatarUrl: () => null,
   }),
+}));
+
+vi.mock("../../common/actor-avatar", () => ({
+  ActorAvatar: () => null,
 }));
 
 vi.mock("@multica/core/modals", () => ({
@@ -283,6 +287,42 @@ beforeEach(() => {
   mocks.projectViewState.sortDirection = "asc";
   mocks.projectViewState.hiddenColumns = [];
   mocks.projectViewState.filters = { statuses: [], priorities: [], leads: [] };
+});
+
+describe("ProjectsPage deletion permissions", () => {
+  it.each(["compact", "comfortable"])("checks each project in %s mode", (mode) => {
+    mocks.projectViewState.viewMode = mode;
+    mocks.members[0]!.role = "member";
+    mocks.projects = [
+      { ...PROJECT, creator_type: "member", creator_id: "user-1" },
+      { ...PROJECT, id: "other", title: "Other project", creator_type: "member", creator_id: "someone" },
+    ];
+    renderProjects();
+    expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(1);
+  });
+
+  it("uses current agent ownership for row deletion", () => {
+    mocks.members[0]!.role = "member";
+    mocks.projects = [{ ...PROJECT, creator_type: "agent", creator_id: "owned-agent" }];
+    mocks.agents = [{ id: "owned-agent", name: "Agent", archived_at: null, owner_id: "user-1" }];
+    renderProjects();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+  });
+
+  it("offers batch deletion only when every selected project is deletable", async () => {
+    mocks.members[0]!.role = "member";
+    mocks.projects = [
+      { ...PROJECT, creator_type: "member", creator_id: "user-1" },
+      { ...PROJECT, id: "other", title: "Other project" },
+    ];
+    const user = userEvent.setup();
+    renderProjects();
+    const checkboxes = screen.getAllByRole("checkbox", { name: "Select row" });
+    await user.click(checkboxes[0]!);
+    expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(2);
+    await user.click(checkboxes[1]!);
+    expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(1);
+  });
 });
 
 describe("ProjectsPage compact row navigation", () => {

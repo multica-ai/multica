@@ -608,7 +608,7 @@ export function AgentCreatePanel({
       const md = editorRef.current?.getMarkdown() ?? "";
       if (md) setManual({ description: md });
     }
-    if (!draft.manual.assigneeId && actor) {
+    if (data?.manual_assignee_cleared !== true && !draft.manual.assigneeId && actor) {
       setManual({ assigneeType: actor.type, assigneeId: actor.id });
     }
     setLastMode("manual");
@@ -616,6 +616,7 @@ export function AgentCreatePanel({
     const carry: Record<string, unknown> = {};
     if (parentIssueId) carry.parent_issue_id = parentIssueId;
     if (parentIssueIdentifier) carry.parent_issue_identifier = parentIssueIdentifier;
+    if (data?.manual_assignee_cleared === true) carry.manual_assignee_cleared = true;
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
   };
 
