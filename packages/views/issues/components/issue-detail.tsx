@@ -15,6 +15,7 @@ import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
 import { IssueDuplicateBanner, IssueDuplicatesSection, isDuplicateIssue } from "./issue-duplicates";
 import {
+  AlertTriangle,
   Archive,
   Calendar,
   CalendarClock,
@@ -1280,7 +1281,7 @@ export function IssueLoadError({
         </div>
       )}
       <CollectionPageState
-        icon={FileQuestion}
+        icon={AlertTriangle}
         title={t(($) => $.detail.load_failed)}
         actions={
           <>
