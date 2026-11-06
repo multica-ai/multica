@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -36,8 +36,12 @@ async function fixture(options: { repositoryUrl?: string; max?: number } = {}) {
     maxEnvironments: options.max ?? 2,
     defaultIdleMinutes: 120,
   });
-  const record = async (state: string, owner?: string) => {
-    const environmentId = randomUUID();
+  const record = async (
+    state: string,
+    owner?: string,
+    environmentId: string = randomUUID(),
+    checkout: string = directory,
+  ) => {
     await writeFile(
       join(directory, "state/environments", `${environmentId}.json`),
       JSON.stringify(
@@ -46,12 +50,15 @@ async function fixture(options: { repositoryUrl?: string; max?: number } = {}) {
           environmentId,
           projectRef: storage.projectRef,
           commit: "0".repeat(40),
-          checkout: directory,
+          checkout,
           mode: "desktop",
           dataMode: "fixture",
           state,
           apiOrigin: "http://test.invalid",
-          components: owner ? { owner } : {},
+          components: {
+            runtimeAttempted: false,
+            ...(owner ? { owner } : {}),
+          },
         }),
       ),
     );
@@ -133,4 +140,38 @@ it("fails a start when every environment slot is in use, naming the holders", as
   expect(job.problem?.message).toContain("alice");
   expect(job.problem?.message).toContain("bob");
   expect(job.problem?.message).not.toContain("carol");
+});
+
+it("removes a stopped environment's worktree and branch from the mirror", async () => {
+  const remote = await mkdtemp(join(tmpdir(), "verification-remote-"));
+  cleanups.push(() => rm(remote, { recursive: true, force: true }));
+  const run = (cwd: string, ...args: string[]) =>
+    exec("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+      cwd,
+    }).then(({ stdout }) => stdout.trim());
+  await run(remote, "init", "-b", "main");
+  await writeFile(join(remote, "a.txt"), "a");
+  await run(remote, "add", ".");
+  await run(remote, "commit", "--no-gpg-sign", "-m", "a");
+  const { directory, jobs, environments, record } = await fixture({
+    repositoryUrl: remote,
+  });
+  const commit = await environments.fetchCommit("main");
+  const environmentId = randomUUID(),
+    branch = `codex/verification-${environmentId.slice(0, 8)}`,
+    checkout = join(directory, "state/worktrees", environmentId),
+    mirror = join(directory, "shared/repository.git");
+  await run(mirror, "worktree", "add", "-b", branch, checkout, commit);
+  await record("prepared", undefined, environmentId, checkout);
+  const receipt = await jobs.submit("env.stop", { environmentId }, "stop");
+  if (receipt.kind !== "accepted") throw new Error("Expected a job");
+  await until(
+    () => jobs.get(receipt.jobId),
+    (job) => job.state === "completed",
+  );
+  await expect(stat(checkout)).rejects.toThrow();
+  expect(await run(mirror, "branch", "--list", branch)).toBe("");
+  expect(await environments.get(environmentId)).toMatchObject({
+    state: "stopped",
+  });
 });

@@ -57,13 +57,13 @@ bash scripts/verification/install-daemon.sh
 claude mcp add --scope user --transport http multica-verification http://127.0.0.1:47311/mcp
 ```
 
-`scripts/verification/uninstall-daemon.sh` 停止守护进程（它会停止并清理所有环境）并移除 launchd 服务；工具链、构建缓存和仓库镜像保留。
+`scripts/verification/uninstall-daemon.sh` 先通过管理台停止所有环境，再停止守护进程并移除 launchd 服务；工具链、构建缓存和仓库镜像保留。
 
 ## 守护进程与环境生命周期
 
 - 守护进程是唯一的验证宿主。所有 MCP 会话共用它的环境、任务和数据快照，会话断开不影响环境；`job_query` 能查到其他会话提交的任务。
 - 环境属于守护进程，直到有人调用 `env_stop`、在管理台停止，或者超过空闲时间。任何带 `environmentId` 的工具调用都会刷新最近使用时间。
-- 守护进程重启时会回收上一个进程留下的环境；被强制结束时，下一次启动同样回收。
+- 守护进程重启（包括崩溃后被 launchd 拉起）时保留环境：重新探测仍在运行的 Desktop 环境并继续管理和守护，最近使用时间从重启时刻重新计算；正在准备、启动或停止的环境，以及 `liveReadOnly` 环境（浏览器随守护进程退出）会被停止并清理。
 - 管理台每 10 秒采样一次：磁盘、Docker、已安装的 Multica、环境名额，以及每个环境的应用、daemon、后端、数据库容器是否存活和探测延迟，保留约 15 分钟历史；也可以查看任务、日志末尾和停止环境。
 
 ## 环境
@@ -116,7 +116,9 @@ claude mcp add --scope user --transport http multica-verification http://127.0.0
 
 ## 数据副本
 
-`data_restore` 每次导入一份新副本：会话历史冻结，运行中的轮次转为取消，队列暂停，工作目录重新绑定，云端引用移除。workspace 副本恢复状态、工作流、项目、事项、父子关系、标签、评论和附件；人员执行身份和自动工作流执行不随内容复制。含执行 source context、自定义属性定义或项目执行资源的选择明确返回不支持。
+`data_restore` 每次导入一份新副本：会话历史冻结，运行中的轮次转为取消，队列暂停，工作目录重新绑定，云端引用移除。未完成的提交状态随副本保留：排队项连同暂停原因保留；"需要确认"的提交保持该状态和原因；复制时正在发送的提交转为"需要确认"。
+
+SQLite 导出不按 schema 版本号判断，而是核对它读取的表和列是否存在；会话库 schema 6 起额外导出未完成的提交状态，与 Local API 快照的格式一致。缺少所需列时返回 `unsupportedVersion` 并指明缺失的列。workspace 副本恢复状态、工作流、项目、事项、父子关系、标签、评论和附件；人员执行身份和自动工作流执行不随内容复制。含执行 source context、自定义属性定义或项目执行资源的选择明确返回不支持。
 
 导入响应丢失时 job 为 `unknown`，`resourceRefs` 中保留副本的 datasetId；可以用 `state_read` 查看副本是否存在，再决定是否导入另一份。
 
@@ -155,7 +157,3 @@ node scripts/verification/check-production.mjs
 (cd server && go test -race -tags=verificationdev ./internal/verificationworkspace ./internal/handler -run '^TestVerification|^TestValidateGraphBeforeImport$|^TestAttachmentIntegrityBeforeMutation$' -count=1)
 (cd server && go test -race ./internal/handler -run '^TestVerificationProductionRoutesStayAbsent$' -count=1)
 ```
-
-## 已知限制
-
-SQLite 导出器只识别会话库 schema 4 和 5。会话库升级到 schema 7 后，配置 `databaseFile` 的来源会返回 `unsupportedVersion`，`test:integration` 中依赖该路径的用例同样失败；不配置 `databaseFile` 时走 Local API 导出。

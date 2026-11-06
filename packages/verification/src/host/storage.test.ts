@@ -8,6 +8,8 @@ import { createInterface } from "node:readline";
 import { afterEach, describe, expect, it } from "vitest";
 import { createVerificationHost } from "./host.js";
 import { HostStorage } from "./storage.js";
+import { randomUUID } from "node:crypto";
+import { environmentSchema } from "../contracts/resources.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -51,6 +53,48 @@ describe("host ownership and crash recovery", () => {
     await first.close();
     await second.close();
     expect(await readdir(join(options.stateRoot, "hosts"))).toEqual([]);
+  });
+
+  it("keeps a stable host's environments across a restart and reclaims ones whose runtime died", async () => {
+    const options = await fixture();
+    const first = await createVerificationHost({
+      ...options,
+      hostId: "daemon",
+    });
+    const environmentId = randomUUID();
+    const record = join(
+      first.stateDirectory,
+      "environments",
+      `${environmentId}.json`,
+    );
+    await writeFile(
+      record,
+      JSON.stringify(
+        environmentSchema.parse({
+          schemaVersion: 1,
+          environmentId,
+          projectRef: first.projectRef,
+          commit: "0".repeat(40),
+          checkout: options.root,
+          mode: "desktop",
+          dataMode: "fixture",
+          state: "ready",
+          apiOrigin: "http://127.0.0.1:1",
+          components: { runtimeAttempted: false },
+        }),
+      ),
+    );
+    await first.close({ keepEnvironments: true });
+    expect(JSON.parse(await readFile(record, "utf8")).state).toBe("ready");
+    const restarted = await createVerificationHost({
+      ...options,
+      hostId: "daemon",
+    });
+    cleanups.push(() => restarted.close());
+    expect(restarted.stateDirectory).toBe(first.stateDirectory);
+    expect(await restarted.environments.get(environmentId)).toMatchObject({
+      state: "stopped",
+    });
   });
 
   it("collects a killed host's directory once without replaying its operation", async () => {

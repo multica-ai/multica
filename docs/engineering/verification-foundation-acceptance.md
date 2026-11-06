@@ -25,7 +25,7 @@
 | --- | --- |
 | 验证包 TypeScript、lint | 通过 |
 | `test:manual` | 26 项通过，含远端分支拉取、环境名额、守护进程 MCP 与管理台 |
-| `test:integration` | 8 项中 7 项通过，覆盖真实 Go service/SQLite/Local API、受控 provider 和 Chromium 页面操作。会话历史复制用例失败：SQLite 导出器只识别 schema 4、5，而会话库已升级到 7；未修改的 origin/main 上同样失败 |
+| `test:integration` | 8 项通过，覆盖真实 Go service/SQLite（当前 schema）/Local API、受控 provider 和 Chromium 页面操作 |
 | Go `verificationdev` 测试（`internal/daemon/localhost`） | 通过 |
 | Desktop `typecheck:node` | 通过 |
 | `scripts/dev-env.test.sh` | 通过，含在调用方容器内建库且不启动共享容器 |

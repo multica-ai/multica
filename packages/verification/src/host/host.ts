@@ -30,6 +30,11 @@ export interface HostOptions {
   repositoryUrl?: string;
   maxEnvironments?: number;
   defaultIdleMinutes?: number;
+  /**
+   * A stable host directory name. The resident daemon uses one so a restart
+   * takes over its own state and keeps environments whose runtime survived.
+   */
+  hostId?: string;
   probe?: Probe;
   bindings?: SourceBinding[];
 }
@@ -46,13 +51,11 @@ export async function createVerificationHost(options: HostOptions) {
     options.stateRoot ??
     join(homedir(), ".multica", "verification", digest(projectRoot));
   await mkdir(join(sharedRoot, "hosts"), { recursive: true, mode: 0o700 });
-  await collectAbandonedHosts(options, projectRoot, sharedRoot);
-  return openHost(
-    options,
-    projectRoot,
-    sharedRoot,
-    join(sharedRoot, "hosts", randomUUID()),
-  );
+  const hostRoot = join(sharedRoot, "hosts", options.hostId ?? randomUUID());
+  await collectAbandonedHosts(options, projectRoot, sharedRoot, hostRoot);
+  return openHost(options, projectRoot, sharedRoot, hostRoot, {
+    adopt: !!options.hostId,
+  });
 }
 
 async function openHost(
@@ -60,6 +63,7 @@ async function openHost(
   projectRoot: string,
   sharedRoot: string,
   hostRoot: string,
+  recovery: { adopt: boolean } = { adopt: false },
 ) {
   const storage = await HostStorage.open({ projectRoot, stateRoot: hostRoot });
   let snapshotRoot: string | undefined;
@@ -81,7 +85,7 @@ async function openHost(
       beforeStart: () =>
         collectAbandonedHosts(options, projectRoot, sharedRoot, hostRoot),
     });
-    await environments.recover();
+    await environments.recover(recovery);
     const state = new State(environments);
     const pages = new Pages(environments);
     const data = new DataService(snapshotRoot, environments);
@@ -97,11 +101,16 @@ async function openHost(
       data,
       state,
       pages,
-      close(): Promise<void> {
+      /**
+       * Stops the host. By default its environments are stopped and its
+       * directory removed; `keepEnvironments` leaves them running for the
+       * next process with the same `hostId`.
+       */
+      close(closeOptions: { keepEnvironments?: boolean } = {}): Promise<void> {
         closing ??= (async () => {
           await jobs.close();
           await pages.close();
-          const clean = await environments.close();
+          const clean = await environments.close(closeOptions);
           await removeSnapshots();
           await storage.close();
           if (clean) await rm(storage.root, { recursive: true, force: true });

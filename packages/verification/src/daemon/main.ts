@@ -78,6 +78,7 @@ async function main() {
   await mkdir(daemonDirectory, { recursive: true, mode: 0o700 });
   const host = await createVerificationHost({
     projectRoot: options.projectRoot,
+    hostId: "daemon",
     maxEnvironments: options.maxEnvironments,
     defaultIdleMinutes: options.idleMinutes,
     ...(options.repositoryUrl ? { repositoryUrl: options.repositoryUrl } : {}),
@@ -104,7 +105,7 @@ async function main() {
       },
     });
   } catch (error) {
-    await host.close();
+    await host.close({ keepEnvironments: true });
     throw error;
   }
   monitor.start();
@@ -116,7 +117,8 @@ async function main() {
     stopping ??= (async () => {
       await monitor.stop();
       await daemon.close();
-      await host.close();
+      // Environments survive a daemon restart; the next start adopts them.
+      await host.close({ keepEnvironments: true });
       await rm(record, { force: true });
     })().catch(() => {
       process.exitCode = 1;

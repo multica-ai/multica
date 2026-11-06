@@ -59,6 +59,13 @@ type VerificationConversation struct {
 		Queue struct {
 			Items []json.RawMessage `json:"items"`
 		} `json:"queue"`
+		// Open submissions as the snapshot reports them (schema 6 and later).
+		Submissions []struct {
+			RequestID     string          `json:"request_id"`
+			State         string          `json:"state"`
+			Item          json.RawMessage `json:"item"`
+			BlockedReason string          `json:"blocked_reason"`
+		} `json:"submissions"`
 		ForkedFromID     string          `json:"forked_from_id"`
 		ForkedFromTurnID string          `json:"forked_from_turn_id"`
 		SideContext      json.RawMessage `json:"side_context"`
@@ -132,6 +139,12 @@ func (s *Service) VerificationImport(ctx context.Context, scopeID int64, input V
 			}
 			mapping[item.RequestID] = verificationID(input.RestoreID, item.RequestID)
 		}
+		for _, submission := range source.Snapshot.Submissions {
+			if submission.RequestID == "" || (submission.State != "queued" && submission.State != "starting" && submission.State != "recovery_required") {
+				return nil, ErrInvalidRequest
+			}
+			mapping[submission.RequestID] = verificationID(input.RestoreID, submission.RequestID)
+		}
 	}
 	for _, source := range input.Conversations {
 		id := mapping[source.OriginalID]
@@ -186,33 +199,52 @@ func (s *Service) VerificationImport(ctx context.Context, scopeID int64, input V
 			batch.Summary = &store.SummaryPatch{Status: &idle, UpdatedAt: time.Now().UTC()}
 			history = append(history, batch)
 		}
-		for index, raw := range source.Snapshot.Queue.Items {
-			var item map[string]json.RawMessage
-			if err := json.Unmarshal(raw, &item); err != nil {
-				return nil, err
+		// Submissions that were being sent or need review are not queue entries;
+		// the snapshot's queue view lists the latter, so keep them out of the queue.
+		review := map[string]string{}
+		reasons := map[string]string{}
+		for _, submission := range source.Snapshot.Submissions {
+			switch submission.State {
+			case "recovery_required":
+				review[submission.RequestID] = submission.BlockedReason
+			case "starting":
+				review[submission.RequestID] = verificationReviewReason
+			case "queued":
+				reasons[submission.RequestID] = submission.BlockedReason
 			}
-			var oldID string
-			if err := json.Unmarshal(item["requestId"], &oldID); err != nil || oldID == "" {
-				return nil, ErrInvalidRequest
-			}
-			mapping[oldID] = verificationID(input.RestoreID, oldID)
-			rewritten, err := verificationRewrite(raw, mapping)
+		}
+		queued := 0
+		for _, raw := range source.Snapshot.Queue.Items {
+			oldID, rewritten, err := verificationQueueItem(raw, mapping)
 			if err != nil {
 				return nil, err
 			}
-			var queued map[string]any
-			if err := json.Unmarshal(rewritten, &queued); err != nil {
+			if _, skip := review[oldID]; skip {
+				continue
+			}
+			queued++
+			count := int64(queued)
+			batch := store.Batch{Queue: &store.QueueChange{Revision: count, Paused: true, Append: &store.QueueItem{RequestID: mapping[oldID], Item: rewritten}}, Summary: &store.SummaryPatch{QueueCount: &count, UpdatedAt: time.Now().UTC()}}
+			if reason := reasons[oldID]; reason != "" {
+				batch.Submissions = []store.SubmissionChange{{RequestID: mapping[oldID], State: "queued", Reason: reason}}
+			}
+			history = append(history, batch)
+		}
+		history = append(history, store.Batch{Queue: &store.QueueChange{Revision: int64(queued + 1), Paused: true}})
+		for _, submission := range source.Snapshot.Submissions {
+			reason, ok := review[submission.RequestID]
+			if !ok || len(submission.Item) == 0 || string(submission.Item) == "{}" {
+				continue
+			}
+			_, rewritten, err := verificationQueueItem(submission.Item, mapping)
+			if err != nil {
 				return nil, err
 			}
-			delete(queued, "agents")
-			delete(queued, "references")
-			queued["requestId"] = mapping[oldID]
-			queued["display"] = map[string]any{"id": mapping[oldID], "clientSubmitId": mapping[oldID]}
-			rewritten, _ = json.Marshal(queued)
-			count := int64(index + 1)
-			history = append(history, store.Batch{Queue: &store.QueueChange{Revision: int64(index + 1), Paused: true, Append: &store.QueueItem{RequestID: mapping[oldID], Item: rewritten}}, Summary: &store.SummaryPatch{QueueCount: &count, UpdatedAt: time.Now().UTC()}})
+			if reason == "" {
+				reason = verificationReviewReason
+			}
+			history = append(history, store.Batch{Submissions: []store.SubmissionChange{{RequestID: mapping[submission.RequestID], Item: rewritten, State: "recovery_required", Reason: reason}}})
 		}
-		history = append(history, store.Batch{Queue: &store.QueueChange{Revision: int64(len(source.Snapshot.Queue.Items) + 1), Paused: true}})
 		conversation := store.NewConversation{ID: id, ScopeID: scopeID, Provider: source.Snapshot.Conversation.Provider, Title: source.Snapshot.Conversation.Title, TitleMode: "manual", Cwd: cwd, PermissionMode: "default", ForkedFromID: mapping[source.Snapshot.ForkedFromID], ForkedFromTurnID: mapping[source.Snapshot.ForkedFromTurnID], CreatedAt: time.Now().UTC(), Receipt: &store.CommandReceipt{ScopeID: scopeID, RequestID: requestID, Fingerprint: fingerprint, Result: id, CreatedAt: time.Now().UTC()}}
 		if source.Snapshot.Conversation.SideSourceID != "" {
 			if mapping[source.Snapshot.Conversation.SideSourceID] == "" || len(source.Snapshot.SideContext) == 0 {
@@ -267,4 +299,35 @@ func verificationRewrite(raw json.RawMessage, mapping map[string]string) (json.R
 		return value
 	}
 	return json.Marshal(rewrite(value, ""))
+}
+
+// A copy cannot resume a send that was in flight, so it asks for review like
+// any send whose delivery is unknown.
+const verificationReviewReason = "This message was being sent when the conversation was copied. Review it before retrying."
+
+// verificationQueueItem remaps a queued prompt's identifiers for the copy and
+// returns its original request ID.
+func verificationQueueItem(raw json.RawMessage, mapping map[string]string) (string, json.RawMessage, error) {
+	var item map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &item); err != nil {
+		return "", nil, err
+	}
+	var oldID string
+	if err := json.Unmarshal(item["requestId"], &oldID); err != nil || oldID == "" {
+		return "", nil, ErrInvalidRequest
+	}
+	rewritten, err := verificationRewrite(raw, mapping)
+	if err != nil {
+		return "", nil, err
+	}
+	var queued map[string]any
+	if err := json.Unmarshal(rewritten, &queued); err != nil {
+		return "", nil, err
+	}
+	delete(queued, "agents")
+	delete(queued, "references")
+	queued["requestId"] = mapping[oldID]
+	queued["display"] = map[string]any{"id": mapping[oldID], "clientSubmitId": mapping[oldID]}
+	rewritten, err = json.Marshal(queued)
+	return oldID, rewritten, err
 }

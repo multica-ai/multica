@@ -58,7 +58,7 @@ func (v *V2) verificationRoute(w http.ResponseWriter, r *http.Request, c caller,
 			writeV2Error(w, err)
 			return true
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"schemaVersion": 1, "mapping": mapping, "policy": "frozen-history-paused-queue", "transformations": []string{"providerSessionsNotResumed", "runningTurnsCancelled", "queuesPaused", "workingDirectoryRebound", "cloudReferencesRemoved", "copiesUnarchived"}})
+		writeJSON(w, http.StatusOK, map[string]any{"schemaVersion": 1, "mapping": mapping, "policy": "frozen-history-paused-queue", "transformations": []string{"providerSessionsNotResumed", "runningTurnsCancelled", "queuesPaused", "inFlightSubmissionsNeedReview", "workingDirectoryRebound", "cloudReferencesRemoved", "copiesUnarchived"}})
 	case path == "/verification/fixture" && r.Method == http.MethodPost:
 		var body struct {
 			ConversationID    string `json:"conversationId"`

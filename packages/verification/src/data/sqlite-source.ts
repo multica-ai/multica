@@ -49,14 +49,27 @@ export async function exportSQLite(
   let committed = false;
   database.exec("BEGIN");
   try {
-    const version = rows("PRAGMA user_version")[0]?.user_version;
-    if (![4, 5].includes(Number(version)))
-      throw new VerificationError(
-        problem(
-          "unsupportedVersion",
-          "This SQLite source schema is not supported; use its versioned API exporter",
+    // Migrations are additive in practice, so check the columns this reader
+    // uses rather than pinning schema versions; a removed column fails closed.
+    const columns = (table: string) =>
+      new Set(
+        rows(`SELECT name FROM pragma_table_info('${table}')`).map((row) =>
+          String(row.name),
         ),
       );
+    for (const [table, required] of Object.entries(requiredColumns)) {
+      const present = columns(table);
+      const missing = required.filter((column) => !present.has(column));
+      if (missing.length)
+        throw new VerificationError(
+          problem(
+            "unsupportedVersion",
+            `This SQLite source lacks ${table}.${missing.join(`, ${table}.`)}; use its API exporter`,
+          ),
+        );
+    }
+    // Schema 6 added durable submission state; older stores have none.
+    const hasSubmissions = columns("prompt_submission").size > 0;
     const scope = rows(
       "SELECT id FROM scope WHERE api_origin = ? AND user_id = ? AND workspace_id = ?",
       binding.scope.apiOrigin,
@@ -177,6 +190,39 @@ export async function exportSQLite(
         "SELECT item FROM prompt_queue_item WHERE conversation_id = ? ORDER BY position",
         id,
       ).map((item) => json(item.item));
+      // The same open submissions the Local API snapshot reports; items that
+      // need review are not in the queue table, and the API view lists them too.
+      const submissions = hasSubmissions
+        ? rows(
+            "SELECT request_id, state, item, revision, blocked_reason FROM prompt_submission WHERE conversation_id = ? AND state IN ('queued', 'starting', 'recovery_required') ORDER BY updated_at, request_id",
+            id,
+          ).map((row) => ({
+            request_id: row.request_id,
+            state: row.state,
+            revision: row.revision,
+            item: json(row.item),
+            ...(row.blocked_reason
+              ? { blocked_reason: row.blocked_reason }
+              : {}),
+          }))
+        : [];
+      for (const submission of submissions) {
+        const item = submission.item;
+        if (
+          submission.state === "recovery_required" &&
+          item &&
+          typeof item === "object" &&
+          !Array.isArray(item) &&
+          !items.some(
+            (queued) =>
+              queued &&
+              typeof queued === "object" &&
+              !Array.isArray(queued) &&
+              queued.requestId === submission.request_id,
+          )
+        )
+          items.push(item);
+      }
       for (const item of items) {
         if (
           item &&
@@ -271,6 +317,7 @@ export async function exportSQLite(
             paused: !!queue?.paused,
             items,
           },
+          submissions,
           forked_from_id: conversation.forked_from_id,
           forked_from_turn_id: conversation.forked_from_turn_id,
           side_context: json(conversation.side),
@@ -295,3 +342,59 @@ export async function exportSQLite(
     database.close();
   }
 }
+
+const requiredColumns: Record<string, string[]> = {
+  scope: ["id", "api_origin", "user_id", "workspace_id"],
+  store_meta: ["key", "value"],
+  conversation: [
+    "id",
+    "scope_id",
+    "forked_from_id",
+    "forked_from_turn_id",
+    "side_source_id",
+    "last_seq",
+    "side",
+  ],
+  turn: [
+    "id",
+    "conversation_id",
+    "turn_index",
+    "request_id",
+    "status",
+    "started_at",
+    "completed_at",
+  ],
+  message: [
+    "id",
+    "conversation_id",
+    "turn_id",
+    "role",
+    "content",
+    "attachment_ids",
+    "steered",
+    "failed",
+    "created_at",
+  ],
+  event: [
+    "conversation_id",
+    "turn_id",
+    "seq",
+    "type",
+    "item_id",
+    "final",
+    "payload",
+    "created_at",
+  ],
+  prompt_queue: ["conversation_id", "revision", "paused"],
+  prompt_queue_item: ["conversation_id", "item", "position"],
+  attachment: [
+    "id",
+    "scope_id",
+    "conversation_id",
+    "file_name",
+    "media_type",
+    "path",
+    "size",
+    "sha256",
+  ],
+};

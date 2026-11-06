@@ -63,7 +63,7 @@ interface Problem {
 - `branch` 是远端分支名或可达 commit。守护进程在自己的部分克隆 `<state-root>/repository.git` 中拉取并固定 commit，再建独立 worktree；只验证已推送的代码。
 - 守护进程是唯一宿主，所有 MCP 会话共享环境、任务和快照。环境持续到 `env_stop`、管理台停止或空闲超时（默认 120 分钟无 MCP 调用，`idleTimeoutMinutes` 可覆盖）；任何带 `environmentId` 的调用都刷新使用时间。
 - 同时运行的环境数有上限（默认 2）。满额时 `env.start` 失败为 `instanceBusy`，并列出占用环境及其 owner；启动阶段按顺序执行。
-- 守护进程重启或被强制结束后，下一次启动回收上一个进程遗留的环境、worktree 和分支。
+- 守护进程使用固定的宿主目录。重启或被强制结束后，下一次启动接管该目录：仍在运行的 Desktop 环境继续保留，过渡中的环境和 `liveReadOnly` 环境被停止并清理。
 - 宿主重启后，未完成的任务标为 `interrupted`，不自动重放。响应丢失时按原 requestId 查询，不换 ID 重放。
 - `job_cancel` 请求协作取消，不撤销已产生的资源。
 
@@ -102,7 +102,7 @@ interface Problem {
 
 快照保存在系统临时目录下本次宿主私有的子目录（权限 0700），宿主关闭时删除，不写入状态目录。宿主重启后旧的 dataSnapshotId 不再可用。
 
-每次 `data.restore` 生成新的 datasetId 作为导入命名空间，副本 ID 由命名空间和原始 ID 派生。同一命名空间重复导入不会产生第二份。导入策略：历史冻结，运行中轮次转为取消，队列暂停，工作目录重新绑定，云端引用移除，provider 原生会话不恢复。
+每次 `data.restore` 生成新的 datasetId 作为导入命名空间，副本 ID 由命名空间和原始 ID 派生。同一命名空间重复导入不会产生第二份。导入策略：历史冻结，运行中轮次转为取消，队列暂停，工作目录重新绑定，云端引用移除，provider 原生会话不恢复。未完成的提交随副本保留：排队项保留暂停原因，"需要确认"保持原状态，复制时正在发送的提交转为"需要确认"（`inFlightSubmissionsNeedReview`）。SQLite 导出核对实际读取的列而不是 schema 版本号。
 
 不支持的内容（执行 source context、自定义属性定义、项目执行资源、Side 上下文的 API 导出）明确拒绝，不当作已复制。
 
