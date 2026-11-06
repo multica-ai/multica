@@ -128,3 +128,56 @@ func TestCreateRetryTask_InheritsSquadID(t *testing.T) {
 		t.Fatalf("child.IsLeaderTask = false, want true (provenance must survive retry)")
 	}
 }
+
+// TestCreateComment_LeaderAgentMentionOnAssignedSquadIssueIsLeaderTask covers
+// #8875: an explicit @agent mention of the leader of the squad the issue is
+// assigned to must enqueue a leader task (is_leader_task + squad_id), exactly
+// like the implicit squad-assignee wake, so the leader can record
+// `multica squad activity`. A plain @agent mention of a non-leader stays a
+// plain mention task.
+func TestCreateComment_LeaderAgentMentionOnAssignedSquadIssueIsLeaderTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newSquadCommentTriggerFixture(t)
+	issueID := uuidToString(fx.Issue.ID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+	})
+
+	w := httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "[@Leader](mention://agent/" + fx.LeaderID + ") and [@Other](mention://agent/" + fx.OtherID + ") please review",
+	})
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	load := func(agentID string) (string, bool) {
+		t.Helper()
+		var squadID *string
+		var isLeader bool
+		if err := testPool.QueryRow(ctx, `
+			SELECT squad_id::text, is_leader_task
+			FROM agent_task_queue
+			WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+		`, issueID, agentID).Scan(&squadID, &isLeader); err != nil {
+			t.Fatalf("load task for agent %s: %v", agentID, err)
+		}
+		if squadID == nil {
+			return "", isLeader
+		}
+		return *squadID, isLeader
+	}
+
+	if squadID, isLeader := load(fx.LeaderID); !isLeader || squadID != fx.SquadID {
+		t.Fatalf("leader mention task: is_leader_task=%v squad_id=%q, want true / %q", isLeader, squadID, fx.SquadID)
+	}
+	if squadID, isLeader := load(fx.OtherID); isLeader || squadID != "" {
+		t.Fatalf("non-leader mention task: is_leader_task=%v squad_id=%q, want false / empty", isLeader, squadID)
+	}
+}
