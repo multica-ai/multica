@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -416,7 +417,7 @@ func TestV2ManagesConversationsAndFolderProjects(t *testing.T) {
 		t.Fatalf("add folder = %d %v", status, project)
 	}
 	_, list := v2Do(t, srv, http.MethodGet, "/local/v2/folder-projects", nil, h)
-	if len(list["projects"].([]any)) != 1 {
+	if len(list["projects"].([]any)) != 2 {
 		t.Fatalf("folder projects = %v", list)
 	}
 	status, created := v2Do(t, srv, http.MethodPost, "/local/v2/sessions", map[string]any{"id": "conv-1", "provider": "claude", "folder_project_id": project["id"]}, h)
@@ -441,6 +442,31 @@ func TestV2ManagesConversationsAndFolderProjects(t *testing.T) {
 	}
 	if status, body := v2Do(t, srv, http.MethodPost, "/local/v2/sessions", map[string]any{"id": "conv-2", "provider": "gemini"}, h); status != http.StatusBadRequest {
 		t.Fatalf("unknown provider = %d %v", status, body)
+	}
+}
+
+func TestV2InitializesDefaultFolderBeforeAnyConversation(t *testing.T) {
+	t.Parallel()
+	srv, _ := newV2Server(t)
+	h := v2Headers("user-1")
+	status, list := v2Do(t, srv, http.MethodGet, "/local/v2/folder-projects", nil, h)
+	if status != http.StatusOK || len(list["projects"].([]any)) != 1 {
+		t.Fatalf("fresh folder projects = %d %v", status, list)
+	}
+	project := list["projects"].([]any)[0].(map[string]any)
+	if project["title"] != "未分配项目" {
+		t.Fatalf("default title = %v", project)
+	}
+	if info, err := os.Stat(project["path"].(string)); err != nil || !info.IsDir() {
+		t.Fatalf("default directory unavailable: %v, %v", project, err)
+	}
+	_, again := v2Do(t, srv, http.MethodGet, "/local/v2/folder-projects", nil, h)
+	if !reflect.DeepEqual(list, again) {
+		t.Fatalf("default initialization is not idempotent: %v / %v", list, again)
+	}
+	status, created := v2Do(t, srv, http.MethodPost, "/local/v2/sessions", map[string]any{"id": "default-conv", "provider": "claude"}, h)
+	if status != http.StatusCreated || created["cwd"] != project["path"] {
+		t.Fatalf("default create = %d %v", status, created)
 	}
 }
 

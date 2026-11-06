@@ -105,6 +105,7 @@ import {
 } from "../platform/local-conversation-service";
 import { useLocalConversationPages } from "../platform/local-conversation-pages";
 import {
+  isDefaultFolderProject,
   projectForDirectory,
   sessionEntry,
   type LocalSessionEntry
@@ -450,7 +451,7 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
       const project = projectForDirectory(folderProjects, entry.cwd);
       setCollapsedProjects((previous) => {
         const next = new Set(previous);
-        next.delete(project?.id ?? "unassigned");
+        next.delete(project && !isDefaultFolderProject(project) ? project.id : "unassigned");
         return next;
       });
       select(id, entry.provider);
@@ -727,7 +728,7 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
         sequence,
         projectPath:
           folderProjects.find((project) => project.id === folderProjectId)
-            ?.path ?? null
+            ?.path ?? folderProjects.find(isDefaultFolderProject)?.path ?? null
       }
     });
     setArchived(false);

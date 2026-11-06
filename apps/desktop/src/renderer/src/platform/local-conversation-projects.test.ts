@@ -6,6 +6,20 @@ import { groupLocalConversations, projectForDirectory, type LocalSessionEntry } 
 const projects = [{ id: "a", title: "Shared title", path: "/repo-a" }, { id: "b", title: "Shared title", path: "/repo-b" }] as LocalFolderProject[];
 const session = (id: string, cwd = "/unregistered", archived = false) => ({ id, title: id, provider: "codex", cwd, archived, pinned: false, projectId: null, running: false, waitingForAnswer: false, preview: "", turnCount: 0, updatedAt: "" }) as LocalSessionEntry;
 describe("local conversation folder grouping", () => {
+  const defaultProject = { id: "unassigned:1", title: "未分配项目", path: "/profile/projects/1/unassigned", createdAt: "2026-11-06" };
+  it("shows the bound default folder in a fresh scope without a duplicate unassigned group", () => {
+    expect(groupLocalConversations([], [defaultProject], false, "")).toEqual([{ id: null, project: defaultProject, sessions: [] }]);
+    expect(groupLocalConversations([], [defaultProject], true, "")).toEqual([]);
+    expect(groupLocalConversations([], [defaultProject], false, "missing")).toEqual([]);
+  });
+  it("keeps legacy directories unchanged in the same default group while matching explicit projects", () => {
+    const rows = [session("default", defaultProject.path), session("legacy", "/old/private"), session("explicit", "/repo-a")];
+    const original = structuredClone(rows);
+    const groups = groupLocalConversations(rows, [defaultProject, ...projects], false, "");
+    expect(groups.map((group) => [group.id, group.sessions.map((entry) => entry.id)])).toEqual([["a", ["explicit"]], ["b", []], [null, ["default", "legacy"]]]);
+    expect(groups.at(-1)?.project).toBe(defaultProject);
+    expect(rows).toEqual(original);
+  });
   it("groups by working directory, preserves session ordering, and puts unregistered directories last", () => {
     const groups = groupLocalConversations([session("b-pinned", "/repo-b"), session("legacy"), session("a", "/repo-a"), session("b-recent", "/repo-b/"), session("cleared"), session("archived", "/repo-a", true)], projects, false, "");
     expect(groups.map((group) => [group.id, group.sessions.map((entry) => entry.id)])).toEqual([["a", ["a"]], ["b", ["b-pinned", "b-recent"]], [null, ["legacy", "cleared"]]]);

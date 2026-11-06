@@ -586,6 +586,17 @@ describe("local conversation execution indicators", () => {
 });
 
 describe("removing projects from the local conversation list", () => {
+  it("shows one bound default folder on first entry and uses it for a new draft", async () => {
+    mock.selected = "";
+    mock.folders = [folder("unassigned:1", "未分配项目", "/profile/projects/1/unassigned")];
+    mock.request.mockImplementation(async (_scope, method) => method === "providers" ? [{ id: "codex", available: true }] : []);
+    render(page());
+    const group = await screen.findByRole("region", { name: "未分配项目" });
+    expect(screen.getAllByRole("region", { name: "未分配项目" })).toHaveLength(1);
+    fireEvent.click(within(group).getByRole("button", { name: "新建项目会话：未分配项目" }));
+    await waitFor(() => expect(mock.panel.mock.calls.at(-1)?.[0].newConversationRequest?.projectPath).toBe("/profile/projects/1/unassigned"));
+    expect(window.desktopAPI.pickDirectory).not.toHaveBeenCalled();
+  });
   it("opens project actions for a pointer activation without compatibility mouse events", async () => {
     mock.folders = [folder("project-a", "Pointer project")];
     render(page());

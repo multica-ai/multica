@@ -6,7 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/localconversation/store"
+	"github.com/multica-ai/multica/server/internal/localconversation/store/sqlitedb"
 )
 
 func TestCreateChoosesTheWorkingDirectory(t *testing.T) {
@@ -21,8 +25,8 @@ func TestCreateChoosesTheWorkingDirectory(t *testing.T) {
 	if own.Title != DefaultTitle || own.TitleMode != "auto" {
 		t.Fatalf("default title = %q/%q", own.Title, own.TitleMode)
 	}
-	if info, err := os.Stat(own.Cwd); err != nil || !info.IsDir() || !strings.Contains(own.Cwd, filepath.Join("workdirs")) {
-		t.Fatalf("private cwd %q: %v", own.Cwd, err)
+	if info, err := os.Stat(own.Cwd); err != nil || !info.IsDir() || !strings.Contains(own.Cwd, filepath.Join("projects")) {
+		t.Fatalf("default cwd %q: %v", own.Cwd, err)
 	}
 
 	folder := t.TempDir()
@@ -54,6 +58,104 @@ func TestCreateChoosesTheWorkingDirectory(t *testing.T) {
 	}
 	if _, err := f.svc.AddFolderProject(ctx, f.scopeID, "relative/dir"); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("relative folder = %v", err)
+	}
+}
+
+func TestDefaultProjectSharesDirectoryWithoutMovingExistingConversations(t *testing.T) {
+	t.Parallel()
+	f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
+	ctx := context.Background()
+	f.create(t, "legacy", "claude")
+	first, err := f.svc.Create(ctx, CreateCommand{ScopeID: f.scopeID, ID: "first", Provider: "claude"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := f.svc.Create(ctx, CreateCommand{ScopeID: f.scopeID, ID: "second", Provider: "claude"})
+	if err != nil || second.Cwd != first.Cwd {
+		t.Fatalf("default directories differ: %q / %q, %v", first.Cwd, second.Cwd, err)
+	}
+	legacy, err := f.svc.Store().Conversation(ctx, "legacy")
+	if err != nil || legacy.Cwd != "/repo" {
+		t.Fatalf("existing conversation changed: %+v, %v", legacy, err)
+	}
+	otherScope, err := f.svc.Store().EnsureScope(ctx, store.Scope{APIOrigin: "https://api.multica.ai", UserID: "u", WorkspaceID: "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := f.svc.Create(ctx, CreateCommand{ScopeID: otherScope, ID: "other", Provider: "claude"})
+	if err != nil || other.Cwd == first.Cwd {
+		t.Fatalf("workspace directories not isolated: %+v, %v", other, err)
+	}
+}
+
+func TestDefaultProjectSurvivesRestart(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "c.sqlite")
+	var first sqlitedb.FolderProject
+	for _, name := range []string{"first open", "reopen"} {
+		t.Run(name, func(t *testing.T) {
+			svc, err := Open(ctx, Options{Path: path})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer svc.Close(ctx)
+			scopeID, err := svc.Store().EnsureScope(ctx, store.Scope{APIOrigin: "https://api.multica.ai", UserID: "u", WorkspaceID: "w"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			projects, err := svc.FolderProjects(ctx, scopeID)
+			if err != nil || len(projects) != 1 {
+				t.Fatalf("default projects = %+v, %v", projects, err)
+			}
+			if first.ID == "" {
+				first = projects[0]
+			} else if projects[0] != first {
+				t.Fatalf("default project changed on restart: %+v / %+v", first, projects[0])
+			}
+		})
+	}
+}
+
+func TestDefaultProjectConcurrentInitialization(t *testing.T) {
+	t.Parallel()
+	f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			projects, err := f.svc.FolderProjects(context.Background(), f.scopeID)
+			if err != nil || len(projects) != 1 {
+				t.Errorf("concurrent initialization = %+v, %v", projects, err)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func TestDefaultProjectUnavailableDoesNotCreateElsewhere(t *testing.T) {
+	t.Parallel()
+	f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
+	ctx := context.Background()
+	projects, err := f.svc.FolderProjects(ctx, f.scopeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(projects[0].Path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(projects[0].Path, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.FolderProjects(ctx, f.scopeID); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("unavailable project list = %v", err)
+	}
+	if _, err := f.svc.Create(ctx, CreateCommand{ScopeID: f.scopeID, ID: "unavailable", Provider: "claude"}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("unavailable default directory = %v", err)
+	}
+	if _, err := f.svc.Store().Conversation(ctx, "unavailable"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("failed create persisted a conversation: %v", err)
 	}
 }
 

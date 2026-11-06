@@ -1171,7 +1171,7 @@ func folderProjectDTO(p sqlitedb.FolderProject) map[string]any {
 }
 
 func (v *V2) listFolderProjects(w http.ResponseWriter, r *http.Request, scopeID int64) {
-	rows, err := v.svc.Store().FolderProjects(r.Context(), scopeID)
+	rows, err := v.svc.FolderProjects(r.Context(), scopeID)
 	if err != nil {
 		writeV2Error(w, err)
 		return

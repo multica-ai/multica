@@ -28,8 +28,8 @@ var (
 const DefaultTitle = "新会话"
 
 // CreateCommand creates a conversation. At most one of FolderProjectID and
-// DirectorySourceID chooses its working directory; without either it gets
-// a private directory of its own.
+// DirectorySourceID chooses its working directory; without either it uses
+// the scope's shared default project directory.
 type CreateCommand struct {
 	ScopeID           int64
 	ID                string
@@ -82,10 +82,11 @@ func (s *Service) Create(ctx context.Context, cmd CreateCommand) (sqlitedb.Conve
 			return sqlitedb.Conversation{}, err
 		}
 	default:
-		cwd = filepath.Join(filepath.Dir(s.opts.Path), "workdirs", fmt.Sprint(cmd.ScopeID), cmd.ID)
-		if err := os.MkdirAll(cwd, 0o700); err != nil {
+		project, err := s.defaultFolderProject(ctx, cmd.ScopeID)
+		if err != nil {
 			return sqlitedb.Conversation{}, err
 		}
+		cwd = project.Path
 	}
 
 	if _, err := s.store.CreateConversation(ctx, store.NewConversation{
@@ -193,6 +194,47 @@ func (s *Service) SetDirectory(ctx context.Context, scopeID int64, conversationI
 		return conv, err
 	}
 	return s.store.Conversation(ctx, conversationID)
+}
+
+// FolderProjects includes the scope's default project even before its first conversation.
+func (s *Service) FolderProjects(ctx context.Context, scopeID int64) ([]sqlitedb.FolderProject, error) {
+	if _, err := s.defaultFolderProject(ctx, scopeID); err != nil {
+		return nil, err
+	}
+	return s.store.FolderProjects(ctx, scopeID)
+}
+
+// Default projects reserve unassigned:<scope ID> as their stable identity.
+// The desktop folds this project and unmatched historical directories into
+// its existing unassigned group, without changing those conversations' cwd.
+func (s *Service) defaultFolderProject(ctx context.Context, scopeID int64) (sqlitedb.FolderProject, error) {
+	if _, err := s.store.ScopeByID(ctx, scopeID); err != nil {
+		return sqlitedb.FolderProject{}, err
+	}
+	id := fmt.Sprintf("unassigned:%d", scopeID)
+	project, err := s.store.FolderProject(ctx, scopeID, id)
+	if errors.Is(err, store.ErrNotFound) {
+		dir := filepath.Join(filepath.Dir(s.opts.Path), "projects", fmt.Sprint(scopeID), "unassigned")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return sqlitedb.FolderProject{}, err
+		}
+		path, err := projectDirectory(dir)
+		if err != nil {
+			return sqlitedb.FolderProject{}, err
+		}
+		return s.store.AddFolderProject(ctx, scopeID, id, "未分配项目", path, s.opts.Now())
+	}
+	if err != nil {
+		return sqlitedb.FolderProject{}, err
+	}
+	path, err := projectDirectory(project.Path)
+	if err != nil {
+		return sqlitedb.FolderProject{}, err
+	}
+	if path != project.Path {
+		return sqlitedb.FolderProject{}, fmt.Errorf("%w: the default project folder changed", ErrInvalidRequest)
+	}
+	return project, nil
 }
 
 // AddFolderProject records a project folder; adding the same folder again
