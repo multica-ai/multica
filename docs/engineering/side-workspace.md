@@ -13,6 +13,8 @@ Side conversations use the same right workspace as folder, file and web previews
 
 A Side inherits its source provider (Codex or Claude Code), working directory and project. Its model can be selected independently. The Side provider selector is read-only: a provider change must not detach a Side into an ordinary session and silently drop its source context. Create a Side from a source using the desired provider instead.
 
+Browser tasks prefer the built-in Side browser, especially for a page already open on the right or its existing login session. This is a recommendation: external browsers and automation tools may be used when the user requests them or they better fit the task, under the selected tool's permissions and confirmation requirements. Side tools remain scoped to the current conversation's open Side tabs; other browsers may use different login sessions.
+
 ## Request and state flow
 
 ```text

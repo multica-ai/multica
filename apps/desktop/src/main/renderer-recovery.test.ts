@@ -137,15 +137,27 @@ describe("installRendererRecoveryHandlers", () => {
     expect(showReloadPrompt).toHaveBeenCalledWith({ kind: "unresponsive", context: {} });
   });
 
-  it("keeps dev diagnostics non-prompting", async () => {
+  it.each(["crashed", "oom"])("offers recovery after a dev renderer %s", async (reason) => {
     const fixture = makeWindow();
     const showReloadPrompt = vi.fn(async () => "reload" as const);
 
     installRendererRecoveryHandlers(fixture.window, { isDev: true, showReloadPrompt, log: vi.fn() });
 
-    fixture.webContentsHandlers.get("render-process-gone")?.({}, { reason: "crashed" });
+    fixture.webContentsHandlers.get("render-process-gone")?.({}, { reason });
     await Promise.resolve();
 
+    expect(showReloadPrompt).toHaveBeenCalledOnce();
+    expect(fixture.reload).toHaveBeenCalledOnce();
+  });
+
+  it("keeps dev preload failures and debugger hangs non-prompting", async () => {
+    vi.useFakeTimers();
+    const fixture = makeWindow();
+    const showReloadPrompt = vi.fn(async () => "reload" as const);
+    installRendererRecoveryHandlers(fixture.window, { isDev: true, showReloadPrompt });
+    fixture.webContentsHandlers.get("preload-error")?.({}, "/preload.js", new Error("fixture"));
+    fixture.windowHandlers.get("unresponsive")?.();
+    await vi.advanceTimersByTimeAsync(2000);
     expect(showReloadPrompt).not.toHaveBeenCalled();
     expect(fixture.reload).not.toHaveBeenCalled();
   });

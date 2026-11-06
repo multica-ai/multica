@@ -187,8 +187,8 @@ Focused: web:… "后台管理" https://…
 
 增加一段短说明：
 - "这里 / 右边 / 这个页面 / 右侧那个文件"默认指聚焦标签（`<side-context>` 的 `Focused`，或调用 `side_focused_tab`）；有歧义时先调用 `side_tabs`，必要时用 `ask_user_question` 确认。
-- 只能访问当前会话 Side 里打开着的标签。
-- **操作右侧网页必须用 `side_browser_*`**，不要用 ego-browser、Midscene、Playwright 或 Computer Use 另开浏览器（这是 Codex 出过的问题）。
+- Side 工具只能访问当前会话 Side 里打开着的标签；此范围限制不约束其他浏览器工具。
+- 优先推荐使用内置 Side 浏览器与 `side_browser_*`，特别是需要操作右侧当前网页或沿用其登录状态时。用户指定或任务需要时，也可使用 ego-browser、Midscene、Playwright、Computer Use 等外部工具，并遵守所选工具自身的权限与确认规则；不同浏览器的登录状态可能不同。
 
 ---
 

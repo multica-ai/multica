@@ -60,7 +60,7 @@ export function installRendererRecoveryHandlers(
     ...context,
   });
   const maybePromptReload = (payload: ReloadPromptPayload) => {
-    if (isDev) return;
+    if (isDev && payload.kind !== "render-process-gone") return;
     void showReloadPrompt(payload).then((result) => {
       if (result === "reload" && !window.isDestroyed()) {
         window.webContents.reload();

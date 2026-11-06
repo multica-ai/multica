@@ -390,6 +390,32 @@ func TestSystemPromptDescribesTheExecution(t *testing.T) {
 	}
 }
 
+func TestSystemPromptRecommendsSideWithoutRestrictingExternalBrowsers(t *testing.T) {
+	t.Parallel()
+	for _, cloud := range []bool{false, true} {
+		prompt := systemPrompt("ws-1", cloud)
+		for _, want := range []string{
+			"Side workspace tools can read and control only tabs still open in this conversation's Side workspace",
+			"Prefer the built-in Side browser",
+			"External browsers and browser automation tools",
+			"are allowed when the user requests them or they better fit the task",
+		} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("cloud=%v: browser guidance lacks %q", cloud, want)
+			}
+		}
+		for _, obsolete := range []string{
+			"The current conversation can read and control only tabs",
+			"Never open a separate browser",
+			"Side webpage tasks continue to use side_browser_*",
+		} {
+			if strings.Contains(prompt, obsolete) {
+				t.Errorf("cloud=%v: browser guidance still restricts tool selection: %q", cloud, obsolete)
+			}
+		}
+	}
+}
+
 func TestReferencesAreCurrentContextWhileTheTurnRuns(t *testing.T) {
 	t.Parallel()
 
