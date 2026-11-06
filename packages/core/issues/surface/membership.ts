@@ -59,8 +59,8 @@ export function listFilterDependsOn(
   filter: MyIssuesFilter,
   changed: IssueChangedDims,
 ): boolean {
-  // my:all is the union of assigned / created / involved — the assigned and
-  // involved legs key on the assignee.
+  // my:all is the union of assigned / created / involved / created by an
+  // owned agent — the assigned and involved legs key on the assignee.
   if (scope === "all") return changed.assignee;
   if (
     changed.assignee &&
@@ -87,8 +87,9 @@ export function issueMatchesListFilter(
   scope: string | undefined,
   filter: MyIssuesFilter,
 ): IssueMembership {
-  // my:all — union across relations; the involved leg needs the server's
-  // agent-ownership graph, so membership is never decidable client-side.
+  // my:all — union across relations; the involved and owned-agent-creator
+  // legs need the server's agent-ownership graph, so membership is never
+  // decidable client-side.
   if (scope === "all") return "unknown";
 
   let unknown = false;
