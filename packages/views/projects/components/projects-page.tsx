@@ -150,6 +150,78 @@ function ProgressRing({ project }: { project: Project }) {
   );
 }
 
+function DeleteProjectsDialog({
+  rows,
+  open,
+  onOpenChange,
+  onDeleted,
+}: {
+  rows: Project[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onDeleted?: () => void;
+}) {
+  const { t } = useT("projects");
+  const deleteProject = useDeleteProject();
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      for (const project of rows) {
+        await deleteProject.mutateAsync(project.id);
+      }
+      onOpenChange(false);
+      onDeleted?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!deleting) onOpenChange(nextOpen);
+      }}
+    >
+      <DialogContent className="sm:max-w-md" showCloseButton={!deleting}>
+        <DialogHeader>
+          <DialogTitle>{t(($) => $.delete_dialog.title)}</DialogTitle>
+          <DialogDescription>
+            {t(($) => $.delete_dialog.description)}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={deleting}
+            onClick={() => onOpenChange(false)}
+          >
+            {t(($) => $.delete_dialog.cancel)}
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={deleting}
+            aria-busy={deleting}
+            onClick={handleDelete}
+          >
+            {deleting && <Spinner className="size-3.5" aria-hidden="true" />}
+            {t(($) => $.delete_dialog.confirm)}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // Shared by table rows (⋯ and right-click) and cards.
 function ProjectRowActions({
   project,
@@ -166,8 +238,6 @@ function ProjectRowActions({
   const intentNavigate = useIntentNavigate();
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
-  const deleteProject = useDeleteProject();
-  const deleting = deleteProject.isPendingFor(project.id);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const togglePin = () => {
@@ -204,56 +274,20 @@ function ProjectRowActions({
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
-              disabled={deleting}
-              aria-busy={deleting}
               onClick={() => setDeleteOpen(true)}
             >
-              {deleting ? <Spinner className="size-3.5" aria-hidden="true" /> : <Trash2 className="size-3.5" />}
+              <Trash2 className="size-3.5" />
               {t(($) => $.page.delete)}
             </DropdownMenuItem>
           </>
         )}
       </CollectionRowMenu>
 
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t(($) => $.delete_dialog.title)}</DialogTitle>
-            <DialogDescription>
-              {t(($) => $.delete_dialog.description)}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setDeleteOpen(false)}
-            >
-              {t(($) => $.delete_dialog.cancel)}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              disabled={deleting}
-              aria-busy={deleting}
-              onClick={() => {
-                if (deleteProject.isPendingFor(project.id)) return;
-                deleteProject.mutate(project.id, {
-                  onError: (err) =>
-                    toast.error(
-                      err instanceof Error ? err.message : String(err),
-                    ),
-                });
-                setDeleteOpen(false);
-              }}
-            >
-              {t(($) => $.delete_dialog.confirm)}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeleteProjectsDialog
+        rows={[project]}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+      />
     </>
   );
 }
@@ -419,8 +453,6 @@ function ProjectBatchToolbar({
 }) {
   const { t } = useT("projects");
   const createPin = useCreatePin();
-  const deleteProject = useDeleteProject();
-  const deleting = rows.some((project) => deleteProject.isPendingFor(project.id));
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const anyUnpinned = rows.some((p) => !pinnedIds.has(p.id));
@@ -450,44 +482,20 @@ function ProjectBatchToolbar({
             variant="ghost"
             size="sm"
             className="text-destructive hover:text-destructive"
-            disabled={deleting}
-            aria-busy={deleting}
             onClick={() => setConfirmDelete(true)}
           >
-            {deleting ? <Spinner className="mr-1 size-3.5" aria-hidden="true" /> : <Trash2 className="mr-1 size-3.5" />}
+            <Trash2 className="mr-1 size-3.5" />
             {t(($) => $.page.delete)}
           </Button>
         )}
       </CollectionBatchBar>
 
-      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t(($) => $.delete_dialog.title)}</DialogTitle>
-            <DialogDescription>{t(($) => $.delete_dialog.description)}</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button type="button" variant="outline" size="sm" onClick={() => setConfirmDelete(false)}>
-              {t(($) => $.delete_dialog.cancel)}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              disabled={deleting}
-              aria-busy={deleting}
-              onClick={() => {
-                if (rows.some((project) => deleteProject.isPendingFor(project.id))) return;
-                for (const p of rows) deleteProject.mutate(p.id);
-                setConfirmDelete(false);
-                onClear();
-              }}
-            >
-              {t(($) => $.delete_dialog.confirm)}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeleteProjectsDialog
+        rows={rows}
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        onDeleted={onClear}
+      />
     </>
   );
 }

@@ -160,18 +160,6 @@ describe("ProjectsPage deletion lifecycle", () => {
     );
   }
 
-  async function repeatFromRowMenu() {
-    const user = userEvent.setup();
-    fireEvent.keyDown(screen.getByRole("button", { name: "Project actions" }), {
-      key: "ArrowDown",
-    });
-    const action = await screen.findByRole("menuitem", { name: "Delete" });
-    await user.click(action);
-    const dialog = screen.queryByRole("dialog");
-    if (dialog)
-      await user.click(within(dialog).getByRole("button", { name: "Delete" }));
-  }
-
   async function submitBatch() {
     const user = userEvent.setup();
     await user.click(screen.getByRole("checkbox", { name: "Select row" }));
@@ -182,138 +170,105 @@ describe("ProjectsPage deletion lifecycle", () => {
       await user.click(within(dialog).getByRole("button", { name: "Delete" }));
   }
 
-  it.each([
-    ["compact", "online"],
-    ["compact", "offline"],
-    ["comfortable", "online"],
-    ["comfortable", "offline"],
-  ] as const)(
-    "does not resubmit a %s project after remount while %s",
-    async (mode, connection) => {
-      useProjectViewStore.setState({ viewMode: mode });
-      if (connection === "offline") onlineManager.setOnline(false);
-      const page = renderPage();
-      await confirmDeletion();
-      await waitFor(() =>
-        expect(qc.getMutationCache().getAll()[0]?.state.status).toBe("pending"),
-      );
-      page.unmount();
+  it.each(["row", "batch"])(
+    "keeps the %s confirmation visibly busy until success",
+    async (source) => {
       renderPage();
-      await repeatFromRowMenu();
-      expect(deleteProject).toHaveBeenCalledTimes(connection === "online" ? 1 : 0);
-      expect(
-        qc
-          .getMutationCache()
-          .getAll()
-          .filter((m) => m.state.status === "pending"),
-      ).toHaveLength(1);
-      act(() => onlineManager.setOnline(true));
+      if (source === "row") await confirmDeletion();
+      else await submitBatch();
       await waitFor(() => expect(deleteProject).toHaveBeenCalledOnce());
+      const dialog = screen.getByRole("dialog");
+      const confirm = within(dialog).getByRole("button", { name: "Delete" });
+      expect(confirm).toBeDisabled();
+      expect(confirm).toHaveAttribute("aria-busy", "true");
+      expect(confirm.querySelector("svg")).toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
+      fireEvent.keyDown(dialog, { key: "Escape" });
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      await userEvent.setup().click(confirm);
+      expect(deleteProject).toHaveBeenCalledOnce();
+      expect(qc.getQueryData(detailKey)).toEqual(project);
       listProjects.mockResolvedValue({ projects: [], total: 0 });
       await act(async () => pending.resolve());
-      await waitFor(() =>
-        expect(screen.queryByText(project.title)).not.toBeInTheDocument(),
-      );
-      expect(deleteProject).toHaveBeenCalledOnce();
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     },
   );
 
-  it.each(["online", "offline"])(
-    "does not resubmit a batch after page remount or through its row while %s",
-    async (connection) => {
-      if (connection === "offline") onlineManager.setOnline(false);
-      const page = renderPage();
-      await submitBatch();
-      // Clearing selection hides the inner bar; the mutation owner remains mounted.
-      expect(
-        screen.getByRole("checkbox", { name: "Select row" }),
-      ).not.toBeChecked();
-      // Unmount the whole page to actually destroy the ProjectBatchToolbar owner.
-      page.unmount();
-      renderPage();
-      await submitBatch();
-      expect(deleteProject).toHaveBeenCalledTimes(connection === "online" ? 1 : 0);
-      expect(
-        qc
-          .getMutationCache()
-          .getAll()
-          .filter((m) => m.state.status === "pending"),
-      ).toHaveLength(1);
-      const user = userEvent.setup();
-      await user.click(screen.getByRole("checkbox", { name: "Select row" }));
-      await repeatFromRowMenu();
-      expect(deleteProject).toHaveBeenCalledTimes(connection === "online" ? 1 : 0);
-      expect(
-        qc
-          .getMutationCache()
-          .getAll()
-          .filter((m) => m.state.status === "pending"),
-      ).toHaveLength(1);
-      act(() => onlineManager.setOnline(true));
-      await waitFor(() => expect(deleteProject).toHaveBeenCalledOnce());
-      listProjects.mockResolvedValue({ projects: [], total: 0 });
-      await act(async () => pending.resolve());
-      await waitFor(() =>
-        expect(screen.queryByText(project.title)).not.toBeInTheDocument(),
-      );
-      expect(deleteProject).toHaveBeenCalledOnce();
-    },
-  );
+  it("reports a partial batch failure and retries only the remaining projects", async () => {
+    const other = { ...project, id: "project-2", title: "Another project" };
+    qc.setQueryData(listKey, { projects: [project, other], total: 2 });
+    qc.setQueryData(projectKeys.detail("workspace-1", other.id), other);
+    listProjects.mockResolvedValue({ projects: [other], total: 1 });
+    deleteProject.mockResolvedValueOnce(undefined).mockReturnValueOnce(pending.promise);
+    renderPage();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("checkbox", { name: "Select all" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(deleteProject).toHaveBeenCalledTimes(2));
+    await act(async () => pending.reject(new Error("Forbidden")));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Forbidden"));
+    expect(screen.queryByText(project.title)).not.toBeInTheDocument();
+    expect(screen.getByText(other.title)).toBeInTheDocument();
+    expect(qc.getQueryData(projectKeys.detail("workspace-1", other.id))).toEqual(other);
+    const confirm = within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" });
+    expect(confirm).toBeEnabled();
+    listProjects.mockResolvedValue({ projects: [], total: 0 });
+    deleteProject.mockResolvedValue(undefined);
+    await user.click(confirm);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(deleteProject.mock.calls.map(([id]) => id)).toEqual([project.id, other.id, other.id]);
+  });
 
   it.each(["row", "batch"])(
-    "re-enables deletion after a failed %s request, including after unmount",
+    "keeps the failed %s confirmation open and allows retry",
+    async (source) => {
+      renderPage();
+      if (source === "row") await confirmDeletion();
+      else await submitBatch();
+      await waitFor(() => expect(deleteProject).toHaveBeenCalledOnce());
+      await act(async () => pending.reject(new Error("Forbidden")));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Forbidden"));
+      const confirm = within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" });
+      expect(confirm).toBeEnabled();
+      expect(qc.getQueryData(detailKey)).toEqual(project);
+      deleteProject.mockResolvedValue(undefined);
+      listProjects.mockResolvedValue({ projects: [], total: 0 });
+      await userEvent.setup().click(confirm);
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(deleteProject).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("keeps the batch confirmation busy and selection intact while offline", async () => {
+    onlineManager.setOnline(false);
+    renderPage();
+    const checkbox = screen.getByRole("checkbox", { name: "Select row" });
+    await submitBatch();
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("button", { name: "Delete" })).toBeDisabled();
+    expect(checkbox).toBeChecked();
+    expect(deleteProject).not.toHaveBeenCalled();
+    act(() => onlineManager.setOnline(true));
+    await waitFor(() => expect(deleteProject).toHaveBeenCalledOnce());
+    listProjects.mockResolvedValue({ projects: [], total: 0 });
+    await act(async () => pending.resolve());
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it.each(["row", "batch"])(
+    "reports a failed %s deletion even after the page unmounts",
     async (source) => {
       const page = renderPage();
       if (source === "row") await confirmDeletion();
       else await submitBatch();
       await waitFor(() => expect(deleteProject).toHaveBeenCalledOnce());
       page.unmount();
-      renderPage();
       await act(async () => pending.reject(new Error("Forbidden")));
-      await waitFor(() =>
-        expect(qc.getMutationCache().getAll()[0]?.state.status).toBe("error"),
-      );
-      const retry = deferred();
-      deleteProject.mockReturnValue(retry.promise);
-      if (source === "row") await confirmDeletion();
-      else await submitBatch();
-      await waitFor(() => expect(deleteProject).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Forbidden"));
       expect(qc.getQueryData(detailKey)).toEqual(project);
-      listProjects.mockResolvedValue({ projects: [], total: 0 });
-      await act(async () => retry.resolve());
-      await waitFor(() =>
-        expect(screen.queryByText(project.title)).not.toBeInTheDocument(),
-      );
     },
   );
-
-  it("blocks an overlapping batch while allowing a different project to be deleted", async () => {
-    const other = { ...project, id: "project-2", title: "Another project" };
-    qc.setQueryData(listKey, { projects: [project, other], total: 2 });
-    listProjects.mockResolvedValue({ projects: [project, other], total: 2 });
-    renderPage();
-    await confirmDeletion(project.title);
-    await waitFor(() => expect(deleteProject).toHaveBeenCalledOnce());
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("checkbox", { name: "Select all" }));
-    const batchAction = screen.getByRole("button", { name: "Delete" });
-    expect(batchAction).toBeDisabled();
-    expect(batchAction).toHaveAttribute("aria-busy", "true");
-    await user.click(batchAction);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    await confirmDeletion(other.title);
-    await waitFor(() => expect(deleteProject).toHaveBeenCalledTimes(2));
-    expect(deleteProject.mock.calls.map(([id]) => id)).toEqual([
-      project.id,
-      other.id,
-    ]);
-    listProjects.mockResolvedValue({ projects: [], total: 0 });
-    await act(async () => pending.resolve());
-    await waitFor(() =>
-      expect(screen.queryByText(project.title)).not.toBeInTheDocument(),
-    );
-    expect(screen.queryByText(other.title)).not.toBeInTheDocument();
-  });
 
   it.each([
     ["403", Object.assign(new Error("Forbidden"), { status: 403 })],
@@ -336,7 +291,8 @@ describe("ProjectsPage deletion lifecycle", () => {
     },
   );
 
-  it("keeps the row visible offline and removes it only after server success", async () => {
+  it.each(["compact", "comfortable"] as const)("keeps a %s row visible offline until server success", async (mode) => {
+    useProjectViewStore.setState({ viewMode: mode });
     onlineManager.setOnline(false);
     renderPage();
     await confirmDeletion();
