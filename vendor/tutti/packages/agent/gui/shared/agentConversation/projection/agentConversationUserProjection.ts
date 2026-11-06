@@ -1,3 +1,4 @@
+import { contentReferencesAttachment } from "@multica/core/types/attachment-url";
 import type { WorkspaceAgentSessionDetailTurn } from "../../workspaceAgentSessionDetailViewModel";
 import { linkifyPastedTextReferences } from "../../pastedTextReferenceProjection";
 import { parseTuttiModeCheckpointWake } from "../tuttiModeCheckpointWakeMarker";
@@ -153,9 +154,22 @@ function projectUserMessageContentParts(
       sourceTimelineItems: message.sourceTimelineItems
     });
   }
+  const text = blocks.filter((block): block is UserPromptTextBlock => block.type === "text").map((block) => block.text).join("\n");
+  const files = blocks.filter((block): block is UserPromptFileBlock => block.type === "file").filter((file) =>
+    !contentReferencesAttachment(text, { id: file.attachmentId ?? "", url: file.url ?? "" })
+  );
+  if (files.length) {
+    parts.push({
+      kind: "message-content", id: `${message.id}:files`, turnId, body: "",
+      presentationKind: "content", contentKind: "file-list",
+      files: files.map((file, index) => ({ ...file, id: `${message.id}:file:${index}` })),
+      occurredAtUnixMs: message.occurredAtUnixMs ?? null,
+      sourceTimelineItems: message.sourceTimelineItems
+    });
+  }
   blocks.forEach((block, index) => {
     if (
-      block.type === "image" ||
+      block.type !== "text" ||
       block.text.trim() === "" ||
       block.kind === "selected-text"
     ) {
@@ -191,7 +205,17 @@ function textPart(
   };
 }
 
-type UserPromptContentBlock = UserPromptTextBlock | UserPromptImageBlock;
+type UserPromptContentBlock = UserPromptTextBlock | UserPromptImageBlock | UserPromptFileBlock;
+
+interface UserPromptFileBlock {
+  type: "file";
+  workspaceId?: string | null;
+  agentSessionId: string;
+  attachmentId?: string | null;
+  name?: string | null;
+  url?: string | null;
+  metadataUnavailable: boolean;
+}
 
 interface UserPromptTextBlock {
   type: "text";
@@ -280,6 +304,21 @@ function userPromptContentBlocks(
                 ...(kind ? { kind } : {})
               }
             ];
+      }
+      if (block.type === "file") {
+        const attachmentId = optionalString(block.attachmentId) ?? optionalString(block.assetId);
+        const url = optionalString(block.url);
+        // Path-only reference snapshots are already represented by the display prompt.
+        if (!attachmentId && !url) return [];
+        return [{
+          type: "file",
+          workspaceId: item?.workspaceId ?? fallbackWorkspaceId ?? null,
+          agentSessionId: item?.agentSessionId ?? message.id,
+          attachmentId,
+          name: optionalString(block.name),
+          url,
+          metadataUnavailable: block.metadataUnavailable === true
+        }];
       }
       if (block.type !== "image") return [];
       const mimeType =

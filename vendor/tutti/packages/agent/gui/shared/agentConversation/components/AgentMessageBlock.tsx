@@ -27,6 +27,7 @@ import type {
 import { AgentCollaborationRow } from "./AgentCollaborationRow";
 import { AgentConversationParticipantHeader } from "./AgentConversationParticipant";
 import { AgentCopyableMessageGroup } from "./AgentMessageActions";
+import { AgentUserFileList } from "./AgentMessageFiles";
 import { AgentUserImageGrid } from "./AgentMessageImages";
 import { AgentPlanCard } from "./AgentPlanCard";
 import { AgentSelectedTextChip } from "./AgentSelectedTextChip";
@@ -265,6 +266,8 @@ export const AgentMessageBlock = observer(function AgentMessageBlock({
         <AgentSelectedTextChip selectedText={message.selectedText} />
       ) : isUser && message.contentKind === "image-grid" ? (
         <AgentUserImageGrid message={message} />
+      ) : isUser && message.contentKind === "file-list" ? (
+        <AgentUserFileList message={message} onLinkClick={handleLinkClickCallback} />
       ) : isUser &&
         message.contentKind === "tutti-checkpoint-wake" &&
         message.checkpointWake ? (

@@ -91,6 +91,7 @@ export function fakeHostServices(
           : request("context.tasks", params)
     },
     attachment: {
+      metadata: (params, options) => options ? request("attachment.metadata", params, options) : request("attachment.metadata", params),
       upload: (params, options) =>
         options
           ? request("attachment.upload", params, options)

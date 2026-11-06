@@ -42,6 +42,7 @@ import type { AgentComposerDraft } from "../../../../vendor/tutti/packages/agent
 import {
 CommittedConversationMessages,
 mergeConversationMessageChanges,
+type ConversationAttachmentMetadata,
 type ConversationMessageChanges
 } from "../../../../vendor/tutti/packages/agent/gui/state/CommittedConversationMessages";
 import {
@@ -132,6 +133,8 @@ export function createMulticaAgentGuiRuntime(
   const commits = new CommitCadence<string>(commitLocal);
   let hostVisible = init.hostVisible !== false;
   const attachments = new Map<string, Attachment>();
+  const attachmentMetadata = new Map<string, ConversationAttachmentMetadata>();
+  const attachmentMetadataLoads = new Map<string, Promise<void>>();
   const sessionLoads = new Map<string, Promise<AgentActivitySession>>();
   const dirtySessions = new Set<string>();
   const watched = new Map<string, number>();
@@ -884,6 +887,7 @@ export function createMulticaAgentGuiRuntime(
           init.locale,
           (id) => migration.clientSubmitId(id),
           (requestId) => desktopQueue.prompts.requestIdentity(guiId, requestId),
+          attachmentMetadata,
         )),
       );
     const messages = transcript.update(conversation, changedTurns);
@@ -909,6 +913,8 @@ export function createMulticaAgentGuiRuntime(
         "This conversation is not available.",
         "session_unavailable"
       );
+    registerAttachments(detail.messages.flatMap((message) => message.attachments ?? []));
+    await hydrateAttachmentMetadata([...source.conversation(sessionId)?.messages.values() ?? []].flatMap((message) => message.attachmentIds));
     scope(detail.session.workspace_id);
     scope(workspaceId);
     return applyDetail(guiId, "all", detail);
@@ -927,6 +933,16 @@ export function createMulticaAgentGuiRuntime(
           conversation.summary.conversation_id,
           event.turn_id
         );
+    }
+    const ids = events.length
+      ? events.filter((event) => event.type === "user.message").flatMap((event) => conversation.messages.get(String(event.payload.message_id))?.attachmentIds ?? [])
+      : [...conversation.messages.values()].flatMap((message) => message.attachmentIds);
+    if (ids.some((id) => !attachmentMetadata.has(id))) {
+      void hydrateAttachmentMetadata(ids).then(() => {
+        if (disposed) return;
+        v2Changes.set(guiId, "all");
+        commits.schedule(guiId);
+      });
     }
     v2Changes.set(
       guiId,
@@ -1576,8 +1592,28 @@ export function createMulticaAgentGuiRuntime(
     };
   }
 
+  async function hydrateAttachmentMetadata(ids: string[]) {
+    await Promise.all([...new Set(ids)].map(async (attachmentId) => {
+      if (attachmentMetadata.has(attachmentId) || disposed) return;
+      let load = attachmentMetadataLoads.get(attachmentId);
+      if (!load) {
+        load = client.attachment.metadata({ attachmentId }).then((metadata) => {
+          if (!disposed) attachmentMetadata.set(attachmentId, metadata);
+        }).catch(reportError).finally(() => { attachmentMetadataLoads.delete(attachmentId); });
+        attachmentMetadataLoads.set(attachmentId, load);
+      }
+      await load;
+    }));
+  }
+
   function registerAttachments(values: Attachment[]) {
-    for (const attachment of values) attachments.set(attachment.id, attachment);
+    for (const attachment of values) {
+      attachments.set(attachment.id, attachment);
+      if (typeof attachment.content_type === "string") attachmentMetadata.set(attachment.id, {
+        name: attachment.filename, mimeType: attachment.content_type, sizeBytes: attachment.size_bytes,
+        url: attachment.markdown_url || attachment.url,
+      });
+    }
   }
 
   const rowModels = new Map<string, ConversationRowsModel>();

@@ -16,7 +16,15 @@ const TURN_SLOT = 2 ** 20;
 /** Room below a turn's slot for rows no loaded turn accounts for. */
 const LOOSE_SLOT = 1024;
 
+export interface ConversationAttachmentMetadata {
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  url: string;
+}
+
 interface Committed {
+  attachments?: readonly (ConversationAttachmentMetadata | undefined)[];
   source: ConversationMessage;
   message: AgentActivityDurableMessage;
 }
@@ -41,6 +49,7 @@ export class CommittedConversationMessages {
       messageId: string,
     ) => string | undefined,
     private readonly submissionIdentity?: (requestId: string) => string,
+    private readonly attachmentMetadata?: ReadonlyMap<string, ConversationAttachmentMetadata>,
   ) {}
 
   update(
@@ -142,6 +151,16 @@ export class CommittedConversationMessages {
     changedSinceLast: boolean
   ): AgentActivityDurableMessage {
     const known = previous.get(source.messageId);
+    const blocks = source.role === "user" && this.attachmentMetadata && Array.isArray(source.payload.content)
+      ? source.payload.content as Record<string, unknown>[] : undefined;
+    const metadata = blocks?.map((block) => typeof block.attachmentId === "string" ? this.attachmentMetadata!.get(block.attachmentId) : undefined);
+    const attachmentsUnchanged = metadata?.length === known?.attachments?.length && metadata?.every((entry, index) => entry === known?.attachments?.[index]);
+    const content = blocks?.map((block, index) => {
+      if (typeof block.attachmentId !== "string") return block;
+      const attachment = metadata?.[index];
+      const image = attachment?.mimeType.toLowerCase().startsWith("image/") ?? false;
+      return { ...block, ...attachment, type: image ? "image" : "file", ...(!attachment ? { metadataUnavailable: true } : {}), ...(image ? { url: undefined } : {}) };
+    });
     // Old receipts are consulted only while migrating messages without a native request id.
     const clientSubmitId =
       source.role === "user"
@@ -153,21 +172,23 @@ export class CommittedConversationMessages {
     const submitted =
       !clientSubmitId ||
       known?.message.payload.clientSubmitId === clientSubmitId;
-    if (known?.source === source && submitted) {
+    if (known?.source === source && submitted && (blocks === undefined || attachmentsUnchanged)) {
       const message =
         known.message.sequence === sequence
           ? known.message
           : { ...known.message, sequence };
-      this.rows.set(source.messageId, { source, message });
+      this.rows.set(source.messageId, { source, message, attachments: metadata });
       return message;
     }
     const raw = {
       workspaceId: this.workspaceId,
       agentSessionId: this.agentSessionId,
       ...source,
-      ...(clientSubmitId
-        ? { payload: { ...source.payload, clientSubmitId } }
-        : {})
+      payload: {
+        ...source.payload,
+        ...(clientSubmitId ? { clientSubmitId } : {}),
+        ...(content ? { content, attachments: content.filter((block) => typeof block.attachmentId === "string").map(({ type: _type, ...attachment }) => attachment) } : {})
+      }
     } as Omit<AgentActivityDurableMessage, "version" | "sequence">;
     // Events said this changed, so reading it to find out would only cost a streamed text's length.
     const previousMessage = known?.message;
@@ -186,7 +207,7 @@ export class CommittedConversationMessages {
       known?.message.version === version && known.message.sequence === sequence
         ? known.message
         : { ...raw, version, sequence };
-    this.rows.set(source.messageId, { source, message });
+    this.rows.set(source.messageId, { source, message, attachments: metadata });
     return message;
   }
 }

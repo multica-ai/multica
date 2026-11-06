@@ -271,6 +271,10 @@ export interface AgentGuiOperations {
     params: { attachmentId: string };
     result: { url: string };
   };
+  "attachment.metadata": {
+    params: { attachmentId: string };
+    result: { name: string; mimeType: string; sizeBytes: number; url: string };
+  };
   "attachment.read": {
     params: { attachmentId: string };
     result: { data: string; mimeType: string; name: string };
@@ -503,6 +507,10 @@ export interface AgentGuiHostServices {
     ): Promise<AgentGuiOperations["context.tasks"]["result"]>;
   };
   attachment: {
+    metadata(
+      params: AgentGuiOperations["attachment.metadata"]["params"],
+      options?: AgentGuiCallOptions
+    ): Promise<AgentGuiOperations["attachment.metadata"]["result"]>;
     upload(
       params: AgentGuiOperations["attachment.upload"]["params"],
       options?: AgentGuiCallOptions

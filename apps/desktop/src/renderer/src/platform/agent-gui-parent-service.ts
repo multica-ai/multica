@@ -281,6 +281,7 @@ export function createAgentGuiWorkspaceService(
       }
     },
     attachment: {
+      metadata: unsupported,
       upload: unsupported,
       cancel: unsupported,
       retry: unsupported,

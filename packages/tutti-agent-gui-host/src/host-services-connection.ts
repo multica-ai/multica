@@ -29,6 +29,7 @@ function allowedInBackground(method: string, params: unknown): boolean {
     method === "attachment.retry" ||
     method === "attachment.forget" ||
     method === "attachment.url" ||
+    method === "attachment.metadata" ||
     method === "image.url"
   )
     return true;
@@ -308,6 +309,7 @@ export function createHostServicesConnection(
         )
     },
     attachment: {
+      metadata: (params, options) => invoke("attachment.metadata", params, () => service.attachment.metadata(params, options), options),
       upload: (params, options) =>
         invoke(
           "attachment.upload",

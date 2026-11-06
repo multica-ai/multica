@@ -2587,8 +2587,7 @@ describe("local thinking settings", () => {
 });
 
 describe("local conversations over protocol v2", () => {
-  async function localRuntime() {
-    const data = backend();
+  async function localRuntime(data = backend(), emptyDetail = false) {
     data.sessions.push(session);
     const original = data.request.getMockImplementation()!;
     data.request.mockImplementation(async (method, params) => {
@@ -2597,11 +2596,13 @@ describe("local conversations over protocol v2", () => {
       if (method === "models.list") return { supported: true, models: [] };
       return original(method, params);
     });
-    const handle = createMulticaAgentGuiRuntime(data.client, {
-      ...init,
-      local: true,
-      sessions: [session]
-    });
+    const source = localSourceFromClient(data.client);
+    const detail = source.detail;
+    if (emptyDetail) source.detail = (id) => {
+      const value = detail(id);
+      return value ? { ...value, messages: [] } : null;
+    };
+    const handle = createRuntime(data.client, { ...init, local: true, sessions: [session] }, source);
     handles.push(handle);
     await handle.initialize();
     const release = handle.runtime.conversations.watch!({
@@ -2640,6 +2641,98 @@ describe("local conversations over protocol v2", () => {
     from_seq: events[0]!.seq,
     to_seq: events.at(-1)!.seq,
     events
+  });
+
+  it("hydrates attachment metadata from history with empty detail messages and retains image retry", async () => {
+    const data = backend();
+    const attachments = [
+      { id: "text", filename: "pasted.txt", content_type: "text/plain" },
+      { id: "video", filename: "clip.mp4", content_type: "video/mp4" },
+      { id: "image", filename: "screen.png", content_type: "image/png" },
+    ].map((value) => ({ ...value, size_bytes: 42, url: `/attachments/${value.id}` } as Attachment));
+    data.tasks.push({ id: "turn-1", status: "completed", created_at: time } as AgentTask);
+    data.messages.push({ id: "m1", role: "user", content: "[pasted.txt](/attachments/text)\n\n[clip.mp4](/attachments/video)", task_id: "turn-1", created_at: time, attachments } as ChatMessage);
+    const original = data.request.getMockImplementation()!;
+    let imageReads = 0;
+    data.request.mockImplementation(async (method, params) => {
+      if (method === "attachment.metadata") {
+        const attachment = attachments.find((value) => value.id === params.attachmentId)!;
+        return { name: attachment.filename, mimeType: attachment.content_type, sizeBytes: attachment.size_bytes, url: attachment.url };
+      }
+      if (method === "attachment.read") {
+        if (++imageReads === 1) throw new Error("temporarily unavailable");
+        return { data: "AAAA", mimeType: "image/png", name: "screen.png" };
+      }
+      return original(method, params);
+    });
+    const { handle, messages } = await localRuntime(data, true);
+    await vi.waitFor(() => expect(messages()[0]?.payload.content).toMatchObject([
+      { type: "text" }, { type: "file", mimeType: "text/plain" }, { type: "file", mimeType: "video/mp4" }, { type: "image", mimeType: "image/png", name: "screen.png" },
+    ]));
+    expect(data.request.mock.calls.filter(([method]) => method === "attachment.metadata")).toHaveLength(3);
+    expect(data.request.mock.calls.some(([method]) => method === "attachment.read" || method === "attachment.url")).toBe(false);
+    await expect(handle.runtime.attachments!.readSessionAttachment!({ workspaceId: init.workspaceId, agentSessionId: session.id, attachmentId: "image" })).rejects.toThrow("temporarily unavailable");
+    await expect(handle.runtime.attachments!.readSessionAttachment!({ workspaceId: init.workspaceId, agentSessionId: session.id, attachmentId: "image" })).resolves.toMatchObject({ data: "AAAA", mimeType: "image/png" });
+  });
+
+  it("keeps live messages on one metadata failure and retries that attachment when reopening history", async () => {
+    const data = backend();
+    const original = data.request.getMockImplementation()!;
+    let unavailable = true;
+    data.request.mockImplementation(async (method, params) => {
+      if (method === "attachment.metadata") {
+        if (params.attachmentId === "text" && unavailable) throw new Error("not found");
+        return { name: `${params.attachmentId}.file`, mimeType: params.attachmentId === "image" ? "image/png" : "text/plain", sizeBytes: 1, url: `/attachments/${params.attachmentId}` };
+      }
+      return original(method, params);
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { handle, messages } = await localRuntime(data, true);
+      data.emit({ type: "local.events", sessionId: session.id, message: batch([
+        event(1, "user.message", { message_id: "m1", content: "[pasted.txt](/attachments/text)", attachment_ids: ["text", "image"] }),
+        event(2, "turn.started", { request_id: "r1" }),
+        event(3, "item.delta", { kind: "assistant_text", field: "text", text: "Still streaming" }, { item_id: "it-1" }),
+      ]) });
+      await vi.waitFor(() => expect(messages().find((value) => value.messageId === "m1")?.payload.content).toMatchObject([
+        { type: "text" }, { type: "file", attachmentId: "text" }, { type: "image", attachmentId: "image" },
+      ]));
+      expect(messages().find((value) => value.messageId === "it-1")?.payload.content).toBe("Still streaming");
+      unavailable = false;
+      data.tasks.push({ id: "turn-1", status: "completed", created_at: time } as AgentTask);
+      data.messages.push({ id: "m1", role: "user", content: "[pasted.txt](/attachments/text)", task_id: "turn-1", created_at: time,
+        attachments: ["text", "image"].map((id) => ({ id })) } as ChatMessage);
+      await handle.runtime.conversations.load(init.workspaceId, session.id);
+      expect(messages().find((value) => value.messageId === "m1")?.payload.content).toMatchObject([
+        { type: "text" }, { type: "file", mimeType: "text/plain" }, { type: "image", mimeType: "image/png" },
+      ]);
+      expect(data.request.mock.calls.filter(([method, params]) => method === "attachment.metadata" && params.attachmentId === "text")).toHaveLength(2);
+      expect(data.request.mock.calls.filter(([method, params]) => method === "attachment.metadata" && params.attachmentId === "image")).toHaveLength(1);
+    } finally { error.mockRestore(); }
+  });
+
+  it("reuses pasted-text upload metadata when a queued message is echoed by v2", async () => {
+    const { data, handle, messages } = await localRuntime();
+    const original = data.request.getMockImplementation()!;
+    data.request.mockImplementation(async (method, params) => {
+      if (method === "queue.enqueue") return { revision: 1, paused: false, items: [params.item] };
+      const result = await original(method, params);
+      return method === "workspace.load" ? { ...result, queueOwner: "desktop" } : result;
+    });
+    data.emit({ type: "invalidate", scope: "workspace" });
+    await handle.runtime.conversations.refreshWorkspace(init.workspaceId);
+    const staged = await handle.runtime.attachments!.stagePastedText!({ workspaceId: init.workspaceId, name: "pasted.txt", text: "Long text" });
+    const text = `[${staged.name}](${staged.url})`;
+    const engine = handle.runtime.prompts;
+    engine.submitPrompt({ agentSessionId: session.id, clientSubmitId: "queued", content: [{ type: "text", text }] });
+    await vi.waitFor(() => expect(data.request).toHaveBeenCalledWith("queue.enqueue", expect.objectContaining({ item: expect.objectContaining({ attachmentIds: [staged.assetId] }) })));
+    data.emit({ type: "local.events", sessionId: session.id, message: batch([
+      event(1, "user.message", { message_id: "m1", request_id: "queued", content: text, attachment_ids: [staged.assetId] }),
+    ]) });
+    await vi.waitFor(() => expect(messages().find((value) => value.messageId === "m1")?.payload.content).toMatchObject([
+      { type: "text", text }, { type: "file", mimeType: "text/plain", name: "pasted.txt" },
+    ]));
+    expect(data.request.mock.calls.some(([method]) => method === "attachment.metadata")).toBe(false);
   });
 
   it("keeps a prompt submitted during a streamed reply in the queue until its own turn starts", async () => {

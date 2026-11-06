@@ -8,6 +8,7 @@ import type { AgentToolGroupRowVM } from "./agentToolGroupRowVM";
 export type AgentMessageContentKind =
   | "text"
   | "image-grid"
+  | "file-list"
   | "plan"
   | "collaboration"
   | "tutti-checkpoint-wake"
@@ -41,6 +42,7 @@ export interface AgentMessageContentVM {
   /** Typed payload for `contentKind: "selected-text"` rows. */
   selectedText?: AgentSelectedTextVM | null;
   images?: AgentMessageImageVM[];
+  files?: AgentMessageFileVM[];
   occurredAtUnixMs: number | null;
   visibleError?: {
     code: string | null;
@@ -84,6 +86,16 @@ export interface AgentTuttiPlanIssueLinkVM {
   title: string;
   /** The original single-mention markdown, rendered as the issue chip. */
   mentionMarkdown: string;
+}
+
+export interface AgentMessageFileVM {
+  id: string;
+  workspaceId?: string | null;
+  agentSessionId: string;
+  attachmentId?: string | null;
+  name?: string | null;
+  url?: string | null;
+  metadataUnavailable: boolean;
 }
 
 export interface AgentMessageImageVM {
