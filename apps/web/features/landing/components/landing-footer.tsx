@@ -29,7 +29,7 @@ export function LandingFooter() {
           {/* Left — newsletter / CTA */}
           <div className="lg:w-[340px] lg:shrink-0">
             <Link href="#product" className="flex items-center">
-              <MulticaWordmark className="h-[22px] text-white" />
+              <MulticaWordmark className="h-6 text-white" />
             </Link>
             <p className="mt-4 max-w-[300px] text-body leading-[1.7] text-white/50 sm:text-body-lg">
               {t.footer.tagline}

@@ -7,6 +7,34 @@ sub-issue status, a linked pull request's state); business completion is still
 decided by the agent after reading current state. There is no sleeping process
 or second run lifecycle.
 
+## Workflow step bindings
+
+Wakeup tasks and automatic retries can be continuations of older work. Their
+new task IDs and provider-session reuse do not determine their workflow bindings:
+
+| Task source | `workflow_step` |
+|---|---|
+| Agent-created wakeup (`CreateWakeupTask`) | The registering task's step, falling back to the current issue status when no source step exists. |
+| Member-created wakeup that creates a task | The issue status at dispatch. |
+| Automatic retry (`CreateRetryTask`) | The parent task's binding, including NULL. |
+| Member-requested rerun (`RerunIssue`) | The issue status when `CreateAgentTask` queues the new task. |
+| Wakeup joined into an existing pending task | The pending task's binding is unchanged. |
+
+For named workflows and Default workflows with handoffs, the claim brief uses
+the same step-mismatch predicate as the status-write guard. A mismatch takes
+precedence over assignee, observer and handlerless-step instructions. The brief
+names the bound step and current issue status, identifies the last status mover
+when available, and includes the workflow's status catalog without any status
+commands. It explicitly overrides runtime start/finish status rules, including
+on older daemons. The existing server-rendered `project_workflow.brief` wire field
+carries this text; no daemon upgrade or protocol extension is required.
+
+The write guard still returns `409 workflow_step_moved`. Claiming or retrying
+does not rebind a stale continuation. After reviewing an external move, a member
+can explicitly rerun the work to create a task bound to the current status.
+Issues without a project and Default workflows without handoffs retain their
+existing behavior.
+
 ## Product contract
 
 The shared web/Desktop issue sidebar lists event and time wakeups together,

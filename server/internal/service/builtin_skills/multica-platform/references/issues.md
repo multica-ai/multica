@@ -32,6 +32,16 @@ Related to MUL-123   (body only)              # no link
 While a PR is open, its automatic links follow the live title, branch, and
 body: removing the key drops the link. After merge or close, existing links stay.
 
+For one issue delivered through PRs opened one after another, pass
+`--pr-auto-complete off` to `issue create` or `issue update <id>` before the
+first merge. The override keeps only this issue's status; other issues still
+follow the workspace's PR merge rule. Restore it with `--pr-auto-complete on`
+before the final PR merges, or leave it off and move the issue to `in_review`
+yourself. Turning it on takes effect at the next PR event. Inspect the setting
+with `issue pull-requests <id>` (JSON: `auto_complete.issue_disabled`). If an
+older server creates the issue but rejects the follow-up override, use the
+reported issue ID with `issue update`; do not retry `issue create`.
+
 ### Default for code-changing issue work
 
 When an issue run changes code in a checked-out GitHub repo, the default handoff
