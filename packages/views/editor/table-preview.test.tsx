@@ -92,6 +92,18 @@ describe("TablePreview", () => {
     expect(title.closest("button")).toHaveClass("normal-case");
   });
 
+  it("keeps quoted punctuation in CSV headers out of delimiter detection", () => {
+    renderWithI18n(
+      <TablePreview text={'"Priority; severity; impact",Owner\nhigh,Ada\n'} delimiter="," />,
+    );
+
+    expect(header("Priority; severity; impact")).toBeTruthy();
+    expect(header("Owner")).toBeTruthy();
+    expect(columnValues("c0")).toEqual(["high"]);
+    expect(columnValues("c1")).toEqual(["Ada"]);
+    expect(screen.getByText(/1 row/)).toHaveTextContent("1 row · 2 columns");
+  });
+
   it("says so when there are no rows", () => {
     renderWithI18n(<TablePreview text={"only,a,header\n"} delimiter="," />);
     expect(screen.getByText("No rows")).toBeTruthy();

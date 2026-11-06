@@ -25,16 +25,40 @@ const CANDIDATES: readonly CellDelimiter[] = [",", ";", "\t"];
 /**
  * The delimiter a `.csv` file actually uses. Spreadsheets in locales with a
  * decimal comma export `;`, and a mislabeled TSV is common. Read off the first
- * record: whichever candidate splits it most wins, a comma on ties.
+ * logical record: whichever candidate occurs most outside quoted fields wins,
+ * a comma on ties. Scan only that record without allocating parsed fields.
  */
 export function sniffDelimiter(text: string): CellDelimiter {
-  let end = text.search(/\r|\n/);
-  if (end < 0) end = text.length;
-  const firstLine = text.slice(0, end);
+  const counts: Record<CellDelimiter, number> = { ",": 0, ";": 0, "\t": 0 };
+  let quoted = false;
+  let fieldStart = true;
+  for (let i = text.charCodeAt(0) === 0xfeff ? 1 : 0; i < text.length; i += 1) {
+    const char = text[i];
+    if (quoted) {
+      if (char === '"') {
+        if (text[i + 1] === '"') i += 1;
+        else quoted = false;
+      }
+      continue;
+    }
+    if (char === '"' && fieldStart) {
+      quoted = true;
+      fieldStart = false;
+    } else if (char === "\r" || char === "\n") {
+      break;
+    } else if (char === "," || char === ";" || char === "\t") {
+      counts[char] += 1;
+      // The delimiter is still unknown, so each candidate can open a field.
+      fieldStart = true;
+    } else {
+      fieldStart = false;
+    }
+  }
+
   let best: CellDelimiter = ",";
   let bestCount = 0;
   for (const candidate of CANDIDATES) {
-    const count = firstLine.split(candidate).length - 1;
+    const count = counts[candidate];
     if (count > bestCount) {
       best = candidate;
       bestCount = count;
