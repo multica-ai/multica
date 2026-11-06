@@ -19,6 +19,13 @@ on:
       head:
         description: "Head ref (branch, tag or SHA)"
         required: true
+      scenario:
+        description: "Scenario to measure"
+        type: choice
+        options:
+          - typing-under-live-runs
+          - image-thread
+        default: typing-under-live-runs
 
 # Read-only and without secrets: it builds and runs whatever refs it is given.
 permissions:
@@ -31,10 +38,8 @@ concurrency:
 jobs:
   compare:
     runs-on: ubuntu-latest
-    # Measured on CI: ~340s for the comparison itself, of which ~292s is the
-    # two builds and ~26s the two measurements, plus setup. Fifteen minutes
-    # leaves room for build variance and still stops a run that has hung.
-    timeout-minutes: 15
+    # The image matrix adds 27 samples, including full-thread scrolls.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,7 +61,7 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Compare
-        run: node scripts/perf-compare.mjs --base "${{ inputs.base }}" --head "${{ inputs.head }}" --out perf-report
+        run: node scripts/perf-compare.mjs --base "${{ inputs.base }}" --head "${{ inputs.head }}" --out perf-report --scenario "${{ inputs.scenario }}"
 
       - name: Publish to the job summary
         if: always()

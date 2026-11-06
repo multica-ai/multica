@@ -85,6 +85,50 @@ success, on failure and on cancellation.
 The ordinary e2e suite ignores this directory; it needs a production build and
 a machine that is not busy doing anything else.
 
+## Image-heavy thread (MUL-8182)
+
+This scenario uses two checked-in, real 2x Chromium screenshots of the application
+(2560×1720 and 2600×2160), with synthetic API data and 46 images in one 36-reply
+thread. See `fixtures/screenshots/README.md` for capture provenance. It runs the
+same fixture and browser against both production builds; no backend is needed.
+
+```bash
+node scripts/perf-compare.mjs --base origin/main --head HEAD --out perf-report --scenario image-thread --runs 3
+```
+
+Each of three cases compares base, head, and a no-image control on head (identical
+comments, prose, parent IDs and timestamps, with image markdown and attachments
+removed):
+
+- `in-viewport`: image responses are released as typing begins beside the thread.
+- `after-scroll`: visit every image and wait for it to load before typing at the
+  bottom. The report asserts all 46 images loaded; merely jumping to the bottom
+  would leave the middle lazy images unloaded.
+- `without-dimensions`: omit width/height from every attachment, then release
+  images while typing to exercise the historical-data placeholder.
+
+All typing uses 4× CPU throttle, 172 keystrokes and 25ms inter-key delay. Browser
+`keydown` timestamps are sampled after the next rAF and timer (a post-paint proxy).
+Reports include the count over 16.7ms, p95 and every raw latency. This is not
+hardware input latency; protocol/OS scheduling and frame phase introduce noise.
+Long tasks (count, total and maximum duration) cover typing and the final image
+settle. Layout-shift sum includes recent-input shifts; CLS uses session windows
+and excludes them. Neither metric should be described as zero layout movement
+merely because typing suppresses CLS.
+
+The script writes every JSON sample, before/after screenshots, and a median
+comparison table. Invalid setup, unexpected network requests, missing key events
+or failed processes invalidate the sample instead of silently retrying it. The
+no-image control uses the same scroll and focus procedure, but has a shorter
+page. Compare trends across repeated runs; small differences are not a speedup.
+
+To debug one case against an already-running production server:
+
+```bash
+PLAYWRIGHT_BASE_URL=http://localhost:3000 PERF_SCENARIO=image-thread PERF_IMAGE_CASE=without-dimensions PERF_REPORT_PATH=perf-report/debug.json pnpm exec playwright test --config=playwright.perf.config.ts image-heavy-thread.spec.ts
+# Add PERF_NO_IMAGES=1 for its control.
+```
+
 The floating-chat lifetime regression runs against the same production build:
 
 ```bash

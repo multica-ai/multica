@@ -12,7 +12,11 @@
  * One sample per ref is a report, not a verdict. A difference near the noise
  * floor means "run it again by hand", not "regression".
  *
- *   node scripts/perf-compare.mjs --base <ref> --head <ref> [--out <dir>]
+ *   node scripts/perf-compare.mjs --base <ref> --head <ref> [--out <dir>] [--scenario <name>]
+ *
+ * `--scenario` picks the measurement: `typing-under-live-runs` (default) or
+ * `image-thread` (MUL-8182). Both write the same report path, so one run
+ * measures exactly one of them.
  */
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
@@ -29,8 +33,36 @@ const flag = (name, fallback) => {
 const baseRef = flag("base");
 const headRef = flag("head", "HEAD");
 const outDir = resolve(flag("out", join(repoRoot, "perf-report")));
-if (!baseRef) {
-  console.error("usage: node scripts/perf-compare.mjs --base <ref> [--head <ref>] [--out <dir>]");
+const SCENARIOS = {
+  "typing-under-live-runs": {
+    title: "Comment typing under live runs (MUL-7227)",
+    spec: null,
+    metrics: [],
+  },
+  "image-thread": {
+    title: "Comment typing beside an image-heavy thread (MUL-8182)",
+    spec: "image-heavy-thread.spec.ts",
+    metrics: [
+      ["layout_shift", "Layout shift (sum)"],
+      ["images_mounted", "Images mounted"],
+      ["originals_served", "Originals fetched"],
+      ["keystrokes_over_frame", "Keystrokes >16.7ms"],
+      ["keystroke_p95_ms", "Keystroke p95 (ms)"],
+      ["cls", "CLS"],
+      ["image_bytes_served", "Image bytes fetched"],
+      ["js_heap_mb", "JS heap (MB)"],
+    ],
+  },
+};
+const scenarioName = flag("scenario", "typing-under-live-runs");
+const scenario = SCENARIOS[scenarioName];
+const repetitions = Number(flag("runs", "3"));
+const imageCases = ["in-viewport", "after-scroll", "without-dimensions"];
+if (!Number.isInteger(repetitions) || repetitions < 1) throw new Error("--runs must be a positive integer");
+if (!baseRef || !scenario) {
+  console.error(
+    `usage: node scripts/perf-compare.mjs --base <ref> [--head <ref>] [--out <dir>] [--scenario ${Object.keys(SCENARIOS).join("|")}]`,
+  );
   process.exit(2);
 }
 
@@ -219,44 +251,52 @@ async function measure(ref, label) {
     await waitForServer(port);
     const startS = seconds(startStart);
 
-    // The spec, fixture and browser come from this working tree, not the ref's.
-    const reportPath = join(outDir, `${label}.json`);
-    // Only a report this run wrote may be read back. A file left by an earlier
-    // run into the same directory would otherwise stand in for a scenario that
-    // failed before writing one — stale numbers, presented as today's.
-    rmSync(reportPath, { force: true });
+    // Every product uses the same spec, screenshots and browser from this tree.
     const measureStart = Date.now();
+    const samples = [];
+    const cases = scenarioName === "image-thread" ? imageCases : [null];
+    const controls = scenarioName === "image-thread" && label === "head" ? [false, true] : [false];
+    const runs = scenarioName === "image-thread" ? repetitions : 1;
     let scenarioExit = 0;
-    try {
-      run("pnpm", ["exec", "playwright", "test", "--config=playwright.perf.config.ts", "typing-under-live-runs.spec.ts"], {
-        cwd: repoRoot,
-        env: {
-          ...process.env,
-          PLAYWRIGHT_BASE_URL: `http://127.0.0.1:${port}`,
-          PERF_REPORT_PATH: reportPath,
-        },
-      });
-    } catch (error) {
-      scenarioExit = typeof error.status === "number" ? error.status : 1;
+    for (const imageCase of cases) for (const control of controls) for (let n = 1; n <= runs; n++) {
+      const name = imageCase ? `${control ? "control" : label}-${imageCase}-${n}` : label;
+      const reportPath = join(outDir, `${name}.json`);
+      rmSync(reportPath, { force: true });
+      let sampleExit = 0;
+      try {
+        run("pnpm", ["exec", "playwright", "test", "--config=playwright.perf.config.ts", scenario.spec ?? "typing-under-live-runs.spec.ts"], {
+          cwd: repoRoot,
+          env: {
+            ...process.env,
+            PLAYWRIGHT_BASE_URL: `http://127.0.0.1:${port}`,
+            PERF_REPORT_PATH: reportPath,
+            PERF_SCENARIO: scenarioName,
+            PERF_IMAGE_CASE: imageCase ?? "",
+            PERF_NO_IMAGES: control ? "1" : "0",
+            PERF_EXPECT_RESERVED_BOXES: label === "head" ? "1" : "0",
+          },
+        });
+      } catch (error) {
+        sampleExit = typeof error.status === "number" ? error.status : 1;
+        scenarioExit = sampleExit;
+      }
+      let sample;
+      try { sample = JSON.parse(readFileSync(reportPath, "utf8")); }
+      catch { sample = { status: "invalid", invalid: ["the scenario produced no readable report"] }; }
+      if (sampleExit !== 0) {
+        sample.status = "invalid";
+        sample.invalid = [...(sample.invalid ?? []), `scenario process exited ${sampleExit}`];
+      }
+      samples.push({ ...sample, name, repetition: n });
+      // A missing/invalid sample is not a latency result; stop before wasting
+      // more builds or silently replacing it with a successful retry.
+      if (sample.status !== "ok") break;
     }
+    const report = scenarioName === "image-thread"
+      ? { status: samples.every((sample) => sample.status === "ok") ? "ok" : "invalid", samples }
+      : samples[0];
     const measureS = seconds(measureStart);
 
-    let report;
-    try {
-      report = JSON.parse(readFileSync(reportPath, "utf8"));
-    } catch {
-      report = { status: "invalid", invalid: ["the scenario produced no readable report"] };
-    }
-    // The scenario process has the last word. A report that says `ok` from a
-    // run whose process then failed is not a sample: whatever failed after the
-    // numbers were written is exactly what nobody has looked at.
-    if (scenarioExit !== 0 && report.status === "ok") {
-      report.status = "invalid";
-      report.invalid = [
-        ...(report.invalid ?? []),
-        `the scenario reported ok but its process exited ${scenarioExit}`,
-      ];
-    }
     const failed = scenarioExit !== 0;
     return {
       ...report, ref, sha, spec_failed: failed, build_cached: buildCached,
@@ -279,9 +319,35 @@ const METRICS = [
   ["long_task_max_ms", "Long task max"],
 ];
 
+function imageMarkdown(base, head) {
+  const median = (values) => {
+    const sorted = values.filter((v) => typeof v === "number").sort((a, b) => a - b);
+    if (!sorted.length) return "—";
+    const mid = Math.floor(sorted.length / 2);
+    return Number((sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2).toFixed(3));
+  };
+  const rows = [];
+  const metrics = [...METRICS, ...scenario.metrics];
+  for (const imageCase of imageCases) {
+    const groups = [base.samples?.filter((s) => s.image_case === imageCase), head.samples?.filter((s) => s.image_case === imageCase && !s.no_images), head.samples?.filter((s) => s.image_case === imageCase && s.no_images)];
+    for (const [key, label] of metrics) rows.push(`| ${imageCase} | ${label} | ${groups.map((g) => median((g ?? []).map((s) => s[key]))).join(" | ")} |`);
+  }
+  const digestsMatch = imageCases.every((c) => base.samples?.find((s) => s.image_case === c)?.fixture?.sha256 === head.samples?.find((s) => s.image_case === c && !s.no_images)?.fixture?.sha256);
+  return [
+    `## ${scenario.title}`, "",
+    `Median of ${repetitions} runs per cell; 4× CPU throttle; 172 keystrokes, 25ms inter-key delay; head hosts the no-image control.`,
+    "Key latency is browser keydown timestamp to rAF + timer (post-paint proxy); one frame is 16.7ms. CLS excludes recent-input shifts; layout shift sum includes them. Raw samples and before/after PNGs are retained.",
+    `Status: base ${base.status}, head ${head.status}. Matching image-fixture hashes: ${digestsMatch}.`, "",
+    "| Scenario | Metric | Base | Head | No-image control |", "| --- | --- | ---: | ---: | ---: |", ...rows, "",
+    `Base: ${base.sha}; head: ${head.sha}. Chromium ${head.samples?.[0]?.browser_version}; Node ${head.samples?.[0]?.node_version}.`,
+    "Small differences require repeat measurements; this benchmark does not assert a speedup.",
+  ].join("\n");
+}
+
 function markdown(base, head) {
+  if (scenarioName === "image-thread") return imageMarkdown(base, head);
   const usable = base.status === "ok" && head.status === "ok";
-  const rows = METRICS.map(([key, label]) => {
+  const rows = [...METRICS, ...scenario.metrics].map(([key, label]) => {
     const a = base[key];
     const b = head[key];
     if (typeof a !== "number" || typeof b !== "number") return `| ${label} | ${a ?? "—"} | ${b ?? "—"} | — | — |`;
@@ -292,7 +358,7 @@ function markdown(base, head) {
   const timing = (r) =>
     `install ${r.timings_s.install}s · build ${r.timings_s.build}s${r.build_cached ? " (restored from cache — not a real build)" : ""} · start ${r.timings_s.start}s · measure ${r.timings_s.measure}s`;
   return [
-    "## Comment typing under live runs (MUL-7227)",
+    `## ${scenario.title}`,
     "",
     usable
       ? "One sample per ref. This is a report, not a merge gate — read a small difference as noise until a second run says otherwise."
