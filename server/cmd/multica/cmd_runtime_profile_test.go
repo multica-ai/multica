@@ -39,6 +39,7 @@ func newProfileCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("command-name", "", "")
 	cmd.Flags().String("display-name", "", "")
 	cmd.Flags().String("description", "", "")
+	cmd.Flags().Bool("skip-if-missing", false, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
 }
@@ -50,6 +51,7 @@ func newProfileUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("command-name", "", "")
 	cmd.Flags().String("description", "", "")
 	cmd.Flags().Bool("enabled", true, "")
+	cmd.Flags().Bool("skip-if-missing", false, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
 }
@@ -126,6 +128,7 @@ func TestRunRuntimeProfileCreate(t *testing.T) {
 	_ = cmd.Flags().Set("protocol-family", "codex")
 	_ = cmd.Flags().Set("command-name", "company-codex")
 	_ = cmd.Flags().Set("display-name", "Company Codex")
+	_ = cmd.Flags().Set("skip-if-missing", "true")
 
 	if err := runRuntimeProfileCreate(cmd, nil); err != nil {
 		t.Fatalf("runRuntimeProfileCreate: %v", err)
@@ -138,6 +141,20 @@ func TestRunRuntimeProfileCreate(t *testing.T) {
 	}
 	if gotBody["protocol_family"] != "codex" || gotBody["command_name"] != "company-codex" || gotBody["display_name"] != "Company Codex" {
 		t.Errorf("unexpected body: %#v", gotBody)
+	}
+	if gotBody["skip_if_missing"] != true {
+		t.Errorf("skip_if_missing = %v, want true", gotBody["skip_if_missing"])
+	}
+	defaultCmd := newProfileCreateTestCmd()
+	_ = defaultCmd.Flags().Set("protocol-family", "codex")
+	_ = defaultCmd.Flags().Set("command-name", "company-codex")
+	_ = defaultCmd.Flags().Set("display-name", "Company Codex")
+	gotBody = nil
+	if err := runRuntimeProfileCreate(defaultCmd, nil); err != nil {
+		t.Fatalf("runRuntimeProfileCreate without skip-if-missing: %v", err)
+	}
+	if _, present := gotBody["skip_if_missing"]; present {
+		t.Errorf("skip_if_missing should be omitted unless set: %#v", gotBody)
 	}
 	// fixed_args is intentionally NOT exposed by the CLI create path yet; the
 	// UI owns command-line parsing until this CLI grows an argv-aware parser.
@@ -189,6 +206,7 @@ func TestRunRuntimeProfileUpdateOnlySendsChangedFlags(t *testing.T) {
 	cmd := newProfileUpdateTestCmd()
 	_ = cmd.Flags().Set("command-name", "new-codex")
 	_ = cmd.Flags().Set("enabled", "false")
+	_ = cmd.Flags().Set("skip-if-missing", "false")
 
 	if err := runRuntimeProfileUpdate(cmd, []string{"prof-1"}); err != nil {
 		t.Fatalf("runRuntimeProfileUpdate: %v", err)
@@ -199,12 +217,15 @@ func TestRunRuntimeProfileUpdateOnlySendsChangedFlags(t *testing.T) {
 	if gotPath != "/api/workspaces/ws-123/runtime-profiles/prof-1" {
 		t.Errorf("path = %q, want .../runtime-profiles/prof-1", gotPath)
 	}
-	// Only the two changed flags must be present.
+	// Only explicitly changed flags must be present.
 	if gotBody["command_name"] != "new-codex" {
 		t.Errorf("command_name = %v, want new-codex", gotBody["command_name"])
 	}
 	if gotBody["enabled"] != false {
 		t.Errorf("enabled = %v, want false", gotBody["enabled"])
+	}
+	if gotBody["skip_if_missing"] != false {
+		t.Errorf("skip_if_missing = %v, want false", gotBody["skip_if_missing"])
 	}
 	if _, ok := gotBody["display_name"]; ok {
 		t.Errorf("display_name should not be sent when unchanged: %#v", gotBody)

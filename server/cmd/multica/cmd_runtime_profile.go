@@ -93,6 +93,7 @@ func init() {
 	runtimeProfileCreateCmd.Flags().String("command-name", "", "Executable the daemon resolves on PATH (required)")
 	runtimeProfileCreateCmd.Flags().String("display-name", "", "Human-readable profile name (required)")
 	runtimeProfileCreateCmd.Flags().String("description", "", "Optional description")
+	runtimeProfileCreateCmd.Flags().Bool("skip-if-missing", false, "Do not register an error runtime on machines without the command")
 	runtimeProfileCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// update
@@ -104,6 +105,7 @@ func init() {
 	// command_name + fixed_args. Keep this CLI shape narrow until we add an
 	// argv-aware command-line parser here too.
 	runtimeProfileUpdateCmd.Flags().Bool("enabled", true, "Enable or disable the profile")
+	runtimeProfileUpdateCmd.Flags().Bool("skip-if-missing", false, "Skip registration where the command is unavailable")
 	runtimeProfileUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// set-path
@@ -211,6 +213,10 @@ func runRuntimeProfileCreate(cmd *cobra.Command, _ []string) error {
 	if description != "" {
 		body["description"] = description
 	}
+	if cmd.Flags().Changed("skip-if-missing") {
+		v, _ := cmd.Flags().GetBool("skip-if-missing")
+		body["skip_if_missing"] = v
+	}
 
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
@@ -242,9 +248,13 @@ func runRuntimeProfileUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetBool("enabled")
 		body["enabled"] = v
 	}
+	if cmd.Flags().Changed("skip-if-missing") {
+		v, _ := cmd.Flags().GetBool("skip-if-missing")
+		body["skip_if_missing"] = v
+	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update: pass at least one of --display-name, --command-name, --description, --enabled")
+		return fmt.Errorf("no fields to update: pass at least one of --display-name, --command-name, --description, --enabled, --skip-if-missing")
 	}
 
 	client, err := newAPIClient(cmd)
@@ -373,7 +383,7 @@ func outputRuntimeProfile(cmd *cobra.Command, profile map[string]any) error {
 
 // printRuntimeProfileTable renders profiles as a stable, sorted table.
 func printRuntimeProfileTable(profiles []map[string]any) {
-	headers := []string{"ID", "DISPLAY_NAME", "PROTOCOL_FAMILY", "COMMAND_NAME", "ENABLED"}
+	headers := []string{"ID", "DISPLAY_NAME", "PROTOCOL_FAMILY", "COMMAND_NAME", "ENABLED", "SKIP_IF_MISSING"}
 	rows := make([][]string, 0, len(profiles))
 	for _, p := range profiles {
 		rows = append(rows, []string{
@@ -382,6 +392,7 @@ func printRuntimeProfileTable(profiles []map[string]any) {
 			strVal(p, "protocol_family"),
 			strVal(p, "command_name"),
 			strVal(p, "enabled"),
+			strVal(p, "skip_if_missing"),
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i][1] < rows[j][1] })

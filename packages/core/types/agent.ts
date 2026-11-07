@@ -162,6 +162,7 @@ export interface RuntimeProfile {
   protocol_family: RuntimeProtocolFamily;
   runtime_type?: RuntimeProfileType;
   command_name: string;
+  skip_if_missing?: boolean;
   description: string | null;
   fixed_args: string[];
   visibility: RuntimeProfileVisibility;
@@ -180,6 +181,7 @@ export interface CreateRuntimeProfileRequest {
   protocol_family?: RuntimeProtocolFamily;
   runtime_type?: RuntimeProfileType;
   command_name: string;
+  skip_if_missing?: boolean;
   description?: string;
   fixed_args?: string[];
   visibility?: RuntimeProfileVisibility;
@@ -191,6 +193,7 @@ export interface CreateRuntimeProfileRequest {
 export interface UpdateRuntimeProfileRequest {
   display_name?: string;
   command_name?: string;
+  skip_if_missing?: boolean;
   description?: string | null;
   fixed_args?: string[];
   visibility?: RuntimeProfileVisibility;

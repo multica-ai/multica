@@ -381,6 +381,68 @@ func TestCreateRuntimeProfile_ForcesWorkspaceVisibility(t *testing.T) {
 	}
 }
 
+func TestRuntimeProfileSkipIfMissingRoundTrip(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name string
+		flag any
+		want bool
+	}{
+		{name: "legacy default", want: false},
+		{name: "opt in", flag: true, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := map[string]any{
+				"display_name":    "Skip Missing " + tc.name,
+				"protocol_family": "codex",
+				"command_name":    "company-codex",
+			}
+			if tc.flag != nil {
+				body["skip_if_missing"] = tc.flag
+			}
+			w := httptest.NewRecorder()
+			req := withURLParam(newRequest("POST", "/", body), "id", testWorkspaceID)
+			testHandler.CreateRuntimeProfile(w, req)
+			if w.Code != http.StatusCreated {
+				t.Fatalf("create status = %d: %s", w.Code, w.Body.String())
+			}
+			var created RuntimeProfileResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE id = $1`, created.ID) })
+			if created.SkipIfMissing != tc.want {
+				t.Fatalf("created skip_if_missing = %t, want %t", created.SkipIfMissing, tc.want)
+			}
+			var stored bool
+			if err := testPool.QueryRow(ctx, `SELECT skip_if_missing FROM runtime_profile WHERE id = $1`, created.ID).Scan(&stored); err != nil {
+				t.Fatal(err)
+			}
+			if stored != tc.want {
+				t.Fatalf("stored skip_if_missing = %t, want %t", stored, tc.want)
+			}
+
+			w = httptest.NewRecorder()
+			req = withURLParams(newRequest("PATCH", "/", map[string]any{"skip_if_missing": !tc.want}),
+				"id", testWorkspaceID, "profileId", created.ID)
+			testHandler.UpdateRuntimeProfile(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("update status = %d: %s", w.Code, w.Body.String())
+			}
+			var updated RuntimeProfileResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
+				t.Fatal(err)
+			}
+			if updated.SkipIfMissing != !tc.want {
+				t.Fatalf("updated skip_if_missing = %t, want %t", updated.SkipIfMissing, !tc.want)
+			}
+		})
+	}
+}
+
 func TestCreateRuntimeProfile_ValidatesCommandAndFixedArgs(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

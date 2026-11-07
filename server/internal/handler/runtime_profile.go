@@ -37,6 +37,7 @@ type RuntimeProfileResponse struct {
 	ProtocolFamily string   `json:"protocol_family"`
 	RuntimeType    string   `json:"runtime_type"`
 	CommandName    string   `json:"command_name"`
+	SkipIfMissing  bool     `json:"skip_if_missing"`
 	Description    *string  `json:"description"`
 	FixedArgs      []string `json:"fixed_args"`
 	Visibility     string   `json:"visibility"`
@@ -61,6 +62,7 @@ func runtimeProfileToResponse(p db.RuntimeProfile) RuntimeProfileResponse {
 		ProtocolFamily: p.ProtocolFamily,
 		RuntimeType:    agent.ProfileRuntimeType(p.RuntimeType, p.ProtocolFamily),
 		CommandName:    p.CommandName,
+		SkipIfMissing:  p.SkipIfMissing,
 		Description:    textToPtr(p.Description),
 		FixedArgs:      args,
 		Visibility:     p.Visibility,
@@ -120,6 +122,7 @@ type createRuntimeProfileRequest struct {
 	ProtocolFamily string   `json:"protocol_family"`
 	RuntimeType    string   `json:"runtime_type"`
 	CommandName    string   `json:"command_name"`
+	SkipIfMissing  bool     `json:"skip_if_missing"`
 	Description    *string  `json:"description"`
 	FixedArgs      []string `json:"fixed_args"`
 	Enabled        *bool    `json:"enabled"`
@@ -187,6 +190,7 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		ProtocolFamily: req.ProtocolFamily,
 		RuntimeType:    req.RuntimeType,
 		CommandName:    req.CommandName,
+		SkipIfMissing:  req.SkipIfMissing,
 		Description:    ptrToText(req.Description),
 		FixedArgs:      fixedArgs,
 		Visibility:     runtimeProfileDefaultVisibility,
@@ -267,6 +271,7 @@ type updateRuntimeProfileRequest struct {
 	ProtocolFamily *string   `json:"protocol_family"`
 	DisplayName    *string   `json:"display_name"`
 	CommandName    *string   `json:"command_name"`
+	SkipIfMissing  *bool     `json:"skip_if_missing"`
 	Description    *string   `json:"description"`
 	FixedArgs      *[]string `json:"fixed_args"`
 	Enabled        *bool     `json:"enabled"`
@@ -331,6 +336,9 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Enabled != nil {
 		params.Enabled = pgtype.Bool{Bool: *req.Enabled, Valid: true}
+	}
+	if req.SkipIfMissing != nil {
+		params.SkipIfMissing = pgtype.Bool{Bool: *req.SkipIfMissing, Valid: true}
 	}
 
 	profile, err := h.Queries.UpdateRuntimeProfile(r.Context(), params)
