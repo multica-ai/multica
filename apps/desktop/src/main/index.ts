@@ -219,6 +219,13 @@ function focusMainWindow(window: BrowserWindow): void {
   window.focus();
 }
 
+// Verification windows are driven in the background through Computer Use, so
+// they must never activate the app and take the user's foreground.
+function revealWindow(window: BrowserWindow): void {
+  if (verificationDev?.enabled) window.showInactive();
+  else window.show();
+}
+
 function ensureMainWindow(): BrowserWindow | null {
   if (!desktopInitialized || !app.isReady()) return null;
   if (!mainWindow || mainWindow.isDestroyed()) return createWindow();
@@ -231,7 +238,7 @@ function dispatchToMainRenderer(
 ): void {
   mainRendererMessages.enqueue(channel, payload, sendMainRendererMessage);
   const window = ensureMainWindow();
-  if (window) focusMainWindow(window);
+  if (window && !verificationDev?.enabled) focusMainWindow(window);
 }
 
 function handleDeepLink(url: string): void {
@@ -424,7 +431,7 @@ function createWindow(): BrowserWindow {
     } else if (windowOpts.isMaximized) {
       window.maximize();
     }
-    window.show();
+    revealWindow(window);
   });
 
   installLocaleRefresh(window);
@@ -540,7 +547,7 @@ function createIssueWindow(context: IssueWindowContext): void {
     authSessionCoordinator.unregisterIssueWindow(window);
   });
 
-  window.on("ready-to-show", () => window.show());
+  window.on("ready-to-show", () => revealWindow(window));
   installLocaleRefresh(window);
   installDownloadSaveDialogHandler(window);
 
