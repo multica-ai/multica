@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localMessageDisplayContent, type LocalConversation, type LocalFolderProject, type LocalUserQuestion } from "@multica/core/local-conversation/protocol";
 import type { Project } from "@multica/core/types";
+import common from "../../../../../../packages/views/locales/zh-Hans/common.json";
 import chat from "../../../../../../packages/views/locales/zh-Hans/chat.json";
 import layout from "../../../../../../packages/views/locales/zh-Hans/layout.json";
 import { LocalConversationFlowPage } from "./local-conversation-flow";
@@ -34,7 +35,7 @@ vi.mock("@multica/views/navigation", () => ({
   useNavigation: () => { mock.useRoute(); return { pathname: mock.pathname, searchParams: new URLSearchParams({ session: mock.selected }), replace: mock.replace }; },
   AppLink: ({ href, children, ...props }: { href: string; children: ReactNode }) => <a href={href} {...props}>{children}</a>,
 }));
-vi.mock("@multica/views/i18n", () => ({ useLocale: () => mock.locale, useT: (namespace?: string) => ({ t: (selector: (resource: typeof chat) => string, options?: { title?: string; device?: string }) => selector((namespace === "layout" ? layout : chat) as typeof chat).replace("{{title}}", options?.title ?? "").replace("{{device}}", options?.device ?? "") }) }));
+vi.mock("@multica/views/i18n", () => ({ useLocale: () => mock.locale, useT: (namespace?: string) => ({ t: (selector: (resource: typeof chat) => string, options?: { title?: string; device?: string }) => selector((namespace === "common" ? common : namespace === "layout" ? layout : chat) as typeof chat).replace("{{title}}", options?.title ?? "").replace("{{device}}", options?.device ?? "") }) }));
 vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsCompact: () => { mock.useRoute(); return mock.compact; } }));
 vi.mock("@multica/views/runtimes/provider-logo", () => ({ ProviderLogo: () => null }));
 vi.mock("../components/tutti-agent-gui-panel", () => ({ TuttiAgentGuiPanel: (props: ComponentProps<typeof TuttiAgentGuiPanel>) => {
@@ -176,6 +177,22 @@ async function activateWithPointer(element: HTMLElement) {
   fireEvent.click(element, { button: 0, detail: 1 });
 }
 
+it("consolidates list actions and returns from archives through the same menu", async () => {
+  render(page());
+  const list = within(screen.getByTestId("local-conversation-sessions"));
+  await list.findByRole("link", { name: /Original/ });
+  const header = screen.getByRole("heading", { name: "本机会话" }).parentElement!;
+  expect(within(header).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["搜索会话", "添加目录", "更多操作"]);
+  expect(list.queryByRole("button", { name: "归档" })).not.toBeInTheDocument();
+  await clickMenuTrigger(list.getByRole("button", { name: "更多操作" }));
+  expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["导入", "归档"]);
+  fireEvent.click(screen.getByRole("menuitem", { name: "归档" }));
+  await waitFor(() => expect(list.queryByRole("link", { name: /Original/ })).not.toBeInTheDocument());
+  await clickMenuTrigger(list.getByRole("button", { name: "更多操作" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "返回会话" }));
+  expect(await list.findByRole("link", { name: /Original/ })).toBeVisible();
+});
+
 describe("provider detection recovery", () => {
   it("shows detection in progress and lets the user retry a failed check", async () => {
     const original = mock.request.getMockImplementation()!;
@@ -183,7 +200,7 @@ describe("provider detection recovery", () => {
     const detection = new Promise((_resolve, reject) => { rejectDetection = reject; });
     mock.request.mockImplementation((scope, method, params) => method === "providers" ? detection : original(scope, method, params));
     render(page());
-    const createButton = screen.getByRole("button", { name: "新建会话" });
+    const createButton = await screen.findByRole("button", { name: "新建项目会话：未分配项目" });
     expect(createButton).toHaveAccessibleDescription("正在检测本机运行器…");
     await act(async () => rejectDetection(new Error("daemon_offline: Runtime starting")));
     const failure = await screen.findByRole("status", { name: "运行器检测失败" });
@@ -202,7 +219,7 @@ describe("provider detection recovery", () => {
     publishAvailability({ state: "unavailable", reason: "daemon_offline" });
     render(page());
     expect(await screen.findByRole("status", { name: "运行器检测失败" })).toBeVisible();
-    const createButton = screen.getByRole("button", { name: "新建会话" });
+    const createButton = await screen.findByRole("button", { name: "新建项目会话：未分配项目" });
     expect(createButton).toHaveAttribute("aria-disabled", "true");
     expect(createButton).toHaveAccessibleDescription("运行器检测失败");
     const draft = screen.getByRole("textbox", { name: "Conversation draft" });
@@ -222,7 +239,7 @@ describe("provider detection recovery", () => {
     mock.request.mockImplementation((scope, method, params) => method === "providers" ? Promise.resolve([{ id: "codex", available }]) : original(scope, method, params));
     qc.setDefaultOptions({ queries: { retry: false, staleTime: Infinity } });
     render(page());
-    const createButton = await screen.findByRole("button", { name: "新建会话" });
+    const createButton = await screen.findByRole("button", { name: "新建项目会话：未分配项目" });
     await waitFor(() => expect(createButton).toHaveAccessibleDescription("请先在本机安装 Codex 或 Claude Code"));
     available = true;
     const reads = () => daemonRequests.filter((entry) => entry.path === "/providers").length;
@@ -682,7 +699,7 @@ describe("local conversation project creation", () => {
     render(page());
     expect(await screen.findByText("本地项目功能已更新，请重启桌面应用")).toBeVisible();
     expect(screen.queryByText("本地项目加载失败")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加目录" }));
     await waitFor(() => expect(mock.error).toHaveBeenCalledWith("本地项目功能已更新，请重启桌面应用"));
     expect(mock.replace).not.toHaveBeenCalled();
   });
@@ -696,7 +713,7 @@ describe("local conversation project creation", () => {
     await screen.findByRole("link", { name: /Original/ });
     const draft = screen.getByRole("textbox", { name: "Conversation draft" });
     fireEvent.change(draft, { target: { value: "Keep my draft" } });
-    fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加目录" }));
     const group = await screen.findByRole("region", { name: "local-repository" });
     expect(mock.request).toHaveBeenCalledWith({ userId: "user", workspaceId: "workspace" }, "folderProjectAdd", {});
     expect(mock.replace).not.toHaveBeenCalled();
@@ -713,8 +730,8 @@ describe("local conversation project creation", () => {
     mock.request.mockImplementation(async (_scope, method) => method === "folderProjectAdd" ? null : method === "listPage" ? [source] : [{ id: "codex", available: false }]);
     render(page());
     await screen.findByRole("link", { name: /Original/ });
-    expect(screen.getByRole("button", { name: "新建项目" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
+    expect(screen.getByRole("button", { name: "添加目录" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "添加目录" }));
     await waitFor(() => expect(mock.request).toHaveBeenCalledWith({ userId: "user", workspaceId: "workspace" }, "folderProjectAdd", {}));
   });
   it.each([false, true])("keeps the conversation when folder selection fails=%s or is cancelled", async (failed) => {
@@ -724,8 +741,8 @@ describe("local conversation project creation", () => {
     });
     render(page());
     await screen.findByRole("link", { name: /Original/ });
-    fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "新建项目" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "添加目录" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "添加目录" })).toBeEnabled());
     expect(mock.replace).not.toHaveBeenCalled();
     if (failed) expect(mock.error).toHaveBeenCalledWith("Could not open folder picker");
     else expect(mock.error).not.toHaveBeenCalled();
@@ -934,7 +951,8 @@ describe("Side conversations in the main session list", () => {
     expect(await screen.findByText("没有匹配的会话")).toBeVisible();
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    fireEvent.click(list.getByRole("button", { name: "归档" }));
+    await clickMenuTrigger(list.getByRole("button", { name: "更多操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "归档" }));
     expect(await list.findByRole("link", { name: /Archived main/ })).toBeVisible();
     expect(list.queryAllByRole("link", { name: /Side/ })).toHaveLength(0);
     expect(listedIds()).not.toContain("side");
@@ -985,7 +1003,8 @@ describe("local conversation project headings", () => {
       fireEvent.click(heading);
       expect(heading).toHaveAttribute("aria-expanded", "true");
     }
-    fireEvent.click(screen.getByRole("button", { name: "归档" }));
+    await clickMenuTrigger(screen.getByRole("button", { name: "更多操作" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "归档" }));
     await waitFor(() => expect(listedIds()).toEqual(["archived-source", "archived-unassigned"]));
     for (const name of [title, "未分配项目"]) expect(screen.getByRole("button", { name }).textContent).toBe(name);
   });
@@ -1016,16 +1035,16 @@ describe("local conversation fork entry", () => {
     });
     const view = render(page());
     await screen.findByRole("link", { name: /Original/ });
-    await waitFor(() => expect(screen.getByRole("button", { name: "新建会话" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "新建项目会话：未分配项目" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "新建项目会话：未分配项目" }));
     await waitFor(() => expect(mock.replace).toHaveBeenCalledWith(`/test/conversations?provider=${provider}`));
     expect(mock.request.mock.calls.some((call) => call[1] === "create")).toBe(false);
     expect(listedIds()).toEqual(["source"]);
     mock.selected = "";
     view.rerender(page());
     const firstRequest = JSON.parse(screen.getByRole("textbox", { name: "Conversation draft" }).getAttribute("data-new-conversation")!);
-    fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
-    fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "新建项目会话：未分配项目" }));
+    fireEvent.click(screen.getByRole("button", { name: "新建项目会话：未分配项目" }));
     expect(JSON.parse(screen.getByRole("textbox", { name: "Conversation draft" }).getAttribute("data-new-conversation")!).sequence).toBeGreaterThan(firstRequest.sequence);
     expect(mock.request.mock.calls.some((call) => call[1] === "create")).toBe(false);
     fireEvent.change(screen.getByRole("textbox", { name: "Conversation draft" }), { target: { value: "Not sent yet" } });

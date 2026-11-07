@@ -1,6 +1,10 @@
 {
   "desktop": {
     "local_conversation": {
+      "add_directory": "디렉터리 추가",
+      "import": "가져오기",
+      "archive": "보관함",
+      "back_to_sessions": "대화로 돌아가기",
       "waiting_for_answer": "답변을 기다리고 있습니다",
       "waiting_for_answer_label": "답변을 기다리고 있습니다: {{title}}"
     },

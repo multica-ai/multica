@@ -1,11 +1,14 @@
+import chat from "../../../../../../packages/views/locales/zh-Hans/chat.json";
+import common from "../../../../../../packages/views/locales/zh-Hans/common.json";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LocalImportCandidate } from "@multica/core/local-conversation/protocol";
 import type { LocalV2Transport } from "@multica/core/local-conversation/v2";
-import { LocalConversationImportButton } from "./local-conversation-import";
+import { LocalConversationListMenu } from "./local-conversation-import";
 
 vi.mock("@multica/views/runtimes/provider-logo", () => ({ ProviderLogo: () => <span /> }));
+vi.mock("@multica/views/i18n", () => ({ useT: (namespace: string) => ({ t: (selector: (resource: any) => string) => selector(namespace === "common" ? common : chat) }) }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn() } }));
 const clients: QueryClient[] = [];
 afterEach(() => { cleanup(); clients.splice(0).forEach((client) => client.clear()); });
@@ -26,13 +29,19 @@ function mount(request: (...args: any[]) => Promise<any>) {
     const outcome = (entry: { sourceId: string; conversationId?: string; error?: string }) => ({ source_id: entry.sourceId, conversation_id: entry.conversationId ?? "", error: entry.error ?? "" });
     return { imported: result.imported.map(outcome), skipped: result.skipped.map(outcome), failed: result.failed.map(outcome) };
   }, send: vi.fn(), subscribe: () => () => {}, onConnection: () => () => {}, fileUrl: vi.fn(), upload: vi.fn(), choose: vi.fn() } as unknown as LocalV2Transport;
-  render(<QueryClientProvider client={qc}><LocalConversationImportButton scope={scope} client={client} projects={[{ id: "project-a", title: "Project A" }]} chinese onImported={onImported} /></QueryClientProvider>);
+  render(<QueryClientProvider client={qc}><LocalConversationListMenu scope={scope} client={client} projects={[{ id: "project-a", title: "Project A" }]} chinese archived={false} onToggleArchive={vi.fn()} onImported={onImported} /></QueryClientProvider>);
   return { onImported };
+}
+async function openImport() {
+  const trigger = screen.getByRole("button", { name: "更多操作" });
+  await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded"));
+  fireEvent.click(trigger);
+  fireEvent.click(await screen.findByRole("menuitem", { name: "导入" }));
 }
 describe("local conversation import dialog", () => {
   it("explains when an already-running desktop needs to reload the new native interface", async () => {
     mount(vi.fn(async () => { throw new Error("http_404: Local conversation request failed (HTTP 404)"); }));
-    fireEvent.click(screen.getByRole("button", { name: "导入本机会话" }));
+    await openImport();
     await screen.findByText("重启 Multica 后可使用本机会话导入。");
     expect(screen.getByRole("button", { name: "导入所选 (0)" })).toBeDisabled();
   });
@@ -44,7 +53,7 @@ describe("local conversation import dialog", () => {
       return undefined;
     });
     const { onImported } = mount(request); expect(request).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "导入本机会话" }));
+    await openImport();
     await screen.findByRole("checkbox", { name: "History first" });
     fireEvent.click(screen.getByRole("button", { name: "选择全部历史" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "导入所选 (2)" })).toBeEnabled());
@@ -61,7 +70,7 @@ describe("local conversation import dialog", () => {
       if (method === "importScan" && params.provider === "codex") throw new Error("Update Codex to read history");
       return { sessions: [{ ...candidate("claude-source"), provider: "claude" }], nextCursor: null };
     });
-    mount(request); fireEvent.click(screen.getByRole("button", { name: "导入本机会话" }));
+    mount(request); await openImport();
     await screen.findByText("Update Codex to read history");
     fireEvent.click(screen.getByRole("button", { name: "Claude Code" }));
     await screen.findByRole("checkbox", { name: "History claude-source" });
@@ -74,7 +83,7 @@ describe("local conversation import dialog", () => {
       imported = true;
       return { imported: [{ sourceId: "good", conversationId: "copy" }], skipped: [], failed: [{ sourceId: "broken", error: "Original folder is missing" }] };
     });
-    const { onImported } = mount(request); fireEvent.click(screen.getByRole("button", { name: "导入本机会话" }));
+    const { onImported } = mount(request); await openImport();
     await screen.findByRole("checkbox", { name: "History good" });
     fireEvent.click(screen.getByRole("checkbox", { name: "全选当前列表" }));
     fireEvent.click(screen.getByRole("button", { name: "导入所选 (2)" }));
@@ -92,7 +101,7 @@ describe("local conversation import dialog", () => {
       return undefined;
       return undefined;
     });
-    const { onImported } = mount(request); fireEvent.click(screen.getByRole("button", { name: "导入本机会话" }));
+    const { onImported } = mount(request); await openImport();
     fireEvent.click(await screen.findByRole("checkbox", { name: "History source" }));
     fireEvent.click(screen.getByRole("button", { name: "导入所选 (1)" }));
     fireEvent.click(await screen.findByRole("button", { name: "停止导入" }));
@@ -108,7 +117,7 @@ describe("local conversation import dialog", () => {
       if (method === "importCancel") rejectPage(new Error("Cancelled"));
       return undefined;
     });
-    mount(request); fireEvent.click(screen.getByRole("button", { name: "导入本机会话" }));
+    mount(request); await openImport();
     await screen.findByRole("checkbox", { name: "History first" });
     fireEvent.click(screen.getByRole("button", { name: "选择全部历史" }));
     await waitFor(() => expect(request).toHaveBeenCalledWith(scope, "importScan", { provider: "codex", cursor: "next" }));

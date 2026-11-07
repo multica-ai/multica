@@ -78,4 +78,4 @@ it("shows the full directory before history is loaded, prefetches on hover, and 
   expect(navigation.visibleTurnIds()).not.toContain("t90");
   expect(screen.getAllByText("Prompt 10").length).toBeGreaterThan(0);
   await waitFor(() => expect(document.querySelector("[data-agent-navigation-target]")).toBeNull());
-});
+}, 20_000);

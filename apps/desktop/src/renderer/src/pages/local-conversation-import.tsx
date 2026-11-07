@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { useId, useRef, useState } from "react";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { FileInput, FolderKanban, Loader2 } from "lucide-react";
+import { Archive, ArrowLeft, FileInput, FolderKanban, Loader2, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -11,7 +11,6 @@ import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   Dialog,
-  DialogTrigger,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -22,9 +21,11 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem
 } from "@multica/ui/components/ui/dropdown-menu";
+import { useT } from "@multica/views/i18n";
 import { ProviderLogo } from "@multica/views/runtimes/provider-logo";
 import type { LocalProviderId } from "@multica/core/local-conversation/protocol";
 import { parseWithFallback } from "@multica/core/api/schema";
@@ -38,24 +39,31 @@ import {
 } from "@multica/core/local-conversation/v2";
 import { conversationService } from "../platform/conversation-services";
 import { observer } from "mobx-react-lite";
-export const LocalConversationImportButton = observer(
-  LocalConversationImportButtonRender
+export const LocalConversationListMenu = observer(
+  LocalConversationListMenuRender
 );
 
-function LocalConversationImportButtonRender({
+function LocalConversationListMenuRender({
   scope,
   client,
   projects,
   chinese,
-  onImported
+  onImported,
+  archived,
+  onToggleArchive
 }: {
   scope: LocalV2Scope;
   client: LocalV2Transport;
   projects: { id: string; title: string }[];
   chinese: boolean;
   onImported(): void;
+  archived: boolean;
+  onToggleArchive(): void;
 }) {
+  const { t } = useT("chat");
+  const { t: tCommon } = useT("common");
   const [open, setOpen] = useState(false);
+  const menuTrigger = useRef<HTMLButtonElement>(null);
   const labelId = useId();
   const [provider, setProvider] = useState<LocalProviderId>("codex");
   const [selected, setSelected] = useState(new Set<string>());
@@ -298,12 +306,34 @@ function LocalConversationImportButtonRender({
   >(() => {
     void startImport();
   });
+  const onMenuPointerDown = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof DropdownMenuTrigger>["onPointerDown"]>
+  >((event) => event.preventBaseUIHandler());
+  const onMenuMouseDown = usePersistCallback<
+    NonNullable<React.ComponentProps<typeof DropdownMenuTrigger>["onMouseDown"]>
+  >((event) => event.preventBaseUIHandler());
+  const openImport = usePersistCallback(() => setOpen(true));
   return (
     <Dialog open={open} onOpenChange={onOpenChangeProp1}>
-      <DialogTrigger render={<IconButton label={labels.title} />}>
-        <FileInput />
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-2xl" showCloseButton={!disabled}>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          onPointerDown={onMenuPointerDown}
+          onMouseDown={onMenuMouseDown}
+          render={<IconButton ref={menuTrigger} label={tCommon(($) => $.more_actions)} />}
+        >
+          <MoreHorizontal />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={openImport}>
+            <FileInput />{t(($) => $.desktop.local_conversation.import)}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onToggleArchive}>
+            {archived ? <ArrowLeft /> : <Archive />}
+            {archived ? t(($) => $.desktop.local_conversation.back_to_sessions) : t(($) => $.desktop.local_conversation.archive)}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <DialogContent className="sm:max-w-2xl" showCloseButton={!disabled} finalFocus={menuTrigger}>
         <DialogHeader>
           <DialogTitle>{labels.title}</DialogTitle>
           <DialogDescription>{labels.description}</DialogDescription>

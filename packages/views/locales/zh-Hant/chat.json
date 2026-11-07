@@ -251,6 +251,10 @@
   },
   "desktop": {
     "local_conversation": {
+      "add_directory": "新增目錄",
+      "import": "匯入",
+      "archive": "封存",
+      "back_to_sessions": "返回對話",
       "waiting_for_answer": "等待你的回答",
       "waiting_for_answer_label": "等待你的回答：{{title}}"
     },

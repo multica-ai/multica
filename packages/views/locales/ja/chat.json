@@ -1,6 +1,10 @@
 {
   "desktop": {
     "local_conversation": {
+      "add_directory": "ディレクトリを追加",
+      "import": "インポート",
+      "archive": "アーカイブ",
+      "back_to_sessions": "会話に戻る",
       "waiting_for_answer": "回答を待っています",
       "waiting_for_answer_label": "回答を待っています：{{title}}"
     },

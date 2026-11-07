@@ -1,6 +1,10 @@
 {
   "desktop": {
     "local_conversation": {
+      "add_directory": "添加目录",
+      "import": "导入",
+      "archive": "归档",
+      "back_to_sessions": "返回会话",
       "waiting_for_answer": "等待你的回答",
       "waiting_for_answer_label": "等待你的回答：{{title}}"
     },

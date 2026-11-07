@@ -1,6 +1,10 @@
 {
   "desktop": {
     "local_conversation": {
+      "add_directory": "Add directory",
+      "import": "Import",
+      "archive": "Archive",
+      "back_to_sessions": "Back to sessions",
       "waiting_for_answer": "Waiting for your answer",
       "waiting_for_answer_label": "Waiting for your answer: {{title}}"
     },
