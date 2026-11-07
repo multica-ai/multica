@@ -89,6 +89,9 @@ export interface AutopilotCollaboratorsResponse {
 }
 
 export interface AutopilotTrigger {
+  execution_limit?: number | null;
+  execution_count?: number;
+  exhausted?: boolean;
   id: string;
   autopilot_id: string;
   kind: AutopilotTriggerKind;
@@ -183,6 +186,7 @@ export interface UpdateAutopilotRequest {
 }
 
 export interface CreateAutopilotTriggerRequest {
+  execution_limit?: number | null;
   kind: AutopilotTriggerKind;
   cron_expression?: string;
   timezone?: string;
@@ -192,6 +196,8 @@ export interface CreateAutopilotTriggerRequest {
 }
 
 export interface UpdateAutopilotTriggerRequest {
+  // Omitted preserves; null clears the limit without resetting the count.
+  execution_limit?: number | null;
   enabled?: boolean;
   cron_expression?: string;
   timezone?: string;

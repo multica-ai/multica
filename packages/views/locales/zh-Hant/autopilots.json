@@ -548,5 +548,16 @@
     "title": "讓 AI 代理按時自己開工",
     "description": "設好排程或 Webhook，每次觸發都會自動建立任務交給 AI 代理，也可以直接執行。挑一個模板，改一改就能用。",
     "templates": "從模板開始"
+  },
+  "execution_limit": {
+    "label": "執行次數",
+    "unlimited": "不限",
+    "once": "一次",
+    "custom": "自訂次數",
+    "count": "次數",
+    "invalid": "請輸入 1 到 2147483647 之間的整數。",
+    "used": "已接受 {{count}} 次，編輯後保留此計數。",
+    "completed": "已完成",
+    "progress": "已接受 {{used}} / {{limit}} 次"
   }
 }

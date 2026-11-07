@@ -92,6 +92,8 @@ const (
 	// ReasonQuotaExceeded is a policy-neutral refusal for an exhausted
 	// Cloud-provided autopilot interval.
 	ReasonQuotaExceeded ReasonCode = "quota_exceeded"
+	// ReasonScheduleExhausted: a finite schedule reached its lifetime count.
+	ReasonScheduleExhausted ReasonCode = "schedule_exhausted"
 	// ReasonIssueLimitReached means a create_issue Autopilot was admitted for a
 	// run, but Cloud's effective workspace issue-count limit blocked the issue.
 	ReasonIssueLimitReached ReasonCode = "issue_limit_reached"

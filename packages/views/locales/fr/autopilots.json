@@ -550,5 +550,16 @@
     "title": "Laissez vos agents se mettre au travail tout seuls",
     "description": "Définissez une planification ou un webhook. À chaque déclenchement, Multica crée une tâche pour un agent, ou lance directement l'agent. Choisissez un modèle et adaptez-le.",
     "templates": "Partir d'un modèle"
+  },
+  "execution_limit": {
+    "label": "Limite d’exécutions",
+    "unlimited": "Illimité",
+    "once": "Une fois",
+    "custom": "Nombre personnalisé",
+    "count": "Nombre d’exécutions",
+    "invalid": "Saisissez un entier de 1 à 2147483647.",
+    "used": "{{count}} exécutions acceptées. Modifier conserve ce compteur.",
+    "completed": "Terminé",
+    "progress": "{{used}} / {{limit}} acceptées"
   }
 }

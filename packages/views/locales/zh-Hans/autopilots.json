@@ -548,5 +548,16 @@
     "title": "让智能体按时自己开工",
     "description": "设好时间表或 Webhook，每次触发都会自动建任务交给智能体，也可以直接运行。挑一个模板，改改就能用。",
     "templates": "从模板开始"
+  },
+  "execution_limit": {
+    "label": "执行次数",
+    "unlimited": "不限",
+    "once": "一次",
+    "custom": "自定义次数",
+    "count": "次数",
+    "invalid": "请输入 1 到 2147483647 之间的整数。",
+    "used": "已接受 {{count}} 次，编辑后保留此计数。",
+    "completed": "已完成",
+    "progress": "已接受 {{used}} / {{limit}} 次"
   }
 }

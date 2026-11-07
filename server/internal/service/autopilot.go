@@ -598,6 +598,12 @@ func (s *AutopilotService) dispatchAutopilot(
 		return nil, dispatch.ReasonInternalError, fmt.Errorf("create run: %w", err)
 	}
 	if reused {
+		// Another scheduler may have won quota admission after our initial
+		// occurrence lookup. A run row alone is not downstream acceptance;
+		// keep the scheduler retryable until creation or recovery finishes.
+		if plannedAt.Valid && !isAutopilotRunComplete(run) {
+			return nil, dispatch.ReasonInternalError, fmt.Errorf("scheduled dispatch is pending; retry")
+		}
 		return &run, dispatch.ReasonCode(run.ReasonCode.String), nil
 	}
 	s.captureAutopilotRunStarted(autopilot, run, source)
@@ -697,6 +703,9 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	defer tx.Rollback(ctx)
 
 	qtx := s.Queries.WithTx(tx)
+	if err := acceptScheduledOccurrence(ctx, qtx, ap, run); err != nil {
+		return err
+	}
 
 	title := s.interpolateTemplate(ap, *run, triggerTimezone)
 	description := s.buildIssueDescription(ap, *run, triggerTimezone)
@@ -1041,7 +1050,16 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "workspace fail-closed: no accountable human for autopilot run"), code: dispatch.ReasonAttributionBlocked}
 	}
 	apSource, _, apEvidenceKind, apEvidenceRef := attributionCreateParams(autopilotAttr)
-	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin task dispatch: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.Queries.WithTx(tx)
+	if err := acceptScheduledOccurrence(ctx, qtx, ap, run); err != nil {
+		return err
+	}
+	task, err := qtx.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
 		ID:             dbid.NewV7(),
 		AgentID:        agent.ID,
 		RuntimeID:      agent.RuntimeID,
@@ -1064,19 +1082,20 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	if err != nil {
 		return fmt.Errorf("create autopilot task: %w", err)
 	}
-	// Only a manual "run now" carries HumanAction; schedule/webhook fires do not.
-	s.TaskSvc.RecordHumanDelegation(ctx, autopilotAttr)
-
 	// Update run with task reference.
-	updatedRun, err := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
+	updatedRun, err := qtx.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
 		ID:     run.ID,
 		TaskID: task.ID,
 	})
 	if err != nil {
-		slog.Warn("failed to update run with task_id", "run_id", util.UUIDToString(run.ID), "error", err)
-	} else {
-		*run = updatedRun
+		return fmt.Errorf("link run to task: %w", err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit task dispatch: %w", err)
+	}
+	*run = updatedRun
+	// Only a manual "run now" carries HumanAction; schedule/webhook fires do not.
+	s.TaskSvc.RecordHumanDelegation(ctx, autopilotAttr)
 
 	// Drop the empty-claim cache and wake the daemon. dispatchRunOnly
 	// inserts the task row directly via Queries.CreateAutopilotTask
@@ -1090,6 +1109,45 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		"task_id", util.UUIDToString(task.ID),
 		"run_id", util.UUIDToString(run.ID),
 	)
+	return nil
+}
+
+// acceptScheduledOccurrence must share the downstream creation transaction.
+// Holding the run lock prevents partial recovery from freeing its planned_at
+// while this attempt is creating a resource. A recovered attempt must never
+// resume and create an untracked second issue/task. Non-schedule paths bypass
+// lifetime counts, including manual runs of an exhausted automation.
+func acceptScheduledOccurrence(ctx context.Context, q *db.Queries, ap db.Autopilot, run *db.AutopilotRun) error {
+	if run.Source != "schedule" {
+		return nil
+	}
+	current, err := q.LockAutopilotRunForScheduleDispatch(ctx, run.ID)
+	if err != nil {
+		return fmt.Errorf("lock scheduled run: %w", err)
+	}
+	if current.PlannedAt.Valid != run.PlannedAt.Valid ||
+		(run.PlannedAt.Valid && !current.PlannedAt.Time.Equal(run.PlannedAt.Time)) ||
+		current.Status != run.Status || current.IssueID.Valid || current.TaskID.Valid {
+		return fmt.Errorf("scheduled dispatch changed concurrently; retry")
+	}
+	_, err = q.AcceptAutopilotScheduleOccurrence(ctx, db.AcceptAutopilotScheduleOccurrenceParams{
+		TriggerID: run.TriggerID, AutopilotID: ap.ID, WorkspaceID: ap.WorkspaceID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		trigger, lookupErr := q.GetAutopilotTriggerForAutopilot(ctx, db.GetAutopilotTriggerForAutopilotParams{
+			ID: run.TriggerID, AutopilotID: ap.ID, WorkspaceID: ap.WorkspaceID,
+		})
+		if lookupErr != nil && !errors.Is(lookupErr, pgx.ErrNoRows) {
+			return fmt.Errorf("check schedule admission: %w", lookupErr)
+		}
+		if lookupErr == nil && trigger.ExecutionLimit.Valid && trigger.ExecutionCount >= int64(trigger.ExecutionLimit.Int32) {
+			return &errDispatchSkipped{reason: "schedule execution limit reached", code: dispatch.ReasonScheduleExhausted}
+		}
+		return &errDispatchSkipped{reason: "schedule no longer enabled", code: dispatch.ReasonTargetUnavailable}
+	}
+	if err != nil {
+		return fmt.Errorf("accept scheduled occurrence: %w", err)
+	}
 	return nil
 }
 

@@ -55,6 +55,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
+import { ExecutionLimitEditor, validExecutionLimit } from "./schedule-editor/execution-limit";
 import { ScheduleEditor } from "./schedule-editor/schedule-editor";
 import { WebhookUrlField } from "./webhook-url-field";
 import { getDefaultScheduleConfig, type ScheduleConfig } from "./schedule-editor/model";
@@ -313,6 +314,8 @@ export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: Autopi
   const describeSchedule = useDescribeSchedule();
   const deleteTrigger = useDeleteAutopilotTrigger();
   const rotateToken = useRotateAutopilotTriggerWebhookToken();
+  const exhausted = trigger.exhausted === true ||
+    (trigger.execution_limit != null && (trigger.execution_count ?? 0) >= trigger.execution_limit);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [rotateOpen, setRotateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -419,6 +422,13 @@ export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: Autopi
             {t(($) => $.trigger_row.disabled_badge)}
           </span>
         )}
+        {trigger.kind === "schedule" && trigger.execution_limit != null && (
+          <span className="shrink-0 text-caption text-muted-foreground">
+            {exhausted
+              ? t(($) => $.execution_limit.completed)
+              : t(($) => $.execution_limit.progress, { used: trigger.execution_count ?? 0, limit: trigger.execution_limit })}
+          </span>
+        )}
         {isApi && (
           <span className="shrink-0 rounded-xs bg-muted px-1.5 py-0.5 text-caption">
             {t(($) => $.trigger_row.deprecated_badge)}
@@ -434,7 +444,7 @@ export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: Autopi
               filters on `enabled` instead of clearing it — so the row would
               otherwise carry the Disabled badge and a promise to run at 09:00
               in the same breath. The badge is the true one. */}
-          {trigger.next_run_at && trigger.enabled && (
+          {trigger.next_run_at && trigger.enabled && !exhausted && (
             <span className="mr-1 hidden text-caption tabular-nums text-muted-foreground sm:inline">
               {t(($) => $.trigger_row.next_label, {
                 date: formatInTimeZone(
@@ -550,10 +560,11 @@ function AddTriggerDialog({
   const [config, setConfig] = useState<ScheduleConfig>(() =>
     getDefaultScheduleConfig(browserTimezone()),
   );
+  const [executionLimit, setExecutionLimit] = useState<number | null>(null);
   const [label, setLabel] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const scheduleGate = useScheduleSubmitGate(wsId);
-  const canSubmit = !submitting && (kind !== "schedule" || scheduleGate.scheduleValid);
+  const canSubmit = !submitting && (kind !== "schedule" || (scheduleGate.scheduleValid && validExecutionLimit(executionLimit)));
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -573,6 +584,7 @@ function AddTriggerDialog({
           autopilotId,
           kind: "schedule",
           cron_expression: cronExpr,
+          execution_limit: executionLimit,
           timezone: config.timezone || undefined,
           label: label.trim() || undefined,
         });
@@ -638,19 +650,26 @@ function AddTriggerDialog({
           </div>
 
           {kind === "schedule" ? (
-            <ScheduleEditor
-              value={config}
-              onChange={(next) => {
-                scheduleGate.clearRejection();
-                setConfig(next);
-              }}
-              wsId={wsId}
-              onValidityChange={scheduleGate.onValidityChange}
-              // Same reason as the autopilot dialog: the submit path reads the
-              // schedule, validates it over the network, then writes what it
-              // read — an edit landing inside that window would be discarded.
-              disabled={submitting}
-            />
+            <>
+              <ScheduleEditor
+                value={config}
+                onChange={(next) => {
+                  scheduleGate.clearRejection();
+                  setConfig(next);
+                }}
+                wsId={wsId}
+                onValidityChange={scheduleGate.onValidityChange}
+                // Same reason as the autopilot dialog: the submit path reads the
+                // schedule, validates it over the network, then writes what it
+                // read — an edit landing inside that window would be discarded.
+                disabled={submitting}
+              />
+              <ExecutionLimitEditor
+                value={executionLimit}
+                onChange={setExecutionLimit}
+                disabled={submitting}
+              />
+            </>
           ) : (
             <p className="rounded-md bg-muted/50 px-3 py-2 text-caption text-muted-foreground">
               {t(($) => $.add_trigger_dialog.webhook_help)}

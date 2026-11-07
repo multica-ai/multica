@@ -333,6 +333,10 @@ import {
   ListAutopilotsResponseSchema,
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
   AutopilotRunSchema,
+  AutopilotTriggerSchema,
+  GetAutopilotResponseSchema,
+  EMPTY_GET_AUTOPILOT_RESPONSE,
+  EMPTY_AUTOPILOT_TRIGGER,
   AutopilotQuotaUsageSchema,
   FALLBACK_AUTOPILOT_RUN,
   CronPreviewResponseSchema,
@@ -4912,7 +4916,10 @@ export class ApiClient {
   }
 
   async getAutopilot(id: string): Promise<GetAutopilotResponse> {
-    return this.fetch(`/api/autopilots/${id}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}`);
+    return parseWithFallback(raw, GetAutopilotResponseSchema, EMPTY_GET_AUTOPILOT_RESPONSE, {
+      endpoint: "GET /api/autopilots/{id}",
+    });
   }
 
   async createAutopilot(data: CreateAutopilotRequest): Promise<Autopilot> {
@@ -4998,17 +5005,19 @@ export class ApiClient {
   }
 
   async createAutopilotTrigger(autopilotId: string, data: CreateAutopilotTriggerRequest): Promise<AutopilotTrigger> {
-    return this.fetch(`/api/autopilots/${autopilotId}/triggers`, {
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/triggers`, {
       method: "POST",
       body: JSON.stringify(data),
     });
+    return parseWithFallback(raw, AutopilotTriggerSchema, EMPTY_AUTOPILOT_TRIGGER, { endpoint: "POST /api/autopilots/{id}/triggers" });
   }
 
   async updateAutopilotTrigger(autopilotId: string, triggerId: string, data: UpdateAutopilotTriggerRequest): Promise<AutopilotTrigger> {
-    return this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, {
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
+    return parseWithFallback(raw, AutopilotTriggerSchema, EMPTY_AUTOPILOT_TRIGGER, { endpoint: "PATCH /api/autopilots/{id}/triggers" });
   }
 
   async deleteAutopilotTrigger(autopilotId: string, triggerId: string): Promise<void> {
