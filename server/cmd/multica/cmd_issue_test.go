@@ -3957,7 +3957,7 @@ func newIssueListTestCmd() *cobra.Command {
 	cmd.Flags().String("project", "", "")
 	cmd.Flags().String("updated-since", "", "")
 	cmd.Flags().String("updated-until", "", "")
-	cmd.Flags().StringSlice("metadata", nil, "")
+	cmd.Flags().StringArray("metadata", nil, "")
 	cmd.Flags().StringArray("property", nil, "")
 	cmd.Flags().Int("limit", 50, "")
 	cmd.Flags().Int("offset", 0, "")

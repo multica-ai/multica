@@ -609,12 +609,17 @@ One call returns one page. `--limit` is the page size, 1 to 100 (the server retu
 
 With `--output json` the envelope carries `total`, `limit`, `offset` and `has_more`. `limit` and `offset` echo the request, so `limit` holds steady across a walk and `offset` is the one you passed. The number of issues in this page is `issues | length`, and that is what to advance `--offset` by: it equals `limit` on a full page and stays right on any page that comes back shorter. An empty page always reports `has_more: false`. `total` cannot end a walk on its own: when the server's count query fails it reports the size of the page it just returned, and a newer backend may drop the field. So a full page reports `has_more: true` whenever `total` is missing or no larger than the page itself. That rule means a list that fills exactly one page costs one extra request that comes back empty; the alternative is a walk that ends one page in whenever the count is unhealthy. To walk a whole list, sort by `created_at` (`--sort created_at --direction asc`): the default `position` order is re-ranked by board drags and status changes, so pages can shift under a walk. Sorting by `created_at` keeps them still, but no offset walk is a consistent snapshot while others are writing.
 
-Use `--metadata key=value` (repeatable; combined with AND) to filter by per-issue metadata. The value is JSON-parsed: `true`/`false` become bool, numbers become numbers, anything else is a string. Wrap as `'"42"'` to force a string when the value would otherwise sniff as a number:
+Use `--metadata key=value` (repeatable; one pair per flag, combined with AND) to filter by per-issue metadata. Commas and additional equals signs are part of the value. The value is JSON-parsed: `true`/`false` become bool, numbers become numbers, anything else is a string. Include JSON quotes to force a numeric-looking value to remain a string:
 
 ```bash
 multica issue list --metadata pipeline_status=waiting_review
 multica issue list --metadata pr_number=482 --metadata is_blocked=true
+multica issue list --metadata 'external_id="42"'
+multica issue list --metadata 'note=Smith, John'
+multica issue list --metadata 'note=a,b=c'
 ```
+
+Older versions split a single flag on commas as CSV. Migrate `--metadata 'phase=ready,blocked=true'` to `--metadata phase=ready --metadata blocked=true` to keep both conditions. The single-flag form now filters for the literal string `ready,blocked=true` under `phase`; CSV quoting is no longer needed to preserve commas.
 
 Use `--property "Name=Value"` (repeatable; one member per flag) to filter by custom property. Names and select option values are case-insensitive and resolve to ids; repeating the same property matches any of its members, different properties must all match. Values are option names or ids (select types), `true`/`false` (checkbox), a member name, email, or id (actor types), or the stored value itself for `text`, `url`, `number`, and `date` (`YYYY-MM-DD`). The reserved value `__none__` matches issues where the property is unset:
 

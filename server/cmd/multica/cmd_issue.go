@@ -642,7 +642,7 @@ func init() {
 	issueListCmd.Flags().String("project", "", "Filter by project ID")
 	issueListCmd.Flags().String("updated-since", "", "Include issues updated at or after this RFC3339 timestamp; requires --updated-until (keep both bounds fixed across pages)")
 	issueListCmd.Flags().String("updated-until", "", "Include issues updated before this RFC3339 timestamp; requires --updated-since")
-	issueListCmd.Flags().StringSlice("metadata", nil, "Filter by metadata key=value (repeatable; combined with AND). Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. Wrap as '\"42\"' to force a string when the value would otherwise sniff as a number.")
+	issueListCmd.Flags().StringArray("metadata", nil, "Filter by metadata key=value (repeatable; one pair per flag; combined with AND). Commas are part of the value; replace old comma-separated filters with repeated --metadata flags. Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. For example: --metadata 'external_id=\"42\"' --metadata 'note=Smith, John'.")
 	issueListCmd.Flags().StringArray("property", nil, `Filter by custom property, written as "Name=Value" or as a comparison such as "Score>=3", "Ship Date<2026-01-01" or "Notes~=review" (repeatable, one member per flag; quote it so the shell does not read < and > as redirection). Name is a property name (case-insensitive) or its UUID; a name containing =, <, >, ! or ~ has to be given by UUID. Use __none__ to match issues where the property is unset; it works for every type, so an option or member actually named __none__ has to be given by id. Repeating a property matches ANY of its members; different properties must ALL match. The per-type value forms and comparisons are in the command description above.`)
 	issueListCmd.Flags().Int("limit", 50, fmt.Sprintf("Page size, 1 to %d (the server returns at most %d issues per request; use --offset to page through more)", issueListMaxPageSize, issueListMaxPageSize))
 	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination; while --output json reports has_more, advance it by the number of issues in that same response)")
@@ -876,7 +876,7 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		}
 		params.Set("project_id", project.ID)
 	}
-	if mdFlags, _ := cmd.Flags().GetStringSlice("metadata"); len(mdFlags) > 0 {
+	if mdFlags, _ := cmd.Flags().GetStringArray("metadata"); len(mdFlags) > 0 {
 		filter, err := buildMetadataFilterQueryParam(mdFlags)
 		if err != nil {
 			return err
