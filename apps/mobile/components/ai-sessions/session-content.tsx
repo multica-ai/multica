@@ -1334,7 +1334,7 @@ export function AISessionContent({
                 variant="ghost"
                 size="sm"
                 hitSlop={{ top: 4, bottom: 4 }}
-                className="flex-1 min-w-0 shrink px-2"
+                className="flex-1 min-w-0 shrink justify-end px-2"
                 disabled={
                   !connected || running || busy || !!pending || !!agents.length
                 }
