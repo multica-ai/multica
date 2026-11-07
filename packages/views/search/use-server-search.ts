@@ -1,8 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { SearchIssueResult, SearchProjectResult } from "@multica/core/types";
-import { isLocalSearchReady, searchIssues, searchProjects } from "@multica/core/search-index";
+import type {
+  SearchChatMessageResult,
+  SearchIssueResult,
+  SearchProjectResult,
+} from "@multica/core/types";
+import {
+  isLocalSearchReady,
+  searchChatMessages,
+  searchIssues,
+  searchProjects,
+} from "@multica/core/search-index";
 
 export interface SearchResults {
   /**
@@ -14,9 +23,10 @@ export interface SearchResults {
   query: string;
   issues: SearchIssueResult[];
   projects: SearchProjectResult[];
+  messages: SearchChatMessageResult[];
 }
 
-export const NO_RESULTS: SearchResults = { query: "", issues: [], projects: [] };
+export const NO_RESULTS: SearchResults = { query: "", issues: [], projects: [], messages: [] };
 
 /**
  * Issue (and optionally project) search for the palette. An empty query
@@ -48,14 +58,20 @@ export function useServerSearch(query: string, options: { projects: boolean }) {
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        const [issueRes, projectRes] = await Promise.all([
+        const [issueRes, projectRes, messageRes] = await Promise.all([
           searchIssues({ q, limit: 20, include_closed: true, signal: controller.signal }),
           withProjects
             ? searchProjects({ q, limit: 10, include_closed: true, signal: controller.signal })
             : Promise.resolve({ projects: [] as SearchProjectResult[] }),
+          searchChatMessages({ q, limit: 10, signal: controller.signal }),
         ]);
         if (!controller.signal.aborted) {
-          setResults({ query: q, issues: issueRes.issues, projects: projectRes.projects });
+          setResults({
+            query: q,
+            issues: issueRes.issues,
+            projects: projectRes.projects,
+            messages: messageRes.messages,
+          });
           setIsLoading(false);
         }
       } catch {
@@ -63,7 +79,7 @@ export function useServerSearch(query: string, options: { projects: boolean }) {
           // Drop the previous query's rows rather than leaving them on screen
           // permanently greyed out: the request that would have replaced them
           // is never coming. The list falls through to the empty state.
-          setResults({ query: q, issues: [], projects: [] });
+          setResults({ query: q, issues: [], projects: [], messages: [] });
           setIsLoading(false);
         }
       }
