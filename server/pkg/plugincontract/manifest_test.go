@@ -399,7 +399,7 @@ func TestValidateScope(t *testing.T) {
 	valid := []string{
 		ScopeIssuesRead, ScopeIssuesWrite, ScopeCommentsRead, ScopeCommentsWrite,
 		ScopeTasksRead, ScopeTasksWrite, ScopeAgentsRead, ScopeMembersRead,
-		ScopeStorageUser, ScopeStorageWorkspace,
+		ScopeStorageUser, ScopeStorageWorkspace, ScopeChannelsSend,
 		"net:example.com", "net:api.example.co.uk",
 	}
 	for _, scope := range valid {
