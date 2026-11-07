@@ -3133,6 +3133,37 @@ describe("IssueDetail (shared)", () => {
           expect(setViewState).not.toHaveBeenCalled();
         } finally { view.unmount(); geometry.restore(); }
       });
+      it.each(["description", "sub-issues"] as const)("gives the %s outline jump ownership over an unfinished landing", async (destination) => {
+        virtuosoWindow.failScroll = true;
+        const target = bulkIndex(50);
+        const geometry = controlLandingGeometry(target);
+        const setViewState = vi.fn();
+        mockApiObj.listTimeline.mockResolvedValue(bulkRoots(60));
+        if (destination === "sub-issues") {
+          mockApiObj.listChildIssues.mockResolvedValue({
+            issues: [{ ...mockIssue, id: "child-1", parent_issue_id: "issue-1", title: "Child destination" }],
+          });
+        }
+        const view = renderVirtualDeepLink(target, 0, { get: () => undefined, setViewState });
+        try {
+          await waitFor(() => expect(scrollToIndexSpy).toHaveBeenCalled());
+          const container = geometry.attach();
+          container.scrollTop = 800;
+          if (destination === "sub-issues") {
+            await screen.findByText("Child destination");
+            const section = view.container.querySelector<HTMLDivElement>(".group\\/sub-issues")!;
+            vi.spyOn(section, "getBoundingClientRect").mockReturnValue({ top: 100 } as DOMRect);
+          }
+          fireEvent.click(within(screen.getByRole("navigation", { name: "Quick navigation" }))
+            .getByRole("button", { name: destination === "description" ? "Issue description" : "Sub-issues" }));
+          await waitFor(() => expect(container.scrollTop).not.toBe(800));
+          const destinationTop = container.scrollTop;
+          await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2800)); });
+          expect(container.scrollTop).toBe(destinationTop);
+          expect(screen.queryByTestId("virtuoso-mock")).not.toBeNull();
+          expect(setViewState).not.toHaveBeenCalled();
+        } finally { view.unmount(); geometry.restore(); }
+      });
       it("releases the unfinished request resources on touch takeover", async () => {
         const target = bulkIndex(50);
         const disconnect = vi.fn();

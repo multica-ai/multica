@@ -2358,6 +2358,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const subIssuesJumpFrame = useRef(0);
   useEffect(() => () => cancelAnimationFrame(subIssuesJumpFrame.current), [issueId]);
   const jumpToSubIssues = useCallback(() => {
+    cancelDeepLinkRef.current?.();
     setSubIssuesCollapsed(false);
     cancelAnimationFrame(subIssuesJumpFrame.current);
     // Wait for expansion so the section can be reached even when a collapsed
@@ -4418,6 +4419,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               targetId: descriptionSectionId,
               title: issue.title,
               onJump: () => {
+                cancelDeepLinkRef.current?.();
                 if (scrollContainerEl) scrollContainerEl.scrollTop = 0;
               },
             }}
