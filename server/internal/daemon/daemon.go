@@ -2099,6 +2099,8 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 	// Sweep orphaned ZCode provider credential snapshots left by a prior
 	// crash/SIGKILL (prepareZcodeRuntimeEnv writes 0600 files under
 	// $TMPDIR/multica-zcode-providers-*; normal exits remove them in defer).
+	// The temp dir is shared with other daemons on this machine, so only
+	// snapshots whose owner process is gone are removed.
 	if n := agent.CleanupStaleZcodeProviderSnapshots(); n > 0 {
 		d.logger.Info("removed stale ZCode provider credential snapshots", "count", n)
 	}
