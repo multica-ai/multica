@@ -44,6 +44,7 @@
     "./issues/read-state": "./issues/read-state.ts",
     "./issues/canonical-id": "./issues/canonical-id.ts",
     "./issues/queries": "./issues/queries.ts",
+    "./issues/use-parent-issue-recents": "./issues/use-parent-issue-recents.ts",
     "./issues/wakeups": "./issues/wakeups.ts",
     "./issues/mutations": "./issues/mutations.ts",
     "./issues/timeline-sort": "./issues/timeline-sort.ts",
