@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // RepoContextForEnv describes a workspace repo available for checkout.
@@ -656,7 +657,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		env.CodexHome = codexHome
 	}
 
-	if params.Provider == "claude" {
+	if agent.ProtocolFamilyFor(params.Provider) == "claude" {
 		preparedTask := ApplyPreparedSkillNames(params.Task, env.PreparedSkillNames)
 		settingsPath, err := prepareClaudeSkillSettings(envRoot, params.Task.DisabledRuntimeSkills, preparedTask.AgentSkills)
 		if err != nil {
@@ -974,7 +975,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		env.PreparedSkillNames = preparedSkillNames
 	}
 
-	if params.Provider == "claude" && env.RootDir != "" {
+	if agent.ProtocolFamilyFor(params.Provider) == "claude" && env.RootDir != "" {
 		preparedTask := ApplyPreparedSkillNames(params.Task, env.PreparedSkillNames)
 		settingsPath, err := prepareClaudeSkillSettings(env.RootDir, params.Task.DisabledRuntimeSkills, preparedTask.AgentSkills)
 		if err != nil {

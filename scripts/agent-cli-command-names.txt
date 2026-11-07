@@ -13,6 +13,7 @@ grok
 hermes
 kimi
 kiro-cli
+langcli
 mcode
 muse
 omp

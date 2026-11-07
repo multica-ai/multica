@@ -47,6 +47,14 @@ type BuiltinRuntime struct {
 	// (e.g. ".omp/agent/skills").
 	UserSkillsDir string
 
+	// ConfigHomeDir is the runtime's default user-level config directory
+	// relative to $HOME (e.g. ".langcli"), where the CLI keys sessions,
+	// transcripts, and cost state. Empty means the protocol family's default
+	// (".claude" for the claude backend). Runtimes that relocate their config
+	// home must declare it, or resume-time usage baselines are read from the
+	// family's directory where the fork writes nothing.
+	ConfigHomeDir string
+
 	// LaunchHeader is the user-visible launch skeleton shown in the UI
 	// (e.g. "omp (json mode)").
 	LaunchHeader string
@@ -71,9 +79,12 @@ type BuiltinRuntime struct {
 
 // ModelDiscoveryFunc discovers available models for a runtime identity.
 // It receives the context and the resolved command — executable plus the
-// runtime's launch prefix — and returns a model catalog. Discovery failures
-// propagate to the picker, which shows the reason and supports manual entry.
-type ModelDiscoveryFunc func(ctx context.Context, runtimeCmd Command) ([]Model, error)
+// runtime's launch prefix — and returns a model catalog. Returning the whole
+// Catalog rather than a bare slice lets a fork inherit its family's
+// unavailable-entry and thinking-level annotations instead of flattening them.
+// Discovery failures propagate to the picker, which shows the reason and
+// supports manual entry.
+type ModelDiscoveryFunc func(ctx context.Context, runtimeCmd Command) (Catalog, error)
 
 // BuiltinRuntimes is the registry of built-in runtime identities that are
 // NOT in SupportedTypes (they are protocol-family derivatives, not families
@@ -81,8 +92,11 @@ type ModelDiscoveryFunc func(ctx context.Context, runtimeCmd Command) ([]Model, 
 // to its protocol family's backend.
 //
 // A runtime identity appears here when it needs its own probe/display/skills
-// but reuses an existing backend's protocol. The first entry is omp (oh-my-pi):
-// a separate CLI that speaks the pi JSON event protocol.
+// but reuses an existing backend's protocol. omp (oh-my-pi) is a separate CLI
+// that speaks the pi JSON event protocol. langcli is a Claude Code fork that
+// keeps Claude Code's stream-json CLI surface (`-p`, `--output-format
+// stream-json`, `--resume`, `--permission-mode`) and its `.claude/skills` +
+// CLAUDE.md discovery conventions, so it dispatches to the claude backend.
 var BuiltinRuntimes = []BuiltinRuntime{
 	{
 		ID:                "omp",
@@ -95,7 +109,25 @@ var BuiltinRuntimes = []BuiltinRuntime{
 		LaunchHeader:      "omp (json mode)",
 		DefaultExecutable: "omp",
 		ProviderLabel:     "omp",
-		ModelDiscovery:    discoverOmpModels,
+		ModelDiscovery:    discoverOmpCatalog,
+	},
+	{
+		ID:             "langcli",
+		ProtocolFamily: "claude",
+		DefaultCommand: "langcli",
+		EnvPrefix:      "MULTICA_LANGCLI",
+		DisplayName:    "Langcli",
+		// Project-level skills stay in Claude Code's native location. Langcli's
+		// own config home is ~/.langcli (CLAUDE_CONFIG_DIR override), so its
+		// user-level skill root is not ~/.claude/skills, and its session
+		// transcripts/cost state live under ~/.langcli/projects.
+		SkillsDir:         ".claude/skills",
+		UserSkillsDir:     ".langcli/skills",
+		ConfigHomeDir:     ".langcli",
+		LaunchHeader:      "langcli (stream-json)",
+		DefaultExecutable: "langcli",
+		ProviderLabel:     "langcli",
+		ModelDiscovery:    discoverLangcliCatalog,
 	},
 }
 
@@ -142,6 +174,62 @@ type backendOverrideApplicator interface {
 func (b *piBackend) applyBuiltinRuntimeOverrides(desc BuiltinRuntime) {
 	b.defaultExecutable = desc.DefaultExecutable
 	b.providerLabel = desc.ProviderLabel
+}
+
+// claudeBackend carries the same overrides so a Claude Code fork registered as
+// its own runtime identity launches its own binary, names itself in logs and
+// task errors, and resolves session transcripts from its own config home.
+func (b *claudeBackend) applyBuiltinRuntimeOverrides(desc BuiltinRuntime) {
+	b.defaultExecutable = desc.DefaultExecutable
+	b.providerLabel = desc.ProviderLabel
+	b.configHomeDir = desc.ConfigHomeDir
+}
+
+// ProtocolFamilyFor resolves a provider key to the protocol family that backs
+// it. Protocol families are their own family; built-in runtime identities
+// (e.g. "langcli") resolve to the family in their descriptor. Callers that
+// branch on a family's CLI behaviour should compare against the result rather
+// than against a literal family name, so a fork inherits that behaviour.
+func ProtocolFamilyFor(provider string) string {
+	if desc, ok := BuiltinRuntimeByID(provider); ok {
+		return desc.ProtocolFamily
+	}
+	return provider
+}
+
+// discoverLangcliCatalog uses the claude family's discovery: the fork speaks
+// the same control protocol. It deliberately does NOT substitute the Claude
+// static catalog when discovery fails: langcli runs its own model set
+// (DeepSeek, GLM, GPT, Claude, ...), so Anthropic IDs would advertise models
+// the runtime may not accept. An old or failing binary reports no models
+// instead and the picker falls back to manual entry.
+//
+// The installed binary's own `--effort` vocabulary is attached in both the
+// success and fallback paths. Langcli builds its model rows from a shared
+// EFFORT_LEVELS superset, so a build can advertise xhigh in list_models while
+// its flag parser still rejects `--effort xhigh`; without the help-derived
+// vocabulary the daemon would inject the level and the CLI would refuse to
+// start. A nil result (help unreadable) keeps the validation pass-through.
+//
+// ListModels resolves an empty Command.Path from the descriptor's
+// DefaultCommand before calling this, so an unset path never enumerates the
+// family's binary instead of the fork's.
+func discoverLangcliCatalog(ctx context.Context, runtimeCmd Command) (Catalog, error) {
+	catalog := discoverClaudeCatalog(ctx, runtimeCmd)
+	if catalog.Fallback {
+		// The static fallback already probed --help and carries its vocabulary.
+		return Catalog{Models: []Model{}, CLIThinkingLevels: catalog.CLIThinkingLevels}, nil
+	}
+	// A live catalog does not, and its rows over-advertise the fork's shared
+	// effort superset — attach the CLI's own flag vocabulary here.
+	catalog.CLIThinkingLevels = annotateClaudeThinking(ctx, nil, runtimeCmd)
+	return catalog, nil
+}
+
+// discoverOmpCatalog adapts discoverOmpModels to the catalog-shaped descriptor
+// contract.
+func discoverOmpCatalog(ctx context.Context, runtimeCmd Command) (Catalog, error) {
+	return discovered(discoverOmpModels(ctx, runtimeCmd))
 }
 
 // ResolveBackend is the single production entry point the daemon uses to

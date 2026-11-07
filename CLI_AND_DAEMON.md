@@ -284,6 +284,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | Hermes | `hermes` | Nous Research coding agent |
 | [Pi](https://pi.dev/) | `pi` | Pi coding agent |
 | Oh-My-Pi | `omp` | Oh-My-Pi coding agent (Pi fork) |
+| Langcli | `langcli` | Claude Code-compatible coding agent (stream-json) |
 | [Cursor Agent](https://cursor.com/) | `cursor-agent` | Cursor's headless coding agent |
 | Kimi | `kimi` | Moonshot coding agent |
 | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) | `reasonix` | DeepSeek-focused ACP coding agent (run `reasonix setup` first) |
