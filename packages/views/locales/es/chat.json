@@ -255,5 +255,17 @@
     "unarchive": "Desarchivar chat",
     "delete": "Eliminar chat",
     "agent_settings": "Ajustes del agente"
+  },
+  "project_filter": {
+    "label": "Proyecto",
+    "all": "Todos los proyectos",
+    "clear": "Borrar filtro de proyecto"
+  },
+  "project_chats": {
+    "title": "Chats",
+    "empty": "No hay chats activos en este proyecto",
+    "loading": "Cargando chats...",
+    "error": "No se han podido cargar los chats",
+    "retry": "Reintentar"
   }
 }
