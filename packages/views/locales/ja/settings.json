@@ -157,6 +157,11 @@
     "toast_saved": "変更を保存しました"
   },
   "preferences": {
+    "content_width": {
+      "title": "コンテンツの幅",
+      "standard": "標準",
+      "full": "全幅"
+    },
     "theme": {
       "title": "テーマ",
       "light": "ライト",

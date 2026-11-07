@@ -47,7 +47,7 @@ import { buildTimeline } from "../../common/task-transcript";
 import { traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
 import { OnboardingStarterCards } from "./onboarding-starter-cards";
 import { TaskStatusPill } from "./task-status-pill";
-import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
+import { CHAT_GUTTER, useChatColumn } from "./chat-column";
 import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-follow";
 import { LIVE_END_ROW_ATTR, useStickToBottom } from "./stick-to-bottom";
 import { formatElapsedMs } from "../lib/format";
@@ -147,9 +147,10 @@ function messageRowKey(message: ChatMessage): string {
 }
 
 function ChatListHeader({ context }: { context?: ChatListContext }) {
+  const chatColumn = useChatColumn();
   const { t } = useT("chat");
   return (
-    <div className={cn(CHAT_COLUMN, "pt-4")}>
+    <div className={cn(chatColumn, "pt-4")}>
       {context?.isFetchingOlderMessages && (
         <div className="text-center text-caption text-muted-foreground">
           {t(($) => $.message_list.loading_older)}
@@ -167,8 +168,9 @@ function ChatListHeader({ context }: { context?: ChatListContext }) {
 // constant bottom inset: without it the last row's own py-2 was the only gap
 // between the final reply (and its follow-up pills) and the composer.
 function ChatListFooter({ context }: { context?: ChatListContext }) {
+  const chatColumn = useChatColumn();
   return (
-    <div className={cn(CHAT_COLUMN, "pb-4 space-y-4")}>
+    <div className={cn(chatColumn, "pb-4 space-y-4")}>
       {context?.showStatusPill && context.pendingTask ? (
         <TaskStatusPill
           pendingTask={context.pendingTask}
@@ -202,6 +204,7 @@ export function ChatMessageList({
   onRegenerateQuickActions,
   quickActionsPendingMessageId = null,
 }: ChatMessageListProps) {
+  const chatColumn = useChatColumn();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
   const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
@@ -344,7 +347,7 @@ export function ChatMessageList({
        *  skeleton BODY rather than <ChatMessageSkeleton>, which brings its own
        *  wrapper for use as a standalone sibling of the list. */}
       {!scrollContainerEl ? (
-        <div className={cn(CHAT_COLUMN, "pt-4")}>
+        <div className={cn(chatColumn, "pt-4")}>
           <ChatSkeletonBody />
         </div>
       ) : (
@@ -392,7 +395,7 @@ export function ChatMessageList({
         components={LIST_COMPONENTS}
         itemContent={(_, item) => (
           <div
-            className={cn(CHAT_COLUMN, "py-2")}
+            className={cn(chatColumn, "py-2")}
             {...(item.key === liveEndKey ? { [LIVE_END_ROW_ATTR]: "" } : {})}
           >
             <MessageBubble
@@ -423,9 +426,10 @@ export function ChatMessageList({
  * shift under the user when real messages arrive.
  */
 export function ChatMessageSkeleton() {
+  const chatColumn = useChatColumn();
   return (
     <div className={cn("flex-1 overflow-hidden", CHAT_GUTTER)}>
-      <div className={cn(CHAT_COLUMN, "py-4")}>
+      <div className={cn(chatColumn, "py-4")}>
         <ChatSkeletonBody />
       </div>
     </div>

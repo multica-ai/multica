@@ -19,7 +19,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
 import { ChatInput } from "../../chat/components/chat-input";
-import { CHAT_COLUMN, CHAT_GUTTER } from "../../chat/components/chat-column";
+import { CHAT_GUTTER, useChatColumn } from "../../chat/components/chat-column";
 import {
   ChatMessageList,
   ChatMessageSkeleton,
@@ -164,6 +164,7 @@ export function BuilderConversation({
 }) {
   const { t } = useT("agents");
   const { t: tModals } = useT("modals");
+  const chatColumn = useChatColumn();
   const pending = !!pendingTask?.task_id;
   const draftKey = `agent-builder:${sessionId}`;
   const prompts = [
@@ -238,7 +239,7 @@ export function BuilderConversation({
             role="alert"
             aria-live="polite"
             className={cn(
-              CHAT_COLUMN,
+              chatColumn,
               "flex items-start gap-2 rounded-md bg-destructive/5 px-3 py-2 text-body text-destructive",
             )}
           >

@@ -159,6 +159,11 @@
     "toast_saved": "Changes saved"
   },
   "preferences": {
+    "content_width": {
+      "title": "Content width",
+      "standard": "Standard",
+      "full": "Full width"
+    },
     "theme": {
       "title": "Theme",
       "light": "Light",

@@ -2,7 +2,7 @@
 
 import { Lock } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
-import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
+import { CHAT_GUTTER, useChatColumn } from "./chat-column";
 import { useT } from "../../i18n";
 
 // Sibling of ArchivedAgentBanner / OfflineBanner / NoAgentBanner, in the same
@@ -15,11 +15,12 @@ import { useT } from "../../i18n";
 // on every send (MUL-4525). Without this banner the input looked live and the
 // user learned about the change from a 403 after typing a message.
 export function AgentAccessRevokedBanner({ agentName }: { agentName?: string }) {
+  const chatColumn = useChatColumn();
   const { t } = useT("chat");
   const name = agentName?.trim() || t(($) => $.offline_banner.fallback_name);
   return (
     <div className={cn(CHAT_GUTTER, "mb-1.5")}>
-      <div className={cn(CHAT_COLUMN, "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-caption bg-muted text-muted-foreground ring-1 ring-border")}>
+      <div className={cn(chatColumn, "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-caption bg-muted text-muted-foreground ring-1 ring-border")}>
         <Lock className="size-3.5 shrink-0" />
         <span className="truncate">
           {t(($) => $.agent_access_revoked_banner, { name })}

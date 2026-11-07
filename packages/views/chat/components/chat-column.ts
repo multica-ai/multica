@@ -1,3 +1,5 @@
+import { useContentWidth } from "@multica/core/issues/stores/content-width-store";
+
 /**
  * Conversation-column geometry — ONE definition shared by every layer of the
  * chat body (message rows, status banners, composer) so their left and right
@@ -28,3 +30,8 @@ export const CHAT_GUTTER = "px-5 @2xl:px-8 @4xl:px-12";
 
 /** The reading column: centered, capped, full-width below the cap. */
 export const CHAT_COLUMN = "mx-auto w-full max-w-4xl";
+
+/** Keep the same outer gutter while lifting only the internal reading cap. */
+export function useChatColumn(): string {
+  return useContentWidth() === "full" ? "mx-auto w-full" : CHAT_COLUMN;
+}

@@ -21,7 +21,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
-import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
+import { CHAT_GUTTER, useChatColumn } from "./chat-column";
 
 interface ChatQueueProps {
   tasks: ChatQueuedTask[];
@@ -45,6 +45,7 @@ export function ChatQueue({
   onRemove,
   onClear,
 }: ChatQueueProps) {
+  const chatColumn = useChatColumn();
   const { t } = useT("chat");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const dispatchableHead =
@@ -86,7 +87,7 @@ export function ChatQueue({
       aria-live="polite"
       aria-busy={busyAction !== null}
     >
-      <div className={CHAT_COLUMN}>
+      <div className={chatColumn}>
         <section
           data-slot="chat-queue"
           aria-label={t(($) => $.queue.title, { count: tasks.length })}

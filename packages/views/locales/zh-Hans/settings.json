@@ -157,6 +157,11 @@
     "toast_saved": "更改已保存"
   },
   "preferences": {
+    "content_width": {
+      "title": "内容宽度",
+      "standard": "标准",
+      "full": "全宽"
+    },
     "theme": {
       "title": "主题",
       "light": "浅色",

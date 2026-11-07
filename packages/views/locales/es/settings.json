@@ -147,6 +147,11 @@
       "dark": "Oscuro",
       "system": "Sistema"
     },
+    "content_width": {
+      "title": "Ancho del contenido",
+      "standard": "Estándar",
+      "full": "Ancho completo"
+    },
     "language": {
       "title": "Idioma",
       "english": "English",

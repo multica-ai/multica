@@ -28,6 +28,7 @@ import { useTheme } from "@multica/ui/components/common/theme-provider";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
+import { useContentWidth, useContentWidthStore, type ContentWidth } from "@multica/core/issues/stores/content-width-store";
 import {
   useCommentComposerStore,
   type RunningAgentReply,
@@ -84,6 +85,7 @@ export function PreferencesTab() {
       >
         <SettingsCard>
           <ThemeRow />
+          <ContentWidthRow />
         </SettingsCard>
       </SettingsSection>
 
@@ -136,6 +138,27 @@ function ThemeRow() {
             ["light", t(($) => $.preferences.theme.light)],
             ["dark", t(($) => $.preferences.theme.dark)],
             ["system", t(($) => $.preferences.theme.system)],
+          ]}
+        />
+      </div>
+    </SettingsRow>
+  );
+}
+
+export function ContentWidthRow() {
+  const { t } = useT("settings");
+  const contentWidth = useContentWidth();
+  const setContentWidth = useContentWidthStore((state) => state.setContentWidth);
+  const label = t(($) => $.preferences.content_width.title);
+  return (
+    <SettingsRow anchor="content-width" label={label}>
+      <div role="group" aria-label={label}>
+        <SegmentedToggle<ContentWidth>
+          value={contentWidth}
+          onChange={setContentWidth}
+          options={[
+            ["standard", t(($) => $.preferences.content_width.standard)],
+            ["full", t(($) => $.preferences.content_width.full)],
           ]}
         />
       </div>

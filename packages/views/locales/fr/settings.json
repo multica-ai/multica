@@ -159,6 +159,11 @@
     "toast_saved": "Modifications enregistrées"
   },
   "preferences": {
+    "content_width": {
+      "title": "Largeur du contenu",
+      "standard": "Standard",
+      "full": "Pleine largeur"
+    },
     "theme": {
       "title": "Thème",
       "light": "Clair",
