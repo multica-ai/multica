@@ -2822,10 +2822,11 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
 		runtimes = append(runtimes, map[string]string{
-			"name":    displayName,
-			"type":    r.name,
-			"version": r.version,
-			"status":  "online",
+			"name":          displayName,
+			"type":          r.name,
+			"version":       r.version,
+			"launch_header": agent.ResolvedLaunchHeader(r.name, agent.Config{CLIVersion: r.version, BuiltinRuntime: true}),
+			"status":        "online",
 		})
 	}
 	return runtimes, demotable, unavailable

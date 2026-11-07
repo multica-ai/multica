@@ -268,3 +268,55 @@ func TestDaemonRegister_FailedProfileInheritsMachineName(t *testing.T) {
 		t.Fatalf("failed-profile custom_name = %v, want inherited \"Bohan MacBook\"", name)
 	}
 }
+
+func TestDaemonRegister_RefreshesLaunchHeader(t *testing.T) {
+	const daemonID = "launch-header-refresh"
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE daemon_id = $1`, daemonID)
+	})
+	first := registerRuntimeOnDaemon(t, daemonID, "opencode")
+	id := first["id"].(string)
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent_runtime SET custom_name = 'Prod Box' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	for _, header := range []string{"opencode acp", "opencode run (json)", "", "opencode acp"} {
+		w := httptest.NewRecorder()
+		req := newOwnerDaemonRequest("POST", "/api/daemon/register", map[string]any{
+			"workspace_id": testWorkspaceID, "daemon_id": daemonID, "device_name": "host",
+			"runtimes": []map[string]any{{"name": "opencode (host)", "type": "opencode", "version": "2.2.5", "status": "online", "launch_header": header}},
+		})
+		testHandler.DaemonRegister(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("register: %d %s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Runtimes []AgentRuntimeResponse `json:"runtimes"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatal(err)
+		}
+		want := header
+		if want == "" {
+			want = "opencode run (json)"
+		}
+		if len(resp.Runtimes) != 1 {
+			t.Fatalf("runtimes = %v", resp.Runtimes)
+		}
+		rt := resp.Runtimes[0]
+		if rt.ID != id || rt.LaunchHeader != want || rt.CustomName == nil || *rt.CustomName != "Prod Box" {
+			t.Fatalf("unexpected runtime: %+v", rt)
+		}
+		stored, err := testHandler.Queries.GetAgentRuntime(context.Background(), parseUUID(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := runtimeToResponse(stored).LaunchHeader; got != want {
+			t.Fatalf("persisted header = %q, want %q", got, want)
+		}
+	}
+	// Older daemons omit the field entirely; re-registration must clear the old advertisement.
+	again := registerRuntimeOnDaemon(t, daemonID, "opencode")
+	if again["launch_header"] != "opencode run (json)" {
+		t.Fatalf("legacy registration: %v", again)
+	}
+}

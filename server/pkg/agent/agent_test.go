@@ -194,3 +194,26 @@ func TestRunContextPositiveTimeoutHasDeadline(t *testing.T) {
 		t.Fatalf("unexpected deadline remaining: %s", remaining)
 	}
 }
+
+func TestResolvedLaunchHeader(t *testing.T) {
+	for _, tc := range []struct {
+		name, provider, version, override, want string
+		builtin                                 bool
+	}{
+		{"v2", "opencode", "2.2.5", "", "opencode acp", true},
+		{"v1", "opencode", "1.15.0", "", "opencode acp", true},
+		{"old", "opencode", "1.14.0", "", "opencode run (json)", true},
+		{"unknown", "opencode", "", "", "opencode run (json)", true},
+		{"override", "opencode", "2.2.5", " Run ", "opencode run (json)", true},
+		{"profile", "opencode", "2.2.5", "", "opencode run (json)", false},
+		{"other", "codex", "", "", "codex app-server", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(opencodeTransportEnv, tc.override)
+			got := ResolvedLaunchHeader(tc.provider, Config{CLIVersion: tc.version, BuiltinRuntime: tc.builtin})
+			if got != tc.want {
+				t.Fatalf("header = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

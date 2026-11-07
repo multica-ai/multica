@@ -601,3 +601,14 @@ func LaunchHeader(agentType string) string {
 	}
 	return ""
 }
+
+// ResolvedLaunchHeader describes the default launch on the daemon that resolved
+// cfg. Agent custom_args can still select the OpenCode run fallback.
+func ResolvedLaunchHeader(agentType string, cfg Config) string {
+	if agentType == "opencode" {
+		if acp, _ := opencodeUsesACP(cfg, ExecOptions{}); acp {
+			return "opencode acp"
+		}
+	}
+	return LaunchHeader(agentType)
+}
