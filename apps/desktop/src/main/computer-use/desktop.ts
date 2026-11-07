@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { computerPrompts } from "@multica/computer-use/prompts";
 import type { ComputerUseApprovals } from "../../shared/computer-use-approvals";
 import { AppApprovals, isVerificationApp } from "./approvals";
-import { ComputerBroker } from "./broker";
+import { ComputerBroker, type ComputerControl } from "./broker";
 import { ComputerChannel, type ComputerClientState } from "./channel";
 import { ComputerNative } from "./native";
 import { COMPUTER_CAPABILITY_VERSION } from "./version";
@@ -34,7 +34,7 @@ export function createComputerDesktop(options: Options) {
   const approvals = new AppApprovals(join(app.getPath("userData"), "computer-use-approvals.json"));
   let tray: Tray | undefined;
   let stopShortcut = false;
-  let control: { conversationId: string; app?: string } | null = null;
+  let controls: ComputerControl[] = [];
   const zh = app.getLocale().toLowerCase().startsWith("zh");
   const text = (en: string, cn: string) => zh ? cn : en;
   const prompt = async (message: string, detail: string, allow: string, signal: AbortSignal, checkboxLabel?: string) => {
@@ -44,9 +44,9 @@ export function createComputerDesktop(options: Options) {
     signal.throwIfAborted();
     return { allowed: result.response === 1, checked: result.checkboxChecked };
   };
-  const showActivity = (value: typeof control) => {
-    control = value;
-    if (!value) { tray?.destroy(); tray = undefined; return; }
+  const showActivity = (value: ComputerControl[]) => {
+    controls = value;
+    if (!value.length) { tray?.destroy(); tray = undefined; return; }
     if (!tray) {
       const icon = nativeImage.createFromDataURL("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAJ0lEQVR4nGNgGEzgP4kYqwGkWDZqwKA1gKJ0gM9QsgHZBlDkbPoCAOaOL9HV2NB4AAAAAElFTkSuQmCC");
       icon.setTemplateImage(true);
@@ -55,13 +55,22 @@ export function createComputerDesktop(options: Options) {
     }
     tray.setToolTip(text("Multica Computer Use", "Multica 电脑操作"));
     tray.setContextMenu(Menu.buildFromTemplate([
-      { label: value.app ?? text("Computer Use active", "正在操作电脑"), enabled: false },
-      { label: value.conversationId, enabled: false },
-      { label: text("Stop Computer Use", "停止电脑操作"), click: () => broker.revoke() },    ]));
+      ...value.map((control) => ({
+        label: control.app ?? text("Computer Use active", "正在操作电脑"),
+        submenu: [
+          { label: control.conversationId, enabled: false },
+          { label: text("Stop", "停止"), click: () => broker.revoke(control.key) },
+        ],
+      })),
+      { type: "separator" as const },
+      { label: value.length > 1 ? text("Stop All Computer Use", "停止全部电脑操作") : text("Stop Computer Use", "停止电脑操作"), click: () => broker.revoke() },
+    ]));
   };
   const broker = new ComputerBroker({
     ...options,
     native: (action, signal) => helper.call(action, signal),
+    nativeGeneration: () => helper.generation,
+    forgetNative: (apps) => helper.forget(apps),
     confirm: async (target, request, signal) => {
       const user = request.scope.userId;
       if (isVerificationApp(target.id) || approvals.has(user, target.id)) return true;
@@ -80,7 +89,7 @@ export function createComputerDesktop(options: Options) {
   });
   const channel = new ComputerChannel({
     endpoint: options.endpoint, clientInfo: { name: "multica-desktop", version: app.getVersion() }, describe,
-    handle: (payload, signal) => broker.handle(payload, signal), stop: () => broker.stop(), log: (message) => console.warn(message),
+    handle: (payload, signal) => broker.handle(payload, signal), cancel: (payload) => broker.cancel(payload), stop: () => broker.stop(), log: (message) => console.warn(message),
   });
   if (process.platform === "darwin") {
     stopShortcut = globalShortcut.register("Control+Alt+Escape", () => broker.revoke());
@@ -99,5 +108,5 @@ export function createComputerDesktop(options: Options) {
       remove: (appId: string) => approvalsForCurrentUser((user) => approvals.remove(user, appId)),
       clear: () => approvalsForCurrentUser((user) => approvals.clear(user)),
     },
-    revoke: () => broker.revoke(), refresh: () => channel.update(), close: () => { channel.close(); broker.stop(); globalShortcut.unregister("Control+Alt+Escape"); }, active: () => control };
+    revoke: () => broker.revoke(), refresh: () => channel.update(), close: () => { channel.close(); broker.stop(); globalShortcut.unregister("Control+Alt+Escape"); }, active: () => controls };
 }

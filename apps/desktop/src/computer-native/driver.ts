@@ -65,6 +65,7 @@ export class CuaComputer {
     if (op === "status") return this.status(false);
     if (op === "request_permissions") return this.status(true);
     if (op === "clear") { this.clear(); return { status: "released" }; }
+    if (op === "forget") { this.forget(input.apps); return { status: "released" }; }
     const app = typeof input.app === "string" && input.app ? input.app : fail("invalid_request", "app required");
     if (op === "get_app") return this.resolve(app);
     if (blocked(app)) fail("app_forbidden", "This application cannot be automated");
@@ -79,6 +80,15 @@ export class CuaComputer {
   }
 
   clear() { this.apps.clear(); this.selected.clear(); this.snapshots.clear(); }
+
+  /** Another turn may claim these apps next; it must not inherit this turn's window or observation. */
+  private forget(raw: unknown) {
+    if (!Array.isArray(raw)) fail("invalid_request", "apps required");
+    for (const app of raw as unknown[]) {
+      if (typeof app !== "string") continue;
+      this.apps.delete(app); this.selected.delete(app); this.snapshots.delete(app);
+    }
+  }
 
   private async run(name: string, args: Record<string, unknown>): Promise<ToolOutput> {
     const output = await this.callTool(name, args);

@@ -213,7 +213,7 @@ JSON-RPC 错误码：
 | -32002 | not_initialized | `ready` 之前收到业务方法 |
 | -32000 | 业务错误 | `computer/control` 的领域错误，`data.code` 给出机器可读的码 |
 
-`computer/control` 的 `data.code` 沿用现有领域错误：`app_not_allowed`、`app_forbidden`、`account_changed`、`device_busy`、`execution_ended`、`permission_required`、`stale_observation`、`background_unavailable` 等，新增 `runtime_outdated`。错误的 `message` 保持 `<code>: <说明>` 的格式，daemon 原样交给模型。
+`computer/control` 的 `data.code` 沿用现有领域错误：`app_not_allowed`、`app_forbidden`、`app_busy`、`native_restarted`、`account_changed`、`device_busy`、`execution_ended`、`permission_required`、`stale_observation`、`background_unavailable` 等，新增 `runtime_outdated`。错误的 `message` 保持 `<code>: <说明>` 的格式，daemon 原样交给模型。
 
 ## 契约锁
 

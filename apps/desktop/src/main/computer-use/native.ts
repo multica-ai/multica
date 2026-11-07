@@ -9,11 +9,18 @@ export class ComputerNative {
   private pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
   private serial: Promise<unknown> = Promise.resolve();
   private sequence = 0;
+  /** Bumped whenever a running helper exits, discarding its per-app state. */
+  generation = 0;
   constructor(private command: { executable: string; args: string[] }, private platform = process.platform) {}
   call(action: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
     const work = this.serial.catch(() => {}).then(() => this.perform(action, signal));
     this.serial = work;
     return work;
+  }
+  /** Clears per-app state in a running helper; a stopped helper has none to clear. */
+  forget(apps: string[]) {
+    const work = this.serial.catch(() => {}).then(() => this.child ? this.perform({ op: "forget", apps }, new AbortController().signal) : undefined);
+    this.serial = work.catch(() => {});
   }
   private perform(action: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
     signal.throwIfAborted();
@@ -52,6 +59,7 @@ export class ComputerNative {
   }
   stop(error = new Error("outcome_unknown: Native helper stopped; observe before further actions")) {
     const child = this.child; this.child = undefined;
+    if (child) this.generation++;
     child?.kill();
     for (const entry of this.pending.values()) entry.reject(error);
     this.pending.clear();

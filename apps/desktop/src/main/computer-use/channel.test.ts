@@ -41,14 +41,16 @@ function channel(base: string, overrides: Partial<ConstructorParameters<typeof C
   let user: string | null = "u";
   const handle = vi.fn(async (_envelope: unknown, _signal: AbortSignal): Promise<unknown> => ({ ok: true }));
   const log = vi.fn();
+  const cancel = vi.fn();
+  const stop = vi.fn();
   const c = new ComputerChannel({
     endpoint: async () => ({ base, token: "t" }), clientInfo: { name: "multica-desktop", version: "9.9.9" },
-    describe: () => state(user), handle, stop: vi.fn(), log,
+    describe: () => state(user), handle, cancel, stop, log,
     timing: { handshakeMs: 100, retryMs: 20, incompatibleRetryMs: 60_000 }, ...overrides,
   });
   void c.run();
   cleanups.push(() => c.close());
-  return { c, handle, log, setUser: (value: string | null) => { user = value; } };
+  return { c, handle, cancel, stop, log, setUser: (value: string | null) => { user = value; } };
 }
 
 async function ready(d: Awaited<ReturnType<typeof daemon>>) {
@@ -84,16 +86,18 @@ describe("Computer Host channel", () => {
     expect(handle).toHaveBeenCalledTimes(1);
   });
 
-  it("returns domain errors with their code and aborts cancelled requests", async () => {
+  it("returns domain errors with their code and ends only the cancelled request's turn", async () => {
     const d = await daemon();
     let seen: AbortSignal | undefined;
-    const { handle } = channel(d.base);
+    const { handle, cancel, stop } = channel(d.base);
     handle.mockImplementation(async (_e, signal) => { seen = signal; await new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("execution_ended: cancelled")))); });
     await ready(d);
-    d.send({ jsonrpc: "2.0", id: "slow", method: "computer/control", params: { capabilityVersion: COMPUTER_CAPABILITY_VERSION, envelope: {} } });
+    d.send({ jsonrpc: "2.0", id: "slow", method: "computer/control", params: { capabilityVersion: COMPUTER_CAPABILITY_VERSION, envelope: { conversationId: "c" } } });
     await vi.waitFor(() => expect(seen).toBeDefined());
     d.send({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: "slow" } });
     expect((await d.next((m) => m.id === "slow")).error).toMatchObject({ message: "execution_ended: cancelled", data: { code: "execution_ended" } });
+    expect(cancel).toHaveBeenCalledWith({ conversationId: "c" });
+    expect(stop).not.toHaveBeenCalled();
   });
 
   it("reports account changes once, without reconnecting", async () => {

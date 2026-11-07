@@ -119,4 +119,14 @@ describe("cua-driver Computer Use translation", () => {
     await computer.perform({ op: "launch", app: "com.example.editor" });
     expect(calls.some(([name]) => name === "launch_app")).toBe(false);
   });
+
+  it("forgets an app's window and observation so the next turn starts fresh", async () => {
+    const { computer, calls, observation } = await observed();
+    await computer.perform({ op: "select_window", app: "com.example.editor", windowId: "42:7" });
+    await computer.perform({ op: "forget", apps: ["com.example.editor"] });
+    await expect(computer.perform({ op: "click", app: "com.example.editor", observationId: observation.observationId, x: 1, y: 1 })).rejects.toThrow("app_not_found");
+    await computer.perform({ op: "get_app", app: "Editor" });
+    await computer.perform({ op: "observe", app: "com.example.editor" });
+    expect(calls.filter(([name]) => name === "get_window_state").at(-1)?.[1]).toMatchObject({ window_id: 8 });
+  });
 });
