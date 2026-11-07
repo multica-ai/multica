@@ -77,6 +77,31 @@ _run_installer() {
   fi
 }
 
+# Run the release-binary installer without Homebrew or inherited environment
+# state. Tests can pass installer CLI arguments after the sandbox path.
+_run_binary_installer() {
+  local tmp="$1"
+  shift
+  local out="$tmp/install.out"
+  local err="$tmp/install.err"
+
+  mkdir -p "$tmp/home"
+  : >"$tmp/sudo.log"
+
+  if ! env -i \
+    PATH="$tmp/stub-bin:/usr/bin:/bin" \
+    HOME="$tmp/home" \
+    MULTICA_TEST_ARCHIVE="$tmp/multica.tar.gz" \
+    MULTICA_TEST_SUDO_LOG="$tmp/sudo.log" \
+    MULTICA_TEST_SYSTEM_SHADOW="$tmp/stub-bin" \
+    bash "$ROOT_DIR/scripts/install.sh" "$@" >"$out" 2>"$err"; then
+    echo "install.sh exited non-zero" >&2
+    cat "$out" >&2 || true
+    cat "$err" >&2 || true
+    return 1
+  fi
+}
+
 test_brew_install_failure_falls_back_to_release_binary() {
   local tmp
   tmp="$(mktemp -d)"
@@ -231,6 +256,126 @@ STUB
   fi
   if grep -q "multica login --token <YOUR_TOKEN>" "$tmp/install.out"; then
     echo "did not expect token login command in local installer output" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+}
+
+test_default_install_is_user_local_and_never_calls_sudo() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  _setup_sandbox "$tmp"
+  cat >"$tmp/stub-bin/sudo" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >>"$MULTICA_TEST_SUDO_LOG"
+exit 99
+STUB
+  chmod +x "$tmp/stub-bin/sudo"
+
+  _run_binary_installer "$tmp"
+
+  if [[ ! -x "$tmp/home/.local/bin/multica" ]]; then
+    echo "expected default install at $tmp/home/.local/bin/multica" >&2
+    cat "$tmp/install.out" >&2 || true
+    cat "$tmp/install.err" >&2 || true
+    return 1
+  fi
+  if [[ -s "$tmp/sudo.log" ]]; then
+    echo "default user-local install must not invoke sudo" >&2
+    cat "$tmp/sudo.log" >&2 || true
+    return 1
+  fi
+  if ! grep -q "Using user install directory $tmp/home/.local/bin" "$tmp/install.out"; then
+    echo "expected installer to report the user-local install directory" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+}
+
+test_bin_dir_overrides_default_without_sudo_when_writable() {
+  local tmp custom_bin
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+  custom_bin="$tmp/custom-bin"
+
+  _setup_sandbox "$tmp"
+  mkdir -p "$custom_bin"
+  cat >"$tmp/stub-bin/sudo" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >>"$MULTICA_TEST_SUDO_LOG"
+exit 99
+STUB
+  chmod +x "$tmp/stub-bin/sudo"
+
+  _run_binary_installer "$tmp" --bin-dir "$custom_bin"
+
+  if [[ ! -x "$custom_bin/multica" ]]; then
+    echo "expected --bin-dir install at $custom_bin/multica" >&2
+    cat "$tmp/install.out" >&2 || true
+    cat "$tmp/install.err" >&2 || true
+    return 1
+  fi
+  if [[ -s "$tmp/sudo.log" ]]; then
+    echo "writable --bin-dir target must not invoke sudo" >&2
+    cat "$tmp/sudo.log" >&2 || true
+    return 1
+  fi
+}
+
+test_system_install_uses_sudo_when_system_dir_is_not_writable() {
+  local tmp
+
+  # Avoid touching a real system directory when the test itself runs as root or
+  # otherwise has direct write access. Hosted CI runners normally take this path.
+  if [ -w /usr/local/bin ]; then
+    echo "skipping --system sudo test: /usr/local/bin is writable"
+    return 0
+  fi
+
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  _setup_sandbox "$tmp"
+  cat >"$tmp/stub-bin/sudo" <<'STUB'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "$*" >>"$MULTICA_TEST_SUDO_LOG"
+case "${1:-}" in
+  mkdir)
+    # The real directory already exists on normal CI hosts; acknowledge the
+    # privileged mkdir without mutating the host filesystem.
+    exit 0
+    ;;
+  mv)
+    # Put a shadow copy on PATH so install.sh's final command_exists check can
+    # succeed without writing to the host's /usr/local/bin.
+    cp "$2" "$MULTICA_TEST_SYSTEM_SHADOW/multica"
+    chmod +x "$MULTICA_TEST_SYSTEM_SHADOW/multica"
+    exit 0
+    ;;
+  *)
+    exit 99
+    ;;
+esac
+STUB
+  chmod +x "$tmp/stub-bin/sudo"
+
+  _run_binary_installer "$tmp" --system
+
+  if ! grep -q '^mkdir -p /usr/local/bin$' "$tmp/sudo.log"; then
+    echo "expected --system to use sudo for /usr/local/bin when it is not writable" >&2
+    cat "$tmp/sudo.log" >&2 || true
+    return 1
+  fi
+  if ! grep -q '^mv .* /usr/local/bin/multica$' "$tmp/sudo.log"; then
+    echo "expected --system to install multica to /usr/local/bin through sudo" >&2
+    cat "$tmp/sudo.log" >&2 || true
+    return 1
+  fi
+  if ! grep -q "Installing to /usr/local/bin requires elevated privileges" "$tmp/install.out"; then
+    echo "expected --system to report its privilege escalation" >&2
     cat "$tmp/install.out" >&2 || true
     return 1
   fi
@@ -513,6 +658,9 @@ test_brew_install_failure_falls_back_to_release_binary
 test_brew_tap_failure_falls_back_to_release_binary
 test_remote_ssh_install_prints_token_login_hint
 test_local_install_does_not_print_token_login_hint
+test_default_install_is_user_local_and_never_calls_sudo
+test_bin_dir_overrides_default_without_sudo_when_writable
+test_system_install_uses_sudo_when_system_dir_is_not_writable
 test_with_server_uses_compose_published_ports
 test_with_server_fails_when_compose_port_is_unavailable
 echo "install.sh tests passed"
