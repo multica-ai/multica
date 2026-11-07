@@ -412,7 +412,7 @@ func chatMessageIDs(messages []SearchIndexChatMessage) []string {
 	return out
 }
 
-// Chat sync (migration 615): sessions and messages copy per creator, kickoff
+// Chat sync (migration 617): sessions and messages copy per creator, kickoff
 // context stays out, and a session delete tombstones the session instead of
 // each cascaded message.
 func TestSearchIndexSyncsChatSessionsAndMessages(t *testing.T) {
