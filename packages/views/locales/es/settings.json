@@ -675,6 +675,12 @@
       "granted": "Este navegador puede mostrar avisos de notificación.",
       "denied": "Bloqueado por tu navegador. Activa las notificaciones para este sitio en la configuración del navegador.",
       "enabled_badge": "Activado"
+    },
+    "email": {
+      "label": "Notificaciones por correo",
+      "hint_enabled": "Recibirás un correo cuando haya actividad nueva en la bandeja.",
+      "hint_unavailable": "El correo no está configurado en este servidor. Define SMTP_HOST o RESEND_API_KEY para activarlo.",
+      "unavailable_badge": "No disponible"
     }
   },
   "tokens": {

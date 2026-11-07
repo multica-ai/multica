@@ -73,4 +73,13 @@ describe("notification preference patches", () => {
       ),
     ).toEqual({});
   });
+
+  it("patches the email delivery toggle like any other group", () => {
+    const muted = deriveNotificationPreferencePatch({}, { email_notifications: "muted" });
+    expect(muted).toEqual({ email_notifications: "muted" });
+    expect(applyNotificationPreferencePatch({}, muted)).toEqual({ email_notifications: "muted" });
+    expect(
+      deriveNotificationPreferencePatch({ email_notifications: "muted" }, {}),
+    ).toEqual({ email_notifications: "all" });
+  });
 });

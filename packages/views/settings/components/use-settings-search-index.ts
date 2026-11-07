@@ -113,6 +113,11 @@ export function useSettingsSearchIndex(
           ]
         : []),
       {
+        tab: "notifications",
+        anchor: "email",
+        title: t(($) => $.notifications.email.label),
+      },
+      {
         tab: "tokens",
         title: t(($) => $.page.tabs.tokens),
         description: t(($) => $.tokens.purpose),
