@@ -13,6 +13,7 @@ import {
 
 const draft = (): AgentDraft => ({
   qoderAgentId: "",
+  claudeAgentId: "",
   name: "Old name",
   description: "Old description",
   instructions: "Old instructions",
@@ -322,6 +323,23 @@ it("persists a per-agent QCA binding and clears it on runtime change", () => {
   expect(applyDraftRuntimeChange(current, "another-runtime").qoderAgentId).toBe("");
 });
 
+it("binds a Claude Managed Agents runtime to its Claude agent only", () => {
+  const current: AgentDraft = {
+    ...draft(),
+    qoderAgentId: "agent_qca",
+    claudeAgentId: "agent_claude",
+    thinkingLevel: "high",
+  };
+  const request = buildCreateAgentRequest({
+    draft: current,
+    runtimeId: "rt-claude",
+    runtimeProvider: "claude_managed",
+  });
+  expect(request.runtime_config).toEqual({ claude_agent_id: "agent_claude" });
+  expect(request.thinking_level).toBeUndefined();
+  expect(applyDraftRuntimeChange(current, "another-runtime").claudeAgentId).toBe("");
+});
+
 it("drops settings a Qoder runtime cannot run from a draft started elsewhere", () => {
   const current: AgentDraft = {
     ...draft(),
@@ -346,4 +364,18 @@ it("drops settings a Qoder runtime cannot run from a draft started elsewhere", (
   const local = buildCreateAgentRequest({ draft: current, runtimeId: "runtime-1", runtimeProvider: "codex" });
   expect(local).not.toHaveProperty("runtime_config");
   expect(local.skill_ids).toEqual(["skill-1"]);
+});
+
+it("drops conversation starters for Claude Managed Agents, which has no chat", () => {
+  const current: AgentDraft = {
+    ...draft(),
+    claudeAgentId: "agent_claude",
+    conversationStarters: [{ label: "Plan", prompt: "Plan it" }],
+  };
+  const request = buildCreateAgentRequest({
+    draft: current,
+    runtimeId: "rt-claude",
+    runtimeProvider: "claude_managed",
+  });
+  expect(request.conversation_starters).toBeUndefined();
 });

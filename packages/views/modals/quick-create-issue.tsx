@@ -167,9 +167,12 @@ export function AgentCreatePanel({
         (a) =>
           !a.archived_at &&
           isAgentRuntimeBound(a) &&
+          !runtimes.some(
+            (r) => r.id === a.runtime_id && r.provider === "claude_managed",
+          ) &&
           canAssignAgent(a, userId, memberRole),
       ),
-    [agents, userId, memberRole],
+    [agents, runtimes, userId, memberRole],
   );
   const visibleAgentIds = useMemo(
     () => new Set(visibleAgents.map((a) => a.id)),

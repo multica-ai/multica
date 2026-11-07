@@ -24,13 +24,14 @@ func syncQoderIssue(ctx context.Context, q *db.Queries, task db.AgentTaskQueue, 
 	if !task.IssueID.Valid || !task.RuntimeID.Valid {
 		return nil, nil
 	}
-	issue, err := q.LockQoderTaskIssue(ctx, task.ID)
+	locked, err := q.LockQoderTaskIssue(ctx, task.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	issue := locked.Issue
 	target := "in_progress"
 	if completing {
 		var marker struct {
@@ -64,7 +65,7 @@ func syncQoderIssue(ctx context.Context, q *db.Queries, task db.AgentTaskQueue, 
 			return nil, err
 		}
 	}
-	details, _ := json.Marshal(map[string]any{"from": issue.Status, "to": target, "source": "qoder_cloud", "task_id": util.UUIDToString(task.ID)})
+	details, _ := json.Marshal(map[string]any{"from": issue.Status, "to": target, "source": locked.Provider, "task_id": util.UUIDToString(task.ID)})
 	activity, err := q.CreateActivity(ctx, db.CreateActivityParams{
 		ID: dbid.NewV7(), WorkspaceID: issue.WorkspaceID, IssueID: issue.ID,
 		ActorType: util.StrToText("agent"), ActorID: task.AgentID, Action: "status_changed", Details: details,

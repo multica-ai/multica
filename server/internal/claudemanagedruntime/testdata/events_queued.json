@@ -1,0 +1,19 @@
+{
+  "data": [
+    {
+      "id": "sevt_01VFwQEZzsLS2gLNb1vvR3T1",
+      "processed_at": "2026-10-26T05:04:06.483532Z",
+      "type": "session.status_running"
+    },
+    {
+      "content": [
+        {
+          "text": "<redacted 814 chars>",
+          "type": "text"
+        }
+      ],
+      "id": "sevt_01MVastTjtzEdidAgFUP1t2C",
+      "type": "user.message"
+    }
+  ]
+}

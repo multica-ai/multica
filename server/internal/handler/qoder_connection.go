@@ -590,7 +590,14 @@ func (h *Handler) qoderReady(ctx context.Context, ws string, revision int64, run
 	return err
 }
 
-func (h *Handler) qoderCredentialAllowed(r *http.Request, ws, daemonID string) (bool, error) {
+// managedCredentialAllowed reports whether the request's daemon token is the
+// live credential of the workspace's server-run bridge for the provider its
+// daemon ID reserves.
+func (h *Handler) managedCredentialAllowed(r *http.Request, ws, daemonID string) (bool, error) {
+	provider := middleware.ManagedDaemonProvider(daemonID)
+	if provider == "" {
+		return false, nil
+	}
 	// Prefer the hash DaemonAuth recorded for the authenticating token: a WS
 	// RPC replays the request in-process without an Authorization header
 	// (MUL-8154). Fall back to the header for callers outside DaemonAuth.
@@ -603,7 +610,7 @@ func (h *Handler) qoderCredentialAllowed(r *http.Request, ws, daemonID string) (
 		tokenHash = auth.HashToken(raw)
 	}
 	var allowed bool
-	err := h.DB.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM cloud_agent_connection c JOIN daemon_token d ON d.id=c.token_id JOIN member m ON m.workspace_id=c.workspace_id AND m.user_id=c.owner_id WHERE c.provider='qoder_cloud' AND c.workspace_id=$1 AND c.enabled AND d.daemon_id=$2 AND d.token_hash=$3 AND d.expires_at>now() AND m.role IN ('owner','admin'))`, ws, daemonID, tokenHash).Scan(&allowed)
+	err := h.DB.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM cloud_agent_connection c JOIN daemon_token d ON d.id=c.token_id JOIN member m ON m.workspace_id=c.workspace_id AND m.user_id=c.owner_id WHERE c.provider=$4 AND c.workspace_id=$1 AND c.enabled AND d.daemon_id=$2 AND d.token_hash=$3 AND d.expires_at>now() AND m.role IN ('owner','admin'))`, ws, daemonID, tokenHash, provider).Scan(&allowed)
 	return allowed, err
 }
 

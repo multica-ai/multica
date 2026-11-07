@@ -416,6 +416,7 @@ export function ProviderLogo({
 }) {
   switch (provider) {
     case "claude":
+    case "claude_managed":
       return <ClaudeLogo className={className} />;
     case "codebuddy":
       return <CodeBuddyLogo className={className} />;

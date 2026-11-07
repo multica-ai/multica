@@ -302,6 +302,39 @@ This first version supports issue runs, chat, squad leaders, creating issues wit
 
 For standalone bridge setup and operational limitations, see the [Qoder runtime README](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md).
 
+## Claude Managed Agents remote runtime
+
+Claude Managed Agents runs assigned issues in Claude-hosted sessions. The Multica server supervises a bridge that uses the existing daemon task protocol; no user-operated local daemon is needed for this runtime.
+
+### Before you start
+
+- You need to be a workspace administrator. Each workspace has one Claude Managed Agents connection.
+- Create an Anthropic API key from the Anthropic workspace that owns your Claude environment and agents, plus at least one environment and the Claude agents you want to use. Models, tools, and skills are configured on the Claude agent, not in Multica. Set every tool's permission policy to `always_allow`: the bridge cannot answer tool confirmations.
+- Self-hosted installations must set `MULTICA_VCS_SECRET_KEY` on the server: a base64-encoded 32-byte key that stays the same across restarts. Without it, Claude Managed Agents cannot be connected.
+
+### Connect Claude Managed Agents
+
+1. On the **Runtimes** page, click **Add** and choose **Claude Managed Agents** under **Cloud services**.
+2. Paste the key into **Anthropic API key**. The **Environment** list loads from Anthropic; choose one.
+3. Optional: add **Vault IDs** (comma-separated). They are attached to every session, for example a GitHub MCP credential so agents can open pull requests.
+4. Optional: under **GitHub repositories**, add a repository URL and token for each repository agents may push to.
+5. Optional: set **Concurrent runs** and **Run timeout**.
+6. Click **Connect**. Claude Managed Agents appears in the cloud section of the Runtimes page and comes online within a few seconds.
+
+### Add an agent
+
+Create an agent as usual and choose **Claude Managed Agents** as the runtime, then select the Claude agent under **Claude agent**. For an existing agent, change the linked Claude agent or its default repository in the agent's Claude agent settings. Several Multica agents can share one connection, each linked to a different Claude agent.
+
+Connection credentials are encrypted and shared within the workspace. Saved secrets are never returned to the browser. On the Claude Managed Agents page, administrators can edit the connection, **Pause** to stop sending new tasks while keeping credentials and agents, or **Disconnect** to delete the saved credentials, remove the runtime, and unbind its agents.
+
+### How runs work
+
+Runs beyond the concurrency limit wait in the queue. A follow-up on the same issue continues the previous Claude session when it is idle. The agent is asked to push a branch named after the issue identifier. To open the pull request as well, add the GitHub MCP server to the Claude agent and attach a vault holding its credential. An agent can set a default repository, used when the issue's project has none. This first version supports issue runs only: chat, quick-create, attachments, and local directories are refused.
+
+### Standalone bridge
+
+You can instead run the bridge yourself with `claude-managed-runtime`, on a server that can reach both Multica and the Anthropic API. This needs a workspace administrator's personal access token (PAT) and a token file for each GitHub repository. Create agents on that runtime from the agent form, or with `multica agent create --runtime-config` and `{"claude_agent_id": "agent_..."}`. A standalone bridge is listed as a machine on the Runtimes page. For configuration and limits, see the [Claude Managed Agents runtime README](https://github.com/multica-ai/multica/blob/main/server/cmd/claude-managed-runtime/README.md).
+
 ## Troubleshooting an offline runtime
 
 Check in this order:

@@ -45,6 +45,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   dsh: "DeepSeek Harness",
   qoderclicn: "Qoder CN",
   qoder_cloud: "Qoder Cloud Agents",
+  claude_managed: "Claude Managed Agents",
   traecli: "Trae",
   qwen: "Qwen Code",
   qwenpaw: "QwenPaw",

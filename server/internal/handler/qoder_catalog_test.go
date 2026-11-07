@@ -56,7 +56,7 @@ func TestQoderCatalogRejectsMalformedAndRedactsErrors(t *testing.T) {
 }
 
 func TestQoderOverridesRejectedAtSave(t *testing.T) {
-	if err := (qoderOverrides{mcpConfig: json.RawMessage(`{}`)}).validate(); err != nil {
+	if err := (qoderOverrides{mcpConfig: json.RawMessage(`{}`)}).validate("qoder_cloud"); err != nil {
 		t.Fatalf("empty overrides rejected: %v", err)
 	}
 	for name, o := range map[string]qoderOverrides{
@@ -68,8 +68,11 @@ func TestQoderOverridesRejectedAtSave(t *testing.T) {
 		"thinking level": {thinkingLevel: "high"},
 		"service tier":   {serviceTier: "priority"},
 	} {
-		if err := o.validate(); err == nil {
+		if err := o.validate("qoder_cloud"); err == nil {
 			t.Errorf("%s accepted for a Qoder agent", name)
+		}
+		if err := o.validate("claude_managed"); err == nil || !strings.Contains(err.Error(), "Claude agent") {
+			t.Errorf("%s accepted or misworded for a Claude Managed Agents agent: %v", name, err)
 		}
 	}
 }

@@ -1,3 +1,4 @@
+import { isManagedClaudeRuntime } from "@multica/core/runtimes/claude-managed";
 import {
   isRuntimeUsableForUser,
   providerDisplayName,
@@ -33,9 +34,10 @@ export interface RuntimeChoiceGroups {
   remotes: DeviceOption[];
   /** Remote devices with no harness this member may use. */
   hiddenRemoteCount: number;
-  /** Managed cloud runtimes other than Qoder, which has its own tile. */
+  /** Managed cloud runtimes other than Qoder and Claude, which have their own tiles. */
   cloud: HarnessOption[];
   qoderRuntime: RuntimeDevice | null;
+  claudeRuntime: RuntimeDevice | null;
 }
 
 /**
@@ -78,6 +80,7 @@ export function buildRuntimeChoiceGroups(
   let hiddenRemoteCount = 0;
   const cloud: HarnessOption[] = [];
   let qoderRuntime: RuntimeDevice | null = null;
+  let claudeRuntime: RuntimeDevice | null = null;
 
   for (const machine of machines) {
     const usable = machine.runtimes.filter((runtime) =>
@@ -98,6 +101,10 @@ export function buildRuntimeChoiceGroups(
           if (!qoderRuntime || runtime.status === "online") qoderRuntime = runtime;
           continue;
         }
+        if (isManagedClaudeRuntime(runtime)) {
+          if (!claudeRuntime || runtime.status === "online") claudeRuntime = runtime;
+          continue;
+        }
         cloud.push(harnessOption(runtime, machine.title));
       }
       continue;
@@ -114,7 +121,7 @@ export function buildRuntimeChoiceGroups(
     });
   }
 
-  return { local, remotes, hiddenRemoteCount, cloud: cloud.sort(byLabel), qoderRuntime };
+  return { local, remotes, hiddenRemoteCount, cloud: cloud.sort(byLabel), qoderRuntime, claudeRuntime };
 }
 
 export function normalizeQuery(query: string): string {

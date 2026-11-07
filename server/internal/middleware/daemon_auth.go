@@ -182,7 +182,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				cacheable := true
 				if dt.OwnerID.Valid {
 					identity.OwnerID = uuidToString(dt.OwnerID)
-				} else if !strings.HasPrefix(dt.DaemonID, "qoder-managed-") {
+				} else if ManagedDaemonProvider(dt.DaemonID) == "" {
 					// Pre-588 Remote MCP token: recover its issuing owner
 					// from the task_token minted in the same claim
 					// transaction. Unresolvable tokens stay unbound and are

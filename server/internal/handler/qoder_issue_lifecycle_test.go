@@ -104,3 +104,50 @@ func TestQoderIssueLifecycle(t *testing.T) {
 		})
 	}
 }
+
+func TestClaudeManagedIssueLifecycle(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	for _, tc := range []struct {
+		provider            string
+		startWant, doneWant string
+		activities          int
+	}{
+		{provider: "claude_managed", startWant: "in_progress", doneWant: "in_review", activities: 2},
+		{provider: "claude", startWant: "todo", doneWant: "todo", activities: 0},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			runtimeID := dbfx.Runtime(t, "lifecycle runtime", testutil.Cols{"provider": tc.provider})
+			agentID := dbfx.Agent(t, "lifecycle agent", runtimeID)
+			issueID := dbfx.Issue(t, "Claude Managed lifecycle", testutil.Cols{"status": "todo", "assignee_type": "agent", "assignee_id": agentID})
+			taskID := dbfx.Task(t, agentID, testutil.Cols{"issue_id": issueID, "runtime_id": runtimeID, "status": "dispatched", "dispatched_at": time.Now().UTC()})
+			if _, err := testHandler.TaskService.StartTask(ctx, parseUUID(taskID)); err != nil {
+				t.Fatal(err)
+			}
+			issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if issue.Status != tc.startWant {
+				t.Fatalf("start status = %s, want %s", issue.Status, tc.startWant)
+			}
+			if _, _, err := testHandler.TaskService.CompleteTaskWithTransition(ctx, parseUUID(taskID), []byte(`{"output":"Ready for review"}`), "", "", "", false, "", ""); err != nil {
+				t.Fatal(err)
+			}
+			issue, err = testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if issue.Status != tc.doneWant {
+				t.Fatalf("completion status = %s, want %s", issue.Status, tc.doneWant)
+			}
+			var changes int
+			dbfx.QueryRow(t, `SELECT count(*) FROM activity_log WHERE issue_id=$1 AND action='status_changed' AND details->>'source'=$2`, issueID, tc.provider).Scan(&changes)
+			if changes != tc.activities {
+				t.Fatalf("activity count = %d, want %d", changes, tc.activities)
+			}
+		})
+	}
+}

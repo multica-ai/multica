@@ -3012,6 +3012,12 @@ func (h *Handler) checkQuickCreateDaemonVersionAtLeast(ctx context.Context, sour
 	if rt.Provider == qoderruntime.Provider {
 		return 0, nil
 	}
+	if name := cloudAgentServiceName(rt.Provider); name != "" {
+		return http.StatusUnprocessableEntity, map[string]any{
+			"code":   "agent_unavailable",
+			"reason": name + " supports existing issue runs only; create the issue manually and assign it to this agent",
+		}
+	}
 	current := readRuntimeCLIVersion(rt.Metadata)
 	switch err := agentpkg.CheckMinCLIVersionFor(current, minimum); {
 	case err == nil:
