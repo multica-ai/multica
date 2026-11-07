@@ -81,7 +81,7 @@
   "resume_queue": "Resume queue",
   "send_now": "Send now",
   "remove": "Remove",
-  "attachment_failed": "Upload failed. Sending tries again; tap to remove.",
+  "attachment_failed": "Upload failed. Retry the failed file or remove it before sending.",
   "attached_files": "Attached files",
   "usage": "Usage and limits",
   "refresh_usage": "Refresh usage",
@@ -160,5 +160,26 @@
   "web_forward": "Forward",
   "activity_count_one": "{{count}} activity",
   "activity_count_other": "{{count}} activities",
-  "load_more_sessions": "Load more"
+  "load_more_sessions": "Load more",
+  "photos": {
+    "choose": "Choose photos",
+    "preview": "Preview {{name}}",
+    "retry": "Retry uploading {{name}}",
+    "reading": "Reading images...",
+    "ready_one": "{{count}} file · Ready",
+    "ready_other": "{{count}} files · Ready",
+    "pending": "Pending delivery",
+    "accepted": "Accepted",
+    "unsupported": "{{name}}: Select a JPEG, PNG or HEIC photo.",
+    "unreadable": "{{name}}: Could not read this image. Choose it again or attach a file.",
+    "too_large": "{{name}}: The image must be 5 MiB or smaller after conversion.",
+    "photo_limit": "Up to {{max}} images per message. Remove an image to add another.",
+    "attachment_limit": "Up to {{max}} files per message.",
+    "permission": "Could not access the selected photos. Check Settings or use Attach file.",
+    "read_failed": "Could not read the selected photos. Choose them again or use Attach file.",
+    "settings": "Open Settings",
+    "relay_limited": "This connection cannot transfer this file through the relay. Retry or remove it.",
+    "upload_too_large": "The computer rejected this file as too large. Remove it and choose a smaller one.",
+    "stalled": "Upload stopped progressing. Retry or remove the file."
+  }
 }

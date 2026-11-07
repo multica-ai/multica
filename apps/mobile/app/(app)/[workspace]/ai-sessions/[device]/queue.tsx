@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { useT } from "@/lib/i18n";
 import { AIMessageContent } from "@/components/ai-sessions/reference-chips";
 import { AISheet } from "@/components/ai-sessions/sheet";
+import { SubmissionAttachments } from "@/components/ai-sessions/submission-attachments";
 import { SessionAttachment } from "@/components/ai-sessions/session-attachment";
 import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
@@ -187,6 +188,7 @@ export default function AIQueueScreen() {
             )}
             {items.map((item, index, items) => {
               const parsed = queueItemSchema.safeParse(item);
+              const record = parsed.success ? records.find((value) => value.request.requestId === parsed.data.requestId) : undefined;
               return (
                 <View
                   key={parsed.success ? parsed.data.requestId : index}
@@ -211,9 +213,9 @@ export default function AIQueueScreen() {
                             attachmentIds: parsed.data.attachmentIds,
                           })}
                         />
-                        {parsed.data.attachmentIds.map((id) => (
-                          <SessionAttachment key={id} id={id} />
-                        ))}
+                        {record ? (
+                          <SubmissionAttachments record={record} />
+                        ) : parsed.data.attachmentIds.map((id) => <SessionAttachment key={id} id={id} />)}
                       </>
                     ) : (
                       <Text style={{ lineHeight: undefined }}>

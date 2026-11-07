@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("expo", () => ({ requireOptionalNativeModule: () => null }));
@@ -26,7 +27,7 @@ describe("draft uploads", () => {
     const { client, transfer, updates, uploads } = setup();
     const id = uploads.start(client, "draft", asset);
     expect(id).toMatch(/^[0-9a-f]{32}$/);
-    expect(updates[0]).toEqual(["draft", id, { id, name: "a.txt", status: "uploading" }]);
+    expect(updates[0]).toEqual(["draft", id, { id, name: "a.txt", mimeType: "text/plain", status: "uploading" }]);
     await flush();
     expect(transfer).toHaveBeenCalledWith(client, asset, id, expect.any(AbortSignal));
     expect(updates.at(-1)).toEqual(["draft", id, { status: "uploaded" }]);
@@ -91,6 +92,39 @@ describe("draft uploads", () => {
     expect(updates.at(-1)).toEqual(["draft", id, { status: "uploaded", id: "stored" }]);
   });
 
+  it("retries a failed draft explicitly without duplicating successful uploads", async () => {
+    const transfer = vi.fn().mockRejectedValueOnce(new Error("upload_stalled")).mockImplementation(async (_client, _asset, id) => id);
+    const { client, uploads } = setup({ transfer });
+    const id = uploads.start(client, "draft", asset);
+    await flush();
+    expect(uploads.failure(id)).toBe("upload_stalled");
+    uploads.retry(client, "draft", { id, ...asset, status: "failed" });
+    await flush();
+    expect(uploads.failure(id)).toBeUndefined();
+    uploads.retry(client, "draft", { id, ...asset, status: "uploaded" });
+    expect(transfer).toHaveBeenCalledTimes(2);
+  });
+
+  it("can retry after local retention failed without losing the source", async () => {
+    const { client } = setup();
+    const retain = vi.fn().mockRejectedValueOnce(new Error("disk_full")).mockResolvedValueOnce("file:///retained");
+    const transfer = vi.fn(async (_client, _asset, id: string) => id);
+    const uploads = createDraftUploads({ retain, hash: async () => null, transfer, update: vi.fn() });
+    const id = uploads.start(client, "draft", asset);
+    await expect(uploads.ensure([id])).rejects.toThrow("upload_failed");
+    uploads.retry(client, "draft", { id, name: asset.name, status: "failed" });
+    await expect(uploads.ensure([id])).resolves.toEqual([id]);
+    expect(retain).toHaveBeenCalledTimes(2);
+    expect(transfer).toHaveBeenCalledWith(client, { ...asset, uri: "file:///retained" }, id, expect.any(AbortSignal));
+  });
+
+  it("retries a failed attachment restored with its retained URI", async () => {
+    const { client, uploads, transfer } = setup();
+    uploads.retry(client, "draft", { id: "restored", ...asset, status: "failed" });
+    await expect(uploads.ensure(["restored"])).resolves.toEqual(["restored"]);
+    expect(transfer).toHaveBeenCalledOnce();
+  });
+
   it("removing stops the transfer, then discards what arrived, and reports nothing further", async () => {
     const order: string[] = [];
     const transfer = vi.fn((_client, _asset, _id, signal: AbortSignal) => new Promise<string>((_, reject) => {
@@ -117,6 +151,10 @@ describe("draft uploads", () => {
 });
 
 describe("saved drafts", () => {
+  it("restores interrupted transfers as retryable files rather than uploading forever", () => {
+    expect(persistedAttachments({ a: [{ id: "1", name: "photo.jpg", uri: "file:///retained", status: "uploading" }] }))
+      .toEqual({ a: [{ id: "1", name: "photo.jpg", uri: "file:///retained", status: "failed" }] });
+  });
   it("keep only attachments the device has stored", () => {
     expect(persistedAttachments({
       a: [{ id: "1", name: "kept", status: "uploaded" }, { id: "2", name: "moving", status: "uploading" }, { id: "3", name: "failed", status: "failed" }],
@@ -155,6 +193,19 @@ describe("sendFile", () => {
       FakeXHR.last.onload!();
       await expect(sending).resolves.toBe("abc");
     } finally { vi.useRealTimers(); }
+  });
+
+  it.each([
+    [201, "<html>bad response</html>", "upload_failed"],
+    [413, "{}", "upload_too_large"],
+    [413, "<html>too large</html>", "upload_too_large"],
+    [413, JSON.stringify({ error: { kind: "relay_transfer_limited" } }), "relay_transfer_limited"],
+  ])("settles invalid and rejected responses (%s)", async (status, body, error) => {
+    const sending = run();
+    FakeXHR.last.status = status;
+    FakeXHR.last.responseText = body;
+    FakeXHR.last.onload!();
+    await expect(sending).rejects.toThrow(error);
   });
 
   it("gives up when the file stops moving", async () => {

@@ -15,8 +15,8 @@ import {
   Keyboard,
   Platform,
   Pressable,
-  ScrollView,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
@@ -35,7 +35,6 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { localV2SummarySchema } from "@multica/core/local-conversation/v2";
-import * as DocumentPicker from "expo-document-picker";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -59,7 +58,6 @@ import {
   useAIDrafts,
   aiDraftKey,
   EMPTY_DRAFT_ATTACHMENTS,
-  type DraftAttachment,
 } from "@/data/ai-sessions/drafts";
 import {
   EMPTY_REFERENCES,
@@ -91,6 +89,10 @@ import { AIActivityGroup } from "@/components/ai-sessions/activity-group";
 import { ConnectionNotice } from "@/components/ai-sessions/connection-notice";
 import { SessionAttachment } from "@/components/ai-sessions/session-attachment";
 import { openDeviceFile, remoteWebURL } from "@/data/ai-sessions/files";
+import { useSessionAttachmentPicker } from "./use-session-attachment-picker";
+import { SessionDraftAttachments } from "./session-draft-attachments";
+import { SubmissionAttachments } from "./submission-attachments";
+import { isPhoto } from "@/data/ai-sessions/photo-attachments";
 import { SessionQuestions } from "@/components/ai-sessions/questions";
 
 export function AISessionContent({
@@ -177,13 +179,13 @@ export function AISessionContent({
     (state) => state.attachments[draftKey] ?? EMPTY_DRAFT_ATTACHMENTS,
   );
   const updateAttachments = useAIDrafts((state) => state.setAttachments);
-  const setAttachments = (
-    value:
-      | DraftAttachment[]
-      | ((files: DraftAttachment[]) => DraftAttachment[]),
-  ) => updateAttachments(draftKey, value);
   const uploading = attachments.some((file) => file.status === "uploading");
+  const attachmentBlocked = attachments.some((file) => file.status !== "uploaded");
+  const { width: windowWidth } = useWindowDimensions();
+  const [width, setComposerWidth] = useState(windowWidth);
   const [busy, setBusy] = useState(false);
+  const { pick, selecting } = useSessionAttachmentPicker(client, scope, draftKey, active && focused,
+    connected && !busy && !pending && !!snapshot && !snapshot.conversation.archived);
   const [sendFailed, setSendFailed] = useState(false);
   const [referenceError, setReferenceError] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -494,7 +496,7 @@ export function AISessionContent({
     }
   };
   const chooseProvider = async () => {
-    if (!client || !connected || running || busy || uploading || pending)
+    if (!client || !connected || running || busy || uploading || selecting || pending)
       return;
     const available = (
       await client.request("GET", "/providers", providersSchema)
@@ -550,6 +552,13 @@ export function AISessionContent({
     });
     void query.refetch();
   };
+  const retrySubmission = (record: MobileSubmission) => {
+    setBusy(true);
+    void transmit(record)
+      .then(() => setSendFailed(false))
+      .catch(() => setSendFailed(true))
+      .finally(() => setBusy(false));
+  };
   const send = async () => {
     if (
       !client ||
@@ -557,6 +566,8 @@ export function AISessionContent({
       !snapshot ||
       busy ||
       submitting.current ||
+      selecting ||
+      attachmentBlocked ||
       snapshot.conversation.archived ||
       !hasMessage
     )
@@ -620,22 +631,8 @@ export function AISessionContent({
       setBusy(false);
     }
   };
-  const upload = async () => {
-    if (!client || !connected || busy || pending) return;
-    const result = await DocumentPicker.getDocumentAsync({
-      multiple: true,
-      copyToCacheDirectory: true,
-    });
-    if (result.canceled) return;
-    for (const asset of result.assets)
-      draftUploads.start(client, draftKey, {
-        uri: asset.uri,
-        name: asset.name,
-        mimeType: asset.mimeType,
-      });
-  };
   const removeAttachment = (id: string) => {
-    setAttachments((files) => files.filter((file) => file.id !== id));
+    updateAttachments(draftKey, (files) => files.filter((file) => file.id !== id));
     if (client) draftUploads.remove(client, id);
   };
   const metadata = (body: Record<string, unknown>) =>
@@ -802,6 +799,43 @@ export function AISessionContent({
     return false;
   };
   const params = { workspace, device, session };
+  const modelControl = (
+    <Button
+      style={{ height: "auto", minHeight: 36 }}
+      variant="ghost"
+      size="sm"
+      hitSlop={{ top: 4, bottom: 4 }}
+      className={cn("min-w-0 shrink justify-end px-2", width <= 375 ? "w-full" : "flex-1")}
+      disabled={
+        !connected || running || busy || selecting || !!pending || !!agents.length
+      }
+      accessibilityLabel={t("settings")}
+      onPress={() =>
+        router.push({
+          pathname: "/[workspace]/ai-sessions/[device]/models",
+          params: {
+            ...params,
+            provider: snapshot?.conversation.provider,
+          },
+        })
+      }
+    >
+      <Text
+        style={{ lineHeight: undefined }}
+        className="shrink text-xs text-muted-foreground"
+        numberOfLines={1}
+      >
+        {agents.length
+          ? t("agent_settings")
+          : `${snapshot?.conversation.provider === "claude" ? "Claude Code" : "Codex"} · ${snapshot?.settings.model || t("default_model")}`}
+      </Text>
+      <Ionicons
+        name="chevron-down"
+        size={12}
+        color={theme.mutedForeground}
+      />
+    </Button>
+  );
   return (
     <SafeAreaView
       edges={embedded ? [] : ["bottom"]}
@@ -1059,6 +1093,9 @@ export function AISessionContent({
                           record.request.prepared?.text ?? record.request.text
                         }
                       />
+                      <SubmissionAttachments record={record} />
+                      <Text className={sendFailed && !record.confirmed ? "text-destructive" : "text-muted-foreground"} accessibilityRole={sendFailed && !record.confirmed ? "alert" : undefined} style={{ fontSize: 12, lineHeight: 16 }}>{t(sendFailed && !record.confirmed ? "send_failed" : record.confirmed ? "photos.accepted" : "photos.pending")}</Text>
+                      {sendFailed && !record.confirmed && <Button variant="ghost" disabled={!connected || busy} onPress={() => retrySubmission(record)}><Text>{t("retry")}</Text></Button>}
                     </View>
                   ))}
                   {snapshot?.pending_interactions.map((interaction) => (
@@ -1140,7 +1177,6 @@ export function AISessionContent({
         {outbox
           .filter(
             (record) =>
-              (sendFailed && !record.confirmed) ||
               record.authority?.state === "recovery_required",
           )
           .map((record) => (
@@ -1174,6 +1210,12 @@ export function AISessionContent({
               </Button>
             </View>
           ))}
+        {sendFailed && submissionView.queued.some((record) => !record.confirmed) && (
+          <View className="px-4 py-2">
+            <Text accessibilityRole="alert" className="text-destructive">{t("send_failed")}</Text>
+            {submissionView.queued.filter((record) => !record.confirmed).map((record) => <Button key={record.request.requestId} variant="ghost" disabled={!connected || busy} onPress={() => retrySubmission(record)}><Text>{t("retry")}</Text></Button>)}
+          </View>
+        )}
         {!!referenceError && (
           <Text
             style={{ lineHeight: undefined }}
@@ -1183,13 +1225,13 @@ export function AISessionContent({
             {referenceError}
           </Text>
         )}
-        <View className="bg-background px-3 pt-2 pb-1">
+        <View className="bg-background px-3 pt-2 pb-1" onLayout={(event) => setComposerWidth(event.nativeEvent.layout.width)}>
           <View
             className="rounded-2xl border border-border bg-secondary"
             style={continuousCorners}
           >
             {(references.length > 0 || attachments.length > 0) && (
-              <View className="px-2 pt-2 pb-1 gap-2">
+              <View className="px-2 pt-1 gap-1">
                 <ReferenceChips
                   references={references}
                   disabled={busy || !!pending}
@@ -1204,73 +1246,14 @@ export function AISessionContent({
                     setReferenceError("");
                   }}
                 />
-                {!!attachments.length && (
-                  <ScrollView
-                    horizontal
-                    keyboardShouldPersistTaps="handled"
-                    contentContainerStyle={{ gap: 6, paddingVertical: 8 }}
-                  >
-                    {attachments.map((file) => (
-                      <View
-                        key={file.id}
-                        className="max-w-64 min-h-7 flex-row items-center rounded-full bg-primary/10"
-                      >
-                        <Pressable
-                          hitSlop={{ top: 8, bottom: 8 }}
-                          accessibilityRole="button"
-                          accessibilityLabel={file.name}
-                          disabled={!connected || file.status !== "uploaded"}
-                          className="shrink min-h-7 justify-center pl-2 py-1"
-                          onPress={() => {
-                            if (client)
-                              void openDeviceFile(
-                                client,
-                                `/attachments/${encodeURIComponent(file.id)}`,
-                                file.name,
-                              ).catch(showError);
-                          }}
-                        >
-                          <View className="flex-row items-center gap-1">
-                            {file.status === "uploading" && (
-                              <ActivityIndicator size="small" />
-                            )}
-                            <Text
-                              style={{ lineHeight: undefined }}
-                              numberOfLines={1}
-                              className={cn(
-                                "text-xs",
-                                file.status === "failed" && "text-destructive",
-                              )}
-                            >
-                              {file.name}
-                            </Text>
-                          </View>
-                        </Pressable>
-                        <IconButton
-                          name="close"
-                          iconSize={12}
-                          hitSlop={8}
-                          accessibilityLabel={t("remove_file", {
-                            name: file.name,
-                          })}
-                          disabled={busy || !!pending}
-                          className="h-7 w-7 rounded-full"
-                          onPress={() => removeAttachment(file.id)}
-                        />
-                      </View>
-                    ))}
-                  </ScrollView>
-                )}
+                <SessionDraftAttachments files={attachments} disabled={busy || !!pending}
+                  onOpen={(file) => { if (client && connected) void openDeviceFile(client, `/attachments/${encodeURIComponent(file.id)}`, file.name).catch(showError); }}
+                  onRemove={removeAttachment}
+                  onRetry={(id) => { const file = attachments.find((entry) => entry.id === id); if (client && file) draftUploads.retry(client, draftKey, file); }}
+                  failure={(id) => draftUploads.failure(id)} />
               </View>
             )}
-            {attachments.some((file) => file.status === "failed") && (
-              <Text
-                accessibilityRole="alert"
-                className="px-4 text-sm text-destructive"
-              >
-                {t("attachment_failed")}
-              </Text>
-            )}
+            {selecting && <Text accessibilityRole="alert" className="px-4 text-muted-foreground" style={{ fontSize: 12, lineHeight: 16 }}>{t("photos.reading")}</Text>}
             <TextInput
               ref={input}
               multiline
@@ -1301,80 +1284,53 @@ export function AISessionContent({
                 })}
               </Text>
             )}
-            <View className="flex-row items-center px-2 pb-2 pt-1">
+            {width <= 375 && <View className="px-2">{modelControl}</View>}
+            <View className="flex-row items-center px-2 pb-1">
               <IconButton
                 name="at"
-                className="h-8 w-8"
-                hitSlop={6}
+                iconSize={16}
+                className="h-11 w-8"
                 color={references.length ? theme.primary : undefined}
                 accessibilityLabel={t("references.title")}
                 disabled={
                   !connected ||
                   busy ||
+                  selecting ||
                   !!pending ||
                   !snapshot ||
                   snapshot.conversation.archived
                 }
                 onPress={() => openReferences()}
               />
+              <IconButton name="image-outline" iconSize={16} className="h-11 w-8"
+                color={attachments.some(isPhoto) ? theme.brand : undefined}
+                accessibilityLabel={t("photos.choose")}
+                disabled={!connected || busy || selecting || !!pending || !snapshot || snapshot.conversation.archived}
+                onPress={() => void pick(true)} />
               <IconButton
                 name="attach-outline"
-                className="h-8 w-8"
-                hitSlop={6}
+                iconSize={16}
+                className="h-11 w-8"
                 accessibilityLabel={t("attachment")}
                 disabled={
                   !connected ||
                   busy ||
+                  selecting ||
                   !!pending ||
                   snapshot?.conversation.archived
                 }
-                onPress={() => void upload().catch(showError)}
+                onPress={() => void pick(false)}
               />
+              {width > 375 && modelControl}
               <Button
-                style={{ height: "auto", minHeight: 36 }}
                 variant="ghost"
-                size="sm"
-                hitSlop={{ top: 4, bottom: 4 }}
-                className="flex-1 min-w-0 shrink justify-end px-2"
-                disabled={
-                  !connected || running || busy || !!pending || !!agents.length
-                }
-                accessibilityLabel={t("settings")}
-                onPress={() =>
-                  router.push({
-                    pathname: "/[workspace]/ai-sessions/[device]/models",
-                    params: {
-                      ...params,
-                      provider: snapshot?.conversation.provider,
-                    },
-                  })
-                }
-              >
-                <Text
-                  style={{ lineHeight: undefined }}
-                  className="shrink text-xs text-muted-foreground"
-                  numberOfLines={1}
-                >
-                  {agents.length
-                    ? t("agent_settings")
-                    : `${snapshot?.conversation.provider === "claude" ? "Claude Code" : "Codex"} · ${snapshot?.settings.model || t("default_model")}`}
-                </Text>
-                <Ionicons
-                  name="chevron-down"
-                  size={12}
-                  color={theme.mutedForeground}
-                />
-              </Button>
-              <Button
-                variant="default"
                 size="icon"
-                className="h-8 w-8 rounded-full"
-                hitSlop={6}
+                className={cn("h-11 w-11 rounded-full bg-transparent active:bg-transparent", width <= 375 && "ml-auto")}
                 disabled={
                   busy ||
                   !connected ||
                   !snapshot ||
-                  (!showStop && (!hasMessage || snapshot.conversation.archived))
+                  (!showStop && (!hasMessage || selecting || attachmentBlocked || snapshot.conversation.archived))
                 }
                 accessibilityLabel={t(
                   showStop
@@ -1389,6 +1345,7 @@ export function AISessionContent({
                 accessibilityState={{ busy }}
                 onPress={() => void (showStop ? stop() : send())}
               >
+                <View className="h-8 w-8 rounded-full bg-primary items-center justify-center">
                 {busy ? (
                   <ActivityIndicator
                     size="small"
@@ -1399,10 +1356,11 @@ export function AISessionContent({
                     name={
                       showStop ? "stop" : sendFailed ? "refresh" : "arrow-up"
                     }
-                    size={18}
+                    size={16}
                     color={theme.primaryForeground}
                   />
                 )}
+                </View>
               </Button>
             </View>
           </View>

@@ -81,7 +81,7 @@
   "resume_queue": "繼續佇列",
   "send_now": "立即傳送",
   "remove": "移除",
-  "attachment_failed": "上傳失敗。傳送時會重試，點按可移除。",
+  "attachment_failed": "上傳失敗，請重試或移除失敗檔案後再傳送。",
   "attached_files": "已加入附件",
   "usage": "用量與額度",
   "refresh_usage": "重新整理用量",
@@ -159,5 +159,25 @@
   "web_back": "上一頁",
   "web_forward": "下一頁",
   "activity_count_other": "{{count}} 項執行過程",
-  "load_more_sessions": "載入更多"
+  "load_more_sessions": "載入更多",
+  "photos": {
+    "choose": "選擇相簿圖片",
+    "preview": "預覽 {{name}}",
+    "retry": "重新上傳 {{name}}",
+    "reading": "正在讀取圖片...",
+    "ready_other": "{{count}} 個檔案 · 已就緒",
+    "pending": "等待傳送確認",
+    "accepted": "已接收",
+    "unsupported": "{{name}}：請選擇 JPEG、PNG 或 HEIC 照片。",
+    "unreadable": "{{name}}：無法讀取圖片，請重新選擇或使用檔案附件。",
+    "too_large": "{{name}}：圖片轉換後不能超過 5 MiB。",
+    "photo_limit": "每則訊息最多 {{max}} 張圖片，請移除後再新增。",
+    "attachment_limit": "每則訊息最多 {{max}} 個檔案。",
+    "permission": "無法存取所選照片，請檢查設定或使用檔案附件。",
+    "read_failed": "無法讀取所選照片，請重新選擇或使用檔案附件。",
+    "settings": "開啟設定",
+    "relay_limited": "目前中繼連線無法傳輸此檔案，請重試或移除。",
+    "upload_too_large": "電腦端拒絕了過大的檔案，請移除並選擇較小的檔案。",
+    "stalled": "上傳已停止，請重試或移除檔案。"
+  }
 }

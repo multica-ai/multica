@@ -81,7 +81,7 @@
   "resume_queue": "继续队列",
   "send_now": "立即发送",
   "remove": "移除",
-  "attachment_failed": "上传失败。发送时会重试，点按可移除。",
+  "attachment_failed": "上传失败，请重试或移除失败文件后再发送。",
   "attached_files": "已添加附件",
   "usage": "用量与额度",
   "refresh_usage": "刷新用量",
@@ -159,5 +159,25 @@
   "web_back": "后退",
   "web_forward": "前进",
   "activity_count_other": "{{count}} 项执行过程",
-  "load_more_sessions": "加载更多"
+  "load_more_sessions": "加载更多",
+  "photos": {
+    "choose": "选择相册图片",
+    "preview": "预览 {{name}}",
+    "retry": "重新上传 {{name}}",
+    "reading": "正在读取图片...",
+    "ready_other": "{{count}} 个文件 · 已就绪",
+    "pending": "等待发送确认",
+    "accepted": "已接收",
+    "unsupported": "{{name}}：请选择 JPEG、PNG 或 HEIC 照片。",
+    "unreadable": "{{name}}：无法读取图片，请重新选择或使用文件附件。",
+    "too_large": "{{name}}：图片转换后不能超过 5 MiB。",
+    "photo_limit": "每条消息最多 {{max}} 张图片，请移除后再添加。",
+    "attachment_limit": "每条消息最多 {{max}} 个文件。",
+    "permission": "无法访问所选照片，请检查设置或使用文件附件。",
+    "read_failed": "无法读取所选照片，请重新选择或使用文件附件。",
+    "settings": "打开设置",
+    "relay_limited": "当前中继连接无法传输此文件，请重试或移除。",
+    "upload_too_large": "电脑端拒绝了过大的文件，请移除并选择较小的文件。",
+    "stalled": "上传已停止，请重试或移除文件。"
+  }
 }

@@ -53,6 +53,7 @@
     "expo-document-picker": "~57.0.3",
     "expo-haptics": "~57.0.3",
     "expo-image": "^57.0.5",
+    "expo-image-manipulator": "~57.0.22",
     "expo-image-picker": "~57.0.20",
     "expo-linking": "~57.0.11",
     "expo-localization": "~57.0.2",

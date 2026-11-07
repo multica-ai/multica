@@ -81,7 +81,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           // iOS 14+. Camera + microphone are disabled — we only ever read
           // from the existing photo library.
           photosPermission:
-            "Allow Multica to access your photos to attach images to issues and comments.",
+            "Allow Multica to access your photos to attach images to conversations, issues and comments.",
           cameraPermission: false,
           microphonePermission: false,
         },

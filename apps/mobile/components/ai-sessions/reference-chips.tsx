@@ -10,9 +10,9 @@ export function ReferenceChips({ references, onRemove, disabled = false }: { ref
   if (!references.length) return null;
   const chips = references.map((reference) => <View key={referenceKey(reference)} className={cn("max-w-full min-h-7 flex-row items-center rounded-full bg-primary/10 pl-2", onRemove ? "max-w-64" : "pr-2")}>
     <Text style={{ lineHeight: undefined }} className="shrink py-1 text-xs font-medium" numberOfLines={1}>{t(reference.kind === "agent" ? "references.invoke" : `references.${reference.kind}`)} · {reference.name}</Text>
-    {onRemove && <IconButton name="close" iconSize={12} hitSlop={8} accessibilityLabel={t("references.remove", { name: reference.name })} disabled={disabled} className="h-7 w-7 rounded-full" onPress={() => onRemove(reference)} />}
+    {onRemove && <IconButton name="close" iconSize={16} accessibilityLabel={t("references.remove", { name: reference.name })} disabled={disabled} className="h-7 w-7 rounded-full" onPress={() => onRemove(reference)} />}
   </View>);
-  return onRemove ? <ScrollView horizontal keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 6, paddingVertical: 8 }} showsHorizontalScrollIndicator>{chips}</ScrollView> : <View className="flex-row flex-wrap gap-1.5">{chips}</View>;
+  return onRemove ? <ScrollView horizontal keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 6, paddingVertical: 4 }} showsHorizontalScrollIndicator>{chips}</ScrollView> : <View className="flex-row flex-wrap gap-1.5">{chips}</View>;
 }
 
 export function AIMessageContent({ content }: { content: string }) {

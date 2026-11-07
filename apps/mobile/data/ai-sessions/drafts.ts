@@ -35,7 +35,7 @@ function submittedDraft(state:AIDrafts,key:string,request:PendingSend){
 /** A transfer does not survive the app; only attachments the device has stored do. */
 export function persistedAttachments(attachments: Record<string, DraftAttachment[]>) {
   return Object.fromEntries(Object.entries(attachments).flatMap(([key, files]) => {
-    const stored = files.filter((file) => file.status === "uploaded"||!!file.uri);
+    const stored = files.filter((file) => file.status === "uploaded" || !!file.uri).map((file) => file.status === "uploading" ? { ...file, status: "failed" as const } : file);
     return stored.length ? [[key, stored]] : [];
   }));
 }

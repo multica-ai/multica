@@ -32,8 +32,15 @@ export function sendFile(client: UploadClient, asset: UploadAsset, body: Blob, i
     for (const [name, value] of Object.entries({ ...client.headers(), "Content-Type": asset.mimeType ?? "application/octet-stream", "X-File-Name": encodeURIComponent(asset.name), "X-Attachment-ID": id })) xhr.setRequestHeader(name, value);
     xhr.upload.onprogress = watch;
     xhr.onload = () => {
-      const response = xhr.status >= 200 && xhr.status < 300 ? localV2UploadSchema.safeParse(JSON.parse(xhr.responseText || "null")) : null;
-      finish(response?.success ? response.data.id : new Error("upload_failed"));
+      let value: unknown;
+      try { value = JSON.parse(xhr.responseText || "null"); } catch { finish(new Error(xhr.status === 413 ? "upload_too_large" : "upload_failed")); return; }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        const response = localV2UploadSchema.safeParse(value);
+        finish(response.success ? response.data.id : new Error("upload_failed"));
+      } else {
+        const error = z.object({ error: z.object({ kind: z.string() }) }).safeParse(value);
+        finish(new Error(error.success ? error.data.error.kind : xhr.status === 413 ? "upload_too_large" : "upload_failed"));
+      }
     };
     xhr.onerror = () => finish(new Error("upload_failed"));
     watch();
@@ -62,6 +69,7 @@ interface Job {
   ready?:Promise<void>;
   status: DraftAttachment["status"];
   storedId: string;
+  error?: string;
 }
 
 /**
@@ -95,6 +103,11 @@ export function createDraftUploads({ hash, transfer, update,retain,discard }: Up
   };
 
   const run = (id: string, job: Job) => {
+    job.error = undefined;
+    if (retain) job.ready = retain(`${job.key}:${id}`, job.asset.uri).then((uri) => {
+      job.asset = { ...job.asset, uri };
+      if (jobs.get(id) === job) update(job.key, id, { uri, mimeType: job.asset.mimeType });
+    });
     job.status = "uploading";
     job.abort = new AbortController();
     update(job.key, id, { status: "uploading" });
@@ -104,7 +117,7 @@ export function createDraftUploads({ hash, transfer, update,retain,discard }: Up
         job.storedId = storedId;
         if (jobs.get(id) === job) update(job.key, id, { status: "uploaded", ...(storedId === id ? {} : { id: storedId }) });
       },
-      () => { job.status = "failed"; if (jobs.get(id) === job) update(job.key, id, { status: "failed" }); },
+      (error: unknown) => { job.status = "failed"; job.error = error instanceof Error ? error.message : "upload_failed"; if (jobs.get(id) === job) update(job.key, id, { status: "failed" }); },
     );
   };
 
@@ -113,11 +126,19 @@ export function createDraftUploads({ hash, transfer, update,retain,discard }: Up
     start(client: UploadClient, key: string, asset: UploadAsset) {
       const id = attachmentId();
       const job: Job = { client, key, asset, abort: new AbortController(), stopped: Promise.resolve(), status: "uploading", storedId: id };
-      if(retain)job.ready=retain(`${key}:${id}`,asset.uri).then((uri)=>{job.asset={...asset,uri};if(jobs.get(id)===job)update(key,id,{uri,mimeType:asset.mimeType});});
       jobs.set(id, job);
-      update(key, id, { id, name: asset.name, status: "uploading" });
+      update(key, id, { id, name: asset.name, mimeType: asset.mimeType, status: "uploading" });
       run(id, job);
       return id;
+    },
+    failure(id: string) { return jobs.get(id)?.error; },
+    retry(client: UploadClient, key: string, file: DraftAttachment) {
+      let job = jobs.get(file.id);
+      if (!job && file.uri) {
+        job = { client, key, asset: { uri: file.uri, name: file.name, mimeType: file.mimeType }, abort: new AbortController(), stopped: Promise.resolve(), status: "failed", storedId: file.id };
+        jobs.set(file.id, job);
+      }
+      if (job?.status === "failed") run(file.id, job);
     },
     async prepare(ids:readonly string[]){
       return Promise.all(ids.flatMap((id)=>{const job=jobs.get(id);return job?[Promise.resolve(job.ready).then(()=>({id,uri:job.asset.uri,name:job.asset.name,mimeType:job.asset.mimeType}))]:[];}));
