@@ -3455,16 +3455,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 placeholder={t(($) => $.detail.title_placeholder)}
                 className={cn("w-full leading-snug", titleSizeClass)}
                 onReady={titleLazy.onReady}
+                onExternalValueAdopted={(value) => {
+                  if (titleConflictDraft === null) titleBaseRef.current = value;
+                }}
                 onBlur={(value) => {
                   const trimmed = value.trim();
                   if (trimmed && trimmed !== issue.title) {
+                    const titleBase = titleBaseRef.current;
                     handleUpdateField({
                       title: trimmed,
-                      title_base: titleBaseRef.current,
+                      title_base: titleBase,
                     }, {
                       onSuccess: (serverIssue) => {
                         setTitleConflictDraft(null);
-                        titleBaseRef.current = serverIssue.title;
+                        // A newer external title may have been adopted while
+                        // this save was in flight. Keep that editor baseline.
+                        if (titleBaseRef.current === titleBase) {
+                          titleBaseRef.current = serverIssue.title;
+                        }
                       },
                       onError: (error) => {
                         if (errorCode(error) === "revision_conflict") {
@@ -3533,12 +3541,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   onClick={() => {
                     const draft = titleConflictDraft.trim();
                     if (!draft) return;
+                    const titleBase = titleBaseRef.current;
                     handleUpdateField(
                       { title: draft, title_base: issue.title },
                       {
                         onSuccess: (serverIssue) => {
                           setTitleConflictDraft(null);
-                          titleBaseRef.current = serverIssue.title;
+                          if (titleBaseRef.current === titleBase) {
+                            titleBaseRef.current = serverIssue.title;
+                          }
                         },
                       },
                     );
