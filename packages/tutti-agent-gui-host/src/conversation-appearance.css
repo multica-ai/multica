@@ -284,6 +284,10 @@ html.multica-agent-gui .agent-gui-node__mention-palette .rich-text-at-mention-pa
   gap: 2px;
 }
 
+html.multica-agent-gui .agent-gui-node__mention-palette .rich-text-at-mention-row--session {
+  column-gap: var(--spacing);
+}
+
 html.multica-agent-gui .agent-gui-node__mention-palette .rich-text-at-mention-palette__expand-button[aria-busy="true"] {
   justify-content: center;
   gap: 8px;
