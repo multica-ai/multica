@@ -1,0 +1,36 @@
+{
+  "runId": "7a999ee8-cacb-48e1-a098-df2d09903ad9",
+  "status": "ok",
+  "summary": "completed",
+  "result": {
+    "payloads": [
+      {
+        "text": "Picked up the issue and set it to in_progress.",
+        "mediaUrl": null
+      }
+    ],
+    "meta": {
+      "durationMs": 164897,
+      "finalAssistantVisibleText": "Picked up the issue and set it to in_progress.",
+      "systemPromptReport": {
+        "skills": [
+          {
+            "name": "github",
+            "blockChars": 213
+          }
+        ]
+      },
+      "agentMeta": {
+        "sessionId": "a2f9529f-2734-4aca-b935-98edb75a1aa0",
+        "provider": "anthropic",
+        "model": "claude-opus-4-7",
+        "usage": {
+          "input": 2,
+          "output": 763,
+          "cacheRead": 103355,
+          "cacheWrite": 425
+        }
+      }
+    }
+  }
+}
