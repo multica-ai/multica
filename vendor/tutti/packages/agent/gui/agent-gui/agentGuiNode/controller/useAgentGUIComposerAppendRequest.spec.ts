@@ -10,6 +10,7 @@ import {
   agentComposerDraftFiles,
   agentComposerDraftConnectors,
   agentComposerDraftPrompt,
+  agentComposerDraftQuotes,
   agentComposerDraftToPromptContent,
   buildAgentComposerDraft
 } from "../model/agentComposerDraft";
@@ -114,6 +115,28 @@ describe("appendAgentGUIComposerPrompt", () => {
 });
 
 describe("resolveAgentGUIComposerAppendRequest", () => {
+  it("replaces the current quote without changing text or attachments, only in its target session", () => {
+    const draft = buildAgentComposerDraft({
+      prompt: "Keep this question",
+      files: [existingFile],
+      quotes: [{ type: "quote", id: "old", text: "Old selection" }]
+    });
+    const request: AgentGUIComposerAppendRequest = {
+      agentSessionId: "session-1", sequence: -1,
+      quote: { type: "quote", id: "new", text: "New selection", sourceName: "Claude Code" }
+    };
+    expect(resolveAgentGUIComposerAppendRequest({
+      activeConversationId: "session-2", draftByScopeKey: {}, handledSequence: null, request
+    })).toBeNull();
+    const resolved = resolveAgentGUIComposerAppendRequest({
+      activeConversationId: "session-1", draftByScopeKey: { "session:session-1": draft }, handledSequence: null, request
+    })!;
+    expect(agentComposerDraftPrompt(resolved.nextDraft)).toBe("Keep this question");
+    expect(agentComposerDraftFiles(resolved.nextDraft)).toEqual([existingFile]);
+    expect(agentComposerDraftQuotes(resolved.nextDraft)).toEqual([{
+      type: "quote", id: "new", text: "New selection", sourceName: "Claude Code"
+    }]);
+  });
   it("routes a connector selection to the exact active draft once", () => {
     const request: AgentGUIComposerAppendRequest = {
       agentSessionId: "session-1",

@@ -15,6 +15,7 @@ import type { AgentRichTextEditorHandle } from "../agentRichText/AgentRichTextEd
 import { agentComposerFileMentionReferences } from "../agentRichText/agentMentionMarkdown";
 import {
   agentComposerDraftHasContent,
+  agentComposerDraftCanSubmit,
   agentComposerDraftPreservingConnectors,
   projectAgentComposerDraftSubmission,
   textPromptContent,
@@ -511,6 +512,7 @@ export function useComposerSlashActions(input: UseComposerSlashActionsInput) {
         }
         return;
       }
+      if (!agentComposerDraftCanSubmit(nextDraftContent)) return;
       if (currentDraftImages.length > 0 && !promptImagesSupported) {
         onPromptImagesUnsupported?.();
         return;

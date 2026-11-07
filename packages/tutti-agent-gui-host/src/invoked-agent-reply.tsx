@@ -34,7 +34,7 @@ function InvokedAgentReplyRender({
   if (!identity) return <>{children}</>;
   const descriptor = agents.find(({ agent }) => agent.id === identity.id);
   return (
-    <>
+    <div data-multica-quote-source={identity.name}>
       <div
         data-invoked-agent={identity.id}
         className="mb-2 flex min-w-0 items-center gap-2 text-body font-semibold text-foreground"
@@ -51,6 +51,6 @@ function InvokedAgentReplyRender({
         </span>
       </div>
       {children}
-    </>
+    </div>
   );
 }

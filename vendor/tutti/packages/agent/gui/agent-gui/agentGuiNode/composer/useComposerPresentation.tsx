@@ -18,6 +18,8 @@ import type { AgentFileMentionSuggestionState } from "../agentRichText/agentFile
 import {
   agentComposerDraftFiles,
   agentComposerDraftHasContent,
+  agentComposerDraftCanSubmit,
+  agentComposerDraftQuotes,
   agentComposerDraftImages,
   agentComposerDraftLargeTexts
 } from "../model/agentComposerDraft";
@@ -151,7 +153,8 @@ export function useComposerPresentation(input: Input) {
         ? "loading"
         : "send";
   const sendButtonBusy = isSendingTurn && !isQueueMode;
-  const emptyDraftBlocksSend = !hasDraftContent && !allowEmptySubmit;
+  const emptyDraftBlocksSend = !agentComposerDraftCanSubmit(draftContent) &&
+    (!allowEmptySubmit || agentComposerDraftQuotes(draftContent).length > 0);
   const sendDisabledReasons = [
     isSelectedProjectMissing ? "project_missing" : null,
     submitDisabled ? "submit_disabled" : null,

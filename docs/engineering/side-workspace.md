@@ -15,6 +15,14 @@ A Side inherits its source provider (Codex or Claude Code), working directory an
 
 Browser tasks prefer the built-in Side browser, especially for a page already open on the right or its existing login session. This is a recommendation: external browsers and automation tools may be used when the user requests them or they better fit the task, under the selected tool's permissions and confirmation requirements. Side tools remain scoped to the current conversation's open Side tabs; other browsers may use different login sessions.
 
+## Quote into the current composer
+
+The selected-text toolbar offers **Copy → Add to input → Ask in side**. Adding a reference keeps the current question and attachments, clears the transcript selection and focuses the end of the question. Each conversation draft holds one selected reference; adding another replaces it. The card shows the source author, clamps long text to two lines and offers bounded expansion and removal. Removing it preserves the question and returns focus to the editor.
+
+A selected reference requires a nonempty question before sending. Submission combines the full quoted text, a blank line and the question into the existing text content format. The transcript displays that leading quotation above the question. Accepted sends clear the draft through the existing submission lifecycle; rejected sends retain the full draft snapshot for recovery. Reference state uses the existing conversation draft scope; it does not introduce a new backend/IPC field or a conversation-history migration. As with other non-text composer state, reference restoration after destroying the GUI document or restarting the app is not guaranteed.
+
+The selection regressions in `e2e/local-conversation-queue.spec.ts` exercise the production GUI with fake completed replies and the Desktop-owned queue. They cover both themes at 1440, 1024 and 390 pixels, complete card visibility after layout measurement, focus/caret restoration, replacement/removal, explicit submission and the actual queued content. No agent CLI is executed.
+
 ## Request and state flow
 
 ```text

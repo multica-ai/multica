@@ -45,6 +45,11 @@ function AgentRichTextReadonlyRender({
   "use memo";
   const contextAgentTargets = useAgentTargetPresentations();
   const effectiveAgentTargets = agentTargets ?? contextAgentTargets;
+  const quotedPrompt = useMemo(() => {
+    const match = /^(> [^\n]*(?:\n> [^\n]*)*)\n\n([\s\S]+)$/u.exec(value.replace(/\r\n?/gu, "\n"));
+    return match ? { quote: match[1]!.replace(/^> /gmu, ""), prompt: match[2]! } : null;
+  }, [value]);
+  const promptValue = quotedPrompt?.prompt ?? value;
   const skillsCacheSource = useMemo(
     () => JSON.stringify(availableSkills),
     [availableSkills]
@@ -54,11 +59,11 @@ function AgentRichTextReadonlyRender({
       readParsedDocumentCache({
         namespace: "rich-text",
         identity: documentCacheKey?.trim() || "content",
-        source: `${value}\u0000${skillsCacheSource}`,
+        source: `${promptValue}\u0000${skillsCacheSource}`,
         create: () =>
-          plainTextToAgentRichTextDoc(value, { skills: availableSkills })
+          plainTextToAgentRichTextDoc(promptValue, { skills: availableSkills })
       }),
-    [availableSkills, documentCacheKey, skillsCacheSource, value]
+    [availableSkills, documentCacheKey, skillsCacheSource, promptValue]
   );
   const contentDoc = useMemo(
     () =>
@@ -117,8 +122,9 @@ function AgentRichTextReadonlyRender({
   return (
     <div
       className={className}
-      data-agent-mention-only={isMentionOnly ? "true" : undefined}
+      data-agent-mention-only={isMentionOnly && !quotedPrompt ? "true" : undefined}
     >
+      {quotedPrompt && <blockquote className="agent-gui-submitted-quote">{quotedPrompt.quote}</blockquote>}
       <div
         className={cn(
           "tiptap ProseMirror",

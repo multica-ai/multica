@@ -4,16 +4,19 @@ import type { AgentGuiInitSnapshot } from "../packages/tutti-agent-gui-host/src/
 import type { AgentTask, ChatMessage, ChatSession } from "../packages/core/types";
 import type { LocalPromptQueue } from "../packages/core/local-conversation/protocol";
 
-async function mountQueueHarness(page: Page, snapshot: AgentGuiInitSnapshot, session: ChatSession, provider: "codex" | "claude") {
+async function mountQueueHarness(page: Page, snapshot: AgentGuiInitSnapshot, session: ChatSession, provider: "codex" | "claude", seed?: string) {
   await page.route("**/__test/local-conversation-queue", (route) => route.fulfill({ contentType: "text/html", body: '<button id="complete">Complete next execution away from composer</button><iframe title="Queue test" style="display:block;width:100%;height:850px;border:0"></iframe>' }));
   await page.setViewportSize({ width: 1200, height: 950 });
   await page.goto("/__test/local-conversation-queue");
-  await page.evaluate(({ snapshot, session, provider }) => {
+  await page.evaluate(({ snapshot, session, provider, seed }) => {
     const frame = document.querySelector("iframe")!;
     const previous = JSON.parse(localStorage.getItem("test-queue-backend") || "null") as { messages: ChatMessage[]; tasks: AgentTask[]; sends: { content: string; queued?: true }[]; queue?: LocalPromptQueue } | null;
-    const messages = previous?.messages ?? [];
-    const tasks = previous?.tasks ?? [];
-    const sends = previous?.sends ?? [];
+    const messages = previous?.messages ?? (seed ? [
+      { id: "input-1", chat_session_id: session.id, role: "user", content: seed, task_id: "turn-1", created_at: session.created_at },
+      { id: "reply-1", chat_session_id: session.id, role: "assistant", content: `Reply ${seed}`, task_id: "turn-1", created_at: session.updated_at }
+    ] as ChatMessage[] : []);
+    const tasks = previous?.tasks ?? (seed ? [{ id: "turn-1", chat_session_id: session.id, status: "completed", created_at: session.created_at, completed_at: session.updated_at }] as AgentTask[] : []);
+    const sends = previous?.sends ?? (seed ? [{ content: seed }] : []);
     // A stopped desktop marks interrupted local executions terminal on reopen.
     for (const task of tasks) if (task.status === "running") { task.status = "failed"; task.completed_at = new Date(Date.parse(session.created_at) + tasks.length * 1000).toISOString(); session.updated_at = task.completed_at; }
     const queue: LocalPromptQueue = previous?.queue ?? { revision: 0, paused: false, items: [] };
@@ -91,7 +94,7 @@ async function mountQueueHarness(page: Page, snapshot: AgentGuiInitSnapshot, ses
       frame.contentWindow!.postMessage({ type: "multica:agent-gui:connect", snapshot }, location.origin, [channel.port2]);
     });
     frame.src = "/tutti-agent-gui/index.html";
-  }, { snapshot, session, provider });
+  }, { snapshot, session, provider, seed });
 }
 
 for (const theme of ["light", "dark"] as const) test(`queue errors stay above the queue and growing input in ${theme}`, async ({ page }) => {
@@ -268,15 +271,11 @@ test("an empty saved Side keeps its composer without the floating home carousel"
 for (const theme of ["light", "dark"] as const) test(`selected-text actions use a compact Multica surface in ${theme}`, async ({ page }) => {
   const at = "2026-10-24T10:00:00Z";
   const session = { id: "selection-style", workspace_id: "style-workspace", creator_id: "style-user", agent_id: "local:codex", title: "Selection", status: "active", created_at: at, updated_at: at, has_unread: false } as ChatSession;
-  const snapshot: AgentGuiInitSnapshot = { workspaceId: session.workspace_id, workspaceSlug: "test", userId: session.creator_id, locale: "zh-CN", theme, local: true, sideWorkspace: true, hostActive: true, hostVisible: true, agents: [], sessions: [session], activeSessionId: session.id, selectedAgentId: session.agent_id,
+  const snapshot: AgentGuiInitSnapshot = { workspaceId: session.workspace_id, workspaceSlug: "test", userId: session.creator_id, locale: "zh-CN", theme, local: true, queueOwner: "desktop", sideWorkspace: true, hostActive: true, hostVisible: true, agents: [], sessions: [session], activeSessionId: session.id, selectedAgentId: session.agent_id,
     executionTargets: [{ id: session.agent_id, provider: "codex", name: "Codex", iconUrl: "", canInvoke: true, runtimeBound: true, runtimeOnline: true }] };
-  await mountQueueHarness(page, snapshot, session, "codex");
+  await mountQueueHarness(page, snapshot, session, "codex", "2");
   await page.setViewportSize({ width: 380, height: 950 });
   const gui = page.frameLocator("iframe");
-  await gui.getByTestId("agent-gui-composer-editor").fill("2");
-  await gui.getByRole("button", { name: "发送", exact: true }).click();
-  await expect(gui.getByTestId("agent-gui-composer-stop-active-turn")).toBeVisible();
-  await page.getByRole("button", { name: "Complete next execution away from composer" }).click();
   const reply = gui.getByText("Reply 2", { exact: true });
   await expect(reply).toBeVisible();
   await reply.evaluate((element) => { const range = document.createRange(); range.selectNodeContents(element); const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range); document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true })); });
@@ -301,10 +300,105 @@ for (const theme of ["light", "dark"] as const) test(`selected-text actions use 
     return { top: rect.top, left: rect.left, right: rect.right, bottom: selected.bottom, viewport: innerWidth };
   });
   expect(edge.top).toBeGreaterThanOrEqual(edge.bottom + 8);
-  expect(edge.left).toBeGreaterThanOrEqual(8);
-  expect(edge.right).toBeLessThanOrEqual(edge.viewport - 8);
+  await expect.poll(() => toolbar.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.left >= 8 && rect.right <= innerWidth - 8;
+  })).toBe(true);
   await gui.getByRole("button", { name: "在旁支中询问", exact: true }).press("Escape");
   await expect(toolbar).not.toBeVisible();
+});
+
+for (const theme of ["light", "dark"] as const) test(`selected quote matches the HTML interaction and reaches the current conversation in ${theme}`, async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const at = "2026-11-07T10:00:00Z";
+  const session = { id: "quote-session", workspace_id: "quote-workspace", creator_id: "quote-user", agent_id: "local:claude", title: "引用到输入框", status: "active", created_at: at, updated_at: at, has_unread: false } as ChatSession;
+  const snapshot: AgentGuiInitSnapshot = { workspaceId: session.workspace_id, workspaceSlug: "test", userId: session.creator_id, locale: "zh-CN", theme, local: true, queueOwner: "desktop", sideWorkspace: true, hostActive: true, hostVisible: true, agents: [], sessions: [session], activeSessionId: session.id, selectedAgentId: session.agent_id,
+    executionTargets: [{ id: session.agent_id, provider: "claude", name: "Claude Code", iconUrl: "", canInvoke: true, runtimeBound: true, runtimeOnline: true }] };
+  const original = Array.from({ length: 8 }, (_, i) => `第 ${i + 1} 行：Desktop 每次连上 daemon，第一条消息先发 hello。`).join("\n");
+  await mountQueueHarness(page, snapshot, session, "claude", original);
+  const gui = page.frameLocator("iframe");
+  const reply = gui.locator('[data-agent-message-speaker="assistant"] p').first();
+  const editor = gui.getByTestId("agent-gui-composer-editor");
+  const card = gui.getByTestId("agent-gui-composer-quote-drafts");
+  const quote = gui.getByTestId("agent-gui-composer-quote-text");
+  const send = gui.getByRole("button", { name: "发送", exact: true });
+  const select = async (short = false) => {
+    await reply.evaluate((element, short) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      if (short) range.setEnd(element.firstChild!, 5);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges(); selection.addRange(range);
+      document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    }, short);
+  };
+  await editor.fill("这段连接流程需要考虑哪些异常？");
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 950 });
+    await select();
+    const toolbar = gui.getByRole("toolbar", { name: "选中文字操作" });
+    await expect(toolbar.getByRole("button")).toHaveText(["复制", "添加到输入框", "在旁支中询问"]);
+    await page.screenshot({ path: `.tmp/quote-design/toolbar-${theme}-${width}.png` });
+    await gui.getByRole("button", { name: "添加到输入框", exact: true }).click();
+    await expect(toolbar).not.toBeVisible();
+    await expect(editor).toBeFocused();
+    await expect.poll(() => editor.evaluate((element) => {
+      const selection = getSelection();
+      return Boolean(selection?.isCollapsed && element.contains(selection.anchorNode));
+    })).toBe(true);
+    await expect(editor).toHaveText("这段连接流程需要考虑哪些异常？");
+    await expect(card).toContainText("引用 · Claude Code");
+    await expect(quote).toHaveAttribute("data-expanded", "false");
+    await expect(gui.getByRole("button", { name: "展开引用", exact: true })).toBeVisible();
+    const layout = await quote.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      const card = element.closest('[data-testid="agent-gui-composer-quote-drafts"]')!.getBoundingClientRect();
+      return { height: rect.height, twoLines: parseFloat(style.lineHeight) * 2, left: card.left, right: card.right, viewport: innerWidth, selectedText: getSelection()?.toString() };
+    });
+    expect(layout.height).toBeLessThanOrEqual(layout.twoLines + 1);
+    expect(layout.left).toBeGreaterThanOrEqual(0);
+    expect(layout.right).toBeLessThanOrEqual(layout.viewport);
+    expect(layout.selectedText).toBe("");
+    await expect.poll(() => card.evaluate((element) => {
+      const input = element.closest<HTMLElement>(".agent-gui-node__composer-prompt-input-area")!;
+      const inputBox = input.getBoundingClientRect();
+      const quoteBox = element.getBoundingClientRect();
+      const targetHeight = parseFloat(getComputedStyle(input).getPropertyValue("--agent-gui-composer-input-height"));
+      return Math.abs(inputBox.height - targetHeight) < 1 && quoteBox.top >= inputBox.top && quoteBox.bottom <= inputBox.bottom;
+    })).toBe(true);
+    await page.screenshot({ path: `.tmp/quote-design/quote-${theme}-${width}.png` });
+    await gui.getByRole("button", { name: "展开引用", exact: true }).click();
+    await expect(quote).toHaveAttribute("data-expanded", "true");
+    expect((await quote.boundingBox())!.height).toBeLessThanOrEqual(160);
+    await gui.getByRole("button", { name: "收起引用", exact: true }).click();
+    await select(true);
+    await gui.getByRole("button", { name: "添加到输入框", exact: true }).click();
+    await expect(card).toHaveCount(1);
+    await expect(quote).toHaveText("Reply");
+    await gui.getByRole("button", { name: "移除引用", exact: true }).click();
+    await expect(card).not.toBeVisible();
+    await expect(editor).toBeFocused();
+    await expect(editor).toHaveText("这段连接流程需要考虑哪些异常？");
+  }
+  await editor.fill("");
+  await select();
+  await gui.getByRole("button", { name: "添加到输入框", exact: true }).click();
+  await expect(send).toBeDisabled();
+  const submittedQuote = await quote.textContent();
+  await editor.press("Enter");
+  expect(JSON.parse((await page.locator("body").getAttribute("data-sends"))!)).toHaveLength(1);
+  await editor.fill("继续分析异常情况");
+  await send.click();
+  await expect.poll(async () => JSON.parse((await page.locator("body").getAttribute("data-sends"))!).length).toBe(2);
+  const sends = JSON.parse((await page.locator("body").getAttribute("data-sends"))!) as { content: string }[];
+  expect(sends[1]!.content).toBe(`> ${submittedQuote!.split("\n").join("\n> ")}\n\n继续分析异常情况`);
+  await expect(gui.locator('[data-agent-message-speaker="user"] blockquote').last()).toContainText("第一条消息先发 hello");
+  await expect(card).not.toBeVisible();
+  await expect(editor).toBeEmpty();
+  expect(await page.locator("body").getAttribute("data-side-request")).toBeNull();
+  expect(errors).toEqual([]);
 });
 
 for (const provider of ["codex", "claude"] as const) for (const reopen of [false, true]) test(`${provider} ${reopen ? "restores a saved queue paused after closing the window" : "drains queued GUI messages after leaving the composer"}`, async ({ page, context }) => {

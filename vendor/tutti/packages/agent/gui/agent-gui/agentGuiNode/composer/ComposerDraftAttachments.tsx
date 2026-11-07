@@ -1,13 +1,8 @@
 import { Slot } from "radix-ui";
 import { useMemo } from "react";
 import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-  Spinner
-} from "@tutti-os/ui-system";
-import { FileText, MessageSquareText, X } from "lucide-react";
+import { Spinner } from "@tutti-os/ui-system";
+import { FileText, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { cn } from "../../../app/renderer/lib/utils";
 import { translate } from "../../../i18n/index";
@@ -17,6 +12,7 @@ import type {
   AgentComposerDraftLargeText,
   AgentComposerQuoteBlock
 } from "../model/agentGuiNodeTypes";
+import { ComposerQuoteCard } from "./ComposerQuoteCard";
 import { AgentComposerDraftImagePreview } from "./AgentComposerDraftPreview";
 import { AGENT_COMPOSER_PASTED_TEXT_FILE_PREFIX } from "./composerDraftUtils";
 
@@ -46,12 +42,6 @@ export const ComposerDraftAttachments = observer(
       () => ({ removeMention: removeLabel }),
       [removeLabel]
     );
-    const quoteCountLabel = translate(
-      draftQuotes.length === 1
-        ? "agentHost.agentGui.selectionReferenceCountOne"
-        : "agentHost.agentGui.selectionReferenceCountMany",
-      { count: draftQuotes.length }
-    );
     const hasAttachments =
       draftQuotes.length > 0 ||
       draftImages.length > 0 ||
@@ -62,53 +52,9 @@ export const ComposerDraftAttachments = observer(
         className="mb-2 flex min-h-0 max-w-full flex-col gap-2"
         data-testid="agent-gui-composer-attachment-drafts"
       >
-        {draftQuotes.length > 0 ? (
-          <div
-            className="flex max-w-full items-center"
-            data-testid="agent-gui-composer-quote-drafts"
-          >
-            <Popover>
-              <div className="group inline-flex max-w-full items-center rounded-[10px] border border-[var(--line-1)] bg-[var(--background-fronted)] text-sm font-medium text-[var(--text-primary)]">
-                <PopoverTrigger asChild>
-                  <button
-                    type="button"
-                    className="inline-flex min-w-0 items-center gap-2 rounded-l-[9px] py-2 pl-3 pr-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:color-mix(in_srgb,var(--text-primary)_34%,transparent)]"
-                    data-testid="agent-gui-composer-quote-trigger"
-                  >
-                    <MessageSquareText
-                      aria-hidden
-                      className="shrink-0 text-[var(--text-secondary)]"
-                      size={16}
-                      strokeWidth={2}
-                    />
-                    <span className="truncate">{quoteCountLabel}</span>
-                  </button>
-                </PopoverTrigger>
-                <button
-                  type="button"
-                  className="mr-1.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full text-[var(--text-secondary)] transition hover:bg-[var(--transparency-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:color-mix(in_srgb,var(--text-primary)_34%,transparent)]"
-                  aria-label={labels.removeMention}
-                  title={labels.removeMention}
-                  onClick={onRemoveQuotes}
-                >
-                  <X size={12} strokeWidth={2.4} aria-hidden />
-                </button>
-              </div>
-              <PopoverContent
-                side="top"
-                align="start"
-                aria-label={quoteCountLabel}
-                className="max-h-[min(320px,var(--radix-popover-content-available-height))] w-auto max-w-[min(520px,calc(100vw-32px))] gap-2 overflow-y-auto overscroll-contain text-left text-sm leading-5 whitespace-pre-wrap [overflow-wrap:anywhere]"
-                data-testid="agent-gui-composer-quote-preview"
-                tabIndex={0}
-              >
-                {draftQuotes.map((quote) => (
-                  <p key={quote.id}>“{quote.text.trim()}”</p>
-                ))}
-              </PopoverContent>
-            </Popover>
-          </div>
-        ) : null}
+        {draftQuotes.map((quote) => (
+          <ComposerQuoteCard key={quote.id} quote={quote} onRemove={onRemoveQuotes} />
+        ))}
         {draftImages.length > 0 ? (
           <div
             className="flex w-full max-w-full flex-wrap items-start gap-2"

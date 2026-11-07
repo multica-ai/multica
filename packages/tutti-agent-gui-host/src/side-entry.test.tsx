@@ -41,7 +41,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-async function mount(chinese = true) {
+async function mount(chinese = true, onAddQuote?: Parameters<typeof SideEntryProvider>[0]["onAddQuote"]) {
   await act(async () =>
     root.render(
       <SideEntryProvider
@@ -51,6 +51,8 @@ async function mount(chinese = true) {
         sessionId="session-a"
         chinese={chinese}
         enabled
+        onAddQuote={onAddQuote}
+        quoteSourceName="Claude Code"
       >
         <article data-multica-turn-id="turn-a">
           <p>Selected reply text</p>
@@ -109,6 +111,22 @@ afterEach(async () => {
   Reflect.deleteProperty(Range.prototype, "getBoundingClientRect");
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+it("adds the selection to the current composer with its actual author and dismisses without sending", async () => {
+  const add = vi.fn();
+  await mount(true, add);
+  container.querySelector("article")!.dataset.multicaQuoteSource = "Review agent";
+  await select();
+  expect(Array.from(container.querySelectorAll("button"), (button) => button.textContent)).toEqual([
+    "复制", "添加到输入框", "在旁支中询问"
+  ]);
+  await click(1);
+  expect(add).toHaveBeenCalledExactlyOnceWith({
+    sessionId: "session-a", text: "Selected reply text", sourceName: "Review agent"
+  });
+  await expectDismissed();
+  expect(request).not.toHaveBeenCalled();
 });
 
 it.each([

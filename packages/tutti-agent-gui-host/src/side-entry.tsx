@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { Button } from "@multica/ui/components/ui/button";
 import { DropdownMenuItem } from "@tutti-os/ui-system";
-import { Copy, MessagesSquare, PanelRightOpen } from "lucide-react";
+import { Copy, MessagesSquare, PanelRightOpen, TextQuote } from "lucide-react";
 import {
   createContext,
   useContext,
@@ -23,6 +23,8 @@ import { observer } from "mobx-react-lite";
 export const SideEntryProvider = observer(SideEntryProviderRender);
 export const SideQueueAction = observer(SideQueueActionRender);
 
+export type SelectedQuote = { sessionId: string; text: string; sourceName: string };
+
 type Entry = {
   client: AgentGuiHostServices;
   handle: ReturnType<typeof createMulticaAgentGuiRuntime>;
@@ -30,6 +32,8 @@ type Entry = {
   chinese: boolean;
   enabled: boolean;
   sidePane?: boolean;
+  quoteSourceName?: string;
+  onAddQuote?: (quote: SelectedQuote) => void;
 };
 const SideEntryContext = createContext<Entry | null>(null);
 
@@ -50,6 +54,8 @@ function SideEntryProviderRender({
   current.current = entry;
   const [selection, setSelection] = useState<{
     text: string;
+    sessionId: string;
+    sourceName: string;
     turnId?: string;
     left: number;
     top: number;
@@ -81,7 +87,12 @@ function SideEntryProviderRender({
       }
       const box = value.getRangeAt(0).getBoundingClientRect();
       setSelection({
-        text: text.slice(0, 20000),
+        text,
+        sessionId: current.current.sessionId,
+        sourceName: anchor?.closest<HTMLElement>("[data-multica-quote-source]")?.dataset.multicaQuoteSource ||
+          (anchor?.closest('[data-agent-message-speaker="user"]')
+            ? (current.current.chinese ? "你" : "You")
+            : current.current.quoteSourceName ?? (current.current.chinese ? "助手" : "Assistant")),
         turnId: source.dataset.multicaTurnId || undefined,
         left: box.left,
         top: box.top,
@@ -95,7 +106,10 @@ function SideEntryProviderRender({
       });
     };
     const key = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSelection(null);
+      if (event.key === "Escape") {
+        setSelection(null);
+        window.getSelection()?.removeAllRanges();
+      }
       else if (event.key === "Shift") select();
     };
     const open = (event: MouseEvent | KeyboardEvent) => {
@@ -264,6 +278,15 @@ function SideEntryProviderRender({
     });
   };
   const copyCallback = usePersistCallback(copy);
+  const addQuote = usePersistCallback(() => {
+    if (!selection || selection.sessionId !== entry.sessionId) return;
+    dismissSelection();
+    entry.onAddQuote?.({
+      sessionId: selection.sessionId,
+      text: selection.text,
+      sourceName: selection.sourceName
+    });
+  });
   const start = async () => {
     if (!selection || !entry.sessionId || pending) return;
     const { text, turnId } = selection;
@@ -273,7 +296,7 @@ function SideEntryProviderRender({
       await entry.client.hostApi.openSide({
         sessionId: entry.sessionId,
         turnId,
-        quote: text,
+        quote: text.slice(0, 20000),
         requestId: crypto.randomUUID()
       });
     } catch (error) {
@@ -295,6 +318,7 @@ function SideEntryProviderRender({
           entry={entry}
           selection={selection}
           copy={copyCallback}
+          addQuote={addQuote}
           pending={pending}
           start={startCallback}
         />
@@ -431,6 +455,7 @@ const DivBinding1 = observer(function DivBinding1({
   entry,
   selection,
   copy,
+  addQuote,
   pending,
   start,
   ...slotProps
@@ -456,6 +481,12 @@ const DivBinding1 = observer(function DivBinding1({
         onPointerDown={onPointerDownProp5}
       >
         <ButtonBinding1 copy={copy} entry={entry} />
+        {entry.onAddQuote && (
+          <Button size="xs" variant="ghost" onClick={addQuote}>
+            <TextQuote className="size-3.5" />
+            {entry.chinese ? "添加到输入框" : "Add to input"}
+          </Button>
+        )}
         <ButtonBinding2 pending={pending} start={start} entry={entry} />
       </div>
     </Slot.Root>
@@ -497,6 +528,7 @@ type DropdownMenuItemBinding3Props = {
 };
 
 type DivBinding1Props = {
+  addQuote: () => void;
   toolbar: import("react").RefObject<HTMLDivElement | null>;
   entry: Omit<
     Entry & { root: HTMLElement; children: ReactNode },

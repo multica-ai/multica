@@ -64,7 +64,10 @@ html.multica-agent-gui [data-multica-located="true"] {
 }
 
 html.multica-agent-gui .multica-selection-toolbar {
+  box-sizing: border-box;
+  inline-size: max-content;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 2px;
   max-inline-size: calc(100vw - 16px);
@@ -77,6 +80,74 @@ html.multica-agent-gui .multica-selection-toolbar {
 }
 
 /* Match the transcript's gutter without changing the measured editor height. */
+html.multica-agent-gui .agent-gui-composer-quote {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+
+html.multica-agent-gui .agent-gui-composer-quote-main {
+  flex: 1;
+  min-width: 0;
+  border-left: 2px solid var(--muted-foreground);
+  padding-left: 12px;
+}
+
+html.multica-agent-gui .agent-gui-composer-quote-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 1.6;
+}
+
+html.multica-agent-gui .agent-gui-composer-quote-head svg {
+  flex-shrink: 0;
+}
+
+html.multica-agent-gui .agent-gui-composer-quote-text {
+  margin-top: 4px;
+  font-size: var(--text-label);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+html.multica-agent-gui .agent-gui-composer-quote-text[data-expanded="true"] {
+  display: block;
+  max-height: 10rem;
+  overflow: auto;
+}
+
+html.multica-agent-gui .agent-gui-composer-quote-toggle {
+  padding: 0;
+  min-height: var(--button-height-sm);
+  font-size: var(--text-caption);
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+
+html.multica-agent-gui .agent-gui-composer-quote-remove {
+  flex-shrink: 0;
+}
+
+html.multica-agent-gui .agent-gui-submitted-quote {
+  margin: 0 0 8px;
+  padding-left: 12px;
+  border-left: 2px solid var(--muted-foreground);
+  font-size: var(--text-label);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 html.multica-agent-gui[data-multica-presentation="conversation"] .agent-gui-node__composer[data-layout="dock"] {
   padding-inline: var(--agent-gui-detail-padding-x);
   padding-bottom: 16px;

@@ -22,6 +22,12 @@ afterEach(() => {
 });
 
 describe("AgentRichTextReadonly", () => {
+  it("renders a submitted leading quote as quoted data above the question", () => {
+    const { container } = render(<AgentRichTextReadonly value={"> First line\n> <script>untrusted text</script>\n\nWhy does this happen?"} />);
+    expect(container.querySelector("blockquote")).toHaveTextContent("First line <script>untrusted text</script>");
+    expect(container.querySelector("script")).toBeNull();
+    expect(container.querySelector(".ProseMirror")).toHaveTextContent("Why does this happen?");
+  });
   it("reuses the parsed document after a historical message remounts", () => {
     resetParsedDocumentCacheForTests();
     const first = render(

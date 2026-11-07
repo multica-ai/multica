@@ -49,6 +49,8 @@ export function useAgentRichTextEditorHandle(input: {
         const end = currentEditor.state.doc.content.size;
         if (!currentEditor.isFocused) input.onBeforeProgrammaticFocus?.();
         currentEditor.chain().focus().setTextSelection(end).run();
+        // A cleared transcript selection can leave model focus at the same position without a DOM caret.
+        currentEditor.view.focus();
       },
       getPromptTextBeforeSelection() {
         const currentEditor = input.editorRef.current;

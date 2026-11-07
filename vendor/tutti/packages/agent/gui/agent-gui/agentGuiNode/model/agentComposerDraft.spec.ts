@@ -4,6 +4,7 @@ import {
   agentComposerDraftDisplayPrompt,
   agentComposerDraftFiles,
   agentComposerDraftHasContent,
+  agentComposerDraftCanSubmit,
   agentComposerDraftImages,
   agentComposerDraftLargeTexts,
   agentComposerDraftPrompt,
@@ -41,10 +42,9 @@ describe("agentComposerDraft", () => {
     expect(agentComposerDraftHasContent(draft)).toBe(true);
     expect(projectAgentComposerDraftSubmission({ draft, skills: [] })).toEqual({
       content: [
-        { type: "text", text: "Why does this happen?" },
-        { type: "text", text: "> First line\n> Second line" }
+        { type: "text", text: "> First line\n> Second line\n\nWhy does this happen?" }
       ],
-      displayPrompt: "Why does this happen?\n> First line\n> Second line"
+      displayPrompt: "> First line\n> Second line\n\nWhy does this happen?"
     });
     expect(
       agentComposerDraftQuotes(
@@ -53,6 +53,14 @@ describe("agentComposerDraft", () => {
     ).toEqual([
       { type: "quote", id: "quote-1", text: "First line\nSecond line" }
     ]);
+  });
+
+  it("retains a quote-only draft as content but requires a question before sending", () => {
+    const quoted = buildAgentComposerDraft({ prompt: " ", quotes: [{ type: "quote", id: "q", text: "Context" }] });
+    expect(agentComposerDraftHasContent(quoted)).toBe(true);
+    expect(agentComposerDraftCanSubmit(quoted)).toBe(false);
+    expect(agentComposerDraftCanSubmit(updateAgentComposerDraft(quoted, { prompt: "Why?" }))).toBe(true);
+    expect(agentComposerDraftCanSubmit(buildAgentComposerDraft({ prompt: "", images: [{ id: "img", mimeType: "image/png", name: "image.png", url: "https://example.com/image.png" }] }))).toBe(true);
   });
 
   it("deduplicates the same selected transcript quote", () => {

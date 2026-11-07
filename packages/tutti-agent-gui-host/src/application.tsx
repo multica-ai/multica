@@ -30,7 +30,7 @@ import type { AgentGuiHostServices, AgentGuiInitSnapshot } from "./protocol";
 import { executionTargets } from "./protocol";
 import { ResourceLinkProvider } from "./resource-link";
 import type { createMulticaAgentGuiRuntime } from "./runtime";
-import { SideEntryProvider } from "./side-entry";
+import { SideEntryProvider, type SelectedQuote } from "./side-entry";
 import { observer } from "mobx-react-lite";
 export const AgentGuiApplication = observer(AgentGuiApplicationRender);
 
@@ -114,6 +114,8 @@ function AgentGuiApplicationRender({
     NonNullable<AgentGUIProps["runtimeRequests"]["composerAppend"]>[]
   >([]);
   const appendRestoreIds = useRef(new Map<number, string | undefined>());
+  // Host append sequences are positive; local selection requests stay in this instance.
+  const localAppendSequence = useRef(0);
   const appliedAppends = useRef(new Set<number>());
   const previousInit = useRef(initial);
   const [size, setSize] = useState(() => ({
@@ -530,16 +532,31 @@ function AgentGuiApplicationRender({
       >["onComposerAppendHandled"]
     >
   >((sequence) => {
+    const quoteRequest = appends.find((request) => request.sequence === sequence)?.quote;
     const restoreRequestId = appendRestoreIds.current.get(sequence);
     appendRestoreIds.current.delete(sequence);
     appliedAppends.current.add(sequence);
     setAppends((current) =>
       current.filter((request) => request.sequence !== sequence)
     );
+    if (quoteRequest) {
+      setComposerFocusSequence((current) => (current ?? 0) + 1);
+      return;
+    }
     void client.hostApi.promptApplied({
       sequence,
       restoreRequestId
     });
+  });
+  const addSelectionQuote = usePersistCallback((quote: SelectedQuote) => {
+    const guiSessionId = node.lastActiveAgentSessionId;
+    if (!guiSessionId || handle.toServerSessionId(guiSessionId) !== quote.sessionId) return;
+    const sequence = --localAppendSequence.current;
+    setAppends((current) => [...current, {
+      sequence,
+      agentSessionId: guiSessionId,
+      quote: { type: "quote", id: crypto.randomUUID(), text: quote.text, sourceName: quote.sourceName }
+    }]);
   });
   const hostActionsProp8 = useMemo<
     NonNullable<React.ComponentProps<typeof AgentGUI>["hostActions"]>
@@ -633,6 +650,8 @@ function AgentGuiApplicationRender({
                 : null
             }
             chinese={snapshot.locale === "zh-CN"}
+            onAddQuote={addSelectionQuote}
+            quoteSourceName={agentDirectory.agents.find((agent) => agent.agentTargetId === node.agentTargetId)?.name}
           >
             <AgentGUI
               identity={identityProp2}

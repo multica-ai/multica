@@ -202,6 +202,7 @@ export interface AgentComposerQuoteBlock {
   type: "quote";
   id: string;
   text: string;
+  sourceName?: string;
 }
 
 export type AgentComposerFileBlock =

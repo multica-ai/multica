@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ComposerDraftAttachments } from "./ComposerDraftAttachments";
 
@@ -39,16 +39,13 @@ describe("ComposerDraftAttachments", () => {
     );
   });
 
-  it("renders selected transcript text as a removable annotation with previews", async () => {
+  it("shows the selected text and source inline with a separate remove action", () => {
     const onRemoveQuotes = vi.fn();
     render(
       <ComposerDraftAttachments
         draftImages={[]}
         draftLargeTexts={[]}
-        draftQuotes={[
-          { type: "quote", id: "quote-1", text: "First selection" },
-          { type: "quote", id: "quote-2", text: "Second selection" }
-        ]}
+        draftQuotes={[{ type: "quote", id: "quote-1", text: "First selection", sourceName: "Claude Code" }]}
         removeLabel="Remove reference"
         onRemoveImage={vi.fn()}
         onRemoveLargeText={vi.fn()}
@@ -56,33 +53,10 @@ describe("ComposerDraftAttachments", () => {
         onRemoveQuotes={onRemoveQuotes}
       />
     );
-
-    expect(
-      screen.getByTestId("agent-gui-composer-quote-drafts")
-    ).toHaveTextContent("2 selected file snippets");
-    const previewTrigger = screen.getByRole("button", {
-      name: "2 selected file snippets"
-    });
-    const removeButton = screen.getByRole("button", {
-      name: "Remove reference"
-    });
-    expect(previewTrigger).not.toContainElement(removeButton);
-    fireEvent.click(previewTrigger);
-    const preview = await screen.findByTestId(
-      "agent-gui-composer-quote-preview"
-    );
-    expect(preview).toHaveAttribute("data-slot", "popover-content");
-    expect(preview).toHaveAttribute("tabindex", "0");
-    expect(preview).toHaveClass("overflow-y-auto", "overscroll-contain");
-    expect(preview).toHaveTextContent("“First selection”“Second selection”");
-    fireEvent.keyDown(preview, { key: "Escape" });
-    await waitFor(() =>
-      expect(
-        screen.queryByTestId("agent-gui-composer-quote-preview")
-      ).toBeNull()
-    );
-    expect(previewTrigger).toHaveFocus();
-    fireEvent.click(removeButton);
+    expect(screen.getByTestId("agent-gui-composer-quote-drafts")).toHaveTextContent("Quote · Claude Code");
+    expect(screen.getByTestId("agent-gui-composer-quote-text")).toHaveTextContent("First selection");
+    expect(screen.queryByRole("button", { name: "Expand quote" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remove quote" }));
     expect(onRemoveQuotes).toHaveBeenCalledOnce();
   });
 });

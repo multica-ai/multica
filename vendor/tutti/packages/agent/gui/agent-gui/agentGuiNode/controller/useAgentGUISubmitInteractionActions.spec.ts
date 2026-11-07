@@ -2,7 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { createTestPromptOperations } from "../../../shared/testing/createTestPromptOperations";
 import { createTestRuntimeState } from "../../../shared/testing/createTestRuntimeState";
-import { agentComposerDraftPrompt } from "../model/agentComposerDraft";
+import { agentComposerDraftPrompt, buildAgentComposerDraft } from "../model/agentComposerDraft";
 import type { AgentComposerDraft } from "../model/agentGuiNodeTypes";
 import { agentGUISubmitSettlementError } from "./agentGuiController.errors";
 import {
@@ -130,12 +130,12 @@ describe("new-conversation home draft lifecycle", () => {
     ).toBe(changed);
   });
 
-  it("restores a failed activation only when the home draft is still empty", () => {
+  it.each([false, true])("restores a failed activation only when the home draft is still empty (quote: %s)", (withQuote) => {
     const empty = { [draftKey]: draft("") };
     const changed = { [draftKey]: draft("second") };
     const failure = {
       draftKey,
-      submittedDraft: draft("first")
+      submittedDraft: buildAgentComposerDraft({ prompt: "first", quotes: withQuote ? [{ type: "quote", id: "quote", text: "Selected reply", sourceName: "Claude Code" }] : [] })
     };
 
     expect(
@@ -143,6 +143,7 @@ describe("new-conversation home draft lifecycle", () => {
         restoreFailedAgentGUIHomeDraft({ ...failure, drafts: empty })[draftKey]!
       )
     ).toBe("first");
+    expect(restoreFailedAgentGUIHomeDraft({ ...failure, drafts: empty })[draftKey]).toEqual(failure.submittedDraft);
     expect(
       restoreFailedAgentGUIHomeDraft({ ...failure, drafts: changed })
     ).toBe(changed);

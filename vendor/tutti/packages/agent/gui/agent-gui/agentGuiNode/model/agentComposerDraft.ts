@@ -315,6 +315,22 @@ export function agentComposerDraftHasContent(
   });
 }
 
+/** A transcript reference needs a question; attachments alone keep their existing send behavior. */
+export function agentComposerDraftCanSubmit(draft: AgentComposerDraft): boolean {
+  return (
+    (agentComposerDraftQuotes(draft).length === 0 ||
+      agentComposerDraftPrompt(draft).trim().length > 0) &&
+    agentComposerDraftHasContent(draft)
+  );
+}
+
+function promptWithDraftQuotes(draft: AgentComposerDraft, prompt: string): string {
+  const quote = agentPromptContentDisplayText(
+    agentComposerQuotePromptContent(agentComposerDraftQuotes(draft))
+  );
+  return [quote, prompt].filter(Boolean).join("\n\n");
+}
+
 export function normalizeAgentPromptContentBlocks(
   content: readonly AgentPromptContentBlock[]
 ): AgentPromptContentBlock[] {
@@ -527,8 +543,7 @@ export function agentComposerDraftToPromptContent(input: {
     connectorProjection.connectorKeys
   );
   return normalizeAgentPromptContentBlocks([
-    ...textPromptContent(connectorProjection.prompt),
-    ...agentComposerQuotePromptContent(agentComposerDraftQuotes(input.draft)),
+    ...textPromptContent(promptWithDraftQuotes(input.draft, connectorProjection.prompt)),
     ...promptItemBlocksForProviderSkills({
       prompt: connectorProjection.prompt,
       skills: input.skills
@@ -560,8 +575,7 @@ export function agentComposerDraftSubmittedText(
 ): string {
   return agentPromptContentDisplayText(
     normalizeAgentPromptContentBlocks([
-      ...textPromptContent(agentComposerDraftPrompt(draft)),
-      ...agentComposerQuotePromptContent(agentComposerDraftQuotes(draft)),
+      ...textPromptContent(promptWithDraftQuotes(draft, agentComposerDraftPrompt(draft))),
       ...largeTextPromptContent(agentComposerDraftLargeTexts(draft))
     ])
   );
@@ -587,7 +601,7 @@ export function agentComposerDraftDisplayPrompt(
   if (!largeTexts.length && !quoteText) {
     return prompt.includes("](mention://") ? prompt : undefined;
   }
-  const parts = [prompt, quoteText].filter(Boolean);
+  const parts = [quoteText ? [quoteText, prompt].filter(Boolean).join("\n\n") : prompt].filter(Boolean);
   parts.push(
     ...largeTexts
       .map((item, index) => pastedTextMentionMarkdown(item, index))

@@ -149,6 +149,10 @@ export const AgentComposerView = observer(function AgentComposerView(
     removeDraftQuotes,
     setDraftConnectorSelected
   } = input.attachments;
+  const removeQuoteAndFocus = usePersistCallback(() => {
+    removeDraftQuotes();
+    input.editorHandleRef.current?.focusAtEnd();
+  });
   const {
     composerClassName,
     effectiveHandoffLabel,
@@ -482,7 +486,7 @@ export const AgentComposerView = observer(function AgentComposerView(
                   onRemoveImage={removeDraftImage}
                   onRemoveLargeText={removeDraftLargeText}
                   onExpandLargeText={expandDraftLargeTextToPrompt}
-                  onRemoveQuotes={removeDraftQuotes}
+                  onRemoveQuotes={removeQuoteAndFocus}
                 />
                 <div
                   className={cn(
