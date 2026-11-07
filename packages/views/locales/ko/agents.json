@@ -678,6 +678,13 @@
       "cancel_task_tooltip": "실행 취소",
       "cancelling_tooltip": "취소하는 중...",
       "cancel_failed_toast": "실행을 취소하지 못했습니다",
+      "move_up_aria": "큐에서 작업을 위로 이동",
+      "move_up_tooltip": "큐에서 위로 이동",
+      "move_down_aria": "큐에서 작업을 아래로 이동",
+      "move_down_tooltip": "큐에서 아래로 이동",
+      "move_front_toast": "이 작업은 이미 큐 맨앞에 있습니다.",
+      "move_back_toast": "이 작업은 이미 큐 맨뒤에 있습니다.",
+      "move_failed_toast": "큐에서 작업을 이동할 수 없습니다.",
       "started_prefix": "{{when}} 시작됨",
       "dispatched_prefix": "{{when}} 디스패치됨",
       "queued_prefix": "{{when}} 대기 시작"

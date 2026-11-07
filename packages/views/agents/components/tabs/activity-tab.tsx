@@ -4,6 +4,8 @@ import type { ReactNode } from "react";
 import { forwardRef, memo, useCallback, useMemo, useState } from "react";
 import {
   ArrowUpRight,
+  ChevronDown,
+  ChevronUp,
   CircleHelp,
   Hash,
   MessageSquare,
@@ -145,11 +147,20 @@ export function AgentWorkSections({
             t.status === "dispatched" ||
             t.status === "waiting_local_directory"),
       )
-      .sort(
-        (a, b) =>
-          (statusRank[a.status] ?? 99) - (statusRank[b.status] ?? 99) ||
-          new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-      );
+      .sort((a, b) => {
+        const rank = (statusRank[a.status] ?? 99) - (statusRank[b.status] ?? 99);
+        if (rank !== 0) return rank;
+        // Queued rows follow the server's claim order (priority DESC,
+        // created_at ASC) so the reorder buttons move a row toward or away
+        // from what the daemon will claim next.
+        if (a.status === "queued" && b.status === "queued") {
+          return (
+            b.priority - a.priority ||
+            new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          );
+        }
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      });
   }, [snapshot, agent.id]);
 
   // Most recent terminal tasks. Includes cancelled — users searching
@@ -627,6 +638,7 @@ function LiveTaskRow({
   const timeAgo = useTimeAgo();
   const paths = useWorkspacePaths();
   const [cancelling, setCancelling] = useState(false);
+  const [moving, setMoving] = useState(false);
   const { cfg, hasIssue, issue, title, SourceIcon, sourceLabel, sourceFallback, statusLabel } =
     useTaskRowModel(task);
   const Icon = cfg.icon;
@@ -638,6 +650,33 @@ function LiveTaskRow({
     task.status === "queued" ||
     task.status === "dispatched" ||
     task.status === "running";
+  // Only queued rows are reorderable — dispatched/running work is already
+  // claimed and its position is no longer the queue's to change.
+  const showMove = task.status === "queued";
+
+  const handleMove = async (direction: "up" | "down") => {
+    if (moving) return;
+    setMoving(true);
+    try {
+      const result = await api.moveQueuedTask(task.id, direction);
+      if (!result.moved) {
+        toast.info(
+          t(($) =>
+            direction === "up"
+              ? $.tab_body.activity.move_front_toast
+              : $.tab_body.activity.move_back_toast,
+          ),
+        );
+      }
+      // No manual invalidate needed — the task:queued WS event flows
+      // through useRealtimeSync's `task:` prefix path which already
+      // invalidates the snapshot.
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.tab_body.activity.move_failed_toast));
+    } finally {
+      setMoving(false);
+    }
+  };
 
   const handleCancel = async () => {
     if (cancelling) return;
@@ -687,6 +726,42 @@ function LiveTaskRow({
         {activeTaskTimeText(task, t, timeAgo)}
       </span>
       <div className={HOVER_ACTIONS_CLASS}>
+        {showMove && (
+          <>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    onClick={() => void handleMove("up")}
+                    disabled={moving}
+                    aria-label={t(($) => $.tab_body.activity.move_up_aria)}
+                  />
+                }
+                className={`flex items-center justify-center rounded-xs p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 ${TOUCH_ACTION_CLASS}`}
+              >
+                <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipContent>{t(($) => $.tab_body.activity.move_up_tooltip)}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    onClick={() => void handleMove("down")}
+                    disabled={moving}
+                    aria-label={t(($) => $.tab_body.activity.move_down_aria)}
+                  />
+                }
+                className={`flex items-center justify-center rounded-xs p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 ${TOUCH_ACTION_CLASS}`}
+              >
+                <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipContent>{t(($) => $.tab_body.activity.move_down_tooltip)}</TooltipContent>
+            </Tooltip>
+          </>
+        )}
         {showTranscript && (
           <TranscriptButton
             task={task}

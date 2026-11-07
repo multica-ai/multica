@@ -2495,6 +2495,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Tasks (user-facing, with ownership check)
 			r.Post("/api/tasks/{taskId}/cancel", h.CancelTaskByUser)
 			r.Post("/api/tasks/{taskId}/rerun", h.RerunTaskByUser)
+			r.Post("/api/tasks/{taskId}/move", h.MoveTaskByUser)
 
 			// Workspace-wide agent task snapshot for presence derivation:
 			// every active task + each agent's most recent terminal task.

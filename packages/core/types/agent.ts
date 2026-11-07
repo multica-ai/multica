@@ -1390,3 +1390,12 @@ export interface RuntimeLocalSkillImportResult {
   skill?: Skill;
   conflict?: RuntimeLocalSkillImportConflict;
 }
+
+export interface MoveTaskResponse {
+  task_id: string;
+  priority: number;
+  /** False when the task was already at the edge of its agent's queue, or
+   * could not gain a position within the 0–4 priority scale; priority is
+   * then unchanged. */
+  moved: boolean;
+}

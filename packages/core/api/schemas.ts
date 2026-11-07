@@ -23,6 +23,7 @@ import type {
   ChatPendingTask,
   ChatSession,
   PrioritizeQueuedChatTaskResponse,
+  MoveTaskResponse,
   SendChatMessageResponse,
   StartMikaOnboardingResponse,
   Comment,
@@ -2326,6 +2327,18 @@ export const PrioritizeQueuedChatTaskResponseSchema:
 
 export const EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE:
   PrioritizeQueuedChatTaskResponse = { task_id: "" };
+
+export const MoveTaskResponseSchema: z.ZodType<MoveTaskResponse> = z.object({
+  task_id: z.string(),
+  priority: z.number(),
+  moved: z.boolean(),
+}).loose();
+
+export const EMPTY_MOVE_TASK_RESPONSE: MoveTaskResponse = {
+  task_id: "",
+  priority: 0,
+  moved: false,
+};
 
 export const EMPTY_CHAT_DRAFT_RESTORES: ChatDraftRestoresResponse = {
   restores: [],

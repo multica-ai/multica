@@ -105,6 +105,7 @@ import type {
   ChatDraftRestoresResponse,
   ChatPendingTask,
   PrioritizeQueuedChatTaskResponse,
+  MoveTaskResponse,
   PendingChatTasksResponse,
   HasPendingChatTasksResponse,
   SendChatMessageResponse,
@@ -276,6 +277,7 @@ import {
   ChatSessionListSchema,
   ChatSessionSchema,
   PrioritizeQueuedChatTaskResponseSchema,
+  MoveTaskResponseSchema,
   SendChatMessageResponseSchema,
   StartMikaOnboardingResponseSchema,
   ChildIssuesResponseSchema,
@@ -304,6 +306,7 @@ import {
   EMPTY_CHAT_SESSION,
   EMPTY_CHAT_SESSION_LIST,
   EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE,
+  EMPTY_MOVE_TASK_RESPONSE,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_AGENT_BUILDER_SESSION,
@@ -4130,6 +4133,22 @@ export class ApiClient {
     });
     return parseWithFallback(raw, CancelTaskResponseSchema, EMPTY_CANCEL_TASK_RESPONSE, {
       endpoint: "POST /api/tasks/{taskId}/cancel",
+    });
+  }
+
+  /**
+   * Move one queued task a step up or down in its agent's claim order.
+   * moved=false means the task was already at the edge of the queue (or
+   * could not gain a position within the 0–4 priority scale); the queue is
+   * then unchanged.
+   */
+  async moveQueuedTask(taskId: string, direction: "up" | "down"): Promise<MoveTaskResponse> {
+    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/move`, {
+      method: "POST",
+      body: JSON.stringify({ direction }),
+    });
+    return parseWithFallback(raw, MoveTaskResponseSchema, EMPTY_MOVE_TASK_RESPONSE, {
+      endpoint: "POST /api/tasks/{taskId}/move",
     });
   }
 

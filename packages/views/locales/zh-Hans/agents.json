@@ -828,6 +828,13 @@
       "cancel_task_tooltip": "取消运行",
       "cancelling_tooltip": "正在取消...",
       "cancel_failed_toast": "取消运行失败",
+      "move_up_aria": "在队列中上移任务",
+      "move_up_tooltip": "在队列中上移",
+      "move_down_aria": "在队列中下移任务",
+      "move_down_tooltip": "在队列中下移",
+      "move_front_toast": "该任务已在队列最前。",
+      "move_back_toast": "该任务已在队列最后。",
+      "move_failed_toast": "无法在队列中移动该任务。",
       "started_prefix": "{{when}}启动",
       "dispatched_prefix": "{{when}}派发",
       "queued_prefix": "{{when}}排队"

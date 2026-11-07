@@ -670,6 +670,13 @@
       "cancel_task_tooltip": "実行をキャンセル",
       "cancelling_tooltip": "キャンセル中...",
       "cancel_failed_toast": "実行をキャンセルできませんでした",
+      "move_up_aria": "キューでタスクを上に移動",
+      "move_up_tooltip": "キューで上に移動",
+      "move_down_aria": "キューでタスクを下に移動",
+      "move_down_tooltip": "キューで下に移動",
+      "move_front_toast": "このタスクはすでにキューの先頭です。",
+      "move_back_toast": "このタスクはすでにキューの末尾です。",
+      "move_failed_toast": "キューでタスクを移動できません。",
       "started_prefix": "{{when}} に開始",
       "dispatched_prefix": "{{when}} にディスパッチ",
       "queued_prefix": "{{when}} に待機開始"

@@ -849,6 +849,13 @@
       "cancel_task_tooltip": "Annuler l'exécution",
       "cancelling_tooltip": "Annulation…",
       "cancel_failed_toast": "Échec de l'annulation de l'exécution",
+      "move_up_aria": "Monter la tâche dans la file",
+      "move_up_tooltip": "Monter dans la file",
+      "move_down_aria": "Descendre la tâche dans la file",
+      "move_down_tooltip": "Descendre dans la file",
+      "move_front_toast": "Cette tâche est déjà en tête de file.",
+      "move_back_toast": "Cette tâche est déjà à la fin de la file.",
+      "move_failed_toast": "Impossible de déplacer la tâche dans la file.",
       "started_prefix": "Démarrée {{when}}",
       "dispatched_prefix": "Envoyée {{when}}",
       "queued_prefix": "Mise en file d'attente {{when}}"

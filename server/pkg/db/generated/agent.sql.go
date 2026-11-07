@@ -7368,6 +7368,101 @@ func (q *Queries) MergeDelegatedFailureCommentIntoPendingTask(ctx context.Contex
 	return i, err
 }
 
+const moveQueuedTaskDown = `-- name: MoveQueuedTaskDown :one
+WITH target AS (
+    SELECT atq.id, atq.agent_id, atq.priority, atq.created_at
+    FROM agent_task_queue atq
+    WHERE atq.id = $1 AND atq.status = 'queued'
+),
+neighbor AS (
+    SELECT p.priority
+    FROM agent_task_queue p
+    JOIN target t ON p.agent_id = t.agent_id
+    WHERE p.status = 'queued'
+      AND p.id <> t.id
+      AND (-p.priority, p.created_at, p.id) > (-t.priority, t.created_at, t.id)
+    ORDER BY (-p.priority, p.created_at, p.id) ASC
+    LIMIT 1
+)
+UPDATE agent_task_queue atq
+SET priority = CASE
+        WHEN neighbor.priority IS NULL THEN atq.priority
+        WHEN neighbor.priority < atq.priority THEN neighbor.priority
+        ELSE GREATEST(atq.priority - 1, 0)
+    END
+FROM target
+LEFT JOIN neighbor ON TRUE
+WHERE atq.id = target.id
+RETURNING atq.id, atq.priority
+`
+
+type MoveQueuedTaskDownRow struct {
+	ID       pgtype.UUID `json:"id"`
+	Priority int32       `json:"priority"`
+}
+
+// Move one queued task one step toward the back of its agent's claim order,
+// mirroring MoveQueuedTaskUp: take the neighbor's level when it is lower,
+// otherwise drop the task's own level by one (clamped at 0). No neighbor
+// means the task is already last — unchanged, moved=false.
+func (q *Queries) MoveQueuedTaskDown(ctx context.Context, id pgtype.UUID) (MoveQueuedTaskDownRow, error) {
+	row := q.db.QueryRow(ctx, moveQueuedTaskDown, id)
+	var i MoveQueuedTaskDownRow
+	err := row.Scan(&i.ID, &i.Priority)
+	return i, err
+}
+
+const moveQueuedTaskUp = `-- name: MoveQueuedTaskUp :one
+WITH target AS (
+    SELECT atq.id, atq.agent_id, atq.priority, atq.created_at
+    FROM agent_task_queue atq
+    WHERE atq.id = $1 AND atq.status = 'queued'
+),
+neighbor AS (
+    SELECT p.priority
+    FROM agent_task_queue p
+    JOIN target t ON p.agent_id = t.agent_id
+    WHERE p.status = 'queued'
+      AND p.id <> t.id
+      AND (-p.priority, p.created_at, p.id) < (-t.priority, t.created_at, t.id)
+    ORDER BY (-p.priority, p.created_at, p.id) DESC
+    LIMIT 1
+)
+UPDATE agent_task_queue atq
+SET priority = CASE
+        WHEN neighbor.priority IS NULL THEN atq.priority
+        WHEN neighbor.priority > atq.priority THEN neighbor.priority
+        ELSE LEAST(atq.priority + 1, 4)
+    END
+FROM target
+LEFT JOIN neighbor ON TRUE
+WHERE atq.id = target.id
+RETURNING atq.id, atq.priority
+`
+
+type MoveQueuedTaskUpRow struct {
+	ID       pgtype.UUID `json:"id"`
+	Priority int32       `json:"priority"`
+}
+
+// Move one queued task one step toward the front of its agent's claim order —
+// priority DESC, created_at ASC, id ASC, the same order ClaimAgentTask uses.
+// The caller holds the agent's claim lock (GetAgentForClaimUpdate), which
+// serializes this against claims and other moves, so a plain
+// read-compute-update is race-free.
+//
+// If a queued peer sorts ahead of the task, the task takes that neighbor's
+// level when it is higher, or bumps its own level by one (clamped at 4) to
+// clear a same-level peer. The 0–4 priority scale is coarse, so a bump can
+// clear several lower levels at once. If nothing sorts ahead, the task is
+// already first: it comes back unchanged and the caller reports moved=false.
+func (q *Queries) MoveQueuedTaskUp(ctx context.Context, id pgtype.UUID) (MoveQueuedTaskUpRow, error) {
+	row := q.db.QueryRow(ctx, moveQueuedTaskUp, id)
+	var i MoveQueuedTaskUpRow
+	err := row.Scan(&i.ID, &i.Priority)
+	return i, err
+}
+
 const nextDeferredTaskFireAtForRuntimes = `-- name: NextDeferredTaskFireAtForRuntimes :one
 SELECT MIN(fire_at)::timestamptz
 FROM agent_task_queue t
