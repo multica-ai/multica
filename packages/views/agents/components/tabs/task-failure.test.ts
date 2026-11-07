@@ -10,6 +10,7 @@ import jaAgents from "../../../locales/ja/agents.json";
 import koAgents from "../../../locales/ko/agents.json";
 import zhHansAgents from "../../../locales/zh-Hans/agents.json";
 import zhHantAgents from "../../../locales/zh-Hant/agents.json";
+import viAgents from "../../../locales/vi/agents.json";
 
 import {
   FAILURE_REASON_I18N_KEYS,
@@ -29,6 +30,7 @@ const AGENT_RESOURCES = {
   ko: koAgents,
   fr: frAgents,
   es: esAgents,
+  vi: viAgents,
 } as const;
 
 function fixedT(locale: SupportedLocale): TFunction<"agents"> {
@@ -123,6 +125,7 @@ describe("cancelReasonLabel", () => {
       ko: "시스템에서 취소함",
       fr: "Annulée par le système",
       es: "Cancelada por el sistema",
+      vi: "Bị hệ thống hủy",
     };
 
     for (const locale of Object.keys(expected) as SupportedLocale[]) {

@@ -20,6 +20,9 @@ export const localeLabels: Record<Locale, string> = {
   // Same for Spanish: app UI is translated, the marketing dictionary is not
   // (yet), so the label only satisfies the Record type.
   es: "ES",
+  // Same for Vietnamese: no landing dictionary variant yet, so this label
+  // only satisfies the Record type.
+  vi: "VI",
 };
 
 export function toLandingDictionaryLocale(

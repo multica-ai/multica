@@ -1,0 +1,53 @@
+{
+  "header": {
+    "back": "Quay lại",
+    "log_out": "Đăng xuất"
+  },
+  "not_found": {
+    "title": "Không tìm thấy lời mời",
+    "description": "Lời mời này có thể đã hết hạn, bị thu hồi, hoặc không thuộc về tài khoản của bạn.",
+    "go_to_dashboard": "Đi tới bảng điều khiển"
+  },
+  "accepted": {
+    "title": "Bạn đã tham gia {{workspace_name}}!",
+    "redirecting": "Đang chuyển hướng tới không gian làm việc..."
+  },
+  "declined": {
+    "title": "Đã từ chối lời mời",
+    "description": "Bạn sẽ không được thêm vào không gian làm việc này.",
+    "go_to_dashboard": "Đi tới bảng điều khiển"
+  },
+  "main": {
+    "join_title": "Tham gia {{workspace_name}}",
+    "fallback_workspace_name": "không gian làm việc",
+    "invited_role_admin": "đã mời bạn tham gia với vai trò quản trị viên.",
+    "invited_role_member": "đã mời bạn tham gia với vai trò thành viên.",
+    "already_handled_accepted": "Lời mời này đã được chấp nhận.",
+    "already_handled_declined": "Lời mời này đã bị từ chối.",
+    "expired": "Lời mời này đã hết hạn.",
+    "decline": "Từ chối",
+    "declining": "Đang từ chối...",
+    "accept": "Chấp nhận & Tham gia",
+    "joining": "Đang tham gia..."
+  },
+  "errors": {
+    "accept_failed": "Không chấp nhận được lời mời",
+    "decline_failed": "Không từ chối được lời mời"
+  },
+  "batch": {
+    "log_out": "Đăng xuất",
+    "empty_title": "Không có lời mời đang chờ",
+    "empty_hint": "Tiếp tục để thiết lập không gian làm việc của riêng bạn.",
+    "empty_continue": "Tiếp tục thiết lập",
+    "title": "Bạn đã được mời",
+    "subtitle": "Chọn các không gian làm việc bạn muốn tham gia. Bạn luôn có thể xử lý phần còn lại sau từ thanh bên.",
+    "submit_skip": "Bỏ qua và thiết lập không gian làm việc của riêng tôi",
+    "submit_join_other": "Tham gia {{count}} không gian làm việc",
+    "joining": "Đang tham gia...",
+    "error_generic": "Không xử lý được các lời mời. Hãy thử lại.",
+    "row_workspace_fallback": "Không gian làm việc",
+    "row_inviter_fallback": "Ai đó",
+    "row_invited_admin": "{{inviter}} đã mời bạn làm quản trị viên",
+    "row_invited_member": "{{inviter}} đã mời bạn làm thành viên"
+  }
+}
