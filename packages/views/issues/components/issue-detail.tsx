@@ -84,6 +84,7 @@ import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { errorCode } from "@multica/core/api";
+import { useIssueDescriptionSave } from "@multica/core/issues";
 import { StatusIcon } from "./status-icon";
 import { PriorityIcon } from "./priority-icon";
 import { StatusPicker } from "./pickers/status-picker";
@@ -2449,13 +2450,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const descriptionEditingRef = useRef(false);
-  const descriptionSaveInFlightRef = useRef(false);
-  const descriptionSaveIssueIdRef = useRef(id);
-  const pendingDescriptionSaveRef = useRef<{
-    markdown: string;
-    baseMarkdown: string;
-    attachmentIds: string[];
-  } | null>(null);
+  const queueDescriptionSave = useIssueDescriptionSave(id, (err) => {
+    toast.error(
+      errorCode(err) === "revision_conflict"
+        ? t(($) => $.revision.conflict)
+        : err instanceof Error && err.message
+        ? err.message
+        : t(($) => $.detail.update_failed),
+    );
+  });
   // Keep the description editor mounted from the start. Unlike the empty
   // composer shells, a long rendered description cannot swap between
   // react-markdown and ProseMirror without small per-block height differences
@@ -2471,9 +2474,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   useEffect(() => {
     setTitleConflictDraft(null);
     titleBaseRef.current = undefined;
-    descriptionSaveInFlightRef.current = false;
-    descriptionSaveIssueIdRef.current = id;
-    pendingDescriptionSaveRef.current = null;
   }, [id]);
   const titleLazy = useLazyEditor({ editorRef: titleEditorRef, resetKey: id });
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
@@ -2825,53 +2825,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   if (!issue) {
     return <IssueNotFound showBackLink={!onDelete} leading={leadingAction} trailing={trailingActions} />;
   }
-
-  const persistDescriptionSave = (
-    draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] },
-  ) => {
-    descriptionSaveInFlightRef.current = true;
-    handleUpdateField(
-      {
-        description: draft.markdown,
-        description_base: draft.baseMarkdown,
-        attachment_ids:
-          draft.attachmentIds.length > 0 ? draft.attachmentIds : undefined,
-      },
-      {
-        onSuccess: (serverIssue) => {
-          if (descriptionSaveIssueIdRef.current !== id) return;
-          descriptionSaveInFlightRef.current = false;
-          const pending = pendingDescriptionSaveRef.current;
-          pendingDescriptionSaveRef.current = null;
-          if (pending) {
-            // Usually the accepted document is exactly what we submitted. If
-            // the server appended late channel media, keep the submitted body
-            // as the next editor baseline: the server can recognize that the
-            // only delta is media the editor never saw and preserve it again.
-            const nextBase = serverIssue.description === draft.markdown
-              ? serverIssue.description
-              : draft.markdown;
-            persistDescriptionSave({ ...pending, baseMarkdown: nextBase });
-          }
-        },
-        onError: () => {
-          if (descriptionSaveIssueIdRef.current !== id) return;
-          descriptionSaveInFlightRef.current = false;
-          pendingDescriptionSaveRef.current = null;
-        },
-      },
-    );
-  };
-
-  const queueDescriptionSave = (
-    draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] },
-  ) => {
-    if (descriptionSaveInFlightRef.current) {
-      pendingDescriptionSaveRef.current = draft;
-      return;
-    }
-    persistDescriptionSave(draft);
-  };
 
   const canAddProperty = OPTIONAL_PROP_KEYS.some(
     (key) => !visibleOptionalProps.has(key) && (key !== "stage" || issue.parent_issue_id != null),
