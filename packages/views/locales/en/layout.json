@@ -57,6 +57,11 @@
     "loading_workspace": "Loading workspace…",
     "loading_named_prefix": "Loading"
   },
+  "realtime": {
+    "disconnected": "Real-time updates disconnected",
+    "reconnecting": "Reconnecting real-time updates…",
+    "reconnect": "Reconnect"
+  },
   "window": {
     "go_back": "Go back",
     "go_forward": "Go forward",

@@ -72,6 +72,7 @@ vi.mock("@multica/views/layout", () => ({
   GlobalShortcuts: () => null,
   NavigationProgress: () => null,
   NewIssueButton: () => null,
+  RealtimeConnectionStatus: () => null,
   SearchButton: () => null,
   ShellRouteDataPrefetch: ({ children }: { children: ReactNode }) => <>{children}</>,
   SpacePanel: () => null,

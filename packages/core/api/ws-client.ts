@@ -3,6 +3,12 @@ import { type Logger, noopLogger } from "../logger";
 
 type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => void;
 
+export type WSConnectionState =
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "reconnecting";
+
 // Cap how much of an unparseable frame we put into the log. A malformed or
 // rogue server can stream arbitrarily large garbage, and the warn handler may
 // be a console / IPC bridge whose buffers we don't want to blow.
@@ -11,8 +17,7 @@ const UNPARSEABLE_LOG_MAX_CHARS = 200;
 // Reconnect backoff parameters. A flat delay causes a thundering herd when many
 // clients reconnect after a server restart; exponential backoff with jitter
 // spreads the reconnection attempts over time. The client retries indefinitely
-// (capped at RECONNECT_MAX_DELAY_MS) because the web/desktop UI does not yet
-// expose a visible disconnected state or manual retry action.
+// (capped at RECONNECT_MAX_DELAY_MS).
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
 
@@ -48,6 +53,8 @@ export class WSClient {
   // on each connect() so a fresh connection logs once again.
   private badFrameLogged = false;
   private onReconnectCallbacks = new Set<() => void>();
+  private connectionState: WSConnectionState = "disconnected";
+  private connectionStateListeners = new Set<() => void>();
   private anyHandlers = new Set<(msg: WSMessage) => void>();
   private logger: Logger;
 
@@ -81,6 +88,14 @@ export class WSClient {
   }
 
   connect() {
+    if (
+      this.connectionState === "connecting" ||
+      this.connectionState === "reconnecting" ||
+      this.connectionState === "connected"
+    ) {
+      return;
+    }
+
     this.badFrameLogged = false;
     const url = new URL(this.baseUrl);
     // Token is never sent as a URL query parameter — it would be logged by
@@ -96,12 +111,18 @@ export class WSClient {
     if (this.identity?.os)
       url.searchParams.set("client_os", this.identity.os);
 
-    this.ws = new WebSocket(url.toString());
+    const socket = new WebSocket(url.toString());
+    this.ws = socket;
+    this.setConnectionState(
+      this.reconnectAttempt > 0 || this.hasConnectedBefore
+        ? "reconnecting"
+        : "connecting",
+    );
 
-    this.ws.onopen = () => {
+    socket.onopen = () => {
       const token = this.getToken?.() ?? this.token;
       if (!this.cookieAuth && token) {
-        this.ws!.send(
+        socket.send(
           JSON.stringify({ type: "auth", payload: { token } }),
         );
         return;
@@ -110,7 +131,7 @@ export class WSClient {
       this.onAuthenticated();
     };
 
-    this.ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
       let msg: WSMessage;
       try {
         msg = JSON.parse(event.data as string) as WSMessage;
@@ -156,11 +177,14 @@ export class WSClient {
       }
     };
 
-    this.ws.onclose = () => {
+    socket.onclose = () => {
+      if (this.ws !== socket) return;
+      this.ws = null;
+      this.setConnectionState("disconnected");
       this.scheduleReconnect();
     };
 
-    this.ws.onerror = () => {
+    socket.onerror = () => {
       // Suppress — onclose handles reconnect; errors during StrictMode
       // double-fire are expected in dev and harmless.
     };
@@ -168,10 +192,11 @@ export class WSClient {
 
   /**
    * Schedule a reconnection attempt with exponential backoff and jitter.
-   * Retries indefinitely with a capped delay because the web/desktop UI
-   * does not yet expose a visible disconnected state or manual retry action.
+   * Retries indefinitely with a capped delay.
    */
   private scheduleReconnect() {
+    if (this.reconnectTimer) return;
+
     const base = Math.min(
       RECONNECT_BASE_DELAY_MS * 2 ** this.reconnectAttempt,
       RECONNECT_MAX_DELAY_MS,
@@ -187,11 +212,15 @@ export class WSClient {
     this.logger.warn(
       `ws: disconnected, reconnecting in ${delay}ms (attempt ${this.reconnectAttempt})`,
     );
-    this.reconnectTimer = setTimeout(() => this.connect(), delay);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
   }
 
   private onAuthenticated() {
     this.logger.info("connected");
+    this.setConnectionState("connected");
     const recoveredConnection = this.hasConnectedBefore || this.reconnectAttempt > 0;
     this.reconnectAttempt = 0;
     if (recoveredConnection) {
@@ -218,11 +247,36 @@ export class WSClient {
       this.ws.close();
       this.ws = null;
     }
+    this.setConnectionState("disconnected");
     this.hasConnectedBefore = false;
     this.reconnectAttempt = 0;
     this.handlers.clear();
     this.anyHandlers.clear();
     this.onReconnectCallbacks.clear();
+  }
+
+  reconnect() {
+    if (this.connectionState !== "disconnected") return;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.connect();
+  }
+
+  getConnectionState = () => this.connectionState;
+
+  subscribeToConnectionState = (listener: () => void) => {
+    this.connectionStateListeners.add(listener);
+    return () => {
+      this.connectionStateListeners.delete(listener);
+    };
+  };
+
+  private setConnectionState(state: WSConnectionState) {
+    if (this.connectionState === state) return;
+    this.connectionState = state;
+    for (const listener of this.connectionStateListeners) listener();
   }
 
   on(event: WSEventType, handler: EventHandler) {

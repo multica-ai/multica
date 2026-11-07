@@ -57,6 +57,11 @@
     "loading_workspace": "Chargement de l'espace de travail…",
     "loading_named_prefix": "Chargement"
   },
+  "realtime": {
+    "disconnected": "Mises à jour en temps réel déconnectées",
+    "reconnecting": "Reconnexion des mises à jour en temps réel…",
+    "reconnect": "Reconnecter"
+  },
   "window": {
     "go_back": "Précédent",
     "go_forward": "Suivant",

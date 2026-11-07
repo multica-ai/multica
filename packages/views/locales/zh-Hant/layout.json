@@ -57,6 +57,11 @@
     "loading_workspace": "正在載入工作區...",
     "loading_named_prefix": "正在載入"
   },
+  "realtime": {
+    "disconnected": "即時更新已中斷",
+    "reconnecting": "正在重新連接即時更新...",
+    "reconnect": "重新連接"
+  },
   "window": {
     "go_back": "後退",
     "go_forward": "前進",

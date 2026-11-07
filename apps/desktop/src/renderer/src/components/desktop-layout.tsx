@@ -18,6 +18,7 @@ import {
   GlobalShortcuts,
   NavigationProgress,
   NewIssueButton,
+  RealtimeConnectionStatus,
   SearchButton,
   ShellRouteDataPrefetch,
   SpacePanel,
@@ -141,6 +142,7 @@ function MainCanvas({
     >
       {railMounted && <SpacePanel />}
       <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+        {railMounted && <RealtimeConnectionStatus />}
         {children}
       </div>
       {showWorkspaceLoading && (

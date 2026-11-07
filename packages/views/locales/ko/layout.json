@@ -57,6 +57,11 @@
     "loading_workspace": "워크스페이스 로딩 중...",
     "loading_named_prefix": "로딩 중"
   },
+  "realtime": {
+    "disconnected": "실시간 업데이트 연결이 끊겼습니다",
+    "reconnecting": "실시간 업데이트에 다시 연결하는 중...",
+    "reconnect": "다시 연결"
+  },
   "window": {
     "go_back": "뒤로",
     "go_forward": "앞으로",

@@ -85,6 +85,7 @@ vi.mock("@multica/views/layout", () => ({
   GlobalShortcuts: () => <div data-testid="global-shortcuts" />,
   NavigationProgress: () => <div data-testid="navigation-progress" />,
   NewIssueButton: () => <div data-testid="title-bar-new-issue" />,
+  RealtimeConnectionStatus: () => null,
   SearchButton: () => <div data-testid="title-bar-search" />,
   ShellRouteDataPrefetch: ({ children }: { children: ReactNode }) => <>{children}</>,
   SpacePanel: () => <div data-testid="space-panel" />,
