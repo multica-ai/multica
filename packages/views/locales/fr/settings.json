@@ -742,6 +742,8 @@
   },
   "workspace": {
     "section_general": "Détails de l'espace de travail",
+    "mention_all_label": "Autoriser les mentions @tous",
+    "mention_all_description": "Si cette option est désactivée, @tous dans les commentaires et descriptions n'envoie plus de notification à chaque membre et disparaît des suggestions de mention.",
     "logo_label": "Logo de l'espace de travail",
     "change_logo_aria": "Changer le logo de l'espace de travail",
     "click_logo_hint": "Cliquez sur le logo pour envoyer une nouvelle image",

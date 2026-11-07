@@ -5,6 +5,7 @@ import { Copy } from "@multica/ui/icons";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Button } from "@multica/ui/components/ui/button";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Label } from "@multica/ui/components/ui/label";
 import {
@@ -44,6 +45,7 @@ import {
 } from "@multica/core/paths";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import type { Workspace } from "@multica/core/types";
+import { isMentionAllEnabled } from "@multica/core/workspace/mention-all";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
@@ -145,6 +147,7 @@ export function WorkspaceTab() {
   const [prefixDraft, setPrefixDraft] = useState<string | null>(null);
   const [prefixSaveStatus, setPrefixSaveStatus] =
     useState<SettingsSaveStatus>("idle");
+  const [mentionAllSaving, setMentionAllSaving] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
     title: string;
@@ -246,6 +249,23 @@ export function WorkspaceTab() {
           ? error.message
           : t(($) => $.workspace.toast_save_failed),
       );
+    }
+  };
+
+  const persistMentionAll = async (next: boolean) => {
+    if (!workspace || !canManageWorkspace || mentionAllSaving) return;
+    setMentionAllSaving(true);
+    try {
+      const updated = await api.updateWorkspace(workspace.id, {
+        settings: { ...workspace.settings, mention_all_enabled: next },
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t(($) => $.workspace.toast_save_failed));
+    } finally {
+      setMentionAllSaving(false);
     }
   };
 
@@ -474,6 +494,18 @@ export function WorkspaceTab() {
                 </Button>
               ) : null}
             </span>
+          </SettingsRow>
+          <SettingsRow
+            anchor="mention-all"
+            label={t(($) => $.workspace.mention_all_label)}
+            description={t(($) => $.workspace.mention_all_description)}
+          >
+            <Switch
+              aria-label={t(($) => $.workspace.mention_all_label)}
+              checked={isMentionAllEnabled(workspace)}
+              onCheckedChange={(value) => void persistMentionAll(value)}
+              disabled={!canManageWorkspace || mentionAllSaving}
+            />
           </SettingsRow>
         </SettingsCard>
       </SettingsSection>

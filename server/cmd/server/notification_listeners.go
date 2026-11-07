@@ -607,7 +607,22 @@ func notifyMentionedMembers(
 		}
 	}
 
-	// If @all is present, expand to all workspace members.
+	// If @all is present, expand to all workspace members unless explicitly disabled.
+	// A missing or unreadable setting keeps the historical behavior.
+	if hasAll {
+		workspace, err := queries.GetWorkspace(context.Background(), parseUUID(e.WorkspaceID))
+		if err != nil {
+			slog.Error("failed to load workspace for @all mention", "workspace_id", e.WorkspaceID, "error", err)
+		} else {
+			var settings map[string]any
+			if err := json.Unmarshal(workspace.Settings, &settings); err != nil {
+				slog.Warn("failed to decode workspace settings for @all mention", "workspace_id", e.WorkspaceID, "error", err)
+			}
+			if settings["mention_all_enabled"] == false {
+				hasAll = false
+			}
+		}
+	}
 	if hasAll {
 		members, err := queries.ListMembers(context.Background(), parseUUID(e.WorkspaceID))
 		if err != nil {
