@@ -556,6 +556,9 @@
       "char_count_other": "{{count}} 个字符"
     },
     "env": {
+      "bulk_notes_notice": "键名不变时会保留备注。如需重命名键并保留备注，请使用行编辑。",
+      "note_placeholder": "备注（可选）",
+      "note_aria": "{{key}} 的备注",
       "intro_readonly": "在智能体进程启动时注入。只有工作区所有者 / 管理员可以查看或编辑值；每次解锁和编辑都会写入工作区审计日志。",
       "empty_readonly": "尚未配置环境变量。",
       "intro_prefix": "在智能体进程启动时注入（例如 ",

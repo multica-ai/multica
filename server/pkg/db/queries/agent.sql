@@ -186,7 +186,7 @@ RETURNING *;
 -- of custom_env handling so all env mutations flow through here and the
 -- handler's audit-log + **** sentinel guard.
 UPDATE agent
-SET custom_env = $2, updated_at = now()
+SET custom_env = $2, custom_env_notes = $3, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

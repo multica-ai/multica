@@ -43,19 +43,24 @@ interface EnvEntry {
   key: string;
   value: string;
   visible: boolean;
+  note: string;
 }
 
-function envMapToEntries(env: Record<string, string>): EnvEntry[] {
+function envMapToEntries(
+  env: Record<string, string>,
+  notes: Record<string, string> = {},
+): EnvEntry[] {
   const entries = Object.entries(env).map(([key, value]) => ({
     id: nextEnvId++,
     key,
     value,
+    note: Object.hasOwn(notes, key) ? notes[key]! : "",
     visible: false,
   }));
 
   return entries.length > 0
     ? entries
-    : [{ id: nextEnvId++, key: "", value: "", visible: true }];
+    : [{ id: nextEnvId++, key: "", value: "", note: "", visible: true }];
 }
 
 // Bulk mode round-trips through the same parser the paste path uses, so the
@@ -77,6 +82,15 @@ function entriesToEnvMap(entries: EnvEntry[]): Record<string, string> {
     }
   }
   return map;
+}
+
+function entriesToNotes(entries: EnvEntry[]): Record<string, string> {
+  const notes = Object.create(null) as Record<string, string>;
+  for (const entry of entries) {
+    const key = entry.key.trim();
+    if (key && entry.note.trim()) notes[key] = entry.note;
+  }
+  return notes;
 }
 
 export function EnvTab({
@@ -102,6 +116,10 @@ export function EnvTab({
   // fetch implicitly on mount.
   const [revealed, setRevealed] = useState<EnvEntry[] | null>(null);
   const [originalMap, setOriginalMap] = useState<Record<string, string>>({});
+  const [notesSupported, setNotesSupported] = useState(false);
+  const [originalNotes, setOriginalNotes] = useState<Record<string, string>>(
+    {},
+  );
   const [revealing, setRevealing] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -112,15 +130,21 @@ export function EnvTab({
   // `bulkError`, which disables Save so the user can never ship the stale
   // state that is no longer on screen.
   const [bulkEditing, setBulkEditing] = useState(false);
+  const [bulkNotes, setBulkNotes] = useState<Record<string, string>>({});
   const [bulkText, setBulkText] = useState("");
   const [bulkError, setBulkError] = useState<EnvParseError | null>(null);
 
   const keyCount = agent.custom_env_key_count ?? 0;
 
   const currentEnvMap = revealed ? entriesToEnvMap(revealed) : originalMap;
+  const currentNotes = revealed ? entriesToNotes(revealed) : originalNotes;
   const dirty =
     revealed !== null &&
-    JSON.stringify(currentEnvMap) !== JSON.stringify(originalMap);
+    (JSON.stringify(currentEnvMap) !== JSON.stringify(originalMap) ||
+      Object.keys(currentNotes).length !== Object.keys(originalNotes).length ||
+      Object.keys(currentNotes).some(
+        (key) => currentNotes[key] !== originalNotes[key],
+      ));
 
   // Bulk text that does not parse never reaches `revealed`, so `dirty` alone
   // would report a clean tab while the textarea still holds the user's work —
@@ -137,7 +161,9 @@ export function EnvTab({
       const resp = await api.getAgentEnv(agent.id);
       const env = resp.custom_env ?? {};
       setOriginalMap(env);
-      setRevealed(envMapToEntries(env));
+      setNotesSupported(resp.custom_env_notes !== undefined);
+      setOriginalNotes(resp.custom_env_notes ?? {});
+      setRevealed(envMapToEntries(env, resp.custom_env_notes));
     } catch (err) {
       toast.error(
         err instanceof Error && err.message
@@ -152,7 +178,7 @@ export function EnvTab({
   const addEnvEntry = () => {
     setRevealed((prev) => [
       ...(prev ?? []),
-      { id: nextEnvId++, key: "", value: "", visible: true },
+      { id: nextEnvId++, key: "", value: "", note: "", visible: true },
     ]);
   };
 
@@ -161,13 +187,13 @@ export function EnvTab({
       const entries = (prev ?? []).filter((_, i) => i !== index);
       return entries.length > 0
         ? entries
-        : [{ id: nextEnvId++, key: "", value: "", visible: true }];
+        : [{ id: nextEnvId++, key: "", value: "", note: "", visible: true }];
     });
   };
 
   const updateEnvEntry = (
     index: number,
-    field: "key" | "value",
+    field: "key" | "value" | "note",
     val: string,
   ) => {
     setRevealed((prev) =>
@@ -212,6 +238,8 @@ export function EnvTab({
         id: pasteIndex === 0 && currentEntry ? currentEntry.id : nextEnvId++,
         key,
         value,
+        note:
+          currentEntries.find((entry) => entry.key.trim() === key)?.note ?? "",
         visible: false,
       }));
 
@@ -238,6 +266,7 @@ export function EnvTab({
       return;
     }
 
+    setBulkNotes(entriesToNotes(revealed ?? []));
     setBulkText(formatted.text);
     setBulkError(null);
     setBulkEditing(true);
@@ -264,9 +293,10 @@ export function EnvTab({
             id: nextEnvId++,
             key,
             value,
+            note: Object.hasOwn(bulkNotes, key) ? bulkNotes[key]! : "",
             visible: false,
           }))
-        : [{ id: nextEnvId++, key: "", value: "", visible: true }],
+        : [{ id: nextEnvId++, key: "", value: "", note: "", visible: true }],
     );
   };
 
@@ -291,9 +321,11 @@ export function EnvTab({
     try {
       const resp = await api.updateAgentEnv(agent.id, {
         custom_env: currentEnvMap,
+        ...(notesSupported ? { custom_env_notes: currentNotes } : {}),
       });
       const env = resp.custom_env ?? {};
-      const savedEntries = envMapToEntries(env);
+      const savedEntries = envMapToEntries(env, resp.custom_env_notes);
+      setOriginalNotes(resp.custom_env_notes ?? {});
       setOriginalMap(env);
       setRevealed(savedEntries);
       // Keep the textarea in step with what the server accepted rather than
@@ -301,6 +333,7 @@ export function EnvTab({
       // back something bulk text cannot express, fall back to rows — the data
       // is already saved, so the only wrong move would be showing lossy text.
       if (bulkEditing) {
+        setBulkNotes(entriesToNotes(savedEntries));
         const formatted = entriesToBulkText(savedEntries);
         if (formatted.ok) {
           setBulkText(formatted.text);
@@ -413,6 +446,11 @@ export function EnvTab({
 
       {bulkEditing ? (
         <div className="space-y-2">
+          {notesSupported && (
+            <p className="text-caption text-muted-foreground">
+              {t(($) => $.tab_body.env.bulk_notes_notice)}
+            </p>
+          )}
           <Textarea
             value={bulkText}
             onChange={(e) => handleBulkTextChange(e.target.value)}
@@ -435,61 +473,76 @@ export function EnvTab({
       ) : revealed.length > 0 ? (
         <div className="space-y-2">
           {revealed.map((entry, index) => (
-            <div key={entry.id} className="flex items-center gap-2">
-              <Input
-                value={entry.key}
-                onChange={(e) => updateEnvEntry(index, "key", e.target.value)}
-                onPaste={(event) => handleEnvPaste(index, event)}
-                placeholder={t(($) => $.tab_body.env.key_placeholder)}
-                className="w-[40%] font-mono text-caption"
-              />
-              <div className="relative flex-1">
+            <div key={entry.id} className="space-y-1.5">
+              <div className="flex items-center gap-2">
                 <Input
-                  type={entry.visible ? "text" : "password"}
-                  value={entry.value}
-                  onChange={(e) =>
-                    updateEnvEntry(index, "value", e.target.value)
-                  }
-                  // Deliberately no paste interception here: a value is
-                  // arbitrary text, and `foo=bar` pasted as a value is a value,
-                  // not an assignment. Bulk edit is the entry point for files.
-                  placeholder={t(($) => $.tab_body.env.value_placeholder)}
-                  className="pr-8 font-mono text-caption"
+                  value={entry.key}
+                  onChange={(e) => updateEnvEntry(index, "key", e.target.value)}
+                  onPaste={(event) => handleEnvPaste(index, event)}
+                  placeholder={t(($) => $.tab_body.env.key_placeholder)}
+                  className="w-[40%] font-mono text-caption"
                 />
-                <TooltipHint
-                  label={
-                    entry.visible
-                      ? t(($) => $.tab_body.env.hide_value_aria)
-                      : t(($) => $.tab_body.env.show_value_aria)
-                  }
-                >
-                  <button
-                    type="button"
-                    onClick={() => toggleEnvVisibility(index)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    aria-label={
+                <div className="relative flex-1">
+                  <Input
+                    type={entry.visible ? "text" : "password"}
+                    value={entry.value}
+                    onChange={(e) =>
+                      updateEnvEntry(index, "value", e.target.value)
+                    }
+                    // Deliberately no paste interception here: a value is
+                    // arbitrary text, and `foo=bar` pasted as a value is a value,
+                    // not an assignment. Bulk edit is the entry point for files.
+                    placeholder={t(($) => $.tab_body.env.value_placeholder)}
+                    className="pr-8 font-mono text-caption"
+                  />
+                  <TooltipHint
+                    label={
                       entry.visible
                         ? t(($) => $.tab_body.env.hide_value_aria)
                         : t(($) => $.tab_body.env.show_value_aria)
                     }
                   >
-                    {entry.visible ? (
-                      <EyeOff className="h-3.5 w-3.5" />
-                    ) : (
-                      <Eye className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                </TooltipHint>
+                    <button
+                      type="button"
+                      onClick={() => toggleEnvVisibility(index)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      aria-label={
+                        entry.visible
+                          ? t(($) => $.tab_body.env.hide_value_aria)
+                          : t(($) => $.tab_body.env.show_value_aria)
+                      }
+                    >
+                      {entry.visible ? (
+                        <EyeOff className="h-3.5 w-3.5" />
+                      ) : (
+                        <Eye className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </TooltipHint>
+                </div>
+                <IconButton
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => removeEnvEntry(index)}
+                  className="text-muted-foreground hover:text-destructive"
+                  label={t(($) => $.tab_body.env.remove_aria)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </IconButton>
               </div>
-              <IconButton
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => removeEnvEntry(index)}
-                className="text-muted-foreground hover:text-destructive"
-                label={t(($) => $.tab_body.env.remove_aria)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </IconButton>
+              {notesSupported && (
+                <Input
+                  value={entry.note}
+                  onChange={(e) =>
+                    updateEnvEntry(index, "note", e.target.value)
+                  }
+                  placeholder={t(($) => $.tab_body.env.note_placeholder)}
+                  aria-label={t(($) => $.tab_body.env.note_aria, {
+                    key: entry.key,
+                  })}
+                  className="text-caption"
+                />
+              )}
             </div>
           ))}
         </div>

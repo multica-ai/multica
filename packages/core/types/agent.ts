@@ -854,6 +854,8 @@ export interface UpdateAgentRequest {
 export interface AgentEnvResponse {
   agent_id: string;
   custom_env: Record<string, string>;
+  /** Optional on older servers; only exposed through the human-only env API. */
+  custom_env_notes?: Record<string, string>;
 }
 
 /**
@@ -865,6 +867,8 @@ export interface AgentEnvResponse {
  */
 export interface UpdateAgentEnvRequest {
   custom_env: Record<string, string>;
+  /** Omit to preserve notes for retained keys; an explicit map replaces notes. */
+  custom_env_notes?: Record<string, string>;
 }
 
 // Skills

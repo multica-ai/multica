@@ -556,6 +556,9 @@
       "char_count_other": "{{count}} 個字元"
     },
     "env": {
+      "bulk_notes_notice": "鍵名不變時會保留備註。如需重新命名鍵並保留備註，請使用列編輯。",
+      "note_placeholder": "備註（選填）",
+      "note_aria": "{{key}} 的備註",
       "intro_readonly": "在 AI 代理程序啟動時注入。只有工作區所有者 / 管理員可以檢視或編輯值；每次解鎖和編輯都會寫入工作區審計日誌。",
       "empty_readonly": "尚未配置環境變數。",
       "intro_prefix": "在 AI 代理程序啟動時注入（例如 ",

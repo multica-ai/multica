@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -40,15 +41,17 @@ const (
 // refactor that adds a field to AgentResponse cannot accidentally
 // pull env values along.
 type AgentEnvResponse struct {
-	AgentID   string            `json:"agent_id"`
-	CustomEnv map[string]string `json:"custom_env"`
+	AgentID        string            `json:"agent_id"`
+	CustomEnv      map[string]string `json:"custom_env"`
+	CustomEnvNotes map[string]string `json:"custom_env_notes"`
 }
 
 // UpdateAgentEnvRequest is the wire shape for `PUT
-// /api/agents/{id}/env`. Only `custom_env` is accepted — fewer
-// surfaces, less to misuse.
+// /api/agents/{id}/env`. Omitted notes preserve metadata for surviving keys;
+// an explicit map replaces notes. Notes never enter the process environment.
 type UpdateAgentEnvRequest struct {
-	CustomEnv map[string]string `json:"custom_env"`
+	CustomEnv      map[string]string `json:"custom_env"`
+	CustomEnvNotes map[string]string `json:"custom_env_notes"`
 }
 
 // authorizeAgentEnv enforces the per-request auth contract for the env
@@ -169,8 +172,9 @@ func (h *Handler) GetAgentEnv(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, AgentEnvResponse{
-		AgentID:   uuidToString(agent.ID),
-		CustomEnv: customEnv,
+		AgentID:        uuidToString(agent.ID),
+		CustomEnv:      customEnv,
+		CustomEnvNotes: unmarshalCustomEnvNotes(agent),
 	})
 }
 
@@ -204,6 +208,8 @@ func (h *Handler) UpdateAgentEnv(w http.ResponseWriter, r *http.Request) {
 
 	existing := unmarshalCustomEnv(agent)
 	merged, audit := mergeAgentEnv(existing, req.CustomEnv)
+	existingNotes := unmarshalCustomEnvNotes(agent)
+	notes := mergeAgentEnvNotes(existingNotes, req.CustomEnvNotes, merged)
 	if len(merged) > 0 && h.rejectQoderOverrides(w, r, agent, qoderOverrides{customEnv: len(merged)}) {
 		return
 	}
@@ -211,6 +217,12 @@ func (h *Handler) UpdateAgentEnv(w http.ResponseWriter, r *http.Request) {
 	envBytes, err := json.Marshal(merged)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to encode env")
+		return
+	}
+
+	noteBytes, err := json.Marshal(notes)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode env notes")
 		return
 	}
 
@@ -225,8 +237,9 @@ func (h *Handler) UpdateAgentEnv(w http.ResponseWriter, r *http.Request) {
 	qtx := h.Queries.WithTx(tx)
 
 	updated, err := qtx.UpdateAgentCustomEnv(r.Context(), db.UpdateAgentCustomEnvParams{
-		ID:        agent.ID,
-		CustomEnv: envBytes,
+		ID:             agent.ID,
+		CustomEnv:      envBytes,
+		CustomEnvNotes: noteBytes,
 	})
 	if err != nil {
 		slog.Warn("update agent custom_env failed",
@@ -236,12 +249,13 @@ func (h *Handler) UpdateAgentEnv(w http.ResponseWriter, r *http.Request) {
 	}
 
 	auditDetails := map[string]any{
-		"agent_id":       uuidToString(agent.ID),
-		"agent_name":     agent.Name,
-		"added_keys":     audit.added,
-		"removed_keys":   audit.removed,
-		"changed_keys":   audit.changed,
-		"preserved_keys": audit.preserved,
+		"agent_id":          uuidToString(agent.ID),
+		"agent_name":        agent.Name,
+		"added_keys":        audit.added,
+		"removed_keys":      audit.removed,
+		"changed_keys":      audit.changed,
+		"preserved_keys":    audit.preserved,
+		"note_changed_keys": changedEnvNoteKeys(existingNotes, notes),
 	}
 	details, _ := json.Marshal(auditDetails)
 	if _, err := qtx.CreateActivity(r.Context(), db.CreateActivityParams{
@@ -281,8 +295,9 @@ func (h *Handler) UpdateAgentEnv(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventAgentStatus, workspaceID, "member", uuidToString(member.UserID), map[string]any{"agent": broadcastAgentResponse(resp)})
 
 	writeJSON(w, http.StatusOK, AgentEnvResponse{
-		AgentID:   uuidToString(updated.ID),
-		CustomEnv: merged,
+		AgentID:        uuidToString(updated.ID),
+		CustomEnv:      merged,
+		CustomEnvNotes: notes,
 	})
 }
 
@@ -376,4 +391,42 @@ func sortedKeys(m map[string]string) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// mergeAgentEnvNotes supports older key/value-only clients without letting
+// deleted keys leave orphan notes. An explicit empty map clears all notes.
+func mergeAgentEnvNotes(existing, request, env map[string]string) map[string]string {
+	if request == nil {
+		request = existing
+	}
+	notes := make(map[string]string)
+	for key, note := range request {
+		if _, ok := env[key]; ok && strings.TrimSpace(note) != "" {
+			notes[key] = note
+		}
+	}
+	return notes
+}
+
+func unmarshalCustomEnvNotes(agent db.Agent) map[string]string {
+	notes := map[string]string{}
+	if err := json.Unmarshal(agent.CustomEnvNotes, &notes); err != nil {
+		slog.Warn("failed to unmarshal agent env notes", "agent_id", uuidToString(agent.ID))
+	}
+	return mergeAgentEnvNotes(nil, notes, unmarshalCustomEnv(agent))
+}
+
+func changedEnvNoteKeys(before, after map[string]string) []string {
+	keys := map[string]string{}
+	for key, note := range before {
+		if after[key] != note {
+			keys[key] = ""
+		}
+	}
+	for key, note := range after {
+		if before[key] != note {
+			keys[key] = ""
+		}
+	}
+	return sortedKeys(keys)
 }

@@ -574,6 +574,9 @@
       "char_count_other": "{{count}} characters"
     },
     "env": {
+      "bulk_notes_notice": "Notes are kept for unchanged keys. Use rows to rename a key with its note.",
+      "note_placeholder": "Note (optional)",
+      "note_aria": "Note for {{key}}",
       "intro_readonly": "Injected into the agent process at launch. Only workspace owners and admins can read or edit values; every reveal and edit is recorded in the workspace audit log.",
       "empty_readonly": "No environment variables configured.",
       "intro_prefix": "Injected into the agent process at launch (e.g. ",
