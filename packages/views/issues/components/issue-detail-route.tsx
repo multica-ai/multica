@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useNavigation } from "../../navigation";
+import { currentPath, useNavigation } from "../../navigation";
 import { IssueDetail, IssueDetailSkeleton, IssueNotFound, IssueLoadError } from "./issue-detail";
 import { IssuePeekHost } from "./issue-peek";
 
@@ -32,7 +32,9 @@ export function useCanonicalIssueUrl(
 ) {
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
-  const canonicalHref = identifier ? `${paths.issueDetail(identifier)}${hash}` : null;
+  const canonicalHref = identifier
+    ? currentPath({ pathname: paths.issueDetail(identifier), searchParams: navigation.searchParams, hash })
+    : null;
   // `useWorkspacePaths()` and the navigation adapter are both rebuilt on
   // render, so this ref — not the dependency array — is what guarantees the
   // replace runs once per target instead of on every commit.

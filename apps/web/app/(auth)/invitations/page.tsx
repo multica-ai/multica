@@ -3,22 +3,17 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@multica/core/auth";
-import { paths } from "@multica/core/paths";
 import { InvitationsPage } from "@multica/views/invitations";
+import { returnToCurrentPage } from "@/features/auth/return-to";
 
 export default function InvitationsRoutePage() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
 
-  // Unauthenticated users have nowhere meaningful to land here — kick them
-  // through login and bring them back. The login page will eventually run
-  // its own listMyInvitations() check and route them here again.
   useEffect(() => {
     if (!isLoading && !user) {
-      router.replace(
-        `${paths.login()}?next=${encodeURIComponent(paths.invitations())}`,
-      );
+      router.replace(returnToCurrentPage());
     }
   }, [isLoading, user, router]);
 
