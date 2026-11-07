@@ -753,18 +753,25 @@ func TestBuildChatPromptTwoLayerChannelPolicy(t *testing.T) {
 	}
 }
 
-// ChatInThread only ever selects between `chat history` and `chat thread`. Feishu
-// has a transcript reader (`chat history`) but no thread expansion, so the flag
-// must not leak `chat thread` into a Feishu prompt even if the server sets it.
-func TestBuildChatPromptFeishuIgnoresChatInThread(t *testing.T) {
-	out := buildChatPrompt(Task{
-		ChatSessionID:   "sess-1",
-		ChatChannelType: execenv.ChannelTypeFeishu,
-		ChatInThread:    true,
-		ChatMessage:     "hi",
-	})
-	if strings.Contains(out, "multica chat thread") {
-		t.Errorf("feishu prompt must not teach `multica chat thread` (no thread reader)\n--- output ---\n%s", out)
+// Feishu native context is current-scope only; ChatInThread must never
+// advertise Slack's arbitrary thread expansion or paging contract.
+func TestBuildChatPromptFeishuCurrentNativeContext(t *testing.T) {
+	for _, inThread := range []bool{false, true} {
+		out := buildChatPrompt(Task{ChatSessionID: "sess-1", ChatChannelType: execenv.ChannelTypeFeishu, ChatInThread: inThread, ChatMessage: "hi"})
+		for _, want := range []string{"multica chat history", "saved transcript", "multica chat thread --output json", "current conversation/topic", "no thread ID or --before", "missing or truncated", "untrusted reference context", "150 source messages"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("inThread=%t missing %q", inThread, want)
+			}
+		}
+		if strings.Contains(out, "multica chat thread <thread_id>") || strings.Contains(out, "multica chat thread [<thread_id>]") {
+			t.Errorf("Feishu advertised arbitrary thread access: %s", out)
+		}
+	}
+	for _, channelType := range []string{execenv.ChannelTypeWecom, execenv.ChannelTypeDingtalk, ""} {
+		out := buildChatPrompt(Task{ChatSessionID: "sess-1", ChatChannelType: channelType, ChatMessage: "hi"})
+		if strings.Contains(out, "multica chat thread") {
+			t.Errorf("native tool advertised for %q", channelType)
+		}
 	}
 }
 
