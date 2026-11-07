@@ -478,6 +478,14 @@ substitutes a downloaded or globally installed CLI. Rebuild Go changes with
 `pnpm --filter @multica/desktop bundle-cli -- --require-build`. The binary in
 `apps/desktop/resources/bin/` is replaced atomically after compilation completes.
 
+Starting or restarting development Electron stops the previous `desktop-runtime`
+daemon and its running work before publishing the new runtime registration.
+It uses the previously registered CLI's `daemon stop --force` and waits for
+confirmed process cleanup, not for tasks to finish. Interrupted conversations are not automatically
+resumed; their initiators decide what to do next. A failed stop leaves the prior
+registration in place and reports the startup error. Verification-mode launches
+keep their existing isolated runtime lifecycle.
+
 Desktop publishes its absolute CLI, Electron and conversation-host entry paths
 in `~/.multica/desktop-runtime/launch.json`. This also works in development,
 where those files do not live in an installed `.app` bundle. Daemon discovery
@@ -510,11 +518,11 @@ sessions after a sidecar restart.
 The shared Desktop profile is `desktop-runtime`; credentials and conversation
 data live in `~/.multica/profiles/desktop-runtime/`. Desktop login supplies its
 CLI token. Switching API origins discards that profile's cached credential
-before authenticating against the new backend. A previous Desktop runtime is
-replaced only when its tasks and local conversations are idle; otherwise the
-new Desktop waits or asks to retry. Superseded windows cannot manage the new
-runtime. Legacy Desktop profiles are preserved, not automatically copied while
-an older process may still be writing them.
+before authenticating against the new backend. A packaged Desktop replaces the
+previous runtime only when its tasks and local conversations are idle; otherwise
+it waits or asks to retry. Development startup interrupts work as described above.
+Superseded windows cannot manage the new runtime. Legacy Desktop profiles are
+preserved, not automatically copied while an older process may still be writing them.
 
 Desktop requires its own bundled CLI in development and packaged builds. A
 missing component is reported instead of downloading or borrowing an unrelated

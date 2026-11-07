@@ -6,7 +6,9 @@ import { join } from "node:path";
 import { RuntimeInstanceRegistry, readPrivateRegistration, runtimeRecordSchema, writePrivateRegistration, type RuntimeRecord, type RuntimeSource } from "./runtime-instance";
 
 const version = vi.hoisted(() => vi.fn(async () => ({ version: "0.7.0", commit: "bcdfa010e" })));
+const stop = vi.hoisted(() => vi.fn((_file: string, _args: string[], _options: unknown, done: (error: Error | null) => void) => done(null)));
 vi.mock("./terminal-cli-version", () => ({ readTerminalCliVersion: version }));
+vi.mock("node:child_process", () => ({ execFile: stop }));
 let home: string;
 let source: RuntimeSource;
 let registry: RuntimeInstanceRegistry;
@@ -26,6 +28,7 @@ async function publish(r: RuntimeRecord) {
   await writeFile(join(registry.directory, "local-api.token"), token + "\n", { mode: 0o600 });
 }
 beforeEach(async () => {
+  stop.mockReset().mockImplementation((_file, _args, _options, done) => done(null));
   version.mockResolvedValue({ version: "0.7.0", commit: "bcdfa010e" });
   home = await mkdtemp(join(tmpdir(), "multica-shared-runtime-"));
   source = { kind: "development", appPath: join(home, "worktree-a"), cliPath: join(home, "worktree-a/cli"), electronPath: process.execPath, claudeEntryPath: join(home, "worktree-a/claude-host.js") };
@@ -35,6 +38,54 @@ beforeEach(async () => {
 afterEach(async () => { await rm(home, { recursive: true, force: true }); });
 
 describe("single Desktop runtime registration", () => {
+  it("stops the previous runtime before a development startup takes ownership", async () => {
+    await publish(await runtime());
+    const previous = await registry.launch();
+    const next = new RuntimeInstanceRegistry(home, { ...source, appPath: join(home, "worktree-b"), cliPath: join(home, "worktree-b/cli") });
+    stop.mockImplementationOnce(() => {});
+
+    const registering = next.register(apiUrl, { interruptRunning: true });
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
+    expect(stop).toHaveBeenCalledWith(source.cliPath,
+      ["daemon", "stop", "--force", "--profile", "desktop-runtime"],
+      expect.objectContaining({ timeout: 55_000, windowsHide: true,
+        env: expect.objectContaining({ MULTICA_DESKTOP_OWNER_ID: previous.ownerId }) }), expect.any(Function));
+    expect(await next.launch()).toEqual(previous);
+    if (process.platform !== "win32") expect(await readlink(next.cliLink)).toBe(source.cliPath);
+
+    stop.mock.calls[0]![3](null);
+    await expect(registering).resolves.toMatchObject({ ownerId: next.ownerId, appPath: join(home, "worktree-b") });
+    await next.refresh(apiUrl);
+    expect(stop).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the previous registration when runtime cleanup cannot be confirmed", async () => {
+    await publish(await runtime());
+    const previous = await registry.launch();
+    const next = new RuntimeInstanceRegistry(home, { ...source, cliPath: join(home, "worktree-b/cli") });
+    stop.mockImplementationOnce((_file, _args, _options, done) => done(new Error("task cleanup could not be confirmed")));
+
+    await expect(next.register(apiUrl, { interruptRunning: true })).rejects.toThrow("task cleanup could not be confirmed");
+    expect(await next.launch()).toEqual(previous);
+    if (process.platform !== "win32") expect(await readlink(next.cliLink)).toBe(source.cliPath);
+  });
+
+  it("allows the first development startup without an existing runtime or profile", async () => {
+    const fresh = new RuntimeInstanceRegistry(join(home, "fresh-home"), source);
+    await expect(fresh.register(apiUrl, { interruptRunning: true })).resolves.toMatchObject({ ownerId: fresh.ownerId });
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it("validates the new build and API origin before interrupting any work", async () => {
+    await publish(await runtime());
+    const next = new RuntimeInstanceRegistry(home, source);
+    version.mockResolvedValueOnce({ version: "dev", commit: "" });
+    await expect(next.register(apiUrl, { interruptRunning: true })).rejects.toThrow("build cannot be verified");
+    await expect(next.register("https://user:password@example.test", { interruptRunning: true })).rejects.toThrow("API origin");
+    expect(stop).not.toHaveBeenCalled();
+    expect((await registry.launch()).ownerId).toBe(registry.ownerId);
+  });
+
   it("records the Claude adapter entry the daemon runs", async () => {
     expect(await registry.launch()).toMatchObject({ claudeEntryPath: join(home, "worktree-a/claude-host.js") });
   });
@@ -43,6 +94,7 @@ describe("single Desktop runtime registration", () => {
     const otherSource = { ...source, kind: "packaged" as const, appPath: join(home, "Multica.app"), cliPath: join(home, "Multica.app/cli") };
     const next = new RuntimeInstanceRegistry(home, otherSource);
     await next.register(apiUrl);
+    expect(stop).not.toHaveBeenCalled();
     expect(next.directory).toBe(registry.directory);
     expect(await next.launch()).toMatchObject({ instanceId: "desktop", ownerId: next.ownerId, kind: "packaged", cliPath: otherSource.cliPath, profile: "desktop-runtime" });
     if (process.platform !== "win32") expect(await readlink(next.cliLink)).toBe(otherSource.cliPath);

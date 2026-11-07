@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
 import { chmod, lstat, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { z } from "zod";
@@ -108,7 +109,7 @@ export class RuntimeInstanceRegistry {
     try { await this.assertOwner(apiUrl); return true; } catch { return false; }
   }
 
-  async register(apiUrl: string): Promise<RuntimeLaunch> {
+  async register(apiUrl: string, { interruptRunning = false }: { interruptRunning?: boolean } = {}): Promise<RuntimeLaunch> {
     const version = await readTerminalCliVersion(this.source.cliPath);
     if (!version?.commit) throw new Error("The bundled CLI build cannot be verified. Rebuild this Desktop instance.");
     const record: RuntimeLaunch = {
@@ -117,6 +118,21 @@ export class RuntimeInstanceRegistry {
       cliPath: resolve(this.source.cliPath), cliVersion: version.version, cliCommit: version.commit,
       electronPath: resolve(this.source.electronPath), claudeEntryPath: resolve(this.source.claudeEntryPath), protocolVersion: 2,
     };
+    if (interruptRunning) {
+      const running = await this.runtime().catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (running) {
+        const previous = await this.launch();
+        // The registered CLI must confirm cleanup before its ownership changes.
+        await new Promise<void>((done, reject) => {
+          execFile(previous.cliPath, ["daemon", "stop", "--force", "--profile", DESKTOP_RUNTIME_PROFILE],
+            { timeout: 55_000, windowsHide: true, env: { ...process.env, MULTICA_DESKTOP_OWNER_ID: previous.ownerId } },
+            (error) => error ? reject(error) : done());
+        });
+      }
+    }
     await writePrivateRegistration(join(this.directory, "launch.json"), record);
     // The terminal command follows the latest registration, including another worktree.
     if (process.platform !== "win32") {

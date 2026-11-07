@@ -689,7 +689,9 @@ if (!gotTheLock) {
     if (runtimeConfigResult.ok) {
       const localApiUrl = runtimeConfigResult.config.apiUrl;
       // A missing local component must not prevent login and Settings from opening.
-      await desktopRuntimeRegistry().register(localApiUrl).catch((error: unknown) => {
+      await desktopRuntimeRegistry().register(localApiUrl, {
+        interruptRunning: is.dev && !verificationDev?.enabled,
+      }).catch((error: unknown) => {
         console.error("[runtime-instance] Could not register this Desktop runtime", error);
       });
       const settingsHost = createDesktopSettingsHost(() => mainWindow, () => settingsUserId, () => authSessionGeneration, async ({ method, path, body }, signal, scope) => {
