@@ -75,7 +75,7 @@ interface Problem {
 | `env_status` | environmentId | 环境记录，以及 application、daemon、backend 的当前可达性和身份 |
 | `env_log_read` | environmentId、日志名、offset、limit | 文本页、`truncated` |
 | `data_snapshot_read` | dataSnapshotId、section、cursor、limit | 清单页 |
-| `fixture_control` | environmentId、conversationId、action、text、expectedRequestId | fake provider 的状态或操作结果 |
+| `fixture_control` | environmentId、conversationId、action、text、expectedRequestId、tool | fake provider 的状态或操作结果 |
 | `state_read` | environmentId、source、subjectRef、beforeTurnIndex | 来源原始 payload |
 | `events_read` | environmentId、source、subjectRef、after | 来源原始事件页 |
 | `page_windows` | environmentId | 窗口 ID（CDP targetId）、标题、URL；Desktop 环境另含 `computerUse`（appId、windowId），无法唯一对应时为 null |
@@ -85,6 +85,17 @@ interface Problem {
 | `page_screenshot` | environmentId、windowId、fullPage | PNG 图片及 colorScheme、capturedAt |
 
 ## 6. 数据语义
+
+### Fake provider 工具事件
+
+`fixture_control.action` 支持 inspect、chunk、release、fail、tool_start、tool_result；除 inspect 外都要求当前请求的 expectedRequestId。
+
+| action | tool | 行为 |
+| --- | --- | --- |
+| tool_start | `{ id, name, input }`；input 为 JSON 对象 | 经 runner/normalizer 生成 item.started；不执行工具 |
+| tool_result | `{ id, output, isError? }`；output 为文本或 JSON | 为同一 ID 生成 item.completed；isError 为 true 时 status 为 failed |
+
+工具 ID 在一个请求内唯一，结果只接受尚未完成的调用。工具动作不接受 text，也不结束轮次；release/fail 仍负责结束轮次。其余动作不接受 tool。现有请求身份、测试来源和生产构建边界保持不变。用法见[模拟工具调用](../../packages/verification/README.md#模拟工具调用)。
 
 ### 6.1 状态和事件
 

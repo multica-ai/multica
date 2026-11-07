@@ -21,6 +21,11 @@ import type { Environments } from "../setup/environments.js";
 import { contentManifest } from "./manifest.js";
 import { exportWorkspace, workspaceContentSchema } from "./workspace.js";
 import { exportSQLite } from "./sqlite-source.js";
+import {
+  fixtureControlInput,
+  type FixtureAction,
+  type FixtureTool,
+} from "./fixture-control.js";
 
 const turnSchema = z
   .object({
@@ -742,17 +747,14 @@ export class DataService {
   async control(
     environmentId: string,
     conversationId: string,
-    action: "inspect" | "release" | "chunk" | "fail",
+    action: FixtureAction,
     text = "",
     expectedRequestId?: string,
+    tool?: FixtureTool,
   ): Promise<unknown> {
-    if (action !== "inspect" && !expectedRequestId)
-      throw new VerificationError(
-        problem(
-          "invalidInput",
-          "Mutating fixture control requires the original expectedRequestId",
-        ),
-      );
+    const input = fixtureControlInput.parse({
+      environmentId, conversationId, action, text, expectedRequestId, tool,
+    });
     const ref = await this.environments.connection(environmentId, "daemon");
     this.environments.bindings.assertTest(ref);
     return action === "inspect"
@@ -764,7 +766,10 @@ export class DataService {
           ref,
           "/local/v2/verification/fixture",
           "POST",
-          { conversationId, action, text, expectedRequestId },
+          {
+            conversationId, action, text: input.text, expectedRequestId,
+            tool: input.tool,
+          },
         );
   }
 }

@@ -211,6 +211,88 @@ func TestVerificationDevRoutesRequireExplicitLaunch(t *testing.T) {
 	}
 }
 
+func TestVerificationToolCallsUseNormalEvents(t *testing.T) {
+	verificationEnv(t)
+	for _, provider := range []string{"claude", "codex"} {
+		t.Run(provider, func(t *testing.T) {
+			server, svc := newV2Server(t)
+			headers := v2Headers("user-1")
+			base := "/local/v2/sessions/tools"
+			scope, err := svc.Store().EnsureScope(context.Background(), store.Scope{APIOrigin: "https://api.multica.ai", UserID: "user-1", WorkspaceID: "ws-1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := svc.Store().CreateConversation(context.Background(), store.NewConversation{ID: "tools", ScopeID: scope, Provider: provider, CreatedAt: time.Now()}); err != nil {
+				t.Fatal(err)
+			}
+			if status, body := v2Do(t, server, http.MethodPost, base+"/commands", map[string]any{"type": "send", "request_id": "request-tools", "text": "Use tools"}, headers); status != http.StatusOK && status != http.StatusAccepted {
+				t.Fatalf("send: %d %v", status, body)
+			}
+			control := func(action, requestID string, tool map[string]any, want int) {
+				t.Helper()
+				status, body := v2Do(t, server, http.MethodPost, "/local/v2/verification/fixture", map[string]any{"conversationId": "tools", "action": action, "expectedRequestId": requestID, "tool": tool}, headers)
+				if status != want {
+					t.Fatalf("%s: %d %v, want %d", action, status, body, want)
+				}
+			}
+			start := map[string]any{"id": "search", "name": "mcp__example__search", "input": map[string]any{"query": "mock"}}
+			control("tool_start", "stale", start, http.StatusConflict)
+			control("tool_start", "request-tools", map[string]any{"id": "invalid"}, http.StatusBadRequest)
+			control("tool_start", "request-tools", map[string]any{"id": "invalid", "name": "Read", "input": []any{}}, http.StatusBadRequest)
+			control("tool_result", "request-tools", map[string]any{"id": "unknown", "output": "no"}, http.StatusBadRequest)
+			control("tool_start", "request-tools", start, http.StatusOK)
+			control("tool_start", "request-tools", start, http.StatusBadRequest)
+			readEvent := func(id, typ, status string) map[string]any {
+				t.Helper()
+				var found map[string]any
+				eventuallyV2(t, func() bool {
+					_, snapshot := v2Do(t, server, http.MethodGet, base+"/snapshot", nil, headers)
+					turn := snapshot["turns"].([]any)[0].(map[string]any)
+					if turn["status"] != "running" {
+						t.Fatalf("tool control finished the turn: %v", turn)
+					}
+					for _, raw := range turn["events"].([]any) {
+						event := raw.(map[string]any)
+						payload := event["payload"].(map[string]any)
+						if event["item_id"] == id && event["type"] == typ && (status == "" || payload["status"] == status) {
+							found = payload
+							return true
+						}
+					}
+					return false
+				})
+				return found
+			}
+			started := readEvent("search", "item.started", "")
+			if started["tool"] != start["name"] || started["input"].(map[string]any)["query"] != "mock" {
+				t.Fatal(started)
+			}
+			control("tool_result", "request-tools", map[string]any{"id": "search", "output": map[string]any{"matches": 2}}, http.StatusOK)
+			if got := readEvent("search", "item.completed", "completed"); got["output"] != `{"matches":2}` {
+				t.Fatal(got)
+			}
+			control("tool_result", "request-tools", map[string]any{"id": "search", "output": "duplicate"}, http.StatusBadRequest)
+			control("tool_start", "request-tools", map[string]any{"id": "command", "name": "Bash", "input": map[string]any{"command": "never execute this"}}, http.StatusOK)
+			control("tool_result", "request-tools", map[string]any{"id": "command", "output": "mock failure", "isError": true}, http.StatusOK)
+			failed := readEvent("command", "item.completed", "failed")
+			if failed["kind"] != "command" || failed["error"].(map[string]any)["message"] != "mock failure" {
+				t.Fatal(failed)
+			}
+			control("release", "request-tools", nil, http.StatusOK)
+			eventuallyV2(t, func() bool {
+				_, snapshot := v2Do(t, server, http.MethodGet, base+"/snapshot", nil, headers)
+				return snapshot["turns"].([]any)[0].(map[string]any)["status"] == "completed"
+			})
+			if status, body := v2Do(t, server, http.MethodPost, base+"/commands", map[string]any{"type": "send", "request_id": "next-request", "text": "Use tools again"}, headers); status != http.StatusOK && status != http.StatusAccepted {
+				t.Fatalf("next send: %d %v", status, body)
+			}
+			control("tool_start", "request-tools", start, http.StatusConflict)
+			control("tool_start", "next-request", start, http.StatusOK)
+			control("release", "next-request", nil, http.StatusOK)
+		})
+	}
+}
+
 func TestVerificationImportKeepsSubmissionsThatNeedReview(t *testing.T) {
 	verificationEnv(t)
 	server, _ := newV2Server(t)

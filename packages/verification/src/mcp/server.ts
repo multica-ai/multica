@@ -12,6 +12,7 @@ import { toProblem } from "../host/problem.js";
 import { prepareInput } from "../setup/environments.js";
 import { restoreInput, snapshotInput } from "../host/operations.js";
 import { eventsReadInput, stateReadInput } from "../state/service.js";
+import { fixtureControlInput } from "../data/fixture-control.js";
 import {
   pageActionSchema,
   pointSchema,
@@ -221,14 +222,8 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
     "fixture_control",
     {
       description:
-        "Inspect, or release/chunk/fail the pending request of, the fake provider behind a conversation in an owned test environment. Never calls a real model.",
-      inputSchema: {
-        environmentId: resourceIdSchema,
-        conversationId: z.string().min(1),
-        action: z.enum(["inspect", "release", "chunk", "fail"]),
-        text: z.string().max(100000).default(""),
-        expectedRequestId: z.string().min(1).optional(),
-      },
+        "Inspect or control the pending fake-provider request in an owned test environment. release/chunk/fail emit text; tool_start emits a tool call with tool {id,name,input}; tool_result completes it with tool {id,output,isError?}. Tool actions keep the turn running until release/fail. Never calls a real model or executes a tool.",
+      inputSchema: fixtureControlInput,
       annotations: command,
     },
     (input) =>
@@ -239,6 +234,7 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
           input.action,
           input.text,
           input.expectedRequestId,
+          input.tool,
         ),
       ),
   );

@@ -61,23 +61,24 @@ func (v *V2) verificationRoute(w http.ResponseWriter, r *http.Request, c caller,
 		writeJSON(w, http.StatusOK, map[string]any{"schemaVersion": 1, "mapping": mapping, "policy": "frozen-history-paused-queue", "transformations": []string{"providerSessionsNotResumed", "runningTurnsCancelled", "queuesPaused", "inFlightSubmissionsNeedReview", "workingDirectoryRebound", "cloudReferencesRemoved", "copiesUnarchived"}})
 	case path == "/verification/fixture" && r.Method == http.MethodPost:
 		var body struct {
-			ConversationID    string `json:"conversationId"`
-			Action            string `json:"action"`
-			Text              string `json:"text"`
-			ExpectedRequestID string `json:"expectedRequestId"`
+			ConversationID    string                    `json:"conversationId"`
+			Action            string                    `json:"action"`
+			Text              string                    `json:"text"`
+			ExpectedRequestID string                    `json:"expectedRequestId"`
+			Tool              *service.VerificationTool `json:"tool"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
 			writeV2Error(w, AppError("invalid_request", "Invalid fixture control"))
 			return true
 		}
-		result, err := v.svc.VerificationFixture(r.Context(), scopeID, body.ConversationID, body.Action, body.Text, body.ExpectedRequestID)
+		result, err := v.svc.VerificationFixture(r.Context(), scopeID, body.ConversationID, body.Action, body.Text, body.ExpectedRequestID, body.Tool)
 		if err != nil {
 			writeV2Error(w, err)
 			return true
 		}
 		writeJSON(w, http.StatusOK, result)
 	case path == "/verification/fixture" && r.Method == http.MethodGet:
-		result, err := v.svc.VerificationFixture(r.Context(), scopeID, r.URL.Query().Get("conversationId"), "inspect", "", "")
+		result, err := v.svc.VerificationFixture(r.Context(), scopeID, r.URL.Query().Get("conversationId"), "inspect", "", "", nil)
 		if err != nil {
 			writeV2Error(w, err)
 			return true

@@ -23,6 +23,15 @@ type verificationAdapter struct {
 	pending   bool
 	requestID string
 	received  []string
+	tools     map[string]bool
+}
+
+type VerificationTool struct {
+	ID      string          `json:"id"`
+	Name    string          `json:"name"`
+	Input   json.RawMessage `json:"input"`
+	Output  json.RawMessage `json:"output"`
+	IsError bool            `json:"isError"`
 }
 
 var verificationAdapters sync.Map
@@ -80,6 +89,7 @@ func (a *verificationAdapter) Request(_ context.Context, typ string, fields map[
 			return nil, errors.New("verification provider is busy")
 		}
 		a.pending = true
+		a.tools = make(map[string]bool)
 		a.requestID, _ = fields["request_id"].(string)
 		a.received = append(a.received, a.requestID)
 	}
@@ -103,7 +113,7 @@ func (a *verificationAdapter) Done() <-chan struct{} { return a.done }
 func (a *verificationAdapter) Err() error            { return nil }
 
 // VerificationFixture controls only the in-memory fake adapter of one scoped conversation.
-func (s *Service) VerificationFixture(ctx context.Context, scopeID int64, id, action, text, expectedRequestID string) (map[string]any, error) {
+func (s *Service) VerificationFixture(ctx context.Context, scopeID int64, id, action, text, expectedRequestID string, tool *VerificationTool) (map[string]any, error) {
 	if !VerificationEnabled() {
 		return nil, ErrUnsupportedProvider
 	}
@@ -132,21 +142,60 @@ func (s *Service) VerificationFixture(ctx context.Context, scopeID int64, id, ac
 		a.mu.Unlock()
 		return nil, errors.New("verification provider has no pending reply")
 	}
-	if action != "release" && action != "fail" && action != "chunk" {
+	var toolMessage map[string]any
+	switch action {
+	case "tool_start":
+		if tool == nil || strings.TrimSpace(tool.ID) == "" || strings.TrimSpace(tool.Name) == "" || text != "" || len(tool.Output) != 0 || tool.IsError {
+			a.mu.Unlock()
+			return nil, ErrInvalidRequest
+		}
+		var input map[string]any
+		if json.Unmarshal(tool.Input, &input) != nil || input == nil {
+			a.mu.Unlock()
+			return nil, ErrInvalidRequest
+		}
+		if _, exists := a.tools[tool.ID]; exists {
+			a.mu.Unlock()
+			return nil, ErrInvalidRequest
+		}
+		a.tools[tool.ID] = false
+		toolMessage = map[string]any{"type": "assistant", "message": map[string]any{"id": "verification-tool-" + a.requestID + ":" + tool.ID, "role": "assistant", "content": []any{map[string]any{"type": "tool_use", "id": tool.ID, "name": tool.Name, "input": input}}}}
+	case "tool_result":
+		if tool == nil || tool.ID == "" || len(tool.Output) == 0 || text != "" || tool.Name != "" || len(tool.Input) != 0 {
+			a.mu.Unlock()
+			return nil, ErrInvalidRequest
+		}
+		if completed, exists := a.tools[tool.ID]; !exists || completed {
+			a.mu.Unlock()
+			return nil, ErrInvalidRequest
+		}
+		a.tools[tool.ID] = true
+		toolMessage = map[string]any{"type": "user", "message": map[string]any{"content": []any{map[string]any{"type": "tool_result", "tool_use_id": tool.ID, "content": tool.Output, "is_error": tool.IsError}}}}
+	case "release", "fail", "chunk":
+		if tool != nil {
+			a.mu.Unlock()
+			return nil, ErrInvalidRequest
+		}
+	default:
 		a.mu.Unlock()
 		return nil, ErrInvalidRequest
 	}
-	if action != "chunk" {
+	terminal := action == "release" || action == "fail"
+	if terminal {
 		a.pending = false
 	}
 	handler := a.handler
 	requestID := a.requestID
 	a.mu.Unlock()
+	if toolMessage != nil {
+		message, _ := json.Marshal(toolMessage)
+		handler(claude.Output{Type: "sdk_message", Message: message})
+	}
 	if text != "" {
 		message, _ := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{"id": "verification-" + requestID, "role": "assistant", "content": []any{map[string]any{"type": "text", "text": text}}}})
 		handler(claude.Output{Type: "sdk_message", Message: message})
 	}
-	if action != "chunk" {
+	if terminal {
 		message, _ := json.Marshal(map[string]any{"type": "result", "subtype": map[bool]string{true: "error_during_execution", false: "success"}[action == "fail"], "is_error": action == "fail", "result": text})
 		handler(claude.Output{Type: "sdk_message", Message: message})
 	}

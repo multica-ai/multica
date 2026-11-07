@@ -163,6 +163,74 @@ afterAll(async () => {
 });
 
 describe("manual verification protocol integration", () => {
+  it("passes mock tool calls from MCP through the daemon into durable conversation events", async () => {
+    const dataset = await host.data.fixture(environmentId);
+    const subjectRef = dataset.refs.conversationId!;
+    await request(`/local/v2/sessions/${subjectRef}/commands`, {
+      type: "send",
+      request_id: "mcp-tools",
+      text: "Use a mock tool",
+    });
+    const server = createVerificationMcpServer(host);
+    const client = new Client({ name: "mock-tools", version: "1" });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverSide);
+    await client.connect(clientSide);
+    try {
+      const control = async (action: string, tool?: Json) => {
+        const result = await client.callTool({
+          name: "fixture_control",
+          arguments: {
+            environmentId, conversationId: subjectRef,
+            expectedRequestId: "mcp-tools", action,
+            ...(tool ? { tool } : {}),
+          },
+        });
+        expect(result.isError).not.toBe(true);
+        expect(object.parse(result.structuredContent).result).toMatchObject({
+          kind: "ok", value: { action },
+        });
+      };
+      await control("tool_start", {
+        id: "mock-search", name: "mcp__example__search",
+        input: { query: "fixture" },
+      });
+      const events = async () => object.parse(
+        (await host.state.events({ environmentId, source: "daemon", subjectRef })).payload,
+      );
+      await eventually(events, (page) => z.array(object).parse(page.events).some(
+        (event) => event.item_id === "mock-search" && event.type === "item.started",
+      ));
+      await control("tool_result", {
+        id: "mock-search", output: "Found fixture",
+      });
+      await control("release");
+      const page = await eventually(events, (page) => z.array(object).parse(page.events).some(
+        (event) => event.type === "turn.completed",
+      ));
+      expect(z.array(object).parse(page.events)).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          item_id: "mock-search", type: "item.started",
+          payload: {
+            kind: "tool_call", tool: "mcp__example__search",
+            input: { query: "fixture" },
+          },
+        }),
+        expect.objectContaining({
+          item_id: "mock-search", type: "item.completed", final: true,
+          payload: {
+            kind: "tool_call", tool: "mcp__example__search",
+            input: { query: "fixture" }, output: "Found fixture",
+            status: "completed",
+          },
+        }),
+      ]));
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it("copies complete paginated history and attachment bytes, freezes copies and leaves originals unchanged", async () => {
     await request("/local/v2/sessions", {
       id: "original",

@@ -21,7 +21,7 @@
 | `data_snapshot` | 异步 | 从宿主绑定的来源导出选定会话、项目或事项 |
 | `data_snapshot_read` | 同步 | 分页读取快照的实体、关系、附件清单 |
 | `data_restore` | 异步 | 把快照或模板导入环境，生成一份新副本；输出原始 ID 到副本 ID 的映射 |
-| `fixture_control` | 同步 | 查看 fake provider，或 release/chunk/fail 当前请求 |
+| `fixture_control` | 同步 | 查看 fake provider，输出文本、模拟工具调用及结果，或结束当前请求 |
 | `state_read` | 同步 | 原样返回一个来源的当前状态：daemon 会话快照（`beforeTurnIndex` 读取更早轮次）、Electron main、renderer 会话模型、后端事项/项目、只读页面运行时 |
 | `events_read` | 同步 | 按 cursor 读取 daemon 持久事件、main 诊断缓冲或只读页面事件，原样返回 generation、cursor、保留范围 |
 | `page_windows` | 同步 | 列出窗口，窗口 ID 是 CDP targetId；Desktop 窗口附带 Multica Computer Use 目标 `computerUse` |
@@ -133,7 +133,38 @@ SQLite 导出不按 schema 版本号判断，而是核对它读取的表和列�
 
 导入响应丢失时 job 为 `unknown`，`resourceRefs` 中保留副本的 datasetId；可以用 `state_read` 查看副本是否存在，再决定是否导入另一份。
 
-默认开发验证使用受控 fake provider，经过真实 service/runner/队列链路；不调用真实模型。`fixture_control` 的 release/chunk/fail 必须指定 `expectedRequestId`，陈旧请求会被拒绝。
+默认开发验证使用受控 fake provider，经过真实 service/runner/队列链路；不调用真实模型。`fixture_control` 除 inspect 外必须指定 `expectedRequestId`，陈旧请求会被拒绝。
+
+### 模拟工具调用
+
+先在测试会话发送消息，再用 inspect 取得 `pendingRequestId` 作为 `expectedRequestId`。沿用该会话的 `environmentId`、`conversationId`，通过 MCP client 分别发送工具开始和结果：
+
+```ts
+await client.callTool({
+  name: "fixture_control",
+  arguments: {
+    environmentId, conversationId, expectedRequestId,
+    action: "tool_start",
+    tool: { id: "search-1", name: "mcp__example__search", input: { query: "mock" } },
+  },
+});
+await client.callTool({
+  name: "fixture_control",
+  arguments: {
+    environmentId, conversationId, expectedRequestId,
+    action: "tool_result",
+    tool: { id: "search-1", output: "Found two matches", isError: false },
+  },
+});
+await client.callTool({
+  name: "fixture_control",
+  arguments: { environmentId, conversationId, expectedRequestId, action: "release", text: "Done" },
+});
+```
+
+`tool_start` 的 input 必须是 JSON 对象；`tool_result` 的 output 可以是文本或 JSON，`isError: true` 生成工具失败状态。两种工具动作均不结束轮次，可在结果之前观察运行中的工具；最后用 release/fail 结束轮次。工具 ID 在当前请求内唯一，结果必须对应尚未完成的调用；重复开始、重复结果和未知 ID 会被拒绝。
+
+工具事件经过现有 normalizer、事件持久化和会话渲染链路，支持 Claude/Codex 测试会话。工具名为 `Bash` 时沿用命令展示。这里只模拟调用及结果，不执行命令、不调用 MCP 服务，也不拦截真实模型的工具执行。工具动作不接受 text；原有 chunk/release/fail 文本控制保持原用法。通过 `state_read` 和 `events_read` 查看事件，Desktop 展示需使用含本能力的验证构建。
 
 ## 状态与事件
 
