@@ -40,6 +40,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -73,10 +74,9 @@ export interface MessageComposerReplyTarget {
 }
 
 interface Props {
-  /** Submit callback. Composer awaits this; on rejection it restores text,
-   *  attachments, and mentions so the user can retry without losing
-   *  context. Resolved promise → text + chips cleared, composer collapses
-   *  back to pill. */
+  /** Draft stays visible and locked while awaiting submission. Rejection
+   *  keeps it for retry; acceptance clears the submitted draft and collapses
+   *  back to the pill. */
   onSubmit: (args: {
     content: string;
     attachmentIds: string[];
@@ -185,6 +185,8 @@ export function MessageComposer({
   const [internalText, setInternalText] = useState("");
   const [attachments, setAttachments] = useState<ComposerAttachmentItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const inFlight = useRef(false);
+  const mounted = useRef(true);
 
   // Hybrid controlled / uncontrolled pattern (React-canonical). Chat
   // passes `value`/`onChangeText` for cross-session draft persistence;
@@ -210,10 +212,16 @@ export function MessageComposer({
   // Drop mention draft on composer unmount so navigating away doesn't
   // leak chips into the next composer's session.
   useEffect(() => {
+    mounted.current = true;
     return () => {
+      mounted.current = false;
       clearMentions();
     };
   }, [clearMentions]);
+
+  const handleChangeText = useCallback((next: string) => {
+    if (mounted.current && !inFlight.current) setText(next);
+  }, [setText]);
 
   // Auto-expand + focus when an `expandTrigger` changes. Comment uses
   // this to react to the long-press → reply flow setting a reply target.
@@ -240,6 +248,14 @@ export function MessageComposer({
     !hasInFlightUpload &&
     (text.trim().length > 0 || mentions.length > 0);
 
+  // Controlled owners and the cross-route mention picker can replace a
+  // draft independently of the input lock. A late success may only clear
+  // the exact draft that was submitted.
+  const draft = useRef({ text, attachments, mentions, canSend });
+  useLayoutEffect(() => {
+    draft.current = { text, attachments, mentions, canSend };
+  }, [text, attachments, mentions, canSend]);
+
   const expand = useCallback(() => {
     if (disabled) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -252,7 +268,12 @@ export function MessageComposer({
   }, [disabled, onClearReplyTarget]);
 
   const handleSubmit = useCallback(async () => {
-    if (!canSend) return;
+    if (
+      !mounted.current || inFlight.current || !canSend || !draft.current.canSend ||
+      draft.current.text !== text || draft.current.attachments !== attachments ||
+      useMentionDraftStore.getState().mentions !== mentions
+    ) return;
+    inFlight.current = true;
     const textSnap = text;
     const mentionsSnap = mentions;
     const attachmentsSnap = attachments;
@@ -270,11 +291,6 @@ export function MessageComposer({
       .map((a) => a.id)
       .filter((id): id is string => !!id);
 
-    // Optimistic clear: text + chips empty out immediately so the next
-    // typing tick doesn't double-include them. Restored on rejection.
-    setText("");
-    setAttachments([]);
-    clearMentions();
     setSubmitting(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 
@@ -284,6 +300,16 @@ export function MessageComposer({
         attachmentIds: activeIds,
         mentions: mentionsSnap,
       });
+      if (
+        !mounted.current ||
+        (draft.current.text !== textSnap && !(isControlled && draft.current.text === "")) ||
+        draft.current.attachments !== attachmentsSnap ||
+        useMentionDraftStore.getState().mentions !== mentionsSnap
+      ) return;
+      // Chat's owner may already have cleared the accepted text.
+      if (draft.current.text !== "") setText("");
+      setAttachments([]);
+      clearMentions();
       // Success → fully exit composing mode. Explicit triple-step
       // because a missing blur leaves the keyboard up; missing
       // Keyboard.dismiss races on iOS when focus is in-flight; missing
@@ -292,16 +318,14 @@ export function MessageComposer({
       Keyboard.dismiss();
       setExpanded(false);
     } catch {
-      setText(textSnap);
-      setAttachments(attachmentsSnap);
-      mentionsSnap.forEach((m) =>
-        useMentionDraftStore.getState().toggle(m),
-      );
+      // The draft was never cleared; the caller owns failure feedback/retry.
     } finally {
-      setSubmitting(false);
+      inFlight.current = false;
+      if (mounted.current) setSubmitting(false);
     }
   }, [
     canSend,
+    isControlled,
     text,
     mentions,
     attachments,
@@ -349,11 +373,12 @@ export function MessageComposer({
   );
 
   const onImagePress = useCallback(async () => {
+    if (inFlight.current) return;
     const picker = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 1,
     });
-    if (picker.canceled) return;
+    if (!mounted.current || inFlight.current || picker.canceled) return;
     const picked = picker.assets[0];
     if (!picked) return;
     if (picked.fileSize != null && picked.fileSize > MAX_FILE_SIZE) {
@@ -385,11 +410,12 @@ export function MessageComposer({
   }, [startUpload, t]);
 
   const onFilePress = useCallback(async () => {
+    if (inFlight.current) return;
     const picker = await DocumentPicker.getDocumentAsync({
       type: "*/*",
       copyToCacheDirectory: true,
     });
-    if (picker.canceled) return;
+    if (!mounted.current || inFlight.current || picker.canceled) return;
     const picked = picker.assets[0];
     if (!picked) return;
     if (picked.size != null && picked.size > MAX_FILE_SIZE) {
@@ -420,11 +446,13 @@ export function MessageComposer({
   }, [startUpload, t]);
 
   const onRemoveAttachment = useCallback((localId: string) => {
+    if (inFlight.current) return;
     setAttachments((prev) => prev.filter((it) => it.localId !== localId));
   }, [setAttachments]);
 
   const onRetryAttachment = useCallback(
     (localId: string) => {
+      if (inFlight.current) return;
       const item = attachments.find((it) => it.localId === localId);
       if (!item) return;
       setAttachments((prev) =>
@@ -444,6 +472,7 @@ export function MessageComposer({
   );
 
   const onAtPress = useCallback(() => {
+    if (inFlight.current) return;
     Haptics.selectionAsync().catch(() => {});
     router.push(mentionPickerPath);
   }, [mentionPickerPath]);
@@ -511,6 +540,7 @@ export function MessageComposer({
             </Text>
             <Pressable
               onPress={onClearReplyTarget}
+              disabled={submitting}
               hitSlop={8}
               accessibilityRole="button"
               accessibilityLabel={t("composer.cancel_reply")}
@@ -542,7 +572,10 @@ export function MessageComposer({
             <ComposerAttachmentRow
               mentions={mentions}
               attachments={attachments}
-              onRemoveMention={removeMention}
+              disabled={submitting}
+              onRemoveMention={(type, id) => {
+                if (!inFlight.current) removeMention(type, id);
+              }}
               onRemoveAttachment={onRemoveAttachment}
               onRetryAttachment={onRetryAttachment}
             />
@@ -552,12 +585,12 @@ export function MessageComposer({
         <TextInput
           ref={inputRef}
           value={text}
-          onChangeText={setText}
+          onChangeText={handleChangeText}
           onBlur={onBlur}
           placeholder={resolvedPlaceholder}
           placeholderTextColor={theme.mutedForeground}
           multiline
-          editable={!disabled}
+          editable={!disabled && !submitting}
           className="px-4 pt-3 pb-1 text-base text-foreground"
           style={{ minHeight: 28, maxHeight: 140, textAlignVertical: "top" }}
         />
@@ -571,6 +604,7 @@ export function MessageComposer({
             iconSize={20}
             color={mentions.length > 0 ? theme.primary : undefined}
             onPress={onAtPress}
+            disabled={submitting}
             accessibilityLabel={t("composer.mention")}
             className="h-8 w-8"
           />
@@ -578,6 +612,7 @@ export function MessageComposer({
             name="image-outline"
             iconSize={20}
             onPress={onImagePress}
+            disabled={submitting}
             accessibilityLabel={t("composer.upload_image")}
             className="h-8 w-8"
           />
@@ -585,6 +620,7 @@ export function MessageComposer({
             name="attach-outline"
             iconSize={20}
             onPress={onFilePress}
+            disabled={submitting}
             accessibilityLabel={t("composer.upload_file")}
             className="h-8 w-8"
           />
