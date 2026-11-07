@@ -201,11 +201,15 @@ export interface LocalImportCandidate {
   updatedAt: string;
   importedId?: string;
 }
+export type LocalContextReference =
+  | { kind: "session" | "issue" | "agent"; id: string }
+  | { kind: "member"; id: string; workspaceId: string };
+
 export interface LocalSidePrompt {
   origin?: { conversationId: string; requestId: string };
   content: string;
   attachmentIds?: string[];
-  references?: { kind: "session" | "issue" | "agent"; id: string }[];
+  references?: LocalContextReference[];
   model?: string;
   reasoningEffort?: LocalReasoningEffort | null;
   permissionMode?: LocalPermissionMode;

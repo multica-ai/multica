@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -429,8 +430,8 @@ func TestReferencesAreCurrentContextWhileTheTurnRuns(t *testing.T) {
 	f.svc.mu.Lock()
 	r := f.svc.runners["conv-1"].(*ClaudeRunner)
 	f.svc.mu.Unlock()
-	if got := fmt.Sprint(r.currentContext()["references"]); got != "[{session conv-2}]" {
-		t.Fatalf("current references = %s", got)
+	if got := r.currentContext()["references"]; !reflect.DeepEqual(got, []Reference{{Kind: "session", ID: "conv-2"}}) {
+		t.Fatalf("current references = %+v", got)
 	}
 	bad := make([]Reference, 6)
 	for i := range bad {
@@ -438,5 +439,35 @@ func TestReferencesAreCurrentContextWhileTheTurnRuns(t *testing.T) {
 	}
 	if _, err := f.svc.Send(ctx, SendCommand{ScopeID: f.scopeID, ConversationID: "conv-1", RequestID: "r2", Text: "x", References: bad}); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("too many references = %v", err)
+	}
+}
+
+func TestMemberReferenceReachesProviderAndCurrentContext(t *testing.T) {
+	t.Parallel()
+	f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
+	ctx := context.Background()
+	f.create(t, "conv-1", "claude")
+	text := "Assign to [@Alex](mention://workspace-member/user-b?workspaceId=w&userId=user-b)"
+	refs := []Reference{{Kind: "member", ID: "user-b", WorkspaceID: "w"}}
+	if _, err := f.svc.Send(ctx, SendCommand{ScopeID: f.scopeID, ConversationID: "conv-1", RequestID: "member-send", Text: text, References: refs}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.sends(t); len(got) != 1 || got[0] != text {
+		t.Fatalf("provider text = %v", got)
+	}
+	f.svc.mu.Lock()
+	r := f.svc.runners["conv-1"].(*ClaudeRunner)
+	f.svc.mu.Unlock()
+	if got := r.currentContext()["references"]; !reflect.DeepEqual(got, refs) {
+		t.Fatalf("current references = %+v", got)
+	}
+	for _, workspaceID := range []string{"", "other-workspace"} {
+		_, err := f.svc.Send(ctx, SendCommand{ScopeID: f.scopeID, ConversationID: "conv-1", RequestID: "invalid-" + workspaceID, Text: text, References: []Reference{{Kind: "member", ID: "user-b", WorkspaceID: workspaceID}}})
+		if !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("workspace %q: %v", workspaceID, err)
+		}
+	}
+	if !strings.Contains(systemPrompt("w", true), "assignee_type=member and assignee_id=user_id") {
+		t.Fatal("member assignment identity is not described")
 	}
 }

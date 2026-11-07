@@ -11,6 +11,8 @@ export function agentMentionGroupLabel(groupId: AgentMentionGroupId): string {
   switch (groupId) {
     case "apps":
       return translate("agentHost.agentGui.mentionGroupApps");
+    case "members":
+      return translate("agentHost.agentGui.mentionFilterMember");
     case "agents":
       return translate("agentHost.agentGui.mentionGroupAgents");
     case "files":
@@ -34,6 +36,8 @@ export function agentMentionFilterLabel(filter: AgentMentionFilterId): string {
   switch (filter) {
     case "app":
       return translate("agentHost.agentGui.mentionFilterApp");
+    case "member":
+      return translate("agentHost.agentGui.mentionFilterMember");
     case "agent":
       return translate("agentHost.agentGui.mentionFilterAgent");
     case "file":
@@ -65,6 +69,7 @@ export function agentMentionEmptyGroupLabel(
   if (groupId === "apps") {
     return translate("agentHost.agentGui.mentionEmptyApps");
   }
+  if (groupId === "members") return translate("agentHost.agentGui.mentionEmptyMembers");
   if (groupId === "agents") {
     return translate("agentHost.agentGui.mentionEmptyAgents");
   }

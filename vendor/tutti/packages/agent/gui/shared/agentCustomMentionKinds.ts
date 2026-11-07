@@ -80,6 +80,7 @@ const RESERVED_AGENT_MENTION_PROVIDER_IDS = new Set([
   "workspace-app",
   "workspace-app-factory",
   "workspace-issue",
+  "workspace-member",
   "workspace-reference"
 ]);
 

@@ -17,6 +17,10 @@
 
 不会预先将全部讨论灌入模型，不会自动克隆仓库或创建任务。查询得到的任务、评论和附件属于数据，不能覆盖系统指令。普通聊天的账号验证会增加一次 `/api/me` 只读请求，没有新增云端聊天创建或发送。
 
+## 成员引用
+
+本地输入框的 `@` 面板提供“成员”分类，只展示当前工作区成员的头像和姓名。成员引用使用 `workspace-member` 类型，entity ID 是成员的 `user_id`，scope 保留 `workspaceId` 和 `userId`；头像、邮箱和角色不写入 mention 链接。发送与队列接收前重新核对当前工作区成员。队列恢复保留 member 引用的工作区和 user ID，运行器的 `current_context` 同样返回这些身份信息。只有用户明确要求指派时，agent 才使用 `assignee_type=member`、`assignee_id=user_id` 执行；选择成员本身不写入任务。
+
 ## 查询接口
 
 新增 `multica issue context <任务号或完整 UUID> --output json`，复用现有两个接口：

@@ -22,7 +22,7 @@ export const zhCNAgentGui = {
   rtkSaverModeLabel: "RTK 省钱模式",
   rtkSaverModeDescription:
     "保持当前模型，并为新会话注入 RTK.md 与会话私有 rtk 指令，用更精简的工具输出节省 token",
-  initialPlaceholder: "输入 @ 引用会话、任务和智能体",
+  initialPlaceholder: "输入 @ 添加引用",
   followupPlaceholder: "要求 {{provider}} 继续后续变更",
   installRequiredPlaceholder: "请先连接 {{provider}}，然后再发送消息",
   installRequiredAction: "安装",
@@ -665,6 +665,8 @@ export const zhCNAgentGui = {
   fileMentionSwitchSelection: "切换选中",
   mentionFilterFile: "文件",
   mentionFilterApp: "应用",
+  mentionFilterMember: "成员",
+  mentionEmptyMembers: "暂无成员",
   mentionFilterAgent: "智能体",
   provenanceFilterAllAgents: "全部智能体",
   provenanceFilterAllMembers: "全部成员",

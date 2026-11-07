@@ -601,13 +601,14 @@ function agentMentionItemToRowItem(
     };
   }
 
-  if (item.kind === "agent-target") {
+  if (item.kind === "agent-target" || item.kind === "workspace-member") {
+    const agent = item.kind === "agent-target" ? item : undefined;
     return {
       kind: "app",
       name: item.name,
-      description: mentionDescriptionWithoutTerminalPeriod(item.description),
-      iconUrl: item.iconUrl ?? managedAgentRoundedIconUrl(item.agentProviderId),
-      statusTag: agentTargetAvailabilityStatusTag(item.availabilityStatus)
+      description: agent ? mentionDescriptionWithoutTerminalPeriod(agent.description) : null,
+      iconUrl: item.iconUrl ?? (agent ? managedAgentRoundedIconUrl(agent.agentProviderId) : null),
+      statusTag: agent ? agentTargetAvailabilityStatusTag(agent.availabilityStatus) : undefined
     };
   }
 
@@ -763,6 +764,8 @@ function mentionStatusTone(
 
 function browseHintForFilter(filter: AgentMentionFilterId): string {
   switch (filter) {
+    case "member":
+      return "";
     case "agent":
       return translate("agentHost.agentGui.contextPickerBrowseAgentHint");
     case "app":

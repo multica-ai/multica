@@ -52,6 +52,21 @@ it("rejects missing storage instead of silently accepting a send", async () => {
     createSubmissionStorage("scope", undefined).put(record("a")),
   ).rejects.toThrow("unavailable");
 });
+
+it("preserves a prepared member reference when reopening a submission", async () => {
+  const factory = new IDBFactory();
+  const store = createSubmissionStorage("member-scope", factory);
+  const value = record("member-send");
+  value.prepared = {
+    requestId: value.requestId,
+    content: "[@Alex](mention://workspace-member/user-b?workspaceId=ws&userId=user-b)",
+    references: [{ kind: "member", id: "user-b", workspaceId: "ws" }],
+    display: { id: value.requestId, createdAtUnixMs: 1, content: [{ type: "text", text: "Alex" }] },
+  };
+  await store.put(value);
+  const reopened = createSubmissionStorage("member-scope", factory);
+  expect((await reopened.read())[0].prepared).toEqual(value.prepared);
+});
 it("does not let a late authority downgrade a newer mirror", async () => {
   const store = createSubmissionStorage("scope", new IDBFactory());
   await store.put(record("a"));

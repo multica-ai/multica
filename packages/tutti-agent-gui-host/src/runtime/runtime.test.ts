@@ -1470,7 +1470,7 @@ describe("Multica Agent GUI runtime with native conversation services", () => {
 
   it.each(["mention picker", "issue menu"])("sends selected reference identities from %s and rejects a foreign workspace before submission", async (source) => {
     const { handle, request } = await setup();
-    const content = ["workspace-issue", "agent-session", "agent-target"]
+    const content = ["workspace-issue", "agent-session", "agent-target", "workspace-member"]
       .map((providerId) =>
         source === "issue menu" && providerId === "workspace-issue"
           ? `[CHOV-85](mention://workspace-issue/${providerId}-id?${new URLSearchParams({ workspaceId: init.workspaceId })})`
@@ -1479,7 +1479,7 @@ describe("Multica Agent GUI runtime with native conversation services", () => {
           entityId:
             providerId === "agent-target" ? agent.id : `${providerId}-id`,
           label: "Reference",
-          scope: { workspaceId: init.workspaceId }
+          scope: { workspaceId: init.workspaceId, ...(providerId === "workspace-member" ? { userId: "workspace-member-id" } : {}) }
         })
       )
       .join(" ");
@@ -1497,7 +1497,8 @@ describe("Multica Agent GUI runtime with native conversation services", () => {
       references: [
         { kind: "issue", id: "workspace-issue-id" },
         { kind: "session", id: "agent-session-id" },
-        { kind: "agent", id: agent.id }
+        { kind: "agent", id: agent.id },
+        { kind: "member", id: "workspace-member-id", workspaceId: init.workspaceId }
       ]
     });
     const other = await setup();

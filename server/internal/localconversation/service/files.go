@@ -77,6 +77,18 @@ func uploadName(id, name, mediaType string) (string, error) {
 // the attached files as quoted metadata the provider reads with its own
 // file tools.
 func (s *Service) promptWithAttachments(ctx context.Context, cmd SendCommand) (string, error) {
+	for _, ref := range cmd.References {
+		if ref.Kind != "member" {
+			continue
+		}
+		scope, err := s.store.ScopeByID(ctx, cmd.ScopeID)
+		if err != nil {
+			return "", err
+		}
+		if ref.WorkspaceID != scope.WorkspaceID {
+			return "", fmt.Errorf("%w: member reference is outside this workspace", ErrInvalidRequest)
+		}
+	}
 	text := cmd.Text
 	if cmd.Prompt != "" {
 		text = cmd.Prompt

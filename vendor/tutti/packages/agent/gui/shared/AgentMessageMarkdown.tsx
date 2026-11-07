@@ -767,7 +767,7 @@ function MentionLinkRender({
   const pillKind =
     mention.kind === "workspace-issue" || mention.referenceSource === "task"
       ? "issue"
-      : mention.kind === "session" || mention.kind === "agent-target"
+      : mention.kind === "session" || mention.kind === "agent-target" || mention.kind === "workspace-member"
         ? "session"
         : mention.kind === "pasted-text"
           ? "file"

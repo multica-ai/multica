@@ -15,10 +15,12 @@ export type AgentMentionFilterId =
   | "file"
   | "issue"
   | "agent"
+  | "member"
   | "app";
 export type AgentMentionStaticGroupId =
   | "apps"
   | "agents"
+  | "members"
   | "files"
   | "opened_files"
   | "agent_generated_files"

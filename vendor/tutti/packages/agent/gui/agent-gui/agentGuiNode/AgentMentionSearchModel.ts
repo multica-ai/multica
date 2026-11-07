@@ -449,6 +449,7 @@ export function emptyAgentMentionRawGroups(): AgentMentionRawGroups {
   return {
     apps: [],
     agents: [],
+    members: [],
     opened_files: [],
     agent_generated_files: [],
     sessions: [],
@@ -462,6 +463,7 @@ export function cloneAgentMentionRawGroups(
   return {
     apps: [...rawGroups.apps],
     agents: [...rawGroups.agents],
+    members: [...rawGroups.members],
     opened_files: [...rawGroups.opened_files],
     agent_generated_files: [...rawGroups.agent_generated_files],
     sessions: [...rawGroups.sessions],
@@ -475,6 +477,7 @@ export function totalCountsFromRawGroups(
   return {
     apps: rawGroups.apps.length,
     agents: rawGroups.agents.length,
+    members: rawGroups.members.length,
     opened_files: rawGroups.opened_files.length,
     agent_generated_files: rawGroups.agent_generated_files.length,
     my_sessions: rawGroups.sessions.filter(
@@ -686,6 +689,11 @@ export function providerItemToAgentMentionItem(input: {
       iconUrl: presentation.iconUrl?.trim() || undefined,
       referencesListSupported: presentation.referencesListSupported === "true"
     };
+  }
+  if (input.providerId === "workspace-member") {
+    return { kind: "workspace-member", targetId, workspaceId, name: label,
+      iconUrl: presentation.iconUrl?.trim() || undefined,
+      href: createRichTextMentionHref({ providerId: "workspace-member", entityId: targetId, label, scope: { workspaceId, userId: targetId } }) };
   }
   if (input.providerId === AGENT_TARGET_PROVIDER_ID) {
     const agentProviderId = presentation.agentProviderId?.trim() || undefined;

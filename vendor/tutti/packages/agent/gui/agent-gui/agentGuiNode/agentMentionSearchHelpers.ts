@@ -212,7 +212,7 @@ export function matchesSessionQuery(
     .every((token) => haystack.includes(token));
 }
 
-export const AGENT_MENTION_FILTER_TAB_ORDER = ["session", "issue", "agent"] as const satisfies readonly AgentMentionFilterId[];
+export const AGENT_MENTION_FILTER_TAB_ORDER = ["session", "issue", "agent", "member"] as const satisfies readonly AgentMentionFilterId[];
 
 export const DEFAULT_AGENT_MENTION_FILTER =
   "session" satisfies AgentMentionFilterId;
@@ -241,6 +241,8 @@ export function groupIdsForFilter(
   filter: AgentMentionFilterId
 ): AgentMentionGroupId[] {
   switch (filter) {
+    case "member":
+      return ["members"];
     case "agent":
       return ["agents"];
     case "app":
@@ -272,6 +274,7 @@ export function shouldShowEmptyGroup(
   if (groupId === "apps") {
     return filter === "app";
   }
+  if (groupId === "members") return filter === "member";
   if (groupId === "agents") {
     return filter === "agent";
   }
@@ -323,6 +326,7 @@ export function resolveMentionGroupItems(
   if (
     groupId === "apps" ||
     groupId === "agents" ||
+    groupId === "members" ||
     groupId === "opened_files" ||
     groupId === "agent_generated_files" ||
     groupId === "issues"

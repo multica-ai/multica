@@ -13,6 +13,7 @@ export interface AgentMentionResolvedPresentation {
 
 type ResolvableAgentMentionKind =
   | "agent-target"
+  | "workspace-member"
   | "workspace-app"
   | "workspace-issue";
 
@@ -69,6 +70,7 @@ function isResolvableAgentMentionKind(
 ): kind is ResolvableAgentMentionKind {
   return (
     kind === "agent-target" ||
+    kind === "workspace-member" ||
     kind === "workspace-app" ||
     kind === "workspace-issue"
   );

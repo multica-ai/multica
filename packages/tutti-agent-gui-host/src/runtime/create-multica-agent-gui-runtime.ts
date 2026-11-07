@@ -1527,7 +1527,9 @@ export function createMulticaAgentGuiRuntime(
                   ? "session"
                   : mention.providerId === "agent-target"
                     ? "agent"
-                    : null;
+                    : mention.providerId === "workspace-member"
+                      ? "member"
+                      : null;
             if (kind) {
               if (mention.scope?.workspaceId !== workspaceId)
                 throw new MulticaAgentGuiError(
@@ -1535,10 +1537,11 @@ export function createMulticaAgentGuiRuntime(
                   "invalid_reference",
                   403
                 );
-              references.set(`${kind}:${mention.entityId}`, {
-                kind,
-                id: mention.entityId
-              });
+              if (kind === "member" && mention.scope?.userId !== mention.entityId)
+                throw new MulticaAgentGuiError("Invalid member identity.", "invalid_reference", 400);
+              references.set(`${kind}:${mention.entityId}`, kind === "member"
+                ? { kind, id: mention.entityId, workspaceId }
+                : { kind, id: mention.entityId });
             }
             if (mention.providerId !== "file") continue;
             const attachment = [...attachments.values()].find((entry) =>

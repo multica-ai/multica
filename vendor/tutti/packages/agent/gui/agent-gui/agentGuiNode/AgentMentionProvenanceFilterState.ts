@@ -10,6 +10,7 @@ const EMPTY_PROVENANCE_FILTERS: Record<
   file: null,
   issue: null,
   agent: null,
+  member: null,
   app: null
 };
 

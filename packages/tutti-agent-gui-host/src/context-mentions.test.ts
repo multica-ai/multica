@@ -28,6 +28,38 @@ function workspaceSource(state: AgentGuiWorkspaceState) {
   };
 }
 
+it("offers members by user ID and keeps only workspace and user identity in the mention", async () => {
+  const source = workspaceSource({
+    agents: [], sessions: [],
+    members: [
+      { userId: "user-a", name: "Alex", iconUrl: "https://example.test/alex.png" },
+      { userId: "user-b", name: "Alex", iconUrl: "" }
+    ]
+  } as unknown as AgentGuiWorkspaceState);
+  const service = createMulticaContextMentions(
+    fakeHostServices(vi.fn()) as unknown as AgentGuiHostServices,
+    { workspaceId: "ws", local: true }, source
+  );
+  try {
+    const provider = service.getProvider("workspace-member")!;
+    expect(provider).toBeDefined();
+    const items = await provider.query({ keyword: "Alex", trigger: "@", context: {} });
+    expect(items.map(item => provider.getItemKey(item))).toEqual(["user-a", "user-b"]);
+    expect(provider.getItemSubtitle?.(items[0])).toBeUndefined();
+    expect(provider.getItemIconUrl?.(items[0])).toBe("https://example.test/alex.png");
+    const inserted = provider.toInsertResult(items[1]);
+    if (inserted.kind !== "mention") throw new Error("Expected a member mention");
+    expect(inserted.mention).toMatchObject({ entityId: "user-b", label: "Alex", scope: { workspaceId: "ws", userId: "user-b" } });
+    const markdown = createRichTextMentionMarkdown({ providerId: "workspace-member", ...inserted.mention });
+    expect(extractRichTextMentionsFromContent(markdown)[0]).toMatchObject({ providerId: "workspace-member", entityId: "user-b", scope: { workspaceId: "ws", userId: "user-b" } });
+    expect(markdown).not.toContain("iconUrl");
+    source.update({ agents: [], sessions: [], members: [{ userId: "user-b", name: "Alex Renamed", iconUrl: "https://example.test/new.png" }] });
+    expect((await provider.query({ keyword: "Alex", trigger: "@", context: {} })).map(item => provider.getItemKey(item))).toEqual(["user-b"]);
+    expect((await service.resolve({ providerId: "workspace-member", ...inserted.mention })).resolved).toMatchObject({ label: "Alex Renamed", presentation: { iconUrl: "https://example.test/new.png" } });
+    expect((await service.resolve({ providerId: "workspace-member", ...inserted.mention, scope: { workspaceId: "another-workspace", userId: "user-b" } })).resolved).not.toHaveProperty("presentation.iconUrl");
+  } finally { service.dispose(); }
+});
+
 function avatarWorkspace() {
   return {
     local: true,

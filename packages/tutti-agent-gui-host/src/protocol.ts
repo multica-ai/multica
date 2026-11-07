@@ -77,6 +77,7 @@ export interface AgentGuiWorkspaceState {
   sideWorkspace?: boolean;
   sidePane?: boolean;
   agents: AgentGuiAgentDescriptor[];
+  members?: { userId: string; name: string; iconUrl: string }[];
   executionTargets?: AgentGuiExecutionTarget[];
   local?: boolean;
   sessions: AgentGuiSession[];
@@ -146,10 +147,7 @@ export interface AgentGuiContextItem {
   statusCategory?: string;
 }
 
-export interface AgentGuiContextReference {
-  kind: "session" | "issue" | "agent";
-  id: string;
-}
+export type AgentGuiContextReference = import("@multica/core/local-conversation/protocol").LocalContextReference;
 
 /** Local CLI status events supplement the cloud transcript contract. */
 export type AgentGuiTaskMessagePayload = Omit<TaskMessagePayload, "type"> & {

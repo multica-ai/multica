@@ -68,6 +68,7 @@ function mentionItemIconUrl(item: AgentContextMentionItem): string | undefined {
     return item.agentIconUrl;
   }
   if (
+    item.kind === "workspace-member" ||
     item.kind === "workspace-app" ||
     item.kind === "agent-target" ||
     item.kind === "workspace-reference" ||

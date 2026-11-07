@@ -80,7 +80,7 @@ it.each([false, true])("keeps the first send visible without flashing a queue be
     await act(async () => root.render(<AgentGuiApplication client={client} initial={initial} handle={handle} root={container} />));
     const initialEditor = container.querySelector('[data-testid="agent-gui-composer-editor"]');
     expect(initialEditor).not.toBeNull();
-    expect(initialEditor?.getAttribute("aria-label")).toBe("Type @ to reference sessions, tasks, and agents");
+    expect(initialEditor?.getAttribute("aria-label")).toBe("Type @ to add a reference");
     await act(async () => {
       handle.runtime.activations.request({ mode: "new", agentSessionId: session.id,
         agentTargetId: session.agent_id, requestId: "activation", clientSubmitId: "first-submit",

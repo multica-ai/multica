@@ -70,6 +70,9 @@ export function mentionItemToAttrs(
       iconUrl: item.iconUrl ?? ""
     };
   }
+  if (item.kind === "workspace-member") {
+    return { kind: item.kind, href: item.href, name: item.name, workspaceId: item.workspaceId, targetId: item.targetId, iconUrl: item.iconUrl ?? "" };
+  }
   if (item.kind === "agent-target") {
     return {
       name: item.name,
@@ -266,6 +269,9 @@ export function attrsToMentionItem(
           : undefined
     };
   }
+  if (kind === "workspace-member") {
+    return { kind, href, name, workspaceId: workspaceIdFromMentionAttrs(attrs), targetId: String(attrs.targetId ?? ""), iconUrl: String(attrs.iconUrl ?? "") || undefined };
+  }
   if (kind === "agent-target") {
     const workspaceId = workspaceIdFromMentionAttrs(attrs);
     const targetId = typeof attrs.targetId === "string" ? attrs.targetId : "";
@@ -437,6 +443,7 @@ function normalizeMentionKind(value: unknown): AgentMentionKind {
   if (value === "workspace-app") {
     return "workspace-app";
   }
+  if (value === "workspace-member") return "workspace-member";
   if (value === "agent-target") {
     return "agent-target";
   }

@@ -23,6 +23,7 @@ export function useAgentMentionProvenanceFilters(
   const issue = useReferenceProvenanceFilterCatalog(effectiveCatalog);
   const agent = useReferenceProvenanceFilterCatalog(effectiveCatalog);
   const app = useReferenceProvenanceFilterCatalog(effectiveCatalog);
+  const member = useReferenceProvenanceFilterCatalog(DISABLED_REFERENCE_PROVENANCE_CATALOG);
 
   return useMemo(
     () =>
@@ -34,9 +35,10 @@ export function useAgentMentionProvenanceFilters(
               file,
               issue,
               agent,
+              member,
               app
             }
           },
-    [agent, app, file, issue, session]
+    [agent, app, file, issue, session, member]
   );
 }

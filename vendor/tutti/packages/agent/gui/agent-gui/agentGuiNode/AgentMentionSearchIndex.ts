@@ -196,6 +196,15 @@ export async function fetchAgentMentionFilterResult(input: {
         issueTopicGroups: null
       };
     }
+    case "member": {
+      const items = await input.queryProviderMentionItemsById({
+        providerId: "workspace-member", workspaceId: input.workspaceId, currentUserId: input.currentUserId,
+        query: input.query, sessionCwd: input.sessionCwd, diagnostics: providerDiagnostics, provenanceFilter: null
+      });
+      const rawGroups = emptyAgentMentionRawGroups();
+      rawGroups.members = items.filter((item) => item.kind === "workspace-member");
+      return { providerDiagnostics, rawGroups, totalCounts: totalCountsFromRawGroups(rawGroups), issueTopicGroups: null };
+    }
     case "app": {
       const appItems = await input.queryProviderMentionItemsById({
         providerId: WORKSPACE_APP_PROVIDER_ID,

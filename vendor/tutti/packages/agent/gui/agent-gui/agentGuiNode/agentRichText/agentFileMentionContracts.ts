@@ -9,6 +9,7 @@ export type AgentMentionFileNavigationAction =
 export type AgentMentionScope = "my_sessions" | "collab_sessions";
 export type AgentMentionKind =
   | "file"
+  | "workspace-member"
   | "agent-target"
   | "session"
   | "workspace-app"
@@ -94,6 +95,15 @@ export interface AgentMentionWorkspaceAppItem {
   referencesListSupported?: boolean;
 }
 
+export interface AgentMentionWorkspaceMemberItem {
+  kind: "workspace-member";
+  href: string;
+  workspaceId: string;
+  targetId: string;
+  name: string;
+  iconUrl?: string;
+}
+
 export interface AgentMentionAgentTargetItem {
   kind: "agent-target";
   href: string;
@@ -151,6 +161,7 @@ export interface AgentMentionCustomItem {
 
 export type AgentContextMentionItem =
   | AgentMentionFileItem
+  | AgentMentionWorkspaceMemberItem
   | AgentMentionAgentTargetItem
   | AgentMentionSessionItem
   | AgentMentionWorkspaceAppItem

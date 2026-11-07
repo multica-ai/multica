@@ -176,7 +176,15 @@ export function createAgentGuiWorkspaceService(
         runtimeOnline: availability === "online" || availability === "unstable"
       };
     });
-    return { agents: descriptors, sessions: [] };
+    return {
+      agents: descriptors,
+      sessions: [],
+      members: members.map((member) => ({
+        userId: member.user_id,
+        name: member.name || member.user_id,
+        iconUrl: agentGuiAvatarUrl(member.avatar_url ?? "emoji:👤", options.resolveAvatar),
+      })),
+    };
   }
 
   const unsupported = async (): Promise<never> => {

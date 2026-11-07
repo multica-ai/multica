@@ -26,7 +26,10 @@ export const persistedQueuedPromptSchema = z.object({
   attachmentIds: z.array(z.string()).optional(),
   references: z
     .array(
-      z.object({ kind: z.enum(["session", "issue", "agent"]), id: z.string() }),
+      z.union([
+        z.object({ kind: z.enum(["session", "issue", "agent"]), id: z.string() }),
+        z.object({ kind: z.literal("member"), id: z.string().min(1), workspaceId: z.string().min(1) }),
+      ]),
     )
     .optional(),
   agents: z.array(z.object({ id: z.string(), name: z.string() })).optional(),

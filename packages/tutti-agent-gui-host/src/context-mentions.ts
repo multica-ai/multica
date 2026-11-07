@@ -47,7 +47,7 @@ export function createMulticaContextMentions(
     item.id === CREATE_TASK_MENTION_ID && item.description
       ? `${item.label}${initial.locale === "en" ? ": " : "："}${item.description}`
       : item.label;
-  const providers = ["agent-session", "workspace-issue", "agent-target"].map(
+  const providers = ["agent-session", "workspace-issue", "agent-target", ...(initial.local === true ? ["workspace-member"] : [])].map(
     (id): AgentContextMentionProvider<AgentGuiContextItem> => ({
       id,
       trigger: "@",
@@ -86,7 +86,9 @@ export function createMulticaContextMentions(
           state.agents.map((entry) => [entry.agent.id, entry])
         );
         const items: AgentGuiContextItem[] =
-          id === "agent-target"
+          id === "workspace-member"
+            ? (state.members ?? []).map((member) => ({ id: member.userId, userId: member.userId, label: member.name, iconUrl: member.iconUrl }))
+            : id === "agent-target"
             ? state.agents
                 .filter(
                   ({ agent }) =>
@@ -197,6 +199,10 @@ export function createMulticaContextMentions(
           identity.scope.workspaceId !== initial.workspaceId
         )
           return { label: identity.label };
+        if (id === "workspace-member") {
+          const member = source.getWorkspaceState().members?.find((entry) => entry.userId === identity.entityId);
+          return { label: member?.name ?? identity.label, presentation: { iconUrl: member?.iconUrl } };
+        }
         if (id !== "agent-target" && id !== "agent-session")
           return { label: identity.label };
         const state = source.getWorkspaceState();
@@ -231,8 +237,10 @@ export function createMulticaContextMentions(
     const next = source.getWorkspaceState();
     const agentsChanged = next.agents !== previous.agents;
     const sessionsChanged = next.sessions !== previous.sessions;
+    const membersChanged = next.members !== previous.members;
     previous = next;
     if (agentsChanged) service.invalidate({ providerId: "agent-target" });
+    if (membersChanged) service.invalidate({ providerId: "workspace-member" });
     if (agentsChanged || sessionsChanged)
       service.invalidate({ providerId: "agent-session" });
   });

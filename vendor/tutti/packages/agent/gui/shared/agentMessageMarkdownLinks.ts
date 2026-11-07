@@ -459,6 +459,7 @@ function windowsPathToFileUrl(path: string): string {
 
 type MentionKind =
   | "session"
+  | "workspace-member"
   | "agent-target"
   | "workspace-app"
   | "workspace-reference"
@@ -510,6 +511,7 @@ export function parseMentionLink(
                   : resource;
   if (
     kind !== "session" &&
+    kind !== "workspace-member" &&
     kind !== "agent-target" &&
     kind !== "workspace-app" &&
     kind !== "workspace-reference" &&
@@ -531,6 +533,10 @@ export function parseMentionLink(
     providerId: mention.providerId,
     ...(mention.scope ? { scope: mention.scope } : {})
   };
+  if (kind === "workspace-member") {
+    if (!mention.scope?.workspaceId || mention.scope?.userId !== entityId) return null;
+    return { ...identity, kind, label };
+  }
   if (kind === "pasted-text") {
     return { ...identity, kind, label };
   }

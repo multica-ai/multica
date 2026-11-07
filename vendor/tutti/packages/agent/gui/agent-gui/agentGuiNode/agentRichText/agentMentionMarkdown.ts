@@ -467,6 +467,11 @@ export function parseMentionItemFromHref(input: {
       iconUrl: mention.scope?.icon?.trim() || undefined
     };
   }
+  if (resource === "workspace-member") {
+    const workspaceId = mention.scope?.workspaceId?.trim() ?? "";
+    if (!workspaceId || mention.scope?.userId !== targetId) return null;
+    return { kind: "workspace-member", href, workspaceId, targetId, name };
+  }
   if (resource === "agent-target") {
     if (!workspaceId) {
       return null;

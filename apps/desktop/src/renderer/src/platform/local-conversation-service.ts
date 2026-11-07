@@ -29,6 +29,7 @@ import {
   type LocalV2Transport,
 } from "@multica/core/local-conversation/v2";
 import { defaultStorage } from "@multica/core/platform";
+import { memberListOptions } from "@multica/core/workspace/queries";
 import type { AgentTask,Attachment } from "@multica/core/types";
 import {
 AGENT_MENTION_SELECTION_KEY,
@@ -190,6 +191,7 @@ const lastAgents = new WeakMap<
   ConversationService,
   AgentGuiWorkspaceState["agents"]
 >();
+const lastMembers = new WeakMap<ConversationService, AgentGuiWorkspaceState["members"]>();
 
 export function localConversationSource(
   store: ConversationService,
@@ -343,10 +345,12 @@ export function createLocalConversationParentService(
           const agentsChanged =
             JSON.stringify(value.agents) !==
             JSON.stringify(lastAgents.get(client) ?? []);
+          const membersChanged = JSON.stringify(value.members) !== JSON.stringify(lastMembers.get(client) ?? []);
           lastAgents.set(client, value.agents);
+          lastMembers.set(client, value.members);
           cloudState = value;
           cloudDirty = false;
-          if (agentsChanged)
+          if (agentsChanged || membersChanged)
             publish({ type: "invalidate", scope: "workspace" });
           return value;
         })
@@ -448,6 +452,7 @@ export function createLocalConversationParentService(
       sideWorkspace: true,
       sidePane: Boolean(options.storagePrefix),
       agents: lastAgents.get(client) ?? [],
+      members: lastMembers.get(client) ?? [],
       executionTargets: providers.providers.map((entry) => ({
         id: localTargetId(entry.id),
         name: entry.name,
@@ -512,6 +517,17 @@ export function createLocalConversationParentService(
       : content;
   }
 
+  async function validateMembers(references: import("@multica/core/local-conversation/protocol").LocalContextReference[]) {
+    const members = references.filter((reference) => reference.kind === "member");
+    if (!members.length) return;
+    if (members.some((member) => member.workspaceId !== scope.workspaceId))
+      throw new Error("Referenced member is outside this workspace");
+    const current = await options.queryClient.fetchQuery({ ...memberListOptions(scope.workspaceId), staleTime: 0 });
+    assertCurrent();
+    if (members.some((member) => !current.some((entry) => entry.user_id === member.id)))
+      throw new Error("Referenced member is no longer in this workspace");
+  }
+
   /** Mentioned agents, checked against the official workspace. */
   async function mentionedAgents(references: { kind: string; id: string }[]) {
     const ids = [
@@ -543,12 +559,14 @@ export function createLocalConversationParentService(
     queue: {
       prepare: async (params) => {
         assertCurrent();
+        await validateMembers(params.item.references ?? []);
         const agents = await mentionedAgents(params.item.references ?? []);
         assertCurrent();
         return { ...params, item: { ...params.item, agents } };
       },
       enqueue: async (params) => {
         assertCurrent();
+        await validateMembers(params.item.references ?? []);
         await uploads.ensure(params.item.attachmentIds ?? []);
         assertCurrent();
 
@@ -683,11 +701,12 @@ export function createLocalConversationParentService(
       send: async (params) => {
         assertCurrent();
 
-        const references: { kind: string; id: string }[] = Array.isArray(
+        const references = Array.isArray(
           params.references
         )
           ? params.references
           : [];
+        await validateMembers(references);
         const agents = await mentionedAgents(references);
         const prompt = await referencedContent(params.content, references);
         assertCurrent();

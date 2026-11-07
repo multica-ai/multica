@@ -135,7 +135,8 @@ export class AgentMentionSearchControllerBase {
     this.diagnosticNow = options.diagnosticNow ?? Date.now;
     this.diagnosticSlowThresholdMs =
       options.diagnosticSlowThresholdMs ?? DEFAULT_DIAGNOSTIC_SLOW_THRESHOLD_MS;
-    this.hiddenFilterIds = [...(options.hiddenFilterIds ?? [])];
+    this.hiddenFilterIds = [...(options.hiddenFilterIds ?? []),
+      ...(!options.contextMentionProviders?.some((provider) => provider.id === "workspace-member") ? ["member"] : [])];
     this.currentFileSearchLimit = this.fileLimit;
     this.currentIssueSearchLimit = this.issueLimit;
     this.state.categories = buildBrowseCategories(this.hiddenFilterIds);

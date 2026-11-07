@@ -403,10 +403,11 @@ type SendCommand struct {
 	Origin TurnOrigin
 }
 
-// Reference is an @ reference: a local conversation, task or agent.
+// Reference is an @ reference: a local conversation, task, agent or workspace member.
 type Reference struct {
-	Kind string `json:"kind"`
-	ID   string `json:"id"`
+	Kind        string `json:"kind"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspaceId,omitempty"`
 }
 
 // createTaskMention is the "New task" mention: an action request rather
@@ -420,8 +421,11 @@ func validReferences(refs []Reference) error {
 		return fmt.Errorf("%w: reference up to %d items per message", ErrInvalidRequest, maxReferences)
 	}
 	for _, r := range refs {
-		if (r.Kind != "session" && r.Kind != "issue" && r.Kind != "agent") || r.ID == "" || len(r.ID) > 200 {
+		if (r.Kind != "session" && r.Kind != "issue" && r.Kind != "agent" && r.Kind != "member") || r.ID == "" || len(r.ID) > 200 {
 			return fmt.Errorf("%w: invalid context reference", ErrInvalidRequest)
+		}
+		if r.Kind == "member" && (r.WorkspaceID == "" || len(r.WorkspaceID) > 200) {
+			return fmt.Errorf("%w: invalid member workspace", ErrInvalidRequest)
 		}
 	}
 	return nil

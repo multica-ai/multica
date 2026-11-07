@@ -59,6 +59,7 @@ export const AgentMentionNodeView = observer(AgentMentionNodeViewRender);
 
 type AgentMentionNodeViewKind =
   | "file"
+  | "workspace-member"
   | "agent-target"
   | "session"
   | "workspace-app"
@@ -143,6 +144,7 @@ function normalizeKind(value: string): AgentMentionNodeViewKind {
   if (value === "workspace-app-factory") {
     return "workspace-app-factory";
   }
+  if (value === "workspace-member") return "workspace-member";
   if (value === "agent-target") {
     return "agent-target";
   }
@@ -244,6 +246,10 @@ function mentionViewModel(
     };
   }
 
+  if (kind === "workspace-member") {
+    return { ariaLabel: displayName, directoryPath: "", entryKind: "", href, kind, label: displayName,
+      iconUrl: resolvedPresentation?.iconUrl ?? (attrString(attrs, "iconUrl").trim() || undefined) };
+  }
   if (kind === "agent-target") {
     const agentProviderId =
       resolvedPresentation?.agentProviderId ??
@@ -544,6 +550,7 @@ function AgentMentionPresentationViewRender({
   }
 
   if (
+    mention.kind === "workspace-member" ||
     mention.kind === "workspace-app" ||
     mention.kind === "workspace-reference" ||
     mention.kind === "agent-target"
@@ -670,8 +677,12 @@ function AgentMentionReadonlyViewRender({
   agentTargets?: readonly AgentMessageMarkdownAgentTarget[];
   attrs: Record<string, unknown>;
 }): JSX.Element {
+  const View =
+    normalizeKind(attrString(attrs, "kind")) === "workspace-member"
+      ? AgentMentionView
+      : AgentMentionPresentationView;
   return (
-    <AgentMentionPresentationView
+    <View
       agentTargets={agentTargets}
       attrs={attrs}
       isEditable={false}
@@ -746,12 +757,13 @@ const MentionPillBinding1 = observer(function MentionPillBinding1({
   onRemove,
   withTooltipProvider
 }: MentionPillBinding1Props) {
+  const usesSessionIcon = mention.kind === "agent-target" || mention.kind === "workspace-member";
   const iconContainerPropsProp1Value1 =
-    mention.kind === "agent-target" ? undefined : "true";
+    usesSessionIcon ? undefined : "true";
   const iconContainerPropsProp1Value2 =
-    mention.kind === "agent-target" ? "true" : undefined;
+    usesSessionIcon ? "true" : undefined;
   const iconContainerPropsProp1Value3 =
-    mention.kind === "agent-target" ? undefined : "true";
+    usesSessionIcon ? undefined : "true";
   const iconContainerPropsProp1 = useMemo<
     NonNullable<React.ComponentProps<typeof MentionPill>["iconContainerProps"]>
   >(
@@ -780,7 +792,7 @@ const MentionPillBinding1 = observer(function MentionPillBinding1({
       data-agent-mention-kind={mention.kind}
       iconUrl={mention.iconUrl}
       iconContainerProps={iconContainerPropsProp1}
-      kind={mention.kind === "agent-target" ? "session" : "app"}
+      kind={usesSessionIcon ? "session" : "app"}
       label={mention.label}
       removable={isEditable}
       removeButtonProps={isEditable ? removeButtonPropsProp2 : undefined}

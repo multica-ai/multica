@@ -213,6 +213,29 @@ afterEach(() => {
 });
 
 describe("local conversation parent service over v2", () => {
+  it("loads member user IDs and avatars and sends a member mention without invoking an agent", async () => {
+    mock.api.listMembers.mockResolvedValue([{ id: "membership-row", user_id: "alex-id", name: "Alex", avatar_url: "https://example.test/alex.png", role: "member" }]);
+    const { service } = setup();
+    await vi.waitFor(async () => expect((await service.load()).members).toEqual([{ userId: "alex-id", name: "Alex", iconUrl: "https://example.test/alex.png" }]));
+    routes.unshift((_method, path) => path === "/sessions/new/commands" ? { turn_id: "turn" } : undefined);
+    const content = "Assign this to [@Alex](mention://workspace-member/alex-id?workspaceId=ws&userId=alex-id)";
+    const references = [{ kind: "member" as const, id: "alex-id", workspaceId: "ws" }];
+    await service.session.send({ sessionId: "new", content, references });
+    expect(requests.find(entry => entry.body?.type === "send")?.body).toMatchObject({ text: content, prompt: content, references });
+    expect(requests.find(entry => entry.body?.type === "send")?.body).not.toHaveProperty("agents");
+  });
+
+  it("rejects foreign or removed members before sending or admitting a queued prompt", async () => {
+    const { service } = setup();
+    for (const workspaceId of ["other-ws", "ws"]) {
+      const references = [{ kind: "member" as const, id: "removed-user", workspaceId }];
+      await expect(service.session.send({ sessionId: "new", content: "Assign", references })).rejects.toThrow(workspaceId === "ws" ? "no longer" : "outside");
+      const params = { sessionId: "new", queued: true as const, item: { requestId: "r", content: "Assign", references, display: { id: "r", createdAtUnixMs: 1, content: [{ type: "text" as const, text: "Assign" }] } } };
+      await expect(service.queue.prepare!(params)).rejects.toThrow();
+      await expect(service.queue.enqueue(params)).rejects.toThrow();
+    }
+    expect(requests).toEqual([]);
+  });
   it("preserves Side and turn send metadata without removing Side sessions", async () => {
     routes.unshift((_method, path) => path.startsWith("/sessions?") ? {
       scope_seq: 4,

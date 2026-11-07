@@ -263,6 +263,50 @@ func TestQueueWaitsForTheUserAfterRestart(t *testing.T) {
 	eventually(t, "the queued message after resume", func() bool { return fmt.Sprint(again.sends(t)) == "[after restart]" })
 }
 
+func TestMemberReferenceSurvivesQueueRestart(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "c.sqlite")
+	f := newServiceFixture(t, path)
+	f.create(t, "conv-1", "claude")
+	text := "Assign to [@Alex](mention://workspace-member/user-b?workspaceId=w&userId=user-b)"
+	var raw map[string]any
+	if err := json.Unmarshal(queued("member-queued", text), &raw); err != nil {
+		t.Fatal(err)
+	}
+	refs := []Reference{{Kind: "member", ID: "user-b", WorkspaceID: "w"}}
+	raw["references"] = refs
+	item, _ := json.Marshal(raw)
+	if _, err := f.svc.Enqueue(ctx, f.scopeID, "conv-1", item, true, TurnOrigin{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	again := newServiceFixture(t, path)
+	view, err := again.svc.Queue(ctx, again.scopeID, "conv-1")
+	if err != nil || len(view.Items) != 1 {
+		t.Fatalf("queue = %+v, %v", view, err)
+	}
+	parsed, err := parseQueueItem(view.Items[0])
+	if err != nil || len(parsed.References) != 1 || parsed.References[0] != refs[0] {
+		t.Fatalf("restored item = %+v, %v", parsed, err)
+	}
+	if _, err := again.svc.UpdateQueue(ctx, again.scopeID, "conv-1", "resume", ""); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the member prompt after restart", func() bool { return len(again.sends(t)) == 1 })
+	if got := again.sends(t)[0]; got != text {
+		t.Fatalf("provider prompt = %s", got)
+	}
+	again.svc.mu.Lock()
+	runner := again.svc.runners["conv-1"].(*ClaudeRunner)
+	again.svc.mu.Unlock()
+	if got := fmt.Sprint(runner.currentContext()["references"]); got != fmt.Sprint(refs) {
+		t.Fatalf("current references = %s", got)
+	}
+}
+
 func TestQueueResumeRetriesAMessageTheProviderNeverReceived(t *testing.T) {
 	t.Parallel()
 

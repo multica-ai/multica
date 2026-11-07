@@ -56,6 +56,7 @@ export function useAgentMentionSearchController(
       file: fileProvenanceFilter,
       issue: issueProvenanceFilter,
       agent: agentProvenanceFilter,
+      member: null,
       app: appProvenanceFilter
     });
     mentionControllerRef.current = controller;
@@ -74,6 +75,7 @@ export function useAgentMentionSearchController(
       file: fileProvenanceFilter,
       issue: issueProvenanceFilter,
       agent: agentProvenanceFilter,
+      member: null,
       app: appProvenanceFilter
     });
   }, [
