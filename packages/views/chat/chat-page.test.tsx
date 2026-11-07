@@ -112,6 +112,7 @@ vi.mock("sonner", () => ({
 }));
 
 vi.mock("@multica/core/chat", () => ({
+  useAddToChatRun: () => undefined,
   useChatStore: Object.assign(
     (selector?: (s: { activeSessionId: string | null }) => unknown) =>
       selector ? selector(storeRef.current) : storeRef.current,

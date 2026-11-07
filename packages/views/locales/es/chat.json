@@ -35,7 +35,11 @@
     "change_project_context": "Cambiar contexto del proyecto",
     "remove_project_context": "Quitar contexto del proyecto",
     "no_projects": "Aún no hay proyectos",
-    "project_context_unsupported": "La descripción del proyecto no se aplicará: el daemon de este agente necesita una actualización"
+    "project_context_unsupported": "La descripción del proyecto no se aplicará: el daemon de este agente necesita una actualización",
+    "add_to_run": "Añadir a la ejecución actual",
+    "add_to_run_error": "No se pudo confirmar el envío. Se conserva el borrador; reintentar comprueba la solicitud original.",
+    "retry_run": "Reintentar solicitud original",
+    "new_run_instruction": "Tratar como instrucción nueva (posible duplicado)"
   },
   "queue": {
     "title_one": "{{count}} mensaje en cola",
@@ -255,5 +259,12 @@
     "unarchive": "Desarchivar chat",
     "delete": "Eliminar chat",
     "agent_settings": "Ajustes del agente"
+  },
+  "supplement": {
+    "delivering": "Enviando a la ejecución actual",
+    "pending": "Pendiente de envío a la ejecución actual",
+    "delivered": "Aceptado por el motor",
+    "failed": "No entregado",
+    "unknown": "Entrega incierta"
   }
 }

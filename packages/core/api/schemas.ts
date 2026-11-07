@@ -996,6 +996,11 @@ const ChatQuickActionSchema = z.object({
 }).loose();
 
 export const ChatMessageSchema = z.object({
+  supplement: z.object({
+    task_id: z.string(),
+    status: z.enum(["pending", "delivering", "delivered", "failed", "unknown"]).catch("unknown"),
+    failure_reason: z.string().nullish(),
+  }).optional().catch(undefined),
   id: z.string(),
   chat_session_id: z.string(),
   role: z.enum(["user", "assistant"]).catch("assistant"),
@@ -2291,6 +2296,7 @@ const ChatQueuedTasksSchema = z.array(z.unknown()).transform((tasks) =>
 // fields optional so callers can distinguish an older server from an empty
 // queue. A malformed queue row is ignored without discarding a valid head.
 export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
+  can_supplement: z.boolean().catch(false).optional(),
   task_id: z.string().optional(),
   status: z.string().optional(),
   created_at: z.string().optional(),

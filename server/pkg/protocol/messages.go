@@ -91,6 +91,7 @@ const (
 	TaskSupplementFailureTurnNotStarted   = "turn_not_started"
 	TaskSupplementFailureProviderRejected = "provider_rejected"
 	TaskSupplementFailureTimeout          = "timeout"
+	TaskSupplementFailureUnknown          = "delivery_unknown"
 	TaskSupplementFailureTurnEnded        = "turn_ended"
 
 	// AppCapabilityChatDraftRestoreV1 is advertised (X-Client-Capabilities) by

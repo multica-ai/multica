@@ -959,3 +959,28 @@ describe("ChatMessageList onboarding starter cards", () => {
     expect(screen.getByRole("button", { name: "Later chip" })).toBeEnabled();
   });
 });
+
+describe("Chat guidance receipts", () => {
+  it.each([
+    ["pending", "Waiting to send to current run"],
+    ["delivering", "Sending to current run"],
+    ["delivered", "Accepted by engine"],
+    ["failed", "Not delivered"],
+    ["unknown", "Delivery uncertain"],
+  ] as const)("renders persisted %s receipt", (status, label) => {
+    const qc = new QueryClient();
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[{ id: "guidance", chat_session_id: "session-1", role: "user", content: "extra input", task_id: TASK_ID, created_at: "2026-11-05T00:00:00Z", supplement: { task_id: TASK_ID, status } }]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(label);
+    qc.clear();
+  });
+});

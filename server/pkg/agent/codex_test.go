@@ -6445,3 +6445,30 @@ func TestCodexResumeOverflowError(t *testing.T) {
 		})
 	}
 }
+
+func TestSupplementCodexDistinguishesRejectionAndUncertainTransport(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		response bool
+		unknown  bool
+	}{{"engine rejection", true, false}, {"lost process", false, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _, _ := newTestCodexClient(t)
+			c.threadID = "thread-current"
+			c.setActiveTurnID("turn-current")
+			stdin := &fakeStdinWithHook{}
+			stdin.afterWrite = func() {
+				if tc.response {
+					c.handleLine(`{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"turn mismatch"}}`)
+				} else {
+					close(c.processDone)
+				}
+			}
+			c.stdin = stdin
+			err := supplementCodexTurn(t.Context(), c, "marker")
+			if err == nil || errors.Is(err, ErrSupplementDeliveryUnknown) != tc.unknown {
+				t.Fatalf("error=%v, unknown want %t", err, tc.unknown)
+			}
+		})
+	}
+}

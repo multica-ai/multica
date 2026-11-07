@@ -34,7 +34,11 @@
     "change_project_context": "プロジェクトコンテキストを変更",
     "remove_project_context": "プロジェクトコンテキストを削除",
     "no_projects": "プロジェクトがまだありません",
-    "project_context_unsupported": "プロジェクトの説明は適用されません——このエージェントのデーモンのアップグレードが必要です"
+    "project_context_unsupported": "プロジェクトの説明は適用されません——このエージェントのデーモンのアップグレードが必要です",
+    "add_to_run": "現在の実行に追加",
+    "add_to_run_error": "追加を確認できませんでした。下書きは保持されています。再試行で元のリクエストを確認します。",
+    "retry_run": "元のリクエストを再試行",
+    "new_run_instruction": "新しい指示として扱う（重複の可能性）"
   },
   "queue": {
     "title_other": "キュー内のメッセージ {{count}} 件",
@@ -251,5 +255,12 @@
     "delete": "チャットを削除",
     "archive": "チャットをアーカイブ",
     "unarchive": "アーカイブを解除"
+  },
+  "supplement": {
+    "delivering": "現在の実行に送信中",
+    "pending": "現在の実行への送信待ち",
+    "delivered": "エンジンが受理",
+    "failed": "未配信",
+    "unknown": "配信状況は不明"
   }
 }

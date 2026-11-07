@@ -34,7 +34,11 @@
     "change_project_context": "更改專案上下文",
     "remove_project_context": "移除專案上下文",
     "no_projects": "還沒有專案",
-    "project_context_unsupported": "專案描述不會生效——該 AI 代理的守護程序版本過舊，需要升級"
+    "project_context_unsupported": "專案描述不會生效——該 AI 代理的守護程序版本過舊，需要升級",
+    "add_to_run": "新增至目前執行",
+    "add_to_run_error": "無法確認新增結果。草稿已保留；重試會檢查原始請求。",
+    "retry_run": "重試原始請求",
+    "new_run_instruction": "視為新指令處理（可能重複）"
   },
   "queue": {
     "title_other": "{{count}} 條排隊訊息",
@@ -251,5 +255,12 @@
     "delete": "刪除會話",
     "archive": "歸檔會話",
     "unarchive": "取消歸檔"
+  },
+  "supplement": {
+    "delivering": "正在傳送至目前執行",
+    "pending": "等待傳送至目前執行",
+    "delivered": "引擎已接受",
+    "failed": "未送達",
+    "unknown": "送達狀態不確定"
   }
 }

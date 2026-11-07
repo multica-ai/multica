@@ -60,7 +60,7 @@ import {
   useSetChatSessionProject,
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
-import { useChatStore } from "@multica/core/chat";
+import { useChatStore, useAddToChatRun } from "@multica/core/chat";
 import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
 import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
 import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
@@ -135,6 +135,7 @@ export function ChatWindow() {
     pendingChatTaskOptions(activeSessionId ?? ""),
   );
   const pendingTaskId = pendingTask?.task_id ?? null;
+  const addToRun = useAddToChatRun(activeSessionId, pendingTask?.can_supplement === true ? pendingTask.task_id : undefined);
   const stopRequestedBeforeTaskRef = useRef(false);
   // Durable deferred-cancellation draft restores (#5219). Same hook as the chat
   // page controller — the skip/apply/consume/reconcile state machine must not
@@ -956,6 +957,7 @@ export function ChatWindow() {
        *  no agent (the EmptyState above carries the CTA). */}
       <ChatInput
         onSend={handleSend}
+        onAddToRun={addToRun}
         restoreDraftRequest={restoreDraftRequest}
         conversationStarterRequest={conversationStarterRequest}
         onConversationStarterApplied={handleConversationStarterApplied}

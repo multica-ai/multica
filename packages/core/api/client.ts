@@ -271,6 +271,7 @@ import {
   CancelTaskResponseSchema,
   ChatDraftRestoresResponseSchema,
   ChatMessageListSchema,
+  ChatMessageSchema,
   ChatMessagesPageSchema,
   ChatPendingTaskSchema,
   ChatSessionListSchema,
@@ -3992,6 +3993,17 @@ export class ApiClient {
       }
       throw err;
     }
+  }
+
+  async addToChatRun(sessionId: string, taskId: string, content: string, requestId: string): Promise<ChatMessage> {
+    const raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/tasks/${taskId}/supplements`, {
+      method: "POST",
+      body: JSON.stringify({ content, client_request_id: requestId }),
+    });
+    const response = parseWithFallback<ChatMessage | null>(raw, ChatMessageSchema, null,
+      { endpoint: "POST /api/chat/sessions/:id/tasks/:taskId/supplements" });
+    if (!response) throw new Error("invalid chat supplement response");
+    return response;
   }
 
   async sendChatMessage(
