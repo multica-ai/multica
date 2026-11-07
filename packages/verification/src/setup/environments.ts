@@ -1503,6 +1503,11 @@ export class Environments {
             VITE_WS_URL: environment.apiOrigin.replace(/^http/, "ws") + "/ws",
             DESKTOP_APP_SUFFIX: `verification-${id.slice(0, 8)}`,
             REMOTE_DEBUGGING_PORT: "0",
+            // Computer Use drags Electron pages through the main-process
+            // inspector. A listener opened now on a free port is found by pid;
+            // otherwise cua-driver sends SIGUSR1, which binds the shared
+            // 9229 and fails while another process holds it.
+            V8_INSPECTOR_PORT: "127.0.0.1:0",
             MULTICA_DAEMON_AUTO_UPDATE: "false",
             MULTICA_DAEMON_AUTO_RELOAD: "false",
           },

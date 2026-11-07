@@ -7,6 +7,8 @@
  * pixels, so every observation records the scale between the two.
  */
 
+import { isVerificationApp } from "../shared/computer-use-verification";
+
 export interface ToolOutput {
   text: string;
   images: { mimeType: string; dataBase64: string }[];
@@ -15,6 +17,8 @@ export interface ToolOutput {
   errorCode?: string;
 }
 export type CallTool = (name: string, args: Record<string, unknown>) => Promise<ToolOutput>;
+/** Whether the process at pid runs Electron, decided the way cua-driver decides it. */
+export type ElectronProbe = (pid: number) => Promise<boolean>;
 
 interface Rect { x: number; y: number; width: number; height: number }
 interface WindowRecord { window_id: number; pid: number; title?: string; bounds?: Rect; layer?: number; z_index?: number | null; is_on_screen?: boolean; on_current_space?: boolean }
@@ -30,16 +34,28 @@ const MODIFIERS: Record<string, string> = { meta: "cmd", command: "cmd", cmd: "c
 const KEYS: Record<string, string> = { enter: "return", backspace: "delete", esc: "escape", arrowleft: "left", arrowright: "right", arrowup: "up", arrowdown: "down", " ": "space" };
 const NAMED_KEYS = new Set(["return", "tab", "escape", "space", "delete", "home", "end", "pageup", "pagedown", "left", "right", "up", "down", ...Array.from({ length: 12 }, (_, i) => `f${i + 1}`)]);
 const PIXELS_PER_NOTCH = 40;
+const ELECTRON_DRAG_REFUSAL = "Background drag is unavailable in this Electron app: its page reads the held mouse button from the hardware. Use the app's own controls (button, menu item or keyboard route).";
 
 const fail = (code: string, detail?: string): never => { throw new Error(detail ? `${code}: ${detail}` : code); };
 const blocked = (id: string) => BLOCKED.some((entry) => id === entry || id.startsWith(`${entry}.`));
 const firstLine = (text: string) => text.split("\n").find((line) => line.trim())?.trim().slice(0, 300) ?? "";
 
+const MAX_DETAIL = 300;
+
+/**
+ * The recovery hint is generic; cua-driver puts the concrete cause (for
+ * example why an Electron main process could not take a drag) at the end of
+ * the text, so a long text keeps its tail.
+ */
 function refusal(output: ToolOutput): string {
   const error = output.structured?.error as { code?: unknown; hint?: unknown } | undefined;
   const code = typeof error?.code === "string" ? error.code : output.errorCode ?? "action_failed";
-  const hint = typeof output.structured?.hint === "string" ? output.structured.hint : typeof error?.hint === "string" ? error.hint : firstLine(output.text);
-  return hint ? `${code}: ${hint}` : code;
+  const reason = typeof output.structured?.reason === "string" ? ` [${output.structured.reason}]` : "";
+  const line = output.text.split("\n").find((item) => item.trim())?.trim() ?? "";
+  const text = line.length > MAX_DETAIL ? `…${line.slice(-MAX_DETAIL)}` : line;
+  const hint = typeof output.structured?.hint === "string" ? output.structured.hint : typeof error?.hint === "string" ? error.hint : undefined;
+  if (!hint) return text ? `${code}${reason}: ${text}` : `${code}${reason}`;
+  return text && text !== hint ? `${code}${reason}: ${hint} Driver detail: ${text}` : `${code}${reason}: ${hint}`;
 }
 
 export function translateKey(chord: string): { key: string; modifiers: string[] } {
@@ -57,8 +73,13 @@ export class CuaComputer {
   private apps = new Map<string, string>();
   private selected = new Map<string, Target>();
   private snapshots = new Map<string, Snapshot>();
-  /** hostPid is the Multica process that owns this broker; its approval dialogs must stay out of reach. */
-  constructor(private callTool: CallTool, private hostPid?: number) {}
+  /**
+   * hostPid is the Multica process that owns this broker; its approval dialogs must stay out of reach.
+   * isElectron gates drags: cua-driver drags an Electron page through the app's main-process
+   * inspector, opening it with SIGUSR1 and leaving it listening, so only verification builds
+   * may take that route.
+   */
+  constructor(private callTool: CallTool, private hostPid: number | undefined, private isElectron: ElectronProbe) {}
 
   async perform(input: Record<string, unknown>): Promise<unknown> {
     const op = typeof input.op === "string" ? input.op : fail("invalid_request");
@@ -233,6 +254,7 @@ export class CuaComputer {
       }
       case "drag": {
         const from = point(), to = point("toX", "toY");
+        if (!isVerificationApp(app) && await this.isElectron(snap.pid)) fail("background_unavailable", ELECTRON_DRAG_REFUSAL);
         output = await this.run("drag", { ...window, from_x: from.x, from_y: from.y, to_x: to.x, to_y: to.y });
         break;
       }

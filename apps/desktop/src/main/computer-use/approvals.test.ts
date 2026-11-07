@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { AppApprovals, isVerificationApp } from "./approvals";
+import { AppApprovals } from "./approvals";
 
 const calculator = { id: "com.apple.calculator", name: "Calculator" };
 const textEdit = { id: "com.apple.TextEdit", name: "TextEdit" };
@@ -14,15 +14,6 @@ const file = () => {
   return join(directory, "nested", "approvals.json");
 };
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
-
-describe("isVerificationApp", () => {
-  it("matches only verification environment bundle IDs", () => {
-    expect(isVerificationApp("ai.multica.verification.0d2c9f3e-1111-4222-8333-444455556666")).toBe(true);
-    expect(isVerificationApp("ai.multica.verification.")).toBe(false);
-    expect(isVerificationApp("ai.multica.desktop")).toBe(false);
-    expect(isVerificationApp("com.github.Electron")).toBe(false);
-  });
-});
 
 describe("AppApprovals", () => {
   it("remembers apps per account across instances in a private file", () => {

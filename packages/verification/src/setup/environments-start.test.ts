@@ -214,6 +214,9 @@ it("runs two isolated environments within capacity and stops only the selected o
       join(environmentDirectory(id), "profile"),
     );
     expect(env.MULTICA_DEV_HEALTH_PORT).toBeTruthy();
+    // Each environment opens its own main-process inspector instead of
+    // competing for the 9229 that SIGUSR1 binds.
+    expect(env.V8_INSPECTOR_PORT).toBe("127.0.0.1:0");
     const database = (await environments.get(id)).components.database;
     expect(database).toMatchObject({ container: `multica-verification-${id}` });
   }

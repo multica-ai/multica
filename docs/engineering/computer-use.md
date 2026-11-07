@@ -79,7 +79,9 @@ SDK 提供：
 
 坐标使用窗口内逻辑点，原生进程按观察时的截图比例换算为 cua-driver 的截图像素。截图可能缩小，不能把截图像素直接当作坐标。控件引用仅属于该应用的最近一次观察；窗口变化、动作执行、原生进程重启或不同应用的引用都不能直接复用。
 
-动作只走后台投递。后台无法投递的动作，例如 Electron 窗口内滚动、在后台打开网页 `<select>`，返回 `background_unavailable` 等拒绝码，不会自动切到前台。成功结果带有 cua-driver 的 `effect`：`confirmed` 表示有读回证据，`unverifiable` 表示已投递但无法确认，仍需重新观察。
+动作只走后台投递。后台无法投递的动作，例如 Electron 窗口内滚动、在后台打开网页 `<select>`，返回 `background_unavailable` 等拒绝码，不会自动切到前台。
+
+Electron 页面的后台拖拽单独处理。Chromium 按硬件状态判断鼠标键是否按住，直接投递给进程的拖动事件到达页面时没有按键，拖拽会中断。cua-driver 因此改由应用主进程完成：经主进程的 Node inspector 用 `webContents.debugger` 发送带按键的 CDP 鼠标事件，HTML5 拖放用 `Input.setInterceptDrags` 与 `Input.dispatchDragEvent` 完成；找不到 inspector 时向进程发送 `SIGUSR1` 打开它，打开后不会关闭。原生进程在调用 cua-driver 之前按 pid 判断目标是否为 Electron（可执行文件所在包含 `Electron Framework.framework`）：只有验证环境（bundle ID 以 `ai.multica.verification.` 开头）走这条路径；其他 Electron 应用直接返回 `background_unavailable`，不调用 cua-driver，不会打开用户应用的 inspector。非 Electron 应用照常投递。成功结果带有 cua-driver 的 `effect`：`confirmed` 表示有读回证据，`unverifiable` 表示已投递但无法确认，仍需重新观察。
 
 ## 权限与生命周期
 

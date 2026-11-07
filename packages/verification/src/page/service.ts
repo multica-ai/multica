@@ -362,7 +362,7 @@ export class Pages {
           throw new VerificationError(
             problem(
               "unsupportedCapability",
-              "Desktop environments accept scroll and scrollIntoView here; click and type through Multica Computer Use with the computerUse target from page_windows",
+              "Desktop environments accept scroll and scrollIntoView here; click, type and drag through Multica Computer Use with the computerUse target from page_windows",
             ),
           );
         if ("x" in target) {

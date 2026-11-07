@@ -3,16 +3,6 @@ import { dirname } from "node:path";
 import { z } from "zod";
 import type { ComputerUseApprovedApp } from "../../shared/computer-use-approvals";
 
-/**
- * Bundle ID prefix the verification host gives each environment's dev
- * Electron. Those apps are disposable test builds, so access needs no dialog.
- */
-export const VERIFICATION_BUNDLE_PREFIX = "ai.multica.verification.";
-
-export function isVerificationApp(appId: string): boolean {
-  return appId.startsWith(VERIFICATION_BUNDLE_PREFIX) && appId.length > VERIFICATION_BUNDLE_PREFIX.length;
-}
-
 const appSchema = z.object({ id: z.string().min(1), name: z.string().min(1) });
 const fileSchema = z.object({ schemaVersion: z.literal(1), users: z.record(z.string(), z.array(appSchema)) });
 

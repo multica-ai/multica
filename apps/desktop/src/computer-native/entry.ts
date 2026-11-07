@@ -1,12 +1,25 @@
 // Runs with ELECTRON_RUN_AS_NODE=1 as a direct child of the desktop main
 // process, so macOS attributes Accessibility and Screen Recording to Multica.
 // It must not import Electron or the desktop main process.
+import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import type * as Cua from "@trycua/cua-driver";
 import { CuaComputer, type ToolOutput } from "./driver";
 
 const MAX_LINE = 64 * 1024;
+const run = promisify(execFile);
+
+/** cua-driver's rule: the executable's bundle ships Electron Framework.framework. */
+async function isElectron(pid: number): Promise<boolean> {
+  const { stdout } = await run("/bin/ps", ["-p", String(pid), "-o", "comm="]);
+  const executable = stdout.trim();
+  if (!executable) throw new Error("window_unavailable: The window's process has exited");
+  return existsSync(join(dirname(dirname(executable)), "Frameworks", "Electron Framework.framework"));
+}
 
 async function main() {
   const sdkPath = process.argv[2];
@@ -25,7 +38,7 @@ async function main() {
       isError: result.isError === true,
       ...(result.errorCode ? { errorCode: result.errorCode } : {}),
     };
-  }, process.ppid);
+  }, process.ppid, isElectron);
   let serial: Promise<unknown> = Promise.resolve();
   const lines = createInterface({ input: process.stdin });
   lines.on("line", (line) => {

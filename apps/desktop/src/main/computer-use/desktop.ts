@@ -2,7 +2,8 @@ import { app, dialog, globalShortcut, Tray, nativeImage, Menu, type BrowserWindo
 import { join } from "node:path";
 import { computerPrompts } from "@multica/computer-use/prompts";
 import type { ComputerUseApprovals } from "../../shared/computer-use-approvals";
-import { AppApprovals, isVerificationApp } from "./approvals";
+import { isVerificationApp } from "../../shared/computer-use-verification";
+import { AppApprovals } from "./approvals";
 import { ComputerBroker, type ComputerControl } from "./broker";
 import { ComputerChannel, type ComputerClientState } from "./channel";
 import { ComputerNative } from "./native";

@@ -264,7 +264,7 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
     "page_windows",
     {
       description:
-        "List the environment's application windows. Desktop windows include computerUse { appId, windowId }: click and type in them in the background with Multica Computer Use (computer.getApp(appId), app.selectWindow(windowId)); scroll them with page_action.",
+        "List the environment's application windows. Desktop windows include computerUse { appId, windowId }: click, type and drag in them in the background with Multica Computer Use (computer.getApp(appId), app.selectWindow(windowId)); scroll them with page_action.",
       inputSchema: { environmentId: resourceIdSchema },
       annotations: readOnly,
     },
@@ -314,7 +314,7 @@ export function createVerificationMcpServer(host: VerificationHost): McpServer {
     "page_action",
     {
       description:
-        "Perform one click, fill, select, pressKey, scroll or scrollIntoView on a locator match (pass index when it matches several), or click/scroll at window coordinates. Desktop environments accept only scroll and scrollIntoView, which reach the page without taking the foreground; click and type there through Multica Computer Use with the computerUse target from page_windows. Reports only that the input was delivered.",
+        "Perform one click, fill, select, pressKey, scroll or scrollIntoView on a locator match (pass index when it matches several), or click/scroll at window coordinates. Desktop environments accept only scroll and scrollIntoView, which reach the page without taking the foreground; click, type and drag there through Multica Computer Use with the computerUse target from page_windows. Reports only that the input was delivered.",
       inputSchema: {
         environmentId: resourceIdSchema,
         target: z.union([targetSchema, pointSchema]),

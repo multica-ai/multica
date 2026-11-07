@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { CuaComputer, translateKey, type ToolOutput } from "./driver";
 
+const verificationApp = "ai.multica.verification.0d2c9f3e-1111-4222-8333-444455556666";
 const ok = (structured: Record<string, unknown>, images: ToolOutput["images"] = []): ToolOutput => ({ text: "", images, structured, isError: false });
 const image = (bytes: number) => ({ mimeType: "image/jpeg", dataBase64: "A".repeat(Math.ceil(bytes * 4 / 3)) });
 const windows = [
@@ -14,10 +15,10 @@ const state = (snapshot = "s00000001") => ok({
   elements: [{ element_token: `${snapshot}:1`, role: "AXButton", label: "Save", enabled: true, depth: 2, frame: { x: 110, y: 60, w: 40, h: 20 }, actions: ["AXPress"] }],
 }, [image(1000)]);
 
-function fixture(overrides: Record<string, (args: Record<string, unknown>) => ToolOutput> = {}) {
+function fixture(overrides: Record<string, (args: Record<string, unknown>) => ToolOutput> = {}, electron = false) {
   const calls: [string, Record<string, unknown>][] = [];
   const tools: Record<string, (args: Record<string, unknown>) => ToolOutput> = {
-    list_apps: () => ok({ apps: [{ bundle_id: "com.example.editor", name: "Editor", running: true }, { bundle_id: "com.apple.Terminal", name: "Terminal" }, { bundle_id: "ai.multica.desktop", name: "Multica" }] }),
+    list_apps: () => ok({ apps: [{ bundle_id: "com.example.editor", name: "Editor", running: true }, { bundle_id: verificationApp, name: "Multica Verification", running: true }, { bundle_id: "com.apple.Terminal", name: "Terminal" }, { bundle_id: "ai.multica.desktop", name: "Multica" }] }),
     list_windows: () => ok({ windows }),
     get_window_state: () => state(),
     ...overrides,
@@ -26,12 +27,13 @@ function fixture(overrides: Record<string, (args: Record<string, unknown>) => To
     calls.push([name, args]);
     return tools[name]?.(args) ?? ok({ effect: "confirmed", route: "accessibility" });
   });
-  return { computer: new CuaComputer(callTool, 1), calls };
+  const isElectron = vi.fn(async () => electron);
+  return { computer: new CuaComputer(callTool, 1, isElectron), calls, isElectron };
 }
-async function observed(overrides?: Parameters<typeof fixture>[0]) {
-  const f = fixture(overrides);
-  await f.computer.perform({ op: "get_app", app: "Editor" });
-  const observation = await f.computer.perform({ op: "observe", app: "com.example.editor" }) as { observationId: string };
+async function observed(overrides?: Parameters<typeof fixture>[0], electron = false, app = "com.example.editor") {
+  const f = fixture(overrides, electron);
+  await f.computer.perform({ op: "get_app", app });
+  const observation = await f.computer.perform({ op: "observe", app }) as { observationId: string };
   return { ...f, observation };
 }
 
@@ -100,6 +102,29 @@ describe("cua-driver Computer Use translation", () => {
   it("surfaces background refusals with their code and hint", async () => {
     const { computer, observation } = await observed({ type_text: () => ({ text: "", images: [], structured: { effect: "refused", error: { code: "background_unavailable", hint: "Electron web content refuses background typing" } }, isError: true }) });
     await expect(computer.perform({ op: "type", app: "com.example.editor", observationId: observation.observationId, text: "hi" })).rejects.toThrow("background_unavailable: Electron web content refuses background typing");
+  });
+
+  it("keeps the driver's reason and concrete cause beside the generic hint", async () => {
+    const text = `Background drag is unavailable for this Electron window on macOS: ${"x".repeat(320)} (no Node inspector for Electron pid 42 (the app may disable it))`;
+    const { computer, observation } = await observed({ drag: () => ({ text, images: [], structured: { effect: "refused", reason: "electron_main_process_unavailable", hint: "This Electron window cannot take a background drag.", error: { code: "background_unavailable" } }, isError: true }) });
+    const drag = computer.perform({ op: "drag", app: "com.example.editor", observationId: observation.observationId, x: 10, y: 10, toX: 50, toY: 40 });
+    await expect(drag).rejects.toThrow("background_unavailable [electron_main_process_unavailable]: This Electron window cannot take a background drag. Driver detail: …");
+    await expect(drag).rejects.toThrow("(no Node inspector for Electron pid 42 (the app may disable it))");
+  });
+
+  it("drags non-Electron apps and verification builds through cua-driver", async () => {
+    for (const [electron, app] of [[false, "com.example.editor"], [true, verificationApp]] as const) {
+      const { computer, calls, observation } = await observed(undefined, electron, app);
+      await computer.perform({ op: "drag", app, observationId: observation.observationId, x: 10, y: 10, toX: 50, toY: 40 });
+      expect(calls.filter(([name]) => name === "drag")).toEqual([["drag", { pid: 42, window_id: 8, from_x: 20, from_y: 20, to_x: 100, to_y: 80 }]]);
+    }
+  });
+
+  it("refuses background drags in other Electron apps without reaching cua-driver", async () => {
+    const { computer, calls, isElectron, observation } = await observed(undefined, true);
+    await expect(computer.perform({ op: "drag", app: "com.example.editor", observationId: observation.observationId, x: 10, y: 10, toX: 50, toY: 40 })).rejects.toThrow(/^background_unavailable: Background drag is unavailable in this Electron app/);
+    expect(isElectron).toHaveBeenCalledWith(42);
+    expect(calls.map(([name]) => name)).not.toContain("drag");
   });
 
   it("never exposes windows of the Multica process hosting Computer Use", async () => {
