@@ -68,9 +68,33 @@ export const pageActionSchema = z.discriminatedUnion("kind", [
       deltaY: z.number().finite().min(-10000).max(10000),
     })
     .strict(),
+  z.object({ kind: z.literal("scrollIntoView") }).strict(),
 ]);
+/**
+ * Desktop windows drop background OS wheel events, so Computer Use cannot
+ * scroll them; CDP scrolling reaches the page without activating the app.
+ */
+const desktopActions = new Set(["scroll", "scrollIntoView"]);
 type Target = z.infer<typeof targetSchema>;
 type Session = { browser: Browser; identity: string };
+const mainSnapshotSchema = z
+  .object({
+    payload: z
+      .object({
+        computerUseAppId: z.string().nullable(),
+        windows: z.array(
+          z
+            .object({
+              title: z.string(),
+              url: z.string(),
+              computerUseWindowId: z.string().nullable(),
+            })
+            .passthrough(),
+        ),
+      })
+      .passthrough(),
+  })
+  .passthrough();
 
 export class Pages {
   private readonly sessions = new Map<string, Session>();
@@ -190,14 +214,42 @@ export class Pages {
     return locator;
   }
 
+  /**
+   * Desktop windows also carry their Multica Computer Use target, matched by
+   * page URL (and title when several windows share one), because input to the
+   * dev application goes through Computer Use in the background.
+   */
   async windows(environmentId: string) {
-    return Promise.all(
+    const environment = await this.environments.get(environmentId);
+    const windows = await Promise.all(
       (await this.pages(environmentId)).map(async ({ windowId, page }) => ({
         windowId,
         title: await page.title(),
         url: page.url(),
       })),
     );
+    if (environment.mode !== "desktop") return windows;
+    const { payload: main } = mainSnapshotSchema.parse(
+      await this.environments.desktopRequest(
+        environmentId,
+        "/snapshot?source=main",
+      ),
+    );
+    return windows.map((window) => {
+      const byUrl = main.windows.filter((item) => item.url === window.url),
+        matches =
+          byUrl.length > 1
+            ? byUrl.filter((item) => item.title === window.title)
+            : byUrl,
+        windowId = matches.length === 1 ? matches[0]!.computerUseWindowId : null;
+      return {
+        ...window,
+        computerUse:
+          main.computerUseAppId && windowId
+            ? { appId: main.computerUseAppId, windowId }
+            : null,
+      };
+    });
   }
 
   async observe(
@@ -301,6 +353,18 @@ export class Pages {
       .catch(() => undefined)
       .then(async () => {
         const parsed = pageActionSchema.parse(action);
+        // Clicks and typing go through Multica Computer Use, matching what a
+        // person does; only scrolling, which it cannot deliver, stays on CDP.
+        if (
+          (await this.environments.get(environmentId)).mode === "desktop" &&
+          !desktopActions.has(parsed.kind)
+        )
+          throw new VerificationError(
+            problem(
+              "unsupportedCapability",
+              "Desktop environments accept scroll and scrollIntoView here; click and type through Multica Computer Use with the computerUse target from page_windows",
+            ),
+          );
         if ("x" in target) {
           const point = pointSchema.parse(target),
             page = await this.page(environmentId, point.windowId);
@@ -336,6 +400,8 @@ export class Pages {
           await element.selectOption(parsed.value, { timeout: 5000 });
         else if (parsed.kind === "pressKey")
           await element.press(parsed.key, { timeout: 5000 });
+        else if (parsed.kind === "scrollIntoView")
+          await element.scrollIntoViewIfNeeded({ timeout: 5000 });
         else {
           await element.scrollIntoViewIfNeeded({ timeout: 5000 });
           const bounds = await element.boundingBox();

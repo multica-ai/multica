@@ -864,7 +864,12 @@ export class Environments {
           [join(checkout, "apps/desktop/scripts/brand-dev-electron.mjs")],
           {
             cwd: checkout,
-            env: tools.env,
+            // Multica Computer Use allows this bundle ID prefix without a dialog.
+            env: {
+              ...tools.env,
+              DESKTOP_APP_SUFFIX: `verification-${id.slice(0, 8)}`,
+              DESKTOP_BUNDLE_ID: `ai.multica.verification.${id}`,
+            },
             log: join(directory, "prepare.log"),
             signal: context.signal,
           },

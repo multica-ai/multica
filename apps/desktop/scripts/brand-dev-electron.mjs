@@ -59,9 +59,17 @@ function plistSet(key, value) {
   }
 }
 
+// The verification host gives each environment its own bundle ID so Computer
+// Use can target that one app; ordinary dev runs keep Electron's stock ID.
+const DESIRED_BUNDLE_ID = process.env.DESKTOP_BUNDLE_ID;
+if (DESIRED_BUNDLE_ID && !/^[A-Za-z0-9.-]+$/.test(DESIRED_BUNDLE_ID)) {
+  throw new Error(`Invalid DESKTOP_BUNDLE_ID: ${DESIRED_BUNDLE_ID}`);
+}
+
 if (
   plistGet("CFBundleName") === DESIRED_NAME &&
-  plistGet("CFBundleDisplayName") === DESIRED_NAME
+  plistGet("CFBundleDisplayName") === DESIRED_NAME &&
+  (!DESIRED_BUNDLE_ID || plistGet("CFBundleIdentifier") === DESIRED_BUNDLE_ID)
 ) {
   process.exit(0);
 }
@@ -75,5 +83,6 @@ writeFileSync(plistPath, original);
 
 plistSet("CFBundleName", DESIRED_NAME);
 plistSet("CFBundleDisplayName", DESIRED_NAME);
+if (DESIRED_BUNDLE_ID) plistSet("CFBundleIdentifier", DESIRED_BUNDLE_ID);
 
 console.log(`[brand-dev-electron] ${plistPath} → CFBundleName="${DESIRED_NAME}"`);

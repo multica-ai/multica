@@ -476,7 +476,7 @@ describe("manual verification protocol integration", () => {
     expect(await request("/health")).toMatchObject({ status: "running" });
   });
 
-  it("operates actual CDP pages by locator, reads elements and returns real screenshot bytes", async () => {
+  it("lists Computer Use targets for desktop windows, operates read-only pages by locator and returns real screenshot bytes", async () => {
     const port = await freePort();
     browser = await chromium.launch({
       headless: true,
@@ -497,24 +497,77 @@ describe("manual verification protocol integration", () => {
       sourceDigest: "fixture",
       apiOrigin: binding.scope.apiOrigin,
     });
-    vi.spyOn(host.environments, "desktopRequest").mockResolvedValue({
-      environmentId,
-    });
+    vi.spyOn(host.environments, "desktopRequest").mockImplementation(
+      async (_id, path) =>
+        path === "/snapshot?source=main"
+          ? {
+              payload: {
+                computerUseAppId: "com.github.Electron",
+                windows: [
+                  {
+                    title: await page.title(),
+                    url: page.url(),
+                    computerUseWindowId: "4321:77",
+                  },
+                ],
+              },
+            }
+          : { environmentId },
+    );
     const windows = await host.pages.windows(environmentId);
     expect(windows).toHaveLength(1);
+    expect(windows[0]).toMatchObject({
+      computerUse: { appId: "com.github.Electron", windowId: "4321:77" },
+    });
     const windowId = windows[0]!.windowId;
     expect((await host.pages.windows(environmentId))[0]!.windowId).toBe(
       windowId,
     );
-    const observed = await host.pages.observe(environmentId);
-    expect(JSON.stringify(observed)).not.toContain("private-password");
-    expect(observed.elements.some((item) => item.testId === "save")).toBe(true);
     const save = {
       windowId,
       locator: { kind: "testId" as const, value: "save" },
     };
+    await expect(
+      host.pages.perform(environmentId, save, { kind: "click" }),
+    ).rejects.toMatchObject({ problem: { code: "unsupportedCapability" } });
+    await page.evaluate(() => {
+      document.body.style.height = "5000px";
+    });
     expect(
-      await host.pages.perform(environmentId, save, { kind: "click" }),
+      await host.pages.perform(
+        environmentId,
+        { windowId, x: 10, y: 10 },
+        { kind: "scroll", deltaX: 0, deltaY: 400 },
+      ),
+    ).toEqual({ performed: true });
+    await expect
+      .poll(() => page.evaluate(() => scrollY))
+      .toBeGreaterThan(0);
+    await page.evaluate(() => scrollTo(0, 0));
+    expect(
+      await host.pages.perform(environmentId, save, { kind: "scrollIntoView" }),
+    ).toEqual({ performed: true });
+    const livePageId = randomUUID();
+    await writeFile(
+      join(host.stateDirectory, "environments", `${livePageId}.json`),
+      JSON.stringify(
+        environmentSchema.parse({
+          ...(await host.environments.get(environmentId)),
+          environmentId: livePageId,
+          mode: "renderer",
+          dataMode: "liveReadOnly",
+        }),
+      ),
+      { mode: 0o600 },
+    );
+    expect(await host.pages.windows(livePageId)).toEqual([
+      { windowId, title: await page.title(), url: page.url() },
+    ]);
+    const observed = await host.pages.observe(environmentId);
+    expect(JSON.stringify(observed)).not.toContain("private-password");
+    expect(observed.elements.some((item) => item.testId === "save")).toBe(true);
+    expect(
+      await host.pages.perform(livePageId, save, { kind: "click" }),
     ).toEqual({ performed: true });
     expect(await host.pages.read(environmentId, save)).toMatchObject({
       count: 1,
@@ -534,11 +587,11 @@ describe("manual verification protocol integration", () => {
       },
     };
     await expect(
-      host.pages.perform(environmentId, twin, { kind: "click" }),
+      host.pages.perform(livePageId, twin, { kind: "click" }),
     ).rejects.toMatchObject({ problem: { code: "invalidInput" } });
     expect(
       await host.pages.perform(
-        environmentId,
+        livePageId,
         { ...twin, index: 1 },
         {
           kind: "click",

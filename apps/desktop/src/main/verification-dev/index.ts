@@ -35,6 +35,23 @@ function sessionFromHost() {
   return session;
 }
 const session = sessionFromHost();
+
+// Computer Use resolves apps by bundle ID; dev Electron keeps the stock ID.
+function bundleId(): string | null {
+  if (process.platform !== "darwin") return null;
+  try {
+    const plist = readFileSync(join(process.execPath, "../../Info.plist"), "utf8");
+    return /<key>CFBundleIdentifier<\/key>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+// macOS media source IDs are "window:<CGWindowID>:0"; Computer Use names a
+// window "<pid>:<CGWindowID>" with the owning process, which is main.
+function computerUseWindowId(window: Electron.BrowserWindow): string | null {
+  const match = /^window:(\d+):/.exec(window.getMediaSourceId());
+  return match && process.platform === "darwin" ? `${process.pid}:${match[1]}` : null;
+}
 type Options = Parameters<
   NonNullable<typeof import("#verification-dev/main").verificationDev>["start"]
 >[0];
@@ -237,6 +254,7 @@ export const verificationDev = {
                       pid: process.pid,
                       userId: options.currentUser(),
                       version: app.getVersion(),
+                      computerUseAppId: bundleId(),
                       windows: options
                         .windows()
                         .filter((window) => !window.isDestroyed())
@@ -245,6 +263,7 @@ export const verificationDev = {
                           title: window.getTitle(),
                           url: window.webContents.getURL(),
                           loading: window.webContents.isLoading(),
+                          computerUseWindowId: computerUseWindowId(window),
                         })),
                     },
             }),

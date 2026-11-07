@@ -78,10 +78,10 @@ interface Problem {
 | `fixture_control` | environmentId、conversationId、action、text、expectedRequestId | fake provider 的状态或操作结果 |
 | `state_read` | environmentId、source、subjectRef、beforeTurnIndex | 来源原始 payload |
 | `events_read` | environmentId、source、subjectRef、after | 来源原始事件页 |
-| `page_windows` | environmentId | 窗口 ID（CDP targetId）、标题、URL |
+| `page_windows` | environmentId | 窗口 ID（CDP targetId）、标题、URL；Desktop 环境另含 `computerUse`（appId、windowId），无法唯一对应时为 null |
 | `page_observe` | environmentId、windowId、frameUrl、offset、limit | 可见的可交互元素 |
 | `page_read` | environmentId、target、limit | 匹配数量，以及每个匹配的可见性、可用性、文本、值、位置 |
-| `page_action` | environmentId、target 或坐标、action | `{ performed: true }` |
+| `page_action` | environmentId、target 或坐标、action | `{ performed: true }`；Desktop 环境只接受 scroll 和 scrollIntoView，其他动作返回 `unsupportedCapability` |
 | `page_screenshot` | environmentId、windowId、fullPage | PNG 图片及 colorScheme、capturedAt |
 
 ## 6. 数据语义
@@ -109,6 +109,8 @@ interface Problem {
 ### 6.3 页面
 
 - 定位器为 testId、text、label、role（可带 name）、css，可附加 frameUrl 和 index。
+- Desktop 环境的点击和输入由调用方经 Multica Computer Use 在后台投递：`computer.getApp(appId)` 后 `app.selectWindow(windowId)`，再观察和操作。Electron 窗口在后台丢弃系统滚轮事件，Computer Use 无法滚动，因此 `page_action` 对 Desktop 环境只执行 scroll 和 scrollIntoView，经 CDP 送达页面，不激活应用；读取和截图也走 CDP。
+- 验证模式的开发 Electron 以不激活的方式显示窗口，自动登录等主进程派发也不聚焦窗口。
 - `page_action` 在定位器匹配多个元素且未传 index 时拒绝；坐标目标只支持 click 和 scroll。
 - 同一环境的页面动作串行执行。动作只说明输入已送达，业务结果由调用方读取。
 - 密码字段的值以 `[REDACTED]` 返回。
