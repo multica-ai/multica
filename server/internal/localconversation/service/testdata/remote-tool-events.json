@@ -1,0 +1,26 @@
+{
+  "messages": [
+    { "seq": 1, "type": "tool_use", "call_id": "a", "tool": "Bash", "input": { "command": "fixture-inspect", "cwd": "/repo" } },
+    { "seq": 2, "type": "tool_use", "call_id": "b", "tool": "exec_command", "input": { "cmd": "fixture-second", "cwd": "/other" } },
+    { "seq": 3, "type": "tool_result", "call_id": "b", "tool": "exec_command", "output": "Second output\n" },
+    { "seq": 4, "type": "tool_result", "call_id": "a", "tool": "Bash", "output": "First output\n" }
+  ],
+  "events": [
+    {
+      "seq": 1, "turn_id": "turn", "turn_seq": 1, "item_id": "remote-turn-a", "type": "item.started", "final": false, "created_at": "2026-11-07T06:00:00Z",
+      "payload": { "kind": "tool_call", "tool": "Bash", "input": { "command": "fixture-inspect", "cwd": "/repo" } }
+    },
+    {
+      "seq": 2, "turn_id": "turn", "turn_seq": 2, "item_id": "remote-turn-b", "type": "item.started", "final": false, "created_at": "2026-11-07T06:00:00Z",
+      "payload": { "kind": "tool_call", "tool": "exec_command", "input": { "cmd": "fixture-second", "cwd": "/other" } }
+    },
+    {
+      "seq": 3, "turn_id": "turn", "turn_seq": 3, "item_id": "remote-turn-b", "type": "item.completed", "final": true, "created_at": "2026-11-07T06:00:00Z",
+      "payload": { "kind": "tool_call", "status": "completed", "tool": "exec_command", "input": { "cmd": "fixture-second", "cwd": "/other" }, "output": "Second output\n" }
+    },
+    {
+      "seq": 4, "turn_id": "turn", "turn_seq": 4, "item_id": "remote-turn-a", "type": "item.completed", "final": true, "created_at": "2026-11-07T06:00:00Z",
+      "payload": { "kind": "tool_call", "status": "completed", "tool": "Bash", "input": { "command": "fixture-inspect", "cwd": "/repo" }, "output": "First output\n" }
+    }
+  ]
+}

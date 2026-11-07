@@ -390,18 +390,7 @@ func (s *Service) mirrorRemote(ctx context.Context, cloud cloudAgents, conversat
 	raw, err := cloud.Request(ctx, http.MethodGet, "/api/tasks/"+task+"/messages", nil)
 	if err == nil {
 		messages, _ := raw.([]any)
-		var events []store.NewEvent
-		now := s.opts.Now()
-		last := state.MirroredSeq
-		for _, m := range messages {
-			msg, _ := m.(map[string]any)
-			seq, _ := msg["seq"].(float64)
-			if int64(seq) <= state.MirroredSeq {
-				continue
-			}
-			events = append(events, remoteEvents(turnID, msg, now)...)
-			last = max(last, int64(seq))
-		}
+		events, last := remoteEvents(turnID, messages, state.MirroredSeq, s.opts.Now())
 		if last > state.MirroredSeq {
 			state.MirroredSeq = last
 			data, _ := json.Marshal(state)
@@ -441,8 +430,30 @@ func (s *Service) mirrorRemote(ctx context.Context, cloud cloudAgents, conversat
 	return false
 }
 
-// remoteEvents maps one cloud task message to items of the local turn.
-func remoteEvents(turnID string, msg map[string]any, at time.Time) []store.NewEvent {
+// remoteEvents reads the task's ordered history, emitting only new messages.
+// Completed items are full states, so rebuild tool inputs even from messages
+// mirrored before the cursor or a daemon restart.
+func remoteEvents(turnID string, messages []any, after int64, at time.Time) ([]store.NewEvent, int64) {
+	uses := map[string]map[string]any{}
+	var events []store.NewEvent
+	last := after
+	for _, raw := range messages {
+		msg, _ := raw.(map[string]any)
+		callID, _ := msg["call_id"].(string)
+		if msg["type"] == "tool_use" && callID != "" {
+			uses[callID] = msg
+		}
+		seq, _ := msg["seq"].(float64)
+		if int64(seq) <= after {
+			continue
+		}
+		events = append(events, remoteMessageEvents(turnID, msg, uses[callID], at)...)
+		last = max(last, int64(seq))
+	}
+	return events, last
+}
+
+func remoteMessageEvents(turnID string, msg, toolUse map[string]any, at time.Time) []store.NewEvent {
 	event := func(item, typ string, final bool, payload map[string]any) store.NewEvent {
 		data, _ := json.Marshal(payload)
 		return store.NewEvent{TurnID: turnID, ItemID: item, Type: typ, Final: final, Payload: data, CreatedAt: at}
@@ -464,7 +475,14 @@ func remoteEvents(turnID string, msg map[string]any, at time.Time) []store.NewEv
 		return []store.NewEvent{event(item, "item.started", false, map[string]any{"kind": "tool_call", "tool": tool, "input": msg["input"]})}
 	case "tool_result":
 		output, _ := msg["output"].(string)
-		return []store.NewEvent{event(item, "item.completed", true, map[string]any{"kind": "tool_call", "status": "completed", "tool": tool, "input": msg["input"], "output": output})}
+		input := msg["input"]
+		if input == nil {
+			input = toolUse["input"]
+		}
+		if tool == "" {
+			tool, _ = toolUse["tool"].(string)
+		}
+		return []store.NewEvent{event(item, "item.completed", true, map[string]any{"kind": "tool_call", "status": "completed", "tool": tool, "input": input, "output": output})}
 	case "error":
 		return []store.NewEvent{event(item, "item.completed", true, map[string]any{"kind": "error", "status": "failed", "error": map[string]any{"kind": "agent_error", "message": content}})}
 	}

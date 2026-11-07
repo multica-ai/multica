@@ -354,13 +354,11 @@ describe("ConversationModel", () => {
       status: "completed",
       payload: { toolName: "Edit" }
     });
-    expect(JSON.parse(byId.get("it-4")!.payload.output as string)[0].path).toBe(
-      "src/a.ts"
-    );
+    expect(byId.get("it-4")!.payload.output).toMatchObject({ changes: [{ path: "src/a.ts" }] });
     expect(byId.get("it-5")).toMatchObject({
       kind: "tool_call",
       status: "failed",
-      payload: { toolName: "mcp__multica__search_issues", output: "timeout" }
+      payload: { toolName: "mcp__multica__search_issues", output: { text: "timeout" } }
     });
     expect(byId.get("it-6")!.payload.attachments).toEqual([
       { attachmentId: "att-1", mimeType: "image/png" }

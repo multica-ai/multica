@@ -136,15 +136,21 @@ export class TurnModel {
         };
       }
       case "command":
-        return toolCall(item.id, status, "Bash", { command: text(state.command) }, item.output);
+        return toolCall(item.id, status, "Bash", {
+          command: text(state.command), ...(text(state.cwd) ? { cwd: state.cwd } : {}),
+        }, {
+          text: item.output,
+          ...(typeof state.exit_code === "number" ? { exitCode: state.exit_code } : {}),
+          ...(typeof state.duration_ms === "number" ? { durationMs: state.duration_ms } : {}),
+        }, state.error);
       case "file_change":
-        return toolCall(item.id, status, "Edit", { changes: state.changes ?? [] }, JSON.stringify(state.changes ?? []));
+        return toolCall(item.id, status, "Edit", { changes: state.changes ?? [] }, { changes: state.changes ?? [] }, state.error);
       case "tool_call": {
         const tool = text(state.tool);
         const server = text(state.server);
         if (server === CONTEXT_SERVER && tool === "ask_user_question") return null;
         const failure = state.error ? errorMessage(state.error) : "";
-        return toolCall(item.id, status, server ? `mcp__${server}__${tool}` : tool || "Tool", state.input, item.output || failure);
+        return toolCall(item.id, status, server ? `mcp__${server}__${tool}` : tool || "Tool", state.input, item.output || failure, state.error);
       }
       case "image": {
         const attachmentId = text(state.attachment_id);
@@ -161,11 +167,27 @@ export class TurnModel {
   }
 }
 
-function toolCall(id: string, status: string, toolName: string, input: unknown, output: string): ItemMessage {
+function toolCall(id: string, status: string, toolName: string, input: unknown, output: string | Record<string, unknown>, error?: unknown): ItemMessage {
+  const failure = record(error);
   return {
     messageId: id, kind: "tool_call", status,
-    payload: { callId: id, toolName, ...(input !== undefined ? { input } : {}), ...(status === "running" && !output ? {} : { output }) },
+    payload: {
+      callId: id, toolName, ...(input !== undefined ? { input } : {}),
+      ...(status === "running" && !output ? {} : { output: typeof output === "string" ? toolOutput(toolName, output) : output }),
+      ...(failure ? { error: { ...failure, text: errorMessage(failure) } } : {}),
+    },
   };
+}
+
+function toolOutput(toolName: string, output: string): Record<string, unknown> {
+  // ImageGeneration reports a JSON object; command and MCP output remain literal text.
+  if (toolName === "ImageGeneration") {
+    try {
+      const value = record(JSON.parse(output));
+      if (value) return value;
+    } catch { /* Retain malformed output as diagnostic text. */ }
+  }
+  return { text: output };
 }
 
 function backgroundTask(item: ItemModel, locale: ConversationLocale, items: readonly ItemModel[]): ItemMessage {
@@ -209,5 +231,5 @@ function backgroundTask(item: ItemModel, locale: ConversationLocale, items: read
 }
 
 function itemStatus(status: string): string {
-  return status === "in_progress" ? "running" : status === "completed" ? "completed" : "failed";
+  return status === "in_progress" ? "running" : status === "completed" ? "completed" : status === "cancelled" ? "canceled" : "failed";
 }
