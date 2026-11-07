@@ -342,6 +342,31 @@
       "timeout": "超時"
     }
   },
+  "agent_cli": {
+    "title": "Agent CLI",
+    "loading": "正在載入 CLI 狀態…",
+    "load_failed": "無法載入 CLI 狀態。",
+    "not_installed": "未安裝",
+    "manual_install": "請手動安裝或升級",
+    "latest": "最新",
+    "update": "更新",
+    "retry": "重試",
+    "unknown_error": "未知錯誤",
+    "initiate_failed": "無法啟動升級",
+    "status": {
+      "up_to_date": "已是最新",
+      "outdated": "有可用更新",
+      "missing": "未安裝",
+      "unknown": "版本未知"
+    },
+    "stage": {
+      "queued": "排隊中",
+      "draining": "等待任務結束",
+      "upgrading": "升級中",
+      "succeeded": "已更新",
+      "failed": "更新失敗"
+    }
+  },
   "charts": {
     "heatmap_less": "少",
     "heatmap_more": "多",

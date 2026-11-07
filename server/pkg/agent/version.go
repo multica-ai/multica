@@ -180,6 +180,29 @@ func parseSemver(raw string) (semver, error) {
 	return semver{Major: major, Minor: minor, Patch: patch}, nil
 }
 
+// CompareVersions compares the numeric major.minor.patch of a and b.
+// It returns -1 when a is older, 0 when the triples match, and 1 when a is
+// newer. A leading "v", prerelease, and build metadata are ignored. An
+// unparsable side returns an error.
+func CompareVersions(a, b string) (int, error) {
+	pa, err := parseSemver(a)
+	if err != nil {
+		return 0, err
+	}
+	pb, err := parseSemver(b)
+	if err != nil {
+		return 0, err
+	}
+	switch {
+	case pa.lessThan(pb):
+		return -1, nil
+	case pb.lessThan(pa):
+		return 1, nil
+	default:
+		return 0, nil
+	}
+}
+
 // lessThan returns true if v < other.
 func (v semver) lessThan(other semver) bool {
 	if v.Major != other.Major {

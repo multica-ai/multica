@@ -50,6 +50,31 @@ func TestParseSemver(t *testing.T) {
 	}
 }
 
+func TestCompareVersions(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want int
+	}{
+		{"1.2.3", "1.2.3", 0},
+		{"v1.2.3", "1.2.4", -1},
+		{"1.3.0", "1.2.9", 1},
+		{"2.0.0", "1.9.9", 1},
+	}
+	for _, tt := range tests {
+		got, err := CompareVersions(tt.a, tt.b)
+		if err != nil {
+			t.Errorf("CompareVersions(%q, %q) error = %v", tt.a, tt.b, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("CompareVersions(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
+		}
+	}
+	if _, err := CompareVersions("latest", "1.0.0"); err == nil {
+		t.Fatal("CompareVersions(latest, 1.0.0) error = nil")
+	}
+}
+
 func TestSemverLessThan(t *testing.T) {
 	tests := []struct {
 		a, b semver

@@ -49,6 +49,8 @@ import {
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+  RuntimeCLIStatusResponseSchema,
+  AgentCLIUpgradeJobSchema,
   RuntimeModelListRequestSchema,
   SearchProjectsResponseSchema,
   RuntimeHourlyActivityListSchema,
@@ -2449,6 +2451,39 @@ describe("TaskMessageListSchema", () => {
   });
 });
 
+
+describe("agent CLI status schema", () => {
+  it("fills missing fields and keeps an unknown status string", () => {
+    const parsed = RuntimeCLIStatusResponseSchema.parse({
+      clis: [{ cli: "codex", status: "brand_new" }, "skip-me"],
+    });
+    expect(parsed.runtime_id).toBe("");
+    expect(parsed.clis).toHaveLength(1);
+    expect(parsed.clis[0]).toMatchObject({
+      cli: "codex",
+      current: "",
+      latest: "",
+      status: "brand_new",
+      upgradable: false,
+    });
+  });
+
+  it("rejects a non-object body so parseWithFallback can return its fallback", () => {
+    expect(RuntimeCLIStatusResponseSchema.safeParse(null).success).toBe(false);
+    expect(RuntimeCLIStatusResponseSchema.safeParse([]).success).toBe(false);
+  });
+
+  it("defaults a missing upgrade job to failed and keeps unknown fields", () => {
+    const parsed = AgentCLIUpgradeJobSchema.parse({ job_id: "job-1" });
+    expect(parsed).toMatchObject({
+      job_id: "job-1",
+      runtime_id: "",
+      cli: "",
+      status: "failed",
+    });
+    expect(AgentCLIUpgradeJobSchema.safeParse("nope").success).toBe(false);
+  });
+});
 
 describe("AgentActivityBucketListSchema duration", () => {
   const bucket = { agent_id: "a", bucket_at: "2026-09-24T00:00:00Z", task_count: 201,

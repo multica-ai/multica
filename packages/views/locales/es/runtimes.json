@@ -353,6 +353,31 @@
       "timeout": "Tiempo agotado"
     }
   },
+  "agent_cli": {
+    "title": "CLI de agentes",
+    "loading": "Cargando el estado de la CLI…",
+    "load_failed": "No se ha podido cargar el estado de la CLI.",
+    "not_installed": "No instalada",
+    "manual_install": "Instalar o actualizar manualmente",
+    "latest": "Última",
+    "update": "Actualizar",
+    "retry": "Reintentar",
+    "unknown_error": "Error desconocido",
+    "initiate_failed": "No se ha podido iniciar la actualización",
+    "status": {
+      "up_to_date": "Al día",
+      "outdated": "Actualización disponible",
+      "missing": "No instalada",
+      "unknown": "Versión desconocida"
+    },
+    "stage": {
+      "queued": "En cola",
+      "draining": "Esperando a que terminen las ejecuciones",
+      "upgrading": "Actualizando",
+      "succeeded": "Actualizada",
+      "failed": "La actualización falló"
+    }
+  },
   "charts": {
     "heatmap_less": "Menos",
     "heatmap_more": "Más",

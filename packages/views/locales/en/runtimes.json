@@ -353,6 +353,31 @@
       "timeout": "Timeout"
     }
   },
+  "agent_cli": {
+    "title": "Agent CLIs",
+    "loading": "Loading CLI status…",
+    "load_failed": "Couldn't load CLI status.",
+    "not_installed": "Not installed",
+    "manual_install": "Install or upgrade manually",
+    "latest": "Latest",
+    "update": "Update",
+    "retry": "Retry",
+    "unknown_error": "Unknown error",
+    "initiate_failed": "Couldn't start the upgrade",
+    "status": {
+      "up_to_date": "Up to date",
+      "outdated": "Update available",
+      "missing": "Not installed",
+      "unknown": "Version unknown"
+    },
+    "stage": {
+      "queued": "Queued",
+      "draining": "Waiting for tasks to finish",
+      "upgrading": "Upgrading",
+      "succeeded": "Updated",
+      "failed": "Update failed"
+    }
+  },
   "charts": {
     "heatmap_less": "Less",
     "heatmap_more": "More",
