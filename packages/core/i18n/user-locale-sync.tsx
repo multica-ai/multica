@@ -17,6 +17,12 @@ import { SUPPORTED_LOCALES, type SupportedLocale } from "./types";
 // Loop safety: reload only fires when user.language is a supported locale AND
 // differs from the active i18n.language. After reload, pickLocale reads the
 // freshly-persisted value from the adapter, locales match, effect no-ops.
+//
+// It seeds; it does not correct. A device that already carries a choice keeps
+// it, because this runs on every page: a reader who picks a language on a page
+// has just written that exact value to the adapter, and overwriting it from the
+// account preference is what made such a pick revert — the page reloaded and
+// came back in the language they had just switched away from.
 export function UserLocaleSync() {
   const userLanguage = useAuthStore((s) => s.user?.language ?? null);
   const adapter = useLocaleAdapter();
@@ -28,6 +34,7 @@ export function UserLocaleSync() {
       return;
     }
     if (userLanguage === i18n.language) return;
+    if (adapter.getUserChoice()) return;
     adapter.persist(userLanguage as SupportedLocale);
     if (typeof window !== "undefined") window.location.reload();
   }, [userLanguage, i18n.language, adapter]);
