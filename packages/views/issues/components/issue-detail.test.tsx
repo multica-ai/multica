@@ -1431,14 +1431,14 @@ describe("IssueDetail (shared)", () => {
       </I18nProvider>
     );
     const view = render(detail(true));
-    fireEvent.click(await screen.findByRole("button", { name: /^Metadata\b/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "View metadata" }));
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
 
     view.rerender(detail(false));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     view.rerender(detail(true));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^Metadata\b/ }));
+    fireEvent.click(screen.getByRole("button", { name: "View metadata" }));
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
