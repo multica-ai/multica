@@ -22,6 +22,7 @@ interface DesktopAPI {
   localFileContextMenu: import("../shared/local-file-context-menu").LocalFileContextMenuClient;
   terminalCli: import("../shared/terminal-cli").TerminalCliClient;
   developerLogs: import("../shared/developer-logs").DeveloperLogsClient;
+  computerUseApprovals: import("../shared/computer-use-approvals").ComputerUseApprovalsClient;
   settingsHost?: import("../shared/settings-host").SettingsHostClient;
   localV2: import("../shared/local-v2-bridge").LocalV2Bridge;
   sideWorkspace: import("../shared/side-workspace").SideWorkspaceClient;

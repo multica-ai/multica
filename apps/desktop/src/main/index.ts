@@ -772,6 +772,17 @@ if (!gotTheLock) {
       if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== event.sender.mainFrame || !developerLogs) throw new Error("Developer logs require the active main window");
       return developerLogs.save(scope);
     });
+    const computerUseApprovals = (event: Electron.IpcMainInvokeEvent) => {
+      if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error("Computer Use settings require the active main window");
+      return computerDesktop?.approvals;
+    };
+    const noComputerUse = { available: false, apps: [] };
+    ipcMain.handle("computer-use:approvals:list", (event) => computerUseApprovals(event)?.list() ?? noComputerUse);
+    ipcMain.handle("computer-use:approvals:remove", (event, appId: unknown) => {
+      if (typeof appId !== "string" || !appId || appId.length > 200) throw new Error("Invalid app ID");
+      return computerUseApprovals(event)?.remove(appId) ?? noComputerUse;
+    });
+    ipcMain.handle("computer-use:approvals:clear", (event) => computerUseApprovals(event)?.clear() ?? noComputerUse);
     let resourcePreview: ResourceWebPreview | undefined;
     const getResourcePreview = () => {
       if (!mainWindow || mainWindow.isDestroyed()) throw new Error("Main window is unavailable");

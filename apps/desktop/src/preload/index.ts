@@ -116,6 +116,11 @@ const desktopAPI = {
   developerLogs: {
     export: (scope) => ipcRenderer.invoke("developer-logs:export", scope),
   } satisfies import("../shared/developer-logs").DeveloperLogsClient,
+  computerUseApprovals: {
+    list: () => ipcRenderer.invoke("computer-use:approvals:list"),
+    remove: (appId) => ipcRenderer.invoke("computer-use:approvals:remove", appId),
+    clear: () => ipcRenderer.invoke("computer-use:approvals:clear"),
+  } satisfies import("../shared/computer-use-approvals").ComputerUseApprovalsClient,
   settingsHost: {
     subscribe: (listener) => {
       const handler = (_event: Electron.IpcRendererEvent, request: import("../shared/settings-host").SettingsHostMessage) => listener(request);

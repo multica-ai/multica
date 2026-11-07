@@ -1396,6 +1396,16 @@
       "save": "Save ports",
       "confirm_title": "Allow access to these local services?",
       "confirm_description": "Devices on this account can send requests to services on ports {{ports}}, including requests that change data."
+    },
+    "computer_use": {
+      "title": "Computer Use",
+      "apps": "Apps that don't ask again",
+      "apps_description": "Conversations can operate these apps without asking. Remove one to be asked each turn again.",
+      "empty": "No apps yet. Check \"Don't ask again for this app\" when allowing access.",
+      "remove": "Remove",
+      "remove_label": "Remove {{name}}",
+      "clear": "Remove all",
+      "failed": "Could not update the apps. Try again."
     }
   },
   "members": {

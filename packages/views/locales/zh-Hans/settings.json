@@ -1386,6 +1386,16 @@
       "save": "保存端口",
       "confirm_title": "允许访问这些本地服务？",
       "confirm_description": "同一账号的设备可以向端口 {{ports}} 上的服务发送请求，包括会修改数据的请求。"
+    },
+    "computer_use": {
+      "title": "电脑操作",
+      "apps": "不再询问的应用",
+      "apps_description": "会话可直接操作这些应用，不再弹出授权。移除后，每轮会重新询问。",
+      "empty": "暂无应用。授权时勾选“不再询问此应用”即可添加。",
+      "remove": "移除",
+      "remove_label": "移除 {{name}}",
+      "clear": "全部移除",
+      "failed": "无法更新应用列表，请重试。"
     }
   },
   "members": {

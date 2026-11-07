@@ -5,7 +5,7 @@ import "strings"
 // CapabilityVersion is the Computer capability contract this daemon speaks.
 // It must equal packages/computer-use/contract/computer.json; the contract
 // test enforces that and the version-bump rules.
-const CapabilityVersion = "1.0.0"
+const CapabilityVersion = "1.0.1"
 
 // Compatible reports whether two semver versions interoperate: major and
 // minor must match, and a patch difference is compatible.
