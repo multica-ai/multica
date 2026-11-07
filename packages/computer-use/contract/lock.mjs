@@ -13,8 +13,10 @@ const majorMinor = (version) => version.split(".").slice(0, 2).join(".");
 
 /** The contract state of the working tree. */
 export function currentEntry() {
-  const contract = resolve(here, "computer.json");
-  return { version: JSON.parse(readFileSync(contract, "utf8")).version, contractSha256: sha256(contract), promptsSha256: sha256(resolve(here, "../prompts.mjs")) };
+  const { version, ...contract } = JSON.parse(readFileSync(resolve(here, "computer.json"), "utf8"));
+  // The version is excluded so a prompt-only patch bump keeps the contract hash.
+  const contractSha256 = createHash("sha256").update(JSON.stringify(contract)).digest("hex");
+  return { version, contractSha256, promptsSha256: sha256(resolve(here, "../prompts.mjs")) };
 }
 
 /** Problems with appending next after previous; empty when the bump is valid. */

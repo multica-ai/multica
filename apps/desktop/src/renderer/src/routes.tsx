@@ -33,8 +33,9 @@ import { ChatPage } from "@multica/views/chat";
 import { LocalConversationFlowPage } from "./pages/local-conversation-flow";
 import { SettingsPage } from "@multica/views/settings";
 import { useT } from "@multica/views/i18n";
-import { Download, FlaskConical, MonitorSmartphone, Server } from "lucide-react";
+import { Download, FlaskConical, MonitorSmartphone, MousePointerClick, Server } from "lucide-react";
 import { LabsSettingsTab } from "./components/labs-settings-tab";
+import { ComputerUseSettingsTab } from "./components/computer-use-settings-tab";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 import { DeviceLinkSettingsTab, useDeviceLinkSetting } from "./components/device-link-settings-tab";
 import { UpdatesSettingsTab } from "./components/updates-settings-tab";
@@ -65,6 +66,13 @@ function DesktopSettingsRoute() {
           icon: Server,
           content: <DaemonSettingsTab />,
         },
+        // Computer Use runs on macOS only.
+        ...(window.desktopAPI.appInfo.os === "macos" ? [{
+          value: "computer-use",
+          label: t(($) => $.desktop.computer_use.title),
+          icon: MousePointerClick,
+          content: <ComputerUseSettingsTab />,
+        }] : []),
         ...(deviceLink.data?.available ? [{
           value: "device-link",
           label: t(($) => $.desktop.device_link.title),

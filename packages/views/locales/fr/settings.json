@@ -1396,6 +1396,16 @@
       "save": "Enregistrer les ports",
       "confirm_title": "Autoriser l’accès à ces services locaux ?",
       "confirm_description": "Les appareils du même compte peuvent envoyer des requêtes aux services des ports {{ports}}, y compris des requêtes modifiant les données."
+    },
+    "computer_use": {
+      "title": "Contrôle de l'ordinateur",
+      "apps": "Apps sans nouvelle demande",
+      "apps_description": "Les conversations peuvent contrôler ces apps sans demander. Retirez-en une pour que l'autorisation soit redemandée à chaque tour.",
+      "empty": "Aucune app pour l'instant. Cochez « Ne plus demander pour cette app » lors de l'autorisation.",
+      "remove": "Retirer",
+      "remove_label": "Retirer {{name}}",
+      "clear": "Tout retirer",
+      "failed": "Impossible de mettre à jour les apps. Réessayez."
     }
   },
   "members": {

@@ -1386,6 +1386,16 @@
       "save": "儲存連接埠",
       "confirm_title": "允許存取這些本機服務？",
       "confirm_description": "同一帳號的裝置可以向連接埠 {{ports}} 上的服務傳送請求，包括會修改資料的請求。"
+    },
+    "computer_use": {
+      "title": "電腦操作",
+      "apps": "不再詢問的應用程式",
+      "apps_description": "對話可直接操作這些應用程式，不再彈出授權。移除後，每輪會重新詢問。",
+      "empty": "尚無應用程式。授權時勾選「不再詢問此應用程式」即可加入。",
+      "remove": "移除",
+      "remove_label": "移除 {{name}}",
+      "clear": "全部移除",
+      "failed": "無法更新應用程式清單，請重試。"
     }
   },
   "members": {

@@ -24,13 +24,23 @@
 | `fixture_control` | 同步 | 查看 fake provider，或 release/chunk/fail 当前请求 |
 | `state_read` | 同步 | 原样返回一个来源的当前状态：daemon 会话快照（`beforeTurnIndex` 读取更早轮次）、Electron main、renderer 会话模型、后端事项/项目、只读页面运行时 |
 | `events_read` | 同步 | 按 cursor 读取 daemon 持久事件、main 诊断缓冲或只读页面事件，原样返回 generation、cursor、保留范围 |
-| `page_windows` | 同步 | 列出窗口，窗口 ID 是 CDP targetId |
+| `page_windows` | 同步 | 列出窗口，窗口 ID 是 CDP targetId；Desktop 窗口附带 Multica Computer Use 目标 `computerUse` |
 | `page_observe` | 同步 | 列出窗口内可见的可交互元素 |
 | `page_read` | 同步 | 按定位器读取匹配数量及每个匹配的可见性、可用性、文本、值、位置 |
-| `page_action` | 同步 | 对定位器匹配项或窗口坐标执行 click/fill/select/pressKey/scroll；只报告输入已送达 |
+| `page_action` | 同步 | 对定位器匹配项或窗口坐标执行 click/fill/select/pressKey/scroll/scrollIntoView；Desktop 环境只接受 scroll 和 scrollIntoView；只报告输入已送达 |
 | `page_screenshot` | 同步 | 截取窗口并直接返回图片 |
 
 窗口参数省略时使用第一个窗口。定位器支持 testId、text、label、role、css；匹配多个元素时 `page_action` 要求传 `index`。
+
+验证模式的开发 Electron 以不激活的方式打开窗口，自动登录也不聚焦窗口。Desktop 环境的点击和输入由调用方用 Multica Computer Use（`computer_execute`）在后台完成；Electron 窗口在后台丢弃系统滚轮事件，滚动改用 `page_action` 的 scroll 或 scrollIntoView，经 CDP 送达页面，不激活应用。读取和截图使用 `page_read`、`page_observe`、`page_screenshot`：
+
+```javascript
+let app = await computer.getApp(target.appId); // page_windows 返回的 computerUse
+await app.selectWindow(target.windowId);       // "<pid>:<CGWindowID>"
+let state = await app.observe();
+```
+
+宿主为每个 Desktop 环境设置专属 bundle ID `ai.multica.verification.<环境 ID>`，Multica Computer Use 对它不显示授权框，`getApp` 能唯一定位这个环境。Computer Use 的 `app.scroll` 对 Electron 窗口返回 `background_unavailable`，请改用 `page_action`。
 
 异步工具的 requestId 用于去重：同一 requestId 只对应一种输入，响应丢失时用 `job_query` 按 requestId 查询原任务，不要换 ID 重放。同步工具不经过任务账本。
 
