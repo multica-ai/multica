@@ -787,6 +787,8 @@
     "cancel_task_aria": "取消运行",
     "retry_task_tooltip": "重试运行",
     "retry_task_aria": "重试运行",
+    "retry_resume": "继续上次的会话",
+    "retry_fresh": "重新开始",
     "retry_failed": "重试运行失败",
     "retry_blocked": "未重试——你没有该智能体的使用权限",
     "transcript_tooltip": "查看记录",

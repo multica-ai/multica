@@ -787,6 +787,8 @@
     "cancel_task_aria": "実行をキャンセル",
     "retry_task_tooltip": "実行を再試行",
     "retry_task_aria": "実行を再試行",
+    "retry_resume": "前回のセッションを続ける",
+    "retry_fresh": "最初からやり直す",
     "retry_failed": "実行を再試行できませんでした",
     "retry_blocked": "再試行されませんでした — このエージェントを使用する権限がありません",
     "transcript_tooltip": "トランスクリプトを表示",
