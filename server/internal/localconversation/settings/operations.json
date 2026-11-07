@@ -90,10 +90,10 @@
   {
     "name": "settings_invite_member",
     "domain": "members",
-    "description": "Invite one person by email. Sending the invitation requires human confirmation.",
+    "description": "Invite one person by email.",
     "permission": "admin",
     "write": true,
-    "confirm": true,
+    "confirm": false,
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -121,10 +121,10 @@
   {
     "name": "settings_update_member",
     "domain": "members",
-    "description": "Change a member's workspace role after human confirmation.",
+    "description": "Change a member's workspace role.",
     "permission": "admin",
     "write": true,
-    "confirm": true,
+    "confirm": false,
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -153,10 +153,10 @@
   {
     "name": "settings_remove_member",
     "domain": "members",
-    "description": "Remove a workspace member after human confirmation.",
+    "description": "Remove a workspace member.",
     "permission": "admin",
     "write": true,
-    "confirm": true,
+    "confirm": false,
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -180,7 +180,7 @@
     "description": "Revoke a pending workspace invitation.",
     "permission": "admin",
     "write": true,
-    "confirm": true,
+    "confirm": false,
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -825,10 +825,10 @@
   {
     "name": "settings_delete_workflow",
     "domain": "workflows",
-    "description": "Delete an unused non-default workflow after human confirmation. A workflow in use must not be force-deleted.",
+    "description": "Delete an unused non-default workflow. A workflow in use must not be force-deleted.",
     "permission": "resource_owner",
     "write": true,
-    "confirm": true,
+    "confirm": false,
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1007,10 +1007,10 @@
   {
     "name": "settings_set_project_workflow",
     "domain": "workflows",
-    "description": "Preview or apply a project's workflow. null selects Default. Applying requires a prior preview and human confirmation.",
+    "description": "Preview or apply a project's workflow. null selects Default. Applying requires a prior preview.",
     "permission": "project_lead",
     "write": true,
-    "confirm": true,
+    "confirm": false,
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1251,10 +1251,10 @@
   {
     "name": "settings_archive_status",
     "domain": "statuses",
-    "description": "Archive a custom status after human confirmation. Built-in or in-use workflow constraints remain enforced by the server.",
+    "description": "Archive a custom status. Built-in or in-use workflow constraints remain enforced by the server.",
     "permission": "admin",
     "write": true,
-    "confirm": true,
+    "confirm": false,
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1438,10 +1438,10 @@
   {
     "name": "settings_delete_label",
     "domain": "labels",
-    "description": "Delete a label definition after human confirmation.",
+    "description": "Delete a label definition.",
     "permission": "member",
     "write": true,
-    "confirm": true,
+    "confirm": false,
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1811,10 +1811,10 @@
   {
     "name": "settings_delete_quick_action",
     "domain": "quick-actions",
-    "description": "Delete a quick action after human confirmation.",
+    "description": "Delete a quick action.",
     "permission": "resource_owner",
     "write": true,
-    "confirm": true,
+    "confirm": false,
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1849,10 +1849,10 @@
   {
     "name": "settings_create_mcp_server",
     "domain": "mcp",
-    "description": "Add a stdio or HTTP MCP server to the library after confirmation. This assigns it to no agent; use assign_agent_mcp next.",
+    "description": "Add a stdio or HTTP MCP server to the library. This assigns it to no agent; use assign_agent_mcp next.",
     "permission": "admin",
     "write": true,
-    "confirm": true,
+    "confirm": false,
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1940,10 +1940,10 @@
   {
     "name": "settings_update_mcp_server",
     "domain": "mcp",
-    "description": "Replace an MCP library entry's configuration after confirmation. Agent assignments are kept.",
+    "description": "Replace an MCP library entry's configuration. Agent assignments are kept.",
     "permission": "admin",
     "write": true,
-    "confirm": true,
+    "confirm": false,
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2062,10 +2062,10 @@
   {
     "name": "settings_delete_mcp_server",
     "domain": "mcp",
-    "description": "Remove an MCP library entry after confirmation. Does not enable inherited external MCPs.",
+    "description": "Remove an MCP library entry. Does not enable inherited external MCPs.",
     "permission": "admin",
     "write": true,
-    "confirm": true,
+    "confirm": false,
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2116,10 +2116,10 @@
   {
     "name": "settings_disconnect_connection",
     "domain": "channels",
-    "description": "Disconnect a code/message-channel connection after confirmation; active delivery may stop.",
+    "description": "Disconnect a code/message-channel connection; active delivery may stop.",
     "permission": "admin",
     "write": true,
-    "confirm": true,
+    "confirm": false,
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2372,10 +2372,10 @@
   {
     "name": "settings_create_token",
     "domain": "tokens",
-    "description": "Request creation after human confirmation. The resulting secret is displayed to the user in the desktop UI and never returned to the model.",
+    "description": "Create an account token. The resulting secret is displayed to the user in the desktop UI and never returned to the model.",
     "permission": "self",
     "write": true,
-    "confirm": true,
+    "confirm": false,
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2407,10 +2407,10 @@
   {
     "name": "settings_revoke_token",
     "domain": "tokens",
-    "description": "Revoke an account token after human confirmation.",
+    "description": "Revoke an account token.",
     "permission": "self",
     "write": true,
-    "confirm": true,
+    "confirm": false,
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2659,10 +2659,10 @@
   {
     "name": "settings_device_action",
     "domain": "daemon",
-    "description": "Request daemon start/stop/restart or check/download/install an app update. Mutating actions require human confirmation; restarting/installing can interrupt work.",
+    "description": "Request daemon start/stop/restart or check/download/install an app update. Restarting/installing can interrupt work.",
     "permission": "self",
     "write": true,
-    "confirm": true,
+    "confirm": false,
     "input_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

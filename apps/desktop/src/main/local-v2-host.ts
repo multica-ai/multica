@@ -18,8 +18,8 @@ const daemonScope = z.object({ workspace_id: z.string(), user_id: z.string() });
 const settingsPayload = z.object({ operation: z.string().regex(/^settings_[a-z_]+$/), scope: daemonScope, input: z.record(z.string(), z.unknown()), impact: z.unknown().optional(), source: z.string().max(200).optional() });
 
 /**
- * The write a confirmed operation performs, built here from the operation
- * and input the dialog shows. Host requests reach main through the
+ * The write a Settings operation performs, built here from the operation
+ * and validated input. Host requests reach main through the
  * renderer, so a request the daemon sent along is never applied.
  */
 export function settingsApply(operation: string, scope: SettingsScope, input: Record<string, unknown>): SettingsRequest | null {
@@ -34,7 +34,7 @@ const HOST_TIMEOUT_MS = 90_000;
 const VIEW_SETTINGS = new Set(["settings_open", "settings_assert_scope", "settings_cancel", "settings_capabilities", "settings_refresh"]);
 
 /**
- * Host requests from another device's agents. Settings confirmations and
+ * Host requests from another device's agents. Settings writes and
  * views happen here, with this Desktop's account, and Side control acts on
  * that device's page here; this device's own settings and logs are not for
  * another device.

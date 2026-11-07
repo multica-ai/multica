@@ -6,8 +6,8 @@ export interface SettingsHostRequest { operation: string; scope: SettingsScope; 
 export type SettingsConfirmRequest = SettingsHostRequest & { impact?: unknown; source?: string };
 export type SettingsApplyOutcome = { approved: false } | { approved: true; raw: unknown };
 /**
- * Asks a human and, only on approval, performs `apply` on the host side, so
- * the caller can never turn a forged approval into a write. `apply` is null
+ * Runs the host acceptance check before performing `apply` on the host side.
+ * Desktop uses this check to validate scope without a user approval dialog. `apply` is null
  * for host-only operations, which the caller runs through `host` afterwards.
  */
 export type ConfirmAndApply = (request: SettingsConfirmRequest, apply: SettingsRequest | null, signal: AbortSignal) => Promise<SettingsApplyOutcome>;

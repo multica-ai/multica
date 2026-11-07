@@ -7,7 +7,7 @@ const request = (operation: string, input: Record<string, unknown> = {}) => ({ o
 const apply = { method: "POST", path: "/api/x", body: {} } as never;
 
 describe("confirmThenApply", () => {
-  it("writes only after a human approves", async () => {
+  it("writes only after the host accepts the request", async () => {
     const write = vi.fn(async () => ({ id: "w1" }));
     const declined = confirmThenApply({ confirm: async () => false, request: write });
     expect(await declined(request("settings_create_workflow"), apply, new AbortController().signal)).toEqual({ approved: false });

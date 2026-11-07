@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -17,6 +18,9 @@ func TestEveryOperationHasARouteOrIsHostOnly(t *testing.T) {
 
 	names := map[string]bool{}
 	for _, op := range Operations() {
+		if op.Confirm {
+			t.Errorf("%s still advertises a required user approval", op.Name)
+		}
 		names[op.Name] = true
 		_, api := routes[op.Name]
 		if api == hostOnly[op.Name] {
@@ -131,43 +135,153 @@ func run(t *testing.T, tools map[string]contextmcp.Tool, name, args string) (any
 	return res.Value, err
 }
 
-func TestConfirmedWritesAreAppliedByDesktop(t *testing.T) {
+func TestWritesDoNotRequireDesktopConfirmation(t *testing.T) {
 	t.Parallel()
-
-	approve := true
-	tools, api, calls := setup(t, map[string]any{}, func(kind string, payload map[string]any) (any, error) {
-		if kind == "settings.confirm" {
-			if !approve {
-				return map[string]any{"approved": false}, nil
+	for _, withHost := range []bool{false, true} {
+		t.Run(fmt.Sprint(withHost), func(t *testing.T) {
+			var host func(string, map[string]any) (any, error)
+			if withHost {
+				host = func(kind string, _ map[string]any) (any, error) {
+					if kind != "settings.refresh" {
+						t.Fatalf("unexpected host request: %s", kind)
+					}
+					return map[string]any{}, nil
+				}
 			}
-			return map[string]any{"approved": true, "raw": map[string]any{"email": "a@example.com"}}, nil
-		}
-		return map[string]any{}, nil
-	})
-	v, err := run(t, tools, "settings_invite_member", `{"email":"a@example.com","request_id":"r1"}`)
-	if err != nil || v.(map[string]any)["status"] != "applied" {
-		t.Fatalf("invite = %v, %v", v, err)
+			tools, api, _ := setup(t, map[string]any{
+				"POST /api/workspaces/ws-1/members": map[string]any{"email": "a@example.com"},
+			}, host)
+			args := `{"email":"a@example.com","request_id":"invite-1"}`
+			for range 2 {
+				v, err := run(t, tools, "settings_invite_member", args)
+				if err != nil || asObject(v)["status"] != "applied" {
+					t.Fatalf("invite = %v, %v", v, err)
+				}
+			}
+			if api.count("POST /api/workspaces/ws-1/members") != 1 {
+				t.Fatal("write was not executed exactly once")
+			}
+			if _, err := run(t, tools, "settings_invite_member", `{"email":"a@example.com","approved":true,"request_id":"invite-2"}`); err == nil {
+				t.Fatal("accepted an unknown approval field")
+			}
+		})
 	}
-	if api.count("POST /api/workspaces/ws-1/members") != 0 {
-		t.Fatal("the daemon performed a confirmed write itself")
-	}
-	confirm := (*calls)[0]
-	apply := confirm.payload["apply"].(map[string]any)
-	if confirm.kind != "settings.confirm" || apply["method"] != "POST" || apply["path"] != "/api/workspaces/ws-1/members" || confirm.payload["input"].(map[string]any)["role"] != "member" {
-		t.Fatalf("confirmation = %+v", confirm)
-	}
-	if (*calls)[len(*calls)-1].kind != "settings.refresh" {
-		t.Fatal("the Settings UI was not refreshed")
-	}
+}
 
-	approve = false
-	v, err = run(t, tools, "settings_invite_member", `{"email":"b@example.com","request_id":"r2"}`)
-	if err != nil || v.(map[string]any)["status"] != "cancelled" {
-		t.Fatalf("declined = %v, %v", v, err)
+func TestUnavailableRefreshDoesNotFailDirectWrite(t *testing.T) {
+	t.Parallel()
+	tools, _, _ := setup(t, map[string]any{
+		"POST /api/workspaces/ws-1/members": map[string]any{"email": "a@example.com"},
+	}, func(kind string, _ map[string]any) (any, error) {
+		if kind != "settings.refresh" {
+			t.Fatalf("unexpected host call: %s", kind)
+		}
+		return nil, errors.New("This operation requires Multica Desktop")
+	})
+	v, err := run(t, tools, "settings_invite_member", `{"email":"a@example.com","request_id":"mobile-1"}`)
+	if err != nil || asObject(v)["status"] != "applied" || asObject(v)["ui_refresh"] != "pending" {
+		t.Fatalf("mobile write = %v, %v", v, err)
 	}
-	// An agent cannot approve through its own input.
-	if _, err := run(t, tools, "settings_invite_member", `{"email":"c@example.com","approved":true,"request_id":"r3"}`); err == nil {
-		t.Fatal("accepted an agent-supplied approval field")
+}
+
+func TestWorkflowPreviewFailureStopsApply(t *testing.T) {
+	t.Parallel()
+	tools, api, _ := setup(t, map[string]any{
+		"GET /api/projects/p1":           map[string]any{"id": "p1", "workspace_id": "ws-1"},
+		"POST /api/projects/p1/workflow": &contextmcp.OperationError{Code: "workflow_status_mapping_required", Message: "Status mapping required", Status: 409},
+	}, nil)
+	_, err := run(t, tools, "settings_set_project_workflow", `{"project_id":"p1","workflow_id":"wf1","dry_run":false,"request_id":"mapping-1"}`)
+	var rejected *OperationError
+	if !errors.As(err, &rejected) || rejected.Code != "workflow_status_mapping_required" {
+		t.Fatalf("preview error = %v", err)
+	}
+	if api.count("POST /api/projects/p1/workflow") != 1 || asObject(api.bodies[1])["dry_run"] != true {
+		t.Fatal("applied after a failed preview")
+	}
+}
+
+func TestDirectWritesPreservePermissionErrors(t *testing.T) {
+	t.Parallel()
+	tools, api, _ := setup(t, map[string]any{
+		"POST /api/workspaces/ws-1/members": &contextmcp.OperationError{Code: "forbidden", Message: "Admin required", Status: 403},
+	}, nil)
+	for range 2 {
+		_, err := run(t, tools, "settings_invite_member", `{"email":"a@example.com","request_id":"denied-1"}`)
+		var rejected *OperationError
+		if !errors.As(err, &rejected) || rejected.Status != 403 {
+			t.Fatalf("permission error = %v", err)
+		}
+	}
+	if api.count("POST /api/workspaces/ws-1/members") != 1 {
+		t.Fatal("replayed a rejected write")
+	}
+}
+
+func TestTokenCreationStaysOnDesktop(t *testing.T) {
+	t.Parallel()
+	tools, api, _ := setup(t, nil, func(kind string, payload map[string]any) (any, error) {
+		if kind != "settings.confirm" || payload["operation"] != "settings_create_token" {
+			t.Fatalf("unexpected host call: %s %v", kind, payload)
+		}
+		return map[string]any{"approved": true, "raw": map[string]any{"id": "token-1"}}, nil
+	})
+	v, err := run(t, tools, "settings_create_token", `{"name":"CI","request_id":"token-1"}`)
+	if err != nil || asObject(v)["secret_displayed_to_user"] != true || asObject(v)["id"] != "token-1" {
+		t.Fatalf("token = %v, %v", v, err)
+	}
+	if api.count("POST /api/tokens") != 0 {
+		t.Fatal("daemon received the raw token")
+	}
+}
+
+func TestWorkflowApplyDoesNotWaitForConfirmation(t *testing.T) {
+	t.Parallel()
+	for _, op := range []string{"settings_set_project_workflow", "settings_update_workflow"} {
+		for _, affected := range []int{0, 3} {
+			t.Run(fmt.Sprintf("%s/%d", op, affected), func(t *testing.T) {
+				path := "/api/projects/p1/workflow"
+				beforePath := "/api/projects/p1"
+				args := `{"project_id":"p1","workflow_id":"wf1","dry_run":false,"request_id":"workflow-1"}`
+				beforeID := "p1"
+				method := "POST "
+				if op == "settings_update_workflow" {
+					path, beforePath, method = "/api/issue-workflows/wf1", "/api/issue-workflows/wf1", "PATCH "
+					args = `{"id":"wf1","fields":{"name":"Updated"},"request_id":"workflow-1"}`
+					beforeID = "wf1"
+				}
+				tools, api, _ := setup(t, map[string]any{
+					"GET " + beforePath: map[string]any{"id": beforeID, "workspace_id": "ws-1"},
+					method + path:       map[string]any{"plan": map[string]any{"affected_issues": float64(affected)}},
+				}, nil)
+				v, err := run(t, tools, op, args)
+				if err != nil || asObject(v)["status"] != "applied" {
+					t.Fatalf("apply = %v, %v", v, err)
+				}
+				if api.count(method+path) != 2 {
+					t.Fatalf("expected preview and apply, got %v", api.calls)
+				}
+				if asObject(api.bodies[1])["dry_run"] != true {
+					t.Fatalf("missing preview: %v", api.bodies)
+				}
+				if asObject(api.bodies[2])["dry_run"] == true {
+					t.Fatalf("only previewed: %v", api.bodies)
+				}
+			})
+		}
+	}
+}
+
+func TestDeviceActionDoesNotRequestApproval(t *testing.T) {
+	t.Parallel()
+	tools, _, calls := setup(t, nil, func(kind string, payload map[string]any) (any, error) {
+		if kind != "settings.host" || payload["operation"] != "settings_device_action" {
+			t.Fatalf("unexpected host call: %s %v", kind, payload)
+		}
+		return map[string]any{"status": "applied"}, nil
+	})
+	v, err := run(t, tools, "settings_device_action", `{"action":"daemon_restart","request_id":"device-1"}`)
+	if err != nil || asObject(v)["status"] != "applied" || len(*calls) != 1 {
+		t.Fatalf("device action = %v, %v (%v)", v, err, *calls)
 	}
 }
 

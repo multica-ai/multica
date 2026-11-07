@@ -1,14 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { clipboard, dialog, ipcMain, type BrowserWindow } from "electron";
-import { SETTINGS_OPERATIONS } from "@multica/core/settings/operations";
 import type { SettingsHostMessage, SettingsHostReply } from "../shared/settings-host";
 import { confirmThenApply, type ConfirmAndApply, type SettingsHostRequest } from "./settings-confirm";
 import type { SettingsRequest, SettingsScope } from "@multica/core/settings/operations";
-import { publicSettingsValue, SettingsOperationError } from "../shared/settings-operation-error";
+import { SettingsOperationError } from "../shared/settings-operation-error";
 
 /**
- * Desktop owns human confirmation: a confirmed write is performed here with
- * `apply`, never by the conversation host that asked for it.
+ * Existing daemon host requests execute directly after scope validation.
+ * Desktop still owns token creation and keeps its secret out of MCP replies.
  */
 export function createDesktopSettingsHost(getWindow: () => BrowserWindow | null, getUser: () => string | null | undefined, getGeneration: () => number, apply: (request: SettingsRequest, signal: AbortSignal, scope: SettingsScope) => Promise<unknown>): { host: (request: SettingsHostRequest, signal: AbortSignal) => Promise<unknown>; confirmAndApply: ConfirmAndApply } {
   const pending = new Map<string, { window: BrowserWindow; generation: number; resolve(value: unknown): void; reject(error: Error): void }>();
@@ -44,19 +43,11 @@ export function createDesktopSettingsHost(getWindow: () => BrowserWindow | null,
   return {
     host,
     confirmAndApply: confirmThenApply({ request: apply, confirm: async (request, signal) => {
-      const window = windowFor(request), generation = getGeneration();
-      // Validate the selected account/workspace in the renderer before showing a native approval.
+      windowFor(request);
+      const generation = getGeneration();
       await host({ ...request, operation: "settings_assert_scope", input: {} }, signal);
       signal.throwIfAborted();
-      const description = SETTINGS_OPERATIONS.find((entry) => entry.name === request.operation)?.description ?? "Apply this settings operation?";
-      const details = JSON.stringify({ workspace_id: request.scope.workspaceId, target: request.input.id ?? request.input.project_id ?? request.input.email, impact: publicSettingsValue(request.impact), changes: request.input }, null, 2);
-      const truncated = details.length > 12000 ? `${details.slice(0, 12000)}\n\nAdditional details were truncated. Cancel to inspect the full requested change first.` : details;
-      const detail = request.source ? `Requested by an agent on ${request.source}.\n\n${truncated}` : truncated;
-      const response = await dialog.showMessageBox(window, { type: "question", title: "Multica Settings", message: description, detail, buttons: ["Cancel", "Apply"], defaultId: 0, cancelId: 0, noLink: true, signal });
-      signal.throwIfAborted();
-      if (generation !== getGeneration()) throw new SettingsOperationError("account_changed", "The account changed before confirmation");
-      if (response.response !== 1) return false;
-      await host({ ...request, operation: "settings_assert_scope", input: {} }, signal);
+      if (generation !== getGeneration()) throw new SettingsOperationError("account_changed", "The account changed before applying settings");
       return true;
     }, showSecret: async (name, secret, scope, signal) => {
       signal.throwIfAborted();

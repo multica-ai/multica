@@ -7,8 +7,7 @@ not install a new global MCP or enable the user's inherited external plugins.
 ## Contract and execution
 
 `packages/core/settings/operations.ts` is the bounded operation registry. It
-defines tool names, input schemas, permission hints, confirmation requirements,
-and requests against existing business APIs. The desktop MCP and the Settings
+defines tool names, input schemas, permission hints and requests against existing business APIs. The desktop MCP and the Settings
 renderer bridge both validate against this contract. The CLI calls the same
 execution-local MCP instead of implementing another set of REST mutations.
 
@@ -25,8 +24,8 @@ catalog (`multica settings tools`) for their current schemas:
 | Properties | List/create/edit/archive/restore definitions and select options; types remain immutable |
 | Quick actions | List/create/edit/archive/delete definitions; creating does not execute an agent |
 | MCP library | Safe metadata; create a public HTTP endpoint; rename/delete entries. No implicit agent assignment |
-| Code and channels | Read supported connection metadata; disconnect with confirmation; merge code-setting flags without replacing unrelated settings |
-| Account | Read/update profile, language/timezone; patch notification groups; token metadata and human-confirmed token creation/revocation |
+| Code and channels | Read supported connection metadata; disconnect; merge code-setting flags without replacing unrelated settings |
+| Account | Read/update profile, language/timezone; patch notification groups; token metadata and token creation/revocation |
 | Device | Read/update theme, composer, issue-opening, floating-chat and create-field preferences; keyboard shortcuts; daemon/update preferences; bounded daemon and updater actions |
 | Interactive setup | `settings_open` opens the relevant Settings tab for OAuth, credential entry, stdio MCP configuration and other user interaction |
 
@@ -40,8 +39,8 @@ explicitly requested. Daemon logs can be opened through the existing local UI;
 their contents are not returned to the model. Externally managed daemons reject
 local lifecycle and automatic-start/stop preference changes.
 
-`settings_capabilities` identifies the execution's account/workspace, cloud and
-host availability, and the current membership role. Role hints do not grant
+`settings_capabilities` identifies the execution's account/workspace, cloud
+availability and the current membership role. Its confirmation fields are false. Role hints do not grant
 permission: the existing backend checks resource ownership and feature gates on
 every call. A workflow creator may edit their own workflow; Default and project
 adoption retain their existing special authorization rules.
@@ -52,9 +51,9 @@ adoption retain their existing special authorization rules.
 2. Preview the requested edit with `settings_preview_workflow`, preserving
    `status_mapping` and the server's affected-task plan.
 3. Apply with `settings_update_workflow`. The adapter re-runs the exact dry run;
-   changes affecting existing tasks require native human confirmation.
+   the requested change executes directly even when existing tasks are affected.
 4. Project workflow changes default to `dry_run=true`. Applying uses
-   `dry_run=false`, re-previews and requires native confirmation.
+   `dry_run=false`, re-previews and executes without a confirmation dialog.
 5. Preserve structured `workflow_status_mapping_required`, `workflow_in_use`,
    permission and feature-disabled errors. A failed request is not success.
 
@@ -62,21 +61,30 @@ Status reordering uses the atomic `/api/issue-statuses/reorder` endpoint.
 Property option updates keep existing IDs. Built-in status keys/categories and
 property types cannot be changed through the Settings schemas.
 
-## Scope, confirmation and credentials
+## Scope, direct execution and credentials
 
 - Cloud requests use the verified desktop account and frozen workspace header.
   Tool arguments cannot select an arbitrary URL, workspace or HTTP operation.
+- Desktopd MCP calls do not require a separate user approval. API writes run
+  in the daemon with its scoped requester; device operations go directly to the
+  host. PC and mobile clients use the same daemon policy. Codex's built-in MCP
+  approval mode and Claude's allowed-tools list already allow these calls.
 - The renderer validates the originating account and workspace before local
-  settings actions. Native confirmations validate again after the user answers.
-  Replies from other windows/frames are rejected; aborted executions cancel
-  pending confirmation dialogs and host requests. Cancellation is checked again
-  after asynchronous preflight and before local writes. An operation already
-  submitted to the server or device is not rolled back by cancellation.
-- Member invitations/role changes/removals, destructive settings changes,
-  external MCP entry creation, token mutations and daemon/update actions require
-  real native confirmation. An agent-supplied approval boolean is invalid.
+  settings actions. Replies from other windows/frames are rejected; aborted
+  executions cancel pending host requests. Cancellation is checked again after
+  asynchronous preflight and before local writes. An operation already submitted
+  to the server or device is not rolled back by cancellation.
+- Existing `settings.confirm` host messages execute directly after scope
+  validation, without Cancel / Apply. The wire name and response stay compatible
+  with installed daemons; new daemons use it only for secure token creation.
+  Deploy the updated Desktop host as well as desktopd to remove old-host dialogs.
+- The policy is unconditional for new and resumed executions: no stored setting,
+  migration or opt-in switch is required. Previously completed/cancelled receipts
+  are unchanged; pending or unknown outcomes are never automatically replayed.
 - Token creation is only registered when the secure display callback exists.
-  The new secret appears in the native UI, never in MCP replies, CLI output or
+  Creation runs before the native token display, without a prior approval. The
+  display is informational and retains its Copy / Done actions. The new secret
+  appears in the native UI, never in MCP replies, CLI output or
   operation receipts. Account changes prevent display to a different user.
 - MCP configurations, headers, environment values, webhook secrets and
   connection credentials are not returned to the model. Property `config`
@@ -135,16 +143,17 @@ execution it reports that the scoped MCP is unavailable.
 ## Verification
 
 ```sh
-pnpm --filter @multica/desktop exec vitest run src/local-host/local-settings-tools.test.ts src/main/desktop-settings-host.test.ts src/renderer/src/platform/settings-host-bridge.test.ts
+pnpm --filter @multica/desktop exec vitest run src/main/desktop-settings-host.test.ts src/main/settings-confirm.test.ts src/main/local-v2-host.test.ts src/renderer/src/platform/settings-host-bridge.test.ts
 pnpm --filter @multica/desktop typecheck
 cd server
+go test -race ./internal/localconversation/settings ./internal/localconversation/service ./internal/localconversation/contextmcp
 go test ./cmd/multica -run '^TestSettingsAdapter' -count=1
-go build -o ../.tmp/settings-mcp-bin/multica ./cmd/multica
-cd ..
-MULTICA_RUN_SETTINGS_CLI_TEST=1 pnpm --filter @multica/desktop exec vitest run src/local-host/local-settings-tools.test.ts
 ```
 
-The opt-in integration test executes only the fixed test-built binary in
-`.tmp/settings-mcp-bin/`. It connects that CLI to a real SDK MCP transport backed
-by fake business APIs and proves creation retries share the same receipt. No
-user-installed agent CLI or real model is involved.
+The Settings regression tests use fake business APIs, host callbacks and receipts.
+They cover calls without a confirmation host, workflow changes affecting zero or
+multiple tasks, direct device actions, permission errors, retries, uncertain
+outcomes and token secret handling. Desktop host tests cover existing daemon
+requests, scope changes, cancellation and native secret display. They do not run
+user-installed agent CLIs or real models. Native PC/mobile UI smoke checks remain
+separate from these shared daemon policy tests.

@@ -1,8 +1,7 @@
 // Package settings gives local executions Multica's Settings operations:
 // the registry the GUI and CLI share, exported from
-// packages/core/settings/operations.ts. Writes that need a human are
-// confirmed and applied by Desktop, so an agent can never supply its own
-// approval.
+// packages/core/settings/operations.ts. Calls execute without a separate
+// user approval; token creation stays on Desktop to keep secrets out of MCP.
 package settings
 
 import (
@@ -47,15 +46,15 @@ func Operations() []Operation {
 }
 
 // Instructions describe the Settings tools to a provider.
-const Instructions = "Multica Settings tools are available through the built-in MCP. Begin with settings_capabilities and read the relevant settings before changes. Use exact IDs and current status keys. Use settings_preview_workflow and dry_run=true for project workflow changes before applying; preserve the server's status_mapping and affected-task plan. Never invent success: distinguish applied, opened, cancelled and unknown results. Human confirmation comes from the desktop host, never from an agent-supplied boolean. OAuth is completed in the settings UI. Never ask the user to paste credentials into chat; when the user supplies one for an MCP server config, pass it only in that config. Use the same request_id for retries. Do not bypass Settings confirmation with raw HTTP or other CLI mutation commands; use settings_* tools."
+const Instructions = "Multica Settings tools are available through the built-in MCP. Begin with settings_capabilities and read the relevant settings before changes. Use exact IDs and current status keys. Use settings_preview_workflow and dry_run=true for project workflow changes before applying; preserve the server's status_mapping and affected-task plan. Never invent success: distinguish applied, opened, cancelled and unknown results. Desktopd MCP calls execute directly without a separate user approval. Do not ask for confirmation before calling these tools. OAuth is completed in the settings UI. Never ask the user to paste credentials into chat; when the user supplies one for an MCP server config, pass it only in that config. Use the same request_id for retries. Use settings_* tools for Settings changes."
 
 // Requester performs authenticated workspace API calls.
 type Requester interface {
 	Request(ctx context.Context, method, path string, body any) (any, error)
 }
 
-// Host asks Desktop to act: "settings.confirm" shows the change and, on
-// approval, applies it; "settings.host" performs a device operation;
+// Host asks Desktop to act: "settings.confirm" applies a write and displays
+// a created token without a prior approval; "settings.host" performs a device operation;
 // "settings.refresh" reloads the Settings UI.
 type Host func(ctx context.Context, kind string, payload any) (json.RawMessage, error)
 
@@ -155,11 +154,11 @@ func (t *tools) capabilities(ctx context.Context, available []Operation) (any, e
 				auth = "eligible"
 			}
 		}
-		ops[i] = map[string]any{"name": op.Name, "domain": op.Domain, "write": op.Write, "human_confirmation": op.Confirm, "permission": op.Permission, "authorization": auth}
+		ops[i] = map[string]any{"name": op.Name, "domain": op.Domain, "write": op.Write, "human_confirmation": false, "permission": op.Permission, "authorization": auth}
 	}
 	return map[string]any{
 		"workspace_id": t.opts.Scope.WorkspaceID, "user_id": t.opts.Scope.UserID, "role": role,
-		"cloud_available": t.opts.Request != nil, "confirmation_available": t.opts.Host != nil,
+		"cloud_available": t.opts.Request != nil, "confirmation_available": false,
 		"feature_gates": map[string]any{"project_workflows_v1": "server_evaluated"}, "domains": domains, "operations": ops,
 	}, nil
 }
@@ -356,33 +355,23 @@ func (t *tools) execute(ctx context.Context, op Operation, input map[string]any)
 			return nil, opErr("resource_not_found", "The setting is outside this workspace or is no longer available")
 		}
 	}
-	var impact any
 	if op.Name == "settings_update_workflow" {
 		call := *r.request(scope, input)
 		body := merged(map[string]any{}, input["fields"])
 		body["dry_run"] = true
 		call.Body = body
-		v, err := t.call(ctx, call)
-		if err != nil {
+		if _, err := t.call(ctx, call); err != nil {
 			return nil, err
 		}
-		impact = v
 	}
 	if op.Name == "settings_set_project_workflow" && input["dry_run"] == false {
 		call := *r.request(scope, input)
 		call.Body = map[string]any{"workflow_id": input["workflow_id"], "status_mapping": input["status_mapping"], "dry_run": true}
-		v, err := t.call(ctx, call)
-		if err != nil {
+		if _, err := t.call(ctx, call); err != nil {
 			return nil, err
 		}
-		impact = v
 	}
 	preview := input["dry_run"] == true || (op.Name == "settings_device_action" && input["action"] == "check_update")
-	affected := 0.0
-	if plan, ok := asObject(asObject(impact)["plan"])["affected_issues"].(float64); ok {
-		affected = plan
-	}
-	needsConfirmation := !preview && (op.Confirm || affected > 0)
 	var call *Call
 	if api {
 		call = r.request(scope, input)
@@ -396,19 +385,14 @@ func (t *tools) execute(ctx context.Context, op Operation, input map[string]any)
 	}
 
 	var raw any
-	confirmed := false
-	if needsConfirmation {
+	hostApplied := false
+	// Token creation must stay on Desktop so the raw secret never enters MCP.
+	// Keep the existing host message for installed-client compatibility.
+	if op.Name == "settings_create_token" {
 		if t.opts.Host == nil {
-			return nil, opErr("confirmation_unavailable", "This action requires the desktop confirmation UI")
+			return nil, opErr("secret_display_unavailable", "Open Desktop to display the created token")
 		}
-		shown := impact
-		if shown == nil {
-			shown = before
-		}
-		payload := map[string]any{"operation": op.Name, "scope": scope, "input": input, "impact": public(shown)}
-		if call != nil {
-			payload["apply"] = call
-		}
+		payload := map[string]any{"operation": op.Name, "scope": scope, "input": input, "apply": call}
 		reply, err := t.opts.Host(ctx, "settings.confirm", payload)
 		if err != nil {
 			return nil, err
@@ -418,12 +402,12 @@ func (t *tools) execute(ctx context.Context, op Operation, input map[string]any)
 			Raw      any  `json:"raw"`
 		}
 		if json.Unmarshal(reply, &outcome) != nil {
-			return nil, opErr("invalid_response", "Desktop returned an invalid confirmation")
+			return nil, opErr("invalid_response", "Desktop returned an invalid token creation result")
 		}
 		if !outcome.Approved {
 			return map[string]any{"status": "cancelled", "operation": op.Name, "workspace_id": scope.WorkspaceID}, nil
 		}
-		confirmed, raw = true, outcome.Raw
+		hostApplied, raw = true, outcome.Raw
 	}
 	if call == nil {
 		reply, err := t.opts.Host(ctx, "settings.host", hostRequest)
@@ -434,7 +418,7 @@ func (t *tools) execute(ctx context.Context, op Operation, input map[string]any)
 		_ = json.Unmarshal(reply, &v)
 		return v, nil
 	}
-	if !confirmed {
+	if !hostApplied {
 		v, err := t.call(ctx, *call)
 		if err != nil {
 			return nil, err
@@ -459,7 +443,7 @@ func (t *tools) execute(ctx context.Context, op Operation, input map[string]any)
 			return nil, opErr("result_unconfirmed", "The server did not confirm a created resource in this workspace. Read current settings before another creation.")
 		}
 	}
-	// Token creation is always confirmed: Desktop showed and kept the secret.
+	// Desktop displayed the created token and removed the secret from its reply.
 	if op.Name == "settings_create_token" {
 		return map[string]any{"status": "applied", "operation": op.Name, "id": obj["id"], "secret_displayed_to_user": true}, nil
 	}

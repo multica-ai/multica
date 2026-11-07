@@ -15,17 +15,34 @@ function fixture() {
   const host = createDesktopSettingsHost(() => window, () => user, () => generation, apply);
   return { host, window, webContents, apply, changeUser: () => { user = "other"; generation++; } };
 }
-describe("native Settings confirmation", () => {
-  it("defaults to cancel and applies the write itself only after an actual native confirmation", async () => {
+describe("Settings host execution", () => {
+  it("applies existing daemon confirmation requests without asking the user", async () => {
     const f = fixture();
     const request = { operation: "settings_remove_member", scope: { userId: "user", workspaceId: "workspace" }, input: { id: "member" } };
     const write = { method: "DELETE" as const, path: "/api/workspaces/workspace/members/member" };
-    expect(await f.host.confirmAndApply!(request, write, new AbortController().signal)).toEqual({ approved: false });
-    expect(fake.show).toHaveBeenCalledWith(f.window, expect.objectContaining({ defaultId: 0, cancelId: 0, buttons: ["Cancel", "Apply"] }));
-    expect(f.apply).not.toHaveBeenCalled();
-    fake.show.mockResolvedValueOnce({ response: 1 });
-    expect(await f.host.confirmAndApply!(request, write, new AbortController().signal)).toEqual({ approved: true, raw: { id: "member" } });
+    expect(await f.host.confirmAndApply(request, write, new AbortController().signal)).toEqual({ approved: true, raw: { id: "member" } });
+    expect(fake.show).not.toHaveBeenCalled();
     expect(f.apply).toHaveBeenCalledWith(write, expect.any(AbortSignal), request.scope);
+  });
+  it("does not approve a host-only action through a dialog", async () => {
+    const f = fixture();
+    const request = { operation: "settings_device_action", scope: { userId: "user", workspaceId: "workspace" }, input: { action: "daemon_restart" } };
+    expect(await f.host.confirmAndApply(request, null, new AbortController().signal)).toEqual({ approved: true, raw: null });
+    expect(fake.show).not.toHaveBeenCalled();
+    expect(f.apply).not.toHaveBeenCalled();
+  });
+  it.each(["account change", "cancellation"])("stops a write after %s during scope validation", async (reason) => {
+    const f = fixture();
+    const controller = new AbortController();
+    const send = f.webContents.send.getMockImplementation()!;
+    f.webContents.send.mockImplementation((channel, request) => {
+      send(channel, request);
+      if (reason === "account change") f.changeUser();
+      else controller.abort();
+    });
+    await expect(f.host.confirmAndApply({ operation: "settings_remove_member", scope: { userId: "user", workspaceId: "workspace" }, input: { id: "member" } }, { method: "DELETE", path: "/api/workspaces/workspace/members/member" }, controller.signal)).rejects.toThrow();
+    expect(f.apply).not.toHaveBeenCalled();
+    expect(fake.show).not.toHaveBeenCalled();
   });
   const tokenRequest = { operation: "settings_create_token", scope: { userId: "user", workspaceId: "workspace" }, input: { name: "Key" } };
   const tokenWrite = { method: "POST" as const, path: "/api/tokens", body: { name: "Key" } };
@@ -37,10 +54,10 @@ describe("native Settings confirmation", () => {
   });
   it("shows a created token only to the human and copies it only on Copy token", async () => {
     const f = fixture();
-    fake.show.mockResolvedValueOnce({ response: 1 }).mockResolvedValueOnce({ response: 1 });
+    fake.show.mockResolvedValueOnce({ response: 1 });
     expect(await f.host.confirmAndApply!(tokenRequest, tokenWrite, new AbortController().signal)).toEqual({ approved: true, raw: { id: "pat" } });
     expect(fake.copy).not.toHaveBeenCalled();
-    fake.show.mockResolvedValueOnce({ response: 1 }).mockResolvedValueOnce({ response: 0 });
+    fake.show.mockResolvedValueOnce({ response: 0 });
     const outcome = await f.host.confirmAndApply!(tokenRequest, tokenWrite, new AbortController().signal);
     expect(JSON.stringify(outcome)).not.toContain("PRIVATE");
     expect(fake.copy).toHaveBeenCalledWith("PRIVATE");

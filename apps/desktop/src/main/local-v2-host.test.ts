@@ -16,7 +16,7 @@ function setup(user = "u1") {
 }
 
 describe("localV2HostHandler", () => {
-  it("confirms settings and applies the write built from the confirmed input, not one sent along", async () => {
+  it("applies the Settings write built from validated input, not one sent along", async () => {
     const { handlers, handle } = setup();
     const forged = { method: "POST", path: "/api/workspaces/w1/members", body: { email: "a@example.com", role: "admin" } };
     await expect(handle(scope, "settings.confirm", { operation: "settings_invite_member", scope: { workspace_id: "w1", user_id: "u1" }, input: { email: "a@example.com" }, impact: null, apply: forged })).resolves.toEqual({ approved: true, raw: { id: "x" } });
@@ -24,7 +24,7 @@ describe("localV2HostHandler", () => {
       { method: "POST", path: "/api/workspaces/w1/members", body: { email: "a@example.com", role: "member" } }, expect.any(AbortSignal));
   });
 
-  it("confirms host-only operations without a write", async () => {
+  it("accepts host-only operations without an API write", async () => {
     const { handlers, handle } = setup();
     await handle(scope, "settings.confirm", { operation: "settings_device_action", scope: { workspace_id: "w1", user_id: "u1" }, input: { action: "daemon_restart" } });
     expect(vi.mocked(handlers.confirm).mock.calls[0]![1]).toBeNull();
@@ -52,7 +52,7 @@ describe("localV2HostHandler", () => {
 });
 
 describe("remoteHostRequests", () => {
-  it("lets another device confirm settings and control its Side, but keeps this device's own to itself", async () => {
+  it("routes another device's settings writes and Side without exposing local device settings", async () => {
     const { handlers, handle } = setup();
     const remote = remoteHostRequests(handle, "peer-1", async () => "Mac Studio");
     await remote(scope, "settings.confirm", { operation: "settings_invite_member", scope: { workspace_id: "w1", user_id: "u1" }, input: { email: "a@example.com" } });
