@@ -181,6 +181,7 @@ it("consolidates list actions and returns from archives through the same menu", 
   render(page());
   const list = within(screen.getByTestId("local-conversation-sessions"));
   await list.findByRole("link", { name: /Original/ });
+  expect(list.queryByText("历史保存在本机")).not.toBeInTheDocument();
   const header = screen.getByRole("heading", { name: "本机会话" }).parentElement!;
   expect(within(header).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["搜索会话", "添加目录", "更多操作"]);
   expect(list.queryByRole("button", { name: "归档" })).not.toBeInTheDocument();

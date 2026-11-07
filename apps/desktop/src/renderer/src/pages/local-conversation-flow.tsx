@@ -1228,9 +1228,6 @@ const LocalConversationFlow = observer(function LocalConversationFlow() {
                 </DropdownMenu>
               </div>
             )}
-            <div className="flex items-center justify-between px-4 py-3 text-caption text-muted-foreground">
-              <span className="font-normal">{labels.storage}</span>
-            </div>
           </div>
         </ResizablePanel>
         <ResizableHandleBinding29
