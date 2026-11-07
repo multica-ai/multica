@@ -1608,13 +1608,11 @@ func TestPrepareLocalWorktreeRestartsAMergedConversationBranch(t *testing.T) {
 	if second.Continued {
 		t.Error("continued a branch the user had already merged")
 	}
-	// Restarted at HEAD: the base is this turn's own baseline commit, sitting
-	// directly on the user's newest commit rather than behind it.
-	if _, err := gitTry(t, repo, "merge-base", "--is-ancestor", head, second.BaseCommit); err != nil {
-		t.Errorf("second turn base %s does not build on the user's HEAD %s", second.BaseCommit, head)
+	if second.BaseCommit != head {
+		t.Errorf("second turn base = %s, want the user's HEAD %s", second.BaseCommit, head)
 	}
-	if parent := gitRun(t, repo, "rev-parse", second.BaseCommit+"^"); parent != head {
-		t.Errorf("second turn base is parented at %s, want the user's HEAD %s", parent, head)
+	if second.incarnation != first.incarnation {
+		t.Error("merged restart changed the branch incarnation")
 	}
 	if _, err := os.Stat(filepath.Join(second.WorkDir, "user-commit.txt")); err != nil {
 		t.Errorf("the user's commits after the merge are missing: %v", err)
@@ -1860,7 +1858,7 @@ func TestBranchRecordRoundTrips(t *testing.T) {
 	}
 	gitRun(t, repo, "branch", "agent/j/mul-6881")
 
-	recorded, err := writeBranchRecord(repo, "agent/j/mul-6881", snapshot, head, testBranchOwner)
+	recorded, err := writeBranchRecord(repo, "agent/j/mul-6881", snapshot, head, testBranchOwner, "roundtrip-incarnation")
 	if err != nil {
 		t.Fatalf("writeBranchRecord: %v", err)
 	}
@@ -1870,6 +1868,9 @@ func TestBranchRecordRoundTrips(t *testing.T) {
 	}
 	if record.owner != testBranchOwner {
 		t.Errorf("owner = %+v, want %+v", record.owner, testBranchOwner)
+	}
+	if record.incarnation != "roundtrip-incarnation" {
+		t.Errorf("incarnation = %q", record.incarnation)
 	}
 	if record.checkpoint != head {
 		t.Errorf("checkpoint = %s, want the branch tip %s", record.checkpoint, head)
@@ -1979,7 +1980,7 @@ func TestPrepareLocalWorktreeRefusesABranchForceMovedOffItsRecord(t *testing.T) 
 	// The deterministic form of the same race: a record written while the ref
 	// already points somewhere else must still pin what was delivered, not
 	// whatever the ref says at the moment of writing.
-	written, err := writeBranchRecord(repo, "agent/j/mul-6881", record.state, delivered, testBranchOwner)
+	written, err := writeBranchRecord(repo, "agent/j/mul-6881", record.state, delivered, testBranchOwner, record.incarnation)
 	if err != nil {
 		t.Fatalf("writeBranchRecord: %v", err)
 	}
@@ -2125,6 +2126,7 @@ func TestFinalizeRefusesToRecordADeliveryFromOffTheBranch(t *testing.T) {
 	gitRun(t, wt.Path, "add", "-A")
 	gitRun(t, wt.Path, "commit", "-m", "turn one")
 	delivered := gitRun(t, repo, "rev-parse", "agent/j/mul-6881")
+	before := gitRun(t, repo, "rev-parse", userStateRef(wt.Branch))
 	// The run wanders off its own branch before it ends.
 	gitRun(t, wt.Path, "checkout", "--quiet", "--detach", head)
 
@@ -2146,35 +2148,25 @@ func TestFinalizeRefusesToRecordADeliveryFromOffTheBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readUserStateRef: %v", err)
 	}
-	record, err := readBranchRecord(repo, ref)
-	if err != nil {
-		t.Fatalf("readBranchRecord: %v", err)
-	}
-	if record.checkpoint == head {
-		t.Error("the stray HEAD was recorded as this branch's checkpoint")
+	if ref != before {
+		t.Error("the refused delivery changed the branch record")
 	}
 	_ = removeLocalWorktreeDir(repo, wt.Path, worktreeTestLogger())
 }
 
-// A branch created by this prepare always gets a commit of its own, even when
-// the user's directory was clean and there was nothing to replay. Without it
-// the branch would sit exactly where the user's HEAD does, and nothing would
-// tell it apart from a branch they create there themselves.
-func TestPrepareLocalWorktreeAlwaysGivesANewBranchACommitOfItsOwn(t *testing.T) {
+// A clean replay starts directly at the source commit and leaves no empty
+// baseline in the branch history. A read-only turn still removes its branch.
+func TestPrepareLocalWorktreeCleanStartUsesSourceHEAD(t *testing.T) {
 	t.Parallel()
 	repo := newTestRepo(t)
 	head := gitRun(t, repo, "rev-parse", "HEAD")
 
 	wt := prepareTurn(t, repo, "MUL-6881", turnOneTask)
-	if wt.BaseCommit == head {
-		t.Fatal("a clean tree left the branch on the user's HEAD")
+	if wt.BaseCommit != head {
+		t.Errorf("clean BaseCommit = %s, want source HEAD %s", wt.BaseCommit, head)
 	}
-	if parent := gitRun(t, repo, "rev-parse", wt.BaseCommit+"^"); parent != head {
-		t.Errorf("baseline is parented at %s, want the user's HEAD %s", parent, head)
-	}
-	// It changes nothing: the point is its existence, not its content.
-	if diff := gitRun(t, repo, "diff", "--stat", head, wt.BaseCommit); diff != "" {
-		t.Errorf("the baseline of a clean tree is not empty:\n%s", diff)
+	if got := gitRun(t, wt.Path, "rev-parse", "HEAD"); got != head {
+		t.Errorf("clean task HEAD = %s, want source HEAD %s", got, head)
 	}
 	// And a turn that produces nothing still leaves no branch behind.
 	outcome := finalizeOK(t, wt)
@@ -2346,7 +2338,7 @@ func TestIsolatedPrepareCarriesTheStateFinalizeNeeds(t *testing.T) {
 	}
 	// The proofs Finalize makes all hang off state that crosses as JSON —
 	// createdBranch among them, without which a read-only turn keeps its branch.
-	if !wt.tracksState || wt.userState == "" || wt.owner != testBranchOwner || !wt.createdBranch || wt.taskID != turnOneTask {
+	if wt.incarnation == "" || !wt.tracksState || wt.userState == "" || wt.owner != testBranchOwner || !wt.createdBranch || wt.taskID != turnOneTask {
 		t.Fatalf("state lost crossing the helper boundary: tracksState=%v userState=%q owner=%+v createdBranch=%v taskID=%q",
 			wt.tracksState, wt.userState, wt.owner, wt.createdBranch, wt.taskID)
 	}
@@ -2367,6 +2359,9 @@ func TestIsolatedPrepareCarriesTheStateFinalizeNeeds(t *testing.T) {
 	}
 	if record.checkpoint != delivered {
 		t.Errorf("checkpoint = %s, want the delivered tip %s", record.checkpoint, delivered)
+	}
+	if record.incarnation != wt.incarnation {
+		t.Error("helper lost the expected branch incarnation")
 	}
 	if record.owner != testBranchOwner {
 		t.Errorf("record owner = %+v, want %+v", record.owner, testBranchOwner)
