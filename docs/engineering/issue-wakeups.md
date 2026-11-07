@@ -607,6 +607,7 @@ the scheduler evaluates:
 | `issue_field` | `field=label`, `label_id` | it has that label |
 | `issue_field` | `field=property`, `property_id`, `value` | the property's stored value equals `value` |
 | `children_done` | optional `stage` | every sub-issue (or every one up to that stage) is closed |
+| `children_reported` | optional `stage` | every selected sub-issue is exactly `in_review` or has terminal category `done`/`closed` |
 | `pull_request` | `event=checks_finished`, `merged` or `conflicts` | a linked PR's checks finished on its current head, it merged, or an open GitHub PR is `CONFLICTING` on its current head |
 | `other_issue` | `issue_id`, `state=done`, `ended`, `in_review` or `blocked` | another issue in the workspace reaches that state |
 
@@ -620,6 +621,27 @@ fires again only after the predicate turned false or its facts changed (a new PR
 head's result, another sub-issue set). States already true at registration fire
 on the first check; finished checks from before registration are ignored. The
 watched issue's identifier is stored in the condition for display.
+
+`children_reported` is an explicit aggregate barrier for reviewing a group of
+independent workers. It reads the current direct children in the same workspace,
+using the same access and invoke checks as `children_done`. Without `stage`,
+unstaged children are included. With `stage=N` (1–1000), only staged children
+through N are selected, and N must contain at least one child. An empty selection
+never holds. Adding, deleting, moving or restaging children changes the next
+evaluation; this is not a fixed snapshot. Custom terminal statuses count, while
+custom `started` statuses do not count as `in_review`.
+
+Its receipt's `observed` separates `review_ready`, `closed`, `cancelled` and
+`total`; `closed` includes both successful and cancelled terminal categories,
+and `cancelled` is the subset in category `closed`. Reporting does not approve
+work, close issues, assign agents or advance stages. `children_done` and the
+system `child_done` stage barrier remain terminal-only.
+
+Like `children_done`, this condition polls every 30 seconds and fingerprints
+the selected count. A continuous rule does not notify on each child report or
+on a same-size replacement while the aggregate remains true. A false-to-true
+transition entirely between checks can be missed. Once/continuous modes,
+caps, expiry and timeout handling otherwise use the existing engine.
 
 `conflicts` reads the GitHub API snapshot (`api_mergeable`) and counts only a
 snapshot fetched for the PR's current head, so a verdict from before a push

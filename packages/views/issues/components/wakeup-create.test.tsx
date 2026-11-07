@@ -164,6 +164,18 @@ describe("platform conditions in the form", () => {
     expect(create.mock.calls[0]![0]).not.toHaveProperty("event_types");
   });
 
+  it("explicitly selects reports without changing the terminal-only choice", async () => {
+    await renderForm();
+    await chooseCondition("子任务已交付");
+    expect(screen.getByRole("button", { name: /子任务已交付: 全部子任务/ })).toBeVisible();
+    fireEvent.change(screen.getByLabelText("唤醒后要做什么"), { target: { value: "核对子任务结果" } });
+    fireEvent.click(screen.getByRole("button", { name: /创建/ }));
+    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "event", mode: "once", condition: { type: "children_reported" },
+    })));
+    expect(create.mock.calls[0]![0]).not.toHaveProperty("event_types");
+  });
+
   it("waits for a linked PR's CI by default and can wait for the merge instead", async () => {
     await renderForm();
     await chooseCondition("关联 PR 的 CI 结束");
