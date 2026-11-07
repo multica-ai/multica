@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -142,6 +143,25 @@ type coAuthoredByStateCache struct {
 	checkouts  []reconciledCheckout
 }
 
+// blockingCoAuthoredByStateCache keeps legacy-hook reconciliation in flight so
+// callers can prove that checkout readiness does not wait behind historical
+// filesystem work.
+type blockingCoAuthoredByStateCache struct {
+	coAuthoredByStateCache
+	lookupPath string
+	entered    chan struct{}
+	release    chan struct{}
+	once       sync.Once
+}
+
+type blockingCoAuthoredByStateWriter struct {
+	coAuthoredByStateCache
+	lookupPath string
+	entered    chan struct{}
+	release    chan struct{}
+	once       sync.Once
+}
+
 // reconciledCheckout records one isolated checkout the daemon asked to bring in
 // line with the workspace setting.
 type reconciledCheckout struct {
@@ -177,6 +197,32 @@ func (c *coAuthoredByStateCache) ReconcileCoAuthoredByHookInCheckout(checkoutPat
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.checkouts = append(c.checkouts, reconciledCheckout{path: checkoutPath, enabled: enabled})
+	return nil
+}
+
+func (c *blockingCoAuthoredByStateCache) Lookup(string, string) string {
+	return c.lookupPath
+}
+
+func (c *blockingCoAuthoredByStateCache) ReconcileCoAuthoredByHooks(_ string, enabled bool) error {
+	c.mu.Lock()
+	c.reconciles = append(c.reconciles, enabled)
+	c.mu.Unlock()
+	c.once.Do(func() { close(c.entered) })
+	<-c.release
+	return nil
+}
+
+func (c *blockingCoAuthoredByStateWriter) Lookup(string, string) string {
+	return c.lookupPath
+}
+
+func (c *blockingCoAuthoredByStateWriter) WriteCoAuthoredByState(_ string, enabled bool) error {
+	c.mu.Lock()
+	c.writes = append(c.writes, enabled)
+	c.mu.Unlock()
+	c.once.Do(func() { close(c.entered) })
+	<-c.release
 	return nil
 }
 
@@ -232,7 +278,156 @@ func newCoAuthoredByStateDaemon(t *testing.T, workspaceID string, settings *stri
 		workspaces: map[string]*workspaceState{workspaceID: newWorkspaceState(workspaceID, nil, "", nil, nil)},
 		logger:     slog.Default(),
 	}
+	t.Cleanup(d.waitBackgroundSyncs)
 	return d, cache
+}
+
+func TestEnsureRepoReadyDoesNotWaitForCoAuthoredByHookReconciliation(t *testing.T) {
+	t.Parallel()
+
+	const (
+		workspaceID = "ws-1"
+		repoURL     = "https://example.invalid/repo"
+	)
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID: workspaceID,
+			Repos:       []RepoData{{URL: repoURL}},
+			Settings:    json.RawMessage(`{"co_authored_by_enabled":false}`),
+		})
+	})
+	cache := &blockingCoAuthoredByStateCache{
+		lookupPath: "/cached/repo.git",
+		entered:    make(chan struct{}),
+		release:    make(chan struct{}),
+	}
+	d.repoCache = cache
+	d.workspaces[workspaceID] = newWorkspaceState(
+		workspaceID,
+		nil,
+		"v1",
+		[]RepoData{{URL: repoURL}},
+		nil,
+	)
+
+	publisherDone := make(chan struct{})
+	go func() {
+		defer close(publisherDone)
+		d.persistCoAuthoredByState(workspaceID)
+	}()
+	<-cache.entered
+	defer func() {
+		close(cache.release)
+		<-publisherDone
+	}()
+
+	ready := make(chan error, 1)
+	go func() {
+		ready <- d.ensureRepoReady(context.Background(), workspaceID, repoURL)
+	}()
+
+	select {
+	case err := <-ready:
+		if err != nil {
+			t.Fatalf("ensureRepoReady: %v", err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("cached checkout waited for historical Co-authored-by hook reconciliation")
+	}
+}
+
+func TestEnsureRepoReadyReturnsCancellationAfterCoAuthoredByStateWrite(t *testing.T) {
+	t.Parallel()
+
+	const (
+		workspaceID = "ws-1"
+		repoURL     = "https://example.invalid/repo"
+	)
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID: workspaceID,
+			Repos:       []RepoData{{URL: repoURL}},
+			Settings:    json.RawMessage(`{"co_authored_by_enabled":false}`),
+		})
+	})
+	cache := &blockingCoAuthoredByStateWriter{
+		lookupPath: "/cached/repo.git",
+		entered:    make(chan struct{}),
+		release:    make(chan struct{}),
+	}
+	d.repoCache = cache
+	d.workspaces[workspaceID] = newWorkspaceState(
+		workspaceID,
+		nil,
+		"v1",
+		[]RepoData{{URL: repoURL}},
+		nil,
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ready := make(chan error, 1)
+	go func() {
+		ready <- d.ensureRepoReady(ctx, workspaceID, repoURL)
+	}()
+	<-cache.entered
+	cancel()
+	close(cache.release)
+
+	if err := <-ready; !errors.Is(err, context.Canceled) {
+		t.Fatalf("ensureRepoReady error = %v, want context cancellation", err)
+	}
+}
+
+func TestPersistCoAuthoredByStateCoalescesNewerHookReconciliation(t *testing.T) {
+	t.Parallel()
+
+	const workspaceID = "ws-1"
+	settings := `{"co_authored_by_enabled":true}`
+	d, _ := newCoAuthoredByStateDaemon(t, workspaceID, &settings)
+	cache := &blockingCoAuthoredByStateCache{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	d.repoCache = cache
+
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		d.persistCoAuthoredByState(workspaceID)
+	}()
+	<-cache.entered
+	released := false
+	defer func() {
+		if !released {
+			close(cache.release)
+		}
+		<-firstDone
+	}()
+
+	d.mu.Lock()
+	d.workspaces[workspaceID].settings = json.RawMessage(`{"co_authored_by_enabled":false}`)
+	d.mu.Unlock()
+
+	secondDone := make(chan struct{})
+	go func() {
+		defer close(secondDone)
+		d.persistCoAuthoredByState(workspaceID)
+	}()
+
+	select {
+	case <-secondDone:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("newer Co-authored-by state waited for historical hook reconciliation")
+	}
+
+	close(cache.release)
+	released = true
+	<-firstDone
+	d.waitBackgroundSyncs()
+	if cache.lastReconcile(t) {
+		t.Fatal("final hook reconciliation used the stale Co-authored-by setting")
+	}
 }
 
 // A settings refresh must publish the current verdict to the repo cache, not
@@ -342,6 +537,7 @@ func TestPersistCoAuthoredByStateReconcilesHooks(t *testing.T) {
 	d.workspaces[workspaceID] = newWorkspaceState(workspaceID, nil, "", nil, json.RawMessage(settings))
 
 	d.persistCoAuthoredByState(workspaceID)
+	d.waitBackgroundSyncs()
 
 	if cache.lastWrite(t) {
 		t.Error("published state = enabled, want disabled")
@@ -519,6 +715,7 @@ func TestPersistCoAuthoredByStateReconcilesIsolatedCheckouts(t *testing.T) {
 	}
 
 	d.persistCoAuthoredByState(workspaceID)
+	d.waitBackgroundSyncs()
 
 	got := cache.reconciledCheckouts()
 	if len(got) != 1 {
@@ -595,6 +792,7 @@ func TestPersistCoAuthoredByStateReconcilesLegacyEnvRoots(t *testing.T) {
 	readableUnattributed := seedEnvRootCheckout(t, root, "multica-61070eA_", "env-x", legacyTaskOnlyOwner)
 
 	d.persistCoAuthoredByState(workspaceID)
+	d.waitBackgroundSyncs()
 
 	reconciled := make(map[string]bool)
 	for _, checkout := range cache.reconciledCheckouts() {
