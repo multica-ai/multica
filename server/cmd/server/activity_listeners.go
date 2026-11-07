@@ -63,6 +63,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 		}
 
 		statusChanged, _ := payload["status_changed"].(bool)
+		fieldStatusChanged := statusChanged
 		// A duplicate mark change is a status change with a better name: the
 		// duplicate row names the other issue and where the status went, so
 		// the generic status row would only repeat it (MUL-7349). Only a row
@@ -76,19 +77,25 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 		assigneeChanged, _ := payload["assignee_changed"].(bool)
 		descriptionChanged, _ := payload["description_changed"].(bool)
 
-		// A workflow handoff (MUL-7420) rides on the status row: entering the
-		// step is what moved the issue to its handler, so the timeline shows
-		// one entry and the separate assignee row would only repeat it.
+		// Status changes carry the handoff on their own row. A direct-agent
+		// project entry can also hand off at the same status, even to the same
+		// assignee; record that entry without inventing either field change.
 		handoff, _ := payload["workflow_handoff"].(map[string]string)
-		if statusChanged && handoff != nil {
+		projectHandoff := !fieldStatusChanged && handoff["to_type"] == "agent" && handoff["to_id"] != ""
+		if (statusChanged && handoff != nil) || projectHandoff {
 			assigneeChanged = false
 		}
 
-		if statusChanged {
-			prevStatus, _ := payload["prev_status"].(string)
-			detailsMap := map[string]string{
-				"from": prevStatus,
-				"to":   issue.Status,
+		if statusChanged || projectHandoff {
+			action := "status_changed"
+			detailsMap := map[string]string{}
+			if statusChanged {
+				prevStatus, _ := payload["prev_status"].(string)
+				detailsMap["from"] = prevStatus
+				detailsMap["to"] = issue.Status
+			} else {
+				action = "workflow_handoff"
+				detailsMap["step"] = issue.Status
 			}
 			for k, v := range handoff {
 				detailsMap["handoff_"+k] = v
@@ -108,11 +115,11 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 				IssueID:     parseUUID(issue.ID),
 				ActorType:   util.StrToText(e.ActorType),
 				ActorID:     optionalUUID(e.ActorID),
-				Action:      "status_changed",
+				Action:      action,
 				Details:     details,
 			})
 			if err != nil {
-				slog.Error("activity: failed to record status change",
+				slog.Error("activity: failed to record workflow or status entry",
 					"issue_id", issue.ID, "error", err)
 			} else {
 				publishActivityEvent(bus, e, activity)
