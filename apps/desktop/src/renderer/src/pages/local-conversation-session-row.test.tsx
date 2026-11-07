@@ -1,6 +1,6 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConversationListModel } from "@multica/conversation-client/models";
 import { localV2SummarySchema } from "@multica/core/local-conversation/v2";
 import { LocalConversationListModel } from "../platform/local-conversation-list-model";
@@ -62,4 +62,50 @@ it("updates only selected rows and lets a preview update bypass activity control
   expect(screen.getByRole("status")).toHaveClass("bg-info");
   act(() => list.completions.set("b", { ...list.completions.get("b")!, readTurnIndex: 0 }));
   expect(screen.queryByRole("status")).toBeNull();
+});
+
+describe.each(["claude", "codex"])("%s failure status", (provider) => {
+  it("shows an existing failure after list reload and follows live updates while unselected", () => {
+    const list = new ConversationListModel();
+    let seq = 0;
+    const update = (status: string, backgroundTasks = 0) => list.upsert([{
+      ...summary("unselected", ++seq, "Previous successful reply"), provider, status, background_tasks: backgroundTasks,
+    }]);
+    update("failed");
+    render(<LocalConversationSessionRow
+      model={new LocalConversationListModel(list)} id="unselected" selected={false}
+      sessionLinks={{ current: new Map() }} flowPath="/test/conversations" select={vi.fn()}
+      updatingId={null} labels={{ pinned: "Pinned", storage: "Saved locally" }} projectLabels={{ actions: "Actions" }}
+      t={((selector: (messages: object) => string) => selector({
+        window: { unread: "Unread" }, workbench: { run_status: { failed: "Failed" } },
+      })) as ComponentProps<typeof LocalConversationSessionRow>["t"]}
+      renderSessionActions={() => <></>} setContextSelection={vi.fn()} chinese={false} remote
+      v2={{ list } as ComponentProps<typeof LocalConversationSessionRow>["v2"]}
+    />);
+    const failure = () => screen.queryByRole("status", { name: "Failed: unselected" });
+    expect(failure()).toHaveClass("text-destructive");
+    expect(screen.getByRole("link")).toHaveClass("pr-16");
+    expect(screen.getByRole("link")).not.toHaveAttribute("aria-current");
+
+    act(() => update("running"));
+    expect(failure()).toBeNull();
+    expect(screen.getByLabelText("Conversation running: unselected")).toBeInTheDocument();
+    act(() => update("idle"));
+    expect(failure()).toBeNull();
+
+    act(() => update("failed", 1));
+    expect(failure()).toBeInTheDocument();
+    expect(screen.getByRole("link")).toHaveClass("pr-24");
+    expect(screen.getByRole("status", { name: "Background tasks: unselected (1)" })).toBeInTheDocument();
+    // A late summary must not erase the newer failure.
+    act(() => list.upsert([{ ...summary("unselected", 1), provider, status: "idle" }]));
+    expect(failure()).toBeInTheDocument();
+
+    act(() => update("running"));
+    // The daemon uses idle after either success or user cancellation.
+    act(() => update("idle"));
+    expect(failure()).toBeNull();
+    act(() => update("future-status"));
+    expect(failure()).toBeNull();
+  });
 });

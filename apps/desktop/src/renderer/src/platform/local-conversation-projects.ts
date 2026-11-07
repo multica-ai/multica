@@ -11,6 +11,7 @@ export interface LocalSessionEntry {
   archived: boolean;
   projectId: string | null;
   running: boolean;
+  failed: boolean;
   waitingForAnswer: boolean;
   backgroundTasks: number;
   preview: string;
@@ -23,7 +24,7 @@ export interface LocalSessionEntry {
 export function sessionEntry(summary: LocalV2Summary): LocalSessionEntry {
   return {
     id: summary.conversation_id, title: summary.title, provider: summary.provider === "codex" ? "codex" : "claude", cwd: summary.cwd,
-    pinned: summary.pinned, archived: summary.archived, projectId: summary.project_id, running: summary.status === "running",
+    pinned: summary.pinned, archived: summary.archived, projectId: summary.project_id, running: summary.status === "running", failed: summary.status === "failed",
     waitingForAnswer: summary.status === "running" && summary.pending_interactions > 0, backgroundTasks: summary.background_tasks, preview: summary.last_message_preview,
     turnCount: summary.turn_count, updatedAt: summary.updated_at,
     // Older daemons only expose activity time. New daemons explicitly return null before a user turn.
