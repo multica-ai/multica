@@ -102,6 +102,21 @@
     "error_not_member": "Has iniciado sesión en una cuenta de Multica que no es miembro de este espacio de trabajo.",
     "error_unknown": "Algo ha ido mal. Inténtalo de nuevo y, si el problema persiste, contacta con el administrador del espacio de trabajo."
   },
+  "sharecrm_bind": {
+    "page_title": "Vincula tu cuenta de ShareCRM",
+    "redeeming": "Vinculando tu cuenta…",
+    "needs_auth_description": "Inicia sesión en Multica para completar la vinculación. El token del enlace vincula tu cuenta de ShareCRM a este usuario de Multica, así que primero debes iniciar sesión.",
+    "sign_in": "Iniciar sesión",
+    "done_title": "Cuenta vinculada.",
+    "done_description": "Tu próximo mensaje al bot en ShareCRM irá directamente al agente. Puedes cerrar esta pestaña.",
+    "error_title": "No se ha podido completar la vinculación",
+    "error_admin_hint": "Si esto sigue ocurriendo, envía un mensaje de nuevo al bot en ShareCRM para obtener un enlace nuevo.",
+    "error_missing_token": "Al enlace le falta el token. Envía un mensaje de nuevo al bot en ShareCRM para obtener uno nuevo.",
+    "error_expired": "Este enlace no es válido o ha caducado (los enlaces son válidos durante 15 minutos). Envía un mensaje de nuevo para obtener uno nuevo.",
+    "error_already_bound": "Esta cuenta de ShareCRM ya está vinculada a otro usuario de Multica. La transferencia de cuentas requiere una desvinculación explícita previa.",
+    "error_not_member": "Has iniciado sesión en una cuenta de Multica que no es miembro de este espacio de trabajo.",
+    "error_unknown": "Algo ha ido mal. Inténtalo de nuevo y, si el problema persiste, contacta con el administrador del espacio de trabajo."
+  },
   "expandable_description": {
     "expand": "Mostrar más",
     "collapse": "Mostrar menos"

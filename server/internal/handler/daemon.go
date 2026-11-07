@@ -3647,6 +3647,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			resp.ChatChannelType = delivery.ChannelType
 			resp.ChatType = delivery.ChatType
 			resp.ChatChannelDeliversFiles = h.channelDeliversFiles(delivery.ChannelType)
+			if resolver := h.channelExternalSessionIDResolvers[delivery.ChannelType]; resolver != nil {
+				resp.ExternalSessionID = strings.TrimSpace(resolver(delivery.Config))
+			}
 			if delivery.ChannelType == string(slack.TypeSlack) {
 				if reader, ok := h.SlackHistory.(slackTaskSourceReader); ok {
 					resp.ChatSource = reader.TaskSource(r.Context(), delivery, cs.WorkspaceID)
