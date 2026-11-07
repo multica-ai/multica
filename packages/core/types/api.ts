@@ -80,6 +80,15 @@ export interface UpdateIssueRequest {
    *  MUL-3375). The assignee/status change still applies. Control field —
    *  strip from optimistic cache patches; never written onto the Issue. */
   suppress_run?: boolean;
+  /** When a status change hands the issue off to a workflow step's handler,
+   *  also stop the active runs of the agent it was taken from (MUL-7420).
+   *  Control field — strip from optimistic cache patches. */
+  stop_previous_assignee_runs?: boolean;
+  /** With a project move: enter the destination workflow's column the issue
+   *  lands on, handing it off like a status change (MUL-7420). Without it a
+   *  project move is administrative. Control field — strip from optimistic
+   *  cache patches. */
+  enter_workflow_step?: boolean;
   /** Marks this issue as a duplicate of another issue (MUL-7349). The server
    *  also sets status to cancelled; any later status change away from
    *  cancelled removes the mark. Write-only — read it back through
@@ -108,6 +117,7 @@ export interface MoveIssueRequest
     | "assignee_id"
     | "parent_issue_id"
     | "project_id"
+    | "stop_previous_assignee_runs"
   > {
   before_id: string | null;
   after_id: string | null;
@@ -148,7 +158,8 @@ export interface ListIssuesParams {
   /**
    * Filter by lifecycle category rather than by exact key, so one bucket holds
    * all concrete and custom statuses in that phase. Task views use exact
-   * status keys for their columns instead.
+   * status keys for their columns instead. The web client's
+   * `ApiClient.listIssues` does not send it.
    */
   status_category?: IssueStatusCategory;
   /** Multi-value form of `status_category`. OR within the field. */
@@ -301,6 +312,38 @@ export type IssueTableScope =
   | { kind: "creator"; actor: IssueActorRef }
   | { kind: "my"; relation: "assigned" | "created" | "involved" | "any" };
 
+export type IssueTableRelation = "assigned" | "created" | "my_agents" | "subscribed";
+
+export type IssueTableNegatableFilter =
+  | "statuses"
+  | "priorities"
+  | "assignees"
+  | "creators"
+  | "project_ids"
+  | "project_statuses"
+  | "label_ids"
+  | "relations"
+  | "due_dates";
+
+export type IssueTableDueDate = "overdue" | "today" | "this_week" | "next_7_days" | "none";
+
+/** One node of `filters.advanced`: a group when it has `children`. */
+export type IssueTableFilterNode = IssueTableFilterGroup | IssueTableFilterCondition;
+
+export interface IssueTableFilterGroup {
+  match: "all" | "any";
+  children: IssueTableFilterNode[];
+}
+
+export interface IssueTableFilterCondition {
+  /** A flat filter's field, or `property:<definitionId>`. */
+  field: IssueTableNegatableFilter | `property:${string}`;
+  negate?: boolean;
+  /** Actors are `${type}:${id}`; assignees and project_ids accept "none".
+   *  A property takes `filters.properties` members. */
+  values: PropertyFilterValue[];
+}
+
 export interface IssueTableFilters {
   statuses?: IssueStatus[];
   priorities?: IssuePriority[];
@@ -314,6 +357,19 @@ export interface IssueTableFilters {
    *  matches. */
   project_statuses?: ProjectStatus[];
   label_ids?: string[];
+  /** How the requesting user relates to the issue, OR within the list:
+   *  assigned to me, created by me, assigned to an agent I own. */
+  relations?: IssueTableRelation[];
+  /** Dimensions whose predicate is inverted ("is not"). Listing a dimension
+   *  that has no values of its own changes nothing. */
+  negate?: IssueTableNegatableFilter[];
+  /** Relative due-date buckets, OR within the list. Needs `today`. */
+  due_dates?: IssueTableDueDate[];
+  /** The viewer's calendar day ("YYYY-MM-DD") the due-date buckets resolve
+   *  against. */
+  today?: string;
+  /** A condition tree ANDed with the flat filters above. */
+  advanced?: IssueTableFilterGroup;
   /** Same shape as `ListIssuesParams.properties`: bare strings are exact
    *  equality / "No value", operator objects narrow scalar matches. */
   properties?: Record<string, PropertyFilterValue[]>;
@@ -326,6 +382,9 @@ export interface IssueTableFilters {
   /** Match the running-task issue projection returned by
    *  `/api/working-agents`. An explicit empty list matches nothing. */
   working_issue_ids?: string[];
+  /** Match the viewer's unread issues as the client holds them
+   *  (`/api/issues/unread`). An explicit empty list matches nothing. */
+  unread_issue_ids?: string[];
   include_sub_issues?: boolean;
 }
 
@@ -512,16 +571,16 @@ export interface WorkingAgentSummary {
   running_task_count: number;
 }
 
-/** Per-status bucket in the paginated issue cache. `total` is the server count (all pages), not the length of `issues`. */
+/** Per-category bucket in the issue list cache. The list's fetch sets `total` to the bucket's row count. */
 export interface IssueStatusBucket {
   issues: Issue[];
   total: number;
 }
 
 /**
- * Frontend cache shape for the issue list. Data is bucketed by status so
- * each column can paginate independently. Assembled from per-status
- * `api.listIssues` responses by the query functions in `issues/queries.ts`.
+ * Frontend cache shape for the issue list. Data is bucketed by status
+ * category. Assembled from one `api.listIssues` response by the query
+ * functions in `issues/queries.ts`.
  */
 export interface ListIssuesCache {
   /** Bucketed by status CATEGORY — see PAGINATED_CATEGORIES. (MUL-6243) */

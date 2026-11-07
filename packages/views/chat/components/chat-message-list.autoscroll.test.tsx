@@ -7,6 +7,7 @@ import type { TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
 import { ChatMessageList } from "./chat-message-list";
+import { resetRevealedLists } from "./stick-to-bottom";
 
 // Auto-scroll wiring: the list must keep the live end visible through streaming
 // growth and composer resizes, releasing only on real reader input. The latch
@@ -355,21 +356,29 @@ function taskMsg(seq: number, content: string): TaskMessagePayload {
   return { task_id: TASK_ID, seq, type: "text", content } as TaskMessagePayload;
 }
 
-function renderStreamingChat({ contentHeight = 2000 } = {}) {
+function renderStreamingChat({
+  contentHeight = 2000,
+  revealKey,
+  onRevealed,
+}: { contentHeight?: number; revealKey?: string; onRevealed?: () => void } = {}) {
   const qc = new QueryClient();
   qc.setQueryData(chatKeys.taskMessages(TASK_ID), [taskMsg(0, "Looking into it. ")]);
 
-  const view = render(
+  const content = (active: boolean) => (
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={qc}>
         <ChatMessageList
+          active={active}
+          revealKey={revealKey}
+          onRevealed={onRevealed}
           messages={[]}
           pendingTask={{ task_id: TASK_ID, status: "running" }}
           availability={undefined}
         />
       </QueryClientProvider>
-    </I18nProvider>,
+    </I18nProvider>
   );
+  const view = render(content(true));
 
   const el = view.container.querySelector<HTMLElement>("[data-tab-scroll-root]");
   if (!el) throw new Error("chat list did not render a scroll container");
@@ -377,6 +386,7 @@ function renderStreamingChat({ contentHeight = 2000 } = {}) {
   return {
     qc,
     view,
+    setActive: (active: boolean) => view.rerender(content(active)),
     scroll: scroller(el, contentHeight),
     rowCount: () => view.container.querySelectorAll("[data-row-key]").length,
     followsAtBottom: () =>
@@ -395,6 +405,54 @@ function renderStreamingChat({ contentHeight = 2000 } = {}) {
 }
 
 describe("ChatMessageList auto-scroll", () => {
+  it("stops following and reveal polling before a closing list unmounts", () => {
+    const { view, scroll, setActive, followsAtBottom } = renderStreamingChat();
+    const observedBefore = observedTargets().length;
+    const measure = vi.spyOn(scroll.el, "getBoundingClientRect");
+    const staleHeightCallback = reportContentHeightChanged;
+
+    setActive(false);
+
+    expect(view.container.contains(scroll.el)).toBe(true);
+    expect(followsAtBottom()).toBe("false");
+    expect(observedTargets()).toHaveLength(observedBefore - 1);
+    scroll.grow(120);
+    scroll.shrinkViewport(72);
+    scroll.browserScrollsListUp(100);
+    act(() => staleHeightCallback?.());
+    for (let frame = 0; frame < 20; frame++) act(() => renderFrame());
+
+    expect(scroll.pinCalls()).toHaveLength(0);
+    expect(measure).not.toHaveBeenCalled();
+  });
+
+  it("resumes following if a closing list is reopened before unmount", () => {
+    const { scroll, setActive, followsAtBottom } = renderStreamingChat();
+
+    setActive(false);
+    scroll.grow(120);
+    setActive(true);
+    scroll.grow(120);
+
+    expect(followsAtBottom()).toBe("auto");
+    expect(scroll.pinCalls()).toHaveLength(1);
+    expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
+  it("preserves the reader's released follow across an interrupted close", () => {
+    const { scroll, setActive, followsAtBottom } = renderStreamingChat();
+
+    scroll.readerScrollsUp(240);
+    setActive(false);
+    scroll.grow(120);
+    setActive(true);
+    scroll.grow(120);
+
+    expect(followsAtBottom()).toBe("false");
+    expect(scroll.pinCalls()).toHaveLength(0);
+    expect(scroll.distanceFromBottom()).toBe(480);
+  });
+
   it("follows a streaming reply whose row count never changes", () => {
     const { scroll, streamChunk, rowCount } = renderStreamingChat();
 
@@ -490,6 +548,90 @@ describe("ChatMessageList auto-scroll", () => {
     // It stops, and the list appears.
     for (let i = 0; i < 20; i++) act(() => renderFrame());
     expect(scroll.el.className).not.toContain("invisible");
+  });
+
+  // MUL-8417: the floating window remounts its list on every open. A
+  // conversation already revealed in this page session has no cold content left
+  // to settle, so it shows as soon as it lands — but it still has to land.
+  describe("revealing a conversation again", () => {
+    const frames = (count: number) => {
+      for (let i = 0; i < count; i++) act(() => renderFrame());
+    };
+    const mountAtLiveEnd = (options: Parameters<typeof renderStreamingChat>[0]) => {
+      const chat = renderStreamingChat(options);
+      const box = (el: Element, top: number, bottom: number) => {
+        el.getBoundingClientRect = () => ({ top, bottom }) as DOMRect;
+      };
+      box(chat.scroll.el, 0, VIEWPORT);
+      const liveEndRow = chat.view.container.querySelector("[data-chat-live-end]");
+      if (!liveEndRow) throw new Error("the newest row is not marked as the live end");
+      return {
+        ...chat,
+        land: () => box(liveEndRow, VIEWPORT - 200, VIEWPORT - 16),
+        predictBelowFold: () => box(liveEndRow, 4600, 5200),
+      };
+    };
+
+    beforeEach(() => resetRevealedLists());
+
+    it("skips the settle window once the conversation has been revealed", () => {
+      const first = mountAtLiveEnd({ revealKey: "session-1" });
+      first.land();
+      frames(2);
+      expect(first.scroll.el.className).toContain("invisible");
+      frames(20);
+      expect(first.scroll.el.className).not.toContain("invisible");
+      first.view.unmount();
+
+      const again = mountAtLiveEnd({ revealKey: "session-1" });
+      expect(again.scroll.el.className).toContain("invisible");
+      again.predictBelowFold();
+      frames(20);
+      expect(again.scroll.el.className).toContain("invisible");
+
+      again.land();
+      frames(2);
+      expect(again.scroll.el.className).not.toContain("invisible");
+    });
+
+    it("still settles a conversation it has not revealed", () => {
+      const first = mountAtLiveEnd({ revealKey: "session-1" });
+      first.land();
+      frames(20);
+      first.view.unmount();
+
+      const other = mountAtLiveEnd({ revealKey: "session-2" });
+      other.land();
+      frames(2);
+      expect(other.scroll.el.className).toContain("invisible");
+    });
+
+    it("still settles every mount of an unnamed list", () => {
+      const first = mountAtLiveEnd({});
+      first.land();
+      frames(20);
+      first.view.unmount();
+
+      const again = mountAtLiveEnd({});
+      again.land();
+      frames(2);
+      expect(again.scroll.el.className).toContain("invisible");
+    });
+
+    it("reports the reveal, and again when a closing list is reopened", () => {
+      const onRevealed = vi.fn();
+      const chat = mountAtLiveEnd({ revealKey: "session-1", onRevealed });
+      chat.land();
+      frames(2);
+      expect(onRevealed).not.toHaveBeenCalled();
+      frames(20);
+      expect(onRevealed).toHaveBeenCalledTimes(1);
+
+      chat.setActive(false);
+      expect(onRevealed).toHaveBeenCalledTimes(1);
+      chat.setActive(true);
+      expect(onRevealed).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("keeps the newest content clear of a composer that grew", () => {

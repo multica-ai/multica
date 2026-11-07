@@ -37,8 +37,7 @@ import {
   Platform,
   View,
 } from "react-native";
-import { router } from "expo-router";
-import { useFocusEffect, useIsFocused } from "@react-navigation/native";
+import { router, useFocusEffect, useIsFocused } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   Agent,
@@ -144,17 +143,11 @@ export default function ChatTab() {
   // state when no `activeSessionId` is persisted; on a phone, picking
   // a session is 4 taps, so jump straight to the most recent session.
   // Hydration is one-shot per workspace.
-  const hydratedWsRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!wsId) return;
-    if (hydratedWsRef.current === wsId) return;
-    if (sessions.length === 0) {
-      hydratedWsRef.current = wsId;
-      return;
-    }
-    hydratedWsRef.current = wsId;
-    setActiveSessionId(sessions[0].id);
-  }, [wsId, sessions]);
+  const [hydratedWs, setHydratedWs] = useState<string | null>(null);
+  if (wsId && hydratedWs !== wsId) {
+    setHydratedWs(wsId);
+    if (sessions.length > 0) setActiveSessionId(sessions[0].id);
+  }
   const { data: messages = [], isLoading: messagesLoading } = useQuery(
     chatMessagesOptions(activeSessionId),
   );
@@ -440,7 +433,7 @@ export default function ChatTab() {
         // Silent — task may have already terminated server-side.
       })
       .finally(() => invalidatePendingTask(qc, sessionId));
-  }, [pendingTask?.task_id, pendingTask?.status, activeSessionId, qc]);
+  }, [pendingTask, activeSessionId, qc]);
 
   // ── Header / sheet actions ─────────────────────────────────────────────
   const handleNewChat = useCallback(() => {
@@ -459,12 +452,15 @@ export default function ChatTab() {
 
   // Apply the user's pick from the chat-sessions route (or "no session"
   // when they delete the active one in the sheet).
-  useEffect(() => {
-    if (!selectRequest) return;
+  const [appliedSelect, setAppliedSelect] = useState<typeof selectRequest>(null);
+  if (selectRequest && selectRequest !== appliedSelect) {
+    setAppliedSelect(selectRequest);
     setSelectedAgentId(null);
     setActiveSessionId(selectRequest.id);
-    consumeSelect();
-  }, [selectRequest, consumeSelect]);
+  }
+  useEffect(() => {
+    if (selectRequest && selectRequest === appliedSelect) consumeSelect();
+  }, [selectRequest, appliedSelect, consumeSelect]);
 
   const handleDeleteActive = useCallback(() => {
     if (!activeSession) return;

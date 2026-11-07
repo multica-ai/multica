@@ -32,10 +32,12 @@ import {
   CodeXml,
   Copy,
   Maximize2,
+  RotateCw,
   TriangleAlert,
   Workflow,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -86,13 +88,30 @@ interface DynamicBlockProps {
   error?: DynamicBlockError | null;
   /** Shows the fullscreen button when set. */
   onFullscreen?: () => void;
+  /** Reloads the current preview when the kind supports it. */
+  onReload?: () => void;
+  /** Reveals the mounted preview while its surface is enlarged. */
+  fullscreen?: boolean;
   /** Focus returns here when the kind's fullscreen surface closes. */
   fullscreenButtonRef?: Ref<HTMLButtonElement>;
   /**
    * The rendered content. It stays mounted while the source view is showing,
    * so switching back is instant; `active` says whether it is on screen.
+   * `collapsed` says the frame is clipping the body at the collapse point, so
+   * the preview must lay out at the clamp, never at its full height — a tall
+   * document that paints unclamped for even a frame slams virtualized
+   * timelines with a total-height shock (visible flicker on scroll jumps).
    */
-  preview: (options: { active: boolean }) => ReactNode;
+  preview: (options: { active: boolean; collapsed: boolean }) => ReactNode;
+  /**
+   * The preview body's content height in px, when the preview knows it (the
+   * html block's measured document height). Passing it moves the collapse
+   * decision out of DOM measurement: the frame flips to collapsed in the same
+   * render the height arrives, so the clamp and the height cannot land a
+   * frame apart. Omit — or pass null while the height is still unknown —
+   * for previews the frame must measure (mermaid).
+   */
+  bodyHeight?: number | null;
   className?: string;
 }
 
@@ -102,13 +121,45 @@ export function DynamicBlock({
   source,
   error,
   onFullscreen,
+  onReload,
+  fullscreen = false,
   fullscreenButtonRef,
   preview,
+  bodyHeight,
   className,
 }: DynamicBlockProps) {
   const { t } = useT("editor");
   const [view, setView] = useState<DynamicBlockView>("preview");
   const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  // Overflow state for previews the frame must measure itself (mermaid). A
+  // preview that reports its height makes this read obsolete — the collapse
+  // decision then lands in the same render the height arrives, so the clamp
+  // and the height can never paint a frame apart.
+  const measuredBodyRef = useRef<HTMLDivElement>(null);
+  const [measuredOverflowing, setMeasuredOverflowing] = useState(false);
+  useLayoutEffect(() => {
+    if (bodyHeight != null) return;
+    const el = measuredBodyRef.current;
+    if (!el) return;
+    const measure = () =>
+      setMeasuredOverflowing(el.offsetHeight > DYNAMIC_BLOCK_COLLAPSE_AT_PX);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [bodyHeight]);
+  const overflowing =
+    bodyHeight != null
+      ? bodyHeight > DYNAMIC_BLOCK_COLLAPSE_AT_PX
+      : measuredOverflowing;
+  // The clamp is an inline-layout concern and stays on while the surface is
+  // enlarged: the dialog is fixed-position, so it escapes the clip and fills
+  // its own box, while the in-place footprint keeps holding the clamp —
+  // dropping the clip for the enlargement would re-expand the timeline for as
+  // long as the dialog is open, the very height jump this frame prevents.
+  const collapsed = overflowing && !expanded;
   const Icon = KIND_ICON[kind];
   const kindLabel = KIND_LABEL[kind];
   const trimmedTitle = title?.trim();
@@ -176,65 +227,138 @@ export function DynamicBlock({
               {t(($) => $.dynamic_block.source)}
             </TabsTrigger>
           </TabsList>
+          {onReload && (
+            <IconButton
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground"
+              disabled={view !== "preview"}
+              onClick={onReload}
+              label={t(($) => $.attachment.reload)}
+            >
+              <RotateCw />
+            </IconButton>
+          )}
           {onFullscreen && (
-            <Button
+            <IconButton
               ref={fullscreenButtonRef}
               type="button"
               variant="ghost"
               size="icon-xs"
               className="text-muted-foreground"
               onClick={onFullscreen}
-              title={t(($) => $.code_block.fullscreen)}
-              aria-label={t(($) => $.code_block.fullscreen)}
+              label={t(($) => $.code_block.fullscreen)}
             >
               <Maximize2 />
-            </Button>
+            </IconButton>
           )}
-          <Button
+          <IconButton
             type="button"
             variant="ghost"
             size="icon-xs"
             className="text-muted-foreground"
             onClick={handleCopy}
-            title={t(($) => $.dynamic_block.copy_source)}
-            aria-label={t(($) => $.dynamic_block.copy_source)}
+            label={t(($) => $.dynamic_block.copy_source)}
           >
             {copied ? <Check /> : <Copy />}
-          </Button>
+          </IconButton>
         </div>
       </div>
-      <TabsContent value="preview" keepMounted>
-        {error && (
+      <TabsContent
+        value="preview"
+        keepMounted
+        hidden={!fullscreen && view !== "preview"}
+        inert={!fullscreen && view !== "preview"}
+      >
+        {error && view === "preview" && (
           <DynamicBlockErrorPanel
             kind={kind}
             error={error}
             onViewSource={() => setView("source")}
           />
         )}
-        <div hidden={!!error}>
-          <CollapsibleBody>{preview({ active: view === "preview" && !error })}</CollapsibleBody>
+        <div hidden={!!error && !fullscreen}>
+          <CollapsibleBody
+            collapsed={collapsed}
+            onExpand={() => setExpanded(true)}
+            measureRef={bodyHeight == null ? measuredBodyRef : undefined}
+          >
+            {preview({ active: view === "preview" && !error, collapsed })}
+          </CollapsibleBody>
         </div>
       </TabsContent>
       <TabsContent value="source">
-        <CollapsibleBody>
+        <SelfCollapsingBody>
           <CodeBlockStatic
             language={SOURCE_LANGUAGE[kind]}
             body={source}
             className="!m-0 !rounded-none !bg-muted"
           />
-        </CollapsibleBody>
+        </SelfCollapsingBody>
       </TabsContent>
     </Tabs>
   );
 }
 
 /**
- * Takes its content's height, collapsed past DYNAMIC_BLOCK_COLLAPSE_AT_PX
- * with a fade and "Show all". The content keeps laying out at full height
- * underneath, so expanding only lifts the clip — an HTML preview or diagram
- * is not rebuilt.
+ * Clips the preview body past DYNAMIC_BLOCK_COLLAPSE_AT_PX with a fade and
+ * "Show all". Whether to clip is decided by the frame (`collapsed`): either
+ * from a preview-reported height in the same render the height arrives, or —
+ * for previews the frame measures — from the ResizeObserver below. The content
+ * keeps laying out at full height underneath the clip (the preview clamps
+ * its own layout height when `collapsed`), so expanding only lifts the clip
+ * — an HTML preview or diagram is not rebuilt.
  */
-function CollapsibleBody({ children }: { children: ReactNode }) {
+function CollapsibleBody({
+  collapsed,
+  onExpand,
+  measureRef,
+  children,
+}: {
+  collapsed: boolean;
+  onExpand: () => void;
+  /** Overflow measurement target for previews the frame must measure itself. */
+  measureRef?: Ref<HTMLDivElement>;
+  children: ReactNode;
+}) {
+  const { t } = useT("editor");
+
+  return (
+    <div
+      className="relative overflow-hidden"
+      data-collapsed={collapsed ? "" : undefined}
+      style={collapsed ? { maxHeight: DYNAMIC_BLOCK_COLLAPSE_AT_PX } : undefined}
+    >
+      <div ref={measureRef}>{children}</div>
+      {collapsed && (
+        <>
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-b from-transparent to-surface" />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-surface shadow-[var(--surface-shadow)]"
+            onClick={onExpand}
+          >
+            <ChevronDown />
+            {t(($) => $.dynamic_block.show_all)}
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The source view's body keeps its own measuring collapse (the behavior the
+ * preview's body had before the reported-height clamp): the frame cannot know
+ * a code block's height, and folding long sources stays useful there. Only
+ * the preview moved to the frame-decided clamp — its height is known, and the
+ * measure-after-paint race on that path is what the html-block flicker fix
+ * removes.
+ */
+function SelfCollapsingBody({ children }: { children: ReactNode }) {
   const { t } = useT("editor");
   const contentRef = useRef<HTMLDivElement>(null);
   const [contentHeight, setContentHeight] = useState(0);

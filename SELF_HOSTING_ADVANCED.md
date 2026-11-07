@@ -75,6 +75,7 @@ Changes take effect after restarting the backend / compose stack. The web UI rea
 | `ALLOWED_EMAIL_DOMAINS` | Optional comma-separated allowlist of email domains |
 | `ALLOWED_EMAILS` | Optional comma-separated allowlist of exact email addresses |
 | `DISABLE_WORKSPACE_CREATION` | Set to `true` to make `POST /api/workspaces` return 403 for every caller — users can only join workspaces they were invited to |
+| `WORKSPACE_CREATION_ALLOWED_EMAILS` | Optional comma-separated list of exact email addresses allowed to create workspaces. When set, everyone else gets 403 from `POST /api/workspaces`. Ignored when `DISABLE_WORKSPACE_CREATION=true` |
 
 Changes take effect after restarting the backend / compose stack. The web UI reads `ALLOW_SIGNUP` and `DISABLE_WORKSPACE_CREATION` from `/api/config` at runtime, so no web rebuild is needed.
 
@@ -86,6 +87,27 @@ Changes take effect after restarting the backend / compose stack. The web UI rea
 2. Sign in as the admin and create the shared workspace.
 3. Set `DISABLE_WORKSPACE_CREATION=true` and restart the backend. Optionally set `ALLOW_SIGNUP=false` at the same time if you also want to restrict new account creation.
 4. Going forward, additional users join via invitation only — the "Create workspace" affordance is hidden in the UI and any direct API call returns 403.
+
+#### Letting only selected users create workspaces
+
+If a few people (for example platform or team leads) need to keep creating workspaces while everyone else only joins by invitation, set `WORKSPACE_CREATION_ALLOWED_EMAILS` instead of toggling `DISABLE_WORKSPACE_CREATION` back and forth:
+
+```dotenv
+WORKSPACE_CREATION_ALLOWED_EMAILS=alice@example.com,bob@example.com
+```
+
+`POST /api/workspaces` is evaluated in this order:
+
+1. `DISABLE_WORKSPACE_CREATION=true` → 403 for everyone, including listed users.
+2. `WORKSPACE_CREATION_ALLOWED_EMAILS` empty → allowed for every signed-in user (default).
+3. The caller's account email matches an entry (case-insensitive) → allowed.
+4. Otherwise → 403.
+
+Things to know:
+
+- The list only controls who can create a workspace. It is not an instance-admin role: listed users get no visibility into, or management rights over, workspaces they are not a member of. Keeping new workspaces visible to the people who run the instance still depends on inviting them.
+- The UI does not hide the "Create workspace" entry points for unlisted users. They see the server's error message when they try.
+- This list is separate from `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`, which only control who can sign up.
 
 > Note: setting `ALLOW_SIGNUP=false` enables invite-only account creation. A new user with a live pending workspace invitation can create an account with the invited email; users without an allowlist match or a valid invitation remain blocked. Invitations also permit emails outside configured allowlists when `ALLOW_SIGNUP=true`. Revocation does not delete accounts already created using an invitation or prevent those accounts from signing in. Combine this with `DISABLE_WORKSPACE_CREATION=true` when invitees must join an existing workspace instead of creating their own.
 
@@ -100,6 +122,14 @@ use S3-compatible object storage instead.
 |----------|-------------|
 | `LOCAL_UPLOAD_DIR` | Directory attachments are written to (default: `./data/uploads`). The default is **relative to the backend's working directory** — `/app` in the bundled image, where the compose file mounts the `backend_uploads` volume. When running the binary manually it resolves against whatever directory you launched from, so set an absolute path; otherwise uploads land somewhere new each time the launch directory changes, and existing `attachment` rows point at files the server no longer looks for |
 | `LOCAL_UPLOAD_BASE_URL` | Optional absolute base for attachment URLs (e.g. `http://localhost:8080`). Leave empty to store `/uploads/...` paths that stay relative to the API origin |
+
+Uploads support files up to **100 MiB**. The backend allows an additional
+1 MiB for multipart boundaries and metadata, and returns HTTP 413 for oversized
+files or requests. The web upload route streams the body to the backend, so
+Next Proxy's body-buffer limit does not truncate uploads, including requests
+without `Content-Length`. If you deploy your own reverse proxy or ingress,
+allow request bodies of at least **101 MiB** there too. The upload limit is fixed;
+no upload-size environment variable is supported.
 
 #### S3 / CloudFront
 
@@ -238,6 +268,33 @@ Things to know:
 - **The CA applies to the whole backend process**, not only the Git provider
   integration: every outbound TLS client in the backend that uses the system
   trust store trusts it too.
+- **Daemons get the CA for git too.** Daemons clone and fetch workspace
+  repositories with the `git` installed on their machine, which never sees the
+  backend's `SSL_CERT_DIR`. The backend therefore sends the certificates from
+  the directories you added to `SSL_CERT_DIR` (the system directories
+  `/etc/ssl/certs` and `/etc/pki/tls/certs` are left out) to every daemon with
+  the workspace repositories. The daemon adds them to the trust git already
+  has on its machine and records the result in each workspace repository's
+  git config, which its own clone and fetch and the git commands agents run in
+  their checkouts all read. Nothing needs to be installed on the daemon's
+  machine. Things to know about it:
+  - The trust git already has is kept. If the daemon's machine sets a general
+    `http.sslCAInfo` in its system or global git config, the certificates in
+    that file are combined with the backend's; otherwise the system CA bundle
+    is. The daemon writes the combination to a file of its own and does not
+    change the system trust store or that git config.
+  - Narrower settings on the daemon's machine win and are not combined: an
+    `http.<url>.sslCAInfo` for a host, an `http.sslCAInfo` set in a
+    repository's own config, and `GIT_SSL_CAINFO`.
+  - Daemons pick up an added, replaced, or removed CA, and changes to the
+    machine's own trust, the next time they refresh the workspace
+    repositories, which happens before every checkout; they do not need a
+    restart. The backend still does. Checkouts created while a CA was
+    present keep working after it is removed.
+  - Within those repositories, git trusts the backend's CAs for every host,
+    not only the one that needs them.
+  - Daemons on Windows do not apply it: Git for Windows verifies certificates
+    against the Windows certificate store by default, so add the CA there.
 - **Only the trust problem is fixed.** An expired certificate, or one that does
   not cover the host name in the URL, is still rejected; fix the certificate
   itself.
@@ -278,6 +335,15 @@ These are configured on each user's machine, not on the server:
 | `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | Upper bound for healthy WebSocket claim safety polls, configured independently of `MULTICA_DAEMON_POLL_INTERVAL`; downward jitter keeps normal polls at `2m30s`–`2m45s`, while old servers and uncertain claims retain the ordinary poll interval |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat frequency |
 
+Browser login callbacks accept only `localhost`, `127.0.0.1`, and RFC 1918
+IPv4 addresses. If route detection selects an unsupported virtual-adapter
+address (for example `198.18.0.1`), login stops before opening the browser.
+When the browser and CLI run on the same machine, retry with
+`multica login --callback-host 127.0.0.1`. For a browser on another LAN machine,
+use `--callback-host <CLI-machine-LAN-IPv4>`; SSH-only machines can use token
+login or the printed SSH tunnel instructions. The login page reports invalid
+callback links instead of treating them as ordinary web sign-ins.
+
 Agent-specific overrides:
 
 | Variable | Description |
@@ -293,7 +359,7 @@ Agent-specific overrides:
 | `MULTICA_CODEARTS_PATH` | Custom path to the `codearts` launcher or binary |
 | `MULTICA_CODEARTS_MODEL` | Override the CodeArts model used |
 | `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
-| `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
+| `MULTICA_OPENCLAW_MODEL` | Select the registered OpenClaw agent ID used by default; the agent's `runtime_config.model_override` persistently overrides its underlying model for all newly claimed runs until changed or cleared |
 | `MULTICA_OPENCLAW_CLI_TIMEOUT` | Deadline for each `openclaw config ...` call during task preparation (default 30s; accepts `45s` or `45`). Raise it when the local CLI is slow to start; the daemon also reads it from `backends.openclaw.cli_timeout` in the CLI config |
 | `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
 | `MULTICA_HERMES_MODEL` | Override the Hermes model used |
@@ -428,7 +494,7 @@ If you are upgrading from a binary that pre-dates MUL-2957 (or the auto-hook fai
 
 If you prefer to build and run services manually:
 
-**Prerequisites:** Go 1.26.6, Node.js 22, pnpm 10.28.2, PostgreSQL 17 — a stock install is enough, see [Database Setup](#database-setup).
+**Prerequisites:** Go 1.26.9, Node.js 22, pnpm 10.28.2, PostgreSQL 17 — a stock install is enough, see [Database Setup](#database-setup).
 
 ```bash
 # Start your PostgreSQL (or use: docker compose up -d postgres)

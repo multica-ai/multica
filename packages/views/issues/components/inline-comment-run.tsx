@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
-import { AlertCircle, Brain, Check, ChevronRight, CirclePause, Clock3, CornerDownRight, ExternalLink, Loader2, MessageSquare, RotateCcw, ScrollText, Square, Terminal } from "lucide-react";
+import { AlertCircle, Brain, Check, ChevronRight, CirclePause, Clock3, CornerDownRight, Loader2, MessageSquare, RotateCcw, ScrollText, Square, Terminal } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -15,8 +15,10 @@ import { dispatchReasonCode } from "@multica/core/api";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { AgentTranscriptDialog, StepBody } from "../../common/task-transcript/agent-transcript-dialog";
 import { buildTimeline } from "../../common/task-transcript/build-timeline";
 import { buildSteps, groupSteps, isCallStep, isGroupRow, type TraceRow } from "../../common/task-transcript/build-steps";
@@ -148,25 +150,28 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
       : isError ? <div role="alert" className="text-body text-destructive">{t(($) => $.inline_run.load_failed)}
         <button className="ml-2 underline" type="button" onClick={() => void refetch()}>{t(($) => $.inline_run.try_again)}</button>
       </div> : undefined} />;
-  const stopButton = active && <Button size="icon-sm" variant="ghost" className="text-muted-foreground"
-    aria-label={stopLabel} title={stopLabel} disabled={cancel.isPending || cancel.isSuccess}
+  const stopButton = active && <IconButton size="icon-sm" variant="ghost" className="text-muted-foreground"
+    label={stopLabel} disabled={cancel.isPending || cancel.isSuccess}
     onClick={() => setConfirmStop(true)}>
     {cancel.isPending || cancel.isSuccess ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Square className="size-3.5" />}
-  </Button>;
+  </IconButton>;
   const stopDialog = <TerminateTaskConfirmDialog open={confirmStop} onOpenChange={setConfirmStop}
     showRunningNote={task.status !== "queued"}
     onConfirm={() => cancel.mutate(task.id, { onError: () => toast.error(t(($) => $.execution_log.cancel_failed)) })} />;
+  const fullLogButton = <Tooltip>
+    <TooltipTrigger render={<Button type="button" size="icon-sm" variant="ghost"
+      className="text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50"
+      aria-label={t(($) => $.inline_run.full_log)} aria-haspopup="dialog" aria-expanded={fullLogOpen}
+      onClick={openFullLog}>
+      <ScrollText aria-hidden className="size-3.5" />
+    </Button>} />
+    <TooltipContent>{t(($) => $.inline_run.full_log)}</TooltipContent>
+  </Tooltip>;
+  // Before the agent session starts there is no transcript to open.
+  const hasTranscript = !PRE_RUN_STATUSES.includes(task.status);
   if (presentation === "header" && showCommentRunInHeader(run)) {
     return <span className="inline-flex shrink-0" data-comment-actions data-run-id={task.id}>
-      <Tooltip>
-        <TooltipTrigger render={<Button type="button" size="icon-sm" variant="ghost"
-          className="text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50"
-          aria-label={t(($) => $.inline_run.full_log)} aria-haspopup="dialog" aria-expanded={fullLogOpen}
-          onClick={openFullLog}>
-          <ScrollText aria-hidden className="size-3.5" />
-        </Button>} />
-        <TooltipContent>{t(($) => $.inline_run.full_log)}</TooltipContent>
-      </Tooltip>
+      {fullLogButton}
       {transcript}
     </span>;
   }
@@ -176,16 +181,18 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
       <div ref={animationVisibility.ref} className="flex min-h-7 min-w-0 items-center gap-2" data-run-summary-row>
         {showIdentity && <>
           <ActorAvatar actorType="agent" actorId={task.agent_id} size="md" enableHoverCard showStatusDot />
-          <span className="max-w-[30%] shrink-0 truncate text-body font-medium" title={name}>{name}</span>
+          <TruncatedTooltip content={name}>
+            <span className="max-w-[30%] shrink-0 truncate text-body font-medium">{name}</span>
+          </TruncatedTooltip>
           {!active && task.completed_at && <Tooltip>
-            <TooltipTrigger render={<span className="shrink-0 cursor-default text-caption text-muted-foreground @max-[32rem]/run:hidden">
+            <TooltipTrigger render={<span className="shrink-0 cursor-default text-label text-muted-foreground @max-[32rem]/run:hidden">
               {timeAgo(task.completed_at)}
             </span>} />
             <TooltipContent side="top">{new Date(task.completed_at).toLocaleString(locale)}</TooltipContent>
           </Tooltip>}
         </>}
         <span className={cn("flex min-w-0 items-center gap-1.5 whitespace-nowrap",
-          outcomeIsContent ? "text-body text-foreground" : "max-w-[50%] shrink-0 text-caption text-muted-foreground",
+          outcomeIsContent ? "text-body text-foreground" : "max-w-[50%] shrink-0 text-label text-muted-foreground",
           showProgress && "sr-only")}
           role="status" data-run-status>
           <TaskStatusIcon status={cancelled ? "cancelled" : task.status} />
@@ -195,10 +202,12 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
               <span>{statusText}</span>
               <span className="break-all font-mono text-muted-foreground">{rawError}</span>
             </TooltipContent>
-          </Tooltip> : <span className="truncate" title={statusText}>{statusText}</span>}
+          </Tooltip> : <TruncatedTooltip content={statusText}>
+            <span className="truncate">{statusText}</span>
+          </TruncatedTooltip>}
         </span>
         <button type="button"
-          className={cn("flex min-w-0 items-center gap-1.5 rounded-xs py-1 text-left text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          className={cn("flex min-w-0 items-center gap-1.5 rounded-xs py-1 text-left text-label text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             showProgress ? "flex-1 text-body" : "ml-auto shrink-0",
             showIdentity && !showProgress && "@max-[32rem]/run:min-w-7 @max-[32rem]/run:justify-center")}
           aria-label={stepLabel ? `${activityLabel} · ${stepLabel}` : activityLabel}
@@ -211,7 +220,8 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           {!showProgress && stepLabel && <span className="text-faint-foreground @max-[32rem]/run:hidden">· {stepLabel}</span>}
           <ChevronRight ref={state.disclosure.chevronRef} aria-hidden className={cn("size-3.5 shrink-0", expanded && "rotate-90")} />
         </button>
-        <span className={cn("shrink-0 whitespace-nowrap text-caption tabular-nums text-muted-foreground", showIdentity && !active && "@max-[32rem]/run:hidden")}>{elapsed}</span>
+        <span className={cn("shrink-0 whitespace-nowrap text-label tabular-nums text-muted-foreground", showIdentity && !active && "@max-[32rem]/run:hidden")}>{elapsed}</span>
+        {hasTranscript && fullLogButton}
         {stopButton}
         {(!hasReply || replacesFailureNotice) && ended && <Button
           size="xs" variant="outline" className={cn(showIdentity && "@max-[32rem]/run:size-6 @max-[32rem]/run:p-0")} disabled={retry.isPending || retry.isSuccess}
@@ -224,10 +234,12 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
       <div className={cn(showIdentity && "pl-8")}>
         {replyTo}
         {output && <div className="mt-2 text-body"><ReadonlyContent content={redactSecrets(output)} /></div>}
-        {needsAction && rawError && <p title={rawError}
-          className="mt-1.5 line-clamp-4 whitespace-pre-wrap break-words rounded-md border bg-muted/50 px-2.5 py-1.5 font-mono text-caption text-muted-foreground">
-          {rawError}
-        </p>}
+        {needsAction && rawError && <TruncatedTooltip content={rawError}>
+          <p
+            className="mt-1.5 line-clamp-4 whitespace-pre-wrap break-words rounded-md border bg-muted/50 px-2.5 py-1.5 font-mono text-caption text-muted-foreground">
+            {rawError}
+          </p>
+        </TruncatedTooltip>}
         {expanded && <div id={regionId} className="mt-2 min-w-0 space-y-1">
           {isPending && <p className="text-caption text-muted-foreground">{t(($) => $.inline_run.loading)}</p>}
           {isError && <div role="alert" className="text-caption text-destructive">{t(($) => $.inline_run.load_failed)}
@@ -238,8 +250,6 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           {interleaveSteers(rows.slice(-visibleCount), steers, rows.length > visibleCount).map((item) => "steer" in item
             ? <InlineSteer key={`steer:${item.steer.id}`} steer={item.steer} />
             : <InlineStep key={item.row.seq} row={item.row} live={active} formatText={formatText} />)}
-          <button type="button" className="flex items-center gap-1.5 rounded-xs py-2 text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={openFullLog}>{t(($) => $.inline_run.full_log)}<ExternalLink className="size-3" /></button>
         </div>}
       </div>
       {transcript}
@@ -247,6 +257,8 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     </section>
   );
 }
+
+const PRE_RUN_STATUSES: AgentTask["status"][] = ["queued", "dispatched", "waiting_local_directory"];
 
 interface DeliveredSteer {
   id: string;
@@ -340,7 +352,9 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
     <summary onClick={disclosure.onTrigger} className="flex cursor-pointer list-none items-center gap-2 rounded-xs py-1.5 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
       {pending ? <Loader2 aria-hidden className="size-3.5 shrink-0 animate-spin text-info motion-reduce:animate-none" />
         : <Icon aria-hidden className={cn("size-3.5 shrink-0", error ? "text-destructive" : "text-muted-foreground")} />}
-      <span className={cn("min-w-0 flex-1 truncate", error && "text-destructive")} title={summary}>{summary}</span>
+      <TruncatedTooltip content={summary}>
+        <span className={cn("min-w-0 flex-1 truncate", error && "text-destructive")}>{summary}</span>
+      </TruncatedTooltip>
       {(grouped || call) && <span className="shrink-0 text-micro text-muted-foreground">
         {grouped ? t(($) => $.inline_run.steps, { count: row.steps.length }) : row.tool}
       </span>}

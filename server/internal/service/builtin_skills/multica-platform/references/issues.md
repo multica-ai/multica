@@ -7,7 +7,7 @@ Product contracts the runtime brief does not fully encode.
 - [Custom properties: typed workflow state](#custom-properties-typed-workflow-state)
 - [Status changes have server side effects](#status-changes-have-server-side-effects)
 - [Who else is running right now](#who-else-is-running-right-now)
-- [Sub-issues: todo starts work now, backlog parks it](#sub-issues-todo-starts-work-now-backlog-parks-it)
+- [Sub-issues and stages](#sub-issues-and-stages)
 - [Charts and files in a comment](#charts-and-files-in-a-comment)
 - [Incorrect to correct](#incorrect-to-correct)
 
@@ -31,6 +31,16 @@ Related to MUL-123   (body only)              # no link
 
 While a PR is open, its automatic links follow the live title, branch, and
 body: removing the key drops the link. After merge or close, existing links stay.
+
+For one issue delivered through PRs opened one after another, pass
+`--pr-auto-complete off` to `issue create` or `issue update <id>` before the
+first merge. The override keeps only this issue's status; other issues still
+follow the workspace's PR merge rule. Restore it with `--pr-auto-complete on`
+before the final PR merges, or leave it off and move the issue to `in_review`
+yourself. Turning it on takes effect at the next PR event. Inspect the setting
+with `issue pull-requests <id>` (JSON: `auto_complete.issue_disabled`). If an
+older server creates the issue but rejects the follow-up override, use the
+reported issue ID with `issue update`; do not retry `issue create`.
 
 ### Default for code-changing issue work
 
@@ -123,13 +133,31 @@ duplicate issue stops the operation before any position write. This protects
 against truncated or repeated pages, but does not promise a snapshot across
 concurrent edits. There is no CLI bulk-export or `--all` mode.
 
+### Saved views
+
+When a request names a saved view ("the Bugs view", a view link), read it
+with `view issues` instead of rebuilding its filters from `issue list` flags:
+the server applies every condition the view saves — "is not", the advanced
+condition tree, relative due dates, project status — which `issue list`
+cannot express.
+
+```bash
+multica view list --output json
+multica view issues "Bugs" --output json --fields identifier,title,status
+```
+
+`<view>` is an ID, ID prefix, or exact name. Pages hold at most 100 issues;
+while `has_more` is true, pass `next_cursor` to `--cursor`. Views and their
+"me" conditions resolve against the runtime owner, so a member's private view
+is only visible when that member owns the runtime.
+
 ## Custom properties: typed workflow state
 
 Workspaces may define custom issue properties (Severity, Environment, QA
 Status, Reviewer, ...). They are the place for durable, typed issue state:
 values are validated against the definition (select options, date format,
-http(s) URL, member reference), visible in the issue sidebar, and addressed
-by name.
+http(s) URL, member reference, free-form text/URL lists), visible in the
+issue sidebar, and addressed by name.
 
 - Read what exists before writing: `multica property list` shows the catalog;
   `multica issue property list <issue-id>` shows values set on the issue.
@@ -147,6 +175,14 @@ multica issue property unset <issue-id> --name Environment
   workspace members only. `--value` takes a member name, email, UUID, short id,
   or an explicit `member:<uuid>`; `multi_actor` takes a comma-separated list
   (duplicates dropped, order kept, max 20).
+- `multi_text` / `multi_url` properties hold free-form lists: `--value` is a
+  comma-separated list of strings / http(s) URLs (empty entries skipped,
+  duplicates dropped, order kept, max 20). They take no options. An entry that
+  itself contains a comma cannot survive that form — pass a JSON array instead:
+  `--value '["Smith, John","https://en.wikipedia.org/wiki/Washington,_D.C."]'`.
+  The array form is always safe; use it whenever any entry has a comma or the
+  input starts with `[`, for example `--value '["[draft] spec"]'`. The same
+  forms work during creation: `--property 'Aliases=["Smith, John","[draft] spec"]'`.
 - Definitions may include an optional catalog icon for visual identification;
   it does not change the property's type or value validation.
 - Agents cannot create or edit property definitions (owner/admin humans only).
@@ -159,23 +195,31 @@ multica issue property unset <issue-id> --name Environment
 ```bash
 multica issue list --property "Impact=High" --property "Impact=Medium" --output json
 multica issue list --property "QA Status=__none__" --status in_review --output json
+multica issue list --property "Effort>=3" --property "Due<2026-10-01" --output json
 multica issue list --sort property:Impact --direction desc --output json
 ```
 
 - `--property` takes one `Name=Value` per flag. Repeating the same property
-  matches ANY of its values; different properties must ALL match. Values are
+  matches ANY of its members; different properties must ALL match. Values are
   option names or ids (select types), `true`/`false` (checkbox), a member
   name/email/id (actor types), or the value itself for text, url, number,
-  and date (`YYYY-MM-DD`). The reserved value `__none__` matches
+  and date (`YYYY-MM-DD`); for `multi_text` / `multi_url` the value matches
+  any single element of the list exactly. The reserved value `__none__` matches
   issues where the property is unset (works for every type; it is not
   index-backed, so use it for targeted audits rather than as a default
-  listing filter). Only `=` is supported today; the `>=`, `<=` and `!=`
-  spellings are reserved for comparison filters and are rejected.
+  listing filter).
+- Comparisons use the same flag: `>`, `>=`, `<`, `<=` on number; `>` (after)
+  and `<` (before) on date; `~=` (contains, case-insensitive) on text and
+  url. Quote the flag so the shell does not read `<` or `>` as redirection.
+  `!=` is rejected (the server has no not-equal filter); `>=` and `<=` on a
+  date are rejected with an error naming the strict form to use. Two
+  comparisons on one property OR, so they do not form a range. Number and
+  date comparisons are not index-backed.
 - `--sort property:<name-or-id>` orders select properties by option order —
   an ordinal scale (Low < Medium < High) sorts by meaning — and number/date/
   text/url by value; issues without the property sort last either way.
   Archived properties and types without an order (multi_select, checkbox,
-  actor kinds) are rejected up front.
+  actor kinds, list types) are rejected up front.
 - `issue list` and `issue get` return `properties` as a map of definition id
   to stored value. Add `--resolve-properties` in JSON mode to get the rows
   `issue property list` prints instead (name, type, stored value, display
@@ -187,8 +231,9 @@ multica issue list --status in_progress --output json --resolve-properties
 multica issue get <issue-id> --resolve-properties
 ```
 
-  Read `display` for a single value and `display_values` for a multi_select
-  or multi_actor value; `value` keeps the stored ids.
+  Read `display` for a single value and `display_values` for a multi-value
+  property (multi_select, multi_actor, multi_text, multi_url); `value` keeps
+  the stored ids / strings.
 
 ## Status changes have server side effects
 
@@ -233,14 +278,22 @@ archived statuses remain readable via an explicit status filter.
   Squad leaders: dispatching members is not delivery — a dispatch turn
   leaves the parent `in_progress`, and it moves to `in_review` only when a
   later re-trigger confirms the overall goal is met.
+  An issue whose run carries a `[Project workflow]` block is the exception:
+  that block's statuses and commands are the whole status contract, and
+  none of the moves above apply to it.
 - **`in_review`** is an accepted issue status. Some workflows use it while a PR
   is open and awaiting review; moving to it is an explicit mutation.
-- **`done`** on a child issue can wake its parent's assignee (see Stages).
+- **`done`** on a child issue can wake its parent's assignee (see Stages in `references/sub-issues.md`).
 - **`cancelled`** is a terminal, user-driven decision to close the issue. Like
   `done` it enqueues no new agent work, but it does **not** stop tasks already in
   flight — a run in progress keeps going. To stop a running task, cancel the
   task itself.
-  A cancelled issue may also be marked as a **duplicate** of another issue
+  A cancelled issue may also be marked as a **duplicate** of another issue.
+  When you cancel an issue because the work already exists elsewhere, mark it
+  with `multica issue status <id> cancelled --duplicate-of <original>` rather
+  than cancelling and explaining in a comment: only the mark links the two.
+  The original must not itself be a duplicate, and an issue that others are
+  marked as duplicates of cannot be marked; the command reports both refusals.
   (`GET /api/issues/<id>/duplicates` shows both sides; issue responses carry
   the original as `duplicate_of` with its id, identifier, title and status
   while the mark counts). Moving it to any
@@ -251,6 +304,9 @@ archived statuses remain readable via an explicit status filter.
 - **Failed issue-triggered tasks** may roll an issue from `in_progress` back to
   `todo` when no active task / retry remains — that is the main server-owned
   status write on the agent-run path.
+- **Project workflows** can limit which statuses an issue takes and turn a
+  status change into a handoff to another agent. When the per-turn prompt
+  carries a `[Project workflow]` block, read `references/projects.md`.
 
 ## Who else is running right now
 
@@ -284,72 +340,11 @@ a run you see may finish a second later, and one you don't see may start a
 second later. Coordinate through the issue's comments — the reads tell you whom
 to coordinate with.
 
-## Sub-issues: todo starts work now, backlog parks it
+## Sub-issues and stages
 
-On an agent-assigned issue, create status decides whether the assignee fires
-immediately. A non-backlog status (e.g. `todo`) enqueues the agent at create
-time; `backlog` sets the assignee without triggering.
-
-Parallel children — all start now:
-
-```bash
-multica issue create --title "..." --parent <issue-id> --assignee <agent> --status todo
-```
-
-Strictly serial children — park later steps, promote one at a time:
-
-```bash
-multica issue create --title "Step 2: ..." --parent <issue-id> --assignee <agent> --status backlog
-multica issue status <child-id> todo   # promote when the previous step is truly done
-```
-
-Creating every serial step as `todo` enqueues the whole chain at once.
-
-### Stages: order sub-issues into barrier groups
-
-`--stage <N>` (N >= 1) groups sub-issues under the same parent into ordered
-stages. The platform's sub-issue wakeup **wakes the parent assignee when a stage
-closes while a later stage is waiting** — every sub-issue up to that stage has
-reached a terminal status (`done`/`cancelled`) — and **once more when every
-sub-issue, staged or not, is closed**. A completion that closes nothing is
-silent. A sibling set with **no** stages wakes the parent once, when the *last*
-sub-issue finishes. A parent in `backlog` is not woken; it catches up once it
-leaves backlog. A member assignee gets an inbox notification instead of a run.
-
-Advancement is agent-driven: the server only detects the closed barrier and
-wakes the parent assignee, who then decides whether to promote the next stage's
-`backlog` sub-issues to `todo`.
-
-```bash
-# Stage 1 runs now; later stages parked until promoted
-multica issue create --title "Research A" --parent <id> --assignee <agent> --stage 1 --status todo
-multica issue create --title "Research B" --parent <id> --assignee <agent> --stage 1 --status todo
-multica issue create --title "Build"      --parent <id> --assignee <agent> --stage 2 --status backlog
-multica issue create --title "Ship"       --parent <id> --assignee <agent> --stage 3 --status backlog
-```
-
-When both Stage 1 sub-issues finish you (the parent assignee) are woken by the
-sub-issue wakeup; its `[WAKEUP]` block lists every stage and names the next one.
-Inspect the layout, then promote the next stage:
-
-```bash
-multica issue children <parent-id>             # sub-issues grouped by stage
-multica issue status <stage-2-child-id> todo   # promote when its deps are met
-```
-
-`issue children --output json` reports per-stage `done` counts, including custom
-statuses in terminal categories. When reading issue JSON, `status` is the exact
-key; `status_category` retains the seven-value API enum for installed clients:
-`backlog` / `todo` mean unstarted, `in_progress` / `in_review` / `blocked` mean
-started, `done` means successful terminal, and `cancelled` means cancelled
-terminal (the internal closed category). These values encode lifecycle, not
-built-in automation behavior. Check `status_category` for `done` / `cancelled`
-(or use the stage counts), not just the concrete `status` key, to recognize
-terminal children.
-
-Read each sub-issue's description before promoting and only promote items whose
-stated dependencies are met; if a description conflicts with the parent's
-breakdown, leave it `backlog` and comment to confirm first.
+Whether to split an issue at all, `todo` vs `backlog` children, serial chains,
+stages and their parent wakeups live in `references/sub-issues.md`. Read it
+before creating a sub-issue.
 
 ## Charts and files in a comment
 
@@ -366,14 +361,14 @@ Where content goes decides how it shows:
   `report.html` is a deliverable to open, not an inline chart. Use it for
   something the reader keeps or downloads.
 
-For HTML that should follow light / dark mode, style it with the page's theme
-variables: `var(--background)`, `var(--foreground)`, `var(--muted)`,
-`var(--muted-foreground)`, `var(--border)`, `var(--primary)`,
-`var(--chart-1)` … `var(--chart-5)`, `var(--font-sans)`. Using any of them opts
-the block into the app's color scheme, so also set the page background
-(`body { background: var(--background); color: var(--foreground) }`). HTML
-that uses none keeps its own look. Size to the content, not the viewport:
-`100vh` heights have no fixed viewport to fill here.
+For HTML that follows light / dark mode, style it with `var(--background)`,
+`var(--foreground)`, `var(--muted)`, `var(--muted-foreground)`, `var(--border)`,
+`var(--primary)`, `var(--chart-1)` … `var(--chart-5)`, `var(--font-sans)`. Any
+of them opts the block into the app's color scheme, so set the page background
+(`body { background: var(--background); color: var(--foreground) }`). Never put
+token text on a fixed light fill: it is near-white in dark mode, so a pastel
+`background:#fde2e4` needs a fixed dark `color`. HTML that uses no token keeps
+its own look. Size to the content: `100vh` has no fixed viewport to fill here.
 
 ````markdown
 ```html title="p95 latency, last 7 days"
@@ -394,20 +389,6 @@ Body-only "Part of MUL-123"         # incorrect — passing mention, won't link
 MUL-123: fix login redirect        # correct — links the PR
 ```
 
-Serial / phased sub-issues (don't start the whole chain at once):
-
-```bash
-# incorrect — all fire immediately, no ordering
-multica issue create --title "Step 2" --parent <issue-id> --assignee <agent> --status todo
-multica issue create --title "Step 3" --parent <issue-id> --assignee <agent> --status todo
-
-# correct — stage them; Stage 1 runs, later stages park and are promoted as
-# each stage's barrier closes
-multica issue create --title "Step 1" --parent <issue-id> --assignee <agent> --stage 1 --status todo
-multica issue create --title "Step 2" --parent <issue-id> --assignee <agent> --stage 2 --status backlog
-multica issue create --title "Step 3" --parent <issue-id> --assignee <agent> --stage 3 --status backlog
-```
-
 ## Issue wakeups
 
 Use `multica issue wakeup` to arrange a future ordinary run, then finish the
@@ -416,22 +397,44 @@ current run. A wakeup persists on the issue; it is not a sleeping process.
 - `wakeup events` lists supported business facts. These work with plugins disabled.
 - `wakeup create <issue> --agent-id <target> --kind event --event task.completed,task.failed,task.cancelled --task-id <run> --instruction-file ./instruction.md` wakes once. Omit `--agent-id` only when acting as the authenticated agent. A specific run must belong to this issue; if already terminal, registration captures its matching state immediately.
 - For a continuing subscription use `--mode continuous`. For task events, use `--filter-agent-id` to match that agent's future runs; this does not replay historical runs. For comment/issue/reaction/attachment changes, use `--filter-actor-type member|agent --filter-actor-id <user-or-agent-id>` to match the actual author/editor. Mutation-only `--filter-agent-id` remains a legacy alias for actor=agent; do not combine it with actor flags.
+- A condition lets the platform check a stored fact itself and wake the target only when it holds. Pass exactly one `--until-*` flag and no `--event`, `--task-id` or actor/agent filter; the rule stays `kind=event`. The platform checks about every 30 seconds, so a condition that already holds fires on the next check, except `--until-pr checks`, which ignores results that finished before registration. A condition wakes once by default. With `--mode continuous` it fires again only after the predicate turns false or the facts behind it change (a new check result or PR head, another linked PR merging, a resolved conflict coming back, the number of sub-issues changing).
+
+```bash
+multica issue wakeup create <issue> --until-status in_review --instruction-file ./instruction.md
+multica issue wakeup create <issue> --until-pr checks --expires-in 2h --on-timeout wake --instruction-file ./instruction.md
+multica issue wakeup create <issue> --until-pr merged --instruction-file ./instruction.md
+multica issue wakeup create <issue> --until-pr conflicts --mode continuous --instruction-file ./instruction.md
+multica issue wakeup create <issue> --until-children-done --instruction-file ./instruction.md
+multica issue wakeup create <issue> --until-children-done --stage 2 --instruction-file ./instruction.md
+multica issue wakeup create <issue> --until-issue <other-issue-id> --until-issue-state done --instruction-file ./instruction.md
+```
+
+- `--until-status KEY` — this issue's status is that key (built-in or one of the workspace's statuses).
+- `--until-pr checks` — a linked pull request's checks finished, passing or failing, on its current head. `--until-pr merged` — a linked pull request merged. `--until-pr conflicts` — an open linked GitHub pull request has merge conflicts on its current head, for example after another PR merged into its base; with `--mode continuous` it fires again each time a resolved conflict comes back or a new head is still conflicting. With several linked pull requests, any one satisfies it. These conditions inspect only PRs linked directly to this issue; they do not inherit a parent issue's PRs. Checks and conflicts also require server-side GitHub snapshots; conflicts are not detected on Forgejo, Gitea or GitLab pull requests. A missing link or snapshot is recorded in the rule's `last_error` and retried automatically rather than rejecting the rule.
+- `--until-children-done` — every sub-issue, staged or not, is closed (`done` or `cancelled`). With `--stage N` it waits only for staged sub-issues up to stage N, and stage N must have at least one. A parent with no sub-issues never fires. The parent's assignee already gets the sub-issue wakeup described under Stages in `references/sub-issues.md`; do not add this condition for the same wake.
+- `--until-issue ISSUE` — another issue in this workspace (identifier or UUID) reaches `--until-issue-state`: `done` (default), `ended` (done or cancelled), `in_review`, or `blocked`.
+- The same form also accepts `--until-assignee member|agent|squad:ID`, `--until-label LABEL_ID`, and `--until-property PROPERTY_ID=VALUE` (VALUE may be JSON). `multica issue wakeup create --help` lists them.
 - `wakeup create <issue> --kind at --after 10m --instruction-file ./instruction.md` schedules one run. Alternatively use `--at <RFC3339>`.
 - `wakeup create <issue> --kind every --every 1h --instruction-file ./instruction.md` schedules a repeating check. Or use `--kind cron --cron '0 * * * *' --timezone Asia/Shanghai`.
-- `wakeup list <issue>` / `wakeup get <issue> <id>` show the saved configuration, next time and latest run. Only promise that a reminder is arranged after creation succeeds.
+- `--max-fires N` (1–1000) caps how many runs a repeating rule starts: every, cron, or `--mode continuous`. A once rule rejects it. Continuous event rules, conditions included, default to 20. The run that reaches the cap is still created, then the rule pauses with `paused_reason=max_fires`. Turning the rule back on clears the pause and restarts the count.
+- `wakeup checkin <issue> <wakeup-id> --note "..."` ends a scheduled check (every or cron) that found nothing worth a reply. Only the running run that rule started may call it, and that run's `[WAKEUP]` block gives the exact command. The note (1–500 characters) is kept on the run and shows in the rule's run history and the issue timeline. The run then ends without a comment. When something changed, needs attention, or the check is done, post a comment instead.
+- `wakeup list <issue>` / `wakeup get <issue> <id>` show the saved configuration, next time and latest run. `wakeup runs <issue> <id>` lists the rule's latest ten runs with their triggers, check-in notes and whether each commented. Only promise that a reminder is arranged after creation succeeds.
+- `wakeup trigger <issue> <id>` queues one run now, as if the rule fired. It is refused on a closed issue, or while the rule is turned off or paused for a loop or burst. `wakeup delete <issue> <id>` removes the rule and its pending inputs and withdraws its runs that have not started.
 - `wakeup update <issue> <id>` uses the same flags as create and replaces the whole configuration, explicitly re-enabling it. Supply all intended fields. Old unclaimed work is withdrawn.
 - `wakeup disable <issue> <id>` stops future triggers and withdraws unclaimed work. Users can also turn it off in the issue sidebar. Closing/cancelling/completing the issue disables its wakeups; reopening does not restore them.
 - `--parent <comment-id>` keeps result delivery in the original thread.
 - Give waits an end: `--expires-in 72h` (restarts if the rule is re-enabled) or `--expires-at <RFC3339>`. With `--on-timeout wake`, an event rule runs the target once with a `wakeup.timeout` fact when the deadline passes first; the default `end` stops quietly. Recurring checks should carry an end date.
-- Members create the same rules from the issue sidebar. The parent's stage wake (see Stages above) appears there as a system rule; a member may turn it off for one issue or set its instruction, which your `[WAKEUP]` block then carries.
+- Members create the same rules from the issue sidebar. The parent's stage wake (see Stages in `references/sub-issues.md`) appears there as a system rule; a member may turn it off for one issue or set its instruction, which your `[WAKEUP]` block then carries.
 
 Read current state with issue get, comment list, and run inspection before
-judging business completion. For CI, use the existing GitHub tools from a time
-wakeup; CI events are not supported here yet. A failed run does not imply its
-business goal is complete. Automatic retry chains are not followed by event
-filters; subscribe to a new run if needed. Once the goal is met, disable any
-continuous configuration. Every wakeup runs under ordinary execution and comment
-delivery rules, even when a periodic check finds no change.
+judging business completion. Wait for a linked pull request with `--until-pr`
+(`checks`, `merged` or `conflicts`) rather than polling it from a timer. There is no separate
+CI event; when the woken run needs check details or logs, use the existing
+GitHub tools. A failed run does not imply its business goal is complete.
+Automatic retry chains are not followed by event filters; subscribe to a new run
+if needed. Once the goal is met, disable any continuous configuration. Every
+wakeup runs under ordinary execution and comment delivery rules; the one
+exception is a scheduled check that ends with `wakeup checkin`.
 
 Self-trigger protection excludes the registering run and runs started by the
 same rule when their source identity is available. Your own comments and issue
@@ -439,6 +442,11 @@ changes never wake you, and a condition your own unfinished run satisfies does
 not wake you when you or the platform set the rule up. A wakeup that fires
 while a run of yours for the same person is waiting to start on the issue
 joins that run instead of starting another: its instruction and facts appear
-in that run's `[WAKEUP — joined this run]` block, so handle them there. None of this prevents
-cycles between different rules. Avoid mutually triggering continuous comment
-subscriptions; when waiting for a person's reply, filter that member explicitly.
+in that run's `[WAKEUP — joined this run]` block, so handle them there.
+
+Event rules, conditions included, also have runaway protection. A rule pauses
+with `paused_reason=loop` when its trigger chain passes through it a third time
+without a person in between, and with `rate` when it has already started 12 runs
+in the past hour. A paused rule stays off until someone turns it back on. Still
+avoid mutually triggering continuous comment subscriptions; when waiting for a
+person's reply, filter that member explicitly.

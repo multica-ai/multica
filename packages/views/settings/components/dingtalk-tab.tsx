@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronDown, ChevronRight, ExternalLink, Info, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ExternalLink, Info, Trash2 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -54,6 +54,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { docsLocalePrefix } from "../../common/docs-locale";
 import { openExternal } from "../../platform";
 import { useT, useTimeAgo } from "../../i18n";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 const dingTalkChatManagePermission = "qyapi_chat_manage";
 
@@ -185,7 +186,7 @@ export function DingTalkConnectionLabel({
                   <TooltipContent
                     side="top"
                     align="start"
-                    className="max-w-80 items-start whitespace-normal border-0 bg-surface-raised px-3 py-2 text-popover-foreground shadow-[var(--menu-shadow)] ring-1 ring-surface-border"
+                    className="max-w-80 items-start whitespace-normal px-3 py-2"
                   >
                     <span className="leading-relaxed">
                       {permissionTooltipPrefix}{" "}
@@ -925,21 +926,24 @@ export function DingTalkAgentBindButton({
       className={cn("flex flex-wrap items-center gap-2", className)}
       data-testid="dingtalk-agent-bind-buttons"
     >
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setDialogOpen(true)}
-        disabled={!agentId}
-        title={
+      <TooltipHint
+        label={
           agentName
             ? t(($) => $.dingtalk.bind_button_title, { agent: agentName })
             : undefined
         }
-        data-testid="dingtalk-agent-connect"
       >
-        <DingTalkMark className="h-4 w-4" />
-        {t(($) => $.dingtalk.bind_button)}
-      </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setDialogOpen(true)}
+          disabled={!agentId}
+          data-testid="dingtalk-agent-connect"
+        >
+          <DingTalkMark className="h-4 w-4" />
+          {t(($) => $.dingtalk.bind_button)}
+        </Button>
+      </TooltipHint>
 
       <Dialog
         open={dialogOpen}
@@ -1106,20 +1110,21 @@ function DingTalkAgentBotConnectedBadge({
           botIdentityIssue={botIdentityIssue}
           showBotIdentity={botName !== undefined || botIdentityIssue !== undefined}
         />
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => setConfirmOpen(true)}
-          disabled={disconnecting}
-          title={t(($) => $.dingtalk.agent_bot_disconnect_tooltip)}
-          aria-label={t(($) => $.dingtalk.disconnect)}
-          data-testid="dingtalk-agent-bot-disconnect"
-        >
-          <Trash2 className="h-3 w-3" aria-hidden="true" />
-          {disconnecting
-            ? t(($) => $.dingtalk.disconnecting)
-            : t(($) => $.dingtalk.disconnect)}
-        </Button>
+        <TooltipHint label={t(($) => $.dingtalk.agent_bot_disconnect_tooltip)}>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setConfirmOpen(true)}
+            disabled={disconnecting}
+            aria-label={t(($) => $.dingtalk.disconnect)}
+            data-testid="dingtalk-agent-bot-disconnect"
+          >
+            <Trash2 className="h-3 w-3" aria-hidden="true" />
+            {disconnecting
+              ? t(($) => $.dingtalk.disconnecting)
+              : t(($) => $.dingtalk.disconnect)}
+          </Button>
+        </TooltipHint>
       </div>
 
       <AlertDialog

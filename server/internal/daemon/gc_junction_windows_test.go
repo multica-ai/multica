@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"os/exec"
@@ -42,6 +43,13 @@ func createJunction(t *testing.T, src, dst string) {
 }
 
 func TestCleanTaskArtifacts_DoesNotFollowDirectoryJunction(t *testing.T) {
+	t.Run("active environment guard", func(t *testing.T) {
+		root := t.TempDir()
+		alias := filepath.Join(t.TempDir(), "alias")
+		createJunction(t, root, alias)
+		assertEnvRootGuardSharesAliases(t, root, alias)
+	})
+
 	d := newGCTestDaemon(t, http.NewServeMux())
 
 	taskDir := t.TempDir()
@@ -58,7 +66,7 @@ func TestCleanTaskArtifacts_DoesNotFollowDirectoryJunction(t *testing.T) {
 	// user's ~/.codex/skills/<name>.
 	createJunction(t, userSkill, filepath.Join(taskDir, "codex-home", "skills", "alpha"))
 
-	removed, _, _ := d.cleanTaskArtifacts(taskDir, []string{"node_modules"})
+	removed, _, _ := d.cleanTaskArtifacts(context.Background(), taskDir, []string{"node_modules"})
 	if removed != 0 {
 		t.Errorf("removed %d artifacts through a junction, want 0", removed)
 	}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
 )
@@ -35,12 +36,14 @@ func (h *Handler) DaemonWebSocket(w http.ResponseWriter, r *http.Request) {
 // this fixed scope without re-reading agent_runtime every 15 seconds.
 func (h *Handler) buildDaemonWebSocketIdentity(w http.ResponseWriter, r *http.Request, runtimeIDs []string, userID string) (daemonws.ClientIdentity, bool) {
 	identity := daemonws.ClientIdentity{
-		DaemonID:      middleware.DaemonIDFromContext(r.Context()),
-		UserID:        userID,
-		RuntimeIDs:    runtimeIDs,
-		RuntimeLeases: make(map[string]*daemonws.RuntimeLease, len(runtimeIDs)),
-		ClientVersion: r.Header.Get("X-Client-Version"),
-		Capabilities:  r.Header.Get("X-Client-Capabilities"),
+		DaemonID:           middleware.DaemonIDFromContext(r.Context()),
+		DaemonTokenHash:    daemonTokenHashForRequest(r),
+		DaemonTokenOwnerID: middleware.DaemonTokenOwnerIDFromContext(r.Context()),
+		UserID:             userID,
+		RuntimeIDs:         runtimeIDs,
+		RuntimeLeases:      make(map[string]*daemonws.RuntimeLease, len(runtimeIDs)),
+		ClientVersion:      r.Header.Get("X-Client-Version"),
+		Capabilities:       r.Header.Get("X-Client-Capabilities"),
 	}
 	if len(runtimeIDs) == 0 {
 		return identity, true
@@ -70,12 +73,12 @@ func (h *Handler) buildDaemonWebSocketIdentity(w http.ResponseWriter, r *http.Re
 			return daemonws.ClientIdentity{}, false
 		}
 		rt := rows[index]
-		if identity.DaemonID != "" && rt.DaemonID.Valid && rt.DaemonID.String != identity.DaemonID {
-			writeError(w, http.StatusNotFound, "runtime not found")
-			return daemonws.ClientIdentity{}, false
-		}
+		// Same runtime-level rule as the HTTP daemon routes (MUL-8154): a
+		// daemon token must match the runtime's daemon_id, a user credential
+		// must own the runtime. The leases seeded below authorize every later
+		// WS heartbeat for this runtime, so this is the only check they get.
 		workspaceID := uuidToString(rt.WorkspaceID)
-		if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
+		if !h.requireDaemonRuntimeAuthorized(w, r, workspaceID, rt.DaemonID, rt.OwnerID, "runtime not found") {
 			return daemonws.ClientIdentity{}, false
 		}
 		if workspaceID != "" {
@@ -99,6 +102,24 @@ func (h *Handler) buildDaemonWebSocketIdentity(w http.ResponseWriter, r *http.Re
 	identity.WorkspaceID = primaryWorkspaceID
 	identity.WorkspaceIDs = workspaceIDs
 	return identity, true
+}
+
+// daemonTokenHashForRequest returns the hash of the mdt_ token behind a
+// daemon-token request: the one DaemonAuth recorded, or — for a request that
+// carries a daemon context without passing DaemonAuth — the Authorization
+// header's. Empty for user credentials.
+func daemonTokenHashForRequest(r *http.Request) string {
+	if middleware.DaemonWorkspaceIDFromContext(r.Context()) == "" {
+		return ""
+	}
+	if hash := middleware.DaemonTokenHashFromContext(r.Context()); hash != "" {
+		return hash
+	}
+	raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !strings.HasPrefix(raw, "mdt_") {
+		return ""
+	}
+	return auth.HashToken(raw)
 }
 
 func parseRuntimeIDs(r *http.Request) []string {

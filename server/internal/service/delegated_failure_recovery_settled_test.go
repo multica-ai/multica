@@ -136,12 +136,13 @@ func TestPlannedButUndeliveredRecoveryStaysPending(t *testing.T) {
 		t.Fatal("automatic cancellation settled a recovery it never delivered")
 	}
 
-	result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
-	if err != nil {
-		t.Fatalf("RecoverPendingDelegatedFailures: %v", err)
-	}
-	if result.Replayed != 1 {
-		t.Fatalf("sweep after undelivered cancellation = %+v, want one replay", result)
+	sweepDelegatedFailureRecoveries(t, svc)
+	var active int
+	testutil.New(f.pool, f.workspaceID, f.userID).QueryRow(t, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE trigger_comment_id = $1 AND status = 'queued'`, recoveryCommentID).Scan(&active)
+	if active != 1 {
+		t.Fatalf("queued recovery tasks after undelivered cancellation = %d, want one replay", active)
 	}
 }
 
@@ -268,7 +269,7 @@ func TestManualRerunSettlesDeliveredRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse actor id: %v", err)
 	}
-	if _, err := svc.RerunIssue(ctx, issueID, recoveryTaskID, pgtype.UUID{}, actorID, func(db.Agent) bool { return true }); err != nil {
+	if _, err := svc.RerunIssue(ctx, issueID, recoveryTaskID, pgtype.UUID{}, actorID, false, func(db.Agent) bool { return true }); err != nil {
 		t.Fatalf("RerunIssue: %v", err)
 	}
 

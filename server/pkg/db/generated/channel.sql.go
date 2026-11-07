@@ -336,12 +336,7 @@ func (q *Queries) ClaimChannelMediaPendingObjectsForBind(ctx context.Context, ar
 }
 
 const claimNextChannelMediaPendingObjectForReconcile = `-- name: ClaimNextChannelMediaPendingObjectForReconcile :one
-UPDATE channel_media_pending_object AS obj
-SET state = CASE WHEN obj.state = 'tombstoned' THEN 'tombstoned' ELSE 'deleting' END,
-    lease_token = $1,
-    lease_expires_at = now() + $2::interval,
-    attempt = obj.attempt + 1
-FROM (
+WITH due AS MATERIALIZED (
     SELECT cand.storage_key FROM channel_media_pending_object AS cand
     WHERE cand.next_attempt_at <= now()
       AND (
@@ -352,7 +347,13 @@ FROM (
     ORDER BY cand.next_attempt_at
     LIMIT 1
     FOR UPDATE SKIP LOCKED
-) AS due
+)
+UPDATE channel_media_pending_object AS obj
+SET state = CASE WHEN obj.state = 'tombstoned' THEN 'tombstoned' ELSE 'deleting' END,
+    lease_token = $1,
+    lease_expires_at = now() + $2::interval,
+    attempt = obj.attempt + 1
+FROM due
 WHERE obj.storage_key = due.storage_key
 RETURNING obj.storage_key, obj.workspace_id, obj.chat_message_id, obj.storage_url, obj.installation_id, obj.state, obj.lease_token, obj.lease_expires_at, obj.attempt, obj.next_attempt_at, obj.last_error, obj.tombstone_pass, obj.created_at
 `
@@ -369,6 +370,8 @@ type ClaimNextChannelMediaPendingObjectForReconcileParams struct {
 // while earlier rows ran, and could expire and be reclaimed before its own
 // DELETE was ever tried, inflating attempt/backoff for work that never
 // happened. One row per claim means attempt counts attempts.
+// MATERIALIZED pins the bounded candidate set so a nested-loop rescan cannot
+// move the LIMIT window to another row after an update.
 //
 // Due means (a) 'pending' rows older than the settle delay — an operational
 // buffer only; correctness comes from the state flip, after which a bind can
@@ -414,17 +417,6 @@ type ClearChannelChatContextPendingFreshParams struct {
 
 func (q *Queries) ClearChannelChatContextPendingFresh(ctx context.Context, arg ClearChannelChatContextPendingFreshParams) error {
 	_, err := q.db.Exec(ctx, clearChannelChatContextPendingFresh, arg.ChatSessionID, arg.Revision)
-	return err
-}
-
-const clearChannelChatSessionPendingFresh = `-- name: ClearChannelChatSessionPendingFresh :exec
-UPDATE channel_chat_session_binding
-SET pending_fresh = FALSE
-WHERE chat_session_id = $1
-`
-
-func (q *Queries) ClearChannelChatSessionPendingFresh(ctx context.Context, chatSessionID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, clearChannelChatSessionPendingFresh, chatSessionID)
 	return err
 }
 
@@ -1382,6 +1374,68 @@ func (q *Queries) FindChannelBindingForMember(ctx context.Context, arg FindChann
 	return i, err
 }
 
+const findChannelBindingForMemberOnAgentInstallation = `-- name: FindChannelBindingForMemberOnAgentInstallation :one
+SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = $1
+  AND b.multica_user_id = $2
+  AND b.channel_type = $3
+  AND ci.channel_type = $3
+  AND ci.agent_id = $4
+  AND ci.status = 'active'
+ORDER BY b.bound_at DESC
+LIMIT 1
+`
+
+type FindChannelBindingForMemberOnAgentInstallationParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+	ChannelType   string      `json:"channel_type"`
+	AgentID       pgtype.UUID `json:"agent_id"`
+}
+
+// Agent-attributed notification lookup: the same member lookup as
+// FindChannelBindingForMember, pinned to the ONE installation the agent whose
+// activity raised the notification owns.
+//
+// Why this exists. FindChannelBindingForMember answers by the
+// RECIPIENT alone, so in a multi-bot org — one bot per agent, several of them
+// bound by the same person — every notification a member receives is pushed
+// through whichever bot they bound most recently, no matter which agent the
+// notification is about. The recipient reads three agents' activity as if it
+// all came from one of them. Pinning the lookup to the acting agent's bot is
+// what makes the notification follow the bot↔agent mapping the sender is
+// reading.
+//
+// The tiebreak stays for the case where one member holds two channel users on
+// the same bot (two WeCom accounts, one Multica account): both rows answer,
+// and `:one` cannot take more than one, so the newest binding wins here
+// exactly as it does in the recipient-wide lookup.
+//
+// channel_type is named once and used for both columns: the installation's
+// own discriminator and the binding's must agree, or installs of two
+// platforms could cross-answer here.
+func (q *Queries) FindChannelBindingForMemberOnAgentInstallation(ctx context.Context, arg FindChannelBindingForMemberOnAgentInstallationParams) (ChannelUserBinding, error) {
+	row := q.db.QueryRow(ctx, findChannelBindingForMemberOnAgentInstallation,
+		arg.WorkspaceID,
+		arg.MulticaUserID,
+		arg.ChannelType,
+		arg.AgentID,
+	)
+	var i ChannelUserBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.MulticaUserID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelUserID,
+		&i.Config,
+		&i.BoundAt,
+	)
+	return i, err
+}
+
 const findLiveChannelBindingToken = `-- name: FindLiveChannelBindingToken :one
 SELECT token_hash, workspace_id, installation_id, channel_type, channel_user_id, expires_at, consumed_at, created_at FROM channel_binding_token
 WHERE installation_id = $1
@@ -1987,6 +2041,59 @@ func (q *Queries) GetChannelUserBindingByUserID(ctx context.Context, arg GetChan
 	return i, err
 }
 
+const isChannelMessageTypingActive = `-- name: IsChannelMessageTypingActive :one
+SELECT EXISTS (
+    SELECT 1 FROM chat_message AS message
+    JOIN chat_session AS session ON session.id = message.chat_session_id
+    JOIN channel_chat_session_binding AS binding ON binding.chat_session_id = session.id
+    JOIN channel_installation AS installation ON installation.id = binding.installation_id
+    LEFT JOIN agent_task_queue AS task ON task.id = message.task_id
+    LEFT JOIN agent AS task_agent ON task_agent.id = task.agent_id
+    WHERE message.id = $1
+      AND session.id = $2
+      AND session.workspace_id = $3
+      AND installation.workspace_id = $3
+      AND installation.id = $4
+      AND installation.channel_type = $5
+      AND binding.channel_type = $5
+      AND installation.status = 'active'
+      AND session.status = 'active'
+      AND binding.retired_at IS NULL
+      AND message.role = 'user'
+      AND message.channel_ingested
+      AND NOT message.channel_typing_settled
+      AND (message.task_id IS NULL OR (
+          task_agent.workspace_id = $3
+          AND task.chat_session_id = session.id
+          AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+      ))
+)
+`
+
+type IsChannelMessageTypingActiveParams struct {
+	MessageID      pgtype.UUID `json:"message_id"`
+	ChatSessionID  pgtype.UUID `json:"chat_session_id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+	ChannelType    string      `json:"channel_type"`
+}
+
+// Revalidate the exact input after a remote reaction Add. A pending debounce
+// input has no task yet; a sealed input follows its immutable owning task.
+// Do not use the binding's latest message or another turn's active task.
+func (q *Queries) IsChannelMessageTypingActive(ctx context.Context, arg IsChannelMessageTypingActiveParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isChannelMessageTypingActive,
+		arg.MessageID,
+		arg.ChatSessionID,
+		arg.WorkspaceID,
+		arg.InstallationID,
+		arg.ChannelType,
+	)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listActiveChannelInstallations = `-- name: ListActiveChannelInstallations :many
 SELECT ci.id, ci.workspace_id, ci.agent_id, ci.channel_type, ci.config, ci.status, ci.ws_lease_token, ci.ws_lease_expires_at, ci.installer_user_id, ci.installed_at, ci.created_at, ci.updated_at FROM channel_installation ci
 JOIN workspace w ON w.id = ci.workspace_id
@@ -2358,22 +2465,6 @@ func (q *Queries) LockChannelChatSessionBindingForContext(ctx context.Context, c
 	return i, err
 }
 
-const lockChannelChatSessionPendingFresh = `-- name: LockChannelChatSessionPendingFresh :one
-SELECT pending_fresh FROM channel_chat_session_binding
-WHERE chat_session_id = $1
-FOR UPDATE
-`
-
-// EnqueueChatTask reads this under the same row lock and transaction that
-// creates the task. A concurrent `/clear` therefore lands either before this
-// task and is consumed by it, or after this task and remains for the next one.
-func (q *Queries) LockChannelChatSessionPendingFresh(ctx context.Context, chatSessionID pgtype.UUID) (bool, error) {
-	row := q.db.QueryRow(ctx, lockChannelChatSessionPendingFresh, chatSessionID)
-	var pending_fresh bool
-	err := row.Scan(&pending_fresh)
-	return pending_fresh, err
-}
-
 const lockChannelInstallationAppIDSlot = `-- name: LockChannelInstallationAppIDSlot :exec
 SELECT pg_advisory_xact_lock(
     hashtext($1::text),
@@ -2472,23 +2563,6 @@ func (q *Queries) LockCurrentChannelChatSessionBindingBySession(ctx context.Cont
 		&i.HistoryBoundaryPending,
 	)
 	return i, err
-}
-
-const markChannelChatSessionPendingFresh = `-- name: MarkChannelChatSessionPendingFresh :one
-UPDATE channel_chat_session_binding
-SET pending_fresh = TRUE
-WHERE chat_session_id = $1 AND retired_at IS NULL
-RETURNING pending_fresh
-`
-
-// Persists a channel `/clear` intent until the next chat task is successfully
-// created. RETURNING makes a missing binding an error instead of silently
-// acknowledging a fresh start that was never stored.
-func (q *Queries) MarkChannelChatSessionPendingFresh(ctx context.Context, chatSessionID pgtype.UUID) (bool, error) {
-	row := q.db.QueryRow(ctx, markChannelChatSessionPendingFresh, chatSessionID)
-	var pending_fresh bool
-	err := row.Scan(&pending_fresh)
-	return pending_fresh, err
 }
 
 const markChannelInboundDedupProcessed = `-- name: MarkChannelInboundDedupProcessed :execrows
@@ -3189,9 +3263,8 @@ type SetChannelInstallationConfigParams struct {
 	Config []byte      `json:"config"`
 }
 
-// Replaces the whole config blob for one installation. Used by the
-// operator backfills (e.g. setting a freshly-fetched bot_union_id) that
-// read-modify-write the JSON in Go and persist it back atomically by id.
+// Replaces the whole config blob for one installation. Prefer field-level
+// patches for metadata that can change concurrently with receipt evidence.
 func (q *Queries) SetChannelInstallationConfig(ctx context.Context, arg SetChannelInstallationConfigParams) error {
 	_, err := q.db.Exec(ctx, setChannelInstallationConfig, arg.ID, arg.Config)
 	return err

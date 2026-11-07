@@ -200,3 +200,41 @@ func TestResolveSymlinksBestEffort(t *testing.T) {
 		}
 	})
 }
+
+// TestResolveSymlinks pins the strict contract containment checks rely on:
+// every link in the path is followed, and a path that does not fully exist is
+// an error rather than a lexical guess — the opposite of
+// ResolveSymlinksBestEffort, which re-attaches a missing tail. The Windows
+// junction shapes it exists for are covered in path_windows_test.go.
+func TestResolveSymlinks(t *testing.T) {
+	root := t.TempDir()
+	physical := filepath.Join(root, "physical")
+	if err := os.MkdirAll(filepath.Join(physical, "existing"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	logical := filepath.Join(root, "logical")
+	if err := os.Symlink(physical, logical); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	realExisting, err := filepath.EvalSymlinks(filepath.Join(physical, "existing"))
+	if err != nil {
+		t.Fatalf("resolve physical: %v", err)
+	}
+
+	got, err := ResolveSymlinks(filepath.Join(logical, "existing"))
+	if err != nil {
+		t.Fatalf("ResolveSymlinks through a symlinked ancestor: %v", err)
+	}
+	if got != realExisting {
+		t.Fatalf("ResolveSymlinks = %q, want %q", got, realExisting)
+	}
+
+	for _, missing := range []string{
+		filepath.Join(logical, "existing", "missing"),
+		filepath.Join(logical, "missing", "deeper"),
+	} {
+		if got, err := ResolveSymlinks(missing); err == nil {
+			t.Fatalf("ResolveSymlinks(%q) = %q; a missing component must be an error", missing, got)
+		}
+	}
+}

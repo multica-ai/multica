@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Check, ChevronDown, Globe } from "lucide-react";
+import { Check, ChevronDown, Globe } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import {
   PropertyPicker,

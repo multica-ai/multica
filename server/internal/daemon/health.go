@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // HealthResponse is returned by the daemon's local health endpoint.
@@ -44,6 +45,9 @@ type HealthResponse struct {
 	DeviceName string `json:"device_name"`
 	ServerURL  string `json:"server_url"`
 	CLIVersion string `json:"cli_version"`
+	// CLICommit belongs to this running process, not an installed replacement.
+	// Empty or unknown values do not attest a revision; never fall back to version.
+	CLICommit string `json:"cli_commit"`
 	// LaunchedBy is "desktop" when the Electron app spawned this daemon, empty
 	// for a standalone one. Already reported to the server on registration;
 	// surfaced here so `daemon status` can say who manages the daemon instead
@@ -90,13 +94,12 @@ type healthWorkspace struct {
 	Runtimes []string `json:"runtimes"`
 }
 
-// listenHealth binds the health port. Returns the listener or an error if
-// another daemon is already running (port taken).
+// listenHealth binds the health port for callers without a prebound listener.
 func (d *Daemon) listenHealth() (net.Listener, error) {
 	addr := fmt.Sprintf("127.0.0.1:%d", d.cfg.HealthPort)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return nil, fmt.Errorf("another daemon is already running on %s: %w", addr, err)
+		return nil, fmt.Errorf("bind health port %s: %w", addr, err)
 	}
 	return ln, nil
 }
@@ -274,26 +277,32 @@ func (d *Daemon) writeRepoCheckoutAuthError(w http.ResponseWriter, result repoCh
 	http.Error(w, message, http.StatusUnauthorized)
 }
 
+// authorizeRepoCheckoutWorkDir proves the requested checkout directory lies
+// inside the active task's workdir and returns its resolved form. Both sides
+// are resolved the way the kernel opens them — util.ResolveSymlinks, not
+// filepath.EvalSymlinks, which on Windows cannot pass through a directory
+// junction: a workspaces root moved to another drive and left behind as a
+// junction made every checkout fail here (#8946). Any path that cannot be
+// resolved is refused; the error says which side and why, because the caller
+// surfaces it instead of a bare "not owned".
 func authorizeRepoCheckoutWorkDir(activeRoot, requested string) (string, error) {
 	root, err := filepath.Abs(activeRoot)
-	if err != nil {
-		return "", err
+	if err == nil {
+		root, err = util.ResolveSymlinks(root)
 	}
-	root, err = filepath.EvalSymlinks(root)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve active task workdir: %w", err)
 	}
 	workdir, err := filepath.Abs(requested)
-	if err != nil {
-		return "", err
+	if err == nil {
+		workdir, err = util.ResolveSymlinks(workdir)
 	}
-	workdir, err = filepath.EvalSymlinks(workdir)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve requested workdir: %w", err)
 	}
 	rel, err := filepath.Rel(root, workdir)
 	if err != nil || !filepath.IsLocal(rel) {
-		return "", errors.New("workdir is outside the active task workdir")
+		return "", fmt.Errorf("%s is outside the active task workdir %s", workdir, root)
 	}
 	return workdir, nil
 }
@@ -346,6 +355,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			DeviceName:            d.cfg.DeviceName,
 			ServerURL:             d.cfg.ServerBaseURL,
 			CLIVersion:            d.cfg.CLIVersion,
+			CLICommit:             d.cfg.CLICommit,
 			ActiveTaskCount:       d.activeTasks.Load(),
 			RunningTaskCount:      d.runningTasks.Load(),
 			ResourceWaitTaskCount: d.resourceWaitTasks.Load(),
@@ -457,7 +467,17 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 		}
 		authorizedWorkDir, authErr := authorizeRepoCheckoutWorkDir(activeTask.WorkDir, req.WorkDir)
 		if authErr != nil {
-			http.Error(w, "repo checkout workdir is not owned by the active task", http.StatusForbidden)
+			// The reason goes to both the agent and daemon.log: a refusal that
+			// says only "not owned" sent #8946 looking at ownership when the
+			// real failure was resolving a junctioned path. Both paths come from
+			// the requesting task — its own workdir and the path it sent — so
+			// the message tells it nothing it could not read for itself.
+			d.logger.Warn("repo checkout rejected",
+				"reason", "workdir_not_owned",
+				"task_id", activeTask.TaskID,
+				"error", authErr,
+			)
+			http.Error(w, "repo checkout workdir is not owned by the active task: "+authErr.Error(), http.StatusForbidden)
 			return
 		}
 		// Identity is derived from the token-bound active task. AgentName and the

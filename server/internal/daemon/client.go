@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/httptransport"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
@@ -124,28 +125,26 @@ type Client struct {
 func NewClient(baseURL string) *Client {
 	return &Client{
 		baseURL:      baseURL,
-		client:       &http.Client{Timeout: 30 * time.Second, Transport: cloneDefaultTransport()},
-		bundleClient: &http.Client{},
+		client:       &http.Client{Timeout: 30 * time.Second, Transport: httptransport.CloneDefault()},
+		bundleClient: &http.Client{Transport: httptransport.CloneDefault()},
 		platform:     "daemon",
 		os:           normalizeGOOS(runtime.GOOS),
 	}
 }
 
-func cloneDefaultTransport() http.RoundTripper {
-	if transport, ok := http.DefaultTransport.(*http.Transport); ok {
-		return transport.Clone()
-	}
-	return http.DefaultTransport
-}
-
-// CloseIdleConnections drops pooled control-plane HTTP connections. The
+// CloseIdleConnections drops pooled daemon HTTP connections. The
 // daemon calls this after repeated heartbeat transport failures so a stale
 // keep-alive socket from a server restart cannot delay recovery indefinitely.
 func (c *Client) CloseIdleConnections() {
-	if c == nil || c.client == nil {
+	if c == nil {
 		return
 	}
-	c.client.CloseIdleConnections()
+	if c.client != nil {
+		c.client.CloseIdleConnections()
+	}
+	if c.bundleClient != nil {
+		c.bundleClient.CloseIdleConnections()
+	}
 }
 
 // normalizeGOOS maps Go's runtime.GOOS values to the protocol vocabulary
@@ -205,15 +204,14 @@ func daemonCommonCapabilities() []string {
 	return []string{
 		protocol.DaemonCapabilitySkillBundlesV1,
 		protocol.DaemonCapabilityCoalescedCommentsV1,
-		protocol.DaemonCapabilityExecutionManifestV1,
-		protocol.DaemonCapabilityAgentSkillV1,
-		protocol.DaemonCapabilityRemoteMCPV1,
 		protocol.DaemonCapabilityLocalWorktreeV1,
 		protocol.DaemonCapabilitySourceContextQuickCreateV1,
 		protocol.DaemonCapabilityRPCV1,
 		protocol.DaemonCapabilityPlatformSkillV1,
 		protocol.DaemonCapabilityCheckoutKeepsWorkV1,
 		protocol.DaemonCapabilityJoinedWakeupsV1,
+		protocol.DaemonCapabilityWorkflowStatusRulesV1,
+		protocol.DaemonCapabilityCLICommentSteerV1,
 	}
 }
 
@@ -271,7 +269,7 @@ func (c *Client) ResolveRemoteMCPCredential(ctx context.Context, daemonToken, ta
 // starvation; a claim that commits server-side after the client gives up is
 // recovered by ReclaimStaleDispatchedTasksForRuntimes on the next poll. Kept
 // comfortably above p99 claim latency so recovery stays the exception.
-const batchClaimRequestTimeout = 5 * time.Second
+const batchClaimRequestTimeout = protocol.DaemonBatchClaimRequestTimeout
 
 // claimTasksResult carries optional scheduling metadata understood only by
 // daemons advertising claim-poll-hints-v1. A zero-value result is deliberately
@@ -439,13 +437,16 @@ func (c *Client) ExtendTaskPrepareLease(ctx context.Context, runtimeID, taskID s
 
 type TaskSupplement struct {
 	CommentID  string `json:"comment_id"`
+	AuthorType string `json:"author_type"`
 	AuthorName string `json:"author_name"`
 	Content    string `json:"content"`
 }
 
 func (c *Client) ClaimTaskSupplement(ctx context.Context, taskID string) (*TaskSupplement, error) {
 	var supplement TaskSupplement
-	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/supplements/claim", taskID), map[string]any{}, &supplement); err != nil {
+	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/supplements/claim", taskID), map[string]any{
+		"capabilities": []string{protocol.DaemonCapabilityTaskSupplementAuthorV1},
+	}, &supplement); err != nil {
 		return nil, err
 	}
 	if supplement.CommentID == "" {
@@ -540,6 +541,8 @@ func (c *Client) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID, reas
 
 // TaskCancelAck is the payload of the daemon's cancel acknowledgement.
 type TaskCancelAck struct {
+	// Nil is an older daemon with no explicit cleanup acknowledgement.
+	ProcessCleanupConfirmed *bool
 	// BranchName: a cancelled worktree task has already finalized — its
 	// partial work is committed to a branch in the user's repo. The cancel
 	// path discards the rest of the result, so this ack is the only channel
@@ -555,6 +558,10 @@ type TaskCancelAck struct {
 	// swallow it entirely.
 	ErrorMessage  string
 	FailureReason string
+	// RetiredSessionID: a resumed session this run produced no output on
+	// before the cancel landed, or one a fresh-session retry abandoned. The
+	// server retires it so later triggers start fresh (MUL-8188).
+	RetiredSessionID string
 }
 
 // AckTaskCancelled tells the server this daemon observed the task's
@@ -569,6 +576,9 @@ type TaskCancelAck struct {
 // The server never overwrites already-recorded values, so replays are safe.
 func (c *Client) AckTaskCancelled(ctx context.Context, taskID string, ack TaskCancelAck) error {
 	body := map[string]any{}
+	if ack.ProcessCleanupConfirmed != nil {
+		body["process_cleanup_confirmed"] = *ack.ProcessCleanupConfirmed
+	}
 	if ack.BranchName != "" {
 		body["branch_name"] = ack.BranchName
 	}
@@ -580,6 +590,9 @@ func (c *Client) AckTaskCancelled(ctx context.Context, taskID string, ack TaskCa
 	}
 	if ack.FailureReason != "" {
 		body["failure_reason"] = ack.FailureReason
+	}
+	if ack.RetiredSessionID != "" {
+		body["retired_session_id"] = ack.RetiredSessionID
 	}
 	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/cancel-ack", taskID), body, nil, defaultTerminalRetrySchedule)
 }
@@ -651,6 +664,21 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/usage", taskID), map[string]any{
 		"usage": usage,
+	}, nil)
+}
+
+// ReportTaskUsageSnapshot posts the same rows mid-run, as a cumulative snapshot
+// of what the agent has spent so far (STOE-30). UpsertTaskUsage overwrites per
+// (task_id, provider, model), so snapshots cannot accumulate; the flag is what
+// keeps the server's additive metrics counter and per-run log on the terminal
+// report, where they would otherwise bill each flush against the last.
+func (c *Client) ReportTaskUsageSnapshot(ctx context.Context, taskID string, usage []TaskUsageEntry) error {
+	if len(usage) == 0 {
+		return nil
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/usage", taskID), map[string]any{
+		"usage":    usage,
+		"snapshot": true,
 	}, nil)
 }
 
@@ -1078,6 +1106,7 @@ type RegisterResponse struct {
 	Repos        []RepoData      `json:"repos"`
 	ReposVersion string          `json:"repos_version"`
 	Settings     json.RawMessage `json:"settings,omitempty"`
+	CACerts      string          `json:"ca_certs,omitempty"`
 }
 
 func (c *Client) Register(ctx context.Context, req map[string]any) (*RegisterResponse, error) {
@@ -1093,6 +1122,9 @@ type WorkspaceReposResponse struct {
 	Repos        []RepoData      `json:"repos"`
 	ReposVersion string          `json:"repos_version"`
 	Settings     json.RawMessage `json:"settings,omitempty"`
+	// CACerts is the server's extra CA certificates (PEM) for git; see
+	// applyGitCACerts.
+	CACerts string `json:"ca_certs,omitempty"`
 }
 
 func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*WorkspaceReposResponse, error) {

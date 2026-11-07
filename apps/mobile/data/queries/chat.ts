@@ -10,12 +10,12 @@
  * Same shape as web's `chatKeys` in packages/core/chat/queries.ts (mobile
  * owns its own copy per the "mirror, don't import" rule in apps/mobile/CLAUDE.md).
  *
- * `staleTime: Infinity` everywhere — caches are kept fresh by WS event
- * handlers, not by background refetch. Foreground / reconnect invalidates
- * are scoped to each owning hook (see use-chat-sessions-realtime.ts and
- * use-chat-session-realtime.ts).
+ * Base caches use `staleTime: Infinity` and WS updates. The run detail
+ * overrides freshness to backfill whenever its selected task becomes active.
+ * Reconnect invalidates are scoped to each owning realtime hook.
  */
 import { queryOptions } from "@tanstack/react-query";
+import type { TaskMessagePayload } from "@multica/core/types";
 import { api } from "@/data/api";
 
 export const chatKeys = {
@@ -78,4 +78,27 @@ export const taskMessagesOptions = (taskId: string | null | undefined) =>
     queryFn: ({ signal }) => api.listTaskMessages(taskId!, { signal }),
     enabled: isTaskMessageTaskId(taskId),
     staleTime: Infinity,
+    // A backfill can snapshot before a live frame is persisted. Keep both
+    // sets of seqs so its later response cannot erase the realtime tail.
+    structuralSharing: (previous, incoming) => {
+      const existing = previous as TaskMessagePayload[] | undefined;
+      const bySeq = new Map(
+        (existing ?? []).map((m) => [m.seq, m]),
+      );
+      let changed = !existing;
+      for (const message of incoming as TaskMessagePayload[]) {
+        if (bySeq.get(message.seq) !== message) changed = true;
+        bySeq.set(message.seq, message);
+      }
+      if (!changed) return existing!;
+      return [...bySeq.values()].sort((a, b) => a.seq - b.seq);
+    },
+  });
+
+export const runTranscriptMessagesOptions = (taskId: string | null | undefined) =>
+  queryOptions({
+    ...taskMessagesOptions(taskId),
+    // A cached cancelled run may predate the final flush. Also backfill when
+    // the initial issue/task lookup resolves after this observer mounted.
+    staleTime: 0,
   });

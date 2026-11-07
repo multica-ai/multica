@@ -31,6 +31,8 @@ type ProjectResponse struct {
 	Priority    string  `json:"priority"`
 	LeadType    *string `json:"lead_type"`
 	LeadID      *string `json:"lead_id"`
+	CreatorType *string `json:"creator_type"`
+	CreatorID   *string `json:"creator_id"`
 	// StartDate / DueDate are calendar days ("YYYY-MM-DD"), no time-of-day or
 	// timezone — same contract as issue.start_date / issue.due_date.
 	StartDate  *string `json:"start_date"`
@@ -44,6 +46,9 @@ type ProjectResponse struct {
 	// payload to keep parent metadata and child collections separate; clients
 	// that need the list call ListProjectResources directly.
 	ResourceCount int64 `json:"resource_count"`
+	// WorkflowID is the workflow this project uses; null means the workspace
+	// Default workflow. (MUL-7420)
+	WorkflowID *string `json:"workflow_id"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
@@ -57,10 +62,13 @@ func projectToResponse(p db.Project) ProjectResponse {
 		Priority:    p.Priority,
 		LeadType:    textToPtr(p.LeadType),
 		LeadID:      uuidToPtr(p.LeadID),
+		CreatorType: textToPtr(p.CreatorType),
+		CreatorID:   uuidToPtr(p.CreatorID),
 		StartDate:   dateToPtr(p.StartDate),
 		DueDate:     dateToPtr(p.DueDate),
 		CreatedAt:   timestampToString(p.CreatedAt),
 		UpdatedAt:   timestampToString(p.UpdatedAt),
+		WorkflowID:  uuidToPtr(p.WorkflowID),
 	}
 }
 
@@ -109,6 +117,10 @@ type CreateProjectRequest struct {
 	StartDate   *string                               `json:"start_date"`
 	DueDate     *string                               `json:"due_date"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
+	// WorkflowID picks the project's workflow at creation; omitted or null
+	// uses the workspace Default workflow. A new project has no issues, so no
+	// status mapping is involved. (MUL-7420)
+	WorkflowID *string `json:"workflow_id,omitempty"`
 }
 
 // CreateProjectResourceRequestPayload mirrors CreateProjectResourceRequest but
@@ -300,6 +312,21 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var workflowID pgtype.UUID
+	if req.WorkflowID != nil && *req.WorkflowID != "" {
+		id, ok := parseUUIDOrBadRequest(w, *req.WorkflowID, "workflow_id")
+		if !ok {
+			return
+		}
+		row, err := h.Queries.GetIssueWorkflow(r.Context(), db.GetIssueWorkflowParams{ID: id, WorkspaceID: wsUUID})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "workflow not found in this workspace")
+			return
+		}
+		if !row.IsDefault {
+			workflowID = id
+		}
+	}
 
 	// start_date / due_date are optional calendar days; an absent or empty
 	// value leaves the column NULL. Mirrors CreateIssue's date handling.
@@ -361,13 +388,20 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 			// run — caught only later, by the claim gate cancelling the task.
 			// It writes its own 422; it runs before the transaction, so a
 			// rejection leaves nothing behind.
-			if !h.requireWorktreeCapableDaemon(w, r, wsUUID, res.ResourceType, ref) {
+			if !requireWorktreeCapableDaemon(w, r, h.Queries, wsUUID, res.ResourceType, ref) {
 				return
 			}
 		}
 	}
 
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	creatorID, ok := parseUUIDOrBadRequest(w, actorID, "creator_id")
+	if !ok {
+		return
+	}
 	createParams := db.CreateProjectParams{
+		CreatorType: pgtype.Text{String: actorType, Valid: true},
+		CreatorID:   creatorID,
 		WorkspaceID: wsUUID,
 		Title:       req.Title,
 		Description: ptrToText(req.Description),
@@ -378,6 +412,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		Priority:    priority,
 		StartDate:   startDate,
 		DueDate:     dueDate,
+		WorkflowID:  workflowID,
 	}
 
 	// Without resources, keep the simple non-tx path.
@@ -503,15 +538,13 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
 
-	params := db.UpdateProjectParams{
-		ID:          prevProject.ID,
-		Description: prevProject.Description,
-		Icon:        prevProject.Icon,
-		LeadType:    prevProject.LeadType,
-		LeadID:      prevProject.LeadID,
-		StartDate:   prevProject.StartDate,
-		DueDate:     prevProject.DueDate,
-	}
+	params := db.UpdateProjectParams{ID: prevProject.ID}
+	_, params.DescriptionSet = rawFields["description"]
+	_, params.IconSet = rawFields["icon"]
+	_, params.LeadTypeSet = rawFields["lead_type"]
+	_, params.LeadIDSet = rawFields["lead_id"]
+	_, params.StartDateSet = rawFields["start_date"]
+	_, params.DueDateSet = rawFields["due_date"]
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
 	}
@@ -615,11 +648,10 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
-	requester, ok := h.requireWorkspaceRole(w, r, uuidToString(project.WorkspaceID), "project not found", "owner", "admin")
-	if !ok {
+	if !h.requireProjectDeletion(w, r, project) {
 		return
 	}
-	userID := uuidToString(requester.UserID)
+	userID := requestUserID(r)
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start transaction")
@@ -800,7 +832,7 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 	query := fmt.Sprintf(`SELECT p.id, p.workspace_id, p.title, p.description, p.icon,
 		p.status, p.priority, p.lead_type, p.lead_id,
 		p.start_date, p.due_date,
-		p.created_at, p.updated_at,
+		p.created_at, p.updated_at, p.creator_type, p.creator_id,
 		%s AS match_source
 	FROM project p
 	WHERE p.workspace_id = %s AND %s
@@ -880,6 +912,8 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 				&row.project.DueDate,
 				&row.project.CreatedAt,
 				&row.project.UpdatedAt,
+				&row.project.CreatorType,
+				&row.project.CreatorID,
 				&row.matchSource,
 			); err != nil {
 				return fmt.Errorf("scan: %w", err)
@@ -889,6 +923,9 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 		return rows.Err()
 	})
 	if err != nil {
+		if writeSearchCancellation(w, r, err) {
+			return
+		}
 		// Statement-timeout surfaces as SQLSTATE 57014 — same
 		// fail-fast contract as SearchIssues (see runSearchQuery).
 		if isSearchStatementTimeout(err) {
@@ -901,6 +938,9 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 		}
 		slog.Warn("search projects failed", "error", err, "workspace_id", workspaceID, "query", q)
 		writeError(w, http.StatusInternalServerError, "failed to search projects")
+		return
+	}
+	if writeSearchCancellation(w, r, ctx.Err()) {
 		return
 	}
 
@@ -956,6 +996,9 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 		resp[i] = spr
 	}
 
+	if writeSearchCancellation(w, r, ctx.Err()) {
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"projects": resp,
 	})

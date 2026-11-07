@@ -11,8 +11,10 @@ import (
 )
 
 const (
-	eventName      = "instance_daily_snapshot"
-	schemaVersion  = 1
+	eventName = "instance_daily_snapshot"
+	// V2 = the V1 fields plus member-activity buckets. This sender only emits
+	// V2; the Cloud receiver keeps accepting V1 from older servers.
+	schemaVersion  = 2
 	maxRequestSize = 16 * 1024
 	maxTaskCount   = int64(1_000_000)
 )
@@ -41,6 +43,13 @@ type Payload struct {
 	TasksCompleted24h          int64  `json:"tasks_completed_24h"`
 	TasksFailed24h             int64  `json:"tasks_failed_24h"`
 	TasksCancelled24h          int64  `json:"tasks_cancelled_24h"`
+
+	VisitingMemberCount1dBucket    string `json:"visiting_member_count_1d_bucket"`
+	VisitingMemberCount7dBucket    string `json:"visiting_member_count_7d_bucket"`
+	VisitingMemberCount28dBucket   string `json:"visiting_member_count_28d_bucket"`
+	DelegatingMemberCount1dBucket  string `json:"delegating_member_count_1d_bucket"`
+	DelegatingMemberCount7dBucket  string `json:"delegating_member_count_7d_bucket"`
+	DelegatingMemberCount28dBucket string `json:"delegating_member_count_28d_bucket"`
 }
 
 // Counts contains deployment-wide aggregates at one snapshot instant.
@@ -53,9 +62,21 @@ type Counts struct {
 	TasksCompleted int64
 	TasksFailed    int64
 	TasksCancelled int64
+
+	Activity ActivityCounts
+}
+
+// ActivityCounts are distinct current members active in the 1, 7 and 28
+// complete UTC days before the snapshot day.
+type ActivityCounts struct {
+	// Visiting: the signed-in web or desktop app was opened.
+	Visiting1d, Visiting7d, Visiting28d int64
+	// Delegating: the member personally started an agent run.
+	Delegating1d, Delegating7d, Delegating28d int64
 }
 
 func newEvent(instanceID uuid.UUID, occurredAt time.Time, serverVersion string, counts Counts) Event {
+	a := counts.Activity
 	return Event{
 		EventName:     eventName,
 		SchemaVersion: schemaVersion,
@@ -71,6 +92,13 @@ func newEvent(instanceID uuid.UUID, occurredAt time.Time, serverVersion string, 
 			TasksCompleted24h:          clampTaskCount(counts.TasksCompleted),
 			TasksFailed24h:             clampTaskCount(counts.TasksFailed),
 			TasksCancelled24h:          clampTaskCount(counts.TasksCancelled),
+
+			VisitingMemberCount1dBucket:    countBucket(a.Visiting1d),
+			VisitingMemberCount7dBucket:    countBucket(a.Visiting7d),
+			VisitingMemberCount28dBucket:   countBucket(a.Visiting28d),
+			DelegatingMemberCount1dBucket:  countBucket(a.Delegating1d),
+			DelegatingMemberCount7dBucket:  countBucket(a.Delegating7d),
+			DelegatingMemberCount28dBucket: countBucket(a.Delegating28d),
 		},
 	}
 }

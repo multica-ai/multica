@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { forgetLocalSearchIndex } from "../search-index/instance";
-import { useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
+import { useQueryClient, type InfiniteData, type QueryClient, type QueryFilters } from "@tanstack/react-query";
 import type { WSClient } from "../api/ws-client";
 import type { StoreApi, UseBoundStore } from "zustand";
 import type { AuthState } from "../auth/store";
@@ -11,6 +11,9 @@ import { clearWorkspaceStorage } from "../platform/storage-cleanup";
 import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
+import { isSidebarTableRequest, type SidebarIssuesRequest } from "../issues/sidebar-list";
+import { refreshIssueUnread } from "../issues/unread";
+import { refreshSubscribedIssues, subscribedIssueKeys } from "../issues/subscribed";
 import { projectKeys } from "../projects/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
@@ -18,6 +21,9 @@ import { runtimeKeys } from "../runtimes/queries";
 import { labelKeys } from "../labels/queries";
 import { propertyKeys } from "../properties/queries";
 import { issueStatusKeys } from "../issue-statuses/queries";
+import { issueWorkflowKeys } from "../issue-workflows/queries";
+import { issueViewKeys } from "../issue-views/queries";
+import { issueViewPrefKeys } from "../issue-views/preferences";
 import {
   agentTaskSnapshotKeys,
   workspaceWorkingAgentsKeys,
@@ -73,6 +79,8 @@ import {
 } from "../chat/pending";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
+  IssueTableFacetsRequest,
+  IssueTableQuerySpec,
   MemberAddedPayload,
   WorkspaceDeletedPayload,
   WorkspaceUpdatedPayload,
@@ -82,6 +90,7 @@ import type {
   IssueDeletedPayload,
   IssueAttachmentsChangedPayload,
   IssueLabelsChangedPayload,
+  IssueUnreadChangedPayload,
   IssueMetadataChangedPayload,
   IssuePropertiesChangedPayload,
   InboxNewPayload,
@@ -643,6 +652,8 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   const wsId = getCurrentWsId();
   if (wsId) {
     qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+    void refreshIssueUnread(qc, wsId);
+    qc.invalidateQueries({ queryKey: subscribedIssueKeys.all(wsId) });
     // Through the inbox's own entry point, not a plain invalidate: a reconnect
     // can land during the list's first load, and a plain invalidate would be
     // answered by the request already on the wire (see refreshInboxQuery).
@@ -666,6 +677,9 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     // 5-minute staleTime — long enough to offer a status the server already
     // archived, or to keep painting its old name.
     qc.invalidateQueries({ queryKey: issueStatusKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: issueViewKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: issueViewPrefKeys.all(wsId) });
   }
   // Cross-workspace, so outside the wsId guard: a reconnect may have missed
   // inbox events from any workspace, so re-pull the switcher-dot summary.
@@ -696,6 +710,43 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   // a mounted composer recovers the prompt without a remount.
   qc.invalidateQueries({ queryKey: chatKeys.draftRestoresAll() });
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+}
+
+async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promise<void> {
+  const filters: QueryFilters[] = [
+    { queryKey: workspaceWorkingAgentsKeys.all(wsId) },
+    {
+      queryKey: issueKeys.tableAll(wsId),
+      predicate: ({ queryKey }) => {
+        const kind = queryKey[3];
+        let spec: IssueTableQuerySpec | undefined;
+        if (kind === "facets") {
+          const request = queryKey[4] as IssueTableFacetsRequest;
+          if (request.facets.some((facet) => facet.kind === "working_agents")) return true;
+          spec = request.query;
+        } else if (kind === "rows" || kind === "groups") {
+          spec = queryKey[4] as IssueTableQuerySpec;
+        }
+        // An explicit empty id list is still a working filter: its next
+        // projection may contain newly started work. Other facets also
+        // depend on this membership, not only rows and group descriptors.
+        return spec?.filters.working_only === true ||
+          spec?.filters.working_issue_ids !== undefined;
+      },
+    },
+    {
+      queryKey: issueKeys.sidebarAll(wsId),
+      predicate: ({ queryKey }) => {
+        const request = queryKey[4] as SidebarIssuesRequest | undefined;
+        return !!request && isSidebarTableRequest(request) && request.table.filters.working_only === true;
+      },
+    },
+  ];
+  // A lifecycle event during the FIRST fetch must not dedupe onto a response
+  // captured before that event. With staleTime=Infinity it could otherwise
+  // leave a completed run visible until another event happens to arrive.
+  await Promise.all(filters.map((filter) => qc.cancelQueries(filter)));
+  await Promise.all(filters.map((filter) => qc.invalidateQueries(filter)));
 }
 
 function invalidateSquadMemberStatusQueries(qc: QueryClient, wsId: string): void {
@@ -768,7 +819,6 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-          qc.invalidateQueries({ queryKey: workspaceWorkingAgentsKeys.all(wsId) });
           // Squad members status is derived per agent, so any agent
           // change (status flip, archive, runtime swap) needs to refresh the
           // per-squad members-status cache without refetching the static squad
@@ -796,12 +846,17 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+          // Workflow responses include the projects using them. Creating,
+          // deleting or changing a project also changes that usage list.
+          qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
           // The issue table can filter on a project's status, so a
           // project create/update/delete changes which issues a filtered
           // window holds. The payload carries no previous status to compare
           // against, and project writes are rare, so refresh the table
           // queries unconditionally rather than guess.
           qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
+          // Deleting a project deletes the saved views scoped to it.
+          qc.invalidateQueries({ queryKey: issueViewKeys.all(wsId) });
         }
       },
       squad: () => {
@@ -840,6 +895,9 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: issueStatusKeys.all(wsId) });
+          // Creating or archiving a status also adds it to, or drops it from,
+          // the stored Default workflow.
+          qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
           // Status-group order is server-owned and depends on catalog positions.
           // Rows/facets and unrelated groupings do not change on catalog edits.
           qc.invalidateQueries({
@@ -851,10 +909,32 @@ export function useRealtimeSync(
           });
         }
       },
+      // Workspace workflows (MUL-7420). Same contract as the status catalog:
+      // the event carries no row, so every write answers with one list read.
+      issue_workflow: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
+      },
       pin: () => {
         const wsId = getCurrentWsId();
         const userId = authStore.getState().user?.id;
         if (wsId && userId) qc.invalidateQueries({ queryKey: pinKeys.all(wsId, userId) });
+      },
+      issue_view: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: issueViewKeys.all(wsId) });
+      },
+      // The member's own preferences, saved on another tab or device.
+      issue_view_preference: () => {
+        const wsId = getCurrentWsId();
+        if (!wsId) return;
+        // A document with a write still in flight here refetches when that
+        // write settles; refetching it now could paint an older copy over the
+        // optimistic one. Every other document refreshes now.
+        qc.invalidateQueries({
+          queryKey: issueViewPrefKeys.all(wsId),
+          predicate: (query) => qc.isMutating({ mutationKey: query.queryKey, exact: true }) === 0,
+        });
       },
       daemon: () => {
         const wsId = getCurrentWsId();
@@ -916,12 +996,7 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (!wsId) return;
         qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
-        qc.invalidateQueries({ queryKey: workspaceWorkingAgentsKeys.all(wsId) });
-        // The Table working-agent shortcut derives an assignee set from the
-        // projection above. Refresh its server-owned graph alongside that set
-        // so rows/groups/facets cannot remain on an old task transition while
-        // the projection refetches (global staleTime is Infinity).
-        qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
+        // Working-agent projections have their own bounded refresh below.
         // 30d activity series shares the same lifecycle signal — any task
         // completion / failure shifts the histogram. (Dispatch alone
         // doesn't change a completed_at-anchored series, but invalidating
@@ -965,6 +1040,33 @@ export function useRealtimeSync(
       },
     };
 
+    const workingAgentTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    const workingAgentInFlight = new Set<string>();
+    const workingAgentDirty = new Set<string>();
+    let disposed = false;
+    const scheduleWorkingAgentRefresh = (wsId: string) => {
+      // Flush one second after the FIRST event in a batch. Later events do
+      // not postpone it, so continuous activity cannot starve the projection.
+      // Capture the workspace now: navigation must not redirect a queued
+      // refresh into a different workspace's cache.
+      workingAgentDirty.add(wsId);
+      if (workingAgentTimers.has(wsId) || workingAgentInFlight.has(wsId)) return;
+      workingAgentTimers.set(wsId, setTimeout(async () => {
+        workingAgentTimers.delete(wsId);
+        workingAgentDirty.delete(wsId);
+        workingAgentInFlight.add(wsId);
+        try {
+          await refreshWorkingAgentQueries(qc, wsId);
+        } finally {
+          workingAgentInFlight.delete(wsId);
+          // Serialize slow requests: cancelling our own refresh every second
+          // would starve it under a continuous stream. Events received while
+          // it runs still get one trailing refresh, including the final stop.
+          if (!disposed && workingAgentDirty.has(wsId)) scheduleWorkingAgentRefresh(wsId);
+        }
+      }, 1_000));
+    };
+
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
     const debouncedRefresh = (prefix: string, fn: () => void) => {
       const existing = timers.get(prefix);
@@ -981,7 +1083,7 @@ export function useRealtimeSync(
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
       "workspace:updated",
-      "issue:updated", "issue:created", "issue:deleted", "issue_attachments:changed", "issue_labels:changed", "issue_metadata:changed", "issue_properties:changed", "property:created", "property:updated", "inbox:new",
+      "issue:updated", "issue:created", "issue:deleted", "issue_attachments:changed", "issue_labels:changed", "issue_unread:changed", "issue_metadata:changed", "issue_properties:changed", "property:created", "property:updated", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
       "activity:created",
@@ -1007,6 +1109,19 @@ export function useRealtimeSync(
     const unsubAny = ws.onAny((msg) => {
       if (specificEvents.has(msg.type)) return;
       const prefix = msg.type.split(":")[0] ?? "";
+      if (prefix === "agent" || (prefix === "task" && msg.type !== "task:progress")) {
+        const wsId = getCurrentWsId();
+        if (wsId) scheduleWorkingAgentRefresh(wsId);
+      }
+      if (msg.type === "skill:deleted") {
+        const wsId = getCurrentWsId();
+        if (wsId) {
+          // Agent lists and details embed skill summaries used by duplication.
+          debouncedRefresh("skill:deleted", () => {
+            qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+          });
+        }
+      }
       const refresh = refreshMap[prefix];
       if (refresh) debouncedRefresh(prefix, refresh);
     });
@@ -1062,6 +1177,12 @@ export function useRealtimeSync(
       if (!issue_id) return;
       const wsId = getCurrentWsId();
       if (wsId) onIssueLabelsChanged(qc, wsId, issue_id, labels ?? [], issue_revision);
+    });
+
+    // Personal; may belong to a workspace other than the open one.
+    const unsubIssueUnreadChanged = ws.on("issue_unread:changed", (p) => {
+      const { workspace_id } = p as IssueUnreadChangedPayload;
+      if (workspace_id) void refreshIssueUnread(qc, workspace_id);
     });
 
     const unsubIssueAttachmentsChanged = ws.on("issue_attachments:changed", (p) => {
@@ -1234,15 +1355,22 @@ export function useRealtimeSync(
       }
     });
 
-    const unsubSubscriberAdded = ws.on("subscriber:added", (p) => {
-      const { issue_id } = p as SubscriberAddedPayload;
-      if (issue_id) qc.invalidateQueries({ queryKey: issueKeys.subscribers(issue_id) });
-    });
-
-    const unsubSubscriberRemoved = ws.on("subscriber:removed", (p) => {
-      const { issue_id } = p as SubscriberRemovedPayload;
-      if (issue_id) qc.invalidateQueries({ queryKey: issueKeys.subscribers(issue_id) });
-    });
+    // The viewer's own subscription changing also moves issues in and out of
+    // views filtered by the "subscribed" relation.
+    const onSubscriberChanged = (p: SubscriberAddedPayload | SubscriberRemovedPayload) => {
+      if (!p.issue_id) return;
+      qc.invalidateQueries({ queryKey: issueKeys.subscribers(p.issue_id) });
+      const wsId = getCurrentWsId();
+      if (wsId && p.user_type === "member" && p.user_id === authStore.getState().user?.id) {
+        void refreshSubscribedIssues(qc, wsId);
+      }
+    };
+    const unsubSubscriberAdded = ws.on("subscriber:added", (p) =>
+      onSubscriberChanged(p as SubscriberAddedPayload),
+    );
+    const unsubSubscriberRemoved = ws.on("subscriber:removed", (p) =>
+      onSubscriberChanged(p as SubscriberRemovedPayload),
+    );
 
     // --- Side-effect handlers (toast, navigation) ---
 
@@ -1758,6 +1886,7 @@ export function useRealtimeSync(
       unsubIssueDeleted();
       unsubIssueAttachmentsChanged();
       unsubIssueLabelsChanged();
+      unsubIssueUnreadChanged();
       unsubIssueMetadataChanged();
       unsubIssuePropertiesChanged();
       unsubPropertyChanged.forEach((unsub) => unsub());
@@ -1802,6 +1931,10 @@ export function useRealtimeSync(
       if (aggregateRefreshTimer) clearTimeout(aggregateRefreshTimer);
       timers.forEach(clearTimeout);
       timers.clear();
+      disposed = true;
+      workingAgentTimers.forEach(clearTimeout);
+      workingAgentTimers.clear();
+      workingAgentDirty.clear();
     };
   }, [ws, qc, authStore, onToast]);
 

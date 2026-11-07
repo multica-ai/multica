@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowRight, Download, Loader2 } from "lucide-react";
+import { ArrowRight, Download, Loader2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -12,7 +12,10 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
 import type { AgentRuntime } from "@multica/core/types";
-import { runtimeDisplayLabel } from "@multica/core/runtimes";
+import {
+  runtimeDisplayLabel,
+  useDaemonSetupCommands,
+} from "@multica/core/runtimes";
 import {
   StepFooter,
   StepHeading,
@@ -21,6 +24,7 @@ import {
   MikaRuntimeChoice,
   type MikaRuntimeSelection,
 } from "../../runtimes/components/mika-runtime-choice";
+import { countRuntimeMachines } from "../../runtimes/components/runtime-machines";
 import { useRuntimePicker } from "../components/use-runtime-picker";
 import { useT } from "../../i18n";
 
@@ -72,6 +76,7 @@ export function StepPlatformFork({
 
   const [dialog, setDialog] = useState<DialogState>(null);
   const [connecting, setConnecting] = useState(false);
+  const [skipping, setSkipping] = useState(false);
   const [model, setModel] = useState("");
 
   const picker = useRuntimePicker(wsId, wsSlug);
@@ -97,6 +102,16 @@ export function StepPlatformFork({
       setDialog(null);
     } finally {
       setConnecting(false);
+    }
+  };
+
+  const handleSkip = async () => {
+    if (skipping) return;
+    setSkipping(true);
+    try {
+      await onNext(null);
+    } finally {
+      setSkipping(false);
     }
   };
 
@@ -140,13 +155,16 @@ export function StepPlatformFork({
         <Button
           variant="ghost"
           className="w-full"
-          onClick={() => onNext(null)}
+          disabled={skipping}
+          onClick={handleSkip}
         >
+          {skipping && <Loader2 className="h-4 w-4 animate-spin" />}
           {t(($) => $.step_runtime.skip)}
         </Button>
       </StepFooter>
 
     <CliInstallDialog
+      workspaceSlug={wsSlug}
       open={dialog === "cli"}
       onClose={() => setDialog(null)}
       onConnect={handleCliConnect}
@@ -170,9 +188,7 @@ export function StepPlatformFork({
   );
 }
 
-// ------------------------------------------------------------
 // Fork cards
-// ------------------------------------------------------------
 
 function ForkPrimary({ onClick }: { onClick: () => void }) {
   const { t } = useT("onboarding");
@@ -255,9 +271,7 @@ function ForkAlt({
   );
 }
 
-// ------------------------------------------------------------
 // CLI install dialog
-// ------------------------------------------------------------
 
 /**
  * Modal dialog for the CLI install path. Contains the real install
@@ -267,6 +281,7 @@ function ForkAlt({
  * closes the dialog and fires the parent's `onConnect`.
  */
 function CliInstallDialog({
+  workspaceSlug,
   open,
   onClose,
   onConnect,
@@ -279,6 +294,7 @@ function CliInstallDialog({
   connecting,
   cliInstructions,
 }: {
+  workspaceSlug?: string;
   open: boolean;
   onClose: () => void;
   onConnect: () => void | Promise<void>;
@@ -307,13 +323,14 @@ function CliInstallDialog({
               <div className="flex items-center gap-2 pt-1 text-body">
                 <div className="h-2 w-2 rounded-full bg-success" />
                 <span className="font-medium">
-                  {t(($) => $.step_platform.runtimes_connected, { count: runtimes.length })}
+                  {t(($) => $.step_platform.runtimes_connected, { count: countRuntimeMachines(runtimes) })}
                 </span>
               </div>
               {/* Cap the runtime list at ~4 rows visible, scroll the rest.
                   Keeps the commands above always reachable even when
                   a user has many machines registered. */}
               <MikaRuntimeChoice
+                workspaceSlug={workspaceSlug}
                 layout="list"
                 runtimes={runtimes}
                 value={choice}
@@ -387,10 +404,11 @@ function formatElapsed(seconds: number) {
  */
 function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
   const { t } = useT("onboarding");
+  const commands = useDaemonSetupCommands();
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
-    if (!dialogOpen) {
+    if (!dialogOpen || commands.status !== "ready") {
       setElapsed(0);
       return;
     }
@@ -398,7 +416,9 @@ function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
       setElapsed((e) => e + 1);
     }, 1000);
     return () => window.clearInterval(id);
-  }, [dialogOpen]);
+  }, [dialogOpen, commands.status]);
+
+  if (commands.status !== "ready") return null;
 
   // Stage thresholds are rough — `multica setup` typical flow is
   //   ~1s save config → browser-tab auth (user-driven, 5–30s) →
@@ -442,21 +462,21 @@ function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
         {stage === "normal" && (
           <>
             {t(($) => $.step_platform.stage_normal_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
+            <span className="font-mono break-all">{commands.setupCmd}</span>
             {t(($) => $.step_platform.stage_normal_suffix)}
           </>
         )}
         {stage === "midway" && (
           <>
             {t(($) => $.step_platform.stage_midway_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
+            <span className="font-mono break-all">{commands.setupCmd}</span>
             {t(($) => $.step_platform.stage_midway_suffix)}
           </>
         )}
         {stage === "slow" && (
           <>
             {t(($) => $.step_platform.stage_slow_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
+            <span className="font-mono break-all">{commands.setupCmd}</span>
             {t(($) => $.step_platform.stage_slow_suffix)}
           </>
         )}

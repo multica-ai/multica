@@ -42,7 +42,9 @@ import rehypeSanitize from "rehype-sanitize";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useConfigStore } from "@multica/core/config";
+import { api } from "@multica/core/api";
 import type { Attachment } from "@multica/core/types";
+import { attachmentIdFromDownloadURL } from "@multica/core/types";
 import {
   isAllowedFileCardHref,
   isIssueIdentifier,
@@ -67,6 +69,7 @@ import {
 import { preprocessMarkdown } from "../editor/utils/preprocess";
 import { highlightToHtml } from "../editor/utils/highlight-markdown";
 import { AttachmentDownloadProvider } from "../editor/attachment-download-context";
+import { useDownloadAttachment } from "../editor/use-download-attachment";
 import { Attachment as AttachmentRenderer } from "../editor/attachment";
 import { computeClosedFences, type ClosedFence } from "./streaming-fence";
 import { remarkRepairCjkStrongTrailingWhitespace } from "./cjk-emphasis";
@@ -77,6 +80,8 @@ import {
   isRichFenceLanguage,
   shouldUpgradeFence,
 } from "./rich-code-block";
+import { RichTable, RichTableSourceContext } from "./rich-table";
+import { getTextContent } from "./rich-table-model";
 import "katex/dist/katex.min.css";
 import "../editor/styles/index.css";
 import "./rich-content.css";
@@ -84,9 +89,7 @@ import "./rich-content.css";
 export type RichContentDensity = "compact" | "document";
 export type RichContentPhase = "streaming" | "settled";
 
-// ---------------------------------------------------------------------------
 // Fence gate context
-// ---------------------------------------------------------------------------
 //
 // The closed-fence offsets travel by context rather than by rebuilding the
 // components map. The map must stay referentially stable: react-markdown
@@ -106,9 +109,7 @@ function useClosedFence(offset: number | undefined): ClosedFence | undefined {
   return offset == null ? undefined : closed.get(offset);
 }
 
-// ---------------------------------------------------------------------------
 // Mention / link renderers
-// ---------------------------------------------------------------------------
 
 /**
  * Issue mention chip. Navigation — plain click, modifier click, and the
@@ -206,9 +207,40 @@ function unfurlableEntityLink(
   return entity;
 }
 
+function ownAttachmentDownloadId(
+  href: string,
+  appOrigin: string | null,
+  attachmentPublicUrl: string,
+): string | undefined {
+  const id = attachmentIdFromDownloadURL(href);
+  if (!id) return undefined;
+  if (href.startsWith("/") && !href.startsWith("//")) return id;
+
+  // The path and UUID alone do not establish which deployment owns a link.
+  // PublicURL can differ from both the web app origin and the browser's
+  // same-origin API proxy, so the server supplies that origin via /api/config.
+  try {
+    const target = new URL(href);
+    if (target.username || target.password) return undefined;
+    const ownOrigins = [appOrigin, api.getBaseUrl?.(), attachmentPublicUrl];
+    return ownOrigins.some((base) => {
+      if (!base) return false;
+      try {
+        return new URL(base).origin === target.origin;
+      } catch {
+        return false;
+      }
+    }) ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   const slug = useWorkspaceSlug();
   const appOrigin = useAppOrigin();
+  const attachmentPublicUrl = useConfigStore((s) => s.attachmentPublicUrl);
+  const downloadAttachment = useDownloadAttachment("markdown-link");
   // Platform probe only: `openInNewTab` present means desktop, where native
   // anchor behavior is a dead end and every click must be intercepted. Absent
   // (web), modified clicks are left to the browser — the only way to get a
@@ -218,6 +250,23 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   if (href?.startsWith("slash://skill/")) {
     return <span className="slash-command">{children}</span>;
   }
+
+  // An attachment download URL written as a plain link — the shape the
+  // server persists into bodies via `buildMarkdownURL`, which in private-
+  // storage deployments is ABSOLUTE and pinned to the API host
+  // (`MULTICA_PUBLIC_URL`). A bare navigation there cannot authenticate:
+  // web's session cookie is host-locked to the API origin and
+  // SameSite=Strict (and Desktop/mobile carry a bearer token no <a> can
+  // send), so the browser gets `401 missing authorization`. Route through
+  // the download hook instead, which refreshes the authenticated metadata
+  // and navigates to the credential-bearing URL the server mints for this
+  // click (capability / presign / CloudFront, per deployment mode). Same
+  // click-time re-sign the file-card renderer already does (MUL-3130).
+  // Also require this deployment's origin; another Multica instance may use
+  // the same path shape with unrelated attachment IDs.
+  const attachmentId = href
+    ? ownAttachmentDownloadId(href, appOrigin, attachmentPublicUrl)
+    : undefined;
 
   if (isMentionHref(href)) {
     const match = href.match(/^mention:\/\/(member|agent|issue|project|all)\/(.+)$/);
@@ -251,6 +300,20 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
       onClick={(e) => {
         if (!href) {
           e.preventDefault();
+          return;
+        }
+        // An attachment link downloads through the re-sign path instead of a
+        // credential-less navigation (see attachmentId note above). This holds
+        // on every platform: web's session cookie is host-locked to the API
+        // origin and SameSite=Strict, and Desktop/mobile carry a bearer token
+        // no <a> can send, so a bare navigation 401s either way. The download
+        // hook owns the per-platform mechanism (capability anchor on web,
+        // native bridge on Desktop). Modified clicks stay native — the browser
+        // owns "open in background tab" and the raw URL remains the durable
+        // reference.
+        if (attachmentId && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+          e.preventDefault();
+          void downloadAttachment(attachmentId);
           return;
         }
         if (!desktopTabs && (e.metaKey || e.ctrlKey || e.shiftKey)) return;
@@ -291,19 +354,7 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   return plainLink;
 }
 
-// ---------------------------------------------------------------------------
 // Fenced code
-// ---------------------------------------------------------------------------
-
-function getTextContent(node: ReactNode): string {
-  if (node == null || typeof node === "boolean") return "";
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(getTextContent).join("");
-  if (isValidElement<{ children?: ReactNode }>(node)) {
-    return getTextContent(node.props.children);
-  }
-  return "";
-}
 
 // Props react-markdown actually passes to a component override: the intrinsic
 // element's own props plus the source hast node (`ExtraProps`). Deriving them
@@ -457,12 +508,9 @@ const COMPONENTS: Partial<Components> = {
     return <div {...props}>{children}</div>;
   },
 
-  // Tables — wrap in tableWrapper div for border/radius/scroll (matches Tiptap)
-  table: ({ children }) => (
-    <div className="tableWrapper">
-      <table>{children}</table>
-    </div>
-  ),
+  // Tables keep Tiptap's tableWrapper (border/radius/scroll) and add column
+  // resizing, an expanded view and copy.
+  table: RichTable,
 
   code: RichCode,
   pre: RichPre,
@@ -485,9 +533,7 @@ const REHYPE_PLUGINS = [
   rehypeKatex,
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
 
-// ---------------------------------------------------------------------------
 // Component
-// ---------------------------------------------------------------------------
 
 export interface RichContentProps {
   content: string;
@@ -538,6 +584,7 @@ export const RichContent = memo(function RichContent({
   // with the hast node positions the `code`/`pre` renderers observe. Computing
   // it from the raw pre-preprocess text would mis-match every rewritten node.
   const closedFences = useMemo(() => computeClosedFences(processed), [processed]);
+  const tableSource = useMemo(() => ({ source: content, rendered: processed }), [content, processed]);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hover = useLinkHover(wrapperRef);
@@ -552,17 +599,19 @@ export const RichContent = memo(function RichContent({
   const markdown = useMemo(
     () => (
       <ClosedFenceContext.Provider value={closedFences}>
-        <ReactMarkdown
-          remarkPlugins={REMARK_PLUGINS}
-          rehypePlugins={REHYPE_PLUGINS}
-          urlTransform={markdownUrlTransform}
-          components={COMPONENTS}
-        >
-          {processed}
-        </ReactMarkdown>
+        <RichTableSourceContext.Provider value={tableSource}>
+          <ReactMarkdown
+            remarkPlugins={REMARK_PLUGINS}
+            rehypePlugins={REHYPE_PLUGINS}
+            urlTransform={markdownUrlTransform}
+            components={COMPONENTS}
+          >
+            {processed}
+          </ReactMarkdown>
+        </RichTableSourceContext.Provider>
       </ClosedFenceContext.Provider>
     ),
-    [processed, closedFences],
+    [processed, closedFences, tableSource],
   );
 
   return (

@@ -8,6 +8,7 @@ import {
   isActorPropertyType,
   isFilterablePropertyType,
   isKnownPropertyType,
+  isListPropertyType,
   isScalarPropertyType,
   parseActorRef,
 } from "./property";
@@ -48,6 +49,8 @@ describe("isFilterablePropertyType", () => {
       "url",
       "actor",
       "multi_actor",
+      "multi_text",
+      "multi_url",
     ]) {
       expect(isFilterablePropertyType(type)).toBe(true);
     }
@@ -66,6 +69,16 @@ describe("isScalarPropertyType", () => {
     expect(isScalarPropertyType("select")).toBe(false);
     expect(isScalarPropertyType("checkbox")).toBe(false);
     expect(isScalarPropertyType("actor")).toBe(false);
+  });
+});
+
+describe("isListPropertyType", () => {
+  it("covers both list types and nothing else", () => {
+    expect(isListPropertyType("multi_text")).toBe(true);
+    expect(isListPropertyType("multi_url")).toBe(true);
+    expect(isListPropertyType("text")).toBe(false);
+    expect(isListPropertyType("url")).toBe(false);
+    expect(isListPropertyType("multi_select")).toBe(false);
   });
 });
 

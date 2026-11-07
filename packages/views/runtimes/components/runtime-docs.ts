@@ -1,4 +1,7 @@
-import { docsLocalePrefix } from "../../common/docs-locale";
+import {
+  docsLocalePrefix,
+  isTraditionalChinese,
+} from "../../common/docs-locale";
 
 export function daemonRuntimesDocsHref(language?: string): string {
   return `https://multica.ai/docs${docsLocalePrefix(language)}/daemon-runtimes`;
@@ -6,6 +9,9 @@ export function daemonRuntimesDocsHref(language?: string): string {
 
 export function customRuntimeDocsHref(language?: string): string {
   const base = daemonRuntimesDocsHref(language);
+  if (isTraditionalChinese(language)) {
+    return `${base}#${encodeURIComponent("自定義執行時配置")}`;
+  }
   if (language?.startsWith("zh")) {
     return `${base}#${encodeURIComponent("自定义运行时配置")}`;
   }

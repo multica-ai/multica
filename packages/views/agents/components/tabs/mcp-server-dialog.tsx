@@ -7,8 +7,9 @@ import {
   useRef,
   useState,
 } from "react";
-import { Globe2, Loader2, Plus, SquareTerminal, Trash2 } from "lucide-react";
+import { Globe2, Loader2, Plus, SquareTerminal, Trash2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
 import {
   Dialog,
@@ -737,18 +738,18 @@ function StringListEditor({
                   ))
                 }
               />
-              <Button
+              <IconButton
                 type="button"
                 variant="ghost"
                 size="icon"
                 className="shrink-0 text-muted-foreground hover:text-destructive"
-                aria-label={`${removeLabel} ${index + 1}`}
+                label={`${removeLabel} ${index + 1}`}
                 onClick={() =>
                   onChange(values.filter((_, itemIndex) => itemIndex !== index))
                 }
               >
                 <Trash2 aria-hidden="true" />
-              </Button>
+              </IconButton>
             </div>
           ))}
         </div>
@@ -831,18 +832,18 @@ function KeyValueEditor({
                   }
                 />
               </div>
-              <Button
+              <IconButton
                 type="button"
                 variant="ghost"
                 size="icon"
                 className="shrink-0 text-muted-foreground hover:text-destructive"
-                aria-label={`${removeLabel} ${index + 1}`}
+                label={`${removeLabel} ${index + 1}`}
                 onClick={() =>
                   onChange(rows.filter((_, itemIndex) => itemIndex !== index))
                 }
               >
                 <Trash2 aria-hidden="true" />
-              </Button>
+              </IconButton>
             </div>
           ))}
         </div>

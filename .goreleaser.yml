@@ -17,6 +17,7 @@ builds:
       - -s -w
       - -X main.version={{.Version}}
       - -X main.commit={{.ShortCommit}}
+      - -X main.buildCommit={{.FullCommit}}
       - -X main.date={{.Date}}
     env:
       - CGO_ENABLED=0

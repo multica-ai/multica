@@ -1,20 +1,22 @@
 {
   "page": {
     "title": "에이전트",
-    "tagline": "태스크를 맡고, 댓글을 남기고, 상태를 업데이트하는 AI 팀원입니다.",
-    "learn_more": "자세히 보기 →",
     "new_agent": "새 에이전트",
-    "search_placeholder": "에이전트 검색...",
+    "search": "에이전트 검색",
     "show_archived": "보관된 에이전트 보기 ({{count}}) →",
     "of_total": "{{total}}개 중 {{visible}}개",
     "list_load_failed": "에이전트 목록을 불러오지 못했습니다",
     "list_load_failed_default": "에이전트 목록을 가져오는 중 문제가 발생했습니다.",
-    "try_again": "다시 시도"
+    "try_again": "다시 시도",
+    "scope_title": {
+      "mine": "내 에이전트",
+      "all": "모든 에이전트",
+      "archived": "보관된 에이전트"
+    }
   },
   "scope": {
     "mine": "내 것",
-    "all": "전체",
-    "archived": "보관됨"
+    "all": "전체"
   },
   "sort": {
     "label_recent": "최근 활동",
@@ -43,15 +45,21 @@
     "title": "보관된 에이전트"
   },
   "empty": {
-    "title": "아직 에이전트가 없습니다",
-    "description": "에이전트를 만든 후 태스크를 할당하세요."
+    "setup": {
+      "label": "설정 단계",
+      "runtime": "런타임 연결하기",
+      "agent": "에이전트 만들기",
+      "issue": "태스크 할당하기",
+      "done": "(완료)",
+      "connect_runtime": "연결"
+    }
   },
   "no_matches": {
     "title": "일치하는 결과 없음",
-    "search_archived": "\"{{query}}\"와 일치하는 보관된 에이전트가 없습니다.",
-    "no_archived": "아직 보관된 에이전트가 없습니다.",
     "search_active": "\"{{query}}\"와 일치하는 에이전트가 없습니다.",
     "search_active_filtered": "이 필터에서 \"{{query}}\"와 일치하는 에이전트가 없습니다.",
+    "no_archived": "아직 보관된 에이전트가 없습니다.",
+    "search_archived": "\"{{query}}\"와 일치하는 보관된 에이전트가 없습니다.",
     "no_filter_match": "이 필터와 일치하는 에이전트가 없습니다.",
     "search_runtime_filtered": "\"{{machine}}\"에서 \"{{query}}\"와 일치하는 에이전트가 없습니다.",
     "runtime_filtered": "\"{{machine}}\"에 에이전트가 없습니다."
@@ -128,7 +136,6 @@
     "archive_dialog_confirm": "보관"
   },
   "detail": {
-    "back_to_agents": "에이전트",
     "back_to_agents_full": "에이전트로 돌아가기",
     "not_found_title": "에이전트를 찾을 수 없습니다",
     "not_found_default": "이 에이전트가 보관되었거나 삭제되었을 수 있습니다.",
@@ -157,16 +164,20 @@
     "runtime_required_toast": "이 에이전트를 실행하기 전에 런타임을 연결하세요.",
     "assign_work": "작업 할당",
     "more_actions_aria": "에이전트 작업",
-    "updated": "{{when}} 업데이트됨"
+    "settings": "설정",
+    "copy_link": "링크 복사",
+    "copy_id": "에이전트 ID 복사",
+    "link_copied_toast": "링크를 복사했습니다",
+    "id_copied_toast": "에이전트 ID를 복사했습니다"
   },
   "inspector": {
     "section_profile": "프로필",
     "section_execution": "실행 설정",
+    "qoder_execution_note": "모델, 도구, 스킬은 Qoder Cloud Agents의 에이전트에서 설정합니다.",
     "section_access": "접근 권한",
     "section_properties": "속성",
     "section_details": "세부 정보",
     "section_details_hint": "소유권과 수명 주기에 대한 읽기 전용 정보입니다.",
-    "section_skills": "스킬",
     "section_integrations": "연동",
     "prop_runtime": "런타임",
     "prop_model": "모델",
@@ -177,7 +188,6 @@
     "prop_owner": "소유자",
     "prop_created": "생성일",
     "prop_updated": "수정일",
-    "no_description_placeholder": "설명 없음",
     "avatar_label": "아바타",
     "name_label": "이름",
     "description_label": "설명",
@@ -193,10 +203,24 @@
     "cancel": "취소"
   },
   "overview": {
-    "agent_context": "에이전트",
-    "access": "접근 권한",
     "attention_title": "확인이 필요한 실행",
     "attention_queued_other": "런타임을 사용할 수 없어 {{count}}개의 실행이 대기 중입니다."
+  },
+  "sections": {
+    "runs_count_other": "실행 {{count}}개",
+    "recent_this_week_other": "이번 주 {{count}}개",
+    "view_all": "모두 보기",
+    "open": "열기",
+    "edit": "편집",
+    "add": "추가",
+    "manage": "관리",
+    "instructions_empty": "아직 지침이 없습니다."
+  },
+  "panel": {
+    "status": "상태",
+    "runs_7d": "실행 (7일)",
+    "edit_access_aria": "접근 권한: {{value}}. 접근 권한 변경",
+    "all_settings": "모든 설정"
   },
   "skill_attach": {
     "trigger_aria": "워크스페이스 스킬 연결",
@@ -251,13 +275,11 @@
     "clear_full": "선택 지우기(제공자 기본값 사용)"
   },
   "tabs": {
-    "overview": "개요",
     "work": "작업",
     "capabilities": "기능",
     "settings": "설정",
     "general": "일반",
     "access": "접근 권한",
-    "page_navigation_aria": "에이전트 페이지",
     "section_navigation_aria": "에이전트 섹션",
     "activity": "활동",
     "tasks": "실행",
@@ -269,6 +291,7 @@
     "composio_mcp": "MCP 앱",
     "integrations": "연동",
     "runtime_config": "라우팅",
+    "qoder_agent": "Qoder Cloud Agents",
     "discard_dialog_title": "저장하지 않은 변경사항을 버릴까요?",
     "discard_dialog_description": "이 탭에 저장하지 않은 변경사항이 있습니다. 지금 나가면 변경사항이 사라집니다.",
     "discard_keep": "계속 편집",
@@ -340,7 +363,7 @@
   },
   "conversation_starters": {
     "label": "대화 시작 예시",
-    "hint": "최대 3개입니다. 선택하면 입력란에 채워지며 전송되지 않습니다.",
+    "hint": "이 에이전트와 새 채팅을 시작하면 표시됩니다. 선택하면 입력란에 채워지며 전송되지 않습니다.",
     "add": "추천 추가",
     "item_label": "추천 {{number}} 라벨",
     "prompt_label": "추천 {{number}} 프롬프트",
@@ -349,13 +372,21 @@
     "incomplete": "각 제안을 완성하거나 삭제한 후 저장하세요.",
     "remove": "추천 {{number}} 삭제",
     "preview_label": "새 채팅 미리보기",
-    "preview_defaults": "지금은 기본 예시입니다. 위에서 하나를 추가하면 세 개 모두 교체됩니다."
+    "preview_defaults": "지금은 기본 추천입니다. 직접 추가하면 세 개 모두 교체됩니다.",
+    "create_hint": "선택 사항입니다. 이 에이전트와의 새 채팅에 표시됩니다.",
+    "edit": "추천 {{number}} 편집",
+    "remove_short": "삭제",
+    "done": "완료",
+    "untitled": "제목 없는 추천",
+    "customize": "사용자 지정",
+    "defaults_summary_other": "기본 추천 {{count}}개 사용 중"
   },
   "tab_body": {
     "common": {
       "save": "저장",
       "add": "추가",
-      "unsaved_changes": "저장하지 않은 변경사항"
+      "unsaved_changes": "저장하지 않은 변경사항",
+      "discard": "변경 취소"
     },
     "instructions": {
       "intro": "모든 실행에 사용할 System Prompt를 설정하세요. Markdown을 지원합니다.",
@@ -367,7 +398,12 @@
       "system_layer_hide": "접기",
       "workspace_notes_label": "워크스페이스 메모",
       "workspace_notes_intro": "팀의 컨텍스트와 선호를 아래에 추가하세요. Multica가 이 에이전트를 위해 관리하는 지침 위에 적용됩니다. Markdown을 지원합니다.",
-      "workspace_notes_placeholder": "이 에이전트가 항상 알아야 할 내용을 적으세요.\n\n# 예시\n메인 저장소는 github.com/acme/platform입니다.\n채팅은 한국어로 해도 태스크는 영어로 작성하세요.\n금요일에는 배포하지 않습니다."
+      "workspace_notes_placeholder": "이 에이전트가 항상 알아야 할 내용을 적으세요.\n\n# 예시\n메인 저장소는 github.com/acme/platform입니다.\n채팅은 한국어로 해도 태스크는 영어로 작성하세요.\n금요일에는 배포하지 않습니다.",
+      "mode_aria": "편집 모드",
+      "mode_write": "작성",
+      "mode_preview": "미리보기",
+      "preview_empty": "아직 미리 볼 내용이 없습니다.",
+      "char_count_other": "{{count}}자"
     },
     "env": {
       "intro_readonly": "에이전트 프로세스가 시작될 때 주입됩니다. 워크스페이스 소유자와 관리자만 값을 읽거나 수정할 수 있으며, 모든 공개와 수정은 워크스페이스 감사 로그에 기록됩니다.",
@@ -523,6 +559,7 @@
       "load_failed": "연결된 앱을 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
       "empty_title": "아직 연결된 앱이 없습니다",
       "empty_link_to_settings": "설정 → 연동에서 연결하기",
+      "open_settings": "설정 열기",
       "connected": "연결됨",
       "toggle_aria": "이 에이전트에 {{toolkit}} 허용",
       "saving": "저장 중…",
@@ -536,6 +573,9 @@
       "mode_label": "라우팅 모드",
       "mode_local": "Local",
       "mode_gateway": "Gateway",
+      "model_override_label": "기본 모델 재정의",
+      "model_override_hint": "변경하거나 비울 때까지 이 에이전트가 가져오는 모든 실행에 적용됩니다. 비우면 OpenClaw 에이전트의 정체성은 그대로 유지하면서 연결된 모델을 사용합니다.",
+      "model_override_placeholder": "openrouter/@preset/agent-reasoning",
       "mode_local_hint": "이 컴퓨터에서 실행합니다.",
       "mode_gateway_hint": "daemon이 OpenClaw Gateway에 다이얼합니다. 엔드포인트 필드를 비워두면 daemon 호스트의 `~/.openclaw/openclaw.json`에서 상속받습니다.",
       "gateway_legend": "Gateway 엔드포인트",
@@ -609,12 +649,6 @@
       "section_now": "현재",
       "section_last_30d": "최근 30일",
       "section_recent": "최근 작업",
-      "subtitle_no_active": "활성 작업 없음",
-      "subtitle_active_other": "활성 실행 {{count}}개",
-      "subtitle_performance": "성과",
-      "subtitle_no_recent": "아직 완료된 실행 없음",
-      "subtitle_recent_progress": "{{total}}회 실행 중 {{shown}}회",
-      "subtitle_recent_latest": "최근 {{count}}회 실행",
       "empty_now": "이 에이전트는 지금 진행 중인 실행이 없습니다.",
       "empty_30d": "최근 30일 동안 완료된 작업이 없습니다.",
       "empty_recent": "이 에이전트는 아직 완료한 실행이 없습니다.",
@@ -625,9 +659,7 @@
       "success_hint": "완료 및 실패한 실행 수 중 완료한 실행의 비율입니다. 취소한 실행은 제외됩니다.",
       "success_unavailable": "이 기간에 완료하거나 실패한 실행이 없어 성공률을 계산할 수 없습니다.",
       "cancelled_count": "{{count}}개 취소됨",
-      "avg_duration": "평균 {{value}}",
       "avg_duration_label": "평균 소요 시간",
-      "failed_count": "{{count}}회 실패",
       "failed_label": "실패",
       "source_issue": "태스크",
       "source_chat": "채팅",
@@ -780,6 +812,7 @@
     "search_placeholder": "이 작업 검색…",
     "no_matches": "검색과 일치하는 단계가 없습니다.",
     "more_actions": "더보기",
+    "kind_text": "에이전트",
     "kind_tool": "도구",
     "kind_thinking": "사고",
     "kind_error": "오류",
@@ -809,6 +842,7 @@
       "runtime_offline": "데몬 오프라인",
       "runtime_reconnect_timeout": "데몬이 제시간에 다시 연결되지 않음",
       "runtime_recovery": "데몬 재시작됨",
+      "runtime_access_revoked": "런타임 접근이 취소됨",
       "timeout": "실행 시간 초과",
       "iteration_limit": "반복 횟수 제한에 도달함",
       "agent_blocked": "사용자 입력 대기 중",
@@ -849,18 +883,9 @@
     "none": "30일간 활동 없음"
   },
   "toolbar": {
-    "result_count_title": "일치하는 에이전트 / 범위 내 전체",
-    "filter_label": "필터",
-    "filter_active_count_other": "필터 {{count}}개",
-    "clear_filters": "필터 지우기",
     "section_availability": "가용성",
     "section_access": "접근 권한",
     "section_runtime": "런타임",
-    "display": "표시",
-    "sort_by": "정렬",
-    "direction_asc": "오름차순",
-    "direction_desc": "내림차순",
-    "section_columns": "열",
     "section_owner": "소유자",
     "section_model": "모델"
   },
@@ -868,19 +893,8 @@
     "title": "에이전트 만들기",
     "squad_title": "이 스쿼드용 에이전트 만들기",
     "duplicate_title": "{{name}} 복제",
-    "back": "뒤로",
-    "eyebrow": "에이전트 만들기",
-    "choose_title": "어떻게 시작하시겠어요?",
-    "recommended": "추천",
-    "continue": "계속",
-    "step_choose": "시작 방법 선택",
-    "step_configure": "검토 및 설정",
     "step_ai": "대화로 만들기",
     "modes": {
-      "blank": {
-        "title": "빈 상태로 시작",
-        "description": "이름, 지침, 런타임을 직접 설정합니다."
-      },
       "template": {
         "title": "템플릿 사용",
         "description": "정리된 지침과 스킬을 바탕으로 워크스페이스에 맞게 세부 항목을 조정합니다."
@@ -919,12 +933,14 @@
       "setup_description": "이 런타임은 생성 대화에 사용되며 새 에이전트의 기본값이 됩니다.",
       "start": "대화 시작",
       "connect_runtime": "런타임 연결",
+      "draft_parse_failed": "이 응답으로 양식을 채울 수 없습니다. 에이전트에게 초안을 다시 생성하도록 요청하거나 직접 입력하세요.",
       "start_failed": "Agent Builder를 시작하지 못했습니다.",
       "send_failed": "메시지를 보내지 못했습니다.",
       "stop_failed": "현재 생성을 중지하지 못했습니다.",
       "switch_runtime_failed": "런타임을 전환하지 못했습니다. 대화는 이전 런타임에서 계속 실행됩니다.",
       "switch_runtime_pending": "현재 답변을 중지하면 런타임을 전환할 수 있습니다.",
       "switch_runtime_success": "런타임을 전환했습니다. 설정 초안은 유지되며, 이후 대화는 새 런타임에서 새로운 모델 세션으로 이어집니다.",
+      "conversation_tab": "대화",
       "chat_title": "Agent Builder",
       "runtime_online": "런타임 온라인",
       "runtime_offline": "런타임 오프라인",
@@ -941,12 +957,11 @@
     "live_draft_hint": "초안을 직접 수정할 수 있습니다.",
     "duplicate_env_notice": "지침, 스킬, 명령 인수는 복사됩니다. 환경 변수, MCP 서버, 머신 로컬 런타임 설정은 복사되지 않습니다.",
     "duplicate_runtime_reset_notice": "원래 런타임을 사용할 수 없어 이 복사본은 다른 런타임에서 실행됩니다. 모델, 추론 수준, 속도는 선택한 런타임에서만 유효하므로 초기화되었습니다.",
-    "create_and_open": "만들고 열기",
+    "create_agent": "에이전트 만들기",
     "create_and_add": "만들고 스쿼드에 추가",
     "creating": "에이전트 만드는 중…",
     "create_failed": "에이전트를 만들지 못했습니다.",
     "name_conflict": "같은 이름의 에이전트가 이미 있습니다.",
-    "created": "{{name}}을(를) 만들었습니다",
     "drafts": {
       "title": "초안",
       "untitled": "제목 없는 초안",
@@ -956,10 +971,97 @@
       "discard_cancel": "계속 편집",
       "banner": "미완료 초안이 {{count}}개 있습니다",
       "pick_hint": "이어서 진행할 항목을 선택하세요."
+    },
+    "close": "닫기",
+    "steps": {
+      "runtime": "런타임 선택",
+      "configure": "구성",
+      "done": "완료",
+      "aria": "에이전트 생성 단계",
+      "progress": "{{total}}단계 중 {{current}}단계"
+    },
+    "configure_title": "에이전트 구성",
+    "ask_ai": "AI에게 작성 맡기기",
+    "change_runtime": "변경",
+    "runtime_label": "런타임",
+    "runtime_loading": "런타임을 불러오는 중…",
+    "runtime_missing": "이 런타임은 더 이상 사용할 수 없습니다.",
+    "cloud_fields_note": "Skills, MCP, 대화 시작 문구는 로컬 및 원격 런타임에서만 사용할 수 있습니다.",
+    "done": {
+      "loading": "마무리하는 중…",
+      "title": "{{name}} 준비 완료",
+      "runs_on": "{{runtime}}에서 실행",
+      "joined_squad": "스쿼드 {{squad}}에 추가됨",
+      "next": "다음 단계",
+      "assign_title": "첫 작업 할당하기",
+      "mention_title": "이슈에서 멘션하기",
+      "squad_title": "스쿼드에 추가",
+      "open_squad_title": "{{squad}} 열기",
+      "open_agent": "에이전트 열기",
+      "back_to_list": "에이전트 목록으로"
+    },
+    "runtime_step": {
+      "title": "이 에이전트를 어디서 실행할까요?",
+      "search_placeholder": "하네스 또는 머신 검색",
+      "groups": {
+        "machines": "머신",
+        "cloud": "클라우드 서비스"
+      },
+      "this_machine": "이 머신",
+      "owner_you": "나",
+      "custom_badge": "사용자 지정",
+      "web_local_title": "데스크톱 앱에서 이 컴퓨터의 하네스를 사용할 수 있습니다",
+      "download_desktop": "데스크톱 앱 다운로드",
+      "harness_count_other": "하네스 {{count}}개",
+      "local_starting": "로컬 데몬을 시작하는 중…",
+      "local_empty_title": "이 머신에서 하네스를 찾지 못했습니다",
+      "local_empty_hint": "Claude Code나 Codex 같은 CLI를 설치하면 여기에 표시됩니다.",
+      "more_harnesses_other": "{{count}}개 더: {{names}}",
+      "add_remote": "머신 연결",
+      "hidden_remote_other": "소유자만 사용할 수 있는 머신 {{count}}대는 표시하지 않습니다",
+      "remote_warning": "작업은 {{owner}}의 머신에서 실행되고, 그 머신의 파일을 읽고 쓰며, 사용량은 {{owner}}의 계정에 집계됩니다.",
+      "no_match": "“{{query}}”와 일치하는 항목이 없습니다",
+      "hosted_by": "제공: {{vendor}}",
+      "coming_soon": "출시 예정",
+      "qoder_status": {
+        "not_configured": "연결 안 됨",
+        "starting": "시작 중",
+        "ready": "연결됨",
+        "error": "오류",
+        "stopped": "일시 중지됨"
+      },
+      "connect": "연결",
+      "settings": "설정",
+      "member_connect": "관리자에게 연결을 요청하세요",
+      "member_fix": "관리자에게 해결을 요청하세요",
+      "footer_selected": "선택됨:",
+      "cancel": "취소",
+      "next": "다음"
     }
   },
-  "actions": {
-    "selected_other": "{{count}}개 선택됨",
-    "clear_selection": "선택 해제"
+  "actions": {},
+  "intro": {
+    "title": "첫 AI 팀원을 맞이하세요",
+    "description": "에이전트는 팀원처럼 태스크를 맡습니다. 런타임에서 Claude Code, Codex 같은 도구로 작업하고, 끝나면 댓글로 결과를 전달합니다.",
+    "slides": {
+      "describe": {
+        "title": "할 일을 한 문장으로",
+        "description": "역할을 설명하고 런타임과 모델을 고르면 만들 수 있습니다. 지침 수정이나 skill 추가는 언제든 가능합니다."
+      },
+      "assign": {
+        "title": "동료처럼 일을 맡기세요",
+        "description": "어떤 태스크든 담당자로 선택하세요. 알아서 작업을 시작하니 지켜볼 필요가 없습니다."
+      },
+      "deliver": {
+        "title": "작업을 보고, 댓글로 받으세요",
+        "description": "실행 과정을 실시간으로 볼 수 있습니다. 끝나면 결과와 PR을 태스크 댓글로 전달합니다."
+      }
+    },
+    "art": {
+      "prompt": "프런트엔드 PR을 리뷰하고 접근성과 성능을 중점으로 본 뒤, 결론을 PR 댓글로 남겨 주세요.",
+      "issue_title": "요금 페이지 모바일 레이아웃 깨짐",
+      "comment": "수정했습니다. 375px 이하에서 요금 카드가 한 열로 바뀝니다. PR을 열었고 테스트도 통과했습니다.",
+      "step_read": "{{file}} 읽기"
+    }
   }
 }

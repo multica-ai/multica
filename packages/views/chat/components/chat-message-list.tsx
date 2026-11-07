@@ -26,7 +26,7 @@ import {
   ArrowUpRight,
   Copy,
   RotateCw,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
 import { RichContent } from "../../rich-content";
@@ -62,6 +62,16 @@ import { useT } from "../../i18n";
 // ─── Public component ────────────────────────────────────────────────────
 
 interface ChatMessageListProps {
+  /** Pause bottom-stick effects while a closing floating window fades out. */
+  active?: boolean;
+  /**
+   * Names the conversation, so a later mount of it in this page session
+   * reveals as soon as it lands instead of waiting out the settle window
+   * (stick-to-bottom.ts). Omit to pay the settle on every mount.
+   */
+  revealKey?: string | null;
+  /** The list became visible to the reader — on reveal, and on each reactivation after it. */
+  onRevealed?: () => void;
   messages: ChatMessage[];
   /**
    * Server-authoritative pending-task snapshot. `null` / undefined means
@@ -176,6 +186,9 @@ const LIST_COMPONENTS: Components<ChatRenderItem, ChatListContext> = {
 };
 
 export function ChatMessageList({
+  active = true,
+  revealKey = null,
+  onRevealed,
   messages,
   pendingTask,
   availability,
@@ -205,7 +218,12 @@ export function ChatMessageList({
   const { isFollowing, onContentHeightChanged, hasReachedLiveEnd } = useStickToBottom(
     scrollContainerEl,
     pinToLiveEnd,
+    active,
+    revealKey,
   );
+  useEffect(() => {
+    if (active && hasReachedLiveEnd) onRevealed?.();
+  }, [active, hasReachedLiveEnd, onRevealed]);
   // Soft edge fade hinting more content above/below. Kept small so it barely
   // grazes full-bleed previews (image / HTML) at the edges.
   const fadeStyle = useScrollFade(scrollRef, 16);
@@ -996,6 +1014,7 @@ function FailureBubble({
     codex_semantic_inactivity: t(($) => $.message_list.failure.codex_semantic_inactivity),
     runtime_offline: t(($) => $.message_list.failure.runtime_offline),
     runtime_access_denied: t(($) => $.message_list.failure.runtime_access_denied),
+    runtime_access_revoked: t(($) => $.message_list.failure.runtime_access_revoked),
     runtime_recovery: t(($) => $.message_list.failure.runtime_recovery),
     manual: t(($) => $.message_list.failure.manual),
     cancelled: t(($) => $.message_list.failure.manual),

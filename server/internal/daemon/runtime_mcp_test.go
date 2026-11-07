@@ -10,7 +10,7 @@ import (
 
 func TestListRuntimeLocalMcpServersCodexRedactsDetails(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("CODEX_HOME", "")
 	configDir := filepath.Join(home, ".codex")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
@@ -44,7 +44,7 @@ enabled = false
 }
 
 func TestListRuntimeLocalMcpServersClaudeMissingConfig(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	servers, supported, err := listRuntimeLocalMcpServers("claude")
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestListRuntimeLocalMcpServersClaudeMissingConfig(t *testing.T) {
 
 func TestListRuntimeLocalMcpServersOmpReadsNativeConfig(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	configDir := filepath.Join(home, ".omp", "agent")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestListRuntimeLocalMcpServersOmpReadsNativeConfig(t *testing.T) {
 
 func TestListRuntimeLocalMcpServersClaudeEnabledPlugin(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	installPath := writeTestClaudePlugin(t, home, "paper-desktop@paper", "paper-desktop", true)
 	config := `{"mcpServers":{"paper":{"type":"http","url":"http://127.0.0.1:29979/mcp"}}}`
 	if err := os.WriteFile(filepath.Join(installPath, "mcp.json"), []byte(config), 0o600); err != nil {
@@ -103,7 +103,7 @@ func TestListRuntimeLocalMcpServersClaudeEnabledPlugin(t *testing.T) {
 }
 
 func TestListRuntimeLocalMcpServersUnknownProvider(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	servers, supported, err := listRuntimeLocalMcpServers("future-runtime")
 	if err != nil {
 		t.Fatal(err)
@@ -113,8 +113,61 @@ func TestListRuntimeLocalMcpServersUnknownProvider(t *testing.T) {
 	}
 }
 
+func TestListRuntimeLocalMcpServersPi(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".pi", "agent")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := `{"mcpServers":{"native":{"command":"native-server","enabled":false}}}`
+	if err := os.WriteFile(filepath.Join(configDir, "mcp.json"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	servers, supported, err := listRuntimeLocalMcpServers("pi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !supported || len(servers) != 1 {
+		t.Fatalf("supported=%v servers=%#v", supported, servers)
+	}
+	if servers[0].Name != "native" || servers[0].Transport != "stdio" || servers[0].Enabled {
+		t.Fatalf("native summary = %#v", servers[0])
+	}
+}
+
+func TestMergeRuntimeAndAgentMcpConfigPiLeavesUserFileAlone(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".pi", "agent")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "mcp.json"), []byte(`{"mcpServers":{"runtime-only":{"command":"runtime-server"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	merged, err := mergeRuntimeAndAgentMcpConfig("pi", json.RawMessage(`{"mcpServers":{"agent":{"command":"agent-server"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		McpServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(merged, &document); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := document.McpServers["runtime-only"]; ok {
+		t.Fatalf("user server was copied into the task config: %#v", document.McpServers)
+	}
+	if document.McpServers["agent"]["command"] != "agent-server" {
+		t.Fatalf("merged servers = %#v", document.McpServers)
+	}
+}
+
 func TestMergeRuntimeAndAgentMcpConfigOmpUsesAgentConfig(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	merged, err := mergeRuntimeAndAgentMcpConfig("omp", json.RawMessage(`{"mcpServers":{"agent":{"command":"agent-server"}}}`))
 	if err != nil {
 		t.Fatal(err)
@@ -132,7 +185,7 @@ func TestMergeRuntimeAndAgentMcpConfigOmpUsesAgentConfig(t *testing.T) {
 
 func TestMergeRuntimeAndAgentMcpConfigClaudeCombinesAndAgentWins(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	runtimeConfig := `{"mcpServers":{"runtime-only":{"command":"runtime-cmd","env":{"TOKEN":"local-secret"}},"shared":{"command":"runtime-shared"}}}`
 	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(runtimeConfig), 0o600); err != nil {
 		t.Fatal(err)
@@ -171,7 +224,7 @@ func TestMergeRuntimeAndAgentMcpConfigClaudeCombinesAndAgentWins(t *testing.T) {
 
 func TestMergeRuntimeAndAgentMcpConfigCodexNormalizesHeaders(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("CODEX_HOME", "")
 	configDir := filepath.Join(home, ".codex")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
@@ -212,7 +265,7 @@ args = ["mcp-server-fetch"]
 }
 
 func TestMergeRuntimeAndAgentMcpConfigNullKeepsNativeInheritance(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	for _, raw := range []json.RawMessage{nil, json.RawMessage("null"), json.RawMessage(" null ")} {
 		merged, err := mergeRuntimeAndAgentMcpConfig("claude", raw)
 		if err != nil {
@@ -226,7 +279,7 @@ func TestMergeRuntimeAndAgentMcpConfigNullKeepsNativeInheritance(t *testing.T) {
 
 func TestCodeArtsMcpConfigLoadsJSONCAndAgentWins(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("USERPROFILE", home)
 	configDir := filepath.Join(home, ".codeartsdoer")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
@@ -348,7 +401,7 @@ func TestCodebuddyUserMcpConfigPathHonorsConfigDirEnv(t *testing.T) {
 
 func TestListRuntimeLocalMcpServersCodebuddyReadsItsOwnConfig(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("CODEBUDDY_CONFIG_DIR", "")
 	configDir := filepath.Join(home, ".codebuddy")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
@@ -383,7 +436,7 @@ func TestListRuntimeLocalMcpServersCodebuddyReadsItsOwnConfig(t *testing.T) {
 // while losing scope precedence and the project-scope approval gate.
 func TestMergeRuntimeAndAgentMcpConfigCodebuddyIsPassthrough(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("CODEBUDDY_CONFIG_DIR", "")
 	configDir := filepath.Join(home, ".codebuddy")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
@@ -512,7 +565,7 @@ func TestStripJSONCRejectsUnterminatedBlockComment(t *testing.T) {
 // surfaces the problem rather than silently reporting zero servers.
 func TestListRuntimeLocalMcpServersCodebuddyRejectsUnterminatedComment(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("CODEBUDDY_CONFIG_DIR", "")
 	configDir := filepath.Join(home, ".codebuddy")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
@@ -530,7 +583,7 @@ func TestListRuntimeLocalMcpServersCodebuddyRejectsUnterminatedComment(t *testin
 
 func TestListRuntimeLocalMcpServersKimi(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("KIMI_CODE_HOME", "")
 	kimiHome := filepath.Join(home, ".kimi-code")
 	if err := os.MkdirAll(kimiHome, 0o755); err != nil {
@@ -549,13 +602,287 @@ func TestListRuntimeLocalMcpServersKimi(t *testing.T) {
 	}
 }
 
+// OpenCode 1.x stores user MCP servers directly under "mcp"; 2.x nests them
+// under "mcp.servers". The shape is written by whichever version the user runs,
+// so the daemon must detect it from the content. The regression this guards: a
+// 2.x config was previously read as a single literal "servers" entry.
+func TestOpencodeNativeMcpServers(t *testing.T) {
+	cases := []struct {
+		name    string
+		cfgJSON string
+		wantOK  bool
+		want    []string
+	}{
+		{
+			name:    "v2 nested under mcp.servers",
+			cfgJSON: `{"mcp":{"servers":{"github":{"type":"remote","url":"https://g.example/mcp"},"grafana":{"type":"local","command":["grafana-mcp"]}}}}`,
+			wantOK:  true,
+			want:    []string{"github", "grafana"},
+		},
+		{
+			name:    "v1 flat under mcp",
+			cfgJSON: `{"mcp":{"github":{"type":"remote","url":"https://g.example/mcp"},"grafana":{"type":"local","command":["grafana-mcp"]}}}`,
+			wantOK:  true,
+			want:    []string{"github", "grafana"},
+		},
+		{
+			name:    "v1 local server named servers",
+			cfgJSON: `{"mcp":{"servers":{"type":"local","command":["local-mcp"]},"github":{"type":"remote","url":"https://g.example/mcp"}}}`,
+			wantOK:  true,
+			want:    []string{"servers", "github"},
+		},
+		{
+			name:    "v1 remote server named servers",
+			cfgJSON: `{"mcp":{"servers":{"type":"remote","url":"https://g.example/mcp"}}}`,
+			wantOK:  true,
+			want:    []string{"servers"},
+		},
+		{
+			name:    "v1 enabled override named servers",
+			cfgJSON: `{"mcp":{"servers":{"enabled":false}}}`,
+			wantOK:  true,
+			want:    []string{"servers"},
+		},
+		{
+			name:    "v2 server names matching entry fields",
+			cfgJSON: `{"mcp":{"servers":{"type":{"type":"local","command":["a"]},"url":{"type":"local","command":["b"]},"command":{"type":"local","command":["c"]},"enabled":{"type":"local","command":["d"]},"disabled":{"type":"local","command":["e"]}}}}`,
+			wantOK:  true,
+			want:    []string{"type", "url", "command", "enabled", "disabled"},
+		},
+		{
+			name:    "no mcp key",
+			cfgJSON: `{"$schema":"https://opencode.ai/config.json"}`,
+			wantOK:  false,
+			want:    nil,
+		},
+		{
+			name:    "mcp is not a map",
+			cfgJSON: `{"mcp":"oops"}`,
+			wantOK:  false,
+			want:    nil,
+		},
+		{
+			name:    "v2 empty servers",
+			cfgJSON: `{"mcp":{"servers":{}}}`,
+			wantOK:  true,
+			want:    nil,
+		},
+		{
+			name:    "v1 empty mcp",
+			cfgJSON: `{"mcp":{}}`,
+			wantOK:  true,
+			want:    nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var cfg map[string]any
+			if err := json.Unmarshal([]byte(tc.cfgJSON), &cfg); err != nil {
+				t.Fatalf("unmarshal fixture: %v", err)
+			}
+			got, ok := opencodeNativeMcpServers(cfg, "mcp")
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (got=%#v)", ok, tc.wantOK, got)
+			}
+			if !ok {
+				return
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %d servers %#v, want %d %v", len(got), got, len(tc.want), tc.want)
+			}
+			for _, name := range tc.want {
+				if _, exists := got[name]; !exists {
+					t.Fatalf("server %q missing: %#v", name, got)
+				}
+			}
+		})
+	}
+}
+
+// Both OpenCode layouts must yield actual server names before task-local merging.
+func TestLoadRuntimeMcpServerConfigsOpencode(t *testing.T) {
+	cases := []struct {
+		name   string
+		config string
+		want   []string
+	}{
+		{
+			name: "v2 nested config parses real server names",
+			config: `{"$schema":"https://opencode.ai/config.json","mcp":{"servers":{` +
+				`"github":{"type":"remote","url":"https://g.example/mcp","headers":{"Authorization":"{env:GITHUB_MCP_TOKEN}"}},` +
+				`"grafana":{"type":"local","command":["grafana-mcp","start"]}}}}`,
+			want: []string{"github", "grafana"},
+		},
+		{
+			name:   "v1 flat config still parses",
+			config: `{"mcp":{"github":{"type":"remote","url":"https://g.example/mcp"},"grafana":{"type":"local","command":["grafana-mcp","start"]}}}`,
+			want:   []string{"github", "grafana"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			redirectTestHome(t, t.TempDir())
+			configDir := t.TempDir()
+			t.Setenv("XDG_CONFIG_HOME", configDir)
+			opencodeDir := filepath.Join(configDir, "opencode")
+			if err := os.MkdirAll(opencodeDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(opencodeDir, "opencode.json"), []byte(tc.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			servers, supported, err := loadRuntimeMcpServerConfigs("opencode")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !supported {
+				t.Fatal("opencode reported unsupported")
+			}
+			if _, misparsed := servers["servers"]; misparsed {
+				t.Fatalf("config was mis-parsed as a literal %q server: %#v", "servers", servers)
+			}
+			if len(servers) != len(tc.want) {
+				t.Fatalf("got %d servers, want %d: %#v", len(servers), len(tc.want), servers)
+			}
+			for _, name := range tc.want {
+				if _, ok := servers[name]; !ok {
+					t.Fatalf("server %q missing: %#v", name, servers)
+				}
+			}
+		})
+	}
+}
+
+func TestMergeRuntimeAndAgentMcpConfigOpencodeDisabledServers(t *testing.T) {
+	cases := []struct {
+		name        string
+		agentConfig string
+		want        []string
+	}{
+		{
+			name:        "disabled runtime servers never reach the task",
+			agentConfig: `{"mcpServers":{"managed":{"command":"managed-mcp"}}}`,
+			want:        []string{"local-on", "remote-on", "managed"},
+		},
+		{
+			name:        "explicit agent entry still wins a same-name collision",
+			agentConfig: `{"mcpServers":{"local-off":{"command":"managed-override"}}}`,
+			want:        []string{"local-on", "remote-on", "local-off"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			writeOpencodeRuntimeConfig(t, `{"servers":{
+				"local-off":{"type":"local","command":["disabled-local"],"disabled":true},
+				"remote-off":{"type":"remote","url":"https://disabled.example.invalid/mcp","disabled":true},
+				"local-on":{"type":"local","command":["enabled-local"]},
+				"remote-on":{"type":"remote","url":"https://enabled.example.invalid/mcp","disabled":false}
+			}}`)
+
+			inventory, supported, err := listRuntimeLocalMcpServers("opencode")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !supported || len(inventory) != 4 {
+				t.Fatalf("supported=%v inventory=%#v", supported, inventory)
+			}
+			for _, server := range inventory {
+				wantEnabled := server.Name == "local-on" || server.Name == "remote-on"
+				if server.Enabled != wantEnabled {
+					t.Errorf("inventory server %q enabled=%v, want %v", server.Name, server.Enabled, wantEnabled)
+				}
+			}
+
+			merged, err := mergeRuntimeAndAgentMcpConfig("opencode", json.RawMessage(tc.agentConfig))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var document struct {
+				Servers map[string]map[string]any `json:"mcpServers"`
+			}
+			if err := json.Unmarshal(merged, &document); err != nil {
+				t.Fatal(err)
+			}
+			if len(document.Servers) != len(tc.want) {
+				t.Fatalf("task servers=%s, want only %v", merged, tc.want)
+			}
+			for _, name := range tc.want {
+				if _, ok := document.Servers[name]; !ok {
+					t.Errorf("task server %q missing: %s", name, merged)
+				}
+			}
+			if entry, ok := document.Servers["local-off"]; ok && entry["command"] != "managed-override" {
+				t.Fatalf("agent override lost: %#v", entry)
+			}
+		})
+	}
+}
+
+// The same shape detection must hold on the public inventory path that feeds
+// the agent capabilities endpoint.
+func TestListRuntimeLocalMcpServersOpencode(t *testing.T) {
+	cases := []struct {
+		name   string
+		config string
+		want   []string
+	}{
+		{
+			name: "v2 nested config lists real server names",
+			config: `{"mcp":{"servers":{` +
+				`"github":{"type":"remote","url":"https://g.example/mcp","disabled":false},` +
+				`"grafana":{"type":"local","command":["grafana-mcp","start"]}}}}`,
+			want: []string{"github", "grafana"},
+		},
+		{
+			name:   "v1 flat config lists real server names",
+			config: `{"mcp":{"github":{"type":"remote","url":"https://g.example/mcp"},"grafana":{"type":"local","command":["grafana-mcp","start"]}}}`,
+			want:   []string{"github", "grafana"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			redirectTestHome(t, t.TempDir())
+			configDir := t.TempDir()
+			t.Setenv("XDG_CONFIG_HOME", configDir)
+			opencodeDir := filepath.Join(configDir, "opencode")
+			if err := os.MkdirAll(opencodeDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(opencodeDir, "opencode.json"), []byte(tc.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			servers, supported, err := listRuntimeLocalMcpServers("opencode")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !supported {
+				t.Fatal("opencode reported unsupported")
+			}
+			if len(servers) != len(tc.want) {
+				t.Fatalf("got %d servers, want %d: %#v", len(servers), len(tc.want), servers)
+			}
+			byName := make(map[string]runtimeLocalMcpServerSummary, len(servers))
+			for _, server := range servers {
+				byName[server.Name] = server
+			}
+			for _, name := range tc.want {
+				if _, ok := byName[name]; !ok {
+					t.Fatalf("server %q missing: %#v", name, servers)
+				}
+			}
+		})
+	}
+}
+
 // kimi merges <KIMI_CODE_HOME>/mcp.json with the ephemeral `mcpServers` array
 // the ACP backend sends in session/new, and a duplicate name spawns the server
 // twice. So kimi is inventory-only: the task-local merge must leave the agent's
 // config untouched.
 func TestMergeRuntimeAndAgentMcpConfigKimiIsPassthrough(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("KIMI_CODE_HOME", "")
 	kimiHome := filepath.Join(home, ".kimi-code")
 	if err := os.MkdirAll(kimiHome, 0o755); err != nil {
