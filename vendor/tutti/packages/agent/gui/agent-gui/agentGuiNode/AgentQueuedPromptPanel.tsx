@@ -1,7 +1,7 @@
 import { Slot } from "radix-ui";
 import { useMemo } from "react";
 import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
-import { SideQueueAction } from "@multica/tutti-agent-gui-host/side-entry";
+import { QueuedPromptMenuActionContext } from "../../queued-prompt-menu";
 import { extractPlainTextFromContent } from "@tutti-os/ui-rich-text";
 import {
   DropdownMenu,
@@ -14,10 +14,11 @@ import {
   TooltipTrigger,
   useTextOverflow
 } from "@tutti-os/ui-system";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Pencil } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import {
   Component,
+  useContext,
   useLayoutEffect,
   useRef,
   useState,
@@ -359,6 +360,7 @@ function AgentQueuedPromptPanelViewRender({
   workspaceAppIcons = EMPTY_WORKSPACE_APP_ICONS
 }: AgentQueuedPromptPanelViewProps): React.JSX.Element {
   const runtime = useOptionalConversationServices();
+  const HostQueueAction = useContext(QueuedPromptMenuActionContext);
   const [isExpanded, setIsExpanded] = useState(false);
   const singlePromptTextRef = useRef<HTMLDivElement | null>(null);
   const queuedPromptListRef = useRef<HTMLDivElement | null>(null);
@@ -615,14 +617,16 @@ function AgentQueuedPromptPanelViewRender({
                     </Tooltip>
                     <DropdownMenuContent
                       align="end"
-                      className={`${styles.composerMenuContent} multica-queue-menu`}
+                      className={`${styles.composerMenuContent} nodrag multica-queue-menu`}
                       sideOffset={8}
                     >
-                      <SideQueueAction
-                        agentSessionId={agentSessionId}
-                        promptId={queuedPrompt.id}
-                        disabled={isDraining}
-                      />
+                      {HostQueueAction && (
+                        <HostQueueAction
+                          agentSessionId={agentSessionId}
+                          promptId={queuedPrompt.id}
+                          disabled={isDraining}
+                        />
+                      )}
                       <DropdownMenuItemBinding4
                         isDraining={isDraining}
                         handleEditQueuedPromptPointerDown={
@@ -802,6 +806,7 @@ const DropdownMenuItemBinding4 = observer(function DropdownMenuItemBinding4({
         onPointerDown={onPointerDownProp6}
         onSelect={onSelectProp7}
       >
+        <Pencil className="size-4" aria-hidden="true" />
         <span>{labels.editQueuedPrompt}</span>
       </DropdownMenuItem>
     </Slot.Root>

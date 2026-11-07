@@ -111,6 +111,41 @@ afterEach(async () => {
   Reflect.deleteProperty(Range.prototype, "getBoundingClientRect");
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+it("cancels the old source locator and locates within the replacement root", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("CSS", { escape: (value: string) => value });
+  const listeners: Parameters<AgentGuiHostServices["subscribe"]>[0][] = [];
+  const release = vi.fn();
+  const sourceClient = fakeHostServices(request, (listener) => {
+    listeners.push(listener);
+    return release;
+  });
+  const oldRoot = document.createElement("div");
+  const newRoot = document.createElement("div");
+  oldRoot.innerHTML = newRoot.innerHTML = '<article data-multica-turn-id="turn-a"><p>Reply</p></article>';
+  const oldScroll = vi.fn();
+  const newScroll = vi.fn();
+  oldRoot.querySelector("p")!.scrollIntoView = oldScroll;
+  newRoot.querySelector("p")!.scrollIntoView = newScroll;
+  const render = async (sourceRoot: HTMLElement) => act(async () => root.render(
+    <SideEntryProvider root={sourceRoot} client={sourceClient} handle={handle}
+      sessionId="session-a" chinese enabled>
+      <span>Conversation</span>
+    </SideEntryProvider>
+  ));
+  const event = { type: "locateSource" as const, sessionId: "session-a", turnId: "turn-a", sequence: 1 };
+  await render(oldRoot);
+  listeners[0]!(event);
+  await render(newRoot);
+  expect(release).toHaveBeenCalledTimes(1);
+  expect(listeners).toHaveLength(2);
+  listeners[1]!(event);
+  await act(async () => vi.advanceTimersByTime(100));
+  expect(oldScroll).not.toHaveBeenCalled();
+  expect(newScroll).toHaveBeenCalledExactlyOnceWith({ block: "center", behavior: "smooth" });
 });
 
 it("adds the selection to the current composer with its actual author and dismisses without sending", async () => {

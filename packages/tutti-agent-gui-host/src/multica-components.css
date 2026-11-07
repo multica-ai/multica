@@ -172,36 +172,28 @@ html.multica-agent-gui :is([data-slot="dropdown-menu-label"], .agent-gui-node__c
 }
 
 html.multica-agent-gui .multica-queue-menu {
-  width: min(288px, calc(100vw - 16px));
+  width: max-content;
   min-width: 0;
   max-width: var(--radix-dropdown-menu-content-available-width);
+  border-radius: var(--radius-md);
 }
 
-html.multica-agent-gui .multica-queue-side-action {
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px;
-}
-
-html.multica-agent-gui .multica-queue-side-action > svg {
-  margin-top: 2px;
-}
-
-html.multica-agent-gui .multica-queue-action-copy {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
-}
-
-html.multica-agent-gui .multica-queue-action-title {
-  white-space: nowrap;
-}
-
-html.multica-agent-gui .multica-queue-action-copy > .text-muted-foreground {
+html.multica-agent-gui .multica-queue-menu [data-slot="dropdown-menu-item"] {
+  align-items: center;
+  min-height: var(--button-height-default);
+  gap: var(--button-gap-default);
+  padding-inline: var(--button-padding-default);
+  padding-block: var(--spacing);
   white-space: normal;
-  line-height: var(--text-caption--line-height);
+}
+
+html.multica-agent-gui .multica-queue-menu [data-slot="dropdown-menu-item"] > svg {
+  color: var(--muted-foreground);
+}
+
+html.multica-agent-gui .multica-queue-menu [data-slot="dropdown-menu-item"] > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 html.multica-agent-gui :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]) {

@@ -5,6 +5,8 @@ import type { AgentTask, ChatMessage, ChatSession } from "../packages/core/types
 import type { LocalPromptQueue } from "../packages/core/local-conversation/protocol";
 
 async function mountQueueHarness(page: Page, snapshot: AgentGuiInitSnapshot, session: ChatSession, provider: "codex" | "claude", seed?: string) {
+  // All local submissions now enter the desktop-owned queue, including the first turn.
+  snapshot = { ...snapshot, queueOwner: "desktop" };
   await page.route("**/__test/local-conversation-queue", (route) => route.fulfill({ contentType: "text/html", body: '<button id="complete">Complete next execution away from composer</button><iframe title="Queue test" style="display:block;width:100%;height:850px;border:0"></iframe>' }));
   await page.setViewportSize({ width: 1200, height: 950 });
   await page.goto("/__test/local-conversation-queue");
@@ -17,16 +19,25 @@ async function mountQueueHarness(page: Page, snapshot: AgentGuiInitSnapshot, ses
     ] as ChatMessage[] : []);
     const tasks = previous?.tasks ?? (seed ? [{ id: "turn-1", chat_session_id: session.id, status: "completed", created_at: session.created_at, completed_at: session.updated_at }] as AgentTask[] : []);
     const sends = previous?.sends ?? (seed ? [{ content: seed }] : []);
-    // A stopped desktop marks interrupted local executions terminal on reopen.
+    // A stopped desktop marks interrupted local executions terminal and pauses its queue on reopen.
+    const interrupted = tasks.some((task) => task.status === "running");
     for (const task of tasks) if (task.status === "running") { task.status = "failed"; task.completed_at = new Date(Date.parse(session.created_at) + tasks.length * 1000).toISOString(); session.updated_at = task.completed_at; }
     const queue: LocalPromptQueue = previous?.queue ?? { revision: 0, paused: false, items: [] };
+    if (interrupted) { queue.paused = true; queue.revision++; }
     const save = () => localStorage.setItem("test-queue-backend", JSON.stringify({ messages, tasks, sends, queue }));
     document.body.dataset.sends = JSON.stringify(sends);
     let port: MessagePort;
-    let background = false;
     const drainDesktop = () => {
       if (snapshot.queueOwner !== "desktop" || queue.paused || tasks.some((task) => task.status === "running")) return;
-      const item = queue.items.shift(); if (!item) return;
+      const item = queue.items[0]; if (!item) return;
+      if (item.content === "Queue failure fixture") {
+        queue.error = "Queue send failed. Check the connection and retry the queued message.";
+        queue.paused = true;
+        queue.revision++;
+        document.body.dataset.failure = queue.error;
+        return;
+      }
+      queue.items.shift();
       sends.push({ content: item.content, queued: true }); queue.revision++;
       const id = `turn-${sends.length}`;
       messages.push({ id: `input-${sends.length}`, chat_session_id: session.id, role: "user", content: item.content, task_id: id, created_at: session.updated_at } as ChatMessage);
@@ -34,7 +45,6 @@ async function mountQueueHarness(page: Page, snapshot: AgentGuiInitSnapshot, ses
       document.body.dataset.sends = JSON.stringify(sends); save();
     };
     document.querySelector("#complete")!.addEventListener("click", () => {
-      background = true;
       const task = tasks.find((entry) => entry.status === "running");
       if (!task) throw new Error("Expected a running execution");
       const completedAt = new Date(Date.parse(session.created_at) + tasks.length * 1000).toISOString();
@@ -59,23 +69,30 @@ async function mountQueueHarness(page: Page, snapshot: AgentGuiInitSnapshot, ses
         const running = tasks.find((entry) => entry.status === "running");
         switch (request.method) {
           case "queue.enqueue": snapshot.activeSessionId = request.params.sessionId; queue.items.push(request.params.item); queue.paused = request.params.paused === true; queue.revision++; drainDesktop(); save(); result = queue; break;
-          case "queue.update": queue.paused = request.params.action === "pause" || request.params.action === "stop"; queue.revision++; drainDesktop(); save(); result = queue; break;
-          case "host.openSide": document.body.dataset.sideRequest = JSON.stringify(request.params); result = { ...session, id: "side-session", title: "Side" }; break;
+          case "queue.update": {
+            if (request.params.action === "remove") queue.items = queue.items.filter((item) => item.requestId !== request.params.requestId);
+            else queue.paused = request.params.action === "pause" || request.params.action === "stop";
+            queue.revision++; drainDesktop(); save(); result = queue; break;
+          }
+          case "host.openSide": {
+            document.body.dataset.sideRequest = JSON.stringify(request.params);
+            // The host transfers the queued request and starts Side atomically.
+            if (request.params.queued) {
+              const index = queue.items.findIndex((item) => item.requestId === request.params.queuedRequestId);
+              if (index < 0) { fail("Queued request no longer exists"); return; }
+              document.body.dataset.sideQueuedContent = queue.items.splice(index, 1)[0].content;
+              document.body.dataset.sideStarted = "side-session";
+              queue.revision++;
+              save();
+            }
+            result = { ...session, id: "side-session", title: "Side" }; break;
+          }
           case "host.startSide": document.body.dataset.sideStarted = request.params.sessionId; break;
           case "workspace.load": result = { ...snapshot, pendingTasks: running ? [{ task_id: running.id, status: "running", chat_session_id: session.id }] : [] }; break;
-          case "session.create": snapshot.sessions = [session]; result = session; break;
-          case "session.load": result = { session, messages, tasks, ...(snapshot.queueOwner === "desktop" ? { promptQueue: queue } : {}), pending: running ? { task_id: running.id, status: "running", created_at: running.created_at } : {} }; break;
+          case "session.create": session.id = request.params.sessionId; snapshot.sessions = [session]; result = session; break;
+          case "session.load": result = { session, messages, tasks, promptQueue: queue, pending: running ? { task_id: running.id, status: "running", created_at: running.created_at } : {} }; break;
           case "session.send": {
-            if (request.params.content === "Queue failure fixture") { fail("Queue send failed. Check the connection and retry the queued message."); return; }
-            if (background && request.params.queued !== true) { fail("Background queue lost its admission", "inactive_host"); return; }
-            if (running) { fail("Two executions overlapped"); return; }
-            sends.push({ content: request.params.content, queued: request.params.queued });
-            const id = `turn-${sends.length}`, messageId = `input-${sends.length}`;
-            messages.push({ id: messageId, chat_session_id: session.id, role: "user", content: request.params.content, task_id: id, created_at: session.updated_at } as ChatMessage);
-            tasks.push({ id, chat_session_id: session.id, status: "running", created_at: session.updated_at, started_at: session.updated_at } as AgentTask);
-            document.body.dataset.sends = JSON.stringify(sends);
-            save();
-            result = { message_id: messageId, task_id: id, created_at: session.updated_at }; break;
+            fail("Local submissions must use queue.enqueue"); return;
           }
           case "storage.read": result = localStorage.getItem(`test-queue:${request.params.key}`); break;
           case "storage.write": localStorage.setItem(`test-queue:${request.params.key}`, request.params.value); break;
@@ -156,7 +173,7 @@ for (const provider of ["codex", "claude"] as const) for (const fresh of [false,
 }
 
 for (const locale of ["zh-CN", "en"] as const) for (const theme of ["light", "dark"] as const) {
-  test(`queued prompt menu keeps its label and description readable in ${locale} ${theme}`, async ({ page }) => {
+  test(`queued prompt menu aligns compact actions in ${locale} ${theme}`, async ({ page }) => {
     const at = "2026-10-24T10:00:00Z";
     const session = { id: "queue-menu", workspace_id: "queue-workspace", creator_id: "queue-user", agent_id: "local:codex", title: "Queue menu", status: "active", created_at: at, updated_at: at, has_unread: false } as ChatSession;
     const snapshot: AgentGuiInitSnapshot = { workspaceId: session.workspace_id, workspaceSlug: "test", userId: session.creator_id, locale, theme, local: true, sideWorkspace: true, hostActive: true, hostVisible: true, agents: [], sessions: [session], activeSessionId: session.id, selectedAgentId: session.agent_id,
@@ -183,7 +200,7 @@ for (const locale of ["zh-CN", "en"] as const) for (const theme of ["light", "da
       expect(Math.abs(alignment.right)).toBeLessThanOrEqual(1);
       expect(Math.abs(alignment.textLeft)).toBeLessThanOrEqual(1);
       await more.click();
-      const action = gui.getByRole("menuitem", { name: locale === "en" ? /Run in side/ : /在旁支中执行/ });
+      const action = gui.getByRole("menuitem", { name: locale === "en" ? /Move to side and run/ : /移至旁支执行/ });
       await expect(action).toBeVisible();
       await expect(gui.getByRole("menu")).toHaveCSS("opacity", "1");
       const layout = await action.evaluate((element) => {
@@ -192,15 +209,22 @@ for (const locale of ["zh-CN", "en"] as const) for (const theme of ["light", "da
         let title: Node | null = null;
         while (walker.nextNode()) if (walker.currentNode.textContent?.trim()) { title = walker.currentNode; break; }
         const range = document.createRange(); range.selectNodeContents(title!);
-        const label = range.getBoundingClientRect();
-        const description = element.querySelector(".text-muted-foreground")!.getBoundingClientRect();
+        const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+        const rows = items.map((item) => {
+          const icon = item.querySelector("svg")!.getBoundingClientRect();
+          const text = item.querySelector("span")!.getBoundingClientRect();
+          return { height: item.getBoundingClientRect().height, iconLeft: icon.left, textLeft: text.left };
+        });
         const bounds = menu.getBoundingClientRect();
-        return { lines: range.getClientRects().length, titleBottom: label.bottom, descriptionTop: description.top, width: bounds.width, height: bounds.height, left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom, viewportWidth: innerWidth, viewportHeight: innerHeight };
+        return { lines: range.getClientRects().length, rows, width: bounds.width, height: bounds.height, left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom, viewportWidth: innerWidth, viewportHeight: innerHeight };
       });
-      expect(layout.width).toBeGreaterThanOrEqual(224);
+      expect(layout.width).toBeLessThan(224);
       expect(layout.lines).toBe(1);
-      expect(layout.descriptionTop).toBeGreaterThanOrEqual(layout.titleBottom);
-      expect(layout.height).toBeLessThanOrEqual(110);
+      expect(layout.rows).toHaveLength(2);
+      expect(Math.abs(layout.rows[0].height - layout.rows[1].height)).toBeLessThanOrEqual(1);
+      expect(layout.rows[0].iconLeft).toBe(layout.rows[1].iconLeft);
+      expect(layout.rows[0].textLeft).toBe(layout.rows[1].textLeft);
+      expect(layout.height).toBeLessThanOrEqual(80);
       expect(layout.left).toBeGreaterThanOrEqual(0);
       expect(layout.right).toBeLessThanOrEqual(layout.viewportWidth);
       expect(layout.top).toBeGreaterThanOrEqual(0);
@@ -208,7 +232,15 @@ for (const locale of ["zh-CN", "en"] as const) for (const theme of ["light", "da
       await page.screenshot({ path: `.tmp/local-conversations/queue-menu-${locale}-${theme}-${width}.png` });
       await page.keyboard.press("Escape");
       await expect(action).not.toBeVisible();
+      await expect(more).toBeFocused();
     }
+    await more.click();
+    await page.keyboard.press("End");
+    await expect(gui.getByRole("menuitem", { name: locale === "en" ? "Edit" : "编辑", exact: true })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(editor).toHaveText("Queued request");
+    await expect(gui.getByTestId("agent-gui-composer-queued-prompts")).not.toBeVisible();
+    await expect(page.locator("body")).not.toHaveAttribute("data-side-request");
     await expect(page.locator("body")).not.toHaveAttribute("data-failure");
   });
 }
@@ -227,10 +259,11 @@ for (const provider of ["codex", "claude"] as const) {
     const queue = gui.getByTestId("agent-gui-composer-queued-prompts");
     await expect(queue).toContainText("Move this queued request");
     await queue.getByRole("button", { name: "More queued prompt actions" }).click();
-    await gui.getByRole("menuitem", { name: /Run in side/ }).click();
+    await gui.getByRole("menuitem", { name: /Move to side and run/ }).click();
     await expect(page.locator("body")).toHaveAttribute("data-side-started", "side-session");
     const moved = await page.locator("body").evaluate((body) => JSON.parse(body.dataset.sideRequest || "{}"));
-    expect(moved.sessionId).toBe(session.id); expect(moved.pending.content).toBe("Move this queued request");
+    expect(moved).toMatchObject({ sessionId: session.id, queued: true, queuedRequestId: expect.any(String) });
+    await expect(page.locator("body")).toHaveAttribute("data-side-queued-content", "Move this queued request");
     await expect(queue).not.toBeVisible();
     await expect(gui.getByTestId("agent-gui-composer-stop-active-turn")).toBeVisible();
     expect(await page.locator("body").evaluate((body) => JSON.parse(body.dataset.sends || "[]").map((send: { content: string }) => send.content))).toEqual(["Original running request"]);
@@ -421,16 +454,16 @@ for (const provider of ["codex", "claude"] as const) for (const reopen of [false
   let queue = gui.getByTestId("agent-gui-composer-queued-prompts");
   await expect(queue).toBeVisible();
   const sent = () => page.locator("body").evaluate((body) => JSON.parse(body.dataset.sends || "[]") as { content: string; queued?: true }[]);
-  expect(await sent()).toEqual([{ content: "2" }]);
+  expect(await sent()).toEqual([{ content: "2", queued: true }]);
   if (reopen) {
-    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("test-queue:runtime-ledger-v1") || "{}").promptQueues?.[0]?.prompts.length)).toBe(4);
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("test-queue-backend") || "{}").queue?.items.length)).toBe(4);
     await page.close();
     page = await context.newPage();
     await mountQueueHarness(page, snapshot, session, provider);
     gui = page.frameLocator("iframe");
     queue = gui.getByTestId("agent-gui-composer-queued-prompts");
     await expect(queue).toContainText("Queue paused");
-    expect(await sent()).toEqual([{ content: "2" }]);
+    expect(await sent()).toEqual([{ content: "2", queued: true }]);
     await queue.getByRole("button", { name: "Send next", exact: true }).first().click();
     await expect.poll(async () => (await sent()).length).toBe(2);
   }
@@ -441,6 +474,6 @@ for (const provider of ["codex", "claude"] as const) for (const reopen of [false
   await page.getByRole("button", { name: "Complete next execution away from composer" }).click();
   await expect(queue).not.toBeVisible();
   await expect(gui.getByText("Reply 6", { exact: true })).toBeVisible();
-  expect(await sent()).toEqual([{ content: "2" }, ...["3", "4", "5", "6"].map((content) => ({ content, queued: true }))]);
+  expect(await sent()).toEqual(["2", "3", "4", "5", "6"].map((content) => ({ content, queued: true })));
   expect(await page.locator("body").getAttribute("data-failure")).toBeNull();
 });

@@ -7,6 +7,7 @@
   "exports": {
     ".": "./index.ts",
     "./agent-gui": "./AgentGUI.tsx",
+    "./queued-prompt-menu": "./queued-prompt-menu.tsx",
     "./startup-shell": "./AgentGUIStartupShell.tsx",
     "./agents": "./agents.ts",
     "./mention-search": "./agent-gui/agentGuiNode/AgentMentionSearchController.ts",

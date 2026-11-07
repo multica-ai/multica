@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { usePersistCallback } from "@multica/ui/hooks/use-persist-callback";
 import { Button } from "@multica/ui/components/ui/button";
 import { DropdownMenuItem } from "@tutti-os/ui-system";
+import { QueuedPromptMenuActionContext } from "@tutti-os/agent-gui/queued-prompt-menu";
 import { Copy, MessagesSquare, PanelRightOpen, TextQuote } from "lucide-react";
 import {
   createContext,
@@ -249,7 +250,7 @@ function SideEntryProviderRender({
       cancelled = true;
       release();
     };
-  }, [entry.client]);
+  }, [entry.client, root]);
   useEffect(() => {
     setSelection(null);
   }, [entry.sessionId]);
@@ -311,7 +312,9 @@ function SideEntryProviderRender({
   const startCallback = usePersistCallback(start);
   return (
     <SideEntryContext.Provider value={entry}>
-      {children}
+      <QueuedPromptMenuActionContext.Provider value={SideQueueAction}>
+        {children}
+      </QueuedPromptMenuActionContext.Provider>
       {selection && (
         <DivBinding1
           toolbar={toolbar}
@@ -434,17 +437,8 @@ const DropdownMenuItemBinding3 = observer(function DropdownMenuItemBinding3({
         disabled={disabled || pending}
         onSelect={onSelectProp3}
       >
-        <PanelRightOpen size={16} aria-hidden="true" />
-        <div className="multica-queue-action-copy">
-          <span className="multica-queue-action-title">
-            {entry.chinese ? "在旁支中执行" : "Run in side"}
-          </span>
-          <span className="text-caption text-muted-foreground">
-            {entry.chinese
-              ? "移出主队列，在右侧独立执行"
-              : "Move from this queue and run alongside"}
-          </span>
-        </div>
+        <PanelRightOpen className="size-4" aria-hidden="true" />
+        <span>{entry.chinese ? "移至旁支执行" : "Move to side and run"}</span>
       </DropdownMenuItem>
     </Slot.Root>
   );

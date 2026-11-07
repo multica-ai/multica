@@ -1,4 +1,3 @@
-import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -7,6 +6,7 @@ import {
   type ConversationServices
 } from "../../conversationServices";
 import { AgentQueuedPromptPanelView as AgentQueuedPromptPanel } from "./AgentQueuedPromptPanel";
+import { QueuedPromptMenuActionContext, type QueuedPromptMenuActionProps } from "../../queued-prompt-menu";
 
 const labels = {
   queuedLabel: "Queued",
@@ -31,6 +31,40 @@ function textQueuedPrompt(id: string, text: string, createdAtUnixMs = 1) {
 }
 
 describe("AgentQueuedPromptPanel", () => {
+  it("injects the host queue action with the current session and prompt", async () => {
+    const action = vi.fn();
+    function HostAction(props: QueuedPromptMenuActionProps) {
+      action(props);
+      return <span>Host queue action</span>;
+    }
+    const panel = (draining: string | null) => (
+      <QueuedPromptMenuActionContext.Provider value={HostAction}>
+        <AgentQueuedPromptPanel
+          agentSessionId="session-a"
+          queuedPrompts={[textQueuedPrompt("queued-1", "queued request")]}
+          drainingQueuedPromptId={draining}
+          labels={labels}
+          onSendQueuedPromptNext={vi.fn()}
+          onRemoveQueuedPrompt={vi.fn()}
+          onEditQueuedPrompt={vi.fn()}
+        />
+      </QueuedPromptMenuActionContext.Provider>
+    );
+    const { rerender } = render(panel(null));
+    const more = screen.getByRole("button", { name: "More" });
+    fireEvent.pointerDown(more, { button: 0, ctrlKey: false });
+    fireEvent.click(more);
+    expect(await screen.findByText("Host queue action")).toBeInTheDocument();
+    expect(action).toHaveBeenLastCalledWith({
+      agentSessionId: "session-a", promptId: "queued-1", disabled: false
+    });
+    expect(screen.getByRole("menuitem", { name: "Edit" })).toBeInTheDocument();
+    rerender(panel("queued-1"));
+    expect(action).toHaveBeenLastCalledWith({
+      agentSessionId: "session-a", promptId: "queued-1", disabled: true
+    });
+  });
+
   it("switches between the paused and active queue labels while preserving actions", async () => {
     const onSendQueuedPromptNext = vi.fn();
     const onRemoveQueuedPrompt = vi.fn();

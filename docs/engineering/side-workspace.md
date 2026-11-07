@@ -106,7 +106,7 @@ With a desktop renderer Vite server running, `e2e/chrome-profile-import.spec.ts`
 - `apps/desktop/src/renderer/src/pages/local-side-workspace.tsx`: shared resource tabs and existing Agent GUI composition.
 - `apps/desktop/src/renderer/src/pages/local-resource-preview.tsx`: folder tree, file preview and webpage toolbar.
 
-The source-vendor GUI remains unchanged; existing pinned compile adapters inject narrow turn/queue hooks. Desktop framing uses Multica's shared Button, IconButton, Dialog, menu, input and resizable primitives and semantic typography/surface tokens.
+The GUI exposes an optional queue-menu action through `@tutti-os/agent-gui/queued-prompt-menu`. The host's `SideEntryProvider` supplies its `SideQueueAction` through that context; the queued panel passes the session ID, prompt ID and draining state. Without a host action, the built-in Edit item remains available. The queued panel does not import the host package. Desktop framing uses Multica's shared Button, IconButton, Dialog, menu, input and resizable primitives and semantic typography/surface tokens.
 
 ## Validation
 
