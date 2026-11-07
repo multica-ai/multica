@@ -445,7 +445,7 @@ function main() {
       },
     );
 
-    execFileSync(process.execPath, [resolve(here, "build-computer-use.mjs"), "--target-platform", PLATFORM_CONFIG[target.platform].runtimePlatform, "--target-arch", target.arch], { stdio: "inherit", cwd: desktopRoot });
+    execFileSync(process.execPath, [resolve(here, "stage-cua-driver.mjs"), "--target-platform", PLATFORM_CONFIG[target.platform].runtimePlatform, "--target-arch", target.arch], { stdio: "inherit", cwd: desktopRoot });
 
     const builderArgs = builderArgsForTarget(target, parsed, version, {
       disableMacNotarize,

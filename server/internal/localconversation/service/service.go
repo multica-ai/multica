@@ -82,10 +82,9 @@ type runner interface {
 
 // Options configures Open.
 type Options struct {
-	Path     string
-	Computer computer.Command
-	Claude   ClaudeLauncher
-	Codex    CodexLauncher
+	Path   string
+	Claude ClaudeLauncher
+	Codex  CodexLauncher
 	// Cloud, when set, gives the context tools official Multica data for a
 	// scope. dir is private to one provider process and removed after it.
 	Cloud func(scope store.Scope, dir string) contextmcp.Cloud
@@ -205,7 +204,7 @@ func Open(ctx context.Context, opts Options) (*Service, error) {
 		focus:     newFocusTracker(),
 		closed:    make(chan struct{}), maintenanceKick: make(chan struct{}, 1)}
 	s.spares = newSparePool(s, opts)
-	s.computer = &computer.Manager{Command: opts.Computer}
+	s.computer = &computer.Manager{}
 	s.computers.active = map[string]*computerExecution{}
 	s.batcher = NewBatcher(writer, BatcherOptions{
 		Published: func(id string, committed store.Committed) {
@@ -891,7 +890,11 @@ func (s *Service) contextBinder(conv sqlitedb.Conversation) ContextBinder {
 		if mobileLogs != nil {
 			tools = append(tools, s.mobileLogTool(conv.ID, current, mobileLogs))
 		}
-		tools = append(tools, s.computerToolsFor(conv, current)...)
+		computerPrompt := ""
+		if capability, ok := s.computerCapability(); ok {
+			tools = append(tools, s.computerToolsFor(conv, current)...)
+			computerPrompt = capability.Prompts.Conversation
+		}
 		if agents, ok := cloud.(cloudAgents); ok && agents != nil {
 			tools = append(tools, s.avatarTool(conv, agents))
 		}
@@ -918,7 +921,7 @@ func (s *Service) contextBinder(conv sqlitedb.Conversation) ContextBinder {
 			_ = os.RemoveAll(dir)
 			return BoundContext{}, nil, err
 		}
-		return BoundContext{Binding: binding, SystemPrompt: systemPrompt(scope.WorkspaceID, cloud != nil)}, func() {
+		return BoundContext{Binding: binding, SystemPrompt: systemPrompt(scope.WorkspaceID, cloud != nil, computerPrompt)}, func() {
 			s.endComputer(conv.ID)
 			s.computer.Reset(fmt.Sprintf("%d/%s", conv.ScopeID, conv.ID))
 			s.context.Release(binding)

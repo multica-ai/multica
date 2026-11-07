@@ -65,6 +65,10 @@ type Execution struct {
 	// Token, when set, is the route's bearer token; providers that read it
 	// from their environment need it before the route exists.
 	Token string
+	// TokenInPath puts the token in the route URL instead of an Authorization
+	// header, for task MCP configs that every provider must accept as a bare
+	// URL, like the daemon's other task-local MCP servers.
+	TokenInPath bool
 }
 
 type route struct {
@@ -140,12 +144,16 @@ func (s *Server) Bind(parent context.Context, exec Execution) (Binding, error) {
 		}
 		s.mu.Unlock()
 	}()
-	return Binding{URL: "http://" + s.host + "/mcp/" + id, Token: token, Tools: names}, nil
+	url := "http://" + s.host + "/mcp/" + id
+	if exec.TokenInPath {
+		url += "/" + token
+	}
+	return Binding{URL: url, Token: token, Tools: names}, nil
 }
 
 // Release ends an execution's route and waits for its running tool calls.
 func (s *Server) Release(b Binding) {
-	id := b.URL[strings.LastIndex(b.URL, "/")+1:]
+	id, _, _ := strings.Cut(strings.TrimPrefix(b.URL, "http://"+s.host+"/mcp/"), "/")
 	s.mu.Lock()
 	r := s.routes[id]
 	delete(s.routes, id)
@@ -180,15 +188,21 @@ type rpcRequest struct {
 // no Origin, so neither a browser page nor another local process that only
 // knows the port can call the tools.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	id, ok := strings.CutPrefix(r.URL.Path, "/mcp/")
+	path, ok := strings.CutPrefix(r.URL.Path, "/mcp/")
 	if !ok || r.Header.Get("Origin") != "" || r.Host != s.host {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
+	id, pathToken, inPath := strings.Cut(path, "/")
 	s.mu.Lock()
 	rt := s.routes[id]
 	s.mu.Unlock()
 	presented, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if rt != nil && rt.exec.TokenInPath {
+		presented = pathToken
+	} else if inPath {
+		rt = nil
+	}
 	if rt == nil || subtle.ConstantTimeCompare([]byte(presented), []byte(rt.token)) != 1 {
 		w.WriteHeader(http.StatusUnauthorized)
 		return

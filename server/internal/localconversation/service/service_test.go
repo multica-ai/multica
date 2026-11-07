@@ -380,7 +380,7 @@ func TestServiceGivesCloudContextAPrivateDirectory(t *testing.T) {
 func TestSystemPromptDescribesTheExecution(t *testing.T) {
 	t.Parallel()
 
-	withCloud, offline := systemPrompt("ws-1", true), systemPrompt("ws-1", false)
+	withCloud, offline := systemPrompt("ws-1", true, ""), systemPrompt("ws-1", false, "")
 	for _, want := range []string{`workspace ID is "ws-1"`, "ask_user_question", "fenced svg code block", "Markdown image syntax"} {
 		if !strings.Contains(withCloud, want) {
 			t.Errorf("prompt lacks %q", want)
@@ -394,7 +394,7 @@ func TestSystemPromptDescribesTheExecution(t *testing.T) {
 func TestSystemPromptRecommendsSideWithoutRestrictingExternalBrowsers(t *testing.T) {
 	t.Parallel()
 	for _, cloud := range []bool{false, true} {
-		prompt := systemPrompt("ws-1", cloud)
+		prompt := systemPrompt("ws-1", cloud, "")
 		for _, want := range []string{
 			"Side workspace tools can read and control only tabs still open in this conversation's Side workspace",
 			"Prefer the built-in Side browser",
@@ -467,7 +467,7 @@ func TestMemberReferenceReachesProviderAndCurrentContext(t *testing.T) {
 			t.Fatalf("workspace %q: %v", workspaceID, err)
 		}
 	}
-	if !strings.Contains(systemPrompt("w", true), "assignee_type=member and assignee_id=user_id") {
+	if !strings.Contains(systemPrompt("w", true, ""), "assignee_type=member and assignee_id=user_id") {
 		t.Fatal("member assignment identity is not described")
 	}
 }

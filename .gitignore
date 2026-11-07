@@ -85,7 +85,7 @@ perf-report/
 # The production example is a tracked template; `.env*` above would hide it.
 !apps/mobile/.env.production.example
 
-# Generated, per-architecture Computer Use helper bundle.
+# Staged, per-architecture cua-driver SDK for Computer Use.
 apps/desktop/resources/native/
 /.agent-gui-file-check/
 /.tmp/

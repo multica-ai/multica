@@ -825,7 +825,7 @@ export class Environments {
         [
           "apps/desktop/resources/bin",
           ...(input.mode === "desktop" && process.platform === "darwin"
-            ? ["apps/desktop/resources/native/Multica Computer Use.app"]
+            ? ["apps/desktop/resources/native/cua-driver"]
             : []),
         ],
         async () => {
@@ -844,7 +844,7 @@ export class Environments {
             },
           );
           if (input.mode === "desktop")
-            for (const script of ["build-computer-use.mjs"])
+            for (const script of ["stage-cua-driver.mjs"])
               await run(
                 tools.node,
                 [join(checkout, "apps/desktop/scripts", script)],

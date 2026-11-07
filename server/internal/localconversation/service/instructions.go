@@ -12,8 +12,9 @@ import (
 const imageInstructions = "Multica can display images in your reply. For images you create as local files, save them inside this conversation's working directory and include Markdown image syntax ![descriptive label](/absolute/path/to/image.png) in your reply. Use a separate image for each result. Do not claim an image is displayed when you only returned a description or file name."
 
 // systemPrompt is appended to the provider's own system prompt for every
-// execution of a conversation.
-func systemPrompt(workspaceID string, cloud bool) string {
+// execution of a conversation. computer is the connected Desktop's Computer
+// Use text, empty when Desktop does not offer it.
+func systemPrompt(workspaceID string, cloud bool, computer string) string {
 	workspaceLine := "Workspace context and operation tools are available within this desktop user's permissions."
 	if !cloud {
 		workspaceLine = "Local conversation tools are available; cloud workspace operations are unavailable until the desktop login is reconnected."
@@ -23,7 +24,7 @@ func systemPrompt(workspaceID string, cloud bool) string {
 	if !cloud {
 		cloudLine = "Official cloud Multica queries are currently unavailable. Local MCP conversation, message, execution and attachment queries remain available: use them normally and do not ask the user to reconnect cloud login for local data. For cloud data only, ask the user to reconnect the desktop login/runtime; do not claim to have queried the server or fall back to a different account/profile."
 	}
-	return strings.Join([]string{
+	parts := []string{
 		"You are running in Multica Desktop's local conversation flow, as an ordinary local coding assistant.",
 		"Interactive questions are supported in this conversation, including Side panes. When you need the user's choice or clarification, call " + contextmcp.Name + ".ask_user_question and wait for its real result before continuing. It renders selectable options, multiple-choice and free-text answers in the GUI and resumes this same execution. Use this MCP tool rather than a provider-native AskUserQuestion/request_user_input tool that may be unavailable in noninteractive CLI mode, or printing a pretend question card in text. Do not answer on the user's behalf. This is for clarification only, never a replacement for command/tool permission approval.",
 		"The current Multica workspace ID is " + string(ws) + ". " + workspaceLine,
@@ -43,12 +44,19 @@ func systemPrompt(workspaceID string, cloud bool) string {
 		"Keep all queries in the selected workspace. Do not run login, config show, switch profiles, print credentials, or modify server data for a context lookup. On 401/403 report the access error and stop that query. Report network failures and missing context rather than inventing results. Respect native CLI sandbox and permission settings; never remove daemon task markers or bypass their checks.",
 		settings.Instructions,
 		SideInstructions,
-		ComputerInstructions,
+		computer,
 		ServicePreviewInstructions,
 		DeveloperLogInstructions,
 		MobileLogInstructions,
 		"Use upload_agent_avatar to upload a local image and set a defined agent's avatar when the user requests it. Supply the absolute file_path within this conversation's working directory or explicitly selected files/folders; copy generated images into the working directory first when needed. The desktop reads the image and authenticates the upload without exposing credentials. Reuse request_id with identical arguments on retries. Upload/update receipts survive turns; an unknown upload is never automatically repeated. This tool changes avatars; it does not edit image content or grant arbitrary filesystem access.",
 		protocol.HTMLPreviewInstructions,
 		imageInstructions,
-	}, "\n\n")
+	}
+	present := parts[:0]
+	for _, part := range parts {
+		if part != "" {
+			present = append(present, part)
+		}
+	}
+	return strings.Join(present, "\n\n")
 }

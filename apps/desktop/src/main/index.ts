@@ -996,6 +996,7 @@ if (!gotTheLock) {
 
       if (sourceWindow === mainWindow) {
         settingsUserId = userId;
+        computerDesktop?.refresh();
         publishDeveloperLogsManifest?.();
         const accountInvalidated = authSessionCoordinator.reportMain(userId);
         if (accountInvalidated) {

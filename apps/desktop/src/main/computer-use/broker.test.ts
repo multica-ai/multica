@@ -46,6 +46,20 @@ describe("Computer Use broker", () => {
     expect(options.stopped).toHaveBeenCalledWith(expect.objectContaining({ conversationId: "c", turnId: "turn" }));
     await broker.handle(request("begin", undefined, "next-turn"), signal());
   });
+  it("approves apps for this device's task runs without a dialog", async () => {
+    const { broker, options } = fixture(false);
+    const task = (op: string, action?: unknown) => ({ op, scope, origin: "task", conversationId: "task:t", turnId: "t", ...(action ? { action } : {}) });
+    await broker.handle(task("begin"), signal());
+    await broker.handle(task("action", { op: "get_app", app: "Example" }), signal());
+    await broker.handle(task("action", { op: "observe", app: "example.app" }), signal());
+    expect(options.confirm).not.toHaveBeenCalled();
+    expect(vi.mocked(options.native).mock.calls.some(([a]) => a.op === "launch")).toBe(true);
+  });
+  it("requires every request, including task runs, to name the signed-in account", async () => {
+    const { broker } = fixture();
+    await expect(broker.handle({ ...request("begin"), scope: { workspaceId: "w" } }, signal())).rejects.toThrow();
+    await expect(broker.handle({ op: "begin", scope: { userId: "other", workspaceId: "w" }, origin: "task", conversationId: "task:t", turnId: "t" }, signal())).rejects.toThrow("account_changed");
+  });
   it("rechecks identity after a pending approval", async () => {
     const { broker, options } = fixture();
     await broker.handle(request("begin"), signal());

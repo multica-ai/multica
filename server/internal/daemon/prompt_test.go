@@ -2008,6 +2008,23 @@ func TestSharedLocalDirectoryBlock(t *testing.T) {
 	})
 }
 
+// TestComputerUseBlock appends Desktop's brief only on runs whose device
+// serves Computer Use.
+func TestComputerUseBlock(t *testing.T) {
+	task := Task{IssueID: "issue-1"}
+	if out := BuildPrompt(task, "codex", WithComputerUse("")); strings.Contains(out, "Computer Use") {
+		t.Fatalf("Computer Use offered without a bound server:\n%s", out)
+	}
+	brief := "[Computer Use]\nDesktop brief for multica_computer."
+	out := BuildPrompt(task, "codex", WithComputerUse(brief))
+	if !strings.Contains(out, brief+"\n\n") {
+		t.Fatalf("Desktop brief missing or unterminated:\n%s", out)
+	}
+	if !strings.HasPrefix(out, buildPromptBody(task, "codex")) {
+		t.Fatalf("brief was not appended after the cacheable prefix:\n%s", out)
+	}
+}
+
 // TestWorktreeReplayConflictBlock covers the one thing a conflicted worktree
 // cannot tell the agent by itself: where the two sides came from. `git status`
 // shows the unmerged paths; only the prompt can say that "theirs" is the user's

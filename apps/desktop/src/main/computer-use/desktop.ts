@@ -1,8 +1,10 @@
 import { app, dialog, globalShortcut, Tray, nativeImage, Menu, type BrowserWindow } from "electron";
 import { join } from "node:path";
+import { computerPrompts } from "@multica/computer-use/prompts";
 import { ComputerBroker } from "./broker";
-import { ComputerChannel } from "./channel";
+import { ComputerChannel, type ComputerClientState } from "./channel";
 import { ComputerNative } from "./native";
+import { COMPUTER_CAPABILITY_VERSION } from "./version";
 
 interface Options {
   endpoint(): Promise<{ base: string; token: string }>;
@@ -12,8 +14,21 @@ interface Options {
 }
 
 export function createComputerDesktop(options: Options) {
-  const root = app.getAppPath().replace("app.asar", "app.asar.unpacked");
-  const helper = new ComputerNative(join(root, "resources/native/Multica Computer Use.app/Contents/MacOS/multica-computer-use"));
+  // Packaged builds ship the staged SDK as an extra resource (see electron-builder.yml).
+  const cuaDriver = app.isPackaged ? join(process.resourcesPath, "native/cua-driver") : join(app.getAppPath(), "resources/native/cua-driver");
+  // The daemon runs this installation's sandboxed REPL runtime, whichever
+  // daemon version is connected.
+  const runtime = {
+    executable: process.execPath,
+    entry: app.isPackaged
+      ? join(app.getAppPath().replace("app.asar", "app.asar.unpacked"), "resources/local-conversation-host/computer-host.cjs")
+      : join(app.getAppPath(), "out/main/computer-host.cjs"),
+  };
+  const describe = (): ComputerClientState => ({
+    user: { id: options.currentUser() ?? null },
+    capabilities: { computer: { version: COMPUTER_CAPABILITY_VERSION, prompts: { ...computerPrompts }, runtime } },
+  });
+  const helper = new ComputerNative({ executable: process.execPath, args: [join(__dirname, "computer-native.js"), join(cuaDriver, "node_modules/@trycua/cua-driver/dist/index.js")] });
   let tray: Tray | undefined;
   let stopShortcut = false;
   let control: { conversationId: string; app?: string } | null = null;
@@ -49,15 +64,18 @@ export function createComputerDesktop(options: Options) {
       text(`Allow this conversation to use ${target.name}?`, `允许此会话操作 ${target.name}？`),
       text(`Multica can read this app's windows and operate its controls during this turn.\n\nApp: ${target.id}\nConversation: ${request.conversationId}\n\n${stopShortcut ? "Stop from the CU menu or press Control+Option+Escape." : "Stop from the CU menu."}`, `Multica 可在本轮执行中读取此应用的窗口并操作控件。\n\n应用：${target.id}\n会话：${request.conversationId}\n\n${stopShortcut ? "可通过 CU 菜单或 Control+Option+Escape 停止。" : "可通过 CU 菜单停止。"}`),
       text("Allow this turn", "允许本轮执行"), signal),
-    permissions: (signal) => prompt(text("Set up Computer Use permissions?", "设置电脑操作权限？"), text("macOS requires Screen Recording and Accessibility for Multica Computer Use. Grant these in System Settings yourself; the agent cannot approve them.", "macOS 需要为 Multica Computer Use 开启屏幕录制和辅助功能权限。请自行在系统设置中授权，智能体不能代为确认。"), text("Request permissions", "请求权限"), signal),
+    permissions: (signal) => prompt(text("Set up Computer Use permissions?", "设置电脑操作权限？"), text("macOS requires Screen Recording and Accessibility for Multica. Grant these in System Settings yourself; the agent cannot approve them.", "macOS 需要为 Multica 开启屏幕录制和辅助功能权限。请自行在系统设置中授权，智能体不能代为确认。"), text("Request permissions", "请求权限"), signal),
     activity: showActivity,
     stopNative: () => helper.stop(),
     stopped: (request) => channel.stopExecution(request),
   });
-  const channel = new ComputerChannel({ endpoint: options.endpoint, handle: (payload, signal) => broker.handle(payload, signal), stop: () => broker.stop() });
+  const channel = new ComputerChannel({
+    endpoint: options.endpoint, clientInfo: { name: "multica-desktop", version: app.getVersion() }, describe,
+    handle: (payload, signal) => broker.handle(payload, signal), stop: () => broker.stop(), log: (message) => console.warn(message),
+  });
   if (process.platform === "darwin") {
     stopShortcut = globalShortcut.register("Control+Alt+Escape", () => broker.revoke());
     void channel.run();
   }
-  return { revoke: () => broker.revoke(), close: () => { channel.close(); broker.stop(); globalShortcut.unregister("Control+Alt+Escape"); }, active: () => control };
+  return { revoke: () => broker.revoke(), refresh: () => channel.update(), close: () => { channel.close(); broker.stop(); globalShortcut.unregister("Control+Alt+Escape"); }, active: () => control };
 }

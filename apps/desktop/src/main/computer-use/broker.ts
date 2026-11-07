@@ -1,8 +1,10 @@
 import { z } from "zod";
 
 const identity = z.string().min(1).max(200);
+// Every request names the account it acts for, and it must be the account
+// signed in to Desktop. Task runs (origin "task") are approved without a dialog.
 const scopeSchema = z.object({ userId: identity, workspaceId: identity }).strict();
-const envelope = z.object({ op: z.enum(["status", "begin", "action", "release"]), conversationId: identity, turnId: identity, scope: scopeSchema, action: z.unknown().optional() }).strict();
+export const envelopeSchema = z.object({ op: z.enum(["status", "begin", "action", "release"]), conversationId: identity, turnId: identity, scope: scopeSchema, origin: z.literal("task").optional(), action: z.unknown().optional() }).strict();
 const point = z.number().finite().nonnegative().max(100000);
 const target = { app: identity, observationId: identity };
 export const actionSchema = z.discriminatedUnion("op", [
@@ -19,7 +21,7 @@ export const actionSchema = z.discriminatedUnion("op", [
 ]);
 const appSchema = z.object({ id: identity, name: identity });
 const statusSchema = z.object({ available: z.boolean(), accessibility: z.boolean(), screenRecording: z.boolean() });
-export type ComputerEnvelope = z.infer<typeof envelope>;
+export type ComputerEnvelope = z.infer<typeof envelopeSchema>;
 export interface BrokerOptions {
   currentUser(): string | null | undefined;
   generation(): number;
@@ -36,7 +38,7 @@ export class ComputerBroker {
   private lease?: { key: string; request: ComputerEnvelope; generation: number; controller: AbortController; apps: Set<string> };
   constructor(private options: BrokerOptions) {}
   async handle(raw: unknown, signal: AbortSignal): Promise<unknown> {
-    const request = envelope.parse(raw);
+    const request = envelopeSchema.parse(raw);
     const { scope, conversationId, turnId, op } = request;
     if (scope.userId !== this.options.currentUser()) throw new Error("account_changed: Computer Use requires the active account");
     signal.throwIfAborted();
@@ -58,11 +60,11 @@ export class ComputerBroker {
           await this.options.native({ op: "request_permissions" }, signal);
         }
         if (this.lease === lease) this.stop();
-        throw new Error("permission_required: Grant Screen Recording and Accessibility to Multica Computer Use in macOS Settings, then retry");
+        throw new Error("permission_required: Grant Screen Recording and Accessibility to Multica in macOS Settings, then retry");
       }
       this.check(key, lease.generation, signal);
       this.options.activity({ conversationId });
-      return { status: "ready", mode: "foreground" };
+      return { status: "ready", mode: "background" };
     }
     const lease = this.lease;
     if (!lease || lease.key !== key) throw new Error("execution_ended: No desktop control lease for this turn");
@@ -72,8 +74,10 @@ export class ComputerBroker {
     if (action.op === "get_app") {
       const app = appSchema.parse(await this.options.native(action, active));
       if (!lease.apps.has(app.id)) {
-        if (!await this.options.confirm(app, request, active)) throw new Error("app_not_allowed: Application access was declined");
-        this.check(key, lease.generation, active);
+        if (request.origin !== "task") {
+          if (!await this.options.confirm(app, request, active)) throw new Error("app_not_allowed: Application access was declined");
+          this.check(key, lease.generation, active);
+        }
         lease.apps.add(app.id);
       }
       this.options.activity({ conversationId, app: app.name });

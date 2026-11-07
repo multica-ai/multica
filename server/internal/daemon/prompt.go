@@ -65,6 +65,9 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
 	b.WriteString(buildWorktreeReplayConflictBlock(opts.worktreeReplayConflicts))
 	b.WriteString(buildWorktreeBranchBlock(opts.worktreeBranch, opts.worktreeBase))
+	if opts.computerUse != "" {
+		b.WriteString(strings.TrimRight(opts.computerUse, "\n") + "\n\n")
+	}
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
 	}
@@ -111,6 +114,7 @@ type promptOpts struct {
 	worktreeReplayConflicts []string
 	worktreeBranch          string
 	worktreeBase            string
+	computerUse             string
 }
 
 // PromptOption tunes per-turn prompt copy with run-scoped context.
@@ -122,6 +126,12 @@ type PromptOption func(*promptOpts)
 // overlap a coding task writing to the same tree, and unlike every other task
 // it got there by design rather than by winning the lock, so it is the one that
 // has to be told (issue #7344).
+// WithComputerUse appends Desktop's Computer Use brief for a run whose device
+// serves it. Whether it does varies per run, so it is run-scoped context.
+func WithComputerUse(brief string) PromptOption {
+	return func(o *promptOpts) { o.computerUse = brief }
+}
+
 func WithSharedLocalDirectory() PromptOption {
 	return func(o *promptOpts) { o.sharedLocalDirectory = true }
 }

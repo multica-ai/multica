@@ -1,9 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+
 	"github.com/multica-ai/multica/server/internal/localconversation/computer"
 	"os"
 	"path/filepath"
@@ -15,6 +18,28 @@ import (
 	"github.com/multica-ai/multica/server/internal/localconversation/contextmcp"
 )
 
+// fakeComputerHost stands in for Desktop's main process.
+type fakeComputerHost struct {
+	capability *ComputerCapability
+	control    func(ctx context.Context, version string, envelope map[string]any) (json.RawMessage, error)
+}
+
+func (f *fakeComputerHost) Computer() (ComputerCapability, bool) {
+	if f.capability == nil {
+		return ComputerCapability{}, false
+	}
+	return *f.capability, true
+}
+
+func (f *fakeComputerHost) Control(ctx context.Context, version string, envelope map[string]any) (json.RawMessage, error) {
+	return f.control(ctx, version, envelope)
+}
+
+func testComputerCapability() *ComputerCapability {
+	return &ComputerCapability{Version: computer.CapabilityVersion, UserID: "u",
+		Prompts: ComputerPrompts{Conversation: "conversation guide", Task: "task guide", TaskBrief: "[Computer Use] brief"}}
+}
+
 func TestComputerToolsBindHostIdentityAndDoNotReplayRequests(t *testing.T) {
 	f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
 	f.create(t, "c", "claude")
@@ -23,14 +48,15 @@ func TestComputerToolsBindHostIdentityAndDoNotReplayRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := 0
-	f.svc.SetComputerHost(func(_ context.Context, scopeID int64, id, kind string, payload any) (json.RawMessage, error) {
+	f.svc.SetComputerHost(&fakeComputerHost{capability: testComputerCapability(), control: func(_ context.Context, version string, p map[string]any) (json.RawMessage, error) {
 		calls++
-		p := payload.(map[string]any)
-		if scopeID != f.scopeID || id != "c" || kind != "computer.control" || p["turnId"] != "turn-1" || p["op"] != "begin" {
-			t.Errorf("wrong host identity: %v", p)
+		assertContractEnvelope(t, p)
+		scope, _ := p["scope"].(map[string]string)
+		if version != computer.CapabilityVersion || p["conversationId"] != "c" || p["turnId"] != "turn-1" || p["op"] != "begin" || scope["userId"] != "u" || p["origin"] != nil {
+			t.Errorf("wrong host identity: version=%s %v", version, p)
 		}
 		return nil, errors.New("app_not_allowed")
-	})
+	}})
 	tools := map[string]contextmcp.Tool{}
 	for _, tool := range f.svc.computerToolsFor(conv, func() map[string]any { return map[string]any{"turn_id": "turn-1"} }) {
 		tools[tool.Name] = tool
@@ -64,14 +90,14 @@ func TestBuiltComputerToolRoundTrip(t *testing.T) {
 	}
 	f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
 	f.create(t, "c", "claude")
-	f.svc.computer.Command = computer.Command{Executable: exe, Entry: entry}
+	capability := testComputerCapability()
+	capability.Runtime = computer.Command{Executable: exe, Entry: entry}
 	conv, err := f.svc.store.Conversation(context.Background(), "c")
 	if err != nil {
 		t.Fatal(err)
 	}
 	calls := 0
-	f.svc.SetComputerHost(func(_ context.Context, _ int64, _ string, _ string, payload any) (json.RawMessage, error) {
-		p := payload.(map[string]any)
+	f.svc.SetComputerHost(&fakeComputerHost{capability: capability, control: func(_ context.Context, _ string, p map[string]any) (json.RawMessage, error) {
 		if p["op"] != "action" {
 			return json.RawMessage(`{"status":"ready"}`), nil
 		}
@@ -85,7 +111,7 @@ func TestBuiltComputerToolRoundTrip(t *testing.T) {
 			return json.RawMessage(`{"observationId":"fixture-observation","elements":[],"image":{"mimeType":"image/png","data":"aGk="}}`), nil
 		}
 		return nil, errors.New("unexpected action")
-	})
+	}})
 	tools := map[string]contextmcp.Tool{}
 	for _, tool := range f.svc.computerToolsFor(conv, func() map[string]any { return map[string]any{"turn_id": "turn"} }) {
 		tools[tool.Name] = tool
@@ -128,8 +154,8 @@ func TestComputerResetWaitsForReleaseAndStopGuardsTurn(t *testing.T) {
 		t.Fatal("late stop cancelled a different turn")
 	}
 	entered, release := make(chan struct{}), make(chan struct{})
-	f.svc.SetComputerHost(func(ctx context.Context, _ int64, _ string, _ string, p any) (json.RawMessage, error) {
-		if p.(map[string]any)["op"] != "release" {
+	f.svc.SetComputerHost(&fakeComputerHost{capability: testComputerCapability(), control: func(ctx context.Context, _ string, p map[string]any) (json.RawMessage, error) {
+		if p["op"] != "release" {
 			t.Error("wrong host operation")
 		}
 		close(entered)
@@ -139,7 +165,7 @@ func TestComputerResetWaitsForReleaseAndStopGuardsTurn(t *testing.T) {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-	})
+	}})
 	var reset contextmcp.Tool
 	for _, tool := range f.svc.computerToolsFor(conv, func() map[string]any { return map[string]any{"turn_id": "turn"} }) {
 		if tool.Name == "computer_reset" {
@@ -167,5 +193,95 @@ func TestComputerResetWaitsForReleaseAndStopGuardsTurn(t *testing.T) {
 	close(release)
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBindTaskComputerRequiresDesktopSignedInAsTheTaskAccount(t *testing.T) {
+	f := newServiceFixture(t, filepath.Join(t.TempDir(), "c.sqlite"))
+	var got map[string]any
+	host := &fakeComputerHost{control: func(_ context.Context, _ string, p map[string]any) (json.RawMessage, error) {
+		got = p
+		return json.RawMessage(`{"available":true}`), nil
+	}}
+	f.svc.SetComputerHost(host)
+	if _, _, ok, err := f.svc.BindTaskComputer("t1", "w1", "u"); ok || err != nil {
+		t.Fatalf("bound without a Desktop capability: ok=%v err=%v", ok, err)
+	}
+	host.capability = testComputerCapability()
+	for _, account := range []string{"", "someone-else"} {
+		if _, _, ok, _ := f.svc.BindTaskComputer("t1", "w1", account); ok {
+			t.Fatalf("bound for daemon account %q while Desktop is signed in as u", account)
+		}
+	}
+	bound, release, ok, err := f.svc.BindTaskComputer("t1", "w1", "u")
+	if !ok || err != nil || bound.Brief != "[Computer Use] brief" {
+		t.Fatalf("bound=%+v ok=%v err=%v", bound, ok, err)
+	}
+	call := func(body string) (int, string) {
+		res, err := http.Post(bound.URL, "application/json", bytes.NewBufferString(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var out bytes.Buffer
+		_, _ = out.ReadFrom(res.Body)
+		return res.StatusCode, out.String()
+	}
+	if _, body := call(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`); !strings.Contains(body, "task guide") {
+		t.Fatalf("task route lacks Desktop's task instructions: %s", body)
+	}
+	if status, _ := call(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"computer_status","arguments":{}}}`); status != http.StatusOK {
+		t.Fatalf("status call = %d", status)
+	}
+	assertContractEnvelope(t, got)
+	scope, _ := got["scope"].(map[string]string)
+	if got["op"] != "status" || got["origin"] != "task" || got["conversationId"] != "task:t1" || got["turnId"] != "t1" || scope["workspaceId"] != "w1" || scope["userId"] != "u" {
+		t.Fatalf("task envelope = %v", got)
+	}
+	release()
+	if status, _ := call(`{"jsonrpc":"2.0","id":3,"method":"tools/list"}`); status != http.StatusUnauthorized {
+		t.Fatalf("released route answered %d", status)
+	}
+}
+
+func TestSystemPromptCarriesDesktopComputerTextOnlyWhenOffered(t *testing.T) {
+	t.Parallel()
+	if prompt := systemPrompt("ws-1", true, ""); strings.Contains(prompt, "computer_execute") || strings.Contains(prompt, "\n\n\n\n") {
+		t.Fatalf("Computer Use text without a Desktop capability:\n%s", prompt)
+	}
+	if !strings.Contains(systemPrompt("ws-1", true, "desktop computer text"), "desktop computer text") {
+		t.Fatal("Desktop's Computer Use text missing")
+	}
+}
+
+// assertContractEnvelope checks that an envelope only uses fields the shared
+// Computer contract defines, which Desktop's broker validates strictly.
+func assertContractEnvelope(t *testing.T, envelope map[string]any) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "packages", "computer-use", "contract", "computer.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contract struct {
+		Control struct {
+			Envelope []string `json:"envelope"`
+			Scope    []string `json:"scope"`
+		} `json:"control"`
+	}
+	if err := json.Unmarshal(raw, &contract); err != nil {
+		t.Fatal(err)
+	}
+	allowed := map[string]bool{}
+	for _, key := range contract.Control.Envelope {
+		allowed[key] = true
+	}
+	for key := range envelope {
+		if !allowed[key] {
+			t.Errorf("envelope field %q is not in the Computer contract", key)
+		}
+	}
+	scope, _ := envelope["scope"].(map[string]string)
+	if len(scope) != len(contract.Control.Scope) {
+		t.Errorf("scope %v does not carry the contract's fields %v", scope, contract.Control.Scope)
 	}
 }

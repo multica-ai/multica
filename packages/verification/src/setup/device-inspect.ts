@@ -223,7 +223,7 @@ export async function inspectDevice(
   }
   const helper = join(
     projectRoot,
-    "apps/desktop/resources/native/Multica Computer Use.app/Contents/MacOS/multica-computer-use",
+    "apps/desktop/resources/native/cua-driver/node_modules/@trycua/cua-driver/dist/index.js",
   );
   const helperPresent = await access(helper).then(
     () => true,
@@ -233,9 +233,9 @@ export async function inspectDevice(
     "computerUse",
     mode !== "desktop" || helperPresent ? "ready" : "blocked",
     mode === "desktop"
-      ? "Native helper presence checked; external agent CU is independently configured"
+      ? "cua-driver SDK presence checked; external agent CU is independently configured"
       : "Not required in renderer mode",
-    "env_start builds the helper; configure the external agent's computer-use capability",
+    "env_start stages cua-driver; configure the external agent's computer-use capability",
   );
   add(
     "externalComputerUse",
