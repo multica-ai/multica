@@ -265,6 +265,19 @@ multica runtime profile unset-path <profile-id>
 
 プロファイルの変更は、それ以降に取得される実行にのみ影響します。プロファイルを削除する前に、対応するランタイムにまだ紐づいているアクティブなエージェントを先に処理してください。あるコンピュータ上のランタイムインスタンスだけを削除してもプロファイルは消えず、実行中のデーモンが再登録します。
 
+### 例：Wally で Claude Code を使う
+
+[Wally](https://www.runwally.com) はオープンウェイトモデルを提供しています。`wally` CLI は、そのプロセスに限りベース URL とトークンを選んだモデルに向けて Claude Code を起動するため、Claude プロトコルファミリーのカスタムプロファイルとして使えます。
+
+1. コンピュータに Claude Code と [`wally` CLI](https://docs.runanywhere.ai/integrations) をインストールし、`wally account login` でサインインします。
+2. カスタムランタイムを追加し、**Claude** を選んで次のコマンドを入力します。
+
+```text
+wally claude-code -m deepseek-v4.1-flash --
+```
+
+`--` で Wally 自身のオプションが終わるため、Multica の引数はそのまま Claude Code に渡ります。モデルピッカーには Wally アカウントで使えるモデルが表示され、エージェントで選んだモデルが `-m` の後のモデルを置き換えます。
+
 ## Qoder Cloud Agents リモートランタイム
 
 Qoder Cloud Agents は割り当てられたタスクをリモートセッションで実行します。Multica サーバーが既存のデーモンプロトコルを使うブリッジを管理するため、ユーザーがローカルデーモンを起動する必要はありません。

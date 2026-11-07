@@ -265,6 +265,19 @@ multica runtime profile unset-path <profile-id>
 
 설정 변경은 이후 가져가는 실행에만 적용됩니다. 설정을 삭제하기 전에 해당 런타임에 계속 연결된 활성 에이전트를 먼저 처리해야 합니다. 특정 컴퓨터의 런타임 인스턴스만 삭제해도 설정은 삭제되지 않으며 실행 중인 데몬이 다시 등록합니다.
 
+### 예시: Wally에서 Claude Code 사용하기
+
+[Wally](https://www.runwally.com)는 오픈 웨이트 모델을 제공합니다. `wally` CLI는 해당 프로세스에 한해 base URL과 토큰을 선택한 모델로 지정해 Claude Code를 실행하므로, Claude 프로토콜 계열의 사용자 지정 설정으로 사용할 수 있습니다.
+
+1. 컴퓨터에 Claude Code와 [`wally` CLI](https://docs.runanywhere.ai/integrations)를 설치한 뒤 `wally account login`으로 로그인합니다.
+2. 사용자 지정 런타임을 추가하고 **Claude**를 선택한 다음 이 명령을 입력합니다.
+
+```text
+wally claude-code -m deepseek-v4.1-flash --
+```
+
+`--`는 Wally 자체 옵션의 끝을 나타내므로 Multica의 인수가 그대로 Claude Code에 전달됩니다. 모델 선택기에는 Wally 계정에서 사용할 수 있는 모델이 표시되며, 에이전트에서 고른 모델이 `-m` 뒤의 모델을 대신합니다.
+
 ## Qoder Cloud Agents 원격 런타임
 
 Qoder Cloud Agents는 할당된 태스크를 원격 세션으로 실행합니다. Multica 서버가 기존 데몬 프로토콜을 사용하는 브리지를 관리하므로 사용자가 로컬 데몬을 실행할 필요가 없습니다.
