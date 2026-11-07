@@ -62,6 +62,8 @@ Docs-only changes can use link/reference checks and `git diff --check`; state th
 
 ## API Compatibility
 
+- For Codex comment turns, keep user-authored comments in user input and send generated platform routing and workflow instructions through `developerInstructions`. Build these parts from task fields; never parse user content to recover trusted instructions.
+
 Installed desktop clients may talk to newer backends. Preserve response compatibility at the API boundary.
 
 - UI-consumed JSON passes through a zod schema and `parseWithFallback`, not an `as T` cast. Web/desktop use `packages/core/api/schema.ts`; mobile uses its own request helpers.

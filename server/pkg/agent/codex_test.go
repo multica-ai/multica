@@ -2503,14 +2503,14 @@ func TestCodexStartOrResumeThreadResumesPriorThread(t *testing.T) {
 	}
 }
 
-// codexRuntimeBriefCanary stands in for the Multica runtime brief the daemon
-// would inline if developerInstructions were ever wired back up.
+// codexRuntimeBriefCanary detects accidental inlining of the runtime brief
+// alongside run-scoped developer instructions.
 const codexRuntimeBriefCanary = "MULTICA-RUNTIME-BRIEF-CANARY"
 
 // assertNoDeveloperInstructions pins the MUL-5392 contract: Codex loads the
 // per-task AGENTS.md from the thread's cwd, so the daemon never inlines the
-// runtime brief here. The field must still be sent — the app-server treats a
-// missing key differently from an explicit null — but always as null.
+// runtime brief here. Without separate run-scoped developer instructions,
+// the field must still be sent explicitly as null.
 func assertNoDeveloperInstructions(t *testing.T, params map[string]any) {
 	t.Helper()
 	got, ok := params["developerInstructions"]

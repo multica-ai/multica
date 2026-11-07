@@ -8993,6 +8993,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if providerNeedsInlineSystemPrompt(provider) {
 		execOpts.SystemPrompt = runtimeBrief
 	}
+	if provider == "codex" && task.WakeupID == "" && task.ChatSessionID == "" &&
+		task.TriggerCommentID != "" && task.TriggerCommentContent != "" {
+		prompt, execOpts.DeveloperInstructions = buildCodexCommentPrompt(task, promptOptions...)
+	}
 
 	// A quick-actions refresh task from a server that predates server-side
 	// generation (MUL-5573). This daemon no longer has a suggestion pass to run
@@ -9106,6 +9110,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}
 		freshPrompt := BuildPrompt(task, provider, promptOptions...)
+		if provider == "codex" && execOpts.DeveloperInstructions != "" {
+			freshPrompt, execOpts.DeveloperInstructions = buildCodexCommentPrompt(task, promptOptions...)
+		}
 
 		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, withPriorTaskUsage(execOpts, firstUsage), taskLog, task.ID, env.CodexHome, &msgSeq)
 		if retryErr != nil {
