@@ -681,6 +681,20 @@
       "title": "시스템 알림",
       "label": "Multica가 백그라운드에 있을 때 시스템 알림 표시"
     },
+    "delivery": {
+      "title": "앱 외부 전송",
+      "google_chat": {
+        "label": "Google Chat",
+        "description": "새 인박스 항목을 Google Chat 스페이스로 보냅니다.",
+        "input_label": "Google Chat 웹훅 URL",
+        "placeholder": "https://chat.googleapis.com/v1/spaces/…",
+        "how_to": "Google Chat 스페이스 → 앱 및 통합 → 웹훅 → 웹훅 추가 → URL 복사.",
+        "save": "저장",
+        "replace": "교체",
+        "remove": "삭제",
+        "cancel": "취소"
+      }
+    },
     "browser": {
       "label": "브라우저 알림",
       "hint": "이 브라우저에서 새 인박스 항목에 대한 알림 배너를 표시하도록 허용합니다.",

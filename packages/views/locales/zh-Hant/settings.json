@@ -681,6 +681,20 @@
       "title": "系統通知",
       "label": "Multica 在背景時顯示系統通知"
     },
+    "delivery": {
+      "title": "應用程式外通知",
+      "google_chat": {
+        "label": "Google Chat",
+        "description": "將新的收件箱條目傳送到 Google Chat 空間。",
+        "input_label": "Google Chat Webhook URL",
+        "placeholder": "https://chat.googleapis.com/v1/spaces/…",
+        "how_to": "Google Chat 空間 → 應用程式和整合 → Webhook → 新增 Webhook → 複製 URL。",
+        "save": "儲存",
+        "replace": "替換",
+        "remove": "移除",
+        "cancel": "取消"
+      }
+    },
     "browser": {
       "label": "瀏覽器通知",
       "hint": "允許當前瀏覽器為新的收件箱條目彈出通知橫幅。",

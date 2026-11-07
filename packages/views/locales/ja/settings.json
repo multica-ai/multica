@@ -681,6 +681,20 @@
       "title": "システム通知",
       "label": "Multica がバックグラウンドにあるときにシステム通知を表示"
     },
+    "delivery": {
+      "title": "アプリ外への通知",
+      "google_chat": {
+        "label": "Google Chat",
+        "description": "新しいインボックス項目を Google Chat スペースに送信します。",
+        "input_label": "Google Chat Webhook URL",
+        "placeholder": "https://chat.googleapis.com/v1/spaces/…",
+        "how_to": "Google Chat スペース → アプリと統合 → Webhook → Webhook を追加 → URL をコピー。",
+        "save": "保存",
+        "replace": "置き換え",
+        "remove": "削除",
+        "cancel": "キャンセル"
+      }
+    },
     "browser": {
       "label": "ブラウザ通知",
       "hint": "このブラウザで新しいインボックス項目の通知バナーを表示できるようにします。",
