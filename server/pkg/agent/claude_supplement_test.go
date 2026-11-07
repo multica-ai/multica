@@ -522,3 +522,93 @@ func TestClaudeResultDrainsPendingControlReplies(t *testing.T) {
 		})
 	}
 }
+
+// claudeFakeHookRoundTrip emits one main-loop hook callback and reports whether
+// the daemon answered it. A closed stdin is the only way it goes unanswered.
+func claudeFakeHookRoundTrip(reader *bufio.Reader, event, requestID string) bool {
+	hook := claudeSupplementHook(event, "")
+	hook.RequestID = requestID
+	if err := json.NewEncoder(os.Stdout).Encode(hook); err != nil {
+		os.Exit(31)
+	}
+	line, err := reader.ReadBytes('\n')
+	if err != nil {
+		return false
+	}
+	var frame struct {
+		Type     string `json:"type"`
+		Response struct {
+			RequestID string `json:"request_id"`
+		} `json:"response"`
+	}
+	if json.Unmarshal(line, &frame) != nil || frame.Type != "control_response" || frame.Response.RequestID != requestID {
+		os.Exit(32)
+	}
+	return true
+}
+
+// runFakeClaudeLaterTurn mimics the two ways Claude Code runs a turn after a
+// result in the same process, and what it does to a tool call whose PreToolUse
+// hook cannot be answered: it cancels the call instead of running it.
+func runFakeClaudeLaterTurn() {
+	reader := bufio.NewReader(os.Stdin)
+	if _, err := reader.ReadBytes('\n'); err != nil {
+		os.Exit(21)
+	}
+	fmt.Println(`{"type":"control_response","response":{"subtype":"success","request_id":"multica-supplement-initialize"}}`)
+	if _, err := reader.ReadBytes('\n'); err != nil {
+		os.Exit(22)
+	}
+	switch os.Getenv("CLAUDE_LATER_TURN") {
+	case "background_task":
+		claudeFakeHookRoundTrip(reader, "UserPromptSubmit", "prompt")
+		fmt.Println(`{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1","task_type":"local_bash"}]}`)
+		claudeFakeHookRoundTrip(reader, "Stop", "stop-1")
+		fmt.Println(`{"type":"result","subtype":"success","result":"waiting for the background task","num_turns":2}`)
+		fmt.Println(`{"type":"system","subtype":"task_notification","task_id":"b1","status":"completed"}`)
+		fmt.Println(`{"type":"system","subtype":"background_tasks_changed","tasks":[]}`)
+		claudeFakeHookRoundTrip(reader, "UserPromptSubmit", "notification")
+	case "replayed_notification":
+		fmt.Println(`{"type":"system","subtype":"task_notification","task_id":"b0","status":"stopped"}`)
+		fmt.Println(`{"type":"result","subtype":"success","result":"","num_turns":0}`)
+		claudeFakeHookRoundTrip(reader, "UserPromptSubmit", "prompt")
+	default:
+		os.Exit(23)
+	}
+	final := "tool ran"
+	if !claudeFakeHookRoundTrip(reader, "PreToolUse", "tool") {
+		final = "tool cancelled"
+	}
+	claudeFakeHookRoundTrip(reader, "Stop", "stop-2")
+	fmt.Printf(`{"type":"result","subtype":"success","result":%q,"num_turns":2}`+"\n", final)
+	// Claude Code exits only once its input ends.
+	if _, err := io.Copy(io.Discard, reader); err != nil {
+		os.Exit(24)
+	}
+}
+
+func TestClaudeKeepsHooksAnswerableUntilFinalResult(t *testing.T) {
+	for _, laterTurn := range []string{"background_task", "replayed_notification"} {
+		t.Run(laterTurn, func(t *testing.T) {
+			self, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			b := &claudeBackend{cfg: Config{ExecutablePath: self, Logger: slog.Default(), Env: map[string]string{
+				"CLAUDE_FAKE_MODE": "later_turn", "CLAUDE_LATER_TURN": laterTurn, "IS_SANDBOX": "1",
+			}}}
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			session, err := b.Execute(ctx, "test prompt", ExecOptions{EnableTaskSupplement: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range session.Messages {
+			}
+			result := <-session.Result
+			if result.Status != "completed" || result.Output != "tool ran" {
+				t.Fatalf("status = %s, output = %q, want completed with the later turn's tool run: %+v", result.Status, result.Output, result)
+			}
+		})
+	}
+}
