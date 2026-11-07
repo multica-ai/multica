@@ -253,6 +253,7 @@ function LocalFilePreviewRender({
             {file.url && file.mimeType.startsWith("image/") ? (
               <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
                 <img
+                  draggable={false}
                   alt={file.name}
                   className="max-h-full max-w-full object-contain"
                   src={file.url}

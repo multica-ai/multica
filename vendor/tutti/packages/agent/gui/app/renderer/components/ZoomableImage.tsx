@@ -330,6 +330,7 @@ function ZoomableImageRender({
       >
         <img
           {...props}
+          draggable={false}
           alt={alt}
           src={src}
           onClick={onClickProp1}

@@ -163,6 +163,7 @@ function MarkdownMediaRender({
       return (
         <img
           {...props}
+          draggable={false}
           src={resolvedSrc}
           alt={alt}
           title={title}
@@ -206,6 +207,7 @@ function MarkdownMediaRender({
       return (
         <img
           {...props}
+          draggable={false}
           src={state.src}
           alt={alt}
           title={title}

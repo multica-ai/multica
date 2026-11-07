@@ -217,6 +217,7 @@ export const AgentHandoffMenu = observer(function AgentHandoffMenu({
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="relative size-5 shrink-0">
                     <img
+                      draggable={false}
                       alt=""
                       aria-hidden="true"
                       className="size-5 rounded-[4px]"

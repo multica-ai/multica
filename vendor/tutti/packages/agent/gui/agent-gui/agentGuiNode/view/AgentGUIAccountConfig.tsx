@@ -205,6 +205,7 @@ function AgentGUIConfigMenuRender({
                     <SpanBinding1 providerMaskIconUrl={providerMaskIconUrl} />
                   ) : providerImageIconUrl ? (
                     <img
+                      draggable={false}
                       alt=""
                       aria-hidden="true"
                       className="size-4 shrink-0 object-contain"

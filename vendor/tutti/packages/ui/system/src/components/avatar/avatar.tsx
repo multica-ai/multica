@@ -287,6 +287,7 @@ function Avatar({
       >
         <AvatarPrimitive.Image
           {...imageProps}
+          draggable={false}
           alt=""
           className={cn(
             "block size-full max-w-none object-cover",

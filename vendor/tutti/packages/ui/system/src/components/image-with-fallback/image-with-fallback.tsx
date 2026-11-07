@@ -101,6 +101,7 @@ export function ImageWithFallback({
   return (
     <img
       {...imageProps}
+      draggable={false}
       key={`${normalizedSrc}:${currentState.attempt}`}
       src={normalizedSrc}
       onError={(event) => {

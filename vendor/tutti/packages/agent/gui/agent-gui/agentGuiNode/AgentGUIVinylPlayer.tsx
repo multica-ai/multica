@@ -38,12 +38,14 @@ function AgentGUIVinylPlayerRender({
     <div className="agent-gui-vinyl-player" aria-hidden="true">
       {showBetaBadge ? (
         <img
+          draggable={false}
           className="agent-gui-vinyl-player__beta"
           src={betaTagAssetUrl}
           alt=""
         />
       ) : null}
       <img
+        draggable={false}
         className="agent-gui-vinyl-player__chassis"
         src={chassisAssetUrl}
         alt=""
@@ -72,13 +74,14 @@ function AgentGUIVinylPlayerRender({
             <span className="agent-gui-vinyl-player__reflection" />
             <span className="agent-gui-vinyl-player__label">
               {selectedAgentCover ? (
-                <img src={selectedAgentCover} alt="" />
+                <img draggable={false} src={selectedAgentCover} alt="" />
               ) : null}
             </span>
           </div>
         </div>
       </div>
       <img
+        draggable={false}
         className="agent-gui-vinyl-player__tonearm"
         src={tonearmAssetUrl}
         alt=""
