@@ -3113,6 +3113,26 @@ describe("IssueDetail (shared)", () => {
           expect(scrollToIndexSpy).toHaveBeenLastCalledWith({ index: 1, align: "start", offset: -16 });
         } finally { view.unmount(); }
       });
+      it("gives the mobile latest jump ownership over an unfinished landing", async () => {
+        mockViewport.isMobile = true;
+        virtuosoWindow.failScroll = true;
+        const target = bulkIndex(50);
+        const geometry = controlLandingGeometry(target);
+        const setViewState = vi.fn();
+        mockApiObj.listTimeline.mockResolvedValue(bulkRoots(60));
+        const view = renderVirtualDeepLink(target, 0, { get: () => undefined, setViewState });
+        try {
+          await waitFor(() => expect(scrollToIndexSpy).toHaveBeenCalled());
+          const container = geometry.attach();
+          fireEvent.scroll(container);
+          fireEvent.click(await screen.findByRole("button", { name: "Jump to latest" }));
+          expect(container.scrollTop).toBe(2400);
+          await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2800)); });
+          expect(container.scrollTop).toBe(2400);
+          expect(screen.queryByTestId("virtuoso-mock")).not.toBeNull();
+          expect(setViewState).not.toHaveBeenCalled();
+        } finally { view.unmount(); geometry.restore(); }
+      });
       it("releases the unfinished request resources on touch takeover", async () => {
         const target = bulkIndex(50);
         const disconnect = vi.fn();

@@ -1527,7 +1527,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Mobile only: desktop already reaches the latest entry through the
   // ThreadMinimap rail, which is not rendered below `md`. Passing null keeps
   // the hook's scroll and resize listeners off on desktop.
-  const jumpToLatest = useJumpToLatest(isMobile ? scrollContainerEl : null);
+  const { visible: showJumpToLatest, jump: jumpToLatest } = useJumpToLatest(isMobile ? scrollContainerEl : null);
+  const jumpToLatestEntry = useCallback(() => {
+    cancelDeepLinkRef.current?.();
+    jumpToLatest();
+  }, [jumpToLatest]);
 
   // Per-session: which resolved threads the user has temporarily expanded.
   // Not persisted (matches Linear) — reload collapses everything back to bars.
@@ -4365,9 +4369,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               composer's top edge. With the sticky composer it rides the
               composer itself; without it, a zero-height sticky anchor pins
               it to the viewport bottom until the composer scrolls in. */}
-          {!stickyComposer && jumpToLatest.visible && (
+          {!stickyComposer && showJumpToLatest && (
             <div className="sticky bottom-0 z-10 h-0">
-              <JumpToLatestButton onClick={jumpToLatest.jump} label={t(($) => $.timeline.jump_to_latest)} />
+              <JumpToLatestButton onClick={jumpToLatestEntry} label={t(($) => $.timeline.jump_to_latest)} />
             </div>
           )}
           <div
@@ -4383,8 +4387,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 keeps the previous issue's in-memory content and the
                 next keystroke would flush it into the new issue's
                 draft key. */}
-            {stickyComposer && jumpToLatest.visible && (
-              <JumpToLatestButton onClick={jumpToLatest.jump} label={t(($) => $.timeline.jump_to_latest)} />
+            {stickyComposer && showJumpToLatest && (
+              <JumpToLatestButton onClick={jumpToLatestEntry} label={t(($) => $.timeline.jump_to_latest)} />
             )}
             <CommentInput
               key={id}
