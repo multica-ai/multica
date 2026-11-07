@@ -10,6 +10,7 @@ import {
   Rows3,
   Trash2,
 } from "@multica/ui/icons";
+import { matchesProjectLifecycle, PROJECT_LIFECYCLE_VIEWS, type ProjectLifecycleView } from "@multica/core/projects/lifecycle";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -410,16 +411,10 @@ function ProjectCard({
 
 // Header tools — scope menu, filter, display (view, sort, columns).
 
-// Scope splits the lifecycle in two: still being worked on, or closed. The
-// status filter narrows further within it.
-type ProjectScope = "all" | "active" | "closed";
-const PROJECT_SCOPES: ProjectScope[] = ["all", "active", "closed"];
-const CLOSED_STATUSES: ReadonlySet<ProjectStatus> = new Set(["completed", "cancelled"]);
-
-function inScope(project: Project, scope: ProjectScope): boolean {
-  if (scope === "all") return true;
-  return CLOSED_STATUSES.has(project.status) === (scope === "closed");
-}
+type ProjectScope = ProjectLifecycleView;
+const PROJECT_SCOPES = PROJECT_LIFECYCLE_VIEWS;
+const inScope = (project: Project, scope: ProjectScope) =>
+  matchesProjectLifecycle(project.status, scope);
 
 const VIEW_MODES: { mode: ProjectViewMode; Icon: typeof Rows3 }[] = [
   { mode: "compact", Icon: Rows3 },
@@ -508,6 +503,11 @@ function ProjectBatchToolbar({
 // Page
 
 export function ProjectsPage() {
+  const wsId = useWorkspaceId();
+  return <ProjectsBrowser key={wsId} />;
+}
+
+function ProjectsBrowser() {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
@@ -548,9 +548,8 @@ export function ProjectsPage() {
     return s;
   }, [pins]);
 
-  const [scope, setScope] = useState<ProjectScope>("all");
-  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
-
+  const scope = useProjectViewStore((s) => s.lifecycleView);
+  const setScope = useProjectViewStore((s) => s.setLifecycleView);
   const activeFilterCount = countActiveFilters(filters);
   const hasActiveFilters = activeFilterCount > 0;
 
@@ -610,6 +609,16 @@ export function ProjectsPage() {
     });
     return sorted;
   }, [projects, scope, filters, sortField, sortDirection]);
+
+  const selectionKey = JSON.stringify([wsId, scope, viewMode, filters]);
+  const [selection, setSelection] = useState<{ key: string; ids: ReadonlySet<string> }>({ key: selectionKey, ids: new Set() });
+  const visibleIds = new Set(visible.map((p) => p.id));
+  const selectedIds = new Set(selection.key === selectionKey
+    ? [...selection.ids].filter((id) => visibleIds.has(id)) : []);
+  const setSelectedIds = (ids: ReadonlySet<string>) => setSelection({ key: selectionKey, ids });
+  if (selection.key !== selectionKey || selection.ids.size !== selectedIds.size) {
+    setSelection({ key: selectionKey, ids: selectedIds });
+  }
 
   const selectedProjects = visible.filter((p) => selectedIds.has(p.id));
 
@@ -732,6 +741,7 @@ export function ProjectsPage() {
     onDirectionChange: setSortDirection,
   };
 
+  const emptyMessage = hasActiveFilters ? t(($) => $.page.no_matches) : t(($) => $.lifecycle.empty[scope]);
   const showEmpty = !isLoading && projects.length === 0;
   const countBadge = (n: number) => (
     <span className="ml-auto pl-3 text-caption text-muted-foreground">{n}</span>
@@ -899,7 +909,7 @@ export function ProjectsPage() {
               selection={{ selectedIds, onChange: setSelectedIds }}
               empty={
                 <CollectionNoMatches
-                  title={t(($) => $.page.no_matches)}
+                  title={emptyMessage}
                   onReset={clearFilters}
                   hasFilters={hasActiveFilters}
                 />
@@ -909,7 +919,7 @@ export function ProjectsPage() {
             <CardsLoading />
           ) : visible.length === 0 ? (
             <CollectionNoMatches
-              title={t(($) => $.page.no_matches)}
+              title={emptyMessage}
               onReset={clearFilters}
               hasFilters={hasActiveFilters}
             />
@@ -929,6 +939,7 @@ export function ProjectsPage() {
           )}
 
           <ProjectBatchToolbar
+            key={JSON.stringify([selectionKey, isWorkspaceAdmin, selectedProjects.map((p) => p.id)])}
             rows={selectedProjects}
             pinnedIds={pinnedProjectIds}
             canDelete={selectedProjects.length > 0 && selectedProjects.every(mayDelete)}

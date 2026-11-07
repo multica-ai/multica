@@ -204,5 +204,12 @@
       "issue_pricing": "Pricing comparison table",
       "issue_blog": "Paginate the blog list"
     }
+  },
+  "lifecycle": {
+    "empty": {
+      "active": "No active projects",
+      "all": "No projects yet",
+      "closed": "No closed projects"
+    }
   }
 }

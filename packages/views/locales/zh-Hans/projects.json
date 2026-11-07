@@ -204,5 +204,12 @@
       "issue_pricing": "定价页对比表",
       "issue_blog": "博客列表分页"
     }
+  },
+  "lifecycle": {
+    "empty": {
+      "active": "没有活跃项目",
+      "all": "暂无项目",
+      "closed": "暂无已关闭项目"
+    }
   }
 }

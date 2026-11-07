@@ -75,6 +75,7 @@ export interface CollectionViewStoreOptions<
   /** Extra state patch applied alongside every filter toggle. */
   onToggleFilter?: (
     state: CollectionViewCore<Sort, Column, Filters> & ExtraState,
+    key: keyof Filters,
   ) => Partial<ExtraState>;
 }
 
@@ -158,7 +159,7 @@ export function createCollectionViewStore<
                 ? list.filter((v) => v !== value)
                 : [...list, value];
               return {
-                ...options.onToggleFilter?.(state),
+                ...options.onToggleFilter?.(state, key),
                 filters: { ...state.filters, [key]: next },
               } as Partial<State>;
             }),

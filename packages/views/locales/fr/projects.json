@@ -204,5 +204,12 @@
       "issue_pricing": "Tableau comparatif des tarifs",
       "issue_blog": "Paginer la liste du blog"
     }
+  },
+  "lifecycle": {
+    "empty": {
+      "active": "Aucun projet actif",
+      "all": "Aucun projet pour le moment",
+      "closed": "Aucun projet fermé"
+    }
   }
 }
