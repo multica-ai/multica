@@ -3,9 +3,40 @@ import { act, fireEvent, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SidebarProvider, useSidebar } from "@multica/ui/components/ui/sidebar";
+import { useRailOrderStore } from "@multica/core/navigation";
 import { renderWithI18n } from "../test/i18n";
 import { AppRail } from "./app-rail";
 import { AppShellProvider, useAppShell } from "./app-shell-context";
+
+// dnd-kit is stubbed to a pass-through that captures the context's drag-end
+// handler, so tests can drop an item onto another and assert on the store.
+// Nothing else in this suite drags, so the stub changes no existing behavior.
+const dnd = vi.hoisted(() => ({ onDragEnd: (_event: unknown) => {} }));
+
+vi.mock("@dnd-kit/core", () => ({
+  DndContext: ({
+    children,
+    onDragEnd,
+  }: {
+    children: ReactNode;
+    onDragEnd: (event: unknown) => void;
+  }) => {
+    dnd.onDragEnd = onDragEnd;
+    return <>{children}</>;
+  },
+  PointerSensor: vi.fn(),
+  KeyboardSensor: vi.fn(),
+  closestCenter: vi.fn(),
+  useSensor: vi.fn(),
+  useSensors: vi.fn(),
+}));
+vi.mock("@dnd-kit/sortable", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@dnd-kit/sortable")>()),
+  SortableContext: ({ children }: { children: ReactNode }) => <>{children}</>,
+  useSortable: () => ({ attributes: {}, listeners: {}, setNodeRef: vi.fn() }),
+  verticalListSortingStrategy: vi.fn(),
+}));
+vi.mock("@dnd-kit/utilities", () => ({ CSS: { Translate: { toString: () => undefined } } }));
 
 const state = vi.hoisted(() => ({
   pathname: "/acme/issues",
@@ -259,3 +290,44 @@ function PeekReader({ onPeek }: { onPeek: (space: string | null) => void }) {
   onPeek(useAppShell()?.peekSpace ?? null);
   return null;
 }
+
+describe("AppRail order", () => {
+  /** Space ids in DOM order, e.g. ["inbox", "work", ...]. */
+  const spaceOrder = () =>
+    [...document.querySelectorAll("nav[data-slot='app-rail'] [data-space]")].map(
+      (el) => el.getAttribute("data-space") ?? "",
+    );
+
+  beforeEach(() => {
+    useRailOrderStore.getState().setRailOrder(["inbox", "work", "team", "chat", "autopilots"]);
+  });
+
+  it("renders the registry order by default", () => {
+    renderRail();
+    expect(spaceOrder()).toEqual(["inbox", "work", "team", "chat", "autopilots"]);
+  });
+
+  it("renders the saved order", () => {
+    useRailOrderStore.getState().setRailOrder(["chat", "inbox", "work", "autopilots", "team"]);
+    renderRail();
+    expect(spaceOrder()).toEqual(["chat", "inbox", "work", "autopilots", "team"]);
+  });
+
+  it("persists a reorder when a drop lands on another space", () => {
+    renderRail();
+    // Chat above Team: drag the chat item onto the team item.
+    act(() => {
+      dnd.onDragEnd({ active: { id: "chat" }, over: { id: "team" } });
+    });
+    expect(useRailOrderStore.getState().order).toEqual(["inbox", "work", "chat", "team", "autopilots"]);
+    expect(spaceOrder()).toEqual(["inbox", "work", "chat", "team", "autopilots"]);
+  });
+
+  it("keeps the order when a drop lands on its own space", () => {
+    renderRail();
+    act(() => {
+      dnd.onDragEnd({ active: { id: "chat" }, over: { id: "chat" } });
+    });
+    expect(useRailOrderStore.getState().order).toEqual(["inbox", "work", "team", "chat", "autopilots"]);
+  });
+});

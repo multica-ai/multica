@@ -1,14 +1,25 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Settings, Users, type IconComponent } from "@multica/ui/icons";
 import { useChatStore } from "@multica/core/chat";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useInboxUnreadCount } from "@multica/core/inbox/queries";
+import { orderedRailSpaces, useRailOrderStore } from "@multica/core/navigation";
 import {
-  RAIL_SPACES,
   useCurrentWorkspace,
   useWorkspacePaths,
   type AppSpaceId,
@@ -126,6 +137,7 @@ function RailSpaceLink({
   fullLabel,
   active,
   badge,
+  peekable,
 }: {
   space: RailSpaceId;
   href: string;
@@ -134,15 +146,28 @@ function RailSpaceLink({
   fullLabel: string;
   active: boolean;
   badge?: RailBadge;
+  /** False while a rail drag is live, so hovering peers does not open their peek panel. */
+  peekable: boolean;
 }) {
-  const peekHandlers = usePeekHandlers(space, true);
+  const peekHandlers = usePeekHandlers(space, peekable);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: space });
+
   return (
-    <li>
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={isDragging ? "opacity-30" : undefined}
+      {...attributes}
+      {...listeners}
+    >
       <TooltipHint label={label === fullLabel ? null : fullLabel} side="right">
         <AppLink
           href={href}
           data-space={space}
           newTabTitle={fullLabel}
+          // The sortable item owns pointer drags; a native link drag would
+          // swallow them (same call as the pinned rows).
+          draggable={false}
           aria-current={active ? "page" : undefined}
           {...peekHandlers}
           className="group relative flex h-[52px] w-[52px] flex-col items-center justify-center gap-1 rounded-xl text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground"
@@ -161,6 +186,9 @@ function RailSpaceLink({
  * settings and the account. It sits on the app shell, outside the content
  * card, and stays put while the panel beside it collapses. Desktop passes
  * `globalActions={false}`: its title bar carries New issue and search.
+ *
+ * The space list is drag-reorderable (pointer drag, or Space to pick an item
+ * up and the arrow keys to move it); the order persists per device.
  */
 export function AppRail({
   topSlot,
@@ -177,6 +205,36 @@ export function AppRail({
   const badges = useRailBadges();
   const space = shell?.space ?? null;
   const settingsPeek = usePeekHandlers("settings", space === "settings");
+
+  const savedOrder = useRailOrderStore((s) => s.order);
+  const setRailOrder = useRailOrderStore((s) => s.setRailOrder);
+  const spaces = useMemo(() => orderedRailSpaces(savedOrder), [savedOrder]);
+  // 5px of slack keeps taps and clicks navigational; past it, the drag owns
+  // the pointer and the release must not open the item.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const [dragging, setDragging] = useState(false);
+  // A finished drag releases the pointer over whatever item is under it, and
+  // the browser follows with a click on that item's link. Swallow clicks in
+  // the brief window after a drag ends, on capture, so a drop does not also
+  // navigate — including drops that land on a different space. A timestamp
+  // (not a flag) keeps keyboard-initiated drags and later clicks safe.
+  const dragEndedAtRef = useRef(0);
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      setDragging(false);
+      dragEndedAtRef.current = performance.now();
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const from = spaces.indexOf(active.id as RailSpaceId);
+      const to = spaces.indexOf(over.id as RailSpaceId);
+      if (from === -1 || to === -1) return;
+      setRailOrder(arrayMove(spaces, from, to));
+    },
+    [setRailOrder, spaces],
+  );
 
   const items: Record<RailSpaceId, { href: string; icon: IconComponent; label: string; fullLabel: string }> = {
     inbox: {
@@ -230,17 +288,36 @@ export function AppRail({
       ) : (
         <div className="h-2 shrink-0" />
       )}
-      <ul className="flex flex-col items-center gap-0.5">
-        {RAIL_SPACES.map((id) => (
-          <RailSpaceLink
-            key={id}
-            space={id}
-            {...items[id]}
-            href={shell?.spaceHref(id, items[id].href) ?? items[id].href}
-            active={space === id}
-            badge={badges[id]}
-          />
-        ))}
+      <ul
+        className="flex flex-col items-center gap-0.5"
+        onClickCapture={(event) => {
+          if (performance.now() - dragEndedAtRef.current < 150) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
+      >
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={() => setDragging(true)}
+          onDragEnd={handleDragEnd}
+          onDragCancel={() => setDragging(false)}
+        >
+          <SortableContext items={spaces} strategy={verticalListSortingStrategy}>
+            {spaces.map((id) => (
+              <RailSpaceLink
+                key={id}
+                space={id}
+                {...items[id]}
+                href={shell?.spaceHref(id, items[id].href) ?? items[id].href}
+                active={space === id}
+                badge={badges[id]}
+                peekable={!dragging}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
       </ul>
       <div className="mt-auto flex flex-col items-center gap-1 pt-2">
         <HelpLauncher />
