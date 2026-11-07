@@ -5413,6 +5413,25 @@ func (r *reportTaskResultRecorder) handler(t *testing.T) http.HandlerFunc {
 	})
 }
 
+func TestReportTaskResult_CodexOverloadCarriesSelectedModel(t *testing.T) {
+	t.Parallel()
+	rec := &reportTaskResultRecorder{}
+	srv := httptest.NewServer(rec.handler(t))
+	t.Cleanup(srv.Close)
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.reportTaskResult(context.Background(), "task-overloaded", TaskResult{
+		Status: "blocked", Comment: "busy", SessionID: "codex-session",
+		FailureReason: taskfailure.ReasonCodexServerOverloaded.String(), SelectedModel: "gpt-6-sol",
+	}, slog.Default())
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if rec.path != "/api/daemon/tasks/task-overloaded/fail" ||
+		rec.payload["failure_reason"] != taskfailure.ReasonCodexServerOverloaded.String() ||
+		rec.payload["selected_model"] != "gpt-6-sol" || rec.payload["session_id"] != "codex-session" {
+		t.Fatalf("overload fail request path=%q payload=%v", rec.path, rec.payload)
+	}
+}
+
 func TestReportTaskResult_CompletedHitsCompleteEndpoint(t *testing.T) {
 	t.Parallel()
 

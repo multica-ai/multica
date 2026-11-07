@@ -398,6 +398,8 @@ type TaskCancellationActor struct {
 
 type AgentTaskResponse struct {
 	StartClaimSupported      bool                   `json:"start_claim_supported,omitempty"`
+	CodexRetryMustResume     bool                   `json:"codex_retry_must_resume,omitempty"`
+	CodexRetryExpectedBranch string                 `json:"codex_retry_expected_branch,omitempty"`
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
 

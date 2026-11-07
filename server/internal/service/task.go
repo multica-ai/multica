@@ -1149,7 +1149,7 @@ func taskErrorType(reason string) string {
 }
 
 // EnqueueTaskForIssue creates a queued task for an agent-assigned issue.
-// No context snapshot is stored — the agent fetches all data it needs at
+// Only retry source evidence is snapshotted; the agent fetches issue data at
 // runtime via the multica CLI.
 func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
 	var commentID pgtype.UUID
@@ -1345,7 +1345,8 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		TriggerEvidenceRefID: attrEvidenceRef,
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
-		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
+		HeadSha:    headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
+		RetryRoute: pgtype.Text{String: "issue_assignee", Valid: true},
 	}
 	var task db.AgentTaskQueue
 	if fireAt.Valid {
@@ -1418,14 +1419,19 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, origin)
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, origin, "mention_agent")
 }
 
 // EnqueueTaskForThreadParent creates a queued task for the agent who authored
 // the direct parent comment a member replied to.
 func (s *TaskService) EnqueueTaskForThreadParent(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
 	// Always named: the only caller is a member replying to what this agent said.
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, OriginNamed)
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, OriginNamed, "thread_parent")
+}
+
+// EnqueueTaskForConversation preserves the route selected by comment routing.
+func (s *TaskService) EnqueueTaskForConversation(ctx context.Context, issue db.Issue, agentID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, OriginNamed, "conversation")
 }
 
 // EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
@@ -1440,7 +1446,12 @@ func (s *TaskService) EnqueueTaskForThreadParent(ctx context.Context, issue db.I
 // leader task was triggered (comment @squad, issue assign, autopilot,
 // sub-issue done callback). See migration 127.
 func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, triggerCommentID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, false, "", pgtype.UUID{}, pgtype.UUID{}, origin)
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, false, "", pgtype.UUID{}, pgtype.UUID{}, origin, "")
+}
+
+// EnqueueTaskForSquadLeaderWithRetryRoute records the source route for a future retry.
+func (s *TaskService) EnqueueTaskForSquadLeaderWithRetryRoute(ctx context.Context, issue db.Issue, leaderID, squadID, triggerCommentID pgtype.UUID, origin RunOrigin, route string) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, false, "", pgtype.UUID{}, pgtype.UUID{}, origin, route)
 }
 
 // EnqueueTaskForSquadLeaderByActor is the assign/promote variant of
@@ -1448,20 +1459,20 @@ func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Is
 // assign/promote and becomes the accountable human (MUL-4302 §4); invalid when
 // the caller has no member actor.
 func (s *TaskService) EnqueueTaskForSquadLeaderByActor(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, pgtype.UUID{}, true, squadID, false, "", actorUserID, pgtype.UUID{}, OriginDerived)
+	return s.enqueueMentionTask(ctx, issue, leaderID, pgtype.UUID{}, true, squadID, false, "", actorUserID, pgtype.UUID{}, OriginDerived, "issue_assignee")
 }
 
 // EnqueueTaskForSquadLeaderWithHandoff is the squad equivalent of
 // EnqueueTaskForIssueWithHandoff.
 func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, handoffNote string, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, pgtype.UUID{}, true, squadID, false, handoffNote, actorUserID, pgtype.UUID{}, OriginDerived)
+	return s.enqueueMentionTask(ctx, issue, leaderID, pgtype.UUID{}, true, squadID, false, handoffNote, actorUserID, pgtype.UUID{}, OriginDerived, "issue_assignee")
 }
 
-func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, origin, false)
+func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin, route string) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, origin, false, route)
 }
 
-func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin, freshRerun bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin, freshRerun bool, route string) (db.AgentTaskQueue, error) {
 	if err := guardIssueNotInTriage(ctx, s.Queries, issue.ID, origin); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
@@ -1518,6 +1529,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		DelegatedFromTaskID:  attrDelegatedFrom,
 		TriggerEvidenceKind:  attrEvidenceKind,
 		TriggerEvidenceRefID: attrEvidenceRef,
+		RetryRoute:           pgtype.Text{String: route, Valid: route != ""},
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
@@ -5071,7 +5083,11 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // FailTaskWithTransition is the failure counterpart to
 // CompleteTaskWithTransition. The bool is false for an idempotent replay that
 // observed an already-terminal row.
-func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, bool, error) {
+func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, selectedModels ...string) (*db.AgentTaskQueue, bool, error) {
+	selectedModel := ""
+	if len(selectedModels) > 0 {
+		selectedModel = selectedModels[0]
+	}
 	// Strip bytes PostgreSQL cannot store before anything else reads errMsg, so
 	// the classifier, the transaction and every downstream consumer see the one
 	// text we will actually persist (GH #7098). Kept at the service boundary
@@ -5111,12 +5127,16 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		retryOverlay     runtimeMCPOverlayData
 		retryFireAt      pgtype.Timestamptz
 		retryMaxAttempts pgtype.Int4
+		retryDelay       time.Duration
+		retrySkipReason  string
 	)
 	if retryableReasons[failureReason] {
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
-		} else if retryEligible(failureReason, parent) {
+		} else if retryDelay = retryDelayForAttempt(failureReason, parent.Attempt); retryEligible(failureReason, parent) &&
+			(failureReason != string(taskfailure.ReasonCodexServerOverloaded) ||
+				(!sessionRolloutMissing && s.codexRetryReady(ctx, parent, selectedModel, time.Now(), retryDelay))) {
 			wantRetry = true
 			// Persist the reason-aware effective budget into the child so the
 			// retry chain self-describes (e.g. provider_network → max_attempts=3),
@@ -5125,8 +5145,8 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			// Defer this attempt when the reason's schedule calls for a backoff
 			// (provider_network's final attempt waits ~5s); a zero delay leaves
 			// fire_at NULL so the child is created immediately-claimable.
-			if delay := retryDelayForAttempt(failureReason, parent.Attempt); delay > 0 {
-				retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
+			if retryDelay > 0 {
+				retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(retryDelay), Valid: true}
 			}
 			if agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID); aerr != nil {
 				// Best-effort: a missing overlay is not retry-fatal — the child
@@ -5137,7 +5157,19 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			} else {
 				retryOverlay = s.buildRuntimeMCPOverlay(ctx, parent.OriginatorUserID, agent)
 			}
+		} else if failureReason == string(taskfailure.ReasonCodexServerOverloaded) && retryEligible(failureReason, parent) {
+			switch {
+			case sessionRolloutMissing:
+				retrySkipReason = "the Codex session rollout is unavailable"
+			case selectedModel == "":
+				retrySkipReason = "the selected model was not recorded"
+			default:
+				retrySkipReason = "the original model, runtime, trigger source, or recovery deadline could not be verified"
+			}
 		}
+	}
+	if retrySkipReason != "" {
+		errMsg += "; [multica] automatic retry skipped: " + retrySkipReason
 	}
 
 	var task db.AgentTaskQueue
@@ -5150,6 +5182,7 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			ID:             taskID,
 			Error:          pgtype.Text{String: errMsg, Valid: true},
 			FailureReason:  pgtype.Text{String: failureReason, Valid: failureReason != ""},
+			SelectedModel:  pgtype.Text{String: selectedModel, Valid: selectedModel != ""},
 			SessionID:      pgtype.Text{String: sessionID, Valid: sessionID != ""},
 			WorkDir:        pgtype.Text{String: workDir, Valid: workDir != ""},
 			DurableWorkDir: pgtype.Text{String: durableWorkDir, Valid: durableWorkDir != ""},
@@ -5500,6 +5533,7 @@ var retryableReasons = map[string]bool{
 	string(taskfailure.ReasonTimeout):                true,
 	"codex_semantic_inactivity":                      true,
 	string(taskfailure.ReasonAgentProviderNetwork):   true,
+	string(taskfailure.ReasonCodexServerOverloaded):  true,
 	string(taskfailure.ReasonSkillBundleUnavailable): true,
 }
 
@@ -5549,6 +5583,16 @@ func retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
 // the child is created 'queued', claimable at once). Callers pass the returned
 // delay to CreateRetryTask via fire_at.
 func retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
+	if reason == string(taskfailure.ReasonCodexServerOverloaded) {
+		base := time.Minute
+		if failedAttempt > 1 {
+			base = time.Duration(1<<min(failedAttempt-1, 3)) * time.Minute
+			if base > 5*time.Minute {
+				base = 5 * time.Minute
+			}
+		}
+		return base - 10*time.Second + time.Duration(time.Now().UnixNano()%int64(20*time.Second))
+	}
 	if reason == string(taskfailure.ReasonRuntimeOffline) {
 		return runtimeOfflineRetryDeferral
 	}
@@ -5557,6 +5601,74 @@ func retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
 		return providerNetworkFinalRetryWait
 	}
 	return 0
+}
+
+func codexRetryExpectation(task db.AgentTaskQueue) (model string, deadline time.Time, ok bool) {
+	var contextData struct {
+		Model    string `json:"codex_retry_model"`
+		Deadline string `json:"codex_retry_deadline"`
+	}
+	if json.Unmarshal(task.Context, &contextData) != nil || contextData.Model == "" || contextData.Deadline == "" {
+		return "", time.Time{}, false
+	}
+	deadline, err := time.Parse(time.RFC3339Nano, contextData.Deadline)
+	return contextData.Model, deadline, err == nil
+}
+
+func (s *TaskService) codexRetryReady(ctx context.Context, parent db.AgentTaskQueue, selectedModel string, now time.Time, delay time.Duration) bool {
+	if selectedModel == "" {
+		return false
+	}
+	if expected, deadline, ok := codexRetryExpectation(parent); ok {
+		if expected != selectedModel || !now.Add(delay).Before(deadline) {
+			return false
+		}
+	} else if parent.Attempt > 1 {
+		return false
+	}
+	agent, err := s.Queries.GetAgent(ctx, parent.AgentID)
+	if err != nil || agent.ArchivedAt.Valid || agent.Model.String != selectedModel || agent.RuntimeID != parent.RuntimeID {
+		return false
+	}
+	return s.codexRetrySourceProblem(ctx, parent, agent) == ""
+}
+
+// CodexRetryClaimProblem checks the original selection immediately before a
+// deferred child is delivered. A changed model or issue ends the child with a
+// visible reason instead of leaving it queued forever or silently switching.
+func (s *TaskService) CodexRetryClaimProblem(ctx context.Context, child db.AgentTaskQueue, agent db.Agent) (bool, string) {
+	if !child.RetryOfTaskID.Valid {
+		return false, ""
+	}
+	parent, err := s.Queries.GetAgentTask(ctx, child.RetryOfTaskID)
+	if err != nil {
+		if model, _, ok := codexRetryExpectation(child); ok && model != "" {
+			return true, "Codex retry source is unavailable."
+		}
+		return false, ""
+	}
+	if parent.FailureReason.String != string(taskfailure.ReasonCodexServerOverloaded) {
+		return false, ""
+	}
+	model, deadline, ok := codexRetryExpectation(child)
+	if !ok || model == "" {
+		return true, "Codex retry model or recovery deadline could not be verified."
+	}
+	if !time.Now().Before(deadline) {
+		return true, "Codex overload recovery window expired."
+	}
+	if child.AgentID != parent.AgentID || child.RuntimeID != parent.RuntimeID ||
+		child.IssueID != parent.IssueID || child.TriggerCommentID != parent.TriggerCommentID || agent.ArchivedAt.Valid ||
+		agent.RuntimeID != child.RuntimeID || agent.Model.String != model {
+		return true, "Codex retry stopped because the agent, runtime, or selected model changed."
+	}
+	if !child.SessionID.Valid || child.SessionRolloutMissing || parent.SessionRolloutMissing {
+		return true, "Codex retry stopped because the previous session is unavailable."
+	}
+	if problem := s.codexRetrySourceProblem(ctx, child, agent); problem != "" {
+		return true, problem
+	}
+	return true, ""
 }
 
 func resumeUnsafeFailureReason(reason string) bool {
@@ -5715,6 +5827,13 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	if !retryEligible(reason, parent) {
 		return nil, nil
 	}
+	retryDelay := retryDelayForAttempt(reason, parent.Attempt)
+	if reason == string(taskfailure.ReasonCodexServerOverloaded) {
+		model, _, ok := codexRetryExpectation(parent)
+		if !ok || parent.SessionRolloutMissing || !s.codexRetryReady(ctx, parent, model, time.Now(), retryDelay) {
+			return nil, nil
+		}
+	}
 
 	var runtimeMCPOverlay runtimeMCPOverlayData
 	agent, agentErr := s.Queries.GetAgent(ctx, parent.AgentID)
@@ -5735,8 +5854,8 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// NULL for an immediate child), and write the reason-aware ceiling into the
 	// child's max_attempts so the retry chain stays self-consistent.
 	var retryFireAt pgtype.Timestamptz
-	if delay := retryDelayForAttempt(reason, parent.Attempt); delay > 0 {
-		retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
+	if retryDelay > 0 {
+		retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(retryDelay), Valid: true}
 	}
 	// Same advisory slot check as FailTask's path, for the same reason: skip the
 	// work when a successor is already visible. Losing the race is handled by
@@ -6186,7 +6305,7 @@ func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agen
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
 		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, true, "", actorUserID, rerunOfTaskID, pgtype.Timestamptz{}, origin, fresh)
 	}
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID, origin, fresh)
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID, origin, fresh, "")
 }
 
 // The bulk terminal writes below are the sweeper, archive and daemon-recovery

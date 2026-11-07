@@ -4475,6 +4475,154 @@ func TestCodexExecuteSemanticInactivityDoesNotAffectNormalTurnCompletion(t *test
 	}
 }
 
+func TestCodexStructuredOverloadEvidence(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	cases := []struct {
+		name         string
+		errorMessage string
+		errorInfo    string
+		toolStarted  bool
+		textStarted  bool
+		cleanupFails bool
+		noModel      bool
+		wantLaunches string
+	}{
+		{"confirmed overload", "selected model unavailable", "serverOverloaded", false, false, false, false, "1"},
+		{"userMessage ack", "selected model unavailable", "serverOverloaded", false, false, false, false, "1"},
+		{"capacity text without code", "Selected model is at capacity. Please try a different model.", "", false, false, false, false, "1"},
+		{"unknown code", "Selected model is at capacity. Please try a different model.", "futureCode", false, false, false, false, "1"},
+		{"quota", "Selected model is at capacity. Please try a different model.", "usageLimitExceeded", false, false, false, false, "1"},
+		{"auth", "Selected model is at capacity. Please try a different model.", "unauthorized", false, false, false, false, "1"},
+		{"invalid model", "Selected model is at capacity. Please try a different model.", "badRequest", false, false, false, false, "1"},
+		{"permanent model rejection", "The selected model is no longer supported", "", false, false, false, false, "1"},
+		{"tool already started", "selected model unavailable", "serverOverloaded", true, false, false, false, "1"},
+		{"text already emitted", "selected model unavailable", "serverOverloaded", false, true, false, false, "1"},
+		{"unknown item", "selected model unavailable", "serverOverloaded", false, false, false, false, "1"},
+		{"process cleanup unconfirmed", "selected model unavailable", "serverOverloaded", false, false, true, false, "1"},
+		{"selected model not pinned", "selected model unavailable", "serverOverloaded", false, false, false, true, "1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.cleanupFails {
+				codexCleanupConfirmationOverride.Store(-1)
+				defer codexCleanupConfirmationOverride.Store(0)
+			}
+			turnCompleted, err := json.Marshal(map[string]any{
+				"jsonrpc": "2.0", "method": "turn/completed",
+				"params": map[string]any{
+					"threadId": "thr-capacity",
+					"turn": map[string]any{"id": "turn-capacity", "status": "failed",
+						"error": map[string]any{"message": tc.errorMessage, "codexErrorInfo": tc.errorInfo}},
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			toolEvent := ""
+			if tc.toolStarted {
+				toolEvent = `echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-capacity","item":{"type":"commandExecution","id":"tool-1","command":"touch changed"}}}'` + "\n"
+			}
+			if tc.textStarted {
+				toolEvent = `echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-capacity","item":{"type":"agentMessage","id":"msg-1","text":"partial"}}}'` + "\n"
+			}
+			if tc.name == "unknown item" {
+				toolEvent = `echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-capacity","item":{"type":"futureAgentAction","id":"item-1"}}}'` + "\n"
+			}
+			if tc.name == "userMessage ack" {
+				toolEvent = `echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-capacity","item":{"type":"userMessage","id":"input-1","content":[{"type":"text","text":"prompt"}]}}}'` + "\n"
+			}
+			fakePath := writeFakeCodexAppServer(t, ""+
+				`DIR="$(dirname "$0")"`+"\n"+
+				`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+				`echo $((ATTEMPT+1)) > "$DIR/attempts"`+"\n"+
+				`read line`+"\n"+
+				`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+				`read line`+"\n"+
+				`read line`+"\n"+
+				`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-capacity"}}}'`+"\n"+
+				`read line`+"\n"+
+				`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+				`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-capacity","turn":{"id":"turn-capacity"}}}'`+"\n"+
+				toolEvent+
+				"echo '"+string(turnCompleted)+"'\n")
+			model := "gpt-6-sol"
+			if tc.noModel {
+				model = ""
+			}
+			result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 10 * time.Second, Model: model})
+			if result.Status != "failed" {
+				t.Fatalf("terminal result = %+v", result)
+			}
+			if result.Error != tc.errorMessage {
+				t.Fatalf("terminal result = %+v", result)
+			}
+			if got, want := result.CodexServerOverloaded, tc.name == "confirmed overload" || tc.name == "userMessage ack"; got != want {
+				t.Fatalf("structured overload = %v, want %v", got, want)
+			}
+			attempts, err := os.ReadFile(filepath.Join(filepath.Dir(fakePath), "attempts"))
+			if err != nil || strings.TrimSpace(string(attempts)) != tc.wantLaunches {
+				t.Fatalf("launch count = %q, err = %v; want %s", attempts, err, tc.wantLaunches)
+			}
+		})
+	}
+}
+
+func TestCodexStructuredErrorInfoCompletionWins(t *testing.T) {
+	t.Parallel()
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-1"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"busy","codexErrorInfo":"serverOverloaded"},"willRetry":false}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"failed","error":{"message":"quota","codexErrorInfo":"usageLimitExceeded"}}}}`)
+	if got := c.getTurnErrorInfo(); got != "usageLimitExceeded" {
+		t.Fatalf("terminal error info = %q, want quota", got)
+	}
+	c2, _, _ := newTestCodexClient(t)
+	c2.notificationProtocol = "raw"
+	c2.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-2"}}}`)
+	c2.handleLine(`{"jsonrpc":"2.0","method":"error","params":{"error":{"message":"busy","codexErrorInfo":"serverOverloaded"},"willRetry":true}}`)
+	c2.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-2","status":"failed","error":{"message":"capacity text without code"}}}}`)
+	if got := c2.getTurnErrorInfo(); got != "" {
+		t.Fatalf("missing terminal code inherited transient notification: %q", got)
+	}
+}
+
+func TestCodexRetryCancellationBeforeTimerAndSpawn(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := waitCodexRetry(ctx, 0); !errors.Is(err, context.Canceled) {
+		t.Fatalf("pre-cancelled retry wait = %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeCodexAppServer(t, `echo invoked > "$(dirname "$0")/invoked"`+"\n")
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = backend.(*codexBackend).executeOnce(ctx, "prompt", ExecOptions{Model: "gpt-6-sol"}, 2)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("pre-cancelled executeOnce = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(fakePath), "invoked")); !os.IsNotExist(err) {
+		t.Fatalf("pre-cancelled retry spawned process: stat err=%v", err)
+	}
+}
+
+func TestMergeCodexAttemptUsage(t *testing.T) {
+	t.Parallel()
+	first := map[string]TokenUsage{"gpt-6-sol": {InputTokens: 10, CacheReadTokens: 3, CostUSDTicks: 7}}
+	second := map[string]TokenUsage{"gpt-6-sol": {OutputTokens: 5, CacheWriteTokens: 2, CostUSDTicks: 11}}
+	got := mergeCodexAttemptUsage(first, second)["gpt-6-sol"]
+	if got.InputTokens != 10 || got.OutputTokens != 5 ||
+		got.CacheReadTokens != 3 || got.CacheWriteTokens != 2 || got.CostUSDTicks != 18 {
+		t.Fatalf("merged retry usage = %+v", got)
+	}
+}
+
 // TestCodexExecuteRetriesAfterModelCatalogRefreshFailure covers the MUL-5110
 // hot path: Codex accepts the turn, fails to load its model catalog, and never
 // emits an item. The daemon must retry once and surface the second attempt.

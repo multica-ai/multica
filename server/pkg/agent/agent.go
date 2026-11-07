@@ -77,6 +77,9 @@ type ExecOptions struct {
 	// HandshakeTimeout; when both are zero Codex uses separate built-in defaults.
 	ThreadHandshakeTimeout time.Duration
 	ResumeSessionID        string // if non-empty, resume a previous agent session
+	// CodexRetryMustResume forbids a fresh thread when a verified overload retry
+	// cannot resume its parent session. Ordinary resumes may still fall back.
+	CodexRetryMustResume bool
 	// ResumeExpected records that this task intended to continue a prior
 	// conversation, independent of ResumeSessionID (which a fallback retry may
 	// clear). When it is true but the backend ends up on a fresh thread — the
@@ -337,6 +340,10 @@ type Result struct {
 	// its model catalog, and that the process tree was reaped afterwards.
 	// Like codexInitializeRetrySafe it is not part of the public contract.
 	codexStartupRefreshRetrySafe bool
+	// CodexServerOverloaded is structured provider evidence that the selected
+	// model was overloaded before any agent action and after process cleanup.
+	// The daemon forwards it as a dedicated task failure reason.
+	CodexServerOverloaded bool
 }
 
 // Config configures a Backend instance.
