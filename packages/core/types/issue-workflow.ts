@@ -64,8 +64,16 @@ export interface NewWorkflowStatus {
 }
 
 /** A column of a workflow write: an existing status or a new one, with its handoff. */
-export type IssueWorkflowStepInput = ({ status_key: string } | { new_status: NewWorkflowStatus }) &
-  Partial<SetWorkflowHandoffRequest>;
+export type IssueWorkflowStepInput = ({ status_key: string } | { new_status: NewWorkflowStatus }) & {
+  handler?: IssueWorkflowHandler;
+  instructions?: string;
+  next_status_key?: string;
+  back_status_key?: string;
+  /** Request-local references, resolved during this workflow write. */
+  client_id?: string;
+  next_step_id?: string;
+  back_step_id?: string;
+};
 
 export interface IssueWorkflowWriteRequest {
   name?: string;
