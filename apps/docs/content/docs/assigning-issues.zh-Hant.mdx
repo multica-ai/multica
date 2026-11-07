@@ -1,0 +1,104 @@
+---
+title: 分配任務給 AI 代理
+description: 讓 AI 代理負責一條任務，並決定是否立即開始執行。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { AssignDemo } from "@/components/demos/assign-demo";
+
+當一項工作需要由 AI 代理持續負責時，把任務分配給它。AI 代理會讀取任務的說明和討論，使用自己的配置與 skill 完成工作，並把進展和結果寫回原來的任務。
+
+只需要 AI 代理處理一條具體請求、不改變負責人時，改用[評論中的 @提及](/mentioning-agents)。
+
+## 分配並開始執行
+
+<Steps>
+<Step>
+
+開啟一條任務，點選**負責人**。
+
+</Step>
+<Step>
+
+選擇一個 AI 代理或小隊。
+
+</Step>
+<Step>
+
+在確認視窗中檢查即將啟動的 AI 代理，然後選擇**確認指派**。
+
+</Step>
+</Steps>
+
+<AssignDemo />
+
+AI 代理這次需要知道的資訊，要寫在任務的說明和討論裡，或者寫進專案說明和 AI 代理指令。
+
+分配給小隊時，任務的負責人是小隊，首先開始執行的是小隊 leader。它會按照小隊的工作方式判斷是否需要交給其他成員。
+
+## 分配後的執行流程
+
+Multica 會為 AI 代理建立一條[執行](/tasks)。線上執行時領取執行後，會呼叫本機的 AI 程式設計工具；進度、評論和結果隨後顯示在任務中。
+
+執行時暫時離線時，執行留在佇列中等待；執行繫結該執行時，不會轉移到其他電腦執行。
+
+AI 代理在執行時可以：
+
+- 讀取任務的描述、屬性和評論；
+- 使用繫結的 skill、MCP 和專案上下文；
+- 在本地工作目錄中讀取檔案、執行命令和修改內容；
+- 發表評論並更新任務狀態。
+
+具體能力仍受 AI 代理配置、執行時環境和你的呼叫權限限制。
+
+AI 代理會隨工作進展更新任務狀態。預設情況下，開始工作時改為進行中，交付後改為審查中；專案使用工作流時，則按其中的步驟和交接說明推進。一次執行結束不等於任務完成，僅回答一個問題也不表示任務本身的工作已經交付。
+
+專案經常需要在成員或 AI 代理之間交接時，可以用[工作流](/workflows)安排每一步。只是經常傳送同一類請求、希望保留原負責人時，可以儲存成[快捷操作](/quick-actions)。
+
+## 只分配，暫時不啟動
+
+確認視窗中的**暫不開始**會儲存負責人，但不建立這一次執行。適合先明確歸屬，等背景或依賴準備好以後再開始。
+
+`backlog` 也不會因為分配 AI 代理而啟動執行。把任務移出 `backlog`，或者在評論中繼續向負責人提出要求後，才會產生後續執行。
+
+如果任務已經有 AI 代理或小隊負責人，把它移出 `backlog` 也會彈出同一個確認窗，因為啟動執行的是這次狀態變更。窗裡同樣有**暫不開始**：只改狀態，不叫醒 AI 代理。只要目標不是 `backlog` 本身，也不屬於 `done` 或 `closed` 分類，都會彈這個確認窗。
+
+只有固定的 `backlog` 狀態有這個效果。`unstarted` 分類下的[自定義狀態](/issues#自定義狀態)**不會**停住工作，把 AI 代理分配到那裡會立刻啟動執行。已經處於 `done` 或 `cancelled` 的任務，分配或重新分配給 AI 代理時同樣會立即開始執行。
+
+## 分配權限
+
+能否分配由 AI 代理的 Access 決定：
+
+- **僅自己**：只有 AI 代理 owner 可以呼叫；
+- **指定成員**：owner 和名單中的成員可以呼叫；
+- **整個工作區**：所有工作區成員都可以呼叫。
+
+工作區 owner 和 admin 可以管理 AI 代理，但"看得到"不代表"可以執行"。負責人選擇器會禁用你無權呼叫的 AI 代理。完整規則見[AI 代理](/agents#權限與-access)。
+
+## 更換或移除負責人
+
+把負責人換成另一個 AI 代理，會為新負責人啟動一次新的執行；選擇成員只會改變負責人，不會呼叫 AI 程式設計工具。移除負責人也不會建立執行。
+
+<Callout type="warning">
+通常，更換或移除負責人不會停止已經開始的執行，需要時請在執行日誌中停止。[工作流交接](/workflows)的確認視窗還可以在移動任務的同時，停止或取消上一位 AI 代理的執行。
+</Callout>
+
+## 使用 CLI
+
+```bash
+multica issue assign MUL-42 --to "Agent name"
+multica issue assign MUL-42 --to-id <agent-uuid> --no-start
+multica issue status MUL-42 in_progress --no-start
+multica issue assign MUL-42 --unassign
+```
+
+指令碼中用 `--to-id <uuid>` 可避免同名物件匹配錯誤。UUID 透過 `multica agent list --output json` 或 `multica workspace member list --output json` 檢視。
+
+如果指派只用於記錄負責人、不應建立新執行（例如同一 AI 代理已在另一次執行中處理該任務），請使用 `--no-start`。`issue update` 和 `issue status` 同樣支援這個 flag。如果只記錄歸屬的流程同時修改負責人和狀態，兩條命令都要傳入該 flag；抑制指派不會自動抑制後續狀態變更觸發的執行。
+
+## 接下來
+
+- [在評論中 @ AI 代理](/mentioning-agents) — 不改變負責人，處理新的問題。
+- [執行](/tasks) — 檢視排隊、重試和停止規則。
+- [小隊](/squads) — 由 leader 協調多個 AI 代理。

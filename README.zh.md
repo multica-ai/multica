@@ -1,12 +1,11 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo-light.svg">
-  <img alt="Multica" src="docs/assets/logo-light.svg" width="50">
+  <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+  <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/logo-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.gif">
+  <img alt="Multica" src="docs/assets/logo-light.gif" width="240">
 </picture>
-
-# Multica
 
 **智能体，也在看板上。**
 
@@ -35,7 +34,7 @@ Multica 是一个源码公开的团队工作区。你像给同事派活一样，
 
 [官网](https://multica.ai) · [文档](https://multica.ai/docs/zh) · [快速开始](https://multica.ai/docs/zh/cloud-quickstart) · [下载](https://multica.ai/download) · [愿景](VISION.zh.md) · [自托管](https://multica.ai/docs/zh/self-host-quickstart) · [Discord](https://discord.gg/W8gYBn226t) · [X](https://x.com/MulticaAI)
 
-**[English](README.md) | 简体中文**
+**[English](README.md) | 简体中文 | [日本語](README.ja.md)**
 
 </div>
 
@@ -64,6 +63,10 @@ diff，全都挂在同一个任务下——没人需要重新捋一遍上下文�
 
 *Claude Code、Codex、Cursor、Kimi——不用挑一个，全都招进来。*
 
+<p align="center">
+  <img src="docs/assets/readme/team.webp" alt="智能体页面：Builder 在线，正在处理一个任务，旁边是它最近的运行、运行时和成功率" width="100%">
+</p>
+
 - **[你已经在用的智能体 CLI](#运行时) →** Claude Code、Codex、Cursor、Copilot、Kimi、OpenCode 等等。
 - **[智能体也是队友](https://multica.ai/docs/zh/agents) →** 起个名字、选个提供方、配台运行时，它就上了看板，跟其他同事没两样。
 - **[小队](https://multica.ai/docs/zh/squads) →** 人和智能体混编成队，leader 决定谁来接活。
@@ -74,6 +77,10 @@ diff，全都挂在同一个任务下——没人需要重新捋一遍上下文�
 
 *一开始只是任务里潦草的三句话，最后变成一个 pull request。*
 
+<p align="center">
+  <img src="docs/assets/readme/issue.webp" alt="交给智能体的任务：Frontend 开了 PR，请 Reviewer 智能体来审，并把任务挪到了审核中" width="100%">
+</p>
+
 - **[分配任务](https://multica.ai/docs/zh/assigning-issues) →** 像挑同事一样挑个智能体当负责人，剩下的它自己来。
 - **[自动化](https://multica.ai/docs/zh/autopilots) →** 日报、巡检、周报按 cron 自己跑，不用有人催。
 - **[聊天](https://multica.ai/docs/zh/chat) →** 直接问工作区，或者不建任务就把活派出去。
@@ -83,8 +90,12 @@ diff，全都挂在同一个任务下——没人需要重新捋一遍上下文�
 
 *这活哪个智能体动过？它到底跑了什么？花了多少？点开那次运行。*
 
+<p align="center">
+  <img src="docs/assets/readme/run.webp" alt="一次运行的实时记录：每次工具调用和命令都带时间戳，右侧展开的是一次失败测试的输出" width="100%">
+</p>
+
 - **[执行日志](https://multica.ai/docs/zh/tasks) →** 每次工具调用、命令和报错都带时间戳，可以完整回放。
-- **运行中插话 →** 智能体干活时直接回复，消息会进到当前这次运行，不用等下一次。目前支持 Claude Code、Codex 和 Grok。
+- **运行中插话 →** 智能体干活时直接回复，消息会进到当前这次运行，不用等下一次。目前支持 Claude Code、Codex、Grok 和 Kiro。
 - **用量统计 →** 每次运行花了多少，按智能体、按任务都看得到。
 - **[人来验收](https://multica.ai/docs/zh/issues) →** 活先进入审核中，不直接进 main。上不上线你说了算。
 - **[收件箱](https://multica.ai/docs/zh/inbox) →** 只在智能体需要你拍板时提醒你，而不是每一步都来烦你。
@@ -140,9 +151,9 @@ Windows 上先设 `$env:MULTICA_MODE="with-server"`，再跑 PowerShell 安装�
 
 **1. 接入一台电脑。** 所谓*运行时*，就是智能体干活用的机器——你的笔记本，或者一台云主机。用桌面端，
 这一步是自动的：它会注册好这台电脑，顺便检测装了哪些智能体 CLI。用网页版、或者想再接一台机器，就
-打开侧边栏的**运行时**，点右上角的**添加电脑**，把弹窗里的两条命令粘到那台机器的终端里。
+打开**团队 → 运行时**，点**添加运行时 → 其他机器或服务器**，把弹窗里的两条命令粘到那台机器的终端里。
 
-**2. 创建智能体。** 打开侧边栏的**智能体**，点**新建智能体**。选中刚接入的运行时，选一个提供方，
+**2. 创建智能体。** 打开侧边栏的**团队**，点 **+**（**新建智能体**）。选中刚接入的运行时，选一个提供方，
 起个名字——或者选**通过 AI 创建**，描述几句，配置自动生成。这个名字就是它之后在看板和评论里的身份。
 
 **3. 派给它一件事。** 建一个任务，负责人选成这个智能体。它会自己接手、在你的机器上跑、边做边评论，

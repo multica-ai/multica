@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, type ReactNode } from "react";
-import { Check, ChevronDown, FileText, ImageIcon, MessageSquareText } from "lucide-react";
+import { Check, ChevronDown, FileText, ImageIcon, MessageSquareText } from "@multica/ui/icons";
 import {
   findDeliverableVersion,
   type DeliverableFile,
@@ -15,6 +15,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { cn } from "@multica/ui/lib/utils";
 import { useLocale, useT, useTimeAgo } from "../../../i18n";
 import { ActorAvatar } from "../../../common/actor-avatar";
@@ -250,32 +251,32 @@ function DeliverableInfo({
             {siblings.map((sibling) => {
               const current = sibling.key === item.key;
               return (
-                <button
-                  key={sibling.key}
-                  type="button"
-                  className={cn(
-                    "aspect-square overflow-hidden rounded-md ring-1 transition-shadow",
-                    current
-                      ? "ring-2 ring-foreground"
-                      : "ring-border hover:ring-foreground/40",
-                  )}
-                  title={sibling.filename}
-                  aria-label={sibling.filename}
-                  aria-current={current || undefined}
-                  onClick={() => controls.goTo(sibling.key)}
-                >
-                  {sibling.attachment ? (
-                    <DeliverableThumbnail
-                      attachment={sibling.attachment}
-                      showTypeLabel={false}
-                      className="size-full"
-                    />
-                  ) : (
-                    <span className="flex size-full items-center justify-center bg-muted text-muted-foreground">
-                      <ImageIcon className="size-4" />
-                    </span>
-                  )}
-                </button>
+                <TooltipHint key={sibling.key} label={sibling.filename}>
+                  <button
+                    type="button"
+                    className={cn(
+                      "aspect-square overflow-hidden rounded-md ring-1 transition-shadow",
+                      current
+                        ? "ring-2 ring-foreground"
+                        : "ring-border hover:ring-foreground/40",
+                    )}
+                    aria-label={sibling.filename}
+                    aria-current={current || undefined}
+                    onClick={() => controls.goTo(sibling.key)}
+                  >
+                    {sibling.attachment ? (
+                      <DeliverableThumbnail
+                        attachment={sibling.attachment}
+                        showTypeLabel={false}
+                        className="size-full"
+                      />
+                    ) : (
+                      <span className="flex size-full items-center justify-center bg-muted text-muted-foreground">
+                        <ImageIcon className="size-4" />
+                      </span>
+                    )}
+                  </button>
+                </TooltipHint>
               );
             })}
           </div>

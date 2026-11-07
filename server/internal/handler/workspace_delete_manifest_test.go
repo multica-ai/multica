@@ -19,6 +19,7 @@ const (
 // teardown. Adding a table requires an explicit ownership decision here; the
 // handler deletion graph must then implement that decision before CI passes.
 var workspaceDeletionManifest = map[string]workspaceDeleteAction{
+	"cloud_agent_connection":             workspaceDelete,
 	"activity_log":                       workspaceDelete,
 	"agent":                              workspaceDelete,
 	"agent_builder_draft":                workspaceDelete,
@@ -90,6 +91,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"issue_workflow":                     workspaceDelete,
 	"issue_subscriber":                   workspaceDelete,
 	"issue_to_label":                     workspaceDelete,
+	"issue_unread":                       workspaceDelete,
 	"issue_vcs_pull_request":             workspaceDelete,
 	"lark_binding_token":                 workspaceDelete,
 	"lark_chat_session_binding":          workspaceDelete,
@@ -100,6 +102,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"lark_user_binding":                  workspaceDelete,
 	"maintenance_job":                    workspaceDeleteKeep, // Global maintenance audit history, not workspace-owned.
 	"member":                             workspaceDelete,
+	"member_delegation_day":              workspaceDeleteKeep, // user-scoped telemetry ledger, no workspace_id
 	"agent_mcp_server":                   workspaceDelete,
 	"workspace_mcp_server":               workspaceDelete,
 	"notification_preference":            workspaceDelete,
@@ -124,6 +127,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"skill":                              workspaceDelete,
 	"skill_file":                         workspaceDelete,
 	"skill_to_label":                     workspaceDelete,
+	"skill_version":                      workspaceDelete,
 	"squad":                              workspaceDelete,
 	"squad_member":                       workspaceDelete,
 	"sys_cron_executions":                workspaceDeleteKeep,
@@ -142,6 +146,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"vcs_pull_request":                   workspaceDelete,
 	"verification_code":                  workspaceDeleteKeep,
 	"webhook_delivery":                   workspaceDelete,
+	"wecom_install_session":              workspaceDelete,
 	"workspace":                          workspaceDelete,
 	"workspace_invitation":               workspaceDelete,
 	"workspace_share_link":               workspaceDelete,

@@ -12,9 +12,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { computePosition, offset, flip, shift } from "@floating-ui/dom";
-import { ExternalLink, Copy } from "lucide-react";
+import { ExternalLink, Copy } from "@multica/ui/icons";
 import { toast } from "sonner";
-import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useAppOrigin } from "../navigation";
@@ -209,24 +209,24 @@ function LinkHoverCard({
       >
         {truncateUrl(href)}
       </span>
-      <Button
+      <IconButton
         size="icon-xs"
         variant="ghost"
         className="text-muted-foreground"
         onClick={handleCopy}
-        title={t(($) => $.link_hover.copy_link)}
+        label={t(($) => $.link_hover.copy_link)}
       >
         <Copy className="size-3.5" />
-      </Button>
-      <Button
+      </IconButton>
+      <IconButton
         size="icon-xs"
         variant="ghost"
         className="text-muted-foreground"
         onClick={handleOpen}
-        title={t(($) => $.link_hover.open_link)}
+        label={t(($) => $.link_hover.open_link)}
       >
         <ExternalLink className="size-3.5" />
-      </Button>
+      </IconButton>
     </div>,
     document.body,
   );

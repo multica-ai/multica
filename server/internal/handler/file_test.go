@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/attachmentpreview"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -1642,13 +1643,62 @@ func TestGetAttachmentContent_TooLarge(t *testing.T) {
 	defer func() { testHandler.Storage = origStorage }()
 
 	// One byte over the limit. Allocate ASCII so io.ReadAll has work to do.
-	big := bytes.Repeat([]byte("a"), maxPreviewTextSize+1)
+	big := bytes.Repeat([]byte("a"), int(attachmentpreview.DefaultMaxSizeBytes)+1)
 	id := seedPreviewAttachment(t, store, "huge-key.txt", "huge.txt", "text/plain", big)
 
 	req, w := newPreviewRequest(t, id, testWorkspaceID)
 	testHandler.GetAttachmentContent(w, req)
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetAttachmentContent_ConfiguredLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		limit        int64
+		size         int
+		recordedSize int64
+		status       int
+	}{
+		{"default exact", 0, 2 << 20, 2 << 20, http.StatusOK},
+		{"default over", 0, (2 << 20) + 1, (2 << 20) + 1, http.StatusRequestEntityTooLarge},
+		{"larger HTML", 8 << 20, 3 << 20, 3 << 20, http.StatusOK},
+		{"custom exact", 8 << 20, 8 << 20, 8 << 20, http.StatusOK},
+		{"custom over", 8 << 20, (8 << 20) + 1, (8 << 20) + 1, http.StatusRequestEntityTooLarge},
+		{"smaller exact", 1024, 1024, 1024, http.StatusOK},
+		{"underreported body", 1024, 1025, 1, http.StatusRequestEntityTooLarge},
+		{"oversized metadata", 1024, 1, 1025, http.StatusRequestEntityTooLarge},
+		{"maximum exact", 16 << 20, 16 << 20, 16 << 20, http.StatusOK},
+		{"clamped maximum exact", 32 << 20, 16 << 20, 16 << 20, http.StatusOK},
+		{"clamped maximum over", 32 << 20, (16 << 20) + 1, 1, http.StatusRequestEntityTooLarge},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &mockStorage{}
+			h := *testHandler
+			h.Storage = store
+			h.cfg.MaxPreviewSizeBytes = tc.limit
+			body := bytes.Repeat([]byte("a"), tc.size)
+			copy(body, "<!doctype html><h1>Preview size test</h1>")
+			id := seedPreviewAttachment(t, store, "configured-preview.html", "preview.html", "text/html", body)
+			if _, err := testPool.Exec(context.Background(), "UPDATE attachment SET size_bytes = $1 WHERE id = $2", tc.recordedSize, id); err != nil {
+				t.Fatal(err)
+			}
+			req, w := newPreviewRequest(t, id, testWorkspaceID)
+			h.GetAttachmentContent(w, req)
+			if w.Code != tc.status {
+				t.Fatalf("status = %d, want %d", w.Code, tc.status)
+			}
+			if tc.status == http.StatusOK {
+				if !bytes.Equal(w.Body.Bytes(), body) {
+					t.Fatal("preview did not preserve the complete body")
+				}
+				if w.Header().Get("Content-Type") != "text/plain; charset=utf-8" || w.Header().Get("X-Original-Content-Type") != "text/html" {
+					t.Fatal("HTML preview content-type isolation changed")
+				}
+				requireAttachmentPreviewCSP(t, w.Header())
+			}
+		})
 	}
 }
 
@@ -1682,10 +1732,8 @@ func TestGetAttachmentContent_NotFound(t *testing.T) {
 	}
 }
 
-// isTextPreviewable is the whitelist linkpin between the proxy and the
-// client-side dispatcher. Regress against the most common content types so
-// drifting one of the lists alone fails loud. The same table runs against the
-// client in packages/views/editor/utils/preview.test.ts — change both.
+// Regress representative text-preview inputs in addition to the exhaustive
+// source-driven checks in attachment_text_preview_test.go.
 func TestIsTextPreviewable(t *testing.T) {
 	t.Helper()
 	cases := []struct {

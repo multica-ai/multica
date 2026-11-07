@@ -11,6 +11,11 @@ const selection = vi.hoisted(() => ({
   clear: () => {},
 }));
 
+const deletionPolicy = vi.hoisted(() => ({ allowed: true }));
+vi.mock("@multica/core/issues/use-issue-deletion", () => ({
+  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed }),
+}));
+
 vi.mock("@multica/core/issues/stores/selection-store", () => ({
   useIssueSelectionStore: (selector: (s: typeof selection) => unknown) =>
     selector(selection),
@@ -121,6 +126,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 }
 
 beforeEach(() => {
+  deletionPolicy.allowed = true;
   selection.selectedIds = new Set();
 });
 
@@ -184,13 +190,13 @@ describe("BatchActionToolbar picker wiring", () => {
     expect(screen.getByTestId("status-picker")).toHaveAttribute("data-allowed", "done,todo");
   });
 
-  it("offers every status when no selected issue has a named workflow", () => {
+  it("offers Default's statuses for issues on Default or outside any project (MUL-8250)", () => {
     const issues = [makeIssue({ id: "a", project_id: "p-default" }), makeIssue({ id: "b" })];
     selection.selectedIds = new Set(["a", "b"]);
 
     render(<BatchActionToolbar issues={issues} />);
 
-    expect(screen.getByTestId("status-picker")).toHaveAttribute("data-allowed", "__all__");
+    expect(screen.getByTestId("status-picker")).toHaveAttribute("data-allowed", "done,in_progress,todo");
   });
 
   it("renders nothing when nothing is selected", () => {

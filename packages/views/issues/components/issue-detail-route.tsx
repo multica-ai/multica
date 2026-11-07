@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "../../navigation";
-import { IssueDetail, IssueDetailSkeleton, IssueNotFound } from "./issue-detail";
+import { IssueDetail, IssueDetailSkeleton, IssueNotFound, IssueLoadError } from "./issue-detail";
+import { IssuePeekHost } from "./issue-peek";
 
 interface IssueDetailRouteProps {
   /**
@@ -51,14 +52,7 @@ export function parseCommentHighlightHash(hash: string): string | undefined {
 }
 
 function useCommentHighlightHash(): { hash: string; commentId?: string } {
-  const read = () => typeof window === "undefined" ? "" : window.location.hash;
-  const [hash, setHash] = useState(read);
-
-  useEffect(() => {
-    const onHashChange = () => setHash(read());
-    window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
-  }, []);
+  const { hash } = useNavigation();
 
   return { hash, commentId: parseCommentHighlightHash(hash) };
 }
@@ -76,12 +70,18 @@ function useCommentHighlightHash(): { hash: string; commentId?: string } {
  */
 export function IssueDetailRoute({ routeId, onDelete }: IssueDetailRouteProps) {
   const wsId = useWorkspaceId();
-  const { canonicalId, issue, isResolving, notFound } = useCanonicalIssue(wsId, routeId);
+  const {
+    canonicalId, issue, isResolving, notFound, loadFailed, isRetrying, retry, hasLoaded,
+  } = useCanonicalIssue(wsId, routeId);
   const highlight = useCommentHighlightHash();
 
   useCanonicalIssueUrl(routeId, issue?.identifier, highlight.hash);
 
-  if (isResolving) return <IssueDetailSkeleton />;
+  if (loadFailed) {
+    return <IssueLoadError showBackLink={!onDelete} onRetry={retry} isRetrying={isRetrying} />;
+  }
+
+  if (isResolving || (!issue && !notFound)) return <IssueDetailSkeleton />;
 
   // Render not-found here rather than handing the unresolved segment down.
   // `IssueDetail` would mount a second observer on the query that just failed,
@@ -89,11 +89,17 @@ export function IssueDetailRoute({ routeId, onDelete }: IssueDetailRouteProps) {
   // unbounded request loop that never settles. See `CanonicalIssue.notFound`.
   if (notFound || !canonicalId) return <IssueNotFound showBackLink={!onDelete} />;
 
+  // The page hosts a side peek so Shift+Click on an issue mention in the
+  // description or comments opens it floating over the page. Keyed so moving
+  // to another issue closes the peek.
   return (
-    <IssueDetail
-      issueId={canonicalId}
-      onDelete={onDelete}
-      highlightCommentId={highlight.commentId}
-    />
+    <IssuePeekHost key={canonicalId}>
+      <IssueDetail
+        issueId={canonicalId}
+        skipInitialRefetch={hasLoaded}
+        onDelete={onDelete}
+        highlightCommentId={highlight.commentId}
+      />
+    </IssuePeekHost>
   );
 }

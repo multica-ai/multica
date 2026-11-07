@@ -139,7 +139,7 @@ describe("groupCommentRuns", () => {
       .toBe(latest.id);
   });
 
-  it("projects chained answers and assignment subtrees before finding run roots", () => {
+  it("projects chained answers while preserving an assignment reply's thread", () => {
     const first = task("first", { trigger_comment_id: "root" });
     const second = task("second", { trigger_comment_id: "answer-a" });
     const assigned = task("assigned");
@@ -150,12 +150,45 @@ describe("groupCommentRuns", () => {
       comment("assigned-answer", { parent_id: "root", actor_type: "agent", source_task_id: assigned.id }),
       comment("nested", { parent_id: "assigned-answer" })];
     const view = buildCommentRunView([followup, second, assigned, first], timeline);
-    expect(view.runs.get("root")?.map((run) => run.task.id)).toEqual(["first", "second"]);
-    expect(view.runs.get("assigned-answer")?.map((run) => run.task.id)).toEqual(["assigned", "followup"]);
+    expect(view.runs.get("root")?.map((run) => run.task.id)).toEqual(["assigned", "first", "followup", "second"]);
+    expect(view.runs.has("assigned-answer")).toBe(false);
+    expect(view.standaloneRuns).toEqual([]);
     expect(view.timeline.find((entry) => entry.id === "answer-a")?.parent_id).toBe("root");
     expect(view.timeline.find((entry) => entry.id === "answer-b")?.parent_id).toBe("answer-a");
-    expect(view.timeline.find((entry) => entry.id === "assigned-answer")?.parent_id).toBeUndefined();
+    expect(view.timeline.find((entry) => entry.id === "assigned-answer")?.parent_id).toBe("root");
     expect(timeline.find((entry) => entry.id === "assigned-answer")?.parent_id).toBe("root");
+  });
+
+  it("keeps an assignment's outputs in their explicit threads and its log with the latest reply", () => {
+    const run = task("assigned", { kind: "direct", delivered_comment_ids: [] });
+    const root = comment("root");
+    const nested = comment("nested", { parent_id: root.id });
+    const timeline = [root, nested, comment("other-thread"),
+      comment("progress", { actor_type: "agent", source_task_id: run.id }),
+      comment("other-reply", { parent_id: "other-thread", actor_type: "agent", source_task_id: run.id }),
+      comment("answer", { parent_id: nested.id, actor_type: "agent", source_task_id: run.id,
+        created_at: "2026-09-07T00:01:00Z" })];
+
+    const view = buildCommentRunView([run], timeline);
+    expect(view.timeline).toEqual(timeline);
+    const placement = { task: run, commentId: "answer", anchorCommentId: nested.id, hasReply: true };
+    expect(view.runs.get(root.id)).toEqual([placement]);
+    expect(view.standaloneRuns).toEqual([]);
+    expect(orderThreadWithRuns(root, [nested, timeline[5]!], view.runs.get(root.id)!))
+      .toEqual([nested, { run: placement, reply: timeline[5]!, replyTo: undefined }]);
+  });
+
+  it("waits for a missing assignment reply parent without promoting the reply", () => {
+    const run = task("assigned", { kind: "direct", delivered_comment_ids: [] });
+    const answer = comment("answer", { parent_id: "pending-parent", actor_type: "agent", source_task_id: run.id });
+    const pending = buildCommentRunView([run], [answer]);
+    expect(pending.timeline).toEqual([answer]);
+    expect(pending.runs.size).toBe(0);
+    expect(pending.standaloneRuns).toEqual([]);
+
+    const loaded = buildCommentRunView([run], [comment("pending-parent"), answer], pending.runs);
+    expect(loaded.runs.get("pending-parent")?.[0]?.anchorCommentId).toBe("pending-parent");
+    expect(loaded.standaloneRuns).toEqual([]);
   });
 
   it("moves a run's earlier top-level comments into the thread with its reply", () => {

@@ -4,6 +4,7 @@ description: 邀请成员，并用 owner、admin 和 member 三种角色管理�
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { RolesDemo } from "@/components/demos/roles-demo";
 
 加入[工作区](/workspaces)的人都是成员，每位成员有一个角色：`owner`、`admin` 或 `member`。角色只控制工作区设置和团队管理；创建任务、发表评论等日常协作对所有成员开放。
 
@@ -20,13 +21,15 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 工作区必须始终保留至少一名 `owner`：最后一名 `owner` 不能被降级、移除或离开。
 
+<RolesDemo />
+
 <Callout type="info">
 角色不决定谁能运行智能体。每个智能体有独立的访问范围（Access），`owner` 和 `admin` 也不能绕过它运行未授权的智能体。详见[智能体](/agents#权限与-access)。
 </Callout>
 
 ## 邀请成员
 
-`owner` 和 `admin` 在设置 → 成员中输入邮箱、选择角色后发送邀请。邀请只能授予 `admin` 或 `member`；`owner` 需要先加入工作区，再由现有 `owner` 提升。
+`owner` 和 `admin` 在**设置 → 成员**中点击**邀请成员**，填写邮箱、选择角色后发送。邀请只能授予 `admin` 或 `member`；`owner` 需要先加入工作区，再由现有 `owner` 提升。
 
 ![成员管理：邀请表单与带角色的成员名册](/images/docs/members-roster.webp)
 
@@ -34,11 +37,13 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 邀请链接只出现在邮件里，产品界面中没有查看或复制它的入口。邮件发送失败时邀请记录仍然存在，可以撤销后重新发送。
 
+需要一条能直接转发的链接时，在**设置 → 成员**的**分享链接**中选择角色和有效期后生成。拿到链接的人都可以以所选角色加入，直到链接过期或被撤销。
+
 ## 调整角色
 
-`admin` 可以在 `admin` 和 `member` 之间调整角色，也可以移除这两类成员。涉及 `owner` 的变更——提升、更改或移除——只有 `owner` 能执行。
+在成员列表中打开某位成员右侧的操作菜单，选择**更改角色**，角色立即生效。
 
-角色变化立即生效。
+`admin` 可以在 `admin` 和 `member` 之间调整角色，也可以移除这两类成员。涉及 `owner` 的变更——提升、更改或移除——只有 `owner` 能执行。
 
 ## 移除成员
 

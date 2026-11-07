@@ -113,6 +113,15 @@ function hasUploadingNode(editor: Editor): boolean {
   return found;
 }
 
+/** Inside a NodeView's own controls, which handle their clicks. The editable
+ *  content a NodeView hosts (a table's cells) is not: its links are the
+ *  editor's, unless they sit in a NodeView of their own (a mention). */
+function isInNodeViewChrome(target: HTMLElement): boolean {
+  const wrapper = target.closest("[data-node-view-wrapper]");
+  const content = target.closest("[data-node-view-content-react]");
+  return wrapper !== null && !(content !== null && wrapper.contains(content));
+}
+
 // Types
 
 interface ContentEditorBaseProps {
@@ -403,6 +412,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // set is built once at mount, so a directly-captured options object would
     // freeze whatever closures existed then and stop seeing new quick actions.
     const quickActionMenuRef = useRef<BuiltinCommandSuggestionOptions | undefined>(quickActionMenu);
+    const quickActionMenuListeners = useRef(new Set<() => void>());
     const lastEmittedRef = useRef<string | null>(null);
     // `content` already consumes the initial synchronized value when Tiptap
     // mounts. Track later changes separately so the sync effect does not parse
@@ -608,10 +618,12 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         slashCommandMode,
         quickActionMenu: {
           getQuickActions: () => quickActionMenuRef.current?.getQuickActions?.() ?? [],
-          renderQuickAction: (id: string) =>
-            quickActionMenuRef.current?.renderQuickAction?.(id) ?? Promise.resolve(""),
-          onRenderError: (error: unknown) =>
-            quickActionMenuRef.current?.onRenderError?.(error),
+          subscribeQuickActions: (refresh) => {
+            quickActionMenuListeners.current.add(refresh);
+            return () => { quickActionMenuListeners.current.delete(refresh); };
+          },
+          getQuickActionContent: (id: string) =>
+            quickActionMenuRef.current?.getQuickActionContent?.(id) ?? "",
         },
         resolveIssueIdentifierRef,
       }),
@@ -641,7 +653,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           click(_view, event) {
             const target = event.target as HTMLElement;
             // Skip links inside NodeView wrappers — they handle their own clicks
-            if (target.closest("[data-node-view-wrapper]")) return false;
+            if (isInNodeViewChrome(target)) return false;
 
             const link = target.closest("a");
             const href = link?.getAttribute("href");
@@ -662,7 +674,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           auxclick(_view, event) {
             if (event.button !== 1) return false;
             const target = event.target as HTMLElement;
-            if (target.closest("[data-node-view-wrapper]")) return false;
+            if (isInNodeViewChrome(target)) return false;
             const href = target.closest("a")?.getAttribute("href");
             if (!href || isMentionHref(href)) return false;
             event.preventDefault();
@@ -680,6 +692,12 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         },
       },
     });
+
+    // Catalog queries can settle after the last keystroke. Refresh the active
+    // popup without changing the document, selection or editor instance.
+    useEffect(() => {
+      quickActionMenuListeners.current.forEach((refresh) => refresh());
+    }, [quickActionMenu]);
 
     // Signal hosts that the deferred editor instance now exists. Fired from a
     // passive effect (not `onCreate`) so it runs after the commit in which

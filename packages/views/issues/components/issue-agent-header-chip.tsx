@@ -40,14 +40,17 @@ import { compareActiveIssueTasks } from "./active-task-order";
 // Hovering the chip opens a compact Popover card with the same active rows as
 // the right panel (click / keyboard still toggle it for touch and a11y). Those
 // rows show necessary status/time and task entry actions, but do not render
-// event counts or prefetch task messages for a count.
+// event counts or prefetch task messages for a count. Clicking a row's trigger
+// closes the card and takes the reader to that run's block in the timeline.
 
 interface IssueAgentHeaderChipProps {
   issueId: string;
+  onJumpToRun?: (taskId: string) => void;
 }
 
 export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
   issueId,
+  onJumpToRun,
 }: IssueAgentHeaderChipProps) {
   const { t } = useT("issues");
   // Same query options as ExecutionLogSection so both observe one cache entry.
@@ -99,6 +102,7 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
           issueId={issueId}
           running={running}
           queued={queued}
+          onJumpToRun={onJumpToRun}
           onTranscriptOpenChange={(task, open, fromKeyboard) => {
             setOpenedTranscript(open ? { task, fromKeyboard } : null);
           }}
@@ -126,6 +130,7 @@ interface ActiveChipProps {
   issueId: string;
   running: AgentTask[];
   queued: AgentTask[];
+  onJumpToRun?: (taskId: string) => void;
   onTranscriptOpenChange: (
     task: AgentTask,
     open: boolean,
@@ -137,10 +142,12 @@ function ActiveChip({
   issueId,
   running,
   queued,
+  onJumpToRun,
   onTranscriptOpenChange,
 }: ActiveChipProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
+  const [open, setOpen] = useState(false);
 
   const activeTasks = [...running, ...queued];
   const agentIds = [...new Set(activeTasks.map((task) => task.agent_id))];
@@ -166,7 +173,7 @@ function ActiveChip({
 
   return (
     <div className="flex items-center gap-1">
-      <Popover>
+      <Popover open={open} onOpenChange={setOpen}>
         {/* Hover opens the card so the live activity reads as a glanceable
             status surface, not a click target. In Base UI the hover config
             lives on the Trigger (a popover can have multiple triggers), not
@@ -227,6 +234,14 @@ function ActiveChip({
                 key={task.id}
                 task={task}
                 issueId={issueId}
+                onJump={
+                  onJumpToRun
+                    ? () => {
+                        setOpen(false);
+                        onJumpToRun(task.id);
+                      }
+                    : undefined
+                }
                 onTranscriptOpenChange={(open, fromKeyboard) => {
                   onTranscriptOpenChange(task, open, fromKeyboard === true);
                 }}

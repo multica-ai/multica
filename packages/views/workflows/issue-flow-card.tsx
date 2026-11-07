@@ -1,15 +1,20 @@
 "use client";
 
-import { Workflow } from "lucide-react";
+import { useState } from "react";
+import { Settings, Workflow } from "@multica/ui/icons";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useProjectWithWorkflow } from "@multica/core/issue-workflows";
+import { useWorkspacePaths } from "@multica/core/paths";
+import { Button } from "@multica/ui/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../common/actor-avatar";
 import { StatusIcon } from "../issues/components/status-icon";
 import { useStatusLabel } from "../issues/utils/status-label";
 import { useT } from "../i18n";
+import { useNavigation } from "../navigation";
+import { useWorkflowPermissions } from "./permissions";
 import { stepHandlerActor, useStepHandlerLabel } from "./step-handler";
 
 /**
@@ -20,14 +25,18 @@ import { stepHandlerActor, useStepHandlerLabel } from "./step-handler";
 export function IssueFlowCard({ projectId, currentStatus }: { projectId: string | null; currentStatus: string }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  const navigation = useNavigation();
+  const paths = useWorkspacePaths();
   const catalog = useIssueStatuses(wsId);
   const labelOf = useStatusLabel(wsId);
   const { project, workflow } = useProjectWithWorkflow(wsId, projectId);
+  const { canCreateWorkflow } = useWorkflowPermissions(project);
   const handlerLabel = useStepHandlerLabel(project);
+  const [open, setOpen] = useState(false);
   if (!workflow || !project) return null;
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
           <button
@@ -75,7 +84,22 @@ export function IssueFlowCard({ projectId, currentStatus }: { projectId: string 
             );
           })}
         </ol>
-        <p className="mt-2 text-caption text-muted-foreground">{t(($) => $.workflows.detail.card_hint)}</p>
+        {canCreateWorkflow && (
+          <div className="-mx-3 -mb-3 mt-2 border-t border-surface-border p-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start"
+              onClick={() => {
+                setOpen(false);
+                navigation.push(`${paths.settings()}?tab=workflows`);
+              }}
+            >
+              <Settings aria-hidden className="size-3.5" />
+              {t(($) => $.workflows.project.manage)}
+            </Button>
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   );

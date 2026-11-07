@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
@@ -108,6 +109,7 @@ type Task struct {
 	ProjectWorkflow               *ProjectWorkflowData   `json:"project_workflow,omitempty"`
 	ThreadName                    string                 `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
 	Agent                         *AgentData             `json:"agent,omitempty"`
+	ModelOverride                 string                 `json:"model_override,omitempty"` // claim-time snapshot of the agent's persistent OpenClaw model override
 	ConnectedApps                 []ConnectedAppData     `json:"connected_apps,omitempty"` // per-run app capabilities mounted through runtime MCP overlays
 	Repos                         []RepoData             `json:"repos,omitempty"`
 	ProjectID                     string                 `json:"project_id,omitempty"`                       // active project for this task, when present
@@ -126,6 +128,8 @@ type Task struct {
 	TriggerCommentContent         string                 `json:"trigger_comment_content,omitempty"`          // content of the triggering comment
 	TriggerAuthorType             string                 `json:"trigger_author_type,omitempty"`              // "agent" or "member" — author kind for the triggering comment
 	TriggerAuthorName             string                 `json:"trigger_author_name,omitempty"`              // display name of the triggering comment author
+	TriggerCommentEditedAt        string                 `json:"trigger_comment_edited_at,omitempty"`        // MUL-8218: set when the trigger comment was edited after the resumed session's run started, so the resumed history may quote an earlier version. Empty on old servers / unedited comments
+	TriggerCommentRevision        int64                  `json:"trigger_comment_revision,omitempty"`         // MUL-8218: current revision of the trigger comment; sent alongside TriggerCommentEditedAt
 	NewCommentCount               int                    `json:"new_comment_count,omitempty"`                // issue-wide comments since this agent's last run (excludes its own and the injected trigger); 0/omitted for old daemons or cold start
 	NewCommentsSince              string                 `json:"new_comments_since,omitempty"`               // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
 	NewCommentsDeltaKnown         bool                   `json:"new_comments_delta_known,omitempty"`         // the server actually computed the issue-wide delta this claim (both reads succeeded). A zero NewCommentCount means "nothing was said" only when this is true; otherwise the zero is a failed read, a cold start, or an old server, and the prompt must not present it as the comment scan's answer (MUL-6984)
@@ -159,10 +163,17 @@ type Task struct {
 	WakeupJoined                  string                 `json:"wakeup_joined,omitempty"`      // wakeups that joined this run instead of queuing their own
 	HandoffNote                   string                 `json:"handoff_note,omitempty"`       // legacy assignment handoff instruction; rendered only in the per-turn prompt
 
+	ChatSource *protocol.ChatSource `json:"chat_source,omitempty"`
+
 	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad, used in prompt text
 	ParentIssueID         string `json:"parent_issue_id,omitempty"`         // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
 	ParentIssueIdentifier string `json:"parent_issue_identifier,omitempty"` // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, used in prompt context
+	// ParentIssue is the parent of the issue this run works on, for runs on a
+	// sub-issue; unrelated to the quick-create ParentIssueID above. Absent on
+	// old servers and for issues without a parent, and then no parent block is
+	// rendered.
+	ParentIssue *ParentIssueData `json:"parent_issue,omitempty"`
 	// RequestingUserName + RequestingUserProfileDescription describe the human
 	// the agent is working on behalf of. v1 sources them from the runtime
 	// owner (the user who registered the daemon). Empty when the runtime has
@@ -210,6 +221,17 @@ type CoalescedCommentData struct {
 	AuthorName string `json:"author_name,omitempty"`
 	Content    string `json:"content"`
 	CreatedAt  string `json:"created_at,omitempty"`
+	EditedAt   string `json:"edited_at,omitempty"` // MUL-8218: set when this comment was edited after the resumed session's run started; empty on old servers / unedited comments
+	Revision   int64  `json:"revision,omitempty"`  // MUL-8218: current revision, sent alongside EditedAt
+}
+
+// ParentIssueData mirrors handler.ClaimParentIssue. Identifier is empty when
+// the server could not resolve the workspace prefix.
+type ParentIssueData struct {
+	ID         string `json:"id"`
+	Identifier string `json:"identifier,omitempty"`
+	Title      string `json:"title"`
+	Status     string `json:"status"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 var (
@@ -49,8 +50,10 @@ func init() {
 	// Core commands
 	issueCmd.GroupID = groupCore
 	projectCmd.GroupID = groupCore
+	workflowCmd.GroupID = groupCore
 	labelCmd.GroupID = groupCore
 	propertyCmd.GroupID = groupCore
+	viewCmd.GroupID = groupCore
 	agentCmd.GroupID = groupCore
 	autopilotCmd.GroupID = groupCore
 	workspaceCmd.GroupID = groupCore
@@ -75,8 +78,10 @@ func init() {
 
 	rootCmd.AddCommand(issueCmd)
 	rootCmd.AddCommand(projectCmd)
+	rootCmd.AddCommand(workflowCmd)
 	rootCmd.AddCommand(labelCmd)
 	rootCmd.AddCommand(propertyCmd)
+	rootCmd.AddCommand(viewCmd)
 	rootCmd.AddCommand(agentCmd)
 	rootCmd.AddCommand(autopilotCmd)
 	rootCmd.AddCommand(workspaceCmd)
@@ -105,6 +110,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+		return
+	}
+	if len(os.Args) == 2 && os.Args[1] == agent.CursorHookHelperArg {
+		agent.RunCursorHookRelay(os.Stdin, os.Stdout, os.Getenv)
 		return
 	}
 	cli.CleanupStaleUpdateArtifacts()

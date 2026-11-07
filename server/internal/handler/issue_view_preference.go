@@ -7,8 +7,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-
+	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // Per-user view-bar preferences (hidden items + order) for one surface
@@ -17,7 +18,8 @@ import (
 
 // resolvePreferenceScope validates scope params and backfills scope_id so
 // the composite key never carries NULL: workspace scope uses the workspace
-// id, my scope the user id, project scope the project id (validated).
+// id, my and both sidebar scopes the user id, project scope the project id
+// (validated).
 func (h *Handler) resolvePreferenceScope(
 	w http.ResponseWriter, r *http.Request,
 	wsUUID pgtype.UUID, userID string, scopeType, rawScopeID string,
@@ -25,7 +27,7 @@ func (h *Handler) resolvePreferenceScope(
 	switch scopeType {
 	case "workspace":
 		return wsUUID, true
-	case "my":
+	case "my", "sidebar", "sidebar_projects":
 		return parseUUID(userID), true
 	case "project":
 		if rawScopeID == "" {
@@ -146,6 +148,17 @@ func (h *Handler) PutIssueViewPreference(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to save preference")
 		return
 	}
+	h.Bus.Publish(events.Event{
+		Type:                protocol.EventIssueViewPreferenceChanged,
+		WorkspaceID:         uuidToString(wsUUID),
+		ActorType:           "member",
+		ActorID:             userID,
+		MemberPrivateUserID: userID,
+		Payload: map[string]any{
+			"scope_type": pref.ScopeType,
+			"scope_id":   uuidToPtr(pref.ScopeID),
+		},
+	})
 	writeJSON(w, http.StatusOK, IssueViewPreferenceResponse{
 		ScopeType: pref.ScopeType,
 		ScopeID:   uuidToPtr(pref.ScopeID),

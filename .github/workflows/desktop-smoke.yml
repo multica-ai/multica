@@ -31,8 +31,8 @@ jobs:
         uses: actions/setup-go@v5
         with:
           # Keep the security floor even when the setup-go manifest lags;
-          # continue accepting newer patches within Go 1.26.
-          go-version: "~1.26.9"
+          # continue accepting newer patches within Go 1.27.
+          go-version: "~1.27.3"
           check-latest: true
           cache-dependency-path: server/go.sum
 

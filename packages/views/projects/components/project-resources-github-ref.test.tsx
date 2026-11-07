@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { setApiInstance } from "@multica/core/api";
+import type { ApiClient } from "@multica/core/api/client";
 import { renderWithI18n } from "../../test/i18n";
 
 const updateMock = vi.fn().mockResolvedValue({});
 const createMock = vi.fn().mockResolvedValue({});
+const deleteHookMock = vi.fn();
 
 const PINNED = {
   id: "res-1",
@@ -53,7 +57,8 @@ const PLAIN = {
   created_by: "u1",
 };
 
-vi.mock("@tanstack/react-query", () => ({
+vi.mock("@tanstack/react-query", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@tanstack/react-query")>(),
   useQuery: (options: { queryKey?: unknown[] }) => {
     const key = options?.queryKey?.[0];
     if (key === "project-resources") return { data: [PINNED, PLAIN] };
@@ -66,7 +71,7 @@ vi.mock("@multica/core/projects", () => ({
   projectResourcesOptions: () => ({ queryKey: ["project-resources"], queryFn: vi.fn() }),
   useCreateProjectResource: () => ({ mutateAsync: createMock, isPending: false }),
   useUpdateProjectResource: () => ({ mutateAsync: updateMock }),
-  useDeleteProjectResource: () => ({ mutateAsync: vi.fn() }),
+  useDeleteProjectResource: (...args: unknown[]) => deleteHookMock(...args),
 }));
 
 vi.mock("@multica/core/config", () => ({
@@ -101,6 +106,53 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   beforeEach(() => {
     updateMock.mockClear();
     createMock.mockClear();
+    deleteHookMock.mockReset().mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
+  });
+
+  it.each(["success", "failure"])("prevents duplicate deletes per row and releases pending state on %s", async (outcome) => {
+    const actual = await vi.importActual<typeof import("@multica/core/projects")>("@multica/core/projects");
+    deleteHookMock.mockImplementation(actual.useDeleteProjectResource);
+    let resolveFirst!: () => void;
+    let rejectFirst!: (error: Error) => void;
+    let resolveSecond!: () => void;
+    const first = new Promise<void>((resolve, reject) => {
+      resolveFirst = resolve;
+      rejectFirst = reject;
+    });
+    const second = new Promise<void>((resolve) => { resolveSecond = resolve; });
+    const remove = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second);
+    setApiInstance({ deleteProjectResource: remove } as unknown as ApiClient);
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    try {
+      renderWithI18n(
+        <QueryClientProvider client={qc}>
+          <ProjectResourcesSection projectId="p1" />
+        </QueryClientProvider>,
+      );
+      const [firstButton, secondButton] = screen.getAllByRole("button", { name: /remove/i });
+      fireEvent.click(firstButton!);
+      await waitFor(() => expect(firstButton).toBeDisabled());
+      expect(firstButton).toHaveAttribute("aria-busy", "true");
+      expect(secondButton).toBeEnabled();
+      fireEvent.click(firstButton!);
+      expect(remove).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(secondButton!);
+      await waitFor(() => expect(secondButton).toBeDisabled());
+      expect(remove).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        if (outcome === "success") resolveFirst();
+        else rejectFirst(new Error("Delete failed"));
+      });
+      await waitFor(() => expect(firstButton).toBeEnabled());
+      expect(secondButton).toBeDisabled();
+      await act(async () => { resolveSecond(); });
+      await waitFor(() => expect(secondButton).toBeEnabled());
+    } finally {
+      resolveFirst();
+      resolveSecond();
+      qc.clear();
+    }
   });
 
   it("shows the ref beside a repo that has a custom label", () => {
@@ -131,7 +183,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("saves a new ref while preserving the rest of the stored ref", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByTitle(/change the branch tasks work on/i)[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
     const input = screen.getByLabelText(/starting branch/i);
     fireEvent.change(input, { target: { value: "release/2026-10" } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
@@ -154,7 +206,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("clearing the field drops the key so tasks fall back to the default branch", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByTitle(/change the branch tasks work on/i)[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "" },
     });
@@ -173,7 +225,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("refuses to save a ref git could never resolve", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByTitle(/change the branch tasks work on/i)[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "main..dev" },
     });
@@ -315,7 +367,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("declines a pasted commit id and points at the per-task escape hatch", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByTitle(/change the branch tasks work on/i)[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "5e0b1cfa0a7d6a1a0f4b3f2e1d0c9b8a7f6e5d4c" },
     });
@@ -330,7 +382,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
   it("still accepts a tag-shaped name — it could be a branch, and only the remote knows", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getAllByTitle(/change the branch tasks work on/i)[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /change the branch tasks work on/i })[0]!);
     fireEvent.change(screen.getByLabelText(/starting branch/i), {
       target: { value: "v1.4.0" },
     });

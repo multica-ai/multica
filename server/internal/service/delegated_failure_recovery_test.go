@@ -44,17 +44,15 @@ func TestPendingDelegatedFailureSweepDoesNotStarveOtherWorkspaces(t *testing.T) 
 	if err != nil || target == nil || !created {
 		t.Fatalf("seed executable recovery: created=%v err=%v", created, err)
 	}
-	result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
-	if err != nil || result != (DelegatedFailureRecoverySweepResult{Scanned: 1, Replayed: 1}) {
-		t.Fatalf("recovery behind 100 paused signals = %+v, %v; want one scan and replay", result, err)
-	}
+	sweepDelegatedFailureRecoveries(t, svc)
 	if covered, err := svc.Queries.HasTaskCoveringDelegatedFailureComment(ctx, db.HasTaskCoveringDelegatedFailureCommentParams{
 		IssueID: target.issue.ID, AgentID: target.agent.ID, CommentID: target.comment.ID,
 	}); err != nil || !covered {
-		t.Fatalf("executable recovery has a task = %v, %v; want true", covered, err)
+		t.Fatalf("recovery behind 100 paused signals has a task = %v, %v; want true", covered, err)
 	}
-	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-		t.Fatalf("repeat sweep = %+v, %v; want no duplicate dispatch", result, err)
+	sweepDelegatedFailureRecoveries(t, svc)
+	if n := f.recoveryTasks(t, failedID); n != 1 {
+		t.Fatalf("recovery tasks after repeat sweep = %d, want 1 without a duplicate dispatch", n)
 	}
 	for _, id := range paused {
 		if f.settled(t, id) {
@@ -156,30 +154,24 @@ func TestDelegatedFailureRecoveryRechecksStatusAndResumes(t *testing.T) {
 			if err != nil || target == nil || !created {
 				t.Fatalf("seed recovery: created=%v err=%v", created, err)
 			}
-			pending, err := svc.Queries.ListPendingDelegatedFailureRecoveries(ctx, 100)
-			if err != nil || len(pending) != 1 || pending[0].ID != target.comment.ID {
-				t.Fatalf("initial candidates = %d, %v; want this recovery", len(pending), err)
+			if !f.pending(t, svc, target.comment.ID) {
+				t.Fatal("initial candidates do not include this recovery")
 			}
 			// Change the issue after selection, before the same dispatch entry
 			// point used by the sweeper and completion reconciliation runs.
 			fx.Exec(t, `UPDATE issue SET status = $2 WHERE id = $1`, f.issueID, status)
-			if err := svc.DispatchDelegatedFailureRecoveryComment(ctx, pending[0], pgtype.UUID{}); err != nil {
+			if err := svc.DispatchDelegatedFailureRecoveryComment(ctx, target.comment, pgtype.UUID{}); err != nil {
 				t.Fatal(err)
 			}
-			var count int
-			if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue
-				WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&count); err != nil {
-				t.Fatal(err)
-			}
-			if count != 0 || f.settled(t, target.comment.ID) {
+			if count := f.recoveryTasks(t, failedID); count != 0 || f.settled(t, target.comment.ID) {
 				t.Fatalf("paused recovery: tasks=%d; want no task or permanent receipt", count)
 			}
 			fx.Exec(t, `UPDATE issue SET status = 'todo' WHERE id = $1`, f.issueID)
-			if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{Scanned: 1, Replayed: 1}) {
-				t.Fatalf("reopened recovery = %+v, %v; want one replay", result, err)
-			}
-			if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-				t.Fatalf("repeat sweep = %+v, %v; want no duplicate", result, err)
+			for _, phase := range []string{"reopened recovery", "repeat sweep"} {
+				sweepDelegatedFailureRecoveries(t, svc)
+				if count := f.recoveryTasks(t, failedID); count != 1 {
+					t.Fatalf("%s: recovery tasks = %d, want one replay and no duplicate", phase, count)
+				}
 			}
 		})
 	}
@@ -388,6 +380,42 @@ func (f *delegatedFailureFixture) insertWorkerTask(t *testing.T, status, evidenc
 	return taskID
 }
 
+// The recovery sweep is not workspace-scoped, and packages share DATABASE_URL
+// in CI, so its totals can include another test's signal. Tests run it through
+// sweepDelegatedFailureRecoveries and assert on their own rows with the
+// helpers below.
+func sweepDelegatedFailureRecoveries(t *testing.T, svc *TaskService) {
+	t.Helper()
+	if result, err := svc.RecoverPendingDelegatedFailures(context.Background(), 100); err != nil {
+		t.Fatalf("recovery sweep = %+v, %v", result, err)
+	}
+}
+
+func (f *delegatedFailureFixture) recoveryTasks(t *testing.T, failedID pgtype.UUID) int {
+	t.Helper()
+	var n int
+	if err := f.pool.QueryRow(context.Background(), `
+		SELECT count(*) FROM agent_task_queue
+		WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&n); err != nil {
+		t.Fatalf("count recovery tasks: %v", err)
+	}
+	return n
+}
+
+func (f *delegatedFailureFixture) pending(t *testing.T, svc *TaskService, commentID pgtype.UUID) bool {
+	t.Helper()
+	pending, err := svc.Queries.ListPendingDelegatedFailureRecoveries(context.Background(), 1000)
+	if err != nil {
+		t.Fatalf("list pending recoveries: %v", err)
+	}
+	for _, comment := range pending {
+		if comment.ID == commentID {
+			return true
+		}
+	}
+	return false
+}
+
 func TestFailTaskFinalDelegatedFailureWakesCoordinatorOnce(t *testing.T) {
 	f, svc := seedDelegatedFailureFixture(t)
 	ctx := context.Background()
@@ -499,8 +527,9 @@ func TestPendingDelegatedFailureSweepRepairsCommittedCommentWithoutTask(t *testi
 	// The durable outbox starts at the explicit platform comment. Do not
 	// retroactively wake arbitrary historical delegated failures that predate
 	// this recovery mechanism.
-	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-		t.Fatalf("pre-comment recovery sweep = %+v, %v; want zero result, nil", result, err)
+	sweepDelegatedFailureRecoveries(t, svc)
+	if n := f.recoveryTasks(t, failedID); n != 0 {
+		t.Fatalf("pre-comment recovery sweep created %d recovery tasks, want 0", n)
 	}
 
 	// This is the durable intermediate state left when comment creation commits
@@ -509,34 +538,19 @@ func TestPendingDelegatedFailureSweepRepairsCommittedCommentWithoutTask(t *testi
 	if err != nil || target == nil || !created {
 		t.Fatalf("ensure recovery comment = target %v created %v err %v", target != nil, created, err)
 	}
-	var tasksBefore int
-	if err := f.pool.QueryRow(ctx, `
-		SELECT count(*) FROM agent_task_queue
-		WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&tasksBefore); err != nil {
-		t.Fatalf("count recovery tasks before sweep: %v", err)
-	}
-	if tasksBefore != 0 {
-		t.Fatalf("recovery tasks before sweep = %d, want 0", tasksBefore)
+	if n := f.recoveryTasks(t, failedID); n != 0 {
+		t.Fatalf("recovery tasks before sweep = %d, want 0", n)
 	}
 
-	result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
-	if err != nil || result.Replayed != 1 || result.Exhausted != 0 {
-		t.Fatalf("RecoverPendingDelegatedFailures = %+v, %v; want one replay, nil", result, err)
-	}
-	var comments, tasks int
-	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE type = 'progress_update' AND source_task_id = $1`, failedID).Scan(&comments); err != nil {
-		t.Fatalf("count recovery comments: %v", err)
-	}
-	if err := f.pool.QueryRow(ctx, `
-		SELECT count(*) FROM agent_task_queue
-		WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&tasks); err != nil {
-		t.Fatalf("count recovery tasks after sweep: %v", err)
-	}
-	if comments != 1 || tasks != 1 {
-		t.Fatalf("comments/tasks after sweep = %d/%d, want 1/1", comments, tasks)
-	}
-	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-		t.Fatalf("second recovery sweep = %+v, %v; want zero result, nil", result, err)
+	for _, phase := range []string{"first sweep", "second sweep"} {
+		sweepDelegatedFailureRecoveries(t, svc)
+		var comments int
+		if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE type = 'progress_update' AND source_task_id = $1`, failedID).Scan(&comments); err != nil {
+			t.Fatalf("count recovery comments: %v", err)
+		}
+		if tasks := f.recoveryTasks(t, failedID); comments != 1 || tasks != 1 {
+			t.Fatalf("%s: comments/tasks = %d/%d, want 1/1", phase, comments, tasks)
+		}
 	}
 }
 
@@ -566,16 +580,8 @@ func TestPendingDelegatedFailureSweepSkipsCustomTerminalSourceIssue(t *testing.T
 		t.Fatalf("move source issue to custom done status: %v", err)
 	}
 
-	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-		t.Fatalf("terminal-source recovery sweep = %+v, %v; want zero result, nil", result, err)
-	}
-	var recoveryTasks int
-	if err := f.pool.QueryRow(ctx, `
-		SELECT count(*) FROM agent_task_queue
-		WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&recoveryTasks); err != nil {
-		t.Fatalf("count recovery tasks: %v", err)
-	}
-	if recoveryTasks != 0 {
+	sweepDelegatedFailureRecoveries(t, svc)
+	if recoveryTasks := f.recoveryTasks(t, failedID); recoveryTasks != 0 {
 		t.Fatalf("recovery tasks = %d, want none for a custom terminal source issue", recoveryTasks)
 	}
 }
@@ -719,23 +725,19 @@ func TestPendingDelegatedFailureSweepRequeuesTerminalUndeliveredTask(t *testing.
 				t.Fatalf("terminalize recovery before delivery: %v", err)
 			}
 
-			result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
-			if err != nil || result.Replayed != 1 || result.Exhausted != 0 {
-				t.Fatalf("RecoverPendingDelegatedFailures = %+v, %v; want one replay, nil", result, err)
-			}
-			var active, total int
-			if err := f.pool.QueryRow(ctx, `
-				SELECT count(*) FILTER (WHERE status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')),
-				       count(*)
-				FROM agent_task_queue
-				WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&active, &total); err != nil {
-				t.Fatalf("count recovery tasks: %v", err)
-			}
-			if active != 1 || total != 2 {
-				t.Fatalf("active/total recovery tasks = %d/%d, want 1/2", active, total)
-			}
-			if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-				t.Fatalf("second recovery sweep = %+v, %v; want zero result, nil", result, err)
+			for _, phase := range []string{"first sweep", "second sweep"} {
+				sweepDelegatedFailureRecoveries(t, svc)
+				var active, total int
+				if err := f.pool.QueryRow(ctx, `
+					SELECT count(*) FILTER (WHERE status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')),
+					       count(*)
+					FROM agent_task_queue
+					WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&active, &total); err != nil {
+					t.Fatalf("count recovery tasks: %v", err)
+				}
+				if active != 1 || total != 2 {
+					t.Fatalf("%s: active/total recovery tasks = %d/%d, want 1/2", phase, active, total)
+				}
 			}
 		})
 	}
@@ -789,17 +791,22 @@ func TestUserCancelledDelegatedFailureRecoveryStaysCancelled(t *testing.T) {
 	if !acknowledged {
 		t.Fatal("user cancellation did not terminally acknowledge the recovery signal")
 	}
-	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-		t.Fatalf("recovery sweep after user cancel = %+v, %v; want zero result, nil", result, err)
+	// Keep another workspace's signal pending so the global sweep has a
+	// candidate besides this fixture, as it can in CI.
+	other, otherSvc := seedDelegatedFailureFixture(t)
+	otherFailedID := other.insertWorkerTask(t, "failed", "comment", 1, 2)
+	if target, created, err := otherSvc.ensureDelegatedFailureRecoveryComment(ctx, otherFailedID); err != nil || target == nil || !created {
+		t.Fatalf("seed unrelated recovery signal: created=%v err=%v", created, err)
 	}
-	var taskCount int
-	if err := f.pool.QueryRow(ctx, `
-		SELECT count(*) FROM agent_task_queue
-		WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&taskCount); err != nil {
-		t.Fatalf("count recovery tasks: %v", err)
+	sweepDelegatedFailureRecoveries(t, svc)
+	if n := f.recoveryTasks(t, failedID); n != 1 {
+		t.Fatalf("recovery tasks after user cancel = %d, want 1", n)
 	}
-	if taskCount != 1 {
-		t.Fatalf("recovery tasks after user cancel = %d, want 1", taskCount)
+	if f.pending(t, svc, recoveryCommentID) {
+		t.Fatal("sweep reopened the user-cancelled recovery signal")
+	}
+	if n := other.recoveryTasks(t, otherFailedID); n != 1 {
+		t.Fatalf("unrelated recovery tasks = %d, want the sweep to replay it once", n)
 	}
 }
 
@@ -836,7 +843,7 @@ func TestManualRerunKeepsDelegatedFailureRecoveryReplayable(t *testing.T) {
 		util.MustParseUUID(f.issueID),
 		util.MustParseUUID(f.sourceTask),
 		pgtype.UUID{},
-		util.MustParseUUID(f.userID),
+		util.MustParseUUID(f.userID), false,
 		nil,
 	)
 	if err != nil {
@@ -853,9 +860,12 @@ func TestManualRerunKeepsDelegatedFailureRecoveryReplayable(t *testing.T) {
 		t.Fatalf("rerun-cancelled recovery = status %q acknowledged %v, want cancelled and replayable", firstStatus, acknowledged)
 	}
 
-	result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
-	if err != nil || result.Replayed != 1 || result.Exhausted != 0 {
-		t.Fatalf("recovery sweep after rerun = %+v, %v; want one replay", result, err)
+	if !f.pending(t, svc, recoveryCommentID) {
+		t.Fatal("rerun-cancelled recovery is not pending replay")
+	}
+	sweepDelegatedFailureRecoveries(t, svc)
+	if f.pending(t, svc, recoveryCommentID) {
+		t.Fatal("recovery sweep after rerun did not replay the signal")
 	}
 	var rerunTrigger string
 	if err := f.pool.QueryRow(ctx, `SELECT COALESCE(trigger_comment_id::text, '') FROM agent_task_queue WHERE id = $1`, rerun.ID).Scan(&rerunTrigger); err != nil {
@@ -864,17 +874,15 @@ func TestManualRerunKeepsDelegatedFailureRecoveryReplayable(t *testing.T) {
 	if rerunTrigger != util.UUIDToString(recoveryCommentID) {
 		t.Fatalf("rerun trigger = %q, want recovery comment %s", rerunTrigger, util.UUIDToString(recoveryCommentID))
 	}
-	var dedicatedRecoveryTasks int
-	if err := f.pool.QueryRow(ctx, `
-		SELECT count(*) FROM agent_task_queue
-		WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&dedicatedRecoveryTasks); err != nil {
-		t.Fatalf("count dedicated recovery tasks: %v", err)
+	if n := f.recoveryTasks(t, failedID); n != 1 {
+		t.Fatalf("dedicated recovery task count after rerun = %d, want original cancelled task only", n)
 	}
-	if dedicatedRecoveryTasks != 1 {
-		t.Fatalf("dedicated recovery task count after rerun = %d, want original cancelled task only", dedicatedRecoveryTasks)
+	sweepDelegatedFailureRecoveries(t, svc)
+	if n := f.recoveryTasks(t, failedID); n != 1 {
+		t.Fatalf("dedicated recovery task count after second sweep = %d, want original cancelled task only", n)
 	}
-	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-		t.Fatalf("second recovery sweep after rerun = %+v, %v; want zero result", result, err)
+	if f.pending(t, svc, recoveryCommentID) {
+		t.Fatal("second recovery sweep left the rerun recovery pending")
 	}
 }
 
@@ -915,17 +923,8 @@ func TestDelegatedFailureRecoveryStopsAfterBoundedUndeliveredAttempts(t *testing
 			t.Fatalf("fail recovery attempt %d: %v", attempt, err)
 		}
 
-		result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
-		if err != nil {
-			t.Fatalf("recovery sweep after attempt %d = %+v, %v", attempt, result, err)
-		}
-		if attempt < delegatedFailureRecoveryMaxTaskAttempts {
-			if result.Replayed != 1 || result.Exhausted != 0 {
-				t.Fatalf("recovery sweep after attempt %d = %+v, want one replay", attempt, result)
-			}
-		} else if result.Replayed != 0 || result.Exhausted != 1 {
-			t.Fatalf("recovery sweep after final attempt = %+v, want one exhaustion", result)
-		}
+		sweepDelegatedFailureRecoveries(t, svc)
+		// A replay leaves one new active attempt; exhaustion leaves none.
 		var active, total int
 		if err := f.pool.QueryRow(ctx, `
 			SELECT count(*) FILTER (WHERE status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')),
@@ -976,9 +975,7 @@ func TestDelegatedFailureRecoveryStopsAfterBoundedUndeliveredAttempts(t *testing
 	if inboxItems != 1 || inboxSeverity != "action_required" || inboxBody != exhaustionContent {
 		t.Fatalf("exhaustion inbox = count %d severity %q body %q, want one action-required copy of explanation", inboxItems, inboxSeverity, inboxBody)
 	}
-	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result != (DelegatedFailureRecoverySweepResult{}) {
-		t.Fatalf("post-exhaustion recovery sweep = %+v, %v; want zero result, nil", result, err)
-	}
+	sweepDelegatedFailureRecoveries(t, svc)
 	if err := f.pool.QueryRow(ctx, `
 		SELECT count(*) FROM inbox_item
 		WHERE workspace_id = $1 AND recipient_id = $2 AND issue_id = $3
@@ -1027,6 +1024,73 @@ func TestHandleFailedTasksFinalDelegatedFailureWakesCoordinator(t *testing.T) {
 	}
 	if recoveryTasks != 1 || recoveryComments != 1 {
 		t.Fatalf("sweeper recovery tasks/comments = %d/%d, want 1/1", recoveryTasks, recoveryComments)
+	}
+}
+
+// insertOrphanedWorkerTask seeds a non-delegated task on the worker's issue
+// that orphan recovery has just failed with runtime_recovery.
+func (f *delegatedFailureFixture) insertOrphanedWorkerTask(t *testing.T, attempt, maxAttempts int32) db.AgentTaskQueue {
+	t.Helper()
+	taskID := dbfx.New(f.pool, f.workspaceID, f.userID).Task(t, f.worker, dbfx.Cols{
+		"runtime_id":          f.runtimeID,
+		"issue_id":            f.workerIssue,
+		"status":              "failed",
+		"attempt":             attempt,
+		"max_attempts":        maxAttempts,
+		"originator_user_id":  f.userID,
+		"accountable_user_id": f.userID,
+		"originator_source":   "direct_human",
+		"failure_reason":      "runtime_recovery",
+		"error":               "daemon restarted while task was in flight",
+		"completed_at":        dbfx.Raw("now()"),
+	})
+	task, err := db.New(f.pool).GetAgentTask(context.Background(), util.MustParseUUID(taskID))
+	if err != nil {
+		t.Fatalf("load orphaned task: %v", err)
+	}
+	return task
+}
+
+func TestHandleFailedTasksTerminalFailureCommentsOnTaskIssue(t *testing.T) {
+	f, svc := seedDelegatedFailureFixture(t)
+	ctx := context.Background()
+	failed := f.insertOrphanedWorkerTask(t, 2, 2)
+
+	if retried := svc.HandleFailedTasks(ctx, []db.AgentTaskQueue{failed}); retried != 0 {
+		t.Fatalf("HandleFailedTasks retried = %d, want 0", retried)
+	}
+
+	var comments int
+	var content string
+	if err := f.pool.QueryRow(ctx, `
+		SELECT count(*), COALESCE(max(content), '')
+		FROM comment
+		WHERE issue_id = $1 AND type = 'system' AND source_task_id = $2`, f.workerIssue, failed.ID).
+		Scan(&comments, &content); err != nil {
+		t.Fatalf("read failure comment: %v", err)
+	}
+	if comments != 1 || content != "daemon restarted while task was in flight" {
+		t.Fatalf("terminal failure comments = %d content %q, want one system comment with the task error", comments, content)
+	}
+}
+
+func TestHandleFailedTasksRetryPendingDoesNotCommentOnTaskIssue(t *testing.T) {
+	f, svc := seedDelegatedFailureFixture(t)
+	ctx := context.Background()
+	failed := f.insertOrphanedWorkerTask(t, 1, 2)
+
+	if retried := svc.HandleFailedTasks(ctx, []db.AgentTaskQueue{failed}); retried != 1 {
+		t.Fatalf("HandleFailedTasks retried = %d, want 1", retried)
+	}
+
+	var comments int
+	if err := f.pool.QueryRow(ctx, `
+		SELECT count(*) FROM comment WHERE issue_id = $1 AND type = 'system' AND source_task_id = $2`,
+		f.workerIssue, failed.ID).Scan(&comments); err != nil {
+		t.Fatalf("count failure comments: %v", err)
+	}
+	if comments != 0 {
+		t.Fatalf("retry-pending failure comments = %d, want 0", comments)
 	}
 }
 
@@ -1218,32 +1282,19 @@ func TestPendingDelegatedFailureSweepSkipsTriageSourceIssue(t *testing.T) {
 		WHERE id = $1`, failedID); err != nil {
 		t.Fatalf("stamp failed task: %v", err)
 	}
-	if target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID); err != nil || target == nil || !created {
+	target, created, err := svc.ensureDelegatedFailureRecoveryComment(ctx, failedID)
+	if err != nil || target == nil || !created {
 		t.Fatalf("ensure recovery comment = target %v created %v err %v", target != nil, created, err)
-	}
-
-	recoveryTasks := func() int {
-		t.Helper()
-		var n int
-		if err := f.pool.QueryRow(ctx, `
-			SELECT count(*) FROM agent_task_queue
-			WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&n); err != nil {
-			t.Fatalf("count recovery tasks: %v", err)
-		}
-		return n
 	}
 
 	if _, err := f.pool.Exec(ctx, `UPDATE issue SET triage_state = 'pending' WHERE id = $1`, f.issueID); err != nil {
 		t.Fatalf("move source issue into triage: %v", err)
 	}
-	result, err := svc.RecoverPendingDelegatedFailures(ctx, 100)
-	if err != nil {
-		t.Fatalf("triage-source recovery sweep: %v", err)
+	if f.pending(t, svc, target.comment.ID) {
+		t.Fatal("triage-source recovery selected by the outbox scan")
 	}
-	if result != (DelegatedFailureRecoverySweepResult{}) {
-		t.Fatalf("triage-source sweep = %+v, want nothing selected and nothing replayed", result)
-	}
-	if n := recoveryTasks(); n != 0 {
+	sweepDelegatedFailureRecoveries(t, svc)
+	if n := f.recoveryTasks(t, failedID); n != 0 {
 		t.Fatalf("recovery tasks = %d, want none while the source issue is in Triage", n)
 	}
 
@@ -1253,10 +1304,8 @@ func TestPendingDelegatedFailureSweepSkipsTriageSourceIssue(t *testing.T) {
 	if _, err := f.pool.Exec(ctx, `UPDATE issue SET triage_state = NULL WHERE id = $1`, f.issueID); err != nil {
 		t.Fatalf("accept source issue: %v", err)
 	}
-	if result, err := svc.RecoverPendingDelegatedFailures(ctx, 100); err != nil || result.Replayed != 1 {
-		t.Fatalf("post-accept sweep = %+v, %v; want one replay", result, err)
-	}
-	if n := recoveryTasks(); n != 1 {
+	sweepDelegatedFailureRecoveries(t, svc)
+	if n := f.recoveryTasks(t, failedID); n != 1 {
 		t.Fatalf("recovery tasks after accept = %d, want 1", n)
 	}
 }

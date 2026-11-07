@@ -1242,12 +1242,12 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 
 	var outputMu sync.Mutex
 	// Result.Output is "final user-facing output selected by the backend"
-	// (agent.go), so it holds the deliverable only. finalAnswer is the text the
-	// app-server labelled `phase: "final_answer"`; lastAgentMessage is the
-	// fallback for the legacy `agent_message` protocol, which carries no phase.
+	// (agent.go), so it holds the deliverable only. output tracks the text the
+	// app-server labelled `phase: "final_answer"` and, for the legacy
+	// `agent_message` protocol which carries no phase, the last agent message.
 	// Every agent message still flows to msgCh, so the transcript is unchanged —
 	// only what the daemon forwards to a chat/channel reply narrows (GH #6006).
-	var finalAnswer, lastAgentMessage string
+	var output codexOutputSelection
 	var semanticObserved atomic.Bool
 	turnNotificationGate := &codexTurnNotificationGate{}
 	firstItemWait := &codexFirstItemWaitObservation{}
@@ -1310,17 +1310,17 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			// preserving the reader's EOF and cancellation liveness.
 			return trySend(msgCh, msg)
 		},
-		onAgentMessage: func(text string) {
+		onAgentMessage: func(text, phase string) {
 			// Delta events make MessageText incremental. Keep Result.Output's
 			// legacy fallback authoritative by updating it from the completed
 			// agent-message snapshot, not whichever delta happened to arrive last.
 			outputMu.Lock()
-			lastAgentMessage = text
+			output.observeAgentMessage(text, phase)
 			outputMu.Unlock()
 		},
 		onFinalAnswer: func(text string) {
 			outputMu.Lock()
-			finalAnswer = text
+			output.observeFinalAnswer(text)
 			outputMu.Unlock()
 		},
 		onSemanticActivity: func(description string) {
@@ -1898,7 +1898,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		}
 
 		outputMu.Lock()
-		finalOutput := codexDeliverableOutput(finalAnswer, lastAgentMessage)
+		finalOutput := codexDeliverableOutput(output)
 		outputMu.Unlock()
 
 		// Build usage map from accumulated codex usage.
@@ -1908,27 +1908,12 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		u := c.usage
 		c.usageMu.Unlock()
 
-		// Fallback: if no usage from JSON-RPC, scan Codex session JSONL logs.
-		// Codex writes token_count events to $CODEX_HOME/sessions/YYYY/MM/DD/*.jsonl;
-		// scan this backend's per-task CODEX_HOME, since sessions are isolated
-		// there rather than in the shared ~/.codex/sessions (MUL-4424).
-		if u.InputTokens == 0 && u.OutputTokens == 0 {
-			taskCodexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
-			if scanned := scanCodexSessionUsage(startTime, taskCodexHome, threadID, resumed); scanned != nil {
-				u = scanned.usage
-				if scanned.model != "" && opts.Model == "" {
-					opts.Model = scanned.model
-				}
-			}
-		}
-
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
-			model := opts.Model
-			if model == "" {
-				model = "unknown"
-			}
-			usageMap = map[string]TokenUsage{model: u}
-		}
+		// Codex sometimes omits usage from JSON-RPC notifications, and can also
+		// omit the configured model when the agent relies on Codex's default.
+		// Scan the per-task session JSONL for either missing value. Session usage
+		// is only a fallback, so it must never replace a JSON-RPC usage sample.
+		taskCodexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
+		usageMap = codexResultUsageMap(startTime, taskCodexHome, threadID, resumed, opts.Model, u)
 
 		resCh <- Result{
 			Status:                       finalStatus,
@@ -2335,17 +2320,50 @@ func trySendString(ch chan<- string, value string) {
 	}
 }
 
+// codexOutputSelection records what a turn produced that could become
+// Result.Output. The zero value is an empty selection.
+type codexOutputSelection struct {
+	// finalAnswer is the last non-blank message labelled `phase: "final_answer"`.
+	finalAnswer string
+	// finalAnswerObserved is set by any final_answer item, including one with
+	// empty or whitespace-only text: the app-server explicitly ended the turn
+	// without a deliverable, which is different from never labelling one.
+	finalAnswerObserved bool
+	lastAgentMessage    string
+	// lastAgentMessagePhase is the phase label of lastAgentMessage; empty for
+	// the legacy protocol and for app-servers that do not label phases.
+	lastAgentMessagePhase string
+}
+
+func (s *codexOutputSelection) observeAgentMessage(text, phase string) {
+	s.lastAgentMessage = text
+	s.lastAgentMessagePhase = phase
+}
+
+func (s *codexOutputSelection) observeFinalAnswer(text string) {
+	s.finalAnswerObserved = true
+	if strings.TrimSpace(text) != "" {
+		s.finalAnswer = text
+	}
+}
+
 // codexDeliverableOutput picks Result.Output from what the turn produced: the
 // message the app-server itself labelled `phase: "final_answer"`, or — for the
 // legacy `agent_message` protocol, which carries no phase — the most recent
 // agent message. Never every message joined: the intermediate ones narrate the
 // work between tool calls, which belongs to the transcript and not to a chat or
-// IM reply (GH #6006).
-func codexDeliverableOutput(finalAnswer, lastAgentMessage string) string {
-	if finalAnswer != "" {
-		return finalAnswer
+// IM reply (GH #6006). A message explicitly labelled with another phase (for
+// example `commentary`) is narration too, so an empty or missing final answer
+// after it yields empty output instead of promoting the narration to the
+// deliverable.
+func codexDeliverableOutput(s codexOutputSelection) string {
+	if s.finalAnswer != "" {
+		return s.finalAnswer
 	}
-	return lastAgentMessage
+	if s.finalAnswerObserved || s.lastAgentMessagePhase != "" {
+		return ""
+	}
+	return s.lastAgentMessage
 }
 
 func logCodexAgentMessage(logger *slog.Logger, msg Message) {
@@ -2409,9 +2427,10 @@ type codexClient struct {
 	// delivered prefix. Unit clients may leave this nil and use onMessage.
 	onAgentMessageChunk func(text string) bool
 	// onAgentMessage receives the authoritative completed text for one agent
-	// message. onAgentMessageChunk may deliver that text incrementally, so
+	// message and its phase label ("" when the protocol carries none).
+	// onAgentMessageChunk may deliver that text incrementally, so
 	// Result.Output fallbacks must use this callback rather than the last chunk.
-	onAgentMessage           func(text string)
+	onAgentMessage           func(text, phase string)
 	onSemanticActivity       func(description string)
 	onTurnDone               func(aborted bool)
 	guardianRateLimitCircuit *codexGuardianRateLimitCircuit
@@ -2419,6 +2438,8 @@ type codexClient struct {
 	// onFinalAnswer fires only for an agent message the app-server itself
 	// labelled `phase: "final_answer"` — the turn's deliverable, as opposed to
 	// the intermediate agent messages that narrate work between tool calls.
+	// It fires for an empty final answer too, so the caller can tell "ended
+	// without a deliverable" from "never labelled one".
 	// Both still reach onMessage: the transcript keeps the whole timeline, only
 	// Result.Output is narrowed to the deliverable (GH #6006).
 	onFinalAnswer func(text string)
@@ -3405,7 +3426,7 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 			c.onMessage(Message{Type: MessageText, Content: text})
 		}
 		if text != "" && c.onAgentMessage != nil {
-			c.onAgentMessage(text)
+			c.onAgentMessage(text, "")
 		}
 	case "exec_command_begin":
 		callID, _ := msg["call_id"].(string)
@@ -3812,18 +3833,20 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 
 	case method == "item/completed" && itemType == "agentMessage":
 		text, _ := item["text"].(string)
+		phase, _ := item["phase"].(string)
 		if text != "" && c.onAgentMessage != nil {
-			c.onAgentMessage(text)
+			c.onAgentMessage(text, phase)
 		}
 		c.completeAgentMessage(itemID, text)
-		phase, _ := item["phase"].(string)
 		if phase == "final_answer" {
 			// The gate exists so a subagent or a replayed history turn cannot
 			// end OUR turn early, and the thread guard at the top of this
 			// function already keeps foreign threads out. A final answer that
 			// arrives before we observed turn/started is still this thread's
-			// deliverable, and dropping it would fall back to narration.
-			if text != "" && c.onFinalAnswer != nil {
+			// deliverable, and dropping it would fall back to narration. An
+			// empty final answer is reported too: it means the turn ended
+			// without a deliverable, not that the last narration is one.
+			if c.onFinalAnswer != nil {
 				c.onFinalAnswer(text)
 			}
 			// Keep the stream open until turn/completed. A final answer is the
@@ -4008,10 +4031,37 @@ func scanCodexSessionUsage(startTime time.Time, codexHome, threadID string, resu
 	// crossing into a different thread's rollout.
 	result := parseCodexSessionFileSince(files[len(files)-1].path, startTime, resumed)
 	if result == nil || (result.usage.InputTokens == 0 && result.usage.OutputTokens == 0 &&
-		result.usage.CacheReadTokens == 0 && result.usage.CacheWriteTokens == 0) {
+		result.usage.CacheReadTokens == 0 && result.usage.CacheWriteTokens == 0 && result.model == "") {
 		return nil
 	}
 	return result
+}
+
+// codexResultUsageMap resolves a Codex result's model and usage without trading
+// one provider signal for another. JSON-RPC usage is authoritative when present;
+// the session log fills only a missing model. Session usage is used only when the
+// JSON-RPC path reported no tokens. A default-model run therefore remains
+// attributable instead of being stored as "unknown".
+func codexResultUsageMap(startTime time.Time, codexHome, threadID string, resumed bool, model string, usage TokenUsage) map[string]TokenUsage {
+	usageEmpty := usage.InputTokens == 0 && usage.OutputTokens == 0 &&
+		usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0
+	var scanned *codexSessionUsage
+	if usageEmpty || model == "" {
+		scanned = scanCodexSessionUsage(startTime, codexHome, threadID, resumed)
+	}
+	if usageEmpty && scanned != nil {
+		usage = scanned.usage
+	}
+	if model == "" && scanned != nil {
+		model = scanned.model
+	}
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0 {
+		return nil
+	}
+	if model == "" {
+		model = "unknown"
+	}
+	return map[string]TokenUsage{model: usage}
 }
 
 // findCodexSessionRollouts returns uncompressed rollout files owned by threadID
@@ -4251,10 +4301,12 @@ func parseCodexSessionFileSince(path string, startTime time.Time, resumed bool) 
 		}
 	}
 
-	if !finalUsageFound {
+	if !finalUsageFound && result.model == "" {
 		return nil
 	}
-	result.usage = codexTokenUsage(finalUsage)
+	if finalUsageFound {
+		result.usage = codexTokenUsage(finalUsage)
+	}
 	return &result
 }
 

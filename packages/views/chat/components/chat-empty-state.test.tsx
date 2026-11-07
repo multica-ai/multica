@@ -91,7 +91,7 @@ describe("chat empty-state conversation starters", () => {
 describe("chat empty-state customize affordance", () => {
   afterEach(cleanup);
 
-  const href = "/acme/agents/agent-1?view=instructions&focus=conversation_starters";
+  const href = "/acme/agents/agent-1?view=general&focus=conversation_starters";
 
   it("links a viewer who may edit the agent to its conversation starters", () => {
     renderEmptyState(agent(), href);
