@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Tag, Plus, Settings2 } from "@multica/ui/icons";
 import { toast } from "sonner";
@@ -115,6 +115,13 @@ export function LabelPicker({
   // for an error the user didn't cause. A ref closes the window cleanly.
   const creatingRef = useRef(false);
 
+  // A create request may finish after the user edits the controlled draft
+  // selection. Read the latest committed props when that response arrives.
+  const draftSelectionRef = useRef({ selectedIds, onSelectedIdsChange });
+  useLayoutEffect(() => {
+    draftSelectionRef.current = { selectedIds, onSelectedIdsChange };
+  }, [selectedIds, onSelectedIdsChange]);
+
   // Draft mode when no issue exists yet: hold selection in the caller instead
   // of hitting the attach/detach endpoints.
   const isDraft = issueId === undefined;
@@ -183,7 +190,10 @@ export function LabelPicker({
       {
         onSuccess: (label) => {
           if (isDraft) {
-            onSelectedIdsChange?.([...selectedIds, label.id]);
+            const latest = draftSelectionRef.current;
+            if (!latest.selectedIds.includes(label.id)) {
+              latest.onSelectedIdsChange?.([...latest.selectedIds, label.id]);
+            }
           } else {
             attach.mutate(label.id);
           }
