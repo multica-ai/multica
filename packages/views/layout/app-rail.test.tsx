@@ -41,9 +41,9 @@ vi.mock("@multica/core/inbox/queries", () => ({
   useInboxUnreadCount: () => state.inboxUnread,
 }));
 vi.mock("@multica/core/chat/queries", () => ({
-  chatSessionsOptions: (wsId: string) => ({
-    queryKey: ["chat", wsId, "sessions"],
-    queryFn: async () => state.chatSessions,
+  chatSessionSummaryOptions: (wsId: string) => ({
+    queryKey: ["chat", wsId, "sessions", "summary"],
+    queryFn: async () => ({ active_count: state.chatSessions.length, archived_count: 0, unread_by_session: Object.fromEntries(state.chatSessions.map((s) => [s.id, s.unread_count ?? 0])) }),
   }),
 }));
 // Callable-store shape (selectorFn + getState) per the repo testing rules.
@@ -80,7 +80,7 @@ function renderRail(children?: ReactNode, rail: ReactNode = <AppRail />) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
-  client.setQueryData(["chat", "ws-1", "sessions"], state.chatSessions);
+  client.setQueryData(["chat", "ws-1", "sessions", "summary"], { active_count: state.chatSessions.length, archived_count: 0, unread_by_session: Object.fromEntries(state.chatSessions.map((s) => [s.id, s.unread_count ?? 0])) });
   return renderWithI18n(
     <QueryClientProvider client={client}>
       <SidebarProvider>

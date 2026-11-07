@@ -1,3 +1,4 @@
+import type { ChatSessionList } from "@multica/core/chat/use-session-list";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { VirtuosoMockContext } from "react-virtuoso";
@@ -18,6 +19,10 @@ import enIssues from "../../locales/en/issues.json";
 
 const setActiveSession = vi.fn();
 const archiveMutate = vi.fn();
+let listRows: ChatSession[] = [];
+vi.mock("@multica/core/chat/use-session-list", () => ({
+  useChatSessionList: () => ({ data: listRows.filter((s) => s.status === "archived"), isSuccess: true, isLoading: false }),
+}));
 
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: ({ actorId }: { actorId: string }) => (
@@ -52,7 +57,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-query")>();
   return {
     ...actual,
-    useQuery: () => ({ data: { tasks: [] } }),
+    useQuery: () => ({ data: { tasks: [], archived_count: listRows.filter((s) => s.status === "archived").length } }),
     useQueryClient: () => ({ setQueryData: vi.fn(), invalidateQueries: vi.fn() }),
   };
 });
@@ -97,11 +102,13 @@ function renderList(
     renderedAgents = [agent],
   } = {},
 ) {
+  listRows = renderedSessions;
   render(
     <VirtuosoMockContext.Provider value={{ viewportHeight: 560, itemHeight: 56 }}>
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
         <ChatThreadList
-          sessions={renderedSessions}
+          sessions={renderedSessions.filter((s) => s.status !== "archived")}
+          sessionList={{ data: renderedSessions, isSuccess: true } as ChatSessionList}
           agents={renderedAgents}
           activeSessionId={activeSessionId}
           onSelectSession={onSelectSession}

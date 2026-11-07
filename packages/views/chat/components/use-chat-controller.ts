@@ -1,5 +1,6 @@
 "use client";
 
+import { useChatSessionList, useCurrentChatSession } from "@multica/core/chat/use-session-list";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   useInfiniteQuery,
@@ -21,7 +22,7 @@ import {
   useWorkspaceAgentAvailability,
 } from "@multica/core/agents";
 import {
-  chatSessionsOptions,
+  chatSessionSummaryOptions,
   chatMessagesPageOptions,
   pendingChatTaskOptions,
   chatKeys,
@@ -220,9 +221,10 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const { data: members = [], isSuccess: membersLoaded } = useQuery(
     memberListOptions(wsId),
   );
-  const { data: sessions = [], isSuccess: sessionsLoaded } = useQuery(
-    chatSessionsOptions(wsId),
-  );
+  const sessionList = useChatSessionList(wsId, "active", isActive);
+  const { data: sessions } = sessionList;
+  const selectedSession = useCurrentChatSession(wsId, activeSessionId, sessions);
+  const { data: sessionSummary } = useQuery(chatSessionSummaryOptions(wsId));
   const { data: projects = [], isSuccess: projectsLoaded } = useQuery(
     projectListOptions(wsId),
   );
@@ -241,7 +243,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     pendingChatTaskOptions(activeSessionId ?? ""),
   );
   const showSkeleton =
-    !!activeSessionId && (messagesLoading || pendingTaskLoading);
+    !!activeSessionId && (messagesLoading || pendingTaskLoading || selectedSession.isLoading);
   const messages = hideQueuedChatMessages(allMessages, pendingTask);
   const olderMessageCount = messagePages
     .slice(1)
@@ -299,9 +301,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     [],
   );
 
-  const currentSession = activeSessionId
-    ? sessions.find((s) => s.id === activeSessionId)
-    : null;
+  const currentSession = selectedSession.data;
   const isSessionArchived = currentSession?.status === "archived";
   const candidateProjectId = currentSession
     ? currentSession.project_id ?? null
@@ -411,7 +411,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
   // session that stays active past the tick — a real select, deep link, or
   // refresh — is read.
   const currentHasUnread =
-    sessions.find((s) => s.id === activeSessionId)?.has_unread ?? false;
+    !!activeSessionId && (sessionSummary?.unread_by_session[activeSessionId] ?? 0) > 0;
   useEffect(() => {
     if (!isActive || !appForeground || !activeSessionId) return;
     if (!currentHasUnread) return;
@@ -428,15 +428,10 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const sessionPromiseRef = useRef<Promise<string | null> | null>(null);
   const ensureSession = useCallback(
     async (titleSeed: string): Promise<string | null> => {
-      // Trust the current session id only when it's real: present in the
-      // loaded list, or a just-created one still awaiting the list refetch
-      // (has an optimistic write). A dangling id (deleted / no access) must not
-      // be treated as an existing session — fall through and create a fresh one
-      // so the message lands somewhere instead of POSTing into a 404.
+      // A partial page cannot establish that a selected session is gone.
       if (
         activeSessionId &&
-        (!sessionsLoaded ||
-          sessions.some((s) => s.id === activeSessionId) ||
+        (!selectedSession.unavailable ||
           hasInFlightPendingTask(qc, activeSessionId))
       ) {
         return activeSessionId;
@@ -464,27 +459,20 @@ export function useChatController(opts?: { isActive?: boolean }) {
       activeAgent,
       activeProjectId,
       createSession,
-      sessions,
-      sessionsLoaded,
+      selectedSession.unavailable,
       qc,
     ],
   );
 
-  // Self-heal a dangling `activeSessionId`. Once the sessions list has loaded
-  // and it isn't in the list — with no in-flight optimistic write exempting a
-  // just-created session — the id was deleted, lost access, or never existed
-  // (a stale `?session=` deep link, or a persisted floating-window selection).
-  // Clearing it stops BOTH surfaces (the tab and the floating window) from
-  // rendering an editable empty chat whose send would POST into a nonexistent
-  // session. Lives in the shared controller so every surface self-heals.
+  // A session outside the loaded pages may still exist. Clear a selection
+  // only when its detail endpoint confirms that it is no longer accessible.
   useEffect(() => {
     if (getCurrentWsId() !== wsId) return;
-    if (!activeSessionId || !sessionsLoaded) return;
-    if (sessions.some((s) => s.id === activeSessionId)) return;
+    if (!activeSessionId || !selectedSession.unavailable) return;
     if (hasInFlightPendingTask(qc, activeSessionId)) return;
     uiLogger.info("clearing dangling activeSessionId", { sessionId: activeSessionId });
     setActiveSession(null);
-  }, [wsId, activeSessionId, sessionsLoaded, sessions, qc, setActiveSession]);
+  }, [wsId, activeSessionId, selectedSession.unavailable, qc, setActiveSession]);
 
   // Upload transport moved into the coordinated-upload engine inside ChatInput
   // (MUL-5181 L2); surfaces only forward whether the affordance exists.
@@ -838,6 +826,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     availableAgents,
     agentsSettled,
     sessions,
+    sessionList,
     projects,
     activeSessionId,
     selectedAgentId,

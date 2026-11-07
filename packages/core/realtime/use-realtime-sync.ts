@@ -1,5 +1,6 @@
 "use client";
 
+import { patchChatSessionPages } from "../chat/session-cache";
 import { useEffect, useRef } from "react";
 import { forgetLocalSearchIndex } from "../search-index/instance";
 import { useQueryClient, type InfiniteData, type QueryClient, type QueryFilters } from "@tanstack/react-query";
@@ -380,6 +381,14 @@ export function applyChatSessionUpdatedToCache(
   wsId: string,
   payload: ChatSessionUpdatedPayload,
 ): void {
+  const { chat_session_id: sessionId, ...patch } = payload;
+  patchChatSessionPages(qc, wsId, sessionId, {
+    ...patch,
+    ...(payload.status === "archived" ? { has_unread: false, unread_count: 0 } : {}),
+  });
+  // Pin/archive changes can cross a cursor boundary or bring in an unloaded row.
+  void qc.invalidateQueries({ queryKey: chatKeys.sessionPages(wsId) });
+  void qc.invalidateQueries({ queryKey: chatKeys.sessionSummary(wsId) });
   qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), (old) => {
     if (!old) return old;
     const next = old.map((s) =>
@@ -1868,6 +1877,7 @@ export function useRealtimeSync(
         const drop = (old?: { id: string }[]) =>
           old?.filter((s) => s.id !== payload.chat_session_id);
         qc.setQueryData(chatKeys.sessions(id), drop);
+        invalidateSessionLists();
       }
       qc.removeQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
       qc.removeQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });

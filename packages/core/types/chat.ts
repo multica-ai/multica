@@ -113,6 +113,18 @@ export interface ChatSession {
   updated_at: string;
 }
 
+export interface ChatSessionsPage {
+  sessions: ChatSession[];
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
+export interface ChatSessionSummary {
+  active_count: number;
+  archived_count: number;
+  unread_by_session: Record<string, number>;
+}
+
 export interface PendingChatTaskItem {
   task_id: string;
   status: string;

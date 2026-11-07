@@ -227,6 +227,11 @@
     }
   },
   "list": {
+    "loading": "加载会话中...",
+    "load_failed": "无法加载会话",
+    "retry": "重试",
+    "load_more": "加载更多",
+    "no_archived": "暂无归档会话",
     "typing": "正在输入…",
     "failed": "发送失败",
     "you_prefix": "你：",

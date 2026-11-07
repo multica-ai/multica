@@ -5,8 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { useChatStore } from "@multica/core/chat";
 import {
-  chatSessionsOptions,
-  countUnreadChatSessions,
+  chatSessionSummaryOptions,
   hasPendingChatTasksOptions,
 } from "@multica/core/chat/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -31,7 +30,7 @@ export function ChatFab() {
   // the tooltip carries the current binding (Settings → Shortcuts can rebind or
   // clear it, hence the null case).
   const shortcut = useShortcut("toggleChat");
-  const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
+  const { data: summary } = useQuery(chatSessionSummaryOptions(wsId));
   // FAB only needs a boolean "is anything running", and only while the window
   // is closed (when open, ChatWindow owns the detailed pending query). Gating
   // on `enabled: !isOpen` keeps the minimised button off the per-message
@@ -43,7 +42,7 @@ export function ChatFab() {
 
   if (isOpen) return null;
 
-  const unreadSessionCount = countUnreadChatSessions(sessions);
+  const unreadSessionCount = Object.keys(summary?.unread_by_session ?? {}).length;
   const isRunning = hasPending?.has_pending ?? false;
 
   const handleClick = () => {

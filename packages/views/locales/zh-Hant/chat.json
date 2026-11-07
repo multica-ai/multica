@@ -227,6 +227,11 @@
     }
   },
   "list": {
+    "loading": "載入對話中...",
+    "load_failed": "無法載入對話",
+    "retry": "重試",
+    "load_more": "載入更多",
+    "no_archived": "尚無封存對話",
     "typing": "正在輸入…",
     "failed": "傳送失敗",
     "you_prefix": "你：",

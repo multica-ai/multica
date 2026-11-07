@@ -231,6 +231,11 @@
     }
   },
   "list": {
+    "loading": "Loading chats...",
+    "load_failed": "Could not load chats",
+    "retry": "Retry",
+    "load_more": "Load more",
+    "no_archived": "No archived chats",
     "typing": "Typing…",
     "failed": "Failed to send",
     "you_prefix": "You: ",

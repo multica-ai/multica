@@ -1,3 +1,4 @@
+import { ApiError } from "@multica/core/api";
 import { useLayoutEffect, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook } from "@testing-library/react";
@@ -10,6 +11,7 @@ import { useChatController } from "./use-chat-controller";
 const route = vi.hoisted(() => ({ workspaceId: "ws-source", isActive: true }));
 const data = vi.hoisted(() => ({
   sessions: {} as Record<string, ChatSession[]>,
+  unavailable: [] as string[],
   projects: {} as Record<string, Project[]>,
 }));
 
@@ -34,6 +36,11 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
   useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
     const wsId = queryKey[1] as string;
+    if (queryKey.includes("summary")) return { data: { unread_by_session: {} } };
+    if (queryKey.includes("detail")) {
+      const id = queryKey.at(-1) as string;
+      return { data: data.sessions[wsId]?.find((s) => s.id === id), error: data.unavailable.includes(id) ? new ApiError("not found", 404, "Not Found") : null };
+    }
     if (queryKey.includes("sessions")) {
       return { data: data.sessions[wsId] ?? [], isSuccess: true };
     }
@@ -45,8 +52,8 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
     }
     return { data: [], isSuccess: true };
   },
-  useInfiniteQuery: () => ({
-    data: undefined,
+  useInfiniteQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => ({
+    data: queryKey.includes("sessions") ? { pages: [{ sessions: data.sessions[queryKey[1] as string] ?? [] }] } : undefined,
     isLoading: false,
     fetchNextPage: vi.fn(),
     hasNextPage: false,
@@ -84,6 +91,7 @@ describe("useChatController workspace rehydration", () => {
   }
 
   beforeEach(async () => {
+    data.unavailable = [];
     route.workspaceId = "ws-source";
     route.isActive = true;
     data.sessions = { "ws-source": [sourceSession], "ws-target": [targetSession] };
@@ -155,6 +163,7 @@ describe("useChatController workspace rehydration", () => {
     expectTargetSelection();
 
     data.sessions["ws-target"] = [];
+    data.unavailable = [targetSession.id];
     data.projects["ws-target"] = [];
     rerender();
 

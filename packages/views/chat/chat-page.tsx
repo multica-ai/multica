@@ -259,6 +259,7 @@ export function ChatPage() {
     <div className="min-h-0 flex-1 px-2 py-1">
       <ChatThreadList
         sessions={c.sessions}
+        sessionList={c.sessionList}
         agents={c.agents}
         activeSessionId={c.activeSessionId}
         onSelectSession={handleSelect}

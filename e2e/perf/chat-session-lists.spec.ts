@@ -99,7 +99,13 @@ async function setup(page: Page, baseURL: string, withArchive: boolean, size = c
       return route.abort();
     }
     if (!url.pathname.startsWith("/api/")) return route.continue();
-    const body = responseFor(url.pathname, rows);
+    // This fixture intentionally supplies all rows in one page to stress
+    // rendering. chat-session-pagination.spec.ts owns bounded-page behavior.
+    const body = url.pathname === "/api/chat/sessions/page"
+      ? { sessions: rows.filter((row) => row.status === (url.searchParams.get("status") ?? "active")), has_more: false, next_cursor: null }
+      : url.pathname === "/api/chat/sessions/summary"
+        ? { active_count: size, archived_count: withArchive ? size : 0, unread_by_session: {} }
+        : responseFor(url.pathname, rows);
     if (body === undefined) {
       unexpected.push(`${route.request().method()} ${url.pathname}${url.search}`);
       return route.fulfill({ status: 404, contentType: "application/json", body: "{}" });

@@ -174,14 +174,16 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
         return { data: [{ user_id: "user-1", role: "admin" }] };
       }
       if (key.includes("runtimes")) return { data: [] };
+      if (key.includes("summary")) return { data: { unread_by_session: Object.fromEntries(h.sessions.filter((s) => s.has_unread).map((s) => [s.id, Math.max(1, s.unread_count ?? 1)])) } };
+      if (key.includes("detail")) return { data: h.sessions.find((s) => s.id === key.at(-1)) ?? null, isSuccess: true };
       if (key.includes("sessions")) return { data: h.sessions, isSuccess: true };
       if (key.includes("projects")) return { data: h.projects, isSuccess: true };
       if (key.includes("pending-task")) return { data: h.pendingTask };
       if (key.includes("draft-restores")) return { data: h.draftRestores };
       return { data: null };
     },
-    useInfiniteQuery: () => ({
-      data: undefined,
+    useInfiniteQuery: (options: { queryKey?: unknown[] }) => ({
+      data: options.queryKey?.includes("sessions") ? { pages: [{ sessions: h.sessions }] } : undefined,
       isLoading: false,
       fetchNextPage: vi.fn(),
       hasNextPage: false,
