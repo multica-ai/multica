@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConversationListModel } from "@multica/conversation-client/models";
@@ -62,6 +62,59 @@ it("updates only selected rows and lets a preview update bypass activity control
   expect(screen.getByRole("status")).toHaveClass("bg-info");
   act(() => list.completions.set("b", { ...list.completions.get("b")!, readTurnIndex: 0 }));
   expect(screen.queryByRole("status")).toBeNull();
+});
+
+it.each([false, true])("defers unread completion indicators until all work stops (remote: %s)", (remote) => {
+  const list = new ConversationListModel();
+  let seq = 1;
+  list.upsert([summary("a"), summary("b")]);
+  const completion = {
+    version: 1 as const, generation: "g", baselineTurnIndex: 0, summarySeq: 1, turnCount: 1,
+    activeTurnId: null, status: "idle", completedTurnIndex: 0, completedTurnId: "t0", readTurnIndex: -1,
+  };
+  list.completions.set("a", completion);
+  list.completions.set("b", completion);
+  const model = new LocalConversationListModel(list);
+  render(<>{["a", "b"].map((id) => <LocalConversationSessionRow
+    key={id} model={model} id={id} selected={false} sessionLinks={{ current: new Map() }}
+    flowPath="/test/conversations" select={vi.fn()} updatingId={null}
+    labels={{ pinned: "Pinned", storage: "Saved locally" }} projectLabels={{ actions: "Actions" }}
+    t={((selector: (messages: object) => string) => selector({
+      window: { unread: "Unread" }, desktop: { local_conversation: {
+        waiting_for_answer: "Waiting for answer", waiting_for_answer_label: "Answer question",
+      } },
+    })) as ComponentProps<typeof LocalConversationSessionRow>["t"]}
+    renderSessionActions={() => <></>} setContextSelection={vi.fn()} chinese={false} remote={remote}
+    v2={{ list } as ComponentProps<typeof LocalConversationSessionRow>["v2"]}
+  />)}</>);
+  const row = (id: string) => within(screen.getByRole("link", { name: new RegExp(`^Codex\\s*${id}`) }).parentElement!);
+  const unread = () => row("a").queryByRole("status", { name: "Unread" });
+  const update = (status: string, backgroundTasks = 0, pendingInteractions = 0) => act(() => list.upsert([{
+    ...summary("a", ++seq), status, background_tasks: backgroundTasks, pending_interactions: pendingInteractions,
+  }]));
+  expect(unread()).toBeInTheDocument();
+  update("running");
+  expect(unread()).toBeNull();
+  expect(row("a").getByLabelText("Conversation running: a")).toBeInTheDocument();
+  expect(list.completions.pending("a")).toEqual(completion);
+  // A queued turn can finish while another turn is already running.
+  act(() => list.completions.set("a", { ...completion, completedTurnIndex: 1, completedTurnId: "t1" }));
+  expect(unread()).toBeNull();
+  update("running", 0, 1);
+  expect(row("a").getByRole("button", { name: "Answer question" })).toBeInTheDocument();
+  expect(unread()).toBeNull();
+  update("idle", 1);
+  expect(row("a").getByRole("status", { name: "Background tasks: a (1)" })).toBeInTheDocument();
+  expect(unread()).toBeNull();
+  update("idle");
+  expect(unread()).toBeInTheDocument();
+  expect(list.completions.pending("a")?.completedTurnId).toBe("t1");
+  act(() => list.completions.set("a", { ...list.completions.get("a")!, readTurnIndex: 1 }));
+  expect(unread()).toBeNull();
+  update("running");
+  update("idle");
+  expect(unread()).toBeNull();
+  expect(row("b").getByRole("status", { name: "Unread" })).toBeInTheDocument();
 });
 
 describe.each(["claude", "codex"])("%s failure status", (provider) => {

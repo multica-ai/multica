@@ -111,7 +111,7 @@ export const LocalConversationSessionRow = observer(function LocalConversationSe
             />
           )
         )}
-        {entry.hasUnreadCompletion && (
+        {!entryRunning && background === 0 && entry.hasUnreadCompletion && (
           <span role="status" aria-label={t(($) => $.window.unread)} className="size-2 shrink-0 rounded-full bg-info" />
         )}
         {entry.failed && (
