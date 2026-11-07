@@ -407,6 +407,35 @@ type ChannelInstallation struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ChannelIssueNotice struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	IssueRevision     int64              `json:"issue_revision"`
+	EventKey          string             `json:"event_key"`
+	Kind              string             `json:"kind"`
+	StatusKey         string             `json:"status_key"`
+	FailedTaskID      pgtype.UUID        `json:"failed_task_id"`
+	SourceTaskID      pgtype.UUID        `json:"source_task_id"`
+	BindingID         pgtype.UUID        `json:"binding_id"`
+	InstallationID    pgtype.UUID        `json:"installation_id"`
+	BindingGeneration string             `json:"binding_generation"`
+	RecipientUserID   pgtype.UUID        `json:"recipient_user_id"`
+	ChannelSenderID   string             `json:"channel_sender_id"`
+	ChannelChatID     string             `json:"channel_chat_id"`
+	ChannelMessageID  pgtype.Text        `json:"channel_message_id"`
+	ChannelThreadID   pgtype.Text        `json:"channel_thread_id"`
+	RouteConfig       []byte             `json:"route_config"`
+	Status            string             `json:"status"`
+	Attempts          int32              `json:"attempts"`
+	OwnerToken        pgtype.UUID        `json:"owner_token"`
+	FirstAttemptAt    pgtype.Timestamptz `json:"first_attempt_at"`
+	RetryAt           pgtype.Timestamptz `json:"retry_at"`
+	MessageID         pgtype.Text        `json:"message_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ChannelMediaPendingObject struct {
 	StorageKey     string             `json:"storage_key"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

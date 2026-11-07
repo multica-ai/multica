@@ -613,6 +613,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Logger:  slog.Default(),
 				})
 				h.LarkAPIClient = larkClient
+				h.LarkIssueNotices = lark.NewIssueNoticeWorker(queries, installSvc, larkClient, appURLFromEnv(), h.TaskService.MemberMayInvokeAgent)
 
 				// Channel-backed store: routes the lark package's DB seams
 				// onto the channel_* tables (MUL-3515). Interface-wired

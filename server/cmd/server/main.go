@@ -753,6 +753,10 @@ func main() {
 	// work, so there is no separate queue TTL to tune: a busy runtime keeps its
 	// backlog, and a departed one retires everything it owned at once.
 	go h.RunQoderConnections(sweepCtx, pool, "http://localhost:"+port)
+	// Async notices share shutdown cancellation and resume from their durable queue.
+	if h.LarkIssueNotices != nil {
+		go h.LarkIssueNotices.Run(sweepCtx)
+	}
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus, runtimeReconnectGrace)
 	if telemetryWorker != nil {
 		go telemetryWorker.Run(sweepCtx)

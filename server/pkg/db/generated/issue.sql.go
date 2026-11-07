@@ -507,6 +507,9 @@ cleared_pr_exclusions AS (
 ),
 cleared_unread AS (
     DELETE FROM issue_unread WHERE issue_id IN (SELECT target.id FROM target)
+),
+cleared_channel_issue_notices AS (
+    DELETE FROM channel_issue_notice WHERE issue_id IN (SELECT target.id FROM target)
 )
 DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target)
 `
