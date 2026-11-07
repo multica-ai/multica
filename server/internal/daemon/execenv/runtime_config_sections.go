@@ -373,7 +373,11 @@ func writeIssueBodyFormatting(b *strings.Builder) {
 // shell is a wrong comment), while the receipt mode only decides how much of
 // an already-correct comment is echoed back, so it must not displace the
 // guardrail from the section lede.
-const commentReceiptRule = "For final-result comments, use `--output table` to confirm success without echoing the body. Use `--output json` instead when you need the returned comment ID, attachment details, or other response fields. Gate the cleanup on the post succeeding (`&&` in bash or Git Bash, an `$LASTEXITCODE` check in PowerShell): a cleanup command run unconditionally succeeds after a failed post and makes the whole shell call exit 0, and under `--output table` empty stdout alone does not prove success.\n\n"
+const commentReceiptRule = "For final-result comments, use `--output table` to confirm success without echoing the body. Use `--output json` instead when you need the returned comment ID, attachment details, or other response fields. Gate the cleanup on the post succeeding (`&&` in bash or Git Bash, an `$LASTEXITCODE` check in PowerShell): a cleanup command run unconditionally succeeds after a failed post and makes the whole shell call exit 0, and under `--output table` empty stdout alone does not prove success.\n\n" +
+	// No post fails before a duplicate: the re-send follows a misread result.
+	// A tool that stops waiting returns a still-running command's partial output,
+	// and a --roots-only read can never list a reply, so both look like "not sent".
+	"**Post each comment once.** Never issue the same `comment add` twice in one turn, and never run two of them concurrently for the same body — a second call is a second comment on the issue, and it wakes every recipient again. A tool result that reports the command as still running (a process or session ID with no exit code) is not a failure: wait for that command to exit or read its remaining output before deciding anything, and do not start another post for the same comments. To verify a reply landed, look up the comment ID from `--output json`, or read its thread with `--thread <parent-id>`; `--roots-only` lists top-level comments only and never shows a reply. A comment that is already there means the post SUCCEEDED: say so and move on, do not re-send it. Re-send only when the body is genuinely absent from the thread.\n\n"
 
 // writeCommentFormatting emits the cross-platform file-first guardrail.
 // The Windows branch carries the `$OutputEncoding` rationale: Windows

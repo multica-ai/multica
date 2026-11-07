@@ -3,8 +3,8 @@ package handler
 import (
 	"context"
 	"fmt"
-	"strings"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 
@@ -114,8 +114,11 @@ func insertAgentBinding(t *testing.T, f supplementFixture, taskID, authorAgentID
 func TestAgentSteeringIsCappedPerAgentAndPerTurn(t *testing.T) {
 	t.Run("per authoring agent", func(t *testing.T) {
 		f := newAgentSteerFixture(t)
-		body := map[string]any{"content": agentMention("Target", f.agentID) + " narrow it", "steer": true}
 		for i := range maxAgentSteersPerAgentPerTurn + 1 {
+			// Each steer is its own comment. A run re-posting byte-identical
+			// content is collapsed into the first comment, so the bodies must differ
+			// for these to count as separate steers.
+			body := map[string]any{"content": agentMention("Target", f.agentID) + fmt.Sprintf(" narrow it (%d)", i), "steer": true}
 			created := postAgentComment(t, f.issueID, f.callerAgent, f.callerTask, body)
 			if got, want := steeredAgent(created, f.agentID), i < maxAgentSteersPerAgentPerTurn; got != want {
 				t.Fatalf("steer %d: steered = %v, want %v; outcomes %+v", i+1, got, want, created.TriggerOutcomes)

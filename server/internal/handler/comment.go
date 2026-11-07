@@ -1842,6 +1842,46 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Re-send guard. An agent run that posts the same body twice on one issue is
+	// re-sending, not writing a second comment: it either fired the CLI
+	// concurrently, or read an ambiguous result and posted again. Both happened
+	// on 2026-11-03, putting byte-identical acceptance verdicts on five issues
+	// 1-2 seconds apart and waking the recipients twice.
+	//
+	// Returning the first comment (200, not 201) makes the second attempt a
+	// no-op the caller cannot distinguish from having won the race, so a
+	// re-sending agent converges instead of needing to detect its own duplicate.
+	// Scoped to source_task_id, so this only ever collapses writes from a single
+	// run; members hit none of it, and two different runs posting the same text
+	// stay two comments.
+	//
+	// Attachments are excluded: their ids are minted per upload, so a re-send
+	// carries different ones and the bodies alone no longer identify a repeat.
+	if sourceTaskID.Valid && len(attachmentIDs) == 0 {
+		existing, lookupErr := h.Queries.GetCommentBySourceTaskAndContent(r.Context(), db.GetCommentBySourceTaskAndContentParams{
+			IssueID:      issue.ID,
+			WorkspaceID:  issue.WorkspaceID,
+			SourceTaskID: sourceTaskID,
+			AuthorType:   authorType,
+			Content:      req.Content,
+			Type:         req.Type,
+			ParentID:     parentID,
+		})
+		switch {
+		case lookupErr == nil:
+			h.respondWithExistingComment(w, r, issue, existing, authorType, authorID, steer)
+			return
+		case !errors.Is(lookupErr, pgx.ErrNoRows):
+			// A failed guard must not cost the agent its comment: fall through
+			// and insert. The duplicate this might let through is the bug we
+			// already have, while refusing the write loses a result entirely.
+			slog.Warn("duplicate comment lookup failed", append(logger.RequestAttrs(r),
+				"error", lookupErr,
+				"issue_id", issueID,
+			)...)
+		}
+	}
+
 	createParams := db.CreateCommentParams{
 		ID:           dbid.NewV7(),
 		IssueID:      issue.ID,
@@ -1951,6 +1991,43 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// respondWithExistingComment answers a re-send with the comment the run already
+// posted, without repeating the side effects that post already had.
+//
+// Returning the first comment (200, not 201) makes the second attempt a no-op
+// the caller cannot distinguish from having lost a race, so a re-sending agent
+// converges instead of needing to detect its own duplicate. The events, the
+// trigger resolution, and the thread unresolve all ran for the first post and
+// must not run again: each writes its own rows, so replaying them would replace
+// one duplicate comment with a duplicate system notice and a second wake-up.
+//
+// Steering is the exception, and only because its effect does not live in the
+// comment row. A run can legitimately post the same text again when the action
+// is the request rather than the words — steering a running turn is exactly
+// that, and its per-agent cap counts the comments posted. A re-sent steer is
+// bound again against the existing comment; the binding is keyed on the
+// comment, so a genuine repeat collides and reports the turn as already steered
+// instead of starting a second one.
+func (h *Handler) respondWithExistingComment(w http.ResponseWriter, r *http.Request, issue db.Issue, existing db.Comment, authorType, authorID string, steer commentSteerRequest) {
+	slog.Info("duplicate comment suppressed", append(logger.RequestAttrs(r),
+		"comment_id", uuidToString(existing.ID),
+		"issue_id", uuidToString(issue.ID),
+		"source_task_id", uuidToString(existing.SourceTaskID),
+	)...)
+
+	groupedAtt := h.groupAttachments(r, []pgtype.UUID{existing.ID})
+	resp := commentToResponse(existing, nil, groupedAtt[uuidToString(existing.ID)])
+	resp.IssueRevision = issue.Revision
+
+	if !steer.empty() {
+		originatorUserID := h.invokeOriginatorFromRequest(r, authorType, authorID)
+		resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, existing, nil, authorType, authorID, originatorUserID, nil, steer)
+		applyCommentSupplements(&resp, h.listCommentSupplements(r.Context(), issue.WorkspaceID, []pgtype.UUID{existing.ID})[uuidToString(existing.ID)])
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // clientAuthorableCommentTypes is what POST /comments accepts. `status_change`
