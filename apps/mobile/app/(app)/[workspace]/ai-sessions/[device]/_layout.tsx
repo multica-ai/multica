@@ -12,7 +12,8 @@ export default function AIComputerLayout() {
     <Stack.Screen name="index" options={{ title: t("sessions"), headerBackTitle: t("title") }} />
     <Stack.Screen name="[session]" options={{ title: t("new") }} />
     <Stack.Screen name="folders" options={SHEET_OPTIONS} />
-    <Stack.Screen name="models" options={SHEET_OPTIONS} />
+    {/* Settings owns its bounded content height; do not inherit the fixed-detent fill style. */}
+    <Stack.Screen name="models" options={{ ...SHEET_OPTIONS, sheetAllowedDetents: "fitToContents", contentStyle: {} }} />
     {/* Search and paginated results need the larger detent. */}
     <Stack.Screen name="references" options={{ ...SHEET_OPTIONS, sheetInitialDetentIndex: 1 }} />
     {/* The queue owns its content height and must stay flush with the bottom edge on iOS 26. */}

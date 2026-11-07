@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -14,6 +14,7 @@ import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 
 export default function AIModels() {
+  const { height } = useWindowDimensions();
   const { t } = useT("aiSessions");
   const { colorScheme } = useColorScheme();
   const theme = THEME[colorScheme];
@@ -37,11 +38,11 @@ export default function AIModels() {
   const disabled = !connected || !settings || running || change.isPending;
   const permissions: { value: string; label: string; help: string }[] = [{ value: "default", label: t("permission_default"), help: t("permission_default_help") }, { value: "auto", label: t("permission_auto"), help: t("permission_auto_help") }, { value: "full-access", label: t("permission_full"), help: t("permission_full_help") }];
   const row = (label: string, value: string, onPress: () => void, checked?: boolean, help?: string) => <Pressable key={value} disabled={disabled} accessibilityRole={checked === undefined ? "button" : "radio"} accessibilityState={{ disabled, checked }} onPress={onPress} className="min-h-12 rounded-lg px-3 py-3 flex-row items-center gap-3 active:bg-secondary"><View className="flex-1 gap-1"><Text style={{ lineHeight: undefined }}>{label}</Text>{help && <Text style={{ lineHeight: undefined }} className="text-xs text-muted-foreground">{help}</Text>}</View>{checked === undefined ? <View className="max-w-[50%] flex-row items-center gap-2"><Text style={{ lineHeight: undefined }} className="shrink text-sm text-muted-foreground text-right" numberOfLines={2}>{value}</Text><Ionicons name="chevron-forward" size={16} color={theme.mutedForeground} /></View> : <View className="w-5">{checked && <Ionicons name="checkmark" size={20} color={theme.primary} />}</View>}</Pressable>;
-  return <AISheet title={t(page === "settings" ? "settings" : page === "model" ? "model" : page === "reasoning" ? "reasoning" : "permissions")} onBack={page === "settings" ? undefined : () => setPage("settings")}>
+  return <AISheet maxHeight={height * 0.8} title={t(page === "settings" ? "settings" : page === "model" ? "model" : page === "reasoning" ? "reasoning" : "permissions")} onBack={page === "settings" ? undefined : () => setPage("settings")}>
     <Text style={{ lineHeight: undefined }} className="text-sm text-muted-foreground">{provider === "claude" ? "Claude Code" : "Codex"}</Text>
     {(query.isPending || snapshot.isPending || change.isPending) && <ActivityIndicator />}
     {(query.isError || snapshot.isError) && <Button style={{ height: "auto", minHeight: 40 }} hitSlop={2} variant="outline" onPress={() => { void query.refetch(); void snapshot.refetch(); }}><Text style={{ lineHeight: undefined }}>{t("retry")}</Text></Button>}
-    <ScrollView className="-mx-2" contentContainerStyle={{ paddingBottom: 16 }}>
+    <ScrollView className="-mx-2" style={{ flexGrow: 0, flexShrink: 1 }} contentInsetAdjustmentBehavior="never" contentContainerStyle={{ paddingBottom: 16 }}>
       {page === "settings" && <>{row(t("model"), selected?.label ?? settings?.model ?? t("default_model"), () => setPage("model"))}{row(t("reasoning"), levels.find((level) => level.value === settings?.reasoning_effort)?.label ?? settings?.reasoning_effort ?? t("model_default"), () => setPage("reasoning"))}{row(t("permissions"), permissions.find((p) => p.value === settings?.permission_mode)?.label ?? t("permission_default"), () => setPage("permissions"))}</>}
       {page === "model" && <>{row(t("default_model"), "default", () => change.mutate({ model: null, reasoning_effort: null }), !settings?.model)}{query.data?.models.map((model) => row(model.label, model.id, () => change.mutate({ model: model.id, reasoning_effort: null }), model.id === settings?.model))}</>}
       {page === "reasoning" && <>{row(t("model_default"), "default", () => change.mutate({ reasoning_effort: null }), !settings?.reasoning_effort)}{levels.map((level) => row(level.label, level.value, () => change.mutate({ reasoning_effort: level.value }), level.value === settings?.reasoning_effort))}</>}
