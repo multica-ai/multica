@@ -32,9 +32,10 @@ const chatSessionTitleMaxLen = 200
 // Chat Sessions
 
 type CreateChatSessionRequest struct {
-	AgentID   string  `json:"agent_id"`
-	Title     string  `json:"title"`
-	ProjectID *string `json:"project_id"`
+	AgentID          string                         `json:"agent_id"`
+	Title            string                         `json:"title"`
+	ProjectID        *string                        `json:"project_id"`
+	WorkingDirectory *protocol.ChatWorkingDirectory `json:"working_directory"`
 }
 
 func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
@@ -91,6 +92,33 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	workingDirectory, err := normalizeChatWorkingDirectory(req.WorkingDirectory)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var workingDirectoryJSON []byte
+	if workingDirectory != nil {
+		runtime, err := h.Queries.GetAgentRuntime(r.Context(), agent.RuntimeID)
+		if err != nil || runtime.WorkspaceID != workspaceUUID {
+			writeError(w, http.StatusBadRequest, "working directories require an available local runtime")
+			return
+		}
+		if !runtime.OwnerID.Valid || uuidToString(runtime.OwnerID) != userID {
+			writeError(w, http.StatusForbidden, "only the runtime owner can choose a working directory")
+			return
+		}
+		if err := validateChatDirectoryRuntime(runtime, workingDirectory.DaemonID, userID); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := validateChatDirectoryAgent(agent, runtime); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		workingDirectoryJSON, _ = json.Marshal(workingDirectory)
+	}
+
 	// Create inside a tx that first takes a FOR KEY SHARE lock on the workspace
 	// row: it conflicts with DeleteWorkspace's FOR UPDATE, so a session cannot be
 	// created into a workspace whose delete is in progress and then be orphaned by
@@ -127,12 +155,13 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	session, err := qtx.CreateChatSession(r.Context(), db.CreateChatSessionParams{
-		ID:          dbid.NewV7(),
-		WorkspaceID: workspaceUUID,
-		AgentID:     agentID,
-		CreatorID:   parseUUID(userID),
-		Title:       req.Title,
-		ProjectID:   projectID,
+		ID:               dbid.NewV7(),
+		WorkspaceID:      workspaceUUID,
+		AgentID:          agentID,
+		CreatorID:        parseUUID(userID),
+		Title:            req.Title,
+		ProjectID:        projectID,
+		WorkingDirectory: workingDirectoryJSON,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create chat session")
@@ -196,19 +225,20 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			resp = append(resp, ChatSessionResponse{
-				ID:          uuidToString(s.ID),
-				WorkspaceID: uuidToString(s.WorkspaceID),
-				AgentID:     uuidToString(s.AgentID),
-				CreatorID:   uuidToString(s.CreatorID),
-				ProjectID:   uuidToPtr(s.ProjectID),
-				Title:       s.Title,
-				Status:      s.Status,
-				HasUnread:   s.UnreadCount > 0,
-				UnreadCount: int(s.UnreadCount),
-				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
-				Pinned:      s.PinnedAt.Valid,
-				CreatedAt:   timestampToString(s.CreatedAt),
-				UpdatedAt:   timestampToString(s.UpdatedAt),
+				ID:               uuidToString(s.ID),
+				WorkspaceID:      uuidToString(s.WorkspaceID),
+				AgentID:          uuidToString(s.AgentID),
+				CreatorID:        uuidToString(s.CreatorID),
+				ProjectID:        uuidToPtr(s.ProjectID),
+				WorkingDirectory: chatWorkingDirectoryForResponse(s.WorkingDirectory),
+				Title:            s.Title,
+				Status:           s.Status,
+				HasUnread:        s.UnreadCount > 0,
+				UnreadCount:      int(s.UnreadCount),
+				LastMessage:      buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
+				Pinned:           s.PinnedAt.Valid,
+				CreatedAt:        timestampToString(s.CreatedAt),
+				UpdatedAt:        timestampToString(s.UpdatedAt),
 			})
 		}
 	} else {
@@ -226,19 +256,20 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			resp = append(resp, ChatSessionResponse{
-				ID:          uuidToString(s.ID),
-				WorkspaceID: uuidToString(s.WorkspaceID),
-				AgentID:     uuidToString(s.AgentID),
-				CreatorID:   uuidToString(s.CreatorID),
-				ProjectID:   uuidToPtr(s.ProjectID),
-				Title:       s.Title,
-				Status:      s.Status,
-				HasUnread:   s.UnreadCount > 0,
-				UnreadCount: int(s.UnreadCount),
-				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
-				Pinned:      s.PinnedAt.Valid,
-				CreatedAt:   timestampToString(s.CreatedAt),
-				UpdatedAt:   timestampToString(s.UpdatedAt),
+				ID:               uuidToString(s.ID),
+				WorkspaceID:      uuidToString(s.WorkspaceID),
+				AgentID:          uuidToString(s.AgentID),
+				CreatorID:        uuidToString(s.CreatorID),
+				ProjectID:        uuidToPtr(s.ProjectID),
+				WorkingDirectory: chatWorkingDirectoryForResponse(s.WorkingDirectory),
+				Title:            s.Title,
+				Status:           s.Status,
+				HasUnread:        s.UnreadCount > 0,
+				UnreadCount:      int(s.UnreadCount),
+				LastMessage:      buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
+				Pinned:           s.PinnedAt.Valid,
+				CreatedAt:        timestampToString(s.CreatedAt),
+				UpdatedAt:        timestampToString(s.UpdatedAt),
 			})
 		}
 	}
@@ -1913,13 +1944,14 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 // Response types & helpers
 
 type ChatSessionResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	AgentID     string  `json:"agent_id"`
-	CreatorID   string  `json:"creator_id"`
-	ProjectID   *string `json:"project_id"`
-	Title       string  `json:"title"`
-	Status      string  `json:"status"`
+	ID               string                         `json:"id"`
+	WorkspaceID      string                         `json:"workspace_id"`
+	AgentID          string                         `json:"agent_id"`
+	CreatorID        string                         `json:"creator_id"`
+	ProjectID        *string                        `json:"project_id"`
+	WorkingDirectory *protocol.ChatWorkingDirectory `json:"working_directory"`
+	Title            string                         `json:"title"`
+	Status           string                         `json:"status"`
 	// Only populated by list endpoints — single-session fetches return 0/false/nil.
 	// HasUnread is kept as a convenience (== UnreadCount > 0) for existing consumers.
 	HasUnread   bool             `json:"has_unread"`
@@ -2030,16 +2062,17 @@ type ChatMessageResponse struct {
 
 func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 	return ChatSessionResponse{
-		ID:          uuidToString(s.ID),
-		WorkspaceID: uuidToString(s.WorkspaceID),
-		AgentID:     uuidToString(s.AgentID),
-		CreatorID:   uuidToString(s.CreatorID),
-		ProjectID:   uuidToPtr(s.ProjectID),
-		Title:       s.Title,
-		Status:      s.Status,
-		Pinned:      s.PinnedAt.Valid,
-		CreatedAt:   timestampToString(s.CreatedAt),
-		UpdatedAt:   timestampToString(s.UpdatedAt),
+		ID:               uuidToString(s.ID),
+		WorkspaceID:      uuidToString(s.WorkspaceID),
+		AgentID:          uuidToString(s.AgentID),
+		CreatorID:        uuidToString(s.CreatorID),
+		ProjectID:        uuidToPtr(s.ProjectID),
+		WorkingDirectory: chatWorkingDirectoryForResponse(s.WorkingDirectory),
+		Title:            s.Title,
+		Status:           s.Status,
+		Pinned:           s.PinnedAt.Valid,
+		CreatedAt:        timestampToString(s.CreatedAt),
+		UpdatedAt:        timestampToString(s.UpdatedAt),
 	}
 }
 

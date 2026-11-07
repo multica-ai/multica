@@ -1,3 +1,24 @@
+export interface ChatWorkingDirectory {
+  daemon_id: string;
+  path: string;
+}
+
+export interface RuntimeDirectoryResult {
+  path: string;
+  parent_path: string | null;
+  entries: { name: string; path: string }[];
+  selectable: boolean;
+}
+
+export interface RuntimeDirectoryRequest {
+  id: string;
+  runtime_id: string;
+  status: "pending" | "running" | "completed" | "failed" | "timeout";
+  path: string;
+  result: RuntimeDirectoryResult | null;
+  error: string | null;
+}
+
 import type { AgentTask } from "./agent";
 
 /** A user's pinned "quick agent" for the Chat list top bar. */
@@ -91,6 +112,7 @@ export interface ChatSession {
   /** Durable project context for every turn in this session. Null when the
    *  conversation uses workspace context only; optional for older servers. */
   project_id?: string | null;
+  working_directory?: ChatWorkingDirectory | null;
   title: string;
   status: "active" | "archived";
   /** True when the session has any unread assistant replies. List-only.

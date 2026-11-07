@@ -175,6 +175,9 @@ export {
 } from "./attachment-url";
 export type {
   ChatSession,
+  ChatWorkingDirectory,
+  RuntimeDirectoryResult,
+  RuntimeDirectoryRequest,
   ChatLastMessage,
   ChatPinnedAgent,
   ChatMessage,

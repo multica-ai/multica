@@ -403,3 +403,19 @@ describe("chat store — draft upload ops", () => {
     );
   });
 });
+
+describe("chat working-directory draft", () => {
+  it("preserves the directory when attaching project context and clears it when changing agent", () => {
+    const store = createChatStore({ storage: memStorage() });
+    store.getState().setSelectedAgentId("agent-1");
+    const selection = { agentId: "agent-1", runtimeId: "rt", directory: { daemon_id: "d", path: "/home/me/项目 files" } };
+    store.getState().setWorkingDirectoryDraft(selection);
+    store.getState().setSelectedAgentId("agent-1");
+    expect(store.getState().workingDirectoryDraft).toEqual(selection);
+    store.getState().setSelectedAgentId("agent-2");
+    expect(store.getState().workingDirectoryDraft).toBeNull();
+    store.getState().setWorkingDirectoryDraft(selection);
+    store.getState().setSelectedProjectId("project-1");
+    expect(store.getState().workingDirectoryDraft).toEqual(selection);
+  });
+});

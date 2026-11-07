@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { StorageAdapter } from "../types";
+import type { ChatWorkingDirectory, StorageAdapter } from "../types";
 import type { Attachment } from "../types/attachment";
 import { getCurrentSlug, registerForWorkspaceRehydration } from "../platform/workspace-storage";
 import { registerDraftCleanup } from "../drafts/cleanup-registry";
@@ -309,6 +309,7 @@ export interface ChatState {
   /** Project context for the next session. Existing sessions remain bound to
    *  their server-persisted project_id. */
   selectedProjectId: string | null;
+  workingDirectoryDraft: { agentId: string; runtimeId: string; directory: ChatWorkingDirectory } | null;
   /** Drafts per session: sessionId (or DRAFT_NEW_SESSION) → markdown text. */
   inputDrafts: Record<string, string>;
   /** Attachment rows referenced by each input draft. */
@@ -328,6 +329,7 @@ export interface ChatState {
   setActiveSession: (id: string | null) => void;
   setSelectedAgentId: (id: string) => void;
   setSelectedProjectId: (id: string | null) => void;
+  setWorkingDirectoryDraft: (value: ChatState["workingDirectoryDraft"]) => void;
   /** sessionId accepts a real session UUID or DRAFT_NEW_SESSION. */
   setInputDraft: (sessionId: string, draft: string) => void;
   /** Append a markdown fragment to a draft slot's text (upload write-back). */
@@ -394,6 +396,8 @@ export function createChatStore(options: ChatStoreOptions) {
     activeSessionId: storage.getItem(wsKey(SESSION_STORAGE_KEY)),
     selectedAgentId: initialAgentId,
     selectedProjectId: storage.getItem(wsKey(PROJECT_STORAGE_KEY)),
+    workingDirectoryDraft: null,
+    setWorkingDirectoryDraft: (value) => set({ workingDirectoryDraft: value }),
     inputDrafts: initialDraftSlots.inputDrafts,
     inputDraftAttachments: initialDraftSlots.inputDraftAttachments,
     appliedDraftRestoreIds: readAppliedRestores(storage, wsKey(APPLIED_RESTORES_KEY)),
@@ -432,7 +436,10 @@ export function createChatStore(options: ChatStoreOptions) {
     setSelectedAgentId: (id) => {
       logger.info("setSelectedAgentId", { from: get().selectedAgentId, to: id });
       storage.setItem(wsKey(AGENT_STORAGE_KEY), id);
-      set({ selectedAgentId: id });
+      set({
+        selectedAgentId: id,
+        workingDirectoryDraft: get().selectedAgentId === id ? get().workingDirectoryDraft : null,
+      });
     },
     setSelectedProjectId: (id) => {
       logger.info("setSelectedProjectId", { from: get().selectedProjectId, to: id });
@@ -629,7 +636,7 @@ export function createChatStore(options: ChatStoreOptions) {
   registerDraftCleanup({
     storageKey: DRAFTS_KEY,
     workspaceScoped: true,
-    resetInMemory: () => store.setState({ inputDrafts: {} }),
+    resetInMemory: () => store.setState({ inputDrafts: {}, workingDirectoryDraft: null }),
   });
   registerDraftCleanup({
     storageKey: DRAFT_ATTACHMENTS_KEY,
@@ -674,6 +681,7 @@ export function createChatStore(options: ChatStoreOptions) {
       activeSessionId: nextSession,
       selectedAgentId: nextAgent,
       selectedProjectId: nextProject,
+      workingDirectoryDraft: null,
       inputDrafts: nextDrafts,
       inputDraftAttachments: nextDraftAttachments,
       appliedDraftRestoreIds: readAppliedRestores(storage, wsKey(APPLIED_RESTORES_KEY)),

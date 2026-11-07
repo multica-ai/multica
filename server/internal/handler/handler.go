@@ -241,6 +241,7 @@ type Handler struct {
 	EmailService          *service.EmailService
 	UpdateStore           UpdateStore
 	ModelListStore        ModelListStore
+	DirectoryListStore    DirectoryListStore
 	LocalSkillListStore   LocalSkillListStore
 	LocalSkillImportStore LocalSkillImportStore
 	FeatureFlags          *featureflag.Service
@@ -525,6 +526,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		UpdateStore:                  NewInMemoryUpdateStore(),
 		ModelListStore:               NewInMemoryModelListStore(),
 		ModelCatalogCache:            NewInMemoryModelCatalogCache(),
+		DirectoryListStore:           NewInMemoryDirectoryListStore(),
 		LocalSkillListStore:          NewInMemoryLocalSkillListStore(),
 		LocalSkillImportStore:        NewInMemoryLocalSkillImportStore(),
 		LivenessStore:                NewNoopLivenessStore(),
