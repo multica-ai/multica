@@ -11,12 +11,14 @@ export const completionReadRecordSchema = z.object({
   status: z.string(),
   completedTurnIndex: z.number().int().min(-1),
   completedTurnId: z.string().nullable(),
+  completedSeq: z.number().int().nonnegative(),
+  readSeq: z.number().int().nonnegative(),
   readTurnIndex: z.number().int().min(-1),
 });
 export type CompletionReadRecord = z.infer<typeof completionReadRecordSchema>;
-export type CompletionPosition = Pick<CompletionReadRecord, "generation" | "completedTurnIndex" | "completedTurnId">;
+export type CompletionPosition = Pick<CompletionReadRecord, "generation" | "completedTurnIndex" | "completedTurnId" | "completedSeq">;
 
-/** Read positions are client-owned; turn indices compare only within one daemon store. */
+/** Read positions are daemon-owned; turn indices compare only within one daemon store. */
 export class CompletionReadModel {
   private readonly records = observable.map<string, CompletionReadRecord>([], { deep: false });
   error: string | null = null;
@@ -28,9 +30,9 @@ export class CompletionReadModel {
   get(id: string): CompletionReadRecord | undefined { return this.records.get(id); }
   pending(id: string): CompletionReadRecord | undefined {
     const record = this.get(id);
-    return record && record.completedTurnId && record.completedTurnIndex > record.readTurnIndex ? record : undefined;
+    return record && record.completedTurnId && record.completedSeq > record.readSeq ? record : undefined;
   }
-  set(id: string, record: CompletionReadRecord): void { this.records.set(id, record); }
+  set(id: string, record: CompletionReadRecord): void { this.records.set(id, record); this.error = null; }
   fail(error: unknown): void { this.error = error instanceof Error ? error.message : String(error); }
   clear(): void { this.records.clear(); this.error = null; }
 }

@@ -56,6 +56,7 @@ export function applyEvents(snapshot: LocalV2Snapshot, events: LocalV2Event[]): 
 export function retainSnapshotHistory(previous: LocalV2Snapshot | undefined, next: LocalV2Snapshot): LocalV2Snapshot {
   if (!previous || previous.store_generation !== next.store_generation) return next;
   if (previous.snapshot_seq > next.snapshot_seq) return previous;
+  if (previous.conversation.summary_seq > next.conversation.summary_seq) next = { ...next, conversation: previous.conversation };
   const first = next.turns[0]?.turn_index;
   if (first == null || !previous.turns.some((turn) => turn.turn_index >= first)) return next;
   const retained = previous.turns.filter((turn) => turn.turn_index < first && turn.status !== "running");

@@ -30,7 +30,15 @@ export const localV2EventSchema = z.object({
 });
 export type LocalV2Event = z.infer<typeof localV2EventSchema>;
 
+export const LOCAL_V2_COMPLETION_READ_CAPABILITY = "completion-read-v1";
+export const localV2CompletionSchema = z.object({ turn_id: z.string().min(1), turn_index: z.number().int().nonnegative(), completion_seq: z.number().int().nonnegative() });
+export const localV2CompletionReadSchema = localV2CompletionSchema.extend({ store_generation: z.string().min(1), completion_seq: z.number().int().positive() }).strict();
+
 export const localV2SummarySchema = z.object({
+  completion: localV2CompletionSchema.nullable().optional(),
+  read_completion_seq: z.number().int().nonnegative().optional(),
+  read_turn_index: z.number().int().min(-1).optional(),
+  has_unread_completion: z.boolean().optional(),
   conversation_id: z.string(),
   summary_seq: z.number().int(),
   provider: z.string(),
@@ -242,7 +250,7 @@ export const localV2SessionListSchema = z.object({
 
 export const localV2SessionGroupsSchema = z.object({
   scope_seq: z.number().int().nonnegative(),
-  groups: z.array(z.object({ id: z.string(), title: z.string(), path: z.string(), total: z.number().int().nonnegative() })),
+  groups: z.array(z.object({ id: z.string(), title: z.string(), path: z.string(), total: z.number().int().nonnegative(), has_unread_completion: z.boolean().optional() })),
 });
 export type LocalV2SessionGroup = z.infer<typeof localV2SessionGroupsSchema>["groups"][number];
 

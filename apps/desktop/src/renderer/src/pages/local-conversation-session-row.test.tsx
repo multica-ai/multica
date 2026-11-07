@@ -57,10 +57,10 @@ it("updates only selected rows and lets a preview update bypass activity control
   expect(counters.activity).not.toHaveBeenCalled();
   act(() => list.completions.set("b", {
     version: 1, generation: "g", baselineTurnIndex: 0, summarySeq: 2, turnCount: 1, activeTurnId: null, status: "idle",
-    completedTurnIndex: 0, completedTurnId: "t0", readTurnIndex: -1,
+    completedTurnIndex: 0, completedTurnId: "t0", completedSeq: 1, readSeq: 0, readTurnIndex: -1,
   }));
   expect(screen.getByRole("status")).toHaveClass("bg-info");
-  act(() => list.completions.set("b", { ...list.completions.get("b")!, readTurnIndex: 0 }));
+  act(() => list.completions.set("b", { ...list.completions.get("b")!, readTurnIndex: 0, readSeq: 1 }));
   expect(screen.queryByRole("status")).toBeNull();
 });
 
@@ -70,7 +70,7 @@ it.each([false, true])("defers unread completion indicators until all work stops
   list.upsert([summary("a"), summary("b")]);
   const completion = {
     version: 1 as const, generation: "g", baselineTurnIndex: 0, summarySeq: 1, turnCount: 1,
-    activeTurnId: null, status: "idle", completedTurnIndex: 0, completedTurnId: "t0", readTurnIndex: -1,
+    activeTurnId: null, status: "idle", completedTurnIndex: 0, completedTurnId: "t0", completedSeq: 1, readSeq: 0, readTurnIndex: -1,
   };
   list.completions.set("a", completion);
   list.completions.set("b", completion);
@@ -98,7 +98,7 @@ it.each([false, true])("defers unread completion indicators until all work stops
   expect(row("a").getByLabelText("Conversation running: a")).toBeInTheDocument();
   expect(list.completions.pending("a")).toEqual(completion);
   // A queued turn can finish while another turn is already running.
-  act(() => list.completions.set("a", { ...completion, completedTurnIndex: 1, completedTurnId: "t1" }));
+  act(() => list.completions.set("a", { ...completion, completedTurnIndex: 1, completedTurnId: "t1", completedSeq: 2 }));
   expect(unread()).toBeNull();
   update("running", 0, 1);
   expect(row("a").getByRole("button", { name: "Answer question" })).toBeInTheDocument();
@@ -109,7 +109,7 @@ it.each([false, true])("defers unread completion indicators until all work stops
   update("idle");
   expect(unread()).toBeInTheDocument();
   expect(list.completions.pending("a")?.completedTurnId).toBe("t1");
-  act(() => list.completions.set("a", { ...list.completions.get("a")!, readTurnIndex: 1 }));
+  act(() => list.completions.set("a", { ...list.completions.get("a")!, readTurnIndex: 1, readSeq: 2 }));
   expect(unread()).toBeNull();
   update("running");
   update("idle");

@@ -13,10 +13,11 @@ import { useT } from "@/lib/i18n";
 interface NewSessionMenuProps {
   providers: { id: string; name: string; available: boolean }[];
   disabled: boolean;
+  accessibilityLabel?: string;
   onSelect: (provider: string) => void;
 }
 
-export function NewSessionMenu({ providers, disabled, onSelect }: NewSessionMenuProps) {
+export function NewSessionMenu({ providers, disabled, onSelect, accessibilityLabel }: NewSessionMenuProps) {
   const { t } = useT("aiSessions");
   const insets = useSafeAreaInsets();
   const available = providers.filter((provider) => provider.available);
@@ -27,7 +28,8 @@ export function NewSessionMenu({ providers, disabled, onSelect }: NewSessionMenu
         <IconButton
           name="add"
           hitSlop={4}
-          accessibilityLabel={t("new")}
+          accessibilityLabel={accessibilityLabel ?? t("new")}
+          style={{ width: 44, height: 44 }}
         />
       </DropdownMenuTrigger>
       <DropdownMenuContent

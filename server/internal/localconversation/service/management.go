@@ -293,3 +293,21 @@ func newID() string {
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
 }
+
+// ReadCompletion acknowledges only the successful result actually shown by a client.
+func (s *Service) ReadCompletion(ctx context.Context, scopeID int64, id, generation, turnID string, index, completionSeq int64) (store.ConversationSummary, error) {
+	if generation != s.Generation() || turnID == "" || index < 0 || completionSeq < 1 {
+		return store.ConversationSummary{}, ErrInvalidRequest
+	}
+	if _, err := s.scopedConversation(ctx, scopeID, id); err != nil {
+		return store.ConversationSummary{}, err
+	}
+	_, err := s.batcher.AppendWait(ctx, store.Batch{ConversationID: id, ReadCompletion: &store.ReadCompletion{TurnID: turnID, TurnIndex: index, CompletionSeq: completionSeq}})
+	if errors.Is(err, store.ErrInvalidCompletion) {
+		return store.ConversationSummary{}, ErrInvalidRequest
+	}
+	if err != nil {
+		return store.ConversationSummary{}, err
+	}
+	return s.store.Summary(ctx, id)
+}

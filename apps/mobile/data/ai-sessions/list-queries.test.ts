@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from "vitest";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { localV2SummarySchema, type LocalV2SessionPage } from "@multica/core/local-conversation/v2";
-import { AISessionClient } from "./client";
+import { refreshAISessionBrowse, AISessionClient } from "./client";
 import { sessionGroupsOptions, sessionPageCursors, sessionPageOptions, sessionPageSummaries } from "./list-queries";
 
 const scope = { userId: "user", workspaceId: "workspace", deviceId: "device" };
@@ -59,4 +59,21 @@ it("follows refreshed page boundaries up to the requested depth without reading 
   expect(sessionPageCursors(3, read)).toEqual(["", "new-boundary"]);
   pages.set("new-boundary", page("new-boundary"));
   expect(sessionPageCursors(3, read)).toEqual(["", "new-boundary"]);
+});
+
+it("refreshes again when a completion arrives during the first group request", async () => {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } }); caches.push(qc);
+  let resolve!: (value: unknown) => void;
+  const old = { scope_seq: 1, groups: [{ id: "folder", title: "Folder", path: "/repo", total: 9, has_unread_completion: false }] };
+  const latest = { ...old, scope_seq: 2, groups: [{ ...old.groups[0], has_unread_completion: true }] };
+  const fetcher = vi.fn<typeof fetch>().mockImplementationOnce(async () => Response.json(await new Promise((done) => { resolve = done; }))).mockResolvedValue(Response.json(latest));
+  const client = new AISessionClient({url: "http://localhost:1234", token: "test"}, scope, qc, () => { throw new Error("no socket"); }, fetcher); clients.push(client);
+  const options = sessionGroupsOptions(client, false, "");
+  const observer = new QueryObserver(qc, options);
+  const stop = observer.subscribe(() => {});
+  const refresh = refreshAISessionBrowse(qc, scope);
+  resolve(old); await refresh;
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(qc.getQueryData(options.queryKey)).toEqual(latest);
+  stop();
 });

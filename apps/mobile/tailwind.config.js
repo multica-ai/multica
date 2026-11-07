@@ -20,6 +20,7 @@ module.exports = {
   presets: [require("nativewind/preset")],
   theme: {
     extend: {
+      fontSize: { caption: ["12px", { lineHeight: "16px" }], body: ["14px", { lineHeight: "20px" }], "title-sm": ["16px", { lineHeight: "24px" }] },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",

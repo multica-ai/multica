@@ -211,7 +211,7 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 		if v.servicePreview != nil {
 			capabilities = append(capabilities, "remote-service-preview-v1")
 		}
-		capabilities = append(capabilities, ConversationFocusCapability, AttachmentReserveCapability, PromptStatusCapability, NavigationCapability, service.SubmissionLifecycleCapability)
+		capabilities = append(capabilities, ConversationFocusCapability, AttachmentReserveCapability, PromptStatusCapability, NavigationCapability, service.SubmissionLifecycleCapability, "completion-read-v1")
 		if v.reports != nil && c.kind == callerRemote {
 			capabilities = append(capabilities, TimingReportCapability)
 		}
@@ -285,6 +285,23 @@ func (v *V2) serve(w http.ResponseWriter, r *http.Request, c caller) {
 		v.listSessions(w, r, scopeID)
 	case path == "/sessions" && r.Method == http.MethodPost:
 		v.createSession(w, r, scopeID)
+	case len(parts) == 3 && parts[0] == "sessions" && parts[2] == "completion-read" && r.Method == http.MethodPost:
+		var body struct {
+			Generation    string `json:"store_generation"`
+			TurnID        string `json:"turn_id"`
+			TurnIndex     *int64 `json:"turn_index"`
+			CompletionSeq int64  `json:"completion_seq"`
+		}
+		if err := decodeBody(r, &body); err != nil || body.TurnIndex == nil {
+			writeV2Error(w, AppError("invalid_request", "A completed turn position is required"))
+			return
+		}
+		summary, err := v.svc.ReadCompletion(r.Context(), scopeID, parts[1], body.Generation, body.TurnID, *body.TurnIndex, body.CompletionSeq)
+		if err != nil {
+			writeV2Error(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, summaryDTO(summary))
 	case path == "/session-groups" && r.Method == http.MethodGet:
 		v.sessionGroups(w, r, scopeID)
 	case path == "/sessions/browse" && r.Method == http.MethodGet:
@@ -1061,6 +1078,12 @@ func summaryDTO(c store.ConversationSummary) map[string]any {
 		"last_message_preview": c.LastMessagePreview, "pending_interactions": c.PendingInteractions, "queue_count": c.QueueCount, "background_tasks": c.BackgroundTasks,
 		"turn_count": c.TurnCount, "created_at": c.CreatedAt,
 		"updated_at": c.UpdatedAt, "last_turn_sent_at": nil,
+		"completion": nil, "read_turn_index": c.ReadTurnIndex,
+		"has_unread_completion": c.CompletionSeq > c.ReadCompletionSeq,
+		"read_completion_seq":   c.ReadCompletionSeq,
+	}
+	if c.CompletedTurnID != "" {
+		dto["completion"] = map[string]any{"turn_id": c.CompletedTurnID, "turn_index": c.CompletedTurnIndex, "completion_seq": c.CompletionSeq}
 	}
 	if c.LastTurnSentAt != "" {
 		dto["last_turn_sent_at"] = c.LastTurnSentAt

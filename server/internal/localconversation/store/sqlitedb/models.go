@@ -59,6 +59,11 @@ type Conversation struct {
 	CreatedAt             string
 	UpdatedAt             string
 	BackgroundTasks       int64
+	CompletedTurnIndex    int64
+	CompletedTurnID       string
+	CompletionSeq         int64
+	ReadCompletionSeq     int64
+	ReadTurnIndex         int64
 }
 
 type ConversationExecution struct {

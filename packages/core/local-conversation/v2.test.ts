@@ -4,10 +4,10 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ZodType } from "zod";
-import { localV2ClientMessageSchema, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionGroupsSchema, localV2SessionPageSchema, localV2SnapshotSchema, localV2PromptStatusesSchema, localV2NavigationSchema, localV2NavigationPath, localV2SummarySchema } from "./v2";
+import { localV2CompletionReadSchema, localV2ClientMessageSchema, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionGroupsSchema, localV2SessionPageSchema, localV2SnapshotSchema, localV2PromptStatusesSchema, localV2NavigationSchema, localV2NavigationPath, localV2SummarySchema } from "./v2";
 
 const root = join(__dirname, "../../../server/internal/localconversation/protocol/testdata/local-v2");
-const schemas: Record<string, ZodType> = { submission:localSubmissionSchema, server_message: localV2ServerMessageSchema, client_message: localV2ClientMessageSchema, hello: localV2HelloSchema, session_groups: localV2SessionGroupsSchema, session_page: localV2SessionPageSchema, navigation: localV2NavigationSchema };
+const schemas: Record<string, ZodType> = { completion_read: localV2CompletionReadSchema, submission:localSubmissionSchema, server_message: localV2ServerMessageSchema, client_message: localV2ClientMessageSchema, hello: localV2HelloSchema, session_groups: localV2SessionGroupsSchema, session_page: localV2SessionPageSchema, navigation: localV2NavigationSchema };
 
 describe("local conversation v2 wire schemas", () => {
   it("rejects malformed metadata ranges without requiring body data", () => {
@@ -41,6 +41,13 @@ describe("local conversation v2 wire schemas", () => {
       events: [{ seq: 1, turn_id: null, turn_seq: null, item_id: null, type: "future.event", final: false, created_at: "2026-10-29T00:00:00Z", payload: {} }],
     });
     expect(parsed.type === "conversation.events" && parsed.events[0]!.type).toBe("future.event");
+  });
+
+  it("distinguishes unknown completion state from read and rejects malformed result positions", () => {
+    const row = { conversation_id: "c", summary_seq: 1, provider: "claude", title: "c", status: "idle", pinned: false, archived: false, updated_at: "now" };
+    expect(localV2SummarySchema.parse(row).has_unread_completion).toBeUndefined();
+    expect(localV2SummarySchema.safeParse({ ...row, completion: { turn_id: "t", turn_index: 0, completion_seq: "bad" } }).success).toBe(false);
+    expect(localV2CompletionReadSchema.safeParse({ store_generation: "g", turn_id: "t", turn_index: 0, completion_seq: 0 }).success).toBe(false);
   });
 
   it("rejects malformed page cursors and negative folder counts", () => {

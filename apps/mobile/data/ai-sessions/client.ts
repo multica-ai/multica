@@ -1,7 +1,7 @@
 import { SUBMISSION_LIFECYCLE_CAPABILITY, localSubmissionStatusesSchema } from "@multica/core/local-conversation/submission";
 import { z } from "zod";
 import type { QueryClient } from "@tanstack/react-query";
-import { LOCAL_V2_VERSION, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionGroupsSchema, localV2SessionPageSchema, localV2SnapshotSchema, localV2NavigationPath, localV2NavigationSchema, localV2PromptStatusesSchema, type LocalV2NavigationQuery, type LocalV2Snapshot } from "@multica/core/local-conversation/v2";
+import { LOCAL_V2_COMPLETION_READ_CAPABILITY, localV2SummarySchema, LOCAL_V2_VERSION, localV2HelloSchema, localV2ServerMessageSchema, localV2SessionGroupsSchema, localV2SessionPageSchema, localV2SnapshotSchema, localV2NavigationPath, localV2NavigationSchema, localV2PromptStatusesSchema, type LocalV2NavigationQuery, type LocalV2Snapshot } from "@multica/core/local-conversation/v2";
 import { LOCAL_V2_FOCUS_CAPABILITY, LocalV2FocusTracker } from "@multica/core/local-conversation/focus";
 import { LOCAL_TIMING_REPORT_CAPABILITY, LOCAL_TIMING_REQUEST_HEADER, isLocalTimingModelOutput, localTimingCloseReason, localTimingFailure, localTimingRequestId, type LocalTimingRecord } from "@multica/core/local-conversation/timing";
 import { createRequestId } from "@/lib/request-id";
@@ -17,6 +17,14 @@ export const aiKeys = {
   browse: (s: SessionScope) => [...aiKeys.scope(s), "browse"] as const,
   snapshot: (s: SessionScope, id: string) => [...aiKeys.scope(s), "snapshot", id] as const,
 };
+
+/** An event during the first fetch needs a second read after that response settles. */
+export async function refreshAISessionBrowse(qc: QueryClient, scope: SessionScope) {
+  const queryKey = aiKeys.browse(scope);
+  const pending = qc.isFetching({ queryKey }) > 0;
+  await qc.invalidateQueries({ queryKey }, { cancelRefetch: false });
+  if (pending) await qc.invalidateQueries({ queryKey }, { cancelRefetch: false });
+}
 
 export type SocketFactory = (url: string, headers: Record<string, string>) => WebSocket;
 export interface SessionPageFilter { groupId?: string; archived?: boolean; search?: string; excludeId?: string; sourceId?: string; cursor?: string; limit?: number }
@@ -76,6 +84,7 @@ export class AISessionClient {
   private browseRefreshTimer?: ReturnType<typeof setTimeout>;
   submissionLifecycle=false;
   storeGeneration="";
+  completionReadSupported = false;
   promptStatuses(id:string,requestIds:string[]){return this.request("POST",`/sessions/${encodeURIComponent(id)}/queue/status`,localV2PromptStatusesSchema,{request_ids:requestIds});}
   submissionStatuses(id:string,requestIds:string[]){return this.request("POST",`/sessions/${encodeURIComponent(id)}/queue/status`,localSubmissionStatusesSchema,{request_ids:requestIds});}
   connectionError: "incompatible" | null = null;
@@ -133,11 +142,20 @@ export class AISessionClient {
     return this.request("GET", `/sessions/browse?${params}`, localV2SessionPageSchema, undefined, signal);
   }
 
+  async readCompletion(id: string, generation: string, turnId: string, turnIndex: number, completionSeq: number) {
+    const summary = await this.request("POST", `/sessions/${encodeURIComponent(id)}/completion-read`, localV2SummarySchema,
+      { store_generation: generation, turn_id: turnId, turn_index: turnIndex, completion_seq: completionSeq });
+    if (generation !== this.storeGeneration) return;
+    this.qc.setQueryData<LocalV2Snapshot>(aiKeys.snapshot(this.scope, id), (old) =>
+      old && old.store_generation === generation && old.conversation.summary_seq <= summary.summary_seq ? { ...old, conversation: summary } : old);
+    await refreshAISessionBrowse(this.qc, this.scope);
+  }
+
   private refreshBrowse() {
     if (this.browseRefreshTimer) return;
     this.browseRefreshTimer = setTimeout(() => {
       this.browseRefreshTimer = undefined;
-      if (!this.stopped) void this.qc.invalidateQueries({ queryKey: aiKeys.browse(this.scope) }, { cancelRefetch: false });
+      if (!this.stopped) void refreshAISessionBrowse(this.qc, this.scope);
     }, 200);
   }
 
@@ -232,6 +250,7 @@ export class AISessionClient {
       if (this.stopped) return;
       this.submissionLifecycle=hello.capabilities.includes(SUBMISSION_LIFECYCLE_CAPABILITY);
       this.storeGeneration=hello.store_generation;
+      this.completionReadSupported = hello.capabilities.includes(LOCAL_V2_COMPLETION_READ_CAPABILITY);
       this.focusSupported = hello.capabilities.includes(LOCAL_V2_FOCUS_CAPABILITY);
       this.reportSupported = hello.capabilities.includes(LOCAL_TIMING_REPORT_CAPABILITY);
       const opening = Date.now();
@@ -252,7 +271,7 @@ export class AISessionClient {
         this.settleRecovery(true);
         ws.send(JSON.stringify({ version: 2, type: "subscribe_scope", after_scope_seq: hello.scope_seq }));
         this.focused.reconnected();
-        void this.qc.invalidateQueries({ queryKey: aiKeys.browse(this.scope) });
+        void refreshAISessionBrowse(this.qc, this.scope);
         if (!this.selected) return;
         // The daemon answers snapshot_required when a cached position is unusable.
         const cached = this.qc.getQueryData<LocalV2Snapshot>(aiKeys.snapshot(this.scope, this.selected));

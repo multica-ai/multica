@@ -1,12 +1,10 @@
 import type { LocalV2Scope, LocalV2Transport } from "@multica/core/local-conversation/v2";
 import { ConversationService, type ConversationSnapshotStore } from "./conversation-service";
-import type { CompletionReadStorage } from "./completion-read-service";
 
 /** Conversations whose content is kept across all services. */
 const MAX_RETAINED_CONVERSATIONS = 100;
 
 export interface ConversationServiceManagerOptions {
-  completions?(scope: LocalV2Scope, deviceId: string): CompletionReadStorage;
   /** Where another device's conversations are kept between reads. */
   snapshots(): ConversationSnapshotStore;
   limit?: number;
@@ -40,7 +38,6 @@ export class ConversationServiceManager {
     if (!service) {
       const deviceId = (transport as { deviceId?: string }).deviceId ?? "local";
       service = new ConversationService(transport, scope, {
-        completionStorage: this.options.completions?.(scope, deviceId),
         deviceId,
         // Only another device's conversations cost anything to read.
         snapshots: deviceId === "local" ? null : this.options.snapshots(),

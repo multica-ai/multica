@@ -98,5 +98,8 @@ func (s *Store) ForkConversation(ctx context.Context, f ForkCopy) (int64, error)
 			return 0, err
 		}
 	}
+	if err := q.EstablishCompletionBaseline(ctx, f.ID); err != nil {
+		return 0, err
+	}
 	return scopeSeq, tx.Commit()
 }

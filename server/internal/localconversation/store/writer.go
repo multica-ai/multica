@@ -15,6 +15,8 @@ import (
 // ErrWriterClosed is returned for batches submitted after Close.
 var ErrWriterClosed = errors.New("local conversation store: writer closed")
 
+var ErrInvalidCompletion = errors.New("local conversation store: invalid completion")
+
 // NewEvent is one event to append. Seq and TurnSeq are assigned on commit.
 type NewEvent struct {
 	TurnID    string
@@ -85,7 +87,14 @@ type SummaryPatch struct {
 // the same transaction or none of it does.
 type QueueOperation struct{ ID, Action, RequestID string }
 
+type ReadCompletion struct {
+	CompletionSeq int64
+	TurnID        string
+	TurnIndex     int64
+}
+
 type Batch struct {
+	ReadCompletion *ReadCompletion
 	Operation      *QueueOperation
 	ConversationID string
 	StartTurn      *NewTurn
@@ -415,6 +424,17 @@ func applyBatch(ctx context.Context, q *sqlitedb.Queries, b Batch) (Committed, e
 
 	committed := Committed{Events: make([]CommittedEvent, 0, len(b.Events))}
 	seq := conv.LastSeq
+	if c := b.CompleteTurn; c != nil && c.Status == "completed" {
+		found := false
+		for _, e := range b.Events {
+			if e.Type == "turn.completed" && e.TurnID == c.TurnID {
+				found = true
+			}
+		}
+		if !found {
+			b.Events = append(b.Events, NewEvent{TurnID: c.TurnID, Type: "turn.completed", Final: true, Payload: json.RawMessage(`{"status":"completed"}`), CreatedAt: c.CompletedAt})
+		}
+	}
 	for _, e := range b.Events {
 		if !json.Valid(e.Payload) {
 			return Committed{}, fmt.Errorf("event %s payload is not JSON", e.Type)
@@ -499,11 +519,17 @@ func applyBatch(ctx context.Context, q *sqlitedb.Queries, b Batch) (Committed, e
 		}
 	}
 
+	newSuccess := false
 	if c := b.CompleteTurn; c != nil {
 		if _, err := turnSeq(c.TurnID); err != nil {
 			return Committed{}, err
 		}
-		err := q.CompleteTurn(ctx, sqlitedb.CompleteTurnParams{
+		previous, err := q.GetTurn(ctx, c.TurnID)
+		if err != nil {
+			return Committed{}, err
+		}
+		newSuccess = c.Status == "completed" && previous.Status != "completed"
+		err = q.CompleteTurn(ctx, sqlitedb.CompleteTurnParams{
 			Status: c.Status, ErrorKind: c.ErrorKind, Error: c.Error,
 			CompletedAt: sql.NullString{String: formatTime(c.CompletedAt), Valid: true}, ID: c.TurnID,
 		})
@@ -514,6 +540,45 @@ func applyBatch(ctx context.Context, q *sqlitedb.Queries, b Batch) (Committed, e
 			if err := q.SetProviderTurnID(ctx, sqlitedb.SetProviderTurnIDParams{ProviderTurnID: c.ProviderTurnID, ID: c.TurnID}); err != nil {
 				return Committed{}, err
 			}
+		}
+	}
+
+	if c := b.CompleteTurn; c != nil && newSuccess {
+		turn, err := q.GetTurn(ctx, c.TurnID)
+		if err != nil {
+			return Committed{}, err
+		}
+		completionSeq := int64(0)
+		for _, event := range committed.Events {
+			if event.Type == "turn.completed" && event.TurnID == c.TurnID {
+				completionSeq = event.Seq
+			}
+		}
+		if err := q.SetCompletedTurn(ctx, sqlitedb.SetCompletedTurnParams{CompletedTurnID: turn.ID, TurnIndex: turn.TurnIndex, CompletionSeq: completionSeq, ID: conv.ID}); err != nil {
+			return Committed{}, err
+		}
+		if b.Summary == nil {
+			b.Summary = &SummaryPatch{KeepRecency: true}
+		}
+	}
+	if read := b.ReadCompletion; read != nil {
+		turn, err := q.GetTurn(ctx, read.TurnID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return Committed{}, err
+		}
+		_, positionErr := q.GetCompletionEvent(ctx, sqlitedb.GetCompletionEventParams{ConversationID: conv.ID, TurnID: sql.NullString{String: read.TurnID, Valid: true}, Seq: read.CompletionSeq})
+		if positionErr != nil && !errors.Is(positionErr, sql.ErrNoRows) {
+			return Committed{}, positionErr
+		}
+		if errors.Is(err, sql.ErrNoRows) || positionErr != nil || turn.ConversationID != conv.ID || turn.TurnIndex != read.TurnIndex || turn.Status != "completed" {
+			return Committed{}, fmt.Errorf("%w: invalid completed turn", ErrInvalidCompletion)
+		}
+
+		if read.CompletionSeq > conv.ReadCompletionSeq {
+			if err := q.AdvanceReadTurn(ctx, sqlitedb.AdvanceReadTurnParams{TurnIndex: read.TurnIndex, CompletionSeq: read.CompletionSeq, ID: conv.ID}); err != nil {
+				return Committed{}, err
+			}
+			b.Summary = &SummaryPatch{KeepRecency: true}
 		}
 	}
 

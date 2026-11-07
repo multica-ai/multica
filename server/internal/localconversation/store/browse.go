@@ -26,10 +26,11 @@ type SessionBrowsePosition struct {
 }
 
 type SessionBrowseGroup struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	Path  string `json:"path"`
-	Total int64  `json:"total"`
+	ID                  string `json:"id"`
+	Title               string `json:"title"`
+	Path                string `json:"path"`
+	Total               int64  `json:"total"`
+	HasUnreadCompletion bool   `json:"has_unread_completion"`
 }
 
 // SessionGroups reads counts and folder metadata without loading summaries.
@@ -55,6 +56,14 @@ func (s *Store) SessionGroups(ctx context.Context, scopeID int64, filter Session
 	if err != nil {
 		return nil, 0, err
 	}
+	unreadGroups, err := q.UnreadSessionBrowseGroups(ctx, sqlitedb.UnreadSessionBrowseGroupsParams{ScopeID: scopeID, Archived: boolInt(filter.Archived)})
+	if err != nil {
+		return nil, 0, err
+	}
+	unread := map[string]bool{}
+	for _, id := range unreadGroups {
+		unread[id] = true
+	}
 	byID := make(map[string]int64, len(counts))
 	for _, count := range counts {
 		byID[count.GroupID] = count.Total
@@ -63,11 +72,11 @@ func (s *Store) SessionGroups(ctx context.Context, scopeID int64, filter Session
 	showEmpty := !filter.Archived && filter.Search == ""
 	for _, folder := range folders {
 		if byID[folder.ID] > 0 || showEmpty {
-			groups = append(groups, SessionBrowseGroup{ID: folder.ID, Title: folder.Title, Path: folder.Path, Total: byID[folder.ID]})
+			groups = append(groups, SessionBrowseGroup{ID: folder.ID, Title: folder.Title, Path: folder.Path, Total: byID[folder.ID], HasUnreadCompletion: unread[folder.ID]})
 		}
 	}
 	if byID[""] > 0 || (showEmpty && len(groups) > 0) {
-		groups = append(groups, SessionBrowseGroup{Total: byID[""]})
+		groups = append(groups, SessionBrowseGroup{Total: byID[""], HasUnreadCompletion: unread[""]})
 	}
 	return groups, seq, tx.Commit()
 }

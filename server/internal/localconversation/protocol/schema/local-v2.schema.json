@@ -64,6 +64,9 @@
               "total": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "has_unread_completion": {
+                "type": "boolean"
               }
             }
           }
@@ -1237,6 +1240,27 @@
             }
           ],
           "description": "Send time of the latest user turn; null before any user turn. Hidden turns and steering do not advance it."
+        },
+        "completion": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/completion"
+            }
+          ]
+        },
+        "read_turn_index": {
+          "type": "integer",
+          "minimum": -1
+        },
+        "has_unread_completion": {
+          "type": "boolean"
+        },
+        "read_completion_seq": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },
@@ -1979,6 +2003,54 @@
         },
         "dispatching_request_id": {
           "type": "string"
+        }
+      }
+    },
+    "completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "turn_id",
+        "turn_index",
+        "completion_seq"
+      ],
+      "properties": {
+        "turn_id": {
+          "$ref": "#/$defs/id"
+        },
+        "turn_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completion_seq": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "completion_read": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "store_generation",
+        "turn_id",
+        "turn_index",
+        "completion_seq"
+      ],
+      "properties": {
+        "store_generation": {
+          "$ref": "#/$defs/id"
+        },
+        "turn_id": {
+          "$ref": "#/$defs/id"
+        },
+        "turn_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completion_seq": {
+          "type": "integer",
+          "minimum": 1
         }
       }
     }

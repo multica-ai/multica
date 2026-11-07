@@ -106,6 +106,9 @@ func TestSummarySendTimePreservesImportedAndForkedHistory(t *testing.T) {
 	}
 	for id, at := range map[string]time.Time{"imported": testTime.Add(time.Minute), "full": testTime.Add(time.Minute), "boundary": testTime} {
 		row, err := s.Summary(ctx, id)
+		if row.CompletedTurnID == "" || row.CompletedTurnIndex != row.ReadTurnIndex {
+			t.Fatalf("history must start read: %+v", row)
+		}
 		if err != nil || row.LastTurnSentAt != formatTime(at) {
 			t.Fatalf("%s = %+v, %v", id, row, err)
 		}

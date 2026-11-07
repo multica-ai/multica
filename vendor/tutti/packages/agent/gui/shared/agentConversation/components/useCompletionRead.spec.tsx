@@ -19,7 +19,7 @@ it("acknowledges a rendered result only when focused, visible and inside the scr
   });
   vi.spyOn(HTMLElement.prototype, "getClientRects").mockReturnValue([{}] as unknown as DOMRectList);
   const model = new CompletionReadModel();
-  model.set("c", { version: 1, generation: "g", baselineTurnIndex: 0, summarySeq: 2, turnCount: 1, activeTurnId: null, status: "idle", completedTurnIndex: 0, completedTurnId: "t0", readTurnIndex: -1 });
+  model.set("c", { version: 1, generation: "g", baselineTurnIndex: 0, summarySeq: 2, turnCount: 1, activeTurnId: null, status: "idle", completedTurnIndex: 0, completedTurnId: "t0", completedSeq: 1, readSeq: 0, readTurnIndex: -1 });
   const completions = { pending: (id: string) => model.pending(id), markRead: vi.fn() };
   function Harness({ visible, settled }: { visible: boolean; settled: boolean }) {
     const ref = useRef<HTMLDivElement>(null);

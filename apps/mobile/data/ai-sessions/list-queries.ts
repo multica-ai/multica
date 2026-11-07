@@ -1,6 +1,6 @@
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import type { LocalV2SessionPage, LocalV2Summary } from "@multica/core/local-conversation/v2";
-import { aiKeys, type AISessionClient, type SessionScope } from "./client";
+import { refreshAISessionBrowse, aiKeys, type AISessionClient, type SessionScope } from "./client";
 
 export const SESSION_LIST_PAGE_SIZE = 8;
 
@@ -33,4 +33,4 @@ export const sessionPageOptions = (client: AISessionClient, groupId: string, arc
   staleTime: 30_000, retry: false,
 });
 
-export const invalidateAISessionLists = (qc: QueryClient, scope: SessionScope) => qc.invalidateQueries({ queryKey: aiKeys.browse(scope) });
+export const invalidateAISessionLists = (qc: QueryClient, scope: SessionScope) => refreshAISessionBrowse(qc, scope);

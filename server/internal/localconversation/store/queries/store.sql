@@ -420,3 +420,33 @@ INSERT INTO queue_operation (conversation_id, operation_id, action, request_id) 
 
 -- name: DeleteConversationQueueOperations :exec
 DELETE FROM queue_operation WHERE conversation_id = ?;
+
+-- name: SetCompletedTurn :exec
+UPDATE conversation SET completed_turn_id = sqlc.arg(completed_turn_id), completed_turn_index = sqlc.arg(turn_index), completion_seq = sqlc.arg(completion_seq)
+WHERE id = sqlc.arg(id) AND completion_seq < sqlc.arg(completion_seq);
+
+-- name: AdvanceReadTurn :exec
+UPDATE conversation SET read_turn_index = sqlc.arg(turn_index), read_completion_seq = sqlc.arg(completion_seq)
+WHERE id = sqlc.arg(id) AND read_completion_seq < sqlc.arg(completion_seq);
+
+-- name: UnreadSessionBrowseGroups :many
+SELECT CAST(COALESCE(f.id, '') AS TEXT) AS group_id
+FROM conversation AS c
+LEFT JOIN folder_project AS f ON f.scope_id = c.scope_id
+  AND rtrim(f.path, '/\') = rtrim(c.cwd, '/\')
+  AND (rtrim(f.path, '/\') <> '' OR f.path = c.cwd)
+WHERE c.scope_id = sqlc.arg(scope_id) AND c.archived = sqlc.arg(archived)
+  AND c.completion_seq > c.read_completion_seq
+GROUP BY CAST(COALESCE(f.id, '') AS TEXT);
+
+-- name: EstablishCompletionBaseline :exec
+UPDATE conversation SET
+    read_completion_seq = completion_seq,
+    completed_turn_id = COALESCE((SELECT t.id FROM turn t WHERE t.conversation_id = sqlc.arg(id) AND t.status = 'completed' ORDER BY t.turn_index DESC LIMIT 1), ''),
+    completed_turn_index = COALESCE((SELECT MAX(t.turn_index) FROM turn t WHERE t.conversation_id = sqlc.arg(id) AND t.status = 'completed'), -1),
+    read_turn_index = COALESCE((SELECT MAX(t.turn_index) FROM turn t WHERE t.conversation_id = sqlc.arg(id) AND t.status = 'completed'), -1)
+WHERE id = sqlc.arg(id);
+
+-- name: GetCompletionEvent :one
+SELECT seq FROM event WHERE conversation_id = ? AND seq = ? AND turn_id = ?
+    AND type = 'turn.completed' AND json_extract(payload, '$.status') = 'completed';

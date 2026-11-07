@@ -1,4 +1,4 @@
-// Test rig: real list row, read service, IndexedDB and viewport hook; no daemon or model CLI.
+// Test rig: real list row, read service and viewport hook with a fake authoritative daemon.
 import { useRef, useState, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { observer } from "mobx-react-lite";
@@ -9,21 +9,24 @@ import { NavigationProvider } from "../../../packages/views/navigation";
 import { ContextMenu } from "@multica/ui/components/ui/context-menu";
 import { LocalConversationSessionRow } from "../../../apps/desktop/src/renderer/src/pages/local-conversation-session-row";
 import { LocalConversationListModel } from "../../../apps/desktop/src/renderer/src/platform/local-conversation-list-model";
-import { createCompletionReadStorage } from "../../../apps/desktop/src/renderer/src/platform/local-completion-storage";
 import { useCompletionRead } from "../../../vendor/tutti/packages/agent/gui/shared/agentConversation/components/useCompletionRead";
 import "../../../apps/desktop/src/renderer/src/globals.css";
 
 const at = "2026-11-06T12:00:00Z";
 const completed = () => sessionStorage.getItem("completed") === "true";
-const summary = () => localV2SummarySchema.parse({ conversation_id: "c", title: "Background conversation", summary_seq: completed() ? 2 : 1,
+const summary = () => localV2SummarySchema.parse({ conversation_id: "c", title: "Background conversation", summary_seq: completed() ? sessionStorage.getItem("read") === "true" ? 3 : 2 : 1,
+  completion: completed() ? { turn_id: "t", turn_index: 0, completion_seq: 1 } : null, read_completion_seq: sessionStorage.getItem("read") === "true" ? 1 : 0, read_turn_index: sessionStorage.getItem("read") === "true" ? 0 : -1,
+  has_unread_completion: completed() && sessionStorage.getItem("read") !== "true",
   provider: "codex", status: completed() ? "idle" : "running", active_turn_id: completed() ? undefined : "t", turn_count: 1,
   pinned: false, archived: false, updated_at: at, last_message_preview: completed() ? "The new result is ready" : "Working" });
-const transport = createFakeTransport({ userId: "u", workspaceId: "w" }, (_method, path) => path.includes("/snapshot") ? {
+const transport = createFakeTransport({ userId: "u", workspaceId: "w" }, (_method, path) => {
+  if (path.endsWith("/completion-read")) { sessionStorage.setItem("read", "true"); return summary(); }
+  return path.includes("/snapshot") ? {
   version: 2, store_generation: "g", snapshot_seq: 5, conversation: summary(),
   turns: [{ id: "t", turn_index: 0, request_id: "r", status: completed() ? "completed" : "running", started_at: at, messages: [], events: [] }],
-} : { scope_seq: summary().summary_seq, summaries: [summary()], has_more: false });
+} : { scope_seq: summary().summary_seq, summaries: [summary()], has_more: false }; });
 transport.storeGeneration = async () => "g";
-const manager = new ConversationServiceManager({ snapshots: () => ({ read: async () => null, write: async () => {} }), completions: () => createCompletionReadStorage(() => "completion-e2e") });
+const manager = new ConversationServiceManager({ snapshots: () => ({ read: async () => null, write: async () => {} }) });
 const service = manager.get(transport, { userId: "u", workspaceId: "w" });
 await service.loadSummaries();
 await service.completions!.settled();

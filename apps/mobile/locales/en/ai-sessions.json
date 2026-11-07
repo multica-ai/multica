@@ -161,6 +161,12 @@
   "activity_count_one": "{{count}} activity",
   "activity_count_other": "{{count}} activities",
   "load_more_sessions": "Load more",
+  "unread_group": "Contains completed unread conversations",
+  "unread_result": "Completed, unread",
+  "new_in_group": "New conversation in {{name}}",
+  "unread_requires_update": "Update Multica on this device to sync unread results.",
+  "directories": "Directories",
+  "search_results": "Search results",
   "photos": {
     "choose": "Choose photos",
     "preview": "Preview {{name}}",

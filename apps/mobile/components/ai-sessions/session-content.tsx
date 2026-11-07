@@ -53,6 +53,7 @@ import {
   useAISubscriptionRejected,
 } from "@/data/ai-sessions/hooks";
 import { draftUploads } from "@/data/ai-sessions/uploads";
+import { useCompletionRead } from "@/data/ai-sessions/use-completion-read";
 import { useStoredSnapshot } from "@/data/ai-sessions/snapshot-store";
 import {
   useAIDrafts,
@@ -248,6 +249,9 @@ export function AISessionContent({
     ? history.hasNextPage
     : snapshot?.has_older_turns;
   const [readingHistory, setReadingHistory] = useState(false);
+  const onVisibleResults = useCompletionRead({ client, session, snapshot, rows: allRows,
+    enabled: connected && focused && active && !query.isError });
+
   const stopTarget=submissionStopTarget(outbox,snapshot,client?.submissionLifecycle===true);
   const running=stopTarget!==null;
   const submissionView = submissionPresentation(outbox, snapshot);
@@ -972,6 +976,7 @@ export function AISessionContent({
             <FlashList
               ref={list}
               data={allRows}
+              onViewableItemsChanged={onVisibleResults}
               keyExtractor={(item) => item.id}
               maintainVisibleContentPosition={{
                 startRenderingFromBottom: true,

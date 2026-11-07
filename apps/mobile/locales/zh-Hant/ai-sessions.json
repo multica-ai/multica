@@ -160,6 +160,12 @@
   "web_forward": "下一頁",
   "activity_count_other": "{{count}} 項執行過程",
   "load_more_sessions": "載入更多",
+  "unread_group": "含已完成未讀對話",
+  "unread_result": "已完成，未讀",
+  "new_in_group": "在 {{name}} 中建立對話",
+  "unread_requires_update": "更新該裝置上的 Multica 後可同步未讀結果。",
+  "directories": "目錄",
+  "search_results": "搜尋結果",
   "photos": {
     "choose": "選擇相簿圖片",
     "preview": "預覽 {{name}}",

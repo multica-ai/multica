@@ -6,9 +6,9 @@ import { sessionGroupsOptions, sessionPageCursors, sessionPageOptions, sessionPa
 import { visibleSessions } from "./projection";
 
 /** Requested page counts are UI state; each bounded server page lives in Query. */
-export function useSessionList({ client, scope, connected, search, archived, collapsed }: {
+export function useSessionList({ client, scope, connected, search, archived, expanded }: {
   client: AISessionClient | null; scope: SessionScope; connected: boolean;
-  search: string; archived: boolean; collapsed: Record<string, boolean>;
+  search: string; archived: boolean; expanded: Record<string, boolean>;
 }) {
   const qc = useQueryClient();
   const [query, setQuery] = useState(search.trim());
@@ -21,7 +21,7 @@ export function useSessionList({ client, scope, connected, search, archived, col
   const [requested, setRequested] = useState<{ frame: string; counts: Record<string, number> }>({ frame, counts: {} });
   const groups = (catalog.data?.groups ?? []).map((group) => {
     const key = aiDraftKey(scope, group.id || "unassigned");
-    return { ...group, key, collapsed: !query && !!collapsed[key] };
+    return { ...group, key, collapsed: !query && !expanded[key] };
   });
   // Follow the latest cursor chain after live updates move a page boundary.
   const descriptors = groups.flatMap((group) => sessionPageCursors(requested.frame === frame ? requested.counts[group.id] ?? 1 : 1,
@@ -34,7 +34,7 @@ export function useSessionList({ client, scope, connected, search, archived, col
     const nextCursor = last?.data?.next_cursor;
     return { ...group, count: group.total, data: group.collapsed || group.total === 0 ? [] : visibleSessions(summaries, "", archived),
       loading: !group.collapsed && group.total > 0 && entries.some((page) => page.isPending),
-      error: group.total > 0 ? entries.find((page) => page.isError)?.error : undefined,
+      error: !group.collapsed && group.total > 0 ? entries.find((page) => page.isError)?.error : undefined,
       retry: () => {
         void catalog.refetch();
         if (entries.some((entry) => entry.error instanceof Error && entry.error.message === "invalid_request")) {

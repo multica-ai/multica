@@ -22,7 +22,13 @@ device identity. Desktop-only host requests fail explicitly.
 AI sessions support adding messages to the running conversation's queue,
 pausing/resuming/removing pending messages, and sending one immediately without
 a second confirmation. Sending immediately interrupts the current generation.
-Project groups can be collapsed, older turns load on demand, and model settings
+Project groups start collapsed on each visit. Expansion survives returning from a
+conversation, refresh and pagination, and search reveals matches without changing
+that selection. A blue dot represents a successful unread result anywhere in the
+directory, including unloaded pages. The source computer's daemon owns read state;
+showing the completed answer in the active viewport acknowledges that exact turn
+through `/sessions/{id}/completion-read`. Reading elsewhere updates the same state.
+This requires `completion-read-v1` on the source computer. Older turns load on demand, and model settings
 include the runner's supported reasoning levels and execution permissions.
 Account usage is available from the conversation's **More → Usage and limits**
 menu; it is read from the selected computer's provider account, separately from
