@@ -151,6 +151,7 @@
       "french": "Français",
       "spanish": "Español",
       "russian": "Русский",
+      "vietnamese": "Tiếng Việt",
       "sync_failed": "Langue enregistrée sur cet appareil, mais la synchronisation avec votre compte a échoué. Vos autres appareils peuvent afficher la langue précédente."
     },
     "timezone": {
