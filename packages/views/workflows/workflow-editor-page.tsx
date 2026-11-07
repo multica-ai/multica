@@ -30,7 +30,7 @@ import {
   Plus,
   Trash2,
   UserRound,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { ApiError, clientErrorMessage } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";

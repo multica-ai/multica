@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, lazy, useRef, useState } from "react";
-import { Bot, Camera, ImagePlus, Loader2, Users, X } from "lucide-react";
+import { Bot, Camera, ImagePlus, Loader2, Users, X } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -149,6 +149,7 @@ export function AvatarUploadControl({
   const { t } = useT("common");
   const { upload } = useFileUpload(api);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadPendingRef = useRef(false);
   const [pickedFile, setPickedFile] = useState<File | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -188,6 +189,8 @@ export function AvatarUploadControl({
   };
 
   const handleCropped = async (cropped: File) => {
+    // Block dismissal during the cropper handoff, before busy has committed.
+    uploadPendingRef.current = true;
     setBusy(true);
     try {
       const result = await upload(cropped);
@@ -202,6 +205,7 @@ export function AvatarUploadControl({
         err instanceof Error ? err.message : t(($) => $.avatar_upload.failed),
       );
     } finally {
+      uploadPendingRef.current = false;
       setBusy(false);
     }
   };
@@ -388,7 +392,7 @@ export function AvatarUploadControl({
         open={dialogOpen}
         busy={busy}
         onOpenChange={(next) => {
-          if (busy) return;
+          if (busy || uploadPendingRef.current) return;
           setDialogOpen(next);
           if (!next) setPickedFile(null);
         }}

@@ -2,6 +2,12 @@
  * Multica shared base styles — imported by all apps
  * ============================================================================= */
 
+/* The UI locale is Chinese, Japanese or Korean. Han, kana and Hangul fill the
+ * whole em square, so wrapped CJK text needs more leading than the Latin value
+ * the type scale pairs with each size. Keyed to <html lang>, which both apps
+ * set from the active locale. */
+@custom-variant cjk (&:is(:lang(zh), :lang(ja), :lang(ko)));
+
 /* The chat launcher overlays the dashboard's bottom-right corner on every
  * workspace page, so anything that runs to that corner has to stop short of
  * it. Named rather than spelled out at each site: the intent is legible, every
@@ -42,16 +48,59 @@
   color: var(--shiki-dark) !important;
 }
 
-/* Multica icon: entrance spin animation */
-@keyframes entrance-spin {
-  0% { transform: rotate(0deg); opacity: 0; }
-  50% { opacity: 1; }
-  100% { transform: rotate(360deg); opacity: 1; }
-}
+/* Multica brand motion — brand guidelines v5 §08. One move: a 45° turn, which
+ * lands the eight-armed star back on itself. Only the tile and the star
+ * overshoot (pop); nothing else does. Delays are set inline by the components
+ * so a sequence stays readable in one place. */
+@keyframes multica-pop { from { transform: scale(0.4); opacity: 0; } }
+@keyframes multica-write { from { stroke-dashoffset: 1; } }
+@keyframes multica-settle { from { transform: rotate(-45deg); } }
+@keyframes multica-arm-grow { from { transform: scaleX(0); } }
+@keyframes multica-arm-fade { from { opacity: 1; } to { opacity: 0.16; } }
+@keyframes multica-star-in { from { transform: scale(0) rotate(-135deg); } }
+@keyframes multica-star-enter { from { transform: rotate(-45deg) scale(0.6); opacity: 0; } }
+@keyframes multica-hop { 40% { transform: translateY(-14%); } }
 
-.animate-entrance-spin {
-  animation: entrance-spin 0.6s ease-out forwards;
+.multica-pop {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: multica-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
+.multica-write {
+  stroke-dasharray: 1 1;
+  animation: multica-write 0.5s cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+/* The group's own box shrinks while its arms grow, so turn about the star's
+   grid centre instead. */
+.multica-settle {
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+  animation: multica-settle 1.1s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.multica-arm-grow {
+  transform-box: fill-box;
+  transform-origin: 0% 50%;
+  animation: multica-arm-grow 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.multica-arm-fade { animation: multica-arm-fade 0.8s linear infinite; }
+.multica-star {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+}
+/* `backwards`, not `both`: a held end state would block the hover turn. */
+.multica-star-in { animation: multica-star-in 0.9s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
+.multica-star-enter {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: multica-star-enter 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+/* Website nav only — the product never animates the wordmark on hover. */
+.multica-hop-on-hover > g { transform-box: fill-box; transform-origin: 50% 100%; }
+.multica-hop-on-hover:hover > g {
+  animation: multica-hop 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.multica-hop-on-hover .multica-star { transition: transform 0.7s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.multica-hop-on-hover:hover .multica-star { transform: rotate(45deg); }
 
 /* Onboarding: step / phase entry — 400ms fade.
  * Applied on mount so every new step (and intra-step phase switch, via
@@ -96,7 +145,9 @@
  * per-frame text repaint caused by animating a clipped background-position.
  * The old 200%-wide gradient travelled four label widths per 2.5s cycle.
  * A six-width window with a repeating two-width mask preserves that spacing
- * and covers the label throughout the sweep, including the loop seam. */
+ * and covers the label throughout the sweep, including the loop seam.
+ * Hosts can raise contrast through the --shimmer-text-* variables (base and
+ * highlight colors, and how far the highlight band spreads from its peak). */
 @keyframes shimmer-text-window {
   from { transform: translateX(-66.6666666667%); }
   to { transform: translateX(0%); }
@@ -115,7 +166,7 @@
   vertical-align: bottom;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--muted-foreground);
+  color: var(--shimmer-text-base, var(--muted-foreground));
 }
 
 .shimmer-text-window {
@@ -126,7 +177,12 @@
   height: 100%;
   pointer-events: none;
   user-select: none;
-  mask-image: linear-gradient(90deg, transparent 35%, black 50%, transparent 65%);
+  mask-image: linear-gradient(
+    90deg,
+    transparent calc(50% - var(--shimmer-text-spread, 15%)),
+    black 50%,
+    transparent calc(50% + var(--shimmer-text-spread, 15%))
+  );
   mask-size: calc(100% / 3) 100%;
   mask-repeat: repeat-x;
   animation: shimmer-text-window 2.5s linear infinite;
@@ -140,7 +196,7 @@
   width: calc(100% / 6);
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--foreground);
+  color: var(--shimmer-text-highlight, var(--foreground));
   animation: shimmer-text-copy 2.5s linear infinite;
 }
 
@@ -156,6 +212,25 @@
 
 .animate-nav-progress-sweep {
   animation: nav-progress-sweep 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Skeleton: hidden (space still reserved) for the first 200ms, then pulses.
+ * Data that lands inside that window — a warm cache, a prefetched route, a
+ * fast API — swaps straight from nothing to content instead of flashing a
+ * placeholder for a frame or two. Visibility, not opacity, so the hold never
+ * fights the pulse over the same property. */
+@keyframes skeleton-hold {
+  from, to { visibility: hidden; }
+}
+
+@keyframes skeleton-pulse {
+  50% { opacity: 0.5; }
+}
+
+.animate-skeleton {
+  animation:
+    skeleton-hold 200ms step-end,
+    skeleton-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 /* Border beam: a brand-tinted highlight sweeps continuously around the
@@ -255,12 +330,23 @@ html[data-dnd-dragging="true"] * {
 
 [data-sidebar-resizing="true"] [data-slot="sidebar-gap"],
 [data-sidebar-resizing="true"] [data-slot="sidebar-container"],
-[data-sidebar-resizing="true"] [data-sidebar-resize-consumer] {
+[data-sidebar-resizing="true"] [data-sidebar-resize-consumer],
+[data-sidebar-resizing="true"] [data-slot="space-panel"],
+[data-sidebar-resizing="true"] [data-slot="list-column"] {
   transition: none !important;
 }
 
 [data-sidebar-resizing="true"] [data-sidebar="rail"]::after {
   background-color: var(--sidebar-border);
+}
+
+[data-sidebar-resizing="true"] [data-slot="space-panel-resize"]::after {
+  background-color: color-mix(in oklab, var(--ring) 60%, transparent);
+}
+
+html[data-sidebar-resizing="true"] {
+  cursor: ew-resize;
+  user-select: none;
 }
 
 /* Right detail sidebars use react-resizable-panels, which sizes panels by
@@ -293,13 +379,31 @@ html[data-dnd-dragging="true"] * {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-entrance-spin,
+  /* Brand motion settles on its final frame. The think arms stop at full
+     strength around the open centre, so "working" still reads without
+     movement. */
+  .multica-pop,
+  .multica-write,
+  .multica-settle,
+  .multica-arm-grow,
+  .multica-arm-fade,
+  .multica-star-in,
+  .multica-star-enter,
+  .multica-hop-on-hover:hover > g,
   .animate-onboarding-enter,
   .animate-chat-impulse,
   .shimmer-text-window,
   .shimmer-text-copy,
   .animate-nav-progress-sweep {
     animation: none;
+  }
+
+  .multica-hop-on-hover:hover .multica-star {
+    transform: none;
+  }
+
+  .animate-skeleton {
+    animation: skeleton-hold 200ms step-end;
   }
 
   .shimmer-text-window {

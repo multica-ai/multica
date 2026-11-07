@@ -1,19 +1,22 @@
 {
   "page": {
     "title": "에이전트",
-    "learn_more": "자세히 보기 →",
     "new_agent": "새 에이전트",
-    "search_placeholder": "에이전트 검색...",
+    "search": "에이전트 검색",
     "show_archived": "보관된 에이전트 보기 ({{count}}) →",
     "of_total": "{{total}}개 중 {{visible}}개",
     "list_load_failed": "에이전트 목록을 불러오지 못했습니다",
     "list_load_failed_default": "에이전트 목록을 가져오는 중 문제가 발생했습니다.",
-    "try_again": "다시 시도"
+    "try_again": "다시 시도",
+    "scope_title": {
+      "mine": "내 에이전트",
+      "all": "모든 에이전트",
+      "archived": "보관된 에이전트"
+    }
   },
   "scope": {
     "mine": "내 것",
-    "all": "전체",
-    "archived": "보관됨"
+    "all": "전체"
   },
   "sort": {
     "label_recent": "최근 활동",
@@ -42,15 +45,21 @@
     "title": "보관된 에이전트"
   },
   "empty": {
-    "title": "아직 에이전트가 없습니다",
-    "description": "에이전트를 만든 후 태스크를 할당하세요."
+    "setup": {
+      "label": "설정 단계",
+      "runtime": "런타임 연결하기",
+      "agent": "에이전트 만들기",
+      "issue": "태스크 할당하기",
+      "done": "(완료)",
+      "connect_runtime": "연결"
+    }
   },
   "no_matches": {
     "title": "일치하는 결과 없음",
-    "search_archived": "\"{{query}}\"와 일치하는 보관된 에이전트가 없습니다.",
-    "no_archived": "아직 보관된 에이전트가 없습니다.",
     "search_active": "\"{{query}}\"와 일치하는 에이전트가 없습니다.",
     "search_active_filtered": "이 필터에서 \"{{query}}\"와 일치하는 에이전트가 없습니다.",
+    "no_archived": "아직 보관된 에이전트가 없습니다.",
+    "search_archived": "\"{{query}}\"와 일치하는 보관된 에이전트가 없습니다.",
     "no_filter_match": "이 필터와 일치하는 에이전트가 없습니다.",
     "search_runtime_filtered": "\"{{machine}}\"에서 \"{{query}}\"와 일치하는 에이전트가 없습니다.",
     "runtime_filtered": "\"{{machine}}\"에 에이전트가 없습니다."
@@ -127,7 +136,6 @@
     "archive_dialog_confirm": "보관"
   },
   "detail": {
-    "back_to_agents": "에이전트",
     "back_to_agents_full": "에이전트로 돌아가기",
     "not_found_title": "에이전트를 찾을 수 없습니다",
     "not_found_default": "이 에이전트가 보관되었거나 삭제되었을 수 있습니다.",
@@ -156,17 +164,20 @@
     "runtime_required_toast": "이 에이전트를 실행하기 전에 런타임을 연결하세요.",
     "assign_work": "작업 할당",
     "more_actions_aria": "에이전트 작업",
-    "updated": "{{when}} 업데이트됨"
+    "settings": "설정",
+    "copy_link": "링크 복사",
+    "copy_id": "에이전트 ID 복사",
+    "link_copied_toast": "링크를 복사했습니다",
+    "id_copied_toast": "에이전트 ID를 복사했습니다"
   },
   "inspector": {
     "section_profile": "프로필",
     "section_execution": "실행 설정",
-    "qoder_execution_note": "모델, 도구, Skills는 Qoder의 QCA 에이전트에서 설정합니다.",
+    "qoder_execution_note": "모델, 도구, 스킬은 Qoder Cloud Agents의 에이전트에서 설정합니다.",
     "section_access": "접근 권한",
     "section_properties": "속성",
     "section_details": "세부 정보",
     "section_details_hint": "소유권과 수명 주기에 대한 읽기 전용 정보입니다.",
-    "section_skills": "스킬",
     "section_integrations": "연동",
     "prop_runtime": "런타임",
     "prop_model": "모델",
@@ -177,7 +188,6 @@
     "prop_owner": "소유자",
     "prop_created": "생성일",
     "prop_updated": "수정일",
-    "no_description_placeholder": "설명 없음",
     "avatar_label": "아바타",
     "name_label": "이름",
     "description_label": "설명",
@@ -193,10 +203,24 @@
     "cancel": "취소"
   },
   "overview": {
-    "agent_context": "에이전트",
-    "access": "접근 권한",
     "attention_title": "확인이 필요한 실행",
     "attention_queued_other": "런타임을 사용할 수 없어 {{count}}개의 실행이 대기 중입니다."
+  },
+  "sections": {
+    "runs_count_other": "실행 {{count}}개",
+    "recent_this_week_other": "이번 주 {{count}}개",
+    "view_all": "모두 보기",
+    "open": "열기",
+    "edit": "편집",
+    "add": "추가",
+    "manage": "관리",
+    "instructions_empty": "아직 지침이 없습니다."
+  },
+  "panel": {
+    "status": "상태",
+    "runs_7d": "실행 (7일)",
+    "edit_access_aria": "접근 권한: {{value}}. 접근 권한 변경",
+    "all_settings": "모든 설정"
   },
   "skill_attach": {
     "trigger_aria": "워크스페이스 스킬 연결",
@@ -251,13 +275,11 @@
     "clear_full": "선택 지우기(제공자 기본값 사용)"
   },
   "tabs": {
-    "overview": "개요",
     "work": "작업",
     "capabilities": "기능",
     "settings": "설정",
     "general": "일반",
     "access": "접근 권한",
-    "page_navigation_aria": "에이전트 페이지",
     "section_navigation_aria": "에이전트 섹션",
     "activity": "활동",
     "tasks": "실행",
@@ -269,7 +291,7 @@
     "composio_mcp": "MCP 앱",
     "integrations": "연동",
     "runtime_config": "라우팅",
-    "qoder_agent": "QCA 에이전트",
+    "qoder_agent": "Qoder Cloud Agents",
     "discard_dialog_title": "저장하지 않은 변경사항을 버릴까요?",
     "discard_dialog_description": "이 탭에 저장하지 않은 변경사항이 있습니다. 지금 나가면 변경사항이 사라집니다.",
     "discard_keep": "계속 편집",
@@ -537,6 +559,7 @@
       "load_failed": "연결된 앱을 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
       "empty_title": "아직 연결된 앱이 없습니다",
       "empty_link_to_settings": "설정 → 연동에서 연결하기",
+      "open_settings": "설정 열기",
       "connected": "연결됨",
       "toggle_aria": "이 에이전트에 {{toolkit}} 허용",
       "saving": "저장 중…",
@@ -626,12 +649,6 @@
       "section_now": "현재",
       "section_last_30d": "최근 30일",
       "section_recent": "최근 작업",
-      "subtitle_no_active": "활성 작업 없음",
-      "subtitle_active_other": "활성 실행 {{count}}개",
-      "subtitle_performance": "성과",
-      "subtitle_no_recent": "아직 완료된 실행 없음",
-      "subtitle_recent_progress": "{{total}}회 실행 중 {{shown}}회",
-      "subtitle_recent_latest": "최근 {{count}}회 실행",
       "empty_now": "이 에이전트는 지금 진행 중인 실행이 없습니다.",
       "empty_30d": "최근 30일 동안 완료된 작업이 없습니다.",
       "empty_recent": "이 에이전트는 아직 완료한 실행이 없습니다.",
@@ -642,9 +659,7 @@
       "success_hint": "완료 및 실패한 실행 수 중 완료한 실행의 비율입니다. 취소한 실행은 제외됩니다.",
       "success_unavailable": "이 기간에 완료하거나 실패한 실행이 없어 성공률을 계산할 수 없습니다.",
       "cancelled_count": "{{count}}개 취소됨",
-      "avg_duration": "평균 {{value}}",
       "avg_duration_label": "평균 소요 시간",
-      "failed_count": "{{count}}회 실패",
       "failed_label": "실패",
       "source_issue": "태스크",
       "source_chat": "채팅",
@@ -868,18 +883,9 @@
     "none": "30일간 활동 없음"
   },
   "toolbar": {
-    "result_count_title": "일치하는 에이전트 / 범위 내 전체",
-    "filter_label": "필터",
-    "filter_active_count_other": "필터 {{count}}개",
-    "clear_filters": "필터 지우기",
     "section_availability": "가용성",
     "section_access": "접근 권한",
     "section_runtime": "런타임",
-    "display": "표시",
-    "sort_by": "정렬",
-    "direction_asc": "오름차순",
-    "direction_desc": "내림차순",
-    "section_columns": "열",
     "section_owner": "소유자",
     "section_model": "모델"
   },
@@ -887,7 +893,6 @@
     "title": "에이전트 만들기",
     "squad_title": "이 스쿼드용 에이전트 만들기",
     "duplicate_title": "{{name}} 복제",
-    "back": "뒤로",
     "step_ai": "대화로 만들기",
     "modes": {
       "template": {
@@ -935,6 +940,7 @@
       "switch_runtime_failed": "런타임을 전환하지 못했습니다. 대화는 이전 런타임에서 계속 실행됩니다.",
       "switch_runtime_pending": "현재 답변을 중지하면 런타임을 전환할 수 있습니다.",
       "switch_runtime_success": "런타임을 전환했습니다. 설정 초안은 유지되며, 이후 대화는 새 런타임에서 새로운 모델 세션으로 이어집니다.",
+      "conversation_tab": "대화",
       "chat_title": "Agent Builder",
       "runtime_online": "런타임 온라인",
       "runtime_offline": "런타임 오프라인",
@@ -971,7 +977,8 @@
       "runtime": "런타임 선택",
       "configure": "구성",
       "done": "완료",
-      "aria": "에이전트 생성 단계"
+      "aria": "에이전트 생성 단계",
+      "progress": "{{total}}단계 중 {{current}}단계"
     },
     "configure_title": "에이전트 구성",
     "ask_ai": "AI에게 작성 맡기기",
@@ -1032,8 +1039,29 @@
       "next": "다음"
     }
   },
-  "actions": {
-    "selected_other": "{{count}}개 선택됨",
-    "clear_selection": "선택 해제"
+  "actions": {},
+  "intro": {
+    "title": "첫 AI 팀원을 맞이하세요",
+    "description": "에이전트는 팀원처럼 태스크를 맡습니다. 런타임에서 Claude Code, Codex 같은 도구로 작업하고, 끝나면 댓글로 결과를 전달합니다.",
+    "slides": {
+      "describe": {
+        "title": "할 일을 한 문장으로",
+        "description": "역할을 설명하고 런타임과 모델을 고르면 만들 수 있습니다. 지침 수정이나 skill 추가는 언제든 가능합니다."
+      },
+      "assign": {
+        "title": "동료처럼 일을 맡기세요",
+        "description": "어떤 태스크든 담당자로 선택하세요. 알아서 작업을 시작하니 지켜볼 필요가 없습니다."
+      },
+      "deliver": {
+        "title": "작업을 보고, 댓글로 받으세요",
+        "description": "실행 과정을 실시간으로 볼 수 있습니다. 끝나면 결과와 PR을 태스크 댓글로 전달합니다."
+      }
+    },
+    "art": {
+      "prompt": "프런트엔드 PR을 리뷰하고 접근성과 성능을 중점으로 본 뒤, 결론을 PR 댓글로 남겨 주세요.",
+      "issue_title": "요금 페이지 모바일 레이아웃 깨짐",
+      "comment": "수정했습니다. 375px 이하에서 요금 카드가 한 열로 바뀝니다. PR을 열었고 테스트도 통과했습니다.",
+      "step_read": "{{file}} 읽기"
+    }
   }
 }

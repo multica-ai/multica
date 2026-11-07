@@ -693,10 +693,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             quickActionMenuListeners.current.add(refresh);
             return () => { quickActionMenuListeners.current.delete(refresh); };
           },
-          renderQuickAction: (id: string) =>
-            quickActionMenuRef.current?.renderQuickAction?.(id) ?? Promise.resolve(""),
-          onRenderError: (error: unknown) =>
-            quickActionMenuRef.current?.onRenderError?.(error),
+          getQuickActionContent: (id: string) =>
+            quickActionMenuRef.current?.getQuickActionContent?.(id) ?? "",
         },
         resolveIssueIdentifierRef,
       }),

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ArrowRight, AtSign, CircleCheck, ListPlus, Users } from "lucide-react";
+import { ArrowRight, AtSign, CircleCheck, ListPlus, Users } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useModalStore } from "@multica/core/modals";
@@ -10,13 +10,17 @@ import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import {
   agentDetailOptions,
+  agentListOptions,
   squadListOptions,
 } from "@multica/core/workspace/queries";
+import { MulticaStarRow } from "@multica/ui/components/common/multica-graphics";
+import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { CreateFlowFooter } from "./create-agent-footer";
 import { AgentCreateShell } from "./create-shell";
 
 /**
@@ -36,17 +40,33 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
   const runtime = runtimes.find((item) => item.id === agent?.runtime_id) ?? null;
   const squad = squadId ? squads.find((item) => item.id === squadId) ?? null : null;
   const name = agent?.name ?? "";
+  const { data: agents } = useQuery(agentListOptions(wsId));
+  // One star per active agent, the newest last. Clamped so a tiny workspace
+  // still reads as a row and a huge one still fits the banner.
+  const stars = agents
+    ? Math.min(Math.max(agents.filter((item) => !item.archived_at).length, 3), 11)
+    : null;
 
   return (
     <AgentCreateShell
       title={t(($) => $.creation_studio.title)}
       step={t(($) => $.creation_studio.steps.done)}
       stepIndex={3}
-      closeIcon
-      onBack={() => navigation.replace(paths.agentDetail(agentId))}
+      onClose={() => navigation.replace(paths.agentDetail(agentId))}
     >
       <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-12">
         <div className="m-auto w-full max-w-xl">
+          <div aria-hidden="true" className="relative mb-10 h-36 overflow-hidden rounded-xl bg-multica-ink">
+            {stars && agent ? (
+              <MulticaStarRow
+                count={stars}
+                join
+                delay={0.2}
+                className="absolute top-1/2 left-1/2 h-8 w-auto -translate-x-1/2 -translate-y-1/2 text-multica-paper/15"
+                lastClassName="fill-multica-paper"
+              />
+            ) : null}
+          </div>
           <div className="flex flex-col items-center text-center">
             {isLoading || !agent ? (
               <Skeleton className="size-14 rounded-full" />
@@ -115,24 +135,16 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
               href={squad ? paths.squadDetail(squad.id) : paths.squads()}
             />
           </div>
-
-          <div className="mt-8 flex items-center justify-center gap-4 text-label">
-            <AppLink
-              href={paths.agentDetail(agentId)}
-              className="font-medium text-foreground underline-offset-4 hover:underline"
-            >
-              {t(($) => $.creation_studio.done.open_agent)}
-            </AppLink>
-            <span aria-hidden="true" className="text-muted-foreground">·</span>
-            <AppLink
-              href={paths.agents()}
-              className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-            >
-              {t(($) => $.creation_studio.done.back_to_list)}
-            </AppLink>
-          </div>
         </div>
       </main>
+      <CreateFlowFooter stepIndex={3}>
+        <Button variant="ghost" render={<AppLink href={paths.agents()} />} nativeButton={false}>
+          {t(($) => $.creation_studio.done.back_to_list)}
+        </Button>
+        <Button render={<AppLink href={paths.agentDetail(agentId)} />} nativeButton={false}>
+          {t(($) => $.creation_studio.done.open_agent)}
+        </Button>
+      </CreateFlowFooter>
     </AgentCreateShell>
   );
 }

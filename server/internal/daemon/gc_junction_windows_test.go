@@ -43,6 +43,13 @@ func createJunction(t *testing.T, src, dst string) {
 }
 
 func TestCleanTaskArtifacts_DoesNotFollowDirectoryJunction(t *testing.T) {
+	t.Run("active environment guard", func(t *testing.T) {
+		root := t.TempDir()
+		alias := filepath.Join(t.TempDir(), "alias")
+		createJunction(t, root, alias)
+		assertEnvRootGuardSharesAliases(t, root, alias)
+	})
+
 	d := newGCTestDaemon(t, http.NewServeMux())
 
 	taskDir := t.TempDir()

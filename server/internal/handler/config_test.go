@@ -130,6 +130,32 @@ func TestGetConfigUsesDaemonServerURLOverride(t *testing.T) {
 	}
 }
 
+func TestGetConfigDeclaresDaemonSetupTarget(t *testing.T) {
+	for _, tt := range []struct {
+		name, appURL, wantTarget, wantServerURL string
+	}{
+		{"official Cloud", "https://multica.ai", "cloud", ""},
+		{"configured self-host", "https://app.example.com", "self_host", "https://api.example.com"},
+		{"incomplete self-host", "", "self_host", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("MULTICA_APP_URL", tt.appURL)
+			t.Setenv("FRONTEND_ORIGIN", "")
+			t.Setenv("MULTICA_PUBLIC_URL", "https://api.example.com")
+			t.Setenv("MULTICA_DAEMON_SERVER_URL", "")
+			var cfg AppConfig
+			req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+			testutil.Call(t, testHandler.GetConfig, req).Want(http.StatusOK).JSON(&cfg)
+			if cfg.DaemonSetupTarget != tt.wantTarget {
+				t.Fatalf("daemon_setup_target = %q, want %q", cfg.DaemonSetupTarget, tt.wantTarget)
+			}
+			if cfg.DaemonServerURL != tt.wantServerURL {
+				t.Fatalf("daemon_server_url = %q, want %q", cfg.DaemonServerURL, tt.wantServerURL)
+			}
+		})
+	}
+}
+
 func TestGetConfigHonorsVCSIntegrationSwitch(t *testing.T) {
 	origCfg := testHandler.cfg
 	t.Cleanup(func() { testHandler.cfg = origCfg })

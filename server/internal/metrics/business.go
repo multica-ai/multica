@@ -666,7 +666,7 @@ func (m *BusinessMetrics) RecordLLMUsage(source, runtimeMode, rawProvider, model
 	}
 	source = NormalizeTaskSource(source)
 	runtimeMode = NormalizeRuntimeMode(runtimeMode)
-	price, priced := PriceForModelAlias(modelAlias)
+	price, priced := PriceForRuntimeModel(rawProvider, modelAlias)
 	if !priced {
 		provider := NormalizeRuntimeProvider(rawProvider)
 		alias := NormalizeModelAlias(modelAlias)
@@ -810,6 +810,7 @@ func claimDecisionSeries() []claimDecisionSeriesKey {
 	claimTaskOutcomes := []claimDecisionSeriesKey{
 		{"", "claimed", "claimed"},
 		{"", "no_capacity", "agent_concurrency_cap"},
+		{"", "runtime_no_capacity", "runtime_concurrency_cap"},
 		{"", "no_runtime", "agent_unbound"},
 		{"", "runtime_mismatch", "agent_rebound"},
 		{"", "error_get_agent", "error"},

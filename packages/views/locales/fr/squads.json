@@ -2,7 +2,6 @@
   "page": {
     "title": "Squads",
     "new_button": "Nouveau squad",
-    "empty_no_squads": "Aucun squad pour l’instant.",
     "empty_no_match": "Aucun squad ne correspond à vos filtres.",
     "table": {
       "name": "Squad",
@@ -14,10 +13,6 @@
     "no_matches": "Aucun squad correspondant",
     "row_menu": "Actions du squad",
     "archive_action": "Archiver"
-  },
-  "inspector": {
-    "details_section": "Détails",
-    "archive_button": "Archiver"
   },
   "member_type": {
     "agent": "Agent",
@@ -65,17 +60,11 @@
     "responsibility_placeholder": "De quoi ce squad est-il responsable ?",
     "save": "Enregistrer"
   },
-  "discard_changes_dialog": {
-    "title": "Abandonner les modifications non enregistrées ?",
-    "description": "Cet onglet contient des modifications non enregistrées. Changer d'onglet les abandonnera.",
-    "keep_editing": "Continuer à modifier",
-    "discard_button": "Abandonner"
-  },
   "members_tab": {
     "section_title": "Membres",
-    "section_count_one": "{{count}} membre dans ce squad",
-    "section_count_other": "{{count}} membres dans ce squad",
     "add_member_button": "Ajouter un membre",
+    "empty_title": "Aucun membre pour l'instant",
+    "empty_description": "Ajoutez des agents ou des membres : les tâches assignées à ce squad leur reviendront.",
     "create_agent_button": "Créer un agent",
     "leader_chip": "Chef",
     "view_agent_tooltip": "Ouvrir le détail de l'agent",
@@ -87,19 +76,31 @@
     "status_unstable": "Instable",
     "status_archived": "Archivé",
     "issue_status_blocked": "bloqué",
-    "active_issue_more": "et {{count}} de plus",
-    "last_active_label": "dernière activité {{time}}"
+    "active_issue_more": "et {{count}} de plus"
   },
-  "detail_tabs": {
-    "members": "Membres",
-    "instructions": "Instructions"
+  "detail": {
+    "assign_work": "Assigner du travail",
+    "copy_link": "Copier le lien",
+    "link_copied": "Lien copié",
+    "not_found": "Squad introuvable",
+    "not_found_description": "Il a peut-être été supprimé, ou vous n'y avez pas accès.",
+    "back_to_list": "Tous les squads",
+    "instructions": "Instructions",
+    "edit": "Modifier",
+    "cancel": "Annuler",
+    "recent_work": "Travail récent",
+    "recent_work_empty": "Aucune tâche n'a encore été assignée à ce squad.",
+    "member_menu": "Actions pour {{name}}",
+    "working_on": "Travaille sur"
   },
   "details": {
     "leader": "Chef",
     "members": "Membres",
     "created_by": "Créé par",
     "created": "Créé",
-    "updated": "Mis à jour"
+    "updated": "Mis à jour",
+    "visibility": "Visibilité",
+    "visibility_workspace": "Espace de travail"
   },
   "toasts": {
     "member_added": "Membre ajouté",
@@ -130,19 +131,38 @@
     "placeholder": "Par exemple : commencez toujours par écrire un test qui échoue. Privilégiez des commits petits et atomiques."
   },
   "scope": {
-    "mine": "Les miens",
-    "all": "Tous"
+    "mine": "Mes squads",
+    "all": "Tous les squads"
   },
-  "toolbar": {
-    "display": "Affichage",
-    "sort_by": "Trier par",
-    "direction_asc": "Croissant",
-    "direction_desc": "Décroissant",
-    "section_columns": "Colonnes",
-    "result_count_title": "Squads correspondants / tous les squads",
-    "filter_label": "Filtrer",
-    "filter_active_count_one": "{{count}} filtre",
-    "filter_active_count_other": "{{count}} filtres",
-    "clear_filters": "Effacer les filtres"
+  "toolbar": {},
+  "intro": {
+    "title": "Réunissez vos agents en squad pour qu'ils travaillent en équipe",
+    "description": "Assignez une tâche au squad. Son agent chef la lit, confie chaque étape au membre dont le rôle correspond et suit le travail jusqu'à l'objectif. Vous n'avez qu'un seul interlocuteur.",
+    "slides": {
+      "route": {
+        "title": "Un seul interlocuteur, une répartition automatique",
+        "description": "Le chef lit la tâche et mentionne le membre le mieux placé pour l'étape suivante. Seul ce membre se met au travail."
+      },
+      "roles": {
+        "title": "Répartir le travail par rôle",
+        "description": "Les descriptions de rôle indiquent au chef les points forts de chaque membre. Les membres peuvent être des agents ou des personnes."
+      },
+      "progress": {
+        "title": "Suivre l'avancement au même endroit",
+        "description": "La page du squad affiche le travail récent et ce sur quoi chaque membre travaille."
+      }
+    },
+    "art": {
+      "assignee": "Assigné à",
+      "squad_name": "Squad frontend",
+      "issue_dark_mode": "Ajouter un mode sombre aux paramètres",
+      "issue_board_columns": "Colonnes du tableau redimensionnables",
+      "issue_inbox_gestures": "Gestes de balayage dans la boîte mobile",
+      "issue_paste_images": "Coller des images dans les commentaires",
+      "delegating": "Choix d'un membre selon son rôle...",
+      "role_frontend": "Frontend",
+      "role_testing": "Tests",
+      "role_product": "Produit"
+    }
   }
 }

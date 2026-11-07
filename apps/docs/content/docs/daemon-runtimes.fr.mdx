@@ -147,6 +147,8 @@ Chaque exécution a un répertoire sous la racine des espaces de travail (par d�
 
 Tant que la tâche reste ouverte, 12 heures après la fin d'une exécution, seul le contenu régénérable est supprimé : les répertoires `node_modules`, `.next` et `.turbo`, ainsi que le cache que le daemon prépare pour Codex. Le reste est conservé. Un daemon connecté à Multica Cloud supprime aussi le répertoire entier 14 jours après la fin de l'exécution, que la tâche soit fermée ou non ; les daemons auto-hébergés ne le font pas par défaut.
 
+Pour un chat non archivé qui utilise un répertoire de travail géré par Multica, le daemon applique le même nettoyage du contenu régénérable, par défaut 12 heures après la fin de la dernière exécution. Le daemon mémorise le nettoyage réussi et évite les parcours répétés pour cette exécution. Une exécution ultérieure devient éligible après le même délai. Si le chat s'exécute directement dans le répertoire local d'un projet, ce nettoyage se limite au cache `codex-home/.sandbox-bin` du daemon dans le répertoire de suivi de l'exécution.
+
 Une exécution sur le répertoire local d'un projet travaille dans votre propre répertoire, auquel le daemon ne touche jamais. Le répertoire de suivi que Multica crée pour cette exécution (journaux, etc.) est conservé lui aussi ; seuls les caches régénérables qu'il contient sont nettoyés.
 
 ### Cache de dépôts partagé
@@ -163,6 +165,10 @@ Un cache n'est supprimé que si les trois conditions sont réunies : aucun espac
 | Historiques de session Hermes | `hermes-sessions/` dans le répertoire de configuration Multica (par défaut `~/.multica` ; `~/.multica/profiles/<name>` pour un profil nommé) | Supprimés après 14 jours sans usage |
 | Mémoire Hermes (une par agent) | `hermes-state/` dans le même répertoire | Supprimée après 90 jours sans usage |
 | Répertoire temporaire privé de chaque exécution (`TMPDIR`) | `multica-task-*` dans le répertoire temporaire du système | Supprimé à la fin de l'exécution ; si le daemon a été tué, un nettoyage ultérieur s'en charge |
+
+Les exécutions Hermes liées à une tâche ou à un chat utilisent le répertoire persistant de leur conversation comme `HERMES_HOME` isolé, avec un fichier `state.db` ordinaire et ses journaux SQLite à l’intérieur. Cette disposition fonctionne aussi bien avec l’ACP exécuté dans le processus qu’avec l’ACP passant par la Gateway. Les historiques existants sont réutilisés et les historiques locaux sont migrés avant l’exécution suivante.
+
+Multica actualise les skills et la configuration dérivée à chaque exécution. L’authentification du fournisseur de modèles est conservée ; les adaptateurs de messagerie et les points d’entrée HTTP sont désactivés pour les exécutions gérées. L’état de la Gateway, les journaux, les sessions et les tâches cron de l’hôte sont isolés. Toute Gateway propre à une exécution est arrêtée à la fin de celle-ci afin que les exécutions suivantes utilisent leur propre environnement.
 
 ### Mémoire native et sous-agents de Codex [#codex-memory]
 
@@ -261,12 +267,12 @@ Modifier un profil n'affecte que les exécutions prises en charge par la suite. 
 
 ## Runtime distant Qoder Cloud Agents
 
-Qoder Cloud Agents exécute les tickets assignés dans des sessions QCA distantes. Le serveur Multica supervise un pont qui utilise le protocole de tâches existant du daemon ; aucun daemon local n'est nécessaire pour ce runtime.
+Qoder Cloud Agents exécute les tickets assignés dans des sessions distantes. Le serveur Multica supervise un pont qui utilise le protocole de tâches existant du daemon ; aucun daemon local n'est nécessaire pour ce runtime.
 
 ### Avant de commencer
 
 - Vous devez être administrateur de l'espace de travail. Chaque espace de travail a une seule connexion Qoder.
-- Dans Qoder, créez un jeton d'accès personnel (PAT), au moins un environnement et les agents QCA à utiliser. Les modèles, outils et skills se configurent sur l'agent QCA dans Qoder, pas dans Multica.
+- Créez un jeton d'accès personnel Qoder (PAT), au moins un environnement et les agents à utiliser dans Qoder Cloud Agents. Les modèles, outils et skills se configurent sur l'agent distant dans Qoder Cloud Agents, pas dans Multica.
 - Les installations auto-hébergées doivent définir `MULTICA_VCS_SECRET_KEY` sur le serveur : une clé de 32 octets encodée en base64, identique d'un redémarrage à l'autre. Sans elle, Qoder Cloud Agents n'apparaît pas dans le menu **Ajouter**.
 
 ### Connecter Qoder
@@ -280,9 +286,9 @@ Qoder Cloud Agents exécute les tickets assignés dans des sessions QCA distante
 
 ### Ajouter un agent
 
-Ouvrez Qoder Cloud Agents depuis la page Runtimes et cliquez sur **Créer un agent avec**, ou créez un agent comme d'habitude en choisissant le runtime Qoder. Dans le formulaire de l'agent, sélectionnez l'agent distant sous **Agent QCA**. Pour un agent existant, modifiez l'agent QCA ou son dépôt par défaut dans l'onglet **Routage**. Plusieurs agents Multica peuvent partager une connexion, chacun lié à un agent QCA différent.
+Ouvrez Qoder Cloud Agents depuis la page Runtimes et cliquez sur **Créer un agent avec**, ou créez un agent comme d'habitude en choisissant le runtime Qoder. Dans le formulaire de l'agent, sélectionnez l'agent distant sous **Agent distant**. Pour un agent existant, modifiez l'agent Qoder Cloud Agents ou son dépôt par défaut dans l'onglet **Qoder Cloud Agents**. Plusieurs agents Multica peuvent partager une connexion, chacun lié à un agent Qoder Cloud Agents différent.
 
-Les identifiants de connexion sont chiffrés et partagés dans l'espace de travail. Les administrateurs gèrent la connexion ; les membres peuvent sélectionner les agents QCA accessibles. Les projets choisissent le dépôt et la branche de départ ; le jeton du dépôt est transmis à QCA à la création d'une session de code. Les PAT ne sont jamais renvoyés au navigateur après l'enregistrement.
+Les identifiants de connexion sont chiffrés et partagés dans l'espace de travail. Les administrateurs gèrent la connexion ; les membres peuvent sélectionner les agents Qoder Cloud Agents accessibles. Les projets choisissent le dépôt et la branche de départ ; le jeton du dépôt est transmis à Qoder Cloud Agents à la création d'une session de code. Les PAT ne sont jamais renvoyés au navigateur après l'enregistrement.
 
 Sur la page Qoder Cloud Agents, les administrateurs peuvent modifier la connexion et les dépôts, **Mettre en pause** pour ne plus envoyer de nouvelles tâches en conservant identifiants et agents, ou **Déconnecter** pour supprimer les jetons enregistrés, retirer le runtime et délier ses agents.
 
@@ -290,7 +296,7 @@ Sur la page Qoder Cloud Agents, les administrateurs peuvent modifier la connexio
 
 Au-delà de la limite de simultanéité, les exécutions attendent dans la file. Une relance sur le même ticket reprend la session Qoder précédente de l'agent si elle est inactive. Un agent peut définir un dépôt par défaut, utilisé quand le projet du ticket n'en a pas. L'agent est invité à pousser une branche nommée d'après l'identifiant du ticket et à préfixer le titre de la pull request avec cet identifiant, afin que la pull request soit liée au ticket.
 
-Cette première version prend en charge l'exécution des tickets, le suivi de progression, l'annulation et la reprise à partir d'un journal d'exécution persistant. Le chat interactif, les répertoires locaux, les pièces jointes et la création d'agents QCA distants depuis Multica ne sont pas pris en charge. La page Runtimes sépare les runtimes distants des ordinateurs connectés.
+Cette première version prend en charge l'exécution des tickets, le chat, le suivi de progression, l'annulation et la reprise à partir d'un journal d'exécution persistant. Les fichiers et images joints aux tickets et aux messages de chat sont transmis à la session, PDF et documents Office compris, jusqu'à 5 Mo par fichier ; les fichiers plus volumineux ne le sont pas, et l'agent est informé de leur existence. Les répertoires locaux et la création d'agents Qoder Cloud Agents distants depuis Multica ne sont pas pris en charge. La page Runtimes sépare les runtimes distants des ordinateurs connectés. Dans le chat, les fichiers que l’agent livre avec DeliverArtifacts, jusqu’à 10 Mo chacun, sont joints à sa réponse.
 
 Pour le déploiement du pont autonome et ses limites opérationnelles, consultez le [README du runtime Qoder](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md).
 

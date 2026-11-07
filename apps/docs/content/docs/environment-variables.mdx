@@ -123,6 +123,10 @@ For the exact allowlist evaluation order, see [Sign-in and signup](/auth-setup#s
 
 When `S3_BUCKET` is unset, Multica uses local disk.
 
+| Variable | Default | Description |
+|---|---|---|
+| `MULTICA_MAX_PREVIEW_SIZE` | `2MiB` | Maximum body size for online text/HTML previews, up to `16MiB`. Accepts positive integer bytes or `KB`/`KiB`, `MB`/`MiB` (binary units). Valid values above `16MiB` are clamped to `16MiB`; invalid values use the default. Larger limits can slow browser previews, especially syntax highlighting and Markdown rendering. Restart the API after changing it. Upload and download limits are unchanged. |
+
 ### S3 or compatible storage
 
 | Variable | Default | Description |
@@ -135,6 +139,8 @@ When `S3_BUCKET` is unset, Multica uses local disk.
 | `S3_USE_PATH_STYLE` | `true` with a custom endpoint | Whether to use path-style addressing |
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`, `cloudfront`, `presign`, or `proxy` |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | Lifetime of signed download URLs |
+
+When `AWS_ENDPOINT_URL` points to Google Cloud Storage, `Accept-Encoding` is automatically excluded from request signing.
 
 Use `ATTACHMENT_DOWNLOAD_MODE=proxy` when the endpoint — an internal MinIO, for example — is not reachable from the browser.
 
@@ -258,6 +264,12 @@ For the internal context that the daemon injects into agent tasks, see [Task run
 
 Precedence is command-line flag → environment variable → `~/.multica/config.json` → built-in default. For watchdog behavior, see [Daemon and runtimes](/daemon-runtimes).
 
+On Linux and macOS, Pi and omp cancellation gives the runtime two seconds to stop its tools before forced termination, with a ten-second cleanup budget. The daemon also retains identities of observed descendant processes, including detached tools. Windows uses the existing owned Job Object cleanup. The daemon releases output pipes and publishes the result after cleanup. Identity checks require Linux pidfds (kernel 5.3 or newer) or supported macOS kernel identity signalling. A failed final cleanup check or a surviving process produces `cleanup_unconfirmed`. Normal completion releases pipes and tracking handles without terminating background services on Linux and macOS; interruption, watchdog expiry, provider-error grace expiry, and a runtime exit with an unfinished tool use the joined cleanup path. Transient observation errors are logged and rechecked during cleanup.
+
+An unconfirmed cleanup blocks automatic retries and subsequent starts for the same agent on that runtime. Check for remaining background processes, then explicitly rerun the task; successful completion of that manual run releases the block. For tasks that negotiated `pi-process-cleanup-v1` when starting, the server waits for an explicit cleanup acknowledgement during user cancellation; a missing acknowledgement remains unconfirmed after 30 seconds. Older daemons do not negotiate this capability and retain their existing cancellation behavior without acquiring this new acknowledgement block. A newer daemon still performs local cleanup against an older server, which cannot enforce the continuation block. No coordinated rollout is required; other runtimes keep their existing cancellation behavior. No new environment variable is required, and watchdog thresholds retain their existing meaning.
+
+Descendant discovery is best effort: a process that forks and reparents between observations can escape discovery. It is not operating-system containment such as a Linux cgroup.
+
 ### Cleanup and retention [#gc]
 
 The daemon periodically cleans up run directories, repository caches, session records, and temporary directories; what is removed when is described in [Cleanup and retention](/daemon-runtimes#cleanup). Durations accept Go duration syntax plus `d` for days (for example `14d` or `1d12h`).
@@ -269,7 +281,7 @@ The daemon periodically cleans up run directories, repository caches, session re
 | `MULTICA_GC_TTL` | `24h` | How long after an issue enters the `done` or `closed` category, or a chat session is archived, its run directories are removed |
 | `MULTICA_GC_COMPLETED_TASK_TTL` | Multica Cloud `14d`; self-hosted `0` | How long after an issue run completes its whole directory is removed, whether or not the issue is closed; `0` turns this off. Does not apply to runs on a project's local directory |
 | `MULTICA_GC_ORPHAN_TTL` | `72h` | How long a directory with no owner found must go unchanged before it is removed |
-| `MULTICA_GC_ARTIFACT_TTL` | `12h` | How long after a run completes regenerable content is removed (the directories in the next row plus the cache the daemon prepares for Codex); `0` keeps it |
+| `MULTICA_GC_ARTIFACT_TTL` | `12h` | How long after a run ends before the daemon cleans regenerable content. The patterns in the next row apply to open issues and to unarchived chats with managed work directories. The same duration applies to the daemon-managed Codex cache. `0` keeps these caches |
 | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` | Directory names treated as regenerable, comma-separated. Setting it **replaces** the default list, so include the defaults if you still want them; entries containing `/` or `\` are ignored |
 | `MULTICA_GC_REPO_TTL` | `30d` | How long a bare repository cache that is no longer referenced and has no worktrees must go without a checkout before it is removed; `0` keeps it |
 | `MULTICA_GC_REPO_MAINTENANCE_ENABLED` | `true` | Whether to run `git reflog expire` and `git gc` on a repository cache after stale agent branches are removed; `false` turns off only this step |

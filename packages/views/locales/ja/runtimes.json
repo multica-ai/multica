@@ -1,9 +1,7 @@
 {
   "page": {
     "title": "ランタイム",
-    "learn_more": "詳しく見る →",
     "connect_remote": "マシンを追加",
-    "search_placeholder": "検索…",
     "scope_mine": "自分のもの",
     "scope_all": "すべて",
     "live": "ライブ",
@@ -25,7 +23,7 @@
       "title": "ローカルランタイムを起動中…",
       "hint": "ワークスペースに接続中..."
     },
-    "add": "追加",
+    "add": "ランタイムを追加",
     "add_menu": {
       "machines": "マシン",
       "this_computer": "このコンピューター",
@@ -67,7 +65,7 @@
       "no_matches": "一致するマシンやクラウドサービスはありません"
     },
     "filters": {
-      "all": "すべて",
+      "all": "すべてのランタイム",
       "online": "オンライン",
       "offline": "オフライン"
     }
@@ -93,7 +91,7 @@
     "this_machine": "このデバイス",
     "local_badge": "ローカル · このマシン",
     "pending_custom_runtimes": "登録待ちのカスタムランタイム",
-    "runtime_count_other": "ランタイム {{count}} 個",
+    "daemon_title": "デーモン",
     "busy_count_other": "使用中 {{count}} 個",
     "no_matches_title": "マシンなし",
     "no_matches_hint": "現在の検索またはフィルターに一致するマシンがありません。",
@@ -158,15 +156,16 @@
     "fact_owner": "所有者",
     "fact_device": "デバイス",
     "fact_runtime": "ランタイム",
-    "technical_details": "技術的な詳細",
     "fact_daemon_cli": "デーモン CLI",
     "fact_daemon_id": "デーモン ID",
-    "serving_title": "提供中",
-    "serving_count_other": "エージェント {{count}} 個",
+    "usage_title": "使用量",
     "no_agents": "まだこのランタイムに紐づいたエージェントがありません。",
-    "diagnostics_title": "診断",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "公開範囲",
+    "concurrency_title": "同時実行数",
+    "concurrency_none": "制限なし",
+    "concurrency_hint": "このランタイム上のすべてのエージェントで同時に行える実行の最大数（{{min}}–{{max}}）。空欄にすると制限なし。",
+    "toast_concurrency_failed": "同時実行数の上限を更新できませんでした",
     "visibility_label": {
       "private": "非公開",
       "public": "公開",
@@ -522,7 +521,7 @@
     "no_data": "まだ使用量データがありません"
   },
   "qoder": {
-    "title": "QCA runtime",
+    "title": "Qoder Cloud Agents runtime",
     "description": "Connect Qoder Cloud Agents. Multica manages execution and stores credentials encrypted. Workspace administrators can change this configuration.",
     "loading": "Loading…",
     "unavailable": "サーバーの設定が必要です：MULTICA_VCS_SECRET_KEY を設定してください。",
@@ -553,20 +552,20 @@
     "select_environment": "実行環境を選択",
     "no_environments": "利用可能な環境がありません。Qoder で作成して一覧を更新してください。",
     "refresh_catalog": "一覧を更新",
-    "agent": "QCA エージェント",
-    "select_agent": "QCA エージェントを選択",
-    "agent_hint": "リモートランタイムに保存された PAT で QCA エージェントを関連付けます。モデル、ツール、スキルは Qoder で管理します。",
-    "no_agents": "利用可能な QCA エージェントがありません。Qoder で作成して一覧を更新してください。",
-    "agent_unavailable": "関連付けた QCA エージェントは利用できません。別のエージェントを選択してください。",
+    "agent": "リモートエージェント",
+    "select_agent": "Qoder Cloud Agents からエージェントを選択",
+    "agent_hint": "保存済みの Qoder PAT でリモートエージェントを関連付けます。モデル、ツール、スキルは Qoder Cloud Agents で管理します。",
+    "no_agents": "利用可能なエージェントがありません。Qoder Cloud Agents でエージェントを作成して一覧を更新してください。",
+    "agent_unavailable": "関連付けたリモートエージェントは利用できません。別のエージェントを選択してください。",
     "save_agent": "関連付けを保存",
-    "agent_saved": "QCA エージェントの関連付けを保存しました",
-    "agent_save_failed": "QCA エージェントの関連付けを保存できませんでした",
+    "agent_saved": "Qoder Cloud Agents のエージェントとの関連付けを保存しました",
+    "agent_save_failed": "Qoder Cloud Agents のエージェントとの関連付けを保存できませんでした",
     "cloud_title": "Qoder Cloud Agents",
     "managed": "マネージドサービス",
     "cloud_description": "共有接続を使って Qoder クラウドでエージェントを実行します。ローカルホストの管理は不要です。",
     "configure_credentials": "認証情報を設定",
     "add_agent": "エージェントを追加",
-    "add_agent_description": "既存の QCA エージェントに関連付ける Multica エージェントを作成します。Qoder クラウドに設定した環境と認証情報を使用します。",
+    "add_agent_description": "既存の Qoder Cloud Agents エージェントに関連付ける Multica エージェントを作成します。Qoder クラウドに設定した環境と認証情報を使用します。",
     "agent_name": "エージェント名",
     "cancel": "キャンセル",
     "shared_credentials_hint": "認証情報はこのワークスペース内で共有します。PAT は暗号化して保存し、再表示しません。",
@@ -652,6 +651,30 @@
       "working": "解除しています…",
       "cancel": "キャンセル",
       "done": "Qoder の接続を解除しました"
+    }
+  },
+  "intro": {
+    "title": "エージェントに作業用のコンピューターを",
+    "description": "ランタイムは、エージェントが実際にタスクを実行する場所です。手元のコンピューター、サーバー、またはクラウドサービスを使えます。",
+    "slides": {
+      "local": {
+        "title": "このコンピューターは自動で接続",
+        "description": "デスクトップアプリをダウンロードしてサインインすると、このコンピューターの Claude Code や Codex などが自動的に表示されます。"
+      },
+      "remote": {
+        "title": "ほかのマシンはコマンド 2 つ",
+        "description": "サーバーや別のコンピューターに CLI をインストールし、multica setup を実行すれば接続できます。"
+      },
+      "cloud": {
+        "title": "クラウドノードも使える",
+        "description": "マシンを自分で管理したくないなら、Multica がホストするクラウドノードを作成できます。"
+      }
+    },
+    "art": {
+      "this_computer": "このコンピューター · デスクトップ",
+      "detected": "検出された harness",
+      "run_there": "そのマシンで実行",
+      "connected": "{{name}} が Multica に接続されました"
     }
   }
 }

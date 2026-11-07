@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
 
+import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { VirtuosoMockContext } from "react-virtuoso";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { api } from "@multica/core/api";
 import type { Agent, AgentActivityBucket, AgentTask } from "@multica/core/types";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -19,8 +22,9 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
-// History fixtures have no issue links, so they need no issue-detail requests.
-vi.mock("@multica/core/api", () => ({ api: {} }));
+vi.mock("@multica/core/api", () => ({ api: {
+  getIssue: vi.fn((id: string) => Promise.resolve({ id, title: `Issue ${id}`, identifier: id })),
+} }));
 
 // Keep transcript internals out of history pagination tests while exposing
 // the identity of each rendered task row.
@@ -56,7 +60,7 @@ vi.mock("@multica/core/agents", async (importOriginal) => {
   };
 });
 
-import { ActivityTab, AgentPerformanceSummary } from "./activity-tab";
+import { AgentPerformanceSummary, AgentWorkSections } from "./activity-tab";
 
 const baseAgent = {
   id: "agent-1",
@@ -65,7 +69,14 @@ const baseAgent = {
 
 const EMPTY_RECENT = "This agent hasn't completed anything yet.";
 
-function renderTab(performance = false) {
+function WorkSections({ onViewAll }: { onViewAll: () => void }) {
+  const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
+  return <div ref={setScrollParent} style={{ height: 1200, overflowY: "auto" }}>
+    <AgentWorkSections agent={baseAgent} onViewAll={onViewAll} scrollParent={scrollParent} />
+  </div>;
+}
+
+function renderTab(performance = false, onViewAll = vi.fn()) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -84,7 +95,9 @@ function renderTab(performance = false) {
         <QueryClientProvider client={queryClient}>
           <WorkspaceSlugProvider slug="acme">
             {performance && <AgentPerformanceSummary agent={baseAgent} />}
-            <ActivityTab agent={baseAgent} showPerformance={performance} />
+            <VirtuosoMockContext.Provider value={{ viewportHeight: 1600, itemHeight: 40 }}>
+              <WorkSections onViewAll={onViewAll} />
+            </VirtuosoMockContext.Provider>
           </WorkspaceSlugProvider>
         </QueryClientProvider>
       </NavigationProvider>
@@ -95,10 +108,11 @@ function renderTab(performance = false) {
 beforeEach(() => {
   agentTasksRef.current = () => new Promise<unknown>(() => {});
   activityRef.current = [];
+  vi.mocked(api.getIssue).mockClear();
 });
 
 describe("agent outcome presentation", () => {
-  it("uses completed and failed outcomes in both summaries and shows cancellations separately", () => {
+  it("uses completed and failed outcomes for success and shows cancellations separately", () => {
     activityRef.current = [{
       agent_id: "agent-1",
       bucket_at: new Date().toISOString(),
@@ -109,8 +123,7 @@ describe("agent outcome presentation", () => {
     }];
     renderTab(true);
     expect(screen.getByText("50%")).toBeInTheDocument();
-    expect(screen.getByText("50% success")).toBeInTheDocument();
-    expect(screen.getAllByText("8 cancelled")).toHaveLength(2);
+    expect(screen.getByText("8 cancelled")).toBeInTheDocument();
     expect(screen.queryByText("90%")).not.toBeInTheDocument();
   });
 
@@ -131,7 +144,7 @@ describe("agent outcome presentation", () => {
   });
 });
 
-describe("ActivityTab Recent work loading state", () => {
+describe("AgentWorkSections Recent work loading state", () => {
   it("shows a skeleton, not the empty state, while the task list is loading", () => {
     // Never-resolving queryFn keeps the per-agent task query pending, which is
     // exactly the first-paint window the skeleton is meant to cover.
@@ -153,7 +166,7 @@ describe("ActivityTab Recent work loading state", () => {
 });
 
 
-describe("ActivityTab server pagination", () => {
+describe("AgentWorkSections server pagination", () => {
   it("requests older history only on demand, disables duplicate fetches, and retries failures", async () => {
     let finish: (value: unknown) => void = () => {};
     const query = vi.fn()
@@ -203,7 +216,7 @@ function historyTask(index: number): AgentTask {
   };
 }
 
-describe("ActivityTab loaded history rows", () => {
+describe("AgentWorkSections loaded history rows", () => {
   it("reveals cached rows before requesting older history and deduplicates overlapping pages", async () => {
     const tasks = Array.from({ length: 31 }, (_, i) => historyTask(i));
     const query = vi.fn()
@@ -248,50 +261,73 @@ describe("ActivityTab loaded history rows", () => {
   });
 });
 
-// A loaded page is not the total history. Keep the denominator unknown until
-// the server reports that the last page has been reached.
-describe("ActivityTab history completeness", () => {
-  it.each([
-    { nextCursor: "older", subtitle: "10 latest runs" },
-    { nextCursor: null, subtitle: "10 of 200 runs" },
-  ])("shows '$subtitle' for a 200-row page with cursor $nextCursor", async ({ nextCursor, subtitle }) => {
+// The Recent work count is the 7-day run total from the activity window, not
+// the number of history rows loaded so far.
+describe("AgentWorkSections section counts", () => {
+  it("counts this week's runs from the activity window, whatever history has loaded", async () => {
+    activityRef.current = [
+      { agent_id: "agent-1", bucket_at: new Date().toISOString(), task_count: 38,
+        failed_count: 2, completed_count: 36, cancelled_count: 0 },
+      { agent_id: "agent-1", bucket_at: new Date(Date.now() - 20 * 86_400_000).toISOString(),
+        task_count: 90, failed_count: 0, completed_count: 90, cancelled_count: 0 },
+    ];
     agentTasksRef.current = () => Promise.resolve({
       tasks: Array.from({ length: 200 }, (_, i) => historyTask(i)),
-      nextCursor,
+      nextCursor: "older",
     });
     renderTab();
-    expect(await screen.findByText(subtitle)).toBeInTheDocument();
-    if (nextCursor) {
-      expect(screen.queryByText("10 of 200 runs")).not.toBeInTheDocument();
-    }
+    await screen.findByTestId("task-0");
+    expect(screen.getByText("38 this week")).toBeInTheDocument();
     expect(screen.getAllByTestId(/^task-/)).toHaveLength(10);
   });
 
-  it.each([
-    { nextCursor: "oldest", subtitle: "50 latest runs" },
-    { nextCursor: null, subtitle: "50 of 220 runs" },
-  ])("shows '$subtitle' after loading more history with cursor $nextCursor", async ({ nextCursor, subtitle }) => {
-    const query = vi.fn()
-      .mockResolvedValueOnce({
-        tasks: Array.from({ length: 20 }, (_, i) => historyTask(i)),
-        nextCursor: "older",
-      })
-      .mockResolvedValueOnce({
-        tasks: Array.from({ length: 200 }, (_, i) => historyTask(i + 20)),
-        nextCursor,
-      });
-    agentTasksRef.current = query;
+  it("shows no Now count and a quiet line while nothing is running", async () => {
+    agentTasksRef.current = () => Promise.resolve({ tasks: [], nextCursor: null });
     renderTab();
-    expect(await screen.findByText("10 latest runs")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Show more/ }));
-    expect(screen.getByText("20 latest runs")).toBeInTheDocument();
-    expect(query).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: /Show more/ }));
-    expect(await screen.findByText(subtitle)).toBeInTheDocument();
-    if (nextCursor) {
-      expect(screen.queryByText(/of 220 runs/)).not.toBeInTheDocument();
+    expect(
+      await screen.findByText("This agent isn't running anything right now."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^\d+ runs?$/)).not.toBeInTheDocument();
+  });
+
+  it("opens the full work list from View all", () => {
+    const onViewAll = vi.fn();
+    renderTab(false, onViewAll);
+    fireEvent.click(screen.getByRole("button", { name: "View all" }));
+    expect(onViewAll).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe("AgentWorkSections windowed history", () => {
+  it("bounds mounted rows after repeatedly revealing cached history", async () => {
+    agentTasksRef.current = () => Promise.resolve({
+      tasks: Array.from({ length: 210 }, (_, i) => historyTask(i)),
+      nextCursor: null,
+    });
+    renderTab();
+    await screen.findByTestId("task-0");
+    for (let i = 0; i < 10; i++) {
+      fireEvent.click(screen.getByRole("button", { name: /Show more/ }));
     }
-    expect(screen.getAllByTestId(/^task-/)).toHaveLength(50);
-    expect(query.mock.calls[1]?.[0]).toBe("older");
+    expect(screen.queryByRole("button", { name: /Show more/ })).not.toBeInTheDocument();
+    expect(screen.getAllByTestId(/^task-/).length).toBeLessThan(50);
+    expect(document.querySelector("[data-virtuoso-scroller]")).toBeInTheDocument();
+  });
+
+  it("resolves issues only for the mounted window, sharing duplicate issue lookups", async () => {
+    agentTasksRef.current = () => Promise.resolve({
+      tasks: Array.from({ length: 210 }, (_, i) => ({ ...historyTask(i), issue_id: `issue-${Math.floor(i / 2)}` })),
+      nextCursor: null,
+    });
+    renderTab();
+    await screen.findAllByText("Issue issue-0");
+    for (let i = 0; i < 10; i++) {
+      fireEvent.click(screen.getByRole("button", { name: /Show more/ }));
+    }
+    await screen.findAllByText("Issue issue-10");
+    expect(vi.mocked(api.getIssue).mock.calls.length).toBeLessThan(30);
+    expect(vi.mocked(api.getIssue).mock.calls.filter(([id]) => id === "issue-0")).toHaveLength(1);
+    expect(screen.queryByText("Issue issue-104")).not.toBeInTheDocument();
   });
 });

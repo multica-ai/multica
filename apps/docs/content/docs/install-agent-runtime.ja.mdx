@@ -90,6 +90,8 @@ Node.js 20+ をインストールして `npm install -g @deepseek-ai/dsh` を実
 
 **プロファイルのインストール。** `MULTICA_DSH_PROFILE_BUNDLE` にインストールするバンドルを設定すればデーモンが追加します。手動で行う場合は `dsh plugin --profile multica add <bundle>` を実行します。`<bundle>` は `dsh plugin` が受け付けるもの、つまり npm のパッケージ名、ディレクトリ、パック済み tarball のいずれかで、Multica 自身のブリッジは [multica-ai/dsh-multica-runtime](https://github.com/multica-ai/dsh-multica-runtime) にあります。これはまだ公開 npm レジストリに公開されていないため（[multica#6936](https://github.com/multica-ai/multica/issues/6936)）、現時点でセルフホストのチームはそのリポジトリからビルドし、変数をビルド出力のディレクトリに向けます。デーモンを動かすマシンとビルドしたマシンが別なら、`npm pack` が生成する tarball を指定してください。ブリッジが公開されれば、パッケージ名を指定するのが最も簡単になります。
 
+**既存プロファイルの移行。** プロファイルをバックアップし、ブリッジの README に従って DSH のバージョンに対応するバンドルをビルドしてください。そのディレクトリまたは tarball を手動でインストールし、`dsh.profile.bundles` が `@multica-ai/dsh-runtime` を読み込むようにします。`dsh-profile-multica` があれば置き換え、両方ある場合は `dsh-profile-multica` を削除してください。依存関係に記載するだけでは読み込まれません。`MULTICA_DSH_PROFILE_BUNDLE` は既存のブリッジ設定を移行しません。`dsh --profile multica --probe` で結果を確認してください。
+
 <Callout type="warning">
 自チームが公開・ビルドしたものを優先してください。この値は追加の確認なしに各デーモンホストの DSH ホームへインストールされるため、素性の分からないサードパーティのパッケージを指定することは、サプライチェーンに関わる判断になります。
 </Callout>

@@ -37,6 +37,8 @@
     --color-priority-high: var(--priority-high);
     --color-brand: var(--brand);
     --color-brand-foreground: var(--brand-foreground);
+    --color-multica-ink: var(--multica-ink);
+    --color-multica-paper: var(--multica-paper);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
     --color-faint-foreground: var(--faint-foreground);
@@ -93,10 +95,13 @@
     /* counters, badges, timestamps, overline labels */
     --text-micro: 11px;
     --text-micro--line-height: 15px;
-    /* secondary and helper text — was text-xs */
+    /* chips, shortcut hints, tooltips, helper text under a field, issue
+       identifiers — was text-xs. Not for text people read in place:
+       that is label. */
     --text-caption: 12px;
     --text-caption--line-height: 16px;
-    /* dense labels: table headers, metadata rows */
+    /* text read in place beside body copy: activity entries, comment
+       timestamps, property panel rows, table headers, metadata rows */
     --text-label: 13px;
     --text-label--line-height: 18px;
     /* UI body, the workhorse — was text-sm */
@@ -128,6 +133,11 @@
     --dialog-exit-duration: 100ms;
     --dialog-enter-easing: ease;
     --dialog-exit-easing: ease;
+    /* Nav panel collapse, shared by the space panel and list columns. The
+       first frame also pays for the toggle's render and the page relayout, so
+       the curve starts soft instead of jumping. */
+    --nav-panel-duration: 220ms;
+    --nav-panel-easing: ease;
 
     color-scheme: light;
     /* Button geometry. Text and icon-only buttons share the height ladder.
@@ -239,6 +249,11 @@
     --sidebar-ring: oklch(0.705 0.015 286.067);
     --brand: oklch(0.56079497 0.19449888 256.41258418);
     --brand-foreground: oklch(0.985 0 0);
+    /* The logo's only two colours (brand guidelines v3.1). Pure black and
+       white in both themes: the logo never takes a grey, a tint, or the UI
+       accent, so there is no dark-mode override for these. */
+    --multica-ink: #0b0b0c;
+    --multica-paper: #ffffff;
     --success: oklch(0.55 0.16 145);
     --warning: oklch(0.75 0.16 85);
     --info: oklch(0.55 0.18 250);

@@ -3,6 +3,7 @@ import { render, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { setApiInstance } from "@multica/core/api";
+import { ApiError } from "@multica/core/api/client";
 import type { ApiClient } from "@multica/core/api/client";
 import { NavigationProvider } from "../../navigation";
 import type { NavigationAdapter } from "../../navigation";
@@ -148,7 +149,7 @@ describe("IssueDetailRoute with an identifier that names no issue", () => {
     expect(vi.isMockFunction(IssueDetail)).toBe(false);
     replace.mockClear();
     push.mockClear();
-    const getIssue = vi.fn().mockRejectedValue(new Error("issue not found"));
+    const getIssue = vi.fn().mockRejectedValue(new ApiError("issue not found", 404, "Not Found"));
     setApiInstance({ getIssue } as unknown as ApiClient);
     const qc = new QueryClient({
       defaultOptions: { queries: { staleTime: Infinity, retry: false } },
