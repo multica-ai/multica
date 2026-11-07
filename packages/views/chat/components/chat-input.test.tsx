@@ -1,6 +1,7 @@
 import { cloneElement, forwardRef, useEffect, useRef, useImperativeHandle } from "react";
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import type { ReplyAnnotation } from "@multica/core/drafts/reply-annotation";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import type { DraftUpload } from "@multica/core/drafts";
@@ -226,6 +227,8 @@ vi.mock("@multica/core/chat", () => {
     selectedAgentId: "agent-1",
     inputDrafts: {} as Record<string, string>,
     inputDraftAttachments: {} as Record<string, unknown[]>,
+    inputDraftAnnotations: {} as Record<string, ReplyAnnotation[]>,
+    setInputDraftAnnotations: vi.fn(),
     setInputDraft: vi.fn(),
     appendToInputDraft: vi.fn(),
     setInputDraftAttachments: vi.fn(),

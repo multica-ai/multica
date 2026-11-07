@@ -110,7 +110,7 @@ describe("selection to reply", () => {
     renderWithI18n(<DescriptionFixture />);
     window.getSelection()?.removeAllRanges();
     fireEvent.click(screen.getByRole("button", { name: "Add to comment" }));
-    expect(toast.error).toHaveBeenCalledWith("Could not capture the selection. Select text within one comment or description and try again.");
+    expect(toast.error).toHaveBeenCalledWith("Could not capture the selection. Select text within one message, comment, or description and try again.");
     expect(useCommentDraftStore.getState().getAnnotations("new:issue")).toHaveLength(0);
   });
 

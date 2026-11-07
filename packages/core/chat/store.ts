@@ -10,6 +10,7 @@ import {
   type PendingDraftUpload,
 } from "../drafts/draft-upload";
 import { createLogger } from "../logger";
+import { normalizeReplyAnnotations, type ReplyAnnotation } from "../drafts/reply-annotation";
 
 const logger = createLogger("chat.store");
 
@@ -20,6 +21,7 @@ const SESSION_STORAGE_KEY = "multica:chat:activeSessionId";
 const DRAFTS_KEY = "multica:chat:drafts";
 /** Draft attachment records per workspace: { [sessionId]: Attachment[] }. */
 const DRAFT_ATTACHMENTS_KEY = "multica:chat:draft-attachments";
+const DRAFT_ANNOTATIONS_KEY = "multica:chat:draft-annotations";
 /**
  * Ids of durable draft restores (#5219) this client has already written into a
  * composer. Persisted, because the server-side consume that follows can be lost
@@ -129,6 +131,26 @@ function readDraftAttachments(storage: StorageAdapter, key: string): Record<stri
   } catch {
     return {};
   }
+}
+
+function readDraftAnnotations(storage: StorageAdapter, key: string): Record<string, ReplyAnnotation[]> {
+  const raw = storage.getItem(key);
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).flatMap(([draftKey, value]) => {
+      const annotations = normalizeReplyAnnotations(value);
+      return annotations.length ? [[draftKey, annotations]] : [];
+    }));
+  } catch {
+    return {};
+  }
+}
+
+function writeDraftAnnotations(storage: StorageAdapter, key: string, drafts: Record<string, ReplyAnnotation[]>) {
+  if (Object.keys(drafts).length) storage.setItem(key, JSON.stringify(drafts));
+  else storage.removeItem(key);
 }
 
 function readAppliedRestores(storage: StorageAdapter, key: string): string[] {
@@ -311,6 +333,7 @@ export interface ChatState {
   selectedProjectId: string | null;
   /** Drafts per session: sessionId (or DRAFT_NEW_SESSION) → markdown text. */
   inputDrafts: Record<string, string>;
+  inputDraftAnnotations: Record<string, ReplyAnnotation[]>;
   /** Attachment rows referenced by each input draft. */
   /** Coordinator-owned uploads per draft slot (placeholders + completed). */
   inputDraftAttachments: Record<string, DraftUpload[]>;
@@ -343,6 +366,7 @@ export interface ChatState {
   failInputDraftUpload: (sessionId: string, clientUploadId: string, error?: string) => void;
   /** Drop a placeholder (dismiss a failure / interrupted). */
   removeInputDraftUpload: (sessionId: string, clientUploadId: string) => void;
+  setInputDraftAnnotations: (sessionId: string, annotations: ReplyAnnotation[]) => void;
   clearInputDraft: (sessionId: string) => void;
   /** Record that a durable restore reached the composer; survives a reload. */
   markDraftRestoreApplied: (restoreId: string) => void;
@@ -395,6 +419,7 @@ export function createChatStore(options: ChatStoreOptions) {
     selectedAgentId: initialAgentId,
     selectedProjectId: storage.getItem(wsKey(PROJECT_STORAGE_KEY)),
     inputDrafts: initialDraftSlots.inputDrafts,
+    inputDraftAnnotations: readDraftAnnotations(storage, wsKey(DRAFT_ANNOTATIONS_KEY)),
     inputDraftAttachments: initialDraftSlots.inputDraftAttachments,
     appliedDraftRestoreIds: readAppliedRestores(storage, wsKey(APPLIED_RESTORES_KEY)),
     pendingSendRestores: readPendingSendRestores(storage, wsKey(PENDING_SEND_RESTORES_KEY)),
@@ -584,21 +609,33 @@ export function createChatStore(options: ChatStoreOptions) {
       writeDraftAttachments(storage, wsKey(DRAFT_ATTACHMENTS_KEY), next);
       set({ inputDraftAttachments: next });
     },
+    setInputDraftAnnotations: (sessionId, annotations) => {
+      const next = { ...get().inputDraftAnnotations };
+      const normalized = normalizeReplyAnnotations(annotations);
+      if (normalized.length) next[sessionId] = normalized;
+      else delete next[sessionId];
+      writeDraftAnnotations(storage, wsKey(DRAFT_ANNOTATIONS_KEY), next);
+      set({ inputDraftAnnotations: next });
+    },
     clearInputDraft: (sessionId) => {
       const currentDrafts = get().inputDrafts;
       const currentAttachments = get().inputDraftAttachments;
-      if (!(sessionId in currentDrafts) && !(sessionId in currentAttachments)) {
-        logger.debug("clearInputDraft skipped (no draft)", { sessionId });
+      const currentAnnotations = get().inputDraftAnnotations;
+      if (!(sessionId in currentDrafts) && !(sessionId in currentAttachments) && !(sessionId in currentAnnotations)) {
+        logger.debug("跳过清理：没有聊天草稿", { sessionId });
         return;
       }
-      logger.info("clearInputDraft", { sessionId });
+      logger.info("清理聊天草稿", { sessionId });
       const nextDrafts = { ...currentDrafts };
       const nextAttachments = { ...currentAttachments };
+      const nextAnnotations = { ...currentAnnotations };
       delete nextDrafts[sessionId];
       delete nextAttachments[sessionId];
+      delete nextAnnotations[sessionId];
       writeDrafts(storage, wsKey(DRAFTS_KEY), nextDrafts);
       writeDraftAttachments(storage, wsKey(DRAFT_ATTACHMENTS_KEY), nextAttachments);
-      set({ inputDrafts: nextDrafts, inputDraftAttachments: nextAttachments });
+      writeDraftAnnotations(storage, wsKey(DRAFT_ANNOTATIONS_KEY), nextAnnotations);
+      set({ inputDrafts: nextDrafts, inputDraftAttachments: nextAttachments, inputDraftAnnotations: nextAnnotations });
     },
     setChatSize: (w, h) => {
       logger.debug("setChatSize", { w, h });
@@ -630,6 +667,11 @@ export function createChatStore(options: ChatStoreOptions) {
     storageKey: DRAFTS_KEY,
     workspaceScoped: true,
     resetInMemory: () => store.setState({ inputDrafts: {} }),
+  });
+  registerDraftCleanup({
+    storageKey: DRAFT_ANNOTATIONS_KEY,
+    workspaceScoped: true,
+    resetInMemory: () => store.setState({ inputDraftAnnotations: {} }),
   });
   registerDraftCleanup({
     storageKey: DRAFT_ATTACHMENTS_KEY,
@@ -674,6 +716,7 @@ export function createChatStore(options: ChatStoreOptions) {
       activeSessionId: nextSession,
       selectedAgentId: nextAgent,
       selectedProjectId: nextProject,
+      inputDraftAnnotations: readDraftAnnotations(storage, wsKey(DRAFT_ANNOTATIONS_KEY)),
       inputDrafts: nextDrafts,
       inputDraftAttachments: nextDraftAttachments,
       appliedDraftRestoreIds: readAppliedRestores(storage, wsKey(APPLIED_RESTORES_KEY)),

@@ -128,6 +128,8 @@ export function resetRevealedLists(): void {
 export interface StickToBottom {
   /** For `followOutput`: the reader is still following the live end. */
   isFollowing(): boolean;
+  /** 主动跳转到批注原文时停止自动跟随最新消息。 */
+  disengage(): void;
   /** Wire to Virtuoso's `totalListHeightChanged`: the content resized. */
   onContentHeightChanged(): void;
   /**
@@ -353,6 +355,7 @@ export function useStickToBottom(
   return useMemo(
     () => ({
       isFollowing: () => follow.isFollowing(),
+      disengage: () => follow.disengage(),
       onContentHeightChanged: onResize,
       hasReachedLiveEnd,
     }),

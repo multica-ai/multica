@@ -70,6 +70,7 @@ import { useChatDraftRestore } from "./use-chat-draft-restore";
 import { useChatTaskActions } from "./use-chat-task-actions";
 import { useChatInputFocus } from "./use-chat-input-focus";
 import { useChatOpenReveal } from "./use-chat-open-reveal";
+import type { ChatMessageListRef } from "./chat-message-list";
 import { ChatWindowMessages } from "./chat-window-messages";
 import { ChatInput } from "./chat-input";
 import { ChatQueue } from "./chat-queue";
@@ -97,6 +98,7 @@ const apiLogger = createLogger("chat.api");
 
 
 export function ChatWindow() {
+  const messageListRef = useRef<ChatMessageListRef>(null);
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
   const isOpen = useChatStore((s) => s.isOpen);
@@ -891,6 +893,8 @@ export function ChatWindow() {
       <AnimatePresence initial={false}>
         {isOpen && (
           <ChatWindowMessages
+            ref={messageListRef}
+            annotationDraftKey={activeSessionId ?? undefined}
             sessionId={activeSessionId}
             pendingTask={pendingTask}
             pendingTaskLoading={pendingTaskLoading}
@@ -955,6 +959,7 @@ export function ChatWindow() {
        *  agent has been archived (read-only); locked out entirely when there's
        *  no agent (the EmptyState above carries the CTA). */}
       <ChatInput
+        onEditAnnotation={(id) => messageListRef.current?.editAnnotation(id) ?? false}
         onSend={handleSend}
         restoreDraftRequest={restoreDraftRequest}
         conversationStarterRequest={conversationStarterRequest}

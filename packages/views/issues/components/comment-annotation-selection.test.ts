@@ -1,5 +1,6 @@
+import { indexRenderedText } from "../../common/text-selection";
 import { describe, expect, it } from "vitest";
-import { annotationRange, captureCommentSelection, indexCommentText } from "./comment-annotation-selection";
+import { annotationRange, captureCommentSelection } from "./comment-annotation-selection";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 
@@ -51,7 +52,7 @@ describe("comment annotation selection", () => {
     const last = root.querySelector("code")!.firstChild!;
     const captured = captureCommentSelection(card, select(first, 0, last, 7))!;
     expect(captured.quote).toBe("world\none\ntwo");
-    expect(indexCommentText(root).text).toBe("Hello world\none\ntwo\nLast\n");
+    expect(indexRenderedText(root).text).toBe("Hello world\none\ntwo\nLast\n");
     const range = annotationRange(root, { ...captured, id: "a", sourceActorName: "Agent", note: "" })!;
     expect(range.startContainer).toBe(first);
     expect(range.endContainer).toBe(last);

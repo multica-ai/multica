@@ -1,3 +1,4 @@
+import { createChatStore, registerChatStore } from "@multica/core/chat";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -894,3 +895,8 @@ describe("ChatMessageList auto-scroll", () => {
     expect(observedTargets()).toHaveLength(0);
   });
 });
+
+// Chat selection annotations use the same app-owned store as the composer.
+beforeEach(() => registerChatStore(createChatStore({ storage: {
+  getItem: () => null, setItem: () => {}, removeItem: () => {},
+} })));

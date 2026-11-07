@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, type Ref, type ReactNode } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { motion, useIsPresent } from "motion/react";
 import type { AgentAvailability } from "@multica/core/agents";
@@ -8,12 +8,14 @@ import type { ChatPendingTask, ChatQuickAction } from "@multica/core/types";
 import { chatMessagesPageOptions } from "@multica/core/chat/queries";
 import { hideQueuedChatMessages } from "@multica/core/chat/pending";
 import { useRegenerateChatQuickActions } from "@multica/core/chat/mutations";
-import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
+import { ChatMessageList, ChatMessageSkeleton, type ChatMessageListRef } from "./chat-message-list";
 
 const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
 
 /** Message-only observers leave with the fading list; the composer stays alive. */
 export function ChatWindowMessages({
+  ref,
+  annotationDraftKey,
   sessionId,
   pendingTask,
   pendingTaskLoading,
@@ -24,6 +26,8 @@ export function ChatWindowMessages({
   onReady,
   children,
 }: {
+  ref?: Ref<ChatMessageListRef>;
+  annotationDraftKey?: string;
   sessionId: string | null;
   pendingTask: ChatPendingTask | null | undefined;
   pendingTaskLoading: boolean;
@@ -75,6 +79,8 @@ export function ChatWindowMessages({
         <ChatMessageSkeleton />
       ) : showList ? (
         <ChatMessageList
+          ref={ref}
+          annotationDraftKey={annotationDraftKey}
           key={sessionId}
           active={isPresent}
           revealKey={sessionId}
