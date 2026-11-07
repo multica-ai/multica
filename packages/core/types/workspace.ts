@@ -86,6 +86,12 @@ export interface User {
   whats_new_seen_version?: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * True when the user has a verified TOTP secret (totp_enabled_at IS NOT NULL
+   * on the server). Optional so that older server versions that don't return
+   * the field don't break the schema — treat undefined as false.
+   */
+  totp_enabled?: boolean;
 }
 
 export interface MemberWithUser {
@@ -97,6 +103,12 @@ export interface MemberWithUser {
   name: string;
   email: string;
   avatar_url: string | null;
+  /**
+   * True when the member's user account has a verified TOTP secret.
+   * Optional for backward compat — older server builds that don't return
+   * this field default to false (no TOTP reset action shown).
+   */
+  totp_enabled?: boolean;
 }
 
 export interface Invitation {

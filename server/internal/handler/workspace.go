@@ -574,6 +574,7 @@ type MemberWithUserResponse struct {
 	Name        string  `json:"name"`
 	Email       string  `json:"email"`
 	AvatarURL   *string `json:"avatar_url"`
+	TotpEnabled bool    `json:"totp_enabled"`
 }
 
 func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
@@ -600,6 +601,7 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 			Name:        m.UserName,
 			Email:       m.UserEmail,
 			AvatarURL:   h.resolveAvatarURLPtr(textToPtr(m.UserAvatarUrl)),
+			TotpEnabled: m.UserTotpEnabled,
 		}
 	}
 
@@ -621,6 +623,7 @@ func (h *Handler) memberWithUserResponse(member db.Member, user db.User) MemberW
 		Name:        user.Name,
 		Email:       user.Email,
 		AvatarURL:   h.resolveAvatarURLPtr(textToPtr(user.AvatarUrl)),
+		TotpEnabled: user.TotpEnabledAt.Valid,
 	}
 }
 

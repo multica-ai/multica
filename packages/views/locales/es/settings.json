@@ -381,6 +381,7 @@
       "issue": "Tarea",
       "notifications": "Notificaciones",
       "tokens": "Tokens de API",
+      "security": "Seguridad",
       "general": "General",
       "github": "GitHub",
       "labs": "Labs",
@@ -675,6 +676,33 @@
       "granted": "Este navegador puede mostrar avisos de notificación.",
       "denied": "Bloqueado por tu navegador. Activa las notificaciones para este sitio en la configuración del navegador.",
       "enabled_badge": "Activado"
+    }
+  },
+  "security": {
+    "title": "Seguridad",
+    "description": "Gestiona la configuración de seguridad de tu cuenta.",
+    "two_factor": {
+      "label": "Inicio de sesión con app de autenticación",
+      "hint_unavailable": "El inicio de sesión con app de autenticación no está disponible en este servidor.",
+      "hint_enabled": "Puedes iniciar sesión con códigos de tu app de autenticación.",
+      "hint_disabled": "Configura una app de autenticación como alternativa a los códigos por correo.",
+      "unavailable_badge": "No disponible",
+      "setup_button": "Configurar",
+      "disable_button": "Desactivar",
+      "setup_title": "Configurar el inicio de sesión con app de autenticación",
+      "setup_scan_qr": "Escanea este código QR con tu app de autenticación (Google Authenticator, Authy, 1Password, etc.).",
+      "setup_manual": "O introduce esta clave manualmente:",
+      "setup_next": "Siguiente: introducir código",
+      "setup_verify": "Introduce el código de 6 dígitos de tu app de autenticación para confirmar la configuración.",
+      "setup_success": "Inicio de sesión con app de autenticación activado.",
+      "setup_invalid": "Código no válido. Inténtalo de nuevo.",
+      "setup_init_error": "No se ha podido iniciar la configuración de TOTP. Inténtalo de nuevo.",
+      "disable_title": "Desactivar el inicio de sesión con app de autenticación",
+      "disable_prompt": "Introduce el código de 6 dígitos de tu app de autenticación para desactivar este método de inicio de sesión.",
+      "disable_success": "Inicio de sesión con app de autenticación desactivado.",
+      "disable_invalid": "Código no válido. Inténtalo de nuevo.",
+      "disable_locked": "Demasiados códigos no válidos. Espera 15 minutos y vuelve a intentarlo.",
+      "confirm": "Confirmar"
     }
   },
   "tokens": {
@@ -1379,6 +1407,15 @@
         "label": "Miembro",
         "description": "Crea tareas y trabaja en ellas"
       }
+    },
+    "totp_reset": {
+      "menu_item": "Restablecer autenticador",
+      "confirm_title": "¿Restablecer el autenticador de {{name}}?",
+      "confirm_description": "Esto desactiva el inicio de sesión con autenticador de {{name}} en toda su cuenta de Multica, no solo en este espacio de trabajo. Tendrá que volver a configurarlo en Ajustes → Seguridad para iniciar sesión con un código del autenticador. Mientras tanto, puede seguir iniciando sesión con un código por correo.",
+      "cancel": "Cancelar",
+      "confirm": "Restablecer autenticador",
+      "success": "Autenticador restablecido para {{name}}",
+      "error": "No se ha podido restablecer el autenticador"
     },
     "share_links_create_title": "Crear enlace de invitación",
     "share_links_create_button": "Generar",

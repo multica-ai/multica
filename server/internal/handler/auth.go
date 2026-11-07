@@ -79,6 +79,10 @@ type UserResponse struct {
 	WhatsNewSeenVersion *string `json:"whats_new_seen_version"`
 	CreatedAt           string  `json:"created_at"`
 	UpdatedAt           string  `json:"updated_at"`
+	// TotpEnabled is true when the user has a verified TOTP secret
+	// (totp_enabled_at IS NOT NULL). Additive field — old clients that
+	// don't know about it will simply ignore it.
+	TotpEnabled bool `json:"totp_enabled"`
 }
 
 // MaxProfileDescriptionLen caps the user-supplied profile_description body.
@@ -108,6 +112,7 @@ func (h *Handler) userToResponse(u db.User) UserResponse {
 		WhatsNewSeenVersion:     textToPtr(u.WhatsNewSeenVersion),
 		CreatedAt:               timestampToString(u.CreatedAt),
 		UpdatedAt:               timestampToString(u.UpdatedAt),
+		TotpEnabled:             u.TotpEnabledAt.Valid,
 	}
 }
 
