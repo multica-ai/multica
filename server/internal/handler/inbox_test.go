@@ -354,3 +354,64 @@ func truncateForLog(s string) string {
 	}
 	return s
 }
+
+// A notification's `title` is written once, when the notification is created.
+// Renaming the issue afterwards must still show the new name in every inbox
+// list (main, legacy archived, paged archived) without waiting for a new
+// notification to be raised.
+func TestInboxListsProjectCurrentIssueTitle(t *testing.T) {
+	workspaceID := dbfx.Workspace(t, "Inbox title projection", "inbox-title-"+uuid.NewString())
+	dbfx.Member(t, workspaceID, testUserID, "owner")
+	activeIssueID := dbfx.Issue(t, "Renamed active issue", testutil.Cols{"workspace_id": workspaceID})
+	archivedIssueID := dbfx.Issue(t, "Renamed archived issue", testutil.Cols{"workspace_id": workspaceID})
+	for _, row := range []struct {
+		issueID  string
+		archived bool
+	}{{activeIssueID, false}, {archivedIssueID, true}} {
+		dbfx.Insert(t, "inbox_item", testutil.Cols{
+			"workspace_id":   workspaceID,
+			"recipient_type": "member",
+			"recipient_id":   testUserID,
+			"type":           "new_comment",
+			"severity":       "info",
+			"issue_id":       row.issueID,
+			"title":          "Title before rename",
+			"archived":       row.archived,
+		})
+	}
+
+	wantCurrent := func(label string, items []InboxItemResponse, issueID, want string) {
+		t.Helper()
+		for _, item := range items {
+			if item.IssueID == nil || *item.IssueID != issueID {
+				continue
+			}
+			if item.Title != "Title before rename" {
+				t.Errorf("%s: title = %q, want the stored snapshot kept", label, item.Title)
+			}
+			if item.IssueTitle == nil || *item.IssueTitle != want {
+				t.Errorf("%s: issue_title = %v, want %q", label, item.IssueTitle, want)
+			}
+			return
+		}
+		t.Fatalf("%s: no row for issue %s in %+v", label, issueID, items)
+	}
+
+	var active []InboxItemResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListInbox),
+		inboxRequest(http.MethodGet, "/api/inbox", workspaceID)).
+		Want(http.StatusOK).JSON(&active)
+	wantCurrent("main list", active, activeIssueID, "Renamed active issue")
+
+	var archived []InboxItemResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListArchivedInbox),
+		inboxRequest(http.MethodGet, "/api/inbox/archived", workspaceID)).
+		Want(http.StatusOK).JSON(&archived)
+	wantCurrent("archived list", archived, archivedIssueID, "Renamed archived issue")
+
+	var page archivedInboxPageResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListArchivedInboxPage),
+		inboxRequest(http.MethodGet, "/api/inbox/archived/page", workspaceID)).
+		Want(http.StatusOK).JSON(&page)
+	wantCurrent("archived page", page.Items, archivedIssueID, "Renamed archived issue")
+}

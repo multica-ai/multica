@@ -532,12 +532,12 @@ export function applyIssueChange(
     if (!prevIssue) prevIssue = prevDetail;
   }
 
-  // Inbox rows carry issue status/priority snapshots used by presentation and
-  // filtering. The issue is the real state, so both projections follow every
+  // Inbox rows carry issue status/priority/title snapshots used by presentation
+  // and filtering. The issue is the real state, so both projections follow every
   // write immediately.
   let prevInboxList: InboxItem[] | undefined;
   let prevArchivedInboxCaches: [QueryKey, ArchivedInboxCache | undefined][] | undefined;
-  if (patch.status !== undefined || patch.priority !== undefined) {
+  if (patch.status !== undefined || patch.priority !== undefined || patch.title !== undefined) {
     prevInboxList = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
     prevArchivedInboxCaches = qc.getQueriesData<ArchivedInboxCache>({ queryKey: inboxKeys.archived(wsId) });
     // Membership and facets are server-owned; callers refresh after commit.
@@ -554,6 +554,7 @@ export function applyIssueChange(
     patchInboxIssueProjection(qc, wsId, id, {
       status: patch.status,
       priority: patch.priority,
+      title: patch.title,
     });
   }
 

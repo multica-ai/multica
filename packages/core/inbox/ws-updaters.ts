@@ -70,7 +70,7 @@ export function patchInboxIssueProjection(
   qc: QueryClient,
   wsId: string,
   issueId: string,
-  patch: { status?: IssueStatus; priority?: IssuePriority },
+  patch: { status?: IssueStatus; priority?: IssuePriority; title?: string },
 ) {
   const project = (old: InboxItem[]) => {
     let changed = false;
@@ -88,6 +88,7 @@ export function patchInboxIssueProjection(
         ...(patch.priority !== undefined && item.issue_priority !== undefined
           ? { issue_priority: patch.priority }
           : {}),
+        ...(patch.title !== undefined ? { issue_title: patch.title } : {}),
       };
     });
     return changed ? next : old;

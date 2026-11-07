@@ -63,6 +63,12 @@ export interface InboxItem {
    * projection; null also covers notifications without a linked issue.
    */
   issue_priority?: IssuePriority | null;
+  /**
+   * Current title of the linked issue. `title` is a snapshot taken when the
+   * notification was written and goes stale once the issue is renamed.
+   * Optional for the same older-backend reason as `issue_priority`.
+   */
+  issue_title?: string | null;
   read: boolean;
   archived: boolean;
   created_at: string;

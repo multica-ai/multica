@@ -125,12 +125,12 @@ WITH newest AS MATERIALIZED (
       ))
     ORDER BY COALESCE(i.issue_id, i.id), i.created_at DESC, i.id DESC
 ), projected AS (
-    SELECT newest.id, newest.issue_id, newest.created_at, newest.read, newest.actor, iss.status AS issue_status, iss.priority AS issue_priority
+    SELECT newest.id, newest.issue_id, newest.created_at, newest.read, newest.actor, iss.status AS issue_status, iss.priority AS issue_priority, iss.title AS issue_title
     FROM newest
     LEFT JOIN issue iss ON iss.id = newest.issue_id
       AND iss.workspace_id = $1::uuid
 ), matched AS (
-    SELECT projected.id, projected.issue_id, projected.created_at, projected.read, projected.actor, projected.issue_status, projected.issue_priority,
+    SELECT projected.id, projected.issue_id, projected.created_at, projected.read, projected.actor, projected.issue_status, projected.issue_priority, projected.issue_title,
            (cardinality($4::text[]) = 0 OR issue_status = ANY($4::text[])) AS status_match,
            (cardinality($5::text[]) = 0 OR issue_priority = ANY($5::text[])) AS priority_match,
            (cardinality($6::text[]) = 0 OR actor = ANY($6::text[])) AS actor_match,
@@ -138,14 +138,14 @@ WITH newest AS MATERIALIZED (
     FROM projected
 )
 , selected AS (
-    SELECT id, issue_id, created_at, read, actor, issue_status, issue_priority, status_match, priority_match, actor_match, read_match FROM matched
+    SELECT id, issue_id, created_at, read, actor, issue_status, issue_priority, issue_title, status_match, priority_match, actor_match, read_match FROM matched
     WHERE status_match AND priority_match AND actor_match AND read_match
       AND ($8::timestamptz IS NULL OR
            (created_at, id) < ($8::timestamptz, $9::uuid))
     ORDER BY created_at DESC, id DESC
     LIMIT $10::int
 )
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, selected.issue_status, selected.issue_priority,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, selected.issue_status, selected.issue_priority, selected.issue_title,
        COALESCE(anchor.comment_id, '')::text AS comment_id
 FROM selected
 JOIN inbox_item i ON i.id = selected.id
@@ -178,6 +178,7 @@ type ListArchivedInboxPageRow struct {
 	InboxItem     InboxItem   `json:"inbox_item"`
 	IssueStatus   pgtype.Text `json:"issue_status"`
 	IssuePriority pgtype.Text `json:"issue_priority"`
+	IssueTitle    pgtype.Text `json:"issue_title"`
 	CommentID     string      `json:"comment_id"`
 }
 
@@ -221,6 +222,7 @@ func (q *Queries) ListArchivedInboxPage(ctx context.Context, arg ListArchivedInb
 			&i.InboxItem.Section,
 			&i.IssueStatus,
 			&i.IssuePriority,
+			&i.IssueTitle,
 			&i.CommentID,
 		); err != nil {
 			return nil, err
