@@ -331,6 +331,7 @@ func rowFingerprint(row db.ChannelInstallation) string {
 		var fields map[string]json.RawMessage
 		if json.Unmarshal(config, &fields) == nil {
 			delete(fields, "first_message_received_at")
+			delete(fields, "last_send_observation")
 			config, _ = json.Marshal(fields)
 		}
 	}

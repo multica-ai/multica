@@ -97,6 +97,7 @@ vi.mock("../../common/actor-avatar", () => ({
 }));
 
 vi.mock("@multica/core/lark", () => ({
+  larkSendObservationOptions: () => ({ queryKey: ["send-observation"], queryFn: vi.fn() }),
   larkInstallationsOptions: () => ({
     queryKey: ["lark", "installations"],
     queryFn: vi.fn(),
@@ -730,6 +731,13 @@ describe("LarkInstallDialog (polling terminal errors)", () => {
 // rendering so the row never regresses to leaking the cli_ prefix.
 describe("LarkTab connected bots list (agent identity rendering)", () => {
   beforeEach(resetFixtures);
+
+  it.each(["owner", "admin", "member", "guest"] as const)("limits the send-observation entry to managers: %s", (role) => {
+    membersRef.current = [{ user_id: "user-1", role }];
+    installationsRef.current.installations = [{ id: "inst", agent_id: "agent", status: "active", installed_at: "2026-11-02T00:00:00Z" }];
+    render(<LarkTab />, { wrapper: I18nWrapper });
+    expect(!!screen.queryByText("Last text/card send observation")).toBe(role === "owner" || role === "admin");
+  });
 
   it("renders the Multica agent's name and avatar instead of the raw Lark app_id / bot_open_id", () => {
     agentNameByIdRef.current = new Map([["agent-1", "Bohan's Helper"]]);

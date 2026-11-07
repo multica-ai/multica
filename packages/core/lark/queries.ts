@@ -7,7 +7,18 @@ import { api } from "../api";
 export const larkKeys = {
   all: (wsId: string) => ["lark", wsId] as const,
   installations: (wsId: string) => [...larkKeys.all(wsId), "installations"] as const,
+  sendObservation: (wsId: string, id: string, revision: string) => [...larkKeys.all(wsId), "send-observation", id, revision] as const,
 };
+
+export const larkSendObservationOptions = (wsId: string, id: string, revision = "") =>
+  queryOptions({
+    // Installation updates include rebinds. Do not reuse the previous
+    // binding's cached evidence while the new request is pending.
+    queryKey: larkKeys.sendObservation(wsId, id, revision),
+    queryFn: () => api.getLarkSendObservation(wsId, id),
+    retry: false,
+    staleTime: 0,
+  });
 
 export const larkInstallationsOptions = (wsId: string) =>
   queryOptions({

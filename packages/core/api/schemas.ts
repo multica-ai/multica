@@ -4057,6 +4057,14 @@ export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsRespon
   configured: false,
 };
 
+export const LarkSendObservationResponseSchema = z.object({
+  observation: z.object({
+    observed_at: z.iso.datetime({ offset: true }),
+    result: z.enum(["api_confirmed", "rejected", "uncertain"]).catch("uncertain"),
+    reason: z.enum(["none", "bot_not_in_chat", "bot_disabled", "app_unavailable", "missing_permission", "chat_permission", "unconfirmed"]).catch("unconfirmed"),
+  }).nullable(),
+}).transform((data) => ({ ...data, available: true }));
+
 // Only `pinned_at` is new here; every other field keeps its pre-schema
 // leniency so one odd workspace can never empty the whole switcher.
 export const WorkspaceListItemSchema = z.object({
