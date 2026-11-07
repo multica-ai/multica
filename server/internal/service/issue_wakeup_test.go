@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -343,5 +344,50 @@ func TestIssueWakeupConcurrentDispatchIsIdempotent(t *testing.T) {
 	}
 	if n := f.Count(t, "SELECT count(*) FROM agent_task_queue WHERE context->>'wakeup_id'=$1", util.UUIDToString(w.ID)); n != 1 {
 		t.Fatalf("created %d runs", n)
+	}
+}
+
+// A retry inherits the parent's wakeup_id/wakeup_revision, but ClaimAgentTask
+// only claims a wakeup task while its rule is still enabled at the recorded
+// revision, and ExpireStaleQueuedTasks skips rows with a wakeup_id — so a
+// retry created after the rule was disabled or edited would sit queued
+// forever (#9017). CreateRetryTask guards the insert with the same rule
+// condition claim time enforces: a doomed retry writes zero rows, callers
+// already treat that as "no retry was created".
+func TestIssueWakeupRetryOfDisabledOrEditedRuleIsNotCreated(t *testing.T) {
+	cases := map[string]func(f *testutil.Fixture, id pgtype.UUID){
+		"disabled rule": func(f *testutil.Fixture, id pgtype.UUID) {
+			f.Exec(t, "UPDATE issue_wakeup SET disabled_at=now() WHERE id=$1", id)
+		},
+		"edited rule": func(f *testutil.Fixture, id pgtype.UUID) {
+			f.Exec(t, "UPDATE issue_wakeup SET revision=revision+1 WHERE id=$1", id)
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			f, s, issue, agent := wakeFixture(t)
+			ctx := context.Background()
+			parent := f.Comment(t, util.UUIDToString(issue), "original request")
+			w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "at", AfterSeconds: 1, ParentCommentID: parent, Instruction: "doomed retry"})
+			f.Exec(t, "UPDATE issue_wakeup SET next_fire_at=now()-interval '1 second' WHERE id=$1", w.ID)
+			wakeDispatch(t, s, w)
+			got, err := f.q.GetIssueWakeup(ctx, db.GetIssueWakeupParams{ID: w.ID, WorkspaceID: w.WorkspaceID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			task, err := f.q.GetAgentTask(ctx, got.LastTaskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// 失败才走 retry 路径：parent 必须先落 failed，否则它仍占着
+			// (issue_id, agent_id) 的 queued/dispatched 部分唯一索引，retry
+			// 会撞 ON CONFLICT DO NOTHING 得到 ErrNoRows——那是槽位冲突的
+			// ErrNoRows，不是守卫的（M4 假绿教训）。
+			f.Exec(t, "UPDATE agent_task_queue SET status='failed',completed_at=now() WHERE id=$1", task.ID)
+			mutate(f.Fixture, w.ID)
+			if _, err := f.q.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: task.ID}); !errors.Is(err, pgx.ErrNoRows) {
+				t.Fatalf("retry of a rule that can never be claimed again: want pgx.ErrNoRows, got %v", err)
+			}
+		})
 	}
 }
