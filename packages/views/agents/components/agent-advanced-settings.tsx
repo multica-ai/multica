@@ -11,6 +11,7 @@ import { larkInstallationsOptions } from "@multica/core/lark";
 import { slackInstallationsOptions } from "@multica/core/slack";
 import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
 import { wecomInstallationsOptions } from "@multica/core/wecom";
+import { weixinInstallationsOptions } from "@multica/core/weixin";
 import { telegramInstallationsOptions } from "@multica/core/telegram";
 import {
   AlertDialog,
@@ -151,7 +152,10 @@ export function AgentAdvancedSettings({
     enabled: !!wsId,
   });
 
+  const { data: weixinListing } = useQuery(weixinInstallationsOptions(wsId));
+
   const integrationsConfigured =
+    weixinListing?.configured === true ||
     larkListing?.configured === true ||
     slackListing?.configured === true ||
     dingtalkListing?.configured === true ||

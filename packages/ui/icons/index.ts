@@ -290,6 +290,7 @@ export const UserPlus = /* @__PURE__ */ createIcon("UserPlus", glyph.UserPlus);
 export const UserRound = /* @__PURE__ */ createIcon("UserRound", glyph.UserRound);
 export const Users = /* @__PURE__ */ createIcon("Users", glyph.Users);
 export const Waves = /* @__PURE__ */ createIcon("Waves", glyph.Waves);
+export const WeChat = /* @__PURE__ */ createIcon("WeChat", glyph.WeChat);
 export const Webhook = /* @__PURE__ */ createIcon("Webhook", glyph.Webhook);
 export const Wifi = /* @__PURE__ */ createIcon("Wifi", glyph.Wifi);
 export const WifiHigh = /* @__PURE__ */ createIcon("WifiHigh", glyph.WifiHigh);

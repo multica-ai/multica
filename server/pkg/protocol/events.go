@@ -233,6 +233,8 @@ const (
 
 	// Telegram installation lifecycle. Same contract as the Slack pair:
 	// front-ends invalidate the Telegram installations query on either.
+	EventWeixinInstallationCreated   = "weixin_installation:created"
+	EventWeixinInstallationRevoked   = "weixin_installation:revoked"
 	EventTelegramInstallationCreated = "telegram_installation:created"
 	EventTelegramInstallationRevoked = "telegram_installation:revoked"
 )

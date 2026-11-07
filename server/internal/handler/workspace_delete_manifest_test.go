@@ -147,6 +147,8 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"verification_code":                  workspaceDeleteKeep,
 	"webhook_delivery":                   workspaceDelete,
 	"wecom_install_session":              workspaceDelete,
+	"weixin_login_session":               workspaceDelete,
+	"weixin_account_state":               workspaceDelete,
 	"workspace":                          workspaceDelete,
 	"workspace_invitation":               workspaceDelete,
 	"workspace_share_link":               workspaceDelete,
