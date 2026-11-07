@@ -353,6 +353,14 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discoverZcodeModels(ctx, runtimeCmd)
 		})
+	case "pai":
+		// P-ai is ACP-native (`p-ai acp`); its model catalog is the set of
+		// LLM provider endpoints the user configured inside P-ai, advertised
+		// by session/new under models.availableModels. On any failure fall
+		// back to an empty catalog so the UI keeps manual entry available.
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discovered(discoverPaiModels(ctx, runtimeCmd))
+		})
 	default:
 		return Catalog{}, fmt.Errorf("unknown agent type: %q", providerType)
 	}
@@ -690,6 +698,20 @@ func codexStaticModels() []Model {
 		{ID: "gpt-5.3-codex", Label: "GPT-5.3-Codex", Provider: "openai", Thinking: standardThinking("medium", false, false)},
 		{ID: "gpt-5.2", Label: "GPT-5.2", Provider: "openai", Thinking: gpt52Thinking()},
 	}
+}
+
+// discoverPaiModels spins up a throwaway `p-ai acp` process and parses the
+// model catalog P-ai returns from session/new. The catalog reflects the
+// provider endpoints configured inside P-ai (see its ApiConfig list), so it is
+// only non-empty when the local P-ai install has at least one working LLM
+// provider; on any failure the caller falls back to the manual-entry field.
+func discoverPaiModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
+	return discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{
+		defaultBin:   "p-ai",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-pai-discovery-",
+		acpArgs:      []string{"acp"},
+	})
 }
 
 // discoverTraecliModels spins up a throwaway `traecli acp serve --yolo` process
