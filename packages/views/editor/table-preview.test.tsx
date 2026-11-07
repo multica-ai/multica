@@ -61,6 +61,32 @@ describe("TablePreview", () => {
     expect(th()).not.toHaveAttribute("aria-sort");
   });
 
+  it.each([",", "\t"] as const)("sorts long integers in a %j preview in both directions", (delimiter) => {
+    const values = [
+      "9007199254740993",
+      "9007199254740992",
+      "-9007199254740992",
+      "-9007199254740993",
+    ];
+    const text = [
+      `item${delimiter}value`,
+      ...values.map((value, index) => `${index}${delimiter}${value}`),
+      `empty${delimiter}`,
+    ].join("\n");
+    renderWithI18n(
+      <TablePreview text={text} delimiter={delimiter} />,
+    );
+
+    fireEvent.click(header("value"));
+    expect(columnValues("c1")).toEqual([
+      "-9007199254740993", "-9007199254740992", "9007199254740992", "9007199254740993", "",
+    ]);
+    fireEvent.click(header("value"));
+    expect(columnValues("c1")).toEqual([...values, ""]);
+    fireEvent.click(header("value"));
+    expect(columnValues("c1")).toEqual([...values, ""]);
+  });
+
   it("keeps each row's file position in the row-number column while sorted", () => {
     renderWithI18n(<TablePreview text={"k\nb\na\n"} delimiter="," />);
     fireEvent.click(header("k"));
@@ -133,6 +159,29 @@ describe("TablePreview", () => {
 describe("compareCells", () => {
   it("orders numbers numerically and ahead of text", () => {
     expect(["b", "10", "9", "a"].sort(compareCells)).toEqual(["9", "10", "a", "b"]);
+  });
+
+  it.each([
+    ["9007199254740992", "9007199254740993"],
+    ["-9007199254740993", "-9007199254740992"],
+    ["9223372036854775806", "9223372036854775807"],
+    ["-9223372036854775808", "-9223372036854775807"],
+    [" +009007199254740992 ", "9007199254740993"],
+    ["9007199254740993", "9007199254740994"],
+    ["9007199254740992.0", "9007199254740993"],
+  ])("compares %s before %s without rounding integer strings", (a, b) => {
+    expect(compareCells(a, b)).toBeLessThan(0);
+    expect(compareCells(b, a)).toBeGreaterThan(0);
+  });
+
+  it("preserves decimal, exponent, radix and equivalent numeric values", () => {
+    expect(["10", "-2.5", "1e2", "0x10", "2.5"].sort(compareCells)).toEqual(["-2.5", "2.5", "10", "0x10", "1e2"]);
+    expect(compareCells("+001", "1.0")).toBe(0);
+    expect(compareCells("-0", "0") === 0).toBe(true);
+    expect(compareCells("9007199254740993", "text")).toBeLessThan(0);
+    expect(compareCells("text", "9007199254740993")).toBeGreaterThan(0);
+    expect(compareCells("", "1")).toBeGreaterThan(0);
+    expect(compareCells(" ", "1")).toBeGreaterThan(0);
   });
 
   it("orders text naturally and case-insensitively", () => {
