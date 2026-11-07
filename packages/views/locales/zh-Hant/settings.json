@@ -1254,7 +1254,8 @@
       "close_others": "關閉其他標籤頁",
       "open_window": "在新視窗開啟",
       "new": "新建標籤頁",
-      "pinned_name": "{{title}}（已固定）"
+      "pinned_name": "{{title}}（已固定）",
+      "attention": "有更新"
     },
     "updates": {
       "title": "更新",

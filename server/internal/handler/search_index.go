@@ -153,7 +153,7 @@ func decodeSearchIndexCursor(s string) (searchIndexCursor, error) {
 		return c, errors.New("invalid cursor")
 	}
 	switch c.AfterType {
-	case "issue", "comment", "project":
+	case "issue", "comment", "project", "chat_session", "chat_message":
 	default:
 		return c, errors.New("invalid cursor")
 	}
@@ -197,37 +197,68 @@ type SearchIndexComment struct {
 	CreatedAt string `json:"created_at"`
 }
 
+// SearchIndexChatSession is the session metadata a client keeps beside its
+// messages, so a message hit can name its conversation.
+type SearchIndexChatSession struct {
+	ID      string `json:"id"`
+	AgentID string `json:"agent_id"`
+	Title   string `json:"title"`
+	Status  string `json:"status"`
+}
+
+// SearchIndexChatMessage is the chat record a client indexes. CreatedAt keeps
+// PostgreSQL's sub-second precision (RFC3339Nano) because server-side search
+// ranking breaks ties with it.
+type SearchIndexChatMessage struct {
+	ID            string `json:"id"`
+	ChatSessionID string `json:"chat_session_id"`
+	Role          string `json:"role"`
+	Content       string `json:"content"`
+	CreatedAt     string `json:"created_at"`
+}
+
 type SearchIndexManifestResponse struct {
 	Cursor       string `json:"cursor"`
 	IssueCount   int64  `json:"issue_count"`
 	CommentCount int64  `json:"comment_count"`
 	ProjectCount int64  `json:"project_count"`
-	// TextBytes totals the UTF-8 bytes of every title, description, and live
-	// comment, so a client can decline a workspace its memory budget cannot hold.
+	// TextBytes totals the UTF-8 bytes of every title, description, live
+	// comment, and chat message, so a client can decline a workspace its memory
+	// budget cannot hold.
 	TextBytes int64 `json:"text_bytes"`
 }
 
 type SearchIndexSnapshotResponse struct {
-	Issues          []SearchIndexIssue   `json:"issues"`
-	Comments        []SearchIndexComment `json:"comments"`
-	Projects        []SearchIndexProject `json:"projects"`
-	NextAfterNumber int32                `json:"next_after_number"`
-	Done            bool                 `json:"done"`
+	Issues   []SearchIndexIssue   `json:"issues"`
+	Comments []SearchIndexComment `json:"comments"`
+	Projects []SearchIndexProject `json:"projects"`
+	// Every chat session of the requesting member, on the first page only.
+	Sessions []SearchIndexChatSession `json:"sessions"`
+	Messages []SearchIndexChatMessage `json:"messages"`
+	// Pages of issues by number and of chat messages by id, in one response.
+	NextAfterNumber    int32  `json:"next_after_number"`
+	NextAfterMessageID string `json:"next_after_message_id"`
+	Done               bool   `json:"done"`
 }
 
 type SearchIndexDeleted struct {
 	Issues   []string `json:"issues"`
 	Comments []string `json:"comments"`
 	Projects []string `json:"projects"`
+	// A deleted session takes every message under it with it.
+	Sessions []string `json:"sessions"`
+	Messages []string `json:"messages"`
 }
 
 type SearchIndexChangesResponse struct {
-	Issues   []SearchIndexIssue   `json:"issues"`
-	Comments []SearchIndexComment `json:"comments"`
-	Projects []SearchIndexProject `json:"projects"`
-	Deleted  SearchIndexDeleted   `json:"deleted"`
-	Cursor   string               `json:"cursor"`
-	HasMore  bool                 `json:"has_more"`
+	Issues   []SearchIndexIssue       `json:"issues"`
+	Comments []SearchIndexComment     `json:"comments"`
+	Projects []SearchIndexProject     `json:"projects"`
+	Sessions []SearchIndexChatSession `json:"sessions"`
+	Messages []SearchIndexChatMessage `json:"messages"`
+	Deleted  SearchIndexDeleted       `json:"deleted"`
+	Cursor   string                   `json:"cursor"`
+	HasMore  bool                     `json:"has_more"`
 }
 
 // RequireLocalSearchIndex answers 404 while the local_search_index kill switch
@@ -278,7 +309,15 @@ func (h *Handler) writeSearchIndexError(w http.ResponseWriter, r *http.Request, 
 // GetSearchIndexManifest returns the snapshot a new local copy starts from and
 // the size of the text it would hold.
 func (h *Handler) GetSearchIndexManifest(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace_id")
+	if !ok {
+		return
+	}
+	creatorUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
 	if !ok {
 		return
 	}
@@ -291,7 +330,10 @@ func (h *Handler) GetSearchIndexManifest(w http.ResponseWriter, r *http.Request)
 	var row db.GetSearchIndexManifestRow
 	err := h.runSearchIndexRead(r.Context(), func(q *db.Queries) error {
 		var err error
-		row, err = q.GetSearchIndexManifest(r.Context(), wsUUID)
+		row, err = q.GetSearchIndexManifest(r.Context(), db.GetSearchIndexManifestParams{
+			WorkspaceID: wsUUID,
+			CreatorID:   creatorUUID,
+		})
 		return err
 	})
 	if err != nil {
@@ -303,15 +345,25 @@ func (h *Handler) GetSearchIndexManifest(w http.ResponseWriter, r *http.Request)
 		IssueCount:   row.IssueCount,
 		CommentCount: row.CommentCount,
 		ProjectCount: row.ProjectCount,
-		TextBytes:    row.IssueBytes + row.CommentBytes + row.ProjectBytes,
+		TextBytes:    row.IssueBytes + row.CommentBytes + row.ProjectBytes + row.ChatMessageBytes,
 	})
 }
 
 // GetSearchIndexSnapshot returns one page of issues ordered by number, every
-// live comment on those issues, and (on the first page) every project.
+// live comment on those issues, (on the first page) every project, (on the
+// first page) every chat session of the requesting member, and one page of
+// that member's chat messages ordered by id.
 func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace_id")
+	if !ok {
+		return
+	}
+	creatorUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
 	if !ok {
 		return
 	}
@@ -324,6 +376,18 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 		}
 		afterNumber = v
 	}
+	// The zero UUID sorts before every generated id, so an absent cursor starts
+	// from the beginning of the keyset.
+	afterMessageID := zeroUUID()
+	if raw := r.URL.Query().Get("after_message_id"); raw != "" {
+		v, err := parseUUIDStrict(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid after_message_id")
+			return
+		}
+		afterMessageID = v
+	}
+	firstPage := afterNumber == 0 && afterMessageID == zeroUUID()
 	limit := searchIndexSnapshotDefaultLimit
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		v, err := strconv.Atoi(raw)
@@ -344,6 +408,8 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 		issues   []db.Issue
 		comments []db.ListSearchIndexCommentsByIssuesRow
 		projects []db.Project
+		sessions []db.ListSearchIndexChatSessionsRow
+		messages []db.ListSearchIndexChatMessagesPageRow
 	)
 	err := h.runSearchIndexRead(ctx, func(q *db.Queries) error {
 		var err error
@@ -368,9 +434,25 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 				return err
 			}
 		}
-		if afterNumber == 0 {
+		if firstPage {
 			projects, err = q.ListSearchIndexProjects(ctx, wsUUID)
+			if err != nil {
+				return err
+			}
+			sessions, err = q.ListSearchIndexChatSessions(ctx, db.ListSearchIndexChatSessionsParams{
+				WorkspaceID: wsUUID,
+				CreatorID:   creatorUUID,
+			})
+			if err != nil {
+				return err
+			}
 		}
+		messages, err = q.ListSearchIndexChatMessagesPage(ctx, db.ListSearchIndexChatMessagesPageParams{
+			WorkspaceID: wsUUID,
+			CreatorID:   creatorUUID,
+			AfterID:     afterMessageID,
+			PageLimit:   int32(limit),
+		})
 		return err
 	})
 	if err != nil {
@@ -382,14 +464,25 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 		Issues:          h.searchIndexIssues(ctx, wsUUID, issues),
 		Comments:        make([]SearchIndexComment, 0, len(comments)),
 		Projects:        searchIndexProjects(projects),
+		Sessions:        make([]SearchIndexChatSession, 0, len(sessions)),
+		Messages:        make([]SearchIndexChatMessage, 0, len(messages)),
 		NextAfterNumber: int32(afterNumber),
-		Done:            len(issues) < limit,
+		Done:            len(issues) < limit && len(messages) < limit,
 	}
 	for _, c := range comments {
 		resp.Comments = append(resp.Comments, searchIndexComment(c.ID, c.IssueID, c.Content, c.CreatedAt))
 	}
+	for _, s := range sessions {
+		resp.Sessions = append(resp.Sessions, searchIndexChatSession(s.ID, s.AgentID, s.Title, s.Status))
+	}
+	for _, m := range messages {
+		resp.Messages = append(resp.Messages, searchIndexChatMessage(m.ID, m.ChatSessionID, m.Role, m.Content, m.CreatedAt))
+	}
 	if n := len(issues); n > 0 {
 		resp.NextAfterNumber = issues[n-1].Number
+	}
+	if n := len(messages); n > 0 {
+		resp.NextAfterMessageID = uuidToString(messages[n-1].ID)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -400,7 +493,15 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 // cursor has not seen; the client must then rebuild its copy.
 func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace_id")
+	if !ok {
+		return
+	}
+	creatorUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
 	if !ok {
 		return
 	}
@@ -429,6 +530,8 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		issues   []db.Issue
 		comments []db.ListSearchIndexCommentsByIDsRow
 		projects []db.Project
+		sessions []db.ListSearchIndexChatSessionsByIDsRow
+		messages []db.ListSearchIndexChatMessagesByIDsRow
 	)
 	err = h.runSearchIndexRead(ctx, func(q *db.Queries) error {
 		var err error
@@ -460,7 +563,7 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		if len(changes) > limit {
 			changes = changes[:limit]
 		}
-		var issueIDs, commentIDs, projectIDs []pgtype.UUID
+		var issueIDs, commentIDs, projectIDs, sessionIDs, messageIDs []pgtype.UUID
 		for _, c := range changes {
 			switch c.EntityType {
 			case "issue":
@@ -469,6 +572,10 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 				commentIDs = append(commentIDs, c.EntityID)
 			case "project":
 				projectIDs = append(projectIDs, c.EntityID)
+			case "chat_session":
+				sessionIDs = append(sessionIDs, c.EntityID)
+			case "chat_message":
+				messageIDs = append(messageIDs, c.EntityID)
 			}
 		}
 		if len(issueIDs) > 0 {
@@ -483,6 +590,19 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		}
 		if len(projectIDs) > 0 {
 			if projects, err = q.ListSearchIndexProjectsByIDs(ctx, db.ListSearchIndexProjectsByIDsParams{WorkspaceID: wsUUID, Ids: projectIDs}); err != nil {
+				return err
+			}
+		}
+		// Session and message reads stay creator-scoped: a change row for
+		// another member's chat resolves to no row and is reported as deleted,
+		// which that member's copy treats as the no-op it is.
+		if len(sessionIDs) > 0 {
+			if sessions, err = q.ListSearchIndexChatSessionsByIDs(ctx, db.ListSearchIndexChatSessionsByIDsParams{WorkspaceID: wsUUID, CreatorID: creatorUUID, Ids: sessionIDs}); err != nil {
+				return err
+			}
+		}
+		if len(messageIDs) > 0 {
+			if messages, err = q.ListSearchIndexChatMessagesByIDs(ctx, db.ListSearchIndexChatMessagesByIDsParams{WorkspaceID: wsUUID, CreatorID: creatorUUID, Ids: messageIDs}); err != nil {
 				return err
 			}
 		}
@@ -508,11 +628,21 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		Issues:   h.searchIndexIssues(ctx, wsUUID, issues),
 		Comments: []SearchIndexComment{},
 		Projects: searchIndexProjects(projects),
+		Sessions: make([]SearchIndexChatSession, 0, len(sessions)),
+		Messages: make([]SearchIndexChatMessage, 0, len(messages)),
 		Deleted: SearchIndexDeleted{
 			Issues:   []string{},
 			Comments: []string{},
 			Projects: []string{},
+			Sessions: []string{},
+			Messages: []string{},
 		},
+	}
+	for _, s := range sessions {
+		resp.Sessions = append(resp.Sessions, searchIndexChatSession(s.ID, s.AgentID, s.Title, s.Status))
+	}
+	for _, m := range messages {
+		resp.Messages = append(resp.Messages, searchIndexChatMessage(m.ID, m.ChatSessionID, m.Role, m.Content, m.CreatedAt))
 	}
 	liveIssues := make(map[pgtype.UUID]bool, len(issues))
 	for _, is := range issues {
@@ -530,6 +660,14 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		liveComments[c.ID] = true
 		resp.Comments = append(resp.Comments, searchIndexComment(c.ID, c.IssueID, c.Content, c.CreatedAt))
 	}
+	liveSessions := make(map[pgtype.UUID]bool, len(sessions))
+	for _, s := range sessions {
+		liveSessions[s.ID] = true
+	}
+	liveMessages := make(map[pgtype.UUID]bool, len(messages))
+	for _, m := range messages {
+		liveMessages[m.ID] = true
+	}
 	for _, c := range changes {
 		switch c.EntityType {
 		case "issue":
@@ -543,6 +681,14 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		case "project":
 			if !liveProjects[c.EntityID] {
 				resp.Deleted.Projects = append(resp.Deleted.Projects, uuidToString(c.EntityID))
+			}
+		case "chat_session":
+			if !liveSessions[c.EntityID] {
+				resp.Deleted.Sessions = append(resp.Deleted.Sessions, uuidToString(c.EntityID))
+			}
+		case "chat_message":
+			if !liveMessages[c.EntityID] {
+				resp.Deleted.Messages = append(resp.Deleted.Messages, uuidToString(c.EntityID))
 			}
 		}
 	}
@@ -604,5 +750,29 @@ func searchIndexComment(id, issueID pgtype.UUID, content string, createdAt pgtyp
 		IssueID:   uuidToString(issueID),
 		Content:   content,
 		CreatedAt: createdAt.Time.UTC().Format(time.RFC3339Nano),
+	}
+}
+
+func zeroUUID() pgtype.UUID {
+	u, _ := parseUUIDStrict("00000000-0000-0000-0000-000000000000")
+	return u
+}
+
+func searchIndexChatSession(id, agentID pgtype.UUID, title, status string) SearchIndexChatSession {
+	return SearchIndexChatSession{
+		ID:      uuidToString(id),
+		AgentID: uuidToString(agentID),
+		Title:   title,
+		Status:  status,
+	}
+}
+
+func searchIndexChatMessage(id, sessionID pgtype.UUID, role, content string, createdAt pgtype.Timestamptz) SearchIndexChatMessage {
+	return SearchIndexChatMessage{
+		ID:            uuidToString(id),
+		ChatSessionID: uuidToString(sessionID),
+		Role:          role,
+		Content:       content,
+		CreatedAt:     createdAt.Time.UTC().Format(time.RFC3339Nano),
 	}
 }

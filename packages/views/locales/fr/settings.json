@@ -1260,7 +1260,8 @@
       "close_others": "Fermer les autres onglets",
       "open_window": "Ouvrir dans une nouvelle fenêtre",
       "new": "Nouvel onglet",
-      "pinned_name": "{{title}} (épinglé)"
+      "pinned_name": "{{title}} (épinglé)",
+      "attention": "Mis à jour"
     },
     "updates": {
       "title": "Mises à jour",

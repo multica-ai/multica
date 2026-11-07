@@ -6,6 +6,7 @@ import {
   fireEvent,
   waitFor,
   within,
+  act,
   type RenderResult,
 } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -97,6 +98,11 @@ vi.mock("@multica/views/layout", () => ({
   ),
 }));
 
+// TabBar mounts useTabAttentionSync, which subscribes to WebSocket events;
+// there is no WS provider in these tests.
+vi.mock("@multica/core/realtime", () => ({ useWSEvent: vi.fn() }));
+
+import { useTabAttentionStore } from "@/stores/tab-attention-store";
 import { TabBar } from "./tab-bar";
 import { useTabPresentation } from "@multica/views/layout";
 
@@ -141,6 +147,7 @@ function reset() {
   pres.title = null;
   pres.titleResolved = true;
   vi.mocked(useTabPresentation).mockClear();
+  useTabAttentionStore.setState({ attention: {} });
 }
 
 beforeEach(() => {
@@ -566,6 +573,46 @@ describe("TabBar context menu", () => {
     expect(state.closeOtherTabs).toHaveBeenCalledWith("tB");
   });
 
+});
+
+describe("TabBar attention dot", () => {
+  it("shows a dot on a tab whose run finished, and folds it into the tab's name", () => {
+    useTabAttentionStore.getState().markTabAttention("tB");
+
+    const { getByLabelText } = render(<TabBar />);
+
+    const tab = getByLabelText("Projects — Updated");
+    expect(tab.querySelector("[data-tab-attention]")).not.toBeNull();
+    // The tab without attention carries neither dot nor suffix.
+    const activeTab = getByLabelText("Issues");
+    expect(activeTab.querySelector("[data-tab-attention]")).toBeNull();
+  });
+
+  it("clears the dot with the attention store", () => {
+    useTabAttentionStore.getState().markTabAttention("tB");
+    const { getByLabelText, queryByLabelText } = render(<TabBar />);
+    expect(getByLabelText("Projects — Updated")).toBeTruthy();
+
+    act(() => {
+      useTabAttentionStore.getState().clearTabAttention("tB");
+    });
+
+    expect(getByLabelText("Projects")).toBeTruthy();
+    expect(queryByLabelText("Projects — Updated")).toBeNull();
+  });
+
+  it("clears a tab's dot when that tab becomes the active one", () => {
+    useTabAttentionStore.getState().markTabAttention("tB");
+    const { getByLabelText, rerender } = render(<TabBar />);
+    expect(getByLabelText("Projects — Updated")).toBeTruthy();
+
+    // Activate tB the way the real store would, then rerender.
+    state.byWorkspace.acme.activeTabId = "tB";
+    rerender(englishTabBar());
+
+    expect(getByLabelText("Projects")).toBeTruthy();
+    expect(useTabAttentionStore.getState().attention).toEqual({});
+  });
 });
 
 describe("TabBar locale", () => {

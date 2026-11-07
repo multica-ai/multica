@@ -1260,7 +1260,8 @@
       "close_others": "Close other tabs",
       "open_window": "Open as new window",
       "new": "New tab",
-      "pinned_name": "{{title}} (pinned)"
+      "pinned_name": "{{title}} (pinned)",
+      "attention": "Updated"
     },
     "updates": {
       "title": "Updates",
