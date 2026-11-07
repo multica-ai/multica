@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, UserPlus, X } from "lucide-react";
+import { ChevronDown, UserPlus, X } from "@multica/ui/icons";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -471,6 +471,7 @@ function AdditionalMembersPicker({
             nesting interactive content. Base UI injects click/keyboard/ARIA
             wiring into the rendered element. */}
         <PopoverTrigger
+          nativeButton={false}
           render={
             <div
               role="combobox"

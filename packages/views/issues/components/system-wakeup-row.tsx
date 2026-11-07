@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
-import { ListChecks, Pencil } from "lucide-react";
+import { ListChecks, Pencil } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useUpdateIssueSystemWakeup } from "@multica/core/issues";
 import type { SystemWakeup } from "@multica/core/types";
@@ -15,6 +15,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useT } from "../../i18n";
 import { useWakeupText } from "./wakeup-presentation";
 
@@ -72,7 +73,7 @@ export function SystemWakeupRow({
           render={
             <button
               type="button"
-              className="col-span-2 col-start-1 row-start-1 grid min-w-0 grid-cols-subgrid rounded-md py-2 text-left text-caption hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
+              className="col-span-2 col-start-1 row-start-1 grid min-w-0 grid-cols-subgrid rounded-md py-2 text-left text-label hover:bg-accent/50 focus-visible:outline-2 focus-visible:outline-ring"
             />
           }
         >
@@ -81,7 +82,7 @@ export function SystemWakeupRow({
             <span className="line-clamp-2 min-w-0 break-words">{title}</span>
             <SystemBadge />
           </span>
-          <span className={`col-span-2 min-w-0 break-words pl-7.5 pr-2 text-micro ${paused ? "text-warning" : "text-muted-foreground"}`}>
+          <span className={`col-span-2 min-w-0 break-words pl-7.5 pr-2 text-caption ${paused ? "text-warning" : "text-muted-foreground"}`}>
             {summary}
           </span>
         </PopoverTrigger>
@@ -184,9 +185,11 @@ function InstructionEditor({
         ) : (
           <div className="text-caption text-muted-foreground">
             <p>{t(($) => $.wakeups.system.instruction_default)}</p>
-            <p className="mt-1 line-clamp-4 whitespace-pre-wrap break-words" title={rule.default_instruction}>
-              {rule.default_instruction}
-            </p>
+            <TruncatedTooltip content={rule.default_instruction}>
+              <p className="mt-1 line-clamp-4 whitespace-pre-wrap break-words">
+                {rule.default_instruction}
+              </p>
+            </TruncatedTooltip>
           </div>
         )}
       </div>

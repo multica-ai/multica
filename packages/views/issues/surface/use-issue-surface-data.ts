@@ -7,14 +7,30 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import { childIssueProgressOptions } from "@multica/core/issues/queries";
 import { issueSurfaceGanttOptions } from "@multica/core/issues/surface/repository";
 import type { IssueSurfaceQueryPlan } from "@multica/core/issues/surface/query-plan";
+import {
+  filterDependencyState,
+  type FilterDependencySource,
+  type FilterDependencyState,
+} from "@multica/core/issues/surface/filter-dependency";
 import type { IssueStatus, ProjectStatus, PropertyFilterValue } from "@multica/core/types";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import {
+  advancedFilterUsesField,
+  statusColumnFilter,
+  type AdvancedFilterGroup,
+  type DueDateFilter,
+} from "@multica/core/issues/stores/filter-tree";
 import { useColumnWorkflow, workflowColumns } from "../utils/workflow-columns";
 import { issueBehavesAsAny, statusColumnKeys, visibleStatusKeys } from "@multica/core/issues";
+import type {
+  IssueRelationFilter,
+  NegatableFilterDimension,
+} from "@multica/core/issues/stores/view-store";
 import {
   applyIssueFilters,
   type IssueFilterState,
   type IssueFilters,
+  type IssueRelationContext,
 } from "../utils/filter";
 import type { ChildProgress } from "../components/list-row";
 import type {
@@ -76,16 +92,12 @@ export interface IssueSurfaceData {
     childProgressMap: Map<string, ChildProgress>;
   }>;
   isLoading: boolean;
-  /**
-   * A filter catalog this surface depends on failed. The filter cannot be
-   * honoured without it, so the surface shows a retryable error rather than
-   * an unexplained empty board (MUL-6243) — or, for the project-status
-   * filter, an unfiltered one under an active chip.
-   */
-  isStatusCatalogError: boolean;
-  /** Re-runs the project list behind the project-status half of
-   *  {@link isStatusCatalogError}. */
-  retryProjectCatalog: () => void;
+  /** The project list behind a project-status filter this surface applies
+   *  itself. */
+  projectCatalogDependency: FilterDependencyState;
+  /** The viewer's subscriptions / agents behind a relation filter this
+   *  surface applies itself. */
+  relationDependency: FilterDependencyState;
   /** The window's data is being revalidated while the previous snapshot is
    *  shown as a placeholder (sort/date change, or any grouped-board filter
    *  change). Drives the header's deferred refresh indicator — content stays
@@ -105,19 +117,27 @@ export function useIssueSurfaceData({
   ganttShowCompleted,
   statusFilters,
   hiddenStatusKeys,
-  statusFilterPending,
-  statusFilterError,
+  statusDependency,
   priorityFilters,
   assigneeFilters,
   includeNoAssignee,
   agentRunningFilter,
+  unreadFilter,
   creatorFilters,
   projectFilters,
   includeNoProject,
   projectStatusFilters,
   labelFilters,
+  relationFilters,
+  relationContext,
+  relationSources,
+  dueDateFilters,
+  advancedFilter,
+  today,
+  negatedFilters,
   propertyFilters,
   workingIssueIDs,
+  unreadIssueIDs,
   showSubIssues,
   loadProjects,
 }: {
@@ -133,22 +153,35 @@ export function useIssueSurfaceData({
   ganttShowCompleted: boolean;
   statusFilters: IssueStatus[];
   hiddenStatusKeys: IssueStatus[];
-  /** A custom status filter is waiting on the catalog — hold loading. */
-  statusFilterPending: boolean;
-  /** The catalog failed, so a custom status filter cannot be honoured. */
-  statusFilterError: boolean;
+  /** The status catalog the columns and a custom status filter route through. */
+  statusDependency: FilterDependencyState;
   priorityFilters: IssueFilterState["priorityFilters"];
   assigneeFilters: IssueFilterState["assigneeFilters"];
   includeNoAssignee: boolean;
   agentRunningFilter: boolean;
+  unreadFilter: boolean;
   creatorFilters: IssueFilterState["creatorFilters"];
   projectFilters: string[];
   includeNoProject: boolean;
   projectStatusFilters: ProjectStatus[];
   labelFilters: string[];
+  relationFilters: IssueRelationFilter[];
+  relationContext: IssueRelationContext | undefined;
+  /** What the active relation values read: the viewer's agents for
+   *  "my_agents", their subscriptions for "subscribed". */
+  relationSources: readonly (FilterDependencySource | false)[];
+  dueDateFilters: DueDateFilter[];
+  /** The scoped, pruned rule tree. */
+  advancedFilter: AdvancedFilterGroup | null;
+  /** Set when due-date buckets are in play. */
+  today: string | undefined;
+  /** Negations that change the result (`effectiveNegatedFilters`). */
+  negatedFilters: NegatableFilterDimension[];
   propertyFilters: Record<string, PropertyFilterValue[]>;
   /** Distinct running-task issue ids projected by `/api/working-agents`. */
   workingIssueIDs: ReadonlySet<string>;
+  /** The viewer's unread issue ids, plus those kept on screen after reading. */
+  unreadIssueIDs: ReadonlySet<string>;
   showSubIssues: boolean;
   loadProjects: boolean;
 }): IssueSurfaceData {
@@ -156,15 +189,11 @@ export function useIssueSurfaceData({
     ...issueSurfaceGanttOptions(wsId, projectId ?? "", queryPlan),
     enabled: usesGantt,
   });
-  const {
-    data: projectData,
-    refetch: refetchProjects,
-    isPending: projectsPending,
-    isError: projectsError,
-  } = useQuery({
+  const projectsQuery = useQuery({
     ...projectListOptions(wsId),
     enabled: loadProjects,
   });
+  const { data: projectData, refetch: refetchProjects } = projectsQuery;
   const projects = projectData ?? EMPTY_PROJECTS;
   const projectMap = useMemo(
     () => new Map(projects.map((project) => [project.id, project])),
@@ -183,23 +212,25 @@ export function useIssueSurfaceData({
         : undefined,
     [projectData],
   );
-  // An unresolved catalog is "cannot answer yet", not "no filter". Showing
-  // UNFILTERED rows under an active chip is as wrong as blanking the surface,
-  // and a failed project request would leave it that way for good. So where a
-  // surface actually applies the client predicate, hold it in loading and
-  // report the failure — the same contract `statusFilterPending` /
-  // `statusFilterError` give a custom status filter. Table and the
-  // server-status branches filter server-side and never read the catalog.
-  const usesClientProjectStatusFilter =
-    projectStatusFilters.length > 0 &&
-    !usesTable &&
-    (usesGantt || !serverStatusBranches.enabled);
-  const projectCatalogPending = usesClientProjectStatusFilter && projectsPending;
-  const projectCatalogError = usesClientProjectStatusFilter && projectsError;
+  // Only where this surface applies a predicate itself does it wait on that
+  // predicate's data. Table and the server-status branches filter server-side.
+  const usesClientPredicates = !usesTable && (usesGantt || !serverStatusBranches.enabled);
+  const projectCatalogDependency = filterDependencyState(
+    usesClientPredicates &&
+      (projectStatusFilters.length > 0 || advancedFilterUsesField(advancedFilter, "projectStatus")),
+    [projectsQuery],
+  );
+  const relationDependency = filterDependencyState(usesClientPredicates, relationSources);
 
   const workingFilterContext = useMemo(
-    () => ({ runningIssueIds: workingIssueIDs, projectStatusById }),
-    [projectStatusById, workingIssueIDs],
+    () => ({
+      runningIssueIds: workingIssueIDs,
+      unreadIssueIds: unreadIssueIDs,
+      projectStatusById,
+      relation: relationContext,
+      today,
+    }),
+    [projectStatusById, relationContext, today, unreadIssueIDs, workingIssueIDs],
   );
   const bucketedIssues = serverStatusBranches.enabled
     ? serverStatusBranches.issues
@@ -229,21 +260,31 @@ export function useIssueSurfaceData({
       includeNoProject,
       projectStatusFilters,
       labelFilters,
+      relationFilters,
+      dueDateFilters,
+      advancedFilter,
+      negatedFilters,
       propertyFilters,
       workingOnly: agentRunningFilter,
+      unreadOnly: unreadFilter,
       showSubIssues,
     }),
     [
+      advancedFilter,
       assigneeFilters,
       agentRunningFilter,
+      unreadFilter,
       creatorFilters,
+      dueDateFilters,
       includeNoAssignee,
       includeNoProject,
       labelFilters,
+      negatedFilters,
       priorityFilters,
       projectFilters,
       projectStatusFilters,
       propertyFilters,
+      relationFilters,
       showSubIssues,
       statusFilters,
     ],
@@ -373,20 +414,30 @@ export function useIssueSurfaceData({
   const catalog = useIssueStatuses(wsId);
   // Columns follow the project's workflow, or Default outside a project.
   // (MUL-7420)
-  const { workflow: projectWorkflow } = useColumnWorkflow(wsId, projectId, statusFilters.length > 0);
+  const statusNegated = negatedFilters.includes("status");
+  const columnStatus = useMemo(
+    () => statusColumnFilter(statusFilters, statusNegated, advancedFilter, hiddenStatusKeys),
+    [advancedFilter, hiddenStatusKeys, statusFilters, statusNegated],
+  );
+  const { workflow: projectWorkflow } = useColumnWorkflow(
+    wsId,
+    projectId,
+    columnStatus.statuses.length > 0 && !columnStatus.negated,
+  );
   const { workflow: scopeWorkflow } = useColumnWorkflow(wsId, projectId, false);
 
   const visibleStatuses = useMemo<IssueStatus[]>(() => {
     // An explicit exact-key filter wins over hidden column preferences.
     return workflowColumns(
       visibleStatusKeys(
-        statusFilters,
-        hiddenStatusKeys,
+        columnStatus.statuses,
+        columnStatus.hiddenStatuses,
         catalog,
+        columnStatus.negated,
       ),
       projectWorkflow,
     );
-  }, [statusFilters, hiddenStatusKeys, catalog, projectWorkflow]);
+  }, [columnStatus, catalog, projectWorkflow]);
 
   // The columns Display can show or hide: this surface's workflow steps, or
   // the whole catalog without a workflow. A status filter does not change
@@ -403,39 +454,52 @@ export function useIssueSurfaceData({
       includeNoAssignee,
       agentRunningFilter,
       runningIssueIds: workingIssueIDs,
+      unreadFilter,
+      unreadIssueIds: unreadIssueIDs,
       creatorFilters,
       projectFilters,
       includeNoProject,
       projectStatusFilters,
       projectStatusById,
       labelFilters,
+      relationFilters,
+      relationContext,
+      dueDateFilters,
+      advancedFilter,
+      today,
+      negatedFilters,
       propertyFilters,
       showSubIssues,
     }),
     [
+      advancedFilter,
       assigneeFilters,
       agentRunningFilter,
       creatorFilters,
+      dueDateFilters,
       includeNoAssignee,
       includeNoProject,
       labelFilters,
+      negatedFilters,
       propertyFilters,
       priorityFilters,
       projectFilters,
       projectStatusById,
       projectStatusFilters,
+      relationContext,
+      relationFilters,
       showSubIssues,
+      today,
+      unreadFilter,
+      unreadIssueIDs,
       workingIssueIDs,
     ],
   );
 
-  // `statusFilterPending` holds the surface in loading while a CUSTOM status
-  // filter waits for the catalog to say which column it belongs to. Without it
-  // the surface reported "loaded, zero results" — an empty board with no
-  // spinner — for the whole cold-load window. (MUL-6243)
   const isLoading =
-    statusFilterPending ||
-    projectCatalogPending ||
+    statusDependency.pending ||
+    projectCatalogDependency.pending ||
+    relationDependency.pending ||
     (serverGroupBranches.enabled
       ? serverGroupBranches.isLoading
       : usesGantt
@@ -480,8 +544,9 @@ export function useIssueSurfaceData({
     // so this shared legacy surface projection never asserts Table empty.
     isEmpty:
       !isLoading &&
-      !statusFilterError &&
-      !projectCatalogError &&
+      !statusDependency.error &&
+      !projectCatalogDependency.error &&
+      !relationDependency.error &&
       !usesGantt &&
       !usesTable &&
       (serverStatusBranches.enabled
@@ -490,10 +555,7 @@ export function useIssueSurfaceData({
         : serverGroupBranches.enabled &&
           !serverGroupBranches.isError &&
           serverGroupBranches.total === 0),
-    // Widened past the status catalog: this flag means "a filter catalog this
-    // surface depends on is down", and the error state's copy and retry fit
-    // either one. `retryStatusCatalog` refetches both.
-    isStatusCatalogError: statusFilterError || projectCatalogError,
-    retryProjectCatalog: refetchProjects,
+    projectCatalogDependency,
+    relationDependency,
   };
 }

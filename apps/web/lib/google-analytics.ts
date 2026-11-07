@@ -1,4 +1,8 @@
-import { isSensitiveAnalyticsUrl, sanitizeAnalyticsUrl } from "../config/google-analytics";
+import {
+  analyticsPageTitle,
+  isSensitiveAnalyticsUrl,
+  sanitizeAnalyticsUrl,
+} from "../config/google-analytics";
 
 type Gtag = (...args: unknown[]) => void;
 type GaWindow = Window & {
@@ -20,6 +24,11 @@ type GaWindow = Window & {
  * A fresh document can start again, with its landing referrer sanitized.
  * The same applies to activating a credential-bearing link or form (e.g. a
  * signed attachment download), which GA reports without a URL change.
+ *
+ * page_title is pinned the same way. GA would otherwise read document.title,
+ * which in a workspace is user content (Issue titles, project names). Every
+ * event instead carries a route label from analyticsPageTitle, set before
+ * GA's own history listener observes a navigation.
  */
 export function installGoogleAnalytics(measurementId: string) {
   const w = window as unknown as GaWindow;
@@ -45,6 +54,10 @@ export function installGoogleAnalytics(measurementId: string) {
       w.dataLayer!.push(arguments);
     };
     w.gtag("js", new Date());
+    // page_title lives in the global `set` scope only, never in `config`:
+    // config parameters take precedence over set, so a config page_title
+    // would freeze the first label and ignore pinPageTitle on navigation.
+    w.gtag("set", { page_title: analyticsPageTitle(w.location.href) });
     // The landing referrer may be a same-origin secret URL (full-page hop
     // off /login?cli_state=…); pin a sanitized copy instead.
     w.gtag("config", measurementId, {
@@ -56,6 +69,14 @@ export function installGoogleAnalytics(measurementId: string) {
     script.async = true;
     script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}`;
     document.head.appendChild(script);
+  };
+
+  // Re-pin page_title for the URL GA is about to observe. gtag.js wraps the
+  // history methods after this module does, so its wrapper calls ours first
+  // and sees the label already set when it reports the navigation.
+  const pinPageTitle = (url: string) => {
+    if (!loaded || stopped || !w.gtag) return;
+    w.gtag("set", { page_title: analyticsPageTitle(url) });
   };
 
   const maybeLoad = () => {
@@ -77,6 +98,7 @@ export function installGoogleAnalytics(measurementId: string) {
       if (loaded && (isSensitiveAnalyticsUrl(w.location.href) || isSensitiveAnalyticsUrl(target))) {
         stop();
       }
+      pinPageTitle(target);
       const result = original.call(this, data, unused, url);
       // Initial loading must happen after a successful navigation, with the
       // real location already clean. No tag has observed earlier URLs yet.
@@ -89,6 +111,7 @@ export function installGoogleAnalytics(measurementId: string) {
   // Capture phase, registered before gtag.js: runs ahead of gtag's listener.
   const onPopState = () => {
     if (loaded && isSensitiveAnalyticsUrl(w.location.href)) stop();
+    pinPageTitle(w.location.href);
     maybeLoad();
   };
   w.addEventListener("popstate", onPopState, true);

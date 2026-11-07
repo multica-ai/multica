@@ -1,12 +1,11 @@
 {
   "page": {
+    "search": "スキルを検索",
     "title": "スキル",
-    "learn_more": "詳しく見る →",
     "new_skill": "新規スキル",
-    "search_placeholder": "スキルを検索…",
     "scopes": {
       "all": {
-        "label": "すべて",
+        "label": "すべてのスキル",
         "description": "このワークスペースのすべてのスキル"
       },
       "used": {
@@ -18,13 +17,9 @@
         "description": "どのエージェントにも割り当てられていないスキル"
       },
       "mine": {
-        "label": "自分が作成",
+        "label": "マイスキル",
         "description": "あなたが作成したスキル"
       }
-    },
-    "empty": {
-      "title": "まだスキルがありません",
-      "description": "skill を作成またはインポートします。"
     },
     "no_matches": {
       "title": "一致なし",
@@ -32,11 +27,6 @@
       "with_query_filter_suffix": "（このフィルター内）",
       "filter_only": "このフィルターに一致するスキルがありません。",
       "try_different": " 別の検索語を試してください。"
-    },
-    "intro_banner": {
-      "title": "ワークスペースと共有されます。",
-      "body": "誰でもスキルを作成したり、URL やローカルフォルダからインポートしたり、ローカルランタイムからコピーしたりでき、すべてのエージェントが使用できます。",
-      "highlight": "ローカルランタイムのスキルは、ここにコピーするまで非公開のままです。"
     },
     "list_error": {
       "title": "スキルを読み込めませんでした",
@@ -76,8 +66,6 @@
     "added_toast": "{{name}} に追加しました",
     "add_failed_toast": "スキルの追加に失敗しました",
     "delete": "削除",
-    "selected": "{{count}} 件選択中",
-    "clear_selection": "選択を解除",
     "delete_no_permission": "作成者または管理者のみ削除できるスキルが含まれています",
     "delete_dialog_title_other": "{{count}} 件のスキルを削除しますか？",
     "delete_dialog_desc_other": "選択した {{count}} 件のスキルを完全に削除し、すべてのエージェントから取り外します。",
@@ -98,28 +86,16 @@
     "added_multi_toast_other": "{{count}} 件のエージェントに追加しました"
   },
   "toolbar": {
-    "result_count_title": "該当スキル / 全スキル",
-    "filter_label": "フィルター",
-    "filter_active_count_other": "{{count}} 件のフィルター",
-    "clear_filters": "フィルターを解除",
     "section_usage": "使用状況",
     "section_labels": "ラベル",
     "filter_search_placeholder": "フィルター...",
     "no_labels": "まだラベルがありません",
     "no_results": "結果なし",
-    "display": "表示",
-    "sort_by": "並び替え",
-    "direction_asc": "昇順",
-    "direction_desc": "降順",
-    "section_columns": "表示する列",
     "manage_labels": "ラベルを管理...",
     "manage_labels_title": "スキルのラベル"
   },
   "detail": {
-    "all_skills": "すべてのスキル",
     "read_only": "読み取り専用",
-    "delete_aria": "スキルを削除",
-    "delete_tooltip": "スキルを削除",
     "supporting_data_warning": "一部のワークスペースデータを読み込めませんでした。次回の更新まで、作成者の表示、ランタイム名、編集権限が不完全に見える場合があります。",
     "delete_file": "ファイルを削除",
     "name_placeholder": "skill-name",
@@ -151,11 +127,11 @@
     },
     "toast_saved": "スキルを保存しました",
     "toast_save_failed": "スキルを保存できませんでした",
+    "toast_saved_version": "v{{version}} として保存しました",
+    "toast_view_history": "履歴を表示",
     "toast_deleted": "スキルを削除しました",
     "toast_delete_failed": "スキルを削除できませんでした",
     "refresh": {
-      "button": "更新",
-      "tooltip": "ソースからスキルを再ダウンロードします",
       "source_github": "GitHub",
       "source_skills_sh": "Skills.sh",
       "source_clawhub": "ClawHub",
@@ -194,29 +170,18 @@
       }
     },
     "header": {
-      "files_other": "{{count}} 個のファイル",
-      "used_by_other": "{{count}} 個のエージェントが使用中",
-      "updated": "{{when}}に更新",
-      "updated_by": "{{name}} が{{when}}に更新"
-    },
-    "tabs": {
-      "aria": "スキルのセクション",
-      "overview": "概要",
-      "files_other": "ファイル {{count}}"
+      "files_other": "{{count}} 個のファイル"
     },
     "overview": {
       "properties": "プロパティ",
-      "properties_hint": "これらの項目は SKILL.md のフロントマターと同期します。",
       "name": "名前",
       "description": "説明",
       "description_hint": "エージェントはこれを基に skill を読み込むタイミングを判断します。",
       "labels": "ラベル",
-      "used_by_other": "{{count}} 個のエージェントが使用中",
       "used_by_empty": "まだどのエージェントにも割り当てられていません。エージェントのスキルタブを開いて割り当ててください。",
       "permissions_owner": "このスキルを編集・削除できます。変更は次回のエージェント実行から反映されます。",
       "permissions_locked_creator": "作成者（{{name}}）またはワークスペース管理者のみがこのスキルを編集できます。",
       "permissions_locked": "作成者またはワークスペース管理者のみがこのスキルを編集できます。",
-      "properties_help": "skill のプロパティについて",
       "character_count": "{{count}} 文字"
     },
     "files": {
@@ -229,6 +194,52 @@
       "mode_preview": "プレビュー",
       "mode_edit": "編集",
       "mode_raw": "プレーンテキスト"
+    },
+    "versions": {
+      "list_aria": "スキルのバージョン",
+      "version_label": "v{{version}}",
+      "current": "現在",
+      "unknown_author": "不明",
+      "empty": "まだバージョンはありません。次にこのスキルを変更したとき、現在の内容が最初のバージョンとして記録されます。",
+      "load_failed": "バージョンを読み込めませんでした。",
+      "restore": "復元",
+      "toast_restored": "v{{version}} を復元しました",
+      "toast_restore_failed": "バージョンを復元できませんでした",
+      "source": {
+        "baseline": "以前の内容",
+        "create": "作成",
+        "update": "編集",
+        "import": "インポート",
+        "refresh": "ソースから更新",
+        "restore": "v{{version}} から復元"
+      },
+      "dialog": {
+        "title": "v{{version}} を復元しますか？",
+        "description": "v{{version}} の内容が新しいバージョンになり、エージェントは次回の実行からそれを使います。新しいバージョンも履歴に残ります。",
+        "unsaved_warning": "保存していない変更は破棄されます。",
+        "cancel": "キャンセル",
+        "confirm": "復元",
+        "restoring": "復元中…"
+      }
+    },
+    "sections": {
+      "content": "内容",
+      "files": "ファイル",
+      "edit": "編集",
+      "open": "開く",
+      "add": "追加",
+      "history": "履歴"
+    },
+    "menu": {
+      "copy_link": "リンクをコピー",
+      "link_copied": "リンクをコピーしました",
+      "delete": "スキルを削除",
+      "version_history": "バージョン履歴"
+    },
+    "panel": {
+      "add_description": "説明を追加",
+      "version": "バージョン",
+      "no_versions": "バージョンなし"
     }
   },
   "create": {
@@ -370,5 +381,34 @@
     "markdown_placeholder": "Markdown の内容を記述...",
     "raw_placeholder": "ファイルの内容...",
     "raw_aria": "{{path}} のプレーンテキスト"
+  },
+  "intro": {
+    "title": "チームの仕事のやり方をスキルにする",
+    "description": "スキルは再利用できる作業手順書（SKILL.md）です。ワークスペースに一度追加してエージェントに割り当てれば、エージェントはそれに従って作業します。",
+    "slides": {
+      "methods": {
+        "title": "4 つの追加方法",
+        "description": "空の SKILL.md から書き始めるか、ローカルフォルダ、URL、ランタイムから既存のスキルを取り込めます。"
+      },
+      "assign": {
+        "title": "エージェントに割り当て",
+        "description": "一つのスキルを複数のエージェントで使えます。一か所を直せば、使っているすべてのエージェントに反映されます。"
+      },
+      "share": {
+        "title": "ワークスペースで共有",
+        "description": "ローカルランタイムのスキルは、ここにコピーするまで非公開です。コピーすればどのエージェントでも使えます。"
+      }
+    },
+    "art": {
+      "skill_summary": "まずテストを実行し、次にアクセシビリティとパフォーマンスを確認する。",
+      "add_to_agent": "エージェントに追加",
+      "local_skills": "ローカルのスキル",
+      "private": "非公開",
+      "workspace_shared": "ワークスペース",
+      "all_agents": "どのエージェントでも使用可",
+      "role_reviewer": "レビュー担当",
+      "role_fullstack": "フルスタック",
+      "copy_to_workspace": "ワークスペースにコピー"
+    }
   }
 }

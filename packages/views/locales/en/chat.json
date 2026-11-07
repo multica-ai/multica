@@ -1,6 +1,9 @@
 {
   "page": {
     "title": "Chat",
+    "no_agent_title": "No agent to chat with yet",
+    "no_agent_description": "Create an agent, then talk through a request here and let it turn the request into issues.",
+    "no_agent_action": "New agent",
     "select_prompt": "Pick a conversation, or start a new one with +",
     "agent_link_no_access": "You don't have access to chat with this agent."
   },
@@ -247,7 +250,7 @@
     "row_actions_aria": "Chat actions"
   },
   "header": {
-    "view_profile": "View agent profile",
+    "agent_settings": "Agent settings",
     "rename": "Rename chat",
     "archive": "Archive chat",
     "unarchive": "Unarchive chat",

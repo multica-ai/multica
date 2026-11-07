@@ -5,7 +5,7 @@ import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "../../navigation";
-import { IssueDetail, IssueDetailSkeleton, IssueNotFound } from "./issue-detail";
+import { IssueDetail, IssueDetailSkeleton, IssueNotFound, IssueLoadError } from "./issue-detail";
 import { IssuePeekHost } from "./issue-peek";
 
 interface IssueDetailRouteProps {
@@ -70,12 +70,18 @@ function useCommentHighlightHash(): { hash: string; commentId?: string } {
  */
 export function IssueDetailRoute({ routeId, onDelete }: IssueDetailRouteProps) {
   const wsId = useWorkspaceId();
-  const { canonicalId, issue, isResolving, notFound } = useCanonicalIssue(wsId, routeId);
+  const {
+    canonicalId, issue, isResolving, notFound, loadFailed, isRetrying, retry, hasLoaded,
+  } = useCanonicalIssue(wsId, routeId);
   const highlight = useCommentHighlightHash();
 
   useCanonicalIssueUrl(routeId, issue?.identifier, highlight.hash);
 
-  if (isResolving) return <IssueDetailSkeleton />;
+  if (loadFailed) {
+    return <IssueLoadError showBackLink={!onDelete} onRetry={retry} isRetrying={isRetrying} />;
+  }
+
+  if (isResolving || (!issue && !notFound)) return <IssueDetailSkeleton />;
 
   // Render not-found here rather than handing the unresolved segment down.
   // `IssueDetail` would mount a second observer on the query that just failed,
@@ -90,6 +96,7 @@ export function IssueDetailRoute({ routeId, onDelete }: IssueDetailRouteProps) {
     <IssuePeekHost key={canonicalId}>
       <IssueDetail
         issueId={canonicalId}
+        skipInitialRefetch={hasLoaded}
         onDelete={onDelete}
         highlightCommentId={highlight.commentId}
       />

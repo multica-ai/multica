@@ -28,6 +28,16 @@ type event struct {
 			Type string `json:"type"`
 		} `json:"retry_status"`
 	} `json:"error"`
+	// ModelUsage is set on span.model_request_end; TotalCredits on
+	// session.usage, where it is the session's cumulative charge.
+	ModelUsage struct {
+		Credits *float64 `json:"credits"`
+	} `json:"model_usage"`
+	TotalCredits *float64 `json:"total_credits"`
+	// Set on agent.artifact_delivered.
+	FileID           string `json:"file_id"`
+	OriginalFilename string `json:"original_filename"`
+	Size             int64  `json:"size"`
 }
 
 func (e event) text() string {
@@ -39,19 +49,38 @@ func (e event) text() string {
 	}
 	return strings.Join(parts, "\n")
 }
+
+// eventPageLimits are tried in order. Qoder returns image blocks in full in
+// user.message events, so a page of them can exceed the response limit even
+// though each message fits; a smaller page is read instead.
+var eventPageLimits = []string{"100", "10", "1"}
+
+type eventPage struct {
+	Data     []event `json:"data"`
+	HasMore  bool    `json:"has_more"`
+	NextPage string  `json:"next_page"`
+}
+
 func (b *Bridge) events(ctx context.Context, r *run) error {
-	q := url.Values{"limit": {"100"}, "order": {"asc"}}
-	if r.Page != "" {
-		q.Set("page", r.Page)
-	} else if r.Cursor != "" {
-		q.Set("after_id", r.Cursor)
+	var q url.Values
+	var page eventPage
+	var err error
+	for i, limit := range eventPageLimits {
+		q = url.Values{"limit": {limit}, "order": {"asc"}}
+		// An opaque page cursor may carry its own page size, so a smaller
+		// retry resumes after the last processed event instead.
+		if r.Page != "" && (i == 0 || r.Cursor == "") {
+			q.Set("page", r.Page)
+		} else if r.Cursor != "" {
+			q.Set("after_id", r.Cursor)
+		}
+		page = eventPage{}
+		err = b.qoder.call(ctx, http.MethodGet, "/sessions/"+url.PathEscape(r.SessionID)+"/events?"+q.Encode(), nil, &page)
+		if !errors.Is(err, errResponseTooLarge) {
+			break
+		}
 	}
-	var page struct {
-		Data     []event `json:"data"`
-		HasMore  bool    `json:"has_more"`
-		NextPage string  `json:"next_page"`
-	}
-	if err := b.qoder.call(ctx, http.MethodGet, "/sessions/"+url.PathEscape(r.SessionID)+"/events?"+q.Encode(), nil, &page); err != nil {
+	if err != nil {
 		var ae *apiError
 		if errors.As(err, &ae) && ae.Status == http.StatusNotFound {
 			return b.reject(ctx, r, "Qoder session no longer exists")
@@ -77,6 +106,18 @@ func (b *Bridge) events(ctx context.Context, r *run) error {
 		}
 		msg := map[string]any{}
 		switch e.Type {
+		case "span.model_request_end":
+			if e.ModelUsage.Credits != nil {
+				r.addSpanCredits(*e.ModelUsage.Credits)
+			}
+		case "session.usage":
+			if e.TotalCredits != nil {
+				r.setSessionCredits(*e.TotalCredits)
+			}
+		case "agent.artifact_delivered":
+			if r.Reply != nil {
+				r.Reply.add(e)
+			}
 		case "agent.message":
 			msg["type"] = "text"
 			msg["content"] = e.text()
@@ -144,4 +185,23 @@ func (b *Bridge) events(ctx context.Context, r *run) error {
 		return fmt.Errorf("submission not yet confirmed; inspect Qoder session %s before any manual resubmission", r.SessionID)
 	}
 	return nil
+}
+
+// latestEventID returns the newest event of a session, or "" when it has none.
+// A continued session starts reading after it, so the new turn never re-reads
+// earlier turns (whose images alone may exceed the response limit) and never
+// mistakes an earlier idle event for its own completion.
+func (b *Bridge) latestEventID(ctx context.Context, sessionID string) (string, error) {
+	q := url.Values{"limit": {"1"}, "order": {"desc"}}
+	var page eventPage
+	if err := b.qoder.call(ctx, http.MethodGet, "/sessions/"+url.PathEscape(sessionID)+"/events?"+q.Encode(), nil, &page); err != nil {
+		return "", err
+	}
+	if len(page.Data) == 0 {
+		return "", nil
+	}
+	if page.Data[0].ID == "" {
+		return "", fmt.Errorf("Qoder event has no ID")
+	}
+	return page.Data[0].ID, nil
 }

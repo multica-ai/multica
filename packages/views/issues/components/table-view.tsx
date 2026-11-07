@@ -1,5 +1,6 @@
 "use client";
 
+import { subIssueCreateDefaults } from "@multica/core/issues";
 import { useStatusLabel } from "../utils/status-label";
 import {
   useCallback,
@@ -50,7 +51,7 @@ import {
   Plus,
   Search,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { DataTable } from "@multica/ui/components/ui/data-table";
 import { Button } from "@multica/ui/components/ui/button";
@@ -75,6 +76,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { isImeComposing } from "@multica/core/utils";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useModalStore } from "@multica/core/modals";
 import {
@@ -754,6 +756,7 @@ export function InlineTitle({
           onChange={(event) => setDraft(event.target.value)}
           onBlur={commit}
           onKeyDown={(event) => {
+            if (isImeComposing(event)) return;
             if (event.key === "Enter") commit();
             if (event.key === "Escape") {
               setDraft(row.issue.title);
@@ -2212,11 +2215,7 @@ export function TableView({
 
   const createSubIssue = useCallback(
     (issue: Issue) =>
-      onCreateIssue({
-        parent_issue_id: issue.id,
-        parent_issue_identifier: issue.identifier,
-        ...(issue.project_id ? { project_id: issue.project_id } : {}),
-      }),
+      onCreateIssue(subIssueCreateDefaults(issue)),
     [onCreateIssue],
   );
 

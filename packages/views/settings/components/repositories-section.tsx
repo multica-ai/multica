@@ -10,7 +10,7 @@ import {
   Plus,
   Search,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
@@ -48,6 +48,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { toast } from "sonner";
 import {
   useInfiniteQuery,
@@ -452,9 +453,11 @@ export function RepositoriesSection() {
                   )}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-mono text-label" title={repository.url}>
-                    {repository.url}
-                  </p>
+                  <TruncatedTooltip content={repository.url}>
+                    <p className="truncate font-mono text-label">
+                      {repository.url}
+                    </p>
+                  </TruncatedTooltip>
                   {repository.description ? (
                     <p className="mt-0.5 truncate text-caption text-muted-foreground">
                       {repository.description}

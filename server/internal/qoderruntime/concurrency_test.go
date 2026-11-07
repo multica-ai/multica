@@ -30,6 +30,13 @@ type multiHarness struct {
 	prompts       map[string]string
 	metadata      map[string]map[string]string
 	resources     map[string][]map[string]any
+	issue         string
+	downloads     map[string]string
+	uploads       int
+	mounts        map[string][]map[string]any
+	mountStatus   int
+	// calls records attachment mounts and message sends in order.
+	calls []string
 }
 
 func newTask(id, prior string) *daemon.Task {
@@ -38,7 +45,7 @@ func newTask(id, prior string) *daemon.Task {
 
 func setupMulti(t *testing.T, limit int, tasks ...*daemon.Task) *multiHarness {
 	t.Helper()
-	h := &multiHarness{queue: tasks, status: map[string]string{}, completed: map[string]map[string]any{}, failed: map[string]map[string]any{}, sessions: map[string][]map[string]any{}, sessionStatus: map[string]string{}, prompts: map[string]string{}, metadata: map[string]map[string]string{}, resources: map[string][]map[string]any{}}
+	h := &multiHarness{queue: tasks, status: map[string]string{}, completed: map[string]map[string]any{}, failed: map[string]map[string]any{}, sessions: map[string][]map[string]any{}, sessionStatus: map[string]string{}, prompts: map[string]string{}, metadata: map[string]map[string]string{}, resources: map[string][]map[string]any{}, downloads: map[string]string{}, mounts: map[string][]map[string]any{}}
 	taskID := func(path string) string {
 		rest := strings.TrimPrefix(path, "/api/daemon/tasks/")
 		return rest[:strings.Index(rest, "/")]
@@ -57,7 +64,18 @@ func setupMulti(t *testing.T, limit int, tasks ...*daemon.Task) *multiHarness {
 			}
 			json.NewEncoder(w).Encode(map[string]any{"task": next})
 		case strings.HasPrefix(r.URL.Path, "/api/issues/"):
+			if h.issue != "" {
+				io.WriteString(w, h.issue)
+				return
+			}
 			io.WriteString(w, `{"title":"Fix the login bug","description":"Use repository context"}`)
+		case strings.HasPrefix(r.URL.Path, "/api/attachments/"):
+			body, ok := h.downloads[r.URL.Path]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			io.WriteString(w, body)
 		case strings.HasSuffix(r.URL.Path, "/status"):
 			json.NewEncoder(w).Encode(map[string]string{"status": h.status[taskID(r.URL.Path)]})
 		case strings.HasSuffix(r.URL.Path, "/start"):
@@ -101,7 +119,21 @@ func setupMulti(t *testing.T, limit int, tasks ...*daemon.Task) *multiHarness {
 			h.metadata[id] = req.Metadata
 			h.resources[id] = req.Resources
 			fmt.Fprintf(w, `{"id":%q}`, id)
+		case r.URL.Path == "/files" && r.Method == http.MethodPost:
+			h.uploads++
+			fmt.Fprintf(w, `{"id":"file_%d"}`, h.uploads)
+		case len(parts) == 3 && parts[2] == "resources" && r.Method == http.MethodPost:
+			if h.mountStatus != 0 {
+				w.WriteHeader(h.mountStatus)
+				return
+			}
+			var res map[string]any
+			json.NewDecoder(r.Body).Decode(&res)
+			h.mounts[parts[1]] = append(h.mounts[parts[1]], res)
+			h.calls = append(h.calls, "mount "+parts[1])
+			io.WriteString(w, `{}`)
 		case len(parts) == 3 && parts[2] == "events" && r.Method == http.MethodPost:
+			h.calls = append(h.calls, "send "+parts[1])
 			var req struct {
 				Events []event `json:"events"`
 			}
@@ -112,16 +144,7 @@ func setupMulti(t *testing.T, limit int, tasks ...*daemon.Task) *multiHarness {
 			h.sessions[parts[1]] = append(h.sessions[parts[1]], map[string]any{"id": fmt.Sprintf("evt_%s_%d", parts[1], len(h.sessions[parts[1]])), "type": "user.message", "content": []map[string]string{{"type": "text", "text": req.Events[0].text()}}})
 			io.WriteString(w, `{"data":[]}`)
 		case len(parts) == 3 && parts[2] == "events":
-			events := h.sessions[parts[1]]
-			if after := r.URL.Query().Get("after_id"); after != "" {
-				for i, e := range events {
-					if e["id"] == after {
-						events = events[i+1:]
-						break
-					}
-				}
-			}
-			json.NewEncoder(w).Encode(map[string]any{"data": events, "has_more": false})
+			json.NewEncoder(w).Encode(eventListPage(r, h.sessions[parts[1]]))
 		case len(parts) == 2 && r.Method == http.MethodGet:
 			status, ok := h.sessionStatus[parts[1]]
 			if !ok {
@@ -199,6 +222,75 @@ func TestFollowUpContinuesIdleSession(t *testing.T) {
 	}
 	if h.completed["task-1"]["session_id"] != "sess_prev" || h.completed["task-1"]["output"] != "done in sess_prev" {
 		t.Fatalf("result: %#v", h.completed["task-1"])
+	}
+}
+
+func chatFollowUp(h *multiHarness, files ...[3]string) {
+	task := h.queue[0]
+	task.IssueID, task.IssueIdentifier = "", ""
+	task.ChatSessionID = "chat-1"
+	task.ChatMessage = "Read the attached notes"
+	chatAttach(h.downloads, task, files...)
+	h.sessionStatus["sess_prev"] = "idle"
+	h.metadata["sess_prev"] = map[string]string{resourcesMetadataKey: resourceFingerprint(nil)}
+}
+
+// A chat follow-up keeps its conversation: the message's files are mounted
+// into the earlier session before the message that names them.
+func TestChatFollowUpMountsAttachmentsIntoPriorSession(t *testing.T) {
+	h := setupMulti(t, 1, newTask("task-1", "sess_prev"))
+	chatFollowUp(h, [3]string{"notes.md", "text/markdown", "hello"}, [3]string{"todo.txt", "text/plain", "ship it"})
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.creates != 0 || fmt.Sprint(h.calls) != "[mount sess_prev mount sess_prev send sess_prev]" {
+		t.Fatalf("creates=%d calls=%v failed=%v", h.creates, h.calls, h.failed)
+	}
+	var paths []string
+	for _, m := range h.mounts["sess_prev"] {
+		paths = append(paths, fmt.Sprint(m["type"], " ", m["file_id"], " ", m["mount_path"]))
+	}
+	if want := "[file file_1 /data/attachments/task-1/notes.md file file_2 /data/attachments/task-1/todo.txt]"; fmt.Sprint(paths) != want {
+		t.Fatalf("mounts: %v", paths)
+	}
+	if !strings.Contains(h.prompts["sess_prev"], "/data/attachments/task-1/notes.md (mounted file)") {
+		t.Fatalf("prompt: %s", h.prompts["sess_prev"])
+	}
+}
+
+// If the earlier session refuses the files, nothing has been sent yet, so the
+// message goes to a fresh session that has them.
+func TestChatFollowUpStartsFreshWhenMountIsRejected(t *testing.T) {
+	h := setupMulti(t, 1, newTask("task-1", "sess_prev"))
+	chatFollowUp(h, [3]string{"notes.md", "text/markdown", "hello"})
+	h.mountStatus = http.StatusConflict
+	ctx := context.Background()
+	for i := 0; i < 2 && len(h.sentTo) == 0; i++ {
+		if err := h.b.step(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if h.creates != 1 || fmt.Sprint(h.sentTo) != "[sess_new_1]" || len(h.failed) != 0 {
+		t.Fatalf("creates=%d sentTo=%v failed=%v", h.creates, h.sentTo, h.failed)
+	}
+	if res := h.resources["sess_new_1"]; len(res) != 1 || res[0]["mount_path"] != "/data/attachments/task-1/notes.md" {
+		t.Fatalf("fresh session resources: %v", res)
+	}
+}
+
+// An issue run uploads every issue attachment again, so it still starts a
+// fresh session instead of mounting duplicates into the earlier one.
+func TestIssueFollowUpWithAttachmentsStartsFreshSession(t *testing.T) {
+	h := setupMulti(t, 1, newTask("task-1", "sess_prev"))
+	h.sessionStatus["sess_prev"] = "idle"
+	h.metadata["sess_prev"] = map[string]string{resourcesMetadataKey: resourceFingerprint(nil)}
+	h.downloads["/api/attachments/a0/download"] = "hello"
+	h.issue = `{"title":"Fix","description":"See notes","attachments":[{"id":"a0","filename":"notes.md","content_type":"text/markdown","size_bytes":5,"download_url":"/api/attachments/a0/download"}]}`
+	if err := h.b.step(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if h.creates != 1 || fmt.Sprint(h.sentTo) != "[sess_new_1]" || len(h.mounts) != 0 {
+		t.Fatalf("creates=%d sentTo=%v mounts=%v", h.creates, h.sentTo, h.mounts)
 	}
 }
 

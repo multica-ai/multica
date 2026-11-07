@@ -195,23 +195,6 @@ func normalizeQuickActionVisibility(raw string) (string, error) {
 
 // Target resolution
 
-// quickActionTarget is the resolved execution target of an action: the agent
-// that will actually run, plus the display identity the client should show.
-// For a squad binding, Agent is the squad leader and Name is the SQUAD's name,
-// because the squad is what the user bound and what the mention will address.
-type quickActionTarget struct {
-	Agent     db.Agent
-	Name      string
-	AvatarURL string
-	// MentionType is the mention:// scheme the rendered comment must use so
-	// the existing trigger path routes it exactly as a hand-typed mention.
-	MentionType string
-	// MentionID is the id inside the mention link: the agent id, or the SQUAD
-	// id for a squad binding (the trigger path resolves the leader itself).
-	MentionID string
-	Found     bool
-}
-
 // resolveQuickActionTarget loads the execution target. A missing/archived
 // agent, or a missing/archived squad, resolves to Found=false — the caller
 // renders that as an unavailable target rather than failing the whole list.
@@ -791,11 +774,9 @@ func (h *Handler) validateQuickActionBinding(w http.ResponseWriter, r *http.Requ
 
 // RenderQuickAction returns what the action WOULD post, without posting it.
 //
-// This backs the composer hand-off (the `/` slash command): the user gets the
-// fully rendered text in the comment box to edit before sending. Rendering
-// stays on the server even for this read-only path so there is exactly one
-// interpolation implementation — a client-side copy would drift from the run
-// path and quietly send something different from the preview.
+// Kept for installed clients that resolve draft text over HTTP. Current
+// clients build drafts from the catalog; shared fixtures keep that text aligned
+// with buildQuickActionBody. Invocation permission is checked again on send.
 func (h *Handler) RenderQuickAction(w http.ResponseWriter, r *http.Request) {
 	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
 	if !ok {
@@ -831,18 +812,6 @@ func (h *Handler) RenderQuickAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"content": buildQuickActionBody(qa, target),
 	})
-}
-
-// buildQuickActionBody prepends the mention line that actually triggers the
-// run. It is parsed by the same ParseMentions the composer's output goes
-// through, so a quick action is indistinguishable from a hand-typed @mention
-// downstream. The prompt itself is passed through untouched — see the file
-// header for why there is no interpolation step.
-func buildQuickActionBody(qa db.QuickAction, target quickActionTarget) string {
-	if qa.AssigneeType == "" {
-		return qa.Prompt
-	}
-	return fmt.Sprintf("[@%s](mention://%s/%s)\n\n%s", target.Name, target.MentionType, target.MentionID, qa.Prompt)
 }
 
 // RunQuickAction renders the action and posts it as a quick_action comment,
@@ -942,7 +911,7 @@ func (h *Handler) RunQuickAction(w http.ResponseWriter, r *http.Request) {
 		"issue_revision":      created.IssueRevision,
 	})
 
-	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, nil, actorType, actorID, originatorUserID, nil, nil)
+	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, nil, actorType, actorID, originatorUserID, nil, commentSteerRequest{})
 
 	// Usage telemetry is best-effort and deliberately outside the run's
 	// success path: a failed counter must never cost the user the run.

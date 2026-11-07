@@ -19,7 +19,7 @@ import {
   GitPullRequestDraft,
   TriangleAlert,
   XCircle,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import {
   issuePullRequestsOptions,
   derivePullRequestVerdict,
@@ -88,10 +88,10 @@ export function PullRequestList({
   const rowActions = autoComplete ? { issueId, identifier, autoComplete } : null;
 
   if (isLoading) {
-    return <p className="text-caption text-muted-foreground px-2">{t(($) => $.detail.pull_requests_loading)}</p>;
+    return <p className="text-label text-muted-foreground px-2">{t(($) => $.detail.pull_requests_loading)}</p>;
   }
   if (isError) {
-    return <button type="button" className="flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" onClick={() => void refetch()}>
+    return <button type="button" className="flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left text-label text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring" onClick={() => void refetch()}>
       {t(($) => $.detail.section_load_failed_retry)}
     </button>;
   }
@@ -125,7 +125,7 @@ export function PullRequestList({
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="block w-full rounded-md px-2 py-2 text-left text-caption text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+            className="block w-full rounded-md px-2 py-2 text-left text-label text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
           >
             {expanded
               ? t(($) => $.detail.pull_request_card_show_less)
@@ -447,14 +447,14 @@ function PullRequestRow({
         >
           <StateIcon className={cn("mt-px size-3.5 shrink-0", cfg.className)} />
           <div className="min-w-0 flex-1">
-            <p className={cn("truncate text-caption font-medium", actions ? "pr-5" : null)}>
+            <p className={cn("truncate text-label font-medium", actions ? "pr-5" : null)}>
               {stripIssueKeyFromTitle(pr.title, identifier)}
             </p>
             <div className="mt-1 flex items-center gap-2">
               {/* The number and the pill never yield. Everything after the dot
                   is one unit: short of room, it wraps whole onto the clipped
                   second line instead of being cut mid-number (+312 → +31). */}
-              <p className="flex h-lh min-w-0 flex-1 flex-wrap items-center gap-x-1.5 overflow-hidden whitespace-nowrap text-micro text-muted-foreground tabular-nums">
+              <p className="flex h-lh min-w-0 flex-1 flex-wrap items-center gap-x-1.5 overflow-hidden whitespace-nowrap text-caption text-muted-foreground tabular-nums">
                 <span className="min-w-0 truncate">
                   {showRepo ? pr.repo_name : null}#{pr.number}
                 </span>

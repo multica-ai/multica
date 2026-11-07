@@ -23,7 +23,7 @@
     "project": "專案",
     "assignee": "負責人",
     "mention": "提及",
-    "agents": "智慧體",
+    "agents": "AI 代理",
     "pinned": "已固定",
     "switch_workspace": "切換工作區",
     "new_issue": "新建任務",
@@ -31,6 +31,7 @@
     "edit_issue": "編輯任務",
     "edit_project": "編輯專案",
     "runs": "執行",
+    "execution_record": "執行記錄",
     "add_resource": "新增資源",
     "recent": "最近"
   }

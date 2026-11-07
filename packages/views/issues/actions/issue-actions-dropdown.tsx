@@ -12,7 +12,6 @@ import {
   IssueActionsMenuItems,
   dropdownPrimitives,
 } from "./issue-actions-menu-items";
-import { AssigneePicker } from "../components/pickers";
 
 interface IssueActionsDropdownProps {
   issue: Issue;
@@ -22,6 +21,8 @@ interface IssueActionsDropdownProps {
   /** If set, leave the page after the issue is deleted — back to wherever the
    *  user came from, or to this path when there is no in-app history. */
   onDeletedFallbackPath?: string;
+  /** The reader's archived inbox notification for this issue; adds "Restore to inbox". */
+  archivedInboxItemId?: string;
 }
 
 export function IssueActionsDropdown({
@@ -29,48 +30,24 @@ export function IssueActionsDropdown({
   trigger,
   align = "end",
   onDeletedFallbackPath,
+  archivedInboxItemId,
 }: IssueActionsDropdownProps) {
   const actions = useIssueActions(issue);
-  const [assigneeOpen, setAssigneeOpen] = useState(false);
+  const [open, setOpen] = useState(false);
 
-  // The outer `relative inline-flex` is the picker's anchor box: the
-  // absolute, pointer-events-none span inside `triggerRender` fills it, so
-  // the popover positions itself relative to the dropdown's 3-dot button
-  // without us having to thread a ref through Base UI's anchor API.
   return (
-    <span className="relative inline-flex">
-      <DropdownMenu>
-        <DropdownMenuTrigger render={trigger} />
-        <DropdownMenuContent align={align} className="w-auto">
-          <IssueActionsMenuItems
-            issue={issue}
-            actions={actions}
-            primitives={dropdownPrimitives}
-            onOpenAssignee={() => setAssigneeOpen(true)}
-            onDeletedFallbackPath={onDeletedFallbackPath}
-          />
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {/* Mount the picker only once the user actually opens it. Otherwise
-          every row in a list/board would subscribe to members/agents/squads
-          /frequency queries on mount, multiplying memory + render cost. */}
-      {assigneeOpen && (
-        <AssigneePicker
-          assigneeType={issue.assignee_type}
-          assigneeId={issue.assignee_id}
-          onUpdate={actions.updateField}
-          open={assigneeOpen}
-          onOpenChange={setAssigneeOpen}
-          triggerRender={
-            <span
-              aria-hidden
-              className="pointer-events-none absolute inset-0"
-            />
-          }
-          trigger={<span />}
-          align={align}
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger render={trigger} />
+      <DropdownMenuContent align={align} className="w-auto">
+        <IssueActionsMenuItems
+          issue={issue}
+          actions={actions}
+          primitives={dropdownPrimitives}
+          onClose={() => setOpen(false)}
+          onDeletedFallbackPath={onDeletedFallbackPath}
+          archivedInboxItemId={archivedInboxItemId}
         />
-      )}
-    </span>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

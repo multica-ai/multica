@@ -19,7 +19,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { LogOut, Mail, Users } from "lucide-react";
+import { LogOut, Mail, Users } from "@multica/ui/icons";
 
 /**
  * Batch invitation handling page for first-contact users who land here
