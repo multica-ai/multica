@@ -328,6 +328,15 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Europ
 
 `multica chat` reads **the external chat session an agent is currently handling**; it is mainly for agents in chat integrations, not a general command for browsing arbitrary workspace conversations.
 
+## Move a project
+
+```bash
+multica project move <project> --to <workspace-slug-or-id> --preview
+multica project move <project> --to <workspace-slug-or-id> --yes --output json
+```
+
+`--preview` prints the plan without writing. Without `--yes`, the command prints the plan and exits non-zero. With `--yes`, it fetches a fresh preview, refuses blockers, and executes with that preview's `plan_hash`; a changed plan returns 409 and requires a new preview. Use the source workspace as your current context. See [move permissions and consequences](/projects#move-to-another-workspace).
+
 ## IDs and output formats
 
 Issues use keys like `MUL-123` or full UUIDs; short UUID prefixes are not accepted.
@@ -411,6 +420,7 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `rerun-task <run-id>` | Repeat a specific run with its original agent and trigger context | `--issue`, `--fresh` |
 | | `cancel-task <task-id>` | Cancel a running or queued run | `--issue` |
 | `project` | `list/get/create/update/delete` | Manage projects | `create`: `--title` (required), `--lead`, `--status`, `--icon`, `--start-date`, `--due-date`, `--repo` (repeatable) |
+| | `move <project>` | Move to another workspace | `--to`, `--preview`, `--yes`, `--output json` |
 | | `status <id> <status>` | Change project status | |
 | | `resource list/add/update/remove` | Manage project resources | `--type`, `--url`, `--default-branch-hint`, `--ref`, `--local-path`, `--daemon-id`, `--execution-mode` (`in_place` / `worktree` for a local directory) |
 | | `workflow get/set <project-id>` | Show the project's effective workflow, or switch it | `set <project-id> <workflow\|default>`: `--map old=new` (repeatable), `--dry-run` prints the status migration plan; the switch neither reassigns issues nor starts runs. Admins and the project lead only |

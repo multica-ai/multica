@@ -72,6 +72,18 @@ Any workspace member can create and edit projects. Members can delete projects t
 Deleting a project does not delete its issues: they detach and stay in the workspace. The project's description, status, and resources are permanently deleted.
 </Callout>
 
+## Move to another workspace
+
+Use the [CLI](/cli#move-a-project) to move one project. This is a Draft feature: ordinary writes are not fenced during a move. Do not use it with concurrent writers until the concurrency design is agreed. You must be the source workspace `owner` and an `owner` or `admin` in the target; agents cannot move projects.
+
+The preview lists blockers, member access changes, catalog mappings, and source cleanup. Active runs, enabled wakeups, project automations, open linked PRs, cross-project issue links, and local-directory resources block a move. Resolve them before confirming.
+
+Issues, comments, attachments, and authorship move together. Labels match by name; statuses fall back to their lifecycle category; unmatched custom properties/options and assignees, leads, or subscribers outside target membership are cleared. Source pins, views, inbox items, unread marks, disabled wakeups, closed PR links, and chat project context are removed. The project switches to the target workspace's default workflow.
+
+Issues receive target numbers in their original order. Old keys resolve through `GET /api/moves/resolve?issue=OLD-7` with the source workspace header. Source-only members see only that the issue moved; target members also receive its current location. Returning to a previous workspace restores its original numbers when available. Old project references use `?project=<uuid>`.
+
+Run history retains the original agents. Target members can read issue runs and their messages; deleting the source workspace still deletes its agents' run history and incurred usage. Attachment object keys remain unchanged. Authenticated downloads follow the attachment's current workspace; local `/uploads/*` remains public by design. Move audit and key-alias history are retained after ordinary deletion; the resolver only returns locations of live objects.
+
 ## Next steps
 
 - [Project resources](/project-resources) — link GitHub repositories or local directories.

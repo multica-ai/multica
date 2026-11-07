@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -652,6 +653,69 @@ func TestRunMigrationsRepairsShareLinkIndexesBeforeRetry(t *testing.T) {
 		if !recorded {
 			t.Fatalf("%s was not recorded on retry", version)
 		}
+	}
+}
+
+// TestRunMigrationsRepairsProjectMoveIndexesBeforeRetry extends the existing
+// invalid-leftover and valid-index/missing-ledger contract to the real 615–619
+// files, including the concurrent build in 619 down.
+func TestRunMigrationsRepairsProjectMoveIndexesBeforeRetry(t *testing.T) {
+	for _, tc := range []struct{ version, direction, index, table, columns string }{
+		{"615_issue_key_alias_key", "up", "idx_issue_key_alias_key", "issue_key_alias", "source_workspace_id,prefix,number"},
+		{"616_issue_key_alias_issue", "up", "idx_issue_key_alias_issue", "issue_key_alias", "issue_id,source_workspace_id"},
+		{"617_project_move_id", "up", "idx_project_move_id", "project_move", "id"},
+		{"618_project_move_source", "up", "idx_project_move_source", "project_move", "source_workspace_id,project_id,moved_at"},
+		{"619_search_index_workspace_key", "up", "idx_search_index_workspace_key", "search_index_change", "workspace_id,entity_type,entity_id"},
+		{"619_search_index_workspace_key", "down", "search_index_change_pkey", "search_index_change", "entity_type,entity_id"},
+	} {
+		t.Run(tc.version+"/"+tc.direction, func(t *testing.T) {
+			admin := openTestPool(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+			defer cancel()
+			schema := createScratchSchema(t, ctx, admin, "move_index_retry_")
+			pool := openTestPoolWithSearchPath(t, schema)
+			// Minimal rows for the real index files; duplicate UNIQUE builds also
+			// inject invalid leftovers for the intended non-unique indexes.
+			if _, err := pool.Exec(ctx, `CREATE TABLE issue_key_alias(source_workspace_id int,prefix int,number int,issue_id int);
+CREATE TABLE project_move(id int,source_workspace_id int,project_id int,moved_at int);
+CREATE TABLE search_index_change(workspace_id int,entity_type int,entity_id int);`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := pool.Exec(ctx, "INSERT INTO "+tc.table+" ("+tc.columns+") SELECT "+strings.Repeat("1,", strings.Count(tc.columns, ","))+"1 FROM generate_series(1,2)"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := pool.Exec(ctx, "CREATE UNIQUE INDEX CONCURRENTLY "+tc.index+" ON "+tc.table+"("+tc.columns+")"); err == nil {
+				t.Fatal("duplicate-key failure injection unexpectedly succeeded")
+			}
+			assertIndexValidity(t, admin, schema, tc.index, false)
+			if _, err := pool.Exec(ctx, "DELETE FROM "+tc.table+" WHERE ctid=(SELECT max(ctid) FROM "+tc.table+")"); err != nil {
+				t.Fatal(err)
+			}
+			ledger := pgx.Identifier{schema, "schema_migrations"}.Sanitize()
+			if _, err := pool.Exec(ctx, "CREATE TABLE "+ledger+"(version text PRIMARY KEY,applied_at timestamptz DEFAULT now())"); err != nil {
+				t.Fatal(err)
+			}
+			opts := runOptions{Direction: tc.direction, Files: realMigrationFiles(t, []string{tc.version}, tc.direction), SchemaMigrationsTable: schema + ".schema_migrations", AdvisoryLockKey: int64(rand.Uint64()&0x7fffffffffffffff) | 1, Hooks: hooksForDirection(tc.direction)}
+			for _, phase := range []string{"invalid leftover", "valid leftover/missing ledger"} {
+				if tc.direction == "down" {
+					if _, err := pool.Exec(ctx, "INSERT INTO "+ledger+"(version) VALUES($1)", tc.version); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					if _, err := pool.Exec(ctx, "DELETE FROM "+ledger+" WHERE version=$1", tc.version); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := runMigrations(ctx, pool, opts); err != nil {
+					t.Fatalf("%s retry: %v", phase, err)
+				}
+				assertIndexReadyAndValid(t, admin, schema, tc.index, true)
+				var recorded bool
+				if err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM "+ledger+" WHERE version=$1)", tc.version).Scan(&recorded); err != nil || recorded != (tc.direction == "up") {
+					t.Fatalf("%s ledger=%v err=%v", phase, recorded, err)
+				}
+			}
+		})
 	}
 }
 
