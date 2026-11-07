@@ -3,7 +3,10 @@ import { execFile } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createVerificationHost } from "../host/host.js";
+import {
+  createVerificationHost,
+  defaultMaxEnvironments,
+} from "../host/host.js";
 import { toProblem } from "../host/problem.js";
 import { readBindings } from "../sources/bindings.js";
 import { HealthMonitor } from "./health.js";
@@ -37,7 +40,9 @@ function argumentsFrom(argv: string[]) {
   if (!projectRoot) throw new Error("--project is required");
   const port = Number(values.get("--port") ?? defaultPort),
     idleMinutes = Number(values.get("--idle-minutes") ?? 120),
-    maxEnvironments = Number(values.get("--max-environments") ?? 2);
+    maxEnvironments = Number(
+      values.get("--max-environments") ?? defaultMaxEnvironments,
+    );
   if (!Number.isInteger(port) || port < 1024 || port > 65535)
     throw new Error("Invalid port");
   if (!Number.isInteger(idleMinutes) || idleMinutes < 1)

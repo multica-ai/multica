@@ -57,7 +57,7 @@ bash scripts/verification/install-daemon.sh
 | 变量 | 默认 | 作用 |
 | --- | --- | --- |
 | `MULTICA_VERIFICATION_PORT` | `47311` | 固定端口；被占用时守护进程启动失败，不会换端口 |
-| `MULTICA_VERIFICATION_MAX_ENVIRONMENTS` | `2` | 同时运行的环境上限，满额时 `env_start` 返回 `instanceBusy` 并列出占用者 |
+| `MULTICA_VERIFICATION_MAX_ENVIRONMENTS` | `10` | 同时运行的环境上限，满额时 `env_start` 返回 `instanceBusy` 并列出占用者 |
 | `MULTICA_VERIFICATION_IDLE_MINUTES` | `120` | 环境连续这么久没有 MCP 调用就自动停止并清理；`env_start` 可按环境覆盖 |
 | `MULTICA_VERIFICATION_BINDINGS_FILE` | 无 | 真实数据来源绑定文件，见下文 |
 

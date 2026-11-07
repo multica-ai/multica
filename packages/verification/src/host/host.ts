@@ -22,6 +22,8 @@ import { DataService } from "../data/service.js";
 import { registerOperations } from "./operations.js";
 import type { SourceBinding } from "../contracts/resources.js";
 
+export const defaultMaxEnvironments = 10;
+
 export interface HostOptions {
   projectRoot: string;
   /** Project-level directory; each host keeps its own state under `hosts/`. */
@@ -80,7 +82,7 @@ async function openHost(
     const environments = new Environments(storage, jobs, bindings, {
       sharedRoot,
       repositoryUrl: options.repositoryUrl ?? (await originUrl(projectRoot)),
-      maxEnvironments: options.maxEnvironments ?? 2,
+      maxEnvironments: options.maxEnvironments ?? defaultMaxEnvironments,
       defaultIdleMinutes: options.defaultIdleMinutes ?? 120,
       beforeStart: () =>
         collectAbandonedHosts(options, projectRoot, sharedRoot, hostRoot),

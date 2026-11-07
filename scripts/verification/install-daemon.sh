@@ -5,7 +5,7 @@ set -euo pipefail
 
 verify_repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 verify_port="${MULTICA_VERIFICATION_PORT:-47311}"
-verify_max="${MULTICA_VERIFICATION_MAX_ENVIRONMENTS:-2}"
+verify_max="${MULTICA_VERIFICATION_MAX_ENVIRONMENTS:-10}"
 verify_idle="${MULTICA_VERIFICATION_IDLE_MINUTES:-120}"
 verify_bindings="${MULTICA_VERIFICATION_BINDINGS_FILE:-}"
 verify_tools_root="${MULTICA_VERIFICATION_TOOLS_ROOT:-$HOME/.multica/verification-tools}"
