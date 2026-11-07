@@ -7,21 +7,20 @@ import { useSidebar } from "@multica/ui/components/ui/sidebar";
 import { useAppShell } from "./app-shell-context";
 import { PanelResizeHandle } from "./panel-resize-handle";
 import { AutopilotsPanel } from "./panels/autopilots-panel";
-import { ChatPeek, InboxPeek } from "./panels/list-space-peeks";
+import { ChatPeek } from "./panels/list-space-peeks";
 import { LIST_COLUMN_WIDTH_CLASS, NAV_COLUMN_MOTION_CLASS, NAV_PEEK_CLASS } from "./rail-styles";
 import { TeamPanel } from "./panels/team-panel";
 import { KeptRowsRelease, WorkPanel } from "./panels/work-panel";
 
 const PANELS: Partial<Record<AppSpaceId, () => React.ReactNode>> = {
+  inbox: WorkPanel,
   work: WorkPanel,
   team: TeamPanel,
   autopilots: AutopilotsPanel,
 };
 
-// Inbox and Chat keep their lists in their pages, so from another space they
-// preview through a standalone copy of the list, at the list width.
+// Chat previews through a standalone copy of its list, at the list width.
 const LIST_PEEKS: Partial<Record<AppSpaceId, () => React.ReactNode>> = {
-  inbox: InboxPeek,
   chat: ChatPeek,
 };
 const PEEKS: Partial<Record<AppSpaceId, () => React.ReactNode>> = {
@@ -38,7 +37,7 @@ export function SpacePanelContent({ space }: { space: AppSpaceId | null }) {
 /**
  * The space panel inside the content card: a column on the card's leading
  * edge, separated from the page by one hairline. Spaces without a shell
- * panel (Inbox, Chat, Settings) render their own `ListColumn` instead, so
+ * panel (Chat, Settings) render their own `ListColumn` instead, so
  * nothing mounts for them. While collapsed, hovering a rail space previews
  * its panel over the page.
  */

@@ -23,7 +23,8 @@ const WIDTH_VARIABLE: Record<PanelWidth, string> = {
 };
 
 /**
- * A column's trailing edge: drag to resize, click to collapse. Every column
+ * A column's trailing edge: drag to resize, click to collapse unless
+ * `resizeOnly` keeps the column expanded. Every column
  * sized by the same width variable shares the one committed width. The preview
  * writes the width straight onto the panel element and commits once on
  * release, so a drag re-renders nothing until the pointer comes up.
@@ -32,10 +33,13 @@ export function PanelResizeHandle({
   panelRef,
   onToggle,
   width = "nav",
+  resizeOnly = false,
 }: {
   panelRef: React.RefObject<HTMLElement | null>;
   onToggle: () => void;
   width?: PanelWidth;
+  /** Drag to resize without offering the shared navigation collapse action. */
+  resizeOnly?: boolean;
 }) {
   const { t } = useT("ui");
   const { commitWidth, commitListWidth } = useSidebarResize();
@@ -104,12 +108,12 @@ export function PanelResizeHandle({
     <button
       type="button"
       data-slot="space-panel-resize"
-      aria-label={t(($) => $.toggle_sidebar)}
-      title={t(($) => $.toggle_sidebar)}
+      aria-label={resizeOnly ? t(($) => $.resize_list_column) : t(($) => $.toggle_sidebar)}
+      title={resizeOnly ? t(($) => $.resize_list_column) : t(($) => $.toggle_sidebar)}
       tabIndex={-1}
       onPointerDown={onPointerDown}
       onClick={() => {
-        if (!draggedRef.current) onToggle();
+        if (!resizeOnly && !draggedRef.current) onToggle();
       }}
       className="absolute inset-y-0 -right-1 z-20 w-2 cursor-ew-resize touch-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:transition-colors hover:after:bg-ring/60"
     />

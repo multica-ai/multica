@@ -35,7 +35,7 @@ type RailBadge =
   | { kind: "dot" };
 
 /**
- * Rail badges. Inbox and Chat count unread; Team only flags that something
+ * Rail badges. Work carries Inbox unread; Chat counts unread messages. Team flags that something
  * needs a look — the panel says what. A dot must be something the user can
  * clear, so a failed autopilot run is shown in the Autopilots panel only.
  */
@@ -70,7 +70,7 @@ function useRailBadges(): Partial<Record<RailSpaceId, RailBadge>> {
   const { stuck } = useTeamAgentStatus(wsId);
 
   const badges: Partial<Record<RailSpaceId, RailBadge>> = {};
-  if (inboxUnread > 0) badges.inbox = { kind: "count", value: inboxUnread, tone: "brand" };
+  if (inboxUnread > 0) badges.work = { kind: "count", value: inboxUnread, tone: "brand" };
   if (chatUnread > 0) badges.chat = { kind: "count", value: chatUnread, tone: "neutral" };
   if (stuck.length > 0) badges.team = { kind: "dot" };
   return badges;
@@ -157,7 +157,7 @@ function RailSpaceLink({
 }
 
 /**
- * The app rail: workspaces, New issue and search, the five spaces, then help,
+ * The app rail: workspaces, New issue and search, the spaces, then help,
  * settings and the account. It sits on the app shell, outside the content
  * card, and stays put while the panel beside it collapses. Desktop passes
  * `globalActions={false}`: its title bar carries New issue and search.
@@ -231,13 +231,13 @@ export function AppRail({
         <div className="h-2 shrink-0" />
       )}
       <ul className="flex flex-col items-center gap-0.5">
-        {RAIL_SPACES.map((id) => (
+        {RAIL_SPACES.filter((id) => id !== "inbox").map((id) => (
           <RailSpaceLink
             key={id}
             space={id}
             {...items[id]}
             href={shell?.spaceHref(id, items[id].href) ?? items[id].href}
-            active={space === id}
+            active={space === id || (space === "inbox" && id === "work")}
             badge={badges[id]}
           />
         ))}

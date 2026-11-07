@@ -1041,7 +1041,7 @@ export function InboxPage() {
   if (viewLoading) {
     return (
       <div className="flex min-h-0 flex-1">
-        <ListColumn collapsed={listCollapsed} width="list">
+        <ListColumn resizeOnly collapsed={listCollapsed} width="list">
           <div className="flex h-12 shrink-0 items-center pl-5 pr-2">
             <Skeleton className="h-5 w-16" />
           </div>
@@ -1067,7 +1067,7 @@ export function InboxPage() {
 
   return (
     <div className="flex min-h-0 flex-1">
-      <ListColumn collapsed={listCollapsed} width="list">{listPanel}</ListColumn>
+      <ListColumn resizeOnly collapsed={listCollapsed} width="list">{listPanel}</ListColumn>
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
         {detailContent ?? (
           <>
