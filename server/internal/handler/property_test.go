@@ -219,6 +219,114 @@ func TestPropertyDefinitionValidation(t *testing.T) {
 	}
 }
 
+func TestPropertySelectOptionLimit(t *testing.T) {
+	for _, propertyType := range []string{"select", "multi_select"} {
+		t.Run(propertyType, func(t *testing.T) {
+			options := make([]PropertyOption, 201)
+			for i := range options {
+				options[i] = PropertyOption{Name: fmt.Sprintf("Service %03d", i), Color: "#3b82f6"}
+			}
+			body := map[string]any{
+				"name": "Services" + uuid.NewString()[:8], "type": propertyType,
+				"config": PropertyConfig{Options: options[:51]},
+			}
+			created := createTestProperty(t, body)
+			if len(created.Config.Options) != 51 {
+				t.Fatalf("created option count = %d, want 51", len(created.Config.Options))
+			}
+			copy(options, created.Config.Options)
+			var updated PropertyResponse
+			testutil.Call(t, testHandler.UpdateProperty,
+				withURLParam(newRequest(http.MethodPatch, "/api/properties/"+created.ID, map[string]any{
+					"config": PropertyConfig{Options: options[:200]},
+				}), "id", created.ID),
+			).Want(http.StatusOK).JSON(&updated)
+			if len(updated.Config.Options) != 200 || updated.Config.Options[0].ID != created.Config.Options[0].ID {
+				t.Fatalf("expanding to 200 did not preserve options: %+v", updated.Config)
+			}
+
+			body["name"] = "OverLimit" + uuid.NewString()[:8]
+			body["config"] = PropertyConfig{Options: options}
+			response := testutil.Call(t, testHandler.CreateProperty,
+				newRequest(http.MethodPost, "/api/properties", body),
+			).Want(http.StatusBadRequest)
+			if !strings.Contains(response.Body.String(), "more than 200 options") {
+				t.Fatalf("unexpected create limit error: %s", response.Body.String())
+			}
+			response = testutil.Call(t, testHandler.UpdateProperty,
+				withURLParam(newRequest(http.MethodPatch, "/api/properties/"+created.ID, map[string]any{
+					"config": PropertyConfig{Options: options},
+				}), "id", created.ID),
+			).Want(http.StatusBadRequest)
+			if !strings.Contains(response.Body.String(), "more than 200 options") {
+				t.Fatalf("unexpected update limit error: %s", response.Body.String())
+			}
+
+			issueID := dbfx.Issue(t, "large select option list")
+			lastID := updated.Config.Options[199].ID
+			var value any = lastID
+			if propertyType == "multi_select" {
+				value = []string{lastID}
+			}
+			if response := setIssuePropertyRaw(t, issueID, created.ID, value); response.Code != http.StatusOK {
+				t.Fatalf("selecting option 200: %d: %s", response.Code, response.Body.String())
+			}
+			filter, _ := json.Marshal(map[string][]string{created.ID: {lastID}})
+			var listed struct {
+				Issues []IssueResponse `json:"issues"`
+			}
+			testutil.Call(t, testHandler.ListIssues,
+				newRequest(http.MethodGet, "/api/issues?properties="+url.QueryEscape(string(filter)), nil),
+			).Want(http.StatusOK).JSON(&listed)
+			if len(listed.Issues) != 1 || listed.Issues[0].ID != issueID {
+				t.Fatalf("filtering by option 200 did not return the issue: %+v", listed.Issues)
+			}
+		})
+	}
+}
+
+func TestIssuePropertyMultiSelectValueLimit(t *testing.T) {
+	options := make([]PropertyOption, 200)
+	for i := range options {
+		options[i] = PropertyOption{Name: fmt.Sprintf("Service %03d", i), Color: "#3b82f6"}
+	}
+	property := createTestProperty(t, map[string]any{
+		"name": "SelectionLimit" + uuid.NewString()[:8], "type": "multi_select",
+		"config": PropertyConfig{Options: options},
+	})
+	ids := make([]string, 51)
+	for i := range ids {
+		ids[i] = property.Config.Options[149+i].ID
+	}
+	title := "selection limit " + uuid.NewString()
+	body := map[string]any{"title": title, "properties": map[string]any{property.ID: ids}}
+	response := testutil.Call(t, testHandler.CreateIssue,
+		newRequest(http.MethodPost, "/api/issues", body),
+	).Want(http.StatusBadRequest)
+	if !strings.Contains(response.Body.String(), "more than 50 options") || countIssuesWithAtomicPropertyTitle(t, title) != 0 {
+		t.Fatalf("over-limit create should fail atomically: %s", response.Body.String())
+	}
+	body["properties"] = map[string]any{property.ID: ids[:50]}
+	created := createIssueWithPropertyBody(t, body)
+	if values, ok := created.Properties[property.ID].([]any); !ok || len(values) != 50 {
+		t.Fatalf("50 selections not preserved on create: %#v", created.Properties)
+	}
+	if response := setIssuePropertyRaw(t, created.ID, property.ID, ids[:50]); response.Code != http.StatusOK {
+		t.Fatalf("50 selections rejected: %d: %s", response.Code, response.Body.String())
+	}
+	if response := setIssuePropertyRaw(t, created.ID, property.ID, ids); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "more than 50 options") {
+		t.Fatalf("51 selections should fail: %d: %s", response.Code, response.Body.String())
+	}
+	var stored []byte
+	if err := testPool.QueryRow(context.Background(), `SELECT properties -> $2 FROM issue WHERE id = $1`, created.ID, property.ID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	var values []string
+	if err := json.Unmarshal(stored, &values); err != nil || len(values) != 50 {
+		t.Fatalf("rejected write changed saved values: %s, %v", stored, err)
+	}
+}
+
 // TestPropertyAdminGate verifies the two definition-management gates: agent
 // actors are rejected outright (even though the fixture user is the workspace
 // owner), while value writes from the same agent context succeed.

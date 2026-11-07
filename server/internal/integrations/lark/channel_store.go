@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -120,6 +121,7 @@ func (s *ChannelStore) ListActiveLarkInstallations(ctx context.Context) ([]Insta
 
 func (s *ChannelStore) UpsertLarkInstallation(ctx context.Context, arg UpsertInstallationParams) (Installation, error) {
 	cfg, err := encodeInstallConfig(Installation{
+		BindingGeneration:  uuid.NewString(),
 		AppID:              arg.AppID,
 		AppSecretEncrypted: arg.AppSecretEncrypted,
 		TenantKey:          arg.TenantKey,
@@ -185,31 +187,12 @@ func (s *ChannelStore) SetLarkInstallationStatus(ctx context.Context, arg SetIns
 	})
 }
 
-// SetLarkInstallationBotUnionID folds bot_union_id into the JSONB config via a
-// read-modify-write through SetChannelInstallationConfig (channel_installation
-// has no dedicated union_id column). This is the operator union_id backfill,
-// keyed by id and effectively single-writer, so the non-atomic RMW is safe —
-// the same shape the channel.sql comment documents for this query.
+// SetLarkInstallationBotUnionID patches only identity metadata so a concurrent
+// inbound receipt or rebind cannot be overwritten with a stale config snapshot.
 func (s *ChannelStore) SetLarkInstallationBotUnionID(ctx context.Context, arg SetInstallationBotUnionIDParams) error {
-	row, err := s.Queries.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
-		ID:          arg.ID,
-		ChannelType: channelTypeFeishu,
-	})
-	if err != nil {
-		return err
-	}
-	inst, err := installationFromRow(row)
-	if err != nil {
-		return err
-	}
-	inst.BotUnionID = arg.BotUnionID
-	cfg, err := encodeInstallConfig(inst)
-	if err != nil {
-		return err
-	}
-	return s.Queries.SetChannelInstallationConfig(ctx, db.SetChannelInstallationConfigParams{
-		ID:     arg.ID,
-		Config: cfg,
+	return s.Queries.SetFeishuInstallationBotUnionID(ctx, db.SetFeishuInstallationBotUnionIDParams{
+		ID:         arg.ID,
+		BotUnionID: arg.BotUnionID.String,
 	})
 }
 

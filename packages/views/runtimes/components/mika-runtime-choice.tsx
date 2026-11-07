@@ -27,6 +27,7 @@ export interface MikaRuntimeSelection {
  */
 export function MikaRuntimeChoice({
   runtimes,
+  workspaceSlug,
   runtimesLoading,
   currentUserId = null,
   value,
@@ -35,6 +36,7 @@ export function MikaRuntimeChoice({
   layout = "dropdown",
 }: {
   runtimes: AgentRuntime[];
+  workspaceSlug?: string;
   runtimesLoading?: boolean;
   /** Only used by the dropdown layout, to label runtime owners. */
   currentUserId?: string | null;
@@ -55,7 +57,11 @@ export function MikaRuntimeChoice({
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    // min-w-0: DialogContent is a CSS grid, and a grid item's automatic
+    // minimum width is its content width. Without this, an overlong runtime
+    // or model name widens the grid column past the dialog and the pickers'
+    // `truncate` never kicks in.
+    <div className="flex min-w-0 flex-col gap-3">
       {layout === "list" ? (
         // Capped at ~4 rows so the install commands above stay reachable when
         // a member has many machines registered.
@@ -82,6 +88,7 @@ export function MikaRuntimeChoice({
         />
       )}
       <ModelDropdown
+        workspaceSlug={workspaceSlug}
         runtimeId={value.runtimeId || null}
         runtimeOnline={selected?.status === "online"}
         value={value.model}

@@ -4,11 +4,12 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import type { StoreApi } from "zustand/vanilla";
 import type { IssueViewState } from "@multica/core/issues/stores/view-store";
 import type { IssueViewBaseline } from "@multica/core/issue-views/baseline";
-import { AlertTriangle, FilterX, ListTodo, Plus } from "lucide-react";
+import { AlertTriangle, FilterX, ListTodo, Plus } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useModalStore } from "@multica/core/modals";
 import { useQuery } from "@tanstack/react-query";
 import { workspaceWakeupSummariesOptions } from "@multica/core/issues/wakeups";
 import {
@@ -20,7 +21,12 @@ import {
   seedIssueSurfaceViewState,
 } from "@multica/core/issues/stores/surface-view-store";
 import { useActiveIssueView } from "@multica/core/issue-views/use-active-view";
-import { baselineFromQuery } from "@multica/core/issue-views/baseline";
+import { UNREAD_VIEW_BASELINE, isUnreadView } from "@multica/core/issue-views/unread-view";
+import {
+  issueViewDefinitionFromState,
+  issueViewSeedDefinition,
+  sameFilterMeaning,
+} from "@multica/core/issue-views/definition";
 import { ViewBaselineProvider, useViewBaseline } from "./view-baseline-context";
 import type { IssueViewScope } from "@multica/core/issue-views/queries";
 import {
@@ -31,20 +37,23 @@ import {
 } from "@multica/core/issues/surface/scope";
 import type { Issue } from "@multica/core/types";
 import { BoardView } from "../components/board-view";
+import { BOARD_COL_WIDTH } from "../components/board-column";
 import { BatchActionToolbar } from "../components/batch-action-toolbar";
 import { GanttView } from "../components/gantt-view";
-import { IssuesHeader } from "../components/issues-header";
 import { ListView } from "../components/list-view";
 import { SwimLaneView } from "../components/swimlane-view";
 import { TableView } from "../components/table-view";
 import { useT } from "../../i18n";
+import { CollectionPageState } from "../../layout/collection-page";
 import { IssueContextMenuProvider } from "../actions";
 import { IssueSurfaceActionsProvider } from "./actions-context";
 import { IssuePeekHost } from "../components/issue-peek";
 import { IssueSurfaceSelectionProvider } from "./selection-context";
+import { ColumnStatusesProvider } from "./column-statuses-context";
 import type { IssueCreateDefaults, IssueSurfaceProps } from "./types";
 import {
   useIssueSurfaceController,
+  type FilterDependencyKind,
   type IssueSurfaceController,
 } from "./use-issue-surface-controller";
 
@@ -111,10 +120,6 @@ export function IssueSurface({
   const seedDefinition = activeView
     ? { ...activeView.query, ...activeView.display }
     : null;
-  const viewBaseline = useMemo(
-    () => (activeView ? baselineFromQuery(activeView.query) : null),
-    [activeView],
-  );
   // While a view is open, the scope axis the view captured belongs to the
   // VIEW, not to whichever tab the user stood on: workspace/project views
   // carry an assignee-type variant, my views a relation variant. The user's
@@ -127,6 +132,7 @@ export function IssueSurface({
       : activeView && scope.type === "my"
         ? { ...scope, relation: myRelationForViewVariant(activeView.scope_variant) }
         : scope;
+  const viewBaseline = isUnreadView(activeView) ? UNREAD_VIEW_BASELINE : null;
   const store = useMemo(() => {
     // First-open seeding happens HERE, at store-creation time for this key:
     // no React component has subscribed to the new key's store yet, so the
@@ -135,9 +141,19 @@ export function IssueSurface({
     if (seedDefinition) {
       seedIssueSurfaceViewState(resolvedSurfaceKey, seedDefinition);
     }
-    return getIssueSurfaceViewStore(resolvedSurfaceKey);
+    const viewStore = getIssueSurfaceViewStore(resolvedSurfaceKey);
+    if (viewBaseline?.unread) keepUnreadFilter(viewStore);
+    return viewStore;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- seed identity follows the key
   }, [resolvedSurfaceKey]);
+  // Seeding happens once per key, but the stored state can be replaced later:
+  // a workspace switch reloads it from that workspace's preferences, which may
+  // never have held the condition. Re-apply it whenever it goes missing.
+  useEffect(() => {
+    if (!viewBaseline?.unread) return;
+    keepUnreadFilter(store);
+    return store.subscribe(() => keepUnreadFilter(store));
+  }, [store, viewBaseline]);
 
   // Every change of this key tears down and remounts the ENTIRE surface
   // (providers, DnD, all columns/cards) — by design for data-window changes,
@@ -154,34 +170,38 @@ export function IssueSurface({
   return (
     <ViewStoreProvider store={store}>
       <ViewBaselineProvider baseline={viewBaseline}>
-      {/* Remount on data-window change: the list queries keep the previous
-          key's data as a placeholder (keepPreviousData) so sort/filter
-          changes within ONE surface never flash a skeleton — but reusing the
-          mounted observer across windows made project A's cards impersonate
-          project B (with isLoading=false, so no skeleton either) until B's
-          fetch landed. A window-keyed remount gives the new window a fresh
-          observer: cold window → skeleton, warm window → instant cache hit.
-          The window identity is wsId + scope — wsId is required because the
-          workspace layout does not remount on workspace switch and two
-          workspaces share the same scope key (e.g. "workspace:all"). Keyed
-          by data identity, not surfaceKey (view-preference identity). */}
-      <IssueSurfaceContent
-        key={contentKey}
-        scope={effectiveScope}
-        modes={modes}
-        createDefaults={createDefaults}
-        search={search}
-        renderHeader={renderHeader}
-        renderEmpty={renderEmpty}
-        renderLoading={renderLoading}
-        clientFilter={clientFilter}
-        showClientEmpty={showClientEmpty}
-        batchToolbar={batchToolbar}
-        contentClassName={contentClassName}
-      />
+        {/* Remount on data-window change: the list queries keep the previous
+            key's data as a placeholder (keepPreviousData) so sort/filter
+            changes within ONE surface never flash a skeleton — but reusing the
+            mounted observer across windows made project A's cards impersonate
+            project B (with isLoading=false, so no skeleton either) until B's
+            fetch landed. A window-keyed remount gives the new window a fresh
+            observer: cold window → skeleton, warm window → instant cache hit.
+            The window identity is wsId + scope — wsId is required because the
+            workspace layout does not remount on workspace switch and two
+            workspaces share the same scope key (e.g. "workspace:all"). Keyed
+            by data identity, not surfaceKey (view-preference identity). */}
+        <IssueSurfaceContent
+          key={contentKey}
+          scope={effectiveScope}
+          modes={modes}
+          createDefaults={createDefaults}
+          search={search}
+          renderHeader={renderHeader}
+          renderEmpty={renderEmpty}
+          renderLoading={renderLoading}
+          clientFilter={clientFilter}
+          showClientEmpty={showClientEmpty}
+          batchToolbar={batchToolbar}
+          contentClassName={contentClassName}
+        />
       </ViewBaselineProvider>
     </ViewStoreProvider>
   );
+}
+
+function keepUnreadFilter(store: StoreApi<IssueViewState>) {
+  if (!store.getState().unreadFilter) store.setState({ unreadFilter: true });
 }
 
 function IssueSurfaceContent({
@@ -261,40 +281,21 @@ function IssueSurfaceContent({
           actions. */}
       <IssueContextMenuProvider>
       <IssueSurfaceSelectionProvider selection={controller.selection}>
-        {renderHeader ? (
-          renderHeader(renderContext)
-        ) : (
-          <IssuesHeader
-            scopedIssues={controller.surfaceIssues}
-            workingAgents={controller.workingAgents}
-            allowGantt={controller.allowGantt}
-            isRefreshing={controller.isRefreshing}
-            facetCountsExact={
-              controller.facetCountsExact
-            }
-            tableFacetCounts={controller.tableFacetCounts}
-            onTableFacetChange={controller.setActiveTableFacet}
-            saveViewScope={
-              scope.type === "project"
-                ? { kind: "project", projectId: scope.projectId }
-                : scope.type === "workspace"
-                  ? { kind: "workspace" }
-                  : null
-            }
-          />
-        )}
+      <ColumnStatusesProvider statuses={controller.columnStatuses}>
+        {renderHeader?.(renderContext)}
         {/* Every view opens the side peek on Shift+Click. The host wraps the
             loading and empty states too, so a view switch that briefly shows
             a skeleton keeps the peek open. */}
         <IssuePeekHost>
-        {/* A failed status catalog precedes loading/empty/content on purpose.
-            Row fetching is suspended while it is down (a custom status filter
-            cannot be routed without it), so every branch below would render an
-            unexplained empty surface with no way out. (MUL-6243) */}
-        {controller.isStatusCatalogError ? (
-          <FilterDependencyErrorState kind="status" onRetry={controller.retryStatusCatalog} />
-        ) : controller.isWorkingFilterError ? (
-          <FilterDependencyErrorState kind="working" onRetry={controller.retryWorkingFilter} />
+        {/* A failed filter dependency precedes loading/empty/content on
+            purpose. Row fetching is suspended while it is down, so every
+            branch below would render an unexplained empty surface with no way
+            out. */}
+        {controller.filterDependencyError ? (
+          <FilterDependencyErrorState
+            kind={controller.filterDependencyError.kind}
+            onRetry={controller.filterDependencyError.retry}
+          />
         ) : controller.isLoading ? (
           renderLoading ? (
             renderLoading(renderContext)
@@ -313,20 +314,32 @@ function IssueSurfaceContent({
           ) : renderEmpty ? (
             renderEmpty(renderContext)
           ) : (
-            <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
-              <ListTodo className="h-10 w-10 text-faint-foreground" />
-              <p className="text-body">{t(($) => $.detail.empty_issues_title)}</p>
-              <p className="text-caption">{t(($) => $.detail.empty_issues_hint)}</p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-1"
-                onClick={() => controller.openCreateIssue()}
-              >
-                <Plus className="size-3.5 mr-1.5" />
-                {t(($) => $.detail.empty_issues_new_button)}
-              </Button>
-            </div>
+            <CollectionPageState
+              icon={ListTodo}
+              title={t(($) => $.detail.empty_issues_title)}
+              description={t(($) => $.detail.empty_issues_hint)}
+              actions={
+                <>
+                  <Button size="sm" onClick={() => controller.openCreateIssue()}>
+                    <Plus aria-hidden="true" />
+                    {t(($) => $.detail.empty_issues_new_button)}
+                  </Button>
+                  {scope.type === "project" ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        useModalStore
+                          .getState()
+                          .open("project-add-issue", { projectId: scope.projectId })
+                      }
+                    >
+                      {t(($) => $.detail.empty_issues_add_existing)}
+                    </Button>
+                  ) : null}
+                </>
+              }
+            />
           )
         ) : (
           <div className={cn("flex flex-col flex-1 min-h-0", contentClassName)}>
@@ -334,7 +347,6 @@ function IssueSurfaceContent({
               <BoardView
                 issues={issues}
                 visibleStatuses={controller.visibleStatuses}
-                hiddenStatuses={controller.hiddenStatuses}
                 onMoveIssue={controller.moveIssue}
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
@@ -348,7 +360,6 @@ function IssueSurfaceContent({
               <ListView
                 issues={issues}
                 visibleStatuses={controller.visibleStatuses}
-                hiddenStatuses={controller.hiddenStatuses}
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
                 projectId={controller.projectId}
@@ -378,7 +389,6 @@ function IssueSurfaceContent({
                 unfilteredIssues={swimlaneIssues}
                 activeFilters={controller.activeFilters}
                 visibleStatuses={controller.visibleStatuses}
-                hiddenStatuses={controller.hiddenStatuses}
                 onMoveIssue={controller.moveIssue}
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
@@ -397,6 +407,7 @@ function IssueSurfaceContent({
             }
           />
         )}
+      </ColumnStatusesProvider>
       </IssueSurfaceSelectionProvider>
       </IssueContextMenuProvider>
     </IssueSurfaceActionsProvider>
@@ -411,28 +422,37 @@ function FilterDependencyErrorState({
   kind,
   onRetry,
 }: {
-  kind: "status" | "working";
+  kind: FilterDependencyKind;
   onRetry: () => void;
 }) {
   const { t } = useT("issues");
   return (
-    <div
+    <CollectionPageState
       role="alert"
-      className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground"
-    >
-      <AlertTriangle className="h-10 w-10 text-faint-foreground" />
-      <p className="text-body">
-        {kind === "working"
+      tone="warning"
+      icon={AlertTriangle}
+      title={
+        kind === "working"
           ? t(($) => $.working_filter_error.title)
-          : t(($) => $.status_catalog_error.title)}
-      </p>
-      {kind === "status" && (
-        <p className="text-caption">{t(($) => $.status_catalog_error.hint)}</p>
-      )}
-      <Button variant="outline" size="sm" className="mt-1" onClick={onRetry}>
-        {t(($) => $.status_catalog_error.retry)}
-      </Button>
-    </div>
+          : kind === "unread"
+            ? t(($) => $.unread_filter_error.title)
+            : kind === "relation"
+              ? t(($) => $.relation_filter_error.title)
+              : t(($) => $.status_catalog_error.title)
+      }
+      description={
+        kind === "status"
+          ? t(($) => $.status_catalog_error.hint)
+          : kind === "relation"
+            ? t(($) => $.relation_filter_error.hint)
+            : undefined
+      }
+      actions={
+        <Button variant="outline" size="sm" onClick={onRetry}>
+          {t(($) => $.status_catalog_error.retry)}
+        </Button>
+      }
+    />
   );
 }
 
@@ -446,40 +466,95 @@ function FilteredEmptyState() {
   const handleClear = baseline
     ? () => resetFiltersTo(baseline.raw)
     : clearFilters;
+  const baselineQuery = useMemo(
+    () => (baseline ? issueViewSeedDefinition({ query: { ...baseline.raw }, display: {} }).query : null),
+    [baseline],
+  );
+  // Only the view's own conditions are on, so there is nothing to clear.
+  const atBaseline = useViewStore(
+    (s) => !!baselineQuery && sameFilterMeaning(baselineQuery, issueViewDefinitionFromState(s).query),
+  );
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
-      <FilterX className="h-10 w-10 text-faint-foreground" />
-      <p className="text-body">{t(($) => $.filtered_empty.title)}</p>
-      <Button variant="outline" size="sm" className="mt-1" onClick={handleClear}>
-        {t(($) => $.filtered_empty.clear_button)}
-      </Button>
-    </div>
+    <CollectionPageState
+      size="compact"
+      icon={FilterX}
+      title={
+        atBaseline && baseline?.unread
+          ? t(($) => $.filtered_empty.unread_title)
+          : t(($) => $.filtered_empty.title)
+      }
+      actions={
+        atBaseline ? undefined : (
+          <Button variant="outline" size="sm" onClick={handleClear}>
+            {t(($) => $.filtered_empty.clear_button)}
+          </Button>
+        )
+      }
+    />
   );
 }
 
 // Table is deliberately absent. It owns its own placeholders, drawn as rows
 // inside its real grid so the header, column widths and toolbar are up before
 // any data is — a surface-level stand-in would replace all of that with bars
-// of a different shape and then jump when the rows arrived.
+// of a different shape and then jump when the rows arrived. For the same
+// reason list and board are drawn box-for-box with `ListView` (40px group
+// header, issue-row-height rows) and `BoardView` (fixed-width columns, plain
+// one-line cards).
 function IssueSurfaceSkeleton({ mode }: { mode: string }) {
   if (mode === "list") {
     return (
-      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-10 w-full rounded-lg" />
-        ))}
+      <div className="flex-1 min-h-0 overflow-hidden p-2 pt-0">
+        <div className="space-y-1">
+          {[4, 3].map((rows, g) => (
+            <div key={g}>
+              <div className="flex h-10 items-center gap-2 rounded-lg bg-muted px-3">
+                <Skeleton className="size-3.5 rounded-full" />
+                <Skeleton className="h-3.5 w-20" />
+              </div>
+              {Array.from({ length: rows }).map((_, i) => (
+                <div key={i} className="flex h-[var(--issue-row-height)] items-center gap-2 px-4">
+                  <Skeleton className="size-4 shrink-0 rounded-full" />
+                  <span className="min-w-16 shrink-0">
+                    <Skeleton className="h-3 w-12" />
+                  </span>
+                  <Skeleton className="h-3.5 w-full max-w-80" />
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-1 min-h-0 gap-4 overflow-x-auto p-4">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <div key={i} className="flex min-w-52 flex-1 flex-col gap-2">
-          <Skeleton className="h-4 w-20" />
-          <Skeleton className="h-24 w-full rounded-lg" />
-          <Skeleton className="h-24 w-full rounded-lg" />
+    <div className="flex flex-1 min-h-0 gap-4 overflow-hidden p-2">
+      {[3, 2, 2, 1, 1].map((cards, c) => (
+        <div
+          key={c}
+          style={{ width: BOARD_COL_WIDTH }}
+          className="flex shrink-0 flex-col rounded-xl bg-muted/40 p-2"
+        >
+          <div className="mb-2 flex h-6 items-center gap-2 px-1.5">
+            <Skeleton className="size-2.5 rounded-full" />
+            <Skeleton className="h-3.5 w-20" />
+          </div>
+          <div className="p-1">
+            {Array.from({ length: cards }).map((_, i) => (
+              <div key={i} className={i === 0 ? undefined : "pt-2"}>
+                <div className="rounded-lg border-[0.5px] border-surface-border bg-surface px-2.5 py-3">
+                  <div className="flex h-4 items-center">
+                    <Skeleton className="h-3 w-14" />
+                  </div>
+                  <div className="mt-1 flex h-5 items-center">
+                    <Skeleton className="h-3.5 w-4/5" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       ))}
     </div>

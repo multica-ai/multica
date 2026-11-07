@@ -4,6 +4,7 @@ description: Créez un bot Slack pour un agent et utilisez-le dans les messages 
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
 Multica utilise votre propre application Slack. Une fois la connexion établie, les membres de l'équipe peuvent envoyer des messages directs au bot, le @mentionner dans un canal, utiliser `/issue` pour créer des tâches, `/new` pour démarrer une nouvelle discussion Multica ou `/clear` pour réinitialiser le contexte de l'agent dans la discussion en cours.
 
@@ -16,7 +17,12 @@ La connexion doit être effectuée par un propriétaire ou un administrateur de 
 - un Bot User OAuth Token (jeton du bot), commençant par `xoxb-` ;
 - un App-level Token (jeton d'application), commençant par `xapp-`.
 
-## 1. Créer l'application Slack à partir d'un manifeste
+## Connecter le bot
+
+<Steps>
+<Step>
+
+### Créer l'application Slack à partir d'un manifeste [#1-créer-lapplication-slack-à-partir-dun-manifeste]
 
 Ouvrez [Slack API Apps](https://api.slack.com/apps), cliquez sur **Create New App → From a manifest**, choisissez l'espace de travail Slack, puis collez ce qui suit sous **YAML** :
 
@@ -72,7 +78,7 @@ settings:
 Avant de créer l'application, vous pouvez remplacer les deux occurrences de `Multica` par le nom de l'agent. Ne supprimez aucune portée ni aucun événement du manifeste, sinon les messages directs, les mentions dans les canaux, les réponses, `/issue`, `/new` ou `/clear` risquent de ne plus fonctionner.
 
 <Callout type="warning">
-Les noms des commandes slash Slack sont globaux à l'espace de travail. Si une autre application installée utilise déjà `/new` ou `/clear`, Slack rejette la commande en conflit lorsque vous créez ou mettez à jour l'application. Résolvez le conflit, ou envoyez la forme message — `@Multica /new [message]` ou `@Multica /clear [message]` — pour contourner l'interception des commandes slash natives.
+Les noms des commandes slash Slack sont globaux à l'espace de travail. Si une autre application installée utilise déjà `/new` ou `/clear`, Slack rejette la commande en conflit lorsque vous créez ou mettez à jour l'application. Résolvez le conflit, ou envoyez la forme message `@Multica /new [message]` ou `@Multica /clear [message]` pour contourner l'interception des commandes slash natives.
 </Callout>
 
 <Callout type="warning">
@@ -81,24 +87,28 @@ Si cette application Slack a été installée avant la prise en charge des pièc
 
 Le bot se connecte à Slack en sortie via Socket Mode : aucune Request URL publique ni OAuth Redirect URL n'est donc nécessaire.
 
-## 2. Obtenir les deux jetons
+</Step>
+<Step>
 
-### Jeton du bot
+### Obtenir les deux jetons [#2-obtenir-les-deux-jetons]
+
+#### Jeton du bot
 
 1. Dans l'application Slack, ouvrez **Install App**.
 2. Cliquez sur **Install to Workspace** et approuvez les permissions.
-3. Copiez le **Bot User OAuth Token** — il commence par `xoxb-`.
+3. Copiez le **Bot User OAuth Token**, qui commence par `xoxb-`.
 
-
-### Jeton d'application
+#### Jeton d'application
 
 1. Ouvrez **Basic Information → App-Level Tokens**.
 2. Cliquez sur **Generate Token and Scopes**.
 3. Ajoutez la portée `connections:write`.
 4. Générez et copiez le jeton commençant par `xapp-`.
 
+</Step>
+<Step>
 
-## 3. Le connecter à un agent
+### Le connecter à un agent [#3-le-connecter-à-un-agent]
 
 1. Dans Multica, ouvrez **Agents** et sélectionnez l'agent à connecter à Slack.
 2. Accédez à **Intégrations** et cliquez sur **Connecter Slack**.
@@ -110,6 +120,9 @@ Multica vérifie que les deux jetons proviennent de la même application. Une fo
 <Callout type="warning">
 Les deux jetons sont stockés chiffrés sur le serveur Multica. Les jetons sont des identifiants : ne les placez pas dans des tâches, des commentaires ou des dépôts de code. Une application déjà connectée à un autre agent ou espace de travail ne peut pas être réutilisée directement ; supprimez d'abord la connexion d'origine.
 </Callout>
+
+</Step>
+</Steps>
 
 ## Première utilisation
 
@@ -133,7 +146,7 @@ Le bot ne répond qu'aux messages de canal qui le @mentionnent explicitement. Lo
 
 ### Envoyer des fichiers
 
-Joignez des fichiers à un message direct, ou à un message de canal qui @mentionne le bot. Ils arrivent en pièces jointes du même travail, si bien que l'agent les lit en même temps que votre demande.
+Joignez des fichiers à un message direct, ou à un message de canal qui @mentionne le bot. Ils sont transmis à l'agent en pièces jointes et traités avec le message.
 
 Cela nécessite la portée `files:read` : si l'application a été installée avant la prise en charge des pièces jointes, consultez la note de l'étape 1. Chaque fichier doit faire 20 Mio au maximum, et un message peut en contenir 10 au plus. Les fichiers plus volumineux, encore en cours d'envoi ou hébergés hors de Slack (un lien Google Drive ou Dropbox, par exemple) sont ignorés ; le texte du message parvient tout de même à l'agent.
 
@@ -149,7 +162,7 @@ Cette commande ne nécessite aucune @mention. Multica transmet la description à
 
 ### Démarrer une nouvelle discussion avec `/new`
 
-Dans un message direct avec le bot, `/new` crée immédiatement une nouvelle discussion vide et visible. `/new <message>` crée la discussion et utilise le message comme premier tour. Un `/new` seul s'affiche sous le nom **Nouvelle discussion** jusqu'à l'arrivée du premier vrai message de l'utilisateur ; le titre suit ensuite le comportement habituel, fondé sur le premier message.
+Dans un message direct avec le bot, `/new` crée immédiatement une nouvelle discussion vide et visible. `/new <message>` crée la discussion et utilise le message comme premier tour. Une discussion créée par un `/new` seul s'affiche sous le nom **Nouvelle discussion** jusqu'à l'arrivée de son premier vrai message, puis prend un titre tiré de ce message.
 
 La discussion précédente reste disponible dans Multica, et vous pouvez toujours y écrire sur le web, sur ordinateur et sur mobile. Seuls les messages suivants de cette conversation Slack sont acheminés vers la nouvelle discussion.
 

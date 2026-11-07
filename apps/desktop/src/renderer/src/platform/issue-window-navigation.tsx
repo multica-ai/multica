@@ -12,6 +12,21 @@ import {
 import { parseIssueWindowPath } from "../../../shared/issue-window";
 
 /**
+ * Hand an app page this single-route window cannot host to the browser.
+ *
+ * Shared by content links and the adapter's push/replace, so a non-issue
+ * destination (e.g. workspace settings from the issue workflow card, MUL-8098)
+ * is never silently dropped.
+ */
+function openInBrowser(
+  path: string,
+  runtimeConfig: typeof window.desktopAPI.runtimeConfig,
+) {
+  if (!runtimeConfig.ok) return;
+  void window.desktopAPI.openExternal(`${runtimeConfig.config.appUrl}${path}`);
+}
+
+/**
  * Answer the `multica:navigate` event inside a dedicated issue window (MUL-5208).
  *
  * The event is what a link in content (comment, description) fires once it
@@ -50,10 +65,7 @@ function useContentLinkHandler(
         void navigate(issuePath.path);
         return;
       }
-      if (!runtimeConfig.ok) return;
-      void window.desktopAPI.openExternal(
-        `${runtimeConfig.config.appUrl}${path}`,
-      );
+      openInBrowser(path, runtimeConfig);
     };
     window.addEventListener("multica:navigate", handler);
     return () => window.removeEventListener("multica:navigate", handler);
@@ -62,8 +74,8 @@ function useContentLinkHandler(
 
 /**
  * Navigation bridge for a dedicated issue window. Unlike the main Desktop
- * shell, this window owns a tiny MemoryRouter and intentionally accepts only
- * issue-detail routes. Keeping the bridge in the platform layer preserves the
+ * shell, this window owns a tiny MemoryRouter and hosts only issue-detail
+ * routes; every other destination is opened in the browser. Keeping the bridge in the platform layer preserves the
  * MUL-4741 boundary around direct router navigation.
  */
 export function IssueWindowNavigationProvider({
@@ -93,9 +105,14 @@ export function IssueWindowNavigationProvider({
   useContentLinkHandler(navigate, runtimeConfig);
 
   const adapter = useMemo<NavigationAdapter>(() => {
+    // Another issue opens in place; any other page goes to the browser, the
+    // same split the content-link handler applies.
     const navigateToIssue = (path: string, replace = false) => {
       const issuePath = parseIssueWindowPath(path);
-      if (!issuePath) return;
+      if (!issuePath) {
+        openInBrowser(path, runtimeConfig);
+        return;
+      }
       void navigate(issuePath.path, { replace });
     };
 

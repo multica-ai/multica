@@ -4,10 +4,11 @@ description: 从源码把 Multica 安装到 iPhone，并连接 Cloud 或自托�
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
 Multica iOS 客户端目前还没有上架 App Store。你可以在 Mac 上从公开的源码仓库构建 Release 版本，再安装到自己的 iPhone。Android 客户端暂未提供。
 
-安装后的 App 默认连接 Multica Cloud，使用已有账号即可登录。工作区、任务、评论和执行记录都保存在服务端，不需要从 Web 或 Desktop 手动同步。
+安装后的 App 默认连接 Multica Cloud，用已有账号登录即可。工作区、任务、评论和执行记录都保存在服务端，不需要从 Web 或 Desktop 同步。
 
 ## 准备工作
 
@@ -23,6 +24,8 @@ Xcode 或真机开发环境未配置时，先完成 Expo 的 [iOS Device 环境�
 
 ## 安装到 iPhone
 
+<Steps>
+<Step>
 克隆仓库并安装依赖：
 
 ```bash
@@ -30,16 +33,20 @@ git clone https://github.com/multica-ai/multica.git
 cd multica
 pnpm install
 ```
-
-然后从仓库根目录运行：
+</Step>
+<Step>
+从仓库根目录运行：
 
 ```bash
 pnpm ios:mobile:device:prod:release
 ```
 
 这会构建一个不依赖 Metro 的 Release 版本，并安装到已连接的 iPhone。第一次构建需要下载 iOS 依赖并编译 React Native，之后会复用 Xcode 缓存。
-
-如果 iPhone 阻止打开应用，到**设置 → 通用 → VPN 与设备管理**中信任对应的开发者证书。
+</Step>
+<Step>
+在 iPhone 上打开 App。如果系统阻止打开，到**设置 → 通用 → VPN 与设备管理**中信任对应的开发者证书。
+</Step>
+</Steps>
 
 ## 免费签名的 7 天限制
 
@@ -72,16 +79,23 @@ pnpm ios:mobile:device:prod:release
 
 Release 构建会把 API 地址写入 App。`apps/mobile/.env.production` 已随仓库提交，默认指向 multica.ai 的公开后端，干净克隆即可构建生产版本。
 
-要连接自托管实例，把 `apps/mobile/.env.production.example` 复制为 `apps/mobile/.env.production.local` 并修改副本：
+要连接自托管实例：
+
+<Steps>
+<Step>
+把 `apps/mobile/.env.production.example` 复制为 `apps/mobile/.env.production.local`，在副本里填写地址：
 
 ```dotenv
 EXPO_PUBLIC_API_URL=https://api.example.com
 EXPO_PUBLIC_WEB_URL=https://app.example.com
 ```
 
-`.local` 文件会按 key 覆盖提交的默认值，且已被 gitignore，个人 API 地址不会进入仓库。`EXPO_PUBLIC_API_URL` 必填；`EXPO_PUBLIC_WEB_URL` 用于 "Copy link"、"Open on web" 等入口。两个都要在副本里设置：没写的 key 会沿用 multica.ai 的默认值，这些入口就会打开 multica.ai，而不是你的实例。
-
-修改后重新运行构建命令。iPhone 必须能访问这个 API 地址；使用局域网地址时，不要写 `localhost`，因为它在 iPhone 上指向手机本身。
+`.local` 文件按 key 覆盖提交的默认值，且已被 gitignore，个人 API 地址不会进入仓库。`EXPO_PUBLIC_API_URL` 必填；`EXPO_PUBLIC_WEB_URL` 用于 "Copy link"、"Open on web" 等入口。两个都要设置：没写的 key 会沿用 multica.ai 的默认值，这些入口就会打开 multica.ai，而不是你的实例。
+</Step>
+<Step>
+重新运行构建命令 `pnpm ios:mobile:device:prod:release`。iPhone 必须能访问这个 API 地址；使用局域网地址时不要写 `localhost`，它在 iPhone 上指向手机本身。
+</Step>
+</Steps>
 
 <Callout type="warning">
 直接修改 `.env.production` 会改变当前 checkout 的生产配置。个人配置请放在 gitignore 的 `.env.production.local` 中。

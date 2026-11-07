@@ -24,8 +24,9 @@ import (
 // built without it deliberately carries no pointer at all.
 func platformSkillFixture() SkillContextForEnv {
 	return SkillContextForEnv{
-		Name:    "multica-platform",
-		Content: "---\nname: multica-platform\n---\n\nbody",
+		Name:        "multica-platform",
+		BuiltinName: "multica-platform",
+		Content:     "---\nname: multica-platform\n---\n\nbody",
 	}
 }
 
@@ -69,7 +70,7 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 				"`--status todo` starts an agent-assigned child immediately",
 				"`--status backlog` parks it",
 				"`--stage <N>` groups children into ordered stages",
-				"read `references/issues.md` in the `multica-platform` skill",
+				"read `references/sub-issues.md` in the `multica-platform` skill",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("[%s] section missing %q", tc.name, want)
@@ -1083,9 +1084,11 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		{"reasonix", "AGENTS.md"},
 		{"dsh", "AGENTS.md"},
 		{"dim", "AGENTS.md"},
+		{"devin", "AGENTS.md"},
 		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
+		{"muse", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
 	}
 	for _, tc := range cases {
@@ -1145,6 +1148,17 @@ func TestRuntimeConfigPathDistinguishesCodebuddyFromClaude(t *testing.T) {
 	}
 	if claudePath == codebuddyPath {
 		t.Fatal("claude and codebuddy must not share a runtime config path")
+	}
+}
+
+func TestRuntimeConfigPathDevinUsesAgentsMd(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	got := runtimeConfigPath(dir, "devin")
+	want := filepath.Join(dir, "AGENTS.md")
+	if got != want {
+		t.Fatalf("devin runtime config path = %q, want %q", got, want)
 	}
 }
 
@@ -1463,9 +1477,11 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		{"reasonix", "AGENTS.md"},
 		{"dsh", "AGENTS.md"},
 		{"dim", "AGENTS.md"},
+		{"devin", "AGENTS.md"},
 		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
+		{"muse", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
 	}
 	for _, tc := range cases {
@@ -1647,6 +1663,76 @@ func TestInjectThenCleanupRoundTripByteExactBoundaries(t *testing.T) {
 	}
 }
 
+// Markdown formatters collapse the blank lines before an HTML block to one
+// and drop leading blank lines entirely. lfFormatter also rewrites CRLF to LF
+// (Prettier's default endOfLine); crlfFormatter keeps the file's CRLF style
+// and applies it to the whole file, including the managed block.
+func lfFormatter(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	for strings.Contains(s, "\n\n\n") {
+		s = strings.ReplaceAll(s, "\n\n\n", "\n\n")
+	}
+	return strings.TrimLeft(s, "\n")
+}
+
+func crlfFormatter(s string) string {
+	return strings.ReplaceAll(lfFormatter(s), "\n", "\r\n")
+}
+
+func TestCleanupRuntimeConfigAfterFormatting(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, seed string
+		format     func(string) string
+		want       string
+	}{
+		{"no newline", "rules", lfFormatter, "rules"},
+		{"one newline", "rules\n", lfFormatter, "rules\n"},
+		{"two newlines", "rules\n\n", lfFormatter, "rules\n\n"},
+		{"multi-line", "# Rules\n\n- a\n- b\n", lfFormatter, "# Rules\n\n- a\n- b\n"},
+		{"empty file", "", lfFormatter, ""},
+		{"blank file", "\n\n", lfFormatter, "\n\n"},
+		// The formatter rewrote the user's line endings itself; the restored
+		// boundary follows that style instead of leaving a stray CRLF.
+		{"crlf to lf", "a\r\nb\r\n", lfFormatter, "a\nb\n"},
+		{"crlf preserved", "a\r\nb\r\n", crlfFormatter, "a\r\nb\r\n"},
+		{"crlf two newlines preserved", "a\r\n\r\n", crlfFormatter, "a\r\n\r\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			path := filepath.Join(dir, "CLAUDE.md")
+			if err := os.WriteFile(path, []byte(tc.seed), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{}); err != nil {
+				t.Fatal(err)
+			}
+			injected, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(tc.format(string(injected))), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			// Re-inject after formatting: metadata must survive the replace path.
+			if _, err := InjectRuntimeConfig(dir, "claude", TaskContextForEnv{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := CleanupRuntimeConfig(dir, "claude"); err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("file must survive cleanup: %v", err)
+			}
+			if string(got) != tc.want {
+				t.Fatalf("cleanup changed user content after formatting: got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // Idempotency across the byte-exact boundaries: when a second Inject runs
 // against a file that already carries a marker block (the "replace in
 // place" branch), the surrounding bytes must stay untouched and the
@@ -1698,6 +1784,123 @@ func TestInjectReplaceThenCleanupRestoresByteExact(t *testing.T) {
 		})
 	}
 }
+
+func TestCleanupRuntimeConfigPreservesEditsAfterFormatting(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, seed, prefix, suffix, want string
+	}{
+		{"edited body", "rules\n", "updated rules\n\n", "", "updated rules\n"},
+		{"added suffix", "rules\n", "rules\n\n", "\nnew section\n", "rules\n\nnew section\n"},
+		{"edited boundary", "rules\n", "rules\n\n\n\n", "", "rules\n\n"},
+		// An empty prefix only means "blank original" when the metadata says
+		// so. Here the agent deleted the original body (and may have written
+		// a replacement after the block); the old trailing newline must not
+		// come back in front of the new content.
+		{"body replaced after block", "# Old\n", "", "# New\n", "# New\n"},
+		{"body deleted", "# Old\n", "", "", ""},
+		{"blank file gains content after block", "", "", "# New\n", "# New\n"},
+		// Newline-only originals: the formatter dropped the leading blank
+		// lines and the agent wrote a body after the block. The recorded
+		// newlines must not be restored in front of the new body.
+		{"newline-only file gains content after block", "\n", "", "# New\n", "# New\n"},
+		{"crlf-only file gains content after block", "\r\n", "", "# New\r\n", "# New\r\n"},
+		{"newline-only file left blank", "\n", "", "", "\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			path := filepath.Join(dir, "CLAUDE.md")
+			if err := os.WriteFile(path, []byte(tc.seed), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := writeRuntimeConfigFile(path, "brief"); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			start, end, found := locateMarkerBlock(string(data))
+			if !found {
+				t.Fatal("missing block")
+			}
+			if err := os.WriteFile(path, []byte(tc.prefix+string(data[start:end])+tc.suffix), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := CleanupRuntimeConfig(dir, "claude"); err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("pre-existing file must survive cleanup: %v", err)
+			}
+			if string(got) != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseRuntimeBoundaryMeta(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		metadata string
+		ok       bool
+		want     runtimeBoundaryMeta
+	}{
+		{`"\n" -->` + "\n", true, runtimeBoundaryMeta{boundary: "\n"}},
+		{`"\r\n\r\n" -->` + "\n", true, runtimeBoundaryMeta{boundary: "\r\n\r\n"}},
+		{`"" blank -->` + "\n", true, runtimeBoundaryMeta{boundary: "", blank: true}},
+		{`"\n" blank -->` + "\r\n", true, runtimeBoundaryMeta{boundary: "\n", blank: true}},
+		{`"text" -->`, false, runtimeBoundaryMeta{}},
+		{`"\n"`, false, runtimeBoundaryMeta{}},
+		{`"\n" bogus -->`, false, runtimeBoundaryMeta{}},
+		{`invalid -->`, false, runtimeBoundaryMeta{}},
+	} {
+		block := runtimeMarkerBegin + "\n" + runtimeBoundaryPrefix + tc.metadata
+		got, ok := parseRuntimeBoundaryMeta(block)
+		if ok != tc.ok || got != tc.want {
+			t.Errorf("metadata %q: got (%+v, %v), want (%+v, %v)", tc.metadata, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
+// A daemon that predates boundary metadata strips the metadata line together
+// with the block, and a current daemon cleaning a legacy block (no metadata)
+// keeps the fixed-separator behaviour, including deleting files it created.
+func TestCleanupRuntimeConfigLegacyBlockCompat(t *testing.T) {
+	t.Parallel()
+	legacyBlock := runtimeMarkerBegin + "\nbrief\n" + runtimeMarkerEnd + "\n"
+	for _, tc := range []struct {
+		name, content string
+		want          *string
+	}{
+		{"legacy appended", "rules\n" + runtimeManagedSeparator + legacyBlock, legacyWant("rules\n")},
+		{"legacy created", legacyBlock, nil},
+	} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "CLAUDE.md")
+		if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := CleanupRuntimeConfig(dir, "claude"); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(path)
+		if tc.want == nil {
+			if !os.IsNotExist(err) {
+				t.Errorf("%s: created file must be removed, got %q (err %v)", tc.name, got, err)
+			}
+			continue
+		}
+		if err != nil || string(got) != *tc.want {
+			t.Errorf("%s: got %q (err %v), want %q", tc.name, got, err, *tc.want)
+		}
+	}
+}
+
+func legacyWant(s string) *string { return &s }
 
 // The fixed managed separator is the invariant that makes byte-exact
 // cleanup possible. This test pins it: writeRuntimeConfigFile must
@@ -2140,18 +2343,8 @@ func TestBriefByteIdenticalAcrossRunsForEveryKind(t *testing.T) {
 	}
 }
 
-// TestBriefSkillsListIsNamesOnly pins the shape of the `## Skills` section: an
-// index of invocable names, with no descriptions and no per-provider branch.
-//
-// Descriptions were removed because every runtime CLI already builds its own
-// listing from the SKILL.md frontmatter the daemon writes, so the brief's copy
-// was the same routing signal paid for twice — ~3,100 tokens per brief on a
-// real task, 40% of the whole brief (MUL-5529).
-//
-// The provider branch was removed because its fallback was wrong: it told
-// providers outside a hardcoded list to look in `.agent_context/skills/`, but
-// the only providers that ever reached it — grok and traecli — have their files
-// written to `.grok/skills` and `.traecli/skills` and discover them natively.
+// TestBriefSkillsListIsNamesOnly pins the native-discovery Skills section
+// byte-for-byte. TRAE's file-loading index has separate coverage.
 func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 	t.Parallel()
 
@@ -2168,26 +2361,46 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 		},
 	}
 
-	// grok and traecli are the providers that used to take the removed branch;
-	// the rest are a spread across the native-discovery list.
-	for _, provider := range []string{"claude", "codex", "opencode", "hermes", "grok", "traecli", "some-unknown-provider"} {
+	for _, provider := range []string{"claude", "codex", "opencode", "hermes", "grok", "some-unknown-provider"} {
 		t.Run(provider, func(t *testing.T) {
 			t.Parallel()
 			out := buildMetaSkillContent(provider, ctx)
 
-			if !strings.Contains(out, "- **pr-review**\n") {
-				t.Errorf("brief does not list the skill by slug:\n%s", out)
+			_, section, ok := strings.Cut(out, "## Skills\n\n")
+			if !ok {
+				t.Fatal("brief has no Skills section")
 			}
-			if strings.Contains(out, "Use when reviewing a pull request") {
-				t.Errorf("brief still carries the skill description; the CLI's own listing already has it:\n%s", out)
-			}
-			if strings.Contains(out, ".agent_context/skills/") {
-				t.Errorf("brief still points at the removed fallback path:\n%s", out)
-			}
-			if !strings.Contains(out, "discovered automatically") {
-				t.Errorf("brief lost the native-discovery framing:\n%s", out)
+			section, _, _ = strings.Cut(section, "## Mentions\n\n")
+			const want = "You have the following skills installed (discovered automatically):\n\n- **pr-review**\n\n"
+			if section != want {
+				t.Errorf("native-discovery Skills section changed:\ngot  %q\nwant %q", section, want)
 			}
 		})
+	}
+}
+
+// TestBriefCarriesTheWhenToSplitRule pins the two halves of MUL-8441 that live
+// in the cached brief: the default against splitting a feature into sub-issues,
+// and the step-1 hook that makes reading a sub-issue's parent part of reading
+// the issue. Both must hold without the platform skill installed.
+func TestBriefCarriesTheWhenToSplitRule(t *testing.T) {
+	t.Parallel()
+
+	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1"})
+	for _, want := range []string{
+		"Default to one issue, one PR.",
+		"slice by user-visible behavior, never by layer",
+		"A PR that is large to review is not a reason to split",
+		"When the per-turn message carries a `[Parent issue]` block, this issue is a sub-issue",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("brief lost %q:\n%s", want, out)
+		}
+	}
+	rule := strings.Index(out, "Default to one issue, one PR.")
+	flags := strings.Index(out, "`--status todo` starts an agent-assigned child immediately")
+	if rule < 0 || flags < 0 || rule > flags {
+		t.Errorf("the split rule must come before the sub-issue flags it gates:\n%s", out)
 	}
 }
 
@@ -2198,7 +2411,7 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 	t.Parallel()
 
 	skill := func(name string) SkillContextForEnv {
-		return SkillContextForEnv{Name: name, Content: "---\nname: " + name + "\n---\n\nbody"}
+		return SkillContextForEnv{Name: name, BuiltinName: name, Content: "---\nname: " + name + "\n---\n\nbody"}
 	}
 
 	cases := []struct {
@@ -2209,7 +2422,7 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 		{
 			name:   "current backend",
 			skills: []SkillContextForEnv{skill("multica-platform")},
-			want:   "`references/issues.md` in the `multica-platform` skill",
+			want:   "`references/sub-issues.md` in the `multica-platform` skill",
 		},
 		{
 			name:   "retired legacy skill alone has no pointer",
@@ -2219,7 +2432,7 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 		{
 			name:   "platform pointer ignores the retired legacy skill",
 			skills: []SkillContextForEnv{skill("multica-working-on-issues"), skill("multica-platform")},
-			want:   "`references/issues.md` in the `multica-platform` skill",
+			want:   "`references/sub-issues.md` in the `multica-platform` skill",
 		},
 		{
 			name:   "neither installed",
@@ -2268,14 +2481,11 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 // gives an agent one name to guess instead of eight. This line is what pays
 // that back, so it must appear whenever the skill does — an agent that cannot
 // find the platform contracts is strictly worse off than before the merge.
-//
-// Naming is by bare name, on the stated assumption that no workspace skill
-// shares a built-in's name (see builtinSlug).
 func TestBriefPointsAtThePlatformSkill(t *testing.T) {
 	t.Parallel()
 
 	skill := func(name string) SkillContextForEnv {
-		return SkillContextForEnv{Name: name, Content: "---\nname: " + name + "\n---\n\nbody"}
+		return SkillContextForEnv{Name: name, BuiltinName: name, Content: "---\nname: " + name + "\n---\n\nbody"}
 	}
 
 	cases := []struct {

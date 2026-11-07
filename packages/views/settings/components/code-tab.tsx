@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { MoreHorizontal, Pause, Play, Unplug } from "lucide-react";
+import { MoreHorizontal, Pause, Play, Unplug } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import {
   AlertDialog,
@@ -220,10 +221,10 @@ export function CodeTab() {
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       render={
-                        <Button
+                        <IconButton
                           variant="ghost"
                           size="icon-sm"
-                          aria-label={t(($) => $.code.github_actions)}
+                          label={t(($) => $.code.github_actions)}
                         />
                       }
                     >

@@ -4,40 +4,50 @@ description: コンピュータを接続し、最初のエージェントを作�
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
 <Callout type="info">
 エージェントが実行するには、実行するコンピュータに Claude Code、Codex、Cursor などの[サポートされている AI コーディングツール](/providers)が少なくとも 1 つインストールされ、ログイン済みである必要があります。Multica にこれらのツールは同梱されていません。
 </Callout>
 
-## 1. ログインしてワークスペースに入る
+<Steps>
+<Step>
 
-Web（[multica.ai](https://multica.ai)）または [Multica Desktop](https://multica.ai/download) でログインします。メール認証コードと Google に対応しています。
+## ログインしてワークスペースに入る [#1-ログインしてワークスペースに入る]
 
-- **Desktop**：このコンピュータを自動で接続できます。
-- **Web**：次のステップでコマンドラインから接続します。
+Web（[multica.ai](https://multica.ai)）または [Multica Desktop](https://multica.ai/download) でログインします。メール認証コードと Google に対応しています。Desktop でログインした場合は次のステップでこのコンピュータを自動で接続でき、Web の場合はコマンドラインから接続します。
 
-## 2. コンピュータを接続する
+</Step>
+<Step>
 
-エージェントは接続されたコンピュータ上で作業を実行します。サイドバー下部の **設定 → ランタイム** を開きます。
+## コンピュータを接続する [#2-コンピュータを接続する]
+
+エージェントは接続されたコンピュータ上で作業を実行します。サイドバーの **AI チーム** にある **ランタイム** を開きます。
 
 - **Desktop の場合**：Desktop がこのコンピュータをランタイムとして自動登録し、インストール済みの AI コーディングツールを検出します。インストールしたばかりのツールは、「更新」をクリックして再検出します。
-- **Web の場合、または別のコンピュータを追加する場合**：右上の **コンピュータを追加** をクリックし、ダイアログに表示される 2 つのコマンドを対象コンピュータのターミナルで実行します。
+- **Web の場合、または別のコンピュータを追加する場合**：右上の **追加** をクリックして **他のマシンまたはサーバー** を選び、ダイアログに表示される 2 つのコマンドを対象コンピュータのターミナルで実行します。
 
-  **macOS / Linux**
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
 
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
-  multica setup
-  ```
+```bash
+curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+multica setup
+```
 
-  **Windows PowerShell**
+</Tab>
+<Tab value="Windows">
 
-  ```powershell
-  irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
-  multica setup
-  ```
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+multica setup
+```
 
-  `multica setup` はブラウザを開いてログインを完了し、その後デーモンをバックグラウンドで実行し続けます。デーモンがオンラインになると、通常 1 分以内にダイアログがこのコンピュータを検出します。
+</Tab>
+</Tabs>
+
+`multica setup` はブラウザを開いてログインを完了し、その後デーモンをバックグラウンドで実行し続けます。デーモンがオンラインになると、通常 1 分以内にダイアログがこのコンピュータを検出します。
 
 **成功の目安**：ランタイム一覧にオンラインのコンピュータが表示されます。
 
@@ -47,20 +57,21 @@ Web（[multica.ai](https://multica.ai)）または [Multica Desktop](https://mul
 セルフホストインスタンスでは接続コマンドが少し異なります。[セルフホストクイックスタート](/self-host-quickstart)を参照してください。
 </Callout>
 
-## 3. エージェントを作成する
+</Step>
+<Step>
 
-サイドバーの **ワークスペース → エージェント** を開き、**新規エージェント** をクリックして、どちらかの方法を選びます。
+## エージェントを作成する [#3-エージェントを作成する]
 
-- **空白から始める**：自分でフィールドを入力します。最低限必要なのは名前だけで、あとはランタイムと AI コーディングツールを確認すれば作成できます。
-- **AI で作成**：欲しいエージェントを説明すると、Agent Builder が質問しながら設定を生成します。この方法にはオンラインのランタイムが必要です。
+サイドバーの **AI チーム** にある **エージェント** を開き、**新規エージェント** をクリックします。まず接続したコンピュータ上の AI コーディングツールを選び、名前を入力して **エージェントを作成** をクリックします。必須項目はランタイムと名前だけです。
 
-残りの設定は後から整えられます。詳しくは[エージェントの作成と構成](/agents-create)を参照してください。
+設定を一から書きたくない場合は、設定画面で **AI に書いてもらう** をクリックすると、Agent Builder が質問しながら設定を補います。これには選択したランタイムがオンラインである必要があります。残りの設定は後から整えられます。詳しくは[エージェントの作成と構成](/agents-create)を参照してください。
 
 **成功の目安**：エージェント一覧に作成したエージェントが表示され、オンラインと表示されます。
 
-![エージェント作成の開始方法の選択画面：「Start blank」と「Build with AI」](/images/docs/quickstart-new-agent.webp)
+</Step>
+<Step>
 
-## 4. 最初のタスクを任せる
+## 最初のタスクを任せる [#4-最初のタスクを任せる]
 
 サイドバー上部の **新規タスク** をクリックします（またはショートカット `C`）。デフォルトのエージェントモードでは次のように進めます。
 
@@ -70,13 +81,19 @@ Web（[multica.ai](https://multica.ai)）または [Multica Desktop](https://mul
 
 ![新規タスクダイアログのエージェントモード：Created by に Multica Assistant が選択されている](/images/docs/quickstart-new-issue.webp)
 
-## 5. 進捗と結果を確認する
+</Step>
+<Step>
+
+## 進捗と結果を確認する [#5-進捗と結果を確認する]
 
 送信後にそのタスクを開きます。実行ログには実行のステータスが表示され、エージェントの進捗と返信はタイムラインに表示されます。
 
 **成功の目安**：実行ログのステータスが「完了」に変わり、タイムラインにエージェントの返信が表示されます。全過程を確認するには、「トランスクリプトを表示」をクリックします。
 
 ![タスク内のエージェントの返信と完了した実行ログ](/images/docs/quickstart-run-result.webp)
+
+</Step>
+</Steps>
 
 ## よくある問題
 
@@ -92,4 +109,4 @@ Web（[multica.ai](https://multica.ai)）または [Multica Desktop](https://mul
 
 - [コアコンセプト](/concepts) — Multica のすべてのコアオブジェクトを 3 分で把握する。
 - [Multica の仕組み](/how-multica-works) — タスク、エージェント、ランタイム、各実行の関係を理解する。
-- [エージェントに仕事を任せる](/triggering-agents) — 割り当てのほかに、@コメント、チャット、オートパイロットという 3 つのトリガー方法。
+- [エージェントに仕事を任せる](/triggering-agents) — 割り当てのほかに、@メンション、チャット、オートパイロットでもエージェントに作業を始めさせられます。

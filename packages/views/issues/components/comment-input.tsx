@@ -7,7 +7,8 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { Button } from "@multica/ui/components/ui/button";
 import { contentReferencesAttachment, type AgentTask } from "@multica/core/types";
-import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
+import { useShortcut } from "@multica/core/shortcuts";
+import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { composeAnnotatedReply, hasReplyIntent } from "@multica/core/drafts/reply-annotation";
 import { ReplyAnnotations } from "./reply-annotations";
@@ -48,9 +49,9 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
   const uploadGate = useUploadGate(editorRef);
   // Subscribe to the persisted draft so text written into it from outside
   // this composer shows up even while it is mounted.
-  // Quick actions in the `/` menu: picking one inserts the server-rendered
+  // Quick actions in the `/` menu: picking one inserts the cached
   // body so the user can edit before sending, instead of firing immediately.
-  const quickActionMenu = useQuickActionMenu(issueId);
+  const quickActionMenu = useQuickActionMenu();
   const draftKey = `new:${issueId}` as const;
   const [initialDraft] = useState(() =>
     useCommentDraftStore.getState().getDraft(draftKey),
@@ -165,7 +166,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
     },
     // A top-level comment ends a turn: the caret is dropped rather than kept,
     // so the composer stops reading as "still writing" once the comment is
-    // posted above it. Thread replies are the opposite — see ReplyInput.
+    // posted above it. Thread replies do the same — see ReplyInput.
     afterAccepted: () => (editorScrubbedRef.current ? "blur" : "none"),
     onSubmit: async (content) => {
       editorScrubbedRef.current = false;
@@ -329,13 +330,19 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
           disabled={!canSend}
           loading={submitting}
           busy={gate.uploading}
-          tooltip={gate.uploading
+          disabledReason={gate.uploading
             ? tEditor(($) => $.upload.in_progress)
             : !canSend && annotations.length > 0
               ? t(($) => $.reply.annotations.intent_hint)
-              : sendShortcut
-              ? `${t(($) => $.comment.send_tooltip)} · ${formatShortcut(sendShortcut)}`
-              : t(($) => $.comment.send_tooltip)}
+              : undefined}
+          tooltip={sendShortcut
+            ? (
+              <>
+                {t(($) => $.comment.send_tooltip)}
+                <ShortcutKeycaps shortcut={sendShortcut} decorative />
+              </>
+            )
+            : t(($) => $.comment.send_tooltip)}
           ariaLabel={gate.uploading
             ? tEditor(($) => $.upload.in_progress)
             : t(($) => $.comment.send_tooltip)}

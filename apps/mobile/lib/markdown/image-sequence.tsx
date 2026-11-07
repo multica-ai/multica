@@ -39,7 +39,7 @@ export function ImageSequenceProvider({
   blocks,
   children,
 }: {
-  blocks: ReadonlyArray<ImageSequenceBlock | null | undefined>;
+  blocks: readonly (ImageSequenceBlock | null | undefined)[];
   children: ReactNode;
 }) {
   const uris = useMemo(

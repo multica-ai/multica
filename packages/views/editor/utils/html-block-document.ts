@@ -76,6 +76,8 @@ const BRIDGE_SCRIPT = [
   "if(r.width||r.height)bottom=Math.max(bottom,r.bottom+px(ks.marginBottom))}",
   "var h=bottom?Math.ceil(bottom+(window.scrollY||0)+px(bs.paddingBottom)+px(bs.borderBottomWidth)+px(bs.marginBottom)):0;",
   "if(h!==last){last=h;post({type:'height',height:h})}}",
+  "window.addEventListener('message',function(e){var m=e.data;",
+  "if(e.source!==parent||!m||m[K]!==1||m.type!=='measure')return;last=-1;measure()});",
   "var failed=false;",
   "window.addEventListener('error',function(e){if(failed)return;var t=e.target;",
   "if(t&&t!==window&&t.tagName){if(t.tagName!=='SCRIPT')return;failed=true;",

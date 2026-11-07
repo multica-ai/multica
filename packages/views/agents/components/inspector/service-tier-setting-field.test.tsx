@@ -189,7 +189,7 @@ describe("ServiceTierSettingField", () => {
     await screen.findByText("Speed");
     expect(await screen.findByText("priority")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button"));
-    fireEvent.click(await screen.findByTitle(/Clear the speed override/i));
+    fireEvent.click(await screen.findByRole("button", { name: "Runtime default" }));
     expect(onChange).toHaveBeenCalledWith("");
   });
 });

@@ -1,24 +1,7 @@
 /**
- * Stable URL helpers for attachment references that get persisted into
- * markdown bodies (issue descriptions, comment bodies, chat messages).
- *
- * Background — MUL-3130:
- *
- *   The original upload flow returned `att.url` as the link to embed in
- *   markdown. After PR #3903 (MUL-3132), `att.url` for the LocalStorage
- *   backend became a 30-minute HMAC-signed `/uploads/<key>?exp&sig` URL.
- *   That URL is short-lived by design — it's the in-memory token that
- *   keeps native browser <img>/<video> resource loads working without an
- *   Authorization header. Persisting it into a comment body means the
- *   comment's images break the moment the signature expires (default
- *   30 min). The same problem applies to CloudFront-mode `download_url`
- *   values, which are also signed redirects.
- *
- *   The fix is to persist a STABLE path that contains only the
- *   attachment id. The server's /api/attachments/{id}/download endpoint
- *   self-resolves the workspace from the attachment row and re-signs (or
- *   proxies) on every request, so the URL is correct forever — until
- *   the attachment row itself is deleted.
+ * Stable attachment URLs for persisted Markdown. Signed storage/download URLs
+ * expire; persist attachment-ID paths so the server can authorize and resolve a
+ * fresh download on each request.
  */
 
 const DOWNLOAD_PREFIX = "/api/attachments/";
@@ -98,6 +81,45 @@ export function attachmentIdFromDownloadURL(rawURL: string): string | undefined 
   const id = path.slice(DOWNLOAD_PREFIX.length, path.length - DOWNLOAD_SUFFIX.length);
   if (!UUID_RE.test(id)) return undefined;
   return id;
+}
+
+// Storage object path the upload handler writes for workspace files:
+// `workspaces/<workspace-id>/<attachment-id><ext>` (server/internal/handler/file.go
+// uses the attachment id as the object name).
+const UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const WORKSPACE_STORAGE_PATH_RE = new RegExp(
+  `^/workspaces/${UUID_PATTERN}/(${UUID_PATTERN})(?:\\.[A-Za-z0-9]+)?$`,
+  "i",
+);
+
+/**
+ * Extract the attachment id from a raw storage URL on the configured CDN
+ * domain, e.g. `https://static.multica.ai/workspaces/<ws>/<id>.jpg`.
+ *
+ * Markdown can embed a storage URL whose attachment record is not in the
+ * surrounding surface's attachment list (an agent quoting an image from
+ * another comment). On a signed CDN that bare URL only loads with the
+ * in-app CloudFront cookies, so download handlers use this id to re-sign
+ * through the API instead of opening the unsigned URL externally.
+ *
+ * Returns `undefined` when the URL is not on `cdnDomain` or the path is not
+ * a workspace storage object.
+ */
+export function attachmentIdFromStorageURL(
+  rawURL: string,
+  cdnDomain: string,
+): string | undefined {
+  const expectedHost = cdnDomain.trim().toLowerCase().replace(/\.$/, "");
+  if (!rawURL || !expectedHost || !/^https?:\/\//i.test(rawURL)) return undefined;
+  let u: URL;
+  try {
+    u = new URL(rawURL);
+  } catch {
+    return undefined;
+  }
+  if (u.hostname.toLowerCase().replace(/\.$/, "") !== expectedHost) return undefined;
+  const match = WORKSPACE_STORAGE_PATH_RE.exec(u.pathname);
+  return match?.[1];
 }
 
 function stripQueryAndFragment(url: string): string {

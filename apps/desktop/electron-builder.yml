@@ -35,7 +35,13 @@ protocols:
       - multica
 asarUnpack:
   - resources/**
+# Publishes `minimumSystemVersion` (Darwin kernel floor) into latest-mac.yml /
+# latest-x64-mac.yml so installed macOS 12 clients skip updates they cannot
+# launch. See scripts/mac-update-floor.cjs for why this can't be plain config.
+beforePack: ./scripts/mac-update-floor.cjs
 mac:
+  # Electron 44 requires macOS 13 Ventura; declare it on every mac bundle.
+  minimumSystemVersion: "13.0.0"
   entitlementsInherit: build/entitlements.mac.plist
   target:
     - dmg
