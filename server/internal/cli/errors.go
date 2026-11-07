@@ -501,8 +501,8 @@ func messageFor(kind ErrorKind, lang Language) string {
 	return m[0]
 }
 
-// FormatError translates an error into a single user-facing line (or a
-// detailed multi-line block when debug is set). It is the only user-facing
+// FormatError translates an error into a user-facing message (or a
+// detailed block when debug is set). It is the only user-facing
 // translation entry point and is meant to be called once, at the top level
 // (main.go), on the error bubbling up from a command.
 //
@@ -570,7 +570,12 @@ func userMessage(err error, lang Language) string {
 				return prefix[0] + serverMsg
 			}
 		}
-		return messageFor(kind, lang)
+		message := messageFor(kind, lang)
+		var scoped *workspaceNotFoundError
+		if kind == KindNotFound && errors.As(err, &scoped) {
+			message += "\n" + scoped.contextMessage(lang)
+		}
+		return message
 	}
 
 	// Not a recognized typed error: this is typically a local/business error
