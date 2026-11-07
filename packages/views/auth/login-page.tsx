@@ -31,7 +31,7 @@ interface GoogleAuthConfig {
   clientId: string;
   redirectUri: string;
   /** Opaque state passed through Google OAuth (e.g. "platform:desktop"). */
-  state?: string;
+  state?: string | (() => string | undefined);
 }
 
 interface CliCallbackConfig {
@@ -287,7 +287,8 @@ export function LoginPage({
       access_type: "offline",
       prompt: "select_account",
     });
-    if (google.state) params.set("state", google.state);
+    const state = typeof google.state === "function" ? google.state() : google.state;
+    if (state) params.set("state", state);
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   };
 

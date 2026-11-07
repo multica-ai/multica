@@ -75,10 +75,8 @@ export function BillingReturnPage() {
     // to resume the return so the user does not land on their default workspace
     // with no idea whether the payment took.
     //
-    // Rebuilt from the two values this page actually uses, NOT forwarded whole:
-    // the login page embeds `next` verbatim in the Google OAuth `state`, so
-    // anything left in here — Stripe's `session_id`, any future cloud param —
-    // would be handed to a third party for no functional reason.
+    // Carry only the workspace and result needed to resume. Stripe's
+    // `session_id` and other checkout metadata do not belong in the login URL.
     // sanitizeNextUrl on the login side also accepts relative paths only, so
     // this cannot become an off-site redirect.
     if (!user) {

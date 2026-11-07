@@ -1,12 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { paths } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { CliInstallInstructions, OnboardingFlow } from "@multica/views/onboarding";
+import { useLoginRedirect } from "@/features/auth/use-login-redirect";
 
 /**
  * Creating a workspace runs the onboarding flow, entered at the workspace
@@ -28,9 +28,7 @@ export default function Page() {
     enabled: !!user,
   });
 
-  useEffect(() => {
-    if (!isLoading && !user) router.replace(paths.login());
-  }, [isLoading, user, router]);
+  useLoginRedirect();
 
   if (isLoading || !user) return null;
 

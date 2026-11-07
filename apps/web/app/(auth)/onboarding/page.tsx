@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { useAuthStore } from "@multica/core/auth";
+import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import {
   paths,
   resolvePostAuthDestination,
@@ -10,13 +10,20 @@ import {
 } from "@multica/core/paths";
 import { useWorkspaceList } from "@multica/core/workspace";
 import { CliInstallInstructions, OnboardingFlow } from "@multica/views/onboarding";
+import { useLoginRedirect } from "@/features/auth/use-login-redirect";
+
+function onboardingReturnTo(): string | null {
+  const next = sanitizeNextUrl(new URLSearchParams(window.location.search).get("next"));
+  return next?.split(/[?#]/, 1)[0] === paths.onboarding() ? null : next;
+}
 
 /**
  * Web shell for the onboarding flow. The route is the platform chrome on
  * web (matching `WindowOverlay` on desktop); content is the shared
  * `<OnboardingFlow />`. Kept minimal — guard on auth, render, exit.
  *
- * Runtime-connected onboarding opens the Mika session that the final step
+ * An explicit return target takes priority after setup. Without one,
+ * runtime-connected onboarding opens the Mika session that the final step
  * created and started; skipping the runtime opens the install-runtime guide
  * issue it created. Other exits land on the workspace issues list, or root
  * when no workspace exists.
@@ -41,12 +48,10 @@ export default function OnboardingPage() {
   // "completing" right before onComplete navigates keeps the guard
   // silent for the in-flight transition.
   const completingRef = useRef(false);
+  useLoginRedirect();
 
   useEffect(() => {
-    if (isLoading || !user) {
-      if (!isLoading && !user) router.replace(paths.login());
-      return;
-    }
+    if (isLoading || !user) return;
     if (!workspacesReady) return;
     if (completingRef.current) return;
     // Bounce out only when onboarding genuinely doesn't apply: the user is
@@ -57,7 +62,7 @@ export default function OnboardingPage() {
     // judgment in callback / login handles "where should this user go on
     // login" so OnboardingPage no longer needs to second-guess it.
     if (hasOnboarded) {
-      router.replace(resolvePostAuthDestination(workspaces, hasOnboarded));
+      router.replace(onboardingReturnTo() ?? resolvePostAuthDestination(workspaces, hasOnboarded));
     }
   }, [isLoading, user, hasOnboarded, workspacesReady, workspaces, router]);
 
@@ -72,7 +77,10 @@ export default function OnboardingPage() {
       <OnboardingFlow
         onComplete={(ws, destination) => {
           completingRef.current = true;
-          if (ws && destination?.kind === "chat") {
+          const next = onboardingReturnTo();
+          if (next) {
+            router.replace(next);
+          } else if (ws && destination?.kind === "chat") {
             router.push(
               paths.workspace(ws.slug).chatSession(destination.sessionId),
             );
