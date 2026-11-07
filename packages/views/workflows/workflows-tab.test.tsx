@@ -9,6 +9,7 @@ import { memberListOptions } from "@multica/core/workspace/queries";
 import type { IssueWorkflow, Project } from "@multica/core/types";
 import { renderWithI18n } from "../test/i18n";
 import { WorkflowsTab } from "./workflows-tab";
+import issuesEn from "../locales/en/issues.json";
 
 const { workflows } = vi.hoisted(() => ({ workflows: [] as IssueWorkflow[] }));
 
@@ -93,12 +94,30 @@ describe("WorkflowsTab list (MUL-8377)", () => {
     expect(dialog.getAttribute("aria-describedby")).toBeTruthy();
     expect(document.getElementById(dialog.getAttribute("aria-describedby")!)?.textContent).toBe("25 projects");
     expect(screen.getAllByRole("link").filter((a) => a.getAttribute("href")?.startsWith("/acme/projects/"))).toHaveLength(25);
-    expect(screen.getByText("Also applies to issues without a project")).toBeTruthy();
+    expect(screen.getByText(issuesEn.workflows.settings.default_covers_no_project)).toBeTruthy();
 
     fireEvent.change(filter, { target: { value: "shuju" } });
     const remaining = screen.getAllByRole("link").filter((a) => a.getAttribute("href")?.startsWith("/acme/projects/"));
     expect(remaining).toHaveLength(1);
     expect(remaining[0]!.textContent).toContain("数据透明化");
+  });
+
+  it.each([
+    { stored: true, count: 0 },
+    { stored: false, count: 0 },
+    { stored: true, count: 1 },
+  ])("opens Default scope guidance with $count projects (stored: $stored)", async ({ stored, count }) => {
+    if (stored) workflows.push(workflow({ id: "wf-default", name: "Default", is_default: true }));
+    renderTab(count ? [project("p1", "Alpha")] : []);
+
+    const label = count ? "1 project + no-project issues" : "Issues without a project";
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    const dialog = await screen.findByRole("dialog", { name: "Default" });
+    expect(within(dialog).getByText(issuesEn.workflows.settings.default_covers_no_project)).toBeTruthy();
+    expect(within(dialog).queryByRole("textbox")).toBeNull();
+    expect(within(dialog).queryByText(issuesEn.workflows.settings.no_matching_projects)).toBeNull();
+    if (count) expect(within(dialog).getByRole("link", { name: /Alpha/ })).toBeTruthy();
+    else expect(within(dialog).queryByRole("link")).toBeNull();
   });
 
   it("names a single project, flags an unused workflow, and links the row by its name", () => {

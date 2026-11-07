@@ -1512,7 +1512,7 @@
       "usage_default_none": "没有项目的任务",
       "filter_projects": "筛选项目",
       "no_matching_projects": "没有匹配的项目",
-      "default_covers_no_project": "也适用于没有项目的任务",
+      "default_covers_no_project": "没有项目的任务只使用 Default 的状态，不会触发交接。要使用工作流交接，请将任务加入项目。",
       "new_blank": "空白工作流",
       "from_template": "从模板创建"
     },
@@ -1570,7 +1570,7 @@
       "select_step": "选择一列，设置任务进入时交给谁。",
       "unsaved": "有未保存的修改",
       "not_found": "这个工作流已不存在。",
-      "default_note": "Default 是所有未选择工作流的项目、以及项目之外视图使用的看板。",
+      "default_note": "Default 适用于未选择其他工作流的项目。没有项目的任务只使用它的状态，不会触发交接。要使用工作流交接，请将任务加入项目。",
       "new_badge": "新建",
       "columns": "列",
       "include_status": "包含「{{status}}」",
