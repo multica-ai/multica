@@ -101,7 +101,7 @@ func seedUserCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv,
 			logger.Warn("execenv: codex user-skill clean dst failed", "name", name, "error", err)
 			continue
 		}
-		if err := seedCodexUserSkill(resolved, dst, name); err != nil {
+		if err := seedCodexUserSkill(resolved, dst, name, logger); err != nil {
 			_ = os.RemoveAll(dst)
 			logger.Warn("execenv: codex user-skill normalization failed", "name", name, "error", err)
 			continue
@@ -268,7 +268,7 @@ func expandAliasesOf(n, target *yaml.Node) {
 	}
 }
 
-func seedCodexUserSkill(src, dst, name string) error {
+func seedCodexUserSkill(src, dst, name string, logger *slog.Logger) error {
 	data, err := os.ReadFile(filepath.Join(src, "SKILL.md"))
 	if err != nil {
 		return err
@@ -314,7 +314,7 @@ func seedCodexUserSkill(src, dst, name string) error {
 		if info.IsDir() {
 			err = createDirLink(source, target)
 		} else {
-			err = createFileLink(source, target)
+			err = createFileLink(source, target, logger)
 		}
 		if err != nil {
 			return err
