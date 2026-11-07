@@ -169,6 +169,57 @@ availability stays independent of a third party's release cadence.
 Desktop-managed daemons ignore both, because the Desktop app owns its bundled
 CLI's lifecycle.
 
+### Boot autostart
+
+Opt-in: only `multica daemon autostart enable` registers the profile's
+daemon with the OS, so the machine brings it back after a reboot or re-login
+— without that, every reboot takes the runtime offline and queued runs sit
+unclaimed. `daemon start` never registers on its own: it prints a one-line
+hint when nothing is registered, and otherwise stays out of the way.
+
+| Platform | Mechanism | Where |
+| --- | --- | --- |
+| Windows | Per-user Run key | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value `Multica` |
+| macOS | launchd LaunchAgent | `~/Library/LaunchAgents/ai.multica.daemon.plist` (runs at login) |
+| Linux | systemd user unit | `~/.config/systemd/user/multica-daemon.service`; without systemd, an XDG autostart entry under `~/.config/autostart/` |
+
+Each entry runs `multica daemon start --foreground` for that profile — named
+profiles get their own entry, so several daemons on one machine never collide.
+Daemon settings are read from the profile's config (`multica config set ...`)
+at start. Shell environment variables do **not** travel into a login session:
+only `PATH` is snapshotted at registration (and refreshed while Multica owns
+the entry), which is what keeps agent CLIs installed via Homebrew, nvm, or a
+user bin directory discoverable — persist everything else with
+`multica config set` or your user environment. On Linux, `enable` also tells
+you (it does not run it for you) how to `loginctl enable-linger $USER` so a
+headless machine starts the unit at boot rather than at first login.
+
+```bash
+multica daemon autostart enable         # the only thing that registers
+multica daemon autostart status         # what is registered, and where
+multica daemon autostart status --output json
+multica daemon autostart disable        # remove the registration
+```
+
+Refresh: while an entry exists and carries Multica's ownership marker,
+`daemon start` silently rewrites it so a moved executable (a Homebrew
+upgrade, a self-update) heals. An entry at the same path that Multica did
+not create — your own systemd unit, a hand-written LaunchAgent — is never
+refreshed and never overwritten: `enable`/`disable` refuse it and say which
+file is in the way, and the refresh is additionally skipped when the daemon
+was launched by an external supervisor (systemd `INVOCATION_ID` for a unit
+that is not ours).
+
+`daemon stop` stops the daemon but keeps the registration — it says nothing
+about the next boot; `autostart disable` is what turns that off. Disabling
+never disturbs a running daemon: on Linux the wants link is removed while
+the managed unit file stays (unlinked), so the current session keeps the
+unit's restart policy across a binary update and only the next-login start
+goes away; on macOS the plist is deleted without a `launchctl bootout`, so
+the process launchd is supervising keeps running. Daemons started by the
+Multica Desktop app are never registered or refreshed here: the app owns
+that daemon's lifecycle through its own app-start daemon preference.
+
 ### Stop
 
 ```bash
@@ -228,6 +279,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Codex](https://github.com/openai/codex) | `codex` | OpenAI's coding agent |
 | [GitHub Copilot CLI](https://docs.github.com/en/copilot) | `copilot` | GitHub's coding agent (model routed by your GitHub entitlement) |
 | OpenCode | `opencode` | Open-source coding agent |
+| [ZCode](https://zcode.z.ai/) | `zcode` / ZCode Desktop | Native NDJSON app-server, sessions, model discovery, thinking levels, MCP and yolo execution |
 | OpenClaw | `openclaw` | Open-source coding agent |
 | Hermes | `hermes` | Nous Research coding agent |
 | [Pi](https://pi.dev/) | `pi` | Pi coding agent |
@@ -236,6 +288,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | Kimi | `kimi` | Moonshot coding agent |
 | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) | `reasonix` | DeepSeek-focused ACP coding agent (run `reasonix setup` first) |
 | Dim | `dim` | DimCode ACP coding agent (speaks the ACP protocol via `dim acp`) |
+| [Devin CLI](https://docs.devin.ai/cli/quickstart) | `devin` | Version 3000.3.22+. Host-local ACP (`devin acp`), not cloud Devin VMs. Run `devin auth login` first. |
 | Kiro CLI | `kiro-cli` | Kiro ACP coding agent |
 | [Qoder CLI](https://docs.qoder.com/) | `qodercli` | Qoder ACP coding agent |
 | [Qoder CN CLI](https://help.aliyun.com/en/lingma/qodercli-cn/product-overview/what-is-qoder-cli-cn) | `qoderclicn` | Qoder CN ACP coding agent |
@@ -247,6 +300,17 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | `dsh` | DeepSeek Harness (`dsh --profile multica --stdio`; requires the Multica runtime profile to be installed; reads AGENTS.md and .dsh/skills/) |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
+
+Pi and Oh-My-Pi require kernel support for process identity signalling to clean
+up detached tools safely: on Linux, `pidfd_open` and `pidfd_send_signal` (kernel
+5.3 or newer); on macOS, kernel-checked process identity signalling. Each run
+checks these operations before launching the runtime. An unsupported or denied
+probe operation, including one blocked by a sandbox, fails startup with a
+compatibility error instead of allowing work to start without the required cleanup
+capability. This is a capability check, not a kernel version check, and a passing
+probe does not guarantee permission to signal every descendant process. Existing runs blocked by
+unconfirmed cleanup still require inspection and a manual rerun; the startup check
+does not clear those blocks or establish that earlier background processes exited.
 
 ### How It Works
 
@@ -293,14 +357,14 @@ Daemon behavior is configured via flags or environment variables:
 
 #### Workspace garbage collection
 
-The daemon periodically scans `MULTICA_WORKSPACES_ROOT` and applies several disk-reclamation policies:
+The daemon periodically scans `MULTICA_WORKSPACES_ROOT` for cleanup. The active-directory guard uses the resolved path so a symlink or Windows junction and its target share the same guard.
 
 - **Full task cleanup** — when an issue's status is `done` or `cancelled` and has been idle for `MULTICA_GC_TTL`, the entire task directory is removed.
 - **Completed-task retention bound** — `MULTICA_GC_COMPLETED_TASK_TTL` fully removes an inactive issue task once its `.gc_meta.json` `completed_at` age exceeds the configured duration, even while the parent issue remains open. Cleanup waits for a successful parent-issue status check, never removes an active environment, and never fully removes a `local_directory` environment. A later rerun provisions a fresh environment instead of resuming the removed checkout.
   - The default depends on where the daemon points: `14d` against Multica Cloud, and `0` (disabled, retain indefinitely) for self-host and every other origin — including cloud staging and previews. Set the variable to opt in or out on either side; an explicit `0` disables the policy on Cloud too.
   - Removing an environment discards work an agent left uncommitted or unpushed on its branch, along with that task's `output/` and `logs/`. The per-issue Codex session store lives outside `MULTICA_WORKSPACES_ROOT` under its own TTL, so a later rerun still resumes the agent's prior session — it just starts from a fresh checkout. Size the TTL against that trade, and keep it comfortably above `MULTICA_GC_INTERVAL`: the active-root guard protects a task that is currently running, not one whose follow-up run is queued but unclaimed.
 - **Orphan cleanup** — task directories with no `.gc_meta.json` (e.g. left over from a daemon crash) are removed once they exceed `MULTICA_GC_ORPHAN_TTL`.
-- **Artifact-only cleanup** — when a task has been completed for at least `MULTICA_GC_ARTIFACT_TTL` but the issue is still open, regenerable build outputs whose directory basename matches `MULTICA_GC_ARTIFACT_PATTERNS` are removed. The daemon also reclaims the exact managed path `codex-home/.sandbox-bin`; old task metadata without `completed_at` becomes eligible for this managed-only cleanup after its `.gc_meta.json` file has been idle for `MULTICA_GC_ORPHAN_TTL`. The rest of the task (source, `.git`, `output/`, `logs/`, `.gc_meta.json`, Codex auth/config/session state) is preserved so the agent can resume it.
+- **Artifact-only cleanup** — when a task has been completed for at least `MULTICA_GC_ARTIFACT_TTL` but the issue is still open, regenerable build outputs whose directory basename matches `MULTICA_GC_ARTIFACT_PATTERNS` are removed. The daemon also reclaims the exact managed path `codex-home/.sandbox-bin`; old task metadata without `completed_at` becomes eligible for this managed-only cleanup after its `.gc_meta.json` file has been idle for `MULTICA_GC_ORPHAN_TTL`. The rest of the task (source, `.git`, `output/`, `logs/`, `.gc_meta.json`, Codex auth/config/session state) is preserved so the agent can resume it. The same basename patterns apply to unarchived chats that use a daemon-managed work directory once the chat status check succeeds and the last run has been complete for `MULTICA_GC_ARTIFACT_TTL`. After a successful cleanup, the daemon skips repeat scans for that run. A later completed run becomes eligible again after the same delay.
 - **Managed-cache reclamation** — the exact managed path above is reclaimed for *every* task kind once the task has been completed for `MULTICA_GC_ARTIFACT_TTL`, not just for issue tasks whose issue is still open. It applies even while the parent record says the directory itself must stay — an active chat session, a still-running autopilot run — and even when the parent record could not be reached this cycle, because the contents are regenerable and the next run re-provisions them on demand. A task currently running on the directory is never touched. Set `MULTICA_GC_ARTIFACT_TTL=0` to disable this along with the rest of artifact cleanup.
 
 - **Repo cache eviction** — the bare git clones under `.repos/` are shared object stores: each task workdir is a `git worktree` off one of them rather than its own clone, so a task's `.git` is only a pointer file. They are evicted only when all of the following hold: the repo is no longer attached to any workspace this daemon watches, it has no worktrees left, and no task has created a worktree from it for `MULTICA_GC_REPO_TTL`. A cache created before this stamp existed is not treated as ancient — its clock starts at the first GC cycle that sees it, so upgrading does not wipe every cache. Evicting is safe by construction: the next task that needs the repo re-clones it on demand, so a wrong eviction costs a clone, not a failure.
@@ -309,7 +373,7 @@ The daemon periodically scans `MULTICA_WORKSPACES_ROOT` and applies several disk
 
 - **Hermes session store reclamation** — a conversation's Hermes transcript (`state.db`) lives at `<work-state root>/hermes-sessions/<agent-id>/<hermes-profile>/<conversation>/`, outside any task directory, so a follow-up turn can resume it (see [Hermes agent memory](#hermes-agent-memory)). A store untouched for `MULTICA_GC_HERMES_SESSION_TTL` is removed. The default matches the Codex session store rather than the memory store above: these hold full transcripts, and reclaiming an idle one costs a thread that starts fresh (with a continuity notice), not an agent that forgot what it learned. A store a running task holds is never reclaimed.
 - **Hermes memory store reclamation** — a Hermes agent's long-term memory (`memories/`) lives at `<work-state root>/hermes-state/<agent-id>/<hermes-profile>/`, outside any task directory, so it survives across tasks and issues (see [Hermes agent memory](#hermes-agent-memory)). A store untouched for `MULTICA_GC_HERMES_MEMORY_TTL` is removed, giving a deleted agent's memory an eventual-reclamation guarantee. The default is deliberately long: these are a handful of markdown files, and reclaiming one is user-visible amnesia rather than a cache miss. A store a running task holds is never reclaimed.
-- **Task temp dir reclamation** — every task gets a private temp directory (`multica-task-*`) under the system temp base (`/tmp`, or `MULTICA_AGENT_TEMP_BASE`), exported to the agent as `TMPDIR`/`TMP`/`TEMP`. It is removed when the run ends, but that removal never happens when the daemon is killed and does not succeed while a file inside is still open — common on Windows, where an open handle makes the delete fail outright. These directories live outside `MULTICA_WORKSPACES_ROOT`, so nothing else reclaimed them and whatever the end-of-run removal missed accumulated forever. Every GC cycle now sweeps the temp base. Liveness is decided by the directory's `.task_lock` — the same OS advisory lock an env root uses, which the kernel releases when the holding process dies — not by age: a directory still in use is never removed however old it is, including one owned by a different daemon sharing the same temp base, and a directory whose owner is gone is removed on the next cycle however new it is. Directories left by a daemon predating that lock carry no lock file, so nothing can be proven about them and age is the only signal available. Reclaiming those is an operator's explicit decision: `MULTICA_GC_TASK_TEMP_LEGACY_TTL` defaults to `0`, which leaves them in place. Set it to a duration only once you know no pre-lock daemon is still running tasks on this machine — a task may legitimately run for weeks (there is no default agent timeout), a daemon on another profile can still be on the old binary, and every daemon on the machine shares one temp base, so a TTL here can delete a `TMPDIR` that is still in use. Each GC cycle logs how many such directories it left alone. Even with a TTL set, a directory holding no task content is never reclaimed on age — an old empty leftover, or a shell left by a daemon that died between creating the directory and publishing its lock — because holding no content is exactly what a directory currently being published looks like, and deleting one of those would take the `TMPDIR` of a task that is starting. Those shells are a few bytes each. Only entries carrying the `multica-task-` prefix are ever considered — the temp base itself is usually shared with other programs — and a directory this sweep cannot read is never touched.
+- **Task temp dir reclamation** — every task gets a private temp directory (`multica-task-*`) under the system temp base (`/tmp`, or `MULTICA_AGENT_TEMP_BASE`), exported to the agent as `TMPDIR`/`TMP`/`TEMP`. On Windows, every task instead inherits the daemon user's `TMP`/`TEMP`: Git Bash's `/tmp` mount is shared by all of the user's live Git Bash processes, whichever runtime started them, so it must never point at a task directory that will be deleted. `TMPDIR` stays task-local, and for Claude Code `CLAUDE_CODE_TMPDIR` defaults to that directory unless the user overrides it. It is removed when the run ends, but that removal never happens when the daemon is killed and does not succeed while a file inside is still open — common on Windows, where an open handle makes the delete fail outright. These directories live outside `MULTICA_WORKSPACES_ROOT`, so nothing else reclaimed them and whatever the end-of-run removal missed accumulated forever. Every GC cycle now sweeps the temp base. Liveness is decided by the directory's `.task_lock` — the same OS advisory lock an env root uses, which the kernel releases when the holding process dies — not by age: a directory still in use is never removed however old it is, including one owned by a different daemon sharing the same temp base, and a directory whose owner is gone is removed on the next cycle however new it is. Directories left by a daemon predating that lock carry no lock file, so nothing can be proven about them and age is the only signal available. Reclaiming those is an operator's explicit decision: `MULTICA_GC_TASK_TEMP_LEGACY_TTL` defaults to `0`, which leaves them in place. Set it to a duration only once you know no pre-lock daemon is still running tasks on this machine — a task may legitimately run for weeks (there is no default agent timeout), a daemon on another profile can still be on the old binary, and every daemon on the machine shares one temp base, so a TTL here can delete a `TMPDIR` that is still in use. Each GC cycle logs how many such directories it left alone. Even with a TTL set, a directory holding no task content is never reclaimed on age — an old empty leftover, or a shell left by a daemon that died between creating the directory and publishing its lock — because holding no content is exactly what a directory currently being published looks like, and deleting one of those would take the `TMPDIR` of a task that is starting. Those shells are a few bytes each. Only entries carrying the `multica-task-` prefix are ever considered — the temp base itself is usually shared with other programs — and a directory this sweep cannot read is never touched.
 
 Configured patterns are basename-only — entries containing `/` or `\` are silently dropped — and `.git` subtrees are never descended into. The managed Codex cache is matched by its exact relative path, so a repository's own `.sandbox-bin` is not removed unless an operator explicitly adds that basename to `MULTICA_GC_ARTIFACT_PATTERNS`. The default list (`node_modules`, `.next`, `.turbo`) is intentionally narrow; extend it per deployment if your repos consistently produce other regenerable directories (for example, `MULTICA_GC_ARTIFACT_PATTERNS=node_modules,.next,.turbo,target,__pycache__`). To disable artifact cleanup entirely, including the managed Codex cache, set `MULTICA_GC_ARTIFACT_TTL=0`.
 
@@ -339,7 +403,7 @@ Agent-specific overrides:
 | `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
 | `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
 | `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
-| `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
+| `MULTICA_OPENCLAW_MODEL` | Select the registered OpenClaw agent ID used by default; the agent's `runtime_config.model_override` persistently overrides its underlying model for all newly claimed runs until changed or cleared |
 | `MULTICA_OPENCLAW_CLI_TIMEOUT` | Deadline for each `openclaw config ...` call during task preparation (default 30s; accepts `45s` or `45`). Raise it when the local CLI is slow to start; the daemon also reads it from `backends.openclaw.cli_timeout` in the CLI config |
 | `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
 | `MULTICA_HERMES_MODEL` | Override the Hermes model used |
@@ -353,6 +417,8 @@ Agent-specific overrides:
 | `MULTICA_REASONIX_MODEL` | Override the Reasonix model used |
 | `MULTICA_DIM_PATH` | Custom path to the `dim` binary |
 | `MULTICA_DIM_MODEL` | Override the Dim model used |
+| `MULTICA_DEVIN_PATH` | Custom path to the `devin` binary |
+| `MULTICA_DEVIN_MODEL` | Override the Devin model used |
 | `MULTICA_KIRO_PATH` | Custom path to the `kiro-cli` binary |
 | `MULTICA_KIRO_MODEL` | Override the Kiro model used |
 | `MULTICA_QODER_PATH` | Custom path to the `qodercli` binary |
@@ -396,6 +462,13 @@ The daemon launches QwenPaw as `qwenpaw acp --workspace <per-task dir>`. It writ
 The daemon launches MiniMax Code as `mcode acp`, writes the task brief to `AGENTS.md`, and injects bound skills under `.minimax/skills/`. MCode owns model selection and currently advertises `loadSession: false`; Multica therefore starts a fresh MCode session when a later run cannot load the saved session.
 
 #### Hermes agent memory
+
+On Windows, detected Hermes versions 0.22 and later use a daemon-owned foreground
+gateway for each isolated task home. The daemon waits for its startup reservation
+before launching ACP, which performs the readiness handshake. The gateway and its
+tool descendants remain in a Windows job object and are terminated on task cleanup
+or cancellation; agent jobs do not permit breakaway. Other platforms and older or
+unrecognized Hermes versions retain their existing ACP startup behavior.
 
 Hermes discovers skills only from its own home, so binding Multica skills to a Hermes agent makes the daemon build a per-task `HERMES_HOME` overlay for that agent. The agent's long-term memory (`memories/`) does **not** live inside that task-scoped overlay: it is linked to a persistent store at
 
@@ -457,7 +530,7 @@ multica daemon start --profile staging
 multica daemon start
 ```
 
-Each profile gets its own config directory (`~/.multica/profiles/<name>/`), daemon state, and health port. Daemon state means that profile's own `daemon.log`, `daemon.err.log`, and `daemon.pid` live in that directory too — see [Start](#start) for the layout, and pass `--profile <name>` to `daemon status` / `daemon logs` to act on it.
+Each profile gets its own config directory (`~/.multica/profiles/<name>/`), daemon state, and health port. Daemon state means that profile's own `daemon.log`, `daemon.err.log`, `daemon.pid`, and `daemon.port` live in that directory too — see [Start](#start) for the layout, and pass `--profile <name>` to `daemon status` / `daemon logs` to act on it. The daemon normally uses the profile-derived health port. If the OS refuses that port, it binds an available loopback port and records the actual port in `daemon.port` for lifecycle commands. The record is valid only while its daemon is alive; do not edit it to configure a port.
 
 ### Work state
 
@@ -566,13 +639,23 @@ multica issue list --metadata pipeline_status=waiting_review
 multica issue list --metadata pr_number=482 --metadata is_blocked=true
 ```
 
-Use `--property "Name=Value"` (repeatable; one value per flag) to filter by custom property. Names and select option values are case-insensitive and resolve to ids; repeating the same property matches any of its values, different properties must all match. Values are option names or ids (select types), `true`/`false` (checkbox), a member name, email, or id (actor types), or the stored value itself for `text`, `url`, `number`, and `date` (`YYYY-MM-DD`). Only `=` is supported today; the `>=`, `<=` and `!=` spellings are reserved for comparison filters and are rejected. The reserved value `__none__` matches issues where the property is unset:
+Use `--property "Name=Value"` (repeatable; one member per flag) to filter by custom property. Names and select option values are case-insensitive and resolve to ids; repeating the same property matches any of its members, different properties must all match. Values are option names or ids (select types), `true`/`false` (checkbox), a member name, email, or id (actor types), or the stored value itself for `text`, `url`, `number`, and `date` (`YYYY-MM-DD`). The reserved value `__none__` matches issues where the property is unset:
 
 ```bash
 multica issue list --property "Impact=High" --property "Impact=Medium"
 multica issue list --property "Impact=__none__" --status in_review
 multica issue list --property "Score=42" --property "Ship Date=2026-08-28"
 ```
+
+Comparisons go in the same flag. `number` takes `>`, `>=`, `<` and `<=`; `date` takes `>` (after) and `<` (before); `text` and `url` take `~=` (contains, case-insensitive, matched exactly as typed). Quote the flag so the shell does not read `<` and `>` as redirection:
+
+```bash
+multica issue list --property "Score>=3" --property "Impact=High"
+multica issue list --property "Ship Date<2026-09-01" --status todo
+multica issue list --property "Notes~=follow up"
+```
+
+A comparison on a type that cannot honour it is rejected with an error naming the type. So is `!=` (the server has no not-equal filter), and so are `>=` and `<=` on a date: the server only compares dates strictly, and the error names the strict form to use instead. Repeating a property ORs its members, so `"Score>1"` plus `"Score<10"` is not a range. A property whose name contains `=`, `<`, `>`, `!` or `~` has to be given by its UUID.
 
 In JSON output, `properties` is a map from definition id to the stored value: an option id for `select`, a list of option ids for `multi_select`, a `member:<uuid>` reference for the actor types, and the value itself otherwise. Pass `--resolve-properties` to replace that map with the rows `issue property list` prints, one per set property, in catalog order: `property_id`, `name`, `type`, the stored `value`, a human `display`, `display_values` (the per-item names of a `multi_select` or `multi_actor` value) and `archived` when the definition is archived. Archived definitions still resolve, since their values stay on the issue. An option that is no longer in the definition, or a member who has left the workspace, keeps its raw id in `display`. The flag adds at most two requests: the catalog, shared with `--property` and `--sort property:`, and the member list, fetched only when an actor `--property` filter or an actor value on the page needs it and shared between the two. If either request fails the command fails rather than printing ids. In JSON output it combines with `--fields` only when that list keeps `properties`; a `--fields` list without it is rejected rather than resolving a key the same command would delete. The flag has no effect on `--output table`, where it and `--fields` are both ignored and neither is rejected.
 
@@ -602,9 +685,11 @@ Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assig
 ```bash
 multica issue update <id> --title "New title" --priority urgent
 multica issue update <id> --position 4.5
+multica issue update <id> --attachment revised.png
 ```
 
 `--position` sets the raw ordering value within the board column (lower sorts first). For relative moves, `issue reorder` is easier because it works out the value for you.
+`--attachment` uploads a local file and appends its Markdown reference to the end of the issue description. Repeat the flag to attach multiple files. To replace an existing image, also use `--description-file` to remove the old reference from the description.
 
 ### Reorder Issue
 
@@ -641,6 +726,16 @@ Built-in statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `block
 `cancelled`. A workspace can define custom statuses on top of these; their keys are
 shown in **Settings → Issue Statuses**, and passing an unknown value returns the full
 list.
+
+To cancel an issue because it duplicates another, mark it so the original lists it:
+
+```bash
+multica issue status <id> cancelled --duplicate-of <original>
+```
+
+`--duplicate-of` takes an issue key or full UUID and requires status `cancelled`.
+`issue update <id> --duplicate-of <original>` does the same, but cannot be combined with
+description or attachment changes. Moving the issue to any other status removes the mark.
 
 ### Comments
 
@@ -688,6 +783,13 @@ multica issue comment add <issue-id> --content "Looks good, merging now"
 
 # Reply to a specific comment
 multica issue comment add <issue-id> --parent <comment-id> --content "Thanks!"
+
+# Add the comment to an agent's running turn instead of queueing a
+# follow-up run (--steer is repeatable; --steer-active picks every running
+# agent you may steer). You may steer an agent exactly when your comment could
+# start it; an agent never steers itself and adds at most 3 messages to one
+# run. Prints per run whether it was steered.
+multica issue comment add <issue-id> --content-file note.md --steer <run-id>
 
 # Delete a comment
 multica issue comment delete <comment-id>

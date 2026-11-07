@@ -66,7 +66,7 @@ func TestCompleteTask_ContextExhaustionFromOlderDaemonIsRecordedAsFailed(t *test
 	// Exactly what an older daemon posts: a successful completion whose output
 	// is the provider's notice, carrying the saturated session id.
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
+	req := newOwnerDaemonRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
 		map[string]any{
 			"output": "Prompt is too long · the request is ~274931 tokens (limit 200000) but this conversation is only ~1597 tokens — " +
 				"the rest is system prompt, tool definitions, and attachment content. A single-exchange conversation cannot be " +
@@ -74,7 +74,7 @@ func TestCompleteTask_ContextExhaustionFromOlderDaemonIsRecordedAsFailed(t *test
 			"session_id": "sess-saturated-6402",
 			"work_dir":   "/tmp/gh6402",
 		},
-		testWorkspaceID, "legit-daemon")
+	)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("taskId", taskID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
@@ -189,9 +189,9 @@ func TestCompleteTask_RealAnswerStillCompletes(t *testing.T) {
 			t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
 
 			w := httptest.NewRecorder()
-			req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
+			req := newOwnerDaemonRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
 				map[string]any{"output": tc.output, "session_id": "sess-healthy"},
-				testWorkspaceID, "legit-daemon")
+			)
 			rctx := chi.NewRouteContext()
 			rctx.URLParams.Add("taskId", taskID)
 			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))

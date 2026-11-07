@@ -6,7 +6,7 @@ import {
   ArrowRight,
   Loader2,
   RefreshCw,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { runtimeKeys } from "@multica/core/runtimes/queries";
@@ -70,6 +70,7 @@ export function StepRuntimeConnect({
 
   return (
     <FancyView
+      wsSlug={wsSlug}
       wsId={wsId}
       runtimes={runtimes}
       selected={selected}
@@ -83,9 +84,7 @@ export function StepRuntimeConnect({
   );
 }
 
-// ============================================================
 // Fancy desktop view
-// ============================================================
 
 type Phase = "scanning" | "found" | "empty";
 
@@ -99,6 +98,7 @@ const EMPTY_TIMEOUT_MS = 5000;
 const EMPTY_HARD_TIMEOUT_MS = 20000;
 
 function FancyView({
+  wsSlug,
   wsId,
   runtimes,
   selected,
@@ -110,6 +110,7 @@ function FancyView({
   currentUserId,
 }: {
   wsId: string;
+  wsSlug?: string;
   runtimes: AgentRuntime[];
   selected: AgentRuntime | null;
   selectedId: string | null;
@@ -167,6 +168,7 @@ function FancyView({
   const onlineCount = runtimes.filter((r) => r.status === "online").length;
 
   const [submitting, setSubmitting] = useState(false);
+  const [skipping, setSkipping] = useState(false);
   const [model, setModel] = useState("");
   const [refreshing, setRefreshing] = useState(false);
 
@@ -193,10 +195,12 @@ function FancyView({
   const handleSkip = async () => {
     if (submitting) return;
     setSubmitting(true);
+    setSkipping(true);
     try {
       await onNext(null);
     } finally {
       setSubmitting(false);
+      setSkipping(false);
     }
   };
   // Starting with Mika only makes sense when a runtime is selected.
@@ -237,6 +241,7 @@ function FancyView({
         {phase === "scanning" && <ScanningView />}
         {phase === "found" && (
           <FoundView
+            wsSlug={wsSlug}
             runtimes={runtimes}
             selectedId={selectedId}
             onSelect={setSelectedId}
@@ -251,6 +256,7 @@ function FancyView({
         {phase === "empty" && (
           <EmptyView
             onSkip={handleSkip}
+            skipping={skipping}
             onRefresh={handleRefresh}
             refreshing={refreshing}
           />
@@ -273,7 +279,9 @@ function FancyView({
             disabled={!canContinue || submitting}
             onClick={handleContinue}
           >
-            {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+            {submitting && !skipping && (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            )}
             {t(($) => $.step_runtime.continue)}
           </Button>
         )}
@@ -284,6 +292,7 @@ function FancyView({
             disabled={submitting}
             onClick={handleSkip}
           >
+            {skipping && <Loader2 className="h-4 w-4 animate-spin" />}
             {t(($) => $.step_runtime.skip)}
           </Button>
         )}
@@ -292,9 +301,7 @@ function FancyView({
   );
 }
 
-// ------------------------------------------------------------
 // Phase views (inline — all three share the same 620px column)
-// ------------------------------------------------------------
 
 function ScanningView() {
   const { t } = useT("onboarding");
@@ -321,6 +328,7 @@ function ScanningView() {
 }
 
 function FoundView({
+  wsSlug,
   runtimes,
   selectedId,
   onSelect,
@@ -332,6 +340,7 @@ function FoundView({
   currentUserId,
 }: {
   runtimes: AgentRuntime[];
+  wsSlug?: string;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onlineCount: number;
@@ -382,6 +391,7 @@ function FoundView({
 
       <div className="mt-6 flex flex-col gap-4">
         <MikaRuntimeChoice
+          workspaceSlug={wsSlug}
           runtimes={runtimes}
           currentUserId={currentUserId}
           value={{ runtimeId: selectedId ?? "", model }}
@@ -397,10 +407,12 @@ function FoundView({
 
 function EmptyView({
   onSkip,
+  skipping,
   onRefresh,
   refreshing,
 }: {
   onSkip: () => void;
+  skipping: boolean;
   onRefresh: () => void;
   refreshing: boolean;
 }) {
@@ -434,6 +446,7 @@ function EmptyView({
           subtitle={t(($) => $.step_runtime.empty_skip_subtitle)}
           actionLabel={t(($) => $.step_runtime.empty_skip_action)}
           onAction={onSkip}
+          busy={skipping}
         />
 
         <ComingSoonCard
@@ -522,17 +535,21 @@ function EmptyCard({
   subtitle,
   actionLabel,
   onAction,
+  busy,
 }: {
   title: string;
   subtitle: string;
   actionLabel: string;
   onAction: () => void;
+  busy: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onAction}
-      className="group flex items-center justify-between gap-4 rounded-lg border bg-card px-5 py-4 text-left transition-colors hover:border-foreground/30 hover:bg-muted/30"
+      disabled={busy}
+      aria-busy={busy}
+      className="group flex items-center justify-between gap-4 rounded-lg border bg-card px-5 py-4 text-left transition-colors hover:border-foreground/30 hover:bg-muted/30 disabled:pointer-events-none"
     >
       <div className="min-w-0">
         <div className="text-body font-medium text-foreground">{title}</div>
@@ -545,15 +562,17 @@ function EmptyCard({
         className="inline-flex shrink-0 items-center gap-1.5 rounded-full border bg-background px-4 py-2 text-label font-medium text-foreground transition-colors group-hover:border-foreground group-hover:bg-foreground group-hover:text-background"
       >
         {actionLabel}
-        <ArrowRight className="h-3.5 w-3.5" />
+        {busy ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <ArrowRight className="h-3.5 w-3.5" />
+        )}
       </span>
     </button>
   );
 }
 
-// ------------------------------------------------------------
 // Card components
-// ------------------------------------------------------------
 
 function SkeletonRuntimeCard() {
   return (

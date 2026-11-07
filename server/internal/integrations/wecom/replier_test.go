@@ -28,9 +28,19 @@ import (
 // fakeBinder mints a fixed, recognizable raw token without touching a DB.
 // With reused set it behaves like the throttle suppressing a mint: no raw
 // secret, only the live token's expiry.
+//
+// withdrawn, when set, records every raw token the replier withdraws.
 type fakeBinder struct {
-	raw    string
-	reused bool
+	raw       string
+	reused    bool
+	withdrawn *[]string
+}
+
+func (f fakeBinder) Withdraw(_ context.Context, raw string) error {
+	if f.withdrawn != nil {
+		*f.withdrawn = append(*f.withdrawn, raw)
+	}
+	return nil
 }
 
 func (f fakeBinder) Mint(context.Context, pgtype.UUID, pgtype.UUID, string) (BindingToken, error) {
@@ -51,10 +61,14 @@ type recordingConn struct {
 	// that read their verdict block until one arrives, so a double that never
 	// answers turns every send into a 5-second timeout.
 	//
-	// Set refuseCode to make the server refuse instead.
+	// Set refuseCode to make the server refuse instead. refuseTo narrows that
+	// to the aibot_send_msg frames addressed to one chatid, the way WeCom
+	// refuses a push into a 1:1 the user never opened while the room the
+	// trigger came from still takes the bot's frames.
 	sender     *wsSender
 	refuseCode int
 	refuseMsg  string
+	refuseTo   string
 
 	// refuseFromSend and swallowAckFromSend act on aibot_send_msg frames
 	// only, counted 1-based, and are how a test refuses or loses the verdict
@@ -81,6 +95,15 @@ func (c *recordingConn) WriteMessage(_ int, data []byte) error {
 	c.frames = append(c.frames, env)
 	s := c.sender
 	code, msg := c.refuseCode, c.refuseMsg
+	if c.refuseTo != "" {
+		var body struct {
+			ChatID string `json:"chatid"`
+		}
+		_ = json.Unmarshal(env.Body, &body)
+		if env.Cmd != cmdSendMsg || body.ChatID != c.refuseTo {
+			code, msg = 0, ""
+		}
+	}
 	swallow := false
 	if env.Cmd == cmdSendMsg {
 		c.sends++
@@ -193,8 +216,8 @@ func TestReply_CommandOutcomes_PostGuidance(t *testing.T) {
 		outcome engine.Outcome
 		want    string
 	}{
-		{engine.OutcomeFreshPending, freshPendingText},
-		{engine.OutcomeIssueUsage, issueUsageText},
+		{engine.OutcomeFreshPending, copyFor(DefaultLocale).FreshPending},
+		{engine.OutcomeIssueUsage, copyFor(DefaultLocale).IssueUsage},
 	} {
 		t.Run(string(tc.outcome), func(t *testing.T) {
 			r, inst, conn := newReplierWithConn(t)
@@ -236,7 +259,7 @@ func TestSendBindingPrompt_GroupNeverLeaksToken(t *testing.T) {
 		ChatType: channel.ChatTypeGroup,
 		SenderID: senderID,
 	}}
-	if err := r.sendBindingPrompt(context.Background(), inst, msg, engine.Result{Sender: senderID}); err != nil {
+	if err := r.sendBindingPrompt(context.Background(), inst, msg, engine.Result{Sender: senderID}, copyFor(DefaultLocale)); err != nil {
 		t.Fatalf("sendBindingPrompt: %v", err)
 	}
 
@@ -300,7 +323,7 @@ func TestSendBindingPrompt_P2PSendsOnlyPrivately(t *testing.T) {
 	r.binding = fakeBinder{raw: rawToken}
 
 	msg := channel.InboundMessage{Source: channel.Source{ChatID: "USER_A", ChatType: channel.ChatTypeP2P, SenderID: "USER_A"}}
-	if err := r.sendBindingPrompt(context.Background(), inst, msg, engine.Result{Sender: "USER_A"}); err != nil {
+	if err := r.sendBindingPrompt(context.Background(), inst, msg, engine.Result{Sender: "USER_A"}, copyFor(DefaultLocale)); err != nil {
 		t.Fatalf("sendBindingPrompt: %v", err)
 	}
 	conn.mu.Lock()
@@ -341,7 +364,7 @@ func TestSendBindingPrompt_ThrottledSendsNoURL(t *testing.T) {
 		ChatType: channel.ChatTypeGroup,
 		SenderID: senderID,
 	}}
-	if err := r.sendBindingPrompt(context.Background(), inst, msg, engine.Result{Sender: senderID}); err != nil {
+	if err := r.sendBindingPrompt(context.Background(), inst, msg, engine.Result{Sender: senderID}, copyFor(DefaultLocale)); err != nil {
 		t.Fatalf("sendBindingPrompt: %v", err)
 	}
 
@@ -377,6 +400,123 @@ func TestSendBindingPrompt_ThrottledSendsNoURL(t *testing.T) {
 	}
 	if privateFrames != 1 {
 		t.Errorf("expected exactly one privately-addressed frame, got %d", privateFrames)
+	}
+}
+
+// groupMessage is an @-mention of the bot in a room by SENDER_USERID.
+func groupMessage() channel.InboundMessage {
+	return channel.InboundMessage{Source: channel.Source{
+		ChatID:   "GROUP_CHAT_ID",
+		ChatType: channel.ChatTypeGroup,
+		SenderID: "SENDER_USERID",
+	}}
+}
+
+// TestSendBindingPrompt_AsksTheRoomWhenTheUserMustMessageFirst: a member who
+// has only ever @-mentioned the bot has no 1:1 WeCom will push into, so the
+// private link is refused with 846607. Before this the room heard nothing and
+// neither did they. The room now gets the token-less ask, and the refused link
+// is withdrawn so the message they send in the 1:1 gets a fresh one.
+func TestSendBindingPrompt_AsksTheRoomWhenTheUserMustMessageFirst(t *testing.T) {
+	t.Parallel()
+	const rawToken = "SECRET_BEARER_TOKEN_do_not_leak"
+	r, inst, conn := newReplierWithConn(t)
+	var withdrawn []string
+	r.binding = fakeBinder{raw: rawToken, withdrawn: &withdrawn}
+	conn.refuseTo, conn.refuseCode, conn.refuseMsg = "SENDER_USERID", errcodeUserMustMessageFirst, "aibot send msg frequency limit exceeded"
+
+	err := r.sendBindingPrompt(context.Background(), inst, groupMessage(), engine.Result{Sender: "SENDER_USERID"}, copyFor(DefaultLocale))
+	if !userMustMessageFirst(err) {
+		t.Fatalf("sendBindingPrompt error = %v, want the 846607 refusal reported", err)
+	}
+
+	frames := conn.sendFrames()
+	if len(frames) != 2 {
+		t.Fatalf("expected 2 frames (refused private link + room ask), got %d", len(frames))
+	}
+	room := conn.sendBody(t, 1)
+	if room["chatid"] != "GROUP_CHAT_ID" || room["chat_type"] != float64(chatTypeGroupInt) {
+		t.Fatalf("second frame = %v, want the room", room)
+	}
+	if got, want := sentMarkdown(t, conn, 1), copyFor(DefaultLocale).MessageMeFirst; got != want {
+		t.Fatalf("room line = %q, want %q", got, want)
+	}
+	if strings.Contains(sentMarkdown(t, conn, 1), rawToken) {
+		t.Fatal("SECURITY: the room line carries the raw token")
+	}
+	if len(withdrawn) != 1 || withdrawn[0] != rawToken {
+		t.Fatalf("withdrawn = %v, want the refused link withdrawn", withdrawn)
+	}
+}
+
+// TestSendBindingPrompt_OtherRefusalsStayOutOfTheRoom: asking the room to open
+// the 1:1, and withdrawing the link so that chat gets a fresh one, are the
+// answer to 846607 alone. Any other refusal leaves both as they were: the room
+// hears nothing and the throttle keeps the link, so a 45009 is not met with a
+// new mint per message.
+func TestSendBindingPrompt_OtherRefusalsStayOutOfTheRoom(t *testing.T) {
+	t.Parallel()
+	r, inst, conn := newReplierWithConn(t)
+	var withdrawn []string
+	r.binding = fakeBinder{raw: "RAW", withdrawn: &withdrawn}
+	conn.refuseTo, conn.refuseCode, conn.refuseMsg = "SENDER_USERID", 45002, "content exceed max length"
+
+	if err := r.sendBindingPrompt(context.Background(), inst, groupMessage(), engine.Result{Sender: "SENDER_USERID"}, copyFor(DefaultLocale)); err == nil {
+		t.Fatal("a refused private send must be reported")
+	}
+	if n := len(conn.sendFrames()); n != 1 {
+		t.Fatalf("expected only the refused private frame, got %d frames", n)
+	}
+	if len(withdrawn) != 0 {
+		t.Fatalf("withdrawn = %v, want nothing withdrawn for a refusal other than 846607", withdrawn)
+	}
+}
+
+// TestSendBindingPrompt_ThrottledRefusalWithdrawsNothing: a throttled prompt
+// carries no link, so there is no token to withdraw; the room still gets the
+// ask.
+func TestSendBindingPrompt_ThrottledRefusalWithdrawsNothing(t *testing.T) {
+	t.Parallel()
+	r, inst, conn := newReplierWithConn(t)
+	var withdrawn []string
+	r.binding = fakeBinder{reused: true, withdrawn: &withdrawn}
+	conn.refuseTo, conn.refuseCode = "SENDER_USERID", errcodeUserMustMessageFirst
+
+	_ = r.sendBindingPrompt(context.Background(), inst, groupMessage(), engine.Result{Sender: "SENDER_USERID"}, copyFor(DefaultLocale))
+	if len(withdrawn) != 0 {
+		t.Fatalf("withdrawn = %v, want nothing (no raw token exists)", withdrawn)
+	}
+	if got, want := sentMarkdown(t, conn, 1), copyFor(DefaultLocale).MessageMeFirst; got != want {
+		t.Fatalf("room line = %q, want %q", got, want)
+	}
+}
+
+// TestBindingLinkReachesTheUserWhoOpensTheChat runs the promise the room line
+// makes against the real throttle: after the refused @-mention, the user's
+// first message in the 1:1 — well inside BindingTokenMintInterval — gets a
+// link, not "I already sent you a link, it is just above".
+func TestBindingLinkReachesTheUserWhoOpensTheChat(t *testing.T) {
+	t.Parallel()
+	r, inst, conn := newReplierWithConn(t)
+	svc, _, _ := newThrottledService()
+	r.binding = svc
+	conn.refuseTo, conn.refuseCode = "SENDER_USERID", errcodeUserMustMessageFirst
+
+	_ = r.sendBindingPrompt(context.Background(), inst, groupMessage(), engine.Result{Sender: "SENDER_USERID"}, copyFor(DefaultLocale))
+
+	// They open the 1:1 and say hello; WeCom now takes pushes into it.
+	conn.mu.Lock()
+	conn.refuseTo, conn.refuseCode = "", 0
+	conn.mu.Unlock()
+	dm := channel.InboundMessage{Source: channel.Source{ChatID: "SENDER_USERID", ChatType: channel.ChatTypeP2P, SenderID: "SENDER_USERID"}}
+	if err := r.sendBindingPrompt(context.Background(), inst, dm, engine.Result{Sender: "SENDER_USERID"}, copyFor(DefaultLocale)); err != nil {
+		t.Fatalf("1:1 binding prompt: %v", err)
+	}
+
+	frames := conn.sendFrames()
+	got := sentMarkdown(t, conn, len(frames)-1)
+	if !strings.Contains(got, "https://multica.example/wecom/bind?token=") {
+		t.Fatalf("1:1 reply = %q, want a fresh bind link", got)
 	}
 }
 
@@ -425,7 +565,7 @@ func TestIssueConfirmationDoesNotRenderReporterLinks(t *testing.T) {
 		IssueIdentifier: "MUL-1",
 		IssueTitle:      "安全升级：请点击 [重置密码](https://evil.example) 完成验证",
 	}
-	got := issueCreatedText(res)
+	got := issueCreatedText(res, copyFor(DefaultLocale))
 	if strings.Contains(got, "](") {
 		t.Fatalf("a reporter-authored link rendered in a bot-authored group message: %q", got)
 	}
@@ -445,7 +585,7 @@ func TestIssueConfirmationDefinesNoLinkReference(t *testing.T) {
 		IssueIdentifier: "MUL-1",
 		IssueTitle:      "安全升级\n\n[重置密码]: https://evil.example\n\n[重置密码]",
 	}
-	got := issueCreatedText(res)
+	got := issueCreatedText(res, copyFor(DefaultLocale))
 	if dests := markdownDestinations(got); hasDestinationTo(dests, "evil.example") {
 		t.Fatalf("a reporter-defined link resolved in a bot-authored group message: %q resolves %v", got, dests)
 	}
@@ -465,7 +605,7 @@ func TestIssueConfirmationKeepsAnOrdinaryTitleVerbatim(t *testing.T) {
 		"[Bug]: 登录失败",
 	} {
 		res := engine.Result{IssueIdentifier: "MUL-1", IssueTitle: title}
-		if got, want := issueCreatedText(res), "✅ 已创建 MUL-1 — "+title; got != want {
+		if got, want := issueCreatedText(res, copyFor(DefaultLocale)), "✅ 已创建 MUL-1 — "+title; got != want {
 			t.Fatalf("the reporter's own title came back altered:\n got %q\nwant %q", got, want)
 		}
 	}
@@ -484,9 +624,9 @@ func TestIssueDuplicateIsNotReportedAsCreated(t *testing.T) {
 		IssueTitle:      "somebody else's title",
 		IssueDuplicate:  true,
 	}
-	text := issueCreatedText(res)
+	text := issueCreatedText(res, copyFor(DefaultLocale))
 	if res.IssueDuplicate {
-		text = issueDuplicateText(res)
+		text = issueDuplicateText(res, copyFor(DefaultLocale))
 	}
 	if strings.Contains(text, "已创建") {
 		t.Errorf("a duplicate was reported as created: %q", text)

@@ -487,6 +487,9 @@ cleared_wakeup_receipts AS (
 cleared_wakeups AS (
  DELETE FROM issue_wakeup WHERE issue_id IN (SELECT target.id FROM target)
 ),
+cleared_child_events AS (
+ DELETE FROM issue_child_event WHERE parent_id IN (SELECT target.id FROM target) OR child_id IN (SELECT target.id FROM target)
+),
 cleared_task_supplements AS (
  DELETE FROM task_supplement WHERE issue_id IN (SELECT target.id FROM target)
 ),
@@ -501,6 +504,9 @@ cleared_pr_automation AS (
 ),
 cleared_pr_exclusions AS (
     DELETE FROM issue_pull_request_exclusion WHERE issue_id IN (SELECT target.id FROM target)
+),
+cleared_unread AS (
+    DELETE FROM issue_unread WHERE issue_id IN (SELECT target.id FROM target)
 )
 DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target)
 `

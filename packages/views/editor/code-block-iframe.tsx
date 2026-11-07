@@ -4,10 +4,10 @@
  * Shared HTML preview iframe.
  *
  * Used by:
- *   - InlineHtmlIframe inside AttachmentCard (HTML attachments inline preview)
+ *   - HtmlPreviewBody (the attachment viewer's html kind)
  *   - CodeBlockView for fenced ```html blocks (editable Tiptap NodeView)
- *   - HtmlBlockPreview for fenced ```html blocks (ReadonlyContent)
- *   - AttachmentPreviewModal's full-screen HTML kind
+ *   - HtmlBlockPreview for fenced ```html blocks (RichContent), which also
+ *     listens to the size/error bridge in utils/html-block-document.ts
  *
  * Sandbox semantics:
  *   sandbox="allow-scripts" (NOT "allow-same-origin")
@@ -21,6 +21,7 @@
  * the text body we fetched, never point iframe.src at the proxy URL.
  */
 
+import type { CSSProperties, Ref } from "react";
 import { cn } from "@multica/ui/lib/utils";
 
 interface CodeBlockIframeProps {
@@ -31,6 +32,9 @@ interface CodeBlockIframeProps {
   className?: string;
   /** Tailwind height token; defaults to h-[480px]. */
   heightClassName?: string;
+  style?: CSSProperties;
+  ref?: Ref<HTMLIFrameElement>;
+  onLoad?: () => void;
 }
 
 export function CodeBlockIframe({
@@ -38,9 +42,13 @@ export function CodeBlockIframe({
   title,
   className,
   heightClassName = "h-[480px]",
+  style,
+  ref,
+  onLoad,
 }: CodeBlockIframeProps) {
   return (
     <iframe
+      ref={ref}
       // srcDoc keeps the body in the parent's process but isolated to an
       // opaque origin via sandbox. Critical that we never combine
       // `allow-scripts` with `allow-same-origin` — that pairing defeats the
@@ -53,6 +61,8 @@ export function CodeBlockIframe({
         heightClassName,
         className,
       )}
+      style={style}
+      onLoad={onLoad}
     />
   );
 }

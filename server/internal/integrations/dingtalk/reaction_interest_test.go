@@ -131,7 +131,7 @@ func TestTerminalBeforeSourceCaptureFencesLateReaction(t *testing.T) {
 					t.Fatal("late callback recreated terminal reaction")
 					return nil
 				}
-				n.OnIngested(context.Background(), inst, msg, sid)
+				n.OnIngested(context.Background(), inst, msg, sid, sid)
 				if q.taskReads != 1 || q.inputReads != 1 || len(n.active) != 0 {
 					t.Fatalf("terminal fence not exercised: task=%d input=%d active=%v", q.taskReads, q.inputReads, n.active)
 				}
@@ -246,7 +246,7 @@ func TestActiveReceiptRemainsDiscoverableAfterSourceEviction(t *testing.T) {
 		return nil
 	}
 	n.client.rememberReplySource(inst.ID, id, sid, msg)
-	n.OnIngested(context.Background(), inst, msg, sid)
+	n.OnIngested(context.Background(), inst, msg, sid, sid)
 	for i := 0; i < maxReplySources; i++ {
 		n.client.rememberReplySource(inst.ID, dbid.NewV7(), sessionUUID(54), groupReactionMessage("other"))
 	}
@@ -290,7 +290,7 @@ func TestIngestKeepsTerminalInterestAcrossSourceEviction(t *testing.T) {
 		t.Fatal("eviction allowed terminal reaction to reappear")
 		return nil
 	}
-	n.OnIngested(context.Background(), inst, msg, sid)
+	n.OnIngested(context.Background(), inst, msg, sid, sid)
 	if q.inputReads != 1 || len(n.active) != 0 || n.client.hasReplySession(sid) {
 		t.Fatal("in-flight interest was lost or leaked")
 	}

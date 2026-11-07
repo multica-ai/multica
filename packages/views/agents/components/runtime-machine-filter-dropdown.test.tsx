@@ -19,6 +19,7 @@ function makeMachine(
     daemonId: "daemon-1",
     title: "dev.local",
     subtitle: "x86_64 macOS",
+    deviceSummary: "x86_64 macOS",
     deviceInfo: "dev.local · x86_64 macOS",
     cliVersion: "1.0.0",
     launchedBy: null,

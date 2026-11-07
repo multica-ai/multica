@@ -18,6 +18,8 @@
  * apps/mobile/CLAUDE.md: pure functions from @multica/core are importable).
  */
 
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { normalizeUri } from "micromark-util-sanitize-uri";
 import type { Attachment } from "../types/attachment";
 import {
   attachmentIdFromDownloadURL,
@@ -72,9 +74,7 @@ export function isImageAttachment(
   return ext !== "" && IMAGE_EXTENSIONS.has(ext);
 }
 
-// ---------------------------------------------------------------------------
 // URL → attachment matching
-// ---------------------------------------------------------------------------
 
 function stripQueryAndFragment(url: string): string {
   return url.split(/[?#]/, 1)[0] ?? "";
@@ -85,10 +85,10 @@ function matchesAttachmentURL(
   attachmentURL?: string,
 ): boolean {
   if (!embeddedURL || !attachmentURL) return false;
-  if (embeddedURL === attachmentURL) return true;
+  if (normalizeUri(embeddedURL) === normalizeUri(attachmentURL)) return true;
   const embeddedStable = stripQueryAndFragment(embeddedURL);
   const attachmentStable = stripQueryAndFragment(attachmentURL);
-  return embeddedStable !== "" && embeddedStable === attachmentStable;
+  return embeddedStable !== "" && normalizeUri(embeddedStable) === normalizeUri(attachmentStable);
 }
 
 /**
@@ -150,50 +150,34 @@ export function selectStandaloneAttachments(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Inline image references
-// ---------------------------------------------------------------------------
+/**
+ * How a standalone attachment is laid out under its body (MUL-7649): images
+ * at full size, everything else — HTML included — as file cards.
+ */
+export type StandaloneAttachmentGroup = "image" | "file";
 
-function blankOut(text: string): string {
-  // Newlines survive so line-anchored patterns below keep their line numbers.
-  return text.replace(/[^\n]/g, " ");
+export function standaloneAttachmentGroup(
+  attachment: Pick<Attachment, "content_type" | "filename">,
+): StandaloneAttachmentGroup {
+  return isImageAttachment(attachment.content_type, attachment.filename) ? "image" : "file";
 }
 
 /**
- * Blank every code span and fenced block, preserving offsets and line breaks.
- *
- * Without this, an `![shot](url)` shown as an EXAMPLE inside a fenced block —
- * common in agent replies explaining markdown — would be counted as a real
- * image and the reader would page onto something that was never rendered.
- *
- * Line scanner rather than one multiline regex: a backreferenced
- * `(`{3,})[\s\S]*?\1` over agent output is a ReDoS shape, and this runs on
- * every issue/chat render.
+ * The order a surface renders its standalone attachments in (MUL-7649):
+ * images first (each at full size), then everything else (a grid of file
+ * cards). Stable within each group. The sequence builder walks standalone
+ * attachments in this same order, so paging through the viewer follows the
+ * screen.
  */
-function maskCode(content: string): string {
-  const lines = content.split("\n");
-  let fence: string | null = null;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    const fenceMatch = /^[ \t]{0,3}(`{3,}|~{3,})/.exec(line);
-    if (fence !== null) {
-      lines[i] = blankOut(line);
-      const closes =
-        fenceMatch !== null &&
-        fenceMatch[1]![0] === fence[0] &&
-        fenceMatch[1]!.length >= fence.length;
-      if (closes) fence = null;
-      continue;
-    }
-    if (fenceMatch !== null) {
-      fence = fenceMatch[1]!;
-      lines[i] = blankOut(line);
-      continue;
-    }
-    lines[i] = line.replace(/(`+)[^`\n]*?\1/g, blankOut);
-  }
-  return lines.join("\n");
+export function orderStandaloneAttachments<T extends Pick<Attachment, "content_type" | "filename">>(
+  attachments: ReadonlyArray<T>,
+): T[] {
+  const groups: Record<StandaloneAttachmentGroup, T[]> = { image: [], file: [] };
+  for (const a of attachments) groups[standaloneAttachmentGroup(a)].push(a);
+  return [...groups.image, ...groups.file];
 }
+
+// Inline image references
 
 interface InlineRef {
   index: number;
@@ -209,11 +193,10 @@ interface InlineRef {
   isFileCard: boolean;
 }
 
-// `![alt](url "title")`. The URL char class stops at whitespace and `)` so a
-// title never leaks into it; the optional <> wrapper is CommonMark's escape
-// for URLs containing spaces.
-const MARKDOWN_IMAGE_RE =
-  /!\[([^\]\n]*)\]\(\s*<([^>\n]*)>[^)]*\)|!\[([^\]\n]*)\]\(\s*([^)\s]+)[^)]*\)/g;
+const INLINE_REF_CACHE_LIMIT = 500;
+// Cache only content-derived refs, never resolved attachments or their signed URLs.
+// Timeline updates can then resolve current metadata without reparsing old bodies.
+const inlineRefCache = new Map<string, ReadonlyArray<InlineRef>>();
 
 // Raw `<img src=...>` — reachable because the readonly renderer runs
 // rehypeRaw + rehypeSanitize, and the sanitize schema keeps img.
@@ -229,36 +212,88 @@ function unescapeLabel(label: string): string {
   return label.replace(/\\([[\]\\()])/g, "$1");
 }
 
-function extractInlineRefs(rawContent: string): InlineRef[] {
-  if (!rawContent) return [];
-  const content = maskCode(rawContent);
+function extractInlineRefs(rawContent: string): ReadonlyArray<InlineRef> {
+  // Every supported image or file-card form has one of these markers. Most
+  // timeline comments have none, so rebuilding a sequence need not parse them.
+  if (
+    !rawContent ||
+    (!rawContent.includes("![") &&
+      !rawContent.includes("!file[") &&
+      !/<img\b/i.test(rawContent))
+  ) return [];
+  const cached = inlineRefCache.get(rawContent);
+  if (cached) {
+    inlineRefCache.delete(rawContent);
+    inlineRefCache.set(rawContent, cached);
+    return cached;
+  }
+  const tree = fromMarkdown(rawContent);
   const refs: InlineRef[] = [];
-
-  for (const m of content.matchAll(MARKDOWN_IMAGE_RE)) {
-    // Two alternations: `<...>`-wrapped URL (groups 1/2) or bare (groups 3/4).
-    const alt = m[1] ?? m[3] ?? "";
-    const url = (m[2] ?? m[4] ?? "").trim();
-    if (!url) continue;
-    refs.push({
-      index: m.index ?? 0,
-      url,
-      filename: unescapeLabel(alt),
-      isFileCard: false,
-    });
+  type Node = typeof tree | (typeof tree.children)[number];
+  const nodes: Node[] = [];
+  const pending: Node[] = [tree];
+  while (pending.length) {
+    const node = pending.pop()!;
+    nodes.push(node);
+    if ("children" in node) {
+      for (let i = node.children.length - 1; i >= 0; i--) {
+        pending.push(node.children[i]!);
+      }
+    }
   }
 
-  for (const m of content.matchAll(HTML_IMAGE_RE)) {
-    const url = (m[1] ?? m[2] ?? m[3] ?? "").trim();
-    if (!url) continue;
-    refs.push({
-      index: m.index ?? 0,
-      url,
-      filename: "",
-      isFileCard: false,
-    });
+  // The parser normalizes reference identifiers (case and whitespace). The
+  // first definition wins, as in react-markdown's remark-parse pipeline.
+  const definitions = new Map<string, string>();
+  for (const node of nodes) {
+    if (node.type === "definition" && !definitions.has(node.identifier)) {
+      definitions.set(node.identifier, node.url);
+    }
   }
 
-  for (const m of content.matchAll(FILE_CARD_LINE_RE)) {
+  const codeRanges: Array<{ start: number; end: number }> = [];
+  for (const node of nodes) {
+    const index = node.position?.start.offset ?? 0;
+    if (node.type === "image" || node.type === "imageReference") {
+      const destination = node.type === "image"
+        ? node.url
+        : definitions.get(node.identifier);
+      // mdast-util-to-hast applies the same normalization before RichContent's
+      // img renderer sees the URL (spaces, Unicode, existing percent escapes).
+      if (destination) {
+        refs.push({
+          index,
+          url: normalizeUri(destination),
+          filename: node.alt ?? "",
+          isFileCard: false,
+        });
+      }
+    } else if (node.type === "html") {
+      for (const m of node.value.matchAll(HTML_IMAGE_RE)) {
+        const url = (m[1] ?? m[2] ?? m[3] ?? "").trim();
+        if (url) {
+          refs.push({ index: index + m.index, url, filename: "", isFileCard: false });
+        }
+      }
+    } else if (node.type === "code" || node.type === "inlineCode") {
+      // File-card preprocessing trims indentation and renders indented cards.
+      // Fenced blocks and code spans still display their contents literally.
+      const fenced = node.type === "code" && /^ {0,3}(?:`{3}|~{3})/.test(rawContent.slice(index));
+      if (node.type === "inlineCode" || fenced) {
+        const end = node.position?.end.offset ?? index;
+        codeRanges.push({ start: index, end });
+      }
+    }
+  }
+
+  let codeIndex = 0;
+  for (const m of rawContent.matchAll(FILE_CARD_LINE_RE)) {
+    const index = m.index;
+    while (codeIndex < codeRanges.length && codeRanges[codeIndex]!.end <= index) {
+      codeIndex++;
+    }
+    const code = codeRanges[codeIndex];
+    if (code && index + m[0].length > code.start) continue;
     const url = (m[2] ?? "").trim();
     if (!url) continue;
     refs.push({
@@ -269,19 +304,22 @@ function extractInlineRefs(rawContent: string): InlineRef[] {
     });
   }
 
-  return refs.sort((a, b) => a.index - b.index);
+  refs.sort((a, b) => a.index - b.index);
+  inlineRefCache.set(rawContent, refs);
+  if (inlineRefCache.size > INLINE_REF_CACHE_LIMIT) {
+    inlineRefCache.delete(inlineRefCache.keys().next().value!);
+  }
+  return refs;
 }
 
-// ---------------------------------------------------------------------------
 // Sequence
-// ---------------------------------------------------------------------------
 
 /** One attachment the viewer can page to. */
 export interface ImageSequenceItem {
   /**
    * Identity used to open the sequence at the clicked attachment. The
    * attachment id when the reference resolves to a record, otherwise the URL
-   * as written in the body — matching what the renderer knows at click time.
+   * passed to the image/card renderer after Markdown decoding/normalization.
    */
   key: string;
   /** Best-known URL. Callers holding `attachment` should prefer re-resolving. */
@@ -295,10 +333,17 @@ export interface ImageSequenceItem {
    * markdown caption, which is prose with no extension to read (MUL-7518).
    */
   imageByConstruction: boolean;
+  /**
+   * `id` of the block the item first appeared in, when the caller named its
+   * blocks — lets a viewer say where a file came from (MUL-7649).
+   */
+  blockId?: string;
 }
 
 /** One renderable unit: an issue description, a comment, a chat message. */
 export interface ImageSequenceBlock {
+  /** Caller-chosen identity, copied onto each item as `blockId`. */
+  id?: string;
   content?: string | null;
   attachments?: ReadonlyArray<Attachment> | null;
   /**
@@ -322,7 +367,8 @@ export interface SequenceCandidate {
  * Flatten blocks into the ordered sequence a viewer walks.
  *
  * Order is render order: for each block, references inline in the body in
- * text order, then the standalone attachment cards rendered under it. Repeats
+ * text order, then the standalone attachments rendered under it, grouped as
+ * `orderStandaloneAttachments` lays them out. Repeats
  * of the same attachment collapse to their first position, so the counter
  * matches the number of distinct files rather than the number of references.
  *
@@ -370,11 +416,14 @@ export function collectAttachmentSequence(
         filename: attachment?.filename || ref.filename,
         attachment,
         imageByConstruction: !ref.isFileCard,
+        blockId: block.id,
       });
     }
 
     if (block.standalone === false) continue;
-    for (const attachment of selectStandaloneAttachments(content, attachments)) {
+    for (const attachment of orderStandaloneAttachments(
+      selectStandaloneAttachments(content, attachments),
+    )) {
       if (
         !include({
           contentType: attachment.content_type,
@@ -391,6 +440,7 @@ export function collectAttachmentSequence(
         filename: attachment.filename,
         attachment,
         imageByConstruction: false,
+        blockId: block.id,
       });
     }
   }

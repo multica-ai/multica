@@ -1,8 +1,11 @@
-import type { IssueWakeup, IssueWakeupSummaryRow } from "../types/issue-wakeup";
+import type { ZodType } from "zod";
+import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
+import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
-import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema } from "./schemas";
-import type { InboxFilters } from "../inbox/filter-store";
+import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema } from "./schemas";
+import type { ArchivedInboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
+import { parseQoderConnection, parseQoderCatalog, type QoderInput } from "../runtimes/qoder-schema";
 import { configStore } from "../config";
 import type {
   Issue,
@@ -15,6 +18,9 @@ import type {
   ListIssuesResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
+  SearchIndexManifest,
+  SearchIndexSnapshotPage,
+  SearchIndexChanges,
   UpdateMeRequest,
   CreateMemberRequest,
   UpdateMemberRequest,
@@ -49,6 +55,7 @@ import type {
   InboxItem,
   InboxWorkspaceUnread,
   IssueSubscriber,
+  IssueUnread,
   Comment,
   CommentTriggerPreview,
   IssueTriggerPreview,
@@ -62,6 +69,8 @@ import type {
   User,
   Skill,
   SkillSummary,
+  SkillVersion,
+  SkillVersionSummary,
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
@@ -128,6 +137,13 @@ import type {
   IssueStatusEntry,
   CreateIssueStatusRequest,
   UpdateIssueStatusRequest,
+  IssueWorkflow,
+  IssueWorkflowWriteRequest,
+  IssueWorkflowDryRunResponse,
+  ListIssueWorkflowsResponse,
+  SetProjectWorkflowRequest,
+  SetWorkflowHandoffRequest,
+  WorkflowHandoffPreview,
   IssueLabelsResponse,
   LabelResourceType,
   ResourceLabelsResponse,
@@ -195,6 +211,8 @@ import type {
   WecomInstallation,
   ListWecomInstallationsResponse,
   RegisterWecomBYORequest,
+  BeginWecomInstallResponse,
+  WecomInstallStatusResponse,
   RedeemWecomBindingTokenResponse,
   TelegramInstallation,
   ListTelegramInstallationsResponse,
@@ -247,6 +265,7 @@ import {
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
   AgentTaskListSchema,
+  AgentTaskPageSchema,
   AgentActivityBucketListSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
@@ -330,7 +349,14 @@ import {
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
   SearchIssuesResponseSchema,
+  ProjectSchema,
+  ListProjectsResponseSchema,
+  EMPTY_PROJECT,
+  EMPTY_LIST_PROJECTS_RESPONSE,
   SearchProjectsResponseSchema,
+  SearchIndexManifestSchema,
+  SearchIndexSnapshotPageSchema,
+  SearchIndexChangesSchema,
   SquadSchema,
   SquadListSchema,
   SquadMemberStatusListResponseSchema,
@@ -366,8 +392,14 @@ import {
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
   RedeemWecomBindingTokenResponseSchema,
+  BeginWecomInstallResponseSchema,
+  MALFORMED_BEGIN_WECOM_INSTALL_RESPONSE,
+  WecomInstallStatusResponseSchema,
+  MALFORMED_WECOM_INSTALL_STATUS_RESPONSE,
   EMPTY_WECOM_INSTALLATION,
   EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
+  ListLarkInstallationsResponseSchema,
+  EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
   TelegramInstallationSchema,
   ListTelegramInstallationsResponseSchema,
@@ -389,6 +421,10 @@ import {
   EMPTY_CREATE_FEEDBACK_RESPONSE,
   InboxUnreadSummarySchema,
   EMPTY_INBOX_UNREAD_SUMMARY,
+  IssueUnreadPageSchema,
+  EMPTY_ISSUE_UNREAD_PAGE,
+  SubscribedIssueIdsSchema,
+  IssueInboxReadSchema,
   InboxItemListSchema,
   ArchivedInboxPageSchema,
   ArchivedInboxFacetsSchema,
@@ -399,6 +435,15 @@ import {
   ListLabelsResponseSchema,
   ListIssueStatusesResponseSchema,
   IssueStatusEntrySchema,
+  ListIssueWorkflowsResponseSchema,
+  IssueWorkflowSchema,
+  IssueWorkflowDryRunResponseSchema,
+  EMPTY_LIST_ISSUE_WORKFLOWS_RESPONSE,
+  EMPTY_ISSUE_WORKFLOW,
+  EMPTY_ISSUE_WORKFLOW_DRY_RUN,
+  WorkflowHandoffPreviewSchema,
+  EMPTY_WORKFLOW_HANDOFF_PREVIEW,
+  IssueWorkflowBriefPreviewSchema,
   IssuePropertySchema,
   ListPropertiesResponseSchema,
   IssuePropertiesResponseSchema,
@@ -432,6 +477,10 @@ import {
   EMPTY_SKILL,
   SkillSummaryListSchema,
   EMPTY_SKILL_SUMMARY_LIST,
+  SkillVersionSchema,
+  EMPTY_SKILL_VERSION,
+  SkillVersionSummaryListSchema,
+  EMPTY_SKILL_VERSION_SUMMARY_LIST,
   SkillImportResultSchema,
   EMPTY_SKILL_IMPORT_RESULT,
   IssueViewSchema,
@@ -464,6 +513,8 @@ import {
   EMPTY_SHARE_LINK,
   EMPTY_SHARE_LINK_INFO,
   EMPTY_JOIN_SHARE_LINK_RESPONSE,
+  WorkspaceListItemSchema,
+  WorkspacePinnedSchema,
   type IssueView,
   type IssueViewPreference,
   type CreateIssueViewRequest,
@@ -517,6 +568,12 @@ export interface ClientUsageRequest {
 export interface LoginResponse {
   token: string;
   user: User;
+}
+
+function parseSearchIndexResponse<T>(raw: unknown, schema: ZodType, endpoint: string): T {
+  const parsed = parseWithFallback<T | null>(raw, schema, null, { endpoint });
+  if (parsed === null) throw new Error(`Malformed response from ${endpoint}`);
+  return parsed;
 }
 
 export class ApiError extends Error {
@@ -616,7 +673,7 @@ export function clientErrorMessage(err: unknown): string | undefined {
 }
 
 // Thrown by getAttachmentTextContent when the server refuses to inline a
-// file because it exceeds the 2 MB cap. UI maps to a "too large, please
+// file because it exceeds the server-configured preview limit. UI maps to a "too large, please
 // download" affordance with the Download CTA still available.
 export class PreviewTooLargeError extends Error {
   constructor() {
@@ -699,10 +756,16 @@ function subscriberTarget(
  * explicitly, or a concurrent writer of that singleton silently redirects the
  * write to the wrong workspace.
  */
+type WorkspaceScope = string | { workspaceId: string };
+
 function workspaceHeader(
-  slug?: string,
+  scope?: WorkspaceScope,
 ): Record<string, string> | undefined {
-  return slug ? { "X-Workspace-Slug": slug } : undefined;
+  if (typeof scope === "object") {
+    // The server resolves slugs first, so suppress the ambient route slug.
+    return { "X-Workspace-Slug": "", "X-Workspace-ID": scope.workspaceId };
+  }
+  return scope ? { "X-Workspace-Slug": scope } : undefined;
 }
 
 function dingTalkGroupSearch(params: ListDingTalkGroupsParams): string {
@@ -1051,6 +1114,16 @@ export class ApiClient {
     });
   }
 
+  async markWhatsNewSeen(version: string): Promise<User> {
+    const raw = await this.fetch<unknown>("/api/me/whats-new/seen", {
+      method: "POST",
+      body: JSON.stringify({ version }),
+    });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "POST /api/me/whats-new/seen",
+    });
+  }
+
   async updateMe(data: UpdateMeRequest): Promise<User> {
     const raw = await this.fetch<unknown>("/api/me", {
       method: "PATCH",
@@ -1235,6 +1308,48 @@ export class ApiClient {
     });
   }
 
+  // Local search index sync (MUL-7754). Each call names its workspace so a
+  // request issued for one workspace cannot be answered for whichever one the
+  // tab has switched to since. A body that fails its schema rejects rather
+  // than degrading: an empty page would be applied to the local copy as truth.
+  async getSearchIndexManifest(params: { workspaceSlug: string; signal?: AbortSignal }): Promise<SearchIndexManifest> {
+    const raw = await this.fetch<unknown>("/api/search-index/manifest", {
+      headers: { "X-Workspace-Slug": params.workspaceSlug },
+      signal: params.signal,
+    });
+    return parseSearchIndexResponse<SearchIndexManifest>(raw, SearchIndexManifestSchema, "GET /api/search-index/manifest");
+  }
+
+  async getSearchIndexSnapshot(params: {
+    workspaceSlug: string;
+    afterNumber: number;
+    limit?: number;
+    signal?: AbortSignal;
+  }): Promise<SearchIndexSnapshotPage> {
+    const search = new URLSearchParams({ after_number: String(params.afterNumber) });
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    const raw = await this.fetch<unknown>(`/api/search-index/snapshot?${search}`, {
+      headers: { "X-Workspace-Slug": params.workspaceSlug },
+      signal: params.signal,
+    });
+    return parseSearchIndexResponse<SearchIndexSnapshotPage>(raw, SearchIndexSnapshotPageSchema, "GET /api/search-index/snapshot");
+  }
+
+  async getSearchIndexChanges(params: {
+    workspaceSlug: string;
+    cursor: string;
+    limit?: number;
+    signal?: AbortSignal;
+  }): Promise<SearchIndexChanges> {
+    const raw = await this.fetch<unknown>("/api/search-index/changes", {
+      method: "POST",
+      headers: { "X-Workspace-Slug": params.workspaceSlug },
+      body: JSON.stringify({ cursor: params.cursor, limit: params.limit }),
+      signal: params.signal,
+    });
+    return parseSearchIndexResponse<SearchIndexChanges>(raw, SearchIndexChangesSchema, "POST /api/search-index/changes");
+  }
+
   /**
    * Fetch one issue by UUID **or** by bare identifier ("MUL-123"): the server
    * resolves `PREFIX-NUMBER` against the workspace's own prefix through the
@@ -1282,6 +1397,52 @@ export class ApiClient {
     await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/wakeups/${encodeURIComponent(wakeupId)}/instruction`, { method: "PATCH", body: JSON.stringify(input) });
   }
 
+  async createIssueWakeup(issueId: string, input: IssueWakeupInput): Promise<void> {
+    await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/wakeups`, { method: "POST", body: JSON.stringify(input) });
+  }
+
+  async listIssueSystemWakeups(issueId: string): Promise<SystemWakeup[]> {
+    const raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/system-wakeups`);
+    const parsed = parseWithFallback<SystemWakeup[] | null>(raw, SystemWakeupSchema.array(), null, { endpoint: "GET /api/issues/:id/system-wakeups" });
+    if (!parsed) throw new Error("Could not load system wakeups");
+    return parsed;
+  }
+
+  async listIssueWakeupRuns(issueId: string, wakeupId: string): Promise<WakeupRun[]> {
+    const raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/wakeups/${encodeURIComponent(wakeupId)}/runs`);
+    const parsed = parseWithFallback<WakeupRun[] | null>(raw, WakeupRunSchema.array(), null, { endpoint: "GET /api/issues/:id/wakeups/:wakeupId/runs" });
+    if (!parsed) throw new Error("Could not load wakeup runs");
+    return parsed;
+  }
+
+  async listPausedWakeups(): Promise<PausedWakeup[]> {
+    const raw = await this.fetch<unknown>("/api/issue-wakeup-paused");
+    return parseWithFallback<PausedWakeup[]>(raw, PausedWakeupSchema.array(), [], { endpoint: "GET /api/issue-wakeup-paused" });
+  }
+
+  async triggerIssueWakeup(issueId: string, wakeupId: string): Promise<void> {
+    await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/wakeups/${encodeURIComponent(wakeupId)}/trigger`, { method: "POST" });
+  }
+
+  async deleteIssueWakeup(issueId: string, wakeupId: string): Promise<void> {
+    await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/wakeups/${encodeURIComponent(wakeupId)}`, { method: "DELETE" });
+  }
+
+  async updateIssueSystemWakeup(issueId: string, rule: SystemWakeup["rule"], input: { enabled?: boolean; instruction?: string }): Promise<void> {
+    await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/system-wakeups/${encodeURIComponent(rule)}`, { method: "PUT", body: JSON.stringify(input) });
+  }
+
+  async listWorkspaceSystemWakeups(): Promise<WorkspaceSystemWakeup[]> {
+    const raw = await this.fetch<unknown>("/api/system-wakeups");
+    const parsed = parseWithFallback<WorkspaceSystemWakeup[] | null>(raw, WorkspaceSystemWakeupSchema.array(), null, { endpoint: "GET /api/system-wakeups" });
+    if (!parsed) throw new Error("Could not load system wakeups");
+    return parsed;
+  }
+
+  async updateWorkspaceSystemWakeup(rule: WorkspaceSystemWakeup["rule"], input: { enabled?: boolean; instruction?: string }): Promise<void> {
+    await this.fetch(`/api/system-wakeups/${encodeURIComponent(rule)}`, { method: "PUT", body: JSON.stringify(input) });
+  }
+
   async disableIssueWakeup(issueId: string, wakeupId: string): Promise<void> {
     await this.fetch(`/api/issues/${encodeURIComponent(issueId)}/wakeups/${encodeURIComponent(wakeupId)}/disable`, { method: "POST" });
   }
@@ -1301,7 +1462,10 @@ export class ApiClient {
     return issue;
   }
 
-  async createIssue(data: CreateIssueRequest): Promise<Issue> {
+  async createIssue(
+    data: CreateIssueRequest,
+    workspaceSlug?: string,
+  ): Promise<Issue> {
     const requestedProperties = requestedIssueCreateProperties(data);
     if (requestedProperties) {
       const config = await this.getConfig();
@@ -1322,6 +1486,7 @@ export class ApiClient {
     // render its localized "failed to create" toast.
     const raw = await this.fetch<unknown>("/api/issues", {
       method: "POST",
+      headers: workspaceHeader(workspaceSlug),
       body: JSON.stringify(data),
     });
     const issue = parseWithFallback<Issue | null>(raw, CreateIssueResponseSchema, null, {
@@ -1541,6 +1706,7 @@ export class ApiClient {
     parentId?: string,
     attachmentIds?: string[],
     suppressAgentIds?: string[],
+    steerTaskIds?: string[],
   ): Promise<Comment> {
     return this.fetch(`/api/issues/${issueId}/comments`, {
       method: "POST",
@@ -1550,6 +1716,7 @@ export class ApiClient {
         ...(parentId ? { parent_id: parentId } : {}),
         ...(attachmentIds?.length ? { attachment_ids: attachmentIds } : {}),
         ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
+        ...(steerTaskIds?.length ? { steer_task_ids: steerTaskIds } : {}),
       }),
     });
   }
@@ -1892,6 +2059,34 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}/cancel-tasks`, { method: "POST" });
   }
 
+  async listQoderEnvironments(wsId: string, token: string, baseUrl: string, signal?: AbortSignal) {
+    return parseQoderCatalog(await this.fetch(`/api/workspaces/${wsId}/qoder/environments`, { method: "POST", body: JSON.stringify({ qoder_token: token, base_url: baseUrl }), signal }));
+  }
+  async listQoderAgents(wsId: string) {
+    return parseQoderCatalog(await this.fetch(`/api/workspaces/${wsId}/qoder/agents`));
+  }
+  async stopQoderConnection(wsId: string) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder/stop`, { method: "POST" }));
+  }
+  // Refuses with 409 `runtime_delete_plan_changed` and the current
+  // `active_agents` when the confirmed list no longer matches.
+  async disconnectQoderConnection(wsId: string, expectedActiveAgentIds: string[]) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder`, { method: "DELETE", body: JSON.stringify({ expected_active_agent_ids: expectedActiveAgentIds }) }));
+  }
+  async getQoderConnection(wsId: string) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder`));
+  }
+  // Saving keeps a paused connection paused; use resumeQoderConnection to run again.
+  async saveQoderConnection(wsId: string, input: QoderInput) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder`, { method: "PUT", body: JSON.stringify({ name: input.name, base_url: input.baseUrl, environment_id: input.environmentId, qoder_token: input.qoderToken, github_tokens: input.githubTokens, max_concurrency: input.maxConcurrency, run_timeout_minutes: input.runTimeoutMinutes }) }));
+  }
+  async resumeQoderConnection(wsId: string, input: QoderInput) {
+    return parseQoderConnection(await this.fetch(`/api/workspaces/${wsId}/qoder/resume`, { method: "POST", body: JSON.stringify({ name: input.name, base_url: input.baseUrl, environment_id: input.environmentId, qoder_token: input.qoderToken, github_tokens: input.githubTokens, max_concurrency: input.maxConcurrency, run_timeout_minutes: input.runTimeoutMinutes }) }));
+  }
+  async checkQoderConnection(wsId: string, input: QoderInput): Promise<void> {
+    await this.fetch(`/api/workspaces/${wsId}/qoder/check`, { method: "POST", body: JSON.stringify({ name: input.name, base_url: input.baseUrl, environment_id: input.environmentId, qoder_token: input.qoderToken, github_tokens: input.githubTokens, max_concurrency: input.maxConcurrency, run_timeout_minutes: input.runTimeoutMinutes }) });
+  }
+
   async listRuntimes(
     params?: { workspace_id?: string; owner?: "me" },
     workspaceSlug?: string,
@@ -1902,9 +2097,10 @@ export class ApiClient {
     // workspace_id alone is not enough: the server resolves the workspace from
     // the slug header first, so a caller listing another workspace's runtimes
     // must override the header too.
-    return this.fetch(`/api/runtimes?${search}`, {
+    const raw = await this.fetch<unknown>(`/api/runtimes?${search}`, {
       headers: workspaceHeader(workspaceSlug),
     });
+    return parseWithFallback(raw, AgentRuntimeSchema.array(), [], { endpoint: "listRuntimes" });
   }
 
   async listCloudRuntimeNodes(
@@ -1950,12 +2146,10 @@ export class ApiClient {
     });
   }
 
-  // ---------------------------------------------------------------------
   // Cloud Billing — proxies to multica-cloud /api/v1/billing/*. The
   // multica-api server stamps X-User-ID and forwards bytes; everything
   // here is upstream-shaped. See packages/core/types/billing.ts for the
   // response field documentation.
-  // ---------------------------------------------------------------------
 
   async getCloudBillingBalance(): Promise<BillingBalance> {
     const raw = await this.fetch<unknown>("/api/cloud-billing/balance");
@@ -2079,7 +2273,6 @@ export class ApiClient {
     );
   }
 
-  // ---------------------------------------------------------------------
   // Workspace subscriptions — the server resolves the workspace from the
   // authenticated request context, so no caller names one.
   //
@@ -2089,7 +2282,6 @@ export class ApiClient {
   //   - non-2xx (older cloud without the route, 403, 503) throws ApiError from
   //     `fetch`, so a React Query caller sees `isError`;
   //   - a 2xx body that does not match the contract returns null here.
-  // ---------------------------------------------------------------------
 
   async getWorkspaceSubscriptionSummary(): Promise<WorkspaceSubscriptionSummary | null> {
     const raw = await this.fetch<unknown>("/api/cloud-subscriptions/summary");
@@ -2255,6 +2447,7 @@ export class ApiClient {
     runtimeId: string,
     patch: {
       visibility?: "private" | "public";
+      shared_with?: string[];
       /**
        * Custom display name. Pass an empty string to clear it (the server
        * reverts to the default name). Omit to leave it unchanged — a JSON
@@ -2263,18 +2456,39 @@ export class ApiClient {
       custom_name?: string;
       /** Apply custom_name to every runtime on the same machine. */
       apply_to_machine?: boolean;
+      /** Runtime-wide concurrency cap; `null` removes it, omit to leave unchanged. */
+      max_concurrent_tasks?: number | null;
     },
   ): Promise<AgentRuntime> {
-    return this.fetch(`/api/runtimes/${runtimeId}`, {
+    const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
     });
+    return parseWithFallback(raw, AgentRuntimeSchema, EMPTY_RUNTIME, { endpoint: "updateRuntime" });
   }
 
-  // ---------------------------------------------------------------------
+  // Confirmed counterpart to a runtime access restriction PATCH. The PATCH
+  // returns a structured 409 when teammates still have bound agents or active
+  // tasks on the runtime; callers present that plan, then submit its exact
+  // agent/task ID sets here. The server rechecks both sets in one transaction.
+  async revokeRuntimeWorkspaceAccess(
+    runtimeId: string,
+    expectedNonownerAgentIds: string[],
+    expectedTaskIds: string[],
+    sharedWith?: string[],
+  ): Promise<void> {
+    await this.fetch(`/api/runtimes/${runtimeId}/revoke-workspace-access`, {
+      method: "POST",
+      body: JSON.stringify({
+        expected_nonowner_agent_ids: expectedNonownerAgentIds,
+        expected_task_ids: expectedTaskIds,
+        shared_with: sharedWith,
+      }),
+    });
+  }
+
   // Custom runtime profiles (MUL-3284). All workspace-scoped: the caller
   // passes the workspace id the same way the runtimes list resolves it.
-  // ---------------------------------------------------------------------
 
   async listRuntimeProfiles(workspaceId: string): Promise<RuntimeProfile[]> {
     const res = await this.fetch<{ runtime_profiles?: RuntimeProfile[] }>(
@@ -2416,12 +2630,10 @@ export class ApiClient {
     );
   }
 
-  // ---------------------------------------------------------------------------
   // Workspace dashboard — three independent rollups for `/{slug}/dashboard`.
   // Each accepts an optional `project_id` to narrow the scope to one project.
   // Cost is computed client-side from the model pricing table (same contract
   // as the per-runtime endpoints above).
-  // ---------------------------------------------------------------------------
 
   async getDashboardUsageDaily(
     params: { days?: number; project_id?: string | null; tz?: string },
@@ -2550,12 +2762,14 @@ export class ApiClient {
   async initiateListModels(
     runtimeId: string,
     options: { force?: boolean } = {},
+    workspaceSlug?: string,
   ): Promise<RuntimeModelListRequest> {
     const query = options.force === true ? "?force=true" : "";
     const raw = await this.fetch<unknown>(
       `/api/runtimes/${runtimeId}/models${query}`,
       {
         method: "POST",
+        headers: workspaceHeader(workspaceSlug),
       },
     );
     return parseWithFallback<RuntimeModelListRequest>(
@@ -2569,9 +2783,11 @@ export class ApiClient {
   async getListModelsResult(
     runtimeId: string,
     requestId: string,
+    workspaceSlug?: string,
   ): Promise<RuntimeModelListRequest> {
     const raw = await this.fetch<unknown>(
       `/api/runtimes/${runtimeId}/models/${requestId}`,
+      { headers: workspaceHeader(workspaceSlug) },
     );
     return parseWithFallback<RuntimeModelListRequest>(
       raw,
@@ -2617,11 +2833,22 @@ export class ApiClient {
     return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import/${requestId}`);
   }
 
-  async listAgentTasks(agentId: string): Promise<AgentTask[]> {
-    const raw = await this.fetch<unknown>(`/api/agents/${agentId}/tasks`);
-    return parseWithFallback<AgentTask[]>(raw, AgentTaskListSchema, [], {
-      endpoint: "GET /api/agents/:id/tasks",
+  async listAgentTasksPage(
+    agentId: string,
+    options: { limit?: number; before?: string; signal?: AbortSignal } = {},
+  ): Promise<{ tasks: AgentTask[]; nextCursor: string | null }> {
+    const search = new URLSearchParams({ limit: String(options.limit ?? 200) });
+    if (options.before) search.set("before", options.before);
+    const response = await this.fetchRaw(`/api/agents/${agentId}/tasks?${search}`, {
+      signal: options.signal,
     });
+    const tasks: unknown = await response.json();
+    return parseWithFallback(
+      { tasks, nextCursor: response.headers.get("X-Agent-Tasks-Next-Cursor") },
+      AgentTaskPageSchema,
+      { tasks: [], nextCursor: null },
+      { endpoint: "GET /api/agents/:id/tasks" },
+    );
   }
 
   // Workspace-scoped agent task snapshot: every active task
@@ -2692,18 +2919,6 @@ export class ApiClient {
     });
   }
 
-  async createTaskSupplement(issueId: string, taskId: string, content: string, clientRequestId: string): Promise<Comment> {
-    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/tasks/${taskId}/supplements`, {
-      method: "POST",
-      body: JSON.stringify({ content, client_request_id: clientRequestId }),
-    });
-    const comment = parseWithFallback<Comment>(raw, CommentSchema, EMPTY_COMMENT, {
-      endpoint: "POST /api/issues/:id/tasks/:taskId/supplements",
-    });
-    if (!comment.id) throw new Error("Invalid additional-message response");
-    return comment;
-  }
-
   async retryTaskSupplement(issueId: string, taskId: string, commentId: string): Promise<void> {
     await this.fetch(`/api/issues/${issueId}/tasks/${taskId}/supplements/${commentId}/retry`, {
       method: "POST",
@@ -2743,6 +2958,39 @@ export class ApiClient {
     return task;
   }
 
+  /** Every unread mark, across all pages: a row missing here reads as "read". */
+  async listIssueUnread(): Promise<IssueUnread[]> {
+    const items: IssueUnread[] = [];
+    let cursor: string | null = null;
+    do {
+      const query: string = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+      const raw = await this.fetch<unknown>(`/api/issues/unread${query}`);
+      const page = parseWithFallback(raw, IssueUnreadPageSchema, EMPTY_ISSUE_UNREAD_PAGE, {
+        endpoint: "GET /api/issues/unread",
+      });
+      items.push(...page.items);
+      cursor = page.next_cursor === cursor ? null : page.next_cursor;
+    } while (cursor);
+    return items;
+  }
+
+  async listSubscribedIssueIds(): Promise<string[]> {
+    const raw = await this.fetch<unknown>("/api/issues/subscribed");
+    const parsed = parseWithFallback<{ issue_ids: string[] } | null>(raw, SubscribedIssueIdsSchema, null, {
+      endpoint: "GET /api/issues/subscribed",
+    });
+    if (!parsed) throw new Error("GET /api/issues/subscribed returned a malformed body");
+    return parsed.issue_ids;
+  }
+
+  async markIssueRead(issueId: string): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/read`, { method: "POST" });
+  }
+
+  async markIssueUnread(issueId: string): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/unread`, { method: "POST" });
+  }
+
   // Inbox
   async listInbox(): Promise<InboxItem[]> {
     const raw = await this.fetch<unknown>("/api/inbox");
@@ -2773,7 +3021,7 @@ export class ApiClient {
     });
   }
 
-  private archivedInboxParams(filters: InboxFilters): URLSearchParams {
+  private archivedInboxParams(filters: ArchivedInboxFilters): URLSearchParams {
     const params = new URLSearchParams();
     if (filters.statuses.length) params.set("statuses", [...filters.statuses].sort().join(","));
     if (filters.priorities.length) params.set("priorities", [...filters.priorities].sort().join(","));
@@ -2782,7 +3030,7 @@ export class ApiClient {
     return params;
   }
 
-  async listArchivedInboxPage(filters: InboxFilters, options: {
+  async listArchivedInboxPage(filters: ArchivedInboxFilters, options: {
     cursor?: string | null; groupId?: string; signal?: AbortSignal;
   } = {}): Promise<ArchivedInboxPage> {
     const params = this.archivedInboxParams(filters);
@@ -2797,7 +3045,7 @@ export class ApiClient {
     return page;
   }
 
-  async getArchivedInboxFacets(filters: InboxFilters, signal?: AbortSignal): Promise<ArchivedInboxFacets> {
+  async getArchivedInboxFacets(filters: ArchivedInboxFilters, signal?: AbortSignal): Promise<ArchivedInboxFacets> {
     const raw = await this.fetch<unknown>(`/api/inbox/archived/facets?${this.archivedInboxParams(filters)}`, { signal });
     const facets = parseWithFallback<ArchivedInboxFacets | null>(raw, ArchivedInboxFacetsSchema, null, {
       endpoint: "GET /api/inbox/archived/facets",
@@ -2833,6 +3081,19 @@ export class ApiClient {
 
   async markAllInboxRead(): Promise<{ count: number }> {
     return this.fetch("/api/inbox/mark-all-read", { method: "POST" });
+  }
+
+  /**
+   * Reads every unread notification the caller has on one issue. `count` is
+   * how many rows the server read, or `null` when the response did not say:
+   * the write itself succeeded, so callers must not read `null` as "nothing
+   * changed".
+   */
+  async markIssueInboxRead(issueId: string): Promise<{ count: number | null }> {
+    const raw = await this.fetch<unknown>(`/api/inbox/issues/${issueId}/read`, { method: "POST" });
+    return parseWithFallback<{ count: number | null }>(raw, IssueInboxReadSchema, { count: null }, {
+      endpoint: "POST /api/inbox/issues/{id}/read",
+    });
   }
 
   async archiveAllInbox(): Promise<{ count: number }> {
@@ -2893,7 +3154,17 @@ export class ApiClient {
 
   // Workspaces
   async listWorkspaces(): Promise<Workspace[]> {
-    return this.fetch("/api/workspaces");
+    const raw = await this.fetch<unknown>("/api/workspaces");
+    return parseWithFallback(raw, WorkspaceListItemSchema.array(), [] as Workspace[], {
+      endpoint: "GET /api/workspaces",
+    }) as Workspace[];
+  }
+
+  async setWorkspacePinned(id: string, pinned: boolean): Promise<{ pinned_at: string | null }> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${id}/pin`, {
+      method: "PUT", body: JSON.stringify({ pinned }),
+    });
+    return parseWithFallback(raw, WorkspacePinnedSchema, { pinned_at: null }, { endpoint: "PUT /api/workspaces/{id}/pin" });
   }
 
   async getWorkspace(id: string): Promise<Workspace> {
@@ -3441,6 +3712,39 @@ export class ApiClient {
     });
   }
 
+  // Content history, newest first. Metadata only; fetch one version for its
+  // snapshot.
+  async listSkillVersions(skillId: string): Promise<SkillVersionSummary[]> {
+    const raw = await this.fetch<unknown>(`/api/skills/${skillId}/versions`);
+    return parseWithFallback(
+      raw,
+      SkillVersionSummaryListSchema,
+      EMPTY_SKILL_VERSION_SUMMARY_LIST,
+      { endpoint: "GET /api/skills/:id/versions" },
+    );
+  }
+
+  async getSkillVersion(skillId: string, version: number): Promise<SkillVersion> {
+    const raw = await this.fetch<unknown>(
+      `/api/skills/${skillId}/versions/${version}`,
+    );
+    return parseWithFallback(raw, SkillVersionSchema, EMPTY_SKILL_VERSION, {
+      endpoint: "GET /api/skills/:id/versions/:version",
+    });
+  }
+
+  // Writes the version's snapshot back to the skill. The server records the
+  // result as a new latest version.
+  async restoreSkillVersion(skillId: string, version: number): Promise<Skill> {
+    const raw = await this.fetch<unknown>(
+      `/api/skills/${skillId}/versions/${version}/restore`,
+      { method: "POST" },
+    );
+    return parseWithFallback(raw, SkillSchema, EMPTY_SKILL, {
+      endpoint: "POST /api/skills/:id/versions/:version/restore",
+    });
+  }
+
   async listAgentSkills(agentId: string): Promise<SkillSummary[]> {
     return this.fetch(`/api/agents/${agentId}/skills`);
   }
@@ -3547,11 +3851,11 @@ export class ApiClient {
   // Chat Sessions
   async listChatSessions(
     params?: { status?: string },
-    workspaceSlug?: string,
+    workspace?: WorkspaceScope,
   ): Promise<ChatSession[]> {
     const query = params?.status ? `?status=${params.status}` : "";
     const raw: unknown = await this.fetch(`/api/chat/sessions${query}`, {
-      headers: workspaceHeader(workspaceSlug),
+      headers: workspaceHeader(workspace),
     });
     return parseWithFallback(raw, ChatSessionListSchema, EMPTY_CHAT_SESSION_LIST, {
       endpoint: "GET /api/chat/sessions",
@@ -3629,8 +3933,8 @@ export class ApiClient {
   }
 
   // Quick-agent bar: per-user pinned agents.
-  async listChatPinnedAgents(): Promise<ChatPinnedAgent[]> {
-    return this.fetch("/api/chat/pinned-agents");
+  async listChatPinnedAgents(workspace?: WorkspaceScope): Promise<ChatPinnedAgent[]> {
+    return this.fetch("/api/chat/pinned-agents", { headers: workspaceHeader(workspace) });
   }
 
   async pinChatAgent(agentId: string): Promise<ChatPinnedAgent> {
@@ -3792,12 +4096,12 @@ export class ApiClient {
     });
   }
 
-  async listPendingChatTasks(): Promise<PendingChatTasksResponse> {
-    return this.fetch(`/api/chat/pending-tasks`);
+  async listPendingChatTasks(workspace?: WorkspaceScope): Promise<PendingChatTasksResponse> {
+    return this.fetch(`/api/chat/pending-tasks`, { headers: workspaceHeader(workspace) });
   }
 
-  async hasAnyPendingChatTasks(): Promise<HasPendingChatTasksResponse> {
-    return this.fetch(`/api/chat/pending-tasks/has-any`);
+  async hasAnyPendingChatTasks(workspace?: WorkspaceScope): Promise<HasPendingChatTasksResponse> {
+    return this.fetch(`/api/chat/pending-tasks/has-any`, { headers: workspaceHeader(workspace) });
   }
 
   async markChatSessionRead(sessionId: string): Promise<void> {
@@ -3841,6 +4145,15 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/attachments/${id}`);
     return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
       endpoint: "GET /api/attachments/{id}",
+    });
+  }
+
+  // The Markdown download path resolves the attachment's own workspace and
+  // checks membership there. Its link may be pasted into another workspace.
+  async getAttachmentForDownload(id: string): Promise<Attachment> {
+    const raw = await this.fetch<unknown>(`/api/attachments/${id}/download-metadata`);
+    return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
+      endpoint: "GET /api/attachments/{id}/download-metadata",
     });
   }
 
@@ -3907,25 +4220,31 @@ export class ApiClient {
   async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
-    return this.fetch(`/api/projects?${search}`);
+    const raw = await this.fetch<unknown>(`/api/projects?${search}`);
+    return parseWithFallback(raw, ListProjectsResponseSchema, EMPTY_LIST_PROJECTS_RESPONSE, {
+      endpoint: "GET /api/projects",
+    });
   }
 
   async getProject(id: string): Promise<Project> {
-    return this.fetch(`/api/projects/${id}`);
+    const raw = await this.fetch<unknown>(`/api/projects/${id}`);
+    return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, { endpoint: "GET /api/projects/:id" });
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {
-    return this.fetch("/api/projects", {
+    const raw = await this.fetch<unknown>("/api/projects", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, { endpoint: "POST /api/projects" });
   }
 
   async updateProject(id: string, data: UpdateProjectRequest): Promise<Project> {
-    return this.fetch(`/api/projects/${id}`, {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
+    return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, { endpoint: "PUT /api/projects/:id" });
   }
 
   async deleteProject(id: string): Promise<void> {
@@ -4006,6 +4325,133 @@ export class ApiClient {
 
   async deleteLabel(id: string): Promise<void> {
     await this.fetch(`/api/labels/${id}`, { method: "DELETE" });
+  }
+
+  // Workspace workflows (MUL-7420). Any workspace member may read and create
+  // workflows; only the workflow owner and workspace admins may edit or delete.
+  async listIssueWorkflows(): Promise<ListIssueWorkflowsResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows`);
+    return parseWithFallback(raw, ListIssueWorkflowsResponseSchema, EMPTY_LIST_ISSUE_WORKFLOWS_RESPONSE, {
+      endpoint: "GET /api/issue-workflows",
+    });
+  }
+
+  async createIssueWorkflow(data: IssueWorkflowWriteRequest): Promise<IssueWorkflow> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueWorkflowSchema, EMPTY_ISSUE_WORKFLOW, {
+      endpoint: "POST /api/issue-workflows",
+    });
+  }
+
+  /**
+   * Saves a workflow edit. When the edit removes statuses that issues of the
+   * workflow's projects still use, the server answers 409
+   * `workflow_status_mapping_required` with a plan; resend with
+   * `status_mapping`. `dryRunIssueWorkflowUpdate` fetches that plan up front.
+   */
+  async updateIssueWorkflow(id: string, data: IssueWorkflowWriteRequest): Promise<IssueWorkflow> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ ...data, dry_run: false }),
+    });
+    return parseWithFallback(raw, IssueWorkflowSchema, EMPTY_ISSUE_WORKFLOW, {
+      endpoint: "PATCH /api/issue-workflows/{id}",
+    });
+  }
+
+  async dryRunIssueWorkflowUpdate(id: string, data: IssueWorkflowWriteRequest): Promise<IssueWorkflowDryRunResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ ...data, dry_run: true }),
+    });
+    return parseWithFallback(raw, IssueWorkflowDryRunResponseSchema, EMPTY_ISSUE_WORKFLOW_DRY_RUN, {
+      endpoint: "PATCH /api/issue-workflows/{id} (dry run)",
+    });
+  }
+
+  async deleteIssueWorkflow(id: string): Promise<void> {
+    await this.fetch(`/api/issue-workflows/${id}`, { method: "DELETE" });
+  }
+
+  /**
+   * Renders the brief a column's handler would receive, from an unsaved
+   * handoff. `project_id` names the project the preview is for, if any.
+   */
+  async previewWorkflowBrief(
+    workflowId: string,
+    data: SetWorkflowHandoffRequest & { status_key: string; project_id?: string },
+  ): Promise<string> {
+    const raw = await this.fetch<unknown>(`/api/issue-workflows/${workflowId}/brief`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    const parsed = parseWithFallback(raw, IssueWorkflowBriefPreviewSchema, { brief: "" }, {
+      endpoint: "POST /api/issue-workflows/{id}/brief",
+    });
+    return parsed.brief;
+  }
+
+  /**
+   * Saves a workflow's handoff for one column, for every project using it;
+   * handler "none" clears it. With `copyForProjectId` the workflow stays as
+   * it is: the handoff lands on a copy that project switches to, and the copy
+   * is returned. Admin only.
+   */
+  async setWorkflowHandoff(
+    workflowId: string,
+    statusKey: string,
+    data: SetWorkflowHandoffRequest,
+    copyForProjectId?: string,
+  ): Promise<IssueWorkflow> {
+    const body = copyForProjectId ? { ...data, copy_for_project_id: copyForProjectId } : data;
+    const raw = await this.fetch<unknown>(
+      `/api/issue-workflows/${workflowId}/handoffs/${encodeURIComponent(statusKey)}`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+    return parseWithFallback(raw, IssueWorkflowSchema, EMPTY_ISSUE_WORKFLOW, {
+      endpoint: "PUT /api/issue-workflows/{id}/handoffs/{status}",
+    });
+  }
+
+  /**
+   * What moving an issue to `status` would do under its project's workflow:
+   * who it goes to, the current agent's active runs, and the brief. Writes
+   * nothing; a status outside the workflow answers 400. With `projectId` it
+   * previews moving the issue into that project instead, entering the column
+   * it lands on (`status` may then be empty).
+   */
+  async previewWorkflowHandoff(issueId: string, status: string, projectId?: string): Promise<WorkflowHandoffPreview> {
+    const query = new URLSearchParams();
+    if (status) query.set("status", status);
+    if (projectId) query.set("project_id", projectId);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/workflow-handoff?${query.toString()}`);
+    return parseWithFallback(raw, WorkflowHandoffPreviewSchema, EMPTY_WORKFLOW_HANDOFF_PREVIEW, {
+      endpoint: "GET /api/issues/{id}/workflow-handoff",
+    });
+  }
+
+  /**
+   * Switches a project's workflow; issues on unlisted statuses need a mapping.
+   * Callers refetch the project and its issues, so the response is not read.
+   */
+  async setProjectWorkflow(projectId: string, data: SetProjectWorkflowRequest): Promise<void> {
+    await this.fetch<unknown>(`/api/projects/${projectId}/workflow`, {
+      method: "POST",
+      body: JSON.stringify({ ...data, dry_run: false }),
+    });
+  }
+
+  async dryRunProjectWorkflow(projectId: string, workflowId: string | null): Promise<IssueWorkflowDryRunResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/workflow`, {
+      method: "POST",
+      body: JSON.stringify({ workflow_id: workflowId, dry_run: true }),
+    });
+    return parseWithFallback(raw, IssueWorkflowDryRunResponseSchema, EMPTY_ISSUE_WORKFLOW_DRY_RUN, {
+      endpoint: "POST /api/projects/{id}/workflow (dry run)",
+    });
   }
 
   // Issue status catalog (MUL-6243). Reads are open to any workspace member;
@@ -4160,8 +4606,9 @@ export class ApiClient {
   }
 
   /**
-   * What a quick action WOULD post, without posting it. Backs the composer
-   * hand-off (⌥-click and the `/` menu) so the user can edit before sending.
+   * What a quick action WOULD post, with server-side validation but no send.
+   * Retained for callers that resolve drafts over HTTP; the comment composer
+   * builds its draft synchronously from the quick-action catalog.
    * Returns "" when the response cannot be read — callers must treat an empty
    * string as "insert nothing" rather than clearing the composer.
    */
@@ -4347,14 +4794,18 @@ export class ApiClient {
     });
   }
 
-  async putIssueViewPreference(data: {
-    scope_type: string;
-    scope_id?: string | null;
-    prefs: { hidden: string[]; order: string[] };
-  }): Promise<IssueViewPreference> {
+  async putIssueViewPreference(
+    data: {
+      scope_type: string;
+      scope_id?: string | null;
+      prefs: Record<string, unknown>;
+    },
+    workspaceSlug?: string,
+  ): Promise<IssueViewPreference> {
     const raw = await this.fetch<unknown>("/api/issue-view-preferences", {
       method: "PUT",
       body: JSON.stringify(data),
+      headers: workspaceHeader(workspaceSlug),
     });
     return parseWithFallback(raw, IssueViewPreferenceSchema, EMPTY_ISSUE_VIEW_PREFERENCE, {
       endpoint: "PUT /api/issue-view-preferences",
@@ -4790,7 +5241,13 @@ export class ApiClient {
 
   // Lark integration
   async listLarkInstallations(workspaceId: string): Promise<ListLarkInstallationsResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/lark/installations`);
+    const endpoint = `/api/workspaces/${workspaceId}/lark/installations`;
+    return parseWithFallback(
+      await this.fetch(endpoint),
+      ListLarkInstallationsResponseSchema,
+      EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE,
+      { endpoint },
+    );
   }
 
   async beginLarkInstall(
@@ -5048,6 +5505,51 @@ export class ApiClient {
     return parseWithFallback(raw, WecomInstallationSchema, EMPTY_WECOM_INSTALLATION, {
       endpoint: "POST /api/workspaces/:id/wecom/install/byo",
     });
+  }
+
+  // beginWecomInstall starts (or resumes) a scan-code install: the backend
+  // hands back a session id, and the install worker fetches the QR from WeCom
+  // out of band. Callers poll getWecomInstallStatus for the QR itself.
+  //
+  // idempotencyKey must be stable for one user gesture — a retried or
+  // double-submitted request with the same key reuses the existing session
+  // rather than burning a WeCom generate quota slot on a second QR.
+  async beginWecomInstall(
+    workspaceId: string,
+    agentId: string,
+    idempotencyKey: string,
+  ): Promise<BeginWecomInstallResponse> {
+    const search = new URLSearchParams({ agent_id: agentId });
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/wecom/install/begin?${search.toString()}`,
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
+      },
+    );
+    return parseWithFallback(
+      raw,
+      BeginWecomInstallResponseSchema,
+      MALFORMED_BEGIN_WECOM_INSTALL_RESPONSE,
+      { endpoint: "POST /api/workspaces/:id/wecom/install/begin" },
+    );
+  }
+
+  // getWecomInstallStatus is one poll of a scan-install session. The response
+  // carries the QR while pending, and the installation id once bound.
+  async getWecomInstallStatus(
+    workspaceId: string,
+    sessionId: string,
+  ): Promise<WecomInstallStatusResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/wecom/install/${sessionId}`,
+    );
+    return parseWithFallback(
+      raw,
+      WecomInstallStatusResponseSchema,
+      MALFORMED_WECOM_INSTALL_STATUS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/wecom/install/:sessionId" },
+    );
   }
 
   async deleteWecomInstallation(workspaceId: string, installationId: string): Promise<void> {

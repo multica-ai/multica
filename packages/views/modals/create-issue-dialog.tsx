@@ -120,15 +120,28 @@ function CreateIssueDialogBody({
 }) {
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const [mode, setMode] = useState<CreateMode>(initialMode);
+  const [manualOpened, setManualOpened] = useState(initialMode === "manual");
   const [panelData, setPanelData] = useState(data ?? null);
   const [isExpanded, setIsExpanded] = useState(false);
-  const effectiveData = sourceContextData
-    ? { ...(panelData ?? {}), ...sourceContextData }
-    : panelData;
+  const effectiveData = {
+    ...(panelData ?? {}),
+    ...sourceContextData,
+  };
 
   const switchTo = (next: CreateMode) => (carry?: Record<string, unknown> | null) => {
     setLastMode(next);
-    setPanelData(carry ?? null);
+    // Apply contextual owner defaults only on the first visit to manual mode.
+    // Later visits must preserve the user's edits, including an explicit clear.
+    const seedParentOwner = next === "manual" && !manualOpened
+      && typeof data?.parent_issue_id === "string"
+      && carry?.parent_issue_id === data?.parent_issue_id
+      && data?.assignee_type && data?.assignee_id;
+    setPanelData(seedParentOwner ? {
+      ...carry,
+      assignee_type: data.assignee_type,
+      assignee_id: data.assignee_id,
+    } : carry ?? null);
+    if (next === "manual") setManualOpened(true);
     setMode(next);
   };
 

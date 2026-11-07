@@ -12,7 +12,10 @@ import (
 	"time"
 )
 
-// Background
+// Agent/profile-scoped Hermes memory lives under hermes-state and is linked
+// into the task home overlay. It survives tasks and issues without sharing the
+// host's memories or another agent's files. Different Hermes profiles use separate
+// stores. Session databases have their own conversation scope in hermes_sessions.go.
 //
 // Hermes keeps its long-term memory (MEMORY.md / USER.md and whatever else the
 // agent writes back) in `<HERMES_HOME>/memories/`. Multica has to take over
@@ -58,6 +61,8 @@ import (
 // Known trade-off, shared with the host-passthrough behaviour it replaces: one
 // agent's concurrent tasks write the same files and Hermes rewrites them whole,
 // so concurrent memory updates are last-writer-wins.
+// Skill-less agents still use the host home without this overlay. Concurrent tasks
+// of the same agent may overwrite memory files; updates remain last-writer-wins.
 
 // hermesMemoryStoreRoot is the directory under the daemon's work-state root that
 // holds every agent's persistent Hermes state. `hermes-state` (not

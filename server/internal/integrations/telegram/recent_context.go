@@ -158,8 +158,9 @@ func (b *recentContextBuffer) evictOldestLocked() {
 }
 
 // recentEntryFromMessage renders one Telegram message the way a group member
-// saw it: raw text or caption (bot mentions included), or a typed placeholder
-// for media without a caption. Never called for bot senders — the polling
+// saw it: raw text or caption (bot mentions included), a file's placeholder
+// above its caption as in the sender's own turn, or a typed placeholder for
+// anything else without text. Never called for bot senders — the polling
 // loop drops those before recording, and the bot's own replies never arrive
 // through getUpdates anyway.
 func recentEntryFromMessage(m *Message) recentEntry {
@@ -167,7 +168,9 @@ func recentEntryFromMessage(m *Message) recentEntry {
 	if text == "" {
 		text = m.Caption
 	}
-	if strings.TrimSpace(text) == "" {
+	if media := mediaFromMessage(m); media != nil {
+		text = leadWithPlaceholder(media.Placeholder, text)
+	} else if strings.TrimSpace(text) == "" {
 		text = fmt.Sprintf("[%s message]", classifyMessage(m))
 	}
 	sender := "Unknown user"

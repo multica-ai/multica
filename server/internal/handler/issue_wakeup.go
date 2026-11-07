@@ -29,7 +29,7 @@ func (h *Handler) ListWorkspaceWakeups(w http.ResponseWriter, r *http.Request) {
 	if kind == "" {
 		kind = "all"
 	}
-	if scope != "active" && scope != "all" && scope != "disabled" && scope != "ended" {
+	if scope != "active" && scope != "all" && scope != "paused" && scope != "disabled" && scope != "ended" {
 		writeError(w, 400, "invalid wakeup scope")
 		return
 	}
@@ -47,6 +47,11 @@ func (h *Handler) ListWorkspaceWakeups(w http.ResponseWriter, r *http.Request) {
 			}
 			*dst = v
 		}
+	}
+	source := params.Get("source")
+	if source != "" && source != "member" && source != "agent" && source != "system" {
+		writeError(w, 400, "invalid wakeup source")
+		return
 	}
 	search := strings.TrimSpace(params.Get("search"))
 	if len(search) > 256 {
@@ -87,7 +92,7 @@ func (h *Handler) ListWorkspaceWakeups(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.Queries.ListWorkspaceWakeups(r.Context(), db.ListWorkspaceWakeupsParams{
 		WorkspaceID: parseUUID(workspaceID), AgentIds: ids, MemberID: managerID, IsAdmin: isAdmin,
-		Scope: scope, Kind: kind, AgentID: agentID, Search: search, PageLimit: int32(limit), PageOffset: int32(page),
+		Scope: scope, Kind: kind, Source: source, AgentID: agentID, Search: search, PageLimit: int32(limit), PageOffset: int32(page),
 	})
 	if err != nil {
 		wakeupError(w, err)
@@ -172,10 +177,16 @@ func (h *Handler) ListWorkspaceWakeupSummaries(w http.ResponseWriter, r *http.Re
 		wakeupError(w, err)
 		return
 	}
-	if rows == nil {
-		rows = []db.ListWorkspaceWakeupSummaryRowsRow{}
+	// The condition is JSON; sqlc cannot type it through the window CTE.
+	type summaryRow struct {
+		db.ListWorkspaceWakeupSummaryRowsRow
+		Condition json.RawMessage `json:"condition"`
 	}
-	writeJSON(w, 200, rows)
+	out := make([]summaryRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, summaryRow{ListWorkspaceWakeupSummaryRowsRow: row, Condition: json.RawMessage(row.Condition)})
+	}
+	writeJSON(w, 200, out)
 }
 
 func (h *Handler) CreateIssueWakeup(w http.ResponseWriter, r *http.Request) {
@@ -317,4 +328,164 @@ func (h *Handler) EditIssueWakeupInstruction(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// wakeupMember resolves the human a management request acts for, the same way
+// as the create and disable endpoints.
+func (h *Handler) wakeupMember(w http.ResponseWriter, r *http.Request, issue db.Issue) (pgtype.UUID, bool) {
+	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
+	originator := h.invokeOriginatorFromRequest(r, actorType, actorID)
+	if originator == "" {
+		writeError(w, 403, "a human originator is required")
+		return pgtype.UUID{}, false
+	}
+	return parseUUID(originator), true
+}
+
+// TriggerIssueWakeup is "wake now": one run of the rule, as if it fired.
+func (h *Handler) TriggerIssueWakeup(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	id, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "wakeupID"), "wakeup id")
+	if !ok {
+		return
+	}
+	member, ok := h.wakeupMember(w, r, issue)
+	if !ok {
+		return
+	}
+	svc := service.IssueWakeupService{Tasks: h.TaskService}
+	if err := svc.Trigger(r.Context(), issue.ID, id, member); err != nil {
+		wakeupError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) DeleteIssueWakeup(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	id, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "wakeupID"), "wakeup id")
+	if !ok {
+		return
+	}
+	member, ok := h.wakeupMember(w, r, issue)
+	if !ok {
+		return
+	}
+	svc := service.IssueWakeupService{Tasks: h.TaskService}
+	if err := svc.Delete(r.Context(), issue.ID, id, member); err != nil {
+		wakeupError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// CheckInIssueWakeup ends a scheduled check silently: the calling run, which
+// the rule itself started, records a note instead of posting a comment.
+func (h *Handler) CheckInIssueWakeup(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	id, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "wakeupID"), "wakeup id")
+	if !ok {
+		return
+	}
+	var in struct {
+		Note string `json:"note"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		writeError(w, 400, "invalid check-in body")
+		return
+	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
+	task := h.wakeupSourceTaskID(r)
+	if actorType != "agent" || !task.Valid {
+		writeError(w, 403, "only the run a wakeup started can check in")
+		return
+	}
+	svc := service.IssueWakeupService{Tasks: h.TaskService}
+	if err := svc.CheckIn(r.Context(), issue.ID, id, task, actorID, in.Note); err != nil {
+		wakeupError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type wakeupRunResponse struct {
+	ID          string   `json:"id"`
+	Status      string   `json:"status"`
+	CreatedAt   string   `json:"created_at"`
+	StartedAt   *string  `json:"started_at"`
+	CompletedAt *string  `json:"completed_at"`
+	CheckinNote string   `json:"checkin_note"`
+	Triggers    []string `json:"triggers"`
+	Commented   bool     `json:"commented"`
+}
+
+// ListIssueWakeupRuns returns a rule's latest runs for its trigger history.
+func (h *Handler) ListIssueWakeupRuns(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	id, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "wakeupID"), "wakeup id")
+	if !ok {
+		return
+	}
+	rule, err := h.Queries.GetIssueWakeup(r.Context(), db.GetIssueWakeupParams{ID: id, WorkspaceID: issue.WorkspaceID})
+	if err != nil || rule.IssueID != issue.ID {
+		writeError(w, 404, "wakeup not found")
+		return
+	}
+	rows, err := h.Queries.ListWakeupRuns(r.Context(), db.ListWakeupRunsParams{WakeupID: uuidToString(id), IssueID: issue.ID})
+	if err != nil {
+		wakeupError(w, err)
+		return
+	}
+	out := make([]wakeupRunResponse, 0, len(rows))
+	for _, row := range rows {
+		triggers := row.Triggers
+		if triggers == nil {
+			triggers = []string{}
+		}
+		out = append(out, wakeupRunResponse{
+			ID: uuidToString(row.ID), Status: row.Status, CreatedAt: timestampToString(row.CreatedAt),
+			StartedAt: timestampToPtr(row.StartedAt), CompletedAt: timestampToPtr(row.CompletedAt),
+			CheckinNote: row.CheckinNote, Triggers: triggers, Commented: row.Commented,
+		})
+	}
+	writeJSON(w, 200, out)
+}
+
+// ListPausedWakeups names the open issues whose rules the platform paused, for
+// board cues.
+func (h *Handler) ListPausedWakeups(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	rows, err := h.Queries.ListPausedWakeupIssues(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		wakeupError(w, err)
+		return
+	}
+	type paused struct {
+		IssueID string `json:"issue_id"`
+		ID      string `json:"id"`
+		AgentID string `json:"agent_id"`
+		Reason  string `json:"paused_reason"`
+	}
+	out := make([]paused, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, paused{IssueID: uuidToString(row.IssueID), ID: uuidToString(row.ID), AgentID: uuidToString(row.AgentID), Reason: row.PausedReason.String})
+	}
+	writeJSON(w, 200, out)
 }

@@ -47,19 +47,35 @@ export interface Comment {
   // Per-target result of every explicit @agent / @squad mention in this comment
   // (MUL-4525 §2). Present only on create/edit responses; older servers omit it.
   trigger_outcomes?: CommentTriggerOutcome[];
+  /** Every running turn this comment steered, one receipt per run. */
+  supplements?: CommentSupplementReceipt[];
+  /** Mirrors the first receipt; servers that predate `supplements` send only these. */
   supplement_task_id?: string;
   supplement_status?: "pending" | "delivering" | "delivered" | "failed";
   supplement_failure_reason?: string;
   supplement_delivered_at?: string;
 }
 
+export type CommentSupplementStatus = "pending" | "delivering" | "delivered" | "failed";
+
+/** Delivery receipt of a comment that steered one agent's running turn. */
+export interface CommentSupplementReceipt {
+  task_id: string;
+  agent_id?: string;
+  status: CommentSupplementStatus;
+  failure_reason?: string;
+  delivered_at?: string;
+}
+
 // The domain result of one explicitly-mentioned trigger target. Success-shaped
-// statuses (queued/coalesced/deferred) mean the mention was handled; `blocked`
+// statuses (queued/coalesced/deferred/steered) mean the mention was handled;
+// `steered` means the comment went into the target's running turn. `blocked`
 // means it was refused with an enumeration-safe reason_code.
 export type CommentTriggerStatus =
   | "queued"
   | "coalesced"
   | "deferred"
+  | "steered"
   | "blocked";
 
 export interface CommentTriggerOutcome {

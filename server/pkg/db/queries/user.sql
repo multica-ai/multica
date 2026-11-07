@@ -63,6 +63,22 @@ UPDATE "user" SET
 WHERE id = sqlc.arg('id')
 RETURNING *;
 
+-- name: AdvanceWhatsNewSeenVersion :one
+-- Only moves forward: an older client reporting an older release must not
+-- resurface highlights a newer client already dismissed. Both sides are
+-- validated MAJOR.MINOR.PATCH strings, so the int[] casts cannot fail and
+-- compare numerically (0.7.10 > 0.7.9). No row comes back when the stored
+-- version is already at or past the requested one.
+UPDATE "user" SET
+    whats_new_seen_version = sqlc.arg('version')::text,
+    updated_at = now()
+WHERE id = sqlc.arg('id')
+  AND (
+    whats_new_seen_version IS NULL
+    OR string_to_array(whats_new_seen_version, '.')::int[] < string_to_array(sqlc.arg('version')::text, '.')::int[]
+  )
+RETURNING *;
+
 -- name: JoinCloudWaitlist :one
 -- Records interest in cloud runtimes. Does NOT mark onboarding
 -- complete — the user still has to pick a real path (CLI / Skip)
@@ -70,18 +86,6 @@ RETURNING *;
 UPDATE "user" SET
     cloud_waitlist_email = $2,
     cloud_waitlist_reason = $3,
-    updated_at = now()
-WHERE id = $1
-RETURNING *;
-
--- name: SetStarterContentState :one
--- Atomically transition starter_content_state. The handler is
--- responsible for checking the current value first (to decide between
--- "transition NULL -> imported and run the seeding" vs "already
--- decided, short-circuit"). Using COALESCE here would swallow the
--- transition, so this is a straight assignment.
-UPDATE "user" SET
-    starter_content_state = $2,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

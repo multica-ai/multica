@@ -5,23 +5,30 @@ import type { SupportedLocale } from "@multica/core/i18n";
 import { describe, expect, it } from "vitest";
 import enAgents from "../../../locales/en/agents.json";
 import frAgents from "../../../locales/fr/agents.json";
+import esAgents from "../../../locales/es/agents.json";
 import jaAgents from "../../../locales/ja/agents.json";
 import koAgents from "../../../locales/ko/agents.json";
 import zhHansAgents from "../../../locales/zh-Hans/agents.json";
+import zhHantAgents from "../../../locales/zh-Hant/agents.json";
 
 import {
   FAILURE_REASON_I18N_KEYS,
   cancellationActorLabel,
   cancelReasonLabel,
+  failureNeedsAction,
   failureReasonLabel,
+  isCancelledOutcome,
+  runOutcomeLabel,
 } from "./task-failure";
 
 const AGENT_RESOURCES = {
   en: enAgents,
   "zh-Hans": zhHansAgents,
+  "zh-Hant": zhHantAgents,
   ja: jaAgents,
   ko: koAgents,
   fr: frAgents,
+  es: esAgents,
 } as const;
 
 function fixedT(locale: SupportedLocale): TFunction<"agents"> {
@@ -70,6 +77,12 @@ describe("cancellationActorLabel", () => {
 // it must hold: a SERVER-cancelled row (persisted reason) reads like a failed
 // row. Actor provenance is handled independently by cancellationActorLabel.
 describe("cancelReasonLabel", () => {
+  it("localizes access revocation without calling the cancelled run a failure", () => {
+    for (const locale of Object.keys(AGENT_RESOURCES) as SupportedLocale[]) {
+      expect(cancelReasonLabel({ status: "cancelled", failure_reason: "runtime_access_revoked" }, fixedT(locale)))
+        .toBe(AGENT_RESOURCES[locale].task_failure.reasons.runtime_access_revoked);
+    }
+  });
   it("returns null for a user-initiated cancel", () => {
     expect(
       cancelReasonLabel(
@@ -105,9 +118,11 @@ describe("cancelReasonLabel", () => {
     const expected: Record<SupportedLocale, string> = {
       en: "Cancelled by the system",
       "zh-Hans": "已由系统取消",
+      "zh-Hant": "已由系統取消",
       ja: "システムによってキャンセルされました",
       ko: "시스템에서 취소함",
       fr: "Annulée par le système",
+      es: "Cancelada por el sistema",
     };
 
     for (const locale of Object.keys(expected) as SupportedLocale[]) {
@@ -215,5 +230,34 @@ describe("failureReasonLabel", () => {
     expect(failureReasonLabel(null, enT)).toBeNull();
     expect(failureReasonLabel(undefined, enT)).toBeNull();
     expect(failureReasonLabel("", enT)).toBeNull();
+  });
+});
+
+describe("run outcome", () => {
+  it("reads a failed row with a cancellation reason as cancelled", () => {
+    expect(isCancelledOutcome({ status: "failed", failure_reason: "cancelled" })).toBe(true);
+    expect(isCancelledOutcome({ status: "failed", failure_reason: "user_cancelled" })).toBe(true);
+    expect(isCancelledOutcome({ status: "cancelled" })).toBe(true);
+    expect(isCancelledOutcome({ status: "failed", failure_reason: "timeout" })).toBe(false);
+    expect(isCancelledOutcome({ status: "failed" })).toBe(false);
+  });
+
+  it("flags only failures that need a configuration change", () => {
+    expect(failureNeedsAction({ status: "failed", failure_reason: "agent_error.provider_auth_or_access" })).toBe(true);
+    expect(failureNeedsAction({ status: "failed", failure_reason: "runtime_access_denied" })).toBe(true);
+    expect(failureNeedsAction({ status: "failed", failure_reason: "agent_error.provider_capacity_or_rate_limit" })).toBe(false);
+    expect(failureNeedsAction({ status: "cancelled", failure_reason: "runtime_access_denied" })).toBe(false);
+  });
+
+  it("labels a run once: reason first, then who cancelled it", () => {
+    expect(runOutcomeLabel({ status: "failed", failure_reason: "cancelled" }, enT)).toBe("Cancelled by the system");
+    expect(runOutcomeLabel({ status: "failed", failure_reason: null }, enT)).toBeNull();
+    expect(runOutcomeLabel({
+      status: "cancelled", failure_reason: "queued_expired", cancelled_by: { type: "system" },
+    }, enT)).toBe("Expired in queue");
+    expect(runOutcomeLabel({
+      status: "cancelled", cancelled_by: { type: "member", name: "Jiayuan" },
+    }, enT)).toBe("Cancelled by Jiayuan");
+    expect(runOutcomeLabel({ status: "cancelled" }, enT)).toBeNull();
   });
 });

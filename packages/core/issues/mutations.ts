@@ -36,13 +36,16 @@ import {
   pruneDeletedIssueFromParentChildrenCaches,
 } from "./delete-cache";
 import { useWorkspaceId } from "../hooks";
+import { refreshSubscribedIssues } from "./subscribed";
+import { getCurrentWsId } from "../platform/workspace-storage";
 import { useRecentContextStore } from "../chat/recent-context-store";
-import { useRecentIssuesStore, useTaskSupplementDraftStore } from "./stores";
+import { useRecentIssuesStore } from "./stores";
 import type { InboxItem, Issue, IssueReaction } from "../types";
 import type {
   CreateCommentSubIssueManualRequest,
   CreateIssueRequest,
   ListIssuesCache,
+  ListIssuesResponse,
   MoveIssueRequest,
   UpdateIssueRequest,
 } from "../types";
@@ -56,10 +59,8 @@ import {
   reconcileIssueFullSnapshotRevision,
 } from "./ws-updaters";
 
-// ---------------------------------------------------------------------------
 // Shared mutation variable types — used by both mutation hooks and
 // useMutationState consumers to keep the type assertion in sync.
-// ---------------------------------------------------------------------------
 
 export type ToggleCommentReactionVars = {
   commentId: string;
@@ -81,13 +82,9 @@ export type UpdateIssueMutationInput = {
   move_intent?: Pick<MoveIssueRequest, "before_id" | "after_id">;
 } & UpdateIssueRequest;
 
-// ---------------------------------------------------------------------------
 // Per-status pagination
-// ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
 // Issue CRUD
-// ---------------------------------------------------------------------------
 
 // Shared by the single and batch update hooks, so the inbox re-read can wait
 // for the last of them (see `owedInboxRereads`).
@@ -168,6 +165,7 @@ function useIssueCreateMutation<TVariables>(
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.sidebarAll(wsId) });
       qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     },
   });
@@ -206,6 +204,8 @@ export function useUpdateIssue() {
       // a rapid follow-up edit. mutationFn still sends the full payload.
       const {
         suppress_run: _suppressRun,
+        stop_previous_assignee_runs: _stopPreviousAssigneeRuns,
+        enter_workflow_step: _enterWorkflowStep,
         duplicate_of_issue_id: _duplicateOfIssueId,
         description: _description,
         description_base: _descriptionBase,
@@ -318,6 +318,8 @@ export function useUpdateIssue() {
       // is the plain surgical patch it always was.
       const {
         suppress_run: _suppressRun,
+        stop_previous_assignee_runs: _stopPreviousAssigneeRuns,
+        enter_workflow_step: _enterWorkflowStep,
         duplicate_of_issue_id: _duplicateOfIssueId,
         description_base: _descriptionBase,
         move_intent: _moveIntent,
@@ -497,15 +499,39 @@ export function useDeleteIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.sidebarAll(wsId) });
       qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       if (ctx?.metadata) invalidateDeletedIssueParentCaches(qc, wsId, ctx.metadata);
     },
   });
 }
 
+interface BatchUpdateSnapshots {
+  prevLists?: Iterable<readonly [QueryKey, unknown]>;
+  prevFlatLists?: Iterable<readonly [QueryKey, unknown]>;
+  prevTableRows?: Iterable<readonly [QueryKey, unknown]>;
+  prevSidebarLists?: Iterable<readonly [QueryKey, unknown]>;
+  prevDetailById?: Iterable<readonly [string, unknown]>;
+  prevInboxList?: unknown;
+  prevArchivedInboxCaches?: Iterable<readonly [QueryKey, unknown]>;
+  prevChildren?: Iterable<readonly [string, unknown]>;
+}
+
 export function useBatchUpdateIssues() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
+  const rollback = (ctx: BatchUpdateSnapshots | undefined) => {
+    for (const [key, snapshot] of ctx?.prevLists ?? []) qc.setQueryData(key, snapshot);
+    for (const [key, snapshot] of ctx?.prevFlatLists ?? []) qc.setQueryData(key, snapshot);
+    for (const [key, snapshot] of ctx?.prevTableRows ?? []) qc.setQueryData(key, snapshot);
+    for (const [key, snapshot] of ctx?.prevSidebarLists ?? []) qc.setQueryData(key, snapshot);
+    for (const [id, snapshot] of ctx?.prevDetailById ?? []) qc.setQueryData(issueKeys.detail(wsId, id), snapshot);
+    if (ctx?.prevInboxList !== undefined) qc.setQueryData(inboxKeys.list(wsId), ctx.prevInboxList);
+    for (const [key, snapshot] of ctx?.prevArchivedInboxCaches ?? []) qc.setQueryData(key, snapshot);
+    for (const [parentId, snapshot] of ctx?.prevChildren ?? []) {
+      qc.setQueryData(issueKeys.children(wsId, parentId), snapshot);
+    }
+  };
   return useMutation({
     mutationKey: issueWriteMutationKey(wsId),
     mutationFn: ({
@@ -522,6 +548,8 @@ export function useBatchUpdateIssues() {
       // until a refetch returns the committed result.
       const {
         suppress_run: _suppressRun,
+        stop_previous_assignee_runs: _stopPreviousAssigneeRuns,
+        enter_workflow_step: _enterWorkflowStep,
         description: _description,
         description_base: _descriptionBase,
         ...patch
@@ -547,6 +575,7 @@ export function useBatchUpdateIssues() {
         string,
         [QueryKey, IssueTableRowCache]
       >();
+      const prevSidebarListByHash = new Map<string, [QueryKey, ListIssuesResponse]>();
       const prevDetailById = new Map<string, Issue>();
       let prevInboxList: InboxItem[] | undefined;
       let prevArchivedInboxCaches: [QueryKey, ArchivedInboxCache | undefined][] | undefined;
@@ -571,6 +600,12 @@ export function useBatchUpdateIssues() {
           const hash = hashKey(key);
           if (!prevTableRowByHash.has(hash)) {
             prevTableRowByHash.set(hash, [key, snapshot]);
+          }
+        }
+        for (const [key, snapshot] of change.prevSidebarLists) {
+          const hash = hashKey(key);
+          if (!prevSidebarListByHash.has(hash)) {
+            prevSidebarListByHash.set(hash, [key, snapshot]);
           }
         }
         if (change.prevDetail) prevDetailById.set(id, change.prevDetail);
@@ -609,6 +644,7 @@ export function useBatchUpdateIssues() {
         prevLists: [...prevListByHash.values()],
         prevFlatLists: [...prevFlatListByHash.values()],
         prevTableRows: [...prevTableRowByHash.values()],
+        prevSidebarLists: [...prevSidebarListByHash.values()],
         prevDetailById,
         prevInboxList,
         prevArchivedInboxCaches,
@@ -618,38 +654,18 @@ export function useBatchUpdateIssues() {
         affectedParentIds,
       };
     },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prevLists) {
-        for (const [key, snapshot] of ctx.prevLists) {
-          qc.setQueryData(key, snapshot);
-        }
-      }
-      if (ctx?.prevFlatLists) {
-        for (const [key, snapshot] of ctx.prevFlatLists) {
-          qc.setQueryData(key, snapshot);
-        }
-      }
-      if (ctx?.prevTableRows) {
-        for (const [key, snapshot] of ctx.prevTableRows) {
-          qc.setQueryData(key, snapshot);
-        }
-      }
-      if (ctx?.prevDetailById) {
-        for (const [id, snapshot] of ctx.prevDetailById) {
-          qc.setQueryData(issueKeys.detail(wsId, id), snapshot);
-        }
-      }
-      if (ctx?.prevInboxList !== undefined) {
-        qc.setQueryData(inboxKeys.list(wsId), ctx.prevInboxList);
-      }
-      for (const [key, snapshot] of ctx?.prevArchivedInboxCaches ?? []) {
-        qc.setQueryData(key, snapshot);
-      }
-      if (ctx?.prevChildren) {
-        for (const [parentId, snapshot] of ctx.prevChildren) {
-          qc.setQueryData(issueKeys.children(wsId, parentId), snapshot);
-        }
-      }
+    onError: (_err, _vars, ctx) => rollback(ctx),
+    // The server skips items its per-issue guards refuse (a status the
+    // issue's workflow does not list, an assignee it cannot take) and reports
+    // only how many it wrote. Which ones were skipped is unknown, so the
+    // optimistic writes are undone and the affected caches refetched.
+    onSuccess: (data, { ids }, ctx) => {
+      if (data.updated >= ids.length) return;
+      rollback(ctx);
+      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
+      for (const id of ids) qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, id) });
     },
     onSettled: (_data, err, _vars, ctx) => {
       settleInboxAfterIssueWrite(qc, wsId, ctx?.inboxWrite, err !== null);
@@ -806,6 +822,7 @@ export function useBatchDeleteIssues() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.sidebarAll(wsId) });
       qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       if (ctx?.parentIssueIds && ctx.parentIssueIds.size > 0) {
         invalidateDeletedIssueParentCaches(qc, wsId, {
@@ -816,9 +833,7 @@ export function useBatchDeleteIssues() {
   });
 }
 
-// ---------------------------------------------------------------------------
 // Comments / Timeline
-// ---------------------------------------------------------------------------
 
 type TimelineCache = TimelineEntry[];
 
@@ -832,13 +847,16 @@ export function useCreateComment(issueId: string) {
       parentId,
       attachmentIds,
       suppressAgentIds,
+      steerTaskIds,
     }: {
       content: string;
       type?: string;
       parentId?: string;
       attachmentIds?: string[];
       suppressAgentIds?: string[];
-    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds),
+      /** Running turns this comment goes into instead of a follow-up run. */
+      steerTaskIds?: string[];
+    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds, steerTaskIds),
     onSuccess: (comment) => {
       if (comment.issue_revision) {
         onIssueAuxiliaryRevision(qc, wsId, issueId, comment.issue_revision);
@@ -858,15 +876,24 @@ export function useCreateComment(issueId: string) {
         attachments: comment.attachments ?? [],
         created_at: comment.created_at,
         updated_at: comment.updated_at,
+        supplements: comment.supplements,
       };
+      const steered = !!comment.supplements?.length;
       // Dedupe by id: the `comment:created` WS event may have already added
       // this entry from the broadcast path before this onSuccess fires. Skip
-      // the append if the entry is already in the cache.
+      // the append if the entry is already in the cache — but keep the
+      // steering receipts, which that broadcast predates.
       qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
         if (!old) return [entry];
-        if (old.some((e) => e.id === entry.id)) return old;
+        if (old.some((e) => e.id === entry.id)) {
+          return steered
+            ? old.map((e) => (e.id === entry.id && !e.supplements?.length ? { ...e, supplements: entry.supplements } : e))
+            : old;
+        }
         return sortTimelineEntriesAsc([...old, entry]);
       });
+      // A steered turn now lists this comment among its inputs.
+      if (steered) qc.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
       // Posting a comment changes the trigger answer itself (the enqueued
       // task now dedupes follow-up triggers), so cached previews for this
       // issue are stale the moment the create lands.
@@ -1079,9 +1106,7 @@ export function useToggleCommentReaction(issueId: string) {
   });
 }
 
-// ---------------------------------------------------------------------------
 // Issue-level Reactions
-// ---------------------------------------------------------------------------
 
 export function useToggleIssueReaction(issueId: string) {
   const qc = useQueryClient();
@@ -1107,9 +1132,7 @@ export function useToggleIssueReaction(issueId: string) {
   });
 }
 
-// ---------------------------------------------------------------------------
 // Issue Subscribers
-// ---------------------------------------------------------------------------
 
 export function useToggleIssueSubscriber(issueId: string) {
   const qc = useQueryClient();
@@ -1170,8 +1193,10 @@ export function useToggleIssueSubscriber(issueId: string) {
       if (ctx?.prev)
         qc.setQueryData(issueKeys.subscribers(issueId), ctx.prev);
     },
-    onSettled: () => {
+    onSettled: (_data, _err, { userType }) => {
       qc.invalidateQueries({ queryKey: issueKeys.subscribers(issueId) });
+      const wsId = getCurrentWsId();
+      if (wsId && userType === "member") void refreshSubscribedIssues(qc, wsId);
     },
   });
 }
@@ -1194,8 +1219,10 @@ export function useUnsubscribeFromIssueSubtree(issueId: string) {
     }) => {
       await api.unsubscribeFromIssueSubtree(issueId, userId, userType);
     },
-    onSettled: () => {
+    onSettled: (_data, _err, { userType }) => {
       qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
+      const wsId = getCurrentWsId();
+      if (wsId && userType === "member") void refreshSubscribedIssues(qc, wsId);
     },
   });
 }
@@ -1205,48 +1232,6 @@ export function useCancelIssueRun(issueId: string) {
   return useMutation({
     mutationFn: (taskId: string) => api.cancelTask(issueId, taskId),
     onSuccess: () => client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) }),
-  });
-}
-
-export function useCreateTaskSupplement(issueId: string) {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ taskId, content, clientRequestId }: {
-      taskId: string;
-      content: string;
-      clientRequestId: string;
-    }) => api.createTaskSupplement(issueId, taskId, content, clientRequestId),
-    onSuccess: (comment, { taskId, clientRequestId }) => {
-      // Re-anchoring the run can unmount its composer before this response.
-      // Clear the submitted draft here, without discarding any newer edits.
-      const drafts = useTaskSupplementDraftStore.getState();
-      if (drafts.drafts[taskId]?.clientRequestId === clientRequestId) {
-        drafts.clear(taskId);
-      }
-      const entry: TimelineEntry = {
-        type: "comment",
-        id: comment.id,
-        actor_type: comment.author_type,
-        actor_id: comment.author_id,
-        content: comment.content,
-        parent_id: comment.parent_id,
-        comment_type: comment.type,
-        reactions: comment.reactions ?? [],
-        attachments: comment.attachments ?? [],
-        created_at: comment.created_at,
-        updated_at: comment.updated_at,
-        supplement_task_id: comment.supplement_task_id,
-        supplement_status: comment.supplement_status,
-        supplement_failure_reason: comment.supplement_failure_reason,
-        supplement_delivered_at: comment.supplement_delivered_at,
-      };
-      client.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
-        if (!old) return [entry];
-        if (old.some((item) => item.id === entry.id)) return old;
-        return sortTimelineEntriesAsc([...old, entry]);
-      });
-      client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
-    },
   });
 }
 

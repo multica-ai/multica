@@ -8,8 +8,12 @@
  *
  *   - image  → ImageAttachmentView (figure + hover toolbar + lightbox via
  *              the shared AttachmentPreviewModal)
- *   - html   → HtmlAttachmentPreview (inline iframe + hover toolbar)
- *   - others → AttachmentCard (icon + filename + Eye/Download row)
+ *   - others → AttachmentCard (icon + filename + Eye/Download row), or
+ *              AttachmentFileCard in the card layout
+ *
+ * An HTML file is a file like any other (MUL-7649): it shows as a card and
+ * opens in the viewer. HTML meant to be read in place is written as a
+ * ```html block in the body, which renders as a dynamic block.
  *
  * Call sites:
  *   - extensions/file-card.tsx FileCardView (Tiptap NodeView)
@@ -25,17 +29,21 @@
 
 import {
   Download,
+  Loader2,
   Link as LinkIcon,
   Maximize2,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
+import { useCallback, useState, type CSSProperties, type ReactNode } from "react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
+import { attachmentIdFromStorageURL } from "@multica/core/types/attachment-url";
 import { useT } from "../i18n";
+import { DeferredTooltip } from "../common/deferred-tooltip";
 import { useAttachmentDownloadResolver } from "./attachment-download-context";
 import { useAttachmentPreview } from "./attachment-preview-modal";
 import { usePreviewSequence } from "./preview-sequence-context";
@@ -44,14 +52,13 @@ import {
   useResignedInlineMedia,
 } from "./hooks/use-inline-media-url";
 import { useDownloadAttachment } from "./use-download-attachment";
-import { AttachmentCard } from "./attachment-card";
-import { HtmlAttachmentPreview } from "./html-attachment-preview";
-import { getPreviewKind, type PreviewKind } from "./utils/preview";
+import { AttachmentCard, AttachmentFileCard } from "./attachment-card";
+import { useAttachmentDownloadState } from "./hooks/use-attachment-download-state";
+import { canOpenPreview, getPreviewKind, type PreviewKind } from "./utils/preview";
+import { imageDimensions } from "./utils/image-metadata";
 import "./styles/attachment.css";
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
 
 export type AttachmentInput =
   // Server response in hand — full record. Used by AttachmentList and any
@@ -95,6 +102,14 @@ export interface AttachmentProps {
   selected?: boolean;
   /** Editor hint — wired to Tiptap deleteNode(). */
   onDelete?: () => void;
+  /**
+   * "block" (default) renders each kind at full width, as a body renders it.
+   * "card" is the form a list of standalone attachments lays out: an image
+   * keeps its full size up to a height cap, any other file becomes a card.
+   */
+  layout?: "block" | "card";
+  /** Card layout only — rendered after the file name, e.g. a version badge. */
+  badge?: ReactNode;
   className?: string;
 }
 
@@ -107,6 +122,17 @@ interface Normalized {
   uploading: boolean;
   width?: number;
   height?: number;
+}
+
+function recordImageFields(
+  record: AttachmentRecord | undefined,
+): Pick<Normalized, "width" | "height"> {
+  if (!record) return {};
+  const dims = imageDimensions(record);
+  return {
+    width: dims?.width,
+    height: dims?.height,
+  };
 }
 
 function normalize(
@@ -125,9 +151,12 @@ function normalize(
       attachmentId: input.attachment.id,
       record: input.attachment,
       uploading: false,
+      ...recordImageFields(input.attachment),
     };
   }
   const record = input.url ? resolve(input.url) : undefined;
+  const fromRecord = recordImageFields(record);
+  const ownSize = input.width !== undefined || input.height !== undefined;
   return {
     filename: input.filename || record?.filename || "",
     contentType: input.contentType || record?.content_type || "",
@@ -158,8 +187,8 @@ function normalize(
     attachmentId: record?.id,
     record,
     uploading: !!input.uploading,
-    width: input.width,
-    height: input.height,
+    width: ownSize ? input.width : fromRecord.width,
+    height: ownSize ? input.height : fromRecord.height,
   };
 }
 
@@ -194,63 +223,14 @@ function absolutizeMediaURL(rawUrl: string): string {
   return `${baseUrl}${rawUrl}`;
 }
 
-// pickInlineMediaURL returns the URL most likely to load successfully
-// inside a native <img>/<video>/<iframe> resource fetch — i.e. without
-// the calling client attaching an Authorization header.
+// pickInlineMediaURL chooses a URL usable by native media loads, which cannot
+// attach the API client's Authorization header. Signed download URLs are suitable
+// for rendering but must not replace durable Markdown references.
 //
-// The metadata response carries three URL fields per attachment row,
-// each with a different lifetime / accessibility:
-//
-//   - `record.download_url` — this-response click-time URL. In
-//                             CloudFront-signed mode this is the
-//                             signed redirect (works as a native img
-//                             src for the duration of the TTL); in
-//                             other modes it's the bare API endpoint
-//                             (`/api/attachments/<id>/download`) which
-//                             requires per-request auth and does NOT
-//                             load as a native img on a non-same-site
-//                             origin like Desktop's file://.
-//   - `record.markdown_url` — the durable URL the server picked for
-//                             persistence (MUL-3192 / `buildMarkdownURL`):
-//                             public CDN passthrough when the storage is
-//                             public-readable, or `MULTICA_PUBLIC_URL +
-//                             /api/attachments/<id>/download` for
-//                             private-bucket modes. Aligned with the
-//                             server-side policy by construction, so it
-//                             beats `record.url` whenever both exist.
-//   - `record.url`          — raw storage URL. May be private (S3 /
-//                             CloudFront-signed, R2, MinIO) and unable
-//                             to load directly. Last-resort fallback
-//                             for legacy responses that omit
-//                             `markdown_url`.
-//
-// Order:
-//
-//  1. Signed `download_url` — when CloudFront has minted a signed
-//     redirect for THIS response, use it; the TTL means the signed URL
-//     beats `markdown_url` on first paint (no extra hop through the
-//     API endpoint), and the renderer doesn't persist it so the TTL is
-//     not a problem.
-//  2. Known CDN `record.url` — when `/api/config` exposes the same CDN
-//     host as the attachment record, the browser can load the object
-//     directly (public CDN, or CloudFront cookie mode). Prefer it over
-//     an API-shaped `markdown_url` so the rendered `<img src>` and Copy
-//     Link affordance expose the CDN URL while the persisted markdown
-//     can remain the stable attachment endpoint. Skipped when the server
-//     reports `cdn_signed` — in CloudFront signed-URL mode the same
-//     domain serves PRIVATE content and a raw (unsigned) storage URL is
-//     a guaranteed 403 (MUL-3254).
-//  3. Local disk `record.url` — self-host LocalStorage without
-//     LOCAL_UPLOAD_BASE_URL stores a site-relative `/uploads/...` path.
-//     It is the direct static object URL and is loadable once
-//     `absolutizeMediaURL` prefixes apiBaseUrl in split-origin clients.
-//  4. `record.markdown_url` — the durable, server-policy-aligned URL.
-//     Beats raw `record.url` because it never points at a private
-//     bucket (must-fix 2 from MUL-3192 review), except for the explicit
-//     site-relative local upload path above.
-//  5. `record.url` — legacy fallback for responses that omit
-//     `markdown_url` (a backend old enough to predate MUL-3192).
-//  6. The input URL — when there's no record at all.
+// Use known public/CDN URLs directly only when cdn_signed is false; unsigned URLs
+// on a private CDN fail even when the domain matches. Local /uploads paths remain
+// valid after origin normalization. Otherwise prefer the server's markdown_url,
+// then legacy storage URLs, then the original input.
 function pickInlineMediaURL(
   record: AttachmentRecord,
   fallback: string,
@@ -307,15 +287,15 @@ function hasExpiringSignatureQuery(q: URLSearchParams): boolean {
   return false;
 }
 
-// ---------------------------------------------------------------------------
 // Dispatcher
-// ---------------------------------------------------------------------------
 
 export function Attachment({
   attachment,
   editable,
   selected,
   onDelete,
+  layout = "block",
+  badge,
   className,
 }: AttachmentProps) {
   const { resolveAttachment, openByUrl } = useAttachmentDownloadResolver();
@@ -386,11 +366,16 @@ export function Attachment({
   };
 
   const handleDownload = () => {
-    if (state.attachmentId) {
-      download(state.attachmentId);
-      return;
+    // A CDN storage URL that didn't resolve against this surface's
+    // attachments (e.g. an image quoted from another comment) still names
+    // its attachment id, so re-sign it instead of opening the bare URL,
+    // which a signed CDN rejects outside the app.
+    const attachmentId =
+      state.attachmentId ?? attachmentIdFromStorageURL(shareUrl, cdnDomain);
+    if (attachmentId) {
+      return download(attachmentId);
     }
-    if (shareUrl) openByUrl(shareUrl);
+    if (shareUrl) return openByUrl(shareUrl);
   };
 
   if (kind === "image") {
@@ -408,19 +393,25 @@ export function Attachment({
           onView={openPreview}
           onDownload={handleDownload}
           onDelete={onDelete}
-          className={className}
+          className={cn(layout === "card" && "image-standalone", className)}
         />
         {preview.modal}
       </>
     );
   }
 
-  if (kind === "html" && state.attachmentId && !state.uploading) {
+  if (layout === "card") {
     return (
       <>
-        <HtmlAttachmentPreview
-          attachmentId={state.attachmentId}
+        <AttachmentFileCard
           filename={state.filename}
+          contentType={state.contentType}
+          sizeBytes={state.record?.size_bytes}
+          // Same gate as the row's Eye button: text kinds need the record.
+          canPreview={!!shareUrl && canOpenPreview(kind, !!state.attachmentId)}
+          canDownload={!!shareUrl || !!state.attachmentId}
+          uploading={state.uploading}
+          badge={badge}
           onPreview={openPreview}
           onDownload={handleDownload}
           onDelete={editable ? onDelete : undefined}
@@ -447,9 +438,7 @@ export function Attachment({
   );
 }
 
-// ---------------------------------------------------------------------------
 // ImageAttachmentView — inline image with hover toolbar
-// ---------------------------------------------------------------------------
 //
 // DOM and styling are intentionally a direct port of the original
 // extensions/image-view.tsx <figure> structure. Shared visual styles live in
@@ -472,7 +461,7 @@ interface ImageAttachmentViewProps {
   editable?: boolean;
   selected?: boolean;
   onView: () => void;
-  onDownload: () => void;
+  onDownload: () => void | Promise<unknown>;
   onDelete?: () => void;
   className?: string;
 }
@@ -492,6 +481,7 @@ function ImageAttachmentView({
   className,
 }: ImageAttachmentViewProps) {
   const { t } = useT("editor");
+  const { downloading, handleDownload } = useAttachmentDownloadState(onDownload);
 
   const handleCopyLink = async () => {
     if (await copyText(linkUrl)) {
@@ -508,6 +498,24 @@ function ImageAttachmentView({
   // cursor: zoom-in }` keys off this same flag for the cursor affordance.
   const clickable = !editable && !uploading;
 
+  // An image that has not loaded has no size of its own (the figure shrinks
+  // to it), so its box is reserved up front: from its pixel size when known,
+  // otherwise as a fixed-ratio placeholder. Once anything has painted the box
+  // follows the image.
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const loaded = !!src && loadedSrc === src;
+  const imgRef = useCallback((img: HTMLImageElement | null) => {
+    if (img?.complete && img.naturalWidth > 0) setLoadedSrc(src);
+  }, [src]);
+  const sized = !!width && !!height;
+  const pending = !loaded && !sized && !uploading;
+  const sizeStyle = sized
+    ? ({
+        "--image-width": `${width}px`,
+        "--image-aspect": `${width! / height!}`,
+      } as CSSProperties)
+    : undefined;
+
   // DOM mirrors the original ReadonlyImage (span-only chain so it stays
   // valid HTML5 when rendered inside a markdown <p>). In editor surfaces
   // the NodeViewWrapper still emits its own outer .image-node div around
@@ -521,36 +529,76 @@ function ImageAttachmentView({
           className,
         )}
         data-clickable={clickable || undefined}
+        data-sized={sized || undefined}
+        data-pending={pending || undefined}
+        style={sizeStyle}
         contentEditable={false}
         onClick={clickable ? onView : undefined}
       >
         <img
+          ref={imgRef}
           src={src || undefined}
           alt={alt}
           width={width}
           height={height}
+          loading="lazy"
+          decoding="async"
+          data-loaded={loaded || undefined}
           className={cn("image-content", uploading && "image-uploading")}
           draggable={false}
+          onLoad={() => setLoadedSrc(src)}
+          onError={() => setLoadedSrc(src)}
         />
         {!uploading && src && (
           <span
             className="image-toolbar"
+            style={downloading ? { opacity: 1 } : undefined}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
-            <button type="button" onClick={onView} title={t(($) => $.image.view)}>
-              <Maximize2 className="size-3.5" />
-            </button>
-            <button type="button" onClick={onDownload} title={t(($) => $.image.download)}>
-              <Download className="size-3.5" />
-            </button>
-            <button type="button" onClick={handleCopyLink} title={t(($) => $.image.copy_link)}>
-              <LinkIcon className="size-3.5" />
-            </button>
+            <DeferredTooltip
+              content={t(($) => $.image.view)}
+              trigger={
+                <button type="button" onClick={onView} aria-label={t(($) => $.image.view)}>
+                  <Maximize2 className="size-3.5" />
+                </button>
+              }
+            />
+            <DeferredTooltip
+              content={t(($) => $.image.download)}
+              trigger={
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  disabled={downloading}
+                  aria-busy={downloading}
+                  aria-label={t(($) => $.image.download)}
+                >
+                  {downloading ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Download className="size-3.5" />
+                  )}
+                </button>
+              }
+            />
+            <DeferredTooltip
+              content={t(($) => $.image.copy_link)}
+              trigger={
+                <button type="button" onClick={handleCopyLink} aria-label={t(($) => $.image.copy_link)}>
+                  <LinkIcon className="size-3.5" />
+                </button>
+              }
+            />
             {editable && onDelete && (
-              <button type="button" onClick={onDelete} title={t(($) => $.image.delete)}>
-                <Trash2 className="size-3.5" />
-              </button>
+              <DeferredTooltip
+                content={t(($) => $.image.delete)}
+                trigger={
+                  <button type="button" onClick={onDelete} aria-label={t(($) => $.image.delete)}>
+                    <Trash2 className="size-3.5" />
+                  </button>
+                }
+              />
             )}
           </span>
         )}

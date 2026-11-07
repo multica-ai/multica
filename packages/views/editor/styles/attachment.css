@@ -29,6 +29,58 @@
   border-radius: var(--radius);
 }
 
+/* An image in a list of standalone attachments (the "card" layout): full
+   size, so it reads without opening, but capped in height — a phone
+   screenshot keeps its shape instead of running the length of the page.
+   The list spaces its images itself. */
+.image-figure.image-standalone {
+  margin: 0;
+}
+
+.image-figure.image-standalone .image-content {
+  width: auto;
+  max-width: 100%;
+  max-height: 36rem;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+/* Reserved box. An unloaded <img> lays out at 0×0 inside the shrink-to-fit
+   figure even with width/height attributes, so the figure carries the size:
+   an image with a known pixel size (--image-width, --image-aspect) gets the
+   box it will render at; one without gets a fixed-ratio placeholder until it
+   loads. Without a box, every unloaded image sits in the viewport at once and
+   lazy loading can't defer any of them. */
+.image-figure[data-sized] {
+  width: min(var(--image-width), 100%);
+}
+
+.image-figure.image-standalone[data-sized] {
+  width: min(var(--image-width), 100%, 36rem * var(--image-aspect));
+}
+
+.image-figure[data-sized] .image-content {
+  width: 100%;
+  aspect-ratio: var(--image-aspect);
+}
+
+.image-figure[data-pending] {
+  display: block;
+}
+
+.image-figure.image-standalone[data-pending] {
+  width: 20rem;
+  max-width: 100%;
+}
+
+.image-figure[data-pending] .image-content {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+}
+
+.image-content:not([data-loaded]) {
+  background-color: var(--muted);
+}
+
 .image-uploading {
   opacity: 0.5;
   animation: rte-upload-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;

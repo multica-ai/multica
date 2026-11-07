@@ -23,8 +23,10 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/attachmentpreview"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/storage"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -755,6 +757,52 @@ func TestGetAttachmentByID_AutoPublicEndpointReturnsPresignedDownloadURL(t *test
 	}
 	if got := dl.Query().Get("response-content-disposition"); !strings.HasPrefix(got, "attachment") {
 		t.Fatalf("attachment_download_url response-content-disposition = %q, want a forced attachment disposition", got)
+	}
+}
+
+func TestGetAttachmentForDownload_UsesAttachmentWorkspaceMembership(t *testing.T) {
+	if testPool == nil {
+		t.Skip("test database not available")
+	}
+	store := &mockStorageNoCdn{}
+	origStorage, origCfg, origSigner := testHandler.Storage, testHandler.cfg, testHandler.CFSigner
+	testHandler.Storage = store
+	testHandler.cfg.AttachmentDownloadMode = "proxy"
+	testHandler.CFSigner = nil
+	t.Cleanup(func() {
+		testHandler.Storage, testHandler.cfg, testHandler.CFSigner = origStorage, origCfg, origSigner
+	})
+
+	slug := fmt.Sprintf("download-metadata-%d", time.Now().UnixNano())
+	otherWorkspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name": "Download metadata workspace", "slug": slug,
+		"description": "", "issue_prefix": "DMW",
+	})
+	id := dbfx.Insert(t, "attachment", testutil.Cols{
+		"workspace_id":  otherWorkspaceID,
+		"uploader_type": "member", "uploader_id": testUserID,
+		"filename": "report.pdf", "url": "https://s3.example.com/test-bucket/report.pdf",
+		"content_type": "application/pdf", "size_bytes": 12,
+	})
+
+	request := func() *http.Request {
+		req := httptest.NewRequest("GET", "/api/attachments/"+id+"/download-metadata", nil)
+		req.Header.Set("X-User-ID", testUserID)
+		req.Header.Set("X-Workspace-ID", testWorkspaceID) // viewing workspace A
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", id)
+		return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	}
+
+	testutil.Call(t, testHandler.GetAttachmentForDownload, request()).Want(http.StatusNotFound)
+	dbfx.Insert(t, "member", testutil.Cols{
+		"workspace_id": otherWorkspaceID, "user_id": testUserID, "role": "member",
+	})
+
+	var resp AttachmentResponse
+	testutil.Call(t, testHandler.GetAttachmentForDownload, request()).Want(http.StatusOK).JSON(&resp)
+	if resp.ID != id || !strings.Contains(resp.AttachmentDownloadURL, "/signed-download?") {
+		t.Fatalf("response missing attachment-specific signed URL: %+v", resp)
 	}
 }
 
@@ -1595,13 +1643,62 @@ func TestGetAttachmentContent_TooLarge(t *testing.T) {
 	defer func() { testHandler.Storage = origStorage }()
 
 	// One byte over the limit. Allocate ASCII so io.ReadAll has work to do.
-	big := bytes.Repeat([]byte("a"), maxPreviewTextSize+1)
+	big := bytes.Repeat([]byte("a"), int(attachmentpreview.DefaultMaxSizeBytes)+1)
 	id := seedPreviewAttachment(t, store, "huge-key.txt", "huge.txt", "text/plain", big)
 
 	req, w := newPreviewRequest(t, id, testWorkspaceID)
 	testHandler.GetAttachmentContent(w, req)
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetAttachmentContent_ConfiguredLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		limit        int64
+		size         int
+		recordedSize int64
+		status       int
+	}{
+		{"default exact", 0, 2 << 20, 2 << 20, http.StatusOK},
+		{"default over", 0, (2 << 20) + 1, (2 << 20) + 1, http.StatusRequestEntityTooLarge},
+		{"larger HTML", 8 << 20, 3 << 20, 3 << 20, http.StatusOK},
+		{"custom exact", 8 << 20, 8 << 20, 8 << 20, http.StatusOK},
+		{"custom over", 8 << 20, (8 << 20) + 1, (8 << 20) + 1, http.StatusRequestEntityTooLarge},
+		{"smaller exact", 1024, 1024, 1024, http.StatusOK},
+		{"underreported body", 1024, 1025, 1, http.StatusRequestEntityTooLarge},
+		{"oversized metadata", 1024, 1, 1025, http.StatusRequestEntityTooLarge},
+		{"maximum exact", 16 << 20, 16 << 20, 16 << 20, http.StatusOK},
+		{"clamped maximum exact", 32 << 20, 16 << 20, 16 << 20, http.StatusOK},
+		{"clamped maximum over", 32 << 20, (16 << 20) + 1, 1, http.StatusRequestEntityTooLarge},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &mockStorage{}
+			h := *testHandler
+			h.Storage = store
+			h.cfg.MaxPreviewSizeBytes = tc.limit
+			body := bytes.Repeat([]byte("a"), tc.size)
+			copy(body, "<!doctype html><h1>Preview size test</h1>")
+			id := seedPreviewAttachment(t, store, "configured-preview.html", "preview.html", "text/html", body)
+			if _, err := testPool.Exec(context.Background(), "UPDATE attachment SET size_bytes = $1 WHERE id = $2", tc.recordedSize, id); err != nil {
+				t.Fatal(err)
+			}
+			req, w := newPreviewRequest(t, id, testWorkspaceID)
+			h.GetAttachmentContent(w, req)
+			if w.Code != tc.status {
+				t.Fatalf("status = %d, want %d", w.Code, tc.status)
+			}
+			if tc.status == http.StatusOK {
+				if !bytes.Equal(w.Body.Bytes(), body) {
+					t.Fatal("preview did not preserve the complete body")
+				}
+				if w.Header().Get("Content-Type") != "text/plain; charset=utf-8" || w.Header().Get("X-Original-Content-Type") != "text/html" {
+					t.Fatal("HTML preview content-type isolation changed")
+				}
+				requireAttachmentPreviewCSP(t, w.Header())
+			}
+		})
 	}
 }
 
@@ -1635,9 +1732,8 @@ func TestGetAttachmentContent_NotFound(t *testing.T) {
 	}
 }
 
-// isTextPreviewable is the whitelist linkpin between the proxy and the
-// client-side dispatcher. Regress against the most common content types so
-// drifting one of the lists alone fails loud.
+// Regress representative text-preview inputs in addition to the exhaustive
+// source-driven checks in attachment_text_preview_test.go.
 func TestIsTextPreviewable(t *testing.T) {
 	t.Helper()
 	cases := []struct {
@@ -1651,6 +1747,12 @@ func TestIsTextPreviewable(t *testing.T) {
 		{"plain text", "text/plain", "log.txt", true},
 		{"json by mime", "application/json", "data.json", true},
 		{"yaml by ext", "application/octet-stream", "config.yml", true},
+		{"csv by ext", "application/octet-stream", "report.csv", true},
+		{"tsv by ext", "application/octet-stream", "export.tsv", true},
+		{"json lines by ext", "application/octet-stream", "events.jsonl", true},
+		{"ndjson by ext", "application/octet-stream", "events.ndjson", true},
+		{"ndjson by mime", "application/x-ndjson", "events", true},
+		{"log by ext", "application/octet-stream", "server.log", true},
 		{"go source", "text/plain", "main.go", true},
 		{"typescript", "application/octet-stream", "index.ts", true},
 		{"html", "text/html", "page.html", true},

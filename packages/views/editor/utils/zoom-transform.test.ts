@@ -12,6 +12,7 @@ import {
   distanceBetween,
   midpointOf,
   panBy,
+  resizeTransform,
   wheelZoomFactor,
   zoomByAtCenter,
   zoomToAt,
@@ -102,6 +103,32 @@ describe("clampTransform", () => {
     const transform: ZoomTransform = { scale: 1, x: 100, y: 50 };
 
     expect(clampTransform(transform, content, VIEWPORT)).toEqual(transform);
+  });
+});
+
+describe("resizeTransform", () => {
+  const content = { width: 2000, height: 1200 };
+  const narrower = { width: 680, height: 600 };
+
+  it("re-fits content that was still at the old viewport's fit", () => {
+    const fitted = computeFitTransform(content, VIEWPORT);
+    expect(resizeTransform(fitted, content, VIEWPORT, narrower)).toEqual(
+      computeFitTransform(content, narrower),
+    );
+  });
+
+  it("only clamps content the reader zoomed or panned", () => {
+    const zoomed: ZoomTransform = { scale: 1, x: -200, y: -100 };
+    expect(resizeTransform(zoomed, content, VIEWPORT, narrower)).toEqual(
+      clampTransform(zoomed, content, narrower),
+    );
+  });
+
+  it("clamps when there was no previous viewport to compare against", () => {
+    const t: ZoomTransform = { scale: 0.5, x: 0, y: 0 };
+    expect(resizeTransform(t, content, { width: 0, height: 0 }, VIEWPORT)).toEqual(
+      clampTransform(t, content, VIEWPORT),
+    );
   });
 });
 

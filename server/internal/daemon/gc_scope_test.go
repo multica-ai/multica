@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -104,13 +105,13 @@ func TestGCScope_EnvRootActiveInAnotherDaemon(t *testing.T) {
 		t.Fatal("GC took the env root of a task running in another daemon")
 	}
 	stats := &gcStats{byPattern: map[string]int{}}
-	if cleaned := daemonA.applyGCAction(root, gcActionCleanArtifacts, stats); cleaned != 0 {
+	if cleaned := daemonA.applyGCAction(context.Background(), root, gcActionCleanArtifacts, stats); cleaned != 0 {
 		t.Fatalf("artifact cleanup mutated a live env root (%d dirs)", cleaned)
 	}
 	if _, err := os.Stat(artifact); err != nil {
 		t.Fatalf("artifact cleanup removed content from a live env root: %v", err)
 	}
-	if cleaned := daemonA.applyGCAction(root, gcActionClean, stats); cleaned != 0 {
+	if cleaned := daemonA.applyGCAction(context.Background(), root, gcActionClean, stats); cleaned != 0 {
 		t.Fatalf("full cleanup removed a live env root (%d dirs)", cleaned)
 	}
 	if _, err := os.Stat(filepath.Join(root, "workdir", "main.go")); err != nil {
@@ -121,7 +122,7 @@ func TestGCScope_EnvRootActiveInAnotherDaemon(t *testing.T) {
 	// production path does it under the claim it takes internally.
 	claim.Release()
 	releaseScope()
-	if cleaned := daemonA.applyGCAction(root, gcActionClean, stats); cleaned != 1 {
+	if cleaned := daemonA.applyGCAction(context.Background(), root, gcActionClean, stats); cleaned != 1 {
 		t.Fatalf("eligible cleanup did not remove the released env root (%d dirs)", cleaned)
 	}
 	if _, err := os.Stat(root); !os.IsNotExist(err) {
@@ -219,7 +220,7 @@ func TestGCScope_LegacyTaskWithoutScopeClaimIsProtected(t *testing.T) {
 		t.Fatal("GC took an env root an old daemon task still holds through .task_lock")
 	}
 	stats := &gcStats{byPattern: map[string]int{}}
-	if cleaned := daemonA.applyGCAction(root, gcActionClean, stats); cleaned != 0 {
+	if cleaned := daemonA.applyGCAction(context.Background(), root, gcActionClean, stats); cleaned != 0 {
 		t.Fatalf("cleanup removed an env root held by an old daemon task (%d dirs)", cleaned)
 	}
 

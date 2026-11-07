@@ -5,9 +5,6 @@ import "encoding/json"
 const (
 	DaemonCapabilitySkillBundlesV1      = "skill-bundles-v1"
 	DaemonCapabilityCoalescedCommentsV1 = "coalesced-comments-v1"
-	DaemonCapabilityExecutionManifestV1 = "execution-manifest-v1"
-	DaemonCapabilityAgentSkillV1        = "agent-skill-v1"
-	DaemonCapabilityRemoteMCPV1         = "remote-mcp-v1"
 	// DaemonCapabilityLocalWorktreeV1 advertises that the daemon implements
 	// worktree mode for local_directory resources (execution_mode=worktree).
 	//
@@ -61,11 +58,35 @@ const (
 	// work, so such a daemon keeps getting a fresh directory and the parent's
 	// stays untouched on disk.
 	DaemonCapabilityCheckoutKeepsWorkV1 = "checkout-keeps-work-v1"
+	// DaemonCapabilityJoinedWakeupsV1 advertises that the daemon renders the
+	// claim's wakeup_joined field into the prompt. Only such a claim takes
+	// along the inputs of wakeup rules that waited for this run; for any other
+	// daemon those rules keep their inputs and start a run of their own.
+	DaemonCapabilityJoinedWakeupsV1 = "joined-wakeups-v1"
 	// DaemonCapabilityTaskSupplementV1 advertises that this provider run can accept
 	// an additional text instruction without cancelling or starting a task.
 	// It is persisted when this exact task enters running; absence always means
 	// unsupported so mixed server/daemon versions fail closed.
 	DaemonCapabilityTaskSupplementV1 = "task-supplement-v1"
+	// DaemonCapabilityPiProcessCleanupV1 promises that this Pi/omp run joins
+	// descendant cleanup and explicitly confirms its cancellation outcome.
+	// Persist only at start; old daemons must retain their cancellation contract.
+	DaemonCapabilityPiProcessCleanupV1 = "pi-process-cleanup-v1"
+	// DaemonCapabilityWorkflowStatusRulesV1 advertises that the daemon's
+	// runtime brief drops its built-in in_progress / in_review rules for an
+	// issue whose claim carries a project workflow (MUL-8145). Only then may
+	// the server leave out the workflow brief's lines that override those
+	// rules; an older daemon still states them, so it keeps getting them.
+	DaemonCapabilityWorkflowStatusRulesV1 = "workflow-status-rules-v1"
+	// DaemonCapabilityTaskSupplementAuthorV1 is sent when claiming a
+	// supplement: the daemon renders the claim's author_type, so an agent's
+	// message is presented as an agent's. Without it the server marks an
+	// agent's message in its content instead.
+	DaemonCapabilityTaskSupplementAuthorV1 = "task-supplement-author-v1"
+	// DaemonCapabilityCLICommentSteerV1 advertises that the multica CLI this
+	// daemon puts on the agent's PATH has `issue comment add --steer`. The
+	// server tells a squad leader about steering only then.
+	DaemonCapabilityCLICommentSteerV1 = "cli-comment-steer-v1"
 
 	TaskSupplementFailureTurnNotStarted   = "turn_not_started"
 	TaskSupplementFailureProviderRejected = "provider_rejected"
@@ -181,6 +202,12 @@ type TaskProgressPayload struct {
 	Summary string `json:"summary"`
 	Step    int    `json:"step,omitempty"`
 	Total   int    `json:"total,omitempty"`
+}
+
+// TaskUsageUpdatedPayload invalidates cached usage after a successful report.
+// It carries no usage values; clients refetch through their authorized APIs.
+type TaskUsageUpdatedPayload struct {
+	TaskID string `json:"task_id"`
 }
 
 // TaskCompletedPayload is sent from daemon to server when a task finishes.

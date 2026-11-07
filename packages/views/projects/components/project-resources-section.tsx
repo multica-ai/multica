@@ -10,7 +10,7 @@ import {
   Plus,
   Search,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import {
   projectResourcesOptions,
@@ -34,6 +34,7 @@ import {
 import { useConfigStore } from "@multica/core/config";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
+import { Spinner } from "@multica/ui/components/ui/spinner";
 import {
   Popover,
   PopoverContent,
@@ -44,6 +45,7 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import {
   isDesktopShell,
   pickDirectory,
@@ -129,7 +131,6 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   );
   const createResource = useCreateProjectResource(wsId, projectId);
   const updateResource = useUpdateProjectResource(wsId, projectId);
-  const deleteResource = useDeleteProjectResource(wsId, projectId);
 
   // Desktop-only entry points. We hide (not just disable) on web so users
   // there don't see an action they can never complete — the spec calls for
@@ -361,19 +362,6 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
     }
   };
 
-  const handleRemove = async (resource: ProjectResource) => {
-    try {
-      await deleteResource.mutateAsync(resource.id);
-      toast.success(t(($) => $.resources.toast_removed));
-    } catch (err) {
-      toast.error(
-        err instanceof Error && err.message
-          ? err.message
-          : t(($) => $.resources.toast_remove_failed),
-      );
-    }
-  };
-
   return (
     <div>
       <button
@@ -399,8 +387,13 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                 <ResourceRow
                   key={resource.id}
                   resource={resource}
+                  githubRepoDescription={
+                    isGithubRef(resource)
+                      ? workspace?.repos?.find((repo) => repo.url === resource.resource_ref.url)
+                          ?.description
+                      : undefined
+                  }
                   localDaemonId={localDaemonId}
-                  onRemove={() => handleRemove(resource)}
                   onEditGithubRef={(target) => {
                     setRefError(null);
                     setRefDialog({ resource: target });
@@ -484,14 +477,23 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                           className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-caption text-left hover:bg-accent transition-colors aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent"
                         >
                           <FolderGit className="size-3.5" />
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <span className="truncate flex-1">{githubShortLabel(repo.url)}</span>
-                              }
-                            />
-                            <TooltipContent side="top">{repo.url}</TooltipContent>
-                          </Tooltip>
+                          <span className="min-w-0 flex-1">
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <span className="block truncate">
+                                    {githubShortLabel(repo.url)}
+                                  </span>
+                                }
+                              />
+                              <TooltipContent side="top">{repo.url}</TooltipContent>
+                            </Tooltip>
+                            {repo.description?.trim() && (
+                              <span className="block truncate text-micro text-muted-foreground">
+                                {repo.description.trim()}
+                              </span>
+                            )}
+                          </span>
                           {isAttached && (
                             <span className="text-micro text-muted-foreground">
                               {t(($) => $.resources.attached_badge)}
@@ -614,8 +616,8 @@ function worktreeUnavailableReason(
 
 interface ResourceRowProps {
   resource: ProjectResource;
+  githubRepoDescription?: string;
   localDaemonId: string | null;
-  onRemove: () => void;
   onEditGithubRef: (
     resource: ProjectResource & { resource_ref: GithubRepoResourceRef },
   ) => void;
@@ -626,51 +628,90 @@ interface ResourceRowProps {
 
 function ResourceRow({
   resource,
+  githubRepoDescription,
   localDaemonId,
-  onRemove,
   onEditGithubRef,
   onEditLocalDirectoryMode,
 }: ResourceRowProps) {
   const { t } = useT("projects");
+  const deleteResource = useDeleteProjectResource(
+    resource.workspace_id,
+    resource.project_id,
+  );
+  const onRemove = async () => {
+    if (deleteResource.isPending) return;
+    try {
+      await deleteResource.mutateAsync(resource.id);
+      toast.success(t(($) => $.resources.toast_removed));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.resources.toast_remove_failed),
+      );
+    }
+  };
+
   if (isGithubRef(resource)) {
     const ref = resource.resource_ref;
     const display = resource.label || githubShortLabel(ref.url);
+    // Workspace repository descriptions are source-of-truth metadata. They stay
+    // live here rather than being copied into the resource label, while an
+    // explicit resource label remains the user's preferred primary text.
+    const description = resource.label ? undefined : githubRepoDescription?.trim();
     const tooltip = ref.ref ? `${ref.url}\nref: ${ref.ref}` : ref.url;
     return (
       <div className="text-caption group">
         <div className="flex items-center gap-2">
           <FolderGit className="size-3.5 text-muted-foreground shrink-0" />
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <a
-                  href={ref.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="truncate min-w-0 flex-1 hover:underline"
-                >
-                  {display}
-                </a>
-              }
-            />
-            <TooltipContent side="top" className="whitespace-pre-line">{tooltip}</TooltipContent>
-          </Tooltip>
-          <button
-            type="button"
-            onClick={() => onEditGithubRef(resource)}
-            className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
-            title={t(($) => $.resources.ref_edit_tooltip)}
-          >
-            <GitBranch className="size-3 text-muted-foreground" />
-          </button>
-          <button
-            type="button"
-            onClick={onRemove}
-            className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
-            title={t(($) => $.resources.remove_tooltip)}
-          >
-            <Trash2 className="size-3 text-muted-foreground" />
-          </button>
+          <div className="min-w-0 flex-1">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <a
+                    href={ref.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block truncate hover:underline"
+                  >
+                    {display}
+                  </a>
+                }
+              />
+              <TooltipContent side="top" className="whitespace-pre-line">{tooltip}</TooltipContent>
+            </Tooltip>
+            {description && (
+              <span className="block truncate text-micro text-muted-foreground">
+                {description}
+              </span>
+            )}
+          </div>
+          <TooltipHint label={t(($) => $.resources.ref_edit_tooltip)}>
+            <button
+              type="button"
+              onClick={() => onEditGithubRef(resource)}
+              className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
+              aria-label={t(($) => $.resources.ref_edit_tooltip)}
+            >
+              <GitBranch className="size-3 text-muted-foreground" />
+            </button>
+          </TooltipHint>
+          <TooltipHint label={t(($) => $.resources.remove_tooltip)}>
+            <button
+              type="button"
+              onClick={onRemove}
+              disabled={deleteResource.isPending}
+              aria-busy={deleteResource.isPending}
+              className="opacity-0 group-hover:opacity-100 disabled:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
+              aria-label={t(($) => $.resources.remove_tooltip)}
+            >
+              {deleteResource.isPending ? (
+                <Spinner className="size-3" aria-hidden="true" />
+              ) : (
+                <Trash2 className="size-3 text-muted-foreground" />
+              )}
+            </button>
+          </TooltipHint>
         </div>
         {/* Its own line rather than appended to the link text: a custom label
             takes that slot, and this panel is narrow enough that an inline
@@ -709,6 +750,7 @@ function ResourceRow({
         resource={resource}
         localDaemonId={localDaemonId}
         onRemove={onRemove}
+        removing={deleteResource.isPending}
         onEditMode={onEditLocalDirectoryMode}
       />
     );
@@ -719,14 +761,22 @@ function ResourceRow({
       <span className="truncate flex-1">
         {resource.label || resource.resource_type}
       </span>
-      <button
-        type="button"
-        onClick={onRemove}
-        className="rounded-sm p-0.5 hover:bg-accent"
-        title={t(($) => $.resources.remove_tooltip)}
-      >
-        <Trash2 className="size-3" />
-      </button>
+      <TooltipHint label={t(($) => $.resources.remove_tooltip)}>
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={deleteResource.isPending}
+          aria-busy={deleteResource.isPending}
+          className="rounded-sm p-0.5 hover:bg-accent"
+          aria-label={t(($) => $.resources.remove_tooltip)}
+        >
+          {deleteResource.isPending ? (
+            <Spinner className="size-3" aria-hidden="true" />
+          ) : (
+            <Trash2 className="size-3" />
+          )}
+        </button>
+      </TooltipHint>
     </div>
   );
 }
@@ -735,6 +785,7 @@ interface LocalDirectoryRowProps {
   resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef };
   localDaemonId: string | null;
   onRemove: () => void;
+  removing: boolean;
   onEditMode: (
     resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef },
   ) => void;
@@ -744,6 +795,7 @@ function LocalDirectoryRow({
   resource,
   localDaemonId,
   onRemove,
+  removing,
   onEditMode,
 }: LocalDirectoryRowProps) {
   const { t } = useT("projects");
@@ -808,22 +860,32 @@ function LocalDirectoryRow({
       {/* Not gated on `mismatch`: switching the mode only rewrites a field, so
           it works from the web app or another device, unlike the folder
           picker. */}
-      <button
-        type="button"
-        onClick={() => onEditMode(resource)}
-        className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
-        title={t(($) => $.resources.mode_edit_tooltip)}
-      >
-        <GitBranch className="size-3 text-muted-foreground" />
-      </button>
-      <button
-        type="button"
-        onClick={onRemove}
-        className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
-        title={t(($) => $.resources.remove_tooltip)}
-      >
-        <Trash2 className="size-3 text-muted-foreground" />
-      </button>
+      <TooltipHint label={t(($) => $.resources.mode_edit_tooltip)}>
+        <button
+          type="button"
+          onClick={() => onEditMode(resource)}
+          className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
+          aria-label={t(($) => $.resources.mode_edit_tooltip)}
+        >
+          <GitBranch className="size-3 text-muted-foreground" />
+        </button>
+      </TooltipHint>
+      <TooltipHint label={t(($) => $.resources.remove_tooltip)}>
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={removing}
+          aria-busy={removing}
+          className="opacity-0 group-hover:opacity-100 disabled:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
+          aria-label={t(($) => $.resources.remove_tooltip)}
+        >
+          {removing ? (
+            <Spinner className="size-3" aria-hidden="true" />
+          ) : (
+            <Trash2 className="size-3 text-muted-foreground" />
+          )}
+        </button>
+      </TooltipHint>
     </div>
   );
 }

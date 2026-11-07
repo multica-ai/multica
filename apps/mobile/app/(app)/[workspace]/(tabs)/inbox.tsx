@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import {
   ActionSheetIOS,
   Alert,
@@ -55,17 +55,14 @@ export default function Inbox() {
   const archiveAllRead = useArchiveAllReadInbox();
   const archiveCompleted = useArchiveCompletedInbox();
 
-  const onPressItem = (item: InboxItem) => {
-    if (!item.read) {
-      // Optimistic read flip lives in useMarkInboxRead.onMutate — fires
-      // setQueryData synchronously before the cancelQueries await, so the
-      // row is already styled "read" by the time iOS captures the source
-      // snapshot for the native stack push transition.
-      markRead.mutate(item.id);
-    }
+  const onPressItem = useCallback((item: InboxItem) => {
+    // Read on every opening: a read row can hide older unread notifications.
+    // The mutation patches synchronously before iOS captures the source
+    // snapshot for the native stack push transition.
+    markRead.mutate(item.id);
     const target = getInboxNavigationTarget(item, wsSlug, String(Date.now()));
     if (target) router.push(target);
-  };
+  }, [markRead, wsSlug]);
 
   // Trailing batch menu — mirrors web's dropdown
   // (packages/views/inbox/components/inbox-page.tsx). "Mark all read" is

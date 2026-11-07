@@ -95,6 +95,44 @@ func TestListWorkspaceMcpServers_NeverEchoesSecrets(t *testing.T) {
 	}
 }
 
+// The library listing reports how many live agents use each entry, so the
+// settings page can show whether removing one affects anybody. Archived
+// agents never receive a server and must not inflate the count.
+func TestListWorkspaceMcpServers_ReportsLiveAgentCount(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	usedID := createWorkspaceMcpServerForTest(t, "sentry", workspaceMcpTestEntry)
+	unusedID := createWorkspaceMcpServerForTest(t, "figma", workspaceMcpTestEntry)
+	for _, name := range []string{"ws-mcp-count-a", "ws-mcp-count-b"} {
+		addAgentMcpServerForTest(t, createHandlerTestAgent(t, name, nil), usedID)
+	}
+	archivedID := createHandlerTestAgent(t, "ws-mcp-count-archived", nil)
+	addAgentMcpServerForTest(t, archivedID, usedID)
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE agent SET archived_at = now() WHERE id = $1`, archivedID); err != nil {
+		t.Fatalf("archive agent: %v", err)
+	}
+
+	code, resp, raw := listWorkspaceMcpServersForTest(t, nil)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", code, raw)
+	}
+	counts := map[string]int64{}
+	for _, server := range resp {
+		if server.AgentCount == nil {
+			t.Fatalf("library listing must report agent_count for %q: %s", server.Name, raw)
+		}
+		counts[server.ID] = *server.AgentCount
+	}
+	if counts[usedID] != 2 {
+		t.Errorf("agent_count for the assigned server = %d, want 2", counts[usedID])
+	}
+	if got, ok := counts[unusedID]; !ok || got != 0 {
+		t.Errorf("agent_count for the unassigned server = %d (present=%v), want 0", got, ok)
+	}
+}
+
 func createWorkspaceMcpServerViaAPI(t *testing.T, body any, mutate func(*http.Request)) (int, WorkspaceMcpServerResponse, string) {
 	t.Helper()
 

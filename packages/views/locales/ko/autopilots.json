@@ -1,8 +1,6 @@
 {
   "page": {
-    "title": "오토파일럿",
     "new_autopilot": "새 오토파일럿",
-    "start_blank": "처음부터 시작",
     "table": {
       "name": "이름",
       "agent": "에이전트",
@@ -16,11 +14,6 @@
       "created": "생성일"
     },
     "last_run_empty": "--",
-    "empty": {
-      "title": "아직 오토파일럿이 없습니다",
-      "hint": "AI 에이전트의 반복 작업을 예약하세요. 템플릿을 고르거나 처음부터 시작할 수 있습니다."
-    },
-    "scope_all": "전체",
     "no_matches": "일치하는 자동화가 없습니다",
     "retry": "다시 시도"
   },
@@ -68,6 +61,8 @@
   },
   "detail": {
     "not_found": "오토파일럿을 찾을 수 없습니다",
+    "not_found_description": "삭제되었거나 접근 권한이 없을 수 있습니다.",
+    "back_to_list": "모든 오토파일럿",
     "pause_aria": "오토파일럿 일시 중지",
     "activate_aria": "오토파일럿 활성화",
     "paused_runtime_required": "담당 에이전트의 런타임이 없어 자동화가 일시 중지되었습니다. 런타임을 연결한 후 다시 활성화하세요.",
@@ -87,10 +82,8 @@
     "run_blocked_quota_exceeded": "실행되지 않음 — 이 기간의 실행 한도에 도달했습니다",
     "run_blocked_issue_limit_reached": "실행되지 않음 — 워크스페이스가 태스크 수 한도에 도달했습니다",
     "run_blocked_generic": "실행되지 않음 — 실행이 차단되었습니다",
-    "section_properties": "속성",
     "section_triggers": "트리거",
     "section_run_history": "실행 기록",
-    "section_danger": "위험 영역",
     "field_agent": "에이전트",
     "field_created_by": "생성자",
     "field_output_mode": "출력 모드",
@@ -100,6 +93,16 @@
     "field_prompt": "프롬프트",
     "field_subscribers": "구독자",
     "field_subscribers_none": "없음",
+    "no_prompt": "아직 프롬프트가 없습니다.",
+    "copy_link": "링크 복사",
+    "link_copied": "링크를 복사했습니다",
+    "link_copy_failed": "링크를 복사하지 못했습니다",
+    "open_project": "프로젝트 열기",
+    "summary": {
+      "create_issue": "{{agent}}이(가) 실행할 때마다 태스크 생성",
+      "run_only": "{{agent}}이(가) 태스크 없이 실행",
+      "with_trigger": "{{trigger}} · {{action}}"
+    },
     "add_trigger": "트리거 추가",
     "no_triggers": "설정된 트리거가 없습니다. 자동으로 실행할 일정을 추가하세요.",
     "no_runs": "아직 실행 기록이 없습니다. 수동으로 실행하려면 \"지금 실행\"을 클릭하세요.",
@@ -441,27 +444,16 @@
     "search_placeholder": "시간대 검색..."
   },
   "toolbar": {
-    "result_count_title": "일치하는 자동화 / 전체 자동화",
-    "filter_label": "필터",
-    "filter_active_count_other": "필터 {{count}}개",
-    "clear_filters": "필터 지우기",
     "section_assignee": "담당",
     "section_mode": "모드",
     "section_trigger": "트리거",
-    "section_creator": "생성자",
-    "display": "표시",
-    "sort_by": "정렬",
-    "direction_asc": "오름차순",
-    "direction_desc": "내림차순",
-    "section_columns": "열"
+    "section_creator": "생성자"
   },
   "actions": {
     "row_menu": "자동화 작업",
     "pause": "일시중지",
     "resume": "재개",
     "delete": "삭제",
-    "selected_other": "{{count}}개 선택됨",
-    "clear_selection": "선택 해제",
     "delete_dialog": {
       "title": "자동화를 삭제할까요?",
       "description_other": "자동화 {{count}}개와 실행 기록이 영구 삭제됩니다.",
@@ -473,33 +465,23 @@
   },
   "wakeups": {
     "title": "작업 깨우기",
-    "scope": "범위",
     "issue": "작업",
     "trigger": "트리거",
-    "next": "깨우기 상태",
     "enabled": "활성화",
     "all_triggers": "모든 트리거",
     "event": "이벤트",
     "at": "일회성",
     "recurring": "반복",
     "all_agents": "모든 에이전트",
-    "search": "작업 또는 에이전트 검색",
-    "search_action": "검색",
     "running": "실행 중",
     "active_runs": "진행 중인 실행 {{count}}개",
     "issue_closed": "종료된 작업",
     "read_only": "생성자 또는 워크스페이스 관리자만 관리할 수 있습니다",
     "select_row": "{{issue}}, {{agent}} 선택",
-    "select_page": "이 페이지의 활성 항목 선택",
+    "select_page": "활성 항목 모두 선택",
     "load_error": "깨우기를 불러오지 못했습니다",
     "loading": "불러오는 중…",
-    "empty": "깨우기 규칙이 없습니다",
-    "selected": "{{count}}개 선택됨",
     "disable_selected": "선택 항목 끄기",
-    "clear": "선택 해제",
-    "results": "{{page}}페이지 · {{count}}개",
-    "previous": "이전",
-    "next_page": "다음",
     "confirm_title": "깨우기 {{count}}개를 끄시겠습니까?",
     "confirm_body": "이후 깨우기를 중지하고 아직 에이전트에게 전달되지 않은 대기 중 실행을 취소합니다. 전달된 실행은 계속되며 실행 로그에서 중지할 수 있습니다.",
     "cancel": "취소",
@@ -508,15 +490,63 @@
     "batch_result": "꺼짐: {{succeeded}}개. 실패: {{failed}}개.",
     "scopes": {
       "active": "깨우기 대기 또는 실행 중",
-      "all": "전체",
+      "all": "모든 깨우기",
       "disabled": "꺼짐",
-      "ended": "종료됨"
+      "ended": "종료됨",
+      "paused": "일시중지됨"
     },
     "target_agent": "깨울 에이전트",
-    "wakeup_run": "깨운 후 실행",
     "empty_filtered": "일치하는 깨우기가 없습니다",
-    "clear_filters": "필터 지우기",
     "batch_success": "깨우기 규칙 {{count}}개를 껐습니다",
-    "batch_partial": "{{succeeded}}개를 껐고 {{failed}}개는 실패했습니다. 실패 항목은 선택된 상태로 남아 다시 시도할 수 있습니다."
+    "batch_partial": "{{succeeded}}개를 껐고 {{failed}}개는 실패했습니다. 실패 항목은 선택된 상태로 남아 다시 시도할 수 있습니다.",
+    "source": "만든 곳",
+    "sources": {
+      "all": "모든 출처",
+      "member": "멤버",
+      "agent": "에이전트",
+      "system": "시스템"
+    },
+    "runs_7d": "최근 7일 실행",
+    "ends": "종료",
+    "until_issue_ends": "태스크 종료 시까지",
+    "fires_once": "한 번 실행",
+    "assignee_target": "담당자 · {{name}}",
+    "no_target": "에이전트 담당자 없음",
+    "banner_other": "깨우기 {{count}}개가 자동으로 일시중지됨: {{issue}} “{{condition}}” — {{reason}}",
+    "banner_view": "보기",
+    "create": "깨우기 추가",
+    "create_pick_issue": "깨우기를 추가할 태스크 선택",
+    "create_pick_issue_description": "깨우기는 이 태스크에 속하며 태스크가 끝나면 함께 끝납니다.",
+    "intro": {
+      "title": "필요한 순간에 에이전트를 다시 부르세요",
+      "description": "깨우기는 작업에 붙습니다. PR이 병합되거나, 누군가 답하거나, 시간이 되면 에이전트를 다시 불러 이어서 일하게 합니다. 작업이 끝나면 깨우기도 자동으로 멈춥니다.",
+      "slides": {
+        "event": {
+          "title": "일이 생길 때까지 기다리기",
+          "description": "에이전트를 헛돌게 하며 기다릴 필요가 없습니다. 조건이 충족되면 Multica가 자동으로 깨웁니다."
+        },
+        "time": {
+          "title": "시간을 정해도 됩니다",
+          "description": "1회 예약은 ‘내일 오후에 다시 보기’에, 반복은 매일 하는 점검에 알맞습니다."
+        },
+        "ends": {
+          "title": "작업이 끝나면 멈춤",
+          "description": "깨우기는 작업에 속합니다. 작업이 완료되거나 취소되면 자동으로 꺼져 남는 규칙이 없습니다."
+        }
+      },
+      "art": {
+        "issue_inbox": "받은편지함 그룹의 빈 상태",
+        "issue_board": "보드 열 너비 드래그 조절",
+        "issue_paste": "댓글에 이미지 붙여넣기",
+        "reply": "“PR이 병합되었습니다. 문서를 업데이트하고 작업을 닫겠습니다.”",
+        "event_examples": "PR 병합, 새 댓글"
+      }
+    }
+  },
+  "intro": {
+    "label": "오토파일럿",
+    "title": "에이전트가 제때 알아서 일을 시작하게 하세요",
+    "description": "일정이나 Webhook을 설정하면 실행될 때마다 태스크를 만들어 에이전트에게 맡기거나 에이전트를 바로 실행합니다. 템플릿을 골라 조금만 고치면 됩니다.",
+    "templates": "템플릿으로 시작"
   }
 }

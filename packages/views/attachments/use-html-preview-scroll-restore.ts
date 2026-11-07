@@ -1,38 +1,14 @@
 "use client";
 
 /**
- * useHtmlPreviewScrollRestore — wires the full-page HTML attachment iframe
- * into the desktop tab Coordinator's scroll-capture/restore channel
- * (multica-ai#6405).
+ * Bridge a full-page opaque-origin HTML iframe into desktop scroll restoration.
+ * The coordinator cannot read scrollY directly, so the iframe reports positions
+ * through postMessage and this hook registers an ExternalScrollSource.
  *
- * Why this exists: the full-page preview renders user HTML inside
- * `<iframe sandbox="allow-scripts" srcDoc>` with no `allow-same-origin`, so
- * the outer document cannot read `iframe.contentWindow.scrollY` (opaque
- * origin → SecurityError) and the Coordinator's `[data-tab-scroll-root]`
- * scan can't see it. The in-iframe bridge (see `iframe-scroll-bridge.ts`)
- * reports `scroll`/`ready` via postMessage; this hook holds the latest value
- * in a ref, registers it as an `ExternalScrollSource` so the Coordinator
- * captures it synchronously at tab-switch, and sends `restore` back when the
- * iframe remounts for the same content.
- *
- * Content-change isolation:
- *   - `contentKey` = DJB2 hash of the rendered text.
- *   - The iframe is keyed on it, so new content structurally remounts a
- *     fresh iframe element + srcdoc document — the old document's bridge,
- *     listeners, and `event.source` are gone with the element.
- *   - Every bridge message carries the token; late messages from a previous
- *     document are dropped.
- *   - `capture()` returns top 0 with the NEW token until the new document
- *     reports, so a content change followed by an immediate tab switch can
- *     never resurrect the old position.
- *
- * Scope: only the full-page `AttachmentPreviewPage` calls this. The inline
- * 480px card / modal path renders via a separate component
- * (`HtmlPreviewBody` → `CodeBlockIframe`) and never touches this hook, so it
- * cannot register an external source against the current tab. On web
- * (no provider / adapter without `registerExternalSource`) `restoreActive`
- * is false: no bridge is injected, no source is registered, behavior is
- * byte-identical to before.
+ * Content keys remount changed documents and reject late messages. Until the new
+ * document reports, capture zero with the new key to avoid restoring old content's
+ * position. Modal previews and web adapters without external-source support do
+ * not participate.
  */
 
 import { useCallback, useLayoutEffect, useRef } from "react";

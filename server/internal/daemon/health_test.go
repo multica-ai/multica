@@ -20,6 +20,96 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 )
 
+func TestHealthHandlerReportsEmptyCLICommitWithoutFallback(t *testing.T) {
+	d := &Daemon{
+		cfg:        Config{CLIVersion: "v9.9.9", DaemonID: "daemon-test", ServerBaseURL: "https://api.example.test"},
+		workspaces: map[string]*workspaceState{},
+		logger:     slog.Default(),
+	}
+	rec := httptest.NewRecorder()
+	d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
+	if got, present := raw["cli_commit"]; !present || got != "" {
+		t.Fatalf("cli_commit: got %v, present %v; want an explicit empty string without version fallback", got, present)
+	}
+}
+
+func TestHealthHandlerReportsCLICommitAndSameIdentitySnapshot(t *testing.T) {
+	for _, commit := range []string{strings.Repeat("a", 40), "", "unknown", "2ae2dbb", "malformed"} {
+		t.Run("commit="+commit, func(t *testing.T) {
+			d := New(Config{
+				WorkspacesRoot: t.TempDir(), CLICommit: commit, CLIVersion: "v9.9.9",
+				Profile: "profile-test", DaemonID: "daemon-test", DeviceName: "device-test",
+				ServerBaseURL: "https://api.example.test",
+			}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			d.workspaces["workspace-test"] = &workspaceState{runtimeIDs: []string{"runtime-test"}}
+			d.ready.Store(true)
+			d.activeTasks.Store(2)
+			d.runningTasks.Store(1)
+			d.resourceWaitTasks.Store(1)
+			rec := httptest.NewRecorder()
+			d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("health status: got %d, want 200", rec.Code)
+			}
+			var raw map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+				t.Fatalf("decode raw health response: %v", err)
+			}
+			for key, want := range map[string]any{
+				"cli_commit": commit, "cli_version": "v9.9.9", "profile": "profile-test",
+				"daemon_id": "daemon-test", "server_url": "https://api.example.test",
+				"device_name": "device-test", "status": "running", "os": runtime.GOOS,
+				"active_task_count": float64(2), "running_task_count": float64(1),
+				"resource_wait_task_count": float64(1),
+			} {
+				if got, present := raw[key]; !present || got != want {
+					t.Errorf("%s: got %v, present %v; want %v", key, got, present, want)
+				}
+			}
+			var typed HealthResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &typed); err != nil {
+				t.Fatalf("decode typed health response: %v", err)
+			}
+			if typed.CLICommit != commit || len(typed.Workspaces) != 1 ||
+				typed.Workspaces[0].ID != "workspace-test" || len(typed.Workspaces[0].Runtimes) != 1 ||
+				typed.Workspaces[0].Runtimes[0] != "runtime-test" {
+				t.Fatalf("commit or workspace/runtime projection changed: %+v", typed)
+			}
+		})
+	}
+}
+
+func TestHealthHandlerCLICommitIsCopiedAtDaemonConstruction(t *testing.T) {
+	cfg := Config{WorkspacesRoot: t.TempDir(), CLICommit: strings.Repeat("a", 40),
+		CLIVersion: "v9.9.9", Profile: "profile-test", DaemonID: "daemon-test",
+		ServerBaseURL: "https://api.example.test"}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	d := New(cfg, logger)
+	read := func(d *Daemon) HealthResponse {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+		var resp HealthResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode health response: %v", err)
+		}
+		return resp
+	}
+	// Changing the input for a later instance cannot change the running instance's build identity.
+	cfg.CLICommit = strings.Repeat("b", 40)
+	cfg.CLIVersion = "v10.0.0"
+	if got := read(d); got.CLICommit != strings.Repeat("a", 40) || got.CLIVersion != "v9.9.9" {
+		t.Fatalf("original daemon identity changed: %+v", got)
+	}
+	if got := read(New(cfg, logger)); got.CLICommit != strings.Repeat("b", 40) || got.CLIVersion != "v10.0.0" {
+		t.Fatalf("new daemon did not use new build identity: %+v", got)
+	}
+}
+
 func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
 	t.Parallel()
 
@@ -523,6 +613,8 @@ func TestRepoCheckoutRejectsAnotherTaskWorkdir(t *testing.T) {
 	cache := &recordingRepoCache{lookupPath: "/cache/org/repo.git"}
 	workDir := t.TempDir()
 	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, workDir, cache)
+	var logs bytes.Buffer
+	d.logger = captureLogger(&logs)
 	otherWorkDir := t.TempDir()
 
 	rec := httptest.NewRecorder()
@@ -534,6 +626,44 @@ func TestRepoCheckoutRejectsAnotherTaskWorkdir(t *testing.T) {
 	}
 	if got := cache.lastCreateParams(); got != (repocache.WorktreeParams{}) {
 		t.Fatalf("cross-task workdir checkout reached repo cache: %+v", got)
+	}
+	// #8946: a bare "not owned" with nothing in daemon.log hid that the real
+	// failure was resolving a junctioned path. The agent and the log both get
+	// the reason now.
+	if !strings.Contains(rec.Body.String(), "outside the active task workdir") {
+		t.Fatalf("rejection body should say why the workdir was refused: %s", rec.Body.String())
+	}
+	for _, want := range []string{"repo checkout rejected", "workdir_not_owned", "level=WARN"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("rejection log missing %q, got: %s", want, logs.String())
+		}
+	}
+}
+
+// A workdir that cannot be resolved at all is refused, and the refusal names
+// the resolution failure instead of reading as an ownership question.
+func TestRepoCheckoutRejectsUnresolvableWorkdirWithTheReason(t *testing.T) {
+	t.Parallel()
+
+	const workspaceID = "ws-checkout"
+	const repoURL = "https://github.com/org/repo.git"
+	cache := &recordingRepoCache{lookupPath: "/cache/org/repo.git"}
+	workDir := t.TempDir()
+	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, workDir, cache)
+	missing := filepath.Join(workDir, "does-not-exist")
+
+	rec := httptest.NewRecorder()
+	body := strings.NewReader(`{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + missing + `","task_id":"task-1"}`)
+	d.repoCheckoutHandler().ServeHTTP(rec, authorizedRepoCheckoutRequest(body))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := cache.lastCreateParams(); got != (repocache.WorktreeParams{}) {
+		t.Fatalf("unresolvable workdir checkout reached repo cache: %+v", got)
+	}
+	if !strings.Contains(rec.Body.String(), "resolve requested workdir") {
+		t.Fatalf("rejection body should name the resolution failure: %s", rec.Body.String())
 	}
 }
 

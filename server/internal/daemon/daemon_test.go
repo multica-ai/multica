@@ -185,6 +185,9 @@ func TestIsBlockedEnvKey(t *testing.T) {
 		{key: "CURSOR_MCP_AUTH_SOURCE", want: true},
 		{key: "OPENCLAW_CONFIG_PATH", want: true},
 		{key: "OPENCLAW_INCLUDE_ROOTS", want: true},
+		// OPENCLAW_STATE_DIR is intentionally NOT blocked so users can give an
+		// agent a dedicated OpenClaw state directory when the default is locked.
+		{key: "OPENCLAW_STATE_DIR", want: false},
 		{key: "ANTHROPIC_API_KEY", want: false},
 		{key: "CURSOR_AGENT", want: false},
 		// HERMES_HOME is intentionally NOT blocked: a skill-less Hermes task
@@ -209,6 +212,9 @@ func TestIsBlockedEnvKey(t *testing.T) {
 
 func TestPrepareReasonixTaskStateHome(t *testing.T) {
 	stateRoot := t.TempDir()
+	home := t.TempDir()
+	redirectTestHome(t, home)
+	t.Setenv("USERPROFILE", home)
 
 	got, err := prepareReasonixTaskStateHome(stateRoot, "runtime-1", "agent_2")
 	if err != nil {
@@ -229,6 +235,9 @@ func TestPrepareReasonixTaskStateHome(t *testing.T) {
 
 func TestPrepareDshTaskSessionRoot(t *testing.T) {
 	stateRoot := t.TempDir()
+	home := t.TempDir()
+	redirectTestHome(t, home)
+	t.Setenv("USERPROFILE", home)
 
 	got, err := prepareDshTaskSessionRoot(stateRoot, "runtime-1", "agent_2")
 	if err != nil {
@@ -385,6 +394,7 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 			"CUSTOM_FLAG":              "enabled",
 			"UNAUTHORIZED_TOKEN":       "daemon-secret",
 			"MULTICA_TASK_CONFIG_ROOT": "/task/multica-config",
+			"MULTICA_CLI_PATH":         "/task/bin/multica",
 			"MULTICA_SERVER_URL":       "https://task.example",
 			"MULTICA_TOKEN":            "mat_task",
 		}
@@ -400,7 +410,7 @@ func TestConfigureCodexTaskShellEnvironment(t *testing.T) {
 			t.Fatalf("read config.toml: %v", err)
 		}
 		config := string(data)
-		for _, want := range []string{"SystemRoot", "USERPROFILE", "CUSTOM_ACCESS_TOKEN", "CUSTOM_FLAG", "MULTICA_TASK_CONFIG_ROOT", "MULTICA_SERVER_URL", "MULTICA_TOKEN"} {
+		for _, want := range []string{"SystemRoot", "USERPROFILE", "CUSTOM_ACCESS_TOKEN", "CUSTOM_FLAG", "MULTICA_TASK_CONFIG_ROOT", "MULTICA_CLI_PATH", "MULTICA_SERVER_URL", "MULTICA_TOKEN"} {
 			if !strings.Contains(config, want) {
 				t.Errorf("config.toml missing %q:\n%s", want, config)
 			}
@@ -565,7 +575,7 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 		AgentID:     "agent-test",
 		WorkspaceID: "workspace-test",
 	}
-	env := taskMulticaEnvironment(task, "agent-name", fakeToken, taskRoot, workspacesRoot, "https://task.example", 19514, 3, "/task/tmp")
+	env := taskMulticaEnvironment(task, "codex", "agent-name", fakeToken, taskRoot, workspacesRoot, "https://task.example", 19514, 3, "/task/tmp")
 
 	want := map[string]string{
 		"MULTICA_TOKEN":                fakeToken,
@@ -581,6 +591,11 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 		"TMPDIR":                       "/task/tmp",
 		"TMP":                          "/task/tmp",
 		"TEMP":                         "/task/tmp",
+	}
+	if runtime.GOOS == "windows" {
+		// Windows tasks inherit host TMP/TEMP; see TestTaskMulticaEnvironmentTempPolicy.
+		delete(want, "TMP")
+		delete(want, "TEMP")
 	}
 	if !maps.Equal(env, want) {
 		t.Fatalf("taskMulticaEnvironment() = %#v, want %#v", env, want)
@@ -599,6 +614,81 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 	}
 	if env["MULTICA_TOKEN"] != fakeToken {
 		t.Fatal("custom env replaced task-scoped token")
+	}
+}
+
+func TestHermesTaskEnvPassthroughCoversTaskEnvironment(t *testing.T) {
+	t.Parallel()
+	names := execenv.HermesTaskEnvPassthroughNames()
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		if !strings.HasPrefix(name, "MULTICA_") || seen[name] {
+			t.Errorf("invalid or duplicate Hermes task environment name: %q", name)
+		}
+		seen[name] = true
+	}
+	env := taskMulticaEnvironment(Task{ID: "task-test", AgentID: "agent-test", WorkspaceID: "workspace-test", QuickCreatePrompt: "create work"},
+		"hermes", "agent-name", "mat_fixture", "/task/config", "/task/workspaces", "https://task.example", 19514, 3, "/task/tmp")
+	for name := range env {
+		if strings.HasPrefix(name, "MULTICA_") && !seen[name] {
+			t.Errorf("daemon injects %s but Hermes tool subprocesses will drop it", name)
+		}
+	}
+}
+
+func TestTaskMulticaEnvironmentTempPolicy(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_TMPDIR", "")
+	for _, provider := range []string{"claude", "codex", "pi", "opencode", "cursor"} {
+		t.Run(provider, func(t *testing.T) {
+			env := taskMulticaEnvironment(Task{}, provider, "", "", "", "", "", 0, 0, "/task/tmp")
+			if env["TMPDIR"] != "/task/tmp" {
+				t.Fatalf("TMPDIR = %q, want private task temp", env["TMPDIR"])
+			}
+			if runtime.GOOS == "windows" {
+				// Every provider can start Git Bash, whose /tmp mount is shared.
+				for _, key := range []string{"TMP", "TEMP"} {
+					if _, overridden := env[key]; overridden {
+						t.Errorf("%s must inherit the host path for Git Bash's shared /tmp", key)
+					}
+				}
+			} else {
+				for _, key := range []string{"TMP", "TEMP"} {
+					if env[key] != "/task/tmp" {
+						t.Errorf("%s = %q, want existing private task temp", key, env[key])
+					}
+				}
+			}
+			wantClaudeTemp := runtime.GOOS == "windows" && provider == "claude"
+			if got, ok := env["CLAUDE_CODE_TMPDIR"]; wantClaudeTemp && got != "/task/tmp" {
+				t.Errorf("CLAUDE_CODE_TMPDIR = %q, want private task temp", got)
+			} else if !wantClaudeTemp && ok {
+				t.Error("only Windows Claude gets a CLAUDE_CODE_TMPDIR default")
+			}
+		})
+	}
+}
+
+func TestTaskMulticaEnvironmentRespectsClaudeTempOverride(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_TMPDIR", "/user/claude-temp")
+	env := taskMulticaEnvironment(Task{}, "claude", "", "", "", "", "", 0, 0, "/task/tmp")
+	if _, overridden := env["CLAUDE_CODE_TMPDIR"]; overridden {
+		t.Fatal("inherited user CLAUDE_CODE_TMPDIR must remain authoritative")
+	}
+	t.Setenv("CLAUDE_CODE_TMPDIR", "")
+	for _, key := range []string{"CLAUDE_CODE_TMPDIR", "claude_code_tmpdir"} {
+		for _, value := range []string{"/custom/claude-temp", ""} {
+			custom := map[string]string{key: value}
+			env = taskMulticaEnvironment(Task{Agent: &AgentData{CustomEnv: custom}}, "claude", "", "", "", "", "", 0, 0, "/task/tmp")
+			layerCustomEnvAndHermesHome(env, custom, "", nil)
+			if env[key] != value {
+				t.Fatalf("custom %s = %q, want user's %q", key, env[key], value)
+			}
+			for name := range env {
+				if strings.EqualFold(name, key) && name != key {
+					t.Errorf("duplicate Windows temp key %q conflicts with user's %q", name, key)
+				}
+			}
+		}
 	}
 }
 
@@ -2018,7 +2108,7 @@ func TestGateResumeToReachableSession(t *testing.T) {
 			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, !tt.sessionHomeUnreachable, false, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, !tt.sessionHomeUnreachable, false, false, false, slog.Default())
 
 			if reachable != tt.wantReused {
 				t.Fatalf("reachable = %v, want %v", reachable, tt.wantReused)
@@ -2034,6 +2124,235 @@ func TestGateResumeToReachableSession(t *testing.T) {
 			wantUnavailable := tt.sessionID != "" && tt.wantSession == ""
 			if taskCtx.PriorSessionResumeUnavailable != wantUnavailable {
 				t.Fatalf("PriorSessionResumeUnavailable = %v, want %v", taskCtx.PriorSessionResumeUnavailable, wantUnavailable)
+			}
+		})
+	}
+}
+
+func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
+	priorDir, workDir, codexHome := t.TempDir(), t.TempDir(), t.TempDir()
+	rollout := filepath.Join(codexHome, "sessions", "2026", "10", "13", "rollout-2026-10-13T00-00-00-session-1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(rollout), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rollout, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name           string
+		provider       string
+		localWorktree  *execenv.LocalWorktree
+		localDirectory bool
+		stableStore    bool
+		codexHome      bool
+		sameWorkdir    bool
+		rolloutPresent bool
+		wantResume     bool
+	}{
+		{name: "continued branch and rollout", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true, rolloutPresent: true, wantResume: true},
+		{name: "new branch", provider: "codex", localWorktree: &execenv.LocalWorktree{}, stableStore: true, codexHome: true, rolloutPresent: true},
+		{name: "missing conversation key", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, codexHome: true, rolloutPresent: true},
+		{name: "missing Codex home", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, rolloutPresent: true},
+		{name: "missing rollout", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true},
+		{name: "managed workdir", provider: "codex", stableStore: true, codexHome: true, rolloutPresent: true},
+		{name: "in-place changed workdir", provider: "codex", localDirectory: true, stableStore: true, codexHome: true, rolloutPresent: true},
+		{name: "in-place same workdir", provider: "codex", localDirectory: true, stableStore: true, codexHome: true, sameWorkdir: true, rolloutPresent: true, wantResume: true},
+		{name: "other provider", provider: "cursor", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true, rolloutPresent: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			task := Task{PriorSessionID: "session-1", PriorWorkDir: priorDir}
+			taskCtx := execenv.TaskContextForEnv{AgentID: "agent-1", PriorSessionResumed: true}
+			if tt.stableStore {
+				taskCtx.IssueID = "issue-1"
+			}
+			env := &execenv.Environment{WorkDir: workDir, LocalDirectory: tt.localDirectory, LocalWorktree: tt.localWorktree}
+			if tt.codexHome {
+				env.CodexHome = codexHome
+			}
+			if tt.sameWorkdir {
+				env.WorkDir = priorDir
+			}
+			store := execenv.CodexSessionStorePath("test", taskCtx)
+			eligible := codexWorktreeResumeEligible(env, store)
+			if got := gateResumeToReachableSession(&task, &taskCtx, tt.provider, env.WorkDir, true, false, eligible, false, slog.Default()); got {
+				if tt.provider == "codex" && !tt.rolloutPresent {
+					gateCodexResumeToRolloutPresence(&task, &taskCtx, tt.provider, t.TempDir(), slog.Default())
+				} else {
+					gateCodexResumeToRolloutPresence(&task, &taskCtx, tt.provider, env.CodexHome, slog.Default())
+				}
+			}
+			if got := task.PriorSessionID != ""; got != tt.wantResume {
+				t.Fatalf("resume=%v, want %v", got, tt.wantResume)
+			}
+			if taskCtx.PriorSessionResumed != tt.wantResume || task.PriorSessionResumeUnavailable == tt.wantResume || taskCtx.PriorSessionResumeUnavailable == tt.wantResume {
+				t.Fatalf("inconsistent resume state: task=%+v taskCtx=%+v", task, taskCtx)
+			}
+		})
+	}
+}
+
+// Claude Code keys its session store to the cwd, but a continued local
+// worktree runs in a fresh directory every turn (#9731). The gate accepts the
+// resume only when the prior transcript has been migrated into this run's
+// encoded projects directory first; a missing transcript still drops it,
+// fail-closed like the cwd-keyed default.
+func TestGateClaudeResumeAcrossLocalWorktrees(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name        string
+		continued   bool
+		transcript  bool
+		sameWorkdir bool
+		wantResume  bool
+	}{
+		{name: "continued worktree with migrated transcript", continued: true, transcript: true, wantResume: true},
+		{name: "continued worktree without transcript", continued: true},
+		{name: "new forked branch", continued: false, transcript: true},
+		{name: "in-place same workdir", sameWorkdir: true, transcript: true, wantResume: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			prior, work, configDir := t.TempDir(), t.TempDir(), t.TempDir()
+			if tt.sameWorkdir {
+				work = prior
+			}
+			if tt.transcript {
+				projectDir := filepath.Join(configDir, "projects", encodeClaudeCwd(prior))
+				if err := os.MkdirAll(projectDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(projectDir, "session-1.jsonl"), []byte("{}"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			task := Task{PriorSessionID: "session-1", PriorWorkDir: prior}
+			taskCtx := execenv.TaskContextForEnv{AgentID: "agent-1", PriorSessionResumed: true}
+			env := &execenv.Environment{WorkDir: work, LocalWorktree: &execenv.LocalWorktree{Continued: tt.continued}}
+
+			ready := migrateClaudeWorktreeTranscript(env, task.PriorSessionID, env.WorkDir, task.PriorWorkDir, map[string]string{"CLAUDE_CONFIG_DIR": configDir}, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", env.WorkDir, true, false, false, ready, slog.Default())
+
+			if reachable != tt.wantResume {
+				t.Fatalf("reachable = %v, want %v", reachable, tt.wantResume)
+			}
+			if got := task.PriorSessionID != ""; got != tt.wantResume {
+				t.Fatalf("resume=%v, want %v", got, tt.wantResume)
+			}
+			if taskCtx.PriorSessionResumed != tt.wantResume || task.PriorSessionResumeUnavailable == tt.wantResume || taskCtx.PriorSessionResumeUnavailable == tt.wantResume {
+				t.Fatalf("inconsistent resume state: task=%+v taskCtx=%+v", task, taskCtx)
+			}
+		})
+	}
+}
+
+func TestEncodeClaudeCwd(t *testing.T) {
+	for _, tt := range []struct{ in, want string }{
+		{"/home/user/repo", "-home-user-repo"},
+		{"/tmp/dir with space", "-tmp-dir-with-space"},
+		{"/a/b.c/d", "-a-b-c-d"},
+		{`C:\Users\dev`, "C--Users-dev"},
+	} {
+		if got := encodeClaudeCwd(tt.in); got != tt.want {
+			t.Fatalf("encodeClaudeCwd(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+// Hermes resumes from HERMES_HOME, independently of the task's cwd (#9062).
+func TestGateHermesResumeToSessionHome(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name        string
+		sameWorkdir bool
+		history     bool
+		envReused   bool
+		noStore     bool
+		want        bool
+	}{
+		{name: "changed worktree with history", history: true, want: true},
+		{name: "in place with history", sameWorkdir: true, history: true, want: true},
+		{name: "changed worktree with unavailable history"},
+		{name: "in place with unavailable history", sameWorkdir: true},
+		{name: "empty store despite reused environment", sameWorkdir: true, envReused: true},
+		{name: "unmounted store in fresh environment", noStore: true},
+		{name: "task local history in reused environment", sameWorkdir: true, noStore: true, envReused: true, want: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			priorDir, workDir := t.TempDir(), t.TempDir()
+			if tt.sameWorkdir {
+				workDir = priorDir
+			}
+			env := &execenv.Environment{HermesSessionStore: "conversation-store", HermesSessionHistoryPresent: tt.history}
+			if tt.noStore {
+				env.HermesSessionStore = ""
+			}
+			task := Task{PriorSessionID: "session-1", PriorWorkDir: priorDir}
+			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
+			got := gateResumeToReachableSession(&task, &taskCtx, "hermes", workDir,
+				sessionHomeReachable("hermes", env, tt.envReused), false, false, false, slog.Default())
+			if got != tt.want || (task.PriorSessionID == "session-1") != tt.want || taskCtx.PriorSessionResumed != tt.want {
+				t.Fatalf("resume = %v, session = %q, resumed = %v; want %v", got, task.PriorSessionID, taskCtx.PriorSessionResumed, tt.want)
+			}
+			if task.PriorSessionResumeUnavailable != !tt.want || taskCtx.PriorSessionResumeUnavailable != !tt.want {
+				t.Fatal("session continuity notice does not match reachability")
+			}
+		})
+	}
+}
+
+func TestHermesPreparedSessionReachability(t *testing.T) {
+	// Keep profile/store resolution inside synthetic homes, never the user's.
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", "")
+	home := t.TempDir()
+	redirectTestHome(t, home)
+	t.Setenv("USERPROFILE", home)
+	sourceHome, root := t.TempDir(), t.TempDir()
+	taskNumber := 0
+	prepare := func(t *testing.T, agentID, issueID string) *execenv.Environment {
+		t.Helper()
+		taskCtx := execenv.TaskContextForEnv{AgentID: agentID, IssueID: issueID,
+			AgentSkills: []execenv.SkillContextForEnv{{Name: "fixture", Content: "synthetic skill"}},
+		}
+		taskNumber++
+		env, err := execenv.Prepare(execenv.PrepareParams{
+			WorkspacesRoot: root, WorkspaceID: "workspace-1", TaskID: fmt.Sprintf("task-%012d", taskNumber),
+			Provider: "hermes", HermesSourceHome: sourceHome, Task: taskCtx,
+			HermesSessionStore: execenv.HermesSessionStorePath("", agentID, sourceHome, taskCtx),
+		}, slog.Default())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = env.Cleanup(true) })
+		return env
+	}
+	first := prepare(t, "agent-1", "issue-1")
+	if first.HermesSessionStore == "" {
+		if runtime.GOOS == "windows" {
+			t.Skip("host cannot mount Hermes session stores")
+		}
+		t.Fatal("Hermes session store was not mounted")
+	}
+	if err := os.WriteFile(filepath.Join(first.HermesHome, "state.db"), []byte("synthetic transcript"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name, agentID, issueID string
+		want                   bool
+	}{
+		{"same conversation in fresh workdir", "agent-1", "issue-1", true},
+		{"different issue", "agent-1", "issue-2", false},
+		{"different agent", "agent-2", "issue-1", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			env := prepare(t, tt.agentID, tt.issueID)
+			if sameExistingDir(first.WorkDir, env.WorkDir) {
+				t.Fatal("fixture must prepare a different task workdir")
+			}
+			task := Task{PriorSessionID: "session-1", PriorWorkDir: first.WorkDir}
+			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
+			if got := gateResumeToReachableSession(&task, &taskCtx, "hermes", env.WorkDir,
+				sessionHomeReachable("hermes", env, false), false, false, false, slog.Default()); got != tt.want {
+				t.Fatalf("reachable = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -2063,7 +2382,7 @@ func TestGatePiResumeToSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionFile, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, true, providerRefusesMissingSessionCwd(provider, true), slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, true, providerRefusesMissingSessionCwd(provider, true), false, false, slog.Default())
 
 			if !reachable {
 				t.Fatal("Pi-family session file should remain reachable across workdirs")
@@ -2123,7 +2442,7 @@ func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionPath, PriorWorkDir: workDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, true, providerRefusesMissingSessionCwd("pi", true), slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, true, providerRefusesMissingSessionCwd("pi", true), false, false, slog.Default())
 
 			if reachable {
 				t.Fatalf("%s Pi session was treated as reachable", test.name)
@@ -2294,7 +2613,7 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 				task := Task{PriorSessionID: sessionPath, PriorWorkDir: liveDir}
 				taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, true, runtime.refusesMissingCwd, slog.Default())
+				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, true, runtime.refusesMissingCwd, false, false, slog.Default())
 
 				if reachable != wantReachable {
 					t.Fatalf("reachable = %v, want %v", reachable, wantReachable)
@@ -3977,8 +4296,9 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnInactivity(t *testing.T) {
 // the production watchdog window or relying on child-process scheduling speed.
 type waitForAgentMessageBackend struct {
 	agent.Backend
-	match   func(agent.Message) bool
-	onMatch func()
+	match      func(agent.Message) bool
+	onMatch    func()
+	resultGate <-chan struct{}
 }
 
 func (b waitForAgentMessageBackend) Execute(ctx context.Context, prompt string, opts agent.ExecOptions) (*agent.Session, error) {
@@ -4008,12 +4328,25 @@ func (b waitForAgentMessageBackend) Execute(ctx context.Context, prompt string, 
 					messages <- msg
 				}
 			}()
+			result := session.Result
+			if b.resultGate != nil {
+				// Keep Result unavailable until the daemon enters the branch under test.
+				gatedResult := make(chan agent.Result, 1)
+				go func() {
+					defer close(gatedResult)
+					<-b.resultGate
+					if final, ok := <-session.Result; ok {
+						gatedResult <- final
+					}
+				}()
+				result = gatedResult
+			}
 			return &agent.Session{
 				ToolActivity:             session.ToolActivity,
 				InterruptBackgroundTools: session.InterruptBackgroundTools,
 				TerminalObserved:         session.TerminalObserved,
 				Messages:                 messages,
-				Result:                   session.Result,
+				Result:                   result,
 			}, nil
 		}
 	}
@@ -4198,11 +4531,19 @@ func TestExecuteAndDrain_PiWithoutTurnErrorKeepsUpstreamCancellation(t *testing.
 	if err != nil {
 		t.Fatalf("new pi backend: %v", err)
 	}
+	probe := &handoffProbe{
+		gate:   make(chan struct{}),
+		prefix: "waiting for the backend to hand over its result after cancellation",
+	}
+	defer func() { probe.once.Do(func() { close(probe.gate) }) }()
 	matched := make(chan struct{})
 	backend = waitForAgentMessageBackend{
 		Backend: backend,
 		match:   func(msg agent.Message) bool { return msg.Type == agent.MessageStatus },
 		onMatch: func() { close(matched) },
+		// Both Done and Result can become ready on cancellation. Pin the drain
+		// arm rather than requiring select to choose it over an aborted Result.
+		resultGate: probe.gate,
 	}
 	d := newTestDaemon(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -4220,7 +4561,7 @@ func TestExecuteAndDrain_PiWithoutTurnErrorKeepsUpstreamCancellation(t *testing.
 			backend,
 			"prompt-ignored",
 			agent.ExecOptions{ResumeSessionID: sessionPath},
-			slog.Default(),
+			slog.New(probe),
 			"t-pi-no-provider-error-upstream-cancel",
 			"",
 			new(atomic.Int32),
@@ -4239,6 +4580,9 @@ func TestExecuteAndDrain_PiWithoutTurnErrorKeepsUpstreamCancellation(t *testing.
 	case got := <-done:
 		if got.err != nil {
 			t.Fatalf("executeAndDrain: %v", got.err)
+		}
+		if !probe.seen.Load() {
+			t.Fatal("upstream cancellation hand-off was not exercised")
 		}
 		if got.result.Status != "cancelled" || !strings.Contains(got.result.Error, "task cancelled by upstream context") {
 			t.Fatalf("result = %+v, want existing upstream cancellation", got.result)
@@ -4848,11 +5192,70 @@ func TestEnsureRepoReadyReportsSyncFailure(t *testing.T) {
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
 	err := d.ensureRepoReady(context.Background(), "ws-1", missingRepo)
-	if err == nil || !strings.Contains(err.Error(), "repo is configured but not synced:") {
-		t.Fatalf("expected sync failure error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "repo is configured but not synced: git clone --bare:") {
+		t.Fatalf("expected sync failure error with git's output, got %v", err)
 	}
-	if got := d.workspaceLastRepoSyncErr("ws-1"); got == "" {
-		t.Fatal("expected lastRepoSyncErr to be recorded")
+}
+
+// syncRaceRepoCache fails the sync of failURL and, on the Lookup that
+// follows, runs a successful background sync of another repo: the window in
+// which a shared per-workspace error slot used to be cleared.
+type syncRaceRepoCache struct {
+	d          *Daemon
+	failURL    string
+	mu         sync.Mutex
+	failedOnce bool
+	raced      bool
+}
+
+func (c *syncRaceRepoCache) Lookup(string, string) string {
+	c.mu.Lock()
+	race := c.failedOnce && !c.raced
+	c.raced = c.raced || race
+	c.mu.Unlock()
+	if race {
+		c.d.syncWorkspaceRepos("ws-1", []RepoData{{URL: "https://example.com/other.git"}})
+	}
+	return ""
+}
+func (c *syncRaceRepoCache) BarePath(string, string) string { return "" }
+func (c *syncRaceRepoCache) Sync(_ string, repos []repocache.RepoInfo) error {
+	for _, r := range repos {
+		if r.URL == c.failURL {
+			c.mu.Lock()
+			c.failedOnce = true
+			c.mu.Unlock()
+			return errors.New("git clone --bare: server certificate verification failed")
+		}
+	}
+	return nil
+}
+func (c *syncRaceRepoCache) WithRepoLock(_ string, fn func() error) error { return fn() }
+func (c *syncRaceRepoCache) CreateWorktree(repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
+	return nil, nil
+}
+
+func TestEnsureRepoReadyKeepsSyncFailureDespiteConcurrentSuccess(t *testing.T) {
+	t.Parallel()
+
+	const repoURL = "https://devops.example.com/team/_git/app"
+	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(WorkspaceReposResponse{
+			WorkspaceID:  "ws-1",
+			Repos:        []RepoData{{URL: repoURL}},
+			ReposVersion: "v1",
+		})
+	})
+	cache := &syncRaceRepoCache{d: d, failURL: repoURL}
+	d.repoCache = cache
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
+
+	err := d.ensureRepoReady(context.Background(), "ws-1", repoURL)
+	if !cache.raced {
+		t.Fatal("test did not exercise the concurrent sync")
+	}
+	if err == nil || !strings.Contains(err.Error(), "server certificate verification failed") {
+		t.Fatalf("expected the checkout's own sync failure, got %v", err)
 	}
 }
 
@@ -6561,7 +6964,7 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 // TestHermesProfileChainCoversLaunchPrefix is the daemon half of GH #7046's
 // Hermes regression. A custom runtime profile's fixed_args are no longer folded
 // into custom_args — they become the launch prefix and reach hermes ahead of
-// custom_args, with the backend's own `acp` token between the two.
+// custom_args, which in turn precede the backend's own `acp` token.
 //
 // Both halves of the profile chain therefore have to run against the argv the
 // backend really assembles. Resolving or stripping against a hand-built
@@ -6570,10 +6973,10 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 func TestHermesProfileChainCoversLaunchPrefix(t *testing.T) {
 	t.Parallel()
 
-	// A prefix ending in a value-taking flag: the `acp` token decides which
-	// selection hermes sees, so it must be present when the daemon resolves.
-	launchPrefix := []string{"--model"}
-	customArgs := []string{"-p", "research", "--yolo"}
+	// A prefix ending in a bare `-p`: the selection straddles the two regions,
+	// so only the assembled argv shows which profile hermes sees.
+	launchPrefix := []string{"-p"}
+	customArgs := []string{"research", "--yolo"}
 
 	sel := agent.ParseHermesProfileArgs(
 		agent.HermesLaunchArgv(launchPrefix, customArgs, slog.Default()))
@@ -6589,10 +6992,10 @@ func TestHermesProfileChainCoversLaunchPrefix(t *testing.T) {
 		agent.HermesLaunchArgv(strippedPrefix, strippedCustom, slog.Default())); sel.Found {
 		t.Fatalf("the launched argv can still redirect HERMES_HOME: %+v", sel)
 	}
-	if strings.Join(strippedPrefix, "\x00") != "--model" {
-		t.Errorf("prefix = %v, want the non-selector token kept", strippedPrefix)
+	if len(strippedPrefix) != 0 {
+		t.Errorf("prefix = %v, want the straddling `-p` removed", strippedPrefix)
 	}
 	if strings.Join(strippedCustom, "\x00") != "--yolo" {
-		t.Errorf("custom = %v, want only the selector removed", strippedCustom)
+		t.Errorf("custom = %v, want only the selector's value removed", strippedCustom)
 	}
 }

@@ -140,52 +140,6 @@ func TestBuildQuickCreatePromptAssigneeIncludesSquads(t *testing.T) {
 	}
 }
 
-// TestBuildQuickCreatePromptSquadDefaultsToSquad locks in the MUL-2203
-// fix: when the picker was a squad, the task runs on the squad's leader
-// agent, but the default assignee for issues created by this run must
-// point at the SQUAD's UUID — not the leader agent's UUID. The previous
-// "default to YOURSELF" instruction made squad-created issues land under
-// the leader, hiding them from the squad's delegation flow.
-func TestBuildQuickCreatePromptSquadDefaultsToSquad(t *testing.T) {
-	const (
-		squadID   = "aaaa1111-2222-3333-4444-555555555555"
-		squadName = "独立团"
-		leaderID  = "bbbb1111-2222-3333-4444-666666666666"
-	)
-	out := buildQuickCreatePrompt(Task{
-		QuickCreatePrompt: "fix the login button color",
-		Agent:             &AgentData{ID: leaderID, Name: "leader-agent"},
-		SquadID:           squadID,
-		SquadName:         squadName,
-	})
-
-	// The default-assignee instruction must point at the squad UUID.
-	if !strings.Contains(out, "--assignee-id \""+squadID+"\"") {
-		t.Errorf("buildQuickCreatePrompt with SquadID must default to the squad's UUID, got:\n%s", out)
-	}
-	// And it must NOT tell the agent to default to itself (the leader).
-	if strings.Contains(out, "--assignee-id \""+leaderID+"\"") {
-		t.Errorf("buildQuickCreatePrompt with SquadID must NOT default to the leader agent's UUID, got:\n%s", out)
-	}
-	// The squad name should appear in the instruction so the agent has
-	// human-readable context for the routing decision.
-	if !strings.Contains(out, squadName) {
-		t.Errorf("buildQuickCreatePrompt with SquadID should mention the squad name %q, got:\n%s", squadName, out)
-	}
-	// And the prompt must explicitly call out the squad-vs-leader rule
-	// so the agent does not silently regress to "default to YOURSELF".
-	mustContain := []string{
-		"picker SQUAD",
-		"running on the squad's behalf",
-		"do not assign it to your own agent UUID",
-	}
-	for _, s := range mustContain {
-		if !strings.Contains(out, s) {
-			t.Errorf("buildQuickCreatePrompt with SquadID missing %q\n--- output ---\n%s", s, out)
-		}
-	}
-}
-
 // TestBuildQuickCreatePromptProjectPinning verifies that when the user
 // pins a project in the quick-create modal, the prompt instructs the agent
 // to pass `--project <uuid>` exactly. Without this, the agent would re-read
@@ -1765,9 +1719,9 @@ func TestPerTurnContextBlocksCarryMovedBriefSections(t *testing.T) {
 		// What this test cares about is that the section reaches the per-turn
 		// message at all, not which variant it is.
 		"could not be restored",
-		"## Task Initiator",
-		"initiated by **Bohan** (bohan@example.com), a member of this workspace",
-		"credentials stay scoped to the runtime owner",
+		"## On Behalf Of",
+		"acting on behalf of **Bohan** (bohan@example.com)",
+		"credentials and access remain scoped to the runtime owner",
 		"## Connected Apps",
 		"- Notion (`notion`) via MCP server `composio`",
 	} {
@@ -1784,7 +1738,7 @@ func TestPerTurnContextBlocksOmittedWhenEmpty(t *testing.T) {
 	prompt := BuildPrompt(Task{IssueID: "issue-1"}, "claude")
 	for _, banned := range []string{
 		"## Session Continuity Notice",
-		"## Task Initiator",
+		"## On Behalf Of",
 		"## Connected Apps",
 	} {
 		if strings.Contains(prompt, banned) {
@@ -1793,18 +1747,66 @@ func TestPerTurnContextBlocksOmittedWhenEmpty(t *testing.T) {
 	}
 }
 
-// An assignment-triggered run carries the initiator too — it is not a
-// comment-path-only block.
+// An assignment-triggered run also carries the authorization human.
 func TestPerTurnContextBlocksOnAssignmentPath(t *testing.T) {
 	t.Parallel()
 
 	prompt := BuildPrompt(Task{
 		IssueID:       "issue-1",
-		InitiatorType: "agent",
-		InitiatorName: "GPT-Boy",
+		InitiatorType: "member",
+		InitiatorName: "Alice",
 	}, "claude")
-	if !strings.Contains(prompt, "initiated by **GPT-Boy**, another agent in this workspace") {
-		t.Errorf("assignment-triggered prompt lost the initiator block\n---\n%s", prompt)
+	if !strings.Contains(prompt, "acting on behalf of **Alice**") {
+		t.Errorf("assignment-triggered prompt lost the authorization human\n---\n%s", prompt)
+	}
+}
+
+func TestPerTurnContextBlocksOnDelegatedPath(t *testing.T) {
+	t.Parallel()
+
+	prompt := BuildPrompt(Task{
+		IssueID:               "issue-1",
+		TriggerCommentID:      "comment-1",
+		TriggerCommentContent: "Please take over",
+		TriggerAuthorType:     "agent",
+		TriggerAuthorName:     "Agent A",
+		InitiatorType:         "member",
+		InitiatorID:           "user-alice",
+		InitiatorName:         "Alice",
+		InitiatorEmail:        "alice@example.com",
+	}, "claude")
+
+	for _, want := range []string{
+		"Agent A",
+		"## On Behalf Of",
+		"acting on behalf of **Alice** (alice@example.com)",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("delegated prompt must contain %q\n---\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "## Task Initiator") || strings.Contains(prompt, "## Original Requester") {
+		t.Errorf("delegated prompt must use one identity block\n---\n%s", prompt)
+	}
+}
+
+func TestTaskDecodesAndRendersOnBehalfOf(t *testing.T) {
+	t.Parallel()
+
+	var task Task
+	if err := json.Unmarshal([]byte(`{
+		"issue_id":"issue-1",
+		"initiator_type":"member", "initiator_id":"user-alice",
+		"initiator_name":"Alice", "initiator_email":"alice@example.com"
+	}`), &task); err != nil {
+		t.Fatal(err)
+	}
+	prompt := BuildPrompt(task, "claude")
+	if !strings.Contains(prompt, "## On Behalf Of") || !strings.Contains(prompt, "**Alice** (alice@example.com)") {
+		t.Errorf("daemon claim JSON lost authorization human\n---\n%s", prompt)
+	}
+	if strings.Contains(prompt, "## Task Initiator") || strings.Contains(prompt, "## Original Requester") {
+		t.Errorf("daemon must not render old identity blocks\n---\n%s", prompt)
 	}
 }
 
@@ -2186,5 +2188,95 @@ func TestBuildPromptIssueStateFallsBackToTheRead(t *testing.T) {
 				t.Errorf("nothing may claim the issue is unchanged here, got:\n%s", out)
 			}
 		})
+	}
+}
+
+// A wakeup the server folded into this run reaches the agent whatever started
+// the run, and nothing is added when none joined.
+func TestPromptCarriesJoinedWakeups(t *testing.T) {
+	note := "Wakeup w1 fired while this run was waiting to start. Instruction:\nSummarize the discussion"
+	for name, task := range map[string]Task{
+		"assignment": {IssueID: "issue-1", WakeupJoined: note},
+		"comment":    {IssueID: "issue-1", TriggerCommentID: "c1", TriggerCommentContent: "please look", WakeupJoined: note},
+	} {
+		out := BuildPrompt(task, "claude")
+		if !strings.Contains(out, "[WAKEUP — joined this run]\n"+note) {
+			t.Errorf("%s prompt lacks the joined wakeup:\n%s", name, out)
+		}
+	}
+	if out := BuildPrompt(Task{IssueID: "issue-1"}, "claude"); strings.Contains(out, "joined this run") {
+		t.Errorf("prompt without joined wakeups mentions them:\n%s", out)
+	}
+}
+
+// A sub-issue's run is pointed at its parent whatever started it (MUL-8441).
+// The claim JSON decodes into the block, a resumed session gets the short form
+// that still names the commands, and a run without a parent is unchanged.
+func TestPromptPointsSubIssueRunsAtTheirParent(t *testing.T) {
+	t.Parallel()
+
+	var decoded Task
+	if err := json.Unmarshal([]byte(`{
+		"issue_id":"issue-1",
+		"parent_issue":{"id":"parent-uuid","identifier":"MUL-9","title":"Merge PRs from Multica","status":"in_progress"}
+	}`), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	parent := decoded.ParentIssue
+
+	header := "[Parent issue]\nThis issue is a sub-issue of MUL-9 \"Merge PRs from Multica\" (status: in_progress)."
+	readCmds := []string{
+		"`multica issue get parent-uuid --output json`",
+		"`multica issue comment list parent-uuid --roots-only --summary --compact --output json`",
+	}
+	full := []string{
+		"this issue's description is only the part handed to you",
+		"Before starting work, read the parent",
+		"`multica issue children parent-uuid --output json`",
+		"If they conflict, ask on this issue instead of picking one.",
+	}
+
+	for name, task := range map[string]Task{
+		"assignment": decoded,
+		"comment":    {IssueID: "issue-1", TriggerCommentID: "c1", TriggerCommentContent: "please look", ParentIssue: parent},
+		"wakeup":     {IssueID: "issue-1", WakeupID: "w1", HandoffNote: "check CI", ParentIssue: parent},
+	} {
+		out := BuildPrompt(task, "claude")
+		for _, want := range append(append([]string{header}, readCmds...), full...) {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s prompt lacks %q:\n%s", name, want, out)
+			}
+		}
+	}
+
+	resumed := BuildPrompt(Task{IssueID: "issue-1", PriorSessionID: "s1", ParentIssue: parent}, "claude")
+	for _, want := range append([]string{header, "If you have not read the parent in this session"}, readCmds...) {
+		if !strings.Contains(resumed, want) {
+			t.Errorf("resumed prompt lacks %q:\n%s", want, resumed)
+		}
+	}
+	if strings.Contains(resumed, "Before starting work, read the parent") {
+		t.Errorf("resumed prompt repeats the full parent instruction:\n%s", resumed)
+	}
+
+	// A resume the server could only serve from an older session reconstructs,
+	// so it gets the full instruction.
+	fallback := BuildPrompt(Task{IssueID: "issue-1", PriorSessionID: "s0", PriorSessionResumeUnavailable: true, ParentIssue: parent}, "claude")
+	if !strings.Contains(fallback, "Before starting work, read the parent") {
+		t.Errorf("fallback-session prompt lacks the full parent instruction:\n%s", fallback)
+	}
+
+	noIdentifier := BuildPrompt(Task{IssueID: "issue-1", ParentIssue: &ParentIssueData{ID: "parent-uuid", Title: "T", Status: "todo"}}, "claude")
+	if !strings.Contains(noIdentifier, "sub-issue of parent-uuid \"T\" (status: todo).") {
+		t.Errorf("parent without identifier must be named by ID:\n%s", noIdentifier)
+	}
+
+	for name, task := range map[string]Task{
+		"no parent": {IssueID: "issue-1"},
+		"chat":      {ChatSessionID: "chat-1", ParentIssue: parent},
+	} {
+		if out := BuildPrompt(task, "claude"); strings.Contains(out, "[Parent issue]") {
+			t.Errorf("%s prompt renders a parent block:\n%s", name, out)
+		}
 	}
 }

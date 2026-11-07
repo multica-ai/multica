@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/imagemetadata"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -35,8 +36,6 @@ var extContentTypes = map[string]string{
 	".wasm": "application/wasm",
 }
 
-const maxUploadSize = 100 << 20 // 100 MB
-
 const defaultAttachmentDownloadURLTTL = 30 * time.Minute
 
 type attachmentDownloadMode string
@@ -48,15 +47,7 @@ const (
 	attachmentDownloadModeProxy      attachmentDownloadMode = "proxy"
 )
 
-// maxPreviewTextSize caps the body the preview proxy will load into memory
-// for text-based types. Anything larger returns 413 and the UI falls back
-// to "please download". Sized so a typical README/source-file fits but a
-// 100 MB log dump can't blow up the renderer.
-const maxPreviewTextSize = 2 << 20 // 2 MB
-
-// ---------------------------------------------------------------------------
 // Response types
-// ---------------------------------------------------------------------------
 
 type AttachmentResponse struct {
 	ID            string  `json:"id"`
@@ -109,6 +100,9 @@ type AttachmentResponse struct {
 	ContentType string `json:"content_type"`
 	SizeBytes   int64  `json:"size_bytes"`
 	CreatedAt   string `json:"created_at"`
+	// Displayed image dimensions, absent for non-images and older uploads.
+	Width  *int32 `json:"width,omitempty"`
+	Height *int32 `json:"height,omitempty"`
 }
 
 // attachmentURLMode selects how DownloadURL is rendered on a response.
@@ -180,6 +174,9 @@ func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) 
 	// download time, so stable mode is a no-op for them.
 	if h.CFSigner != nil && mode != attachmentURLModeStable {
 		resp.DownloadURL = h.CFSigner.SignedURL(a.Url, time.Now().Add(h.attachmentDownloadURLTTL()))
+	}
+	if a.Width.Valid && a.Height.Valid {
+		resp.Width, resp.Height = &a.Width.Int32, &a.Height.Int32
 	}
 	if a.IssueID.Valid {
 		s := uuidToString(a.IssueID)
@@ -372,9 +369,7 @@ func (h *Handler) groupChatMessageAttachments(ctx context.Context, workspaceID s
 	return grouped
 }
 
-// ---------------------------------------------------------------------------
 // UploadFile — POST /api/upload-file
-// ---------------------------------------------------------------------------
 
 func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	r = h.withWakeupActor(r)
@@ -390,13 +385,19 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 
 	workspaceID := h.resolveWorkspaceID(r)
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
-
-	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
-		writeError(w, http.StatusBadRequest, "file too large or invalid multipart form")
+	err := parseUploadForm(w, r)
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	if err != nil {
+		var sizeErr *http.MaxBytesError
+		if errors.As(err, &sizeErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "file exceeds the 100 MiB upload limit")
+		} else {
+			writeError(w, http.StatusBadRequest, "invalid multipart form")
+		}
 		return
 	}
-	defer r.MultipartForm.RemoveAll()
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
@@ -557,6 +558,10 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			params.ChatSessionID = task.ChatSessionID
 		}
 
+		if dimensions, ok := imagemetadata.Dimensions(data); ok {
+			params.Width = pgtype.Int4{Int32: dimensions.Width, Valid: true}
+			params.Height = pgtype.Int4{Int32: dimensions.Height, Valid: true}
+		}
 		link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
 		if err != nil {
 			slog.Error("file upload failed", "error", err)
@@ -635,9 +640,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ---------------------------------------------------------------------------
 // ListAttachments — GET /api/issues/{id}/attachments
-// ---------------------------------------------------------------------------
 
 func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
@@ -664,15 +667,29 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ---------------------------------------------------------------------------
 // GetAttachmentByID — GET /api/attachments/{id}
-// ---------------------------------------------------------------------------
 
 func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	att, ok := h.loadAttachmentForRequest(w, r)
 	if !ok {
 		return
 	}
+	h.writeSignedAttachmentMetadata(w, r, att)
+}
+
+// GetAttachmentForDownload resolves the workspace from the attachment, as the
+// durable Markdown download URL does. A link can be pasted into a different
+// workspace; the current workspace header must not change its target. The
+// membership check is the same one used by the protected download endpoint.
+func (h *Handler) GetAttachmentForDownload(w http.ResponseWriter, r *http.Request) {
+	att, ok := h.loadAttachmentForDownload(w, r)
+	if !ok {
+		return
+	}
+	h.writeSignedAttachmentMetadata(w, r, att)
+}
+
+func (h *Handler) writeSignedAttachmentMetadata(w http.ResponseWriter, r *http.Request, att db.Attachment) {
 
 	// Always signed, regardless of what the caller advertised: this endpoint is
 	// the single source of fresh, natively-loadable URLs. Stable-mode callers
@@ -830,9 +847,7 @@ func (h *Handler) loadAttachmentForDownload(w http.ResponseWriter, r *http.Reque
 	return att, true
 }
 
-// ---------------------------------------------------------------------------
 // DownloadAttachment — GET /api/attachments/{id}/download
-// ---------------------------------------------------------------------------
 //
 // Workspace context is derived from the attachment row itself, not from
 // X-Workspace-Slug / X-Workspace-ID headers. This is what lets a markdown
@@ -1267,7 +1282,6 @@ func normalizeFrameAncestorSource(raw string) (string, bool) {
 	return scheme + "://" + strings.ToLower(u.Host), true
 }
 
-// ---------------------------------------------------------------------------
 // GetAttachmentContent — GET /api/attachments/{id}/content
 //
 // Streams the raw bytes of a text-previewable attachment back to the client.
@@ -1278,9 +1292,8 @@ func normalizeFrameAncestorSource(raw string) (string, bool) {
 // the explicit /download route signs redirects as attachment downloads and
 // proxy mode streams with the same media-type policy as storage uploads.
 //
-// Hard cap: 2 MB. Larger files return 413. Anything outside the text
-// whitelist returns 415.
-// ---------------------------------------------------------------------------
+// Files above the configured preview limit return 413. Anything outside the
+// text whitelist returns 415.
 
 func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	att, ok := h.loadAttachmentForRequest(w, r)
@@ -1298,6 +1311,11 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 		writeFeatureDisabled(w, "storage_not_configured", "storage not configured")
 		return
 	}
+	limit := h.maxPreviewSizeBytes()
+	if att.SizeBytes > limit {
+		writeError(w, http.StatusRequestEntityTooLarge, "file too large for inline preview")
+		return
+	}
 	key := h.Storage.KeyFromURL(att.Url)
 	reader, err := h.Storage.GetReader(r.Context(), key)
 	if err != nil {
@@ -1307,15 +1325,15 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	}
 	defer reader.Close()
 
-	// LimitReader to maxPreviewTextSize+1 so we can detect "exactly at the
-	// limit" vs "exceeds the limit" by checking the returned length.
-	body, err := io.ReadAll(io.LimitReader(reader, maxPreviewTextSize+1))
+	// Check actual bytes as well as metadata. The hard maximum keeps limit+1
+	// safe, while the extra byte distinguishes the exact boundary from overflow.
+	body, err := io.ReadAll(io.LimitReader(reader, limit+1))
 	if err != nil {
 		slog.Error("failed to read attachment body for preview", "id", attachmentID, "error", err)
 		writeError(w, http.StatusBadGateway, "failed to read attachment body")
 		return
 	}
-	if len(body) > maxPreviewTextSize {
+	if int64(len(body)) > limit {
 		writeError(w, http.StatusRequestEntityTooLarge, "file too large for inline preview")
 		return
 	}
@@ -1328,7 +1346,7 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	// No-store: workspace membership / attachment ACL can change between
 	// requests (member removed, attachment deleted). A cached body would
 	// stay readable past the revocation window. The redundant request is
-	// fine here — bodies are capped at 2 MB and the endpoint is only hit
+	// fine here — bodies are bounded by the preview limit and the endpoint is only hit
 	// when a user explicitly opens a preview.
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -1341,74 +1359,14 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 
 // isTextPreviewable is the whitelist for the text preview proxy.
 //
-// IMPORTANT — KEEP IN SYNC with the client-side mirror in
-// packages/views/editor/utils/preview.ts (TEXT_EXTENSIONS / TEXT_CONTENT_TYPES
-// / TEXT_BASENAMES + extensionToLanguage). If a type is allowed here but not
-// mapped client-side the user sees raw unhighlighted text; if mapped client-side
-// but rejected here the user sees a 415 fallback.
-//
-// TODO(follow-up): extract this list to a JSON single-source-of-truth and
-// generate the TS side, mirroring the reserved-slugs pattern (see
-// server/internal/handler/reserved_slugs.json + scripts/generate-reserved-slugs.mjs).
-// Drift severity here is low (worst case: Eye button visible but proxy 415s,
-// modal shows the unsupported fallback — still functional, just confusing),
-// so it ships as manual hand-sync for v1.
-//
-// We check both content_type and extension because http.DetectContentType
-// regularly returns "text/plain" for Markdown / source code, so a pure
-// content-type check would 415 those.
+// The Go handler embeds attachment_text_preview.json directly. The client
+// imports a generated representation of the same source, and CI rejects stale
+// generated output.
 func isTextPreviewable(contentType, filename string) bool {
-	ct := strings.ToLower(strings.TrimSpace(contentType))
-	// Strip params (e.g. "text/plain; charset=utf-8")
-	if idx := strings.Index(ct, ";"); idx >= 0 {
-		ct = strings.TrimSpace(ct[:idx])
-	}
-	if strings.HasPrefix(ct, "text/") {
-		return true
-	}
-	switch ct {
-	case "application/json",
-		"application/javascript",
-		"application/xml",
-		"application/x-yaml",
-		"application/yaml",
-		"application/toml",
-		"application/x-sh",
-		"application/x-httpd-php":
-		return true
-	}
-
-	ext := strings.ToLower(path.Ext(filename))
-	switch ext {
-	case ".md", ".markdown",
-		".txt", ".log",
-		".csv", ".tsv",
-		".html", ".htm",
-		".json", ".xml",
-		".yml", ".yaml", ".toml", ".ini", ".conf",
-		".sh", ".bash", ".zsh",
-		".py", ".rb", ".go", ".rs",
-		".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
-		".css", ".scss", ".sass", ".less",
-		".sql",
-		".java", ".kt", ".swift",
-		".c", ".cc", ".cpp", ".h", ".hpp",
-		".cs", ".php", ".lua", ".vim",
-		".dockerfile", ".makefile", ".gitignore":
-		return true
-	}
-	// Filenames without extension that match well-known build files.
-	base := strings.ToLower(path.Base(filename))
-	switch base {
-	case "dockerfile", "makefile", ".env":
-		return true
-	}
-	return false
+	return attachmentTextPreview.allows(contentType, filename)
 }
 
-// ---------------------------------------------------------------------------
 // DeleteAttachment — DELETE /api/attachments/{id}
-// ---------------------------------------------------------------------------
 
 func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	r = h.withWakeupActor(r)
@@ -1501,9 +1459,7 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ---------------------------------------------------------------------------
 // Attachment linking
-// ---------------------------------------------------------------------------
 
 // linkAttachmentsByIssueIDs links unbound attachments to an issue. A caller
 // that did not already advance the issue revision can ask this visible change

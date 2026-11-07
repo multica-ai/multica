@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Trash2, Copy, Check, Info } from "lucide-react";
+import { Trash2, Copy, Check, Info } from "@multica/ui/icons";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import type { PersonalAccessToken } from "@multica/core/types";
 import { Alert, AlertDescription } from "@multica/ui/components/ui/alert";
@@ -130,7 +130,7 @@ export function TokensTab() {
   };
 
   return (
-    <SettingsTab title={t(($) => $.tokens.title)} description={t(($) => $.tokens.purpose)}>
+    <SettingsTab title={t(($) => $.tokens.title)} description={t(($) => $.tokens.purpose)} scope="account">
       <SettingsSection
         description={t(($) => $.tokens.security_note)}
       >

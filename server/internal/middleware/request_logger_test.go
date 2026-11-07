@@ -92,6 +92,14 @@ func TestRequestLogger_500StaysError(t *testing.T) {
 	requireLogLevel(t, logs, "ERROR", "WARN", "INFO")
 }
 
+func TestRequestLogger_ClientClosedRequestStaysInfo(t *testing.T) {
+	logs := runRequestLogger(t, 499, "")
+	requireLogLevel(t, logs, "INFO", "WARN", "ERROR")
+	if !strings.Contains(logs.String(), "status=499") {
+		t.Fatalf("canceled request lost its status: %s", logs.String())
+	}
+}
+
 func TestRequestLogger_200StaysInfo(t *testing.T) {
 	logs := runRequestLogger(t, http.StatusOK, `{"ok":true}`)
 	requireLogLevel(t, logs, "INFO", "WARN", "ERROR")

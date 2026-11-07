@@ -21,18 +21,27 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
-const (
-	agentOfflineText  = "⚠️ 智能体当前不在线，你的消息已收到，等它上线后会处理。"
-	agentArchivedText = "⚠️ 该智能体已归档，无法回复。请联系工作区管理员。"
-	freshPendingText  = "✅ 已准备从空上下文运行。你的下一条聊天消息仍会进入当前对话，但不会带上之前的上下文。"
-	chatStartedText   = "✅ 已新建 Multica 对话。你的下一条消息会进入该对话。"
-	issueUsageText    = "请填写任务标题，格式如下：\n\n`/issue <标题>`\n`[描述]`（可选）"
-)
+// defaultBindingPath is where the web app serves the bind page.
+const defaultBindingPath = "/wecom/bind"
+
+// normalizeBindingPath applies the one default: the binding prompt is the only
+// thing that builds this URL, and a deployment that configures no path still
+// needs a usable link.
+func normalizeBindingPath(p string) string {
+	if p == "" {
+		return defaultBindingPath
+	}
+	if !strings.HasPrefix(p, "/") {
+		return "/" + p
+	}
+	return p
+}
 
 // OutboundReplier implements engine.OutboundReplier for WeCom.
 type OutboundReplier struct {
 	binding     binder
 	senders     *sendersRegistry
+	languages   languageLookup
 	appURL      string
 	bindingPath string
 	logger      *slog.Logger
@@ -43,6 +52,27 @@ type OutboundReplier struct {
 // (no DB-backed token mint). *BindingTokenService is the production value.
 type binder interface {
 	Mint(ctx context.Context, workspaceID, installationID pgtype.UUID, wecomUserID string) (BindingToken, error)
+	Withdraw(ctx context.Context, raw string) error
+}
+
+// errcodeUserMustMessageFirst — WeCom refused an aibot_send_msg because the
+// person has never written to the bot in that conversation. The bot may push
+// into a chat only after the user has spoken there: "需要用户在会话中给机器人发消息，
+// 后续机器人才能主动推送消息给对应会话中" (developer.work.weixin.qq.com/document/path/101463).
+// The global errcode table names the code and the same remedy: "846607 发送消息
+// 命中限制 智能机器人发送消息频率超限，请确保用户在该会话中给机器人发过消息"
+// (.../path/90313). The errmsg the server sends with it reads "aibot send msg
+// frequency limit exceeded", which is why the code and not the text decides.
+//
+// For a group trigger the conversation is the sender's 1:1, which a member who
+// has only ever @-mentioned the bot in a room has never opened.
+const errcodeUserMustMessageFirst = 846607
+
+// userMustMessageFirst reports whether a private send was refused because the
+// recipient has not yet written to the bot in their 1:1.
+func userMustMessageFirst(err error) bool {
+	var apiErr *wecomAPIError
+	return errors.As(err, &apiErr) && apiErr.Code == errcodeUserMustMessageFirst
 }
 
 // OutboundReplierConfig configures the replier. Binding + AppURL are
@@ -54,6 +84,13 @@ type OutboundReplierConfig struct {
 	// Senders is the same sendersRegistry the wecom ChannelDeps was built
 	// with. The replier looks up the live wsSender by installation id.
 	Senders *sendersRegistry
+
+	// Languages resolves the notice's DESTINATION to a copy language
+	// (language.go): a 1:1 reads the sender's own Multica profile, a room
+	// reads the deployment default. Nil — and every unbound sender, which
+	// notably includes everyone the binding prompt is FOR — gets the
+	// deployment default.
+	Languages languageLookup
 
 	// AppURL is the Multica web app host the user clicks into to redeem
 	// the binding token (e.g. https://multica.example). It comes from
@@ -74,17 +111,19 @@ func NewOutboundReplier(cfg OutboundReplierConfig) *OutboundReplier {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	bindingPath := cfg.BindingPath
-	if bindingPath == "" {
-		bindingPath = "/wecom/bind"
-	}
-	if !strings.HasPrefix(bindingPath, "/") {
-		bindingPath = "/" + bindingPath
+	if cfg.Languages == nil {
+		// Not fatal — the deployment language is a usable answer — but it is
+		// the difference between this replier doing its job and quietly doing
+		// main's. A missing wire produces no other symptom: nothing errors,
+		// nothing is empty, every notice just comes out in one language.
+		logger.Warn("wecom replier: no language lookup wired; every notice will use the deployment language " +
+			"whatever the reader's profile says (set OutboundReplierConfig.Languages)")
 	}
 	r := &OutboundReplier{
 		senders:     cfg.Senders,
+		languages:   cfg.Languages,
 		appURL:      strings.TrimRight(cfg.AppURL, "/"),
-		bindingPath: bindingPath,
+		bindingPath: normalizeBindingPath(cfg.BindingPath),
 		logger:      logger,
 	}
 	// Assign through the interface only when non-nil: a nil *BindingTokenService
@@ -101,34 +140,49 @@ func NewOutboundReplier(cfg OutboundReplierConfig) *OutboundReplier {
 // logged, not propagated: the replier runs detached from the inbound ACK
 // path (the engine.Router owns that goroutine).
 func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, res engine.Result) {
+	// These notices land in the room the message came from, so the room
+	// decides the language — not whichever member happened to trigger them.
+	//
+	// The binding prompt is the one thing here addressed to a person rather
+	// than the room, and it needs no separate resolution: its reader is
+	// unbound by definition, so they have no profile to consult and get the
+	// same deployment default the room does.
+	c := copyFor(localeFor(ctx, r.languages, inst.ID, aibotChatTypeFromChannel(msg.Source.ChatType), msg.Source.SenderID))
+
 	switch res.Outcome {
 	case engine.OutcomeNeedsBinding:
-		if err := r.sendBindingPrompt(ctx, inst, msg, res); err != nil {
+		if err := r.sendBindingPrompt(ctx, inst, msg, res, c); err != nil {
 			r.logger.WarnContext(ctx, "wecom replier: binding prompt failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeAgentOffline:
-		if err := r.post(ctx, inst, msg, agentOfflineText); err != nil {
+		if err := r.post(ctx, inst, msg, c.AgentOffline); err != nil {
 			r.logger.WarnContext(ctx, "wecom replier: offline notice failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeAgentArchived:
-		if err := r.post(ctx, inst, msg, agentArchivedText); err != nil {
+		if err := r.post(ctx, inst, msg, c.AgentArchived); err != nil {
 			r.logger.WarnContext(ctx, "wecom replier: archived notice failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeFreshPending:
-		if err := r.post(ctx, inst, msg, freshPendingText); err != nil {
+		if err := r.post(ctx, inst, msg, c.FreshPending); err != nil {
 			r.logger.WarnContext(ctx, "wecom replier: fresh-start confirmation failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeChatStarted:
-		if err := r.post(ctx, inst, msg, chatStartedText); err != nil {
-			r.logger.WarnContext(ctx, "wecom replier: new-chat confirmation failed", "installation_id", util.UUIDToString(inst.ID), "error", err)
+		if err := r.post(ctx, inst, msg, c.ChatStarted); err != nil {
+			r.logger.WarnContext(ctx, "wecom replier: new-chat confirmation failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeIssueUsage:
-		if err := r.post(ctx, inst, msg, issueUsageText); err != nil {
+		if err := r.post(ctx, inst, msg, c.IssueUsage); err != nil {
 			r.logger.WarnContext(ctx, "wecom replier: issue usage reply failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
+	case engine.OutcomeInvokeDenied:
+		if err := r.sendInvokeDenied(ctx, inst, msg, c); err != nil {
+			r.logger.WarnContext(ctx, "wecom replier: invoke-denied notice failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeIngested:
@@ -143,9 +197,9 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 			// never wrote — so they stopped chasing it and the report was
 			// lost. slack/replier.go:125 and dingtalk/replier.go:125 both
 			// branch here; WeCom was the one that did not.
-			text := issueCreatedText(res)
+			text := issueCreatedText(res, c)
 			if res.IssueDuplicate {
-				text = issueDuplicateText(res)
+				text = issueDuplicateText(res, c)
 			}
 			if err := r.post(ctx, inst, msg, text); err != nil {
 				r.logger.WarnContext(ctx, "wecom replier: issue confirmation failed",
@@ -156,7 +210,7 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 	}
 }
 
-func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, res engine.Result) error {
+func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, res engine.Result, c copyPack) error {
 	sender := res.Sender
 	if sender == "" {
 		sender = msg.Source.SenderID
@@ -185,10 +239,10 @@ func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.Res
 	// telling the reader to go to a chat they are already reading. Only the
 	// group ack further down runs in the room, and it is the one that names
 	// the 1:1.
-	text := "👋 绑定链接刚才已经发给你了，就在上方，请直接点击完成绑定。"
+	text := c.BindingPending
 	if !token.Reused {
 		bindURL := r.appURL + r.bindingPath + "?token=" + url.QueryEscape(token.Raw)
-		text = "👋 请先绑定你的 Multica 账号，才能与我对话：\n" + bindURL + "\n（链接 15 分钟内有效）"
+		text = c.BindingPromptPrefix + bindURL + c.BindingPromptSuffix
 	}
 	// A binding token is a bearer credential: binding.Redeem only checks that
 	// the redeemer belongs to the token's workspace, and the bind page redeems
@@ -200,6 +254,30 @@ func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.Res
 	// address outbound.go uses for inbox pushes), never to the room. Lark's
 	// SendBindingPromptCard targets the sender's OpenID for the same reason.
 	if err := r.postPrivate(ctx, inst, sender, text); err != nil {
+		// The room is about to be told that a message in the 1:1 gets an
+		// answer. Left live, the refused link would make that message's mint
+		// come back Reused inside BindingTokenMintInterval, and the user would
+		// be told to tap a link above that is not there. Withdrawing it lets
+		// the next message mint a link that can reach them. Only this refusal:
+		// any other leaves the throttle as it was, so a 45009 is not answered
+		// with a fresh mint per message. A throttled prompt has no raw token
+		// to withdraw.
+		if userMustMessageFirst(err) && !token.Reused {
+			if werr := r.binding.Withdraw(ctx, token.Raw); werr != nil {
+				r.logger.WarnContext(ctx, "wecom replier: withdraw undelivered binding link failed",
+					"installation_id", util.UUIDToString(inst.ID), "error", werr)
+			}
+		}
+		// A member who has only ever @-mentioned the bot in a room cannot be
+		// written to privately until they write to it first. Without a word
+		// in the room they hear nothing at all, so the room is asked to make
+		// that first move. The line carries no token and names no one; the
+		// link itself still only ever goes to the 1:1, once they open it.
+		if userMustMessageFirst(err) && aibotChatTypeFromChannel(msg.Source.ChatType) == chatTypeGroupInt {
+			if perr := r.post(ctx, inst, msg, c.MessageMeFirst); perr != nil {
+				return errors.Join(err, perr)
+			}
+		}
 		return err
 	}
 	// A group trigger still needs an answer — silence reads as a broken bot —
@@ -207,9 +285,36 @@ func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.Res
 	// send is accepted, so the room is never pointed at a message the wire
 	// refused. A 1:1 trigger already received the prompt in its only room.
 	if aibotChatTypeFromChannel(msg.Source.ChatType) == chatTypeGroupInt {
-		return r.post(ctx, inst, msg, "👋 已把绑定链接私发给你，请在与我的单聊里点击完成绑定。")
+		return r.post(ctx, inst, msg, c.BindingSentPrivately)
 	}
 	return nil
+}
+
+// sendInvokeDenied tells a member the agent is not theirs to run.
+//
+// A 1:1 is answered in place. A GROUP trigger is answered in the sender's own
+// 1:1 and the room hears nothing about the refusal: a line there would tell
+// everyone present both which member was refused and that the agent is
+// someone's private one. Being bound does not mean they have ever written to
+// the bot in that 1:1, though, and until they have WeCom refuses the push
+// (errcodeUserMustMessageFirst). The room is then asked, in roomCopy, to make
+// that first move — the same line an unbound member gets, so it says nothing
+// about why. Their first message in the 1:1 is refused in place.
+//
+// The refusal's only reader is the sender, so the sender's own profile picks
+// its language — not the room's, which is what Reply resolved into roomCopy.
+func (r *OutboundReplier) sendInvokeDenied(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, roomCopy copyPack) error {
+	text := copyFor(localeFor(ctx, r.languages, inst.ID, chatTypeSingleInt, msg.Source.SenderID)).InvokeDenied
+	if aibotChatTypeFromChannel(msg.Source.ChatType) != chatTypeGroupInt {
+		return r.post(ctx, inst, msg, text)
+	}
+	err := r.postPrivate(ctx, inst, msg.Source.SenderID, text)
+	if userMustMessageFirst(err) {
+		if perr := r.post(ctx, inst, msg, roomCopy.MessageMeFirst); perr != nil {
+			return errors.Join(err, perr)
+		}
+	}
+	return err
 }
 
 // postPrivate delivers text to a single user's 1:1 chat (chat_type=1),
@@ -262,37 +367,27 @@ func (r *OutboundReplier) post(ctx context.Context, inst engine.ResolvedInstalla
 //
 // That title belongs to the pre-existing issue, so it is text some *other*
 // member wrote — not even the reporter's own, which is what makes this the
-// worse of the two /issue call sites — and the reply ships as markdown. Hence
-// breakMemberLinks, the same entry point issueCreatedText runs its title
-// through: it breaks the inline "](" form and the link reference definition a
-// multi-line title can smuggle instead. See markdown.go.
-func issueDuplicateText(res engine.Result) string {
-	id := res.IssueIdentifier
-	if id == "" {
-		id = fmt.Sprintf("#%d", res.IssueNumber)
-	}
-	title := breakMemberLinks(strings.TrimSpace(res.IssueTitle))
-	if title == "" {
-		return "⚠️ 未创建 —— 已存在进行中的 " + id
-	}
-	return "⚠️ 未创建 —— 已存在进行中的 " + id + " — " + title
+// worse of the two /issue call sites — and the reply ships as markdown. The
+// pack's renderer runs it through breakMemberLinks, the same entry point
+// issueCreated uses: it breaks the inline "](" form and the link reference
+// definition a multi-line title can smuggle instead. See markdown.go.
+func issueDuplicateText(res engine.Result, c copyPack) string {
+	return c.issueDuplicate(issueRef(res), res.IssueTitle)
 }
 
-func issueCreatedText(res engine.Result) string {
-	id := res.IssueIdentifier
-	if id == "" {
-		id = fmt.Sprintf("#%d", res.IssueNumber)
+// issueCreatedText answers a /issue the engine accepted. The title is the
+// reporter's own text and this confirmation goes back into the chat that
+// triggered it — in a group, in front of the room — so the pack breaks its
+// links before it goes out. See copyPack.issueCreated.
+func issueCreatedText(res engine.Result, c copyPack) string {
+	return c.issueCreated(issueRef(res), res.IssueTitle)
+}
+
+// issueRef is how an issue is named in a confirmation: its identifier when the
+// engine produced one, its number otherwise.
+func issueRef(res engine.Result) string {
+	if res.IssueIdentifier != "" {
+		return res.IssueIdentifier
 	}
-	// The title is the reporter's own text and this confirmation goes back
-	// into the chat that triggered it — in a group, in front of the room. An
-	// issue titled "安全升级：请点击 [重置密码](https://evil.example) 完成验证"
-	// otherwise comes back from the bot as a working link, with the bot's
-	// authority behind it. A title carrying a line break can define one
-	// instead of writing it inline, which is why the reference-definition
-	// break applies here too.
-	title := breakMemberLinks(strings.TrimSpace(res.IssueTitle))
-	if title == "" {
-		return "✅ 已创建 " + id
-	}
-	return "✅ 已创建 " + id + " — " + title
+	return fmt.Sprintf("#%d", res.IssueNumber)
 }

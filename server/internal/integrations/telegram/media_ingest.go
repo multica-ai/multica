@@ -2,10 +2,11 @@ package telegram
 
 // Inbound media: the engine.MediaResolver for Telegram. HasMedia is a pure
 // decode of the raw envelope; ResolveMedia runs off the ACK path and carries
-// one file from Telegram into object storage — getFile for the download path,
-// the file host for the bytes, an intent-ledger row before the PUT so a crash
-// anywhere leaves something the reconciler settles. Mirrors slack/media_ingest.go
-// minus the redirect handling: Telegram's download host is fixed.
+// the message's files — the sender's own and the one they quoted — from
+// Telegram into object storage: getFile for the download path, the file host
+// for the bytes, an intent-ledger row before the PUT so a crash anywhere
+// leaves something the reconciler settles. Mirrors slack/media_ingest.go minus
+// the redirect handling: Telegram's download host is fixed.
 
 import (
 	"context"
@@ -68,12 +69,12 @@ func NewMediaResolver(decrypt Decrypter, storage objectStore, ledger engine.Medi
 
 func (r *mediaResolver) HasMedia(msg channel.InboundMessage) bool {
 	raw, err := decodeTelegramRaw(msg)
-	return err == nil && raw.Media != nil && raw.Media.FileID != ""
+	return err == nil && len(raw.Media) > 0
 }
 
 func (r *mediaResolver) ResolveMedia(ctx context.Context, inst engine.ResolvedInstallation, _ engine.ResolvedIdentity, _ pgtype.UUID, chatMessageID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage {
 	raw, err := decodeTelegramRaw(msg)
-	if err != nil || raw.Media == nil || raw.Media.FileID == "" {
+	if err != nil || len(raw.Media) == 0 {
 		return msg
 	}
 	row, ok := inst.Platform.(db.ChannelInstallation)
@@ -87,20 +88,29 @@ func (r *mediaResolver) ResolveMedia(ctx context.Context, inst engine.ResolvedIn
 		return msg
 	}
 	api := newBotAPI(r.apiBase, creds.BotToken, r.client)
-	ref, err := r.ingest(ctx, inst, chatMessageID, *raw.Media, api)
-	if err != nil {
-		r.logWarn(msg, err)
-		r.notifyUnavailable(ctx, api, msg)
-		return msg
+	// Every file is attempted; one that fails keeps its placeholder in the
+	// body, and the sender hears about it once.
+	failed := false
+	for i, m := range raw.Media {
+		ref, err := r.ingest(ctx, inst, chatMessageID, i, m, api)
+		if err != nil {
+			r.logWarn(msg, err)
+			failed = true
+			continue
+		}
+		msg.MediaRefs = append(msg.MediaRefs, ref)
 	}
-	msg.MediaRefs = append(msg.MediaRefs, ref)
+	if failed {
+		r.notifyUnavailable(ctx, api, msg)
+	}
 	return msg
 }
 
-// notifyUnavailable tells the sender their file did not make it — over
-// Telegram's 20 MB bot download limit, or a failed fetch — so the placeholder
-// the agent is left with is not mistaken for a file it saw. Best effort, on
-// its own short budget: the failure may be the fetch context running out.
+// notifyUnavailable tells the sender a file did not make it — their own or
+// the one they quoted, over Telegram's 20 MB bot download limit or a failed
+// fetch — so the placeholder the agent is left with is not mistaken for a
+// file it saw. Best effort, on its own short budget: the failure may be the
+// fetch context running out.
 func (r *mediaResolver) notifyUnavailable(ctx context.Context, api *botAPI, msg channel.InboundMessage) {
 	chatID, err := strconv.ParseInt(msg.Source.ChatID, 10, 64)
 	if err != nil {
@@ -125,7 +135,7 @@ func (r *mediaResolver) notifyUnavailable(ctx context.Context, api *botAPI, msg 
 // ingest carries one file from Telegram to object storage. The intent row goes
 // first: from that point on every failure leaves a row the reconciler settles,
 // and nothing here deletes anything.
-func (r *mediaResolver) ingest(ctx context.Context, inst engine.ResolvedInstallation, chatMessageID pgtype.UUID, m inboundMedia, api *botAPI) (channel.MediaRef, error) {
+func (r *mediaResolver) ingest(ctx context.Context, inst engine.ResolvedInstallation, chatMessageID pgtype.UUID, index int, m inboundMedia, api *botAPI) (channel.MediaRef, error) {
 	if m.FileSize > maxBotDownloadBytes {
 		return channel.MediaRef{}, fmt.Errorf("file size %d exceeds the %d MiB bot download limit", m.FileSize, maxBotDownloadBytes>>20)
 	}
@@ -139,7 +149,7 @@ func (r *mediaResolver) ingest(ctx context.Context, inst engine.ResolvedInstalla
 	if file.FileSize > maxBotDownloadBytes {
 		return channel.MediaRef{}, fmt.Errorf("file size %d exceeds the %d MiB bot download limit", file.FileSize, maxBotDownloadBytes>>20)
 	}
-	key := mediaObjectKey(inst, chatMessageID, m)
+	key := mediaObjectKey(inst, chatMessageID, index, m)
 	link := r.storage.ObjectURL(key)
 	owned, err := r.ledger.RecordPendingMediaObject(ctx, engine.RecordPendingMediaObjectParams{
 		StorageKey:     key,
@@ -175,12 +185,13 @@ func (r *mediaResolver) ingest(ctx context.Context, inst engine.ResolvedInstalla
 	}, nil
 }
 
-// mediaObjectKey is keyed by the chat message the object binds to, not the
-// platform message alone: a reclaimed dedup claim can ingest one platform
-// message twice, and a shared key would run the second ingest into the first
-// one's (possibly tombstoned) ledger row.
-func mediaObjectKey(inst engine.ResolvedInstallation, chatMessageID pgtype.UUID, m inboundMedia) string {
-	sum := sha256.Sum256([]byte(util.UUIDToString(chatMessageID) + "\x00" + firstNonEmpty(m.FileUniqueID, m.FileID)))
+// mediaObjectKey is keyed by the chat message the object binds to and the
+// file's position in it, not the platform file alone: a reclaimed dedup claim
+// can ingest one platform message twice, and a reply can quote the very file
+// it sends, so a shared key would run the second ingest into the first one's
+// (possibly tombstoned) ledger row.
+func mediaObjectKey(inst engine.ResolvedInstallation, chatMessageID pgtype.UUID, index int, m inboundMedia) string {
+	sum := sha256.Sum256([]byte(util.UUIDToString(chatMessageID) + "\x00" + strconv.Itoa(index) + "\x00" + firstNonEmpty(m.FileUniqueID, m.FileID)))
 	return path.Join("workspaces", util.UUIDToString(inst.WorkspaceID), "telegram", util.UUIDToString(inst.ID), hex.EncodeToString(sum[:]))
 }
 

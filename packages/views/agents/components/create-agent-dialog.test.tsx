@@ -184,8 +184,7 @@ describe("CreateAgentDialog runtime visibility gate", () => {
       .getByText("Others Private")
       .closest("button") as HTMLButtonElement;
     expect(disabledRow).not.toBeNull();
-    expect(disabledRow.disabled).toBe(true);
-    expect(disabledRow.title).toMatch(/Private runtime/i);
+    expect(disabledRow).toHaveAttribute("aria-disabled", "true");
   });
 
   it("lets a plain member pick another member's public runtime", () => {

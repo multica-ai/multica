@@ -9,11 +9,18 @@ import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import { defaultStorage } from "../platform/storage";
 import type { Workspace, WorkspaceMcpServer } from "../types";
+import { forgetLocalSearchIndex } from "../search-index/instance";
 import {
   useCreateWorkspace,
   useDeleteWorkspace,
+  useLeaveWorkspace,
+  useSetWorkspacePinned,
   useUpdateWorkspaceMcpServer,
 } from "./mutations";
+
+vi.mock("../search-index/instance", () => ({
+  forgetLocalSearchIndex: vi.fn(async () => undefined),
+}));
 import { agentMcpServersOptions, workspaceKeys } from "./queries";
 import {
   isWorkspaceDeletePending,
@@ -132,6 +139,7 @@ describe("useDeleteWorkspace", () => {
     unmarkWorkspaceDeletePending("ws-2");
     localStorage.clear();
     vi.restoreAllMocks();
+    vi.mocked(forgetLocalSearchIndex).mockClear();
   });
 
   it("leaves the list cache untouched while the DELETE is pending (no optimistic removal)", async () => {
@@ -196,6 +204,7 @@ describe("useDeleteWorkspace", () => {
 
     expect(defaultStorage.getItem("multica_issue_draft:delete-me")).toBeNull();
     expect(defaultStorage.getItem("multica_issue_draft:keep-me")).toBe("draft");
+    expect(forgetLocalSearchIndex).toHaveBeenCalledWith("ws-2");
   });
 
   it("leaves storage and cache untouched when the DELETE fails", async () => {
@@ -214,6 +223,8 @@ describe("useDeleteWorkspace", () => {
     // No optimistic write happened, so there is nothing to roll back.
     expect(defaultStorage.getItem("multica_issue_draft:delete-me")).toBe("draft");
     expect(cachedList().map((w) => w.id)).toEqual(["ws-1", "ws-2"]);
+    // The workspace still exists, so its local search copy stays.
+    expect(forgetLocalSearchIndex).not.toHaveBeenCalled();
   });
 
   it("keeps the self-initiated marker after success and lifts it after failure", async () => {
@@ -353,5 +364,55 @@ describe("useUpdateWorkspaceMcpServer", () => {
       expect(result.current.updateServer.error).toBe(responseLost);
     });
     expect(listAgentMcpServers).toHaveBeenCalledWith("agent-1");
+  });
+});
+
+describe("useLeaveWorkspace", () => {
+  afterEach(() => {
+    vi.mocked(forgetLocalSearchIndex).mockClear();
+  });
+
+  it("destroys the local search copy only after the server confirms", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const leaveWorkspace = vi.fn().mockRejectedValueOnce(new Error("nope")).mockResolvedValueOnce(undefined);
+    setApiInstance({ leaveWorkspace, listWorkspaces: vi.fn().mockResolvedValue([]) } as unknown as ApiClient);
+    const { result } = renderHook(() => useLeaveWorkspace(), { wrapper: createWrapper(qc) });
+
+    await act(async () => {
+      await expect(result.current.mutateAsync("ws-3")).rejects.toThrow("nope");
+    });
+    expect(forgetLocalSearchIndex).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.mutateAsync("ws-3");
+    });
+    expect(forgetLocalSearchIndex).toHaveBeenCalledWith("ws-3");
+  });
+});
+
+describe("useSetWorkspacePinned", () => {
+  it("reorders optimistically, preserves existing pin time, and rolls back failure", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const setWorkspacePinned = vi.fn<(_: string, __: boolean) => Promise<{ pinned_at: string | null }>>();
+    setApiInstance({ setWorkspacePinned } as unknown as ApiClient);
+    const first = makeWorkspace("first", "first");
+    const second = { ...makeWorkspace("second", "second"), created_at: "2026-02-01T00:00:00Z" };
+    qc.setQueryData(workspaceKeys.list(), [first, second]);
+    let resolve!: (value: { pinned_at: string | null }) => void;
+    setWorkspacePinned.mockImplementationOnce(() => new Promise((res) => { resolve = res; }));
+    const { result } = renderHook(() => useSetWorkspacePinned(), { wrapper: createWrapper(qc) });
+    let pending!: Promise<unknown>;
+    await act(async () => { pending = result.current.mutateAsync({ workspaceId: "second", pinned: true }); await new Promise((res) => setTimeout(res, 0)); });
+    expect(qc.getQueryData<Workspace[]>(workspaceKeys.list())?.[0]?.id).toBe("second");
+    await act(async () => { resolve({ pinned_at: "2026-03-01T00:00:00Z" }); await pending; });
+    expect(qc.getQueryData<Workspace[]>(workspaceKeys.list())?.[0]?.pinned_at).toBe("2026-03-01T00:00:00Z");
+    setWorkspacePinned.mockResolvedValueOnce({ pinned_at: "2026-03-01T00:00:00Z" });
+    await act(async () => { await result.current.mutateAsync({ workspaceId: "second", pinned: true }); });
+    expect(qc.getQueryData<Workspace[]>(workspaceKeys.list())?.[0]?.pinned_at).toBe("2026-03-01T00:00:00Z");
+    setWorkspacePinned.mockRejectedValueOnce(new Error("failed"));
+    await act(async () => { await expect(result.current.mutateAsync({ workspaceId: "second", pinned: false })).rejects.toThrow("failed"); });
+    expect(qc.getQueryData<Workspace[]>(workspaceKeys.list())?.[0]?.pinned_at).toBe("2026-03-01T00:00:00Z");
+    expect(qc.getQueryState(workspaceKeys.list())?.isInvalidated).toBe(true);
+    qc.clear();
   });
 });

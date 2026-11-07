@@ -16,6 +16,7 @@
     "priority": "우선순위",
     "from": "보낸 사람",
     "unread_only": "읽지 않음만",
+    "no_agents_working": "작업 중인 에이전트 없음",
     "notification_count_other": "알림 {{count}}개",
     "clear": "필터 지우기",
     "empty": "필터와 일치하는 알림이 없습니다"
@@ -78,6 +79,7 @@
     "quick_create_failed": "에이전트 생성 실패",
     "quick_create_unconfirmed": "에이전트 생성 결과 미확인",
     "autopilot_paused": "자동화 일시 중지됨",
+    "children_done": "하위 태스크가 모두 끝났습니다",
     "autopilot_quota_exceeded": "자동화 실행 한도 도달"
   },
   "labels": {
@@ -92,7 +94,8 @@
     "reacted_to_comment": "내 댓글에 {{emoji}} 반응을 남겼습니다",
     "created_with_agent": "에이전트가 생성: {{identifier}}",
     "failed_with_detail": "실패: {{detail}}",
-    "autopilot_quota_blocked": "한도에 도달하여 실행이 차단됨"
+    "autopilot_quota_blocked": "한도에 도달하여 실행이 차단됨",
+    "children_done_stage": "{{stage}}단계 하위 태스크가 모두 끝났습니다"
   },
   "toasts": {
     "source_context_retry_started": "원본 컨텍스트로 재시도를 시작했습니다",

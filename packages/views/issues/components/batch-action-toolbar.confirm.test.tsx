@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 
@@ -14,15 +14,30 @@ const selection = vi.hoisted(() => ({
   select: vi.fn(),
   deselect: vi.fn(),
 }));
+const deletionPolicy = vi.hoisted(() => ({ allowed: true }));
+vi.mock("@multica/core/issues/use-issue-deletion", () => ({
+  useIssueDeletion: () => ({ canDelete: () => deletionPolicy.allowed }),
+}));
+
 vi.mock("@multica/core/issues/stores/selection-store", () => ({
   useIssueSelectionStore: (selector: (s: typeof selection) => unknown) => selector(selection),
 }));
 
-const batchUpdate = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const batchUpdate = vi.hoisted(() => vi.fn().mockResolvedValue({ updated: 1 }));
 const batchDelete = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("@multica/core/issues/mutations", () => ({
   useBatchUpdateIssues: () => ({ mutateAsync: batchUpdate, isPending: false }),
   useBatchDeleteIssues: () => ({ mutateAsync: batchDelete, isPending: false }),
+}));
+
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+vi.mock("@multica/core/issue-workflows", () => ({
+  useIssueWorkflows: () => ({ workflows: [] }),
+  sharedWorkflowStatusKeys: () => null,
+}));
+vi.mock("@tanstack/react-query", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-query")>()),
+  useQuery: () => ({ data: [] }),
 }));
 
 const openModal = vi.hoisted(() => vi.fn());
@@ -31,7 +46,8 @@ vi.mock("@multica/core/modals", () => ({
 }));
 
 vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "label" }) }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }));
+vi.mock("sonner", () => ({ toast }));
 
 // Interactive picker stubs: each renders buttons that fire the real onUpdate the
 // toolbar passes in, so we exercise handleBatchStatus / handleBatchAssignee.
@@ -93,10 +109,14 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 }
 
 beforeEach(() => {
+  deletionPolicy.allowed = true;
   selection.selectedIds = new Set(["a"]);
   batchUpdate.mockClear();
   batchDelete.mockClear();
   openModal.mockClear();
+  selection.clear.mockClear();
+  toast.success.mockClear();
+  toast.warning.mockClear();
 });
 
 describe("BatchActionToolbar status routing (MUL-4155)", () => {
@@ -112,6 +132,15 @@ describe("BatchActionToolbar status routing (MUL-4155)", () => {
       expect(batchUpdate).toHaveBeenCalledWith({ ids: ["a"], updates: { status } });
       unmount();
     }
+  });
+
+  it("warns instead of reporting success when the server skips some issues", async () => {
+    selection.selectedIds = new Set(["a", "b"]);
+    batchUpdate.mockResolvedValueOnce({ updated: 1 });
+    render(<BatchActionToolbar issues={[makeIssue({ id: "a" }), makeIssue({ id: "b" })]} />);
+    fireEvent.click(screen.getByTestId("status-done"));
+    await waitFor(() => expect(toast.warning).toHaveBeenCalled());
+    expect(toast.success).not.toHaveBeenCalled();
   });
 
   it("still routes agent assignment through the run-confirm modal", () => {
@@ -134,11 +163,59 @@ describe("BatchActionToolbar status routing (MUL-4155)", () => {
     });
   });
 
+  it("disables deleting a selection containing an unauthorized issue", () => {
+    deletionPolicy.allowed = false;
+    render(<BatchActionToolbar issues={[makeIssue()]} />);
+    const button = screen.getByText("label", { selector: "button.text-destructive" });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(batchDelete).not.toHaveBeenCalled();
+  });
+
   it("opens the dedicated delete confirmation, not the run-confirm modal", () => {
     render(<BatchActionToolbar issues={[makeIssue({ status: "todo" })]} />);
     fireEvent.click(screen.getByText("label", { selector: "button.text-destructive" }));
     expect(screen.getByRole("alertdialog")).toBeInTheDocument();
     expect(openModal).not.toHaveBeenCalled();
     expect(batchDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe("BatchActionToolbar selection after apply (MUL-8179)", () => {
+  it("keeps the selection after an update by default, so edits can be chained", async () => {
+    render(<BatchActionToolbar issues={[makeIssue()]} />);
+    fireEvent.click(screen.getByTestId("status-done"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(selection.clear).not.toHaveBeenCalled();
+  });
+
+  it("clears the selection once an update fully applies when opted in", async () => {
+    render(<BatchActionToolbar issues={[makeIssue()]} clearSelectionOnApply />);
+    fireEvent.click(screen.getByTestId("status-done"));
+    await waitFor(() => expect(selection.clear).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps the selection after a partial update so it can be retried", async () => {
+    selection.selectedIds = new Set(["a", "b"]);
+    batchUpdate.mockResolvedValueOnce({ updated: 1 });
+    render(
+      <BatchActionToolbar
+        issues={[makeIssue({ id: "a" }), makeIssue({ id: "b" })]}
+        clearSelectionOnApply
+      />,
+    );
+    fireEvent.click(screen.getByTestId("status-done"));
+    await waitFor(() => expect(toast.warning).toHaveBeenCalled());
+    expect(selection.clear).not.toHaveBeenCalled();
+  });
+
+  it("hands the run-confirm modal a clear callback instead of clearing up front", () => {
+    render(<BatchActionToolbar issues={[makeIssue({ status: "todo" })]} clearSelectionOnApply />);
+    fireEvent.click(screen.getByTestId("assign-agent"));
+    expect(selection.clear).not.toHaveBeenCalled();
+    const data = openModal.mock.calls[0]![1] as { onApplied?: () => void };
+    data.onApplied?.();
+    expect(selection.clear).toHaveBeenCalledTimes(1);
   });
 });

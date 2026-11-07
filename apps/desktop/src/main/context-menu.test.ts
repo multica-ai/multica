@@ -16,7 +16,7 @@ const ctx = vi.hoisted(() => ({
   capturedItems: [] as CapturedMenuItem[][],
   browserWindowFromWebContents: vi.fn(),
   popupSpy: vi.fn(),
-  clipboardWriteText: vi.fn(),
+  clipboardWriteText: vi.fn().mockResolvedValue(undefined),
   openExternalSpy: vi.fn().mockResolvedValue(undefined),
   preferredLanguagesRef: { current: ["en-US"] as string[] },
 }));
@@ -61,6 +61,12 @@ type ContextMenuParams = {
   selectionText: string;
   isEditable: boolean;
   linkURL: string;
+  mediaType: string;
+  hasImageContents: boolean;
+  misspelledWord: string;
+  dictionarySuggestions: string[];
+  x: number;
+  y: number;
   editFlags: {
     canCut: boolean;
     canCopy: boolean;
@@ -78,6 +84,9 @@ type Listener = (event: unknown, params: ContextMenuParams) => void;
 function makeWebContents() {
   const handlers: Listener[] = [];
   return {
+    copyImageAt: vi.fn(),
+    replaceMisspelling: vi.fn(),
+    session: { addWordToSpellCheckerDictionary: vi.fn() },
     on(event: string, fn: Listener) {
       if (event === "context-menu") handlers.push(fn);
     },
@@ -93,6 +102,45 @@ const baseEditFlags = {
   canPaste: false,
   canSelectAll: false,
 };
+
+describe("installContextMenu — spelling", () => {
+  beforeEach(() => {
+    ctx.capturedItems.length = 0;
+    ctx.preferredLanguagesRef.current = ["en-US"];
+  });
+
+  it("shows suggestions and 'Add to Dictionary' first for a misspelled word in an editable field", () => {
+    const wc = makeWebContents();
+    installContextMenu(wc as never);
+    wc.fire(
+      baseSelection({
+        isEditable: true,
+        misspelledWord: "teh",
+        dictionarySuggestions: ["the", "tea"],
+        editFlags: { ...baseEditFlags, canPaste: true },
+      }),
+    );
+
+    expect(lastMenuLabelsOrEmpty().slice(0, 3)).toEqual([
+      "the",
+      "tea",
+      "Add to Dictionary",
+    ]);
+    invokeByLabel("the");
+    expect(wc.replaceMisspelling).toHaveBeenCalledWith("the");
+    invokeByLabel("Add to Dictionary");
+    expect(wc.session.addWordToSpellCheckerDictionary).toHaveBeenCalledWith("teh");
+  });
+
+  it("omits spelling items when the field is not editable", () => {
+    const wc = makeWebContents();
+    installContextMenu(wc as never);
+    wc.fire(
+      baseSelection({ selectionText: "teh", misspelledWord: "teh", dictionarySuggestions: ["the"] }),
+    );
+    expect(lastMenuLabelsOrEmpty()).not.toContain("Add to Dictionary");
+  });
+});
 
 describe("installContextMenu — link items", () => {
   beforeEach(() => {
@@ -148,12 +196,12 @@ describe("installContextMenu — link items", () => {
   it("does NOT add link items when there is no link under the cursor", () => {
     const wc = makeWebContents();
     installContextMenu(wc as never);
-    wc.fire({
-      selectionText: "hello",
-      isEditable: false,
-      linkURL: "",
-      editFlags: { ...baseEditFlags, canCopy: true },
-    });
+    wc.fire(
+      baseSelection({
+        selectionText: "hello",
+        editFlags: { ...baseEditFlags, canCopy: true },
+      }),
+    );
     const labels = lastMenuLabelsOrEmpty();
     expect(labels).not.toContain("Open Link in Browser");
     // Selection-only context still surfaces copy as before — guards
@@ -184,6 +232,63 @@ describe("installContextMenu — link items", () => {
   });
 });
 
+describe("installContextMenu — image items", () => {
+  beforeEach(() => {
+    ctx.capturedItems.length = 0;
+    ctx.popupSpy.mockClear();
+    ctx.preferredLanguagesRef.current = ["en-US"];
+  });
+
+  it("adds 'Copy Image' on a loaded image and copies the pixels under the cursor", () => {
+    // MUL-7759: the attachment viewer and inline images had no way to
+    // copy the picture itself — Electron shows no menu at all by default.
+    const wc = makeWebContents();
+    installContextMenu(wc as never);
+    wc.fire(
+      baseSelection({ mediaType: "image", hasImageContents: true, x: 120, y: 48 }),
+    );
+
+    expect(lastMenuLabels()).toEqual(["Copy Image"]);
+    invokeByLabel("Copy Image");
+    expect(wc.copyImageAt).toHaveBeenCalledWith(120, 48);
+    expect(ctx.popupSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT add 'Copy Image' before the image has loaded", () => {
+    const wc = makeWebContents();
+    installContextMenu(wc as never);
+    wc.fire(baseSelection({ mediaType: "image", hasImageContents: false }));
+    expect(lastMenuLabelsOrEmpty()).not.toContain("Copy Image");
+    expect(ctx.popupSpy).not.toHaveBeenCalled();
+  });
+
+  it("lists the image items after the link items for an image inside a link", () => {
+    const wc = makeWebContents();
+    installContextMenu(wc as never);
+    wc.fire(
+      baseSelection({
+        linkURL: "https://multica.ai",
+        mediaType: "image",
+        hasImageContents: true,
+      }),
+    );
+    expect(lastMenu().map((i) => i.label ?? i.type)).toEqual([
+      "Open Link in Browser",
+      "Copy Link Address",
+      "separator",
+      "Copy Image",
+    ]);
+  });
+
+  it("uses zh-Hans labels when the OS preferred language is Chinese", () => {
+    ctx.preferredLanguagesRef.current = ["zh-CN"];
+    const wc = makeWebContents();
+    installContextMenu(wc as never);
+    wc.fire(baseSelection({ mediaType: "image", hasImageContents: true }));
+    expect(lastMenuLabels()).toContain("复制图片");
+  });
+});
+
 // --- helpers ---
 
 function baseSelection(over: Partial<ContextMenuParams>): ContextMenuParams {
@@ -191,6 +296,12 @@ function baseSelection(over: Partial<ContextMenuParams>): ContextMenuParams {
     selectionText: "",
     isEditable: false,
     linkURL: "",
+    mediaType: "none",
+    hasImageContents: false,
+    misspelledWord: "",
+    dictionarySuggestions: [],
+    x: 0,
+    y: 0,
     editFlags: { ...baseEditFlags },
     ...over,
   };

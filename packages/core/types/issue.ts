@@ -159,6 +159,22 @@ export interface IssueSourceContext {
   snapshot: SourceContextSnapshot;
 }
 
+/**
+ * An issue with an agent result the viewer has not seen yet
+ * (`GET /api/issues/unread`). `outcome` is `completed` | `failed` for a run, or
+ * `manual` when the viewer marked it unread; `agent_id` and `task_id` are null
+ * for manual. `comment_id` is the last comment that run left on the issue, null
+ * when it left none.
+ */
+export interface IssueUnread {
+  issue_id: string;
+  outcome: string;
+  agent_id: string | null;
+  task_id: string | null;
+  comment_id: string | null;
+  created_at: string;
+}
+
 /** The original a duplicate points at: enough to link it and show its status. */
 export interface IssueDuplicateOf {
   id: string;
@@ -205,8 +221,8 @@ export interface Issue {
   project_id: string | null;
   position: number;
   // Ordered barrier group among sibling sub-issues (null = unstaged). The
-  // parent assignee is notified/woken only when every sub-issue in a stage
-  // finishes; see server/internal/handler/issue_child_done.go.
+  // parent assignee is woken when a stage closes while a later one waits;
+  // see server/internal/service/issue_wakeup_system.go.
   stage: number | null;
   // Calendar days as date-only "YYYY-MM-DD" (no time, no timezone). Use the
   // helpers in @multica/core/issues/date to format/compare — never `new Date()`

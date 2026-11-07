@@ -14,7 +14,7 @@ WITH candidate AS MATERIALIZED (
     SELECT id, workspace_id, issue_id, 'task-supplement-v1'
     FROM candidate
     WHERE @enable_task_supplement::boolean
-      AND provider IN ('codex', 'claude')
+      AND provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro')
       AND issue_id IS NOT NULL
     ON CONFLICT DO NOTHING
     RETURNING task_id
@@ -23,7 +23,10 @@ UPDATE agent_task_queue t
 SET status = 'running',
     started_at = now(),
     wait_reason = NULL,
-    prepare_lease_expires_at = NULL
+    prepare_lease_expires_at = NULL,
+    result = CASE WHEN @enable_process_cleanup::boolean AND candidate.provider IN ('pi', 'omp')
+                  THEN COALESCE(t.result, '{}'::jsonb) || '{"process_cleanup_capability":"pi-process-cleanup-v1"}'::jsonb
+                  ELSE t.result END
 FROM candidate
 WHERE t.id = candidate.id
   -- Reference the data-modifying CTE explicitly: capability persistence and
@@ -45,7 +48,7 @@ WITH locked_task AS MATERIALIZED (
       AND r.workspace_id = @workspace_id
       AND t.status = 'running'
       AND cap.capability = 'task-supplement-v1'
-      AND r.provider IN ('codex', 'claude')
+      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro')
     FOR UPDATE OF t
 ), touched_issue AS (
     UPDATE issue i SET
@@ -92,17 +95,102 @@ WHERE s.task_id = @task_id
   AND s.author_id = @author_id
   AND s.client_request_id = @client_request_id;
 
--- name: GetTaskSupplementByComment :one
+-- name: LockTaskForSupplementBind :one
+-- Taken in its own statement before BindCommentTaskSupplement, in the same
+-- transaction. BindCommentTaskSupplement counts an agent author's earlier
+-- bindings; a count inside the locking statement would keep that statement's
+-- snapshot across the lock wait, so two binders racing for the last slot
+-- would both see the old count. Counting in the next statement sees what the
+-- previous lock holder committed.
+SELECT id FROM agent_task_queue WHERE id = @task_id FOR UPDATE;
+
+-- name: BindCommentTaskSupplement :one
+-- Binds an ordinary comment, already created through the normal comment path,
+-- to the exact running turn its author chose. Locking the task serializes
+-- against terminal transitions: when that turn ended first nothing is bound —
+-- never a later turn of the same agent — and the caller keeps the comment's
+-- normal trigger instead. Agent-authored bindings are capped per turn and per
+-- authoring agent so two agents cannot keep steering each other; a member's
+-- binding is not capped.
+WITH locked_task AS MATERIALIZED (
+    SELECT t.id, t.issue_id, t.runtime_id
+    FROM agent_task_queue t
+    JOIN agent_runtime r ON r.id = t.runtime_id
+    JOIN task_supplement_capability cap ON cap.task_id = t.id
+    WHERE t.id = @task_id
+      AND t.issue_id = @issue_id
+      AND t.agent_id = @agent_id
+      AND r.workspace_id = @workspace_id
+      AND t.status = 'running'
+      AND cap.capability = 'task-supplement-v1'
+      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro')
+      AND (@author_type::text <> 'agent' OR (
+          (SELECT count(*) FROM task_supplement s
+           JOIN comment c ON c.id = s.comment_id
+           WHERE s.task_id = t.id AND c.author_type = 'agent') < @max_agent_bindings::int
+          AND (SELECT count(*) FROM task_supplement s
+               JOIN comment c ON c.id = s.comment_id
+               WHERE s.task_id = t.id AND c.author_type = 'agent'
+                 AND s.author_id = @author_id) < @max_bindings_per_agent::int
+      ))
+    FOR UPDATE OF t
+), inserted AS (
+    INSERT INTO task_supplement (
+        task_id, workspace_id, issue_id, comment_id, author_id,
+        client_request_id, status
+    )
+    SELECT t.id, @workspace_id, t.issue_id, @comment_id, @author_id,
+           @client_request_id, 'pending'
+    FROM locked_task t
+    RETURNING *
+)
+SELECT inserted.*, locked_task.runtime_id
+FROM inserted
+JOIN locked_task ON locked_task.id = inserted.task_id;
+
+-- name: GetRunningTaskForAgentOnIssue :one
+-- The turn a comment sent with steer=true is added to for one recipient. The
+-- bind re-checks that it is still running and can take additional input.
+SELECT id FROM agent_task_queue
+WHERE issue_id = @issue_id AND agent_id = @agent_id AND status = 'running'
+ORDER BY started_at DESC NULLS LAST, id DESC
+LIMIT 1;
+
+-- name: ListUndeliveredTaskSupplementCommentIDs :many
+-- Comments bound to this run that it never read. Completion replays the
+-- agent-authored ones as the mention they replaced.
+SELECT comment_id FROM task_supplement
+WHERE task_id = @task_id AND status <> 'delivered';
+
+-- name: DeleteUndeliveredTaskSupplementForRun :execrows
+-- Drops the receipt of an agent comment that completion replayed: the comment
+-- is now handled by the follow-up run like any other mention, so no client
+-- should offer to resend it.
+DELETE FROM task_supplement
+WHERE comment_id = @comment_id AND task_id = @task_id AND status <> 'delivered';
+
+-- name: GetTaskSupplementForRun :one
 SELECT * FROM task_supplement
-WHERE comment_id = @comment_id AND workspace_id = @workspace_id;
+WHERE comment_id = @comment_id AND task_id = @task_id AND workspace_id = @workspace_id;
+
+-- name: CommentHasTaskSupplement :one
+SELECT EXISTS (
+    SELECT 1 FROM task_supplement
+    WHERE comment_id = @comment_id AND workspace_id = @workspace_id
+) AS bound;
 
 -- name: GetTaskSupplementCapability :one
 SELECT * FROM task_supplement_capability WHERE task_id = @task_id;
 
 -- name: ListTaskSupplementsByCommentIDs :many
-SELECT * FROM task_supplement
-WHERE workspace_id = @workspace_id
-  AND comment_id = ANY(@comment_ids::uuid[]);
+-- One comment may steer several runs; receipts carry the run's agent so a
+-- client can say whose turn received it.
+SELECT s.*, t.agent_id
+FROM task_supplement s
+LEFT JOIN agent_task_queue t ON t.id = s.task_id
+WHERE s.workspace_id = @workspace_id
+  AND s.comment_id = ANY(@comment_ids::uuid[])
+ORDER BY s.created_at, s.task_id;
 
 -- name: ListTaskSupplementMetadata :many
 SELECT cap.task_id, cap.capability,
@@ -131,7 +219,7 @@ WHERE supplement.task_id = task.id
 
 -- name: ClaimNextTaskSupplement :one
 WITH next AS MATERIALIZED (
-    SELECT s.comment_id
+    SELECT s.comment_id, s.task_id
     FROM task_supplement s
     JOIN agent_task_queue t ON t.id = s.task_id
     JOIN task_supplement_capability cap ON cap.task_id = t.id
@@ -139,6 +227,12 @@ WITH next AS MATERIALIZED (
       AND s.status = 'pending'
       AND t.status = 'running'
       AND cap.capability = 'task-supplement-v1'
+      -- A daemon that cannot present an agent's message as an agent's never
+      -- receives one: it stays pending until the turn ends, and completion
+      -- replays it as an ordinary mention.
+      AND (@include_agent_authored::bool OR NOT EXISTS (
+          SELECT 1 FROM comment ac WHERE ac.id = s.comment_id AND ac.author_type = 'agent'
+      ))
     ORDER BY s.created_at, s.comment_id
     FOR UPDATE OF s SKIP LOCKED
     LIMIT 1
@@ -150,13 +244,16 @@ WITH next AS MATERIALIZED (
         updated_at = now()
     FROM next
     WHERE s.comment_id = next.comment_id
+      AND s.task_id = next.task_id
     RETURNING s.*
 )
-SELECT claimed.comment_id, claimed.attempt_count, c.content,
-       COALESCE(NULLIF(btrim(u.name), ''), 'a user')::text AS author_name
+SELECT claimed.comment_id, claimed.attempt_count, c.content, c.author_type,
+       COALESCE(NULLIF(btrim(COALESCE(u.name, a.name)), ''),
+                CASE WHEN c.author_type = 'agent' THEN 'an agent' ELSE 'a user' END)::text AS author_name
 FROM claimed
 JOIN comment c ON c.id = claimed.comment_id
-LEFT JOIN "user" u ON u.id = claimed.author_id;
+LEFT JOIN "user" u ON u.id = claimed.author_id AND c.author_type = 'member'
+LEFT JOIN agent a ON a.id = claimed.author_id AND c.author_type = 'agent';
 
 -- name: AckTaskSupplementDelivered :one
 -- The provider can accept input before completion while its HTTP acknowledgement
@@ -215,7 +312,7 @@ WHERE s.task_id = t.id
   AND s.status = 'failed'
 RETURNING s.*;
 
--- name: LockTaskSupplementByComment :one
+-- name: LockTaskSupplementsByComment :many
 SELECT * FROM task_supplement
 WHERE comment_id = @comment_id AND workspace_id = @workspace_id
 FOR UPDATE;

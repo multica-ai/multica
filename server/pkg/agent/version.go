@@ -18,13 +18,16 @@ import (
 var MinVersions = map[string]string{
 	"antigravity": "1.1.10", // stream-json usage plus reliable headless --model selection
 	"claude":      "2.0.0",
-	"codex":       "0.100.0", // app-server --listen stdio:// added in 0.100.0
-	"copilot":     "1.0.0",   // --output-format json envelope stable from 1.0.x
-	"grok":        "0.2.89",  // ACP + authenticate/session-load/set_model/MCP and --effort thinking flag
-	"qwen":        "0.20.0",  // stream-json protocol captured and verified against Qwen Code 0.20.0
-	"dim":         "0.3.10",  // cross-run session/load: per-process lock releases on graceful exit
-	"mcode":       "0.1.2",   // ACP v1 session/new, prompt, MCP capability forwarding
-	"zeroclaw":    "0.8.0",   // persistent ACP sessions and session/resume were added in 0.8.0
+	"codex":       "0.100.0",   // app-server --listen stdio:// added in 0.100.0
+	"copilot":     "1.0.0",     // --output-format json envelope stable from 1.0.x
+	"grok":        "0.2.89",    // ACP + authenticate/session-load/set_model/MCP and --effort thinking flag
+	"qwen":        "0.20.0",    // stream-json protocol captured and verified against Qwen Code 0.20.0
+	"dim":         "0.3.10",    // cross-run session/load: per-process lock releases on graceful exit
+	"mcode":       "0.1.2",     // ACP v1 session/new, prompt, MCP capability forwarding
+	"muse":        "1.4.10",    // MSP stable surface: session/start, turn/start, item stream
+	"devin":       "3000.3.22", // devin acp --model was introduced in 3000.3.22
+	"zeroclaw":    "0.8.0",     // persistent ACP sessions and session/resume were added in 0.8.0
+	"zcode":       "0.16.0",    // native NDJSON app-server protocol
 	// opencode: honors TMPDIR/TMP/TEMP from 1.1.54. Earlier builds ignore all
 	// three when their embedded Bun runtime extracts a native module, writing
 	// into the shared system temp dir whatever the daemon exports — one 4-8 MB
@@ -130,6 +133,9 @@ type semver struct {
 func SupportsTaskSupplement(provider, version string) bool {
 	var minimum string
 	switch provider {
+	case "pi":
+		// Pi 1.4 RPC reports authoritative prompt/steer dispositions.
+		minimum = "1.4.0"
 	case "codex":
 		// v0.100.0 exposes turn/steer with the expectedTurnId precondition.
 		minimum = "0.100.0"
@@ -137,6 +143,19 @@ func SupportsTaskSupplement(provider, version string) bool {
 		// 2.1.110 fixes PreToolUse additionalContext being lost on tool failure.
 		// https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md
 		minimum = "2.1.110"
+	case "grok":
+		// Grok Build 1.0.14 supports atomic delivery of in-turn interjections
+		// through its x.ai/interject ACP extension.
+		minimum = "1.0.14"
+	case "kiro":
+		// 2.33.0 is the oldest kiro-cli verified to fold `_session/steer`
+		// into the running ACP turn (queued, then injected at the next
+		// tool/message boundary of the same session/prompt).
+		minimum = "2.33.0"
+	case "cursor":
+		// 2026.10.14 is the oldest build verified to forward postToolUse
+		// additional_context into the model turn in --print mode.
+		minimum = "2026.10.14"
 	default:
 		return false
 	}

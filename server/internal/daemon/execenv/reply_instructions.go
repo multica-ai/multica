@@ -2,58 +2,17 @@ package execenv
 
 import "fmt"
 
-// BuildNewCommentsHint returns the comment-reading pointer for a run that
-// RESUMES its provider session and has new comments to catch up on. The server
-// count is ISSUE-WIDE (every thread, not just the triggering one) and excludes
-// the triggering comment itself because that body is already injected into the
-// prompt. It ships only the COUNT and the cursor — never the comment bodies —
-// so the server stays cheap and the agent pulls details on demand.
+// BuildNewCommentsHint supplies issue-wide catch-up facts and exact read commands
+// for a resumed provider session. The count excludes the injected trigger and
+// the agent's own comments; the unfiltered since read may return more rows.
 //
-// The hint carries facts and this turn's exact commands: the issue-wide
-// volume and ONE read that returns exactly the comments behind it. It states
-// no modality: whether the scan runs is decided by step 2 alone, never here.
-// The earlier wording ("don't read them all blindly … only if you need context
-// from the other threads") made the same read optional that the brief calls
-// mandatory, and measured across 537 comment-triggered runs the "only if
-// needed" form meant "never": 0 of 36 non-scanning runs opened a thread the
-// prompt had not already named, against 1 in 10 of the scanning runs
-// (MUL-6984).
+// The issue-wide since read supplies the server-computed delta and satisfies the
+// workflow's scan. This hint does not make that scan optional. Keep per-run state
+// in the user message rather than the stable brief.
 //
-// That wide read used to be the roots scan plus a per-thread expansion — two
-// or more calls to rediscover what the server already computed. A single
-// `--since <anchor>` with no `--thread` IS the delta: ListCommentsSinceForIssue
-// returns every comment on the issue created after the anchor, in every thread
-// and at every nesting level, with no folding, and its predicate is the same
-// `created_at > since` the server counted with (CountNewCommentsSince). It is
-// therefore a strict superset of what the scan could surface: roots-only
-// `last_activity_at` is MAX(created_at) over a thread, so any comment that
-// could move a thread's activity is already in the `--since` result. Reading
-// it satisfies step 2's scan, and the hint says so — the same rule as
-// BuildResumedCommentsHint, where a server-computed EMPTY delta answers the
-// scan (MUL-7344).
-//
-// The count and the read deliberately do not agree, and the text says so. The
-// COUNT is what the agent needs to size the catch-up, so it excludes the
-// injected trigger and the agent's own comments (CountNewCommentsSince). The
-// READ has no such filter — `--since` returns everything after the anchor —
-// and narrowing it to match would mean building a second, count-shaped query
-// for no gain. An agent that sees more rows than the number was told why.
-//
-// Known bounds of the `--since` read, unchanged by this hint: the handler caps
-// a page at 2000 comments and reports the cut in `X-Comments-Truncated`, which
-// the CLI does not surface; and `--thread` combined with `--since` drops the
-// thread root unless `--tail` is passed. The thread command below therefore
-// stays on `--tail 30`, never `--thread ... --since ...`.
-//
-// Since MUL-5377 the per-turn prompt (daemon.buildCommentPrompt) is the only
-// caller — the brief must not carry per-run routing state. The caller invokes
-// this only when the session actually resumes; a run whose resume was dropped
-// takes the cold path even though it carries a since-anchor.
-//
-// Renders nothing on cold start (no prior run → newCommentsSince empty) or when
-// there are no new comments (newCommentCount <= 0) or issueID is empty. In those
-// cases the caller falls back to BuildResumedCommentsHint (when a prior session
-// is active) or BuildColdCommentsHint.
+// The since read has a 2000-comment cap. Use tail for bounded thread reads because
+// thread+since alone may omit the root. Empty inputs render nothing, allowing
+// the caller to select resumed-empty or cold-start guidance instead.
 func BuildNewCommentsHint(issueID, triggerCommentID, triggerThreadID, newCommentsSince string, newCommentCount int) string {
 	if newCommentCount <= 0 || newCommentsSince == "" || issueID == "" {
 		return ""
@@ -201,50 +160,12 @@ func activeThreadID(triggerThreadID, triggerCommentID string) string {
 	return triggerCommentID
 }
 
-// BuildCommentReplyInstructions returns the canonical block telling an agent
-// how to post its reply for a comment-triggered task. Both the per-turn
-// prompt (daemon.buildCommentPrompt) and the CLAUDE.md workflow
-// (InjectRuntimeConfig) call this so the trigger comment ID and the
-// --parent value cannot drift between surfaces.
+// BuildCommentReplyInstructions formats this turn's reply target and file-based
+// posting command. Resumed sessions must not reuse a previous --parent value.
 //
-// The explicit "do not reuse --parent from previous turns" wording exists
-// because resumed Claude sessions keep prior turns' tool calls in context
-// and will otherwise copy the old --parent UUID forward.
-//
-// The template is platform-agnostic AND provider-agnostic — the failure it
-// guards against lives at the shell layer, so it cannot be scoped to one
-// provider or one OS:
-//
-//   - Inline `--content "..."` lets the shell rewrite the body BEFORE the CLI
-//     receives it: a backtick-wrapped token becomes a failed command
-//     substitution that is silently deleted, the stored comment no longer
-//     matches what the model intended, and a model that notices the mismatch
-//     can retry forever (MUL-2904 / OKK-497). It also lets Codex emit literal
-//     `\n` escapes inside `--content` (MUL-1467).
-//   - `--content-stdin` with a HEREDOC has TWO failure modes the model cannot
-//     see:
-//     1. On Windows, PowerShell 5.1's `$OutputEncoding` defaults to
-//     ASCIIEncoding when piping to native commands and drops non-ASCII as
-//     `?` before the bytes reach `multica.exe` (#2198 Chinese, #2236
-//     Chinese, #2376 Cyrillic).
-//     2. On any host, when the model emits a multi-flag command (e.g.
-//     `multica issue create --title ... --assignee-id ... --project ...`)
-//     the bash heredoc/flag boundary is fragile: a `BODY \` "terminator
-//     with trailing token" is not recognised as the heredoc end, so flag
-//     lines after it are swallowed into the description; or a clean
-//     terminator turns the trailing `--assignee ...` line into a separate
-//     shell statement that fails while the create already succeeded with
-//     no assignee. Both paths exit 0 with silently dropped flags. Github
-//     issue #4182 documents two confirmed cases (OXY-78, OXY-76).
-//
-// The single safe path is therefore: write the body to a UTF-8 file with
-// the file-write tool, post with `--content-file`, then remove the file.
-// All flags live on one shell-token line; the body never touches the shell;
-// no heredoc boundary exists for flags to leak across. This converges with
-// the long-standing Windows path so the cross-platform template is one shape.
-//
-// provider is retained for caller symmetry and future per-provider tweaks; the
-// guardrail itself is intentionally identical across providers and hosts.
+// Write UTF-8 with --content-file so shell substitution, pipeline encoding, and
+// heredoc boundaries cannot alter the body or swallow trailing flags. Cleanup
+// must depend on a successful post. The template is shared across providers.
 func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string, squadLeader bool) string {
 	if triggerCommentID == "" {
 		return ""

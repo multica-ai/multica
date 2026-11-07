@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"log/slog"
+	"slices"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -61,6 +62,12 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 	if err := qtx.LockSubscriberWrites(ctx, db.LockSubscriberWritesParams{
 		WorkspaceID: workspaceID,
 		UserID:      userID,
+	}); err != nil {
+		return empty, err
+	}
+
+	if _, err := qtx.LockRuntimeShareMemberRemoval(ctx, db.LockRuntimeShareMemberRemovalParams{
+		WorkspaceID: workspaceID, UserID: userID,
 	}); err != nil {
 		return empty, err
 	}
@@ -220,6 +227,36 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 			return empty, err
 		}
 	}
+	sharedRuntimes, err := qtx.ListSharedAgentRuntimesForUpdate(ctx, db.ListSharedAgentRuntimesForUpdateParams{
+		WorkspaceID: workspaceID, UserID: userID,
+	})
+	if err != nil {
+		return empty, err
+	}
+	result.SharedRuntimeCount = len(sharedRuntimes)
+	for _, rt := range sharedRuntimes {
+		rt.SharedWith = slices.DeleteFunc(rt.SharedWith, func(id pgtype.UUID) bool { return id == userID })
+		if rt.Visibility == "public" {
+			if _, err := qtx.UpdateAgentRuntimeVisibility(ctx, db.UpdateAgentRuntimeVisibilityParams{
+				ID: rt.ID, Visibility: rt.Visibility, SharedWith: rt.SharedWith,
+			}); err != nil {
+				return empty, err
+			}
+			continue
+		}
+		if _, err := lockRuntimeRevocationPlan(ctx, qtx, rt); err != nil {
+			return empty, err
+		}
+		_, teardown, readyChats, err := applyRuntimeAccessRevocation(ctx, qtx, rt)
+		if err != nil {
+			return empty, err
+		}
+		result.SharedTeardown.UnboundAgents = append(result.SharedTeardown.UnboundAgents, teardown.UnboundAgents...)
+		result.SharedTeardown.CancelledTasks = append(result.SharedTeardown.CancelledTasks, teardown.CancelledTasks...)
+		result.SharedTeardown.PausedAutopilots = append(result.SharedTeardown.PausedAutopilots, teardown.PausedAutopilots...)
+		result.ReadyChats = append(result.ReadyChats, readyChats...)
+	}
+
 	if err := qtx.DeleteMember(ctx, memberID); err != nil {
 		return empty, err
 	}
@@ -241,10 +278,13 @@ type revocationResult struct {
 	CancelledTasks     []db.AgentTaskQueue
 	OfflineRuntimeIDs  []db.ForceOfflineRuntimesByIDsRow
 	RevokedTokenHashes []string
+	SharedRuntimeCount int
+	SharedTeardown     service.RuntimeTeardownResult
+	ReadyChats         []pgtype.UUID
 }
 
 func (r revocationResult) isEmpty() bool {
-	return len(r.Runtimes) == 0
+	return len(r.Runtimes) == 0 && r.SharedRuntimeCount == 0
 }
 
 // publishRevocation runs all post-commit side effects: invalidate daemon token
@@ -277,12 +317,19 @@ func (h *Handler) publishRevocation(ctx context.Context, result revocationResult
 		})
 	}
 
+	h.PublishRuntimeTeardown(ctx, result.SharedTeardown, workspaceIDStr, actorType, actorIDStr, "revoke", false)
+	if h.TaskService != nil {
+		for _, taskID := range result.ReadyChats {
+			h.TaskService.FinalizeDeferredCancelledChat(ctx, taskID)
+		}
+	}
+
 	// Tell connected clients to refresh the runtime list. We piggyback on
 	// EventDaemonRegister with a "revoke" action — same channel the runtime
 	// delete handler uses — so the frontend invalidates its cached list
 	// without us having to introduce a new event type the desktop app would
 	// need a build to learn about.
-	if len(result.OfflineRuntimeIDs) > 0 {
+	if len(result.OfflineRuntimeIDs) > 0 || result.SharedRuntimeCount > 0 {
 		h.publish(protocol.EventDaemonRegister, workspaceIDStr, actorType, actorIDStr, map[string]any{
 			"action": "revoke",
 		})

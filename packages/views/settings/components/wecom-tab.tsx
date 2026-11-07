@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, Trash2 } from "lucide-react";
+import { ChevronRight, Trash2 } from "@multica/ui/icons";
 import { WecomMark } from "./wecom-mark";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
@@ -35,8 +35,10 @@ import { wecomInstallationsOptions, wecomKeys } from "@multica/core/wecom";
 import { errorCode } from "@multica/core/api";
 import { api } from "@multica/core/api";
 import type { WecomInstallation } from "@multica/core/types";
+import { WecomScanInstallDialog } from "./wecom-scan-install-dialog";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 // WecomTab is the workspace settings panel for WeCom smart-bot
 // installations. Listing is member-visible; the disconnect action is
@@ -252,6 +254,7 @@ export function WecomAgentBindButton({
   const user = useAuthStore((s) => s.user);
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [botId, setBotId] = useState("");
   const [secret, setSecret] = useState("");
   const [botName, setBotName] = useState("");
@@ -262,6 +265,9 @@ export function WecomAgentBindButton({
     enabled: !!wsId,
   });
   const installSupported = listing?.install_supported === true;
+  // Scan needs a QR provider on top of the secret key, so it can be off where
+  // BYO works. When it is off the dialog shows only the BYO fields.
+  const scanSupported = listing?.scan_install_supported === true;
 
   const { data: members = [] } = useQuery({
     ...memberListOptions(wsId),
@@ -363,21 +369,24 @@ export function WecomAgentBindButton({
       className={cn("flex flex-wrap items-center gap-2", className)}
       data-testid="wecom-agent-bind-buttons"
     >
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setDialogOpen(true)}
-        disabled={!agentId}
-        title={
+      <TooltipHint
+        label={
           agentName
             ? t(($) => $.wecom.bind_button_title, { agent: agentName })
             : undefined
         }
-        data-testid="wecom-agent-connect"
       >
-        <WecomMark className="h-3 w-3" />
-        {t(($) => $.wecom.bind_button)}
-      </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setDialogOpen(true)}
+          disabled={!agentId}
+          data-testid="wecom-agent-connect"
+        >
+          <WecomMark className="h-3 w-3" />
+          {t(($) => $.wecom.bind_button)}
+        </Button>
+      </TooltipHint>
 
       <Dialog
         open={dialogOpen}
@@ -389,6 +398,36 @@ export function WecomAgentBindButton({
           </DialogHeader>
 
           <div className="space-y-4">
+            {scanSupported && (
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  className="w-full rounded-md border p-3 text-left transition-colors hover:bg-accent"
+                  onClick={() => {
+                    setDialogOpen(false);
+                    setScanOpen(true);
+                  }}
+                  disabled={submitting}
+                  data-testid="wecom-scan-option"
+                >
+                  <span className="text-body font-medium">
+                    {t(($) => $.wecom.scan_option_title)}
+                  </span>
+                  <span className="text-caption text-muted-foreground mt-0.5 block">
+                    {t(($) => $.wecom.scan_option_description)}
+                  </span>
+                </button>
+                <div className="space-y-0.5">
+                  <p className="text-body font-medium">
+                    {t(($) => $.wecom.byo_option_title)}
+                  </p>
+                  <p className="text-caption text-muted-foreground">
+                    {t(($) => $.wecom.byo_option_description)}
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <Label htmlFor="wecom-byo-bot-id">
                 {t(($) => $.wecom.byo_bot_id_label)}
@@ -464,6 +503,15 @@ export function WecomAgentBindButton({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {scanOpen && (
+        <WecomScanInstallDialog
+          wsId={wsId}
+          agentId={agentId}
+          agentName={agentName}
+          onClose={() => setScanOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -538,20 +586,21 @@ function WecomAgentBotConnectedBadge({
             })}
           </span>
         </span>
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={() => setConfirmOpen(true)}
-          disabled={disconnecting}
-          title={t(($) => $.wecom.agent_bot_disconnect_tooltip)}
-          aria-label={t(($) => $.wecom.disconnect)}
-          data-testid="wecom-agent-bot-disconnect"
-        >
-          <Trash2 className="h-3 w-3" />
-          {disconnecting
-            ? t(($) => $.wecom.disconnecting)
-            : t(($) => $.wecom.disconnect)}
-        </Button>
+        <TooltipHint label={t(($) => $.wecom.agent_bot_disconnect_tooltip)}>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setConfirmOpen(true)}
+            disabled={disconnecting}
+            aria-label={t(($) => $.wecom.disconnect)}
+            data-testid="wecom-agent-bot-disconnect"
+          >
+            <Trash2 className="h-3 w-3" />
+            {disconnecting
+              ? t(($) => $.wecom.disconnecting)
+              : t(($) => $.wecom.disconnect)}
+          </Button>
+        </TooltipHint>
       </div>
 
       <AlertDialog

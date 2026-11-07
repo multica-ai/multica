@@ -36,6 +36,8 @@ func freshAgentEnvSetCmd() *cobra.Command {
 func newAgentTasksTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "tasks"}
 	cmd.Flags().String("output", "json", "")
+	cmd.Flags().Int("limit", 200, "")
+	cmd.Flags().String("before", "", "")
 	cmd.Flags().String("profile", "", "")
 	return cmd
 }
@@ -68,6 +70,38 @@ func TestRunAgentTasksRequestsUsageForJSON(t *testing.T) {
 	}
 	if !strings.Contains(out, `"input_tokens": 12`) {
 		t.Fatalf("JSON output missing usage: %s", out)
+	}
+}
+
+func TestRunAgentTasksPagination(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	cursor := "2026-09-24T01:02:03.123456Z|00000000-0000-0000-0000-000000000001"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("limit") != "7" || r.URL.Query().Get("before") != cursor {
+			t.Errorf("pagination query = %s", r.URL.RawQuery)
+		}
+		w.Header().Set("X-Agent-Tasks-Next-Cursor", cursor)
+		_, _ = w.Write([]byte(`[{"id":"task-1"}]`))
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	cmd := newAgentTasksTestCmd()
+	_ = cmd.Flags().Set("limit", "7")
+	_ = cmd.Flags().Set("before", cursor)
+	var stderr bytes.Buffer
+	cmd.SetErr(&stderr)
+	output, err := captureStdout(t, func() error { return runAgentTasks(cmd, []string{"agent-123"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.String(), "--before") || !strings.Contains(stderr.String(), cursor) {
+		t.Fatalf("missing continuation: %s", stderr.String())
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(output), &rows); err != nil {
+		t.Fatalf("stdout must remain JSON: %s", output)
 	}
 }
 
@@ -217,7 +251,7 @@ func TestMissingServerConfigMessageExplainsPortOnlyContext(t *testing.T) {
 // and asserts the CLI refuses the config-PAT fallback from the escaped cwd.
 func TestNewAPIClient_WorkdirParentEscapeFailsClosed(t *testing.T) {
 	// Seed a user config with a mul_ PAT that must never be picked up.
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_owner_pat"}); err != nil {
 		t.Fatalf("seed config: %v", err)
 	}
@@ -299,7 +333,7 @@ func TestNewAPIClient_LeftoverMarkerActionableError(t *testing.T) {
 // Outside agent context, the three-level fallback (flag → env → config) is
 // unchanged.
 func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 
 	// Seed the global CLI config with a workspace_id that must NOT be
 	// picked up while running inside an agent task.
@@ -394,7 +428,7 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 }
 
 func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 
 	if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_profile_token"}); err != nil {
 		t.Fatalf("seed config: %v", err)
@@ -608,7 +642,7 @@ func TestNewAPIClient_AgentContextRequiresTaskToken(t *testing.T) {
 
 func TestNewAPIClient_DaemonPortRequiresTaskToken(t *testing.T) {
 	t.Chdir(t.TempDir())
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
 	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
 	t.Setenv("MULTICA_AGENT_ID", "")
@@ -633,7 +667,7 @@ func TestNewAPIClient_DaemonPortRequiresTaskToken(t *testing.T) {
 }
 
 func TestNewAPIClient_WorkdirMarkerRequiresTaskToken(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
 	t.Setenv("MULTICA_AGENT_ID", "")
 	t.Setenv("MULTICA_TASK_ID", "")
@@ -741,7 +775,7 @@ func TestParseCustomEnv(t *testing.T) {
 // --custom-env* flags are gone from `agent update`; the hint must
 // surface their replacement so users discover the new audited path.
 func TestAgentUpdateNoFieldsErrorPointsAtEnvCommand(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
 	t.Setenv("MULTICA_WORKSPACE_ID", "test-ws")
 	t.Setenv("MULTICA_TOKEN", "test-token")
@@ -797,7 +831,7 @@ func TestAgentMaxConcurrentTasksFlagValidation(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	t.Setenv("HOME", t.TempDir())
+	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
 	t.Setenv("MULTICA_TOKEN", "test-token")

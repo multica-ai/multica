@@ -1,14 +1,14 @@
 "use client";
 
 import type { CSSProperties, ReactNode } from "react";
-import { ArrowLeft, Check } from "lucide-react";
+import { ArrowLeft, Check } from "@multica/ui/icons";
 import {
   ONBOARDING_STEP_ORDER,
   type OnboardingStep,
 } from "@multica/core/onboarding";
 import { cn } from "@multica/ui/lib/utils";
-import { Button } from "@multica/ui/components/ui/button";
-import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import { MulticaWordmark } from "@multica/ui/components/common/multica-wordmark";
 import { DotSphere } from "@multica/ui/components/ui/dot-sphere";
 import {
   Stepper,
@@ -82,18 +82,19 @@ export function StepProgressBar({
   return (
     <div className="mb-6 flex items-center gap-3 md:hidden">
       {onBack ? (
-        <Button
+        <IconButton
           type="button"
           variant="ghost"
           size="icon-sm"
           onClick={onBack}
           disabled={backDisabled}
-          aria-label={t(($) => $.common.back)}
+          label={t(($) => $.common.back)}
+          tooltipSide="bottom"
           className="-ml-2 shrink-0"
           style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
         >
           <ArrowLeft />
-        </Button>
+        </IconButton>
       ) : null}
       <span
         aria-hidden
@@ -163,24 +164,23 @@ export function StepSidebar({
 
         <div className="relative flex min-h-0 flex-1 flex-col pt-5">
           <header className="flex min-h-9 shrink-0 items-center justify-between gap-3">
-            <span className="flex min-w-0 items-center gap-2">
-              <MulticaIcon className="size-5 shrink-0 text-foreground" noSpin />
-              <span className="truncate text-label font-medium text-foreground">
-                {t(($) => $.step_nav.wordmark)}
-              </span>
-            </span>
+            <MulticaWordmark
+              title={t(($) => $.step_nav.wordmark)}
+              className="h-[17px] text-foreground"
+            />
             {onBack ? (
-              <Button
+              <IconButton
                 type="button"
                 variant="ghost"
                 size="icon-sm"
                 onClick={onBack}
                 disabled={backDisabled}
-                aria-label={t(($) => $.common.back)}
+                label={t(($) => $.common.back)}
+                tooltipSide="bottom"
                 style={{ WebkitAppRegion: "no-drag" } as CSSProperties}
               >
                 <ArrowLeft />
-              </Button>
+              </IconButton>
             ) : null}
           </header>
 

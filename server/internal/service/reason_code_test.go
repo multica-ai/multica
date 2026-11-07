@@ -168,7 +168,7 @@ func TestAgentReadinessVerdict(t *testing.T) {
 	if fresh.Reason != dispatch.ReasonRuntimeOffline {
 		t.Errorf("install in flight: reason = %q, want %q", fresh.Reason, dispatch.ReasonRuntimeOffline)
 	}
-	stale := runtimeVerdict(installingRow(time.Now().Add(-runtimeInstallClaimWindow - time.Minute)), db.Agent{OwnerID: ownerA})
+	stale := runtimeVerdict(installingRow(time.Now().Add(-runtimeInstallClaimWindow-time.Minute)), db.Agent{OwnerID: ownerA})
 	if !stale.Blocked() || stale.Reason != dispatch.ReasonRuntimeProfileMissing {
 		t.Fatalf("stale install claim: got %+v, want blocked/runtime_profile_missing", stale)
 	}
@@ -230,5 +230,28 @@ func TestRuntimeUnusableNotice(t *testing.T) {
 	accessDenied := RuntimeUnusableNotice("Mika", AgentVerdict{Reason: dispatch.ReasonRuntimeAccessDenied})
 	if !strings.Contains(accessDenied, "public") || !strings.Contains(accessDenied, "rebind/copy") {
 		t.Errorf("access-denied notice must include both recovery paths:\n%s", accessDenied)
+	}
+}
+
+func TestRuntimeProfileNoticeIncludesManualMigrationPath(t *testing.T) {
+	verdict := runtimeVerdict(db.AgentRuntime{
+		Status:   "offline",
+		Metadata: []byte(`{"offline_reason":{"code":"dsh_profile","detail":"the multica DSH profile needs manual migration","installing":false}}`),
+	}, db.Agent{})
+	if !verdict.Blocked() || verdict.Reason != dispatch.ReasonRuntimeProfileMissing {
+		t.Fatalf("migration must refuse the trigger with the existing profile reason: %+v", verdict)
+	}
+	notice := RuntimeUnusableNotice("Kit", verdict)
+	for _, required := range []string{
+		"Kit",
+		"https://github.com/multica-ai/dsh-multica-runtime",
+		"`dsh.profile.bundles`",
+		"replace `dsh-profile-multica` with `@multica-ai/dsh-runtime`",
+		"back up",
+		"will not migrate",
+	} {
+		if !strings.Contains(notice, required) {
+			t.Errorf("blocked-trigger notice lacks migration instruction %q:\n%s", required, notice)
+		}
 	}
 }

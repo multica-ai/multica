@@ -53,7 +53,7 @@ func mergeWakeupEvidence(w db.IssueWakeup, previous db.AgentTaskQueue, receipts 
 		evidence = wakeupEvidence{Version: 1}
 	}
 
-	header := "Wakeup " + util.UUIDToString(w.ID) + " triggered. Instruction:\n" + w.Instruction + "\nTrigger facts (read current state before deciding what to do):\n"
+	header := wakeupNoteHeader(w)
 	budget := wakeupNoteLimit - len(header) - len(wakeupOmittedEvidence) - len(wakeupLegacyHeading)
 	budget = max(budget, 0)
 	total := len(evidence.Legacy)
@@ -107,7 +107,7 @@ func mergeWakeupEvidence(w db.IssueWakeup, previous db.AgentTaskQueue, receipts 
 }
 
 func renderWakeupEvidence(w db.IssueWakeup, evidence wakeupEvidence) string {
-	header := "Wakeup " + util.UUIDToString(w.ID) + " triggered. Instruction:\n" + w.Instruction + "\nTrigger facts (read current state before deciding what to do):\n"
+	header := wakeupNoteHeader(w)
 	if evidence.Omitted {
 		header += wakeupOmittedEvidence
 	}
@@ -132,4 +132,15 @@ func canonicalWakeupPayload(raw json.RawMessage) json.RawMessage {
 	}
 	result, _ := json.Marshal(value)
 	return result
+}
+
+// wakeupNoteHeader opens the [WAKEUP] block. A scheduled check may end with a
+// check-in instead of a comment when nothing needs a reply; say so, with the
+// exact command, only for those rules.
+func wakeupNoteHeader(w db.IssueWakeup) string {
+	header := "Wakeup " + util.UUIDToString(w.ID) + " triggered. Instruction:\n" + w.Instruction + "\n"
+	if w.Kind == "every" || w.Kind == "cron" {
+		header += "This is a scheduled check. If it finds nothing that needs a reply, end with `multica issue wakeup checkin " + util.UUIDToString(w.IssueID) + " " + util.UUIDToString(w.ID) + " --note \"<what you checked and found>\"` instead of posting a comment; the note is shown on the rule. Post a comment when something changed, needs attention, or the check is done.\n"
+	}
+	return header + "Trigger facts (read current state before deciding what to do):\n"
 }

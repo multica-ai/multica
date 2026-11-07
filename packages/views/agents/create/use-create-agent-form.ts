@@ -52,8 +52,10 @@ interface RuntimeSeed {
    * never win a race against the authoritative answer.
    */
   ready: boolean;
-  /** The runtime to adopt; empty falls back to the first usable one. */
+  /** The runtime to adopt; empty may fall back to the first usable one. */
   runtimeId: string;
+  /** Live builder sessions must be explicitly rebound before adopting one. */
+  fallbackToFirstUsable?: boolean;
 }
 
 const IMMEDIATE_RUNTIME_SEED: RuntimeSeed = { ready: true, runtimeId: "" };
@@ -87,9 +89,27 @@ export function useCreateAgentForm(options?: {
     isError: runtimesFailed,
   } = useQuery(runtimeListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
+  const {
+    data: workspaceSkills = [],
+    isSuccess: workspaceSkillsLoaded,
+    fetchStatus: workspaceSkillsFetchStatus,
+  } = useQuery(skillListOptions(wsId));
 
   const [draft, setDraft] = useState<AgentDraft>(EMPTY_AGENT_DRAFT);
+
+  // Drafts can arrive after the catalog through duplication or restoration.
+  // Persist the reconciliation in the draft so the picker, autosave and submit agree.
+  useEffect(() => {
+    // A background refresh still exposes the previous successful catalog.
+    if (!workspaceSkillsLoaded || workspaceSkillsFetchStatus !== "idle" || draft.skillIds.size === 0) return;
+    const validIds = new Set(workspaceSkills.map((skill) => skill.id));
+    setDraft((current) => {
+      const skillIds = new Set([...current.skillIds].filter((id) => validIds.has(id)));
+      return skillIds.size === current.skillIds.size
+        ? current
+        : { ...current, skillIds };
+    });
+  }, [draft.skillIds, workspaceSkills, workspaceSkillsLoaded, workspaceSkillsFetchStatus]);
 
   const usableRuntimes = useMemo(
     () =>
@@ -114,12 +134,13 @@ export function useCreateAgentForm(options?: {
   const seed = options?.runtimeSeed ?? IMMEDIATE_RUNTIME_SEED;
   const seedReady = seed.ready;
   const seedRuntimeId = seed.runtimeId;
+  const fallbackToFirstUsable = seed.fallbackToFirstUsable !== false;
   useEffect(() => {
     if (draft.runtimeId || !seedReady) return;
-    const next = seedRuntimeId || usableRuntimes[0]?.id || "";
+    const next = seedRuntimeId || (fallbackToFirstUsable ? usableRuntimes[0]?.id : "") || "";
     if (!next) return;
     setDraft((current) => ({ ...current, runtimeId: next }));
-  }, [draft.runtimeId, seedReady, seedRuntimeId, usableRuntimes]);
+  }, [draft.runtimeId, seedReady, seedRuntimeId, fallbackToFirstUsable, usableRuntimes]);
 
   const accessInvalid =
     draft.permissionScope === "members" &&
@@ -148,6 +169,7 @@ export function useCreateAgentForm(options?: {
     draftReady:
       selectedRuntime != null &&
       isRuntimeUsableForUser(selectedRuntime, currentUserId) &&
+      (selectedRuntime.provider !== "qoder_cloud" || !!draft.qoderAgentId) &&
       isDraftDescriptionWithinLimit(draft.description) &&
       !accessInvalid &&
       !conversationStartersInvalid,

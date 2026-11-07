@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuthStore } from "../auth";
+import { setCurrentWorkspace } from "../platform/workspace-storage";
 import { configStore } from "../config";
 import type { StorageAdapter, User } from "../types";
 import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
@@ -237,7 +238,7 @@ describe("ApiClient pull-request response schema", () => {
   it("parses the auto-complete decision and link source", async () => {
     stubPullRequests({
       pull_requests: [{ ...validPR, link_source: "title" }],
-      auto_complete: { state: "waiting", pull_request_ids: ["pr-1"], issue_disabled: false, workspace_enabled: true },
+      auto_complete: { state: "waiting", pull_request_ids: ["pr-1"], issue_disabled: false, workspace_enabled: true, target_status: "in_review" },
     });
     const result = await new ApiClient("https://api.example.test").listIssuePullRequests("issue-1");
     expect(result.pull_requests[0]?.link_source).toBe("title");
@@ -246,6 +247,7 @@ describe("ApiClient pull-request response schema", () => {
       pull_request_ids: ["pr-1"],
       issue_disabled: false,
       workspace_enabled: true,
+      target_status: "in_review",
     });
   });
 
@@ -1147,13 +1149,41 @@ describe("ApiClient", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
-    const tasks = await client.listAgentTasks("agent-1");
+    const { tasks, nextCursor } = await client.listAgentTasksPage("agent-1");
 
     expect(tasks.map((task) => task.id)).toEqual(["task-1", "task-2"]);
+    expect(nextCursor).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "https://api.example.test/api/agents/agent-1/tasks",
+      "https://api.example.test/api/agents/agent-1/tasks?limit=200",
     );
+  });
+
+  it("reads a lossless task cursor and passes it to the next bounded request", async () => {
+    const cursor = "2026-09-24T01:02:03.123456Z|00000000-0000-0000-0000-000000000001";
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(
+      JSON.stringify([{ id: "task-1", status: "completed" }]),
+      { headers: { "X-Agent-Tasks-Next-Cursor": cursor } },
+    )));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    const page = await client.listAgentTasksPage("agent-1", { limit: 7 });
+    expect(page.nextCursor).toBe(cursor);
+    const controller = new AbortController();
+    await client.listAgentTasksPage("agent-1", { limit: 7, before: page.nextCursor!, signal: controller.signal });
+    const request = new URL(fetchMock.mock.calls[1]![0]);
+    expect(request.searchParams.get("limit")).toBe("7");
+    expect(request.searchParams.get("before")).toBe(cursor);
+    expect(fetchMock.mock.calls[1]![1].signal).toBe(controller.signal);
+  });
+
+  it("drops the continuation when the task page is malformed", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ tasks: "not-an-array" }),
+      { headers: { "X-Agent-Tasks-Next-Cursor": "cursor" } },
+    )));
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.listAgentTasksPage("agent-1")).resolves.toEqual({ tasks: [], nextCursor: null });
   });
 
   it("falls back to an empty agent task history for a malformed response", async () => {
@@ -1166,7 +1196,7 @@ describe("ApiClient", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
-    await expect(client.listAgentTasks("agent-1")).resolves.toEqual([]);
+    await expect(client.listAgentTasksPage("agent-1")).resolves.toEqual({ tasks: [], nextCursor: null });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -1560,6 +1590,36 @@ describe("ApiClient", () => {
   });
 
   describe("getAttachment", () => {
+    it("uses the attachment-owned workspace endpoint for Markdown downloads", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            id: "att-1",
+            workspace_id: "ws-b",
+            uploader_type: "member",
+            uploader_id: "u-1",
+            filename: "report.md",
+            url: "https://static.example.test/report.md",
+            download_url: "/api/attachments/att-1/signed-download?sig=abc",
+            attachment_download_url: "/api/attachments/att-1/signed-download?sig=def&dl=1",
+            content_type: "text/markdown",
+            size_bytes: 123,
+            created_at: "2026-05-11T00:00:00Z",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const client = new ApiClient("https://api.example.test");
+
+      const att = await client.getAttachmentForDownload("att-1");
+
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        "https://api.example.test/api/attachments/att-1/download-metadata",
+      );
+      expect(att.attachment_download_url).toContain("dl=1");
+    });
+
     it("returns the parsed attachment for a well-formed response", async () => {
       vi.stubGlobal(
         "fetch",
@@ -1611,6 +1671,26 @@ describe("ApiClient", () => {
       // surface a user-facing error instead of opening `undefined`.
       expect(att.id).toBe("");
       expect(att.download_url).toBe("");
+    });
+  });
+
+  describe("attachment dimensions", () => {
+    it.each([
+      [{ width: 3200, height: 2000 }, [3200, 2000]],
+      [{ width: "wide", height: -1 }, [undefined, undefined]],
+      [{ width: null, height: 0.5 }, [undefined, undefined]],
+      [{}, [undefined, undefined]],
+    ])("preserves the attachment with optional metadata %j", async (metadata, expected) => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          id: "att-1", filename: "shot.png", url: "/uploads/shot.png",
+          download_url: "/uploads/shot.png", ...metadata,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )));
+      const att = await new ApiClient("https://api.example.test").getAttachment("att-1");
+      expect(att.id).toBe("att-1");
+      expect([att.width, att.height]).toEqual(expected);
     });
   });
 
@@ -2184,7 +2264,7 @@ describe("ApiClient model discovery response schema", () => {
   function stubJSON(body: unknown) {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
+      vi.fn().mockImplementation(() =>
         new Response(JSON.stringify(body), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -2192,6 +2272,39 @@ describe("ApiClient model discovery response schema", () => {
       ),
     );
   }
+
+  it.each([null, "other-workspace"])(
+    "targets onboarding workspace for discovery and polling with active route %s",
+    async (activeSlug) => {
+      setCurrentWorkspace(activeSlug, null);
+      try {
+        stubJSON(completed);
+        const client = new ApiClient("https://api.example.test");
+        await client.initiateListModels("rt-1", { force: true }, "new-workspace");
+        await client.getListModelsResult("rt-1", "req-1", "new-workspace");
+        for (const [, init] of vi.mocked(fetch).mock.calls) {
+          expect(new Headers(init?.headers).get("X-Workspace-Slug")).toBe("new-workspace");
+        }
+      } finally {
+        setCurrentWorkspace(null, null);
+      }
+    },
+  );
+
+  it("keeps the active workspace header when no override is supplied", async () => {
+    setCurrentWorkspace("existing-workspace", null);
+    try {
+      stubJSON(completed);
+      const client = new ApiClient("https://api.example.test");
+      await client.initiateListModels("rt-1");
+      await client.getListModelsResult("rt-1", "req-1");
+      for (const [, init] of vi.mocked(fetch).mock.calls) {
+        expect(new Headers(init?.headers).get("X-Workspace-Slug")).toBe("existing-workspace");
+      }
+    } finally {
+      setCurrentWorkspace(null, null);
+    }
+  });
 
   it("parses a live completed discovery", async () => {
     stubJSON(completed);
@@ -2478,6 +2591,66 @@ describe("ApiClient refreshSkill response schema", () => {
   });
 });
 
+describe("ApiClient skill version response schemas", () => {
+  function stubJSON(body: unknown) {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  const summary = {
+    id: "ver-2",
+    skill_id: "skill-1",
+    version: 2,
+    name: "review-helper",
+    source: "restore",
+    restored_from_version: 1,
+    created_by: "user-1",
+    created_at: "2026-01-02T00:00:00Z",
+  };
+
+  it("parses the version list and maps unknown sources to update", async () => {
+    stubJSON([summary, { ...summary, id: "ver-1", version: 1, source: "future-kind" }]);
+    const result = await new ApiClient("https://api.example.test").listSkillVersions("skill-1");
+    expect(result.map((v) => [v.version, v.source])).toEqual([
+      [2, "restore"],
+      [1, "update"],
+    ]);
+  });
+
+  it("falls back to an empty list when the response is malformed", async () => {
+    stubJSON({ versions: 42 });
+    const result = await new ApiClient("https://api.example.test").listSkillVersions("skill-1");
+    expect(result).toEqual([]);
+  });
+
+  it("parses a version snapshot and defaults omitted fields", async () => {
+    const fetchMock = stubJSON({ ...summary, content: "# v2", files: [{ path: "a.md" }] });
+    const result = await new ApiClient("https://api.example.test").getSkillVersion("skill-1", 2);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/skills/skill-1/versions/2");
+    expect(result).toMatchObject({
+      version: 2,
+      description: "",
+      content: "# v2",
+      files: [{ path: "a.md", content: "" }],
+    });
+  });
+
+  it("restores through POST and falls back to the empty skill on a malformed body", async () => {
+    const fetchMock = stubJSON({ skill: 42 });
+    const result = await new ApiClient("https://api.example.test").restoreSkillVersion("skill-1", 1);
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toContain("/api/skills/skill-1/versions/1/restore");
+    expect((init as RequestInit | undefined)?.method).toBe("POST");
+    expect(result).toMatchObject({ id: "", files: [] });
+  });
+});
+
 describe("ApiClient workspace MCP servers", () => {
   function stubJSON(body: unknown) {
     const fetchMock = vi.fn().mockResolvedValue(
@@ -2548,6 +2721,19 @@ describe("ApiClient workspace MCP servers", () => {
 
     expect(result).toHaveLength(1);
     expect(result[0]?.transport).toBe("websocket");
+  });
+
+  it("keeps the agent count and degrades a malformed one to unknown", async () => {
+    stubJSON([
+      { ...server, id: "srv-1", agent_count: 3 },
+      { ...server, id: "srv-2", agent_count: "many" },
+      { ...server, id: "srv-3" },
+    ]);
+
+    const result = await new ApiClient("https://api.example.test")
+      .listWorkspaceMcpServers("ws-1");
+
+    expect(result.map((item) => item.agent_count)).toEqual([3, undefined, undefined]);
   });
 
   it("POSTs a name and entry when creating a library server", async () => {
