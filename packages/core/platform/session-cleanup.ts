@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
+import { clearIssueDescriptionSaves } from "../issues/description-save-queue";
 import { resetAllRegisteredDrafts } from "../drafts/cleanup-registry";
 import { wipeLocalSearchIndex } from "../search-index/instance";
 import type { StorageAdapter } from "../types/storage";
@@ -30,6 +31,10 @@ export function clearClientSessionData(
   queryClient: QueryClient,
   storage: StorageAdapter = defaultStorage,
 ): void {
+  // Invalidate queued descriptions before cleanup can unmount their editors.
+  // Requests already sent keep their normal lifecycle; unsent drafts are dropped.
+  clearIssueDescriptionSaves(queryClient);
+
   // Reset draft stores' in-memory state FIRST, before removing persisted
   // keys. Each reset is a Zustand setState, and persist middleware writes the
   // new (empty) state straight back to storage under the still-active
