@@ -1094,6 +1094,39 @@ func (q *Queries) GetAutopilotTriggerForAutopilot(ctx context.Context, arg GetAu
 	return i, err
 }
 
+const getLastAutopilotTaskWorkDir = `-- name: GetLastAutopilotTaskWorkDir :one
+SELECT t.work_dir
+FROM agent_task_queue t
+JOIN autopilot_run r ON r.id = t.autopilot_run_id
+WHERE r.autopilot_id = $1
+  AND t.agent_id = $2
+  AND t.status IN ('completed', 'failed', 'cancelled')
+  AND t.work_dir IS NOT NULL
+ORDER BY COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC
+LIMIT 1
+`
+
+type GetLastAutopilotTaskWorkDirParams struct {
+	AutopilotID pgtype.UUID `json:"autopilot_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+}
+
+// GH #8532: the latest terminal task of this autopilot records the workdir
+// the next run should be offered, so the daemon can reuse the path and the
+// provider's prompt cache survives across runs. Mirrors the (agent, issue)
+// follow-up lookup that backs GetLastTaskSession: only terminal rows, the
+// same COALESCE ordering, and the claiming agent's own rows (a reassigned
+// autopilot starts a new path rather than inheriting another agent's
+// directory). The daemon still re-proves ownership on disk before reusing,
+// so offering a stale or foreign path degrades to a fresh prepare, never to
+// a wrong directory.
+func (q *Queries) GetLastAutopilotTaskWorkDir(ctx context.Context, arg GetLastAutopilotTaskWorkDirParams) (pgtype.Text, error) {
+	row := q.db.QueryRow(ctx, getLastAutopilotTaskWorkDir, arg.AutopilotID, arg.AgentID)
+	var work_dir pgtype.Text
+	err := row.Scan(&work_dir)
+	return work_dir, err
+}
+
 const getLatestAutopilotRunForIssueAttribution = `-- name: GetLatestAutopilotRunForIssueAttribution :one
 SELECT r.id, r.autopilot_id, r.trigger_id, r.source, r.status, r.issue_id, r.task_id, r.triggered_at, r.completed_at, r.failure_reason, r.trigger_payload, r.result, r.created_at, r.squad_id, r.planned_at, r.webhook_delivery_id, r.quota_reservation_id, r.reason_code FROM autopilot_run r
 JOIN autopilot a ON a.id = r.autopilot_id
