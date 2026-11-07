@@ -36,7 +36,7 @@ let state = await app.observe();
 | REPL 进程管理 | `server/internal/localconversation/computer/` | 每个会话独立进程，按 Desktop 上报的运行时启动，能力版本不兼容时重建；超时、终止、原生动作记录 |
 | JavaScript 运行时、SDK 与提示词 | `packages/computer-use/` | Node REPL、顶层 await、变量和应用对象；不持有宿主授权凭据。`prompts.mjs` 是面向模型的说明，`contract/` 是 Computer 能力契约与版本锁 |
 | 主进程通道 | `server/internal/daemon/localhost/computer_host.go` 与 Desktop `computer-use/channel.ts` | Computer Host 协议（JSON-RPC 2.0）：Desktop 以 `initialize` 上报能力、提示词、REPL 运行时和账号；执行设备上的主进程直连 daemon，不经渲染进程或远端查看端 |
-| 桌面 Broker | `apps/desktop/src/main/computer-use/` | 每轮应用授权、设备输入互斥、权限请求、停止和原生进程生命周期 |
+| 桌面 Broker | `apps/desktop/src/main/computer-use/` | 每轮应用授权、按应用的控制互斥、权限请求、停止和原生进程生命周期 |
 | 原生执行 | `apps/desktop/src/computer-native/` | 以 `ELECTRON_RUN_AS_NODE=1` 运行的主进程子进程，内嵌 cua-driver SDK；把 Broker 动作转换为 cua-driver 工具：窗口截图、辅助功能结构、后台控件动作与键鼠投递 |
 
 模型经 MCP 把代码交给 Go。Go 使用 stdin/stdout 向独立 Node REPL 发送 `execute`。SDK 发出结构化 `action`；Go 补齐宿主身份，经 `/local/v2/computer-host` 交给 Electron Broker。原生结果沿相同链路返回，最新截图作为 MCP image 返回模型。
@@ -49,7 +49,7 @@ let state = await app.observe();
 
 - 路由复用 `contextmcp` 本地服务与本地会话的三个工具，令牌放在 URL 路径中，与 daemon 其他任务本地 MCP 一致；任务结束时解绑路由、清空 REPL 并释放桌面控制。
 - 控制身份为 `conversationId = task:<任务 ID>`、`turnId = <任务 ID>`，信封带 `origin: "task"`、工作区和 daemon 账号。daemon 账号在启动时由 `/api/me` 获取，未知时任务不注入。Broker 对 AI 会话和任务一样要求信封账号等于 Desktop 当前账号；账号会话代次变化时撤销控制。
-- 任务运行的应用访问**自动授权**，不弹窗；设备互斥、`CU` 菜单与快捷键停止、禁用应用和宿主进程排除规则与本地会话相同。任务内容（issue、评论、网页）属于未可信数据，自动授权意味着没有逐应用的人工关卡。
+- 任务运行的应用访问**自动授权**，不弹窗；按应用互斥、`CU` 菜单与快捷键停止、禁用应用和宿主进程排除规则与本地会话相同。任务内容（issue、评论、网页）属于未可信数据，自动授权意味着没有逐应用的人工关卡。
 - 工具说明以 MCP `instructions` 下发，内容是 Desktop 上报的 `prompts.task`；AI 会话的系统提示词使用 `prompts.conversation`。两者只在授权方式一句上不同。
 
 ## 模型接口
@@ -86,7 +86,7 @@ SDK 提供：
 - REPL 进程由 Go 管理，使用安装包的 Electron Node 模式，不运行在 Electron 主进程。macOS 使用 `sandbox-exec` 限制文件读取、写入、网络与子进程；启动失败即拒绝执行，没有放宽权限的回退。
 - 只允许读取系统库和本安装的运行时代码。系统加载器需要根目录及文件元信息；不因此开放用户文件内容。环境变量经过清空，不继承账号凭据。V8 heap 上限为 128 MiB，这不等同于总 RSS 上限。
 - Node REPL 自身不是安全沙箱。它使用打包 Node 的 REPL 行为，并对同步异常和顶层 await 做回归测试；升级 Electron 时必须运行实际构建产物的沙箱测试。
-- 一个设备同时只允许一个会话轮次或任务运行控制原生输入。本地会话的应用授权由真实桌面弹窗产生，模型不能传入 `approved`；任务运行自动授权，见上文。不勾选时授权只在本轮有效；勾选“不再询问此应用”的应用按账号保存在 Desktop 用户数据的 `computer-use-approvals.json`，跨轮次和重启有效；设置页的“电脑操作”（仅 macOS）列出当前账号的这些应用，可逐个或全部移除，经主窗口 IPC `computer-use:approvals:*` 读写。验证环境由验证宿主为每个环境设置专属 bundle ID `ai.multica.verification.<环境 ID>`，Broker 对该前缀直接放行；它只表示一次性测试构建，不是权限边界，本机代码仍可伪造该 ID。
+- 多个会话轮次或任务运行可以同时操作电脑，但一个应用同一时间只归一个轮次：轮次第一次 `getApp` 时占用该应用，轮次结束、被取消或被停止时释放；其他轮次在此期间 `getApp` 同一应用会得到 `app_busy`。轮次释放应用时，原生层清掉该应用的已选窗口和观察结果，下一个轮次从头开始；最后一个轮次结束时停止原生进程。原生调用仍在同一个进程里串行执行。正在执行的原生操作被取消时原生进程会重启，其他轮次已获取的应用随之失效，下次操作返回 `native_restarted`，重新 `getApp` 和选择窗口即可，不再弹授权框。`CU` 菜单逐个列出正在操作的轮次，可单独停止；“停止全部”和 Control+Option+Escape 停止所有轮次。daemon 取消某个请求只结束发出该请求的轮次。本地会话的应用授权由真实桌面弹窗产生，模型不能传入 `approved`；任务运行自动授权，见上文。不勾选时授权只在本轮有效；勾选“不再询问此应用”的应用按账号保存在 Desktop 用户数据的 `computer-use-approvals.json`，跨轮次和重启有效；设置页的“电脑操作”（仅 macOS）列出当前账号的这些应用，可逐个或全部移除，经主窗口 IPC `computer-use:approvals:*` 读写。验证环境由验证宿主为每个环境设置专属 bundle ID `ai.multica.verification.<环境 ID>`，Broker 对该前缀直接放行；它只表示一次性测试构建，不是权限边界，本机代码仍可伪造该 ID。
 - 同一运行器进程中的 REPL 可跨轮次保留变量；下一轮仍需重新 `getApp`，选择了不再询问的应用不弹窗。重置、取消、超时、断连、运行器关闭和 daemon 关闭会使变量丢失。分叉不共享 REPL。
 - 停止菜单／快捷键同时撤销原生许可，并通知 Go 终止当前 REPL。该轮不能自动重新获取控制。账号切换与桌面退出也会释放控制。
 - 已发送的系统输入不能撤销。原生调用或连接中断后可能返回 `outcome_unknown`，应检查界面与动作记录，不能直接重复整段代码。

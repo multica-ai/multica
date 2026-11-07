@@ -24,6 +24,8 @@ interface Options {
   clientInfo: { name: string; version: string };
   describe(): ComputerClientState;
   handle(envelope: unknown, signal: AbortSignal): Promise<unknown>;
+  /** The daemon cancelled a request; only the turn that sent it ends. */
+  cancel(envelope: unknown): void;
   stop(): void;
   log?(message: string): void;
   timing?: { handshakeMs: number; retryMs: number; incompatibleRetryMs: number };
@@ -41,7 +43,7 @@ export class ComputerChannel {
   private ready = false;
   private reported = "";
   private controller = new AbortController();
-  private pending = new Map<string, AbortController>();
+  private pending = new Map<string, { abort: AbortController; envelope: unknown }>();
   private timing: typeof defaultTiming;
   constructor(private options: Options) { this.timing = options.timing ?? defaultTiming; }
 
@@ -120,7 +122,9 @@ export class ComputerChannel {
         if (!this.ready) return;
         if (message.method === "notifications/cancelled") {
           const cancel = cancelSchema.safeParse(message.params);
-          if (cancel.success) { this.pending.get(String(cancel.data.requestId))?.abort(); this.options.stop(); }
+          if (!cancel.success) return;
+          const pending = this.pending.get(String(cancel.data.requestId));
+          if (pending) { pending.abort.abort(); this.options.cancel(pending.envelope); }
           return;
         }
         if (message.id === undefined) return;
@@ -135,7 +139,7 @@ export class ComputerChannel {
         }
         const key = String(id);
         if (this.pending.has(key)) { socket.close(); return; }
-        const abort = new AbortController(); this.pending.set(key, abort);
+        const abort = new AbortController(); this.pending.set(key, { abort, envelope: control.data.envelope });
         void this.options.handle(control.data.envelope, abort.signal).then(
           (result) => reply({ result: result ?? null }),
           (error: unknown) => {
@@ -149,7 +153,7 @@ export class ComputerChannel {
       socket.once("close", () => {
         clearTimeout(handshake);
         this.ready = false;
-        for (const pending of this.pending.values()) pending.abort();
+        for (const pending of this.pending.values()) pending.abort.abort();
         this.pending.clear(); this.options.stop(); resolve(retry);
       });
     });
