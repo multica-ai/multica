@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Pencil, Trash2 } from "lucide-react";
+import { Loader2, Pencil, Trash2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
