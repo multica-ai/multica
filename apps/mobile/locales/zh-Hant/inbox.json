@@ -59,6 +59,7 @@
     "task_failed": "執行失敗",
     "agent_blocked": "AI 代理受阻",
     "agent_completed": "AI 代理已完成",
+    "agent_question": "AI 代理提問",
     "reaction_added": "新增了表情",
     "quick_create_done": "快速建立完成",
     "quick_create_failed": "快速建立失敗",

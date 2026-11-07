@@ -249,7 +249,7 @@ Auparavant, vos arguments étaient ajoutés en dernier. La plupart des commandes
 À noter aussi :
 
 - **Les valeurs de Multica l'emportent en cas de conflit.** Si vos arguments fixes définissent une option que Multica définit aussi, la valeur de Multica arrive plus tard et prend effet. Surtout, un modèle choisi sur l'agent remplace un `--model` figé dans le profil. Pour imposer un modèle à tout le monde, laissez vide le champ du modèle des agents.
-- **Les options critiques pour le protocole sont ignorées.** `-p`, `--output-format`, `--input-format`, `--permission-mode` et leurs équivalents pour les autres familles sont retirés de vos arguments fixes, car les remplacer romprait la connexion du daemon à l'outil. Les sous-commandes et les autres arguments positionnels sont toujours transmis.
+- **Les options critiques pour le protocole sont ignorées.** `-p`, `--output-format`, `--input-format`, `--permission-mode`, `--permission-prompt-tool` et leurs équivalents pour les autres familles sont retirés de vos arguments fixes, car les remplacer romprait la connexion du daemon à l'outil. Les sous-commandes et les autres arguments positionnels sont toujours transmis.
 
 Si un daemon lancé par Desktop ne trouve pas une commande que votre terminal peut exécuter, définissez un chemin absolu pour l'ordinateur courant :
 

@@ -39,7 +39,7 @@ Multica 不會替你做檔案系統沙箱。如果守護程序跑在你的個人
 
 ## 不構成邊界的部分
 
-- **程式設計工具自帶的沙箱與審批設定。** Multica 以無人值守方式執行 AI 代理，審批請求會被自動應答。預設路徑下檔案系統沙箱同樣處於關閉狀態：Codex 使用 `sandbox_mode = "danger-full-access"`，Claude Code 使用 `--permission-mode bypassPermissions`。例外是 Windows——如果你顯式配置了 Codex 原生沙箱（`windows.sandbox = "unelevated"` 或 `"elevated"`），Multica 會尊重這個 opt-in，對這些執行保留 `workspace-write`。適用場景下值得開啟，但它只覆蓋一個平臺上的一個工具，不改變你應當如何收窄守護程序使用者的權限。
+- **程式設計工具自帶的沙箱與審批設定。** Multica 以無人值守方式執行 AI 代理，審批請求會被自動應答。唯一的例外是提問：Claude Code 執行呼叫 `AskUserQuestion` 時，機器上不會有任何自動回答——問題會以卡片形式發布到任務裡，本次執行結束，成員回覆後 AI 代理再繼續。預設路徑下檔案系統沙箱同樣處於關閉狀態：Codex 使用 `sandbox_mode = "danger-full-access"`，Claude Code 使用 `--permission-mode bypassPermissions`。例外是 Windows——如果你顯式配置了 Codex 原生沙箱（`windows.sandbox = "unelevated"` 或 `"elevated"`），Multica 會尊重這個 opt-in，對這些執行保留 `workspace-write`。適用場景下值得開啟，但它只覆蓋一個平臺上的一個工具，不改變你應當如何收窄守護程序使用者的權限。
 - **你的 `HOME` 目錄結構。** 執行繼承守護程序使用者真實的 `HOME` 與 `XDG_*` 變數——正因如此，`gh`、`aws`、`kubectl`、`gcloud`、`glab` 等宿主 CLI 在執行內的行為與在你 shell 裡完全一致。這同時也意味著該 home 下的一切都可觸達。
 
 <Callout>
