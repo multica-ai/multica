@@ -148,6 +148,8 @@
       "stuck_one": "{{count}} tâche attend un runtime hors ligne",
       "stuck_other": "{{count}} tâches attendent un runtime hors ligne",
       "working_now": "En cours",
+      "show_more_agents": "Afficher {{count}} de plus…",
+      "show_fewer_agents": "Afficher moins",
       "running_tasks_one": "{{count}} tâche en cours",
       "running_tasks_other": "{{count}} tâches en cours",
       "all_agents": "Tous les agents",
