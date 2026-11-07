@@ -8094,21 +8094,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	if task.Agent != nil {
 		agentMcpConfig = task.Agent.McpConfig
-		effectiveMcpConfig = agentMcpConfig
-		if merged, mergeErr := mergeRuntimeAndAgentMcpConfig(provider, agentMcpConfig); mergeErr != nil {
-			taskLog.Warn("mcp_config: runtime merge failed; using agent configuration only",
-				"provider", provider,
-				"error", mergeErr,
-			)
-		} else {
-			effectiveMcpConfig = merged
-		}
-		if len(remoteMCPConfig) > 0 {
-			merged, mergeErr := mergeTaskRemoteMCPConfig(effectiveMcpConfig, remoteMCPConfig)
-			if mergeErr != nil {
-				return TaskResult{}, fmt.Errorf("merge Remote MCP broker configuration: %w", mergeErr)
-			}
-			effectiveMcpConfig = merged
+		effectiveMcpConfig, err = mergeTaskMcpConfig(provider, agentMcpConfig, remoteMCPConfig, taskLog)
+		if err != nil {
+			return TaskResult{}, err
 		}
 		if provider == "cursor" {
 			cursorMcpAuthSource = strings.TrimSpace(task.Agent.CustomEnv[execenv.CursorMcpAuthSourceEnv])

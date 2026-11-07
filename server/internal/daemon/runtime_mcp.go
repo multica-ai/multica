@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,6 +22,27 @@ type runtimeLocalMcpServerSummary struct {
 	Transport string `json:"transport,omitempty"`
 	Source    string `json:"source,omitempty"`
 	Enabled   bool   `json:"enabled"`
+}
+
+func mergeTaskMcpConfig(provider string, agentConfig, taskConfig json.RawMessage, logger *slog.Logger) (json.RawMessage, error) {
+	config := agentConfig
+	trimmed := bytes.TrimSpace(config)
+	if len(taskConfig) > 0 && (len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null"))) {
+		// Task contributions also make the provider's MCP set authoritative.
+		// Resolve native servers before the provider replaces its inherited set.
+		config = json.RawMessage(`{}`)
+	}
+	if merged, err := mergeRuntimeAndAgentMcpConfig(provider, config); err != nil {
+		logger.Warn("mcp_config: runtime merge failed; using agent configuration only",
+			"provider", provider, "error", err)
+	} else {
+		config = merged
+	}
+	merged, err := mergeTaskRemoteMCPConfig(config, taskConfig)
+	if err != nil {
+		return nil, fmt.Errorf("merge Remote MCP broker configuration: %w", err)
+	}
+	return merged, nil
 }
 
 // mergeRuntimeAndAgentMcpConfig builds the task-local MCP configuration used
