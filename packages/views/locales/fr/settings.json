@@ -328,6 +328,7 @@
       "description": "Non personnalisables. Les raccourcis de zoom et d’onglets sont réservés à Desktop.",
       "open_settings": "Ouvrir les paramètres",
       "close_tab": "Fermer l'onglet actif",
+      "reopen_closed_tab": "Rouvrir l’onglet fermé",
       "select_tab_1_to_8": "Sélectionner l'onglet 1 à 8",
       "select_last_tab": "Sélectionner le dernier onglet",
       "zoom_in": "Zoom avant",
@@ -1258,6 +1259,7 @@
       "unpin": "Désépingler l'onglet",
       "close": "Fermer l'onglet",
       "close_others": "Fermer les autres onglets",
+      "reopen_closed": "Rouvrir l’onglet fermé",
       "open_window": "Ouvrir dans une nouvelle fenêtre",
       "new": "Nouvel onglet",
       "pinned_name": "{{title}} (épinglé)"

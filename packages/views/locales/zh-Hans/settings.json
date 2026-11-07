@@ -326,6 +326,7 @@
       "description": "不可自定义；缩放和标签页快捷键仅用于桌面端。",
       "open_settings": "打开设置",
       "close_tab": "关闭当前标签页",
+      "reopen_closed_tab": "重新打开已关闭的标签页",
       "select_tab_1_to_8": "选择第 1–8 个标签页",
       "select_last_tab": "选择最后一个标签页",
       "zoom_in": "放大",
@@ -1252,6 +1253,7 @@
       "unpin": "取消固定标签页",
       "close": "关闭标签页",
       "close_others": "关闭其他标签页",
+      "reopen_closed": "重新打开已关闭的标签页",
       "open_window": "在新窗口打开",
       "new": "新建标签页",
       "pinned_name": "{{title}}（已固定）"

@@ -394,3 +394,10 @@ describe("keyboard shortcut definitions", () => {
     expect(parseLegacyShortcut("Bogus+K")).toBeNull();
   });
 });
+
+
+describe("fixed Desktop tab recovery reservation", () => {
+  it.each(["macos", "windows", "linux"] as const)("keeps primary Shift T unavailable to overrides on %s", (platform) => {
+    expect(isReservedShortcut(createShortcutChord("T", { primary: true, shift: true }), platform, "desktop")).toBe(true);
+  });
+});

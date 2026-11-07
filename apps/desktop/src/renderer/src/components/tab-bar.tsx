@@ -43,6 +43,8 @@ import {
   useTabPresentation,
   ResourceLeadingVisual,
 } from "@multica/views/layout";
+import { createShortcutChord } from "@multica/core/shortcuts";
+import { ShortcutKeycaps } from "@multica/views/common/shortcut-keycaps";
 import { parseIssueWindowPath } from "../../../shared/issue-window";
 
 const TAB_SCROLL_FADE_SIZE = 24;
@@ -153,6 +155,9 @@ function SortableTabItem({
   const setActiveTab = useTabStore((s) => s.setActiveTab);
   const closeTab = useTabStore((s) => s.closeTab);
   const closeOtherTabs = useTabStore((s) => s.closeOtherTabs);
+  const reopenClosedTab = useTabStore((s) => s.reopenClosedTab);
+  const canReopen = useTabStore((s) => !!s.activeWorkspaceSlug &&
+    (s.closedTabsByWorkspace[s.activeWorkspaceSlug]?.length ?? 0) > 0);
   const togglePin = useTabStore((s) => s.togglePin);
   const updateTab = useTabStore((s) => s.updateTab);
   const issueWindowPath = parseIssueWindowPath(tab.url);
@@ -375,6 +380,11 @@ function SortableTabItem({
             >
               <ListX />
               {closeOthersLabel}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem disabled={!canReopen} onClick={reopenClosedTab}>
+              {t(($) => $.desktop.tab_bar.reopen_closed)}
+              <ShortcutKeycaps shortcut={createShortcutChord("T", { primary: true, shift: true })} decorative className="ml-auto" />
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>

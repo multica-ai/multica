@@ -49,6 +49,8 @@ vi.mock("@/stores/tab-store", () => {
     get byWorkspace() {
       return state.byWorkspace;
     },
+    closedTabsByWorkspace: {},
+    reopenClosedTab: vi.fn(),
     togglePin: state.togglePin,
     closeTab: state.closeTab,
     closeOtherTabs: state.closeOtherTabs,

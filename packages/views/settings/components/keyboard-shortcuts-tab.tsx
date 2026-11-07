@@ -199,6 +199,7 @@ export function KeyboardShortcutsTab() {
         <SettingsCard>
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.open_settings)} shortcut={createShortcutChord(",", { primary: true })} />
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.close_tab)} shortcut={createShortcutChord("W", { primary: true })} />
+          <FixedShortcutRow label={t(($) => $.shortcuts.fixed.reopen_closed_tab)} shortcut={createShortcutChord("T", { primary: true, shift: true })} />
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.select_tab_1_to_8)} shortcut={createShortcutChord("1–8", { primary: true })} />
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.select_last_tab)} shortcut={createShortcutChord("9", { primary: true })} />
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.zoom_in)} shortcut={createShortcutChord("Plus", { primary: true })} />

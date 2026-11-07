@@ -326,6 +326,7 @@
       "description": "변경할 수 없습니다. 확대 및 탭 단축키는 데스크톱 전용입니다.",
       "open_settings": "설정 열기",
       "close_tab": "활성 탭 닫기",
+      "reopen_closed_tab": "닫은 탭 다시 열기",
       "select_tab_1_to_8": "1~8번째 탭 선택",
       "select_last_tab": "마지막 탭 선택",
       "zoom_in": "확대",
@@ -966,6 +967,7 @@
       "unpin": "탭 고정 해제",
       "close": "탭 닫기",
       "close_others": "다른 탭 닫기",
+      "reopen_closed": "닫은 탭 다시 열기",
       "open_window": "새 창에서 열기",
       "new": "새 탭",
       "pinned_name": "{{title}} (고정됨)"

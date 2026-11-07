@@ -310,6 +310,7 @@
       "description": "No personalizables. Los atajos de zoom y pestañas solo se aplican en la app de escritorio.",
       "open_settings": "Abrir Configuración",
       "close_tab": "Cerrar pestaña activa",
+      "reopen_closed_tab": "Volver a abrir pestaña cerrada",
       "select_tab_1_to_8": "Seleccionar pestaña 1-8",
       "select_last_tab": "Seleccionar la última pestaña",
       "zoom_in": "Acercar",
@@ -1240,6 +1241,7 @@
       "unpin": "Dejar de fijar pestaña",
       "close": "Cerrar pestaña",
       "close_others": "Cerrar las demás pestañas",
+      "reopen_closed": "Volver a abrir pestaña cerrada",
       "open_window": "Abrir en ventana nueva",
       "new": "Pestaña nueva",
       "pinned_name": "{{title}} (fijada)"
