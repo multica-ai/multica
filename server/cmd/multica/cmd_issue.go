@@ -496,14 +496,16 @@ var issueSearchCmd = &cobra.Command{
 	Short: "Search issues by title, description, or comments",
 	Long: "Search issues in the current workspace. The query matches issue titles,\n" +
 		"descriptions, and comment bodies, so a conclusion that only lives in a\n" +
-		"comment thread is still findable.\n\n" +
+		"comment thread is still findable. Pass --scope title_desc to skip comments\n" +
+		"when comment threads add too much noise or slow down large workspaces.\n\n" +
 		"A bare number or an identifier-shaped query (\"412\", \"AGE-412\") matches\n" +
 		"the issue with that number. The prefix is not validated, and number\n" +
 		"matches rank first, so pasting an identifier from another tracker can\n" +
 		"put an unrelated local issue at the top of the results.\n\n" +
 		"The MATCH column (match_source in --output json) reports the strongest\n" +
 		"field that matched — title, description, or comment — and falls back to\n" +
-		"\"comment\" for a number-only hit. Treat it as a display hint, not a\n" +
+		"\"comment\" for a number-only hit (\"description\" with --scope title_desc,\n" +
+		"where comments are skipped). Treat it as a display hint, not a\n" +
 		"filter.",
 	Args: cobra.ExactArgs(1),
 	RunE: runIssueSearch,
@@ -782,6 +784,7 @@ func init() {
 
 	// issue search
 	issueSearchCmd.Flags().Int("limit", 20, "Maximum number of results to return")
+	issueSearchCmd.Flags().String("scope", "all", "Match scope: all (title, description, comments) or title_desc (title and description only)")
 	issueSearchCmd.Flags().Bool("include-closed", false, "Include done and cancelled issues")
 	issueSearchCmd.Flags().String("output", "table", "Output format: table or json")
 
@@ -3209,6 +3212,11 @@ func runIssueCancelTask(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueSearch(cmd *cobra.Command, args []string) error {
+	scope, _ := cmd.Flags().GetString("scope")
+	if scope != "all" && scope != "title_desc" {
+		return fmt.Errorf("invalid --scope %q: valid values are all, title_desc", scope)
+	}
+
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -3224,6 +3232,9 @@ func runIssueSearch(cmd *cobra.Command, args []string) error {
 	}
 	if v, _ := cmd.Flags().GetBool("include-closed"); v {
 		params.Set("include_closed", "true")
+	}
+	if scope == "title_desc" {
+		params.Set("scope", scope)
 	}
 
 	path := "/api/issues/search?" + params.Encode()

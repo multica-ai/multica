@@ -365,7 +365,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `assign <id>` | 할당 또는 할당 해제 | `--to`(이름으로 멤버, 에이전트, 스쿼드 fuzzy match), `--to-id`, `--unassign`, `--no-start` |
 | | `status <id> <status>` | 상태 변경 | `--no-start`, `--duplicate-of` |
 | | `reorder <id>` | 열 안에서 이동 | |
-| | `search <query>` | 태스크 검색 | `--limit`, `--include-closed` |
+| | `search <query>` | 태스크 검색 | `--limit`, `--scope`, `--include-closed` |
 | | `children <id>` | 단계별로 묶은 하위 태스크 목록 | |
 | | `pull-requests <id>` | 연결된 PR 목록 | |
 | | `comment list/add/update/delete/resolve/unresolve` | 댓글 관리 | `add`: `--content` / `--content-stdin` / `--content-file`, `--parent`, `--attachment`. `update`: `--expected-revision`(필수), `--content` / `--content-stdin` / `--content-file`. `list`: `--since`, `--thread`, `--tail`, `--recent`, `--roots-only`, `--summary`, `--compact`, `--full` |

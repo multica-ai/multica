@@ -40,6 +40,11 @@ const (
 
 	searchWorkMemEnv       = "DATABASE_SEARCH_WORK_MEM_MB"
 	defaultSearchWorkMemMB = 64
+
+	// searchScopeTitleDesc restricts issue search to title and description,
+	// skipping the comment scan and aggregation pass. Any other value
+	// (including empty or "all") keeps the default full-scope behavior.
+	searchScopeTitleDesc = "title_desc"
 )
 
 // configuredSearchWorkMemMB removes the candidate-first comment aggregation

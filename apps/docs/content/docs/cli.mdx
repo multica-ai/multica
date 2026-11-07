@@ -395,7 +395,7 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `assign <id>` | Assign or unassign | `--to` (fuzzy name match against members, agents, and squads), `--to-id`, `--unassign`, `--no-start` |
 | | `status <id> <status>` | Change status | `--no-start`, `--duplicate-of` |
 | | `reorder <id>` | Move within a column | |
-| | `search <query>` | Search issues | `--limit`, `--include-closed` |
+| | `search <query>` | Search issues | `--limit`, `--scope`, `--include-closed` |
 | | `children <id>` | List sub-issues grouped by stage | |
 | | `pull-requests <id>` | List linked PRs | |
 | | `comment list/add/update/delete/resolve/unresolve` | Manage comments | `add`: `--content` / `--content-stdin` / `--content-file`, `--parent`, `--attachment`; `update`: `--expected-revision` (required), `--content` / `--content-stdin` / `--content-file`; `list`: `--since`, `--thread`, `--tail`, `--recent`, `--roots-only`, `--summary`, `--compact`, `--full` |
