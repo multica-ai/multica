@@ -580,7 +580,8 @@
   },
   "timeline": {
     "loading": "Loading...",
-    "jump_to_latest": "Jump to latest"
+    "jump_to_latest": "Jump to latest",
+    "back_to_top": "Back to top"
   },
   "activity": {
     "created": "created this issue",

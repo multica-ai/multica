@@ -572,7 +572,8 @@
   },
   "timeline": {
     "loading": "加载中…",
-    "jump_to_latest": "跳到最新"
+    "jump_to_latest": "跳到最新",
+    "back_to_top": "回到顶部"
   },
   "activity": {
     "created": "创建了这个任务",

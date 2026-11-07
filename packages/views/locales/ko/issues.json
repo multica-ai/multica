@@ -572,7 +572,8 @@
   },
   "timeline": {
     "loading": "불러오는 중...",
-    "jump_to_latest": "최신으로 이동"
+    "jump_to_latest": "최신으로 이동",
+    "back_to_top": "맨 위로"
   },
   "activity": {
     "created": "이 태스크를 만들었습니다",
