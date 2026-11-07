@@ -1058,7 +1058,7 @@ func TestCompletionFallbackSingleWinner(t *testing.T) {
 	defer func() { testHandler.TaskService.TxStarter = originalTxStarter }()
 	done := make(chan int, 1)
 	go func() {
-		req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/"+workerTaskID+"/complete", map[string]any{"output": "Processed the inputs delivered to this run"}, testWorkspaceID, "worker-reply-handoff")
+		req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/tasks/"+workerTaskID+"/complete", map[string]any{"output": "Processed the inputs delivered to this run"})
 		req = withURLParam(req, "taskId", workerTaskID)
 		rec := httptest.NewRecorder()
 		testHandler.CompleteTask(rec, req)
@@ -1066,6 +1066,8 @@ func TestCompletionFallbackSingleWinner(t *testing.T) {
 	}()
 	select {
 	case <-starter.started:
+	case code := <-done:
+		t.Fatalf("completion callback returned before synthesis lock: status %d", code)
 	case <-time.After(30 * time.Second):
 		t.Fatal("completion synthesis never acquired the row lock")
 	}
