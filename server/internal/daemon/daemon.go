@@ -8830,6 +8830,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if err := agent.StopHermesTaskGateway(backendConfig, env.HermesHome); err != nil {
 			return TaskResult{}, err
 		}
+		stopGateway, err := agent.StartHermesTaskGateway(ctx, backendConfig, env.HermesHome)
+		if err != nil {
+			return TaskResult{}, err
+		}
+		defer stopGateway()
 		defer func() {
 			if err := agent.StopHermesTaskGateway(backendConfig, env.HermesHome); err != nil {
 				d.logger.Warn("failed to stop task Hermes gateway", "home", env.HermesHome, "error", err)
