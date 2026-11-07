@@ -52,7 +52,7 @@ export function useChatSessionRealtime(
 
       const invalidateMine = () => {
         qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-        qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
+        void invalidatePendingTask(qc, sessionId);
       };
 
       return [
@@ -62,7 +62,7 @@ export function useChatSessionRealtime(
         ws.on("chat:message", (payload) => {
           if (!isMine(payload)) return;
           qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-          qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
+          void invalidatePendingTask(qc, sessionId);
         }),
         ws.on("chat:done", (payload) => {
           if (!isMine(payload)) return;
@@ -85,7 +85,7 @@ export function useChatSessionRealtime(
         }),
         ws.on("task:cancelled", (payload) => {
           if (!isMine(payload)) return;
-          invalidatePendingTask(qc, sessionId);
+          void invalidatePendingTask(qc, sessionId);
           qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
         }),
         // Revocation arms durable chat settlement in its transaction. The
@@ -97,13 +97,13 @@ export function useChatSessionRealtime(
         }),
         ws.on("task:completed", (payload) => {
           if (!isMine(payload)) return;
-          invalidatePendingTask(qc, sessionId);
+          void invalidatePendingTask(qc, sessionId);
         }),
         ws.on("task:failed", (payload) => {
           if (!isMine(payload)) return;
           // FailTask persists a destructive assistant message — surface it
           // and recover any queued successor from the authoritative endpoint.
-          invalidatePendingTask(qc, sessionId);
+          void invalidatePendingTask(qc, sessionId);
           qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
         }),
         ws.on("chat:session_deleted", (payload) => {
