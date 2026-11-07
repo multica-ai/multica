@@ -57,6 +57,20 @@ STARTTLS is used automatically when advertised by the server. Port 465 (SMTPS / 
 
 > **Note:** If neither Resend nor SMTP is configured, generated verification codes are printed to backend logs — copy them from there to log in. A fixed local testing code (e.g. `888888`) is **opt-in only**: set `MULTICA_DEV_VERIFICATION_CODE=888888` in `.env` and keep `APP_ENV` non-production. The Docker self-host stack pins `APP_ENV=production`, so the shortcut is ignored there. **Never enable a fixed code on a publicly reachable instance.**
 
+### Out-of-App Notification Batching (Optional)
+
+`NOTIFICATION_DELIVERY_DELAY` adds an in-memory debounce window before configured out-of-app channels, such as Google Chat, receive new inbox items.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `NOTIFICATION_DELIVERY_DELAY` | Non-negative Go duration such as `30s`, `2m`, or `10m`. `0` keeps immediate one-item delivery. | `0` |
+
+During a non-zero window, items are grouped per workspace and recipient. Before a batch is sent, Multica reads every item again and drops items that were deleted, read, or archived. Each recipient buffer holds at most 100 items; if a burst exceeds that cap, the oldest item is dropped and the backend logs the item ID.
+
+Graceful shutdown flushes pending batches after request and channel work has stopped. A crash or forced restart loses the in-memory window, so keep the delay shorter than the deployment's acceptable notification-loss window.
+
+The buffer is process-local. In a multi-replica deployment, each replica batches the inbox events it creates; batches for the same recipient are not combined across replicas. Multica's in-process event bus does not fan one event out to every replica, so enabling the delay does not itself duplicate deliveries. An external system that replays the same inbox event into multiple replicas can still produce duplicates.
+
 ### Google OAuth (Optional)
 
 | Variable | Description |

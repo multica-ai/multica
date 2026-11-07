@@ -668,6 +668,20 @@
       "title": "Notificaciones del sistema",
       "label": "Mostrar notificaciones del sistema"
     },
+    "delivery": {
+      "title": "Entrega fuera de la aplicación",
+      "google_chat": {
+        "label": "Google Chat",
+        "description": "Envía nuevos elementos de la bandeja a un espacio de Google Chat.",
+        "input_label": "URL del webhook de Google Chat",
+        "placeholder": "https://chat.googleapis.com/v1/spaces/…",
+        "how_to": "Espacio de Google Chat → Aplicaciones e integraciones → Webhooks → Añadir webhook → copiar URL.",
+        "save": "Guardar",
+        "replace": "Reemplazar",
+        "remove": "Eliminar",
+        "cancel": "Cancelar"
+      }
+    },
     "browser": {
       "label": "Notificaciones del navegador",
       "hint": "Permite que este navegador muestre avisos de notificación para nuevos elementos de la bandeja.",

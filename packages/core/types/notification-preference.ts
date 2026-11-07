@@ -9,7 +9,11 @@ export type NotificationGroupKey =
 
 export type NotificationGroupValue = "all" | "muted";
 
-export type NotificationPreferences = Partial<Record<NotificationGroupKey, NotificationGroupValue>>;
+export type NotificationPreferences = Partial<
+  Record<NotificationGroupKey, NotificationGroupValue>
+> & {
+  google_chat_webhook?: string;
+};
 
 export interface NotificationPreferenceResponse {
   workspace_id: string;

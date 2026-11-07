@@ -102,6 +102,14 @@ export function useSettingsSearchIndex(
         anchor: "system",
         title: t(($) => $.notifications.system.label),
       },
+      {
+        tab: "notifications",
+        anchor: "google-chat",
+        title: t(($) => $.notifications.delivery.google_chat.label),
+        description: t(
+          ($) => $.notifications.delivery.google_chat.description,
+        ),
+      },
       // Web-only row: absent on desktop and without the Notification API.
       ...(browserNotificationSettingAvailable()
         ? [

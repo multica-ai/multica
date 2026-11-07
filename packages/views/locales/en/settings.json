@@ -686,6 +686,20 @@
       "title": "System Notifications",
       "label": "Show system notifications when Multica is in the background"
     },
+    "delivery": {
+      "title": "Out-of-app delivery",
+      "google_chat": {
+        "label": "Google Chat",
+        "description": "Send new inbox items to a Google Chat space.",
+        "input_label": "Google Chat webhook URL",
+        "placeholder": "https://chat.googleapis.com/v1/spaces/…",
+        "how_to": "Google Chat space → Apps & integrations → Webhooks → Add webhook → copy URL.",
+        "save": "Save",
+        "replace": "Replace",
+        "remove": "Remove",
+        "cancel": "Cancel"
+      }
+    },
     "browser": {
       "label": "Browser notifications",
       "hint": "Allow this browser to show notification banners for new inbox items.",

@@ -14,6 +14,8 @@ const NOTIFICATION_GROUP_KEYS: readonly NotificationGroupKey[] = [
   "system_notifications",
 ];
 
+const PENDING_MASKED_CREDENTIAL = "••••";
+
 function preferenceValue(
   preferences: NotificationPreferences,
   key: NotificationGroupKey,
@@ -39,6 +41,12 @@ export function deriveNotificationPreferencePatch(
     }
   }
 
+  const previousWebhook = previous.google_chat_webhook ?? "";
+  const nextWebhook = next.google_chat_webhook ?? "";
+  if (previousWebhook !== nextWebhook) {
+    patch.google_chat_webhook = nextWebhook;
+  }
+
   return patch;
 }
 
@@ -55,6 +63,14 @@ export function applyNotificationPreferencePatch(
       next[key] = value;
     } else if (value === "all") {
       delete next[key];
+    }
+  }
+
+  if (Object.hasOwn(patch, "google_chat_webhook")) {
+    if (patch.google_chat_webhook) {
+      next.google_chat_webhook = PENDING_MASKED_CREDENTIAL;
+    } else {
+      delete next.google_chat_webhook;
     }
   }
 
@@ -86,6 +102,20 @@ export function rollbackNotificationPreferencePatch(
       delete next[key];
     } else {
       next[key] = previousValue;
+    }
+  }
+
+  if (Object.hasOwn(patch, "google_chat_webhook")) {
+    const patchedWebhook = patch.google_chat_webhook ?? "";
+    const currentWebhook = current.google_chat_webhook ?? "";
+    const expectedCurrent = patchedWebhook ? PENDING_MASKED_CREDENTIAL : "";
+    if (currentWebhook === expectedCurrent) {
+      const previousWebhook = previous.google_chat_webhook ?? "";
+      if (previousWebhook) {
+        next.google_chat_webhook = previousWebhook;
+      } else {
+        delete next.google_chat_webhook;
+      }
     }
   }
 
