@@ -729,6 +729,9 @@
   "reply": {
     "placeholder": "回复...",
     "annotations": {
+      "direct_reply": "回复",
+      "direct_comment": "发表评论",
+      "direct_target_deleted": "回复目标已删除，意见已保留。请选择其他评论回复。",
       "confirm_add": "添加批注",
       "save": "保存批注",
       "add_comment": "加入评论",

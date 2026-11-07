@@ -729,6 +729,9 @@
   "reply": {
     "placeholder": "返信を残す...",
     "annotations": {
+      "direct_reply": "返信",
+      "direct_comment": "コメントを投稿",
+      "direct_target_deleted": "返信先が削除されました。入力内容は保持されています。別のコメントを選んで返信してください。",
       "confirm_add": "注釈を追加",
       "save": "注釈を保存",
       "add_comment": "コメントに追加",

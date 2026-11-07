@@ -751,6 +751,9 @@
   "reply": {
     "placeholder": "Laisser une réponse...",
     "annotations": {
+      "direct_reply": "Répondre",
+      "direct_comment": "Publier le commentaire",
+      "direct_target_deleted": "Le commentaire ciblé a été supprimé. Votre texte est conservé ; sélectionnez un autre commentaire pour répondre.",
       "confirm_add": "Ajouter une annotation",
       "save": "Enregistrer l'annotation",
       "add_comment": "Ajouter au commentaire",

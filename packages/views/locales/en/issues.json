@@ -751,6 +751,9 @@
   "reply": {
     "placeholder": "Leave a reply...",
     "annotations": {
+      "direct_reply": "Reply",
+      "direct_comment": "Post comment",
+      "direct_target_deleted": "The reply target was deleted. Your note is kept; select another comment to reply.",
       "confirm_add": "Add annotation",
       "save": "Save annotation",
       "add_comment": "Add to comment",

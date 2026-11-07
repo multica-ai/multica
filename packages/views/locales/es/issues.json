@@ -734,6 +734,9 @@
   "reply": {
     "placeholder": "Deja una respuesta...",
     "annotations": {
+      "direct_reply": "Responder",
+      "direct_comment": "Publicar comentario",
+      "direct_target_deleted": "El comentario de destino se ha eliminado. Tu texto se conserva; selecciona otro comentario para responder.",
       "confirm_add": "Añadir anotación",
       "save": "Guardar anotación",
       "add_comment": "Añadir al comentario",
