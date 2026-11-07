@@ -3285,3 +3285,71 @@ describe("ApiClient shared credential across windows", () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ApiClient autopilot run detail", () => {
+  it("encodes URL-supplied run and autopilot IDs as individual path segments", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "run/#?",
+          autopilot_id: "ap/#?",
+          task_id: null,
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    await client.getAutopilotRun("ap/#?", "run/#?");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/autopilots/ap%2F%23%3F/runs/run%2F%23%3F",
+    );
+  });
+
+  it("parses older run records and preserves unknown server fields", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            id: "run-1",
+            autopilot_id: "ap-1",
+            task_id: "task-1",
+            status: "future_status",
+            future_field: true,
+          }),
+        ),
+      ),
+    );
+    const client = new ApiClient("https://api.example.test");
+    const run = await client.getAutopilotRun("ap-1", "run-1");
+    expect(run).toMatchObject({
+      id: "run-1",
+      autopilot_id: "ap-1",
+      task_id: "task-1",
+      issue_id: null,
+      trigger_payload: null,
+      status: "future_status",
+      future_field: true,
+    });
+  });
+
+  it.each([
+    null,
+    { id: "run-1", autopilot_id: "ap-1", task_id: 42 },
+    { id: "another-run", autopilot_id: "ap-1", task_id: "task-1" },
+    { id: "run-1", autopilot_id: "another-autopilot", task_id: "task-1" },
+    { task_id: "task-1" },
+  ])(
+    "rejects malformed or mismatched run identity before using its task (%j)",
+    async (body) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(new Response(JSON.stringify(body))),
+      );
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getAutopilotRun("ap-1", "run-1")).rejects.toThrow(
+        "Malformed autopilot run response",
+      );
+    },
+  );
+});

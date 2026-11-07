@@ -4994,7 +4994,14 @@ export class ApiClient {
   // omit trigger_payload to keep them small (a webhook envelope can be
   // up to 256 KiB × limit rows), so the detail view fetches via this route.
   async getAutopilotRun(autopilotId: string, runId: string): Promise<AutopilotRun> {
-    return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots/${encodeURIComponent(autopilotId)}/runs/${encodeURIComponent(runId)}`);
+    const run = parseWithFallback<AutopilotRun | null>(raw, AutopilotRunSchema, null, {
+      endpoint: "GET /api/autopilots/:id/runs/:runId",
+    });
+    if (!run || run.id !== runId || run.autopilot_id !== autopilotId) {
+      throw new Error("Malformed autopilot run response");
+    }
+    return run;
   }
 
   async createAutopilotTrigger(autopilotId: string, data: CreateAutopilotTriggerRequest): Promise<AutopilotTrigger> {

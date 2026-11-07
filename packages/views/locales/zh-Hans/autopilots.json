@@ -147,6 +147,11 @@
   "run": {
     "issue_linked": "已关联任务",
     "view_log": "查看执行日志",
+    "log_unavailable": "执行日志不可用",
+    "log_load_failed": "无法加载执行日志。",
+    "log_waiting_connection": "正在等待网络连接…",
+    "no_log": "此运行没有执行日志。",
+    "retry": "重试",
     "skipped_group": {
       "label": "已跳过",
       "summary": "{{count}} 条跳过的运行"

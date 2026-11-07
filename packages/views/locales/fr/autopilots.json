@@ -147,6 +147,11 @@
   "run": {
     "issue_linked": "Tâche liée",
     "view_log": "Voir le journal d'exécution",
+    "log_unavailable": "Journal d’exécution indisponible",
+    "log_load_failed": "Impossible de charger le journal d’exécution.",
+    "log_waiting_connection": "En attente de connexion…",
+    "no_log": "Cette exécution n’a pas de journal.",
+    "retry": "Réessayer",
     "skipped_group": {
       "label": "Ignorées",
       "summary": "{{count}} exécutions ignorées"

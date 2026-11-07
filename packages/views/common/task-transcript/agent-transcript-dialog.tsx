@@ -1129,14 +1129,16 @@ export function AgentTranscriptDialog({
               className="min-w-0 flex-1 bg-transparent text-caption outline-none placeholder:text-faint-foreground"
             />
           </label>
-          <span className="ml-auto shrink-0 whitespace-nowrap text-caption text-muted-foreground">
-            {activeFilterKeys.length > 0 || trimmedQuery.length > 0
-              ? t(($) => $.transcript.steps_filtered, {
-                  shown: filteredSteps.length,
-                  total: steps.length,
-                })
-              : t(($) => $.transcript.steps_count, { count: steps.length })}
-          </span>
+          {!contentState && (
+            <span className="ml-auto shrink-0 whitespace-nowrap text-caption text-muted-foreground">
+              {activeFilterKeys.length > 0 || trimmedQuery.length > 0
+                ? t(($) => $.transcript.steps_filtered, {
+                    shown: filteredSteps.length,
+                    total: steps.length,
+                  })
+                : t(($) => $.transcript.steps_count, { count: steps.length })}
+            </span>
+          )}
           {filterOptions.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger
