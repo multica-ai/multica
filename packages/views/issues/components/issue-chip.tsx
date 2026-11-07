@@ -67,6 +67,9 @@ export function IssueChip({
   const { data: detailIssue } = useQuery({
     ...issueDetailOptions(wsId, issueId),
     enabled: !listIssue,
+    // Default is false; a mention that failed to load retries when the window
+    // regains focus. A hydrated query stays fresh (staleTime: Infinity).
+    refetchOnWindowFocus: true,
   });
 
   const issue = listIssue ?? detailIssue;
