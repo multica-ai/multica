@@ -7,6 +7,7 @@ import ja from "./ja";
 import ru from "./ru";
 import fr from "./fr";
 import es from "./es";
+import vi from "./vi";
 
 // Shared <locale>.ts entries are the source of truth for namespace registrations.
 // Add namespaces to every language entry. When adding a language, update its
@@ -21,4 +22,5 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
   ru,
   fr,
   es,
+  vi,
 };

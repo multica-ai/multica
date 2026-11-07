@@ -151,7 +151,8 @@
       "french": "Français",
       "russian": "Русский",
       "spanish": "Español",
-      "sync_failed": "Idioma guardado en este dispositivo, pero no se ha podido sincronizar con tu cuenta. Otros dispositivos pueden mostrar el idioma anterior."
+      "sync_failed": "Idioma guardado en este dispositivo, pero no se ha podido sincronizar con tu cuenta. Otros dispositivos pueden mostrar el idioma anterior.",
+      "vietnamese": "Tiếng Việt"
     },
     "timezone": {
       "title": "Zona horaria de visualización",
