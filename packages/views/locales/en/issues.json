@@ -817,6 +817,8 @@
     "cancel_task_aria": "Cancel run",
     "retry_task_tooltip": "Retry run",
     "retry_task_aria": "Retry run",
+    "retry_fresh_task_tooltip": "Retry in a new session — a new session and working directory, so uncommitted changes in the old one don't carry over",
+    "retry_fresh_task_aria": "Retry in a new session",
     "retry_failed": "Failed to retry run",
     "retry_blocked": "Not retried — you don't have permission to use this agent",
     "transcript_tooltip": "View transcript",

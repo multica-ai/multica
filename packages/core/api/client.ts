@@ -2940,10 +2940,17 @@ export class ApiClient {
     return task;
   }
 
-  async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {
+  async rerunIssue(
+    issueId: string,
+    taskId?: string,
+    opts?: { fresh?: boolean },
+  ): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/rerun`, {
       method: "POST",
-      body: JSON.stringify(taskId ? { task_id: taskId } : {}),
+      body: JSON.stringify({
+        ...(taskId ? { task_id: taskId } : {}),
+        ...(opts?.fresh ? { fresh: true } : {}),
+      }),
     });
   }
 
