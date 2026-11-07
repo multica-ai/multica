@@ -336,6 +336,7 @@
   },
   "chat": {
     "floating_label": "悬浮聊天窗",
+    "collapsed_execution_details_label": "默认折叠聊天执行详情",
     "floating_hint": "在每个页面显示悬浮聊天按钮。"
   },
   "issue": {

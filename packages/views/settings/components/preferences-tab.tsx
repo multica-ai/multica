@@ -96,6 +96,7 @@ export function PreferencesTab() {
           <StickyCommentBarRow />
           <RunningAgentReplyRow />
           <FloatingChatRow />
+          <CollapsedExecutionDetailsRow />
         </SettingsCard>
       </SettingsSection>
 
@@ -296,6 +297,22 @@ function FloatingChatRow() {
         checked={enabled}
         onCheckedChange={(checked) => setEnabled(checked)}
         aria-label={t(($) => $.chat.floating_label)}
+      />
+    </SettingsRow>
+  );
+}
+
+function CollapsedExecutionDetailsRow() {
+  const { t } = useT("settings");
+  const collapsed = useChatStore((s) => s.keepExecutionDetailsCollapsed);
+  const setCollapsed = useChatStore((s) => s.setKeepExecutionDetailsCollapsed);
+  const label = t(($) => $.chat.collapsed_execution_details_label);
+  return (
+    <SettingsRow anchor="chat-execution-details" label={label}>
+      <Switch
+        checked={collapsed}
+        onCheckedChange={(checked) => setCollapsed(checked)}
+        aria-label={label}
       />
     </SettingsRow>
   );

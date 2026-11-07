@@ -55,10 +55,12 @@ vi.mock("@multica/core/i18n/react", async () => {
 });
 
 // The chat store is registered by the app shell; a callable stand-in with the
-// Zustand shape is enough for the one toggle this page owns.
+// Zustand shape is enough for the chat preferences this page owns.
 const chatState = vi.hoisted(() => ({
   floatingChatEnabled: true,
   setFloatingChatEnabled: vi.fn(),
+  keepExecutionDetailsCollapsed: false,
+  setKeepExecutionDetailsCollapsed: vi.fn(),
 }));
 vi.mock("@multica/core/chat", () => ({
   useChatStore: Object.assign(
@@ -124,6 +126,25 @@ function I18nWrapper({ children }: { children: ReactNode }) {
     </I18nProvider>
   );
 }
+
+describe("PreferencesTab — execution details", () => {
+  afterEach(() => cleanup());
+
+  it("exposes a device preference and passes both choices to the chat store", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<PreferencesTab />, { wrapper: I18nWrapper });
+    const label = "Keep chat execution details collapsed";
+    expect(screen.getByRole("switch", { name: label })).not.toBeChecked();
+    await user.click(screen.getByRole("switch", { name: label }));
+    expect(chatState.setKeepExecutionDetailsCollapsed).toHaveBeenCalledWith(true);
+    chatState.keepExecutionDetailsCollapsed = true;
+    rerender(<PreferencesTab />);
+    expect(screen.getByRole("switch", { name: label })).toBeChecked();
+    await user.click(screen.getByRole("switch", { name: label }));
+    expect(chatState.setKeepExecutionDetailsCollapsed).toHaveBeenCalledWith(false);
+    chatState.keepExecutionDetailsCollapsed = false;
+  });
+});
 
 describe("PreferencesTab — Language switcher", () => {
   beforeEach(() => {

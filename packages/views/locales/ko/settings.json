@@ -336,6 +336,7 @@
   },
   "chat": {
     "floating_label": "플로팅 채팅 창",
+    "collapsed_execution_details_label": "채팅 실행 세부 정보 기본 접기",
     "floating_hint": "모든 페이지에 플로팅 채팅 버튼을 표시합니다."
   },
   "issue": {

@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { chatKeys } from "@multica/core/chat/queries";
+import { createChatStore, registerChatStore, useChatStore } from "@multica/core/chat";
 import type { Attachment, TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
@@ -52,6 +53,12 @@ import { ChatMessageList } from "./chat-message-list";
 
 const TEST_RESOURCES = { en: { chat: enChat } };
 const TASK_ID = "6af44cbe-80ab-4dfe-b07d-bd3cfd588f4d";
+
+beforeEach(() => {
+  registerChatStore(createChatStore({
+    storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+  }));
+});
 
 function taskMsg(
   seq: number,
@@ -114,6 +121,103 @@ function pushTaskMessage(qc: QueryClient, msg: TaskMessagePayload) {
     );
   });
 }
+
+describe("ChatMessageList collapsed execution details preference", () => {
+  it("starts collapsed when opted in and preserves manual expansion as output arrives", async () => {
+    useChatStore.setState({ keepExecutionDetailsCollapsed: true });
+    const qc = new QueryClient();
+    renderList(qc);
+    const trigger = (await screen.findByText("2 steps")).closest("button")!;
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+    fireEvent.click(trigger);
+    expect(screen.getByText("Bash")).toBeInTheDocument();
+    expect(screen.queryByText(/"command":/)).not.toBeInTheDocument();
+    pushTaskMessage(qc, taskMsg(3, "tool_use", { tool: "Read", input: { path: "/tmp/x" } }));
+    expect(await screen.findByText("3 steps")).toBeInTheDocument();
+    expect(screen.getByText("Bash")).toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("applies preference changes to an untouched live fold and respects a manual override", async () => {
+    const qc = new QueryClient();
+    renderList(qc);
+    const trigger = (await screen.findByText("2 steps")).closest("button")!;
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    act(() => useChatStore.getState().setKeepExecutionDetailsCollapsed(true));
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    act(() => useChatStore.getState().setKeepExecutionDetailsCollapsed(false));
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(trigger);
+    act(() => useChatStore.getState().setKeepExecutionDetailsCollapsed(true));
+    act(() => useChatStore.getState().setKeepExecutionDetailsCollapsed(false));
+    pushTaskMessage(qc, taskMsg(3, "tool_result", { output: "next" }));
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("keeps transcript errors visible while routine tool activity stays collapsed", async () => {
+    useChatStore.setState({ keepExecutionDetailsCollapsed: true });
+    const qc = new QueryClient();
+    renderList(qc);
+    pushTaskMessage(qc, taskMsg(3, "error", { content: "Permission denied: approve access before retrying" }));
+    expect(await screen.findByText("Permission denied: approve access before retrying")).toBeVisible();
+    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("3 steps"));
+    expect(screen.getAllByText("Permission denied: approve access before retrying")).toHaveLength(1);
+    expect(screen.getByText("Bash")).toBeVisible();
+  });
+
+  it("keeps later turns and remounted history collapsed, with decisions outside the fold", async () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: (key: string) => { values.delete(key); },
+    };
+    registerChatStore(createChatStore({ storage }));
+    useChatStore.getState().setKeepExecutionDetailsCollapsed(true);
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), INITIAL_MESSAGES);
+    const secondTaskId = "8af44cbe-80ab-4dfe-b07d-bd3cfd588f4d";
+    qc.setQueryData(chatKeys.taskMessages(secondTaskId), INITIAL_MESSAGES.map((m) => ({ ...m, task_id: secondTaskId })));
+    const reply = {
+      id: "turn-1", chat_session_id: "session-1", role: "assistant" as const,
+      content: "Please choose how to proceed.", task_id: TASK_ID,
+      created_at: "2026-11-04T00:00:00Z",
+      quick_actions: [{ label: "Approve access", prompt: "Approve the requested access" }],
+    };
+    const onQuickAction = vi.fn();
+    const view = (settled: boolean, nextTaskId: string | null) => (
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList messages={settled ? [reply] : []}
+            pendingTask={nextTaskId ? { task_id: nextTaskId, status: "running" } : null}
+            availability="online" onQuickAction={onQuickAction} />
+        </QueryClientProvider>
+      </I18nProvider>
+    );
+    const first = render(view(false, TASK_ID));
+    expect((await screen.findByText("2 steps")).closest("button")).toHaveAttribute("aria-expanded", "false");
+    first.rerender(view(true, null));
+    fireEvent.click(await screen.findByRole("button", { name: "Approve access" }));
+    expect(onQuickAction).toHaveBeenCalledWith(reply.quick_actions[0]);
+    first.rerender(view(true, secondTaskId));
+    expect(screen.getAllByText("2 steps")).toHaveLength(2);
+    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+    first.unmount();
+    registerChatStore(createChatStore({ storage }));
+    const reopened = render(view(true, secondTaskId));
+    expect(screen.getAllByText("2 steps")).toHaveLength(2);
+    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+    act(() => useChatStore.getState().setKeepExecutionDetailsCollapsed(false));
+    expect(screen.getByText("Bash")).toBeInTheDocument();
+    // A new mount uses the newly saved default; settled history stays closed.
+    reopened.unmount();
+    registerChatStore(createChatStore({ storage }));
+    render(view(true, secondTaskId));
+    expect(screen.getByText("Bash")).toBeInTheDocument();
+  });
+});
 
 describe("ChatMessageList live follow (#6697)", () => {
   it("follows appended output immediately only while Virtuoso is at the live end", () => {
@@ -354,7 +458,8 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
     expect(screen.getAllByText("Complete canonical answer")).toHaveLength(1);
   });
 
-  it("keeps the answer node mounted across the live-to-settled handoff", async () => {
+  it.each([false, true])("keeps the answer node mounted across the live-to-settled handoff (collapsed preference %s)", async (keepExecutionDetailsCollapsed) => {
+    useChatStore.setState({ keepExecutionDetailsCollapsed });
     const qc = new QueryClient();
     qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
       taskMsg(0, "tool_use", { tool: "Read", input: { path: "/tmp/x" } }),
