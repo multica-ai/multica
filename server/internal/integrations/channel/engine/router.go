@@ -621,7 +621,11 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			// cannot race an issue agent reading the newly-created issue.
 			assignedRunFireAt = localMediaDeadline.Add(mediaFinalizeTimeout)
 		}
-		issueRes, err := r.createIssue(ctx, inst, set.OriginType, identity.UserID, sessionID, *appendRes.IssueCommand, prefix, assignedRunFireAt)
+		var issueDelivery *service.ChannelIssueDelivery
+		if set.IssueDelivery != nil {
+			issueDelivery = set.IssueDelivery(inst, msg, sessionID, appendRes.BindingID, appendRes.RouteRevision)
+		}
+		issueRes, err := r.createIssue(ctx, inst, set.OriginType, identity.UserID, sessionID, *appendRes.IssueCommand, prefix, assignedRunFireAt, issueDelivery)
 		if errors.Is(err, service.ErrActiveDuplicate) && issueRes.DuplicateIssue != nil {
 			duplicate := *issueRes.DuplicateIssue
 			res.IssueID = duplicate.ID
@@ -1153,7 +1157,7 @@ func (r *Router) drop(ctx context.Context, set ResolverSet, msg channel.InboundM
 	return Result{Outcome: OutcomeDropped, DropReason: reason, InstallationID: instID}
 }
 
-func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, originType string, creatorUserID, sessionID pgtype.UUID, cmd IssueCommand, issuePrefix string, assignedRunFireAt time.Time) (service.IssueCreateResult, error) {
+func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, originType string, creatorUserID, sessionID pgtype.UUID, cmd IssueCommand, issuePrefix string, assignedRunFireAt time.Time, issueDelivery *service.ChannelIssueDelivery) (service.IssueCreateResult, error) {
 	if cmd.Title == "" {
 		return service.IssueCreateResult{}, ErrEmptyIssueTitle
 	}
@@ -1180,6 +1184,7 @@ func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, ori
 	// shape regardless of which entry point created the issue.
 	opts := service.IssueCreateOpts{
 		AssignedAgentRunFireAt: assignedRunFireAt,
+		ChannelDelivery:        issueDelivery,
 		BroadcastPayload: func(issue db.Issue, _ []db.Attachment, _ []db.IssueLabel) map[string]any {
 			// Plain IssueToMap is authoritative here: this path always creates
 			// with the built-in "todo" above, and a built-in status IS its own

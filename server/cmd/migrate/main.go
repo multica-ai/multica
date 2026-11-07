@@ -197,6 +197,7 @@ var concurrentIndexCleanups = map[string]string{
 	"587_cloud_agent_connection_provider_index":                 "cloud_agent_connection_provider_index",
 	"590_member_delegation_day_unique_index":                    "member_delegation_day_user_date_uidx",
 	"598_issue_unread_unique_index":                             "issue_unread_workspace_user_issue_uidx",
+	"618_channel_issue_comment_notification_issue_index":        "idx_channel_issue_comment_notification_issue_id",
 	"035_task_queue_issue_id_index":                             "idx_agent_task_queue_issue_id",
 	"067_task_queue_claim_candidate_index":                      "idx_agent_task_queue_claim_candidates",
 	"074_task_usage_updated_at_index":                           "idx_task_usage_updated_at",

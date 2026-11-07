@@ -461,7 +461,10 @@ type ResolverSet struct {
 	Audit        Auditor
 	Replier      OutboundReplier
 	Typing       TypingNotifier
-	OriginType   string
+	// IssueDelivery snapshots the platform route for a newly created /issue.
+	// Platforms that do not support issue callbacks leave it nil.
+	IssueDelivery func(ResolvedInstallation, channel.InboundMessage, pgtype.UUID, pgtype.UUID, int64) *service.ChannelIssueDelivery
+	OriginType    string
 }
 
 // IssueCreator is the narrow subset of service.IssueService the Router needs
