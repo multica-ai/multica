@@ -265,6 +265,19 @@ multica runtime profile unset-path <profile-id>
 
 Modifier un profil n'affecte que les exécutions prises en charge par la suite. Avant de supprimer un profil, occupez-vous des agents actifs encore liés à ses runtimes. Supprimer uniquement l'instance de runtime sur un ordinateur ne supprime pas le profil — un daemon en cours d'exécution le réenregistrera.
 
+### Exemple : Claude Code sur Wally
+
+[Wally](https://www.runwally.com) héberge des modèles open-weight. Sa CLI `wally` lance Claude Code avec l'URL de base et le jeton pointant vers le modèle choisi, pour ce seul processus ; elle fonctionne donc comme un profil personnalisé de la famille de protocoles Claude :
+
+1. Sur l'ordinateur, installez Claude Code et la [CLI `wally`](https://docs.runanywhere.ai/integrations), puis connectez-vous avec `wally account login`.
+2. Ajoutez un runtime personnalisé, choisissez **Claude** et saisissez cette commande :
+
+```text
+wally claude-code -m deepseek-v4.1-flash --
+```
+
+`--` termine les options propres à Wally, si bien que les arguments de Multica parviennent tels quels à Claude Code. Le sélecteur de modèle liste les modèles disponibles pour votre compte Wally ; un modèle choisi sur l'agent remplace celui qui suit `-m`.
+
 ## Runtime distant Qoder Cloud Agents
 
 Qoder Cloud Agents exécute les tickets assignés dans des sessions distantes. Le serveur Multica supervise un pont qui utilise le protocole de tâches existant du daemon ; aucun daemon local n'est nécessaire pour ce runtime.

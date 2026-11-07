@@ -266,6 +266,19 @@ multica runtime profile unset-path <profile-id>
 
 修改配置只影響之後領取的執行。刪除配置前，需要先處理仍繫結在對應執行時上的活動 AI 代理。只刪除某臺電腦上的執行時例項不會刪除配置，執行中的守護程序還會重新註冊它。
 
+### 範例：在 Wally 上執行 Claude Code
+
+[Wally](https://www.runwally.com) 提供開放權重模型。它的 `wally` CLI 啟動 Claude Code 時，只為該程序把 base URL 和權杖指向所選模型，因此可以作為 Claude 協議族的自定義配置使用：
+
+1. 在電腦上安裝 Claude Code 和 [`wally` CLI](https://docs.runanywhere.ai/integrations)，然後用 `wally account login` 登入。
+2. 新增自定義執行時，選擇 **Claude**，並填寫以下命令：
+
+```text
+wally claude-code -m deepseek-v4.1-flash --
+```
+
+`--` 表示 Wally 自身的選項到此結束，Multica 的引數會原樣傳給 Claude Code。模型選擇器會列出你的 Wally 帳號可用的模型；在 AI 代理上選擇的模型會取代 `-m` 後面的模型。
+
 ## Qoder Cloud Agents 遠端執行時
 
 Qoder Cloud Agents 透過遠端會話執行分配的任務。Multica 服務端管理橋接程序，重複使用現有守護程序任務協議，無需使用者啟動本地守護程序。
