@@ -453,6 +453,7 @@ type Daemon struct {
 	deviceTimingOnce sync.Once
 	reportsTiming    *timing.Log
 	conversations    *service.Service
+	account          daemonAccount
 	// conversationPreheat is this device's preheat choice; nil without local
 	// conversations.
 	conversationPreheat *conversationPreheat
@@ -2149,6 +2150,7 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 	if err := d.resolveAuth(); err != nil {
 		return err
 	}
+	go d.trackAccount(ctx)
 
 	if sidecar := d.cfg.LocalHost; sidecar != nil && sidecar.ClaudeEntry != "" {
 		if err := d.openLocalConversations(ctx, *sidecar); err != nil {
@@ -8092,6 +8094,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			remoteMCPConfig = merged
 		}
 	}
+	computerConfig, computerBrief, releaseComputer := d.taskComputerMCP(task, provider, taskLog)
+	if releaseComputer != nil {
+		defer releaseComputer()
+	}
+	computerUse := ""
+	if len(computerConfig) > 0 {
+		merged, mergeErr := mergeTaskRemoteMCPConfig(remoteMCPConfig, computerConfig)
+		if mergeErr != nil {
+			taskLog.Warn("could not merge Computer Use MCP config", "error", mergeErr)
+		} else {
+			remoteMCPConfig = merged
+			if task.Agent != nil {
+				computerUse = computerBrief
+			}
+		}
+	}
 	if task.Agent != nil {
 		agentMcpConfig = task.Agent.McpConfig
 		effectiveMcpConfig, err = mergeTaskMcpConfig(provider, agentMcpConfig, remoteMCPConfig, taskLog)
@@ -8624,6 +8642,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// the daemon cannot record either (#9404).
 	if env.LocalWorktree != nil {
 		promptOptions = append(promptOptions, WithWorktreeBranch(env.LocalWorktree.Branch, env.LocalWorktree.BaseCommit))
+	}
+	if computerUse != "" {
+		promptOptions = append(promptOptions, WithComputerUse(computerUse))
 	}
 	prompt := BuildPrompt(task, provider, promptOptions...)
 

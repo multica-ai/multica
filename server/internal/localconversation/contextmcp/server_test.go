@@ -83,6 +83,40 @@ func TestServerAuthenticatesEachRoute(t *testing.T) {
 	}
 }
 
+func TestServerAuthenticatesTokenInPathRoutes(t *testing.T) {
+	t.Parallel()
+
+	s := startServer(t)
+	exec := echoExecution()
+	exec.TokenInPath = true
+	b, err := s.Bind(context.Background(), exec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	header, _ := s.Bind(context.Background(), echoExecution())
+	call := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
+	if !strings.HasSuffix(b.URL, "/"+b.Token) {
+		t.Fatalf("token missing from URL %q", b.URL)
+	}
+	if status, _ := post(t, b, "", "", call); status != http.StatusOK {
+		t.Fatalf("path token = %d", status)
+	}
+	wrong := Binding{URL: strings.TrimSuffix(b.URL, b.Token) + header.Token}
+	if status, _ := post(t, wrong, b.Token, "", call); status != http.StatusUnauthorized {
+		t.Fatalf("header cannot replace a path token: %d", status)
+	}
+	if status, _ := post(t, Binding{URL: header.URL + "/" + header.Token}, "", "", call); status != http.StatusUnauthorized {
+		t.Fatalf("header route accepted a path token: %d", status)
+	}
+	if status, _ := post(t, b, "", "https://evil.example", call); status != http.StatusForbidden {
+		t.Fatalf("browser origin = %d", status)
+	}
+	s.Release(b)
+	if status, _ := post(t, b, "", "", call); status != http.StatusUnauthorized {
+		t.Fatalf("released route = %d", status)
+	}
+}
+
 func TestServerSpeaksMCP(t *testing.T) {
 	t.Parallel()
 

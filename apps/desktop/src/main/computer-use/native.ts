@@ -9,7 +9,7 @@ export class ComputerNative {
   private pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
   private serial: Promise<unknown> = Promise.resolve();
   private sequence = 0;
-  constructor(private path: string, private platform = process.platform) {}
+  constructor(private command: { executable: string; args: string[] }, private platform = process.platform) {}
   call(action: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
     const work = this.serial.catch(() => {}).then(() => this.perform(action, signal));
     this.serial = work;
@@ -19,7 +19,7 @@ export class ComputerNative {
     signal.throwIfAborted();
     if (this.platform !== "darwin") return Promise.resolve({ available: false, platform: this.platform, accessibility: false, screenRecording: false });
     if (!this.child) {
-      const child = spawn(this.path, [], { stdio: "pipe", env: { PATH: "/usr/bin:/bin", LANG: "en_US.UTF-8" } });
+      const child = spawn(this.command.executable, this.command.args, { stdio: "pipe", env: { ELECTRON_RUN_AS_NODE: "1", PATH: "/usr/bin:/bin", LANG: "en_US.UTF-8" } });
       this.child = child;
       const lines = createInterface({ input: child.stdout });
       let bytes = 0;
@@ -33,7 +33,7 @@ export class ComputerNative {
         } catch { this.stop(); }
       });
       child.stderr.resume();
-      child.once("error", () => { if (this.child === child) this.stop(new Error("native_unavailable: Build the Multica Computer Use helper")); });
+      child.once("error", () => { if (this.child === child) this.stop(new Error("native_unavailable: Stage the cua-driver SDK")); });
       child.once("exit", () => { if (this.child === child) this.stop(); });
     }
     const id = String(++this.sequence), child = this.child;

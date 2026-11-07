@@ -1,0 +1,25 @@
+{
+  "version": "1.0.0",
+  "protocolVersion": "1.0.0",
+  "taskServerName": "multica_computer",
+  "methods": {
+    "desktopRequests": ["initialize"],
+    "desktopNotifications": ["notifications/initialized", "notifications/client/updated", "notifications/computer/stopped"],
+    "daemonRequests": ["computer/control"],
+    "daemonNotifications": ["notifications/cancelled"]
+  },
+  "initialize": {
+    "params": ["protocolVersion", "clientInfo", "user", "capabilities"],
+    "computer": ["version", "prompts", "runtime"],
+    "prompts": ["conversation", "task", "taskBrief"],
+    "runtime": ["executable", "entry"]
+  },
+  "control": {
+    "params": ["capabilityVersion", "envelope"],
+    "envelope": ["op", "conversationId", "turnId", "scope", "origin", "action"],
+    "scope": ["userId", "workspaceId"],
+    "ops": ["status", "begin", "action", "release"],
+    "origins": ["task"],
+    "actions": ["get_app", "observe", "windows", "select_window", "click", "set_value", "type", "press", "scroll", "drag"]
+  }
+}

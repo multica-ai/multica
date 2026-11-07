@@ -102,10 +102,15 @@ func NewV2(svc *service.Service, token, profileDir string) *V2 {
 	v.hosts.origin = v.origin
 	svc.SetHost(v.hosts.request)
 	svc.SetLocalHost(v.hosts.requestLocal)
-	svc.SetComputerHost(v.computer.request)
+	v.computer.svc = svc
+	svc.SetComputerHost(&v.computer)
 	svc.OnTurnEnd(v.turnEnded)
 	return v
 }
+
+// SetDaemonIdentity supplies the daemon version and task account reported to
+// Desktop in the Computer Host initialize response.
+func (v *V2) SetDaemonIdentity(identity func() DaemonIdentity) { v.computer.identity = identity }
 
 // SetServerOrigin refuses requests for any API origin but origin.
 func (v *V2) SetServerOrigin(origin string) { v.serverOrigin = normalizeOrigin(origin) }

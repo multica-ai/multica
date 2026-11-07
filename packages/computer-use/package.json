@@ -3,6 +3,19 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./sdk.mjs", "./runtime": { "types": "./runtime.d.ts", "default": "./runtime.mjs" } },
-  "scripts": { "test": "node --test *.test.mjs" }
+  "exports": {
+    ".": "./sdk.mjs",
+    "./runtime": {
+      "types": "./runtime.d.ts",
+      "default": "./runtime.mjs"
+    },
+    "./contract/computer.json": "./contract/computer.json",
+    "./prompts": {
+      "types": "./prompts.d.ts",
+      "default": "./prompts.mjs"
+    }
+  },
+  "scripts": {
+    "test": "node --test *.test.mjs contract/*.test.mjs"
+  }
 }

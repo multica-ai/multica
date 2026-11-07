@@ -33,6 +33,8 @@ export default defineConfig(({ command }) => {
           // One-conversation Claude Agent SDK adapter the daemon runs with ELECTRON_RUN_AS_NODE=1.
           "claude-host": resolve("src/claude-host/entry.ts"),
           "computer-host": resolve("src/computer-host/entry.ts"),
+          // Native Computer Use host the desktop main process spawns with ELECTRON_RUN_AS_NODE=1.
+          "computer-native": resolve("src/computer-native/entry.ts"),
         },
       },
       rolldownOptions: {

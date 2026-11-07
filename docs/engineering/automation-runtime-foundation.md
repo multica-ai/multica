@@ -83,7 +83,7 @@ agent 负责选择复现路径、协调外部 CU、补充边界检查、阅读�
 | E7 | [独立 MCP 入口](../../apps/desktop/src/main/developer-logs-mcp.ts)、[工具注册](../../apps/desktop/src/main/developer-logs-mcp-server.ts) | 沿用 stdio、schema 和结构化结果模式；新宿主不依赖被测 UI 正常运行 |
 | E8 | [日志导出](../../apps/desktop/src/main/developer-log-export.ts)、[运行日志](../../apps/desktop/src/main/developer-runtime-logs.ts) | 复用脱敏、覆盖范围和限额思想；当前 daemon tail 不按操作步骤过滤，需要新增步骤采集与覆盖标识 |
 | E9 | [双版本比较](../../scripts/perf-compare.mjs)、[进程树管理](../../server/internal/daemon/processtree/run.go) | 复用同场景对照、旧报告拒绝和清理约束；跨进程长驻服务不能按短命令结束即清理 |
-| E10 | [Computer Use 边界](computer-use.md)、[原生策略](../../apps/desktop/native/computer-use/ComputerUse.swift) | 内置能力禁止控制 Multica，自验证不解除此限制；外部 CU 必须实际具备授权和控制能力 |
+| E10 | [Computer Use 边界](computer-use.md)、[原生策略](../../apps/desktop/src/computer-native/driver.ts) | 内置能力只排除托管当前会话的 Multica 进程，可以控制验证环境等其他 Multica 实例；外部 CU 必须实际具备授权和控制能力 |
 | E11 | [Codex MCP 注册](../../apps/desktop/src/main/codex-mcp-registration.ts)、[运行配置加载](../../apps/desktop/src/main/runtime-config-loader.ts) | 被测 Desktop 会发生全局 provider 配置副作用，发行配置还可能默认指向云端；需验证启动策略防止真实 provider 发现和错误 API 目标 |
 | E12 | [任务评论和附件](../../server/cmd/multica/cmd_issue.go) | 报告交付复用已有评论附件；本地导出与外部发布分开 |
 

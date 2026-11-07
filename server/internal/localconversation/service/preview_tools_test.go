@@ -50,7 +50,7 @@ func TestServicePreviewToolsBindTheCurrentConversationAndDedupeWrites(t *testing
 	if !f.tools["service_preview_list"].ReadOnly || f.tools["service_preview_register"].ReadOnly {
 		t.Fatal("incorrect tool effect annotations")
 	}
-	if !strings.Contains(systemPrompt("workspace", false), "call service_preview_register") {
+	if !strings.Contains(systemPrompt("workspace", false, ""), "call service_preview_register") {
 		t.Fatal("providers were not instructed to register started services")
 	}
 }

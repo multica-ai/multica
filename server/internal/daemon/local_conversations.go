@@ -15,7 +15,6 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/daemon/localhost"
 	"github.com/multica-ai/multica/server/internal/localconversation/catalog"
-	"github.com/multica-ai/multica/server/internal/localconversation/computer"
 	"github.com/multica-ai/multica/server/internal/localconversation/contextmcp"
 	"github.com/multica-ai/multica/server/internal/localconversation/provider/claude"
 	"github.com/multica-ai/multica/server/internal/localconversation/provider/codex"
@@ -31,7 +30,6 @@ import (
 func (d *Daemon) openLocalConversations(ctx context.Context, sidecar localhost.Sidecar) error {
 	d.conversationPreheat = newConversationPreheat(d.cfg.ProfileDir, d.cfg.LocalAPIToken)
 	svc, err := service.Open(ctx, service.Options{
-		Computer:                computer.Command{Executable: sidecar.Electron, Entry: filepath.Join(filepath.Dir(sidecar.ClaudeEntry), "computer-host.cjs")},
 		Path:                    filepath.Join(d.cfg.ProfileDir, "local-conversations", "conversations.sqlite"),
 		TimingPath:              filepath.Join(d.cfg.ProfileDir, "local-conversations", "diagnostics", "daemon-timing.jsonl"),
 		Claude:                  d.claudeLauncher(sidecar),
@@ -59,6 +57,9 @@ func (d *Daemon) openLocalConversations(ctx context.Context, sidecar localhost.S
 	d.conversations = svc
 	d.localV2 = localhost.NewV2(svc, d.cfg.LocalAPIToken, d.cfg.ProfileDir)
 	d.localV2.SetServerOrigin(d.cfg.ServerBaseURL)
+	d.localV2.SetDaemonIdentity(func() localhost.DaemonIdentity {
+		return localhost.DaemonIdentity{Version: d.cfg.CLIVersion, UserID: d.accountUserID()}
+	})
 	d.reportsTiming = timing.Open(filepath.Join(d.cfg.ProfileDir, "local-conversations", "diagnostics", reportsTimingFile), timing.Options{})
 	d.localV2.SetTiming(timing.NewMarks(d.openDeviceTiming(), timing.SourceDaemon), d.reportsTiming)
 	svc.SetMobileLogs(d.newMobileLogs())

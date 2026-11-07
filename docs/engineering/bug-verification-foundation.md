@@ -34,7 +34,7 @@
 | E5 | [双版本对照脚本](../../scripts/perf-compare.mjs)、[生命周期测试](../../scripts/perf-compare.test.sh) | 同一份场景和 fixture 跑两个版本；记录 SHA、fixture digest、构建耗时和缓存命中；拒绝旧报告，并清理进程组 | 复用其比较和报告约束；脚本目前专用于性能测试，不能直接宣称是通用验证器 |
 | E6 | [原生预览冒烟](../../apps/desktop/scripts/side-preview-smoke.cjs) | 临时 `userData` 的小型 Electron 集成测试，通过单独入口加载模块 | 可参考模块集成方式；不等于已验证真实 Desktop 的完整启动链 |
 | E7 | [任务评论 CLI](../../server/cmd/multica/cmd_issue.go)、[附件测试](../../server/cmd/multica/cmd_attachment_test.go) | 评论支持 `--content-file` 与重复 `--attachment`，图片引用可随评论展示 | 初期直接复用评论与附件，不必先新增报告数据库实体 |
-| E8 | [Computer Use 实现](../../apps/desktop/native/computer-use/ComputerUse.swift)、[能力说明](computer-use.md) | 内置工具拒绝 Multica 自身及相关 bundle ID，要求前台、系统权限和真实用户授权 | 原会话建议的“用内置 Computer Use 验收自身原生外观”当前不可执行 |
+| E8 | [Computer Use 实现](../../apps/desktop/src/computer-native/driver.ts)、[能力说明](computer-use.md) | 内置工具只排除托管当前会话的 Multica 进程，要求系统权限和真实用户授权 | 改用 cua-driver 后可在后台操作验证环境中的 Multica 实例；用它验收原生外观尚未经过人工验证 |
 
 ### 两个会改变设计的边界
 

@@ -18,6 +18,14 @@ import (
 )
 
 type Command struct{ Executable, Entry string }
+
+// Runtime is the REPL Desktop reported and the Computer capability version it
+// implements. A running REPL is replaced when the reported version is no
+// longer compatible with the one it started with.
+type Runtime struct {
+	Command
+	Version string
+}
 type Action func(context.Context, json.RawMessage) (json.RawMessage, error)
 type Result struct {
 	Output  string         `json:"output"`
@@ -51,10 +59,10 @@ type process struct {
 	writeMu  sync.Mutex
 	busy     sync.Mutex
 	stopOnce sync.Once
+	version  string
 }
 
 type Manager struct {
-	Command  Command
 	mu       sync.Mutex
 	sessions map[string]*process
 	closed   bool
@@ -79,51 +87,55 @@ func SandboxProfile(command Command) string {
 (allow file-write-data (literal "/dev/null"))`
 }
 
-func (m *Manager) Available() bool {
-	return runtime.GOOS == "darwin" && m.Command.Executable != "" && m.Command.Entry != ""
-}
-
-func (m *Manager) get(ctx context.Context, key string) (*process, error) {
+// get returns key's REPL for rt, replacing one started for an incompatible
+// capability version; restarted reports that variables were lost for it.
+func (m *Manager) get(ctx context.Context, key string, rt Runtime) (_ *process, restarted bool, _ error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
-		return nil, errors.New("computer runtime closed")
+		return nil, false, errors.New("computer runtime closed")
 	}
 	if p := m.sessions[key]; p != nil {
 		select {
 		case <-p.done:
 			delete(m.sessions, key)
 		default:
-			return p, nil
+			if Compatible(p.version, rt.Version) {
+				return p, false, nil
+			}
+			p.stop()
+			delete(m.sessions, key)
+			restarted = true
 		}
 	}
-	if !m.Available() {
-		return nil, errors.New("computer runtime requires the macOS desktop installation")
+	if runtime.GOOS != "darwin" || rt.Executable == "" || rt.Entry == "" {
+		return nil, restarted, errors.New("computer runtime requires the macOS desktop installation")
 	}
-	cmd := exec.Command("/usr/bin/sandbox-exec", "-p", SandboxProfile(m.Command), m.Command.Executable, "--max-old-space-size=128", m.Command.Entry)
+	cmd := exec.Command("/usr/bin/sandbox-exec", "-p", SandboxProfile(rt.Command), rt.Executable, "--max-old-space-size=128", rt.Entry)
 	cmd.Env = []string{"ELECTRON_RUN_AS_NODE=1", "NODE_REPL_HISTORY=", "LANG=en_US.UTF-8"}
-	cmd.Dir = filepath.Dir(m.Command.Entry)
+	cmd.Dir = filepath.Dir(rt.Entry)
 	p, err := start(cmd)
 	if err != nil {
-		return nil, err
+		return nil, restarted, err
 	}
+	p.version = rt.Version
 	readyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	select {
 	case f, ok := <-p.frames:
 		if !ok || f.Type != "ready" {
 			p.stop()
-			return nil, errors.New("computer runtime did not become ready")
+			return nil, restarted, errors.New("computer runtime did not become ready")
 		}
 	case <-readyCtx.Done():
 		p.stop()
-		return nil, readyCtx.Err()
+		return nil, restarted, readyCtx.Err()
 	}
 	if m.sessions == nil {
 		m.sessions = map[string]*process{}
 	}
 	m.sessions[key] = p
-	return p, nil
+	return p, restarted, nil
 }
 
 func start(cmd *exec.Cmd) (*process, error) {
@@ -174,40 +186,42 @@ func (p *process) send(v any) error {
 	return json.NewEncoder(p.in).Encode(v)
 }
 
-func (m *Manager) Execute(ctx context.Context, key, id, code string, action Action) (result Result, failure error) {
+// Execute runs code in key's REPL for rt. restarted reports that an earlier
+// REPL for an incompatible capability version was replaced first.
+func (m *Manager) Execute(ctx context.Context, key string, rt Runtime, id, code string, action Action) (result Result, restarted bool, failure error) {
 	var trace []ActionRecord
 	defer func() { result.Trace = trace; result.Actions = len(trace) }()
-	p, err := m.get(ctx, key)
+	p, restarted, err := m.get(ctx, key, rt)
 	if err != nil {
-		return Result{}, err
+		return Result{}, restarted, err
 	}
 	if !p.busy.TryLock() {
-		return Result{}, errors.New("computer runtime busy")
+		return Result{}, restarted, errors.New("computer runtime busy")
 	}
 	defer p.busy.Unlock()
 	if err := p.send(map[string]any{"type": "execute", "id": id, "code": code}); err != nil {
 		p.stop()
-		return Result{}, err
+		return Result{}, restarted, err
 	}
 	count := 0
 	for {
 		select {
 		case <-ctx.Done():
 			p.stop()
-			return Result{}, fmt.Errorf("outcome_unknown: execution cancelled; inspect the application before retrying: %w", ctx.Err())
+			return Result{}, restarted, fmt.Errorf("outcome_unknown: execution cancelled; inspect the application before retrying: %w", ctx.Err())
 		case f, ok := <-p.frames:
 			if !ok {
-				return Result{}, errors.New("outcome_unknown: computer runtime exited; variables were lost")
+				return Result{}, restarted, errors.New("outcome_unknown: computer runtime exited; variables were lost")
 			}
 			if f.Type == "result" && f.ID == id {
 				if f.Error != "" {
-					return f.Result, errors.New(f.Error)
+					return f.Result, restarted, errors.New(f.Error)
 				}
-				return f.Result, nil
+				return f.Result, restarted, nil
 			}
 			if f.Type != "action" || f.ExecutionID != id || len(f.Action) == 0 || count >= 60 {
 				p.stop()
-				return Result{}, errors.New("invalid computer runtime action")
+				return Result{}, restarted, errors.New("invalid computer runtime action")
 			}
 			count++
 			value, err := action(ctx, f.Action)
@@ -228,7 +242,7 @@ func (m *Manager) Execute(ctx context.Context, key, id, code string, action Acti
 			}
 			if err := p.send(reply); err != nil {
 				p.stop()
-				return Result{}, err
+				return Result{}, restarted, err
 			}
 		}
 	}

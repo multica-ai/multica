@@ -54,6 +54,7 @@ func runtimeFixture(t *testing.T) *Manager {
 	case <-time.After(5 * time.Second):
 		t.Fatal("fixture did not start")
 	}
+	p.version = CapabilityVersion
 	m := &Manager{sessions: map[string]*process{"c": p}}
 	t.Cleanup(m.Close)
 	return m
@@ -62,14 +63,14 @@ func TestRuntimePersistsAndRoutesActions(t *testing.T) {
 	m := runtimeFixture(t)
 	called := false
 	for n, code := range []string{"one", "action"} {
-		r, err := m.Execute(context.Background(), "c", fmt.Sprint(n), code, func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
+		r, restarted, err := m.Execute(context.Background(), "c", fixtureRuntime, fmt.Sprint(n), code, func(_ context.Context, raw json.RawMessage) (json.RawMessage, error) {
 			called = true
 			if !strings.Contains(string(raw), "fixture") {
 				t.Fatal(string(raw))
 			}
 			return json.RawMessage(`{"ok":true}`), nil
 		})
-		if err != nil || r.Value != fmt.Sprint(n+1) {
+		if err != nil || restarted || r.Value != fmt.Sprint(n+1) {
 			t.Fatalf("result=%+v err=%v", r, err)
 		}
 	}
@@ -77,12 +78,44 @@ func TestRuntimePersistsAndRoutesActions(t *testing.T) {
 		t.Fatal("desktop action not routed")
 	}
 }
+
+var fixtureRuntime = Runtime{Version: CapabilityVersion}
+
+func TestRuntimeKeepsPatchVersionsAndReplacesIncompatibleOnes(t *testing.T) {
+	m := runtimeFixture(t)
+	p := m.sessions["c"]
+	patch := Runtime{Version: "1.0.9"}
+	if _, restarted, err := m.Execute(context.Background(), "c", patch, "one", "one", nil); err != nil || restarted {
+		t.Fatalf("patch difference replaced the REPL: restarted=%v err=%v", restarted, err)
+	}
+	_, restarted, err := m.Execute(context.Background(), "c", Runtime{Version: "1.1.0"}, "two", "one", nil)
+	if !restarted || err == nil {
+		t.Fatalf("minor difference kept the REPL: restarted=%v err=%v", restarted, err)
+	}
+	select {
+	case <-p.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("incompatible runtime survived")
+	}
+}
+
+func TestCompatibleVersions(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{{"1.0.0", "1.0.7", true}, {"1.0.0", "1.1.0", false}, {"1.2.3", "2.2.3", false}, {"1.0", "1.0.0", false}, {"", "1.0.0", false}, {"1.0.0-rc", "1.0.0", false}} {
+		if got := Compatible(c.a, c.b); got != c.want {
+			t.Errorf("Compatible(%q, %q) = %v", c.a, c.b, got)
+		}
+	}
+}
+
 func TestRuntimeCancellationKillsTheProcess(t *testing.T) {
 	m := runtimeFixture(t)
 	p := m.sessions["c"]
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	_, err := m.Execute(ctx, "c", "one", "hang", nil)
+	_, _, err := m.Execute(ctx, "c", fixtureRuntime, "one", "hang", nil)
 	if err == nil || !strings.Contains(err.Error(), "outcome_unknown") {
 		t.Fatalf("cancel=%v", err)
 	}

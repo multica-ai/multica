@@ -29,6 +29,13 @@ extraResources:
     to: LICENSE
   - from: ../../NOTICE
     to: NOTICE
+  # Computer Use loads cua-driver's native library by real path, so the staged
+  # SDK ships outside app.asar. electron-builder always drops a node_modules
+  # directly under `from`, hence the parent directory plus a nested filter.
+  - from: resources/native
+    to: native
+    filter:
+      - "cua-driver/**/*"
 protocols:
   - name: Multica
     schemes:
