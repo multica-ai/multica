@@ -1,0 +1,172 @@
+{
+  "title": "Thanh lệnh",
+  "description": "Tìm kiếm, chạy lệnh hoặc giao việc cho agent",
+  "placeholder": "Tìm kiếm, hoặc nhập việc cần làm...",
+  "groups": {
+    "pages": "Trang",
+    "commands": "Lệnh",
+    "members": "Thành viên",
+    "projects": "Dự án",
+    "issues": "Công việc",
+    "cancelled": "Đã hủy",
+    "recent": "Gần đây",
+    "workspaces": "Không gian làm việc",
+    "agents": "Agents",
+    "squads": "Squads",
+    "autopilots": "Autopilots",
+    "chats": "Trò chuyện",
+    "skills": "Skills",
+    "new": "Mới",
+    "best_match": "Khớp nhất",
+    "actions": "Hành động"
+  },
+  "commands": {
+    "current_theme_aria": "Giao diện hiện tại",
+    "new_issue": "Công việc mới",
+    "new_project": "Dự án mới",
+    "copy_issue_link": "Sao chép liên kết công việc",
+    "copy_identifier": "Sao chép định danh ({{identifier}})",
+    "fold_all_comments": "Thu gọn tất cả bình luận",
+    "unfold_all_comments": "Mở rộng tất cả bình luận",
+    "new_autopilot": "Autopilot mới",
+    "chat_with_agent": "Trò chuyện với một agent",
+    "change_theme": "Đổi giao diện...",
+    "send_feedback": "Gửi phản hồi"
+  },
+  "toast": {
+    "link_copied": "Đã sao chép liên kết",
+    "copied_identifier": "Đã sao chép {{identifier}}",
+    "run_retried": "Đã khởi động lại lần chạy",
+    "run_cancelled": "Đã hủy lần chạy",
+    "subscribed": "Đã theo dõi",
+    "unsubscribed": "Đã bỏ theo dõi",
+    "label_added": "Đã thêm nhãn {{name}}",
+    "label_removed": "Đã gỡ nhãn {{name}}",
+    "label_failed": "Không thêm được nhãn {{name}} cho mọi công việc",
+    "update_failed": "Cập nhật thất bại",
+    "assigned": "Đã giao {{identifier}} cho {{name}}"
+  },
+  "empty": {
+    "no_results": "Không tìm thấy kết quả nào.",
+    "no_labels": "Không có nhãn",
+    "type_to_find_issue": "Nhập để tìm công việc",
+    "type_to_find_people": "Nhập để tìm người và agent"
+  },
+  "trigger": {
+    "label": "Tìm kiếm..."
+  },
+  "page_placeholder": "Lọc...",
+  "breadcrumb_aria": "Menu hiện tại",
+  "context": {
+    "current_issue": "Công việc hiện tại",
+    "selected_issues_other": "{{count}} công việc đã chọn",
+    "current_project": "Dự án hiện tại",
+    "current_agent": "Agent hiện tại",
+    "current_autopilot": "Autopilot hiện tại",
+    "inbox": "Hộp thư đến",
+    "current_chat": "Trò chuyện hiện tại"
+  },
+  "issue": {
+    "change_status": "Đổi trạng thái...",
+    "assign_to": "Giao cho...",
+    "set_priority": "Đặt mức ưu tiên...",
+    "run_quick_action": "Chạy hành động nhanh...",
+    "quick_actions_available_other": "{{count}} khả dụng",
+    "add_label": "Thêm nhãn...",
+    "set_due_date": "Đặt hạn...",
+    "move_to_project": "Chuyển sang dự án...",
+    "set_parent": "Đặt công việc cha...",
+    "cancel_run": "Hủy lần chạy hiện tại",
+    "retry_run": "Chạy lại lần chạy gần nhất",
+    "create_sub_issue": "Công việc con mới",
+    "subscribe": "Theo dõi",
+    "unsubscribe": "Bỏ theo dõi",
+    "delete": "Xóa công việc",
+    "delete_selected_other": "Xóa {{count}} công việc"
+  },
+  "project": {
+    "change_status": "Đổi trạng thái dự án...",
+    "new_issue": "Công việc mới trong dự án này",
+    "pin": "Ghim vào thanh bên",
+    "unpin": "Bỏ ghim khỏi thanh bên",
+    "copy_link": "Sao chép liên kết dự án"
+  },
+  "agent": {
+    "chat": "Trò chuyện với {{name}}",
+    "assign_issue": "Giao một công việc cho {{name}}...",
+    "new_issue": "Công việc mới cho {{name}}",
+    "pin_in_chat": "Ghim trong trò chuyện",
+    "unpin_in_chat": "Bỏ ghim trong trò chuyện",
+    "settings": "Mở cài đặt agent"
+  },
+  "autopilot": {
+    "run_now": "Chạy một lần ngay",
+    "pause": "Tạm dừng",
+    "resume": "Tiếp tục"
+  },
+  "inbox": {
+    "archive": "Lưu trữ",
+    "mark_unread": "Đánh dấu chưa đọc",
+    "mark_all_read": "Đánh dấu tất cả đã đọc",
+    "archive_all_read": "Lưu trữ tất cả mục đã đọc"
+  },
+  "chat": {
+    "link_project": "Liên kết tới dự án...",
+    "pin": "Ghim trò chuyện",
+    "unpin": "Bỏ ghim trò chuyện",
+    "archive": "Lưu trữ trò chuyện"
+  },
+  "pages": {
+    "status": "Trạng thái",
+    "priority": "Mức ưu tiên",
+    "assignee": "Người được giao",
+    "labels": "Nhãn",
+    "due_date": "Hạn",
+    "project": "Dự án",
+    "parent": "Công việc cha",
+    "quick_actions": "Hành động nhanh",
+    "theme": "Giao diện",
+    "project_status": "Trạng thái dự án",
+    "no_project": "Không dự án",
+    "current": "Hiện tại"
+  },
+  "theme": {
+    "light": "Sáng",
+    "dark": "Tối",
+    "system": "Hệ thống"
+  },
+  "delegate": {
+    "heading": "Giao cho agent",
+    "create_and_assign": "Công việc mới và giao cho {{name}}",
+    "squad": "Squad",
+    "context_aria": "Tạo kèm",
+    "parent": "Thuộc {{identifier}}",
+    "pick_crumb": "Chọn",
+    "pick_another": "Giao cho agent hoặc squad khác...",
+    "detected": "Hướng dẫn"
+  },
+  "best": {
+    "assign": "Giao {{subject}} cho {{name}}",
+    "chat": "Trò chuyện với {{name}}",
+    "new_issue_in": "Công việc mới trong {{name}}"
+  },
+  "types": {
+    "issue": "Công việc",
+    "project": "Dự án",
+    "agent": "Agent",
+    "autopilot": "Autopilot",
+    "squad": "Squad",
+    "member": "Thành viên"
+  },
+  "footer": {
+    "navigate": "Điều hướng",
+    "select": "Chọn",
+    "open_in_new_tab": "Mở trong tab mới",
+    "delegate": "Tạo và giao cho {{name}}",
+    "search_instead": "Tìm theo từ khóa",
+    "back": "Quay lại",
+    "prefix_commands": "Lệnh",
+    "prefix_issues": "Công việc",
+    "prefix_people": "Người và agent"
+  }
+}

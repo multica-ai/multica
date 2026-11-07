@@ -1,0 +1,169 @@
+{
+  "page": {
+    "title": "Squad",
+    "new_button": "Squad mới",
+    "empty_no_match": "Không có squad nào khớp với bộ lọc của bạn.",
+    "table": {
+      "name": "Squad",
+      "leader": "Trưởng nhóm",
+      "members": "Thành viên",
+      "creator": "Người tạo",
+      "created": "Ngày tạo"
+    },
+    "no_matches": "Không có squad nào khớp",
+    "row_menu": "Thao tác với squad",
+    "archive_action": "Lưu trữ"
+  },
+  "inspector": {},
+  "member_type": {
+    "agent": "Agent",
+    "member": "Thành viên"
+  },
+  "archive_dialog": {
+    "title": "Lưu trữ squad này?",
+    "description": "\"{{name}}\" sẽ được lưu trữ. Các công việc hiện đang giao cho squad này sẽ được chuyển cho trưởng nhóm của nó. Hành động này không thể hoàn tác — hãy tạo squad mới nếu bạn cần khôi phục việc điều phối.",
+    "cancel": "Hủy",
+    "confirm": "Lưu trữ",
+    "archiving": "Đang lưu trữ…",
+    "success": "Đã lưu trữ squad"
+  },
+  "name_editor": {
+    "title": "Đổi tên squad",
+    "placeholder": "Tên squad",
+    "required": "Tên là bắt buộc",
+    "cancel": "Hủy",
+    "save": "Lưu",
+    "saved": "Đã lưu",
+    "save_failed": "Không lưu được"
+  },
+  "add_member_dialog": {
+    "title": "Thêm thành viên",
+    "description": "Chọn thành viên không gian làm việc hoặc agent.",
+    "label_member": "Thành viên",
+    "label_role": "Vai trò",
+    "label_optional": "(không bắt buộc)",
+    "cancel": "Hủy",
+    "select_target": "Chọn một thành viên hoặc agent",
+    "search_placeholder": "Tìm kiếm thành viên hoặc agent...",
+    "members_section": "Thành viên",
+    "agents_section": "Agent",
+    "role_placeholder": "ví dụ: Reviewer, Frontend Lead",
+    "add": "Thêm"
+  },
+  "role_editor": {
+    "empty": "Thêm vai trò…",
+    "placeholder": "Vai trò (ví dụ: Reviewer)"
+  },
+  "description_dialog": {
+    "title": "Chỉnh sửa mô tả",
+    "placeholder_empty": "Thêm mô tả",
+    "cancel": "Hủy",
+    "responsibility_placeholder": "Squad này chịu trách nhiệm về việc gì?",
+    "save": "Lưu"
+  },
+  "discard_changes_dialog": {},
+  "members_tab": {
+    "section_title": "Thành viên",
+    "add_member_button": "Thêm thành viên",
+    "create_agent_button": "Tạo Agent",
+    "leader_chip": "Trưởng nhóm",
+    "view_agent_tooltip": "Mở chi tiết agent",
+    "make_leader_tooltip": "Đặt làm trưởng nhóm squad",
+    "remove_member_tooltip": "Loại khỏi squad",
+    "status_working": "Đang làm việc",
+    "status_idle": "Nhàn rỗi",
+    "status_offline": "Ngoại tuyến",
+    "status_unstable": "Không ổn định",
+    "status_archived": "Đã lưu trữ",
+    "issue_status_blocked": "bị chặn",
+    "active_issue_more": "và {{count}} công việc nữa",
+    "empty_title": "Chưa có thành viên nào",
+    "empty_description": "Thêm agent hoặc thành viên, và công việc giao cho squad này sẽ tới họ."
+  },
+  "detail_tabs": {},
+  "details": {
+    "leader": "Trưởng nhóm",
+    "members": "Thành viên",
+    "created_by": "Người tạo",
+    "created": "Ngày tạo",
+    "updated": "Ngày cập nhật",
+    "visibility": "Hiển thị",
+    "visibility_workspace": "Không gian làm việc"
+  },
+  "toasts": {
+    "member_added": "Đã thêm thành viên",
+    "member_add_failed": "Không thêm được thành viên",
+    "member_removed": "Đã loại bỏ thành viên",
+    "member_remove_failed": "Không loại bỏ được thành viên",
+    "role_updated": "Đã cập nhật vai trò",
+    "role_update_failed": "Không cập nhật được vai trò",
+    "leader_updated": "Đã cập nhật trưởng nhóm",
+    "leader_update_failed": "Không cập nhật được trưởng nhóm",
+    "archive_failed": "Không lưu trữ được squad",
+    "instructions_saved": "Đã lưu hướng dẫn"
+  },
+  "profile_card": {
+    "unavailable": "Squad không khả dụng",
+    "detail_link": "Chi tiết →",
+    "archived": "Đã lưu trữ",
+    "member_count_other": "{{count}} thành viên",
+    "members_section": "Thành viên",
+    "more_members_other": "+{{count}} nữa"
+  },
+  "instructions_tab": {
+    "description": "Trưởng nhóm đọc các hướng dẫn này mỗi khi làm việc trên một công việc được giao cho squad này.",
+    "unsaved_changes": "Thay đổi chưa lưu",
+    "save_button": "Lưu",
+    "placeholder": "ví dụ: Luôn bắt đầu bằng cách viết một test đang lỗi. Ưu tiên các commit nhỏ, độc lập."
+  },
+  "scope": {
+    "mine": "Squad của tôi",
+    "all": "Tất cả squad"
+  },
+  "toolbar": {},
+  "detail": {
+    "assign_work": "Giao việc",
+    "copy_link": "Sao chép liên kết",
+    "link_copied": "Đã sao chép liên kết",
+    "not_found": "Không tìm thấy squad",
+    "not_found_description": "Có thể nó đã bị xóa hoặc bạn không có quyền truy cập.",
+    "back_to_list": "Tất cả squad",
+    "instructions": "Hướng dẫn",
+    "edit": "Sửa",
+    "cancel": "Hủy",
+    "recent_work": "Việc gần đây",
+    "recent_work_empty": "Chưa có công việc nào được giao cho squad này.",
+    "member_menu": "Hành động cho {{name}}",
+    "working_on": "Đang làm"
+  },
+  "intro": {
+    "title": "Cho agent vào squad, chúng làm việc như một đội",
+    "description": "Giao công việc cho squad. Agent trưởng đọc nó, giao từng bước cho thành viên có vai phù hợp, và theo dõi tới khi đạt mục tiêu. Bạn chỉ làm việc với một người được giao.",
+    "slides": {
+      "route": {
+        "title": "Một người được giao, tự định tuyến",
+        "description": "Trưởng đọc công việc và nhắc tới thành viên phù hợp nhất cho bước tiếp theo. Chỉ thành viên đó bắt đầu làm."
+      },
+      "roles": {
+        "title": "Chia việc theo vai trò",
+        "description": "Mô tả vai trò cho trưởng biết mỗi thành viên giỏi gì. Thành viên có thể là agent hay con người."
+      },
+      "progress": {
+        "title": "Theo dõi tiến độ ở một chỗ",
+        "description": "Trang squad hiện công việc gần đây và mỗi thành viên đang làm gì."
+      }
+    },
+    "art": {
+      "assignee": "Người được giao",
+      "squad_name": "Frontend squad",
+      "issue_dark_mode": "Thêm nút bật dark mode vào cài đặt",
+      "issue_board_columns": "Cho cột bảng co giãn được",
+      "issue_inbox_gestures": "Vuốt trong hộp thư mobile",
+      "issue_paste_images": "Dán ảnh vào bình luận",
+      "delegating": "Đang chọn thành viên theo vai trò...",
+      "role_frontend": "Frontend",
+      "role_testing": "Testing",
+      "role_product": "Product"
+    }
+  }
+}

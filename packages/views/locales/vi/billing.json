@@ -1,0 +1,257 @@
+{
+  "title": "Thanh toán (trang kiểm thử)",
+  "subtitle": "Chuyển thẳng tới /api/v1/billing/* của multica-cloud. Chưa phải giao diện hoàn chỉnh — chỉ là gộp mọi endpoint vào một trang để kiểm chứng proxy + luồng Stripe.",
+  "endpoints": {
+    "balance": "GET /api/cloud-billing/balance",
+    "transactions": "GET /api/cloud-billing/transactions",
+    "batches": "GET /api/cloud-billing/batches",
+    "topups": "GET /api/cloud-billing/topups",
+    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
+  },
+  "balance": {
+    "title": "Số dư",
+    "credits_suffix": "credit",
+    "meta": "micro gốc: {{micro}} · chủ sở hữu: {{owner}}… · cập nhật {{updated}}"
+  },
+  "buy": {
+    "title": "Mua credit / Quản lý thanh toán",
+    "no_tiers": "Chưa cấu hình bậc giá nào. Có thể Cloud chưa đặt khóa Stripe — quá trình thanh toán sẽ trả về 503.",
+    "tier_money_to_credits": "{{money}} → {{credits}} credit",
+    "tier_bonus": " + {{credits}} tặng thêm",
+    "tier_bonus_with_expiry": " + {{credits}} tặng thêm ({{expiry}})",
+    "tier_id": "id: {{id}}",
+    "open_portal": "Mở Cổng thanh toán Stripe",
+    "portal_hint": "Lỗi 400 là bình thường với người dùng chưa từng thanh toán (chưa có hồ sơ khách hàng Stripe).",
+    "toast_no_url": "Cloud không trả về URL thanh toán",
+    "toast_checkout_failed": "Thanh toán thất bại",
+    "toast_no_portal_url": "Không nhận được URL cổng thanh toán",
+    "toast_portal_failed": "Mở cổng thanh toán thất bại"
+  },
+  "checkout": {
+    "session_label": "Phiên thanh toán {{prefix}}…",
+    "loading": "Đang tải trạng thái đơn hàng…",
+    "fetch_failed": "Không tải được trạng thái: {{error}}",
+    "fetch_failed_unknown": "lỗi không xác định",
+    "final_status": "Trạng thái cuối: {{status}}",
+    "polling_status": "Đang kiểm tra trạng thái… hiện tại: {{status}}",
+    "status_unknown": "không xác định",
+    "label_order": "Đơn hàng",
+    "label_tier": "Gói",
+    "label_charged": "Đã tính phí",
+    "charged_value": "{{money}} · {{credits}} credit",
+    "charged_with_bonus": "{{money}} · {{credits}} credit + {{bonus}} tặng thêm",
+    "clear_url": "Xóa khỏi URL"
+  },
+  "transactions": {
+    "title": "Giao dịch",
+    "empty": "Chưa có giao dịch nào.",
+    "credits_value": "{{value}} credit",
+    "row_meta": "{{date}} · số dư sau: {{balance}} credit · mã tham chiếu: {{ref}}",
+    "ref_empty": "—"
+  },
+  "batches": {
+    "title": "Các lô credit",
+    "empty": "Chưa có lô nào.",
+    "remaining_over_total": "{{remaining}} / {{total}} credit",
+    "id_suffix": "{{id}}…",
+    "consumed": "Đã dùng: {{value}} credit",
+    "expires_suffix": " · hết hạn {{value}}",
+    "never_expires_suffix": " · không bao giờ hết hạn"
+  },
+  "topups": {
+    "title": "Đơn nạp tiền",
+    "empty": "Chưa có đơn nạp nào.",
+    "amount_to_credits": "{{money}} → {{credits}} credit",
+    "amount_to_credits_with_bonus": "{{money}} → {{credits}} credit + {{bonus}} tặng thêm",
+    "row_meta": "{{date}} · stripe: {{checkout}}",
+    "stripe_empty": "—"
+  },
+  "workspace": {
+    "title": "Thanh toán",
+    "description": "Quản lý gói, giới hạn, số ghế người dùng và thanh toán Stripe của không gian làm việc này.",
+    "loading": "Đang tải thông tin thanh toán của không gian làm việc",
+    "plan": {
+      "free": "Miễn phí",
+      "pro": "Pro",
+      "unknown": "Gói không xác định"
+    },
+    "status": {
+      "inactive": "Không hoạt động",
+      "active": "Đang hoạt động",
+      "trialing": "Đang dùng thử",
+      "past_due": "Quá hạn thanh toán",
+      "canceled": "Đã hủy",
+      "incomplete": "Chưa hoàn tất",
+      "incomplete_expired": "Thiết lập đã hết hạn",
+      "paused": "Đã tạm dừng",
+      "unpaid": "Chưa thanh toán",
+      "unknown": "Trạng thái không xác định"
+    },
+    "load_failed": {
+      "title": "Thanh toán tạm thời không khả dụng",
+      "description": "Không tải được chi tiết gói đăng ký. Hãy thử lại."
+    },
+    "actions": {
+      "retry": "Thử lại",
+      "retry_autopilots": "Thử tải lại mức sử dụng automation",
+      "upgrade": "Nâng cấp lên Pro",
+      "manage": "Quản lý thanh toán",
+      "add_seats": "Thêm ghế",
+      "cancel": "Hủy",
+      "continue_to_stripe": "Tiếp tục tới Stripe"
+    },
+    "errors": {
+      "action_title": "Thao tác thanh toán thất bại",
+      "temporarily_unavailable": "Thanh toán tạm thời không khả dụng. Hãy thử lại sau giây lát.",
+      "not_enabled": "Gói đăng ký cho không gian làm việc chưa được bật trên bản triển khai này. Hãy liên hệ quản trị viên của bạn.",
+      "permission_changed": "Vai trò của bạn trong không gian làm việc không còn cho phép thao tác này. Hãy làm mới trang để xem quyền truy cập hiện tại.",
+      "checkout_response": "Không mở được trang thanh toán vì phản hồi của máy chủ không đọc được. Hãy thử lại mà không thay đổi chu kỳ đã chọn.",
+      "already_subscribed": "Không gian làm việc này đã có gói đăng ký. Gói hiện tại đã được làm mới.",
+      "checkout_failed": "Không tạo được phiên thanh toán. Hãy thử lại sau giây lát.",
+      "portal_response": "Không mở được Cổng thanh toán vì phản hồi của máy chủ không đọc được.",
+      "portal_unavailable": "Cổng thanh toán không khả dụng cho không gian làm việc này. Gói hiện tại đã được làm mới.",
+      "portal_failed": "Không mở được Cổng thanh toán. Hãy thử lại sau giây lát."
+    },
+    "return": {
+      "cancel_title": "Đã hủy thanh toán",
+      "cancel_description": "Không có thay đổi nào về gói.",
+      "portal_title": "Đã làm mới chi tiết thanh toán",
+      "syncing_title": "Đang kích hoạt gói đăng ký của bạn",
+      "syncing_description": "Thanh toán đã hoàn tất. Hệ thống đang chờ Stripe xác nhận thay đổi gói.",
+      "timeout_description": "Đã nhận thanh toán, nhưng gói đăng ký vẫn đang đồng bộ. Hãy làm mới trang sau giây lát.",
+      "active_title": "Pro đã được kích hoạt",
+      "active_description": "Không gian làm việc này hiện đã có quyền truy cập Pro."
+    },
+    "past_due": {
+      "title": "Thanh toán cần xử lý",
+      "description": "Hãy cập nhật phương thức thanh toán trong phần quản lý thanh toán.",
+      "grace_description": "Hãy cập nhật phương thức thanh toán trước {{date}} để giữ quyền truy cập Pro."
+    },
+    "subscription_notice": {
+      "canceling_title": "Đã lên lịch hủy",
+      "canceling_description": "Gói đăng ký của bạn sẽ bị hủy vào {{date}}.",
+      "canceling_description_without_date": "Gói đăng ký này đã được lên lịch hủy vào cuối chu kỳ hiện tại.",
+      "incomplete_title": "Thiết lập gói đăng ký chưa hoàn tất",
+      "incomplete_description": "Mở phần quản lý thanh toán để hoàn tất hoặc xem lại thiết lập thanh toán.",
+      "incomplete_expired_title": "Thiết lập gói đăng ký đã hết hạn",
+      "incomplete_expired_description": "Thiết lập thanh toán trước đó đã hết hạn mà chưa kích hoạt Pro. Hãy bắt đầu nâng cấp mới khi sẵn sàng.",
+      "paused_title": "Gói đăng ký đã tạm dừng",
+      "paused_description": "Mở phần quản lý thanh toán để xem lại việc tạm dừng và các tùy chọn khôi phục.",
+      "unpaid_title": "Gói đăng ký chưa thanh toán",
+      "unpaid_description": "Mở phần quản lý thanh toán để xử lý số dư chưa thanh toán.",
+      "canceled_title": "Gói đăng ký đã bị hủy"
+    },
+    "current": {
+      "title": "Gói hiện tại",
+      "plan": "Gói của không gian làm việc",
+      "members": "Thành viên là người",
+      "members_description": "Agent và lời mời đang chờ không được tính là ghế.",
+      "member_count_other": "{{count}} thành viên",
+      "billing_interval": "Chu kỳ thanh toán",
+      "period_end": "Ngày kết thúc chu kỳ hiện tại"
+    },
+    "upgrade": {
+      "title": "Nâng cấp lên Pro",
+      "description": "Chọn chu kỳ thanh toán, sau đó xác nhận số ghế hiện tại và tổng số tiền cuối cùng trong Stripe Checkout.",
+      "interval_label": "Chu kỳ thanh toán",
+      "monthly": "Hàng tháng",
+      "yearly": "Hàng năm",
+      "pro_for_team_other": "Pro cho {{count}} ghế người dùng",
+      "price_loading": "Đang tải giá gói đăng ký",
+      "unit_price": "{{price}} cho mỗi ghế người dùng",
+      "price_at_checkout": "Máy chủ sẽ đếm lại số thành viên là người trước khi mua. Stripe Checkout hiển thị giá mỗi ghế và tổng số tiền chính xác trước khi bạn thanh toán."
+    },
+    "management": {
+      "title": "Quản lý gói đăng ký",
+      "description": "Phương thức thanh toán, hóa đơn và hủy đăng ký.",
+      "portal": "Cổng thanh toán Stripe",
+      "portal_unavailable": "Không có Cổng thanh toán Stripe nào khả dụng cho không gian làm việc này."
+    },
+    "limits": {
+      "title": "Mức sử dụng và giới hạn",
+      "issues": "Công việc",
+      "autopilots": "Lượt chạy automation",
+      "unlimited": "Không giới hạn",
+      "per_month": "{{count}} / tháng",
+      "usage_loading": "Đang tải mức sử dụng automation",
+      "usage_label": "Mức dùng hạn mức automation",
+      "current_usage": "Mức sử dụng hiện tại",
+      "reached": "Đã chạm giới hạn",
+      "usage_total": "{{total}} / {{limit}}",
+      "usage_breakdown": "{{used}} đã hoàn thành · {{reserved}} đang tiến hành",
+      "resets_at": "Đặt lại vào {{date}}",
+      "usage_unavailable": "Mức sử dụng tạm thời không khả dụng"
+    },
+    "seats": {
+      "title": "Ghế",
+      "description": "Số ghế đã mua bao gồm các thành viên là người hiện tại và lời mời đang chờ. Agent không bao giờ dùng ghế.",
+      "human_members": "Ghế đã dùng",
+      "billed": "Ghế đã mua",
+      "pending_invitations": "Lời mời đang chờ",
+      "pending_invitations_description": "Lời mời còn hiệu lực sẽ giữ chỗ trong số ghế đã mua cho đến khi được chấp nhận hoặc hết hạn.",
+      "available": "Ghế còn trống",
+      "available_description": "Số ghế đã mua trừ đi thành viên và lời mời đã giữ chỗ.",
+      "pending": "Số ghế đã lên lịch thay đổi",
+      "pending_description": "Có hiệu lực từ chu kỳ thanh toán tiếp theo.",
+      "seat_count_other": "{{count}} ghế",
+      "pending_with_date_other": "{{count}} ghế từ {{date}}",
+      "none_pending": "Không có thay đổi nào được lên lịch",
+      "not_subscribed": "Không có gói đăng ký đang hoạt động",
+      "unavailable": "Không khả dụng",
+      "summary_loading": "Đang tải chi tiết ghế của gói đăng ký",
+      "summary_unavailable_title": "Một số chi tiết về ghế không khả dụng",
+      "summary_unavailable_description": "Gói hiện tại vẫn được hiển thị, nhưng không tải được số ghế đã mua và số ghế đã lên lịch.",
+      "members_over_capacity_title": "Số thành viên vượt quá số ghế đã mua",
+      "members_over_capacity_description": "Không gian làm việc này có {{actual}} thành viên nhưng chỉ có {{purchased}} ghế đã mua. Hãy thêm đủ ghế hoặc loại bỏ thành viên trước khi gửi thêm lời mời.",
+      "occupancy_over_capacity_description": "Không gian làm việc này đang dùng {{occupied}} trong {{purchased}} ghế đã mua ({{members}} thành viên và {{reserved}} lời mời đang chờ). Hãy thêm ghế, loại bỏ một thành viên hoặc thu hồi lời mời đang chờ trước khi mời người khác.",
+      "updated": "Đã gửi yêu cầu mua ghế",
+      "available_help": "Cách tính số ghế còn trống"
+    },
+    "seat_purchase": {
+      "title": "Thêm ghế",
+      "description": "Nhập số ghế muốn thêm. Một ước tính mới từ Stripe sẽ xuất hiện trước khi bạn xác nhận.",
+      "additional_label": "Số ghế thêm",
+      "additional_hint": "Nhập số ghế muốn thêm, không phải tổng số mới.",
+      "preview_loading": "Đang cập nhật ước tính...",
+      "preview_unreadable": "Không đọc được ước tính. Hãy thay đổi số ghế hoặc thử lại.",
+      "preview_failed": "Ước tính tạm thời không khả dụng. Hãy thử lại sau giây lát.",
+      "capacity_out_of_sync": "Số ghế trong Stripe không khớp với hồ sơ thanh toán. Hãy liên hệ hỗ trợ trước khi thử mua lại.",
+      "in_progress": "Một giao dịch mua ghế khác đang được xử lý. Hãy chờ giao dịch đó hoàn tất; liên hệ hỗ trợ nếu trạng thái này kéo dài.",
+      "purchase_unreadable": "Không đọc được phản hồi mua ghế. Hãy thử lại với báo giá này; cùng một yêu cầu mua sẽ được dùng lại.",
+      "purchase_failed": "Không thêm được ghế. Hãy thử lại với cùng báo giá, hoặc làm mới nếu báo giá đã hết hạn.",
+      "payment_failed": "Không hoàn tất được thanh toán. Hãy cập nhật phương thức thanh toán trong Stripe, rồi yêu cầu báo giá mới.",
+      "quote_changed": "Số ghế hoặc ước tính đã thay đổi. Hãy xem lại báo giá đã làm mới trước khi xác nhận lại.",
+      "seats_after": "Số ghế sau khi mua",
+      "charge_today": "Ước tính chi phí hôm nay",
+      "next_invoice": "Ước tính lần gia hạn tiếp theo",
+      "tax_notice": "Stripe quyết định thuế, credit và chi tiết hóa đơn cuối cùng. Ghế sẽ khả dụng sau khi Stripe xác nhận việc cập nhật gói đăng ký.",
+      "confirm_other": "Thêm {{count}} ghế",
+      "pending_title": "Đang xử lý mua ghế",
+      "pending_description_other": "Stripe đang xác nhận việc cập nhật gói đăng ký lên {{count}} ghế.",
+      "delayed_title": "Việc xác nhận ghế lâu hơn dự kiến",
+      "delayed_description": "Việc kiểm tra tự động đã dừng. Giao dịch mua vẫn có thể hoàn tất; hãy kiểm tra lại sau hoặc liên hệ hỗ trợ trước khi bắt đầu một giao dịch mua khác.",
+      "delayed_description_with_expiry": "Việc kiểm tra tự động đã dừng. Nếu lần thử này vẫn đang chờ sau {{date}}, hãy tải lại trang trước khi yêu cầu báo giá khác; liên hệ hỗ trợ nếu nó vẫn ở trạng thái chờ.",
+      "submitted_other": "Đã gửi yêu cầu mua {{count}} ghế. Sức chứa mới sẽ xuất hiện sau khi Stripe xác nhận.",
+      "error_title": "Không cập nhật được ước tính"
+    },
+    "confirm": {
+      "title": "Tiếp tục tới Stripe Checkout?",
+      "description": "Chu kỳ thanh toán: {{interval}}. Số thành viên là người hiện tại: {{count}}. Stripe sẽ đếm lại số ghế và hiển thị tổng số tiền cuối cùng trước khi thanh toán."
+    }
+  },
+  "shared": {
+    "request_failed": "Yêu cầu thất bại",
+    "refresh": "Làm mới",
+    "paging": "trang {{page}} / {{totalPages}} · tổng {{total}}",
+    "date_dash": "—"
+  },
+  "return_page": {
+    "redirecting": "Đang đưa bạn về trang thanh toán của không gian làm việc…",
+    "load_failed_title": "Không mở được trang thanh toán của không gian làm việc",
+    "load_failed_description": "Bạn đã quay lại từ Stripe, nhưng hệ thống không tải được danh sách không gian làm việc của bạn để mở đúng trang thanh toán. Hãy mở Cài đặt không gian làm việc → Thanh toán để kiểm tra trạng thái hiện tại.",
+    "workspace_missing_title": "Không tìm thấy không gian làm việc đó",
+    "workspace_missing_description": "Bạn đã quay lại từ Stripe, nhưng không gian làm việc này không còn khả dụng với bạn — có thể nó đã bị loại bỏ, hoặc quyền truy cập của bạn đã thay đổi. Hãy mở mục Thanh toán trong không gian làm việc bạn dự định để kiểm tra trạng thái hiện tại.",
+    "retry": "Thử lại",
+    "go_to_app": "Đi tới Multica"
+  }
+}
