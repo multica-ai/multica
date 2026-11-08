@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { SidebarProvider } from "@multica/ui/components/ui/sidebar";
+import { AppearanceSync } from "../common/appearance-sync";
 import { ModalRegistry } from "../modals/registry";
 import { SourceBackfillModal } from "../onboarding";
 import { AppRail } from "./app-rail";
@@ -42,30 +43,33 @@ export function DashboardLayout({
   loadingIndicator,
 }: DashboardLayoutProps) {
   return (
-    <DashboardGuard
-      loadingFallback={
-        <div className="flex h-svh items-center justify-center">
-          {loadingIndicator}
-        </div>
-      }
-    >
-      <SidebarProvider className="h-svh bg-app-shell [--sidebar-wrapper-fill:var(--app-shell)]">
-        <AppShellProvider>
-          <ShellRouteDataPrefetch>
-            <GlobalShortcuts />
-            <WorkspacePresencePrefetch />
-            <AppRail className="hidden md:flex" />
-            <CompactNavSheet />
-            <AppShellCard>
-              <NavigationProgress />
-              {children}
-              <ModalRegistry />
-              <SourceBackfillModal />
-              {extra}
-            </AppShellCard>
-          </ShellRouteDataPrefetch>
-        </AppShellProvider>
-      </SidebarProvider>
-    </DashboardGuard>
+    <>
+      <AppearanceSync />
+      <DashboardGuard
+        loadingFallback={
+          <div className="flex h-svh items-center justify-center">
+            {loadingIndicator}
+          </div>
+        }
+      >
+        <SidebarProvider className="h-svh bg-app-shell [--sidebar-wrapper-fill:var(--app-shell)]">
+          <AppShellProvider>
+            <ShellRouteDataPrefetch>
+              <GlobalShortcuts />
+              <WorkspacePresencePrefetch />
+              <AppRail className="hidden md:flex" />
+              <CompactNavSheet />
+              <AppShellCard>
+                <NavigationProgress />
+                {children}
+                <ModalRegistry />
+                <SourceBackfillModal />
+                {extra}
+              </AppShellCard>
+            </ShellRouteDataPrefetch>
+          </AppShellProvider>
+        </SidebarProvider>
+      </DashboardGuard>
+    </>
   );
 }

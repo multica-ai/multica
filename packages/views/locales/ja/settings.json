@@ -163,6 +163,21 @@
       "dark": "ダーク",
       "system": "システム"
     },
+    "style": {
+      "title": "スタイル",
+      "default": "デフォルト",
+      "pop": "ポップ"
+    },
+    "frame": {
+      "title": "フレームの色",
+      "pop_hint": "ポップでは黒いフレームに固定されます。",
+      "neutral": "ニュートラル",
+      "sand": "サンド",
+      "sage": "セージ",
+      "mist": "ミスト",
+      "lilac": "ライラック",
+      "rose": "ローズ"
+    },
     "language": {
       "title": "言語",
       "english": "English",

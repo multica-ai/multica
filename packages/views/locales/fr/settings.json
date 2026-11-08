@@ -165,6 +165,21 @@
       "dark": "Sombre",
       "system": "Système"
     },
+    "style": {
+      "title": "Style",
+      "default": "Par défaut",
+      "pop": "Pop"
+    },
+    "frame": {
+      "title": "Couleur du cadre",
+      "pop_hint": "Le style Pop utilise un cadre noir fixe.",
+      "neutral": "Neutre",
+      "sand": "Sable",
+      "sage": "Sauge",
+      "mist": "Brume",
+      "lilac": "Lilas",
+      "rose": "Rose"
+    },
     "language": {
       "title": "Langue",
       "english": "English",

@@ -165,6 +165,21 @@
       "dark": "Dark",
       "system": "System"
     },
+    "style": {
+      "title": "Style",
+      "default": "Default",
+      "pop": "Pop"
+    },
+    "frame": {
+      "title": "Frame color",
+      "pop_hint": "Pop uses a fixed black frame.",
+      "neutral": "Neutral",
+      "sand": "Sand",
+      "sage": "Sage",
+      "mist": "Mist",
+      "lilac": "Lilac",
+      "rose": "Rose"
+    },
     "language": {
       "title": "Language",
       "english": "English",

@@ -163,6 +163,21 @@
       "dark": "다크",
       "system": "시스템"
     },
+    "style": {
+      "title": "스타일",
+      "default": "기본",
+      "pop": "팝"
+    },
+    "frame": {
+      "title": "프레임 색상",
+      "pop_hint": "팝 스타일은 검은색 프레임을 사용합니다.",
+      "neutral": "뉴트럴",
+      "sand": "샌드",
+      "sage": "세이지",
+      "mist": "미스트",
+      "lilac": "라일락",
+      "rose": "로즈"
+    },
     "language": {
       "title": "언어",
       "english": "English",

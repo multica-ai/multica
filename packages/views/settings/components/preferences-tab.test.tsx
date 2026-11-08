@@ -106,6 +106,7 @@ vi.mock("@multica/core/auth", async () => {
 import { PreferencesTab } from "./preferences-tab";
 import { useCommentComposerStore } from "@multica/core/issues/stores";
 import { useIssueOpeningStore } from "@multica/core/issues/stores/issue-opening-store";
+import { useAppearanceStore } from "@multica/core/appearance";
 import {
   DEFAULT_MANUAL_CREATE_FIELDS,
   DEFAULT_QUICK_CREATE_FIELDS,
@@ -421,6 +422,51 @@ describe("PreferencesTab — Create-issue fields", () => {
       "assignee",
       "project",
     ]);
+  });
+});
+
+describe("PreferencesTab — Style and frame", () => {
+  beforeEach(() => {
+    useAppearanceStore.setState({ style: "default", frame: "neutral" });
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("tints the frame with the picked swatch", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+    const group = screen.getByRole("group", { name: "Frame color" });
+    expect(within(group).getByRole("button", { name: "Neutral" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.click(within(group).getByRole("button", { name: "Sage" }));
+
+    expect(useAppearanceStore.getState().frame).toBe("sage");
+    expect(within(group).getByRole("button", { name: "Sage" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("locks the frame picker while Pop is on and keeps the chosen tint", async () => {
+    useAppearanceStore.setState({ frame: "rose" });
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    await user.click(
+      within(screen.getByRole("group", { name: "Style" })).getByRole("button", { name: "Pop" }),
+    );
+
+    expect(useAppearanceStore.getState()).toMatchObject({ style: "pop", frame: "rose" });
+    expect(screen.getByText(enSettings.preferences.frame.pop_hint)).toBeInTheDocument();
+    for (const swatch of within(screen.getByRole("group", { name: "Frame color" })).getAllByRole(
+      "button",
+    )) {
+      expect(swatch).toBeDisabled();
+    }
   });
 });
 

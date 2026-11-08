@@ -163,6 +163,21 @@
       "dark": "深色",
       "system": "跟隨系統"
     },
+    "style": {
+      "title": "風格",
+      "default": "預設",
+      "pop": "波普"
+    },
+    "frame": {
+      "title": "外框顏色",
+      "pop_hint": "波普風格使用固定的黑色外框。",
+      "neutral": "中性",
+      "sand": "暖沙",
+      "sage": "鼠尾草",
+      "mist": "霧藍",
+      "lilac": "薰衣草",
+      "rose": "玫瑰"
+    },
     "language": {
       "title": "語言",
       "english": "English",

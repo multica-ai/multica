@@ -25,6 +25,13 @@ import {
   CommandList,
 } from "@multica/ui/components/ui/command";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import {
+  APPEARANCE_FRAMES,
+  styleHasFixedFrame,
+  useAppearanceStore,
+  type AppearanceStyle,
+} from "@multica/core/appearance";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
@@ -84,6 +91,8 @@ export function PreferencesTab() {
       >
         <SettingsCard>
           <ThemeRow />
+          <StyleRow />
+          <FrameRow />
         </SettingsCard>
       </SettingsSection>
 
@@ -138,6 +147,65 @@ function ThemeRow() {
             ["system", t(($) => $.preferences.theme.system)],
           ]}
         />
+      </div>
+    </SettingsRow>
+  );
+}
+
+function StyleRow() {
+  const { t } = useT("settings");
+  const style = useAppearanceStore((s) => s.style);
+  const setStyle = useAppearanceStore((s) => s.setStyle);
+  const label = t(($) => $.preferences.style.title);
+  return (
+    <SettingsRow anchor="style" label={label}>
+      <div role="group" aria-label={label}>
+        <SegmentedToggle<AppearanceStyle>
+          value={style}
+          onChange={setStyle}
+          buttonClassName="px-3 py-1 text-label"
+          options={[
+            ["default", t(($) => $.preferences.style.default)],
+            ["pop", t(($) => $.preferences.style.pop)],
+          ]}
+        />
+      </div>
+    </SettingsRow>
+  );
+}
+
+/** Tints only the app shell around the content card; Pop keeps its own frame. */
+function FrameRow() {
+  const { t } = useT("settings");
+  const frame = useAppearanceStore((s) => s.frame);
+  const setFrame = useAppearanceStore((s) => s.setFrame);
+  const fixed = styleHasFixedFrame(useAppearanceStore((s) => s.style));
+  const label = t(($) => $.preferences.frame.title);
+  return (
+    <SettingsRow
+      anchor="frame"
+      label={label}
+      description={fixed ? t(($) => $.preferences.frame.pop_hint) : undefined}
+    >
+      <div role="group" aria-label={label} className="flex items-center gap-2">
+        {APPEARANCE_FRAMES.map((option) => {
+          const name = t(($) => $.preferences.frame[option]);
+          return (
+            <TooltipHint key={option} label={name}>
+              <button
+                type="button"
+                aria-label={name}
+                aria-pressed={frame === option}
+                disabled={fixed}
+                data-frame-swatch={option}
+                onClick={() => {
+                  if (option !== frame) setFrame(option);
+                }}
+                className="size-6 rounded-full ring-1 ring-inset ring-foreground/10 outline-offset-2 transition-opacity aria-pressed:outline-2 aria-pressed:outline-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
+              />
+            </TooltipHint>
+          );
+        })}
       </div>
     </SettingsRow>
   );

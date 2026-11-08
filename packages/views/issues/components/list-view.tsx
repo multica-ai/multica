@@ -595,6 +595,8 @@ function StatusAccordionItem({
   return (
     <Accordion.Item value={status} ref={dragEnabled ? setDroppableRef : undefined}>
       <Accordion.Header
+        data-slot="issue-group-header"
+        data-status={status}
         className={`group/header sticky top-0 z-10 flex h-10 items-center rounded-lg bg-muted transition-colors hover:bg-accent ${
           isOver && !isExpanded
             ? "ring-2 ring-brand/25 bg-accent/15"

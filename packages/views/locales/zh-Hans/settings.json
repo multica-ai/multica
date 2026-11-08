@@ -163,6 +163,21 @@
       "dark": "深色",
       "system": "跟随系统"
     },
+    "style": {
+      "title": "风格",
+      "default": "默认",
+      "pop": "波普"
+    },
+    "frame": {
+      "title": "外框颜色",
+      "pop_hint": "波普风格使用固定的黑色外框。",
+      "neutral": "中性",
+      "sand": "暖沙",
+      "sage": "鼠尾草",
+      "mist": "雾蓝",
+      "lilac": "薰衣草",
+      "rose": "玫瑰"
+    },
     "language": {
       "title": "语言",
       "english": "English",

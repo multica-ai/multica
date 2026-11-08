@@ -147,6 +147,21 @@
       "dark": "Oscuro",
       "system": "Sistema"
     },
+    "style": {
+      "title": "Estilo",
+      "default": "Predeterminado",
+      "pop": "Pop"
+    },
+    "frame": {
+      "title": "Color del marco",
+      "pop_hint": "El estilo Pop usa un marco negro fijo.",
+      "neutral": "Neutro",
+      "sand": "Arena",
+      "sage": "Salvia",
+      "mist": "Niebla",
+      "lilac": "Lila",
+      "rose": "Rosa"
+    },
     "language": {
       "title": "Idioma",
       "english": "English",
