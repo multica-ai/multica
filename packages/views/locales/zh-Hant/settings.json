@@ -196,20 +196,101 @@
     }
   },
   "appearance": {
-    "theme": {
-      "title": "主題",
-      "description": "淺色、深色，或跟隨系統。",
+    "reset": "恢復預設",
+    "color": {
+      "title": "顏色"
+    },
+    "mode": {
+      "title": "模式",
       "light": "淺色",
       "dark": "深色",
       "system": "跟隨系統"
     },
-    "style": {
-      "title": "風格",
-      "description": "整個應用程式的視覺風格。",
+    "theme": {
+      "title": "主題",
+      "description": "整個應用程式的配色、邊框、陰影和圓角。",
       "default": "預設",
-      "default_description": "安靜、中性，適合長時間工作。",
-      "pop": "波普",
-      "pop_description": "黑色粗框、硬陰影和鮮明的狀態色。"
+      "pop": "普普"
+    },
+    "accent": {
+      "title": "強調色",
+      "description": "啟用狀態、連結和未讀標記。",
+      "theme": "主題色",
+      "blue": "藍",
+      "violet": "紫",
+      "green": "綠",
+      "orange": "橙",
+      "pink": "粉",
+      "graphite": "石墨"
+    },
+    "text": {
+      "title": "文字"
+    },
+    "ui_font": {
+      "title": "介面字體",
+      "description": "標題、內文和按鈕裡的字母與數字。",
+      "sample": "Aa 漢字",
+      "inter": "預設",
+      "system": "系統",
+      "serif": "襯線",
+      "mono": "等寬"
+    },
+    "cjk_font": {
+      "title": "中文字體",
+      "description": "漢字（以及日文、韓文）的顯示字體。",
+      "sans": "黑體",
+      "serif": "宋體",
+      "kai": "楷體"
+    },
+    "code_font": {
+      "title": "程式碼字體",
+      "description": "程式碼區塊、行內程式碼和日誌。",
+      "geist": "預設",
+      "jetbrains": "連字",
+      "system": "系統等寬"
+    },
+    "font_size": {
+      "title": "字級",
+      "description": "只放大文字，間距和版面不變。",
+      "value": "{{size}} px",
+      "default": "{{size}} px · 預設"
+    },
+    "layout": {
+      "title": "版面與輔助功能"
+    },
+    "density": {
+      "title": "資訊密度",
+      "description": "任務清單和搜尋結果的列高。",
+      "compact": "緊湊",
+      "default": "標準",
+      "comfortable": "寬鬆"
+    },
+    "reduce_motion": {
+      "title": "減少動態效果",
+      "description": "關閉動畫和轉場。關閉時仍遵循系統設定。"
+    },
+    "high_contrast": {
+      "title": "提高對比",
+      "description": "次要文字更深，邊框更明顯。"
+    },
+    "preview": {
+      "title": "預覽",
+      "live": "變更立即生效",
+      "breadcrumb": "所有任務",
+      "issue_title": "把 Multica 調成順手的樣子",
+      "status": "進行中",
+      "priority": "高",
+      "label": "設計",
+      "body": "選擇適合自己的主題、字體和字級。這裡的設定只儲存在目前的裝置。",
+      "link": "查看說明",
+      "subissues": "子任務",
+      "row_1": "字體選擇器與即時範例",
+      "row_2": "放大文字時版面不動",
+      "row_3": "楷體按需載入",
+      "comment": "字級現在只縮放文字，介面不會跳動。",
+      "comment_time": "2 分鐘前",
+      "cancel": "取消",
+      "submit": "留言"
     }
   },
   "shortcuts": {

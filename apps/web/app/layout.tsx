@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
-import { Inter, Geist_Mono, Source_Serif_4 } from "next/font/google";
+import { Inter, Geist_Mono, JetBrains_Mono, Source_Serif_4 } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
@@ -47,11 +47,19 @@ const inter = Inter({
 // Mono font has no explicit CJK fallback: CJK chars in code blocks are inherently
 // non-aligned with a mono grid (Chinese is proportional), so listing CJK fonts
 // here would falsely signal alignment guarantees. Browser default fallback handles
-// the rare mixed case correctly.
+// the rare mixed case correctly. `--font-mono` itself is composed in
+// ./globals.css so the Appearance code font can replace it without losing the
+// Geist family, which the monospace UI font still uses.
 const geistMono = Geist_Mono({
   subsets: ["latin"],
-  variable: "--font-mono",
-  fallback: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
+  variable: "--font-geist-mono",
+});
+// Optional code font from the Appearance settings. Not preloaded: the face is
+// only fetched once something renders with it.
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains-mono",
+  preload: false,
 });
 // Editorial serif used for onboarding headlines. Italic support for h1 em
 // accents (e.g. "...on one shared board."). Only loaded on routes that
@@ -143,7 +151,7 @@ export default async function RootLayout({
     <html
       lang={HTML_LANG[locale]}
       suppressHydrationWarning
-      className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable, sourceSerif.variable)}
+      className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable, jetbrainsMono.variable, sourceSerif.variable)}
     >
       <body className="h-full overflow-hidden">
         {/*

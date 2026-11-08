@@ -2,6 +2,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
+import { ACCENT_COLORS, BUILT_IN_THEMES, type ThemeTokens } from "@multica/core/appearance";
 
 /**
  * Is every tone the product paints text and marks with actually legible, and is
@@ -161,17 +162,20 @@ const tokensCss = () =>
   readFileSync(resolve(repoRoot, "packages/ui/styles/tokens.css"), "utf8");
 const landingCss = () =>
   readFileSync(resolve(repoRoot, "apps/web/app/custom.css"), "utf8");
-const appearanceCss = () =>
-  readFileSync(resolve(repoRoot, "packages/ui/styles/appearance.css"), "utf8");
 
-/** Later blocks win, as they do in the cascade for the attribute selectors. */
+/** Later declarations win, as the generated theme stylesheet does over tokens.css. */
 const layered = (...blocks: Map<string, string>[]) =>
   new Map(blocks.flatMap((block) => [...block]));
 
-const POP_LIGHT = ':root[data-style="pop"]';
-const POP_DARK = ':root.dark[data-style="pop"]';
-const POP_FRAME_SCOPE =
-  ':root[data-style="pop"] :is([data-slot="app-rail"], [data-slot="window-toolbar"], [data-slot="main-top-bar"])';
+const asDeclarations = (tokens: ThemeTokens | undefined) =>
+  new Map(Object.entries(tokens ?? {}).map(([name, value]) => [`--${name}`, value]));
+
+/** What each mode paints under a theme: tokens.css for that mode, then the manifest. */
+function themePalette(mode: "light" | "dark", tokens: ThemeTokens | undefined) {
+  const base = readBlock(tokensCss(), ":root");
+  const palette = mode === "dark" ? layered(base, readBlock(tokensCss(), ".dark")) : base;
+  return layered(palette, asDeclarations(tokens));
+}
 
 // ── source scanning ────────────────────────────────────────────────────────
 
@@ -438,63 +442,71 @@ describe("text contrast", () => {
     });
   });
 
-  describe("appearance", () => {
-    // Pop's frame is black, so the content tones are judged on the content
-    // surfaces only; what sits on the frame reads the frame scope below.
-    const popContentBackgrounds = backgroundTokens.filter((token) => token !== "--app-shell");
+  describe("themes", () => {
+    const modes = ["light", "dark"] as const;
+    const cases = BUILT_IN_THEMES.flatMap((theme) =>
+      modes.map((mode) => [theme.name, mode, theme] as const),
+    );
+    const readingSurfaces = ["--background", "--page-canvas", "--surface", "--surface-raised"];
 
-    it.each([
-      ["light", () => layered(readBlock(tokensCss(), ":root"), readBlock(appearanceCss(), POP_LIGHT))],
-      [
-        "dark",
-        () =>
-          layered(
-            readBlock(tokensCss(), ":root"),
-            readBlock(tokensCss(), ".dark"),
-            readBlock(appearanceCss(), POP_LIGHT),
-            readBlock(appearanceCss(), POP_DARK),
-          ),
-      ],
-    ])("Pop keeps both tones legible on content surfaces in %s mode", (_mode, palette) => {
-      const declarations = palette();
-      expectTonePasses(declarations, "--muted-foreground", WCAG_AA_NORMAL_TEXT, popContentBackgrounds);
-      expectTonePasses(declarations, "--faint-foreground", WCAG_AA_NON_TEXT, popContentBackgrounds);
-      expectTonePasses(declarations, "--signature-foreground", WCAG_AA_NORMAL_TEXT, ["--signature"]);
+    it.each(cases)("%s keeps both tones legible in %s mode", (_name, mode, theme) => {
+      const palette = themePalette(mode, theme.tokens[mode]);
+      // A theme with its own frame paints the shell behind the rail and tabs,
+      // which read the frame tokens instead; the frame test covers them.
+      const backgrounds = theme.frame?.[mode]
+        ? backgroundTokens.filter((token) => token !== "--app-shell")
+        : backgroundTokens;
+      expectTonePasses(palette, "--muted-foreground", WCAG_AA_NORMAL_TEXT, backgrounds);
+      expectTonePasses(palette, "--faint-foreground", WCAG_AA_NON_TEXT, backgrounds);
+      expectTonePasses(palette, "--brand", WCAG_AA_NORMAL_TEXT, readingSurfaces);
     });
 
-    it.each([
-      ["light", [POP_LIGHT]],
-      ["dark", [POP_LIGHT, POP_DARK]],
-    ])("Pop's frame scope is legible on the black frame in %s mode", (_mode, selectors) => {
-      const css = appearanceCss();
-      const declarations = layered(
-        readBlock(tokensCss(), ":root"),
-        ...selectors.map((selector) => readBlock(css, selector)),
-        readBlock(css, POP_FRAME_SCOPE),
+    it.each(cases)("%s's primary button label is legible in %s mode", (_name, mode, theme) => {
+      const palette = themePalette(mode, theme.tokens[mode]);
+      if (!palette.has("--button-primary")) return;
+      expectTonePasses(palette, "--button-primary-foreground", WCAG_AA_NORMAL_TEXT, [
+        "--button-primary",
+      ]);
+    });
+
+    it.each(cases.filter(([, mode, theme]) => theme.frame?.[mode]))(
+      "%s's frame is legible in %s mode",
+      (_name, mode, theme) => {
+        const palette = layered(
+          themePalette(mode, theme.tokens[mode]),
+          asDeclarations(theme.frame?.[mode]),
+        );
+        const frameBackgrounds = [
+          "--app-shell",
+          "--background",
+          "--page-canvas",
+          "--surface",
+          "--surface-raised",
+          "--surface-hover",
+          "--surface-selected",
+          "--muted",
+          "--sidebar-accent",
+        ];
+        for (const tone of ["--foreground", "--muted-foreground", "--sidebar-accent-foreground"]) {
+          expectTonePasses(palette, tone, WCAG_AA_NORMAL_TEXT, frameBackgrounds);
+        }
+        expectTonePasses(palette, "--faint-foreground", WCAG_AA_NON_TEXT, frameBackgrounds);
+      },
+    );
+
+    it.each(cases)("every accent reads as link text under %s in %s mode", (_name, mode, theme) => {
+      const surfaces = readingSurfaces.map((token) =>
+        oklchToRgb(resolveToken(themePalette(mode, theme.tokens[mode]), token)),
       );
-      const frameBackgrounds = [
-        "--app-shell",
-        "--background",
-        "--page-canvas",
-        "--surface",
-        "--surface-raised",
-        "--surface-hover",
-        "--surface-selected",
-        "--muted",
-        "--sidebar-accent",
-      ];
-      for (const tone of ["--foreground", "--muted-foreground", "--sidebar-accent-foreground"]) {
-        expectTonePasses(declarations, tone, WCAG_AA_NORMAL_TEXT, frameBackgrounds);
+      for (const [accent, colors] of Object.entries(ACCENT_COLORS)) {
+        const brand = oklchToRgb(colors[mode]);
+        for (const surface of surfaces) {
+          const ratio = contrastRatio(brand, surface);
+          expect(Number(ratio.toFixed(2)), `${accent} is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(
+            WCAG_AA_NORMAL_TEXT,
+          );
+        }
       }
-      expectTonePasses(declarations, "--faint-foreground", WCAG_AA_NON_TEXT, frameBackgrounds);
-    });
-
-    // The light selector also matches in dark mode, so a colour the dark block
-    // forgets is painted with its light value on a dark surface.
-    it("Pop's dark block redeclares every colour of the light block", () => {
-      const lightKeys = [...readBlock(appearanceCss(), POP_LIGHT).keys()].filter((key) => key !== "--radius");
-      const darkKeys = new Set(readBlock(appearanceCss(), POP_DARK).keys());
-      expect(lightKeys.filter((key) => !darkKeys.has(key))).toEqual([]);
     });
   });
 

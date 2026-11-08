@@ -146,6 +146,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               t(($) => $.page.tabs.appearance),
               Palette,
               <AppearanceTab />,
+              { wide: true },
             ),
             entry(
               "notifications",

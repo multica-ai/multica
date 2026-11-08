@@ -1,233 +1,105 @@
-/* Appearance: styles on top of tokens.css.
+/* Appearance: what themes and type preferences need beyond tokens.css.
  *
- * The style is the `data-style` attribute on <html> (absent = default),
- * written by the appearance store in @multica/core/appearance. Import after
- * tokens.css.
- *
- * Contrast for every block here is recomputed by apps/web/app/text-contrast.test.ts;
- * that test reads these selectors verbatim, so keep one selector per block. */
+ * Theme colours are data (packages/core/appearance/themes.ts) and arrive as a
+ * generated stylesheet. This file holds the fixed parts a theme opts into:
+ * the primary button fill, and the component treatments named by
+ * `data-theme-traits` on <html>. Import after tokens.css. */
 
-/* ── Previews ───────────────────────────────────────────────────────────────
- * The Appearance settings draw a miniature app for options that are not the
- * applied ones, so their colours are spelled out here rather than read from
- * the live tokens. Mode and style blocks carry the mode attribute so a later,
- * equally specific block cannot paint light values in dark mode. */
+/* ── Type families the Appearance settings can pick ─────────────────────────
+ * CJK families per locale, mirroring the sans chains in each app's
+ * globals.css: Simplified first by default, Traditional for zh-TW, Japanese
+ * Mincho for ja. Kai has no Japanese counterpart and falls back to Mincho. */
 
-[data-appearance-preview] {
-    --pv-shell: oklch(0.964 0.001 286);
-    --pv-rail: color-mix(in oklab, var(--pv-ink) 22%, var(--pv-shell));
-    --pv-canvas: oklch(0.988 0 0);
-    --pv-line: oklch(0.92 0.004 286);
-    --pv-ink: oklch(0.141 0.005 286);
-    --pv-faint: oklch(0.89 0.004 286);
-    --pv-selected: oklch(0.935 0.003 286);
-    --pv-band-a: oklch(0.955 0.002 286);
-    --pv-band-b: oklch(0.955 0.002 286);
-    --pv-band-line: transparent;
-    --pv-band-ink: var(--pv-ink);
-    --pv-dot-a: oklch(0.75 0.15 75);
-    --pv-dot-b: oklch(0.7 0.02 286);
-    --pv-primary: oklch(0.21 0.006 286);
-    --pv-primary-line: transparent;
-    --pv-primary-shadow: none;
-    --pv-radius: 2cqw;
+:root {
+    --font-cjk-serif: "Songti SC", "STSong", "Source Han Serif SC", "Noto Serif CJK SC",
+        "Noto Serif SC", "SimSun", "Apple Myungjo", "Noto Serif CJK KR", serif;
+    --font-cjk-kai: "LXGW WenKai", "LXGW WenKai Screen", "Kaiti SC", "STKaiti", "KaiTi",
+        "Kaiti TC", "BiauKai", var(--font-cjk-serif);
 }
 
-[data-appearance-preview][data-preview-mode="dark"] {
-    --pv-shell: oklch(0.155 0.005 286);
-    --pv-canvas: oklch(0.18 0.005 286);
-    --pv-line: oklch(0.27 0.006 286);
-    --pv-ink: oklch(0.985 0 0);
-    --pv-faint: oklch(0.32 0.006 286);
-    --pv-selected: oklch(0.274 0.006 286);
-    --pv-band-a: oklch(0.22 0.006 286);
-    --pv-band-b: oklch(0.22 0.006 286);
-    --pv-dot-b: oklch(0.55 0.015 286);
-    --pv-primary: oklch(0.92 0 0);
+html[lang|="ja"] {
+    --font-cjk-serif: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", "Noto Serif CJK JP",
+        "Noto Serif JP", "Songti SC", "SimSun", serif;
+    --font-cjk-kai: var(--font-cjk-serif);
 }
 
-
-[data-appearance-preview][data-preview-mode="light"][data-preview-style="pop"] {
-    --pv-shell: oklch(0.145 0 0);
-    --pv-rail: oklch(0.42 0 0);
-    --pv-canvas: oklch(0.966 0.005 106.5);
-    --pv-line: oklch(0.145 0 0);
-    --pv-ink: oklch(0.145 0 0);
-    --pv-faint: oklch(0.82 0.01 106);
-    --pv-selected: oklch(0.88 0.1 340);
-    --pv-band-a: oklch(0.87 0.16 88);
-    --pv-band-b: oklch(0.8 0.08 268);
-    --pv-band-line: oklch(0.145 0 0);
-    --pv-band-ink: oklch(0.145 0 0);
-    --pv-dot-a: oklch(0.145 0 0);
-    --pv-dot-b: oklch(0.145 0 0);
-    --pv-primary: oklch(0.82 0.15 340);
-    --pv-primary-line: oklch(0.145 0 0);
-    --pv-primary-shadow: 0.8cqw 0.8cqw 0 oklch(0.145 0 0);
-    --pv-radius: 1cqw;
+html[lang="zh-TW"] {
+    --font-cjk-serif: "Songti TC", "Source Han Serif TC", "Noto Serif CJK TC", "PMingLiU",
+        "Songti SC", "Noto Serif CJK SC", serif;
+    --font-cjk-kai: "LXGW WenKai TC", "Kaiti TC", "BiauKai", "DFKai-SB", "LXGW WenKai",
+        "Kaiti SC", var(--font-cjk-serif);
 }
 
-[data-appearance-preview][data-preview-mode="dark"][data-preview-style="pop"] {
-    --pv-shell: oklch(0 0 0);
-    --pv-rail: oklch(0.42 0 0);
-    --pv-canvas: oklch(0.17 0 0);
-    --pv-line: oklch(0.92 0 0);
-    --pv-ink: oklch(0.97 0 0);
-    --pv-faint: oklch(0.32 0 0);
-    --pv-selected: oklch(0.34 0.1 340);
-    --pv-band-a: oklch(0.87 0.16 88);
-    --pv-band-b: oklch(0.8 0.08 268);
-    --pv-band-line: oklch(0 0 0);
-    --pv-band-ink: oklch(0.145 0 0);
-    --pv-dot-a: oklch(0.145 0 0);
-    --pv-dot-b: oklch(0.145 0 0);
-    --pv-primary: oklch(0.82 0.15 340);
-    --pv-primary-line: oklch(0.92 0 0);
-    --pv-primary-shadow: 0.8cqw 0.8cqw 0 oklch(0.82 0.15 340);
-    --pv-radius: 1cqw;
+/* ── Primary button fill ────────────────────────────────────────────────────
+ * --primary also paints text (`text-primary`), so a theme whose button colour
+ * would fail as text sets --button-primary instead. Only active under a
+ * theme; the default theme keeps the button's own classes. */
+
+:root[data-theme] [data-slot="button"][data-variant="default"] {
+    background-color: var(--button-primary, var(--primary));
+    color: var(--button-primary-foreground, var(--primary-foreground));
+    border-color: var(--button-primary-border, transparent);
 }
 
-/* ── Style: Pop ─────────────────────────────────────────────────────────────
- * Black frame, cream canvas, 1px black outlines, small radius, hard offset
- * shadows and a pink signature fill. Layout and density are untouched.
- *
- * --primary stays dark on purpose: it also paints text and icons
- * (`text-primary`), where pink on cream would fail contrast. The pink lives in
- * --signature and reaches primary buttons through the hook further down.
- *
- * The dark block must redeclare every colour the light block sets, because
- * the light selector also matches in dark mode. */
-
-:root[data-style="pop"] {
-    --radius: 0.25rem;
-    --signature: oklch(0.82 0.15 340);
-    --signature-foreground: oklch(0.145 0 0);
-    --app-shell: oklch(0.145 0 0);
-    --page-canvas: oklch(0.966 0.005 106.5);
-    --surface: oklch(1 0 0);
-    --surface-raised: oklch(1 0 0);
-    --surface-hover: oklch(0.935 0.01 106);
-    --surface-selected: oklch(0.88 0.1 340);
-    --surface-border: oklch(0.145 0 0);
-    --surface-shadow: none;
-    --floating-shadow: 6px 6px 0 oklch(0.145 0 0);
-    --menu-shadow: 4px 4px 0 oklch(0.145 0 0);
-    --secondary: oklch(0.935 0.01 106);
-    --muted: oklch(0.935 0.01 106);
-    --accent: oklch(0.935 0.01 106);
-    --muted-foreground: oklch(0.44 0.01 106);
-    --faint-foreground: oklch(0.56 0.01 106);
-    --border: oklch(0.145 0 0);
-    --input: oklch(0.145 0 0);
-    --ring: oklch(0.145 0 0);
-    --sidebar: oklch(0.935 0.01 106);
-    --sidebar-accent: oklch(0.9 0.012 106);
-    --sidebar-border: oklch(0.145 0 0);
+:root[data-theme] [data-slot="button"][data-variant="default"]:not(:disabled):hover {
+    background-color: color-mix(in oklab, var(--button-primary, var(--primary)) 90%, var(--foreground));
 }
 
-:root.dark[data-style="pop"] {
-    --signature: oklch(0.82 0.15 340);
-    --signature-foreground: oklch(0.145 0 0);
-    --app-shell: oklch(0 0 0);
-    --page-canvas: oklch(0.17 0 0);
-    --surface: oklch(0.2 0 0);
-    --surface-raised: oklch(0.22 0 0);
-    --surface-hover: oklch(0.26 0 0);
-    --surface-selected: oklch(0.34 0.1 340);
-    --surface-border: oklch(0.92 0 0);
-    --surface-shadow: none;
-    --floating-shadow: 6px 6px 0 oklch(0.82 0.15 340);
-    --menu-shadow: 4px 4px 0 oklch(0.82 0.15 340);
-    --secondary: oklch(0.26 0 0);
-    --muted: oklch(0.26 0 0);
-    --accent: oklch(0.26 0 0);
-    --muted-foreground: oklch(0.8 0 0);
-    --faint-foreground: oklch(0.62 0 0);
-    --border: oklch(0.92 0 0);
-    --input: oklch(0.92 0 0);
-    --ring: oklch(0.82 0.15 340);
-    --sidebar: oklch(0.2 0 0);
-    --sidebar-accent: oklch(0.26 0 0);
-    --sidebar-border: oklch(0.92 0 0);
-}
+/* ── Trait: offset-shadow ───────────────────────────────────────────────────
+ * Primary buttons lift onto a hard shadow on hover instead of darkening. */
 
-/* What sits directly on Pop's black frame — the rail, and on desktop the
- * window toolbar and tab bar — reads light tokens in both modes. Tokens that
- * are aliases at :root (--background) resolve there, so they are restated. */
-:root[data-style="pop"] :is([data-slot="app-rail"], [data-slot="window-toolbar"], [data-slot="main-top-bar"]) {
-    --foreground: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.8 0 0);
-    --faint-foreground: oklch(0.64 0 0);
-    --background: oklch(0.145 0 0);
-    --page-canvas: oklch(0.25 0 0);
-    --surface: oklch(0.2 0 0);
-    --surface-raised: oklch(0.25 0 0);
-    --surface-hover: oklch(0.3 0 0);
-    --surface-selected: oklch(0.32 0.08 340);
-    --muted: oklch(0.27 0 0);
-    --sidebar-accent: oklch(0.27 0 0);
-    --sidebar-accent-foreground: oklch(0.85 0.13 340);
-    --surface-border: oklch(0.4 0 0);
-    --surface-shadow: none;
-    --ring: oklch(0.85 0.13 340);
-}
-
-/* Primary buttons take the signature fill with an outline, and lift onto a
- * hard shadow on hover. */
-:root[data-style="pop"] [data-slot="button"][data-variant="default"] {
-    background-color: var(--signature);
-    color: var(--signature-foreground);
-    border-color: var(--surface-border);
-}
-
-:root[data-style="pop"] [data-slot="button"][data-variant="default"]:not(:disabled):hover {
+:root[data-theme-traits~="offset-shadow"] [data-slot="button"][data-variant="default"]:not(:disabled):hover {
+    background-color: var(--button-primary, var(--primary));
     translate: -2px -2px;
     box-shadow: 3px 3px 0 var(--surface-border);
 }
 
 @media (prefers-reduced-motion: reduce) {
-    :root[data-style="pop"] [data-slot="button"][data-variant="default"]:not(:disabled):hover {
+    :root[data-theme-traits~="offset-shadow"] [data-slot="button"][data-variant="default"]:not(:disabled):hover {
         translate: none;
     }
 }
 
-/* Issue list group headers become solid colour blocks keyed by status. Custom
- * statuses keep the neutral header. Text on the blocks is always ink. */
-:root[data-style="pop"] [data-slot="issue-group-header"] {
+/* ── Trait: status-blocks ───────────────────────────────────────────────────
+ * Issue list group headers become solid colour blocks keyed by status. Custom
+ * statuses keep the neutral header. Text and glyphs on the blocks are ink. */
+
+:root[data-theme-traits~="status-blocks"] [data-slot="issue-group-header"] {
     box-shadow: inset 0 0 0 1px var(--surface-border);
 }
 
-:root[data-style="pop"] [data-slot="issue-group-header"]:is([data-status="backlog"], [data-status="todo"], [data-status="in_progress"], [data-status="in_review"], [data-status="done"], [data-status="blocked"]) {
+:root[data-theme-traits~="status-blocks"] [data-slot="issue-group-header"]:is([data-status="backlog"], [data-status="todo"], [data-status="in_progress"], [data-status="in_review"], [data-status="done"], [data-status="blocked"]) {
     --foreground: oklch(0.145 0 0);
     --muted-foreground: oklch(0.3 0 0);
     color: var(--foreground);
 }
 
-/* The status glyph would vanish into its own colour block. */
-:root[data-style="pop"] [data-slot="issue-group-header"]:is([data-status="backlog"], [data-status="todo"], [data-status="in_progress"], [data-status="in_review"], [data-status="done"], [data-status="blocked"]) svg {
+:root[data-theme-traits~="status-blocks"] [data-slot="issue-group-header"]:is([data-status="backlog"], [data-status="todo"], [data-status="in_progress"], [data-status="in_review"], [data-status="done"], [data-status="blocked"]) svg {
     color: var(--foreground);
 }
 
-:root[data-style="pop"] [data-slot="issue-group-header"]:is([data-status="backlog"], [data-status="todo"]) {
-    background-color: oklch(0.8 0.08 268);
+:root[data-theme-traits~="status-blocks"] [data-slot="issue-group-header"]:is([data-status="backlog"], [data-status="todo"]) {
+    background-color: oklch(0.88 0.035 250);
 }
 
-:root[data-style="pop"] [data-slot="issue-group-header"][data-status="in_progress"] {
-    background-color: oklch(0.87 0.16 88);
+:root[data-theme-traits~="status-blocks"] [data-slot="issue-group-header"][data-status="in_progress"] {
+    background-color: oklch(0.84 0.13 68);
 }
 
-:root[data-style="pop"] [data-slot="issue-group-header"][data-status="in_review"] {
-    background-color: oklch(0.85 0.1 170);
+:root[data-theme-traits~="status-blocks"] [data-slot="issue-group-header"][data-status="in_review"] {
+    background-color: oklch(0.86 0.1 165);
 }
 
-:root[data-style="pop"] [data-slot="issue-group-header"][data-status="done"] {
-    background-color: var(--signature);
+:root[data-theme-traits~="status-blocks"] [data-slot="issue-group-header"][data-status="done"] {
+    background-color: oklch(0.8 0.09 255);
 }
 
-:root[data-style="pop"] [data-slot="issue-group-header"][data-status="blocked"] {
-    background-color: oklch(0.8 0.13 50);
+:root[data-theme-traits~="status-blocks"] [data-slot="issue-group-header"][data-status="blocked"] {
+    background-color: oklch(0.78 0.13 28);
 }
 
-:root[data-style="pop"] [data-slot="label-chip"] {
+/* ── Trait: outlined-chips ─────────────────────────────────────────────────*/
+
+:root[data-theme-traits~="outlined-chips"] [data-slot="label-chip"] {
     box-shadow: inset 0 0 0 1px var(--surface-border);
 }

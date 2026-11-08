@@ -196,20 +196,101 @@
     }
   },
   "appearance": {
-    "theme": {
-      "title": "테마",
-      "description": "라이트, 다크 또는 시스템 설정을 따릅니다.",
+    "reset": "기본값으로 재설정",
+    "color": {
+      "title": "색상"
+    },
+    "mode": {
+      "title": "모드",
       "light": "라이트",
       "dark": "다크",
       "system": "시스템"
     },
-    "style": {
-      "title": "스타일",
-      "description": "앱 전체의 시각적 스타일입니다.",
+    "theme": {
+      "title": "테마",
+      "description": "앱 전체의 색상, 테두리, 그림자, 모서리.",
       "default": "기본",
-      "default_description": "차분하고 중립적인 스타일. 오래 작업하기 좋습니다.",
-      "pop": "팝",
-      "pop_description": "굵은 검은 테두리, 선명한 그림자, 강렬한 상태 색상."
+      "pop": "팝"
+    },
+    "accent": {
+      "title": "강조 색상",
+      "description": "활성 상태, 링크, 읽지 않음 배지.",
+      "theme": "테마 색상",
+      "blue": "파랑",
+      "violet": "보라",
+      "green": "초록",
+      "orange": "주황",
+      "pink": "분홍",
+      "graphite": "그래파이트"
+    },
+    "text": {
+      "title": "텍스트"
+    },
+    "ui_font": {
+      "title": "인터페이스 글꼴",
+      "description": "제목, 본문, 버튼의 영문과 숫자.",
+      "sample": "Aa 한글",
+      "inter": "기본",
+      "system": "시스템",
+      "serif": "세리프",
+      "mono": "고정폭"
+    },
+    "cjk_font": {
+      "title": "CJK 글꼴",
+      "description": "한중일 문자를 표시하는 글꼴.",
+      "sans": "고딕",
+      "serif": "명조",
+      "kai": "해서"
+    },
+    "code_font": {
+      "title": "코드 글꼴",
+      "description": "코드 블록, 인라인 코드, 로그.",
+      "geist": "기본",
+      "jetbrains": "합자",
+      "system": "시스템 고정폭"
+    },
+    "font_size": {
+      "title": "글꼴 크기",
+      "description": "텍스트만 확대합니다. 간격과 레이아웃은 그대로입니다.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · 기본"
+    },
+    "layout": {
+      "title": "레이아웃 및 접근성"
+    },
+    "density": {
+      "title": "밀도",
+      "description": "이슈 목록과 검색 결과의 행 높이.",
+      "compact": "좁게",
+      "default": "기본",
+      "comfortable": "넓게"
+    },
+    "reduce_motion": {
+      "title": "동작 줄이기",
+      "description": "애니메이션과 전환 효과를 끕니다. 꺼져 있어도 시스템 설정은 적용됩니다."
+    },
+    "high_contrast": {
+      "title": "대비 높이기",
+      "description": "보조 텍스트를 진하게, 테두리를 뚜렷하게 합니다."
+    },
+    "preview": {
+      "title": "미리 보기",
+      "live": "변경 사항이 바로 적용됩니다",
+      "breadcrumb": "모든 이슈",
+      "issue_title": "Multica를 내 방식대로",
+      "status": "진행 중",
+      "priority": "높음",
+      "label": "디자인",
+      "body": "작업 방식에 맞는 테마, 글꼴, 크기를 고르세요. 이 설정은 이 기기에만 저장됩니다.",
+      "link": "가이드 보기",
+      "subissues": "하위 이슈",
+      "row_1": "실시간 미리 보기가 있는 글꼴 선택",
+      "row_2": "레이아웃 변화 없이 텍스트 확대",
+      "row_3": "해서체 필요할 때 불러오기",
+      "comment": "이제 글꼴 크기는 텍스트만 확대합니다.",
+      "comment_time": "2분 전",
+      "cancel": "취소",
+      "submit": "댓글"
     }
   },
   "shortcuts": {

@@ -22,14 +22,22 @@
    would falsely signal alignment guarantees. Browser default fallback handles
    the rare mixed case correctly. */
 :root {
-  --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont,
-               "Segoe UI", "PingFang SC", "Microsoft YaHei",
-               "Noto Sans CJK SC", "Apple SD Gothic Neo", "Malgun Gothic",
-               "Noto Sans CJK KR", sans-serif;
+  /* --font-ui and --font-cjk are set by the Appearance settings
+     (packages/core/appearance); unset, the stack is Inter + the CJK chain. */
+  --font-sans: var(--font-ui, "Inter Variable", "Inter"),
+               var(--font-cjk, var(--font-cjk-sans));
+  --font-cjk-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                   "Microsoft YaHei", "Noto Sans CJK SC", "Apple SD Gothic Neo",
+                   "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
   --font-serif: "Source Serif 4 Variable", "Source Serif 4", "Iowan Old Style",
                 "Apple Garamond", Baskerville, "Times New Roman", serif;
   --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, SFMono-Regular,
                Menlo, Consolas, monospace;
+  /* Latin-only faces the Appearance settings can pick. Web defines the same
+     names over its next/font families. */
+  --font-ui-serif: "Source Serif 4 Variable", "Source Serif 4";
+  --font-ui-mono: "Geist Mono Variable", "Geist Mono";
+  --font-code-jetbrains: "JetBrains Mono Variable", "JetBrains Mono";
 }
 
 /* Japanese-scoped CJK override. Japanese Kanji share the Han Unicode block
@@ -44,23 +52,21 @@
    `ja` or `ja-<region>` (App.tsx sets `ja-JP`), never unrelated subtags
    such as `jam`. */
 html[lang|="ja"] {
-  --font-sans: "Inter Variable", "Inter", "Hiragino Sans",
-               "Hiragino Kaku Gothic ProN", "Yu Gothic", "YuGothic", "Meiryo",
-               "Noto Sans CJK JP", "Noto Sans JP", -apple-system,
-               BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei",
-               "Noto Sans CJK SC", "Apple SD Gothic Neo", "Malgun Gothic",
-               "Noto Sans CJK KR", sans-serif;
+  --font-cjk-sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic",
+                   "YuGothic", "Meiryo", "Noto Sans CJK JP", "Noto Sans JP",
+                   -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                   "Microsoft YaHei", "Noto Sans CJK SC", "Apple SD Gothic Neo",
+                   "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
 }
 
 /* Traditional Chinese: same problem one level down — the default stack is
    Simplified-first, so zh-TW users get Simplified glyph shapes for shared
    ideographs. App.tsx maps zh-Hant to `zh-TW`. Mirrors apps/web/app/globals.css. */
 html[lang="zh-TW"] {
-  --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont,
-               "Segoe UI", "PingFang TC", "Microsoft JhengHei",
-               "Noto Sans CJK TC", "PingFang SC", "Microsoft YaHei",
-               "Noto Sans CJK SC", "Apple SD Gothic Neo", "Malgun Gothic",
-               "Noto Sans CJK KR", sans-serif;
+  --font-cjk-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC",
+                   "Microsoft JhengHei", "Noto Sans CJK TC", "PingFang SC",
+                   "Microsoft YaHei", "Noto Sans CJK SC", "Apple SD Gothic Neo",
+                   "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
 }
 
 @source "../../../../../packages/ui/**/*.tsx";

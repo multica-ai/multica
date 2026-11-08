@@ -180,20 +180,101 @@
     "region_title": "Idioma y región"
   },
   "appearance": {
-    "theme": {
-      "title": "Tema",
-      "description": "Claro, oscuro o según el sistema.",
+    "reset": "Restablecer valores predeterminados",
+    "color": {
+      "title": "Color"
+    },
+    "mode": {
+      "title": "Modo",
       "light": "Claro",
       "dark": "Oscuro",
       "system": "Sistema"
     },
-    "style": {
-      "title": "Estilo",
-      "description": "El aspecto general de la aplicación.",
+    "theme": {
+      "title": "Tema",
+      "description": "Colores, bordes, sombras y esquinas en toda la aplicación.",
       "default": "Predeterminado",
-      "default_description": "Sobrio y neutro, pensado para jornadas largas.",
-      "pop": "Pop",
-      "pop_description": "Un marco negro grueso, sombras marcadas y colores de estado vivos."
+      "pop": "Pop"
+    },
+    "accent": {
+      "title": "Color de acento",
+      "description": "Estados activos, enlaces e indicadores de no leídos.",
+      "theme": "Color del tema",
+      "blue": "Azul",
+      "violet": "Violeta",
+      "green": "Verde",
+      "orange": "Naranja",
+      "pink": "Rosa",
+      "graphite": "Grafito"
+    },
+    "text": {
+      "title": "Texto"
+    },
+    "ui_font": {
+      "title": "Fuente de la interfaz",
+      "description": "Letras y números en títulos, texto y botones.",
+      "sample": "Aa",
+      "inter": "Predeterminada",
+      "system": "Sistema",
+      "serif": "Serif",
+      "mono": "Monoespaciada"
+    },
+    "cjk_font": {
+      "title": "Fuente CJK",
+      "description": "Cómo se muestran los caracteres chinos, japoneses y coreanos.",
+      "sans": "Sans",
+      "serif": "Serif",
+      "kai": "Kai"
+    },
+    "code_font": {
+      "title": "Fuente del código",
+      "description": "Bloques de código, código en línea y registros.",
+      "geist": "Predeterminada",
+      "jetbrains": "Ligaduras",
+      "system": "Monoespaciada del sistema"
+    },
+    "font_size": {
+      "title": "Tamaño del texto",
+      "description": "Solo agranda el texto. El espaciado y el diseño no cambian.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · Predeterminado"
+    },
+    "layout": {
+      "title": "Diseño y accesibilidad"
+    },
+    "density": {
+      "title": "Densidad",
+      "description": "Altura de las filas en listas de incidencias y búsqueda.",
+      "compact": "Compacta",
+      "default": "Predeterminada",
+      "comfortable": "Amplia"
+    },
+    "reduce_motion": {
+      "title": "Reducir movimiento",
+      "description": "Desactiva animaciones y transiciones. Si está desactivado, se sigue aplicando el ajuste del sistema."
+    },
+    "high_contrast": {
+      "title": "Aumentar contraste",
+      "description": "Texto secundario más oscuro y bordes más marcados."
+    },
+    "preview": {
+      "title": "Vista previa",
+      "live": "Los cambios se aplican al instante",
+      "breadcrumb": "Todas las incidencias",
+      "issue_title": "Haz que Multica se adapte a ti",
+      "status": "En curso",
+      "priority": "Alta",
+      "label": "Diseño",
+      "body": "Elige el tema, las fuentes y el tamaño que mejor te funcionen. Estos ajustes se guardan en este dispositivo.",
+      "link": "Leer la guía",
+      "subissues": "Subincidencias",
+      "row_1": "Selector de fuentes con muestra en vivo",
+      "row_2": "Agrandar el texto sin mover el diseño",
+      "row_3": "Cargar la fuente Kai bajo demanda",
+      "comment": "El tamaño del texto ahora solo agranda el texto.",
+      "comment_time": "hace 2 min",
+      "cancel": "Cancelar",
+      "submit": "Comentar"
     }
   },
   "shortcuts": {

@@ -198,20 +198,101 @@
     }
   },
   "appearance": {
-    "theme": {
-      "title": "Theme",
-      "description": "Light, dark, or follow your system.",
+    "reset": "Reset to defaults",
+    "color": {
+      "title": "Color"
+    },
+    "mode": {
+      "title": "Mode",
       "light": "Light",
       "dark": "Dark",
       "system": "System"
     },
-    "style": {
-      "title": "Style",
-      "description": "The overall look of the app.",
+    "theme": {
+      "title": "Theme",
+      "description": "Colors, borders, shadows and corners across the app.",
       "default": "Default",
-      "default_description": "Quiet and neutral, made for long working days.",
-      "pop": "Pop",
-      "pop_description": "A bold black frame, hard shadows and bright status colors."
+      "pop": "Pop"
+    },
+    "accent": {
+      "title": "Accent color",
+      "description": "Active states, links and unread badges.",
+      "theme": "Theme color",
+      "blue": "Blue",
+      "violet": "Violet",
+      "green": "Green",
+      "orange": "Orange",
+      "pink": "Pink",
+      "graphite": "Graphite"
+    },
+    "text": {
+      "title": "Text"
+    },
+    "ui_font": {
+      "title": "Interface font",
+      "description": "Letters and numbers in headings, text and buttons.",
+      "sample": "Aa",
+      "inter": "Default",
+      "system": "System",
+      "serif": "Serif",
+      "mono": "Monospace"
+    },
+    "cjk_font": {
+      "title": "CJK font",
+      "description": "How Chinese, Japanese and Korean characters are drawn.",
+      "sans": "Sans",
+      "serif": "Serif",
+      "kai": "Kai"
+    },
+    "code_font": {
+      "title": "Code font",
+      "description": "Code blocks, inline code and logs.",
+      "geist": "Default",
+      "jetbrains": "Ligatures",
+      "system": "System monospace"
+    },
+    "font_size": {
+      "title": "Font size",
+      "description": "Scales text only. Spacing and layout stay the same.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · Default"
+    },
+    "layout": {
+      "title": "Layout and accessibility"
+    },
+    "density": {
+      "title": "Density",
+      "description": "Row height in issue lists and search.",
+      "compact": "Compact",
+      "default": "Default",
+      "comfortable": "Comfortable"
+    },
+    "reduce_motion": {
+      "title": "Reduce motion",
+      "description": "Turn off animations and transitions. When off, your system setting still applies."
+    },
+    "high_contrast": {
+      "title": "Increase contrast",
+      "description": "Darker secondary text and stronger borders."
+    },
+    "preview": {
+      "title": "Preview",
+      "live": "Changes apply right away",
+      "breadcrumb": "All issues",
+      "issue_title": "Make Multica feel like yours",
+      "status": "In progress",
+      "priority": "High",
+      "label": "Design",
+      "body": "Pick the theme, fonts and size that suit how you work. Everything here is saved on this device.",
+      "link": "Read the guide",
+      "subissues": "Sub-issues",
+      "row_1": "Font picker with a live sample",
+      "row_2": "Scale text without moving layout",
+      "row_3": "Load the Kai face on demand",
+      "comment": "Font size now scales text only, so nothing shifts.",
+      "comment_time": "2m ago",
+      "cancel": "Cancel",
+      "submit": "Comment"
     }
   },
   "shortcuts": {

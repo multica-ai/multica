@@ -198,20 +198,101 @@
     }
   },
   "appearance": {
-    "theme": {
-      "title": "Thème",
-      "description": "Clair, sombre ou selon le système.",
+    "reset": "Rétablir les valeurs par défaut",
+    "color": {
+      "title": "Couleur"
+    },
+    "mode": {
+      "title": "Mode",
       "light": "Clair",
       "dark": "Sombre",
       "system": "Système"
     },
-    "style": {
-      "title": "Style",
-      "description": "L'allure générale de l'application.",
+    "theme": {
+      "title": "Thème",
+      "description": "Couleurs, bordures, ombres et arrondis dans toute l’application.",
       "default": "Par défaut",
-      "default_description": "Sobre et neutre, pour les longues journées de travail.",
-      "pop": "Pop",
-      "pop_description": "Un cadre noir épais, des ombres franches et des couleurs de statut vives."
+      "pop": "Pop"
+    },
+    "accent": {
+      "title": "Couleur d’accent",
+      "description": "États actifs, liens et pastilles non lues.",
+      "theme": "Couleur du thème",
+      "blue": "Bleu",
+      "violet": "Violet",
+      "green": "Vert",
+      "orange": "Orange",
+      "pink": "Rose",
+      "graphite": "Graphite"
+    },
+    "text": {
+      "title": "Texte"
+    },
+    "ui_font": {
+      "title": "Police de l’interface",
+      "description": "Lettres et chiffres des titres, du texte et des boutons.",
+      "sample": "Aa",
+      "inter": "Par défaut",
+      "system": "Système",
+      "serif": "Serif",
+      "mono": "Chasse fixe"
+    },
+    "cjk_font": {
+      "title": "Police CJK",
+      "description": "Rendu des caractères chinois, japonais et coréens.",
+      "sans": "Sans",
+      "serif": "Serif",
+      "kai": "Kai"
+    },
+    "code_font": {
+      "title": "Police du code",
+      "description": "Blocs de code, code en ligne et journaux.",
+      "geist": "Par défaut",
+      "jetbrains": "Ligatures",
+      "system": "Chasse fixe système"
+    },
+    "font_size": {
+      "title": "Taille du texte",
+      "description": "Agrandit uniquement le texte. Les espacements et la mise en page restent identiques.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · Par défaut"
+    },
+    "layout": {
+      "title": "Mise en page et accessibilité"
+    },
+    "density": {
+      "title": "Densité",
+      "description": "Hauteur des lignes dans les listes de tickets et la recherche.",
+      "compact": "Compacte",
+      "default": "Par défaut",
+      "comfortable": "Aérée"
+    },
+    "reduce_motion": {
+      "title": "Réduire les animations",
+      "description": "Désactive les animations et transitions. Désactivé, le réglage du système s’applique toujours."
+    },
+    "high_contrast": {
+      "title": "Augmenter le contraste",
+      "description": "Texte secondaire plus foncé et bordures plus marquées."
+    },
+    "preview": {
+      "title": "Aperçu",
+      "live": "Les changements s’appliquent immédiatement",
+      "breadcrumb": "Tous les tickets",
+      "issue_title": "Adaptez Multica à votre façon de travailler",
+      "status": "En cours",
+      "priority": "Haute",
+      "label": "Design",
+      "body": "Choisissez le thème, les polices et la taille qui vous conviennent. Ces réglages sont enregistrés sur cet appareil.",
+      "link": "Lire le guide",
+      "subissues": "Sous-tickets",
+      "row_1": "Sélecteur de police avec aperçu",
+      "row_2": "Agrandir le texte sans bouger la mise en page",
+      "row_3": "Charger la police Kai à la demande",
+      "comment": "La taille du texte n’agrandit plus que le texte.",
+      "comment_time": "il y a 2 min",
+      "cancel": "Annuler",
+      "submit": "Commenter"
     }
   },
   "shortcuts": {

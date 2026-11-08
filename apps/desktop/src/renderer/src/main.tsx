@@ -27,6 +27,9 @@ import "@fontsource-variable/source-serif-4/wght-italic.css";
 // markdown (600 -> 700). One variable file covers 100-900 and closes the whole
 // class instead of chasing weights one at a time.
 import "@fontsource-variable/geist-mono";
+// Optional code font from the Appearance settings; the browser only loads the
+// face once something renders with it.
+import "@fontsource-variable/jetbrains-mono";
 import "./globals.css";
 
 // react-grab: dev-only element inspector. Hold ⌘C (Mac) / Ctrl+C and click any

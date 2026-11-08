@@ -196,20 +196,101 @@
     }
   },
   "appearance": {
-    "theme": {
-      "title": "主题",
-      "description": "浅色、深色，或跟随系统。",
+    "reset": "恢复默认",
+    "color": {
+      "title": "颜色"
+    },
+    "mode": {
+      "title": "模式",
       "light": "浅色",
       "dark": "深色",
       "system": "跟随系统"
     },
-    "style": {
-      "title": "风格",
-      "description": "整个应用的视觉风格。",
+    "theme": {
+      "title": "主题",
+      "description": "整个应用的配色、边框、阴影和圆角。",
       "default": "默认",
-      "default_description": "安静、中性，适合长时间工作。",
-      "pop": "波普",
-      "pop_description": "黑色粗框、硬投影和鲜明的状态色。"
+      "pop": "波普"
+    },
+    "accent": {
+      "title": "强调色",
+      "description": "激活状态、链接和未读角标。",
+      "theme": "主题色",
+      "blue": "蓝",
+      "violet": "紫",
+      "green": "绿",
+      "orange": "橙",
+      "pink": "粉",
+      "graphite": "石墨"
+    },
+    "text": {
+      "title": "文字"
+    },
+    "ui_font": {
+      "title": "界面字体",
+      "description": "标题、正文和按钮里的字母与数字。",
+      "sample": "Aa 汉字",
+      "inter": "默认",
+      "system": "系统",
+      "serif": "衬线",
+      "mono": "等宽"
+    },
+    "cjk_font": {
+      "title": "中文字体",
+      "description": "汉字（以及日文、韩文）的显示字体。",
+      "sans": "黑体",
+      "serif": "宋体",
+      "kai": "楷体"
+    },
+    "code_font": {
+      "title": "代码字体",
+      "description": "代码块、行内代码和日志。",
+      "geist": "默认",
+      "jetbrains": "连字",
+      "system": "系统等宽"
+    },
+    "font_size": {
+      "title": "字号",
+      "description": "只放大文字，间距和布局不变。",
+      "value": "{{size}} px",
+      "default": "{{size}} px · 默认"
+    },
+    "layout": {
+      "title": "布局与辅助功能"
+    },
+    "density": {
+      "title": "信息密度",
+      "description": "任务列表和搜索结果的行高。",
+      "compact": "紧凑",
+      "default": "标准",
+      "comfortable": "宽松"
+    },
+    "reduce_motion": {
+      "title": "减少动态效果",
+      "description": "关闭动画和过渡。关掉时仍遵循系统设置。"
+    },
+    "high_contrast": {
+      "title": "提高对比度",
+      "description": "次要文字更深，边框更明显。"
+    },
+    "preview": {
+      "title": "预览",
+      "live": "改动即时生效",
+      "breadcrumb": "全部任务",
+      "issue_title": "把 Multica 调成顺手的样子",
+      "status": "进行中",
+      "priority": "高",
+      "label": "设计",
+      "body": "选择适合自己的主题、字体和字号。这里的设置只保存在当前设备。",
+      "link": "查看说明",
+      "subissues": "子任务",
+      "row_1": "字体选择器与实时示例",
+      "row_2": "放大文字时布局不动",
+      "row_3": "楷体按需加载",
+      "comment": "字号现在只缩放文字，界面不会跳动。",
+      "comment_time": "2 分钟前",
+      "cancel": "取消",
+      "submit": "评论"
     }
   },
   "shortcuts": {

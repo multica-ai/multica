@@ -15,8 +15,16 @@ export function isChannelIntegration(
   return (CHANNEL_INTEGRATIONS as readonly string[]).includes(value ?? "");
 }
 
-/** Preferences anchors that moved to the Appearance page. */
-const APPEARANCE_SECTIONS = new Set(["appearance", "theme", "style"]);
+/**
+ * Preferences anchors that moved to the Appearance page, and where they land
+ * there. The light/dark picker was `theme` under Preferences; on the
+ * Appearance page that row is `mode` and `theme` is the theme gallery.
+ */
+const APPEARANCE_SECTIONS: Record<string, string | null> = {
+  appearance: null,
+  theme: "mode",
+  style: "theme",
+};
 
 export interface SettingsLocation {
   tab: string;
@@ -46,12 +54,8 @@ export function resolveSettingsLocation(
     case "chat":
       return { tab: "preferences", section: tab, integration: null };
     case "preferences":
-      if (section && APPEARANCE_SECTIONS.has(section)) {
-        return {
-          tab: "appearance",
-          section: section === "appearance" ? null : section,
-          integration: null,
-        };
+      if (section && Object.hasOwn(APPEARANCE_SECTIONS, section)) {
+        return { tab: "appearance", section: APPEARANCE_SECTIONS[section] ?? null, integration: null };
       }
       return { tab, section, integration };
     case "labs":
