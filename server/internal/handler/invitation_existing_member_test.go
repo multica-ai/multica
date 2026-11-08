@@ -199,6 +199,31 @@ func (q legacyReadFailure) QueryRow(ctx context.Context, sql string, args ...any
 	return q.DBTX.QueryRow(ctx, sql, args...)
 }
 
+// Decorate only Begin; locking and every database operation remain real.
+type legacyWorkspaceLocker struct {
+	seatcapacity.WorkspaceLocker
+	begin func(context.Context, txStarter) (pgx.Tx, error)
+}
+
+type legacyWorkspaceSession struct {
+	db.DBTX
+	begin legacyBeginHook
+}
+
+func (s legacyWorkspaceSession) Begin(ctx context.Context) (pgx.Tx, error) {
+	return s.begin(ctx)
+}
+
+func (l legacyWorkspaceLocker) Lock(ctx context.Context, workspaceID uuid.UUID) (db.DBTX, func(), error) {
+	session, unlock, err := l.WorkspaceLocker.Lock(ctx, workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return legacyWorkspaceSession{DBTX: session, begin: func(ctx context.Context) (pgx.Tx, error) {
+		return l.begin(ctx, session.(txStarter))
+	}}, unlock, nil
+}
+
 type legacyCommitFailure struct{ pgx.Tx }
 
 func (tx legacyCommitFailure) Commit(ctx context.Context) error {
@@ -322,10 +347,10 @@ func TestAcceptInvitation_LegacyMemberManagedCapacityRecovery(t *testing.T) {
 				return
 			}
 			if mode == "rollback" {
-				h.TxStarter = legacyBeginHook(func(ctx context.Context) (pgx.Tx, error) {
-					tx, e := testPool.Begin(ctx)
+				h.SeatCapacityLocker = legacyWorkspaceLocker{h.SeatCapacityLocker, func(ctx context.Context, starter txStarter) (pgx.Tx, error) {
+					tx, e := starter.Begin(ctx)
 					return legacyCommitFailure{tx}, e
-				})
+				}}
 			}
 			w := legacyAccept(&h, user, invitation)
 			if mode == "concurrent" {

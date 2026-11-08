@@ -14,19 +14,28 @@ import (
 func (h *Handler) acceptInvitationForExistingMember(w http.ResponseWriter, r *http.Request, inv db.WorkspaceInvitation, user db.User, existing db.Member) {
 	ctx := r.Context()
 	capacityQueries := h.Queries
-	if h.seatCapacityEnabled() {
+	starter := h.TxStarter
+	if h.seatCapacityEnabled() && h.SeatCapacityLocker != nil {
 		// Share the worker's lock order so a previously interrupted consume
 		// cannot race the durable release below.
-		q, unlock, err := h.lockSeatCapacityWorkspace(ctx, uuid.UUID(inv.WorkspaceID.Bytes))
+		lockedDB, unlock, err := h.lockSeatCapacityWorkspaceDB(ctx, uuid.UUID(inv.WorkspaceID.Bytes))
 		if err != nil {
 			writeSeatCapacityError(w, err)
 			return
 		}
 		defer unlock()
-		capacityQueries = q
+		// Begin on the lock's pinned session: another pool acquisition cannot
+		// progress when this request already holds the only connection.
+		var ok bool
+		starter, ok = lockedDB.(txStarter)
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "failed to accept invitation")
+			return
+		}
+		capacityQueries = db.New(lockedDB)
 	}
 
-	tx, err := h.TxStarter.Begin(ctx)
+	tx, err := starter.Begin(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to accept invitation")
 		return
