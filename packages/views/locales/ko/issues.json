@@ -937,6 +937,7 @@
     "unassigned": "담당자 없음",
     "open_in_new_tab": "새 탭에서 열기",
     "pin_to_sidebar": "사이드바에 고정",
+    "locate_in_sidebar": "사이드바에서 보기",
     "unpin_from_sidebar": "사이드바 고정 해제",
     "restore_to_inbox": "인박스로 복원",
     "mark_read": "읽음으로 표시",
