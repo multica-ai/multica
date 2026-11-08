@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -81,15 +82,62 @@ func TestWorkspaceLinkHome(t *testing.T) {
 	call(http.MethodPost, "", map[string]any{"name": "Invalid", "url_template": "https://example.com", "open_mode": "new_tab", "is_home": true}, http.StatusBadRequest)
 	assertHomes(second, projectHome)
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// Hold the shared scope row until both requests are queued behind it.
+	lockScope := func() func() {
+		t.Helper()
+		blocker, err := testPool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = blocker.Rollback(context.Background()) })
+		var blockerPID int
+		if err := blocker.QueryRow(ctx, "SELECT pg_backend_pid() FROM workspace WHERE id=$1 FOR UPDATE", ws).Scan(&blockerPID); err != nil {
+			t.Fatal(err)
+		}
+		return func() {
+			t.Helper()
+			ticker := time.NewTicker(10 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				var waiting int
+				if err := testPool.QueryRow(ctx, `
+					WITH RECURSIVE waiting AS (
+						SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))
+						UNION
+						SELECT a.pid FROM pg_stat_activity a
+						JOIN waiting w ON w.pid = ANY(pg_blocking_pids(a.pid))
+					)
+					SELECT count(*) FROM waiting
+				`, blockerPID).Scan(&waiting); err != nil {
+					t.Fatalf("wait for home scope lock queue: %v", err)
+				}
+				if waiting >= 2 {
+					break
+				}
+				select {
+				case <-ticker.C:
+				case <-ctx.Done():
+					t.Fatal("home requests did not reach the scope lock")
+				}
+			}
+			if err := blocker.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	release := lockScope()
 	start := make(chan struct{})
 	results := make(chan *httptest.ResponseRecorder, 2)
 	var workers sync.WaitGroup
+	defer func() { cancel(); workers.Wait() }()
 	for _, id := range []string{first, second} {
 		workers.Add(1)
 		go func(id string) {
 			defer workers.Done()
 			<-start
-			req := withURLParam(newRequest(http.MethodPatch, "/api/links", map[string]any{"is_home": true}), "id", id)
+			req := withURLParam(newRequest(http.MethodPatch, "/api/links", map[string]any{"is_home": true}).WithContext(ctx), "id", id)
 			req.Header.Set("X-Workspace-ID", ws)
 			w := httptest.NewRecorder()
 			testHandler.UpdateWorkspaceLink(w, req)
@@ -97,6 +145,7 @@ func TestWorkspaceLinkHome(t *testing.T) {
 		}(id)
 	}
 	close(start)
+	release()
 	workers.Wait()
 	for range 2 {
 		w := <-results
@@ -118,6 +167,7 @@ func TestWorkspaceLinkHome(t *testing.T) {
 	assertHomes(third, projectHome)
 
 	// Create and PATCH must share the same scope lock and atomic replacement.
+	release = lockScope()
 	start = make(chan struct{})
 	results = make(chan *httptest.ResponseRecorder, 2)
 	for _, method := range []string{http.MethodPost, http.MethodPatch} {
@@ -129,7 +179,7 @@ func TestWorkspaceLinkHome(t *testing.T) {
 			if method == http.MethodPost {
 				body["name"], body["url_template"], body["open_mode"] = "Concurrent", "https://example.com", "embed"
 			}
-			req := withURLParam(newRequest(method, "/api/links", body), "id", first)
+			req := withURLParam(newRequest(method, "/api/links", body).WithContext(ctx), "id", first)
 			req.Header.Set("X-Workspace-ID", ws)
 			w := httptest.NewRecorder()
 			if method == http.MethodPost {
@@ -141,6 +191,7 @@ func TestWorkspaceLinkHome(t *testing.T) {
 		}(method)
 	}
 	close(start)
+	release()
 	workers.Wait()
 	for range 2 {
 		w := <-results
@@ -169,4 +220,13 @@ func TestWorkspaceLinkHome(t *testing.T) {
 	req.Header.Set("X-Workspace-ID", ws)
 	testutil.Call(t, h.UpdateWorkspaceLink, req).Want(http.StatusInternalServerError)
 	assertHomes(winner, projectHome)
+
+	_, err = testPool.Exec(context.Background(), `INSERT INTO workspace_link (id, workspace_id, project_id, name, url_template, open_mode, is_home)
+		VALUES ($1, $2, $3, 'Duplicate project', 'https://example.com', 'embed', true)`, uuid.NewString(), ws, project)
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" || pgErr.ConstraintName != "workspace_link_home_scope_idx" {
+		t.Fatalf("duplicate project home INSERT: want 620 unique index violation, got %v", err)
+	}
+	otherProject := dbfx.Project(t, "Independent project home", testutil.Cols{"workspace_id": ws})
+	otherProjectHome := create(otherProject, true)
+	assertHomes(winner, projectHome, otherProjectHome)
 }
