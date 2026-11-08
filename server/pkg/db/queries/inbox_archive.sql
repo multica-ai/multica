@@ -1,5 +1,7 @@
 -- name: ListArchivedInboxPage :many
 -- Select narrow group representatives before loading bodies or comment anchors.
+-- Only types the Inbox lists (inbox.TurnTypes) are history here, and only an
+-- active row of one of them keeps an issue out of this list.
 WITH newest AS MATERIALIZED (
     SELECT DISTINCT ON (COALESCE(i.issue_id, i.id))
            i.id, i.issue_id, i.created_at, i.read,
@@ -10,6 +12,7 @@ WITH newest AS MATERIALIZED (
       AND i.recipient_type = 'member'
       AND i.recipient_id = sqlc.arg(recipient_id)::uuid
       AND i.archived = true
+      AND i.type = ANY(sqlc.arg(types)::text[])
       AND (sqlc.narg(group_id)::uuid IS NULL OR i.issue_id = sqlc.narg(group_id)::uuid
            OR (i.issue_id IS NULL AND i.id = sqlc.narg(group_id)::uuid))
       AND (i.issue_id IS NULL OR NOT EXISTS (
@@ -18,6 +21,7 @@ WITH newest AS MATERIALIZED (
             AND active.recipient_type = i.recipient_type
             AND active.recipient_id = i.recipient_id
             AND active.issue_id = i.issue_id AND active.archived = false
+            AND active.type = ANY(sqlc.arg(types)::text[])
       ))
     ORDER BY COALESCE(i.issue_id, i.id), i.created_at DESC, i.id DESC
 ), projected AS (
@@ -68,12 +72,14 @@ WITH newest AS MATERIALIZED (
       AND i.recipient_type = 'member'
       AND i.recipient_id = sqlc.arg(recipient_id)::uuid
       AND i.archived = true
+      AND i.type = ANY(sqlc.arg(types)::text[])
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM inbox_item active
           WHERE active.workspace_id = i.workspace_id
             AND active.recipient_type = i.recipient_type
             AND active.recipient_id = i.recipient_id
             AND active.issue_id = i.issue_id AND active.archived = false
+            AND active.type = ANY(sqlc.arg(types)::text[])
       ))
     ORDER BY COALESCE(i.issue_id, i.id), i.created_at DESC, i.id DESC
 ), projected AS (

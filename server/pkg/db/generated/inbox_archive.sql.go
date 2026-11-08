@@ -22,12 +22,14 @@ WITH newest AS MATERIALIZED (
       AND i.recipient_type = 'member'
       AND i.recipient_id = $2::uuid
       AND i.archived = true
+      AND i.type = ANY($3::text[])
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM inbox_item active
           WHERE active.workspace_id = i.workspace_id
             AND active.recipient_type = i.recipient_type
             AND active.recipient_id = i.recipient_id
             AND active.issue_id = i.issue_id AND active.archived = false
+            AND active.type = ANY($3::text[])
       ))
     ORDER BY COALESCE(i.issue_id, i.id), i.created_at DESC, i.id DESC
 ), projected AS (
@@ -37,10 +39,10 @@ WITH newest AS MATERIALIZED (
       AND iss.workspace_id = $1::uuid
 ), matched AS (
     SELECT projected.id, projected.issue_id, projected.created_at, projected.read, projected.actor, projected.issue_status, projected.issue_priority,
-           (cardinality($3::text[]) = 0 OR issue_status = ANY($3::text[])) AS status_match,
-           (cardinality($4::text[]) = 0 OR issue_priority = ANY($4::text[])) AS priority_match,
-           (cardinality($5::text[]) = 0 OR actor = ANY($5::text[])) AS actor_match,
-           (NOT $6::boolean OR NOT read) AS read_match
+           (cardinality($4::text[]) = 0 OR issue_status = ANY($4::text[])) AS status_match,
+           (cardinality($5::text[]) = 0 OR issue_priority = ANY($5::text[])) AS priority_match,
+           (cardinality($6::text[]) = 0 OR actor = ANY($6::text[])) AS actor_match,
+           (NOT $7::boolean OR NOT read) AS read_match
     FROM projected
 )
 SELECT 'statuses'::text AS dimension, issue_status::text AS key,
@@ -63,6 +65,7 @@ FROM matched
 type ArchivedInboxFacetsParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	RecipientID pgtype.UUID `json:"recipient_id"`
+	Types       []string    `json:"types"`
 	Statuses    []string    `json:"statuses"`
 	Priorities  []string    `json:"priorities"`
 	Actors      []string    `json:"actors"`
@@ -80,6 +83,7 @@ func (q *Queries) ArchivedInboxFacets(ctx context.Context, arg ArchivedInboxFace
 	rows, err := q.db.Query(ctx, archivedInboxFacets,
 		arg.WorkspaceID,
 		arg.RecipientID,
+		arg.Types,
 		arg.Statuses,
 		arg.Priorities,
 		arg.Actors,
@@ -114,14 +118,16 @@ WITH newest AS MATERIALIZED (
       AND i.recipient_type = 'member'
       AND i.recipient_id = $2::uuid
       AND i.archived = true
-      AND ($3::uuid IS NULL OR i.issue_id = $3::uuid
-           OR (i.issue_id IS NULL AND i.id = $3::uuid))
+      AND i.type = ANY($3::text[])
+      AND ($4::uuid IS NULL OR i.issue_id = $4::uuid
+           OR (i.issue_id IS NULL AND i.id = $4::uuid))
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM inbox_item active
           WHERE active.workspace_id = i.workspace_id
             AND active.recipient_type = i.recipient_type
             AND active.recipient_id = i.recipient_id
             AND active.issue_id = i.issue_id AND active.archived = false
+            AND active.type = ANY($3::text[])
       ))
     ORDER BY COALESCE(i.issue_id, i.id), i.created_at DESC, i.id DESC
 ), projected AS (
@@ -131,19 +137,19 @@ WITH newest AS MATERIALIZED (
       AND iss.workspace_id = $1::uuid
 ), matched AS (
     SELECT projected.id, projected.issue_id, projected.created_at, projected.read, projected.actor, projected.issue_status, projected.issue_priority,
-           (cardinality($4::text[]) = 0 OR issue_status = ANY($4::text[])) AS status_match,
-           (cardinality($5::text[]) = 0 OR issue_priority = ANY($5::text[])) AS priority_match,
-           (cardinality($6::text[]) = 0 OR actor = ANY($6::text[])) AS actor_match,
-           (NOT $7::boolean OR NOT read) AS read_match
+           (cardinality($5::text[]) = 0 OR issue_status = ANY($5::text[])) AS status_match,
+           (cardinality($6::text[]) = 0 OR issue_priority = ANY($6::text[])) AS priority_match,
+           (cardinality($7::text[]) = 0 OR actor = ANY($7::text[])) AS actor_match,
+           (NOT $8::boolean OR NOT read) AS read_match
     FROM projected
 )
 , selected AS (
     SELECT id, issue_id, created_at, read, actor, issue_status, issue_priority, status_match, priority_match, actor_match, read_match FROM matched
     WHERE status_match AND priority_match AND actor_match AND read_match
-      AND ($8::timestamptz IS NULL OR
-           (created_at, id) < ($8::timestamptz, $9::uuid))
+      AND ($9::timestamptz IS NULL OR
+           (created_at, id) < ($9::timestamptz, $10::uuid))
     ORDER BY created_at DESC, id DESC
-    LIMIT $10::int
+    LIMIT $11::int
 )
 SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, selected.issue_status, selected.issue_priority,
        COALESCE(anchor.comment_id, '')::text AS comment_id
@@ -164,6 +170,7 @@ ORDER BY i.created_at DESC, i.id DESC
 type ListArchivedInboxPageParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	RecipientID pgtype.UUID        `json:"recipient_id"`
+	Types       []string           `json:"types"`
 	GroupID     pgtype.UUID        `json:"group_id"`
 	Statuses    []string           `json:"statuses"`
 	Priorities  []string           `json:"priorities"`
@@ -182,10 +189,13 @@ type ListArchivedInboxPageRow struct {
 }
 
 // Select narrow group representatives before loading bodies or comment anchors.
+// Only types the Inbox lists (inbox.TurnTypes) are history here, and only an
+// active row of one of them keeps an issue out of this list.
 func (q *Queries) ListArchivedInboxPage(ctx context.Context, arg ListArchivedInboxPageParams) ([]ListArchivedInboxPageRow, error) {
 	rows, err := q.db.Query(ctx, listArchivedInboxPage,
 		arg.WorkspaceID,
 		arg.RecipientID,
+		arg.Types,
 		arg.GroupID,
 		arg.Statuses,
 		arg.Priorities,

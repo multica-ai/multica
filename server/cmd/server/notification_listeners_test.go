@@ -688,10 +688,9 @@ func TestNotification_TaskCompleted(t *testing.T) {
 		},
 	})
 
-	// No inbox notification should be created for task:completed
-	creatorItems := inboxItemsForRecipient(t, queries, testUserID)
-	if len(creatorItems) != 0 {
-		t.Fatalf("expected 0 inbox items for creator on task:completed, got %d", len(creatorItems))
+	// The run hands the issue back to its creator.
+	if active, _ := countInboxByTypeForIssue(t, testUserID, issueID, "agent_completed"); active != 1 {
+		t.Fatalf("expected 1 agent_completed row for creator on task:completed, got %d", active)
 	}
 }
 
@@ -1117,12 +1116,14 @@ func countInboxByTypeForRecipient(t *testing.T, recipientID, notifType string) (
 
 // publishStatusChange is a small helper to publish the issue:updated event
 // shape used by the notification listener for status-only transitions.
+// The agent flips the status, so the terminal-status cleanup is observed
+// apart from a member's own action clearing their Inbox.
 func publishStatusChange(bus *events.Bus, issueID, newStatus, prevStatus string) {
 	bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: testWorkspaceID,
-		ActorType:   "member",
-		ActorID:     testUserID,
+		ActorType:   "agent",
+		ActorID:     "00000000-0000-0000-0000-aaaaaaaaaaaa",
 		Payload: map[string]any{
 			"issue": handler.IssueResponse{
 				ID:          issueID,

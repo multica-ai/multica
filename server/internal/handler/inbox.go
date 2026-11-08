@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -174,9 +175,13 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]InboxItemResponse, len(items))
-	for i, item := range items {
-		resp[i] = inboxRowToResponse(item)
+	// Every notification is recorded, but only a hand-back (inbox.IsTurn)
+	// puts the issue in the Inbox.
+	resp := make([]InboxItemResponse, 0, len(items))
+	for _, item := range items {
+		if inbox.IsTurn(item.Type) {
+			resp = append(resp, inboxRowToResponse(item))
+		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -376,17 +381,17 @@ func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int64{"count": count})
 }
 
-// InboxWorkspaceUnreadResponse is one workspace's unread inbox count in the
-// cross-workspace summary.
+// InboxWorkspaceUnreadResponse is one workspace's count in the cross-workspace
+// summary: the issues waiting on the user there.
 type InboxWorkspaceUnreadResponse struct {
 	WorkspaceID string `json:"workspace_id"`
 	Count       int64  `json:"count"`
 }
 
-// UnreadInboxSummary returns per-workspace unread inbox counts across every
-// workspace the user belongs to. The sidebar uses it to light a dot on the
-// workspace switcher when a workspace OTHER than the active one has unread
-// items, without fetching each workspace's full inbox list. It is
+// UnreadInboxSummary returns, per workspace the user belongs to, how many
+// issues are waiting on them: the Inbox rows, read or not. The rail badge and
+// the workspace switcher dot read it without fetching each workspace's full
+// inbox list. The route keeps its "unread" name for installed clients. It is
 // account-level by nature: it ignores the active workspace and keys only on
 // the authenticated user.
 func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
@@ -395,7 +400,10 @@ func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.Queries.CountUnreadInboxByWorkspace(r.Context(), parseUUID(userID))
+	rows, err := h.Queries.CountPendingInboxByWorkspace(r.Context(), db.CountPendingInboxByWorkspaceParams{
+		RecipientID: parseUUID(userID),
+		Types:       inbox.TurnTypes,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to summarize unread inbox")
 		return

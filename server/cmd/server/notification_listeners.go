@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/inbox"
@@ -291,9 +292,106 @@ func archiveStaleTaskFailedInbox(
 		"row_count", len(rows), "recipient_count", len(counts))
 }
 
+// archiveInboxForActor clears a member's Inbox for an issue they just acted
+// on. Replying, changing the status or reassigning moves the issue on, so it
+// is no longer waiting on them; a later hand-back delivers a fresh row.
+// Opening the issue alone is not acting, and does not come through here.
+func archiveInboxForActor(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	e events.Event,
+	issueID string,
+) {
+	if e.ActorType != "member" || e.ActorID == "" || issueID == "" {
+		return
+	}
+	count, err := queries.ArchiveInboxByIssue(ctx, db.ArchiveInboxByIssueParams{
+		WorkspaceID:   parseUUID(e.WorkspaceID),
+		RecipientType: "member",
+		RecipientID:   parseUUID(e.ActorID),
+		IssueID:       parseUUID(issueID),
+	})
+	if err != nil {
+		slog.Error("archive acted-on inbox: query failed",
+			"workspace_id", e.WorkspaceID, "issue_id", issueID, "actor_id", e.ActorID, "error", err)
+		return
+	}
+	if count == 0 {
+		return
+	}
+	bus.Publish(events.Event{
+		Type:        protocol.EventInboxBatchArchived,
+		WorkspaceID: e.WorkspaceID,
+		Payload: map[string]any{
+			"recipient_id": e.ActorID,
+			"count":        count,
+			"issue_id":     issueID,
+			"reason":       "acted_on_issue",
+		},
+	})
+}
+
+// notifyRunEnded hands an issue back when an agent's run on it completes: to
+// the issue's creator, and to the member whose own action started the run.
+// Runs one agent started for another (delegation, a reaction to an agent's
+// comment) leave the human alone; they hear when the issue they handed over
+// comes back. Agent-created issues therefore reach no one by creator.
+func notifyRunEnded(ctx context.Context, queries *db.Queries, bus *events.Bus, e events.Event) {
+	payload, ok := e.Payload.(map[string]any)
+	if !ok {
+		return
+	}
+	issueID, _ := payload["issue_id"].(string)
+	taskID, _ := payload["task_id"].(string)
+	agentID, _ := payload["agent_id"].(string)
+	issueUUID, err := util.ParseUUID(issueID)
+	if err != nil {
+		return
+	}
+	issue, err := queries.GetIssue(ctx, issueUUID)
+	if err != nil {
+		slog.Error("run ended notification: failed to get issue", "issue_id", issueID, "error", err)
+		return
+	}
+
+	recipients := []string{}
+	if issue.CreatorType == "member" && issue.CreatorID.Valid {
+		recipients = append(recipients, util.UUIDToString(issue.CreatorID))
+	}
+	if taskUUID, err := util.ParseUUID(taskID); err == nil {
+		task, err := queries.GetAgentTask(ctx, taskUUID)
+		if err != nil {
+			slog.Error("run ended notification: failed to get task", "task_id", taskID, "error", err)
+		} else if task.OriginatorUserID.Valid && task.OriginatorSource.String == string(attribution.SourceDirectHuman) {
+			originator := util.UUIDToString(task.OriginatorUserID)
+			if len(recipients) == 0 || recipients[0] != originator {
+				recipients = append(recipients, originator)
+			}
+		}
+	}
+
+	agentEvent := events.Event{
+		Type:        e.Type,
+		WorkspaceID: e.WorkspaceID,
+		ActorType:   "agent",
+		ActorID:     agentID,
+	}
+	for _, recipientID := range recipients {
+		notifyDirect(ctx, queries, bus,
+			"member", recipientID,
+			e.WorkspaceID, agentEvent, issueID, issue.Status,
+			"agent_completed", "action_required",
+			issue.Title, "",
+			emptyDetails,
+		)
+	}
+}
+
 // notifySubscribers queries the subscriber table for an issue, excludes the
 // actor and any extra IDs, and creates inbox items for each remaining member
-// subscriber. Publishes an inbox:new event for each notification.
+// subscriber. Publishes an inbox:new event for each notification the Inbox
+// lists (inbox.IsTurn); the rest are recorded without being announced.
 // If the issue has a parent and the notification type is in the bubble
 // allowlist, parent issue subscribers are also notified (deduplicated
 // against direct subscribers).
@@ -472,6 +570,9 @@ func notifyIssueSubscribers(
 		}
 
 		notified[subID] = true
+		if !inbox.IsTurn(notifType) {
+			continue
+		}
 		resp := inboxItemToResponse(item)
 		resp["issue_status"] = issueStatus
 		bus.Publish(events.Event{
@@ -487,7 +588,8 @@ func notifyIssueSubscribers(
 }
 
 // notifyDirect creates an inbox item for a specific recipient. Skips if the
-// recipient is the actor. Publishes an inbox:new event on success.
+// recipient is the actor. Publishes an inbox:new event on success when the
+// Inbox lists the type (inbox.IsTurn).
 func notifyDirect(
 	ctx context.Context,
 	queries *db.Queries,
@@ -536,7 +638,7 @@ func notifyDirect(
 			"issue_id", issueID, "recipient_id", recipientID, "type", notifType, "error", err)
 		return
 	}
-	if !inserted {
+	if !inserted || !inbox.IsTurn(notifType) {
 		return
 	}
 
@@ -731,6 +833,10 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		prevAssigneeType, _ := payload["prev_assignee_type"].(*string)
 		prevAssigneeID, _ := payload["prev_assignee_id"].(*string)
 		prevDescription, _ := payload["prev_description"].(*string)
+
+		if assigneeChanged || statusChanged {
+			archiveInboxForActor(ctx, queries, bus, e, issue.ID)
+		}
 
 		if assigneeChanged {
 			// Build structured details for assignee change.
@@ -946,6 +1052,10 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		issueTitle, _ := payload["issue_title"].(string)
 		issueStatus, _ := payload["issue_status"].(string)
 
+		if authorType == "member" {
+			archiveInboxForActor(ctx, queries, bus, e, issueID)
+		}
+
 		commentDetails := emptyDetails
 		if commentID != "" {
 			commentDetails, _ = json.Marshal(map[string]string{
@@ -1042,12 +1152,19 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		)
 	})
 
-	// task:completed — no inbox notification (completion is visible from status change)
+	// task:completed — hand the issue back to whoever handed it over
+	bus.Subscribe(protocol.EventTaskCompleted, func(e events.Event) {
+		notifyRunEnded(ctx, queries, bus, e)
+	})
 
-	// task:failed — notify all subscribers except the agent
+	// task:failed — notify all subscribers except the agent, once the failure
+	// is final: an attempt with a retry pending has not ended the run.
 	bus.Subscribe(protocol.EventTaskFailed, func(e events.Event) {
 		payload, ok := e.Payload.(map[string]any)
 		if !ok {
+			return
+		}
+		if retryPending, _ := payload["retry_pending"].(bool); retryPending {
 			return
 		}
 		agentID, _ := payload["agent_id"].(string)

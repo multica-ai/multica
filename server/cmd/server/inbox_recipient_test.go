@@ -41,7 +41,7 @@ func TestCreateInboxItem_RecipientWorkspace(t *testing.T) {
 		{"agent ID as member", "member", agent, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			params := db.CreateInboxItemParams{ID: dbid.NewV7(), WorkspaceID: util.MustParseUUID(testWorkspaceID), RecipientType: tc.recipientType, RecipientID: util.MustParseUUID(tc.recipientID), IssueID: util.MustParseUUID(issue), Type: "reaction_added", Severity: "info", Title: "Recipient guard", Details: emptyDetails}
+			params := db.CreateInboxItemParams{ID: dbid.NewV7(), WorkspaceID: util.MustParseUUID(testWorkspaceID), RecipientType: tc.recipientType, RecipientID: util.MustParseUUID(tc.recipientID), IssueID: util.MustParseUUID(issue), Type: "mentioned", Severity: "info", Title: "Recipient guard", Details: emptyDetails}
 			item, err := queries.CreateInboxItem(context.Background(), params)
 			if tc.allowed {
 				if err != nil {
@@ -58,7 +58,7 @@ func TestCreateInboxItem_RecipientWorkspace(t *testing.T) {
 			count := 0
 			bus.Subscribe(protocol.EventInboxNew, func(events.Event) { count++ })
 			notifyDirect(context.Background(), queries, bus, tc.recipientType, tc.recipientID, testWorkspaceID,
-				events.Event{ActorType: "member", ActorID: testUserID}, issue, "todo", "reaction_added", "info", "Recipient guard", "", emptyDetails)
+				events.Event{ActorType: "member", ActorID: testUserID}, issue, "todo", "mentioned", "info", "Recipient guard", "", emptyDetails)
 			want := 0
 			if tc.allowed {
 				want = 1

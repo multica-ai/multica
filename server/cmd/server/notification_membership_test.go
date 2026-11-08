@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -167,6 +168,10 @@ func TestNotification_CurrentMembership(t *testing.T) {
 				}
 				if n := fx.Count(t, `SELECT count(*) FROM inbox_item WHERE workspace_id = $1 AND recipient_id = $2`, testWorkspaceID, recipient); n != want {
 					t.Errorf("inbox rows = %d, want %d", n, want)
+				}
+				// Every row is recorded; only the ones the Inbox lists are announced.
+				if !inbox.IsTurn(expectedType) {
+					want = 0
 				}
 				if eventCount != want {
 					t.Errorf("inbox:new events = %d, want %d", eventCount, want)

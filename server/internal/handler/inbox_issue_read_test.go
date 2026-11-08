@@ -198,9 +198,9 @@ func (f issueInboxFixture) rawUnread() int64 {
 		f.workspaceID, testUserID))
 }
 
-// unreadRows is the issue's row in the unread badge: 1 while its newest
-// active row is unread.
-func (f issueInboxFixture) unreadRows() int64 {
+// pendingRows is the issue's row in the Inbox badge: 1 while it has an active
+// row the Inbox lists, read or not.
+func (f issueInboxFixture) pendingRows() int64 {
 	f.t.Helper()
 	var summary []InboxWorkspaceUnreadResponse
 	testutil.Call(f.t, inboxWorkspaceHandler(testHandler.UnreadInboxSummary),
@@ -239,8 +239,12 @@ func TestMarkIssueInboxReadReadsItemsThatNeedHandling(t *testing.T) {
 			if got := f.openIssue(); got != 2 {
 				t.Fatalf("count = %d, want both rows read", got)
 			}
-			if !f.read(pendingID) || !f.read(comment) || f.unreadRows() != 0 || f.rawUnread() != 0 {
+			if !f.read(pendingID) || !f.read(comment) || f.rawUnread() != 0 {
 				t.Fatalf("opening the issue left %s unread", pending.notifType)
+			}
+			// Opening is not handling: the issue still waits in the Inbox.
+			if f.pendingRows() != 1 {
+				t.Fatalf("opening the issue took %s out of the Inbox", pending.notifType)
 			}
 		})
 	}

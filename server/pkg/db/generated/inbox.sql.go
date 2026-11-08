@@ -188,6 +188,54 @@ func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxIt
 	return i, err
 }
 
+const countPendingInboxByWorkspace = `-- name: CountPendingInboxByWorkspace :many
+SELECT i.workspace_id, count(DISTINCT COALESCE(i.issue_id, i.id)) AS count
+FROM inbox_item i
+JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id
+WHERE i.recipient_type = 'member'
+  AND i.recipient_id = $1
+  AND i.archived = false
+  AND i.type = ANY($2::text[])
+GROUP BY i.workspace_id
+`
+
+type CountPendingInboxByWorkspaceParams struct {
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	Types       []string    `json:"types"`
+}
+
+type CountPendingInboxByWorkspaceRow struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Count       int64       `json:"count"`
+}
+
+// Per-workspace count of issues waiting on a recipient member, matching the
+// rows the Inbox lists: one per issue (items without an issue count on their
+// own id) with an active item of a type the Inbox shows (inbox.TurnTypes).
+// Read state does not matter: opening an issue is not handling it, so the
+// issue counts until the member acts on it or archives it. The member join
+// keeps counts scoped to workspaces the user still belongs to, so a stale item
+// left behind in a workspace the user has since left cannot light the dot.
+func (q *Queries) CountPendingInboxByWorkspace(ctx context.Context, arg CountPendingInboxByWorkspaceParams) ([]CountPendingInboxByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, countPendingInboxByWorkspace, arg.RecipientID, arg.Types)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountPendingInboxByWorkspaceRow{}
+	for rows.Next() {
+		var i CountPendingInboxByWorkspaceRow
+		if err := rows.Scan(&i.WorkspaceID, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countUnreadInbox = `-- name: CountUnreadInbox :one
 SELECT count(*) FROM inbox_item
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read = false AND archived = false
@@ -204,58 +252,6 @@ func (q *Queries) CountUnreadInbox(ctx context.Context, arg CountUnreadInboxPara
 	var count int64
 	err := row.Scan(&count)
 	return count, err
-}
-
-const countUnreadInboxByWorkspace = `-- name: CountUnreadInboxByWorkspace :many
-SELECT newest.workspace_id, count(*) AS count
-FROM (
-    SELECT DISTINCT ON (i.workspace_id, COALESCE(i.issue_id, i.id))
-        i.workspace_id, i.read
-    FROM inbox_item i
-    JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id
-    WHERE i.recipient_type = 'member'
-      AND i.recipient_id = $1
-      AND i.archived = false
-    ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
-) newest
-WHERE newest.read = false
-GROUP BY newest.workspace_id
-`
-
-type CountUnreadInboxByWorkspaceRow struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Count       int64       `json:"count"`
-}
-
-// Per-workspace unread inbox counts for a recipient member, matching the
-// inbox UI's deduplicated view: notifications are grouped per issue
-// (Linear-style, one row per issue) and an issue counts as unread only when
-// its NEWEST non-archived item is unread. Opening an issue reads the whole
-// group now (MUL-8618), but rows read before that read only the newest item,
-// so counting raw unread rows would keep those older siblings alive and light
-// the switcher dot for a workspace whose inbox the user sees as empty
-// (MUL-3695). Items without an issue group on their own id. The
-// member join keeps counts scoped to workspaces the user still belongs to,
-// so a stale item left behind in a workspace the user has since left cannot
-// light the dot.
-func (q *Queries) CountUnreadInboxByWorkspace(ctx context.Context, recipientID pgtype.UUID) ([]CountUnreadInboxByWorkspaceRow, error) {
-	rows, err := q.db.Query(ctx, countUnreadInboxByWorkspace, recipientID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []CountUnreadInboxByWorkspaceRow{}
-	for rows.Next() {
-		var i CountUnreadInboxByWorkspaceRow
-		if err := rows.Scan(&i.WorkspaceID, &i.Count); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const createInboxItem = `-- name: CreateInboxItem :one

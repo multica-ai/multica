@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -96,6 +97,7 @@ func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) 
 	p := db.ListArchivedInboxPageParams{
 		WorkspaceID: filters.WorkspaceID, RecipientID: filters.RecipientID,
 		Statuses: filters.Statuses, Priorities: filters.Priorities, Actors: filters.Actors, UnreadOnly: filters.UnreadOnly,
+		Types: inbox.TurnTypes,
 	}
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -176,6 +178,7 @@ func (h *Handler) GetArchivedInboxFacets(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	p.Types = inbox.TurnTypes
 	rows, err := h.Queries.ArchivedInboxFacets(r.Context(), p)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load archived inbox filters")
