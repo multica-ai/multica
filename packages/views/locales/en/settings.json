@@ -274,25 +274,6 @@
     "high_contrast": {
       "title": "Increase contrast",
       "description": "Darker secondary text and stronger borders."
-    },
-    "preview": {
-      "title": "Preview",
-      "live": "Changes apply right away",
-      "breadcrumb": "All issues",
-      "issue_title": "Make Multica feel like yours",
-      "status": "In progress",
-      "priority": "High",
-      "label": "Design",
-      "body": "Pick the theme, fonts and size that suit how you work. Everything here is saved on this device.",
-      "link": "Read the guide",
-      "subissues": "Sub-issues",
-      "row_1": "Font picker with a live sample",
-      "row_2": "Scale text without moving layout",
-      "row_3": "Load the Kai face on demand",
-      "comment": "Font size now scales text only, so nothing shifts.",
-      "comment_time": "2m ago",
-      "cancel": "Cancel",
-      "submit": "Comment"
     }
   },
   "shortcuts": {

@@ -3,10 +3,7 @@
 import { useId, type CSSProperties, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
-  Bot,
   Check,
-  ChevronRight,
-  ListTodo,
   Monitor,
   Moon,
   RotateCcw,
@@ -44,8 +41,6 @@ import {
   type UiFont,
 } from "@multica/core/appearance";
 import { useT } from "../../i18n";
-import { StatusIcon } from "../../issues/components/status-icon";
-import { PriorityIcon } from "../../issues/components/priority-icon";
 import { SegmentedToggle } from "../../common/segmented-toggle";
 import {
   SETTINGS_ANCHOR_ATTR,
@@ -92,8 +87,7 @@ const CODE_FONT_NAME: Record<CodeFont, string> = {
 /**
  * Appearance: colour (mode, theme, accent), text (faces and size), and
  * layout and accessibility. Every change applies at once, so the page itself
- * is part of the preview; the sample on the right adds what the settings page
- * has none of — an issue with code, sub-issues and a comment.
+ * is the preview.
  */
 export function AppearanceTab() {
   const { t } = useT("settings");
@@ -115,13 +109,10 @@ export function AppearanceTab() {
         </Button>
       }
     >
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
-        <div className="min-w-0 space-y-8">
-          <ColorSection />
-          <TextSection />
-          <LayoutSection />
-        </div>
-        <PreviewPanel />
+      <div className="space-y-8">
+        <ColorSection />
+        <TextSection />
+        <LayoutSection />
       </div>
     </SettingsTab>
   );
@@ -495,132 +486,6 @@ function LayoutSection() {
         </SettingsRow>
       </SettingsCard>
     </SettingsSection>
-  );
-}
-
-function PreviewPanel() {
-  const { t } = useT("settings");
-  return (
-    <aside className="hidden space-y-3 lg:sticky lg:top-0 lg:block">
-      <div className="flex items-center justify-between gap-2 px-0.5">
-        <h3 className="text-body font-semibold">{t(($) => $.appearance.preview.title)}</h3>
-        <span className="flex items-center gap-1.5 text-caption text-muted-foreground">
-          <span aria-hidden="true" className="size-1.5 rounded-full bg-success" />
-          {t(($) => $.appearance.preview.live)}
-        </span>
-      </div>
-      <AppearanceSample />
-    </aside>
-  );
-}
-
-/** Sample data, not copy: identifiers and names read the same in every locale. */
-const SAMPLE_ISSUE = "MUL-128";
-const SAMPLE_AGENT = "Lambda";
-const SAMPLE_CODE = "--font-scale";
-
-/** A real-looking issue drawn with the live tokens. Decorative: not focusable. */
-function AppearanceSample() {
-  const { t } = useT("settings");
-  const rows: [string, string, string][] = [
-    ["done", "MUL-129", t(($) => $.appearance.preview.row_1)],
-    ["in_review", "MUL-130", t(($) => $.appearance.preview.row_2)],
-    ["todo", "MUL-131", t(($) => $.appearance.preview.row_3)],
-  ];
-  const chip =
-    "inline-flex h-6 items-center gap-1.5 rounded-full border border-input bg-surface px-2 text-caption";
-  return (
-    <div
-      aria-hidden="true"
-      inert
-      className="space-y-3 overflow-hidden rounded-xl bg-background p-4 shadow-(--surface-shadow) ring-1 ring-surface-border"
-    >
-      <div className="flex items-center gap-1.5 text-caption text-muted-foreground">
-        <ListTodo className="size-3.5" />
-        {t(($) => $.appearance.preview.breadcrumb)}
-        <ChevronRight className="size-3 text-faint-foreground" />
-        {SAMPLE_ISSUE}
-      </div>
-      <h4 className="font-heading text-title-lg font-semibold">
-        {t(($) => $.appearance.preview.issue_title)}
-      </h4>
-      <div className="flex flex-wrap gap-1.5">
-        <span className={chip}>
-          <StatusIcon status="in_progress" className="size-3.5" />
-          {t(($) => $.appearance.preview.status)}
-        </span>
-        <span className={chip}>
-          <PriorityIcon priority="high" className="size-3.5" />
-          {t(($) => $.appearance.preview.priority)}
-        </span>
-        <span className={chip}>
-          <AgentMark />
-          {SAMPLE_AGENT}
-        </span>
-      </div>
-      <p className="text-body leading-relaxed">
-        {t(($) => $.appearance.preview.body)}{" "}
-        <span className="text-brand underline decoration-brand/40 underline-offset-2">
-          {t(($) => $.appearance.preview.link)}
-        </span>
-      </p>
-      <pre className="overflow-hidden rounded-md bg-muted px-3 py-2 font-mono text-caption leading-relaxed">
-        <span className="text-muted-foreground">{"// 0Oo 1lI {} => !="}</span>
-        {"\n"}
-        {'theme.set({ font: "mono" });'}
-      </pre>
-      <div className="overflow-hidden rounded-lg bg-surface ring-1 ring-surface-border">
-        <div className="border-b border-border px-3 py-1.5 text-caption font-medium text-muted-foreground">
-          {t(($) => $.appearance.preview.subissues)}
-        </div>
-        {rows.map(([status, id, title]) => (
-          <div
-            key={id}
-            className="flex h-[var(--issue-row-height)] items-center gap-2 border-b border-border px-3 text-body last:border-b-0"
-          >
-            <StatusIcon status={status} className="size-3.5 shrink-0" />
-            <span className="shrink-0 text-caption tabular-nums text-muted-foreground">{id}</span>
-            <span className="min-w-0 truncate">{title}</span>
-          </div>
-        ))}
-      </div>
-      <div className="flex gap-2">
-        <AgentMark className="mt-0.5 size-6" />
-        <div className="min-w-0 flex-1 rounded-lg bg-surface px-3 py-2 ring-1 ring-surface-border">
-          <div className="flex items-baseline gap-2 text-label font-medium">
-            {SAMPLE_AGENT}
-            <span className="text-caption font-normal text-muted-foreground">
-              {t(($) => $.appearance.preview.comment_time)}
-            </span>
-          </div>
-          <p className="mt-0.5 text-body">
-            {t(($) => $.appearance.preview.comment)}{" "}
-            <code className="rounded-sm bg-muted px-1 font-mono text-caption">{SAMPLE_CODE}</code>
-          </p>
-        </div>
-      </div>
-      <div className="flex justify-end gap-2">
-        <Button variant="outline" size="sm" tabIndex={-1}>
-          {t(($) => $.appearance.preview.cancel)}
-        </Button>
-        <Button size="sm" tabIndex={-1}>
-          {t(($) => $.appearance.preview.submit)}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function AgentMark({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn(
-        "flex size-4 shrink-0 items-center justify-center rounded-sm bg-brand text-brand-foreground",
-        className,
-      )}
-    >
-      <Bot className="size-3" />
-    </span>
   );
 }
 

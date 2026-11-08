@@ -272,25 +272,6 @@
     "high_contrast": {
       "title": "提高对比度",
       "description": "次要文字更深，边框更明显。"
-    },
-    "preview": {
-      "title": "预览",
-      "live": "改动即时生效",
-      "breadcrumb": "全部任务",
-      "issue_title": "把 Multica 调成顺手的样子",
-      "status": "进行中",
-      "priority": "高",
-      "label": "设计",
-      "body": "选择适合自己的主题、字体和字号。这里的设置只保存在当前设备。",
-      "link": "查看说明",
-      "subissues": "子任务",
-      "row_1": "字体选择器与实时示例",
-      "row_2": "放大文字时布局不动",
-      "row_3": "楷体按需加载",
-      "comment": "字号现在只缩放文字，界面不会跳动。",
-      "comment_time": "2 分钟前",
-      "cancel": "取消",
-      "submit": "评论"
     }
   },
   "shortcuts": {

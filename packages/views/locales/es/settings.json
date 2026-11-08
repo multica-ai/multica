@@ -256,25 +256,6 @@
     "high_contrast": {
       "title": "Aumentar contraste",
       "description": "Texto secundario más oscuro y bordes más marcados."
-    },
-    "preview": {
-      "title": "Vista previa",
-      "live": "Los cambios se aplican al instante",
-      "breadcrumb": "Todas las incidencias",
-      "issue_title": "Haz que Multica se adapte a ti",
-      "status": "En curso",
-      "priority": "Alta",
-      "label": "Diseño",
-      "body": "Elige el tema, las fuentes y el tamaño que mejor te funcionen. Estos ajustes se guardan en este dispositivo.",
-      "link": "Leer la guía",
-      "subissues": "Subincidencias",
-      "row_1": "Selector de fuentes con muestra en vivo",
-      "row_2": "Agrandar el texto sin mover el diseño",
-      "row_3": "Cargar la fuente Kai bajo demanda",
-      "comment": "El tamaño del texto ahora solo agranda el texto.",
-      "comment_time": "hace 2 min",
-      "cancel": "Cancelar",
-      "submit": "Comentar"
     }
   },
   "shortcuts": {

@@ -272,25 +272,6 @@
     "high_contrast": {
       "title": "提高對比",
       "description": "次要文字更深，邊框更明顯。"
-    },
-    "preview": {
-      "title": "預覽",
-      "live": "變更立即生效",
-      "breadcrumb": "所有任務",
-      "issue_title": "把 Multica 調成順手的樣子",
-      "status": "進行中",
-      "priority": "高",
-      "label": "設計",
-      "body": "選擇適合自己的主題、字體和字級。這裡的設定只儲存在目前的裝置。",
-      "link": "查看說明",
-      "subissues": "子任務",
-      "row_1": "字體選擇器與即時範例",
-      "row_2": "放大文字時版面不動",
-      "row_3": "楷體按需載入",
-      "comment": "字級現在只縮放文字，介面不會跳動。",
-      "comment_time": "2 分鐘前",
-      "cancel": "取消",
-      "submit": "留言"
     }
   },
   "shortcuts": {

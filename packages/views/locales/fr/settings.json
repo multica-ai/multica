@@ -274,25 +274,6 @@
     "high_contrast": {
       "title": "Augmenter le contraste",
       "description": "Texte secondaire plus foncé et bordures plus marquées."
-    },
-    "preview": {
-      "title": "Aperçu",
-      "live": "Les changements s’appliquent immédiatement",
-      "breadcrumb": "Tous les tickets",
-      "issue_title": "Adaptez Multica à votre façon de travailler",
-      "status": "En cours",
-      "priority": "Haute",
-      "label": "Design",
-      "body": "Choisissez le thème, les polices et la taille qui vous conviennent. Ces réglages sont enregistrés sur cet appareil.",
-      "link": "Lire le guide",
-      "subissues": "Sous-tickets",
-      "row_1": "Sélecteur de police avec aperçu",
-      "row_2": "Agrandir le texte sans bouger la mise en page",
-      "row_3": "Charger la police Kai à la demande",
-      "comment": "La taille du texte n’agrandit plus que le texte.",
-      "comment_time": "il y a 2 min",
-      "cancel": "Annuler",
-      "submit": "Commenter"
     }
   },
   "shortcuts": {
