@@ -73,6 +73,12 @@ describe("handleAppShortcut — zoom in", () => {
     expect(wc.currentLevel()).toBe(0.5);
   });
 
+  it("zooms in on Ctrl++ where + has its own unshifted key (DE/ES/PT, numpad)", () => {
+    const wc = makeWc(0);
+    expect(handleAppShortcut(key("+", { control: true }), wc, "linux")).toBe(true);
+    expect(wc.currentLevel()).toBe(0.5);
+  });
+
   it("zooms in on Ctrl+= on non-mac", () => {
     const wc = makeWc(0);
     expect(handleAppShortcut(key("=", { control: true }), wc, "linux")).toBe(true);
