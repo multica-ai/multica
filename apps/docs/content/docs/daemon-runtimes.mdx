@@ -170,6 +170,20 @@ Hermes issue and chat tasks use their conversation's session directory as an iso
 
 Multica refreshes the home's skills and derived configuration for each run. Provider authentication is preserved; messaging adapters and HTTP ingress are disabled for managed tasks. Host gateway state, logs, sessions, and cron jobs are isolated. Any task-owned gateway is stopped at task completion so later tasks receive their own execution environment.
 
+### Resident Hermes gateway (opt-in)
+
+Self-hosted runtimes can run one long-lived `hermes gateway run` per container to retain Hermes sessions, memory, and learned skills across runs, with per-run `hermes acp` processes acting only as viewers. Set `MULTICA_HERMES_RESIDENT_GATEWAY=1` on the daemon and `MULTICA_RESIDENT_OWNER=1` on the resident gateway process. Start and manage that gateway yourself; the daemon does not start or stop a per-run gateway in this mode.
+
+The overlay mirrors the resident owner's gateway records, logs, sessions, and cron state instead of isolating them. The conversation session store is not used as `HERMES_HOME`, and an empty store does not veto resume. If the owner no longer has a session, the backend still retries with a fresh session.
+
+Before launching a Hermes run, the daemon atomically writes `.multica_resident_task.json` in the run's environment root with mode `0600`, containing its task, agent, workspace, optional chat session, and task-scoped `mat_` token. It removes the file when the run finishes. Multica CLI tools under the resident owner walk up from their current directory to the nearest context file and use its task credential and identity only when no explicit task identity is present in their environment. Explicit `MULTICA_TASK_ID` or a `mat_` token takes precedence.
+
+Known limits:
+
+- Bound skills prepared in the run's task home are not read by the resident owner.
+- Per-run `custom_env` does not reach the resident owner's tools.
+- Tools belonging to one owner share one OS user. A same-UID process can read another live run's context file despite its `0600` permissions. Use this mode only where all agents in the runtime trust each other.
+
 ### Codex native memory and subagents [#codex-memory]
 
 Daemon-managed Codex runs have Codex native memory turned off by default, so memories from this machine or an earlier run do not carry into another workspace. The setting is written only to that run's own `CODEX_HOME/config.toml` (`features.memories`, `memories.generate_memories`, and `memories.use_memories` all `false`); your `~/.codex/config.toml` is not changed. To keep native memory, set `MULTICA_CODEX_MEMORY=1` in the daemon's environment.
