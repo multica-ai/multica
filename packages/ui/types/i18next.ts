@@ -19,6 +19,7 @@ declare global {
     ui: {
       attach_file: string;
       toggle_sidebar: string;
+      resize_list_column: string;
       copy_code: string;
       plain_text: string;
       error_boundary: {

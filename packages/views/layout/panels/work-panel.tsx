@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
+import { useInboxUnreadCount } from "@multica/core/inbox/queries";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { isIssueUuid } from "@multica/core/issues/canonical-id";
 import { issueDetailOptions } from "@multica/core/issues/queries";
@@ -12,10 +13,13 @@ import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-st
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Project } from "@multica/core/types";
+import { Inbox } from "@multica/ui/icons";
+import { useSidebarSafe } from "@multica/ui/components/ui/sidebar";
+import { useAppShell } from "../app-shell-context";
 import { useNavigation } from "../../navigation";
 import { IssueContextMenuProvider } from "../../issues/actions";
 import { useT } from "../../i18n";
-import { PanelBody, PanelHeader, isPathWithin } from "../panel-nav";
+import { PanelBody, PanelHeader, PanelLink, PanelList, PanelCount, isPathWithin } from "../panel-nav";
 import { PinnedSection, usePanelPins } from "./pinned-section";
 import { useKeptActiveItem } from "./sidebar-tree";
 import { ProjectsSection, useIssueIdInTree } from "./work-tree";
@@ -65,6 +69,9 @@ export function WorkPanel() {
   const p = useWorkspacePaths();
   const { pathname } = useNavigation();
   const wsId = useCurrentWorkspace()?.id;
+  const shell = useAppShell();
+  const sidebar = useSidebarSafe();
+  const inboxUnread = useInboxUnreadCount(wsId);
   const userId = useAuthStore((s) => s.user?.id);
 
   const { data: projects = EMPTY_PROJECTS } = useQuery({
@@ -132,6 +139,16 @@ export function WorkPanel() {
           through the React tree, and must not reach rememberClickedIssue. */}
       <IssueContextMenuProvider variant="sidebar">
         <PanelBody onClickCapture={rememberClickedIssue}>
+          <PanelList>
+            <PanelLink
+              href={shell?.spaceHref("inbox", p.inbox()) ?? p.inbox()}
+              label={t(($) => $.nav.inbox)}
+              icon={<Inbox />}
+              active={shell ? shell.space === "inbox" : isPathWithin(pathname, p.inbox())}
+              trailing={<PanelCount value={inboxUnread} />}
+              onNavigate={() => sidebar?.setOpenMobile(false)}
+            />
+          </PanelList>
           {wsId && (
             <ViewsSection
               wsId={wsId}

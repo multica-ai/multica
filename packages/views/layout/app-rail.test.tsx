@@ -125,7 +125,7 @@ describe("AppRail spaces", () => {
     state.pathname = "/acme/projects/p-1";
     renderRail();
 
-    for (const href of ["/acme/inbox", "/acme/issues", "/acme/agents", "/acme/chat", "/acme/autopilots"]) {
+    for (const href of ["/acme/issues", "/acme/agents", "/acme/chat", "/acme/autopilots"]) {
       expect(link(href)).not.toBeNull();
     }
     // Projects belong to the work space, which links to Issues.
@@ -150,7 +150,7 @@ describe("AppRail badges", () => {
   it("counts inbox unread with a static counter", () => {
     state.inboxUnread = 4;
     renderRail();
-    const badge = countBadge("/acme/inbox") as (HTMLElement & { animated?: boolean }) | null;
+    const badge = countBadge("/acme/issues") as (HTMLElement & { animated?: boolean }) | null;
     expect(badge).toHaveAttribute("aria-label", "4");
     expect(badge?.animated).toBe(false);
   });
@@ -249,9 +249,11 @@ describe("AppRail panel peek", () => {
     });
     expect(peek).toBe("team");
 
-    // Inbox and Chat keep their lists in their pages but still preview.
-    hover("/acme/inbox");
-    expect(peek).toBe("inbox");
+    // Inbox is reached inside Work; Chat still previews its own list.
+    hover("/acme/issues");
+    expect(peek).toBe("work");
+    hover("/acme/chat");
+    expect(peek).toBe("chat");
   });
 });
 
