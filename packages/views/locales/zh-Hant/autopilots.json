@@ -147,6 +147,8 @@
   "run": {
     "issue_linked": "已關聯任務",
     "view_log": "檢視執行日誌",
+    "stop": "停止執行",
+    "stop_failed": "無法停止執行。",
     "skipped_group": {
       "label": "已跳過",
       "summary": "{{count}} 條跳過的執行"
