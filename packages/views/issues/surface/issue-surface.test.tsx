@@ -877,6 +877,68 @@ describe("IssueSurface — filtered empty state", () => {
     expect(screen.queryByRole("button", { name: "filtered_empty.clear_button" })).toBeNull();
   });
 
+  it.each(["created_at", "updated_at"] as const)(
+    "offers recovery for an empty Unread view narrowed only by %s",
+    async (field) => {
+      const store = getIssueSurfaceViewStore(`view:${UNREAD_VIEW_ID}`);
+      act(() => store.getState().setDateFilter({ field, from: "2026-01-01", to: "2026-01-02" }));
+
+      render(unreadViewSurface());
+
+      await screen.findByText("filtered_empty.title");
+      expect(screen.queryByText("filtered_empty.unread_title")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "filtered_empty.clear_button" }));
+
+      expect(store.getState().dateFilter).toBeNull();
+      expect(store.getState().unreadFilter).toBe(true);
+      await screen.findByText("filtered_empty.unread_title");
+      expect(screen.queryByRole("button", { name: "filtered_empty.clear_button" })).toBeNull();
+    },
+  );
+
+  it.each(["created_at", "updated_at"] as const)(
+    "clears %s with other user filters while preserving Unread and display settings",
+    async (field) => {
+      const store = getIssueSurfaceViewStore(`view:${UNREAD_VIEW_ID}`);
+      act(() => store.setState({
+        dateFilter: { field, from: "2026-01-01", to: "2026-01-02" },
+        priorityFilters: ["high"],
+        agentRunningFilter: true,
+        sortBy: "title",
+        sortDirection: "asc",
+        showSubIssues: false,
+      }));
+
+      render(unreadViewSurface());
+
+      fireEvent.click(await screen.findByRole("button", { name: "filtered_empty.clear_button" }));
+
+      expect(store.getState()).toMatchObject({
+        dateFilter: null,
+        priorityFilters: [],
+        agentRunningFilter: false,
+        unreadFilter: true,
+        sortBy: "title",
+        sortDirection: "asc",
+        showSubIssues: false,
+      });
+      await screen.findByText("filtered_empty.unread_title");
+    },
+  );
+
+  it("clears a date interval on an ordinary surface without adding Unread", async () => {
+    const store = getIssueSurfaceViewStore("project:pf");
+    act(() => store.getState().setDateFilter({ field: "created_at", from: "2026-01-01", to: "2026-01-02" }));
+
+    render(filteredSurface());
+
+    fireEvent.click(await screen.findByRole("button", { name: "filtered_empty.clear_button" }));
+
+    expect(store.getState().dateFilter).toBeNull();
+    expect(store.getState().unreadFilter).toBe(false);
+    await screen.findByText("detail.empty_issues_title");
+  });
+
   it("keeps the built-in Unread view's condition when a workspace switch reloads its state", async () => {
     setCurrentWorkspace("acme", "ws-1");
     const store = getIssueSurfaceViewStore(`view:${UNREAD_VIEW_ID}`);
