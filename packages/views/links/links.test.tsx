@@ -9,6 +9,7 @@ import { EmbeddedLinkPage, LINK_SANDBOX } from "./embedded-link-page";
 import { LinksBar } from "./components/links-bar";
 import { LinkEditor } from "./components/link-editor";
 import { LinksSection } from "./components/links-section";
+import { WorkspaceEntry } from "./workspace-entry";
 
 const state = vi.hoisted(() => ({
   role: "member",
@@ -34,6 +35,7 @@ vi.mock("@multica/core/paths", async (original) => {
   return {
     ...actual,
     useCurrentWorkspace: () => ({ id: "ws", slug: "acme" }),
+    useRequiredWorkspaceSlug: () => "acme",
     useWorkspacePaths: () => actual.paths.workspace("acme"),
   };
 });
@@ -53,6 +55,7 @@ const link: WorkspaceLink = {
   icon: "book-open",
   urlTemplate: "https://example.com/{workspace_slug}",
   openMode: "embed",
+  isHome: false,
   allowSameOrigin: false,
   position: 0,
 };
@@ -166,7 +169,43 @@ describe("link management", () => {
   });
 });
 
+describe("workspace entry", () => {
+  it.each([true, false])("replaces through the platform callback (home=%s)", async (isHome) => {
+    state.list.mockResolvedValue([{ ...link, isHome }]);
+    const replace = vi.fn();
+    render(<WorkspaceEntry onResolve={replace} />);
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(isHome ? "/acme/links/link" : "/acme/issues"));
+  });
+  it("falls back to issues when the links API fails", async () => {
+    state.list.mockRejectedValue(new Error("offline"));
+    const replace = vi.fn();
+    render(<WorkspaceEntry onResolve={replace} />);
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/acme/issues"));
+  });
+});
+
 describe("link editor", () => {
+  it("saves home as embedded and clears home when switching to new tab", async () => {
+    state.update.mockResolvedValue(link);
+    const user = userEvent.setup();
+    render(<LinkEditor link={{ ...link, isHome: true }} />);
+    await user.click(screen.getByRole("button", { name: "Edit link" }));
+    expect(screen.getAllByRole("radio")).toHaveLength(3);
+    expect((screen.getByRole("radio", { name: "Embedded, as home page" }) as HTMLInputElement).checked).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(state.update).toHaveBeenCalledWith("link", expect.objectContaining({
+      openMode: "embed",
+      isHome: true,
+    })));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await user.click(screen.getByRole("button", { name: "Edit link" }));
+    await user.click(screen.getByRole("radio", { name: "New tab" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(state.update).toHaveBeenLastCalledWith("link", expect.objectContaining({
+      openMode: "new_tab",
+      isHome: false,
+    })));
+  });
   it("previews expansion and preserves the form after a failed save", async () => {
     state.create.mockRejectedValue(new Error("offline"));
     render(<LinkEditor />);

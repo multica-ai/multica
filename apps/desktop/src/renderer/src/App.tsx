@@ -6,7 +6,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useWorkspaceList } from "@multica/core/workspace";
 import { api } from "@multica/core/api";
-import { useHasOnboarded } from "@multica/core/paths";
+import { paths, useHasOnboarded } from "@multica/core/paths";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
@@ -304,7 +304,9 @@ function AppContent() {
       launchWorkspaceSlug(),
       otherWindowWorkspaces(),
     );
-    if (target && target !== activeWorkspaceSlug) switchWorkspace(target);
+    if (target && target !== activeWorkspaceSlug) {
+      switchWorkspace(target, paths.workspace(target).home());
+    }
   }, [workspaces, workspaceListReady]);
 
   // null = undecided (pre-login or list hasn't settled yet)

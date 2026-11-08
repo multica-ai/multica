@@ -35,7 +35,9 @@ export function LinkEditor({
   const [name, setName] = useState(link?.name ?? "");
   const [icon, setIcon] = useState(link?.icon ?? "");
   const [url, setUrl] = useState(link?.urlTemplate ?? "");
-  const [mode, setMode] = useState<"embed" | "new_tab">(link?.openMode ?? "embed");
+  const [mode, setMode] = useState<"embed" | "new_tab" | "home">(
+    link?.isHome ? "home" : link?.openMode ?? "embed",
+  );
   const [session, setSession] = useState(link?.allowSameOrigin ?? false);
   const [failed, setFailed] = useState(false);
   const invalid =
@@ -55,7 +57,14 @@ export function LinkEditor({
   const save = async () => {
     if (invalid) return;
     setFailed(false);
-    const data = { name, icon, urlTemplate: url, openMode: mode, allowSameOrigin: session };
+    const data = {
+      name,
+      icon,
+      urlTemplate: url,
+      openMode: mode === "new_tab" ? "new_tab" as const : "embed" as const,
+      isHome: mode === "home",
+      allowSameOrigin: session,
+    };
     try {
       if (link) {
         await update.mutateAsync({ id: link.id, ...data });
@@ -77,7 +86,7 @@ export function LinkEditor({
           setName(link?.name ?? "");
           setIcon(link?.icon ?? "");
           setUrl(link?.urlTemplate ?? "");
-          setMode(link?.openMode ?? "embed");
+          setMode(link?.isHome ? "home" : link?.openMode ?? "embed");
           setSession(link?.allowSameOrigin ?? false);
           setFailed(false);
         }
@@ -144,18 +153,26 @@ export function LinkEditor({
           <p id="link-variables" className="text-caption text-muted-foreground">
             {t(($) => $.links.variables)}
           </p>
-          <label className="grid gap-1 text-caption">
-            {t(($) => $.links.mode)}
-            <select
-              className="rounded-md border bg-background p-2"
-              value={mode}
-              onChange={(e) => setMode(e.target.value === "embed" ? "embed" : "new_tab")}
-            >
-              <option value="embed">{t(($) => $.links.embed)}</option>
-              <option value="new_tab">{t(($) => $.links.new_tab)}</option>
-            </select>
-          </label>
-          {mode === "embed" && (
+          <fieldset className="grid gap-2 text-caption">
+            <legend className="mb-2">{t(($) => $.links.mode)}</legend>
+            {([
+              ["new_tab", t(($) => $.links.new_tab)],
+              ["embed", t(($) => $.links.embed)],
+              ["home", t(($) => $.links.embed_home)],
+            ] as const).map(([value, label]) => (
+              <label key={value} className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="open-mode"
+                  value={value}
+                  checked={mode === value}
+                  onChange={() => setMode(value)}
+                />
+                {label}
+              </label>
+            ))}
+          </fieldset>
+          {mode !== "new_tab" && (
             <div className="grid gap-1">
               <label className="flex gap-2 text-caption">
                 <input type="checkbox" checked={session} onChange={(e) => setSession(e.target.checked)} />

@@ -1,6 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import type { WorkspaceLink } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { linkListOptions, expandLinkUrl, validateLinkUrl } from "@multica/core/links";
@@ -33,6 +35,15 @@ export function EmbeddedLinkPage({ id }: { id: string }) {
     return <CollectionPageState icon={FileQuestion} title={t(($) => $.links.not_found)} />;
   }
 
+  return <EmbeddedLinkFrame link={link} />;
+}
+
+export function EmbeddedLinkFrame({ link, header }: { link: WorkspaceLink; header?: ReactNode }) {
+  const { t } = useT("settings");
+  const ws = useCurrentWorkspace();
+  if (!ws || validateLinkUrl(link.urlTemplate, !!link.projectId)) {
+    return <CollectionPageState icon={FileQuestion} title={t(($) => $.links.not_found)} />;
+  }
   const url = expandLinkUrl(link.urlTemplate, {
     workspaceSlug: ws.slug,
     workspaceId: ws.id,
@@ -41,7 +52,7 @@ export function EmbeddedLinkPage({ id }: { id: string }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <PageHeader>
+      {header ?? <PageHeader>
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <LinkIcon icon={link.icon} />
           <h1 className="truncate text-body font-medium">{link.name}</h1>
@@ -54,7 +65,7 @@ export function EmbeddedLinkPage({ id }: { id: string }) {
         >
           <ExternalLink />
         </Button>
-      </PageHeader>
+      </PageHeader>}
       <iframe
         title={link.name}
         src={url}

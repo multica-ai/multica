@@ -814,6 +814,7 @@ export const WorkspaceLinkSchema = z
     icon: z.string().optional().default(""),
     url_template: z.string(),
     open_mode: z.string().optional().default("new_tab"),
+    is_home: z.boolean().optional().default(false),
     allow_same_origin: z.boolean().optional().default(false),
     position: z.number().optional().default(0),
   })
@@ -827,6 +828,7 @@ export const WorkspaceLinkSchema = z
     urlTemplate: link.url_template,
     // An unknown future mode degrades to opening a new tab, never to framing.
     openMode: link.open_mode === "embed" ? ("embed" as const) : ("new_tab" as const),
+    isHome: link.is_home === true,
     allowSameOrigin: link.allow_same_origin === true,
     position: link.position,
   }));
@@ -843,6 +845,7 @@ export const EMPTY_WORKSPACE_LINK = {
   icon: "",
   urlTemplate: "",
   openMode: "new_tab" as const,
+  isHome: false,
   allowSameOrigin: false,
   position: 0,
 };

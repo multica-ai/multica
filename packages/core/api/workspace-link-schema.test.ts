@@ -21,6 +21,7 @@ describe("workspace link response compatibility", () => {
       urlTemplate: "https://example.com",
       icon: "",
       openMode: "new_tab",
+      isHome: false,
       allowSameOrigin: false,
       position: 0,
     });
@@ -28,10 +29,17 @@ describe("workspace link response compatibility", () => {
   it("uses an external-opening fallback for unknown modes", () => {
     expect(WorkspaceLinkSchema.parse({ ...link, open_mode: "future" }).openMode).toBe("new_tab");
   });
+  it("maps the server home flag without rejecting future fields", () => {
+    expect(WorkspaceLinkSchema.parse({ ...link, open_mode: "embed", is_home: true, future: 1 })).toMatchObject({
+      openMode: "embed",
+      isHome: true,
+    });
+  });
   it.each([
     { ...link, name: 1 },
     { ...link, url_template: null },
     { ...link, allow_same_origin: "true" },
+    { ...link, is_home: "true" },
     {},
   ])("rejects malformed used fields %j", (raw) => {
     expect(

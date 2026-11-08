@@ -4593,6 +4593,7 @@ export class ApiClient {
       icon: data.icon,
       url_template: data.urlTemplate,
       open_mode: data.openMode,
+      is_home: data.isHome,
       allow_same_origin: data.allowSameOrigin,
       position: data.position,
     };

@@ -27,6 +27,8 @@ const wifi = (arcs) => [
 ].slice(0, arcs + 1).join("");
 
 export const DRAWINGS = {
+  Home: `<path class="b" d="${shape([[3.25, 10, 1], [12, 2.75, 0], [20.75, 10, 1], [20.75, 21.25, 4], [3.25, 21.25, 4]])}"/>
+    <path class="k" d="M9 21.25v-7h6v7"/>`,
   Inbox: `<path class="b" d="${rect(2.75, 3, 18.5, 18, 8)}"/>
     <path class="k" d="M2.75 14h4.4c.75 0 1.35.55 1.75 1.2.55.95 1.6 1.8 3.1 1.8s2.55-.85 3.1-1.8c.4-.65 1-1.2 1.75-1.2h4.4"/>`,
   CircleUser: `<circle class="b" cx="12" cy="12" r="9.25"/><circle class="k" cx="12" cy="10" r="3"/>

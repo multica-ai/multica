@@ -5,6 +5,7 @@ import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { projectKeys } from "@multica/core/projects/queries";
+import { linkKeys } from "@multica/core/links";
 import userEvent from "@testing-library/user-event";
 import type { Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -64,6 +65,7 @@ vi.mock("@multica/core/chat", () => ({
 }));
 
 vi.mock("@multica/core/paths", () => ({
+  useCurrentWorkspace: () => ({ id: "workspace-1", slug: "test-workspace" }),
   useWorkspacePaths: () => ({
     projects: () => "/test-workspace/projects",
   }),
@@ -274,6 +276,7 @@ beforeEach(() => {
   mocks.role = "admin";
   qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), PROJECT);
+  qc.setQueryData(linkKeys.list("workspace-1", PROJECT.id), []);
   qc.setQueryData(["agents"], []);
   qc.setQueryData(["pins"], []);
   pending = deferred();
@@ -294,6 +297,29 @@ afterEach(() => {
 });
 
 describe("ProjectDetail sharing", () => {
+  it("defaults to embedded Home and switches back to the existing Issues view", async () => {
+    qc.setQueryData(linkKeys.list("workspace-1", PROJECT.id), [{
+      id: "home",
+      workspaceId: "workspace-1",
+      projectId: PROJECT.id,
+      name: "Project home",
+      icon: "",
+      urlTemplate: "https://example.com/{project_id}",
+      openMode: "embed",
+      isHome: true,
+      allowSameOrigin: false,
+      position: 0,
+    }]);
+    const user = userEvent.setup();
+    renderProjectDetail();
+    expect(screen.getByRole("button", { name: "Home" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTitle("Project home")).toHaveAttribute("src", "https://example.com/project-1");
+    await user.click(screen.getByRole("button", { name: "Issues" }));
+    expect(screen.queryByTitle("Project home")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Home" }));
+    expect(screen.getByTitle("Project home")).toBeInTheDocument();
+  });
   it("copies the platform shareable URL instead of the renderer URL", async () => {
     const user = userEvent.setup();
     renderProjectDetail();

@@ -7,7 +7,8 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths, useCurrentWorkspace } from "@multica/core/paths";
 import { useCurrentMember } from "@multica/core/permissions";
 import { expandLinkUrl, validateLinkUrl, linkListOptions } from "@multica/core/links";
-import { MoreHorizontal } from "@multica/ui/icons";
+import { Home, MoreHorizontal } from "@multica/ui/icons";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -57,6 +58,13 @@ export function LinksBar({ projectId }: { projectId?: string }) {
       <span className={compact ? "hidden max-w-28 truncate xl:inline" : "truncate"}>
         {link.name}
       </span>
+      {link.isHome && (
+        <TooltipHint label={t(($) => $.links.home_page)}>
+          <span aria-label={t(($) => $.links.home_page)}>
+            <Home className="size-3 text-muted-foreground" />
+          </span>
+        </TooltipHint>
+      )}
     </>
   );
   const item = (link: WorkspaceLink, compact: boolean) =>

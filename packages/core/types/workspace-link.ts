@@ -8,6 +8,7 @@ export interface WorkspaceLink {
   openMode: "embed" | "new_tab";
   allowSameOrigin: boolean;
   position: number;
+  isHome: boolean;
 }
 
 export interface WorkspaceLinkInput {
@@ -18,4 +19,5 @@ export interface WorkspaceLinkInput {
   openMode: "embed" | "new_tab";
   allowSameOrigin: boolean;
   position?: number;
+  isHome?: boolean;
 }
