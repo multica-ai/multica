@@ -16,7 +16,10 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-const maxLinksPerScope = 20
+const (
+	maxLinksPerScope = 20
+	maxLinkIconBytes = 32
+)
 
 var linkVariableRE = regexp.MustCompile(`\{([^{}]*)\}`)
 
@@ -82,6 +85,9 @@ func validateWorkspaceLink(link *db.WorkspaceLink) error {
 	link.Name = strings.TrimSpace(link.Name)
 	if n := utf8.RuneCountInString(link.Name); n < 1 || n > 40 {
 		return fmt.Errorf("name must contain 1 to 40 characters")
+	}
+	if len(link.Icon) > maxLinkIconBytes {
+		return fmt.Errorf("icon must be at most %d bytes", maxLinkIconBytes)
 	}
 	if link.Icon != "" && !linkEmojiRE.MatchString(link.Icon) {
 		switch link.Icon {
@@ -296,7 +302,19 @@ func (h *Handler) UpdateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	l, err := h.Queries.GetWorkspaceLink(r.Context(), db.GetWorkspaceLinkParams{ID: id, WorkspaceID: ws})
+	// Serialize the full read-merge-validate-write flow, as for project resources
+	// (#9238), so a partial PATCH cannot overwrite another writer's changes.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeLinkDBError(w, err)
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	l, err := qtx.GetWorkspaceLinkForUpdate(r.Context(), db.GetWorkspaceLinkForUpdateParams{
+		ID:          id,
+		WorkspaceID: ws,
+	})
 	if err != nil {
 		writeLinkDBError(w, err)
 		return
@@ -335,7 +353,7 @@ func (h *Handler) UpdateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	l, err = h.Queries.UpdateWorkspaceLink(r.Context(), db.UpdateWorkspaceLinkParams{
+	l, err = qtx.UpdateWorkspaceLink(r.Context(), db.UpdateWorkspaceLinkParams{
 		ID:              id,
 		WorkspaceID:     ws,
 		Name:            l.Name,
@@ -346,6 +364,10 @@ func (h *Handler) UpdateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		Position:        l.Position,
 	})
 	if err != nil {
+		writeLinkDBError(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeLinkDBError(w, err)
 		return
 	}

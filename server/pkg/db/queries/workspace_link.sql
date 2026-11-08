@@ -6,6 +6,13 @@ ORDER BY position, created_at, id;
 -- name: GetWorkspaceLink :one
 SELECT * FROM workspace_link WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetWorkspaceLinkForUpdate :one
+-- Lock the scoped row until the caller's transaction ends so partial updates
+-- merge against the latest committed values instead of overwriting each other.
+SELECT * FROM workspace_link
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
 -- name: CountWorkspaceLinks :one
 SELECT count(*) FROM workspace_link
 WHERE workspace_id = $1 AND project_id IS NOT DISTINCT FROM sqlc.narg('project_id')::uuid;

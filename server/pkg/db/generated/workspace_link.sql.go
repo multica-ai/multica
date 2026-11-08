@@ -134,6 +134,39 @@ func (q *Queries) GetWorkspaceLink(ctx context.Context, arg GetWorkspaceLinkPara
 	return i, err
 }
 
+const getWorkspaceLinkForUpdate = `-- name: GetWorkspaceLinkForUpdate :one
+SELECT id, workspace_id, project_id, name, icon, url_template, open_mode, allow_same_origin, position, created_by, created_at, updated_at FROM workspace_link
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type GetWorkspaceLinkForUpdateParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Lock the scoped row until the caller's transaction ends so partial updates
+// merge against the latest committed values instead of overwriting each other.
+func (q *Queries) GetWorkspaceLinkForUpdate(ctx context.Context, arg GetWorkspaceLinkForUpdateParams) (WorkspaceLink, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceLinkForUpdate, arg.ID, arg.WorkspaceID)
+	var i WorkspaceLink
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Icon,
+		&i.UrlTemplate,
+		&i.OpenMode,
+		&i.AllowSameOrigin,
+		&i.Position,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listWorkspaceLinks = `-- name: ListWorkspaceLinks :many
 SELECT id, workspace_id, project_id, name, icon, url_template, open_mode, allow_same_origin, position, created_by, created_at, updated_at FROM workspace_link
 WHERE workspace_id = $1 AND project_id IS NOT DISTINCT FROM $2::uuid

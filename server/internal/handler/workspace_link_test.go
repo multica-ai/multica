@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -26,6 +28,14 @@ func TestWorkspaceLinkValidation(t *testing.T) {
 		{"javascript", "javascript:alert(1)", false, false},
 		{"data", "data:text/html,test", false, false},
 		{"relative", "/docs", false, false},
+		{"protocol relative", "//host/x", false, false},
+		{"backslash", `https:\host`, false, false},
+		{"double backslash", `https:\\host`, false, false},
+		{"tab", "https://example.com/	x", false, false},
+		{"newline", "https://example.com/\nx", false, false},
+		{"encoded braces", "https://example.com/%7Bworkspace_slug%7D", false, true},
+		{"empty userinfo", "https://@host/", false, false},
+		{"malformed authority", "https://:443/", false, false},
 		{"unknown", "https://example.com/{unknown}", false, false},
 		{"project in workspace", "https://example.com/{project_id}", false, false},
 		{"host", "https://{workspace_slug}.example.com", false, false},
@@ -69,8 +79,15 @@ func TestWorkspaceLinkLifecycle(t *testing.T) {
 		}
 		return w
 	}
-	w := call("POST", map[string]any{"name": "  Docs  ", "url_template": "https://example.com/{workspace_slug}"}, "", 201)
-	var link struct{ ID, Name string }
+	w := call("POST", map[string]any{
+		"name":              "  Docs  ",
+		"icon":              "book-open",
+		"url_template":      "https://example.com/{workspace_slug}",
+		"open_mode":         "new_tab",
+		"allow_same_origin": true,
+		"position":          7,
+	}, "", http.StatusCreated)
+	var link WorkspaceLinkResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &link); err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +95,24 @@ func TestWorkspaceLinkLifecycle(t *testing.T) {
 		t.Fatal(link.Name)
 	}
 	call("GET", nil, "", 200)
-	call("PATCH", map[string]any{"position": 4, "name": "Dashboard"}, link.ID, 200)
+	w = call("PATCH", map[string]any{"position": 4, "name": "Dashboard"}, link.ID, http.StatusOK)
+	var patched WorkspaceLinkResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &patched); err != nil {
+		t.Fatal(err)
+	}
+	if patched.Name != "Dashboard" || patched.Position != 4 || patched.Icon != link.Icon ||
+		patched.URLTemplate != link.URLTemplate || patched.OpenMode != link.OpenMode ||
+		patched.AllowSameOrigin != link.AllowSameOrigin {
+		t.Fatalf("partial PATCH did not preserve omitted fields: %+v", patched)
+	}
+	w = call("PATCH", map[string]any{"position": 0, "allow_same_origin": false}, link.ID, http.StatusOK)
+	if err := json.Unmarshal(w.Body.Bytes(), &patched); err != nil {
+		t.Fatal(err)
+	}
+	if patched.Position != 0 || patched.AllowSameOrigin || patched.Name != "Dashboard" ||
+		patched.Icon != link.Icon || patched.URLTemplate != link.URLTemplate || patched.OpenMode != link.OpenMode {
+		t.Fatalf("explicit zero/false PATCH was not applied correctly: %+v", patched)
+	}
 	call("DELETE", nil, link.ID, 204)
 	call("PATCH", map[string]any{"name": "Gone"}, link.ID, 404)
 	for i := 0; i < maxLinksPerScope; i++ {
@@ -92,6 +126,134 @@ func TestWorkspaceLinkLifecycle(t *testing.T) {
 	call("POST", map[string]any{"name": "Denied", "url_template": "https://example.com"}, "", 403)
 	call("PATCH", map[string]any{"name": "Denied"}, uuid.NewString(), 403)
 	call("DELETE", nil, uuid.NewString(), 403)
+}
+
+func TestWorkspaceLinkConcurrentDisjointPatches(t *testing.T) {
+	ws := dbfx.Workspace(t, "Concurrent links", "link-concurrent-"+uuid.NewString())
+	dbfx.Member(t, ws, testUserID, "owner")
+	id := dbfx.Insert(t, "workspace_link", testutil.Cols{
+		"workspace_id": ws,
+		"name":         "Docs",
+		"url_template": "https://example.com/old",
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	blocker, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback(context.Background())
+	var blockerPID int
+	if err := blocker.QueryRow(ctx, `
+		SELECT pg_backend_pid() FROM workspace_link WHERE id=$1 FOR UPDATE
+	`, id).Scan(&blockerPID); err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	results := make(chan *httptest.ResponseRecorder, 2)
+	var workers sync.WaitGroup
+	defer func() {
+		cancel()
+		workers.Wait()
+	}()
+	for _, body := range []map[string]any{
+		{"position": 12},
+		{"url_template": "https://example.com/new"},
+	} {
+		req := newRequest(http.MethodPatch, "/api/links/"+id, body).WithContext(ctx)
+		req.Header.Set("X-Workspace-ID", ws)
+		req = withURLParam(req, "id", id)
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			w := httptest.NewRecorder()
+			testHandler.UpdateWorkspaceLink(w, req)
+			results <- w
+		}()
+	}
+	close(start)
+
+	// Keep both requests behind the same row lock. Before the fix they can
+	// both read stale values and then block in UPDATE; with FOR UPDATE they
+	// block before reading. Release only once both are in that lock queue.
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var waiting int
+		if err := testPool.QueryRow(ctx, `
+			WITH RECURSIVE waiting AS (
+				SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))
+				UNION
+				SELECT a.pid FROM pg_stat_activity a
+				JOIN waiting w ON w.pid = ANY(pg_blocking_pids(a.pid))
+			)
+			SELECT count(*) FROM waiting
+		`, blockerPID).Scan(&waiting); err != nil {
+			t.Fatalf("wait for concurrent PATCH lock queue: %v", err)
+		}
+		if waiting >= 2 {
+			break
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatal("concurrent PATCH requests did not reach the row lock")
+		}
+	}
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		select {
+		case w := <-results:
+			if w.Code != http.StatusOK {
+				t.Fatalf("concurrent PATCH: %d %s", w.Code, w.Body.String())
+			}
+		case <-ctx.Done():
+			t.Fatal("concurrent PATCH did not complete")
+		}
+	}
+	stored, err := testHandler.Queries.GetWorkspaceLink(ctx, db.GetWorkspaceLinkParams{
+		ID:          parseUUID(id),
+		WorkspaceID: parseUUID(ws),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Position != 12 || stored.UrlTemplate != "https://example.com/new" {
+		t.Fatalf("disjoint PATCH changes were lost: position=%d url=%q", stored.Position, stored.UrlTemplate)
+	}
+}
+
+func TestWorkspaceLinkCrossWorkspaceMutations(t *testing.T) {
+	ws := dbfx.Workspace(t, "Other link scope", "link-foreign-"+uuid.NewString())
+	dbfx.Member(t, ws, testUserID, "owner")
+	id := dbfx.Insert(t, "workspace_link", testutil.Cols{
+		"workspace_id": testWorkspaceID,
+		"name":         "Private workspace docs",
+		"url_template": "https://example.com/original",
+	})
+	for _, method := range []string{http.MethodPatch, http.MethodDelete} {
+		req := withURLParam(newRequest(method, "/api/links/"+id, map[string]any{"name": "Denied"}), "id", id)
+		req.Header.Set("X-Workspace-ID", ws)
+		if method == http.MethodPatch {
+			testutil.Call(t, testHandler.UpdateWorkspaceLink, req).Want(http.StatusNotFound)
+		} else {
+			testutil.Call(t, testHandler.DeleteWorkspaceLink, req).Want(http.StatusNotFound)
+		}
+	}
+	stored, err := testHandler.Queries.GetWorkspaceLink(context.Background(), db.GetWorkspaceLinkParams{
+		ID:          parseUUID(id),
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Name != "Private workspace docs" || stored.UrlTemplate != "https://example.com/original" {
+		t.Fatalf("foreign workspace mutations changed the link: %+v", stored)
+	}
 }
 
 func TestWorkspaceLinkCrossWorkspaceProject(t *testing.T) {
@@ -205,6 +367,34 @@ func TestWorkspaceLinkFields(t *testing.T) {
 		if err := validateWorkspaceLink(&link); err == nil {
 			t.Fatal("invalid name accepted")
 		}
+	}
+}
+
+func TestWorkspaceLinkIconByteLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		icon  string
+		valid bool
+	}{
+		{"family emoji fits", "👨‍👩‍👧‍👦", true},
+		{"32 bytes", strings.Repeat("🚀\u200d", 4) + "🚀", true},
+		{"over 32 bytes", strings.Repeat("🚀\u200d", 5) + "🚀", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			link := db.WorkspaceLink{
+				Name:        "Docs",
+				Icon:        tc.icon,
+				UrlTemplate: "https://example.com",
+				OpenMode:    "embed",
+			}
+			err := validateWorkspaceLink(&link)
+			if (err == nil) != tc.valid {
+				t.Fatalf("%d-byte icon valid=%v, error=%v", len(tc.icon), tc.valid, err)
+			}
+			if !tc.valid && !strings.Contains(err.Error(), "32 bytes") {
+				t.Fatalf("expected icon byte-limit error, got %v", err)
+			}
+		})
 	}
 }
 
