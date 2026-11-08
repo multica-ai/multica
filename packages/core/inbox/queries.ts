@@ -174,8 +174,9 @@ export function unreadCountForWorkspace(
 }
 
 /**
- * Unread inbox count for the given workspace — the number the sidebar nav
- * badge and the desktop dock badge render.
+ * How many issues wait on the user in the given workspace's Inbox, read or
+ * not — the number the Work rail badge, the Inbox row and the desktop dock
+ * badge render. Only acting on an issue or archiving it lowers it.
  *
  * Read from the cross-workspace summary, NOT from the inbox list. The summary
  * is one small server-computed row per workspace and the sidebar already
@@ -185,8 +186,8 @@ export function unreadCountForWorkspace(
  *
  * `GET /api/inbox/unread-count` is deliberately not the source: it counts raw
  * notification rows, while the inbox renders one row per issue. The summary
- * endpoint applies the same newest-per-issue rule `deduplicateInboxItems`
- * applies client-side, so this number matches the list the user sees.
+ * endpoint counts issues, over the notification types the list shows, so
+ * this number matches the list the user sees.
  */
 export function useInboxUnreadCount(
   wsId: string | null | undefined,

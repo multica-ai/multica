@@ -46,15 +46,15 @@ type RailBadge =
   | { kind: "dot" };
 
 /**
- * Rail badges. Inbox and Chat count unread; Team only flags that something
- * needs a look — the panel says what. A dot must be something the user can
+ * Rail badges. Work counts the issues waiting in its Inbox and Chat counts
+ * unread; Team only flags that something needs a look — the panel says what. A dot must be something the user can
  * clear, so a failed autopilot run is shown in the Autopilots panel only.
  */
 function useRailBadges(): Partial<Record<RailSpaceId, RailBadge>> {
   const wsId = useCurrentWorkspace()?.id;
   const p = useWorkspacePaths();
   const { pathname } = useNavigation();
-  const inboxUnread = useInboxUnreadCount(wsId);
+  const inboxPending = useInboxUnreadCount(wsId);
 
   const { data: chatSessions = [] } = useQuery({
     ...chatSessionsOptions(wsId ?? ""),
@@ -81,7 +81,7 @@ function useRailBadges(): Partial<Record<RailSpaceId, RailBadge>> {
   const { stuck } = useTeamAgentStatus(wsId);
 
   const badges: Partial<Record<RailSpaceId, RailBadge>> = {};
-  if (inboxUnread > 0) badges.inbox = { kind: "count", value: inboxUnread, tone: "brand" };
+  if (inboxPending > 0) badges.work = { kind: "count", value: inboxPending, tone: "brand" };
   if (chatUnread > 0) badges.chat = { kind: "count", value: chatUnread, tone: "neutral" };
   if (stuck.length > 0) badges.team = { kind: "dot" };
   return badges;
@@ -255,12 +255,6 @@ export function AppRail({
   );
 
   const items: Record<RailSpaceId, { href: string; icon: IconComponent; label: string; fullLabel: string }> = {
-    inbox: {
-      href: p.inbox(),
-      icon: routeIconForPath(p.inbox()),
-      label: t(($) => $.rail.inbox),
-      fullLabel: t(($) => $.nav.inbox),
-    },
     work: {
       href: p.issues(),
       icon: routeIconForPath(p.issues()),
