@@ -2306,7 +2306,7 @@ func TestHermesPreparedSessionReachability(t *testing.T) {
 	home := t.TempDir()
 	redirectTestHome(t, home)
 	t.Setenv("USERPROFILE", home)
-	sourceHome, root := t.TempDir(), t.TempDir()
+	sourceHome, stateRoot, root := t.TempDir(), t.TempDir(), t.TempDir()
 	taskNumber := 0
 	prepare := func(t *testing.T, agentID, issueID string) *execenv.Environment {
 		t.Helper()
@@ -2317,7 +2317,7 @@ func TestHermesPreparedSessionReachability(t *testing.T) {
 		env, err := execenv.Prepare(execenv.PrepareParams{
 			WorkspacesRoot: root, WorkspaceID: "workspace-1", TaskID: fmt.Sprintf("task-%012d", taskNumber),
 			Provider: "hermes", HermesSourceHome: sourceHome, Task: taskCtx,
-			HermesSessionStore: execenv.HermesSessionStorePath("", agentID, sourceHome, taskCtx),
+			HermesSessionStore: execenv.HermesSessionStorePath(stateRoot, agentID, sourceHome, taskCtx),
 		}, slog.Default())
 		if err != nil {
 			t.Fatal(err)
@@ -2327,9 +2327,6 @@ func TestHermesPreparedSessionReachability(t *testing.T) {
 	}
 	first := prepare(t, "agent-1", "issue-1")
 	if first.HermesSessionStore == "" {
-		if runtime.GOOS == "windows" {
-			t.Skip("host cannot mount Hermes session stores")
-		}
 		t.Fatal("Hermes session store was not mounted")
 	}
 	if err := os.WriteFile(filepath.Join(first.HermesHome, "state.db"), []byte("synthetic transcript"), 0o600); err != nil {

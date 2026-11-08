@@ -4,65 +4,31 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-type delayedRegisterDBTX struct {
-	db.DBTX
+// Delay the old request before it takes the per-daemon transaction lock.
+type delayedRegistrationStarter struct {
+	inner   txStarter
 	started chan struct{}
 	release chan struct{}
 }
 
-type delayedProfileRegisterTxStarter struct {
-	started chan struct{}
-	release chan struct{}
-}
-
-func (s delayedProfileRegisterTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
-	tx, err := testPool.Begin(ctx)
-	if err != nil {
-		return nil, err
+func (s delayedRegistrationStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	close(s.started)
+	select {
+	case <-s.release:
+		return s.inner.Begin(ctx)
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-	return delayedProfileRegisterTx{Tx: tx, started: s.started, release: s.release}, nil
-}
-
-type delayedProfileRegisterTx struct {
-	pgx.Tx
-	started chan struct{}
-	release chan struct{}
-}
-
-func (tx delayedProfileRegisterTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
-	if strings.Contains(sql, "-- name: UpsertAgentRuntimeWithProfile :one") {
-		close(tx.started)
-		<-tx.release
-	}
-	return tx.Tx.QueryRow(ctx, sql, args...)
-}
-
-func (d delayedRegisterDBTX) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	return d.DBTX.Exec(ctx, sql, args...)
-}
-
-func (d delayedRegisterDBTX) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-	return d.DBTX.Query(ctx, sql, args...)
-}
-
-func (d delayedRegisterDBTX) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
-	if strings.Contains(sql, "-- name: UpsertAgentRuntime :one") {
-		close(d.started)
-		<-d.release
-	}
-	return d.DBTX.QueryRow(ctx, sql, args...)
 }
 
 func TestDaemonRegisterLateOldOwnerCannotOverwriteNewOwner(t *testing.T) {
@@ -71,27 +37,32 @@ func TestDaemonRegisterLateOldOwnerCannotOverwriteNewOwner(t *testing.T) {
 	}
 	daemonID := "register-generation-race-test"
 	runtimeID := dbfx.Runtime(t, "delayed register", testutil.Cols{
-		"daemon_id": daemonID, "runtime_mode": "local", "provider": "codex", "status": "online",
+		"daemon_id": daemonID, "runtime_mode": "local", "provider": "codex", "status": "online", "owner_id": testUserID,
 	})
-	gate := delayedRegisterDBTX{DBTX: testPool, started: make(chan struct{}), release: make(chan struct{})}
-	h := New(db.New(gate), testPool, testHandler.Hub, testHandler.Bus, testHandler.EmailService,
+	gate := delayedRegistrationStarter{inner: testPool, started: make(chan struct{}), release: make(chan struct{})}
+	h := New(db.New(testPool), testPool, testHandler.Hub, testHandler.Bus, testHandler.EmailService,
 		nil, nil, analytics.NoopClient{}, Config{})
+	h.TxStarter = gate
 	register := func(handler *Handler, generation string) *httptest.ResponseRecorder {
-		req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/register", map[string]any{
 			"workspace_id": testWorkspaceID, "daemon_id": daemonID,
 			"runtimes": []map[string]any{{"name": "codex", "type": "codex", "status": "online", "owner_generation": generation}},
 		}, testWorkspaceID, daemonID)
+		ctx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
+		defer cancel()
 		w := httptest.NewRecorder()
-		handler.DaemonRegister(w, req)
+		handler.DaemonRegister(w, req.WithContext(ctx))
 		return w
 	}
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() { done <- register(h, "g00000000000000000001:owner-A") }()
 	select {
 	case <-gate.started:
+	case w := <-done:
+		t.Fatalf("old owner returned before starting registration: %d %s", w.Code, w.Body.String())
 	case <-time.After(5 * time.Second):
 		close(gate.release)
-		t.Fatal("old owner register did not reach the delayed upsert")
+		t.Fatal("old owner did not reach the registration transaction")
 	}
 	if w := register(testHandler, "g00000000000000000002:owner-B"); w.Code != http.StatusOK {
 		close(gate.release)
@@ -100,7 +71,7 @@ func TestDaemonRegisterLateOldOwnerCannotOverwriteNewOwner(t *testing.T) {
 	close(gate.release)
 	select {
 	case w := <-done:
-		if w.Code != http.StatusOK && w.Code != http.StatusConflict {
+		if w.Code != http.StatusConflict {
 			t.Fatalf("old owner register status=%d: %s", w.Code, w.Body.String())
 		}
 	case <-time.After(5 * time.Second):
@@ -131,7 +102,7 @@ func TestDaemonRegisterLateFailedProfileCannotOfflineNewOwner(t *testing.T) {
 	daemonID := "register-failure-race-test"
 	runtimeID := insertProfileRuntimeFixture(t, t.Context(), profileID, "delayed failure", "codex")
 	dbfx.Exec(t, `UPDATE agent_runtime SET daemon_id = $1 WHERE id = $2`, daemonID, runtimeID)
-	gate := delayedProfileRegisterTxStarter{started: make(chan struct{}), release: make(chan struct{})}
+	gate := delayedRegistrationStarter{inner: testPool, started: make(chan struct{}), release: make(chan struct{})}
 	h := New(db.New(testPool), testPool, testHandler.Hub, testHandler.Bus, testHandler.EmailService,
 		nil, nil, analytics.NoopClient{}, Config{})
 	h.TxStarter = gate
@@ -142,17 +113,22 @@ func TestDaemonRegisterLateFailedProfileCannotOfflineNewOwner(t *testing.T) {
 		} else {
 			body["runtimes"] = []map[string]any{{"name": "codex", "type": "codex", "profile_id": profileID, "status": "online", "owner_generation": generation}}
 		}
+		req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/register", body, testWorkspaceID, daemonID)
+		ctx, cancel := context.WithTimeout(req.Context(), 10*time.Second)
+		defer cancel()
 		w := httptest.NewRecorder()
-		handler.DaemonRegister(w, newDaemonTokenRequest("POST", "/api/daemon/register", body, testWorkspaceID, daemonID))
+		handler.DaemonRegister(w, req.WithContext(ctx))
 		return w
 	}
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() { done <- register(h, true, "g00000000000000000001:failure") }()
 	select {
 	case <-gate.started:
+	case w := <-done:
+		t.Fatalf("failed profile returned before starting registration: %d %s", w.Code, w.Body.String())
 	case <-time.After(5 * time.Second):
 		close(gate.release)
-		t.Fatal("failed profile did not reach delayed upsert")
+		t.Fatal("failed profile did not reach the registration transaction")
 	}
 	if w := register(testHandler, false, "g00000000000000000002:online"); w.Code != http.StatusOK {
 		close(gate.release)

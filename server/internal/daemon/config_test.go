@@ -1452,6 +1452,7 @@ func TestLoadConfig_UsesChatGPTAppBundleCodexPath(t *testing.T) {
 // Resources/codex-cli/bin/codex. Discovery must use that path when the older
 // flat Resources/codex file is absent.
 func TestLoadConfig_UsesNestedChatGPTCodexCLIPath(t *testing.T) {
+	stageTestHome(t, t.TempDir())
 	pathDir := t.TempDir()
 	nested := filepath.Join(pathDir, "ChatGPT.app", "Contents", "Resources", "codex-cli", "bin", "codex")
 	if err := os.MkdirAll(filepath.Dir(nested), 0o755); err != nil {
@@ -1472,7 +1473,7 @@ func TestLoadConfig_UsesNestedChatGPTCodexCLIPath(t *testing.T) {
 
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:0",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
@@ -1518,6 +1519,7 @@ func TestProbeAgentCLIsIgnoresNonExecutableCodexBundle(t *testing.T) {
 // When both the nested CLI and the older flat binary exist, the nested path
 // is the current ChatGPT.app layout and must win.
 func TestLoadConfig_PrefersNestedChatGPTCodexCLIPath(t *testing.T) {
+	stageTestHome(t, t.TempDir())
 	pathDir := t.TempDir()
 	nested := filepath.Join(pathDir, "ChatGPT.app", "Contents", "Resources", "codex-cli", "bin", "codex")
 	flat := filepath.Join(pathDir, "ChatGPT.app", "Contents", "Resources", "codex")
@@ -1541,7 +1543,7 @@ func TestLoadConfig_PrefersNestedChatGPTCodexCLIPath(t *testing.T) {
 
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:0",
-		WorkspacesRoot: t.TempDir(),
+		WorkspacesRoot: testWorkspacesRoot(t),
 	})
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
