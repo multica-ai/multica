@@ -1,13 +1,10 @@
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import type { ArchivedInboxPage } from "../types/inbox";
 import { EMPTY_INBOX_FILTERS, type ArchivedInboxFilters } from "./filter-store";
-import { infiniteQueryOptions, queryOptions, useQuery } from "@tanstack/react-query";
+import { infiniteQueryOptions, keepPreviousData, queryOptions, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
-import type { InboxItem, InboxSection, InboxWorkspaceUnread } from "../types";
+import type { InboxItem, InboxWorkspaceUnread } from "../types";
 import { focusManager } from "@tanstack/react-query";
-import { inboxItemSection } from "./section";
-
-export { inboxItemSection, isInboxItemUnread } from "./section";
 
 export const inboxKeys = {
   all: (wsId: string) => ["inbox", wsId] as const,
@@ -47,12 +44,22 @@ function normalizedInboxFilters(filters: ArchivedInboxFilters): ArchivedInboxFil
     actors: [...filters.actors].sort(), unreadOnly: filters.unreadOnly };
 }
 
+// A filter change re-keys the archive. Keep the previous result while the new
+// one loads, so the page does not drop to its skeleton and unmount the open
+// filter menu. Only within the same workspace: another workspace's rows or
+// counts must never stand in.
+function isSameWorkspace(previousKey: readonly unknown[] | undefined, wsId: string) {
+  return previousKey?.[1] === wsId;
+}
+
 export function archivedInboxPagesOptions(wsId: string, filters: ArchivedInboxFilters) {
   return infiniteQueryOptions({
     queryKey: [...inboxKeys.pages(wsId), normalizedInboxFilters(filters)],
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) => api.listArchivedInboxPage(filters, { cursor: pageParam, signal }),
     getNextPageParam: (page) => page.nextCursor ?? undefined,
+    placeholderData: (previousData, previousQuery) =>
+      isSameWorkspace(previousQuery?.queryKey, wsId) ? keepPreviousData(previousData) : undefined,
     retry: false,
   });
 }
@@ -70,6 +77,8 @@ export function archivedInboxFacetsOptions(wsId: string, filters: ArchivedInboxF
   return queryOptions({
     queryKey: [...inboxKeys.facets(wsId), normalizedInboxFilters(filters)],
     queryFn: ({ signal }) => api.getArchivedInboxFacets(filters, signal),
+    placeholderData: (previousData, previousQuery) =>
+      isSameWorkspace(previousQuery?.queryKey, wsId) ? keepPreviousData(previousData) : undefined,
     retry: false,
   });
 }
@@ -190,20 +199,6 @@ export function useInboxUnreadCount(
       unreadCountForWorkspace(summary, wsId),
   });
   return data ?? 0;
-}
-
-/**
- * Active inbox items split into the two sections, each grouped one entry per
- * issue like {@link deduplicateInboxItems}. An issue with both kinds appears
- * in both sections, and routine activity never moves its action entry: each
- * section orders by its own newest row.
- */
-export function groupInboxItemsBySection(items: InboxItem[]): Record<InboxSection, InboxItem[]> {
-  const active = items.filter((i) => !i.archived);
-  return {
-    action: groupInboxItemsByIssue(active.filter((i) => inboxItemSection(i) === "action")),
-    activity: groupInboxItemsByIssue(active.filter((i) => inboxItemSection(i) === "activity")),
-  };
 }
 
 /**

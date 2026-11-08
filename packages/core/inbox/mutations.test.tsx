@@ -9,13 +9,7 @@ import type { ReactNode } from "react";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";
-import {
-  useArchiveInbox,
-  useMarkInboxRead,
-  useMarkInboxUnread,
-  useMarkIssueInboxRead,
-  useUnarchiveInbox,
-} from "./mutations";
+import { useMarkInboxRead, useMarkInboxUnread, useMarkIssueInboxRead, useUnarchiveInbox } from "./mutations";
 import { inboxKeys, useInboxUnreadCount } from "./queries";
 import { onInboxSummaryInvalidate } from "./ws-updaters";
 import { createQueryClient } from "../query-client";
@@ -71,7 +65,7 @@ function summaryCount(qc: QueryClient) {
   return summary?.find((e) => e.workspace_id === WORKSPACE_ID)?.count;
 }
 
-describe("useArchiveInbox sections", () => {
+describe("useMarkInboxRead", () => {
   let queryClient: QueryClient;
 
   beforeEach(() => {
@@ -79,92 +73,73 @@ describe("useArchiveInbox sections", () => {
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
     setApiInstance({
-      archiveInbox: vi.fn(async (id: string) => item({ id, archived: true })),
-      listInbox: vi.fn(async () => listCache(queryClient)),
-      listArchivedInbox: vi.fn(async () => []),
-      getInboxUnreadSummary: vi.fn(async () => []),
+      markInboxRead: vi.fn(async (id: string) => item({ id, read: true, archived: false })),
     } as unknown as ApiClient);
+  });
+
+  // MUL-8618: the server reads the issue's other unread active rows with the
+  // one the row shows, so an assignment under a later comment does not stay
+  // unread out of sight. The optimistic patch covers the same rows.
+  it("reads the item and every other active item on its issue", async () => {
     queryClient.setQueryData<InboxItem[]>(inboxKeys.list(WORKSPACE_ID), [
-      item({ id: "mention", type: "mentioned", section: "action", archived: false }),
-      item({ id: "status", type: "status_changed", section: "activity", archived: false }),
-      item({ id: "reply", section: "activity", archived: false }),
+      item({ id: "comment", type: "new_comment", archived: false }),
+      item({ id: "assigned", type: "issue_assigned", severity: "action_required", archived: false }),
+      item({ id: "archived-sibling", archived: true }),
+      item({ id: "other-issue", issue_id: "issue-2", archived: false }),
+      item({ id: "no-issue", issue_id: null, archived: false }),
+    ]);
+
+    const { result } = renderHook(() => useMarkInboxRead(), {
+      wrapper: createWrapper(queryClient),
+    });
+    result.current.mutate("comment");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const read = Object.fromEntries(listCache(queryClient).map((i) => [i.id, i.read]));
+    expect(read).toEqual({
+      comment: true,
+      assigned: true,
+      "archived-sibling": false,
+      "other-issue": false,
+      "no-issue": false,
+    });
+  });
+
+  it("reads the issue's active items when the row was opened from the archive", async () => {
+    queryClient.setQueryData<InboxItem[]>(inboxKeys.list(WORKSPACE_ID), [
+      item({ id: "active", type: "issue_assigned", archived: false }),
+    ]);
+    queryClient.setQueryData<InboxItem[]>(inboxKeys.archived(WORKSPACE_ID), [
+      item({ id: "archived-newest" }),
+      item({ id: "archived-older" }),
+    ]);
+
+    const { result } = renderHook(() => useMarkInboxRead(), {
+      wrapper: createWrapper(queryClient),
+    });
+    result.current.mutate("archived-newest");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(listCache(queryClient)[0]?.read).toBe(true);
+    expect(archivedCache(queryClient).map((i) => [i.id, i.read])).toEqual([
+      ["archived-newest", true],
+      ["archived-older", false],
     ]);
   });
 
-  const archivedIds = () => listCache(queryClient).filter((i) => i.archived).map((i) => i.id);
-
-  it("archiving activity keeps the issue's action rows", async () => {
-    const { result } = renderHook(() => useArchiveInbox(), { wrapper: createWrapper(queryClient) });
-    act(() => result.current.mutate("status"));
-    await waitFor(() => expect(archivedIds()).toEqual(["status", "reply"]));
-  });
-
-  it("archiving an action row takes the whole issue", async () => {
-    const { result } = renderHook(() => useArchiveInbox(), { wrapper: createWrapper(queryClient) });
-    act(() => result.current.mutate("mention"));
-    await waitFor(() => expect(archivedIds()).toEqual(["mention", "status", "reply"]));
-  });
-});
-
-describe("useMarkIssueInboxRead", () => {
-  let queryClient: QueryClient;
-  let markIssueInboxRead: ReturnType<typeof vi.fn>;
-  let getInboxUnreadSummary: ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    });
-    markIssueInboxRead = vi.fn(async () => ({ count: 2 }));
-    getInboxUnreadSummary = vi.fn(async () => []);
-    setApiInstance({
-      markIssueInboxRead,
-      getInboxUnreadSummary,
-      listInbox: vi.fn(async () => listCache(queryClient)),
-      listArchivedInbox: vi.fn(async () => []),
-    } as unknown as ApiClient);
+  it("reads only the item when it has no issue", async () => {
     queryClient.setQueryData<InboxItem[]>(inboxKeys.list(WORKSPACE_ID), [
-      item({ id: "a", archived: false }),
-      item({ id: "b", archived: false, type: "mentioned" }),
-      item({ id: "other", issue_id: "issue-2", archived: false }),
+      item({ id: "first", issue_id: null, archived: false }),
+      item({ id: "second", issue_id: null, archived: false }),
     ]);
-  });
 
-  it("marks every row on the issue read and leaves other issues alone", async () => {
-    const { result } = renderHook(() => useMarkIssueInboxRead(WORKSPACE_ID), {
+    const { result } = renderHook(() => useMarkInboxRead(), {
       wrapper: createWrapper(queryClient),
     });
-    act(() => result.current.mutate("issue-1"));
+    result.current.mutate("first");
 
-    await waitFor(() => expect(markIssueInboxRead).toHaveBeenCalledWith("issue-1"));
-    const byId = Object.fromEntries(listCache(queryClient).map((i) => [i.id, i.read]));
-    expect(byId).toEqual({ a: true, b: true, other: false });
-  });
-
-  it("does not refresh the badge when nothing changed", async () => {
-    markIssueInboxRead.mockResolvedValueOnce({ count: 0 });
-    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    const { result } = renderHook(() => useMarkIssueInboxRead(WORKSPACE_ID), {
-      wrapper: createWrapper(queryClient),
-    });
-    await act(() => result.current.mutateAsync("issue-1"));
-
-    expect(invalidate).not.toHaveBeenCalled();
-  });
-
-  it("refreshes the badge when the reply could not be read", async () => {
-    markIssueInboxRead.mockResolvedValueOnce({ count: null });
-    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    const { result } = renderHook(() => useMarkIssueInboxRead(WORKSPACE_ID), {
-      wrapper: createWrapper(queryClient),
-    });
-    await act(() => result.current.mutateAsync("issue-1"));
-
-    await waitFor(() =>
-      expect(invalidate).toHaveBeenCalledWith(
-        expect.objectContaining({ queryKey: inboxKeys.unreadSummary() }),
-      ),
-    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(listCache(queryClient).map((i) => i.read)).toEqual([true, false]);
   });
 });
 
@@ -181,8 +156,8 @@ describe("useMarkInboxUnread", () => {
   });
 
   it("flips only the targeted item unread, in both lists", async () => {
-    // Item-level, mirroring mark-read: the list shows one row per issue
-    // carrying that group's newest item, so flipping siblings would resurrect
+    // Item-level, unlike mark-read: the list shows one row per issue carrying
+    // that group's newest item, so flipping siblings would resurrect
     // notifications the user already dealt with without changing the row.
     queryClient.setQueryData<InboxItem[]>(inboxKeys.list(WORKSPACE_ID), [
       item({ id: "inbox-1", read: true, archived: false }),
@@ -240,6 +215,67 @@ describe("useMarkInboxUnread", () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(listCache(queryClient)).toEqual(active);
     expect(archivedCache(queryClient)).toEqual(archived);
+  });
+});
+
+describe("useMarkIssueInboxRead", () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+  });
+
+  it("refreshes the inbox caches when the server read rows", async () => {
+    const markIssueInboxRead = vi.fn(async () => ({ count: 2 }));
+    setApiInstance({ markIssueInboxRead } as unknown as ApiClient);
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    const { result } = renderHook(() => useMarkIssueInboxRead(WORKSPACE_ID), {
+      wrapper: createWrapper(queryClient),
+    });
+    result.current.mutate("issue-1");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(markIssueInboxRead).toHaveBeenCalledWith("issue-1");
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxKeys.unreadSummary() }),
+    );
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxKeys.all(WORKSPACE_ID) });
+  });
+
+  it("refreshes when the response did not say how many rows changed", async () => {
+    setApiInstance({
+      markIssueInboxRead: vi.fn(async () => ({ count: null })),
+    } as unknown as ApiClient);
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    const { result } = renderHook(() => useMarkIssueInboxRead(WORKSPACE_ID), {
+      wrapper: createWrapper(queryClient),
+    });
+    result.current.mutate("issue-1");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxKeys.unreadSummary() }),
+    );
+  });
+
+  it("leaves the caches alone when the issue had nothing unread", async () => {
+    setApiInstance({
+      markIssueInboxRead: vi.fn(async () => ({ count: 0 })),
+    } as unknown as ApiClient);
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    const { result } = renderHook(() => useMarkIssueInboxRead(WORKSPACE_ID), {
+      wrapper: createWrapper(queryClient),
+    });
+    result.current.mutate("issue-1");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(invalidate).not.toHaveBeenCalled();
   });
 });
 

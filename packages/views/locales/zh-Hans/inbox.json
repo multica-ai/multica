@@ -3,14 +3,6 @@
     "title": "收件箱",
     "back": "收件箱"
   },
-  "sections": {
-    "action": "需要处理",
-    "activity": "动态",
-    "action_empty": "需要你处理的都处理完了",
-    "activity_empty": "暂无动态",
-    "activity_waiting_other": "动态里还有 {{count}} 条更新，随时可以看。",
-    "open_activity": "查看动态"
-  },
   "menu": {
     "mark_all_read": "全部标为已读",
     "archive_all": "归档全部",

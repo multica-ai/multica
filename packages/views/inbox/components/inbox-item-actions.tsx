@@ -1,7 +1,6 @@
 "use client";
 
 import { Archive, ArchiveRestore, Check, CircleDot, ExternalLink } from "@multica/ui/icons";
-import { inboxItemSection } from "@multica/core/inbox/queries";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
 import type { RowActionItem } from "../../common/row-actions-menu";
@@ -67,9 +66,8 @@ export function useInboxItemActions(
   // The read toggle is main-view only. Archived rows deliberately render as
   // read (archiving preserves `read` so a restore can bring the real state
   // back) and the unread count excludes archived items — so a toggle here
-  // would report success and change nothing on screen. Activity is never
-  // unread at all, so it has no toggle either.
-  if (!isArchivedView && inboxItemSection(item) === "action") {
+  // would report success and change nothing on screen.
+  if (!isArchivedView) {
     groups.push([
       item.read === true
         ? {

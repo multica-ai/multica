@@ -123,16 +123,5 @@
     "unarchive_failed": "Не удалось восстановить из архива",
     "archived_load_failed": "Не удалось загрузить архивные уведомления",
     "filters_load_failed": "Не удалось загрузить фильтры"
-  },
-  "sections": {
-    "action": "Требуют действий",
-    "activity": "Активность",
-    "action_empty": "Всё просмотрено",
-    "activity_empty": "Нет недавних событий",
-    "activity_waiting_one": "В разделе «Активность» ожидает {{count}} обновление.",
-    "activity_waiting_few": "В разделе «Активность» ожидают {{count}} обновления.",
-    "activity_waiting_many": "В разделе «Активность» ожидают {{count}} обновлений.",
-    "activity_waiting_other": "В разделе «Активность» ожидают {{count}} обновления.",
-    "open_activity": "Посмотреть активность"
   }
 }

@@ -99,6 +99,30 @@ describe("LoginPage", () => {
     mockListMyInvitations.mockResolvedValue([]);
   });
 
+  it.each([null, { id: "u1", email: "test@multica.ai" }])(
+    "blocks invalid CLI callbacks even with an existing session: %j",
+    (user) => {
+      searchParamsState.params = new URLSearchParams({
+        cli_callback: "http://198.18.0.1:46233/callback",
+        cli_state: "test-state",
+        platform: "desktop",
+      });
+      authStateRef.state.user = user;
+      render(<LoginPage />, { wrapper: createWrapper() });
+      expect(screen.getByText("CLI authorization incomplete")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+      expect(mockIssueCliToken).not.toHaveBeenCalled();
+      expect(mockPush).not.toHaveBeenCalled();
+      expect(mockReplace).not.toHaveBeenCalled();
+    },
+  );
+
+  it("blocks an explicitly empty CLI callback", () => {
+    searchParamsState.params = new URLSearchParams({ cli_callback: "" });
+    render(<LoginPage />, { wrapper: createWrapper() });
+    expect(screen.getByText("CLI authorization incomplete")).toBeInTheDocument();
+  });
+
   // Shared LoginPage behavior is canonical in
   // packages/views/auth/login-page.test.tsx. This wrapper suite only owns web
   // platform handoff and redirect behavior.

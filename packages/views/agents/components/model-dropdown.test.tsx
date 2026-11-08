@@ -88,6 +88,18 @@ describe("ModelDropdown", () => {
     discoveryKey += 1;
   });
 
+  it("keeps an overlong model id ellipsized inside the trigger instead of overflowing", () => {
+    // Regression: the trigger label sits in a flex row; without min-w-0 the
+    // flex item refuses to shrink below its content width, so hex-encoded
+    // model ids (e.g. Claude Code custom models) stretched the picker panel.
+    const longModel = `anthropic/claude-ccr-h${"3656e6f76612f646565707365656b".repeat(8)}`;
+    const { container } = renderDropdown({ value: longModel });
+    const trigger = container.querySelector('[data-slot="popover-trigger"]');
+    const label = trigger?.querySelector("span.truncate");
+    expect(label?.textContent).toBe(longModel);
+    expect(label?.className).toContain("min-w-0");
+  });
+
   it("offers the gpt-5.6 Codex models and submits their canonical IDs", async () => {
     const onAutomaticChange = vi.fn();
     const { container, onChange } = renderDropdown({ onAutomaticChange });

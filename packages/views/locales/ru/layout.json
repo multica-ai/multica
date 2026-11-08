@@ -81,7 +81,9 @@
     "open_in_new_window_click": "Нажмите",
     "open_in_other_window": "Уже открыто в другом окне",
     "in_other_window": "Другое окно",
-    "all_workspaces_open": "Все рабочие пространства уже открыты в окнах"
+    "all_workspaces_open": "Все рабочие пространства уже открыты в окнах",
+    "pin_workspace": "Закрепить рабочее пространство",
+    "unpin_workspace": "Открепить рабочее пространство"
   },
   "panels": {
     "work": {
@@ -123,7 +125,9 @@
       "view_duplicate": "Дублировать",
       "view_delete": "Удалить представление",
       "all_projects_few": "Всего {{count}} проекта",
-      "all_projects_many": "Всего {{count}} проектов"
+      "all_projects_many": "Всего {{count}} проектов",
+      "project_issues_retry": "Повторить",
+      "unread": "Непрочитанные"
     },
     "team": {
       "new_agent": "Новый агент",
@@ -139,8 +143,6 @@
       "members_one": "{{count}} участник",
       "members_other": "{{count}} участника",
       "resources": "Ресурсы",
-      "runtimes_offline_one": "Не в сети: {{count}}",
-      "runtimes_offline_other": "Не в сети: {{count}}",
       "invite_member": "Пригласить участника",
       "stuck_few": "{{count}} запуска ожидают подключения среды выполнения",
       "stuck_many": "{{count}} запусков ожидают подключения среды выполнения",
@@ -148,8 +150,12 @@
       "running_tasks_many": "Выполняется {{count}} запусков",
       "members_few": "{{count}} участника",
       "members_many": "{{count}} участников",
-      "runtimes_offline_few": "Не в сети: {{count}}",
-      "runtimes_offline_many": "Не в сети: {{count}}"
+      "runtimes_online_one": "В сети: {{count}}",
+      "runtimes_online_few": "В сети: {{count}}",
+      "runtimes_online_many": "В сети: {{count}}",
+      "runtimes_online_other": "В сети: {{count}}",
+      "show_fewer_agents": "Показать меньше",
+      "show_more_agents": "Ещё {{count}}…"
     },
     "autopilots": {
       "all": "Все автопилоты",
@@ -198,5 +204,29 @@
   "object_page": {
     "toggle_panel": "Показать или скрыть правую панель",
     "properties": "Свойства"
+  },
+  "feature_intro": {
+    "carousel": "карусель",
+    "go_to_slide": "Перейти к слайду {{index}}",
+    "next": "Далее",
+    "previous": "Назад",
+    "read_docs": "Открыть документацию",
+    "slide": "слайд",
+    "slide_position": "{{current}} из {{total}}"
+  },
+  "whats_new": {
+    "action": {
+      "learn_more": "Подробнее",
+      "open": "Открыть",
+      "try": "Попробовать"
+    },
+    "panel": {
+      "close": "Закрыть",
+      "full_changelog": "Полный список изменений",
+      "new": "Новое",
+      "release_notes": "Изменения в v{{version}}",
+      "title": "Что нового"
+    },
+    "trigger": "Что нового"
   }
 }

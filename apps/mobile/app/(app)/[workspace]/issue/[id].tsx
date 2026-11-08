@@ -33,6 +33,7 @@ import {
   issueKeys,
   issueTimelineOptions,
 } from "@/data/queries/issues";
+import { ApiError } from "@/data/api";
 import { useDeleteIssue } from "@/data/mutations/issues";
 import { pinListOptions } from "@/data/queries/pins";
 import { useCreatePin, useDeletePin } from "@/data/mutations/pins";
@@ -40,7 +41,6 @@ import { useAuthStore } from "@/data/auth-store";
 import { useIssueRealtime } from "@/data/realtime/use-issue-realtime";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useViewedIssuesStore } from "@/data/viewed-issues-store";
-import { useMarkInboxReadOnOpen } from "@/lib/use-mark-inbox-read-on-open";
 import { useCommentSelectStore } from "@/data/comment-select-store";
 import { useReplyTargetStore } from "@/data/stores/reply-target-store";
 import { useT } from "@/lib/i18n";
@@ -78,8 +78,6 @@ export default function IssueDetail() {
       useViewedIssuesStore.getState().push(wsId, id);
     }
   }, [wsId, id]);
-
-  useMarkInboxReadOnOpen(wsId, id);
 
   // Screen-scoped composer state — clear on unmount so re-entering the
   // issue starts from a clean slate (no stale text-selection comment id,
@@ -166,6 +164,12 @@ export default function IssueDetail() {
           confirmDelete(issue, t, () =>
             deleteIssue.mutate(issue.id, {
               onSuccess: () => router.back(),
+              onError: (error) => Alert.alert(
+                t("delete.failed_title"),
+                error instanceof ApiError && error.status === 403
+                  ? t("delete.permission_denied")
+                  : t("delete.failed"),
+              ),
             }),
           );
         }

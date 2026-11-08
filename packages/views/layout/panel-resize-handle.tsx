@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import {
+  clampListColumnWidth,
   clampSidebarWidth,
   useSidebarResize,
 } from "@multica/ui/components/ui/sidebar";
@@ -10,20 +11,34 @@ import { useT } from "../i18n";
 const RESIZE_DRAG_THRESHOLD = 2;
 
 /**
+ * Which committed width a column is sized by: `nav` is `--sidebar-width`, the
+ * space panel's; `list` is `--list-column-width`, shared by the list columns
+ * whose rows need more room than the nav's labels (Inbox, Chat).
+ */
+export type PanelWidth = "nav" | "list";
+
+const WIDTH_VARIABLE: Record<PanelWidth, string> = {
+  nav: "--sidebar-width",
+  list: "--list-column-width",
+};
+
+/**
  * A column's trailing edge: drag to resize, click to collapse. Every column
- * sized by `--sidebar-width` shares the one committed width. The preview
+ * sized by the same width variable shares the one committed width. The preview
  * writes the width straight onto the panel element and commits once on
  * release, so a drag re-renders nothing until the pointer comes up.
  */
 export function PanelResizeHandle({
   panelRef,
   onToggle,
+  width = "nav",
 }: {
   panelRef: React.RefObject<HTMLElement | null>;
   onToggle: () => void;
+  width?: PanelWidth;
 }) {
   const { t } = useT("ui");
-  const { commitWidth } = useSidebarResize();
+  const { commitWidth, commitListWidth } = useSidebarResize();
   const cancelRef = useRef<(() => void) | null>(null);
   const draggedRef = useRef(false);
 
@@ -36,10 +51,13 @@ export function PanelResizeHandle({
       e.preventDefault();
       cancelRef.current?.();
       draggedRef.current = false;
+      const clamp = width === "list" ? clampListColumnWidth : clampSidebarWidth;
+      const commit = width === "list" ? commitListWidth : commitWidth;
+      const variable = WIDTH_VARIABLE[width];
       const handle = e.currentTarget;
       const pointerId = e.pointerId;
       const startX = e.clientX;
-      const startWidth = clampSidebarWidth(panel.getBoundingClientRect().width);
+      const startWidth = clamp(panel.getBoundingClientRect().width);
       let latestWidth = startWidth;
       document.documentElement.setAttribute("data-sidebar-resizing", "true");
 
@@ -49,8 +67,8 @@ export function PanelResizeHandle({
         document.removeEventListener("pointercancel", onCancel);
         window.removeEventListener("blur", onBlur);
         document.documentElement.removeAttribute("data-sidebar-resizing");
-        if (mode === "commit" && draggedRef.current) commitWidth(latestWidth);
-        panel.style.removeProperty("--sidebar-width");
+        if (mode === "commit" && draggedRef.current) commit(latestWidth);
+        panel.style.removeProperty(variable);
         cancelRef.current = null;
         if (handle.hasPointerCapture?.(pointerId)) handle.releasePointerCapture?.(pointerId);
       };
@@ -59,10 +77,10 @@ export function PanelResizeHandle({
         const delta = event.clientX - startX;
         if (!draggedRef.current && Math.abs(delta) < RESIZE_DRAG_THRESHOLD) return;
         draggedRef.current = true;
-        const next = clampSidebarWidth(startWidth + delta);
+        const next = clamp(startWidth + delta);
         if (next === latestWidth) return;
         latestWidth = next;
-        panel.style.setProperty("--sidebar-width", `${next}px`);
+        panel.style.setProperty(variable, `${next}px`);
       };
       const onUp = (event: PointerEvent) => {
         if (event.pointerId === pointerId) finish("commit");
@@ -79,7 +97,7 @@ export function PanelResizeHandle({
       cancelRef.current = () => finish("cancel");
       handle.setPointerCapture?.(pointerId);
     },
-    [commitWidth, panelRef],
+    [commitListWidth, commitWidth, panelRef, width],
   );
 
   return (

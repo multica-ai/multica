@@ -286,9 +286,25 @@ describe("AgentAdvancedSettings section lists", () => {
   });
 
   it("drops what the Qoder bridge rejects and names the Qoder Cloud Agents section", () => {
-    larkListingRef.current = { installations: [], configured: true };
     renderDialog([makeRuntime("qoder_cloud")]);
     expect(sectionNames()).toEqual(["General", "Access", "Qoder Cloud Agents"]);
+  });
+
+  it("keeps Integrations on Qoder, since the bridge runs chat", async () => {
+    // An IM message becomes a chat task, which the Qoder bridge runs. Only
+    // Integrations comes back: Skills, MCP and connected apps are still
+    // rejected by the bridge.
+    larkListingRef.current = { installations: [], configured: true };
+    renderDialog([makeRuntime("qoder_cloud")]);
+    expect(
+      await screen.findByRole("tab", { name: /^Integrations$/i }),
+    ).toBeInTheDocument();
+    expect(sectionNames()).toEqual([
+      "General",
+      "Access",
+      "Qoder Cloud Agents",
+      "Integrations",
+    ]);
   });
 
   it("renders nothing while closed", () => {

@@ -173,6 +173,7 @@
       "korean": "한국어",
       "japanese": "日本語",
       "french": "Français",
+      "spanish": "Español",
       "russian": "Русский",
       "sync_failed": "Langue enregistrée sur cet appareil, mais la synchronisation avec votre compte a échoué. Vos autres appareils peuvent afficher la langue précédente."
     },
@@ -397,7 +398,7 @@
       "preferences": "Préférences",
       "shortcuts": "Raccourcis",
       "issue": "Tâche",
-      "notifications": "Boîte de réception",
+      "notifications": "Notifications",
       "tokens": "Jetons d'API",
       "general": "Général",
       "github": "GitHub",
@@ -653,61 +654,38 @@
     "toast_profile_failed": "Échec de la mise à jour du profil"
   },
   "notifications": {
-    "title": "Tri des notifications",
-    "description": "Les changements s'appliquent aux nouvelles notifications.",
-    "reset": "Rétablir les valeurs par défaut",
+    "title": "Notifications de la boîte de réception",
+    "description": "Les événements désactivés restent visibles dans la tâche.",
     "toast_failed": "Échec de la mise à jour des réglages de notification",
-    "routes": {
-      "action": {
-        "label": "À traiter",
-        "description": "Compte comme non lu, peut envoyer une notification système"
-      },
-      "activity": {
-        "label": "Activité",
-        "description": "Consigné discrètement, jamais non lu"
-      },
-      "muted": {
-        "label": "Désactivé",
-        "description": "Hors de la boîte de réception ; toujours visible sur la tâche"
-      }
-    },
-    "kinds": {
-      "assigned": {
-        "label": "Assigné à moi",
-        "description": "Quand une tâche vous est assignée"
-      },
-      "mentions": {
-        "label": "Mentions",
-        "description": "Quand quelqu'un vous @mentionne, y compris @all et @squad"
-      },
-      "comments_without_mentions": {
-        "label": "Commentaires sans mention",
-        "description": "Quand quelqu'un commente une tâche que vous suivez sans @mentionner personne"
-      },
-      "agent_failures": {
-        "label": "Erreurs d'agent",
-        "description": "Quand l'exécution d'un agent échoue ou est bloquée et requiert votre intervention"
+    "groups": {
+      "assignments": {
+        "label": "Assignations",
+        "description": "Quand une tâche vous est assignée ou retirée"
       },
       "status_changes": {
         "label": "Changements de statut",
-        "description": "Quand une tâche que vous suivez change de statut"
+        "description": "Quand une tâche que vous suivez change de statut (à faire, en cours, terminé…)"
       },
-      "assignee_changes": {
-        "label": "Changements d'assigné",
-        "description": "Quand une tâche change d'assigné, ou que vous n'êtes plus assigné"
+      "comments": {
+        "label": "Commentaires",
+        "description": "Nouveaux commentaires sur les tâches que vous suivez"
+      },
+      "mentions": {
+        "label": "Mentions",
+        "description": "Quand quelqu'un vous @mentionne, y compris via @all et @squad"
       },
       "updates": {
-        "label": "Priorité et dates",
-        "description": "Quand la priorité, la date de début ou l'échéance change"
+        "label": "Priorité et date d'échéance",
+        "description": "Quand la priorité ou la date d'échéance change sur les tâches que vous suivez"
       },
-      "comments_mentioning_others": {
-        "label": "Commentaires mentionnant d'autres",
-        "description": "Quand un commentaire sur une tâche que vous suivez @mentionne d'autres personnes ou agents, mais pas vous"
+      "agent_activity": {
+        "label": "Activité des agents",
+        "description": "Lorsqu'une exécution d'agent échoue"
       }
     },
     "system": {
       "title": "Notifications système",
-      "label": "Envoyer une notification système pour les éléments « À traiter » quand Multica est en arrière-plan"
+      "label": "Afficher les notifications système lorsque Multica est en arrière-plan"
     },
     "browser": {
       "label": "Notifications du navigateur",

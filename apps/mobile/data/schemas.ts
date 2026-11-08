@@ -21,7 +21,6 @@ import type {
   Comment,
   InboxItem,
   InboxWorkspaceUnread,
-  MarkIssueInboxReadResult,
   IssueLabelsResponse,
   Label,
   ListLabelsResponse,
@@ -167,6 +166,8 @@ export const ProjectSchema = z.object({
   priority: z.string(),
   lead_type: z.string().nullable(),
   lead_id: z.string().nullable(),
+  creator_type: z.string().nullable().default(null).catch(null),
+  creator_id: z.string().nullable().default(null).catch(null),
   // .default(null) so a project from an older backend that omits these keys
   // parses to null instead of degrading the batch to the empty fallback.
   start_date: z.string().nullable().default(null),
@@ -583,10 +584,6 @@ const InboxItemSchema: z.ZodType<InboxItem> = z.object({
   issue_status: z.string().nullable().default(null) as unknown as z.ZodType<
     InboxItem["issue_status"]
   >,
-  // Inbox section (packages/core/types/inbox.ts InboxSection). A missing or
-  // unknown value reads as "action" through inboxItemSection, the behavior
-  // before sections existed.
-  section: z.enum(["action", "activity"]).optional().catch(undefined),
   read: z.boolean().default(false),
   archived: z.boolean().default(false),
   created_at: z.string().default(""),
@@ -613,16 +610,6 @@ export const InboxUnreadSummarySchema = z
   .array(InboxWorkspaceUnreadSchema)
   .default([]);
 export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
-
-// `POST /api/inbox/issues/{id}/read`. Mirrors MarkIssueInboxReadResultSchema
-// in packages/core/api/schemas.ts: a malformed body yields an unknown (null)
-// count, which the mutation treats as a change and refreshes.
-export const MarkIssueInboxReadResultSchema = z
-  .object({ count: z.number() })
-  .loose();
-export const UNKNOWN_MARK_ISSUE_INBOX_READ_RESULT: MarkIssueInboxReadResult = {
-  count: null,
-};
 
 export const MemberWithUserSchema: z.ZodType<MemberWithUser> = z.object({
   id: z.string(),

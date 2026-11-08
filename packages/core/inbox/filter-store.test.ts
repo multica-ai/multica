@@ -161,19 +161,6 @@ describe("unread filtering", () => {
     expect(inboxFilterCount(filters)).toBe(1);
   });
 
-  it("drops activity, which is never unread", () => {
-    const rows = [
-      item("action", "todo", "high", { section: "action" }),
-      item("activity", "todo", "high", { section: "activity" }),
-    ];
-
-    expect(
-      filterInboxItems(rows, { ...EMPTY_INBOX_FILTERS, unreadOnly: true }).map(
-        (candidate) => candidate.id,
-      ),
-    ).toEqual(["action"]);
-  });
-
   it("keeps notifications without an issue, unlike the issue dimensions", () => {
     // The issue-less rows are the quick-create failures — the ones that most
     // need to stay reachable while screening for what is unhandled.

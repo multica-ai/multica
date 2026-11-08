@@ -58,12 +58,13 @@ var authLogoutCmd = &cobra.Command{
 	RunE:  runAuthLogout,
 }
 
-// callbackHostFlag lets users override the host/IP that goes into the OAuth
-// cli_callback URL. Useful when the CLI sits behind a reverse proxy or the
-// auto-detected LAN IP isn't the one the browser can reach.
+// callbackHostFlag lets users override the host that goes into the OAuth
+// cli_callback URL when the auto-detected address isn't one the browser can
+// reach. The value must pass isSupportedCallbackHost; hostnames other than
+// localhost are rejected because the web login never accepts them.
 const callbackHostFlag = "callback-host"
 
-const callbackHostFlagHelp = "Host/IP the OAuth callback URL points at when the browser can reach this CLI directly. For SSH-only machines, use the printed tunnel hint instead."
+const callbackHostFlagHelp = "Callback host reachable from the browser: localhost, 127.0.0.1, or an RFC 1918 IPv4 address. For SSH-only machines, use the printed tunnel hint instead."
 
 func init() {
 	authCmd.AddCommand(authStatusCmd)
@@ -152,16 +153,19 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 //   - self-host, CLI on server box: same as above.
 //   - self-host, CLI on a different LAN box: the callback URL must point at
 //     the CLI's own LAN IP, not the server's.
-//   - reverse-proxied / FQDN setups: auto-detection can't know the right
-//     host — the user supplies it via --callback-host.
+//   - routes through a virtual adapter: the detected address may not be a
+//     supported callback host; ask the user to supply --callback-host.
 //
 // detectOutbound is injected so tests can exercise the routing decisions
 // without real network calls.
-func resolveCallbackBinding(flagHost, serverURL, appURL string, detectOutbound func(string) net.IP) (callbackHost, bindAddr string) {
+func resolveCallbackBinding(flagHost, serverURL, appURL string, detectOutbound func(string) net.IP) (callbackHost, bindAddr string, err error) {
 	// Explicit flag always wins. Bind on all interfaces so the browser can
 	// reach us regardless of which interface the host name resolves to.
 	if h := strings.TrimSpace(flagHost); h != "" {
-		return h, "0.0.0.0"
+		if !isSupportedCallbackHost(h) {
+			return "", "", callbackHostError(h)
+		}
+		return h, "0.0.0.0", nil
 	}
 
 	appIP := urlPrivateIP(appURL)
@@ -169,7 +173,7 @@ func resolveCallbackBinding(flagHost, serverURL, appURL string, detectOutbound f
 		// Public hostname, FQDN without private-IP mapping, or parse error.
 		// Loopback is the only safe default — on hosted/public setups the
 		// browser and CLI live on the same machine.
-		return "localhost", "127.0.0.1"
+		return "localhost", "127.0.0.1", nil
 	}
 
 	// app_url is a private LAN IP. Figure out whether the CLI is on that
@@ -180,12 +184,28 @@ func resolveCallbackBinding(flagHost, serverURL, appURL string, detectOutbound f
 	if cliIP == nil {
 		// Detection failed (offline, unreachable server, etc.). Fall back to
 		// the app IP — preserves the pre-existing same-machine behaviour.
-		return appIP.String(), "0.0.0.0"
+		return appIP.String(), "0.0.0.0", nil
 	}
 	if cliIP.Equal(appIP) {
-		return "localhost", "127.0.0.1"
+		return "localhost", "127.0.0.1", nil
 	}
-	return cliIP.String(), "0.0.0.0"
+	if !isSupportedCallbackHost(cliIP.String()) {
+		return "", "", callbackHostError(cliIP.String())
+	}
+	return cliIP.String(), "0.0.0.0", nil
+}
+
+// Keep this host policy aligned with validateCliCallback in packages/views/auth.
+func isSupportedCallbackHost(host string) bool {
+	if host == "localhost" || host == "127.0.0.1" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && !strings.Contains(host, ":") && ip.To4() != nil && ip.IsPrivate()
+}
+
+func callbackHostError(host string) error {
+	return fmt.Errorf("cannot use %q as the login callback host: the web app accepts only localhost, 127.0.0.1, or RFC 1918 IPv4 addresses. If the browser runs on this machine, retry with --callback-host 127.0.0.1; otherwise use --callback-host <this-machine-LAN-IP> or sign in with multica login --token", host)
 }
 
 // urlPrivateIP returns the hostname of rawURL parsed as an RFC 1918 IP, or
@@ -196,7 +216,7 @@ func urlPrivateIP(rawURL string) net.IP {
 		return nil
 	}
 	ip := net.ParseIP(parsed.Hostname())
-	if ip == nil || !ip.IsPrivate() {
+	if ip == nil || ip.To4() == nil || !ip.IsPrivate() {
 		return nil
 	}
 	return ip
@@ -240,11 +260,14 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	appURL := resolveAppURL(cmd)
 
 	flagHost := callbackHostFlagValue(cmd)
-	callbackHost, bindAddr := resolveCallbackBinding(flagHost, serverURL, appURL, detectOutboundIP)
+	callbackHost, bindAddr, err := resolveCallbackBinding(flagHost, serverURL, appURL, detectOutboundIP)
+	if err != nil {
+		return err
+	}
 
 	// Pin to "tcp4" — a bare "tcp" on macOS can produce an IPv6-only socket
 	// that IPv4 clients (including browsers resolving localhost → 127.0.0.1)
-	// cannot reach. The callback URL is always an IPv4 literal or hostname,
+	// cannot reach. The callback host is always localhost or an IPv4 literal,
 	// so an IPv4 listener is what the browser actually needs.
 	listener, err := net.Listen("tcp4", bindAddr+":0")
 	if err != nil {
@@ -506,6 +529,8 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// The .brand SVG is written by `node scripts/brand/sync.mjs` from
+// packages/ui/lib/multica-brand.ts; CI fails when it drifts.
 const callbackSuccessHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -536,7 +561,7 @@ const callbackSuccessHTML = `<!DOCTYPE html>
     <div class="icon-wrap">
       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
     </div>
-    <div class="brand"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -30.5 421.36 106.5" height="18" width="71" role="img" aria-label="Multica"><g fill="none" stroke="currentColor" stroke-width="16"><path d="M8 76V31A23 23 0 0 1 54 31V76M54 31A23 23 0 0 1 100 31V76"/><path d="M128 0V45A23 23 0 0 0 174 45M174 0V76"/><path d="M202 -30V76"/><path d="M239.6 -19.8V76M219.6 8H259.6"/><path d="M277.8 0V76"/><circle cx="277.8" cy="-18.6" r="8.96" fill="currentColor" stroke="none"/><path d="M344.103 14.737A23 23 0 0 0 304.84 31V45A23 23 0 0 0 344.103 61.263"/><path d="M367.36 31A23 23 0 0 1 413.36 31V45A23 23 0 0 1 367.36 45ZM413.36 0V76"/></g></svg></div>
+    <div class="brand"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -39.5 421.36 115.5" role="img" aria-label="Multica" height="19.5" width="71"><g fill="none" stroke="currentColor" stroke-width="16"><path d="M8 76V31A23 23 0 0 1 54 31V76M54 31A23 23 0 0 1 100 31V76"/><path d="M128 0V45A23 23 0 0 0 174 45M174 0V76"/><path d="M202 -30V76"/><path d="M239.6 -19.8V76M219.6 8H259.6"/><path d="M277.8 0V76"/><path d="M274.92 -23L274.92 -38.739A16 16 0 0 1 280.68 -38.739L280.68 -23ZM275.764 -25.036L286.892 -36.165A16 16 0 0 1 290.965 -32.092L279.836 -20.964ZM277.8 -25.88L293.539 -25.88A16 16 0 0 1 293.539 -20.12L277.8 -20.12ZM279.836 -25.036L290.965 -13.908A16 16 0 0 1 286.892 -9.835L275.764 -20.964ZM280.68 -23L280.68 -7.261A16 16 0 0 1 274.92 -7.261L274.92 -23ZM279.836 -20.964L268.708 -9.835A16 16 0 0 1 264.635 -13.908L275.764 -25.036ZM277.8 -20.12L262.061 -20.12A16 16 0 0 1 262.061 -25.88L277.8 -25.88ZM275.764 -20.964L264.635 -32.092A16 16 0 0 1 268.708 -36.165L279.836 -25.036Z" fill="currentColor" stroke="none"/><path d="M344.103 14.737A23 23 0 0 0 304.84 31V45A23 23 0 0 0 344.103 61.263"/><path d="M367.36 31A23 23 0 0 1 413.36 31V45A23 23 0 0 1 367.36 45ZM413.36 0V76"/></g></svg></div>
     <h1>Authentication successful</h1>
     <p>You can close this tab and return to the terminal.</p>
     <p class="hint">Your CLI session is now authenticated.</p>

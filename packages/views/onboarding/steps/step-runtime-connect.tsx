@@ -559,7 +559,7 @@ function EmptyCard({
       </div>
       <span
         aria-hidden
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border bg-background px-4 py-2 text-label font-medium text-foreground transition-colors group-hover:border-foreground group-hover:bg-foreground group-hover:text-background"
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border bg-background px-4 py-2 text-label font-medium text-foreground transition-colors group-hover:border-foreground group-hover:bg-foreground group-hover:text-background"
       >
         {actionLabel}
         {busy ? (

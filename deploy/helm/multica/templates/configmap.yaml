@@ -31,6 +31,7 @@ data:
   S3_REGION: {{ .Values.backend.config.s3Region | quote }}
   CLOUDFRONT_DOMAIN: {{ .Values.backend.config.cloudfrontDomain | quote }}
   CLOUDFRONT_KEY_PAIR_ID: {{ .Values.backend.config.cloudfrontKeyPairId | quote }}
+  MULTICA_MAX_PREVIEW_SIZE: {{ .Values.backend.config.maxPreviewSize | quote }}
   LOCAL_UPLOAD_BASE_URL: {{ .Values.backend.config.localUploadBaseUrl | quote }}
 
   {{- if not .Values.postgres.external.enabled }}

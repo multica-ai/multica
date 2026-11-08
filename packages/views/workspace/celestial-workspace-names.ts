@@ -16,6 +16,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "알파 센타우리",
       ru: "Альфа Центавра",
       fr: "Alpha du Centaure",
+      es: "Alfa Centauri",
     },
   },
   {
@@ -28,6 +29,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "안드로메다 은하",
       ru: "Андромеда",
       fr: "Andromède",
+      es: "Andrómeda",
     },
   },
   {
@@ -40,6 +42,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "안타레스",
       ru: "Антарес",
       fr: "Antarès",
+      es: "Antares",
     },
   },
   {
@@ -52,6 +55,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "아리엘",
       ru: "Ариэль",
       fr: "Ariel",
+      es: "Ariel",
     },
   },
   {
@@ -64,6 +68,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "베텔게우스",
       ru: "Бетельгейзе",
       fr: "Bételgeuse",
+      es: "Betelgeuse",
     },
   },
   {
@@ -76,6 +81,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "칼리스토",
       ru: "Каллисто",
       fr: "Callisto",
+      es: "Callisto",
     },
   },
   {
@@ -88,6 +94,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "카펠라",
       ru: "Капелла",
       fr: "Capella",
+      es: "Capella",
     },
   },
   {
@@ -100,6 +107,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "세레스",
       ru: "Церера",
       fr: "Cérès",
+      es: "Ceres",
     },
   },
   {
@@ -112,6 +120,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "데이모스",
       ru: "Деймос",
       fr: "Déimos",
+      es: "Deimos",
     },
   },
   {
@@ -124,6 +133,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "데네브",
       ru: "Денеб",
       fr: "Deneb",
+      es: "Deneb",
     },
   },
   {
@@ -136,6 +146,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "디오네",
       ru: "Диона",
       fr: "Dioné",
+      es: "Dione",
     },
   },
   {
@@ -148,6 +159,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "엔셀라두스",
       ru: "Энцелад",
       fr: "Encelade",
+      es: "Enceladus",
     },
   },
   {
@@ -160,6 +172,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "에리스",
       ru: "Эрида",
       fr: "Éris",
+      es: "Eris",
     },
   },
   {
@@ -172,6 +185,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "유로파",
       ru: "Европа",
       fr: "Europe",
+      es: "Europa",
     },
   },
   {
@@ -184,6 +198,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "가니메데",
       ru: "Ганимед",
       fr: "Ganymède",
+      es: "Ganymede",
     },
   },
   {
@@ -196,6 +211,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "핼리 혜성",
       ru: "Комета Галлея",
       fr: "Halley",
+      es: "Halley",
     },
   },
   {
@@ -208,6 +224,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "히페리온",
       ru: "Гиперион",
       fr: "Hypérion",
+      es: "Hyperion",
     },
   },
   {
@@ -220,6 +237,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "이오",
       ru: "Ио",
       fr: "Io",
+      es: "Io",
     },
   },
   {
@@ -232,6 +250,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "화성",
       ru: "Марс",
       fr: "Mars",
+      es: "Marte",
     },
   },
   {
@@ -244,6 +263,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "수성",
       ru: "Меркурий",
       fr: "Mercure",
+      es: "Mercurio",
     },
   },
   {
@@ -256,6 +276,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "미마스",
       ru: "Мимас",
       fr: "Mimas",
+      es: "Mimas",
     },
   },
   {
@@ -268,6 +289,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "미란다",
       ru: "Миранда",
       fr: "Miranda",
+      es: "Miranda",
     },
   },
   {
@@ -280,6 +302,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "해왕성",
       ru: "Нептун",
       fr: "Neptune",
+      es: "Neptuno",
     },
   },
   {
@@ -292,6 +315,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "오베론",
       ru: "Оберон",
       fr: "Obéron",
+      es: "Oberon",
     },
   },
   {
@@ -304,6 +328,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "오리온 성운",
       ru: "Туманность Ориона",
       fr: "Nébuleuse d'Orion",
+      es: "Nebulosa de Orión",
     },
   },
   {
@@ -316,6 +341,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "포보스",
       ru: "Фобос",
       fr: "Phobos",
+      es: "Phobos",
     },
   },
   {
@@ -328,6 +354,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "명왕성",
       ru: "Плутон",
       fr: "Pluton",
+      es: "Plutón",
     },
   },
   {
@@ -340,6 +367,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "북극성",
       ru: "Полярная звезда",
       fr: "Polaris",
+      es: "Polaris",
     },
   },
   {
@@ -352,6 +380,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "프록시마 센타우리",
       ru: "Проксима Центавра",
       fr: "Proxima du Centaure",
+      es: "Próxima Centauri",
     },
   },
   {
@@ -364,6 +393,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "레아",
       ru: "Рея",
       fr: "Rhéa",
+      es: "Rhea",
     },
   },
   {
@@ -376,6 +406,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "리겔",
       ru: "Ригель",
       fr: "Rigel",
+      es: "Rigel",
     },
   },
   {
@@ -388,6 +419,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "토성",
       ru: "Сатурн",
       fr: "Saturne",
+      es: "Saturno",
     },
   },
   {
@@ -400,6 +432,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "시리우스",
       ru: "Сириус",
       fr: "Sirius",
+      es: "Sirio",
     },
   },
   {
@@ -412,6 +445,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "솜브레로 은하",
       ru: "Галактика Сомбреро",
       fr: "Galaxie du Sombrero",
+      es: "Galaxia del Sombrero",
     },
   },
   {
@@ -424,6 +458,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "타이탄",
       ru: "Титан",
       fr: "Titan",
+      es: "Titan",
     },
   },
   {
@@ -436,6 +471,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "티타니아",
       ru: "Титания",
       fr: "Titania",
+      es: "Titania",
     },
   },
   {
@@ -448,6 +484,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "트리톤",
       ru: "Тритон",
       fr: "Triton",
+      es: "Triton",
     },
   },
   {
@@ -460,6 +497,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "베가",
       ru: "Вега",
       fr: "Véga",
+      es: "Vega",
     },
   },
   {
@@ -472,6 +510,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "금성",
       ru: "Венера",
       fr: "Vénus",
+      es: "Venus",
     },
   },
   {
@@ -484,6 +523,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "베스타",
       ru: "Веста",
       fr: "Vesta",
+      es: "Vesta",
     },
   },
   {
@@ -496,6 +536,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "아케르나르",
       ru: "Ахернар",
       fr: "Achernar",
+      es: "Achernar",
     },
   },
   {
@@ -508,6 +549,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "아크룩스",
       ru: "Акрукс",
       fr: "Acrux",
+      es: "Acrux",
     },
   },
   {
@@ -520,6 +562,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "아다라",
       ru: "Адара",
       fr: "Adhara",
+      es: "Adhara",
     },
   },
   {
@@ -532,6 +575,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "아드라스테아",
       ru: "Адрастея",
       fr: "Adrastée",
+      es: "Adrastea",
     },
   },
   {
@@ -544,6 +588,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "알키오네",
       ru: "Альциона",
       fr: "Alcyone",
+      es: "Alcyone",
     },
   },
   {
@@ -556,6 +601,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "알데바란",
       ru: "Альдебаран",
       fr: "Aldébaran",
+      es: "Aldebaran",
     },
   },
   {
@@ -568,6 +614,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "알골",
       ru: "Алголь",
       fr: "Algol",
+      es: "Algol",
     },
   },
   {
@@ -580,6 +627,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "알헤나",
       ru: "Альхена",
       fr: "Alhena",
+      es: "Alhena",
     },
   },
   {
@@ -592,6 +640,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "알나이르",
       ru: "Альнаир",
       fr: "Alnair",
+      es: "Alnair",
     },
   },
   {
@@ -604,6 +653,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "알닐람",
       ru: "Альнилам",
       fr: "Alnilam",
+      es: "Alnilam",
     },
   },
   {
@@ -616,6 +666,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "알니탁",
       ru: "Альнитак",
       fr: "Alnitak",
+      es: "Alnitak",
     },
   },
   {
@@ -628,6 +679,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "알타이르",
       ru: "Альтаир",
       fr: "Altaïr",
+      es: "Altair",
     },
   },
   {
@@ -640,6 +692,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "아말테아",
       ru: "Амальтея",
       fr: "Amalthée",
+      es: "Amalthea",
     },
   },
   {
@@ -652,6 +705,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "아난케",
       ru: "Ананке",
       fr: "Ananké",
+      es: "Ananke",
     },
   },
   {
@@ -664,6 +718,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "아르크투루스",
       ru: "Арктур",
       fr: "Arcturus",
+      es: "Arcturus",
     },
   },
   {
@@ -676,6 +731,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "벨라트릭스",
       ru: "Беллятрикс",
       fr: "Bellatrix",
+      es: "Bellatrix",
     },
   },
   {
@@ -688,6 +744,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "비앙카",
       ru: "Бианка",
       fr: "Bianca",
+      es: "Bianca",
     },
   },
   {
@@ -700,6 +757,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "카노푸스",
       ru: "Канопус",
       fr: "Canopus",
+      es: "Canopus",
     },
   },
   {
@@ -712,6 +770,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "카르메",
       ru: "Карме",
       fr: "Carmé",
+      es: "Carme",
     },
   },
   {
@@ -724,6 +783,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "수레바퀴 은하",
       ru: "Галактика Колесо Телеги",
       fr: "Galaxie de la Roue de chariot",
+      es: "Galaxia de la Rueda",
     },
   },
   {
@@ -736,6 +796,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "카스토르",
       ru: "Кастор",
       fr: "Castor",
+      es: "Castor",
     },
   },
   {
@@ -748,6 +809,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "카론",
       ru: "Харон",
       fr: "Charon",
+      es: "Charon",
     },
   },
   {
@@ -760,6 +822,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "코델리아",
       ru: "Корделия",
       fr: "Cordélia",
+      es: "Cordelia",
     },
   },
   {
@@ -772,6 +835,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "게 성운",
       ru: "Крабовидная туманность",
       fr: "Nébuleuse du Crabe",
+      es: "Nebulosa del Cangrejo",
     },
   },
   {
@@ -784,6 +848,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "백조자리 X-1",
       ru: "Лебедь X-1",
       fr: "Cygnus X-1",
+      es: "Cygnus X-1",
     },
   },
   {
@@ -796,6 +861,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "데스피나",
       ru: "Деспина",
       fr: "Despina",
+      es: "Despina",
     },
   },
   {
@@ -808,6 +874,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "엘라라",
       ru: "Элара",
       fr: "Élara",
+      es: "Elara",
     },
   },
   {
@@ -820,6 +887,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "엘렉트라",
       ru: "Электра",
       fr: "Électre",
+      es: "Electra",
     },
   },
   {
@@ -832,6 +900,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "포말하우트",
       ru: "Фомальгаут",
       fr: "Fomalhaut",
+      es: "Fomalhaut",
     },
   },
   {
@@ -844,6 +913,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "하우메아",
       ru: "Хаумеа",
       fr: "Hauméa",
+      es: "Haumea",
     },
   },
   {
@@ -856,6 +926,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "헬레네",
       ru: "Елена",
       fr: "Hélène",
+      es: "Helene",
     },
   },
   {
@@ -868,6 +939,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "이아페투스",
       ru: "Япет",
       fr: "Japet",
+      es: "Iapetus",
     },
   },
   {
@@ -880,6 +952,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "야누스",
       ru: "Янус",
       fr: "Janus",
+      es: "Janus",
     },
   },
   {
@@ -892,6 +965,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "줄리엣",
       ru: "Джульетта",
       fr: "Juliette",
+      es: "Juliet",
     },
   },
   {
@@ -904,6 +978,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "라리사",
       ru: "Лариса",
       fr: "Larissa",
+      es: "Larissa",
     },
   },
   {
@@ -916,6 +991,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "레다",
       ru: "Леда",
       fr: "Léda",
+      es: "Leda",
     },
   },
   {
@@ -928,6 +1004,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "마케마케",
       ru: "Макемаке",
       fr: "Makémaké",
+      es: "Makemake",
     },
   },
   {
@@ -940,6 +1017,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "메로페",
       ru: "Меропа",
       fr: "Mérope",
+      es: "Merope",
     },
   },
   {
@@ -952,6 +1030,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "메티스",
       ru: "Метида",
       fr: "Métis",
+      es: "Metis",
     },
   },
   {
@@ -964,6 +1043,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "민타카",
       ru: "Минтака",
       fr: "Mintaka",
+      es: "Mintaka",
     },
   },
   {
@@ -976,6 +1056,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "나이아드",
       ru: "Наяда",
       fr: "Naïade",
+      es: "Naiad",
     },
   },
   {
@@ -988,6 +1069,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "네레이드",
       ru: "Нереида",
       fr: "Néréide",
+      es: "Nereid",
     },
   },
   {
@@ -1000,6 +1082,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "오필리아",
       ru: "Офелия",
       fr: "Ophélie",
+      es: "Ophelia",
     },
   },
   {
@@ -1012,6 +1095,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "판",
       ru: "Пан",
       fr: "Pan",
+      es: "Pan",
     },
   },
   {
@@ -1024,6 +1108,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "판도라",
       ru: "Пандора",
       fr: "Pandore",
+      es: "Pandora",
     },
   },
   {
@@ -1036,6 +1121,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "파시파에",
       ru: "Пасифе",
       fr: "Pasiphaé",
+      es: "Pasiphae",
     },
   },
   {
@@ -1048,6 +1134,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "포에베",
       ru: "Феба",
       fr: "Phœbé",
+      es: "Phoebe",
     },
   },
   {
@@ -1060,6 +1147,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "바람개비 은하",
       ru: "Галактика Вертушка",
       fr: "Galaxie du Moulinet",
+      es: "Galaxia del Molinete",
     },
   },
   {
@@ -1072,6 +1160,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "폴룩스",
       ru: "Поллукс",
       fr: "Pollux",
+      es: "Pollux",
     },
   },
   {
@@ -1084,6 +1173,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "포샤",
       ru: "Порция",
       fr: "Portia",
+      es: "Portia",
     },
   },
   {
@@ -1096,6 +1186,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "프로테우스",
       ru: "Протей",
       fr: "Protée",
+      es: "Proteus",
     },
   },
   {
@@ -1108,6 +1199,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "퍽",
       ru: "Пак",
       fr: "Puck",
+      es: "Puck",
     },
   },
   {
@@ -1120,6 +1212,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "레굴루스",
       ru: "Регул",
       fr: "Régulus",
+      es: "Regulus",
     },
   },
   {
@@ -1132,6 +1225,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "로잘린드",
       ru: "Розалинда",
       fr: "Rosalinde",
+      es: "Rosalind",
     },
   },
   {
@@ -1144,6 +1238,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "스피카",
       ru: "Спика",
       fr: "Spica",
+      es: "Spica",
     },
   },
   {
@@ -1156,6 +1251,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "시코락스",
       ru: "Сикоракса",
       fr: "Sycorax",
+      es: "Sycorax",
     },
   },
   {
@@ -1168,6 +1264,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "텔레스토",
       ru: "Телесто",
       fr: "Télesto",
+      es: "Telesto",
     },
   },
   {
@@ -1180,6 +1277,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "테베",
       ru: "Фива",
       fr: "Thébé",
+      es: "Thebe",
     },
   },
   {
@@ -1192,6 +1290,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "움브리엘",
       ru: "Умбриэль",
       fr: "Umbriel",
+      es: "Umbriel",
     },
   },
   {
@@ -1204,6 +1303,7 @@ export const CELESTIAL_WORKSPACE_NAMES = [
       ko: "소용돌이 은하",
       ru: "Галактика Водоворот",
       fr: "Galaxie du Tourbillon",
+      es: "Galaxia del Remolino",
     },
   },
 ] as const satisfies readonly CelestialWorkspaceName[];

@@ -171,6 +171,7 @@
       "korean": "한국어",
       "japanese": "日本語",
       "french": "Français",
+      "spanish": "Español",
       "russian": "Русский",
       "sync_failed": "语言已在本设备保存，但同步到账号失败。其他设备可能仍显示旧语言。"
     },
@@ -395,7 +396,7 @@
       "preferences": "偏好设置",
       "shortcuts": "快捷键",
       "issue": "任务",
-      "notifications": "收件箱",
+      "notifications": "通知",
       "tokens": "API Token",
       "general": "常规",
       "github": "GitHub",
@@ -648,61 +649,38 @@
     "toast_profile_failed": "更新资料失败"
   },
   "notifications": {
-    "title": "通知去向",
-    "description": "更改只影响之后的新通知。",
-    "reset": "恢复默认",
+    "title": "收件箱通知",
+    "description": "关闭通知后，仍可在任务中查看相关动态。",
     "toast_failed": "更新通知设置失败",
-    "routes": {
-      "action": {
-        "label": "需要处理",
-        "description": "计入未读，可弹出系统通知"
+    "groups": {
+      "assignments": {
+        "label": "分配",
+        "description": "你被分配或取消分配某个任务时"
       },
-      "activity": {
-        "label": "动态",
-        "description": "安静记录，不计未读"
+      "status_changes": {
+        "label": "状态变更",
+        "description": "你订阅的任务状态变化时（例如 todo、in_progress、done）"
       },
-      "muted": {
-        "label": "关闭",
-        "description": "不进收件箱，在任务里仍能看到"
-      }
-    },
-    "kinds": {
-      "assigned": {
-        "label": "分配给我",
-        "description": "任务分配给你时"
+      "comments": {
+        "label": "评论",
+        "description": "你订阅的任务有新评论时"
       },
       "mentions": {
         "label": "提及",
         "description": "有人 @ 你时，包括 @all 和 @squad"
       },
-      "comments_without_mentions": {
-        "label": "未 @ 任何人的评论",
-        "description": "有人在你订阅的任务里评论，且没有 @ 任何人时"
-      },
-      "agent_failures": {
-        "label": "智能体出错",
-        "description": "智能体运行失败或被阻塞、需要你介入时"
-      },
-      "status_changes": {
-        "label": "状态变更",
-        "description": "你订阅的任务状态变化时"
-      },
-      "assignee_changes": {
-        "label": "负责人变更",
-        "description": "任务换了负责人，或你被取消分配时"
-      },
       "updates": {
-        "label": "优先级与日期",
-        "description": "优先级、开始日期或截止日期变化时"
+        "label": "优先级与截止日期",
+        "description": "你订阅的任务优先级或截止日期变更时"
       },
-      "comments_mentioning_others": {
-        "label": "@ 了其他人的评论",
-        "description": "你订阅的任务里的评论 @ 了其他成员或智能体、但没有 @ 你时"
+      "agent_activity": {
+        "label": "智能体活动",
+        "description": "智能体运行失败时"
       }
     },
     "system": {
       "title": "系统通知",
-      "label": "Multica 在后台时，为「需要处理」的通知弹出系统通知"
+      "label": "Multica 在后台时显示系统通知"
     },
     "browser": {
       "label": "浏览器通知",

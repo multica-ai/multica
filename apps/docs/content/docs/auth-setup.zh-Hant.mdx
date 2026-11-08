@@ -1,0 +1,193 @@
+---
+title: 登入與註冊
+description: 配置信箱驗證碼、Google 登入和新使用者註冊範圍。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+Multica 預設使用信箱驗證碼登入，也可以增加 Google OAuth。已經存在的使用者始終可以再次登入；註冊限制只決定是否允許建立新帳號。
+
+## 信箱驗證碼
+
+使用者輸入信箱後，Multica 會傳送一個 6 位驗證碼。驗證碼 10 分鐘內有效，驗證成功後瀏覽器獲得登入 cookie。
+
+郵件可以透過 Resend 或 SMTP 傳送。兩者同時配置時，`SMTP_HOST` 優先。
+
+### 使用 Resend
+
+<Steps>
+<Step>
+
+在 [Resend](https://resend.com/) 驗證發信網域並建立 API key。
+
+</Step>
+<Step>
+
+設定：
+
+```dotenv
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+RESEND_FROM_EMAIL=noreply@example.com
+```
+
+</Step>
+<Step>
+
+重啟 API 服務。
+
+</Step>
+</Steps>
+
+`RESEND_FROM_EMAIL` 必須屬於已經在 Resend 驗證的網域。
+
+### 使用 SMTP
+
+最少需要設定主機和發件地址：
+
+```dotenv
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=multica
+SMTP_PASSWORD=<password>
+SMTP_FROM_EMAIL=noreply@example.com
+```
+
+常見連接方式：
+
+| 場景 | 配置 |
+|---|---|
+| 內網匿名 relay | `SMTP_PORT=25`，使用者名和密碼留空 |
+| STARTTLS | `SMTP_PORT=587`，預設會在伺服器支援時升級 TLS |
+| 隱式 TLS | `SMTP_PORT=465`，或顯式設定 `SMTP_TLS=implicit` |
+
+如果沒有設定 `SMTP_FROM_EMAIL`，會回退到 `RESEND_FROM_EMAIL`。私有 CA 或自簽憑證需要把 CA 加入容器信任庫；`SMTP_TLS_INSECURE=true` 會跳過憑證校驗，只應在可信內網中臨時使用。
+
+有些嚴格的 relay 還要求合法的 EHLO 名稱：
+
+```dotenv
+SMTP_EHLO_NAME=mail.example.com
+```
+
+### 無郵件服務時的行為
+
+伺服器仍可啟動，但驗證碼和邀請連結只會寫入日誌，不會傳送郵件。這種模式只適合本地開發。
+
+啟動日誌會說明當前使用的是 `Resend API`、`SMTP relay` 還是 `DEV mode`。
+
+## 本地固定驗證碼
+
+本地自動化測試可以設定固定驗證碼：
+
+```dotenv
+APP_ENV=development
+MULTICA_DEV_VERIFICATION_CODE=888888
+```
+
+驗證碼必須是 6 位數字。`APP_ENV=production` 時固定驗證碼會被忽略。
+
+<Callout type="warning">
+不要在公網實例中啟用固定驗證碼。生產環境的組合是 `APP_ENV=production` 加空的 `MULTICA_DEV_VERIFICATION_CODE`。
+</Callout>
+
+## Google 登入
+
+<Steps>
+<Step>
+
+在 [Google Cloud Console](https://console.cloud.google.com/) 建立 OAuth 2.0 client。
+
+</Step>
+<Step>
+
+把 Multica 前端的回呼地址加入 **Authorized redirect URIs**：
+
+```text
+https://multica.example.com/auth/callback
+```
+
+</Step>
+<Step>
+
+設定：
+
+```dotenv
+GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
+GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
+```
+
+</Step>
+<Step>
+
+重啟 API 服務。
+
+</Step>
+</Steps>
+
+Google Console 與 `GOOGLE_REDIRECT_URI` 中的地址必須完全一致，包括協議、連接埠和結尾斜槓。配置生效後，登入頁會出現 Google 登入按鈕；前端映像不需要重新構建。
+
+## 註冊範圍控制
+
+三個變數共同決定新帳號能否建立：
+
+| 變數 | 作用 |
+|---|---|
+| `ALLOWED_EMAILS` | 允許的完整信箱，多個值用逗號分隔 |
+| `ALLOWED_EMAIL_DOMAINS` | 允許的信箱網域，多個值用逗號分隔 |
+| `ALLOW_SIGNUP` | 未配置任何白名單時，是否允許註冊；預設 `true` |
+
+判斷順序如下：
+
+1. 信箱命中 `ALLOWED_EMAILS`，允許；
+2. 或網域命中 `ALLOWED_EMAIL_DOMAINS`，允許；
+3. 沒有設定白名單且 `ALLOW_SIGNUP=true`，允許；
+4. 否則，如果該信箱有待接受且未過期的工作區邀請，允許；
+5. 其他情況均拒絕。
+
+常見配置：
+
+```dotenv
+# 允許公司域名和受邀使用者
+ALLOW_SIGNUP=false
+ALLOWED_EMAIL_DOMAINS=company.com
+
+# 再放行一位外部協作者
+ALLOWED_EMAILS=partner@example.net
+```
+
+<Callout type="info">
+兩個白名單在 `ALLOW_SIGNUP=false` 時也可以作為明確的例外名單。
+</Callout>
+
+## 邀請與註冊限制
+
+待接受且未過期的工作區邀請允許該信箱建立帳號，即使 `ALLOW_SIGNUP=false`，或信箱未命中 `ALLOWED_EMAILS` 和 `ALLOWED_EMAIL_DOMAINS`。此例外也適用於 `ALLOW_SIGNUP=true` 且配置了白名單的情況：白名單不會攔截持有有效邀請的使用者。
+
+已有使用者仍可登入。新使用者如果未命中白名單且未開放註冊，就需要待接受且未過期的邀請；缺失、已過期、已接受、已拒絕或已撤銷的邀請不能授予註冊許可。申請登入碼時會檢查邀請，建立帳號時會再次檢查，包括透過 Google 登入建立帳號。
+
+普通受邀人無需再加入 `ALLOWED_EMAILS`，也無需重啟伺服器。帳號建立後，仍需透過正常邀請流程接受邀請才能加入工作區。
+
+撤銷邀請不會刪除透過該邀請建立的帳號，也不會阻止該已有帳號登入。
+
+## 登入有效期
+
+會話會滑動續期。下面這個值是**閒置**上限，不從登入時刻開始倒計時：會話剩餘有效期低於一半時，下一個請求就會把它續到完整有效期，所以持續使用的帳號不會被定時踢出。沒有絕對上限。
+
+這個上限是單邊的。只有掉到一半以下才會續期，因此最後一次使用時仍有超過一半有效期的會話不會被延長。能保證存活的閒置時長只有下面這個值的一半。
+
+可以用 `AUTH_TOKEN_TTL` 調整，支援 Go duration 或正整數秒數：
+
+```dotenv
+AUTH_TOKEN_TTL=720h
+```
+
+最小值是 `60s`，更小的取值會被上調到 `60s` 並在啟動時打出警告。低於這個值時，服務端算出的續期檢查間隔會低於客戶端對它設定的下限，客戶端的檢查頻率就會低於會話能存活的時長。
+
+修改後需要重啟 API 服務。這個值對之後簽發或續期的會話生效。會話會滑動續期，所以已有會話會在下次續期時用上新的有效期。
+
+## 接下來
+
+- [環境變數](/environment-variables) — 完整變數參考。
+- [認證與令牌](/auth-tokens) — 登入會話與令牌類型。
+- [成員與權限](/members-roles) — 邀請與角色。

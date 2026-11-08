@@ -5,6 +5,7 @@ import type { SupportedLocale } from "@multica/core/i18n";
 import { describe, expect, it } from "vitest";
 import enAgents from "../../../locales/en/agents.json";
 import frAgents from "../../../locales/fr/agents.json";
+import esAgents from "../../../locales/es/agents.json";
 import jaAgents from "../../../locales/ja/agents.json";
 import koAgents from "../../../locales/ko/agents.json";
 import zhHansAgents from "../../../locales/zh-Hans/agents.json";
@@ -28,6 +29,7 @@ const AGENT_RESOURCES = {
   ja: jaAgents,
   ko: koAgents,
   fr: frAgents,
+  es: esAgents,
   ru: ruAgents,
 } as const;
 
@@ -122,6 +124,7 @@ describe("cancelReasonLabel", () => {
       ja: "システムによってキャンセルされました",
       ko: "시스템에서 취소함",
       fr: "Annulée par le système",
+      es: "Cancelada por el sistema",
       ru: "Отменено системой",
     };
 

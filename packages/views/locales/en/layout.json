@@ -38,6 +38,21 @@
     "feedback": "Feedback",
     "server_version": "Server version {{version}}"
   },
+  "whats_new": {
+    "trigger": "What's new",
+    "panel": {
+      "title": "What's new",
+      "close": "Close",
+      "new": "New",
+      "release_notes": "v{{version}} release notes",
+      "full_changelog": "Full changelog"
+    },
+    "action": {
+      "try": "Try it",
+      "open": "Open",
+      "learn_more": "Learn more"
+    }
+  },
   "workspace_loader": {
     "loading_workspace": "Loading workspace…",
     "loading_named_prefix": "Loading"
@@ -77,6 +92,8 @@
     "autopilots": "Auto",
     "switch_workspace": "Switch workspace",
     "invitation_from": "{{name}} invited you",
+    "pin_workspace": "Pin workspace",
+    "unpin_workspace": "Unpin workspace",
     "open_in_new_window": "Open in new window",
     "open_in_new_window_click": "Click",
     "open_in_other_window": "Already open in another window",
@@ -87,6 +104,7 @@
     "work": {
       "my_agents": "My agents' work",
       "all_issues": "All issues",
+      "unread": "Unread",
       "views": "Views",
       "new_project": "New project",
       "new_issue_in_project": "New issue in {{name}}",
@@ -95,6 +113,7 @@
       "project_issues": "Issues in {{name}}",
       "project_issues_empty": "No issues",
       "project_issues_error": "Couldn't load issues",
+      "project_issues_retry": "Retry",
       "project_issues_settings": "Issues in projects",
       "settings_status": "Status",
       "settings_assignee": "Assignee",
@@ -129,6 +148,8 @@
       "stuck_one": "{{count}} task waiting on an offline runtime",
       "stuck_other": "{{count}} tasks waiting on an offline runtime",
       "working_now": "Working now",
+      "show_more_agents": "Show {{count}} more…",
+      "show_fewer_agents": "Show fewer",
       "running_tasks_one": "{{count}} task running",
       "running_tasks_other": "{{count}} tasks running",
       "all_agents": "All agents",
@@ -137,8 +158,8 @@
       "members_one": "{{count}} member",
       "members_other": "{{count}} members",
       "resources": "Resources",
-      "runtimes_offline_one": "{{count}} offline",
-      "runtimes_offline_other": "{{count}} offline",
+      "runtimes_online_one": "{{count}} online",
+      "runtimes_online_other": "{{count}} online",
       "invite_member": "Invite member"
     },
     "autopilots": {
@@ -184,5 +205,14 @@
   "object_page": {
     "toggle_panel": "Toggle right sidebar",
     "properties": "Properties"
+  },
+  "feature_intro": {
+    "read_docs": "Read the docs",
+    "carousel": "carousel",
+    "slide": "slide",
+    "slide_position": "{{current}} of {{total}}",
+    "go_to_slide": "Go to slide {{index}}",
+    "previous": "Previous",
+    "next": "Next"
   }
 }

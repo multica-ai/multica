@@ -652,5 +652,29 @@
       "cancel": "取消",
       "done": "已断开 Qoder"
     }
+  },
+  "intro": {
+    "title": "给智能体一台干活的电脑",
+    "description": "运行时是智能体真正执行任务的地方：你的电脑、一台服务器，或者云服务。",
+    "slides": {
+      "local": {
+        "title": "这台电脑，自动连接",
+        "description": "下载桌面端并登录，这台电脑上的 Claude Code、Codex 等会自动出现。"
+      },
+      "remote": {
+        "title": "其他机器，两条命令",
+        "description": "在服务器或另一台电脑上装好 CLI，运行 multica setup 就连上了。"
+      },
+      "cloud": {
+        "title": "或者用云端节点",
+        "description": "不想自己管机器？创建一台 Multica 托管的云节点。"
+      }
+    },
+    "art": {
+      "this_computer": "这台电脑 · 桌面端",
+      "detected": "自动识别到的 harness",
+      "run_there": "在那台机器上运行",
+      "connected": "{{name}} 已连接到 Multica"
+    }
   }
 }
