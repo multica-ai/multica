@@ -1,4 +1,12 @@
 {
+  "links": {
+    "title": "クイックリンク", "add": "リンクを追加", "edit": "リンクを編集", "delete": "リンクを削除", "up": "上へ移動", "down": "下へ移動",
+    "name": "名前", "icon": "アイコンまたは絵文字", "default_icon": "標準の地球アイコン", "url": "URL", "mode": "開き方", "embed": "埋め込みで開く", "new_tab": "新しいタブで開く",
+    "session": "埋め込みページで独自のログインセッションを使用する（allow-same-origin）", "warning": "信頼できるシステムでのみ有効にしてください。",
+    "variables": "使用できる変数：{workspace_slug}、{workspace_id}。プロジェクトのリンクでは {project_id} も使用できます。", "preview": "URL のプレビュー", "save": "保存", "cancel": "キャンセル",
+    "invalid": "HTTPS の URL を入力し、対応する変数はパスまたはクエリ内でのみ使用してください。名前は 1～40 文字です。", "failed": "変更を保存できませんでした。もう一度お試しください。",
+    "fallback": "X-Frame-Options や frame-ancestors により埋め込みを許可しないサイトもあります。表示されない場合は新しいタブで開いてください。", "open": "新しいタブで開く", "loading": "リンクを読み込み中...", "not_found": "リンクが見つかりません", "load_failed": "リンクを読み込めませんでした。"
+  },
   "issue_statuses": {
     "title": "タスクステータス",
     "loading": "ステータスを読み込み中…",

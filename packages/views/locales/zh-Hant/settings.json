@@ -1,4 +1,12 @@
 {
+  "links": {
+    "title": "快捷連結", "add": "新增連結", "edit": "編輯連結", "delete": "刪除連結", "up": "上移", "down": "下移",
+    "name": "名稱", "icon": "圖示或表情符號", "default_icon": "預設地球圖示", "url": "URL", "mode": "開啟方式", "embed": "內嵌開啟", "new_tab": "在新分頁開啟",
+    "session": "允許內嵌頁面使用自己的登入工作階段（allow-same-origin）", "warning": "僅對你信任的系統啟用。",
+    "variables": "可用變數：{workspace_slug}、{workspace_id}。專案連結也支援 {project_id}。", "preview": "URL 預覽", "save": "儲存", "cancel": "取消",
+    "invalid": "請使用 HTTPS URL，僅在路徑或查詢參數中使用支援的變數。名稱須為 1–40 個字元。", "failed": "無法儲存變更，請重試。",
+    "fallback": "部分網站透過 X-Frame-Options 或 frame-ancestors 禁止內嵌。若頁面無法載入，請在新分頁開啟。", "open": "在新分頁開啟", "loading": "正在載入連結...", "not_found": "找不到連結", "load_failed": "無法載入連結。"
+  },
   "issue_statuses": {
     "title": "任務狀態",
     "loading": "正在載入狀態…",

@@ -3,6 +3,7 @@ import { createMemoryRouter, Outlet, useLocation, useMatches } from "react-route
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
+import { LinkPage } from "./pages/link-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
@@ -171,6 +172,11 @@ export const appRoutes: RouteObject[] = [
             path: "projects/:id",
             element: <ProjectDetailPage />,
             handle: { title: "Project" },
+          },
+          {
+            path: "links/:id",
+            element: <LinkPage />,
+            handle: { title: "Link" },
           },
           {
             path: "autopilots",

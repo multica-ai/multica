@@ -1,4 +1,12 @@
 {
+  "links": {
+    "title": "Quick links", "add": "Add link", "edit": "Edit link", "delete": "Delete link", "up": "Move up", "down": "Move down",
+    "name": "Name", "icon": "Icon or emoji", "default_icon": "Default globe", "url": "URL", "mode": "Open mode", "embed": "Embedded", "new_tab": "New tab",
+    "session": "Allow the embedded page to use its own login session (allow-same-origin)", "warning": "Only enable for systems you trust.",
+    "variables": "Variables: {workspace_slug}, {workspace_id}. Project links also support {project_id}.", "preview": "URL preview", "save": "Save", "cancel": "Cancel",
+    "invalid": "Use an HTTPS URL with supported variables in the path or query only. Names must contain 1–40 characters.", "failed": "Could not save changes. Try again.",
+    "fallback": "Some sites block embedded pages with X-Frame-Options or frame-ancestors. Open the link in a new tab if it does not load.", "open": "Open in new tab", "loading": "Loading links...", "not_found": "Link not found", "load_failed": "Could not load links."
+  },
   "issue_statuses": {
     "title": "Issue Statuses",
     "loading": "Loading statuses…",
