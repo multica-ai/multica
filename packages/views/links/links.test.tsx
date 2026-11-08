@@ -104,7 +104,7 @@ describe("embedded links", () => {
     ]);
     render(<EmbeddedLinkPage id="link" />, "project=project");
     expect((await screen.findByTitle("Docs")).getAttribute("src")).toBe("https://example.com/project");
-    expect(state.list).toHaveBeenCalledWith("project");
+    expect(state.list).toHaveBeenCalledWith("project", "ws");
   });
   it("shows the standard missing state for deleted links", async () => {
     state.list.mockResolvedValue([]);
