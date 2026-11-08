@@ -44,8 +44,8 @@ func (q *Queries) CountWorkspaceLinks(ctx context.Context, arg CountWorkspaceLin
 }
 
 const createWorkspaceLink = `-- name: CreateWorkspaceLink :one
-INSERT INTO workspace_link (workspace_id, project_id, name, icon, url_template, open_mode, allow_same_origin, position, created_by, is_home)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, workspace_id, project_id, name, icon, url_template, open_mode, allow_same_origin, position, created_by, created_at, updated_at, is_home
+INSERT INTO workspace_link (workspace_id, project_id, name, icon, url_template, open_mode, allow_same_origin, position, created_by, is_home, show_name)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, workspace_id, project_id, name, icon, show_name, url_template, open_mode, allow_same_origin, position, created_by, created_at, updated_at, is_home
 `
 
 type CreateWorkspaceLinkParams struct {
@@ -59,6 +59,7 @@ type CreateWorkspaceLinkParams struct {
 	Position        int32       `json:"position"`
 	CreatedBy       pgtype.UUID `json:"created_by"`
 	IsHome          bool        `json:"is_home"`
+	ShowName        bool        `json:"show_name"`
 }
 
 func (q *Queries) CreateWorkspaceLink(ctx context.Context, arg CreateWorkspaceLinkParams) (WorkspaceLink, error) {
@@ -73,6 +74,7 @@ func (q *Queries) CreateWorkspaceLink(ctx context.Context, arg CreateWorkspaceLi
 		arg.Position,
 		arg.CreatedBy,
 		arg.IsHome,
+		arg.ShowName,
 	)
 	var i WorkspaceLink
 	err := row.Scan(
@@ -81,6 +83,7 @@ func (q *Queries) CreateWorkspaceLink(ctx context.Context, arg CreateWorkspaceLi
 		&i.ProjectID,
 		&i.Name,
 		&i.Icon,
+		&i.ShowName,
 		&i.UrlTemplate,
 		&i.OpenMode,
 		&i.AllowSameOrigin,
@@ -124,7 +127,7 @@ func (q *Queries) DeleteWorkspaceLink(ctx context.Context, arg DeleteWorkspaceLi
 }
 
 const getWorkspaceLink = `-- name: GetWorkspaceLink :one
-SELECT id, workspace_id, project_id, name, icon, url_template, open_mode, allow_same_origin, position, created_by, created_at, updated_at, is_home FROM workspace_link WHERE id = $1 AND workspace_id = $2
+SELECT id, workspace_id, project_id, name, icon, show_name, url_template, open_mode, allow_same_origin, position, created_by, created_at, updated_at, is_home FROM workspace_link WHERE id = $1 AND workspace_id = $2
 `
 
 type GetWorkspaceLinkParams struct {
@@ -141,6 +144,7 @@ func (q *Queries) GetWorkspaceLink(ctx context.Context, arg GetWorkspaceLinkPara
 		&i.ProjectID,
 		&i.Name,
 		&i.Icon,
+		&i.ShowName,
 		&i.UrlTemplate,
 		&i.OpenMode,
 		&i.AllowSameOrigin,
@@ -154,7 +158,7 @@ func (q *Queries) GetWorkspaceLink(ctx context.Context, arg GetWorkspaceLinkPara
 }
 
 const getWorkspaceLinkForUpdate = `-- name: GetWorkspaceLinkForUpdate :one
-SELECT id, workspace_id, project_id, name, icon, url_template, open_mode, allow_same_origin, position, created_by, created_at, updated_at, is_home FROM workspace_link
+SELECT id, workspace_id, project_id, name, icon, show_name, url_template, open_mode, allow_same_origin, position, created_by, created_at, updated_at, is_home FROM workspace_link
 WHERE id = $1 AND workspace_id = $2
 FOR UPDATE
 `
@@ -175,6 +179,7 @@ func (q *Queries) GetWorkspaceLinkForUpdate(ctx context.Context, arg GetWorkspac
 		&i.ProjectID,
 		&i.Name,
 		&i.Icon,
+		&i.ShowName,
 		&i.UrlTemplate,
 		&i.OpenMode,
 		&i.AllowSameOrigin,
@@ -188,7 +193,7 @@ func (q *Queries) GetWorkspaceLinkForUpdate(ctx context.Context, arg GetWorkspac
 }
 
 const listWorkspaceLinks = `-- name: ListWorkspaceLinks :many
-SELECT id, workspace_id, project_id, name, icon, url_template, open_mode, allow_same_origin, position, created_by, created_at, updated_at, is_home FROM workspace_link
+SELECT id, workspace_id, project_id, name, icon, show_name, url_template, open_mode, allow_same_origin, position, created_by, created_at, updated_at, is_home FROM workspace_link
 WHERE workspace_id = $1 AND project_id IS NOT DISTINCT FROM $2::uuid
 ORDER BY position, created_at, id
 `
@@ -213,6 +218,7 @@ func (q *Queries) ListWorkspaceLinks(ctx context.Context, arg ListWorkspaceLinks
 			&i.ProjectID,
 			&i.Name,
 			&i.Icon,
+			&i.ShowName,
 			&i.UrlTemplate,
 			&i.OpenMode,
 			&i.AllowSameOrigin,
@@ -233,8 +239,8 @@ func (q *Queries) ListWorkspaceLinks(ctx context.Context, arg ListWorkspaceLinks
 }
 
 const updateWorkspaceLink = `-- name: UpdateWorkspaceLink :one
-UPDATE workspace_link SET name=$3, icon=$4, url_template=$5, open_mode=$6, allow_same_origin=$7, position=$8, is_home=$9, updated_at=now()
-WHERE id=$1 AND workspace_id=$2 RETURNING id, workspace_id, project_id, name, icon, url_template, open_mode, allow_same_origin, position, created_by, created_at, updated_at, is_home
+UPDATE workspace_link SET name=$3, icon=$4, url_template=$5, open_mode=$6, allow_same_origin=$7, position=$8, is_home=$9, show_name=$10, updated_at=now()
+WHERE id=$1 AND workspace_id=$2 RETURNING id, workspace_id, project_id, name, icon, show_name, url_template, open_mode, allow_same_origin, position, created_by, created_at, updated_at, is_home
 `
 
 type UpdateWorkspaceLinkParams struct {
@@ -247,6 +253,7 @@ type UpdateWorkspaceLinkParams struct {
 	AllowSameOrigin bool        `json:"allow_same_origin"`
 	Position        int32       `json:"position"`
 	IsHome          bool        `json:"is_home"`
+	ShowName        bool        `json:"show_name"`
 }
 
 func (q *Queries) UpdateWorkspaceLink(ctx context.Context, arg UpdateWorkspaceLinkParams) (WorkspaceLink, error) {
@@ -260,6 +267,7 @@ func (q *Queries) UpdateWorkspaceLink(ctx context.Context, arg UpdateWorkspaceLi
 		arg.AllowSameOrigin,
 		arg.Position,
 		arg.IsHome,
+		arg.ShowName,
 	)
 	var i WorkspaceLink
 	err := row.Scan(
@@ -268,6 +276,7 @@ func (q *Queries) UpdateWorkspaceLink(ctx context.Context, arg UpdateWorkspaceLi
 		&i.ProjectID,
 		&i.Name,
 		&i.Icon,
+		&i.ShowName,
 		&i.UrlTemplate,
 		&i.OpenMode,
 		&i.AllowSameOrigin,

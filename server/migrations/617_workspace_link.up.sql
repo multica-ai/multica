@@ -1,6 +1,6 @@
 -- Workspace Links: admin-configured shortcuts to the team's external tools,
 -- displayed in workspace and project headers. Each link stores its label,
--- icon, URL template, opening mode, and manual position within one scope.
+-- icon, header name visibility, URL template, opening mode, and manual position.
 --
 -- Scope is represented by project_id:
 --   - NULL: workspace-level link, available across workspace headers.
@@ -27,6 +27,7 @@ CREATE TABLE workspace_link (
     project_id UUID,
     name TEXT NOT NULL,
     icon TEXT NOT NULL DEFAULT '',
+    show_name BOOLEAN NOT NULL DEFAULT true,
     url_template TEXT NOT NULL,
     open_mode TEXT NOT NULL DEFAULT 'embed' CHECK (open_mode IN ('embed', 'new_tab')),
     allow_same_origin BOOLEAN NOT NULL DEFAULT false,

@@ -1,5 +1,8 @@
 {
   "links": {
+    "show_in_header": "Show in header",
+    "icon_and_name": "Icon and name",
+    "icon_only": "Icon only",
     "title": "Quick links",
     "add": "Add link",
     "edit": "Edit link",

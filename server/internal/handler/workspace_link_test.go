@@ -94,6 +94,9 @@ func TestWorkspaceLinkLifecycle(t *testing.T) {
 	if link.Name != "Docs" {
 		t.Fatal(link.Name)
 	}
+	if !link.ShowName {
+		t.Fatal("create without show_name must default to true")
+	}
 	call("GET", nil, "", 200)
 	w = call("PATCH", map[string]any{"position": 4, "name": "Dashboard"}, link.ID, http.StatusOK)
 	var patched WorkspaceLinkResponse
@@ -102,19 +105,38 @@ func TestWorkspaceLinkLifecycle(t *testing.T) {
 	}
 	if patched.Name != "Dashboard" || patched.Position != 4 || patched.Icon != link.Icon ||
 		patched.URLTemplate != link.URLTemplate || patched.OpenMode != link.OpenMode ||
-		patched.AllowSameOrigin != link.AllowSameOrigin {
+		patched.AllowSameOrigin != link.AllowSameOrigin || patched.ShowName != link.ShowName {
 		t.Fatalf("partial PATCH did not preserve omitted fields: %+v", patched)
 	}
-	w = call("PATCH", map[string]any{"position": 0, "allow_same_origin": false}, link.ID, http.StatusOK)
+	w = call("PATCH", map[string]any{"position": 0, "allow_same_origin": false, "show_name": false}, link.ID, http.StatusOK)
 	if err := json.Unmarshal(w.Body.Bytes(), &patched); err != nil {
 		t.Fatal(err)
 	}
-	if patched.Position != 0 || patched.AllowSameOrigin || patched.Name != "Dashboard" ||
+	if patched.Position != 0 || patched.AllowSameOrigin || patched.ShowName || patched.Name != "Dashboard" ||
 		patched.Icon != link.Icon || patched.URLTemplate != link.URLTemplate || patched.OpenMode != link.OpenMode {
 		t.Fatalf("explicit zero/false PATCH was not applied correctly: %+v", patched)
 	}
 	call("DELETE", nil, link.ID, 204)
 	call("PATCH", map[string]any{"name": "Gone"}, link.ID, 404)
+	w = call("POST", map[string]any{
+		"name":         "Icon only",
+		"url_template": "https://example.com",
+		"show_name":    false,
+	}, "", http.StatusCreated)
+	if err := json.Unmarshal(w.Body.Bytes(), &link); err != nil {
+		t.Fatal(err)
+	}
+	if link.ShowName {
+		t.Fatal("create with show_name=false must preserve false")
+	}
+	w = call("PATCH", map[string]any{"name": "Still icon only"}, link.ID, http.StatusOK)
+	if err := json.Unmarshal(w.Body.Bytes(), &patched); err != nil {
+		t.Fatal(err)
+	}
+	if patched.ShowName {
+		t.Fatal("PATCH must preserve omitted show_name=false")
+	}
+	call("DELETE", nil, link.ID, 204)
 	for i := 0; i < maxLinksPerScope; i++ {
 		call("POST", map[string]any{"name": "Docs", "url_template": "https://example.com"}, "", 201)
 	}

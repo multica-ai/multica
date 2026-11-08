@@ -34,6 +34,7 @@ export function LinkEditor({
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(link?.name ?? "");
   const [icon, setIcon] = useState(link?.icon ?? "");
+  const [showName, setShowName] = useState(link?.showName ?? true);
   const [url, setUrl] = useState(link?.urlTemplate ?? "");
   const [mode, setMode] = useState<"embed" | "new_tab" | "home">(
     link?.isHome ? "home" : link?.openMode ?? "embed",
@@ -60,6 +61,7 @@ export function LinkEditor({
     const data = {
       name,
       icon,
+      showName,
       urlTemplate: url,
       openMode: mode === "new_tab" ? "new_tab" as const : "embed" as const,
       isHome: mode === "home",
@@ -85,6 +87,7 @@ export function LinkEditor({
         if (next) {
           setName(link?.name ?? "");
           setIcon(link?.icon ?? "");
+          setShowName(link?.showName ?? true);
           setUrl(link?.urlTemplate ?? "");
           setMode(link?.isHome ? "home" : link?.openMode ?? "embed");
           setSession(link?.allowSameOrigin ?? false);
@@ -145,6 +148,17 @@ export function LinkEditor({
               ))}
             </div>
             <Input aria-label={t(($) => $.links.icon)} value={icon} onChange={(e) => setIcon(e.target.value)} />
+            <label className="grid gap-1 text-caption">
+              {t(($) => $.links.show_in_header)}
+              <select
+                className="rounded-md border bg-background p-2"
+                value={showName ? "name" : "icon"}
+                onChange={(e) => setShowName(e.target.value === "name")}
+              >
+                <option value="name">{t(($) => $.links.icon_and_name)}</option>
+                <option value="icon">{t(($) => $.links.icon_only)}</option>
+              </select>
+            </label>
           </div>
           <label className="grid gap-1 text-caption">
             {t(($) => $.links.url)}

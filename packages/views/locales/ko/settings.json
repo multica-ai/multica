@@ -1,5 +1,8 @@
 {
   "links": {
+    "show_in_header": "헤더 표시",
+    "icon_and_name": "아이콘과 이름",
+    "icon_only": "아이콘만",
     "title": "빠른 링크",
     "add": "링크 추가",
     "edit": "링크 편집",

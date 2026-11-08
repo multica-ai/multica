@@ -55,9 +55,11 @@ export function LinksBar({ projectId }: { projectId?: string }) {
   const label = (link: WorkspaceLink, compact = false) => (
     <>
       <LinkIcon icon={link.icon} />
-      <span className={compact ? "hidden max-w-28 truncate xl:inline" : "truncate"}>
-        {link.name}
-      </span>
+      {(!compact || link.showName) && (
+        <span className={compact ? "hidden max-w-28 truncate xl:inline" : "truncate"}>
+          {link.name}
+        </span>
+      )}
       {link.isHome && (
         <TooltipHint label={t(($) => $.links.home_page)}>
           <span aria-label={t(($) => $.links.home_page)}>
@@ -73,7 +75,7 @@ export function LinksBar({ projectId }: { projectId?: string }) {
         href={href(link)}
         title={link.name}
         aria-label={link.name}
-        className={buttonVariants({ variant: "ghost", size: "sm" })}
+        className={buttonVariants({ variant: "ghost", size: link.showName ? "sm" : "icon-sm" })}
       >
         {label(link, compact)}
       </AppLink>
@@ -84,7 +86,7 @@ export function LinksBar({ projectId }: { projectId?: string }) {
         rel="noopener noreferrer"
         title={link.name}
         aria-label={link.name}
-        className={buttonVariants({ variant: "ghost", size: "sm" })}
+        className={buttonVariants({ variant: "ghost", size: link.showName ? "sm" : "icon-sm" })}
         onClick={(e) => {
           if (isDesktopShell()) {
             e.preventDefault();

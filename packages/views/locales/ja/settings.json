@@ -1,5 +1,8 @@
 {
   "links": {
+    "show_in_header": "ヘッダーでの表示",
+    "icon_and_name": "アイコンと名前",
+    "icon_only": "アイコンのみ",
     "title": "クイックリンク",
     "add": "リンクを追加",
     "edit": "リンクを編集",

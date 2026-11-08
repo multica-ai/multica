@@ -57,6 +57,7 @@ test("configures workspace and project home links and restores issues when clear
     await page.goto(`/${workspace.slug}/settings?tab=links`);
     await page.getByRole("button", { name: "Add link" }).click();
     await page.getByRole("textbox", { name: "Name", exact: true }).fill("Team documentation");
+    await page.getByLabel("Show in header").selectOption("icon");
     await page.getByRole("textbox", { name: "URL", exact: true }).fill(
       "https://example.com/{workspace_slug}?workspace={workspace_id}",
     );
@@ -69,6 +70,12 @@ test("configures workspace and project home links and restores issues when clear
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByText("Team documentation", { exact: true })).toBeVisible();
     if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/workspace-links.png` });
+    await page.goto(`/${workspace.slug}/issues`);
+    const iconOnly = page
+      .getByRole("navigation", { name: "Quick links" })
+      .getByRole("link", { name: "Team documentation" });
+    await expect(iconOnly).toHaveAccessibleName("Team documentation");
+    await expect(iconOnly).not.toContainText("Team documentation");
     await page.goto(`/${workspace.slug}/start`);
     await expect(page).toHaveURL(new RegExp(`/${workspace.slug}/links/`));
     await expect(page.locator("iframe")).toHaveAttribute(
@@ -95,6 +102,10 @@ test("configures workspace and project home links and restores issues when clear
     if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/project-home.png` });
     await page.getByRole("button", { name: "Issues", exact: true }).click();
     await expect(page.locator("iframe")).toHaveCount(0);
+    const header = page.getByRole("navigation", { name: "Quick links" });
+    await expect(header.getByRole("link", { name: "Team documentation" })).not.toContainText("Team documentation");
+    await expect(header.getByRole("link", { name: "Project dashboard" })).toContainText("Project dashboard");
+    if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/header-icon-only.png` });
     await expect(page.getByRole("link", { name: "Project dashboard", exact: true })).toBeVisible();
 
     await page.goto(`/${workspace.slug}/settings?tab=links`);

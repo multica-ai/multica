@@ -1,5 +1,8 @@
 {
   "links": {
+    "show_in_header": "顶栏显示",
+    "icon_and_name": "图标和名称",
+    "icon_only": "仅图标",
     "title": "快捷链接",
     "add": "添加链接",
     "edit": "编辑链接",

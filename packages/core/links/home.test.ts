@@ -9,6 +9,7 @@ const home: WorkspaceLink = {
   projectId: null,
   name: "Home",
   icon: "",
+  showName: true,
   urlTemplate: "https://example.com/{workspace_slug}",
   openMode: "embed",
   allowSameOrigin: false,

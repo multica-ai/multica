@@ -20,6 +20,7 @@ describe("workspace link response compatibility", () => {
       name: "Docs",
       urlTemplate: "https://example.com",
       icon: "",
+      showName: true,
       openMode: "new_tab",
       isHome: false,
       allowSameOrigin: false,
@@ -35,11 +36,16 @@ describe("workspace link response compatibility", () => {
       isHome: true,
     });
   });
+  it("defaults a missing show_name to true and preserves explicit false", () => {
+    expect(WorkspaceLinkSchema.parse(link).showName).toBe(true);
+    expect(WorkspaceLinkSchema.parse({ ...link, show_name: false }).showName).toBe(false);
+  });
   it.each([
     { ...link, name: 1 },
     { ...link, url_template: null },
     { ...link, allow_same_origin: "true" },
     { ...link, is_home: "true" },
+    { ...link, show_name: "false" },
     {},
   ])("rejects malformed used fields %j", (raw) => {
     expect(
