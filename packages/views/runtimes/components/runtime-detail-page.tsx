@@ -37,6 +37,7 @@ import {
   ObjectSection,
   ObjectSectionAction,
   ObjectSectionCard,
+  ObjectSectionEmpty,
 } from "../../layout/object-page";
 import { AppLink } from "../../navigation";
 import { buildWorkloadIndex, RuntimeList } from "./runtime-list";
@@ -351,22 +352,19 @@ export function RuntimeDetailPage({
                 />
               </div>
             ) : (
-              <div className="flex min-h-40 flex-col items-center justify-center rounded-lg border border-dashed px-6 text-center">
-                <Server
-                  aria-hidden="true"
-                  className="size-6 text-faint-foreground"
-                />
-                <p className="mt-3 text-body font-medium">
-                  {bootstrapping
+              <ObjectSectionEmpty
+                icon={Server}
+                title={
+                  bootstrapping
                     ? t(($) => $.page.bootstrapping.title)
-                    : t(($) => $.machine.no_runtimes_title)}
-                </p>
-                <p className="mt-1 max-w-sm text-caption text-muted-foreground">
-                  {bootstrapping
+                    : t(($) => $.machine.no_runtimes_title)
+                }
+                description={
+                  bootstrapping
                     ? t(($) => $.page.bootstrapping.hint)
-                    : t(($) => $.machine.no_runtimes_hint)}
-                </p>
-              </div>
+                    : t(($) => $.machine.no_runtimes_hint)
+                }
+              />
             )}
           </ObjectSection>
         </div>

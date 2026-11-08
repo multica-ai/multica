@@ -104,6 +104,8 @@ vi.mock("@multica/core/runtimes", async () => ({
 
 vi.mock("@multica/core/agents", () => ({
   useWorkspacePresenceMap: () => ({ byAgent: new Map() }),
+  AGENT_MAX_CONCURRENT_TASKS_MIN: 1,
+  AGENT_MAX_CONCURRENT_TASKS_MAX: 50,
 }));
 
 vi.mock("@multica/core/paths", () => ({

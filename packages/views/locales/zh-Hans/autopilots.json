@@ -1,7 +1,6 @@
 {
   "page": {
     "new_autopilot": "新建自动化",
-    "start_blank": "从空白开始",
     "table": {
       "name": "名称",
       "agent": "智能体",
@@ -15,10 +14,6 @@
       "created": "创建时间"
     },
     "last_run_empty": "--",
-    "empty": {
-      "title": "还没有自动化",
-      "hint": "为你的智能体安排周期性工作。从模板选一个，或从空白开始。"
-    },
     "no_matches": "没有匹配的自动化",
     "retry": "重试"
   },
@@ -66,6 +61,8 @@
   },
   "detail": {
     "not_found": "未找到该自动化",
+    "not_found_description": "它可能已被删除，或你没有访问权限。",
+    "back_to_list": "全部自动化",
     "pause_aria": "暂停自动化",
     "activate_aria": "启用自动化",
     "paused_runtime_required": "由于执行智能体失去运行时，自动化已暂停。绑定运行时后请重新启用。",
@@ -150,6 +147,8 @@
   "run": {
     "issue_linked": "已关联任务",
     "view_log": "查看执行日志",
+    "stop": "停止运行",
+    "stop_failed": "无法停止运行。",
     "skipped_group": {
       "label": "已跳过",
       "summary": "{{count}} 条跳过的运行"
@@ -484,7 +483,6 @@
     "select_page": "选择所有已开启的唤醒",
     "load_error": "无法加载唤醒",
     "loading": "正在加载唤醒…",
-    "empty": "暂无唤醒规则",
     "disable_selected": "关闭所选",
     "confirm_title": "关闭 {{count}} 个唤醒？",
     "confirm_body": "关闭后将停止后续唤醒，并撤回仍在排队、尚未交给智能体的运行。已交给智能体的运行会继续，可在执行日志中停止。",
@@ -501,7 +499,6 @@
     },
     "target_agent": "唤醒对象",
     "empty_filtered": "没有匹配的唤醒",
-    "clear_filters": "清除筛选",
     "batch_success": "已关闭 {{count}} 条唤醒",
     "batch_partial": "已关闭 {{succeeded}} 条，{{failed}} 条失败；失败项仍保留选中，可重试。",
     "source": "来源",
@@ -521,6 +518,37 @@
     "banner_view": "查看",
     "create": "新建唤醒",
     "create_pick_issue": "选择要添加唤醒的任务",
-    "create_pick_issue_description": "唤醒属于该任务，并随任务结束而停止。"
+    "create_pick_issue_description": "唤醒属于该任务，并随任务结束而停止。",
+    "intro": {
+      "title": "让智能体在对的时候回来",
+      "description": "唤醒挂在任务上：PR 合并了、有人回复了、到点了，就把智能体叫回来接着做。任务结束，唤醒自动停止。",
+      "slides": {
+        "event": {
+          "title": "等事件发生",
+          "description": "不用让智能体空转等待。条件满足时，平台自动把它叫回来。"
+        },
+        "time": {
+          "title": "或者定个时间",
+          "description": "单次定时适合\"明天下午再看看\"，周期适合每天的例行检查。"
+        },
+        "ends": {
+          "title": "任务结束就停",
+          "description": "唤醒属于任务，任务完成或取消后自动关闭，不会留下孤儿规则。"
+        }
+      },
+      "art": {
+        "issue_inbox": "收件箱分组的空状态",
+        "issue_board": "看板列宽可拖拽",
+        "issue_paste": "评论支持粘贴图片",
+        "reply": "\"PR 已合并，开始更新文档并关闭任务。\"",
+        "event_examples": "PR 合并、有新评论"
+      }
+    }
+  },
+  "intro": {
+    "label": "自动化",
+    "title": "让智能体按时自己开工",
+    "description": "设好时间表或 Webhook，每次触发都会自动建任务交给智能体，也可以直接运行。挑一个模板，改改就能用。",
+    "templates": "从模板开始"
   }
 }

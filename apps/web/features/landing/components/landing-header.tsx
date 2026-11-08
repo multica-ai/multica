@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Menu, X } from "@multica/ui/icons";
-import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
+import { MulticaWordmark } from "@multica/ui/components/common/multica-wordmark";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
 import { docsHrefForLocale, useLocale } from "../i18n";
@@ -41,22 +41,14 @@ export function LandingHeader({
     >
       <div className="mx-auto flex h-[76px] max-w-[1320px] items-center justify-between px-4 sm:px-6 lg:px-8">
         <div className="flex min-w-0 items-center gap-6 lg:gap-8">
-          <Link href="/" className="flex shrink-0 items-center gap-3">
-            <MulticaIcon
+          <Link href="/" className="flex shrink-0 items-center">
+            <MulticaWordmark
+              hop
               className={cn(
-                "size-5",
+                "h-6 sm:h-[26px]",
                 variant === "dark" ? "text-white" : "text-[#0a0d12]",
               )}
-              noSpin
             />
-            <span
-              className={cn(
-                "text-title font-semibold tracking-[0.04em] lowercase sm:text-title-lg",
-                variant === "dark" ? "text-white/92" : "text-[#0a0d12]",
-              )}
-            >
-              multica
-            </span>
           </Link>
 
           <nav

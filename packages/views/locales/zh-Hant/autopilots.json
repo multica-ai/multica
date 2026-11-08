@@ -1,7 +1,6 @@
 {
   "page": {
     "new_autopilot": "新建自動化",
-    "start_blank": "從空白開始",
     "table": {
       "name": "名稱",
       "agent": "AI 代理",
@@ -15,10 +14,6 @@
       "created": "建立時間"
     },
     "last_run_empty": "--",
-    "empty": {
-      "title": "還沒有自動化",
-      "hint": "為你的 AI 代理安排週期性工作。從模板選一個，或從空白開始。"
-    },
     "no_matches": "沒有匹配的自動化",
     "retry": "重試"
   },
@@ -66,6 +61,8 @@
   },
   "detail": {
     "not_found": "未找到該自動化",
+    "not_found_description": "它可能已被刪除，或你沒有訪問權限。",
+    "back_to_list": "全部自動化",
     "pause_aria": "暫停自動化",
     "activate_aria": "啟用自動化",
     "paused_runtime_required": "由於執行 AI 代理失去執行時，自動化已暫停。繫結執行時後請重新啟用。",
@@ -150,6 +147,8 @@
   "run": {
     "issue_linked": "已關聯任務",
     "view_log": "檢視執行日誌",
+    "stop": "停止執行",
+    "stop_failed": "無法停止執行。",
     "skipped_group": {
       "label": "已跳過",
       "summary": "{{count}} 條跳過的執行"
@@ -484,7 +483,6 @@
     "select_page": "選擇所有已開啟的喚醒",
     "load_error": "無法載入喚醒",
     "loading": "正在載入喚醒…",
-    "empty": "暫無喚醒規則",
     "disable_selected": "關閉所選",
     "confirm_title": "關閉 {{count}} 個喚醒？",
     "confirm_body": "關閉後將停止後續喚醒，並撤回仍在排隊、尚未交給 AI 代理的執行。已交給 AI 代理的執行會繼續，可在執行日誌中停止。",
@@ -501,7 +499,6 @@
     },
     "target_agent": "喚醒物件",
     "empty_filtered": "沒有匹配的喚醒",
-    "clear_filters": "清除篩選",
     "batch_success": "已關閉 {{count}} 條喚醒",
     "batch_partial": "已關閉 {{succeeded}} 條，{{failed}} 條失敗；失敗項仍保留選中，可重試。",
     "source": "來源",
@@ -521,6 +518,37 @@
     "banner_view": "檢視",
     "create": "新建喚醒",
     "create_pick_issue": "選擇要新增喚醒的任務",
-    "create_pick_issue_description": "喚醒屬於該任務，並隨任務結束而停止。"
+    "create_pick_issue_description": "喚醒屬於該任務，並隨任務結束而停止。",
+    "intro": {
+      "title": "讓 AI 代理在對的時候回來",
+      "description": "喚醒掛在任務上：PR 合併了、有人回覆了、到點了，就把 AI 代理叫回來接著做。任務結束，喚醒自動停止。",
+      "slides": {
+        "event": {
+          "title": "等事件發生",
+          "description": "不用讓 AI 代理空轉等待。條件滿足時，平臺自動把它叫回來。"
+        },
+        "time": {
+          "title": "或者定個時間",
+          "description": "單次定時適合\"明天下午再看看\"，週期適合每天的例行檢查。"
+        },
+        "ends": {
+          "title": "任務結束就停",
+          "description": "喚醒屬於任務，任務完成或取消後自動關閉，不會留下孤兒規則。"
+        }
+      },
+      "art": {
+        "issue_inbox": "收件匣分組的空狀態",
+        "issue_board": "看板欄寬可拖曳",
+        "issue_paste": "評論支援貼上圖片",
+        "reply": "\"PR 已合併，開始更新文件並關閉任務。\"",
+        "event_examples": "PR 合併、有新評論"
+      }
+    }
+  },
+  "intro": {
+    "label": "自動化",
+    "title": "讓 AI 代理按時自己開工",
+    "description": "設好排程或 Webhook，每次觸發都會自動建立任務交給 AI 代理，也可以直接執行。挑一個模板，改一改就能用。",
+    "templates": "從模板開始"
   }
 }

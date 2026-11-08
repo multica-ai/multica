@@ -10,8 +10,10 @@ import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import {
   agentDetailOptions,
+  agentListOptions,
   squadListOptions,
 } from "@multica/core/workspace/queries";
+import { MulticaStarRow } from "@multica/ui/components/common/multica-graphics";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
@@ -38,6 +40,12 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
   const runtime = runtimes.find((item) => item.id === agent?.runtime_id) ?? null;
   const squad = squadId ? squads.find((item) => item.id === squadId) ?? null : null;
   const name = agent?.name ?? "";
+  const { data: agents } = useQuery(agentListOptions(wsId));
+  // One star per active agent, the newest last. Clamped so a tiny workspace
+  // still reads as a row and a huge one still fits the banner.
+  const stars = agents
+    ? Math.min(Math.max(agents.filter((item) => !item.archived_at).length, 3), 11)
+    : null;
 
   return (
     <AgentCreateShell
@@ -48,6 +56,17 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
     >
       <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-12">
         <div className="m-auto w-full max-w-xl">
+          <div aria-hidden="true" className="relative mb-10 h-36 overflow-hidden rounded-xl bg-multica-ink">
+            {stars && agent ? (
+              <MulticaStarRow
+                count={stars}
+                join
+                delay={0.2}
+                className="absolute top-1/2 left-1/2 h-8 w-auto -translate-x-1/2 -translate-y-1/2 text-multica-paper/15"
+                lastClassName="fill-multica-paper"
+              />
+            ) : null}
+          </div>
           <div className="flex flex-col items-center text-center">
             {isLoading || !agent ? (
               <Skeleton className="size-14 rounded-full" />

@@ -696,7 +696,7 @@ type Daemon struct {
 
 	activeEnvRootsMu   sync.Mutex
 	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
-	activeEnvRoots     map[string]int  // env root path -> reference count (handles reuse paths marked twice)
+	activeEnvRoots     map[string]int  // env root guard key -> reference count (handles reuse paths marked twice)
 	deletingEnvRoots   map[string]bool // env roots reserved by GC; new tasks wait until the mutation finishes
 
 	activeStoresMu   sync.Mutex
@@ -2096,6 +2096,12 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 		logFields = append(logFields, "profile", d.cfg.Profile)
 	}
 	d.logger.Info("starting daemon", logFields...)
+	// Sweep orphaned ZCode provider credential snapshots left by a prior
+	// crash/SIGKILL (prepareZcodeRuntimeEnv writes 0600 files under
+	// $TMPDIR/multica-zcode-providers-*; normal exits remove them in defer).
+	if n := agent.CleanupStaleZcodeProviderSnapshots(); n > 0 {
+		d.logger.Info("removed stale ZCode provider credential snapshots", "count", n)
+	}
 	d.logger.Debug("daemon config resolved",
 		"daemon_id", d.cfg.DaemonID,
 		"device_name", d.cfg.DeviceName,
@@ -5766,13 +5772,11 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		taskLog.Error("resolve stable task env root", "error", resolveRootErr)
 	}
 	if resolvedEnvRoot != "" {
-		d.markActiveEnvRoot(resolvedEnvRoot)
-		defer d.unmarkActiveEnvRoot(resolvedEnvRoot)
+		defer d.markActiveEnvRoot(resolvedEnvRoot)()
 	}
 	if task.PriorWorkDir != "" {
 		if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != resolvedEnvRoot {
-			d.markActiveEnvRoot(priorRoot)
-			defer d.unmarkActiveEnvRoot(priorRoot)
+			defer d.markActiveEnvRoot(priorRoot)()
 		}
 	}
 
@@ -6528,6 +6532,7 @@ var runtimeDisplayNameOverrides = map[string]string{
 	"qwenpaw":    "QwenPaw",
 	"mcode":      "MiniMax Code",
 	"muse":       "Muse Code",
+	"zcode":      "ZCode",
 	"zeroclaw":   "ZeroClaw",
 }
 
@@ -8026,18 +8031,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("resolve stable task env root: %w", err)
 	}
-	d.markActiveEnvRoot(resolvedRoot)
-	defer d.unmarkActiveEnvRoot(resolvedRoot)
+	defer d.markActiveEnvRoot(resolvedRoot)()
 	if task.PriorWorkDir != "" {
 		priorRoot := filepath.Dir(task.PriorWorkDir)
 		if priorRoot != resolvedRoot {
-			d.markActiveEnvRoot(priorRoot)
-			defer d.unmarkActiveEnvRoot(priorRoot)
+			defer d.markActiveEnvRoot(priorRoot)()
 		}
 	}
 
 	// Claim the env root HERE, in the daemon parent, and hold it for the whole
-	// task run — the same lifetime as unmarkActiveEnvRoot above.
+	// task run, for the same lifetime as the active guard above.
 	//
 	// It cannot be claimed inside preparation: production preparation runs in a
 	// short-lived helper process (prepareExecutionEnvironment ->
@@ -8436,8 +8439,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Belt-and-suspenders: also mark whatever root we ended up with, in case
 	// future changes diverge from ResolveRootDir.
 	if env.RootDir != resolvedRoot && env.RootDir != "" {
-		d.markActiveEnvRoot(env.RootDir)
-		defer d.unmarkActiveEnvRoot(env.RootDir)
+		defer d.markActiveEnvRoot(env.RootDir)()
 	}
 	// Finalize the worktree on EVERY exit path, success or failure: commit
 	// whatever the agent left uncommitted, then unregister the worktree from
@@ -8678,6 +8680,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// the daemon cannot record either (#9404).
 	if env.LocalWorktree != nil {
 		promptOptions = append(promptOptions, WithWorktreeBranch(env.LocalWorktree.Branch, env.LocalWorktree.BaseCommit))
+		// The branch block's rule for uncommitted files has one exception,
+		// decided by the same predicate Finalize uses (#9788 review).
+		if env.LocalWorktree.CommitsAllLeftovers() {
+			promptOptions = append(promptOptions, WithWorktreeCommitsAllLeftovers())
+		}
 	}
 	prompt := BuildPrompt(task, provider, promptOptions...)
 
@@ -8718,13 +8725,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}
 	}
-	// Ensure the multica CLI is on PATH inside the agent's environment.
-	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
-	// inherit the daemon's PATH. Prepend the directory of the running
-	// multica binary so that `multica` commands in the agent always resolve.
-	if selfBin, err := resolveSelfExecutable(); err == nil {
-		binDir := filepath.Dir(selfBin)
-		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
+	if err := configureTaskCLIEnvironment(agentEnv); err != nil {
+		return TaskResult{}, err
 	}
 	// Point Codex to the per-task CODEX_HOME so it discovers skills natively
 	// without polluting the system ~/.codex/skills/.
@@ -8828,6 +8830,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if err := agent.StopHermesTaskGateway(backendConfig, env.HermesHome); err != nil {
 			return TaskResult{}, err
 		}
+		stopGateway, err := agent.StartHermesTaskGateway(ctx, backendConfig, env.HermesHome)
+		if err != nil {
+			return TaskResult{}, err
+		}
+		defer stopGateway()
 		defer func() {
 			if err := agent.StopHermesTaskGateway(backendConfig, env.HermesHome); err != nil {
 				d.logger.Warn("failed to stop task Hermes gateway", "home", env.HermesHome, "error", err)
@@ -10551,42 +10558,58 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 	return result
 }
 
-// markActiveEnvRoot records that a task is currently using the given env root,
-// so the GC loop won't reclaim its artifacts mid-execution. Calls are
-// reference-counted so a reuse path marked twice (predicted + prior) only
-// becomes inactive after both unmark calls.
-func (d *Daemon) markActiveEnvRoot(envRoot string) {
-	if envRoot == "" {
-		return
+// envRootGuardKey gives a reused root and the path GC scans through the
+// configured workspaces root the same identity, even before a new task root
+// has been created. The key is used only for locking, never as a deletion path.
+func envRootGuardKey(envRoot string) (string, error) {
+	key, err := util.ResolveSymlinksBestEffort(envRoot)
+	if runtime.GOOS == "windows" {
+		// A junction can spell the target with different casing.
+		key = strings.ToLower(key)
 	}
-	d.activeEnvRootsMu.Lock()
-	defer d.activeEnvRootsMu.Unlock()
-	d.ensureActiveEnvRootStateLocked()
-	for d.deletingEnvRoots[envRoot] {
-		d.activeEnvRootsCond.Wait()
-	}
-	d.activeEnvRoots[envRoot]++
+	return key, err
 }
 
-func (d *Daemon) unmarkActiveEnvRoot(envRoot string) {
-	if envRoot == "" {
-		return
+// markActiveEnvRoot protects a root until the returned function is called.
+// The release uses the original key even if a link is moved in the meantime.
+func (d *Daemon) markActiveEnvRoot(envRoot string) (release func()) {
+	key, err := envRootGuardKey(envRoot)
+	if err != nil {
+		// Keep the original guard for this path. GC skips paths whose
+		// identity it cannot resolve.
+		key = filepath.Clean(envRoot)
+	}
+	if key == "" {
+		return func() {}
 	}
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
 	d.ensureActiveEnvRootStateLocked()
-	if d.activeEnvRoots[envRoot] <= 1 {
-		delete(d.activeEnvRoots, envRoot)
-		return
+	for d.deletingEnvRoots[key] {
+		d.activeEnvRootsCond.Wait()
 	}
-	d.activeEnvRoots[envRoot]--
+	d.activeEnvRoots[key]++
+
+	return func() {
+		d.activeEnvRootsMu.Lock()
+		defer d.activeEnvRootsMu.Unlock()
+		if d.activeEnvRoots[key] <= 1 {
+			delete(d.activeEnvRoots, key)
+			return
+		}
+		d.activeEnvRoots[key]--
+	}
 }
 
 func (d *Daemon) isActiveEnvRoot(envRoot string) bool {
+	key, err := envRootGuardKey(envRoot)
+	if err != nil {
+		return true
+	}
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
 	d.ensureActiveEnvRootStateLocked()
-	return d.activeEnvRoots[envRoot] > 0
+	return d.activeEnvRoots[key] > 0
 }
 
 func (d *Daemon) ensureActiveEnvRootStateLocked() {
@@ -10607,19 +10630,20 @@ func (d *Daemon) ensureActiveEnvRootStateLocked() {
 // the active task and skips, or task startup waits for the mutation to finish
 // and recreates/uses the post-GC environment.
 func (d *Daemon) reserveEnvRootForGC(envRoot string) (release func(), ok bool) {
-	if envRoot == "" {
+	key, err := envRootGuardKey(envRoot)
+	if err != nil || key == "" {
 		return nil, false
 	}
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
 	d.ensureActiveEnvRootStateLocked()
-	if d.activeEnvRoots[envRoot] > 0 || d.deletingEnvRoots[envRoot] {
+	if d.activeEnvRoots[key] > 0 || d.deletingEnvRoots[key] {
 		return nil, false
 	}
-	d.deletingEnvRoots[envRoot] = true
+	d.deletingEnvRoots[key] = true
 	return func() {
 		d.activeEnvRootsMu.Lock()
-		delete(d.deletingEnvRoots, envRoot)
+		delete(d.deletingEnvRoots, key)
 		d.activeEnvRootsCond.Broadcast()
 		d.activeEnvRootsMu.Unlock()
 	}, true
@@ -10714,6 +10738,11 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 			Name:        s.Name,
 			Description: s.Description,
 			Content:     s.Content,
+		}
+		// Legacy full-skill responses omit Source and give only workspace
+		// skills an ID, matching the server's bundle source classification.
+		if s.Source == skillbundle.SourceBuiltin || (s.Source == "" && s.ID == "") {
+			result[i].BuiltinName = s.Name
 		}
 		for _, f := range s.Files {
 			result[i].Files = append(result[i].Files, execenv.SkillFileContextForEnv{

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useId, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BarChart3, BookOpenText, Bot, Monitor, Plus, User, UserPlus, Users } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
@@ -10,8 +10,8 @@ import { agentTaskSnapshotOptions, type AgentPresenceDetail } from "@multica/cor
 import { useAgentsViewStore } from "@multica/core/agents/stores";
 import { useAuthStore } from "@multica/core/auth";
 import { issueDetailOptions } from "@multica/core/issues/queries";
+import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
-import { deriveRuntimeHealth } from "@multica/core/runtimes";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { memberListOptions, skillListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -19,6 +19,7 @@ import type { Agent, AgentTask } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { availabilityConfig } from "../../agents/presence";
 import { useT } from "../../i18n";
+import { buildRuntimeMachines, runtimeMachineCounts } from "../../runtimes/components/runtime-machines";
 import {
   PanelBody,
   PanelCount,
@@ -26,12 +27,60 @@ import {
   PanelLink,
   PanelList,
   PanelSection,
+  PANEL_ROW_CLASS,
   isPathWithin,
+  panelRowStateClass,
 } from "../panel-nav";
 import { useTeamAgentStatus } from "./team-status";
 
 const EMPTY_TASKS: AgentTask[] = [];
 const MEMBER_AVATAR_LIMIT = 4;
+const AGENT_PREVIEW_LIMIT = 5;
+
+function AgentStatusSection({
+  label,
+  agents,
+  collapsed,
+  onCollapsedChange,
+  countClassName,
+  renderAgent,
+}: {
+  label: string;
+  agents: Agent[];
+  collapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
+  countClassName?: string;
+  renderAgent: (agent: Agent) => ReactNode;
+}) {
+  const { t } = useT("layout");
+  const [expanded, setExpanded] = useState(false);
+  const listId = useId();
+  const displayed = expanded ? agents : agents.slice(0, AGENT_PREVIEW_LIMIT);
+
+  return (
+    <PanelSection
+      label={label}
+      collapsed={collapsed}
+      onCollapsedChange={onCollapsedChange}
+      action={<PanelCount value={agents.length} className={cn("pr-2", countClassName)} />}
+    >
+      <PanelList id={listId}>{displayed.map(renderAgent)}</PanelList>
+      {agents.length > AGENT_PREVIEW_LIMIT && (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={listId}
+          className={cn(PANEL_ROW_CLASS, panelRowStateClass(false), "pl-[2.375rem] text-caption")}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded
+            ? t(($) => $.panels.team.show_fewer_agents)
+            : t(($) => $.panels.team.show_more_agents, { count: agents.length - AGENT_PREVIEW_LIMIT })}
+        </button>
+      )}
+    </PanelSection>
+  );
+}
 
 function AgentAvatar({ agent, detail }: { agent: Agent; detail: AgentPresenceDetail | undefined }) {
   return (
@@ -101,6 +150,10 @@ export function TeamPanel() {
   const agentsScope = useAgentsViewStore((s) => s.scope);
   const setAgentsScope = useAgentsViewStore((s) => s.setScope);
   const { agents, stuck, working, byAgent } = useTeamAgentStatus(wsId || undefined);
+  const workingCollapsed = useSidebarTreeStore((s) => s.workingCollapsed);
+  const setWorkingCollapsed = useSidebarTreeStore((s) => s.setWorkingCollapsed);
+  const needsAttentionCollapsed = useSidebarTreeStore((s) => s.needsAttentionCollapsed);
+  const setNeedsAttentionCollapsed = useSidebarTreeStore((s) => s.setNeedsAttentionCollapsed);
 
   const { data: snapshot = EMPTY_TASKS } = useQuery({
     ...agentTaskSnapshotOptions(wsId),
@@ -119,12 +172,11 @@ export function TeamPanel() {
   const { data: members = [] } = useQuery({ ...memberListOptions(wsId), enabled: !!wsId });
   const { data: skills = [] } = useQuery({ ...skillListOptions(wsId), enabled: !!wsId });
   const { data: runtimes = [] } = useQuery({ ...runtimeListOptions(wsId), enabled: !!wsId });
-  const offlineRuntimes = useMemo(() => {
-    const now = Date.now();
-    return runtimes.filter((runtime) => {
-      const health = deriveRuntimeHealth(runtime, now);
-      return health === "offline" || health === "long_offline";
-    }).length;
+  const machineCounts = useMemo(() => {
+    const machines = buildRuntimeMachines(runtimes, { now: Date.now() }).filter(
+      (machine) => !machine.runtimes.every((runtime) => runtime.provider === "qoder_cloud"),
+    );
+    return runtimeMachineCounts(machines);
   }, [runtimes]);
 
   const mineCount = userId ? agents.filter((agent) => agent.owner_id === userId).length : 0;
@@ -158,50 +210,51 @@ export function TeamPanel() {
       </PanelHeader>
       <PanelBody>
         {stuck.length > 0 && (
-          <PanelSection
+          <AgentStatusSection
+            key={`attention:${wsId}`}
             label={t(($) => $.panels.team.needs_attention)}
-            action={<PanelCount value={stuck.length} className="pr-2 text-warning" />}
-          >
-            <PanelList>
-              {stuck.map((agent) => {
-                const href = p.agentDetail(agent.id);
-                return (
-                  <PanelLink
-                    key={agent.id}
-                    href={href}
-                    label={agent.name}
-                    active={isPathWithin(pathname, href)}
-                    icon={<AgentAvatar agent={agent} detail={byAgent.get(agent.id)} />}
-                    description={
-                      <span className="text-warning">
-                        {t(($) => $.panels.team.stuck, { count: byAgent.get(agent.id)?.queuedCount ?? 0 })}
-                      </span>
-                    }
-                  />
-                );
-              })}
-            </PanelList>
-          </PanelSection>
+            agents={stuck}
+            collapsed={needsAttentionCollapsed}
+            onCollapsedChange={setNeedsAttentionCollapsed}
+            countClassName="text-warning"
+            renderAgent={(agent) => {
+              const href = p.agentDetail(agent.id);
+              return (
+                <PanelLink
+                  key={agent.id}
+                  href={href}
+                  label={agent.name}
+                  active={isPathWithin(pathname, href)}
+                  icon={<AgentAvatar agent={agent} detail={byAgent.get(agent.id)} />}
+                  description={
+                    <span className="text-warning">
+                      {t(($) => $.panels.team.stuck, { count: byAgent.get(agent.id)?.queuedCount ?? 0 })}
+                    </span>
+                  }
+                />
+              );
+            }}
+          />
         )}
 
         {working.length > 0 && (
-          <PanelSection
+          <AgentStatusSection
+            key={`working:${wsId}`}
             label={t(($) => $.panels.team.working_now)}
-            action={<PanelCount value={working.length} className="pr-2" />}
-          >
-            <PanelList>
-              {working.map((agent) => (
-                <WorkingAgentRow
-                  key={agent.id}
-                  agent={agent}
-                  detail={byAgent.get(agent.id)}
-                  task={runningTaskByAgent.get(agent.id)}
-                  wsId={wsId}
-                  active={isPathWithin(pathname, p.agentDetail(agent.id))}
-                />
-              ))}
-            </PanelList>
-          </PanelSection>
+            agents={working}
+            collapsed={workingCollapsed}
+            onCollapsedChange={setWorkingCollapsed}
+            renderAgent={(agent) => (
+              <WorkingAgentRow
+                key={agent.id}
+                agent={agent}
+                detail={byAgent.get(agent.id)}
+                task={runningTaskByAgent.get(agent.id)}
+                wsId={wsId}
+                active={isPathWithin(pathname, p.agentDetail(agent.id))}
+              />
+            )}
+          />
         )}
 
         <PanelSection label={t(($) => $.nav.agents)}>
@@ -231,22 +284,9 @@ export function TeamPanel() {
               href={p.squads()}
               icon={<Users />}
               label={t(($) => $.nav.squads)}
-              active={pathname === p.squads()}
+              active={isPathWithin(pathname, p.squads())}
               trailing={<PanelCount value={liveSquads.length} />}
             />
-            {liveSquads.map((squad) => {
-              const href = p.squadDetail(squad.id);
-              return (
-                <PanelLink
-                  key={squad.id}
-                  href={href}
-                  label={squad.name}
-                  active={isPathWithin(pathname, href)}
-                  icon={<span className="size-4" aria-hidden />}
-                  className="text-caption"
-                />
-              );
-            })}
             <PanelLink
               href={`${p.settings()}?tab=members`}
               label={t(($) => $.panels.team.members, { count: members.length })}
@@ -284,9 +324,12 @@ export function TeamPanel() {
               label={t(($) => $.nav.runtimes)}
               active={isPathWithin(pathname, p.runtimes())}
               trailing={
-                offlineRuntimes > 0 ? (
-                  <span className="shrink-0 text-caption text-warning">
-                    {t(($) => $.panels.team.runtimes_offline, { count: offlineRuntimes })}
+                machineCounts.all > 0 ? (
+                  <span className={cn(
+                    "shrink-0 text-caption",
+                    machineCounts.online > 0 ? "text-success" : "text-warning",
+                  )}>
+                    {t(($) => $.panels.team.runtimes_online, { count: machineCounts.online })}
                   </span>
                 ) : undefined
               }

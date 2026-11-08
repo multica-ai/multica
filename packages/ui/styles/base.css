@@ -48,16 +48,59 @@
   color: var(--shiki-dark) !important;
 }
 
-/* Multica icon: entrance spin animation */
-@keyframes entrance-spin {
-  0% { transform: rotate(0deg); opacity: 0; }
-  50% { opacity: 1; }
-  100% { transform: rotate(360deg); opacity: 1; }
-}
+/* Multica brand motion — brand guidelines v5 §08. One move: a 45° turn, which
+ * lands the eight-armed star back on itself. Only the tile and the star
+ * overshoot (pop); nothing else does. Delays are set inline by the components
+ * so a sequence stays readable in one place. */
+@keyframes multica-pop { from { transform: scale(0.4); opacity: 0; } }
+@keyframes multica-write { from { stroke-dashoffset: 1; } }
+@keyframes multica-settle { from { transform: rotate(-45deg); } }
+@keyframes multica-arm-grow { from { transform: scaleX(0); } }
+@keyframes multica-arm-fade { from { opacity: 1; } to { opacity: 0.16; } }
+@keyframes multica-star-in { from { transform: scale(0) rotate(-135deg); } }
+@keyframes multica-star-enter { from { transform: rotate(-45deg) scale(0.6); opacity: 0; } }
+@keyframes multica-hop { 40% { transform: translateY(-14%); } }
 
-.animate-entrance-spin {
-  animation: entrance-spin 0.6s ease-out forwards;
+.multica-pop {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: multica-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
+.multica-write {
+  stroke-dasharray: 1 1;
+  animation: multica-write 0.5s cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+/* The group's own box shrinks while its arms grow, so turn about the star's
+   grid centre instead. */
+.multica-settle {
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+  animation: multica-settle 1.1s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.multica-arm-grow {
+  transform-box: fill-box;
+  transform-origin: 0% 50%;
+  animation: multica-arm-grow 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.multica-arm-fade { animation: multica-arm-fade 0.8s linear infinite; }
+.multica-star {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+}
+/* `backwards`, not `both`: a held end state would block the hover turn. */
+.multica-star-in { animation: multica-star-in 0.9s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
+.multica-star-enter {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: multica-star-enter 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+/* Website nav only — the product never animates the wordmark on hover. */
+.multica-hop-on-hover > g { transform-box: fill-box; transform-origin: 50% 100%; }
+.multica-hop-on-hover:hover > g {
+  animation: multica-hop 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.multica-hop-on-hover .multica-star { transition: transform 0.7s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.multica-hop-on-hover:hover .multica-star { transform: rotate(45deg); }
 
 /* Onboarding: step / phase entry — 400ms fade.
  * Applied on mount so every new step (and intra-step phase switch, via
@@ -336,13 +379,27 @@ html[data-sidebar-resizing="true"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-entrance-spin,
+  /* Brand motion settles on its final frame. The think arms stop at full
+     strength around the open centre, so "working" still reads without
+     movement. */
+  .multica-pop,
+  .multica-write,
+  .multica-settle,
+  .multica-arm-grow,
+  .multica-arm-fade,
+  .multica-star-in,
+  .multica-star-enter,
+  .multica-hop-on-hover:hover > g,
   .animate-onboarding-enter,
   .animate-chat-impulse,
   .shimmer-text-window,
   .shimmer-text-copy,
   .animate-nav-progress-sweep {
     animation: none;
+  }
+
+  .multica-hop-on-hover:hover .multica-star {
+    transform: none;
   }
 
   .animate-skeleton {

@@ -3640,8 +3640,9 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 		// A daemon may still hold a stale candidate after the agent is rebound.
 		// Reject it before doing capacity work. ClaimAgentTask repeats the fence
 		// before its state transition; the claim handler then rechecks the freshly
-		// loaded Agent before returning any payload. Runtime mutation teardown is
-		// responsible for serializing and settling the remaining queued rows.
+		// loaded Agent before returning any payload. Runtime mutation paths settle
+		// the remaining queued rows: teardown and revocation cancel them, and
+		// UpdateAgent re-stamps them to the new runtime.
 		if runtimeID.Valid && agent.RuntimeID != runtimeID {
 			outcome = "runtime_mismatch"
 			return nil
@@ -3659,6 +3660,42 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 			outcome = "no_capacity"
 			return nil
 		}
+
+		// Runtime-wide cap (GitHub #9626): several agents can share one
+		// runtime (e.g. one local GPU), so the per-agent cap alone cannot
+		// keep their combined work bounded.
+		//
+		// The lock is taken before the cap is read, on every claim. The cap
+		// update (UpdateAgentRuntimeMaxConcurrentTasks in the handler) takes
+		// the same lock before committing, so once a PATCH returns, no claim
+		// can still commit against the old value: a claim either finished
+		// before the update got the lock, or reads the new value after it.
+		// Reading the cap first and locking only when it is set would let a
+		// claim that waited on the lock (or read NULL) dispatch against a
+		// stale cap. Claims on one runtime are already short and nearly
+		// serial (one daemon per runtime), so the extra lock is cheap.
+		if err := qtx.LockRuntimeClaimCapacity(ctx, claimRuntimeID); err != nil {
+			outcome = claimOutcomeErrorCountRunning
+			return fmt.Errorf("lock runtime claim capacity: %w", err)
+		}
+		runtimeCap, err := qtx.GetAgentRuntimeMaxConcurrentTasks(ctx, claimRuntimeID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			outcome = claimOutcomeErrorCountRunning
+			return fmt.Errorf("get runtime concurrency cap: %w", err)
+		}
+		if err == nil && runtimeCap.Valid {
+			runtimeRunning, err := qtx.CountActiveTasksByRuntime(ctx, claimRuntimeID)
+			if err != nil {
+				outcome = claimOutcomeErrorCountRunning
+				return fmt.Errorf("count runtime running tasks: %w", err)
+			}
+			if runtimeRunning >= int64(runtimeCap.Int32) {
+				decisionDetail = claimDecisionDetail{running: runtimeRunning, maxConcurrent: int64(runtimeCap.Int32)}
+				outcome = claimOutcomeRuntimeNoCapacity
+				return nil
+			}
+		}
+		countRunningMs = time.Since(t0).Milliseconds()
 
 		t0 = time.Now()
 		reclaimCheckAfter = t0.Add(claimResponseRecoveryWindow + ReclaimCheckHintSafetyMargin)
@@ -4753,11 +4790,10 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 			var payload protocol.TaskCompletedPayload
 			if err := json.Unmarshal(result, &payload); err == nil {
 				if payload.Output != "" {
-					// Match the CLI's --content / --description behavior: agents that
-					// emit literal `\n` 4-char sequences (Python/JSON-style) get them
-					// decoded into real newlines before the comment hits the DB. See
-					// util.UnescapeBackslashEscapes for the exact contract.
-					body := util.UnescapeBackslashEscapes(payload.Output)
+					// An agent that emitted its whole answer as one escaped blob gets
+					// its literal `\n` decoded; formatted output is stored verbatim.
+					// See util.DecodeEscapedAgentOutput for the exact contract.
+					body := util.DecodeEscapedAgentOutput(payload.Output)
 					if task.TriggerCommentID.Valid && isTrivialDoneOutput(body) {
 						slog.Warn("suppressing trivial comment-trigger fallback output",
 							"task_id", util.UUIDToString(task.ID),
@@ -4849,9 +4885,9 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 	// valid JSON; an empty Output is the only case this branch cares about.
 	var payload protocol.TaskCompletedPayload
 	_ = json.Unmarshal(result, &payload)
-	// Same unescape as the issue-comment path: literal `\n` from agent stdout
-	// becomes a real newline so the chat panel renders paragraph breaks.
-	body := util.UnescapeBackslashEscapes(payload.Output)
+	// Same decoding as the issue-comment path: an escaped blob gets its
+	// paragraph breaks back, while LaTeX and paths in formatted replies survive.
+	body := util.DecodeEscapedAgentOutput(payload.Output)
 	// Strip any in-band quick-actions footer from EVERY chat completion — the
 	// reserved syntax must never reach a stored transcript. This includes the
 	// agent-initiated intro turn (chat_input_task_id NULL), which previously
@@ -7399,6 +7435,19 @@ func (s *TaskService) NotifyTaskFinished(task db.AgentTaskQueue) {
 	s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
 }
 
+// NotifyRuntimeCapacityChanged wakes a runtime's daemon after its
+// runtime-wide concurrency cap was raised or removed (GitHub #9626), since
+// queued work held back by the old cap may now be claimable.
+func (s *TaskService) NotifyRuntimeCapacityChanged(runtimeID pgtype.UUID) {
+	s.notifyRuntimeMayHaveWork(runtimeID, "")
+}
+
+// NotifyRuntimeMayHaveWork wakes a runtime's daemon after queued work was
+// moved onto it outside an enqueue, such as an agent runtime switch.
+func (s *TaskService) NotifyRuntimeMayHaveWork(runtimeID pgtype.UUID) {
+	s.notifyRuntimeMayHaveWork(runtimeID, "")
+}
+
 // notifyTasksFinished is the batch form used by bulk terminal transitions.
 // Coalesce by runtime so cancelling many tasks on one machine produces one
 // cache bump and one websocket hint rather than a burst of identical work.
@@ -8068,9 +8117,9 @@ func quickCreateFailureDetail(result []byte) string {
 	if err := json.Unmarshal(result, &payload); err != nil {
 		return ""
 	}
-	// Same unescape as the comment-fallback path: literal `\n` sequences from
-	// agent stdout become real newlines before the reason reaches the user.
-	body := strings.TrimSpace(util.UnescapeBackslashEscapes(payload.Output))
+	// Same decoding as the comment-fallback path: an escaped blob's literal
+	// `\n` sequences become real newlines before the reason reaches the user.
+	body := strings.TrimSpace(util.DecodeEscapedAgentOutput(payload.Output))
 	if body == "" {
 		return ""
 	}

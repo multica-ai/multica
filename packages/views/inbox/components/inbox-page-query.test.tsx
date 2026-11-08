@@ -45,7 +45,13 @@ vi.mock("./inbox-list", () => ({
     ))}</div>
   ),
 }));
-vi.mock("./inbox-filter-menu", () => ({ InboxFilterMenu: () => null }));
+const filterMenuUnmounted = vi.hoisted(() => vi.fn());
+vi.mock("./inbox-filter-menu", () => ({
+  InboxFilterMenu: () => {
+    useEffect(() => () => filterMenuUnmounted(), []);
+    return <div data-testid="filter-menu" />;
+  },
+}));
 vi.mock("./inbox-list-item", () => ({ useTimeAgo: () => vi.fn() }));
 let rowActions: { onAction: (id: string) => void };
 vi.mock("./inbox-context-menu", () => ({
@@ -80,6 +86,7 @@ beforeEach(() => {
   searchParams = new URLSearchParams();
   replace.mockClear();
   detailUnmounted.mockClear();
+  filterMenuUnmounted.mockClear();
   useInboxFilterStore.setState({ filtersByWorkspace: {} });
   useInboxFilterStore.getState().toggleUnreadOnly("workspace-1");
 });
@@ -96,6 +103,30 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const page = (items: InboxItem[]): ArchivedInboxPage => ({ items, hasMore: false, nextCursor: null });
+
+it.each([false, true])("clears an older unread assignment when opening a read row via URL=%s", async (viaUrl) => {
+  useInboxFilterStore.setState({ filtersByWorkspace: {} });
+  if (viaUrl) searchParams.set("issue", "issue-a");
+  let rows = [
+    item({ id: "comment", read: true, created_at: "2026-06-15T08:01:00Z" }),
+    item({ id: "assigned", type: "issue_assigned", severity: "action_required" }),
+  ];
+  const listInbox = vi.fn(async () => rows);
+  const markInboxRead = vi.fn(async () => {
+    rows = rows.map((row) => ({ ...row, read: true }));
+    return rows[0]!;
+  });
+  setApiInstance({ listInbox, markInboxRead, getInboxUnreadSummary: async () => [] } as unknown as ApiClient);
+
+  renderPage();
+  const row = await screen.findByText("comment");
+  if (!viaUrl) fireEvent.click(row);
+
+  expect(await screen.findByTestId("detail")).toHaveTextContent("issue-a");
+  await waitFor(() => expect(markInboxRead).toHaveBeenCalledExactlyOnceWith("comment"));
+  await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(2));
+  expect(qc.getQueryData<InboxItem[]>(inboxKeys.list("workspace-1"))?.every((row) => row.read)).toBe(true);
+});
 
 function archivedFixture() {
   searchParams = new URLSearchParams("view=archived");
@@ -227,4 +258,23 @@ it.each(["status", "priority", "actor"] as const)("still applies the %s filter t
   await waitFor(() => expect(screen.queryByTestId("detail")).not.toBeInTheDocument());
   expect(screen.queryByText("inbox-a")).not.toBeInTheDocument();
   expect(replace).toHaveBeenLastCalledWith("/acme/inbox?view=archived");
+});
+
+it("keeps the archived list and its filter menu mounted while a new filter loads", async () => {
+  searchParams = new URLSearchParams("view=archived");
+  const next = deferred<ArchivedInboxPage>();
+  const listArchivedInboxPage = vi.fn(async (filters: InboxFilters) =>
+    filters.statuses.length ? next.promise : page([item({ archived: true })]));
+  setApiInstance({ listArchivedInboxPage, getInboxUnreadSummary: async () => [] } as unknown as ApiClient);
+  renderPage();
+  await screen.findByText("inbox-a");
+  const menu = screen.getByTestId("filter-menu");
+  act(() => useInboxFilterStore.getState().toggleStatusFilter("workspace-1", "todo"));
+  await waitFor(() => expect(listArchivedInboxPage).toHaveBeenCalledTimes(2));
+  expect(screen.getByTestId("filter-menu")).toBe(menu);
+  expect(screen.getByText("inbox-a")).toBeInTheDocument();
+  act(() => useInboxFilterStore.getState().toggleStatusFilter("workspace-1", "in_progress"));
+  await act(async () => next.resolve(page([item({ archived: true })])));
+  expect(screen.getByTestId("filter-menu")).toBe(menu);
+  expect(filterMenuUnmounted).not.toHaveBeenCalled();
 });

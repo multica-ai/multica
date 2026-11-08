@@ -61,6 +61,12 @@
     "toast_failed": "サブタスクを追加できませんでした",
     "toast_success": "{{identifier}} をサブタスクとして追加しました"
   },
+  "add_project_issue": {
+    "title": "既存のタスクを追加",
+    "description": "このプロジェクトに移すタスクを検索します",
+    "toast_success": "{{identifier}} をプロジェクトに移しました",
+    "toast_failed": "タスクを移動できませんでした"
+  },
   "run_confirm": {
     "title_assign": "割り当てを確認しますか？",
     "assign_single": "このタスクを {{name}} に割り当てます。実行条件を満たす場合はすぐに作業を開始します。",
@@ -265,5 +271,13 @@
     "toast_failed": "重複としてマークできませんでした",
     "error_target_is_duplicate": "{{identifier}} 自体が重複です。元のタスクを選択してください",
     "error_has_duplicates": "他のタスクがこのタスクの重複としてマークされています。先にそのマークを解除してください"
+  },
+  "copy_parent_fields": {
+    "trigger": "親タスクのフィールドをコピー",
+    "title": "親タスクのフィールドをコピー",
+    "description": "{{identifier}} から選択した値を一度だけ上書きします。以降の変更は同期されません。",
+    "apply": "{{count}} 項目をコピー",
+    "no_labels": "ラベルなし",
+    "manual_only": "ラベル、開始日、カスタムプロパティは手動作成にのみ適用されます。"
   }
 }

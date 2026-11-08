@@ -2864,7 +2864,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, payload)
 		return
 	}
-	if status, payload := h.checkQuickCreateQoderLimits(r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID, hasSquad, len(req.AttachmentIDs) > 0); status != 0 {
+	if status, payload := h.checkQuickCreateQoderLimits(r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID, len(req.AttachmentIDs) > 0); status != 0 {
 		writeJSON(w, status, payload)
 		return
 	}
@@ -2982,26 +2982,19 @@ func (h *Handler) checkQuickCreateDaemonVersion(ctx context.Context, source stri
 	return h.checkQuickCreateDaemonVersionAtLeast(ctx, source, runtimeID, agentpkg.MinQuickCreateCLIVersion)
 }
 
-// checkQuickCreateQoderLimits rejects quick-create requests that a Qoder
-// Cloud Agents leader can create but not run afterwards. The bridge drafts and
-// creates the issue itself, but the run that the new issue's assignment
-// dispatches next fails on the bridge for a squad-leader task or an issue with
-// attachments, so the user would see "created" followed by a failed run.
-func (h *Handler) checkQuickCreateQoderLimits(ctx context.Context, source string, runtimeID pgtype.UUID, squad, attachments bool) (int, map[string]any) {
-	if !squad && !attachments {
+// checkQuickCreateQoderLimits keeps attachment-backed quick-create blocked:
+// the bridge can run squad leaders, but cannot draft from these attachments.
+func (h *Handler) checkQuickCreateQoderLimits(ctx context.Context, source string, runtimeID pgtype.UUID, attachments bool) (int, map[string]any) {
+	if !attachments {
 		return 0, nil
 	}
 	rt, err := h.getAgentRuntime(ctx, source, runtimeID)
 	if err != nil || rt.Provider != qoderruntime.Provider {
 		return 0, nil
 	}
-	reason := "Qoder Cloud Agents cannot lead a squad; pick the agent directly to create the issue"
-	if !squad {
-		reason = "Qoder Cloud Agents cannot read attachments; remove them or pick another agent"
-	}
 	return http.StatusUnprocessableEntity, map[string]any{
 		"code":   "agent_unavailable",
-		"reason": reason,
+		"reason": "Qoder Cloud Agents cannot read attachments; remove them or pick another agent",
 	}
 }
 
@@ -3088,7 +3081,14 @@ type CreateIssueRequest struct {
 	OriginType *string `json:"origin_type,omitempty"`
 	OriginID   *string `json:"origin_id,omitempty"`
 
-	AllowDuplicate bool `json:"allow_duplicate,omitempty"`
+	AllowDuplicate         bool `json:"allow_duplicate,omitempty"`
+	PRAutoCompleteDisabled bool `json:"pr_auto_complete_disabled,omitempty"`
+}
+
+// CreateIssueResponse echoes the atomic PR setting without expanding issue reads.
+type CreateIssueResponse struct {
+	IssueResponse
+	PRAutoCompleteDisabled bool `json:"pr_auto_complete_disabled"`
 }
 
 // UnmarshalJSON rejects duplicate object members before Go's ordinary map
@@ -3488,26 +3488,27 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
-		WorkspaceID:    wsUUID,
-		Title:          req.Title,
-		Description:    ptrToText(req.Description),
-		Status:         status,
-		Priority:       priority,
-		AssigneeType:   assigneeType,
-		AssigneeID:     assigneeID,
-		CreatorType:    creatorType,
-		CreatorID:      parseUUID(actualCreatorID),
-		ParentIssueID:  parentIssueID,
-		ProjectID:      projectID,
-		StartDate:      startDate,
-		DueDate:        dueDate,
-		OriginType:     originType,
-		OriginID:       originID,
-		Stage:          ptrToInt4(req.Stage),
-		AttachmentIDs:  attachmentIDs,
-		LabelIDs:       labelIDs,
-		Properties:     properties,
-		AllowDuplicate: req.AllowDuplicate,
+		WorkspaceID:            wsUUID,
+		Title:                  req.Title,
+		Description:            ptrToText(req.Description),
+		Status:                 status,
+		Priority:               priority,
+		AssigneeType:           assigneeType,
+		AssigneeID:             assigneeID,
+		CreatorType:            creatorType,
+		CreatorID:              parseUUID(actualCreatorID),
+		ParentIssueID:          parentIssueID,
+		ProjectID:              projectID,
+		StartDate:              startDate,
+		DueDate:                dueDate,
+		OriginType:             originType,
+		OriginID:               originID,
+		Stage:                  ptrToInt4(req.Stage),
+		AttachmentIDs:          attachmentIDs,
+		LabelIDs:               labelIDs,
+		Properties:             properties,
+		AllowDuplicate:         req.AllowDuplicate,
+		PRAutoCompleteDisabled: req.PRAutoCompleteDisabled,
 	}, service.IssueCreateOpts{
 		ActorID:          actualCreatorID,
 		AnalyticsAgentID: analyticsAgentID,
@@ -3582,7 +3583,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// understood label_ids and skip its legacy post-create attach fallback.
 	labelResponses := labelsToResponse(res.Labels)
 	resp.Labels = &labelResponses
-	writeJSON(w, http.StatusCreated, resp)
+	if req.PRAutoCompleteDisabled {
+		h.recordPRAutoCompleteActivity(r.Context(), issue, creatorType, actualCreatorID, true)
+	}
+	writeJSON(w, http.StatusCreated, CreateIssueResponse{IssueResponse: resp, PRAutoCompleteDisabled: req.PRAutoCompleteDisabled})
 }
 
 type UpdateIssueRequest struct {
@@ -4455,6 +4459,9 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.requireIssueDeletion(w, r, issue.WorkspaceID, []db.Issue{issue}) {
+		return
+	}
 
 	h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
@@ -5056,6 +5063,11 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		seenIssueIDs[issueUUID] = struct{}{}
 		issues = append(issues, issue)
 		excludedIDs = append(excludedIDs, issue.ID)
+	}
+	if !h.requireIssueDeletion(w, r, wsUUID, issues) {
+		return
+	}
+	for _, issue := range issues {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 		_ = h.AutopilotService.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 	}

@@ -500,6 +500,14 @@ function renderPanel(props: React.ComponentProps<typeof AgentCreatePanel>) {
 }
 
 describe("AgentCreatePanel", () => {
+  it("does not replace an explicitly cleared manual assignee with the filing agent", async () => {
+    const user = userEvent.setup();
+    renderPanel({ onClose: vi.fn(), onSwitchMode: vi.fn(), isExpanded: false, setIsExpanded: vi.fn(), data: { manual_assignee_cleared: true } });
+    await user.click(screen.getByRole("button", { name: /Switch to Manual/i }));
+    expect(mockIssueDraftStore.draft.manual.assigneeId).toBeUndefined();
+    expect(mockSetManual.mock.calls.some(([patch]) => "assigneeId" in patch)).toBe(false);
+  });
+
   it("selects Qoder agents without the daemon CLI version gate", () => {
     mockRuntimesData.list = [{ id: "runtime-1", provider: "qoder_cloud", metadata: {} }];
     mockQuickCreateStore.lastActorType = "agent";
@@ -509,8 +517,7 @@ describe("AgentCreatePanel", () => {
     expect(screen.getByRole("button", { name: /^Create$/i })).toBeEnabled();
     expect(screen.queryByText(/daemon.*version/i)).not.toBeInTheDocument();
     expect(screen.getAllByText("Bohan").length).toBeGreaterThan(0);
-    // The Qoder bridge cannot run squad-leader tasks, so its squads stay hidden.
-    expect(screen.queryByText("Cloud Squad")).not.toBeInTheDocument();
+    expect(screen.getByText("Cloud Squad")).toBeInTheDocument();
   });
 
   it("blocks Qoder agents when the prompt references an attachment", () => {

@@ -293,6 +293,30 @@ func TestApplyConfigSetPositiveDurationRoundTripsToDaemonResolver(t *testing.T) 
 	}
 }
 
+func TestApplyConfigSetWatchdogDurationsAllowZero(t *testing.T) {
+	cases := []string{"agent_idle_watchdog", "agent_tool_watchdog"}
+	for _, key := range cases {
+		t.Run(key, func(t *testing.T) {
+			cfg := cli.CLIConfig{}
+			if err := applyConfigSet(&cfg, key, "15m"); err != nil {
+				t.Fatalf("set positive duration: %v", err)
+			}
+			if err := applyConfigSet(&cfg, key, "0s"); err != nil {
+				t.Fatalf("set zero duration: %v", err)
+			}
+			if err := applyConfigSet(&cfg, key, ""); err != nil {
+				t.Fatalf("clear duration: %v", err)
+			}
+			if got := cfg.AgentIdleWatchdog + cfg.AgentToolWatchdog; got != "" {
+				t.Fatalf("cleared config = %q, want empty", got)
+			}
+			if err := applyConfigSet(&cfg, key, "-1s"); err == nil {
+				t.Fatal("expected negative duration to be rejected")
+			}
+		})
+	}
+}
+
 // TestApplyConfigSetAgentTimeoutTriState pins the agent_timeout
 // pointer-based semantics: "" clears, "0s" persists as an explicit
 // "disabled" sentinel, positive durations persist as-is. Negative

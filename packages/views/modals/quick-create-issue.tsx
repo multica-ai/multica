@@ -175,28 +175,14 @@ export function AgentCreatePanel({
     () => new Set(visibleAgents.map((a) => a.id)),
     [visibleAgents],
   );
-  // Qoder Cloud Agents can draft a quick-create issue as a single agent, but
-  // its bridge cannot run the squad-leader task that follows a squad
-  // assignment, so squads led by a Qoder agent stay hidden.
-  const qoderAgentIds = useMemo(() => {
-    const qoderRuntimeIds = new Set(
-      runtimes.filter((r) => r.provider === "qoder_cloud").map((r) => r.id),
-    );
-    return new Set(
-      visibleAgents
-        .filter((a) => a.runtime_id != null && qoderRuntimeIds.has(a.runtime_id))
-        .map((a) => a.id),
-    );
-  }, [visibleAgents, runtimes]);
   const visibleSquads = useMemo(
     () =>
       squads.filter(
         (s) =>
           !s.archived_at &&
-          visibleAgentIds.has(s.leader_id) &&
-          !qoderAgentIds.has(s.leader_id),
+          visibleAgentIds.has(s.leader_id),
       ),
-    [squads, visibleAgentIds, qoderAgentIds],
+    [squads, visibleAgentIds],
   );
 
   const lastActorType = useQuickCreateStore((s) => s.lastActorType);
@@ -622,7 +608,7 @@ export function AgentCreatePanel({
       const md = editorRef.current?.getMarkdown() ?? "";
       if (md) setManual({ description: md });
     }
-    if (!draft.manual.assigneeId && actor) {
+    if (data?.manual_assignee_cleared !== true && !draft.manual.assigneeId && actor) {
       setManual({ assigneeType: actor.type, assigneeId: actor.id });
     }
     setLastMode("manual");
@@ -630,6 +616,7 @@ export function AgentCreatePanel({
     const carry: Record<string, unknown> = {};
     if (parentIssueId) carry.parent_issue_id = parentIssueId;
     if (parentIssueIdentifier) carry.parent_issue_identifier = parentIssueIdentifier;
+    if (data?.manual_assignee_cleared === true) carry.manual_assignee_cleared = true;
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
   };
 
