@@ -211,7 +211,7 @@ Installing and authenticating them: [Install an agent runtime](https://multica.a
 | Connect Git and chat tools | [GitHub](https://multica.ai/docs/github-integration) · [Self-hosted Git](https://multica.ai/docs/vcs-integration) · [Channels](https://multica.ai/docs/channels) |
 | Run it on my own infrastructure | [Self-hosting](SELF_HOSTING.md) · [Security model](https://multica.ai/docs/security-model) · [Environment variables](https://multica.ai/docs/environment-variables) |
 | Script it | [CLI reference](https://multica.ai/docs/cli) · [CLI and daemon guide](CLI_AND_DAEMON.md) · [Auth tokens](https://multica.ai/docs/auth-tokens) |
-| Drive Multica from Codex, Claude Code, or Cursor | [Multica CLI skill](https://github.com/multica-ai/multica-cli) |
+| Drive Multica from Codex, Claude Code, or Cursor | [Bundled CLI guides](CLI_AND_DAEMON.md#bundled-agent-guides) · [Standalone CLI skill](https://github.com/multica-ai/multica-cli) |
 | Work out why an agent is stuck | [Runs](https://multica.ai/docs/tasks) · [Troubleshooting](https://multica.ai/docs/troubleshooting) |
 
 The docs are also available in [简体中文](https://multica.ai/docs/zh), [日本語](https://multica.ai/docs/ja),

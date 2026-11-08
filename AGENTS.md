@@ -28,6 +28,11 @@ Multica is a task management platform where people and agents collaborate on iss
 
 ## Development and Verification
 
+- Offline external-agent CLI guides live in `server/cmd/multica/skills/` and
+  are embedded by `cmd_embedded_skills.go`. Update them alongside the commands
+  they describe. `multica skills list/read` must work without API access or
+  authentication; `multica skill` continues to manage workspace skills.
+
 Use `Makefile`, workspace `package.json` files, and `pnpm-workspace.yaml` for current commands and versions. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and worktree operations.
 
 - Use the checkout's managed environment: `make up`, `make status`, `make down`. `make down` preserves data; `make destroy` removes the environment and its data.

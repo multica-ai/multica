@@ -129,6 +129,7 @@ ENVIRONMENT VARIABLES
 
 LEARN MORE
   Use ` + "`multica <command> <subcommand> --help`" + ` for more information about a command.
+  Agents: read the bundled guide with ` + "`multica skills read multica-cli`" + ` (offline, no login).
 `
 
 var subHelpTemplate = `{{.Short}}
