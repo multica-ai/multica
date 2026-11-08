@@ -50,6 +50,7 @@ export function InboxList({
   items,
   view,
   selectedKey,
+  handledKey,
   onLoadMore,
   loadingMore = false,
   loadMoreError = false,
@@ -62,6 +63,8 @@ export function InboxList({
   items: InboxItem[];
   view: InboxView;
   selectedKey: string;
+  /** The open row, kept in place after its issue left the Inbox. */
+  handledKey?: string;
   onLoadMore?: () => void;
   loadingMore?: boolean;
   loadMoreError?: boolean;
@@ -202,6 +205,7 @@ export function InboxList({
       item={item}
       view={view}
       isSelected={(item.issue_id ?? item.id) === selectedKey}
+      handled={!!handledKey && (item.issue_id ?? item.id) === handledKey}
       onClick={() => selectItem(item)}
       onAction={() => onAction(item.id)}
     />

@@ -121,6 +121,7 @@ function renderRow(props: {
   view: "inbox" | "archived";
   adapter?: NavigationAdapter;
   onClick?: () => void;
+  handled?: boolean;
 }) {
   return render(
     <WorkspaceSlugProvider slug="acme">
@@ -129,6 +130,7 @@ function renderRow(props: {
           item={props.item}
           view={props.view}
           isSelected={false}
+          handled={props.handled}
           onClick={props.onClick ?? vi.fn()}
           onAction={vi.fn()}
         />
@@ -139,6 +141,17 @@ function renderRow(props: {
 
 const unreadDot = (container: HTMLElement) => container.querySelector(".bg-brand");
 const title = (container: HTMLElement) => container.querySelector(".truncate");
+
+describe("InboxListItem handled row", () => {
+  it("dims the row and offers nothing left to do", () => {
+    const { container } = renderRow({ item: item(), view: "inbox", handled: true });
+    const row = container.querySelector("[role='button']");
+
+    expect(row).toHaveAttribute("data-handled", "true");
+    expect(row?.className).toContain("opacity-50");
+    expect(row?.querySelector("button")).toBeNull();
+  });
+});
 
 describe("InboxListItem unread affordance", () => {
   it("marks an unread row in the main inbox", () => {

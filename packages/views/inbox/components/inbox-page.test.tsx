@@ -14,10 +14,18 @@ vi.mock("sonner", () => ({
 // The page runs two queries — the active list and the archived one. They are
 // told apart by the queryKey their options carry, so each test can stock the
 // two lists independently.
-const listData: { active: InboxItem[]; archived: InboxItem[]; lookup?: InboxItem[]; tasks: AgentTask[] } = {
+const listData: {
+  active: InboxItem[];
+  archived: InboxItem[];
+  lookup?: InboxItem[];
+  tasks: AgentTask[];
+  /** Issues whose detail is in the cache (a deleted issue's is dropped). */
+  cachedIssues: string[];
+} = {
   active: [],
   archived: [],
   tasks: [],
+  cachedIssues: [],
 };
 
 const queryCalls: Array<{ queryKey: readonly unknown[]; enabled?: boolean }> = [];
@@ -28,8 +36,11 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => queryClient,
   useQuery: (options: { queryKey: readonly unknown[]; enabled?: boolean }) => {
     queryCalls.push(options);
+    const detailId = options.queryKey.includes("detail") ? String(options.queryKey.at(-1)) : null;
     return ({
-    data: options.queryKey.includes("archived")
+    data: detailId !== null
+      ? (listData.cachedIssues.includes(detailId) ? { id: detailId } : undefined)
+      : options.queryKey.includes("archived")
       ? { items: listData.lookup ?? listData.archived, hasMore: false, nextCursor: null }
       : options.queryKey.includes("agent-task-snapshot") ? listData.tasks : listData.active,
     isLoading: false,
@@ -158,19 +169,26 @@ vi.mock("./inbox-list", () => ({
   InboxList: ({
     items,
     view,
+    handledKey,
     onSelect,
     emptyLabel,
     emptyAction,
   }: {
     items: InboxItem[];
     view: string;
+    handledKey?: string;
     onSelect: (item: InboxItem) => void;
     emptyLabel?: string;
     emptyAction?: React.ReactNode;
   }) => (
     <div data-testid="list" data-view={view}>
       {items.map((i) => (
-        <button key={i.id} data-testid="row" onClick={() => onSelect(i)}>
+        <button
+          key={i.id}
+          data-testid="row"
+          data-handled={(i.issue_id ?? i.id) === handledKey || undefined}
+          onClick={() => onSelect(i)}
+        >
           {i.id}
         </button>
       ))}
@@ -249,6 +267,7 @@ function reset() {
   listData.archived = [];
   listData.lookup = undefined;
   listData.tasks = [];
+  listData.cachedIssues = [];
   lookupState.isLoading = false;
   lookupState.isError = false;
   lookupState.refetch.mockClear();
@@ -837,6 +856,53 @@ describe("InboxPage", () => {
       "inbox-a",
     ]);
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
+  });
+
+  it("keeps a handled row in place, dimmed, until the selection moves", () => {
+    // Replying or changing the status from the detail takes the issue out of
+    // the Inbox on the server. The issue being worked must not be pulled away.
+    reset();
+    layout.width = DESKTOP;
+    const rows = [
+      item({ id: "inbox-a", issue_id: "issue-a" }),
+      item({ id: "inbox-b", issue_id: "issue-b" }),
+      item({ id: "inbox-c", issue_id: "issue-c" }),
+    ];
+    listData.active = rows;
+    listData.cachedIssues = ["issue-a", "issue-b", "issue-c"];
+
+    const { rerender } = render(<InboxPage />);
+    fireEvent.click(screen.getAllByTestId("row")[1]!);
+    rerender(<InboxPage />);
+    listData.active = [rows[0]!, rows[2]!];
+    rerender(<InboxPage />);
+
+    const shown = screen.getAllByTestId("row");
+    expect(shown.map((row) => row.textContent)).toEqual(["inbox-a", "inbox-b", "inbox-c"]);
+    expect(shown[1]).toHaveAttribute("data-handled", "true");
+    expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "issue-b" });
+    expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
+
+    fireEvent.click(shown[0]!);
+    rerender(<InboxPage />);
+    expect(screen.getAllByTestId("row").map((row) => row.textContent)).toEqual(["inbox-a", "inbox-c"]);
+  });
+
+  it("does not keep the row of an issue deleted while it was open", () => {
+    reset();
+    layout.width = DESKTOP;
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+    listData.cachedIssues = ["issue-a"];
+
+    const { rerender } = render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+    rerender(<InboxPage />);
+    listData.active = [];
+    listData.cachedIssues = [];
+    rerender(<InboxPage />);
+
+    expect(screen.queryByTestId("row")).toBeNull();
+    expect(replace).toHaveBeenLastCalledWith("/acme/inbox");
   });
 
   it("keeps an explicitly unread row unread while it stays open", () => {

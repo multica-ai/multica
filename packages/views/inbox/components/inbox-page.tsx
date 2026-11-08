@@ -21,6 +21,7 @@ import {
   shortcutMatchesEvent,
 } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
+import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
   inboxListOptions,
@@ -138,6 +139,8 @@ export function InboxPage() {
   // user is working in. Set once the open row has passed the idle filter, so
   // turning the filter on over a busy row still filters it out.
   const pinnedIdleKeyRef = useRef<string | null>(null);
+  // The open row as the list last showed it, kept once it has been handled.
+  const handledRowRef = useRef<{ key: string; item: InboxItem; index: number } | null>(null);
 
   // Sync from URL when searchParams change (e.g. navigation)
   useEffect(() => {
@@ -194,12 +197,33 @@ export function InboxPage() {
     () => ({ activeIssueIds: idleFilterIssueIds, pinnedUnreadKey, pinnedIdleKey }),
     [idleFilterIssueIds, pinnedUnreadKey, pinnedIdleKey],
   );
-  const filteredItems = useMemo(
+  const matchedItems = useMemo(
     () => filterInboxItems(viewItems, effectiveFilters, filterContext),
     [viewItems, effectiveFilters, filterContext],
   );
   const hasActiveFilters = inboxFilterCount(effectiveFilters) > 0;
   const selectedOnPage = viewItems.find((i) => (i.issue_id ?? i.id) === selectedKey);
+  // Acting on the open issue (a reply, a status or assignee change) takes it
+  // out of the Inbox on the server. Its row stays where it was, dimmed, until
+  // the selection moves, so the issue being worked is not pulled away. A
+  // deleted issue drops its detail from the cache, and is not kept.
+  const { data: selectedIssue } = useQuery({
+    ...issueDetailOptions(wsId, selectedKey),
+    enabled: false,
+  });
+  const handled =
+    !isArchivedView &&
+    !!selectedKey &&
+    !selectedOnPage &&
+    !!selectedIssue &&
+    handledRowRef.current?.key === selectedKey
+      ? handledRowRef.current
+      : null;
+  const filteredItems = useMemo(() => {
+    if (!handled) return matchedItems;
+    const at = Math.min(handled.index, matchedItems.length);
+    return [...matchedItems.slice(0, at), handled.item, ...matchedItems.slice(at)];
+  }, [matchedItems, handled]);
   // A deep link can point beyond every loaded page. Resolve its group directly
   // without adding it to the cursor chain or mistaking a page miss for a 404.
   const lookup = useQuery({
@@ -256,6 +280,11 @@ export function InboxPage() {
   useEffect(() => {
     if (selected) lastResolvedKeyRef.current = selectedKey;
   }, [selected, selectedKey]);
+  useEffect(() => {
+    if (isArchivedView || !selected || handled) return;
+    const index = filteredItems.indexOf(selected);
+    handledRowRef.current = { key: selectedKey, item: selected, index };
+  }, [isArchivedView, selected, handled, filteredItems, selectedKey]);
 
   // Both the view and the selection live in the URL, so every write has to
   // carry the other one — a bare `?issue=` would silently drop the user out of
@@ -742,6 +771,7 @@ export function InboxPage() {
         items={visibleItems}
         view={view}
         selectedKey={selectedKey}
+        handledKey={handled?.key}
         onLoadMore={isArchivedView && archiveQuery.hasNextPage ? loadNextArchivedPage : undefined}
         loadingMore={archiveQuery.isFetchingNextPage}
         loadMoreError={archiveQuery.isFetchNextPageError}
