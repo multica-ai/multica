@@ -14,6 +14,6 @@ export const linkKeys = {
 export function linkListOptions(wsId: string, projectId?: string) {
   return queryOptions({
     queryKey: linkKeys.list(wsId, projectId),
-    queryFn: () => api.listWorkspaceLinks(projectId),
+    queryFn: () => api.listWorkspaceLinks(projectId, wsId),
   });
 }

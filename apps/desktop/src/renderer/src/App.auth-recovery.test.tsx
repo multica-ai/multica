@@ -22,8 +22,9 @@ const tabStore = vi.hoisted(() => ({
   validateWorkspaceSlugs: vi.fn(),
 }));
 
-vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ setQueryData: vi.fn() }),
+vi.mock("@tanstack/react-query", async (original) => ({
+  ...await original<typeof import("@tanstack/react-query")>(),
+  useQueryClient: () => ({ setQueryData: vi.fn(), getQueryData: () => [] }),
 }));
 
 vi.mock("@multica/core/platform", () => ({
@@ -197,6 +198,14 @@ describe("App main-window auth recovery", () => {
     if (exists) tabStore.byWorkspace.acme = { tabs: [{ url: "/acme/issues/ACME-1" }] };
     render(<App />);
     expect(tabStore.switchWorkspace).toHaveBeenCalledWith("acme", exists ? undefined : "/acme/start");
+  });
+
+  it("applies entry policy once to the persisted active workspace too", () => {
+    tabStore.byWorkspace.acme = { tabs: [{ url: "/acme/issues/ACME-1" }] };
+    const view = render(<App />);
+    expect(tabStore.switchWorkspace).toHaveBeenCalledWith("acme", undefined);
+    view.rerender(<App />);
+    expect(tabStore.switchWorkspace).toHaveBeenCalledTimes(1);
   });
 
   it("keeps auth recovery ahead of the desktop shell while the session recovers", () => {

@@ -6,6 +6,7 @@ import {
 } from "@multica/core/query-client";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useEffect } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
 
 // MUL-4741: the adapter mutates tab sessions in the REAL store (no router,
 // no mocks needed for it anymore) — the Coordinator, not tested here, is
@@ -80,9 +81,9 @@ function renderProvider() {
     adapter = a;
   });
   render(
-    <DesktopNavigationProvider>
-      <Probe />
-    </DesktopNavigationProvider>,
+    <QueryClientProvider client={createQueryClient()}>
+      <DesktopNavigationProvider><Probe /></DesktopNavigationProvider>
+    </QueryClientProvider>,
   );
   return () => adapter!;
 }

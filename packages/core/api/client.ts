@@ -4578,9 +4578,11 @@ export class ApiClient {
     });
   }
 
-  async listWorkspaceLinks(projectId?: string): Promise<WorkspaceLink[]> {
+  async listWorkspaceLinks(projectId?: string, workspaceId?: string): Promise<WorkspaceLink[]> {
     const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
-    const raw = await this.fetch<unknown>(`/api/links${query}`);
+    const raw = await this.fetch<unknown>(`/api/links${query}`, {
+      headers: workspaceId ? workspaceHeader({ workspaceId }) : undefined,
+    });
     return parseWithFallback(raw, WorkspaceLinksSchema, { links: [] }, {
       endpoint: "GET /api/links",
     }).links;

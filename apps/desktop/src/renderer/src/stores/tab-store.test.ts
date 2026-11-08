@@ -55,7 +55,7 @@ describe("sanitizeTabPath", () => {
     expect(sanitizeTabPath("/project-x/inbox")).toBe("/project-x/inbox");
   });
 
-  it("normalizes a bare workspace to Issues while preserving query and hash", () => {
+  it("keeps upstream bare-slug behavior: Issues, not workspace home", () => {
     expect(sanitizeTabPath("/acme")).toBe("/acme/issues");
     expect(sanitizeTabPath("/acme?welcome=1#hello")).toBe("/acme/issues?welcome=1#hello");
   });

@@ -2223,6 +2223,19 @@ describe("ApiClient explicit workspace targeting", () => {
     return (init.headers as Record<string, string>)["X-Workspace-Slug"];
   }
 
+  it("targets the link catalog's workspace before switching the active route", async () => {
+    setCurrentWorkspace("old-workspace", "old-id");
+    try {
+      const fetchMock = stubOk({ links: [] });
+      await new ApiClient("https://api.example.test").listWorkspaceLinks(undefined, "target-id");
+      const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+      expect(headers.get("X-Workspace-Slug")).toBe("");
+      expect(headers.get("X-Workspace-ID")).toBe("target-id");
+    } finally {
+      setCurrentWorkspace(null, null);
+    }
+  });
+
   it("sends the given slug on Mika creation", async () => {
     const fetchMock = stubOk({ id: "agent-1" });
     await new ApiClient("https://api.example.test").createMikaAgent(
