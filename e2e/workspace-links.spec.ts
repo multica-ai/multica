@@ -2,7 +2,7 @@ import "./env";
 import { expect, test } from "@playwright/test";
 import { createTestApi } from "./helpers";
 
-test("configures workspace and project quick links and opens the embedded page", async ({ page }) => {
+test("configures workspace and project home links and restores issues when cleared", async ({ page }) => {
   test.setTimeout(180_000);
   const api = await createTestApi();
   const workspace = (await api.getWorkspaces())[0]!;
@@ -63,13 +63,14 @@ test("configures workspace and project quick links and opens the embedded page",
     await expect(
       page.getByText(`https://example.com/${workspace.slug}?workspace=${workspace.id}`, { exact: true }),
     ).toBeVisible();
-    if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/link-editor.png` });
+    await page.getByRole("radio", { name: "Embedded, as home page", exact: true }).check();
+    if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/home-editor.png` });
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByText("Team documentation", { exact: true })).toBeVisible();
     if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/workspace-links.png` });
-    await page.goto(`/${workspace.slug}/issues`);
-    await page.getByRole("link", { name: "Team documentation" }).click();
+    await page.goto(`/${workspace.slug}`);
+    await expect(page).toHaveURL(new RegExp(`/${workspace.slug}/links/`));
     await expect(page.locator("iframe")).toHaveAttribute(
       "src",
       `https://example.com/${workspace.slug}?workspace=${workspace.id}`,
@@ -79,17 +80,30 @@ test("configures workspace and project quick links and opens the embedded page",
     await expect(
       page.frameLocator("iframe").getByRole("heading", { name: "Team documentation", exact: true }),
     ).toBeVisible();
-    if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/embedded-link.png` });
+    if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/workspace-home-landing.png` });
     await page.goto(`/${workspace.slug}/projects/${project.id}`);
     await page.getByRole("button", { name: "Add link", exact: true }).last().click();
     await page.getByRole("textbox", { name: "Name", exact: true }).fill("Project dashboard");
     await page.getByRole("textbox", { name: "URL", exact: true }).fill("https://example.com/projects/{project_id}");
+    await page.getByRole("radio", { name: "Embedded, as home page", exact: true }).check();
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Project dashboard" })).toBeVisible();
-    if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/project-links.png` });
-    await page.getByRole("link", { name: "Project dashboard" }).click();
+    await page.goto(`/${workspace.slug}/projects/${project.id}`);
+    await expect(page.getByRole("button", { name: "Home", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator("iframe")).toHaveAttribute("src", `https://example.com/projects/${project.id}`);
+    await expect(page.frameLocator("iframe").getByRole("heading", { name: "Team documentation", exact: true })).toBeVisible();
+    if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/project-home.png` });
+    await page.getByRole("button", { name: "Issues", exact: true }).click();
+    await expect(page.locator("iframe")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Project dashboard", exact: true })).toBeVisible();
+
+    await page.goto(`/${workspace.slug}/settings?tab=links`);
+    await page.getByRole("button", { name: "Edit link", exact: true }).click();
+    await page.getByRole("radio", { name: "Embedded", exact: true }).check();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.goto(`/${workspace.slug}`);
+    await expect(page).toHaveURL(new RegExp(`/${workspace.slug}/issues$`));
     await page.goto(`/${workspace.slug}/issues`);
     await page.setViewportSize({ width: 480, height: 900 });
     await page.getByRole("button", { name: "Quick links", exact: true }).click();
@@ -108,6 +122,10 @@ test("configures workspace and project quick links and opens the embedded page",
       (await page.context().cookies()).find((cookie) => cookie.name === "multica-locale")?.value,
     ).toBe("zh-Hans");
     if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/settings-links-zh.png` });
+    await page.getByRole("button", { name: "编辑链接", exact: true }).click();
+    await page.getByRole("radio", { name: "内嵌打开并设为首页", exact: true }).check();
+    if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/home-editor-zh.png` });
+    await page.getByRole("button", { name: "取消", exact: true }).click();
   } finally {
     for (const link of await api.getLinks()) await api.deleteLink(link.id);
     await api.cleanup();
