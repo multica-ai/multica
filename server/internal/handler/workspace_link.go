@@ -108,6 +108,7 @@ type WorkspaceLinkResponse struct {
 	ProjectID       *string `json:"project_id"`
 	Name            string  `json:"name"`
 	Icon            string  `json:"icon"`
+	ShowName        bool    `json:"show_name"`
 	URLTemplate     string  `json:"url_template"`
 	OpenMode        string  `json:"open_mode"`
 	AllowSameOrigin bool    `json:"allow_same_origin"`
@@ -120,6 +121,7 @@ type WorkspaceLinkResponse struct {
 func workspaceLinkResponse(l db.WorkspaceLink) WorkspaceLinkResponse {
 	return WorkspaceLinkResponse{
 		ID:              uuidToString(l.ID),
+		ShowName:        l.ShowName,
 		WorkspaceID:     uuidToString(l.WorkspaceID),
 		ProjectID:       uuidToPtr(l.ProjectID),
 		Name:            l.Name,
@@ -205,6 +207,7 @@ func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		ProjectID       string `json:"project_id"`
 		Name            string `json:"name"`
 		Icon            string `json:"icon"`
+		ShowName        *bool  `json:"show_name"`
 		URLTemplate     string `json:"url_template"`
 		OpenMode        string `json:"open_mode"`
 		AllowSameOrigin bool   `json:"allow_same_origin"`
@@ -222,6 +225,7 @@ func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		req.OpenMode = "embed"
 	}
 	l := db.WorkspaceLink{
+		ShowName:        true,
 		WorkspaceID:     ws,
 		ProjectID:       project,
 		Name:            req.Name,
@@ -230,6 +234,9 @@ func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		OpenMode:        req.OpenMode,
 		AllowSameOrigin: req.AllowSameOrigin,
 		Position:        req.Position,
+	}
+	if req.ShowName != nil {
+		l.ShowName = *req.ShowName
 	}
 	if err := validateWorkspaceLink(&l); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -280,6 +287,7 @@ func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		AllowSameOrigin: l.AllowSameOrigin,
 		Position:        l.Position,
 		CreatedBy:       creator,
+		ShowName:        l.ShowName,
 	})
 	if err != nil {
 		writeLinkDBError(w, err)
@@ -322,6 +330,7 @@ func (h *Handler) UpdateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name            *string `json:"name"`
 		Icon            *string `json:"icon"`
+		ShowName        *bool   `json:"show_name"`
 		URLTemplate     *string `json:"url_template"`
 		OpenMode        *string `json:"open_mode"`
 		AllowSameOrigin *bool   `json:"allow_same_origin"`
@@ -336,6 +345,9 @@ func (h *Handler) UpdateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Icon != nil {
 		l.Icon = *req.Icon
+	}
+	if req.ShowName != nil {
+		l.ShowName = *req.ShowName
 	}
 	if req.URLTemplate != nil {
 		l.UrlTemplate = *req.URLTemplate
@@ -354,6 +366,7 @@ func (h *Handler) UpdateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	l, err = qtx.UpdateWorkspaceLink(r.Context(), db.UpdateWorkspaceLinkParams{
+		ShowName:        l.ShowName,
 		ID:              id,
 		WorkspaceID:     ws,
 		Name:            l.Name,

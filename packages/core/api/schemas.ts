@@ -812,6 +812,7 @@ export const WorkspaceLinkSchema = z
     project_id: z.string().nullable().optional().default(null),
     name: z.string(),
     icon: z.string().optional().default(""),
+    show_name: z.boolean().optional().default(true),
     url_template: z.string(),
     open_mode: z.string().optional().default("new_tab"),
     allow_same_origin: z.boolean().optional().default(false),
@@ -824,6 +825,7 @@ export const WorkspaceLinkSchema = z
     projectId: link.project_id,
     name: link.name,
     icon: link.icon,
+    showName: link.show_name,
     urlTemplate: link.url_template,
     // An unknown future mode degrades to opening a new tab, never to framing.
     openMode: link.open_mode === "embed" ? ("embed" as const) : ("new_tab" as const),
@@ -841,6 +843,7 @@ export const EMPTY_WORKSPACE_LINK = {
   projectId: null,
   name: "",
   icon: "",
+  showName: true,
   urlTemplate: "",
   openMode: "new_tab" as const,
   allowSameOrigin: false,

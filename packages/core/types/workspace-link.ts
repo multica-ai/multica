@@ -4,6 +4,7 @@ export interface WorkspaceLink {
   projectId: string | null;
   name: string;
   icon: string;
+  showName: boolean;
   urlTemplate: string;
   openMode: "embed" | "new_tab";
   allowSameOrigin: boolean;
@@ -14,6 +15,7 @@ export interface WorkspaceLinkInput {
   projectId?: string;
   name: string;
   icon: string;
+  showName?: boolean;
   urlTemplate: string;
   openMode: "embed" | "new_tab";
   allowSameOrigin: boolean;

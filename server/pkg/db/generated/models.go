@@ -1848,6 +1848,7 @@ type WorkspaceLink struct {
 	ProjectID       pgtype.UUID        `json:"project_id"`
 	Name            string             `json:"name"`
 	Icon            string             `json:"icon"`
+	ShowName        bool               `json:"show_name"`
 	UrlTemplate     string             `json:"url_template"`
 	OpenMode        string             `json:"open_mode"`
 	AllowSameOrigin bool               `json:"allow_same_origin"`

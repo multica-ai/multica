@@ -20,6 +20,7 @@ describe("workspace link response compatibility", () => {
       name: "Docs",
       urlTemplate: "https://example.com",
       icon: "",
+      showName: true,
       openMode: "new_tab",
       allowSameOrigin: false,
       position: 0,
@@ -28,10 +29,15 @@ describe("workspace link response compatibility", () => {
   it("uses an external-opening fallback for unknown modes", () => {
     expect(WorkspaceLinkSchema.parse({ ...link, open_mode: "future" }).openMode).toBe("new_tab");
   });
+  it("defaults a missing show_name to true and preserves explicit false", () => {
+    expect(WorkspaceLinkSchema.parse(link).showName).toBe(true);
+    expect(WorkspaceLinkSchema.parse({ ...link, show_name: false }).showName).toBe(false);
+  });
   it.each([
     { ...link, name: 1 },
     { ...link, url_template: null },
     { ...link, allow_same_origin: "true" },
+    { ...link, show_name: "false" },
     {},
   ])("rejects malformed used fields %j", (raw) => {
     expect(

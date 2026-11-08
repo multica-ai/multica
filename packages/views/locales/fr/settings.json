@@ -1,5 +1,8 @@
 {
   "links": {
+    "show_in_header": "Afficher dans l’en-tête",
+    "icon_and_name": "Icône et nom",
+    "icon_only": "Icône uniquement",
     "title": "Liens rapides",
     "add": "Ajouter un lien",
     "edit": "Modifier le lien",

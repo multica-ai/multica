@@ -57,6 +57,7 @@ test("configures workspace and project quick links and opens the embedded page",
     await page.goto(`/${workspace.slug}/settings?tab=links`);
     await page.getByRole("button", { name: "Add link" }).click();
     await page.getByRole("textbox", { name: "Name", exact: true }).fill("Team documentation");
+    await page.getByLabel("Show in header").selectOption("icon");
     await page.getByRole("textbox", { name: "URL", exact: true }).fill(
       "https://example.com/{workspace_slug}?workspace={workspace_id}",
     );
@@ -70,6 +71,11 @@ test("configures workspace and project quick links and opens the embedded page",
     if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/workspace-links.png` });
     await page.goto(`/${workspace.slug}/issues`);
     await page.getByRole("link", { name: "Team documentation" }).click();
+    const iconOnly = page
+      .getByRole("navigation", { name: "Quick links" })
+      .getByRole("link", { name: "Team documentation" });
+    await expect(iconOnly).toHaveAccessibleName("Team documentation");
+    await expect(iconOnly).toHaveText("");
     await expect(page.locator("iframe")).toHaveAttribute(
       "src",
       `https://example.com/${workspace.slug}?workspace=${workspace.id}`,
@@ -87,6 +93,10 @@ test("configures workspace and project quick links and opens the embedded page",
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Project dashboard" })).toBeVisible();
+    const header = page.getByRole("navigation", { name: "Quick links" });
+    await expect(header.getByRole("link", { name: "Team documentation" })).toHaveText("");
+    await expect(header.getByRole("link", { name: "Project dashboard" })).toHaveText("Project dashboard");
+    if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/header-icon-only.png` });
     if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/project-links.png` });
     await page.getByRole("link", { name: "Project dashboard" }).click();
     await expect(page.locator("iframe")).toHaveAttribute("src", `https://example.com/projects/${project.id}`);

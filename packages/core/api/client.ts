@@ -4591,6 +4591,7 @@ export class ApiClient {
       project_id: data.projectId,
       name: data.name,
       icon: data.icon,
+      show_name: data.showName,
       url_template: data.urlTemplate,
       open_mode: data.openMode,
       allow_same_origin: data.allowSameOrigin,

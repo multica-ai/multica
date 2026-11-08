@@ -51,6 +51,7 @@ const link: WorkspaceLink = {
   projectId: null,
   name: "Docs",
   icon: "book-open",
+  showName: true,
   urlTemplate: "https://example.com/{workspace_slug}",
   openMode: "embed",
   allowSameOrigin: false,
@@ -110,6 +111,19 @@ describe("embedded links", () => {
   });
 });
 describe("links bar", () => {
+  it.each(["embed", "new_tab"] as const)(
+    "keeps icon-only %s links accessible and menu names visible",
+    async (openMode) => {
+      state.list.mockResolvedValue([{ ...link, icon: "", showName: false, openMode }]);
+      render(<LinksBar />);
+      const button = await screen.findByRole("link", { name: "Docs" });
+      expect(button.textContent).toBe("");
+      expect(button.getAttribute("title")).toBe("Docs");
+      expect(button.querySelector("svg")).not.toBeNull();
+      await userEvent.click(screen.getByRole("button", { name: "Quick links" }));
+      expect((await screen.findByRole("menuitem", { name: "Docs" })).textContent).toBe("Docs");
+    },
+  );
   it("uses the existing desktop external opener", async () => {
     state.desktop = true;
     state.list.mockResolvedValue([{ ...link, openMode: "new_tab" }]);
@@ -167,6 +181,20 @@ describe("link management", () => {
 });
 
 describe("link editor", () => {
+  it("saves icon-only links with the default icon", async () => {
+    render(<LinkEditor />);
+    await userEvent.click(screen.getByRole("button", { name: "Add link" }));
+    expect((screen.getByLabelText("Show in header") as HTMLSelectElement).value).toBe("name");
+    await userEvent.type(screen.getByLabelText("Name"), "Docs");
+    await userEvent.type(screen.getByLabelText("URL"), "https://example.com/docs");
+    await userEvent.selectOptions(screen.getByLabelText("Show in header"), "icon");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(state.create).toHaveBeenCalledWith(
+        expect.objectContaining({ icon: "", showName: false }),
+      ),
+    );
+  });
   it("previews expansion and preserves the form after a failed save", async () => {
     state.create.mockRejectedValue(new Error("offline"));
     render(<LinkEditor />);

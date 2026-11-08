@@ -1,5 +1,8 @@
 {
   "links": {
+    "show_in_header": "頂欄顯示",
+    "icon_and_name": "圖示和名稱",
+    "icon_only": "僅圖示",
     "title": "快捷連結",
     "add": "新增連結",
     "edit": "編輯連結",
