@@ -1502,6 +1502,8 @@
     "version_short": "v{{version}}",
     "locate_comment": "Show in comments",
     "locate_description": "Show in description",
+    "copy_link": "Copy link to latest version",
+    "not_found": "No deliverable named “{{name}}” on this issue",
     "version_label": "Version {{version}} of {{total}}",
     "version_of": "v{{version}} of {{total}}",
     "info_source": "Source",

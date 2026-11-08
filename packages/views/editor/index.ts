@@ -30,6 +30,7 @@ export {
 } from "./attachment-preview-modal";
 export type {
   AttachmentPreviewHandle,
+  PreviewCopyLinkAction,
   PreviewLocateAction,
   PreviewSequence,
 } from "./attachment-preview-modal";

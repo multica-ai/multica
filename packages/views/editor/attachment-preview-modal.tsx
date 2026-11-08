@@ -41,6 +41,7 @@ import {
   FileVideo,
   ImageIcon,
   LayoutGrid,
+  Link2,
   ListTree,
   Loader2,
   Maximize2,
@@ -221,6 +222,15 @@ export interface PreviewLocateAction {
   onSelect: () => void;
 }
 
+/**
+ * Copy a link to the file on screen — labelled by the host, which knows what
+ * the link points at (for an issue deliverable, its newest version).
+ */
+export interface PreviewCopyLinkAction {
+  label: string;
+  onSelect: () => void;
+}
+
 /** The info panel beside the stage (MUL-7649). Its open state outlives the file. */
 export interface PreviewInfoPanel {
   content: ReactNode;
@@ -241,6 +251,8 @@ interface AttachmentPreviewModalProps {
   info?: PreviewInfoPanel;
   /** Adds "show where this was posted": the caller closes the viewer and scrolls. */
   locate?: PreviewLocateAction;
+  /** Adds a "copy link" button for the file on screen. */
+  copyLink?: PreviewCopyLinkAction;
   /** Adds the overview button and `G`. */
   onOpenOverview?: () => void;
 }
@@ -417,6 +429,7 @@ export function AttachmentPreviewModal({
   titleAccessory,
   info,
   locate,
+  copyLink,
   onOpenOverview,
 }: AttachmentPreviewModalProps & { onExitComplete?: () => void }) {
   const download = useDownloadAttachment();
@@ -593,6 +606,7 @@ export function AttachmentPreviewModal({
             titleAccessory={titleAccessory}
             info={info}
             locate={locate}
+            copyLink={copyLink}
             onOpenOverview={onOpenOverview}
             onHtmlAddressChange={handleHtmlAddressChange}
           />
@@ -682,6 +696,7 @@ function PreviewPanel({
   titleAccessory,
   info,
   locate,
+  copyLink,
   onOpenOverview,
   renderHtmlFrame = renderViewerHtmlFrame,
   initialHtmlAddress = "",
@@ -700,6 +715,7 @@ function PreviewPanel({
   titleAccessory?: ReactNode;
   info?: PreviewInfoPanel;
   locate?: PreviewLocateAction;
+  copyLink?: PreviewCopyLinkAction;
   onOpenOverview?: () => void;
   renderHtmlFrame?: HtmlFrameRenderer;
   /** Query and fragment an HTML file opens at. */
@@ -960,6 +976,11 @@ function PreviewPanel({
           {locate && (
             <ChromeButton label={locate.label} onClick={locate.onSelect}>
               <MessageSquareText className="size-4" />
+            </ChromeButton>
+          )}
+          {copyLink && (
+            <ChromeButton label={copyLink.label} onClick={copyLink.onSelect}>
+              <Link2 className="size-4" />
             </ChromeButton>
           )}
           {onOpenInNewTab && (

@@ -1451,6 +1451,8 @@
     "version_short": "v{{version}}",
     "locate_comment": "댓글에서 보기",
     "locate_description": "설명에서 보기",
+    "copy_link": "최신 버전 링크 복사",
+    "not_found": "이 이슈에 “{{name}}” 산출물이 없습니다",
     "version_label": "버전 {{version}} / 전체 {{total}}개",
     "version_of": "v{{version}} / 전체 {{total}}개",
     "info_source": "출처",

@@ -54,6 +54,7 @@ import { useT } from "../i18n";
 import {
   AttachmentPreviewModal,
   PreviewImagePrefetch,
+  type PreviewCopyLinkAction,
   type PreviewLocateAction,
   type PreviewSource,
 } from "./attachment-preview-modal";
@@ -82,6 +83,8 @@ export interface PreviewItemDetails {
   info?: ReactNode;
   /** Take the reader to where the file was posted. The viewer closes first. */
   locate?: PreviewLocateAction;
+  /** Copy a link to the file. Unlike `locate`, the viewer stays open. */
+  copyLink?: PreviewCopyLinkAction;
 }
 
 /** Handed to `describeItem` so its controls can move within the session. */
@@ -150,6 +153,7 @@ export function PreviewSequenceProvider({
   items,
   describeItem,
   onOpenOverview,
+  onClosed,
   children,
 }: {
   items: ReadonlyArray<ImageSequenceItem>;
@@ -162,6 +166,8 @@ export function PreviewSequenceProvider({
    * showing, so the overview can offer a way back to it.
    */
   onOpenOverview?: (currentKey: string) => void;
+  /** The viewer finished closing, by any means. */
+  onClosed?: () => void;
   children: ReactNode;
 }) {
   const { t } = useT("editor");
@@ -276,7 +282,10 @@ export function PreviewSequenceProvider({
         source={toPreviewSource(current)}
         open={open}
         onClose={() => setOpen(false)}
-        onExitComplete={() => setSession(null)}
+        onExitComplete={() => {
+          setSession(null);
+          onClosed?.();
+        }}
         onImageError={handleImageError}
         titleAccessory={details?.titleAccessory}
         info={
@@ -295,6 +304,7 @@ export function PreviewSequenceProvider({
               }
             : undefined
         }
+        copyLink={details?.copyLink}
         onOpenOverview={
           onOpenOverview
             ? () => {

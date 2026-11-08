@@ -15,6 +15,19 @@
 const encode = (id: string) => encodeURIComponent(id);
 
 /**
+ * Undo `encode` for a route parameter the router handed over still encoded.
+ * A segment that isn't valid percent-encoding is returned as is, so a
+ * hand-typed `%` can't throw while the page renders.
+ */
+export function decodeRouteSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+/**
  * `?focus=` token that scrolls the agent's General settings to its
  * conversation-starters editor and flashes it. Lives here because it is URL
  * vocabulary: `agentConversationStarters()` writes it and the page reads it,
@@ -42,6 +55,11 @@ function workspaceScoped(slug: string) {
     usage: () => `${ws}/usage`,
     issues: () => `${ws}/issues`,
     issueDetail: (id: string) => `${ws}/issues/${encode(id)}`,
+    // Opens the newest upload of the deliverable named `filename` on this
+    // issue. Addresses the file by name, not by attachment id, so the link
+    // keeps pointing at the latest version as new ones are uploaded.
+    issueDeliverable: (id: string, filename: string) =>
+      `${ws}/issues/${encode(id)}/deliverables/${encode(filename)}`,
     projects: () => `${ws}/projects`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,

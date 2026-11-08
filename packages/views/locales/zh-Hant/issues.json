@@ -1451,6 +1451,8 @@
     "version_short": "v{{version}}",
     "locate_comment": "定位到評論",
     "locate_description": "定位到描述",
+    "copy_link": "複製最新版連結",
+    "not_found": "這個任務裡沒有名為「{{name}}」的產物",
     "version_label": "第 {{version}} 版，共 {{total}} 版",
     "version_of": "v{{version}}（共 {{total}} 版）",
     "info_source": "來源",

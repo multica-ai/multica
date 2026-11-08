@@ -131,6 +131,7 @@ import {
 } from "./deliverables/deliverable-details";
 import { collectDeliverableFiles } from "@multica/core/attachments/deliverables";
 import { AttachmentVersionsProvider } from "./deliverables/attachment-versions";
+import { OpenDeliverableOnLoad, useCopyDeliverableLink } from "./deliverables/deliverable-link";
 import { useQuery } from "@tanstack/react-query";
 import { useIssueReadState } from "@multica/core/issues/read-state";
 import { useAuthStore } from "@multica/core/auth";
@@ -1200,6 +1201,17 @@ interface IssueDetailProps {
   readsInbox?: boolean;
   /** The route already completed the authoritative detail read this mount. */
   skipInitialRefetch?: boolean;
+  /**
+   * Route only: the file name of a `/deliverables/<name>` link. Opens the
+   * newest upload of that deliverable once the timeline has loaded.
+   */
+  openDeliverable?: string;
+  /**
+   * Route only: the deliverable link has been dealt with (the viewer it
+   * opened closed, or the file is missing); the route puts the plain issue
+   * address back.
+   */
+  onDeliverableLinkDone?: () => void;
 }
 
 // Not found
@@ -1380,7 +1392,7 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -2589,11 +2601,30 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     jumpToThread(locateRootRequest);
   }, [locateRootRequest, jumpToThread]);
 
+  // Identifier form, like the issue's own copy link: a pasted link should say
+  // which issue it points at.
+  const copyDeliverableLink = useCopyDeliverableLink(issue?.identifier ?? id);
   const describeDeliverable = useDeliverableDetails({
     files: deliverableFiles,
     commentById,
     onLocate: locateOrigin,
+    onCopyLink: copyDeliverableLink,
   });
+  // A `/deliverables/<name>` link opened the viewer: when it closes, however
+  // it closes, the address goes back to the plain issue page. Viewer sessions
+  // the reader opens themselves leave the address alone.
+  const deliverableLinkSessionRef = useRef(false);
+  const onDeliverableOpenedInViewer = useCallback(() => {
+    deliverableLinkSessionRef.current = true;
+  }, []);
+  const onDeliverableLinkDoneStable = useCallback(() => {
+    onDeliverableLinkDone?.();
+  }, [onDeliverableLinkDone]);
+  const onPreviewClosed = useCallback(() => {
+    if (!deliverableLinkSessionRef.current) return;
+    deliverableLinkSessionRef.current = false;
+    onDeliverableLinkDone?.();
+  }, [onDeliverableLinkDone]);
   // The overview remembers the file the viewer was showing, so `G` can go
   // back to it.
   const [overview, setOverview] = useState<{ open: boolean; returnKey: string | null }>({
@@ -3140,7 +3171,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
       {/* Deliverables — the files this issue's comments delivered. Hidden
           while there are none. */}
-      <DeliverablesSection files={deliverableFiles} onOpenOverview={openOverview} />
+      <DeliverablesSection
+        files={deliverableFiles}
+        onOpenOverview={openOverview}
+        onCopyLink={copyDeliverableLink}
+      />
 
       {/* Execution summary owns its query, realtime updates and disclosure. */}
       <ExecutionLogSection issueId={id} identifier={issue.identifier} issueTitle={issue.title} />
@@ -4112,8 +4147,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       items={previewSequence}
       describeItem={describeDeliverable}
       onOpenOverview={openOverviewFromViewer}
+      onClosed={onPreviewClosed}
     >
       <AttachmentVersionsProvider files={deliverableFiles}>{layout}</AttachmentVersionsProvider>
+      {openDeliverable && (
+        <OpenDeliverableOnLoad
+          name={openDeliverable}
+          files={deliverableFiles}
+          ready={!timelineLoading}
+          onOpenedInViewer={onDeliverableOpenedInViewer}
+          onDone={onDeliverableLinkDoneStable}
+        />
+      )}
       <DeliverablesOverview
         open={overview.open}
         onClose={closeOverview}
@@ -4122,6 +4167,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         files={deliverableFiles}
         commentById={commentById}
         onLocate={locateOrigin}
+        onCopyLink={copyDeliverableLink}
       />
     </PreviewSequenceProvider>
   );

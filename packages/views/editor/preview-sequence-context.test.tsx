@@ -566,6 +566,54 @@ describe("host details", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  it("copies a link from the top bar and stays open", () => {
+    const onSelect = vi.fn();
+    render(
+      <PreviewSequenceProvider
+        items={sequenceOf(THREE)}
+        describeItem={(item) =>
+          item.key === THREE[0]!.id
+            ? { copyLink: { label: "Copy link to latest version", onSelect } }
+            : undefined
+        }
+      >
+        <Opener openKey={THREE[0]!.id} />
+      </PreviewSequenceProvider>,
+    );
+    openFirst();
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy link to latest version" }));
+    });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    // A file the host has no link for shows no button.
+    act(() => {
+      fireEvent.click(nextButton());
+    });
+    expect(screen.queryByRole("button", { name: "Copy link to latest version" })).toBeNull();
+  });
+
+  it("reports when the viewer has finished closing, not when it moves", async () => {
+    const onClosed = vi.fn();
+    render(
+      <PreviewSequenceProvider items={sequenceOf(THREE)} onClosed={onClosed}>
+        <Opener openKey={THREE[0]!.id} />
+      </PreviewSequenceProvider>,
+    );
+    openFirst();
+    act(() => {
+      fireEvent.click(nextButton());
+    });
+    expect(onClosed).not.toHaveBeenCalled();
+
+    act(() => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1));
+  });
+
   it("hands the overview the file on screen when G is pressed", async () => {
     const onOpenOverview = vi.fn();
     render(
