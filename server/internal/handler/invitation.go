@@ -506,6 +506,20 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusGone, "invitation has expired")
 		return
 	}
+	// Older share-link joins could leave a pending invitation behind. Settle
+	// that invitation before consuming capacity: this membership already has
+	// its own seat, and its role must not be replaced by the invitation's role.
+	existing, memberErr := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+		UserID: user.ID, WorkspaceID: inv.WorkspaceID,
+	})
+	if memberErr == nil {
+		h.acceptInvitationForExistingMember(w, r, inv, user, existing)
+		return
+	}
+	if !errors.Is(memberErr, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to load membership")
+		return
+	}
 	capacityActive, err := h.beginCapacityConsume(r.Context(), uuid.UUID(inv.WorkspaceID.Bytes), uuid.UUID(inv.ID.Bytes), uuid.UUID(inv.ID.Bytes), uuid.UUID(user.ID.Bytes))
 	if err != nil {
 		writeSeatCapacityError(w, err)
