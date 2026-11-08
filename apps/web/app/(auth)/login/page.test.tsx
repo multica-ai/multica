@@ -206,7 +206,7 @@ describe("LoginPage", () => {
       render(<LoginPage />, { wrapper: createWrapper() });
 
       await waitFor(() => {
-        expect(mockReplace).toHaveBeenCalledWith("/acme");
+        expect(mockReplace).toHaveBeenCalledWith("/acme/start");
       });
       expect(mockListWorkspaces).toHaveBeenCalledTimes(1);
     });

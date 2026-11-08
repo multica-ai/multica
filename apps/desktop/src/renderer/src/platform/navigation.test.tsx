@@ -127,6 +127,23 @@ describe("openInNewTab", () => {
 });
 
 describe("push", () => {
+  it("repeated rail switches resume issue detail without adding tabs", () => {
+    const adapter = renderProvider();
+    act(() => adapter().push("/acme/issues/ACME-1?tab=activity#comment-c1"));
+    for (let i = 0; i < 4; i++) {
+      act(() => adapter().push("/butter/start"));
+      if (i === 0) {
+        expect(getActiveTab(useTabStore.getState())?.url).toBe("/butter/start");
+        act(() => useTabStore.getState().navigateActiveSession("/butter/issues", { replace: true }));
+      }
+      act(() => adapter().push("/acme/start"));
+      const state = useTabStore.getState();
+      expect(getActiveTab(state)?.url).toBe("/acme/issues/ACME-1?tab=activity#comment-c1");
+      expect(state.byWorkspace.acme.tabs).toHaveLength(1);
+      expect(state.byWorkspace.butter.tabs).toHaveLength(1);
+    }
+  });
+
   it("navigates the active session in-tab (url + virtual history)", () => {
     const getAdapter = renderProvider();
 
@@ -435,10 +452,10 @@ describe("workspaces shown in another window", () => {
     },
   );
 
-  it("focuses that window without a path for a workspace switcher click", () => {
+  it.each(["issues", "start"])("focuses that window without a path for a %s switcher click", (route) => {
     const focusWorkspaceWindow = withOtherWindow("butter");
     const adapter = renderProvider();
-    act(() => adapter().push("/butter/issues"));
+    act(() => adapter().push(`/butter/${route}`));
 
     expect(focusWorkspaceWindow).toHaveBeenCalledWith("butter", undefined);
     expect(useTabStore.getState().activeWorkspaceSlug).toBe("acme");

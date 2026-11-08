@@ -16,8 +16,8 @@ import {
 describe("workspace page coverage", () => {
   // `root` aliases `issues` (same segment) and is never rendered as its own
   // nav item; the parameterized detail routes are resources, not pages.
-  // `home` resolves to another destination and is not a sidebar page.
-  const EXCLUDED_METHODS = new Set(["root", "home"]);
+  // `start` resolves to another destination and is not a sidebar page.
+  const EXCLUDED_METHODS = new Set(["root", "start"]);
   const KNOWN_SEGMENTS = new Set(
     (Object.keys(WORKSPACE_PAGES) as WorkspacePageKey[]).map(
       (k) => WORKSPACE_PAGES[k].segment,

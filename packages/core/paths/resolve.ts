@@ -36,7 +36,7 @@ export function resolvePostAuthDestination(
   }
   const first = workspaces[0];
   if (first) {
-    return paths.workspace(first.slug).home();
+    return paths.workspace(first.slug).start();
   }
   return paths.newWorkspace();
 }

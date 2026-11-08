@@ -23,6 +23,7 @@ const workspaceRoutes = new Set([
   "members",
   "attachments",
   "links",
+  "start",
 ]);
 
 function splitWorkspacePath(path: string): { slug: string; route?: string } | null {

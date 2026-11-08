@@ -305,7 +305,8 @@ function AppContent() {
       otherWindowWorkspaces(),
     );
     if (target && target !== activeWorkspaceSlug) {
-      switchWorkspace(target, paths.workspace(target).home());
+      const group = useTabStore.getState().byWorkspace[target];
+      switchWorkspace(target, group?.tabs.length ? undefined : paths.workspace(target).start());
     }
   }, [workspaces, workspaceListReady]);
 

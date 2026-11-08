@@ -15,8 +15,8 @@ beforeEach(() => {
 
 describe("desktop workspace entry", () => {
   it("replaces the tab session and virtual history, leaving router writes to the coordinator", () => {
-    useTabStore.getState().switchWorkspace("acme", "/acme");
-    expect(getActiveTab(useTabStore.getState())?.url).toBe("/acme");
+    useTabStore.getState().switchWorkspace("acme", "/acme/start");
+    expect(getActiveTab(useTabStore.getState())?.url).toBe("/acme/start");
     render(<DesktopWorkspaceEntry />);
     fireEvent.click(screen.getByRole("button", { name: "Resolve home" }));
     const tab = getActiveTab(useTabStore.getState());

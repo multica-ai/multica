@@ -10,6 +10,13 @@ import {
 afterEach(() => setWorkspaceSlugLookup(() => false));
 
 describe("workspaceSlugForPath", () => {
+  it.each(["links", "dingtalk"])("resolves start for reserved workspace %s with membership", (slug) => {
+    expect(workspaceSlugForPath(`/${slug}/start`)).toBeNull();
+    setWorkspaceSlugLookup((candidate) => candidate === slug);
+    expect(workspaceSlugForPath(`/${slug}/start`)).toBe(slug);
+    expect(isKnownWorkspacePath(`/${slug}/start`)).toBe(true);
+  });
+
   it("recognizes embedded link paths for a workspace member", () => {
     setWorkspaceSlugLookup((slug) => slug === "acme");
     expect(workspaceSlugForPath("/acme/links/id")).toBe("acme");

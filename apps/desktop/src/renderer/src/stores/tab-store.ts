@@ -370,9 +370,8 @@ function inboxSelectionKeyForUrl(url: string): string | null {
  *     was constructed without the workspace prefix. The router would
  *     interpret `issues` as a workspace slug → NoAccessPage.
  *
- * A bare `/{slug}` stays an entry destination. The navigation-layer entry
- * resolver loads its home link and replaces the session with home or Issues;
- * the router never self-navigates (MUL-4741).
+ * A bare `/{slug}` normalizes to Issues. Explicit workspace entry uses
+ * `/{slug}/start`, resolved at the session layer (MUL-4741).
  *
  * Returns null for rejects (caller decides how to recover — usually by
  * dropping the tab or substituting a default).
@@ -395,7 +394,7 @@ export function sanitizeTabPath(path: string, savedGroupSlug?: string): string |
     return null;
   }
   if (segments.length === 1) {
-    return `/${firstSegment}${suffix}`;
+    return `/${firstSegment}/issues${suffix}`;
   }
   return path;
 }

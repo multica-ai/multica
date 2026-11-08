@@ -69,7 +69,7 @@ test("configures workspace and project home links and restores issues when clear
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByText("Team documentation", { exact: true })).toBeVisible();
     if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/workspace-links.png` });
-    await page.goto(`/${workspace.slug}`);
+    await page.goto(`/${workspace.slug}/start`);
     await expect(page).toHaveURL(new RegExp(`/${workspace.slug}/links/`));
     await expect(page.locator("iframe")).toHaveAttribute(
       "src",
@@ -102,7 +102,7 @@ test("configures workspace and project home links and restores issues when clear
     await page.getByRole("radio", { name: "Embedded", exact: true }).check();
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    await page.goto(`/${workspace.slug}`);
+    await page.goto(`/${workspace.slug}/start`);
     await expect(page).toHaveURL(new RegExp(`/${workspace.slug}/issues$`));
     await page.goto(`/${workspace.slug}/issues`);
     await page.setViewportSize({ width: 480, height: 900 });

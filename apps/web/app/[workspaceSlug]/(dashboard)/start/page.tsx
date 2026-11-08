@@ -1,5 +1,5 @@
 import { WorkspaceEntry } from "@multica/views/links";
 
-export default function WorkspacePage() {
+export default function WorkspaceStartPage() {
   return <WorkspaceEntry />;
 }

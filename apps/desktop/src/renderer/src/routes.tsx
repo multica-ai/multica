@@ -146,7 +146,7 @@ export const appRoutes: RouteObject[] = [
         children: [
           // The entry resolver replaces the tab session, not the router.
           // Only the coordinator navigates the router (MUL-4741).
-          { index: true, element: <DesktopWorkspaceEntry /> },
+          { path: "start", element: <DesktopWorkspaceEntry /> },
           {
             path: "issues",
             element: (

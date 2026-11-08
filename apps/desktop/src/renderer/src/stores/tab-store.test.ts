@@ -55,9 +55,9 @@ describe("sanitizeTabPath", () => {
     expect(sanitizeTabPath("/project-x/inbox")).toBe("/project-x/inbox");
   });
 
-  it("preserves a bare workspace entry for home resolution at the session layer", () => {
-    expect(sanitizeTabPath("/acme")).toBe("/acme");
-    expect(sanitizeTabPath("/acme?welcome=1")).toBe("/acme?welcome=1");
+  it("normalizes a bare workspace to Issues while preserving query and hash", () => {
+    expect(sanitizeTabPath("/acme")).toBe("/acme/issues");
+    expect(sanitizeTabPath("/acme?welcome=1#hello")).toBe("/acme/issues?welcome=1#hello");
   });
 });
 
