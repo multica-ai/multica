@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "../../../packages/ui/styles/tokens.css";
+@import "../../../packages/ui/styles/appearance.css";
 @import "../../../packages/ui/styles/base.css";
 @import "./custom.css";
 

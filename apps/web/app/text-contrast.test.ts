@@ -2,6 +2,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
+import { APPEARANCE_FRAMES } from "@multica/core/appearance";
 
 /**
  * Is every tone the product paints text and marks with actually legible, and is
@@ -142,10 +143,11 @@ function expectTonePasses(
   declarations: Map<string, string>,
   tone: string,
   floor: number,
+  backgrounds: readonly string[] = backgroundTokens,
 ) {
   const foreground = oklchToRgb(resolveToken(declarations, tone));
 
-  for (const token of backgroundTokens) {
+  for (const token of backgrounds) {
     const background = oklchToRgb(resolveToken(declarations, token));
     const ratio = contrastRatio(foreground, background);
 
@@ -160,6 +162,17 @@ const tokensCss = () =>
   readFileSync(resolve(repoRoot, "packages/ui/styles/tokens.css"), "utf8");
 const landingCss = () =>
   readFileSync(resolve(repoRoot, "apps/web/app/custom.css"), "utf8");
+const appearanceCss = () =>
+  readFileSync(resolve(repoRoot, "packages/ui/styles/appearance.css"), "utf8");
+
+/** Later blocks win, as they do in the cascade for the attribute selectors. */
+const layered = (...blocks: Map<string, string>[]) =>
+  new Map(blocks.flatMap((block) => [...block]));
+
+const POP_LIGHT = ':root[data-style="pop"]';
+const POP_DARK = ':root.dark[data-style="pop"]';
+const POP_FRAME_SCOPE =
+  ':root[data-style="pop"] :is([data-slot="app-rail"], [data-slot="window-toolbar"], [data-slot="main-top-bar"])';
 
 // ── source scanning ────────────────────────────────────────────────────────
 
@@ -423,6 +436,83 @@ describe("text contrast", () => {
         contrastRatio(faint, surface),
         "faint must read as the quieter step, or the two tiers have swapped",
       ).toBeLessThan(contrastRatio(muted, surface));
+    });
+  });
+
+  describe("appearance", () => {
+    const frames = APPEARANCE_FRAMES.filter((frame) => frame !== "neutral");
+
+    it.each(frames)("the %s frame keeps both tones legible in light and dark", (frame) => {
+      const css = appearanceCss();
+      const root = readBlock(tokensCss(), ":root");
+      const light = layered(root, readBlock(css, `:root[data-frame="${frame}"]:not([data-style="pop"])`));
+      const dark = layered(
+        root,
+        readBlock(tokensCss(), ".dark"),
+        readBlock(css, `:root.dark[data-frame="${frame}"]:not([data-style="pop"])`),
+      );
+      for (const mode of [light, dark]) {
+        expectTonePasses(mode, "--muted-foreground", WCAG_AA_NORMAL_TEXT);
+        expectTonePasses(mode, "--faint-foreground", WCAG_AA_NON_TEXT);
+      }
+    });
+
+    // Pop's frame is black, so the content tones are judged on the content
+    // surfaces only; what sits on the frame reads the frame scope below.
+    const popContentBackgrounds = backgroundTokens.filter((token) => token !== "--app-shell");
+
+    it.each([
+      ["light", () => layered(readBlock(tokensCss(), ":root"), readBlock(appearanceCss(), POP_LIGHT))],
+      [
+        "dark",
+        () =>
+          layered(
+            readBlock(tokensCss(), ":root"),
+            readBlock(tokensCss(), ".dark"),
+            readBlock(appearanceCss(), POP_LIGHT),
+            readBlock(appearanceCss(), POP_DARK),
+          ),
+      ],
+    ])("Pop keeps both tones legible on content surfaces in %s mode", (_mode, palette) => {
+      const declarations = palette();
+      expectTonePasses(declarations, "--muted-foreground", WCAG_AA_NORMAL_TEXT, popContentBackgrounds);
+      expectTonePasses(declarations, "--faint-foreground", WCAG_AA_NON_TEXT, popContentBackgrounds);
+      expectTonePasses(declarations, "--signature-foreground", WCAG_AA_NORMAL_TEXT, ["--signature"]);
+    });
+
+    it.each([
+      ["light", [POP_LIGHT]],
+      ["dark", [POP_LIGHT, POP_DARK]],
+    ])("Pop's frame scope is legible on the black frame in %s mode", (_mode, selectors) => {
+      const css = appearanceCss();
+      const declarations = layered(
+        readBlock(tokensCss(), ":root"),
+        ...selectors.map((selector) => readBlock(css, selector)),
+        readBlock(css, POP_FRAME_SCOPE),
+      );
+      const frameBackgrounds = [
+        "--app-shell",
+        "--background",
+        "--page-canvas",
+        "--surface",
+        "--surface-raised",
+        "--surface-hover",
+        "--surface-selected",
+        "--muted",
+        "--sidebar-accent",
+      ];
+      for (const tone of ["--foreground", "--muted-foreground", "--sidebar-accent-foreground"]) {
+        expectTonePasses(declarations, tone, WCAG_AA_NORMAL_TEXT, frameBackgrounds);
+      }
+      expectTonePasses(declarations, "--faint-foreground", WCAG_AA_NON_TEXT, frameBackgrounds);
+    });
+
+    // The light selector also matches in dark mode, so a colour the dark block
+    // forgets is painted with its light value on a dark surface.
+    it("Pop's dark block redeclares every colour of the light block", () => {
+      const lightKeys = [...readBlock(appearanceCss(), POP_LIGHT).keys()].filter((key) => key !== "--radius");
+      const darkKeys = new Set(readBlock(appearanceCss(), POP_DARK).keys());
+      expect(lightKeys.filter((key) => !darkKeys.has(key))).toEqual([]);
     });
   });
 

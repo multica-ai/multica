@@ -1,0 +1,229 @@
+/* Appearance: styles and frame colours on top of tokens.css.
+ *
+ * Both are attributes on <html>, written by the appearance store in
+ * @multica/core/appearance: `data-style` (absent = default) and `data-frame`
+ * (absent = neutral). Import after tokens.css.
+ *
+ * Contrast for every block here is recomputed by apps/web/app/text-contrast.test.ts;
+ * that test reads these selectors verbatim, so keep one selector per block. */
+
+/* ── Frame colours ──────────────────────────────────────────────────────────
+ * Tint only the app shell around the content card (and the rail's hover and
+ * active fill), never the card itself: tinting the whole neutral ramp made
+ * every surface, border and secondary text look muddy. Lightness stays close
+ * to the neutral shell so --muted-foreground keeps clearing AA on it.
+ * Pop paints its own black frame, so frames do not apply under it. */
+
+:root[data-frame="sand"]:not([data-style="pop"]) {
+    --app-shell: oklch(0.955 0.026 75);
+    --sidebar: oklch(0.955 0.026 75);
+    --sidebar-accent: oklch(0.925 0.032 75);
+}
+
+:root[data-frame="sage"]:not([data-style="pop"]) {
+    --app-shell: oklch(0.955 0.024 150);
+    --sidebar: oklch(0.955 0.024 150);
+    --sidebar-accent: oklch(0.925 0.03 150);
+}
+
+:root[data-frame="mist"]:not([data-style="pop"]) {
+    --app-shell: oklch(0.955 0.024 245);
+    --sidebar: oklch(0.955 0.024 245);
+    --sidebar-accent: oklch(0.925 0.03 245);
+}
+
+:root[data-frame="lilac"]:not([data-style="pop"]) {
+    --app-shell: oklch(0.955 0.026 295);
+    --sidebar: oklch(0.955 0.026 295);
+    --sidebar-accent: oklch(0.925 0.032 295);
+}
+
+:root[data-frame="rose"]:not([data-style="pop"]) {
+    --app-shell: oklch(0.955 0.022 15);
+    --sidebar: oklch(0.955 0.022 15);
+    --sidebar-accent: oklch(0.925 0.028 15);
+}
+
+:root.dark[data-frame="sand"]:not([data-style="pop"]) {
+    --app-shell: oklch(0.175 0.022 75);
+    --sidebar: oklch(0.21 0.02 75);
+    --sidebar-accent: oklch(0.274 0.024 75);
+}
+
+:root.dark[data-frame="sage"]:not([data-style="pop"]) {
+    --app-shell: oklch(0.175 0.02 150);
+    --sidebar: oklch(0.21 0.018 150);
+    --sidebar-accent: oklch(0.274 0.022 150);
+}
+
+:root.dark[data-frame="mist"]:not([data-style="pop"]) {
+    --app-shell: oklch(0.175 0.026 255);
+    --sidebar: oklch(0.21 0.024 255);
+    --sidebar-accent: oklch(0.274 0.028 255);
+}
+
+:root.dark[data-frame="lilac"]:not([data-style="pop"]) {
+    --app-shell: oklch(0.175 0.026 295);
+    --sidebar: oklch(0.21 0.024 295);
+    --sidebar-accent: oklch(0.274 0.028 295);
+}
+
+:root.dark[data-frame="rose"]:not([data-style="pop"]) {
+    --app-shell: oklch(0.175 0.02 15);
+    --sidebar: oklch(0.21 0.018 15);
+    --sidebar-accent: oklch(0.274 0.022 15);
+}
+
+/* Frame picker swatches: a stronger cut of each hue than the frame itself, so
+ * the choices read apart at swatch size in both modes. */
+[data-frame-swatch="neutral"] { background-color: oklch(0.9 0.004 286); }
+[data-frame-swatch="sand"] { background-color: oklch(0.86 0.07 75); }
+[data-frame-swatch="sage"] { background-color: oklch(0.86 0.06 150); }
+[data-frame-swatch="mist"] { background-color: oklch(0.86 0.06 245); }
+[data-frame-swatch="lilac"] { background-color: oklch(0.86 0.07 295); }
+[data-frame-swatch="rose"] { background-color: oklch(0.86 0.06 15); }
+
+/* ── Style: Pop ─────────────────────────────────────────────────────────────
+ * Black frame, cream canvas, 1px black outlines, small radius, hard offset
+ * shadows and a pink signature fill. Layout and density are untouched.
+ *
+ * --primary stays dark on purpose: it also paints text and icons
+ * (`text-primary`), where pink on cream would fail contrast. The pink lives in
+ * --signature and reaches primary buttons through the hook further down.
+ *
+ * The dark block must redeclare every colour the light block sets, because
+ * the light selector also matches in dark mode. */
+
+:root[data-style="pop"] {
+    --radius: 0.25rem;
+    --signature: oklch(0.82 0.15 340);
+    --signature-foreground: oklch(0.145 0 0);
+    --app-shell: oklch(0.145 0 0);
+    --page-canvas: oklch(0.966 0.005 106.5);
+    --surface: oklch(1 0 0);
+    --surface-raised: oklch(1 0 0);
+    --surface-hover: oklch(0.935 0.01 106);
+    --surface-selected: oklch(0.88 0.1 340);
+    --surface-border: oklch(0.145 0 0);
+    --surface-shadow: none;
+    --floating-shadow: 6px 6px 0 oklch(0.145 0 0);
+    --menu-shadow: 4px 4px 0 oklch(0.145 0 0);
+    --secondary: oklch(0.935 0.01 106);
+    --muted: oklch(0.935 0.01 106);
+    --accent: oklch(0.935 0.01 106);
+    --muted-foreground: oklch(0.44 0.01 106);
+    --faint-foreground: oklch(0.56 0.01 106);
+    --border: oklch(0.145 0 0);
+    --input: oklch(0.145 0 0);
+    --ring: oklch(0.145 0 0);
+    --sidebar: oklch(0.935 0.01 106);
+    --sidebar-accent: oklch(0.9 0.012 106);
+    --sidebar-border: oklch(0.145 0 0);
+}
+
+:root.dark[data-style="pop"] {
+    --signature: oklch(0.82 0.15 340);
+    --signature-foreground: oklch(0.145 0 0);
+    --app-shell: oklch(0 0 0);
+    --page-canvas: oklch(0.17 0 0);
+    --surface: oklch(0.2 0 0);
+    --surface-raised: oklch(0.22 0 0);
+    --surface-hover: oklch(0.26 0 0);
+    --surface-selected: oklch(0.34 0.1 340);
+    --surface-border: oklch(0.92 0 0);
+    --surface-shadow: none;
+    --floating-shadow: 6px 6px 0 oklch(0.82 0.15 340);
+    --menu-shadow: 4px 4px 0 oklch(0.82 0.15 340);
+    --secondary: oklch(0.26 0 0);
+    --muted: oklch(0.26 0 0);
+    --accent: oklch(0.26 0 0);
+    --muted-foreground: oklch(0.8 0 0);
+    --faint-foreground: oklch(0.62 0 0);
+    --border: oklch(0.92 0 0);
+    --input: oklch(0.92 0 0);
+    --ring: oklch(0.82 0.15 340);
+    --sidebar: oklch(0.2 0 0);
+    --sidebar-accent: oklch(0.26 0 0);
+    --sidebar-border: oklch(0.92 0 0);
+}
+
+/* What sits directly on Pop's black frame — the rail, and on desktop the
+ * window toolbar and tab bar — reads light tokens in both modes. Tokens that
+ * are aliases at :root (--background) resolve there, so they are restated. */
+:root[data-style="pop"] :is([data-slot="app-rail"], [data-slot="window-toolbar"], [data-slot="main-top-bar"]) {
+    --foreground: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.8 0 0);
+    --faint-foreground: oklch(0.64 0 0);
+    --background: oklch(0.145 0 0);
+    --page-canvas: oklch(0.25 0 0);
+    --surface: oklch(0.2 0 0);
+    --surface-raised: oklch(0.25 0 0);
+    --surface-hover: oklch(0.3 0 0);
+    --surface-selected: oklch(0.32 0.08 340);
+    --muted: oklch(0.27 0 0);
+    --sidebar-accent: oklch(0.27 0 0);
+    --sidebar-accent-foreground: oklch(0.85 0.13 340);
+    --surface-border: oklch(0.4 0 0);
+    --surface-shadow: none;
+    --ring: oklch(0.85 0.13 340);
+}
+
+/* Primary buttons take the signature fill with an outline, and lift onto a
+ * hard shadow on hover. */
+:root[data-style="pop"] [data-slot="button"][data-variant="default"] {
+    background-color: var(--signature);
+    color: var(--signature-foreground);
+    border-color: var(--surface-border);
+}
+
+:root[data-style="pop"] [data-slot="button"][data-variant="default"]:not(:disabled):hover {
+    translate: -2px -2px;
+    box-shadow: 3px 3px 0 var(--surface-border);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :root[data-style="pop"] [data-slot="button"][data-variant="default"]:not(:disabled):hover {
+        translate: none;
+    }
+}
+
+/* Issue list group headers become solid colour blocks keyed by status. Custom
+ * statuses keep the neutral header. Text on the blocks is always ink. */
+:root[data-style="pop"] [data-slot="issue-group-header"] {
+    box-shadow: inset 0 0 0 1px var(--surface-border);
+}
+
+:root[data-style="pop"] [data-slot="issue-group-header"]:is([data-status="backlog"], [data-status="todo"], [data-status="in_progress"], [data-status="in_review"], [data-status="done"], [data-status="blocked"]) {
+    --foreground: oklch(0.145 0 0);
+    --muted-foreground: oklch(0.3 0 0);
+    color: var(--foreground);
+}
+
+/* The status glyph would vanish into its own colour block. */
+:root[data-style="pop"] [data-slot="issue-group-header"]:is([data-status="backlog"], [data-status="todo"], [data-status="in_progress"], [data-status="in_review"], [data-status="done"], [data-status="blocked"]) svg {
+    color: var(--foreground);
+}
+
+:root[data-style="pop"] [data-slot="issue-group-header"]:is([data-status="backlog"], [data-status="todo"]) {
+    background-color: oklch(0.8 0.08 268);
+}
+
+:root[data-style="pop"] [data-slot="issue-group-header"][data-status="in_progress"] {
+    background-color: oklch(0.87 0.16 88);
+}
+
+:root[data-style="pop"] [data-slot="issue-group-header"][data-status="in_review"] {
+    background-color: oklch(0.85 0.1 170);
+}
+
+:root[data-style="pop"] [data-slot="issue-group-header"][data-status="done"] {
+    background-color: var(--signature);
+}
+
+:root[data-style="pop"] [data-slot="issue-group-header"][data-status="blocked"] {
+    background-color: oklch(0.8 0.13 50);
+}
+
+:root[data-style="pop"] [data-slot="label-chip"] {
+    box-shadow: inset 0 0 0 1px var(--surface-border);
+}
