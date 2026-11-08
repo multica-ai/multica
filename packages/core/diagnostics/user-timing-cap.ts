@@ -1,4 +1,5 @@
-// Development-only cap on the User Timing buffer — shared by web and desktop.
+// Cap on the User Timing buffer for development windows — shared by web and
+// desktop, which each install it from their entry point only in development.
 //
 // React's development build records a `performance.measure` entry, carrying a
 // changed-props `detail`, for component renders and never clears them. The
@@ -6,7 +7,8 @@
 // that stays open while runs stream grows without bound: about 1.4KB per entry
 // at 50–200 entries a second, mostly in native memory that V8's heap limit
 // does not cap. A Desktop Canary left open for two days reached 30GB+
-// (MUL-8781). Production React emits no measures, so this is dev-only.
+// (MUL-8781). Production React emits no measures, so production never needs
+// this.
 //
 // DevTools Performance recordings capture measures as they are emitted, so
 // emptying the buffer loses nothing a recording would show.
@@ -16,13 +18,12 @@ const CLEAR_INTERVAL_MS = 60_000;
 let installed = false;
 
 /**
- * Periodically empty the User Timing measure buffer in development. Safe to
- * call multiple times (idempotent) and safe on the server. Call once from a
- * client-only effect.
+ * Periodically empty the User Timing measure buffer. Safe to call multiple
+ * times (idempotent) and safe on the server. The caller decides whether this
+ * is a development build.
  */
 export function installUserTimingCap(): void {
   if (installed) return;
-  if (process.env.NODE_ENV === "production") return;
   if (typeof window === "undefined") return;
   if (typeof performance === "undefined" || typeof performance.clearMeasures !== "function") return;
   installed = true;

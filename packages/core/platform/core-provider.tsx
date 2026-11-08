@@ -3,7 +3,6 @@
 import { useEffect, useMemo } from "react";
 import { ApiClient } from "../api/client";
 import { installFreezeWatchdog } from "../diagnostics/freeze-watchdog";
-import { installUserTimingCap } from "../diagnostics/user-timing-cap";
 import { setApiInstance, setSchemaLogger } from "../api";
 import { createAuthStore, registerAuthStore } from "../auth";
 import { createChatStore, registerChatStore } from "../chat";
@@ -170,12 +169,10 @@ export function CoreProvider({
     [],
   );
 
-  // Client-only diagnostics — shared by web and desktop. Both are no-ops on
-  // the server and idempotent, so mounting them here covers both apps in one
-  // place.
+  // Client-only freeze watchdog — shared by web and desktop. No-op on the
+  // server and idempotent, so mounting it here covers both apps in one place.
   useEffect(() => {
     installFreezeWatchdog();
-    installUserTimingCap();
   }, []);
 
   // Sliding session renewal, driven by use rather than by a clock. The store

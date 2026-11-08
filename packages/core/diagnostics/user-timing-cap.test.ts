@@ -16,13 +16,11 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  vi.unstubAllEnvs();
   vi.useRealTimers();
 });
 
 describe("installUserTimingCap", () => {
-  it("empties the measure buffer once a minute in development", async () => {
-    vi.stubEnv("NODE_ENV", "development");
+  it("empties the measure buffer once a minute", async () => {
     const installUserTimingCap = await load();
     installUserTimingCap();
 
@@ -35,7 +33,6 @@ describe("installUserTimingCap", () => {
   });
 
   it("installs a single timer when called repeatedly", async () => {
-    vi.stubEnv("NODE_ENV", "development");
     const installUserTimingCap = await load();
     installUserTimingCap();
     installUserTimingCap();
@@ -44,17 +41,7 @@ describe("installUserTimingCap", () => {
     expect(clearMeasures).toHaveBeenCalledTimes(1);
   });
 
-  it("does nothing in production", async () => {
-    vi.stubEnv("NODE_ENV", "production");
-    const installUserTimingCap = await load();
-    installUserTimingCap();
-
-    vi.advanceTimersByTime(120_000);
-    expect(clearMeasures).not.toHaveBeenCalled();
-  });
-
   it("does nothing on the server", async () => {
-    vi.stubEnv("NODE_ENV", "development");
     vi.stubGlobal("window", undefined);
     const installUserTimingCap = await load();
     installUserTimingCap();
