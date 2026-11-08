@@ -185,7 +185,7 @@ export function NewChatButton({
             <Button
               variant="ghost"
               size="icon-sm"
-              className="rounded-full text-muted-foreground"
+              className="text-muted-foreground"
               aria-label={label}
               onClick={() => {
                 if (only && !isAgentRuntimeBound(only)) {
@@ -215,7 +215,7 @@ export function NewChatButton({
         <IconButton
           variant="ghost"
           size="icon-sm"
-          className="rounded-full text-muted-foreground"
+          className="text-muted-foreground"
           label={label}
           tooltipSide={side === "top" ? "top" : "bottom"}
         />
