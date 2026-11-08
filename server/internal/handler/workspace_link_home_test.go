@@ -2,12 +2,14 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -114,4 +116,57 @@ func TestWorkspaceLinkHome(t *testing.T) {
 	assertHomes(fourth, projectHome)
 	call(http.MethodPatch, third, map[string]any{"is_home": true}, http.StatusOK)
 	assertHomes(third, projectHome)
+
+	// Create and PATCH must share the same scope lock and atomic replacement.
+	start = make(chan struct{})
+	results = make(chan *httptest.ResponseRecorder, 2)
+	for _, method := range []string{http.MethodPost, http.MethodPatch} {
+		workers.Add(1)
+		go func(method string) {
+			defer workers.Done()
+			<-start
+			body := map[string]any{"is_home": true, "open_mode": "embed"}
+			if method == http.MethodPost {
+				body["name"], body["url_template"], body["open_mode"] = "Concurrent", "https://example.com", "embed"
+			}
+			req := withURLParam(newRequest(method, "/api/links", body), "id", first)
+			req.Header.Set("X-Workspace-ID", ws)
+			w := httptest.NewRecorder()
+			if method == http.MethodPost {
+				testHandler.CreateWorkspaceLink(w, req)
+			} else {
+				testHandler.UpdateWorkspaceLink(w, req)
+			}
+			results <- w
+		}(method)
+	}
+	close(start)
+	workers.Wait()
+	for range 2 {
+		w := <-results
+		if w.Code != http.StatusOK && w.Code != http.StatusCreated {
+			t.Fatalf("concurrent create/PATCH: %d %s", w.Code, w.Body.String())
+		}
+	}
+	if err := testPool.QueryRow(context.Background(), "SELECT id::text FROM workspace_link WHERE workspace_id=$1 AND project_id IS NULL AND is_home", ws).Scan(&winner); err != nil {
+		t.Fatal(err)
+	}
+	assertHomes(winner, projectHome)
+
+	// Exercise migration 620 directly, bypassing the handler's home clearing.
+	_, err := testPool.Exec(context.Background(), `INSERT INTO workspace_link (id, workspace_id, name, url_template, open_mode, is_home)
+		VALUES ($1, $2, 'Duplicate', 'https://example.com', 'embed', true)`, uuid.NewString(), ws)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" || pgErr.ConstraintName != "workspace_link_home_scope_idx" {
+		t.Fatalf("duplicate home INSERT: want 620 unique index violation, got %v", err)
+	}
+	assertHomes(winner, projectHome)
+
+	// Fail after clearing and updating, at commit, to prove both writes roll back.
+	h := *testHandler
+	h.TxStarter = rollbackOnCommitTxStarter{pool: testPool}
+	req := withURLParam(newRequest(http.MethodPatch, "/api/links", map[string]any{"is_home": true, "open_mode": "embed"}), "id", second)
+	req.Header.Set("X-Workspace-ID", ws)
+	testutil.Call(t, h.UpdateWorkspaceLink, req).Want(http.StatusInternalServerError)
+	assertHomes(winner, projectHome)
 }
