@@ -90,6 +90,8 @@
     "team": "팀",
     "chat": "채팅",
     "autopilots": "자동화",
+    "new_issue": "만들기",
+    "search": "검색",
     "switch_workspace": "워크스페이스 전환",
     "invitation_from": "{{name}} 님이 초대했습니다",
     "pin_workspace": "작업 공간 고정",

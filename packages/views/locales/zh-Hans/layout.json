@@ -90,6 +90,8 @@
     "team": "团队",
     "chat": "聊天",
     "autopilots": "自动化",
+    "new_issue": "新建",
+    "search": "搜索",
     "switch_workspace": "切换工作区",
     "invitation_from": "{{name}} 邀请你加入",
     "pin_workspace": "置顶工作区",

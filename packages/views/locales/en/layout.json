@@ -90,6 +90,8 @@
     "team": "Team",
     "chat": "Chat",
     "autopilots": "Auto",
+    "new_issue": "New",
+    "search": "Search",
     "switch_workspace": "Switch workspace",
     "invitation_from": "{{name}} invited you",
     "pin_workspace": "Pin workspace",

@@ -21,5 +21,9 @@ export const LIST_COLUMN_WIDTH_CLASS = "w-[min(var(--list-column-width),40vw)]";
 export const NAV_PEEK_CLASS =
   "absolute inset-y-0 left-0 z-30 flex w-(--sidebar-width) flex-col overflow-hidden rounded-xl bg-page-canvas shadow-[var(--floating-shadow)] ring-1 ring-surface-border";
 
+/** A rail item: an icon over its short label. */
+export const RAIL_TILE_CLASS =
+  "group relative flex h-[52px] w-[52px] cursor-pointer flex-col items-center justify-center gap-1 rounded-xl text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground [&_svg]:size-5";
+
 export const RAIL_ICON_BUTTON_CLASS =
   "relative inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring data-popup-open:bg-sidebar-accent data-popup-open:text-sidebar-accent-foreground aria-[current=page]:bg-sidebar-accent aria-[current=page]:text-sidebar-accent-foreground [&_svg:not([class*='size-'])]:size-[18px]";

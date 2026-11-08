@@ -90,6 +90,8 @@
     "team": "Équipe",
     "chat": "Chat",
     "autopilots": "Auto",
+    "new_issue": "Créer",
+    "search": "Chercher",
     "switch_workspace": "Changer d'espace de travail",
     "invitation_from": "{{name}} vous a invité",
     "pin_workspace": "Épingler l’espace de travail",

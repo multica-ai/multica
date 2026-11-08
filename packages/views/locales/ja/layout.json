@@ -90,6 +90,8 @@
     "team": "チーム",
     "chat": "チャット",
     "autopilots": "自動化",
+    "new_issue": "新規",
+    "search": "検索",
     "switch_workspace": "ワークスペースを切り替え",
     "invitation_from": "{{name}} さんから招待されています",
     "pin_workspace": "ワークスペースをピン留め",
