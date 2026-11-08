@@ -84,6 +84,8 @@ vi.mock("@multica/views/layout", () => ({
   CompactNavSheet: () => null,
   GlobalShortcuts: () => <div data-testid="global-shortcuts" />,
   NavigationProgress: () => <div data-testid="navigation-progress" />,
+  NewIssueButton: () => <div data-testid="title-bar-new-issue" />,
+  SearchButton: () => <div data-testid="title-bar-search" />,
   ShellRouteDataPrefetch: ({ children }: { children: ReactNode }) => <>{children}</>,
   SpacePanel: () => <div data-testid="space-panel" />,
   useAppShell: () => ({ hasPanel: true }),
@@ -161,6 +163,8 @@ describe("DesktopShell workspace gating", () => {
     expect(queryByTestId("app-rail")).not.toBeNull();
     expect(queryByTestId("space-panel")).not.toBeNull();
     expect(queryByTestId("search-command")).not.toBeNull();
+    expect(queryByTestId("title-bar-new-issue")).not.toBeNull();
+    expect(queryByTestId("title-bar-search")).not.toBeNull();
     expect(queryByTestId("global-shortcuts")).not.toBeNull();
     expect(queryByTestId("modal-registry")).not.toBeNull();
     expect(queryByTestId("floating-chat")).not.toBeNull();
@@ -195,6 +199,7 @@ describe("DesktopShell workspace gating", () => {
     expect(queryByTestId("app-rail")).toBeNull();
     expect(queryByTestId("space-panel")).toBeNull();
     expect(queryByTestId("search-command")).toBeNull();
+    expect(queryByTestId("title-bar-new-issue")).toBeNull();
     expect(queryByTestId("global-shortcuts")).toBeNull();
     expect(queryByTestId("modal-registry")).toBeNull();
     expect(queryByTestId("floating-chat")).toBeNull();
@@ -230,5 +235,6 @@ describe("DesktopShell workspace gating", () => {
 
     expect(queryByTestId("app-rail")).toBeNull();
     expect(queryByTestId("search-command")).toBeNull();
+    expect(queryByTestId("title-bar-new-issue")).toBeNull();
   });
 });

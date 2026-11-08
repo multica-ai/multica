@@ -1,39 +1,40 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_RAIL_ORDER, resolveRailOrder, useRailOrderStore } from "./rail-order-store";
+import { RAIL_SPACES } from "../paths/spaces";
+import { resolveRailOrder, useRailOrderStore } from "./rail-order-store";
 
 describe("resolveRailOrder", () => {
   it("uses the default order until the user reorders", () => {
-    expect(resolveRailOrder(null)).toEqual(DEFAULT_RAIL_ORDER);
+    expect(resolveRailOrder(null)).toEqual(RAIL_SPACES);
   });
 
   it("keeps a saved order", () => {
-    const saved = ["chat", "inbox", "search", "new_issue", "work", "team", "autopilots"];
+    const saved = ["chat", "inbox", "work", "team", "autopilots"];
     expect(resolveRailOrder(saved)).toEqual(saved);
   });
 
   it("drops unknown and repeated ids", () => {
-    expect(
-      resolveRailOrder(["chat", "settings", 3, "chat", "inbox", "search", "new_issue", "work", "team", "autopilots"]),
-    ).toEqual(["chat", "inbox", "search", "new_issue", "work", "team", "autopilots"]);
-  });
-
-  it("puts an item missing from the saved order after its default neighbour", () => {
-    expect(resolveRailOrder(["inbox", "work", "new_issue", "team", "chat", "autopilots"])).toEqual([
+    expect(resolveRailOrder(["chat", "settings", 3, "chat", "inbox", "work", "team", "autopilots"])).toEqual([
+      "chat",
       "inbox",
       "work",
-      "new_issue",
-      "search",
       "team",
-      "chat",
       "autopilots",
     ]);
-    expect(resolveRailOrder(["inbox", "search", "work", "team", "chat", "autopilots"])).toEqual([
-      "new_issue",
+  });
+
+  it("puts a space missing from the saved order after its default neighbour", () => {
+    expect(resolveRailOrder(["chat", "inbox", "autopilots", "work"])).toEqual([
+      "chat",
       "inbox",
-      "search",
+      "autopilots",
       "work",
       "team",
+    ]);
+    expect(resolveRailOrder(["chat", "work", "team", "autopilots"])).toEqual([
+      "inbox",
       "chat",
+      "work",
+      "team",
       "autopilots",
     ]);
   });
@@ -45,14 +46,14 @@ describe("useRailOrderStore", () => {
   });
 
   it("saves a custom order", () => {
-    const order = ["inbox", "work", "team", "chat", "autopilots", "new_issue", "search"] as const;
+    const order = ["chat", "inbox", "work", "team", "autopilots"] as const;
     useRailOrderStore.getState().setOrder(order);
     expect(useRailOrderStore.getState().order).toEqual(order);
   });
 
   it("forgets the order once it is back to the default", () => {
-    useRailOrderStore.getState().setOrder(["search", "new_issue", "inbox", "work", "team", "chat", "autopilots"]);
-    useRailOrderStore.getState().setOrder(DEFAULT_RAIL_ORDER);
+    useRailOrderStore.getState().setOrder(["work", "inbox", "team", "chat", "autopilots"]);
+    useRailOrderStore.getState().setOrder(RAIL_SPACES);
     expect(useRailOrderStore.getState().order).toBeNull();
   });
 });

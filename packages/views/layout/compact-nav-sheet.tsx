@@ -19,7 +19,7 @@ import { SpacePanelContent } from "./space-panel";
  * Below `md` the rail and the current space's panel move into one sheet,
  * opened by the page header's nav trigger.
  */
-export function CompactNavSheet() {
+export function CompactNavSheet({ globalActions = true }: { globalActions?: boolean }) {
   const { t } = useT("layout");
   const { isCompact, openMobile, setOpenMobile } = useSidebar();
   const { pathname } = useNavigation();
@@ -48,7 +48,7 @@ export function CompactNavSheet() {
           <SheetTitle>{t(($) => $.rail.label)}</SheetTitle>
           <SheetDescription>{t(($) => $.rail.sheet_description)}</SheetDescription>
         </SheetHeader>
-        <AppRail />
+        <AppRail globalActions={globalActions} />
         {hasPanel && (
           <div className="my-2 mr-2 flex w-[260px] min-w-0 flex-col overflow-hidden rounded-xl bg-page-canvas shadow-[var(--surface-shadow)] ring-1 ring-surface-border">
             <SpacePanelContent space={shell?.space ?? null} />

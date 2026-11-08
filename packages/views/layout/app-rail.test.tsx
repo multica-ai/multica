@@ -111,16 +111,28 @@ beforeEach(() => {
 const railOrder = () =>
   Array.from(document.querySelectorAll<HTMLElement>("[data-rail-item]"), (item) => item.dataset.railItem);
 
-describe("AppRail items", () => {
-  it("leads with New issue and search, captioned like the spaces", () => {
+describe("AppRail global actions", () => {
+  it("carries New issue and search by default", () => {
     renderRail();
-    expect(screen.getByRole("button", { name: /^new issue$/i })).toHaveTextContent("New");
-    expect(screen.getByRole("button", { name: "Search..." })).toHaveTextContent("Search");
-    expect(railOrder()).toEqual(["new_issue", "search", "inbox", "work", "team", "chat", "autopilots"]);
+    expect(screen.getByRole("button", { name: /^new issue$/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Search..." })).toBeTruthy();
+  });
+
+  it("leaves them to the desktop title bar when turned off", () => {
+    renderRail(undefined, <AppRail globalActions={false} />);
+    expect(screen.queryByRole("button", { name: /^new issue$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Search..." })).toBeNull();
+  });
+});
+
+describe("AppRail order", () => {
+  it("lists the spaces in the default order", () => {
+    renderRail();
+    expect(railOrder()).toEqual(["inbox", "work", "team", "chat", "autopilots"]);
   });
 
   it("follows the saved order", () => {
-    const order = ["inbox", "chat", "work", "team", "autopilots", "search", "new_issue"] as const;
+    const order = ["chat", "inbox", "work", "team", "autopilots"] as const;
     useRailOrderStore.getState().setOrder(order);
     renderRail();
     expect(railOrder()).toEqual(order);

@@ -18,7 +18,7 @@ import { useChatStore } from "@multica/core/chat";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useInboxUnreadCount } from "@multica/core/inbox/queries";
-import { resolveRailOrder, useRailOrderStore, type RailItemId } from "@multica/core/navigation";
+import { resolveRailOrder, useRailOrderStore } from "@multica/core/navigation";
 import {
   useCurrentWorkspace,
   useWorkspacePaths,
@@ -37,7 +37,7 @@ import { NewIssueButton, SearchButton } from "./global-actions";
 import { HelpLauncher } from "./help-launcher";
 import { isPathWithin } from "./panel-nav";
 import { useTeamAgentStatus } from "./panels/team-status";
-import { RAIL_ICON_BUTTON_CLASS, RAIL_TILE_CLASS } from "./rail-styles";
+import { RAIL_ICON_BUTTON_CLASS } from "./rail-styles";
 import { RailWorkspaces } from "./rail-workspaces";
 import { routeIconForPath } from "./route-icon-components";
 
@@ -156,9 +156,9 @@ function RailSpaceLink({
         draggable={false}
         aria-current={active ? "page" : undefined}
         {...peekHandlers}
-        className={RAIL_TILE_CLASS}
+        className="group relative flex h-[52px] w-[52px] flex-col items-center justify-center gap-1 rounded-xl text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground"
       >
-        <Icon />
+        <Icon className="size-5" />
         <span className="max-w-full truncate px-1 text-micro leading-[14px]">{label}</span>
         {badge && <RailBadgeMark badge={badge} />}
       </AppLink>
@@ -166,7 +166,7 @@ function RailSpaceLink({
   );
 }
 
-function SortableRailItem({ id, children }: { id: RailItemId; children: React.ReactNode }) {
+function SortableRailItem({ id, children }: { id: RailSpaceId; children: React.ReactNode }) {
   const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   const wasDragged = useRef(false);
   useEffect(() => {
@@ -200,16 +200,19 @@ function SortableRailItem({ id, children }: { id: RailItemId; children: React.Re
 const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
 
 /**
- * The app rail: workspaces, then New issue, search and the five spaces in
- * the user's order (drag to reorder), then help, settings and the account.
- * It sits on the app shell, outside the content card, and stays put while
- * the panel beside it collapses.
+ * The app rail: workspaces, New issue and search, the five spaces in the
+ * user's order (drag to reorder), then help, settings and the account. It
+ * sits on the app shell, outside the content card, and stays put while the
+ * panel beside it collapses. Desktop passes `globalActions={false}`: its
+ * title bar carries New issue and search.
  */
 export function AppRail({
   topSlot,
+  globalActions = true,
   className,
 }: {
   topSlot?: React.ReactNode;
+  globalActions?: boolean;
   className?: string;
 }) {
   const { t } = useT("layout");
@@ -226,15 +229,15 @@ export function AppRail({
   const onDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
       if (!over || active.id === over.id) return;
-      const from = order.indexOf(active.id as RailItemId);
-      const to = order.indexOf(over.id as RailItemId);
+      const from = order.indexOf(active.id as RailSpaceId);
+      const to = order.indexOf(over.id as RailSpaceId);
       if (from === -1 || to === -1) return;
       setOrder(arrayMove(order, from, to));
     },
     [order, setOrder],
   );
 
-  const spaces: Record<RailSpaceId, { href: string; icon: IconComponent; label: string; fullLabel: string }> = {
+  const items: Record<RailSpaceId, { href: string; icon: IconComponent; label: string; fullLabel: string }> = {
     inbox: {
       href: p.inbox(),
       icon: routeIconForPath(p.inbox()),
@@ -278,6 +281,14 @@ export function AppRail({
     >
       {topSlot}
       <RailWorkspaces />
+      {globalActions ? (
+        <div className="my-2 flex flex-col items-center gap-1">
+          <NewIssueButton className={RAIL_ICON_BUTTON_CLASS} tooltipSide="right" />
+          <SearchButton className={RAIL_ICON_BUTTON_CLASS} tooltipSide="right" />
+        </div>
+      ) : (
+        <div className="h-2 shrink-0" />
+      )}
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -285,30 +296,16 @@ export function AppRail({
         onDragEnd={onDragEnd}
       >
         <SortableContext items={order} strategy={verticalListSortingStrategy}>
-          <ul className="mt-2 flex flex-col items-center gap-0.5">
+          <ul className="flex flex-col items-center gap-0.5">
             {order.map((id) => (
               <SortableRailItem key={id} id={id}>
-                {id === "new_issue" ? (
-                  <NewIssueButton
-                    className={RAIL_TILE_CLASS}
-                    tooltipSide="right"
-                    caption={t(($) => $.rail.new_issue)}
-                  />
-                ) : id === "search" ? (
-                  <SearchButton
-                    className={RAIL_TILE_CLASS}
-                    tooltipSide="right"
-                    caption={t(($) => $.rail.search)}
-                  />
-                ) : (
-                  <RailSpaceLink
-                    space={id}
-                    {...spaces[id]}
-                    href={shell?.spaceHref(id, spaces[id].href) ?? spaces[id].href}
-                    active={space === id}
-                    badge={badges[id]}
-                  />
-                )}
+                <RailSpaceLink
+                  space={id}
+                  {...items[id]}
+                  href={shell?.spaceHref(id, items[id].href) ?? items[id].href}
+                  active={space === id}
+                  badge={badges[id]}
+                />
               </SortableRailItem>
             ))}
           </ul>

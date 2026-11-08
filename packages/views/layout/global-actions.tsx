@@ -28,21 +28,13 @@ function DraftDot() {
   return <span aria-hidden className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-brand" />;
 }
 
-function Caption({ children }: { children?: string }) {
-  if (!children) return null;
-  return <span className="max-w-full truncate px-1 text-micro leading-[14px]">{children}</span>;
-}
-
 /** The app-wide New issue action, reachable from every space. */
 export function NewIssueButton({
   className,
   tooltipSide,
-  caption,
 }: {
   className: string;
   tooltipSide: TooltipSide;
-  /** A short visible label under the icon. */
-  caption?: string;
 }) {
   const { t } = useT("layout");
   const { pathname } = useNavigation();
@@ -65,7 +57,6 @@ export function NewIssueButton({
           <SquarePen />
           <DraftDot />
         </span>
-        <Caption>{caption}</Caption>
       </button>
     </TooltipHint>
   );
@@ -74,11 +65,9 @@ export function NewIssueButton({
 export function SearchButton({
   className,
   tooltipSide,
-  caption,
 }: {
   className: string;
   tooltipSide: TooltipSide;
-  caption?: string;
 }) {
   const { t } = useT("search");
   const shortcut = useShortcut("openSearch");
@@ -97,7 +86,6 @@ export function SearchButton({
         className={className}
       >
         <Search />
-        <Caption>{caption}</Caption>
       </button>
     </TooltipHint>
   );

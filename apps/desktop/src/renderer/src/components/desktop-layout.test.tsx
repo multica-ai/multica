@@ -71,6 +71,8 @@ vi.mock("@multica/views/layout", () => ({
   CompactNavSheet: () => null,
   GlobalShortcuts: () => null,
   NavigationProgress: () => null,
+  NewIssueButton: () => null,
+  SearchButton: () => null,
   ShellRouteDataPrefetch: ({ children }: { children: ReactNode }) => <>{children}</>,
   SpacePanel: () => null,
   // In a panel space the shell's toggleNav is the sidebar toggle.

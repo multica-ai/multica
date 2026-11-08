@@ -17,6 +17,8 @@ import {
   CompactNavSheet,
   GlobalShortcuts,
   NavigationProgress,
+  NewIssueButton,
+  SearchButton,
   ShellRouteDataPrefetch,
   SpacePanel,
 } from "@multica/views/layout";
@@ -43,6 +45,8 @@ import { WindowToolbar, WINDOW_TOOLBAR_CLEARANCE } from "./window-toolbar";
 
 const TOP_BAR_HEIGHT_CLASS = "h-10";
 const RAIL_WIDTH = 64;
+const TITLE_BAR_ACTION_CLASS =
+  "flex size-7 items-center justify-center rounded-md text-faint-foreground transition-colors duration-150 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 [&_svg]:size-4";
 
 function RailTopSpacer() {
   return <div className={cn("shrink-0", TOP_BAR_HEIGHT_CLASS)} />;
@@ -66,7 +70,8 @@ function useNativeNavigationGestures() {
 // The main area's top bar doubles as a window drag region. The window
 // toolbar (traffic lights, history, panel toggle) floats over the rail and
 // the start of this bar, so the tabs start past whatever the rail leaves of
-// its width.
+// its width. New issue and search hold the far end; the tabs give way to
+// them.
 function MainTopBar({ railMounted }: { railMounted: boolean }) {
   const { isCompact } = useSidebar();
   const toolbarClearance =
@@ -96,6 +101,16 @@ function MainTopBar({ railMounted }: { railMounted: boolean }) {
       >
         <TabBar />
       </div>
+      {railMounted && (
+        <div
+          data-slot="title-bar-actions"
+          className="relative z-10 ml-auto flex shrink-0 items-center gap-2 pr-3"
+          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+        >
+          <NewIssueButton className={TITLE_BAR_ACTION_CLASS} tooltipSide="bottom" />
+          <SearchButton className={TITLE_BAR_ACTION_CLASS} tooltipSide="bottom" />
+        </div>
+      )}
     </header>
   );
 }
@@ -276,10 +291,11 @@ export function DesktopShell() {
                 {slug && (
                   <AppRail
                     topSlot={<RailTopSpacer />}
+                    globalActions={false}
                     className="hidden pt-0 md:flex"
                   />
                 )}
-                {slug && <CompactNavSheet />}
+                {slug && <CompactNavSheet globalActions={false} />}
                 {/* Right side: header + content card */}
                 <div className="flex flex-1 min-w-0 flex-col">
                   <MainTopBar railMounted={Boolean(slug)} />
