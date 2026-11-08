@@ -595,13 +595,34 @@ Run 'make down' here first — a leftover instance answers /health with 200 and 
   die "api never became healthy. Log: $(log_file api)"
 }
 
+# Next compiles routes on demand and holds `/` until the compile finishes, which
+# after a file change can take longer than one probe. Our own listener gets the
+# same 300s a fresh launch does before it counts as hung.
+wait_for_owned_web() {
+  local deadline
+  deadline=$(($(now_epoch) + 300))
+  curl -sf --max-time 15 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1 && return 0
+  info "web on :$FRONTEND_PORT is ours but not answering yet (likely compiling); waiting for it."
+  while [ "$(now_epoch)" -lt "$deadline" ]; do
+    listener_belongs_to_component web "$FRONTEND_PORT" || return 1
+    sleep 2
+    curl -sf --max-time 15 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
 start_web() {
   local waited=0 listener
-  if curl -sf --max-time 15 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1; then
-    listener="$(record_component_listener web "$FRONTEND_PORT" || true)"
-    if [ -n "$listener" ]; then
-      ok "web already running on :$FRONTEND_PORT (pid $listener)"
-      return 0
+  if listener_belongs_to_component web "$FRONTEND_PORT"; then
+    if wait_for_owned_web; then
+      listener="$(record_component_listener web "$FRONTEND_PORT" || true)"
+      if [ -n "$listener" ]; then
+        ok "web already running on :$FRONTEND_PORT (pid $listener)"
+        return 0
+      fi
+    elif listener_belongs_to_component web "$FRONTEND_PORT"; then
+      warn "web on :$FRONTEND_PORT is ours but did not answer within 300s; restarting it."
+      stop_component web
     fi
   fi
   if ! port_free "$FRONTEND_PORT"; then
