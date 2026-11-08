@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { InfiniteQueryObserver, QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, ApiClient, setApiInstance } from "../api";
 import { setCurrentWorkspace } from "../platform/workspace-storage";
@@ -7,6 +7,8 @@ import type { ChatSession } from "../types/chat";
 import {
   chatKeys,
   chatPinnedAgentsOptions,
+  chatSessionPagesOptions,
+  chatSessionSummaryOptions,
   chatSessionsOptions,
   hasPendingChatTasksOptions,
   pendingChatTasksOptions,
@@ -31,10 +33,26 @@ const session = (workspaceId: string): ChatSession => ({
   updated_at: "2026-11-05T00:00:00Z",
 });
 
-function responseBody(path: string, workspaceId: string): unknown {
+function sessionPage(workspaceId: string, status: "active" | "archived", cursor: string | null = null) {
+  return {
+    sessions: [{ ...session(workspaceId), status, id: `session-${workspaceId}-${status}-${cursor ?? "first"}` }],
+    next_cursor: cursor ? null : `older-${workspaceId}-${status}`,
+    has_more: !cursor,
+  };
+}
+
+function responseBody(path: string, workspaceId: string, search = new URLSearchParams()): unknown {
   switch (path) {
     case "/api/chat/sessions":
       return [session(workspaceId)];
+    case "/api/chat/sessions/page":
+      return sessionPage(workspaceId, search.get("status") === "archived" ? "archived" : "active", search.get("cursor"));
+    case "/api/chat/sessions/summary":
+      return {
+        active_count: workspaceId === workspaceA ? 2 : 20,
+        archived_count: workspaceId === workspaceA ? 3 : 30,
+        unread_by_session: { [`session-${workspaceId}`]: 1 },
+      };
     case "/api/chat/pinned-agents":
       return [{ agent_id: `agent-${workspaceId}`, position: 1 }];
     case "/api/chat/pending-tasks":
@@ -66,7 +84,7 @@ function stubWorkspaceServer(failFirst = false) {
       return new Response(JSON.stringify({ error: "temporarily unavailable" }), { status: 503 });
     }
     const url = new URL(input instanceof Request ? input.url : String(input));
-    return new Response(JSON.stringify(responseBody(url.pathname, workspaceId)), {
+    return new Response(JSON.stringify(responseBody(url.pathname, workspaceId, url.searchParams)), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -152,5 +170,70 @@ describe("chat collection workspace ownership", () => {
 
     expect(await api.listChatSessions({ status: "all" }, scope)).toEqual([session(expected)]);
     expect(requestedWorkspaces).toEqual([expected]);
+  });
+});
+
+describe("paginated chat collection workspace ownership", () => {
+  it.each(["active", "archived"] as const)("keeps %s history retries and later pages in the original workspace", async (status) => {
+    const requestedWorkspaces = stubWorkspaceServer(true);
+    const options = { ...chatSessionPagesOptions(workspaceA, status), retry: 1, retryDelay: 0 };
+    const observer = new InfiniteQueryObserver(queryClient, options);
+    const unsubscribe = observer.subscribe(() => undefined);
+    try {
+      // The first response fails and switches the active workspace to B.
+      await queryClient.fetchInfiniteQuery(options);
+      await observer.fetchNextPage();
+
+      expect(requestedWorkspaces).toEqual([workspaceA, workspaceA, workspaceA]);
+      expect(queryClient.getQueryData(chatKeys.sessionPages(workspaceA, status))).toEqual({
+        pages: [sessionPage(workspaceA, status), sessionPage(workspaceA, status, `older-${workspaceA}-${status}`)],
+        pageParams: [null, `older-${workspaceA}-${status}`],
+      });
+      expect(queryClient.getQueryData(chatKeys.sessionPages(workspaceB, status))).toBeUndefined();
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it.each(["active", "archived"] as const)("fetches %s history for its key even when another workspace is already active", async (status) => {
+    const requestedWorkspaces = stubWorkspaceServer();
+    setCurrentWorkspace("workspace-b", workspaceB);
+
+    const data = await queryClient.fetchInfiniteQuery(chatSessionPagesOptions(workspaceA, status));
+
+    expect(requestedWorkspaces).toEqual([workspaceA]);
+    expect(data.pages).toEqual([sessionPage(workspaceA, status)]);
+  });
+
+  it("keeps a summary retry in its original workspace", async () => {
+    const requestedWorkspaces = stubWorkspaceServer(true);
+
+    await queryClient.fetchQuery({ ...chatSessionSummaryOptions(workspaceA), retry: 1, retryDelay: 0 });
+
+    expect(requestedWorkspaces).toEqual([workspaceA, workspaceA]);
+    expect(queryClient.getQueryData(chatKeys.sessionSummary(workspaceA))).toEqual(responseBody("/api/chat/sessions/summary", workspaceA));
+    expect(queryClient.getQueryData(chatKeys.sessionSummary(workspaceB))).toBeUndefined();
+  });
+
+  it("fetches the summary for its key even when another workspace is already active", async () => {
+    const requestedWorkspaces = stubWorkspaceServer();
+    setCurrentWorkspace("workspace-b", workspaceB);
+
+    const data = await queryClient.fetchQuery(chatSessionSummaryOptions(workspaceA));
+
+    expect(requestedWorkspaces).toEqual([workspaceA]);
+    expect(data).toEqual(responseBody("/api/chat/sessions/summary", workspaceA));
+  });
+
+  it.each([
+    { name: "an explicit slug", scope: "workspace-a", expected: workspaceA },
+    { name: "the current workspace by default", scope: undefined, expected: workspaceB },
+  ])("preserves page and summary API routing with $name", async ({ scope, expected }) => {
+    const requestedWorkspaces = stubWorkspaceServer();
+    setCurrentWorkspace("workspace-b", workspaceB);
+
+    expect(await api.listChatSessionsPage({ status: "active" }, scope)).toEqual(sessionPage(expected, "active"));
+    expect(await api.getChatSessionSummary(scope)).toEqual(responseBody("/api/chat/sessions/summary", expected));
+    expect(requestedWorkspaces).toEqual([expected, expected]);
   });
 });

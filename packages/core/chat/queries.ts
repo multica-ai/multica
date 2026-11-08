@@ -85,7 +85,7 @@ export function chatSessionsOptions(wsId: string) {
 export function chatSessionPagesOptions(wsId: string, status: "active" | "archived" = "active") {
   return infiniteQueryOptions({
     queryKey: chatKeys.sessionPages(wsId, status),
-    queryFn: ({ pageParam }) => api.listChatSessionsPage({ status, cursor: pageParam }),
+    queryFn: ({ pageParam }) => api.listChatSessionsPage({ status, cursor: pageParam }, { workspaceId: wsId }),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.has_more ? lastPage.next_cursor ?? undefined : undefined,
     staleTime: Infinity,
@@ -95,7 +95,7 @@ export function chatSessionPagesOptions(wsId: string, status: "active" | "archiv
 export function chatSessionSummaryOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.sessionSummary(wsId),
-    queryFn: () => api.getChatSessionSummary(),
+    queryFn: () => api.getChatSessionSummary({ workspaceId: wsId }),
     staleTime: Infinity,
   });
 }

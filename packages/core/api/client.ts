@@ -3868,17 +3868,24 @@ export class ApiClient {
     });
   }
 
-  async listChatSessionsPage(params: { status: "active" | "archived"; cursor?: string | null }): Promise<ChatSessionsPage> {
+  async listChatSessionsPage(
+    params: { status: "active" | "archived"; cursor?: string | null },
+    workspace?: WorkspaceScope,
+  ): Promise<ChatSessionsPage> {
     const query = new URLSearchParams({ status: params.status, limit: "50" });
     if (params.cursor) query.set("cursor", params.cursor);
-    const raw: unknown = await this.fetch(`/api/chat/sessions/page?${query}`);
+    const raw: unknown = await this.fetch(`/api/chat/sessions/page?${query}`, {
+      headers: workspaceHeader(workspace),
+    });
     return parseWithFallback(raw, ChatSessionsPageSchema, EMPTY_CHAT_SESSIONS_PAGE, {
       endpoint: "GET /api/chat/sessions/page",
     });
   }
 
-  async getChatSessionSummary(): Promise<ChatSessionSummary> {
-    const raw: unknown = await this.fetch("/api/chat/sessions/summary");
+  async getChatSessionSummary(workspace?: WorkspaceScope): Promise<ChatSessionSummary> {
+    const raw: unknown = await this.fetch("/api/chat/sessions/summary", {
+      headers: workspaceHeader(workspace),
+    });
     return parseWithFallback(raw, ChatSessionSummarySchema, EMPTY_CHAT_SESSION_SUMMARY, {
       endpoint: "GET /api/chat/sessions/summary",
     });

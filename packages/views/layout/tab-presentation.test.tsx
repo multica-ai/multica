@@ -308,9 +308,8 @@ describe("useTabPresentation — pending / fallback", () => {
     );
 
     expect(result.current).toMatchObject({ title: fallback ?? "Chat", titleResolved: false });
-    act(() => qc.setQueryData(chatSessionsOptions("ws1").queryKey, [
-      { id: "s7", title: "Loaded session" },
-    ] as never));
+    act(() => qc.setQueryData(chatSessionOptions("ws1", "s7").queryKey,
+      { id: "s7", title: "Loaded session", status: "active" } as never));
     await waitFor(() => expect(result.current).toMatchObject({
       title: "Loaded session", titleResolved: true,
     }));
