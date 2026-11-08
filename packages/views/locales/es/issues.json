@@ -563,7 +563,8 @@
   },
   "timeline": {
     "loading": "Cargando...",
-    "jump_to_latest": "Ir a lo más reciente"
+    "jump_to_latest": "Ir a lo más reciente",
+    "back_to_top": "Volver arriba"
   },
   "activity": {
     "created": "creó esta tarea",
