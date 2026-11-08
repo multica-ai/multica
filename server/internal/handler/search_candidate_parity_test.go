@@ -162,7 +162,7 @@ func TestBuildSearchQuery_CandidateFirstParity(t *testing.T) {
 			legacyArgs[len(legacyArgs)-1] = tt.offset
 
 			candidateQuery, candidateArgs := buildSearchQuery(
-				tt.phrase, append([]string(nil), terms...), tt.queryNum, tt.hasNum, tt.includeClosed, tt.terminalKeys,
+				tt.phrase, append([]string(nil), terms...), tt.queryNum, tt.hasNum, tt.includeClosed, tt.terminalKeys, false,
 			)
 			candidateArgs[3] = testWorkspaceID
 			candidateArgs[len(candidateArgs)-2] = tt.limit
@@ -256,7 +256,7 @@ func runBuiltSearchForParity(t *testing.T, phrase string, includeClosed bool, te
 	t.Helper()
 	terms := splitSearchTerms(phrase)
 	queryNum, hasNum := parseQueryNumber(phrase)
-	query, args := buildSearchQuery(phrase, terms, queryNum, hasNum, includeClosed, terminalKeys)
+	query, args := buildSearchQuery(phrase, terms, queryNum, hasNum, includeClosed, terminalKeys, false)
 	args[3] = testWorkspaceID
 	args[len(args)-2] = limit
 	args[len(args)-1] = offset

@@ -800,7 +800,7 @@ type searchResult struct {
 // case-insensitive LIKE semantics as the legacy query. The pipeline deliberately
 // trades the title, description, and comment content GIN fast paths for one
 // predictable pass over each relation within the selected workspace.
-func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, terminalStatusKeys []string) (string, []any) {
+func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, terminalStatusKeys []string, titleDescOnly bool) (string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
 	for i, term := range terms {
@@ -973,21 +973,33 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		wsParam,
 		strings.Join(commentCandidateFlags, " OR "),
 	)
+	if titleDescOnly {
+		commentMatchesCTE = ""
+	}
 
 	// Stage two combines the two narrow sources, applies the legacy eligibility
 	// and ranking rules once, and materializes only the requested page.
 	eligibleParts := []string{
 		"im.title_phrase",
 		"im.description_phrase",
-		"COALESCE(cm.comment_phrase, FALSE)",
+	}
+	if !titleDescOnly {
+		eligibleParts = append(eligibleParts, "COALESCE(cm.comment_phrase, FALSE)")
 	}
 	if len(termContainsParams) > 1 {
 		var allTerms []string
 		for index := range termContainsParams {
-			allTerms = append(allTerms, fmt.Sprintf(
-				"(im.title_term_%[1]d OR im.description_term_%[1]d OR COALESCE(cm.comment_term_%[1]d, FALSE))",
-				index,
-			))
+			if titleDescOnly {
+				allTerms = append(allTerms, fmt.Sprintf(
+					"(im.title_term_%[1]d OR im.description_term_%[1]d)",
+					index,
+				))
+			} else {
+				allTerms = append(allTerms, fmt.Sprintf(
+					"(im.title_term_%[1]d OR im.description_term_%[1]d OR COALESCE(cm.comment_term_%[1]d, FALSE))",
+					index,
+				))
+			}
 		}
 		eligibleParts = append(eligibleParts, "("+strings.Join(allTerms, " AND ")+")")
 	}
@@ -1020,9 +1032,11 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		}
 		rankCases = append(rankCases, "WHEN ("+strings.Join(descriptionTerms, " AND ")+") THEN 6")
 	}
-	rankCases = append(rankCases, "WHEN COALESCE(cm.comment_phrase, FALSE) THEN 7")
-	if len(termContainsParams) > 1 {
-		rankCases = append(rankCases, "WHEN COALESCE(cm.comment_all_terms, FALSE) THEN 8")
+	if !titleDescOnly {
+		rankCases = append(rankCases, "WHEN COALESCE(cm.comment_phrase, FALSE) THEN 7")
+		if len(termContainsParams) > 1 {
+			rankCases = append(rankCases, "WHEN COALESCE(cm.comment_all_terms, FALSE) THEN 8")
+		}
 	}
 	rankExpr := "CASE " + strings.Join(rankCases, " ") + " ELSE 9 END"
 
@@ -1066,18 +1080,27 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		}
 		matchSourceParts = append(matchSourceParts, "WHEN ("+strings.Join(descriptionTerms, " AND ")+") THEN 'description'")
 	}
-	matchSourceExpr := "CASE " + strings.Join(matchSourceParts, " ") + " ELSE 'comment' END"
+	matchSourceElse := "'comment'"
+	if titleDescOnly {
+		matchSourceElse = "'description'"
+	}
+	matchSourceExpr := "CASE " + strings.Join(matchSourceParts, " ") + " ELSE " + matchSourceElse + " END"
 
+	snippetSelect := "cm.snippet_comment_id"
+	commentJoin := "\n\t\tLEFT JOIN comment_matches cm ON cm.issue_id = im.issue_id"
+	if titleDescOnly {
+		snippetSelect = "NULL::uuid AS snippet_comment_id"
+		commentJoin = ""
+	}
 	rankedCandidatesCTE := fmt.Sprintf(`ranked_candidates AS (
-		SELECT im.issue_id, im.updated_at, cm.snippet_comment_id,
+		SELECT im.issue_id, im.updated_at, %s,
 			%s AS cancelled_rank,
 			%s AS relevance_rank,
 			%s AS status_rank,
 			%s AS match_source
-		FROM issue_matches im
-		LEFT JOIN comment_matches cm ON cm.issue_id = im.issue_id
+		FROM issue_matches im%s
 		WHERE %s
-	)`, cancelledRank, rankExpr, statusRank, matchSourceExpr, eligibleExpr)
+	)`, snippetSelect, cancelledRank, rankExpr, statusRank, matchSourceExpr, commentJoin, eligibleExpr)
 
 	pageCandidatesCTE := fmt.Sprintf(`page_candidates AS MATERIALIZED (
 		SELECT issue_id, updated_at, snippet_comment_id, cancelled_rank, relevance_rank, status_rank, match_source
@@ -1086,10 +1109,13 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		LIMIT %s OFFSET %s
 	)`, limitParam, offsetParam)
 
-	query := fmt.Sprintf(`WITH %s,
-	%s,
-	%s,
-	%s
+	ctes := []string{issueMatchesCTE}
+	if !titleDescOnly {
+		ctes = append(ctes, commentMatchesCTE)
+	}
+	ctes = append(ctes, rankedCandidatesCTE, pageCandidatesCTE)
+
+	query := fmt.Sprintf(`WITH %s
 	SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
@@ -1101,10 +1127,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	JOIN issue i ON i.id = pc.issue_id AND i.workspace_id = %s
 	LEFT JOIN comment c ON c.id = pc.snippet_comment_id AND c.workspace_id = %s
 	ORDER BY pc.cancelled_rank, pc.relevance_rank, pc.status_rank, pc.updated_at DESC, pc.issue_id ASC`,
-		issueMatchesCTE,
-		commentMatchesCTE,
-		rankedCandidatesCTE,
-		pageCandidatesCTE,
+		strings.Join(ctes, ",\n\t"),
 		wsParam,
 		wsParam,
 	)
@@ -1139,6 +1162,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	includeClosed := r.URL.Query().Get("include_closed") == "true"
+	titleDescOnly := r.URL.Query().Get("scope") == searchScopeTitleDesc
 
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
@@ -1160,7 +1184,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		terminalStatusKeys = resolvedKeys
 	}
 
-	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, terminalStatusKeys)
+	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, terminalStatusKeys, titleDescOnly)
 	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
 	args[3] = wsUUID
 	args[len(args)-2] = limit
@@ -1251,7 +1275,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		// Populate description snippet when description matches
-		if sr.matchSource == "description" || descriptionContains(sr.issue.Description, q, terms) {
+		if (sr.matchSource == "description" && !titleDescOnly) || descriptionContains(sr.issue.Description, q, terms) {
 			if sr.issue.Description.Valid && sr.issue.Description.String != "" {
 				snippet := extractSnippet(sr.issue.Description.String, q)
 				sir.MatchedDescriptionSnippet = &snippet
