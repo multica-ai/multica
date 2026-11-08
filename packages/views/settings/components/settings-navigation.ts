@@ -15,6 +15,9 @@ export function isChannelIntegration(
   return (CHANNEL_INTEGRATIONS as readonly string[]).includes(value ?? "");
 }
 
+/** Preferences anchors that moved to the Appearance page. */
+const APPEARANCE_SECTIONS = new Set(["appearance", "theme", "style"]);
+
 export interface SettingsLocation {
   tab: string;
   /** In-page anchor to scroll to (see `SettingsSection`/`SettingsRow`). */
@@ -42,6 +45,15 @@ export function resolveSettingsLocation(
     case "issue":
     case "chat":
       return { tab: "preferences", section: tab, integration: null };
+    case "preferences":
+      if (section && APPEARANCE_SECTIONS.has(section)) {
+        return {
+          tab: "appearance",
+          section: section === "appearance" ? null : section,
+          integration: null,
+        };
+      }
+      return { tab, section, integration };
     case "labs":
       return { tab: "workspace", section: null, integration: null };
     case "github":

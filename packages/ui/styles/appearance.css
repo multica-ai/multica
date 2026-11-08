@@ -1,87 +1,91 @@
-/* Appearance: styles and frame colours on top of tokens.css.
+/* Appearance: styles on top of tokens.css.
  *
- * Both are attributes on <html>, written by the appearance store in
- * @multica/core/appearance: `data-style` (absent = default) and `data-frame`
- * (absent = neutral). Import after tokens.css.
+ * The style is the `data-style` attribute on <html> (absent = default),
+ * written by the appearance store in @multica/core/appearance. Import after
+ * tokens.css.
  *
  * Contrast for every block here is recomputed by apps/web/app/text-contrast.test.ts;
  * that test reads these selectors verbatim, so keep one selector per block. */
 
-/* ── Frame colours ──────────────────────────────────────────────────────────
- * Tint only the app shell around the content card (and the rail's hover and
- * active fill), never the card itself: tinting the whole neutral ramp made
- * every surface, border and secondary text look muddy. Lightness stays close
- * to the neutral shell so --muted-foreground keeps clearing AA on it.
- * Pop paints its own black frame, so frames do not apply under it. */
+/* ── Previews ───────────────────────────────────────────────────────────────
+ * The Appearance settings draw a miniature app for options that are not the
+ * applied ones, so their colours are spelled out here rather than read from
+ * the live tokens. Mode and style blocks carry the mode attribute so a later,
+ * equally specific block cannot paint light values in dark mode. */
 
-:root[data-frame="sand"]:not([data-style="pop"]) {
-    --app-shell: oklch(0.955 0.026 75);
-    --sidebar: oklch(0.955 0.026 75);
-    --sidebar-accent: oklch(0.925 0.032 75);
+[data-appearance-preview] {
+    --pv-shell: oklch(0.964 0.001 286);
+    --pv-rail: color-mix(in oklab, var(--pv-ink) 22%, var(--pv-shell));
+    --pv-canvas: oklch(0.988 0 0);
+    --pv-line: oklch(0.92 0.004 286);
+    --pv-ink: oklch(0.141 0.005 286);
+    --pv-faint: oklch(0.89 0.004 286);
+    --pv-selected: oklch(0.935 0.003 286);
+    --pv-band-a: oklch(0.955 0.002 286);
+    --pv-band-b: oklch(0.955 0.002 286);
+    --pv-band-line: transparent;
+    --pv-band-ink: var(--pv-ink);
+    --pv-dot-a: oklch(0.75 0.15 75);
+    --pv-dot-b: oklch(0.7 0.02 286);
+    --pv-primary: oklch(0.21 0.006 286);
+    --pv-primary-line: transparent;
+    --pv-primary-shadow: none;
+    --pv-radius: 2cqw;
 }
 
-:root[data-frame="sage"]:not([data-style="pop"]) {
-    --app-shell: oklch(0.955 0.024 150);
-    --sidebar: oklch(0.955 0.024 150);
-    --sidebar-accent: oklch(0.925 0.03 150);
+[data-appearance-preview][data-preview-mode="dark"] {
+    --pv-shell: oklch(0.155 0.005 286);
+    --pv-canvas: oklch(0.18 0.005 286);
+    --pv-line: oklch(0.27 0.006 286);
+    --pv-ink: oklch(0.985 0 0);
+    --pv-faint: oklch(0.32 0.006 286);
+    --pv-selected: oklch(0.274 0.006 286);
+    --pv-band-a: oklch(0.22 0.006 286);
+    --pv-band-b: oklch(0.22 0.006 286);
+    --pv-dot-b: oklch(0.55 0.015 286);
+    --pv-primary: oklch(0.92 0 0);
 }
 
-:root[data-frame="mist"]:not([data-style="pop"]) {
-    --app-shell: oklch(0.955 0.024 245);
-    --sidebar: oklch(0.955 0.024 245);
-    --sidebar-accent: oklch(0.925 0.03 245);
+
+[data-appearance-preview][data-preview-mode="light"][data-preview-style="pop"] {
+    --pv-shell: oklch(0.145 0 0);
+    --pv-rail: oklch(0.42 0 0);
+    --pv-canvas: oklch(0.966 0.005 106.5);
+    --pv-line: oklch(0.145 0 0);
+    --pv-ink: oklch(0.145 0 0);
+    --pv-faint: oklch(0.82 0.01 106);
+    --pv-selected: oklch(0.88 0.1 340);
+    --pv-band-a: oklch(0.87 0.16 88);
+    --pv-band-b: oklch(0.8 0.08 268);
+    --pv-band-line: oklch(0.145 0 0);
+    --pv-band-ink: oklch(0.145 0 0);
+    --pv-dot-a: oklch(0.145 0 0);
+    --pv-dot-b: oklch(0.145 0 0);
+    --pv-primary: oklch(0.82 0.15 340);
+    --pv-primary-line: oklch(0.145 0 0);
+    --pv-primary-shadow: 0.8cqw 0.8cqw 0 oklch(0.145 0 0);
+    --pv-radius: 1cqw;
 }
 
-:root[data-frame="lilac"]:not([data-style="pop"]) {
-    --app-shell: oklch(0.955 0.026 295);
-    --sidebar: oklch(0.955 0.026 295);
-    --sidebar-accent: oklch(0.925 0.032 295);
+[data-appearance-preview][data-preview-mode="dark"][data-preview-style="pop"] {
+    --pv-shell: oklch(0 0 0);
+    --pv-rail: oklch(0.42 0 0);
+    --pv-canvas: oklch(0.17 0 0);
+    --pv-line: oklch(0.92 0 0);
+    --pv-ink: oklch(0.97 0 0);
+    --pv-faint: oklch(0.32 0 0);
+    --pv-selected: oklch(0.34 0.1 340);
+    --pv-band-a: oklch(0.87 0.16 88);
+    --pv-band-b: oklch(0.8 0.08 268);
+    --pv-band-line: oklch(0 0 0);
+    --pv-band-ink: oklch(0.145 0 0);
+    --pv-dot-a: oklch(0.145 0 0);
+    --pv-dot-b: oklch(0.145 0 0);
+    --pv-primary: oklch(0.82 0.15 340);
+    --pv-primary-line: oklch(0.92 0 0);
+    --pv-primary-shadow: 0.8cqw 0.8cqw 0 oklch(0.82 0.15 340);
+    --pv-radius: 1cqw;
 }
-
-:root[data-frame="rose"]:not([data-style="pop"]) {
-    --app-shell: oklch(0.955 0.022 15);
-    --sidebar: oklch(0.955 0.022 15);
-    --sidebar-accent: oklch(0.925 0.028 15);
-}
-
-:root.dark[data-frame="sand"]:not([data-style="pop"]) {
-    --app-shell: oklch(0.175 0.022 75);
-    --sidebar: oklch(0.21 0.02 75);
-    --sidebar-accent: oklch(0.274 0.024 75);
-}
-
-:root.dark[data-frame="sage"]:not([data-style="pop"]) {
-    --app-shell: oklch(0.175 0.02 150);
-    --sidebar: oklch(0.21 0.018 150);
-    --sidebar-accent: oklch(0.274 0.022 150);
-}
-
-:root.dark[data-frame="mist"]:not([data-style="pop"]) {
-    --app-shell: oklch(0.175 0.026 255);
-    --sidebar: oklch(0.21 0.024 255);
-    --sidebar-accent: oklch(0.274 0.028 255);
-}
-
-:root.dark[data-frame="lilac"]:not([data-style="pop"]) {
-    --app-shell: oklch(0.175 0.026 295);
-    --sidebar: oklch(0.21 0.024 295);
-    --sidebar-accent: oklch(0.274 0.028 295);
-}
-
-:root.dark[data-frame="rose"]:not([data-style="pop"]) {
-    --app-shell: oklch(0.175 0.02 15);
-    --sidebar: oklch(0.21 0.018 15);
-    --sidebar-accent: oklch(0.274 0.022 15);
-}
-
-/* Frame picker swatches: a stronger cut of each hue than the frame itself, so
- * the choices read apart at swatch size in both modes. */
-[data-frame-swatch="neutral"] { background-color: oklch(0.9 0.004 286); }
-[data-frame-swatch="sand"] { background-color: oklch(0.86 0.07 75); }
-[data-frame-swatch="sage"] { background-color: oklch(0.86 0.06 150); }
-[data-frame-swatch="mist"] { background-color: oklch(0.86 0.06 245); }
-[data-frame-swatch="lilac"] { background-color: oklch(0.86 0.07 295); }
-[data-frame-swatch="rose"] { background-color: oklch(0.86 0.06 15); }
 
 /* ── Style: Pop ─────────────────────────────────────────────────────────────
  * Black frame, cream canvas, 1px black outlines, small radius, hard offset

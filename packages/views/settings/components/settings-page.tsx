@@ -12,6 +12,7 @@ import {
   ListPlus,
   Lock,
   MessagesSquare,
+  Palette,
   Plug,
   Search,
   Server,
@@ -37,6 +38,7 @@ import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
 import { AppLink, useNavigation } from "../../navigation";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
+import { AppearanceTab } from "./appearance-tab";
 import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
@@ -138,6 +140,12 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               t(($) => $.page.tabs.preferences),
               SlidersHorizontal,
               <PreferencesTab />,
+            ),
+            entry(
+              "appearance",
+              t(($) => $.page.tabs.appearance),
+              Palette,
+              <AppearanceTab />,
             ),
             entry(
               "notifications",

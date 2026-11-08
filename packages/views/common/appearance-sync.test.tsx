@@ -8,39 +8,34 @@ const html = () => document.documentElement;
 describe("AppearanceSync", () => {
   beforeEach(() => {
     localStorage.clear();
-    useAppearanceStore.setState({ style: "default", frame: "neutral" });
+    useAppearanceStore.setState({ style: "default" });
   });
   afterEach(cleanup);
 
-  it("mirrors the preference onto <html> and leaves defaults unset", () => {
+  it("mirrors the style onto <html> and leaves the default unset", () => {
     render(<AppearanceSync />);
     expect(html().hasAttribute("data-style")).toBe(false);
-    expect(html().hasAttribute("data-frame")).toBe(false);
-
-    act(() => useAppearanceStore.getState().setFrame("sand"));
-    expect(html().getAttribute("data-frame")).toBe("sand");
 
     act(() => useAppearanceStore.getState().setStyle("pop"));
     expect(html().getAttribute("data-style")).toBe("pop");
 
-    act(() => useAppearanceStore.getState().setFrame("neutral"));
-    expect(html().hasAttribute("data-frame")).toBe(false);
+    act(() => useAppearanceStore.getState().setStyle("default"));
+    expect(html().hasAttribute("data-style")).toBe(false);
   });
 
-  it("clears the attributes when the product UI unmounts", () => {
-    useAppearanceStore.setState({ style: "pop", frame: "mist" });
+  it("clears the attribute when the product UI unmounts", () => {
+    useAppearanceStore.setState({ style: "pop" });
     const { unmount } = render(<AppearanceSync />);
     expect(html().getAttribute("data-style")).toBe("pop");
     unmount();
     expect(html().hasAttribute("data-style")).toBe(false);
-    expect(html().hasAttribute("data-frame")).toBe(false);
   });
 
   it("follows a change saved by another window", async () => {
     render(<AppearanceSync />);
     localStorage.setItem(
       APPEARANCE_STORAGE_KEY,
-      JSON.stringify({ state: { style: "pop", frame: "neutral" }, version: 0 }),
+      JSON.stringify({ state: { style: "pop" }, version: 0 }),
     );
     await act(async () => {
       window.dispatchEvent(new StorageEvent("storage", { key: APPEARANCE_STORAGE_KEY }));

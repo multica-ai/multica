@@ -141,27 +141,6 @@
     "toast_saved": "Cambios guardados"
   },
   "preferences": {
-    "theme": {
-      "title": "Tema",
-      "light": "Claro",
-      "dark": "Oscuro",
-      "system": "Sistema"
-    },
-    "style": {
-      "title": "Estilo",
-      "default": "Predeterminado",
-      "pop": "Pop"
-    },
-    "frame": {
-      "title": "Color del marco",
-      "pop_hint": "El estilo Pop usa un marco negro fijo.",
-      "neutral": "Neutro",
-      "sand": "Arena",
-      "sage": "Salvia",
-      "mist": "Niebla",
-      "lilac": "Lila",
-      "rose": "Rosa"
-    },
     "language": {
       "title": "Idioma",
       "english": "English",
@@ -191,7 +170,6 @@
       "hint": "Solo establece el valor predeterminado. Puedes cambiarlo para cualquier mensaje antes de enviarlo."
     },
     "comments_title": "Comentarios",
-    "appearance_title": "Apariencia",
     "issue_fields": {
       "field": "Campo",
       "manual": "Creación manual",
@@ -200,6 +178,23 @@
     },
     "issue_fields_title": "Campos al crear tareas",
     "region_title": "Idioma y región"
+  },
+  "appearance": {
+    "theme": {
+      "title": "Tema",
+      "description": "Claro, oscuro o según el sistema.",
+      "light": "Claro",
+      "dark": "Oscuro",
+      "system": "Sistema"
+    },
+    "style": {
+      "title": "Estilo",
+      "description": "El aspecto general de la aplicación.",
+      "default": "Predeterminado",
+      "default_description": "Sobrio y neutro, pensado para jornadas largas.",
+      "pop": "Pop",
+      "pop_description": "Un marco negro grueso, sombras marcadas y colores de estado vivos."
+    }
   },
   "shortcuts": {
     "title": "Atajos de teclado",
@@ -392,6 +387,7 @@
     "tabs": {
       "profile": "Perfil",
       "preferences": "Preferencias",
+      "appearance": "Apariencia",
       "shortcuts": "Atajos",
       "issue": "Tarea",
       "notifications": "Notificaciones",

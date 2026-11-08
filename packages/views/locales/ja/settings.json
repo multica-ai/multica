@@ -157,27 +157,6 @@
     "toast_saved": "変更を保存しました"
   },
   "preferences": {
-    "theme": {
-      "title": "テーマ",
-      "light": "ライト",
-      "dark": "ダーク",
-      "system": "システム"
-    },
-    "style": {
-      "title": "スタイル",
-      "default": "デフォルト",
-      "pop": "ポップ"
-    },
-    "frame": {
-      "title": "フレームの色",
-      "pop_hint": "ポップでは黒いフレームに固定されます。",
-      "neutral": "ニュートラル",
-      "sand": "サンド",
-      "sage": "セージ",
-      "mist": "ミスト",
-      "lilac": "ライラック",
-      "rose": "ローズ"
-    },
     "language": {
       "title": "言語",
       "english": "English",
@@ -208,13 +187,29 @@
     },
     "comments_title": "コメントとチャット",
     "region_title": "言語と地域",
-    "appearance_title": "外観",
     "issue_fields_title": "タスク作成時に表示するフィールド",
     "issue_fields": {
       "field": "フィールド",
       "quick": "エージェントで作成",
       "manual": "手動作成",
       "unsupported": "エージェントでの作成では使用できません"
+    }
+  },
+  "appearance": {
+    "theme": {
+      "title": "テーマ",
+      "description": "ライト、ダーク、またはシステムに合わせます。",
+      "light": "ライト",
+      "dark": "ダーク",
+      "system": "システム"
+    },
+    "style": {
+      "title": "スタイル",
+      "description": "アプリ全体の見た目です。",
+      "default": "デフォルト",
+      "default_description": "落ち着いたニュートラルな見た目。長時間の作業に。",
+      "pop": "ポップ",
+      "pop_description": "太い黒のフレーム、くっきりした影、鮮やかなステータス色。"
     }
   },
   "shortcuts": {
@@ -408,6 +403,7 @@
     "tabs": {
       "profile": "プロフィール",
       "preferences": "環境設定",
+      "appearance": "外観",
       "shortcuts": "ショートカット",
       "issue": "タスク",
       "notifications": "通知",

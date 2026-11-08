@@ -52,9 +52,8 @@ export function useSettingsSearchIndex(
         title: t(($) => $.preferences.timezone.title),
         description: t(($) => $.preferences.timezone.hint),
       },
-      { tab: "preferences", anchor: "theme", title: t(($) => $.preferences.theme.title) },
-      { tab: "preferences", anchor: "style", title: t(($) => $.preferences.style.title) },
-      { tab: "preferences", anchor: "frame", title: t(($) => $.preferences.frame.title) },
+      { tab: "appearance", anchor: "theme", title: t(($) => $.appearance.theme.title) },
+      { tab: "appearance", anchor: "style", title: t(($) => $.appearance.style.title) },
       {
         tab: "preferences",
         anchor: "sticky-comment-bar",

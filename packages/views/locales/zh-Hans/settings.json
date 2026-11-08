@@ -157,27 +157,6 @@
     "toast_saved": "更改已保存"
   },
   "preferences": {
-    "theme": {
-      "title": "主题",
-      "light": "浅色",
-      "dark": "深色",
-      "system": "跟随系统"
-    },
-    "style": {
-      "title": "风格",
-      "default": "默认",
-      "pop": "波普"
-    },
-    "frame": {
-      "title": "外框颜色",
-      "pop_hint": "波普风格使用固定的黑色外框。",
-      "neutral": "中性",
-      "sand": "暖沙",
-      "sage": "鼠尾草",
-      "mist": "雾蓝",
-      "lilac": "薰衣草",
-      "rose": "玫瑰"
-    },
     "language": {
       "title": "语言",
       "english": "English",
@@ -208,13 +187,29 @@
     },
     "comments_title": "评论与聊天",
     "region_title": "语言与地区",
-    "appearance_title": "外观",
     "issue_fields_title": "创建任务时显示的字段",
     "issue_fields": {
       "field": "字段",
       "quick": "智能体创建",
       "manual": "手动创建",
       "unsupported": "智能体创建时不支持此字段"
+    }
+  },
+  "appearance": {
+    "theme": {
+      "title": "主题",
+      "description": "浅色、深色，或跟随系统。",
+      "light": "浅色",
+      "dark": "深色",
+      "system": "跟随系统"
+    },
+    "style": {
+      "title": "风格",
+      "description": "整个应用的视觉风格。",
+      "default": "默认",
+      "default_description": "安静、中性，适合长时间工作。",
+      "pop": "波普",
+      "pop_description": "黑色粗框、硬投影和鲜明的状态色。"
     }
   },
   "shortcuts": {
@@ -408,6 +403,7 @@
     "tabs": {
       "profile": "个人资料",
       "preferences": "偏好设置",
+      "appearance": "外观",
       "shortcuts": "快捷键",
       "issue": "任务",
       "notifications": "通知",

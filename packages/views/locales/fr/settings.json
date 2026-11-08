@@ -159,27 +159,6 @@
     "toast_saved": "Modifications enregistrées"
   },
   "preferences": {
-    "theme": {
-      "title": "Thème",
-      "light": "Clair",
-      "dark": "Sombre",
-      "system": "Système"
-    },
-    "style": {
-      "title": "Style",
-      "default": "Par défaut",
-      "pop": "Pop"
-    },
-    "frame": {
-      "title": "Couleur du cadre",
-      "pop_hint": "Le style Pop utilise un cadre noir fixe.",
-      "neutral": "Neutre",
-      "sand": "Sable",
-      "sage": "Sauge",
-      "mist": "Brume",
-      "lilac": "Lilas",
-      "rose": "Rose"
-    },
     "language": {
       "title": "Langue",
       "english": "English",
@@ -210,13 +189,29 @@
     },
     "comments_title": "Commentaires et discussion",
     "region_title": "Langue et région",
-    "appearance_title": "Apparence",
     "issue_fields_title": "Champs affichés à la création de tâches",
     "issue_fields": {
       "field": "Champ",
       "quick": "Création avec un agent",
       "manual": "Création manuelle",
       "unsupported": "Indisponible lors de la création avec un agent"
+    }
+  },
+  "appearance": {
+    "theme": {
+      "title": "Thème",
+      "description": "Clair, sombre ou selon le système.",
+      "light": "Clair",
+      "dark": "Sombre",
+      "system": "Système"
+    },
+    "style": {
+      "title": "Style",
+      "description": "L'allure générale de l'application.",
+      "default": "Par défaut",
+      "default_description": "Sobre et neutre, pour les longues journées de travail.",
+      "pop": "Pop",
+      "pop_description": "Un cadre noir épais, des ombres franches et des couleurs de statut vives."
     }
   },
   "shortcuts": {
@@ -410,6 +405,7 @@
     "tabs": {
       "profile": "Profil",
       "preferences": "Préférences",
+      "appearance": "Apparence",
       "shortcuts": "Raccourcis",
       "issue": "Tâche",
       "notifications": "Notifications",

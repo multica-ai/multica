@@ -24,14 +24,6 @@ import {
   CommandItem,
   CommandList,
 } from "@multica/ui/components/ui/command";
-import { useTheme } from "@multica/ui/components/common/theme-provider";
-import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
-import {
-  APPEARANCE_FRAMES,
-  styleHasFixedFrame,
-  useAppearanceStore,
-  type AppearanceStyle,
-} from "@multica/core/appearance";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
@@ -64,9 +56,10 @@ import {
 
 /**
  * Preferences on one page. The settings here are stored in three different
- * places — the account (language, timezone), this device (theme, composer,
- * chat) and this device for the current workspace (create-dialog fields) —
- * so each section carries a scope badge instead of splitting them into tabs.
+ * places — the account (language, timezone), this device (composer, chat,
+ * opening issues) and this device for the current workspace (create-dialog
+ * fields) — so each section carries a scope badge instead of splitting them
+ * into tabs. Theme, style and frame colour live on the Appearance page.
  * Changes apply immediately; only failures are announced.
  */
 export function PreferencesTab() {
@@ -81,18 +74,6 @@ export function PreferencesTab() {
         <SettingsCard>
           <LanguageRow />
           <TimezoneRow />
-        </SettingsCard>
-      </SettingsSection>
-
-      <SettingsSection
-        title={t(($) => $.preferences.appearance_title)}
-        scope="device"
-        anchor="appearance"
-      >
-        <SettingsCard>
-          <ThemeRow />
-          <StyleRow />
-          <FrameRow />
         </SettingsCard>
       </SettingsSection>
 
@@ -127,87 +108,6 @@ export function PreferencesTab() {
         <IssueFieldsMatrix />
       </SettingsSection>
     </SettingsTab>
-  );
-}
-
-function ThemeRow() {
-  const { t } = useT("settings");
-  const { theme, setTheme } = useTheme();
-  const value = theme === "light" || theme === "dark" ? theme : "system";
-  return (
-    <SettingsRow anchor="theme" label={t(($) => $.preferences.theme.title)}>
-      <div role="group" aria-label={t(($) => $.preferences.theme.title)}>
-        <SegmentedToggle
-          value={value}
-          onChange={setTheme}
-          buttonClassName="px-3 py-1 text-label"
-          options={[
-            ["light", t(($) => $.preferences.theme.light)],
-            ["dark", t(($) => $.preferences.theme.dark)],
-            ["system", t(($) => $.preferences.theme.system)],
-          ]}
-        />
-      </div>
-    </SettingsRow>
-  );
-}
-
-function StyleRow() {
-  const { t } = useT("settings");
-  const style = useAppearanceStore((s) => s.style);
-  const setStyle = useAppearanceStore((s) => s.setStyle);
-  const label = t(($) => $.preferences.style.title);
-  return (
-    <SettingsRow anchor="style" label={label}>
-      <div role="group" aria-label={label}>
-        <SegmentedToggle<AppearanceStyle>
-          value={style}
-          onChange={setStyle}
-          buttonClassName="px-3 py-1 text-label"
-          options={[
-            ["default", t(($) => $.preferences.style.default)],
-            ["pop", t(($) => $.preferences.style.pop)],
-          ]}
-        />
-      </div>
-    </SettingsRow>
-  );
-}
-
-/** Tints only the app shell around the content card; Pop keeps its own frame. */
-function FrameRow() {
-  const { t } = useT("settings");
-  const frame = useAppearanceStore((s) => s.frame);
-  const setFrame = useAppearanceStore((s) => s.setFrame);
-  const fixed = styleHasFixedFrame(useAppearanceStore((s) => s.style));
-  const label = t(($) => $.preferences.frame.title);
-  return (
-    <SettingsRow
-      anchor="frame"
-      label={label}
-      description={fixed ? t(($) => $.preferences.frame.pop_hint) : undefined}
-    >
-      <div role="group" aria-label={label} className="flex items-center gap-2">
-        {APPEARANCE_FRAMES.map((option) => {
-          const name = t(($) => $.preferences.frame[option]);
-          return (
-            <TooltipHint key={option} label={name}>
-              <button
-                type="button"
-                aria-label={name}
-                aria-pressed={frame === option}
-                disabled={fixed}
-                data-frame-swatch={option}
-                onClick={() => {
-                  if (option !== frame) setFrame(option);
-                }}
-                className="size-6 rounded-full ring-1 ring-inset ring-foreground/10 outline-offset-2 transition-opacity aria-pressed:outline-2 aria-pressed:outline-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
-              />
-            </TooltipHint>
-          );
-        })}
-      </div>
-    </SettingsRow>
   );
 }
 

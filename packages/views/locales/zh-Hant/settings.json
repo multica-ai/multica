@@ -157,27 +157,6 @@
     "toast_saved": "更改已儲存"
   },
   "preferences": {
-    "theme": {
-      "title": "主題",
-      "light": "淺色",
-      "dark": "深色",
-      "system": "跟隨系統"
-    },
-    "style": {
-      "title": "風格",
-      "default": "預設",
-      "pop": "波普"
-    },
-    "frame": {
-      "title": "外框顏色",
-      "pop_hint": "波普風格使用固定的黑色外框。",
-      "neutral": "中性",
-      "sand": "暖沙",
-      "sage": "鼠尾草",
-      "mist": "霧藍",
-      "lilac": "薰衣草",
-      "rose": "玫瑰"
-    },
     "language": {
       "title": "語言",
       "english": "English",
@@ -208,13 +187,29 @@
     },
     "comments_title": "評論與聊天",
     "region_title": "語言與地區",
-    "appearance_title": "外觀",
     "issue_fields_title": "建立任務時顯示的欄位",
     "issue_fields": {
       "field": "欄位",
       "quick": "AI 代理建立",
       "manual": "手動建立",
       "unsupported": "AI 代理建立時不支援此欄位"
+    }
+  },
+  "appearance": {
+    "theme": {
+      "title": "主題",
+      "description": "淺色、深色，或跟隨系統。",
+      "light": "淺色",
+      "dark": "深色",
+      "system": "跟隨系統"
+    },
+    "style": {
+      "title": "風格",
+      "description": "整個應用程式的視覺風格。",
+      "default": "預設",
+      "default_description": "安靜、中性，適合長時間工作。",
+      "pop": "波普",
+      "pop_description": "黑色粗框、硬陰影和鮮明的狀態色。"
     }
   },
   "shortcuts": {
@@ -408,6 +403,7 @@
     "tabs": {
       "profile": "個人資料",
       "preferences": "偏好設定",
+      "appearance": "外觀",
       "shortcuts": "快捷鍵",
       "issue": "任務",
       "notifications": "通知",

@@ -30,14 +30,9 @@ const mockReload = vi.hoisted(() => vi.fn());
 const mockToastWarning = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
-const mockSetTheme = vi.hoisted(() => vi.fn());
 const mockSetUser = vi.hoisted(() => vi.fn());
 const userRef = vi.hoisted(() => ({
   current: null as { id: string; timezone?: string | null } | null,
-}));
-
-vi.mock("@multica/ui/components/common/theme-provider", () => ({
-  useTheme: () => ({ theme: "light", setTheme: mockSetTheme }),
 }));
 
 vi.mock("@multica/core/i18n/react", async () => {
@@ -106,7 +101,6 @@ vi.mock("@multica/core/auth", async () => {
 import { PreferencesTab } from "./preferences-tab";
 import { useCommentComposerStore } from "@multica/core/issues/stores";
 import { useIssueOpeningStore } from "@multica/core/issues/stores/issue-opening-store";
-import { useAppearanceStore } from "@multica/core/appearance";
 import {
   DEFAULT_MANUAL_CREATE_FIELDS,
   DEFAULT_QUICK_CREATE_FIELDS,
@@ -159,21 +153,6 @@ describe("PreferencesTab — Language switcher", () => {
     expect(mockPersist).not.toHaveBeenCalled();
     expect(mockUpdateMe).not.toHaveBeenCalled();
     expect(mockReload).not.toHaveBeenCalled();
-  });
-
-  it("applies the theme on this device without announcing success", async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    render(<PreferencesTab />, { wrapper: I18nWrapper });
-
-    const group = screen.getByRole("group", { name: "Theme" });
-    expect(within(group).getByRole("button", { name: "Light" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    await user.click(within(group).getByRole("button", { name: "Dark" }));
-
-    expect(mockSetTheme).toHaveBeenCalledWith("dark");
-    expect(mockToastSuccess).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -425,51 +404,6 @@ describe("PreferencesTab — Create-issue fields", () => {
   });
 });
 
-describe("PreferencesTab — Style and frame", () => {
-  beforeEach(() => {
-    useAppearanceStore.setState({ style: "default", frame: "neutral" });
-  });
-  afterEach(() => {
-    cleanup();
-  });
-
-  it("tints the frame with the picked swatch", async () => {
-    const user = userEvent.setup();
-    render(<PreferencesTab />, { wrapper: I18nWrapper });
-    const group = screen.getByRole("group", { name: "Frame color" });
-    expect(within(group).getByRole("button", { name: "Neutral" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-
-    await user.click(within(group).getByRole("button", { name: "Sage" }));
-
-    expect(useAppearanceStore.getState().frame).toBe("sage");
-    expect(within(group).getByRole("button", { name: "Sage" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-  });
-
-  it("locks the frame picker while Pop is on and keeps the chosen tint", async () => {
-    useAppearanceStore.setState({ frame: "rose" });
-    const user = userEvent.setup();
-    render(<PreferencesTab />, { wrapper: I18nWrapper });
-
-    await user.click(
-      within(screen.getByRole("group", { name: "Style" })).getByRole("button", { name: "Pop" }),
-    );
-
-    expect(useAppearanceStore.getState()).toMatchObject({ style: "pop", frame: "rose" });
-    expect(screen.getByText(enSettings.preferences.frame.pop_hint)).toBeInTheDocument();
-    for (const swatch of within(screen.getByRole("group", { name: "Frame color" })).getAllByRole(
-      "button",
-    )) {
-      expect(swatch).toBeDisabled();
-    }
-  });
-});
-
 describe("PreferencesTab — Scope", () => {
   afterEach(() => {
     cleanup();
@@ -478,8 +412,8 @@ describe("PreferencesTab — Scope", () => {
   it("labels where each group of settings is stored", () => {
     render(<PreferencesTab />, { wrapper: I18nWrapper });
     expect(screen.getByText("Account · synced")).toBeInTheDocument();
-    // Appearance, opening issues, comments & chat.
-    expect(screen.getAllByText("This device only")).toHaveLength(3);
+    // Opening issues, comments & chat.
+    expect(screen.getAllByText("This device only")).toHaveLength(2);
   });
 
   it("switches what clicking a card or row opens, and says what Shift does", async () => {

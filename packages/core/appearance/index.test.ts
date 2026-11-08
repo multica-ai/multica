@@ -1,39 +1,31 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
-import { APPEARANCE_STORAGE_KEY, appearanceAttributes, useAppearanceStore } from ".";
+import { APPEARANCE_STORAGE_KEY, appearanceStyleAttribute, useAppearanceStore } from ".";
 
 describe("appearance store", () => {
   beforeEach(() => {
     localStorage.clear();
-    useAppearanceStore.setState({ style: "default", frame: "neutral" });
+    useAppearanceStore.setState({ style: "default" });
   });
 
-  it("persists the style and frame on this device", () => {
+  it("persists the style on this device", () => {
     useAppearanceStore.getState().setStyle("pop");
-    useAppearanceStore.getState().setFrame("mist");
     expect(JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY)!).state).toEqual({
       style: "pop",
-      frame: "mist",
     });
   });
 
-  it("falls back to the defaults for unknown or missing stored values", async () => {
+  it("falls back to the default for an unknown stored style", async () => {
     localStorage.setItem(
       APPEARANCE_STORAGE_KEY,
-      JSON.stringify({ state: { style: "brutalist", frame: 42 }, version: 0 }),
+      JSON.stringify({ state: { style: "brutalist" }, version: 0 }),
     );
     await useAppearanceStore.persist.rehydrate();
-    expect(useAppearanceStore.getState()).toMatchObject({ style: "default", frame: "neutral" });
+    expect(useAppearanceStore.getState().style).toBe("default");
   });
 
-  it("maps the defaults to no attribute so the base tokens apply", () => {
-    expect(appearanceAttributes({ style: "default", frame: "neutral" })).toEqual({
-      "data-style": null,
-      "data-frame": null,
-    });
-    expect(appearanceAttributes({ style: "pop", frame: "sand" })).toEqual({
-      "data-style": "pop",
-      "data-frame": "sand",
-    });
+  it("maps the default style to no attribute so the base tokens apply", () => {
+    expect(appearanceStyleAttribute("default")).toBeNull();
+    expect(appearanceStyleAttribute("pop")).toBe("pop");
   });
 });

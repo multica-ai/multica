@@ -2,7 +2,6 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
-import { APPEARANCE_FRAMES } from "@multica/core/appearance";
 
 /**
  * Is every tone the product paints text and marks with actually legible, and is
@@ -440,23 +439,6 @@ describe("text contrast", () => {
   });
 
   describe("appearance", () => {
-    const frames = APPEARANCE_FRAMES.filter((frame) => frame !== "neutral");
-
-    it.each(frames)("the %s frame keeps both tones legible in light and dark", (frame) => {
-      const css = appearanceCss();
-      const root = readBlock(tokensCss(), ":root");
-      const light = layered(root, readBlock(css, `:root[data-frame="${frame}"]:not([data-style="pop"])`));
-      const dark = layered(
-        root,
-        readBlock(tokensCss(), ".dark"),
-        readBlock(css, `:root.dark[data-frame="${frame}"]:not([data-style="pop"])`),
-      );
-      for (const mode of [light, dark]) {
-        expectTonePasses(mode, "--muted-foreground", WCAG_AA_NORMAL_TEXT);
-        expectTonePasses(mode, "--faint-foreground", WCAG_AA_NON_TEXT);
-      }
-    });
-
     // Pop's frame is black, so the content tones are judged on the content
     // surfaces only; what sits on the frame reads the frame scope below.
     const popContentBackgrounds = backgroundTokens.filter((token) => token !== "--app-shell");

@@ -159,27 +159,6 @@
     "toast_saved": "Changes saved"
   },
   "preferences": {
-    "theme": {
-      "title": "Theme",
-      "light": "Light",
-      "dark": "Dark",
-      "system": "System"
-    },
-    "style": {
-      "title": "Style",
-      "default": "Default",
-      "pop": "Pop"
-    },
-    "frame": {
-      "title": "Frame color",
-      "pop_hint": "Pop uses a fixed black frame.",
-      "neutral": "Neutral",
-      "sand": "Sand",
-      "sage": "Sage",
-      "mist": "Mist",
-      "lilac": "Lilac",
-      "rose": "Rose"
-    },
     "language": {
       "title": "Language",
       "english": "English",
@@ -210,13 +189,29 @@
     },
     "comments_title": "Comments & chat",
     "region_title": "Language & region",
-    "appearance_title": "Appearance",
     "issue_fields_title": "Fields shown when creating issues",
     "issue_fields": {
       "field": "Field",
       "quick": "Create with agent",
       "manual": "Manual create",
       "unsupported": "Not available when creating with an agent"
+    }
+  },
+  "appearance": {
+    "theme": {
+      "title": "Theme",
+      "description": "Light, dark, or follow your system.",
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    },
+    "style": {
+      "title": "Style",
+      "description": "The overall look of the app.",
+      "default": "Default",
+      "default_description": "Quiet and neutral, made for long working days.",
+      "pop": "Pop",
+      "pop_description": "A bold black frame, hard shadows and bright status colors."
     }
   },
   "shortcuts": {
@@ -410,6 +405,7 @@
     "tabs": {
       "profile": "Profile",
       "preferences": "Preferences",
+      "appearance": "Appearance",
       "shortcuts": "Shortcuts",
       "issue": "Issue",
       "notifications": "Notifications",

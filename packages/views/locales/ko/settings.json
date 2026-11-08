@@ -157,27 +157,6 @@
     "toast_saved": "변경사항을 저장했습니다"
   },
   "preferences": {
-    "theme": {
-      "title": "테마",
-      "light": "라이트",
-      "dark": "다크",
-      "system": "시스템"
-    },
-    "style": {
-      "title": "스타일",
-      "default": "기본",
-      "pop": "팝"
-    },
-    "frame": {
-      "title": "프레임 색상",
-      "pop_hint": "팝 스타일은 검은색 프레임을 사용합니다.",
-      "neutral": "뉴트럴",
-      "sand": "샌드",
-      "sage": "세이지",
-      "mist": "미스트",
-      "lilac": "라일락",
-      "rose": "로즈"
-    },
     "language": {
       "title": "언어",
       "english": "English",
@@ -208,13 +187,29 @@
     },
     "comments_title": "댓글 및 채팅",
     "region_title": "언어 및 지역",
-    "appearance_title": "모양",
     "issue_fields_title": "태스크 생성 시 표시할 필드",
     "issue_fields": {
       "field": "필드",
       "quick": "에이전트로 생성",
       "manual": "수동 생성",
       "unsupported": "에이전트로 생성할 때는 사용할 수 없습니다"
+    }
+  },
+  "appearance": {
+    "theme": {
+      "title": "테마",
+      "description": "라이트, 다크 또는 시스템 설정을 따릅니다.",
+      "light": "라이트",
+      "dark": "다크",
+      "system": "시스템"
+    },
+    "style": {
+      "title": "스타일",
+      "description": "앱 전체의 시각적 스타일입니다.",
+      "default": "기본",
+      "default_description": "차분하고 중립적인 스타일. 오래 작업하기 좋습니다.",
+      "pop": "팝",
+      "pop_description": "굵은 검은 테두리, 선명한 그림자, 강렬한 상태 색상."
     }
   },
   "shortcuts": {
@@ -408,6 +403,7 @@
     "tabs": {
       "profile": "프로필",
       "preferences": "환경설정",
+      "appearance": "모양",
       "shortcuts": "단축키",
       "issue": "태스크",
       "notifications": "알림",
