@@ -619,7 +619,16 @@ func (s *AutopilotService) dispatchAutopilotRun(
 	switch autopilot.ExecutionMode {
 	case "create_issue":
 		triggerTimezone := s.resolveAutopilotTriggerTimezone(ctx, triggerID)
-		if err := s.dispatchCreateIssue(ctx, autopilot, run, triggerTimezone, actorUserID); err != nil {
+		err := s.dispatchCreateIssue(ctx, autopilot, run, triggerTimezone, actorUserID)
+		// Same rule as IssueService.Create: a collision on uq_issue_workspace_number
+		// means the workspace counter trails MAX(issue.number), and the failed
+		// dispatch already rolled its own increment back. Heal, then dispatch once
+		// more — otherwise this run fails and every later dispatch of this autopilot
+		// fails with it, which is how one drifted workspace wedges a board.
+		if err != nil && healIssueCounterAfterCollision(ctx, s.Queries, autopilot.WorkspaceID, err) {
+			err = s.dispatchCreateIssue(ctx, autopilot, run, triggerTimezone, actorUserID)
+		}
+		if err != nil {
 			if skipped, code := s.handleDispatchSkip(ctx, autopilot, run, err); skipped != nil {
 				return skipped, code, nil
 			}
