@@ -210,11 +210,26 @@ func (h *terminalRetryHeap) Pop() any {
 	return x
 }
 
-// editInterval is the minimum spacing between editMessageText calls per chat.
-// Telegram tolerates roughly one edit per second per chat, with a much
-// stricter per-group budget (~20 messages/min); 2.5s keeps a long generation
-// well inside both without feeling static.
+// editInterval is the minimum spacing between editMessageText calls in a
+// private chat. Telegram tolerates roughly one edit per second per chat; 2.5s
+// keeps a long generation well inside that without feeling static. Groups use
+// groupEditInterval.
 const editInterval = 2500 * time.Millisecond
+
+// groupEditInterval spaces edits in groups. Telegram allows a group about 20
+// messages a minute and edits count against it, so 2.5s (24 a minute) runs a
+// long reply into 429s; 3s keeps sends plus edits at 20.
+const groupEditInterval = 3 * time.Second
+
+// editSpacing is the minimum gap between Telegram calls in this schedule's
+// chat. Telegram gives groups, supergroups and channels negative chat ids and
+// private chats positive ones.
+func (s *chatSchedule) editSpacing() time.Duration {
+	if s.key.chatID < 0 {
+		return groupEditInterval
+	}
+	return editInterval
+}
 
 // placeholderSettleRetry re-checks a stream whose placeholder sendMessage is
 // still in flight. A check costs one map lookup — the delivery target is
@@ -1001,7 +1016,7 @@ func (o *Outbound) editStreamedReply(ctx context.Context, api *botAPI, reply *te
 		o.deliverAttachments(ctx, reply)
 		return terminalRequestResult{done: true}
 	}
-	return terminalRequestResult{retryAt: schedule.lastEdit.Add(editInterval)}
+	return terminalRequestResult{retryAt: schedule.lastEdit.Add(schedule.editSpacing())}
 }
 
 // sendReplyChunk posts one part of the final answer. The send is published
@@ -1058,7 +1073,7 @@ func (o *Outbound) sendReplyChunk(ctx context.Context, api *botAPI, reply *termi
 		o.deliverAttachments(ctx, reply)
 		return terminalRequestResult{done: true}
 	}
-	return terminalRequestResult{retryAt: schedule.lastEdit.Add(editInterval)}
+	return terminalRequestResult{retryAt: schedule.lastEdit.Add(schedule.editSpacing())}
 }
 
 func (o *Outbound) cleanupTerminalReply(reply *terminalReply) {
@@ -1351,7 +1366,7 @@ func (o *Outbound) makeChatScheduleRoomLocked(now time.Time) bool {
 	var inactive *chatSchedule
 	for key, schedule := range o.chats {
 		if schedule.refs != 0 || schedule.idleSince.IsZero() ||
-			now.Sub(schedule.idleSince) < editInterval || schedule.hasActiveBackoff(now) {
+			now.Sub(schedule.idleSince) < schedule.editSpacing() || schedule.hasActiveBackoff(now) {
 			continue
 		}
 		if inactive == nil || schedule.idleSince.Before(inactive.idleSince) {
@@ -1367,7 +1382,7 @@ func (o *Outbound) makeChatScheduleRoomLocked(now time.Time) bool {
 	var active *chatSchedule
 	for key, schedule := range o.chats {
 		if schedule.refs != 0 || schedule.idleSince.IsZero() ||
-			now.Sub(schedule.idleSince) < editInterval || !schedule.hasActiveBackoff(now) {
+			now.Sub(schedule.idleSince) < schedule.editSpacing() || !schedule.hasActiveBackoff(now) {
 			continue
 		}
 		if !o.canMergeBotFallbackLocked(schedule.key.botKey, now) {
@@ -1417,7 +1432,7 @@ func (o *Outbound) botFallbackTill(botKey string, now time.Time) time.Time {
 
 func (o *Outbound) terminalAvailableAt(schedule *chatSchedule, botKey string, now time.Time) time.Time {
 	available := schedule.backoffTill
-	if editAvailable := schedule.lastEdit.Add(editInterval); editAvailable.After(available) {
+	if editAvailable := schedule.lastEdit.Add(schedule.editSpacing()); editAvailable.After(available) {
 		available = editAvailable
 	}
 	if fallback := o.botFallbackTill(botKey, now); fallback.After(available) {

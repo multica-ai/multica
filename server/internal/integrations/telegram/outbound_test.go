@@ -512,6 +512,34 @@ func TestOutboundCapacityPruningPreservesActiveBackoff(t *testing.T) {
 	}
 }
 
+// Telegram allows a group about 20 messages a minute, and edits count against
+// it; at the private-chat spacing a long streamed reply in a group would run
+// into 429s. Group chat ids are negative, private chat ids positive.
+func TestOutboundEditSpacingFollowsChatType(t *testing.T) {
+	o := NewOutbound(nil, nil, "", nil, nil)
+	lastEdit := time.Date(2026, 8, 18, 0, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name   string
+		chatID int64
+		want   time.Duration
+	}{
+		{name: "private chat", chatID: 42, want: editInterval},
+		{name: "basic group", chatID: -4012345678, want: groupEditInterval},
+		{name: "supergroup", chatID: -1001234567890, want: groupEditInterval},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			schedule := &chatSchedule{key: chatScheduleKey{botKey: "bot-a", chatID: tt.chatID}, lastEdit: lastEdit}
+			if got := o.terminalAvailableAt(schedule, "bot-a", lastEdit).Sub(lastEdit); got != tt.want {
+				t.Fatalf("next edit after %v, want %v", got, tt.want)
+			}
+		})
+	}
+	if groupEditInterval < time.Minute/20 {
+		t.Fatalf("group spacing %v allows more than 20 messages a minute", groupEditInterval)
+	}
+}
+
 func TestOutboundCapacityEvictionPreservesRecentChatCooldown(t *testing.T) {
 	current := time.Date(2026, 8, 18, 0, 0, 0, 0, time.UTC)
 	tests := []struct {
