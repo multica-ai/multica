@@ -148,6 +148,8 @@
       "stuck_one": "{{count}} task waiting on an offline runtime",
       "stuck_other": "{{count}} tasks waiting on an offline runtime",
       "working_now": "Working now",
+      "show_more_agents": "Show {{count}} more…",
+      "show_fewer_agents": "Show fewer",
       "running_tasks_one": "{{count}} task running",
       "running_tasks_other": "{{count}} tasks running",
       "all_agents": "All agents",
