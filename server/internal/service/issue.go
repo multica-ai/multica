@@ -234,7 +234,9 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		return res, nil
 	}
 	if !healIssueCounterAfterCollision(ctx, s.Queries, p.WorkspaceID, err) {
-		return IssueCreateResult{}, err
+		// Pass the result through: callers read fields alongside some of these
+		// errors, e.g. DuplicateIssue with ErrActiveDuplicate.
+		return res, err
 	}
 	res, err = s.createOnce(ctx, p, opts)
 	if err != nil {
@@ -245,7 +247,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 				"allocated", collision.Allocated,
 				"constraint", collision.Constraint)
 		}
-		return IssueCreateResult{}, err
+		return res, err
 	}
 	return res, nil
 }
