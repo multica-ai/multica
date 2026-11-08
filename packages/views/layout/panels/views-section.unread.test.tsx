@@ -81,7 +81,7 @@ function renderSection({ activeIssueId = null }: { activeIssueId?: string | null
           wsId="ws-1"
           pathname={issueId ? `/acme/issues/${issueId}` : "/acme/issues"}
           plainRowsLit
-          issueLitInTree={false}
+          issueInAllIssues={false}
           activeIssueId={issueId}
           litSource={viewSidebarSource(UNREAD_VIEW_ID)}
           actions={actions as unknown as IssueViewActions}

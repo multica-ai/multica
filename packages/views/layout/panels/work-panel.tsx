@@ -128,7 +128,7 @@ export function WorkPanel() {
   const issueProject =
     !projectsCollapsed && issueProjectId ? shownProjects.find((project) => project.id === issueProjectId) : undefined;
   const issueProjectSource = issueProject ? projectSidebarSource(issueProject.id) : null;
-  // An expanded project always lists its open issue (`ownsActive`).
+  // An expanded project always lists its open issue (`ownsOpen`).
   const issueProjectExpanded = useSidebarTreeStore(
     (s) => !!issueProjectSource && s.expanded.includes(issueProjectSource),
   );
@@ -146,7 +146,9 @@ export function WorkPanel() {
           ? issueProjectSource
           : (listOrder.find((source) => listing.includes(source)) ?? null);
   const locatedProjectId = plainRowsLit && !litSource && issueProject ? issueProject.id : null;
-  const issueMarked = litSource !== null || locatedProjectId !== null;
+  // An issue in a project the panel hides, or under the collapsed Projects
+  // section, stays unmarked rather than lighting a list that may not show it.
+  const issueInAllIssues = plainRowsLit && !!currentIssue && !currentIssue.project_id && litSource === null;
 
   const locate = useSidebarTreeStore((s) => s.locate);
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
@@ -170,7 +172,7 @@ export function WorkPanel() {
               wsId={wsId}
               pathname={pathname}
               plainRowsLit={plainRowsLit}
-              issueLitInTree={issueMarked}
+              issueInAllIssues={issueInAllIssues}
               activeIssueId={currentIssueId}
               litSource={litSource}
               actions={viewActions}

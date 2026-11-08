@@ -250,7 +250,13 @@ describe("WorkPanel issue highlight", () => {
   });
 
   it("leaves All issues lit for an issue no expanded row lists", async () => {
-    renderPanel("/acme/issues/9c8d7e6f-5a4b-4c3d-8e2f-1a0b9c8d7e6f");
+    const qc = renderPanel("/acme/issues/9c8d7e6f-5a4b-4c3d-8e2f-1a0b9c8d7e6f");
+    act(() => {
+      qc.setQueryData(issueDetailOptions("ws-1", "9c8d7e6f-5a4b-4c3d-8e2f-1a0b9c8d7e6f").queryKey, {
+        ...OTHER,
+        id: "9c8d7e6f-5a4b-4c3d-8e2f-1a0b9c8d7e6f",
+      });
+    });
 
     await screen.findByRole("link", { name: ISSUE.title });
     expect(allIssues()).toHaveAttribute("aria-current", "page");
@@ -354,6 +360,8 @@ describe("WorkPanel and the open issue's project", () => {
     act(() => {
       qc.setQueryData(issueDetailOptions("ws-1", ISSUE.id).queryKey, IN_PROJECT);
     });
+  // Query observers hear of cache writes on a timer.
+  const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 10)));
 
   beforeEach(() => {
     useSidebarTreeStore.setState({ locate: null });
@@ -388,6 +396,64 @@ describe("WorkPanel and the open issue's project", () => {
     await waitFor(() => expect(projectLocated()).toBe(true));
     expect(allIssues()).not.toHaveAttribute("aria-current");
     expect(useSidebarTreeStore.getState().expanded).toEqual([]);
+  });
+
+  it("lights All issues for an issue without a project that no list shows", async () => {
+    useSidebarTreeStore.setState({ expanded: [] });
+    const qc = renderPanel(`/acme/issues/${ISSUE.id}`, [], [PROJECT]);
+    act(() => {
+      qc.setQueryData(issueDetailOptions("ws-1", ISSUE.id).queryKey, ISSUE);
+    });
+
+    await waitFor(() => expect(allIssues()).toHaveAttribute("aria-current", "page"));
+  });
+
+  it("does not light All issues for an issue under the collapsed Projects section", async () => {
+    useSidebarTreeStore.setState({ expanded: [], projectsCollapsed: true });
+    const qc = renderPanel(`/acme/issues/${ISSUE.id}`, [], [PROJECT]);
+    await openInProject(qc);
+    await settle();
+
+    expect(allIssues()).not.toHaveAttribute("aria-current");
+    expect(document.querySelector("[data-located]")).toBeNull();
+  });
+
+  it("does not light All issues for an issue in a project the sidebar filters out", async () => {
+    useSidebarTreeStore.setState({ expanded: [] });
+    const done = { ...PROJECT, status: "completed" } as Project;
+    const qc = renderPanel(`/acme/issues/${ISSUE.id}`, [], [done]);
+    await openInProject(qc);
+    await settle();
+
+    expect(screen.queryByRole("link", { name: PROJECT.title })).toBeNull();
+    expect(allIssues()).not.toHaveAttribute("aria-current");
+  });
+
+  it("lists an issue lit in a view under its project once the project is expanded", async () => {
+    // The open issue is on the project's second page.
+    apiMock.listIssues.mockImplementation(async ({ offset }: { offset: number }) => ({
+      issues: offset ? [] : [OTHER],
+      total: 2,
+    }));
+    const qc = renderPanel("/acme/my-issues", [], [PROJECT]);
+    await openInProject(qc);
+    const inMyIssues = await waitFor(() => {
+      const element = document.querySelector('[data-sidebar-list="builtin:my_issues"]') as HTMLElement;
+      expect(within(element).getByRole("link", { name: ISSUE.title })).toBeInTheDocument();
+      return element;
+    });
+    fireEvent.click(within(inMyIssues).getByRole("link", { name: ISSUE.title }));
+
+    act(() => {
+      useSidebarTreeStore.getState().setExpanded(PROJECT_SOURCE, true);
+    });
+    const list = await waitFor(() => {
+      const element = document.querySelector(`[data-sidebar-list="${PROJECT_SOURCE}"]`) as HTMLElement;
+      expect(within(element).getAllByRole("link").map((link) => link.textContent)).toEqual([OTHER.title, ISSUE.title]);
+      return element;
+    });
+    expect(within(list).getByRole("link", { name: ISSUE.title })).not.toHaveAttribute("aria-current");
+    expect(litIssueRows()).toEqual([within(inMyIssues).getByRole("link", { name: ISSUE.title })]);
   });
 
   it("lists the open issue last under its expanded project when no page has it", async () => {

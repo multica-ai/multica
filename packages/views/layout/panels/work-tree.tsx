@@ -195,6 +195,7 @@ export function ProjectsSection({
                 showCount={projectSettings.showCount}
                 issueSettings={issueSettings}
                 activeIssueId={litSource === projectSidebarSource(project.id) ? activeIssueId : null}
+                openIssueId={activeIssueId}
                 located={locatedProjectId === project.id}
               />
             ))}
@@ -241,6 +242,7 @@ function ProjectTreeItem({
   showCount,
   issueSettings,
   activeIssueId,
+  openIssueId,
   located,
 }: {
   wsId: string;
@@ -250,6 +252,7 @@ function ProjectTreeItem({
   showCount: boolean;
   issueSettings: SidebarIssueSettings;
   activeIssueId: string | null;
+  openIssueId: string | null;
   located: boolean;
 }) {
   const { t } = useT("layout");
@@ -329,7 +332,8 @@ function ProjectTreeItem({
           paramsError={catalogDependency.error}
           onRetry={catalogDependency.retry}
           activeIssueId={activeIssueId}
-          ownsActive={(issue) => issue.project_id === project.id}
+          openIssueId={openIssueId}
+          ownsOpen={(issue) => issue.project_id === project.id}
           onCollapse={() => {
             setExpanded(false);
             linkRef.current?.focus();

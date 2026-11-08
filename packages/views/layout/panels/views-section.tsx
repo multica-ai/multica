@@ -79,8 +79,8 @@ interface ViewsSectionProps {
   wsId: string;
   pathname: string;
   plainRowsLit: boolean;
-  /** Another row marks the current issue, so "All issues" stays unlit. */
-  issueLitInTree: boolean;
+  /** No other row marks the open issue and it has no project, so "All issues" lights for it. */
+  issueInAllIssues: boolean;
   activeIssueId: string | null;
   /** The one list that lights the open issue. */
   litSource: string | null;
@@ -101,7 +101,7 @@ export function ViewsSection({
   wsId,
   pathname,
   plainRowsLit,
-  issueLitInTree,
+  issueInAllIssues,
   activeIssueId,
   litSource,
   actions,
@@ -185,7 +185,7 @@ export function ViewsSection({
                       builtin={item.key}
                       pathname={pathname}
                       plainRowsLit={plainRowsLit}
-                      issueLitInTree={issueLitInTree}
+                      issueInAllIssues={issueInAllIssues}
                       activeIssueId={litSource === sidebarViewItemSource(item) ? activeIssueId : null}
                       actions={actions}
                       drag={drag}
@@ -305,7 +305,7 @@ function BuiltinViewRow({
   builtin,
   pathname,
   plainRowsLit,
-  issueLitInTree,
+  issueInAllIssues,
   activeIssueId,
   actions,
   drag,
@@ -314,7 +314,7 @@ function BuiltinViewRow({
   builtin: ScopeBuiltinViewKey;
   pathname: string;
   plainRowsLit: boolean;
-  issueLitInTree: boolean;
+  issueInAllIssues: boolean;
   activeIssueId: string | null;
   actions: IssueViewActions;
   drag: DragBindings;
@@ -345,7 +345,7 @@ function BuiltinViewRow({
     (builtin === "all_issues"
       ? pathname === p.issues()
         ? activeWorkspaceView === null
-        : !issueLitInTree && isPathWithin(pathname, p.issues())
+        : issueInAllIssues && isPathWithin(pathname, p.issues())
       : onMyIssues && activeMyView === null && (builtin === "my_agents") === isMyAgentsSearch(searchParams));
 
   const source = builtinSidebarSource(builtin);

@@ -9,6 +9,7 @@ import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-st
 import { useWorkspacePaths } from "@multica/core/paths";
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { Issue } from "@multica/core/types";
+import { useSidebarSafe } from "@multica/ui/components/ui/sidebar";
 import { useNavigation } from "../../navigation";
 import { useAppShell } from "../app-shell-context";
 
@@ -21,6 +22,7 @@ export function useShowInSidebar(issue: Pick<Issue, "id" | "project_id"> | null 
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
   const shell = useAppShell();
+  const sidebar = useSidebarSafe();
   const paths = useWorkspacePaths();
   const { pathname } = useNavigation();
   const { data: projects } = useQuery({ ...projectListOptions(wsId), enabled: !!issue?.project_id });
@@ -32,7 +34,9 @@ export function useShowInSidebar(issue: Pick<Issue, "id" | "project_id"> | null 
   );
   if (!listed) return null;
   return () => {
-    if (shell?.navCollapsed) shell.toggleNav();
+    // `navCollapsed` is always false in the compact layout, where the nav is a sheet.
+    if (sidebar?.isCompact) sidebar.setOpenMobile(true);
+    else if (shell?.navCollapsed) shell.toggleNav();
     useSidebarTreeStore.getState().requestLocate({ issueId: issue.id, source: projectSidebarSource(projectId) });
   };
 }

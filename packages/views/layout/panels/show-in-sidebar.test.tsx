@@ -29,6 +29,16 @@ vi.mock("@multica/core/auth", async (importOriginal) => {
   };
 });
 
+const layout = vi.hoisted(() => ({
+  shell: null as { navCollapsed: boolean; toggleNav: () => void } | null,
+  sidebar: null as { isCompact: boolean; setOpenMobile: (open: boolean) => void } | null,
+}));
+vi.mock("../app-shell-context", () => ({ useAppShell: () => layout.shell }));
+vi.mock("@multica/ui/components/ui/sidebar", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/ui/components/ui/sidebar")>()),
+  useSidebarSafe: () => layout.sidebar,
+}));
+
 const PROJECT = { id: "p-1", title: "Launch", status: "in_progress", lead_type: null, lead_id: null } as unknown as Project;
 const DONE_PROJECT = { ...PROJECT, id: "p-2", status: "completed" } as Project;
 const ISSUE_ID = "0a3f0a8e-6a52-4c1e-9f5e-1b2c3d4e5f60";
@@ -56,6 +66,8 @@ function render(pathname: string, projectId: string | null) {
 
 beforeEach(() => {
   useSidebarTreeStore.setState({ locate: null });
+  layout.shell = null;
+  layout.sidebar = null;
 });
 
 describe("useShowInSidebar", () => {
@@ -63,6 +75,23 @@ describe("useShowInSidebar", () => {
     const result = render(`/acme/issues/${ISSUE_ID}`, PROJECT.id);
     result.current?.();
     expect(useSidebarTreeStore.getState().locate).toEqual({ issueId: ISSUE_ID, source: `project:${PROJECT.id}` });
+  });
+
+  it("opens a collapsed space panel", () => {
+    layout.shell = { navCollapsed: true, toggleNav: vi.fn() };
+    layout.sidebar = { isCompact: false, setOpenMobile: vi.fn() };
+    render(`/acme/issues/${ISSUE_ID}`, PROJECT.id).current?.();
+    expect(layout.shell.toggleNav).toHaveBeenCalledOnce();
+    expect(layout.sidebar.setOpenMobile).not.toHaveBeenCalled();
+  });
+
+  it("opens the nav sheet in the compact layout", () => {
+    layout.shell = { navCollapsed: false, toggleNav: vi.fn() };
+    layout.sidebar = { isCompact: true, setOpenMobile: vi.fn() };
+    render(`/acme/issues/${ISSUE_ID}`, PROJECT.id).current?.();
+    expect(layout.sidebar.setOpenMobile).toHaveBeenCalledWith(true);
+    expect(layout.shell.toggleNav).not.toHaveBeenCalled();
+    expect(useSidebarTreeStore.getState().locate?.issueId).toBe(ISSUE_ID);
   });
 
   it("is not offered off an issue route, where the panel does not mark the issue", () => {

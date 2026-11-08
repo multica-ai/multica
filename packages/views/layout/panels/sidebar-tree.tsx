@@ -205,8 +205,9 @@ export function useKeptActiveItem<T extends { id: string }>(
  * The issues under an expanded row: the first page, then "Load more" in
  * steps. `params: null` means the row's settings can match nothing;
  * `undefined` that they are still resolving, or — with `paramsError` — that
- * they could not resolve, which `onRetry` tries again. An open issue that
- * `ownsActive` claims is listed last when no loaded page has it.
+ * they could not resolve, which `onRetry` tries again. `activeIssueId` is the
+ * row that lights; the open issue `openIssueId` names is listed last when
+ * `ownsOpen` claims it and no loaded page has it, lit or not.
  */
 export function SidebarIssueList({
   id,
@@ -216,7 +217,8 @@ export function SidebarIssueList({
   paramsError = false,
   onRetry,
   activeIssueId,
-  ownsActive,
+  openIssueId = activeIssueId,
+  ownsOpen,
   onCollapse,
 }: {
   id: string;
@@ -226,7 +228,8 @@ export function SidebarIssueList({
   paramsError?: boolean;
   onRetry?: () => void;
   activeIssueId: string | null;
-  ownsActive?: (issue: Issue) => boolean;
+  openIssueId?: string | null;
+  ownsOpen?: (issue: Issue) => boolean;
   onCollapse: () => void;
 }) {
   const { t } = useT("layout");
@@ -243,17 +246,18 @@ export function SidebarIssueList({
   const total = params ? (query.data?.total ?? 0) : 0;
   // The list no longer carries a kept issue; the detail cache follows its
   // edits, and dropping it on delete ends the keep.
-  const { data: activeIssue } = useQuery({
-    ...issueDetailOptions(wsId, activeIssueId ?? ""),
+  const openId = activeIssueId ?? openIssueId;
+  const { data: openIssue } = useQuery({
+    ...issueDetailOptions(wsId, openId ?? ""),
     enabled: false,
   });
-  const kept = useKeptActiveItem(source, listed, activeIssueId, activeIssue);
+  const kept = useKeptActiveItem(source, listed, activeIssueId, openIssue);
   const issues =
-    activeIssue &&
-    activeIssue.id === activeIssueId &&
-    ownsActive?.(activeIssue) &&
-    !kept.some((issue) => issue.id === activeIssue.id)
-      ? [...kept, activeIssue]
+    openIssue &&
+    openIssue.id === openId &&
+    ownsOpen?.(openIssue) &&
+    !kept.some((issue) => issue.id === openIssue.id)
+      ? [...kept, openIssue]
       : kept;
   const locating = useSidebarTreeStore(
     (s) => !!activeIssueId && s.locate?.source === source && s.locate.issueId === activeIssueId,

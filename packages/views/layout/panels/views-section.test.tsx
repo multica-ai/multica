@@ -71,7 +71,7 @@ function renderSection(adapter = makeAdapter()) {
         wsId="ws-1"
         pathname="/acme/issues"
         plainRowsLit
-        issueLitInTree={false}
+        issueInAllIssues={false}
         activeIssueId={null}
         litSource={null}
         actions={actions as unknown as IssueViewActions}
