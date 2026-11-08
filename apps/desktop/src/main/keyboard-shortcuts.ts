@@ -22,8 +22,8 @@ export type ZoomTarget = Pick<WebContents, "getZoomLevel" | "setZoomLevel">;
 // per step). Clamp to a range that keeps the UI legible — values outside
 // this band turn the workspace into either confetti or a microfiche.
 const ZOOM_STEP = 0.5;
-const ZOOM_MIN = -3;
-const ZOOM_MAX = 4.5;
+export const ZOOM_MIN = -3;
+export const ZOOM_MAX = 4.5;
 
 /**
  * Window shortcut outcomes tell the caller whether to continue, preventDefault,

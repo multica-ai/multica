@@ -24,6 +24,7 @@ import { configureLinuxFileDialogs } from "./linux-file-dialog";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { handleAppShortcut } from "./keyboard-shortcuts";
+import { loadZoomLevel, saveZoomLevel, zoomLevelFilePath } from "./zoom-level";
 import { installNavigationGestures } from "./navigation-gestures";
 import { installNavigationGuard } from "./navigation-guard";
 import { createRendererWebPreferences } from "./renderer-web-preferences";
@@ -380,9 +381,27 @@ function installLocaleRefresh(window: BrowserWindow): void {
   });
 }
 
+// Zoom is shared by every window (Chromium zooms per origin); remember it
+// across launches. Loaded lazily because userData is final only once ready.
+let persistedZoomLevel: number | null = null;
+
+function zoomLevelFile(): string {
+  return zoomLevelFilePath(app.getPath("userData"));
+}
+
 function installWindowShortcutHandler(window: BrowserWindow): void {
+  persistedZoomLevel ??= loadZoomLevel(zoomLevelFile());
+  window.webContents.on("did-finish-load", () => {
+    if (persistedZoomLevel) window.webContents.setZoomLevel(persistedZoomLevel);
+  });
   window.webContents.on("before-input-event", (event, input) => {
+    const zoomBefore = window.webContents.getZoomLevel();
     const result = handleAppShortcut(input, window.webContents);
+    const zoomAfter = window.webContents.getZoomLevel();
+    if (zoomAfter !== zoomBefore) {
+      persistedZoomLevel = zoomAfter;
+      saveZoomLevel(zoomLevelFile(), zoomAfter);
+    }
     if (result === "close-tab") {
       event.preventDefault();
       window.webContents.send("tab:close-active");
