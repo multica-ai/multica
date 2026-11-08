@@ -604,6 +604,8 @@ function createIssueWindow(context: IssueWindowContext): void {
     minHeight: 520,
     title: context.title,
     titleBarStyle: "hiddenInset",
+    // Center the native controls in the issue page's 48px header, which is
+    // this window's title bar.
     trafficLightPosition: { x: 16, y: 17 },
     show: false,
     autoHideMenuBar: true,
