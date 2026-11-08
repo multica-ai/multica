@@ -210,6 +210,56 @@ assert_component_state() {
   )
 }
 
+# Launcher 100 owns listener 200; listener 999 is someone else's. The probe of
+# `/` fails `failed_probes` times before answering ("never" keeps failing), and
+# every clock read advances 10s so the 300s wait runs out without sleeping.
+assert_start_web() {
+  local case_name=$1 listener=$2 failed_probes=$3 expected_status=$4
+  local expected_output=$5 expected_events=$6
+  (
+    # shellcheck disable=SC1090
+    source "$root_dir/scripts/dev-env.sh"
+    STATE_DIR="$tmp_dir/start-web-$case_name"
+    mkdir -p "$STATE_DIR"
+    FRONTEND_PORT=13000
+    ENV_FILE=.env.example
+    local events="$STATE_DIR/events" probes="$STATE_DIR/probes" clock="$STATE_DIR/clock"
+    printf '%s' "$listener" > "$STATE_DIR/listener"
+    : > "$events"
+    TEST_FAILED_PROBES=$failed_probes
+
+    component_pid() { printf '100'; }
+    port_listener_pid() { cat "$STATE_DIR/listener"; }
+    process_group_id() { [ "$1" = 200 ] && printf '100' || printf '%s' "$1"; }
+    process_parent_id() { printf '1'; }
+    describe_port_owner() { printf 'pid %s' "$(port_listener_pid "$1")"; }
+    curl() {
+      local count
+      count=$(($(cat "$probes" 2>/dev/null || echo 0) + 1))
+      printf '%s' "$count" > "$probes"
+      [ "$TEST_FAILED_PROBES" != never ] && [ "$count" -gt "$TEST_FAILED_PROBES" ]
+    }
+    now_epoch() {
+      local now
+      now=$(($(cat "$clock" 2>/dev/null || echo 1000) + 10))
+      printf '%s' "$now" > "$clock"
+      printf '%s' "$now"
+    }
+    sleep() { :; }
+    kill() { printf 'kill %s\n' "$*" >> "$events"; }
+    stop_component() { printf 'stop %s\n' "$1" >> "$events"; : > "$STATE_DIR/listener"; }
+    launch_detached() { printf 'launch %s\n' "$1" >> "$events"; exit 0; }
+
+    local status=0
+    ( start_web ) > "$out" 2>&1 || status=$?
+    [ "$status" = "$expected_status" ] \
+      || { sed 's/^/  /' "$out" >&2; fail "$case_name start_web exited $status, want $expected_status"; }
+    require_contains "$out" "$expected_output"
+    [ "$(cat "$events")" = "$expected_events" ] \
+      || fail "$case_name events = $(cat "$events"), want $expected_events"
+  )
+}
+
 # ---------------------------------------------------------------------------
 # An empty registry is a normal state, not an error.
 # ---------------------------------------------------------------------------
@@ -338,6 +388,14 @@ assert_component_state web-running web 200 - 1 running "pid 200"
 assert_component_state web-busy web 200 - 0 busy "pid 200 is ours but not responding"
 assert_component_state web-foreign web 999 - 1 mismatch "listener pid 999 is not owned"
 assert_component_state web-foreign-silent web 999 - 0 mismatch "listener pid 999 is not owned"
+
+# `make up` waits for its own web server while Next compiles instead of calling
+# the port busy, restarts it only once the launch timeout runs out, and still
+# refuses a listener it does not own.
+assert_start_web compiling 200 3 0 "web already running on :13000 (pid 200)" ""
+assert_start_web hung 200 never 0 "did not answer within 300s; restarting it" $'stop web\nlaunch web'
+assert_start_web foreign 999 0 1 "Port 13000 is busy: pid 999" ""
+assert_start_web foreign-silent 999 never 1 "Port 13000 is busy: pid 999" ""
 
 # ---------------------------------------------------------------------------
 # Unknown names and components fail loudly instead of doing something else.
