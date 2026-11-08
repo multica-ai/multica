@@ -168,10 +168,6 @@ function RailSpaceLink({
 
 function SortableRailItem({ id, children }: { id: RailSpaceId; children: React.ReactNode }) {
   const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
-  const wasDragged = useRef(false);
-  useEffect(() => {
-    if (isDragging) wasDragged.current = true;
-  }, [isDragging]);
   return (
     <li
       ref={setNodeRef}
@@ -179,18 +175,6 @@ function SortableRailItem({ id, children }: { id: RailSpaceId; children: React.R
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn("relative rounded-xl", isDragging && "z-10 bg-app-shell shadow-[var(--menu-shadow)]")}
       {...listeners}
-      // A drop released off the item never clicks, so the flag cannot
-      // outlive the next press.
-      onPointerDownCapture={() => {
-        wasDragged.current = false;
-      }}
-      // The release that ends a drag must not also open the item.
-      onClickCapture={(event) => {
-        if (!wasDragged.current) return;
-        wasDragged.current = false;
-        event.preventDefault();
-        event.stopPropagation();
-      }}
     >
       {children}
     </li>
@@ -198,6 +182,37 @@ function SortableRailItem({ id, children }: { id: RailSpaceId; children: React.R
 }
 
 const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
+// dnd-kit keeps swallowing clicks for this long after a drag ends.
+const DRAG_CLICK_GUARD_MS = 50;
+
+function preventDefault(event: Event) {
+  event.preventDefault();
+}
+
+/**
+ * The release that ends a drag must not also open the space. Once a drag
+ * activates, dnd-kit stops that click's propagation at the document but
+ * leaves its default, so the link would still navigate natively. A window
+ * capture listener runs first and cancels it.
+ */
+function useDragClickGuard() {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const disarm = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    window.removeEventListener("click", preventDefault, true);
+  }, []);
+  useEffect(() => disarm, [disarm]);
+  return {
+    arm: useCallback(() => {
+      disarm();
+      window.addEventListener("click", preventDefault, true);
+    }, [disarm]),
+    release: useCallback(() => {
+      timer.current = setTimeout(disarm, DRAG_CLICK_GUARD_MS);
+    }, [disarm]),
+  };
+}
 
 /**
  * The app rail: workspaces, New issue and search, the five spaces in the
@@ -225,16 +240,18 @@ export function AppRail({
   const setOrder = useRailOrderStore((s) => s.setOrder);
   const order = useMemo(() => resolveRailOrder(savedOrder), [savedOrder]);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const { arm: armClickGuard, release: releaseClickGuard } = useDragClickGuard();
 
   const onDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
+      releaseClickGuard();
       if (!over || active.id === over.id) return;
       const from = order.indexOf(active.id as RailSpaceId);
       const to = order.indexOf(over.id as RailSpaceId);
       if (from === -1 || to === -1) return;
       setOrder(arrayMove(order, from, to));
     },
-    [order, setOrder],
+    [order, releaseClickGuard, setOrder],
   );
 
   const items: Record<RailSpaceId, { href: string; icon: IconComponent; label: string; fullLabel: string }> = {
@@ -293,7 +310,9 @@ export function AppRail({
         sensors={sensors}
         collisionDetection={closestCenter}
         modifiers={DRAG_MODIFIERS}
+        onDragStart={armClickGuard}
         onDragEnd={onDragEnd}
+        onDragCancel={releaseClickGuard}
       >
         <SortableContext items={order} strategy={verticalListSortingStrategy}>
           <ul className="flex flex-col items-center gap-0.5">

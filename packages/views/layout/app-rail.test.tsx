@@ -137,6 +137,22 @@ describe("AppRail order", () => {
     renderRail();
     expect(railOrder()).toEqual(order);
   });
+
+  // dnd-kit stops the release's click at the document without cancelling
+  // it, so the link would navigate natively even though React never sees it.
+  it("does not open the space released at the end of a drag", async () => {
+    renderRail();
+    const chat = link("/acme/chat")!;
+    const pointer = { isPrimary: true, button: 0, clientX: 30, clientY: 300 };
+    fireEvent.pointerDown(chat, pointer);
+    fireEvent.pointerMove(document, { ...pointer, clientY: 310 });
+    fireEvent.pointerUp(document, { ...pointer, clientY: 310 });
+
+    expect(fireEvent.click(chat)).toBe(false);
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(fireEvent.click(chat)).toBe(true);
+  });
 });
 
 describe("AppRail spaces", () => {

@@ -26,6 +26,17 @@ test("rail spaces reorder by drag and keep their order", async ({ page }) => {
 
   expect(await railOrder(page)).toEqual(["inbox", "work", "team", "chat", "autopilots"]);
 
+  // A drag that starts but moves nothing must not open Chat on release.
+  const chat = await page.locator("[data-slot='app-rail'] [data-rail-item='chat']").boundingBox();
+  if (!chat) throw new Error("rail item is not on screen");
+  await page.mouse.move(chat.x + chat.width / 2, chat.y + chat.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(chat.x + chat.width / 2, chat.y + chat.height / 2 + 10, { steps: 5 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  expect(await railOrder(page)).toEqual(["inbox", "work", "team", "chat", "autopilots"]);
+  await expect(page).toHaveURL(new RegExp(`/${slug}/issues`));
+
   // Dropping Chat on Inbox must not also open Chat.
   await dragOnto(page, "chat", "inbox");
   expect(await railOrder(page)).toEqual(["chat", "inbox", "work", "team", "autopilots"]);
