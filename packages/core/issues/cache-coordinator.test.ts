@@ -517,6 +517,49 @@ describe("applyIssueChange", () => {
     ).toBe("low");
   });
 
+  it("title change patches and rolls back both Inbox projections", () => {
+    const active = {
+      id: "inbox-active",
+      workspace_id: WS_ID,
+      recipient_type: "member" as const,
+      recipient_id: "me",
+      actor_type: "member" as const,
+      actor_id: "bob",
+      type: "new_comment" as const,
+      severity: "info" as const,
+      issue_id: "issue-1",
+      title: "Before rename",
+      issue_title: "Before rename",
+      body: null,
+      issue_status: "todo" as const,
+      read: false,
+      archived: false,
+      created_at: "2025-01-01T00:00:00Z",
+      details: null,
+    } satisfies InboxItem;
+    const archived = { ...active, id: "inbox-archived", archived: true } satisfies InboxItem;
+    qc.setQueryData<InboxItem[]>(inboxKeys.list(WS_ID), [active]);
+    qc.setQueryData<InboxItem[]>(inboxKeys.archived(WS_ID), [archived]);
+
+    const patch = { title: "After rename" };
+    const result = applyIssueChange(qc, WS_ID, "issue-1", patch, {
+      changed: issueChangedDims(patch, issue()),
+      baseIssue: issue(),
+    });
+
+    for (const key of [inboxKeys.list(WS_ID), inboxKeys.archived(WS_ID)]) {
+      const row = qc.getQueryData<InboxItem[]>(key)?.[0];
+      expect(row?.issue_title).toBe("After rename");
+      // The stored snapshot is left as the server wrote it.
+      expect(row?.title).toBe("Before rename");
+    }
+
+    rollbackIssueChange(qc, WS_ID, "issue-1", result);
+    for (const key of [inboxKeys.list(WS_ID), inboxKeys.archived(WS_ID)]) {
+      expect(qc.getQueryData<InboxItem[]>(key)?.[0]?.issue_title).toBe("Before rename");
+    }
+  });
+
   it("off-window leave: decrements the old status bucket total without a refetch", () => {
     // The card is beyond My-Assigned's loaded window; reassigning it to bob
     // means the list's todo total counted it and must lose one.

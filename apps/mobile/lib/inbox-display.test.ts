@@ -59,6 +59,13 @@ describe("deduplicateInboxItems", () => {
 });
 
 describe("getInboxDisplayTitle", () => {
+  it("shows the issue's current title once it has been renamed", () => {
+    expect(
+      getInboxDisplayTitle(item({ title: "Before rename", issue_title: "After rename" })),
+    ).toBe("After rename");
+    expect(getInboxDisplayTitle(item({ title: "Before rename" }))).toBe("Before rename");
+  });
+
   it("uses the same stable quota title as web instead of backend fallback copy", () => {
     expect(
       getInboxDisplayTitle(

@@ -149,6 +149,7 @@ func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) 
 		item := inboxToResponse(row.InboxItem)
 		item.Body = inboxListBody(row.InboxItem.Type, row.InboxItem.IssueID, row.InboxItem.Body)
 		item.IssueStatus, item.IssuePriority = textToPtr(row.IssueStatus), textToPtr(row.IssuePriority)
+		item.IssueTitle = textToPtr(row.IssueTitle)
 		if row.CommentID != "" {
 			var details map[string]json.RawMessage
 			if len(item.Details) == 0 || string(item.Details) == "null" {
