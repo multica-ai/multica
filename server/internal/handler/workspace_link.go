@@ -99,6 +99,9 @@ func validateWorkspaceLink(link *db.WorkspaceLink) error {
 	if link.OpenMode != "embed" && link.OpenMode != "new_tab" {
 		return fmt.Errorf("open_mode must be embed or new_tab")
 	}
+	if link.IsHome && link.OpenMode != "embed" {
+		return fmt.Errorf("is_home requires open_mode to be embed; clear is_home before opening in a new tab")
+	}
 	return validateLinkURL(link.UrlTemplate, link.ProjectID.Valid)
 }
 
@@ -110,6 +113,7 @@ type WorkspaceLinkResponse struct {
 	Icon            string  `json:"icon"`
 	URLTemplate     string  `json:"url_template"`
 	OpenMode        string  `json:"open_mode"`
+	IsHome          bool    `json:"is_home"`
 	AllowSameOrigin bool    `json:"allow_same_origin"`
 	Position        int32   `json:"position"`
 	CreatedBy       *string `json:"created_by"`
@@ -129,6 +133,7 @@ func workspaceLinkResponse(l db.WorkspaceLink) WorkspaceLinkResponse {
 		AllowSameOrigin: l.AllowSameOrigin,
 		Position:        l.Position,
 		CreatedBy:       uuidToPtr(l.CreatedBy),
+		IsHome:          l.IsHome,
 		CreatedAt:       timestampToString(l.CreatedAt),
 		UpdatedAt:       timestampToString(l.UpdatedAt),
 	}
@@ -207,6 +212,7 @@ func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		Icon            string `json:"icon"`
 		URLTemplate     string `json:"url_template"`
 		OpenMode        string `json:"open_mode"`
+		IsHome          bool   `json:"is_home"`
 		AllowSameOrigin bool   `json:"allow_same_origin"`
 		Position        int32  `json:"position"`
 	}
@@ -228,6 +234,7 @@ func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		Icon:            req.Icon,
 		UrlTemplate:     req.URLTemplate,
 		OpenMode:        req.OpenMode,
+		IsHome:          req.IsHome,
 		AllowSameOrigin: req.AllowSameOrigin,
 		Position:        req.Position,
 	}
@@ -270,6 +277,12 @@ func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if l.IsHome {
+		if err = q.ClearWorkspaceLinkHome(r.Context(), db.ClearWorkspaceLinkHomeParams{WorkspaceID: ws, ProjectID: project}); err != nil {
+			writeLinkDBError(w, err)
+			return
+		}
+	}
 	l, err = q.CreateWorkspaceLink(r.Context(), db.CreateWorkspaceLinkParams{
 		WorkspaceID:     ws,
 		ProjectID:       project,
@@ -280,6 +293,7 @@ func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		AllowSameOrigin: l.AllowSameOrigin,
 		Position:        l.Position,
 		CreatedBy:       creator,
+		IsHome:          l.IsHome,
 	})
 	if err != nil {
 		writeLinkDBError(w, err)
@@ -311,6 +325,22 @@ func (h *Handler) UpdateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+	// Scope locks precede link row locks, matching create and project deletion.
+	if _, err = qtx.LockWorkspaceForDelete(r.Context(), ws); err != nil {
+		writeLinkDBError(w, err)
+		return
+	}
+	scope, err := qtx.GetWorkspaceLink(r.Context(), db.GetWorkspaceLinkParams{ID: id, WorkspaceID: ws})
+	if err != nil {
+		writeLinkDBError(w, err)
+		return
+	}
+	if scope.ProjectID.Valid {
+		if _, err = qtx.LockProjectForChatSessionCreate(r.Context(), db.LockProjectForChatSessionCreateParams{ID: scope.ProjectID, WorkspaceID: ws}); err != nil {
+			writeLinkDBError(w, err)
+			return
+		}
+	}
 	l, err := qtx.GetWorkspaceLinkForUpdate(r.Context(), db.GetWorkspaceLinkForUpdateParams{
 		ID:          id,
 		WorkspaceID: ws,
@@ -324,6 +354,7 @@ func (h *Handler) UpdateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		Icon            *string `json:"icon"`
 		URLTemplate     *string `json:"url_template"`
 		OpenMode        *string `json:"open_mode"`
+		IsHome          *bool   `json:"is_home"`
 		AllowSameOrigin *bool   `json:"allow_same_origin"`
 		Position        *int32  `json:"position"`
 	}
@@ -333,6 +364,9 @@ func (h *Handler) UpdateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Name != nil {
 		l.Name = *req.Name
+	}
+	if req.IsHome != nil {
+		l.IsHome = *req.IsHome
 	}
 	if req.Icon != nil {
 		l.Icon = *req.Icon
@@ -353,8 +387,15 @@ func (h *Handler) UpdateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if l.IsHome {
+		if err = qtx.ClearWorkspaceLinkHome(r.Context(), db.ClearWorkspaceLinkHomeParams{WorkspaceID: ws, ProjectID: l.ProjectID}); err != nil {
+			writeLinkDBError(w, err)
+			return
+		}
+	}
 	l, err = qtx.UpdateWorkspaceLink(r.Context(), db.UpdateWorkspaceLinkParams{
 		ID:              id,
+		IsHome:          l.IsHome,
 		WorkspaceID:     ws,
 		Name:            l.Name,
 		Icon:            l.Icon,
