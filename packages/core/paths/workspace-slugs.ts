@@ -22,6 +22,7 @@ const workspaceRoutes = new Set([
   ...Object.values(WORKSPACE_PAGES).map((page) => page.segment),
   "members",
   "attachments",
+  "links",
 ]);
 
 function splitWorkspacePath(path: string): { slug: string; route?: string } | null {

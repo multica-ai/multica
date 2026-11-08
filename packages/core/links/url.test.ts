@@ -24,6 +24,13 @@ describe("link URLs", () => {
     "javascript:alert(1)",
     "data:text/html,x",
     "/docs",
+    "//host/x",
+    "https:\\host",
+    String.raw`https:\\host`,
+    "https://example.com/\tx",
+    "https://example.com/\nx",
+    "https://@host/",
+    "https://:443/",
     "https://example.com/{unknown}",
     "https://example.com/{project_id}",
     "https://{workspace_slug}.example.com",
@@ -35,5 +42,11 @@ describe("link URLs", () => {
   it("accepts allowed variables in path and query", () => {
     expect(validateLinkUrl("https://example.com/{workspace_slug}?ws={workspace_id}")).toBeNull();
     expect(validateLinkUrl("https://example.com/{project_id}", true)).toBeNull();
+  });
+
+  it("accepts encoded braces without treating them as template variables", () => {
+    const template = "https://example.com/%7Bworkspace_slug%7D";
+    expect(validateLinkUrl(template)).toBeNull();
+    expect(expandLinkUrl(template, { workspaceSlug: "acme", workspaceId: "workspace" })).toBe(template);
   });
 });
