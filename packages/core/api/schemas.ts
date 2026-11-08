@@ -803,24 +803,49 @@ export const EMPTY_ISSUE_PROPERTY: IssueProperty = {
 // Quick actions (MUL-5465). `visibility` and `status` stay z.string() rather
 // than z.enum: they are server-driven, and a newer server adding a value must
 // degrade to the UI's default branch, not blank the whole list.
-export const WorkspaceLinkSchema = z.object({
-  id: z.string(),
-  workspace_id: z.string(),
-  project_id: z.string().nullable().optional().default(null),
-  name: z.string(),
-  icon: z.string().optional().default(""),
-  url_template: z.string(),
-  open_mode: z.string().optional().default("new_tab"),
-  allow_same_origin: z.boolean().optional().default(false),
-  position: z.number().optional().default(0),
-}).loose().transform((link) => ({
-  id: link.id, workspaceId: link.workspace_id, projectId: link.project_id,
-  name: link.name, icon: link.icon, urlTemplate: link.url_template,
-  openMode: link.open_mode === "embed" ? "embed" as const : "new_tab" as const,
-  allowSameOrigin: link.allow_same_origin === true, position: link.position,
-}));
-export const WorkspaceLinksSchema = z.object({ links: z.array(WorkspaceLinkSchema).default([]) }).loose();
-export const EMPTY_WORKSPACE_LINK = { id: "", workspaceId: "", projectId: null, name: "", icon: "", urlTemplate: "", openMode: "new_tab" as const, allowSameOrigin: false, position: 0 };
+// Validate only what the client reads; unknown fields pass through so a newer
+// server cannot empty the header bar by adding a column.
+export const WorkspaceLinkSchema = z
+  .object({
+    id: z.string(),
+    workspace_id: z.string(),
+    project_id: z.string().nullable().optional().default(null),
+    name: z.string(),
+    icon: z.string().optional().default(""),
+    url_template: z.string(),
+    open_mode: z.string().optional().default("new_tab"),
+    allow_same_origin: z.boolean().optional().default(false),
+    position: z.number().optional().default(0),
+  })
+  .loose()
+  .transform((link) => ({
+    id: link.id,
+    workspaceId: link.workspace_id,
+    projectId: link.project_id,
+    name: link.name,
+    icon: link.icon,
+    urlTemplate: link.url_template,
+    // An unknown future mode degrades to opening a new tab, never to framing.
+    openMode: link.open_mode === "embed" ? ("embed" as const) : ("new_tab" as const),
+    allowSameOrigin: link.allow_same_origin === true,
+    position: link.position,
+  }));
+
+export const WorkspaceLinksSchema = z
+  .object({ links: z.array(WorkspaceLinkSchema).default([]) })
+  .loose();
+
+export const EMPTY_WORKSPACE_LINK = {
+  id: "",
+  workspaceId: "",
+  projectId: null,
+  name: "",
+  icon: "",
+  urlTemplate: "",
+  openMode: "new_tab" as const,
+  allowSameOrigin: false,
+  position: 0,
+};
 
 export const QuickActionSchema = z.object({
   id: z.string(),

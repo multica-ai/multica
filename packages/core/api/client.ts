@@ -4579,22 +4579,46 @@ export class ApiClient {
   }
 
   async listWorkspaceLinks(projectId?: string): Promise<WorkspaceLink[]> {
-    const raw = await this.fetch<unknown>(`/api/links${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`);
-    return parseWithFallback(raw, WorkspaceLinksSchema, { links: [] }, { endpoint: "GET /api/links" }).links;
+    const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
+    const raw = await this.fetch<unknown>(`/api/links${query}`);
+    return parseWithFallback(raw, WorkspaceLinksSchema, { links: [] }, {
+      endpoint: "GET /api/links",
+    }).links;
   }
 
   private workspaceLinkPayload(data: Partial<WorkspaceLinkInput>) {
-    return { project_id: data.projectId, name: data.name, icon: data.icon, url_template: data.urlTemplate, open_mode: data.openMode, allow_same_origin: data.allowSameOrigin, position: data.position };
+    return {
+      project_id: data.projectId,
+      name: data.name,
+      icon: data.icon,
+      url_template: data.urlTemplate,
+      open_mode: data.openMode,
+      allow_same_origin: data.allowSameOrigin,
+      position: data.position,
+    };
   }
 
   async createWorkspaceLink(data: WorkspaceLinkInput): Promise<WorkspaceLink> {
-    const raw = await this.fetch<unknown>("/api/links", { method: "POST", body: JSON.stringify(this.workspaceLinkPayload(data)) });
-    return parseWithFallback(raw, WorkspaceLinkSchema, EMPTY_WORKSPACE_LINK, { endpoint: "POST /api/links" });
+    const raw = await this.fetch<unknown>("/api/links", {
+      method: "POST",
+      body: JSON.stringify(this.workspaceLinkPayload(data)),
+    });
+    return parseWithFallback(raw, WorkspaceLinkSchema, EMPTY_WORKSPACE_LINK, {
+      endpoint: "POST /api/links",
+    });
   }
 
-  async updateWorkspaceLink(id: string, data: Partial<WorkspaceLinkInput>): Promise<WorkspaceLink> {
-    const raw = await this.fetch<unknown>(`/api/links/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(this.workspaceLinkPayload(data)) });
-    return parseWithFallback(raw, WorkspaceLinkSchema, EMPTY_WORKSPACE_LINK, { endpoint: "PATCH /api/links" });
+  async updateWorkspaceLink(
+    id: string,
+    data: Partial<WorkspaceLinkInput>,
+  ): Promise<WorkspaceLink> {
+    const raw = await this.fetch<unknown>(`/api/links/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(this.workspaceLinkPayload(data)),
+    });
+    return parseWithFallback(raw, WorkspaceLinkSchema, EMPTY_WORKSPACE_LINK, {
+      endpoint: "PATCH /api/links/{id}",
+    });
   }
 
   async deleteWorkspaceLink(id: string): Promise<void> {
