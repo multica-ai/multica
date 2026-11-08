@@ -2174,12 +2174,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Issue quick actions (definitions; running one lives under
 			// /api/issues/{id}/quick-actions/{quickActionId}/run)
-			r.Route("/api/links", func(r chi.Router) {
-				r.Get("/", h.ListWorkspaceLinks)
-				r.Post("/", h.CreateWorkspaceLink)
-				r.Patch("/{id}", h.UpdateWorkspaceLink)
-				r.Delete("/{id}", h.DeleteWorkspaceLink)
-			})
 			r.Route("/api/quick-actions", func(r chi.Router) {
 				r.Get("/", h.ListQuickActions)
 				r.Post("/", h.CreateQuickAction)
@@ -2187,6 +2181,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/", h.UpdateQuickAction)
 					r.Delete("/", h.DeleteQuickAction)
 				})
+			})
+
+			// Workspace and project quick links.
+			r.Route("/api/links", func(r chi.Router) {
+				r.Get("/", h.ListWorkspaceLinks)
+				r.Post("/", h.CreateWorkspaceLink)
+				r.Patch("/{id}", h.UpdateWorkspaceLink)
+				r.Delete("/{id}", h.DeleteWorkspaceLink)
 			})
 
 			// Custom issue properties (definitions; values live under /api/issues/{id}/properties)

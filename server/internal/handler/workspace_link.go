@@ -25,6 +25,10 @@ const linkEmojiBase = `[\x{00A9}\x{00AE}\x{203C}\x{2049}\x{2122}\x{2139}\x{2194}
 
 var linkEmojiRE = regexp.MustCompile(`^(?:[\x{1F1E6}-\x{1F1FF}]{2}|[0-9#*]\x{FE0F}?\x{20E3}|` + linkEmojiBase + `\x{FE0F}?[\x{1F3FB}-\x{1F3FF}]?(?:\x{200D}` + linkEmojiBase + `\x{FE0F}?[\x{1F3FB}-\x{1F3FF}]?)*(?:[\x{E0020}-\x{E007E}]+\x{E007F})?)$`)
 
+// validateLinkURL permits only absolute HTTPS destinations so quick links cannot
+// execute URL-scheme payloads or load insecure content inside the app. Variables
+// are limited to path/query values: substitution must never change the origin
+// that an admin reviewed, or introduce credentials or fragment-only behavior.
 func validateLinkURL(template string, project bool) error {
 	if len(template) > 2048 {
 		return fmt.Errorf("url_template must be at most 2048 characters")
@@ -72,6 +76,8 @@ func validateLinkURL(template string, project bool) error {
 	return nil
 }
 
+// validateWorkspaceLink bounds the header label and accepts only a fixed icon
+// key or one emoji sequence before applying the destination's template rules.
 func validateWorkspaceLink(link *db.WorkspaceLink) error {
 	link.Name = strings.TrimSpace(link.Name)
 	if n := utf8.RuneCountInString(link.Name); n < 1 || n > 40 {
@@ -106,15 +112,30 @@ type WorkspaceLinkResponse struct {
 }
 
 func workspaceLinkResponse(l db.WorkspaceLink) WorkspaceLinkResponse {
-	return WorkspaceLinkResponse{uuidToString(l.ID), uuidToString(l.WorkspaceID), uuidToPtr(l.ProjectID), l.Name, l.Icon, l.UrlTemplate, l.OpenMode, l.AllowSameOrigin, l.Position, uuidToPtr(l.CreatedBy), timestampToString(l.CreatedAt), timestampToString(l.UpdatedAt)}
-}
-func writeLinkDBError(w http.ResponseWriter, err error) {
-	if errors.Is(err, pgx.ErrNoRows) {
-		writeError(w, 404, "link or project not found")
-	} else {
-		writeError(w, 500, "failed to access links")
+	return WorkspaceLinkResponse{
+		ID:              uuidToString(l.ID),
+		WorkspaceID:     uuidToString(l.WorkspaceID),
+		ProjectID:       uuidToPtr(l.ProjectID),
+		Name:            l.Name,
+		Icon:            l.Icon,
+		URLTemplate:     l.UrlTemplate,
+		OpenMode:        l.OpenMode,
+		AllowSameOrigin: l.AllowSameOrigin,
+		Position:        l.Position,
+		CreatedBy:       uuidToPtr(l.CreatedBy),
+		CreatedAt:       timestampToString(l.CreatedAt),
+		UpdatedAt:       timestampToString(l.UpdatedAt),
 	}
 }
+
+func writeLinkDBError(w http.ResponseWriter, err error) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "link or project not found")
+	} else {
+		writeError(w, http.StatusInternalServerError, "failed to access links")
+	}
+}
+
 func (h *Handler) linkWorkspace(w http.ResponseWriter, r *http.Request, write bool) (pgtype.UUID, bool) {
 	ws := h.resolveWorkspaceID(r)
 	id, ok := parseUUIDOrBadRequest(w, ws, "workspace id")
@@ -128,6 +149,7 @@ func (h *Handler) linkWorkspace(w http.ResponseWriter, r *http.Request, write bo
 	}
 	return id, ok
 }
+
 func (h *Handler) linkProject(w http.ResponseWriter, r *http.Request, ws pgtype.UUID, raw string) (pgtype.UUID, bool) {
 	if raw == "" {
 		return pgtype.UUID{}, true
@@ -143,6 +165,9 @@ func (h *Handler) linkProject(w http.ResponseWriter, r *http.Request, ws pgtype.
 	}
 	return id, true
 }
+
+// ListWorkspaceLinks returns the workspace scope or the requested project's
+// scope. Any workspace member may read the catalog.
 func (h *Handler) ListWorkspaceLinks(w http.ResponseWriter, r *http.Request) {
 	ws, ok := h.linkWorkspace(w, r, false)
 	if !ok {
@@ -161,8 +186,10 @@ func (h *Handler) ListWorkspaceLinks(w http.ResponseWriter, r *http.Request) {
 	for _, l := range rows {
 		out = append(out, workspaceLinkResponse(l))
 	}
-	writeJSON(w, 200, map[string]any{"links": out})
+	writeJSON(w, http.StatusOK, map[string]any{"links": out})
 }
+
+// CreateWorkspaceLink creates an admin-configured link within the scope cap.
 func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 	ws, ok := h.linkWorkspace(w, r, true)
 	if !ok {
@@ -178,7 +205,7 @@ func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		Position        int32  `json:"position"`
 	}
 	if json.NewDecoder(r.Body).Decode(&req) != nil {
-		writeError(w, 400, "invalid request body")
+		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	project, ok := h.linkProject(w, r, ws, req.ProjectID)
@@ -188,9 +215,18 @@ func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 	if req.OpenMode == "" {
 		req.OpenMode = "embed"
 	}
-	l := db.WorkspaceLink{WorkspaceID: ws, ProjectID: project, Name: req.Name, Icon: req.Icon, UrlTemplate: req.URLTemplate, OpenMode: req.OpenMode, AllowSameOrigin: req.AllowSameOrigin, Position: req.Position}
+	l := db.WorkspaceLink{
+		WorkspaceID:     ws,
+		ProjectID:       project,
+		Name:            req.Name,
+		Icon:            req.Icon,
+		UrlTemplate:     req.URLTemplate,
+		OpenMode:        req.OpenMode,
+		AllowSameOrigin: req.AllowSameOrigin,
+		Position:        req.Position,
+	}
 	if err := validateWorkspaceLink(&l); err != nil {
-		writeError(w, 400, err.Error())
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// Serialize the count and insertion per workspace so the scope cap is exact.
@@ -217,7 +253,7 @@ func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if count >= maxLinksPerScope {
-		writeError(w, 400, fmt.Sprintf("a scope can have at most %d links", maxLinksPerScope))
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("a scope can have at most %d links", maxLinksPerScope))
 		return
 	}
 	user, ok := requireUserID(w, r)
@@ -228,7 +264,17 @@ func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	l, err = q.CreateWorkspaceLink(r.Context(), db.CreateWorkspaceLinkParams{WorkspaceID: ws, ProjectID: project, Name: l.Name, Icon: l.Icon, UrlTemplate: l.UrlTemplate, OpenMode: l.OpenMode, AllowSameOrigin: l.AllowSameOrigin, Position: l.Position, CreatedBy: creator})
+	l, err = q.CreateWorkspaceLink(r.Context(), db.CreateWorkspaceLinkParams{
+		WorkspaceID:     ws,
+		ProjectID:       project,
+		Name:            l.Name,
+		Icon:            l.Icon,
+		UrlTemplate:     l.UrlTemplate,
+		OpenMode:        l.OpenMode,
+		AllowSameOrigin: l.AllowSameOrigin,
+		Position:        l.Position,
+		CreatedBy:       creator,
+	})
 	if err != nil {
 		writeLinkDBError(w, err)
 		return
@@ -237,8 +283,10 @@ func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		writeLinkDBError(w, err)
 		return
 	}
-	writeJSON(w, 201, workspaceLinkResponse(l))
+	writeJSON(w, http.StatusCreated, workspaceLinkResponse(l))
 }
+
+// UpdateWorkspaceLink applies an admin's edits to an existing scoped link.
 func (h *Handler) UpdateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 	ws, ok := h.linkWorkspace(w, r, true)
 	if !ok {
@@ -262,7 +310,7 @@ func (h *Handler) UpdateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		Position        *int32  `json:"position"`
 	}
 	if json.NewDecoder(r.Body).Decode(&req) != nil {
-		writeError(w, 400, "invalid request body")
+		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if req.Name != nil {
@@ -284,16 +332,27 @@ func (h *Handler) UpdateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		l.Position = *req.Position
 	}
 	if err = validateWorkspaceLink(&l); err != nil {
-		writeError(w, 400, err.Error())
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	l, err = h.Queries.UpdateWorkspaceLink(r.Context(), db.UpdateWorkspaceLinkParams{ID: id, WorkspaceID: ws, Name: l.Name, Icon: l.Icon, UrlTemplate: l.UrlTemplate, OpenMode: l.OpenMode, AllowSameOrigin: l.AllowSameOrigin, Position: l.Position})
+	l, err = h.Queries.UpdateWorkspaceLink(r.Context(), db.UpdateWorkspaceLinkParams{
+		ID:              id,
+		WorkspaceID:     ws,
+		Name:            l.Name,
+		Icon:            l.Icon,
+		UrlTemplate:     l.UrlTemplate,
+		OpenMode:        l.OpenMode,
+		AllowSameOrigin: l.AllowSameOrigin,
+		Position:        l.Position,
+	})
 	if err != nil {
 		writeLinkDBError(w, err)
 		return
 	}
-	writeJSON(w, 200, workspaceLinkResponse(l))
+	writeJSON(w, http.StatusOK, workspaceLinkResponse(l))
 }
+
+// DeleteWorkspaceLink removes a link after checking workspace admin access.
 func (h *Handler) DeleteWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 	ws, ok := h.linkWorkspace(w, r, true)
 	if !ok {
@@ -308,5 +367,5 @@ func (h *Handler) DeleteWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		writeLinkDBError(w, err)
 		return
 	}
-	w.WriteHeader(204)
+	w.WriteHeader(http.StatusNoContent)
 }

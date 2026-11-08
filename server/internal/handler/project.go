@@ -689,7 +689,7 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := qtx.DeleteProjectWorkspaceLinks(r.Context(), db.DeleteProjectWorkspaceLinksParams{
 		WorkspaceID: project.WorkspaceID,
-		ProjectID: project.ID,
+		ProjectID:   project.ID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete project links")
 		return

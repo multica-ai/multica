@@ -1,8 +1,30 @@
-export const LINK_ICON_KEYS = ["globe", "link", "book-open", "chart-bar", "code", "terminal", "folder", "file-text", "database", "server", "rocket", "shield"] as const;
-export interface LinkContext { workspaceSlug: string; workspaceId: string; projectId?: string }
+export const LINK_ICON_KEYS = [
+  "globe",
+  "link",
+  "book-open",
+  "chart-bar",
+  "code",
+  "terminal",
+  "folder",
+  "file-text",
+  "database",
+  "server",
+  "rocket",
+  "shield",
+] as const;
+
+export interface LinkContext {
+  workspaceSlug: string;
+  workspaceId: string;
+  projectId?: string;
+}
 
 export function expandLinkUrl(template: string, context: LinkContext): string {
-  const values: Record<string, string | undefined> = { workspace_slug: context.workspaceSlug, workspace_id: context.workspaceId, project_id: context.projectId };
+  const values: Record<string, string | undefined> = {
+    workspace_slug: context.workspaceSlug,
+    workspace_id: context.workspaceId,
+    project_id: context.projectId,
+  };
   return template.replace(/\{([^{}]*)\}/g, (token, key: string) => {
     const value = values[key];
     if (value === undefined) throw new Error(`Unresolved variable ${token}`);
@@ -11,6 +33,7 @@ export function expandLinkUrl(template: string, context: LinkContext): string {
 }
 
 export type LinkUrlError = "length" | "variable" | "project" | "location" | "https" | "userinfo" | null;
+
 export function validateLinkUrl(template: string, project = false): LinkUrlError {
   if (new TextEncoder().encode(template).length > 2048) return "length";
   for (const match of template.matchAll(/\{([^{}]*)\}/g)) {
@@ -26,5 +49,7 @@ export function validateLinkUrl(template: string, project = false): LinkUrlError
     const authority = template.match(/^.*?:\/\/[^/?#]*/)?.[0] ?? "";
     if (/[{}]/.test(authority) || /[{}]/.test(template.split("#").slice(1).join("#"))) return "location";
     return null;
-  } catch { return "https"; }
+  } catch {
+    return "https";
+  }
 }
