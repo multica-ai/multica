@@ -95,7 +95,7 @@ function RailBadgeMark({ badge }: { badge: RailBadge }) {
       <span
         aria-hidden
         className={cn(
-          "absolute top-1.5 right-3.5 size-2 rounded-full bg-warning",
+          "absolute top-1 right-3 size-2 rounded-full bg-warning",
           ring,
         )}
       />
@@ -106,7 +106,7 @@ function RailBadgeMark({ badge }: { badge: RailBadge }) {
       value={badge.value}
       animated={false}
       className={cn(
-        "absolute top-0.5 right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-medium tabular-nums",
+        "absolute top-0 right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-medium tabular-nums",
         ring,
         badge.tone === "brand" ? "bg-brand text-brand-foreground" : "bg-foreground text-background",
       )}
@@ -156,10 +156,10 @@ function RailSpaceLink({
         draggable={false}
         aria-current={active ? "page" : undefined}
         {...peekHandlers}
-        className="group relative flex h-[52px] w-[52px] flex-col items-center justify-center gap-1 rounded-xl text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground"
+        className="group relative flex size-12 flex-col items-center justify-center gap-1 rounded-xl text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground"
       >
         <Icon className="size-5" />
-        <span className="max-w-full truncate px-1 text-micro leading-[14px]">{label}</span>
+        <span className="max-w-full truncate px-0.5 text-micro leading-[14px]">{label}</span>
         {badge && <RailBadgeMark badge={badge} />}
       </AppLink>
     </TooltipHint>
@@ -292,7 +292,7 @@ export function AppRail({
       aria-label={t(($) => $.rail.label)}
       data-slot="app-rail"
       className={cn(
-        "flex h-full w-16 shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden pt-3 pb-2.5 [scrollbar-width:none]",
+        "flex h-full w-14 shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden pt-3 pb-2.5 [scrollbar-width:none]",
         className,
       )}
     >
