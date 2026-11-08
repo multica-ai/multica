@@ -152,6 +152,8 @@
     "log_waiting_connection": "正在等待网络连接…",
     "no_log": "此运行没有执行日志。",
     "retry": "重试",
+    "stop": "停止运行",
+    "stop_failed": "无法停止运行。",
     "skipped_group": {
       "label": "已跳过",
       "summary": "{{count}} 条跳过的运行"

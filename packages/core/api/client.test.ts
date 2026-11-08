@@ -1674,6 +1674,26 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("attachment dimensions", () => {
+    it.each([
+      [{ width: 3200, height: 2000 }, [3200, 2000]],
+      [{ width: "wide", height: -1 }, [undefined, undefined]],
+      [{ width: null, height: 0.5 }, [undefined, undefined]],
+      [{}, [undefined, undefined]],
+    ])("preserves the attachment with optional metadata %j", async (metadata, expected) => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          id: "att-1", filename: "shot.png", url: "/uploads/shot.png",
+          download_url: "/uploads/shot.png", ...metadata,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )));
+      const att = await new ApiClient("https://api.example.test").getAttachment("att-1");
+      expect(att.id).toBe("att-1");
+      expect([att.width, att.height]).toEqual(expected);
+    });
+  });
+
   describe("getAttachmentTextContent", () => {
     it("returns body text and the original content type from the X-* header", async () => {
       vi.stubGlobal(

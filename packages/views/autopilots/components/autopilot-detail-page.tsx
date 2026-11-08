@@ -4,7 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import {
   Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil,
   Ban, ChevronDown, ChevronRight, MoreHorizontal, Link2, ArrowUpRight, FilePlus2,
-  Webhook, RotateCw, Server, FileQuestion, FileText, ScrollText,
+  Webhook, RotateCw, Server, FileQuestion, FileText, ScrollText, Square,
 } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions } from "@multica/core/autopilots/queries";
@@ -136,7 +136,46 @@ const RUN_VISUAL: Record<RunStatus, { color: string; icon: typeof CheckCircle2; 
   failed: { color: "text-destructive", icon: XCircle },
 };
 
-function RunRow({ run }: { run: AutopilotRun }) {
+// Stops a run_only run by cancelling its task. The server then fails the run
+// and broadcasts autopilot:run_done, which refetches this list, so the row
+// needs no local status patch.
+function StopRunButton({ taskId }: { taskId: string }) {
+  const { t } = useT("autopilots");
+  const [stopping, setStopping] = useState(false);
+
+  const stop = async () => {
+    if (stopping) return;
+    setStopping(true);
+    try {
+      await api.cancelTaskById(taskId);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.run.stop_failed));
+      setStopping(false);
+    }
+  };
+
+  return (
+    <IconButton
+      size="icon-sm"
+      variant="ghost"
+      className="shrink-0 text-muted-foreground hover:text-destructive"
+      onClick={stop}
+      disabled={stopping}
+      aria-busy={stopping}
+      label={t(($) => $.run.stop)}
+    >
+      {stopping ? <Loader2 className="size-3.5 animate-spin" /> : <Square className="size-3 fill-current" />}
+    </IconButton>
+  );
+}
+
+function RunRow({
+  run,
+  canStop = false,
+}: {
+  run: AutopilotRun;
+  canStop?: boolean;
+}) {
   const { t, i18n } = useT("autopilots");
   const wsPaths = useWorkspacePaths();
   const navigation = useNavigation();
@@ -192,6 +231,9 @@ function RunRow({ run }: { run: AutopilotRun }) {
           </IconButton>
         </>
       )}
+      {canStop && run.task_id && !run.issue_id && run.status === "running" && (
+        <StopRunButton taskId={run.task_id} />
+      )}
     </>
   );
 
@@ -210,8 +252,10 @@ function RunRow({ run }: { run: AutopilotRun }) {
 
 function RunHistoryList({
   runs,
+  canStop,
 }: {
   runs: AutopilotRun[];
+  canStop: boolean;
 }) {
   const visibleRuns = runs.filter((run) => run.status !== "skipped");
   const skippedRuns = runs.filter((run) => run.status === "skipped");
@@ -219,7 +263,7 @@ function RunHistoryList({
   return (
     <ObjectSectionCard>
       {visibleRuns.map((run) => (
-        <RunRow key={run.id} run={run} />
+        <RunRow key={run.id} run={run} canStop={canStop} />
       ))}
       {skippedRuns.length > 0 && (
         <SkippedRunsGroup runs={skippedRuns} />
@@ -1193,7 +1237,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           ) : runs.length === 0 ? (
             <ObjectSectionEmpty icon={Play} description={t(($) => $.detail.no_runs)} />
           ) : (
-            <RunHistoryList runs={runs} />
+            <RunHistoryList runs={runs} canStop={canWrite} />
           )}
         </ObjectSection>
       </div>

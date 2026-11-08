@@ -152,6 +152,8 @@
     "log_waiting_connection": "正在等待網路連線…",
     "no_log": "此執行沒有日誌。",
     "retry": "重試",
+    "stop": "停止執行",
+    "stop_failed": "無法停止執行。",
     "skipped_group": {
       "label": "已跳過",
       "summary": "{{count}} 條跳過的執行"

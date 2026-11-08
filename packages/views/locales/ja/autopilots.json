@@ -152,6 +152,8 @@
     "log_waiting_connection": "接続を待機中…",
     "no_log": "この実行にはログがありません。",
     "retry": "再試行",
+    "stop": "実行を停止",
+    "stop_failed": "実行を停止できませんでした。",
     "skipped_group": {
       "label": "スキップ済み",
       "summary": "スキップされた実行 {{count}} 件"

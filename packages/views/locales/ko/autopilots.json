@@ -152,6 +152,8 @@
     "log_waiting_connection": "연결을 기다리는 중…",
     "no_log": "이 실행에는 로그가 없습니다.",
     "retry": "다시 시도",
+    "stop": "실행 중지",
+    "stop_failed": "실행을 중지하지 못했습니다.",
     "skipped_group": {
       "label": "건너뜀",
       "summary": "건너뛴 실행 {{count}}개"

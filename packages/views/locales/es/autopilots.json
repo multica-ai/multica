@@ -152,6 +152,8 @@
     "log_waiting_connection": "Esperando conexión…",
     "no_log": "Esta ejecución no tiene registro.",
     "retry": "Reintentar",
+    "stop": "Detener ejecución",
+    "stop_failed": "No se ha podido detener la ejecución.",
     "skipped_group": {
       "label": "Omitidas",
       "summary": "{{count}} ejecuciones omitidas"

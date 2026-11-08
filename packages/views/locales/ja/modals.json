@@ -271,5 +271,13 @@
     "toast_failed": "重複としてマークできませんでした",
     "error_target_is_duplicate": "{{identifier}} 自体が重複です。元のタスクを選択してください",
     "error_has_duplicates": "他のタスクがこのタスクの重複としてマークされています。先にそのマークを解除してください"
+  },
+  "copy_parent_fields": {
+    "trigger": "親タスクのフィールドをコピー",
+    "title": "親タスクのフィールドをコピー",
+    "description": "{{identifier}} から選択した値を一度だけ上書きします。以降の変更は同期されません。",
+    "apply": "{{count}} 項目をコピー",
+    "no_labels": "ラベルなし",
+    "manual_only": "ラベル、開始日、カスタムプロパティは手動作成にのみ適用されます。"
   }
 }

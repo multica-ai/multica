@@ -57,6 +57,12 @@ catalogs:
     katex:
       specifier: ^0.16.45
       version: 0.16.45
+    mdast-util-from-markdown:
+      specifier: ^2.0.3
+      version: 2.0.3
+    micromark-util-sanitize-uri:
+      specifier: ^2.0.1
+      version: 2.0.1
     mermaid:
       specifier: ^11.14.0
       version: 11.14.0
@@ -463,6 +469,12 @@ importers:
       marked:
         specifier: ^18.0.3
         version: 18.0.3
+      mdast-util-from-markdown:
+        specifier: 2.0.3
+        version: 2.0.3
+      micromark-util-sanitize-uri:
+        specifier: 2.0.1
+        version: 2.0.1
       nativewind:
         specifier: ^4.1.23
         version: 4.2.4(react-native-reanimated@4.5.1(react-native-worklets@0.10.1(@babel/core@7.29.0)(@react-native/metro-config@0.86.3(@babel/core@7.29.0))(react-native@0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.86.3(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.86.3(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native-safe-area-context@5.7.0(react-native@0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.86.3(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native-svg@15.15.4(react-native@0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.86.3(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.0)(@react-native/metro-config@0.86.3(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)(tailwindcss@3.4.19(yaml@2.9.1))
@@ -651,6 +663,12 @@ importers:
       i18next:
         specifier: 'catalog:'
         version: 26.0.8(@typescript/typescript6@6.0.2)
+      mdast-util-from-markdown:
+        specifier: 'catalog:'
+        version: 2.0.3
+      micromark-util-sanitize-uri:
+        specifier: 'catalog:'
+        version: 2.0.1
       posthog-js:
         specifier: 'catalog:'
         version: 1.369.3

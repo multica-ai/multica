@@ -152,6 +152,8 @@
     "log_waiting_connection": "Waiting for connection…",
     "no_log": "This run has no execution log.",
     "retry": "Try again",
+    "stop": "Stop run",
+    "stop_failed": "Could not stop the run.",
     "skipped_group": {
       "label": "Skipped",
       "summary": "{{count}} skipped runs"

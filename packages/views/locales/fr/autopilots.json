@@ -152,6 +152,8 @@
     "log_waiting_connection": "En attente de connexion…",
     "no_log": "Cette exécution n’a pas de journal.",
     "retry": "Réessayer",
+    "stop": "Arrêter l'exécution",
+    "stop_failed": "Impossible d'arrêter l'exécution.",
     "skipped_group": {
       "label": "Ignorées",
       "summary": "{{count}} exécutions ignorées"

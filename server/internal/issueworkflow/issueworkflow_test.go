@@ -2,6 +2,7 @@ package issueworkflow
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -283,6 +284,58 @@ func TestBriefNamesStepCommandsAndHandlers(t *testing.T) {
 	} {
 		if !strings.Contains(brief, want) {
 			t.Fatalf("brief is missing %q:\n%s", want, brief)
+		}
+	}
+}
+
+func TestBriefForMovedStep(t *testing.T) {
+	for _, current := range []string{"implement", "todo"} {
+		for _, observer := range []bool{false, true} {
+			for _, legacy := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/observer=%v/legacy=%v", current, observer, legacy), func(t *testing.T) {
+					in := BriefInput{
+						Workflow: devDefinition(), StatusKey: current, BoundStep: "waiting_for_merge",
+						IssueIdentifier: "MUL-7", Observer: observer, LegacyRuntimeRules: legacy,
+						MovedBy: "Lin\n\tLee\x01", StatusName: func(key string) string { return testCatalog()[key].Name },
+					}
+					brief := Brief(in)
+					for _, want := range []string{
+						`bound to "waiting_for_merge"`, statusLabel(testCatalog()[current].Name, current),
+						"last moved by Lin Lee", "Do not change", "overrides the status rules", "member",
+						"Statuses in this workflow:", "   ← current",
+					} {
+						if !strings.Contains(brief, want) {
+							t.Errorf("brief missing %q:\n%s", want, brief)
+						}
+					}
+					for _, leak := range []string{
+						"Implement it.", "Step instructions:", "You are handling", "Your moves:", "multica issue status",
+						"Needs changes", "Can't proceed", "unless you are explicitly asked", "Before your run ends, either run",
+						"Lin\n", "\x01",
+					} {
+						if strings.Contains(brief, leak) {
+							t.Errorf("stale run received %q:\n%s", leak, brief)
+						}
+					}
+					in.MovedBy = ""
+					if unknown := Brief(in); !strings.Contains(unknown, "last moved by someone else") {
+						t.Fatalf("missing mover must not prevent a mismatch brief:\n%s", unknown)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestBriefMatchingBindingKeepsNormalInstructions(t *testing.T) {
+	for _, observer := range []bool{false, true} {
+		for _, legacy := range []bool{false, true} {
+			in := BriefInput{Workflow: devDefinition(), StatusKey: "implement", IssueIdentifier: "MUL-7", Observer: observer, LegacyRuntimeRules: legacy}
+			unbound := Brief(in)
+			in.BoundStep, in.MovedBy = in.StatusKey, "Lin"
+			if got := Brief(in); got != unbound {
+				t.Errorf("observer=%v/legacy=%v: matching binding changed the normal brief:\n%s", observer, legacy, got)
+			}
 		}
 	}
 }
