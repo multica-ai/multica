@@ -111,6 +111,7 @@
     "./properties/queries": "./properties/queries.ts",
     "./properties/mutations": "./properties/mutations.ts",
     "./quick-actions": "./quick-actions/index.ts",
+    "./links": "./links/index.ts",
     "./quick-actions/queries": "./quick-actions/queries.ts",
     "./quick-actions/mutations": "./quick-actions/mutations.ts",
     "./autopilots": "./autopilots/index.ts",
