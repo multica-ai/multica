@@ -990,7 +990,10 @@ var thinkingDynamicCatalogProviders = map[string]bool{
 	"grok":     true,
 	"opencode": true,
 	"kimi":     true,
-	"zcode":    true,
+	// Kiro's model command options advertise per-model effortLevels. Its
+	// native effort command applies the override to fresh and loaded sessions.
+	"kiro":  true,
+	"zcode": true,
 }
 
 // acpCatalogThinkingProviders are the ACP runtimes that discover their effort

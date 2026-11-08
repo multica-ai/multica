@@ -748,6 +748,12 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"kimi", "future-level", true}, // exact support is checked against the daemon catalog
 		{"kimi", ".hidden", false},
 		{"kimi", "bad value", false},
+		{"kiro", "", true},
+		{"kiro", "none", true},
+		{"kiro", "max", true},
+		{"kiro", "future-level", true},
+		{"kiro", ".hidden", false},
+		{"kiro", "bad value", false},
 		{"hermes", "", true},
 		// jcode runs under this provider and applies an advertised effort;
 		// Hermes Agent advertises none. The per-session catalog decides, so the
@@ -791,6 +797,7 @@ func TestThinkingControlSupported(t *testing.T) {
 		{"omp", true},      // pi backend identity; per-model subset from `omp models --json`
 		{"hermes", true},   // jcode applies it; Hermes Agent gets an empty catalog
 		{"kimi", true},     // dynamic catalog; ACP session/set_config_option applies it
+		{"kiro", true},     // native model options and session effort command
 		{"qwenpaw", false},
 		{"", false},
 		{"not-a-runtime", false},
@@ -809,7 +816,7 @@ func TestThinkingControlSupported(t *testing.T) {
 // reject a level while claiming the runtime supports one, or vice versa.
 func TestThinkingControlSupportedMatchesTokenGate(t *testing.T) {
 	t.Parallel()
-	providers := []string{"claude", "codebuddy", "grok", "codex", "opencode", "pi", "omp", "hermes", "kimi", "cursor"}
+	providers := []string{"claude", "codebuddy", "grok", "codex", "opencode", "pi", "omp", "hermes", "kimi", "kiro", "cursor"}
 	// "medium" is in every fixed enum and is a well-formed dynamic token, so a
 	// provider with any reasoning control accepts it.
 	for _, provider := range providers {

@@ -1,5 +1,6 @@
 {
   "page": {
+    "search": "搜尋 skill",
     "title": "Skills",
     "new_skill": "新建 skill",
     "scopes": {
@@ -20,21 +21,12 @@
         "description": "你建立的 skill"
       }
     },
-    "empty": {
-      "title": "還沒有 skill",
-      "description": "skill 是 AI 代理可重複使用的做事方法。建立一個，或從執行時匯入。"
-    },
     "no_matches": {
       "title": "無匹配",
       "with_query": "沒有 skill 匹配 \"{{query}}\"{{filterSuffix}}。",
       "with_query_filter_suffix": "（在當前篩選下）",
       "filter_only": "當前篩選下沒有匹配的 skill。",
       "try_different": " 換個關鍵詞試試。"
-    },
-    "intro_banner": {
-      "title": "在工作區內共享。",
-      "body": "任何成員都可以建立 skill、從 URL 或本地資料夾匯入、或從本地執行時複製——之後所有 AI 代理都能用它。",
-      "highlight": "本地執行時裡的 skill 在你複製過來之前是私有的。"
     },
     "list_error": {
       "title": "無法載入 skill",
@@ -135,6 +127,8 @@
     },
     "toast_saved": "已儲存 skill",
     "toast_save_failed": "儲存 skill 失敗",
+    "toast_saved_version": "已儲存為 v{{version}}",
+    "toast_view_history": "查看歷史",
     "toast_deleted": "已刪除 skill",
     "toast_delete_failed": "刪除 skill 失敗",
     "refresh": {
@@ -201,20 +195,51 @@
       "mode_edit": "編輯",
       "mode_raw": "純文字"
     },
+    "versions": {
+      "list_aria": "skill 版本",
+      "version_label": "v{{version}}",
+      "current": "目前",
+      "unknown_author": "未知",
+      "empty": "還沒有版本。這個 skill 下次被修改時，會先把目前內容記錄為第一個版本。",
+      "load_failed": "版本載入失敗。",
+      "restore": "還原",
+      "toast_restored": "已還原 v{{version}}",
+      "toast_restore_failed": "版本還原失敗",
+      "source": {
+        "baseline": "早期內容",
+        "create": "建立",
+        "update": "編輯",
+        "import": "匯入",
+        "refresh": "從來源更新",
+        "restore": "還原自 v{{version}}"
+      },
+      "dialog": {
+        "title": "還原到 v{{version}}？",
+        "description": "v{{version}} 的內容會成為一個新版本，智慧體從下一次執行起使用它。較新的版本仍保留在歷史中。",
+        "unsaved_warning": "未儲存的修改會被捨棄。",
+        "cancel": "取消",
+        "confirm": "還原",
+        "restoring": "還原中..."
+      }
+    },
     "sections": {
       "content": "內容",
       "files": "檔案",
       "edit": "編輯",
       "open": "開啟",
-      "add": "新增"
+      "add": "新增",
+      "history": "歷史"
     },
     "menu": {
       "copy_link": "複製連結",
       "link_copied": "已複製連結",
-      "delete": "刪除 skill"
+      "delete": "刪除 skill",
+      "version_history": "版本歷史"
     },
     "panel": {
-      "add_description": "新增描述"
+      "add_description": "新增描述",
+      "version": "版本",
+      "no_versions": "暫無版本"
     }
   },
   "create": {
@@ -356,5 +381,34 @@
     "markdown_placeholder": "輸入 Markdown 內容...",
     "raw_placeholder": "檔案內容...",
     "raw_aria": "{{path}} 的純文字內容"
+  },
+  "intro": {
+    "title": "把團隊的做事方法寫成 skill",
+    "description": "Skill 是一份可重複使用的做事說明（SKILL.md）。在工作區裡新增一次，分配給哪個 AI 代理，它就會照著做。",
+    "slides": {
+      "methods": {
+        "title": "四種方式新增",
+        "description": "從空白的 SKILL.md 寫起，或從本地資料夾、URL、執行時匯入已有的 skill。"
+      },
+      "assign": {
+        "title": "分配給 AI 代理",
+        "description": "一個 skill 可以給多個 AI 代理使用。改一處，所有用到它的 AI 代理都會更新。"
+      },
+      "share": {
+        "title": "在工作區內共享",
+        "description": "本地執行時裡的 skill 在你複製過來之前是私有的，複製後所有 AI 代理都能使用。"
+      }
+    },
+    "art": {
+      "skill_summary": "先跑測試，再看無障礙和效能。",
+      "add_to_agent": "分配給 AI 代理",
+      "local_skills": "本地 skill",
+      "private": "私有",
+      "workspace_shared": "工作區",
+      "all_agents": "所有 AI 代理可用",
+      "role_reviewer": "審查者",
+      "role_fullstack": "全端",
+      "copy_to_workspace": "複製到工作區"
+    }
   }
 }

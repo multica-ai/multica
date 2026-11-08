@@ -63,10 +63,14 @@ interface SidebarTreeState {
   projectsCollapsed: boolean;
   viewsCollapsed: boolean;
   pinnedCollapsed: boolean;
+  workingCollapsed: boolean;
+  needsAttentionCollapsed: boolean;
   setExpanded: (key: string, expanded: boolean) => void;
   setProjectsCollapsed: (collapsed: boolean) => void;
   setViewsCollapsed: (collapsed: boolean) => void;
   setPinnedCollapsed: (collapsed: boolean) => void;
+  setWorkingCollapsed: (collapsed: boolean) => void;
+  setNeedsAttentionCollapsed: (collapsed: boolean) => void;
 }
 
 type PersistedSidebarTree = Pick<
@@ -78,6 +82,8 @@ type PersistedSidebarTree = Pick<
   | "projectsCollapsed"
   | "viewsCollapsed"
   | "pinnedCollapsed"
+  | "workingCollapsed"
+  | "needsAttentionCollapsed"
 >;
 
 const INITIAL: PersistedSidebarTree = {
@@ -88,6 +94,8 @@ const INITIAL: PersistedSidebarTree = {
   projectsCollapsed: false,
   viewsCollapsed: false,
   pinnedCollapsed: false,
+  workingCollapsed: false,
+  needsAttentionCollapsed: false,
 };
 
 export const useSidebarTreeStore = create<SidebarTreeState>()(
@@ -102,6 +110,8 @@ export const useSidebarTreeStore = create<SidebarTreeState>()(
       setProjectsCollapsed: (collapsed) => set({ projectsCollapsed: collapsed }),
       setViewsCollapsed: (collapsed) => set({ viewsCollapsed: collapsed }),
       setPinnedCollapsed: (collapsed) => set({ pinnedCollapsed: collapsed }),
+      setWorkingCollapsed: (collapsed) => set({ workingCollapsed: collapsed }),
+      setNeedsAttentionCollapsed: (collapsed) => set({ needsAttentionCollapsed: collapsed }),
     }),
     {
       name: "multica_sidebar_tree",
@@ -114,6 +124,8 @@ export const useSidebarTreeStore = create<SidebarTreeState>()(
         projectsCollapsed: state.projectsCollapsed,
         viewsCollapsed: state.viewsCollapsed,
         pinnedCollapsed: state.pinnedCollapsed,
+        workingCollapsed: state.workingCollapsed,
+        needsAttentionCollapsed: state.needsAttentionCollapsed,
       }),
       // A workspace switch rehydrates into the previous workspace's state:
       // start from the initial values, never from `current`'s data.

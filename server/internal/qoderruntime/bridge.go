@@ -53,6 +53,8 @@ type Bridge struct {
 	path           string
 	log            *slog.Logger
 	turn           int
+	replyTurn      int
+	replyStep      bool
 }
 
 func New(cfg Config, log *slog.Logger) (*Bridge, error) {
@@ -232,11 +234,52 @@ func (b *Bridge) taskCall(ctx context.Context, r *run, suffix string, body, out 
 	return b.multica.call(ctx, http.MethodPost, "/api/daemon/tasks/"+url.PathEscape(r.TaskID)+suffix, body, out)
 }
 
-// step advances every active run, then claims new work while capacity remains.
+// step alternates normal polling with one pending file transfer. Each runs
+// under a separate guard and deadline; transfers cannot spend another run's
+// budget, and normal polling and heartbeats still run between transfers.
+func (b *Bridge) step(ctx context.Context) error {
+	if b.replyStep {
+		b.replyStep = false
+		if r := b.nextReplyRun(); r != nil {
+			b.replyTurn++
+			statusCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			err := b.stepRun(statusCtx, r)
+			cancel()
+			if err != nil {
+				return err
+			}
+			// The status check may have removed a cancelled or completed run.
+			for _, active := range b.state.Runs {
+				if active == r {
+					if pending, err := b.attachReplyFile(ctx, r); err != nil || pending {
+						return err
+					}
+					return b.deliver(ctx, r)
+				}
+			}
+			return nil
+		}
+	}
+	err := b.stepRuns(ctx)
+	b.replyStep = b.nextReplyRun() != nil
+	return err
+}
+
+func (b *Bridge) nextReplyRun() *run {
+	for i := range b.state.Runs {
+		r := b.state.Runs[(b.replyTurn+i)%len(b.state.Runs)]
+		if r.Phase == "final" && r.Outcome == "completed" && r.Reply != nil && r.Reply.Handled < len(r.Reply.Delivered) {
+			return r
+		}
+	}
+	return nil
+}
+
+// stepRuns advances every active run, then claims new work while capacity remains.
 // One failing run must not stall the others, so errors are collected and the
 // first is returned after all runs had their turn. Rotating the starting run
 // keeps a slow provider call from starving the same run on every tick.
-func (b *Bridge) step(ctx context.Context) error {
+func (b *Bridge) stepRuns(ctx context.Context) error {
 	var firstErr error
 	keep := func(r *run, err error) error {
 		var diskErr *persistenceError
@@ -381,7 +424,7 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 		}
 		fingerprint := resourceFingerprint(resources)
 		resources = append(resources, r.Files...)
-		if r.PriorSessionID != "" && len(r.Files) == 0 {
+		if r.PriorSessionID != "" && (len(r.Files) == 0 || r.MountFiles) {
 			continued, err := b.continueSession(ctx, r, fingerprint)
 			if err != nil {
 				return err
@@ -417,6 +460,33 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 			return err
 		}
 		r.Cursor = latest
+	}
+	if r.Phase == "created" && r.Continued {
+		// A continued session lacks this message's files; mount them before the
+		// message that names them. The cursor is already set, and events before
+		// the message are skipped, so the mounts do not read as this turn.
+		for r.MountedFiles < len(r.Files) {
+			err := b.qoder.call(ctx, http.MethodPost, "/sessions/"+url.PathEscape(r.SessionID)+"/resources", r.Files[r.MountedFiles], nil)
+			if rateLimited(err) {
+				r.RetryAt = time.Now().Add(30 * time.Second)
+				return b.persist()
+			}
+			if definitelyRejected(err) {
+				// Nothing was sent yet; start a fresh session with the files instead.
+				r.SessionID, r.PriorSessionID, r.Continued, r.Cursor = "", "", false, ""
+				r.Credits = runCredits{}
+				r.MountedFiles = 0
+				r.Phase = "prepared"
+				return b.persist()
+			}
+			if err != nil {
+				return err
+			}
+			r.MountedFiles++
+			if err := b.persist(); err != nil {
+				return err
+			}
+		}
 	}
 	if r.Phase == "created" {
 		// Save intent before POST. After an ambiguous response/restart, never resend automatically.
@@ -616,13 +686,26 @@ func (b *Bridge) deliver(ctx context.Context, r *run) error {
 			return err
 		}
 	}
+	if r.Reply != nil && r.Outcome == "completed" {
+		if r.Reply.Handled < len(r.Reply.Delivered) {
+			return nil
+		}
+	}
 	if err := b.reportCredits(ctx, r); err != nil {
 		return err
+	}
+	if r.Leader != nil && r.Outcome == "completed" {
+		if err := b.deliverLeader(ctx, r); err != nil {
+			return err
+		}
 	}
 	body := map[string]any{"session_id": r.SessionID}
 	suffix := "/complete"
 	if r.Outcome == "completed" {
 		body["output"] = r.Output
+		if r.Reply != nil {
+			body["output"] = r.Reply.output(r.Output)
+		}
 	} else {
 		suffix = "/fail"
 		body["error"] = r.Failure
@@ -676,15 +759,19 @@ func (b *Bridge) Check(ctx context.Context) error {
 }
 
 func (b *Bridge) guardedStep(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
 	if b.cfg.BeforeStep != nil {
-		release, err := b.cfg.BeforeStep(ctx)
+		acquireCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		release, err := b.cfg.BeforeStep(acquireCtx)
+		cancel()
 		if err != nil {
 			return err
 		}
 		defer release()
 	}
+	// The managed guard's 45-second lease starts when acquisition commits.
+	// Give the work its own 30 seconds after acquisition, within that lease.
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	return b.step(ctx)
 }
 

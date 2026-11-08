@@ -123,6 +123,9 @@ type Config struct {
 	CloudTimeout             time.Duration
 	AttachmentDownloadMode   string
 	AttachmentDownloadURLTTL time.Duration
+	// MaxPreviewSizeBytes bounds text-backed attachment previews independently
+	// of upload/download limits. Zero selects the default 2 MiB limit.
+	MaxPreviewSizeBytes int64
 	// AttachmentFrameAncestors are trusted browser origins allowed to embed
 	// attachment preview responses. In production this should mirror the
 	// frontend/CORS origin allowlist so split app/api self-hosted deployments

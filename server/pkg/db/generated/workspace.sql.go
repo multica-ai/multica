@@ -348,22 +348,39 @@ func (q *Queries) ListDaemonWorkspaces(ctx context.Context, userID pgtype.UUID) 
 const listWorkspaces = `-- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,
-       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed
+       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed, m.pinned_at
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
-ORDER BY w.created_at ASC
+ORDER BY m.pinned_at DESC NULLS LAST, w.created_at ASC
 `
 
-func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Workspace, error) {
+type ListWorkspacesRow struct {
+	ID                    pgtype.UUID        `json:"id"`
+	Name                  string             `json:"name"`
+	Slug                  string             `json:"slug"`
+	Description           pgtype.Text        `json:"description"`
+	Settings              []byte             `json:"settings"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	Context               pgtype.Text        `json:"context"`
+	Repos                 []byte             `json:"repos"`
+	IssuePrefix           string             `json:"issue_prefix"`
+	IssueCounter          int32              `json:"issue_counter"`
+	AvatarUrl             pgtype.Text        `json:"avatar_url"`
+	AttributionFailClosed bool               `json:"attribution_fail_closed"`
+	PinnedAt              pgtype.Timestamptz `json:"pinned_at"`
+}
+
+func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]ListWorkspacesRow, error) {
 	rows, err := q.db.Query(ctx, listWorkspaces, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Workspace{}
+	items := []ListWorkspacesRow{}
 	for rows.Next() {
-		var i Workspace
+		var i ListWorkspacesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
@@ -378,6 +395,7 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 			&i.IssueCounter,
 			&i.AvatarUrl,
 			&i.AttributionFailClosed,
+			&i.PinnedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -431,6 +449,26 @@ func (q *Queries) LockWorkspaceForDelete(ctx context.Context, id pgtype.UUID) (p
 	var id_2 pgtype.UUID
 	err := row.Scan(&id_2)
 	return id_2, err
+}
+
+const setWorkspacePinned = `-- name: SetWorkspacePinned :one
+UPDATE member
+SET pinned_at = CASE WHEN $1::bool THEN COALESCE(pinned_at, now()) ELSE NULL END
+WHERE workspace_id = $2 AND user_id = $3
+RETURNING pinned_at
+`
+
+type SetWorkspacePinnedParams struct {
+	Pinned      bool        `json:"pinned"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) SetWorkspacePinned(ctx context.Context, arg SetWorkspacePinnedParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, setWorkspacePinned, arg.Pinned, arg.WorkspaceID, arg.UserID)
+	var pinned_at pgtype.Timestamptz
+	err := row.Scan(&pinned_at)
+	return pinned_at, err
 }
 
 const updateWorkspace = `-- name: UpdateWorkspace :one

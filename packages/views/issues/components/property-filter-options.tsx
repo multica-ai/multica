@@ -6,6 +6,7 @@ import { Input } from "@multica/ui/components/ui/input";
 import { DropdownMenuCheckboxItem } from "@multica/ui/components/ui/dropdown-menu";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { isImeComposing } from "@multica/core/utils";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import {
   formatActorRef,
@@ -328,7 +329,7 @@ export function PropertyFilterOptions({
               // focus; Enter commits and still needs stopPropagation so it does
               // not bubble up and activate the highlighted "No value" item.
               if (event.key === "Escape" || event.key === "Tab") return;
-              if (event.key === "Enter") commitValue(draft);
+              if (event.key === "Enter" && !isImeComposing(event)) commitValue(draft);
               event.stopPropagation();
             }}
             disabled={locked}

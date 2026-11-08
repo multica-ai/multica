@@ -184,6 +184,13 @@ make start
 
 `make db-reset` は現在の `POSTGRES_DB` を削除して再作成し、リモートデータベースへの接続を拒否します。実行前に `.env` または `.env.worktree` を確認し、対象データベースが正しいことを確かめてください。
 
+## GitHub Issue の作成
+
+- **[機能リクエスト](https://github.com/multica-ai/multica/blob/main/.github/ISSUE_TEMPLATE/feature_request.yml)：** **問題（Problem）**と**目標（Goal）**を説明します。設計の概要（Proposal）、代替案（Alternatives）、スクリーンショット（Screenshots）は任意です。解決策を設計していなくても報告できます。
+- **[バグ報告](https://github.com/multica-ai/multica/blob/main/.github/ISSUE_TEMPLATE/bug_report.yml)：** **問題**、**期待する動作**、**再現手順**を分けて記載します。断続的に発生する場合は、試した操作と頻度を説明してください。画像、ログ、環境情報は任意です。
+
+報告を担当者に振り分けるため、影響する領域を選びます。バグ報告ではデプロイ方法も選択します。Issue の報告では画像は任意であり、UI や操作を変更する PR の画像必須ルールは適用されません。
+
 ## 提出前の確認
 
 - ルートの `AGENTS.md` と関連するサブディレクトリの説明を読みます。
@@ -191,7 +198,18 @@ make start
 - コードコメントは英語で記述します。
 - `.env`、トークン、ビルド成果物、ローカルパスをコミットしません。
 - `feat(scope)`、`fix(scope)`、`docs` などの conventional commit を使用します。
-- PR に動作変更と実際に実行した検証コマンドを記載します。
+
+### PR の提出要件
+
+[PR テンプレート](https://github.com/multica-ai/multica/blob/main/.github/PULL_REQUEST_TEMPLATE.md)を使い、[貢献要件](https://github.com/multica-ai/multica/blob/main/CONTRIBUTING.md#pull-request-requirements)に従ってください。
+
+1. **問題（Problem）：** 解決する具体的な問題、影響を受ける人、問題の重要性を説明します。
+2. **目標（Goal）：** 変更によって実現したい結果を示します。
+3. **提案（Proposal）：** 設計の全体像と、それが目標を達成する理由を説明します。プロジェクトの背景を詳しく知らない読者にも伝わるようにし、実装の詳細は最小限に抑えます。
+4. **代替案（Alternatives、任意）：** 理解に役立つ場合は、他の方法と採用しなかった理由を簡潔に説明します。
+5. **スクリーンショット（Screenshots）：** UI や操作を変更する場合、実際に動かしたアプリのスクリーンショットまたは画面録画で、影響する画面と状態を示します。変更前後の比較を強く推奨します。新しい画面では変更後の状態を示します。UI や操作への影響がない場合は "N/A" と理由を記載します。
+
+**UI や操作を変更する PR にスクリーンショットも画面録画もなければ、原則として受け付けません。** どちらかが添付されるまでは、レビュアーは変更を要求するか PR を閉じてください。問題、目標、設計の全体像が欠けた PR もレビューの対象になりません。
 
 ## 次のステップ
 

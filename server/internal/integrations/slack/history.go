@@ -45,6 +45,7 @@ type historyQueries interface {
 // historyClient is the slice of the slack-go Web API the reader calls. The real
 // *slack.Client satisfies it; tests inject a fake.
 type historyClient interface {
+	sourceClient
 	GetConversationHistoryContext(ctx context.Context, params *slack.GetConversationHistoryParameters) (*slack.GetConversationHistoryResponse, error)
 	GetConversationRepliesContext(ctx context.Context, params *slack.GetConversationRepliesParameters) ([]slack.Message, bool, string, error)
 	GetUsersInfoContext(ctx context.Context, users ...string) (*[]slack.User, error)
@@ -249,6 +250,11 @@ func (h *History) Thread(ctx context.Context, chatSessionID pgtype.UUID, threadI
 	page.NextCursor = nextCursor
 	page.ChannelType = string(TypeSlack)
 	page.ThreadID = ts
+	if source := sourceMetadata(ctx, t.client, t.channelID, ts, ts); source != nil {
+		page.ChannelID = source.ChannelID
+		page.ChannelName = source.ChannelName
+		page.Permalink = source.Permalink
+	}
 	return page, nil
 }
 
