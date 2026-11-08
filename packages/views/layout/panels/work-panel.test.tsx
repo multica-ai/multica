@@ -20,7 +20,7 @@ import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { KeptRowsRelease, WorkPanel } from "./work-panel";
 
-const apiMock = vi.hoisted(() => ({ listIssueTableRows: vi.fn(), getIssue: vi.fn() }));
+const apiMock = vi.hoisted(() => ({ listIssueTableRows: vi.fn(), listIssues: vi.fn(), getIssue: vi.fn() }));
 const actions = vi.hoisted(() => ({
   sidebar: {
     items: [
@@ -221,6 +221,7 @@ beforeEach(() => {
     total: 2,
     next_cursor: null,
   } as unknown as IssueTableRowsResponse);
+  apiMock.listIssues.mockResolvedValue({ issues: [ISSUE, OTHER], total: 2 });
   // The issue page never finishes loading, so the panel cannot lean on it.
   apiMock.getIssue.mockReturnValue(new Promise<Issue>(() => {}));
 });
@@ -340,6 +341,89 @@ describe("WorkPanel issue highlight", () => {
 
     fireEvent.click(allIssues());
     expect(screen.queryByRole("link", { name: "Launched" })).toBeNull();
+  });
+});
+
+describe("WorkPanel and the open issue's project", () => {
+  const PROJECT_SOURCE = `project:${PROJECT.id}`;
+  const IN_PROJECT = { ...ISSUE, project_id: PROJECT.id } as Issue;
+  const projectLocated = () => !!screen.getByRole("link", { name: PROJECT.title }).closest("[data-located]");
+  const litIssueRows = () =>
+    screen.queryAllByRole("link", { name: ISSUE.title }).filter((link) => link.getAttribute("aria-current") === "page");
+  const openInProject = (qc: QueryClient) =>
+    act(() => {
+      qc.setQueryData(issueDetailOptions("ws-1", ISSUE.id).queryKey, IN_PROJECT);
+    });
+
+  beforeEach(() => {
+    useSidebarTreeStore.setState({ locate: null });
+  });
+
+  it("leaves the project closed when its issue is clicked in a view", async () => {
+    const qc = renderPanel("/acme/my-issues", [], [PROJECT]);
+    await openInProject(qc);
+    fireEvent.click(await screen.findByRole("link", { name: ISSUE.title }));
+
+    expect(useSidebarTreeStore.getState().expanded).not.toContain(PROJECT_SOURCE);
+    expect(litIssueRows()).toHaveLength(1);
+    expect(projectLocated()).toBe(false);
+  });
+
+  it("lights the issue only in the list it was clicked in", async () => {
+    useSidebarTreeStore.setState({ expanded: ["builtin:my_issues", PROJECT_SOURCE] });
+    const qc = renderPanel("/acme/my-issues", [], [PROJECT]);
+    await openInProject(qc);
+    await waitFor(() => expect(screen.getAllByRole("link", { name: ISSUE.title })).toHaveLength(2));
+    const inMyIssues = document.querySelector('[data-sidebar-list="builtin:my_issues"]') as HTMLElement;
+    fireEvent.click(within(inMyIssues).getByRole("link", { name: ISSUE.title }));
+
+    expect(litIssueRows()).toEqual([within(inMyIssues).getByRole("link", { name: ISSUE.title })]);
+  });
+
+  it("marks the closed project of an issue no list shows, instead of All issues", async () => {
+    useSidebarTreeStore.setState({ expanded: [] });
+    const qc = renderPanel(`/acme/issues/${ISSUE.id}`, [], [PROJECT]);
+    await openInProject(qc);
+
+    await waitFor(() => expect(projectLocated()).toBe(true));
+    expect(allIssues()).not.toHaveAttribute("aria-current");
+    expect(useSidebarTreeStore.getState().expanded).toEqual([]);
+  });
+
+  it("lists the open issue last under its expanded project when no page has it", async () => {
+    useSidebarTreeStore.setState({ expanded: [PROJECT_SOURCE] });
+    apiMock.listIssues.mockResolvedValue({ issues: [OTHER], total: 1 });
+    const qc = renderPanel(`/acme/issues/${ISSUE.id}`, [], [PROJECT]);
+    await openInProject(qc);
+
+    const list = await waitFor(() => {
+      const element = document.querySelector(`[data-sidebar-list="${PROJECT_SOURCE}"]`) as HTMLElement;
+      expect(within(element).getByRole("link", { name: OTHER.title })).toBeInTheDocument();
+      return element;
+    });
+    const links = within(list).getAllByRole("link");
+    expect(links.map((link) => link.textContent)).toEqual([OTHER.title, ISSUE.title]);
+    expect(links[1]).toHaveAttribute("aria-current", "page");
+    expect(allIssues()).not.toHaveAttribute("aria-current");
+  });
+
+  it("opens the project and lights the issue there when asked to show it", async () => {
+    const qc = renderPanel(`/acme/issues/${ISSUE.id}`, [], [PROJECT]);
+    await openInProject(qc);
+    await screen.findByRole("link", { name: ISSUE.title });
+
+    act(() => {
+      useSidebarTreeStore.getState().requestLocate({ issueId: ISSUE.id, source: PROJECT_SOURCE });
+    });
+
+    expect(useSidebarTreeStore.getState().expanded).toContain(PROJECT_SOURCE);
+    const list = await waitFor(() => {
+      const element = document.querySelector(`[data-sidebar-list="${PROJECT_SOURCE}"]`) as HTMLElement;
+      expect(within(element).getByRole("link", { name: ISSUE.title })).toHaveAttribute("aria-current", "page");
+      return element;
+    });
+    expect(litIssueRows()).toEqual([within(list).getByRole("link", { name: ISSUE.title })]);
+    await waitFor(() => expect(useSidebarTreeStore.getState().locate).toBeNull());
   });
 });
 

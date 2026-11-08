@@ -895,6 +895,7 @@
     "unassigned": "Sin asignar",
     "open_in_new_tab": "Abrir en una pestaña nueva",
     "pin_to_sidebar": "Fijar en la barra lateral",
+    "locate_in_sidebar": "Mostrar en la barra lateral",
     "unpin_from_sidebar": "Dejar de fijar de la barra lateral",
     "copy_link": "Copiar enlace",
     "copy_workdir_path": "Copiar ruta del directorio de trabajo local",

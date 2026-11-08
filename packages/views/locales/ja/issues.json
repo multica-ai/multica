@@ -937,6 +937,7 @@
     "unassigned": "未割り当て",
     "open_in_new_tab": "新しいタブで開く",
     "pin_to_sidebar": "サイドバーにピン留め",
+    "locate_in_sidebar": "サイドバーで表示",
     "unpin_from_sidebar": "サイドバーのピン留めを解除",
     "restore_to_inbox": "インボックスに戻す",
     "mark_read": "既読にする",

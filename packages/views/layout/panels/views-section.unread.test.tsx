@@ -12,6 +12,7 @@ import { UNREAD_VIEW_ID } from "@multica/core/issue-views/unread-view";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { ViewsSection } from "./views-section";
+import type { IssueViewActions } from "../../issue-views/use-view-actions";
 
 const actions = vi.hoisted(() => ({
   sidebar: { items: [] as unknown[], reorder: vi.fn(), unstar: vi.fn() },
@@ -82,6 +83,8 @@ function renderSection({ activeIssueId = null }: { activeIssueId?: string | null
           plainRowsLit
           issueLitInTree={false}
           activeIssueId={issueId}
+          litSource={viewSidebarSource(UNREAD_VIEW_ID)}
+          actions={actions as unknown as IssueViewActions}
         />
       </NavigationProvider>
     </QueryClientProvider>
