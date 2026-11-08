@@ -7,7 +7,7 @@ import { NavigationProvider, type NavigationAdapter } from "../../../navigation"
 import { renderWithI18n } from "../../../test/i18n";
 
 const { openAtMock, tryOpenMock, downloadMock, copyTextMock, toastMock } = vi.hoisted(() => ({
-  openAtMock: vi.fn((_key: string) => true),
+  openAtMock: vi.fn((_key: string, _options?: { stayOnError?: boolean }) => true),
   tryOpenMock: vi.fn(() => false),
   downloadMock: vi.fn(),
   copyTextMock: vi.fn(async (_text: string) => true),
@@ -99,7 +99,8 @@ describe("OpenDeliverableOnLoad", () => {
   it("opens the newest version in the page's viewer", () => {
     const { onOpenedInViewer, onDone } = renderOpener({ files: TWO_VERSIONS });
     expect(openAtMock).toHaveBeenCalledTimes(1);
-    expect(openAtMock).toHaveBeenCalledWith("v2");
+    // Asks the viewer to stay on the named file if it fails to load.
+    expect(openAtMock).toHaveBeenCalledWith("v2", { stayOnError: true });
     expect(onOpenedInViewer).toHaveBeenCalledTimes(1);
     // The viewer is still open; the host puts the address back when it closes.
     expect(onDone).not.toHaveBeenCalled();
@@ -107,11 +108,11 @@ describe("OpenDeliverableOnLoad", () => {
 
   it("opens the new version when the same link is visited after a re-upload", () => {
     const first = renderOpener({ files: ONE_VERSION });
-    expect(openAtMock).toHaveBeenLastCalledWith("v1");
+    expect(openAtMock).toHaveBeenLastCalledWith("v1", { stayOnError: true });
     first.unmount();
 
     renderOpener({ files: TWO_VERSIONS });
-    expect(openAtMock).toHaveBeenLastCalledWith("v2");
+    expect(openAtMock).toHaveBeenLastCalledWith("v2", { stayOnError: true });
   });
 
   it("waits for the timeline before deciding", () => {
@@ -121,7 +122,7 @@ describe("OpenDeliverableOnLoad", () => {
     expect(toastMock.error).not.toHaveBeenCalled();
 
     rerender(<OpenDeliverableOnLoad {...props} files={ONE_VERSION} ready />);
-    expect(openAtMock).toHaveBeenCalledWith("v1");
+    expect(openAtMock).toHaveBeenCalledWith("v1", { stayOnError: true });
     expect(toastMock.error).not.toHaveBeenCalled();
   });
 

@@ -340,6 +340,51 @@ describe("PreviewSequenceProvider", () => {
     expectCounter("1 / 3");
   });
 
+  it("stays on a file opened by name when it fails, and says so on the stage", () => {
+    function PinnedOpener() {
+      const sequence = usePreviewSequence();
+      return (
+        <button type="button" onClick={() => sequence.openAt(THREE[1]!.id, { stayOnError: true })}>
+          open
+        </button>
+      );
+    }
+    render(
+      <PreviewSequenceProvider items={sequenceOf(THREE)}>
+        <PinnedOpener />
+      </PreviewSequenceProvider>,
+    );
+    act(() => {
+      fireEvent.click(screen.getByText("open"));
+    });
+    expectCounter("2 / 3");
+
+    act(() => {
+      fireEvent.error(screen.getByRole("dialog").querySelector("img")!);
+    });
+
+    // Not swapped for a neighbour: same position, same title, no broken frame,
+    // a visible failure with a way to download, and no "skipped it" toast.
+    expectCounter("2 / 3");
+    expect(screen.getByRole("dialog", { name: THREE[1]!.filename })).toBeInTheDocument();
+    expect(screen.getByRole("dialog").querySelector("img")).toBeNull();
+    // The stage shows the failure with its own download button, beside the
+    // top bar's (this file renders without translations, so match structure).
+    expect(screen.getAllByRole("button", { name: "Download" })).toHaveLength(2);
+    expect(toastErrorMock).not.toHaveBeenCalled();
+
+    // Moving on is still the reader's call, and a later failure skips as usual.
+    act(() => {
+      fireEvent.click(nextButton());
+    });
+    expectCounter("3 / 3");
+    act(() => {
+      fireEvent.error(screen.getByRole("dialog").querySelector("img")!);
+    });
+    expectCounter("1 / 3");
+    expect(toastErrorMock).toHaveBeenCalledTimes(1);
+  });
+
   it("pages onto files that are not images", () => {
     const mixed = [
       imageAttachment(1),

@@ -89,7 +89,9 @@ export function OpenDeliverableOnLoad({
       onDone();
       return;
     }
-    if (openAt(file.latest.id)) {
+    // The link names this file: if it fails to load, stay on it and say so
+    // rather than showing the reader a different one.
+    if (openAt(file.latest.id, { stayOnError: true })) {
       onOpenedInViewer();
       return;
     }

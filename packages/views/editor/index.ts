@@ -40,6 +40,7 @@ export {
   usePreviewSequence,
 } from "./preview-sequence-context";
 export type {
+  OpenAtOptions,
   PreviewItemDetails,
   PreviewSequenceControls,
 } from "./preview-sequence-context";

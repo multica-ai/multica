@@ -108,7 +108,16 @@ interface PreviewSequenceApi {
    * Returns false when no provider is mounted or the key is not part of this
    * surface's sequence, so callers can fall back to a single-file preview.
    */
-  openAt: (key: string) => boolean;
+  openAt: (key: string, options?: OpenAtOptions) => boolean;
+}
+
+export interface OpenAtOptions {
+  /**
+   * The reader asked for this exact file (a link that names it), so a load
+   * failure must not quietly show them a different one: stay on it and say
+   * it failed, instead of skipping to the next loadable image.
+   */
+  stayOnError?: boolean;
 }
 
 const NO_SEQUENCE: PreviewSequenceApi = { openAt: () => false };
@@ -147,6 +156,8 @@ interface Session {
   /** Snapshot taken at open time — see the freeze note in the file header. */
   items: ImageSequenceItem[];
   index: number;
+  /** The file opened with `stayOnError`; a load failure keeps it on screen. */
+  pinnedKey?: string;
 }
 
 export function PreviewSequenceProvider({
@@ -194,14 +205,18 @@ export function PreviewSequenceProvider({
 
   const api = useMemo<PreviewSequenceApi>(
     () => ({
-      openAt: (key: string) => {
+      openAt: (key: string, options?: OpenAtOptions) => {
         const snapshot = [...itemsRef.current];
         const index = indexOfImageKey(snapshot, key);
         if (index < 0) return false;
         directionRef.current = 1;
         brokenRef.current = new Set();
         setBroken(brokenRef.current);
-        setSession({ items: snapshot, index });
+        setSession({
+          items: snapshot,
+          index,
+          pinnedKey: options?.stayOnError ? key : undefined,
+        });
         setOpen(true);
         return true;
       },
@@ -241,6 +256,9 @@ export function PreviewSequenceProvider({
 
     brokenRef.current = new Set(brokenRef.current).add(failed.key);
     setBroken(brokenRef.current);
+    // The file the reader asked for by name: stay and show the failure on the
+    // stage rather than swapping in a different image.
+    if (failed.key === session.pinnedKey) return;
     toast.error(t(($) => $.image.unavailable));
 
     const forward = directionRef.current;
@@ -287,6 +305,7 @@ export function PreviewSequenceProvider({
           onClosed?.();
         }}
         onImageError={handleImageError}
+        imageFailed={current.key === session.pinnedKey && broken.has(current.key)}
         titleAccessory={details?.titleAccessory}
         info={
           details?.info
