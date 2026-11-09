@@ -2451,6 +2451,23 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     let last = -1;
     let fade: number | undefined;
     let cancelled = false;
+    const centerTarget = (el: HTMLElement) => {
+      const c = container.getBoundingClientRect();
+      const e = el.getBoundingClientRect();
+      const target = Math.max(0, container.scrollTop + e.top - c.top - (container.clientHeight - e.height) / 2);
+      const row = !isFlatTimeline ? el.closest<HTMLElement>("[data-item-index]") : null;
+      if (row) {
+        // Redirect pending size-correction retries to the reply, not the
+        // thread's start, or the outer list can undo the nested landing.
+        virtuosoRef.current?.scrollToIndex({
+          index: targetIdx,
+          align: "start",
+          offset: e.top - row.getBoundingClientRect().top - (container.clientHeight - e.height) / 2,
+        });
+      }
+      container.scrollTop = target;
+      return target;
+    };
     const land = () => {
       const el = document.getElementById(`comment-${landingId}`);
       if (!el) {
@@ -2460,22 +2477,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
       // A reply anchor is cheap and persistent; wait for its body after revealing it.
       if (el.dataset.virtualThreadMounted === "false") {
-        const c = container.getBoundingClientRect();
-        const e = el.getBoundingClientRect();
-        container.scrollTop = Math.max(0, container.scrollTop + e.top - c.top - (container.clientHeight - e.height) / 2);
+        centerTarget(el);
         if (++mountFrames < 60) rafId = requestAnimationFrame(land);
         return;
       }
       didHighlightRef.current = highlightCommentId;
       writeViewState(issueHighlightMementoKey(id), highlightCommentId);
       const center = () => {
-        const c = container.getBoundingClientRect();
-        const e = el.getBoundingClientRect();
-        const target = Math.max(
-          0,
-          container.scrollTop + (e.top - c.top) - (container.clientHeight - e.height) / 2,
-        );
-        container.scrollTop = target;
+        const target = centerTarget(el);
         if (Math.abs(target - last) > 1 && ++frames < 30) {
           last = target;
           rafId = requestAnimationFrame(center);

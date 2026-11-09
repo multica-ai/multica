@@ -483,7 +483,7 @@ const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
 const scrollToIndexSpy = vi.hoisted(() => vi.fn());
 const scrollIntoViewIndexSpy = vi.hoisted(() => vi.fn());
 const mockVirtualWindow = vi.hoisted(() => ({
-  enabled: false, delayedViewport: false, lateScrollReset: false, offscreenViewport: false, pendingSizeCorrection: false,
+  enabled: false, delayedViewport: false, lateScrollReset: false, offscreenViewport: false, pendingSizeCorrection: false, holdAtIndex: false,
   targetId: "", scrollParent: null as HTMLElement | null,
 }));
 
@@ -499,6 +499,12 @@ vi.mock("react-virtuoso", () => ({
     ref: any,
   ) {
     const [windowStart, setWindowStart] = useState(0);
+    const correctionTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+    useEffect(() => {
+      if (!mockVirtualWindow.holdAtIndex || !customScrollParent) return;
+      correctionTimer.current = setInterval(() => { customScrollParent.scrollTop = 0; }, 10);
+      return () => { if (correctionTimer.current) clearInterval(correctionTimer.current); };
+    }, [customScrollParent]);
     const viewportMeasured = useRef(!mockVirtualWindow.delayedViewport && !mockVirtualWindow.offscreenViewport);
     useEffect(() => {
       const measured = () => {
@@ -518,18 +524,26 @@ vi.mock("react-virtuoso", () => ({
       return () => window.clearTimeout(timer);
     }, [totalListHeightChanged, customScrollParent]);
     useEffect(() => {
-      if (!mockVirtualWindow.lateScrollReset || !customScrollParent) return;
+      if ((!mockVirtualWindow.lateScrollReset && !mockVirtualWindow.holdAtIndex) || !customScrollParent) return;
       mockVirtualWindow.scrollParent = customScrollParent;
       Object.defineProperty(customScrollParent, "clientHeight", { configurable: true, value: 200 });
       customScrollParent.getBoundingClientRect = () => new DOMRect(0, 0, 400, 200);
       const target = document.getElementById(`comment-${mockVirtualWindow.targetId}`);
-      if (target) target.getBoundingClientRect = () => new DOMRect(0, 250 - customScrollParent.scrollTop, 400, 100);
+      if (target) {
+        target.getBoundingClientRect = () => new DOMRect(0, 250 - customScrollParent.scrollTop, 400, 100);
+        const row = target.closest<HTMLElement>("[data-item-index]");
+        if (row) row.getBoundingClientRect = () => new DOMRect(0, -customScrollParent.scrollTop, 400, 500);
+      }
     }, [customScrollParent, windowStart, data]);
-    const jump = (location: { index: number; done?: () => void }) => {
+    const jump = (location: { index: number; offset?: number; done?: () => void }) => {
+      if (location.offset !== undefined && customScrollParent && mockVirtualWindow.holdAtIndex) {
+        if (correctionTimer.current) clearInterval(correctionTimer.current);
+        customScrollParent.scrollTop = location.offset;
+      }
       if (mockVirtualWindow.enabled && viewportMeasured.current) setWindowStart(Math.max(0, location.index - 2));
       if (mockVirtualWindow.lateScrollReset && customScrollParent) {
-        window.setTimeout(() => { customScrollParent.scrollTop = 0; location.done?.(); }, 80);
-      } else if (!mockVirtualWindow.pendingSizeCorrection) location.done?.();
+        window.setTimeout(() => { customScrollParent.scrollTop = location.offset ?? 0; location.done?.(); }, 80);
+      } else if (!mockVirtualWindow.pendingSizeCorrection && !mockVirtualWindow.holdAtIndex) location.done?.();
     };
     useImperativeHandle(ref, () => ({
       scrollIntoView: (location: { index: number; done?: () => void }) => {
@@ -546,7 +560,7 @@ vi.mock("react-virtuoso", () => ({
     return (
       <div data-testid="virtuoso-mock">
         {visible.map((item, i) => (
-          <div key={computeItemKey(start + i, item)}>{itemContent(start + i, item) as React.ReactElement}</div>
+          <div key={computeItemKey(start + i, item)} data-item-index={start + i}>{itemContent(start + i, item) as React.ReactElement}</div>
         ))}
       </div>
     );
@@ -558,6 +572,7 @@ vi.mock("react-virtuoso", () => ({
 beforeEach(() => {
   mockVirtualWindow.enabled = false;
   mockVirtualWindow.pendingSizeCorrection = false;
+  mockVirtualWindow.holdAtIndex = false;
   mockVirtualWindow.delayedViewport = false;
   mockVirtualWindow.offscreenViewport = false;
   mockVirtualWindow.lateScrollReset = false;
@@ -2502,7 +2517,9 @@ describe("IssueDetail (shared)", () => {
       { kind: "reply", delayedViewport: false, lateScrollReset: true },
       { kind: "reply", delayedViewport: false, lateScrollReset: false, offscreenViewport: true },
       { kind: "reply", delayedViewport: false, lateScrollReset: false, pendingSizeCorrection: true },
-    ])("keeps long history virtualized for a $kind (late viewport: $delayedViewport, late scroll: $lateScrollReset, below fold: $offscreenViewport)", async ({ kind, delayedViewport, lateScrollReset, offscreenViewport, pendingSizeCorrection }) => {
+      { kind: "reply", delayedViewport: false, lateScrollReset: false, holdAtIndex: true },
+    ])("keeps long history virtualized for a $kind (late viewport: $delayedViewport, late scroll: $lateScrollReset, below fold: $offscreenViewport)", async ({ kind, delayedViewport, lateScrollReset, offscreenViewport, pendingSizeCorrection, holdAtIndex }) => {
+      mockVirtualWindow.holdAtIndex = !!holdAtIndex;
       mockVirtualWindow.pendingSizeCorrection = !!pendingSizeCorrection;
       mockVirtualWindow.enabled = true;
       mockVirtualWindow.delayedViewport = delayedViewport;
@@ -2531,7 +2548,7 @@ describe("IssueDetail (shared)", () => {
       await waitFor(() => expect(hasHighlightedCommentBackground(
         document.getElementById(`comment-${target.id}`),
       )).toBe(true));
-      if (lateScrollReset) {
+      if (lateScrollReset || holdAtIndex) {
         await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 150)); });
         expect(mockVirtualWindow.scrollParent?.scrollTop).toBe(200);
       }
