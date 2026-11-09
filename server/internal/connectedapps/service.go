@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -337,6 +338,7 @@ func (s *Service) activePersonalAccounts(ctx context.Context, userID pgtype.UUID
 type account struct {
 	scope              string
 	connectedAccountID string
+	composioUserID     string
 	connectionID       pgtype.UUID
 	// owner is the member whose personal account it is; invalid for team.
 	owner pgtype.UUID
@@ -354,7 +356,7 @@ func (s *Service) resolveAccount(ctx context.Context, workspaceID, triggeredBy p
 		if !ok {
 			return account{}, ErrAccountMissing
 		}
-		return account{scope: ScopeTeam, connectedAccountID: row.ConnectedAccountID, connectionID: row.ID}, nil
+		return account{scope: ScopeTeam, connectedAccountID: row.ConnectedAccountID, composioUserID: row.ComposioUserID, connectionID: row.ID}, nil
 	}
 	if !triggeredBy.Valid {
 		return account{}, ErrAccountMissing
@@ -367,7 +369,7 @@ func (s *Service) resolveAccount(ctx context.Context, workspaceID, triggeredBy p
 	if !ok {
 		return account{}, ErrAccountMissing
 	}
-	return account{scope: ScopePersonal, connectedAccountID: row.ConnectedAccountID, connectionID: row.ID, owner: triggeredBy}, nil
+	return account{scope: ScopePersonal, connectedAccountID: row.ConnectedAccountID, composioUserID: row.ComposioUserID, connectionID: row.ID, owner: triggeredBy}, nil
 }
 
 // accountRule returns the account owner's rule for one class, or "".
@@ -402,6 +404,17 @@ type toolCall struct {
 	toolkit, tool, class, outcome                                     string
 	requestID                                                         pgtype.UUID
 	err                                                               string
+}
+
+// Upstream errors can contain tool arguments or private app data. Log only
+// fixed failure classes and the local identifiers needed to find the call.
+func logExecutionFailure(ctx context.Context, c toolCall, errorClass string) {
+	slog.WarnContext(ctx, "connectedapps: tool execution failed",
+		"workspace_id", util.UUIDToString(c.workspaceID),
+		"task_id", util.UUIDToString(c.taskID),
+		"request_id", util.UUIDToString(c.requestID),
+		"toolkit", c.toolkit, "tool", c.tool,
+		"account_scope", c.acct.scope, "error_class", errorClass)
 }
 
 func (s *Service) recordCall(ctx context.Context, c toolCall) {
