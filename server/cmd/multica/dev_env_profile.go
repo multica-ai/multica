@@ -28,8 +28,10 @@ import (
 // from. A loopback URL alone proves nothing: a self-hosted install can run its
 // real server on localhost.
 
-// devEnvHomeEnv mirrors DEV_HOME in scripts/dev-env.sh.
-const devEnvHomeEnv = "MULTICA_DEV_HOME"
+const (
+	devEnvHomeEnv = "MULTICA_DEV_HOME"
+	devEnvNameEnv = "MULTICA_DEV_ENV"
+)
 
 // The registry manifest is written by `printf '%q'`, which leaves values made
 // of these characters unquoted. Anything else is not a value this check reads.
@@ -76,13 +78,9 @@ func taskIdentityInEnv() bool {
 // PROFILE and the `desktop-localhost-<backend port>` profile its Desktop
 // derives from the backend URL.
 func devEnvBackendPortForProfile(profile string) string {
-	root := strings.TrimSpace(os.Getenv(devEnvHomeEnv))
+	root := devEnvHome()
 	if root == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		root = filepath.Join(home, ".multica", "dev")
+		return ""
 	}
 	manifests, _ := filepath.Glob(filepath.Join(root, "envs", "*", "manifest.env"))
 	for _, path := range manifests {
@@ -99,6 +97,38 @@ func devEnvBackendPortForProfile(profile string) string {
 		}
 	}
 	return ""
+}
+
+// launchingDevEnv returns the name of the registered dev-env environment that
+// launched this process, or "" when none did. dev-env run from an agent task
+// exports devEnvNameEnv to everything it starts with that task's identity
+// stripped. It only
+// changes what a refusal says, never whether a command is refused, and a name
+// the registry does not hold is ignored so a stray export cannot hide a real
+// leftover marker.
+func launchingDevEnv() string {
+	name := strings.TrimSpace(os.Getenv(devEnvNameEnv))
+	root := devEnvHome()
+	if !devEnvManifestValue.MatchString(name) || root == "" {
+		return ""
+	}
+	manifest := readDevEnvManifest(filepath.Join(root, "envs", name, "manifest.env"))
+	if manifest["NAME"] != name {
+		return ""
+	}
+	return name
+}
+
+// devEnvHome mirrors DEV_HOME in scripts/dev-env.sh.
+func devEnvHome() string {
+	if root := strings.TrimSpace(os.Getenv(devEnvHomeEnv)); root != "" {
+		return root
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".multica", "dev")
 }
 
 func readDevEnvManifest(path string) map[string]string {
