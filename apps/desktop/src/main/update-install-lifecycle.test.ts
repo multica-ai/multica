@@ -76,6 +76,9 @@ vi.mock("fs", () => ({
 }));
 vi.mock("fs/promises", () => ({
   readFile: vi.fn(async (path: string) => {
+    if (path.endsWith("active.json")) {
+      throw Object.assign(new Error("No shared daemon in this fixture"), { code: "ENOENT" });
+    }
     if (path.endsWith("desktop_prefs.json")) {
       return JSON.stringify({ autoStart: true, autoStop: ctx.autoStop });
     }
@@ -230,8 +233,9 @@ describe("Windows update and daemon lifecycle coordination", () => {
 
   it("invalidates a timed-out stop queued behind an earlier start", async () => {
     await setupRealGate();
+    ctx.health = null;
     ctx.holdStart = true;
-    const restart = ipc("daemon:restart");
+    const start = ipc("daemon:start");
     await vi.advanceTimersByTimeAsync(0);
     const stopsBeforeInstall = ctx.stops;
     const install = ipc("updater:install");
@@ -242,7 +246,7 @@ describe("Windows update and daemon lifecycle coordination", () => {
     ctx.health!.status = "running";
     ctx.health!.active_task_count = 1;
     ctx.finishStart!();
-    await restart;
+    await start;
     await vi.advanceTimersByTimeAsync(0);
     expect(ctx.stops).toBe(stopsBeforeInstall);
   });
