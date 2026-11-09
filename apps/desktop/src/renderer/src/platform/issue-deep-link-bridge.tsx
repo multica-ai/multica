@@ -4,7 +4,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceList } from "@multica/core/workspace";
 import { useT } from "@multica/views/i18n";
 import { parseIssueDeepLink } from "../../../shared/issue-deep-link";
-import { routeContentLinkPath } from "./navigation";
+import { routeIssueDeepLinkPath } from "./navigation";
 
 export function IssueDeepLinkBridge() {
   const { t } = useT("issues");
@@ -27,7 +27,7 @@ export function IssueDeepLinkBridge() {
         toast.error(t(($) => $.desktop.link_workspace_unavailable));
         return;
       }
-      routeContentLinkPath(target.path, "foreground-tab");
+      routeIssueDeepLinkPath(target.path);
     });
   }, [authenticated, ready, workspaces, config, t]);
 

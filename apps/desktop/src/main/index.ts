@@ -243,7 +243,7 @@ function handOffToWorkspaceWindow(
 ): boolean {
   if (!source || !mainWindows.has(source)) return false;
   if (!request || typeof request !== "object") return false;
-  const { workspaceSlug: rawSlug, path: rawPath } = request as Record<
+  const { workspaceSlug: rawSlug, path: rawPath, navigate } = request as Record<
     string,
     unknown
   >;
@@ -255,7 +255,11 @@ function handOffToWorkspaceWindow(
   const target = mainWindows.findByWorkspace(workspaceSlug, source);
   if (!target || target.isDestroyed()) return false;
   if (path) {
-    dispatchToMainRenderer(WORKSPACE_OPEN_PATH_CHANNEL, path, target);
+    dispatchToMainRenderer(
+      WORKSPACE_OPEN_PATH_CHANNEL,
+      { path, navigate: navigate === true },
+      target,
+    );
   } else {
     focusWindow(target);
   }
