@@ -140,7 +140,8 @@
     "local_pick_failed": "No se ha podido abrir el selector de directorios.",
     "local_invalid_dir": "Este directorio no se puede usar. Elige otro.",
     "local_hint": "Los agentes en otras máquinas no verán esta ruta: fallarán al arrancar. Usa repos para trabajo compartido.",
-    "repos_ref_default": "Rama por defecto"
+    "repos_ref_default": "Rama por defecto",
+    "repos_remove_aria": "Quitar {{repo}}"
   },
   "create_issue": {
     "sr_manual": "Nueva tarea",

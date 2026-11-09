@@ -727,14 +727,13 @@
     "restart_failed": "現在の実行を停止できませんでした。メッセージは送信されていません。"
   },
   "reply": {
+    "recipients_changed": "返信先が変更されました。送信先を確認してから、もう一度送信してください。",
     "placeholder": "返信を残す...",
     "annotations": {
-      "direct_reply": "返信",
-      "direct_comment": "コメントを投稿",
-      "direct_target_deleted": "返信先が削除されました。別のコメントを選ぶ前に、意見をコピーしてください。",
-      "copy_note": "意見をコピー",
-      "note_copied": "意見をコピーしました",
-      "note_copy_failed": "コピーできませんでした。テキストを選択して手動でコピーしてください。",
+      "send_all": "すべて送信",
+      "send_with_annotations_and_body": "保存済みの注釈 {{count}} 件と下書きの本文もまとめて送信します。",
+      "send_with_annotations": "保存済みの注釈 {{count}} 件もまとめて送信します。",
+      "send_with_body": "下書きの本文もまとめて送信します。",
       "confirm_add": "注釈を追加",
       "save": "注釈を保存",
       "add_comment": "コメントに追加",

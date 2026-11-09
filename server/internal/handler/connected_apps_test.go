@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/connectedapps"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	sdk "github.com/multica-ai/multica/server/pkg/composio"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -23,8 +27,10 @@ import (
 // appsFakeSDK serves a small Gmail toolkit and records executions.
 type appsFakeSDK struct {
 	composioFakeSDK
-	mu       sync.Mutex
-	executed []sdk.ExecuteToolRequest
+	mu         sync.Mutex
+	executed   []sdk.ExecuteToolRequest
+	executeErr error
+	toolError  string
 }
 
 var appsFakeGmailTools = []sdk.Tool{
@@ -57,6 +63,15 @@ func (f *appsFakeSDK) ExecuteTool(_ context.Context, slug string, req sdk.Execut
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.executed = append(f.executed, req)
+	if req.UserID == "" || req.ConnectedAccountID == "" {
+		return nil, errors.New("User ID is required with connected account")
+	}
+	if f.executeErr != nil {
+		return nil, f.executeErr
+	}
+	if f.toolError != "" {
+		return &sdk.ExecuteToolResponse{Error: f.toolError}, nil
+	}
 	return &sdk.ExecuteToolResponse{Successful: true, Data: map[string]any{"tool": slug}}, nil
 }
 
@@ -592,5 +607,231 @@ func TestConnectedApps_CustomCatalogAndIssueCalls(t *testing.T) {
 	}
 	if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "slack", "account_scope": "personal", "level": "read"}}); w.Code != http.StatusForbidden {
 		t.Fatalf("unlisted app in custom catalog: %d, want 403", w.Code)
+	}
+}
+
+// executionAccount gives each scope a stored identity distinct from the run's
+// originator, so deriving the identity instead of reading it fails the test.
+func (f *appsFixture) executionAccount(t *testing.T, scope string) (table, id, userID, accountID string) {
+	t.Helper()
+	userID = fmt.Sprintf("stored_%s_%d", scope, testSeq.Add(1))
+	accountID = fmt.Sprintf("ca_%s_%d", scope, testSeq.Add(1))
+	if scope == "team" {
+		table = "workspace_composio_connection"
+		id = dbfx.Insert(t, table, testutil.Cols{
+			"workspace_id": testWorkspaceID, "toolkit_slug": "gmail", "auth_config_id": "ac_gmail",
+			"connected_account_id": accountID, "composio_user_id": userID, "connected_by": testUserID,
+		})
+	} else {
+		table = "user_composio_connection"
+		dbfx.QueryRow(t, `UPDATE user_composio_connection SET composio_user_id = $1, connected_account_id = $2
+			WHERE user_id = $3 AND toolkit_slug = 'gmail' AND status = 'active' RETURNING id`, userID, accountID, testUserID).Scan(&id)
+		dbfx.Cleanup(t, `DELETE FROM user_composio_connection WHERE id = $1`, id)
+	}
+	return
+}
+
+func (f *appsFixture) approve(t *testing.T, requestID string, args map[string]any) AppRequestResponse {
+	t.Helper()
+	var body any
+	if args != nil {
+		body = map[string]any{"arguments": args}
+	}
+	req := appsReqAs(t, testUserID, http.MethodPost, "/api/app-requests/"+requestID+"/approve", body)
+	var out AppRequestResponse
+	testutil.Call(t, f.h.ApproveAppRequest, withURLParam(req, "id", requestID)).Want(http.StatusOK).JSON(&out)
+	return out
+}
+
+func TestConnectedApps_ExecutionIdentity(t *testing.T) {
+	for _, scope := range []string{"personal", "team"} {
+		for _, approved := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/approved=%t", scope, approved), func(t *testing.T) {
+				f := newAppsFixture(t)
+				table, id, userID, accountID := f.executionAccount(t, scope)
+				if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": scope, "level": "confirm_writes"}}); w.Code != http.StatusOK {
+					t.Fatalf("attach app: %d %s", w.Code, w.Body.String())
+				}
+				tool := "GMAIL_FETCH_EMAILS"
+				if approved {
+					tool = "GMAIL_SEND_EMAIL"
+				}
+				args := map[string]any{"user_id": "me", "connected_account_id": "caller_account", "body": "private draft"}
+				_, text, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": tool, "arguments": args})
+				if isErr {
+					t.Fatalf("gateway call failed: %s", text)
+				}
+				if approved {
+					if !strings.HasPrefix(text, "submitted") || len(f.sdk.executions()) != 0 {
+						t.Fatalf("call did not wait for approval: %s", text)
+					}
+					requests := f.listRequests(t, testUserID)
+					if len(requests) != 1 {
+						t.Fatalf("requests = %+v", requests)
+					}
+					// Execution must resolve the current pair again after approval.
+					userID, accountID = userID+"_reconnected", accountID+"_reconnected"
+					dbfx.Exec(t, "UPDATE "+table+" SET composio_user_id = $1, connected_account_id = $2 WHERE id = $3", userID, accountID, id)
+					args["body"] = "edited draft"
+					if out := f.approve(t, requests[0].ID, args); out.Status != "approved" {
+						t.Fatalf("approved call = %+v", out)
+					}
+				}
+				execs := f.sdk.executions()
+				if len(execs) != 1 {
+					t.Fatalf("executions = %d, want 1", len(execs))
+				}
+				if got := execs[0]; got.UserID != userID || got.ConnectedAccountID != accountID || !reflect.DeepEqual(got.Arguments, args) {
+					t.Fatalf("execution identity or tool arguments changed: %+v", got)
+				}
+			})
+		}
+	}
+}
+
+func TestConnectedApps_ExecutionRejectsMissingIdentity(t *testing.T) {
+	for _, scope := range []string{"personal", "team"} {
+		for _, approved := range []bool{false, true} {
+			for _, identity := range []string{"", " \t"} {
+				t.Run(fmt.Sprintf("%s/approved=%t/identity=%q", scope, approved, identity), func(t *testing.T) {
+					f := newAppsFixture(t)
+					table, id, _, _ := f.executionAccount(t, scope)
+					if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": scope, "level": "confirm_writes"}}); w.Code != http.StatusOK {
+						t.Fatalf("attach app: %d %s", w.Code, w.Body.String())
+					}
+					args := map[string]any{"user_id": "me"}
+					if approved {
+						_, text, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL", "arguments": args})
+						if isErr || !strings.HasPrefix(text, "submitted") {
+							t.Fatalf("submit = %s", text)
+						}
+					}
+					dbfx.Exec(t, "UPDATE "+table+" SET composio_user_id = $1 WHERE id = $2", identity, id)
+					if approved {
+						requests := f.listRequests(t, testUserID)
+						if len(requests) != 1 {
+							t.Fatalf("requests = %+v", requests)
+						}
+						if out := f.approve(t, requests[0].ID, nil); out.Status != "failed" || out.Error == nil || !strings.Contains(*out.Error, "user ID is missing") {
+							t.Fatalf("missing identity approval = %+v", out)
+						}
+					} else if _, text, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_FETCH_EMAILS", "arguments": args}); !isErr || !strings.Contains(text, "user ID is missing") {
+						t.Fatalf("missing identity call = %s (error %v)", text, isErr)
+					}
+					if len(f.sdk.executions()) != 0 {
+						t.Fatal("missing identity reached upstream")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestConnectedApps_ExecutionAccountIsolation(t *testing.T) {
+	for _, scope := range []string{"personal", "team"} {
+		for _, approved := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/approved=%t", scope, approved), func(t *testing.T) {
+				f := newAppsFixture(t)
+				table, id, _, _ := f.executionAccount(t, scope)
+				if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": scope, "level": "confirm_writes"}}); w.Code != http.StatusOK {
+					t.Fatalf("attach app: %d %s", w.Code, w.Body.String())
+				}
+				args := map[string]any{"user_id": "me"}
+				var requestID string
+				if approved {
+					f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL", "arguments": args})
+					requests := f.listRequests(t, testUserID)
+					if len(requests) != 1 {
+						t.Fatalf("requests = %+v", requests)
+					}
+					requestID = requests[0].ID
+					req := appsReqAs(t, f.member, http.MethodPost, "/api/app-requests/"+requestID+"/approve", nil)
+					testutil.Call(t, f.h.ApproveAppRequest, withURLParam(req, "id", requestID)).Want(http.StatusForbidden)
+					otherWorkspace := dbfx.Workspace(t, "Foreign approvals", fmt.Sprintf("apps-approval-%d", testSeq.Add(1)))
+					if _, err := f.h.ConnectedApps.Approve(context.Background(), parseUUID(otherWorkspace), parseUUID(testUserID), parseUUID(requestID), nil); !errors.Is(err, connectedapps.ErrRequestNotFound) {
+						t.Fatalf("cross-workspace approval = %v", err)
+					}
+					if len(f.sdk.executions()) != 0 {
+						t.Fatal("unauthorized approval reached upstream")
+					}
+				}
+				if scope == "personal" {
+					dbfx.Exec(t, "UPDATE "+table+" SET user_id = $1 WHERE id = $2", f.member, id)
+				} else {
+					otherWorkspace := dbfx.Workspace(t, "Foreign account", fmt.Sprintf("apps-account-%d", testSeq.Add(1)))
+					dbfx.Exec(t, "UPDATE "+table+" SET workspace_id = $1 WHERE id = $2", otherWorkspace, id)
+				}
+				if approved {
+					if out := f.approve(t, requestID, nil); out.Status != "failed" {
+						t.Fatalf("foreign account approval = %+v", out)
+					}
+				} else if _, text, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_FETCH_EMAILS", "arguments": args}); !isErr {
+					t.Fatalf("foreign account call succeeded: %s", text)
+				}
+				if len(f.sdk.executions()) != 0 {
+					t.Fatal("foreign account reached upstream")
+				}
+			})
+		}
+	}
+}
+
+func TestConnectedApps_ExecutionFailureLogs(t *testing.T) {
+	for _, approved := range []bool{false, true} {
+		for _, category := range []string{"request_failed", "tool_unsuccessful"} {
+			t.Run(fmt.Sprintf("approved=%t/%s", approved, category), func(t *testing.T) {
+				f := newAppsFixture(t)
+				_, _, userID, accountID := f.executionAccount(t, "personal")
+				if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "personal", "level": "confirm_writes"}}); w.Code != http.StatusOK {
+					t.Fatalf("attach app: %d %s", w.Code, w.Body.String())
+				}
+				const private = "private_mail_or_token"
+				if category == "request_failed" {
+					f.sdk.executeErr = errors.New(private)
+				} else {
+					f.sdk.toolError = private
+				}
+				var logs bytes.Buffer
+				prev := slog.Default()
+				slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+				t.Cleanup(func() { slog.SetDefault(prev) })
+				tool := "GMAIL_FETCH_EMAILS"
+				if approved {
+					tool = "GMAIL_SEND_EMAIL"
+				}
+				code, text, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": tool, "arguments": map[string]any{"body": private}})
+				requestID := ""
+				if approved {
+					requests := f.listRequests(t, testUserID)
+					if len(requests) != 1 {
+						t.Fatalf("requests = %+v", requests)
+					}
+					requestID = requests[0].ID
+					if out := f.approve(t, requestID, nil); out.Status != "failed" {
+						t.Fatalf("upstream failure approval = %+v", out)
+					}
+				} else if code != http.StatusOK || !isErr || !strings.Contains(text, private) {
+					t.Fatalf("MCP error changed: HTTP %d, %s (error %v)", code, text, isErr)
+				}
+				var event map[string]any
+				for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+					var entry map[string]any
+					if json.Unmarshal([]byte(line), &entry) == nil && entry["msg"] == "connectedapps: tool execution failed" {
+						event = entry
+					}
+				}
+				if event["workspace_id"] != testWorkspaceID || event["task_id"] != f.taskID || event["request_id"] != requestID || event["toolkit"] != "gmail" || event["tool"] != tool || event["account_scope"] != "personal" || event["error_class"] != category {
+					t.Fatalf("failure log = %v", event)
+				}
+				for _, sensitive := range []string{private, userID, accountID} {
+					if strings.Contains(logs.String(), sensitive) {
+						t.Fatalf("sensitive value appeared in logs: %q", sensitive)
+					}
+				}
+				if n := dbfx.Count(t, `SELECT count(*) FROM app_tool_call WHERE task_id = $1 AND outcome = 'error'`, f.taskID); n != 1 {
+					t.Fatalf("recorded failures = %d, want 1", n)
+				}
+			})
+		}
 	}
 }

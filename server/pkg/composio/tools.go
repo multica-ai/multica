@@ -12,10 +12,8 @@ import (
 //
 // Spec: https://docs.composio.dev/reference/api-reference/tools/postToolsExecuteByToolSlug
 //
-// Either ConnectedAccountID or (UserID + the tool's toolkit) is required so
-// Composio knows which credential set to use. The SDK does not enforce that
-// invariant up front; the upstream returns a 422 with a clear message when
-// missing.
+// Connected-account callers should send both ConnectedAccountID and its UserID.
+// The SDK leaves provider-specific identity validation to the upstream.
 type ExecuteToolRequest struct {
 	// Arguments is the structured input to the tool. Shape varies per tool.
 	Arguments map[string]any `json:"arguments,omitempty"`
@@ -23,8 +21,8 @@ type ExecuteToolRequest struct {
 	// ConnectedAccountID pins execution to a specific connected account.
 	ConnectedAccountID string `json:"connected_account_id,omitempty"`
 
-	// UserID lets Composio resolve the connected account by user when
-	// the caller does not have the explicit `ca_` id handy.
+	// UserID identifies the Composio owner of the connected account. It is
+	// separate from any user_id inside Arguments (e.g. Gmail's "me").
 	UserID string `json:"user_id,omitempty"`
 
 	// Version pins the tool definition version. Pass "latest" or a dated
