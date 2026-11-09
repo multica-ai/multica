@@ -9,10 +9,9 @@ import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
 import { useConfigStore } from "@multica/core/config";
 import { formatStarCount, githubStarsOptions, MULTICA_GITHUB_URL } from "@multica/core/github/stars";
-import { useWorkspaceId } from "@multica/core/hooks";
 import { createLogger } from "@multica/core/logger";
 import { needsSourceBackfill } from "@multica/core/onboarding";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useSessionPromptStore } from "@multica/core/session-prompt";
 import {
   agentDoneIssueCountOptions,
@@ -67,7 +66,8 @@ interface Showing {
 export function StarPrompt() {
   const { t } = useT("layout");
   const titleId = useId();
-  const wsId = useWorkspaceId();
+  // Shells mount this while the workspace slug is still resolving.
+  const wsId = useCurrentWorkspace()?.id ?? null;
   const qc = useQueryClient();
   const moment = useStarPromptStore((s) => s.moment);
   const disabled = useConfigStore((s) => s.starPromptDisabled);
@@ -89,10 +89,10 @@ export function StarPrompt() {
   }, []);
 
   useEffect(() => {
-    if (!moment) return;
+    if (!moment || !wsId) return;
 
-    const consider = async (m: StarPromptMoment) => {
-      if (m.wsId !== wsId || disabled) return;
+    const consider = async (m: StarPromptMoment, workspaceId: string) => {
+      if (m.wsId !== workspaceId || disabled) return;
       if (useSessionPromptStore.getState().prompted) return;
       const user = useAuthStore.getState().user;
       if (!starPromptDue(user, Date.now())) return;
@@ -101,8 +101,8 @@ export function StarPrompt() {
       if (!isQuietMoment()) return;
 
       const [doneCount, agents] = await Promise.all([
-        qc.fetchQuery(agentDoneIssueCountOptions(wsId, m.agentId)),
-        qc.fetchQuery(agentListOptions(wsId)),
+        qc.fetchQuery(agentDoneIssueCountOptions(workspaceId, m.agentId)),
+        qc.fetchQuery(agentListOptions(workspaceId)),
       ]);
       const agent = agents.find((a) => a.id === m.agentId);
       if (!agent || doneCount < STAR_PROMPT_MIN_AGENT_DONE_ISSUES) return;
@@ -113,7 +113,7 @@ export function StarPrompt() {
 
     const timer = window.setTimeout(() => {
       useStarPromptStore.getState().clearMoment();
-      consider(moment).catch((err) => logger.warn("failed to evaluate star prompt", err));
+      consider(moment, wsId).catch((err) => logger.warn("failed to evaluate star prompt", err));
     }, STAR_PROMPT_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [moment, wsId, disabled, qc]);

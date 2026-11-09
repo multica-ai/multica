@@ -32,13 +32,12 @@ const stores = vi.hoisted(() => {
 
 vi.mock("@multica/core/auth", () => ({ useAuthStore: stores.auth }));
 vi.mock("@multica/core/chat", () => ({ useChatStore: stores.chat }));
-vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/paths", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/paths")>("@multica/core/paths");
   return {
     ...actual,
     useWorkspacePaths: () => ({ chat: () => "/acme/chat" }),
-    useCurrentWorkspace: () => ({ id: "ws-1", slug: "acme" }),
+    useCurrentWorkspace: () => workspace.current,
   };
 });
 vi.mock("@multica/core/onboarding", async () => {
@@ -65,6 +64,9 @@ vi.mock("@multica/core/star-prompt", async () => {
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const workspace = vi.hoisted(() => ({
+  current: { id: "ws-1", slug: "acme" } as { id: string; slug: string } | null,
+}));
 const listIssues = vi.fn();
 let qc: QueryClient;
 
@@ -117,6 +119,7 @@ beforeEach(() => {
   stores.chat.setState({ isOpen: false });
   useStarPromptStore.setState({ moment: null });
   useSessionPromptStore.setState({ prompted: false });
+  workspace.current = { id: "ws-1", slug: "acme" };
 });
 
 afterEach(() => {
@@ -208,6 +211,15 @@ describe("StarPrompt", () => {
     input.remove();
 
     expect(listIssues).not.toHaveBeenCalled();
+  });
+
+  it("waits quietly while the workspace is still resolving", async () => {
+    workspace.current = null;
+    renderPrompt();
+    await agentFinishesIssue();
+
+    expect(listIssues).not.toHaveBeenCalled();
+    expect(claimStarPromptShowing).not.toHaveBeenCalled();
   });
 
   it("does nothing when the deployment turns it off", async () => {
