@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "Открыть в приложении"
+  },
+  "desktop": {
+    "link_other_instance": "Приложение подключено к другому экземпляру Multica.",
+    "link_workspace_unavailable": "Это рабочее пространство недоступно в приложении."
+  },
   "inline_run": {
     "label": "Запуск {{name}}",
     "stop": "Остановить",

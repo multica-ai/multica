@@ -16,6 +16,7 @@ import {
   Hash,
   Link2,
   LocateFixed,
+  Monitor,
   Network,
   Pin,
   PinOff,
@@ -160,6 +161,7 @@ export function IssueActionsMenuItems({
     isPinned,
     updateField,
     openInNewTab,
+    openInDesktop,
     togglePin,
     copyLink,
     openCreateSubIssue,
@@ -417,6 +419,12 @@ export function IssueActionsMenuItems({
         <ExternalLink className="h-3.5 w-3.5" />
         {t(($) => $.actions.open_in_new_tab)}
       </P.Item>
+      {openInDesktop && (
+        <P.Item onClick={openInDesktop}>
+          <Monitor className="h-3.5 w-3.5" />
+          {t(($) => $.web.open_in_desktop)}
+        </P.Item>
+      )}
       <P.Item onClick={togglePin}>
         {isPinned ? (
           <PinOff className="h-3.5 w-3.5" />

@@ -1,3 +1,5 @@
+import type { WorkspacePathOptions } from "../../../shared/workspace-window";
+
 /**
  * Desktop main windows each show one workspace (the VS Code folder model).
  * These helpers send a workspace this window does not show to the window
@@ -14,9 +16,14 @@ function isMainWindow(): boolean {
  * already shows that workspace. Returns false when no other window does, so
  * the caller switches its own workspace instead.
  */
-export function handOffToWorkspaceWindow(slug: string, path?: string): boolean {
+export function handOffToWorkspaceWindow(
+  slug: string,
+  path?: string,
+  options?: WorkspacePathOptions,
+): boolean {
   if (!isMainWindow()) return false;
-  return window.desktopAPI.focusWorkspaceWindow?.(slug, path) ?? false;
+  const focus = window.desktopAPI.focusWorkspaceWindow;
+  return (options ? focus?.(slug, path, options) : focus?.(slug, path)) ?? false;
 }
 
 export function openWorkspaceInNewWindow(slug: string): void {

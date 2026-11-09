@@ -451,7 +451,7 @@ assert_desktop_env_sync() (
   local case_name=$1 initial=$2 expected=$3
   # shellcheck disable=SC1090
   source "$root_dir/scripts/dev-env.sh"
-  NAME=sync-env BACKEND_PORT=18555
+  NAME=sync-env BACKEND_PORT=18555 FRONTEND_PORT=13555
   DESKTOP_ENV_FILE="$tmp_dir/desktop-env-$case_name"
   rm -f "$DESKTOP_ENV_FILE"
   [ -z "$initial" ] || printf '%s\n' "$initial" > "$DESKTOP_ENV_FILE"
@@ -462,6 +462,9 @@ assert_desktop_env_sync() (
 assert_desktop_env_sync missing "" "VITE_API_URL=http://localhost:18555"
 assert_desktop_env_sync managed-elsewhere "# Managed by scripts/dev-env.sh for environment old-env." \
   "VITE_API_URL=http://localhost:18555"
+assert_desktop_env_sync managed-missing-app "# Managed by scripts/dev-env.sh for environment sync-env.
+VITE_API_URL=http://localhost:18555
+VITE_WS_URL=ws://localhost:18555/ws" "VITE_APP_URL=http://localhost:13555"
 assert_desktop_env_sync hand-written "VITE_API_URL=https://staging.example" "VITE_API_URL=https://staging.example"
 
 # Turbo puts Electron in a nested process group; the stop path finds it through
