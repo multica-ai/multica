@@ -200,7 +200,7 @@
   "inspector": {
     "section_profile": "Профиль",
     "section_execution": "Выполнение",
-    "qoder_execution_note": "Модель, инструменты и skill настраиваются у агента в Qoder Cloud Agents.",
+    "qoder_execution_note": "Модель, инструменты и навыки настраиваются у агента в Qoder Cloud Agents.",
     "section_access": "Доступ",
     "section_properties": "Свойства",
     "section_details": "Сведения",
