@@ -12,16 +12,17 @@ import {
   findBuiltInTheme,
   isDefaultAppearance,
   isSafeFontValue,
-  isSafeTokenValue,
+  isSafeThemeValue,
   localizedText,
   sanitizeAppearance,
   sanitizeThemeCss,
-  themeStylesheet,
+  THEME_VARIABLE_NAMES,
+  themeModeVariables,
+  themeTokensCss,
   useAppearanceStore,
   useInstalledThemesStore,
   type AppearancePreferences,
-  type ThemeManifest,
-  type ThemeToken,
+  type Theme,
 } from ".";
 
 const pop = findBuiltInTheme("pop")!;
@@ -135,15 +136,12 @@ describe("appearanceStylesheet", () => {
     expect(appearanceThemeAttributes(defaults, DEFAULT_APPEARANCE)).toEqual({ "data-theme": null });
   });
 
-  it("puts the accent and contrast after the theme so they win", () => {
+  it("writes accent and contrast with selectors that outrank the theme's", () => {
     const prefs = { ...DEFAULT_APPEARANCE, theme: "github", accent: "violet", highContrast: true } as const;
     const css = appearanceStylesheet(activeTheme(prefs), prefs);
-    const theme = css.indexOf("--button-primary:");
-    const accent = css.indexOf("--brand: oklch(0.52 0.2 292)");
-    const contrast = css.indexOf("--muted-foreground: color-mix");
-    expect(theme).toBeGreaterThanOrEqual(0);
-    expect(accent).toBeGreaterThan(theme);
-    expect(contrast).toBeGreaterThan(accent);
+    expect(css).toContain(":root:not(.dark) { --brand: oklch(0.52 0.2 292);");
+    expect(css).toMatch(/:root:not\(\.dark\), :root\.dark \{ --muted-foreground: color-mix/);
+    expect(activeTheme(prefs).css).toMatch(/^\.theme-light \{/);
   });
 
   it("names the theme and its options, defaults included", () => {
@@ -167,12 +165,11 @@ describe("appearanceStylesheet", () => {
   });
 
   it("applies an installed theme and its CSS", () => {
-    const theme: ThemeManifest = {
+    const theme: Theme = {
       apiVersion: 1,
       id: "paper",
       name: "Paper",
-      tokens: { light: { "page-canvas": "oklch(0.97 0.02 85)" }, dark: {} },
-      css: '[data-mc="content"] p { hyphens: auto; }',
+      css: '.theme-light { --page-canvas: oklch(0.97 0.02 85); }\n[data-mc="content"] p { hyphens: auto; }',
     };
     useInstalledThemesStore.setState({ themes: [theme] });
     const active = activeTheme({ ...DEFAULT_APPEARANCE, theme: "paper" });
@@ -183,16 +180,26 @@ describe("appearanceStylesheet", () => {
 });
 
 describe("built-in themes", () => {
-  it("have unique ids, safe values and CSS that passes the same check as installed themes", () => {
+  it("set only public variables, and their CSS passes the same check as installed themes", () => {
     expect(new Set(BUILT_IN_THEMES.map((t) => t.id)).size).toBe(BUILT_IN_THEMES.length);
     for (const theme of BUILT_IN_THEMES) {
       for (const tokens of [theme.tokens.light, theme.tokens.dark, theme.frame?.light, theme.frame?.dark]) {
         for (const [name, value] of Object.entries(tokens ?? {})) {
-          expect(isSafeTokenValue(name as ThemeToken, value)).toBe(true);
+          expect(THEME_VARIABLE_NAMES.has(name), name).toBe(true);
+          expect(isSafeFontValue(value) || isSafeThemeValue(value), `${name}: ${value}`).toBe(true);
         }
       }
-      if (theme.css) expect(sanitizeThemeCss(theme.css, theme.assets)).toEqual({ ok: true, css: theme.css });
+      expect(sanitizeThemeCss(theme.css, theme.assets)).toEqual({ ok: true, css: theme.css });
     }
+  });
+
+  it("compile their token tables to mode rules a preview can read back", () => {
+    const github = findBuiltInTheme("github")!;
+    expect(themeModeVariables(github.css).light).toEqual(github.tokens.light);
+    expect(themeModeVariables(github.css).dark).toEqual(github.tokens.dark);
+    expect(themeTokensCss({ tokens: { light: { surface: "oklch(1 0 0)" }, dark: {} } })).toBe(
+      ".theme-light { --surface: oklch(1 0 0); }",
+    );
   });
 
   it("give Pop's options a label in every locale the app ships", () => {
@@ -203,25 +210,6 @@ describe("built-in themes", () => {
     }
     expect(localizedText(pop.options![0]!.label, "zh-Hant")).toBe("信號色");
     expect(localizedText(pop.options![0]!.label, "de")).toBe("Signal color");
-  });
-
-  it("drops unknown tokens and unsafe values from a manifest", () => {
-    const manifest = {
-      apiVersion: 1,
-      id: "evil",
-      name: "Evil",
-      tokens: {
-        light: {
-          brand: "red; } body { display: none",
-          "page-canvas": "url(https://example.com/x.png)",
-          "font-ui": '"Inter"; } body { display: none',
-          surface: "oklch(1 0 0)",
-          position: "fixed",
-        },
-        dark: {},
-      },
-    } as unknown as ThemeManifest;
-    expect(themeStylesheet(manifest)).toBe(":root:not(.dark) { --surface: oklch(1 0 0); }");
   });
 });
 

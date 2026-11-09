@@ -7,8 +7,7 @@ import {
   DEFAULT_THEME_ID,
   findBuiltInTheme,
   themeOptionAttributes,
-  themeStylesheet,
-  type ThemeManifest,
+  type Theme,
   type ThemeOptionValues,
 } from "./themes";
 
@@ -18,14 +17,15 @@ export * from "./theme-package";
 export * from "./installed-themes";
 export * from "./anchors";
 export * from "./theme-variables";
+export * from "./theme-archive";
 
 /**
  * Appearance sits on top of light/dark mode: a theme (see ./themes) with its
  * options, an accent colour, type for the interface and for content, density
  * and two accessibility switches. All of it is saved on this device.
  * `AppearanceSync` in @multica/views writes it onto `<html>`: global
- * variables as inline style, mode-dependent tokens and the theme's own CSS
- * as generated stylesheets.
+ * variables as inline style, the theme's CSS and the adjustments on top of
+ * it as two generated stylesheets.
  */
 
 export const UI_FONTS = ["inter", "system", "serif", "mono"] as const;
@@ -314,7 +314,7 @@ export const useThemeSafeMode = create<SafeModeState>()((set) => ({
 }));
 
 /** The theme to render: the chosen one, or Default in safe mode or when it is not installed. */
-export function activeTheme(prefs: Pick<AppearancePreferences, "theme">, safeMode = false): ThemeManifest {
+export function activeTheme(prefs: Pick<AppearancePreferences, "theme">, safeMode = false): Theme {
   const fallback = findBuiltInTheme(DEFAULT_THEME_ID)!;
   if (safeMode) return fallback;
   return findTheme(prefs.theme) ?? fallback;
@@ -323,12 +323,12 @@ export function activeTheme(prefs: Pick<AppearancePreferences, "theme">, safeMod
 const BOTH_MODES = ":root:not(.dark), :root.dark";
 
 /**
- * Everything mode-dependent, in cascade order: the theme's tokens, then the
- * accent and contrast adjustments on top of whichever theme is active. Every
- * block uses the theme blocks' specificity, so order decides.
+ * What the person chose on top of the theme: accent and contrast. Written
+ * after the theme's CSS, with selectors that outrank `.theme-light` and
+ * `.theme-dark`, so they hold whichever theme is active.
  */
-export function appearanceStylesheet(theme: ThemeManifest, prefs: AppearancePreferences): string {
-  const parts: string[] = [themeStylesheet(theme)];
+export function appearanceStylesheet(_theme: Theme, prefs: AppearancePreferences): string {
+  const parts: string[] = [];
   if (prefs.accent !== "theme") {
     const accent = ACCENT_COLORS[prefs.accent];
     parts.push(
@@ -352,13 +352,13 @@ export function appearanceStylesheet(theme: ThemeManifest, prefs: AppearancePref
 }
 
 /** The theme's own CSS, checked and with assets resolved. */
-export function appearanceThemeCss(theme: ThemeManifest): string {
+export function appearanceThemeCss(theme: Theme): string {
   return themeCss(theme);
 }
 
 /** Attributes for <html>: `data-theme` and the theme's options; `null` removes one. */
 export function appearanceThemeAttributes(
-  theme: ThemeManifest,
+  theme: Theme,
   prefs: AppearancePreferences,
 ): Record<string, string | null> {
   if (theme.id === DEFAULT_THEME_ID) return { [APPEARANCE_THEME_ATTR]: null };

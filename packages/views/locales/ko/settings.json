@@ -219,8 +219,8 @@
     },
     "import": {
       "button": "테마 가져오기",
-      "too_large": "테마 파일은 최대 {{size}}KB예요.",
-      "not_json": "유효한 JSON 파일이 아니에요.",
+      "from_zip": "테마 파일(.zip)",
+      "from_folder": "테마 폴더",
       "storage_full": "이 기기에 테마를 저장할 공간이 부족해요. 다른 테마를 제거한 뒤 다시 시도하세요.",
       "confirm_title": "‘{{name}}’을(를) 설치할까요?",
       "warning": "테마는 대화상자와 경고를 포함한 모든 화면의 모양을 바꿀 수 있어요. 신뢰하는 사람이 만든 테마만 설치하세요.",
@@ -228,14 +228,13 @@
       "version": "버전",
       "replaces": "{{to}} ({{from}} 대체)",
       "includes": "포함",
-      "has_tokens": "색상",
-      "has_css": "자체 CSS",
       "cancel": "취소",
       "confirm": "설치하고 사용",
       "error_title": "이 테마를 설치할 수 없어요",
       "error_description": "아무것도 바뀌지 않았어요. 테마 파일에 다음 문제가 있어요:",
       "close": "닫기",
-      "has_options_other": "옵션 {{count}}개"
+      "has_options_other": "옵션 {{count}}개",
+      "has_assets_other": "글꼴·이미지 {{count}}개"
     },
     "accent": {
       "title": "강조 색상",

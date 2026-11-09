@@ -2,7 +2,6 @@ import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  THEME_TOKENS,
   THEME_VARIABLES,
   THEME_VARIABLE_NAMES,
   THEME_VARIABLE_SECTIONS,
@@ -94,10 +93,6 @@ const END = "<!-- theme-variables:end -->";
 describe("theme variables", () => {
   it("has no duplicates", () => {
     expect(THEME_VARIABLE_NAMES.size).toBe(THEME_VARIABLES.length);
-  });
-
-  it("lists every token a theme could set before", () => {
-    expect(THEME_TOKENS.filter((token) => !THEME_VARIABLE_NAMES.has(token))).toEqual([]);
   });
 
   it("reads every component variable with its documented default", () => {

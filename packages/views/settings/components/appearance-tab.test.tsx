@@ -42,18 +42,19 @@ const PAPER = {
   name: "Paper",
   author: "Someone",
   version: "1.0.0",
-  tokens: { light: { "page-canvas": "#f6efdf" }, dark: {} },
-  css: '[data-mc="content"] p { hyphens: auto; }',
 };
+const PAPER_CSS = '.theme-light { --page-canvas: #f6efdf; }\n[data-mc="content"] p { hyphens: auto; }';
 
-function themeFile(content: unknown, name = "paper.json") {
-  return new File([typeof content === "string" ? content : JSON.stringify(content)], name, {
-    type: "application/json",
-  });
+/** The files of a theme folder, as the folder picker returns them. */
+function themeFolder(manifest: unknown, css: string) {
+  return [
+    new File([JSON.stringify(manifest)], "manifest.json", { type: "application/json" }),
+    new File([css], "theme.css", { type: "text/css" }),
+  ];
 }
 
-function fileInput() {
-  return document.querySelector<HTMLInputElement>('input[type="file"]')!;
+function folderInput() {
+  return document.querySelector<HTMLInputElement>('input[type="file"][webkitdirectory]')!;
 }
 
 describe("AppearanceTab", () => {
@@ -156,10 +157,13 @@ describe("AppearanceTab", () => {
     const user = userEvent.setup();
     render(<AppearanceTab />, { wrapper: Wrapper });
 
-    await user.upload(fileInput(), themeFile(PAPER));
+    await user.click(screen.getByRole("button", { name: "Import theme" }));
+    expect(await screen.findByRole("menuitem", { name: "Theme file (.zip)" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.upload(folderInput(), themeFolder(PAPER, PAPER_CSS));
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText("Install “Paper”?")).toBeInTheDocument();
-    expect(within(dialog).getByText("Colors · Its own CSS")).toBeInTheDocument();
+    expect(within(dialog).getByText("theme.css")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Install and use" }));
 
     expect(useInstalledThemesStore.getState().themes.map((t) => t.id)).toEqual(["paper"]);
@@ -178,13 +182,10 @@ describe("AppearanceTab", () => {
     const user = userEvent.setup();
     render(<AppearanceTab />, { wrapper: Wrapper });
 
-    await user.upload(
-      fileInput(),
-      themeFile({ ...PAPER, css: "body { background: url(https://evil.test/x); }" }),
-    );
+    await user.upload(folderInput(), themeFolder(PAPER, "body { background: url(https://evil.test/x); }"));
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText("Couldn't install this theme")).toBeInTheDocument();
-    expect(within(dialog).getByText(/css line 1: url\("https:\/\/evil.test\/x"\)/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/theme\.css line 1: url\("https:\/\/evil.test\/x"\)/)).toBeInTheDocument();
     expect(useInstalledThemesStore.getState().themes).toEqual([]);
   });
 

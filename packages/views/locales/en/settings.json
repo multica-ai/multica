@@ -221,8 +221,8 @@
     },
     "import": {
       "button": "Import theme",
-      "too_large": "A theme file can be at most {{size}} KB.",
-      "not_json": "The file is not valid JSON.",
+      "from_zip": "Theme file (.zip)",
+      "from_folder": "Theme folder",
       "storage_full": "There isn't enough space on this device to save the theme. Remove another theme and try again.",
       "confirm_title": "Install “{{name}}”?",
       "warning": "A theme can restyle every page, including dialogs and warnings. Only install themes from people you trust.",
@@ -230,15 +230,15 @@
       "version": "Version",
       "replaces": "{{to}} (replaces {{from}})",
       "includes": "Includes",
-      "has_tokens": "Colors",
-      "has_css": "Its own CSS",
       "cancel": "Cancel",
       "confirm": "Install and use",
       "error_title": "Couldn't install this theme",
       "error_description": "Nothing was changed. The theme file has these problems:",
       "close": "Close",
       "has_options_one": "{{count}} option",
-      "has_options_other": "{{count}} options"
+      "has_options_other": "{{count}} options",
+      "has_assets_one": "{{count}} font or image",
+      "has_assets_other": "{{count}} fonts and images"
     },
     "accent": {
       "title": "Accent color",

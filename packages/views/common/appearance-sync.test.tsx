@@ -18,8 +18,7 @@ const PAPER = {
   apiVersion: 1,
   id: "paper",
   name: "Paper",
-  tokens: { light: { "page-canvas": "#f6efdf" }, dark: {} },
-  css: '[data-mc="content"] p { hyphens: auto; }',
+  css: '.theme-light { --page-canvas: #f6efdf; }\n[data-mc="content"] p { hyphens: auto; }',
 } as const;
 
 describe("AppearanceSync", () => {
@@ -40,11 +39,25 @@ describe("AppearanceSync", () => {
     expect(themeCss()).toBeNull();
   });
 
+  it("marks the mode on <html> for theme CSS, following the dark class", async () => {
+    const { unmount } = render(<AppearanceSync />);
+    expect(html().classList.contains("theme-light")).toBe(true);
+    html().classList.add("dark");
+    await act(async () => {});
+    expect(html().classList.contains("theme-dark")).toBe(true);
+    expect(html().classList.contains("theme-light")).toBe(false);
+    html().classList.remove("dark");
+    await act(async () => {});
+    expect(html().classList.contains("theme-light")).toBe(true);
+    unmount();
+    expect(html().classList.contains("theme-light")).toBe(false);
+  });
+
   it("mirrors the theme, its options, type and density onto <html>", () => {
     render(<AppearanceSync />);
     act(() => {
       const { set, setThemeOption } = useAppearanceStore.getState();
-      set({ theme: "pop", uiFont: "serif", fontSize: 15, contentCjkFont: "serif", density: "comfortable" });
+      set({ theme: "pop", accent: "violet", uiFont: "serif", fontSize: 15, contentCjkFont: "serif", density: "comfortable" });
       setThemeOption("pop", "status-blocks", false);
     });
     expect(html().getAttribute("data-theme")).toBe("pop");
@@ -55,18 +68,27 @@ describe("AppearanceSync", () => {
     expect(html().style.getPropertyValue("--font-content-cjk")).toBe("var(--font-cjk-serif)");
     expect(html().style.getPropertyValue("--font-scale")).toBe(String(15 / 14));
     expect(html().style.getPropertyValue("--issue-row-height")).toBe("42px");
-    expect(sheet()?.textContent).toContain("--button-primary:");
+    expect(themeCss()?.textContent).toContain("--button-primary:");
     expect(themeCss()?.textContent).toContain('[data-mc="issue-group-header"]');
-    expect(sheet()!.compareDocumentPosition(themeCss()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(sheet()?.textContent).toContain("--brand: oklch(0.52 0.2 292)");
 
     act(() => useAppearanceStore.getState().set({ theme: "github" }));
     expect(html().hasAttribute("data-theme-option-signal")).toBe(false);
-    expect(themeCss()).toBeNull();
+    expect(themeCss()?.textContent).not.toContain('[data-mc="issue-group-header"]');
+    expect(themeCss()!.compareDocumentPosition(sheet()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     act(() => useAppearanceStore.getState().reset());
     expect(html().hasAttribute("data-theme")).toBe(false);
     expect(html().style.getPropertyValue("--font-ui")).toBe("");
     expect(sheet()).toBeNull();
+    expect(themeCss()).toBeNull();
+  });
+
+  it("keeps the adjustments after a theme stylesheet created later", () => {
+    useAppearanceStore.setState({ accent: "green" });
+    render(<AppearanceSync />);
+    act(() => useAppearanceStore.getState().set({ theme: "notion" }));
+    expect(themeCss()!.compareDocumentPosition(sheet()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("applies an installed theme's CSS, and nothing of it in safe mode", () => {

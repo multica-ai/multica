@@ -1,5 +1,5 @@
 /**
- * Checks and rewrites the stylesheet a theme ships (`ThemeManifest.css`).
+ * Checks and rewrites the stylesheet a theme ships (`theme.css`).
  *
  * A theme's CSS runs on every product page, so anything that makes the
  * browser fetch a URL could leak page content: attribute selectors can match

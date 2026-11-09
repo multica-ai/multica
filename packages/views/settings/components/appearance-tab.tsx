@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   Monitor,
@@ -23,6 +23,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -48,7 +54,6 @@ import {
   DENSITIES,
   FOLLOW_UI,
   FONT_SIZES,
-  THEME_PACKAGE_MAX_BYTES,
   UI_FONTS,
   activeTheme,
   cjkFontStack,
@@ -56,8 +61,9 @@ import {
   isLocalFont,
   localFontFamily,
   localizedText,
-  parseThemePackage,
+  readThemePackage,
   selectAppearance,
+  themeModeVariables,
   themeOptionValue,
   uiFontStack,
   useAppearanceStore,
@@ -67,9 +73,8 @@ import {
   type CodeFont,
   type ContentSize,
   type FontSize,
-  type ThemeManifest,
+  type Theme,
   type ThemeOption,
-  type ThemeTokens,
   type UiFont,
 } from "@multica/core/appearance";
 import { useLocale, useT } from "../../i18n";
@@ -147,7 +152,7 @@ function useAppliedMode(): PreviewMode {
 
 function useThemeLabel() {
   const { t } = useT("settings");
-  return (theme: ThemeManifest) =>
+  return (theme: Theme) =>
     theme.id === "default"
       ? t(($) => $.appearance.theme.default)
       : theme.id === "pop"
@@ -171,7 +176,7 @@ function ColorSection() {
   const themeLabel = t(($) => $.appearance.theme.title);
   const accentLabel = t(($) => $.appearance.accent.title);
   const current = activeTheme({ theme }, safeMode.active);
-  const themeBrand = current.tokens[appliedMode].brand ?? THEME_SWATCH_BASE[appliedMode].brand;
+  const themeBrand = swatchTokens(current, appliedMode).brand;
   const selected = [...BUILT_IN_THEMES, ...installed].find((manifest) => manifest.id === theme);
   const selectedInstalled = installed.find((manifest) => manifest.id === theme);
   const items = [...BUILT_IN_THEMES, ...installed].map((manifest) => ({
@@ -179,7 +184,7 @@ function ColorSection() {
     label: themeLabelFor(manifest),
   }));
 
-  const option = (manifest: ThemeManifest, author?: string) => (
+  const option = (manifest: Theme, author?: string) => (
     <SelectItem key={manifest.id} value={manifest.id}>
       <span className="flex min-w-0 flex-1 items-center gap-2.5">
         <ThemeSwatch theme={manifest} mode={appliedMode} />
@@ -293,14 +298,15 @@ function ColorSection() {
 }
 
 /**
- * Reads a theme file, shows what it is and that it can restyle every page,
- * and installs it on confirmation. Problems are listed as the checks report
- * them, which is what someone writing a theme needs.
+ * Reads a theme from a .zip or a folder, shows what it is and that it can
+ * restyle every page, and installs it on confirmation. Problems are listed
+ * as the checks report them, which is what someone writing a theme needs.
  */
 function ImportThemeButton() {
   const { t } = useT("settings");
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [pending, setPending] = useState<ThemeManifest | null>(null);
+  const zipRef = useRef<HTMLInputElement>(null);
+  const folderRef = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState<Theme | null>(null);
   const [errors, setErrors] = useState<string[] | null>(null);
   const installed = useInstalledThemesStore((s) => s.themes);
   const install = useInstalledThemesStore((s) => s.install);
@@ -308,19 +314,14 @@ function ImportThemeButton() {
   const set = useAppearanceStore((s) => s.set);
   const previous = pending ? installed.find((theme) => theme.id === pending.id) : undefined;
 
-  const readFile = async (file: File) => {
-    if (file.size > THEME_PACKAGE_MAX_BYTES) {
-      setErrors([t(($) => $.appearance.import.too_large, { size: THEME_PACKAGE_MAX_BYTES / 1024 })]);
-      return;
-    }
-    let json: unknown;
-    try {
-      json = JSON.parse(await file.text());
-    } catch {
-      setErrors([t(($) => $.appearance.import.not_json)]);
-      return;
-    }
-    const result = parseThemePackage(json);
+  useEffect(() => {
+    // Not in React's input props; it makes the picker choose a folder.
+    folderRef.current?.setAttribute("webkitdirectory", "");
+  }, []);
+
+  const read = async (files: File[]) => {
+    if (files.length === 0) return;
+    const result = await readThemePackage(files);
     if (result.ok) setPending(result.theme);
     else setErrors(result.errors);
   };
@@ -339,23 +340,39 @@ function ImportThemeButton() {
     setPending(null);
   };
 
+  const picker = (ref: React.RefObject<HTMLInputElement | null>, props: React.ComponentProps<"input">) => (
+    <input
+      ref={ref}
+      type="file"
+      className="hidden"
+      onChange={(event) => {
+        const files = Array.from(event.target.files ?? []);
+        event.target.value = "";
+        void read(files);
+      }}
+      {...props}
+    />
+  );
+  const assetCount = pending ? Object.keys(pending.assets ?? {}).length : 0;
+
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()}>
-        <Upload />
-        {t(($) => $.appearance.import.button)}
-      </Button>
-      <input
-        ref={inputRef}
-        type="file"
-        accept=".json,application/json"
-        className="hidden"
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          event.target.value = "";
-          if (file) void readFile(file);
-        }}
-      />
+      <DropdownMenu>
+        <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
+          <Upload />
+          {t(($) => $.appearance.import.button)}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={() => zipRef.current?.click()}>
+            {t(($) => $.appearance.import.from_zip)}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => folderRef.current?.click()}>
+            {t(($) => $.appearance.import.from_folder)}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {picker(zipRef, { accept: ".zip,application/zip", "aria-label": t(($) => $.appearance.import.from_zip) })}
+      {picker(folderRef, { multiple: true, "aria-label": t(($) => $.appearance.import.from_folder) })}
       <AlertDialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -385,8 +402,8 @@ function ImportThemeButton() {
               <dt className="text-muted-foreground">{t(($) => $.appearance.import.includes)}</dt>
               <dd>
                 {[
-                  t(($) => $.appearance.import.has_tokens),
-                  pending.css ? t(($) => $.appearance.import.has_css) : null,
+                  "theme.css",
+                  assetCount > 0 ? t(($) => $.appearance.import.has_assets, { count: assetCount }) : null,
                   pending.options ? t(($) => $.appearance.import.has_options, { count: pending.options.length }) : null,
                 ]
                   .filter(Boolean)
@@ -937,11 +954,13 @@ function LayoutSection() {
   );
 }
 
+type SwatchTokens = Record<"app-shell" | "page-canvas" | "surface-border" | "foreground" | "brand", string>;
+
 /**
  * The tokens a theme swatch needs, as tokens.css sets them for the default
- * theme. Theme manifests only list overrides, so swatches start from these.
+ * theme. A theme only overrides some of them, so swatches start from these.
  */
-const THEME_SWATCH_BASE: Record<PreviewMode, Required<Pick<ThemeTokens, "app-shell" | "page-canvas" | "surface-border" | "foreground" | "brand">>> = {
+const THEME_SWATCH_BASE: Record<PreviewMode, SwatchTokens> = {
   light: {
     "app-shell": "oklch(0.964 0.001 286)",
     "page-canvas": "oklch(0.988 0 0)",
@@ -958,16 +977,27 @@ const THEME_SWATCH_BASE: Record<PreviewMode, Required<Pick<ThemeTokens, "app-she
   },
 };
 
+const swatchCache = new WeakMap<Theme, ReturnType<typeof themeModeVariables>>();
+
+function swatchTokens(theme: Theme, mode: PreviewMode): SwatchTokens {
+  let variables = swatchCache.get(theme);
+  if (!variables) {
+    variables = themeModeVariables(theme.css);
+    swatchCache.set(theme, variables);
+  }
+  return { ...THEME_SWATCH_BASE[mode], ...variables[mode] };
+}
+
 /** A theme in miniature: its frame, page, ink and brand colour. */
-function ThemeSwatch({ theme, mode }: { theme: ThemeManifest; mode: PreviewMode }) {
-  const tokens = { ...THEME_SWATCH_BASE[mode], ...theme.tokens[mode] };
+function ThemeSwatch({ theme, mode }: { theme: Theme; mode: PreviewMode }) {
+  const tokens = swatchTokens(theme, mode);
   return (
     <span
       aria-hidden="true"
       data-theme-swatch={theme.id}
       data-swatch-mode={mode}
       className="flex h-4 w-6 shrink-0 items-end overflow-hidden rounded-[3px] p-[2px] ring-1 ring-foreground/10"
-      style={{ background: theme.frame?.[mode]?.["app-shell"] ?? tokens["app-shell"] }}
+      style={{ background: tokens["app-shell"] }}
     >
       <span
         className="flex size-full flex-col justify-center gap-[2px] rounded-[1.5px] px-[2px]"

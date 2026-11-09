@@ -1,37 +1,32 @@
+import { readZip, type ArchiveFile } from "./theme-archive";
 import { isSafeThemeAsset, sanitizeThemeCss, themeAssetPath } from "./theme-css";
 import {
   THEME_API_VERSION,
-  THEME_TOKENS,
   findBuiltInTheme,
   isSafeThemeValue,
-  isSafeTokenValue,
   type LocalizedText,
-  type ThemeManifest,
+  type Theme,
   type ThemeOption,
-  type ThemeTokens,
 } from "./themes";
 
 /**
- * Reads a theme package: a JSON object in the ThemeManifest shape, from a
- * file someone picked or from storage. Everything in it is untrusted, so the
- * result is rebuilt field by field from what passes validation; unknown
- * fields are dropped. Unknown token names are ignored rather than rejected,
- * so a theme written for a newer app still loads.
+ * Reads a theme package: `manifest.json`, `theme.css` and the fonts and
+ * images the CSS references, from a folder or a .zip someone picked, or from
+ * storage. Everything in it is untrusted, so the result is rebuilt field by
+ * field from what passes validation; unknown manifest fields are dropped.
  */
 
 export const THEME_PACKAGE_MAX_BYTES = 1024 * 1024;
 const MAX_ASSETS = 24;
-const MAX_OPTIONS = 12;
+const MAX_OPTIONS = 24;
 const MAX_CHOICES = 8;
 
 export const THEME_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
-const OPTION_ID = /^[a-z][a-z0-9-]{0,31}$/;
+const OPTION_ID = /^[a-z][a-z0-9-]{0,47}$/;
 const CHOICE_VALUE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const LOCALE_KEY = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
 
-export type ThemePackageResult =
-  | { ok: true; theme: ThemeManifest }
-  | { ok: false; errors: string[] };
+export type ThemePackageResult = { ok: true; theme: Theme } | { ok: false; errors: string[] };
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -51,15 +46,6 @@ function localized(value: unknown, max: number): LocalizedText | undefined {
     if (LOCALE_KEY.test(key) && clean) out[key] = clean;
   }
   return Object.keys(out).length > 0 ? out : undefined;
-}
-
-function tokens(value: unknown): ThemeTokens {
-  if (!isRecord(value)) return {};
-  const out: ThemeTokens = {};
-  for (const name of THEME_TOKENS) {
-    if (isSafeTokenValue(name, value[name])) out[name] = value[name] as string;
-  }
-  return out;
 }
 
 function option(value: unknown, errors: string[]): ThemeOption | null {
@@ -103,52 +89,57 @@ function option(value: unknown, errors: string[]): ThemeOption | null {
   return null;
 }
 
-export function parseThemePackage(input: unknown): ThemePackageResult {
+export interface ThemePackageInput {
+  /** The parsed manifest.json. */
+  manifest: unknown;
+  /** theme.css */
+  css: unknown;
+  assets?: unknown;
+}
+
+export function parseTheme({ manifest, css, assets: rawAssets }: ThemePackageInput): ThemePackageResult {
   const errors: string[] = [];
-  if (!isRecord(input)) return { ok: false, errors: ["A theme is a JSON object"] };
-  if (JSON.stringify(input).length > THEME_PACKAGE_MAX_BYTES) {
-    return { ok: false, errors: [`A theme can be at most ${THEME_PACKAGE_MAX_BYTES / 1024} KB`] };
-  }
-  if (input.apiVersion !== THEME_API_VERSION) {
+  if (!isRecord(manifest)) return { ok: false, errors: ["manifest.json must be a JSON object"] };
+  if (typeof css !== "string") return { ok: false, errors: ["theme.css is missing"] };
+  if (manifest.apiVersion !== THEME_API_VERSION) {
     errors.push(`apiVersion must be ${THEME_API_VERSION}`);
   }
-  const id = typeof input.id === "string" && THEME_ID_PATTERN.test(input.id) ? input.id : null;
+  const id = typeof manifest.id === "string" && THEME_ID_PATTERN.test(manifest.id) ? manifest.id : null;
   if (!id) errors.push("id must be 1–40 characters of a-z, 0-9 and -");
   else if (findBuiltInTheme(id)) errors.push(`"${id}" is a built-in theme id`);
-  const name = shortText(input.name, 40);
+  const name = shortText(manifest.name, 40);
   if (!name) errors.push("name is required (at most 40 characters)");
-  if (!isRecord(input.tokens)) errors.push("tokens.light and tokens.dark are required");
 
   const assets: Record<string, string> = {};
-  if (input.assets !== undefined) {
-    if (!isRecord(input.assets) || Object.keys(input.assets).length > MAX_ASSETS) {
-      errors.push(`assets must map at most ${MAX_ASSETS} relative paths to data: URLs`);
+  let size = css.length;
+  if (rawAssets !== undefined) {
+    if (!isRecord(rawAssets) || Object.keys(rawAssets).length > MAX_ASSETS) {
+      errors.push(`A theme can ship at most ${MAX_ASSETS} fonts and images`);
     } else {
-      for (const [path, url] of Object.entries(input.assets)) {
+      for (const [path, url] of Object.entries(rawAssets)) {
         const clean = themeAssetPath(path);
         if (!clean || !isSafeThemeAsset(url)) {
-          errors.push(`Asset ${JSON.stringify(path)} must be a relative path to a base64 font or image`);
-        } else assets[clean] = url;
+          errors.push(`${JSON.stringify(path)} must be a font or image inside the theme folder`);
+        } else {
+          assets[clean] = url;
+          size += url.length;
+        }
       }
     }
   }
-
-  let css: string | undefined;
-  if (input.css !== undefined) {
-    if (typeof input.css !== "string") errors.push("css must be a string");
-    else {
-      const result = sanitizeThemeCss(input.css, assets);
-      if (result.ok) css = input.css;
-      else errors.push(...result.errors.map((e) => `css line ${e.line}: ${e.message}`));
-    }
+  if (size > THEME_PACKAGE_MAX_BYTES) {
+    return { ok: false, errors: [`A theme can be at most ${THEME_PACKAGE_MAX_BYTES / 1024} KB`] };
   }
 
+  const checked = sanitizeThemeCss(css, assets);
+  if (!checked.ok) errors.push(...checked.errors.map((e) => `theme.css line ${e.line}: ${e.message}`));
+
   const options: ThemeOption[] = [];
-  if (input.options !== undefined) {
-    if (!Array.isArray(input.options) || input.options.length > MAX_OPTIONS) {
+  if (manifest.options !== undefined) {
+    if (!Array.isArray(manifest.options) || manifest.options.length > MAX_OPTIONS) {
       errors.push(`options must be a list of at most ${MAX_OPTIONS}`);
     } else {
-      for (const raw of input.options) {
+      for (const raw of manifest.options) {
         const parsed = option(raw, errors);
         if (parsed && !options.some((o) => o.id === parsed.id)) options.push(parsed);
       }
@@ -156,19 +147,15 @@ export function parseThemePackage(input: unknown): ThemePackageResult {
   }
 
   if (errors.length > 0 || !id || !name) return { ok: false, errors };
-  const rawTokens = input.tokens as Record<string, unknown>;
-  const frame = isRecord(input.frame) ? input.frame : undefined;
   return {
     ok: true,
     theme: {
       apiVersion: THEME_API_VERSION,
       id,
       name,
-      author: shortText(input.author, 60),
-      version: shortText(input.version, 20),
-      description: shortText(input.description, 200),
-      tokens: { light: tokens(rawTokens.light), dark: tokens(rawTokens.dark) },
-      frame: frame ? { light: tokens(frame.light), dark: tokens(frame.dark) } : undefined,
+      author: shortText(manifest.author, 60),
+      version: shortText(manifest.version, 20),
+      description: shortText(manifest.description, 200),
       options: options.length > 0 ? options : undefined,
       css,
       assets: Object.keys(assets).length > 0 ? assets : undefined,
@@ -176,13 +163,86 @@ export function parseThemePackage(input: unknown): ThemePackageResult {
   };
 }
 
-const compiledCss = new WeakMap<ThemeManifest, string>();
+/** A theme as it is stored: the manifest fields with `css` and `assets` alongside. */
+export function parseStoredTheme(stored: unknown): ThemePackageResult {
+  const record = isRecord(stored) ? stored : {};
+  return parseTheme({ manifest: record, css: record.css, assets: record.assets });
+}
+
+const ASSET_TYPES: Record<string, string> = {
+  woff2: "font/woff2",
+  woff: "font/woff",
+  ttf: "font/ttf",
+  otf: "font/otf",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+  avif: "image/avif",
+  svg: "image/svg+xml",
+};
+
+function base64(data: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < data.length; i += 0x8000) {
+    binary += String.fromCharCode(...data.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
+
+const IGNORED = /(^|\/)(\.|__MACOSX\/)|(^|\/)(README|LICENSE)[^/]*$/i;
+
+/**
+ * Builds a theme from its files: a picked folder, several picked files, or
+ * the contents of a .zip. The files may sit inside one top-level folder.
+ */
+export function themeFromFiles(files: readonly ArchiveFile[]): ThemePackageResult {
+  const kept = files.filter((f) => !IGNORED.test(f.path));
+  const manifestFile = kept.find((f) => f.path === "manifest.json" || f.path.endsWith("/manifest.json"));
+  if (!manifestFile) return { ok: false, errors: ["manifest.json is missing"] };
+  const root = manifestFile.path.slice(0, -"manifest.json".length);
+  const decoder = new TextDecoder();
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(decoder.decode(manifestFile.data));
+  } catch {
+    return { ok: false, errors: ["manifest.json is not valid JSON"] };
+  }
+  const cssFile = kept.find((f) => f.path === `${root}theme.css`);
+  const assets: Record<string, string> = {};
+  for (const file of kept) {
+    if (!file.path.startsWith(root) || file === manifestFile || file === cssFile) continue;
+    const type = ASSET_TYPES[file.path.split(".").pop()?.toLowerCase() ?? ""];
+    if (type) assets[file.path.slice(root.length)] = `data:${type};base64,${base64(file.data)}`;
+  }
+  return parseTheme({ manifest, css: cssFile ? decoder.decode(cssFile.data) : undefined, assets });
+}
+
+/** Reads what someone picked: one .zip, or the files of a theme folder. */
+export async function readThemePackage(files: readonly File[]): Promise<ThemePackageResult> {
+  const total = files.reduce((sum, f) => sum + f.size, 0);
+  if (total > THEME_PACKAGE_MAX_BYTES) {
+    return { ok: false, errors: [`A theme can be at most ${THEME_PACKAGE_MAX_BYTES / 1024} KB`] };
+  }
+  const bytes = async (file: File) => new Uint8Array(await file.arrayBuffer());
+  if (files.length === 1 && /\.zip$/i.test(files[0]!.name)) {
+    const archive = await readZip(await bytes(files[0]!), THEME_PACKAGE_MAX_BYTES);
+    return archive.ok ? themeFromFiles(archive.files) : { ok: false, errors: [archive.error] };
+  }
+  const entries = await Promise.all(
+    files.map(async (file) => ({ path: file.webkitRelativePath || file.name, data: await bytes(file) })),
+  );
+  return themeFromFiles(entries);
+}
+
+const compiledCss = new WeakMap<Theme, string>();
 
 /**
  * The theme's CSS ready to inject: checked again and with asset references
- * resolved. Empty when the theme has none or it no longer passes.
+ * resolved. Empty when it no longer passes.
  */
-export function themeCss(theme: ThemeManifest): string {
+export function themeCss(theme: Theme): string {
   if (!theme.css) return "";
   const cached = compiledCss.get(theme);
   if (cached !== undefined) return cached;

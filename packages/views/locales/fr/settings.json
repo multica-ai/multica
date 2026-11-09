@@ -221,8 +221,8 @@
     },
     "import": {
       "button": "Importer un thème",
-      "too_large": "Un fichier de thème peut faire au plus {{size}} Ko.",
-      "not_json": "Le fichier n’est pas un JSON valide.",
+      "from_zip": "Fichier de thème (.zip)",
+      "from_folder": "Dossier du thème",
       "storage_full": "Pas assez d’espace sur cet appareil pour enregistrer le thème. Retirez un autre thème et réessayez.",
       "confirm_title": "Installer « {{name}} » ?",
       "warning": "Un thème peut modifier l’apparence de toutes les pages, y compris les boîtes de dialogue et les avertissements. N’installez que des thèmes de personnes de confiance.",
@@ -230,15 +230,15 @@
       "version": "Version",
       "replaces": "{{to}} (remplace {{from}})",
       "includes": "Contient",
-      "has_tokens": "Couleurs",
-      "has_css": "CSS propre",
       "cancel": "Annuler",
       "confirm": "Installer et utiliser",
       "error_title": "Impossible d’installer ce thème",
       "error_description": "Rien n’a été modifié. Le fichier de thème présente ces problèmes :",
       "close": "Fermer",
       "has_options_one": "{{count}} option",
-      "has_options_other": "{{count}} options"
+      "has_options_other": "{{count}} options",
+      "has_assets_one": "{{count}} police ou image",
+      "has_assets_other": "{{count}} polices et images"
     },
     "accent": {
       "title": "Couleur d’accent",

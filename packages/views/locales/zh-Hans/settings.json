@@ -219,8 +219,8 @@
     },
     "import": {
       "button": "导入主题",
-      "too_large": "主题文件最大 {{size}} KB。",
-      "not_json": "这个文件不是有效的 JSON。",
+      "from_zip": "主题文件（.zip）",
+      "from_folder": "主题文件夹",
       "storage_full": "这台设备的存储空间不够保存这个主题。移除别的主题后再试。",
       "confirm_title": "安装「{{name}}」？",
       "warning": "主题可以改变每个页面的样式，包括弹窗和警告。只安装你信任的人做的主题。",
@@ -228,14 +228,13 @@
       "version": "版本",
       "replaces": "{{to}}（替换 {{from}}）",
       "includes": "包含",
-      "has_tokens": "颜色",
-      "has_css": "自带 CSS",
       "cancel": "取消",
       "confirm": "安装并使用",
       "error_title": "无法安装这个主题",
       "error_description": "没有做任何改动。主题文件有以下问题：",
       "close": "关闭",
-      "has_options_other": "{{count}} 个选项"
+      "has_options_other": "{{count}} 个选项",
+      "has_assets_other": "{{count}} 个字体和图片"
     },
     "accent": {
       "title": "强调色",

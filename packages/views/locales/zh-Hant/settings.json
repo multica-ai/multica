@@ -219,8 +219,8 @@
     },
     "import": {
       "button": "匯入主題",
-      "too_large": "主題檔案最大 {{size}} KB。",
-      "not_json": "這個檔案不是有效的 JSON。",
+      "from_zip": "主題檔案（.zip）",
+      "from_folder": "主題資料夾",
       "storage_full": "這台裝置的儲存空間不夠儲存這個主題。移除其他主題後再試。",
       "confirm_title": "安裝「{{name}}」？",
       "warning": "主題可以改變每個頁面的樣式，包括對話框和警告。只安裝你信任的人做的主題。",
@@ -228,14 +228,13 @@
       "version": "版本",
       "replaces": "{{to}}（取代 {{from}}）",
       "includes": "包含",
-      "has_tokens": "顏色",
-      "has_css": "自帶 CSS",
       "cancel": "取消",
       "confirm": "安裝並使用",
       "error_title": "無法安裝這個主題",
       "error_description": "沒有做任何變更。主題檔案有以下問題：",
       "close": "關閉",
-      "has_options_other": "{{count}} 個選項"
+      "has_options_other": "{{count}} 個選項",
+      "has_assets_other": "{{count}} 個字型和圖片"
     },
     "accent": {
       "title": "強調色",

@@ -1,105 +1,17 @@
 /**
- * Themes are data plus an optional stylesheet. A theme overrides public
- * tokens per mode, may repaint the frame around the page (rail, desktop
- * toolbar and tab bar), may declare options the Appearance page renders, and
- * may ship CSS that targets the public anchors in ./anchors.
+ * A theme is a folder: `manifest.json` names it and declares its options,
+ * `theme.css` overrides the public variables (./theme-variables) under
+ * `.theme-light` and `.theme-dark` and may restyle the public anchors
+ * (./anchors), and any fonts or images the CSS references sit next to it.
  *
- * Built-in themes use exactly this format, so the format is what a theme
- * from outside the codebase gets too: token names are allowlisted, values
- * are sanitised, and CSS goes through `sanitizeThemeCss` (./theme-css).
+ * Built-in themes are written as token tables so the contrast test can read
+ * them, and compiled to the same CSS an outside theme ships. Everything a
+ * theme ships goes through `sanitizeThemeCss` (./theme-css).
  * docs/theming.md is the public reference; keep it in step with this file.
  */
 
 /** Bumped only for changes that would break existing themes. */
 export const THEME_API_VERSION = 1;
-
-/**
- * Tokens a theme may set, per mode. Renaming or removing one breaks themes:
- * keep the old name working until the next THEME_API_VERSION.
- */
-export const THEME_COLOR_TOKENS = [
-  "app-shell",
-  "page-canvas",
-  "surface",
-  "surface-foreground",
-  "surface-raised",
-  "surface-hover",
-  "surface-selected",
-  "surface-selected-foreground",
-  "surface-border",
-  "surface-shadow",
-  "floating-shadow",
-  "menu-shadow",
-  "tooltip",
-  "tooltip-shadow",
-  "background",
-  "foreground",
-  "card",
-  "card-foreground",
-  "popover",
-  "popover-foreground",
-  "primary",
-  "primary-foreground",
-  "secondary",
-  "secondary-foreground",
-  "muted",
-  "muted-foreground",
-  "faint-foreground",
-  "accent",
-  "accent-foreground",
-  "border",
-  "input",
-  "ring",
-  "radius",
-  "sidebar",
-  "sidebar-foreground",
-  "sidebar-primary",
-  "sidebar-primary-foreground",
-  "sidebar-accent",
-  "sidebar-accent-foreground",
-  "sidebar-border",
-  "sidebar-ring",
-  "brand",
-  "brand-foreground",
-  "button-primary",
-  "button-primary-foreground",
-  "button-primary-border",
-  "destructive",
-  "success",
-  "warning",
-  "info",
-  "priority-high",
-  "chart-1",
-  "chart-2",
-  "chart-3",
-  "chart-4",
-  "chart-5",
-  "find-match",
-  "find-match-active",
-  "find-match-foreground",
-  "scrollbar-track",
-  "scrollbar-thumb",
-  "scrollbar-thumb-hover",
-  "content-leading",
-  "content-leading-cjk",
-  "issue-row-height",
-] as const;
-
-/**
- * Font stacks. A theme's value is the default; what the person picks on the
- * Appearance page is written inline on <html> and wins.
- */
-export const THEME_FONT_TOKENS = [
-  "font-ui",
-  "font-cjk",
-  "font-content-latin",
-  "font-content-cjk",
-  "font-mono",
-] as const;
-
-export const THEME_TOKENS = [...THEME_COLOR_TOKENS, ...THEME_FONT_TOKENS] as const;
-export type ThemeToken = (typeof THEME_TOKENS)[number];
-export type ThemeTokens = Partial<Record<ThemeToken, string>>;
 
 /** Text a theme shows on the Appearance page: one string, or one per locale. */
 export type LocalizedText = string | Readonly<Record<string, string>>;
@@ -126,6 +38,7 @@ export interface ThemeSelectOption extends ThemeOptionBase {
 
 export type ThemeOption = ThemeToggleOption | ThemeSelectOption;
 
+/** manifest.json */
 export interface ThemeManifest {
   apiVersion: typeof THEME_API_VERSION;
   id: string;
@@ -134,14 +47,52 @@ export interface ThemeManifest {
   author?: string;
   version?: string;
   description?: string;
+  options?: readonly ThemeOption[];
+}
+
+/** A theme ready to apply: its manifest, theme.css and the files the CSS references. */
+export interface Theme extends ThemeManifest {
+  css: string;
+  /** Relative path to a base64 `data:` URL. */
+  assets?: Readonly<Record<string, string>>;
+}
+
+/** Variable name (without `--`) to value. */
+export type ThemeTokens = Readonly<Record<string, string>>;
+
+export interface BuiltInTheme extends Theme {
   tokens: { light: ThemeTokens; dark: ThemeTokens };
   /** Tokens for what sits on the frame: the rail, desktop toolbar and tab bar. */
   frame?: { light?: ThemeTokens; dark?: ThemeTokens };
-  options?: readonly ThemeOption[];
-  /** Injected while the theme is active, after the app's own styles. */
-  css?: string;
-  /** Files `css` may reference with `url()`, by relative path, as base64 `data:` URLs. */
-  assets?: Readonly<Record<string, string>>;
+}
+
+const FRAME_ANCHORS = ':is([data-mc="app-rail"], [data-mc="window-toolbar"], [data-mc="tab-bar"])';
+
+function declarations(tokens: ThemeTokens | undefined): string {
+  return Object.entries(tokens ?? {})
+    .map(([name, value]) => `--${name}: ${value};`)
+    .join(" ");
+}
+
+/** The CSS a token table stands for. */
+export function themeTokensCss(theme: Pick<BuiltInTheme, "tokens" | "frame">): string {
+  const blocks: string[] = [];
+  const add = (selector: string, body: string) => {
+    if (body) blocks.push(`${selector} { ${body} }`);
+  };
+  add(".theme-light", declarations(theme.tokens.light));
+  add(".theme-dark", declarations(theme.tokens.dark));
+  add(`.theme-light ${FRAME_ANCHORS}`, declarations(theme.frame?.light));
+  add(`.theme-dark ${FRAME_ANCHORS}`, declarations(theme.frame?.dark));
+  return blocks.join("\n");
+}
+
+function builtInTheme(theme: Omit<BuiltInTheme, "apiVersion" | "css"> & { css?: string }): BuiltInTheme {
+  return {
+    ...theme,
+    apiVersion: THEME_API_VERSION,
+    css: [themeTokensCss(theme), theme.css].filter(Boolean).join("\n\n"),
+  };
 }
 
 export const DEFAULT_THEME_ID = "default";
@@ -195,7 +146,7 @@ const POP_CSS = [
     .filter(([id]) => id !== "yellow")
     .map(([id, color]) => `:root[data-theme-option-signal="${id}"] { --pop-signal: ${color}; }`),
   `${POP_SIGNAL_ON} { --button-primary: var(--pop-signal); --surface-selected: color-mix(in oklab, var(--pop-signal) 35%, oklch(1 0 0)); }`,
-  `${POP_SIGNAL_ON}.dark { --ring: var(--pop-signal); --floating-shadow: 6px 6px 0 var(--pop-signal); --menu-shadow: 4px 4px 0 var(--pop-signal); --surface-selected: color-mix(in oklab, var(--pop-signal) 22%, oklch(0.2 0 0)); }`,
+  `${POP_SIGNAL_ON}.theme-dark { --ring: var(--pop-signal); --floating-shadow: 6px 6px 0 var(--pop-signal); --menu-shadow: 4px 4px 0 var(--pop-signal); --surface-selected: color-mix(in oklab, var(--pop-signal) 22%, oklch(0.2 0 0)); }`,
   `${POP_SIGNAL_ON} ${POP_FRAME_ANCHORS} { --sidebar-accent-foreground: var(--pop-signal); --ring: var(--pop-signal); --surface-selected: color-mix(in oklab, var(--pop-signal) 22%, oklch(0.2 0 0)); }`,
   "",
   "/* Primary buttons lift onto a hard shadow on hover instead of darkening. */",
@@ -221,8 +172,7 @@ const POP_CSS = [
  * also paints text (`text-primary`); the signal colour reaches buttons
  * through --button-primary.
  */
-const POP: ThemeManifest = {
-  apiVersion: THEME_API_VERSION,
+const POP = builtInTheme({
   id: "pop",
   name: "Pop",
   tokens: {
@@ -361,11 +311,10 @@ const POP: ThemeManifest = {
     },
   ],
   css: POP_CSS,
-};
+});
 
 /** GitHub (Primer): cool greys, 6px radius, green primary, blue links. */
-const GITHUB: ThemeManifest = {
-  apiVersion: THEME_API_VERSION,
+const GITHUB = builtInTheme({
   id: "github",
   name: "GitHub",
   author: "Primer",
@@ -433,11 +382,10 @@ const GITHUB: ThemeManifest = {
       "button-primary-border": "oklch(0.6 0.15 146)",
     },
   },
-};
+});
 
 /** Blueprint: crisp blue-greys, 4px radius, blue intent for primary and selection. */
-const BLUEPRINT: ThemeManifest = {
-  apiVersion: THEME_API_VERSION,
+const BLUEPRINT = builtInTheme({
   id: "blueprint",
   name: "Blueprint",
   author: "Palantir",
@@ -506,11 +454,10 @@ const BLUEPRINT: ThemeManifest = {
       "button-primary-border": "oklch(0.655 0.159 257.4)",
     },
   },
-};
+});
 
 /** Notion: warm greys, quiet hairlines, soft layered shadows, blue primary. */
-const NOTION: ThemeManifest = {
-  apiVersion: THEME_API_VERSION,
+const NOTION = builtInTheme({
   id: "notion",
   name: "Notion",
   tokens: {
@@ -577,18 +524,17 @@ const NOTION: ThemeManifest = {
       "button-primary-foreground": "oklch(1 0 0)",
     },
   },
-};
+});
 
-const DEFAULT: ThemeManifest = {
-  apiVersion: THEME_API_VERSION,
+const DEFAULT = builtInTheme({
   id: DEFAULT_THEME_ID,
   name: "Default",
   tokens: { light: {}, dark: {} },
-};
+});
 
-export const BUILT_IN_THEMES: readonly ThemeManifest[] = [DEFAULT, POP, GITHUB, BLUEPRINT, NOTION];
+export const BUILT_IN_THEMES: readonly BuiltInTheme[] = [DEFAULT, POP, GITHUB, BLUEPRINT, NOTION];
 
-export function findBuiltInTheme(id: string): ThemeManifest | undefined {
+export function findBuiltInTheme(id: string): BuiltInTheme | undefined {
   return BUILT_IN_THEMES.find((theme) => theme.id === id);
 }
 
@@ -616,36 +562,27 @@ export function isSafeFontValue(value: unknown): value is string {
   return SAFE_FONT_VALUE.test(rest) && (rest.split('"').length - 1) % 2 === 0 && (rest.split("'").length - 1) % 2 === 0;
 }
 
-const FONT_TOKEN_SET = new Set<string>(THEME_FONT_TOKENS);
-
-export function isSafeTokenValue(token: ThemeToken, value: unknown): value is string {
-  return FONT_TOKEN_SET.has(token) ? isSafeFontValue(value) : isSafeThemeValue(value);
-}
-
-function declarations(tokens: ThemeTokens | undefined): string {
-  if (!tokens) return "";
-  return THEME_TOKENS.filter((name) => isSafeTokenValue(name, tokens[name]))
-    .map((name) => `--${name}: ${tokens[name]};`)
-    .join(" ");
-}
-
-const FRAME_ANCHORS = ':is([data-mc="app-rail"], [data-mc="window-toolbar"], [data-mc="tab-bar"])';
+const MODE_SELECTOR = /^(?::root|html)?\.theme-(light|dark)$/;
 
 /**
- * Token CSS for one theme. Light rules exclude `.dark` so both selectors are
- * equally specific and each mode reads only its own block; both outrank the
- * `:root` and `.dark` blocks of tokens.css.
+ * The variables a theme sets directly on `.theme-light` and `.theme-dark`,
+ * for previews. Only values that would pass as a token are returned.
  */
-export function themeStylesheet(theme: ThemeManifest): string {
-  const blocks: string[] = [];
-  const add = (selector: string, body: string) => {
-    if (body) blocks.push(`${selector} { ${body} }`);
-  };
-  add(":root:not(.dark)", declarations(theme.tokens.light));
-  add(":root.dark", declarations(theme.tokens.dark));
-  add(`:root:not(.dark) ${FRAME_ANCHORS}`, declarations(theme.frame?.light));
-  add(`:root.dark ${FRAME_ANCHORS}`, declarations(theme.frame?.dark));
-  return blocks.join("\n");
+export function themeModeVariables(css: string): { light: Record<string, string>; dark: Record<string, string> } {
+  const out = { light: {} as Record<string, string>, dark: {} as Record<string, string> };
+  const clean = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const rule of clean.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const modes = rule[1]!
+      .split(",")
+      .map((selector) => MODE_SELECTOR.exec(selector.trim())?.[1] as "light" | "dark" | undefined)
+      .filter((mode) => mode !== undefined);
+    for (const declaration of rule[2]!.matchAll(/--([a-z0-9-]+)\s*:\s*([^;]+)/gi)) {
+      const value = declaration[2]!.trim();
+      if (!isSafeThemeValue(value)) continue;
+      for (const mode of modes) out[mode][declaration[1]!] = value;
+    }
+  }
+  return out;
 }
 
 export const THEME_OPTION_ATTR_PREFIX = "data-theme-option-";

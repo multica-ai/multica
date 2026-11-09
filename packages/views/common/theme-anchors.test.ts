@@ -1,18 +1,13 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  THEME_ANCHORS,
-  THEME_COLOR_TOKENS,
-  THEME_FONT_TOKENS,
-  THEME_PUBLIC_SLOTS,
-} from "@multica/core/appearance";
+import { THEME_ANCHORS, THEME_PUBLIC_SLOTS } from "@multica/core/appearance";
 
 /**
  * The theme anchors are a public contract (docs/theming.md). This keeps the
  * registry, the source and the docs in step: every listed anchor is still
  * rendered, nothing renders an unlisted one, and the docs mention each
- * anchor, slot and token.
+ * anchor and slot.
  */
 
 const REPO = join(__dirname, "../../..");
@@ -61,11 +56,10 @@ describe("theme anchors", () => {
     expect(missing).toEqual([]);
   });
 
-  it("documents every anchor, slot and token", () => {
+  it("documents every anchor and slot", () => {
     const names = [
       ...Object.keys(THEME_ANCHORS).map((name) => `data-mc="${name}"`),
       ...THEME_PUBLIC_SLOTS.map((slot) => `\`${slot}\``),
-      ...[...THEME_COLOR_TOKENS, ...THEME_FONT_TOKENS].map((token) => `\`${token}\``),
     ];
     expect(names.filter((name) => !docs.includes(name))).toEqual([]);
   });

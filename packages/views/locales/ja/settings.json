@@ -219,8 +219,8 @@
     },
     "import": {
       "button": "テーマを読み込む",
-      "too_large": "テーマファイルは最大 {{size}} KB です。",
-      "not_json": "このファイルは有効な JSON ではありません。",
+      "from_zip": "テーマファイル（.zip）",
+      "from_folder": "テーマフォルダ",
       "storage_full": "このデバイスにテーマを保存する空き容量がありません。ほかのテーマを削除してからもう一度お試しください。",
       "confirm_title": "「{{name}}」をインストールしますか？",
       "warning": "テーマはダイアログや警告を含むすべての画面の見た目を変えられます。信頼できる作者のテーマだけをインストールしてください。",
@@ -228,14 +228,13 @@
       "version": "バージョン",
       "replaces": "{{to}}（{{from}} を置き換え）",
       "includes": "内容",
-      "has_tokens": "カラー",
-      "has_css": "独自の CSS",
       "cancel": "キャンセル",
       "confirm": "インストールして使う",
       "error_title": "このテーマをインストールできません",
       "error_description": "何も変更していません。テーマファイルに次の問題があります：",
       "close": "閉じる",
-      "has_options_other": "オプション {{count}} 個"
+      "has_options_other": "オプション {{count}} 個",
+      "has_assets_other": "フォント・画像 {{count}} 個"
     },
     "accent": {
       "title": "アクセントカラー",
