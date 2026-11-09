@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -18,6 +19,36 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/daemon"
 )
+
+func TestBackendOperationPinsURLAcrossProfileRewrite(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	t.Setenv("MULTICA_SERVER_URL", "")
+	cmd := &cobra.Command{}
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("server-url", "", "")
+	const original = "https://backend-a.example.test"
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{ServerURL: original}, ""); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := acquireBackendOperation(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{ServerURL: "https://backend-b.example.test"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := backendURLForCommand(cmd, ""); err != nil || got != original {
+		t.Fatalf("operation switched backend: %q, %v", got, err)
+	}
+	args := buildDaemonStartArgs(cmd)
+	index := slices.Index(args, "--server-url")
+	if index < 0 || index+1 >= len(args) || args[index+1] != original {
+		t.Fatalf("replacement did not inherit the locked backend: %v", args)
+	}
+}
 
 func TestBackendLifetimeLockAcrossProfiles(t *testing.T) {
 	dir := t.TempDir()

@@ -289,6 +289,16 @@ func prepareBackendService(cfg *daemon.Config, expectedOwner string) (*os.File, 
 	return lock, dir, nil
 }
 
+type daemonOperationBackendKey struct{}
+
+func daemonOperationBackend(cmd *cobra.Command) string {
+	if ctx := cmd.Context(); ctx != nil {
+		serverURL, _ := ctx.Value(daemonOperationBackendKey{}).(string)
+		return serverURL
+	}
+	return ""
+}
+
 // Every lifecycle transition has the same lock order: operation, backend,
 // profile. A background child inherits a parent PID marker while its starter
 // holds operation.lock; arbitrary direct foreground starts do not bypass it.
@@ -311,6 +321,13 @@ func acquireBackendOperation(cmd *cobra.Command) (*os.File, error) {
 	if !acquired {
 		return nil, fmt.Errorf("another local service transition is in progress; retry after it finishes")
 	}
+	// Keep the lock, service lookup, and replacement on the same backend even
+	// if another command rewrites the profile configuration during this operation.
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd.SetContext(context.WithValue(ctx, daemonOperationBackendKey{}, serverURL))
 	return lock, nil
 }
 

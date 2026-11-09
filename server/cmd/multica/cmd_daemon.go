@@ -782,6 +782,9 @@ func runDaemonBackgroundUnlocked(cmd *cobra.Command) error {
 // in the same precedence order the foreground daemon uses: --server-url flag,
 // MULTICA_SERVER_URL env, then the stored CLI config for the profile.
 func resolveDaemonServerURL(cmd *cobra.Command, profile string) string {
+	if serverURL := daemonOperationBackend(cmd); serverURL != "" {
+		return serverURL
+	}
 	serverURL := cli.FlagOrEnv(cmd, "server-url", "MULTICA_SERVER_URL", "")
 	if serverURL == "" {
 		if c, err := cli.LoadCLIConfigForProfile(profile); err == nil && c.ServerURL != "" {
@@ -975,8 +978,12 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	}
 
 	// Forward global persistent flags.
-	if v, _ := cmd.Flags().GetString("server-url"); v != "" {
-		args = append(args, "--server-url", v)
+	serverURL := daemonOperationBackend(cmd)
+	if serverURL == "" {
+		serverURL, _ = cmd.Flags().GetString("server-url")
+	}
+	if serverURL != "" {
+		args = append(args, "--server-url", serverURL)
 	}
 	if v := resolveProfile(cmd); v != "" {
 		args = append(args, "--profile", v)
