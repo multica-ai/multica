@@ -58,6 +58,50 @@ const ALLOWED = [
   ["IconButton", '<IconButton label="Close"><X /></IconButton>'],
 ];
 
+const ICONS = 'import { ChevronDown, ChevronUp, X, X as XIcon } from "@multica/ui/icons";\n';
+
+const NATIVE_FLAGGED = [
+  ["icon-only native button", '<button type="button"><X /></button>'],
+  ["aliased icon import", '<button type="button"><XIcon className="size-4" /></button>'],
+  ["namespace icon import", 'import * as Icons from "@multica/ui/icons";\n<button type="button"><Icons.X /></button>'],
+  ["several icons", "<button><ChevronUp /><ChevronDown /></button>"],
+  ["icon chosen by a conditional", "<button>{open ? <ChevronUp /> : <ChevronDown />}</button>"],
+  ["icon behind &&", "<button>{open && <ChevronUp />}</button>"],
+  ["icon inside a fragment", "<button><><X /></></button>"],
+  ["native render-prop trigger with the icon inside", "<TooltipTrigger render={<button><X /></button>} />"],
+  ["native render-prop trigger with the icon as a child", "<TooltipTrigger render={<button />}><X /></TooltipTrigger>"],
+  [
+    "native button with the label only in a tooltip",
+    "<Tooltip><TooltipTrigger render={<button><X /></button>} /><TooltipContent>Close</TooltipContent></Tooltip>",
+  ],
+];
+
+const NATIVE_ALLOWED = [
+  ["native aria-label", '<button aria-label="Close"><X /></button>'],
+  ["native translated aria-label", "<button aria-label={t(($) => $.close)}><X /></button>"],
+  ["native aria-labelledby", '<button aria-labelledby="title-id"><X /></button>'],
+  ["native props spread", "<button {...props}><X /></button>"],
+  ["native icon and text", "<button><X /> Close</button>"],
+  ["native icon and expression", "<button><X />{label}</button>"],
+  ["native sr-only child", '<button><X /><span className="sr-only">Close</span></button>'],
+  ["native child component that may render text", "<button><X /><Label /></button>"],
+  ["native icon or text", "<button>{busy ? <X /> : label}</button>"],
+  ["icon not from @multica/ui/icons", 'import { X } from "./x";\n<button><X /></button>'],
+  ["empty native button", "<button />"],
+  ["native named render-prop trigger", '<TooltipTrigger aria-label="Close" render={<button />}><X /></TooltipTrigger>'],
+  ["native render-prop trigger with text", "<TooltipTrigger render={<button />}><X /> Close</TooltipTrigger>"],
+];
+
+const withIcons = (code) => (code.startsWith("import") ? code : ICONS + code);
+
+for (const [name, code] of NATIVE_FLAGGED) {
+  test(`flags ${name}`, () => assert.equal(flagged(withIcons(code)), true));
+}
+
+for (const [name, code] of NATIVE_ALLOWED) {
+  test(`allows ${name}`, () => assert.equal(flagged(withIcons(code)), false));
+}
+
 for (const [name, code] of FLAGGED) {
   test(`flags ${name}`, () => assert.equal(flagged(code), true));
 }
