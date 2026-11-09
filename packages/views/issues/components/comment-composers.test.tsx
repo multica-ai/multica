@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ComponentProps, type ReactNode, type Ref } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
@@ -241,6 +241,12 @@ function renderCommentInput(onSubmit = vi.fn().mockResolvedValue(true)) {
   return { ...view, onSubmit };
 }
 
+function DraftReplyInput(props: ComponentProps<typeof ReplyInput>) {
+  const parentId = useCommentDraftStore((s) =>
+    (props.draftKey ? s.drafts[props.draftKey]?.replyTarget?.commentId : undefined) ?? props.parentId);
+  return <ReplyInput {...props} parentId={parentId} />;
+}
+
 function renderReplyInput({
   onSubmit = vi.fn().mockResolvedValue("reply-new"),
   onAccepted,
@@ -253,7 +259,7 @@ function renderReplyInput({
   draftKey?: `reply:${string}:${string}`;
 } = {}) {
   const view = renderWithProviders(
-    <ReplyInput
+    <DraftReplyInput
       issueId="issue-1"
       parentId="comment-1"
       avatarType="member"

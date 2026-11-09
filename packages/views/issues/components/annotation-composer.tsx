@@ -1,140 +1,128 @@
 "use client";
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useRef, useState, type ReactNode, type RefObject } from "react";
 import { Loader2, Trash2 } from "@multica/ui/icons";
-import { toast } from "sonner";
-import { copyText } from "@multica/ui/lib/clipboard";
+import { createShortcutChord } from "@multica/core/shortcuts";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
-import { composeSelectionReply, MAX_REPLY_ANNOTATIONS, type ReplyAnnotation } from "@multica/core/drafts/reply-annotation";
-import type { AgentTask } from "@multica/core/types";
+import { MAX_REPLY_ANNOTATIONS, type ReplyAnnotation } from "@multica/core/drafts/reply-annotation";
 import { ContentEditor, type ContentEditorRef } from "../../editor";
 import { EditorOverlayOwnerContext } from "../../editor/overlay-owner";
-import { useComposerSubmit } from "../../editor/use-composer-submit";
-import { useUploadGate } from "../../editor/use-upload-gate";
+import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useT } from "../../i18n";
-import { commentTriggerPreviewSignature, useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
-import { useRecipientActions } from "../hooks/use-recipient-actions";
-import { CommentTriggerChips } from "./comment-trigger-chips";
-import { useStopRunsBeforeSend } from "./use-stop-runs-before-send";
 
-export interface AnnotationReplyOptions {
-  onSubmit: (sourceId: string, content: string, suppressAgentIds?: string[], steerTaskIds?: string[]) => Promise<string | boolean>;
-  onAccepted?: (commentId: string) => void;
-  steerByDefault: (task: AgentTask) => boolean;
+/** The existing reply/comment composer owns routing, uploads and submission. */
+export interface AnnotationSendControls {
+  submit: () => Promise<void>;
+  submitting: boolean;
+  uploading: boolean;
+  targetMissing?: boolean;
+  restart: boolean;
+  recipients: ReactNode;
+  draftContent: string;
+  annotations: readonly ReplyAnnotation[];
 }
 
+export interface AnnotationComposerSlot {
+  pending: ReplyAnnotation;
+  render: (controls?: AnnotationSendControls) => ReactNode;
+}
+
+export function annotationsWithPending(annotations: readonly ReplyAnnotation[], pending?: ReplyAnnotation): readonly ReplyAnnotation[] {
+  if (!pending) return annotations;
+  const saved = annotations.some((a) => a.id === pending.id);
+  return saved ? annotations.map((a) => a.id === pending.id ? pending : a) : [...annotations, pending];
+}
+
+const ENTER = createShortcutChord("Enter");
+const SEND = createShortcutChord("Enter", { primary: true });
+
 export function AnnotationComposer({
-  issueId, owner, annotation, existing, number, parentId, editorRef, reply,
-  sourceMissing, sourceChanged, canSave, isSourceAvailable,
-  onChange, onSave, onRemove, onBusyChange, onAccepted,
+  issueId, owner, annotation, existing, number, editorRef, controls,
+  sourceMissing, sourceChanged, canSave, onChange, onSave, onRemove, onBusyChange,
 }: {
   issueId: string;
   owner: string;
   annotation: ReplyAnnotation;
   existing: boolean;
   number: number;
-  parentId?: string;
   editorRef: RefObject<ContentEditorRef | null>;
-  reply?: AnnotationReplyOptions;
+  controls?: AnnotationSendControls;
   sourceMissing: boolean;
   sourceChanged: boolean;
   canSave: boolean;
-  isSourceAvailable: () => boolean;
   onChange: (note: string) => void;
-  onSave: (note: string) => void;
+  onSave: (note: string, close: boolean) => boolean;
   onRemove?: () => void;
   onBusyChange: (busy: boolean) => void;
-  onAccepted: () => void;
 }) {
   const { t } = useT("issues");
   const [initialNote] = useState(annotation.note);
-  const direct = !existing && !!reply;
-  const composed = composeSelectionReply(annotation, annotation.note);
-  const preview = useCommentTriggerPreview({ issueId, parentId, content: direct ? composed : "" });
-  const { recipients, routing, setAction } = useRecipientActions({
-    issueId, agents: preview.agents, allowSteer: true,
-    steerByDefault: reply?.steerByDefault ?? (() => false), resetKey: `${issueId}:${annotation.id}`,
-  });
-  const stopRuns = useStopRunsBeforeSend(issueId);
-  const uploadGate = useUploadGate(editorRef);
-  const acceptedId = useRef<string | null>(null);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => { mounted.current = false; };
-  }, []);
-  const { submitting, submit } = useComposerSubmit({
-    editorRef, uploadGate,
-    normalize: (raw) => direct && isSourceAvailable() ? composeSelectionReply(annotation, raw) : "",
-    onSubmit: async (content) => {
-      if (!reply || !isSourceAvailable()) return false;
-      onBusyChange(true);
-      try {
-        const previewMatches = preview.isCurrent && commentTriggerPreviewSignature(content) === commentTriggerPreviewSignature(composed);
-        if (!(await stopRuns(previewMatches ? routing.restartTaskIds : []))) return false;
-        const result = await reply.onSubmit(annotation.sourceCommentId, content,
-          routing.suppressAgentIds.length ? routing.suppressAgentIds : undefined,
-          routing.steerTaskIds.length ? routing.steerTaskIds : undefined);
-        acceptedId.current = typeof result === "string" ? result : null;
-        return !!result;
-      } finally {
-        onBusyChange(false);
-      }
-    },
-    onAccepted: () => {
-      if (!mounted.current) return;
-      onAccepted();
-      if (acceptedId.current) reply?.onAccepted?.(acceptedId.current);
-    },
-  });
+  const [sending, setSending] = useState(false);
+  const inFlight = useRef(false);
+  const busy = sending || controls?.submitting === true;
+  const otherAnnotations = controls?.annotations.filter((a) => a.id !== annotation.id).length ?? 0;
+  const hasBody = !!controls?.draftContent.trim();
+  const sendAll = otherAnnotations > 0 || hasBody;
   const save = () => {
-    if (submitting || !canSave) return;
+    if (busy || inFlight.current || !canSave) return;
     const note = editorRef.current?.getMarkdown() ?? "";
-    if (note.trim()) onSave(note);
+    if (note.trim()) onSave(note, true);
   };
-  const saveLabel = t(($) => existing ? $.reply.annotations.save : $.reply.annotations.confirm_add);
-  const copyNote = async () => {
+  const send = async () => {
+    if (!controls || controls.targetMissing || busy || inFlight.current || !canSave) return;
     const note = editorRef.current?.getMarkdown() ?? "";
-    if (await copyText(note)) toast.success(t(($) => $.reply.annotations.note_copied));
-    else toast.error(t(($) => $.reply.annotations.note_copy_failed));
+    if (!note.trim()) return;
+    inFlight.current = true;
+    onBusyChange(true);
+    setSending(true);
+    try {
+      // Commit first: the existing composer's failure/retry path owns the note.
+      if (onSave(note, false)) await controls.submit();
+    } finally {
+      inFlight.current = false;
+      onBusyChange(false);
+      setSending(false);
+    }
   };
 
   return <EditorOverlayOwnerContext.Provider value={owner}>
-    <div className="flex w-96 max-w-[calc(100vw-26px)] flex-col gap-1" aria-busy={submitting || undefined}>
-      <div className={submitting ? "pointer-events-none opacity-60" : undefined} inert={submitting || undefined}>
+    <div className="flex w-[30rem] max-w-[calc(100vw-26px)] flex-col gap-1" aria-busy={busy || undefined}>
+      <div className={busy ? "pointer-events-none opacity-60" : undefined} inert={busy || undefined}>
         <ContentEditor ref={editorRef} defaultValue={initialNote}
           ariaLabel={t(($) => $.reply.annotations.note_label)}
           placeholder={t(($) => $.reply.annotations.note_placeholder)}
           className="min-h-8 max-h-32 overflow-y-auto px-2 py-1.5"
           currentIssueId={issueId} showBubbleMenu={false} debounceMs={100}
-          onUpdate={onChange} onSubmit={direct ? submit : save} />
+          onUpdate={onChange} onEnter={save} onSubmit={send} />
       </div>
-      {sourceMissing && <div className="px-2">
-        <p role="alert" className="text-caption text-destructive">{t(($) => $.reply.annotations.direct_target_deleted)}</p>
-        <Button size="sm" variant="ghost" disabled={!annotation.note.trim() || submitting}
-          onClick={copyNote}>{t(($) => $.reply.annotations.copy_note)}</Button>
-      </div>}
-      {!sourceMissing && sourceChanged && <p className="px-2 text-caption text-muted-foreground">{t(($) => $.reply.annotations.source_changed)}</p>}
+      {(sourceMissing || sourceChanged) && <p role={sourceMissing ? "alert" : undefined} className="px-2 text-caption text-muted-foreground">
+        {t(($) => $.reply.annotations.source_changed)}
+      </p>}
+      {controls?.targetMissing && <p role="alert" className="px-2 text-caption text-destructive">
+        {t(($) => $.reply.annotations.target_deleted)}
+      </p>}
       {!canSave && <p className="px-2 text-caption text-muted-foreground">{t(($) => $.reply.annotations.count_limit, { count: MAX_REPLY_ANNOTATIONS })}</p>}
-      <div className="flex flex-wrap items-center gap-1 px-1 pb-1" inert={submitting || undefined}>
+      {sendAll && <p className="px-2 text-caption text-muted-foreground">
+        {otherAnnotations ? t(($) => hasBody ? $.reply.annotations.send_with_annotations_and_body : $.reply.annotations.send_with_annotations, { count: otherAnnotations })
+          : t(($) => $.reply.annotations.send_with_body)}
+      </p>}
+      <div className="flex flex-wrap items-center gap-1 px-1 pb-1" inert={busy || undefined}>
         {existing && onRemove && <IconButton variant="ghost" size="icon-sm"
           className="text-muted-foreground hover:text-destructive" label={t(($) => $.reply.annotations.remove, { number })}
-          disabled={submitting} onClick={onRemove}><Trash2 /></IconButton>}
-        {direct && <div className="min-w-0 flex-1">
-          <CommentTriggerChips recipients={recipients} blocked={preview.blocked}
-            hasAllMembersMention={preview.hasAllMembersMention} draftContent={composed} onActionChange={setAction} />
-        </div>}
+          disabled={busy} onClick={onRemove}><Trash2 /></IconButton>}
+        <div className="min-w-0 flex-1">{controls?.recipients}</div>
         <div className="ml-auto flex items-center gap-1">
-          <Button size="sm" variant={direct ? "ghost" : "default"} className={direct ? "text-muted-foreground" : undefined}
-            disabled={!annotation.note.trim() || !canSave || submitting}
-            onClick={save}>{saveLabel}</Button>
-          {direct && <Button size="sm" variant={routing.restartTaskIds.length ? "destructive" : "default"}
-            disabled={!composed || sourceMissing || submitting} onClick={submit} aria-busy={submitting || undefined}>
-            {submitting && <Loader2 className="animate-spin" />}
-            {t(($) => routing.restartTaskIds.length ? $.comment.restart_send
-              : parentId ? $.reply.annotations.direct_reply : $.reply.annotations.direct_comment)}
+          {controls && <Button size="sm" variant={controls.restart ? "destructive" : "ghost"}
+            disabled={!annotation.note.trim() || !canSave || busy || controls.uploading || controls.targetMissing} onClick={send} aria-busy={busy || undefined}>
+            {busy && <Loader2 className="animate-spin" />}
+            {t(($) => controls.restart ? $.comment.restart_send : sendAll ? $.reply.annotations.send_all : $.comment.send_tooltip)}
+            <ShortcutKeycaps shortcut={SEND} decorative />
           </Button>}
+          <Button size="sm" disabled={!annotation.note.trim() || !canSave || busy} onClick={save}>
+            {t(($) => existing ? $.reply.annotations.save : $.reply.annotations.confirm_add)}
+            <ShortcutKeycaps shortcut={ENTER} decorative />
+          </Button>
         </div>
       </div>
     </div>

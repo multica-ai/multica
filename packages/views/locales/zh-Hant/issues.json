@@ -727,14 +727,13 @@
     "restart_failed": "沒能停止當前執行，訊息還沒有傳送。"
   },
   "reply": {
+    "recipients_changed": "回覆目標已變更。請重新確認收件者後再傳送。",
     "placeholder": "回覆...",
     "annotations": {
-      "direct_reply": "回覆",
-      "direct_comment": "發表評論",
-      "direct_target_deleted": "回覆對象已刪除。請先複製意見，再選擇其他評論。",
-      "copy_note": "複製意見",
-      "note_copied": "意見已複製",
-      "note_copy_failed": "複製失敗，請選取意見文字手動複製。",
+      "send_all": "全部傳送",
+      "send_with_annotations_and_body": "將連同下方 {{count}} 條批註和正文一起傳送",
+      "send_with_annotations": "將連同下方 {{count}} 條批註一起傳送",
+      "send_with_body": "將連同下方正文一起傳送",
       "confirm_add": "新增批註",
       "save": "儲存批註",
       "add_comment": "加入評論",

@@ -1647,11 +1647,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const descriptionSourceId = `description:${id}`;
   const descriptionAnnotations = useCommentAnnotations({
     issueId: id,
-    reply: {
-      onSubmit: (_sourceId, content, suppressAgentIds, steerTaskIds) => submitComment(content, undefined, suppressAgentIds, steerTaskIds),
-      onAccepted: (commentId) => scrollToTimelineBottom(commentId),
-      steerByDefault: (task) => !task.trigger_comment_id,
-    },
     draftKey: `new:${id}`,
     sources: [{ id: descriptionSourceId, name: "Description", revision: issue?.revision }],
     enabled: !!user && !!issue,
@@ -4071,6 +4066,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               key={id}
               issueId={id}
               onSubmit={submitComment}
+              annotationComposer={descriptionAnnotations.composer}
               onAccepted={scrollToTimelineBottom}
               onEditAnnotation={(annotationId) => descriptionAnnotations.editAnnotation(annotationId, true)}
             />
