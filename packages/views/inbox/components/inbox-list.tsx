@@ -9,7 +9,6 @@ import {
   type ReactNode,
 } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
-import { Inbox } from "@multica/ui/icons";
 import { isEditableShortcutTarget } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
 import type { InboxItem } from "@multica/core/types";
@@ -184,9 +183,10 @@ export function InboxList({
   if (items.length === 0) {
     return (
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {!onLoadMore && <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <Inbox className="mb-3 h-8 w-8 text-faint-foreground" />
-          <p className="text-body">
+        {/* On the column title's edge, like Chat's empty list. The detail
+            pane beside it carries the large empty state. */}
+        {!onLoadMore && <div className="px-5 pt-2.5 pb-1.5 text-caption text-muted-foreground">
+          <p>
             {emptyLabel ??
               (isArchivedView
                 ? t(($) => $.list.archived_empty)

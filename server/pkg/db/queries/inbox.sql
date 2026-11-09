@@ -1,7 +1,17 @@
 -- name: ListInboxItems :many
+-- The issue projections feed the inbox filters. Keep this column list
+-- identical to ListArchivedInboxItems: the handler converts one row type into
+-- the other.
 SELECT i.*,
        iss.status AS issue_status,
-       iss.priority AS issue_priority
+       iss.priority AS issue_priority,
+       iss.project_id AS issue_project_id,
+       iss.assignee_type AS issue_assignee_type,
+       iss.assignee_id AS issue_assignee_id,
+       iss.due_date AS issue_due_date,
+       ARRAY(SELECT il.label_id::text FROM issue_to_label il
+             WHERE iss.id IS NOT NULL AND il.issue_id = iss.id
+             ORDER BY il.label_id)::text[] AS issue_label_ids
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
@@ -75,7 +85,14 @@ WITH eligible_archived AS MATERIALIZED (
 )
 SELECT i.*,
        iss.status AS issue_status,
-       iss.priority AS issue_priority
+       iss.priority AS issue_priority,
+       iss.project_id AS issue_project_id,
+       iss.assignee_type AS issue_assignee_type,
+       iss.assignee_id AS issue_assignee_id,
+       iss.due_date AS issue_due_date,
+       ARRAY(SELECT il.label_id::text FROM issue_to_label il
+             WHERE iss.id IS NOT NULL AND il.issue_id = iss.id
+             ORDER BY il.label_id)::text[] AS issue_label_ids
 FROM inbox_item i
 JOIN selected_ids selected ON selected.id = i.id
 LEFT JOIN issue iss ON iss.id = i.issue_id

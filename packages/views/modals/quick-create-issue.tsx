@@ -910,7 +910,7 @@ export function AgentCreatePanel({
           {parentIssueId && (
             <span
               data-testid="agent-sub-issue-chip"
-              className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-caption text-muted-foreground"
+              className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-caption text-muted-foreground"
               title={t(($) => $.create_issue.agent.sub_issue_of, {
                 identifier: parentIssueIdentifier ?? "",
               })}

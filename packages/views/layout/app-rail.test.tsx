@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useRailOrderStore } from "@multica/core/navigation";
@@ -180,6 +180,33 @@ describe("AppRail spaces", () => {
     state.pathname = "/acme/runtimes";
     renderRail();
     expect(link("/acme/agents")).toHaveAttribute("aria-current", "page");
+  });
+});
+
+describe("AppRail label disclosure", () => {
+  const tooltip = () => document.querySelector("[data-slot=tooltip-content]");
+
+  // jsdom does not lay out the rail: model a label too long for the item.
+  function clipLabel(el: HTMLElement) {
+    el.style.overflowX = "hidden";
+    Object.defineProperties(el, {
+      scrollWidth: { configurable: true, value: 90 },
+      clientWidth: { configurable: true, value: 44 },
+    });
+  }
+
+  it("names a space whose label is cut off even when it is already the full name", async () => {
+    renderRail();
+    const inbox = link("/acme/inbox")!;
+    clipLabel(within(inbox).getByText("Inbox"));
+    await act(async () => inbox.focus());
+    expect(tooltip()).toHaveTextContent("Inbox");
+  });
+
+  it("stays quiet when the full-name label fits", async () => {
+    renderRail();
+    await act(async () => link("/acme/inbox")!.focus());
+    expect(tooltip()).toBeNull();
   });
 });
 

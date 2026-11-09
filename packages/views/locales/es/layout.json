@@ -35,6 +35,7 @@
     "docs": "Documentación",
     "changelog": "Registro de cambios",
     "discord": "Discord",
+    "star_on_github": "Dar una estrella en GitHub",
     "feedback": "Comentarios",
     "server_version": "Versión del servidor {{version}}"
   },
@@ -78,6 +79,15 @@
       "learn_more": "Más información"
     }
   },
+  "star_prompt": {
+    "title_one": "{{agent}} ha completado {{count}} tarea",
+    "title_other": "{{agent}} ha completado {{count}} tareas",
+    "body": "Si Multica te resulta útil, una estrella en GitHub ayuda a que otros equipos lo descubran.",
+    "star": "Star",
+    "star_label": "Dar una Star a Multica en GitHub",
+    "later": "Ahora no",
+    "close": "Cerrar"
+  },
   "spaces": {
     "work": "Trabajo",
     "team": "Equipo"
@@ -85,7 +95,7 @@
   "rail": {
     "label": "Navegación de la app",
     "sheet_description": "Cambia de sección y de espacio de trabajo.",
-    "inbox": "Bandeja de entrada",
+    "inbox": "Bandeja",
     "work": "Trabajo",
     "team": "Equipo",
     "chat": "Chat",

@@ -591,7 +591,7 @@ function MemberChip({
 }) {
   const { t } = useT("modals");
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border bg-background px-1.5 py-0.5 text-caption">
+    <span className="inline-flex items-center gap-1 rounded-md border bg-background px-1.5 py-0.5 text-caption">
       <ActorAvatar actorType={m.type} actorId={m.id} size="xs" />
       <span className="max-w-[120px] truncate">{m.name}</span>
       <TooltipHint label={t(($) => $.create_squad.members_remove_aria, { name: m.name })}>
@@ -603,7 +603,7 @@ function MemberChip({
             onRemove();
           }}
           aria-label={t(($) => $.create_squad.members_remove_aria, { name: m.name })}
-          className="rounded-full text-muted-foreground hover:text-foreground"
+          className="rounded-sm text-muted-foreground hover:text-foreground"
         >
           <X className="h-3 w-3" />
         </button>

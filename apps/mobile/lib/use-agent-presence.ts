@@ -7,8 +7,8 @@
  * QueryClient + query keys.
  *
  * Pure derivation is shared though — `deriveAgentPresenceDetail` /
- * `buildPresenceMap` are imported from `@multica/core/agents` (pure functions,
- * on the whitelist). Don't re-implement the three-state logic locally; the
+ * `buildPresenceMap` are imported from `@multica/core/agents/derive-presence`
+ * (pure functions, on the whitelist). Don't re-implement the three-state logic locally; the
  * web/desktop/mobile semantics MUST agree (apps/mobile/CLAUDE.md
  * "State enums and transitions must agree").
  *
@@ -25,11 +25,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 import { useQuery } from "@tanstack/react-query";
+import type { AgentPresenceDetail } from "@multica/core/agents";
 import {
   buildPresenceMap,
   deriveAgentPresenceDetail,
-  type AgentPresenceDetail,
-} from "@multica/core/agents";
+} from "@multica/core/agents/derive-presence";
 import { agentListOptions } from "@/data/queries/agents";
 import { runtimeListOptions } from "@/data/queries/runtimes";
 import { agentTaskSnapshotOptions } from "@/data/queries/agent-task-snapshot";

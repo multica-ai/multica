@@ -46,7 +46,10 @@
     },
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      // scripts/dev-env.sh opens a Desktop DevTools port (read by
+      // electron-vite) and signs the dev Desktop in (read by its main process).
+      "passThroughEnv": ["REMOTE_DEBUGGING_PORT", "MULTICA_DEV_AUTH_TOKEN"]
     },
     "dev:staging": {
       "cache": false,

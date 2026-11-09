@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { formatStarCount } from "./use-github-stars";
+import { formatStarCount } from "./stars";
 
 describe("formatStarCount", () => {
   it("renders counts below 1,000 exactly", () => {

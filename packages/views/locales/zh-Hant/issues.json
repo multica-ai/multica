@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "在桌面版開啟"
+  },
+  "desktop": {
+    "link_other_instance": "桌面版連線的是另一個 Multica 執行個體。",
+    "link_workspace_unavailable": "此工作區在桌面版中無法使用。"
+  },
   "inline_run": {
     "label": "{{name}} 的執行",
     "stop": "停止",
@@ -727,8 +734,13 @@
     "restart_failed": "沒能停止當前執行，訊息還沒有傳送。"
   },
   "reply": {
+    "recipients_changed": "回覆目標已變更。請重新確認收件者後再傳送。",
     "placeholder": "回覆...",
     "annotations": {
+      "send_all": "全部傳送",
+      "send_with_annotations_and_body": "將連同下方 {{count}} 條批註和正文一起傳送",
+      "send_with_annotations": "將連同下方 {{count}} 條批註一起傳送",
+      "send_with_body": "將連同下方正文一起傳送",
       "confirm_add": "新增批註",
       "save": "儲存批註",
       "add_comment": "加入評論",
@@ -782,6 +794,11 @@
     "cancel_failed": "取消執行失敗"
   },
   "execution_log": {
+    "latest": "最近",
+    "include_children": "包含子任務",
+    "loading": "正在載入執行記錄...",
+    "load_failed_retry": "無法載入執行記錄，點擊重試",
+    "empty": "此範圍內暫無執行記錄。",
     "section": "執行日誌",
     "cancel_task_tooltip": "取消執行",
     "cancel_task_aria": "取消執行",
@@ -1797,6 +1814,25 @@
       "row_actions": "{{name}} 的操作",
       "empty_title": "還沒有儲存的檢視",
       "empty_description": "在任務列表裡調好篩選和顯示方式，然後另存為檢視。"
+    }
+  },
+  "app_calls": {
+    "section_title": "應用",
+    "chips_label": "本次執行用到的應用",
+    "calls_count_other": "{{count}} 次呼叫",
+    "more": "還有 {{count}} 個",
+    "scope": {
+      "team": "團隊帳號",
+      "personal": "個人帳號"
+    },
+    "outcome": {
+      "ok": "已執行",
+      "error": "失敗",
+      "blocked": "已攔截",
+      "pending": "等待確認",
+      "approved": "已核准",
+      "rejected": "已拒絕",
+      "rate_limited": "已限流"
     }
   }
 }

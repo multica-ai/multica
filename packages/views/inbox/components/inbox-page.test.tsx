@@ -201,6 +201,11 @@ vi.mock("./inbox-filter-menu", () => ({
   InboxFilterMenu: () => <button type="button">Filter inbox</button>,
 }));
 vi.mock("./inbox-list-item", () => ({ useTimeAgo: () => vi.fn() }));
+vi.mock("./inbox-filter-options", () => ({
+  InboxFilterChipsBar: ({ filters }: { filters: { types: string[]; agent: string | null } }) => (
+    <div data-testid="filter-chips" data-types={filters.types.join(",")} data-agent={filters.agent ?? ""} />
+  ),
+}));
 
 // Capture the row actions the page hands the context menu, so the read/unread
 // handlers can be driven without standing up Base UI's menu.
@@ -306,7 +311,7 @@ describe("InboxPage", () => {
     rerender(<InboxPage />);
     expect(screen.getByTestId("row")).toHaveTextContent("busy-row");
 
-    act(() => useInboxFilterStore.getState().toggleIdleOnly("workspace-1"));
+    act(() => useInboxFilterStore.getState().setAgent("workspace-1", "idle"));
 
     expect(screen.queryByTestId("row")).toBeNull();
   });
@@ -315,7 +320,7 @@ describe("InboxPage", () => {
     reset();
     layout.width = DESKTOP;
     listData.active = [item({ id: "read-row", issue_id: "idle-issue", read: true })];
-    useInboxFilterStore.getState().toggleIdleOnly("workspace-1");
+    useInboxFilterStore.getState().setAgent("workspace-1", "idle");
     render(<InboxPage />);
     fireEvent.click(screen.getByTestId("row"));
 
@@ -328,15 +333,15 @@ describe("InboxPage", () => {
     reset();
     layout.width = DESKTOP;
     listData.active = [item({ id: "was-idle", issue_id: "issue-a", read: true })];
-    useInboxFilterStore.getState().toggleIdleOnly("workspace-1");
+    useInboxFilterStore.getState().setAgent("workspace-1", "idle");
     const { rerender } = render(<InboxPage />);
     fireEvent.click(screen.getByTestId("row"));
-    act(() => useInboxFilterStore.getState().toggleIdleOnly("workspace-1"));
+    act(() => useInboxFilterStore.getState().setAgent("workspace-1", "idle"));
     listData.tasks = [{ id: "task-a", agent_id: "agent-1", issue_id: "issue-a", status: "running" }] as AgentTask[];
     rerender(<InboxPage />);
     expect(screen.getByTestId("row")).toHaveTextContent("was-idle");
 
-    act(() => useInboxFilterStore.getState().toggleIdleOnly("workspace-1"));
+    act(() => useInboxFilterStore.getState().setAgent("workspace-1", "idle"));
 
     expect(screen.queryByTestId("row")).toBeNull();
   });
@@ -431,6 +436,38 @@ describe("InboxPage", () => {
     expect(screen.getByTestId("row")).toHaveTextContent("from-alice");
   });
 
+  it("matches a type on any notification of an issue and shows the newest match", () => {
+    reset();
+    listData.active = [
+      item({ id: "newest-comment", issue_id: "issue-1", type: "new_comment", created_at: "2026-06-15T09:00:00Z" }),
+      item({ id: "older-mention", issue_id: "issue-1", type: "mentioned", created_at: "2026-06-15T08:00:00Z" }),
+      item({ id: "other-comment", issue_id: "issue-2", type: "new_comment" }),
+    ];
+    useInboxFilterStore.getState().toggleFilterValue("workspace-1", "type", "mention");
+
+    render(<InboxPage />);
+
+    expect(screen.getAllByTestId("row")).toHaveLength(1);
+    expect(screen.getByTestId("row")).toHaveTextContent("older-mention");
+    expect(screen.getByTestId("filter-chips").dataset.types).toBe("mention");
+  });
+
+  it("keeps a type filtered out with is not", () => {
+    reset();
+    listData.active = [
+      item({ id: "mention", issue_id: "issue-1", type: "mentioned" }),
+      item({ id: "comment", issue_id: "issue-2", type: "new_comment" }),
+    ];
+    const filters = useInboxFilterStore.getState();
+    filters.toggleFilterValue("workspace-1", "type", "mention");
+    filters.setFilterNegated("workspace-1", "type", true);
+
+    render(<InboxPage />);
+
+    expect(screen.getAllByTestId("row")).toHaveLength(1);
+    expect(screen.getByTestId("row")).toHaveTextContent("comment");
+  });
+
   it("hides issues an agent is running or queued on while the idle filter is on", () => {
     reset();
     listData.active = [
@@ -444,7 +481,7 @@ describe("InboxPage", () => {
       { id: "task-2", agent_id: "agent-1", issue_id: "issue-2", status: "queued" },
       { id: "task-3", agent_id: "agent-1", issue_id: "issue-3", status: "completed" },
     ] as AgentTask[];
-    useInboxFilterStore.getState().toggleIdleOnly("workspace-1");
+    useInboxFilterStore.getState().setAgent("workspace-1", "idle");
 
     render(<InboxPage />);
 
@@ -622,11 +659,12 @@ describe("InboxPage", () => {
     listData.tasks = [
       { id: "task-1", agent_id: "agent-1", issue_id: "issue-1", status: "running" },
     ] as AgentTask[];
-    useInboxFilterStore.getState().toggleIdleOnly("workspace-1");
+    useInboxFilterStore.getState().setAgent("workspace-1", "idle");
 
     render(<InboxPage />);
 
     expect(screen.getByTestId("row")).toHaveTextContent("archived-busy");
+    expect(screen.getByTestId("filter-chips").dataset.agent).toBe("");
   });
 
   it("keeps the archive open when it is empty", () => {
@@ -840,7 +878,7 @@ describe("InboxPage", () => {
       item({ id: "inbox-a", issue_id: "issue-a", read: true }),
       item({ id: "inbox-b", issue_id: "issue-b", read: true }),
     ];
-    useInboxFilterStore.getState().toggleIdleOnly("workspace-1");
+    useInboxFilterStore.getState().setAgent("workspace-1", "idle");
 
     const { rerender } = render(<InboxPage />);
     fireEvent.click(screen.getAllByTestId("row")[0]!);
