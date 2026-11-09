@@ -608,7 +608,7 @@ export function AgentCreatePanel({
       const md = editorRef.current?.getMarkdown() ?? "";
       if (md) setManual({ description: md });
     }
-    if (!draft.manual.assigneeId && actor) {
+    if (data?.manual_assignee_cleared !== true && !draft.manual.assigneeId && actor) {
       setManual({ assigneeType: actor.type, assigneeId: actor.id });
     }
     setLastMode("manual");
@@ -616,6 +616,7 @@ export function AgentCreatePanel({
     const carry: Record<string, unknown> = {};
     if (parentIssueId) carry.parent_issue_id = parentIssueId;
     if (parentIssueIdentifier) carry.parent_issue_identifier = parentIssueIdentifier;
+    if (data?.manual_assignee_cleared === true) carry.manual_assignee_cleared = true;
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
   };
 
@@ -909,7 +910,7 @@ export function AgentCreatePanel({
           {parentIssueId && (
             <span
               data-testid="agent-sub-issue-chip"
-              className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-caption text-muted-foreground"
+              className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-caption text-muted-foreground"
               title={t(($) => $.create_issue.agent.sub_issue_of, {
                 identifier: parentIssueIdentifier ?? "",
               })}

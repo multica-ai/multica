@@ -470,6 +470,8 @@
     "metadata_description": "Données clé-valeur enregistrées par les agents et les intégrations pour poursuivre le workflow.",
     "section_load_failed_retry": "Échec du chargement. Réessayer",
     "not_found": "Cette tâche n'existe pas ou a été supprimée dans cet espace de travail.",
+    "load_failed": "Impossible de charger la tâche.",
+    "load_retry": "Réessayer",
     "not_found_title": "Tâche introuvable",
     "breadcrumb_project_unknown": "Projet inconnu",
     "back": "Retour",
@@ -754,6 +756,12 @@
   "reply": {
     "placeholder": "Laisser une réponse...",
     "annotations": {
+      "direct_reply": "Répondre",
+      "direct_comment": "Publier le commentaire",
+      "direct_target_deleted": "Le commentaire ciblé a été supprimé. Copiez votre note avant de sélectionner un autre commentaire.",
+      "copy_note": "Copier la note",
+      "note_copied": "Note copiée",
+      "note_copy_failed": "Impossible de copier la note. Sélectionnez et copiez le texte manuellement.",
       "confirm_add": "Ajouter une annotation",
       "save": "Enregistrer l'annotation",
       "add_comment": "Ajouter au commentaire",
@@ -815,6 +823,11 @@
     "cancel_failed": "Échec de l'annulation de l'exécution"
   },
   "execution_log": {
+    "latest": "Récentes",
+    "include_children": "Inclure les sous-tâches",
+    "loading": "Chargement des exécutions...",
+    "load_failed_retry": "Impossible de charger les exécutions. Réessayer",
+    "empty": "Aucune exécution dans ce périmètre.",
     "section": "Journal d'exécution",
     "cancel_task_tooltip": "Annuler l'exécution",
     "cancel_task_aria": "Annuler l'exécution",
@@ -985,6 +998,7 @@
     "unassigned": "Non assigné",
     "open_in_new_tab": "Ouvrir dans un nouvel onglet",
     "pin_to_sidebar": "Épingler à la barre latérale",
+    "locate_in_sidebar": "Afficher dans la barre latérale",
     "unpin_from_sidebar": "Détacher de la barre latérale",
     "restore_to_inbox": "Restaurer dans la boîte de réception",
     "mark_read": "Marquer comme lu",

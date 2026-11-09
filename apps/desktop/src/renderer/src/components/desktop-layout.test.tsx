@@ -159,10 +159,10 @@ describe("DesktopShell sidebar trigger", () => {
       "data-external-trigger",
       "true",
     );
-    // The toolbar floats over the 64px rail; the tabs start past the rest
+    // The toolbar floats over the 56px rail; the tabs start past the rest
     // of it whether or not the panel inside the card is open.
     const mainTopBar = container.querySelector('[data-slot="main-top-bar"]');
-    expect(mainTopBar).toHaveStyle({ paddingLeft: "136px" });
+    expect(mainTopBar).toHaveStyle({ paddingLeft: "144px" });
 
     fireEvent.click(
       container.querySelector('[data-slot="sidebar-trigger"]')!,
@@ -171,7 +171,7 @@ describe("DesktopShell sidebar trigger", () => {
       "data-sidebar-state",
       "collapsed",
     );
-    expect(mainTopBar).toHaveStyle({ paddingLeft: "136px" });
+    expect(mainTopBar).toHaveStyle({ paddingLeft: "144px" });
     expect(queryByRole("status", { name: /loading workspace/i })).toBeNull();
   });
 

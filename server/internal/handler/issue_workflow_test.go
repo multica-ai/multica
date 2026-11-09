@@ -900,6 +900,10 @@ func TestClaimCarriesProjectWorkflow(t *testing.T) {
 	if testHandler.claimProjectWorkflow(context.Background(), quietIssue, nil, false) != nil {
 		t.Fatal("a Default project without handoffs must not carry a workflow")
 	}
+	stale := db.AgentTaskQueue{AgentID: util.MustParseUUID(agentID), WorkflowStep: pgtype.Text{String: "waiting_for_merge", Valid: true}}
+	if testHandler.claimProjectWorkflow(context.Background(), quietIssue, &stale, false) != nil {
+		t.Fatal("a Default project without handoffs must not restrict a stale binding")
+	}
 
 	projectID := deliveryProject(t, "Workflow claim project", agentID)
 	issueID := dbfx.Issue(t, "claim context", testutil.Cols{
@@ -918,6 +922,9 @@ func TestClaimCarriesProjectWorkflow(t *testing.T) {
 			t.Fatalf("assignee brief is missing %q:\n%s", want, brief)
 		}
 	}
+	if matched := claimBriefForTest(t, issueID, db.AgentTaskQueue{AgentID: util.MustParseUUID(agentID), WorkflowStep: pgtype.Text{String: "in_progress", Valid: true}}); matched != brief {
+		t.Fatalf("matching and NULL bindings must receive the same brief:\n%s", matched)
+	}
 
 	// Any other agent on the issue — mentioned in a comment, say — gets the
 	// statuses and is told to leave them to the assignee.
@@ -931,6 +938,76 @@ func TestClaimCarriesProjectWorkflow(t *testing.T) {
 	if testHandler.claimProjectWorkflow(context.Background(), plainIssue, nil, false) != nil {
 		t.Fatal("an issue outside a project must not carry a workflow")
 	}
+}
+
+func TestClaimExplainsMovedWorkflowStep(t *testing.T) {
+	seedTestCatalog(t)
+	agentID := seededReadyAgentID(t)
+	projectID := deliveryProject(t, "Workflow continuation project", agentID)
+	issueID := dbfx.Issue(t, "continued after an external move", testutil.Cols{
+		"project_id": projectID, "status": "in_progress", "assignee_type": "agent", "assignee_id": agentID,
+	})
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": issueID, "runtime_id": handlerTestRuntimeID(t), "status": "running",
+		"started_at": time.Now(), "workflow_step": "waiting_for_merge",
+	})
+	ctx := context.Background()
+	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := testHandler.Queries.GetAgentTask(ctx, util.MustParseUUID(taskID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := util.MustParseUUID(dbfx.Agent(t, "Workflow continuation observer", handlerTestRuntimeID(t)))
+	for _, observer := range []bool{false, true} {
+		for _, legacy := range []bool{false, true} {
+			t.Run(fmt.Sprintf("observer=%v/legacy=%v", observer, legacy), func(t *testing.T) {
+				claim := task
+				if observer {
+					claim.AgentID = other
+				}
+				got := testHandler.claimProjectWorkflow(ctx, issue, &claim, legacy)
+				if got == nil {
+					t.Fatal("missing workflow brief")
+				}
+				for _, want := range []string{`bound to "waiting_for_merge"`, `"in_progress"`, "Do not change", "member"} {
+					if !strings.Contains(got.Brief, want) {
+						t.Errorf("brief missing %q:\n%s", want, got.Brief)
+					}
+				}
+				for _, leak := range []string{"Implement it and open a PR.", "Your moves:", "multica issue status", "unless you are explicitly asked", "Before your run ends, either run"} {
+					if strings.Contains(got.Brief, leak) {
+						t.Errorf("stale run received %q:\n%s", leak, got.Brief)
+					}
+				}
+			})
+		}
+	}
+	if got := taskWorkflowStep(t, taskID); got != "waiting_for_merge" {
+		t.Fatalf("claim rebound the task to %q", got)
+	}
+	body := agentUpdateIssue(t, issueID, agentID, taskID, map[string]any{"status": "in_review"}).Want(http.StatusConflict).Map()
+	if body["code"] != "workflow_step_moved" || body["current_status"] != "in_progress" {
+		t.Fatalf("stale run's rejection = %v", body)
+	}
+	if status, _, _ := issueStatusAndAssignee(t, issueID); status != "in_progress" {
+		t.Fatalf("refused change moved issue to %q", status)
+	}
+	dbfx.Insert(t, "activity_log", testutil.Cols{
+		"workspace_id": testWorkspaceID, "issue_id": issueID, "actor_type": "member", "actor_id": testUserID,
+		"action": "status_changed", "details": `{"from":"waiting_for_merge","to":"in_progress"}`,
+	})
+	if brief := claimBriefForTest(t, issueID, task); !strings.Contains(brief, "last moved by "+handlerTestName) {
+		t.Fatalf("brief lost the known status mover:\n%s", brief)
+	}
+	named := createTestWorkflow(t, "Continuation "+workflowTestSuffix(), "in_progress", "in_review")
+	setProjectWorkflow(t, projectID, map[string]any{"workflow_id": named.ID}).Want(http.StatusOK)
+	if brief := claimBriefForTest(t, issueID, task); !strings.Contains(brief, `bound to "waiting_for_merge"`) || strings.Contains(brief, "multica issue status") {
+		t.Fatalf("named workflow without handoffs lost the step guard:\n%s", brief)
+	}
+	agentUpdateIssue(t, issueID, agentID, taskID, map[string]any{"status": "in_review"}).Want(http.StatusConflict)
 }
 
 // claimBriefForTest renders the workflow brief a claim of task would carry
@@ -1152,16 +1229,15 @@ func TestAgentStatusChangeOnDefaultIgnoresStep(t *testing.T) {
 	agentUpdateIssue(t, issueID, agentID, taskID, map[string]any{"status": "in_review"}).Want(http.StatusOK)
 }
 
-// Squads can't be handed to, but a handoff away from an issue a squad owns
-// offers to stop — and stops — the runs made on
-// the squad's behalf, recording who stopped them.
+// A handoff away from an issue a squad owns offers to stop — and stops — the
+// runs made on the squad's behalf, recording who stopped them.
 func TestHandoffStopsPreviousSquadRuns(t *testing.T) {
 	seedTestCatalog(t)
 	agentID := seededReadyAgentID(t)
 	squadID := dbfx.Squad(t, "Workflow review squad "+workflowTestSuffix(), agentID)
 	projectID := createWorkflowTestProject(t, "Workflow squad stop project")
 	setColumnHandoff(t, projectID, "in_progress", map[string]any{"handler": map[string]any{"type": "member", "id": testUserID}}).Want(http.StatusOK)
-	setColumnHandoff(t, projectID, "in_review", map[string]any{"handler": map[string]any{"type": "squad", "id": squadID}}).Want(http.StatusBadRequest)
+	setColumnHandoff(t, projectID, "in_review", map[string]any{"handler": map[string]any{"type": "squad", "id": squadID}}).Want(http.StatusOK)
 	issueID := dbfx.Issue(t, "squad reviewing", testutil.Cols{
 		"project_id": projectID, "status": "in_review", "assignee_type": "squad", "assignee_id": squadID,
 	})
@@ -1169,6 +1245,10 @@ func TestHandoffStopsPreviousSquadRuns(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID)
 	running := dbfx.Task(t, agentID, testutil.Cols{
 		"issue_id": issueID, "squad_id": squadID, "runtime_id": runtimeID, "status": "running", "started_at": time.Now(),
+	})
+	otherSquad := dbfx.Squad(t, "Another squad sharing the leader "+workflowTestSuffix(), agentID)
+	unrelated := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": issueID, "squad_id": otherSquad, "runtime_id": runtimeID, "status": "deferred", "fire_at": time.Now(),
 	})
 
 	var preview WorkflowHandoffPreviewResponse
@@ -1186,6 +1266,10 @@ func TestHandoffStopsPreviousSquadRuns(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT name FROM "user" WHERE id = $1`, testUserID).Scan(&memberName)
 	if status != "cancelled" || stoppedBy == nil || *stoppedBy != memberName {
 		t.Fatalf("squad run = %s stopped by %v, want cancelled by %s", status, stoppedBy, memberName)
+	}
+	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, unrelated).Scan(&status)
+	if status != "deferred" {
+		t.Fatalf("handoff cancelled another squad's waiting run: %s", status)
 	}
 }
 

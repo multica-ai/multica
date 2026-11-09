@@ -979,8 +979,14 @@ const ReactionSchema = z.object({
 // Nested attachments embedded in timeline/comment responses stay lenient on
 // purpose: a single malformed attachment must not knock the whole timeline
 // into the fallback `[]`.
+const AttachmentImageFields = {
+  width: z.number().int().positive().optional().catch(undefined),
+  height: z.number().int().positive().optional().catch(undefined),
+};
+
 const AttachmentSchema = z.object({
   id: z.string(),
+  ...AttachmentImageFields,
 }).loose();
 
 const ChatQuickActionSchema = z.object({
@@ -1046,6 +1052,9 @@ export const AttachmentResponseSchema = z.object({
   filename: z.string(),
   chat_session_id: z.string().nullable().optional(),
   chat_message_id: z.string().nullable().optional(),
+  // Image metadata is optional and degrades on its own: a malformed value
+  // means "unknown dimensions", never a lost attachment.
+  ...AttachmentImageFields,
 }).loose();
 
 export const EMPTY_ATTACHMENT: Attachment = {
@@ -1538,6 +1547,7 @@ export const ListIssuesResponseSchema = z.object({
 export const CreateIssueResponseSchema = IssueSchema.extend({
   id: z.string().min(1),
   labels: z.array(LabelSchema).optional().catch(undefined),
+  pr_auto_complete_disabled: z.boolean().optional().catch(undefined),
 }).loose();
 
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
@@ -2085,6 +2095,8 @@ export const AgentTaskSchema = z.object({
   agent_id: z.string().default(""),
   runtime_id: z.string().default(""),
   issue_id: z.string().default(""),
+  issue_identifier: z.string().optional().catch(undefined),
+  issue_title: z.string().optional().catch(undefined),
   status: z.string().default("cancelled"),
   priority: z.number().default(0),
   dispatched_at: z.string().nullable().default(null),
@@ -2860,6 +2872,11 @@ export const InboxItemListSchema = z.array(
       body: z.string().nullish(),
       issue_status: z.string().nullish(),
       issue_priority: z.string().nullish(),
+      issue_project_id: z.string().nullish(),
+      issue_assignee_type: z.string().nullish(),
+      issue_assignee_id: z.string().nullish(),
+      issue_due_date: z.string().nullish(),
+      issue_label_ids: z.array(z.string()).nullish(),
       read: z.boolean(),
       archived: z.boolean(),
       created_at: z.string(),
@@ -2875,14 +2892,24 @@ export const ArchivedInboxPageSchema = z.object({
   (!page.has_more || page.items.length > 0))
   .transform((page) => ({ items: page.items, nextCursor: page.next_cursor, hasMore: page.has_more }));
 
+const FacetCountsSchema = z.record(z.string(), z.number().int().nonnegative());
+
+// The type / project / assignee / label counts arrived later; an older server
+// omits them, so they default to empty rather than failing the whole menu.
 export const ArchivedInboxFacetsSchema = z.object({
-  statuses: z.record(z.string(), z.number().int().nonnegative()),
-  priorities: z.record(z.string(), z.number().int().nonnegative()),
-  actors: z.record(z.string(), z.number().int().nonnegative()),
+  statuses: FacetCountsSchema,
+  priorities: FacetCountsSchema,
+  actors: FacetCountsSchema,
+  types: FacetCountsSchema.optional(),
+  projects: FacetCountsSchema.optional(),
+  assignees: FacetCountsSchema.optional(),
+  labels: FacetCountsSchema.optional(),
   unread_count: z.number().int().nonnegative(),
 }).transform((facets) => ({
   statuses: facets.statuses, priorities: facets.priorities,
-  actors: facets.actors, unreadCount: facets.unread_count,
+  actors: facets.actors, types: facets.types ?? {},
+  projects: facets.projects ?? {}, assignees: facets.assignees ?? {},
+  labels: facets.labels ?? {}, unreadCount: facets.unread_count,
 }));
 
 export const EMPTY_INBOX_ITEMS: InboxItem[] = [];
@@ -4046,3 +4073,17 @@ export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsRespon
   installations: [],
   configured: false,
 };
+
+// Only `pinned_at` is new here; every other field keeps its pre-schema
+// leniency so one odd workspace can never empty the whole switcher.
+export const WorkspaceListItemSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  created_at: z.string(),
+  pinned_at: z.iso.datetime({ offset: true }).nullable().optional().catch(null).default(null),
+}).loose();
+
+export const WorkspacePinnedSchema = z.object({
+  pinned_at: z.iso.datetime({ offset: true }).nullable().catch(null),
+});

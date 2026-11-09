@@ -205,6 +205,8 @@ type Attachment struct {
 	ChatMessageID   pgtype.UUID        `json:"chat_message_id"`
 	TaskID          pgtype.UUID        `json:"task_id"`
 	SourceContextID pgtype.UUID        `json:"source_context_id"`
+	Width           pgtype.Int4        `json:"width"`
+	Height          pgtype.Int4        `json:"height"`
 }
 
 type Autopilot struct {
@@ -1229,6 +1231,7 @@ type Member struct {
 	UserID      pgtype.UUID        `json:"user_id"`
 	Role        string             `json:"role"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	PinnedAt    pgtype.Timestamptz `json:"pinned_at"`
 }
 
 type MemberDelegationDay struct {

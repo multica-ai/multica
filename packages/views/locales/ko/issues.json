@@ -463,6 +463,8 @@
     "metadata_description": "에이전트와 연동 기능이 작업 흐름을 이어가기 위해 기록하는 키와 값 데이터입니다.",
     "section_load_failed_retry": "불러오지 못했습니다. 다시 시도",
     "not_found": "이 워크스페이스에 해당 태스크가 없거나 삭제되었습니다.",
+    "load_failed": "태스크를 불러올 수 없습니다.",
+    "load_retry": "다시 시도",
     "not_found_title": "태스크를 찾을 수 없습니다",
     "breadcrumb_project_unknown": "알 수 없는 프로젝트",
     "back": "뒤로",
@@ -731,6 +733,12 @@
   "reply": {
     "placeholder": "답글 남기기...",
     "annotations": {
+      "direct_reply": "답글",
+      "direct_comment": "댓글 게시",
+      "direct_target_deleted": "답글 대상이 삭제되었습니다. 다른 댓글을 선택하기 전에 의견을 복사하세요.",
+      "copy_note": "의견 복사",
+      "note_copied": "의견을 복사했습니다",
+      "note_copy_failed": "의견을 복사하지 못했습니다. 텍스트를 선택해 직접 복사하세요.",
       "confirm_add": "주석 추가",
       "save": "주석 저장",
       "add_comment": "댓글에 추가",
@@ -784,6 +792,11 @@
     "cancel_failed": "실행을 취소하지 못했습니다"
   },
   "execution_log": {
+    "latest": "최근",
+    "include_children": "하위 태스크 포함",
+    "loading": "실행 기록 불러오는 중...",
+    "load_failed_retry": "실행 기록을 불러올 수 없습니다. 다시 시도",
+    "empty": "이 범위에 실행 기록이 없습니다.",
     "section": "실행 로그",
     "cancel_task_tooltip": "실행 취소",
     "cancel_task_aria": "실행 취소",
@@ -939,6 +952,7 @@
     "unassigned": "담당자 없음",
     "open_in_new_tab": "새 탭에서 열기",
     "pin_to_sidebar": "사이드바에 고정",
+    "locate_in_sidebar": "사이드바에서 보기",
     "unpin_from_sidebar": "사이드바 고정 해제",
     "restore_to_inbox": "인박스로 복원",
     "mark_read": "읽음으로 표시",

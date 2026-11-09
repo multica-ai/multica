@@ -463,6 +463,8 @@
     "metadata_description": "AI 代理和整合記錄的鍵值資料，用於銜接工作流程。",
     "section_load_failed_retry": "載入失敗，點選重試",
     "not_found": "這個任務不存在或已在該工作區被刪除。",
+    "load_failed": "無法載入任務。",
+    "load_retry": "重試",
     "not_found_title": "未找到該任務",
     "breadcrumb_project_unknown": "未知專案",
     "back": "返回",
@@ -731,6 +733,12 @@
   "reply": {
     "placeholder": "回覆...",
     "annotations": {
+      "direct_reply": "回覆",
+      "direct_comment": "發表評論",
+      "direct_target_deleted": "回覆對象已刪除。請先複製意見，再選擇其他評論。",
+      "copy_note": "複製意見",
+      "note_copied": "意見已複製",
+      "note_copy_failed": "複製失敗，請選取意見文字手動複製。",
       "confirm_add": "新增批註",
       "save": "儲存批註",
       "add_comment": "加入評論",
@@ -784,6 +792,11 @@
     "cancel_failed": "取消執行失敗"
   },
   "execution_log": {
+    "latest": "最近",
+    "include_children": "包含子任務",
+    "loading": "正在載入執行記錄...",
+    "load_failed_retry": "無法載入執行記錄，點擊重試",
+    "empty": "此範圍內暫無執行記錄。",
     "section": "執行日誌",
     "cancel_task_tooltip": "取消執行",
     "cancel_task_aria": "取消執行",
@@ -939,6 +952,7 @@
     "unassigned": "未分配",
     "open_in_new_tab": "在新標籤頁開啟",
     "pin_to_sidebar": "固定到側邊欄",
+    "locate_in_sidebar": "在側邊欄中定位",
     "unpin_from_sidebar": "從側邊欄取消固定",
     "restore_to_inbox": "恢復到收件箱",
     "mark_read": "標為已讀",

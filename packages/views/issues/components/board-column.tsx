@@ -286,7 +286,7 @@ export const BoardColumn = memo(function BoardColumn({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="rounded-full text-muted-foreground"
+                  className="text-muted-foreground"
                   aria-label={tCommon(($) => $.more_actions)}
                 >
                   <MoreHorizontal className="size-3.5" />
@@ -303,7 +303,7 @@ export const BoardColumn = memo(function BoardColumn({
                           <Button
                             variant="ghost"
                             size="icon-sm"
-                            className="rounded-full text-muted-foreground"
+                            className="text-muted-foreground"
                             aria-label={tCommon(($) => $.more_actions)}
                           >
                             <MoreHorizontal className="size-3.5" />
@@ -333,7 +333,7 @@ export const BoardColumn = memo(function BoardColumn({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="rounded-full text-muted-foreground"
+                  className="text-muted-foreground"
                   aria-label={t(($) => $.board.add_issue_tooltip)}
                   onClick={() => {
                     const data = {

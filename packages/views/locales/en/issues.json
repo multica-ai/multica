@@ -470,6 +470,8 @@
     "metadata_description": "Key-value data recorded by agents and integrations for workflow coordination.",
     "section_load_failed_retry": "Could not load. Retry",
     "not_found": "This issue does not exist or has been deleted in this workspace.",
+    "load_failed": "Could not load issue.",
+    "load_retry": "Retry",
     "not_found_title": "Issue not found",
     "breadcrumb_project_unknown": "Unknown project",
     "back": "Back",
@@ -754,6 +756,12 @@
   "reply": {
     "placeholder": "Leave a reply...",
     "annotations": {
+      "direct_reply": "Reply",
+      "direct_comment": "Post comment",
+      "direct_target_deleted": "The reply target was deleted. Copy your note before selecting another comment.",
+      "copy_note": "Copy note",
+      "note_copied": "Note copied",
+      "note_copy_failed": "Could not copy note. Select and copy the text manually.",
       "confirm_add": "Add annotation",
       "save": "Save annotation",
       "add_comment": "Add to comment",
@@ -815,6 +823,11 @@
     "cancel_failed": "Failed to cancel run"
   },
   "execution_log": {
+    "latest": "Latest",
+    "include_children": "Include sub-issues",
+    "loading": "Loading runs...",
+    "load_failed_retry": "Could not load runs. Retry",
+    "empty": "No runs in this scope.",
     "section": "Execution log",
     "cancel_task_tooltip": "Cancel run",
     "cancel_task_aria": "Cancel run",
@@ -985,6 +998,7 @@
     "unassigned": "Unassigned",
     "open_in_new_tab": "Open in new tab",
     "pin_to_sidebar": "Pin to sidebar",
+    "locate_in_sidebar": "Show in sidebar",
     "unpin_from_sidebar": "Unpin from sidebar",
     "restore_to_inbox": "Restore to inbox",
     "mark_read": "Mark as read",

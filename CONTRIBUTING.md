@@ -1,9 +1,10 @@
 # Contributing Guide
 
-This guide documents the local development workflow for contributors working on the Multica codebase.
+This guide documents issue and pull request requirements and the local development workflow for contributors working on the Multica codebase.
 
 It covers:
 
+- issue templates, pull request requirements, and review evidence
 - first-time setup
 - environments: starting, inspecting, stopping and deleting them
 - day-to-day development in the main checkout
@@ -27,6 +28,47 @@ other work — you agree to condition 2 of the [Multica License](LICENSE):
   as deemed necessary.
 
 See the [LICENSE](LICENSE) file for the full terms.
+
+## Opening an Issue
+
+Choose the form that fits your report:
+
+- **[Feature request](.github/ISSUE_TEMPLATE/feature_request.yml):** Explain the
+  **Problem** and **Goal**. A high-level **Proposal**, **Alternatives**, and
+  **Screenshots** are optional; you can raise a problem without designing its
+  solution.
+- **[Bug report](.github/ISSUE_TEMPLATE/bug_report.yml):** Describe the
+  **Problem**, **Expected behavior**, and **Steps to reproduce**. For intermittent
+  bugs, explain what you tried and how often it happens. Screenshots, logs, and
+  environment details are optional supporting information.
+
+Select the affected area so we can route the report. Bug reports also ask for
+the deployment type. Screenshots are optional for issues; the mandatory
+screenshot rule below applies to PRs that change UI or interactions.
+
+## Pull Request Requirements
+
+Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md) with these five sections:
+
+1. **Problem:** Describe the concrete problem, who is affected, and why it matters.
+2. **Goal:** State the intended outcome of the change.
+3. **Proposal:** Explain the high-level design and why it achieves the goal.
+   Make it understandable to a reader without much project background. Keep
+   implementation details to a minimum.
+4. **Alternatives (optional):** When useful, briefly describe other approaches
+   and why you did not choose them.
+5. **Screenshots:** For UI or interaction changes, attach screenshots or a
+   screen recording from the running app showing the affected screens and
+   states. Before/after comparisons are strongly preferred; for a new screen,
+   show the after state. If there is no UI or interaction impact, write "N/A"
+   and explain why.
+
+End the description with `Closes #<issue>` when the PR resolves an issue.
+
+**UI or interaction PRs without screenshots or a recording are rejected by
+default.** Reviewers should request changes or close the PR until one is
+provided. PRs
+missing the problem, goal, or high-level proposal are also not ready for review.
 
 ## Development Model
 
@@ -485,6 +527,30 @@ Two constraints are enforced rather than documented:
   competing for its own work, so `make up C=daemon` stops with that explanation
   before spending a login on it. Use `C=api,web` there.
 
+### Web with realistic content
+
+Every `make up`, whatever components it starts, signs `dev@localhost` in,
+marks the user onboarded, and seeds the `dev` workspace with two issues. The
+token sits in the environment's CLI profile, so a Playwright script can open
+`/dev/issues` directly by setting it as `multica_token` in `localStorage`
+before the first page load.
+
+For chat and Agent Builder content without a model or a daemon, add one-shot
+fixtures:
+
+```bash
+make up C=api,web ARGS="--ephemeral"
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue, --json
+make destroy ARGS="--yes"
+```
+
+`chat` and `builder` each create a session with a user message and an assistant
+reply holding a wide table, code and a long log line; `issue` creates an issue
+with a wide description and a comment with a diff. The script registers a
+fixture runtime with the profile token and completes each task with canned
+Markdown through the daemon API, so it also works inside a daemon-managed task.
+It prints the URL of everything it created and exits.
+
 ### Desktop
 
 ```bash
@@ -500,6 +566,64 @@ this environment's Electron userData. Direct `pnpm dev:desktop` still uses its
 path-derived fallback when it is run outside `make up`.
 
 Log in with `dev@localhost` and `888888`.
+
+#### Scripting Desktop over CDP
+
+Some bugs only reproduce in Electron, so evidence for them has to come from the
+running app driven with real input. Start Desktop with a Chrome DevTools
+Protocol endpoint, then attach Playwright to it:
+
+```bash
+make up C=desktop ARGS="--ephemeral --cdp"
+make env-exec ARGS="-- node scripts/desktop-cdp.mjs --screenshot desktop.png"
+make env-exec ARGS="-- node scripts/desktop-cdp.mjs --record steps.mp4 ./steps.mjs"
+make destroy ARGS="--yes"
+```
+
+`--cdp` allocates a port for the environment, `--remote-debugging-port N`
+picks one, and `--no-cdp` drops it; later `make up` runs keep it. `make status`
+prints the endpoint, and `make status ARGS="--json"` reports `desktop_cdp_port`.
+
+`scripts/desktop-cdp.mjs` attaches to the main window of the already signed-in
+Desktop. A script argument is an ES module whose default export receives
+`{ browser, context, page, env, login, screencast, args }`. Drive it with
+`page.mouse` or locator clicks, which go through Chromium's input pipeline,
+rather than `element.click()` inside `page.evaluate`. `--login`, or `login()`
+from a script, signs `dev@localhost` back in after a step signed out.
+`--record` needs `ffmpeg` to encode; without it the frames and an ffconcat file
+stay in `<file>.frames/`. The helper only disconnects, so the app stays up for
+the next attach.
+
+#### Capturing the native window
+
+A renderer screenshot has no title bar or traffic lights. To capture the real
+macOS window of this environment's Desktop, start it with the debug port from
+above and run the capture script from the checkout:
+
+```bash
+make up C=desktop ARGS="--ephemeral --cdp"
+node scripts/desktop-window-capture.mjs window.png
+node scripts/desktop-window-capture.mjs --compare origin/main shots/ -- apps/desktop packages/views
+make destroy ARGS="--yes"
+```
+
+The script finds the window by its owner PID, the process listening on the
+CDP port that `make status` has verified for this environment. It never matches
+by app name or window title: a dev build is also called "Multica Canary", and
+its title is the current page, so either could pick up your own Desktop window.
+Transparent rounded corners are flattened onto white, and the colour profile is
+kept. The app running the command needs Screen Recording permission.
+
+`--compare BASE` writes `before.png` with BASE's version of the changed files
+and `after.png` with the worktree's. Desktop is stopped and relaunched for each
+state, because swapping files under HMR can leave the app stuck loading. The
+index is never touched, and the files are restored on success, failure and
+interrupt. A pathspec after `--` limits which files are swapped.
+
+`--prepare CMD` runs before every capture, in both modes, for example
+`make env-exec ARGS="-- node scripts/desktop-cdp.mjs ./open-page.mjs"` to open
+the page to show. It sees `DESKTOP_CAPTURE_STATE` set to `current`, `before` or
+`after`, and a non-zero exit aborts the run without capturing.
 
 ### Isolation Guarantee
 

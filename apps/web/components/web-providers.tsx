@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { CoreProvider } from "@multica/core/platform";
+import { installUserTimingCap } from "@multica/core/diagnostics";
 import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
 import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
 import packageJson from "../package.json";
@@ -66,6 +67,11 @@ export function WebProviders({
     [],
   );
   const localeAdapter = useMemo(() => createBrowserCookieLocaleAdapter(), []);
+  // React's development build never clears its render measures; see
+  // installUserTimingCap.
+  useEffect(() => {
+    if (process.env.NODE_ENV === "development") installUserTimingCap();
+  }, []);
   return (
     <CoreProvider
       apiBaseUrl={apiBaseUrl}

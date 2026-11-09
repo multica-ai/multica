@@ -3,7 +3,7 @@ import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
 import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema } from "./schemas";
-import type { ArchivedInboxFilters } from "../inbox/filter-store";
+import { archivedInboxQuery, type ArchivedInboxFilters } from "../inbox/filters";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import { parseQoderConnection, parseQoderCatalog, type QoderInput } from "../runtimes/qoder-schema";
 import { configStore } from "../config";
@@ -513,6 +513,8 @@ import {
   EMPTY_SHARE_LINK,
   EMPTY_SHARE_LINK_INFO,
   EMPTY_JOIN_SHARE_LINK_RESPONSE,
+  WorkspaceListItemSchema,
+  WorkspacePinnedSchema,
   type IssueView,
   type IssueViewPreference,
   type CreateIssueViewRequest,
@@ -754,10 +756,16 @@ function subscriberTarget(
  * explicitly, or a concurrent writer of that singleton silently redirects the
  * write to the wrong workspace.
  */
+type WorkspaceScope = string | { workspaceId: string };
+
 function workspaceHeader(
-  slug?: string,
+  scope?: WorkspaceScope,
 ): Record<string, string> | undefined {
-  return slug ? { "X-Workspace-Slug": slug } : undefined;
+  if (typeof scope === "object") {
+    // The server resolves slugs first, so suppress the ambient route slug.
+    return { "X-Workspace-Slug": "", "X-Workspace-ID": scope.workspaceId };
+  }
+  return scope ? { "X-Workspace-Slug": scope } : undefined;
 }
 
 function dingTalkGroupSearch(params: ListDingTalkGroupsParams): string {
@@ -2904,8 +2912,10 @@ export class ApiClient {
     });
   }
 
-  async listTasksByIssue(issueId: string): Promise<AgentTask[]> {
-    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/task-runs`);
+  async listTasksByIssue(issueId: string, includeDescendants = false): Promise<AgentTask[]> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${issueId}/task-runs${includeDescendants ? "?scope=subtree" : ""}`,
+    );
     return parseWithFallback<AgentTask[]>(raw, AgentTaskListSchema, [], {
       endpoint: "GET /api/issues/:id/task-runs",
     });
@@ -3014,12 +3024,7 @@ export class ApiClient {
   }
 
   private archivedInboxParams(filters: ArchivedInboxFilters): URLSearchParams {
-    const params = new URLSearchParams();
-    if (filters.statuses.length) params.set("statuses", [...filters.statuses].sort().join(","));
-    if (filters.priorities.length) params.set("priorities", [...filters.priorities].sort().join(","));
-    if (filters.actors.length) params.set("actors", [...filters.actors].sort().join(","));
-    if (filters.unreadOnly) params.set("unread_only", "true");
-    return params;
+    return new URLSearchParams(archivedInboxQuery(filters));
   }
 
   async listArchivedInboxPage(filters: ArchivedInboxFilters, options: {
@@ -3146,7 +3151,17 @@ export class ApiClient {
 
   // Workspaces
   async listWorkspaces(): Promise<Workspace[]> {
-    return this.fetch("/api/workspaces");
+    const raw = await this.fetch<unknown>("/api/workspaces");
+    return parseWithFallback(raw, WorkspaceListItemSchema.array(), [] as Workspace[], {
+      endpoint: "GET /api/workspaces",
+    }) as Workspace[];
+  }
+
+  async setWorkspacePinned(id: string, pinned: boolean): Promise<{ pinned_at: string | null }> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${id}/pin`, {
+      method: "PUT", body: JSON.stringify({ pinned }),
+    });
+    return parseWithFallback(raw, WorkspacePinnedSchema, { pinned_at: null }, { endpoint: "PUT /api/workspaces/{id}/pin" });
   }
 
   async getWorkspace(id: string): Promise<Workspace> {
@@ -3616,11 +3631,22 @@ export class ApiClient {
   }
 
   // Skills
-  async listSkills(): Promise<SkillSummary[]> {
-    const raw = await this.fetch<unknown>("/api/skills");
-    return parseWithFallback(raw, SkillSummaryListSchema, EMPTY_SKILL_SUMMARY_LIST, {
-      endpoint: "GET /api/skills",
+  async listSkills(options?: {
+    requireValidResponse?: boolean;
+    workspaceSlug?: string;
+  }): Promise<SkillSummary[]> {
+    const raw = await this.fetch<unknown>("/api/skills", {
+      headers: options?.workspaceSlug ? { "X-Workspace-Slug": options.workspaceSlug } : undefined,
     });
+    // Rendering can degrade to an empty list; absence checks must fail closed.
+    const skills = parseWithFallback<SkillSummary[] | null>(
+      raw,
+      options?.requireValidResponse ? SkillSummaryListSchema.removeDefault() : SkillSummaryListSchema,
+      options?.requireValidResponse ? null : EMPTY_SKILL_SUMMARY_LIST,
+      { endpoint: "GET /api/skills" },
+    );
+    if (skills === null) throw new Error("Invalid skill list response");
+    return skills;
   }
 
   async getSkill(id: string): Promise<Skill> {
@@ -3663,6 +3689,7 @@ export class ApiClient {
   async importSkillArchive(
     file: File,
     onConflict?: "fail" | "overwrite" | "rename" | "skip",
+    options?: { workspaceSlug: string },
   ): Promise<Skill> {
     const formData = new FormData();
     formData.append("file", file, file.name || "skill.zip");
@@ -3673,6 +3700,8 @@ export class ApiClient {
       res = await this.fetchRaw("/api/skills/import", {
         method: "POST",
         body: formData,
+        // Pin retries to the workspace that owns this import queue.
+        headers: options ? { "X-Workspace-Slug": options.workspaceSlug } : undefined,
       });
     } catch (err) {
       throw remapSkillImportError(err);
@@ -3833,11 +3862,11 @@ export class ApiClient {
   // Chat Sessions
   async listChatSessions(
     params?: { status?: string },
-    workspaceSlug?: string,
+    workspace?: WorkspaceScope,
   ): Promise<ChatSession[]> {
     const query = params?.status ? `?status=${params.status}` : "";
     const raw: unknown = await this.fetch(`/api/chat/sessions${query}`, {
-      headers: workspaceHeader(workspaceSlug),
+      headers: workspaceHeader(workspace),
     });
     return parseWithFallback(raw, ChatSessionListSchema, EMPTY_CHAT_SESSION_LIST, {
       endpoint: "GET /api/chat/sessions",
@@ -3915,8 +3944,8 @@ export class ApiClient {
   }
 
   // Quick-agent bar: per-user pinned agents.
-  async listChatPinnedAgents(): Promise<ChatPinnedAgent[]> {
-    return this.fetch("/api/chat/pinned-agents");
+  async listChatPinnedAgents(workspace?: WorkspaceScope): Promise<ChatPinnedAgent[]> {
+    return this.fetch("/api/chat/pinned-agents", { headers: workspaceHeader(workspace) });
   }
 
   async pinChatAgent(agentId: string): Promise<ChatPinnedAgent> {
@@ -4078,12 +4107,12 @@ export class ApiClient {
     });
   }
 
-  async listPendingChatTasks(): Promise<PendingChatTasksResponse> {
-    return this.fetch(`/api/chat/pending-tasks`);
+  async listPendingChatTasks(workspace?: WorkspaceScope): Promise<PendingChatTasksResponse> {
+    return this.fetch(`/api/chat/pending-tasks`, { headers: workspaceHeader(workspace) });
   }
 
-  async hasAnyPendingChatTasks(): Promise<HasPendingChatTasksResponse> {
-    return this.fetch(`/api/chat/pending-tasks/has-any`);
+  async hasAnyPendingChatTasks(workspace?: WorkspaceScope): Promise<HasPendingChatTasksResponse> {
+    return this.fetch(`/api/chat/pending-tasks/has-any`, { headers: workspaceHeader(workspace) });
   }
 
   async markChatSessionRead(sessionId: string): Promise<void> {
