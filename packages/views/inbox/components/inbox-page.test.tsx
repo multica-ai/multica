@@ -375,7 +375,7 @@ describe("InboxPage", () => {
     expect(openIssue()).toBe("issue-a");
   });
 
-  it("gives the opened issue a reason bar that can finish it", () => {
+  it("gives the opened issue a reason bar that archives it", () => {
     reset();
     layout.width = DESKTOP;
     listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
@@ -384,10 +384,10 @@ describe("InboxPage", () => {
 
     const notice = issueDetailProps.at(-1)?.notice as React.ReactElement<{
       handled: boolean;
-      onDone: () => void;
+      onArchive: () => void;
     }>;
     expect(notice.props.handled).toBe(false);
-    act(() => notice.props.onDone());
+    act(() => notice.props.onArchive());
 
     expect(archiveMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
   });

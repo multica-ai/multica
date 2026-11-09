@@ -1,6 +1,6 @@
 "use client";
 
-import { Check } from "@multica/ui/icons";
+import { Archive, Check } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import type { InboxItem } from "@multica/core/types";
@@ -18,11 +18,11 @@ import { useTimeAgo } from "./inbox-list-item";
 export function InboxReasonBar({
   item,
   handled,
-  onDone,
+  onArchive,
 }: {
   item: InboxItem;
   handled: boolean;
-  onDone: () => void;
+  onArchive: () => void;
 }) {
   const { t } = useT("inbox");
   const timeAgo = useTimeAgo();
@@ -52,14 +52,14 @@ export function InboxReasonBar({
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button variant="ghost" size="sm" className="shrink-0" onClick={onDone}>
-              <Check className="mr-1.5 size-3.5" />
-              {t(($) => $.detail.done)}
+            <Button variant="ghost" size="sm" className="shrink-0" onClick={onArchive}>
+              <Archive className="mr-1.5 size-3.5" />
+              {t(($) => $.detail.archive)}
             </Button>
           }
         />
         <TooltipContent side="bottom">
-          {t(($) => $.detail.done)}
+          {t(($) => $.detail.archive)}
           <ActionShortcutKeycaps action="archiveInboxItem" />
         </TooltipContent>
       </Tooltip>

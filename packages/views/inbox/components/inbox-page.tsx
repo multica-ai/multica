@@ -915,7 +915,7 @@ export function InboxPage() {
               <InboxReasonBar
                 item={detailItem}
                 handled={handled?.key === detailItem.issue_id}
-                onDone={() => handleArchive(detailItem.id)}
+                onArchive={() => handleArchive(detailItem.id)}
               />
             )
           }
