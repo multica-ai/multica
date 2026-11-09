@@ -82,9 +82,7 @@ type AttachmentResponse struct {
 	// Why a separate field from URL / DownloadURL:
 	//   - URL is the raw storage object URL — fine for avatar/logo
 	//     surfaces but may be private (S3 + CloudFront-signed mode) or
-	//     site-relative (LocalStorage with no base URL configured). For a
-	//     site-relative LocalStorage object bound to content it is the
-	//     stable API URL instead (see localUploadURLNeedsStableAlias).
+	//     site-relative (LocalStorage with no base URL configured).
 	//   - DownloadURL is the URL the renderer uses for THIS response — it
 	//     can be a short-lived signed URL (CloudFront, S3 presign) and
 	//     therefore must NOT be persisted. It expires.
@@ -170,14 +168,15 @@ func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) 
 		SizeBytes:    a.SizeBytes,
 		CreatedAt:    a.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
 	}
-	// Only CloudFront mode overrides the stable path here; the presign and proxy
-	// modes already leave DownloadURL as the stable path and resolve it at
-	// download time, so stable mode is a no-op for them.
-	if h.CFSigner != nil && mode != attachmentURLModeStable {
-		resp.DownloadURL = h.CFSigner.SignedURL(a.Url, time.Now().Add(h.attachmentDownloadURLTTL()))
-	}
-	if h.localUploadURLNeedsStableAlias(a) {
-		resp.URL = resp.MarkdownURL
+	// Only CloudFront mode and local disk override the stable path here; the
+	// presign and other proxy modes leave DownloadURL as the stable path and
+	// resolve it at download time, so stable mode is a no-op for them.
+	if mode != attachmentURLModeStable {
+		if h.CFSigner != nil {
+			resp.DownloadURL = h.CFSigner.SignedURL(a.Url, time.Now().Add(h.attachmentDownloadURLTTL()))
+		} else if signed := h.localInlineDownloadURL(id); signed != "" {
+			resp.DownloadURL = signed
+		}
 	}
 	if a.Width.Valid && a.Height.Valid {
 		resp.Width, resp.Height = &a.Width.Int32, &a.Height.Int32
@@ -201,17 +200,26 @@ func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) 
 	return resp
 }
 
-// localUploadURLNeedsStableAlias reports whether URL must be reported as the
-// stable API URL instead of the site-relative /uploads path. Clients released
-// before MUL-8859 render a site-relative /uploads url directly as a native
-// <img> src, which cannot carry the session /uploads now requires; given the
-// API URL they fall through to their authenticated re-sign / byte fetch.
-// Unbound uploads keep the storage URL because avatar_url must reference it.
-func (h *Handler) localUploadURLNeedsStableAlias(a db.Attachment) bool {
+// localInlineDownloadURL is the signed download_url a local-disk deployment
+// returns, standing in for the presigned / CloudFront URL other backends
+// return there. /uploads/* needs a session (MUL-8859), and clients released
+// before that change render a site-relative /uploads url natively unless
+// download_url is an absolute signed URL. The capability is anchored on
+// MULTICA_PUBLIC_URL, else on the app URL, whose web server proxies /api/*;
+// with neither configured there is no origin to make it absolute, and it is
+// left out.
+func (h *Handler) localInlineDownloadURL(attachmentID string) string {
 	if _, ok := h.Storage.(*storage.LocalStorage); !ok {
-		return false
+		return ""
 	}
-	return strings.HasPrefix(a.Url, "/") && attachmentIsBound(a)
+	base := strings.TrimRight(h.cfg.PublicURL, "/")
+	if base == "" {
+		base = strings.TrimRight(h.cfg.AppURL, "/")
+	}
+	if base == "" {
+		return ""
+	}
+	return base + attachmentInlineCapabilityPath(attachmentID, time.Now().Add(h.attachmentDownloadURLTTL()))
 }
 
 // buildMarkdownURL chooses the durable URL the client persists into

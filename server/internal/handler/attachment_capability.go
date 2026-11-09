@@ -40,6 +40,11 @@ import (
 //   - signed with a key domain-separated from the JWT secret, so it can be
 //     neither forged from nor used to forge a session token
 //   - never persisted, and never emitted into list responses
+//
+// The one exception is local disk (attachmentInlineCapabilityPath): its
+// download_url carries a capability on every response, with the same TTL as
+// a presigned or CloudFront URL, because that is the only signed URL the
+// backend has to offer there (MUL-8859).
 
 const (
 	// attachmentCapabilityVersion is part of the signed message so the
@@ -137,6 +142,18 @@ func attachmentCapabilityPath(attachmentID string, now time.Time) string {
 		"&sig=" + signAttachmentCapability(attachmentID, exp)
 }
 
+// attachmentInlineCapabilityPath builds the load-intent capability that a
+// local-disk deployment returns as download_url, expiring at `expires`.
+// The query uses the CloudFront names Expires / Signature: clients render
+// download_url directly only when it carries one of the signed-URL query
+// names, and clients released before MUL-8859 cannot learn a new one.
+func attachmentInlineCapabilityPath(attachmentID string, expires time.Time) string {
+	exp := expires.Unix()
+	return "/api/attachments/" + attachmentID + "/signed-download" +
+		"?Expires=" + strconv.FormatInt(exp, 10) +
+		"&Signature=" + signAttachmentCapability(attachmentID, exp)
+}
+
 // attachmentDownloadCapabilityPath builds the site-relative capability URL for a
 // forced-attachment ("download button") intent. Same short-lived, single-id
 // shape as attachmentCapabilityPath, plus dl=1 — which the redemption route
@@ -203,7 +220,11 @@ func (h *Handler) DownloadAttachmentWithCapability(w http.ResponseWriter, r *htt
 	if query.Get("dl") == "1" {
 		intent = attachmentCapabilityDownloadIntent
 	}
-	if !verifyAttachmentCapability(attachmentID, query.Get("exp"), query.Get("sig"), intent, time.Now()) {
+	rawExp, rawSig := query.Get("exp"), query.Get("sig")
+	if rawExp == "" && rawSig == "" {
+		rawExp, rawSig = query.Get("Expires"), query.Get("Signature")
+	}
+	if !verifyAttachmentCapability(attachmentID, rawExp, rawSig, intent, time.Now()) {
 		// One generic rejection for every reason, so a caller cannot
 		// distinguish "expired" from "forged" from "wrong attachment"
 		// and use the difference to probe the signer.

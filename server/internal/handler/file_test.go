@@ -1952,32 +1952,64 @@ func TestBuildMarkdownURL_LocalBaseURLUsesAPIEndpoint(t *testing.T) {
 	}
 }
 
-// Clients released before MUL-8859 pick a site-relative /uploads url as a
-// native <img> src ahead of markdown_url. Content attachments on local disk
-// must therefore report url as the stable API URL so those clients fall
-// through to their authenticated fetch; unbound uploads keep the storage URL
-// that avatar_url has to reference.
-func TestAttachmentResponse_LocalStorageContentURLIsStableAPIURL(t *testing.T) {
-	withLocalUploadStorage(t, nil)
-	id := uuid.NewString()
-	storageURL := "/uploads/workspaces/" + testWorkspaceID + "/" + id + ".png"
-	base := db.Attachment{
+// Clients released before MUL-8859 render download_url natively only when it
+// is absolute and carries a signed-URL query, and otherwise render a
+// site-relative /uploads url, which now needs a session. Local disk therefore
+// signs download_url like presign / CloudFront do, while url stays the storage
+// URL that legacy bodies and avatar_url match against.
+func TestAttachmentResponse_LocalStorageSignsDownloadURL(t *testing.T) {
+	key := "workspaces/" + testWorkspaceID + "/inline.png"
+	withLocalUploadStorage(t, map[string]string{key: "PNGBYTES"})
+	testHandler.cfg.PublicURL = "https://multica.example.test"
+	storageURL := testHandler.Storage.ObjectURL(key)
+	id := seedAttachmentURL(t, storageURL, "inline.png", "image/png", 8)
+	att, err := testHandler.Queries.GetAttachment(context.Background(), db.GetAttachmentParams{
 		ID:          parseUUID(id),
 		WorkspaceID: parseUUID(testWorkspaceID),
-		Url:         storageURL,
-		Filename:    "shot.png",
-		ContentType: "image/png",
-	}
-	wantAPI := "/api/attachments/" + id + "/download"
-
-	bound := base
-	bound.IssueID = parseUUID(uuid.NewString())
-	if got := testHandler.attachmentToResponse(bound, attachmentURLModeSigned); got.URL != wantAPI || got.MarkdownURL != wantAPI {
-		t.Fatalf("bound attachment url = %q, markdown_url = %q, want both %q", got.URL, got.MarkdownURL, wantAPI)
+	})
+	if err != nil {
+		t.Fatalf("GetAttachment: %v", err)
 	}
 
-	if got := testHandler.attachmentToResponse(base, attachmentURLModeSigned); got.URL != storageURL {
-		t.Fatalf("unbound upload url = %q, want storage URL %q for avatar_url", got.URL, storageURL)
+	resp := testHandler.attachmentToResponse(att, attachmentURLModeSigned)
+	if resp.URL != storageURL {
+		t.Fatalf("url = %q, want the storage URL %q", resp.URL, storageURL)
+	}
+	prefix := "https://multica.example.test/api/attachments/" + id + "/signed-download?Expires="
+	if !strings.HasPrefix(resp.DownloadURL, prefix) || !strings.Contains(resp.DownloadURL, "&Signature=") {
+		t.Fatalf("download_url = %q, want an absolute Expires/Signature capability", resp.DownloadURL)
+	}
+
+	signed, err := url.Parse(resp.DownloadURL)
+	if err != nil {
+		t.Fatalf("parse download_url: %v", err)
+	}
+	req, w := newCapabilityRequest(id, signed.Query())
+	testHandler.DownloadAttachmentWithCapability(w, req)
+	if w.Code != http.StatusOK || w.Body.String() != "PNGBYTES" {
+		t.Fatalf("redeem download_url: status %d body %q, want 200 PNGBYTES", w.Code, w.Body.String())
+	}
+	forged := signed.Query()
+	forged.Set("Signature", strings.Repeat("0", len(forged.Get("Signature"))))
+	req, w = newCapabilityRequest(id, forged)
+	testHandler.DownloadAttachmentWithCapability(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("forged signature: status %d, want 403", w.Code)
+	}
+
+	stable := "/api/attachments/" + id + "/download"
+	if got := testHandler.attachmentToResponse(att, attachmentURLModeStable).DownloadURL; got != stable {
+		t.Fatalf("stable-mode download_url = %q, want %q", got, stable)
+	}
+	testHandler.cfg.PublicURL = ""
+	testHandler.cfg.AppURL = "https://app.example.test"
+	appPrefix := "https://app.example.test/api/attachments/" + id + "/signed-download?Expires="
+	if got := testHandler.attachmentToResponse(att, attachmentURLModeSigned).DownloadURL; !strings.HasPrefix(got, appPrefix) {
+		t.Fatalf("download_url without MULTICA_PUBLIC_URL = %q, want it anchored on the app URL", got)
+	}
+	testHandler.cfg.AppURL = ""
+	if got := testHandler.attachmentToResponse(att, attachmentURLModeSigned).DownloadURL; got != stable {
+		t.Fatalf("download_url with no configured origin = %q, want %q", got, stable)
 	}
 }
 

@@ -189,16 +189,5 @@ export function contentReferencesAttachment(
   if (contentReferencesURL(content, attachment.url)) return true;
   if (contentReferencesURL(content, attachment.download_url)) return true;
   if (contentReferencesURL(content, attachment.markdown_url)) return true;
-  return contentReferencesLocalUpload(content, attachment.id);
-}
-
-// The server reports a bound local-disk attachment's url as its API URL, so a
-// legacy body's `/uploads/workspaces/<ws>/<id>.ext` reference is matched by id.
-function contentReferencesLocalUpload(content: string, attachmentId: string): boolean {
-  if (!UUID_RE.test(attachmentId) || !content.includes("/uploads/workspaces/")) return false;
-  const re = new RegExp(
-    `/uploads/workspaces/${UUID_PATTERN}/${attachmentId}(?:\\.[A-Za-z0-9]+)?(?![A-Za-z0-9])`,
-    "i",
-  );
-  return re.test(content);
+  return false;
 }

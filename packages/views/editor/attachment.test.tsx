@@ -353,31 +353,40 @@ describe("Attachment — image dispatch", () => {
     }
   });
 
-  it("renders a local disk content attachment the server reports by API url through the byte fetch (MUL-8859)", async () => {
-    // The response shape a bound local-disk attachment now has. Clients from
-    // before MUL-8859 render it the same way: url is no longer a site-relative
-    // /uploads path they would load natively.
-    getBaseUrlMock.mockReturnValue("https://api.example.test");
-    configStore.setState({ cdnDomain: "", cdnSigned: true });
+  describe("local disk responses with a signed download_url (MUL-8859)", () => {
+    // The shape every local-disk response now has: url stays the storage path,
+    // download_url is an absolute Expires/Signature capability. Clients from
+    // before MUL-8859 must render it without touching /uploads.
     const id = "11111111-2222-3333-4444-555555555555";
-    const apiPath = `/api/attachments/${id}/download`;
-    const markdownUrl = `https://api.example.test${apiPath}`;
-    resolverState.attachments = [
-      makeRecord({ id, url: markdownUrl, markdown_url: markdownUrl, download_url: apiPath }),
-    ];
-    getAttachmentMock.mockResolvedValue(makeRecord({ id, download_url: apiPath }));
-    getAttachmentBlobMock.mockResolvedValue(new Blob(["png-bytes"], { type: "image/png" }));
+    const storageUrl = `/uploads/workspaces/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/${id}.png`;
+    const markdownUrl = `https://multica.example.test/api/attachments/${id}/download`;
+    const signedUrl = `https://multica.example.test/api/attachments/${id}/signed-download?Expires=1900000000&Signature=abc`;
+    const record = () =>
+      makeRecord({ id, url: storageUrl, markdown_url: markdownUrl, download_url: signedUrl });
 
-    renderWithQuery(
-      <Attachment
-        attachment={{ kind: "url", url: markdownUrl, filename: "shot.png", forceKind: "image" }}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL);
+    beforeEach(() => {
+      getBaseUrlMock.mockReturnValue("https://multica.example.test");
+      configStore.setState({ cdnDomain: "", cdnSigned: true });
     });
-    expect(getAttachmentBlobMock).toHaveBeenCalledWith(id);
+
+    it("renders a draft upload record through the signed URL", () => {
+      renderWithQuery(<Attachment attachment={{ kind: "record", attachment: record() }} />);
+
+      expect(document.querySelector("img")?.getAttribute("src")).toBe(signedUrl);
+      expect(getAttachmentMock).not.toHaveBeenCalled();
+    });
+
+    it("renders a legacy body's /uploads link through the signed URL", () => {
+      resolverState.attachments = [record()];
+
+      renderWithQuery(
+        <Attachment
+          attachment={{ kind: "url", url: storageUrl, filename: "shot.png", forceKind: "image" }}
+        />,
+      );
+
+      expect(document.querySelector("img")?.getAttribute("src")).toBe(signedUrl);
+    });
   });
 
   it("loads a legacy /uploads link whose attachment is not in this surface's list by id (MUL-8859)", async () => {
