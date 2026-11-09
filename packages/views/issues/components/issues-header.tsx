@@ -343,7 +343,7 @@ function useIssueCounts(
 
 // Actor sub-menu content (shared between Assignee and Creator)
 
-function ActorSubContent({
+export function ActorSubContent({
   counts,
   selected,
   onToggle,
@@ -528,7 +528,7 @@ function ActorSubContent({
 
 // Project sub-menu content
 
-function ProjectSubContent({
+export function ProjectSubContent({
   counts,
   selected,
   onToggle,
@@ -667,7 +667,7 @@ function ProjectStatusSubContent({
 
 // Label sub-menu content
 
-function LabelSubContent({
+export function LabelSubContent({
   counts,
   selected,
   onToggle,
@@ -911,16 +911,20 @@ const OPERATOR_SEGMENT_CLASS =
 
 /** "Is" / "is not" for one dimension, heading its submenu. Radio items keep
  *  it in the menu's keyboard order; the selection below is left as it is. */
-function FilterOperatorSwitch({ dimension }: { dimension: NegatableFilterDimension }) {
+export function FilterOperatorToggle({
+  negated,
+  onNegatedChange,
+}: {
+  negated: boolean;
+  onNegatedChange: (negated: boolean) => void;
+}) {
   const { t } = useT("issues");
-  const negated = useViewStore((s) => s.negatedFilters.includes(dimension));
-  const setFilterNegated = useViewStore((s) => s.setFilterNegated);
   return (
     <>
       <DropdownMenuRadioGroup
         aria-label={t(($) => $.filters.operator_label)}
         value={negated ? "is_not" : "is"}
-        onValueChange={(value) => setFilterNegated(dimension, value === "is_not")}
+        onValueChange={(value) => onNegatedChange(value === "is_not")}
         className="m-1 flex gap-0.5 rounded-lg bg-muted p-0.5"
       >
         <DropdownMenuRadioItem value="is" closeOnClick={false} className={OPERATOR_SEGMENT_CLASS}>
@@ -932,6 +936,17 @@ function FilterOperatorSwitch({ dimension }: { dimension: NegatableFilterDimensi
       </DropdownMenuRadioGroup>
       <DropdownMenuSeparator />
     </>
+  );
+}
+
+function FilterOperatorSwitch({ dimension }: { dimension: NegatableFilterDimension }) {
+  const negated = useViewStore((s) => s.negatedFilters.includes(dimension));
+  const setFilterNegated = useViewStore((s) => s.setFilterNegated);
+  return (
+    <FilterOperatorToggle
+      negated={negated}
+      onNegatedChange={(next) => setFilterNegated(dimension, next)}
+    />
   );
 }
 

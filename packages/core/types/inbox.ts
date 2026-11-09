@@ -1,4 +1,4 @@
-import type { IssuePriority, IssueStatus } from "./issue";
+import type { IssueAssigneeType, IssuePriority, IssueStatus } from "./issue";
 
 export type InboxSeverity = "action_required" | "attention" | "info";
 
@@ -63,6 +63,16 @@ export interface InboxItem {
    * projection; null also covers notifications without a linked issue.
    */
   issue_priority?: IssuePriority | null;
+  /**
+   * The linked issue's fields the inbox filters match on. Optional for the
+   * same reason as `issue_priority`; a server that has them always sends
+   * `issue_label_ids` as an array.
+   */
+  issue_project_id?: string | null;
+  issue_assignee_type?: IssueAssigneeType | null;
+  issue_assignee_id?: string | null;
+  issue_due_date?: string | null;
+  issue_label_ids?: string[] | null;
   read: boolean;
   archived: boolean;
   created_at: string;
@@ -80,5 +90,9 @@ export interface ArchivedInboxFacets {
   statuses: Record<string, number>;
   priorities: Record<string, number>;
   actors: Record<string, number>;
+  types: Record<string, number>;
+  projects: Record<string, number>;
+  assignees: Record<string, number>;
+  labels: Record<string, number>;
   unreadCount: number;
 }

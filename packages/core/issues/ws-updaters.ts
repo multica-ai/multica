@@ -22,6 +22,7 @@ import {
   patchIssueInBuckets,
 } from "./cache-helpers";
 import { cleanupDeletedIssueCaches } from "./delete-cache";
+import { patchInboxIssueProjection } from "../inbox/ws-updaters";
 import type {
   Issue,
   IssueLabelsResponse,
@@ -585,6 +586,7 @@ export function patchIssueLabels(
     return;
   }
   patchIssueSnapshot(qc, wsId, issueId, { labels }, revision);
+  patchInboxIssueProjection(qc, wsId, issueId, { label_ids: labels.map((label) => label.id) });
   qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId), (old) =>
     old &&
     !(
