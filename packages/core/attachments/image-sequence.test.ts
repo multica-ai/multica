@@ -90,6 +90,17 @@ describe("matchAttachmentByURL", () => {
   it("returns undefined for unrelated URLs", () => {
     expect(matchAttachmentByURL("https://example.com/x.png", [a])).toBeUndefined();
   });
+
+  it("matches a legacy local-disk /uploads link to a record reported by API url (MUL-8859)", () => {
+    const local = attachment({
+      id: UUID_B,
+      url: `/api/attachments/${UUID_B}/download`,
+      markdown_url: `/api/attachments/${UUID_B}/download`,
+    });
+    const legacy = `/uploads/workspaces/${UUID_C}/${UUID_B}.png`;
+    expect(matchAttachmentByURL(legacy, [a, local])).toBe(local);
+    expect(selectStandaloneAttachments(`![shot](${legacy})`, [local])).toEqual([]);
+  });
 });
 
 describe("selectStandaloneAttachments", () => {

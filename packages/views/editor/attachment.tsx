@@ -41,7 +41,10 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
-import { attachmentIdFromStorageURL } from "@multica/core/types/attachment-url";
+import {
+  attachmentIdFromLocalUploadURL,
+  attachmentIdFromStorageURL,
+} from "@multica/core/types/attachment-url";
 import { useT } from "../i18n";
 import { DeferredTooltip } from "../common/deferred-tooltip";
 import { useAttachmentDownloadResolver } from "./attachment-download-context";
@@ -367,7 +370,9 @@ export function Attachment({
     // its attachment id, so re-sign it instead of opening the bare URL,
     // which a signed CDN rejects outside the app.
     const attachmentId =
-      state.attachmentId ?? attachmentIdFromStorageURL(shareUrl, cdnDomain);
+      state.attachmentId ??
+      attachmentIdFromStorageURL(shareUrl, cdnDomain) ??
+      attachmentIdFromLocalUploadURL(shareUrl);
     if (attachmentId) {
       return download(attachmentId);
     }

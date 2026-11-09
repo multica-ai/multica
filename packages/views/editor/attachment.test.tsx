@@ -353,6 +353,61 @@ describe("Attachment — image dispatch", () => {
     }
   });
 
+  it("renders a local disk content attachment the server reports by API url through the byte fetch (MUL-8859)", async () => {
+    // The response shape a bound local-disk attachment now has. Clients from
+    // before MUL-8859 render it the same way: url is no longer a site-relative
+    // /uploads path they would load natively.
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    configStore.setState({ cdnDomain: "", cdnSigned: true });
+    const id = "11111111-2222-3333-4444-555555555555";
+    const apiPath = `/api/attachments/${id}/download`;
+    const markdownUrl = `https://api.example.test${apiPath}`;
+    resolverState.attachments = [
+      makeRecord({ id, url: markdownUrl, markdown_url: markdownUrl, download_url: apiPath }),
+    ];
+    getAttachmentMock.mockResolvedValue(makeRecord({ id, download_url: apiPath }));
+    getAttachmentBlobMock.mockResolvedValue(new Blob(["png-bytes"], { type: "image/png" }));
+
+    renderWithQuery(
+      <Attachment
+        attachment={{ kind: "url", url: markdownUrl, filename: "shot.png", forceKind: "image" }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL);
+    });
+    expect(getAttachmentBlobMock).toHaveBeenCalledWith(id);
+  });
+
+  it("loads a legacy /uploads link whose attachment is not in this surface's list by id (MUL-8859)", async () => {
+    // A body quoting an image from another comment: no record resolves, so the
+    // id has to come from the storage path itself.
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    const id = "11111111-2222-3333-4444-555555555555";
+    const legacyUrl = `/uploads/workspaces/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/${id}.png`;
+    getAttachmentMock.mockResolvedValue(
+      makeRecord({ id, download_url: `/api/attachments/${id}/download` }),
+    );
+    getAttachmentBlobMock.mockResolvedValue(new Blob(["png-bytes"], { type: "image/png" }));
+
+    renderWithQuery(
+      <Attachment
+        attachment={{ kind: "url", url: legacyUrl, filename: "shot.png", forceKind: "image" }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL);
+    });
+    expect(getAttachmentMock).toHaveBeenCalledWith(id);
+    expect(getAttachmentBlobMock).toHaveBeenCalledWith(id);
+
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+    expect(downloadMock).toHaveBeenCalledWith(id);
+    expect(openByUrlMock).not.toHaveBeenCalled();
+  });
+
   it("does not pick a LOCAL_UPLOAD_BASE_URL storage URL as a public image (MUL-8859)", () => {
     // The server reports cdn_signed for local storage: the base URL's host
     // matches cdn_domain but serves only to a session.

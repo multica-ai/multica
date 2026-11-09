@@ -12,7 +12,10 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
-import { attachmentIdFromDownloadURL } from "@multica/core/types/attachment-url";
+import {
+  attachmentIdFromDownloadURL,
+  attachmentIdFromLocalUploadURL,
+} from "@multica/core/types/attachment-url";
 
 // Keep refetches well inside the server's signed-URL TTL (30 min default,
 // server/internal/handler/file.go) so a re-render never serves an expired
@@ -83,7 +86,10 @@ export function useResignedInlineMedia(
   pickedUrl: string,
   blobFallback: boolean,
 ): { url: string; pending: boolean } {
-  const idFromPickedUrl = attachmentIdFromDownloadURL(pickedUrl);
+  // A legacy local-disk /uploads link is just as auth-gated (MUL-8859), and
+  // may name an attachment that is not in this surface's list.
+  const idFromPickedUrl =
+    attachmentIdFromDownloadURL(pickedUrl) ?? attachmentIdFromLocalUploadURL(pickedUrl);
   const resignAttachmentId = attachmentId ?? idFromPickedUrl;
   const isCrossOriginWebURL = (() => {
     if (!/^https?:\/\//i.test(pickedUrl) || typeof window === "undefined") {

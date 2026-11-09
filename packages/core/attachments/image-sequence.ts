@@ -23,6 +23,7 @@ import { normalizeUri } from "micromark-util-sanitize-uri";
 import type { Attachment } from "../types/attachment";
 import {
   attachmentIdFromDownloadURL,
+  attachmentIdFromLocalUploadURL,
   contentReferencesAttachment,
 } from "../types/attachment-url";
 
@@ -99,8 +100,10 @@ function matchesAttachmentURL(
  * for the download click and another for the sequence):
  *
  *   1. id extracted from the stable `/api/attachments/<id>/download` shape
- *      that every post-MUL-3130 body persists. Survives a host swap and any
- *      incidental query / fragment.
+ *      that every post-MUL-3130 body persists, or from a legacy local-disk
+ *      `/uploads/workspaces/<ws>/<id>` path, whose record `url` the server
+ *      now reports as the API URL. Survives a host swap and any incidental
+ *      query / fragment.
  *   2. full-URL equality against `url` / `download_url` / `markdown_url`, for
  *      legacy bodies and CDN markdown that never got the stable shape.
  */
@@ -109,7 +112,7 @@ export function matchAttachmentByURL(
   attachments: ReadonlyArray<Attachment> | null | undefined,
 ): Attachment | undefined {
   if (!url || !attachments?.length) return undefined;
-  const idFromUrl = attachmentIdFromDownloadURL(url);
+  const idFromUrl = attachmentIdFromDownloadURL(url) ?? attachmentIdFromLocalUploadURL(url);
   if (idFromUrl) {
     const byId = attachments.find((a) => a.id === idFromUrl);
     if (byId) return byId;

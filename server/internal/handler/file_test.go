@@ -1952,6 +1952,35 @@ func TestBuildMarkdownURL_LocalBaseURLUsesAPIEndpoint(t *testing.T) {
 	}
 }
 
+// Clients released before MUL-8859 pick a site-relative /uploads url as a
+// native <img> src ahead of markdown_url. Content attachments on local disk
+// must therefore report url as the stable API URL so those clients fall
+// through to their authenticated fetch; unbound uploads keep the storage URL
+// that avatar_url has to reference.
+func TestAttachmentResponse_LocalStorageContentURLIsStableAPIURL(t *testing.T) {
+	withLocalUploadStorage(t, nil)
+	id := uuid.NewString()
+	storageURL := "/uploads/workspaces/" + testWorkspaceID + "/" + id + ".png"
+	base := db.Attachment{
+		ID:          parseUUID(id),
+		WorkspaceID: parseUUID(testWorkspaceID),
+		Url:         storageURL,
+		Filename:    "shot.png",
+		ContentType: "image/png",
+	}
+	wantAPI := "/api/attachments/" + id + "/download"
+
+	bound := base
+	bound.IssueID = parseUUID(uuid.NewString())
+	if got := testHandler.attachmentToResponse(bound, attachmentURLModeSigned); got.URL != wantAPI || got.MarkdownURL != wantAPI {
+		t.Fatalf("bound attachment url = %q, markdown_url = %q, want both %q", got.URL, got.MarkdownURL, wantAPI)
+	}
+
+	if got := testHandler.attachmentToResponse(base, attachmentURLModeSigned); got.URL != storageURL {
+		t.Fatalf("unbound upload url = %q, want storage URL %q for avatar_url", got.URL, storageURL)
+	}
+}
+
 func TestBuildMarkdownURL_PublicURLUnsetFallsBackToSiteRelative(t *testing.T) {
 	origPublic := testHandler.cfg.PublicURL
 	origSigner := testHandler.CFSigner

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   attachmentDownloadPath,
   attachmentIdFromDownloadURL,
+  attachmentIdFromLocalUploadURL,
   attachmentIdFromStorageURL,
   contentReferencesAttachment,
   stripChannelMediaMarkers,
@@ -183,5 +184,43 @@ describe("attachmentIdFromStorageURL", () => {
       attachmentIdFromStorageURL(`https://${CDN}/workspaces/${WS}/${ID}.jpg`, ""),
     ).toBeUndefined();
     expect(attachmentIdFromStorageURL(`/workspaces/${WS}/${ID}.jpg`, CDN)).toBeUndefined();
+  });
+});
+
+describe("attachmentIdFromLocalUploadURL", () => {
+  const WS = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+
+  it("extracts the id from site-relative and absolute local-disk paths", () => {
+    expect(attachmentIdFromLocalUploadURL(`/uploads/workspaces/${WS}/${ID}.png`)).toBe(ID);
+    expect(
+      attachmentIdFromLocalUploadURL(`https://api.example.test/uploads/workspaces/${WS}/${ID}?x=1`),
+    ).toBe(ID);
+  });
+
+  it("ignores other shapes", () => {
+    expect(attachmentIdFromLocalUploadURL(`/uploads/users/${WS}/${ID}.png`)).toBeUndefined();
+    expect(attachmentIdFromLocalUploadURL(`/uploads/workspaces/${WS}/lark/${ID}.png`)).toBeUndefined();
+    expect(attachmentIdFromLocalUploadURL(`/workspaces/${WS}/${ID}.png`)).toBeUndefined();
+    expect(attachmentIdFromLocalUploadURL("")).toBeUndefined();
+  });
+});
+
+describe("contentReferencesAttachment with legacy local-disk links (MUL-8859)", () => {
+  const WS = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  // A bound local-disk attachment's url is reported as the API URL, so the
+  // legacy /uploads body is matched by id.
+  const att = { id: ID, url: attachmentDownloadPath(ID), markdown_url: attachmentDownloadPath(ID) };
+
+  it("matches a body that embeds the /uploads path", () => {
+    expect(contentReferencesAttachment(`![s](/uploads/workspaces/${WS}/${ID}.png)`, att)).toBe(true);
+    expect(
+      contentReferencesAttachment(`![s](https://h.test/uploads/workspaces/${WS}/${ID})`, att),
+    ).toBe(true);
+  });
+
+  it("does not match a different id sharing the prefix", () => {
+    expect(
+      contentReferencesAttachment(`![s](/uploads/workspaces/${WS}/${ID}0.png)`, att),
+    ).toBe(false);
   });
 });

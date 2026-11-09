@@ -82,7 +82,9 @@ type AttachmentResponse struct {
 	// Why a separate field from URL / DownloadURL:
 	//   - URL is the raw storage object URL — fine for avatar/logo
 	//     surfaces but may be private (S3 + CloudFront-signed mode) or
-	//     site-relative (LocalStorage with no base URL configured).
+	//     site-relative (LocalStorage with no base URL configured). For a
+	//     site-relative LocalStorage object bound to content it is the
+	//     stable API URL instead (see localUploadURLNeedsStableAlias).
 	//   - DownloadURL is the URL the renderer uses for THIS response — it
 	//     can be a short-lived signed URL (CloudFront, S3 presign) and
 	//     therefore must NOT be persisted. It expires.
@@ -174,6 +176,9 @@ func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) 
 	if h.CFSigner != nil && mode != attachmentURLModeStable {
 		resp.DownloadURL = h.CFSigner.SignedURL(a.Url, time.Now().Add(h.attachmentDownloadURLTTL()))
 	}
+	if h.localUploadURLNeedsStableAlias(a) {
+		resp.URL = resp.MarkdownURL
+	}
 	if a.Width.Valid && a.Height.Valid {
 		resp.Width, resp.Height = &a.Width.Int32, &a.Height.Int32
 	}
@@ -194,6 +199,19 @@ func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) 
 		resp.ChatMessageID = &s
 	}
 	return resp
+}
+
+// localUploadURLNeedsStableAlias reports whether URL must be reported as the
+// stable API URL instead of the site-relative /uploads path. Clients released
+// before MUL-8859 render a site-relative /uploads url directly as a native
+// <img> src, which cannot carry the session /uploads now requires; given the
+// API URL they fall through to their authenticated re-sign / byte fetch.
+// Unbound uploads keep the storage URL because avatar_url must reference it.
+func (h *Handler) localUploadURLNeedsStableAlias(a db.Attachment) bool {
+	if _, ok := h.Storage.(*storage.LocalStorage); !ok {
+		return false
+	}
+	return strings.HasPrefix(a.Url, "/") && attachmentIsBound(a)
 }
 
 // buildMarkdownURL chooses the durable URL the client persists into

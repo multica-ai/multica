@@ -55,7 +55,10 @@ import {
   type IconComponent,
 } from "@multica/ui/icons";
 import type { Attachment } from "@multica/core/types";
-import { attachmentIdFromStorageURL } from "@multica/core/types/attachment-url";
+import {
+  attachmentIdFromLocalUploadURL,
+  attachmentIdFromStorageURL,
+} from "@multica/core/types/attachment-url";
 import { useConfigStore } from "@multica/core/config";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { createShortcutChord } from "@multica/core/shortcuts";
@@ -500,7 +503,9 @@ export function AttachmentPreviewModal({
   // NodeView's download path.
   const handleDownload = () => {
     const attachmentId =
-      state.attachmentId ?? attachmentIdFromStorageURL(state.mediaUrl, cdnDomain);
+      state.attachmentId ??
+      attachmentIdFromStorageURL(state.mediaUrl, cdnDomain) ??
+      attachmentIdFromLocalUploadURL(state.mediaUrl);
     if (attachmentId) {
       return download(attachmentId);
     }

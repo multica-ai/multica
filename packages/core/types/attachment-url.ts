@@ -122,6 +122,33 @@ export function attachmentIdFromStorageURL(
   return match?.[1];
 }
 
+const LOCAL_UPLOAD_PATH_RE = new RegExp(
+  `^/uploads/workspaces/${UUID_PATTERN}/(${UUID_PATTERN})(?:\\.[A-Za-z0-9]+)?$`,
+  "i",
+);
+
+/**
+ * Extract the attachment id from a local-disk storage URL,
+ * `/uploads/workspaces/<ws>/<id>.png`, site-relative or on any host.
+ *
+ * Older bodies persisted that path. It needs a session a native <img> on
+ * Desktop, mobile, or split-origin web cannot send (MUL-8859), so renderers
+ * use this id to load the file through the authenticated attachment API,
+ * including when the record is not in the surface's attachment list.
+ */
+export function attachmentIdFromLocalUploadURL(rawURL: string): string | undefined {
+  if (!rawURL) return undefined;
+  let path = stripQueryAndFragment(rawURL);
+  if (/^https?:\/\//i.test(path)) {
+    try {
+      path = new URL(path).pathname;
+    } catch {
+      return undefined;
+    }
+  }
+  return LOCAL_UPLOAD_PATH_RE.exec(path)?.[1];
+}
+
 function stripQueryAndFragment(url: string): string {
   return url.split(/[?#]/, 1)[0] ?? "";
 }
@@ -162,5 +189,16 @@ export function contentReferencesAttachment(
   if (contentReferencesURL(content, attachment.url)) return true;
   if (contentReferencesURL(content, attachment.download_url)) return true;
   if (contentReferencesURL(content, attachment.markdown_url)) return true;
-  return false;
+  return contentReferencesLocalUpload(content, attachment.id);
+}
+
+// The server reports a bound local-disk attachment's url as its API URL, so a
+// legacy body's `/uploads/workspaces/<ws>/<id>.ext` reference is matched by id.
+function contentReferencesLocalUpload(content: string, attachmentId: string): boolean {
+  if (!UUID_RE.test(attachmentId) || !content.includes("/uploads/workspaces/")) return false;
+  const re = new RegExp(
+    `/uploads/workspaces/${UUID_PATTERN}/${attachmentId}(?:\\.[A-Za-z0-9]+)?(?![A-Za-z0-9])`,
+    "i",
+  );
+  return re.test(content);
 }
