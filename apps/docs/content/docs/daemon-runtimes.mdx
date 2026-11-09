@@ -80,6 +80,14 @@ The registered command is `multica daemon start --foreground` for that profile, 
 - If a file Multica did not create already sits at that location (your own systemd unit, for example), `enable` and `disable` refuse to modify it.
 - A daemon launched by Desktop is managed by Desktop; `daemon start` neither hints nor refreshes a registration for it.
 
+## Long issue replies
+
+By default, synthesized issue comments longer than 8,000 Unicode characters are replaced with a notice. To preserve long final answers, set `MULTICA_LONG_REPLY_ATTACHMENTS=true` in the daemon's environment before starting or restarting it. This applies to completed issue runs from all providers, including Hermes; chat replies are unchanged.
+
+With this opt-in enabled, the daemon uploads the full redacted answer as a Markdown issue attachment and reports a short excerpt with an attachment card through normal completion. It does not call the comment or task-creation API, avoiding an extra comment-triggered run. Explicit attachment-event wakeup subscriptions still follow their normal rules. `MULTICA_LONG_REPLY_THRESHOLD` sets the Unicode-character threshold (default 7,000); only answers strictly above it are uploaded. Invalid or nonpositive values use 7,000, and values above 7,999 are capped at 7,999 to stay below the server limit.
+
+If upload fails or the task credential is unavailable, the original output is reported unchanged, including the existing server notice for oversized output. Providers that already posted an issue comment still suppress the synthesized completion comment; the uploaded file remains on the issue. Existing comments are not edited. Completion retries reuse the uploaded attachment; a daemon crash between upload and saving the completion report can leave an extra attachment.
+
 ## Dispatch and online status
 
 Once registered, a runtime keeps a persistent connection. When a new run enters the queue, the server notifies the matching daemon; the daemon also polls periodically so a dropped connection does not lose the notification. When a runtime is online with spare capacity, runs usually start immediately.
