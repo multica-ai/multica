@@ -131,24 +131,44 @@ func daemonAccountCredentials(ctx context.Context, profile, serverURL string) (s
 	return me.ID, token, nil
 }
 
+func readBackendServiceRecord(dir, serverURL string) (*backendServiceRecord, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "active.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var record backendServiceRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return nil, fmt.Errorf("invalid local service record: %w", err)
+	}
+	if !validServiceProfile(record.Profile) || record.OwnerID == "" || record.ServerURL != serverURL || record.Port < 1 || record.Port > 65535 || record.PID < 1 {
+		return nil, fmt.Errorf("invalid local service identity")
+	}
+	return &record, nil
+}
+
+func requirePreviousBackendCleanup(dir, serverURL string) error {
+	record, err := readBackendServiceRecord(dir, serverURL)
+	if err != nil || record == nil {
+		return err
+	}
+	result, err := readDaemonShutdownResult(record.Profile)
+	if err != nil || result.PID != record.PID || !result.CleanupConfirmed {
+		return fmt.Errorf("previous daemon cleanup could not be confirmed; verify the daemon and its tasks have exited before removing %s and retrying", filepath.Join(dir, "active.json"))
+	}
+	return nil
+}
+
 func liveBackendService(serverURL string) (*backendServiceRecord, map[string]any, error) {
 	dir, err := backendServiceDir(serverURL)
 	if err != nil {
 		return nil, nil, err
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "active.json"))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil, nil
-	}
-	if err != nil {
+	record, err := readBackendServiceRecord(dir, serverURL)
+	if err != nil || record == nil {
 		return nil, nil, err
-	}
-	var record backendServiceRecord
-	if err := json.Unmarshal(data, &record); err != nil {
-		return nil, nil, fmt.Errorf("invalid local service record: %w", err)
-	}
-	if !validServiceProfile(record.Profile) || record.OwnerID == "" || record.ServerURL != serverURL || record.Port < 1 || record.Port > 65535 || record.PID < 1 {
-		return nil, nil, fmt.Errorf("invalid local service identity")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -164,7 +184,22 @@ func liveBackendService(serverURL string) (*backendServiceRecord, map[string]any
 	if err != nil || normalized != serverURL {
 		return nil, nil, fmt.Errorf("local service belongs to another backend")
 	}
-	return &record, health, nil
+	return record, health, nil
+}
+
+// Older health responses may omit the backend. A reported backend must
+// match the operation's selected target before a profile fallback can stop it.
+func checkDaemonHealthBackend(health map[string]any, serverURL string) error {
+	reported, ok := health["server_url"]
+	if !ok || reported == "" {
+		return nil
+	}
+	raw, _ := reported.(string)
+	got, err := daemon.BackendServiceURL(raw)
+	if err != nil || got != serverURL {
+		return fmt.Errorf("daemon at the profile's health port serves another backend; select its backend and retry")
+	}
+	return nil
 }
 
 // Older daemons do not hold a backend lock or attest an account. Never start
@@ -287,6 +322,9 @@ func prepareBackendService(cfg *daemon.Config, expectedOwner string) (*os.File, 
 		return nil, "", fmt.Errorf("another daemon is already serving this backend; connect to it or use 'daemon takeover' explicitly")
 	}
 	fail := func(err error) (*os.File, string, error) { lock.Close(); return nil, "", err }
+	if err := requirePreviousBackendCleanup(dir, serverURL); err != nil {
+		return fail(err)
+	}
 	if err := refuseLegacyBackendDaemon(serverURL, cfg.Profile); err != nil {
 		return fail(err)
 	}
@@ -426,6 +464,13 @@ func runBackendTransitionLocked(cmd *cobra.Command, allowAccountSwitch bool) err
 
 	}
 	if record == nil {
+		dir, err := backendServiceDir(serverURL)
+		if err != nil {
+			return err
+		}
+		if err := requirePreviousBackendCleanup(dir, serverURL); err != nil {
+			return err
+		}
 		if err := refuseLegacyBackendDaemon(serverURL, profile); err != nil {
 			return err
 		}

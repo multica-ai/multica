@@ -9,7 +9,7 @@ import (
 )
 
 func TestBackendServiceIdentity(t *testing.T) {
-	for _, pair := range [][2]string{{"https://EXAMPLE.test:443/", "https://example.test"}, {"wss://example.test/ws", "https://example.test"}, {"http://example.test:80/", "http://example.test"}, {"HTTPS://example.test/a/../b", "https://example.test/b"}, {"https://example.test/%61", "https://example.test/a"}, {"https://example.test/任务", "https://example.test/%E4%BB%BB%E5%8A%A1"}, {"https://example.test/a!", "https://example.test/a%21"}} {
+	for _, pair := range [][2]string{{"https://EXAMPLE.test:443/", "https://example.test"}, {"wss://example.test/ws", "https://example.test"}, {"wss://example.test/ws/", "https://example.test"}, {"http://example.test:80/", "http://example.test"}, {"HTTPS://example.test/a/../b", "https://example.test/b"}, {"https://example.test/%61", "https://example.test/a"}, {"https://example.test/任务", "https://example.test/%E4%BB%BB%E5%8A%A1"}, {"https://example.test/a!", "https://example.test/a%21"}} {
 		a, err := BackendServiceKey(pair[0])
 		if err != nil {
 			t.Fatal(err)

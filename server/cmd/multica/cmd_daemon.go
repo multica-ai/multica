@@ -1235,8 +1235,6 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	}); err != nil {
 		return err
 	}
-	defer os.Remove(servicePath)
-
 	ctx, stop := notifyShutdownContext(context.Background())
 	defer stop()
 
@@ -1254,8 +1252,14 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		operation = nil
 	}
 	runErr := d.RunWithHealthListener(ctx, healthLn)
-	if err := writeDaemonShutdownResult(profile, daemonShutdownResult{PID: os.Getpid(), CleanupConfirmed: d.ShutdownCleanupConfirmed()}); err != nil {
+	cleanupConfirmed := d.ShutdownCleanupConfirmed()
+	if err := writeDaemonShutdownResult(profile, daemonShutdownResult{PID: os.Getpid(), CleanupConfirmed: cleanupConfirmed}); err != nil {
 		return fmt.Errorf("write daemon shutdown result: %w", err)
+	}
+	if cleanupConfirmed {
+		if err := os.Remove(servicePath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove local service record: %w", err)
+		}
 	}
 	if runErr != nil && !errors.Is(runErr, context.Canceled) {
 		return runErr
@@ -1429,6 +1433,9 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	defer cancel()
 	health := checkDaemonHealthOnPort(ctx, healthPort)
 	if daemonAlive(health) {
+		if err := checkDaemonHealthBackend(health, serverURL); err != nil {
+			return err
+		}
 		// Identity before preflight, and well before the stop phase: restart
 		// kills whatever answered on this port, so a collision would take out
 		// another profile's daemon and then start ours in its place.
@@ -1523,6 +1530,11 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	health := checkDaemonHealthOnPort(ctx, healthPort)
+	if daemonAlive(health) {
+		if err := checkDaemonHealthBackend(health, serverURL); err != nil {
+			return err
+		}
+	}
 	if expected, _ := cmd.Flags().GetInt("expected-pid"); expected > 0 && health["pid"] != float64(expected) {
 		return fmt.Errorf("local execution service changed after confirmation; retry before stopping")
 	}

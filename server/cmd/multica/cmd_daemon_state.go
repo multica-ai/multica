@@ -37,12 +37,16 @@ func readAccountState(path string) (backendAccountState, error) {
 	return state, nil
 }
 
-func savedBackendAccountStates() ([]backendAccountState, error) {
+func savedBackendAccountStatePaths() ([]string, error) {
 	root, err := cli.ProfileDir("")
 	if err != nil {
 		return nil, err
 	}
-	paths, err := filepath.Glob(filepath.Join(root, "services", "*", "accounts", "*.json"))
+	return filepath.Glob(filepath.Join(root, "services", "*", "accounts", "*.json"))
+}
+
+func savedBackendAccountStates() ([]backendAccountState, error) {
+	paths, err := savedBackendAccountStatePaths()
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +176,7 @@ func migrateLegacyExecutionState(dir string, cfg daemon.Config, owner string) er
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	states, err := savedBackendAccountStates()
+	paths, err := savedBackendAccountStatePaths()
 	if err != nil {
 		return err
 	}
@@ -180,7 +184,14 @@ func migrateLegacyExecutionState(dir string, cfg daemon.Config, owner string) er
 	if err != nil {
 		return fmt.Errorf("resolve legacy execution root: %w", err)
 	}
-	for _, state := range states {
+	for _, statePath := range paths {
+		state, err := readAccountState(statePath)
+		if err != nil {
+			return err
+		}
+		if filepath.Dir(filepath.Dir(statePath)) == dir && state.DaemonID == cfg.DaemonID {
+			return fmt.Errorf("legacy daemon ID is already bound to another account on this backend")
+		}
 		boundRoot, err := util.ResolveSymlinksBestEffort(state.WorkspacesRoot)
 		if err != nil {
 			return fmt.Errorf("resolve saved execution root: %w", err)
@@ -227,6 +238,9 @@ func runDaemonMigrateState(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("stop the backend's execution service before migrating")
 	}
 	defer lock.Close()
+	if err := requirePreviousBackendCleanup(dir, serverURL); err != nil {
+		return err
+	}
 	if err := refuseLegacyBackendDaemon(serverURL, profile); err != nil {
 		return err
 	}

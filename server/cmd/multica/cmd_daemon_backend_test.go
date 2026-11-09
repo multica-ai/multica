@@ -63,6 +63,38 @@ func TestBackendOperationPinsURLAcrossProfileRewrite(t *testing.T) {
 	}
 }
 
+func TestBackendLifecycleRejectsWrongProfilePortBackend(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	const actual = "https://backend-a.example.test"
+	var shutdown atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/shutdown" {
+			shutdown.Store(true)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"status": "running", "profile": "", "pid": 123, "server_url": actual})
+	}))
+	defer srv.Close()
+	if err := publishDaemonPort("", daemonPortRecord{PID: 123, Port: srv.Listener.Addr().(*net.TCPAddr).Port}); err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range []func(*cobra.Command, []string) error{runDaemonStop, runDaemonRestart} {
+		cmd := &cobra.Command{}
+		cmd.Flags().String("server-url", "", "")
+		cmd.Flags().Bool("force", true, "")
+		if err := cmd.Flags().Set("server-url", "https://backend-b.example.test"); err != nil {
+			t.Fatal(err)
+		}
+		if err := run(cmd, nil); err == nil || !strings.Contains(err.Error(), "serves another backend") {
+			t.Fatalf("expected backend mismatch, got %v", err)
+		}
+	}
+	if shutdown.Load() {
+		t.Fatal("wrong backend received a shutdown request")
+	}
+}
+
 func TestBackendLifetimeLockAcrossProfiles(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "service.lock")

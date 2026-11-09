@@ -9,8 +9,10 @@ export function backendServiceURL(raw: string): string {
   if (url.protocol === "wss:") url.protocol = "https:";
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("Invalid backend URL");
   // Match Go's escaped-path serialization before hashing the connection key.
-  url.pathname = encodeURI(decodeURIComponent(url.pathname)).replace(/[!'()*?#]/g,(char)=>"%"+char.charCodeAt(0).toString(16).toUpperCase());
-  if (url.pathname === "/ws") url.pathname = "/";
+  const pathname = decodeURIComponent(url.pathname).replace(/\/+$/, "");
+  url.pathname = pathname === "/ws"
+    ? "/"
+    : encodeURI(pathname).replace(/[!'()*?#]/g, (char) => "%" + char.charCodeAt(0).toString(16).toUpperCase());
   url.search = "";
   url.hash = "";
   return url.toString().replace(/\/+$/, "");

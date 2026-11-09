@@ -47,6 +47,11 @@ func TestBackendLegacyMigrationPreservesRuntimeAndSessions(t *testing.T) {
 	if err := migrateLegacyExecutionState(dir, cfg, "b"); err == nil {
 		t.Fatal("another account adopted the migrated namespace")
 	}
+	distinct := cfg
+	distinct.Profile, distinct.WorkspacesRoot = "other-legacy", t.TempDir()
+	if err := migrateLegacyExecutionState(dir, distinct, "b"); err == nil || !strings.Contains(err.Error(), "daemon ID is already bound") {
+		t.Fatalf("duplicate runtime identity admitted: %v", err)
+	}
 	other := daemon.Config{Profile: "legacy", ServerBaseURL: cfg.ServerBaseURL, WorkspacesRoot: root, DaemonID: "machine"}
 	if err := bindBackendAccount(dir, &other, "b"); err != nil {
 		t.Fatal(err)

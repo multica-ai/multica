@@ -8,12 +8,15 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/daemon"
 )
 
 // Real process/HTTP/OS-lock fixture. It never discovers or starts agent CLIs.
@@ -119,7 +122,30 @@ func TestBackendHandoffConfirmsProcessAndTaskCleanup(t *testing.T) {
 			if stopErr != nil || !stopped {
 				t.Fatalf("process still owns lock: %v", stopErr)
 			}
-
+			const backend = "https://example.test"
+			dir, err := backendServiceDir(backend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := writeServiceJSON(filepath.Join(dir, "active.json"), backendServiceRecord{
+				ServerURL: backend, Profile: "handoff-fixture", OwnerID: "a", PID: record.PID, Port: record.Port,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if !unconfirmed {
+				if err := requirePreviousBackendCleanup(dir, backend); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			cfg := daemon.Config{ServerBaseURL: backend, Profile: "another-profile"}
+			lock, _, err := prepareBackendService(&cfg, "")
+			if lock != nil {
+				lock.Close()
+			}
+			if err == nil || !strings.Contains(err.Error(), "previous daemon cleanup could not be confirmed") {
+				t.Fatalf("replacement should still be blocked after retry: %v", err)
+			}
 		})
 	}
 }

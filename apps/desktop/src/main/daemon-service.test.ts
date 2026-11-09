@@ -11,6 +11,7 @@ describe("backend service discovery",()=>{
  it.each([
   ["https://EXAMPLE.test:443/","https://example.test"],
   ["wss://example.test/ws","https://example.test"],
+  ["wss://example.test/ws/","https://example.test"],
   ["http://example.test:80/","http://example.test"],
   ["HTTPS://example.test/a/../b","https://example.test/b"],
   ["https://example.test/%61","https://example.test/a"],
