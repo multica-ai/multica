@@ -764,7 +764,7 @@ func CheckThinkingLevelWith(loadCatalog func() (Catalog, error), providerType, m
 			return ThinkingLevelCheck{Reason: "the runtime's default model could not be resolved"}, nil
 		}
 	}
-	if providerType == "claude" {
+	if ProtocolFamilyFor(providerType) == "claude" {
 		for _, unavailable := range catalog.Unavailable {
 			if modelIDForCapabilityLookup(providerType, unavailable.ID) == target {
 				return ThinkingLevelCheck{Reason: fmt.Sprintf("model %q is unavailable in the installed CLI", target)}, nil
@@ -795,7 +795,7 @@ func CheckThinkingLevelWith(loadCatalog func() (Catalog, error), providerType, m
 	// accepts. An omitted explicit model therefore has unknown capabilities.
 	// Keep malformed context modifiers rejected rather than treating them as
 	// independent model IDs, and never bypass an explicit unavailable row.
-	if providerType == "claude" && model != "" && !strings.ContainsAny(target, "[]") {
+	if ProtocolFamilyFor(providerType) == "claude" && model != "" && !strings.ContainsAny(target, "[]") {
 		return ThinkingLevelCheck{}, fmt.Errorf("%w for model %q; cannot validate claude thinking level %q", errUnverifiedCatalog, model, value)
 	}
 	return ThinkingLevelCheck{Reason: fmt.Sprintf("model %q was not found in the runtime catalog", target)}, nil
@@ -919,6 +919,10 @@ func anyModelSupportsThinkingValue(models []Model, value string) bool {
 // absent because their values come from daemon-local model catalogs, which can
 // gain new tokens without a Multica release.
 //
+// Keys are protocol families; callers resolve built-in runtime identities
+// through ProtocolFamilyFor so a fork inherits its family's vocabulary instead
+// of keeping a copy that can drift.
+//
 // The server doesn't have local CLI binaries, so it cannot do per-model
 // discovery the way the daemon can. Fixed-catalog providers use this enum;
 // dynamic providers take the safe-token path in IsKnownThinkingValue below.
@@ -970,20 +974,6 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"xhigh":   true,
 		"max":     true,
 		"ultra":   true,
-	},
-	// omp (Oh-My-Pi) dispatches to the pi backend (see BuiltinRuntimes), so it
-	// inherits pi's fixed CLI vocabulary; discoverOmpModels narrows it to each
-	// model's advertised efforts before execution. `auto` is deliberately absent
-	// even though omp's --thinking accepts it — see ompThinkingFromCatalogEntry
-	// (MUL-7412).
-	"omp": {
-		"off":     true,
-		"minimal": true,
-		"low":     true,
-		"medium":  true,
-		"high":    true,
-		"xhigh":   true,
-		"max":     true,
 	},
 }
 
@@ -1094,10 +1084,13 @@ func UsesACPCatalogThinking(providerType string) bool {
 // true here and the per-session catalog decides whether a picker actually
 // appears. See acpCatalogThinkingProviders for the evidence on each.
 func ThinkingControlSupported(providerType string) bool {
-	if usesDynamicThinkingCatalog(providerType) {
+	// Fixed vocabularies are declared per protocol family; a built-in runtime
+	// identity (e.g. a Claude Code fork) inherits its family's answer instead of
+	// keeping a second copy that can drift.
+	if usesDynamicThinkingCatalog(ProtocolFamilyFor(providerType)) {
 		return true
 	}
-	_, ok := providerThinkingEnums[providerType]
+	_, ok := providerThinkingEnums[ProtocolFamilyFor(providerType)]
 	return ok
 }
 
@@ -1117,10 +1110,10 @@ func IsKnownThinkingValue(providerType, value string) bool {
 	if value == "" {
 		return true
 	}
-	if usesDynamicThinkingCatalog(providerType) {
+	if usesDynamicThinkingCatalog(ProtocolFamilyFor(providerType)) {
 		return isValidDynamicThinkingValue(value)
 	}
-	enum, ok := providerThinkingEnums[providerType]
+	enum, ok := providerThinkingEnums[ProtocolFamilyFor(providerType)]
 	if !ok {
 		return false
 	}

@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
@@ -158,11 +159,14 @@ func startTaskRemoteMCPBrokers(setupCtx, lifetimeCtx context.Context, taskID, pr
 
 func providerSupportsRemoteMCPBroker(provider string) bool {
 	switch provider {
-	case "codex", "claude", "hermes", "qoder", "mcode":
+	case "codex", "hermes", "qoder", "mcode":
 		return true
-	default:
-		return false
 	}
+	// The broker injects plain HTTP MCP entries into the same mcpServers
+	// document every claude-family CLI consumes, so a fork such as langcli
+	// inherits support instead of failing a task that carries connected-app
+	// connections.
+	return agent.ProtocolFamilyFor(provider) == "claude"
 }
 
 func validatePinnedRemoteMCPTools(approved, discovered []remotemcp.Tool) error {

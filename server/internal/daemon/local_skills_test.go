@@ -45,7 +45,12 @@ func testDefaultHermesHome(home string) string {
 
 func writeTestClaudePlugin(t *testing.T, home, id, name string, enabled bool) string {
 	t.Helper()
-	installPath := filepath.Join(home, ".claude", "plugins", "cache", name, "1.0.0")
+	return writeTestClaudePluginAt(t, filepath.Join(home, ".claude"), id, name, enabled)
+}
+
+func writeTestClaudePluginAt(t *testing.T, configDir, id, name string, enabled bool) string {
+	t.Helper()
+	installPath := filepath.Join(configDir, "plugins", "cache", name, "1.0.0")
 	if err := os.MkdirAll(filepath.Join(installPath, ".claude-plugin"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -53,18 +58,18 @@ func writeTestClaudePlugin(t *testing.T, home, id, name string, enabled bool) st
 	if err := os.WriteFile(filepath.Join(installPath, ".claude-plugin", "plugin.json"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(home, ".claude", "plugins"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(configDir, "plugins"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	installed := `{"version":2,"plugins":{"` + id + `":[{"scope":"user","installPath":"` + installPath + `"}]}}`
-	if err := os.WriteFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"), []byte(installed), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, "plugins", "installed_plugins.json"), []byte(installed), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	settings := `{"enabledPlugins":{"` + id + `":` + map[bool]string{true: "true", false: "false"}[enabled] + `}}`
-	if err := os.WriteFile(filepath.Join(home, ".claude", "settings.json"), []byte(settings), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, "settings.json"), []byte(settings), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return installPath
@@ -114,6 +119,55 @@ func TestListRuntimeLocalSkills_Claude(t *testing.T) {
 	}
 	if !skill.CanDisable {
 		t.Fatal("claude runtime skill should be controllable")
+	}
+}
+
+// Langcli keeps claude's project skill directory but its user-level config
+// home is ~/.langcli, so plugin skills must come from ~/.langcli/plugins —
+// not from the ~/.claude installs Claude Code itself reads.
+func TestListRuntimeLocalSkills_Langcli(t *testing.T) {
+	home := t.TempDir()
+	redirectTestHome(t, home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".langcli", "skills"), "lang-review", map[string]string{
+		"SKILL.md": "---\nname: Langcli Review\ndescription: Review with Langcli\n---\n",
+	})
+	langInstall := writeTestClaudePluginAt(t, filepath.Join(home, ".langcli"), "lang-plugin@market", "lang-plugin", true)
+	writeTestLocalSkill(t, filepath.Join(langInstall, "skills"), "plugin-review", map[string]string{
+		"SKILL.md": "---\nname: Plugin Review\ndescription: From a langcli plugin\n---\n",
+	})
+	writeTestClaudePlugin(t, home, "claude-plugin@market", "claude-plugin", true)
+
+	skills, supported, err := listRuntimeLocalSkills("langcli")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("langcli should be supported")
+	}
+
+	byKey := make(map[string]runtimeLocalSkillSummary, len(skills))
+	for _, skill := range skills {
+		byKey[skill.Key] = skill
+	}
+	userSkill, ok := byKey["lang-review"]
+	if !ok {
+		t.Fatalf("missing ~/.langcli/skills entry: %+v", skills)
+	}
+	if userSkill.SourcePath != "~/.langcli/skills/lang-review" || !userSkill.CanDisable {
+		t.Fatalf("user skill = %#v", userSkill)
+	}
+	pluginSkill, ok := byKey["lang-plugin:plugin-review"]
+	if !ok {
+		t.Fatalf("missing ~/.langcli plugin skill: %+v", skills)
+	}
+	if pluginSkill.Plugin != "lang-plugin@market" || pluginSkill.Root != "plugin" || !pluginSkill.CanDisable {
+		t.Fatalf("plugin skill = %#v", pluginSkill)
+	}
+	for _, skill := range skills {
+		if skill.Plugin == "claude-plugin@market" {
+			t.Fatalf("~/.claude plugin leaked into langcli: %#v", skill)
+		}
 	}
 }
 

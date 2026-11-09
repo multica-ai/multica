@@ -55,15 +55,39 @@ func claudeErrorResultGrace() time.Duration {
 // with --output-format stream-json.
 type claudeBackend struct {
 	cfg Config
+	// defaultExecutable, providerLabel, and configHomeDir are overridden by
+	// applyBuiltinRuntimeOverrides when this backend serves a Claude Code fork
+	// registered as its own runtime identity (e.g. langcli). They stay empty
+	// for the "claude" protocol family, where the defaults below apply.
+	defaultExecutable string
+	providerLabel     string
+	// configHomeDir is the fork's config directory relative to $HOME (e.g.
+	// ".langcli"), where its session transcripts and cost state live. Empty
+	// means the claude family default, ".claude".
+	configHomeDir string
+}
+
+func (b *claudeBackend) executable() string {
+	if b.cfg.ExecutablePath != "" {
+		return b.cfg.ExecutablePath
+	}
+	if b.defaultExecutable != "" {
+		return b.defaultExecutable
+	}
+	return "claude"
+}
+
+func (b *claudeBackend) label() string {
+	if b.providerLabel != "" {
+		return b.providerLabel
+	}
+	return "claude"
 }
 
 func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
-	execPath := b.cfg.ExecutablePath
-	if execPath == "" {
-		execPath = "claude"
-	}
+	execPath := b.executable()
 	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("claude executable not found at %q: %w", execPath, err)
+		return nil, fmt.Errorf("%s executable not found at %q: %w", b.label(), execPath, err)
 	}
 
 	timeout := opts.Timeout
@@ -114,9 +138,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	var usageSnapshot *claudeUsageSnapshot
 	if opts.ResumeSessionID != "" {
-		snapshot, snapshotErr := captureClaudeUsageSnapshot(cmd.Env, cmd.Dir, opts.ResumeSessionID)
+		snapshot, snapshotErr := captureClaudeUsageSnapshot(cmd.Env, cmd.Dir, opts.ResumeSessionID, b.configHomeDir)
 		if snapshotErr != nil {
-			b.cfg.Logger.Warn("claude usage baseline unavailable; ignoring reported session totals, keeping per-run stream usage", "error", snapshotErr)
+			b.cfg.Logger.Warn(b.label()+" usage baseline unavailable; ignoring reported session totals, keeping per-run stream usage", "error", snapshotErr)
 		} else {
 			usageSnapshot = snapshot
 		}
@@ -125,12 +149,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("claude stdout pipe: %w", err)
+		return nil, fmt.Errorf("%s stdout pipe: %w", b.label(), err)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("claude stdin pipe: %w", err)
+		return nil, fmt.Errorf("%s stdin pipe: %w", b.label(), err)
 	}
 	inputWriter := &claudeInputWriter{w: stdin}
 	var supplements *claudeSupplementSession
@@ -149,16 +173,16 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// exits unexpectedly. Without the tail, an exit-code-only failure looks
 	// like "claude exited with error: exit status 3" — which is useless for
 	// root-causing V8 aborts, Bun panics, or any other CLI-side crash.
-	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[claude:stderr] "), agentStderrTailBytes)
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "["+b.label()+":stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		closeStdin()
 		cancel()
-		return nil, fmt.Errorf("start claude: %w", err)
+		return nil, fmt.Errorf("start %s: %w", b.label(), err)
 	}
 
-	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info(b.label()+" started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	// The process started — transfer temp file ownership to the goroutine.
 	mcpFileCleanup = nil
@@ -251,7 +275,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				return
 			case <-time.After(claudeErrorResultGrace()):
 			}
-			b.cfg.Logger.Warn("claude still running after an error result; terminating process group", "pid", cmd.Process.Pid)
+			b.cfg.Logger.Warn(b.label()+" still running after an error result; terminating process group", "pid", cmd.Process.Pid)
 			signalProcessGroup(cmd, syscall.SIGTERM)
 			if !waitProcessGroupGone(cmd, claudeTerminateGrace()) {
 				signalProcessGroup(cmd, syscall.SIGKILL)
@@ -328,7 +352,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				sawResult = true
 				finalResultText = msg.ResultText
 				resultIsError = msg.IsError
-				terminalReasonError = claudeTerminalReasonFailure(msg.TerminalReason, msg.ResultText)
+				terminalReasonError = claudeTerminalReasonFailure(b.label(), msg.TerminalReason, msg.ResultText)
 				sessionID = msg.SessionID
 				// A resume whose baseline capture failed cannot trust the
 				// result's modelUsage: newer Claude Code restores the session's
@@ -435,14 +459,14 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// Internal protocol failures cancel the process to unblock its pipes.
 		// Preserve the actual failure instead of reporting a user cancellation.
 		if supplements != nil && writeErr != nil && ctx.Err() == nil && terminalReasonError == "" && !errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-			terminalReasonError = fmt.Sprintf("claude input/control protocol failed: %v", writeErr)
+			terminalReasonError = fmt.Sprintf("%s input/control protocol failed: %v", b.label(), writeErr)
 		}
 
 		if !sawResult && usageSnapshot != nil {
 			appendedUsage, found, snapshotErr := usageSnapshot.appendedCostStateUsage()
 			switch {
 			case snapshotErr != nil:
-				b.cfg.Logger.Warn("claude final cost state unavailable; keeping stream usage fallback", "error", snapshotErr)
+				b.cfg.Logger.Warn(b.label()+" final cost state unavailable; keeping stream usage fallback", "error", snapshotErr)
 			case found:
 				usage = subtractClaudeUsage(appendedUsage, usageSnapshot.baseline)
 			}
@@ -450,10 +474,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		completionGuardError := ""
 		if sawAsyncLaunch {
-			completionGuardError = "claude launched an async background task; Multica-managed runs require foreground execution"
+			completionGuardError = b.label() + " launched an async background task; Multica-managed runs require foreground execution"
 		}
 		finalStatus, finalOutput, finalError := finalizeStreamResult(
-			"claude",
+			b.label(),
 			timeout,
 			runCtx.Err(),
 			writeErr,
@@ -477,10 +501,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// task's error field, which is the only place users see it.
 		stderrTail := stderrBuf.Tail()
 		if finalError != "" {
-			finalError = withAgentStderr(finalError, "claude", stderrTail)
+			finalError = withAgentStderr(finalError, b.label(), stderrTail)
 		}
 		logStreamProtocolObservation(b.cfg.Logger, streamProtocolObservation{
-			provider:                   "claude",
+			provider:                   b.label(),
 			cliVersion:                 b.cfg.CLIVersion,
 			model:                      opts.Model,
 			exitCode:                   streamProcessExitCode(exitErr),
@@ -497,7 +521,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			anthropicBaseURLConfigured: strings.TrimSpace(b.cfg.Env["ANTHROPIC_BASE_URL"]) != "",
 		})
 
-		b.cfg.Logger.Info("claude finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info(b.label()+" finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		// The account-binding 400 arrives in the result event (finalError);
 		// "no conversation found" is printed to stderr. Check both.
@@ -511,7 +535,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					usage = resultUsage
 				}
 			}
-			b.cfg.Logger.Info("claude resume was rejected; dropping session id and signalling fresh-session retry",
+			b.cfg.Logger.Info(b.label()+" resume was rejected; dropping session id and signalling fresh-session retry",
 				"requested_resume", opts.ResumeSessionID,
 				"emitted_session", sessionID,
 			)
@@ -645,7 +669,7 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 		inputMap = map[string]any{}
 	}
 	if forceClaudeToolInputForeground(inputMap) {
-		b.cfg.Logger.Info("claude: forced foreground tool execution",
+		b.cfg.Logger.Info(b.label()+": forced foreground tool execution",
 			"request_id", msg.RequestID,
 			"tool", req.ToolName,
 		)
@@ -665,12 +689,12 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 
 	data, err := json.Marshal(response)
 	if err != nil {
-		b.cfg.Logger.Warn("claude: failed to marshal control response", "error", err)
+		b.cfg.Logger.Warn(b.label()+": failed to marshal control response", "error", err)
 		return
 	}
 	data = append(data, '\n')
 	if _, err := stdin.Write(data); err != nil {
-		b.cfg.Logger.Warn("claude: failed to write control response", "error", err)
+		b.cfg.Logger.Warn(b.label()+": failed to write control response", "error", err)
 	}
 }
 
@@ -796,11 +820,11 @@ type claudeResultModelUsage struct {
 // blacklist (GetLastTaskSession / GetLastChatTaskSession), so the saturated
 // session is retired and the next task on the issue starts fresh — the
 // automated form of the transcript-archiving workaround #6402 reported.
-func claudeTerminalReasonFailure(terminalReason, resultText string) string {
+func claudeTerminalReasonFailure(provider, terminalReason, resultText string) string {
 	if strings.TrimSpace(terminalReason) != taskfailure.TerminalReasonPromptTooLong {
 		return ""
 	}
-	msg := "claude ended the turn with terminal_reason=" + taskfailure.TerminalReasonPromptTooLong +
+	msg := provider + " ended the turn with terminal_reason=" + taskfailure.TerminalReasonPromptTooLong +
 		": the session's context window is exhausted and compaction could not recover it"
 	if detail := strings.TrimSpace(resultText); detail != "" {
 		msg += " (" + detail + ")"
@@ -908,8 +932,8 @@ type claudeUsageSnapshot struct {
 	baseline map[string]TokenUsage
 }
 
-func captureClaudeUsageSnapshot(env []string, cwd, sessionID string) (*claudeUsageSnapshot, error) {
-	configDir, err := claudeConfigDir(env, cwd)
+func captureClaudeUsageSnapshot(env []string, cwd, sessionID, configHomeDir string) (*claudeUsageSnapshot, error) {
+	configDir, err := claudeConfigDir(env, cwd, configHomeDir)
 	if err != nil {
 		return nil, err
 	}
@@ -960,25 +984,32 @@ func (s *claudeUsageSnapshot) appendedCostStateUsage() (map[string]TokenUsage, b
 // ClaudeConfigDir resolves Claude's config directory using the same inherited
 // environment and task overrides as the backend's child process.
 func ClaudeConfigDir(extraEnv map[string]string, cwd string) (string, error) {
-	return claudeConfigDir(buildEnv(extraEnv), cwd)
+	return claudeConfigDir(buildEnv(extraEnv), cwd, "")
 }
 
-func claudeConfigDir(env []string, cwd string) (string, error) {
+// claudeConfigDir returns the directory the CLI keys sessions and cost state
+// under. configHomeDir is the runtime's config directory relative to $HOME
+// (".langcli" for langcli, empty for the claude family default); a non-empty
+// CLAUDE_CONFIG_DIR still wins outright because it names the full directory.
+func claudeConfigDir(env []string, cwd, configHomeDir string) (string, error) {
 	if value, ok := lastClaudeEnvValue(env, "CLAUDE_CONFIG_DIR"); ok && value != "" {
 		return resolveClaudeConfigPath(value, cwd)
 	}
+	if configHomeDir == "" {
+		configHomeDir = ".claude"
+	}
 	if runtime.GOOS == "windows" {
 		if value, ok := lastClaudeEnvValue(env, "USERPROFILE"); ok && value != "" {
-			return resolveClaudeConfigPath(filepath.Join(value, ".claude"), cwd)
+			return resolveClaudeConfigPath(filepath.Join(value, configHomeDir), cwd)
 		}
 	} else if value, ok := lastClaudeEnvValue(env, "HOME"); ok && value != "" {
-		return resolveClaudeConfigPath(filepath.Join(value, ".claude"), cwd)
+		return resolveClaudeConfigPath(filepath.Join(value, configHomeDir), cwd)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve home directory for Claude config: %w", err)
 	}
-	return resolveClaudeConfigPath(filepath.Join(home, ".claude"), cwd)
+	return resolveClaudeConfigPath(filepath.Join(home, configHomeDir), cwd)
 }
 
 func resolveClaudeConfigPath(path, cwd string) (string, error) {
@@ -1244,7 +1275,7 @@ func buildClaudeInput(prompt string) ([]byte, error) {
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshal claude input: %w", err)
+		return nil, fmt.Errorf("marshal stream-json input: %w", err)
 	}
 	return append(data, '\n'), nil
 }

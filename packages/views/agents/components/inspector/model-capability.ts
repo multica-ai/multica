@@ -5,11 +5,15 @@ import type { RuntimeModel } from "@multica/core/types";
 // context size so arbitrary bracketed variants remain fail-closed.
 const CLAUDE_CONTEXT_WINDOW_TAG = /\[[1-9]\d*[km]\]$/;
 
+// Providers that dispatch to the claude backend and therefore share its model
+// ID conventions. Mirrors agent.ProtocolFamilyFor on the server.
+const CLAUDE_FAMILY_PROVIDERS = new Set(["claude", "langcli"]);
+
 export function modelIdForCapabilityLookup(
   provider: string,
   model: string,
 ): string {
-  return provider === "claude"
+  return CLAUDE_FAMILY_PROVIDERS.has(provider)
     ? model.replace(CLAUDE_CONTEXT_WINDOW_TAG, "")
     : model;
 }
