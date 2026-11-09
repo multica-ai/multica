@@ -787,6 +787,14 @@ func (h *Handler) writeSignedAttachmentMetadata(w http.ResponseWriter, r *http.R
 		// far longer than the TTL, so a capability embedded in one would be
 		// expired by the time anything used it.
 		resp.DownloadURL = attachmentCapabilityPath(resp.ID, time.Now())
+		// Local disk already hands out capabilities with the signed-URL TTL
+		// in every response, so this one matches it rather than expiring
+		// under a video or audio preview that is still issuing range
+		// requests. Still site-relative, so the inline-image re-sign keeps
+		// taking its byte-fetch path (MUL-8859).
+		if _, ok := h.Storage.(*storage.LocalStorage); ok {
+			resp.DownloadURL = attachmentInlineCapabilityPath(resp.ID, time.Now().Add(h.attachmentDownloadURLTTL()))
+		}
 		// Download-intent sibling capability (dl=1): the redemption route turns
 		// it into a Content-Disposition: attachment, for the download button.
 		resp.AttachmentDownloadURL = attachmentDownloadCapabilityPath(resp.ID, time.Now())

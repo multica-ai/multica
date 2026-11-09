@@ -432,6 +432,123 @@ describe("AttachmentPreviewModal — dispatch", () => {
   });
 });
 
+describe("AttachmentPreviewModal — PDF, video and audio on local disk (MUL-8859)", () => {
+  // A local-disk record carries a capability in download_url for older
+  // clients, and stays cached past its expiry. A native <iframe>/<video>/<audio>
+  // can't send the Desktop token, so the preview signs again through the
+  // authenticated API every time it opens — whether or not the cached one
+  // has expired yet.
+  const id = "11111111-2222-3333-4444-555555555555";
+  const listExpires = 1_900_000_000;
+  const listCapability = `https://multica.example.test/api/attachments/${id}/signed-download?Expires=${listExpires}&Signature=cached`;
+  const fresh = (n: number) => `/api/attachments/${id}/signed-download?Expires=${listExpires + n}&Signature=fresh${n}`;
+  const kinds = [
+    { kind: "pdf", filename: "manual.pdf", contentType: "application/pdf", selector: "iframe" },
+    { kind: "video", filename: "clip.mp4", contentType: "video/mp4", selector: "video" },
+    { kind: "audio", filename: "note.mp3", contentType: "audio/mpeg", selector: "audio" },
+  ] as const;
+  const localRecord = (filename: string, contentType: string) =>
+    makeAttachment({
+      id,
+      filename,
+      content_type: contentType,
+      url: `/uploads/workspaces/ws-1/${id}.bin`,
+      markdown_url: `https://multica.example.test/api/attachments/${id}/download`,
+      download_url: listCapability,
+    });
+
+  beforeEach(() => {
+    getBaseUrlMock.mockReturnValue("https://multica.example.test");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    getAttachmentMock.mockImplementation(async () => makeAttachment({ id, download_url: fresh(1) }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe.each(kinds)("$kind", ({ filename, contentType, selector }) => {
+    it.each([
+      ["has not expired", listExpires - 60],
+      ["has expired", listExpires + 60 * 60],
+    ])("loads a freshly signed URL when the cached capability %s", async (_, now) => {
+      vi.setSystemTime(now * 1000);
+      render(
+        <AttachmentPreviewModal
+          source={{ kind: "full", attachment: localRecord(filename, contentType) }}
+          open
+          onClose={() => {}}
+        />,
+      );
+
+      expect(document.querySelector(selector)).toBeNull();
+      await waitFor(() =>
+        expect(document.querySelector(selector)?.getAttribute("src")).toBe(
+          `https://multica.example.test${fresh(1)}`,
+        ),
+      );
+      expect(getAttachmentMock).toHaveBeenCalledWith(id);
+    });
+  });
+
+  it("signs again when the preview is reopened", async () => {
+    vi.setSystemTime((listExpires + 60 * 60) * 1000);
+    let signings = 0;
+    let opened = 1;
+    getAttachmentMock.mockImplementation(async () => {
+      signings += 1;
+      return makeAttachment({ id, download_url: fresh(opened) });
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = (open: boolean) => (
+      <QueryClientProvider client={qc}>
+        <AttachmentPreviewModal
+          source={{ kind: "full", attachment: localRecord("clip.mp4", "video/mp4") }}
+          open={open}
+          onClose={() => {}}
+        />
+      </QueryClientProvider>
+    );
+    const { rerender } = rtlRender(view(true));
+    await waitFor(() =>
+      expect(document.querySelector("video")?.getAttribute("src")).toBe(
+        `https://multica.example.test${fresh(1)}`,
+      ),
+    );
+
+    const signingsOnOpen = signings;
+
+    rerender(view(false));
+    await waitFor(() => expect(document.querySelector("video")).toBeNull());
+    opened = 2;
+    rerender(view(true));
+    await waitFor(() =>
+      expect(document.querySelector("video")?.getAttribute("src")).toBe(
+        `https://multica.example.test${fresh(2)}`,
+      ),
+    );
+    expect(signings).toBeGreaterThan(signingsOnOpen);
+  });
+
+  it("uses the stable URL directly on same-origin web", () => {
+    getBaseUrlMock.mockReturnValue("");
+    const stable = `${window.location.origin}/api/attachments/${id}/download`;
+    render(
+      <AttachmentPreviewModal
+        source={{
+          kind: "full",
+          attachment: { ...localRecord("clip.mp4", "video/mp4"), markdown_url: stable },
+        }}
+        open
+        onClose={() => {}}
+      />,
+    );
+
+    expect(document.querySelector("video")?.getAttribute("src")).toBe(stable);
+    expect(getAttachmentMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("AttachmentPreviewModal — server-relative download_url resolution (MUL-2976)", () => {
   // The unified `/api/attachments/{id}/download` endpoint returns a
   // server-relative path on non-CloudFront deployments. The web app keeps

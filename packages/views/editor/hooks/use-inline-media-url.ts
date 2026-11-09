@@ -16,6 +16,7 @@ import {
   attachmentIdFromDownloadURL,
   attachmentIdFromLocalUploadURL,
 } from "@multica/core/types/attachment-url";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 
 // Keep refetches well inside the server's signed-URL TTL (30 min default,
 // server/internal/handler/file.go) so a re-render never serves an expired
@@ -43,6 +44,72 @@ export function __resetInlineMediaBlobCacheForTests(): void {
   blobUrlGCTimers.clear();
   blobUrlRefCount.clear();
   blobUrlCache.clear();
+}
+
+// authenticatedLoadTarget returns the attachment id to load through the
+// authenticated API when `pickedUrl` is an auth-gated path this client cannot
+// load natively, and undefined when the URL can be used as it is.
+function authenticatedLoadTarget(
+  attachmentId: string | undefined,
+  pickedUrl: string,
+): string | undefined {
+  // A legacy local-disk /uploads link is just as auth-gated (MUL-8859), and
+  // may name an attachment that is not in this surface's list.
+  const idFromPickedUrl =
+    attachmentIdFromDownloadURL(pickedUrl) ?? attachmentIdFromLocalUploadURL(pickedUrl);
+  if (!pickedUrl || idFromPickedUrl === undefined) return undefined;
+  const isCrossOriginWebURL = (() => {
+    if (!/^https?:\/\//i.test(pickedUrl) || typeof window === "undefined") {
+      return false;
+    }
+    try {
+      return new URL(pickedUrl).origin !== window.location.origin;
+    } catch (_err) {
+      void _err;
+      return false;
+    }
+  })();
+  if ((api.getBaseUrl?.() ?? "") === "" && !isCrossOriginWebURL) return undefined;
+  return attachmentId ?? idFromPickedUrl;
+}
+
+// useNativeMediaURL gives an <iframe>, <video> or <audio> preview a URL it can
+// load without credentials. Like the inline-image case below, an auth-gated
+// URL 401s there; unlike it, the bytes are not worth pulling into renderer
+// memory, and a player keeps issuing range requests for as long as it plays.
+// So fetch the attachment's metadata each time the preview mounts and use its
+// signed `download_url` — never one held in a cache, which may already have
+// expired. Not a query on purpose: a cached entry would outlive the preview
+// and hand a reopen the old signature.
+export function useNativeMediaURL(
+  attachmentId: string | undefined,
+  pickedUrl: string,
+  enabled: boolean,
+): { url: string; pending: boolean } {
+  const target = enabled ? authenticatedLoadTarget(attachmentId, pickedUrl) : undefined;
+  const [signed, setSigned] = useState<{ target: string; url: string } | null>(null);
+
+  useEffect(() => {
+    if (target === undefined) return;
+    let cancelled = false;
+    const settle = (url: string) => {
+      if (!cancelled) setSigned({ target, url });
+    };
+    api.getAttachment(target).then(
+      (fresh) => {
+        const dl = fresh.download_url ?? "";
+        settle(dl && attachmentIdFromDownloadURL(dl) === undefined ? (resolvePublicFileUrl(dl) ?? dl) : "");
+      },
+      () => settle(""),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [target]);
+
+  if (target === undefined) return { url: pickedUrl, pending: false };
+  if (signed?.target !== target) return { url: pickedUrl, pending: true };
+  return { url: signed.url || pickedUrl, pending: false };
 }
 
 // useResignedInlineMediaURL upgrades an auth-gated media URL to a freshly
@@ -86,27 +153,8 @@ export function useResignedInlineMedia(
   pickedUrl: string,
   blobFallback: boolean,
 ): { url: string; pending: boolean } {
-  // A legacy local-disk /uploads link is just as auth-gated (MUL-8859), and
-  // may name an attachment that is not in this surface's list.
-  const idFromPickedUrl =
-    attachmentIdFromDownloadURL(pickedUrl) ?? attachmentIdFromLocalUploadURL(pickedUrl);
-  const resignAttachmentId = attachmentId ?? idFromPickedUrl;
-  const isCrossOriginWebURL = (() => {
-    if (!/^https?:\/\//i.test(pickedUrl) || typeof window === "undefined") {
-      return false;
-    }
-    try {
-      return new URL(pickedUrl).origin !== window.location.origin;
-    } catch (_err) {
-      void _err;
-      return false;
-    }
-  })();
-  const needsResign =
-    !!resignAttachmentId &&
-    !!pickedUrl &&
-    idFromPickedUrl !== undefined &&
-    ((api.getBaseUrl?.() ?? "") !== "" || isCrossOriginWebURL);
+  const resignAttachmentId = authenticatedLoadTarget(attachmentId, pickedUrl);
+  const needsResign = resignAttachmentId !== undefined;
 
   const { data: fresh, isError: freshFailed } = useQuery({
     queryKey: ["attachment-inline-resign", resignAttachmentId],

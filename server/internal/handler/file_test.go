@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -2010,6 +2011,59 @@ func TestAttachmentResponse_LocalStorageSignsDownloadURL(t *testing.T) {
 	testHandler.cfg.AppURL = ""
 	if got := testHandler.attachmentToResponse(att, attachmentURLModeSigned).DownloadURL; got != stable {
 		t.Fatalf("download_url with no configured origin = %q, want %q", got, stable)
+	}
+}
+
+// The authenticated metadata endpoint is what PDF, video and audio previews
+// load from, and a player keeps redeeming the URL for as long as it plays.
+func TestGetAttachmentByID_LocalStorageCapabilityOutlivesPlayback(t *testing.T) {
+	key := "workspaces/" + testWorkspaceID + "/clip.mp4"
+	withLocalUploadStorage(t, map[string]string{key: "MP4BYTES"})
+	id := seedAttachmentURL(t, testHandler.Storage.ObjectURL(key), "clip.mp4", "video/mp4", 8)
+
+	req := httptest.NewRequest("GET", "/api/attachments/"+id, nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", id)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	w := httptest.NewRecorder()
+	testHandler.GetAttachmentByID(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var resp AttachmentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if !strings.HasPrefix(resp.DownloadURL, "/api/attachments/"+id+"/signed-download?") {
+		t.Fatalf("download_url = %q, want a site-relative capability", resp.DownloadURL)
+	}
+	signed, err := url.Parse(resp.DownloadURL)
+	if err != nil {
+		t.Fatalf("parse download_url: %v", err)
+	}
+	exp, err := strconv.ParseInt(signed.Query().Get("Expires"), 10, 64)
+	if err != nil {
+		t.Fatalf("download_url = %q, want an Expires capability", resp.DownloadURL)
+	}
+	if remaining := time.Until(time.Unix(exp, 0)); remaining < testHandler.attachmentDownloadURLTTL()-time.Minute {
+		t.Fatalf("download_url expires in %s, want the signed-URL TTL %s", remaining, testHandler.attachmentDownloadURLTTL())
+	}
+	redeem, rw := newCapabilityRequest(id, signed.Query())
+	testHandler.DownloadAttachmentWithCapability(rw, redeem)
+	if rw.Code != http.StatusOK || rw.Body.String() != "MP4BYTES" {
+		t.Fatalf("redeem download_url: status %d body %q, want 200 MP4BYTES", rw.Code, rw.Body.String())
+	}
+
+	dl, err := url.Parse(resp.AttachmentDownloadURL)
+	if err != nil || dl.Query().Get("dl") != "1" {
+		t.Fatalf("attachment_download_url = %q, want the dl=1 capability", resp.AttachmentDownloadURL)
+	}
+	dlExp, _ := strconv.ParseInt(dl.Query().Get("exp"), 10, 64)
+	if remaining := time.Until(time.Unix(dlExp, 0)); remaining > attachmentCapabilityTTL {
+		t.Fatalf("attachment_download_url expires in %s, want the %s download capability", remaining, attachmentCapabilityTTL)
 	}
 }
 

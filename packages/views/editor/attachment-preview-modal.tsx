@@ -93,7 +93,7 @@ import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useDownloadAttachment } from "./use-download-attachment";
 import { useAttachmentDownloadState } from "./hooks/use-attachment-download-state";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
-import { useResignedInlineMedia } from "./hooks/use-inline-media-url";
+import { useNativeMediaURL, useResignedInlineMedia } from "./hooks/use-inline-media-url";
 import { useZoomCanvas, type ZoomCanvasApi } from "./hooks/use-zoom-canvas";
 import { ZoomCanvas, ZoomControls } from "./zoom-canvas";
 import type { Size } from "./utils/zoom-transform";
@@ -1373,6 +1373,11 @@ function PreviewContent({
   onBackdropClick: (e: React.MouseEvent) => void;
 }) {
   const { t } = useT("editor");
+  const nativeMedia = useNativeMediaURL(
+    state.attachmentId ?? undefined,
+    state.mediaUrl,
+    kind === "pdf" || kind === "video" || kind === "audio",
+  );
 
   if (kind === null) {
     return (
@@ -1411,12 +1416,21 @@ function PreviewContent({
     </DocumentSheet>
   );
 
+  if (nativeMedia.pending) {
+    return (
+      <div className="dark flex h-full items-center justify-center gap-2 text-body text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" />
+        {t(($) => $.attachment.preview_loading)}
+      </div>
+    );
+  }
+
   switch (kind) {
     case "pdf":
       return (
         <div className="h-full pb-4">
           <iframe
-            src={state.mediaUrl}
+            src={nativeMedia.url}
             className="h-full w-full rounded-lg bg-background"
             title={state.filename}
           />
@@ -1426,7 +1440,7 @@ function PreviewContent({
       return (
         <div className="flex h-full w-full items-center justify-center pb-4">
           <video
-            src={state.mediaUrl}
+            src={nativeMedia.url}
             controls
             className="h-full w-full object-contain"
           />
@@ -1435,7 +1449,7 @@ function PreviewContent({
     case "audio":
       return (
         <div className="dark flex h-full w-full items-center justify-center p-8">
-          <audio src={state.mediaUrl} controls className="w-full max-w-xl" />
+          <audio src={nativeMedia.url} controls className="w-full max-w-xl" />
         </div>
       );
     case "markdown":
