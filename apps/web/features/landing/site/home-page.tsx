@@ -21,8 +21,9 @@ import { docsHrefForLocale, useLocale } from "../i18n";
 import type { HomeDict } from "../i18n/types";
 import { DownloadLink } from "../components/download/download-link";
 import { OSIcon, OS_NAMES } from "../components/download/os-icons";
+import { OtherDownloads } from "../components/download/other-downloads";
 import { useDetectedPlatform } from "../components/download/use-detected-platform";
-import { osOf, platformOf, resolvePrimary } from "../utils/download-target";
+import { osOf, resolvePrimary } from "../utils/download-target";
 import type { HomeDownload } from "../utils/home-download";
 import { CUSTOMER_LOGOS, type CustomerLogo } from "./customer-logos";
 import { AutopilotsVisual, ChatVisual, RuntimesVisual, SkillsVisual, WorkflowVisual } from "./demo/feature-visuals";
@@ -92,15 +93,7 @@ function Hero({ download }: { download: HomeDownload }) {
           </ActionLink>
         </div>
         {primary ? (
-          <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-site-small text-site-muted">
-            <span>{[download.version, t.download.platforms[platformOf(primary.key)]].filter(Boolean).join(" · ")}</span>
-            <Link
-              href="/download"
-              className={cn("rounded-sm text-site-ink-secondary underline decoration-site-line-strong underline-offset-4 hover:text-site-ink", focusRing)}
-            >
-              {copy.otherPlatforms}
-            </Link>
-          </p>
+          <OtherDownloads primary={primary.key} assets={download.assets} sizes={download.sizes} version={download.version} />
         ) : null}
       </Container>
       <Container className="mt-10 max-w-site-wide lg:mt-12">

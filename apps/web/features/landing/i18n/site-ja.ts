@@ -50,7 +50,7 @@ export const jaSiteCopy: Pick<LandingDict, "site" | "home"> = {
       lead: "チームとエージェントがひとつのワークスペースで働きます。仕事を割り当て、進み具合を追い、結果をレビュー。主導権はいつもあなたにあります。",
       download: "ダウンロード",
       downloadFor: "{os} 版をダウンロード",
-      otherPlatforms: "ほかのプラットフォーム",
+      alsoFor: "ほかのバージョン: {platforms}",
       bookDemo: "デモを予約",
       workflowGroup: "ワークフロー",
       workflows: {

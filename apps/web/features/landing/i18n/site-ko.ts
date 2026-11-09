@@ -50,7 +50,7 @@ export const koSiteCopy: Pick<LandingDict, "site" | "home"> = {
       lead: "팀과 에이전트가 하나의 워크스페이스에서 일합니다. 일을 맡기고, 진행 상황을 확인하고, 결과를 검토하세요. 결정은 언제나 사람이 합니다.",
       download: "다운로드",
       downloadFor: "{os}용 다운로드",
-      otherPlatforms: "다른 플랫폼",
+      alsoFor: "다른 버전: {platforms}",
       bookDemo: "데모 예약",
       workflowGroup: "워크플로",
       workflows: {

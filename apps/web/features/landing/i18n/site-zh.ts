@@ -50,7 +50,7 @@ export const zhSiteCopy: Pick<LandingDict, "site" | "home"> = {
       lead: "你的团队和智能体共用一个工作空间：分派任务、跟进进度、审核结果，主动权始终在你手里。",
       download: "下载",
       downloadFor: "下载 {os} 版",
-      otherPlatforms: "其他平台",
+      alsoFor: "其他版本：{platforms}",
       bookDemo: "预约演示",
       workflowGroup: "工作流",
       workflows: {

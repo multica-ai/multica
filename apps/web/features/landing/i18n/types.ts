@@ -97,7 +97,8 @@ export type HomeDict = {
     download: string;
     /** `{os}` is macOS, Windows or Linux. */
     downloadFor: string;
-    otherPlatforms: string;
+    /** `{platforms}` lists the other builds, e.g. "Intel · Windows · Linux". */
+    alsoFor: string;
     bookDemo: string;
     workflowGroup: string;
     workflows: { ship: HeroWorkflow; launch: HeroWorkflow; triage: HeroWorkflow };
