@@ -85,13 +85,19 @@ From the repository root, upload files to an existing PR with Node.js 22+ and
 scripts/pr-shots --repo multica-ai/multica 123 ./before.png ./after.png ./demo.mp4
 ```
 
-The script updates the PR description, preserves its existing content, and
-prints the resulting attachment Markdown to stdout. A PR URL can replace the
-number; `--repo` is optional when `gh` can identify the repository. Diagnostics
+By default, the script appends attachments at the end of the PR description
+(after any closing issue reference), preserves its existing content, and prints
+the resulting attachment Markdown to stdout. A PR URL can replace the number;
+`--repo` is optional when `gh` can identify the repository. Diagnostics
 go to stderr. Files are identified by SHA-256 in hidden comments next to the
 attachments in the PR body, so retries and renamed files reuse uploaded content
 across checkouts. Keep those comments if you want that retry behavior. Changed
 file content produces a new attachment.
+
+The attachments are already in the PR description; do not paste another copy
+of the stdout Markdown into it. To place an attachment under Screenshots, move
+its entire block from the end of the description: the hidden hash comment,
+blank lines, and image Markdown or video URL together.
 
 Uploads run one file at a time and stop at the first failure. Already confirmed
 files remain saved; stderr identifies the failed and unattempted files. The
