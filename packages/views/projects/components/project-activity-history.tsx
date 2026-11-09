@@ -99,7 +99,7 @@ export function ProjectActivityHistory({ projectId }: { projectId: string }) {
               />
               <div className="min-w-0 flex-1">
                 <p className="break-words leading-4 text-muted-foreground">
-                  <span className="font-medium text-foreground/90">
+                  <span className="font-medium text-foreground">
                     {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
                   </span>{" "}
                   {formatProjectActivity(entry, t, statusLabels, priorityLabels, getActorName)}
