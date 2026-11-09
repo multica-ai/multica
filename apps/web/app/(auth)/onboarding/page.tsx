@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { useAuthStore } from "@multica/core/auth";
+import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import {
   paths,
   resolvePostAuthDestination,
@@ -10,6 +10,12 @@ import {
 } from "@multica/core/paths";
 import { useWorkspaceList } from "@multica/core/workspace";
 import { CliInstallInstructions, OnboardingFlow } from "@multica/views/onboarding";
+import { returnToCurrentPage } from "@/features/auth/return-to";
+
+function onboardingReturnTo(): string | null {
+  const next = sanitizeNextUrl(new URLSearchParams(window.location.search).get("next"));
+  return next?.split(/[?#]/, 1)[0] === paths.onboarding() ? null : next;
+}
 
 /**
  * Web shell for the onboarding flow. The route is the platform chrome on
@@ -44,7 +50,7 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     if (isLoading || !user) {
-      if (!isLoading && !user) router.replace(paths.login());
+      if (!isLoading && !user) router.replace(returnToCurrentPage());
       return;
     }
     if (!workspacesReady) return;
@@ -57,7 +63,7 @@ export default function OnboardingPage() {
     // judgment in callback / login handles "where should this user go on
     // login" so OnboardingPage no longer needs to second-guess it.
     if (hasOnboarded) {
-      router.replace(resolvePostAuthDestination(workspaces, hasOnboarded));
+      router.replace(onboardingReturnTo() ?? resolvePostAuthDestination(workspaces, hasOnboarded));
     }
   }, [isLoading, user, hasOnboarded, workspacesReady, workspaces, router]);
 
@@ -72,7 +78,10 @@ export default function OnboardingPage() {
       <OnboardingFlow
         onComplete={(ws, destination) => {
           completingRef.current = true;
-          if (ws && destination?.kind === "chat") {
+          const next = onboardingReturnTo();
+          if (next) {
+            router.replace(next);
+          } else if (ws && destination?.kind === "chat") {
             router.push(
               paths.workspace(ws.slug).chatSession(destination.sessionId),
             );

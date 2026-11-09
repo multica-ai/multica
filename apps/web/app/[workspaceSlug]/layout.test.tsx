@@ -117,6 +117,41 @@ beforeEach(() => {
 });
 
 describe("WorkspaceLayout", () => {
+  it.each([
+    "/acme/issues/ACME-12?label=a,b&label=c%2Fd#comment-123",
+    "/acme/projects/project-1?view=members#activity",
+    "/acme/chat?session=123#message-7",
+    "/acme/settings?tab=general#profile",
+    "/acme/attachments/file-1/preview",
+  ])("preserves the login return target for %s", (href) => {
+    const original = window.location.href;
+    state.user = null;
+    state.pathname = new URL(href, original).pathname;
+    window.history.replaceState(null, "", href);
+
+    try {
+      renderLayout();
+      expect(state.replace).toHaveBeenCalledExactlyOnceWith(`/login?next=${encodeURIComponent(href)}`);
+    } finally {
+      window.history.replaceState(null, "", original);
+    }
+  });
+
+  it("keeps the original target when first-time setup is required", () => {
+    const href = "/acme/projects/project-1?view=members#activity";
+    const original = window.location.href;
+    state.user = { id: "user-1", onboarded_at: null };
+    state.pathname = "/acme/projects/project-1";
+    window.history.replaceState(null, "", href);
+
+    try {
+      renderLayout();
+      expect(state.replace).toHaveBeenCalledExactlyOnceWith(`/onboarding?next=${encodeURIComponent(href)}`);
+    } finally {
+      window.history.replaceState(null, "", original);
+    }
+  });
+
   it("keeps loading instead of showing NoAccess when the initial list request fails", async () => {
     state.workspaceError = true;
     const { queryClient } = renderLayout();

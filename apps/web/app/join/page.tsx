@@ -10,6 +10,7 @@ import { Badge } from "@multica/ui/components/ui/badge";
 import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type { ShareLinkInfo, Workspace } from "@multica/core/types";
+import { returnToCurrentPage } from "@/features/auth/return-to";
 
 function JoinInner() {
   const router = useRouter();
@@ -49,7 +50,7 @@ function JoinInner() {
     if (!code) return;
     if (!user) {
       // Not logged in: send them to login, then return here to join.
-      router.push(`/login?next=${encodeURIComponent(`/join?code=${code}`)}`);
+      router.push(returnToCurrentPage());
       return;
     }
     setJoining(true);

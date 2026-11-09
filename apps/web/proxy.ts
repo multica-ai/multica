@@ -6,24 +6,7 @@ import {
 } from "./lib/locale-routing";
 import { runtimeRewriteDestination } from "./config/runtime-urls";
 import { isOfficialMarketingHost } from "./lib/public-host";
-
-// Old workspace-scoped route segments that existed before the URL refactor
-// (pre-#1131). Any URL with these as the FIRST segment is a legacy URL that
-// needs to be rewritten to /{slug}/{route}/... so old bookmarks, deep links,
-// and post-revert-and-reapply users don't hit 404.
-const LEGACY_ROUTE_SEGMENTS = new Set([
-  "issues",
-  "projects",
-  "agents",
-  "squads",
-  "inbox",
-  "my-issues",
-  "autopilots",
-  "runtimes",
-  "skills",
-  "settings",
-  "usage",
-]);
+import { isLegacyWorkspacePath } from "./lib/legacy-workspace-path";
 
 function resolveLocale(req: NextRequest): string {
   return resolveLocaleFromSignals({
@@ -61,32 +44,20 @@ export function proxy(req: NextRequest) {
   // --- Legacy URL redirect: /issues/... → /{slug}/issues/... ---
   // Old bookmarks and clients that hit us before the slug migration would
   // otherwise 404 since the route moved under [workspaceSlug].
-  const firstSegment = pathname.split("/")[1] ?? "";
-  if (LEGACY_ROUTE_SEGMENTS.has(firstSegment)) {
+  if (isLegacyWorkspacePath(pathname)) {
     const url = req.nextUrl.clone();
 
-    if (!hasSession) {
-      url.pathname = "/login";
-      return NextResponse.redirect(url);
-    }
-
-    if (lastSlug) {
+    if (hasSession && lastSlug) {
       // Preserve deep-link path + query: /issues/abc → /{lastSlug}/issues/abc
       url.pathname = `/${lastSlug}${pathname}`;
       return NextResponse.redirect(url);
     }
 
-    // Logged-in but no cookie yet (never opened a workspace, or the cookie was
-    // cleared). Root is the wrong destination: the root-path rule below leaves
-    // `/` on the public site for the official marketing hosts even with a
-    // session, so bouncing there dead-ends on the landing page instead of
-    // reaching the app. /login already resolves an authenticated visitor
-    // against their workspace list — including pending invitations and the
-    // no-workspace-yet case — and replaces to the right destination. Deep-link
-    // path and query are dropped rather than passed as `next`: they are legacy
-    // segments themselves, so feeding one back would land here again.
+    // Login can resolve a slugless path once it has the user's workspace list.
+    const next = pathname + url.search;
     url.pathname = "/login";
     url.search = "";
+    url.searchParams.set("next", next);
     return NextResponse.redirect(url);
   }
 
