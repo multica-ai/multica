@@ -313,6 +313,15 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 
 `multica chat` 读取的是**智能体当前正在处理的外部聊天会话**，主要供聊天集成中的智能体使用，不能用来浏览任意工作区对话。
 
+## 移动项目
+
+```bash
+multica project move <project> --to <workspace-slug-or-id> --preview
+multica project move <project> --to <workspace-slug-or-id> --yes --output json
+```
+
+`--preview` 只打印预览，不写入数据。未提供 `--yes` 时，命令打印预览并以非零状态退出。提供 `--yes` 后，命令获取新预览，拒绝阻碍项，再携带预览的 `plan_hash` 执行；计划变化会返回 409，需要重新预览。当前上下文应为来源工作区。详见[移动权限与影响](/projects#移到另一个工作区)。
+
 ## ID 和输出格式
 
 任务使用 `MUL-123` 这样的 key 或完整 UUID，不接受 UUID 短前缀。
@@ -388,6 +397,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `rerun-task <run-id>` | 沿用原智能体和触发上下文，重跑指定运行 | `--issue`, `--fresh` |
 | | `cancel-task <task-id>` | 取消进行中或排队中的运行 | `--issue` |
 | `project` | `list/get/create/update/delete` | 管理项目 | `create`：`--title`（必填）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（可重复） |
+| | `move <project>` | 移到另一个工作区 | `--to`、`--preview`、`--yes`、`--output json` |
 | | `status <id> <status>` | 修改项目状态 | |
 | | `resource list/add/update/remove` | 管理项目附加资源 | `--type`、`--url`、`--default-branch-hint`、`--ref`、`--local-path`、`--daemon-id`、`--execution-mode`（本地目录的 `in_place` / `worktree`） |
 | | `workflow get/set <project-id>` | 查看项目当前生效的工作流，或切换工作流 | `set <project-id> <workflow\|default>`：`--map old=new`（可重复），`--dry-run` 打印状态迁移计划；切换不会重新分配任务，也不会启动运行。仅管理员和项目负责人可操作 |
