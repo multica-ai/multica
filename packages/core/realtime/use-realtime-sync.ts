@@ -646,7 +646,7 @@ export async function handleInboxNew(
 }
 
 /**
- * Invalidates all workspace-scoped queries. Used after reconnect and when a
+ * Invalidates workspace and account caches. Used after reconnect and when a
  * new WSClient instance is detected (workspace switch) to recover events
  * missed while disconnected.
  */
@@ -686,6 +686,9 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   // Cross-workspace, so outside the wsId guard: a reconnect may have missed
   // inbox events from any workspace, so re-pull the switcher-dot summary.
   void onInboxSummaryInvalidate(qc);
+  // Account invitations can change while only the socket is disconnected,
+  // with no browser focus or online event to trigger the fallback refetch.
+  qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
   // Per-issue caches are keyed without wsId, so the issueKeys.all(wsId)
   // prefix above does not reach them. They rely entirely on WS events for
   // freshness (staleTime: Infinity), so events missed while disconnected
@@ -1490,11 +1493,10 @@ export function useRealtimeSync(
     // The workspace broadcast reaches every online member, so the admin lists
     // refresh unconditionally. The account-level pending list is gated on the
     // acting user: only the invitee who concluded the invite (possibly from
-    // another surface or device) needs their stale pending row dropped —
-    // staleTime is Infinity, so nothing refetches it on its own. Without the
-    // gate every accept/decline fanout refetches the list once per online
-    // member. The actor rides the frame envelope (ws-client hands it to the
-    // handler as its second argument), not the event payload.
+    // another surface or device) needs an immediate refresh even while its
+    // cached list is fresh. Without the gate every accept/decline fanout
+    // refetches the list once per online member. The actor arrives in the frame
+    // envelope (the handler's second argument), not the event payload.
     const unsubInvitationAccepted = ws.on(
       "invitation:accepted",
       (_payload, actorId) => {
