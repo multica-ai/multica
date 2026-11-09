@@ -738,6 +738,8 @@
   },
   "workspace": {
     "section_general": "ワークスペース情報",
+    "mention_all_label": "@全メンバーへのメンションを許可",
+    "mention_all_description": "オフにすると、コメントや説明の @全メンバー は各メンバーの受信トレイに通知されず、メンション候補にも表示されなくなります。",
     "logo_label": "ワークスペースのアイコン",
     "name_label": "名前",
     "description_label": "説明",

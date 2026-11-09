@@ -738,6 +738,8 @@
   },
   "workspace": {
     "section_general": "워크스페이스 정보",
+    "mention_all_label": "@모든 멤버 멘션 허용",
+    "mention_all_description": "끄면 댓글과 설명의 @모든 멤버가 각 멤버의 받은 편지함에 알림을 보내지 않으며, 멘션 선택 목록에도 표시되지 않습니다.",
     "logo_label": "워크스페이스 아이콘",
     "change_logo_aria": "워크스페이스 로고 변경",
     "click_logo_hint": "로고를 클릭하여 새 이미지를 업로드하세요",

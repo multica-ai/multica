@@ -738,6 +738,8 @@
   },
   "workspace": {
     "section_general": "工作區資訊",
+    "mention_all_label": "允許 @所有成員",
+    "mention_all_description": "關閉後，留言和描述中的 @所有成員 不再向每位成員發送收件匣通知，@ 選人清單也不再顯示此選項。",
     "logo_label": "工作區圖示",
     "change_logo_aria": "更換工作區圖示",
     "click_logo_hint": "點選圖示上傳新圖片",

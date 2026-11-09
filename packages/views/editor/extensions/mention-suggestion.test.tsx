@@ -121,8 +121,10 @@ function fakeQc(data: {
     leader_id: string;
   }>;
   issues?: Array<{ id: string; identifier: string; title: string; status: string }>;
+  mentionAllEnabled?: boolean;
 }): QueryClient {
   const map = new Map<string, unknown>();
+  map.set(JSON.stringify(workspaceKeys.list()), [{ id: "ws-1", settings: { mention_all_enabled: data.mentionAllEnabled } }]);
   map.set(JSON.stringify(workspaceKeys.members("ws-1")), data.members ?? []);
   // MUL-3963: the mention filter runs through canAssignAgentToIssue, which
   // reads permission_mode + invocation_targets (not the legacy `visibility`).
@@ -201,6 +203,17 @@ function pressPickerInteractionKeys(ref: MentionListRef | null): boolean[] {
 }
 
 describe("createMentionSuggestion", () => {
+  it("omits @all when disabled without hiding explicit members", () => {
+    const members = [{ user_id: "u1", name: "Alice", role: "member" }];
+    const enabled = createMentionSuggestion(fakeQc({ members }));
+    expect(enabled.items!(itemArgs(""))).toEqual(expect.arrayContaining([expect.objectContaining({ type: "all" })]));
+
+    const disabled = createMentionSuggestion(fakeQc({ members, mentionAllEnabled: false }));
+    const items = disabled.items!(itemArgs("")) as MentionItem[];
+    expect(items.some((item) => item.type === "all")).toBe(false);
+    expect(items).toEqual(expect.arrayContaining([expect.objectContaining({ type: "member", id: "u1" })]));
+  });
+
   beforeEach(() => {
     searchIssuesMock.mockReset();
     searchProjectsMock.mockReset();

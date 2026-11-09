@@ -24,6 +24,7 @@ import { FlatList, Pressable, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "nativewind";
+import { isMentionAllEnabled } from "@multica/core/workspace/mention-all";
 import type {
   Agent,
   Issue,
@@ -36,6 +37,7 @@ import { StatusIcon } from "@/components/ui/status-icon";
 import { issueColumnCategory } from "@/lib/issue-status";
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
 import { memberListOptions } from "@/data/queries/members";
+import { workspaceListOptions } from "@/data/queries/workspaces";
 import { agentListOptions } from "@/data/queries/agents";
 import { squadListOptions } from "@/data/queries/squads";
 import { api } from "@/data/api";
@@ -73,6 +75,8 @@ interface Props {
 
 export function MentionPickerBody({ query, mode = "comment" }: Props) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { data: workspaces } = useQuery(workspaceListOptions());
+  const mentionAllEnabled = isMentionAllEnabled(workspaces?.find((ws) => ws.id === wsId));
   const { t } = useT("issues");
   // Rows are icon-only here too — colour is what names a custom status.
   const catalog = useIssueStatuses();
@@ -154,7 +158,7 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
     // people. The Issues section IS useful in chat ("reference ticket
     // for context"), so it stays for both modes.
     if (mode === "comment") {
-      if (!q || "all".includes(q)) {
+      if (mentionAllEnabled && (!q || "all".includes(q))) {
         out.push({ kind: "all" });
       }
       const memberRows = [...members]
@@ -187,7 +191,7 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
       }
     }
     return out;
-  }, [mode, members, agents, squads, issueResults, query, t]);
+  }, [mode, members, agents, squads, issueResults, query, t, mentionAllEnabled]);
 
   const pick = (row: Row) => {
     let chip: MentionChipDraft | null = null;
