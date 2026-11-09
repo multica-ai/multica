@@ -73,6 +73,34 @@ test("Markdown autosave, folder move, immutable history and restore", async ({
   expect((await api.getDoc(doc.id)).title).toBe("Release runbook");
 });
 
+test("navigating to history saves the last title and Markdown before the debounce", async ({ page }) => {
+  const doc = await api.createDoc("Quick edit", "Original");
+  // Warm the destination so this checks leaving the editor, not route compilation.
+  await page.goto(`/${slug}/docs/${doc.id}/history`);
+  await expect(page.getByRole("button", { name: /^v1/ })).toBeVisible();
+  await page.goto(`/${slug}/docs/${doc.id}`);
+  const title = page.getByRole("textbox", { name: "Title", exact: true });
+  const editor = page.locator('[contenteditable="true"]').first();
+  await expect(title).toHaveValue("Quick edit");
+  await expect(editor).toBeVisible();
+  await page.clock.install({ time: new Date("2026-11-09T12:00:00Z") });
+  await page.clock.pauseAt(new Date("2026-11-09T12:00:01Z"));
+
+  const saving = page.waitForRequest((request) =>
+    request.method() === "PATCH" && request.url().endsWith(`/api/docs/${doc.id}`),
+  );
+  await title.fill("Final title");
+  await editor.fill("Last Markdown edit before leaving.");
+  await page.getByRole("link", { name: "History", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/${doc.id}/history$`));
+  expect((await saving).postDataJSON()).toMatchObject({
+    title: "Final title", content: "Last Markdown edit before leaving.", base_revision: 1,
+  });
+  await expect.poll(async () => api.getDoc(doc.id)).toMatchObject({
+    title: "Final title", content: "Last Markdown edit before leaving.", revision: 2, version_count: 2,
+  });
+});
+
 test("stale save keeps a draft across reload and lets the human load the latest", async ({
   page,
 }, info) => {
