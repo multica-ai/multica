@@ -1,22 +1,10 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/features/landing/utils/page-metadata";
 import { LicensingPageClient } from "@/features/landing/components/licensing-page-client";
-import { SHARE_IMAGE } from "@/features/landing/share-image";
 
-export const metadata: Metadata = {
-  title: "Licensing",
-  description:
-    "When you can use Multica for free and when you need a commercial license, explained with common scenarios.",
-  openGraph: {
-    images: [SHARE_IMAGE],
-    title: "Licensing — Multica",
-    description:
-      "Free to self-host inside your organization. Offering Multica to others as a hosted service needs a commercial license.",
-    url: "/licensing",
-  },
-  alternates: {
-    canonical: "/licensing",
-  },
-};
+export function generateMetadata(): Promise<Metadata> {
+  return pageMetadata("licensing", "/licensing");
+}
 
 export default function LicensingPage() {
   return <LicensingPageClient />;

@@ -1,6 +1,52 @@
 import type { LandingDict } from "./types";
+import { zhDemoCopy } from "./demo-zh";
 
-export const zhSiteCopy: Pick<LandingDict, "site" | "home"> = {
+export const zhSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = {
+  demo: zhDemoCopy,
+  meta: {
+    home: {
+      title: "Multica — 人和智能体团队的项目管理平台",
+      description: "源码公开的平台，把编码智能体变成真正的队友。分派任务、跟进进度、沉淀技能。",
+      ogTitle: "Multica — 人和智能体团队的项目管理平台",
+      ogDescription: "在一个地方管理你的人和智能体团队。",
+    },
+    about: {
+      title: "关于我们",
+      description: "了解 Multica（Multiplexed Information and Computing Agent）：一个源码公开、为人和智能体团队打造的项目管理平台。",
+      ogTitle: "关于 Multica",
+      ogDescription: "Multica 背后的故事，以及我们为什么要为人和智能体团队做项目管理。",
+    },
+    changelog: {
+      title: "更新日志",
+      description: "看看 Multica 有什么新变化：最新功能、改进和修复。",
+      ogTitle: "更新日志 | Multica",
+      ogDescription: "Multica 的最新更新和版本发布。",
+    },
+    contactSales: {
+      title: "联系销售",
+      description: "和 Multica 团队聊聊，怎么在你的公司落地人和智能体协作的工作流。",
+      ogTitle: "联系销售 — Multica",
+      ogDescription: "介绍一下你的团队，我们会在三个工作日内回复。",
+    },
+    download: {
+      title: "下载 Multica",
+      description: "下载适用于 macOS、Windows 或 Linux 的 Multica，或在服务器和远程开发机上安装 CLI。",
+      ogTitle: "下载 Multica",
+      ogDescription: "获取自带守护进程的 Multica 桌面应用，或在服务器和远程开发机上安装 CLI。",
+    },
+    licensing: {
+      title: "许可协议",
+      description: "什么时候可以免费使用 Multica，什么时候需要商业许可，用常见场景讲清楚。",
+      ogTitle: "许可协议 — Multica",
+      ogDescription: "在组织内部自托管免费。把 Multica 作为托管服务提供给他人，需要商业许可。",
+    },
+    privacy: {
+      title: "隐私政策",
+      description: "Multica 如何在 multica.ai 和 Multica Cloud 上收集、使用和保护个人信息。",
+      ogTitle: "隐私政策 — Multica",
+      ogDescription: "Multica 如何收集、使用和保护个人信息。",
+    },
+  },
   site: {
     nav: {
       product: "产品",
@@ -58,19 +104,19 @@ export const zhSiteCopy: Pick<LandingDict, "site" | "home"> = {
           label: "交付一个功能",
           short: "交付",
           description:
-            "一个由工作流驱动的 Multica 项目看板：Issue 依次经过 Spec、Build、Code review、Approve 和 Shipped，轮流交给规划智能体、编码智能体、审查智能体和一位同事",
+            "一个由工作流驱动的 Multica 项目看板：Issue 依次经过方案、开发、代码审查、审批和已上线，轮流交给规划智能体、编码智能体、审查智能体和一位同事",
         },
         launch: {
           label: "发布内容",
           short: "发布",
           description:
-            "一个由工作流驱动的市场团队项目看板：一篇发布文章依次经过 Brief、Research、Draft、Edit 和 Published，轮流交给调研智能体、写作智能体和一位编辑",
+            "一个由工作流驱动的市场团队项目看板：一篇发布文章依次经过需求、调研、撰写、编辑和已发布，轮流交给调研智能体、写作智能体和一位编辑",
         },
         triage: {
           label: "处理用户反馈",
           short: "反馈",
           description:
-            "一个由工作流驱动的支持团队项目看板：Autopilot 把用户反馈归入 Inbox，Issue 再依次经过 Reproduce、Fix、Reply 和 Resolved，轮流交给分诊智能体、QA 智能体和编码智能体",
+            "一个由工作流驱动的支持团队项目看板：Autopilot 把用户反馈归入待处理，Issue 再依次经过复现、修复、回复和已解决，轮流交给分诊智能体、QA 智能体和编码智能体",
         },
       },
     },
@@ -86,7 +132,7 @@ export const zhSiteCopy: Pick<LandingDict, "site" | "home"> = {
         workflows: {
           title: "工作流把每一步交接好",
           body: "给每个状态指定负责人。Issue 进入下一步，就自动交给这一步的智能体或同事。",
-          alt: "“Ship a feature”工作流：Spec 交给 Lead Agent，Build 交给 Backend Agent，Code review 交给 QA Agent，Approve 交给 Mia Chen，最后到 Shipped；右侧打开了 Build 这一步的交接设置",
+          alt: "“交付一个功能”工作流：方案交给 Lead Agent，开发交给 Backend Agent，代码审查交给 QA Agent，审批交给 Mia Chen，最后到已上线；右侧打开了开发这一步的交接设置",
         },
         chat: {
           title: "在聊天里 @ 智能体",

@@ -1,6 +1,56 @@
 import type { LandingDict } from "./types";
+import { enDemoCopy } from "./demo-en";
 
-export const enSiteCopy: Pick<LandingDict, "site" | "home"> = {
+export const enSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = {
+  demo: enDemoCopy,
+  meta: {
+    home: {
+      title: "Multica — Project Management for Human + Agent Teams",
+      description:
+        "Source-available platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
+      ogTitle: "Multica — Project Management for Human + Agent Teams",
+      ogDescription: "Manage your human + agent workforce in one place.",
+    },
+    about: {
+      title: "About",
+      description:
+        "Learn about Multica — multiplexed information and computing agent. A source-available project management platform for human + agent teams.",
+      ogTitle: "About Multica",
+      ogDescription: "The story behind Multica and why we're building project management for human + agent teams.",
+    },
+    changelog: {
+      title: "Changelog",
+      description: "See what's new in Multica — latest features, improvements, and fixes.",
+      ogTitle: "Changelog | Multica",
+      ogDescription: "Latest updates and releases from Multica.",
+    },
+    contactSales: {
+      title: "Contact Sales",
+      description: "Talk to the Multica team about rolling out human + agent workflows at your company.",
+      ogTitle: "Contact Sales — Multica",
+      ogDescription: "Tell us about your team. We’ll respond within three business days.",
+    },
+    download: {
+      title: "Download Multica",
+      description: "Download Multica for macOS, Windows, or Linux — or install the CLI for servers and remote dev boxes.",
+      ogTitle: "Download Multica",
+      ogDescription: "Get the Multica desktop app with a bundled daemon, or install the CLI for servers and remote dev boxes.",
+    },
+    licensing: {
+      title: "Licensing",
+      description:
+        "When you can use Multica for free and when you need a commercial license, explained with common scenarios.",
+      ogTitle: "Licensing — Multica",
+      ogDescription:
+        "Free to self-host inside your organization. Offering Multica to others as a hosted service needs a commercial license.",
+    },
+    privacy: {
+      title: "Privacy Policy",
+      description: "How Multica collects, uses, and protects personal information on multica.ai and Multica Cloud.",
+      ogTitle: "Privacy Policy — Multica",
+      ogDescription: "How Multica collects, uses, and protects personal information.",
+    },
+  },
   site: {
     nav: {
       product: "Product",

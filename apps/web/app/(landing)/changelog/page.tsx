@@ -1,21 +1,10 @@
 import type { Metadata } from "next";
+import { pageMetadata } from "@/features/landing/utils/page-metadata";
 import { ChangelogPageClient } from "@/features/landing/components/changelog-page-client";
-import { SHARE_IMAGE } from "@/features/landing/share-image";
 
-export const metadata: Metadata = {
-  title: "Changelog",
-  description:
-    "See what's new in Multica — latest features, improvements, and fixes.",
-  openGraph: {
-    images: [SHARE_IMAGE],
-    title: "Changelog | Multica",
-    description: "Latest updates and releases from Multica.",
-    url: "/changelog",
-  },
-  alternates: {
-    canonical: "/changelog",
-  },
-};
+export function generateMetadata(): Promise<Metadata> {
+  return pageMetadata("changelog", "/changelog");
+}
 
 export default function ChangelogPage() {
   return <ChangelogPageClient />;

@@ -23,6 +23,8 @@ import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { HERO_PROVIDERS } from "../../components/provider-marks";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
+import { useLocale } from "../../i18n";
+import type { DemoDict } from "../../i18n/types";
 
 /*
  * Shared pieces for the landing's product mockups: the fictional Acme Labs
@@ -45,6 +47,21 @@ export const LEAD: Actor = { kind: "agent", name: "Lead Agent", provider: "Claud
 export const CONTENT: Actor = { kind: "agent", name: "Content Agent", provider: "Hermes" };
 export const RESEARCH: Actor = { kind: "agent", name: "Research Agent", provider: "Kimi CLI" };
 export const TRIAGE: Actor = { kind: "agent", name: "Triage Agent", provider: "OpenCode" };
+
+/** The mockups' text in the page's language. */
+export function useDemoCopy(): DemoDict {
+  return useLocale().t.demo;
+}
+
+/** How long ago something changed: "now", or a count of minutes, hours or days such as "40m", "3h" or "2d". */
+export type Age = "now" | `${number}${"m" | "h" | "d"}`;
+
+export function formatAge(age: Age, ago: DemoDict["app"]["ago"]): string {
+  if (age === "now") return ago.now;
+  const unit = age.slice(-1);
+  const template = unit === "m" ? ago.minutes : unit === "h" ? ago.hours : ago.days;
+  return template.replace("{count}", age.slice(0, -1));
+}
 
 export const PROVIDER_MARKS = new Map<string, ComponentType<{ className?: string }>>(
   HERO_PROVIDERS.map((provider) => [provider.name, provider.Mark]),
@@ -157,12 +174,12 @@ export const FLOATING = "rounded-xl bg-background shadow-[var(--floating-shadow)
 /** The app's top-level spaces. Settings sits in the rail's footer, not its list. */
 export type Space = "inbox" | "work" | "team" | "chat" | "autopilots" | "settings";
 
-const RAIL_SPACES: { key: Space; label: string; icon: IconComponent }[] = [
-  { key: "inbox", label: "Inbox", icon: Inbox },
-  { key: "work", label: "Work", icon: ListTodo },
-  { key: "team", label: "Team", icon: Users },
-  { key: "chat", label: "Chat", icon: MessageSquare },
-  { key: "autopilots", label: "Auto", icon: Zap },
+const RAIL_SPACES: { key: Exclude<Space, "settings">; icon: IconComponent }[] = [
+  { key: "inbox", icon: Inbox },
+  { key: "work", icon: ListTodo },
+  { key: "team", icon: Users },
+  { key: "chat", icon: MessageSquare },
+  { key: "autopilots", icon: Zap },
 ];
 
 const RAIL_ACTIVE = "bg-sidebar-accent font-medium text-sidebar-accent-foreground";
@@ -187,6 +204,7 @@ function RailButton({ icon: Icon, active }: { icon: IconComponent; active?: bool
  * controls at the top.
  */
 export function AppRail({ active, inbox = 3, desktop }: { active: Space; inbox?: number; desktop?: boolean }) {
+  const labels = useDemoCopy().app.spaces;
   return (
     <div className={cn("flex w-14 shrink-0 flex-col items-center pb-2.5", desktop ? "pt-10" : "pt-3")}>
       <span className="flex size-[34px] shrink-0 items-center justify-center rounded-lg border border-surface-border bg-surface-raised text-body font-semibold shadow-[var(--surface-shadow)]">
@@ -212,7 +230,7 @@ export function AppRail({ active, inbox = 3, desktop }: { active: Space; inbox?:
               )}
             >
               <space.icon className="size-5" />
-              <span className="text-micro leading-[14px]">{space.label}</span>
+              <span className="text-micro leading-[14px]">{labels[space.key]}</span>
               {space.key === "inbox" && inbox > 0 ? (
                 <span
                   className={cn(
@@ -416,10 +434,11 @@ export function ProviderStack({ names }: { names: string[] }) {
 }
 
 export function Online() {
+  const label = useDemoCopy().app.online;
   return (
     <>
       <Wifi className="size-3 shrink-0 text-success" />
-      <span className="truncate text-foreground">Online</span>
+      <span className="truncate text-foreground">{label}</span>
     </>
   );
 }
@@ -438,22 +457,24 @@ export function AvatarStack({ actors, size = 20, ring = "ring-background" }: { a
 }
 
 /** An issue's live agent badge: who is on it, and a shimmering "Working". */
-export function Working({ label = "Working", agents }: { label?: string; agents?: Actor[] }) {
+export function Working({ label, agents }: { label?: string; agents?: Actor[] }) {
+  const working = useDemoCopy().app.working;
   return (
     <span className="inline-flex shrink-0 items-center gap-1">
       {agents ? <AvatarStack actors={agents} size={16} /> : null}
       <MulticaIcon mode="think" size={12} />
-      <ShimmerText className="text-micro text-muted-foreground">{label}</ShimmerText>
+      <ShimmerText className="text-micro text-muted-foreground">{label ?? working}</ShimmerText>
     </span>
   );
 }
 
 /** The page header's "agents working" chip; compact keeps the faces and the number. */
 export function WorkingChip({ agents, compact }: { agents: Actor[]; compact?: boolean }) {
+  const label = useDemoCopy().app.agentsWorking;
   return (
     <span className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-brand/28 bg-brand/7 px-2.5 text-caption font-medium dark:border-brand/45 dark:bg-brand/12">
       <AvatarStack actors={agents.slice(0, 3)} ring="ring-page-canvas" />
-      <span className="tabular-nums">{compact ? agents.length : `${agents.length} agents working`}</span>
+      <span className="tabular-nums">{compact ? agents.length : label.replace("{count}", String(agents.length))}</span>
     </span>
   );
 }

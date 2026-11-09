@@ -39,6 +39,7 @@ import {
   HeaderButton,
   Working,
   WorkingChip,
+  useDemoCopy,
   usePrefersReducedMotion,
   type Actor,
 } from "./mock-kit";
@@ -125,6 +126,7 @@ export function HeroBoard({ workflow, label, onLoop }: { workflow: Workflow; lab
   const [visible, setVisible] = useState(false);
   const [shown, setShown] = useState({ id: workflow.id, step: 0 });
   const reducedMotion = usePrefersReducedMotion();
+  const justNow = useDemoCopy().app.ago.now;
 
   // A new workflow restarts its story from the first beat.
   const step = shown.id === workflow.id ? shown.step : 0;
@@ -209,7 +211,7 @@ export function HeroBoard({ workflow, label, onLoop }: { workflow: Workflow; lab
     priority: stage.priority ?? workflow.focus.priority,
     assignee,
     working: stage.working && assignee?.kind === "agent",
-    updated: "just now",
+    updated: justNow,
   };
   const peekOpen = stage.panel && !narrow;
   const working = [
@@ -294,13 +296,6 @@ function assigneeAt(workflow: Workflow, index: number): Actor | undefined {
 
 // --- The Work panel -----------------------------------------------------------
 
-const PROJECTS = [
-  { name: "API Platform", open: 12 },
-  { name: "Autopilots launch", open: 9 },
-  { name: "Customer feedback", open: 7 },
-  { name: "Mobile app", open: 5 },
-];
-
 const PANEL_ROW = "flex min-h-8 items-center gap-2.5 rounded-lg px-3 py-1.5 text-body";
 const PANEL_ROW_ACTIVE = "bg-surface-selected text-surface-selected-foreground";
 /** A working agent's issue title in the panel: dimmer at rest, with a wider highlight. */
@@ -340,20 +335,27 @@ function WorkPanel({ workflow, focus, status, peeked }: { workflow: Workflow; fo
   const byStatus = workflow.statuses.flatMap((s) => (workflow.cards[s.key]?.cards ?? []).map((card) => ({ card, status: s })));
   const others = [...byStatus.filter((row) => row.card.working), ...byStatus.filter((row) => !row.card.working)];
   const tree = [{ card: focus, status: workflow.statuses.find((s) => s.key === status)! }, ...others].slice(0, TREE_SIZE);
+  const { app, hero } = useDemoCopy();
+  const projects = [
+    { name: hero.ship.project, open: 12 },
+    { name: hero.launch.project, open: 9 },
+    { name: hero.triage.project, open: 7 },
+    { name: hero.otherProject, open: 5 },
+  ];
   return (
     <aside className="flex shrink-0 flex-col border-r border-border" style={{ width: PANEL_WIDTH }}>
       <div className="flex h-12 shrink-0 items-center pr-2 pl-5">
-        <h2 className="text-title-sm font-semibold">Work</h2>
+        <h2 className="text-title-sm font-semibold">{app.spaces.work}</h2>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden px-2 pb-4">
-        <PanelSection label="Views">
-          <PanelRow icon={CircleUser} label="My Issues" />
-          <PanelRow icon={Bot} label="My agents’ work" />
-          <PanelRow icon={ListTodo} label="All issues" />
-          <PanelRow label="All views" count={3} />
+        <PanelSection label={app.views}>
+          <PanelRow icon={CircleUser} label={app.myIssues} />
+          <PanelRow icon={Bot} label={app.myAgents} />
+          <PanelRow icon={ListTodo} label={app.allIssues} />
+          <PanelRow label={app.allViews} count={3} />
         </PanelSection>
-        <PanelSection label="Projects">
-          {PROJECTS.map((project) => {
+        <PanelSection label={app.projects}>
+          {projects.map((project) => {
             const open = project.name === workflow.project;
             return (
               <li key={project.name}>
@@ -384,7 +386,7 @@ function WorkPanel({ workflow, focus, status, peeked }: { workflow: Workflow; fo
               </li>
             );
           })}
-          <PanelRow label="All 8 projects" />
+          <PanelRow label={app.allProjects.replace("{count}", "8")} />
         </PanelSection>
       </div>
     </aside>
@@ -473,6 +475,7 @@ function BoardColumn({
 }
 
 function BoardCard({ card, peeked }: { card: Card; peeked: boolean }) {
+  const unassigned = useDemoCopy().app.unassigned;
   return (
     <div
       data-card={card.id}
@@ -502,7 +505,7 @@ function BoardCard({ card, peeked }: { card: Card; peeked: boolean }) {
             <span className="truncate text-caption">{card.assignee.name}</span>
           </span>
         ) : (
-          <span className="text-caption text-muted-foreground">Unassigned</span>
+          <span className="text-caption text-muted-foreground">{unassigned}</span>
         )}
         <span className="shrink-0 text-caption text-muted-foreground">{card.updated}</span>
       </div>
@@ -510,19 +513,12 @@ function BoardCard({ card, peeked }: { card: Card; peeked: boolean }) {
   );
 }
 
-const PRIORITY_LABEL: Record<Priority, string> = {
-  none: "No priority",
-  urgent: "Urgent",
-  high: "High",
-  medium: "Medium",
-  low: "Low",
-};
-
 /** The product's issue peek: a floating panel over the board's right edge. */
 function IssuePeek({ workflow, focus, stage, open }: { workflow: Workflow; focus: Card; stage: Stage; open: boolean }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const status = workflow.statuses.find((s) => s.key === stage.status)!;
   const items = workflow.timeline.slice(0, stage.entries);
+  const { app } = useDemoCopy();
 
   // The newest entry stays in view, the way a reader following along would scroll.
   useEffect(() => {
@@ -557,7 +553,7 @@ function IssuePeek({ workflow, focus, stage, open }: { workflow: Workflow; focus
               className="flex h-7 items-center gap-1.5 rounded-md bg-brand/5 px-1.5 animate-in fade-in duration-300 motion-reduce:animate-none"
             >
               <AvatarStack actors={[focus.assignee]} />
-              <span className="text-caption whitespace-nowrap text-info">{focus.assignee.name} is working</span>
+              <span className="text-caption whitespace-nowrap text-info">{app.isWorking.replace("{name}", focus.assignee.name)}</span>
             </span>
           ) : null}
           <HeaderButton icon={MoreHorizontal} />
@@ -574,7 +570,7 @@ function IssuePeek({ workflow, focus, stage, open }: { workflow: Workflow; focus
             </Pill>
             <Pill key={focus.priority}>
               <PriorityIcon priority={focus.priority} />
-              {PRIORITY_LABEL[focus.priority]}
+              {app.priority[focus.priority]}
             </Pill>
             {focus.assignee ? (
               <Pill key={focus.assignee.name}>
@@ -597,7 +593,7 @@ function IssuePeek({ workflow, focus, stage, open }: { workflow: Workflow; focus
           </div>
           <p className="mt-5 text-body leading-relaxed">{workflow.focus.description}</p>
           <div className="mt-8 border-t border-border pt-6">
-            <h2 className="text-title-sm font-semibold">Activity</h2>
+            <h2 className="text-title-sm font-semibold">{app.activity}</h2>
             <div className="mt-4 flex flex-col gap-3">
               {items.map((item, index) => (
                 <Entry key={index}>
@@ -610,7 +606,7 @@ function IssuePeek({ workflow, focus, stage, open }: { workflow: Workflow; focus
       </div>
       <div className="shrink-0 px-6 pt-2 pb-4">
         <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5 text-body text-muted-foreground">
-          Leave a comment…
+          {app.leaveComment}
           <span className="flex items-center gap-2">
             <Paperclip className="size-3.5" />
             <span className="flex size-6 items-center justify-center rounded-md bg-muted">
@@ -637,13 +633,14 @@ function Entry({ children }: { children: ReactNode }) {
 
 /** One entry of an issue's activity: a comment, or a status change and the handoff it made. */
 export function TimelineRow({ item, statuses }: { item: TimelineItem; statuses: Status[] }) {
+  const { app } = useDemoCopy();
   if (item.kind === "comment") {
     return (
       <div className="overflow-clip rounded-xl border border-border bg-card">
         <div className="flex items-center gap-2.5 px-4 pt-3 pb-2">
           <Avatar actor={item.actor} size={24} />
           <span className="text-body font-medium">{item.actor.name}</span>
-          <span className="text-caption text-muted-foreground">just now</span>
+          <span className="text-caption text-muted-foreground">{app.ago.now}</span>
         </div>
         <div className="px-4 pb-3 text-body leading-relaxed">{item.body}</div>
       </div>
@@ -656,10 +653,9 @@ export function TimelineRow({ item, statuses }: { item: TimelineItem; statuses: 
     ) : (
       <CustomStatusIcon status={statuses.find((s) => s.key === item.to)!} className="h-4 w-4 shrink-0" />
     );
+  const nameOf = (key: string) => statuses.find((s) => s.key === key)?.name ?? key;
   const text =
-    item.kind === "created"
-      ? "created this issue"
-      : `changed status from ${statuses.find((s) => s.key === item.from)?.name} to ${statuses.find((s) => s.key === item.to)?.name}`;
+    item.kind === "created" ? app.created : app.statusChanged.replace("{from}", nameOf(item.from)).replace("{to}", nameOf(item.to));
   return (
     <div className="text-label text-muted-foreground">
       <div className="flex items-center">
@@ -667,16 +663,16 @@ export function TimelineRow({ item, statuses }: { item: TimelineItem; statuses: 
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <span className="shrink-0 font-medium">{byName}</span>
           <span className="truncate">{text}</span>
-          <span className="ml-auto shrink-0">{item.when ?? "just now"}</span>
+          <span className="ml-auto shrink-0">{item.when ?? app.ago.now}</span>
         </div>
       </div>
       {item.handoff ? (
         <div className="mt-1 ml-6 flex flex-wrap items-center gap-1.5 text-caption">
           <CornerDownRight className="size-3 shrink-0" />
-          <span>Handed to</span>
+          <span>{app.handedTo}</span>
           <Avatar actor={item.handoff} size={16} />
           <span className="font-medium text-foreground">{item.handoff.name}</span>
-          <span>{item.handoff.kind === "member" ? "(member, no run)" : "and started a run"}</span>
+          <span>{item.handoff.kind === "member" ? app.memberNoRun : app.startedRun}</span>
         </div>
       ) : null}
     </div>

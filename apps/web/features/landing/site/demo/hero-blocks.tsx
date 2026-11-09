@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Check, CircleCheck, GitPullRequest, MessageCircle } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
+import { useDemoCopy } from "./mock-kit";
 
 /*
  * Rich blocks the agents post in the hero's issue peek — charts, previews and
@@ -23,8 +24,9 @@ function Block({ title, aside, children }: { title: string; aside?: ReactNode; c
 }
 
 export function Checklist({ title, items }: { title: string; items: string[] }) {
+  const steps = useDemoCopy().hero.blocks.steps;
   return (
-    <Block title={title} aside={`${items.length} steps`}>
+    <Block title={title} aside={steps.replace("{count}", String(items.length))}>
       <ul className="flex flex-col gap-1.5 text-caption">
         {items.map((item, index) => (
           <li
@@ -82,15 +84,16 @@ export function PullRequest({
 
 /** Stacked bars: requests the limiter let through, and the 429s above the line. */
 export function LoadChart() {
+  const copy = useDemoCopy().hero.blocks.load;
   const offered = [60, 80, 120, 180, 260, 340, 420, 480, 500, 500, 460, 380];
   const limit = 100;
   const max = 500;
   return (
     <Block
-      title="Requests per minute on staging"
+      title={copy.title}
       aside={
         <span className="flex items-center gap-3">
-          <Legend className="bg-brand">served</Legend>
+          <Legend className="bg-brand">{copy.served}</Legend>
           <Legend className="bg-destructive/60">429</Legend>
         </span>
       }
@@ -100,7 +103,7 @@ export function LoadChart() {
           className="absolute inset-x-0 border-t border-dashed border-foreground/40"
           style={{ bottom: `${(limit / max) * 100}%` }}
         >
-          <span className="absolute -top-4 left-0 text-micro text-muted-foreground">limit 100</span>
+          <span className="absolute -top-4 left-0 text-micro text-muted-foreground">{copy.limit}</span>
         </div>
         {offered.map((value, index) => {
           const served = Math.min(value, limit);
@@ -144,6 +147,7 @@ export function BarList({ title, aside, bars }: { title: string; aside: string; 
 
 /** Export time against row count, crossing the request timeout. */
 export function TimeoutChart() {
+  const copy = useDemoCopy().hero.blocks.exportTime;
   const points: [number, number][] = [
     [0, 0],
     [2, 2],
@@ -159,11 +163,11 @@ export function TimeoutChart() {
   const y = (seconds: number) => h - (seconds / 36) * h;
   const path = points.map(([rows, seconds], index) => `${index ? "L" : "M"}${x(rows).toFixed(1)} ${y(seconds).toFixed(1)}`).join(" ");
   return (
-    <Block title="Export time by rows" aside="staging, 12k rows">
+    <Block title={copy.title} aside={copy.aside}>
       <svg viewBox={`0 0 ${w} ${h + 14}`} className="block w-full overflow-visible">
         <line x1="0" x2={w} y1={y(30)} y2={y(30)} className="stroke-destructive/60" strokeDasharray="4 3" />
         <text x={0} y={y(30) - 4} className="fill-muted-foreground text-[10px]">
-          timeout 30s
+          {copy.timeout}
         </text>
         <path
           d={path}
@@ -217,8 +221,9 @@ export function DocPreview({ title, meta }: { title: string; meta: string }) {
 const SOURCE_TONE = { Intercom: "bg-sky-500", Discord: "bg-indigo-500" } as const;
 
 export function ReportCluster({ reports }: { reports: { source: keyof typeof SOURCE_TONE; from: string; quote: string }[] }) {
+  const copy = useDemoCopy().hero.blocks.reports;
   return (
-    <Block title="Grouped reports" aside={`${reports.length} merged`}>
+    <Block title={copy.title} aside={copy.merged.replace("{count}", String(reports.length))}>
       <ul className="flex flex-col gap-1.5">
         {reports.map((report, index) => (
           <li
@@ -239,6 +244,7 @@ export function ReportCluster({ reports }: { reports: { source: keyof typeof SOU
 }
 
 export function Replies({ people }: { people: { initials: string; name: string }[] }) {
+  const sent = useDemoCopy().hero.blocks.sent;
   return (
     <div className="mt-2.5 flex items-center gap-3 rounded-lg border border-border px-3 py-2 text-caption">
       <span className="flex -space-x-1.5">
@@ -255,7 +261,7 @@ export function Replies({ people }: { people: { initials: string; name: string }
       <span className="min-w-0 flex-1 truncate text-muted-foreground">{people.map((person) => person.name).join(", ")}</span>
       <span className="flex items-center gap-1 text-success">
         <Check className="size-3.5" />
-        Sent
+        {sent}
       </span>
     </div>
   );

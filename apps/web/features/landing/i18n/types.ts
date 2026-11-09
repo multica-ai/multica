@@ -87,7 +87,123 @@ export type SiteDict = {
   cta: { title: string; lead: string; getStarted: string; bookDemo: string };
 };
 
-/** Copy for the home page. Product mockups stay in English, like screenshots of the app. */
+/** A workflow the hero board plays: its project, its statuses by key, and its issues' titles by issue key. */
+type DemoWorkflow<S extends string> = {
+  project: string;
+  statuses: Record<S, string>;
+  cards: Record<string, string>;
+  focus: { title: string; description: string; label: string };
+};
+
+/**
+ * Text inside the product mockups. `app` is the Multica interface itself and
+ * follows the product's own translations; the rest is the fictional Acme Labs
+ * team's work. People's and agents' names stay as they are, like any name.
+ */
+export type DemoDict = {
+  app: {
+    spaces: { inbox: string; work: string; team: string; chat: string; autopilots: string };
+    views: string;
+    projects: string;
+    myIssues: string;
+    myAgents: string;
+    allIssues: string;
+    allViews: string;
+    /** `{count}` is the number of projects. */
+    allProjects: string;
+    unassigned: string;
+    priority: { none: string; urgent: string; high: string; medium: string; low: string };
+    activity: string;
+    leaveComment: string;
+    created: string;
+    /** `{from}` and `{to}` are status names. */
+    statusChanged: string;
+    handedTo: string;
+    startedRun: string;
+    memberNoRun: string;
+    /** `{name}` is an agent's name. */
+    isWorking: string;
+    /** `{count}` is the number of agents. */
+    agentsWorking: string;
+    working: string;
+    online: string;
+    inProgress: string;
+    /** `{count}` is the number of minutes, hours or days. */
+    ago: { now: string; minutes: string; hours: string; days: string };
+  };
+  hero: {
+    ship: DemoWorkflow<"spec" | "build" | "review" | "approve" | "shipped"> & {
+      plan: { comment: string; title: string; items: string[] };
+      built: { comment: string; pr: string };
+      tested: string;
+      approved: string;
+    };
+    launch: DemoWorkflow<"brief" | "research" | "draft" | "edit" | "published"> & {
+      research: { comment: string; title: string; aside: string; bars: string[] };
+      draft: { comment: string; meta: string };
+      edited: string;
+    };
+    triage: DemoWorkflow<"inbox" | "repro" | "fix" | "reply" | "resolved"> & {
+      /** The autopilot that files the issue. */
+      autopilot: string;
+      grouped: { comment: string; quotes: string[] };
+      reproduced: string;
+      fixed: { comment: string; pr: string };
+      replied: string;
+    };
+    /** The fourth project in the side panel, which no workflow plays. */
+    otherProject: string;
+    blocks: {
+      /** `{count}` is the number of steps. */
+      steps: string;
+      checks: { build: string; lint: string };
+      /** `{count}` is the number of tests. */
+      tests: string;
+      load: { title: string; served: string; limit: string };
+      exportTime: { title: string; aside: string; timeout: string };
+      reports: { title: string; merged: string };
+      sent: string;
+    };
+  };
+  features: {
+    runtimes: {
+      title: string;
+      machines: string;
+      cloud: string;
+      server: string;
+      laptop: string;
+      thisDevice: string;
+      sandboxes: string;
+    };
+    workflow: {
+      breadcrumb: string;
+      onEnter: string;
+      next: string;
+      instructions: string;
+      instructionsBody: string;
+      finalStep: string;
+    };
+    chat: {
+      channels: string;
+      apps: string;
+      /** The message reads `{before} @Backend Agent {after}`. */
+      ask: { before: string; after: string };
+      reply: string;
+      issue: string;
+      /** `{channel}` is the channel's name. */
+      composer: string;
+    };
+    autopilots: { title: string; name: string; agent: string; nextRun: string; rows: { name: string; next: string }[] };
+    skills: { title: string; name: string; usedBy: string; rows: string[] };
+  };
+};
+
+/** A page's title, search description, and the card shown when its link is shared. */
+export type PageMeta = { title: string; description: string; ogTitle: string; ogDescription: string };
+
+export type MetaPage = "home" | "about" | "changelog" | "contactSales" | "download" | "licensing" | "privacy";
+
+/** Copy for the home page. */
 export type HomeDict = {
   hero: {
     /** The headline reads `{headlinePrefix}{agent}{headlineSuffix}`. */
@@ -122,6 +238,8 @@ export type HomeDict = {
 export type LandingDict = {
   site: SiteDict;
   home: HomeDict;
+  demo: DemoDict;
+  meta: Record<MetaPage, PageMeta>;
   faq: {
     label: string;
     headline: string;

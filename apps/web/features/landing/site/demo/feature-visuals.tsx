@@ -19,6 +19,7 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { StatusIcon } from "@multica/views/issues/components/status-icon";
+import { useLocale } from "../../i18n";
 import type { Status } from "./hero-board";
 import {
   AppWindow,
@@ -44,6 +45,7 @@ import {
   TRIAGE,
   Working,
   ZoomCanvas,
+  useDemoCopy,
   type Actor,
   type Space,
 } from "./mock-kit";
@@ -82,13 +84,6 @@ export function Chip({ actor }: { actor: Actor }) {
 
 type Runtime = { name: string; icon: IconComponent; detail: string; tools: string[]; fresh?: boolean };
 
-const MACHINES: Runtime[] = [
-  { name: "build-02", icon: Server, detail: "Linux · Leo Park", tools: ["Claude Code", "Codex", "OpenCode"], fresh: true },
-  { name: "Mia’s MacBook Pro", icon: Laptop, detail: "This device", tools: ["Claude Code", "Cursor"] },
-];
-
-const CLOUD: Runtime[] = [{ name: "Multica Cloud", icon: Cloud, detail: "Cloud sandboxes", tools: ["Claude Code", "Codex"] }];
-
 const RUNTIME_COLUMNS = "minmax(0,1fr) auto";
 
 function RuntimeRow({ runtime }: { runtime: Runtime }) {
@@ -107,18 +102,24 @@ function RuntimeRow({ runtime }: { runtime: Runtime }) {
 }
 
 export function RuntimesVisual() {
+  const copy = useDemoCopy().features.runtimes;
+  const machines: Runtime[] = [
+    { name: "build-02", icon: Server, detail: copy.server, tools: ["Claude Code", "Codex", "OpenCode"], fresh: true },
+    { name: copy.laptop, icon: Laptop, detail: copy.thisDevice, tools: ["Claude Code", "Cursor"] },
+  ];
+  const cloud: Runtime[] = [{ name: "Multica Cloud", icon: Cloud, detail: copy.sandboxes, tools: ["Claude Code", "Codex"] }];
   return (
     <Screen active="team">
-      <PageHeader icon={Server} title="All runtimes" filter={false}>
+      <PageHeader icon={Server} title={copy.title} filter={false}>
         <HeaderButton icon={Plus} />
       </PageHeader>
       <div className={LIST}>
-        <ListGroup title="Machines" count={MACHINES.length} />
-        {MACHINES.map((runtime) => (
+        <ListGroup title={copy.machines} count={machines.length} />
+        {machines.map((runtime) => (
           <RuntimeRow key={runtime.name} runtime={runtime} />
         ))}
-        <ListGroup title="Cloud services" count={CLOUD.length} />
-        {CLOUD.map((runtime) => (
+        <ListGroup title={copy.cloud} count={cloud.length} />
+        {cloud.map((runtime) => (
           <RuntimeRow key={runtime.name} runtime={runtime} />
         ))}
       </div>
@@ -128,17 +129,15 @@ export function RuntimesVisual() {
 
 // --- Workflows --------------------------------------------------------------
 
-const STEPS: Status[] = [
-  { key: "spec", name: "Spec", category: "unstarted", icon: "circle", color: "#8b5cf6", handler: LEAD },
-  { key: "build", name: "Build", category: "started", icon: "half", color: "#f97316", handler: BACKEND },
-  { key: "review", name: "Code review", category: "started", icon: "three_quarters", color: "#3b82f6", handler: QA },
-  { key: "approve", name: "Approve", category: "started", icon: "three_quarters", color: "#ec4899", handler: MIA },
-  { key: "shipped", name: "Shipped", category: "done", icon: "check", color: "#22c55e" },
+const STEPS: Omit<Status, "name">[] = [
+  { key: "spec", category: "unstarted", icon: "circle", color: "#8b5cf6", handler: LEAD },
+  { key: "build", category: "started", icon: "half", color: "#f97316", handler: BACKEND },
+  { key: "review", category: "started", icon: "three_quarters", color: "#3b82f6", handler: QA },
+  { key: "approve", category: "started", icon: "three_quarters", color: "#ec4899", handler: MIA },
+  { key: "shipped", category: "done", icon: "check", color: "#22c55e" },
 ];
 
-const SELECTED_STEP = STEPS[1]!;
-
-function StepIcon({ step, className }: { step: Status; className: string }) {
+function StepIcon({ step, className }: { step: Omit<Status, "name">; className: string }) {
   return <StatusIcon status={step.key} category={step.category} color={step.color} icon={step.icon} className={className} />;
 }
 
@@ -161,20 +160,25 @@ function Select({ children }: { children: ReactNode }) {
 }
 
 export function WorkflowVisual() {
+  const { t } = useLocale();
+  const copy = t.demo.features.workflow;
+  const names = t.demo.hero.ship.statuses;
+  const steps: Status[] = STEPS.map((step) => ({ ...step, name: names[step.key as keyof typeof names] }));
+  const selected = steps[1]!;
   return (
     <Screen active="settings">
       <BreadcrumbHeader
         parent={
           <>
-            <Workflow className="size-3.5" /> Workflows
+            <Workflow className="size-3.5" /> {copy.breadcrumb}
           </>
         }
-        leaf="Ship a feature"
+        leaf={t.home.hero.workflows.ship.label}
       />
       <div className="flex min-h-0 flex-1 gap-3 p-3">
         <ol className="flex w-[150px] shrink-0 flex-col gap-1.5 self-start rounded-xl bg-muted/40 p-1.5">
-          {STEPS.map((step) => (
-            <li key={step.key} className={cn(RAISED, "px-2.5 py-2", step === SELECTED_STEP && "ring-2 ring-brand/50")}>
+          {steps.map((step) => (
+            <li key={step.key} className={cn(RAISED, "px-2.5 py-2", step === selected && "ring-2 ring-brand/50")}>
               <p className="flex items-center gap-2">
                 <StepIcon step={step} className="h-3.5 w-3.5 shrink-0" />
                 <span className="truncate text-label font-medium">{step.name}</span>
@@ -186,7 +190,7 @@ export function WorkflowVisual() {
                     <span className="truncate text-foreground">{step.handler.name}</span>
                   </>
                 ) : (
-                  "Final step"
+                  copy.finalStep
                 )}
               </div>
             </li>
@@ -194,22 +198,22 @@ export function WorkflowVisual() {
         </ol>
         <div className="flex min-w-0 flex-1 flex-col gap-3 pt-1">
           <p className="flex items-center gap-2">
-            <StepIcon step={SELECTED_STEP} className="h-4 w-4 shrink-0" />
-            <span className="text-label font-semibold">{SELECTED_STEP.name}</span>
+            <StepIcon step={selected} className="h-4 w-4 shrink-0" />
+            <span className="text-label font-semibold">{selected.name}</span>
           </p>
-          <Field label="On entering, hand to">
+          <Field label={copy.onEnter}>
             <Select>
-              <Avatar actor={BACKEND} size={16} /> Backend Agent
+              <Avatar actor={BACKEND} size={16} /> {BACKEND.name}
             </Select>
           </Field>
-          <Field label="When done, move to">
+          <Field label={copy.next}>
             <Select>
-              <StepIcon step={STEPS[2]!} className="h-3.5 w-3.5 shrink-0" /> Code review
+              <StepIcon step={steps[2]!} className="h-3.5 w-3.5 shrink-0" /> {steps[2]!.name}
             </Select>
           </Field>
-          <Field label="Handoff instructions">
+          <Field label={copy.instructions}>
             <div className="rounded-md border border-border bg-background px-2.5 py-2 text-caption leading-snug">
-              Build to the spec, then open a pull request.
+              {copy.instructionsBody}
             </div>
           </Field>
         </div>
@@ -263,6 +267,10 @@ export function ChatMessage({ actor, time, children }: { actor: Actor; time: str
 }
 
 export function ChatVisual() {
+  const { locale, t } = useLocale();
+  const copy = t.demo.features.chat;
+  const time = new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit", timeZone: "UTC" });
+  const at = (minute: number) => time.format(Date.UTC(2026, 5, 9, 11, minute));
   return (
     <ZoomCanvas {...CANVAS}>
       <div className="absolute top-8 -right-12 -bottom-12 left-8 flex overflow-hidden rounded-xl border border-site-line-strong bg-background shadow-site-float">
@@ -271,7 +279,7 @@ export function ChatVisual() {
             Acme Labs <ChevronDown className="size-3.5" />
           </p>
           <div>
-            <p className="px-1.5 pb-1 text-micro">Channels</p>
+            <p className="px-1.5 pb-1 text-micro">{copy.channels}</p>
             {CHANNELS.map((channel) => (
               <p
                 key={channel}
@@ -286,7 +294,7 @@ export function ChatVisual() {
             ))}
           </div>
           <div>
-            <p className="px-1.5 pb-1 text-micro">Apps</p>
+            <p className="px-1.5 pb-1 text-micro">{copy.apps}</p>
             <p className="flex items-center gap-1.5 rounded-md px-1.5 py-1">
               <span className="flex size-3.5 shrink-0 items-center justify-center rounded-sm bg-white text-[#3f0e40]">
                 <MulticaIcon className="size-2.5" />
@@ -302,20 +310,20 @@ export function ChatVisual() {
             <ChevronDown className="size-3.5 text-muted-foreground" />
           </div>
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-4 py-3">
-            <ChatMessage actor={MIA} time="11:55 AM">
-              Exports over 10k rows time out.{" "}
-              <span className="rounded-sm bg-[#e8f5fa] px-0.5 text-[#1264a3]">@Backend Agent</span> can you look?
+            <ChatMessage actor={MIA} time={at(55)}>
+              {copy.ask.before}{" "}
+              <span className="rounded-sm bg-[#e8f5fa] px-0.5 text-[#1264a3]">@{BACKEND.name}</span> {copy.ask.after}
             </ChatMessage>
-            <ChatMessage actor={BACKEND} time="11:56 AM">
-              Filed it and started a fix.
+            <ChatMessage actor={BACKEND} time={at(56)}>
+              {copy.reply}
               <div className="mt-1.5 border-l-4 border-border pl-2.5">
                 <p className="flex items-center gap-1 text-micro text-muted-foreground">
                   <MulticaIcon className="size-2.5" /> Multica
                 </p>
-                <p className="mt-0.5 truncate font-bold text-[#1264a3]">ACM-151 CSV export times out</p>
+                <p className="mt-0.5 truncate font-bold text-[#1264a3]">ACM-151 {copy.issue}</p>
                 <p className="mt-0.5 flex items-center gap-1.5 text-caption text-muted-foreground">
                   <StatusIcon status="in_progress" className="h-3 w-3 shrink-0" />
-                  In progress
+                  {t.demo.app.inProgress}
                   <Working />
                 </p>
               </div>
@@ -323,7 +331,7 @@ export function ChatVisual() {
           </div>
           <div className="shrink-0 px-4 pb-3">
             <div className="flex h-9 items-center justify-between rounded-lg border border-site-line-strong px-3 text-label text-muted-foreground">
-              Message #eng-support
+              {copy.composer.replace("{channel}", "eng-support")}
               <span className="flex items-center gap-2">
                 <Plus className="size-3.5" />
                 <ArrowUp className="size-3.5" />
@@ -338,40 +346,38 @@ export function ChatVisual() {
 
 // --- Autopilots -------------------------------------------------------------
 
-const AUTOPILOTS: { name: string; next: string; agent: Actor }[] = [
-  { name: "Nightly triage", next: "Tonight 02:00", agent: TRIAGE },
-  { name: "Flaky tests", next: "In 4 hours", agent: QA },
-  { name: "Dependency bumps", next: "Mon 09:00", agent: BACKEND },
-  { name: "Weekly digest", next: "Fri 17:00", agent: CONTENT },
-  { name: "Visual checks", next: "Next release", agent: FRONTEND },
-];
+const AUTOPILOT_AGENTS: Actor[] = [TRIAGE, QA, BACKEND, CONTENT, FRONTEND];
 
-const AUTOPILOT_COLUMNS = "minmax(0,1fr) 44px 84px";
+const AUTOPILOT_COLUMNS = "minmax(0,1fr) auto 84px";
 
 export function AutopilotsVisual() {
+  const copy = useDemoCopy().features.autopilots;
   return (
     <Screen active="autopilots">
-      <PageHeader icon={Zap} title="All autopilots">
+      <PageHeader icon={Zap} title={copy.title}>
         <HeaderButton icon={SlidersHorizontal} />
         <HeaderButton icon={Plus} />
       </PageHeader>
       <div className={LIST}>
         <ListHead columns={AUTOPILOT_COLUMNS}>
-          <span>Name</span>
-          <span>Agent</span>
-          <span>Next run</span>
+          <span>{copy.name}</span>
+          <span>{copy.agent}</span>
+          <span>{copy.nextRun}</span>
         </ListHead>
-        {AUTOPILOTS.map((autopilot) => (
+        {AUTOPILOT_AGENTS.map((agent, index) => {
+          const autopilot = copy.rows[index];
+          return autopilot ? (
           <ListRow key={autopilot.name} columns={AUTOPILOT_COLUMNS}>
             <NameCell title={autopilot.name} />
             <span className={LIST_CELL}>
-              <Avatar actor={autopilot.agent} size={20} />
+              <Avatar actor={agent} size={20} />
             </span>
             <span className={cn(LIST_CELL, "tabular-nums")}>
               <span className="truncate">{autopilot.next}</span>
             </span>
           </ListRow>
-        ))}
+          ) : null;
+        })}
       </div>
     </Screen>
   );
@@ -379,13 +385,7 @@ export function AutopilotsVisual() {
 
 // --- Skills -----------------------------------------------------------------
 
-const SKILLS: { name: string; agents: Actor[] }[] = [
-  { name: "Write release notes", agents: [LEAD, CONTENT, FRONTEND, BACKEND] },
-  { name: "Review a migration", agents: [BACKEND, QA] },
-  { name: "Triage a bug report", agents: [TRIAGE, QA, LEAD] },
-  { name: "Deploy checklist", agents: [BACKEND] },
-  { name: "Reply to a customer", agents: [CONTENT, TRIAGE] },
-];
+const SKILL_AGENTS: Actor[][] = [[LEAD, CONTENT, FRONTEND, BACKEND], [BACKEND, QA], [TRIAGE, QA, LEAD], [BACKEND], [CONTENT, TRIAGE]];
 
 const SKILL_COLUMNS = "minmax(0,1fr) 84px";
 
@@ -408,22 +408,23 @@ function UsedBy({ agents }: { agents: Actor[] }) {
 }
 
 export function SkillsVisual() {
+  const copy = useDemoCopy().features.skills;
   return (
     <Screen active="team">
-      <PageHeader icon={BookOpenText} title="All skills">
+      <PageHeader icon={BookOpenText} title={copy.title}>
         <HeaderButton icon={SlidersHorizontal} />
         <HeaderButton icon={Plus} />
       </PageHeader>
       <div className={LIST}>
         <ListHead columns={SKILL_COLUMNS}>
-          <span>Name</span>
-          <span>Used by</span>
+          <span>{copy.name}</span>
+          <span>{copy.usedBy}</span>
         </ListHead>
-        {SKILLS.map((skill, index) => (
-          <ListRow key={skill.name} columns={SKILL_COLUMNS} className={cn(index === 0 && "bg-surface-selected")}>
-            <NameCell icon={<BookOpenText className="size-4 shrink-0 text-muted-foreground" />} title={skill.name} />
+        {SKILL_AGENTS.map((agents, index) => (
+          <ListRow key={index} columns={SKILL_COLUMNS} className={cn(index === 0 && "bg-surface-selected")}>
+            <NameCell icon={<BookOpenText className="size-4 shrink-0 text-muted-foreground" />} title={copy.rows[index]} />
             <span className={LIST_CELL}>
-              <UsedBy agents={skill.agents} />
+              <UsedBy agents={agents} />
             </span>
           </ListRow>
         ))}

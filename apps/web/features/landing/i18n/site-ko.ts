@@ -1,6 +1,53 @@
 import type { LandingDict } from "./types";
+import { koDemoCopy } from "./demo-ko";
 
-export const koSiteCopy: Pick<LandingDict, "site" | "home"> = {
+export const koSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = {
+  demo: koDemoCopy,
+  meta: {
+    home: {
+      title: "Multica — 사람과 에이전트 팀을 위한 프로젝트 관리",
+      description: "코딩 에이전트를 진짜 팀원으로 만드는 소스 공개 플랫폼. 일을 맡기고, 진행을 추적하고, 스킬을 쌓으세요.",
+      ogTitle: "Multica — 사람과 에이전트 팀을 위한 프로젝트 관리",
+      ogDescription: "사람과 에이전트로 이루어진 팀을 한곳에서 관리하세요.",
+    },
+    about: {
+      title: "회사 소개",
+      description:
+        "Multica(Multiplexed Information and Computing Agent)를 소개합니다. 사람과 에이전트 팀을 위한 소스 공개 프로젝트 관리 플랫폼입니다.",
+      ogTitle: "Multica 소개",
+      ogDescription: "Multica를 만든 이야기, 그리고 사람과 에이전트 팀을 위한 프로젝트 관리를 만드는 이유.",
+    },
+    changelog: {
+      title: "변경 로그",
+      description: "Multica의 새로운 소식. 최신 기능, 개선 사항, 수정 사항을 확인하세요.",
+      ogTitle: "변경 로그 | Multica",
+      ogDescription: "Multica의 최신 업데이트와 릴리스.",
+    },
+    contactSales: {
+      title: "영업팀 문의",
+      description: "회사에 사람과 에이전트가 함께하는 워크플로를 도입하는 방법을 Multica 팀과 상의하세요.",
+      ogTitle: "영업팀 문의 — Multica",
+      ogDescription: "팀에 대해 알려 주세요. 영업일 기준 3일 안에 답변드립니다.",
+    },
+    download: {
+      title: "Multica 다운로드",
+      description: "macOS, Windows, Linux용 Multica를 다운로드하거나, 서버와 원격 개발 환경에 CLI를 설치하세요.",
+      ogTitle: "Multica 다운로드",
+      ogDescription: "데몬이 포함된 Multica 데스크톱 앱을 받거나, 서버와 원격 개발 환경에 CLI를 설치하세요.",
+    },
+    licensing: {
+      title: "라이선스",
+      description: "Multica를 무료로 쓸 수 있는 경우와 상용 라이선스가 필요한 경우를 흔한 사례로 설명합니다.",
+      ogTitle: "라이선스 — Multica",
+      ogDescription: "조직 내부에서 자체 호스팅하는 것은 무료입니다. Multica를 다른 사람에게 호스팅 서비스로 제공하려면 상용 라이선스가 필요합니다.",
+    },
+    privacy: {
+      title: "개인정보 처리방침",
+      description: "Multica가 multica.ai와 Multica Cloud에서 개인정보를 수집, 이용, 보호하는 방법.",
+      ogTitle: "개인정보 처리방침 — Multica",
+      ogDescription: "Multica가 개인정보를 수집, 이용, 보호하는 방법.",
+    },
+  },
   site: {
     nav: {
       product: "제품",
@@ -58,19 +105,19 @@ export const koSiteCopy: Pick<LandingDict, "site" | "home"> = {
           label: "기능 출시",
           short: "출시",
           description:
-            "워크플로로 움직이는 Multica 프로젝트 보드. Issue가 Spec, Build, Code review, Approve, Shipped 순으로 진행되며 기획 에이전트, 코딩 에이전트, 리뷰 에이전트, 팀원에게 차례로 넘어갑니다",
+            "워크플로로 움직이는 Multica 프로젝트 보드. Issue가 기획, 개발, 코드 리뷰, 승인, 출시됨 순으로 진행되며 기획 에이전트, 코딩 에이전트, 리뷰 에이전트, 팀원에게 차례로 넘어갑니다",
         },
         launch: {
           label: "콘텐츠 발행",
           short: "발행",
           description:
-            "워크플로로 움직이는 마케팅 팀의 프로젝트 보드. 출시 글이 Brief, Research, Draft, Edit, Published 순으로 진행되며 리서치 에이전트, 작성 에이전트, 편집자에게 차례로 넘어갑니다",
+            "워크플로로 움직이는 마케팅 팀의 프로젝트 보드. 출시 글이 브리프, 리서치, 초안, 편집, 게시됨 순으로 진행되며 리서치 에이전트, 작성 에이전트, 편집자에게 차례로 넘어갑니다",
         },
         triage: {
           label: "피드백 분류",
           short: "분류",
           description:
-            "워크플로로 움직이는 지원 팀의 프로젝트 보드. 오토파일럿이 사용자 제보를 Inbox에 등록하고, Issue가 Reproduce, Fix, Reply, Resolved 순으로 진행되며 분류 에이전트, QA 에이전트, 코딩 에이전트에게 차례로 넘어갑니다",
+            "워크플로로 움직이는 지원 팀의 프로젝트 보드. 오토파일럿이 사용자 제보를 접수에 등록하고, Issue가 재현, 수정, 답변, 해결됨 순으로 진행되며 분류 에이전트, QA 에이전트, 코딩 에이전트에게 차례로 넘어갑니다",
         },
       },
     },
@@ -86,7 +133,7 @@ export const koSiteCopy: Pick<LandingDict, "site" | "home"> = {
         workflows: {
           title: "워크플로가 단계마다 일을 넘겨줍니다",
           body: "상태마다 담당자를 정해 두세요. Issue를 다음 단계로 옮기면 그 단계의 에이전트나 팀원에게 넘어갑니다.",
-          alt: "‘Ship a feature’ 워크플로. Spec은 Lead Agent, Build는 Backend Agent, Code review는 QA Agent, Approve는 Mia Chen에게 넘어가고 마지막은 Shipped. Build 단계의 인계 설정이 열려 있다",
+          alt: "‘기능 출시’ 워크플로. 기획은 Lead Agent, 개발은 Backend Agent, 코드 리뷰는 QA Agent, 승인은 Mia Chen에게 넘어가고 마지막은 출시됨. 개발 단계의 인계 설정이 열려 있다",
         },
         chat: {
           title: "채팅에서 에이전트를 멘션하세요",
