@@ -34,6 +34,7 @@ function Wrapper({ children }: { children: ReactNode }) {
 
 const group = (name: string) => screen.getByRole("group", { name });
 const state = () => useAppearanceStore.getState();
+const themeSelect = () => screen.getByRole("combobox", { name: "Theme" });
 
 const PAPER = {
   apiVersion: 1,
@@ -82,24 +83,20 @@ describe("AppearanceTab", () => {
     expect(themeState.setTheme).toHaveBeenCalledWith("dark");
   });
 
-  it("previews every theme in the applied mode and saves the pick", async () => {
+  it("lists every theme in a dropdown, drawn in the applied mode, and saves the pick", async () => {
     themeState.theme = "system";
     themeState.resolvedTheme = "dark";
     const user = userEvent.setup();
     render(<AppearanceTab />, { wrapper: Wrapper });
 
-    const themes = within(group("Theme")).getAllByRole("button");
-    expect(themes.map((b) => b.textContent)).toEqual(["Default", "Pop", "GitHub", "Blueprint", "Notion"]);
-    const github = within(group("Theme")).getByRole("button", { name: "GitHub" });
-    expect(github.querySelector("[data-appearance-preview]")).toHaveAttribute(
-      "data-preview-mode",
-      "dark",
-    );
-
-    await user.click(github);
+    await user.click(themeSelect());
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Default", "Pop", "GitHub", "Blueprint", "Notion"]);
+    expect(options[2]!.querySelector("[data-theme-swatch]")).toHaveAttribute("data-swatch-mode", "dark");
+    await user.click(options[2]!);
 
     expect(state().theme).toBe("github");
-    expect(github).toHaveAttribute("aria-pressed", "true");
+    expect(themeSelect()).toHaveTextContent("GitHub");
   });
 
   it("renders the options the active theme declares and saves them per theme", async () => {
@@ -107,7 +104,8 @@ describe("AppearanceTab", () => {
     render(<AppearanceTab />, { wrapper: Wrapper });
     expect(screen.queryByText("Theme options")).not.toBeInTheDocument();
 
-    await user.click(within(group("Theme")).getByRole("button", { name: "Pop" }));
+    await user.click(themeSelect());
+    await user.click(await screen.findByRole("option", { name: "Pop" }));
     expect(screen.getByText("Theme options")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Yellow" })).toHaveAttribute("aria-checked", "true");
     await user.click(screen.getByRole("radio", { name: "Mint" }));
@@ -166,10 +164,10 @@ describe("AppearanceTab", () => {
 
     expect(useInstalledThemesStore.getState().themes.map((t) => t.id)).toEqual(["paper"]);
     expect(state().theme).toBe("paper");
-    expect(within(group("Theme")).getByRole("button", { name: "Paper" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(themeSelect()).toHaveTextContent("Paper");
+    await user.click(themeSelect());
+    expect(await screen.findByText("Installed")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
 
     await user.click(screen.getByRole("button", { name: "Remove Paper" }));
     expect(useInstalledThemesStore.getState().themes).toEqual([]);

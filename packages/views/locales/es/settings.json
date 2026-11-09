@@ -195,6 +195,8 @@
       "description": "Colores, bordes, sombras y esquinas de toda la app. Importa un archivo de tema para añadir más.",
       "default": "Predeterminado",
       "pop": "Pop",
+      "built_in": "Integrados",
+      "installed": "Instalados",
       "remove": "Quitar {{name}}",
       "safe_mode": "Modo seguro: tu tema está en pausa hasta que cierres esta ventana.",
       "safe_mode_exit": "Usar mi tema"

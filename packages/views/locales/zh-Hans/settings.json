@@ -211,6 +211,8 @@
       "description": "全局的颜色、边框、阴影和圆角。可以导入主题文件添加更多主题。",
       "default": "默认",
       "pop": "波普",
+      "built_in": "内置",
+      "installed": "已安装",
       "remove": "移除 {{name}}",
       "safe_mode": "安全模式：关闭这个窗口之前，你的主题暂停生效。",
       "safe_mode_exit": "恢复我的主题"

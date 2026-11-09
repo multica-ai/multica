@@ -1,16 +1,15 @@
 "use client";
 
-import { useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
-  Check,
   Monitor,
   Moon,
   RotateCcw,
   Sun,
+  Trash2,
   TriangleAlert,
   Upload,
-  X,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
@@ -76,7 +75,6 @@ import {
 import { useLocale, useT } from "../../i18n";
 import { SegmentedToggle } from "../../common/segmented-toggle";
 import {
-  SETTINGS_ANCHOR_ATTR,
   SettingsCard,
   SettingsRow,
   SettingsSection,
@@ -147,36 +145,6 @@ function useAppliedMode(): PreviewMode {
   return resolvedTheme === "dark" ? "dark" : "light";
 }
 
-/** A card row whose control sits under the label rather than beside it. */
-function SettingsBlock({
-  label,
-  description,
-  anchor,
-  action,
-  children,
-}: {
-  label: string;
-  description?: string;
-  anchor: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div {...{ [SETTINGS_ANCHOR_ATTR]: anchor }} className="scroll-mt-6 space-y-3 px-4 py-3.5">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-body font-medium">{label}</div>
-          {description ? (
-            <div className="mt-0.5 text-caption leading-5 text-muted-foreground">{description}</div>
-          ) : null}
-        </div>
-        {action}
-      </div>
-      {children}
-    </div>
-  );
-}
-
 function useThemeLabel() {
   const { t } = useT("settings");
   return (theme: ThemeManifest) =>
@@ -203,13 +171,25 @@ function ColorSection() {
   const themeLabel = t(($) => $.appearance.theme.title);
   const accentLabel = t(($) => $.appearance.accent.title);
   const current = activeTheme({ theme }, safeMode.active);
-  const themeBrand = current.tokens[appliedMode].brand ?? PREVIEW_BASE[appliedMode].brand;
-  const themes = [...BUILT_IN_THEMES, ...installed];
+  const themeBrand = current.tokens[appliedMode].brand ?? THEME_SWATCH_BASE[appliedMode].brand;
+  const selected = [...BUILT_IN_THEMES, ...installed].find((manifest) => manifest.id === theme);
+  const selectedInstalled = installed.find((manifest) => manifest.id === theme);
+  const items = [...BUILT_IN_THEMES, ...installed].map((manifest) => ({
+    value: manifest.id,
+    label: themeLabelFor(manifest),
+  }));
 
-  const remove = (id: string) => {
-    if (theme === id) set({ theme: "default" });
-    uninstall(id);
-  };
+  const option = (manifest: ThemeManifest, author?: string) => (
+    <SelectItem key={manifest.id} value={manifest.id}>
+      <span className="flex min-w-0 flex-1 items-center gap-2.5">
+        <ThemeSwatch theme={manifest} mode={appliedMode} />
+        <span className="truncate">{themeLabelFor(manifest)}</span>
+        {author ? (
+          <span className="ml-auto shrink-0 pl-3 text-caption text-muted-foreground">{author}</span>
+        ) : null}
+      </span>
+    </SelectItem>
+  );
 
   return (
     <SettingsSection title={t(($) => $.appearance.color.title)} anchor="color">
@@ -228,54 +208,68 @@ function ColorSection() {
             />
           </div>
         </SettingsRow>
-        <SettingsBlock
-          label={themeLabel}
-          description={t(($) => $.appearance.theme.description)}
-          anchor="theme"
-          action={<ImportThemeButton />}
-        >
-          {safeMode.active ? (
-            <div
-              role="status"
-              className="flex items-center gap-3 rounded-md bg-muted px-3 py-2 text-caption"
-            >
-              <TriangleAlert aria-hidden="true" className="size-3.5 shrink-0 text-warning" />
-              <span className="min-w-0 flex-1">{t(($) => $.appearance.theme.safe_mode)}</span>
-              <Button variant="outline" size="xs" onClick={safeMode.exit}>
-                {t(($) => $.appearance.theme.safe_mode_exit)}
+        <SettingsRow label={themeLabel} description={t(($) => $.appearance.theme.description)} anchor="theme">
+          <div className="flex items-center gap-2">
+            {selectedInstalled ? (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground"
+                aria-label={t(($) => $.appearance.theme.remove, { name: selectedInstalled.name })}
+                title={t(($) => $.appearance.theme.remove, { name: selectedInstalled.name })}
+                onClick={() => {
+                  set({ theme: "default" });
+                  uninstall(selectedInstalled.id);
+                }}
+              >
+                <Trash2 />
               </Button>
-            </div>
-          ) : null}
-          <div role="group" aria-label={themeLabel} className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {themes.map((manifest) => {
-              const label = themeLabelFor(manifest);
-              const removable = installed.includes(manifest);
-              return (
-                <div key={manifest.id} className="relative min-w-0">
-                  <OptionCard
-                    label={label}
-                    caption={removable ? manifest.author : undefined}
-                    selected={theme === manifest.id}
-                    onSelect={() => set({ theme: manifest.id })}
-                    preview={<ThemePreview theme={manifest} mode={appliedMode} />}
-                  />
-                  {removable ? (
-                    <Button
-                      variant="secondary"
-                      size="icon-xs"
-                      className="absolute top-1.5 right-1.5 shadow-sm"
-                      aria-label={t(($) => $.appearance.theme.remove, { name: label })}
-                      title={t(($) => $.appearance.theme.remove, { name: label })}
-                      onClick={() => remove(manifest.id)}
-                    >
-                      <X />
-                    </Button>
+            ) : null}
+            <Select
+              items={items}
+              value={selected ? theme : "default"}
+              onValueChange={(next) => {
+                if (next) set({ theme: next });
+              }}
+            >
+              <SelectTrigger size="sm" className="w-48" aria-label={themeLabel}>
+                <SelectValue>
+                  {selected ? (
+                    <span className="flex min-w-0 items-center gap-2">
+                      <ThemeSwatch theme={selected} mode={appliedMode} />
+                      <span className="truncate">{themeLabelFor(selected)}</span>
+                    </span>
                   ) : null}
-                </div>
-              );
-            })}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent align="end" className="min-w-64">
+                <SelectGroup>
+                  <SelectLabel>{t(($) => $.appearance.theme.built_in)}</SelectLabel>
+                  {BUILT_IN_THEMES.map((manifest) => option(manifest))}
+                </SelectGroup>
+                {installed.length > 0 ? (
+                  <>
+                    <SelectSeparator />
+                    <SelectGroup>
+                      <SelectLabel>{t(($) => $.appearance.theme.installed)}</SelectLabel>
+                      {installed.map((manifest) => option(manifest, manifest.author))}
+                    </SelectGroup>
+                  </>
+                ) : null}
+              </SelectContent>
+            </Select>
+            <ImportThemeButton />
           </div>
-        </SettingsBlock>
+        </SettingsRow>
+        {safeMode.active ? (
+          <div role="status" className="flex items-center gap-3 px-4 py-3 text-caption">
+            <TriangleAlert aria-hidden="true" className="size-3.5 shrink-0 text-warning" />
+            <span className="min-w-0 flex-1">{t(($) => $.appearance.theme.safe_mode)}</span>
+            <Button variant="outline" size="xs" onClick={safeMode.exit}>
+              {t(($) => $.appearance.theme.safe_mode_exit)}
+            </Button>
+          </div>
+        ) : null}
         <SettingsRow
           label={accentLabel}
           description={t(($) => $.appearance.accent.description)}
@@ -943,73 +937,16 @@ function LayoutSection() {
   );
 }
 
-function OptionCard({
-  label,
-  caption,
-  selected,
-  onSelect,
-  preview,
-}: {
-  label: string;
-  caption?: string;
-  selected: boolean;
-  onSelect: () => void;
-  preview: ReactNode;
-}) {
-  const labelId = useId();
-  return (
-    <button
-      type="button"
-      aria-labelledby={labelId}
-      aria-pressed={selected}
-      onClick={() => {
-        if (!selected) onSelect();
-      }}
-      className="group/option flex w-full min-w-0 flex-col gap-2 rounded-xl text-left outline-none"
-    >
-      <span
-        className={cn(
-          "@container block w-full overflow-hidden rounded-lg ring-1 ring-surface-border transition-shadow group-focus-visible/option:outline-2 group-focus-visible/option:outline-offset-2 group-focus-visible/option:outline-ring",
-          selected ? "ring-2 ring-foreground" : "group-hover/option:ring-foreground/30",
-        )}
-      >
-        {preview}
-      </span>
-      <span className="flex min-w-0 items-center gap-2 px-0.5">
-        <span
-          aria-hidden="true"
-          className={cn(
-            "flex size-3.5 shrink-0 items-center justify-center rounded-full border",
-            selected ? "border-foreground bg-foreground text-background" : "border-input",
-          )}
-        >
-          {selected ? <Check className="size-2.5" /> : null}
-        </span>
-        <span id={labelId} className={cn("block truncate text-label", selected && "font-medium")}>
-          {label}
-        </span>
-        {caption ? <span className="truncate text-caption text-muted-foreground">{caption}</span> : null}
-      </span>
-    </button>
-  );
-}
-
 /**
- * The tokens a miniature needs, as tokens.css sets them for the default
- * theme. Theme manifests only list overrides, so previews start from these.
+ * The tokens a theme swatch needs, as tokens.css sets them for the default
+ * theme. Theme manifests only list overrides, so swatches start from these.
  */
-const PREVIEW_BASE: Record<PreviewMode, Required<Pick<ThemeTokens,
-  "app-shell" | "page-canvas" | "surface-border" | "foreground" | "surface-selected" | "muted" | "primary" | "radius" | "brand"
->>> = {
+const THEME_SWATCH_BASE: Record<PreviewMode, Required<Pick<ThemeTokens, "app-shell" | "page-canvas" | "surface-border" | "foreground" | "brand">>> = {
   light: {
     "app-shell": "oklch(0.964 0.001 286)",
     "page-canvas": "oklch(0.988 0 0)",
     "surface-border": "oklch(0.92 0.004 286)",
     foreground: "oklch(0.141 0.005 286)",
-    "surface-selected": "oklch(0.95 0.002 286)",
-    muted: "oklch(0.967 0.001 286)",
-    primary: "oklch(0.21 0.006 286)",
-    radius: "0.5rem",
     brand: "oklch(0.561 0.194 256.4)",
   },
   dark: {
@@ -1017,93 +954,28 @@ const PREVIEW_BASE: Record<PreviewMode, Required<Pick<ThemeTokens,
     "page-canvas": "oklch(0.18 0.005 286)",
     "surface-border": "oklch(0.3 0.006 286)",
     foreground: "oklch(0.985 0 0)",
-    "surface-selected": "oklch(0.3 0.006 286)",
-    muted: "oklch(0.274 0.006 286)",
-    primary: "oklch(0.92 0.004 286)",
-    radius: "0.5rem",
     brand: "oklch(0.65 0.16 255)",
   },
 };
 
-function previewVariables(theme: ThemeManifest, mode: PreviewMode): CSSProperties {
-  const tokens = { ...PREVIEW_BASE[mode], ...theme.tokens[mode] };
-  const frame = theme.frame?.[mode];
-  const ink = tokens.foreground;
-  const canvas = tokens["page-canvas"];
-  const radiusRem = Number.parseFloat(tokens.radius) || 0.5;
-  return {
-    "--pv-shell": tokens["app-shell"],
-    "--pv-rail": `color-mix(in oklab, ${frame?.foreground ?? ink} 28%, ${tokens["app-shell"]})`,
-    "--pv-canvas": canvas,
-    "--pv-line": tokens["surface-border"],
-    "--pv-ink": ink,
-    "--pv-faint": `color-mix(in oklab, ${ink} 16%, ${canvas})`,
-    "--pv-selected": tokens["surface-selected"],
-    "--pv-band": tokens.muted,
-    "--pv-dot-a": "oklch(0.75 0.15 75)",
-    "--pv-dot-b": `color-mix(in oklab, ${ink} 40%, ${canvas})`,
-    "--pv-primary": tokens["button-primary"] ?? tokens.primary,
-    "--pv-primary-line": tokens["button-primary-border"] ?? "transparent",
-    "--pv-brand": tokens.brand,
-    "--pv-radius": `${(radiusRem / 0.5) * 2}cqw`,
-  } as CSSProperties;
-}
-
-/** A miniature app in a theme: rail, sidebar, and a list with two status groups. */
-function ThemePreview({ theme, mode }: { theme: ThemeManifest; mode: PreviewMode }) {
+/** A theme in miniature: its frame, page, ink and brand colour. */
+function ThemeSwatch({ theme, mode }: { theme: ThemeManifest; mode: PreviewMode }) {
+  const tokens = { ...THEME_SWATCH_BASE[mode], ...theme.tokens[mode] };
   return (
     <span
       aria-hidden="true"
-      data-appearance-preview={theme.id}
-      data-preview-mode={mode}
-      style={previewVariables(theme, mode)}
-      className="flex aspect-[16/10] w-full gap-[2.5cqw] bg-(--pv-shell) p-[2.5cqw] pl-[2cqw]"
+      data-theme-swatch={theme.id}
+      data-swatch-mode={mode}
+      className="flex h-4 w-6 shrink-0 items-end overflow-hidden rounded-[3px] p-[2px] ring-1 ring-foreground/10"
+      style={{ background: theme.frame?.[mode]?.["app-shell"] ?? tokens["app-shell"] }}
     >
-      <span className="flex w-[5cqw] shrink-0 flex-col items-center gap-[2.5cqw] pt-[0.5cqw]">
-        <span className="size-[4.5cqw] rounded-[1.2cqw] bg-(--pv-canvas)" />
-        {[0, 1, 2].map((i) => (
-          <span key={i} className="size-[3.2cqw] rounded-[0.9cqw] bg-(--pv-rail)" />
-        ))}
-      </span>
-      <span className="flex min-w-0 flex-1 overflow-hidden rounded-(--pv-radius) border border-(--pv-line) bg-(--pv-canvas)">
-        <span className="flex w-[24cqw] shrink-0 flex-col gap-[2.2cqw] border-r border-(--pv-line) p-[2.8cqw]">
-          <span className="h-[2cqw] w-3/5 rounded-full bg-(--pv-ink)" />
-          <span className="h-[4.2cqw] rounded-[0.9cqw] bg-(--pv-selected)" />
-          {["w-4/5", "w-3/5", "w-2/3"].map((width) => (
-            <span key={width} className={cn("h-[1.6cqw] rounded-full bg-(--pv-faint)", width)} />
-          ))}
-        </span>
-        <span className="flex min-w-0 flex-1 flex-col gap-[2.2cqw] p-[3cqw]">
-          <span className="flex items-center justify-between">
-            <span className="h-[2cqw] w-[28%] rounded-full bg-(--pv-ink)" />
-            <span className="h-[3.6cqw] w-[11cqw] rounded-[0.9cqw] border border-(--pv-primary-line) bg-(--pv-primary)" />
-          </span>
-          <PreviewGroup dot="a" rows={["w-3/4", "w-1/2"]} />
-          <PreviewGroup dot="b" rows={["w-2/3", "w-3/5"]} />
-        </span>
+      <span
+        className="flex size-full flex-col justify-center gap-[2px] rounded-[1.5px] px-[2px]"
+        style={{ background: tokens["page-canvas"], boxShadow: `inset 0 0 0 0.5px ${tokens["surface-border"]}` }}
+      >
+        <span className="h-[2px] w-3/5 rounded-full" style={{ background: tokens.foreground }} />
+        <span className="h-[2px] w-2/5 rounded-full" style={{ background: tokens.brand }} />
       </span>
     </span>
-  );
-}
-
-function PreviewGroup({ dot, rows }: { dot: "a" | "b"; rows: string[] }) {
-  return (
-    <>
-      <span className="flex h-[4.2cqw] items-center gap-[1.2cqw] rounded-[0.9cqw] bg-(--pv-band) px-[1.4cqw]">
-        <span className={cn("size-[2cqw] rounded-full", dot === "a" ? "bg-(--pv-dot-a)" : "bg-(--pv-dot-b)")} />
-        <span className="h-[1.6cqw] w-[22%] rounded-full bg-(--pv-ink)" />
-      </span>
-      {rows.map((width, i) => (
-        <span key={width} className="flex items-center gap-[1.4cqw] px-[1.4cqw]">
-          <span
-            className={cn(
-              "h-[1.6cqw] w-[9%] rounded-full",
-              i === 0 ? "bg-(--pv-brand)" : "bg-(--pv-faint)",
-            )}
-          />
-          <span className={cn("h-[1.6cqw] rounded-full bg-(--pv-faint)", width)} />
-        </span>
-      ))}
-    </>
   );
 }

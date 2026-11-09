@@ -211,6 +211,8 @@
       "description": "全域的顏色、邊框、陰影和圓角。可以匯入主題檔案加入更多主題。",
       "default": "預設",
       "pop": "普普",
+      "built_in": "內建",
+      "installed": "已安裝",
       "remove": "移除 {{name}}",
       "safe_mode": "安全模式：關閉這個視窗之前，你的主題暫停生效。",
       "safe_mode_exit": "恢復我的主題"

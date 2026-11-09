@@ -213,6 +213,8 @@
       "description": "Colors, borders, shadows and corners across the app. Import a theme file to add more.",
       "default": "Default",
       "pop": "Pop",
+      "built_in": "Built in",
+      "installed": "Installed",
       "remove": "Remove {{name}}",
       "safe_mode": "Safe mode: your theme is paused until you close this window.",
       "safe_mode_exit": "Use my theme"

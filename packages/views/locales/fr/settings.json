@@ -213,6 +213,8 @@
       "description": "Couleurs, bordures, ombres et coins de toute l’app. Importez un fichier de thème pour en ajouter.",
       "default": "Par défaut",
       "pop": "Pop",
+      "built_in": "Intégrés",
+      "installed": "Installés",
       "remove": "Retirer {{name}}",
       "safe_mode": "Mode sans échec : votre thème est suspendu jusqu’à la fermeture de cette fenêtre.",
       "safe_mode_exit": "Utiliser mon thème"

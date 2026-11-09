@@ -211,6 +211,8 @@
       "description": "앱 전체의 색상, 테두리, 그림자, 모서리. 테마 파일을 가져와 더 추가할 수 있어요.",
       "default": "기본",
       "pop": "팝",
+      "built_in": "기본 제공",
+      "installed": "설치됨",
       "remove": "{{name}} 제거",
       "safe_mode": "안전 모드: 이 창을 닫을 때까지 테마가 꺼져 있어요.",
       "safe_mode_exit": "내 테마 사용"
