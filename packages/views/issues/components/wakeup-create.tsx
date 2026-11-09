@@ -16,8 +16,8 @@ import {
   Plus,
   RefreshCw,
   Zap,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import { childIssuesOptions, issueDetailOptions, useCreateIssueWakeup } from "@multica/core/issues";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { labelListOptions } from "@multica/core/labels/queries";
@@ -372,7 +372,7 @@ function ConditionMenu({
   onChange: (value: WakeupCondition) => void;
 }) {
   const { t } = useT("issues");
-  const items: Record<WakeupCondition, { icon: LucideIcon; label: string; hint: string }> = {
+  const items: Record<WakeupCondition, { icon: IconComponent; label: string; hint: string }> = {
     at: { icon: Clock3, label: t(($) => $.wakeups.create.cond_at), hint: t(($) => $.wakeups.create.cond_at_hint) },
     recurring: { icon: RefreshCw, label: t(($) => $.wakeups.create.cond_recurring), hint: t(($) => $.wakeups.create.cond_recurring_hint) },
     reply: { icon: MessageSquare, label: t(($) => $.wakeups.create.cond_reply), hint: t(($) => $.wakeups.create.cond_reply_hint) },

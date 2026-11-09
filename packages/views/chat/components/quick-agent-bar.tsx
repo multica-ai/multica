@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { Plus } from "@multica/ui/icons";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { chatPinnedAgentsOptions } from "@multica/core/chat/queries";
 import { usePinChatAgent, useUnpinChatAgent } from "@multica/core/chat/mutations";
@@ -68,6 +68,7 @@ export function QuickAgentBar({
                 type="button"
                 aria-label={agent.name}
                 onClick={() => onStartNewChat(agent)}
+                // eslint-disable-next-line no-restricted-syntax -- avatar row: the pinned agent's avatar is the button
                 className="flex size-[34px] shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
             }
@@ -105,6 +106,7 @@ export function QuickAgentBar({
               // Filled circle (not a dashed outline) so it reads as the exact
               // same size as the filled agent avatars — an empty outline looks
               // larger at the same pixel diameter. Same ring as the avatars.
+              // eslint-disable-next-line no-restricted-syntax -- avatar row: this button sits in the row of round agent avatars
               className="flex size-[34px] shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground ring-1 ring-inset ring-border outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
             />
           }

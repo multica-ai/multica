@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Copy, Maximize2, Minimize2, X } from "lucide-react";
+import { Copy, Maximize2, Minimize2, X } from "@multica/ui/icons";
 import { toast } from "sonner";
 import type { IssueMetadata } from "@multica/core/types";
 import { IconButton } from "@multica/ui/components/common/icon-button";

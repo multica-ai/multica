@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, type KeyboardEvent, type ReactNode } from "react";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal } from "@multica/ui/icons";
 import {
   DropdownMenu,
   DropdownMenuContent,

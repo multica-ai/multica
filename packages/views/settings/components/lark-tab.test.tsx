@@ -325,6 +325,7 @@ describe("LarkAgentBindButton (CTA gate)", () => {
     // Disconnect action appears; the region-aware Manage link still points
     // at the mainland host.
     expect(screen.getByText("Feishu")).toBeTruthy();
+    expect(screen.getByText("Bound — awaiting message verification")).toBeTruthy();
     expect(screen.getByTestId("lark-agent-bot-disconnect")).toBeTruthy();
     const link = screen.getByRole("link", { name: /Manage in Feishu/i }) as HTMLAnchorElement;
     expect(link.href).toBe("https://open.feishu.cn/app/cli_existing_app");
@@ -357,7 +358,7 @@ describe("LarkAgentBindButton (CTA gate)", () => {
     render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, {
       wrapper: I18nWrapper,
     });
-    expect(screen.getByText(/Connected to Lark/i)).toBeTruthy();
+    expect(screen.getByText("Bound — awaiting message verification")).toBeTruthy();
     const link = screen.getByRole("link", { name: /Manage in Lark/i }) as HTMLAnchorElement;
     expect(link.href).toBe("https://open.larksuite.com/app/cli_lark_app");
   });
@@ -788,5 +789,21 @@ describe("LarkTab connected bots list (agent identity rendering)", () => {
     expect(screen.getByText(/Unknown Agent/)).toBeTruthy();
     // Disconnect stays reachable so the orphan row can be cleaned up.
     expect(screen.getByRole("button", { name: /Disconnect/i })).toBeTruthy();
+  });
+});
+
+
+describe("Lark inbound verification display", () => {
+  it("updates the bound status when refreshed evidence arrives", () => {
+    const installation = { id: "proof", workspace_id: "workspace-1", agent_id: "agent-1", app_id: "app", bot_open_id: "bot", installer_user_id: "user-1", status: "active", installed_at: "2026-10-29T00:00:00Z", created_at: "2026-10-29T00:00:00Z", updated_at: "2026-10-29T00:00:00Z", first_message_received_at: null as string | null };
+    installationsRef.current.installations = [installation];
+    const { rerender } = render(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />, { wrapper: I18nWrapper });
+    expect(screen.getByText("Bound — awaiting message verification")).toBeTruthy();
+    expect(screen.getByText(/Existing bindings may have no recorded verification yet/)).toBeTruthy();
+    installation.first_message_received_at = "2026-10-29T01:00:00Z";
+    rerender(<LarkAgentBindButton agentId="agent-1" agentName="Bot" />);
+    expect(screen.getByText("Message reception verified")).toBeTruthy();
+    expect(screen.getByText(/does not confirm ongoing connectivity/)).toBeTruthy();
+    expect(screen.queryByText("Bound — awaiting message verification")).toBeNull();
   });
 });

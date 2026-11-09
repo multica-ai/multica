@@ -35,6 +35,7 @@ vi.mock("electron", () => ({
     getPath: () => "/review-only/user-data",
     getAppPath: () => "/review-only/app",
     getVersion: () => "0.7.0",
+    getPreferredSystemLanguages: () => ["en"],
   },
   BrowserWindow: class {},
   ipcMain: {
@@ -131,7 +132,7 @@ async function ipc(name: string) {
 async function setupRealGate() {
   const manager = await import("./daemon-manager");
   const { setupAutoUpdater } = await import("./updater");
-  setupAutoUpdater(() => null, {
+  setupAutoUpdater(() => [], {
     platform: "win32",
     daemonGate: {
       prepare: manager.prepareDaemonForUpdateInstall,

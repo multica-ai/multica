@@ -136,7 +136,18 @@ const (
 	// in_progress first and in_review on delivery, so responsibility 6 has
 	// to rule those moves out for this issue.
 	leaderWorkflowLegacyDaemon
+	// leaderWorkflowStepMoved: the run's binding no longer matches the issue,
+	// so it must leave status unchanged even when its squad owns the issue.
+	leaderWorkflowStepMoved
 )
+
+const squadParentStatusStepMoved = `6. **Leave the parent issue's status unchanged for this run.** This issue
+   is assigned to your squad, but this run's workflow binding no longer matches
+   the issue's current step. Follow the explanation in ` + "`" + `[Project workflow]` + "`" + `.
+   Keep the current status even when you confirm the overall goal is met; do
+   not change it to mark progress or delivery. This overrides the status rules
+   in your runtime instructions. Leave a comment if something needs attention;
+   a member can review the current state and explicitly rerun the work.`
 
 // squadParentStatusOwnedInWorkflow is responsibility 6 for an owning leader
 // whose issue follows a project workflow that came with the claim (MUL-8145).
@@ -208,12 +219,27 @@ const squadOperatingProtocolHardRules = `Hard rules:
   @mention on this issue, or create a ` + "`" + `todo` + "`" + ` child issue assigned to
   them. Never both for the same work.`
 
+// squadSteerRule is added to the hard rules only for a daemon that ships a
+// CLI with --steer (protocol.DaemonCapabilityCLICommentSteerV1): an older CLI
+// rejects the flag and the comment is never posted.
+const squadSteerRule = `- A worker already running on this issue gets a new comment only after its
+  run ends. To correct it mid-run (wrong direction, a missing fact, a
+  narrower scope), steer that run instead: add the comment with
+  ` + "`" + `--steer <run-id>` + "`" + ` (run ids from ` + "`" + `multica issue runs <issue-id> --active` + "`" + `), or
+  ` + "`" + `--steer-active` + "`" + ` for every running worker you may steer. Only a run that
+  accepts additional messages (` + "`" + `can_supplement: true` + "`" + ` in
+  ` + "`" + `multica issue runs <issue-id> --active --output json` + "`" + `) can be steered, and
+  the command reports per run whether it was. New work is still a normal
+  delegation.`
+
 // squadOperatingProtocolFor assembles the protocol, selecting the parent-status
 // responsibility that matches this leader's actual authority over the issue
 // and, for an owner, whether the issue's project workflow governs its moves.
 func squadOperatingProtocolFor(ownsIssueStatus bool, workflow leaderWorkflow) string {
 	status := squadParentStatusNotOwned
 	switch {
+	case ownsIssueStatus && workflow == leaderWorkflowStepMoved:
+		status = squadParentStatusStepMoved
 	case ownsIssueStatus && workflow == leaderWorkflowCurrentDaemon:
 		status = squadParentStatusOwnedInWorkflow
 	case ownsIssueStatus && workflow == leaderWorkflowLegacyDaemon:
@@ -246,9 +272,15 @@ func squadOperatingProtocolFor(ownsIssueStatus bool, workflow leaderWorkflow) st
 // Archived agent members are skipped — there's no point asking the leader
 // to delegate to a retired agent. Members whose underlying record can't be
 // loaded (deleted user/agent races, FK weirdness) are also skipped silently.
-func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad, ownsIssueStatus bool, workflow leaderWorkflow) string {
+//
+// steer adds the rule for steering a running worker; see squadSteerRule.
+func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad, ownsIssueStatus bool, workflow leaderWorkflow, steer bool) string {
 	var sb strings.Builder
 	sb.WriteString(squadOperatingProtocolFor(ownsIssueStatus, workflow))
+	if steer {
+		sb.WriteString("\n")
+		sb.WriteString(squadSteerRule)
+	}
 	sb.WriteString("\n\n")
 	sb.WriteString(buildSquadRoster(ctx, q, squad))
 

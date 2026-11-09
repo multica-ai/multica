@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode, SyntheticEvent } from "react";
-import { ArrowUp, Loader2, Square } from "lucide-react";
+import { ArrowUp, Loader2, Square } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Tooltip,
@@ -68,6 +68,7 @@ function SubmitButton({
     const stopButton = (
       <Button
         size="icon-sm"
+        // eslint-disable-next-line no-restricted-syntax -- composer send button, the one round button
         className="rounded-full"
         onPointerDown={keepFocusInComposer}
         onMouseDown={keepFocusInComposer}
@@ -91,6 +92,7 @@ function SubmitButton({
     <Button
       size="icon-sm"
       className={cn(
+        // eslint-disable-next-line no-restricted-syntax -- composer send button, the one round button
         "rounded-full",
         showReason && "aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:active:translate-y-0",
       )}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowRight, Download, Loader2 } from "lucide-react";
+import { ArrowRight, Download, Loader2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -24,6 +24,7 @@ import {
   MikaRuntimeChoice,
   type MikaRuntimeSelection,
 } from "../../runtimes/components/mika-runtime-choice";
+import { countRuntimeMachines } from "../../runtimes/components/runtime-machines";
 import { useRuntimePicker } from "../components/use-runtime-picker";
 import { useT } from "../../i18n";
 
@@ -163,6 +164,7 @@ export function StepPlatformFork({
       </StepFooter>
 
     <CliInstallDialog
+      workspaceSlug={wsSlug}
       open={dialog === "cli"}
       onClose={() => setDialog(null)}
       onConnect={handleCliConnect}
@@ -210,7 +212,7 @@ function ForkPrimary({ onClick }: { onClick: () => void }) {
       </div>
       <span
         aria-hidden
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-background/10 px-4 py-2 text-label font-medium transition-colors group-hover:bg-background/20"
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-background/10 px-4 py-2 text-label font-medium transition-colors group-hover:bg-background/20"
       >
         {t(($) => $.step_platform.download_button)}
         <ArrowRight className="h-3.5 w-3.5" />
@@ -279,6 +281,7 @@ function ForkAlt({
  * closes the dialog and fires the parent's `onConnect`.
  */
 function CliInstallDialog({
+  workspaceSlug,
   open,
   onClose,
   onConnect,
@@ -291,6 +294,7 @@ function CliInstallDialog({
   connecting,
   cliInstructions,
 }: {
+  workspaceSlug?: string;
   open: boolean;
   onClose: () => void;
   onConnect: () => void | Promise<void>;
@@ -319,13 +323,14 @@ function CliInstallDialog({
               <div className="flex items-center gap-2 pt-1 text-body">
                 <div className="h-2 w-2 rounded-full bg-success" />
                 <span className="font-medium">
-                  {t(($) => $.step_platform.runtimes_connected, { count: runtimes.length })}
+                  {t(($) => $.step_platform.runtimes_connected, { count: countRuntimeMachines(runtimes) })}
                 </span>
               </div>
               {/* Cap the runtime list at ~4 rows visible, scroll the rest.
                   Keeps the commands above always reachable even when
                   a user has many machines registered. */}
               <MikaRuntimeChoice
+                workspaceSlug={workspaceSlug}
                 layout="list"
                 runtimes={runtimes}
                 value={choice}

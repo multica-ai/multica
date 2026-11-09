@@ -6,6 +6,7 @@ import type { AgentTask, Attachment, Issue, IssueStatusEntry, Label, TimelineEnt
 import { issueKeys } from "@multica/core/issues/queries";
 import { issueStatusKeys } from "@multica/core/issue-statuses";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { ApiError } from "@multica/core/api/client";
 import { toast } from "sonner";
 import { useResolvedExpandStore } from "@multica/core/issues/stores/resolved-expand-store";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
@@ -825,7 +826,7 @@ describe("IssueDetail (shared)", () => {
 
     fireEvent.click(menuButton("source-root")!);
     const branchAction = await screen.findByText("Create sub-issue from here");
-    expect(branchAction.closest('[role="menuitem"]')?.querySelector(".lucide-message-square-plus")).toBeInTheDocument();
+    expect(branchAction.closest('[role="menuitem"]')?.querySelector(".icon-message-square-plus")).toBeInTheDocument();
     fireEvent.click(branchAction);
     expect(mockOpenModal).toHaveBeenLastCalledWith("quick-create-issue", expect.objectContaining({
       anchor_comment_id: "source-root",
@@ -1228,7 +1229,7 @@ describe("IssueDetail (shared)", () => {
   });
 
   it("keeps the peek's host controls when the issue cannot be loaded", async () => {
-    mockApiObj.getIssue.mockRejectedValue(new Error("Not found"));
+    mockApiObj.getIssue.mockRejectedValue(new ApiError("Not found", 404, "Not Found"));
     renderPeek("nonexistent-id");
     await waitFor(() => {
       expect(
@@ -1822,8 +1823,31 @@ describe("IssueDetail (shared)", () => {
     ).toBeTruthy();
   });
 
+  it("keeps an unsaved comment mounted when the primary background refresh fails", async () => {
+    const queryClient = createTestQueryClient();
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={queryClient}>
+          <IssueDetail issueId="issue-1" />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+    await screen.findByText("Implement authentication");
+    fireEvent.click(screen.getByTestId("comment-composer-shell"));
+    const editor = await screen.findByPlaceholderText("Leave a comment...");
+    fireEvent.change(editor, { target: { value: "Unsaved synthetic comment" } });
+    mockApiObj.getIssue.mockRejectedValue(new ApiError("unavailable", 503, "Unavailable"));
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: issueKeys.detail("ws-1", "issue-1"), exact: true });
+    });
+    expect(queryClient.getQueryState(issueKeys.detail("ws-1", "issue-1"))?.status).toBe("error");
+    expect(editor).toBeInTheDocument();
+    expect(editor).toHaveValue("Unsaved synthetic comment");
+    expect(screen.queryByText("Could not load issue.")).not.toBeInTheDocument();
+  });
+
   it("shows 'not found' message when issue does not exist", async () => {
-    mockApiObj.getIssue.mockRejectedValue(new Error("Not found"));
+    mockApiObj.getIssue.mockRejectedValue(new ApiError("Not found", 404, "Not Found"));
 
     renderIssueDetail("nonexistent-id");
 
@@ -1835,7 +1859,7 @@ describe("IssueDetail (shared)", () => {
   });
 
   it("shows 'Back' button when issue is not found and no onDelete prop", async () => {
-    mockApiObj.getIssue.mockRejectedValue(new Error("Not found"));
+    mockApiObj.getIssue.mockRejectedValue(new ApiError("Not found", 404, "Not Found"));
 
     renderIssueDetail("nonexistent-id");
 
@@ -2511,6 +2535,53 @@ describe("IssueDetail (shared)", () => {
       const reply = document.getElementById("comment-reply-under-root");
       expect(reply).not.toBeNull();
       expect(hasHighlightedCommentBackground(reply)).toBe(false);
+    });
+
+    it("lands on a run that left no comment by its task id", async () => {
+      const taskId = "7c1f3a9e-2b4d-4e8a-9f60-0a1b2c3d4e5f";
+      const task: AgentTask = {
+        id: taskId, agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
+        status: "failed", priority: 0, created_at: "2026-01-18T00:00:00Z",
+        started_at: "2026-01-18T00:00:01Z", dispatched_at: "2026-01-18T00:00:01Z",
+        completed_at: "2026-01-18T00:05:00Z", result: null, error: "go test timed out",
+        delivered_comment_ids: [],
+      };
+      mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+
+      renderIssueDetailWithHighlight(taskId);
+
+      await waitFor(() => {
+        expect(hasHighlightedCommentBackground(document.getElementById(`comment-${taskId}`))).toBe(true);
+      });
+    });
+
+    it.each([
+      ["an open thread", "open"],
+      ["a thread whose root is resolved", "root"],
+      ["a thread a later reply resolved", "reply"],
+    ])("unfolds and lands on a run that left no comment in %s", async (_case, fold) => {
+      const taskId = "7c1f3a9e-2b4d-4e8a-9f60-0a1b2c3d4e5f";
+      const root = { ...mockTimeline[0]!, id: "run-thread-root", parent_id: null,
+        resolved_at: fold === "root" ? "2026-01-19T00:00:00Z" : null };
+      const trigger = { ...mockTimeline[0]!, id: "run-trigger", parent_id: root.id,
+        content: "Please run this check", created_at: "2026-01-18T00:00:00Z" };
+      const resolution = { ...trigger, id: "run-resolution", content: "Resolved",
+        resolved_at: "2026-01-19T00:00:00Z", created_at: "2026-01-19T00:00:00Z" };
+      const task: AgentTask = {
+        id: taskId, agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
+        status: "failed", priority: 0, created_at: "2026-01-18T00:00:00Z",
+        started_at: "2026-01-18T00:00:01Z", dispatched_at: "2026-01-18T00:00:01Z",
+        completed_at: "2026-01-18T00:05:00Z", result: null, error: "go test timed out",
+        trigger_comment_id: trigger.id, delivered_comment_ids: [trigger.id],
+      };
+      mockApiObj.listTimeline.mockResolvedValue([root, trigger, ...(fold === "reply" ? [resolution] : [])]);
+      mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+
+      renderIssueDetailWithHighlight(taskId);
+
+      await waitFor(() => {
+        expect(hasHighlightedCommentBackground(document.getElementById(`comment-${taskId}`))).toBe(true);
+      });
     });
 
     it("still scrolls when the timeline is ready before the issue (regression for inbox click)", async () => {

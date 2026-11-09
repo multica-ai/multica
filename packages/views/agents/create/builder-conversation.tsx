@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Loader2, MessageSquare, X } from "lucide-react";
+import { Loader2, MessageSquare, X } from "@multica/ui/icons";
 import {
   applyDraftModelChange,
   applyDraftRuntimeChange,
@@ -222,7 +222,7 @@ export function BuilderConversation({
                   key={prompt}
                   type="button"
                   onClick={() => void onSend(prompt)}
-                  className="rounded-full border bg-background px-3 py-1.5 text-caption transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="rounded-md border bg-background px-3 py-1.5 text-caption transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   {prompt}
                 </button>

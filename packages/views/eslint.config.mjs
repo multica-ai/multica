@@ -1,4 +1,5 @@
 import reactConfig from "@multica/eslint-config/react";
+import { NO_ROUND_CONTROLS } from "@multica/eslint-config/control-shape";
 import i18next from "eslint-plugin-i18next";
 import {
   NO_UNTRANSLATED_ATTRIBUTES,
@@ -33,6 +34,7 @@ export default [
         "error",
         NO_UNTRANSLATED_ATTRIBUTES,
         NO_UNTRANSLATED_TOAST,
+        NO_ROUND_CONTROLS,
       ],
     },
   },

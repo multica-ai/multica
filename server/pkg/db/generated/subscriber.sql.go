@@ -338,6 +338,43 @@ func (q *Queries) ListIssueSubscribers(ctx context.Context, issueID pgtype.UUID)
 	return items, nil
 }
 
+const listSubscribedIssueIDs = `-- name: ListSubscribedIssueIDs :many
+SELECT s.issue_id
+FROM issue_subscriber s
+JOIN issue i ON i.id = s.issue_id
+WHERE i.workspace_id = $1
+  AND s.user_type = 'member'
+  AND s.user_id = $2
+  AND s.unsubscribed_at IS NULL
+`
+
+type ListSubscribedIssueIDsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Every issue in the workspace the member actively subscribes to; opt-out
+// tombstones do not count.
+func (q *Queries) ListSubscribedIssueIDs(ctx context.Context, arg ListSubscribedIssueIDsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listSubscribedIssueIDs, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var issue_id pgtype.UUID
+		if err := rows.Scan(&issue_id); err != nil {
+			return nil, err
+		}
+		items = append(items, issue_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockActiveMember = `-- name: LockActiveMember :one
 SELECT id FROM member
 WHERE user_id = $1 AND workspace_id = $2

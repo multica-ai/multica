@@ -4,7 +4,7 @@ import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 
 import { memo, useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { ChevronRight, Plus } from "lucide-react";
+import { ChevronRight, Plus } from "@multica/ui/icons";
 import { Accordion } from "@base-ui/react/accordion";
 import {
   DndContext,
@@ -542,7 +542,9 @@ function StatusAccordionItem({
         issue={issue}
         childProgress={childProgressMap.get(issue.id)}
         project={
-          issue.project_id ? projectMap?.get(issue.project_id) : undefined
+          issue.project_id && issue.project_id !== projectId
+            ? projectMap?.get(issue.project_id)
+            : undefined
         }
         disableSorting={disableSorting}
       />
@@ -551,7 +553,9 @@ function StatusAccordionItem({
         issue={issue}
         childProgress={childProgressMap.get(issue.id)}
         project={
-          issue.project_id ? projectMap?.get(issue.project_id) : undefined
+          issue.project_id && issue.project_id !== projectId
+            ? projectMap?.get(issue.project_id)
+            : undefined
         }
       />
     );
@@ -627,7 +631,7 @@ function StatusAccordionItem({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="rounded-full text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
+                  className="text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
                   onClick={() => {
                     const defaults = {
                       status: status,
@@ -652,6 +656,16 @@ function StatusAccordionItem({
           ) : (
             rows
           )
+        ) : page.isError ? (
+          <ListLoadMoreFooter
+            hasMore={page.hasMore}
+            isLoading={page.isLoading || page.isFetching}
+            total={page.total}
+            onLoadMore={page.loadMore}
+            isError
+            onRetry={page.retry}
+            errorLabel={t(($) => $.detail.section_load_failed_retry)}
+          />
         ) : (
           <p className="py-6 text-center text-caption text-muted-foreground">
             {t(($) => $.list.empty_status)}

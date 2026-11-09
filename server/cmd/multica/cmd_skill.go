@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -480,7 +481,7 @@ func runSkillRefresh(cmd *cobra.Command, args []string) error {
 
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/skills/"+args[0]+"/refresh", map[string]any{}, &result); err != nil {
-		return fmt.Errorf("refresh skill: %w", err)
+		return withSkillSourceMessage("Skill refresh failed: ", fmt.Errorf("refresh skill: %w", err))
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -537,7 +538,7 @@ func runSkillImport(cmd *cobra.Command, _ []string) error {
 		if handledErr := handleSkillImportError(cmd, err); handledErr != nil {
 			return handledErr
 		}
-		return fmt.Errorf("import skill: %w", err)
+		return withSkillSourceMessage("Skill import failed: ", fmt.Errorf("import skill: %w", err))
 	}
 
 	return printSkillImportResult(cmd, result)
@@ -579,6 +580,31 @@ func handleSkillImportError(cmd *cobra.Command, err error) error {
 		reason = "skill import conflict"
 	}
 	return errors.New(reason)
+}
+
+// withSkillSourceMessage surfaces the server's explanation when fetching a
+// skill from its upstream source fails. The import and refresh endpoints answer
+// such failures with 502 (source error, e.g. SKILL.md not found at that path),
+// 503 (source temporarily unavailable, usually GitHub rate limiting) or 504
+// (fetch deadline exceeded), each with a hand-written message. The generic 5xx
+// copy says the Multica service is unavailable, which points the user at the
+// wrong system. A body without a message (a proxy's own 502/504 page) keeps the
+// generic copy.
+func withSkillSourceMessage(leadIn string, err error) error {
+	var httpErr *cli.HTTPError
+	if !errors.As(err, &httpErr) {
+		return err
+	}
+	switch httpErr.StatusCode {
+	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+	default:
+		return err
+	}
+	msg := cli.ServerMessage(err)
+	if msg == "" {
+		return err
+	}
+	return cli.WithUserMessage(leadIn+msg, err)
 }
 
 func normalizeLegacySkillImportConflict(body map[string]any) map[string]any {

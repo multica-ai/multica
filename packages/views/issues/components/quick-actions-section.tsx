@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Zap } from "lucide-react";
+import { Loader2, Zap } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { dispatchReasonCode } from "@multica/core/api";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -124,7 +124,7 @@ export function QuickActionsSection({ issueId }: { issueId: string }) {
  * started. "Added to Lambda's current run" is the truth; "Lambda started
  * working" is not.
  */
-function outcomeMessage(
+export function outcomeMessage(
   outcome: CommentTriggerOutcome | undefined,
   targetName: string,
   t: ReturnType<typeof useT<"issues">>["t"],

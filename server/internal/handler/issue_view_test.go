@@ -119,6 +119,59 @@ func TestIssueViewPrivateInvisibleToOthers(t *testing.T) {
 	}
 }
 
+func TestListAllIssueViewsAcrossScopes(t *testing.T) {
+	shared, code, body := createIssueViewForTest(t, map[string]any{
+		"name":       "Shared board",
+		"scope_type": "workspace",
+		"visibility": "workspace",
+		"query":      map[string]any{},
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create shared: %d %s", code, body)
+	}
+	mine, code, body := createIssueViewForTest(t, map[string]any{
+		"name":          "Created by me",
+		"scope_type":    "my",
+		"scope_variant": "created",
+		"query":         map[string]any{},
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create my: %d %s", code, body)
+	}
+
+	listAll := func(userID string) map[string]bool {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("GET", "/api/issue-views?scope_type=all", nil)
+		if userID != "" {
+			req.Header.Set("X-User-ID", userID)
+		}
+		testHandler.ListIssueViews(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("list all: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var views []IssueViewResponse
+		json.NewDecoder(w.Body).Decode(&views)
+		ids := map[string]bool{}
+		for _, v := range views {
+			ids[v.ID] = true
+		}
+		return ids
+	}
+
+	own := listAll("")
+	if !own[shared.ID] || !own[mine.ID] {
+		t.Fatalf("owner's all-list must include every scope, got %v", own)
+	}
+	other := listAll(createSecondWorkspaceMember(t))
+	if !other[shared.ID] {
+		t.Fatalf("shared view missing from another member's all-list")
+	}
+	if other[mine.ID] {
+		t.Fatalf("private view leaked into another member's all-list")
+	}
+}
+
 func TestUpdateIssueViewRevisionConflict(t *testing.T) {
 
 	view, code, body := createIssueViewForTest(t, map[string]any{

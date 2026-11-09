@@ -90,7 +90,7 @@ func TestTaskSupplementLateDeliveryAndDeletion(t *testing.T) {
 	f := newSupplementFixture(t, "claude", "running", true)
 	var sent, pending CommentResponse
 	supplementRequest(t, f, "0199a4e8-22ce-7b01-bba5-111111111111", "already injected").Want(http.StatusCreated).JSON(&sent)
-	if _, err := testHandler.Queries.ClaimNextTaskSupplement(t.Context(), parseUUID(f.taskID)); err != nil {
+	if _, err := testHandler.Queries.ClaimNextTaskSupplement(t.Context(), db.ClaimNextTaskSupplementParams{TaskID: parseUUID(f.taskID), IncludeAgentAuthored: true}); err != nil {
 		t.Fatal(err)
 	}
 	supplementRequest(t, f, "0199a4e8-22ce-7b01-bba5-222222222222", "never injected").Want(http.StatusCreated).JSON(&pending)
@@ -323,7 +323,7 @@ func TestTaskSupplementConcurrentClaimsKeepUniqueReceipts(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			row, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), parseUUID(fixture.taskID))
+			row, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), db.ClaimNextTaskSupplementParams{TaskID: parseUUID(fixture.taskID), IncludeAgentAuthored: true})
 			claims <- claimResult{row, err}
 		}()
 	}
@@ -346,7 +346,7 @@ func TestTaskSupplementConcurrentClaimsKeepUniqueReceipts(t *testing.T) {
 	if len(seen) != additions {
 		t.Fatalf("claimed %d unique comments, want %d", len(seen), additions)
 	}
-	if _, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), parseUUID(fixture.taskID)); !errors.Is(err, pgx.ErrNoRows) {
+	if _, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), db.ClaimNextTaskSupplementParams{TaskID: parseUUID(fixture.taskID), IncludeAgentAuthored: true}); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("extra claim = %v, want no rows", err)
 	}
 	if delivered := dbfx.Count(t, `SELECT count(*) FROM task_supplement WHERE task_id = $1 AND status = 'delivered'`, fixture.taskID); delivered != additions {
@@ -392,7 +392,7 @@ func TestTaskSupplementConcurrentDuplicateSubmissionsAndRetries(t *testing.T) {
 	if n := dbfx.Count(t, `SELECT count(*) FROM comment WHERE issue_id = $1 AND content = 'duplicate addition'`, fixture.issueID); n != 1 {
 		t.Fatalf("duplicate submissions left %d comments", n)
 	}
-	claim, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), parseUUID(fixture.taskID))
+	claim, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), db.ClaimNextTaskSupplementParams{TaskID: parseUUID(fixture.taskID), IncludeAgentAuthored: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,11 +417,11 @@ func TestTaskSupplementConcurrentDuplicateSubmissionsAndRetries(t *testing.T) {
 	for response := range responses {
 		response.Want(http.StatusOK)
 	}
-	retried, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), parseUUID(fixture.taskID))
+	retried, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), db.ClaimNextTaskSupplementParams{TaskID: parseUUID(fixture.taskID), IncludeAgentAuthored: true})
 	if err != nil || retried.CommentID != claim.CommentID || retried.AttemptCount != 2 {
 		t.Fatalf("retry claim = %#v: %v", retried, err)
 	}
-	if _, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), parseUUID(fixture.taskID)); !errors.Is(err, pgx.ErrNoRows) {
+	if _, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), db.ClaimNextTaskSupplementParams{TaskID: parseUUID(fixture.taskID), IncludeAgentAuthored: true}); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("duplicate retry left another claim: %v", err)
 	}
 	ack := db.AckTaskSupplementDeliveredParams{TaskID: parseUUID(fixture.taskID), CommentID: claim.CommentID}
@@ -466,7 +466,7 @@ func TestTaskSupplementTimestampOrderAndCommentIDTieBreak(t *testing.T) {
 				t.Fatalf("metadata order=%v, want %v", got, want)
 			}
 			for _, id := range want {
-				claim, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), parseUUID(fixture.taskID))
+				claim, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), db.ClaimNextTaskSupplementParams{TaskID: parseUUID(fixture.taskID), IncludeAgentAuthored: true})
 				if err != nil || uuidToString(claim.CommentID) != id {
 					t.Fatalf("claim=%s, want %s: %v", uuidToString(claim.CommentID), id, err)
 				}
