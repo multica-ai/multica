@@ -6,6 +6,7 @@ const context = vi.hoisted(() => ({
   beforeQuit: null as null | ((event: { preventDefault: () => void }) => void),
   quit: vi.fn(), emit: vi.fn(), dialog: vi.fn(), exec: vi.fn(), health: vi.fn(), readPort: vi.fn(), exists: vi.fn(), install: vi.fn(),
   pid: null as number | null,
+  sharedHealth: vi.fn(),
   autoStart: false, autoStop: true, locale: "en", holdStart: false,
   windows: [] as Array<{
     isDestroyed: () => boolean; isVisible: () => boolean;
@@ -43,6 +44,7 @@ vi.mock("fs/promises", async (original) => ({
   writeFile: vi.fn(), mkdir: vi.fn(),
 }));
 vi.mock("./cli-bootstrap", () => ({ ensureManagedCli: context.install, managedCliPath: () => "/test/managed/multica" }));
+vi.mock("./daemon-service", async (original) => ({...await original<typeof import("./daemon-service")>(),probeBackendService:context.sharedHealth}));
 vi.mock("./daemon-port", () => ({ probeProfileHealth: context.health, readDaemonPortRecord: context.readPort }));
 
 async function setup() {
@@ -83,6 +85,7 @@ describe("desktop quit uses the CLI lifecycle", () => {
     context.autoStart = false; context.autoStop = true; context.locale = "en"; context.holdStart = false;
     context.windows = [];
     context.pid = null; context.readPort.mockResolvedValue(null);
+    context.sharedHealth.mockResolvedValue(null);
     context.exists.mockReturnValue(true); context.install.mockReset();
     context.finishStart = null; context.finishStop = null;
     context.health.mockResolvedValue({ status: "running", active_task_count: 1 });
@@ -97,6 +100,91 @@ describe("desktop quit uses the CLI lifecycle", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
   });
   afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it("leaves a CLI-owned shared service running when Desktop quits", async () => {
+    context.sharedHealth.mockResolvedValue({status:"running",profile:"",active_task_count:2});
+    await setup();requestQuit();
+    await vi.waitFor(()=>expect(context.quit).toHaveBeenCalledOnce());
+    expect(context.exec).not.toHaveBeenCalled();expect(context.dialog).not.toHaveBeenCalled();
+  });
+
+  it("does not automatically recover from an unverifiable connection record", async () => {
+    context.sharedHealth.mockRejectedValue(new Error("service identity changed"));
+    await setup();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(context.exec.mock.calls.filter(([,args])=>args[1]==="start")).toHaveLength(0);
+  });
+
+  it("keeps the old service and credentials untouched when a different account cancels switching", async () => {
+    context.sharedHealth.mockResolvedValue({status:"running",profile:"",owner_id:"account-a",active_task_count:2});
+    context.dialog.mockResolvedValue({response:0});
+    await setup();
+    const fs = await import("fs/promises");
+    vi.mocked(fs.writeFile).mockClear();
+    await expect(context.handlers.get("daemon:sync-token")!({},"mul_new","account-b")).rejects.toThrow("cancelled");
+    expect(fs.writeFile).not.toHaveBeenCalled();expect(context.exec).not.toHaveBeenCalled();
+    await expect(context.handlers.get("daemon:get-status")!({})).resolves.toMatchObject({state:"stopped",accountConflict:true});
+  });
+
+  it("switches accounts in one CLI transaction with credentials only on stdin", async () => {
+    context.sharedHealth.mockResolvedValue({status:"running",profile:"",pid:123,owner_id:"account-a",active_task_count:2});
+    await setup();
+    const fs = await import("fs/promises");
+    vi.mocked(fs.writeFile).mockClear();
+    const stdin = {on:vi.fn(),end:vi.fn()};
+    context.exec.mockImplementation((_bin, _args, _options, callback) => {
+      callback(null);
+      return {stdin};
+    });
+    await context.handlers.get("daemon:sync-token")!({},"mul_new","account-b");
+    expect(context.exec).toHaveBeenCalledOnce();
+    const args = context.exec.mock.calls[0][1];
+    expect(args).toEqual(expect.arrayContaining(["takeover","--desktop-credentials-stdin","--expected-pid","123"]));
+    expect(args.join(" ")).not.toContain("mul_new");
+    expect(stdin.end).toHaveBeenCalledWith(JSON.stringify({token:"mul_new",owner_id:"account-b"}));
+    expect(fs.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("refuses an ownerless legacy daemon even when the cached owner hint is missing", async () => {
+    await setup();
+    const fs = await import("fs/promises");
+    vi.mocked(fs.readFile)
+      .mockResolvedValueOnce(JSON.stringify({server_url:"https://example.test"}))
+      .mockRejectedValueOnce(Object.assign(new Error("missing owner hint"),{code:"ENOENT"}));
+    vi.mocked(fs.writeFile).mockClear();
+    await expect(context.handlers.get("daemon:sync-token")!({},"mul_new","account-b"))
+      .rejects.toThrow("older daemon");
+    expect(context.exec).not.toHaveBeenCalled();
+    expect(fs.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("stops the signed-in account's daemon before logout clears its identity", async () => {
+    await setup();
+    context.health.mockResolvedValue(null);
+    await context.handlers.get("daemon:sync-token")!({},"mul_a","account-a");
+    context.sharedHealth.mockResolvedValue({status:"running",profile:"desktop-example.test",owner_id:"account-a",launched_by:"desktop",pid:123,active_task_count:0});
+    context.exec.mockClear();
+    const fs = await import("fs/promises");
+    vi.mocked(fs.writeFile).mockClear();
+    const {tearDownOnLogout} = await import("../renderer/src/platform/session-teardown");
+    const logout = tearDownOnLogout({
+      reportAuthSession:vi.fn(),resetTabs:vi.fn(),closeOverlay:vi.fn(),
+      stopDaemon:async () => {
+        const result = await context.handlers.get("daemon:stop")!({});
+        expect(result).toEqual({success:true});
+      },
+      clearDaemonToken:async () => { await context.handlers.get("daemon:clear-token")!({}); },
+    });
+    await vi.waitFor(() => expect(context.finishStop).not.toBeNull());
+    expect(fs.writeFile).not.toHaveBeenCalled();
+    vi.mocked(fs.readFile).mockResolvedValueOnce(JSON.stringify({server_url:"https://example.test",token:"mul_a"}));
+    context.finishStop!();
+    await logout;
+    expect(context.exec).toHaveBeenCalledOnce();
+    expect(context.exec.mock.calls[0][1]).toEqual(expect.arrayContaining(["stop","--expected-pid","123"]));
+    expect(fs.writeFile).toHaveBeenCalled();
+    await expect(context.handlers.get("daemon:get-status")!({})).resolves.toMatchObject({accountConflict:true});
+  });
 
   it("leaves an already prevented quit to the Windows updater", async () => {
     await setup();

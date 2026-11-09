@@ -114,6 +114,8 @@ func init() {
 	f.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	f.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	f.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
+	daemonStopCmd.Flags().Int("expected-pid", 0, "Refuse to stop if the observed service process changed")
+	daemonStopCmd.Flags().Bool("drain", false, "Stop accepting tasks and wait for current tasks before shutdown")
 	daemonStopCmd.Flags().Bool("force", false, "Wait for graceful shutdown, then force termination if needed")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
@@ -561,7 +563,40 @@ func runDaemonStart(cmd *cobra.Command, _ []string) error {
 	return runDaemonBackground(cmd)
 }
 
+type daemonTransitionOwnerKey struct{}
+type daemonForegroundOperationKey struct{}
+
+// Foreground transitions carry the same account assertion as spawned children.
+func expectedDaemonOwner(cmd *cobra.Command) string {
+	if ctx := cmd.Context(); ctx != nil {
+		if owner, _ := ctx.Value(daemonTransitionOwnerKey{}).(string); owner != "" {
+			return owner
+		}
+	}
+	return os.Getenv("MULTICA_DAEMON_HANDOFF_OWNER")
+}
+
+func daemonBackgroundEnv(cmd *cobra.Command) []string {
+	env := append(os.Environ(), "MULTICA_DAEMON_STARTER_PID="+strconv.Itoa(os.Getpid()))
+	if owner := expectedDaemonOwner(cmd); owner != "" {
+		env = append(env, "MULTICA_DAEMON_HANDOFF_OWNER="+owner)
+	}
+	return env
+}
+
 func runDaemonBackground(cmd *cobra.Command) error {
+	operation, err := acquireBackendOperation(cmd)
+	if err != nil {
+		return err
+	}
+	defer operation.Close()
+	return runDaemonBackgroundUnlocked(cmd)
+}
+
+func runDaemonBackgroundUnlocked(cmd *cobra.Command) error {
+	if reused, err := reuseBackendService(cmd); reused || err != nil {
+		return err
+	}
 	profile := resolveProfile(cmd)
 	healthPort := resolveHealthPort(profile)
 
@@ -639,6 +674,7 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	}
 
 	child := exec.Command(exePath, args...)
+	child.Env = daemonBackgroundEnv(cmd)
 	child.Stdout = logFile
 	child.Stderr = logFile
 	// On Windows we want to break the child out of the parent shell's Job
@@ -653,6 +689,7 @@ func runDaemonBackground(cmd *cobra.Command) error {
 			// Retry without breakaway. Reset the cmd state — exec.Cmd is
 			// not safe to Start() twice, so build a fresh one.
 			child = exec.Command(exePath, args...)
+			child.Env = daemonBackgroundEnv(cmd)
 			child.Stdout = logFile
 			child.Stderr = logFile
 			child.SysProcAttr = daemonSysProcAttr(false)
@@ -721,6 +758,9 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		}
 	}
 	if !started {
+		if ctx := cmd.Context(); ctx != nil && ctx.Value(daemonTransitionOwnerKey{}) != nil {
+			return fmt.Errorf("replacement service readiness is not confirmed; it may still be starting; inspect daemon status and logs at %s before retrying", logPath)
+		}
 		if lastStatus == "starting" {
 			fmt.Fprintf(os.Stderr, "Daemon is still starting after %s (agent detection / workspace sync is taking longer than expected). Check logs:\n  %s\n", startupTimeout, logPath)
 		} else {
@@ -946,6 +986,23 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 }
 
 func runDaemonForeground(cmd *cobra.Command) error {
+	var operation *os.File
+	if cmd.Context() != nil {
+		operation, _ = cmd.Context().Value(daemonForegroundOperationKey{}).(*os.File)
+	}
+	if operation == nil && os.Getenv("MULTICA_DAEMON_STARTER_PID") != strconv.Itoa(os.Getppid()) {
+		var err error
+		operation, err = acquireBackendOperation(cmd)
+		if err != nil {
+			return err
+		}
+	}
+	defer func() {
+		if operation != nil {
+			operation.Close()
+		}
+	}()
+	_ = os.Unsetenv("MULTICA_DAEMON_STARTER_PID")
 	util.EnsureHiddenConsole()
 
 	profile := resolveProfile(cmd)
@@ -1130,6 +1187,11 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	// Set by the Electron Desktop app when it spawns the CLI so the server
 	// can mark those runtimes as "managed" and hide CLI self-update UI.
 	cfg.LaunchedBy = os.Getenv("MULTICA_LAUNCHED_BY")
+	backendLock, backendDir, err := prepareBackendService(&cfg, expectedDaemonOwner(cmd))
+	if err != nil {
+		return err
+	}
+	defer backendLock.Close()
 	lock, err := acquireDaemonProfileLock(profile, os.Getenv("MULTICA_DAEMON_HANDOFF") == "1")
 	if err != nil {
 		return err
@@ -1158,6 +1220,15 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		return fmt.Errorf("publish daemon health port: %w", err)
 	}
 	defer removeDaemonPortIfOwned(profile, os.Getpid())
+	servicePath := filepath.Join(backendDir, "active.json")
+	if err := writeServiceJSON(servicePath, backendServiceRecord{
+		ServerURL: cfg.ServerBaseURL, OwnerID: cfg.OwnerID, Profile: profile,
+		StateProfile: cfg.ExecutionStateProfile(), WorkspacesRoot: cfg.WorkspacesRoot,
+		DaemonID: cfg.DaemonID, Port: actualPort, PID: os.Getpid(),
+	}); err != nil {
+		return err
+	}
+	defer os.Remove(servicePath)
 
 	ctx, stop := notifyShutdownContext(context.Background())
 	defer stop()
@@ -1171,6 +1242,10 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	}
 	defer os.Remove(daemonPIDPathForProfile(profile))
 
+	if operation != nil {
+		operation.Close()
+		operation = nil
+	}
 	runErr := d.RunWithHealthListener(ctx, healthLn)
 	if err := writeDaemonShutdownResult(profile, daemonShutdownResult{PID: os.Getpid(), CleanupConfirmed: d.ShutdownCleanupConfirmed()}); err != nil {
 		return fmt.Errorf("write daemon shutdown result: %w", err)
@@ -1212,7 +1287,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 
 		args := buildDaemonStartArgs(cmd)
 		child := exec.Command(restartBin, args...)
-		child.Env = append(os.Environ(), "MULTICA_DAEMON_HANDOFF=1")
+		child.Env = append(os.Environ(), "MULTICA_DAEMON_HANDOFF=1", "MULTICA_DAEMON_HANDOFF_OWNER="+cfg.OwnerID)
 
 		// The successor is a fresh foreground daemon that will open daemon.log
 		// through its own rotating writer; hand it the raw-stderr sink so its
@@ -1238,7 +1313,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 			// duplicate cleanup here.
 			if isAccessDeniedSpawnErr(err) {
 				child = exec.Command(restartBin, args...)
-				child.Env = append(os.Environ(), "MULTICA_DAEMON_HANDOFF=1")
+				child.Env = append(os.Environ(), "MULTICA_DAEMON_HANDOFF=1", "MULTICA_DAEMON_HANDOFF_OWNER="+cfg.OwnerID)
 				child.Stdout = logFile
 				child.Stderr = logFile
 				child.SysProcAttr = daemonSysProcAttr(false)
@@ -1318,7 +1393,27 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	if err := requireHumanLocalCommand("daemon restart"); err != nil {
 		return err
 	}
+	operation, err := acquireBackendOperation(cmd)
+	if err != nil {
+		return err
+	}
+	defer operation.Close()
 	profile := resolveProfile(cmd)
+	serverURL, err := backendURLForCommand(cmd, profile)
+	if err != nil {
+		return err
+	}
+	if record, _, err := liveBackendService(serverURL); err != nil {
+		return err
+	} else if record != nil {
+		transitionContext := cmd.Context()
+		if transitionContext == nil {
+			transitionContext = context.Background()
+		}
+		cmd.SetContext(context.WithValue(transitionContext, daemonForegroundOperationKey{}, operation))
+		return runBackendTransitionLocked(cmd, false)
+	}
+
 	if err := requireKnownProfile(profile); err != nil {
 		return err
 	}
@@ -1374,7 +1469,11 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
-	return runDaemonStart(cmd, args)
+	if foreground, _ := cmd.Flags().GetBool("foreground"); foreground {
+		operation.Close()
+		return runDaemonForeground(cmd)
+	}
+	return runDaemonBackgroundUnlocked(cmd)
 }
 
 // --- daemon stop ---
@@ -1383,16 +1482,57 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 	if err := requireHumanLocalCommand("daemon stop"); err != nil {
 		return err
 	}
+	operation, err := acquireBackendOperation(cmd)
+	if err != nil {
+		return err
+	}
+	defer operation.Close()
 	profile := resolveProfile(cmd)
 	if err := requireKnownProfile(profile); err != nil {
 		return err
 	}
 	healthPort := resolveHealthPort(profile)
+	serverURL, err := backendURLForCommand(cmd, profile)
+	if err != nil {
+		return err
+	}
+	if record, _, err := liveBackendService(serverURL); err != nil {
+		return err
+	} else if record != nil {
+		if profile != record.Profile {
+			ctx, cancel := cli.APIContext(context.Background())
+			defer cancel()
+			owner, err := authenticatedDaemonOwner(ctx, profile, serverURL)
+			if err != nil {
+				return err
+			}
+			if owner != record.OwnerID {
+				return fmt.Errorf("another account owns this service; target its actual profile for an explicit local stop, or use an account takeover")
+			}
+		}
+		profile, healthPort = record.Profile, record.Port
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	health := checkDaemonHealthOnPort(ctx, healthPort)
+	if expected, _ := cmd.Flags().GetInt("expected-pid"); expected > 0 && health["pid"] != float64(expected) {
+		return fmt.Errorf("local execution service changed after confirmation; retry before stopping")
+	}
+	if drain, _ := cmd.Flags().GetBool("drain"); drain {
+		if !daemonAlive(health) {
+			return nil
+		}
+		if err := daemonIdentityMismatch(health, profile, healthPort); err != nil {
+			return err
+		}
+		pid, ok := health["pid"].(float64)
+		if !ok || pid <= 1 {
+			return fmt.Errorf("daemon did not identify its process")
+		}
+		return drainAndStopBackend(&backendServiceRecord{Profile: profile, Port: healthPort, PID: int(pid)}, health, false)
+	}
 	if force, _ := cmd.Flags().GetBool("force"); force {
 		if err := stopDaemonAndWait(profile, healthPort, health, daemonShutdownLockWait, 2*time.Second); err != nil {
 			return err
@@ -1506,6 +1646,15 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	health := checkDaemonHealthOnPort(ctx, healthPort)
+	if !inDaemonTaskIdentityContext() {
+		if serverURL, urlErr := backendURLForCommand(cmd, profile); urlErr == nil {
+			if record, serviceHealth, lookupErr := liveBackendService(serverURL); lookupErr != nil {
+				return lookupErr
+			} else if record != nil {
+				profile, healthPort, health = record.Profile, record.Port, serviceHealth
+			}
+		}
+	}
 
 	// A daemon belonging to another profile answered on our port. Reporting it
 	// as ours would be the same lie in a new place: this profile's daemon is
@@ -1675,6 +1824,24 @@ func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	profile := resolveProfile(cmd)
 	if err := requireKnownProfile(profile); err != nil {
 		return err
+	}
+	serverURL, err := backendURLForCommand(cmd, profile)
+	if err != nil {
+		return err
+	}
+	if record, _, err := liveBackendService(serverURL); err != nil {
+		return err
+	} else if record != nil && record.Profile != profile {
+		ctx, cancel := cli.APIContext(context.Background())
+		owner, err := authenticatedDaemonOwner(ctx, profile, serverURL)
+		cancel()
+		if err != nil {
+			return cli.WithUserMessage("Could not verify the current account for cross-profile daemon logs. Sign in to the backend and retry.", err)
+		}
+		if owner != record.OwnerID {
+			return fmt.Errorf("the running daemon belongs to another account")
+		}
+		profile = record.Profile
 	}
 	logPath, err := daemonLogSourcePath(profile)
 	if err != nil {
@@ -1947,7 +2114,7 @@ func runDaemonDiskUsage(cmd *cobra.Command, _ []string) error {
 		return runDaemonDiskUsageAggregate(cmd, byWorkspace, top, output)
 	}
 
-	workspacesRoot, err := resolveDiskUsageRoot(taskContext, profile, rootOverride)
+	workspacesRoot, err := resolveDiskUsageRoot(cmd, taskContext, profile, rootOverride)
 	if err != nil {
 		return fmt.Errorf("resolve workspaces root: %w", err)
 	}
@@ -2010,8 +2177,15 @@ func checkTaskDiskUsageScope(profile, rootOverride string, allProfiles bool) err
 // profile-derived default, which for a task hosted by a named-profile daemon
 // resolves to the default root and reports a tree the task has nothing to do
 // with. Failing closed on a missing value keeps that guess out of the output.
-func resolveDiskUsageRoot(taskContext bool, profile, rootOverride string) (string, error) {
+func resolveDiskUsageRoot(cmd *cobra.Command, taskContext bool, profile, rootOverride string) (string, error) {
 	if !taskContext {
+		if rootOverride == "" {
+			if root, err := boundExecutionRoot(cmd, profile); err != nil {
+				return "", err
+			} else if root != "" {
+				return root, nil
+			}
+		}
 		return resolveWorkspacesRootForProfile(profile, rootOverride)
 	}
 	root := strings.TrimSpace(os.Getenv(daemon.TaskWorkspacesRootEnv))
@@ -2148,6 +2322,15 @@ func enumerateDiskUsageRoots() ([]daemon.DiskUsageRoot, error) {
 
 	if root, err := resolveWorkspacesRootForProfile("", ""); err == nil {
 		out = append(out, daemon.DiskUsageRoot{Profile: "", Root: root})
+	}
+	bindings, err := savedBackendAccountStates()
+	if err != nil {
+		return nil, err
+	}
+	for _, binding := range bindings {
+		if !containsDiskUsageRoot(out, binding.WorkspacesRoot) {
+			out = append(out, daemon.DiskUsageRoot{Profile: binding.StateProfile, Root: binding.WorkspacesRoot})
+		}
 	}
 
 	profilesRoot, err := profilesRootDir()

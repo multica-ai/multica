@@ -19,6 +19,12 @@ import (
 
 // HealthResponse is returned by the daemon's local health endpoint.
 type HealthResponse struct {
+	OwnerID        string `json:"owner_id,omitempty"`
+	StateProfile   string `json:"state_profile"`
+	WorkspacesRoot string `json:"workspaces_root"`
+	Draining       bool   `json:"draining"`
+	ClaimsInFlight int    `json:"claims_in_flight"`
+
 	Status string `json:"status"`
 	PID    int    `json:"pid"`
 	// OS is the daemon's runtime.GOOS. The desktop app compares it against its
@@ -344,7 +350,12 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			status = "running"
 		}
 
+		d.claimMu.Lock()
+		draining := d.serviceDraining
+		claimsInFlight := d.claimsInFlight
+		d.claimMu.Unlock()
 		resp := HealthResponse{
+			OwnerID: d.cfg.OwnerID, StateProfile: d.cfg.ExecutionStateProfile(), WorkspacesRoot: d.cfg.WorkspacesRoot, Draining: draining, ClaimsInFlight: claimsInFlight,
 			Status:                status,
 			PID:                   os.Getpid(),
 			OS:                    runtime.GOOS,
@@ -412,6 +423,7 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
+	mux.HandleFunc("/drain", d.drainHandler())
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
 
 	srv := &http.Server{Handler: mux}
@@ -553,5 +565,22 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
+	}
+}
+
+// Draining stops new claims under the same mutex used by every claim path;
+// already claimed tasks retain their normal lifetime. DELETE cancels a wait.
+func (d *Daemon) drainHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		d.claimMu.Lock()
+		d.serviceDraining = r.Method == http.MethodPost
+		idle := d.claimsInFlight == 0 && d.activeTasks.Load() == 0
+		d.claimMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"idle": idle})
 	}
 }

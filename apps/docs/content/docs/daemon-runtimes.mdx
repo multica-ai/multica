@@ -80,6 +80,32 @@ The registered command is `multica daemon start --foreground` for that profile, 
 - If a file Multica did not create already sits at that location (your own systemd unit, for example), `enable` and `disable` refuse to modify it.
 - A daemon launched by Desktop is managed by Desktop; `daemon start` neither hints nor refreshes a registration for it.
 
+## One local service per backend
+
+CLI and Desktop are entry points to the same local execution service. For one OS user and normalized backend URL, only one daemon may run, even when different CLI profiles select that backend. Different backend paths, hosts or ports remain separate deployments. Profile names and launcher type do not create additional execution pools.
+
+A same-account background `daemon start` reuses an existing verified service. Desktop discovers its public connection record, displays that it is shared, and leaves a CLI-owned service running when Desktop quits. Desktop continues to write credentials only to its own authentication profile.
+
+To explicitly change the launcher or account, authenticate the destination profile first, then run:
+
+```bash
+multica --profile <destination> daemon takeover
+```
+
+A normal `daemon restart` only restarts the same account. Cross-account switching requires explicit takeover. Desktop sends replacement credentials through stdin to a single CLI transition, which verifies the account before stopping and holds the backend operation lock through credential persistence and replacement startup. Failed replacement startup may leave the service offline; it does not silently roll back.
+
+Takeover stops accepting tasks and waits up to 40 seconds for claimed tasks to finish. A timeout cancels draining and leaves the original service running. `daemon takeover --force` explicitly interrupts tasks; it still refuses to start a replacement if process/task cleanup cannot be confirmed. The same graceful wait is available without restarting through `daemon stop --drain`.
+
+`daemon logs` follows a running service in another profile only after verifying that your account owns it. `daemon disk-usage` selects the authenticated account’s bound workspaces root on the requested backend, honoring `--server-url`. Automatic account selection requires authentication even if only one binding is saved. If the backend is unreachable, use `--workspaces-root <path>` for an explicit directory or `--all-profiles` to include saved account roots. `daemon restart --foreground` keeps the replacement in the current terminal.
+
+Within an account, a persistent backend binding keeps its workspaces root, provider session namespace and runtime identity across launcher changes. A new binding uses an account-scoped subdirectory of the configured workspaces root and a separate runtime identity; existing unbound state is not evidence of ownership and is not automatically imported. Changing `workspaces_root` in another profile does not move or replace an existing binding. Account switching is sequential: another account gets separate execution state and runtime ownership, and switching back restores that account's binding. This is not support for parallel accounts or multiple execution pools.
+
+Upgrade CLI and Desktop together. Older daemons do not obey the backend lock or attest their owner. Stop all older daemons for that backend before starting the updated CLI or Desktop. Before the first upgraded start, run `multica --profile <legacy-profile> daemon migrate-state` while signed in as the owner of that profile’s historical state. Omit `--profile` for the default CLI profile. This explicit adoption preserves the old runtime identity, agent assignments, workspaces root and provider session namespace without moving files. Stop the old daemon first; a running service or a namespace already bound to another account prevents migration. Startup refuses to silently replace detected legacy workdirs with an empty binding. If the old daemon used `--workspaces-root` or `--daemon-id`, pass the same values to `migrate-state`. The new CLI detects an older live daemon and refuses to start over it; it cannot prevent an old binary from being started later. Use one boot-autostart registration per backend, and disable the old registration when intentionally transferring lifecycle management.
+
+Before creating the backend’s first binding, startup checks the default and named profiles configured for that backend for legacy state. Starting Desktop with a fresh profile therefore cannot bypass a legacy CLI migration. Existing bindings are never automatically overwritten or merged.
+
+The backend identity is a normalized configured URL, not DNS equivalence: use the same URL in both entry points. Host aliases for the same deployment cannot be inferred automatically. Profiles continue to isolate authentication and preferences; they no longer allow simultaneous daemons for the same backend.
+
 ## Dispatch and online status
 
 Once registered, a runtime keeps a persistent connection. When a new run enters the queue, the server notifies the matching daemon; the daemon also polls periodically so a dropped connection does not lose the notification. When a runtime is online with spare capacity, runs usually start immediately.

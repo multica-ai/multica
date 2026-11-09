@@ -1,3 +1,5 @@
+import { LocalDaemonHealthSchema } from "@multica/core/api/schemas";
+import { parseWithFallback } from "@multica/core/api/schema";
 import { app, ipcMain, BrowserWindow, shell, dialog, type MessageBoxOptions } from "electron";
 import { execFile } from "child_process";
 import {
@@ -39,6 +41,8 @@ import {
   profilePidPath,
   profileUserIdPath,
 } from "./daemon-profile";
+import { probeBackendService, isSharedExecutionService, serviceLogPath, backendServiceURL, desktopAuthProfile } from "./daemon-service";
+import { handoffConfirmationOptions, sharedStopConfirmationOptions } from "./daemon-handoff-dialogs";
 import { probeProfileHealth, readDaemonPortRecord } from "./daemon-port";
 import {
   DaemonOperationGate,
@@ -117,6 +121,8 @@ let autoStartSuppressedAfterQuit = false;
 // Once a foreign-OS daemon (for example WSL2) is observed on this profile, do
 // not replace it with a native daemon if its forwarded health endpoint drops.
 let externalDaemonObserved = false;
+// The signed-in UI identity is distinct from the account owning a cached PAT.
+let signedInUserId: string | null = null;
 const recoveryPolicy = new DaemonRecoveryPolicy();
 const lifecycleOperations = new DaemonOperationGate();
 
@@ -161,14 +167,8 @@ async function removeProfileUserId(profile: string): Promise<void> {
   }
 }
 
-function normalizeUrl(u: string): string {
-  if (!u) return "";
-  try {
-    const parsed = new URL(u);
-    return `${parsed.protocol}//${parsed.host}`.toLowerCase();
-  } catch {
-    return u.replace(/\/+$/, "").toLowerCase();
-  }
+function normalizeUrl(u:string):string {
+ try { return backendServiceURL(u); } catch { return ""; }
 }
 
 function urlsMatch(a: string, b: string): boolean {
@@ -185,6 +185,9 @@ function sendStatus(status: DaemonStatus): void {
 }
 
 interface HealthPayload {
+  owner_id?: string;
+  draining?: boolean;
+  launched_by?: string;
   status?: string;
   pid?: number;
   profile?: string;
@@ -211,7 +214,7 @@ async function fetchHealthAtPort(
       signal: controller.signal,
     });
     if (!res.ok) return null;
-    return (await res.json()) as HealthPayload;
+    return parseWithFallback(await res.json(),LocalDaemonHealthSchema,null,{endpoint:"local-daemon:/health"});
   } catch {
     return null;
   } finally {
@@ -223,6 +226,10 @@ async function fetchProfileHealth(
   active: ActiveProfile,
   timeoutMs = HEALTH_PROBE_TIMEOUT_MS,
 ): Promise<HealthPayload | null> {
+  if (targetApiBaseUrl) {
+    const shared = await probeBackendService(targetApiBaseUrl, (port) => fetchHealthAtPort(port, timeoutMs));
+    if (shared) return shared;
+  }
   return probeProfileHealth(active.name, (port) =>
     fetchHealthAtPort(port, timeoutMs),
   );
@@ -300,8 +307,10 @@ async function resolveActiveProfile(): Promise<ActiveProfile | null> {
   const target = targetApiBaseUrl;
   if (!target) return null;
 
-  const name = deriveProfileName(target);
-  const cfg = await readProfileConfig(name);
+  let name = deriveProfileName(target);
+  let cfg = await readProfileConfig(name);
+  const isolated = desktopAuthProfile(target,name,cfg.server_url);
+  if (isolated!==name) { name=isolated;cfg=await readProfileConfig(name); }
 
   if (cfg.server_url !== target) {
     cfg.server_url = target;
@@ -322,6 +331,7 @@ async function ensureActiveProfile(): Promise<ActiveProfile | null> {
 }
 
 function invalidateActiveProfile(): void {
+  signedInUserId = null;
   activeProfile = null;
   externalDaemonObserved = false;
   recoveryPolicy.reset();
@@ -337,7 +347,7 @@ function setDesiredDaemonRunning(desired: boolean, explicit = false): void {
 
 function observeDaemonBoundary(status: DaemonStatus): void {
   if (status.state !== "running") return;
-  externalDaemonObserved = status.externallyManaged === true;
+  externalDaemonObserved = status.externallyManaged === true || status.sharedService === true;
   if (externalDaemonObserved) {
     recoveryPolicy.reset();
   }
@@ -356,7 +366,16 @@ async function fetchHealth(): Promise<DaemonStatus> {
   // honest answer; probing the default port would surface the user's own CLI
   // daemon as if it were Desktop's.
   if (!active) return { state: "stopped" };
-  const data = await fetchProfileHealth(active);
+  let data: HealthPayload | null;
+  try { data = await fetchProfileHealth(active); }
+  catch (error) {
+    console.warn("[daemon] cannot verify shared execution service",error);
+    return {state:"stopped",connectionError:true};
+  }
+
+  if (data?.owner_id && data.owner_id !== signedInUserId) {
+    return { state: "stopped", accountConflict: true, profile: data.profile, serverUrl: data.server_url };
+  }
 
   if (!data || data.status !== "running") {
     // A start that never reaches "running" is the symptom; an expired/invalid
@@ -403,6 +422,7 @@ async function fetchHealth(): Promise<DaemonStatus> {
     };
   }
 
+
   // A live, authenticated daemon clears any prior auth-failure verdict so the
   // re-login prompt disappears once the user reconnects.
   authExpired = false;
@@ -439,7 +459,8 @@ async function fetchHealth(): Promise<DaemonStatus> {
     workspaceCount: Array.isArray(data.workspaces)
       ? data.workspaces.length
       : 0,
-    profile: active.name,
+    profile: data.profile ?? active.name,
+    sharedService: isSharedExecutionService(data,active.name),
     serverUrl: data.server_url,
     externallyManaged,
   };
@@ -640,6 +661,10 @@ async function ensureRunningDaemonVersionMatches(): Promise<
     return "ok";
   }
 
+  if (isSharedExecutionService(running,active.name)) {
+    pendingVersionRestart = false;
+    return "ok";
+  }
   const bundled = await getCliBinaryVersion();
   if (
     quitting ||
@@ -726,8 +751,8 @@ async function mintPat(jwt: string): Promise<string> {
  *   mint a fresh PAT, overwriting any stale cached PAT. This is the critical
  *   path: without it, a previous user's PAT would be used by a new session.
  * - If the caller happens to pass a PAT directly, write it through.
- * - Reports a user mismatch to the caller; the IPC boundary owns the gated
- *   restart so internal callers such as reauthenticate never re-enter it.
+ * - A confirmed cross-account handoff commits credentials and starts the
+ *   replacement inside one CLI transition. Callers serialize lifecycle work.
  */
 async function syncToken(
   tokenFromRenderer: string,
@@ -740,9 +765,19 @@ async function syncToken(
     // reaching this branch is a real error rather than a normal startup race.
     throw new Error("daemon profile is not resolved yet; token sync skipped");
   }
+  signedInUserId = userId;
+  const loginTarget = targetApiBaseUrl;
+  const existingService = await fetchProfileHealth(active);
+  let handoffForce: boolean | undefined;
+  if (existingService?.owner_id && existingService.owner_id !== userId) {
+    handoffForce = await confirmServiceHandoff(true);
+  }
   const config = await readProfileConfig(active.name);
   const previousUserId = await readProfileUserId(active.name);
   const userChanged = Boolean(previousUserId) && previousUserId !== userId;
+  if (daemonStatusAlive(existingService?.status) && !existingService?.owner_id) {
+    throw new Error("Restart the older daemon with the updated CLI in its original profile before switching accounts");
+  }
   const sameUserWithCachedPat =
     !userChanged &&
     previousUserId === userId &&
@@ -766,38 +801,39 @@ async function syncToken(
     }
   }
 
+  const assertCurrentLogin = () => {
+    if (targetApiBaseUrl!==loginTarget || activeProfile?.name!==active.name || signedInUserId!==userId) throw new Error("Daemon login was superseded by another account or backend");
+  };
+  assertCurrentLogin();
+  if (handoffForce !== undefined && existingService?.profile !== undefined) {
+    const target = targetApiBaseUrl;
+    if (!target) throw new Error("Waiting for the service address");
+    const bin = await resolveCliBinary();
+    if (!bin) throw new Error("Multica CLI is not available");
+    assertCurrentLogin();
+    await new Promise<void>((resolve, reject) => {
+      const child = execFile(bin, [
+        "daemon", "takeover", "--desktop-credentials-stdin",
+        ...(handoffForce ? ["--force"] : []),
+        "--expected-pid", String(existingService.pid),
+        "--server-url", target, ...profileArgs(active.name),
+      ], { timeout: 140_000, env: desktopSpawnEnv() }, (error) => error ? reject(error) : resolve());
+      child.stdin?.on("error", () => { /* execFile reports an early exit. */ });
+      child.stdin?.end(JSON.stringify({ token: finalToken, owner_id: userId }));
+    });
+    setDesiredDaemonRunning(true, true);
+    scheduleStatusRefresh();
+    // The CLI holds the backend transition lock through credential commit and
+    // replacement readiness; do not split this into stop/write/start calls.
+    return { active, userChanged: true };
+  }
+  assertCurrentLogin();
   config.token = finalToken;
   if (targetApiBaseUrl) config.server_url = targetApiBaseUrl;
   await writeProfileConfig(active.name, config);
   await writeProfileUserId(active.name, userId);
 
   return { active, userChanged };
-}
-
-async function restartDaemonAfterUserSwitch(
-  active: ActiveProfile,
-): Promise<void> {
-  // If we just rotated credentials onto a running daemon, restart it so the
-  // in-memory token in the Go process matches the new config.
-  const existing = await fetchProfileHealth(active);
-  if (daemonStatusAlive(existing?.status)) {
-    // Restart whether it's "running" or still "starting" — a booting daemon
-    // already loaded the old token at startup, so it must be restarted to
-    // pick up the rotated credentials.
-    console.log(
-      "[daemon] user switched — restarting daemon with new credentials",
-    );
-    // Credential rotation is a one-shot login intent, not poll-driven
-    // maintenance: wait for bootstrap/recovery instead of dropping it.
-    const restarted = await lifecycleOperations.runForeground(() =>
-      restartDaemon(),
-    );
-    if (!restarted.success) {
-      console.warn(
-        `[daemon] restart-on-user-switch failed: ${restarted.error ?? "unknown error"}`,
-      );
-    }
-  }
 }
 
 async function loadPrefs(): Promise<DaemonPrefs> {
@@ -817,6 +853,7 @@ async function savePrefs(prefs: DaemonPrefs): Promise<void> {
 }
 
 async function clearToken(): Promise<void> {
+  signedInUserId = null;
   const active = await ensureActiveProfile();
   // Nothing of ours to clear yet, and the default CLI profile is not ours to
   // strip a token from.
@@ -1001,6 +1038,10 @@ async function startDaemon(
     return { success: false, error: "Daemon recovery was superseded" };
   }
   const existing = await fetchProfileHealth(active);
+  if (existing?.owner_id && existing.owner_id !== signedInUserId) {
+    if (recoveryProfile) return { success:false, error:"Another account owns the local execution service" };
+    return {success:false,error:"Another account owns this backend’s local execution service; sign in again to confirm switching accounts"};
+  }
   if (daemonStatusAlive(existing?.status)) {
     // A daemon is already up ("running") or booting ("starting") on this port —
     // don't spawn a second one (the CLI rejects that as "already running").
@@ -1094,6 +1135,16 @@ async function stopDaemon(
 
   const active = await ensureActiveProfile();
   if (!active) return { success: true };
+  let force = options.force === true;
+  const shared = await fetchProfileHealth(active);
+  if (shared?.owner_id && shared.owner_id !== signedInUserId) return {success:false,error:"Another account owns the local service; confirm an account switch before stopping it"};
+  if (isSharedExecutionService(shared,active.name)) {
+    const box = sharedStopConfirmationOptions(app.getPreferredSystemLanguages()[0] ?? "en");
+    const window = getMainWindow();
+    const answer = window && !window.isDestroyed() ? await dialog.showMessageBox(window,box) : await dialog.showMessageBox(box);
+    if (answer.response === 0) return {success:false,error:"Shared service stop cancelled"};
+    force = answer.response === 2;
+  }
   // A queued update stop can expire while resolving the CLI/profile/preflight.
   if (signal?.aborted) return { success: true };
   currentState = "stopping";
@@ -1102,11 +1153,11 @@ async function stopDaemon(
   startingSince = null;
   sendStatus({ state: "stopping" });
 
-  const args = ["daemon", "stop", ...(options.force ? ["--force"] : []), ...profileArgs(active.name)];
+  const args = ["daemon", "stop", ...(force ? ["--force"] : ["--drain"]), ...(shared?.pid ? ["--expected-pid",String(shared.pid)] : []), ...profileArgs(active.name)];
 
   return new Promise((resolve) => {
     // The CLI's forced stop includes the existing 40s shutdown budget.
-    execFile(bin, args, { timeout: options.force ? 55_000 : 15_000 }, (err) => {
+    execFile(bin, args, { timeout: force ? 55_000 : 100_000 }, (err) => {
       if (err) {
         resolve({ success: false, error: err.message });
       } else {
@@ -1126,9 +1177,32 @@ async function restartDaemon(): Promise<{ success: boolean; error?: string }> {
   // first-workspace, and any future restart caller all route through here).
   // #3916.
   if (await lifecycleBlockedByForeignDaemon()) return { success: true };
-  const stopResult = await stopDaemon();
-  if (!stopResult.success) return stopResult;
-  return startDaemon();
+  const active = await ensureActiveProfile();
+  if (!active) return { success:false, error:"Waiting for the service address" };
+  const health = await fetchProfileHealth(active);
+  if (health?.owner_id && health.owner_id !== signedInUserId) return {success:false,error:"Another account owns the local service; confirm an account switch before restarting it"};
+  const confirm = health && (isSharedExecutionService(health,active.name) || (health.active_task_count ?? 0) > 0);
+  return handoffDaemon(confirm ? await confirmServiceHandoff(false) : false,health?.pid);
+}
+
+async function confirmServiceHandoff(differentAccount: boolean): Promise<boolean> {
+  const options = handoffConfirmationOptions(app.getPreferredSystemLanguages()[0] ?? "en", differentAccount);
+  const window = getMainWindow();
+  const result = window && !window.isDestroyed() ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options);
+  if (result.response === 0) throw new Error("Local execution service switch cancelled");
+  return result.response === 2;
+}
+
+async function handoffDaemon(force: boolean, expectedPID?: number): Promise<{success:boolean;error?:string}> {
+  const bin = await resolveCliBinary();
+  const active = await ensureActiveProfile();
+  if (!bin || !active) return {success:false,error:"Multica CLI is not available"};
+  return new Promise((resolve) => {
+    execFile(bin,["daemon","restart",...(force ? ["--force"] : []),...(expectedPID ? ["--expected-pid",String(expectedPID)] : []),...profileArgs(active.name)],{timeout:140_000,env:desktopSpawnEnv()},(error) => {
+      scheduleStatusRefresh();
+      resolve(error ? {success:false,error:error.message} : {success:true});
+    });
+  });
 }
 
 async function daemonPidIsConfirmedAbsent(profile: string): Promise<boolean> {
@@ -1225,6 +1299,7 @@ async function attemptDaemonRecovery(active: ActiveProfile): Promise<void> {
 }
 
 function recoveryDecision(status: DaemonStatus) {
+  if (status.accountConflict || status.sharedService || status.connectionError) return "none" as const;
   return recoveryPolicy.observe({
     desiredRunning: desiredDaemonRunning,
     externalDaemonObserved,
@@ -1341,7 +1416,9 @@ function startLogTail(win: BrowserWindow, retryCount = 0): void {
     // Before the renderer reports its apiUrl there is no Desktop-owned profile
     // yet, and therefore no log file of ours to tail. Retry rather than reach
     // for the default profile's log.
-    const logPath = active ? profileLogPath(active.name) : null;
+    const observed = active ? await fetchProfileHealth(active) : null;
+    const user = signedInUserId;
+    const logPath = observed?.owner_id && observed.owner_id !== user ? null : observed?.profile !== undefined ? serviceLogPath(observed.profile) : active ? profileLogPath(active.name) : null;
     if (!logPath || !existsSync(logPath)) {
       if (retryCount < LOG_TAIL_MAX_RETRIES) {
         setTimeout(() => startLogTail(win, retryCount + 1), LOG_TAIL_RETRY_MS);
@@ -1419,7 +1496,7 @@ export function prepareDaemonForUpdateInstall(options: {
         alive: daemonStatusAlive(health?.status),
         pid: health?.pid,
         activeTasks: health?.active_task_count ?? 0,
-        externallyManaged: isDaemonExternallyManaged(health?.os, normalizeHostOS(process.platform)),
+        externallyManaged: isDaemonExternallyManaged(health?.os, normalizeHostOS(process.platform)) || isSharedExecutionService(health,active.name) || (!!health?.owner_id && health.owner_id !== signedInUserId),
       };
     },
     stop: async (signal) => {
@@ -1493,15 +1570,12 @@ export function setupDaemonManager(
   ipcMain.handle(
     "daemon:sync-token",
     async (_event, token: string, userId: string) => {
-      const result = await syncToken(token, userId);
-      if (result.userChanged) {
-        await restartDaemonAfterUserSwitch(result.active);
-      }
+      await lifecycleOperations.runForeground(() => syncToken(token, userId));
     },
   );
   ipcMain.handle("daemon:clear-token", () => {
     setDesiredDaemonRunning(false, true);
-    return clearToken();
+    return lifecycleOperations.runForeground(() => clearToken());
   });
   ipcMain.handle(
     "daemon:reauthenticate",
@@ -1580,7 +1654,9 @@ export function setupDaemonManager(
   // (full history, complex search, copy-to-clipboard at scale).
   ipcMain.handle("daemon:open-log-file", async () => {
     const active = await ensureActiveProfile();
-    const logPath = active ? profileLogPath(active.name) : null;
+    const observed = active ? await fetchProfileHealth(active) : null;
+    const user = signedInUserId;
+    const logPath = observed?.owner_id && observed.owner_id !== user ? null : observed?.profile !== undefined ? serviceLogPath(observed.profile) : active ? profileLogPath(active.name) : null;
     if (!logPath || !existsSync(logPath)) {
       return { success: false, error: "Log file not found yet" };
     }
@@ -1635,7 +1711,7 @@ export function setupDaemonManager(
       const active = await ensureActiveProfile();
       if (!active) return true;
       const health = await fetchProfileHealth(active);
-      if (isDaemonExternallyManaged(health?.os, normalizeHostOS(process.platform))) return true;
+      if (isDaemonExternallyManaged(health?.os, normalizeHostOS(process.platform)) || (isSharedExecutionService(health,active.name))) return true;
       const healthy = daemonStatusAlive(health?.status);
       const reportedRuns = health?.active_task_count;
       const activeRuns = healthy && typeof reportedRuns === "number"

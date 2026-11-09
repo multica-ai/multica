@@ -102,6 +102,11 @@ var DefaultGCArtifactPatterns = []string{"node_modules", ".next", ".turbo"}
 
 // Config holds all daemon configuration.
 type Config struct {
+	ServiceToken string `json:"-"` // immutable credential verified for OwnerID during startup
+
+	StateProfile *string // stable execution state, independent of the auth/launcher profile
+	OwnerID      string  // authenticated account that owns this local service
+
 	ServerBaseURL                  string
 	DaemonID                       string
 	LegacyDaemonIDs                []string // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows

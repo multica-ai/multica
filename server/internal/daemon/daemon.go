@@ -690,9 +690,10 @@ type Daemon struct {
 	// or any task is in handleTask. Together that closes the fetch-then-claim
 	// race where a new task slipping in during the release-metadata fetch
 	// would be cancelled by triggerRestart's root-ctx cancel.
-	claimMu        sync.Mutex
-	pauseClaims    bool // when true, the batch poller skips claiming
-	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
+	serviceDraining bool // guarded by claimMu; independent of update barriers
+	claimMu         sync.Mutex
+	pauseClaims     bool // when true, the batch poller skips claiming
+	claimsInFlight  int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
 
 	activeEnvRootsMu   sync.Mutex
 	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
@@ -2221,6 +2222,14 @@ func (d *Daemon) deregisterRuntimes() {
 
 // resolveAuth loads the auth token from the CLI config for the active profile.
 func (d *Daemon) resolveAuth() error {
+	if d.cfg.OwnerID != "" {
+		if d.cfg.ServiceToken == "" {
+			return fmt.Errorf("verified service credential is missing")
+		}
+		d.client.SetToken(d.cfg.ServiceToken)
+		return nil
+	}
+
 	cfg, err := cli.LoadCLIConfigForProfile(d.cfg.Profile)
 	if err != nil {
 		return fmt.Errorf("load CLI config: %w", err)
@@ -5178,7 +5187,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 func (d *Daemon) tryEnterClaim() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.pauseClaims {
+	if d.pauseClaims || d.serviceDraining {
 		return false
 	}
 	d.claimsInFlight++
@@ -7389,11 +7398,14 @@ func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, t
 // acting on it. Declining is always safe: the caller falls back to a fresh
 // Prepare, which costs session continuity, not correctness.
 //
-// The error return is the one outcome that is NOT "decline and carry on": it is
-// non-nil only when the run was cancelled while waiting for the prior env root,
-// and it carries the context's cause so the caller can end the task instead of
-// preparing an environment for work that no longer exists.
+// Cancellation and a prior workdir outside a bound execution state are errors:
+// neither may silently create an unrelated environment and discard continuity.
 func (d *Daemon) lockReusablePriorEnvRoot(ctx context.Context, task Task, localAssignment *localDirectoryAssignment, heldRoot string) (*execenv.EnvRootClaim, string, os.FileInfo, bool, error) {
+	if d.cfg.OwnerID != "" && localAssignment == nil && task.PriorWorkDir != "" {
+		if err := validateBoundPriorState(d.cfg.WorkspacesRoot, task.PriorWorkDir); err != nil {
+			return nil, "", nil, false, err
+		}
+	}
 	// Pin the workspaces root BEFORE validating anything. Opening it after,
 	// from a name validation just approved, would re-resolve that name: rename
 	// the root aside, leave a symlink to a look-alike tree, and os.Root
@@ -7994,7 +8006,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// root claim so shutdown releases that claim first; the next task can then
 	// safely reuse the prior environment after it acquires this lock.
 	if provider == "codex" {
-		if store := execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx); store != "" {
+		if store := execenv.CodexSessionStorePath(d.cfg.ExecutionStateProfile(), taskCtx); store != "" {
 			// Mark before waiting so the session-store GC cannot remove the store
 			// between this task being queued behind its predecessor and mounting it.
 			d.markActiveStore(store)
@@ -8244,7 +8256,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// the resolved source home so switching an agent's profile switches its
 		// memory line, matching Hermes' own "a profile is an isolated instance"
 		// model. Guarded from the GC for the whole task, as the Codex store below.
-		if store := execenv.HermesMemoryStorePath(d.cfg.Profile, task.AgentID, res.SourceHome); store != "" {
+		if store := execenv.HermesMemoryStorePath(d.cfg.ExecutionStateProfile(), task.AgentID, res.SourceHome); store != "" {
 			hermesMemoryStore = store
 			d.markActiveStore(store)
 			defer d.unmarkActiveStore(store)
@@ -8255,7 +8267,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// tasks of one conversation are serial, so the shard has a single
 		// writer, while two issues never share a database. Guarded from the GC
 		// for the whole task, as the stores above and below.
-		if store := execenv.HermesSessionStorePath(d.cfg.Profile, task.AgentID, res.SourceHome, taskCtx); store != "" {
+		if store := execenv.HermesSessionStorePath(d.cfg.ExecutionStateProfile(), task.AgentID, res.SourceHome, taskCtx); store != "" {
 			hermesSessionStore = store
 			d.markActiveStore(store)
 			defer d.unmarkActiveStore(store)
@@ -8291,7 +8303,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		var err error
 		env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
 			WorkspacesRoot: d.cfg.WorkspacesRoot,
-			Profile:        d.cfg.Profile,
+			Profile:        d.cfg.ExecutionStateProfile(),
 			// The canonical path the lock was taken on. Handing Reuse the raw
 			// PriorWorkDir instead would re-resolve it, so the directory we
 			// locked and the directory we use could differ.
@@ -8338,7 +8350,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		var err error
 		prepParams := execenv.PrepareParams{
 			WorkspacesRoot:  d.cfg.WorkspacesRoot,
-			Profile:         d.cfg.Profile,
+			Profile:         d.cfg.ExecutionStateProfile(),
 			WorkspaceID:     task.WorkspaceID,
 			WorkspaceSlug:   task.WorkspaceSlug,
 			TaskID:          task.ID,
@@ -8645,7 +8657,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		&task, &taskCtx, provider, env.WorkDir,
 		sessionHomeReachable(provider, env, envReused),
 		providerRefusesMissingSessionCwd(provider, !usesCustomProfileCommand),
-		provider == "codex" && codexWorktreeResumeEligible(env, execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx)),
+		provider == "codex" && codexWorktreeResumeEligible(env, execenv.CodexSessionStorePath(d.cfg.ExecutionStateProfile(), taskCtx)),
 		claudeResumeReady,
 		taskLog,
 	)
@@ -8780,14 +8792,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
 	if provider == "reasonix" {
-		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
+		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.ExecutionStateProfile(), task.RuntimeID, task.AgentID)
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("prepare reasonix state home: %w", err)
 		}
 		agentEnv["REASONIX_STATE_HOME"] = reasonixStateHome
 	}
 	if provider == "dsh" {
-		dshSessionRoot, err := prepareDshTaskSessionRoot(d.cfg.Profile, task.RuntimeID, task.AgentID)
+		dshSessionRoot, err := prepareDshTaskSessionRoot(d.cfg.ExecutionStateProfile(), task.RuntimeID, task.AgentID)
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("prepare dsh session root: %w", err)
 		}

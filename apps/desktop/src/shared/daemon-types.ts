@@ -14,6 +14,9 @@ export type DaemonState =
   | "auth_expired";
 
 export interface DaemonStatus {
+  sharedService?: boolean;
+  accountConflict?: boolean;
+  connectionError?: boolean;
   state: DaemonState;
   pid?: number;
   uptime?: string;

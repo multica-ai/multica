@@ -4046,3 +4046,23 @@ export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsRespon
   installations: [],
   configured: false,
 };
+
+// Local daemon protocol shared by Desktop's service discovery and lifecycle.
+// Older daemons may omit owner/state metadata; absence never proves ownership.
+export const LocalDaemonHealthSchema = z.object({
+  status: z.enum(["running", "starting"]).optional().catch(undefined),
+  pid: z.number().int().positive().optional().catch(undefined),
+  profile: z.string().optional(),
+  owner_id: z.string().min(1).optional(),
+  os: z.string().optional(),
+  launched_by: z.string().optional(),
+  uptime: z.string().optional(),
+  daemon_id: z.string().optional(),
+  device_name: z.string().optional(),
+  server_url: z.string().optional(),
+  cli_version: z.string().optional(),
+  active_task_count: z.number().int().nonnegative().optional().catch(undefined),
+  agents: z.array(z.string()).optional().catch(undefined),
+  workspaces: z.array(z.unknown()).optional().catch(undefined),
+  draining: z.boolean().optional(),
+}).loose().nullable();

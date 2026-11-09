@@ -102,6 +102,10 @@ export function DaemonSettingsTab() {
       title={t(($) => $.desktop.daemon.title)}
     >
 
+
+      {status.connectionError && <p role="alert" className="text-caption text-destructive">{t(($) => $.desktop.daemon.service_unavailable)}</p>}
+      {status.sharedService && <p role="status" className="text-caption text-muted-foreground">{t(($) => $.desktop.daemon.shared_service)}</p>}
+      {status.accountConflict && <p role="alert" className="text-caption text-destructive">{t(($) => $.desktop.daemon.account_conflict)}</p>}
       {status.state === "auth_expired" && (
         <div className="mt-4 flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3">
           <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />

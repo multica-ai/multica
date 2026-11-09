@@ -95,7 +95,7 @@ func newTerminalReportStore(cfg Config) *terminalReportStore {
 	if strings.TrimSpace(cfg.WorkspacesRoot) == "" {
 		return nil
 	}
-	identity := strings.TrimRight(cfg.ServerBaseURL, "/") + "\x00" + cfg.Profile + "\x00" + cfg.DaemonID
+	identity := strings.TrimRight(cfg.ServerBaseURL, "/") + "\x00" + cfg.ExecutionStateProfile() + "\x00" + cfg.DaemonID
 	sum := sha256.Sum256([]byte(identity))
 	namespace := hex.EncodeToString(sum[:16])
 	root := filepath.Join(cfg.WorkspacesRoot, ".pending-terminal-reports", "v1")

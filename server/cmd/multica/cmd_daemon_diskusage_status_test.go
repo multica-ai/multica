@@ -462,7 +462,7 @@ func TestResolveDiskUsageRootTaskContext(t *testing.T) {
 		injected := filepath.Join(t.TempDir(), "daemon-workspaces")
 		t.Setenv(daemon.TaskWorkspacesRootEnv, injected+string(filepath.Separator))
 
-		got, err := resolveDiskUsageRoot(true, "", "")
+		got, err := resolveDiskUsageRoot(&cobra.Command{}, true, "", "")
 		if err != nil {
 			t.Fatalf("resolveDiskUsageRoot: %v", err)
 		}
@@ -474,7 +474,7 @@ func TestResolveDiskUsageRootTaskContext(t *testing.T) {
 	for name, value := range map[string]string{"missing": "", "relative": "relative/workspaces"} {
 		t.Run("fails closed on a "+name+" root", func(t *testing.T) {
 			t.Setenv(daemon.TaskWorkspacesRootEnv, value)
-			if _, err := resolveDiskUsageRoot(true, "", ""); err == nil {
+			if _, err := resolveDiskUsageRoot(&cobra.Command{}, true, "", ""); err == nil {
 				t.Fatalf("%s=%q resolved a root, want fail closed", daemon.TaskWorkspacesRootEnv, value)
 			}
 		})
@@ -486,7 +486,7 @@ func TestResolveDiskUsageRootTaskContext(t *testing.T) {
 		t.Setenv("MULTICA_WORKSPACES_ROOT", "")
 		t.Setenv(daemon.TaskWorkspacesRootEnv, filepath.Join(t.TempDir(), "ignored"))
 
-		got, err := resolveDiskUsageRoot(false, "staging", "")
+		got, err := resolveDiskUsageRoot(&cobra.Command{}, false, "staging", "")
 		if err != nil {
 			t.Fatalf("resolveDiskUsageRoot: %v", err)
 		}
@@ -534,7 +534,7 @@ func TestResolveDiskUsageRootEnvOverridesProfileConfig(t *testing.T) {
 		t.Fatalf("SaveCLIConfig: %v", err)
 	}
 
-	got, err := resolveDiskUsageRoot(false, "", "")
+	got, err := resolveDiskUsageRoot(&cobra.Command{}, false, "", "")
 	if err != nil {
 		t.Fatalf("resolveDiskUsageRoot: %v", err)
 	}
