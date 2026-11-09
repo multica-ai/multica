@@ -65,6 +65,7 @@
     "copy_link": "링크 복사",
     "delete_action": "프로젝트 삭제",
     "section_properties": "속성",
+    "section_activity_history": "활동 기록",
     "section_progress": "진행률",
     "section_description": "설명",
     "prop_start_date": "시작일",
@@ -81,6 +82,15 @@
     "toast_link_copied": "링크를 복사했습니다",
     "toast_project_deleted": "프로젝트를 삭제했습니다",
     "toast_move_issue_failed": "태스크를 이동하지 못했습니다"
+  },
+  "activity": {
+    "created": "이 프로젝트를 만들었습니다",
+    "changed": "{{field}}을(를) \"{{from}}\"에서 \"{{to}}\"(으)로 변경했습니다",
+    "set": "{{field}}을(를) \"{{value}}\"(으)로 설정했습니다",
+    "removed": "{{field}}을(를) 제거했습니다",
+    "description_updated": "프로젝트 설명을 업데이트했습니다",
+    "icon_changed": "프로젝트 아이콘을 변경했습니다",
+    "fields": { "title": "제목", "status": "상태", "priority": "우선순위", "lead": "담당자", "start_date": "시작일", "due_date": "마감일" }
   },
   "resources": {
     "section_header": "리소스",

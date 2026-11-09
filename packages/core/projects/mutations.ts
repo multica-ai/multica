@@ -49,6 +49,7 @@ export function useUpdateProject() {
       if (ctx?.prevDetail) qc.setQueryData(projectKeys.detail(wsId, ctx.id), ctx.prevDetail);
     },
     onSettled: (_data, _err, vars) => {
+	  qc.invalidateQueries({ queryKey: projectKeys.activities(wsId, vars.id) });
       qc.invalidateQueries({ queryKey: projectKeys.detail(wsId, vars.id) });
       qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
       // A project's status is a filter dimension of the issue table, so

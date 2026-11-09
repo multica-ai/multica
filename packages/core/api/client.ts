@@ -4247,6 +4247,13 @@ export class ApiClient {
     return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, { endpoint: "GET /api/projects/:id" });
   }
 
+  async listProjectActivities(id: string): Promise<TimelineEntry[]> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/activities`);
+    return parseWithFallback(raw, TimelineEntriesSchema, EMPTY_TIMELINE_ENTRIES, {
+      endpoint: "GET /api/projects/:id/activities",
+    });
+  }
+
   async createProject(data: CreateProjectRequest): Promise<Project> {
     const raw = await this.fetch<unknown>("/api/projects", {
       method: "POST",

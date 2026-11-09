@@ -282,6 +282,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	status := req.Status
 	if status == "" {
 		status = "planned"
@@ -394,7 +395,6 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	creatorID, ok := parseUUIDOrBadRequest(w, actorID, "creator_id")
 	if !ok {
 		return
@@ -423,7 +423,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp := projectToResponse(project)
-		h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
+		h.publish(protocol.EventProjectCreated, workspaceID, actorType, actorID, map[string]any{"project": resp})
 		writeJSON(w, http.StatusCreated, resp)
 		return
 	}
@@ -484,7 +484,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := projectToResponse(project)
 	resp.ResourceCount = int64(len(resourceResp))
-	h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
+	h.publish(protocol.EventProjectCreated, workspaceID, actorType, actorID, map[string]any{"project": resp})
 	for _, rr := range resourceResp {
 		h.publish(protocol.EventProjectResourceCreated, workspaceID, "member", userID, map[string]any{
 			"resource":   rr,
@@ -525,6 +525,7 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "failed to read request body")
@@ -626,7 +627,10 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), wsUUID, project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
-	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
+	h.publish(protocol.EventProjectUpdated, workspaceID, actorType, actorID, map[string]any{
+		"project":      resp,
+		"prev_project": projectToResponse(prevProject),
+	})
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -685,6 +689,14 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		ScopeID:     project.ID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete project views")
+		return
+	}
+	if err := qtx.DeleteActivitiesForEntity(r.Context(), db.DeleteActivitiesForEntityParams{
+		WorkspaceID: project.WorkspaceID,
+		EntityType:  pgtype.Text{String: "project", Valid: true},
+		EntityID:    project.ID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete project activities")
 		return
 	}
 	if err := qtx.DeleteProject(r.Context(), db.DeleteProjectParams{

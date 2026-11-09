@@ -60,9 +60,13 @@ func (q *Queries) CountAssigneeChangesByActor(ctx context.Context, arg CountAssi
 
 const createActivity = `-- name: CreateActivity :one
 INSERT INTO activity_log (
-    workspace_id, issue_id, actor_type, actor_id, action, details, id
-) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::uuid, gen_random_uuid()))
-RETURNING id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at
+    workspace_id, issue_id, entity_type, entity_id,
+    actor_type, actor_id, action, details, id
+) VALUES (
+    $1, $2, 'issue', $2,
+    $3, $4, $5, $6, COALESCE($7::uuid, gen_random_uuid())
+)
+RETURNING id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at, entity_type, entity_id
 `
 
 type CreateActivityParams struct {
@@ -95,12 +99,82 @@ func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) 
 		&i.Action,
 		&i.Details,
 		&i.CreatedAt,
+		&i.EntityType,
+		&i.EntityID,
 	)
 	return i, err
 }
 
+const createEntityActivity = `-- name: CreateEntityActivity :one
+INSERT INTO activity_log (
+    workspace_id, entity_type, entity_id,
+    actor_type, actor_id, action, details, id
+) VALUES (
+    $1, $2, $3,
+    $4, $5, $6, $7,
+    COALESCE($8::uuid, gen_random_uuid())
+)
+RETURNING id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at, entity_type, entity_id
+`
+
+type CreateEntityActivityParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	EntityType  pgtype.Text `json:"entity_type"`
+	EntityID    pgtype.UUID `json:"entity_id"`
+	ActorType   pgtype.Text `json:"actor_type"`
+	ActorID     pgtype.UUID `json:"actor_id"`
+	Action      string      `json:"action"`
+	Details     []byte      `json:"details"`
+	ID          pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) CreateEntityActivity(ctx context.Context, arg CreateEntityActivityParams) (ActivityLog, error) {
+	row := q.db.QueryRow(ctx, createEntityActivity,
+		arg.WorkspaceID,
+		arg.EntityType,
+		arg.EntityID,
+		arg.ActorType,
+		arg.ActorID,
+		arg.Action,
+		arg.Details,
+		arg.ID,
+	)
+	var i ActivityLog
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Action,
+		&i.Details,
+		&i.CreatedAt,
+		&i.EntityType,
+		&i.EntityID,
+	)
+	return i, err
+}
+
+const deleteActivitiesForEntity = `-- name: DeleteActivitiesForEntity :exec
+DELETE FROM activity_log
+WHERE workspace_id = $1
+  AND entity_type = $2
+  AND entity_id = $3
+`
+
+type DeleteActivitiesForEntityParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	EntityType  pgtype.Text `json:"entity_type"`
+	EntityID    pgtype.UUID `json:"entity_id"`
+}
+
+func (q *Queries) DeleteActivitiesForEntity(ctx context.Context, arg DeleteActivitiesForEntityParams) error {
+	_, err := q.db.Exec(ctx, deleteActivitiesForEntity, arg.WorkspaceID, arg.EntityType, arg.EntityID)
+	return err
+}
+
 const getActivity = `-- name: GetActivity :one
-SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at FROM activity_log
+SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at, entity_type, entity_id FROM activity_log
 WHERE id = $1
 `
 
@@ -116,6 +190,8 @@ func (q *Queries) GetActivity(ctx context.Context, id pgtype.UUID) (ActivityLog,
 		&i.Action,
 		&i.Details,
 		&i.CreatedAt,
+		&i.EntityType,
+		&i.EntityID,
 	)
 	return i, err
 }
@@ -167,9 +243,64 @@ func (q *Queries) HasSquadLeaderNoActionEvaluationForTask(ctx context.Context, a
 	return exists, err
 }
 
+const listActivitiesForEntity = `-- name: ListActivitiesForEntity :many
+SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at, entity_type, entity_id FROM (
+    SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at, entity_type, entity_id FROM activity_log
+    WHERE workspace_id = $1
+      AND entity_type = $2
+      AND entity_id = $3
+    ORDER BY created_at DESC, id DESC
+    LIMIT $4
+) AS recent
+ORDER BY created_at ASC, id ASC
+`
+
+type ListActivitiesForEntityParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	EntityType  pgtype.Text `json:"entity_type"`
+	EntityID    pgtype.UUID `json:"entity_id"`
+	LimitCount  int32       `json:"limit_count"`
+}
+
+func (q *Queries) ListActivitiesForEntity(ctx context.Context, arg ListActivitiesForEntityParams) ([]ActivityLog, error) {
+	rows, err := q.db.Query(ctx, listActivitiesForEntity,
+		arg.WorkspaceID,
+		arg.EntityType,
+		arg.EntityID,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ActivityLog{}
+	for rows.Next() {
+		var i ActivityLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Action,
+			&i.Details,
+			&i.CreatedAt,
+			&i.EntityType,
+			&i.EntityID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActivitiesForIssue = `-- name: ListActivitiesForIssue :many
-SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at FROM (
-    SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at FROM activity_log
+SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at, entity_type, entity_id FROM (
+    SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at, entity_type, entity_id FROM activity_log
     WHERE issue_id = $1
     ORDER BY created_at DESC, id DESC
     LIMIT $2
@@ -215,6 +346,8 @@ func (q *Queries) ListActivitiesForIssue(ctx context.Context, arg ListActivities
 			&i.Action,
 			&i.Details,
 			&i.CreatedAt,
+			&i.EntityType,
+			&i.EntityID,
 		); err != nil {
 			return nil, err
 		}

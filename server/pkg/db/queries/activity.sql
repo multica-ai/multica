@@ -28,9 +28,41 @@ WHERE id = $1;
 
 -- name: CreateActivity :one
 INSERT INTO activity_log (
-    workspace_id, issue_id, actor_type, actor_id, action, details, id
-) VALUES ($1, $2, $3, $4, $5, $6, COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()))
+    workspace_id, issue_id, entity_type, entity_id,
+    actor_type, actor_id, action, details, id
+) VALUES (
+    $1, $2, 'issue', $2,
+    $3, $4, $5, $6, COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+)
 RETURNING *;
+
+-- name: ListActivitiesForEntity :many
+SELECT * FROM (
+    SELECT * FROM activity_log
+    WHERE workspace_id = @workspace_id
+      AND entity_type = @entity_type
+      AND entity_id = @entity_id
+    ORDER BY created_at DESC, id DESC
+    LIMIT @limit_count
+) AS recent
+ORDER BY created_at ASC, id ASC;
+
+-- name: CreateEntityActivity :one
+INSERT INTO activity_log (
+    workspace_id, entity_type, entity_id,
+    actor_type, actor_id, action, details, id
+) VALUES (
+    @workspace_id, @entity_type, @entity_id,
+    @actor_type, @actor_id, @action, @details,
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+)
+RETURNING *;
+
+-- name: DeleteActivitiesForEntity :exec
+DELETE FROM activity_log
+WHERE workspace_id = @workspace_id
+  AND entity_type = @entity_type
+  AND entity_id = @entity_id;
 
 -- name: HasSquadLeaderNoActionEvaluationForTask :one
 SELECT EXISTS (

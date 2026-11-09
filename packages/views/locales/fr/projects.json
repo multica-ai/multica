@@ -65,6 +65,7 @@
     "copy_link": "Copier le lien",
     "delete_action": "Supprimer le projet",
     "section_properties": "Propriétés",
+    "section_activity_history": "Historique d’activité",
     "section_progress": "Avancement",
     "section_description": "Description",
     "prop_start_date": "Date de début",
@@ -81,6 +82,15 @@
     "toast_link_copied": "Lien copié",
     "toast_project_deleted": "Projet supprimé",
     "toast_move_issue_failed": "Échec du déplacement de la tâche"
+  },
+  "activity": {
+    "created": "a créé ce projet",
+    "changed": "a modifié {{field}} de « {{from}} » à « {{to}} »",
+    "set": "a défini {{field}} sur « {{value}} »",
+    "removed": "a supprimé {{field}}",
+    "description_updated": "a mis à jour la description du projet",
+    "icon_changed": "a modifié l’icône du projet",
+    "fields": { "title": "le titre", "status": "le statut", "priority": "la priorité", "lead": "le responsable", "start_date": "la date de début", "due_date": "la date d’échéance" }
   },
   "resources": {
     "section_header": "Ressources",
