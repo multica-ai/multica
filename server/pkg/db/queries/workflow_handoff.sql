@@ -14,3 +14,16 @@ WHERE issue_id = @issue_id
   AND context->>'workflow_handoff_revision' = sqlc.arg('issue_revision')::bigint::text
 ORDER BY created_at DESC, id DESC
 LIMIT 1;
+
+-- name: ListAssigneeRunsForHandoff :many
+-- Preview and explicit stop must cover every unfinished run of the previous
+-- assignee, including stage handoffs still waiting for a pending queue slot.
+SELECT id, agent_id, status, started_at, created_at
+FROM agent_task_queue
+WHERE issue_id = @issue_id
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+  AND (
+    (sqlc.arg('assignee_type')::text = 'agent' AND agent_id = @assignee_id)
+    OR (sqlc.arg('assignee_type')::text = 'squad' AND squad_id = @assignee_id)
+  )
+ORDER BY created_at DESC, id DESC;

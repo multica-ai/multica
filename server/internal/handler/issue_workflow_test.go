@@ -1246,6 +1246,10 @@ func TestHandoffStopsPreviousSquadRuns(t *testing.T) {
 	running := dbfx.Task(t, agentID, testutil.Cols{
 		"issue_id": issueID, "squad_id": squadID, "runtime_id": runtimeID, "status": "running", "started_at": time.Now(),
 	})
+	otherSquad := dbfx.Squad(t, "Another squad sharing the leader "+workflowTestSuffix(), agentID)
+	unrelated := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": issueID, "squad_id": otherSquad, "runtime_id": runtimeID, "status": "deferred", "fire_at": time.Now(),
+	})
 
 	var preview WorkflowHandoffPreviewResponse
 	req := withURLParam(newRequest("GET", "/api/issues/"+issueID+"/workflow-handoff?status=in_progress", nil), "id", issueID)
@@ -1262,6 +1266,10 @@ func TestHandoffStopsPreviousSquadRuns(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT name FROM "user" WHERE id = $1`, testUserID).Scan(&memberName)
 	if status != "cancelled" || stoppedBy == nil || *stoppedBy != memberName {
 		t.Fatalf("squad run = %s stopped by %v, want cancelled by %s", status, stoppedBy, memberName)
+	}
+	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, unrelated).Scan(&status)
+	if status != "deferred" {
+		t.Fatalf("handoff cancelled another squad's waiting run: %s", status)
 	}
 }
 

@@ -43,6 +43,60 @@ func (q *Queries) GetWorkflowSquadHandoffTask(ctx context.Context, arg GetWorkfl
 	return id, err
 }
 
+const listAssigneeRunsForHandoff = `-- name: ListAssigneeRunsForHandoff :many
+SELECT id, agent_id, status, started_at, created_at
+FROM agent_task_queue
+WHERE issue_id = $1
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+  AND (
+    ($2::text = 'agent' AND agent_id = $3)
+    OR ($2::text = 'squad' AND squad_id = $3)
+  )
+ORDER BY created_at DESC, id DESC
+`
+
+type ListAssigneeRunsForHandoffParams struct {
+	IssueID      pgtype.UUID `json:"issue_id"`
+	AssigneeType string      `json:"assignee_type"`
+	AssigneeID   pgtype.UUID `json:"assignee_id"`
+}
+
+type ListAssigneeRunsForHandoffRow struct {
+	ID        pgtype.UUID        `json:"id"`
+	AgentID   pgtype.UUID        `json:"agent_id"`
+	Status    string             `json:"status"`
+	StartedAt pgtype.Timestamptz `json:"started_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+// Preview and explicit stop must cover every unfinished run of the previous
+// assignee, including stage handoffs still waiting for a pending queue slot.
+func (q *Queries) ListAssigneeRunsForHandoff(ctx context.Context, arg ListAssigneeRunsForHandoffParams) ([]ListAssigneeRunsForHandoffRow, error) {
+	rows, err := q.db.Query(ctx, listAssigneeRunsForHandoff, arg.IssueID, arg.AssigneeType, arg.AssigneeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAssigneeRunsForHandoffRow{}
+	for rows.Next() {
+		var i ListAssigneeRunsForHandoffRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.Status,
+			&i.StartedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockWorkflowSquadHandoff = `-- name: LockWorkflowSquadHandoff :exec
 SELECT pg_advisory_xact_lock(hashtextextended($1::uuid::text || ':workflow_squad_handoff', 0))
 `

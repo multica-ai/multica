@@ -14,6 +14,74 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+func TestWorkflowHandoffCancelsDeferredSquadStages(t *testing.T) {
+	seedTestCatalog(t)
+	for _, queued := range []bool{true, false} {
+		for _, stop := range []bool{true, false} {
+			t.Run(fmt.Sprintf("queued=%v/stop=%v", queued, stop), func(t *testing.T) {
+				fx := newSquadBriefingClaimFixture(t, t.Context(), "Cancel waiting squad stages")
+				wf := createTestWorkflow(t, "Cancel waiting flow "+workflowTestSuffix(), "in_progress", "in_review")
+				projectID := createWorkflowTestProject(t, "Cancel waiting project")
+				setProjectWorkflow(t, projectID, map[string]any{"workflow_id": wf.ID}).Want(http.StatusOK)
+				for _, status := range []string{"in_progress", "in_review"} {
+					setWorkflowHandoff(t, wf.ID, status, map[string]any{"handler": map[string]any{"type": "squad", "id": fx.SquadID}}).Want(http.StatusOK)
+				}
+				setWorkflowHandoff(t, wf.ID, "todo", map[string]any{"handler": map[string]any{"type": "member", "id": testUserID}}).Want(http.StatusOK)
+				dbfx.Exec(t, `UPDATE issue SET project_id=$2,status='backlog' WHERE id=$1`, fx.IssueID, projectID)
+				updateIssueForTest(t, fx.IssueID, map[string]any{"status": "in_progress"}).Want(http.StatusOK)
+				updateIssueForTest(t, fx.IssueID, map[string]any{"status": "in_review"}).Want(http.StatusOK)
+				if !queued {
+					dbfx.Exec(t, `UPDATE agent_task_queue SET status='completed',completed_at=now() WHERE issue_id=$1 AND workflow_step='in_progress'`, fx.IssueID)
+				}
+				before, err := testHandler.Queries.ListTasksByIssue(t.Context(), parseUUID(fx.IssueID))
+				if err != nil || len(before) != 2 {
+					t.Fatalf("handoff fixture tasks = %+v, %v", before, err)
+				}
+				var deferred bool
+				for _, task := range before {
+					deferred = deferred || task.Status == "deferred"
+				}
+				if !deferred {
+					t.Fatal("fixture did not retain a deferred stage handoff")
+				}
+				var preview WorkflowHandoffPreviewResponse
+				req := withURLParam(newRequest(http.MethodGet, "/api/issues/"+fx.IssueID+"/workflow-handoff?status=todo", nil), "id", fx.IssueID)
+				testutil.Call(t, testHandler.PreviewWorkflowHandoff, req).Want(http.StatusOK).JSON(&preview)
+				wantRuns := 1
+				if queued {
+					wantRuns++
+				}
+				if len(preview.PreviousRuns) != wantRuns {
+					t.Errorf("preview lists %d runs, want %d including deferred stages", len(preview.PreviousRuns), wantRuns)
+				}
+				updateIssueForTest(t, fx.IssueID, map[string]any{"status": "todo", "stop_previous_assignee_runs": stop}).Want(http.StatusOK)
+				for _, previous := range before {
+					after, err := testHandler.Queries.GetAgentTask(t.Context(), previous.ID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					wantStatus := previous.Status
+					if stop && previous.Status != "completed" {
+						wantStatus = "cancelled"
+						if after.CancelledByType.String != "member" || after.CancelledByID != parseUUID(testUserID) {
+							t.Errorf("stage %s lost cancellation attribution", previous.WorkflowStep.String)
+						}
+					}
+					if after.Status != wantStatus {
+						t.Errorf("stage %s: status = %s, want %s", previous.WorkflowStep.String, after.Status, wantStatus)
+					}
+				}
+				claimed, _, _, _ := claimAgentInstructionsForTest(t, fx.RuntimeID)
+				if stop && claimed != "" {
+					t.Errorf("explicitly stopped squad task was claimed: %s", claimed)
+				} else if !stop && claimed == "" {
+					t.Error("opting out of stopping must preserve runnable squad work")
+				}
+			})
+		}
+	}
+}
+
 func TestWorkflowSquadHandoffReplayDoesNotDuplicate(t *testing.T) {
 	seedTestCatalog(t)
 	fx := newSquadBriefingClaimFixture(t, t.Context(), "Idempotent squad handoff")

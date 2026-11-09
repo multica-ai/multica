@@ -326,10 +326,10 @@ func (h *Handler) stopPreviousAssigneeRuns(ctx context.Context, prev, issue db.I
 	}
 }
 
-// assigneeActiveRuns lists the active runs of an issue's assignee on it: the
-// agent's own runs, or every run made on a squad's behalf. Members run
-// nothing.
-func (h *Handler) assigneeActiveRuns(ctx context.Context, issue db.Issue) []db.AgentTaskQueue {
+// assigneeActiveRuns lists the unfinished runs of an issue's assignee on it,
+// including deferred work: the agent's own runs, or every run made on a
+// squad's behalf. Members run nothing.
+func (h *Handler) assigneeActiveRuns(ctx context.Context, issue db.Issue) []db.ListAssigneeRunsForHandoffRow {
 	if !issue.AssigneeID.Valid {
 		return nil
 	}
@@ -337,19 +337,14 @@ func (h *Handler) assigneeActiveRuns(ctx context.Context, issue db.Issue) []db.A
 	if assigneeType != "agent" && assigneeType != "squad" {
 		return nil
 	}
-	tasks, err := h.Queries.ListActiveTasksByIssue(ctx, issue.ID)
+	tasks, err := h.Queries.ListAssigneeRunsForHandoff(ctx, db.ListAssigneeRunsForHandoffParams{
+		IssueID: issue.ID, AssigneeType: assigneeType, AssigneeID: issue.AssigneeID,
+	})
 	if err != nil {
 		slog.Warn("workflow: list active tasks failed", "issue_id", uuidToString(issue.ID), "error", err)
 		return nil
 	}
-	var out []db.AgentTaskQueue
-	for _, task := range tasks {
-		if (assigneeType == "agent" && task.AgentID == issue.AssigneeID) ||
-			(assigneeType == "squad" && task.SquadID == issue.AssigneeID) {
-			out = append(out, task)
-		}
-	}
-	return out
+	return tasks
 }
 
 // claimProjectWorkflow renders the issue's project workflow for a task claim,
