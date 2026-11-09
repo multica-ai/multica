@@ -490,7 +490,8 @@ var issueUsageCmd = &cobra.Command{
 	Short: "Show aggregated token usage for an issue",
 	Long: "Show aggregated token usage for an issue.\n\n" +
 		"In table output, RUNS counts terminal runs. Token totals prefixed with >= " +
-		"are lower bounds because one or more terminal runs did not report usage.",
+		"are lower bounds because one or more terminal runs did not report usage. " +
+		"EST_COST_USD is the server's rate-table estimate, the same figure as the issue page.",
 	Args: exactArgs(1),
 	RunE: runIssueUsage,
 }
@@ -3474,18 +3475,55 @@ func runIssueUsage(cmd *cobra.Command, args []string) error {
 	// JSON numbers decode to float64; formatIssueUsageTokens and
 	// formatMetadataValue render them as clean integers (no scientific
 	// notation for large cache-token counts).
-	headers := []string{"INPUT_TOKENS", "OUTPUT_TOKENS", "CACHE_READ", "CACHE_WRITE", "RUNS", "METERED_RUNS", "UNREPORTED"}
+	headers := []string{"INPUT_TOKENS", "OUTPUT_TOKENS", "CACHE_READ", "CACHE_WRITE", "EST_COST_USD", "RUNS", "METERED_RUNS", "UNREPORTED"}
 	rows := [][]string{{
 		formatIssueUsageTokens(result["total_input_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
 		formatIssueUsageTokens(result["total_output_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
 		formatIssueUsageTokens(result["total_cache_read_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
 		formatIssueUsageTokens(result["total_cache_write_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
+		formatIssueUsageCost(result["estimated_cost_usd"], terminal, metered, usageRows, hasTerminal && hasMetered),
 		formatMetadataValue(terminal),
 		formatMetadataValue(metered),
 		formatMetadataValue(unreported),
 	}}
 	cli.PrintTable(os.Stdout, headers, rows)
+	printIssueUsageCostNotes(os.Stdout, result)
 	return nil
+}
+
+// formatIssueUsageCost renders the server's rate-table estimate
+// (estimated_cost_usd), the same figure as the issue page. "—" when the server predates the field. Marked
+// ">=" like the token counts when some runs reported no usage.
+func formatIssueUsageCost(value, terminal, metered, usageRows any, coverageKnown bool) string {
+	cost, ok := value.(float64)
+	if !ok {
+		return "—"
+	}
+	marked := formatIssueUsageTokens(float64(0), terminal, metered, usageRows, coverageKnown)
+	text := fmt.Sprintf("$%.2f", cost)
+	switch {
+	case marked == "—" && cost == 0:
+		return "—"
+	case strings.HasPrefix(marked, ">="):
+		return ">=" + text
+	}
+	return text
+}
+
+func printIssueUsageCostNotes(out io.Writer, result map[string]any) {
+	if _, ok := result["estimated_cost_usd"].(float64); !ok {
+		return
+	}
+	fmt.Fprintln(out, "\nEST_COST_USD is an estimate from the server's rate table, the same figure as the issue page. It does not include custom rates set in the browser; the provider's bill is authoritative.")
+	models, _ := result["unpriced_models"].([]any)
+	if len(models) == 0 {
+		return
+	}
+	names := make([]string, 0, len(models))
+	for _, m := range models {
+		names = append(names, fmt.Sprint(m))
+	}
+	fmt.Fprintf(out, "%d model(s) have no rate and are NOT included in the estimate: %s\n", len(names), strings.Join(names, ", "))
 }
 
 func formatIssueUsageTokens(value, terminal, metered, usageRows any, coverageKnown bool) string {

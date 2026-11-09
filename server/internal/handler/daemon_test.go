@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -5010,5 +5011,61 @@ func TestDaemonRegister_ProfileUsesStoredRuntimeIdentity(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT provider FROM agent_runtime WHERE profile_id = $1`, profileID).Scan(&provider)
 	if provider != "omp" {
 		t.Fatalf("provider = %q, want stored omp identity", provider)
+	}
+}
+
+// /usage carries the issue page's rate-table estimate, so the CLI
+// can show it. A provider charge wins over the table, and a model with no
+// rate is listed instead of being priced at zero.
+func TestGetIssueUsageEstimatesCost(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	var agentID, runtimeID string
+	dbfx.QueryRow(t, `
+		SELECT id, runtime_id FROM agent
+		WHERE workspace_id = $1 AND runtime_id IS NOT NULL
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID)
+	issueID := dbfx.Issue(t, "issue usage estimate")
+	run := testutil.Cols{"issue_id": issueID, "runtime_id": runtimeID, "status": "completed"}
+	first := dbfx.Task(t, agentID, run)
+	second := dbfx.Task(t, agentID, run)
+	dbfx.Insert(t, "task_usage", testutil.Cols{
+		"task_id": first, "provider": "claude", "model": "claude-opus-5-5",
+		"input_tokens": 1_000_000, "output_tokens": 1_000_000,
+		"cache_read_tokens": 1_000_000, "cache_write_tokens": 1_000_000,
+	})
+	dbfx.Insert(t, "task_usage", testutil.Cols{
+		"task_id": second, "provider": "claude", "model": "claude-opus-5-5",
+		"input_tokens": 1_000_000, "cost_usd_ticks": int64(3 * 10_000_000_000),
+	})
+	dbfx.Insert(t, "task_usage", testutil.Cols{
+		"task_id": second, "provider": "acme", "model": "mystery-1", "input_tokens": 50,
+	})
+
+	get := func(id string) (got struct {
+		EstimatedCostUSD   float64  `json:"estimated_cost_usd"`
+		UnpricedModelCount int      `json:"unpriced_model_count"`
+		UnpricedModels     []string `json:"unpriced_models"`
+	}) {
+		req := newRequest("GET", "/api/issues/"+id+"/usage", nil)
+		req = withURLParam(req, "id", id)
+		testutil.Call(t, testHandler.GetIssueUsage, req).Want(http.StatusOK).JSON(&got)
+		return got
+	}
+
+	got := get(issueID)
+	if want := 4 + 20 + 0.2 + 5 + 3.0; math.Abs(got.EstimatedCostUSD-want) > 1e-9 {
+		t.Errorf("estimated_cost_usd = %v, want %v", got.EstimatedCostUSD, want)
+	}
+	if got.UnpricedModelCount != 1 || len(got.UnpricedModels) != 1 || got.UnpricedModels[0] != "acme/mystery-1" {
+		t.Errorf("unpriced = %d %v, want 1 [acme/mystery-1]", got.UnpricedModelCount, got.UnpricedModels)
+	}
+
+	empty := get(dbfx.Issue(t, "issue usage estimate, no runs"))
+	if empty.EstimatedCostUSD != 0 || empty.UnpricedModelCount != 0 || empty.UnpricedModels == nil {
+		t.Errorf("empty issue = %+v, want 0 / 0 / []", empty)
 	}
 }

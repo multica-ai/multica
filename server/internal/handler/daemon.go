@@ -6891,6 +6891,11 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to get issue usage")
 		return
 	}
+	estimate, err := h.issueUsageEstimate(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get issue usage")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"total_input_tokens":       row.TotalInputTokens,
@@ -6910,6 +6915,11 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		"terminal_task_count":   row.TerminalTaskCount,
 		"metered_task_count":    row.MeteredTaskCount,
 		"unreported_task_count": row.UnreportedTaskCount,
+		// Rate-table estimate, same rule as the issue page. Models
+		// with no rate are listed and left out of the figure, not priced 0.
+		"estimated_cost_usd":   estimate.CostUSD,
+		"unpriced_model_count": len(estimate.UnpricedModels),
+		"unpriced_models":      estimate.UnpricedModels,
 	})
 }
 

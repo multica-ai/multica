@@ -6801,3 +6801,116 @@ func TestRunIssuePullRequestsLinkExplainsUnsyncedPR(t *testing.T) {
 		t.Fatalf("err = %v, want the not-synced explanation", err)
 	}
 }
+
+func issueUsageServer(t *testing.T, usage map[string]any) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/MUL-2818":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-uuid", "identifier": "MUL-2818"})
+		case "/api/issues/issue-uuid/usage":
+			json.NewEncoder(w).Encode(usage)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+}
+
+func issueUsageWithCost(extra map[string]any) map[string]any {
+	u := map[string]any{
+		"total_input_tokens": 50521228, "total_output_tokens": 749295,
+		"total_cache_read_tokens": 96561697, "total_cache_write_tokens": 3187617,
+		"task_count": 7, "terminal_task_count": 7, "metered_task_count": 7, "unreported_task_count": 0,
+		"estimated_cost_usd": 251.2391, "unpriced_model_count": 0, "unpriced_models": []string{},
+	}
+	for k, v := range extra {
+		u[k] = v
+	}
+	return u
+}
+
+// The CLI shows the server's estimate, so an agent no longer has
+// to guess per-model rates.
+func TestRunIssueUsageTableShowsEstimatedCost(t *testing.T) {
+	issueUsageServer(t, issueUsageWithCost(nil))
+	out, err := captureStdout(t, func() error {
+		return runIssueUsage(newIssueUsageTestCmd(), []string{"MUL-2818"})
+	})
+	if err != nil {
+		t.Fatalf("runIssueUsage: %v", err)
+	}
+	for _, want := range []string{"EST_COST_USD", "$251.24", "estimate from the server's rate table", "custom rates"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "no rate") {
+		t.Errorf("unexpected unpriced note:\n%s", out)
+	}
+}
+
+func TestRunIssueUsageTableNamesUnpricedModels(t *testing.T) {
+	issueUsageServer(t, issueUsageWithCost(map[string]any{
+		"unpriced_model_count": 2, "unpriced_models": []string{"acme/mystery-1", "acme/mystery-2"},
+	}))
+	out, err := captureStdout(t, func() error {
+		return runIssueUsage(newIssueUsageTestCmd(), []string{"MUL-2818"})
+	})
+	if err != nil {
+		t.Fatalf("runIssueUsage: %v", err)
+	}
+	if !strings.Contains(out, "2 model(s) have no rate and are NOT included in the estimate: acme/mystery-1, acme/mystery-2") {
+		t.Errorf("output missing unpriced note:\n%s", out)
+	}
+}
+
+func TestRunIssueUsageTableMarksPartialCost(t *testing.T) {
+	issueUsageServer(t, issueUsageWithCost(map[string]any{"terminal_task_count": 8, "unreported_task_count": 1}))
+	out, err := captureStdout(t, func() error {
+		return runIssueUsage(newIssueUsageTestCmd(), []string{"MUL-2818"})
+	})
+	if err != nil {
+		t.Fatalf("runIssueUsage: %v", err)
+	}
+	if !strings.Contains(out, ">=$251.24") {
+		t.Errorf("cost with unreported runs should be a lower bound:\n%s", out)
+	}
+}
+
+func TestRunIssueUsageTableOlderServerHasNoCost(t *testing.T) {
+	u := issueUsageWithCost(nil)
+	delete(u, "estimated_cost_usd")
+	delete(u, "unpriced_model_count")
+	delete(u, "unpriced_models")
+	issueUsageServer(t, u)
+	out, err := captureStdout(t, func() error {
+		return runIssueUsage(newIssueUsageTestCmd(), []string{"MUL-2818"})
+	})
+	if err != nil {
+		t.Fatalf("runIssueUsage: %v", err)
+	}
+	if !strings.Contains(out, "EST_COST_USD") || !strings.Contains(out, "—") || strings.Contains(out, "estimate from") {
+		t.Errorf("older server should show — and no note:\n%s", out)
+	}
+}
+
+func TestRunIssueUsageJSONCarriesEstimatedCost(t *testing.T) {
+	issueUsageServer(t, issueUsageWithCost(nil))
+	cmd := newIssueUsageTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	out, err := captureStdout(t, func() error { return runIssueUsage(cmd, []string{"MUL-2818"}) })
+	if err != nil {
+		t.Fatalf("runIssueUsage: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	if payload["estimated_cost_usd"] != 251.2391 {
+		t.Errorf("estimated_cost_usd = %v", payload["estimated_cost_usd"])
+	}
+}
