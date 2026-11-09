@@ -30,7 +30,7 @@ afterEach(() => {
 // Realtime invalidation must refresh even a fresh pending-invitations list.
 // The invitation:accepted / invitation:declined handlers must include it: the
 // accepting client may have concluded the invite from another surface, and
-// its own stale sidebar row otherwise survives until restart.
+// its list must update without waiting for a later focus/online fallback.
 it.each(["invitation:accepted", "invitation:declined"] as const)(
   "refreshes the pending-invitations list on %s when the actor is the current user",
   async (event) => {
