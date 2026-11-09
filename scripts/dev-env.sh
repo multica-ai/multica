@@ -993,6 +993,9 @@ desktop_cdp_suffix() {
 
 # Electron does not stop the daemon it started when it quits (autoStop is off
 # by default), and that daemon talks to this environment's backend only.
+# A plain `daemon stop` exits 0 while the daemon is still finishing a run;
+# --force waits for the profile lock, escalates, and confirms cleanup. The pid
+# is checked again because the profile directory holding it is deleted next.
 stop_desktop_daemon() {
   local profile pid bin
   profile="$(desktop_daemon_profile)"
@@ -1000,7 +1003,8 @@ stop_desktop_daemon() {
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 0
   bin="$MULTICA_BIN"
   [ -x "$bin" ] || bin="$DIR/apps/desktop/resources/bin/multica"
-  if [ -x "$bin" ] && "${CLEAN_ENV[@]}" "$bin" daemon stop --profile "$profile" >/dev/null 2>&1; then
+  if [ -x "$bin" ] && "${CLEAN_ENV[@]}" "$bin" daemon stop --force --profile "$profile" >/dev/null 2>&1 \
+    && ! kill -0 "$pid" 2>/dev/null; then
     ok "stopped Desktop's daemon for profile $profile"
     return 0
   fi
@@ -1365,10 +1369,12 @@ cmd_up() {
   for comp in $requested; do
     case " $ALL_COMPONENTS " in *" $comp "*) ;; *) die "Unknown component '$comp'. Valid: $ALL_COMPONENTS" ;; esac
   done
+  # Changing the port without the desktop component would rewrite the record
+  # while a running Desktop keeps serving the old port.
   case " $requested " in
     *" desktop "*) ;;
-    *) [ -z "$cdp_request" ] || [ "$cdp_request" = off ] \
-         || die "--cdp and --remote-debugging-port need the desktop component (C=desktop)." ;;
+    *) [ -z "$cdp_request" ] \
+         || die "--cdp, --remote-debugging-port and --no-cdp need the desktop component (C=desktop)." ;;
   esac
   # web, daemon and desktop are all clients of the backend; selecting one
   # without api would produce an environment that cannot serve a single request.
@@ -1575,9 +1581,12 @@ cmd_destroy() {
 
   export PORT="$BACKEND_PORT" FRONTEND_PORT DATABASE_URL POSTGRES_DB="$DB_NAME"
   step "Destroying $NAME"
-  local comp
+  local comp desktop_stopped=1
   for comp in $ALL_COMPONENTS; do
-    if ! stop_component "$comp"; then failures=$((failures + 1)); fi
+    if ! stop_component "$comp"; then
+      failures=$((failures + 1))
+      [ "$comp" != desktop ] || desktop_stopped=0
+    fi
   done
 
   if command -v psql >/dev/null 2>&1; then
@@ -1627,8 +1636,13 @@ cmd_destroy() {
     failures=$((failures + 1))
   fi
 
+  # The profile holds the daemon's pid and config, which a retried destroy
+  # needs to stop it; keep it until Desktop and its daemon are confirmed gone.
   desktop_profile_dir="$DEV_PROFILES_HOME/$(desktop_daemon_profile)"
-  if [ -d "$desktop_profile_dir" ]; then
+  if [ "$desktop_stopped" != 1 ]; then
+    [ ! -d "$desktop_profile_dir" ] \
+      || warn "kept Desktop's CLI profile $(desktop_daemon_profile) for the retry"
+  elif [ -d "$desktop_profile_dir" ]; then
     if rm -rf "$desktop_profile_dir"; then
       ok "removed Desktop's CLI profile $(desktop_daemon_profile)"
     else

@@ -421,6 +421,13 @@ dev_env up --components api --cdp > "$out" 2>&1 || status=$?
 [ "$status" -ne 0 ] || fail "up accepted --cdp without the desktop component"
 require_contains "$out" "need the desktop component"
 
+# Clearing the port without the desktop component would leave a running
+# Desktop serving it while status reports null.
+status=0
+dev_env up --components api --no-cdp > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "up accepted --no-cdp without the desktop component"
+require_contains "$out" "need the desktop component"
+
 status=0
 dev_env up --components desktop --remote-debugging-port 80 > "$out" 2>&1 || status=$?
 [ "$status" -ne 0 ] || fail "up accepted a privileged CDP port"
@@ -456,31 +463,57 @@ wait "$tree_root" 2>/dev/null || true
 [ "$(printf '%s\n' "$tree" | grep -c .)" -ge 3 ] \
   || fail "descendant_pids found $(printf '%s' "$tree" | tr '\n' ' ') under $tree_root, want both sleeps and the nested shell"
 
-# Desktop's own daemon outlives Electron; stopping Desktop stops it, and
-# destroy removes the profile Desktop derived from this backend's URL.
+# Desktop's own daemon outlives Electron. Stopping Desktop stops it, and only a
+# confirmed stop lets destroy remove the profile Desktop derived from this
+# backend's URL; that profile holds the pid a retried destroy needs.
 desktop_profile_dir="$MULTICA_DEV_PROFILES_HOME/desktop-localhost-18080"
 mkdir -p "$desktop_profile_dir"
-desktop_daemon="$(sleep 30 > /dev/null 2>&1 & printf '%s' "$!")"
+desktop_daemon="$(sleep 60 > /dev/null 2>&1 & printf '%s' "$!")"
 printf '%s\n' "$desktop_daemon" > "$desktop_profile_dir/daemon.pid"
-cat > "$tmp_dir/fake-multica" <<EOF
+fake_checkout="$tmp_dir/fake-checkout"
+stop_mode="$tmp_dir/daemon-stop-mode"
+mkdir -p "$fake_checkout/server/bin"
+# The fake CLI stops the daemon only in "kill" mode. "lies" exits 0 with the
+# daemon still alive, like a plain `daemon stop` that is still finishing a run.
+cat > "$fake_checkout/server/bin/multica" <<EOF
 #!/usr/bin/env bash
-[ "\$*" = "daemon stop --profile desktop-localhost-18080" ] && kill $desktop_daemon
+[ "\$*" = "daemon stop --force --profile desktop-localhost-18080" ] || exit 0
+case "\$(cat "$stop_mode")" in
+  kill)
+    kill -KILL $desktop_daemon
+    while kill -0 $desktop_daemon 2>/dev/null; do sleep 0.1; done
+    ;;
+  lies) ;;
+  *) exit 1 ;;
+esac
 EOF
-chmod +x "$tmp_dir/fake-multica"
+chmod +x "$fake_checkout/server/bin/multica"
+
+printf 'lies' > "$stop_mode"
+status=0
 (
   # shellcheck disable=SC1090
   source "$root_dir/scripts/dev-env.sh"
-  BACKEND_PORT=18080 MULTICA_BIN="$tmp_dir/fake-multica" DIR="$root_dir"
-  stop_desktop_daemon > "$out" 2>&1 || fail "stop_desktop_daemon failed: $(cat "$out")"
-)
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  kill -0 "$desktop_daemon" 2>/dev/null || break
-  sleep 0.2
-done
-! kill -0 "$desktop_daemon" 2>/dev/null || fail "Desktop's daemon is still running"
+  BACKEND_PORT=18080 MULTICA_BIN="$fake_checkout/server/bin/multica" DIR="$fake_checkout"
+  stop_desktop_daemon
+) > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "stop_desktop_daemon trusted a stop that left the daemon running"
+kill -0 "$desktop_daemon" 2>/dev/null || fail "the fake daemon died before the retry test"
 
-write_manifest "desktop-profile-906" "$root_dir" 0
-dev_env destroy desktop-profile-906 --yes > "$out" 2>&1 || fail "destroy with a Desktop profile failed"
+printf 'fails' > "$stop_mode"
+write_manifest "desktop-profile-906" "$fake_checkout" 0
+status=0
+dev_env destroy desktop-profile-906 --yes > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "destroy succeeded while Desktop's daemon was still running"
+[ -f "$desktop_profile_dir/daemon.pid" ] || fail "a failed destroy removed Desktop's daemon pid"
+[ -f "$MULTICA_DEV_HOME/envs/desktop-profile-906/manifest.env" ] \
+  || fail "a failed destroy discarded the manifest"
+require_contains "$out" "kept Desktop's CLI profile desktop-localhost-18080"
+
+printf 'kill' > "$stop_mode"
+dev_env destroy desktop-profile-906 --yes > "$out" 2>&1 \
+  || { sed 's/^/  /' "$out" >&2; fail "retrying destroy after the daemon could be stopped failed"; }
+! kill -0 "$desktop_daemon" 2>/dev/null || fail "Desktop's daemon is still running after destroy"
 [ ! -d "$desktop_profile_dir" ] || fail "destroy left Desktop's CLI profile behind"
 
 # ---------------------------------------------------------------------------
