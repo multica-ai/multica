@@ -37,12 +37,14 @@ function Fixture({ deleted = false, description = false, onSubmit = async () => 
   const annotations = useCommentAnnotations({ issueId: "issue", draftKey: description ? "new:issue" : key, enabled: true,
     sources: [{ id: "root", name: "Root" }, ...(!deleted ? [{ id: "child", name: "Child" }] : [])],
   });
+  const replyTarget = useCommentDraftStore((s) => s.drafts[key]?.replyTarget);
   return <QueryClientProvider client={client}><WorkspaceSlugProvider slug="test"><div ref={annotations.cardRef} {...annotations.captureProps}>
     {annotations.popup}
     <div data-comment-content="root" tabIndex={0}>Root text</div>
     {!deleted && <div data-comment-content="child" tabIndex={0}>Child text</div>}
     {description ? <CommentInput issueId="issue" onSubmit={onSubmit} annotationComposer={annotations.composer}
-      onEditAnnotation={annotations.editAnnotation} /> : <ReplyInput issueId="issue" parentId="root" draftKey={key}
+      onEditAnnotation={annotations.editAnnotation} /> : <ReplyInput issueId="issue" parentId={replyTarget?.commentId ?? "root"} draftKey={key}
+      targetMissing={deleted && replyTarget?.commentId === "child"}
       avatarType="member" avatarId="" onSubmit={onSubmit} annotationComposer={annotations.composer}
       onEditAnnotation={annotations.editAnnotation} />}
   </div></WorkspaceSlugProvider></QueryClientProvider>;
@@ -114,6 +116,7 @@ describe("annotation draft submission through the real composer", () => {
     const onSubmit = vi.fn(async () => true);
     const view = renderWithI18n(<Fixture onSubmit={onSubmit} />);
     const input = await open(view.container, "First line");
+    await waitFor(() => expect(preview).toHaveBeenCalledWith("issue", "> Child text\n\nFirst line", "child", undefined));
     const before = (input as HTMLElement & { editor: Editor }).editor.getText();
     fireEvent.keyDown(input, { key: "Enter", isComposing: true });
     fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
@@ -153,7 +156,9 @@ describe("annotation draft submission through the real composer", () => {
     await waitFor(() => expect(useCommentDraftStore.getState().drafts[key]).toBeUndefined());
   });
 
-  it("keeps a deleted source's quote and sends to the surviving thread composer", async () => {
+  it("keeps a deleted non-target source's quote while the first annotation's target survives", async () => {
+    const first = saved("first");
+    useCommentDraftStore.getState().addAnnotation(key, first);
     const onSubmit = vi.fn<Submit>(async () => "posted");
     const view = renderWithI18n(<Fixture onSubmit={onSubmit} />);
     const input = await open(view.container, "Retain this instruction");
@@ -161,7 +166,7 @@ describe("annotation draft submission through the real composer", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("The source changed or is unavailable");
     expect(input).toHaveTextContent("Retain this instruction");
     fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("> Child text\n\nRetain this instruction", undefined, undefined, undefined));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(composeAnnotatedReply("", [first, { ...saved("pending", "Child text"), sourceCommentId: "child", note: "Retain this instruction" }]), undefined, undefined, undefined));
   });
 
   it("blocks an extra annotation at the quota, while an existing annotation can still be saved and sent", async () => {
@@ -187,9 +192,10 @@ describe("annotation draft submission through the real composer", () => {
     expect(onSubmit.mock.calls[0]![0]).not.toContain("Over quota");
   });
 
-  it("shares recipient choices between the popup and lower composer", async () => {
+  it.each(["popup", "lower"])("shares recipient choices and applies them only to the submitted target (send: %s)", async (sendFrom) => {
     const agentId = "11111111-1111-1111-1111-111111111111";
     preview.mockResolvedValue({ agents: [{ id: agentId, name: "Agent", source: "thread_parent", reason: "" }] });
+    if (sendFrom === "lower") useCommentDraftStore.getState().setDraft(key, "Root reply body");
     const onSubmit = vi.fn<Submit>(async () => "posted");
     const view = renderWithI18n(<Fixture onSubmit={onSubmit} />);
     const input = await open(view.container, "Please revise");
@@ -199,8 +205,9 @@ describe("annotation draft submission through the real composer", () => {
     fireEvent.pointerDown(skip); fireEvent.click(skip);
     expect(input).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByRole("button", { name: "Agent trigger: Won't start this time" })).toHaveLength(2));
-    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("> Child text\n\nPlease revise", undefined, [agentId], undefined));
+    if (sendFrom === "popup") fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    else fireEvent.click(within(view.container).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(sendFrom === "popup" ? "> Child text\n\nPlease revise" : "Root reply body", undefined, sendFrom === "popup" ? [agentId] : undefined, undefined));
   });
 
   it("saves the note but respects the lower composer's in-flight upload gate", async () => {

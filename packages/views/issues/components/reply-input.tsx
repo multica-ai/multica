@@ -93,7 +93,9 @@ function ReplyInput({
   const previewAnnotations = useMemo(() => annotationsWithPending(annotations, annotationComposer?.pending), [annotations, annotationComposer?.pending]);
   const composedContent = useMemo(() => composeAnnotatedReply(content, previewAnnotations), [content, previewAnnotations]);
   const canSend = !targetMissing && (annotations.length ? hasReplyIntent(content, annotations) : !isEmpty);
-  const triggerPreview = useCommentTriggerPreview({ issueId, parentId, content: canSend || annotationComposer?.pending.note.trim() ? composedContent : "" });
+  // Saving the first pending annotation will fix the target before submission.
+  const previewParentId = annotations.length === 0 ? annotationComposer?.pending.sourceCommentId ?? parentId : parentId;
+  const triggerPreview = useCommentTriggerPreview({ issueId, parentId: previewParentId, content: !targetMissing && (canSend || annotationComposer?.pending.note.trim()) ? composedContent : "" });
   // Uploads for this reply session (MUL-5181) — owned by the coordinator. With
   // a draftKey they persist in the draft store so scroll-out/close no longer
   // drops an in-flight upload; without one (no persistence context) they fall
@@ -112,7 +114,7 @@ function ReplyInput({
     allowSteer: true,
     hasAttachments,
     steerByDefault,
-    resetKey: `${issueId}:${parentId}`,
+    resetKey: `${issueId}:${previewParentId}`,
   });
   const stopRunsBeforeSend = useStopRunsBeforeSend(issueId);
 
@@ -177,10 +179,13 @@ function ReplyInput({
     afterAccepted: () => (editorScrubbedRef.current ? "blur" : "none"),
     onSubmit: async (content) => {
       editorScrubbedRef.current = false;
-      const { suppressAgentIds, steerTaskIds } = routing;
+      const currentParentId = (draftKey ? useCommentDraftStore.getState().drafts[draftKey]?.replyTarget?.commentId : undefined) ?? parentId;
+      const previewTargetMatches = currentParentId === previewParentId;
+      const suppressAgentIds = previewTargetMatches ? routing.suppressAgentIds : [];
+      const steerTaskIds = previewTargetMatches ? routing.steerTaskIds : [];
       // A preview still catching up with an edited @mention can name a
       // recipient this comment no longer addresses: never stop a run on it.
-      const previewMatches = triggerPreview.isCurrent && commentTriggerPreviewSignature(content) === commentTriggerPreviewSignature(composedContent);
+      const previewMatches = previewTargetMatches && triggerPreview.isCurrent && commentTriggerPreviewSignature(content) === commentTriggerPreviewSignature(composedContent);
       const restartTaskIds = previewMatches ? routing.restartTaskIds : [];
       if (!(await stopRunsBeforeSend(restartTaskIds))) return false;
       if (draftKey) {
@@ -232,7 +237,7 @@ function ReplyInput({
 
   return (<>
     {annotationComposer?.render({
-      submit, submitting, uploading: gate.uploading, restart: routing.restartTaskIds.length > 0,
+      submit, submitting, uploading: gate.uploading, targetMissing, restart: routing.restartTaskIds.length > 0,
       draftContent: content, annotations,
       recipients: <CommentTriggerChips recipients={recipients} blocked={triggerPreview.blocked}
         hasAllMembersMention={triggerPreview.hasAllMembersMention} draftContent={composedContent} onActionChange={setAction} />,

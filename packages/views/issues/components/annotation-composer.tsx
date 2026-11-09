@@ -16,6 +16,7 @@ export interface AnnotationSendControls {
   submit: () => Promise<void>;
   submitting: boolean;
   uploading: boolean;
+  targetMissing?: boolean;
   restart: boolean;
   recipients: ReactNode;
   draftContent: string;
@@ -98,6 +99,9 @@ export function AnnotationComposer({
       {(sourceMissing || sourceChanged) && <p role={sourceMissing ? "alert" : undefined} className="px-2 text-caption text-muted-foreground">
         {t(($) => $.reply.annotations.source_changed)}
       </p>}
+      {controls?.targetMissing && <p role="alert" className="px-2 text-caption text-destructive">
+        {t(($) => $.reply.annotations.target_deleted)}
+      </p>}
       {!canSave && <p className="px-2 text-caption text-muted-foreground">{t(($) => $.reply.annotations.count_limit, { count: MAX_REPLY_ANNOTATIONS })}</p>}
       {sendAll && <p className="px-2 text-caption text-muted-foreground">
         {otherAnnotations ? t(($) => hasBody ? $.reply.annotations.send_with_annotations_and_body : $.reply.annotations.send_with_annotations, { count: otherAnnotations })
@@ -110,7 +114,7 @@ export function AnnotationComposer({
         <div className="min-w-0 flex-1">{controls?.recipients}</div>
         <div className="ml-auto flex items-center gap-1">
           {controls && <Button size="sm" variant={controls.restart ? "destructive" : "ghost"}
-            disabled={!annotation.note.trim() || !canSave || busy || controls.uploading} onClick={send} aria-busy={busy || undefined}>
+            disabled={!annotation.note.trim() || !canSave || busy || controls.uploading || controls.targetMissing} onClick={send} aria-busy={busy || undefined}>
             {busy && <Loader2 className="animate-spin" />}
             {t(($) => controls.restart ? $.comment.restart_send : sendAll ? $.reply.annotations.send_all : $.comment.send_tooltip)}
             <ShortcutKeycaps shortcut={SEND} decorative />

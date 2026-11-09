@@ -371,7 +371,7 @@ describe("comment edit — upload submit gate", () => {
 // Keep the real card, annotation hook, reply composer and submit wiring together.
 // Source parsing and persistence boundary matrices live in their own suites.
 describe("comment thread — selection reply", () => {
-  it.each([[false, "agent", "agent-1", "comment"], [true, "agent", "agent-1", "comment"], [false, "member", "user-1", "comment"], [false, "member", "other-user", "comment"], [false, "member", "user-1", "note"]] as const)("sends quotes in the source thread and clears overlays (open: %s, author: %s %s, type: %s)", async (keepNoteOpen, actorType, actorId, commentType) => {
+  it.each([[false, "agent", "agent-1", "comment", "lower"], [true, "agent", "agent-1", "comment", "lower"], [false, "member", "user-1", "comment", "lower"], [false, "member", "other-user", "comment", "lower"], [false, "member", "user-1", "note", "lower"], [false, "agent", "agent-1", "comment", "popup-button"], [false, "agent", "agent-1", "comment", "popup-shortcut"]] as const)("replies to the first annotated comment and clears overlays (open: %s, author: %s %s, type: %s, send: %s)", async (keepNoteOpen, actorType, actorId, commentType, sendFrom) => {
     Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: 1024 });
     Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: 768 });
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 10, 600, 400));
@@ -399,22 +399,51 @@ describe("comment thread — selection reply", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Comment" }), { target: { value: "Reply-specific note" } });
     expect(useCommentDraftStore.getState().getAnnotations("reply:issue-1:comment-1")).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
+    if (sendFrom === "lower") fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
     if (keepNoteOpen) {
       fireEvent.click(await screen.findByRole("button", { name: "Edit annotation 1" }));
       fireEvent.change(await screen.findByRole("textbox", { name: "Comment" }), { target: { value: "Unconfirmed edit" } });
     }
-    expect(container.querySelector('[data-annotation-thread="reply:issue-1:comment-1"]')).toHaveTextContent("1 annotation");
+    if (sendFrom === "lower") expect(container.querySelector('[data-annotation-thread="reply:issue-1:comment-1"]')).toHaveTextContent("1 annotation");
     expect(screen.queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Preview reply" })).not.toBeInTheDocument();
-    fireEvent.click(within(container).getByRole("button", { name: "Send" }));
+    if (sendFrom === "popup-shortcut") fireEvent.keyDown(screen.getByRole("textbox", { name: "Comment" }), { key: "Enter", ctrlKey: true });
+    else fireEvent.click(within(sendFrom === "lower" ? container : document.querySelector<HTMLElement>("[data-reply-annotation-overlay]")!).getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onReply).toHaveBeenCalledTimes(1));
-    expect(onReply).toHaveBeenCalledWith("comment-1", "> Selected agent text\n\nReply-specific note", undefined, undefined, undefined);
+    expect(onReply).toHaveBeenCalledWith("agent-child", "> Selected agent text\n\nReply-specific note", undefined, undefined, undefined);
     await waitFor(() => {
       expect(useCommentDraftStore.getState().getAnnotations("reply:issue-1:comment-1")).toHaveLength(0);
       expect(document.querySelector("[data-reply-annotation-overlay]")).not.toBeInTheDocument();
     });
     expect(useCommentDraftStore.getState().drafts["new:issue-1"]).toBe(taskDraft);
     expect(useCommentDraftStore.getState().getDraft("reply:issue-1:other-thread")).toBe("Other thread draft");
+  });
+
+  it.each([false, true])("blocks lower and popup sends when the fixed target is gone (tombstone: %s)", async (tombstone) => {
+    const draftKey = "reply:issue-1:comment-1";
+    const store = useCommentDraftStore.getState();
+    const annotation = { id: "saved", sourceCommentId: "agent-child", sourceActorName: "Agent B", quote: "Saved quote", start: 0, prefix: "", suffix: "", note: "Keep this note" };
+    store.setDraft(draftKey, "Keep this body");
+    store.addAnnotation(draftKey, annotation);
+    const other = { ...annotation, id: "other", sourceCommentId: entry.id, sourceActorName: "Ada", quote: entry.content!, note: "Keep this other note" };
+    store.addAnnotation(draftKey, other);
+    const onReply = vi.fn().mockResolvedValue("should-not-send");
+    const deletedChild = { ...entry, id: "agent-child", parent_id: entry.id, deleted_at: "2026-11-09T00:00:00Z", content: "" };
+    const { container } = renderCard(undefined, { replies: tombstone ? [deletedChild] : [], onReply });
+    expect(await screen.findByRole("alert")).toHaveTextContent("The reply target was deleted");
+    expect(within(container).getByRole("button", { name: "Send" })).toBeDisabled();
+    fireEvent.keyDown(within(container).getByTestId("editor"), { key: "Enter", ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "2 annotations" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "2 annotations" })).getByRole("button", { name: "Edit annotation 2" }));
+    const input = await screen.findByRole("textbox", { name: "Comment" });
+    const popup = within(input.closest("[data-reply-annotation-overlay]")! as HTMLElement);
+    expect(popup.getByRole("button", { name: "Send all" })).toBeDisabled();
+    expect(popup.getByText(/The reply target was deleted/)).toBeVisible();
+    expect(popup.getByRole("button", { name: "Save annotation" })).toBeEnabled();
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    await act(async () => {});
+    expect(onReply).not.toHaveBeenCalled();
+    expect(useCommentDraftStore.getState().getDraft(draftKey)).toBe("Keep this body");
+    expect(useCommentDraftStore.getState().getAnnotations(draftKey)).toEqual([annotation, other]);
   });
 });

@@ -1038,6 +1038,12 @@ function CommentCardImpl({
   const locale = useLocale();
   const timeAgo = useTimeAgo();
   const { getActorName } = useActorName();
+  const replyTarget = useCommentDraftStore((s) => s.drafts[`reply:${issueId}:${entry.id}`]?.replyTarget);
+  const replyTargetId = replyTarget?.commentId ?? entry.id;
+  // A deleted target's tombstone is as gone as a removed row.
+  const isReplyTargetMissing = (id: string) => id !== entry.id
+    && !replies.some((r) => r.id === id && !isDeletedComment(r));
+  const replyTargetMissing = !!replyTarget && isReplyTargetMissing(replyTargetId);
   // A reply here goes into the running turn of a run that belongs to this
   // thread by default; another thread's turn is only reached by choice.
   const steerThreadRunByDefault = useCallback(
@@ -1520,7 +1526,8 @@ function CommentCardImpl({
               <div className="border-t border-border/50 px-4 max-md:px-3 py-2.5">
                 <ReplyInput
                   issueId={issueId}
-                  parentId={entry.id}
+                  parentId={replyTargetId}
+                  targetMissing={replyTargetMissing}
                   annotationComposer={annotation.composer}
                   placeholder={t(($) => $.reply.placeholder)}
                   size="sm"
@@ -1529,7 +1536,12 @@ function CommentCardImpl({
                   draftKey={`reply:${issueId}:${entry.id}`}
                   onEditAnnotation={(id) => annotation.editAnnotation(id, true)}
                   steerByDefault={steerThreadRunByDefault}
-                  onSubmit={(content, attachmentIds, suppressAgentIds, steerTaskIds) => onReply(entry.id, content, attachmentIds, suppressAgentIds, steerTaskIds)}
+                  onSubmit={(content, attachmentIds, suppressAgentIds, steerTaskIds) => {
+                    // The popup can save the first annotation and submit in the same event.
+                    const targetId = useCommentDraftStore.getState().drafts[`reply:${issueId}:${entry.id}`]?.replyTarget?.commentId ?? entry.id;
+                    return isReplyTargetMissing(targetId) ? Promise.resolve(false)
+                      : onReply(targetId, content, attachmentIds, suppressAgentIds, steerTaskIds);
+                  }}
                   onAccepted={onReplyAccepted}
                 />
               </div>
