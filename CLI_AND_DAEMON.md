@@ -942,12 +942,13 @@ multica project delete <id>
 ### Associating Issues with Projects
 
 Use the `--project` flag on `issue create` / `issue update` to attach an issue to a
-project, or on `issue list` to filter issues by project:
+project, or on `issue list` / `issue search` to filter issues by project:
 
 ```bash
 multica issue create --title "Login bug" --project <project-id>
 multica issue update <issue-id> --project <project-id>
 multica issue list --project <project-id>
+multica issue search "Login" --project <project-id>
 ```
 
 ## Setup
