@@ -2442,6 +2442,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     const land = () => {
       const el = document.getElementById(`comment-${landingId}`);
       if (!el) {
+        // The initial jump can precede Virtuoso's first viewport measurement.
+        if (!isFlatTimeline) virtuosoRef.current?.scrollToIndex({ index: targetIdx, align: "center" });
         if (++mountFrames < 60) rafId = requestAnimationFrame(land);
         return;
       }

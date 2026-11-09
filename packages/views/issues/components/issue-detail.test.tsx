@@ -481,7 +481,7 @@ vi.mock("@multica/core/issues/stores", async () => ({
 // layout.
 const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
 const scrollToIndexSpy = vi.hoisted(() => vi.fn());
-const mockVirtualWindow = vi.hoisted(() => ({ enabled: false }));
+const mockVirtualWindow = vi.hoisted(() => ({ enabled: false, delayedViewport: false }));
 
 vi.mock("react-virtuoso", () => ({
   Virtuoso: forwardRef(function MockVirtuoso(
@@ -493,11 +493,17 @@ vi.mock("react-virtuoso", () => ({
     ref: any,
   ) {
     const [windowStart, setWindowStart] = useState(0);
+    const viewportMeasured = useRef(!mockVirtualWindow.delayedViewport);
+    useEffect(() => {
+      if (!mockVirtualWindow.delayedViewport) return;
+      const timer = window.setTimeout(() => { viewportMeasured.current = true; }, 100);
+      return () => window.clearTimeout(timer);
+    }, []);
     useImperativeHandle(ref, () => ({
       scrollIntoView: vi.fn(),
       scrollToIndex: (location: { index: number }) => {
         scrollToIndexSpy(location);
-        if (mockVirtualWindow.enabled) setWindowStart(Math.max(0, location.index - 2));
+        if (mockVirtualWindow.enabled && viewportMeasured.current) setWindowStart(Math.max(0, location.index - 2));
       },
     }));
     const start = mockVirtualWindow.enabled ? windowStart : 0;
@@ -516,6 +522,7 @@ vi.mock("react-virtuoso", () => ({
 // with a spy so the deep-link effect's call can be observed.
 beforeEach(() => {
   mockVirtualWindow.enabled = false;
+  mockVirtualWindow.delayedViewport = false;
   scrollIntoViewSpy.mockClear();
   scrollToIndexSpy.mockClear();
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
@@ -2428,8 +2435,13 @@ describe("IssueDetail (shared)", () => {
   });
 
   describe("highlightCommentId scroll-to-comment", () => {
-    it.each(["root", "reply"])("keeps long history virtualized while landing on a deep-linked %s", async (kind) => {
+    it.each([
+      { kind: "root", delayedViewport: false },
+      { kind: "reply", delayedViewport: false },
+      { kind: "root", delayedViewport: true },
+    ])("keeps long history virtualized for a $kind (late viewport: $delayedViewport)", async ({ kind, delayedViewport }) => {
       mockVirtualWindow.enabled = true;
+      mockVirtualWindow.delayedViewport = delayedViewport;
       const history = Array.from({ length: 120 }, (_, index) => ({
         ...mockTimeline[0]!,
         id: `history-${index}`,
