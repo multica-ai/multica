@@ -727,6 +727,7 @@
     "restart_failed": "現在の実行を停止できませんでした。メッセージは送信されていません。"
   },
   "reply": {
+    "recipients_changed": "返信先が変更されました。送信先を確認してから、もう一度送信してください。",
     "placeholder": "返信を残す...",
     "annotations": {
       "send_all": "すべて送信",

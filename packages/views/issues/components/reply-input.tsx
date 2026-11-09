@@ -4,6 +4,7 @@ import { composeAnnotatedReply, EMPTY_REPLY_ANNOTATIONS, hasReplyIntent } from "
 import { annotationsWithPending, type AnnotationComposerSlot } from "./annotation-composer";
 import { ReplyAnnotations } from "./reply-annotations";
 import { useRef, useState, useEffect, useMemo } from "react";
+import { toast } from "sonner";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
@@ -180,12 +181,14 @@ function ReplyInput({
     onSubmit: async (content) => {
       editorScrubbedRef.current = false;
       const currentParentId = (draftKey ? useCommentDraftStore.getState().drafts[draftKey]?.replyTarget?.commentId : undefined) ?? parentId;
-      const previewTargetMatches = currentParentId === previewParentId;
-      const suppressAgentIds = previewTargetMatches ? routing.suppressAgentIds : [];
-      const steerTaskIds = previewTargetMatches ? routing.steerTaskIds : [];
+      if (currentParentId !== previewParentId) {
+        toast.error(t(($) => $.reply.recipients_changed));
+        return false;
+      }
+      const { suppressAgentIds, steerTaskIds } = routing;
       // A preview still catching up with an edited @mention can name a
       // recipient this comment no longer addresses: never stop a run on it.
-      const previewMatches = previewTargetMatches && triggerPreview.isCurrent && commentTriggerPreviewSignature(content) === commentTriggerPreviewSignature(composedContent);
+      const previewMatches = triggerPreview.isCurrent && commentTriggerPreviewSignature(content) === commentTriggerPreviewSignature(composedContent);
       const restartTaskIds = previewMatches ? routing.restartTaskIds : [];
       if (!(await stopRunsBeforeSend(restartTaskIds))) return false;
       if (draftKey) {

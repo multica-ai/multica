@@ -70,7 +70,7 @@ export function AnnotationComposer({
     if (note.trim()) onSave(note, true);
   };
   const send = async () => {
-    if (!controls || busy || inFlight.current || !canSave) return;
+    if (!controls || controls.targetMissing || busy || inFlight.current || !canSave) return;
     const note = editorRef.current?.getMarkdown() ?? "";
     if (!note.trim()) return;
     inFlight.current = true;

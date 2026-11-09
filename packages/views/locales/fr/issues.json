@@ -749,6 +749,7 @@
     "restart_failed": "Impossible d'arrêter l'exécution en cours. Votre message n'a pas été envoyé."
   },
   "reply": {
+    "recipients_changed": "La cible de la réponse a changé. Vérifiez les destinataires avant de réessayer.",
     "placeholder": "Laisser une réponse...",
     "annotations": {
       "send_all": "Tout envoyer",

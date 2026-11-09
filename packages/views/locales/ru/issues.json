@@ -792,6 +792,7 @@
     "recipient_count_many": "{{count}} агентов получат это"
   },
   "reply": {
+    "recipients_changed": "Адресат ответа изменился. Проверьте получателей перед повторной отправкой.",
     "placeholder": "Оставить ответ...",
     "annotations": {
       "send_all": "Отправить всё",

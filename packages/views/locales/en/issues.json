@@ -749,6 +749,7 @@
     "restart_failed": "Couldn't stop the current run. Your message wasn't sent."
   },
   "reply": {
+    "recipients_changed": "Reply target changed. Review the recipients before sending again.",
     "placeholder": "Leave a reply...",
     "annotations": {
       "send_all": "Send all",

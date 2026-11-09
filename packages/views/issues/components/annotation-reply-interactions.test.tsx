@@ -7,6 +7,7 @@ import { configureShortcutPlatform, createShortcutChord, useShortcutStore } from
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { composeAnnotatedReply, type ReplyAnnotation } from "@multica/core/drafts/reply-annotation";
+import { toast } from "sonner";
 import { renderWithI18n } from "../../test/i18n";
 import { useCommentAnnotations } from "./use-comment-annotations";
 import { ReplyInput } from "./reply-input";
@@ -85,7 +86,7 @@ beforeEach(() => {
   Range.prototype.getBoundingClientRect = function () { return this.collapsed ? new DOMRect() : new DOMRect(10, 10, 120, 20); };
   Range.prototype.getClientRects = function () { return [this.getBoundingClientRect()] as unknown as DOMRectList; };
 });
-afterEach(() => { useShortcutStore.getState().resetAll(); configureShortcutPlatform(null); });
+afterEach(() => { vi.restoreAllMocks(); useShortcutStore.getState().resetAll(); configureShortcutPlatform(null); });
 
 describe("annotation draft submission through the real composer", () => {
   it.each([false, true])("sends all saved annotations and body through the existing composer (description: %s)", async (description) => {
@@ -192,7 +193,8 @@ describe("annotation draft submission through the real composer", () => {
     expect(onSubmit.mock.calls[0]![0]).not.toContain("Over quota");
   });
 
-  it.each(["popup", "lower"])("shares recipient choices and applies them only to the submitted target (send: %s)", async (sendFrom) => {
+  it.each(["popup", "lower"])("requires matching targets before applying recipient choices (send: %s)", async (sendFrom) => {
+    const showError = vi.spyOn(toast, "error").mockReturnValue("test-toast");
     const agentId = "11111111-1111-1111-1111-111111111111";
     preview.mockResolvedValue({ agents: [{ id: agentId, name: "Agent", source: "thread_parent", reason: "" }] });
     if (sendFrom === "lower") useCommentDraftStore.getState().setDraft(key, "Root reply body");
@@ -206,8 +208,21 @@ describe("annotation draft submission through the real composer", () => {
     expect(input).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByRole("button", { name: "Agent trigger: Won't start this time" })).toHaveLength(2));
     if (sendFrom === "popup") fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
-    else fireEvent.click(within(view.container).getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(sendFrom === "popup" ? "> Child text\n\nPlease revise" : "Root reply body", undefined, sendFrom === "popup" ? [agentId] : undefined, undefined));
+    else {
+      fireEvent.click(within(view.container).getByRole("button", { name: "Send" }));
+      await waitFor(() => expect(showError).toHaveBeenCalledWith("Reply target changed. Review the recipients before sending again."));
+      expect(onSubmit).not.toHaveBeenCalled();
+      expect(useCommentDraftStore.getState().getDraft(key)).toBe("Root reply body");
+      expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(0);
+      expect(input).toHaveTextContent("Please revise");
+      // Return to the root reply and explicitly confirm its recipient choice.
+      fireEvent.keyDown(input, { key: "Escape" });
+      const rootChip = await within(view.container).findByRole("button", { name: "Agent trigger: Will start when sent" });
+      fireEvent.click(rootChip);
+      fireEvent.click(await screen.findByRole("menuitemradio", { name: /Won't start this time/ }));
+      fireEvent.click(within(view.container).getByRole("button", { name: "Send" }));
+    }
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(sendFrom === "popup" ? "> Child text\n\nPlease revise" : "Root reply body", undefined, [agentId], undefined));
   });
 
   it("saves the note but respects the lower composer's in-flight upload gate", async () => {

@@ -727,6 +727,7 @@
     "restart_failed": "沒能停止當前執行，訊息還沒有傳送。"
   },
   "reply": {
+    "recipients_changed": "回覆目標已變更。請重新確認收件者後再傳送。",
     "placeholder": "回覆...",
     "annotations": {
       "send_all": "全部傳送",

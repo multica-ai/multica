@@ -440,10 +440,12 @@ describe("comment thread — selection reply", () => {
     expect(popup.getByRole("button", { name: "Send all" })).toBeDisabled();
     expect(popup.getByText(/The reply target was deleted/)).toBeVisible();
     expect(popup.getByRole("button", { name: "Save annotation" })).toBeEnabled();
+    fireEvent.change(input, { target: { value: "Unconfirmed edit" } });
     fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
     await act(async () => {});
     expect(onReply).not.toHaveBeenCalled();
     expect(useCommentDraftStore.getState().getDraft(draftKey)).toBe("Keep this body");
     expect(useCommentDraftStore.getState().getAnnotations(draftKey)).toEqual([annotation, other]);
+    expect(input).toHaveValue("Unconfirmed edit");
   });
 });

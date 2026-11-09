@@ -727,6 +727,7 @@
     "restart_failed": "没能停止当前运行，消息还没有发送。"
   },
   "reply": {
+    "recipients_changed": "回复目标已变化。请重新确认接收者后再发送。",
     "placeholder": "回复...",
     "annotations": {
       "send_all": "全部发送",

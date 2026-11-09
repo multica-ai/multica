@@ -727,6 +727,7 @@
     "restart_failed": "현재 실행을 중지하지 못했습니다. 메시지는 보내지 않았습니다."
   },
   "reply": {
+    "recipients_changed": "답글 대상이 변경되었습니다. 받는 사람을 확인한 뒤 다시 보내 주세요.",
     "placeholder": "답글 남기기...",
     "annotations": {
       "send_all": "모두 보내기",
