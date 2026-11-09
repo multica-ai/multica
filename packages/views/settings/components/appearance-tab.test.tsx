@@ -155,16 +155,15 @@ describe("AppearanceTab", () => {
     expect(screen.getByRole("combobox", { name: "Code font" })).toHaveTextContent("Geist Mono");
   });
 
-  it("picks the accent and density", async () => {
+  it("picks the density and contrast, and has no accent colour of its own", async () => {
     const user = userEvent.setup();
     render(<AppearanceTab />, { wrapper: Wrapper });
+    expect(screen.queryByRole("radiogroup", { name: "Accent color" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("radio", { name: "Violet" }));
     await user.click(within(group("Density")).getByRole("button", { name: "Compact" }));
     await user.click(screen.getByRole("switch", { name: "Increase contrast" }));
 
-    expect(state()).toMatchObject({ accent: "violet", density: "compact", highContrast: true });
-    expect(screen.getByRole("radio", { name: "Violet" })).toHaveAttribute("aria-checked", "true");
+    expect(state()).toMatchObject({ density: "compact", highContrast: true });
   });
 
   it("imports a theme file after confirmation, and removes it again", async () => {

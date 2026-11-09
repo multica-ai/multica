@@ -240,17 +240,6 @@
       "has_assets_one": "{{count}} font or image",
       "has_assets_other": "{{count}} fonts and images"
     },
-    "accent": {
-      "title": "Accent color",
-      "description": "Active states, links and unread badges.",
-      "theme": "Theme color",
-      "blue": "Blue",
-      "violet": "Violet",
-      "green": "Green",
-      "orange": "Orange",
-      "pink": "Pink",
-      "graphite": "Graphite"
-    },
     "theme_options": {
       "title": "Theme options",
       "description": "Provided by {{name}}.",

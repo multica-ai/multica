@@ -222,17 +222,6 @@
       "has_assets_one": "{{count}} fuente o imagen",
       "has_assets_other": "{{count}} fuentes e imágenes"
     },
-    "accent": {
-      "title": "Color de acento",
-      "description": "Estados activos, enlaces e indicadores de no leídos.",
-      "theme": "Color del tema",
-      "blue": "Azul",
-      "violet": "Violeta",
-      "green": "Verde",
-      "orange": "Naranja",
-      "pink": "Rosa",
-      "graphite": "Grafito"
-    },
     "theme_options": {
       "title": "Opciones del tema",
       "description": "Las ofrece {{name}}.",

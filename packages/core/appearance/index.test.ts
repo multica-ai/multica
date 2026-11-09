@@ -51,7 +51,7 @@ describe("appearance store", () => {
 
   it("resets everything to the defaults", () => {
     const { set, setThemeOption, reset } = useAppearanceStore.getState();
-    set({ theme: "pop", accent: "green", contentFont: "serif" });
+    set({ theme: "pop", contentFont: "serif" });
     setThemeOption("pop", "signal", "sky");
     reset();
     expect(isDefaultAppearance(sanitizeAppearance(useAppearanceStore.getState()))).toBe(true);
@@ -60,10 +60,11 @@ describe("appearance store", () => {
   it("reads older saved shapes", async () => {
     localStorage.setItem(
       APPEARANCE_STORAGE_KEY,
-      JSON.stringify({ state: { style: "pop", cjkFont: "kai" }, version: 0 }),
+      JSON.stringify({ state: { style: "pop", cjkFont: "kai", accent: "violet" }, version: 0 }),
     );
     await useAppearanceStore.persist.rehydrate();
     expect(useAppearanceStore.getState()).toMatchObject({ theme: "pop", uiCjkFont: "kai" });
+    expect(useAppearanceStore.getState()).not.toHaveProperty("accent");
   });
 });
 
@@ -136,12 +137,10 @@ describe("appearanceStylesheet", () => {
     expect(appearanceThemeAttributes(defaults, DEFAULT_APPEARANCE)).toEqual({ "data-theme": null });
   });
 
-  it("writes accent and contrast with selectors that outrank the theme's", () => {
-    const prefs = { ...DEFAULT_APPEARANCE, theme: "github", accent: "violet", highContrast: true } as const;
+  it("writes contrast with selectors that outrank the theme's", () => {
+    const prefs = { ...DEFAULT_APPEARANCE, theme: "github", highContrast: true } as const;
     const css = appearanceStylesheet(activeTheme(prefs), prefs);
-    expect(css).toContain(":root:not(.dark) { --brand: oklch(0.52 0.2 292);");
-    expect(css).toContain("--nav-item-active-color: color-mix(in oklab, var(--brand)");
-    expect(css).toContain("--rail-item-active-background: color-mix(in srgb, var(--brand) 12%, transparent);");
+    expect(css).not.toContain("--brand");
     expect(css).toMatch(/:root:not\(\.dark\), :root\.dark \{ --muted-foreground: color-mix/);
     expect(activeTheme(prefs).css).toMatch(/^\.theme-light \{/);
   });

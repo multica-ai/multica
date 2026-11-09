@@ -240,17 +240,6 @@
       "has_assets_one": "{{count}} police ou image",
       "has_assets_other": "{{count}} polices et images"
     },
-    "accent": {
-      "title": "Couleur d’accent",
-      "description": "États actifs, liens et pastilles non lues.",
-      "theme": "Couleur du thème",
-      "blue": "Bleu",
-      "violet": "Violet",
-      "green": "Vert",
-      "orange": "Orange",
-      "pink": "Rose",
-      "graphite": "Graphite"
-    },
     "theme_options": {
       "title": "Options du thème",
       "description": "Proposées par {{name}}.",

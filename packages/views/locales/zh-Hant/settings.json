@@ -236,17 +236,6 @@
       "has_options_other": "{{count}} 個選項",
       "has_assets_other": "{{count}} 個字型和圖片"
     },
-    "accent": {
-      "title": "強調色",
-      "description": "啟用狀態、連結和未讀標記。",
-      "theme": "主題色",
-      "blue": "藍",
-      "violet": "紫",
-      "green": "綠",
-      "orange": "橙",
-      "pink": "粉",
-      "graphite": "石墨"
-    },
     "theme_options": {
       "title": "主題選項",
       "description": "由 {{name}} 提供。",

@@ -236,17 +236,6 @@
       "has_options_other": "オプション {{count}} 個",
       "has_assets_other": "フォント・画像 {{count}} 個"
     },
-    "accent": {
-      "title": "アクセントカラー",
-      "description": "アクティブ状態、リンク、未読バッジ。",
-      "theme": "テーマの色",
-      "blue": "ブルー",
-      "violet": "バイオレット",
-      "green": "グリーン",
-      "orange": "オレンジ",
-      "pink": "ピンク",
-      "graphite": "グラファイト"
-    },
     "theme_options": {
       "title": "テーマのオプション",
       "description": "{{name}} が提供しています。",

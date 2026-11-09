@@ -83,10 +83,9 @@ Set variables on `.theme-light` and `.theme-dark` (both on `<html>`). The
 CSS loads after the app's own styles while the theme is active, so at equal
 specificity the theme wins; keep selectors that simple and avoid
 `!important`. What the person picks on the Appearance page still wins over a
-theme: the accent colour replaces `--brand`, `--ring` and the active
-sidebar and rail backgrounds (plus the active sidebar text), high contrast replaces the
-muted and border colours, and font choices other than the defaults replace
-the font variables.
+theme: high contrast replaces the muted and border colours, and font choices
+other than the defaults replace the font variables. Colour is the theme's
+alone; to let people pick one, declare an option.
 
 ## Variables
 

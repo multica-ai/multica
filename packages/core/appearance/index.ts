@@ -23,8 +23,8 @@ export * from "./theme-archive";
 
 /**
  * Appearance sits on top of light/dark mode: a theme (see ./themes) with its
- * options, an accent colour, type for the interface and for content, density
- * and two accessibility switches. All of it is saved on this device.
+ * options, type for the interface and for content, density and two
+ * accessibility switches. All of it is saved on this device.
  * `AppearanceSync` in @multica/views writes it onto `<html>`: global
  * variables as inline style, the theme's CSS and the adjustments on top of
  * it as two generated stylesheets.
@@ -62,40 +62,10 @@ export type ContentLeading = (typeof CONTENT_LEADINGS)[number];
 export const DENSITIES = ["compact", "default", "comfortable"] as const;
 export type Density = (typeof DENSITIES)[number];
 
-/** `theme` keeps the theme's own brand colour. */
-export const ACCENTS = ["theme", "blue", "violet", "green", "orange", "pink", "graphite"] as const;
-export type Accent = (typeof ACCENTS)[number];
-
-/**
- * An accented active item: --brand at this share over what sits behind it.
- * Sidebar items also take --brand mixed toward --foreground as their text, so
- * it stays legible on that tint; rail items keep the frame's own text.
- */
-export const ACCENT_ACTIVE_TINT = 12;
-export const ACCENT_ACTIVE_TEXT = 70;
-
-/** Light and dark values of --brand per accent, and the text that sits on it. */
-export const ACCENT_COLORS: Record<
-  Exclude<Accent, "theme">,
-  { light: string; dark: string; darkForeground?: string }
-> = {
-  blue: { light: "oklch(0.53 0.19 256.4)", dark: "oklch(0.75 0.13 255)" },
-  violet: { light: "oklch(0.52 0.2 292)", dark: "oklch(0.75 0.13 292)" },
-  green: { light: "oklch(0.5 0.11 160)", dark: "oklch(0.75 0.13 160)" },
-  orange: { light: "oklch(0.55 0.16 45)", dark: "oklch(0.76 0.13 52)" },
-  pink: { light: "oklch(0.54 0.2 355)", dark: "oklch(0.76 0.13 355)" },
-  graphite: {
-    light: "oklch(0.32 0.01 286)",
-    dark: "oklch(0.86 0.01 286)",
-    darkForeground: "oklch(0.21 0.006 285.885)",
-  },
-};
-
 export interface AppearancePreferences {
   theme: string;
   /** Option values per theme id, so switching themes keeps each one's choices. */
   themeOptions: Readonly<Record<string, ThemeOptionValues>>;
-  accent: Accent;
   uiFont: UiFont;
   uiCjkFont: CjkFontChoice;
   fontSize: FontSize;
@@ -112,7 +82,6 @@ export interface AppearancePreferences {
 export const DEFAULT_APPEARANCE: AppearancePreferences = {
   theme: DEFAULT_THEME_ID,
   themeOptions: {},
-  accent: "theme",
   uiFont: "inter",
   uiCjkFont: "sans",
   fontSize: DEFAULT_FONT_SIZE,
@@ -203,7 +172,6 @@ export function sanitizeAppearance(stored: unknown): AppearancePreferences {
       p.theme ?? p.style,
     ),
     themeOptions: sanitizeThemeOptions(p.themeOptions),
-    accent: pick("accent", oneOf(ACCENTS)),
     uiFont: pick("uiFont", oneOf(UI_FONTS)),
     uiCjkFont: pick("uiCjkFont", isCjkChoice, p.uiCjkFont ?? p.cjkFont),
     fontSize: pick("fontSize", oneOf(FONT_SIZES)),
@@ -351,8 +319,8 @@ const declare = (variables: Record<string, string>) =>
     .join(" ");
 
 /**
- * What the person chose on top of the theme: its option values, accent and
- * contrast. Written after the theme's CSS, with selectors that outrank
+ * What the person chose on top of the theme: its option values, contrast
+ * and motion. Written after the theme's CSS, with selectors that outrank
  * `.theme-light` and `.theme-dark`, so they hold whichever theme is active.
  */
 export function appearanceStylesheet(theme: Theme, prefs: AppearancePreferences): string {
@@ -360,23 +328,6 @@ export function appearanceStylesheet(theme: Theme, prefs: AppearancePreferences)
   const options = themeOptionVariables(theme, prefs.themeOptions[theme.id]);
   if (Object.keys(options.light).length > 0) {
     parts.push(`:root.theme-light { ${declare(options.light)} }`, `:root.theme-dark { ${declare(options.dark)} }`);
-  }
-  if (prefs.accent !== "theme") {
-    const accent = ACCENT_COLORS[prefs.accent];
-    parts.push(
-      `:root:not(.dark) { --brand: ${accent.light}; --brand-foreground: oklch(0.985 0 0); }`,
-      `:root.dark { --brand: ${accent.dark}; --brand-foreground: ${accent.darkForeground ?? "oklch(0.985 0 0)"}; }`,
-    );
-    const tint = `color-mix(in srgb, var(--brand) ${ACCENT_ACTIVE_TINT}%, transparent)`;
-    const text = `color-mix(in oklab, var(--brand) ${ACCENT_ACTIVE_TEXT}%, var(--foreground))`;
-    parts.push(
-      `${BOTH_MODES} { ${declare({
-        "--nav-item-active-background": tint,
-        "--nav-item-active-color": text,
-        "--rail-item-active-background": tint,
-        "--ring": "var(--brand)",
-      })} }`,
-    );
   }
   if (prefs.highContrast) {
     const toward = (share: number) =>
@@ -444,7 +395,6 @@ export function selectAppearance(state: AppearanceState): AppearancePreferences 
   return {
     theme: state.theme,
     themeOptions: state.themeOptions,
-    accent: state.accent,
     uiFont: state.uiFont,
     uiCjkFont: state.uiCjkFont,
     fontSize: state.fontSize,

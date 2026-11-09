@@ -44,8 +44,6 @@ import { Slider } from "@multica/ui/components/ui/slider";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import {
-  ACCENT_COLORS,
-  ACCENTS,
   BUILT_IN_THEMES,
   CJK_FONTS,
   CODE_FONTS,
@@ -128,7 +126,7 @@ function useThemeSetsFont(variable: "font-ui" | "font-mono"): boolean {
 const LOAD_LOCAL_FONTS = "__load_local_fonts";
 
 /**
- * Appearance: colour (mode, theme, accent), the active theme's options,
+ * Appearance: colour (mode and theme), the active theme's options,
  * interface text, content text, and layout and accessibility. Every change
  * applies at once, so the page itself is the preview.
  */
@@ -183,7 +181,6 @@ function ColorSection() {
   const { theme: mode, setTheme: setMode } = useTheme();
   const appliedMode = useAppliedMode();
   const theme = useAppearanceStore((s) => s.theme);
-  const accent = useAppearanceStore((s) => s.accent);
   const set = useAppearanceStore((s) => s.set);
   const installed = useInstalledThemesStore((s) => s.themes);
   const uninstall = useInstalledThemesStore((s) => s.uninstall);
@@ -192,9 +189,6 @@ function ColorSection() {
   const modeValue: ModeChoice = mode === "light" || mode === "dark" ? mode : "system";
   const modeLabel = t(($) => $.appearance.mode.title);
   const themeLabel = t(($) => $.appearance.theme.title);
-  const accentLabel = t(($) => $.appearance.accent.title);
-  const current = activeTheme({ theme }, safeMode.active);
-  const themeBrand = swatchTokens(current, appliedMode).brand;
   const selected = [...BUILT_IN_THEMES, ...installed].find((manifest) => manifest.id === theme);
   const selectedInstalled = installed.find((manifest) => manifest.id === theme);
   const items = [...BUILT_IN_THEMES, ...installed].map((manifest) => ({
@@ -293,23 +287,6 @@ function ColorSection() {
             </Button>
           </div>
         ) : null}
-        <SettingsRow
-          label={accentLabel}
-          description={t(($) => $.appearance.accent.description)}
-          anchor="accent"
-        >
-          <div role="radiogroup" aria-label={accentLabel} className="flex flex-wrap items-center gap-2.5">
-            {ACCENTS.map((id) => (
-              <AccentSwatch
-                key={id}
-                label={t(($) => $.appearance.accent[id])}
-                color={id === "theme" ? themeBrand : ACCENT_COLORS[id][appliedMode]}
-                selected={accent === id}
-                onSelect={() => set({ accent: id })}
-              />
-            ))}
-          </div>
-        </SettingsRow>
       </SettingsCard>
     </SettingsSection>
   );
@@ -562,7 +539,7 @@ function ThemeOptionRow({
           {swatches ? (
             <div role="radiogroup" aria-label={label} className="flex items-center gap-2.5">
               {option.choices.map((choice) => (
-                <AccentSwatch
+                <ColorSwatch
                   key={choice.value}
                   label={localizedText(choice.label, locale)}
                   color={choice.swatch!}
@@ -704,7 +681,7 @@ function expandHex(hex: string): string {
   return `#${[...hex.slice(1)].map((c) => c + c).join("")}`;
 }
 
-function AccentSwatch({
+function ColorSwatch({
   label,
   color,
   selected,

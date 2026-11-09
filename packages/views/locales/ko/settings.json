@@ -236,17 +236,6 @@
       "has_options_other": "옵션 {{count}}개",
       "has_assets_other": "글꼴·이미지 {{count}}개"
     },
-    "accent": {
-      "title": "강조 색상",
-      "description": "활성 상태, 링크, 읽지 않음 배지.",
-      "theme": "테마 색상",
-      "blue": "파랑",
-      "violet": "보라",
-      "green": "초록",
-      "orange": "주황",
-      "pink": "분홍",
-      "graphite": "그래파이트"
-    },
     "theme_options": {
       "title": "테마 옵션",
       "description": "{{name}}에서 제공해요.",

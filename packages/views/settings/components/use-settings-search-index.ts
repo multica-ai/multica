@@ -61,12 +61,6 @@ export function useSettingsSearchIndex(
       },
       {
         tab: "appearance",
-        anchor: "accent",
-        title: t(($) => $.appearance.accent.title),
-        description: t(($) => $.appearance.accent.description),
-      },
-      {
-        tab: "appearance",
         anchor: "ui-text",
         title: t(($) => $.appearance.ui_text.title),
         description: t(($) => $.appearance.ui_text.description),

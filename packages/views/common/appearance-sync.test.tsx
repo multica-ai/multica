@@ -75,7 +75,7 @@ describe("AppearanceSync", () => {
     render(<AppearanceSync />);
     act(() => {
       const { set, setThemeOption } = useAppearanceStore.getState();
-      set({ theme: "pop", accent: "violet", uiFont: "serif", fontSize: 15, contentCjkFont: "serif", density: "comfortable" });
+      set({ theme: "pop", highContrast: true, uiFont: "serif", fontSize: 15, contentCjkFont: "serif", density: "comfortable" });
       setThemeOption("pop", "status-blocks", false);
     });
     expect(html().getAttribute("data-theme")).toBe("pop");
@@ -88,7 +88,7 @@ describe("AppearanceSync", () => {
     expect(html().style.getPropertyValue("--issue-row-height")).toBe("42px");
     expect(themeCss()?.textContent).toContain("--button-primary:");
     expect(themeCss()?.textContent).toContain('[data-mc="issue-group-header"]');
-    expect(sheet()?.textContent).toContain("--brand: oklch(0.52 0.2 292)");
+    expect(sheet()?.textContent).toContain("--muted-foreground: color-mix(");
 
     act(() => useAppearanceStore.getState().set({ theme: "github" }));
     expect(html().hasAttribute("data-theme-option-signal")).toBe(false);
@@ -103,7 +103,7 @@ describe("AppearanceSync", () => {
   });
 
   it("keeps the adjustments after a theme stylesheet created later", () => {
-    useAppearanceStore.setState({ accent: "green" });
+    useAppearanceStore.setState({ highContrast: true });
     render(<AppearanceSync />);
     act(() => useAppearanceStore.getState().set({ theme: "notion" }));
     expect(themeCss()!.compareDocumentPosition(sheet()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -126,7 +126,7 @@ describe("AppearanceSync", () => {
   });
 
   it("clears everything when the product UI unmounts", () => {
-    useAppearanceStore.setState({ theme: "pop", accent: "green", codeFont: "system" });
+    useAppearanceStore.setState({ theme: "pop", highContrast: true, codeFont: "system" });
     const { unmount } = render(<AppearanceSync />);
     expect(html().getAttribute("data-theme")).toBe("pop");
     expect(sheet()).not.toBeNull();
