@@ -408,7 +408,7 @@ func seatCapacityExecutor(cloudURL string) seatcapacity.Executor {
 // NewRouter shim) discard the second value.
 func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb redis.UniversalClient, opts RouterOptions) (chi.Router, *handler.Handler) {
 	queries := db.New(pool)
-	emailSvc := service.NewEmailService()
+	emailSvc := service.NewEmailSender()
 	daemonHub := opts.DaemonHub
 	if daemonHub == nil {
 		daemonHub = daemonws.NewHub()
