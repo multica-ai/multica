@@ -359,6 +359,18 @@ MULTICA_WORKSPACES_ROOT=/owner/workspaces \
   ' _ "$MULTICA_DEV_WORKSPACES_PARENT/multica_workspaces_dev-dev-env-test-903" \
   > "$out" 2>&1 || fail "env-exec leaked daemon task identity or owner workspaces root"
 
+# scripts/desktop-cdp.mjs finds Desktop through env-exec: a recorded CDP port
+# becomes its endpoint, and an environment without one never inherits a URL.
+write_manifest "cdp-exec-906" "$root_dir" 906
+printf 'DESKTOP_CDP_PORT=10129\n' >> "$MULTICA_DEV_HOME/envs/cdp-exec-906/manifest.env"
+dev_env exec cdp-exec-906 -- sh -c '
+  test "$MULTICA_DEV_DESKTOP_CDP_URL" = http://127.0.0.1:10129 &&
+  test "$MULTICA_DEV_DESKTOP_RENDERER_URL" = http://localhost:6080
+' > "$out" 2>&1 || fail "env-exec did not export the Desktop CDP and renderer URLs"
+MULTICA_DEV_DESKTOP_CDP_URL=http://127.0.0.1:1 dev_env exec clean-env-903 -- sh -c '
+  test -z "${MULTICA_DEV_DESKTOP_CDP_URL:-}"
+' > "$out" 2>&1 || fail "env-exec leaked a CDP URL into an environment without one"
+
 # A health response without process identity is never proof that the process is
 # this checkout's freshly launched API.
 if bash -c 'source "$1"; api_started_after '\''{"status":"ok"}'\'' 1' _ "$root_dir/scripts/dev-env.sh"; then
