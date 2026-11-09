@@ -77,6 +77,10 @@ type Config struct {
 	// invitation only. The public /api/config endpoint mirrors this flag so
 	// the UI can hide every "Create workspace" affordance — see #3433.
 	DisableWorkspaceCreation bool
+	// DisableStarPrompt turns off the "Star us on GitHub" prompt for every
+	// user of the deployment: /api/config tells clients not to show it, and
+	// claiming a showing is refused. The Help menu link is unaffected.
+	DisableStarPrompt bool
 	// WorkspaceCreationAllowedEmails, when non-empty, restricts
 	// POST /api/workspaces to callers whose account email matches one of
 	// the entries (case-insensitive). Empty means every signed-in user may

@@ -1114,6 +1114,30 @@ describe("UserSchema whats_new_seen_version drift", () => {
   });
 });
 
+describe("UserSchema star prompt drift", () => {
+  const base = {
+    id: "11111111-1111-1111-1111-111111111111",
+    name: "Ada",
+    email: "ada@example.com",
+  };
+
+  it("leaves the showing count undefined when an older server omits it", () => {
+    expect(UserSchema.parse(base).star_prompt_shown_count).toBeUndefined();
+  });
+
+  it("degrades wrong-type values to undefined without discarding the user", () => {
+    const parsed = parseWithFallback(
+      { ...base, star_prompt_shown_count: "2", star_prompt_starred_at: 1 },
+      UserSchema,
+      EMPTY_USER,
+      { endpoint: "GET /api/me" },
+    );
+    expect(parsed.email).toBe("ada@example.com");
+    expect(parsed.star_prompt_shown_count).toBeUndefined();
+    expect(parsed.star_prompt_starred_at).toBeUndefined();
+  });
+});
+
 describe("SquadListSchema member preview drift", () => {
   const baseSquad = {
     id: "squad-1",
