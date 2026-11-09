@@ -602,6 +602,10 @@ jobs:
         # -v makes RUN/PASS evidence explicit in CI logs.
         run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree|TestCodeArtsWindowsCancellationTerminatesDescendants)$' -count=1 -timeout=5m
 
+      - name: Test Windows Hermes gateway ownership and reservation
+        working-directory: server
+        run: go test ./pkg/agent -v -run '^(TestHermesGatewayWindowsCleanupOwnsDescendants|TestHermesGatewayReservation)$' -count=1 -timeout=5m
+
       - name: Test bounded CLI output collection on Windows
         working-directory: server
         # MUL-5467: RunCollect / RunCollectQuiet own the pipes as well as the
@@ -923,6 +927,13 @@ jobs:
         run: |
           node scripts/generate-attachment-text-preview.mjs
           git diff --exit-code -- packages/views/editor/utils/text-preview-whitelist.generated.ts
+
+      - name: Verify brand copies match multica-brand.ts
+        # The mobile wordmark, the CLI login page and the logo SVGs are text
+        # copies of packages/ui/lib/multica-brand.ts; bitmaps are not rendered here.
+        run: |
+          node scripts/brand/sync.mjs --check
+          node --test scripts/brand/sync.test.mjs
 
       - name: Setup Helm
         uses: azure/setup-helm@v4

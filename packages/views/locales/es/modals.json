@@ -273,5 +273,13 @@
     "description": "Busca una tarea para moverla a este proyecto",
     "toast_success": "{{identifier}} movida al proyecto",
     "toast_failed": "No se ha podido mover la tarea"
+  },
+  "copy_parent_fields": {
+    "trigger": "Copiar campos de la tarea principal",
+    "title": "Copiar campos de la tarea principal",
+    "description": "Desde {{identifier}}. Sustituye una vez los valores seleccionados; los cambios posteriores no se sincronizan.",
+    "apply": "Copiar {{count}} campos",
+    "no_labels": "Sin etiquetas",
+    "manual_only": "Las etiquetas, la fecha de inicio y las propiedades personalizadas solo se aplican a la creación manual."
   }
 }

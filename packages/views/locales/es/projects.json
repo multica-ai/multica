@@ -153,6 +153,7 @@
     "ref_default_tooltip": "Sin rama definida: las ejecuciones usan la rama por defecto que tenga el repositorio en ese momento."
   },
   "delete_dialog": {
+    "offline_error": "Estás sin conexión. Vuelve a conectarte e intenta eliminar de nuevo.",
     "title": "Eliminar proyecto",
     "description": "Esto eliminará el proyecto. Las tareas no se eliminarán, pero se desenlazarán.",
     "confirm": "Eliminar",

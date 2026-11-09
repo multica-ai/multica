@@ -101,6 +101,8 @@ function renderSection() {
         totalProjects={4}
         plainRowsLit
         activeIssueId={null}
+        litSource={null}
+        locatedProjectId={null}
       />
     </QueryClientProvider>,
   );

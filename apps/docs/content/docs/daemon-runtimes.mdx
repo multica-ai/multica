@@ -173,6 +173,8 @@ Each run gets a directory under the workspaces root (default `~/multica_workspac
 
 While the issue is still open, 12 hours after a run completes only regenerable content is removed: `node_modules`, `.next`, and `.turbo` directories, plus the cache the daemon prepares for Codex. Everything else stays. A daemon connected to Multica Cloud also removes the whole directory 14 days after the run completes, whether or not the issue is closed; self-hosted daemons do not do this by default.
 
+For an unarchived chat in a work directory managed by Multica, the daemon applies the same regenerable content cleanup 12 hours after its last run ends by default. After a successful cleanup, the daemon skips repeat scans for that run. A later completed run becomes eligible again after the same delay. When a chat runs directly in a project's local directory, this cleanup is limited to the daemon's `codex-home/.sandbox-bin` cache in the run's record directory.
+
 A run on a project's local directory works in your own directory, which the daemon never touches. The record directory Multica creates for that run (logs and so on) is kept too; only regenerable caches inside it are cleaned.
 
 ### Shared repository cache

@@ -55,7 +55,7 @@ import {
 } from "@multica/core/issue-views/sidebar-views";
 import { issueViewTarget } from "@multica/core/issue-views/view-target";
 import { UNREAD_VIEW, UNREAD_VIEW_ID } from "@multica/core/issue-views/unread-view";
-import { useIssueViewActions, type IssueViewActions } from "../../issue-views/use-view-actions";
+import type { IssueViewActions } from "../../issue-views/use-view-actions";
 import { DeleteViewDialog } from "../../issue-views/delete-view-dialog";
 import { ViewNameInput } from "../../issue-views/view-name-input";
 import { UnreadViewIcon } from "../../issue-views/unread-view-icon";
@@ -79,9 +79,18 @@ interface ViewsSectionProps {
   wsId: string;
   pathname: string;
   plainRowsLit: boolean;
-  /** An expanded tree row lists the current issue, so "All issues" stays unlit. */
-  issueLitInTree: boolean;
+  /** No other row marks the open issue and it has no project, so "All issues" lights for it. */
+  issueInAllIssues: boolean;
   activeIssueId: string | null;
+  /** The one list that lights the open issue. */
+  litSource: string | null;
+  actions: IssueViewActions;
+}
+
+/** The sidebar source of a starred view's issue list. */
+export function sidebarViewItemSource(item: SidebarViewItem): string {
+  if (item.kind === "view") return viewSidebarSource(item.view.id);
+  return item.key === "unread" ? viewSidebarSource(UNREAD_VIEW_ID) : builtinSidebarSource(item.key);
 }
 
 /**
@@ -92,12 +101,13 @@ export function ViewsSection({
   wsId,
   pathname,
   plainRowsLit,
-  issueLitInTree,
+  issueInAllIssues,
   activeIssueId,
+  litSource,
+  actions,
 }: ViewsSectionProps) {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
-  const actions = useIssueViewActions();
   const { items, reorder } = actions.sidebar;
   const { data: allViews = EMPTY_VIEWS } = useQuery(issueViewEverywhereOptions(wsId));
   const [deleteTarget, setDeleteTarget] = useState<IssueView | null>(null);
@@ -155,7 +165,7 @@ export function ViewsSection({
                       item={item}
                       pathname={pathname}
                       plainRowsLit={plainRowsLit}
-                      activeIssueId={activeIssueId}
+                      activeIssueId={litSource === sidebarViewItemSource(item) ? activeIssueId : null}
                       actions={actions}
                       onDelete={setDeleteTarget}
                       drag={drag}
@@ -165,7 +175,7 @@ export function ViewsSection({
                       wsId={wsId}
                       pathname={pathname}
                       plainRowsLit={plainRowsLit}
-                      activeIssueId={activeIssueId}
+                      activeIssueId={litSource === sidebarViewItemSource(item) ? activeIssueId : null}
                       actions={actions}
                       drag={drag}
                     />
@@ -175,8 +185,8 @@ export function ViewsSection({
                       builtin={item.key}
                       pathname={pathname}
                       plainRowsLit={plainRowsLit}
-                      issueLitInTree={issueLitInTree}
-                      activeIssueId={activeIssueId}
+                      issueInAllIssues={issueInAllIssues}
+                      activeIssueId={litSource === sidebarViewItemSource(item) ? activeIssueId : null}
                       actions={actions}
                       drag={drag}
                     />
@@ -295,7 +305,7 @@ function BuiltinViewRow({
   builtin,
   pathname,
   plainRowsLit,
-  issueLitInTree,
+  issueInAllIssues,
   activeIssueId,
   actions,
   drag,
@@ -304,7 +314,7 @@ function BuiltinViewRow({
   builtin: ScopeBuiltinViewKey;
   pathname: string;
   plainRowsLit: boolean;
-  issueLitInTree: boolean;
+  issueInAllIssues: boolean;
   activeIssueId: string | null;
   actions: IssueViewActions;
   drag: DragBindings;
@@ -335,7 +345,7 @@ function BuiltinViewRow({
     (builtin === "all_issues"
       ? pathname === p.issues()
         ? activeWorkspaceView === null
-        : !issueLitInTree && isPathWithin(pathname, p.issues())
+        : issueInAllIssues && isPathWithin(pathname, p.issues())
       : onMyIssues && activeMyView === null && (builtin === "my_agents") === isMyAgentsSearch(searchParams));
 
   const source = builtinSidebarSource(builtin);

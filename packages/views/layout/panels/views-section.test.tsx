@@ -6,6 +6,7 @@ import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-s
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { ViewsSection } from "./views-section";
+import type { IssueViewActions } from "../../issue-views/use-view-actions";
 
 const actions = vi.hoisted(() => ({
   sidebar: { items: [] as unknown[], reorder: vi.fn(), unstar: vi.fn() },
@@ -70,8 +71,10 @@ function renderSection(adapter = makeAdapter()) {
         wsId="ws-1"
         pathname="/acme/issues"
         plainRowsLit
-        issueLitInTree={false}
+        issueInAllIssues={false}
         activeIssueId={null}
+        litSource={null}
+        actions={actions as unknown as IssueViewActions}
       />
     </NavigationProvider>,
   );

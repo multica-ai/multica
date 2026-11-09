@@ -147,6 +147,8 @@ Chaque exécution a un répertoire sous la racine des espaces de travail (par d�
 
 Tant que la tâche reste ouverte, 12 heures après la fin d'une exécution, seul le contenu régénérable est supprimé : les répertoires `node_modules`, `.next` et `.turbo`, ainsi que le cache que le daemon prépare pour Codex. Le reste est conservé. Un daemon connecté à Multica Cloud supprime aussi le répertoire entier 14 jours après la fin de l'exécution, que la tâche soit fermée ou non ; les daemons auto-hébergés ne le font pas par défaut.
 
+Pour un chat non archivé qui utilise un répertoire de travail géré par Multica, le daemon applique le même nettoyage du contenu régénérable, par défaut 12 heures après la fin de la dernière exécution. Le daemon mémorise le nettoyage réussi et évite les parcours répétés pour cette exécution. Une exécution ultérieure devient éligible après le même délai. Si le chat s'exécute directement dans le répertoire local d'un projet, ce nettoyage se limite au cache `codex-home/.sandbox-bin` du daemon dans le répertoire de suivi de l'exécution.
+
 Une exécution sur le répertoire local d'un projet travaille dans votre propre répertoire, auquel le daemon ne touche jamais. Le répertoire de suivi que Multica crée pour cette exécution (journaux, etc.) est conservé lui aussi ; seuls les caches régénérables qu'il contient sont nettoyés.
 
 ### Cache de dépôts partagé

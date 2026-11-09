@@ -43,9 +43,8 @@ export function LandingHeader({
         <div className="flex min-w-0 items-center gap-6 lg:gap-8">
           <Link href="/" className="flex shrink-0 items-center">
             <MulticaWordmark
-              hop
               className={cn(
-                "h-[22px] sm:h-6",
+                "h-6 sm:h-[26px]",
                 variant === "dark" ? "text-white" : "text-[#0a0d12]",
               )}
             />

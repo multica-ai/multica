@@ -557,6 +557,8 @@
     "thread_nav_show_replies_one": "Mostrar {{count}} respuesta",
     "thread_nav_show_replies_other": "Mostrar {{count}} respuestas",
     "thread_nav_hide_replies": "Ocultar respuestas",
+    "load_failed": "No se pudo cargar la tarea.",
+    "load_retry": "Reintentar",
     "not_found_title": "Tarea no encontrada"
   },
   "timeline": {
@@ -893,6 +895,7 @@
     "unassigned": "Sin asignar",
     "open_in_new_tab": "Abrir en una pestaña nueva",
     "pin_to_sidebar": "Fijar en la barra lateral",
+    "locate_in_sidebar": "Mostrar en la barra lateral",
     "unpin_from_sidebar": "Dejar de fijar de la barra lateral",
     "copy_link": "Copiar enlace",
     "copy_workdir_path": "Copiar ruta del directorio de trabajo local",
