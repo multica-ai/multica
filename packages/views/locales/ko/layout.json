@@ -35,6 +35,7 @@
     "docs": "문서",
     "changelog": "변경 로그",
     "discord": "Discord",
+    "star_on_github": "GitHub에서 Star 하기",
     "feedback": "피드백",
     "server_version": "서버 버전 {{version}}"
   },
@@ -52,6 +53,14 @@
       "open": "열기",
       "learn_more": "자세히 알아보기"
     }
+  },
+  "star_prompt": {
+    "title_other": "{{agent}}이(가) 태스크 {{count}}개를 완료했습니다",
+    "body": "Multica가 도움이 되었다면 GitHub에서 Star를 눌러 주세요. 다른 팀이 Multica를 찾는 데 도움이 됩니다.",
+    "star": "Star",
+    "star_label": "GitHub에서 Multica에 Star 하기",
+    "later": "나중에",
+    "close": "닫기"
   },
   "workspace_loader": {
     "loading_workspace": "워크스페이스 로딩 중...",

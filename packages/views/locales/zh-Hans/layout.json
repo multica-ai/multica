@@ -35,6 +35,7 @@
     "docs": "文档",
     "changelog": "更新日志",
     "discord": "Discord",
+    "star_on_github": "在 GitHub 上 Star",
     "feedback": "反馈",
     "server_version": "服务器版本 {{version}}"
   },
@@ -52,6 +53,14 @@
       "open": "前往",
       "learn_more": "了解更多"
     }
+  },
+  "star_prompt": {
+    "title_other": "{{agent}} 已经完成了 {{count}} 个任务",
+    "body": "如果 Multica 帮上了忙，在 GitHub 上点个 Star，能让更多团队发现它。",
+    "star": "Star",
+    "star_label": "在 GitHub 上给 Multica 点 Star",
+    "later": "以后再说",
+    "close": "关闭"
   },
   "workspace_loader": {
     "loading_workspace": "正在加载工作区...",
