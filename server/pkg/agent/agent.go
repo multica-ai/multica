@@ -158,6 +158,11 @@ type ExecOptions struct {
 	// can trip its idle watchdog. Take the snapshot and report on your own
 	// goroutine.
 	OnUsage func(map[string]TokenUsage)
+	// OnRateLimits optionally receives subscription usage windows the provider
+	// reports during the run. The update may name only some windows; the
+	// receiver merges by window ID. Same non-blocking rule as OnUsage.
+	// Currently honoured by the claude and codex backends.
+	OnRateLimits func(RateLimitSnapshot)
 	// piMcpExtensionPath is set by piBackend.Execute after it writes the
 	// temporary MCP extension. The daemon does not fill it.
 	piMcpExtensionPath string

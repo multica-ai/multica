@@ -324,6 +324,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					sessionID = msg.SessionID
 				}
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
+			case "rate_limit_event":
+				if opts.OnRateLimits != nil {
+					if windows := ParseClaudeRateLimitEvent(msg.RateLimitInfo); len(windows) > 0 {
+						opts.OnRateLimits(RateLimitSnapshot{Provider: "claude", Windows: windows, Source: RateLimitSourceRun})
+					}
+				}
 			case "result":
 				sawResult = true
 				finalResultText = msg.ResultText
@@ -742,6 +748,8 @@ type claudeSDKMessage struct {
 
 	// log fields
 	Log *claudeLogEntry `json:"log,omitempty"`
+
+	RateLimitInfo json.RawMessage `json:"rate_limit_info,omitempty"`
 
 	// control request fields
 	RequestID string          `json:"request_id,omitempty"`

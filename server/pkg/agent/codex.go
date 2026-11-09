@@ -1285,6 +1285,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		notificationProtocol:     "unknown",
 		acceptNotification:       turnNotificationGate.accept,
 		guardianRateLimitCircuit: &codexGuardianRateLimitCircuit{},
+		onRateLimits:             opts.OnRateLimits,
 		onGuardianRateLimit: func() {
 			guardianRateLimitTripped.Store(true)
 			b.cfg.Logger.Warn("codex Guardian approval rate-limit circuit opened",
@@ -2466,6 +2467,10 @@ type codexClient struct {
 	notificationProtocol string // "unknown", "legacy", "raw"
 	turnCompleted        bool
 
+	// onRateLimits receives account/rateLimits/updated. The notification is
+	// account-scoped and carries no threadId, so it bypasses the turn gate.
+	onRateLimits func(RateLimitSnapshot)
+
 	usageMu sync.Mutex
 	usage   TokenUsage // accumulated from turn events
 	// usageTotal is the last accepted cumulative v2 usage snapshot for the
@@ -3027,6 +3032,15 @@ func codexPermissionsApprovalResponse(params json.RawMessage, logger *slog.Logge
 func (c *codexClient) handleNotification(raw map[string]json.RawMessage) {
 	var method string
 	_ = json.Unmarshal(raw["method"], &method)
+
+	if method == "account/rateLimits/updated" {
+		if c.onRateLimits != nil {
+			if limits, ok := ParseCodexRateLimits(raw["params"]); ok {
+				c.onRateLimits(RateLimitSnapshot{Provider: "codex", Plan: limits.Plan, Windows: limits.Windows, Source: RateLimitSourceRun})
+			}
+		}
+		return
+	}
 
 	var params map[string]any
 	if p, ok := raw["params"]; ok {
