@@ -77,6 +77,7 @@
   "scripts": [
     "scripts/generate-attachment-text-preview.mjs",
     "scripts/generate-reserved-slugs.mjs",
+    "scripts/selfhost-images*.py",
     "scripts/selfhost-config.test.sh",
     "scripts/drop-database.sh",
     "scripts/remove-worktree.sh",

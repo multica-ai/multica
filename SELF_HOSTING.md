@@ -507,6 +507,29 @@ docker compose -f docker-compose.selfhost.yml pull
 docker compose -f docker-compose.selfhost.yml up -d
 ```
 
+### Install the Compose images on a disconnected Linux host
+
+Use Docker with platform-aware `image save`, `image load`, and `image inspect`, Docker Compose, and Python 3.9+ on both machines. Use a trusted copy of this repository, including the same Compose file and transfer script, on both machines. Choose a published release that has images for the target platform. The commands below use v0.8.1.
+
+On a connected machine, export the official PostgreSQL, backend, and web images for one release and platform:
+
+```bash
+scripts/selfhost-images.py export v0.8.1 linux/amd64 ./multica-images
+```
+
+Transfer the resulting directory and communicate the printed manifest digest through a trusted channel. The manifest binds the release and platform to the image references, registry digests, local image IDs, and archive checksum. Use `linux/arm64` for an ARM64 Linux target.
+
+On the disconnected host, configure `.env` as in Manual Docker Compose Setup above and set `MULTICA_IMAGE_TAG=v0.8.1`. The import verifies that the actual Compose image settings match the bundle. Use the digest from the connected machine:
+
+```bash
+scripts/selfhost-images.py import v0.8.1 linux/amd64 ./multica-images 'sha256:<manifest-digest>'
+docker compose -f docker-compose.selfhost.yml up -d --pull never
+curl --fail --retry 30 --retry-delay 2 --retry-connrefused \
+  "http://$(docker compose -f docker-compose.selfhost.yml port backend 8080)/health"
+```
+
+The import verifies the archive before loading it and checks each loaded image ID before reporting success. On error, stop before running Compose. This transfers container images only. Configure SMTP, model providers, and other integrations according to the target site's connectivity.
+
 ## Manual CLI Configuration
 
 If you prefer configuring the CLI step by step instead of `multica setup`:

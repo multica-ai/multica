@@ -905,6 +905,9 @@ jobs:
       - name: Test self-host env derivation
         run: bash scripts/selfhost-config.test.sh
 
+      - name: Test offline Compose image transfer
+        run: python3 -B scripts/selfhost-images.test.py -v
+
       - name: Test check script
         run: bash scripts/check.test.sh
 
