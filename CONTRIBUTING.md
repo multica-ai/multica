@@ -527,6 +527,30 @@ Two constraints are enforced rather than documented:
   competing for its own work, so `make up C=daemon` stops with that explanation
   before spending a login on it. Use `C=api,web` there.
 
+### Web with realistic content
+
+Every `make up`, whatever components it starts, signs `dev@localhost` in,
+marks the user onboarded, and seeds the `dev` workspace with two issues. The
+token sits in the environment's CLI profile, so a Playwright script can open
+`/dev/issues` directly by setting it as `multica_token` in `localStorage`
+before the first page load.
+
+For chat and Agent Builder content without a model or a daemon, add one-shot
+fixtures:
+
+```bash
+make up C=api,web ARGS="--ephemeral"
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue, --json
+make destroy ARGS="--yes"
+```
+
+`chat` and `builder` each create a session with a user message and an assistant
+reply holding a wide table, code and a long log line; `issue` creates an issue
+with a wide description and a comment with a diff. The script registers a
+fixture runtime with the profile token and completes each task with canned
+Markdown through the daemon API, so it also works inside a daemon-managed task.
+It prints the URL of everything it created and exits.
+
 ### Desktop
 
 ```bash
