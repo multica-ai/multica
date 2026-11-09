@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import {
   registerSystemNotificationClickHandler,
+  registerSystemNotificationSoundPlayer,
   type SystemNotificationPayload,
 } from "@multica/core/platform";
 import { paths } from "@multica/core/paths";
@@ -30,6 +31,16 @@ export function WebNotificationBridge() {
   }, [push]);
 
   useEffect(() => {
+    const audio = new Audio();
+    audio.preload = "auto";
+    audio.src = "/sounds/confirmation_001.wav";
+
+    const playSound = () => {
+      audio.currentTime = 0;
+      void audio.play().catch(() => {});
+    };
+
+    registerSystemNotificationSoundPlayer(playSound);
     registerSystemNotificationClickHandler(
       ({ slug, issueKey }: SystemNotificationPayload) => {
         if (!slug) return;
@@ -37,7 +48,11 @@ export function WebNotificationBridge() {
         pushRef.current(inboxPath);
       },
     );
-    return () => registerSystemNotificationClickHandler(null);
+    return () => {
+      registerSystemNotificationSoundPlayer(null);
+      registerSystemNotificationClickHandler(null);
+      audio.pause();
+    };
   }, []);
 
   return null;

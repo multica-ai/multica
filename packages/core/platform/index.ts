@@ -8,6 +8,7 @@ export { clearWorkspaceStorage } from "./storage-cleanup";
 export { clearClientSessionData } from "./session-cleanup";
 export {
   registerSystemNotificationClickHandler,
+  registerSystemNotificationSoundPlayer,
   isWebNotificationSupported,
   getWebNotificationPermission,
   requestWebNotificationPermission,
