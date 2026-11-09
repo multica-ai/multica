@@ -263,7 +263,7 @@
     "trigger_label": "Прикрепить"
   },
   "pickers": {
-    "concurrency_tooltip": "Параллелизм · максимум одновременных задач: {{value}}",
+    "concurrency_tooltip": "Параллелизм · максимум одновременных запусков: {{value}}",
     "concurrency_range": "Максимум одновременных запусков ({{min}}–{{max}})",
     "runtime_none": "Нет среды выполнения",
     "runtime_tooltip": "Среда выполнения · {{name}} · {{status}}",

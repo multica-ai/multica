@@ -21,6 +21,7 @@ const countedMessages = [
 
 const runMessages = [
   ["agent run count", (count: number) => i18n.t(($) => $.row.task_count, { ns: "agents", count })],
+  ["agent concurrency limit", (count: number) => i18n.t(($) => $.pickers.concurrency_tooltip, { ns: "agents", value: count })],
   ["cancelled runs", (count: number) => i18n.t(($) => $.row_actions.cancelled_tasks_toast, { ns: "agents", count })],
   ["queued runs", (count: number) => i18n.t(($) => $.overview.attention_queued, { ns: "agents", count })],
   ["active runs", (count: number) => i18n.t(($) => $.agent_activity.hover_header_tasks, { ns: "issues", count })],
