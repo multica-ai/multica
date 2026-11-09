@@ -143,8 +143,8 @@ func TestRunRuntimeDeleteCascadeConfirmsActiveAgentSnapshot(t *testing.T) {
 				"code":  "runtime_has_active_agents",
 				"error": "cannot delete runtime: it has active agents bound to it.",
 				"active_agents": []map[string]any{
-					{"id": "agent-1", "name": "Codex"},
-					{"id": "agent-2", "name": "Claude"},
+					{"id": "agent-1", "name": "Codex", "instructions": strings.Repeat("a", 40<<10)},
+					{"id": "agent-2", "name": "Claude", "instructions": strings.Repeat("b", 40<<10)},
 				},
 			})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/runtimes/rt-1/unbind-agents-and-delete":
@@ -244,5 +244,39 @@ func TestRunRuntimeDeleteConflictWithoutMessageKeepsWrapper(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "delete runtime:") {
 		t.Fatalf("error = %q, want the generic wrapper", err.Error())
+	}
+}
+
+func TestRuntimeDeleteDoesNotConfirmIncompleteSnapshot(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	const marker = "fixture-instruction"
+	for _, tc := range []struct {
+		name, body string
+	}{
+		{"oversized", `{"active_agents":[{"id":"agent-1","instructions":"` + marker + strings.Repeat("a", 8<<20) + `"}],"code":"runtime_has_active_agents"}`},
+		{"truncated", `{"active_agents":[{"instructions":"` + marker},
+		{"JSON with BOM", "\ufeff" + `{"error":"` + marker + `"}`},
+		{"JSON string", `"` + marker + `"`},
+		{"proxy plaintext", "proxy: " + marker},
+		{"missing ID", `{"code":"runtime_has_active_agents","active_agents":[{"id":"agent-1"},{"name":"second"}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodDelete {
+					t.Errorf("unexpected confirmation request: %s %s", r.Method, r.URL.Path)
+				}
+				w.WriteHeader(http.StatusConflict)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+
+			cmd := newRuntimeDeleteTestCmd(srv.URL)
+			_ = cmd.Flags().Set("cascade", "true")
+			err := runRuntimeDelete(cmd, []string{"rt-1"})
+			if err == nil || strings.Contains(err.Error(), marker) {
+				t.Fatal("expected a safe error without agent instructions")
+			}
+		})
 	}
 }

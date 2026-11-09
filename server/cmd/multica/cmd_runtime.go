@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -236,24 +237,23 @@ func runRuntimeDelete(cmd *cobra.Command, args []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
-	err = client.DeleteJSON(ctx, "/api/runtimes/"+runtimeID)
-	if err == nil {
+	var conflict runtimeDeleteConflictPayload
+	hadConflict := false
+	err = client.DeleteJSONWithConflict(ctx, "/api/runtimes/"+runtimeID, func(body io.Reader) error {
+		hadConflict = true
+		return readRuntimeDeleteConflict(body, &conflict)
+	})
+	if err != nil {
+		if hadConflict {
+			return err
+		}
+		return fmt.Errorf("delete runtime: %w", err)
+	}
+	if !hadConflict {
 		return printRuntimeDeleteResult(cmd, map[string]any{
 			"id":      runtimeID,
 			"deleted": true,
 		})
-	}
-
-	conflict, ok := runtimeDeleteConflict(err)
-	if !ok {
-		// Any other 409 is a deliberate, already-explained refusal — most often
-		// a profile-backed instance that cannot be deleted on its own. Show the
-		// server's guidance instead of a raw HTTP wrapper; --cascade cannot get
-		// past these, so there is nothing more for this command to try.
-		if _, msg, isConflict := serverConflictMessage(err); isConflict {
-			return errors.New(msg)
-		}
-		return fmt.Errorf("delete runtime: %w", err)
 	}
 
 	cascade, _ := cmd.Flags().GetBool("cascade")
@@ -457,19 +457,29 @@ type runtimeDeleteConflictPayload struct {
 	} `json:"active_agents"`
 }
 
-func runtimeDeleteConflict(err error) (runtimeDeleteConflictPayload, bool) {
-	var httpErr *cli.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict {
-		return runtimeDeleteConflictPayload{}, false
+func readRuntimeDeleteConflict(body io.Reader, payload *runtimeDeleteConflictPayload) error {
+	// This response contains full agent representations. Read the entire
+	// snapshot within a bounded budget; never confirm a truncated list.
+	const maxSnapshotBytes = 8 << 20
+	data, err := io.ReadAll(io.LimitReader(body, maxSnapshotBytes+1))
+	if err != nil || len(data) > maxSnapshotBytes {
+		return errors.New("delete runtime: cannot read the complete active-agent snapshot; rebind agents before retrying")
 	}
-	var payload runtimeDeleteConflictPayload
-	if json.Unmarshal([]byte(httpErr.Body), &payload) != nil {
-		return runtimeDeleteConflictPayload{}, false
+	if err := json.Unmarshal(data, payload); err != nil {
+		// An invalid response can still contain agent instructions. Do not
+		// print it as plain text or confirm a partial snapshot.
+		return errors.New("delete runtime: invalid conflict response; no agents were unbound")
 	}
-	if payload.Code != "runtime_has_active_agents" || len(payload.ActiveAgents) == 0 {
-		return runtimeDeleteConflictPayload{}, false
+	if payload.Code != "runtime_has_active_agents" {
+		if payload.Error != "" {
+			return errors.New(payload.Error)
+		}
+		return errors.New("delete runtime: server refused the request without an explanation")
 	}
-	return payload, true
+	if len(payload.ActiveAgents) == 0 || len(payload.AgentIDs()) != len(payload.ActiveAgents) {
+		return errors.New("delete runtime: incomplete active-agent snapshot; no agents were unbound")
+	}
+	return nil
 }
 
 func (p runtimeDeleteConflictPayload) AgentIDs() []string {
