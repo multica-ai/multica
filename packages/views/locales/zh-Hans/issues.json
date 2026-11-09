@@ -729,12 +729,10 @@
   "reply": {
     "placeholder": "回复...",
     "annotations": {
-      "direct_reply": "回复",
-      "direct_comment": "发表评论",
-      "direct_target_deleted": "回复目标已删除。请先复制意见，再选择其他评论。",
-      "copy_note": "复制意见",
-      "note_copied": "意见已复制",
-      "note_copy_failed": "复制失败，请选中意见文字手动复制。",
+      "send_all": "全部发送",
+      "send_with_annotations_and_body": "将连同下方 {{count}} 条批注和正文一起发送",
+      "send_with_annotations": "将连同下方 {{count}} 条批注一起发送",
+      "send_with_body": "将连同下方正文一起发送",
       "confirm_add": "添加批注",
       "save": "保存批注",
       "add_comment": "加入评论",

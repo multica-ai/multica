@@ -751,12 +751,10 @@
   "reply": {
     "placeholder": "Laisser une réponse...",
     "annotations": {
-      "direct_reply": "Répondre",
-      "direct_comment": "Publier le commentaire",
-      "direct_target_deleted": "Le commentaire ciblé a été supprimé. Copiez votre note avant de sélectionner un autre commentaire.",
-      "copy_note": "Copier la note",
-      "note_copied": "Note copiée",
-      "note_copy_failed": "Impossible de copier la note. Sélectionnez et copiez le texte manuellement.",
+      "send_all": "Tout envoyer",
+      "send_with_annotations_and_body": "Sera envoyé avec les annotations enregistrées ({{count}}) et le texte du brouillon.",
+      "send_with_annotations": "Sera envoyé avec les annotations enregistrées ({{count}}).",
+      "send_with_body": "Sera envoyé avec le texte du brouillon.",
       "confirm_add": "Ajouter une annotation",
       "save": "Enregistrer l'annotation",
       "add_comment": "Ajouter au commentaire",

@@ -734,12 +734,10 @@
   "reply": {
     "placeholder": "Deja una respuesta...",
     "annotations": {
-      "direct_reply": "Responder",
-      "direct_comment": "Publicar comentario",
-      "direct_target_deleted": "Se eliminó el destino de la respuesta. Copia tu nota antes de seleccionar otro comentario.",
-      "copy_note": "Copiar nota",
-      "note_copied": "Nota copiada",
-      "note_copy_failed": "No se pudo copiar la nota. Selecciona y copia el texto manualmente.",
+      "send_all": "Enviar todo",
+      "send_with_annotations_and_body": "Se enviará con las anotaciones guardadas ({{count}}) y el texto del borrador.",
+      "send_with_annotations": "Se enviará con las anotaciones guardadas ({{count}}).",
+      "send_with_body": "Se enviará con el texto del borrador.",
       "confirm_add": "Añadir anotación",
       "save": "Guardar anotación",
       "add_comment": "Añadir al comentario",

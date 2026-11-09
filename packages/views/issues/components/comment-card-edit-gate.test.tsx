@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, type ComponentProps, type ReactNode, type Ref } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Attachment, TimelineEntry } from "@multica/core/types";
@@ -407,9 +407,9 @@ describe("comment thread — selection reply", () => {
     expect(container.querySelector('[data-annotation-thread="reply:issue-1:comment-1"]')).toHaveTextContent("1 annotation");
     expect(screen.queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Preview reply" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    fireEvent.click(within(container).getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onReply).toHaveBeenCalledTimes(1));
-    expect(onReply).toHaveBeenCalledWith("agent-child", "> Selected agent text\n\nReply-specific note", undefined, undefined, undefined);
+    expect(onReply).toHaveBeenCalledWith("comment-1", "> Selected agent text\n\nReply-specific note", undefined, undefined, undefined);
     await waitFor(() => {
       expect(useCommentDraftStore.getState().getAnnotations("reply:issue-1:comment-1")).toHaveLength(0);
       expect(document.querySelector("[data-reply-annotation-overlay]")).not.toBeInTheDocument();
