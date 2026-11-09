@@ -27,11 +27,11 @@ vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: () => null,
 }));
 
-function renderFilterMenu(setup?: (store: StoreApi<IssueViewState>) => void, withProperty = false) {
+function renderFilterMenu(setup?: (store: StoreApi<IssueViewState>) => void, withProperty = false, propertyType = "number") {
   setApiInstance({
     listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
     listProperties: async () => ({ properties: withProperty ? [{
-      id: "estimate", workspace_id: "ws-1", name: "Estimate", type: "number",
+      id: "estimate", workspace_id: "ws-1", name: "Estimate", type: propertyType,
       config: {}, position: 1, archived: false, created_at: "", updated_at: "",
     }] : [] }),
     listMembers: async () => [],
@@ -126,6 +126,31 @@ describe("IssueFilterMenu advanced mode", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
     expect(store.getState().advancedFilter?.children).toEqual([]);
     expect(screen.getByRole("button", { name: "Clear all" })).toBeDisabled();
+  });
+
+  it.each([
+    ["standard", { key: "Enter", isComposing: true, keyCode: 13 }],
+    ["Safari", { key: "Enter", isComposing: false, keyCode: 229 }],
+  ])("keeps the advanced text condition unchanged on %s IME confirmation", async (_label, event) => {
+    const store = renderFilterMenu((s) => s.getState().setAdvancedFilter(
+      createFilterGroup("all", [createFilterCondition("property:estimate", ["original"])]),
+    ), true, "text");
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    const input = await screen.findByRole("textbox", { name: "Values" });
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: "zhong" } });
+    fireEvent.keyDown(input, event);
+    expect(store.getState().advancedFilter?.children).toMatchObject([{ values: ["original"] }]);
+    expect(input).toHaveValue("zhong");
+    expect(screen.getByTestId("advanced-filter-panel")).toBeInTheDocument();
+
+    fireEvent.compositionEnd(input, { data: "中" });
+    fireEvent.change(input, { target: { value: "中" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(store.getState().advancedFilter?.children).toMatchObject([{ values: ["中"] }]);
+    fireEvent.change(input, { target: { value: "blurred" } });
+    fireEvent.blur(input);
+    expect(store.getState().advancedFilter?.children).toMatchObject([{ values: ["blurred"] }]);
   });
 
   it("edits a number property with a typed value and its own operators", async () => {

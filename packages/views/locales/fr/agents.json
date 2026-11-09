@@ -2,6 +2,7 @@
   "page": {
     "title": "Agents",
     "new_agent": "Nouvel agent",
+    "search": "Rechercher des agents",
     "show_archived": "Afficher les archivés ({{count}}) →",
     "of_total": "{{visible}} sur {{total}}",
     "list_load_failed": "Impossible de charger les agents",
@@ -45,12 +46,21 @@
     "title": "Agents archivés"
   },
   "empty": {
-    "title": "Aucun agent pour l'instant",
-    "description": "Créez un agent, puis assignez-lui des tâches."
+    "setup": {
+      "label": "Étapes de configuration",
+      "runtime": "Connecter un runtime",
+      "agent": "Créer un agent",
+      "issue": "Lui assigner une tâche",
+      "done": "(fait)",
+      "connect_runtime": "Connecter"
+    }
   },
   "no_matches": {
     "title": "Aucune correspondance",
+    "search_active": "Aucun agent ne correspond à « {{query}} ».",
+    "search_active_filtered": "Aucun agent ne correspond à « {{query}} » dans ce filtre.",
     "no_archived": "Aucun agent archivé pour l'instant.",
+    "search_archived": "Aucun agent archivé ne correspond à « {{query}} ».",
     "no_filter_match": "Aucun agent ne correspond à ce filtre.",
     "search_runtime_filtered": "Aucun agent sur « {{machine}} » ne correspond à « {{query}} ».",
     "runtime_filtered": "Aucun agent sur « {{machine}} »."
@@ -163,7 +173,7 @@
     "runtime_required_toast": "Associez un runtime avant d'exécuter cet agent.",
     "assign_work": "Assigner du travail",
     "more_actions_aria": "Actions de l'agent",
-    "advanced_settings": "Paramètres avancés",
+    "settings": "Paramètres",
     "copy_link": "Copier le lien",
     "copy_id": "Copier l'ID de l'agent",
     "link_copied_toast": "Lien copié",
@@ -221,7 +231,8 @@
   "panel": {
     "status": "Statut",
     "runs_7d": "Exécutions (7 j)",
-    "edit_access_aria": "Accès : {{value}}. Modifier l'accès"
+    "edit_access_aria": "Accès : {{value}}. Modifier l'accès",
+    "all_settings": "Tous les paramètres"
   },
   "skill_attach": {
     "trigger_aria": "Rattacher un skill de l'espace de travail",
@@ -289,7 +300,7 @@
     "environment": "Environnement",
     "custom_args": "Arguments personnalisés",
     "mcp_config": "MCP",
-    "composio_mcp": "Applications MCP",
+    "composio_mcp": "Apps",
     "integrations": "Intégrations",
     "runtime_config": "Routage",
     "qoder_agent": "Qoder Cloud Agents",
@@ -711,21 +722,6 @@
       "redacted_hint": "Seul le propriétaire de l'agent ou un administrateur de l'espace de travail peut lire cette configuration.",
       "dialog_json_help": "Modifiez la configuration complète du serveur en JSON."
     },
-    "composio_mcp": {
-      "subtitle": "Cochez une boîte à outils pour permettre à cet agent de la monter comme serveur MCP — mais uniquement lorsque c'est vous (son créateur) qui avez déclenché l'exécution, directement ou via une chaîne de sous-agents.",
-      "loading": "Chargement de vos connexions…",
-      "load_failed": "Impossible de charger vos applications connectées. Réessayez dans un instant.",
-      "empty_title": "Aucune application connectée pour l'instant",
-      "empty_link_to_settings": "Connectez-en un dans Paramètres → Intégrations",
-      "connected": "Connecté",
-      "toggle_aria": "Autoriser {{toolkit}} pour cet agent",
-      "saving": "Enregistrement…",
-      "save_failed_toast": "Impossible d'enregistrer — veuillez réessayer",
-      "redacted_title": "Configuré — masqué pour vous",
-      "redacted_hint": "Seul le créateur de l'agent peut voir ou modifier les applications qu'il peut utiliser.",
-      "shared_warning": "Cet agent est partagé. Les personnes qui peuvent l'exécuter pourront utiliser les applications Composio que vous activez ici. Passez en Privé ou restreignez la liste d'accès si ces applications exposent des données sensibles.",
-      "workspace_warning": "Public pour l'espace de travail : tout membre de l'espace de travail peut utiliser ces applications Composio via cet agent."
-    },
     "runtime_config": {
       "mode_label": "Mode de routage",
       "mode_local": "Local",
@@ -840,6 +836,24 @@
       "started_prefix": "Démarrée {{when}}",
       "dispatched_prefix": "Envoyée {{when}}",
       "queued_prefix": "Mise en file d'attente {{when}}"
+    },
+    "connected_apps": {
+      "subtitle": "Les apps que cet agent peut utiliser. Chacune agit avec le compte d'équipe ou celui de la personne qui lance l'exécution, au niveau choisi.",
+      "loading": "Chargement des apps…",
+      "load_failed": "Impossible de charger les apps de cet agent.",
+      "empty": "Aucune app pour l'instant.",
+      "add_placeholder": "Ajouter une app…",
+      "account": "Compte",
+      "level": "Niveau",
+      "remove": "Retirer {{app}}",
+      "team_connected": "Compte d'équipe connecté",
+      "team_missing": "Compte d'équipe non connecté",
+      "personal_connected": "Votre compte est connecté",
+      "personal_missing": "Vous n'avez pas connecté cette app",
+      "team_admin_only": "Seuls les admins de l'espace peuvent donner un compte d'équipe à un agent.",
+      "team_shared_warning": "Toute personne qui peut lancer cet agent agit avec le compte d'équipe pour ces apps.",
+      "manage_link": "Gérer les comptes dans Paramètres → Applications connectées",
+      "save_failed_toast": "Échec de l'enregistrement, veuillez réessayer"
     }
   },
   "char_counter": {
@@ -1053,5 +1067,29 @@
     "section_owner": "Propriétaire",
     "section_model": "Modèle"
   },
-  "actions": {}
+  "actions": {},
+  "intro": {
+    "title": "Recrutez votre premier coéquipier IA",
+    "description": "Les agents prennent des tâches comme un membre de l'équipe : ils travaillent sur votre runtime avec Claude Code, Codex et d'autres outils, puis livrent dans les commentaires.",
+    "slides": {
+      "describe": {
+        "title": "Décrivez son rôle en une phrase",
+        "description": "Décrivez la mission, choisissez un runtime et un modèle, puis créez-le. Modifiez ses instructions ou ajoutez des skills quand vous voulez."
+      },
+      "assign": {
+        "title": "Confiez-lui du travail comme à un collègue",
+        "description": "Choisissez-le comme responsable de n'importe quelle tâche. Il s'y met tout seul, sans surveillance."
+      },
+      "deliver": {
+        "title": "Suivez son travail, recevez le résultat en commentaire",
+        "description": "Chaque étape est visible pendant l'exécution. Une fois terminé, il publie le résultat et la PR sur la tâche."
+      }
+    },
+    "art": {
+      "prompt": "Relire les PR frontend en priorité pour l'accessibilité et les performances, et publier les conclusions en commentaire de PR.",
+      "issue_title": "Mise en page de la page tarifs cassée sur mobile",
+      "comment": "Corrigé : sous 375px, les cartes tarifs passent sur une colonne. PR ouverte, tests au vert.",
+      "step_read": "Lecture de {{file}}"
+    }
+  }
 }

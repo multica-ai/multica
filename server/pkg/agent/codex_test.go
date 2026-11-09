@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1618,6 +1619,43 @@ func TestCodexRawAgentMessageBelowAggregationThresholdDefersTailUntilCompleted(t
 	c.flushAgentMessageDeltas()
 	if len(chunks) != 2 {
 		t.Fatalf("EOF flush duplicated tail: chunks=%q", chunks)
+	}
+}
+
+// A long answer must keep streaming while it is generated, not show its first
+// token and then nothing until item/completed (Telegram, Slack and the web chat
+// all rendered the reply as stuck on its first word).
+func TestCodexRawAgentMessageFlushesPendingTailOnInterval(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	clock := time.Unix(1_700_000_000, 0)
+	c.now = func() time.Time { return clock }
+	var chunks []string
+	c.onAgentMessageChunk = func(text string) bool {
+		chunks = append(chunks, text)
+		return true
+	}
+	delta := func(after time.Duration, text string) {
+		clock = clock.Add(after)
+		c.handleLine(fmt.Sprintf(`{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-1","turnId":"turn-1","itemId":"msg-1","delta":%q}}`, text))
+	}
+
+	delta(0, "The ")
+	delta(codexAgentMessageFlushInterval/5, "answer ")
+	if want := []string{"The "}; !slices.Equal(chunks, want) {
+		t.Fatalf("chunks inside the interval = %q, want %q", chunks, want)
+	}
+	delta(codexAgentMessageFlushInterval, "is ")
+	if want := []string{"The ", "answer is "}; !slices.Equal(chunks, want) {
+		t.Fatalf("chunks after the interval = %q, want %q", chunks, want)
+	}
+	delta(codexAgentMessageFlushInterval/5, "42.")
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-1","turnId":"turn-1","item":{"type":"agentMessage","id":"msg-1","text":"The answer is 42."}}}`)
+	if want := []string{"The ", "answer is ", "42."}; !slices.Equal(chunks, want) {
+		t.Fatalf("chunks after item/completed = %q, want %q", chunks, want)
 	}
 }
 

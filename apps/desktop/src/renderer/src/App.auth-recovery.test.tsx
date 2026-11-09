@@ -176,6 +176,7 @@ beforeEach(() => {
       onAuthToken: () => () => {},
       onCloseActiveTab: () => () => {},
       onInviteOpen: () => () => {},
+      onIssueOpen: () => () => {},
       onSystemLocaleChanged: () => () => {},
       reportAuthSession: vi.fn(),
       runtimeConfig: {

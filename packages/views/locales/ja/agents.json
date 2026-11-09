@@ -2,6 +2,7 @@
   "page": {
     "title": "エージェント",
     "new_agent": "新規エージェント",
+    "search": "エージェントを検索",
     "show_archived": "アーカイブ済みを表示 ({{count}}) →",
     "of_total": "{{total}} 件中 {{visible}} 件",
     "list_load_failed": "エージェントを読み込めませんでした",
@@ -44,12 +45,21 @@
     "title": "アーカイブ済みエージェント"
   },
   "empty": {
-    "title": "まだエージェントがいません",
-    "description": "エージェントを作成してタスクを割り当てましょう。"
+    "setup": {
+      "label": "セットアップ手順",
+      "runtime": "ランタイムを接続する",
+      "agent": "エージェントを作成する",
+      "issue": "タスクを割り当てる",
+      "done": "（完了）",
+      "connect_runtime": "接続"
+    }
   },
   "no_matches": {
     "title": "一致する結果なし",
+    "search_active": "\"{{query}}\" に一致するエージェントがありません。",
+    "search_active_filtered": "このフィルターで \"{{query}}\" に一致するエージェントがありません。",
     "no_archived": "まだアーカイブ済みのエージェントはありません。",
+    "search_archived": "\"{{query}}\" に一致するアーカイブ済みエージェントがありません。",
     "no_filter_match": "このフィルターに一致するエージェントがありません。",
     "search_runtime_filtered": "\"{{machine}}\" 上に \"{{query}}\" に一致するエージェントがありません。",
     "runtime_filtered": "\"{{machine}}\" 上にエージェントがありません。"
@@ -146,7 +156,7 @@
     "runtime_required_toast": "このエージェントを実行する前にランタイムを設定してください。",
     "assign_work": "作業を割り当てる",
     "more_actions_aria": "エージェントの操作",
-    "advanced_settings": "詳細設定",
+    "settings": "設定",
     "copy_link": "リンクをコピー",
     "copy_id": "エージェント ID をコピー",
     "link_copied_toast": "リンクをコピーしました",
@@ -201,7 +211,8 @@
   "panel": {
     "status": "ステータス",
     "runs_7d": "実行 (7日)",
-    "edit_access_aria": "アクセス: {{value}}。アクセスを変更"
+    "edit_access_aria": "アクセス: {{value}}。アクセスを変更",
+    "all_settings": "すべての設定"
   },
   "skill_attach": {
     "trigger_aria": "ワークスペースのスキルを追加",
@@ -269,7 +280,7 @@
     "environment": "環境",
     "custom_args": "カスタム引数",
     "mcp_config": "MCP",
-    "composio_mcp": "MCP アプリ",
+    "composio_mcp": "アプリ",
     "integrations": "連携",
     "runtime_config": "ルーティング",
     "qoder_agent": "Qoder Cloud Agents",
@@ -534,21 +545,6 @@
       "redacted_hint": "この config を読み取れるのは、エージェントのオーナーまたはワークスペースの admin のみです。",
       "dialog_json_help": "サーバー設定全体を JSON で編集します。"
     },
-    "composio_mcp": {
-      "subtitle": "ツールキットにチェックを入れると、あなた（この agent の作成者）が直接または下位 agent のチェーン経由でこの agent をトリガーしたときに限り、MCP サーバーとしてマウントされます。",
-      "loading": "接続を読み込み中…",
-      "load_failed": "接続済みアプリを読み込めませんでした。しばらくしてから再試行してください。",
-      "empty_title": "接続済みのアプリがありません",
-      "empty_link_to_settings": "設定 → 連携 で接続する",
-      "connected": "接続済み",
-      "toggle_aria": "この agent に {{toolkit}} を許可",
-      "saving": "保存中…",
-      "save_failed_toast": "保存できませんでした。もう一度お試しください",
-      "redacted_title": "設定済み — あなたには非表示",
-      "redacted_hint": "この agent が使用できるアプリを閲覧・変更できるのは作成者のみです。",
-      "shared_warning": "このエージェントは共有されています。このエージェントを実行できる人は、ここで有効化した Composio アプリを利用できます。これらのアプリが機微なデータを扱う場合は、Private にするかアクセス範囲を絞ってください。",
-      "workspace_warning": "ワークスペースに公開：ワークスペースの全メンバーがこのエージェントを通じてこれらの Composio アプリを利用できます。"
-    },
     "runtime_config": {
       "mode_label": "ルーティングモード",
       "mode_local": "Local",
@@ -661,6 +657,24 @@
       "started_prefix": "{{when}} に開始",
       "dispatched_prefix": "{{when}} にディスパッチ",
       "queued_prefix": "{{when}} に待機開始"
+    },
+    "connected_apps": {
+      "subtitle": "このエージェントが使えるアプリです。各アプリはチームアカウントか、実行を起動した人のアカウントとして、選んだレベルで動作します。",
+      "loading": "アプリを読み込み中…",
+      "load_failed": "このエージェントのアプリを読み込めませんでした。",
+      "empty": "アプリはまだありません。",
+      "add_placeholder": "アプリを追加…",
+      "account": "アカウント",
+      "level": "レベル",
+      "remove": "{{app}} を削除",
+      "team_connected": "チームアカウント接続済み",
+      "team_missing": "チームアカウント未接続",
+      "personal_connected": "あなたのアカウントは接続済み",
+      "personal_missing": "このアプリはまだ接続していません",
+      "team_admin_only": "エージェントにチームアカウントを付与できるのはワークスペース管理者のみです。",
+      "team_shared_warning": "このエージェントを実行できる人は誰でも、これらのアプリをチームアカウントとして使います。",
+      "manage_link": "設定 → 接続済みアプリ でアカウントを管理",
+      "save_failed_toast": "保存できませんでした。もう一度お試しください"
     }
   },
   "char_counter": {
@@ -1027,5 +1041,29 @@
       "next": "次へ"
     }
   },
-  "actions": {}
+  "actions": {},
+  "intro": {
+    "title": "最初の AI チームメイトを迎える",
+    "description": "エージェントはチームメンバーと同じようにタスクを引き受けます。ランタイム上で Claude Code や Codex などを使って作業し、終わったらコメントで成果を渡します。",
+    "slides": {
+      "describe": {
+        "title": "やることを一文で伝える",
+        "description": "役割を書き、ランタイムとモデルを選べば作成できます。指示の変更や skill の追加はいつでもできます。"
+      },
+      "assign": {
+        "title": "同僚と同じように任せる",
+        "description": "どのタスクでも担当者に選ぶだけ。自分で作業を始めるので、見張る必要はありません。"
+      },
+      "deliver": {
+        "title": "作業を見守り、コメントで受け取る",
+        "description": "実行の様子はリアルタイムで見えます。完了すると、結果と PR をタスクのコメントで渡します。"
+      }
+    },
+    "art": {
+      "prompt": "フロントエンドの PR をレビューし、アクセシビリティとパフォーマンスを重点的に見て、結論を PR コメントに書く。",
+      "issue_title": "料金ページのモバイル表示が崩れる",
+      "comment": "修正しました。375px 以下では料金カードを 1 列にしています。PR を作成し、テストも通っています。",
+      "step_read": "{{file}} を読む"
+    }
+  }
 }

@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useRailOrderStore } from "@multica/core/navigation";
 import { SidebarProvider, useSidebar } from "@multica/ui/components/ui/sidebar";
 import { renderWithI18n } from "../test/i18n";
 import { AppRail } from "./app-rail";
@@ -14,7 +15,6 @@ const state = vi.hoisted(() => ({
   chatSessions: [] as { id: string; unread_count?: number }[],
   chat: { activeSessionId: null as string | null, isOpen: false },
   stuck: [] as unknown[],
-  failingAutopilots: [] as unknown[],
 }));
 
 vi.mock("../navigation", () => ({
@@ -61,9 +61,6 @@ vi.mock("../common/use-app-foreground", () => ({
 vi.mock("./panels/team-status", () => ({
   useTeamAgentStatus: () => ({ stuck: state.stuck }),
 }));
-vi.mock("./panels/autopilots-panel", () => ({
-  useFailingAutopilots: () => state.failingAutopilots,
-}));
 vi.mock("./rail-workspaces", () => ({ RailWorkspaces: () => null }));
 vi.mock("./help-launcher", () => ({ HelpLauncher: () => null }));
 vi.mock("./account-menu", () => ({ AccountMenu: () => null }));
@@ -108,8 +105,11 @@ beforeEach(() => {
   state.chatSessions = [];
   state.chat = { activeSessionId: null, isOpen: false };
   state.stuck = [];
-  state.failingAutopilots = [];
+  useRailOrderStore.setState({ order: null });
 });
+
+const railOrder = () =>
+  Array.from(document.querySelectorAll<HTMLElement>("[data-rail-item]"), (item) => item.dataset.railItem);
 
 describe("AppRail global actions", () => {
   it("carries New issue and search by default", () => {
@@ -122,6 +122,36 @@ describe("AppRail global actions", () => {
     renderRail(undefined, <AppRail globalActions={false} />);
     expect(screen.queryByRole("button", { name: /^new issue$/i })).toBeNull();
     expect(screen.queryByRole("button", { name: "Search..." })).toBeNull();
+  });
+});
+
+describe("AppRail order", () => {
+  it("lists the spaces in the default order", () => {
+    renderRail();
+    expect(railOrder()).toEqual(["inbox", "work", "team", "chat", "autopilots"]);
+  });
+
+  it("follows the saved order", () => {
+    const order = ["chat", "inbox", "work", "team", "autopilots"] as const;
+    useRailOrderStore.getState().setOrder(order);
+    renderRail();
+    expect(railOrder()).toEqual(order);
+  });
+
+  // dnd-kit stops the release's click at the document without cancelling
+  // it, so the link would navigate natively even though React never sees it.
+  it("does not open the space released at the end of a drag", async () => {
+    renderRail();
+    const chat = link("/acme/chat")!;
+    const pointer = { isPrimary: true, button: 0, clientX: 30, clientY: 300 };
+    fireEvent.pointerDown(chat, pointer);
+    fireEvent.pointerMove(document, { ...pointer, clientY: 310 });
+    fireEvent.pointerUp(document, { ...pointer, clientY: 310 });
+
+    expect(fireEvent.click(chat)).toBe(false);
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(fireEvent.click(chat)).toBe(true);
   });
 });
 
@@ -151,6 +181,33 @@ describe("AppRail spaces", () => {
   });
 });
 
+describe("AppRail label disclosure", () => {
+  const tooltip = () => document.querySelector("[data-slot=tooltip-content]");
+
+  // jsdom does not lay out the rail: model a label too long for the item.
+  function clipLabel(el: HTMLElement) {
+    el.style.overflowX = "hidden";
+    Object.defineProperties(el, {
+      scrollWidth: { configurable: true, value: 90 },
+      clientWidth: { configurable: true, value: 44 },
+    });
+  }
+
+  it("names a space whose label is cut off even when it is already the full name", async () => {
+    renderRail();
+    const inbox = link("/acme/inbox")!;
+    clipLabel(within(inbox).getByText("Inbox"));
+    await act(async () => inbox.focus());
+    expect(tooltip()).toHaveTextContent("Inbox");
+  });
+
+  it("stays quiet when the full-name label fits", async () => {
+    renderRail();
+    await act(async () => link("/acme/inbox")!.focus());
+    expect(tooltip()).toBeNull();
+  });
+});
+
 describe("AppRail badges", () => {
   it("counts inbox unread with a static counter", () => {
     state.inboxUnread = 4;
@@ -160,18 +217,15 @@ describe("AppRail badges", () => {
     expect(badge?.animated).toBe(false);
   });
 
-  it("shows no attention dots when nothing needs a look", () => {
+  it("shows no attention dot when nothing needs a look", () => {
     renderRail();
     expect(link("/acme/agents")?.querySelector(".bg-warning")).toBeNull();
-    expect(link("/acme/autopilots")?.querySelector(".bg-destructive")).toBeNull();
   });
 
-  it("flags Team when an agent is stuck and Autopilot when a run failed", () => {
+  it("flags Team when an agent is stuck", () => {
     state.stuck = [{ id: "agent-1" }];
-    state.failingAutopilots = [{ id: "ap-1" }];
     renderRail();
     expect(link("/acme/agents")?.querySelector(".bg-warning")).not.toBeNull();
-    expect(link("/acme/autopilots")?.querySelector(".bg-destructive")).not.toBeNull();
   });
 });
 

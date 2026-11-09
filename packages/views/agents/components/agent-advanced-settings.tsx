@@ -34,7 +34,7 @@ import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
-import { AgentMcpTab } from "./tabs/agent-mcp-tab";
+import { AgentAppsTab } from "./tabs/agent-apps-tab";
 import { IntegrationsTab } from "./tabs/integrations-tab";
 import { QoderAgentTab } from "./tabs/qoder-agent-tab";
 import { RuntimeConfigTab } from "./tabs/runtime-config-tab";
@@ -159,8 +159,9 @@ export function AgentAdvancedSettings({
     telegramListing?.configured === true;
 
   // The Qoder bridge fails every task carrying skills, MCP, connected apps,
-  // env, args or a model override, and runs issues only (no chat). Those
-  // editors are not offered; the agent in Qoder Cloud Agents owns that configuration.
+  // env, args or a model override. Those editors are not offered; the agent
+  // in Qoder Cloud Agents owns that configuration. It does run chat, so IM
+  // channels (Integrations) stay available.
   const qoderRuntime = runtime?.provider === "qoder_cloud";
 
   const settingsSections = useMemo(
@@ -184,13 +185,13 @@ export function AgentAdvancedSettings({
   );
 
   const capabilitySections = useMemo(() => {
-    if (qoderRuntime) return [];
+    if (qoderRuntime) {
+      return CAPABILITY_SECTIONS.filter(
+        (item) => item.id === "integrations" && integrationsConfigured,
+      );
+    }
     const showMcp = runtime ? providerSupportsMcpConfig(runtime.provider) : true;
-    const showComposioMcp =
-      composioMCPAppsEnabled &&
-      !!currentUserId &&
-      !!agent.owner_id &&
-      agent.owner_id === currentUserId;
+    const showComposioMcp = composioMCPAppsEnabled && canEdit;
     return CAPABILITY_SECTIONS.filter((item) => {
       if (item.id === "mcp_config") return showMcp;
       if (item.id === "composio_mcp") return showComposioMcp;
@@ -198,9 +199,8 @@ export function AgentAdvancedSettings({
       return true;
     });
   }, [
-    agent.owner_id,
+    canEdit,
     composioMCPAppsEnabled,
-    currentUserId,
     integrationsConfigured,
     qoderRuntime,
     runtime,
@@ -244,7 +244,7 @@ export function AgentAdvancedSettings({
       >
         <DialogContent className="flex h-[min(85dvh,52rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
           <DialogHeader className="shrink-0 gap-1 border-b px-5 py-4 pr-12">
-            <DialogTitle>{t(($) => $.detail.advanced_settings)}</DialogTitle>
+            <DialogTitle>{t(($) => $.detail.settings)}</DialogTitle>
             <DialogDescription className="truncate">{agent.name}</DialogDescription>
           </DialogHeader>
 
@@ -370,7 +370,7 @@ export function AgentAdvancedSettings({
                       onDirtyChange={setDirty}
                     />
                   )}
-                  {active.id === "composio_mcp" && <AgentMcpTab agent={agent} />}
+                  {active.id === "composio_mcp" && <AgentAppsTab agent={agent} />}
                   {active.id === "integrations" && (
                     <IntegrationsTab agent={agent} />
                   )}

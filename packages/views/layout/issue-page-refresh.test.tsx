@@ -26,6 +26,9 @@ vi.mock("../issues/surface/issue-surface", () => ({
     <>{renderHeader({ controller: { isRefreshing: state.refreshing, surfaceIssues: [] } })}</>
   ),
 }));
+vi.mock("../chat/use-start-chat-with-draft", () => ({
+  useStartChatWithDraft: () => null,
+}));
 vi.mock("../issue-views/view-header", () => ({
   IssueViewHeader: ({ controller, base }: { controller: { isRefreshing: boolean }; base: { kind: string } }) => (
     <header>

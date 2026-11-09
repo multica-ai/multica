@@ -102,10 +102,10 @@ describe("issue view defaults", () => {
     store = createStore<IssueViewState>()((set) => viewStoreSlice(set));
   });
 
-  it("starts with newest-created issues first and a compact card", () => {
+  it("starts with recently updated issues first and a compact card", () => {
     const state = store.getState();
 
-    expect([state.sortBy, state.sortDirection]).toEqual(["created_at", "desc"]);
+    expect([state.sortBy, state.sortDirection]).toEqual(["updated_at", "desc"]);
     expect(state.cardProperties).toEqual({
       priority: true,
       description: false,
@@ -139,7 +139,7 @@ describe("issue view defaults", () => {
     store.getState().setSortBy("position");
     store.getState().setGrouping("assignee");
 
-    expect(store.getState().sortBy).toBe("created_at");
+    expect(store.getState().sortBy).toBe("updated_at");
     expect(store.getState().sortDirection).toBe("desc");
   });
 
@@ -150,7 +150,7 @@ describe("issue view defaults", () => {
     store.getState().setViewMode("board");
 
     expect(store.getState().grouping).toBe("assignee");
-    expect(store.getState().sortBy).toBe("created_at");
+    expect(store.getState().sortBy).toBe("updated_at");
     expect(store.getState().sortDirection).toBe("desc");
   });
 

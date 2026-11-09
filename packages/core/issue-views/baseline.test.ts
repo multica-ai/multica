@@ -116,3 +116,16 @@ describe("baselineFromQuery agent running", () => {
     expect(issueViewFilterCount({ agentRunningFilter: true, statusFilters: ["todo"] })).toBe(2);
   });
 });
+
+describe("baselineFromQuery unread", () => {
+  it("fixes the filter only when the view saved it as true", () => {
+    expect(baselineFromQuery({ unreadFilter: true }).unread).toBe(true);
+    expect(baselineFromQuery({ unreadFilter: true }).raw.unreadFilter).toBe(true);
+    expect(baselineFromQuery({ unreadFilter: "yes" }).unread).toBe(false);
+    expect(baselineFromQuery({}).raw.unreadFilter).toBe(false);
+  });
+
+  it("counts as one condition in the view summary", () => {
+    expect(issueViewFilterCount({ unreadFilter: true, statusFilters: ["todo"] })).toBe(2);
+  });
+});

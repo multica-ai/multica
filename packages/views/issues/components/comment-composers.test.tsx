@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ComponentProps, type ReactNode, type Ref } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
@@ -13,8 +13,7 @@ import { ReplyInput } from "./reply-input";
 /** Shape of ContentEditor's `quickActionMenu` prop, as the composers pass it. */
 type QuickActionMenuProp = {
   getQuickActions?: () => { id: string; name: string; description?: string }[];
-  renderQuickAction?: (quickActionId: string) => Promise<string>;
-  onRenderError?: (error: unknown) => void;
+  getQuickActionContent?: (quickActionId: string) => string;
 };
 
 // Uploads now flow through the module-level coordinator, which calls
@@ -39,8 +38,8 @@ const editorQuickActionMenu = vi.hoisted(() => ({
 // Observability + failure control for the write-back insert path (MUL-5181):
 // `insertMarkdownAtEnd` returns false while the (simulated) Tiptap instance
 // doesn't exist yet, exactly like the real handle.
-// Post-send caret policy: the top-level composer blurs (the page scrolls to the
-// posted comment instead), a thread reply keeps the caret for the next reply.
+// Post-send caret policy: both the top-level composer and a thread reply blur,
+// so the page's keyboard shortcuts work again straight after a send.
 const focusCalls = vi.hoisted(() => ({ focused: 0, blurred: 0 }));
 const insertMarkdownSpy = vi.hoisted(() => vi.fn());
 const insertPlaceholderSpy = vi.hoisted(() => vi.fn());
@@ -242,6 +241,12 @@ function renderCommentInput(onSubmit = vi.fn().mockResolvedValue(true)) {
   return { ...view, onSubmit };
 }
 
+function DraftReplyInput(props: ComponentProps<typeof ReplyInput>) {
+  const parentId = useCommentDraftStore((s) =>
+    (props.draftKey ? s.drafts[props.draftKey]?.replyTarget?.commentId : undefined) ?? props.parentId);
+  return <ReplyInput {...props} parentId={parentId} />;
+}
+
 function renderReplyInput({
   onSubmit = vi.fn().mockResolvedValue("reply-new"),
   onAccepted,
@@ -254,7 +259,7 @@ function renderReplyInput({
   draftKey?: `reply:${string}:${string}`;
 } = {}) {
   const view = renderWithProviders(
-    <ReplyInput
+    <DraftReplyInput
       issueId="issue-1"
       parentId="comment-1"
       avatarType="member"
@@ -327,7 +332,7 @@ describe("quick action `/` menu", () => {
     apiListWorkspaces.mockResolvedValue([workspace]);
     apiListQuickActions.mockResolvedValue({
       quick_actions: [
-        { id: "qa-1", name: "review", description: "Ask for a review", status: "active" },
+        { id: "qa-1", name: "review", description: "Ask for a review", status: "active", assignee_type: "", prompt: "Review this issue" },
         { id: "qa-2", name: "retired", description: "", status: "archived" },
       ],
     });
@@ -378,17 +383,14 @@ describe("quick action `/` menu", () => {
       });
     });
 
-    it(`binds quick action rendering to this issue in the ${composer.name}`, async () => {
-      apiRenderQuickAction.mockResolvedValue("rendered body");
+    it(`builds quick action text from the catalog in the ${composer.name}`, async () => {
       renderInWorkspace(composer.element);
       activateComposer(composer.shell);
 
       await waitFor(() => {
-        expect(editorQuickActionMenu.last?.renderQuickAction).toBeTypeOf("function");
+        expect(editorQuickActionMenu.last?.getQuickActionContent?.("qa-1")).toBe("Review this issue");
       });
-      await editorQuickActionMenu.last?.renderQuickAction?.("qa-1");
-
-      expect(apiRenderQuickAction).toHaveBeenCalledWith("issue-1", "qa-1");
+      expect(apiRenderQuickAction).not.toHaveBeenCalled();
     });
   }
 });
@@ -640,9 +642,9 @@ describe("comment composers", () => {
     expect(screen.getByTestId("editor").closest("[aria-busy]")).toBeNull();
   });
 
-  // Post-send caret policy. The two composers deliberately disagree: posting a
-  // top-level comment ends the turn and drops the caret, while a thread reply
-  // leaves the user mid-conversation with the box ready for the next one.
+  // Post-send caret policy. Both composers drop the caret once the send is
+  // accepted: a focused editor swallows the page's keyboard shortcuts, so
+  // leaving the caret in a reply box traps the user until they click away.
   it("blurs the top-level composer after a posted comment", async () => {
     const { container } = renderCommentInput();
 
@@ -657,17 +659,18 @@ describe("comment composers", () => {
     expect(focusCalls.focused).toBe(0);
   });
 
-  it("keeps the caret in the reply box after a posted reply", async () => {
+  it("blurs the reply box after a posted reply", async () => {
     const { container } = renderReplyInput();
 
     activateComposer("reply-composer-shell");
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "replied" } });
-    // Discard the shell→editor activation focus; what follows is the refocus.
+    // Discard the shell→editor activation focus; what follows is entirely the
+    // post-send policy.
     focusCalls.focused = 0;
     fireEvent.click(getSubmitButton(container));
 
-    await waitFor(() => expect(focusCalls.focused).toBeGreaterThan(0));
-    expect(focusCalls.blurred).toBe(0);
+    await waitFor(() => expect(focusCalls.blurred).toBeGreaterThan(0));
+    expect(focusCalls.focused).toBe(0);
   });
 
   it("reports the new reply id as the accepted scroll target", async () => {
@@ -682,7 +685,7 @@ describe("comment composers", () => {
     expect(onAccepted).toHaveBeenCalledWith("reply-new");
   });
 
-  it("does not refocus the reply box when the send fails", async () => {
+  it("leaves reply focus alone when the send fails", async () => {
     const onSubmit = vi.fn().mockResolvedValue(false);
     const { container } = renderReplyInput({ onSubmit });
 
@@ -694,6 +697,7 @@ describe("comment composers", () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
     expect(focusCalls.focused).toBe(0);
+    expect(focusCalls.blurred).toBe(0);
   });
 
   // Regression: the tab-switch flush re-writes IDENTICAL content mid-flight;
@@ -756,9 +760,9 @@ describe("comment composers", () => {
     expect(focusCalls.blurred).toBe(0);
   });
 
-  // Same coupling on the reply side: refocus is bound to having actually wiped
+  // Same coupling on the reply side: the blur is bound to having actually wiped
   // the editor, not merely to acceptance.
-  it("does not refocus a reply box whose mid-flight draft was kept", async () => {
+  it("does not blur a reply box whose mid-flight draft was kept", async () => {
     let resolveSubmit!: (v: boolean) => void;
     const onSubmit = vi.fn(() => new Promise<boolean>((r) => { resolveSubmit = r; }));
     renderReplyInput({ onSubmit, draftKey: "reply:issue-1:comment-1" });
@@ -780,6 +784,7 @@ describe("comment composers", () => {
       "reply A plus more",
     );
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    expect(focusCalls.blurred).toBe(0);
     expect(focusCalls.focused).toBe(0);
   });
 

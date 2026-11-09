@@ -46,6 +46,21 @@ export async function copyText(text: string): Promise<boolean> {
   const previouslyFocused =
     document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
+  // Form controls keep their own selection when focus is restored. Applying a
+  // DOM Selection there would instead reset their selectionStart/selectionEnd.
+  const selection =
+    previouslyFocused instanceof HTMLInputElement ||
+    previouslyFocused instanceof HTMLTextAreaElement
+      ? null
+      : document.getSelection();
+  const anchorNode = selection?.anchorNode;
+  const focusNode = selection?.focusNode;
+  const range = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+  const backward =
+    range &&
+    anchorNode === range.endContainer &&
+    selection?.anchorOffset === range.endOffset;
+
   document.body.appendChild(textarea);
   try {
     textarea.focus();
@@ -55,7 +70,27 @@ export async function copyText(text: string): Promise<boolean> {
     return false;
   } finally {
     document.body.removeChild(textarea);
-    previouslyFocused?.focus();
+    if (previouslyFocused?.isConnected) previouslyFocused.focus();
+    if (selection && range && anchorNode?.isConnected && focusNode?.isConnected) {
+      // A Range alone loses backward selections. Restore the anchor and focus
+      // in their original order so the next edit keeps the same caret/selection.
+      selection.setBaseAndExtent(
+        backward ? range.endContainer : range.startContainer,
+        backward ? range.endOffset : range.startOffset,
+        backward ? range.startContainer : range.endContainer,
+        backward ? range.startOffset : range.endOffset,
+      );
+      // Setting a DOM selection can focus its editing host (e.g. after a copy
+      // button click). Keep the original focus target, as on the async path.
+      if (
+        previouslyFocused?.isConnected &&
+        document.activeElement !== previouslyFocused
+      ) {
+        previouslyFocused.focus();
+      }
+    } else if (selection && !range) {
+      selection.removeAllRanges();
+    }
   }
 }
 

@@ -30,6 +30,7 @@ import { DiagnosticRouteReporter } from "./platform/diagnostic-route-reporter";
 import { flushFreezeBreadcrumb } from "./freeze-flush";
 import { DesktopAuthSessionBridge } from "./platform/auth-session-bridge";
 import { WorkspaceWindowBridge } from "./platform/workspace-window-bridge";
+import { IssueDeepLinkBridge } from "./platform/issue-deep-link-bridge";
 import {
   launchWorkspaceSlug,
   otherWindowWorkspaces,
@@ -53,6 +54,8 @@ const HTML_LANG: Record<SupportedLocale, string> = {
   ko: "ko-KR",
   ja: "ja-JP",
   fr: "fr-FR",
+  es: "es",
+  ru: "ru",
 };
 
 
@@ -102,7 +105,7 @@ function IssueWindowContent() {
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <MulticaIcon className="size-6 animate-pulse" />
+        <MulticaIcon mode="think" size={40} />
       </div>
     );
   }
@@ -332,7 +335,7 @@ function AppContent() {
   if (isLoading || bootstrapping) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <MulticaIcon className="size-6 animate-pulse" />
+        <MulticaIcon mode="think" size={40} />
       </div>
     );
   }
@@ -483,6 +486,7 @@ export default function App() {
           <DesktopAuthSessionBridge />
           {windowContext.kind === "main" && <DiagnosticRouteReporter />}
           {windowContext.kind === "main" && <WorkspaceWindowBridge />}
+          {windowContext.kind === "main" && <IssueDeepLinkBridge />}
           {windowContext.kind === "main" && (
             <DesktopClientUsageReporter
               apiUrl={runtimeConfigResult.config.apiUrl}

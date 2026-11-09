@@ -29,8 +29,10 @@ import type { Issue, PinnedItem } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { IssueActionsContextMenu } from "../../issues/actions";
 import { useStatusLabel } from "../../issues/utils/status-label";
+import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
 import { PANEL_ROW_CLASS, PanelList, PanelSection, isPathWithin, panelRowStateClass } from "../panel-nav";
+import { useDragClickGuard } from "../use-drag-click-guard";
 import {
   ISSUE_ROW_LINK_CLASS,
   IssueAgentBadge,
@@ -38,6 +40,7 @@ import {
   SIDEBAR_SHIMMER_CLASS,
   SidebarIssueStatus,
   issueRowMenuOpenClass,
+  unreadIssueHref,
   useIssueAgentState,
 } from "./sidebar-tree";
 
@@ -124,13 +127,20 @@ export function PinnedSection({ pins, wsId }: { pins: PanelPins; wsId: string })
   const { visible, displayed, expanded, setExpanded, setLocalPinned, isDraggingRef, viewPins, isPinActive } = pins;
   const collapsed = useSidebarTreeStore((s) => s.pinnedCollapsed);
   const setCollapsed = useSidebarTreeStore((s) => s.setPinnedCollapsed);
+  const { arm: armClickGuard, release: releaseClickGuard } = useDragClickGuard();
 
   const handleDragStart = useCallback(() => {
     isDraggingRef.current = true;
-  }, [isDraggingRef]);
+    armClickGuard();
+  }, [armClickGuard, isDraggingRef]);
+  const handleDragCancel = useCallback(() => {
+    isDraggingRef.current = false;
+    releaseClickGuard();
+  }, [isDraggingRef, releaseClickGuard]);
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       isDraggingRef.current = false;
+      releaseClickGuard();
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const oldIndex = visible.findIndex((pin) => pin.id === active.id);
@@ -140,7 +150,7 @@ export function PinnedSection({ pins, wsId }: { pins: PanelPins; wsId: string })
       setLocalPinned(reordered);
       reorderPins.mutate([...reordered, ...viewPins]);
     },
-    [isDraggingRef, reorderPins, setLocalPinned, viewPins, visible],
+    [isDraggingRef, releaseClickGuard, reorderPins, setLocalPinned, viewPins, visible],
   );
 
   if (visible.length === 0) return null;
@@ -151,7 +161,13 @@ export function PinnedSection({ pins, wsId }: { pins: PanelPins; wsId: string })
       collapsed={collapsed}
       onCollapsedChange={setCollapsed}
     >
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+      >
         <SortableContext items={displayed.map((pin) => pin.id)} strategy={verticalListSortingStrategy}>
           <PanelList>
             {displayed.map((pin) => (
@@ -193,7 +209,6 @@ function SortablePinItem({
   running = false,
   unread = false,
   trailing,
-  onNavigate,
   issue,
 }: {
   pin: PinnedItem;
@@ -207,18 +222,11 @@ function SortablePinItem({
   /** Brightens the label while the issue has an unread agent result. */
   unread?: boolean;
   trailing?: React.ReactNode;
-  /** Runs on a real click (not a drag-release) before navigation. */
-  onNavigate?: () => void;
   /** A pinned issue's row opens the issue context menu on right-click. */
   issue?: Issue;
 }) {
   const { t } = useT("layout");
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: pin.id });
-  const wasDragged = useRef(false);
-
-  useEffect(() => {
-    if (isDragging) wasDragged.current = true;
-  }, [isDragging]);
 
   const row = (
     <div
@@ -237,14 +245,6 @@ function SortablePinItem({
         newTabTitle={label}
         draggable={false}
         aria-current={active ? "page" : undefined}
-        onClick={(event) => {
-          if (wasDragged.current) {
-            wasDragged.current = false;
-            event.preventDefault();
-            return;
-          }
-          onNavigate?.();
-        }}
         className={cn(ISSUE_ROW_LINK_CLASS, "gap-2.5")}
       >
         <ShimmerText
@@ -341,7 +341,7 @@ function PinRow({
     return (
       <SortablePinItem
         pin={pin}
-        href={href}
+        href={unreadIssueHref(href, unread)}
         onUnpin={onUnpin}
         label={issue.title}
         active={active}
@@ -372,7 +372,9 @@ function PinRow({
       onUnpin={onUnpin}
       label={project.title}
       active={active}
-      iconNode={<Folder className="size-4 shrink-0" />}
+      iconNode={
+        project.icon ? <ProjectIcon project={project} size="md" /> : <Folder className="size-4 shrink-0" />
+      }
     />
   );
 }

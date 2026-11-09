@@ -14,11 +14,12 @@ import { Button } from "@multica/ui/components/ui/button";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { ModalRegistry } from "@multica/views/modals/registry";
 import { WorkspacePresencePrefetch } from "@multica/views/layout";
-import { DragStrip } from "@multica/views/platform";
+import { DragStrip, WindowTitleBarProvider } from "@multica/views/platform";
 import type { IssueWindowContext } from "../../../shared/issue-window";
 import { DesktopAuthRecoveryPage } from "../pages/auth-recovery";
 import { IssueDetailPage } from "../pages/issue-detail-page";
 import { IssueWindowNavigationProvider } from "../platform/issue-window-navigation";
+import { TRAFFIC_LIGHT_CLEARANCE } from "./window-toolbar";
 
 export function IssueWindow({ context }: { context: IssueWindowContext }) {
   const router = useMemo(
@@ -67,7 +68,7 @@ function IssueWindowRoute() {
     return (
       <IssueWindowFrame>
         <div className="flex min-h-0 flex-1 items-center justify-center">
-          <MulticaIcon className="size-6 animate-pulse" />
+          <MulticaIcon mode="think" size={40} />
         </div>
       </IssueWindowFrame>
     );
@@ -81,7 +82,7 @@ function IssueWindowRoute() {
     <WorkspaceSlugProvider slug={workspaceSlug}>
       <IssueWindowNavigationProvider>
         <WorkspacePresencePrefetch />
-        <IssueWindowFrame>
+        <IssueWindowFrame pageOwnsTitleBar>
           <IssueDetailPage onDelete={() => window.desktopAPI.closeWindow()} />
         </IssueWindowFrame>
         <ModalRegistry />
@@ -90,14 +91,27 @@ function IssueWindowRoute() {
   );
 }
 
-function IssueWindowFrame({ children }: { children: React.ReactNode }) {
+const ISSUE_WINDOW_TITLE_BAR = { leadingInset: TRAFFIC_LIGHT_CLEARANCE };
+
+// The issue page's 48px header is the title bar: trafficLightPosition centres
+// the lights on it, so stacking a separate drag strip above it would leave
+// the lights alone in an empty row. States with no page header keep the strip.
+function IssueWindowFrame({
+  children,
+  pageOwnsTitleBar = false,
+}: {
+  children: React.ReactNode;
+  pageOwnsTitleBar?: boolean;
+}) {
   return (
     <div
       data-dedicated-issue-window="true"
       className="flex h-screen min-h-0 flex-col bg-page-canvas text-foreground"
     >
-      <DragStrip />
-      <div className="flex min-h-0 flex-1 overflow-hidden">{children}</div>
+      {!pageOwnsTitleBar && <DragStrip />}
+      <WindowTitleBarProvider value={pageOwnsTitleBar ? ISSUE_WINDOW_TITLE_BAR : null}>
+        <div className="flex min-h-0 flex-1 overflow-hidden">{children}</div>
+      </WindowTitleBarProvider>
     </div>
   );
 }

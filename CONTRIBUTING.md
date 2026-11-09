@@ -1,9 +1,10 @@
 # Contributing Guide
 
-This guide documents the local development workflow for contributors working on the Multica codebase.
+This guide documents issue and pull request requirements and the local development workflow for contributors working on the Multica codebase.
 
 It covers:
 
+- issue templates, pull request requirements, and review evidence
 - first-time setup
 - environments: starting, inspecting, stopping and deleting them
 - day-to-day development in the main checkout
@@ -28,6 +29,138 @@ other work — you agree to condition 2 of the [Multica License](LICENSE):
 
 See the [LICENSE](LICENSE) file for the full terms.
 
+## Opening an Issue
+
+Choose the form that fits your report:
+
+- **[Feature request](.github/ISSUE_TEMPLATE/feature_request.yml):** Explain the
+  **Problem** and **Goal**. A high-level **Proposal**, **Alternatives**, and
+  **Screenshots** are optional; you can raise a problem without designing its
+  solution.
+- **[Bug report](.github/ISSUE_TEMPLATE/bug_report.yml):** Describe the
+  **Problem**, **Expected behavior**, and **Steps to reproduce**. For intermittent
+  bugs, explain what you tried and how often it happens. Screenshots, logs, and
+  environment details are optional supporting information.
+
+Select the affected area so we can route the report. Bug reports also ask for
+the deployment type. Screenshots are optional for issues; the mandatory
+screenshot rule below applies to PRs that change UI or interactions.
+
+## Pull Request Requirements
+
+Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md) with these five sections:
+
+1. **Problem:** Describe the concrete problem, who is affected, and why it matters.
+2. **Goal:** State the intended outcome of the change.
+3. **Proposal:** Explain the high-level design and why it achieves the goal.
+   Make it understandable to a reader without much project background. Keep
+   implementation details to a minimum.
+4. **Alternatives (optional):** When useful, briefly describe other approaches
+   and why you did not choose them.
+5. **Screenshots:** For UI or interaction changes, attach screenshots or a
+   screen recording from the running app showing the affected screens and
+   states. Before/after comparisons are strongly preferred; for a new screen,
+   show the after state. If there is no UI or interaction impact, write "N/A"
+   and explain why.
+
+End the description with `Closes #<issue>` when the PR resolves an issue.
+
+**UI or interaction PRs without screenshots or a recording are rejected by
+default.** Reviewers should request changes or close the PR until one is
+provided. PRs
+missing the problem, goal, or high-level proposal are also not ready for review.
+
+### Screenshots and Recordings
+
+Store PR evidence as [GitHub attachments](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli).
+Their URLs do not depend on a temporary Git branch and have no preset expiry;
+GitHub does not promise permanent archival. Keep visual-test reference images
+with their tests, and use CI artifacts for temporary debugging reports. Actions
+artifacts expire, so they are unsuitable as the only copy of PR evidence.
+
+From the repository root, upload files to an existing PR with Node.js 22+ and
+[GitHub CLI 2.103.2+](https://github.com/cli/cli/releases/tag/v2.103.2):
+
+```bash
+scripts/pr-shots --repo multica-ai/multica 123 ./before.png ./after.png ./demo.mp4
+```
+
+By default, the script appends attachments at the end of the PR description
+(after any closing issue reference), preserves its existing content, and prints
+the resulting attachment Markdown to stdout. A PR URL can replace the number;
+`--repo` is optional when `gh` can identify the repository. Diagnostics
+go to stderr. Files are identified by SHA-256 in hidden comments next to the
+attachments in the PR body, so retries and renamed files reuse uploaded content
+across checkouts. Keep those comments if you want that retry behavior. Changed
+file content produces a new attachment.
+
+The attachments are already in the PR description; do not paste another copy
+of the stdout Markdown into it. To place an attachment under Screenshots, move
+its entire block from the end of the description: the hidden hash comment,
+blank lines, and image Markdown or video URL together.
+
+Uploads run one file at a time and stop at the first failure. Already confirmed
+files remain saved; stderr identifies the failed and unattempted files. The
+script reads back the PR even when `gh` exits nonzero, because a write may have
+succeeded. Re-run the same command to reuse confirmed attachments and upload
+the missing ones. Run one uploader per PR at a time and avoid editing the
+description during an upload; GitHub body edits are not conditional writes.
+
+To migrate an existing screenshot while keeping its caption and position, use
+`--replace` with exactly one image file. The old URL must occur in a standalone
+Markdown image, such as `![Original caption](https://example.com/old.png)`:
+
+```bash
+scripts/pr-shots --repo multica-ai/multica \
+  --replace https://example.com/old.png 123 ./after.png
+```
+
+Verify the new attachments render and remain accessible to the PR's reviewers
+before deleting old storage. Check other PRs and repository references before
+removing a shared evidence branch. Preserve old links for any failed migration.
+
+You can also use the native CLI directly, including during PR creation:
+
+```bash
+gh pr create --body-file ./pr.md --attach ./before.png --attach ./after.png
+gh pr edit 123 --attach ./demo.mp4
+```
+
+In `pr.md`, write `![Before](./before.png)` and `![After](./after.png)` where
+the images should appear. For video, put `![](./demo.mp4)` in its own paragraph.
+The CLI replaces these local references with uploaded URLs; unreferenced
+attachments are appended. Native `gh --attach` does not deduplicate retries.
+
+CLI uploads require **push access to the target repository** and a credential
+accepted by GitHub's upload endpoint. Version 2.103.2 lets that endpoint decide
+which GitHub App tokens can upload; it does not guarantee support for every App
+or an Actions `GITHUB_TOKEN`. Verify the actual agent/CI credential. Without
+push access, upload through the PR editor in GitHub's web interface. Contributors
+who must stay in the CLI should ask a maintainer in the PR to upload their files;
+opening a fork PR alone does not grant upload permission on the upstream repo.
+This helper targets GitHub.com, not GitHub Enterprise Server.
+
+Supported files are PNG, JPEG, GIF, WebP, SVG, MP4, MOV, and WebM. Images are
+limited to 10 MB; video limits are 10 MB on Free plans and 100 MB on paid plans.
+Use H.264 MP4 for broad playback support. Public-repository attachments are
+publicly accessible: use test data and inspect captures before uploading.
+
+Capture the affected screens from the running application and record the
+commit, viewport, theme, and reproduction steps with the evidence. Use the
+local environment workflow below; for Desktop recording, see
+[Scripting Desktop over CDP](#scripting-desktop-over-cdp). For stable screenshots:
+
+```js
+await page.screenshot({ path: "after.png", animations: "disabled" });
+```
+
+This completes finite CSS/Web Animations and resets infinite ones to their
+initial frame during capture. To compare a particular animation frame, pause
+`document.getAnimations()` and set each animation's `currentTime` to the same
+timestamp on both versions instead. Hold a loading state with a controlled
+local API response, rather than relying on a fixed sleep. Include a short
+recording when the motion or sequence itself is the change under review.
+
 ## Development Model
 
 Local development uses one shared PostgreSQL container and one database per checkout.
@@ -46,6 +179,40 @@ This keeps Docker simple while still isolating schema and data.
 - `pnpm` `10.28.2`
 - Go `1.26.9`
 - Docker
+
+Outside mobile, `pnpm typecheck` uses the native TypeScript 7 compiler (`tsc`,
+provided by the `@typescript/native` npm alias). The `typescript` dependency
+aliases `@typescript/typescript6` so ESLint, Next.js builds, and repository
+scripts retain the compatible TypeScript 6 API. Use `tsc6` to check with that
+compiler explicitly. Keep both dependencies when updating the toolchain;
+replacing the API package with TypeScript 7 breaks API consumers.
+Mobile keeps its own TypeScript dependency.
+When removing TS6 compatibility, update the `typescript` peer range in
+`packages/eslint-config/package.json` together with TypeScript API support in
+`typescript-eslint`.
+
+### Editor TypeScript SDK
+
+The compatibility package provides the compiler API but does not include
+`node_modules/typescript/lib/tsserver.js`. An existing workspace SDK selection
+or `typescript.tsdk` setting pointing to `node_modules/typescript/lib` can
+therefore become invalid or fall back to the editor's bundled TypeScript.
+
+To keep TS6 in VS Code with the repository root open:
+
+1. After `pnpm install`, set the SDK directory to
+   `node_modules/@typescript/old/lib`, the real TS6 installation in this
+   repository's pnpm layout. Use `typescript.tsdk`, or `js/ts.tsdk.path` in
+   versions using that setting name. The selected directory must contain
+   `tsserver.js`.
+2. Open a TypeScript file, run **TypeScript: Select TypeScript Version**, and
+   select the workspace version. Confirm TS6 is selected in the language
+   status item. See [VS Code's SDK selection instructions](https://code.visualstudio.com/docs/typescript/typescript-transpiling#_using-newer-typescript-versions).
+
+To use the TS7 language server instead, remove the TS6 SDK override, install
+the [official TypeScript 7 extension](https://marketplace.visualstudio.com/items?itemName=TypeScriptTeam.native-preview),
+and run **TypeScript: Enable TypeScript 7**. The editor language server is
+selected separately from the CLI compiler used by `pnpm typecheck`.
 
 ## Important Rules
 
@@ -451,6 +618,30 @@ Two constraints are enforced rather than documented:
   competing for its own work, so `make up C=daemon` stops with that explanation
   before spending a login on it. Use `C=api,web` there.
 
+### Web with realistic content
+
+Every `make up`, whatever components it starts, signs `dev@localhost` in,
+marks the user onboarded, and seeds the `dev` workspace with two issues. The
+token sits in the environment's CLI profile, so a Playwright script can open
+`/dev/issues` directly by setting it as `multica_token` in `localStorage`
+before the first page load.
+
+For chat and Agent Builder content without a model or a daemon, add one-shot
+fixtures:
+
+```bash
+make up C=api,web ARGS="--ephemeral"
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue, --json
+make destroy ARGS="--yes"
+```
+
+`chat` and `builder` each create a session with a user message and an assistant
+reply holding a wide table, code and a long log line; `issue` creates an issue
+with a wide description and a comment with a diff. The script registers a
+fixture runtime with the profile token and completes each task with canned
+Markdown through the daemon API, so it also works inside a daemon-managed task.
+It prints the URL of everything it created and exits.
+
 ### Desktop
 
 ```bash
@@ -466,6 +657,64 @@ this environment's Electron userData. Direct `pnpm dev:desktop` still uses its
 path-derived fallback when it is run outside `make up`.
 
 Log in with `dev@localhost` and `888888`.
+
+#### Scripting Desktop over CDP
+
+Some bugs only reproduce in Electron, so evidence for them has to come from the
+running app driven with real input. Start Desktop with a Chrome DevTools
+Protocol endpoint, then attach Playwright to it:
+
+```bash
+make up C=desktop ARGS="--ephemeral --cdp"
+make env-exec ARGS="-- node scripts/desktop-cdp.mjs --screenshot desktop.png"
+make env-exec ARGS="-- node scripts/desktop-cdp.mjs --record steps.mp4 ./steps.mjs"
+make destroy ARGS="--yes"
+```
+
+`--cdp` allocates a port for the environment, `--remote-debugging-port N`
+picks one, and `--no-cdp` drops it; later `make up` runs keep it. `make status`
+prints the endpoint, and `make status ARGS="--json"` reports `desktop_cdp_port`.
+
+`scripts/desktop-cdp.mjs` attaches to the main window of the already signed-in
+Desktop. A script argument is an ES module whose default export receives
+`{ browser, context, page, env, login, screencast, args }`. Drive it with
+`page.mouse` or locator clicks, which go through Chromium's input pipeline,
+rather than `element.click()` inside `page.evaluate`. `--login`, or `login()`
+from a script, signs `dev@localhost` back in after a step signed out.
+`--record` needs `ffmpeg` to encode; without it the frames and an ffconcat file
+stay in `<file>.frames/`. The helper only disconnects, so the app stays up for
+the next attach.
+
+#### Capturing the native window
+
+A renderer screenshot has no title bar or traffic lights. To capture the real
+macOS window of this environment's Desktop, start it with the debug port from
+above and run the capture script from the checkout:
+
+```bash
+make up C=desktop ARGS="--ephemeral --cdp"
+node scripts/desktop-window-capture.mjs window.png
+node scripts/desktop-window-capture.mjs --compare origin/main shots/ -- apps/desktop packages/views
+make destroy ARGS="--yes"
+```
+
+The script finds the window by its owner PID, the process listening on the
+CDP port that `make status` has verified for this environment. It never matches
+by app name or window title: a dev build is also called "Multica Canary", and
+its title is the current page, so either could pick up your own Desktop window.
+Transparent rounded corners are flattened onto white, and the colour profile is
+kept. The app running the command needs Screen Recording permission.
+
+`--compare BASE` writes `before.png` with BASE's version of the changed files
+and `after.png` with the worktree's. Desktop is stopped and relaunched for each
+state, because swapping files under HMR can leave the app stuck loading. The
+index is never touched, and the files are restored on success, failure and
+interrupt. A pathspec after `--` limits which files are swapped.
+
+`--prepare CMD` runs before every capture, in both modes, for example
+`make env-exec ARGS="-- node scripts/desktop-cdp.mjs ./open-page.mjs"` to open
+the page to show. It sees `DESKTOP_CAPTURE_STATE` set to `current`, `before` or
+`after`, and a non-zero exit aborts the run without capturing.
 
 ### Isolation Guarantee
 

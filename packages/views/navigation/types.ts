@@ -28,6 +28,8 @@ export interface NavigationAdapter {
     title?: string,
     opts?: { activate?: boolean },
   ) => void;
+  /** Web only: hand an issue path to the installed desktop app. */
+  openInDesktop?: (path: string) => void;
   /**
    * Desktop only: show a workspace in its own window, or focus the window
    * that already shows it.

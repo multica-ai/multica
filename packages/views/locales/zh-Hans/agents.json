@@ -2,6 +2,7 @@
   "page": {
     "title": "智能体",
     "new_agent": "新建智能体",
+    "search": "搜索智能体",
     "show_archived": "显示已归档（{{count}}）→",
     "of_total": "{{visible}} / {{total}}",
     "list_load_failed": "无法加载智能体列表",
@@ -44,12 +45,21 @@
     "title": "已归档智能体"
   },
   "empty": {
-    "title": "还没有智能体",
-    "description": "创建智能体后，即可把任务分配给它。"
+    "setup": {
+      "label": "配置步骤",
+      "runtime": "接入运行时",
+      "agent": "创建智能体",
+      "issue": "给它分配一个任务",
+      "done": "（已完成）",
+      "connect_runtime": "去接入"
+    }
   },
   "no_matches": {
     "title": "无匹配项",
+    "search_active": "没有智能体匹配\"{{query}}\"。",
+    "search_active_filtered": "在该筛选下没有智能体匹配\"{{query}}\"。",
     "no_archived": "还没有已归档智能体。",
+    "search_archived": "没有已归档智能体匹配\"{{query}}\"。",
     "no_filter_match": "该筛选下没有匹配的智能体。",
     "search_runtime_filtered": "\"{{machine}}\"上没有匹配\"{{query}}\"的智能体。",
     "runtime_filtered": "\"{{machine}}\"上还没有智能体。"
@@ -154,7 +164,7 @@
     "runtime_required_toast": "请先绑定运行时，再运行该智能体。",
     "assign_work": "分配工作",
     "more_actions_aria": "智能体操作",
-    "advanced_settings": "高级设置",
+    "settings": "设置",
     "copy_link": "复制链接",
     "copy_id": "复制智能体 ID",
     "link_copied_toast": "链接已复制",
@@ -209,7 +219,8 @@
   "panel": {
     "status": "状态",
     "runs_7d": "运行（7 天）",
-    "edit_access_aria": "访问权限：{{value}}。更改访问权限"
+    "edit_access_aria": "访问权限：{{value}}。更改访问权限",
+    "all_settings": "全部设置"
   },
   "skill_attach": {
     "trigger_aria": "附加工作区 skill",
@@ -277,7 +288,7 @@
     "environment": "环境变量",
     "custom_args": "自定义参数",
     "mcp_config": "MCP",
-    "composio_mcp": "MCP 应用",
+    "composio_mcp": "应用",
     "integrations": "集成",
     "runtime_config": "路由",
     "qoder_agent": "Qoder Cloud Agents",
@@ -692,21 +703,6 @@
       "redacted_hint": "只有智能体 owner 或工作区 admin 可以查看此配置。",
       "dialog_json_help": "以 JSON 编辑完整的服务器配置。"
     },
-    "composio_mcp": {
-      "subtitle": "勾选 toolkit，只在你自己（这个智能体的创建者）直接或通过下级智能体链路触发这个智能体时，才把它挂载为 MCP server。",
-      "loading": "正在加载你的连接…",
-      "load_failed": "无法加载你已连接的应用，请稍后重试。",
-      "empty_title": "还没有已连接的应用",
-      "empty_link_to_settings": "去 \"设置 → 集成\" 连一个",
-      "connected": "已连接",
-      "toggle_aria": "允许该智能体使用 {{toolkit}}",
-      "saving": "正在保存…",
-      "save_failed_toast": "保存失败，请重试",
-      "redacted_title": "已配置——对你隐藏",
-      "redacted_hint": "只有该智能体的创建者才能查看或修改它可使用的应用。",
-      "shared_warning": "该智能体已共享。能够运行该智能体的人可以通过它使用你在此启用的 Composio 应用。如果这些应用涉及敏感数据，请改用\"私有\"或缩小访问范围。",
-      "workspace_warning": "公开给工作区：工作区内任何成员都可以通过该智能体使用这些 Composio 应用。"
-    },
     "runtime_config": {
       "mode_label": "路由模式",
       "mode_local": "Local",
@@ -819,6 +815,24 @@
       "started_prefix": "{{when}}启动",
       "dispatched_prefix": "{{when}}派发",
       "queued_prefix": "{{when}}排队"
+    },
+    "connected_apps": {
+      "subtitle": "这个智能体可以使用的应用。每个应用以团队账号或触发者的账号身份操作，权限级别由你设定。",
+      "loading": "正在加载应用…",
+      "load_failed": "无法加载此智能体的应用。",
+      "empty": "还没有应用。",
+      "add_placeholder": "添加应用…",
+      "account": "账号",
+      "level": "权限",
+      "remove": "移除 {{app}}",
+      "team_connected": "团队账号已连接",
+      "team_missing": "团队账号未连接",
+      "personal_connected": "你的账号已连接",
+      "personal_missing": "你还没有连接这个应用",
+      "team_admin_only": "只有工作区管理员可以给智能体团队账号。",
+      "team_shared_warning": "能运行这个智能体的人，都会以团队账号身份使用这些应用。",
+      "manage_link": "在 设置 → 已连接应用 中管理账号",
+      "save_failed_toast": "保存失败，请重试"
     }
   },
   "char_counter": {
@@ -1027,5 +1041,29 @@
     "section_owner": "owner",
     "section_model": "模型"
   },
-  "actions": {}
+  "actions": {},
+  "intro": {
+    "title": "招第一位 AI 队友",
+    "description": "智能体像团队成员一样接任务：在你的运行时上用 Claude Code、Codex 等工具动手做，做完在评论里交付。",
+    "slides": {
+      "describe": {
+        "title": "一句话说清它做什么",
+        "description": "描述职责，选好运行时和模型，就能创建。之后随时改指令、加 skill。"
+      },
+      "assign": {
+        "title": "像同事一样分配任务",
+        "description": "在任何任务的负责人里选它。它会自己开工，不用盯着。"
+      },
+      "deliver": {
+        "title": "看它干活，在评论里交付",
+        "description": "执行过程实时可见；完成后在任务评论里交付结果和 PR。"
+      }
+    },
+    "art": {
+      "prompt": "审查前端 PR，重点看可访问性和性能，结论写在 PR 评论里。",
+      "issue_title": "定价页移动端排版错位",
+      "comment": "修好了：价格卡片在 375px 下改为单列。已开 PR，测试通过。",
+      "step_read": "读取 {{file}}"
+    }
+  }
 }

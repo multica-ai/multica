@@ -116,7 +116,9 @@ function stripHtml(input: string): string {
   return input
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<br\s*\/?>/gi, "  \n")
-    .replace(/<\/?[a-z][^>]*>/gi, "");
+    // Angle-bracket URL destinations are not HTML tags. Closing tags have
+    // no attributes, so </chart v2.png> must also survive for the lexer.
+    .replace(/<(?:\/[a-z][a-z\d:-]*\s*|[a-z][a-z\d:-]*(?:\s[^>]*|\/?))>/gi, "");
 }
 
 export function preprocessMobileMarkdown(input: string): string {

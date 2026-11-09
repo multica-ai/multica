@@ -671,6 +671,8 @@ function SwimLaneViewImpl({
     // the same running-task issue ids returned by `/api/working-agents`.
     agentRunningFilter: activeFiltersProp?.agentRunningFilter ?? false,
     runningIssueIds: activeFiltersProp?.runningIssueIds,
+    unreadFilter: activeFiltersProp?.unreadFilter ?? false,
+    unreadIssueIds: activeFiltersProp?.unreadIssueIds,
     creatorFilters: activeFiltersProp?.creatorFilters ?? [],
     projectFilters: activeFiltersProp?.projectFilters ?? [],
     includeNoProject: activeFiltersProp?.includeNoProject ?? false,
@@ -1473,7 +1475,7 @@ function SwimLaneViewImpl({
                         variant="ghost"
                         size="icon-sm"
                         aria-label={t(($) => $.board.hide_column)}
-                        className="rounded-full text-muted-foreground"
+                        className="text-muted-foreground"
                       >
                         <MoreHorizontal className="size-3.5" />
                       </Button>
@@ -1491,7 +1493,7 @@ function SwimLaneViewImpl({
                                   variant="ghost"
                                   size="icon-sm"
                                   aria-label={t(($) => $.board.hide_column)}
-                                  className="rounded-full text-muted-foreground"
+                                  className="text-muted-foreground"
                                 >
                                   <MoreHorizontal className="size-3.5" />
                                 </Button>

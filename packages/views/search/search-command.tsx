@@ -3,8 +3,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, SearchIcon, Sparkles } from "@multica/ui/icons";
 import { Command as CommandPrimitive } from "cmdk";
-import { selectCommandBarContexts, useCommandBarContextStore } from "@multica/core/command-bar";
+import {
+  selectCommandBarContexts,
+  useCommandBarContextStore,
+  useSearchStore,
+} from "@multica/core/command-bar";
 import { createShortcutChord } from "@multica/core/shortcuts";
+import { isImeComposing } from "@multica/core/utils";
 import {
   Dialog,
   DialogContent,
@@ -22,7 +27,6 @@ import { PageView } from "./pages/page-view";
 import { RootView } from "./root-view";
 import { useDelegateSubmit } from "./delegate/use-delegate";
 import { useRootModel } from "./use-root-model";
-import { useSearchStore } from "./search-store";
 import type { DelegateActor, PaletteHostDialog, PaletteStackEntry } from "./types";
 
 const ESCAPE = createShortcutChord("Escape");
@@ -180,7 +184,7 @@ function PaletteFrame({
       return;
     }
     // ⇧↵ treats an input that read as an instruction as a plain search.
-    if (!current && e.key === "Enter" && e.shiftKey && model.delegate) {
+    if (!current && e.key === "Enter" && e.shiftKey && model.delegate && !isImeComposing(e)) {
       e.preventDefault();
       setDismissedDelegateFor(rawQuery);
     }

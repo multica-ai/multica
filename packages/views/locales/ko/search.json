@@ -74,7 +74,8 @@
     "assign_issue": "{{name}}에게 태스크 지정...",
     "new_issue": "{{name}}에게 새 태스크",
     "pin_in_chat": "채팅에 고정",
-    "unpin_in_chat": "채팅 고정 해제"
+    "unpin_in_chat": "채팅 고정 해제",
+    "settings": "에이전트 설정 열기"
   },
   "autopilot": {
     "run_now": "지금 한 번 실행",

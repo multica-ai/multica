@@ -2,6 +2,7 @@ package composio
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -53,6 +54,46 @@ type ListAuthConfigsResponse struct {
 	Items      []AuthConfig `json:"items"`
 	NextCursor string       `json:"next_cursor,omitempty"`
 	TotalItems int          `json:"total_items,omitempty"`
+}
+
+type createAuthConfigRequest struct {
+	Toolkit    createAuthConfigToolkit `json:"toolkit"`
+	AuthConfig createAuthConfigBody    `json:"auth_config"`
+}
+
+type createAuthConfigToolkit struct {
+	Slug string `json:"slug"`
+}
+
+type createAuthConfigBody struct {
+	Type string `json:"type"`
+}
+
+type createAuthConfigResponse struct {
+	AuthConfig AuthConfig `json:"auth_config"`
+}
+
+// CreateManagedAuthConfig registers an auth config for a toolkit that uses
+// Composio's managed OAuth app, making the toolkit connectable in the project.
+// It returns the new auth_config_id.
+//
+// Spec: https://docs.composio.dev/reference/v3/api-reference/auth-configs/postAuthConfigs
+func (c *Client) CreateManagedAuthConfig(ctx context.Context, toolkitSlug string) (string, error) {
+	if toolkitSlug == "" {
+		return "", errors.New("composio: CreateManagedAuthConfig: toolkitSlug is required")
+	}
+	var out createAuthConfigResponse
+	body := createAuthConfigRequest{
+		Toolkit:    createAuthConfigToolkit{Slug: toolkitSlug},
+		AuthConfig: createAuthConfigBody{Type: "use_composio_managed_auth"},
+	}
+	if err := c.do(c.newRequest(ctx).SetBody(body), http.MethodPost, "/auth_configs", &out); err != nil {
+		return "", err
+	}
+	if out.AuthConfig.ID == "" {
+		return "", errors.New("composio: CreateManagedAuthConfig: response has no auth config id")
+	}
+	return out.AuthConfig.ID, nil
 }
 
 // ListAuthConfigs returns the auth configs registered in the project, with

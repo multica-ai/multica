@@ -1,105 +1,112 @@
-import { useState, useEffect } from "react";
+import type { CSSProperties } from "react";
 import { cn } from "../../lib/utils";
+import {
+  ICON_TILE_RADIUS,
+  STAR_ARM_ANGLES,
+  iconStar,
+  iconStarTransform,
+  starArmPath,
+} from "../../lib/multica-brand";
 
-interface MulticaIconProps extends React.ComponentProps<"span"> {
+export type MulticaIconMode =
+  /** The mark at rest. */
+  | "static"
+  /** The centre opens and the arms light up in turn: an agent at work, loading, waiting. */
+  | "think"
   /**
-   * If true, play a one-time entrance spin animation.
+   * Tile pops in, arms grow out of the centre as the star turns into place.
+   * Sign-in only: loading screens use `think`, so the intro never plays twice
+   * or gets cut off when loading finishes early.
    */
-  animate?: boolean;
+  | "intro";
+
+interface MulticaIconProps extends Omit<React.ComponentProps<"svg">, "mode"> {
+  mode?: MulticaIconMode;
+  /** `circle` is the avatar form. */
+  shape?: "square" | "circle";
   /**
-   * If true, disable hover spin animation.
+   * Rendered size in px. Sets width/height and picks the optical size (24px and
+   * below draws a bigger, heavier star). Omit to size with `className` (1em
+   * default); the small optical size is used then.
    */
-  noSpin?: boolean;
-  /**
-   * If true, show a border around the icon.
-   */
-  bordered?: boolean;
-  /**
-   * Size of the bordered icon: "sm" (default), "md", "lg"
-   */
-  size?: "sm" | "md" | "lg";
+  size?: number;
+  /** Accessible name. Without one the mark is decorative. */
+  title?: string;
 }
 
-const borderedSizes = {
-  sm: { wrapper: "p-1.5", icon: "size-3.5" },
-  md: { wrapper: "p-2", icon: "size-4" },
-  lg: { wrapper: "p-2.5", icon: "size-5" },
-};
+const INTRO_AT_S = 0.15;
+const ARM_STAGGER_MS = 55;
+/** Think: one lap of the eight arms. */
+const THINK_LAP_MS = 800;
+/** Think: the open centre, in the star's grid. */
+const THINK_HOLE = 15;
 
 /**
- * Pure CSS 8-pointed asterisk icon matching the Multica logo.
- * Uses currentColor so it adapts to light/dark themes automatically.
- * Clip-path polygon traced from the original SVG path coordinates.
+ * The Multica icon: the star from the wordmark's i on a rounded tile. Black
+ * tile with a white star in light mode, inverted in dark mode.
  */
 export function MulticaIcon({
+  mode = "static",
+  shape = "square",
+  size,
+  title,
   className,
-  animate = false,
-  noSpin = false,
-  bordered = false,
-  size = "sm",
+  style,
   ...props
 }: MulticaIconProps) {
-  const [entranceDone, setEntranceDone] = useState(!animate);
+  const { scale, stroke } = iconStar(size, shape);
+  const intro = mode === "intro";
+  const tileClass = "fill-multica-ink dark:fill-multica-paper";
+  const starClass = "fill-multica-paper dark:fill-multica-ink";
+  const delay = (ms: number | string): CSSProperties => ({
+    animationDelay: typeof ms === "number" ? `${ms}ms` : ms,
+  });
 
-  useEffect(() => {
-    if (!animate) return;
-    const timer = setTimeout(() => setEntranceDone(true), 600);
-    return () => clearTimeout(timer);
-  }, [animate]);
-
-  const clipPath = `polygon(
-    45% 62.1%, 45% 100%, 55% 100%, 55% 62.1%,
-    81.8% 88.9%, 88.9% 81.8%, 62.1% 55%, 100% 55%,
-    100% 45%, 62.1% 45%, 88.9% 18.2%, 81.8% 11.1%,
-    55% 37.9%, 55% 0%, 45% 0%, 45% 37.9%,
-    18.2% 11.1%, 11.1% 18.2%, 37.9% 45%, 0% 45%,
-    0% 55%, 37.9% 55%, 11.1% 81.8%, 18.2% 88.9%
-  )`;
-
-  if (bordered) {
-    const sizeConfig = borderedSizes[size];
-    return (
-      <span
-        className={cn(
-          "inline-flex items-center justify-center border border-border rounded-md",
-          sizeConfig.wrapper,
-          className
-        )}
-        aria-hidden="true"
-        {...props}
-      >
-        <span
+  const arms = (variant: "static" | "grow" | "think") =>
+    STAR_ARM_ANGLES.map((angle, k) => (
+      <g key={angle} transform={`rotate(${angle} 50 50)`}>
+        <path
+          d={starArmPath(stroke, variant === "think" ? THINK_HOLE : 0)}
           className={cn(
-            "block",
-            sizeConfig.icon,
-            !entranceDone && "animate-entrance-spin",
-            entranceDone && !noSpin && "hover:animate-spin"
+            starClass,
+            variant === "grow" && "multica-arm-grow",
+            variant === "think" && "multica-arm-fade",
           )}
-        >
-          <span
-            className="block size-full bg-current"
-            style={{ clipPath }}
-          />
-        </span>
-      </span>
-    );
-  }
+          style={
+            variant === "grow"
+              ? delay(INTRO_AT_S * 1000 + k * ARM_STAGGER_MS)
+              : variant === "think"
+                ? delay(k * (THINK_LAP_MS / STAR_ARM_ANGLES.length) - THINK_LAP_MS)
+                : undefined
+          }
+        />
+      </g>
+    ));
 
   return (
-    <span
-      className={cn(
-        "inline-block size-[1em]",
-        !entranceDone && "animate-entrance-spin",
-        entranceDone && !noSpin && "hover:animate-spin",
-        className
-      )}
-      aria-hidden="true"
+    <svg
+      viewBox="0 0 100 100"
+      role={title ? "img" : undefined}
+      aria-label={title}
+      aria-hidden={title ? undefined : true}
+      className={cn("inline-block shrink-0", size == null && "size-[1em]", intro && "multica-pop", className)}
+      style={{ ...(size != null && { width: size, height: size }), ...(intro && delay("0.1s")), ...style }}
       {...props}
     >
-      <span
-        className="block size-full bg-current"
-        style={{ clipPath }}
-      />
-    </span>
+      {shape === "circle" ? (
+        <circle cx={50} cy={50} r={50} className={tileClass} />
+      ) : (
+        <rect width={100} height={100} rx={ICON_TILE_RADIUS} className={tileClass} />
+      )}
+      <g transform={iconStarTransform(scale)}>
+        {mode === "static" ? arms("static") : null}
+        {mode === "think" ? arms("think") : null}
+        {mode === "intro" ? (
+          <g className="multica-settle" style={delay(INTRO_AT_S * 1000)}>
+            {arms("grow")}
+          </g>
+        ) : null}
+      </g>
+    </svg>
   );
 }

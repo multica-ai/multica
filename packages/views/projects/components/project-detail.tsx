@@ -3,15 +3,17 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, Link2, PanelRight, Pin, PinOff, Trash2, UserMinus } from "@multica/ui/icons";
+import { Check, ChevronRight, FileQuestion, Link2, PanelRight, Pin, PinOff, Trash2, UserMinus } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
+import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
 import { projectDetailOptions } from "@multica/core/projects/queries";
-import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
+import { Spinner } from "@multica/ui/components/ui/spinner";
+import { useUpdateProject, useDeleteProject, ProjectDeletionOfflineError } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
@@ -23,7 +25,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { currentPath, useNavigation } from "../../navigation";
+import { AppLink, currentPath, useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
@@ -33,7 +35,7 @@ import { ProjectWorkflowControl } from "../../workflows/project-workflow-row";
 import { ProjectWorkflowMenuHost } from "../../workflows/project-workflow-menu";
 import { IssueSurface } from "../../issues/surface/issue-surface";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { Button } from "@multica/ui/components/ui/button";
+import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
@@ -64,6 +66,7 @@ import {
   useAnimatedRightSidebarState,
   useRightSidebarShortcut,
 } from "../../layout/animated-right-sidebar";
+import { CollectionPageState } from "../../layout/collection-page";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -117,7 +120,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const userId = useAuthStore((s) => s.user?.id);
-  const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
+  const deleteProject = useDeleteProject();
+  const deleted = deleteProject.isSuccess && deleteProject.variables === projectId;
+  const { data: project, isLoading } = useQuery({
+    ...projectDetailOptions(wsId, projectId),
+    enabled: !deleted,
+  });
   useRegisterCommandBarContext(
     useMemo(() => (project ? { kind: "project", project } : null), [project]),
   );
@@ -143,17 +151,14 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { getActorName } = useActorName();
   const updateProject = useUpdateProject();
-  const deleteProject = useDeleteProject();
+  const deleting = deleteProject.isPending;
   const { data: pinnedItems = [] } = useQuery({
     ...pinListOptions(wsId, userId ?? ""),
     enabled: !!userId,
   });
   const isPinned = pinnedItems.some((p) => p.item_type === "project" && p.item_id === projectId);
-  const isWorkspaceAdmin = useMemo(() => {
-    if (!userId) return false;
-    const me = members.find((m) => m.user_id === userId);
-    return me?.role === "owner" || me?.role === "admin";
-  }, [members, userId]);
+  const role = members.find((m) => m.user_id === userId)?.role ?? null;
+  const canDelete = !!project && canDeleteProject(project, userId ?? null, role, agents);
   const createPin = useCreatePin();
   const deletePinMut = useDeletePin();
   const descEditorRef = useRef<ContentEditorRef>(null);
@@ -228,16 +233,23 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   );
 
   const handleDelete = useCallback(() => {
-    if (!project) return;
+    if (!project || deleteProject.isPending) return;
     deleteProject.mutate(project.id, {
       onSuccess: () => {
+        setDeleteDialogOpen(false);
         toast.success(t(($) => $.detail.toast_project_deleted));
         router.push(wsPaths.projects());
       },
+      onError: (err) =>
+        toast.error(
+          err instanceof ProjectDeletionOfflineError
+            ? t(($) => $.delete_dialog.offline_error)
+            : err instanceof Error ? err.message : String(err),
+        ),
     });
   }, [project, deleteProject, router, wsPaths, t]);
 
-  if (isLoading) {
+  if (isLoading || deleted) {
     return (
       <div className="mx-auto w-full max-w-4xl px-8 py-10 space-y-4">
         <Skeleton className="h-5 w-32" />
@@ -249,7 +261,23 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   }
 
   if (!project) {
-    return <div className="flex items-center justify-center h-full text-muted-foreground">{t(($) => $.detail.not_found)}</div>;
+    return (
+      <div className="flex h-full flex-col">
+        <CollectionPageState
+          icon={FileQuestion}
+          title={t(($) => $.detail.not_found)}
+          description={t(($) => $.detail.not_found_description)}
+          actions={
+            <AppLink
+              href={wsPaths.projects()}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              {t(($) => $.detail.back_to_list)}
+            </AppLink>
+          }
+        />
+      </div>
+    );
   }
 
   const issueMetrics = getProjectIssueMetrics(project);
@@ -529,14 +557,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                             {workflowSubmenu}
                           </>
                         )}
-                        {isWorkspaceAdmin && (
+                        {canDelete && (
                           <>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               variant="destructive"
+                              disabled={deleting}
+                              aria-busy={deleting}
                               onClick={() => setDeleteDialogOpen(true)}
                             >
-                              <Trash2 className="h-3.5 w-3.5" />
+                              {deleting ? <Spinner className="size-3.5" aria-hidden="true" /> : <Trash2 className="h-3.5 w-3.5" />}
                               {t(($) => $.detail.delete_action)}
                             </DropdownMenuItem>
                           </>
@@ -597,8 +627,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       </ResizablePanelGroup>
 
       {/* Delete confirmation */}
-      {isWorkspaceAdmin && (
-        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+      {canDelete && (
+        <AlertDialog
+          open={deleteDialogOpen}
+          onOpenChange={(open) => {
+            if (!deleting) setDeleteDialogOpen(open);
+          }}
+        >
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>{t(($) => $.delete_dialog.title)}</AlertDialogTitle>
@@ -607,8 +642,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>{t(($) => $.delete_dialog.cancel)}</AlertDialogCancel>
-              <AlertDialogAction onClick={handleDelete} className="bg-destructive text-white hover:bg-destructive/90">
+              <AlertDialogCancel disabled={deleting}>
+                {t(($) => $.delete_dialog.cancel)}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={deleting}
+                aria-busy={deleting}
+                onClick={handleDelete}
+                className="bg-destructive text-white hover:bg-destructive/90"
+              >
+                {deleting && <Spinner className="size-3.5" aria-hidden="true" />}
                 {t(($) => $.delete_dialog.confirm)}
               </AlertDialogAction>
             </AlertDialogFooter>

@@ -3,6 +3,7 @@ import { createStore } from "zustand/vanilla";
 import { viewStoreSlice, type IssueViewState } from "../issues/stores/view-store";
 import {
   isIssueViewModified,
+  isIssueViewUndefined,
   issueViewDefinitionFromState,
   issueViewSeedDefinition,
   modifiedFilterDimensions,
@@ -59,6 +60,27 @@ describe("isIssueViewModified", () => {
   });
 });
 
+describe("isIssueViewUndefined", () => {
+  const created = { ...issueViewSeedDefinition({ query: {}, display: {} }), scope_variant: null };
+
+  it("holds for a view as it is created: no conditions, default display", () => {
+    expect(isIssueViewUndefined(created)).toBe(true);
+    expect(isIssueViewUndefined({ query: {}, display: {}, scope_variant: "any" })).toBe(true);
+  });
+
+  it("ignores 'is not' on a dimension with no values", () => {
+    expect(isIssueViewUndefined({ ...created, query: { negatedFilters: ["label"] } })).toBe(true);
+  });
+
+  it("stops holding once the view saves a condition, a display or a narrower scope", () => {
+    expect(isIssueViewUndefined({ ...created, query: { labelFilters: ["bug"] } })).toBe(false);
+    expect(isIssueViewUndefined({ ...created, query: { agentRunningFilter: true } })).toBe(false);
+    expect(isIssueViewUndefined({ ...created, display: { viewMode: "list" } })).toBe(false);
+    expect(isIssueViewUndefined({ ...created, scope_variant: "agents" })).toBe(false);
+    expect(isIssueViewUndefined({ ...created, scope_variant: "assigned" })).toBe(false);
+  });
+});
+
 describe("modifiedFilterDimensions", () => {
   const view = {
     query: { statusFilters: ["done"], negatedFilters: ["status"], priorityFilters: ["high"] },
@@ -100,6 +122,33 @@ describe("agent running in a saved view", () => {
     const legacy = { query: { statusFilters: ["todo"] }, display: {} };
     const store = liveStateFor(legacy);
     expect(store.getState().agentRunningFilter).toBe(false);
+    expect(isIssueViewModified(legacy, store.getState()).filters).toBe(false);
+  });
+});
+
+describe("unread in a saved view", () => {
+  const view = { query: { unreadFilter: true }, display: {} };
+
+  it("saves the filter and opens with it on, unmodified", () => {
+    const store = liveStateFor(view);
+    expect(store.getState().unreadFilter).toBe(true);
+    expect(issueViewDefinitionFromState(store.getState()).query).toMatchObject({
+      unreadFilter: true,
+    });
+    expect(isIssueViewModified(view, store.getState()).filters).toBe(false);
+  });
+
+  it("reports turning it off as a modified filter", () => {
+    const store = liveStateFor(view);
+    store.getState().toggleUnreadFilter();
+    expect(isIssueViewModified(view, store.getState()).filters).toBe(true);
+    expect([...modifiedFilterDimensions(view, store.getState())]).toEqual(["unread"]);
+  });
+
+  it("treats a view saved before the filter existed as off", () => {
+    const legacy = { query: { statusFilters: ["todo"] }, display: {} };
+    const store = liveStateFor(legacy);
+    expect(store.getState().unreadFilter).toBe(false);
     expect(isIssueViewModified(legacy, store.getState()).filters).toBe(false);
   });
 });

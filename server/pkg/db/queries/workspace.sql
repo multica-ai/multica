@@ -1,11 +1,11 @@
 -- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context, w.repos,
-       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed
+       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed, m.pinned_at
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
-ORDER BY w.created_at ASC;
+ORDER BY m.pinned_at DESC NULLS LAST, w.created_at ASC;
 
 -- name: ListDaemonWorkspaces :many
 -- Daemons only need the membership set and display name to discover which
@@ -61,6 +61,32 @@ RETURNING *;
 UPDATE workspace SET issue_counter = issue_counter + 1
 WHERE id = $1
 RETURNING issue_counter;
+
+-- name: HealIssueCounter :one
+-- Operator-shaped repair for a workspace whose issue_counter sits below
+-- MAX(issue.number): something persisted a numbered issue row without this
+-- counter ever being advanced for it. Deliberately a separate statement from
+-- IncrementIssueCounter so a healthy create pays nothing for it, and scoped to
+-- one workspace.
+--
+-- The WHERE guard is what makes a retry meaningful: no row is updated, and sqlc
+-- returns no row, unless the counter really is behind — so a collision caused by
+-- anything else is never retried against the same taken number. It returns the
+-- value it wrote, the value it replaced and the highest number the workspace
+-- holds, so a repair can be logged with its before and after instead of leaving
+-- no trace for whoever debugs the next occurrence.
+WITH target AS (
+    SELECT w.id, w.issue_counter,
+           (SELECT COALESCE(MAX(i.number), 0)::int FROM issue i WHERE i.workspace_id = w.id) AS max_number
+    FROM workspace w
+    WHERE w.id = $1
+)
+UPDATE workspace w SET issue_counter = t.max_number
+FROM target t
+WHERE w.id = t.id AND w.issue_counter < t.max_number
+RETURNING w.issue_counter AS issue_counter,
+          t.issue_counter AS previous_counter,
+          t.max_number AS max_number;
 
 -- name: LockWorkspaceForDelete :one
 -- Taken first by DeleteWorkspace, before it enumerates the workspace's chat
@@ -240,3 +266,9 @@ cleared_client_usage_workspace AS (
     UPDATE client_usage_daily SET workspace_id = NULL WHERE workspace_id = $1
 )
 DELETE FROM workspace WHERE workspace.id = $1;
+
+-- name: SetWorkspacePinned :one
+UPDATE member
+SET pinned_at = CASE WHEN @pinned::bool THEN COALESCE(pinned_at, now()) ELSE NULL END
+WHERE workspace_id = @workspace_id AND user_id = @user_id
+RETURNING pinned_at;

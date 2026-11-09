@@ -61,6 +61,12 @@
     "toast_failed": "添加子任务失败",
     "toast_success": "已添加 {{identifier}} 为子任务"
   },
+  "add_project_issue": {
+    "title": "添加已有任务",
+    "description": "搜索要移入这个项目的任务",
+    "toast_success": "已把 {{identifier}} 移入项目",
+    "toast_failed": "移动任务失败"
+  },
   "run_confirm": {
     "title_assign": "确认指派？",
     "assign_single": "将这个任务指派给 {{name}}；符合运行条件时会立即开始处理。",
@@ -148,7 +154,8 @@
     "local_pick_failed": "无法打开目录选择器。",
     "local_invalid_dir": "该目录不可用，请重新选择。",
     "local_hint": "其他机器上的智能体看不到这个路径，会启动失败。需要协作请用仓库模式。",
-    "repos_ref_default": "默认分支"
+    "repos_ref_default": "默认分支",
+    "repos_remove_aria": "移除 {{repo}}"
   },
   "create_issue": {
     "sr_manual": "新建任务",
@@ -265,5 +272,13 @@
     "toast_failed": "无法标记为重复",
     "error_target_is_duplicate": "{{identifier}} 本身是重复任务，请选择它的原始任务",
     "error_has_duplicates": "已有任务被标记为此任务的重复，请先解除这些标记"
+  },
+  "copy_parent_fields": {
+    "trigger": "复制父任务字段",
+    "title": "复制父任务字段",
+    "description": "从 {{identifier}} 复制所选字段，覆盖当前值；后续不联动。",
+    "apply": "复制所选 {{count}} 项",
+    "no_labels": "无标签",
+    "manual_only": "标签、开始日期和自定义属性仅用于手动创建。"
   }
 }

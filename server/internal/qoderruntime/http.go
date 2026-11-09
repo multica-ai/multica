@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
@@ -58,12 +60,42 @@ func (a *api) call(ctx context.Context, method, path string, in, out any) error 
 		}
 		body = bytes.NewReader(b)
 	}
+	return a.do(ctx, method, path, "application/json", body, out)
+}
+
+// upload posts one file as multipart/form-data under the "file" field, with
+// its name and any extra form fields.
+func (a *api) upload(ctx context.Context, path, name string, data []byte, fields map[string]string, out any) error {
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	part, err := w.CreateFormFile("file", name)
+	if err != nil {
+		return err
+	}
+	if _, err := part.Write(data); err != nil {
+		return err
+	}
+	if err := w.WriteField("name", name); err != nil {
+		return err
+	}
+	for k, v := range fields {
+		if err := w.WriteField(k, v); err != nil {
+			return err
+		}
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	return a.do(ctx, http.MethodPost, path, w.FormDataContentType(), &body, out)
+}
+
+func (a *api) do(ctx context.Context, method, path, contentType string, body io.Reader, out any) error {
 	req, err := http.NewRequestWithContext(ctx, method, a.base+path, body)
 	if err != nil {
 		return fmt.Errorf("build API request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+a.token)
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
 	if a.workspace != "" {
 		req.Header.Set("X-Workspace-ID", a.workspace)
@@ -93,7 +125,7 @@ func (a *api) call(ctx context.Context, method, path string, in, out any) error 
 		return fmt.Errorf("read API response failed")
 	}
 	if len(b) > 8<<20 {
-		return fmt.Errorf("API response exceeds 8 MiB")
+		return errResponseTooLarge
 	}
 	if out != nil {
 		if err := json.Unmarshal(b, out); err != nil {
@@ -102,3 +134,52 @@ func (a *api) call(ctx context.Context, method, path string, in, out any) error 
 	}
 	return nil
 }
+
+// download fetches at most limit bytes. A site-relative URL is served by this
+// API and carries its credential; an absolute URL is presigned and does not.
+// Redirects are followed (Go drops the credential on cross-host hops) because
+// attachment downloads redirect to the storage provider.
+func (a *api) download(ctx context.Context, rawURL string, limit int64) ([]byte, error) {
+	relative := strings.HasPrefix(rawURL, "/") && !strings.HasPrefix(rawURL, "//")
+	target := rawURL
+	if relative {
+		target = a.base + rawURL
+	} else if u, err := url.Parse(rawURL); err != nil || u.Scheme != "https" && !(u.Scheme == "http" && strings.HasPrefix(a.base, "http://")) {
+		return nil, fmt.Errorf("invalid download URL")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, fmt.Errorf("invalid download URL")
+	}
+	if relative {
+		req.Header.Set("Authorization", "Bearer "+a.token)
+		if a.workspace != "" {
+			req.Header.Set("X-Workspace-ID", a.workspace)
+		}
+	}
+	client := &http.Client{Timeout: 2 * time.Minute, Transport: a.client.Transport}
+	resp, err := client.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("download transport failed")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, &apiError{Status: resp.StatusCode}
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return nil, fmt.Errorf("read download failed")
+	}
+	if int64(len(b)) > limit {
+		return nil, errTooLarge
+	}
+	return b, nil
+}
+
+var errTooLarge = errors.New("file too large")
+
+// errResponseTooLarge reports a response body larger than api.do reads.
+var errResponseTooLarge = errors.New("API response exceeds 8 MiB")

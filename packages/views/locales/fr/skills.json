@@ -1,5 +1,6 @@
 {
   "page": {
+    "search": "Rechercher des skills",
     "title": "Skills",
     "new_skill": "Nouveau skill",
     "scopes": {
@@ -20,21 +21,12 @@
         "description": "Les skills que vous avez créés"
       }
     },
-    "empty": {
-      "title": "Aucun skill pour l'instant",
-      "description": "Créez ou importez un skill."
-    },
     "no_matches": {
       "title": "Aucune correspondance",
       "with_query": "Aucun skill ne correspond à « {{query}} »{{filterSuffix}}.",
       "with_query_filter_suffix": " dans ce filtre",
       "filter_only": "Aucun skill ne correspond à ce filtre.",
       "try_different": " Essayez une autre recherche."
-    },
-    "intro_banner": {
-      "title": "Partagés avec votre espace de travail.",
-      "body": "Chacun peut créer un skill, en importer un depuis une URL ou un dossier local, ou en copier un depuis son runtime local : tous les agents pourront l'utiliser.",
-      "highlight": "Les skills d'un runtime local restent privés tant que vous n'en copiez pas un ici."
     },
     "list_error": {
       "title": "Impossible de charger les skills",
@@ -143,6 +135,8 @@
     },
     "toast_saved": "Skill enregistré",
     "toast_save_failed": "Échec de l'enregistrement du skill",
+    "toast_saved_version": "Enregistré en v{{version}}",
+    "toast_view_history": "Voir l'historique",
     "toast_deleted": "Skill supprimé",
     "toast_delete_failed": "Échec de la suppression du skill",
     "refresh": {
@@ -212,20 +206,51 @@
       "mode_edit": "Modifier",
       "mode_raw": "Texte brut"
     },
+    "versions": {
+      "list_aria": "Versions du skill",
+      "version_label": "v{{version}}",
+      "current": "Actuelle",
+      "unknown_author": "Inconnu",
+      "empty": "Aucune version pour l'instant. À la prochaine modification de ce skill, son contenu actuel sera enregistré comme première version.",
+      "load_failed": "Impossible de charger les versions.",
+      "restore": "Restaurer",
+      "toast_restored": "v{{version}} restaurée",
+      "toast_restore_failed": "Impossible de restaurer la version",
+      "source": {
+        "baseline": "Contenu antérieur",
+        "create": "Création",
+        "update": "Modification",
+        "import": "Import",
+        "refresh": "Mis à jour depuis la source",
+        "restore": "Restaurée depuis v{{version}}"
+      },
+      "dialog": {
+        "title": "Restaurer v{{version}} ?",
+        "description": "Le contenu de v{{version}} devient une nouvelle version. Les agents l'utilisent dès leur prochaine exécution. Les versions plus récentes restent dans l'historique.",
+        "unsaved_warning": "Vos modifications non enregistrées seront perdues.",
+        "cancel": "Annuler",
+        "confirm": "Restaurer",
+        "restoring": "Restauration..."
+      }
+    },
     "sections": {
       "content": "Contenu",
       "files": "Fichiers",
       "edit": "Modifier",
       "open": "Ouvrir",
-      "add": "Ajouter"
+      "add": "Ajouter",
+      "history": "Historique"
     },
     "menu": {
       "copy_link": "Copier le lien",
       "link_copied": "Lien copié",
-      "delete": "Supprimer le skill"
+      "delete": "Supprimer le skill",
+      "version_history": "Historique des versions"
     },
     "panel": {
-      "add_description": "Ajouter une description"
+      "add_description": "Ajouter une description",
+      "version": "Version",
+      "no_versions": "Aucune version"
     }
   },
   "create": {
@@ -284,7 +309,19 @@
       "cancel": "Annuler",
       "import": "Importer",
       "importing": "Importation…",
-      "toast_imported": "Skill importé"
+      "toast_imported": "Skill importé",
+      "select_all": "Tout sélectionner",
+      "import_count": "Importer {{count}}",
+      "done": "Terminer",
+      "stop": "Arrêter après cet élément",
+      "unreadable": "Impossible de lire ce skill. Sélectionnez à nouveau le dossier.",
+      "uncertain": "Résultat incertain. Actualisez la liste avant de réessayer. Les noms déjà présents restent verrouillés ; consultez la liste.",
+      "check_results": "Vérifier les résultats",
+      "retry_ready": "Absent de la liste actualisée. Vous pouvez réessayer.",
+      "uncertain_manual": "Résultat incertain et nom du skill dans l’archive inconnu. Vérifiez manuellement la liste avant de réimporter cette archive.",
+      "check_failed": "Impossible de vérifier la liste. Les imports incertains restent verrouillés. Réessayez la vérification ou consultez la liste manuellement.",
+      "workspace_changed": "L’espace de travail a changé. Les imports restants sont arrêtés. Fermez cette fenêtre et rouvrez-la dans l’espace souhaité.",
+      "summary": "Importés : {{success}} · Échecs ou incertains : {{failed}}"
     },
     "url": {
       "url_label": "URL du skill",
@@ -369,5 +406,34 @@
     "markdown_placeholder": "Rédigez du contenu Markdown...",
     "raw_placeholder": "Contenu du fichier...",
     "raw_aria": "Contenu en texte brut de {{path}}"
+  },
+  "intro": {
+    "title": "Transformez les méthodes de votre équipe en skills",
+    "description": "Un skill est un ensemble d'instructions réutilisable (SKILL.md). Ajoutez-le une fois à l'espace de travail, confiez-le à un agent, et l'agent le suit.",
+    "slides": {
+      "methods": {
+        "title": "Quatre façons d'en ajouter un",
+        "description": "Partez d'un SKILL.md vierge, ou importez un skill existant depuis un dossier local, une URL ou un runtime."
+      },
+      "assign": {
+        "title": "Confiez-le à des agents",
+        "description": "Un skill peut servir à plusieurs agents. Modifiez-le à un seul endroit et tous les agents qui l'utilisent en profitent."
+      },
+      "share": {
+        "title": "Partagé dans l'espace de travail",
+        "description": "Les skills d'un runtime local restent privés tant que vous ne les copiez pas ici. Ensuite, tout agent peut les utiliser."
+      }
+    },
+    "art": {
+      "skill_summary": "Lancer d'abord les tests, puis vérifier l'accessibilité et les performances.",
+      "add_to_agent": "Ajouter à un agent",
+      "local_skills": "Skills locaux",
+      "private": "Privé",
+      "workspace_shared": "Espace de travail",
+      "all_agents": "Utilisable par tout agent",
+      "role_reviewer": "Relecteur",
+      "role_fullstack": "Full stack",
+      "copy_to_workspace": "Copier dans l'espace"
+    }
   }
 }
