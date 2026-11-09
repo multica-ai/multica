@@ -14,7 +14,7 @@
  * Run: node scripts/check-dependency-catalog.mjs
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -141,4 +141,4 @@ function main() {
   console.log(`Dependency catalog clean (${workspaces.length} workspaces checked).`);
 }
 
-if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) main();
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) main();
