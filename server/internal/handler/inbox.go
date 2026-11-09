@@ -14,23 +14,31 @@ import (
 )
 
 type InboxItemResponse struct {
-	ID            string          `json:"id"`
-	WorkspaceID   string          `json:"workspace_id"`
-	RecipientType string          `json:"recipient_type"`
-	RecipientID   string          `json:"recipient_id"`
-	Type          string          `json:"type"`
-	Severity      string          `json:"severity"`
-	IssueID       *string         `json:"issue_id"`
-	Title         string          `json:"title"`
-	Body          *string         `json:"body"`
-	Read          bool            `json:"read"`
-	Archived      bool            `json:"archived"`
-	CreatedAt     string          `json:"created_at"`
-	IssueStatus   *string         `json:"issue_status"`
-	IssuePriority *string         `json:"issue_priority"`
-	ActorType     *string         `json:"actor_type"`
-	ActorID       *string         `json:"actor_id"`
-	Details       json.RawMessage `json:"details"`
+	ID            string  `json:"id"`
+	WorkspaceID   string  `json:"workspace_id"`
+	RecipientType string  `json:"recipient_type"`
+	RecipientID   string  `json:"recipient_id"`
+	Type          string  `json:"type"`
+	Severity      string  `json:"severity"`
+	IssueID       *string `json:"issue_id"`
+	Title         string  `json:"title"`
+	Body          *string `json:"body"`
+	Read          bool    `json:"read"`
+	Archived      bool    `json:"archived"`
+	CreatedAt     string  `json:"created_at"`
+	IssueStatus   *string `json:"issue_status"`
+	IssuePriority *string `json:"issue_priority"`
+	// Issue fields the inbox filters match on. List rows always carry them
+	// (an empty label list included), which is how a client tells a server
+	// that supports those filters from an older one.
+	IssueProjectID    *string         `json:"issue_project_id"`
+	IssueAssigneeType *string         `json:"issue_assignee_type"`
+	IssueAssigneeID   *string         `json:"issue_assignee_id"`
+	IssueDueDate      *string         `json:"issue_due_date"`
+	IssueLabelIDs     []string        `json:"issue_label_ids"`
+	ActorType         *string         `json:"actor_type"`
+	ActorID           *string         `json:"actor_id"`
+	Details           json.RawMessage `json:"details"`
 }
 
 func inboxToResponse(i db.InboxItem) InboxItemResponse {
@@ -111,24 +119,36 @@ func inboxListBody(notifType string, issueID pgtype.UUID, body pgtype.Text) *str
 // through inboxToResponse and keep the full body.
 func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 	return InboxItemResponse{
-		ID:            uuidToString(r.ID),
-		WorkspaceID:   uuidToString(r.WorkspaceID),
-		RecipientType: r.RecipientType,
-		RecipientID:   uuidToString(r.RecipientID),
-		Type:          r.Type,
-		Severity:      r.Severity,
-		IssueID:       uuidToPtr(r.IssueID),
-		Title:         r.Title,
-		Body:          inboxListBody(r.Type, r.IssueID, r.Body),
-		Read:          r.Read,
-		Archived:      r.Archived,
-		CreatedAt:     timestampToString(r.CreatedAt),
-		IssueStatus:   textToPtr(r.IssueStatus),
-		IssuePriority: textToPtr(r.IssuePriority),
-		ActorType:     textToPtr(r.ActorType),
-		ActorID:       uuidToPtr(r.ActorID),
-		Details:       json.RawMessage(r.Details),
+		ID:                uuidToString(r.ID),
+		WorkspaceID:       uuidToString(r.WorkspaceID),
+		RecipientType:     r.RecipientType,
+		RecipientID:       uuidToString(r.RecipientID),
+		Type:              r.Type,
+		Severity:          r.Severity,
+		IssueID:           uuidToPtr(r.IssueID),
+		Title:             r.Title,
+		Body:              inboxListBody(r.Type, r.IssueID, r.Body),
+		Read:              r.Read,
+		Archived:          r.Archived,
+		CreatedAt:         timestampToString(r.CreatedAt),
+		IssueStatus:       textToPtr(r.IssueStatus),
+		IssuePriority:     textToPtr(r.IssuePriority),
+		IssueProjectID:    uuidToPtr(r.IssueProjectID),
+		IssueAssigneeType: textToPtr(r.IssueAssigneeType),
+		IssueAssigneeID:   uuidToPtr(r.IssueAssigneeID),
+		IssueDueDate:      dateToPtr(r.IssueDueDate),
+		IssueLabelIDs:     inboxLabelIDs(r.IssueLabelIds),
+		ActorType:         textToPtr(r.ActorType),
+		ActorID:           uuidToPtr(r.ActorID),
+		Details:           json.RawMessage(r.Details),
 	}
+}
+
+func inboxLabelIDs(ids []string) []string {
+	if ids == nil {
+		return []string{}
+	}
+	return ids
 }
 
 // ListArchivedInboxItemsRow carries the same columns as ListInboxItemsRow (both
@@ -149,6 +169,17 @@ func (h *Handler) enrichInboxResponse(ctx context.Context, resp InboxItemRespons
 		resp.IssueStatus = &s
 		p := issue.Priority
 		resp.IssuePriority = &p
+		resp.IssueProjectID = uuidToPtr(issue.ProjectID)
+		resp.IssueAssigneeType = textToPtr(issue.AssigneeType)
+		resp.IssueAssigneeID = uuidToPtr(issue.AssigneeID)
+		resp.IssueDueDate = dateToPtr(issue.DueDate)
+		labels, err := h.Queries.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID})
+		if err == nil {
+			resp.IssueLabelIDs = make([]string, len(labels))
+			for i, label := range labels {
+				resp.IssueLabelIDs[i] = uuidToString(label.ID)
+			}
+		}
 	}
 	return resp
 }

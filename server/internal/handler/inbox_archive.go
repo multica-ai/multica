@@ -31,8 +31,20 @@ type archivedInboxFacetsResponse struct {
 	Statuses    map[string]int64 `json:"statuses"`
 	Priorities  map[string]int64 `json:"priorities"`
 	Actors      map[string]int64 `json:"actors"`
+	Types       map[string]int64 `json:"types"`
+	Projects    map[string]int64 `json:"projects"`
+	Assignees   map[string]int64 `json:"assignees"`
+	Labels      map[string]int64 `json:"labels"`
 	UnreadCount int64            `json:"unread_count"`
 }
+
+// Values the closed-set filters accept; the type groups mirror the CASE in
+// inbox_archive.sql and INBOX_TYPE_GROUPS in packages/core/inbox.
+var (
+	archivedInboxTypeGroups = []string{"mention", "comment", "assign", "review", "change", "run", "system"}
+	archivedInboxDueDates   = []string{"overdue", "today", "this_week", "next_7_days", "none"}
+	archivedInboxNegatable  = []string{"type", "actor", "status", "priority", "project", "assignee", "label", "dueDate"}
+)
 
 func parseArchivedInboxFilters(w http.ResponseWriter, r *http.Request) (db.ArchivedInboxFacetsParams, bool) {
 	var p db.ArchivedInboxFacetsParams
@@ -46,7 +58,12 @@ func parseArchivedInboxFilters(w http.ResponseWriter, r *http.Request) (db.Archi
 	}
 	p.RecipientID = parseUUID(userID)
 	q := r.URL.Query()
-	for name, target := range map[string]*[]string{"statuses": &p.Statuses, "priorities": &p.Priorities, "actors": &p.Actors} {
+	lists := map[string]*[]string{
+		"statuses": &p.Statuses, "priorities": &p.Priorities, "actors": &p.Actors,
+		"types": &p.Types, "projects": &p.Projects, "assignees": &p.Assignees,
+		"labels": &p.Labels, "due_dates": &p.DueDates, "negated": &p.Negated,
+	}
+	for name, target := range lists {
 		*target = []string{}
 		if raw := q.Get(name); raw != "" {
 			if len(raw) > 8192 {
@@ -68,12 +85,41 @@ func parseArchivedInboxFilters(w http.ResponseWriter, r *http.Request) (db.Archi
 			*target = slices.Compact(*target)
 		}
 	}
+	for name, allowed := range map[string][]string{"types": archivedInboxTypeGroups, "due_dates": archivedInboxDueDates, "negated": archivedInboxNegatable} {
+		for _, value := range *lists[name] {
+			if !slices.Contains(allowed, value) {
+				writeError(w, http.StatusBadRequest, "invalid "+name+" filter")
+				return p, false
+			}
+		}
+	}
 	if raw := q.Get("unread_only"); raw != "" {
 		if raw != "true" && raw != "false" {
 			writeError(w, http.StatusBadRequest, "invalid unread_only")
 			return p, false
 		}
 		p.UnreadOnly = raw == "true"
+	}
+	if raw := q.Get("received_after"); raw != "" {
+		after, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid received_after")
+			return p, false
+		}
+		p.ReceivedAfter = pgtype.Timestamptz{Time: after.UTC(), Valid: true}
+	}
+	// Due-date buckets are relative to the viewer's calendar day, which only
+	// the client knows.
+	if raw := q.Get("today"); raw != "" {
+		today, err := time.Parse(time.DateOnly, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid today")
+			return p, false
+		}
+		p.Today = pgtype.Date{Time: today, Valid: true}
+	} else if len(p.DueDates) > 0 {
+		writeError(w, http.StatusBadRequest, "due_dates requires today")
+		return p, false
 	}
 	return p, true
 }
@@ -95,7 +141,10 @@ func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) 
 	}
 	p := db.ListArchivedInboxPageParams{
 		WorkspaceID: filters.WorkspaceID, RecipientID: filters.RecipientID,
-		Statuses: filters.Statuses, Priorities: filters.Priorities, Actors: filters.Actors, UnreadOnly: filters.UnreadOnly,
+		Types: filters.Types, Negated: filters.Negated, Actors: filters.Actors, ReceivedAfter: filters.ReceivedAfter,
+		Statuses: filters.Statuses, Priorities: filters.Priorities, Projects: filters.Projects,
+		Assignees: filters.Assignees, Labels: filters.Labels, DueDates: filters.DueDates, Today: filters.Today,
+		UnreadOnly: filters.UnreadOnly,
 	}
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -157,6 +206,9 @@ func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) 
 		item := inboxToResponse(row.InboxItem)
 		item.Body = inboxListBody(row.InboxItem.Type, row.InboxItem.IssueID, row.InboxItem.Body)
 		item.IssueStatus, item.IssuePriority = textToPtr(row.IssueStatus), textToPtr(row.IssuePriority)
+		item.IssueProjectID, item.IssueDueDate = uuidToPtr(row.IssueProjectID), dateToPtr(row.IssueDueDate)
+		item.IssueAssigneeType, item.IssueAssigneeID = textToPtr(row.IssueAssigneeType), uuidToPtr(row.IssueAssigneeID)
+		item.IssueLabelIDs = inboxLabelIDs(row.IssueLabelIds)
 		if row.CommentID != "" {
 			var details map[string]json.RawMessage
 			if len(item.Details) == 0 || string(item.Details) == "null" {
@@ -194,15 +246,20 @@ func (h *Handler) GetArchivedInboxFacets(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to load archived inbox filters")
 		return
 	}
-	resp := archivedInboxFacetsResponse{Statuses: map[string]int64{}, Priorities: map[string]int64{}, Actors: map[string]int64{}}
+	resp := archivedInboxFacetsResponse{
+		Statuses: map[string]int64{}, Priorities: map[string]int64{}, Actors: map[string]int64{},
+		Types: map[string]int64{}, Projects: map[string]int64{}, Assignees: map[string]int64{}, Labels: map[string]int64{},
+	}
+	dimensions := map[string]map[string]int64{
+		"statuses": resp.Statuses, "priorities": resp.Priorities, "actors": resp.Actors,
+		"types": resp.Types, "projects": resp.Projects, "assignees": resp.Assignees, "labels": resp.Labels,
+	}
 	for _, row := range rows {
+		if counts, ok := dimensions[row.Dimension]; ok {
+			counts[row.Key] = row.Count
+			continue
+		}
 		switch row.Dimension {
-		case "statuses":
-			resp.Statuses[row.Key] = row.Count
-		case "priorities":
-			resp.Priorities[row.Key] = row.Count
-		case "actors":
-			resp.Actors[row.Key] = row.Count
 		case "unread":
 			resp.UnreadCount = row.Count
 		}

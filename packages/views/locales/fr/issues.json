@@ -751,6 +751,12 @@
   "reply": {
     "placeholder": "Laisser une réponse...",
     "annotations": {
+      "direct_reply": "Répondre",
+      "direct_comment": "Publier le commentaire",
+      "direct_target_deleted": "Le commentaire ciblé a été supprimé. Copiez votre note avant de sélectionner un autre commentaire.",
+      "copy_note": "Copier la note",
+      "note_copied": "Note copiée",
+      "note_copy_failed": "Impossible de copier la note. Sélectionnez et copiez le texte manuellement.",
       "confirm_add": "Ajouter une annotation",
       "save": "Enregistrer l'annotation",
       "add_comment": "Ajouter au commentaire",
@@ -1871,6 +1877,26 @@
       "row_actions": "Actions pour {{name}}",
       "empty_title": "Aucune vue enregistrée pour l'instant",
       "empty_description": "Réglez les filtres et l'affichage d'une liste de tâches, puis enregistrez-les comme vue."
+    }
+  },
+  "app_calls": {
+    "section_title": "Apps",
+    "chips_label": "Apps utilisées dans cette exécution",
+    "calls_count_one": "{{count}} appel",
+    "calls_count_other": "{{count}} appels",
+    "more": "+{{count}} de plus",
+    "scope": {
+      "team": "Compte d'équipe",
+      "personal": "Compte personnel"
+    },
+    "outcome": {
+      "ok": "Exécuté",
+      "error": "Échec",
+      "blocked": "Bloqué",
+      "pending": "En attente",
+      "approved": "Approuvé",
+      "rejected": "Refusé",
+      "rate_limited": "Limite atteinte"
     }
   }
 }

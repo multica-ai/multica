@@ -271,8 +271,11 @@ export function SidebarIssueList({
 
   const tailClass = cn(TREE_CHILD_ROW_CLASS, panelRowStateClass(false), "gap-1.5 min-h-6 text-caption text-faint-foreground");
 
+  // The connector sits on the parent icon's centre line (`ml-5`), and the
+  // child icons on the parent's label column: 1px border + 9px + the child
+  // row's 8px reaches the parent row's 12px + 16px icon + 10px gap.
   return (
-    <ul id={id} data-sidebar-list={source} className="mb-2 ml-5 border-l border-surface-border pl-1.5">
+    <ul id={id} data-sidebar-list={source} className="mb-2 ml-5 border-l border-surface-border pl-[9px]">
       {params === undefined && paramsError ? (
         <li className="flex h-[26px] items-center gap-2 px-2 text-caption text-faint-foreground">
           <span className="min-w-0 truncate">{t(($) => $.panels.work.project_issues_error)}</span>

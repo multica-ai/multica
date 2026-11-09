@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   DndContext,
@@ -41,6 +41,7 @@ import { useTeamAgentStatus } from "./panels/team-status";
 import { RAIL_ICON_BUTTON_CLASS } from "./rail-styles";
 import { RailWorkspaces } from "./rail-workspaces";
 import { routeIconForPath } from "./route-icon-components";
+import { useDragClickGuard } from "./use-drag-click-guard";
 
 type RailBadge =
   | { kind: "count"; value: number; tone: "brand" | "neutral" }
@@ -195,37 +196,6 @@ function SortableRailItem({ id, children }: { id: RailSpaceId; children: React.R
 }
 
 const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
-// dnd-kit keeps swallowing clicks for this long after a drag ends.
-const DRAG_CLICK_GUARD_MS = 50;
-
-function preventDefault(event: Event) {
-  event.preventDefault();
-}
-
-/**
- * The release that ends a drag must not also open the space. Once a drag
- * activates, dnd-kit stops that click's propagation at the document but
- * leaves its default, so the link would still navigate natively. A window
- * capture listener runs first and cancels it.
- */
-function useDragClickGuard() {
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const disarm = useCallback(() => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
-    window.removeEventListener("click", preventDefault, true);
-  }, []);
-  useEffect(() => disarm, [disarm]);
-  return {
-    arm: useCallback(() => {
-      disarm();
-      window.addEventListener("click", preventDefault, true);
-    }, [disarm]),
-    release: useCallback(() => {
-      timer.current = setTimeout(disarm, DRAG_CLICK_GUARD_MS);
-    }, [disarm]),
-  };
-}
 
 /**
  * The app rail: workspaces, New issue and search, the five spaces in the
@@ -300,12 +270,16 @@ export function AppRail({
     },
   };
 
+  // The 34px workspace tile is centred on the card's 48px header band, so it
+  // shares a centre line with the column and page titles: the card starts
+  // 8px down, plus (48 - 34) / 2. Desktop's card starts below its title bar,
+  // so it passes its own top inset with the same 7px.
   return (
     <nav
       aria-label={t(($) => $.rail.label)}
       data-slot="app-rail"
       className={cn(
-        "flex h-full w-14 shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden pt-3 pb-2.5 [scrollbar-width:none]",
+        "flex h-full w-14 shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden pt-[15px] pb-2.5 [scrollbar-width:none]",
         className,
       )}
     >

@@ -729,6 +729,12 @@
   "reply": {
     "placeholder": "回复...",
     "annotations": {
+      "direct_reply": "回复",
+      "direct_comment": "发表评论",
+      "direct_target_deleted": "回复目标已删除。请先复制意见，再选择其他评论。",
+      "copy_note": "复制意见",
+      "note_copied": "意见已复制",
+      "note_copy_failed": "复制失败，请选中意见文字手动复制。",
       "confirm_add": "添加批注",
       "save": "保存批注",
       "add_comment": "加入评论",
@@ -1802,6 +1808,25 @@
       "row_actions": "{{name}} 的操作",
       "empty_title": "还没有保存的视图",
       "empty_description": "在任务列表里调好筛选和显示方式，然后另存为视图。"
+    }
+  },
+  "app_calls": {
+    "section_title": "应用",
+    "chips_label": "本次运行用到的应用",
+    "calls_count_other": "{{count}} 次调用",
+    "more": "还有 {{count}} 个",
+    "scope": {
+      "team": "团队账号",
+      "personal": "个人账号"
+    },
+    "outcome": {
+      "ok": "已执行",
+      "error": "失败",
+      "blocked": "已拦截",
+      "pending": "等待确认",
+      "approved": "已批准",
+      "rejected": "已拒绝",
+      "rate_limited": "已限流"
     }
   }
 }

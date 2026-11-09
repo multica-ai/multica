@@ -37,6 +37,7 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { api, dispatchReasonCode, errorCode } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import { CommentTriggerChips } from "./comment-trigger-chips";
+import { AppCallChips } from "./app-call-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import { useRecipientActions } from "../hooks/use-recipient-actions";
 import { SteerBadge, SteerReceipts } from "./steer-receipts";
@@ -911,6 +912,9 @@ function CommentRow({
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
           <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3">
             <SteerReceipts issueId={issueId} entry={entry} />
+            {entry.actor_type === "agent" && entry.source_task_id && (
+              <AppCallChips issueId={issueId} taskId={entry.source_task_id} />
+            )}
           </div>
           {retryableAgentFailureComment(entry) && (
             <TaskCommentRetryButton
@@ -1043,9 +1047,20 @@ function CommentCardImpl({
   // A deleted target's tombstone is as gone as a removed row.
   const replyTargetMissing = !!replyTarget && replyTargetId !== entry.id
     && !replies.some((r) => r.id === replyTargetId && !isDeletedComment(r));
+  // A reply here goes into the running turn of a run that belongs to this
+  // thread by default; another thread's turn is only reached by choice.
+  const steerThreadRunByDefault = useCallback(
+    (task: AgentTask) => runs.some((run) => run.task.id === task.id),
+    [runs],
+  );
   const annotation = useCommentAnnotations({
+    issueId,
+    reply: {
+      onSubmit: (sourceId, content, suppressAgentIds, steerTaskIds) => onReply(sourceId, content, undefined, suppressAgentIds, steerTaskIds),
+      onAccepted: onReplyAccepted, steerByDefault: steerThreadRunByDefault,
+    },
     draftKey: `reply:${issueId}:${entry.id}`,
-    sources: [entry, ...replies].filter((e) => e.type === "comment")
+    sources: [entry, ...replies].filter((e) => e.type === "comment" && !isDeletedComment(e))
       .map((e) => ({ id: e.id, name: e.actor_name || getActorName(e.actor_type, e.actor_id), revision: e.revision })),
     enabled: !!currentUserId,
     onAdded: () => { if (replyFolded) onResolvedExpandChange?.(entry.id, true); },
@@ -1065,12 +1080,6 @@ function CommentCardImpl({
   const canEditEntry = receipts.length === 0 && (isOwn || (canModerate && entry.actor_type === "member"));
   const canDeleteEntry = !receipts.some(isSupplementInFlight) && (isOwn || canModerate);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  // A reply here goes into the running turn of a run that belongs to this
-  // thread by default; another thread's turn is only reached by choice.
-  const steerThreadRunByDefault = useCallback(
-    (task: AgentTask) => runs.some((run) => run.task.id === task.id),
-    [runs],
-  );
 
   const allNestedReplies = replies;
   // What the thread shows. Tombstones are excluded from display and counts but
@@ -1461,6 +1470,9 @@ function CommentCardImpl({
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />
                 <div className="pl-8 max-md:pl-0">
                   <SteerReceipts issueId={issueId} entry={entry} />
+                  {entry.actor_type === "agent" && entry.source_task_id && (
+                    <AppCallChips issueId={issueId} taskId={entry.source_task_id} />
+                  )}
                 </div>
                 {retryableAgentFailureComment(entry) && (
                   <TaskCommentRetryButton
