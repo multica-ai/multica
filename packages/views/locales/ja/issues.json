@@ -729,6 +729,12 @@
   "reply": {
     "placeholder": "返信を残す...",
     "annotations": {
+      "direct_reply": "返信",
+      "direct_comment": "コメントを投稿",
+      "direct_target_deleted": "返信先が削除されました。別のコメントを選ぶ前に、意見をコピーしてください。",
+      "copy_note": "意見をコピー",
+      "note_copied": "意見をコピーしました",
+      "note_copy_failed": "コピーできませんでした。テキストを選択して手動でコピーしてください。",
       "confirm_add": "注釈を追加",
       "save": "注釈を保存",
       "add_comment": "コメントに追加",
@@ -782,6 +788,11 @@
     "cancel_failed": "実行をキャンセルできませんでした"
   },
   "execution_log": {
+    "latest": "最新",
+    "include_children": "サブタスクを含める",
+    "loading": "実行履歴を読み込み中...",
+    "load_failed_retry": "実行履歴を読み込めませんでした。再試行",
+    "empty": "この範囲には実行履歴がありません。",
     "section": "実行ログ",
     "cancel_task_tooltip": "実行をキャンセル",
     "cancel_task_aria": "実行をキャンセル",
@@ -937,6 +948,7 @@
     "unassigned": "未割り当て",
     "open_in_new_tab": "新しいタブで開く",
     "pin_to_sidebar": "サイドバーにピン留め",
+    "locate_in_sidebar": "サイドバーで表示",
     "unpin_from_sidebar": "サイドバーのピン留めを解除",
     "restore_to_inbox": "インボックスに戻す",
     "mark_read": "既読にする",

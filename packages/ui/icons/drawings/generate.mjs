@@ -3,7 +3,7 @@
 //   pnpm --filter @multica/ui icons --check            exit 1 if either is stale
 //   pnpm --filter @multica/ui icons --preview [Name…]  write a contact sheet and print its path
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -96,7 +96,7 @@ figcaption{color:#71717a;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 </style>${tiles.join("")}`;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   const preview = process.argv.indexOf("--preview");
   if (preview !== -1) {
     const names = process.argv.slice(preview + 1);
