@@ -812,6 +812,11 @@
     "cancel_failed": "Failed to cancel run"
   },
   "execution_log": {
+    "latest": "Latest",
+    "include_children": "Include sub-issues",
+    "loading": "Loading runs...",
+    "load_failed_retry": "Could not load runs. Retry",
+    "empty": "No runs in this scope.",
     "section": "Execution log",
     "cancel_task_tooltip": "Cancel run",
     "cancel_task_aria": "Cancel run",
