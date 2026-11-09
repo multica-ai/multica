@@ -176,13 +176,15 @@ type RuntimeProfilesChangedPayload struct {
 type WorkspacesChangedPayload struct{}
 
 // PendingWorkKind values carried by PendingWorkPayload.Kind. The kind is
-// advisory only — the daemon reacts identically to every kind (one immediate
-// heartbeat, which claims whatever is queued) — so an unknown value from a
-// newer server stays safe on an older daemon.
+// advisory: a daemon that does not know a kind sends one immediate heartbeat,
+// which claims whatever is queued, so an unknown value from a newer server
+// stays safe on an older daemon. PendingWorkKindUsageLimits asks the daemon to
+// check plan limits now instead.
 const (
 	PendingWorkKindModelList        = "model_list"
 	PendingWorkKindLocalSkills      = "local_skills"
 	PendingWorkKindLocalSkillImport = "local_skill_import"
+	PendingWorkKindUsageLimits      = "usage_limits"
 )
 
 // PendingWorkPayload is sent from server to daemon as a wakeup hint when a

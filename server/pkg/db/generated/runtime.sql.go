@@ -1886,6 +1886,25 @@ func (q *Queries) SetAgentRuntimeOfflineWithReason(ctx context.Context, arg SetA
 	return err
 }
 
+const setAgentRuntimeUsageLimits = `-- name: SetAgentRuntimeUsageLimits :exec
+UPDATE agent_runtime
+SET metadata = metadata || jsonb_build_object('usage_limits', $2::jsonb)
+WHERE id = $1
+`
+
+type SetAgentRuntimeUsageLimitsParams struct {
+	ID          pgtype.UUID `json:"id"`
+	UsageLimits []byte      `json:"usage_limits"`
+}
+
+// Stores the latest plan-limit snapshot of the provider login a runtime uses.
+// Kept in metadata; UpsertAgentRuntime carries it over on registration.
+// updated_at stays: it tracks changes to the runtime itself.
+func (q *Queries) SetAgentRuntimeUsageLimits(ctx context.Context, arg SetAgentRuntimeUsageLimitsParams) error {
+	_, err := q.db.Exec(ctx, setAgentRuntimeUsageLimits, arg.ID, arg.UsageLimits)
+	return err
+}
+
 const touchAgentRuntimeLastSeen = `-- name: TouchAgentRuntimeLastSeen :execrows
 UPDATE agent_runtime
 SET last_seen_at = now()
@@ -2327,7 +2346,13 @@ DO UPDATE SET
     runtime_mode = EXCLUDED.runtime_mode,
     status = EXCLUDED.status,
     device_info = EXCLUDED.device_info,
-    metadata = EXCLUDED.metadata,
+    -- usage_limits describes the provider login, not this registration, so it
+    -- survives a daemon restart; its checked_at shows how old it is.
+    metadata = CASE
+        WHEN agent_runtime.metadata -> 'usage_limits' IS NOT NULL
+        THEN EXCLUDED.metadata || jsonb_build_object('usage_limits', agent_runtime.metadata -> 'usage_limits')
+        ELSE EXCLUDED.metadata
+    END,
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
