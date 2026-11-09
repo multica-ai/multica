@@ -17,7 +17,7 @@ export const CUSTOMER_LOGOS: CustomerLogo[] = [
   { name: "Tencent", logo: "tencent", ratio: 7.79 },
   { name: "Amazon", logo: "amazon", ratio: 3.32 },
   { name: "Rakuten", logo: "rakuten", ratio: 5.88 },
-  { name: "Alibaba", logo: "alibaba", ratio: 4.88 },
+  { name: "Alibaba", logo: "alibaba", ratio: 7.79 },
   { name: "UC Berkeley", logo: "berkeley", ratio: 5.32 },
   { name: "Xiaomi", logo: "xiaomi", ratio: 3.75 },
   { name: "SAP", logo: "sap", ratio: 2.02 },
