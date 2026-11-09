@@ -1842,6 +1842,22 @@ type WorkspaceInvitation struct {
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
 }
 
+type WorkspaceLink struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ProjectID       pgtype.UUID        `json:"project_id"`
+	Name            string             `json:"name"`
+	Icon            string             `json:"icon"`
+	ShowName        bool               `json:"show_name"`
+	UrlTemplate     string             `json:"url_template"`
+	OpenMode        string             `json:"open_mode"`
+	AllowSameOrigin bool               `json:"allow_same_origin"`
+	Position        int32              `json:"position"`
+	CreatedBy       pgtype.UUID        `json:"created_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type WorkspaceMcpServer struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

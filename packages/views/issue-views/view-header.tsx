@@ -79,6 +79,7 @@ import {
 } from "@multica/core/issues/stores/filter-tree";
 import type { Project } from "@multica/core/types";
 import { PageHeader } from "../layout/page-header";
+import { LinksBar } from "../links/components/links-bar";
 import { RefreshablePageIcon } from "../layout/refreshable-page-icon";
 import { ActionShortcutKeycaps } from "../common/shortcut-keycaps";
 import { ProjectIcon } from "../projects/components/project-icon";
@@ -535,6 +536,7 @@ export function IssueViewHeader({
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
+          <LinksBar projectId={base.kind === "project" ? base.project.id : undefined} />
           {showAgentsChip && (
             <WorkspaceAgentWorkingChip
               value={agentRunningFilter}

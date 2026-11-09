@@ -13,6 +13,7 @@ import type { IssueSurfaceController } from "../issues/surface/use-issue-surface
 import { IssueViewHeader } from "./view-header";
 
 const copyLink = vi.hoisted(() => vi.fn());
+vi.mock("../links/components/links-bar", () => ({ LinksBar: () => null }));
 const rename = vi.hoisted(() => vi.fn());
 const active = vi.hoisted(() => ({ view: null as IssueView | null }));
 

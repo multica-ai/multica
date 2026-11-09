@@ -423,6 +423,9 @@ deleted_squad_members AS (
     DELETE FROM squad_member
     WHERE squad_id IN (SELECT id FROM ws_squads)
 ),
+deleted_workspace_links AS (
+    DELETE FROM workspace_link WHERE workspace_id = $1
+),
 deleted_project_resources AS (
     DELETE FROM project_resource WHERE workspace_id = $1
 ),

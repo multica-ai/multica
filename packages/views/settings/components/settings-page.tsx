@@ -10,6 +10,7 @@ import {
   Keyboard,
   KeyRound,
   ListPlus,
+  Link,
   Lock,
   MessagesSquare,
   Plug,
@@ -48,6 +49,7 @@ import { LabelsTab } from "./labels-tab";
 import { WorkflowsTab } from "../../workflows/workflows-tab";
 import { PropertiesTab } from "./properties-tab";
 import { QuickActionsTab } from "./quick-actions-tab";
+import { LinksSection } from "../../links/components/links-section";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { PluginsTab } from "./plugins-tab";
 import { McpTab } from "./mcp-tab";
@@ -213,6 +215,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               <QuickActionsTab />,
               { wide: true },
             ),
+            entry("links", t(($) => $.links.title), Link, <LinksSection />, { wide: true, adminOnly: true }),
           ],
         },
         {

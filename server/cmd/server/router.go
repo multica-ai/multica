@@ -2183,6 +2183,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Workspace and project quick links.
+			r.Route("/api/links", func(r chi.Router) {
+				r.Get("/", h.ListWorkspaceLinks)
+				r.Post("/", h.CreateWorkspaceLink)
+				r.Patch("/{id}", h.UpdateWorkspaceLink)
+				r.Delete("/{id}", h.DeleteWorkspaceLink)
+			})
+
 			// Custom issue properties (definitions; values live under /api/issues/{id}/properties)
 			r.Route("/api/properties", func(r chi.Router) {
 				r.Get("/", h.ListProperties)
