@@ -192,9 +192,33 @@
     },
     "theme": {
       "title": "Tema",
-      "description": "Colores, bordes, sombras y esquinas en toda la aplicación.",
+      "description": "Colores, bordes, sombras y esquinas de toda la app. Importa un archivo de tema para añadir más.",
       "default": "Predeterminado",
-      "pop": "Pop"
+      "pop": "Pop",
+      "remove": "Quitar {{name}}",
+      "safe_mode": "Modo seguro: tu tema está en pausa hasta que cierres esta ventana.",
+      "safe_mode_exit": "Usar mi tema"
+    },
+    "import": {
+      "button": "Importar tema",
+      "too_large": "Un archivo de tema puede ocupar como máximo {{size}} KB.",
+      "not_json": "El archivo no es un JSON válido.",
+      "storage_full": "No hay espacio suficiente en este dispositivo para guardar el tema. Quita otro tema e inténtalo de nuevo.",
+      "confirm_title": "¿Instalar «{{name}}»?",
+      "warning": "Un tema puede cambiar el aspecto de todas las páginas, incluidos los diálogos y avisos. Instala solo temas de personas de confianza.",
+      "author": "Autor",
+      "version": "Versión",
+      "replaces": "{{to}} (sustituye a {{from}})",
+      "includes": "Incluye",
+      "has_tokens": "Colores",
+      "has_css": "CSS propio",
+      "cancel": "Cancelar",
+      "confirm": "Instalar y usar",
+      "error_title": "No se pudo instalar este tema",
+      "error_description": "No se ha cambiado nada. El archivo de tema tiene estos problemas:",
+      "close": "Cerrar",
+      "has_options_one": "{{count}} opción",
+      "has_options_other": "{{count}} opciones"
     },
     "accent": {
       "title": "Color de acento",
@@ -207,13 +231,19 @@
       "pink": "Rosa",
       "graphite": "Grafito"
     },
-    "text": {
-      "title": "Texto"
+    "theme_options": {
+      "title": "Opciones del tema",
+      "description": "Las ofrece {{name}}.",
+      "reset": "Restablecer opciones"
+    },
+    "ui_text": {
+      "title": "Texto de la interfaz",
+      "description": "Menús, botones, listas, la barra lateral y los títulos."
+    },
+    "latin_font": {
+      "title": "Fuente latina"
     },
     "ui_font": {
-      "title": "Fuente de la interfaz",
-      "description": "Letras y números en títulos, texto y botones.",
-      "sample": "Aa",
       "inter": "Predeterminada",
       "system": "Sistema",
       "serif": "Serif",
@@ -221,10 +251,29 @@
     },
     "cjk_font": {
       "title": "Fuente CJK",
-      "description": "Cómo se muestran los caracteres chinos, japoneses y coreanos.",
+      "description": "Caracteres chinos; el japonés y el coreano lo siguen.",
       "sans": "Sans",
       "serif": "Serif",
-      "kai": "Kai"
+      "kai": "Kai",
+      "built_in": "Integradas",
+      "local": "En este dispositivo",
+      "load_local": "Mostrar las fuentes de este dispositivo…",
+      "loading": "Buscando fuentes…",
+      "none": "No hay fuentes con caracteres chinos en este dispositivo.",
+      "load_failed": "No se pudieron leer las fuentes de este dispositivo.",
+      "sample": "永和九年 漢字"
+    },
+    "follow_ui": "Igual que la interfaz",
+    "font_size": {
+      "title": "Tamaño del texto",
+      "description": "Solo agranda el texto. El espaciado y el diseño no cambian.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · Predeterminado"
+    },
+    "content_text": {
+      "title": "Texto del contenido",
+      "description": "Descripciones de incidencias, comentarios, chat y documentos.",
+      "sample": "Las descripciones y los comentarios se leen enteros, así que pueden usar una fuente pensada para leer mientras listas y botones siguen compactos."
     },
     "code_font": {
       "title": "Fuente del código",
@@ -233,11 +282,16 @@
       "jetbrains": "Ligaduras",
       "system": "Monoespaciada del sistema"
     },
-    "font_size": {
-      "title": "Tamaño del texto",
-      "description": "Solo agranda el texto. El espaciado y el diseño no cambian.",
-      "value": "{{size}} px",
-      "default": "{{size}} px · Predeterminado"
+    "content_size": {
+      "title": "Tamaño de letra",
+      "description": "Solo el texto del contenido; la interfaz mantiene su tamaño.",
+      "follow": "Igual que la interfaz ({{size}} px)"
+    },
+    "content_leading": {
+      "title": "Interlineado",
+      "compact": "Compacto",
+      "default": "Predeterminado",
+      "relaxed": "Amplio"
     },
     "layout": {
       "title": "Diseño y accesibilidad"

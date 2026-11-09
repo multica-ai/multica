@@ -208,9 +208,32 @@
     },
     "theme": {
       "title": "テーマ",
-      "description": "アプリ全体の配色、枠線、影、角丸。",
+      "description": "アプリ全体の色、枠線、影、角丸。テーマファイルを読み込んで追加できます。",
       "default": "デフォルト",
-      "pop": "ポップ"
+      "pop": "ポップ",
+      "remove": "{{name}} を削除",
+      "safe_mode": "セーフモード：このウィンドウを閉じるまでテーマを停止しています。",
+      "safe_mode_exit": "テーマを戻す"
+    },
+    "import": {
+      "button": "テーマを読み込む",
+      "too_large": "テーマファイルは最大 {{size}} KB です。",
+      "not_json": "このファイルは有効な JSON ではありません。",
+      "storage_full": "このデバイスにテーマを保存する空き容量がありません。ほかのテーマを削除してからもう一度お試しください。",
+      "confirm_title": "「{{name}}」をインストールしますか？",
+      "warning": "テーマはダイアログや警告を含むすべての画面の見た目を変えられます。信頼できる作者のテーマだけをインストールしてください。",
+      "author": "作者",
+      "version": "バージョン",
+      "replaces": "{{to}}（{{from}} を置き換え）",
+      "includes": "内容",
+      "has_tokens": "カラー",
+      "has_css": "独自の CSS",
+      "cancel": "キャンセル",
+      "confirm": "インストールして使う",
+      "error_title": "このテーマをインストールできません",
+      "error_description": "何も変更していません。テーマファイルに次の問題があります：",
+      "close": "閉じる",
+      "has_options_other": "オプション {{count}} 個"
     },
     "accent": {
       "title": "アクセントカラー",
@@ -223,13 +246,19 @@
       "pink": "ピンク",
       "graphite": "グラファイト"
     },
-    "text": {
-      "title": "テキスト"
+    "theme_options": {
+      "title": "テーマのオプション",
+      "description": "{{name}} が提供しています。",
+      "reset": "オプションをリセット"
+    },
+    "ui_text": {
+      "title": "インターフェースの文字",
+      "description": "メニュー、ボタン、リスト、サイドバー、見出し。"
+    },
+    "latin_font": {
+      "title": "欧文フォント"
     },
     "ui_font": {
-      "title": "UI フォント",
-      "description": "見出し、本文、ボタンの英数字。",
-      "sample": "Aa 漢字",
       "inter": "デフォルト",
       "system": "システム",
       "serif": "セリフ",
@@ -237,10 +266,29 @@
     },
     "cjk_font": {
       "title": "和文フォント",
-      "description": "日本語・中国語・韓国語の文字の書体。",
+      "description": "漢字の字形。仮名とハングルもこれに従います。",
       "sans": "ゴシック",
       "serif": "明朝",
-      "kai": "楷書"
+      "kai": "楷書",
+      "built_in": "標準",
+      "local": "このデバイス",
+      "load_local": "このデバイスのフォントを表示…",
+      "loading": "フォントを探しています…",
+      "none": "このデバイスに漢字を含むフォントはありません。",
+      "load_failed": "このデバイスのフォントを読み込めませんでした。",
+      "sample": "永和九年 いろは"
+    },
+    "follow_ui": "インターフェースと同じ",
+    "font_size": {
+      "title": "文字サイズ",
+      "description": "文字だけを拡大します。余白とレイアウトは変わりません。",
+      "value": "{{size}} px",
+      "default": "{{size}} px · デフォルト"
+    },
+    "content_text": {
+      "title": "本文の文字",
+      "description": "課題の説明、コメント、チャット、ドキュメントの本文。",
+      "sample": "説明やコメントはじっくり読むものなので、読みやすい書体にできます。リストやボタンはコンパクトなままです。"
     },
     "code_font": {
       "title": "コードフォント",
@@ -249,11 +297,16 @@
       "jetbrains": "合字",
       "system": "システム等幅"
     },
-    "font_size": {
+    "content_size": {
       "title": "文字サイズ",
-      "description": "文字だけを拡大します。余白とレイアウトは変わりません。",
-      "value": "{{size}} px",
-      "default": "{{size}} px · デフォルト"
+      "description": "本文だけ。インターフェースは変わりません。",
+      "follow": "インターフェースと同じ（{{size}} px）"
+    },
+    "content_leading": {
+      "title": "行の高さ",
+      "compact": "詰める",
+      "default": "標準",
+      "relaxed": "ゆったり"
     },
     "layout": {
       "title": "レイアウトとアクセシビリティ"

@@ -35,6 +35,7 @@
                Menlo, Consolas, monospace;
   /* Latin-only faces the Appearance settings can pick. Web defines the same
      names over its next/font families. */
+  --font-ui-inter: "Inter Variable", "Inter";
   --font-ui-serif: "Source Serif 4 Variable", "Source Serif 4";
   --font-ui-mono: "Geist Mono Variable", "Geist Mono";
   --font-code-jetbrains: "JetBrains Mono Variable", "JetBrains Mono";

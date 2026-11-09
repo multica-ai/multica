@@ -802,6 +802,7 @@ export function ChatWindow() {
 
   return (
     <motion.div
+      data-mc="chat-window"
       ref={windowRef}
       inert={!isOpen}
       aria-hidden={!isOpen}

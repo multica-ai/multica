@@ -210,9 +210,33 @@
     },
     "theme": {
       "title": "Theme",
-      "description": "Colors, borders, shadows and corners across the app.",
+      "description": "Colors, borders, shadows and corners across the app. Import a theme file to add more.",
       "default": "Default",
-      "pop": "Pop"
+      "pop": "Pop",
+      "remove": "Remove {{name}}",
+      "safe_mode": "Safe mode: your theme is paused until you close this window.",
+      "safe_mode_exit": "Use my theme"
+    },
+    "import": {
+      "button": "Import theme",
+      "too_large": "A theme file can be at most {{size}} KB.",
+      "not_json": "The file is not valid JSON.",
+      "storage_full": "There isn't enough space on this device to save the theme. Remove another theme and try again.",
+      "confirm_title": "Install “{{name}}”?",
+      "warning": "A theme can restyle every page, including dialogs and warnings. Only install themes from people you trust.",
+      "author": "Author",
+      "version": "Version",
+      "replaces": "{{to}} (replaces {{from}})",
+      "includes": "Includes",
+      "has_tokens": "Colors",
+      "has_css": "Its own CSS",
+      "cancel": "Cancel",
+      "confirm": "Install and use",
+      "error_title": "Couldn't install this theme",
+      "error_description": "Nothing was changed. The theme file has these problems:",
+      "close": "Close",
+      "has_options_one": "{{count}} option",
+      "has_options_other": "{{count}} options"
     },
     "accent": {
       "title": "Accent color",
@@ -225,13 +249,19 @@
       "pink": "Pink",
       "graphite": "Graphite"
     },
-    "text": {
-      "title": "Text"
+    "theme_options": {
+      "title": "Theme options",
+      "description": "Provided by {{name}}.",
+      "reset": "Reset options"
+    },
+    "ui_text": {
+      "title": "Interface text",
+      "description": "Menus, buttons, lists, the sidebar and headings."
+    },
+    "latin_font": {
+      "title": "Latin font"
     },
     "ui_font": {
-      "title": "Interface font",
-      "description": "Letters and numbers in headings, text and buttons.",
-      "sample": "Aa",
       "inter": "Default",
       "system": "System",
       "serif": "Serif",
@@ -239,10 +269,29 @@
     },
     "cjk_font": {
       "title": "CJK font",
-      "description": "How Chinese, Japanese and Korean characters are drawn.",
+      "description": "Chinese characters; Japanese and Korean follow it.",
       "sans": "Sans",
       "serif": "Serif",
-      "kai": "Kai"
+      "kai": "Kai",
+      "built_in": "Built in",
+      "local": "On this device",
+      "load_local": "Show fonts on this device…",
+      "loading": "Looking for fonts…",
+      "none": "No fonts with Chinese characters on this device.",
+      "load_failed": "Couldn't read this device's fonts.",
+      "sample": "永和九年 汉字"
+    },
+    "follow_ui": "Same as interface",
+    "font_size": {
+      "title": "Font size",
+      "description": "Scales text only. Spacing and layout stay the same.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · Default"
+    },
+    "content_text": {
+      "title": "Content text",
+      "description": "Issue descriptions, comments, chat and documents.",
+      "sample": "Descriptions and comments are read in full, so they can use a font made for reading while lists and buttons stay compact."
     },
     "code_font": {
       "title": "Code font",
@@ -251,11 +300,16 @@
       "jetbrains": "Ligatures",
       "system": "System monospace"
     },
-    "font_size": {
+    "content_size": {
       "title": "Font size",
-      "description": "Scales text only. Spacing and layout stay the same.",
-      "value": "{{size}} px",
-      "default": "{{size}} px · Default"
+      "description": "Only content text; the interface keeps its size.",
+      "follow": "Same as interface ({{size}} px)"
+    },
+    "content_leading": {
+      "title": "Line height",
+      "compact": "Compact",
+      "default": "Default",
+      "relaxed": "Relaxed"
     },
     "layout": {
       "title": "Layout and accessibility"

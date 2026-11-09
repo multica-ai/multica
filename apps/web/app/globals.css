@@ -35,6 +35,7 @@
     monospace;
   /* Latin-only faces the Appearance settings can pick, over the next/font
      families from app/layout.tsx. Desktop defines the same names. */
+  --font-ui-inter: var(--font-inter);
   --font-ui-serif: var(--font-serif);
   --font-ui-mono: var(--font-geist-mono);
   --font-code-jetbrains: var(--font-jetbrains-mono);

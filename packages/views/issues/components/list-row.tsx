@@ -90,6 +90,7 @@ function ListRowContent({
       <div
         ref={containerRef}
         data-slot="issue-list-row"
+        data-mc="issue-row"
         {...{ [PEEK_TARGET_ATTR]: issue.id }}
         data-peeked={peeked ? "" : undefined}
         style={containerStyle}

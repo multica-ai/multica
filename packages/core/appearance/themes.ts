@@ -1,16 +1,23 @@
 /**
- * Themes are data, not stylesheets. A theme overrides design tokens from
- * `packages/ui/styles/tokens.css` per mode, may repaint the frame around the
- * page (rail, desktop toolbar and tab bar), and may opt into a fixed set of
- * component treatments that `packages/ui/styles/appearance.css` implements.
+ * Themes are data plus an optional stylesheet. A theme overrides public
+ * tokens per mode, may repaint the frame around the page (rail, desktop
+ * toolbar and tab bar), may declare options the Appearance page renders, and
+ * may ship CSS that targets the public anchors in ./anchors.
  *
- * Keeping the format to tokens and named traits is what lets a theme come
- * from outside the codebase later: a manifest can only set allowlisted token
- * names to sanitised values, so installing one cannot inject arbitrary CSS.
+ * Built-in themes use exactly this format, so the format is what a theme
+ * from outside the codebase gets too: token names are allowlisted, values
+ * are sanitised, and CSS goes through `sanitizeThemeCss` (./theme-css).
+ * docs/theming.md is the public reference; keep it in step with this file.
  */
 
-/** Tokens a theme may set. Anything else in a manifest is ignored. */
-export const THEME_TOKENS = [
+/** Bumped only for changes that would break existing themes. */
+export const THEME_API_VERSION = 1;
+
+/**
+ * Tokens a theme may set, per mode. Renaming or removing one breaks themes:
+ * keep the old name working until the next THEME_API_VERSION.
+ */
+export const THEME_COLOR_TOKENS = [
   "app-shell",
   "page-canvas",
   "surface",
@@ -23,6 +30,8 @@ export const THEME_TOKENS = [
   "surface-shadow",
   "floating-shadow",
   "menu-shadow",
+  "tooltip",
+  "tooltip-shadow",
   "background",
   "foreground",
   "card",
@@ -44,37 +53,95 @@ export const THEME_TOKENS = [
   "radius",
   "sidebar",
   "sidebar-foreground",
+  "sidebar-primary",
+  "sidebar-primary-foreground",
   "sidebar-accent",
   "sidebar-accent-foreground",
   "sidebar-border",
+  "sidebar-ring",
   "brand",
   "brand-foreground",
   "button-primary",
   "button-primary-foreground",
   "button-primary-border",
+  "destructive",
+  "success",
+  "warning",
+  "info",
+  "priority-high",
+  "chart-1",
+  "chart-2",
+  "chart-3",
+  "chart-4",
+  "chart-5",
+  "find-match",
+  "find-match-active",
+  "find-match-foreground",
+  "scrollbar-track",
+  "scrollbar-thumb",
+  "scrollbar-thumb-hover",
+  "content-leading",
+  "content-leading-cjk",
+  "issue-row-height",
 ] as const;
+
+/**
+ * Font stacks. A theme's value is the default; what the person picks on the
+ * Appearance page is written inline on <html> and wins.
+ */
+export const THEME_FONT_TOKENS = [
+  "font-ui",
+  "font-cjk",
+  "font-content-latin",
+  "font-content-cjk",
+  "font-mono",
+] as const;
+
+export const THEME_TOKENS = [...THEME_COLOR_TOKENS, ...THEME_FONT_TOKENS] as const;
 export type ThemeToken = (typeof THEME_TOKENS)[number];
 export type ThemeTokens = Partial<Record<ThemeToken, string>>;
 
-/**
- * Component treatments a theme can switch on. Each one is a block in
- * appearance.css keyed on `data-theme-traits~="<trait>"`.
- * - `offset-shadow`: primary buttons lift onto a hard offset shadow on hover.
- * - `status-blocks`: issue group headers become solid blocks per status.
- * - `outlined-chips`: label chips get an ink outline.
- */
-export const THEME_TRAITS = ["offset-shadow", "status-blocks", "outlined-chips"] as const;
-export type ThemeTrait = (typeof THEME_TRAITS)[number];
+/** Text a theme shows on the Appearance page: one string, or one per locale. */
+export type LocalizedText = string | Readonly<Record<string, string>>;
+
+interface ThemeOptionBase {
+  /** Becomes `data-theme-option-<id>` on <html> while the theme is active. */
+  id: string;
+  label: LocalizedText;
+  description?: LocalizedText;
+}
+
+/** On: the attribute is present with the value `on`. Off: it is absent. */
+export interface ThemeToggleOption extends ThemeOptionBase {
+  type: "toggle";
+  default: boolean;
+}
+
+/** The attribute carries the chosen value. */
+export interface ThemeSelectOption extends ThemeOptionBase {
+  type: "select";
+  default: string;
+  choices: readonly { value: string; label: LocalizedText; swatch?: string }[];
+}
+
+export type ThemeOption = ThemeToggleOption | ThemeSelectOption;
 
 export interface ThemeManifest {
+  apiVersion: typeof THEME_API_VERSION;
   id: string;
   name: string;
   /** Who made it; built-in themes name the product they follow. */
   author?: string;
+  version?: string;
+  description?: string;
   tokens: { light: ThemeTokens; dark: ThemeTokens };
   /** Tokens for what sits on the frame: the rail, desktop toolbar and tab bar. */
   frame?: { light?: ThemeTokens; dark?: ThemeTokens };
-  traits?: readonly ThemeTrait[];
+  options?: readonly ThemeOption[];
+  /** Injected while the theme is active, after the app's own styles. */
+  css?: string;
+  /** Files `css` may reference with `url()`, by relative path, as base64 `data:` URLs. */
+  assets?: Readonly<Record<string, string>>;
 }
 
 export const DEFAULT_THEME_ID = "default";
@@ -101,13 +168,61 @@ const POP_FRAME: ThemeTokens = {
   ring: POP_YELLOW,
 };
 
+const POP_SIGNALS = {
+  yellow: POP_YELLOW,
+  mint: "oklch(0.87 0.12 165)",
+  sky: "oklch(0.83 0.1 230)",
+  coral: "oklch(0.8 0.13 30)",
+};
+
+const POP_FRAME_ANCHORS = ':is([data-mc="app-rail"], [data-mc="window-toolbar"], [data-mc="tab-bar"])';
+const POP_STATUS_BLOCKS: [string, string][] = [
+  ['[data-status="backlog"], [data-status="todo"]', "oklch(0.88 0.035 250)"],
+  ['[data-status="in_progress"]', "oklch(0.84 0.13 68)"],
+  ['[data-status="in_review"]', "oklch(0.86 0.1 165)"],
+  ['[data-status="done"]', "oklch(0.8 0.09 255)"],
+  ['[data-status="blocked"]', "oklch(0.78 0.13 28)"],
+];
+const POP_SIGNAL_ON = ':root[data-theme-option-signal]:not([data-theme-option-signal="yellow"])';
+const POP_BUTTON = '[data-slot="button"][data-variant="default"]:not(:disabled):hover';
+const POP_GROUP = '[data-mc="issue-group-header"]';
+const POP_BLOCKED_STATUSES = POP_STATUS_BLOCKS.map(([status]) => status).join(", ");
+
+/** Pop's component treatments, each behind one of its options. */
+const POP_CSS = [
+  "/* Signal colour: button fill, selection, focus ring and dark floating shadows. */",
+  ...Object.entries(POP_SIGNALS)
+    .filter(([id]) => id !== "yellow")
+    .map(([id, color]) => `:root[data-theme-option-signal="${id}"] { --pop-signal: ${color}; }`),
+  `${POP_SIGNAL_ON} { --button-primary: var(--pop-signal); --surface-selected: color-mix(in oklab, var(--pop-signal) 35%, oklch(1 0 0)); }`,
+  `${POP_SIGNAL_ON}.dark { --ring: var(--pop-signal); --floating-shadow: 6px 6px 0 var(--pop-signal); --menu-shadow: 4px 4px 0 var(--pop-signal); --surface-selected: color-mix(in oklab, var(--pop-signal) 22%, oklch(0.2 0 0)); }`,
+  `${POP_SIGNAL_ON} ${POP_FRAME_ANCHORS} { --sidebar-accent-foreground: var(--pop-signal); --ring: var(--pop-signal); --surface-selected: color-mix(in oklab, var(--pop-signal) 22%, oklch(0.2 0 0)); }`,
+  "",
+  "/* Primary buttons lift onto a hard shadow on hover instead of darkening. */",
+  `:root[data-theme-option-offset-shadow] ${POP_BUTTON} { background-color: var(--button-primary, var(--primary)); translate: -2px -2px; box-shadow: 3px 3px 0 var(--surface-border); }`,
+  `@media (prefers-reduced-motion: reduce) { :root[data-theme-option-offset-shadow] ${POP_BUTTON} { translate: none; } }`,
+  "",
+  "/* Issue group headers become solid blocks per status; custom statuses stay neutral. */",
+  `:root[data-theme-option-status-blocks] ${POP_GROUP} { box-shadow: inset 0 0 0 1px var(--surface-border); }`,
+  `:root[data-theme-option-status-blocks] ${POP_GROUP}:is(${POP_BLOCKED_STATUSES}) { --foreground: ${INK}; --muted-foreground: oklch(0.3 0 0); color: var(--foreground); }`,
+  `:root[data-theme-option-status-blocks] ${POP_GROUP}:is(${POP_BLOCKED_STATUSES}) svg { color: var(--foreground); }`,
+  ...POP_STATUS_BLOCKS.map(
+    ([status, color]) =>
+      `:root[data-theme-option-status-blocks] ${POP_GROUP}:is(${status}) { background-color: ${color}; }`,
+  ),
+  "",
+  "/* Label chips get an ink outline. */",
+  `:root[data-theme-option-outlined-chips] [data-mc="label-chip"] { box-shadow: inset 0 0 0 1px var(--surface-border); }`,
+].join("\n");
+
 /**
  * Pop: black frame, warm paper canvas, ink outlines, small radius, hard
- * offset shadows and a signal-yellow primary. --primary stays ink because it
- * also paints text (`text-primary`); the yellow reaches buttons through
- * --button-primary.
+ * offset shadows and a signal-colour primary. --primary stays ink because it
+ * also paints text (`text-primary`); the signal colour reaches buttons
+ * through --button-primary.
  */
 const POP: ThemeManifest = {
+  apiVersion: THEME_API_VERSION,
   id: "pop",
   name: "Pop",
   tokens: {
@@ -169,11 +284,88 @@ const POP: ThemeManifest = {
     },
   },
   frame: { light: POP_FRAME, dark: POP_FRAME },
-  traits: ["offset-shadow", "status-blocks", "outlined-chips"],
+  options: [
+    {
+      id: "signal",
+      type: "select",
+      label: {
+        en: "Signal color",
+        "zh-Hans": "信号色",
+        "zh-Hant": "信號色",
+        ja: "シグナルカラー",
+        ko: "시그널 색상",
+        es: "Color de señal",
+        fr: "Couleur signal",
+      },
+      description: {
+        en: "Primary buttons, selection and focus.",
+        "zh-Hans": "主按钮、选中项和焦点。",
+        "zh-Hant": "主按鈕、選取項目和焦點。",
+        ja: "主要ボタン、選択項目、フォーカス。",
+        ko: "기본 버튼, 선택 항목, 포커스.",
+        es: "Botones principales, selección y foco.",
+        fr: "Boutons principaux, sélection et focus.",
+      },
+      default: "yellow",
+      choices: [
+        { value: "yellow", label: { en: "Yellow", "zh-Hans": "黄", "zh-Hant": "黃", ja: "イエロー", ko: "노랑", es: "Amarillo", fr: "Jaune" }, swatch: POP_SIGNALS.yellow },
+        { value: "mint", label: { en: "Mint", "zh-Hans": "薄荷", "zh-Hant": "薄荷", ja: "ミント", ko: "민트", es: "Menta", fr: "Menthe" }, swatch: POP_SIGNALS.mint },
+        { value: "sky", label: { en: "Sky", "zh-Hans": "天蓝", "zh-Hant": "天藍", ja: "スカイ", ko: "하늘", es: "Cielo", fr: "Ciel" }, swatch: POP_SIGNALS.sky },
+        { value: "coral", label: { en: "Coral", "zh-Hans": "珊瑚", "zh-Hant": "珊瑚", ja: "コーラル", ko: "코랄", es: "Coral", fr: "Corail" }, swatch: POP_SIGNALS.coral },
+      ],
+    },
+    {
+      id: "offset-shadow",
+      type: "toggle",
+      label: { en: "Hard shadows", "zh-Hans": "硬投影", "zh-Hant": "硬投影", ja: "ハードシャドウ", ko: "하드 섀도", es: "Sombras duras", fr: "Ombres franches" },
+      description: {
+        en: "Primary buttons lift onto a solid offset shadow on hover.",
+        "zh-Hans": "悬停时主按钮浮起，露出实色投影。",
+        "zh-Hant": "滑過時主按鈕浮起，露出實色投影。",
+        ja: "ホバー時に主要ボタンが浮き、ベタの影が出ます。",
+        ko: "마우스를 올리면 기본 버튼이 떠오르며 단색 그림자가 생깁니다.",
+        es: "Los botones principales se elevan sobre una sombra sólida al pasar el cursor.",
+        fr: "Les boutons principaux se soulèvent sur une ombre pleine au survol.",
+      },
+      default: true,
+    },
+    {
+      id: "status-blocks",
+      type: "toggle",
+      label: { en: "Status blocks", "zh-Hans": "状态色块", "zh-Hant": "狀態色塊", ja: "ステータスブロック", ko: "상태 블록", es: "Bloques de estado", fr: "Blocs de statut" },
+      description: {
+        en: "Group headers in issue lists fill with their status color.",
+        "zh-Hans": "列表按状态分组时，分组标题整块填色。",
+        "zh-Hant": "列表依狀態分組時，分組標題整塊填色。",
+        ja: "課題リストのグループ見出しをステータス色で塗ります。",
+        ko: "이슈 목록의 그룹 제목을 상태 색으로 채웁니다.",
+        es: "Los encabezados de grupo se rellenan con el color de su estado.",
+        fr: "Les en-têtes de groupe prennent la couleur de leur statut.",
+      },
+      default: true,
+    },
+    {
+      id: "outlined-chips",
+      type: "toggle",
+      label: { en: "Outlined labels", "zh-Hans": "标签描边", "zh-Hant": "標籤描邊", ja: "ラベルの枠線", ko: "라벨 테두리", es: "Etiquetas con contorno", fr: "Étiquettes contourées" },
+      description: {
+        en: "Label chips get an ink outline.",
+        "zh-Hans": "标签加一圈墨线。",
+        "zh-Hant": "標籤加一圈墨線。",
+        ja: "ラベルに墨色の枠線を付けます。",
+        ko: "라벨에 먹색 테두리를 둘러요.",
+        es: "Las etiquetas llevan un contorno de tinta.",
+        fr: "Les étiquettes reçoivent un contour encre.",
+      },
+      default: true,
+    },
+  ],
+  css: POP_CSS,
 };
 
 /** GitHub (Primer): cool greys, 6px radius, green primary, blue links. */
 const GITHUB: ThemeManifest = {
+  apiVersion: THEME_API_VERSION,
   id: "github",
   name: "GitHub",
   author: "Primer",
@@ -245,6 +437,7 @@ const GITHUB: ThemeManifest = {
 
 /** Blueprint: crisp blue-greys, 4px radius, blue intent for primary and selection. */
 const BLUEPRINT: ThemeManifest = {
+  apiVersion: THEME_API_VERSION,
   id: "blueprint",
   name: "Blueprint",
   author: "Palantir",
@@ -317,6 +510,7 @@ const BLUEPRINT: ThemeManifest = {
 
 /** Notion: warm greys, quiet hairlines, soft layered shadows, blue primary. */
 const NOTION: ThemeManifest = {
+  apiVersion: THEME_API_VERSION,
   id: "notion",
   name: "Notion",
   tokens: {
@@ -386,6 +580,7 @@ const NOTION: ThemeManifest = {
 };
 
 const DEFAULT: ThemeManifest = {
+  apiVersion: THEME_API_VERSION,
   id: DEFAULT_THEME_ID,
   name: "Default",
   tokens: { light: {}, dark: {} },
@@ -393,12 +588,12 @@ const DEFAULT: ThemeManifest = {
 
 export const BUILT_IN_THEMES: readonly ThemeManifest[] = [DEFAULT, POP, GITHUB, BLUEPRINT, NOTION];
 
-export function findTheme(id: string): ThemeManifest | undefined {
+export function findBuiltInTheme(id: string): ThemeManifest | undefined {
   return BUILT_IN_THEMES.find((theme) => theme.id === id);
 }
 
 const SAFE_VALUE = /^[\w\s#.,%()/+-]+$/;
-const UNSAFE_FUNCTION = /\b(url|image|image-set|cross-fade|element|expression|attr|env)\s*\(/i;
+const UNSAFE_FUNCTION = /\b(url|image|image-set|cross-fade|element|expression|attr|env|src)\s*\(/i;
 
 /** A token value a theme may set: colours, lengths, shadows and var() references only. */
 export function isSafeThemeValue(value: unknown): value is string {
@@ -411,18 +606,33 @@ export function isSafeThemeValue(value: unknown): value is string {
   );
 }
 
+const FONT_VAR = /var\(--[a-z0-9-]+\)/g;
+const SAFE_FONT_VALUE = /^[\p{L}\p{N} "',._-]+$/u;
+
+/** A font stack: family names, quoted or not, and var() references to other stacks. */
+export function isSafeFontValue(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 300) return false;
+  const rest = value.replace(FONT_VAR, "x");
+  return SAFE_FONT_VALUE.test(rest) && (rest.split('"').length - 1) % 2 === 0 && (rest.split("'").length - 1) % 2 === 0;
+}
+
+const FONT_TOKEN_SET = new Set<string>(THEME_FONT_TOKENS);
+
+export function isSafeTokenValue(token: ThemeToken, value: unknown): value is string {
+  return FONT_TOKEN_SET.has(token) ? isSafeFontValue(value) : isSafeThemeValue(value);
+}
+
 function declarations(tokens: ThemeTokens | undefined): string {
   if (!tokens) return "";
-  return THEME_TOKENS.filter((name) => isSafeThemeValue(tokens[name]))
+  return THEME_TOKENS.filter((name) => isSafeTokenValue(name, tokens[name]))
     .map((name) => `--${name}: ${tokens[name]};`)
     .join(" ");
 }
 
-const FRAME_SLOTS =
-  ':is([data-slot="app-rail"], [data-slot="window-toolbar"], [data-slot="main-top-bar"])';
+const FRAME_ANCHORS = ':is([data-mc="app-rail"], [data-mc="window-toolbar"], [data-mc="tab-bar"])';
 
 /**
- * CSS for one theme. Light rules exclude `.dark` so both selectors are
+ * Token CSS for one theme. Light rules exclude `.dark` so both selectors are
  * equally specific and each mode reads only its own block; both outrank the
  * `:root` and `.dark` blocks of tokens.css.
  */
@@ -433,15 +643,48 @@ export function themeStylesheet(theme: ThemeManifest): string {
   };
   add(":root:not(.dark)", declarations(theme.tokens.light));
   add(":root.dark", declarations(theme.tokens.dark));
-  add(`:root:not(.dark) ${FRAME_SLOTS}`, declarations(theme.frame?.light));
-  add(`:root.dark ${FRAME_SLOTS}`, declarations(theme.frame?.dark));
+  add(`:root:not(.dark) ${FRAME_ANCHORS}`, declarations(theme.frame?.light));
+  add(`:root.dark ${FRAME_ANCHORS}`, declarations(theme.frame?.dark));
   return blocks.join("\n");
 }
 
-/** The traits attribute value, limited to traits appearance.css implements. */
-export function themeTraits(theme: ThemeManifest): string | null {
-  const traits = (theme.traits ?? []).filter((trait) =>
-    (THEME_TRAITS as readonly string[]).includes(trait),
+export const THEME_OPTION_ATTR_PREFIX = "data-theme-option-";
+
+export type ThemeOptionValues = Readonly<Record<string, string | boolean>>;
+
+/** The value an option has: the person's choice when it is still valid, else the default. */
+export function themeOptionValue(option: ThemeOption, chosen: unknown): string | boolean {
+  if (option.type === "toggle") return typeof chosen === "boolean" ? chosen : option.default;
+  return typeof chosen === "string" && option.choices.some((c) => c.value === chosen)
+    ? chosen
+    : option.default;
+}
+
+/** `data-theme-option-*` attributes for <html>; `null` means absent. */
+export function themeOptionAttributes(
+  theme: ThemeManifest,
+  chosen: ThemeOptionValues | undefined,
+): Record<string, string | null> {
+  const attributes: Record<string, string | null> = {};
+  for (const option of theme.options ?? []) {
+    const value = themeOptionValue(option, chosen?.[option.id]);
+    attributes[`${THEME_OPTION_ATTR_PREFIX}${option.id}`] =
+      value === true ? "on" : value === false ? null : value;
+  }
+  return attributes;
+}
+
+/** Picks the text for `locale`: exact match, then its language, then English, then any. */
+export function localizedText(text: LocalizedText | undefined, locale: string): string {
+  if (text === undefined) return "";
+  if (typeof text === "string") return text;
+  const language = locale.split("-")[0] ?? locale;
+  return (
+    text[locale] ??
+    text[language] ??
+    Object.entries(text).find(([key]) => key.startsWith(`${language}-`))?.[1] ??
+    text.en ??
+    Object.values(text)[0] ??
+    ""
   );
-  return traits.length > 0 ? traits.join(" ") : null;
 }

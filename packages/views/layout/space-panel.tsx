@@ -63,6 +63,7 @@ export function SpacePanel() {
           key={space}
           ref={panelRef}
           data-slot="space-panel"
+          data-mc="sidebar"
           data-state={open ? "expanded" : "collapsed"}
           inert={!open}
           className={cn(

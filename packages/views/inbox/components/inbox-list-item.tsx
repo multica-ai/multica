@@ -100,6 +100,7 @@ export function InboxListItem({
     // are invalid HTML that screen readers cannot reach. `role="button"` plus
     // the Enter/Space handler keeps the row's own keyboard behavior.
     <div
+      data-mc="inbox-item"
       role="button"
       tabIndex={0}
       onClick={(e) => {

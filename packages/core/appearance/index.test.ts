@@ -4,15 +4,28 @@ import {
   APPEARANCE_STORAGE_KEY,
   BUILT_IN_THEMES,
   DEFAULT_APPEARANCE,
+  activeTheme,
   appearanceRootVariables,
   appearanceStylesheet,
   appearanceThemeAttributes,
-  isSafeThemeValue,
+  appearanceThemeCss,
+  findBuiltInTheme,
+  isDefaultAppearance,
+  isSafeFontValue,
+  isSafeTokenValue,
+  localizedText,
   sanitizeAppearance,
+  sanitizeThemeCss,
   themeStylesheet,
   useAppearanceStore,
+  useInstalledThemesStore,
+  type AppearancePreferences,
   type ThemeManifest,
+  type ThemeToken,
 } from ".";
+
+const pop = findBuiltInTheme("pop")!;
+const defaults = findBuiltInTheme("default")!;
 
 describe("appearance store", () => {
   beforeEach(() => {
@@ -21,33 +34,68 @@ describe("appearance store", () => {
   });
 
   it("saves the preferences on this device", () => {
-    useAppearanceStore.getState().set({ theme: "github", fontSize: 16 });
+    useAppearanceStore.getState().set({ theme: "github", fontSize: 16, contentSize: 17 });
     const saved = JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) ?? "{}");
-    expect(saved.state).toMatchObject({ theme: "github", fontSize: 16, density: "default" });
+    expect(saved.state).toMatchObject({ theme: "github", fontSize: 16, contentSize: 17 });
+  });
+
+  it("keeps option values per theme", () => {
+    const { setThemeOption } = useAppearanceStore.getState();
+    setThemeOption("pop", "signal", "mint");
+    setThemeOption("pop", "status-blocks", false);
+    expect(useAppearanceStore.getState().themeOptions).toEqual({
+      pop: { signal: "mint", "status-blocks": false },
+    });
   });
 
   it("resets everything to the defaults", () => {
-    useAppearanceStore.getState().set({ theme: "pop", accent: "green", highContrast: true });
-    useAppearanceStore.getState().reset();
-    expect(sanitizeAppearance(useAppearanceStore.getState())).toEqual(DEFAULT_APPEARANCE);
+    const { set, setThemeOption, reset } = useAppearanceStore.getState();
+    set({ theme: "pop", accent: "green", contentFont: "serif" });
+    setThemeOption("pop", "signal", "sky");
+    reset();
+    expect(isDefaultAppearance(sanitizeAppearance(useAppearanceStore.getState()))).toBe(true);
   });
 
-  it("reads the first version's style as the theme", async () => {
+  it("reads older saved shapes", async () => {
     localStorage.setItem(
       APPEARANCE_STORAGE_KEY,
-      JSON.stringify({ state: { style: "pop" }, version: 0 }),
+      JSON.stringify({ state: { style: "pop", cjkFont: "kai" }, version: 0 }),
     );
     await useAppearanceStore.persist.rehydrate();
-    expect(useAppearanceStore.getState().theme).toBe("pop");
+    expect(useAppearanceStore.getState()).toMatchObject({ theme: "pop", uiCjkFont: "kai" });
   });
 });
 
 describe("sanitizeAppearance", () => {
   it("falls back per field for unknown or missing values", () => {
     expect(
-      sanitizeAppearance({ theme: "solarized", fontSize: 40, density: "comfortable", reduceMotion: "yes" }),
+      sanitizeAppearance({
+        theme: "Not An Id",
+        fontSize: 40,
+        density: "comfortable",
+        reduceMotion: "yes",
+        contentSize: 99,
+        uiCjkFont: 'local:Evil"; }',
+      }),
     ).toEqual({ ...DEFAULT_APPEARANCE, density: "comfortable" });
     expect(sanitizeAppearance(null)).toEqual(DEFAULT_APPEARANCE);
+  });
+
+  it("keeps the id of a theme that may be installed later", () => {
+    expect(sanitizeAppearance({ theme: "solarized" }).theme).toBe("solarized");
+  });
+
+  it("accepts installed CJK families and follow-the-interface values", () => {
+    expect(
+      sanitizeAppearance({ uiCjkFont: "local:Hiragino Sans GB", contentCjkFont: "ui", contentFont: "serif" }),
+    ).toMatchObject({ uiCjkFont: "local:Hiragino Sans GB", contentCjkFont: "ui", contentFont: "serif" });
+  });
+
+  it("drops malformed theme options", () => {
+    expect(
+      sanitizeAppearance({ themeOptions: { pop: { signal: "mint", "Bad Key": true, big: "x".repeat(40) }, "!": {} } })
+        .themeOptions,
+    ).toEqual({ pop: { signal: "mint" } });
   });
 });
 
@@ -56,36 +104,40 @@ describe("appearanceRootVariables", () => {
     expect(Object.values(appearanceRootVariables(DEFAULT_APPEARANCE)).every((v) => v === null)).toBe(true);
   });
 
-  it("maps fonts, size and density onto variables the stylesheets read", () => {
+  it("maps interface and content type onto separate variables", () => {
     const vars = appearanceRootVariables({
       ...DEFAULT_APPEARANCE,
       uiFont: "serif",
-      cjkFont: "kai",
+      uiCjkFont: "kai",
+      contentFont: "inter",
+      contentCjkFont: "local:Songti SC",
+      contentSize: 16,
+      contentLeading: "relaxed",
       codeFont: "jetbrains",
-      fontSize: 16,
+      fontSize: 15,
       density: "compact",
     });
     expect(vars["--font-ui"]).toBe("var(--font-ui-serif)");
     expect(vars["--font-cjk"]).toBe("var(--font-cjk-kai)");
+    expect(vars["--font-content-latin"]).toBe("var(--font-ui-inter)");
+    expect(vars["--font-content-cjk"]).toBe('"Songti SC", var(--font-cjk-sans)');
+    expect(vars["--content-scale"]).toBe(String(16 / 14));
+    expect(vars["--content-leading"]).toBe("1.8");
     expect(vars["--font-mono"]).toMatch(/^var\(--font-code-jetbrains\)/);
-    expect(vars["--font-scale"]).toBe(String(16 / 14));
+    expect(vars["--font-scale"]).toBe(String(15 / 14));
     expect(vars["--issue-row-height"]).toBe("32px");
   });
 });
 
 describe("appearanceStylesheet", () => {
   it("is empty for the defaults", () => {
-    expect(appearanceStylesheet(DEFAULT_APPEARANCE)).toBe("");
-    expect(appearanceThemeAttributes(DEFAULT_APPEARANCE)).toEqual({ theme: null, traits: null });
+    expect(appearanceStylesheet(defaults, DEFAULT_APPEARANCE)).toBe("");
+    expect(appearanceThemeAttributes(defaults, DEFAULT_APPEARANCE)).toEqual({ "data-theme": null });
   });
 
   it("puts the accent and contrast after the theme so they win", () => {
-    const css = appearanceStylesheet({
-      ...DEFAULT_APPEARANCE,
-      theme: "github",
-      accent: "violet",
-      highContrast: true,
-    });
+    const prefs = { ...DEFAULT_APPEARANCE, theme: "github", accent: "violet", highContrast: true } as const;
+    const css = appearanceStylesheet(activeTheme(prefs), prefs);
     const theme = css.indexOf("--button-primary:");
     const accent = css.indexOf("--brand: oklch(0.52 0.2 292)");
     const contrast = css.indexOf("--muted-foreground: color-mix");
@@ -94,36 +146,75 @@ describe("appearanceStylesheet", () => {
     expect(contrast).toBeGreaterThan(accent);
   });
 
-  it("names the theme and its traits for appearance.css", () => {
-    expect(appearanceThemeAttributes({ ...DEFAULT_APPEARANCE, theme: "pop" })).toEqual({
+  it("names the theme and its options, defaults included", () => {
+    const prefs: AppearancePreferences = {
+      ...DEFAULT_APPEARANCE,
       theme: "pop",
-      traits: "offset-shadow status-blocks outlined-chips",
+      themeOptions: { pop: { signal: "sky", "status-blocks": false, unknown: true } },
+    };
+    expect(appearanceThemeAttributes(pop, prefs)).toEqual({
+      "data-theme": "pop",
+      "data-theme-option-signal": "sky",
+      "data-theme-option-offset-shadow": "on",
+      "data-theme-option-status-blocks": null,
+      "data-theme-option-outlined-chips": "on",
     });
-    expect(appearanceThemeAttributes({ ...DEFAULT_APPEARANCE, theme: "notion" })).toEqual({
-      theme: "notion",
-      traits: null,
-    });
+  });
+
+  it("falls back to the default theme in safe mode or when the theme is missing", () => {
+    expect(activeTheme({ ...DEFAULT_APPEARANCE, theme: "pop" }, true).id).toBe("default");
+    expect(activeTheme({ ...DEFAULT_APPEARANCE, theme: "not-installed" }).id).toBe("default");
+  });
+
+  it("applies an installed theme and its CSS", () => {
+    const theme: ThemeManifest = {
+      apiVersion: 1,
+      id: "paper",
+      name: "Paper",
+      tokens: { light: { "page-canvas": "oklch(0.97 0.02 85)" }, dark: {} },
+      css: '[data-mc="content"] p { hyphens: auto; }',
+    };
+    useInstalledThemesStore.setState({ themes: [theme] });
+    const active = activeTheme({ ...DEFAULT_APPEARANCE, theme: "paper" });
+    expect(active).toBe(theme);
+    expect(appearanceThemeCss(active)).toContain("hyphens: auto");
+    useInstalledThemesStore.setState({ themes: [] });
   });
 });
 
-describe("themes", () => {
-  it("gives every built-in theme a unique id and safe values", () => {
+describe("built-in themes", () => {
+  it("have unique ids, safe values and CSS that passes the same check as installed themes", () => {
     expect(new Set(BUILT_IN_THEMES.map((t) => t.id)).size).toBe(BUILT_IN_THEMES.length);
     for (const theme of BUILT_IN_THEMES) {
       for (const tokens of [theme.tokens.light, theme.tokens.dark, theme.frame?.light, theme.frame?.dark]) {
-        for (const value of Object.values(tokens ?? {})) expect(isSafeThemeValue(value)).toBe(true);
+        for (const [name, value] of Object.entries(tokens ?? {})) {
+          expect(isSafeTokenValue(name as ThemeToken, value)).toBe(true);
+        }
+      }
+      if (theme.css) expect(sanitizeThemeCss(theme.css, theme.assets)).toEqual({ ok: true, css: theme.css });
+    }
+  });
+
+  it("give Pop's options a label in every locale the app ships", () => {
+    for (const option of pop.options ?? []) {
+      for (const locale of ["en", "zh-Hans", "zh-Hant", "ja", "ko", "es", "fr"]) {
+        expect(localizedText(option.label, locale)).not.toBe("");
       }
     }
+    expect(localizedText(pop.options![0]!.label, "zh-Hant")).toBe("信號色");
+    expect(localizedText(pop.options![0]!.label, "de")).toBe("Signal color");
   });
 
   it("drops unknown tokens and unsafe values from a manifest", () => {
     const manifest = {
+      apiVersion: 1,
       id: "evil",
       name: "Evil",
       tokens: {
         light: {
           brand: "red; } body { display: none",
           "page-canvas": "url(https://example.com/x.png)",
+          "font-ui": '"Inter"; } body { display: none',
           surface: "oklch(1 0 0)",
           position: "fixed",
         },
@@ -131,5 +222,16 @@ describe("themes", () => {
       },
     } as unknown as ThemeManifest;
     expect(themeStylesheet(manifest)).toBe(":root:not(.dark) { --surface: oklch(1 0 0); }");
+  });
+});
+
+describe("isSafeFontValue", () => {
+  it("accepts font stacks and rejects anything that can leave the declaration", () => {
+    expect(isSafeFontValue('"Source Serif 4", Georgia, var(--font-ui-serif)')).toBe(true);
+    expect(isSafeFontValue('"霞鹜文楷", serif')).toBe(true);
+    expect(isSafeFontValue('"Open')).toBe(false);
+    expect(isSafeFontValue("Inter; color: red")).toBe(false);
+    expect(isSafeFontValue("url(x)")).toBe(false);
+    expect(isSafeFontValue("Inter}")).toBe(false);
   });
 });

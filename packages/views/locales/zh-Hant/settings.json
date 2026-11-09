@@ -208,9 +208,32 @@
     },
     "theme": {
       "title": "主題",
-      "description": "整個應用程式的配色、邊框、陰影和圓角。",
+      "description": "全域的顏色、邊框、陰影和圓角。可以匯入主題檔案加入更多主題。",
       "default": "預設",
-      "pop": "普普"
+      "pop": "普普",
+      "remove": "移除 {{name}}",
+      "safe_mode": "安全模式：關閉這個視窗之前，你的主題暫停生效。",
+      "safe_mode_exit": "恢復我的主題"
+    },
+    "import": {
+      "button": "匯入主題",
+      "too_large": "主題檔案最大 {{size}} KB。",
+      "not_json": "這個檔案不是有效的 JSON。",
+      "storage_full": "這台裝置的儲存空間不夠儲存這個主題。移除其他主題後再試。",
+      "confirm_title": "安裝「{{name}}」？",
+      "warning": "主題可以改變每個頁面的樣式，包括對話框和警告。只安裝你信任的人做的主題。",
+      "author": "作者",
+      "version": "版本",
+      "replaces": "{{to}}（取代 {{from}}）",
+      "includes": "包含",
+      "has_tokens": "顏色",
+      "has_css": "自帶 CSS",
+      "cancel": "取消",
+      "confirm": "安裝並使用",
+      "error_title": "無法安裝這個主題",
+      "error_description": "沒有做任何變更。主題檔案有以下問題：",
+      "close": "關閉",
+      "has_options_other": "{{count}} 個選項"
     },
     "accent": {
       "title": "強調色",
@@ -223,13 +246,19 @@
       "pink": "粉",
       "graphite": "石墨"
     },
-    "text": {
-      "title": "文字"
+    "theme_options": {
+      "title": "主題選項",
+      "description": "由 {{name}} 提供。",
+      "reset": "恢復主題預設"
+    },
+    "ui_text": {
+      "title": "介面文字",
+      "description": "選單、按鈕、列表、側欄和標題。"
+    },
+    "latin_font": {
+      "title": "西文字體"
     },
     "ui_font": {
-      "title": "介面字體",
-      "description": "標題、內文和按鈕裡的字母與數字。",
-      "sample": "Aa 漢字",
       "inter": "預設",
       "system": "系統",
       "serif": "襯線",
@@ -237,10 +266,29 @@
     },
     "cjk_font": {
       "title": "中文字體",
-      "description": "漢字（以及日文、韓文）的顯示字體。",
+      "description": "漢字字形；日文、韓文跟著這裡走。",
       "sans": "黑體",
       "serif": "宋體",
-      "kai": "楷體"
+      "kai": "楷體",
+      "built_in": "常用",
+      "local": "本機字體",
+      "load_local": "顯示本機字體…",
+      "loading": "正在尋找字體…",
+      "none": "這台裝置上沒有含漢字的字體。",
+      "load_failed": "無法讀取本機字體。",
+      "sample": "永和九年，歲在癸丑"
+    },
+    "follow_ui": "跟隨介面",
+    "font_size": {
+      "title": "字級",
+      "description": "只放大文字，間距和版面不變。",
+      "value": "{{size}} px",
+      "default": "{{size}} px · 預設"
+    },
+    "content_text": {
+      "title": "內容文字",
+      "description": "任務描述、留言、對話和文件裡的正文。",
+      "sample": "描述和留言需要整段閱讀，可以換成更適合閱讀的字體；列表和按鈕仍然保持緊湊。"
     },
     "code_font": {
       "title": "程式碼字體",
@@ -249,11 +297,16 @@
       "jetbrains": "連字",
       "system": "系統等寬"
     },
-    "font_size": {
+    "content_size": {
       "title": "字級",
-      "description": "只放大文字，間距和版面不變。",
-      "value": "{{size}} px",
-      "default": "{{size}} px · 預設"
+      "description": "只改內容文字，介面不變。",
+      "follow": "跟隨介面（{{size}} px）"
+    },
+    "content_leading": {
+      "title": "行高",
+      "compact": "緊湊",
+      "default": "標準",
+      "relaxed": "寬鬆"
     },
     "layout": {
       "title": "版面與輔助功能"

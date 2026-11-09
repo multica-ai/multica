@@ -82,6 +82,7 @@ function MainTopBar({ railMounted }: { railMounted: boolean }) {
   return (
     <header
       data-slot="main-top-bar"
+      data-mc="tab-bar"
       className={cn("relative shrink-0 flex items-center gap-2", TOP_BAR_HEIGHT_CLASS)}
       style={{ paddingLeft: toolbarClearance }}
     >
@@ -134,6 +135,7 @@ function MainCanvas({
   return (
     <div
       data-slot="main-canvas"
+      data-mc="page"
       className={cn(
         "relative mr-2 mb-2 flex min-h-0 flex-1 flex-row overflow-hidden rounded-xl bg-page-canvas shadow-[var(--surface-shadow)] ring-1 ring-surface-border",
         railMounted && !isCompact ? "ml-0" : "ml-2",

@@ -110,7 +110,7 @@
 .rich-text-editor p {
   margin-top: 0.625rem;
   margin-bottom: 0.625rem;
-  line-height: 1.625;
+  line-height: var(--content-leading, 1.625);
 }
 
 /* First child should not have top margin */
@@ -139,7 +139,7 @@
 
 .rich-text-editor li {
   margin: 0.25rem 0;
-  line-height: 1.625;
+  line-height: var(--content-leading, 1.625);
 }
 
 .rich-text-editor li + li {
@@ -152,7 +152,7 @@
    language people write their issues and comments in. Table cells are listed
    so editable cells (text in a <p>) and readonly cells (bare text) stay equal. */
 .rich-text-editor :is(p, li, th, td):is(:lang(zh), :lang(ja), :lang(ko)) {
-  line-height: 1.75;
+  line-height: var(--content-leading-cjk, 1.75);
 }
 
 .rich-text-editor li::marker {
@@ -375,7 +375,7 @@
      (which carries 1.625); the readonly render keeps bare text in the cell,
      which otherwise inherits the host's text-body line-height (~1.43) and
      makes every readonly cell 2.5px shorter per line. */
-  line-height: 1.625;
+  line-height: var(--content-leading, 1.625);
 }
 
 /* The header label sets its column's minimum width rather than wrapping. */

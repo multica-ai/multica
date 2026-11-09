@@ -208,9 +208,32 @@
     },
     "theme": {
       "title": "主题",
-      "description": "整个应用的配色、边框、阴影和圆角。",
+      "description": "全局的颜色、边框、阴影和圆角。可以导入主题文件添加更多主题。",
       "default": "默认",
-      "pop": "波普"
+      "pop": "波普",
+      "remove": "移除 {{name}}",
+      "safe_mode": "安全模式：关闭这个窗口之前，你的主题暂停生效。",
+      "safe_mode_exit": "恢复我的主题"
+    },
+    "import": {
+      "button": "导入主题",
+      "too_large": "主题文件最大 {{size}} KB。",
+      "not_json": "这个文件不是有效的 JSON。",
+      "storage_full": "这台设备的存储空间不够保存这个主题。移除别的主题后再试。",
+      "confirm_title": "安装「{{name}}」？",
+      "warning": "主题可以改变每个页面的样式，包括弹窗和警告。只安装你信任的人做的主题。",
+      "author": "作者",
+      "version": "版本",
+      "replaces": "{{to}}（替换 {{from}}）",
+      "includes": "包含",
+      "has_tokens": "颜色",
+      "has_css": "自带 CSS",
+      "cancel": "取消",
+      "confirm": "安装并使用",
+      "error_title": "无法安装这个主题",
+      "error_description": "没有做任何改动。主题文件有以下问题：",
+      "close": "关闭",
+      "has_options_other": "{{count}} 个选项"
     },
     "accent": {
       "title": "强调色",
@@ -223,13 +246,19 @@
       "pink": "粉",
       "graphite": "石墨"
     },
-    "text": {
-      "title": "文字"
+    "theme_options": {
+      "title": "主题选项",
+      "description": "由 {{name}} 提供。",
+      "reset": "恢复主题默认"
+    },
+    "ui_text": {
+      "title": "界面文字",
+      "description": "菜单、按钮、列表、侧栏和标题。"
+    },
+    "latin_font": {
+      "title": "西文字体"
     },
     "ui_font": {
-      "title": "界面字体",
-      "description": "标题、正文和按钮里的字母与数字。",
-      "sample": "Aa 汉字",
       "inter": "默认",
       "system": "系统",
       "serif": "衬线",
@@ -237,10 +266,29 @@
     },
     "cjk_font": {
       "title": "中文字体",
-      "description": "汉字（以及日文、韩文）的显示字体。",
+      "description": "汉字字形；日文、韩文跟着这里走。",
       "sans": "黑体",
       "serif": "宋体",
-      "kai": "楷体"
+      "kai": "楷体",
+      "built_in": "常用",
+      "local": "本机字体",
+      "load_local": "显示本机字体…",
+      "loading": "正在查找字体…",
+      "none": "这台设备上没有含汉字的字体。",
+      "load_failed": "无法读取本机字体。",
+      "sample": "永和九年，岁在癸丑"
+    },
+    "follow_ui": "跟随界面",
+    "font_size": {
+      "title": "字号",
+      "description": "只放大文字，间距和布局不变。",
+      "value": "{{size}} px",
+      "default": "{{size}} px · 默认"
+    },
+    "content_text": {
+      "title": "内容文字",
+      "description": "任务描述、评论、对话和文档里的正文。",
+      "sample": "描述和评论需要整段阅读，可以换成更适合阅读的字体；列表和按钮仍然保持紧凑。"
     },
     "code_font": {
       "title": "代码字体",
@@ -249,11 +297,16 @@
       "jetbrains": "连字",
       "system": "系统等宽"
     },
-    "font_size": {
+    "content_size": {
       "title": "字号",
-      "description": "只放大文字，间距和布局不变。",
-      "value": "{{size}} px",
-      "default": "{{size}} px · 默认"
+      "description": "只改内容文字，界面不变。",
+      "follow": "跟随界面（{{size}} px）"
+    },
+    "content_leading": {
+      "title": "行高",
+      "compact": "紧凑",
+      "default": "标准",
+      "relaxed": "宽松"
     },
     "layout": {
       "title": "布局与辅助功能"

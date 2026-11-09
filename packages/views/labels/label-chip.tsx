@@ -59,6 +59,7 @@ export function LabelChip({ label, onRemove, className, fullName }: LabelChipPro
   return (
     <span
       data-slot="label-chip"
+      data-mc="label-chip"
       // `min-w-0` lets the chip shrink when it is a flex item in a width-capped
       // container (the create toolbar's label pill). Without it the chip keeps
       // its content width and the parent clips it mid-shape; with it the inner

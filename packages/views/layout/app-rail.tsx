@@ -291,6 +291,7 @@ export function AppRail({
     <nav
       aria-label={t(($) => $.rail.label)}
       data-slot="app-rail"
+      data-mc="app-rail"
       className={cn(
         "flex h-full w-16 shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden pt-3 pb-2.5 [scrollbar-width:none]",
         className,

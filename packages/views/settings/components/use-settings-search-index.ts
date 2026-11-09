@@ -67,14 +67,32 @@ export function useSettingsSearchIndex(
       },
       {
         tab: "appearance",
-        anchor: "ui-font",
-        title: t(($) => $.appearance.ui_font.title),
-        description: t(($) => $.appearance.ui_font.description),
+        anchor: "ui-text",
+        title: t(($) => $.appearance.ui_text.title),
+        description: t(($) => $.appearance.ui_text.description),
       },
       {
         tab: "appearance",
-        anchor: "cjk-font",
-        title: t(($) => $.appearance.cjk_font.title),
+        anchor: "ui-cjk-font",
+        title: `${t(($) => $.appearance.ui_text.title)} · ${t(($) => $.appearance.cjk_font.title)}`,
+        description: t(($) => $.appearance.cjk_font.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "font-size",
+        title: t(($) => $.appearance.font_size.title),
+        description: t(($) => $.appearance.font_size.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "content-text",
+        title: t(($) => $.appearance.content_text.title),
+        description: t(($) => $.appearance.content_text.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "content-cjk-font",
+        title: `${t(($) => $.appearance.content_text.title)} · ${t(($) => $.appearance.cjk_font.title)}`,
         description: t(($) => $.appearance.cjk_font.description),
       },
       {
@@ -85,9 +103,14 @@ export function useSettingsSearchIndex(
       },
       {
         tab: "appearance",
-        anchor: "font-size",
-        title: t(($) => $.appearance.font_size.title),
-        description: t(($) => $.appearance.font_size.description),
+        anchor: "content-size",
+        title: `${t(($) => $.appearance.content_text.title)} · ${t(($) => $.appearance.content_size.title)}`,
+        description: t(($) => $.appearance.content_size.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "content-leading",
+        title: t(($) => $.appearance.content_leading.title),
       },
       {
         tab: "appearance",

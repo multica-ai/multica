@@ -1,9 +1,9 @@
 /* Appearance: what themes and type preferences need beyond tokens.css.
  *
- * Theme colours are data (packages/core/appearance/themes.ts) and arrive as a
- * generated stylesheet. This file holds the fixed parts a theme opts into:
- * the primary button fill, and the component treatments named by
- * `data-theme-traits` on <html>. Import after tokens.css. */
+ * Theme tokens are data (packages/core/appearance/themes.ts) and arrive as a
+ * generated stylesheet; a theme's own CSS arrives as a second one. This file
+ * holds the fixed parts both rely on: the CJK families, the content type
+ * stack and the primary button fill. Import after tokens.css. */
 
 /* ── Type families the Appearance settings can pick ─────────────────────────
  * CJK families per locale, mirroring the sans chains in each app's
@@ -30,6 +30,40 @@ html[lang="zh-TW"] {
         "Kaiti SC", var(--font-cjk-serif);
 }
 
+/* ── Content type ───────────────────────────────────────────────────────────
+ * Issue descriptions, comments, chat and documents render under
+ * .rich-text-editor and can have their own faces, size and line height
+ * (Appearance > Content text). Each falls back to the interface setting.
+ * The text tokens are redeclared here because a custom property that uses
+ * var() is resolved where it is declared, so --content-scale has to be read
+ * on this element rather than on :root. */
+
+:root {
+    --font-content: var(--font-content-latin, var(--font-ui, var(--font-ui-inter))),
+        var(--font-content-cjk, var(--font-cjk, var(--font-cjk-sans)));
+}
+
+.rich-text-editor {
+    --content-size: var(--content-scale, var(--font-scale, 1));
+    --text-micro: calc(11px * var(--content-size));
+    --text-micro--line-height: calc(15px * var(--content-size));
+    --text-caption: calc(12px * var(--content-size));
+    --text-caption--line-height: calc(16px * var(--content-size));
+    --text-label: calc(13px * var(--content-size));
+    --text-label--line-height: calc(18px * var(--content-size));
+    --text-body: calc(14px * var(--content-size));
+    --text-body--line-height: calc(20px * var(--content-size));
+    --text-body-lg: calc(15px * var(--content-size));
+    --text-body-lg--line-height: calc(22px * var(--content-size));
+    --text-title-sm: calc(16px * var(--content-size));
+    --text-title-sm--line-height: calc(24px * var(--content-size));
+    --text-title: calc(18px * var(--content-size));
+    --text-title--line-height: calc(28px * var(--content-size));
+    --text-display-sm: calc(24px * var(--content-size));
+    --text-display-sm--line-height: calc(32px * var(--content-size));
+    font-family: var(--font-content);
+}
+
 /* ── Primary button fill ────────────────────────────────────────────────────
  * --primary also paints text (`text-primary`), so a theme whose button colour
  * would fail as text sets --button-primary instead. Only active under a
@@ -43,63 +77,4 @@ html[lang="zh-TW"] {
 
 :root[data-theme] [data-slot="button"][data-variant="default"]:not(:disabled):hover {
     background-color: color-mix(in oklab, var(--button-primary, var(--primary)) 90%, var(--foreground));
-}
-
-/* ── Trait: offset-shadow ───────────────────────────────────────────────────
- * Primary buttons lift onto a hard shadow on hover instead of darkening. */
-
-:root[data-theme-traits~="offset-shadow"] [data-slot="button"][data-variant="default"]:not(:disabled):hover {
-    background-color: var(--button-primary, var(--primary));
-    translate: -2px -2px;
-    box-shadow: 3px 3px 0 var(--surface-border);
-}
-
-@media (prefers-reduced-motion: reduce) {
-    :root[data-theme-traits~="offset-shadow"] [data-slot="button"][data-variant="default"]:not(:disabled):hover {
-        translate: none;
-    }
-}
-
-/* ── Trait: status-blocks ───────────────────────────────────────────────────
- * Issue list group headers become solid colour blocks keyed by status. Custom
- * statuses keep the neutral header. Text and glyphs on the blocks are ink. */
-
-:root[data-theme-traits~="status-blocks"] [data-slot="issue-group-header"] {
-    box-shadow: inset 0 0 0 1px var(--surface-border);
-}
-
-:root[data-theme-traits~="status-blocks"] [data-slot="issue-group-header"]:is([data-status="backlog"], [data-status="todo"], [data-status="in_progress"], [data-status="in_review"], [data-status="done"], [data-status="blocked"]) {
-    --foreground: oklch(0.145 0 0);
-    --muted-foreground: oklch(0.3 0 0);
-    color: var(--foreground);
-}
-
-:root[data-theme-traits~="status-blocks"] [data-slot="issue-group-header"]:is([data-status="backlog"], [data-status="todo"], [data-status="in_progress"], [data-status="in_review"], [data-status="done"], [data-status="blocked"]) svg {
-    color: var(--foreground);
-}
-
-:root[data-theme-traits~="status-blocks"] [data-slot="issue-group-header"]:is([data-status="backlog"], [data-status="todo"]) {
-    background-color: oklch(0.88 0.035 250);
-}
-
-:root[data-theme-traits~="status-blocks"] [data-slot="issue-group-header"][data-status="in_progress"] {
-    background-color: oklch(0.84 0.13 68);
-}
-
-:root[data-theme-traits~="status-blocks"] [data-slot="issue-group-header"][data-status="in_review"] {
-    background-color: oklch(0.86 0.1 165);
-}
-
-:root[data-theme-traits~="status-blocks"] [data-slot="issue-group-header"][data-status="done"] {
-    background-color: oklch(0.8 0.09 255);
-}
-
-:root[data-theme-traits~="status-blocks"] [data-slot="issue-group-header"][data-status="blocked"] {
-    background-color: oklch(0.78 0.13 28);
-}
-
-/* ── Trait: outlined-chips ─────────────────────────────────────────────────*/
-
-:root[data-theme-traits~="outlined-chips"] [data-slot="label-chip"] {
-    box-shadow: inset 0 0 0 1px var(--surface-border);
 }

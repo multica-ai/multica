@@ -215,6 +215,7 @@ export function StatusIcon({
 
   return (
     <svg
+      data-mc="status-icon"
       viewBox="0 0 14 14"
       fill="none"
       style={useCustomColor ? { color: color ?? undefined } : undefined}

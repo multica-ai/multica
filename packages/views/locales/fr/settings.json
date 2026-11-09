@@ -210,9 +210,33 @@
     },
     "theme": {
       "title": "Thème",
-      "description": "Couleurs, bordures, ombres et arrondis dans toute l’application.",
+      "description": "Couleurs, bordures, ombres et coins de toute l’app. Importez un fichier de thème pour en ajouter.",
       "default": "Par défaut",
-      "pop": "Pop"
+      "pop": "Pop",
+      "remove": "Retirer {{name}}",
+      "safe_mode": "Mode sans échec : votre thème est suspendu jusqu’à la fermeture de cette fenêtre.",
+      "safe_mode_exit": "Utiliser mon thème"
+    },
+    "import": {
+      "button": "Importer un thème",
+      "too_large": "Un fichier de thème peut faire au plus {{size}} Ko.",
+      "not_json": "Le fichier n’est pas un JSON valide.",
+      "storage_full": "Pas assez d’espace sur cet appareil pour enregistrer le thème. Retirez un autre thème et réessayez.",
+      "confirm_title": "Installer « {{name}} » ?",
+      "warning": "Un thème peut modifier l’apparence de toutes les pages, y compris les boîtes de dialogue et les avertissements. N’installez que des thèmes de personnes de confiance.",
+      "author": "Auteur",
+      "version": "Version",
+      "replaces": "{{to}} (remplace {{from}})",
+      "includes": "Contient",
+      "has_tokens": "Couleurs",
+      "has_css": "CSS propre",
+      "cancel": "Annuler",
+      "confirm": "Installer et utiliser",
+      "error_title": "Impossible d’installer ce thème",
+      "error_description": "Rien n’a été modifié. Le fichier de thème présente ces problèmes :",
+      "close": "Fermer",
+      "has_options_one": "{{count}} option",
+      "has_options_other": "{{count}} options"
     },
     "accent": {
       "title": "Couleur d’accent",
@@ -225,13 +249,19 @@
       "pink": "Rose",
       "graphite": "Graphite"
     },
-    "text": {
-      "title": "Texte"
+    "theme_options": {
+      "title": "Options du thème",
+      "description": "Proposées par {{name}}.",
+      "reset": "Réinitialiser les options"
+    },
+    "ui_text": {
+      "title": "Texte de l’interface",
+      "description": "Menus, boutons, listes, barre latérale et titres."
+    },
+    "latin_font": {
+      "title": "Police latine"
     },
     "ui_font": {
-      "title": "Police de l’interface",
-      "description": "Lettres et chiffres des titres, du texte et des boutons.",
-      "sample": "Aa",
       "inter": "Par défaut",
       "system": "Système",
       "serif": "Serif",
@@ -239,10 +269,29 @@
     },
     "cjk_font": {
       "title": "Police CJK",
-      "description": "Rendu des caractères chinois, japonais et coréens.",
+      "description": "Caractères chinois ; le japonais et le coréen suivent ce réglage.",
       "sans": "Sans",
       "serif": "Serif",
-      "kai": "Kai"
+      "kai": "Kai",
+      "built_in": "Intégrées",
+      "local": "Sur cet appareil",
+      "load_local": "Afficher les polices de cet appareil…",
+      "loading": "Recherche des polices…",
+      "none": "Aucune police avec des caractères chinois sur cet appareil.",
+      "load_failed": "Impossible de lire les polices de cet appareil.",
+      "sample": "永和九年 漢字"
+    },
+    "follow_ui": "Comme l’interface",
+    "font_size": {
+      "title": "Taille du texte",
+      "description": "Agrandit uniquement le texte. Les espacements et la mise en page restent identiques.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · Par défaut"
+    },
+    "content_text": {
+      "title": "Texte du contenu",
+      "description": "Descriptions de tickets, commentaires, chat et documents.",
+      "sample": "Les descriptions et commentaires se lisent en entier : ils peuvent utiliser une police faite pour la lecture, tandis que listes et boutons restent compacts."
     },
     "code_font": {
       "title": "Police du code",
@@ -251,11 +300,16 @@
       "jetbrains": "Ligatures",
       "system": "Chasse fixe système"
     },
-    "font_size": {
+    "content_size": {
       "title": "Taille du texte",
-      "description": "Agrandit uniquement le texte. Les espacements et la mise en page restent identiques.",
-      "value": "{{size}} px",
-      "default": "{{size}} px · Par défaut"
+      "description": "Seulement le texte du contenu ; l’interface garde sa taille.",
+      "follow": "Comme l’interface ({{size}} px)"
+    },
+    "content_leading": {
+      "title": "Interligne",
+      "compact": "Serré",
+      "default": "Par défaut",
+      "relaxed": "Aéré"
     },
     "layout": {
       "title": "Mise en page et accessibilité"

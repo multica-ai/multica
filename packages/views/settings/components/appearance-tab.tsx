@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, type CSSProperties, type ReactNode } from "react";
+import { useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   Check,
@@ -8,13 +8,29 @@ import {
   Moon,
   RotateCcw,
   Sun,
+  TriangleAlert,
+  Upload,
+  X,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
@@ -27,20 +43,37 @@ import {
   BUILT_IN_THEMES,
   CJK_FONTS,
   CODE_FONTS,
+  CONTENT_LEADINGS,
+  CONTENT_SIZES,
   DEFAULT_FONT_SIZE,
   DENSITIES,
+  FOLLOW_UI,
   FONT_SIZES,
+  THEME_PACKAGE_MAX_BYTES,
   UI_FONTS,
+  activeTheme,
+  cjkFontStack,
   isDefaultAppearance,
+  isLocalFont,
+  localFontFamily,
+  localizedText,
+  parseThemePackage,
   selectAppearance,
+  themeOptionValue,
+  uiFontStack,
   useAppearanceStore,
+  useInstalledThemesStore,
+  useThemeSafeMode,
+  type CjkFontChoice,
   type CodeFont,
+  type ContentSize,
   type FontSize,
   type ThemeManifest,
+  type ThemeOption,
   type ThemeTokens,
   type UiFont,
 } from "@multica/core/appearance";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 import { SegmentedToggle } from "../../common/segmented-toggle";
 import {
   SETTINGS_ANCHOR_ATTR,
@@ -49,29 +82,16 @@ import {
   SettingsSection,
   SettingsTab,
 } from "./settings-layout";
+import { useLocalCjkFonts } from "./local-fonts";
 
 type PreviewMode = "light" | "dark";
 type ModeChoice = PreviewMode | "system";
 
-const CJK_STACK = "var(--font-cjk, var(--font-cjk-sans))";
-
-/** Each interface font drawn in its own face, followed by the chosen CJK face. */
-const UI_FONT_SAMPLE: Record<UiFont, string> = {
-  inter: `var(--font-inter, "Inter Variable"), "Inter", ${CJK_STACK}`,
-  system: `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, ${CJK_STACK}`,
-  serif: `var(--font-ui-serif), ${CJK_STACK}`,
-  mono: `var(--font-ui-mono), ${CJK_STACK}`,
-};
 const UI_FONT_NAME: Record<UiFont, string> = {
   inter: "Inter",
   system: "SF Pro / Segoe UI",
   serif: "Source Serif 4",
   mono: "Geist Mono",
-};
-const CJK_SAMPLE: Record<(typeof CJK_FONTS)[number], string> = {
-  sans: "var(--font-cjk-sans)",
-  serif: "var(--font-cjk-serif)",
-  kai: "var(--font-cjk-kai)",
 };
 const CODE_FONT_SAMPLE: Record<CodeFont, string> = {
   geist: "var(--font-ui-mono), monospace",
@@ -83,11 +103,13 @@ const CODE_FONT_NAME: Record<CodeFont, string> = {
   jetbrains: "JetBrains Mono",
   system: "SF Mono / Consolas",
 };
+/** Select value that asks for the device's fonts instead of choosing one. */
+const LOAD_LOCAL_FONTS = "__load_local_fonts";
 
 /**
- * Appearance: colour (mode, theme, accent), text (faces and size), and
- * layout and accessibility. Every change applies at once, so the page itself
- * is the preview.
+ * Appearance: colour (mode, theme, accent), the active theme's options,
+ * interface text, content text, and layout and accessibility. Every change
+ * applies at once, so the page itself is the preview.
  */
 export function AppearanceTab() {
   const { t } = useT("settings");
@@ -111,7 +133,9 @@ export function AppearanceTab() {
     >
       <div className="space-y-8">
         <ColorSection />
-        <TextSection />
+        <ThemeOptionsSection />
+        <InterfaceTextSection />
+        <ContentTextSection />
         <LayoutSection />
       </div>
     </SettingsTab>
@@ -128,24 +152,39 @@ function SettingsBlock({
   label,
   description,
   anchor,
+  action,
   children,
 }: {
   label: string;
   description?: string;
   anchor: string;
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div {...{ [SETTINGS_ANCHOR_ATTR]: anchor }} className="scroll-mt-6 space-y-3 px-4 py-3.5">
-      <div>
-        <div className="text-body font-medium">{label}</div>
-        {description ? (
-          <div className="mt-0.5 text-caption leading-5 text-muted-foreground">{description}</div>
-        ) : null}
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-body font-medium">{label}</div>
+          {description ? (
+            <div className="mt-0.5 text-caption leading-5 text-muted-foreground">{description}</div>
+          ) : null}
+        </div>
+        {action}
       </div>
       {children}
     </div>
   );
+}
+
+function useThemeLabel() {
+  const { t } = useT("settings");
+  return (theme: ThemeManifest) =>
+    theme.id === "default"
+      ? t(($) => $.appearance.theme.default)
+      : theme.id === "pop"
+        ? t(($) => $.appearance.theme.pop)
+        : theme.name;
 }
 
 function ColorSection() {
@@ -155,12 +194,22 @@ function ColorSection() {
   const theme = useAppearanceStore((s) => s.theme);
   const accent = useAppearanceStore((s) => s.accent);
   const set = useAppearanceStore((s) => s.set);
+  const installed = useInstalledThemesStore((s) => s.themes);
+  const uninstall = useInstalledThemesStore((s) => s.uninstall);
+  const safeMode = useThemeSafeMode();
+  const themeLabelFor = useThemeLabel();
   const modeValue: ModeChoice = mode === "light" || mode === "dark" ? mode : "system";
   const modeLabel = t(($) => $.appearance.mode.title);
   const themeLabel = t(($) => $.appearance.theme.title);
   const accentLabel = t(($) => $.appearance.accent.title);
-  const currentTheme = BUILT_IN_THEMES.find((m) => m.id === theme) ?? BUILT_IN_THEMES[0]!;
-  const themeBrand = currentTheme.tokens[appliedMode].brand ?? PREVIEW_BASE[appliedMode].brand;
+  const current = activeTheme({ theme }, safeMode.active);
+  const themeBrand = current.tokens[appliedMode].brand ?? PREVIEW_BASE[appliedMode].brand;
+  const themes = [...BUILT_IN_THEMES, ...installed];
+
+  const remove = (id: string) => {
+    if (theme === id) set({ theme: "default" });
+    uninstall(id);
+  };
 
   return (
     <SettingsSection title={t(($) => $.appearance.color.title)} anchor="color">
@@ -183,23 +232,48 @@ function ColorSection() {
           label={themeLabel}
           description={t(($) => $.appearance.theme.description)}
           anchor="theme"
+          action={<ImportThemeButton />}
         >
+          {safeMode.active ? (
+            <div
+              role="status"
+              className="flex items-center gap-3 rounded-md bg-muted px-3 py-2 text-caption"
+            >
+              <TriangleAlert aria-hidden="true" className="size-3.5 shrink-0 text-warning" />
+              <span className="min-w-0 flex-1">{t(($) => $.appearance.theme.safe_mode)}</span>
+              <Button variant="outline" size="xs" onClick={safeMode.exit}>
+                {t(($) => $.appearance.theme.safe_mode_exit)}
+              </Button>
+            </div>
+          ) : null}
           <div role="group" aria-label={themeLabel} className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {BUILT_IN_THEMES.map((manifest) => (
-              <OptionCard
-                key={manifest.id}
-                label={
-                  manifest.id === "default"
-                    ? t(($) => $.appearance.theme.default)
-                    : manifest.id === "pop"
-                      ? t(($) => $.appearance.theme.pop)
-                      : manifest.name
-                }
-                selected={theme === manifest.id}
-                onSelect={() => set({ theme: manifest.id })}
-                preview={<ThemePreview theme={manifest} mode={appliedMode} />}
-              />
-            ))}
+            {themes.map((manifest) => {
+              const label = themeLabelFor(manifest);
+              const removable = installed.includes(manifest);
+              return (
+                <div key={manifest.id} className="relative min-w-0">
+                  <OptionCard
+                    label={label}
+                    caption={removable ? manifest.author : undefined}
+                    selected={theme === manifest.id}
+                    onSelect={() => set({ theme: manifest.id })}
+                    preview={<ThemePreview theme={manifest} mode={appliedMode} />}
+                  />
+                  {removable ? (
+                    <Button
+                      variant="secondary"
+                      size="icon-xs"
+                      className="absolute top-1.5 right-1.5 shadow-sm"
+                      aria-label={t(($) => $.appearance.theme.remove, { name: label })}
+                      title={t(($) => $.appearance.theme.remove, { name: label })}
+                      onClick={() => remove(manifest.id)}
+                    >
+                      <X />
+                    </Button>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         </SettingsBlock>
         <SettingsRow
@@ -221,6 +295,230 @@ function ColorSection() {
         </SettingsRow>
       </SettingsCard>
     </SettingsSection>
+  );
+}
+
+/**
+ * Reads a theme file, shows what it is and that it can restyle every page,
+ * and installs it on confirmation. Problems are listed as the checks report
+ * them, which is what someone writing a theme needs.
+ */
+function ImportThemeButton() {
+  const { t } = useT("settings");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState<ThemeManifest | null>(null);
+  const [errors, setErrors] = useState<string[] | null>(null);
+  const installed = useInstalledThemesStore((s) => s.themes);
+  const install = useInstalledThemesStore((s) => s.install);
+  const uninstall = useInstalledThemesStore((s) => s.uninstall);
+  const set = useAppearanceStore((s) => s.set);
+  const previous = pending ? installed.find((theme) => theme.id === pending.id) : undefined;
+
+  const readFile = async (file: File) => {
+    if (file.size > THEME_PACKAGE_MAX_BYTES) {
+      setErrors([t(($) => $.appearance.import.too_large, { size: THEME_PACKAGE_MAX_BYTES / 1024 })]);
+      return;
+    }
+    let json: unknown;
+    try {
+      json = JSON.parse(await file.text());
+    } catch {
+      setErrors([t(($) => $.appearance.import.not_json)]);
+      return;
+    }
+    const result = parseThemePackage(json);
+    if (result.ok) setPending(result.theme);
+    else setErrors(result.errors);
+  };
+
+  const confirm = () => {
+    if (!pending) return;
+    const replaced = previous;
+    try {
+      install(pending);
+      set({ theme: pending.id });
+    } catch {
+      if (replaced) install(replaced);
+      else uninstall(pending.id);
+      setErrors([t(($) => $.appearance.import.storage_full)]);
+    }
+    setPending(null);
+  };
+
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()}>
+        <Upload />
+        {t(($) => $.appearance.import.button)}
+      </Button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) void readFile(file);
+        }}
+      />
+      <AlertDialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t(($) => $.appearance.import.confirm_title, { name: pending?.name ?? "" })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>{t(($) => $.appearance.import.warning)}</AlertDialogDescription>
+          </AlertDialogHeader>
+          {pending ? (
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-md bg-muted px-3 py-2.5 text-caption">
+              {pending.author ? (
+                <>
+                  <dt className="text-muted-foreground">{t(($) => $.appearance.import.author)}</dt>
+                  <dd className="min-w-0 truncate">{pending.author}</dd>
+                </>
+              ) : null}
+              {pending.version ? (
+                <>
+                  <dt className="text-muted-foreground">{t(($) => $.appearance.import.version)}</dt>
+                  <dd>
+                    {previous?.version
+                      ? t(($) => $.appearance.import.replaces, { from: previous.version, to: pending.version })
+                      : pending.version}
+                  </dd>
+                </>
+              ) : null}
+              <dt className="text-muted-foreground">{t(($) => $.appearance.import.includes)}</dt>
+              <dd>
+                {[
+                  t(($) => $.appearance.import.has_tokens),
+                  pending.css ? t(($) => $.appearance.import.has_css) : null,
+                  pending.options ? t(($) => $.appearance.import.has_options, { count: pending.options.length }) : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </dd>
+            </dl>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t(($) => $.appearance.import.cancel)}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirm}>{t(($) => $.appearance.import.confirm)}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={errors !== null} onOpenChange={(open) => !open && setErrors(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t(($) => $.appearance.import.error_title)}</AlertDialogTitle>
+            <AlertDialogDescription>{t(($) => $.appearance.import.error_description)}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <ul className="max-h-60 list-disc space-y-1 overflow-y-auto rounded-md bg-muted py-2.5 pr-3 pl-7 font-mono text-caption">
+            {errors?.map((error, i) => <li key={i}>{error}</li>)}
+          </ul>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t(($) => $.appearance.import.close)}</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
+/** The options the active theme declares, rendered from its manifest. */
+function ThemeOptionsSection() {
+  const { t } = useT("settings");
+  const locale = useLocale();
+  const prefs = useAppearanceStore(useShallow(selectAppearance));
+  const setThemeOption = useAppearanceStore((s) => s.setThemeOption);
+  const set = useAppearanceStore((s) => s.set);
+  useInstalledThemesStore((s) => s.themes);
+  const safeMode = useThemeSafeMode((s) => s.active);
+  const themeLabelFor = useThemeLabel();
+  const theme = activeTheme(prefs, safeMode);
+  const options = theme.options ?? [];
+  if (options.length === 0) return null;
+  const chosen = prefs.themeOptions[theme.id];
+
+  return (
+    <SettingsSection
+      title={t(($) => $.appearance.theme_options.title)}
+      description={t(($) => $.appearance.theme_options.description, { name: themeLabelFor(theme) })}
+      anchor="theme-options"
+      action={
+        <Button
+          variant="ghost"
+          size="xs"
+          disabled={!chosen}
+          onClick={() => {
+            const { [theme.id]: _removed, ...rest } = prefs.themeOptions;
+            set({ themeOptions: rest });
+          }}
+        >
+          {t(($) => $.appearance.theme_options.reset)}
+        </Button>
+      }
+    >
+      <SettingsCard>
+        {options.map((option) => (
+          <ThemeOptionRow
+            key={option.id}
+            option={option}
+            locale={locale}
+            value={themeOptionValue(option, chosen?.[option.id])}
+            onChange={(value) => setThemeOption(theme.id, option.id, value)}
+          />
+        ))}
+      </SettingsCard>
+    </SettingsSection>
+  );
+}
+
+function ThemeOptionRow({
+  option,
+  locale,
+  value,
+  onChange,
+}: {
+  option: ThemeOption;
+  locale: string;
+  value: string | boolean;
+  onChange: (value: string | boolean) => void;
+}) {
+  const label = localizedText(option.label, locale);
+  const description = localizedText(option.description, locale) || undefined;
+  if (option.type === "toggle") {
+    return (
+      <SettingsRow label={label} description={description}>
+        <Switch checked={value === true} onCheckedChange={onChange} aria-label={label} />
+      </SettingsRow>
+    );
+  }
+  const swatches = option.choices.every((choice) => choice.swatch);
+  return (
+    <SettingsRow label={label} description={description}>
+      {swatches ? (
+        <div role="radiogroup" aria-label={label} className="flex items-center gap-2.5">
+          {option.choices.map((choice) => (
+            <AccentSwatch
+              key={choice.value}
+              label={localizedText(choice.label, locale)}
+              color={choice.swatch!}
+              selected={value === choice.value}
+              onSelect={() => onChange(choice.value)}
+            />
+          ))}
+        </div>
+      ) : (
+        <div role="group" aria-label={label}>
+          <SegmentedToggle
+            value={String(value)}
+            onChange={onChange}
+            buttonClassName="px-3 py-1 text-label"
+            options={option.choices.map((choice) => [choice.value, localizedText(choice.label, locale)] as const)}
+          />
+        </div>
+      )}
+    </SettingsRow>
   );
 }
 
@@ -254,100 +552,30 @@ function AccentSwatch({
   );
 }
 
-function TextSection() {
+function InterfaceTextSection() {
   const { t } = useT("settings");
-  const { uiFont, cjkFont, codeFont, fontSize, set } = useAppearanceStore(
-    useShallow((s) => ({
-      uiFont: s.uiFont,
-      cjkFont: s.cjkFont,
-      codeFont: s.codeFont,
-      fontSize: s.fontSize,
-      set: s.set,
-    })),
+  const { uiFont, uiCjkFont, fontSize, set } = useAppearanceStore(
+    useShallow((s) => ({ uiFont: s.uiFont, uiCjkFont: s.uiCjkFont, fontSize: s.fontSize, set: s.set })),
   );
-  const uiLabel = t(($) => $.appearance.ui_font.title);
-  const cjkLabel = t(($) => $.appearance.cjk_font.title);
-  const codeLabel = t(($) => $.appearance.code_font.title);
   const sizeLabel = t(($) => $.appearance.font_size.title);
-  const codeOptions = CODE_FONTS.map((id) => ({ value: id, label: CODE_FONT_NAME[id] }));
 
   return (
-    <SettingsSection title={t(($) => $.appearance.text.title)} anchor="text">
+    <SettingsSection
+      title={t(($) => $.appearance.ui_text.title)}
+      description={t(($) => $.appearance.ui_text.description)}
+      anchor="ui-text"
+    >
       <SettingsCard>
-        <SettingsBlock
-          label={uiLabel}
-          description={t(($) => $.appearance.ui_font.description)}
-          anchor="ui-font"
-        >
-          <div role="group" aria-label={uiLabel} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {UI_FONTS.map((id) => (
-              <FontTile
-                key={id}
-                label={UI_FONT_NAME[id]}
-                hint={t(($) => $.appearance.ui_font[id])}
-                sample={t(($) => $.appearance.ui_font.sample)}
-                fontFamily={UI_FONT_SAMPLE[id]}
-                selected={uiFont === id}
-                onSelect={() => set({ uiFont: id })}
-              />
-            ))}
-          </div>
-        </SettingsBlock>
-        <SettingsRow
-          label={cjkLabel}
-          description={t(($) => $.appearance.cjk_font.description)}
-          anchor="cjk-font"
-        >
-          <div role="group" aria-label={cjkLabel}>
-            <SegmentedToggle
-              value={cjkFont}
-              onChange={(cjk) => set({ cjkFont: cjk })}
-              buttonClassName="px-3 py-1 text-body"
-              options={CJK_FONTS.map(
-                (id) =>
-                  [
-                    id,
-                    <span key={id} style={{ fontFamily: CJK_SAMPLE[id] }}>
-                      {t(($) => $.appearance.cjk_font[id])}
-                    </span>,
-                  ] as const,
-              )}
-            />
-          </div>
+        <SettingsRow label={t(($) => $.appearance.latin_font.title)} anchor="ui-latin-font" size="select">
+          <LatinFontSelect value={uiFont} onChange={(next) => set({ uiFont: next as UiFont })} />
         </SettingsRow>
         <SettingsRow
-          label={codeLabel}
-          description={t(($) => $.appearance.code_font.description)}
-          anchor="code-font"
+          label={t(($) => $.appearance.cjk_font.title)}
+          description={t(($) => $.appearance.cjk_font.description)}
+          anchor="ui-cjk-font"
           size="select"
         >
-          <Select
-            items={codeOptions}
-            value={codeFont}
-            onValueChange={(next) => {
-              if (next) set({ codeFont: next as CodeFont });
-            }}
-          >
-            <SelectTrigger size="sm" className="w-full" aria-label={codeLabel}>
-              <SelectValue>
-                <span style={{ fontFamily: CODE_FONT_SAMPLE[codeFont] }}>
-                  {CODE_FONT_NAME[codeFont]}
-                </span>
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent align="end">
-              {CODE_FONTS.map((id) => (
-                <SelectItem key={id} value={id}>
-                  <span className="flex min-w-0 flex-1 items-baseline justify-between gap-3">
-                    <span style={{ fontFamily: CODE_FONT_SAMPLE[id] }}>{CODE_FONT_NAME[id]}</span>
-                    <span className="text-caption text-muted-foreground">
-                      {t(($) => $.appearance.code_font[id])}
-                    </span>
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <CjkFontSelect value={uiCjkFont} onChange={(next) => set({ uiCjkFont: next as CjkFontChoice })} />
         </SettingsRow>
         <SettingsRow
           label={sizeLabel}
@@ -387,50 +615,276 @@ function TextSection() {
   );
 }
 
-function FontTile({
-  label,
-  hint,
-  sample,
-  fontFamily,
-  selected,
-  onSelect,
-}: {
-  label: string;
-  hint: string;
-  sample: string;
-  fontFamily: string;
-  selected: boolean;
-  onSelect: () => void;
-}) {
+function ContentTextSection() {
+  const { t } = useT("settings");
+  const { contentFont, contentCjkFont, contentSize, contentLeading, codeFont, fontSize, set } =
+    useAppearanceStore(
+      useShallow((s) => ({
+        contentFont: s.contentFont,
+        contentCjkFont: s.contentCjkFont,
+        contentSize: s.contentSize,
+        contentLeading: s.contentLeading,
+        codeFont: s.codeFont,
+        fontSize: s.fontSize,
+        set: s.set,
+      })),
+    );
+  const codeLabel = t(($) => $.appearance.code_font.title);
+  const sizeLabel = t(($) => $.appearance.content_size.title);
+  const leadingLabel = t(($) => $.appearance.content_leading.title);
+  const codeOptions = CODE_FONTS.map((id) => ({ value: id, label: CODE_FONT_NAME[id] }));
+  const sizeName = (size: ContentSize) =>
+    size === FOLLOW_UI
+      ? t(($) => $.appearance.content_size.follow, { size: fontSize })
+      : t(($) => $.appearance.font_size.value, { size });
+  const sizeOptions = ([FOLLOW_UI, ...CONTENT_SIZES] as ContentSize[]).map((size) => ({
+    value: String(size),
+    label: sizeName(size),
+  }));
+
   return (
-    <button
-      type="button"
-      aria-pressed={selected}
-      aria-label={`${label} · ${hint}`}
-      onClick={() => {
-        if (!selected) onSelect();
-      }}
-      className={cn(
-        "relative flex min-w-0 flex-col items-start gap-1.5 rounded-lg bg-surface px-3 py-2.5 text-left outline-none ring-1 ring-surface-border transition-shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-        selected ? "ring-2 ring-foreground" : "hover:ring-foreground/30",
-      )}
+    <SettingsSection
+      title={t(($) => $.appearance.content_text.title)}
+      description={t(($) => $.appearance.content_text.description)}
+      anchor="content-text"
     >
-      <span aria-hidden="true" className="truncate text-display-sm leading-8" style={{ fontFamily }}>
-        {sample}
-      </span>
-      <span className="min-w-0">
-        <span className="block truncate text-caption font-medium">{label}</span>
-        <span className="block truncate text-micro text-muted-foreground">{hint}</span>
-      </span>
-      {selected ? (
-        <span
-          aria-hidden="true"
-          className="absolute top-2 right-2 flex size-4 items-center justify-center rounded-full bg-foreground text-background"
+      <SettingsCard>
+        <div className="rich-text-editor bg-page-canvas px-4 py-3.5 text-body" data-appearance-content-sample="">
+          <p>{t(($) => $.appearance.content_text.sample)}</p>
+        </div>
+        <SettingsRow label={t(($) => $.appearance.latin_font.title)} anchor="content-latin-font" size="select">
+          <LatinFontSelect value={contentFont} follow onChange={(next) => set({ contentFont: next as UiFont })} />
+        </SettingsRow>
+        <SettingsRow
+          label={t(($) => $.appearance.cjk_font.title)}
+          description={t(($) => $.appearance.cjk_font.description)}
+          anchor="content-cjk-font"
+          size="select"
         >
-          <Check className="size-2.5" />
+          <CjkFontSelect
+            value={contentCjkFont}
+            follow
+            onChange={(next) => set({ contentCjkFont: next as CjkFontChoice })}
+          />
+        </SettingsRow>
+        <SettingsRow
+          label={codeLabel}
+          description={t(($) => $.appearance.code_font.description)}
+          anchor="code-font"
+          size="select"
+        >
+          <Select
+            items={codeOptions}
+            value={codeFont}
+            onValueChange={(next) => {
+              if (next) set({ codeFont: next as CodeFont });
+            }}
+          >
+            <SelectTrigger size="sm" className="w-full" aria-label={codeLabel}>
+              <SelectValue>
+                <span style={{ fontFamily: CODE_FONT_SAMPLE[codeFont] }}>{CODE_FONT_NAME[codeFont]}</span>
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent align="end">
+              {CODE_FONTS.map((id) => (
+                <SelectItem key={id} value={id}>
+                  <span className="flex min-w-0 flex-1 items-baseline justify-between gap-3">
+                    <span style={{ fontFamily: CODE_FONT_SAMPLE[id] }}>{CODE_FONT_NAME[id]}</span>
+                    <span className="text-caption text-muted-foreground">
+                      {t(($) => $.appearance.code_font[id])}
+                    </span>
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+        <SettingsRow
+          label={sizeLabel}
+          description={t(($) => $.appearance.content_size.description)}
+          anchor="content-size"
+          size="select"
+        >
+          <Select
+            items={sizeOptions}
+            value={String(contentSize)}
+            onValueChange={(next) => {
+              if (!next) return;
+              const size = next === FOLLOW_UI ? FOLLOW_UI : Number(next);
+              if (size === FOLLOW_UI || (CONTENT_SIZES as readonly number[]).includes(size)) {
+                set({ contentSize: size as ContentSize });
+              }
+            }}
+          >
+            <SelectTrigger size="sm" className="w-full" aria-label={sizeLabel}>
+              <SelectValue>{sizeName(contentSize)}</SelectValue>
+            </SelectTrigger>
+            <SelectContent align="end">
+              {sizeOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+        <SettingsRow label={leadingLabel} anchor="content-leading">
+          <div role="group" aria-label={leadingLabel}>
+            <SegmentedToggle
+              value={contentLeading}
+              onChange={(next) => set({ contentLeading: next })}
+              buttonClassName="px-3 py-1 text-label"
+              options={CONTENT_LEADINGS.map((id) => [id, t(($) => $.appearance.content_leading[id])] as const)}
+            />
+          </div>
+        </SettingsRow>
+      </SettingsCard>
+    </SettingsSection>
+  );
+}
+
+/** Latin faces, each drawn in itself; `follow` adds "same as interface" for content. */
+function LatinFontSelect({
+  value,
+  follow = false,
+  onChange,
+}: {
+  value: string;
+  follow?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useT("settings");
+  const label = t(($) => $.appearance.latin_font.title);
+  const followLabel = t(($) => $.appearance.follow_ui);
+  const name = (id: string) => (id === FOLLOW_UI ? followLabel : UI_FONT_NAME[id as UiFont]);
+  const family = (id: string) => (id === FOLLOW_UI ? undefined : uiFontStack(id as UiFont));
+  const ids: string[] = [...(follow ? [FOLLOW_UI] : []), ...UI_FONTS];
+  return (
+    <Select
+      items={ids.map((id) => ({ value: id, label: name(id) }))}
+      value={value}
+      onValueChange={(next) => {
+        if (next) onChange(next);
+      }}
+    >
+      <SelectTrigger size="sm" className="w-full" aria-label={label}>
+        <SelectValue>
+          <span style={{ fontFamily: family(value) }}>{name(value)}</span>
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent align="end">
+        {ids.map((id) => (
+          <SelectItem key={id} value={id}>
+            <span className="flex min-w-0 flex-1 items-baseline justify-between gap-3">
+              <span style={{ fontFamily: family(id) }}>{name(id)}</span>
+              {id === FOLLOW_UI ? null : (
+                <span className="text-caption text-muted-foreground">
+                  {t(($) => $.appearance.ui_font[id as UiFont])}
+                </span>
+              )}
+            </span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/**
+ * Built-in CJK faces, then families installed on this device (listed on
+ * request, since reading them can ask for permission). Every option shows a
+ * sample in its own face.
+ */
+function CjkFontSelect({
+  value,
+  follow = false,
+  onChange,
+}: {
+  value: string;
+  follow?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useT("settings");
+  const local = useLocalCjkFonts();
+  const label = t(($) => $.appearance.cjk_font.title);
+  const sample = t(($) => $.appearance.cjk_font.sample);
+  const followLabel = t(($) => $.appearance.follow_ui);
+  const localValues = local.families.map((family) => `local:${family}`);
+  if (isLocalFont(value) && !localValues.includes(value)) localValues.unshift(value);
+
+  const name = (id: string) =>
+    id === FOLLOW_UI
+      ? followLabel
+      : isLocalFont(id)
+        ? localFontFamily(id)
+        : t(($) => $.appearance.cjk_font[id as (typeof CJK_FONTS)[number]]);
+  const family = (id: string) => (id === FOLLOW_UI ? undefined : cjkFontStack(id as CjkFontChoice));
+  const builtIn: string[] = [...(follow ? [FOLLOW_UI] : []), ...CJK_FONTS];
+  const items = [...builtIn, ...localValues].map((id) => ({ value: id, label: name(id) }));
+
+  const row = (id: string) => (
+    <SelectItem key={id} value={id}>
+      <span className="flex min-w-0 flex-1 items-baseline justify-between gap-4">
+        <span className="truncate" style={{ fontFamily: family(id) }}>
+          {name(id)}
         </span>
-      ) : null}
-    </button>
+        {id === FOLLOW_UI ? null : (
+          <span className="shrink-0 text-caption text-muted-foreground" style={{ fontFamily: family(id) }}>
+            {sample}
+          </span>
+        )}
+      </span>
+    </SelectItem>
+  );
+
+  const localStatus =
+    local.status === "loading"
+      ? t(($) => $.appearance.cjk_font.loading)
+      : local.status === "ready" && local.families.length === 0
+        ? t(($) => $.appearance.cjk_font.none)
+        : local.status === "error"
+          ? t(($) => $.appearance.cjk_font.load_failed)
+          : null;
+
+  return (
+    <Select
+      items={items}
+      value={value}
+      onValueChange={(next) => {
+        if (!next) return;
+        if (next === LOAD_LOCAL_FONTS) void local.load();
+        else onChange(next);
+      }}
+    >
+      <SelectTrigger size="sm" className="w-full" aria-label={label}>
+        <SelectValue>
+          <span style={{ fontFamily: family(value) }}>{name(value)}</span>
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent align="end" className="min-w-80">
+        <SelectGroup>
+          <SelectLabel>{t(($) => $.appearance.cjk_font.built_in)}</SelectLabel>
+          {builtIn.map(row)}
+        </SelectGroup>
+        {local.status !== "unavailable" || localValues.length > 0 ? (
+          <>
+            <SelectSeparator />
+            <SelectGroup>
+              <SelectLabel>{t(($) => $.appearance.cjk_font.local)}</SelectLabel>
+              {localValues.map(row)}
+              {local.status === "idle" || local.status === "error" ? (
+                <SelectItem value={LOAD_LOCAL_FONTS}>
+                  <span className="text-muted-foreground">{t(($) => $.appearance.cjk_font.load_local)}</span>
+                </SelectItem>
+              ) : null}
+              {localStatus ? (
+                <div className="px-2 py-1.5 text-caption text-muted-foreground">{localStatus}</div>
+              ) : null}
+            </SelectGroup>
+          </>
+        ) : null}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -491,11 +945,13 @@ function LayoutSection() {
 
 function OptionCard({
   label,
+  caption,
   selected,
   onSelect,
   preview,
 }: {
   label: string;
+  caption?: string;
   selected: boolean;
   onSelect: () => void;
   preview: ReactNode;
@@ -509,7 +965,7 @@ function OptionCard({
       onClick={() => {
         if (!selected) onSelect();
       }}
-      className="group/option flex min-w-0 flex-col gap-2 rounded-xl text-left outline-none"
+      className="group/option flex w-full min-w-0 flex-col gap-2 rounded-xl text-left outline-none"
     >
       <span
         className={cn(
@@ -532,6 +988,7 @@ function OptionCard({
         <span id={labelId} className={cn("block truncate text-label", selected && "font-medium")}>
           {label}
         </span>
+        {caption ? <span className="truncate text-caption text-muted-foreground">{caption}</span> : null}
       </span>
     </button>
   );
@@ -568,16 +1025,11 @@ const PREVIEW_BASE: Record<PreviewMode, Required<Pick<ThemeTokens,
   },
 };
 
-/** Status block colours from appearance.css, for themes with that trait. */
-const STATUS_BLOCKS = { a: "oklch(0.84 0.13 68)", b: "oklch(0.88 0.035 250)" };
-
 function previewVariables(theme: ThemeManifest, mode: PreviewMode): CSSProperties {
   const tokens = { ...PREVIEW_BASE[mode], ...theme.tokens[mode] };
   const frame = theme.frame?.[mode];
   const ink = tokens.foreground;
   const canvas = tokens["page-canvas"];
-  const blocks = theme.traits?.includes("status-blocks");
-  const shadow = theme.traits?.includes("offset-shadow");
   const radiusRem = Number.parseFloat(tokens.radius) || 0.5;
   return {
     "--pv-shell": tokens["app-shell"],
@@ -587,15 +1039,11 @@ function previewVariables(theme: ThemeManifest, mode: PreviewMode): CSSPropertie
     "--pv-ink": ink,
     "--pv-faint": `color-mix(in oklab, ${ink} 16%, ${canvas})`,
     "--pv-selected": tokens["surface-selected"],
-    "--pv-band-a": blocks ? STATUS_BLOCKS.a : tokens.muted,
-    "--pv-band-b": blocks ? STATUS_BLOCKS.b : tokens.muted,
-    "--pv-band-line": blocks ? tokens["surface-border"] : "transparent",
-    "--pv-band-ink": blocks ? "oklch(0.145 0 0)" : ink,
-    "--pv-dot-a": blocks ? "oklch(0.145 0 0)" : "oklch(0.75 0.15 75)",
-    "--pv-dot-b": blocks ? "oklch(0.145 0 0)" : `color-mix(in oklab, ${ink} 40%, ${canvas})`,
+    "--pv-band": tokens.muted,
+    "--pv-dot-a": "oklch(0.75 0.15 75)",
+    "--pv-dot-b": `color-mix(in oklab, ${ink} 40%, ${canvas})`,
     "--pv-primary": tokens["button-primary"] ?? tokens.primary,
     "--pv-primary-line": tokens["button-primary-border"] ?? "transparent",
-    "--pv-primary-shadow": shadow ? `0.8cqw 0.8cqw 0 ${tokens["surface-border"]}` : "none",
     "--pv-brand": tokens.brand,
     "--pv-radius": `${(radiusRem / 0.5) * 2}cqw`,
   } as CSSProperties;
@@ -628,29 +1076,22 @@ function ThemePreview({ theme, mode }: { theme: ThemeManifest; mode: PreviewMode
         <span className="flex min-w-0 flex-1 flex-col gap-[2.2cqw] p-[3cqw]">
           <span className="flex items-center justify-between">
             <span className="h-[2cqw] w-[28%] rounded-full bg-(--pv-ink)" />
-            <span className="h-[3.6cqw] w-[11cqw] rounded-[0.9cqw] border border-(--pv-primary-line) bg-(--pv-primary) shadow-(--pv-primary-shadow)" />
+            <span className="h-[3.6cqw] w-[11cqw] rounded-[0.9cqw] border border-(--pv-primary-line) bg-(--pv-primary)" />
           </span>
-          <PreviewGroup band="a" rows={["w-3/4", "w-1/2"]} />
-          <PreviewGroup band="b" rows={["w-2/3", "w-3/5"]} />
+          <PreviewGroup dot="a" rows={["w-3/4", "w-1/2"]} />
+          <PreviewGroup dot="b" rows={["w-2/3", "w-3/5"]} />
         </span>
       </span>
     </span>
   );
 }
 
-function PreviewGroup({ band, rows }: { band: "a" | "b"; rows: string[] }) {
+function PreviewGroup({ dot, rows }: { dot: "a" | "b"; rows: string[] }) {
   return (
     <>
-      <span
-        className={cn(
-          "flex h-[4.2cqw] items-center gap-[1.2cqw] rounded-[0.9cqw] px-[1.4cqw] ring-1 ring-inset ring-(--pv-band-line)",
-          band === "a" ? "bg-(--pv-band-a)" : "bg-(--pv-band-b)",
-        )}
-      >
-        <span
-          className={cn("size-[2cqw] rounded-full", band === "a" ? "bg-(--pv-dot-a)" : "bg-(--pv-dot-b)")}
-        />
-        <span className="h-[1.6cqw] w-[22%] rounded-full bg-(--pv-band-ink)" />
+      <span className="flex h-[4.2cqw] items-center gap-[1.2cqw] rounded-[0.9cqw] bg-(--pv-band) px-[1.4cqw]">
+        <span className={cn("size-[2cqw] rounded-full", dot === "a" ? "bg-(--pv-dot-a)" : "bg-(--pv-dot-b)")} />
+        <span className="h-[1.6cqw] w-[22%] rounded-full bg-(--pv-ink)" />
       </span>
       {rows.map((width, i) => (
         <span key={width} className="flex items-center gap-[1.4cqw] px-[1.4cqw]">

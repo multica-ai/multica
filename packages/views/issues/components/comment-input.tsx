@@ -221,6 +221,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
 
   return (
     <div
+      data-mc="comment-composer"
       {...dropZoneProps}
       className="relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border"
     >

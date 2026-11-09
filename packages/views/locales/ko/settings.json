@@ -208,9 +208,32 @@
     },
     "theme": {
       "title": "테마",
-      "description": "앱 전체의 색상, 테두리, 그림자, 모서리.",
+      "description": "앱 전체의 색상, 테두리, 그림자, 모서리. 테마 파일을 가져와 더 추가할 수 있어요.",
       "default": "기본",
-      "pop": "팝"
+      "pop": "팝",
+      "remove": "{{name}} 제거",
+      "safe_mode": "안전 모드: 이 창을 닫을 때까지 테마가 꺼져 있어요.",
+      "safe_mode_exit": "내 테마 사용"
+    },
+    "import": {
+      "button": "테마 가져오기",
+      "too_large": "테마 파일은 최대 {{size}}KB예요.",
+      "not_json": "유효한 JSON 파일이 아니에요.",
+      "storage_full": "이 기기에 테마를 저장할 공간이 부족해요. 다른 테마를 제거한 뒤 다시 시도하세요.",
+      "confirm_title": "‘{{name}}’을(를) 설치할까요?",
+      "warning": "테마는 대화상자와 경고를 포함한 모든 화면의 모양을 바꿀 수 있어요. 신뢰하는 사람이 만든 테마만 설치하세요.",
+      "author": "만든 사람",
+      "version": "버전",
+      "replaces": "{{to}} ({{from}} 대체)",
+      "includes": "포함",
+      "has_tokens": "색상",
+      "has_css": "자체 CSS",
+      "cancel": "취소",
+      "confirm": "설치하고 사용",
+      "error_title": "이 테마를 설치할 수 없어요",
+      "error_description": "아무것도 바뀌지 않았어요. 테마 파일에 다음 문제가 있어요:",
+      "close": "닫기",
+      "has_options_other": "옵션 {{count}}개"
     },
     "accent": {
       "title": "강조 색상",
@@ -223,13 +246,19 @@
       "pink": "분홍",
       "graphite": "그래파이트"
     },
-    "text": {
-      "title": "텍스트"
+    "theme_options": {
+      "title": "테마 옵션",
+      "description": "{{name}}에서 제공해요.",
+      "reset": "옵션 초기화"
+    },
+    "ui_text": {
+      "title": "인터페이스 글자",
+      "description": "메뉴, 버튼, 목록, 사이드바, 제목."
+    },
+    "latin_font": {
+      "title": "라틴 글꼴"
     },
     "ui_font": {
-      "title": "인터페이스 글꼴",
-      "description": "제목, 본문, 버튼의 영문과 숫자.",
-      "sample": "Aa 한글",
       "inter": "기본",
       "system": "시스템",
       "serif": "세리프",
@@ -237,10 +266,29 @@
     },
     "cjk_font": {
       "title": "CJK 글꼴",
-      "description": "한중일 문자를 표시하는 글꼴.",
+      "description": "한자 글꼴. 일본어와 한국어도 이 설정을 따라요.",
       "sans": "고딕",
       "serif": "명조",
-      "kai": "해서"
+      "kai": "해서",
+      "built_in": "기본",
+      "local": "이 기기",
+      "load_local": "이 기기의 글꼴 보기…",
+      "loading": "글꼴을 찾는 중…",
+      "none": "이 기기에 한자가 있는 글꼴이 없어요.",
+      "load_failed": "이 기기의 글꼴을 읽을 수 없어요.",
+      "sample": "永和九年 한글"
+    },
+    "follow_ui": "인터페이스와 같게",
+    "font_size": {
+      "title": "글꼴 크기",
+      "description": "텍스트만 확대합니다. 간격과 레이아웃은 그대로입니다.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · 기본"
+    },
+    "content_text": {
+      "title": "본문 글자",
+      "description": "이슈 설명, 댓글, 채팅, 문서의 본문.",
+      "sample": "설명과 댓글은 길게 읽으니 읽기 좋은 글꼴로 바꿀 수 있어요. 목록과 버튼은 그대로 촘촘하게 유지돼요."
     },
     "code_font": {
       "title": "코드 글꼴",
@@ -249,11 +297,16 @@
       "jetbrains": "합자",
       "system": "시스템 고정폭"
     },
-    "font_size": {
-      "title": "글꼴 크기",
-      "description": "텍스트만 확대합니다. 간격과 레이아웃은 그대로입니다.",
-      "value": "{{size}} px",
-      "default": "{{size}} px · 기본"
+    "content_size": {
+      "title": "글자 크기",
+      "description": "본문만 바뀌고 인터페이스는 그대로예요.",
+      "follow": "인터페이스와 같게 ({{size}}px)"
+    },
+    "content_leading": {
+      "title": "줄 간격",
+      "compact": "좁게",
+      "default": "기본",
+      "relaxed": "넓게"
     },
     "layout": {
       "title": "레이아웃 및 접근성"
