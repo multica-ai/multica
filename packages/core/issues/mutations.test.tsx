@@ -1549,6 +1549,19 @@ describe("useUpdateIssue — star prompt moment", () => {
     });
   });
 
+  it("reports a custom status in the done category", async () => {
+    await update(
+      { id: "issue-1", status: "shipped" },
+      makeIssue(1, {
+        status: "shipped",
+        status_category: "done",
+        assignee_type: "agent",
+        assignee_id: "agent-1",
+      }),
+    );
+    expect(useStarPromptStore.getState().moment).toMatchObject({ agentId: "agent-1" });
+  });
+
   it("ignores done issues owned by members and edits that leave status alone", async () => {
     await update(
       { id: "issue-1", status: "done" },

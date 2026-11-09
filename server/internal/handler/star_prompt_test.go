@@ -3,9 +3,13 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 func callStarPrompt(t *testing.T, userID, action string) *httptest.ResponseRecorder {
@@ -170,5 +174,65 @@ func TestGetMeAlwaysSerializesStarPromptCount(t *testing.T) {
 	}
 	if got, ok := raw["star_prompt_shown_count"]; !ok || string(got) != "0" {
 		t.Fatalf("star_prompt_shown_count must be present and 0 for a fresh user, got %s (present=%v)", got, ok)
+	}
+}
+
+// The star prompt counts an agent's finished issues by lifecycle category, so
+// a workspace that finishes work in a custom done status still qualifies.
+func TestListIssuesCountsAgentDoneCategoryIncludingCustomStatuses(t *testing.T) {
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	customKey := fmt.Sprintf("shipped_%d", suffix)
+	agentID := uuid.NewString()
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO issue_status (workspace_id, key, name, description, category, color, position)
+		VALUES ($1, $2, 'Shipped', '', 'done', '#00aa00', 1)
+	`, testWorkspaceID, customKey); err != nil {
+		t.Fatalf("create custom status: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE assignee_id = $1`, agentID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue_status WHERE workspace_id = $1 AND key = $2`, testWorkspaceID, customKey)
+	})
+
+	var firstNumber int
+	if err := testPool.QueryRow(ctx, `
+		UPDATE workspace
+		SET issue_counter = GREATEST(
+			issue_counter,
+			(SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)
+		) + 4
+		WHERE id = $1
+		RETURNING issue_counter - 3
+	`, testWorkspaceID).Scan(&firstNumber); err != nil {
+		t.Fatalf("reserve issue numbers: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, position, number)
+		VALUES
+			($1, 'built-in done', 'done',      'none', 'member', $3, 'agent', $4, 1, $5),
+			($1, 'custom done',   $2,          'none', 'member', $3, 'agent', $4, 2, $5 + 1),
+			($1, 'cancelled',     'cancelled', 'none', 'member', $3, 'agent', $4, 3, $5 + 2),
+			($1, 'in review',     'in_review', 'none', 'member', $3, 'agent', $4, 4, $5 + 3)
+	`, testWorkspaceID, customKey, testUserID, agentID, firstNumber); err != nil {
+		t.Fatalf("seed issues: %v", err)
+	}
+
+	path := fmt.Sprintf("/api/issues?workspace_id=%s&status_categories=done&assignee_filters=agent:%s&limit=1",
+		testWorkspaceID, agentID)
+	w := httptest.NewRecorder()
+	testHandler.ListIssues(w, newRequest("GET", path, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Total int64 `json:"total"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if resp.Total != 2 {
+		t.Fatalf("done-category total = %d, want 2 (built-in done + custom done)", resp.Total)
 	}
 }

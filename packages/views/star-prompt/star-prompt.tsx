@@ -13,6 +13,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { createLogger } from "@multica/core/logger";
 import { needsSourceBackfill } from "@multica/core/onboarding";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useSessionPromptStore } from "@multica/core/session-prompt";
 import {
   agentDoneIssueCountOptions,
   claimStarPromptShowing,
@@ -92,7 +93,7 @@ export function StarPrompt() {
 
     const consider = async (m: StarPromptMoment) => {
       if (m.wsId !== wsId || disabled) return;
-      if (useStarPromptStore.getState().shownThisSession) return;
+      if (useSessionPromptStore.getState().prompted) return;
       const user = useAuthStore.getState().user;
       if (!starPromptDue(user, Date.now())) return;
       // The attribution survey owns this session's one interruption.
@@ -106,7 +107,7 @@ export function StarPrompt() {
       const agent = agents.find((a) => a.id === m.agentId);
       if (!agent || doneCount < STAR_PROMPT_MIN_AGENT_DONE_ISSUES) return;
       if (!mountedRef.current || !(await claimStarPromptShowing())) return;
-      useStarPromptStore.getState().markShownThisSession();
+      useSessionPromptStore.getState().markPrompted();
       if (mountedRef.current) setShowing({ agentName: agent.name, doneCount });
     };
 

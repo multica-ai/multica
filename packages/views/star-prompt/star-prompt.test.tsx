@@ -1,16 +1,21 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setApiInstance, type ApiClient } from "@multica/core/api";
 import { configStore } from "@multica/core/config";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { useSessionPromptStore } from "@multica/core/session-prompt";
 import {
   claimStarPromptShowing,
   markStarPromptStarred,
   useStarPromptStore,
 } from "@multica/core/star-prompt";
 import type { User } from "@multica/core/types";
+import enCommon from "../locales/en/common.json";
 import enLayout from "../locales/en/layout.json";
+import enOnboarding from "../locales/en/onboarding.json";
+import { SourceBackfillModal } from "../onboarding/source-backfill-modal";
 import { STAR_PROMPT_DELAY_MS, StarPrompt } from "./star-prompt";
 
 const stores = vi.hoisted(() => {
@@ -28,7 +33,25 @@ const stores = vi.hoisted(() => {
 vi.mock("@multica/core/auth", () => ({ useAuthStore: stores.auth }));
 vi.mock("@multica/core/chat", () => ({ useChatStore: stores.chat }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
-vi.mock("@multica/core/paths", () => ({ useWorkspacePaths: () => ({ chat: () => "/acme/chat" }) }));
+vi.mock("@multica/core/paths", async () => {
+  const actual = await vi.importActual<typeof import("@multica/core/paths")>("@multica/core/paths");
+  return {
+    ...actual,
+    useWorkspacePaths: () => ({ chat: () => "/acme/chat" }),
+    useCurrentWorkspace: () => ({ id: "ws-1", slug: "acme" }),
+  };
+});
+vi.mock("@multica/core/onboarding", async () => {
+  const actual = await vi.importActual<typeof import("@multica/core/onboarding")>("@multica/core/onboarding");
+  return {
+    ...actual,
+    // The real call refreshes /api/me; the answer landing on the user is what matters here.
+    saveQuestionnaire: vi.fn(async (questionnaire: Record<string, unknown>) => {
+      const user = stores.auth.getState().user;
+      stores.auth.setState({ user: { ...user, onboarding_questionnaire: questionnaire } });
+    }),
+  };
+});
 vi.mock("../navigation", () => ({ useNavigation: () => ({ pathname: "/acme/issues" }) }));
 vi.mock("@multica/core/star-prompt", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/star-prompt")>(
@@ -58,11 +81,14 @@ function eligibleUser(): Partial<User> {
   };
 }
 
-function renderPrompt() {
+function renderPrompt(children: ReactNode = <StarPrompt />) {
   return render(
     <QueryClientProvider client={qc}>
-      <I18nProvider locale="en" resources={{ en: { layout: enLayout } }}>
-        <StarPrompt />
+      <I18nProvider
+        locale="en"
+        resources={{ en: { common: enCommon, layout: enLayout, onboarding: enOnboarding } }}
+      >
+        {children}
       </I18nProvider>
     </QueryClientProvider>,
   );
@@ -89,10 +115,12 @@ beforeEach(() => {
   vi.mocked(claimStarPromptShowing).mockResolvedValue(true);
   stores.auth.setState({ user: eligibleUser() });
   stores.chat.setState({ isOpen: false });
-  useStarPromptStore.setState({ moment: null, shownThisSession: false });
+  useStarPromptStore.setState({ moment: null });
+  useSessionPromptStore.setState({ prompted: false });
 });
 
 afterEach(() => {
+  window.localStorage.removeItem("multica.source_backfill.dismiss.u1");
   qc.clear();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -111,7 +139,10 @@ describe("StarPrompt", () => {
       "https://github.com/multica-ai/multica",
     );
     expect(listIssues).toHaveBeenCalledWith(
-      expect.objectContaining({ assignee_filters: [{ type: "agent", id: "agent-1" }] }),
+      expect.objectContaining({
+        status_categories: ["done"],
+        assignee_filters: [{ type: "agent", id: "agent-1" }],
+      }),
     );
   });
 
@@ -185,5 +216,37 @@ describe("StarPrompt", () => {
     await agentFinishesIssue();
 
     expect(listIssues).not.toHaveBeenCalled();
+  });
+});
+
+describe("StarPrompt after the source survey", () => {
+  it.each([
+    [
+      "answering",
+      async () => {
+        fireEvent.click(await screen.findByText("Friends or colleagues"));
+        fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+      },
+    ],
+    ["skipping", async () => fireEvent.click(await screen.findByRole("button", { name: "Skip" }))],
+    ["closing", async () => fireEvent.click(await screen.findByRole("button", { name: "Close" }))],
+  ])("does not ask again in the session after %s the survey", async (_name, finishSurvey) => {
+    stores.auth.setState({ user: { ...eligibleUser(), onboarding_questionnaire: { source: [] } } });
+    renderPrompt(
+      <>
+        <SourceBackfillModal />
+        <StarPrompt />
+      </>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(screen.getByText("How did you hear about Multica?")).toBeInTheDocument();
+
+    await finishSurvey();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await agentFinishesIssue();
+
+    expect(claimStarPromptShowing).not.toHaveBeenCalled();
   });
 });

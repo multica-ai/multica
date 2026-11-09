@@ -165,6 +165,7 @@
     "./modals": "./modals/index.ts",
     "./onboarding": "./onboarding/index.ts",
     "./whats-new": "./whats-new/index.ts",
+    "./session-prompt": "./session-prompt/index.ts",
     "./star-prompt": "./star-prompt/index.ts",
     "./paths": "./paths/index.ts",
     "./hooks": "./hooks.tsx",

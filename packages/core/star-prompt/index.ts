@@ -55,29 +55,24 @@ export interface StarPromptMoment {
 
 interface StarPromptStore {
   moment: StarPromptMoment | null;
-  /** At most one showing per app session, whatever the server allows. */
-  shownThisSession: boolean;
   reportAgentIssueDone: (moment: StarPromptMoment) => void;
   clearMoment: () => void;
-  markShownThisSession: () => void;
 }
 
 export const useStarPromptStore = create<StarPromptStore>((set) => ({
   moment: null,
-  shownThisSession: false,
   reportAgentIssueDone: (moment) => set({ moment }),
   clearMoment: () => set({ moment: null }),
-  markShownThisSession: () => set({ shownThisSession: true }),
 }));
 
-/** Done issues assigned to one agent in the workspace. */
+/** Issues assigned to one agent in the workspace whose status is in the done category. */
 export function agentDoneIssueCountOptions(wsId: string, agentId: string) {
   return queryOptions({
     queryKey: [...issueKeys.all(wsId), "done-count-by-agent", agentId] as const,
     queryFn: async () => {
       const res = await api.listIssues({
         workspace_id: wsId,
-        statuses: ["done"],
+        status_categories: ["done"],
         assignee_filters: [{ type: "agent", id: agentId }],
         limit: 1,
       });
