@@ -595,13 +595,34 @@ Run 'make down' here first — a leftover instance answers /health with 200 and 
   die "api never became healthy. Log: $(log_file api)"
 }
 
+# Next compiles routes on demand and holds `/` until the compile finishes, which
+# after a file change can take longer than one probe. Our own listener gets the
+# same 300s a fresh launch does before it counts as hung.
+wait_for_owned_web() {
+  local deadline
+  deadline=$(($(now_epoch) + 300))
+  curl -sf --max-time 15 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1 && return 0
+  info "web on :$FRONTEND_PORT is ours but not answering yet (likely compiling); waiting for it."
+  while [ "$(now_epoch)" -lt "$deadline" ]; do
+    listener_belongs_to_component web "$FRONTEND_PORT" || return 1
+    sleep 2
+    curl -sf --max-time 15 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
 start_web() {
   local waited=0 listener
-  if curl -sf --max-time 15 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1; then
-    listener="$(record_component_listener web "$FRONTEND_PORT" || true)"
-    if [ -n "$listener" ]; then
-      ok "web already running on :$FRONTEND_PORT (pid $listener)"
-      return 0
+  if listener_belongs_to_component web "$FRONTEND_PORT"; then
+    if wait_for_owned_web; then
+      listener="$(record_component_listener web "$FRONTEND_PORT" || true)"
+      if [ -n "$listener" ]; then
+        ok "web already running on :$FRONTEND_PORT (pid $listener)"
+        return 0
+      fi
+    elif listener_belongs_to_component web "$FRONTEND_PORT"; then
+      warn "web on :$FRONTEND_PORT is ours but did not answer within 300s; restarting it."
+      stop_component web
     fi
   fi
   if ! port_free "$FRONTEND_PORT"; then
@@ -921,13 +942,21 @@ stop_component() {
 component_state() {
   case "$1" in
     api)
-      local health
+      local health expected_commit reported_commit
       health="$(health_json || true)"
-      if [ -n "$health" ] && api_identity_matches "$health" "$(checkout_commit)"; then
+      expected_commit="$(checkout_commit)"
+      reported_commit="$(json_field "$health" commit || true)"
+      if [ -n "$health" ] && api_identity_matches "$health" "$expected_commit"; then
         printf 'running|http://localhost:%s|pid %s commit %s started %s' "$BACKEND_PORT" \
           "$(json_field "$health" pid || echo '?')" \
-          "$(json_field "$health" commit || echo '?')" \
+          "$reported_commit" \
           "$(json_field "$health" started_at || echo '?')"
+      elif [ -n "$health" ] && health_belongs_to_api "$health" \
+        && [ "$reported_commit" != "$expected_commit" ]; then
+        # Same process this environment launched; only the checkout moved on.
+        # `make up` restarts it, so this is not an external conflict.
+        printf 'stale|http://localhost:%s|running %s, checkout at %s; run make up to restart' \
+          "$BACKEND_PORT" "${reported_commit:-?}" "$expected_commit"
       elif [ -n "$health" ]; then
         printf 'mismatch|http://localhost:%s|health responder is not this checkout/process' "$BACKEND_PORT"
       else
@@ -935,13 +964,20 @@ component_state() {
       fi
       ;;
     web)
-      if curl -sf --max-time 10 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1 \
-        && listener_belongs_to_component web "$FRONTEND_PORT"; then
-        printf 'running|http://localhost:%s|pid %s' "$FRONTEND_PORT" "$(port_listener_pid "$FRONTEND_PORT")"
-      elif [ -n "$(port_listener_pid "$FRONTEND_PORT")" ]; then
-        printf 'mismatch|http://localhost:%s|listener is not owned by this environment' "$FRONTEND_PORT"
-      else
+      local listener
+      listener="$(port_listener_pid "$FRONTEND_PORT")"
+      if [ -z "$listener" ]; then
         printf 'stopped|http://localhost:%s|' "$FRONTEND_PORT"
+      elif ! listener_pid_belongs_to_component web "$listener"; then
+        printf 'mismatch|http://localhost:%s|listener pid %s is not owned by this environment' \
+          "$FRONTEND_PORT" "$listener"
+      elif curl -sf --max-time 10 "http://localhost:${FRONTEND_PORT}" >/dev/null 2>&1; then
+        printf 'running|http://localhost:%s|pid %s' "$FRONTEND_PORT" "$listener"
+      else
+        # Next dev serializes compiles, so a probe can time out behind a slow
+        # route compile even though the listener is ours.
+        printf 'busy|http://localhost:%s|pid %s is ours but not responding (likely compiling); re-run make status' \
+          "$FRONTEND_PORT" "$listener"
       fi
       ;;
     daemon)

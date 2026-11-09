@@ -602,6 +602,10 @@ jobs:
         # -v makes RUN/PASS evidence explicit in CI logs.
         run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree|TestCodeArtsWindowsCancellationTerminatesDescendants)$' -count=1 -timeout=5m
 
+      - name: Test Windows Hermes gateway ownership and reservation
+        working-directory: server
+        run: go test ./pkg/agent -v -run '^(TestHermesGatewayWindowsCleanupOwnsDescendants|TestHermesGatewayReservation)$' -count=1 -timeout=5m
+
       - name: Test bounded CLI output collection on Windows
         working-directory: server
         # MUL-5467: RunCollect / RunCollectQuiet own the pipes as well as the

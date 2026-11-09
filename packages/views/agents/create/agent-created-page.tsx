@@ -60,7 +60,7 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
             {stars && agent ? (
               <MulticaStarRow
                 count={stars}
-                enter="join"
+                join
                 delay={0.2}
                 className="absolute top-1/2 left-1/2 h-8 w-auto -translate-x-1/2 -translate-y-1/2 text-multica-paper/15"
                 lastClassName="fill-multica-paper"

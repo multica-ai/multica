@@ -4,7 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import {
   Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil,
   Ban, ChevronDown, ChevronRight, MoreHorizontal, Link2, ArrowUpRight, FilePlus2,
-  Webhook, RotateCw, Server, FileQuestion, FileText,
+  Webhook, RotateCw, Server, FileQuestion, FileText, Square,
 } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions, autopilotRunOptions } from "@multica/core/autopilots/queries";
@@ -156,7 +156,50 @@ function WebhookPayloadSlot({ autopilotId, runId }: { autopilotId: string; runId
   return <WebhookPayloadPreview payload={data.trigger_payload} />;
 }
 
-function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: string; agentName: string }) {
+// Stops a run_only run by cancelling its task. The server then fails the run
+// and broadcasts autopilot:run_done, which refetches this list, so the row
+// needs no local status patch.
+function StopRunButton({ taskId }: { taskId: string }) {
+  const { t } = useT("autopilots");
+  const [stopping, setStopping] = useState(false);
+
+  const stop = async () => {
+    if (stopping) return;
+    setStopping(true);
+    try {
+      await api.cancelTaskById(taskId);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.run.stop_failed));
+      setStopping(false);
+    }
+  };
+
+  return (
+    <IconButton
+      size="icon-sm"
+      variant="ghost"
+      className="shrink-0 text-muted-foreground hover:text-destructive"
+      onClick={stop}
+      disabled={stopping}
+      aria-busy={stopping}
+      label={t(($) => $.run.stop)}
+    >
+      {stopping ? <Loader2 className="size-3.5 animate-spin" /> : <Square className="size-3 fill-current" />}
+    </IconButton>
+  );
+}
+
+function RunRow({
+  run,
+  agentId,
+  agentName,
+  canStop = false,
+}: {
+  run: AutopilotRun;
+  agentId: string;
+  agentName: string;
+  canStop?: boolean;
+}) {
   const { t, i18n } = useT("autopilots");
   const wsPaths = useWorkspacePaths();
   const status = (RUN_VISUAL[run.status as RunStatus] ? (run.status as RunStatus) : "issue_created");
@@ -222,6 +265,9 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
           }
         />
       )}
+      {canStop && run.task_id && !run.issue_id && run.status === "running" && (
+        <StopRunButton taskId={run.task_id} />
+      )}
     </>
   );
 
@@ -242,10 +288,12 @@ function RunHistoryList({
   runs,
   agentId,
   agentName,
+  canStop,
 }: {
   runs: AutopilotRun[];
   agentId: string;
   agentName: string;
+  canStop: boolean;
 }) {
   const visibleRuns = runs.filter((run) => run.status !== "skipped");
   const skippedRuns = runs.filter((run) => run.status === "skipped");
@@ -253,7 +301,7 @@ function RunHistoryList({
   return (
     <ObjectSectionCard>
       {visibleRuns.map((run) => (
-        <RunRow key={run.id} run={run} agentId={agentId} agentName={agentName} />
+        <RunRow key={run.id} run={run} agentId={agentId} agentName={agentName} canStop={canStop} />
       ))}
       {skippedRuns.length > 0 && (
         <SkippedRunsGroup runs={skippedRuns} agentId={agentId} agentName={agentName} />
@@ -1234,6 +1282,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               runs={runs}
               agentId={autopilot.assignee_id}
               agentName={getActorName(autopilot.assignee_type, autopilot.assignee_id)}
+              canStop={canWrite}
             />
           )}
         </ObjectSection>

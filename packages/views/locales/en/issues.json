@@ -982,6 +982,7 @@
     "unassigned": "Unassigned",
     "open_in_new_tab": "Open in new tab",
     "pin_to_sidebar": "Pin to sidebar",
+    "locate_in_sidebar": "Show in sidebar",
     "unpin_from_sidebar": "Unpin from sidebar",
     "restore_to_inbox": "Restore to inbox",
     "mark_read": "Mark as read",

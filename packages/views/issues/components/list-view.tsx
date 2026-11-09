@@ -631,7 +631,7 @@ function StatusAccordionItem({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="rounded-full text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
+                  className="text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
                   onClick={() => {
                     const defaults = {
                       status: status,
