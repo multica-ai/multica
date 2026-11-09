@@ -1,4 +1,5 @@
 import reactConfig from "@multica/eslint-config/react";
+import { ICON_LIBRARY_IMPORT_PATTERNS } from "@multica/eslint-config/base";
 import { NO_ROUND_CONTROLS } from "@multica/eslint-config/control-shape";
 import i18next from "eslint-plugin-i18next";
 import {
@@ -11,6 +12,16 @@ import {
 // `mode: "jsx-text-only"`: flags raw strings inside JSX children only;
 // attribute values and plain TS literals are allowed through — the two doors
 // `eslint-i18n-guard.mjs` pins shut.
+
+// Package boundary (AGENTS.md): views consumes stores but never defines them.
+// Tests may build throwaway stores as fixtures.
+const STORE_FACTORY_MESSAGE =
+  "packages/views must not define stores. Define the store in packages/core and import it here.";
+const STORE_FACTORY_IMPORTS = ["zustand", "zustand/vanilla"].map((name) => ({
+  name,
+  importNames: ["create", "createStore"],
+  message: STORE_FACTORY_MESSAGE,
+}));
 
 export default [
   ...reactConfig,
@@ -35,6 +46,13 @@ export default [
         NO_UNTRANSLATED_ATTRIBUTES,
         NO_UNTRANSLATED_TOAST,
         NO_ROUND_CONTROLS,
+      ],
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: STORE_FACTORY_IMPORTS,
+          patterns: ICON_LIBRARY_IMPORT_PATTERNS,
+        },
       ],
     },
   },
