@@ -192,6 +192,16 @@ INSERT INTO issue (
 SELECT * FROM issue
 WHERE workspace_id = $1 AND number = $2;
 
+-- name: GetDeletedIssueNumber :one
+-- The tombstone lookup behind the identifier form of GET /api/issues/{id}:
+-- when the live GetIssueByNumber misses, the detail endpoint falls through
+-- here so a deleted identifier answers with its number and deletion time
+-- while a never-issued number (no row here either) stays not-found. Callers
+-- must resolve the workspace and match its own prefix first, exactly like
+-- resolveIssueByIdentifier does for live rows.
+SELECT number, deleted_at FROM deleted_issue
+WHERE workspace_id = $1 AND number = $2;
+
 -- name: UpdateIssue :one
 WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', COALESCE(sqlc.narg('source_task_id')::uuid::text, ''), true)), candidate AS MATERIALIZED (
     -- FOR UPDATE, so every next_* value below is computed from the row this
@@ -475,8 +485,24 @@ LIMIT 1;
 -- when a caller passes a foreign issue_id with its own workspace_id (the issue
 -- itself is correctly untouched, but the links are already gone) — the exact
 -- cross-tenant leak the #1661 guard above exists to prevent.
+--
+-- The tombstone INSERT (recorded_tombstone) reads the same workspace-checked
+-- target, so it can only ever record the deleted issue's own workspace and
+-- number — inheriting the #1661 guard rather than re-deriving it.
 WITH target AS (
-    SELECT issue.id FROM issue WHERE issue.id = $1 AND issue.workspace_id = $2
+    SELECT issue.id, issue.number FROM issue WHERE issue.id = $1 AND issue.workspace_id = $2
+),
+recorded_tombstone AS (
+    -- A hard delete destroys the only proof that this number was ever issued,
+    -- which made a deleted identifier indistinguishable from a never-issued
+    -- one (#9070). Record the number in the same transaction so the detail
+    -- endpoint can answer a deleted identifier with a tombstone. Numbers are
+    -- never reused (the per-workspace counter only increments), so
+    -- (workspace_id, number) cannot collide; ON CONFLICT keeps a retried
+    -- delete of the same issue idempotent.
+    INSERT INTO deleted_issue (workspace_id, number)
+    SELECT $2, number FROM target
+    ON CONFLICT DO NOTHING
 ),
 cleared_wakeup_receipts AS (
  DELETE FROM issue_wakeup_receipt WHERE wakeup_id IN (SELECT id FROM issue_wakeup WHERE issue_id IN (SELECT target.id FROM target))
