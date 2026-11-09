@@ -1963,6 +1963,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Virtuoso instance — minimap jumps drive the scroll container directly.
   const isFlatTimeline = find.open;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const virtualTimelineRef = useRef<HTMLDivElement>(null);
   const [measuredTimelineId, setMeasuredTimelineId] = useState<string | null>(null);
   const handleTimelineHeightChange = useCallback((height: number) => {
     if (height > 0) setMeasuredTimelineId(id);
@@ -2422,7 +2423,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     );
     const container = scrollContainerEl;
     if (!container) return;
-    if (!isFlatTimeline && (targetIdx < 0 || measuredTimelineId !== id)) return;
+    if (!isFlatTimeline) {
+      if (targetIdx < 0) return;
+      if (measuredTimelineId !== id) {
+        // A long description can put the whole list below the scroll viewport.
+        // Bring its probe row into view so Virtuoso can measure before jumping.
+        const list = virtualTimelineRef.current;
+        if (list) container.scrollTop += list.getBoundingClientRect().top - container.getBoundingClientRect().top;
+        return;
+      }
+    }
 
     // Center the target comment WITHIN its own scroll container by driving the
     // container's scrollTop directly — never native scrollIntoView. Native
@@ -4006,7 +4016,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   // flash empty.
                   <TimelineSkeleton />
                 ) : (
-                  <div className="mt-4">
+                  <div ref={virtualTimelineRef} className="mt-4">
                     <Virtuoso
                       key={`${wsId}:${id}`}
                       ref={virtuosoRef}
