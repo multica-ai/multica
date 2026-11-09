@@ -1,12 +1,16 @@
 package handler
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func TestBuildSearchQuery_SingleTerm(t *testing.T) {
-	query, args := buildSearchQuery("Hello", []string{"Hello"}, 0, false, false, []string{"done", "cancelled"})
+	query, args := buildSearchQuery("Hello", []string{"Hello"}, 0, false, false, []string{"done", "cancelled"}, pgtype.UUID{})
 
 	// Pattern should be lowercased in Go.
 	if args[0] != "hello" {
@@ -48,7 +52,7 @@ func TestBuildSearchQuery_SingleTerm(t *testing.T) {
 }
 
 func TestBuildSearchQuery_OmitsUnusedExactTotal(t *testing.T) {
-	query, _ := buildSearchQuery("Hello", []string{"Hello"}, 0, false, false, []string{"done", "cancelled"})
+	query, _ := buildSearchQuery("Hello", []string{"Hello"}, 0, false, false, []string{"done", "cancelled"}, pgtype.UUID{})
 
 	if strings.Contains(query, "COUNT(*) OVER()") || strings.Contains(query, "total_count") {
 		t.Fatalf("search query should not calculate an unused exact total:\n%s", query)
@@ -72,6 +76,7 @@ func TestBuildSearchQuery_CustomTerminalStatuses(t *testing.T) {
 		false,
 		false,
 		terminalStatusKeys,
+		pgtype.UUID{},
 	)
 
 	if !strings.Contains(query, "NOT (i.status = ANY($5::text[]))") {
@@ -89,7 +94,7 @@ func TestBuildSearchQuery_CustomTerminalStatuses(t *testing.T) {
 }
 
 func TestBuildSearchQuery_MultiTerm(t *testing.T) {
-	query, args := buildSearchQuery("Foo Bar", []string{"Foo", "Bar"}, 0, false, false, []string{"done", "cancelled"})
+	query, args := buildSearchQuery("Foo Bar", []string{"Foo", "Bar"}, 0, false, false, []string{"done", "cancelled"}, pgtype.UUID{})
 
 	// Both phrase and terms should be lowercased.
 	if args[0] != "foo bar" {
@@ -110,7 +115,7 @@ func TestBuildSearchQuery_MultiTerm(t *testing.T) {
 }
 
 func TestBuildSearchQuery_LowersCommentContentOnce(t *testing.T) {
-	query, _ := buildSearchQuery("Foo Bar Baz", []string{"Foo", "Bar", "Baz"}, 0, false, false, []string{"done", "cancelled"})
+	query, _ := buildSearchQuery("Foo Bar Baz", []string{"Foo", "Bar", "Baz"}, 0, false, false, []string{"done", "cancelled"}, pgtype.UUID{})
 
 	if count := strings.Count(query, "LOWER(c.content)"); count != 1 {
 		t.Fatalf("query lowers comment content %d times, want exactly once:\n%s", count, query)
@@ -133,7 +138,7 @@ func TestBuildSearchQuery_LowersCommentContentOnce(t *testing.T) {
 }
 
 func TestBuildSearchQuery_LowersIssueTextOnceAndSkipsDescriptionForTitleMatches(t *testing.T) {
-	query, _ := buildSearchQuery("Foo Bar Baz", []string{"Foo", "Bar", "Baz"}, 0, false, false, []string{"done", "cancelled"})
+	query, _ := buildSearchQuery("Foo Bar Baz", []string{"Foo", "Bar", "Baz"}, 0, false, false, []string{"done", "cancelled"}, pgtype.UUID{})
 	normalizedQuery := strings.Join(strings.Fields(query), " ")
 
 	if count := strings.Count(query, "LOWER(i.title)"); count != 1 {
@@ -185,7 +190,7 @@ func assertSQLBefore(t *testing.T, query, earlier, later string) {
 }
 
 func TestBuildSearchQuery_WithNumber(t *testing.T) {
-	query, args := buildSearchQuery("MUL-42", []string{"MUL-42"}, 42, true, false, []string{"done", "cancelled"})
+	query, args := buildSearchQuery("MUL-42", []string{"MUL-42"}, 42, true, false, []string{"done", "cancelled"}, pgtype.UUID{})
 
 	_ = args
 	// Number match should be in WHERE.
@@ -199,7 +204,7 @@ func TestBuildSearchQuery_WithNumber(t *testing.T) {
 }
 
 func TestBuildSearchQuery_IncludeClosed(t *testing.T) {
-	query, _ := buildSearchQuery("test", []string{"test"}, 0, false, true, []string{"done", "cancelled"})
+	query, _ := buildSearchQuery("test", []string{"test"}, 0, false, true, []string{"done", "cancelled"}, pgtype.UUID{})
 
 	if strings.Contains(query, "i.status = ANY(") {
 		t.Error("query should not exclude done/cancelled when includeClosed=true")
@@ -210,7 +215,7 @@ func TestBuildSearchQuery_IncludeClosed(t *testing.T) {
 }
 
 func TestBuildSearchQuery_SpecialChars(t *testing.T) {
-	query, args := buildSearchQuery("100%", []string{"100%"}, 0, false, false, []string{"done", "cancelled"})
+	query, args := buildSearchQuery("100%", []string{"100%"}, 0, false, false, []string{"done", "cancelled"}, pgtype.UUID{})
 
 	_ = query
 	// % should be escaped in the phrase arg.
@@ -329,7 +334,7 @@ func TestExtractSnippet_CJKContent(t *testing.T) {
 // --- Ranking regression tests ---
 
 func TestBuildSearchQuery_CommentRankTiers(t *testing.T) {
-	query, _ := buildSearchQuery("test phrase", []string{"test", "phrase"}, 0, false, false, []string{"done", "cancelled"})
+	query, _ := buildSearchQuery("test phrase", []string{"test", "phrase"}, 0, false, false, []string{"done", "cancelled"}, pgtype.UUID{})
 
 	// Comment phrase match should be tier 7
 	if !strings.Contains(query, "THEN 7") {
@@ -346,7 +351,7 @@ func TestBuildSearchQuery_CommentRankTiers(t *testing.T) {
 }
 
 func TestBuildSearchQuery_DescriptionRankTiers(t *testing.T) {
-	query, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"})
+	query, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"}, pgtype.UUID{})
 
 	// Description phrase match should be tier 5
 	if !strings.Contains(query, "THEN 5") {
@@ -359,7 +364,7 @@ func TestBuildSearchQuery_DescriptionRankTiers(t *testing.T) {
 }
 
 func TestBuildSearchQuery_SingleTermNoAllTermTiers(t *testing.T) {
-	query, _ := buildSearchQuery("html", []string{"html"}, 0, false, false, []string{"done", "cancelled"})
+	query, _ := buildSearchQuery("html", []string{"html"}, 0, false, false, []string{"done", "cancelled"}, pgtype.UUID{})
 
 	// Extract the rank CASE expression (ends with "ELSE 9 END") to avoid
 	// false matches against statusRank which also contains THEN 4/6.
@@ -390,7 +395,7 @@ func TestBuildSearchQuery_SingleTermNoAllTermTiers(t *testing.T) {
 // $4 is buildSearchQuery's canonical workspace_id placeholder (the
 // caller writes wsUUID into args[3] before executing).
 func TestBuildSearchQuery_CommentSubqueryWorkspaceScope(t *testing.T) {
-	singleQuery, _ := buildSearchQuery("html", []string{"html"}, 0, false, false, []string{"done", "cancelled"})
+	singleQuery, _ := buildSearchQuery("html", []string{"html"}, 0, false, false, []string{"done", "cancelled"}, pgtype.UUID{})
 
 	// Candidate-first search aggregates comments in one workspace-first pass;
 	// it must not grow a second scan for eligibility, ranking, or snippets.
@@ -410,7 +415,7 @@ func TestBuildSearchQuery_CommentSubqueryWorkspaceScope(t *testing.T) {
 	}
 
 	// Adding terms adds boolean aggregates, not extra comment relation scans.
-	multiQuery, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"})
+	multiQuery, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"}, pgtype.UUID{})
 	fromCountMulti := strings.Count(multiQuery, "FROM comment c")
 	if fromCountMulti != 1 {
 		t.Errorf("multi-term query has %d comment scans, want exactly one:\n%s", fromCountMulti, multiQuery)
@@ -424,7 +429,7 @@ func TestBuildSearchQuery_CommentSubqueryWorkspaceScope(t *testing.T) {
 }
 
 func TestBuildSearchQuery_HydratesOnlyTheSelectedPage(t *testing.T) {
-	query, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"})
+	query, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, []string{"done", "cancelled"}, pgtype.UUID{})
 
 	if strings.Contains(query, "issue_matches AS MATERIALIZED") {
 		t.Fatalf("issue flag CTE must remain inlineable; forced materialization spills in production:\n%s", query)
@@ -543,6 +548,98 @@ func TestBuildProjectSearchQuery_CancelledDemotedAheadOfRelevance(t *testing.T) 
 // keeps each test's literals independent.
 func buildSearchQueryForTest(t *testing.T, phrase string, terms []string, num int, hasNum bool, includeClosed bool) string {
 	t.Helper()
-	query, _ := buildSearchQuery(phrase, append([]string(nil), terms...), num, hasNum, includeClosed, []string{"done", "cancelled"})
+	query, _ := buildSearchQuery(phrase, append([]string(nil), terms...), num, hasNum, includeClosed, []string{"done", "cancelled"}, pgtype.UUID{})
 	return query
+}
+
+func TestBuildSearchQuery_ProjectFilter(t *testing.T) {
+	unfilteredQuery, _ := buildSearchQuery("deploy", []string{"deploy"}, 0, false, false, []string{"done", "cancelled"}, pgtype.UUID{})
+	if strings.Contains(unfilteredQuery, "i.project_id =") {
+		t.Fatalf("unfiltered query should not contain project_id predicate:\n%s", unfilteredQuery)
+	}
+	if count := strings.Count(unfilteredQuery, "EXISTS (SELECT 1 FROM issue i"); count != 1 {
+		t.Fatalf("unfiltered open-only query should retain one terminal-status comment EXISTS predicate, got %d:\n%s", count, unfilteredQuery)
+	}
+
+	rawProjectID := uuid.MustParse("11111111-2222-3333-4444-555555555555")
+	projectFilter := pgtype.UUID{Bytes: rawProjectID, Valid: true}
+
+	for _, tc := range []struct {
+		name           string
+		phrase         string
+		terms          []string
+		queryNum       int
+		hasNum         bool
+		includeClosed  bool
+		terminalKeys   []string
+		wantProjectIdx int // 1-based SQL placeholder index for projectFilter
+		wantArgCount   int
+	}{
+		{
+			name:           "single term open only",
+			phrase:         "deploy",
+			terms:          []string{"deploy"},
+			terminalKeys:   []string{"done", "cancelled"},
+			wantProjectIdx: 6,
+			wantArgCount:   8,
+		},
+		{
+			name:           "multi term with number and closed included",
+			phrase:         "MUL-42 deploy",
+			terms:          []string{"MUL-42", "deploy"},
+			queryNum:       42,
+			hasNum:         true,
+			includeClosed:  true,
+			wantProjectIdx: 8,
+			wantArgCount:   10,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			filteredQuery, args := buildSearchQuery(
+				tc.phrase,
+				append([]string(nil), tc.terms...),
+				tc.queryNum,
+				tc.hasNum,
+				tc.includeClosed,
+				tc.terminalKeys,
+				projectFilter,
+			)
+			if len(args) != tc.wantArgCount {
+				t.Fatalf("len(args) = %d, want %d (%#v)", len(args), tc.wantArgCount, args)
+			}
+			if args[tc.wantProjectIdx-1] != projectFilter {
+				t.Fatalf("args[%d] = %#v, want projectFilter %#v", tc.wantProjectIdx-1, args[tc.wantProjectIdx-1], projectFilter)
+			}
+			if args[len(args)-2] != nil || args[len(args)-1] != nil {
+				t.Fatalf("trailing pagination placeholders must remain nil, got %#v", args[len(args)-2:])
+			}
+
+			commentCTEStart := strings.Index(filteredQuery, "comment_matches AS MATERIALIZED")
+			if commentCTEStart == -1 {
+				t.Fatalf("missing comment_matches CTE:\n%s", filteredQuery)
+			}
+			issueMatchesSection := filteredQuery[:commentCTEStart]
+			wantIssueWhere := fmt.Sprintf("WHERE i.workspace_id = $4 AND i.project_id = $%d", tc.wantProjectIdx)
+			if !strings.Contains(issueMatchesSection, wantIssueWhere) {
+				t.Fatalf("issue_matches CTE missing %q:\n%s", wantIssueWhere, issueMatchesSection)
+			}
+
+			wantCommentWhere := fmt.Sprintf("i.workspace_id = $4 AND i.project_id = $%d", tc.wantProjectIdx)
+			if !tc.includeClosed && len(tc.terminalKeys) > 0 {
+				wantCommentWhere += fmt.Sprintf(" AND NOT (i.status = ANY($%d::text[]))", tc.wantProjectIdx-1)
+			}
+			wantCommentExists := "AND EXISTS (SELECT 1 FROM issue i WHERE i.id = c.issue_id AND " + wantCommentWhere + ")"
+			if !strings.Contains(filteredQuery[commentCTEStart:], wantCommentExists) {
+				t.Fatalf("comment_matches CTE missing %q:\n%s", wantCommentExists, filteredQuery[commentCTEStart:])
+			}
+			if count := strings.Count(filteredQuery, "EXISTS (SELECT 1 FROM issue i"); count != 1 {
+				t.Fatalf("project and terminal-status filters should share one comment EXISTS predicate, got %d:\n%s", count, filteredQuery)
+			}
+
+			wantLimitOffset := fmt.Sprintf("LIMIT $%d OFFSET $%d", tc.wantProjectIdx+1, tc.wantProjectIdx+2)
+			if !strings.Contains(filteredQuery, wantLimitOffset) {
+				t.Fatalf("page_candidates CTE missing %q:\n%s", wantLimitOffset, filteredQuery)
+			}
+		})
+	}
 }

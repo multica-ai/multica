@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -162,7 +163,7 @@ func TestBuildSearchQuery_CandidateFirstParity(t *testing.T) {
 			legacyArgs[len(legacyArgs)-1] = tt.offset
 
 			candidateQuery, candidateArgs := buildSearchQuery(
-				tt.phrase, append([]string(nil), terms...), tt.queryNum, tt.hasNum, tt.includeClosed, tt.terminalKeys,
+				tt.phrase, append([]string(nil), terms...), tt.queryNum, tt.hasNum, tt.includeClosed, tt.terminalKeys, pgtype.UUID{},
 			)
 			candidateArgs[3] = testWorkspaceID
 			candidateArgs[len(candidateArgs)-2] = tt.limit
@@ -256,7 +257,7 @@ func runBuiltSearchForParity(t *testing.T, phrase string, includeClosed bool, te
 	t.Helper()
 	terms := splitSearchTerms(phrase)
 	queryNum, hasNum := parseQueryNumber(phrase)
-	query, args := buildSearchQuery(phrase, terms, queryNum, hasNum, includeClosed, terminalKeys)
+	query, args := buildSearchQuery(phrase, terms, queryNum, hasNum, includeClosed, terminalKeys, pgtype.UUID{})
 	args[3] = testWorkspaceID
 	args[len(args)-2] = limit
 	args[len(args)-1] = offset

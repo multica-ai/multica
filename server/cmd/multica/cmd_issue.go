@@ -783,6 +783,7 @@ func init() {
 	// issue search
 	issueSearchCmd.Flags().Int("limit", 20, "Maximum number of results to return")
 	issueSearchCmd.Flags().Bool("include-closed", false, "Include done and cancelled issues")
+	issueSearchCmd.Flags().String("project", "", "Filter by project ID")
 	issueSearchCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue subscriber list
@@ -3224,6 +3225,18 @@ func runIssueSearch(cmd *cobra.Command, args []string) error {
 	}
 	if v, _ := cmd.Flags().GetBool("include-closed"); v {
 		params.Set("include_closed", "true")
+	}
+	if projectInput, _ := cmd.Flags().GetString("project"); projectInput != "" {
+		if client.WorkspaceID == "" {
+			if _, err := requireWorkspaceID(cmd); err != nil {
+				return err
+			}
+		}
+		project, err := resolveProjectID(ctx, client, projectInput)
+		if err != nil {
+			return err
+		}
+		params.Set("project_id", project.ID)
 	}
 
 	path := "/api/issues/search?" + params.Encode()

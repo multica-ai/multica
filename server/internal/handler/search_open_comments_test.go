@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -37,6 +38,7 @@ func TestBuildSearchQuery_OpenCommentCandidates(t *testing.T) {
 				false,
 				includeClosed,
 				[]string{"done", "cancelled", "verified"},
+				pgtype.UUID{},
 			)
 			args[3], args[len(args)-2], args[len(args)-1] = parseUUID(testWorkspaceID), 20, 0
 			// Inspect the candidate CTE directly: checking final search rows alone
