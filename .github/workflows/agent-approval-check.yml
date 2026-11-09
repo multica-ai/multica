@@ -1,0 +1,31 @@
+name: agent-approval-check
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
+jobs:
+  check:
+    if: github.event_name != 'issue_comment' || github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout base-branch policy
+        uses: actions/checkout@v6
+        with:
+          # Keep policy on the trusted base branch. Never read agent identities
+          # from the PR head.
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.ref || github.event.repository.default_branch }}
+          fetch-depth: 1
+
+      - name: Run agent approval check
+        uses: anthropics/claude-code-action/agent-approval-check@main
+        with:
+          required_approvals: 1
+          config_file: .github/agent-identities.yaml

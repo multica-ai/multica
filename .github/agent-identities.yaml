@@ -1,0 +1,41 @@
+---
+# Pilot identity map for anthropics/claude-code-action/agent-approval-check.
+#
+# Detection rule summary:
+# - commit/co-author emails in agent_emails mark a PR as agent-authored
+# - PR/review actors in agent_app_logins also mark agent activity
+# - approvals from excluded_approver_logins never count toward the required total
+#
+# Source notes:
+# - multica-agent / github@multica.ai were observed in recent multica PR commits
+#   such as #5018, #5150, and #6233
+# - Claude identities come from Anthropic's agent-approval-check docs
+# - Codex identities come from public OpenAI Codex commit attribution examples
+# - Hermes currently shows up upstream as Hermes Agent <hermes@nousresearch.com>
+#   and hermes-seaeye[bot]; if BHirst standardizes a noreply identity later,
+#   update this file to match the real emitted trailer/login
+agent_emails:
+  - github@multica.ai
+  - noreply@anthropic.com
+  - noreply@openai.com
+  - codex@openai.com
+  - hermes@nousresearch.com
+
+agent_app_logins:
+  - multica-agent
+  - claude[bot]
+  - claude-code[bot]
+  - openai-codex[bot]
+  - hermes-seaeye[bot]
+
+excluded_approver_logins:
+  - multica-agent
+  - claude[bot]
+  - claude-code[bot]
+  - openai-codex[bot]
+  - hermes-seaeye[bot]
+
+protected_bases:
+  multica-ai/multica:
+    exact: [main]
+    prefixes: []
