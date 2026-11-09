@@ -250,3 +250,54 @@ describe("StarPrompt after the source survey", () => {
     expect(claimStarPromptShowing).not.toHaveBeenCalled();
   });
 });
+
+describe("StarPrompt for a workspace that finishes work in custom done statuses", () => {
+  // Mirrors the server: three issues sit in a custom done-category status, so
+  // only a category query finds them and an exact `done` query finds none.
+  function customDoneIssues() {
+    listIssues.mockImplementation(async (params: { status_categories?: string[] }) => ({
+      issues: [],
+      total: params.status_categories?.includes("done") ? 3 : 0,
+    }));
+  }
+
+  function renderSession() {
+    return renderPrompt(
+      <>
+        <SourceBackfillModal />
+        <StarPrompt />
+      </>,
+    );
+  }
+
+  it.each([
+    ["answering", async () => {
+      fireEvent.click(await screen.findByText("Friends or colleagues"));
+      fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    }],
+    ["skipping", async () => fireEvent.click(await screen.findByRole("button", { name: "Skip" }))],
+  ])("asks for the survey first, then for a star only in a later session after %s it", async (_name, finishSurvey) => {
+    customDoneIssues();
+    stores.auth.setState({ user: { ...eligibleUser(), onboarding_questionnaire: { source: [] } } });
+
+    const first = renderSession();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(screen.getByText("How did you hear about Multica?")).toBeInTheDocument();
+    await finishSurvey();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await agentFinishesIssue();
+    expect(claimStarPromptShowing).not.toHaveBeenCalled();
+    first.unmount();
+
+    // A new app session: fresh module state and caches, same signed-in user.
+    useSessionPromptStore.setState({ prompted: false });
+    qc.clear();
+    renderSession();
+    await agentFinishesIssue();
+
+    expect(await screen.findByText("Lambda has completed 3 issues")).toBeInTheDocument();
+    expect(screen.queryByText("How did you hear about Multica?")).not.toBeInTheDocument();
+  });
+});
