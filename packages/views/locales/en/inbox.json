@@ -1,7 +1,7 @@
 {
   "page": {
-    "title": "Inbox",
-    "back": "Inbox"
+    "title": "Needs action",
+    "back": "Needs action"
   },
   "menu": {
     "mark_all_read": "Mark all as read",
@@ -64,14 +64,16 @@
   },
   "detail": {
     "select_prompt": "Select a notification to view details",
-    "empty": "Your inbox is empty",
+    "empty": "Nothing needs you right now",
     "original_input": "Original input",
     "retry_with_context": "Retry with context",
     "edit_advanced": "Edit as advanced form",
     "autopilot_quota_exceeded_body": "This workspace has reached its limit of {{limit}} autopilot runs for the current period. Further autopilot runs will not start until the allowance resets {{resetAt}}.",
     "autopilot_quota_upgrade": "View upgrade options",
     "archive": "Archive",
-    "unarchive": "Unarchive"
+    "unarchive": "Unarchive",
+    "done": "Done",
+    "handled": "Handled · it left Needs action"
   },
   "types": {
     "issue_assigned": "Assigned",

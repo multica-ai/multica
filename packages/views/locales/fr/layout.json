@@ -1,6 +1,6 @@
 {
   "nav": {
-    "inbox": "Boîte de réception",
+    "inbox": "À traiter",
     "chat": "Discussion",
     "my_issues": "Mes tâches",
     "issues": "Tâches",
@@ -90,12 +90,13 @@
   },
   "spaces": {
     "work": "Travail",
-    "team": "Équipe"
+    "team": "Équipe",
+    "attention": "Attention"
   },
   "rail": {
     "label": "Navigation de l'application",
     "sheet_description": "Changer d'espace et d'espace de travail.",
-    "inbox": "Boîte",
+    "inbox": "Attention",
     "work": "Travail",
     "team": "Équipe",
     "chat": "Chat",
@@ -176,6 +177,11 @@
       "all": "Toutes les automatisations",
       "list": "Automatisations",
       "templates": "À partir d’un modèle"
+    },
+    "attention": {
+      "needs_action": "À traiter",
+      "view_all": "Tout voir ({{total}})",
+      "empty": "Rien ne vous attend pour l'instant"
     }
   },
   "account": {

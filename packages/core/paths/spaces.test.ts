@@ -15,7 +15,7 @@ describe("spaceForPath", () => {
   });
 
   it.each([
-    [ws.inbox(), "work"],
+    [ws.inbox(), "inbox"],
     [ws.myIssues(), "work"],
     [ws.issues(), "work"],
     [ws.issueDetail("MUL-1"), "work"],

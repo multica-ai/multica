@@ -1,6 +1,6 @@
 {
   "nav": {
-    "inbox": "Inbox",
+    "inbox": "Needs action",
     "chat": "Chat",
     "my_issues": "My Issues",
     "issues": "Issues",
@@ -90,12 +90,13 @@
   },
   "spaces": {
     "work": "Work",
-    "team": "Team"
+    "team": "Team",
+    "attention": "Attention"
   },
   "rail": {
     "label": "App navigation",
     "sheet_description": "Switch spaces and workspaces.",
-    "inbox": "Inbox",
+    "inbox": "Attention",
     "work": "Work",
     "team": "Team",
     "chat": "Chat",
@@ -176,6 +177,11 @@
       "all": "All autopilots",
       "list": "Autopilots",
       "templates": "From a template"
+    },
+    "attention": {
+      "needs_action": "Needs action",
+      "view_all": "View all {{total}}",
+      "empty": "Nothing needs you right now"
     }
   },
   "account": {

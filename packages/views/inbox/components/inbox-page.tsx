@@ -95,12 +95,11 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { cn } from "@multica/ui/lib/utils";
-import { CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "../../layout/page-header";
+import { CollapsedNavTrigger, PAGE_GUTTER } from "../../layout/page-header";
 import { PanelHeader } from "../../layout/panel-nav";
-import { useListColumnCollapsed } from "../../layout/app-shell-context";
-import { ListColumn } from "../../layout/list-column";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
+import { InboxReasonBar } from "./inbox-reason-bar";
 import { InboxFilterMenu } from "./inbox-filter-menu";
 import { InboxFilterChipsBar } from "./inbox-filter-options";
 import { InboxContextMenuProvider } from "./inbox-context-menu";
@@ -126,7 +125,7 @@ export function InboxPage() {
   const showAutopilotQuotaRecoveryPrompt = useIssueLimitUpgradePrompt(
     "autopilot_quota",
   );
-  const { searchParams, replace } = useNavigation();
+  const { searchParams, push, replace } = useNavigation();
   const urlIssue = searchParams.get("issue") ?? "";
   const urlView: InboxView =
     searchParams.get("view") === ARCHIVED_VIEW_PARAM ? "archived" : "inbox";
@@ -402,7 +401,6 @@ export function InboxPage() {
   ]);
 
   const isCompact = useIsCompact();
-  const listCollapsed = useListColumnCollapsed();
   const unreadCount = useInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
@@ -496,11 +494,6 @@ export function InboxPage() {
   }, [unreadOnlyActive]);
 
   const writeViewState = useViewStateWriter();
-  // Bumped when the already-open notification row is re-clicked; threaded to
-  // IssueDetail so it replays the comment-highlight landing without a
-  // remount. Selection changes don't need it — they remount the detail (key
-  // by issue) and a fresh mount with a cleared memento entry lands by itself.
-  const [highlightRequestToken, setHighlightRequestToken] = useState(0);
   const handleSelect = (item: InboxItem) => {
     const nextKey = item.issue_id ?? item.id;
     // Every click on a notification row is a fresh deep-link intent: clear
@@ -509,13 +502,11 @@ export function InboxPage() {
     // consumed) before. Selection restored from the URL on a remount goes
     // through the effects above, not through here, so a tab switch back
     // keeps the entry and does NOT re-jump.
-    if (item.issue_id) {
-      writeViewState(issueHighlightMementoKey(item.issue_id), undefined);
-      if (nextKey === selectedKey) {
-        setHighlightRequestToken((t) => t + 1);
-      }
-    }
-    setSelectedKey(nextKey);
+    if (item.issue_id) writeViewState(issueHighlightMementoKey(item.issue_id), undefined);
+    // The open issue replaces the list on screen, so opening one is a step
+    // Back returns from.
+    setSelectedKeyState(nextKey);
+    push(buildInboxUrl(view, nextKey));
   };
 
   const handleMarkRead = (id: string) => {
@@ -863,14 +854,14 @@ export function InboxPage() {
     </>
   );
 
-  // Compact widths only: the detail fills the screen there, so the trip back to
-  // the list has to live inside it. On desktop the list is still on screen in
-  // the left panel and needs no back control at all.
+  // The open issue fills the page, so the trip back to the list has to live
+  // inside it — except on desktop in the main view, where the Attention panel
+  // beside the page lists the same issues.
   //
-  // The detail owns the whole compact screen in four states — loaded, loading,
+  // The detail owns the whole screen in four states — loaded, loading,
   // not-found and crashed — so this control is threaded into all four below.
   // Miss one and that state strands the reader with no way out.
-  const compactBackAction = isCompact ? (
+  const backAction = isCompact || isArchivedView ? (
     <Button
       variant="ghost"
       size="sm"
@@ -884,9 +875,9 @@ export function InboxPage() {
     </Button>
   ) : undefined;
 
-  const compactBackBar = compactBackAction ? (
+  const backBar = backAction ? (
     <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>
-      {compactBackAction}
+      {backAction}
     </div>
   ) : null;
 
@@ -900,9 +891,9 @@ export function InboxPage() {
       // The default fallback is a bare message card. On a phone it would be the
       // only thing on screen, so it has to carry the way back too — the bar is
       // the point here, the message is whatever the boundary caught.
-      fallback={compactBackAction ? ({ error }) => (
+      fallback={backAction ? ({ error }) => (
         <div className="flex flex-1 min-h-0 flex-col">
-          {compactBackBar}
+          {backBar}
           <div className="flex flex-1 min-h-0 items-center justify-center px-4 text-center text-body text-muted-foreground">
             {error.message}
           </div>
@@ -914,20 +905,24 @@ export function InboxPage() {
         <IssueDetail
           key={detailItem.issue_id}
           issueId={detailItem.issue_id}
-          defaultSidebarOpen={false}
           layoutId="multica_inbox_issue_detail_layout"
           highlightCommentId={detailItem.details?.comment_id ?? undefined}
-          highlightRequestToken={highlightRequestToken}
           highlightAppRequestId={
             detailItem.type.startsWith("app_") ? (detailItem.details?.request_id ?? undefined) : undefined
+          }
+          notice={
+            isArchivedView ? undefined : (
+              <InboxReasonBar
+                item={detailItem}
+                handled={handled?.key === detailItem.issue_id}
+                onDone={() => handleArchive(detailItem.id)}
+              />
+            )
           }
           // The inbox reads the row it selected itself (see the auto-read
           // effect above), and must keep a row marked unread while it is open.
           readsInbox={false}
-          // The split layout already has a nav trigger in the list header.
-          // Explicit false suppresses the detail header's fallback trigger,
-          // which is the way back once the list column is collapsed.
-          leadingAction={compactBackAction ?? (listCollapsed ? undefined : false)}
+          leadingAction={backAction}
           onDelete={() => {
             // Issue deletion CASCADE-deletes the inbox item server-side, and the
             // issue:deleted WS event prunes it from the inbox cache. Just clear
@@ -1109,7 +1104,7 @@ export function InboxPage() {
       // slot and no scroller of its own, so this branch keeps supplying both.
       return (
         <div className="flex flex-1 flex-col min-h-0">
-          {compactBackBar}
+          {backBar}
           <div className="flex-1 min-h-0 overflow-y-auto">{detailContent}</div>
         </div>
       );
@@ -1119,67 +1114,64 @@ export function InboxPage() {
     return <div className="flex flex-1 flex-col min-h-0">{listPanel}</div>;
   }
 
-  // -- Desktop layout: list column + detail ----------------------------------
+  // -- Desktop layout: the open issue, or the whole list ---------------------
+  // The Attention panel beside the page lists what is waiting, so an open
+  // issue takes the page's full width, and with none open the page lists all.
 
   if (viewLoading) {
-    return (
-      <div className="flex min-h-0 flex-1">
-        <ListColumn collapsed={listCollapsed} width="list">
-          <div className="flex h-12 shrink-0 items-center pl-5 pr-2.5">
-            <Skeleton className="h-5 w-16" />
-          </div>
-          <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-2 py-2.5">
-                <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-3/4" />
-                  <Skeleton className="h-3 w-1/2" />
-                </div>
+    return selectedKey ? (
+      <div className="min-w-0 flex-1 p-6">
+        <Skeleton className="h-6 w-48" />
+        <Skeleton className="mt-4 h-4 w-32" />
+      </div>
+    ) : (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex h-12 shrink-0 items-center pl-5 pr-2.5">
+          <Skeleton className="h-5 w-16" />
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 px-2 py-2.5">
+              <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-3 w-1/2" />
               </div>
-            ))}
-          </div>
-        </ListColumn>
-        <div className="min-w-0 flex-1 p-6">
-          <Skeleton className="h-6 w-48" />
-          <Skeleton className="mt-4 h-4 w-32" />
+            </div>
+          ))}
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="flex min-h-0 flex-1">
-      <ListColumn collapsed={listCollapsed} width="list">{listPanel}</ListColumn>
+  if (detailItem?.issue_id) {
+    return <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">{detailContent}</div>;
+  }
+
+  if (detailItem) {
+    return (
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        {detailContent ?? (
-          <>
-          {listCollapsed && (
-            <PageHeader>
-              <h1 className="text-body font-semibold">{t(($) => $.page.title)}</h1>
-            </PageHeader>
-          )}
-          <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden text-muted-foreground">
-            {inboxZeroCount === 0 ? (
-              <MulticaBleedMark
-                key={inboxZeroRises ? "rise" : "rest"}
-                enterDelay={inboxZeroRises ? 0.2 : undefined}
-                className="pointer-events-none absolute -right-[14%] -bottom-[26%] w-[min(560px,58%)] text-muted"
-              />
-            ) : (
-              <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
-            )}
-            <p className="relative text-body">
-              {visibleItems.length > 0
-                ? t(($) => $.detail.select_prompt)
-                : isArchivedView
-                  ? t(($) => $.list.archived_empty)
-                  : t(($) => $.detail.empty)}
-            </p>
-          </div>
-          </>
-        )}
+        {backBar}
+        <div className="flex-1 min-h-0 overflow-y-auto">{detailContent}</div>
       </div>
-    </div>
-  );
+    );
+  }
+
+  if (inboxZeroCount === 0) {
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {listHeader}
+        <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden text-muted-foreground">
+          <MulticaBleedMark
+            key={inboxZeroRises ? "rise" : "rest"}
+            enterDelay={inboxZeroRises ? 0.2 : undefined}
+            className="pointer-events-none absolute -right-[14%] -bottom-[26%] w-[min(560px,58%)] text-muted"
+          />
+          <p className="relative text-body">{t(($) => $.detail.empty)}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <div className="flex min-h-0 min-w-0 flex-1 flex-col">{listPanel}</div>;
 }

@@ -48,9 +48,10 @@ type RailBadge =
   | { kind: "dot" };
 
 /**
- * Rail badges. Work counts the issues waiting in its Inbox and Chat counts
- * unread; Team only flags that something needs a look — the panel says what. A dot must be something the user can
- * clear, so a failed autopilot run is shown in the Autopilots panel only.
+ * Rail badges. Attention counts the issues waiting on the user and Chat counts
+ * unread; Team only flags that something needs a look — the panel says what.
+ * A dot must be something the user can clear, so a failed autopilot run is
+ * shown in the Autopilots panel only.
  */
 function useRailBadges(): Partial<Record<RailSpaceId, RailBadge>> {
   const wsId = useCurrentWorkspace()?.id;
@@ -83,7 +84,7 @@ function useRailBadges(): Partial<Record<RailSpaceId, RailBadge>> {
   const { stuck } = useTeamAgentStatus(wsId);
 
   const badges: Partial<Record<RailSpaceId, RailBadge>> = {};
-  if (inboxPending > 0) badges.work = { kind: "count", value: inboxPending, tone: "brand" };
+  if (inboxPending > 0) badges.inbox = { kind: "count", value: inboxPending, tone: "brand" };
   if (chatUnread > 0) badges.chat = { kind: "count", value: chatUnread, tone: "neutral" };
   if (stuck.length > 0) badges.team = { kind: "dot" };
   return badges;
@@ -149,6 +150,7 @@ function RailSpaceLink({
   badge?: RailBadge;
 }) {
   const peekHandlers = usePeekHandlers(space, true);
+  const shell = useAppShell();
   const link = (
     <AppLink
       href={href}
@@ -156,6 +158,7 @@ function RailSpaceLink({
       newTabTitle={fullLabel}
       draggable={false}
       aria-current={active ? "page" : undefined}
+      onClick={() => shell?.chooseSpace(space)}
       {...peekHandlers}
       className="group relative flex size-12 flex-col items-center justify-center gap-1 rounded-xl text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground"
     >
@@ -238,6 +241,12 @@ export function AppRail({
   );
 
   const items: Record<RailSpaceId, { href: string; icon: IconComponent; label: string; fullLabel: string }> = {
+    inbox: {
+      href: p.inbox(),
+      icon: routeIconForPath(p.inbox()),
+      label: t(($) => $.rail.inbox),
+      fullLabel: t(($) => $.spaces.attention),
+    },
     work: {
       href: p.issues(),
       icon: routeIconForPath(p.issues()),

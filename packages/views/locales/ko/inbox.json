@@ -1,7 +1,7 @@
 {
   "page": {
-    "title": "인박스",
-    "back": "인박스"
+    "title": "처리 필요",
+    "back": "처리 필요"
   },
   "menu": {
     "mark_all_read": "모두 읽음으로 표시",
@@ -62,14 +62,16 @@
   },
   "detail": {
     "select_prompt": "자세히 볼 알림을 선택하세요",
-    "empty": "인박스가 비어 있습니다",
+    "empty": "지금 처리할 일이 없습니다",
     "original_input": "원본 입력",
     "retry_with_context": "컨텍스트를 유지하여 재시도",
     "edit_advanced": "고급 양식으로 수정",
     "autopilot_quota_exceeded_body": "이 워크스페이스는 현재 기간의 자동화 실행 한도 {{limit}}회에 도달했습니다. 한도가 {{resetAt}}에 초기화될 때까지 이후 자동화 실행은 시작되지 않습니다.",
     "autopilot_quota_upgrade": "업그레이드 옵션 보기",
     "archive": "보관",
-    "unarchive": "보관 해제"
+    "unarchive": "보관 해제",
+    "done": "완료",
+    "handled": "처리됨 · 처리 필요에서 빠졌습니다"
   },
   "types": {
     "issue_assigned": "할당됨",

@@ -1,7 +1,7 @@
 {
   "page": {
-    "title": "收件箱",
-    "back": "收件箱"
+    "title": "待处理",
+    "back": "待处理"
   },
   "menu": {
     "mark_all_read": "全部标为已读",
@@ -62,14 +62,16 @@
   },
   "detail": {
     "select_prompt": "选择一条通知查看详情",
-    "empty": "收件箱为空",
+    "empty": "现在没有需要你处理的事",
     "original_input": "原始输入",
     "retry_with_context": "保留上下文重试",
     "edit_advanced": "在完整表单中编辑",
     "autopilot_quota_exceeded_body": "当前周期的 {{limit}} 次自动化执行额度已用完。在 {{resetAt}} 重置前，后续自动化执行将不会启动。",
     "autopilot_quota_upgrade": "查看升级方案",
     "archive": "归档",
-    "unarchive": "取消归档"
+    "unarchive": "取消归档",
+    "done": "完成",
+    "handled": "已处理 · 已移出待处理"
   },
   "types": {
     "issue_assigned": "已分配",

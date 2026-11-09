@@ -32,9 +32,10 @@ vi.mock("../../issues/components/issue-detail", () => ({
   issueHighlightMementoKey: (issueId: string) => `highlight:${issueId}`,
 }));
 const replace = vi.fn();
+const push = vi.fn();
 let searchParams = new URLSearchParams();
 vi.mock("../../navigation", () => ({
-  useNavigation: () => ({ searchParams, replace }),
+  useNavigation: () => ({ searchParams, push, replace }),
   useReportNavigating: () => {},
 }));
 vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsCompact: () => false }));
@@ -53,12 +54,8 @@ vi.mock("./inbox-filter-menu", () => ({
   },
 }));
 vi.mock("./inbox-list-item", () => ({ useTimeAgo: () => vi.fn() }));
-let rowActions: { onAction: (id: string) => void };
 vi.mock("./inbox-context-menu", () => ({
-  InboxContextMenuProvider: ({ actions, children }: { actions: typeof rowActions; children: ReactNode }) => {
-    rowActions = actions;
-    return children;
-  },
+  InboxContextMenuProvider: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("./inbox-detail-label", () => ({ useTypeLabels: () => ({}) }));
 vi.mock("../../i18n", () => {
@@ -92,8 +89,17 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); qc.clear(); });
 
+const page$ = () => <QueryClientProvider client={qc}><InboxPage /></QueryClientProvider>;
+let view: ReturnType<typeof render>;
 function renderPage() {
-  return render(<QueryClientProvider client={qc}><InboxPage /></QueryClientProvider>);
+  view = render(page$());
+  return view;
+}
+
+/** An open issue fills the page, so the next one arrives through the URL, as from the Attention panel. */
+function navigate(query: string) {
+  searchParams = new URLSearchParams(query);
+  view.rerender(page$());
 }
 
 function deferred<T>() {
@@ -119,8 +125,7 @@ it.each([false, true])("clears an older unread assignment when opening a read ro
   setApiInstance({ listInbox, markInboxRead, getInboxUnreadSummary: async () => [] } as unknown as ApiClient);
 
   renderPage();
-  const row = await screen.findByText("comment");
-  if (!viaUrl) fireEvent.click(row);
+  if (!viaUrl) fireEvent.click(await screen.findByText("comment"));
 
   expect(await screen.findByTestId("detail")).toHaveTextContent("issue-a");
   await waitFor(() => expect(markInboxRead).toHaveBeenCalledExactlyOnceWith("comment"));
@@ -151,7 +156,7 @@ function archivedFixture() {
   setApiInstance({ listArchivedInboxPage, markInboxRead, unarchiveInbox,
     getInboxUnreadSummary: async () => [],
   } as unknown as ApiClient);
-  return { a, readGate, lookup, listArchivedInboxPage, unarchiveInbox,
+  return { a, readGate, lookup, listArchivedInboxPage, markInboxRead, unarchiveInbox,
     remove: () => { rows = rows.filter((row) => row.id !== a.id); },
   };
 }
@@ -159,10 +164,9 @@ function archivedFixture() {
 async function openArchived(fixture: ReturnType<typeof archivedFixture>, viaUrl = false) {
   if (viaUrl) searchParams.set("issue", "issue-a");
   renderPage();
-  const row = await screen.findByText("inbox-a");
-  if (!viaUrl) fireEvent.click(row);
+  if (!viaUrl) fireEvent.click(await screen.findByText("inbox-a"));
   const detail = await screen.findByTestId("detail");
-  await waitFor(() => expect(screen.getByText("inbox-a")).toHaveAttribute("data-read", "true"));
+  await waitFor(() => expect(fixture.markInboxRead).toHaveBeenCalledWith("inbox-a"));
   await act(async () => fixture.readGate.resolve());
   await waitFor(() => expect(fixture.listArchivedInboxPage.mock.calls.some((call) => call[1].groupId === "issue-a")).toBe(true));
   return detail;
@@ -179,28 +183,30 @@ it("keeps the active read selection until moving to another notification", async
   renderPage();
   fireEvent.click(await screen.findByText("inbox-a"));
   await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(2));
-  expect(screen.getByText("inbox-a")).toHaveAttribute("data-read", "true");
+  expect(markInboxRead).toHaveBeenCalledWith("inbox-a");
   expect(screen.getByTestId("detail")).toHaveTextContent("issue-a");
-  fireEvent.click(screen.getByText("inbox-b"));
+  navigate("issue=issue-b");
   await waitFor(() => expect(listInbox).toHaveBeenCalledTimes(3));
+  expect(markInboxRead).toHaveBeenCalledWith("inbox-b");
   expect(screen.getByTestId("detail")).toHaveTextContent("issue-b");
+  navigate("");
+  await waitFor(() => expect(screen.queryByTestId("detail")).not.toBeInTheDocument());
   expect(screen.queryByText("inbox-a")).not.toBeInTheDocument();
-  expect(screen.getByText("inbox-b")).toHaveAttribute("data-read", "true");
 });
 
 it.each(["click", "url"])("keeps the archived row and detail mounted through refetch and slow lookup after %s selection, then releases the pin", async (selection) => {
   const fixture = archivedFixture();
   const detail = await openArchived(fixture, selection === "url");
-  expect(screen.getByText("inbox-a")).toHaveAttribute("data-read", "true");
   expect(screen.getByTestId("detail")).toBe(detail);
   expect(detailUnmounted).not.toHaveBeenCalled();
   await act(async () => fixture.lookup.resolve(page([{ ...fixture.a, read: true }])));
-  expect(screen.getByText("inbox-a")).toHaveAttribute("data-read", "true");
   expect(screen.getByTestId("detail")).toBe(detail);
   expect(detailUnmounted).not.toHaveBeenCalled();
   expect(replace).not.toHaveBeenCalledWith("/acme/inbox?view=archived");
-  fireEvent.click(screen.getByText("inbox-b"));
+  navigate("view=archived&issue=issue-b");
   await waitFor(() => expect(screen.getByTestId("detail")).toHaveTextContent("issue-b"));
+  navigate("view=archived");
+  await waitFor(() => expect(screen.queryByTestId("detail")).not.toBeInTheDocument());
   expect(screen.queryByText("inbox-a")).not.toBeInTheDocument();
 });
 
@@ -254,7 +260,6 @@ it("keeps reading through lookup failure and clears a confirmed missing notifica
   const detail = await openArchived(fixture);
   await act(async () => fixture.lookup.reject(new Error("offline")));
   await waitFor(() => expect(qc.getQueryState(archivedInboxLookupOptions("workspace-1", "issue-a").queryKey)?.status).toBe("error"));
-  expect(screen.getByText("inbox-a")).toBeInTheDocument();
   expect(screen.getByTestId("detail")).toBe(detail);
   expect(detailUnmounted).not.toHaveBeenCalled();
   fixture.listArchivedInboxPage.mockImplementation(async () => page([]));
@@ -279,9 +284,13 @@ it("restores a pinned notification without keeping it in the archived list", asy
   const fixture = archivedFixture();
   await openArchived(fixture);
   await act(async () => fixture.lookup.resolve(page([{ ...fixture.a, read: true }])));
-  act(() => rowActions.onAction("inbox-a"));
+  fireEvent.keyDown(document, { key: "e" });
   await waitFor(() => expect(fixture.unarchiveInbox).toHaveBeenCalledOnce());
   await waitFor(() => expect(screen.getByTestId("detail")).toHaveTextContent("issue-b"));
+  expect(replace).toHaveBeenLastCalledWith("/acme/inbox?view=archived&issue=issue-b");
+  navigate("view=archived&issue=issue-b");
+  navigate("view=archived");
+  await waitFor(() => expect(screen.queryByTestId("detail")).not.toBeInTheDocument());
   expect(screen.queryByText("inbox-a")).not.toBeInTheDocument();
 });
 

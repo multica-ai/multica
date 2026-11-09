@@ -1,7 +1,7 @@
 {
   "page": {
-    "title": "收件箱",
-    "back": "收件箱"
+    "title": "待處理",
+    "back": "待處理"
   },
   "menu": {
     "mark_all_read": "全部標為已讀",
@@ -62,14 +62,16 @@
   },
   "detail": {
     "select_prompt": "選擇一條通知檢視詳情",
-    "empty": "收件箱為空",
+    "empty": "現在沒有需要你處理的事",
     "original_input": "原始輸入",
     "retry_with_context": "保留上下文重試",
     "edit_advanced": "在完整表單中編輯",
     "autopilot_quota_exceeded_body": "當前週期的 {{limit}} 次自動化執行額度已用完。在 {{resetAt}} 重置前，後續自動化執行將不會啟動。",
     "autopilot_quota_upgrade": "檢視升級方案",
     "archive": "歸檔",
-    "unarchive": "取消歸檔"
+    "unarchive": "取消歸檔",
+    "done": "完成",
+    "handled": "已處理 · 已移出待處理"
   },
   "types": {
     "issue_assigned": "已分配",

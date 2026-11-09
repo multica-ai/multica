@@ -19,8 +19,8 @@ export function isPathWithin(pathname: string, href: string): boolean {
 
 /**
  * The title band of every left column — the space panels and the list columns
- * of Inbox, Chat and Settings — so the space name reads the same in all of
- * them. Pages that own the column (Inbox, Chat, Settings) render it as their h1.
+ * of Chat and Settings — so the space name reads the same in all of them.
+ * Pages that own the column (Chat, Settings) render it as their h1.
  */
 export function PanelHeader({
   title,

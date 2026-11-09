@@ -1,6 +1,6 @@
 {
   "nav": {
-    "inbox": "收件箱",
+    "inbox": "待處理",
     "chat": "聊天",
     "my_issues": "我的任務",
     "issues": "任務",
@@ -89,12 +89,13 @@
   },
   "spaces": {
     "work": "工作",
-    "team": "團隊"
+    "team": "團隊",
+    "attention": "關注"
   },
   "rail": {
     "label": "應用導覽",
     "sheet_description": "切換空間和工作區。",
-    "inbox": "收件箱",
+    "inbox": "關注",
     "work": "工作",
     "team": "團隊",
     "chat": "聊天",
@@ -170,6 +171,11 @@
       "all": "全部自動化",
       "list": "自動化",
       "templates": "從範本開始"
+    },
+    "attention": {
+      "needs_action": "待處理",
+      "view_all": "查看全部 {{total}} 件",
+      "empty": "現在沒有需要你處理的事"
     }
   },
   "account": {

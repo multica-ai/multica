@@ -14,6 +14,9 @@ vi.mock("./panels/work-panel", () => ({
   WorkPanel: () => <div data-testid="work-panel" />,
   KeptRowsRelease: () => null,
 }));
+vi.mock("./panels/attention-panel", () => ({
+  AttentionPanel: () => <div data-testid="attention-panel" />,
+}));
 vi.mock("./panels/team-panel", () => ({ TeamPanel: () => <div data-testid="team-panel" /> }));
 vi.mock("./panels/autopilots-panel", () => ({
   AutopilotsPanel: () => <div data-testid="autopilots-panel" />,
@@ -63,13 +66,6 @@ describe("SpacePanel", () => {
     expect(panel()).toBeNull();
   });
 
-  it("keeps the Work panel beside the Inbox", () => {
-    navigation.pathname = "/acme/inbox";
-    renderPanel();
-    expect(panel()).toHaveAttribute("data-state", "expanded");
-    expect(screen.getByTestId("work-panel")).toBeInTheDocument();
-  });
-
   it("collapses from a click on its edge and keeps its content out of reach", () => {
     renderPanel();
     fireEvent.click(screen.getByRole("button", { name: "Toggle left sidebar" }));
@@ -113,13 +109,15 @@ describe("SpacePanel", () => {
     }
   });
 
-  it("previews Chat from another space, not over its own page", () => {
+  it("previews Attention and Chat from another space, not over their own page", () => {
     vi.useFakeTimers();
     try {
       renderPanel();
       act(() => shell!.toggleNav());
-      act(() => shell!.requestPeek("chat"));
+      act(() => shell!.requestPeek("inbox"));
       act(() => vi.advanceTimersByTime(200));
+      expect(screen.getByTestId("attention-panel")).toBeInTheDocument();
+      act(() => shell!.requestPeek("chat"));
       expect(screen.getByTestId("chat-peek")).toBeInTheDocument();
     } finally {
       vi.useRealTimers();

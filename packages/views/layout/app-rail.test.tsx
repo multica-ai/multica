@@ -128,11 +128,11 @@ describe("AppRail global actions", () => {
 describe("AppRail order", () => {
   it("lists the spaces in the default order", () => {
     renderRail();
-    expect(railOrder()).toEqual(["work", "team", "chat", "autopilots"]);
+    expect(railOrder()).toEqual(["inbox", "work", "team", "chat", "autopilots"]);
   });
 
   it("follows the saved order", () => {
-    const order = ["chat", "work", "team", "autopilots"] as const;
+    const order = ["chat", "inbox", "work", "team", "autopilots"] as const;
     useRailOrderStore.getState().setOrder(order);
     renderRail();
     expect(railOrder()).toEqual(order);
@@ -160,11 +160,9 @@ describe("AppRail spaces", () => {
     state.pathname = "/acme/projects/p-1";
     renderRail();
 
-    for (const href of ["/acme/issues", "/acme/agents", "/acme/chat", "/acme/autopilots"]) {
+    for (const href of ["/acme/inbox", "/acme/issues", "/acme/agents", "/acme/chat", "/acme/autopilots"]) {
       expect(link(href)).not.toBeNull();
     }
-    // The Inbox is a page of Work, not a space of its own.
-    expect(link("/acme/inbox")).toBeNull();
     // Projects belong to the work space, which links to Issues.
     expect(link("/acme/issues")).toHaveAttribute("aria-current", "page");
     expect(link("/acme/agents")).not.toHaveAttribute("aria-current");
@@ -198,9 +196,9 @@ describe("AppRail label disclosure", () => {
   it("names a space whose label is cut off even when it is already the full name", async () => {
     renderRail();
     const inbox = link("/acme/inbox")!;
-    clipLabel(within(inbox).getByText("Inbox"));
+    clipLabel(within(inbox).getByText("Attention"));
     await act(async () => inbox.focus());
-    expect(tooltip()).toHaveTextContent("Inbox");
+    expect(tooltip()).toHaveTextContent("Attention");
   });
 
   it("stays quiet when the full-name label fits", async () => {
@@ -211,10 +209,10 @@ describe("AppRail label disclosure", () => {
 });
 
 describe("AppRail badges", () => {
-  it("counts the issues waiting in the Inbox on Work, with a static counter", () => {
+  it("counts inbox unread with a static counter", () => {
     state.inboxUnread = 4;
     renderRail();
-    const badge = countBadge("/acme/issues") as (HTMLElement & { animated?: boolean }) | null;
+    const badge = countBadge("/acme/inbox") as (HTMLElement & { animated?: boolean }) | null;
     expect(badge).toHaveAttribute("aria-label", "4");
     expect(badge?.animated).toBe(false);
   });
@@ -313,9 +311,9 @@ describe("AppRail panel peek", () => {
     });
     expect(peek).toBe("team");
 
-    // Chat keeps its list in its page but still previews.
-    hover("/acme/chat");
-    expect(peek).toBe("chat");
+    // Inbox and Chat keep their lists in their pages but still preview.
+    hover("/acme/inbox");
+    expect(peek).toBe("inbox");
   });
 });
 

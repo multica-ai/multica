@@ -1,7 +1,7 @@
 {
   "page": {
-    "title": "Bandeja de entrada",
-    "back": "Bandeja de entrada"
+    "title": "Pendiente",
+    "back": "Pendiente"
   },
   "menu": {
     "mark_all_read": "Marcar todo como leído",
@@ -64,14 +64,16 @@
   },
   "detail": {
     "select_prompt": "Selecciona una notificación para ver los detalles",
-    "empty": "Tu bandeja de entrada está vacía",
+    "empty": "Nada te espera ahora",
     "original_input": "Entrada original",
     "retry_with_context": "Reintentar con contexto",
     "edit_advanced": "Editar como formulario avanzado",
     "autopilot_quota_exceeded_body": "Este espacio de trabajo ha alcanzado su límite de {{limit}} ejecuciones de automatizaciones para el periodo actual. No se iniciarán más ejecuciones de automatizaciones hasta que se reinicie la cuota {{resetAt}}.",
     "autopilot_quota_upgrade": "Ver opciones de mejora del plan",
     "archive": "Archivar",
-    "unarchive": "Desarchivar"
+    "unarchive": "Desarchivar",
+    "done": "Hecho",
+    "handled": "Gestionado · ya no está pendiente"
   },
   "types": {
     "issue_assigned": "Asignada",

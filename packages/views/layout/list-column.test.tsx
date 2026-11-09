@@ -6,7 +6,7 @@ import { AppShellProvider, useAppShell } from "./app-shell-context";
 import { ListColumn } from "./list-column";
 
 vi.mock("../navigation", () => ({
-  useNavigation: () => ({ pathname: "/acme/chat" }),
+  useNavigation: () => ({ pathname: "/acme/inbox" }),
 }));
 
 let shell: ReturnType<typeof useAppShell> = null;
@@ -103,7 +103,7 @@ describe("ListColumn", () => {
         </SidebarProvider>,
       );
       const column = container.querySelector("[data-slot='list-column']");
-      act(() => shell!.requestPeek("chat"));
+      act(() => shell!.requestPeek("inbox"));
       act(() => vi.advanceTimersByTime(200));
       expect(column).not.toHaveAttribute("inert");
       expect(column).toHaveClass("w-0");

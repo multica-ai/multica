@@ -166,7 +166,7 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
 
 /** Issues under an expanded row sit flush and a step smaller than the rows
  *  around them, so a group reads as one block. */
-const TREE_CHILD_ROW_CLASS =
+export const TREE_CHILD_ROW_CLASS =
   "flex min-h-[26px] w-full items-center gap-2 rounded-lg px-2 py-[3px] text-left text-label transition-colors outline-none focus-visible:outline-2 focus-visible:outline-ring";
 
 /** An issue row whose context menu is open stays lit as if hovered. The

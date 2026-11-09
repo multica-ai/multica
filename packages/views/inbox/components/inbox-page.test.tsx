@@ -134,16 +134,17 @@ const issueDetailProps = vi.hoisted(
 vi.mock("../../issues/components/issue-detail", () => ({
   IssueDetail: (props: Record<string, unknown>) => {
     issueDetailProps.push(props);
-    return null;
+    return <div data-testid="detail" data-issue={String(props.issueId)} />;
   },
   issueHighlightMementoKey: (issueId: string) => `highlight:${issueId}`,
 }));
 
 const replace = vi.fn();
+const push = vi.fn();
 let searchParams = new URLSearchParams();
 
 vi.mock("../../navigation", () => ({
-  useNavigation: () => ({ searchParams, replace }),
+  useNavigation: () => ({ searchParams, push, replace }),
   // Real hook: reports the detail-pane swap to the shell's progress bar.
   // Nothing here renders that bar, and the page reads nothing back from it.
   useReportNavigating: () => {},
@@ -151,9 +152,8 @@ vi.mock("../../navigation", () => ({
 
 // Drive the layout from a viewport width so a test can name the device it
 // cares about instead of a boolean, and the two breakpoints stay in one place.
-// Phone-width by default — one column keeps most assertions simple. Tests
-// about actioning a row WHILE it is open need the two-panel desktop layout,
-// since a single column swaps the list out for the detail on selection.
+// Phone-width by default. At every width an open row takes the list's place,
+// so tests about a row WHILE it is open read the detail instead.
 const PHONE = 390;
 // iPhone Duo's inner screen: 669px wide held upright, 951px held sideways.
 const FOLD_INNER_PORTRAIT = 669;
@@ -267,6 +267,15 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
   };
 }
 
+/** The issue the detail shows, or null while the list is on screen. */
+const openIssue = () => screen.queryByTestId("detail")?.getAttribute("data-issue") ?? null;
+
+/** A selection that arrives through the URL, as from the Attention panel. */
+function openFromUrl(rerender: (ui: React.ReactElement) => void, key: string) {
+  searchParams = new URLSearchParams(key ? `issue=${key}` : "");
+  rerender(<InboxPage />);
+}
+
 function reset() {
   listData.active = [];
   listData.archived = [];
@@ -279,6 +288,7 @@ function reset() {
   queryCalls.length = 0;
   searchParams = new URLSearchParams();
   replace.mockClear();
+  push.mockClear();
   markReadMutate.mockReset();
   markUnreadMutate.mockClear();
   archiveMutate.mockClear();
@@ -309,10 +319,11 @@ describe("InboxPage", () => {
     const { rerender } = render(<InboxPage />);
     fireEvent.click(screen.getByTestId("row"));
     rerender(<InboxPage />);
-    expect(screen.getByTestId("row")).toHaveTextContent("busy-row");
+    expect(openIssue()).toBe("busy-issue");
 
     act(() => useInboxFilterStore.getState().setAgent("workspace-1", "idle"));
 
+    expect(openIssue()).toBeNull();
     expect(screen.queryByTestId("row")).toBeNull();
   });
 
@@ -339,24 +350,59 @@ describe("InboxPage", () => {
     act(() => useInboxFilterStore.getState().setAgent("workspace-1", "idle"));
     listData.tasks = [{ id: "task-a", agent_id: "agent-1", issue_id: "issue-a", status: "running" }] as AgentTask[];
     rerender(<InboxPage />);
-    expect(screen.getByTestId("row")).toHaveTextContent("was-idle");
+    expect(openIssue()).toBe("issue-a");
 
     act(() => useInboxFilterStore.getState().setAgent("workspace-1", "idle"));
 
+    expect(openIssue()).toBeNull();
     expect(screen.queryByTestId("row")).toBeNull();
   });
 
-  // Inbox rows need more room than the nav's labels, so the list is sized by
-  // the list width rather than the space panel's.
-  it("sizes the desktop list with the list column width", () => {
+  // The Attention panel beside the page lists what is waiting, so the page
+  // has no list column of its own: it shows the list or the open issue.
+  it("swaps the full-width list for the opened issue on desktop", () => {
     reset();
     layout.width = DESKTOP;
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
 
     const { container } = render(<InboxPage />);
+    expect(container.querySelector("[data-slot='list-column']")).toBeNull();
+    expect(screen.getByTestId("list")).toBeInTheDocument();
 
-    expect(container.querySelector("[data-slot='list-column']")).toHaveClass(
-      "w-[min(var(--list-column-width),40vw)]",
-    );
+    fireEvent.click(screen.getByTestId("row"));
+
+    expect(screen.queryByTestId("list")).toBeNull();
+    expect(openIssue()).toBe("issue-a");
+  });
+
+  it("gives the opened issue a reason bar that can finish it", () => {
+    reset();
+    layout.width = DESKTOP;
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+    render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+
+    const notice = issueDetailProps.at(-1)?.notice as React.ReactElement<{
+      handled: boolean;
+      onDone: () => void;
+    }>;
+    expect(notice.props.handled).toBe(false);
+    act(() => notice.props.onDone());
+
+    expect(archiveMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+  });
+
+  it("leaves the reason bar out of the archive", () => {
+    reset();
+    layout.width = DESKTOP;
+    searchParams = new URLSearchParams("view=archived&issue=issue-9");
+    listData.archived = [item({ id: "archived-1", issue_id: "issue-9", archived: true })];
+    render(<InboxPage />);
+
+    expect(openIssue()).toBe("issue-9");
+    expect(issueDetailProps.at(-1)?.notice).toBeUndefined();
+    // No panel lists the archive, so the detail carries the way back.
+    expect(issueDetailProps.at(-1)?.leadingAction).toBeTruthy();
   });
 
   it("keeps the title unread count static", () => {
@@ -623,7 +669,6 @@ describe("InboxPage", () => {
   it("switches between the inbox and the archive from the title menu", async () => {
     reset();
     layout.width = DESKTOP;
-    searchParams = new URLSearchParams("issue=issue-1");
     listData.active = [item({ id: "active-1", issue_id: "issue-1" })];
     const { container } = render(<InboxPage />);
 
@@ -676,23 +721,6 @@ describe("InboxPage", () => {
     expect(screen.getByTestId("list").dataset.view).toBe("archived");
   });
 
-  it("replays the comment highlight when the already-open row is clicked again", () => {
-    // Re-clicking the open notification is an explicit "take me back to that
-    // comment". It doesn't remount the detail (same issue key), so the page
-    // signals the replay through the bumped token; a selection change keeps
-    // the token still — its remount replays the landing by itself.
-    reset();
-    layout.width = DESKTOP;
-    listData.active = [item({ details: { comment_id: "comment-1" } })];
-
-    render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
-    expect(issueDetailProps.at(-1)?.highlightRequestToken).toBe(0);
-
-    fireEvent.click(screen.getByTestId("row"));
-    expect(issueDetailProps.at(-1)?.highlightRequestToken).toBe(1);
-  });
-
   it("keeps its own detail pane from reading the inbox, so a row marked unread stays unread", () => {
     // The detail reads an issue's notifications when it is opened anywhere
     // else (MUL-8588). Here the page reads the row it selected itself, and a
@@ -718,9 +746,10 @@ describe("InboxPage", () => {
     render(<InboxPage />);
     fireEvent.click(screen.getByTestId("row"));
 
-    expect(replace).toHaveBeenCalledWith("/acme/inbox?view=archived&issue=issue-9");
+    expect(push).toHaveBeenCalledWith("/acme/inbox?view=archived&issue=issue-9");
   });
 
+  // The open issue replaces the list, so opening one is a step Back returns from.
   it("writes a bare issue param when selecting in the main view", () => {
     reset();
     listData.active = [item({ id: "active-1", issue_id: "issue-3" })];
@@ -728,7 +757,8 @@ describe("InboxPage", () => {
     render(<InboxPage />);
     fireEvent.click(screen.getByTestId("row"));
 
-    expect(replace).toHaveBeenCalledWith("/acme/inbox?issue=issue-3");
+    expect(push).toHaveBeenCalledWith("/acme/inbox?issue=issue-3");
+    expect(replace).not.toHaveBeenCalled();
   });
 
   // `InboxItem.issue_id` is nullable: a quick-create outcome is a notification,
@@ -865,7 +895,7 @@ describe("InboxPage", () => {
     fireEvent.click(screen.getByTestId("row"));
     rerender(<InboxPage />);
 
-    expect(screen.getByTestId("row")).toHaveTextContent("inbox-a");
+    expect(openIssue()).toBe("issue-a");
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
   });
 
@@ -889,14 +919,11 @@ describe("InboxPage", () => {
     ] as AgentTask[];
     rerender(<InboxPage />);
 
-    // The open row stays; another row that turned busy is still filtered.
-    expect(screen.getAllByTestId("row").map((row) => row.textContent)).toEqual([
-      "inbox-a",
-    ]);
+    expect(openIssue()).toBe("issue-a");
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
   });
 
-  it("keeps a handled row in place, dimmed, until the selection moves", () => {
+  it("keeps a handled issue open, marked handled, until the selection moves", () => {
     // Replying or changing the status from the detail takes the issue out of
     // the Inbox on the server. The issue being worked must not be pulled away.
     reset();
@@ -915,14 +942,14 @@ describe("InboxPage", () => {
     listData.active = [rows[0]!, rows[2]!];
     rerender(<InboxPage />);
 
-    const shown = screen.getAllByTestId("row");
-    expect(shown.map((row) => row.textContent)).toEqual(["inbox-a", "inbox-b", "inbox-c"]);
-    expect(shown[1]).toHaveAttribute("data-handled", "true");
-    expect(issueDetailProps.at(-1)).toMatchObject({ issueId: "issue-b" });
+    expect(openIssue()).toBe("issue-b");
+    expect(
+      (issueDetailProps.at(-1)?.notice as React.ReactElement<{ handled: boolean }>).props.handled,
+    ).toBe(true);
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
 
-    fireEvent.click(shown[0]!);
-    rerender(<InboxPage />);
+    openFromUrl(rerender, "issue-a");
+    openFromUrl(rerender, "");
     expect(screen.getAllByTestId("row").map((row) => row.textContent)).toEqual(["inbox-a", "inbox-c"]);
   });
 
@@ -974,14 +1001,13 @@ describe("InboxPage", () => {
       item({ id: "inbox-b", issue_id: "issue-b", read: false }),
     ];
 
-    render(<InboxPage />);
-    const [rowA, rowB] = screen.getAllByTestId("row");
-    fireEvent.click(rowA!);
+    const { rerender } = render(<InboxPage />);
+    fireEvent.click(screen.getAllByTestId("row")[0]!);
     act(() => rowActions?.onMarkUnread("inbox-a"));
 
-    fireEvent.click(rowB!);
+    openFromUrl(rerender, "issue-b");
     markReadMutate.mockClear();
-    fireEvent.click(rowA!);
+    openFromUrl(rerender, "issue-a");
 
     expect(markReadMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
   });
@@ -1001,11 +1027,9 @@ describe("InboxPage", () => {
     expect(screen.queryByTestId("list")).toBeNull();
   });
 
-  it.each([TABLET, FOLD_INNER_LANDSCAPE])("keeps both panes at %spx", (width) => {
-    // 768px is the first width that keeps the two-pane layout. The nav
-    // auto-collapses there instead (see the sidebar), so the list has to stay
-    // on screen next to an open item — on a foldable's inner screen held
-    // sideways as much as on a tablet.
+  it.each([TABLET, FOLD_INNER_LANDSCAPE])("leaves the way back to the panel at %spx", (width) => {
+    // 768px is the first desktop width. The Attention panel lists the issues
+    // there, so the detail carries no back control of its own.
     reset();
     layout.width = width;
     listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
@@ -1013,7 +1037,8 @@ describe("InboxPage", () => {
     render(<InboxPage />);
     fireEvent.click(screen.getByTestId("row"));
 
-    expect(screen.queryByTestId("list")).not.toBeNull();
+    expect(openIssue()).toBe("issue-a");
+    expect(issueDetailProps.at(-1)?.leadingAction).toBeUndefined();
   });
 
   function renderWithActiveItem() {

@@ -13,10 +13,10 @@ const WIDTH_CLASS: Record<PanelWidth, string> = {
 };
 
 /**
- * The list column of a list-and-detail page (Inbox, Chat, Settings). It takes
+ * The list column of a list-and-detail page (Chat, Settings). It takes
  * the space panel's resize edge and collapse motion. A `nav` column (Settings)
  * also takes the panel's width, so its divider stays put when switching
- * spaces; a `list` column (Inbox, Chat) shares the wider list width instead,
+ * spaces; a `list` column (Chat) shares the wider list width instead,
  * because its rows carry far more than the nav's labels. It stays mounted
  * while collapsed, keeping the list's scroll position.
  */

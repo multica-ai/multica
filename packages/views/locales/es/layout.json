@@ -1,6 +1,6 @@
 {
   "nav": {
-    "inbox": "Bandeja de entrada",
+    "inbox": "Pendiente",
     "chat": "Chat",
     "my_issues": "Mis tareas",
     "issues": "Tareas",
@@ -90,12 +90,13 @@
   },
   "spaces": {
     "work": "Trabajo",
-    "team": "Equipo"
+    "team": "Equipo",
+    "attention": "Atención"
   },
   "rail": {
     "label": "Navegación de la app",
     "sheet_description": "Cambia de sección y de espacio de trabajo.",
-    "inbox": "Bandeja",
+    "inbox": "Atención",
     "work": "Trabajo",
     "team": "Equipo",
     "chat": "Chat",
@@ -176,6 +177,11 @@
       "all": "Todas las automatizaciones",
       "list": "Automatizaciones",
       "templates": "Desde una plantilla"
+    },
+    "attention": {
+      "needs_action": "Pendiente",
+      "view_all": "Ver los {{total}}",
+      "empty": "Nada te espera ahora"
     }
   },
   "account": {

@@ -1,7 +1,7 @@
 {
   "page": {
-    "title": "インボックス",
-    "back": "インボックス"
+    "title": "要対応",
+    "back": "要対応"
   },
   "menu": {
     "mark_all_read": "すべて既読にする",
@@ -62,14 +62,16 @@
   },
   "detail": {
     "select_prompt": "詳細を表示する通知を選択してください",
-    "empty": "インボックスは空です",
+    "empty": "今対応が必要なものはありません",
     "original_input": "元の入力",
     "retry_with_context": "コンテキストを保持して再試行",
     "edit_advanced": "詳細フォームで編集",
     "autopilot_quota_exceeded_body": "このワークスペースは現在の期間の自動化実行上限 {{limit}} 回に達しました。実行枠が {{resetAt}} にリセットされるまで、以降の自動化は開始されません。",
     "autopilot_quota_upgrade": "アップグレード方法を見る",
     "archive": "アーカイブ",
-    "unarchive": "アーカイブ解除"
+    "unarchive": "アーカイブ解除",
+    "done": "完了",
+    "handled": "対応済み · 要対応から外れました"
   },
   "types": {
     "issue_assigned": "割り当て済み",
