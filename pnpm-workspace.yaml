@@ -27,6 +27,9 @@ catalog:
   clsx: ^2.1.1
   cmdk: ^1.1.1
   eslint-plugin-i18next: ^6.1.4
+  fumadocs-core: ^16.17.8
+  fumadocs-mdx: ^15.4.10
+  fumadocs-ui: ^16.17.8
   i18next: ^26.0.8
   jsdom: ^29.0.1
   katex: ^0.16.45

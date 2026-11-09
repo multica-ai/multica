@@ -29,14 +29,6 @@ export const allowlist = new Map([
     "@vitejs/plugin-react",
     "apps/desktop bundles with plugin-react 5; moving it to the catalog's 6 changes how pnpm resolves vite for electron-vite and needs its own verification.",
   ],
-  [
-    "fumadocs-core",
-    "apps/web is on fumadocs 15 and apps/docs on 16; aligning them needs an apps/web fumadocs upgrade.",
-  ],
-  [
-    "fumadocs-mdx",
-    "apps/web is on fumadocs-mdx 12 and apps/docs on 15; aligning them needs an apps/web fumadocs upgrade.",
-  ],
 ]);
 
 const unquote = (value) => value.trim().replace(/^(['"])(.*)\1$/, "$2");
