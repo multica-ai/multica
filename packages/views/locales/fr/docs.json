@@ -1,0 +1,57 @@
+{
+  "untitled": "Sans titre",
+  "version_number": "v{{number}}",
+  "kb": "Documents",
+  "actions": {
+    "new": "Nouveau",
+    "new_doc": "Nouveau document",
+    "new_folder": "Nouveau dossier",
+    "rename": "Renommer",
+    "move": "Déplacer vers...",
+    "delete": "Supprimer",
+    "cancel": "Annuler",
+    "history": "Historique",
+    "more": "Plus"
+  },
+  "errors": {
+    "move": "Impossible de déplacer l'élément",
+    "delete": "Impossible de supprimer l'élément",
+    "save": "Échec de l'enregistrement"
+  },
+  "move": {
+    "title": "Déplacer « {{title}} »",
+    "destination": "Destination",
+    "root": "Base de connaissances (racine)",
+    "current": "Actuel",
+    "confirm": "Déplacer"
+  },
+  "delete": {
+    "title": "Supprimer ce document ?",
+    "description": "« {{title}} » et tout son historique seront supprimés. Action irréversible.",
+    "confirm": "Supprimer",
+    "folder_title": "Supprimer ce dossier ?",
+    "folder_description": "Seuls les dossiers vides peuvent être supprimés."
+  },
+  "tree": {
+    "more": "Plus d'actions pour {{title}}",
+    "empty": "Aucun document"
+  },
+  "editor": {
+    "placeholder": "Écrivez, ou tapez / pour les commandes...",
+    "title_label": "Titre",
+    "saving": "Enregistrement...",
+    "saved": "Enregistré",
+    "save_failed": "Non enregistré · Réessayer",
+    "retry": "Réessayer",
+    "conflict": "{{name}} a modifié le document. Votre brouillon est conservé. Rechargez pour continuer.",
+    "reload": "Recharger la dernière version",
+    "draft": "Votre brouillon conservé"
+  },
+  "history": {
+    "title": "Historique",
+    "current": "Actuelle",
+    "restore": "Restaurer cette version",
+    "loading": "Chargement..."
+  },
+  "updated": "Mis à jour par {{name}} · {{time}}"
+}

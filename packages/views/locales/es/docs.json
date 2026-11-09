@@ -1,0 +1,57 @@
+{
+  "untitled": "Sin título",
+  "version_number": "v{{number}}",
+  "kb": "Documentos",
+  "actions": {
+    "new": "Nuevo",
+    "new_doc": "Nuevo documento",
+    "new_folder": "Nueva carpeta",
+    "rename": "Renombrar",
+    "move": "Mover a...",
+    "delete": "Eliminar",
+    "cancel": "Cancelar",
+    "history": "Historial",
+    "more": "Más"
+  },
+  "errors": {
+    "move": "No se pudo mover",
+    "delete": "No se pudo eliminar",
+    "save": "No se pudo guardar"
+  },
+  "move": {
+    "title": "Mover \"{{title}}\"",
+    "destination": "Destino",
+    "root": "Documentos (nivel superior)",
+    "current": "Actual",
+    "confirm": "Mover"
+  },
+  "delete": {
+    "title": "¿Eliminar este documento?",
+    "description": "Se eliminará \"{{title}}\" y todo su historial. Esta acción no se puede deshacer.",
+    "confirm": "Eliminar",
+    "folder_title": "¿Eliminar esta carpeta?",
+    "folder_description": "Solo se pueden eliminar carpetas vacías."
+  },
+  "tree": {
+    "more": "Más acciones para {{title}}",
+    "empty": "Aún no hay documentos"
+  },
+  "editor": {
+    "placeholder": "Escribe o pulsa / para ver los comandos...",
+    "title_label": "Título",
+    "saving": "Guardando...",
+    "saved": "Guardado",
+    "save_failed": "Sin guardar · Reintentar",
+    "retry": "Reintentar",
+    "conflict": "{{name}} actualizó el documento. Tu borrador se conserva. Recarga para continuar.",
+    "reload": "Cargar última versión",
+    "draft": "Tu borrador guardado"
+  },
+  "history": {
+    "title": "Historial",
+    "current": "Actual",
+    "restore": "Restaurar esta versión",
+    "loading": "Cargando..."
+  },
+  "updated": "Actualizado por {{name}} · {{time}}"
+}

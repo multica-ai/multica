@@ -1,0 +1,57 @@
+{
+  "untitled": "無題",
+  "version_number": "v{{number}}",
+  "kb": "ドキュメント",
+  "actions": {
+    "new": "新規",
+    "new_doc": "新規ドキュメント",
+    "new_folder": "新規フォルダ",
+    "rename": "名前を変更",
+    "move": "移動...",
+    "delete": "削除",
+    "cancel": "キャンセル",
+    "history": "履歴",
+    "more": "その他"
+  },
+  "errors": {
+    "move": "移動できませんでした",
+    "delete": "削除できませんでした",
+    "save": "保存できませんでした"
+  },
+  "move": {
+    "title": "\"{{title}}\"を移動",
+    "destination": "移動先",
+    "root": "ナレッジベース（最上位）",
+    "current": "現在",
+    "confirm": "移動"
+  },
+  "delete": {
+    "title": "このドキュメントを削除しますか？",
+    "description": "\"{{title}}\"とその履歴がすべて削除されます。元に戻せません。",
+    "confirm": "削除",
+    "folder_title": "フォルダーを削除しますか？",
+    "folder_description": "空のフォルダーのみ削除できます。"
+  },
+  "tree": {
+    "more": "{{title}} のその他の操作",
+    "empty": "ドキュメントはまだありません"
+  },
+  "editor": {
+    "placeholder": "入力するか / でコマンド...",
+    "title_label": "タイトル",
+    "saving": "保存中...",
+    "saved": "保存済み",
+    "save_failed": "未保存 · 再試行",
+    "retry": "再試行",
+    "conflict": "{{name}} が更新しました。下書きを保持しています。再読み込みして続けてください。",
+    "reload": "最新版を読み込む",
+    "draft": "保存した下書き"
+  },
+  "history": {
+    "title": "履歴",
+    "current": "現在",
+    "restore": "このバージョンを復元",
+    "loading": "読み込み中..."
+  },
+  "updated": "{{name}} が更新 · {{time}}"
+}

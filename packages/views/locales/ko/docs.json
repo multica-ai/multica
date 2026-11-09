@@ -1,0 +1,57 @@
+{
+  "untitled": "제목 없음",
+  "version_number": "v{{number}}",
+  "kb": "문서",
+  "actions": {
+    "new": "새로 만들기",
+    "new_doc": "새 문서",
+    "new_folder": "새 폴더",
+    "rename": "이름 변경",
+    "move": "이동...",
+    "delete": "삭제",
+    "cancel": "취소",
+    "history": "기록",
+    "more": "더 보기"
+  },
+  "errors": {
+    "move": "이동하지 못했습니다",
+    "delete": "삭제하지 못했습니다",
+    "save": "저장하지 못했습니다"
+  },
+  "move": {
+    "title": "‘{{title}}’ 이동",
+    "destination": "대상 위치",
+    "root": "지식 베이스(최상위)",
+    "current": "현재",
+    "confirm": "이동"
+  },
+  "delete": {
+    "title": "이 문서를 삭제할까요?",
+    "description": "‘{{title}}’와 전체 기록이 삭제됩니다. 되돌릴 수 없습니다.",
+    "confirm": "삭제",
+    "folder_title": "폴더를 삭제할까요?",
+    "folder_description": "빈 폴더만 삭제할 수 있습니다."
+  },
+  "tree": {
+    "more": "{{title}} 더 보기",
+    "empty": "아직 문서가 없습니다"
+  },
+  "editor": {
+    "placeholder": "입력하거나 /로 명령어...",
+    "title_label": "제목",
+    "saving": "저장 중...",
+    "saved": "저장됨",
+    "save_failed": "저장 안 됨 · 다시 시도",
+    "retry": "다시 시도",
+    "conflict": "{{name}}님이 수정했습니다. 초안이 보존됩니다. 다시 불러와 계속하세요.",
+    "reload": "최신 버전 불러오기",
+    "draft": "보존된 초안"
+  },
+  "history": {
+    "title": "기록",
+    "current": "현재",
+    "restore": "이 버전 복원",
+    "loading": "불러오는 중..."
+  },
+  "updated": "{{name}} 업데이트 · {{time}}"
+}
