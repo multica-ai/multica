@@ -1,20 +1,16 @@
 import { notFound } from "next/navigation";
-import { discordUrl, githubUrl, twitterUrl } from "../components/shared";
 import type { SiteDict } from "../i18n/types";
 
 /**
- * Information architecture of the marketing site: every page, the header
- * menus, and the footer are derived from the registries below, so a page added
- * here appears in navigation, gets a route, and lands in `sitemap.xml` in one
- * edit.
+ * Information architecture of the marketing site: every page and the footer
+ * are derived from the registries below, so a page added here appears in
+ * navigation, gets a route, and lands in `sitemap.xml` in one edit.
  *
  * Copy is English-only placeholder text while positioning is being settled.
  */
 
 export type SiteLink = { label: string; href: string; external?: boolean };
 export type SiteLinkGroup = { title: string; links: SiteLink[] };
-export type SiteMenuId = "product" | "solutions" | "resources";
-export type SiteMenu = { id: SiteMenuId; label: string; groups: SiteLinkGroup[] };
 
 export type SitePage = {
   slug: string;
@@ -143,9 +139,6 @@ export function liveMetadata<T extends object>(href: string, metadata: T): T | R
 export const productHref = (slug: string) => `/product/${slug}`;
 export const solutionHref = (slug: string) => `/solutions/${slug}`;
 
-const toLinks = (pages: SitePage[], href: (slug: string) => string): SiteLink[] =>
-  pages.map((page) => ({ label: page.title, href: href(page.slug) }));
-
 export function findPage(groups: PageGroup[], slug: string): SitePage | undefined {
   return groups.flatMap((group) => group.pages).find((page) => page.slug === slug);
 }
@@ -158,96 +151,6 @@ function released(groups: SiteLinkGroup[], isLive: IsLive): SiteLinkGroup[] {
   return groups
     .map((group) => ({ ...group, links: group.links.filter((link) => link.external || isLive(link.href)) }))
     .filter((group) => group.links.length > 0);
-}
-
-export function buildTopLinks(docsHref: string, nav: NavLabels, isLive: IsLive = isLiveRoute): SiteLink[] {
-  return [
-    { label: nav.customers, href: "/customers" },
-    { label: nav.pricing, href: "/pricing" },
-    { label: nav.docs, href: docsHref, external: true },
-  ].filter((link) => link.external || isLive(link.href));
-}
-
-export function buildMenus(docsHref: string, nav: NavLabels, isLive: IsLive = isLiveRoute): SiteMenu[] {
-  const productGroups = released(
-    PRODUCT_GROUPS.map((group) => ({ title: group.title, links: toLinks(group.pages, productHref) })),
-    isLive,
-  );
-  const menus: SiteMenu[] = [
-    {
-      id: "product",
-      label: nav.product,
-      // The agent list only frames the product pages; without them the menu goes.
-      groups: productGroups.length
-        ? [
-            ...productGroups,
-            {
-              title: nav.worksWith,
-              links: [
-                { label: "Claude Code", href: `${docsHref}/providers`, external: true },
-                { label: "Codex", href: `${docsHref}/providers`, external: true },
-                { label: "Cursor", href: `${docsHref}/providers`, external: true },
-                { label: "GitHub Copilot", href: `${docsHref}/providers`, external: true },
-                { label: nav.allAgents, href: `${docsHref}/providers`, external: true },
-              ],
-            },
-          ]
-        : [],
-    },
-    {
-      id: "solutions",
-      label: nav.solutions,
-      groups: released(
-        SOLUTION_GROUPS.map((group) => ({ title: group.title, links: toLinks(group.pages, solutionHref) })),
-        isLive,
-      ),
-    },
-    {
-      id: "resources",
-      label: nav.resources,
-      groups: released(
-        [
-          {
-            title: nav.learn,
-            links: [
-              { label: nav.documentation, href: docsHref, external: true },
-              { label: nav.changelog, href: "/changelog" },
-              { label: nav.useCases, href: "/usecases" },
-              { label: nav.blog, href: "/blog" },
-              { label: nav.download, href: "/download" },
-            ],
-          },
-          {
-            title: nav.community,
-            links: [
-              { label: "GitHub", href: githubUrl, external: true },
-              { label: "Discord", href: discordUrl, external: true },
-              { label: "X", href: twitterUrl, external: true },
-            ],
-          },
-          {
-            title: nav.company,
-            links: [
-              { label: nav.about, href: "/about" },
-              { label: nav.careers, href: "/careers" },
-              { label: nav.press, href: "/press" },
-              { label: nav.contactSales, href: "/contact-sales" },
-            ],
-          },
-          {
-            title: nav.trust,
-            links: [
-              { label: nav.security, href: "/security" },
-              { label: nav.licensing, href: "/licensing" },
-              { label: nav.privacy, href: "/privacy" },
-            ],
-          },
-        ],
-        isLive,
-      ),
-    },
-  ];
-  return menus.filter((menu) => menu.groups.length > 0);
 }
 
 export function buildFooterGroups(docsHref: string, nav: NavLabels, isLive: IsLive = isLiveRoute): SiteLinkGroup[] {

@@ -2,11 +2,9 @@
 
 import { useEffect, useRef, useState, type ComponentType, type CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, ChevronRight, ArrowLeftRight } from "@multica/ui/icons";
+import { ArrowRight, ArrowUpRight, ChevronRight } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { BorderBeam } from "@multica/ui/components/common/border-beam";
-import { useAuthStore } from "@multica/core/auth";
-import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
 import { FAQSection } from "../components/faq-section";
 import { anchorId } from "../components/changelog-page-client";
 import {
@@ -18,33 +16,21 @@ import {
   focusRing,
 } from "./primitives";
 import { HERO_PROVIDERS } from "../components/provider-marks";
-import { docsHrefForLocale, useLocale } from "../i18n";
+import { docsHrefForLocale, toLandingDictionaryLocale, useLocale } from "../i18n";
 import type { HomeDict } from "../i18n/types";
 import { CUSTOMER_LOGOS } from "./customer-logos";
 import { AutopilotsVisual, ChatVisual, RuntimesVisual, SkillsVisual, WorkflowVisual } from "./demo/feature-visuals";
 import { HeroDemo } from "./demo/hero-demo";
-import { PROVIDER_MARKS, ZoomCanvas, usePrefersReducedMotion, useStoryLoop } from "./demo/mock-kit";
-import {
-  DigestAfter,
-  DigestBefore,
-  PipelineAfter,
-  PipelineBefore,
-  STAGE_CANVAS,
-  TabsAfter,
-  TabsBefore,
-} from "./demo/before-after-visuals";
+import { PROVIDER_MARKS, useStoryLoop } from "./demo/mock-kit";
 import { CtaBand, SitePage } from "./site-page";
-import { AdvanceLine, useAutoAdvance } from "./auto-advance";
 import { SITE_PREVIEW } from "./sitemap";
 
 export function HomePage() {
   return (
     <SitePage>
       <Hero />
-      {/* The logo wall waits for an approved customer list; previews show placeholder logos. */}
-      {SITE_PREVIEW ? <LogoWall /> : null}
+      <LogoWall />
       <div className="site-rails">
-        <BeforeAfter />
         <Features />
         <Agents />
         <Updates />
@@ -61,8 +47,6 @@ const ANNOUNCEMENT: { label: string; href: string } | null = SITE_PREVIEW
   : null;
 
 function Hero() {
-  const user = useAuthStore((s) => s.user);
-  const ctaHref = useDashboardCtaHref();
   const copy = useLocale().t.home.hero;
 
   return (
@@ -84,8 +68,8 @@ function Hero() {
         <HeroHeadline />
         <p className="mt-3 max-w-[38rem] text-site-body text-site-muted text-pretty">{copy.lead}</p>
         <div className="mt-6 flex flex-wrap gap-2.5">
-          <ActionLink href={ctaHref} size="lg">
-            {user ? copy.openDashboard : copy.getStarted}
+          <ActionLink href="/download" size="lg">
+            {copy.download}
           </ActionLink>
           <ActionLink href="/contact-sales" size="lg" tone="secondary">
             {copy.bookDemo}
@@ -163,7 +147,8 @@ function ProviderMark({ name }: { name: string }) {
 }
 
 function LogoWall() {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
+  const logos = CUSTOMER_LOGOS[toLandingDictionaryLocale(locale)];
   return (
     <section aria-labelledby="logo-wall-title" className="pb-site-section">
       <Container className="max-w-site-wide">
@@ -181,19 +166,21 @@ function LogoWall() {
                   copy === 1 && "motion-reduce:hidden",
                 )}
               >
-                {CUSTOMER_LOGOS.map((logo) => (
+                {logos.map((logo) => (
                   <li
                     key={logo.name}
-                    style={{ "--logo-color": logo.color } as CSSProperties}
+                    style={logo.mark ? ({ "--logo-color": logo.mark.color } as CSSProperties) : undefined}
                     className="group/logo flex h-10 items-center gap-2 text-site-muted transition-colors duration-200 hover:text-site-ink"
                   >
-                    <svg
-                      viewBox="0 0 24 24"
-                      aria-hidden
-                      className="size-5 fill-current sm:size-6 transition-colors duration-200 group-hover/logo:fill-(--logo-color)"
-                    >
-                      <path d={logo.path} />
-                    </svg>
+                    {logo.mark ? (
+                      <svg
+                        viewBox="0 0 24 24"
+                        aria-hidden
+                        className="size-5 fill-current sm:size-6 transition-colors duration-200 group-hover/logo:fill-(--logo-color)"
+                      >
+                        <path d={logo.mark.path} />
+                      </svg>
+                    ) : null}
                     <span className="text-[0.9375rem] font-semibold sm:text-[1.0625rem] tracking-tight whitespace-nowrap">{logo.name}</span>
                   </li>
                 ))}
@@ -367,182 +354,6 @@ function FeatureCard({ id, visual: Visual }: (typeof FEATURES)[number]) {
       </div>
       <h3 className="mt-4 text-site-card text-site-ink">{title}</h3>
       <p className="mt-site-stack max-w-[32rem] text-site-body text-site-muted">{body}</p>
-    </div>
-  );
-}
-
-type StoryId = keyof HomeDict["stories"]["items"];
-
-const STORIES: { id: StoryId; scenes: [ComponentType, ComponentType] }[] = [
-  { id: "board", scenes: [TabsBefore, TabsAfter] },
-  { id: "digest", scenes: [DigestBefore, DigestAfter] },
-  { id: "pipeline", scenes: [PipelineBefore, PipelineAfter] },
-];
-
-const STORY_ENTER = "animate-in fade-in duration-500 motion-reduce:animate-none";
-
-const STORY_HOLD = 8000;
-
-function BeforeAfter() {
-  const copy = useLocale().t.home.stories;
-  const cycle = useAutoAdvance(STORIES.length);
-  const story = STORIES[cycle.active]!;
-  const text = copy.items[story.id];
-  const outcomeLabels = [copy.beforeLabel, copy.afterLabel];
-
-  return (
-    <Section>
-      <Container>
-        <SectionHeader title={copy.title} lead={copy.lead} />
-        <div
-          ref={cycle.ref}
-          className="mt-site-block grid gap-8 xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] xl:gap-14"
-        >
-          <ol {...cycle.holdProps} className="order-2 flex flex-col xl:order-1">
-            {STORIES.map((item, index) => {
-              const selected = index === cycle.active;
-              return (
-                <li key={item.id} className="relative border-t border-site-line last:border-b">
-                  <AdvanceLine
-                    selected={selected}
-                    playing={cycle.playing}
-                    running={cycle.running}
-                    duration={STORY_HOLD}
-                    onDone={cycle.advance}
-                  />
-                  <button
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => cycle.select(index)}
-                    className={cn(
-                      "w-full py-5 text-left text-site-card transition-colors",
-                      selected ? "text-site-ink" : "text-site-muted hover:text-site-ink",
-                      focusRing,
-                    )}
-                  >
-                    {copy.items[item.id].title}
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-          <div key={story.id} className={cn("order-1 xl:order-2", STORY_ENTER)}>
-            <dl className="grid grid-cols-2">
-              {text.outcomes.map((outcome, index) => (
-                <div key={index} className={index === 0 ? "pr-4 sm:pr-6" : "border-l border-site-line pl-4 sm:pl-6"}>
-                  <dt className="text-site-small text-site-muted">{outcomeLabels[index]}</dt>
-                  <dd
-                    className={cn(
-                      "mt-2 font-site-display text-site-heading tabular-nums",
-                      index === 0 ? "text-site-muted" : "text-site-ink",
-                    )}
-                  >
-                    {outcome.value}
-                  </dd>
-                  <dd className="mt-1.5 text-site-small text-site-muted text-pretty">{outcome.caption}</dd>
-                </div>
-              ))}
-            </dl>
-            <CompareStage story={story} onDrag={cycle.stop} className="mt-6 sm:mt-8" />
-          </div>
-        </div>
-      </Container>
-    </Section>
-  );
-}
-
-function CompareStage({ story, onDrag, className }: { story: (typeof STORIES)[number]; onDrag: () => void; className?: string }) {
-  const [Before, After] = story.scenes;
-  const copy = useLocale().t.home.stories;
-  const text = copy.items[story.id];
-  const ref = useRef<HTMLDivElement>(null);
-  const [split, setSplit] = useState(100);
-  const [sweeping, setSweeping] = useState(false);
-  const reducedMotion = usePrefersReducedMotion();
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const intersection = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry?.isIntersecting) return;
-        intersection.disconnect();
-        if (reducedMotion) {
-          setSplit(50);
-          return;
-        }
-        timer = setTimeout(() => {
-          setSweeping(true);
-          setSplit(50);
-        }, 500);
-      },
-      { threshold: 0.5 },
-    );
-    intersection.observe(el);
-    return () => {
-      intersection.disconnect();
-      clearTimeout(timer);
-    };
-  }, [reducedMotion]);
-
-  const motion = sweeping && "transition-[clip-path,left] duration-[1400ms] ease-[cubic-bezier(0.65,0,0.35,1)]";
-
-  return (
-    <div
-      ref={ref}
-      role="group"
-      aria-label={text.title}
-      className={cn("relative aspect-[4/3] overflow-hidden rounded-site-panel select-none sm:aspect-[3/2]", className)}
-    >
-      <p className="sr-only">
-        {copy.beforeLabel}: {text.before} {copy.afterLabel}: {text.after}
-      </p>
-      <div className="absolute inset-0">
-        <div data-frost={story.id} className="site-frost size-full">
-          <ZoomCanvas {...STAGE_CANVAS}>
-            <After />
-          </ZoomCanvas>
-        </div>
-      </div>
-      <div
-        className={cn("absolute inset-0", motion)}
-        style={{ clipPath: `inset(0 ${100 - split}% 0 0)` }}
-        onTransitionEnd={() => setSweeping(false)}
-      >
-        <div className="site-visual size-full">
-          <ZoomCanvas {...STAGE_CANVAS}>
-            <Before />
-          </ZoomCanvas>
-        </div>
-      </div>
-      <input
-        type="range"
-        min={0}
-        max={100}
-        value={split}
-        aria-label={copy.compare}
-        aria-valuetext={copy.compareValue.replace("{value}", String(split))}
-        onChange={(event) => {
-          onDrag();
-          setSweeping(false);
-          setSplit(Number(event.target.value));
-        }}
-        className="peer absolute inset-0 size-full cursor-ew-resize appearance-none opacity-0"
-      />
-      <div
-        aria-hidden
-        className={cn(
-          "pointer-events-none absolute inset-y-0 w-px bg-site-surface",
-          "peer-focus-visible:*:outline-2 peer-focus-visible:*:outline-offset-2 peer-focus-visible:*:outline-site-ink",
-          motion,
-        )}
-        style={{ left: `${split}%` }}
-      >
-        <span className="absolute top-1/2 left-1/2 flex size-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-site-surface text-site-ink shadow-site-float ring-1 ring-site-line">
-          <ArrowLeftRight className="size-4" />
-        </span>
-      </div>
     </div>
   );
 }

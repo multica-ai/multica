@@ -17,7 +17,7 @@ export function AboutPageClient() {
       <SiteHeader />
       <main className="bg-white text-[#0a0d12]">
         <div className="mx-auto max-w-[720px] px-4 py-16 sm:px-6 sm:py-20 lg:py-24">
-          <h1 className="landing-serif text-[2.6rem] leading-[1.05] tracking-[-0.03em] sm:text-[3.4rem]">
+          <h1 className="font-site-display text-site-heading">
             {t.about.title}
           </h1>
           <div className="mt-8 space-y-6 text-body-lg leading-[1.8] text-[#0a0d12]/70 sm:text-title-sm">
@@ -58,7 +58,7 @@ export function AboutPageClient() {
           </div>
 
           <section className="mt-16 border-t border-[#0a0d12]/10 pt-12 sm:mt-20 sm:pt-16">
-            <h2 className="landing-serif text-[2rem] leading-[1.1] tracking-[-0.02em] sm:text-[2.4rem]">
+            <h2 className="font-site-display text-site-title">
               {team.title}
             </h2>
             <div className="mt-6 space-y-6 text-body-lg leading-[1.8] text-[#0a0d12]/70 sm:text-title-sm">

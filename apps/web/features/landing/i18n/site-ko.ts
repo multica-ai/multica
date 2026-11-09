@@ -8,16 +8,11 @@ export const koSiteCopy: Pick<LandingDict, "site" | "home"> = {
       resources: "리소스",
       customers: "고객 사례",
       pricing: "요금제",
-      docs: "문서",
-      worksWith: "지원 에이전트",
-      allAgents: "에이전트 27종 전체",
-      learn: "알아보기",
       documentation: "문서",
       changelog: "변경 로그",
       useCases: "사용 사례",
       blog: "블로그",
       download: "다운로드",
-      community: "커뮤니티",
       company: "회사",
       about: "회사 소개",
       careers: "채용",
@@ -30,10 +25,6 @@ export const koSiteCopy: Pick<LandingDict, "site" | "home"> = {
     },
     header: {
       home: "Multica 홈",
-      primary: "주 메뉴",
-      menu: "메뉴",
-      openMenu: "메뉴 열기",
-      closeMenu: "메뉴 닫기",
       githubStars: "GitHub, 스타 {count}개",
       logIn: "로그인",
       getStarted: "시작하기",
@@ -57,8 +48,7 @@ export const koSiteCopy: Pick<LandingDict, "site" | "home"> = {
       headlinePrefix: "",
       headlineSuffix: ", 이제 우리 팀의 동료로.",
       lead: "팀과 에이전트가 하나의 워크스페이스에서 일합니다. 일을 맡기고, 진행 상황을 확인하고, 결과를 검토하세요. 결정은 언제나 사람이 합니다.",
-      getStarted: "시작하기",
-      openDashboard: "대시보드 열기",
+      download: "다운로드",
       bookDemo: "데모 예약",
       workflowGroup: "워크플로",
       workflows: {
@@ -82,44 +72,7 @@ export const koSiteCopy: Pick<LandingDict, "site" | "home"> = {
         },
       },
     },
-    logoWall: { title: "이런 회사의 엔지니어들이 사용합니다" },
-    stories: {
-      title: "에이전트가 팀에 합류하면 달라지는 것",
-      lead: "에이전트의 일을 Multica로 옮긴 팀들의 세 가지 이야기.",
-      beforeLabel: "이전",
-      afterLabel: "Multica와 함께",
-      compare: "이전과 Multica 사용 후 비교하기",
-      compareValue: "이전 {value}%",
-      items: {
-        board: {
-          title: "에이전트 30개, 탭 30개",
-          outcomes: [
-            { value: "탭 30개", caption: "멈춘 에이전트를 찾으려면 전부 열어 봐야 함" },
-            { value: "받은 항목 1곳", caption: "나를 기다리는 에이전트를 바로 알려 줌" },
-          ],
-          before: "에이전트마다 터미널 탭이 따로 있고, 질문은 보고 있지 않은 탭에서 기다립니다.",
-          after: "모든 작업이 하나의 보드에 모이고, 내가 처리할 일은 받은 항목으로 들어옵니다.",
-        },
-        digest: {
-          title: "아무도 손댈 시간이 없는 일",
-          outcomes: [
-            { value: "2%", caption: "고객 지원 대화 중 누군가 읽는 비율" },
-            { value: "100%", caption: "매일 밤 에이전트가 모두 읽음" },
-          ],
-          before: "하루 수십 건의 지원 대화만 골라 확인하고, 나머지는 아무도 읽지 않습니다.",
-          after: "오토파일럿이 매일 밤 모든 대화를 읽고, 고칠 것을 Issue로 만듭니다. 아침에는 요약만 검토하면 됩니다.",
-        },
-        pipeline: {
-          title: "사람을 기다리는 프로세스",
-          outcomes: [
-            { value: "9일", caption: "수정 한 건에 걸리는 시간, 그중 4일은 대기" },
-            { value: "3일", caption: "에이전트가 넘기고, 사람은 승인만" },
-          ],
-          before: "수정의 각 단계가 누군가 자기 차례임을 알아챌 때까지 멈춰 있습니다.",
-          after: "에이전트가 각 단계를 다음으로 넘기고, 사람은 승인할 때만 나섭니다.",
-        },
-      },
-    },
+    logoWall: { title: "이런 기업과 대학의 사람들이 Multica를 사용합니다" },
     features: {
       title: "사람과 에이전트로 이루어진 팀을 위해",
       items: {

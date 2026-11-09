@@ -296,18 +296,6 @@
     --frost-image: url("/images/frost/mobile.webp");
 }
 
-.site-frost[data-frost="board"] {
-    --frost-image: url("/images/frost/board.webp");
-}
-
-.site-frost[data-frost="digest"] {
-    --frost-image: url("/images/frost/digest.webp");
-}
-
-.site-frost[data-frost="pipeline"] {
-    --frost-image: url("/images/frost/pipeline.webp");
-}
-
 /* Charts in the hero's issue peek: bars grow and lines draw in once, staggered
    by an inline animation-delay. */
 @theme {

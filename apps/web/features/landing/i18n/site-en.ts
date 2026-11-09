@@ -8,16 +8,11 @@ export const enSiteCopy: Pick<LandingDict, "site" | "home"> = {
       resources: "Resources",
       customers: "Customers",
       pricing: "Pricing",
-      docs: "Docs",
-      worksWith: "Works with",
-      allAgents: "All 27 agents",
-      learn: "Learn",
       documentation: "Documentation",
       changelog: "Changelog",
       useCases: "Use cases",
       blog: "Blog",
       download: "Download",
-      community: "Community",
       company: "Company",
       about: "About",
       careers: "Careers",
@@ -30,10 +25,6 @@ export const enSiteCopy: Pick<LandingDict, "site" | "home"> = {
     },
     header: {
       home: "Multica home",
-      primary: "Primary",
-      menu: "Menu",
-      openMenu: "Open menu",
-      closeMenu: "Close menu",
       githubStars: "GitHub, {count} stars",
       logIn: "Log in",
       getStarted: "Get started",
@@ -57,8 +48,7 @@ export const enSiteCopy: Pick<LandingDict, "site" | "home"> = {
       headlinePrefix: "Turn ",
       headlineSuffix: " into a teammate.",
       lead: "One workspace for your team and its agents: assign the work, track it, and review it. You stay in control.",
-      getStarted: "Get started",
-      openDashboard: "Open dashboard",
+      download: "Download",
       bookDemo: "Book a demo",
       workflowGroup: "Workflow",
       workflows: {
@@ -82,44 +72,7 @@ export const enSiteCopy: Pick<LandingDict, "site" | "home"> = {
         },
       },
     },
-    logoWall: { title: "Used by engineers at" },
-    stories: {
-      title: "What changes when agents join your team",
-      lead: "Three stories from teams that moved their agent work into Multica.",
-      beforeLabel: "Before",
-      afterLabel: "With Multica",
-      compare: "Compare before and with Multica",
-      compareValue: "{value}% before",
-      items: {
-        board: {
-          title: "Thirty agents, thirty tabs",
-          outcomes: [
-            { value: "30 tabs", caption: "to check for the agent that’s stuck" },
-            { value: "1 inbox", caption: "tells you which agent needs you" },
-          ],
-          before: "Every agent runs in its own terminal tab, and a question waits in the one you aren’t watching.",
-          after: "All their work sits on one board, and anything waiting on you lands in your inbox.",
-        },
-        digest: {
-          title: "The work nobody has time to do",
-          outcomes: [
-            { value: "2%", caption: "of support conversations get read" },
-            { value: "100%", caption: "read every night by an agent" },
-          ],
-          before: "Someone spot-checks a few dozen support conversations a day. The rest are never read.",
-          after: "An autopilot reads every one overnight and files what needs fixing. You review the digest in the morning.",
-        },
-        pipeline: {
-          title: "A process that waits on people",
-          outcomes: [
-            { value: "9 days", caption: "per fix, 4 of them spent waiting" },
-            { value: "3 days", caption: "agents hand off, people approve" },
-          ],
-          before: "Each step of a fix waits for someone to notice it’s their turn.",
-          after: "Agents hand each step to the next, and people step in only to approve.",
-        },
-      },
-    },
+    logoWall: { title: "Used by people at these companies and universities" },
     features: {
       title: "Built for teams of people and agents",
       items: {

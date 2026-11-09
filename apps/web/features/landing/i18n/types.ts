@@ -7,7 +7,7 @@ export type LandingDictionaryLocale = "en" | "zh" | "ko" | "ja";
 export const locales: Locale[] = ["en", "zh-Hans", "ko", "ja"];
 
 export const localeLabels: Record<Locale, string> = {
-  en: "EN",
+  en: "English",
   "zh-Hans": "\u4e2d\u6587",
   // The landing dictionary has no Traditional Chinese variant yet, so
   // `locales` above does not offer it and it reads the Simplified copy.
@@ -44,8 +44,6 @@ export type DocumentSection = {
 export type ContactSalesOption = { value: string; label: string };
 
 type Copy = { title: string; body: string; alt: string };
-type Outcome = { value: string; caption: string };
-type Story = { title: string; outcomes: [Outcome, Outcome]; before: string; after: string };
 type HeroWorkflow = { label: string; short: string; description: string };
 
 /** Labels for the marketing site's header, menus, footer, and closing call to action. */
@@ -56,16 +54,11 @@ export type SiteDict = {
     resources: string;
     customers: string;
     pricing: string;
-    docs: string;
-    worksWith: string;
-    allAgents: string;
-    learn: string;
     documentation: string;
     changelog: string;
     useCases: string;
     blog: string;
     download: string;
-    community: string;
     company: string;
     about: string;
     careers: string;
@@ -78,10 +71,6 @@ export type SiteDict = {
   };
   header: {
     home: string;
-    primary: string;
-    menu: string;
-    openMenu: string;
-    closeMenu: string;
     /** `{count}` is the formatted star count. */
     githubStars: string;
     logIn: string;
@@ -105,23 +94,12 @@ export type HomeDict = {
     headlinePrefix: string;
     headlineSuffix: string;
     lead: string;
-    getStarted: string;
-    openDashboard: string;
+    download: string;
     bookDemo: string;
     workflowGroup: string;
     workflows: { ship: HeroWorkflow; launch: HeroWorkflow; triage: HeroWorkflow };
   };
   logoWall: { title: string };
-  stories: {
-    title: string;
-    lead: string;
-    beforeLabel: string;
-    afterLabel: string;
-    compare: string;
-    /** `{value}` is the share of the stage showing the before scene. */
-    compareValue: string;
-    items: { board: Story; digest: Story; pipeline: Story };
-  };
   features: {
     title: string;
     items: { runtimes: Copy; workflows: Copy; chat: Copy; autopilots: Copy; skills: Copy };

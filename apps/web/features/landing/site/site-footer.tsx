@@ -2,8 +2,10 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
+import { Globe } from "@multica/ui/icons";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@multica/ui/components/ui/select";
 import { cn } from "@multica/ui/lib/utils";
-import { docsHrefForLocale, localeLabels, locales, useLocale } from "../i18n";
+import { docsHrefForLocale, localeLabels, locales, useLocale, type Locale } from "../i18n";
 import {
   DiscordMark,
   GitHubMark,
@@ -22,6 +24,8 @@ const SOCIAL_LINKS = [
   { label: "Discord", href: discordUrl, Mark: DiscordMark },
   { label: "X", href: twitterUrl, Mark: XMark },
 ];
+
+const LANGUAGE_ITEMS: { value: Locale; label: string }[] = locales.map((value) => ({ value, label: localeLabels[value] }));
 
 /** One column per group on wide screens, so a short footer doesn't leave empty columns. */
 const WIDE_COLUMNS: Record<number, string> = { 3: "lg:grid-cols-3", 4: "lg:grid-cols-4" };
@@ -59,25 +63,31 @@ export function SiteFooter() {
               </li>
             ))}
           </ul>
-          <div role="group" aria-label={labels.language} className="mt-6 flex flex-wrap items-center gap-1">
-            {locales.map((l) => (
-              <button
-                type="button"
-                key={l}
-                aria-pressed={l === locale}
-                onClick={() => setLocale(l)}
-                className={cn(
-                  "rounded-site-control px-2.5 py-1 text-site-small transition-colors",
-                  focusRing,
-                  l === locale
-                    ? "bg-site-hover text-site-ink"
-                    : "text-site-muted hover:text-site-ink",
-                )}
-              >
-                {localeLabels[l]}
-              </button>
-            ))}
-          </div>
+          <Select
+            items={LANGUAGE_ITEMS}
+            value={locale}
+            onValueChange={(value) => {
+              if (value) setLocale(value);
+            }}
+          >
+            <SelectTrigger
+              aria-label={labels.language}
+              className={cn(
+                "mt-6 h-site-control-sm gap-2 rounded-site-control border-site-line pr-2 pl-2.5 text-site-small text-site-muted transition-colors hover:border-site-line-strong hover:text-site-ink data-popup-open:text-site-ink",
+                focusRing,
+              )}
+            >
+              <Globe aria-hidden className="size-4" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="landing-light min-w-40" alignItemWithTrigger={false} side="top" align="start">
+              {LANGUAGE_ITEMS.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <p className="mt-4 text-site-small text-site-muted">
             {labels.copyright.replace("{year}", String(new Date().getFullYear()))}
           </p>

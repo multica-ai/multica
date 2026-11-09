@@ -8,8 +8,6 @@ import {
   PRODUCT_GROUPS,
   SOLUTION_GROUPS,
   buildFooterGroups,
-  buildMenus,
-  buildTopLinks,
   isLiveRoute,
   liveMetadata,
   siteRoutes,
@@ -22,14 +20,11 @@ const preview = () => true;
 const landingRoutes = resolve(__dirname, "../../../app/(landing)");
 
 const internalLinks = (links: SiteLink[]) => links.filter((link) => !link.external);
-const navLinks = (isLive?: (href: string) => boolean) => [
-  ...buildTopLinks("/docs", nav, isLive),
-  ...buildMenus("/docs", nav, isLive).flatMap((menu) => menu.groups.flatMap((group) => group.links)),
-  ...buildFooterGroups("/docs", nav, isLive).flatMap((group) => group.links),
-];
+const navLinks = (isLive?: (href: string) => boolean) =>
+  buildFooterGroups("/docs", nav, isLive).flatMap((group) => group.links);
 
 describe("site map", () => {
-  it("points every internal menu and footer link at a served route", () => {
+  it("points every internal footer link at a served route", () => {
     const routes = new Set(siteRoutes());
     for (const link of internalLinks(navLinks(preview))) {
       expect(routes, `${link.label} → ${link.href}`).toContain(link.href);
@@ -62,14 +57,14 @@ describe("site map", () => {
     for (const link of internalLinks(navLinks())) {
       expect(isLiveRoute(link.href), `${link.label} → ${link.href}`).toBe(true);
     }
-    expect(buildMenus("/docs", nav).map((menu) => menu.id)).toEqual(["resources"]);
+    expect(buildFooterGroups("/docs", nav).map((group) => group.title)).toEqual([nav.resources, nav.company, nav.trust]);
   });
 
-  it("drops a menu once none of its pages are released", () => {
+  it("drops a footer column once none of its pages are released", () => {
     const onlyDesktop = (href: string) => href === "/product/desktop";
-    const product = buildMenus("/docs", nav, onlyDesktop).find((menu) => menu.id === "product");
-    expect(product?.groups.map((group) => group.title)).toEqual(["Surfaces", nav.worksWith]);
-    expect(buildMenus("/docs", nav, () => false).find((menu) => menu.id === "product")).toBeUndefined();
+    const product = buildFooterGroups("/docs", nav, onlyDesktop).find((group) => group.title === nav.product);
+    expect(product?.links.map((link) => link.href)).toEqual(["/product/desktop"]);
+    expect(buildFooterGroups("/docs", nav, () => false).find((group) => group.title === nav.product)).toBeUndefined();
   });
 
   it("withholds the metadata of unreleased pages", () => {
@@ -79,9 +74,6 @@ describe("site map", () => {
   });
 
   it.each(["/docs", "/docs/zh", "/docs/ja"])("links documentation to the %s docs", (docsHref) => {
-    const resources = buildMenus(docsHref, nav).find((menu) => menu.id === "resources")!;
-    const docs = resources.groups.flatMap((group) => group.links).find((link) => link.label === "Documentation");
-    expect(docs?.href).toBe(docsHref);
     const footerDocs = buildFooterGroups(docsHref, nav)
       .flatMap((group) => group.links)
       .find((link) => link.label === "Documentation");

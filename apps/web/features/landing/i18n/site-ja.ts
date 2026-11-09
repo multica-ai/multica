@@ -8,16 +8,11 @@ export const jaSiteCopy: Pick<LandingDict, "site" | "home"> = {
       resources: "リソース",
       customers: "導入事例",
       pricing: "料金",
-      docs: "ドキュメント",
-      worksWith: "対応エージェント",
-      allAgents: "全 27 種のエージェント",
-      learn: "学ぶ",
       documentation: "ドキュメント",
       changelog: "変更履歴",
       useCases: "ユースケース",
       blog: "ブログ",
       download: "ダウンロード",
-      community: "コミュニティ",
       company: "会社",
       about: "会社概要",
       careers: "採用情報",
@@ -30,10 +25,6 @@ export const jaSiteCopy: Pick<LandingDict, "site" | "home"> = {
     },
     header: {
       home: "Multica ホーム",
-      primary: "メインナビゲーション",
-      menu: "メニュー",
-      openMenu: "メニューを開く",
-      closeMenu: "メニューを閉じる",
       githubStars: "GitHub、スター {count}",
       logIn: "ログイン",
       getStarted: "始める",
@@ -57,8 +48,7 @@ export const jaSiteCopy: Pick<LandingDict, "site" | "home"> = {
       headlinePrefix: "",
       headlineSuffix: " を、チームの一員に。",
       lead: "チームとエージェントがひとつのワークスペースで働きます。仕事を割り当て、進み具合を追い、結果をレビュー。主導権はいつもあなたにあります。",
-      getStarted: "始める",
-      openDashboard: "ダッシュボードを開く",
+      download: "ダウンロード",
       bookDemo: "デモを予約",
       workflowGroup: "ワークフロー",
       workflows: {
@@ -82,44 +72,7 @@ export const jaSiteCopy: Pick<LandingDict, "site" | "home"> = {
         },
       },
     },
-    logoWall: { title: "これらの企業のエンジニアが利用中" },
-    stories: {
-      title: "エージェントがチームに加わると、何が変わるか",
-      lead: "エージェントの仕事を Multica に移したチームの、3 つのストーリー。",
-      beforeLabel: "これまで",
-      afterLabel: "Multica なら",
-      compare: "これまでと Multica 導入後を比べる",
-      compareValue: "これまで {value}%",
-      items: {
-        board: {
-          title: "30 のエージェント、30 のタブ",
-          outcomes: [
-            { value: "30 タブ", caption: "止まったエージェントを探して、全部見て回る" },
-            { value: "受信トレイ 1 つ", caption: "あなたを待つエージェントがすぐ分かる" },
-          ],
-          before: "エージェントはそれぞれ別のターミナルタブで動き、質問は見ていないタブで待ちぼうけ。",
-          after: "すべての仕事がひとつのボードに集まり、あなたの対応が必要なものは受信トレイに届きます。",
-        },
-        digest: {
-          title: "誰も手が回らない仕事",
-          outcomes: [
-            { value: "2%", caption: "サポート会話のうち、読まれているのはこれだけ" },
-            { value: "100%", caption: "毎晩エージェントがすべて読む" },
-          ],
-          before: "1 日に数十件のサポート会話を抜き取りで確認するだけ。残りは誰にも読まれません。",
-          after: "Autopilot が毎晩すべてを読み、直すべきものを Issue にします。朝はダイジェストを確認するだけ。",
-        },
-        pipeline: {
-          title: "人を待ってばかりのプロセス",
-          outcomes: [
-            { value: "9 日", caption: "修正 1 件あたり。うち 4 日は待ち時間" },
-            { value: "3 日", caption: "エージェントが引き継ぎ、人は承認だけ" },
-          ],
-          before: "修正の各ステップが、誰かが自分の番だと気づくまで止まっています。",
-          after: "エージェントが各ステップを次へ引き継ぎ、人は承認のときだけ関わります。",
-        },
-      },
-    },
+    logoWall: { title: "これらの企業や大学の人たちが Multica を利用中" },
     features: {
       title: "人とエージェントのチームのために",
       items: {

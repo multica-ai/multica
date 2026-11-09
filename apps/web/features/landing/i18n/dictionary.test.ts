@@ -20,7 +20,7 @@ describe("createLandingDict", () => {
       const t = createLandingDict(locale);
       expect(t.home.hero.lead).not.toBe(en.home.hero.lead);
       expect(t.home.features.items.skills.body).not.toBe(en.home.features.items.skills.body);
-      expect(t.home.stories.items.pipeline.after).not.toBe(en.home.stories.items.pipeline.after);
+      expect(t.home.logoWall.title).not.toBe(en.home.logoWall.title);
       expect(t.site.nav.resources).not.toBe(en.site.nav.resources);
       expect(t.site.cta.title).not.toBe(en.site.cta.title);
     }
