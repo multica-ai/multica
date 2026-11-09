@@ -26,6 +26,7 @@ import {
   type RailSpaceId,
 } from "@multica/core/paths";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { CappedNumberFlow } from "@multica/ui/components/ui/number-flow";
 import { cn } from "@multica/ui/lib/utils";
 import { useAppForeground } from "../common/use-app-foreground";
@@ -147,21 +148,33 @@ function RailSpaceLink({
   badge?: RailBadge;
 }) {
   const peekHandlers = usePeekHandlers(space, true);
+  const link = (
+    <AppLink
+      href={href}
+      data-space={space}
+      newTabTitle={fullLabel}
+      draggable={false}
+      aria-current={active ? "page" : undefined}
+      {...peekHandlers}
+      className="group relative flex size-12 flex-col items-center justify-center gap-1 rounded-xl text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground"
+    >
+      <Icon className="size-5" />
+      <span className="max-w-full truncate px-0.5 text-micro leading-[14px]">{label}</span>
+      {badge && <RailBadgeMark badge={badge} />}
+    </AppLink>
+  );
+  // A label the same as the full name still needs the tooltip whenever a
+  // locale's text doesn't fit the 48px item.
+  if (label === fullLabel) {
+    return (
+      <TruncatedTooltip content={fullLabel} side="right">
+        {link}
+      </TruncatedTooltip>
+    );
+  }
   return (
-    <TooltipHint label={label === fullLabel ? null : fullLabel} side="right">
-      <AppLink
-        href={href}
-        data-space={space}
-        newTabTitle={fullLabel}
-        draggable={false}
-        aria-current={active ? "page" : undefined}
-        {...peekHandlers}
-        className="group relative flex size-12 flex-col items-center justify-center gap-1 rounded-xl text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground"
-      >
-        <Icon className="size-5" />
-        <span className="max-w-full truncate px-0.5 text-micro leading-[14px]">{label}</span>
-        {badge && <RailBadgeMark badge={badge} />}
-      </AppLink>
+    <TooltipHint label={fullLabel} side="right">
+      {link}
     </TooltipHint>
   );
 }
