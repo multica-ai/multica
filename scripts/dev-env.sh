@@ -1782,6 +1782,13 @@ cmd_exec() {
   export PORT="$BACKEND_PORT" FRONTEND_PORT DATABASE_URL POSTGRES_DB="$DB_NAME"
   export TMPDIR="$DEV_TMPDIR" TMP="$DEV_TMPDIR" TEMP="$DEV_TMPDIR"
   export MULTICA_DEV_PROFILE="$PROFILE"
+  # Read by scripts/desktop-cdp.mjs to find this environment's Desktop.
+  export MULTICA_DEV_DESKTOP_RENDERER_URL="http://localhost:${DESKTOP_RENDERER_PORT}"
+  if [ -n "${DESKTOP_CDP_PORT:-}" ]; then
+    export MULTICA_DEV_DESKTOP_CDP_URL="http://127.0.0.1:${DESKTOP_CDP_PORT}"
+  else
+    unset MULTICA_DEV_DESKTOP_CDP_URL
+  fi
   exec "${CLEAN_ENV[@]}" MULTICA_WORKSPACES_ROOT="$WORKSPACES_ROOT" "$@"
 }
 

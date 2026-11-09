@@ -543,11 +543,38 @@ path-derived fallback when it is run outside `make up`.
 
 Log in with `dev@localhost` and `888888`.
 
+#### Scripting Desktop over CDP
+
+Some bugs only reproduce in Electron, so evidence for them has to come from the
+running app driven with real input. Start Desktop with a Chrome DevTools
+Protocol endpoint, then attach Playwright to it:
+
+```bash
+make up C=desktop ARGS="--ephemeral --cdp"
+make env-exec ARGS="-- node scripts/desktop-cdp.mjs --screenshot desktop.png"
+make env-exec ARGS="-- node scripts/desktop-cdp.mjs --record steps.mp4 ./steps.mjs"
+make destroy ARGS="--yes"
+```
+
+`--cdp` allocates a port for the environment, `--remote-debugging-port N`
+picks one, and `--no-cdp` drops it; later `make up` runs keep it. `make status`
+prints the endpoint, and `make status ARGS="--json"` reports `desktop_cdp_port`.
+
+`scripts/desktop-cdp.mjs` attaches to the main window of the already signed-in
+Desktop. A script argument is an ES module whose default export receives
+`{ browser, context, page, env, login, screencast, args }`. Drive it with
+`page.mouse` or locator clicks, which go through Chromium's input pipeline,
+rather than `element.click()` inside `page.evaluate`. `--login`, or `login()`
+from a script, signs `dev@localhost` back in after a step signed out.
+`--record` needs `ffmpeg` to encode; without it the frames and an ffconcat file
+stay in `<file>.frames/`. The helper only disconnects, so the app stays up for
+the next attach.
+
 #### Capturing the native window
 
 A renderer screenshot has no title bar or traffic lights. To capture the real
-macOS window of this environment's Desktop, start it with a debug port and run
-the capture script from the checkout:
+macOS window of this environment's Desktop, start it with the debug port from
+above and run the capture script from the checkout:
 
 ```bash
 make up C=desktop ARGS="--ephemeral --cdp"
@@ -567,9 +594,12 @@ kept. The app running the command needs Screen Recording permission.
 and `after.png` with the worktree's. Desktop is stopped and relaunched for each
 state, because swapping files under HMR can leave the app stuck loading. The
 index is never touched, and the files are restored on success, failure and
-interrupt. A pathspec after `--` limits which files are swapped. `--prepare CMD`
-runs before each capture, for example a Playwright script that opens the page
-to show; it sees `DESKTOP_CAPTURE_STATE=before` or `after`.
+interrupt. A pathspec after `--` limits which files are swapped.
+
+`--prepare CMD` runs before every capture, in both modes, for example
+`make env-exec ARGS="-- node scripts/desktop-cdp.mjs ./open-page.mjs"` to open
+the page to show. It sees `DESKTOP_CAPTURE_STATE` set to `current`, `before` or
+`after`, and a non-zero exit aborts the run without capturing.
 
 ### Isolation Guarantee
 
