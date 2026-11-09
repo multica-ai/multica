@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 // Agent/profile-scoped Hermes memory lives under hermes-state and is linked
@@ -19,11 +17,55 @@ import (
 // host's memories or another agent's files. Different Hermes profiles use separate
 // stores. Session databases have their own conversation scope in hermes_sessions.go.
 //
+// Hermes keeps its long-term memory (MEMORY.md / USER.md and whatever else the
+// agent writes back) in `<HERMES_HOME>/memories/`. Multica has to take over
+// HERMES_HOME to inject an agent's bound skills — Hermes discovers skills only
+// from its own home, never from the workspace (see hermes_home.go) — so the
+// overlay inherited the decision of where memory lives and made it task-local.
+//
+// Nobody designed the two behaviours that produced (issue #6638):
+//
+//   - An agent WITH skills bound got a fresh memories/ per task, so it forgot
+//     everything between tasks. Users read that as "Hermes 失忆", and it changed
+//     the moment they bound an unrelated skill, with no UI signal.
+//   - An agent with NO skills bound built no overlay at all, ran against the
+//     user's real ~/.hermes, and therefore shared one memories/ with every
+//     other skill-less agent, task, and issue on the runtime.
+//
+// This file makes memory an agent-scoped store Multica owns:
+//
+//	<daemon work-state root>/hermes-state/<agent>/<hermes profile>/memories
+//
+// linked into the per-task overlay. Memory then survives across tasks and issues
+// for the same agent, never touches the user's home, and is invisible to other
+// agents. The shape is deliberately identical to the per-issue Codex session
+// store (codex_home.go) and the per-agent Reasonix state home — same lifecycle,
+// same GC, same active-store guard.
+//
+// Scoping to (hermes profile, agent) rather than agent alone mirrors Hermes' own
+// model, where a profile is an isolated instance: pointing an agent at a
+// different profile gives it a different identity, so it gets a different memory
+// line. Same semantics as the Codex store keying on (profile, agent, issue).
+//
+// Deliberately NOT covered here:
+//
+//   - The session database (state.db and its WAL sidecars) stays task-local.
+//     Sharing a live SQLite database between one agent's concurrent tasks needs
+//     lock and consistency work — plus Windows byte-range locks on -shm — that
+//     plain memory files do not. Users get "remembers the agreements", not
+//     "remembers the transcript".
+//   - Skill-less Hermes agents still run against the host home unchanged.
+//     Tightening that would break the only workaround #6638's reporter has, and
+//     it belongs with the platform-wide memory_scope work (MUL-5969).
+//
+// Known trade-off, shared with the host-passthrough behaviour it replaces: one
+// agent's concurrent tasks write the same files and Hermes rewrites them whole,
+// so concurrent memory updates are last-writer-wins.
 // Skill-less agents still use the host home without this overlay. Concurrent tasks
 // of the same agent may overwrite memory files; updates remain last-writer-wins.
 
-// hermesMemoryStoreRoot is the directory under the daemon's Multica profile dir
-// that holds every agent's persistent Hermes state. `hermes-state` (not
+// hermesMemoryStoreRoot is the directory under the daemon's work-state root that
+// holds every agent's persistent Hermes state. `hermes-state` (not
 // `hermes-memories`) because state.db joins it when the session half is solved.
 const hermesMemoryStoreRoot = "hermes-state"
 
@@ -31,26 +73,24 @@ const hermesMemoryStoreRoot = "hermes-state"
 // and the overlay home — Hermes resolves it relative to HERMES_HOME.
 const hermesMemoriesEntry = "memories"
 
-// HermesMemoryStorePath returns the persistent memory store for (daemonProfile,
+// HermesMemoryStorePath returns the persistent memory store for (stateRoot,
 // agentID, sourceHome), or "" when memory must stay task-local — there is no
-// agent to key on, or the Multica profile dir cannot be resolved. The daemon
-// marks the returned path in-use for the task's duration so
-// PruneHermesMemoryStores never reclaims it mid-mount.
+// agent to key on, or the daemon has no work-state root. The daemon marks the
+// returned path in-use for the task's duration so PruneHermesMemoryStores never
+// reclaims it mid-mount.
 //
-// daemonProfile namespaces by Multica profile for free: profile dirs are already
-// disjoint, so a staging daemon's GC can never see a production daemon's stores
-// and no hashed namespace segment is needed (unlike the Codex store, which lives
-// in the shared ~/.codex).
-func HermesMemoryStorePath(daemonProfile, agentID, sourceHome string) string {
+// stateRoot is the daemon's resolved work-state root
+// (daemon.WorkStateScope.StateRoot): the machine + backend boundary, NOT the
+// Multica profile. Two profiles on one machine talking to one backend therefore
+// share one memory line for the same agent, so a task prepared by either can be
+// continued by the other (GH #8280), while different backends stay disjoint —
+// the same guarantee the profile directory used to give, one level up.
+func HermesMemoryStorePath(stateRoot, agentID, sourceHome string) string {
 	agent := sanitizePathSegment(agentID)
-	if agent == "" {
+	if agent == "" || strings.TrimSpace(stateRoot) == "" {
 		return ""
 	}
-	profileDir, err := cli.ProfileDir(daemonProfile)
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(profileDir, hermesMemoryStoreRoot, agent, hermesMemoryProfileSegment(sourceHome))
+	return filepath.Join(stateRoot, hermesMemoryStoreRoot, agent, hermesMemoryProfileSegment(sourceHome))
 }
 
 // hermesMemoryProfileSegment maps a resolved Hermes source home to the store
@@ -362,15 +402,11 @@ func touchHermesMemoryStore(storeDir string, logger *slog.Logger) {
 // reserve (may be nil) atomically claims a store for deletion, exactly as
 // PruneCodexSessionStores uses it: ok=false means a live task holds the store,
 // so it is left alone. nil disables the guard (tests).
-func PruneHermesMemoryStores(daemonProfile string, retention time.Duration, now time.Time, reserve func(storeDir string) (commit func(), ok bool), logger *slog.Logger) (removed int, bytesFreed int64) {
-	if retention <= 0 {
+func PruneHermesMemoryStores(stateRoot string, retention time.Duration, now time.Time, reserve func(storeDir string) (commit func(), ok bool), logger *slog.Logger) (removed int, bytesFreed int64) {
+	if retention <= 0 || strings.TrimSpace(stateRoot) == "" {
 		return 0, 0
 	}
-	profileDir, err := cli.ProfileDir(daemonProfile)
-	if err != nil {
-		return 0, 0
-	}
-	root := filepath.Join(profileDir, hermesMemoryStoreRoot)
+	root := filepath.Join(stateRoot, hermesMemoryStoreRoot)
 	agents, err := os.ReadDir(root)
 	if err != nil {
 		return 0, 0 // not created yet, or unreadable — nothing to prune

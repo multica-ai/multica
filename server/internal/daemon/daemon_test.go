@@ -59,6 +59,28 @@ func TestNormalizeServerBaseURL(t *testing.T) {
 	}
 }
 
+func TestNormalizeServerBaseURLDefaultPorts(t *testing.T) {
+	t.Parallel()
+	for _, pair := range [][2]string{
+		{"https://multica.example", "https://multica.example:443"},
+		{"http://multica.example", "http://multica.example:80"},
+		{"wss://MULTICA.EXAMPLE:443/ws", "https://multica.example"},
+		{"https://[::1]", "https://[::1]:443"},
+	} {
+		left, err := NormalizeServerBaseURL(pair[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		right, err := NormalizeServerBaseURL(pair[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if left != right || WorkStateKey(left) != WorkStateKey(right) {
+			t.Errorf("%q and %q resolved to different work state: %q, %q", pair[0], pair[1], left, right)
+		}
+	}
+}
+
 func TestTriggerRestart_BrewLinuxCellarDeleted(t *testing.T) {
 	originalIsBrewInstall := isBrewInstall
 	originalGetBrewPrefix := getBrewPrefix
@@ -189,15 +211,16 @@ func TestIsBlockedEnvKey(t *testing.T) {
 }
 
 func TestPrepareReasonixTaskStateHome(t *testing.T) {
+	stateRoot := t.TempDir()
 	home := t.TempDir()
 	redirectTestHome(t, home)
 	t.Setenv("USERPROFILE", home)
 
-	got, err := prepareReasonixTaskStateHome("work", "runtime-1", "agent_2")
+	got, err := prepareReasonixTaskStateHome(stateRoot, "runtime-1", "agent_2")
 	if err != nil {
 		t.Fatalf("prepareReasonixTaskStateHome: %v", err)
 	}
-	want := filepath.Join(home, ".multica", "profiles", "work", "reasonix-state", "runtime-1", "agent_2")
+	want := filepath.Join(stateRoot, "reasonix-state", "runtime-1", "agent_2")
 	if got != want {
 		t.Fatalf("state home = %q, want %q", got, want)
 	}
@@ -211,15 +234,16 @@ func TestPrepareReasonixTaskStateHome(t *testing.T) {
 }
 
 func TestPrepareDshTaskSessionRoot(t *testing.T) {
+	stateRoot := t.TempDir()
 	home := t.TempDir()
 	redirectTestHome(t, home)
 	t.Setenv("USERPROFILE", home)
 
-	got, err := prepareDshTaskSessionRoot("work", "runtime-1", "agent_2")
+	got, err := prepareDshTaskSessionRoot(stateRoot, "runtime-1", "agent_2")
 	if err != nil {
 		t.Fatalf("prepareDshTaskSessionRoot: %v", err)
 	}
-	want := filepath.Join(home, ".multica", "profiles", "work", "dsh-sessions", "runtime-1", "agent_2")
+	want := filepath.Join(stateRoot, "dsh-sessions", "runtime-1", "agent_2")
 	if got != want {
 		t.Fatalf("session root = %q, want %q", got, want)
 	}
@@ -2282,7 +2306,7 @@ func TestHermesPreparedSessionReachability(t *testing.T) {
 	home := t.TempDir()
 	redirectTestHome(t, home)
 	t.Setenv("USERPROFILE", home)
-	sourceHome, root := t.TempDir(), t.TempDir()
+	sourceHome, stateRoot, root := t.TempDir(), t.TempDir(), t.TempDir()
 	taskNumber := 0
 	prepare := func(t *testing.T, agentID, issueID string) *execenv.Environment {
 		t.Helper()
@@ -2293,7 +2317,7 @@ func TestHermesPreparedSessionReachability(t *testing.T) {
 		env, err := execenv.Prepare(execenv.PrepareParams{
 			WorkspacesRoot: root, WorkspaceID: "workspace-1", TaskID: fmt.Sprintf("task-%012d", taskNumber),
 			Provider: "hermes", HermesSourceHome: sourceHome, Task: taskCtx,
-			HermesSessionStore: execenv.HermesSessionStorePath("", agentID, sourceHome, taskCtx),
+			HermesSessionStore: execenv.HermesSessionStorePath(stateRoot, agentID, sourceHome, taskCtx),
 		}, slog.Default())
 		if err != nil {
 			t.Fatal(err)
@@ -2303,9 +2327,6 @@ func TestHermesPreparedSessionReachability(t *testing.T) {
 	}
 	first := prepare(t, "agent-1", "issue-1")
 	if first.HermesSessionStore == "" {
-		if runtime.GOOS == "windows" {
-			t.Skip("host cannot mount Hermes session stores")
-		}
 		t.Fatal("Hermes session store was not mounted")
 	}
 	if err := os.WriteFile(filepath.Join(first.HermesHome, "state.db"), []byte("synthetic transcript"), 0o600); err != nil {

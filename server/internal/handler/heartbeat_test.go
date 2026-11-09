@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -71,9 +72,29 @@ type recordingHeartbeatScheduler struct {
 	err error
 }
 
-func (s *recordingHeartbeatScheduler) Schedule(_ context.Context, id, _ pgtype.UUID) error {
+func (s *recordingHeartbeatScheduler) Schedule(_ context.Context, id, _ pgtype.UUID, _ ...string) error {
 	s.ids = append(s.ids, id)
 	return s.err
+}
+
+func recordHeartbeatRuntimeForTest(h *Handler, ctx context.Context, rt db.AgentRuntime) error {
+	return h.recordHeartbeatState(ctx, rt.ID, uuidToString(rt.ID), heartbeatLivenessState{
+		Status: rt.Status, LastSeenAt: rt.LastSeenAt.Time,
+		LastSeenAtValid: rt.LastSeenAt.Valid, WorkspaceID: rt.WorkspaceID,
+	}, nil)
+}
+
+func recordHeartbeatLeaseForTest(h *Handler, ctx context.Context, runtimeID string, lease *daemonws.RuntimeLease) error {
+	runtimeUUID, err := util.ParseUUID(runtimeID)
+	if err != nil {
+		return err
+	}
+	state := lease.Snapshot()
+	workspaceID, _ := util.ParseUUID(state.WorkspaceID)
+	return h.recordHeartbeatState(ctx, runtimeUUID, runtimeID, heartbeatLivenessState{
+		Status: state.Status, LastSeenAt: state.LastSeenAt,
+		LastSeenAtValid: state.LastSeenAtValid, WorkspaceID: workspaceID,
+	}, lease.MarkDBWriteScheduled)
 }
 
 // readRuntimeRow returns the fresh agent_runtime row for assertions.
@@ -135,10 +156,10 @@ func TestRecordHeartbeatLeaseThrottlesDBScheduling(t *testing.T) {
 	h := &Handler{LivenessStore: fake, HeartbeatScheduler: scheduler}
 	lease := daemonws.NewRuntimeLease("workspace-1", "online", time.Now().Add(-2*runtimeHeartbeatDBFlushInterval), true)
 
-	if err := h.recordHeartbeatLease(context.Background(), runtimeID, lease); err != nil {
+	if err := recordHeartbeatLeaseForTest(h, context.Background(), runtimeID, lease); err != nil {
 		t.Fatalf("first recordHeartbeatLease: %v", err)
 	}
-	if err := h.recordHeartbeatLease(context.Background(), runtimeID, lease); err != nil {
+	if err := recordHeartbeatLeaseForTest(h, context.Background(), runtimeID, lease); err != nil {
 		t.Fatalf("second recordHeartbeatLease: %v", err)
 	}
 
@@ -163,7 +184,7 @@ func TestRecordHeartbeatLeaseScheduleFailureKeepsStaleWatermark(t *testing.T) {
 	stale := time.Now().Add(-2 * runtimeHeartbeatDBFlushInterval)
 	lease := daemonws.NewRuntimeLease("workspace-1", "online", stale, true)
 
-	if err := h.recordHeartbeatLease(context.Background(), runtimeID, lease); !errors.Is(err, injected) {
+	if err := recordHeartbeatLeaseForTest(h, context.Background(), runtimeID, lease); !errors.Is(err, injected) {
 		t.Fatalf("recordHeartbeatLease error = %v, want injected failure", err)
 	}
 	if got := lease.Snapshot().LastSeenAt; !got.Equal(stale) {
@@ -184,7 +205,7 @@ func TestRecordHeartbeatLeaseOfflineTransitionIsSynchronous(t *testing.T) {
 	h.HeartbeatScheduler = scheduler
 	lease := daemonws.NewRuntimeLease(testWorkspaceID, "offline", time.Now(), true)
 
-	if err := h.recordHeartbeatLease(context.Background(), runtimeID, lease); err != nil {
+	if err := recordHeartbeatLeaseForTest(&h, context.Background(), runtimeID, lease); err != nil {
 		t.Fatalf("recordHeartbeatLease: %v", err)
 	}
 
@@ -221,7 +242,7 @@ func TestRecordHeartbeat_NoopStoreAlwaysWritesDB(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	if err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
+	if err := recordHeartbeatRuntimeForTest(testHandler, context.Background(), rt); err != nil {
 		t.Fatalf("recordHeartbeat: %v", err)
 	}
 
@@ -250,7 +271,7 @@ func TestRecordHeartbeat_RedisAvailableSkipsDBWithinFlushWindow(t *testing.T) {
 	rt := loadRuntime(t, runtimeID)
 	before := rt.LastSeenAt.Time
 
-	if err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
+	if err := recordHeartbeatRuntimeForTest(testHandler, context.Background(), rt); err != nil {
 		t.Fatalf("recordHeartbeat: %v", err)
 	}
 
@@ -282,7 +303,7 @@ func TestRecordHeartbeat_DBFlushOnStaleRow(t *testing.T) {
 	setRuntimeLastSeenAt(t, runtimeID, stale)
 	rt := loadRuntime(t, runtimeID)
 
-	if err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
+	if err := recordHeartbeatRuntimeForTest(testHandler, context.Background(), rt); err != nil {
 		t.Fatalf("recordHeartbeat: %v", err)
 	}
 
@@ -315,7 +336,7 @@ func TestRecordHeartbeat_OfflineToOnlineForcesDBWrite(t *testing.T) {
 		t.Fatalf("setup: status = %q, want offline", rt.Status)
 	}
 
-	if err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
+	if err := recordHeartbeatRuntimeForTest(testHandler, context.Background(), rt); err != nil {
 		t.Fatalf("recordHeartbeat: %v", err)
 	}
 
@@ -345,7 +366,7 @@ func TestRecordHeartbeat_RecoveryPublishesOnce(t *testing.T) {
 		refreshes = append(refreshes, event)
 	})
 
-	if err := h.recordHeartbeat(context.Background(), loadRuntime(t, runtimeID)); err != nil {
+	if err := recordHeartbeatRuntimeForTest(&h, context.Background(), loadRuntime(t, runtimeID)); err != nil {
 		t.Fatalf("recovery recordHeartbeat: %v", err)
 	}
 	if len(refreshes) != 1 {
@@ -358,7 +379,7 @@ func TestRecordHeartbeat_RecoveryPublishesOnce(t *testing.T) {
 		t.Fatalf("refresh payload = %#v, want heartbeat_recovery", refreshes[0].Payload)
 	}
 
-	if err := h.recordHeartbeat(context.Background(), loadRuntime(t, runtimeID)); err != nil {
+	if err := recordHeartbeatRuntimeForTest(&h, context.Background(), loadRuntime(t, runtimeID)); err != nil {
 		t.Fatalf("ordinary recordHeartbeat: %v", err)
 	}
 	if len(refreshes) != 1 {
@@ -409,7 +430,7 @@ func TestRecordHeartbeat_TouchErrorFallsBackToDB(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	if err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
+	if err := recordHeartbeatRuntimeForTest(testHandler, context.Background(), rt); err != nil {
 		t.Fatalf("recordHeartbeat: %v", err)
 	}
 
@@ -451,7 +472,7 @@ func TestRecordHeartbeat_SweeperRaceRecoversOnline(t *testing.T) {
 	// snapshot and the heartbeat's UPDATE.
 	setRuntimeStatus(t, runtimeID, "offline")
 
-	if err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
+	if err := recordHeartbeatRuntimeForTest(testHandler, context.Background(), rt); err != nil {
 		t.Fatalf("recordHeartbeat: %v", err)
 	}
 

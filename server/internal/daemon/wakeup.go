@@ -118,6 +118,15 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	// WS claims use the common capabilities plus scheduling hints that only the
 	// healthy-connection poller can consume.
 	headers.Set("X-Client-Capabilities", daemonClientCapabilities())
+	ownerGenerations := make(map[string]string, len(runtimeIDs))
+	for _, id := range runtimeIDs {
+		if rt := d.findRuntime(id); rt != nil && rt.OwnerGeneration != "" {
+			ownerGenerations[id] = rt.OwnerGeneration
+		}
+	}
+	if raw, err := json.Marshal(ownerGenerations); err == nil {
+		headers.Set("X-Runtime-Owner-Generations", string(raw))
+	}
 
 	// A hand-built websocket.Dialer has Proxy == nil, which gorilla reads as
 	// "dial direct" — unlike websocket.DefaultDialer, it does not fall back to

@@ -2,10 +2,13 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -119,5 +122,86 @@ func TestDaemonDeregisterBatchReadErrorFailsClosed(t *testing.T) {
 
 	if got := runtimeStatus(t, online); got != "online" {
 		t.Errorf("runtime status = %q, want online (deregister must not have taken effect)", got)
+	}
+}
+
+type delayedDeregisterDBTX struct {
+	db.DBTX
+	started chan struct{}
+	release chan struct{}
+}
+
+func (d delayedDeregisterDBTX) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(sql, "SetAgentRuntimeOfflineIfOwner") {
+		close(d.started)
+		<-d.release
+	}
+	return d.DBTX.Exec(ctx, sql, args...)
+}
+
+func TestDaemonDeregisterLateOldOwnerCannotOfflineNewOwner(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	daemonID := "owner-generation-race-test"
+	runtimeID := dbfx.Runtime(t, "delayed deregister", testutil.Cols{
+		"daemon_id": daemonID, "runtime_mode": "local", "provider": "codex", "status": "online",
+	})
+	dbfx.Exec(t, `UPDATE agent_runtime SET metadata = COALESCE(metadata, '{}'::jsonb) || '{"owner_generation":"owner-A"}'::jsonb WHERE id = $1`, runtimeID)
+	gate := delayedDeregisterDBTX{DBTX: testPool, started: make(chan struct{}), release: make(chan struct{})}
+	h := New(db.New(gate), testPool, testHandler.Hub, testHandler.Bus, testHandler.EmailService,
+		nil, nil, analytics.NoopClient{}, Config{})
+	req := newRequest("POST", "/api/daemon/deregister/fenced", map[string]any{
+		"runtime_ids": []string{runtimeID}, "owner_generations": map[string]string{runtimeID: "owner-A"},
+	})
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { h.DaemonDeregister(w, req); close(done) }()
+	select {
+	case <-gate.started:
+	case <-time.After(5 * time.Second):
+		close(gate.release)
+		t.Fatal("old owner deregister did not reach the delayed DB write")
+	}
+	// A has released its local claim after an uncertain response; B registers
+	// the same runtime row while the old request is paused before its write.
+	register := testutil.Call(t, testHandler.DaemonRegister, newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID, "daemon_id": daemonID,
+		"runtimes": []map[string]any{{"name": "codex", "type": "codex", "status": "online", "owner_generation": "owner-B"}},
+	}, testWorkspaceID, daemonID)).Want(http.StatusOK)
+	var registered struct {
+		Runtimes []struct {
+			OwnerGeneration string `json:"owner_generation"`
+		} `json:"runtimes"`
+	}
+	if err := json.Unmarshal(register.Body.Bytes(), &registered); err != nil || len(registered.Runtimes) != 1 || registered.Runtimes[0].OwnerGeneration != "owner-B" {
+		t.Fatalf("register response did not echo owner generation: %s (%v)", register.Body.String(), err)
+	}
+	close(gate.release)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("delayed deregister did not finish")
+	}
+	if w.Code != http.StatusOK || runtimeStatus(t, runtimeID) != "online" {
+		t.Fatalf("late deregister status=%d runtime=%q, want online", w.Code, runtimeStatus(t, runtimeID))
+	}
+	testutil.Call(t, testHandler.DaemonDeregister, newRequest("POST", "/api/daemon/deregister", map[string]any{
+		"runtime_ids": []string{runtimeID},
+	})).Want(http.StatusOK)
+	if got := runtimeStatus(t, runtimeID); got != "online" {
+		t.Fatalf("legacy deregister retired fenced owner: %q", got)
+	}
+	testutil.Call(t, testHandler.DaemonDeregister, newRequest("POST", "/api/daemon/deregister/fenced", map[string]any{
+		"runtime_ids": []string{runtimeID}, "owner_generations": map[string]string{runtimeID: "owner-B"},
+		"offline_reasons": map[string]any{runtimeID: map[string]string{"code": "not_executable"}},
+	})).Want(http.StatusOK)
+	if got := runtimeStatus(t, runtimeID); got != "offline" {
+		t.Fatalf("current owner deregister left runtime %q, want offline", got)
+	}
+	var reasonCode string
+	dbfx.QueryRow(t, `SELECT metadata->'offline_reason'->>'code' FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&reasonCode)
+	if reasonCode != "not_executable" {
+		t.Fatalf("offline reason = %q, want not_executable", reasonCode)
 	}
 }

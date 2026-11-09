@@ -67,6 +67,27 @@ func TestBatchedHeartbeatScheduler_CoalescesAndFlushes(t *testing.T) {
 	}
 }
 
+func TestBatchedHeartbeatScheduler_OldGenerationReceiptCannotTouchTakeover(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID, _, daemonID := runtimeFenceFixture(t)
+	registerFenceOwner(t, runtimeID, daemonID, fenceOwnerA, "online")
+	rt := loadRuntime(t, runtimeID)
+	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, 0, nil)
+	if err := sched.Schedule(context.Background(), rt.ID, rt.WorkspaceID, fenceOwnerA); err != nil {
+		t.Fatal(err)
+	}
+	registerFenceOwner(t, runtimeID, daemonID, fenceOwnerB, "online")
+	setRuntimeLastSeenAt(t, runtimeID, time.Now().Add(-time.Hour))
+	_, before, _ := readRuntimeRow(t, runtimeID)
+	sched.FlushNow(context.Background())
+	_, after, _ := readRuntimeRow(t, runtimeID)
+	if !after.Equal(before) {
+		t.Fatalf("old batch receipt refreshed replacement: %s -> %s", before, after)
+	}
+}
+
 // TestBatchedHeartbeatScheduler_ExplicitDeregisterReceiptStaysOffline confirms
 // that a heartbeat queued before a user-visible deregistration cannot undo the
 // offline state or leave an online row with stale offline_reason metadata.

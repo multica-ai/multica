@@ -60,10 +60,15 @@ type batchFixture struct {
 	// deregistered accumulates every runtime ID sent to /api/daemon/deregister,
 	// so a test can assert the server was actually told to stop routing work.
 	deregistered []string
+	// recovered accumulates every runtime ID sent to recover-orphans, in call
+	// order. Recovery hard-fails every running task on that runtime, so the set
+	// of IDs it was aimed at is the evidence for "whose work was reclaimed".
+	recovered []string
 	// offlineReasons is the server's view of WHY each row is offline. The
 	// register upsert overwrites it (see the register handler), which is what
 	// makes "the reason survived a late healthy register" testable.
-	offlineReasons map[string]RuntimeOfflineReason
+	offlineReasons   map[string]RuntimeOfflineReason
+	ownerGenerations map[string]string
 	// registerDelay, when non-zero, makes the register handler sleep before
 	// recording the call, widening the window in which two unserialized
 	// register calls for the same workspace would overlap.
@@ -263,6 +268,13 @@ func (fx *batchFixture) deregisteredCount() int {
 	return len(fx.deregistered)
 }
 
+// recoveredIDs copies the runtime IDs recovery was run against, in order.
+func (fx *batchFixture) recoveredIDs() []string {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	return append([]string(nil), fx.recovered...)
+}
+
 // deregisteredIDs copies the runtime IDs deregistered server-side, in order.
 func (fx *batchFixture) deregisteredIDs() []string {
 	fx.mu.Lock()
@@ -401,26 +413,32 @@ func newBatchFixture(t *testing.T) *batchFixture {
 					}
 				}
 				fx.online[id] = true
+				if fx.ownerGenerations == nil {
+					fx.ownerGenerations = make(map[string]string)
+				}
+				fx.ownerGenerations[id] = rt["owner_generation"]
 				// The real upsert overwrites metadata wholesale, so a register
 				// drops any recorded reason. This is the mechanism the revived-row
 				// cleanup has to compensate for.
 				delete(fx.offlineReasons, id)
 				resp.Runtimes = append(resp.Runtimes, Runtime{
-					ID:        id,
-					Name:      rt["name"],
-					Provider:  rt["type"],
-					Status:    "online",
-					ProfileID: rt["profile_id"],
+					ID:              id,
+					OwnerGeneration: rt["owner_generation"],
+					Name:            rt["name"],
+					Provider:        rt["type"],
+					Status:          "online",
+					ProfileID:       rt["profile_id"],
 				})
 			}
 			fx.registered = append(fx.registered, call)
 			fx.mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
-		case r.URL.Path == "/api/daemon/deregister":
+		case r.URL.Path == "/api/daemon/deregister/fenced":
 			var body struct {
-				RuntimeIDs     []string                        `json:"runtime_ids"`
-				OfflineReasons map[string]RuntimeOfflineReason `json:"offline_reasons"`
+				RuntimeIDs       []string                        `json:"runtime_ids"`
+				OfflineReasons   map[string]RuntimeOfflineReason `json:"offline_reasons"`
+				OwnerGenerations map[string]string               `json:"owner_generations"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			fx.mu.Lock()
@@ -432,6 +450,9 @@ func newBatchFixture(t *testing.T) *batchFixture {
 			fx.mu.Lock()
 			fx.deregistered = append(fx.deregistered, body.RuntimeIDs...)
 			for _, id := range body.RuntimeIDs {
+				if fx.ownerGenerations[id] != body.OwnerGenerations[id] {
+					continue
+				}
 				fx.online[id] = false
 				// Mirror the server: the reason is stored on the runtime row, and
 				// a deregister without one leaves whatever was there — which is
@@ -443,6 +464,14 @@ func newBatchFixture(t *testing.T) *batchFixture {
 					fx.offlineReasons[id] = reason
 				}
 			}
+			fx.mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/recover-orphans"):
+			// Mirror the route: the runtime is the last path segment.
+			trimmed := strings.TrimSuffix(r.URL.Path, "/recover-orphans")
+			id := trimmed[strings.LastIndex(trimmed, "/")+1:]
+			fx.mu.Lock()
+			fx.recovered = append(fx.recovered, id)
 			fx.mu.Unlock()
 			w.WriteHeader(http.StatusOK)
 		case strings.HasSuffix(r.URL.Path, "/runtime-profiles"):

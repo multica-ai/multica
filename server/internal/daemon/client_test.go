@@ -17,6 +17,36 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+func TestRuntimeOwnerGenerationSentOnLifecycleRequests(t *testing.T) {
+	const generation = "g00000000000000000002:owner-B"
+	seen := make(map[string]string)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			OwnerGeneration string `json:"owner_generation"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode %s: %v", r.URL.Path, err)
+		}
+		seen[r.URL.Path] = body.OwnerGeneration
+		if r.URL.Path == "/api/daemon/heartbeat" {
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		}
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL)
+	if err := c.RecoverOrphans(context.Background(), "runtime-1", generation); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.SendHeartbeat(context.Background(), "runtime-1", generation); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/daemon/runtimes/runtime-1/recover-orphans", "/api/daemon/heartbeat"} {
+		if seen[path] != generation {
+			t.Fatalf("%s owner_generation = %q", path, seen[path])
+		}
+	}
+}
+
 func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("X-Client-Platform"); got != "daemon" {

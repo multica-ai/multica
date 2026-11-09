@@ -1195,6 +1195,17 @@ func TestDemoteBelowMinimumRuntimes_LateAuthoritativeResponseCannotReviveTheProv
 	if len(droppedIDs) == 0 {
 		t.Error("demoted runtime was rejected but not reported in droppedIDs, so the caller would never " +
 			"deregister the row the server brought back online")
+	} else {
+		// The response may land after demotion released the local claim. Its
+		// generation, not the now-absent claim, must fence the cleanup.
+		fx.mu.Lock()
+		fx.online[droppedIDs[0].ID] = true
+		fx.ownerGenerations[droppedIDs[0].ID] = staleResp.Runtimes[0].OwnerGeneration
+		fx.mu.Unlock()
+		d.deregisterDroppedRuntimes(context.Background(), "ws-1", droppedIDs, "late response", nil)
+		if fx.runtimeOnline(droppedIDs[0].ID) {
+			t.Error("late authoritative response stayed online after fenced cleanup")
+		}
 	}
 	// The version record must not claim the server holds a version for a
 	// provider whose rows are on their way offline — that is exactly what makes

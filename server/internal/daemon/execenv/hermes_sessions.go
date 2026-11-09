@@ -5,10 +5,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
-
-	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 // Persist Hermes ACP session databases by agent, profile, and conversation under
@@ -16,38 +15,80 @@ import (
 // get separate SQLite databases. This keeps resumable transcripts across task homes
 // without sharing a live database among an agent's concurrent issues.
 //
+// Hermes persists every ACP session — the actual conversation transcript — in
+// the SQLite database at `<HERMES_HOME>/state.db` (acp_adapter/session.py).
+// Because Multica has to take over HERMES_HOME to inject bound skills, that
+// database landed inside the per-task overlay, which made a Hermes agent's
+// conversation last exactly one task.
+//
+// The failure was silent, which is what made it expensive. `session/resume`
+// against a database that does not hold the session does not fail: Hermes
+// creates a fresh session and answers with an ordinary success frame
+// (acp_adapter/server.py resume_session), so the daemon believed it had
+// resumed, re-sent the same dead id on every later turn, and the user saw a
+// conversation that restarted from zero with nothing in the logs (GH #6806).
+// The backend now detects that rebind (resolveHermesResumedSessionID), and
+// this file removes the cause.
+//
+// The store is keyed by (agent, hermes profile, conversation):
+//
+//	<daemon work-state root>/hermes-sessions/<agent>/<hermes profile>/<conversation>/state.db
+//
+// Keying to the conversation — the issue, or `chat_<id>` for a chat session —
+// is what makes this safe to share where #6693 could not. Its stated reason
+// for leaving state.db task-local was concurrency: one agent's parallel tasks
+// would write one live SQLite database, which needs lock and consistency work
+// (plus Windows byte-range locks on `-shm`) that plain memory files do not.
+// Tasks of the SAME conversation are serial by construction — a follow-up is
+// dispatched after its predecessor reports — so the shard has one writer at a
+// time, while two different issues get two different databases and never meet.
+//
+// The (agent, profile) prefix matches the memory store's scoping exactly, so
+// pointing an agent at another Hermes profile gives it a fresh conversation
+// line just as it gives it a fresh memory line. It is a sibling root rather
+// than a subdirectory of `hermes-state/<agent>/<profile>` because that
+// directory IS the agent's memories dir (the overlay links `memories/`
+// straight at it), so nesting sessions inside it would surface them to Hermes
+// as a memory entry.
+//
+// The overlay mounts the shard by symlinking `<overlay>/state.db` at
+// `<store>/state.db`. SQLite resolves the link when it derives the `-wal` and
+// `-shm` paths, so the journal sidecars are created in the store next to the
+// database rather than in the task directory, and a task teardown can never
+// take the write-ahead log with it.
 // The conversation store is the effective HERMES_HOME, with an ordinary state.db
 // and its journals inside it. Both in-process ACP and gateway-backed Hermes can
 // use it without relaxing gateway database ownership checks or copying a live DB.
 
-// hermesSessionStoreRoot is the directory under the daemon's Multica profile
-// dir that holds every agent's persistent Hermes conversation shards.
+// hermesSessionStoreRoot is the directory under the daemon's work-state root
+// that holds every agent's persistent Hermes conversation shards.
 const hermesSessionStoreRoot = "hermes-sessions"
 
 // hermesSessionDBEntry is the database file name inside both the store and the
 // overlay home — Hermes resolves it relative to HERMES_HOME.
 const hermesSessionDBEntry = "state.db"
 
-// HermesSessionStorePath returns the persistent session store for
-// (daemonProfile, agentID, sourceHome, conversation), or "" when the session
-// database must stay task-local — no agent to key on, no conversation to key
-// on (neither an issue nor a chat session), or an unresolvable Multica profile
-// dir. The daemon marks the returned path in-use for the task's duration so
-// PruneHermesSessionStores never reclaims it mid-mount.
-func HermesSessionStorePath(daemonProfile, agentID, sourceHome string, task TaskContextForEnv) string {
+// HermesSessionStorePath returns the persistent session store for (stateRoot,
+// agentID, sourceHome, conversation), or "" when the session database must stay
+// task-local — no agent to key on, no conversation to key on (neither an issue
+// nor a chat session), or no work-state root. The daemon marks the returned path
+// in-use for the task's duration so PruneHermesSessionStores never reclaims it
+// mid-mount.
+//
+// stateRoot is the daemon's resolved work-state root
+// (daemon.WorkStateScope.StateRoot), the machine + backend boundary, so a
+// conversation started under one Multica profile resumes under another profile
+// aimed at the same backend (GH #8280).
+func HermesSessionStorePath(stateRoot, agentID, sourceHome string, task TaskContextForEnv) string {
 	agent := sanitizePathSegment(agentID)
-	if agent == "" {
+	if agent == "" || strings.TrimSpace(stateRoot) == "" {
 		return ""
 	}
 	conversation := hermesConversationSegment(task)
 	if conversation == "" {
 		return ""
 	}
-	profileDir, err := cli.ProfileDir(daemonProfile)
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(profileDir, hermesSessionStoreRoot, agent,
+	return filepath.Join(stateRoot, hermesSessionStoreRoot, agent,
 		hermesMemoryProfileSegment(sourceHome), conversation)
 }
 
@@ -319,15 +360,11 @@ func touchHermesSessionStore(storeDir string, logger *slog.Logger) {
 // reserve (may be nil) atomically claims a store for deletion exactly as
 // PruneCodexSessionStores uses it: ok=false means a live task holds the store,
 // so it is left alone. nil disables the guard (tests).
-func PruneHermesSessionStores(daemonProfile string, retention time.Duration, now time.Time, reserve func(storeDir string) (commit func(), ok bool), logger *slog.Logger) (removed int, bytesFreed int64) {
-	if retention <= 0 {
+func PruneHermesSessionStores(stateRoot string, retention time.Duration, now time.Time, reserve func(storeDir string) (commit func(), ok bool), logger *slog.Logger) (removed int, bytesFreed int64) {
+	if retention <= 0 || strings.TrimSpace(stateRoot) == "" {
 		return 0, 0
 	}
-	profileDir, err := cli.ProfileDir(daemonProfile)
-	if err != nil {
-		return 0, 0
-	}
-	root := filepath.Join(profileDir, hermesSessionStoreRoot)
+	root := filepath.Join(stateRoot, hermesSessionStoreRoot)
 	agents, err := os.ReadDir(root)
 	if err != nil {
 		return 0, 0 // not created yet, or unreadable — nothing to prune

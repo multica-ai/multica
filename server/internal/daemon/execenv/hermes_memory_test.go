@@ -49,16 +49,15 @@ func TestHermesMemoryProfileSegment(t *testing.T) {
 	}
 }
 
-// TestHermesMemoryStorePathLayout pins the on-disk layout the documented
-// one-off import depends on: <profile dir>/hermes-state/<agent>/<profile>.
+// TestHermesMemoryStorePathLayout pins the on-disk layout an operator (and the
+// GC) depends on: <work-state root>/hermes-state/<agent>/<hermes profile>. The
+// root is the machine + backend scope, not the Multica profile directory (#8280).
 func TestHermesMemoryStorePathLayout(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	stateRoot := t.TempDir()
 
 	agent := "11111111-2222-3333-4444-555555555555"
-	got := HermesMemoryStorePath("", agent, filepath.Join(platformDefaultHermesHome(), "profiles", "research"))
-	want := filepath.Join(home, ".multica", hermesMemoryStoreRoot, agent, "research")
+	got := HermesMemoryStorePath(stateRoot, agent, filepath.Join(platformDefaultHermesHome(), "profiles", "research"))
+	want := filepath.Join(stateRoot, hermesMemoryStoreRoot, agent, "research")
 	if got != want {
 		t.Fatalf("store path = %q, want %q", got, want)
 	}
@@ -67,12 +66,15 @@ func TestHermesMemoryStorePathLayout(t *testing.T) {
 // TestHermesMemoryStorePathDisabled covers the task without an agent to key the
 // store on: memory has to stay task-local rather than land in a shared segment.
 func TestHermesMemoryStorePathDisabled(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	stateRoot := t.TempDir()
 
-	if got := HermesMemoryStorePath("", "", ""); got != "" {
+	if got := HermesMemoryStorePath(stateRoot, "", ""); got != "" {
 		t.Fatalf("store path without an agent = %q, want empty", got)
+	}
+	// No work-state root means no daemon-managed store: memory stays task-local
+	// rather than landing in an un-namespaced path.
+	if got := HermesMemoryStorePath("", "agent-1", ""); got != "" {
+		t.Fatalf("store path without a work-state root = %q, want empty", got)
 	}
 }
 
@@ -543,11 +545,10 @@ func TestPrepareHermesHomeMigrationKeepsExistingStore(t *testing.T) {
 // are reclaimed, recently-used ones are kept, and a store a live task holds is
 // never removed.
 func TestPruneHermesMemoryStores(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-
-	root := filepath.Join(home, ".multica", hermesMemoryStoreRoot)
+	// The store lives under the daemon's work-state root, so the test owns that
+	// root directly instead of going through HOME and the profile directory.
+	stateRoot := t.TempDir()
+	root := filepath.Join(stateRoot, hermesMemoryStoreRoot)
 	idle := filepath.Join(root, "agent-idle", "default")
 	fresh := filepath.Join(root, "agent-fresh", "default")
 	held := filepath.Join(root, "agent-held", "default")
@@ -573,7 +574,7 @@ func TestPruneHermesMemoryStores(t *testing.T) {
 		return func() {}, true
 	}
 
-	removed, freed := PruneHermesMemoryStores("", 14*24*time.Hour, now, reserve, testLogger())
+	removed, freed := PruneHermesMemoryStores(stateRoot, 14*24*time.Hour, now, reserve, testLogger())
 	if removed != 1 {
 		t.Fatalf("removed = %d, want 1", removed)
 	}
@@ -594,21 +595,38 @@ func TestPruneHermesMemoryStores(t *testing.T) {
 // TestPruneHermesMemoryStoresDisabled documents that retention <= 0 turns the
 // pruner off entirely, matching the Codex store knob.
 func TestPruneHermesMemoryStoresDisabled(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-
-	store := filepath.Join(home, ".multica", hermesMemoryStoreRoot, "agent-1", "default")
+	stateRoot := t.TempDir()
+	store := filepath.Join(stateRoot, hermesMemoryStoreRoot, "agent-1", "default")
 	mustWrite(t, filepath.Join(store, "MEMORY.md"), "remembered")
-	old := time.Now().Add(-365 * 24 * time.Hour)
-	if err := os.Chtimes(store, old, old); err != nil {
-		t.Fatalf("age store: %v", err)
-	}
+	chtimesTree(t, store, time.Now().Add(-365*24*time.Hour))
 
-	if removed, _ := PruneHermesMemoryStores("", 0, time.Now(), nil, testLogger()); removed != 0 {
+	if removed, _ := PruneHermesMemoryStores(stateRoot, 0, time.Now(), nil, testLogger()); removed != 0 {
 		t.Fatalf("removed = %d with pruning disabled, want 0", removed)
 	}
 	if _, err := os.Stat(store); err != nil {
 		t.Fatalf("store was reclaimed with pruning disabled: %v", err)
+	}
+}
+
+// TestPruneHermesMemoryStoresIgnoresOtherWorkStateRoots pins the GC ownership
+// boundary (GH #8280): two backends on one machine own two work-state roots, and
+// a daemon may only ever reclaim the one it is authorized to serve. Without this
+// the GC would be the next split-brain — a daemon pruning stores it cannot mount.
+func TestPruneHermesMemoryStoresIgnoresOtherWorkStateRoots(t *testing.T) {
+	mine := t.TempDir()
+	otherBackend := t.TempDir()
+	store := filepath.Join(mine, hermesMemoryStoreRoot, "agent-1", "default")
+	mustWrite(t, filepath.Join(store, "MEMORY.md"), "remembered")
+	chtimesTree(t, store, time.Now().Add(-30*24*time.Hour))
+
+	if removed, _ := PruneHermesMemoryStores(otherBackend, 14*24*time.Hour, time.Now(), nil, testLogger()); removed != 0 {
+		t.Fatalf("removed = %d, want 0 — another backend's work-state root is out of scope", removed)
+	}
+	if _, err := os.Stat(store); err != nil {
+		t.Fatalf("another backend's prune reclaimed this backend's store: %v", err)
+	}
+
+	if removed, _ := PruneHermesMemoryStores(mine, 14*24*time.Hour, time.Now(), nil, testLogger()); removed != 1 {
+		t.Fatalf("removed = %d, want 1 — the owning work-state root reclaims its idle store", removed)
 	}
 }

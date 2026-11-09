@@ -67,7 +67,7 @@ func (noopLivenessStore) Forget(_ context.Context, _ string) {}
 // runtimeLivenessKeyPrefix is the Redis key prefix for runtime liveness
 // records. Mirrors the namespacing used by the other runtime stores
 // (mul:update:*, mul:model_list:*, mul:local_skill_list:*).
-const runtimeLivenessKeyPrefix = "mul:runtime:hb:"
+const runtimeLivenessKeyPrefix = "mul:{runtime_pending}:runtime:hb:"
 
 func runtimeLivenessKey(runtimeID string) string {
 	return runtimeLivenessKeyPrefix + runtimeID
@@ -128,6 +128,32 @@ func (s *RedisLivenessStore) IsAliveBatch(ctx context.Context, runtimeIDs []stri
 		out[runtimeIDs[i]] = command.Err() == nil
 	}
 	return out, true
+}
+
+// IsAliveOwnerBatch accepts a Redis heartbeat only for the generation in the
+// current runtime row. A delayed old heartbeat cannot keep a replacement alive.
+func (s *RedisLivenessStore) IsAliveOwnerBatch(ctx context.Context, generations map[string]string) (map[string]bool, bool) {
+	if !s.Available() {
+		return nil, false
+	}
+	pipe := s.rdb.Pipeline()
+	commands := make(map[string]*redis.StringCmd, len(generations))
+	for id := range generations {
+		commands[id] = pipe.Get(ctx, runtimeLivenessKey(id))
+	}
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return nil, false
+	}
+	alive := make(map[string]bool, len(generations))
+	for id, command := range commands {
+		if err := command.Err(); err != nil && !errors.Is(err, redis.Nil) {
+			return nil, false
+		}
+		if command.Err() == nil {
+			alive[id] = generations[id] == "" || command.Val() == generations[id]
+		}
+	}
+	return alive, true
 }
 
 func (s *RedisLivenessStore) Forget(ctx context.Context, runtimeID string) {

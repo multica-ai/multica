@@ -203,13 +203,17 @@ func (s *RedisUpdateStore) PopPending(ctx context.Context, runtimeID string) (*U
 			return nil, err
 		}
 
+		ownerKey, ownerGeneration := redisPendingOwner(ctx)
 		result, err := claimPendingScript.Run(
 			ctx, s.rdb,
-			[]string{pendingKey, updateKey(id)},
-			id, data, int(updateStoreRetention.Seconds()),
+			[]string{pendingKey, updateKey(id), ownerKey},
+			id, data, int(updateStoreRetention.Seconds()), ownerGeneration,
 		).Int64()
 		if err != nil {
 			return nil, fmt.Errorf("claim pending update: %w", err)
+		}
+		if err := pendingClaimError(result); err != nil {
+			return nil, err
 		}
 		if result == 0 {
 			continue

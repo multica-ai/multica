@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -39,7 +41,7 @@ type HeartbeatScheduler interface {
 	// (sweeper-race fallback, batch-receipt reconciliation), it reports the
 	// recovery through RecoveryNotifier so the workspace-scoped daemon:register
 	// refresh fires exactly once per actual offline → online transition.
-	Schedule(ctx context.Context, runtimeID, workspaceID pgtype.UUID) error
+	Schedule(ctx context.Context, runtimeID, workspaceID pgtype.UUID, generation ...string) error
 }
 
 // PassthroughHeartbeatScheduler is the synchronous scheduler used as the
@@ -55,8 +57,12 @@ func NewPassthroughHeartbeatScheduler(queries *db.Queries) *PassthroughHeartbeat
 	return &PassthroughHeartbeatScheduler{queries: queries}
 }
 
-func (p *PassthroughHeartbeatScheduler) Schedule(ctx context.Context, runtimeID, workspaceID pgtype.UUID) error {
-	rows, err := p.queries.TouchAgentRuntimeLastSeen(ctx, runtimeID)
+func (p *PassthroughHeartbeatScheduler) Schedule(ctx context.Context, runtimeID, workspaceID pgtype.UUID, generation ...string) error {
+	owner := ""
+	if len(generation) > 0 {
+		owner = generation[0]
+	}
+	rows, err := p.queries.TouchAgentRuntimeLastSeenIfOwner(ctx, db.TouchAgentRuntimeLastSeenIfOwnerParams{ID: runtimeID, OwnerGeneration: owner})
 	if err != nil {
 		return err
 	}
@@ -68,7 +74,7 @@ func (p *PassthroughHeartbeatScheduler) Schedule(ctx context.Context, runtimeID,
 	// if another heartbeat already won the race (or the row is gone), the
 	// unconditional MarkAgentRuntimeOnline still bumps last_seen_at and
 	// preserves pgx.ErrNoRows for the deleted case.
-	flipped, err := p.queries.MarkAgentRuntimeOnlineIfOffline(ctx, runtimeID)
+	flipped, err := p.queries.MarkAgentRuntimeOnlineIfOfflineAndOwner(ctx, db.MarkAgentRuntimeOnlineIfOfflineAndOwnerParams{ID: runtimeID, OwnerGeneration: owner})
 	if err != nil {
 		return err
 	}
@@ -76,7 +82,7 @@ func (p *PassthroughHeartbeatScheduler) Schedule(ctx context.Context, runtimeID,
 		p.notifyRuntimeRecovered(ctx, workspaceID)
 		return nil
 	}
-	_, err = p.queries.MarkAgentRuntimeOnline(ctx, runtimeID)
+	_, err = p.queries.MarkAgentRuntimeOnlineIfOwner(ctx, db.MarkAgentRuntimeOnlineIfOwnerParams{ID: runtimeID, OwnerGeneration: owner})
 	return err
 }
 
@@ -110,7 +116,7 @@ type BatchedHeartbeatScheduler struct {
 	RecoveryNotifier RuntimeRecoveryNotifier
 
 	mu      sync.Mutex
-	pending map[pgtype.UUID]struct{}
+	pending map[pgtype.UUID]string
 
 	stopOnce sync.Once
 	stopCh   chan struct{}
@@ -139,15 +145,19 @@ func NewBatchedHeartbeatScheduler(queries *db.Queries, tickInterval time.Duratio
 		queries:      queries,
 		runtimeGone:  runtimeGone,
 		tickInterval: tickInterval,
-		pending:      make(map[pgtype.UUID]struct{}),
+		pending:      make(map[pgtype.UUID]string),
 		stopCh:       make(chan struct{}),
 		doneCh:       make(chan struct{}),
 	}
 }
 
-func (b *BatchedHeartbeatScheduler) Schedule(_ context.Context, runtimeID, _ pgtype.UUID) error {
+func (b *BatchedHeartbeatScheduler) Schedule(_ context.Context, runtimeID, _ pgtype.UUID, generation ...string) error {
+	owner := ""
+	if len(generation) > 0 {
+		owner = generation[0]
+	}
 	b.mu.Lock()
-	b.pending[runtimeID] = struct{}{}
+	b.pending[runtimeID] = owner
 	b.mu.Unlock()
 	return nil
 }
@@ -217,18 +227,25 @@ func (b *BatchedHeartbeatScheduler) flushOnce(ctx context.Context) {
 		return
 	}
 	ids := make([]pgtype.UUID, 0, len(b.pending))
-	for id := range b.pending {
+	receipts := make(map[string]string, len(b.pending))
+	for id, owner := range b.pending {
 		ids = append(ids, id)
+		receipts[uuidToString(id)] = owner
 	}
-	b.pending = make(map[pgtype.UUID]struct{})
+	b.pending = make(map[pgtype.UUID]string)
 	b.mu.Unlock()
 
-	touched, err := b.queries.TouchAgentRuntimesLastSeenBatch(ctx, ids)
+	encoded, err := json.Marshal(receipts)
+	if err != nil {
+		b.requeue(receipts)
+		return
+	}
+	touched, err := b.queries.TouchAgentRuntimesLastSeenBatchIfOwner(ctx, encoded)
 	if err != nil {
 		// The connection lease advances its flush watermark when Schedule
 		// accepts the ID, so retain failed IDs here instead of waiting another
 		// full lease interval before retrying.
-		b.requeue(ids)
+		b.requeue(receipts)
 		slog.Warn("heartbeat batch flush failed",
 			"scheduled", len(ids), "error", err)
 		return
@@ -250,7 +267,7 @@ func (b *BatchedHeartbeatScheduler) flushOnce(ctx context.Context) {
 
 	states, err := b.queries.GetAgentRuntimeHeartbeatLeases(ctx, omitted)
 	if err != nil {
-		b.requeue(omitted)
+		b.requeue(receipts)
 		slog.Warn("heartbeat batch reconciliation query failed",
 			"omitted", len(omitted), "error", err)
 		return
@@ -262,19 +279,24 @@ func (b *BatchedHeartbeatScheduler) flushOnce(ctx context.Context) {
 	now := time.Now()
 	for _, state := range states {
 		existing[state.ID] = struct{}{}
+		if state.OwnerGeneration != receipts[uuidToString(state.ID)] {
+			continue
+		}
 		if state.Status != "offline" || !state.LastSeenAt.Valid || now.Sub(state.LastSeenAt.Time) < heartbeatReceiptRecoveryThreshold {
 			// The omission was not a stale-sweeper race. In particular, preserve
 			// recent explicit deregistration and its offline_reason metadata.
 			preservedOffline++
 			continue
 		}
-		if _, err := b.queries.MarkAgentRuntimeOnline(ctx, state.ID); err != nil {
+		if _, err := b.queries.MarkAgentRuntimeOnlineIfOwner(ctx, db.MarkAgentRuntimeOnlineIfOwnerParams{ID: state.ID, OwnerGeneration: state.OwnerGeneration}); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				missing++
-				b.notifyRuntimeGone(state.ID)
+				if _, lookupErr := b.queries.GetAgentRuntimeHeartbeatState(ctx, state.ID); errors.Is(lookupErr, pgx.ErrNoRows) {
+					missing++
+					b.notifyRuntimeGone(state.ID)
+				}
 				continue
 			}
-			b.requeue([]pgtype.UUID{state.ID})
+			b.requeue(map[string]string{uuidToString(state.ID): state.OwnerGeneration})
 			slog.Warn("heartbeat batch offline recovery failed",
 				"runtime_id", uuidToString(state.ID), "error", err)
 			continue
@@ -299,14 +321,21 @@ func (b *BatchedHeartbeatScheduler) flushOnce(ctx context.Context) {
 	)
 }
 
-func (b *BatchedHeartbeatScheduler) requeue(ids []pgtype.UUID) {
+func (b *BatchedHeartbeatScheduler) requeue(receipts map[string]string) {
 	// A runtime can disconnect while its ID waits here, so a recovered DB may
 	// receive one final delayed last_seen_at refresh. That delay is bounded by
 	// one retry tick after recovery; keeping the ID is required because the
 	// connection lease already advanced its local flush watermark.
 	b.mu.Lock()
-	for _, id := range ids {
-		b.pending[id] = struct{}{}
+	for id, generation := range receipts {
+		uuid, err := util.ParseUUID(id)
+		if err != nil {
+			continue
+		}
+		if current, ok := b.pending[uuid]; ok && current != generation {
+			continue
+		}
+		b.pending[uuid] = generation
 	}
 	b.mu.Unlock()
 }

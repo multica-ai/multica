@@ -180,7 +180,7 @@ func newDriftFixture(t *testing.T, initial []RuntimeProfile) *driftFixture {
 			fx.recoverOrphansMu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"orphaned":0,"retried":0}`))
-		case r.URL.Path == "/api/daemon/deregister":
+		case r.URL.Path == "/api/daemon/deregister/fenced":
 			var body struct {
 				RuntimeIDs []string `json:"runtime_ids"`
 			}

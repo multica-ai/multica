@@ -66,9 +66,11 @@ func TestRunTaskWakeupConnectionSignalsDisconnect(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	connected := make(chan struct{})
 	capabilities := make(chan string, 1)
+	ownerGenerations := make(chan string, 1)
 	closeConnection := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capabilities <- r.Header.Get("X-Client-Capabilities")
+		ownerGenerations <- r.Header.Get("X-Runtime-Owner-Generations")
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
@@ -90,6 +92,7 @@ func TestRunTaskWakeupConnectionSignalsDisconnect(t *testing.T) {
 		ServerBaseURL:     srv.URL,
 		HeartbeatInterval: time.Hour,
 	}, slog.Default())
+	d.runtimeIndex["runtime-1"] = Runtime{ID: "runtime-1", OwnerGeneration: "g00000000000000000002:owner-B"}
 	taskWakeups := make(chan taskWakeup, 2)
 	errCh := make(chan error, 1)
 	go func() {
@@ -104,6 +107,10 @@ func TestRunTaskWakeupConnectionSignalsDisconnect(t *testing.T) {
 	}
 	if got := <-capabilities; !strings.Contains(got, protocol.DaemonCapabilityClaimPollHintsV1) {
 		t.Fatalf("WS capabilities = %q, missing %q", got, protocol.DaemonCapabilityClaimPollHintsV1)
+	}
+	var generations map[string]string
+	if err := json.Unmarshal([]byte(<-ownerGenerations), &generations); err != nil || generations["runtime-1"] != "g00000000000000000002:owner-B" {
+		t.Fatalf("WS owner generations = %v, err = %v", generations, err)
 	}
 	select {
 	case <-taskWakeups: // initial catch-up claim

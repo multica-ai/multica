@@ -372,7 +372,19 @@ func filterStaleRuntimesByLiveness(ctx context.Context, candidates []db.SelectSt
 	for i, c := range candidates {
 		idStrs[i] = util.UUIDToString(c.ID)
 	}
-	alive, ok := liveness.IsAliveBatch(ctx, idStrs)
+	var alive map[string]bool
+	var ok bool
+	if ownerStore, supportsOwner := liveness.(interface {
+		IsAliveOwnerBatch(context.Context, map[string]string) (map[string]bool, bool)
+	}); supportsOwner {
+		generations := make(map[string]string, len(candidates))
+		for i, candidate := range candidates {
+			generations[idStrs[i]] = candidate.OwnerGeneration
+		}
+		alive, ok = ownerStore.IsAliveOwnerBatch(ctx, generations)
+	} else {
+		alive, ok = liveness.IsAliveBatch(ctx, idStrs)
+	}
 	if !ok {
 		// Store hiccup: degrade to DB-only behavior for this tick.
 		for _, c := range candidates {
