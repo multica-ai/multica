@@ -3,7 +3,6 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTask } from "@multica/core/types";
-import { ApiClient, setApiInstance } from "@multica/core/api";
 import { renderWithI18n } from "../../test/i18n";
 
 const mockState = vi.hoisted(() => ({
@@ -276,7 +275,7 @@ describe("subtree execution log", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Include sub-issues" }));
     expect(screen.getByRole("status", { name: "Loading runs..." })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Execution log 1" })).not.toBeInTheDocument();
-    expect(list).toHaveBeenCalledWith("issue-1", true);
+    expect(list).toHaveBeenCalledWith("issue-1", true, { view: "timeline" });
     await act(async () => { rejectRequest(new Error("unavailable")); });
     const retry = await screen.findByRole("button", { name: "Could not load runs. Retry" });
     list.mockResolvedValue([makeTask({ id: "deep", issue_id: "deep-issue" })]);

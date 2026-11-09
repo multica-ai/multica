@@ -1107,6 +1107,8 @@ export function useRealtimeSync(
         // Debounce per issue so simultaneous runs cannot erase each other's refresh.
         debouncedRefresh(`issue-task:${issueId ?? "all"}`, () => {
           qc.invalidateQueries({ queryKey: issueId ? issueKeys.tasks(issueId) : issueKeys.tasksAll() });
+          // Events don't carry the ancestor chain needed to scope subtree projections.
+          if (issueId) qc.invalidateQueries({ queryKey: issueKeys.tasksAll(), predicate: (q) => q.queryKey[3] === "subtree" });
           qc.invalidateQueries({ queryKey: issueId ? issueKeys.usage(issueId) : issueKeys.usageAll() });
         });
       }

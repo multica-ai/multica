@@ -540,6 +540,7 @@ describe("useRealtimeSync — comment folded into a queued run", () => {
     const onAny = vi.mocked(ws.onAny).mock.calls[0]![0];
     qc.setQueryData(issueKeys.tasks("issue-1"), []);
     qc.setQueryData(issueKeys.tasks("unrelated-issue"), []);
+    qc.setQueryData(issueKeys.subtreeTasks("parent"), []);
 
     onAny({
       type: "task:coalesced",
@@ -549,6 +550,7 @@ describe("useRealtimeSync — comment folded into a queued run", () => {
 
     expect(qc.getQueryState(issueKeys.tasks("issue-1"))?.isInvalidated).toBe(true);
     expect(qc.getQueryState(issueKeys.tasks("unrelated-issue"))?.isInvalidated).toBe(false);
+    expect(qc.getQueryState(issueKeys.subtreeTasks("parent"))?.isInvalidated).toBe(true);
   });
 });
 
