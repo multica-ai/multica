@@ -202,7 +202,7 @@ function RunCard({ className, compact }: { className: string; compact?: boolean 
         <p className="mt-1.5 text-label font-semibold">Redesign the settings page</p>
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
           <Chip actor={BACKEND} />
-          <span className="flex items-center gap-1.5 rounded-full border border-border py-0.5 pr-2 pl-1 text-caption">
+          <span className="flex items-center gap-1.5 rounded-md border border-border py-0.5 pr-2 pl-1 text-caption">
             <ProviderLogo provider="qoder_cloud" className="size-3.5" />
             {QODER}
           </span>

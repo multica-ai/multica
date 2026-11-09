@@ -188,7 +188,7 @@ function RailButton({ icon: Icon, active }: { icon: IconComponent; active?: bool
  */
 export function AppRail({ active, inbox = 3, desktop }: { active: Space; inbox?: number; desktop?: boolean }) {
   return (
-    <div className={cn("flex w-16 shrink-0 flex-col items-center pb-2.5", desktop ? "pt-10" : "pt-3")}>
+    <div className={cn("flex w-14 shrink-0 flex-col items-center pb-2.5", desktop ? "pt-10" : "pt-3")}>
       <span className="flex size-[34px] shrink-0 items-center justify-center rounded-lg border border-surface-border bg-surface-raised text-body font-semibold shadow-[var(--surface-shadow)]">
         A
       </span>
@@ -207,7 +207,7 @@ export function AppRail({ active, inbox = 3, desktop }: { active: Space; inbox?:
             <span
               key={space.key}
               className={cn(
-                "relative flex size-[52px] shrink-0 flex-col items-center justify-center gap-1 rounded-xl",
+                "relative flex size-12 shrink-0 flex-col items-center justify-center gap-1 rounded-xl",
                 current ? RAIL_ACTIVE : "text-muted-foreground",
               )}
             >
@@ -216,7 +216,7 @@ export function AppRail({ active, inbox = 3, desktop }: { active: Space; inbox?:
               {space.key === "inbox" && inbox > 0 ? (
                 <span
                   className={cn(
-                    "absolute top-0.5 right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] leading-none font-medium tabular-nums text-brand-foreground ring-2",
+                    "absolute top-0 right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10px] leading-none font-medium tabular-nums text-brand-foreground ring-2",
                     current ? "ring-sidebar-accent" : "ring-app-shell",
                   )}
                 >

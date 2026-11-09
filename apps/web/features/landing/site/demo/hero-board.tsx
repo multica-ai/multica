@@ -56,7 +56,7 @@ import {
 const WIDE_WIDTH = 1440;
 const NARROW_WIDTH = 540;
 const NARROW_BELOW = 600;
-const RAIL_WIDTH = 64;
+const RAIL_WIDTH = 56;
 const PANEL_WIDTH = 240;
 const CARD_MARGIN = 8;
 const COLUMN_WIDTH = 280;
@@ -453,7 +453,7 @@ function BoardColumn({
         </div>
         <div className="flex min-w-0 items-center gap-1">
           {status.handler ? (
-            <span className="inline-flex min-w-0 max-w-32 items-center gap-1 rounded-full border border-surface-border bg-background/70 py-0.5 pr-2 pl-0.5 text-caption">
+            <span className="inline-flex min-w-0 max-w-32 items-center gap-1 rounded-md border border-surface-border bg-background/70 py-0.5 pr-2 pl-0.5 text-caption">
               <Avatar actor={status.handler} size={16} />
               <span className="truncate">{status.handler.name}</span>
             </span>
@@ -625,7 +625,7 @@ function IssuePeek({ workflow, focus, stage, open }: { workflow: Workflow; focus
 
 function Pill({ children }: { children: ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1.5 h-[var(--button-height-xs)] rounded-full border px-2.5 text-caption animate-in fade-in duration-300 motion-reduce:animate-none">
+    <span className="inline-flex items-center gap-1.5 h-[var(--button-height-xs)] rounded-md border px-2 text-caption animate-in fade-in duration-300 motion-reduce:animate-none">
       {children}
     </span>
   );

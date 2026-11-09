@@ -71,7 +71,7 @@ function Screen({ active, children }: { active: Space; children: ReactNode }) {
 
 export function Chip({ actor }: { actor: Actor }) {
   return (
-    <span className="flex min-w-0 items-center gap-1.5 rounded-full border border-border py-0.5 pr-2 pl-0.5 text-caption">
+    <span className="flex min-w-0 items-center gap-1.5 rounded-md border border-border py-0.5 pr-2 pl-0.5 text-caption">
       <Avatar actor={actor} size={16} />
       <span className="truncate">{actor.name}</span>
     </span>

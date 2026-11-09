@@ -58,6 +58,7 @@ const ACME_TABS: Tab[] = [
 
 /** Room the window controls and history take at the title bar's start. */
 const TOOLBAR_CLEARANCE = 200;
+const RAIL_WIDTH = 56;
 const TITLE_BAR_ACTION = "flex size-7 shrink-0 items-center justify-center rounded-md text-faint-foreground";
 const TAB_FADE: CSSProperties = {
   maskImage: "linear-gradient(to right, black calc(100% - 12px), transparent)",
@@ -160,7 +161,7 @@ function NativeWindow({
       <WindowToolbar />
       <AppRail active={active} desktop />
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex h-10 shrink-0 items-center gap-2" style={{ paddingLeft: TOOLBAR_CLEARANCE - 64 }}>
+        <div className="flex h-10 shrink-0 items-center gap-2" style={{ paddingLeft: TOOLBAR_CLEARANCE - RAIL_WIDTH }}>
           <TabStrip tabs={tabs} active={activeTab} tabClassName={compact ? "w-32 shrink-0" : "w-56"} />
           {compact ? null : (
             <span className="flex shrink-0 items-center gap-2" style={{ marginRight: bleed + 12 }}>
@@ -402,13 +403,13 @@ function WorkspaceWindow({ initial, tabs, active, front, className }: { initial:
       )}
     >
       <WindowToolbar />
-      <div className="flex w-16 shrink-0 justify-center pt-10 pb-2">
+      <div className="flex w-14 shrink-0 justify-center pt-10 pb-2">
         <span className="flex size-[34px] items-center justify-center rounded-lg border border-surface-border bg-surface-raised text-body font-semibold shadow-[var(--surface-shadow)]">
           {initial}
         </span>
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex h-10 shrink-0 items-center pr-2" style={{ paddingLeft: TOOLBAR_CLEARANCE - 64 }}>
+        <div className="flex h-10 shrink-0 items-center pr-2" style={{ paddingLeft: TOOLBAR_CLEARANCE - RAIL_WIDTH }}>
           <TabStrip tabs={tabs} active={active} tabClassName="w-56 min-w-0 flex-1" />
         </div>
         <div className={cn(APP_CARD, "mr-2 mb-2 h-12 flex-none items-center gap-2 px-4 text-body font-medium")}>
