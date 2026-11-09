@@ -733,18 +733,34 @@ WHERE i.workspace_id = $1
     WHERE r.issue_id = i.id
       AND r.autopilot_id = i.origin_id
       AND r.status IN ('issue_created', 'running', 'completed')
+      -- In payload mode only a run that carried the same trigger payload
+      -- counts as a duplicate. The webhook envelope's ` + "`" + `request` + "`" + ` block holds
+      -- per-delivery metadata (receivedAt), so it is left out of the
+      -- comparison. NULL payloads (manual / schedule runs) still match.
+      AND (
+        NOT $7::bool
+        OR (CASE WHEN jsonb_typeof(r.trigger_payload) = 'object'
+                 THEN r.trigger_payload - 'request'
+                 ELSE r.trigger_payload END)
+           IS NOT DISTINCT FROM
+           (CASE WHEN jsonb_typeof($8::jsonb) = 'object'
+                 THEN $8::jsonb - 'request'
+                 ELSE $8::jsonb END)
+      )
   )
 ORDER BY i.created_at ASC
 LIMIT 1
 `
 
 type FindRecentAutopilotDuplicateIssueParams struct {
-	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
-	OriginID           pgtype.UUID        `json:"origin_id"`
-	TerminalStatusKeys []string           `json:"terminal_status_keys"`
-	ProjectID          pgtype.UUID        `json:"project_id"`
-	NormalizedTitle    string             `json:"normalized_title"`
-	CreatedAfter       pgtype.Timestamptz `json:"created_after"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	OriginID            pgtype.UUID        `json:"origin_id"`
+	TerminalStatusKeys  []string           `json:"terminal_status_keys"`
+	ProjectID           pgtype.UUID        `json:"project_id"`
+	NormalizedTitle     string             `json:"normalized_title"`
+	CreatedAfter        pgtype.Timestamptz `json:"created_after"`
+	MatchTriggerPayload bool               `json:"match_trigger_payload"`
+	TriggerPayload      []byte             `json:"trigger_payload"`
 }
 
 func (q *Queries) FindRecentAutopilotDuplicateIssue(ctx context.Context, arg FindRecentAutopilotDuplicateIssueParams) (Issue, error) {
@@ -755,6 +771,8 @@ func (q *Queries) FindRecentAutopilotDuplicateIssue(ctx context.Context, arg Fin
 		arg.ProjectID,
 		arg.NormalizedTitle,
 		arg.CreatedAfter,
+		arg.MatchTriggerPayload,
+		arg.TriggerPayload,
 	)
 	var i Issue
 	err := row.Scan(

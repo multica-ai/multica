@@ -97,6 +97,15 @@ func LockAndFindActiveDuplicate(
 	return duplicate, true, nil
 }
 
+// RecentAutopilotPayloadMatch narrows the recent-autopilot duplicate check to
+// runs whose trigger payload equals TriggerPayload (ignoring the webhook
+// envelope's per-delivery `request` block). With Enabled false, the title
+// alone decides, as before.
+type RecentAutopilotPayloadMatch struct {
+	Enabled        bool
+	TriggerPayload []byte
+}
+
 func LockAndFindRecentAutopilotDuplicate(
 	ctx context.Context,
 	q *db.Queries,
@@ -105,6 +114,7 @@ func LockAndFindRecentAutopilotDuplicate(
 	projectID pgtype.UUID,
 	title string,
 	window time.Duration,
+	payload RecentAutopilotPayloadMatch,
 ) (db.Issue, bool, error) {
 	normalizedTitle := NormalizeTitle(title)
 	if normalizedTitle == "" || !autopilotID.Valid || window <= 0 {
@@ -119,12 +129,14 @@ func LockAndFindRecentAutopilotDuplicate(
 	}
 
 	duplicate, err := q.FindRecentAutopilotDuplicateIssue(ctx, db.FindRecentAutopilotDuplicateIssueParams{
-		WorkspaceID:        workspaceID,
-		TerminalStatusKeys: inactiveKeys,
-		OriginID:           autopilotID,
-		ProjectID:          projectID,
-		NormalizedTitle:    normalizedTitle,
-		CreatedAfter:       pgtype.Timestamptz{Time: time.Now().UTC().Add(-window), Valid: true},
+		WorkspaceID:         workspaceID,
+		TerminalStatusKeys:  inactiveKeys,
+		OriginID:            autopilotID,
+		ProjectID:           projectID,
+		NormalizedTitle:     normalizedTitle,
+		CreatedAfter:        pgtype.Timestamptz{Time: time.Now().UTC().Add(-window), Valid: true},
+		MatchTriggerPayload: payload.Enabled,
+		TriggerPayload:      payload.TriggerPayload,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

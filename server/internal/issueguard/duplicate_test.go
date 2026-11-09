@@ -52,6 +52,7 @@ func TestLockAndFindRecentAutopilotDuplicatePropagatesStatusCatalogFailure(t *te
 
 	_, found, err := LockAndFindRecentAutopilotDuplicate(
 		context.Background(), q, testUUID(1), testUUID(2), pgtype.UUID{}, "duplicate title", time.Hour,
+		RecentAutopilotPayloadMatch{},
 	)
 	if !errors.Is(err, catalogErr) || found {
 		t.Fatalf("LockAndFindRecentAutopilotDuplicate = found %v, err %v; want false, catalog error", found, err)

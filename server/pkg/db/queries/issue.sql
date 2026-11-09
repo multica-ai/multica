@@ -454,6 +454,20 @@ WHERE i.workspace_id = $1
     WHERE r.issue_id = i.id
       AND r.autopilot_id = i.origin_id
       AND r.status IN ('issue_created', 'running', 'completed')
+      -- In payload mode only a run that carried the same trigger payload
+      -- counts as a duplicate. The webhook envelope's `request` block holds
+      -- per-delivery metadata (receivedAt), so it is left out of the
+      -- comparison. NULL payloads (manual / schedule runs) still match.
+      AND (
+        NOT sqlc.arg('match_trigger_payload')::bool
+        OR (CASE WHEN jsonb_typeof(r.trigger_payload) = 'object'
+                 THEN r.trigger_payload - 'request'
+                 ELSE r.trigger_payload END)
+           IS NOT DISTINCT FROM
+           (CASE WHEN jsonb_typeof(sqlc.narg('trigger_payload')::jsonb) = 'object'
+                 THEN sqlc.narg('trigger_payload')::jsonb - 'request'
+                 ELSE sqlc.narg('trigger_payload')::jsonb END)
+      )
   )
 ORDER BY i.created_at ASC
 LIMIT 1;

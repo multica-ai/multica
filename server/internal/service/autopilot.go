@@ -41,6 +41,38 @@ type AutopilotService struct {
 	TaskSvc      *TaskService
 	Entitlements entitlement.Provider
 	QuotaMetrics AutopilotQuotaMetrics
+	// DuplicateGuard selects how create_issue dispatch detects a recent
+	// duplicate issue. The zero value behaves like AutopilotDuplicateGuardTitle.
+	DuplicateGuard AutopilotDuplicateGuard
+}
+
+// AutopilotDuplicateGuard is the instance-wide policy for the recent-duplicate
+// check that runs before an autopilot creates an issue.
+type AutopilotDuplicateGuard string
+
+const (
+	// AutopilotDuplicateGuardTitle treats any issue with the same rendered
+	// title created by the autopilot in the last minute as a duplicate.
+	AutopilotDuplicateGuardTitle AutopilotDuplicateGuard = "title"
+	// AutopilotDuplicateGuardPayload additionally requires the same trigger
+	// payload, so distinct webhook deliveries never collapse into one issue.
+	AutopilotDuplicateGuardPayload AutopilotDuplicateGuard = "payload"
+	// AutopilotDuplicateGuardOff disables the recent-duplicate check. Webhook
+	// retries are still deduplicated by delivery id / Idempotency-Key.
+	AutopilotDuplicateGuardOff AutopilotDuplicateGuard = "off"
+)
+
+// ParseAutopilotDuplicateGuard parses MULTICA_AUTOPILOT_DUPLICATE_GUARD.
+// An empty value selects the default (title).
+func ParseAutopilotDuplicateGuard(raw string) (AutopilotDuplicateGuard, error) {
+	switch mode := AutopilotDuplicateGuard(strings.ToLower(strings.TrimSpace(raw))); mode {
+	case "":
+		return AutopilotDuplicateGuardTitle, nil
+	case AutopilotDuplicateGuardTitle, AutopilotDuplicateGuardPayload, AutopilotDuplicateGuardOff:
+		return mode, nil
+	default:
+		return AutopilotDuplicateGuardTitle, fmt.Errorf("unknown autopilot duplicate guard %q (want title, payload or off)", raw)
+	}
 }
 
 // DefaultAutopilotTriggerTimezone is the timezone used to render Autopilot
@@ -721,8 +753,16 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	}
 	projectID := currentAutopilot.ProjectID
 
+	duplicateWindow := autopilotRecentDuplicateWindow
+	if s.DuplicateGuard == AutopilotDuplicateGuardOff {
+		duplicateWindow = 0
+	}
 	if duplicate, found, err := issueguard.LockAndFindRecentAutopilotDuplicate(
-		ctx, qtx, ap.WorkspaceID, ap.ID, projectID, title, autopilotRecentDuplicateWindow,
+		ctx, qtx, ap.WorkspaceID, ap.ID, projectID, title, duplicateWindow,
+		issueguard.RecentAutopilotPayloadMatch{
+			Enabled:        s.DuplicateGuard == AutopilotDuplicateGuardPayload,
+			TriggerPayload: run.TriggerPayload,
+		},
 	); err != nil {
 		return fmt.Errorf("recent duplicate guard: %w", err)
 	} else if found {

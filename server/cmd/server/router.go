@@ -456,6 +456,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		GitExtraCACerts:                gitca.Load(slog.Default()),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	duplicateGuard, err := service.ParseAutopilotDuplicateGuard(os.Getenv("MULTICA_AUTOPILOT_DUPLICATE_GUARD"))
+	if err != nil {
+		slog.Warn("invalid MULTICA_AUTOPILOT_DUPLICATE_GUARD, using default", "default", duplicateGuard, "error", err)
+	}
+	h.AutopilotService.DuplicateGuard = duplicateGuard
 	invitationRateLimits := handler.DefaultInvitationRateLimits()
 	invitationRateLimits.Actor.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_ACTOR_10M", invitationRateLimits.Actor.Limit)
 	invitationRateLimits.Workspace.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_WORKSPACE_24H", invitationRateLimits.Workspace.Limit)
