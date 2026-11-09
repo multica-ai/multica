@@ -89,6 +89,8 @@ type IssueCreateParams struct {
 	// used by the standalone PUT path, then inserts the complete bag atomically.
 	Properties     map[pgtype.UUID]json.RawMessage
 	AllowDuplicate bool
+	// PRAutoCompleteDisabled is persisted before the issue becomes visible.
+	PRAutoCompleteDisabled bool
 	// Stage groups this issue into an ordered barrier group under its parent
 	// (NULL = unstaged). See issue_wakeup_system.go for the staged-barrier wake.
 	Stage pgtype.Int4
@@ -274,15 +276,16 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		}
 	}
 
-	// Project workflow (MUL-7420): an issue created in a project whose named
-	// workflow does not list the requested status starts on todo instead.
-	// The HTTP create path already rejects an explicit status outside the
-	// workflow; this keeps the other creators (channels, captured comments)
-	// inside it too. Resolved before the custom-status guard below so that
-	// guard checks the status actually written.
+	// Project workflow (MUL-7420): an issue created with a status its
+	// workflow does not list — the project's, or the stored Default outside
+	// any project (MUL-8250) — starts on todo instead. The HTTP create path
+	// already rejects an explicit status outside the workflow; this keeps the
+	// other creators (channels, captured comments) inside it too. Resolved
+	// before the custom-status guard below so that guard checks the status
+	// actually written.
 	if def, err := s.createWorkflow(ctx, qtx, p); err != nil {
 		return IssueCreateResult{}, err
-	} else if def != nil && !def.IsDefault && !def.Has(p.Status) {
+	} else if def != nil && def.Limits() && !def.Has(p.Status) {
 		p.Status = issueworkflow.StartStatus
 	}
 
@@ -425,6 +428,15 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			return IssueCreateResult{}, ErrIssuePropertiesTooLarge
 		}
 		return IssueCreateResult{}, fmt.Errorf("create issue: %w", err)
+	}
+
+	if p.PRAutoCompleteDisabled {
+		if err := qtx.SetIssuePRAutoCompleteDisabled(ctx, db.SetIssuePRAutoCompleteDisabledParams{
+			IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, AutoCompleteDisabled: true,
+			UpdatedByType: pgtype.Text{String: p.CreatorType, Valid: true}, UpdatedByID: p.CreatorID,
+		}); err != nil {
+			return IssueCreateResult{}, fmt.Errorf("set issue PR auto-complete: %w", err)
+		}
 	}
 
 	if p.SourceContext != nil {
@@ -846,8 +858,9 @@ func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autop
 	}
 }
 
-// createWorkflow resolves the workflow of the project a new issue lands in:
-// its own project, or its parent's when it names none.
+// createWorkflow resolves the workflow whose statuses a new issue may take:
+// its own project's, its parent's project's when it names none, or the
+// stored Default when neither has a project.
 func (s *IssueService) createWorkflow(ctx context.Context, qtx *db.Queries, p IssueCreateParams) (*issueworkflow.Definition, error) {
 	projectID := p.ProjectID
 	if !projectID.Valid && p.ParentIssueID.Valid {
@@ -857,6 +870,9 @@ func (s *IssueService) createWorkflow(ctx context.Context, qtx *db.Queries, p Is
 			return nil, nil
 		}
 		projectID = parent.ProjectID
+	}
+	if !projectID.Valid {
+		return issueworkflow.OutsideProject(ctx, qtx, p.WorkspaceID)
 	}
 	def, _, err := issueworkflow.ForProject(ctx, qtx, p.WorkspaceID, projectID)
 	return def, err

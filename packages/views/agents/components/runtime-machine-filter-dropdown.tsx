@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ChevronDown, Server } from "lucide-react";
+import { ChevronDown, Server } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,

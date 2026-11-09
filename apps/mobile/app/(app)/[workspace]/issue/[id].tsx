@@ -33,6 +33,7 @@ import {
   issueKeys,
   issueTimelineOptions,
 } from "@/data/queries/issues";
+import { ApiError } from "@/data/api";
 import { useDeleteIssue } from "@/data/mutations/issues";
 import { pinListOptions } from "@/data/queries/pins";
 import { useCreatePin, useDeletePin } from "@/data/mutations/pins";
@@ -163,6 +164,12 @@ export default function IssueDetail() {
           confirmDelete(issue, t, () =>
             deleteIssue.mutate(issue.id, {
               onSuccess: () => router.back(),
+              onError: (error) => Alert.alert(
+                t("delete.failed_title"),
+                error instanceof ApiError && error.status === 403
+                  ? t("delete.permission_denied")
+                  : t("delete.failed"),
+              ),
             }),
           );
         }

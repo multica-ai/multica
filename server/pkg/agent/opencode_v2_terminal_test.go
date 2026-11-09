@@ -23,7 +23,7 @@ const (
 )
 
 func v2TermConfig() Config {
-	return Config{Logger: slog.Default(), BuiltinRuntime: true, CLIVersion: "opencode v2.1.3"}
+	return Config{Logger: slog.Default(), BuiltinRuntime: true, CLIVersion: "opencode v2.1.3", Env: map[string]string{opencodeTransportEnv: "run"}}
 }
 
 func runV2TermStream(t *testing.T, cfg Config, lines ...string) eventResult {

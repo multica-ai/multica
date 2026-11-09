@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   MAX_SKILL_FILE_BYTES,
+  MAX_SKILL_FILE_COUNT,
   discoverSkillArchivesFromPickerFiles,
   isIgnoredArchiveEntry,
   isSkillArchiveFilename,
@@ -324,7 +325,7 @@ describe("discoverSkillArchivesFromPickerFiles", () => {
         arrayBuffer: read,
       }),
       entry("skills/count/SKILL.md"),
-      ...Array.from({ length: 257 }, (_, i) =>
+      ...Array.from({ length: MAX_SKILL_FILE_COUNT + 1 }, (_, i) =>
         fileWithPath(`${i}.md`, `skills/count/${i}.md`, bytes(""), {
           arrayBuffer: read,
         }),

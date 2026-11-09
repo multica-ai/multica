@@ -1,12 +1,11 @@
 {
   "page": {
+    "search": "스킬 검색",
     "title": "스킬",
-    "learn_more": "자세히 보기 →",
     "new_skill": "새 스킬",
-    "search_placeholder": "스킬 검색...",
     "scopes": {
       "all": {
-        "label": "전체",
+        "label": "모든 스킬",
         "description": "이 워크스페이스의 모든 스킬"
       },
       "used": {
@@ -18,13 +17,9 @@
         "description": "어떤 에이전트에도 할당되지 않은 스킬"
       },
       "mine": {
-        "label": "내가 만든 스킬",
+        "label": "내 스킬",
         "description": "내가 생성한 스킬"
       }
-    },
-    "empty": {
-      "title": "아직 스킬이 없습니다",
-      "description": "skill을 만들거나 가져오세요."
     },
     "no_matches": {
       "title": "일치하는 결과 없음",
@@ -32,11 +27,6 @@
       "with_query_filter_suffix": " (이 필터 기준)",
       "filter_only": "이 필터와 일치하는 스킬이 없습니다.",
       "try_different": " 다른 검색어를 시도해 보세요."
-    },
-    "intro_banner": {
-      "title": "워크스페이스와 공유됩니다.",
-      "body": "누구나 스킬을 만들거나 URL이나 로컬 폴더에서 가져오거나 로컬 런타임에서 복사할 수 있으며, 모든 에이전트가 사용할 수 있습니다.",
-      "highlight": "로컬 런타임 스킬은 여기로 복사하기 전까지 비공개로 유지됩니다."
     },
     "list_error": {
       "title": "스킬을 불러오지 못했습니다",
@@ -76,8 +66,6 @@
     "added_toast": "{{name}}에 추가했습니다",
     "add_failed_toast": "스킬 추가에 실패했습니다",
     "delete": "삭제",
-    "selected": "{{count}}개 선택됨",
-    "clear_selection": "선택 해제",
     "delete_no_permission": "작성자 또는 관리자만 삭제할 수 있는 스킬이 포함되어 있습니다",
     "delete_dialog_title_other": "스킬 {{count}}개를 삭제할까요?",
     "delete_dialog_desc_other": "선택한 스킬 {{count}}개를 영구 삭제하고 모든 에이전트에서 제거합니다.",
@@ -98,28 +86,16 @@
     "added_multi_toast_other": "에이전트 {{count}}개에 추가했습니다"
   },
   "toolbar": {
-    "result_count_title": "일치하는 스킬 / 전체 스킬",
-    "filter_label": "필터",
-    "filter_active_count_other": "필터 {{count}}개",
-    "clear_filters": "필터 해제",
     "section_usage": "사용 상태",
     "section_labels": "라벨",
     "filter_search_placeholder": "필터...",
     "no_labels": "아직 라벨이 없습니다",
     "no_results": "결과 없음",
-    "display": "표시",
-    "sort_by": "정렬",
-    "direction_asc": "오름차순",
-    "direction_desc": "내림차순",
-    "section_columns": "표시 열",
     "manage_labels": "라벨 관리...",
     "manage_labels_title": "스킬 라벨"
   },
   "detail": {
-    "all_skills": "모든 스킬",
     "read_only": "읽기 전용",
-    "delete_aria": "스킬 삭제",
-    "delete_tooltip": "스킬 삭제",
     "supporting_data_warning": "일부 워크스페이스 데이터를 불러오지 못했습니다. 다음 새로고침 전까지 생성자 표시, 런타임 이름, 수정 권한이 불완전하게 보일 수 있습니다.",
     "delete_file": "파일 삭제",
     "name_placeholder": "skill-name",
@@ -151,11 +127,11 @@
     },
     "toast_saved": "스킬을 저장했습니다",
     "toast_save_failed": "스킬을 저장하지 못했습니다",
+    "toast_saved_version": "v{{version}}(으)로 저장했습니다",
+    "toast_view_history": "기록 보기",
     "toast_deleted": "스킬을 삭제했습니다",
     "toast_delete_failed": "스킬을 삭제하지 못했습니다",
     "refresh": {
-      "button": "업데이트",
-      "tooltip": "소스에서 스킬을 다시 다운로드합니다",
       "source_github": "GitHub",
       "source_skills_sh": "Skills.sh",
       "source_clawhub": "ClawHub",
@@ -194,29 +170,18 @@
       }
     },
     "header": {
-      "files_other": "파일 {{count}}개",
-      "used_by_other": "에이전트 {{count}}개가 사용 중",
-      "updated": "{{when}} 업데이트",
-      "updated_by": "{{name}}이(가) {{when}} 업데이트"
-    },
-    "tabs": {
-      "aria": "스킬 섹션",
-      "overview": "개요",
-      "files_other": "파일 {{count}}"
+      "files_other": "파일 {{count}}개"
     },
     "overview": {
       "properties": "속성",
-      "properties_hint": "이 필드는 SKILL.md 프런트매터와 동기화됩니다.",
       "name": "이름",
       "description": "설명",
       "description_hint": "에이전트가 이를 보고 skill을 불러올 시점을 판단합니다.",
       "labels": "라벨",
-      "used_by_other": "에이전트 {{count}}개가 사용 중",
       "used_by_empty": "아직 어떤 에이전트에도 할당되지 않았습니다. 에이전트의 스킬 탭에서 할당하세요.",
       "permissions_owner": "이 스킬을 편집하고 삭제할 수 있습니다. 변경 사항은 다음 에이전트 실행부터 적용됩니다.",
       "permissions_locked_creator": "작성자({{name}}) 또는 워크스페이스 관리자만 이 스킬을 편집할 수 있습니다.",
       "permissions_locked": "작성자 또는 워크스페이스 관리자만 이 스킬을 편집할 수 있습니다.",
-      "properties_help": "skill 속성 정보",
       "character_count": "{{count}}자"
     },
     "files": {
@@ -229,6 +194,52 @@
       "mode_preview": "미리보기",
       "mode_edit": "편집",
       "mode_raw": "일반 텍스트"
+    },
+    "versions": {
+      "list_aria": "스킬 버전",
+      "version_label": "v{{version}}",
+      "current": "현재",
+      "unknown_author": "알 수 없음",
+      "empty": "아직 버전이 없습니다. 다음에 이 스킬을 변경하면 현재 내용이 첫 번째 버전으로 기록됩니다.",
+      "load_failed": "버전을 불러오지 못했습니다.",
+      "restore": "복원",
+      "toast_restored": "v{{version}}을(를) 복원했습니다",
+      "toast_restore_failed": "버전을 복원하지 못했습니다",
+      "source": {
+        "baseline": "이전 내용",
+        "create": "생성",
+        "update": "편집",
+        "import": "가져오기",
+        "refresh": "소스에서 업데이트",
+        "restore": "v{{version}}에서 복원"
+      },
+      "dialog": {
+        "title": "v{{version}}(으)로 복원할까요?",
+        "description": "v{{version}}의 내용이 새 버전이 되며, 에이전트는 다음 실행부터 이를 사용합니다. 이후 버전도 기록에 남습니다.",
+        "unsaved_warning": "저장하지 않은 변경 사항은 삭제됩니다.",
+        "cancel": "취소",
+        "confirm": "복원",
+        "restoring": "복원하는 중..."
+      }
+    },
+    "sections": {
+      "content": "내용",
+      "files": "파일",
+      "edit": "편집",
+      "open": "열기",
+      "add": "추가",
+      "history": "기록"
+    },
+    "menu": {
+      "copy_link": "링크 복사",
+      "link_copied": "링크를 복사했습니다",
+      "delete": "스킬 삭제",
+      "version_history": "버전 기록"
+    },
+    "panel": {
+      "add_description": "설명 추가",
+      "version": "버전",
+      "no_versions": "아직 버전 없음"
     }
   },
   "create": {
@@ -382,5 +393,34 @@
     "markdown_placeholder": "Markdown 내용 작성...",
     "raw_placeholder": "파일 내용...",
     "raw_aria": "{{path}}의 일반 텍스트 내용"
+  },
+  "intro": {
+    "title": "팀의 일하는 방식을 스킬로 만드세요",
+    "description": "스킬은 재사용할 수 있는 작업 지침(SKILL.md)입니다. 워크스페이스에 한 번 추가하고 에이전트에 할당하면 에이전트가 그대로 따릅니다.",
+    "slides": {
+      "methods": {
+        "title": "네 가지 추가 방법",
+        "description": "빈 SKILL.md부터 쓰거나, 로컬 폴더, URL, 런타임에서 기존 스킬을 가져오세요."
+      },
+      "assign": {
+        "title": "에이전트에 할당",
+        "description": "스킬 하나를 여러 에이전트가 쓸 수 있습니다. 한 곳만 고치면 이를 쓰는 모든 에이전트에 반영됩니다."
+      },
+      "share": {
+        "title": "워크스페이스에서 공유",
+        "description": "로컬 런타임의 스킬은 여기로 복사하기 전까지 비공개입니다. 복사하면 어떤 에이전트든 쓸 수 있습니다."
+      }
+    },
+    "art": {
+      "skill_summary": "먼저 테스트를 돌린 뒤 접근성과 성능을 확인한다.",
+      "add_to_agent": "에이전트에 추가",
+      "local_skills": "로컬 스킬",
+      "private": "비공개",
+      "workspace_shared": "워크스페이스",
+      "all_agents": "모든 에이전트가 사용 가능",
+      "role_reviewer": "리뷰어",
+      "role_fullstack": "풀스택",
+      "copy_to_workspace": "워크스페이스로 복사"
+    }
   }
 }

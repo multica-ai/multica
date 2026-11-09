@@ -58,7 +58,7 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-import { CreateSkillDialog } from "./create-skill-dialog";
+import { CreateSkillDialog, type CreateSkillMethod } from "./create-skill-dialog";
 
 const ARCHIVE_FILE = new File(["pk"], "review-helper.skill", {
   type: "application/zip",
@@ -120,7 +120,11 @@ function installLiveFileList(input: HTMLInputElement, files: File[]) {
   });
 }
 
-function renderDialog(onCreated = vi.fn(), onClose = vi.fn()) {
+function renderDialog(
+  onCreated = vi.fn(),
+  onClose = vi.fn(),
+  initialMethod?: CreateSkillMethod,
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -133,9 +137,14 @@ function renderDialog(onCreated = vi.fn(), onClose = vi.fn()) {
     onCreated,
     onClose,
     queryClient,
-    ...render(<CreateSkillDialog onClose={onClose} onCreated={onCreated} />, {
-      wrapper,
-    }),
+    ...render(
+      <CreateSkillDialog
+        onClose={onClose}
+        onCreated={onCreated}
+        initialMethod={initialMethod}
+      />,
+      { wrapper },
+    ),
   };
 }
 
@@ -1075,5 +1084,41 @@ describe("CreateSkillDialog local import", () => {
     expect(invalidate).not.toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: ["workspaces", "ws-2", "skills"] }),
     );
+  });
+});
+
+describe("CreateSkillDialog opened on a method", () => {
+  it("opens local source choices directly and Cancel leaves the dialog", () => {
+    const click = vi.spyOn(HTMLInputElement.prototype, "click");
+    try {
+      const { onClose } = renderDialog(vi.fn(), vi.fn(), "local");
+      expect(screen.getByRole("button", { name: /Choose folder/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Choose \.skill \/ \.zip/i })).toBeInTheDocument();
+      expect(click).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: enSkills.create.local.cancel }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("button", { name: /Import from URL/i })).toBeNull();
+    } finally {
+      click.mockRestore();
+    }
+  });
+
+  it("skips the chooser, and Cancel leaves the dialog", () => {
+    const { onClose } = renderDialog(vi.fn(), vi.fn(), "manual");
+    expect(screen.getByText(enSkills.create.manual.name_label)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Import from URL/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: enSkills.create.manual.cancel }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("still steps back to the chooser when the user came through it", () => {
+    const { onClose } = renderDialog();
+    fireEvent.click(screen.getByRole("button", { name: /Create manually/i }));
+    fireEvent.click(screen.getByRole("button", { name: enSkills.create.manual.cancel }));
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /Import from URL/i })).toBeInTheDocument();
   });
 });

@@ -13,7 +13,7 @@ import {
   Pencil,
   Plus,
   X as XIcon,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@multica/core/api";
@@ -59,6 +59,8 @@ import { isNameConflictError } from "../lib/utils";
 
 type Method = "chooser" | "manual" | "local" | "url" | "runtime";
 
+export type CreateSkillMethod = Exclude<Method, "chooser">;
+
 function seedAfterCreate(
   qc: ReturnType<typeof useQueryClient>,
   wsId: string,
@@ -75,7 +77,7 @@ function seedAfterCreate(
 function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
   const { t } = useT("skills");
   const methods: {
-    key: Exclude<Method, "chooser">;
+    key: CreateSkillMethod;
     icon: typeof Plus;
   }[] = [
     { key: "manual", icon: Plus },
@@ -853,16 +855,19 @@ function LocalForm({
 // Root dialog
 
 export function CreateSkillDialog({
+  initialMethod,
   onClose,
   onCreated,
 }: {
+  /** Opens straight on one method; without it the dialog starts on the chooser. */
+  initialMethod?: CreateSkillMethod;
   onClose: () => void;
   onCreated?: (skill: Skill) => void;
 }) {
   const { t } = useT("skills");
   const wsId = useWorkspaceId();
   const localSelectionWorkspace = useRef({ wsId, slug: getCurrentSlug() });
-  const [method, setMethod] = useState<Method>("chooser");
+  const [method, setMethod] = useState<Method>(initialMethod ?? "chooser");
   const [localPrepared, setLocalPrepared] =
     useState<SkillArchiveDiscovery | null>(null);
   const [localPreparing, setLocalPreparing] = useState(false);
@@ -965,6 +970,13 @@ export function CreateSkillDialog({
     );
   };
 
+  // Opened on a method, Cancel leaves the dialog: the chooser it would fall
+  // back to is a step the user never took.
+  const cancelForm = () => {
+    if (initialMethod) onClose();
+    else setMethod("chooser");
+  };
+
   const wide = method === "runtime";
 
   return (
@@ -1062,10 +1074,7 @@ export function CreateSkillDialog({
         {/* Method body — each form owns its scroll middle + footer */}
         {method === "chooser" && <MethodChooser onChoose={handleChoose} />}
         {method === "manual" && (
-          <ManualForm
-            onCreated={handleCreated}
-            onCancel={() => setMethod("chooser")}
-          />
+          <ManualForm onCreated={handleCreated} onCancel={cancelForm} />
         )}
         {method === "local" && (
           <LocalForm
@@ -1078,17 +1087,14 @@ export function CreateSkillDialog({
             onCreated={handleCreated}
             onCancel={() => {
               resetLocal();
-              setMethod("chooser");
+              cancelForm();
             }}
             onChooseFolder={openFolderPicker}
             onChooseArchive={openArchivePicker}
           />
         )}
         {method === "url" && (
-          <UrlForm
-            onCreated={handleCreated}
-            onCancel={() => setMethod("chooser")}
-          />
+          <UrlForm onCreated={handleCreated} onCancel={cancelForm} />
         )}
         {method === "runtime" && (
           <RuntimeLocalSkillImportPanel

@@ -170,6 +170,9 @@ backend:
     s3Region: us-west-2
     cloudfrontDomain: ""
     cloudfrontKeyPairId: ""
+    # Text/HTML preview size only; values above 16 MiB are clamped.
+    # Larger limits can slow browser previews.
+    maxPreviewSize: 2MiB
     localUploadBaseUrl: http://api.multica.dev.lan
   resources:
     requests:
@@ -197,6 +200,8 @@ frontend:
     # default same-origin frontend proxy.
     publicApiUrl: ""
     publicWsUrl: ""
+    # Optional GA4 Measurement ID (G-XXXXXXXXXX). Empty keeps gtag.js off.
+    googleAnalyticsId: ""
   # Compatibility shim for legacy multica-web images built before runtime
   # URL rewrites. New images do not need this unprefixed Service.
   compatibility:

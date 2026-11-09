@@ -66,6 +66,14 @@ func (f *fakeHistoryClient) GetUsersInfoContext(_ context.Context, _ ...string) 
 	return &f.users, nil
 }
 
+func (f *fakeHistoryClient) GetConversationInfoContext(context.Context, *slack.GetConversationInfoInput) (*slack.Channel, error) {
+	return nil, errors.New("missing_scope")
+}
+
+func (f *fakeHistoryClient) GetPermalinkContext(context.Context, *slack.PermalinkParameters) (string, error) {
+	return "", errors.New("message_not_found")
+}
+
 func msg(user, text, ts string) slack.Message {
 	return slack.Message{Msg: slack.Msg{User: user, Text: text, Timestamp: ts}}
 }

@@ -26,11 +26,19 @@ import type {
 } from "../shared/daemon-types";
 import {
   MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
+  NEW_WINDOW_SHORTCUT_CHANNEL,
   parseTabSelectionShortcutKey,
   TAB_SELECTION_SHORTCUT_CHANNEL,
+  WORKSPACE_OPEN_PATH_CHANNEL,
   type MainRendererMessageChannel,
   type TabSelectionShortcutKey,
 } from "../shared/main-renderer-messages";
+import {
+  FOCUS_WORKSPACE_WINDOW_CHANNEL,
+  OPEN_WORKSPACE_WINDOW_CHANNEL,
+  OTHER_WINDOW_WORKSPACES_CHANNEL,
+  WINDOW_WORKSPACE_REPORT_CHANNEL,
+} from "../shared/workspace-window";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
 // can pass it into CoreProvider during the initial render — the alternative
@@ -243,6 +251,49 @@ const desktopAPI = {
   /** Open a validated issue-detail route in a dedicated native window. */
   openIssueWindow: (request: IssueWindowRequest) =>
     ipcRenderer.invoke("window:open-issue", request),
+  /** Tell main which workspace this main window shows (null while none). */
+  reportWindowWorkspace: (workspaceSlug: string | null) =>
+    ipcRenderer.send(WINDOW_WORKSPACE_REPORT_CHANNEL, workspaceSlug),
+  /** Workspaces shown by the other main windows. Sync so routing decisions
+   *  inside click handlers can consult it. */
+  getOtherWindowWorkspaces: (): string[] => {
+    try {
+      const slugs: unknown = ipcRenderer.sendSync(OTHER_WINDOW_WORKSPACES_CHANNEL);
+      return Array.isArray(slugs)
+        ? slugs.filter((slug): slug is string => typeof slug === "string")
+        : [];
+    } catch {
+      return [];
+    }
+  },
+  /** Hand a workspace (and optionally a path inside it) to the other main
+   *  window that shows it. Returns false when no other window does. */
+  focusWorkspaceWindow: (workspaceSlug: string, path?: string): boolean => {
+    try {
+      return (
+        ipcRenderer.sendSync(FOCUS_WORKSPACE_WINDOW_CHANNEL, {
+          workspaceSlug,
+          ...(path === undefined ? {} : { path }),
+        }) === true
+      );
+    } catch {
+      return false;
+    }
+  },
+  /** Open a workspace in its own main window, or focus the one showing it. */
+  openWorkspaceWindow: (workspaceSlug: string) =>
+    ipcRenderer.invoke(OPEN_WORKSPACE_WINDOW_CHANNEL, workspaceSlug),
+  /** Listen for workspace paths routed here from another window. */
+  onOpenWorkspacePath: (callback: (path: string) => void) =>
+    subscribeToMainRendererChannel<unknown>(
+      WORKSPACE_OPEN_PATH_CHANNEL,
+      (path) => {
+        if (typeof path === "string") callback(path);
+      },
+    ),
+  /** Listen for Cmd/Ctrl+Shift+N new-window requests. */
+  onNewWindowShortcut: (callback: () => void) =>
+    subscribeToMainRendererChannel(NEW_WINDOW_SHORTCUT_CHANNEL, () => callback()),
 };
 
 type DaemonReauthResult =

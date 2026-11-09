@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ApiClient, ApiError } from "./client";
 import { parseWithFallback } from "./schema";
+import { CreateIssueResponseSchema } from "./schemas";
 
 // Helper: stub fetch with a single JSON response. Status defaults to 200.
 function stubFetchJson(body: unknown, status = 200) {
@@ -25,6 +26,20 @@ afterEach(() => {
 // app in past incidents. The contract is: a malformed response degrades to
 // an empty/safe shape, never throws into React.
 describe("ApiClient schema fallback", () => {
+  describe("workspace pin responses", () => {
+    it("defaults missing or malformed pinned_at to null and falls back on malformed lists", async () => {
+      const ws = { id: "ws-1", name: "One", slug: "one", description: null, context: null, settings: {}, repos: [], issue_prefix: "ONE", avatar_url: null, created_at: "2026-01-01", updated_at: "2026-01-01" };
+      const client = new ApiClient("https://api.example.test");
+      stubFetchJson([ws, { ...ws, id: "ws-2", pinned_at: 123 }]);
+      expect((await client.listWorkspaces()).map((item) => item.pinned_at)).toEqual([null, null]);
+      stubFetchJson({ invalid: true });
+      await expect(client.listWorkspaces()).resolves.toEqual([]);
+      stubFetchJson({ pinned_at: 123 });
+      await expect(client.setWorkspacePinned("ws-1", true)).resolves.toEqual({ pinned_at: null });
+      expect(vi.mocked(fetch).mock.calls[0]?.[1]).toMatchObject({ method: "PUT", body: JSON.stringify({ pinned: true }) });
+    });
+  });
+
   describe("GitHub repository import", () => {
     it("falls back safely when installation or repository responses are malformed", async () => {
       stubFetchJson({ installations: "not-an-array", configured: true });
@@ -327,6 +342,11 @@ describe("ApiClient schema fallback", () => {
       const issue = await client.createIssue({ title: "Created" });
       expect(issue.id).toBe("issue-1");
       expect(issue.labels).toBeUndefined();
+    });
+
+    it.each([true, false, undefined, null, "off"])("validates the create PR override %s without breaking older responses", (value) => {
+      const parsed = CreateIssueResponseSchema.parse({ ...validIssue, pr_auto_complete_disabled: value });
+      expect(parsed.pr_auto_complete_disabled).toBe(typeof value === "boolean" ? value : undefined);
     });
 
     it("validates a well-formed labels array", async () => {
@@ -927,7 +947,82 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listWecomInstallations", () => {
+    it("falls back to a safe empty shape when the response is malformed", async () => {
+      stubFetchJson({ installations: "not-an-array", configured: true });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listWecomInstallations("ws-1");
+      expect(res).toEqual({ installations: [], configured: false });
+    });
+
+    // The settings tab shows the QR install entry point only when this is
+    // exactly true, so the flag has to survive parsing.
+    it("keeps both install flags, and treats a missing one as off", async () => {
+      stubFetchJson({
+        installations: [{ id: "wc-1", status: "active" }],
+        configured: true,
+        install_supported: true,
+        scan_install_supported: true,
+        future_field: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listWecomInstallations("ws-1");
+      expect(res.install_supported).toBe(true);
+      expect(res.scan_install_supported).toBe(true);
+
+      // A server that predates the scan flow sends neither, and must not be
+      // read as "scanning is available".
+      stubFetchJson({ installations: [], configured: true });
+      const older = await client.listWecomInstallations("ws-1");
+      expect(older.scan_install_supported).toBeUndefined();
+      expect(older.scan_install_supported === true).toBe(false);
+    });
+
+    // The flag has to be VALIDATED, not merely passed through: this object is
+    // loose, so an undeclared key would survive parsing untouched.
+    it("does not let a non-boolean scan flag through unvalidated", async () => {
+      stubFetchJson({
+        installations: [],
+        configured: true,
+        scan_install_supported: "yes",
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listWecomInstallations("ws-1");
+      expect(res.scan_install_supported).toBeUndefined();
+    });
+  });
+
   describe("getConfig", () => {
+    it("preserves an omitted daemon setup target for legacy self-host detection", async () => {
+      stubFetchJson({
+        daemon_server_url: "https://api.example.com",
+        daemon_app_url: "https://app.example.com",
+      });
+      const config = await new ApiClient("https://api.example.test").getConfig();
+      expect(config.daemon_setup_target).toBeUndefined();
+      expect(config.daemon_server_url).toBe("https://api.example.com");
+      expect(config.daemon_app_url).toBe("https://app.example.com");
+    });
+
+    it.each([null, 123, {}, "unexpected", "unknown"])(
+      "does not infer Cloud from an unrecognized daemon setup target: %j",
+      async (target) => {
+        stubFetchJson({
+          daemon_setup_target: target,
+          daemon_server_url: "https://api.example.com",
+          daemon_app_url: "https://app.example.com",
+        });
+        const config = await new ApiClient("https://api.example.test").getConfig();
+        expect(config.daemon_setup_target).toBe("unknown");
+      },
+    );
+
+    it.each(["cloud", "self_host"])("preserves the confirmed daemon setup target %s", async (target) => {
+      stubFetchJson({ cdn_domain: "", daemon_setup_target: target });
+      const config = await new ApiClient("https://api.example.test").getConfig();
+      expect(config.daemon_setup_target).toBe(target);
+    });
+
     it("drops malformed daemon setup URLs instead of throwing", async () => {
       stubFetchJson({
         cdn_domain: "cdn.example.com",

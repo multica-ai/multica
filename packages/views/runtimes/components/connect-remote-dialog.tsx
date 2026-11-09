@@ -8,13 +8,14 @@ import {
   type ReactNode,
 } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Check, ChevronRight, Copy, Terminal } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { Check, ChevronRight, Copy, Terminal } from "@multica/ui/icons";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { runtimeKeys } from "@multica/core/runtimes/queries";
-import { useWSEvent } from "@multica/core/realtime";
+import { runtimeKeys, runtimeListOptions } from "@multica/core/runtimes/queries";
+import { useDaemonSetupCommands } from "@multica/core/runtimes";
+import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
-import { useConfigStore } from "@multica/core/config";
 import {
   Dialog,
   DialogContent,
@@ -33,65 +34,96 @@ import {
 } from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { CliInstallCommand } from "../../common/cli-install-command";
+import { DaemonSetupNotice } from "../../common/daemon-setup-notice";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
 type Step = "instructions" | "success";
 
-const CLOUD_SERVER_URL = "https://api.multica.ai";
-const CLOUD_APP_URL = "https://multica.ai";
-
-function normalizeCommandURL(url: string | undefined) {
-  return url?.trim().replace(/\/+$/, "") ?? "";
-}
-
-function daemonCommands(serverUrl: string | undefined, appUrl: string | undefined) {
-  const normalizedServerUrl = normalizeCommandURL(serverUrl);
-  const normalizedAppUrl = normalizeCommandURL(appUrl);
-  if (normalizedServerUrl && normalizedAppUrl) {
-    return {
-      setupCmd: `multica setup self-host --server-url ${normalizedServerUrl} --app-url ${normalizedAppUrl}`,
-      tokenCmd: `multica config set server_url ${normalizedServerUrl}
-multica config set app_url ${normalizedAppUrl}
-multica login --token <YOUR_TOKEN>
-multica daemon start`,
-    };
-  }
-
-  return {
-    setupCmd: "multica setup",
-    tokenCmd: `multica config set server_url ${CLOUD_SERVER_URL}
-multica config set app_url ${CLOUD_APP_URL}
-multica login --token <YOUR_TOKEN>
-multica daemon start`,
-  };
-}
-
 export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
-  const [step, setStep] = useState<Step>("instructions");
   const wsId = useWorkspaceId();
+  const currentUserId = useAuthStore((state) => state.user?.id);
+  return (
+    <WorkspaceConnectDialog
+      key={`${wsId}:${currentUserId ?? ""}`}
+      wsId={wsId}
+      currentUserId={currentUserId}
+      onClose={onClose}
+    />
+  );
+}
+
+function WorkspaceConnectDialog({ wsId, currentUserId, onClose }: {
+  wsId: string;
+  currentUserId: string | undefined;
+  onClose: () => void;
+}) {
+  const [step, setStep] = useState<Step>("instructions");
   const slug = useWorkspaceSlug();
   const qc = useQueryClient();
   const navigation = useNavigation();
   const shouldReduceMotion = useReducedMotion() ?? false;
   const newRuntimeIdRef = useRef<string | null>(null);
+  const initialDaemonIds = useRef<Set<string> | null>(null);
+  const pendingInitialRefresh = useRef(false);
+  const { data: runtimes, isSuccess, isFetchedAfterMount, isFetching } = useQuery({
+    ...runtimeListOptions(wsId, "me", slug ?? undefined),
+    enabled: !!currentUserId && step === "instructions",
+    refetchOnMount: "always",
+  });
 
-  // `multica setup` is one blocking command that handles config + login
-  // + daemon start; the dialog passively listens for the resulting
-  // `daemon:register` WS event and auto-advances to success.
-  const handleDaemonRegister = useCallback(
-    (payload: unknown) => {
-      if (step !== "instructions") return;
-      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
-      const p = payload as Record<string, unknown> | null;
-      if (p?.runtime_id && typeof p.runtime_id === "string") {
-        newRuntimeIdRef.current = p.runtime_id;
-      }
-      setStep("success");
-    },
-    [step, qc, wsId],
-  );
+  // Registration, configuration updates and offline sweeps share this event.
+  // Only the refreshed runtime list can confirm a newly connected computer.
+  const handleDaemonRegister = useCallback(() => {
+    if (step !== "instructions") return;
+    // Invalidating an uncached in-flight query only joins its stale snapshot.
+    if (!initialDaemonIds.current && qc.isFetching({ queryKey: runtimeKeys.listMine(wsId), exact: true })) {
+      pendingInitialRefresh.current = true;
+      return;
+    }
+    return qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+  }, [step, qc, wsId]);
   useWSEvent("daemon:register", handleDaemonRegister);
+  useWSReconnect(handleDaemonRegister);
+
+  useEffect(() => {
+    if (
+      step !== "instructions" ||
+      !currentUserId ||
+      !isSuccess ||
+      !isFetchedAfterMount ||
+      isFetching ||
+      !runtimes
+    ) return;
+    // A fresh initial response avoids treating an old, uncached machine as new.
+    const knownDaemonIds = initialDaemonIds.current;
+    if (!knownDaemonIds) {
+      initialDaemonIds.current = new Set(
+        runtimes.flatMap((runtime) => runtime.daemon_id ? [runtime.daemon_id] : []),
+      );
+      return;
+    }
+    const runtime = runtimes.find((runtime) =>
+      runtime.workspace_id === wsId &&
+      runtime.owner_id === currentUserId &&
+      runtime.runtime_mode === "local" &&
+      runtime.status === "online" &&
+      runtime.daemon_id &&
+      !knownDaemonIds.has(runtime.daemon_id) &&
+      runtime.metadata.pending_custom_runtime !== true &&
+      runtime.metadata.runtime_profile_registration_error !== true,
+    );
+    if (!runtime) return;
+    newRuntimeIdRef.current = runtime.id;
+    setStep("success");
+  }, [step, currentUserId, isSuccess, isFetchedAfterMount, isFetching, runtimes, wsId]);
+
+  useEffect(() => {
+    if (step !== "instructions" || isFetching || !pendingInitialRefresh.current) return;
+    // Establish the initial baseline above before fetching queued notifications.
+    pendingInitialRefresh.current = false;
+    void qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+  }, [step, isFetching, qc, wsId]);
 
   const handleGoToAgents = () => {
     onClose();
@@ -240,9 +272,7 @@ function CommandStep({
 
 function InstructionsStep({ onClose }: { onClose: () => void }) {
   const { t } = useT("runtimes");
-  const daemonServerUrl = useConfigStore((s) => s.daemonServerUrl);
-  const daemonAppUrl = useConfigStore((s) => s.daemonAppUrl);
-  const { setupCmd, tokenCmd } = daemonCommands(daemonServerUrl, daemonAppUrl);
+  const commands = useDaemonSetupCommands();
   return (
     <>
       <DialogHeader className="px-6 pt-6 pb-2">
@@ -278,19 +308,28 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
 
           <div>
             <CommandStep n={2} label={t(($) => $.connect.step2_label)}>
-              <CommandRow
-                cmd={setupCmd}
-                copyAria={t(($) => $.connect.copy_aria)}
-              />
+              {commands.status === "ready" ? (
+                <CommandRow
+                  cmd={commands.setupCmd}
+                  copyAria={t(($) => $.connect.copy_aria)}
+                />
+              ) : (
+                <DaemonSetupNotice status={commands.status} />
+              )}
             </CommandStep>
-            <p className="mt-1.5 text-micro leading-[1.55] text-muted-foreground">
-              {t(($) => $.connect.step2_hint)}
-            </p>
+            {commands.status === "ready" && (
+              <p className="mt-1.5 text-micro leading-[1.55] text-muted-foreground">
+                {t(($) => $.connect.step2_hint)}
+              </p>
+            )}
           </div>
 
-          <LiveListening />
-
-          <TroubleshootingDetails tokenCmd={tokenCmd} />
+          {commands.status === "ready" && (
+            <>
+              <LiveListening />
+              <TroubleshootingDetails tokenCmd={commands.tokenCmd} />
+            </>
+          )}
         </div>
       </div>
 
