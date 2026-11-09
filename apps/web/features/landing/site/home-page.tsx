@@ -18,7 +18,7 @@ import {
 import { HERO_PROVIDERS } from "../components/provider-marks";
 import { docsHrefForLocale, toLandingDictionaryLocale, useLocale } from "../i18n";
 import type { HomeDict } from "../i18n/types";
-import { CUSTOMER_LOGOS } from "./customer-logos";
+import { CUSTOMER_LOGOS, type CustomerLogo } from "./customer-logos";
 import { AutopilotsVisual, ChatVisual, RuntimesVisual, SkillsVisual, WorkflowVisual } from "./demo/feature-visuals";
 import { HeroDemo } from "./demo/hero-demo";
 import { PROVIDER_MARKS, useStoryLoop } from "./demo/mock-kit";
@@ -146,6 +146,20 @@ function ProviderMark({ name }: { name: string }) {
   return Mark ? <Mark className="size-[0.72em] shrink-0" /> : null;
 }
 
+/** Logos share one visual area, so wide wordmarks and square seals read at the same weight. */
+const LOGO_AREA = 2600;
+
+function logoMaskStyle({ logo, ratio }: CustomerLogo): CSSProperties {
+  const height = Math.min(40, Math.max(18, Math.sqrt(LOGO_AREA / ratio)));
+  const mask = `url(/images/logos/${logo}.webp) center / 100% 100% no-repeat`;
+  return {
+    "--logo-h": `calc(${height.toFixed(1)}px * var(--logo-scale))`,
+    aspectRatio: ratio,
+    mask,
+    WebkitMask: mask,
+  } as CSSProperties;
+}
+
 function LogoWall() {
   const { t, locale } = useLocale();
   const logos = CUSTOMER_LOGOS[toLandingDictionaryLocale(locale)];
@@ -167,21 +181,13 @@ function LogoWall() {
                 )}
               >
                 {logos.map((logo) => (
-                  <li
-                    key={logo.name}
-                    style={logo.mark ? ({ "--logo-color": logo.mark.color } as CSSProperties) : undefined}
-                    className="group/logo flex h-10 items-center gap-2 text-site-muted transition-colors duration-200 hover:text-site-ink"
-                  >
-                    {logo.mark ? (
-                      <svg
-                        viewBox="0 0 24 24"
-                        aria-hidden
-                        className="size-5 fill-current sm:size-6 transition-colors duration-200 group-hover/logo:fill-(--logo-color)"
-                      >
-                        <path d={logo.mark.path} />
-                      </svg>
-                    ) : null}
-                    <span className="text-[0.9375rem] font-semibold sm:text-[1.0625rem] tracking-tight whitespace-nowrap">{logo.name}</span>
+                  <li key={logo.name} className="flex h-10 items-center">
+                    <span
+                      role="img"
+                      aria-label={logo.name}
+                      style={logoMaskStyle(logo)}
+                      className="block h-(--logo-h) bg-site-muted transition-colors duration-200 [--logo-scale:0.8] hover:bg-site-ink sm:[--logo-scale:1]"
+                    />
                   </li>
                 ))}
               </ul>
