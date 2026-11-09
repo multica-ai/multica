@@ -67,7 +67,7 @@ func isACPResumeRejected(err error) bool {
 	// literals, so "unknown session capability requested" would otherwise be
 	// answered true before the scrub ever ran.
 	text = acpSessionRequestComplaintRe.ReplaceAllString(text, " ")
-	return acpSessionNotFoundWording(text) || acpSessionUnusableRe.MatchString(text)
+	return acpSessionNotFoundWording(text) || acpSessionUnusableRe.MatchString(text) || acpSessionPathMissingRe.MatchString(text)
 }
 
 // acpSessionUnusableRe matches a runtime saying the session id itself is no
@@ -112,6 +112,22 @@ var acpSessionUnusableRe = regexp.MustCompile(
 // which is why it is a stop-list rather than a redesign.
 var acpSessionRequestComplaintRe = regexp.MustCompile(
 	`(no such|unknown|invalid|expired|unrecogni[sz]ed|nonexistent|missing)\s+(session|conversation|thread)\s+(params?|parameters?|request|requests|config|configuration|option|options|capability|capabilities|mode|setup)`)
+
+// acpSessionPathMissingRe matches the one rejection a runtime reports without
+// ever naming the session. Grok resolves the recorded id to a file under its
+// per-cwd session store and answers session/load with -32603 and
+// data {code: FS_NOT_FOUND, detail: "No such file or directory"} once that file
+// is gone — the cwd was recreated empty, or the store was cleaned. Neither
+// acpSessionNotFoundWording nor acpSessionUnusableRe fires, because both need a
+// session-shaped noun and this frame has none, so the pointer looks healthy and
+// the daemon replays the dead id on every later turn.
+//
+// The match is the code, plus Grok's own "path not found" verdict, and NOT the
+// generic "no such file or directory" in `detail`: that detail is attached to
+// unrelated filesystem failures this RPC can also produce — a config file, a
+// missing cwd — which a fresh session does not cure, so matching it would
+// retire a live conversation's pointer for nothing.
+var acpSessionPathMissingRe = regexp.MustCompile(`fs_not_found|path not found`)
 
 // setupFailureWithholdsSessionID reports whether a run that failed during setup
 // — after session/new, before session/prompt — must report an empty SessionID
