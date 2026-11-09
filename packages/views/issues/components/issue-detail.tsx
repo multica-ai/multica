@@ -2458,6 +2458,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         return;
       }
 
+      // A reply anchor is cheap and persistent; wait for its body after revealing it.
+      if (el.dataset.virtualThreadMounted === "false") {
+        const c = container.getBoundingClientRect();
+        const e = el.getBoundingClientRect();
+        container.scrollTop = Math.max(0, container.scrollTop + e.top - c.top - (container.clientHeight - e.height) / 2);
+        if (++mountFrames < 60) rafId = requestAnimationFrame(land);
+        return;
+      }
       didHighlightRef.current = highlightCommentId;
       writeViewState(issueHighlightMementoKey(id), highlightCommentId);
       const center = () => {
@@ -3226,7 +3234,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           onExpand={() => toggleResolvedExpand(reply.id, true)} /> : <AgentRunComment run={item.run} entering={enteringRunIds.has(item.run.task.id)} standalone
           highlightedId={highlightedId}
           commentProps={reply ? {
-            issueId: id, entry: reply, replies: timelineView.threadReplies.get(reply.id) ?? EMPTY_REPLIES,
+            issueId: id, replyScrollParent: isFlatTimeline ? null : scrollContainerEl, entry: reply, replies: timelineView.threadReplies.get(reply.id) ?? EMPTY_REPLIES,
             currentUserId: user?.id, canModerate: canModerateComments, onReply: submitReply,
             onReplyAccepted: scrollToTimelineBottom, onEdit: editComment, onDelete: deleteComment,
             onToggleReaction: handleToggleReaction, onCreateSubIssue: openCommentSubIssue,
@@ -3256,6 +3264,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <div className="pb-3" id={`comment-${item.id}`}>
           <CommentCard
             issueId={id}
+            replyScrollParent={isFlatTimeline ? null : scrollContainerEl}
             runs={commentRuns.get(item.id) ?? EMPTY_COMMENT_RUNS}
             enteringRunIds={enteringRunIds}
             entry={item.entry}
