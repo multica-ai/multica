@@ -101,6 +101,7 @@
     "./projects/deletion-permissions": "./projects/deletion-permissions.ts",
     "./projects/queries": "./projects/queries.ts",
     "./projects/mutations": "./projects/mutations.ts",
+    "./projects/access": "./projects/access.ts",
     "./projects/config": "./projects/config.ts",
     "./plugins": "./plugins/index.ts",
     "./plugins/queries": "./plugins/queries.ts",

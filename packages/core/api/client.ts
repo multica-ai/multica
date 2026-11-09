@@ -114,6 +114,7 @@ import type {
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
+  ListProjectMembersResponse,
   ProjectResource,
   CreateProjectResourceRequest,
   UpdateProjectResourceRequest,
@@ -365,6 +366,7 @@ import {
   RuntimeUsageListSchema,
   SearchIssuesResponseSchema,
   ProjectSchema,
+  ListProjectMembersResponseSchema,
   ListProjectsResponseSchema,
   EMPTY_PROJECT,
   EMPTY_LIST_PROJECTS_RESPONSE,
@@ -4273,6 +4275,9 @@ export class ApiClient {
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {
+    if (data.visibility === "private" && configStore.getState().featureFlags.private_projects_v1 !== true) {
+      throw new Error("Private projects are not enabled on this server.");
+    }
     const raw = await this.fetch<unknown>("/api/projects", {
       method: "POST",
       body: JSON.stringify(data),
@@ -4290,6 +4295,26 @@ export class ApiClient {
 
   async deleteProject(id: string): Promise<void> {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  async getProjectMembers(id: string): Promise<ListProjectMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/members`);
+    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0 }, {
+      endpoint: "GET /api/projects/:id/members",
+    });
+  }
+
+  async addProjectMembers(id: string, userIds: string[]): Promise<ListProjectMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/members`, {
+      method: "POST", body: JSON.stringify({ user_ids: userIds }),
+    });
+    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0 }, {
+      endpoint: "POST /api/projects/:id/members",
+    });
+  }
+
+  async removeProjectMember(id: string, userId: string): Promise<void> {
+    await this.fetch(`/api/projects/${id}/members/${userId}`, { method: "DELETE" });
   }
 
   // Project resources

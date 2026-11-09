@@ -34,7 +34,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
-import type { ProjectStatus, ProjectPriority } from "@multica/core/types";
+import type { ProjectStatus, ProjectPriority, ProjectVisibility } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -61,6 +61,7 @@ import {
 } from "../projects/components/labels";
 import { ProjectStartDatePicker } from "../projects/components/project-start-date-picker";
 import { ProjectDueDatePicker } from "../projects/components/project-due-date-picker";
+import { ProjectAccessDraftPicker } from "../projects/components/project-access";
 import { PillButton } from "../common/pill-button";
 import { WorkflowPill } from "../workflows/workflow-pill";
 import { githubShortLabel } from "../common/github-url";
@@ -170,6 +171,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [icon, setIcon] = useState<string | undefined>(draft.icon);
   const [startDate, setStartDate] = useState<string>(draft.startDate ?? "");
   const [dueDate, setDueDate] = useState<string>(draft.dueDate ?? "");
+  const [visibility, setVisibility] = useState<ProjectVisibility>(draft.visibility ?? "workspace");
+  const [memberIds, setMemberIds] = useState<string[]>(draft.memberIds ?? []);
+  const privateEnabled = useConfigStore((s) => s.featureFlags.private_projects_v1 === true);
   // Dates are collapsed into the ⋯ overflow by default (progressive
   // disclosure, mirroring create-issue); these flip a pill inline + open.
   const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
@@ -353,6 +357,10 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     // Checked here as well as on the button: TitleEditor's onSubmit calls this
     // directly, so a disabled button alone leaves the keyboard path open.
     if (!title.trim() || submitting) return;
+    if (visibility === "private" && !privateEnabled) {
+      toast.error(tProjects(($) => $.access.disabled));
+      return;
+    }
     if (sourceMode === "repos" && hasRejectedRepoRef) return;
     // `sourceMode` decides which side's stash gets persisted — the other
     // side is silently dropped, so repos picked then abandoned for local
@@ -402,6 +410,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         ...(workflowId ? { workflow_id: workflowId } : {}),
         // Server attaches these in the same transaction as the project.
         resources,
+        ...(visibility === "private" ? { visibility, member_ids: memberIds } : {}),
       });
       clearDraft();
       onClose();
@@ -619,6 +628,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           </DropdownMenu>
 
           <WorkflowPill value={workflowId} onChange={setWorkflowId} />
+          {(privateEnabled || visibility === "private") && <ProjectAccessDraftPicker visibility={visibility} memberIds={memberIds} members={members}
+            leadId={leadType === "member" ? leadId : undefined}
+            onChange={(value, ids) => { setVisibility(value); setMemberIds(ids); setDraft({ visibility: value, memberIds: ids }); }} />}
 
           <Popover
             open={leadOpen}
@@ -1120,6 +1132,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             disabled={
               !title.trim() ||
               submitting ||
+              (visibility === "private" && !privateEnabled) ||
               (sourceMode === "repos" && hasRejectedRepoRef)
             }
             className="shrink-0"

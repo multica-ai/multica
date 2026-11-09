@@ -1577,6 +1577,7 @@ export const ProjectSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
   title: z.string(),
+  visibility: z.enum(["workspace", "private"]).default("workspace").catch("private"),
   description: z.string().nullable(),
   icon: z.string().nullable(),
   status: z.string(),
@@ -1611,6 +1612,19 @@ export const ListProjectsResponseSchema = z.object({
 }).loose();
 
 export const EMPTY_LIST_PROJECTS_RESPONSE: ListProjectsResponse = { projects: [], total: 0 };
+
+export const ProjectMemberSchema = z.object({
+  project_id: z.string(),
+  user_id: z.string(),
+  name: z.string(),
+  email: z.string(),
+  avatar_url: z.string().nullable().default(null),
+}).loose();
+
+export const ListProjectMembersResponseSchema = z.object({
+  members: z.array(ProjectMemberSchema),
+  total: z.number(),
+}).loose();
 
 const SearchProjectResultSchema = ProjectSchema.extend({
   match_source: z.string(),

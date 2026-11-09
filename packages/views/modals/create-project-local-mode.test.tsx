@@ -91,8 +91,8 @@ vi.mock("@multica/core/projects", () => ({
 // release before the worktree save gate.
 let serverValidatesWorktree = true;
 vi.mock("@multica/core/config", () => ({
-  useConfigStore: (selector: (state: { localWorktreeSupported: boolean }) => unknown) =>
-    selector({ localWorktreeSupported: serverValidatesWorktree }),
+  useConfigStore: (selector: (state: { localWorktreeSupported: boolean; featureFlags: Record<string, boolean> }) => unknown) =>
+    selector({ localWorktreeSupported: serverValidatesWorktree, featureFlags: {} }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
