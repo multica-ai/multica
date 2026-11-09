@@ -270,12 +270,14 @@ func (s *Service) executeApproved(ctx context.Context, req db.AppActionRequest) 
 	if Decide(req.ToolkitSlug, app.Level, class, rule) == PolicyBlock {
 		return fail("a rule now blocks this call")
 	}
-	resp, err := s.composio.ExecuteTool(ctx, acct.connectedAccountID, *tool, args)
+	resp, err := s.composio.ExecuteTool(ctx, acct.connectedAccountID, acct.composioUserID, *tool, args)
 	s.touch(ctx, req.WorkspaceID, acct)
 	if err != nil {
+		logExecutionFailure(ctx, call, "request_failed")
 		return fail(truncate(err.Error(), 500))
 	}
 	if !resp.Successful {
+		logExecutionFailure(ctx, call, "tool_unsuccessful")
 		return fail(truncate(resp.Error, 500))
 	}
 	result, err := json.Marshal(resp.Data)

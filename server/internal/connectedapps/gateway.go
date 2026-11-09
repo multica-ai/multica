@@ -498,15 +498,17 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 		s.recordCall(ctx, call)
 		return textResult(fmt.Sprintf("rate limited: this %s account already ran %d calls in the last minute. Wait a minute before the next call, and batch work where the app allows it.", slug, s.perMinute), true)
 	}
-	resp, err := s.composio.ExecuteTool(ctx, acct.connectedAccountID, *tool, args)
+	resp, err := s.composio.ExecuteTool(ctx, acct.connectedAccountID, acct.composioUserID, *tool, args)
 	s.touch(ctx, rn.workspaceID, acct)
 	if err != nil {
 		call.outcome, call.err = "error", truncate(err.Error(), 500)
+		logExecutionFailure(ctx, call, "request_failed")
 		s.recordCall(ctx, call)
 		return textResult("the app call failed: "+truncate(err.Error(), 500), true)
 	}
 	if !resp.Successful {
 		call.outcome, call.err = "error", truncate(resp.Error, 500)
+		logExecutionFailure(ctx, call, "tool_unsuccessful")
 		s.recordCall(ctx, call)
 		return textResult("the app returned an error: "+truncate(resp.Error, 2000), true)
 	}
