@@ -83,6 +83,49 @@ export function attachmentIdFromDownloadURL(rawURL: string): string | undefined 
   return id;
 }
 
+const CAPABILITY_PATH_RE = new RegExp(
+  `^/api/attachments/[0-9a-f-]{36}/signed-download$`,
+  "i",
+);
+
+/**
+ * True for the server's own attachment capability URL,
+ * `/api/attachments/<id>/signed-download?...`, site-relative or absolute.
+ *
+ * Local-disk servers put one in `download_url` on every response so clients
+ * released before MUL-8859 can render images. It expires while the record
+ * sits in the query cache (staleTime: Infinity), so this client must not
+ * render it; it uses the stable URL and the authenticated re-sign path.
+ */
+export function isAttachmentCapabilityURL(rawURL: string): boolean {
+  if (!rawURL) return false;
+  let path = rawURL.split(/[?#]/, 1)[0] ?? "";
+  if (/^https?:\/\//i.test(path)) {
+    try {
+      path = new URL(path).pathname;
+    } catch {
+      return false;
+    }
+  }
+  return CAPABILITY_PATH_RE.test(path);
+}
+
+/**
+ * The URL this client renders for an attachment record: `download_url`
+ * unless it is a capability (see isAttachmentCapabilityURL), then the durable
+ * `markdown_url`, then the storage `url`.
+ */
+export function attachmentMediaURL(attachment: {
+  url: string;
+  download_url?: string;
+  markdown_url?: string;
+}): string {
+  const dl = attachment.download_url ?? "";
+  return (
+    (isAttachmentCapabilityURL(dl) ? "" : dl) || attachment.markdown_url || attachment.url
+  );
+}
+
 // Storage object path the upload handler writes for workspace files:
 // `workspaces/<workspace-id>/<attachment-id><ext>` (server/internal/handler/file.go
 // uses the attachment id as the object name).

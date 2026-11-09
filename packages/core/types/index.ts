@@ -169,6 +169,8 @@ export type { Attachment } from "./attachment";
 export {
   attachmentDownloadPath,
   attachmentIdFromDownloadURL,
+  attachmentMediaURL,
+  isAttachmentCapabilityURL,
   attachmentIdFromLocalUploadURL,
   attachmentIdFromStorageURL,
   contentReferencesAttachment,

@@ -58,6 +58,7 @@ import type { Attachment } from "@multica/core/types";
 import {
   attachmentIdFromLocalUploadURL,
   attachmentIdFromStorageURL,
+  attachmentMediaURL,
 } from "@multica/core/types/attachment-url";
 import { useConfigStore } from "@multica/core/config";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
@@ -163,8 +164,7 @@ interface PreviewState {
 }
 
 function resolvePreviewMediaUrl(attachment: Attachment): string {
-  const raw =
-    attachment.download_url || attachment.markdown_url || attachment.url;
+  const raw = attachmentMediaURL(attachment);
   return resolvePublicFileUrl(raw) ?? raw;
 }
 

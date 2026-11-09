@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { Attachment } from "@multica/core/types";
+import { attachmentMediaURL } from "@multica/core/types/attachment-url";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { cn } from "@multica/ui/lib/utils";
 import { useResignedInlineMedia } from "../../../editor/hooks/use-inline-media-url";
@@ -69,8 +70,7 @@ function ImageThumbnail({
   attachment: Attachment;
   className?: string;
 }) {
-  const picked =
-    attachment.download_url || attachment.markdown_url || attachment.url;
+  const picked = attachmentMediaURL(attachment);
   const { url, pending } = useResignedInlineMedia(
     attachment.id,
     resolvePublicFileUrl(picked) ?? picked,

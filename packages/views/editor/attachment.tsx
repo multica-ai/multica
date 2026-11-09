@@ -44,6 +44,7 @@ import type { Attachment as AttachmentRecord } from "@multica/core/types";
 import {
   attachmentIdFromLocalUploadURL,
   attachmentIdFromStorageURL,
+  isAttachmentCapabilityURL,
 } from "@multica/core/types/attachment-url";
 import { useT } from "../i18n";
 import { DeferredTooltip } from "../common/deferred-tooltip";
@@ -228,7 +229,9 @@ function absolutizeMediaURL(rawUrl: string): string {
 
 // pickInlineMediaURL chooses a URL usable by native media loads, which cannot
 // attach the API client's Authorization header. Signed download URLs are suitable
-// for rendering but must not replace durable Markdown references.
+// for rendering but must not replace durable Markdown references. The server's
+// own capability URL is the exception: it expires while the record is cached,
+// so local-disk media goes through the re-sign path instead (MUL-8859).
 //
 // Use known public/CDN URLs directly only when cdn_signed is false; unsigned URLs
 // on a private CDN fail even when the domain matches. Local-disk /uploads paths
@@ -246,6 +249,7 @@ function pickInlineMediaURL(
   const dl = record.download_url ?? "";
   if (
     /^https?:\/\//i.test(dl) &&
+    !isAttachmentCapabilityURL(dl) &&
     /[?&](Signature|X-Amz-Signature|Key-Pair-Id|Expires|X-Amz-Expires)=/i.test(dl)
   ) {
     return dl;

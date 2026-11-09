@@ -4,7 +4,9 @@ import {
   attachmentIdFromDownloadURL,
   attachmentIdFromLocalUploadURL,
   attachmentIdFromStorageURL,
+  attachmentMediaURL,
   contentReferencesAttachment,
+  isAttachmentCapabilityURL,
   stripChannelMediaMarkers,
 } from "./attachment-url";
 
@@ -184,6 +186,29 @@ describe("attachmentIdFromStorageURL", () => {
       attachmentIdFromStorageURL(`https://${CDN}/workspaces/${WS}/${ID}.jpg`, ""),
     ).toBeUndefined();
     expect(attachmentIdFromStorageURL(`/workspaces/${WS}/${ID}.jpg`, CDN)).toBeUndefined();
+  });
+});
+
+describe("isAttachmentCapabilityURL / attachmentMediaURL (MUL-8859)", () => {
+  const capability = `https://multica.example.test/api/attachments/${ID}/signed-download?Expires=1&Signature=a`;
+
+  it("recognizes the server's capability URL, absolute or site-relative", () => {
+    expect(isAttachmentCapabilityURL(capability)).toBe(true);
+    expect(isAttachmentCapabilityURL(`/api/attachments/${ID}/signed-download?exp=1&sig=a`)).toBe(true);
+    expect(isAttachmentCapabilityURL(`/api/attachments/${ID}/download`)).toBe(false);
+    expect(isAttachmentCapabilityURL("https://cdn.example.test/x.png?Signature=a")).toBe(false);
+    expect(isAttachmentCapabilityURL("")).toBe(false);
+  });
+
+  it("skips a capability download_url for the durable markdown_url", () => {
+    const markdown = `https://multica.example.test/api/attachments/${ID}/download`;
+    expect(attachmentMediaURL({ url: "/uploads/x.png", download_url: capability, markdown_url: markdown })).toBe(markdown);
+    expect(attachmentMediaURL({ url: "/uploads/x.png", download_url: capability })).toBe("/uploads/x.png");
+  });
+
+  it("keeps any other download_url first", () => {
+    const signed = "https://cdn.example.test/x.png?Signature=a";
+    expect(attachmentMediaURL({ url: "u", download_url: signed, markdown_url: "m" })).toBe(signed);
   });
 });
 

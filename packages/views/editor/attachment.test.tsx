@@ -353,30 +353,47 @@ describe("Attachment — image dispatch", () => {
     }
   });
 
-  describe("local disk responses with a signed download_url (MUL-8859)", () => {
-    // The shape every local-disk response now has: url stays the storage path,
-    // download_url is an absolute Expires/Signature capability. Clients from
-    // before MUL-8859 must render it without touching /uploads.
+  describe("local disk capability download_url (MUL-8859)", () => {
+    // Every local-disk response carries an absolute Expires/Signature
+    // capability in download_url for clients released before MUL-8859. Records
+    // stay cached (staleTime: Infinity) past its TTL, so this client must
+    // never render it: it goes through markdown_url and the authenticated
+    // re-sign / byte fetch, which is keyed by id and refreshes on its own.
     const id = "11111111-2222-3333-4444-555555555555";
+    const expires = 1_900_000_000;
     const storageUrl = `/uploads/workspaces/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/${id}.png`;
     const markdownUrl = `https://multica.example.test/api/attachments/${id}/download`;
-    const signedUrl = `https://multica.example.test/api/attachments/${id}/signed-download?Expires=1900000000&Signature=abc`;
+    const capabilityUrl = `https://multica.example.test/api/attachments/${id}/signed-download?Expires=${expires}&Signature=abc`;
     const record = () =>
-      makeRecord({ id, url: storageUrl, markdown_url: markdownUrl, download_url: signedUrl });
+      makeRecord({ id, url: storageUrl, markdown_url: markdownUrl, download_url: capabilityUrl });
+    const srcs = () => [...document.querySelectorAll("img")].map((img) => img.getAttribute("src"));
 
     beforeEach(() => {
       getBaseUrlMock.mockReturnValue("https://multica.example.test");
       configStore.setState({ cdnDomain: "", cdnSigned: true });
+      // The cached record is now older than the capability's TTL.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime((expires + 60 * 60) * 1000);
+      getAttachmentMock.mockResolvedValue(
+        makeRecord({ id, download_url: `/api/attachments/${id}/signed-download?exp=1&sig=x` }),
+      );
+      getAttachmentBlobMock.mockResolvedValue(new Blob(["png-bytes"], { type: "image/png" }));
     });
 
-    it("renders a draft upload record through the signed URL", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("loads a cached record's image through the authenticated fetch, not the capability", async () => {
       renderWithQuery(<Attachment attachment={{ kind: "record", attachment: record() }} />);
 
-      expect(document.querySelector("img")?.getAttribute("src")).toBe(signedUrl);
-      expect(getAttachmentMock).not.toHaveBeenCalled();
+      expect(srcs()).not.toContain(capabilityUrl);
+      await waitFor(() => expect(srcs()).toEqual([OBJECT_URL]));
+      expect(getAttachmentMock).toHaveBeenCalledWith(id);
+      expect(getAttachmentBlobMock).toHaveBeenCalledWith(id);
     });
 
-    it("renders a legacy body's /uploads link through the signed URL", () => {
+    it("loads a legacy body's /uploads link through the authenticated fetch", async () => {
       resolverState.attachments = [record()];
 
       renderWithQuery(
@@ -385,7 +402,45 @@ describe("Attachment — image dispatch", () => {
         />,
       );
 
-      expect(document.querySelector("img")?.getAttribute("src")).toBe(signedUrl);
+      expect(srcs()).not.toContain(capabilityUrl);
+      await waitFor(() => expect(srcs()).toEqual([OBJECT_URL]));
+    });
+
+    it("never hands the capability to the preview, opened before or after the image loads", async () => {
+      renderWithQuery(<Attachment attachment={{ kind: "record", attachment: record() }} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "View" }));
+      expect(srcs()).not.toContain(capabilityUrl);
+      fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+
+      await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL));
+      fireEvent.click(screen.getByRole("button", { name: "View" }));
+      await waitFor(() =>
+        expect(screen.getByRole("dialog").querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL),
+      );
+      expect(srcs()).not.toContain(capabilityUrl);
+    });
+
+    it("uses the stable URL directly on same-origin web", () => {
+      getBaseUrlMock.mockReturnValue("");
+      const origin = window.location.origin;
+      const stable = `${origin}/api/attachments/${id}/download`;
+      renderWithQuery(
+        <Attachment
+          attachment={{
+            kind: "record",
+            attachment: makeRecord({
+              id,
+              url: storageUrl,
+              markdown_url: stable,
+              download_url: `${origin}/api/attachments/${id}/signed-download?Expires=${expires}&Signature=abc`,
+            }),
+          }}
+        />,
+      );
+
+      expect(srcs()).toEqual([stable]);
+      expect(getAttachmentMock).not.toHaveBeenCalled();
     });
   });
 
