@@ -683,18 +683,32 @@ export function useFilterChips(
   return { chips, hasAny: chips.length > 0, clearAll };
 }
 
-export function ChipSpan({ chip, className }: { chip: FilterChip; className?: string }) {
+export function ChipSpan({
+  chip,
+  className,
+  compact = false,
+}: {
+  chip: FilterChip;
+  className?: string;
+  /** Icon and value only, for narrow columns; the field name moves to the
+   *  hover title. */
+  compact?: boolean;
+}) {
   const { t } = useT("issues");
   const removeLabel = t(($) => $.filters.chip_remove, { name: chip.label });
+  const operator = chip.negated ? t(($) => $.filters.operator_is_not) : t(($) => $.filters.operator_is);
   return (
     // Keyed per dimension: the chip animates in once when its dimension
     // first gains a value; value changes inside it re-render without
     // re-animating. No exit animation — unmount presence isn't worth the
     // machinery for a 150ms nicety.
-    <span className={cn("flex h-6 max-w-72 shrink-0 items-center gap-1.5 rounded-md bg-background pl-2 pr-1 text-caption shadow-xs animate-in fade-in-0 zoom-in-95 duration-150", className)}>
+    <span
+      title={compact ? `${chip.label} ${operator} ${chip.value}` : undefined}
+      className={cn("flex h-6 max-w-72 shrink-0 items-center gap-1.5 rounded-md bg-background pl-2 pr-1 text-caption shadow-xs animate-in fade-in-0 zoom-in-95 duration-150", compact && "min-w-0 max-w-full shrink", className)}
+    >
       <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
         {chip.icon}
-        <span>{chip.label}</span>
+        {!compact && <span>{chip.label}</span>}
       </span>
       <span className="flex min-w-0 items-center gap-1">
         {chip.negated && <FilterOperator negated />}
