@@ -29,16 +29,16 @@ vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
 
 const dnd = vi.hoisted(() => ({ onDragEnd: undefined as ((event: DragEndEvent) => void) | undefined }));
 
-vi.mock("@dnd-kit/core", () => ({
-  DndContext: ({ children, onDragEnd }: { children: ReactNode; onDragEnd: (event: DragEndEvent) => void }) => {
-    dnd.onDragEnd = onDragEnd;
-    return <>{children}</>;
-  },
-  PointerSensor: vi.fn(),
-  closestCenter: vi.fn(),
-  useSensor: vi.fn(),
-  useSensors: vi.fn(),
-}));
+vi.mock("@dnd-kit/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@dnd-kit/core")>();
+  return {
+    ...actual,
+    DndContext: (props: React.ComponentProps<typeof actual.DndContext>) => {
+      dnd.onDragEnd = props.onDragEnd;
+      return <actual.DndContext {...props} />;
+    },
+  };
+});
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog([]),
 }));
@@ -142,6 +142,23 @@ describe("ProjectsSection", () => {
     const { prefs } = apiMock.putIssueViewPreference.mock.calls[0]![0];
     expect(prefs.order).toEqual(["p3", "p1", "p2", "p9"]);
     expect(prefs.projects.ordering).toBe("manual");
+  });
+
+  // dnd-kit stops the release's click at the document without cancelling
+  // it. Where React listens below the document (Desktop), it never sees that
+  // click, so the row must not wait for it before opening on the next one.
+  it("does not open the project released at the end of a drag, and opens it on the next click", async () => {
+    renderSection();
+    const row = screen.getByRole("link", { name: "Mobile" });
+    const pointer = { isPrimary: true, button: 0, clientX: 30, clientY: 100 };
+    fireEvent.pointerDown(row, pointer);
+    fireEvent.pointerMove(document, { ...pointer, clientY: 110 });
+    fireEvent.pointerUp(document, { ...pointer, clientY: 110 });
+
+    expect(fireEvent.click(row)).toBe(false);
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(fireEvent.click(row)).toBe(true);
   });
 
   it("creates an issue in a project from its row", () => {
