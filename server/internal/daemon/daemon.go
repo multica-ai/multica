@@ -8779,6 +8779,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("write resident task context: %w", err)
 	}
 	defer cleanupResident()
+	// Resume may use a predecessor's root while task lookups use this run's stable root.
+	if resolvedRoot != "" && resolvedRoot != env.RootDir {
+		cleanupStable, err := writeResidentTaskContext(resolvedRoot, provider, task, agentToken)
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("write stable resident task context: %w", err)
+		}
+		defer cleanupStable()
+	}
 	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
 		agentEnv[repoCheckoutModeEnv] = checkoutMode
 	}
@@ -8851,6 +8859,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	if provider == "hermes" && execenv.ResidentHermesGatewayEnabled() && env.HermesHome != "" {
+		names := execenv.HermesTaskEnvPassthroughNames()
+		for name := range sanitizeAgentEnv(agentCustomEnv) {
+			// The overlay home is an ACP control, not a tool environment override.
+			if !strings.EqualFold(name, "HERMES_HOME") {
+				names = append(names, name)
+			}
+		}
+		if err := execenv.ConfigureHermesTurnEnvironment(env.HermesHome, names); err != nil {
+			return TaskResult{}, fmt.Errorf("configure resident turn environment: %w", err)
+		}
+	}
 	if provider == "reasonix" {
 		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
 		if err != nil {
