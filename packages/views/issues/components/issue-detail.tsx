@@ -2486,12 +2486,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       fade = window.setTimeout(() => setHighlightedId(null), 2500);
     };
     if (isFlatTimeline) land();
-    else virtuosoRef.current?.scrollIntoView({
-      index: targetIdx,
-      align: "start",
-      // Finish virtual size corrections before positioning a nested reply.
-      done: () => { if (!cancelled) rafId = requestAnimationFrame(land); },
-    });
+    else {
+      const queueLanding = () => {
+        if (cancelled) return;
+        cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(land);
+      };
+      virtuosoRef.current?.scrollIntoView({
+        index: targetIdx,
+        align: "start",
+        done: queueLanding,
+      });
+      // Windowed replies can keep changing the row's size. Don't wait for
+      // Virtuoso's completion callback before revealing the nested anchor.
+      queueLanding();
+    }
     return () => {
       cancelled = true;
       cancelAnimationFrame(rafId);

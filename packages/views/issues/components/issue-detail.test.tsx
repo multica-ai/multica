@@ -483,7 +483,7 @@ const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
 const scrollToIndexSpy = vi.hoisted(() => vi.fn());
 const scrollIntoViewIndexSpy = vi.hoisted(() => vi.fn());
 const mockVirtualWindow = vi.hoisted(() => ({
-  enabled: false, delayedViewport: false, lateScrollReset: false, offscreenViewport: false,
+  enabled: false, delayedViewport: false, lateScrollReset: false, offscreenViewport: false, pendingSizeCorrection: false,
   targetId: "", scrollParent: null as HTMLElement | null,
 }));
 
@@ -529,7 +529,7 @@ vi.mock("react-virtuoso", () => ({
       if (mockVirtualWindow.enabled && viewportMeasured.current) setWindowStart(Math.max(0, location.index - 2));
       if (mockVirtualWindow.lateScrollReset && customScrollParent) {
         window.setTimeout(() => { customScrollParent.scrollTop = 0; location.done?.(); }, 80);
-      } else location.done?.();
+      } else if (!mockVirtualWindow.pendingSizeCorrection) location.done?.();
     };
     useImperativeHandle(ref, () => ({
       scrollIntoView: (location: { index: number; done?: () => void }) => {
@@ -557,6 +557,7 @@ vi.mock("react-virtuoso", () => ({
 // with a spy so the deep-link effect's call can be observed.
 beforeEach(() => {
   mockVirtualWindow.enabled = false;
+  mockVirtualWindow.pendingSizeCorrection = false;
   mockVirtualWindow.delayedViewport = false;
   mockVirtualWindow.offscreenViewport = false;
   mockVirtualWindow.lateScrollReset = false;
@@ -2500,7 +2501,9 @@ describe("IssueDetail (shared)", () => {
       { kind: "root", delayedViewport: true, lateScrollReset: false },
       { kind: "reply", delayedViewport: false, lateScrollReset: true },
       { kind: "reply", delayedViewport: false, lateScrollReset: false, offscreenViewport: true },
-    ])("keeps long history virtualized for a $kind (late viewport: $delayedViewport, late scroll: $lateScrollReset, below fold: $offscreenViewport)", async ({ kind, delayedViewport, lateScrollReset, offscreenViewport }) => {
+      { kind: "reply", delayedViewport: false, lateScrollReset: false, pendingSizeCorrection: true },
+    ])("keeps long history virtualized for a $kind (late viewport: $delayedViewport, late scroll: $lateScrollReset, below fold: $offscreenViewport)", async ({ kind, delayedViewport, lateScrollReset, offscreenViewport, pendingSizeCorrection }) => {
+      mockVirtualWindow.pendingSizeCorrection = !!pendingSizeCorrection;
       mockVirtualWindow.enabled = true;
       mockVirtualWindow.delayedViewport = delayedViewport;
       mockVirtualWindow.offscreenViewport = !!offscreenViewport;
