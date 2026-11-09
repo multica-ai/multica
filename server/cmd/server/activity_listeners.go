@@ -262,6 +262,10 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 		}
 
 		if descriptionChanged {
+			details, _ := json.Marshal(map[string]any{
+				"from": payload["prev_description"],
+				"to":   issue.Description,
+			})
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
 				ID:          dbid.NewV7(),
 				WorkspaceID: parseUUID(issue.WorkspaceID),
@@ -269,7 +273,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 				ActorType:   util.StrToText(e.ActorType),
 				ActorID:     optionalUUID(e.ActorID),
 				Action:      "description_updated",
-				Details:     []byte("{}"),
+				Details:     details,
 			})
 			if err != nil {
 				slog.Error("activity: failed to record description change",

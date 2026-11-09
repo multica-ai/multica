@@ -2080,6 +2080,56 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText(/changed priority/i)).toBeInTheDocument();
   });
 
+  it("shows description snapshots as collapsed plain text and ignores legacy details", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "description-legacy",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "description_updated",
+        details: {},
+        created_at: "2026-01-18T00:00:00Z",
+      },
+      {
+        type: "comment",
+        id: "description-separator",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "Reviewed the earlier edit.",
+        parent_id: null,
+        created_at: "2026-01-18T00:00:30Z",
+        updated_at: "2026-01-18T00:00:30Z",
+        comment_type: "comment",
+      },
+      {
+        type: "activity",
+        id: "description-new",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "description_updated",
+        details: {
+          from: "Before <script>alert('no')</script>",
+          to: "After **plain text**",
+        },
+        created_at: "2026-01-18T00:01:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetail();
+
+    const summary = await screen.findByText("View description change");
+    expect(screen.getAllByText("View description change")).toHaveLength(1);
+    const snapshot = summary.closest("details");
+    expect(snapshot).not.toHaveAttribute("open");
+
+    fireEvent.click(summary);
+    expect(snapshot).toHaveAttribute("open");
+    expect(screen.getByText("Before <script>alert('no')</script>")).toBeInTheDocument();
+    expect(screen.getByText("After **plain text**")).toBeInTheDocument();
+    expect(document.querySelector("script")).not.toBeInTheDocument();
+  });
+
   // Duplicate marks (MUL-7349) name another issue; the identifier is a link
   // to it, and a mark removed because its original was deleted is plain text.
   it("links a duplicate mark to the issue it names", async () => {
