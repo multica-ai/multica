@@ -153,3 +153,62 @@ func TestProjectInvalidDateReturns400(t *testing.T) {
 		t.Fatalf("expected 400 for invalid update due_date, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestProjectDateRangeValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		startDate string
+		dueDate   string
+	}{
+		{name: "due date before start date", startDate: "2026-04-02", dueDate: "2026-04-01"},
+		{name: "due date equals start date", startDate: "2026-04-01", dueDate: "2026-04-01"},
+	} {
+		t.Run("create rejects "+tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			testHandler.CreateProject(w, newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+				"title":      "date range validation",
+				"start_date": tc.startDate,
+				"due_date":   tc.dueDate,
+			}))
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.CreateProject(w, newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title":      "partial date range update",
+		"start_date": "2026-05-01",
+		"due_date":   "2026-05-31",
+	}))
+	project := decodeProject(t, w, http.StatusCreated)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, project.ID)
+	})
+
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+	}{
+		{name: "moves due date before existing start date", body: map[string]any{"due_date": "2026-04-30"}},
+		{name: "moves start date after existing due date", body: map[string]any{"start_date": "2026-06-01"}},
+	} {
+		t.Run("update rejects "+tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := withURLParam(newRequest("PUT", "/api/projects/"+project.ID, tc.body), "id", project.ID)
+			testHandler.UpdateProject(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	w = httptest.NewRecorder()
+	req := withURLParam(newRequest("PUT", "/api/projects/"+project.ID, map[string]any{"due_date": nil}), "id", project.ID)
+	testHandler.UpdateProject(w, req)
+	cleared := decodeProject(t, w, http.StatusOK)
+	if cleared.StartDate == nil || *cleared.StartDate != "2026-05-01" || cleared.DueDate != nil {
+		t.Fatalf("clearing due_date changed the effective range: start=%v due=%v", cleared.StartDate, cleared.DueDate)
+	}
+}

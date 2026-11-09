@@ -240,6 +240,14 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 var validProjectStatuses = []string{"planned", "in_progress", "paused", "completed", "cancelled"}
 var validProjectPriorities = []string{"urgent", "high", "medium", "low", "none"}
 
+func validateProjectDateRange(w http.ResponseWriter, startDate, dueDate pgtype.Date) bool {
+	if startDate.Valid && dueDate.Valid && !dueDate.Time.After(startDate.Time) {
+		writeError(w, http.StatusBadRequest, "due_date must be after start_date")
+		return false
+	}
+	return true
+}
+
 // validateProjectEnum writes a 400 and returns false when value is not in
 // allowed; the caller returns immediately on false.
 func validateProjectEnum(w http.ResponseWriter, field, value string, allowed []string) bool {
@@ -347,6 +355,9 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		dueDate = d
+	}
+	if !validateProjectDateRange(w, startDate, dueDate) {
+		return
 	}
 
 	// Pre-validate every resource payload before opening a transaction so an
@@ -617,6 +628,17 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		} else {
 			params.DueDate = pgtype.Date{Valid: false} // explicit null = clear date
 		}
+	}
+	effectiveStartDate := prevProject.StartDate
+	if params.StartDateSet {
+		effectiveStartDate = params.StartDate
+	}
+	effectiveDueDate := prevProject.DueDate
+	if params.DueDateSet {
+		effectiveDueDate = params.DueDate
+	}
+	if !validateProjectDateRange(w, effectiveStartDate, effectiveDueDate) {
+		return
 	}
 	project, err := h.Queries.UpdateProject(r.Context(), params)
 	if err != nil {
