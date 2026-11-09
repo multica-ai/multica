@@ -153,6 +153,14 @@ load_manifest() {
   # shellcheck disable=SC1090
   . "$file"
   [ "$NAME" = "$1" ] || die "Manifest $file declares NAME=$NAME; expected $1."
+  # Run from an agent task, everything launched for this environment loses the
+  # task's MULTICA_* identity (CLEAN_ENV) but still sits under the task's
+  # marker. This tells the CLI why, so its refusal does not call the task's own
+  # marker a leftover to delete. A human's run exports nothing: a marker in
+  # their checkout really can be a leftover.
+  if [ -n "${MULTICA_TASK_ID:-}${MULTICA_AGENT_ID:-}${MULTICA_TASK_CONFIG_ROOT:-}" ]; then
+    export MULTICA_DEV_ENV="$NAME"
+  fi
 }
 
 # Prints nothing (and succeeds) for a missing manifest or key: callers compare
