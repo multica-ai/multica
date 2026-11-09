@@ -52,7 +52,7 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
-import { Calendar } from "@multica/ui/components/ui/calendar";
+import { LazyCalendar } from "@multica/ui/components/ui/lazy-calendar";
 import { Switch } from "@multica/ui/components/ui/switch";
 import {
   Select,
@@ -823,7 +823,8 @@ function DateSubContent({
             }
           />
           <PopoverContent align="start" side="right" className="w-auto gap-0 p-0">
-            <Calendar
+            <LazyCalendar
+              autoFocus
               mode="range"
               selected={range}
               onSelect={(next) => setRange(next)}
