@@ -152,27 +152,45 @@ describe("LoginPage", () => {
   // Email validation
   // -------------------------------------------------------------------------
 
+  it("keeps Continue enabled when the email field is empty", () => {
+    // Continue must stay clickable so Safari autofill (DOM filled, React
+    // state empty) is not deadlocked behind disabled={!email}.
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
+    expect(
+      screen.getByRole("button", { name: /continue/i }),
+    ).not.toBeDisabled();
+  });
+
   it("shows error when submitting with empty email", async () => {
     renderWithI18n(<LoginPage onSuccess={onSuccess} />);
 
-    // The Continue button is disabled when email is empty, so we submit the
-    // form programmatically the same way the component does — via form submit.
-    // Since the button is disabled, we directly call handleSendCode's logic
-    // by removing the required attr and submitting.
     const emailInput = screen.getByLabelText(/email/i);
-    // The input has required + the button is disabled, so we need to type
-    // a space then clear to trigger the empty-email error path.
-    // Actually, the component guards `if (!email)` in handleSendCode.
-    // But the button is disabled when `!email`. Let's verify:
-    const button = screen.getByRole("button", { name: /continue/i });
-    expect(button).toBeDisabled();
+    // HTML required would block submit; strip it so the JS guard is exercised.
+    emailInput.removeAttribute("required");
 
-    // Type an email to enable button, then clear it — button becomes disabled again
     const user = userEvent.setup();
-    await user.type(emailInput, "a");
-    expect(button).not.toBeDisabled();
-    await user.clear(emailInput);
-    expect(button).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Email is required")).toBeInTheDocument();
+    });
+    expect(mockSendCode).not.toHaveBeenCalled();
+  });
+
+  it("submits an autofilled DOM email without React onChange", async () => {
+    mockSendCode.mockResolvedValueOnce(undefined);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
+
+    const emailInput = screen.getByLabelText(/email/i) as HTMLInputElement;
+    // Simulate Safari autofill: mutate the DOM value without React onChange.
+    emailInput.value = "autofill@example.com";
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(mockSendCode).toHaveBeenCalledWith("autofill@example.com");
+    });
   });
 
   // -------------------------------------------------------------------------

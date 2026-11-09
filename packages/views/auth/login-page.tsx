@@ -170,14 +170,30 @@ export function LoginPage({
   const handleSendCode = useCallback(
     async (e?: React.FormEvent) => {
       e?.preventDefault();
-      if (!email) {
+      // iOS Safari / password-manager autofill often fills the DOM without
+      // firing React onChange, so controlled state can stay empty. Prefer
+      // live form/DOM values, then fall back to React state.
+      let resolved = email.trim();
+      const form = e?.currentTarget;
+      if (!resolved && form instanceof HTMLFormElement) {
+        const fromForm = new FormData(form).get("email");
+        if (typeof fromForm === "string") resolved = fromForm.trim();
+      }
+      if (!resolved) {
+        const live = document.getElementById(
+          "login-email",
+        ) as HTMLInputElement | null;
+        resolved = live?.value?.trim() ?? "";
+      }
+      if (!resolved) {
         setError(t(($) => $.common.email_required));
         return;
       }
+      setEmail(resolved);
       setLoading(true);
       setError("");
       try {
-        await useAuthStore.getState().sendCode(email);
+        await useAuthStore.getState().sendCode(resolved);
         setStep("code");
         setCode("");
         setCooldown(60);
@@ -425,14 +441,18 @@ export function LoginPage({
               </AlertDescription>
             </Alert>
           )}
-          <form id="login-form" onSubmit={handleSendCode} className="space-y-4">
+          <form onSubmit={handleSendCode} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="login-email">{t(($) => $.common.email)}</Label>
               <Input
                 id="login-email"
+                name="email"
                 type="email"
+                inputMode="email"
+                autoComplete="email"
                 placeholder={t(($) => $.common.email_placeholder)}
-                value={email}
+                // Uncontrolled so Safari autofill is not wiped by empty React state.
+                defaultValue={email}
                 onChange={(e) => setEmail(e.target.value)}
                 autoFocus
                 required
@@ -441,20 +461,19 @@ export function LoginPage({
             {error && (
               <p className="text-body text-destructive">{error}</p>
             )}
+            <Button
+              type="submit"
+              className="w-full"
+              size="lg"
+              disabled={loading}
+            >
+              {loading
+                ? t(($) => $.signin.sending)
+                : t(($) => $.signin.continue)}
+            </Button>
           </form>
         </CardContent>
         <CardFooter className="flex flex-col gap-3">
-          <Button
-            type="submit"
-            form="login-form"
-            className="w-full"
-            size="lg"
-            disabled={!email || loading}
-          >
-            {loading
-              ? t(($) => $.signin.sending)
-              : t(($) => $.signin.continue)}
-          </Button>
           {(google || onGoogleLogin) && (
             <Button
               type="button"

@@ -97,9 +97,9 @@ export const metadata: Metadata = {
   },
   // Home-screen behaviour: launch without browser chrome, and label the icon
   // "Multica" rather than the long SEO <title>. `capable` renders the
-  // standardised `mobile-web-app-capable` tag — Next 16 no longer emits the
-  // deprecated apple-prefixed spelling, so iOS standalone rides on the
-  // manifest's `display` instead (honoured since iOS 16.4).
+  // standardised `mobile-web-app-capable` tag. Next 16 no longer emits the
+  // apple-prefixed spelling; older Safari still keys standalone launch off
+  // `apple-mobile-web-app-capable`, so re-emit it via `other` below.
   appleWebApp: {
     capable: true,
     title: "Multica",
@@ -107,6 +107,9 @@ export const metadata: Metadata = {
     // (`black-translucent` + viewport-fit=cover) needs env(safe-area-inset-*)
     // padding, which no surface in the app has yet.
     statusBarStyle: "default",
+  },
+  other: {
+    "apple-mobile-web-app-capable": "yes",
   },
   openGraph: {
     type: "website",
