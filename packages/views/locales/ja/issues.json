@@ -729,6 +729,12 @@
   "reply": {
     "placeholder": "返信を残す...",
     "annotations": {
+      "direct_reply": "返信",
+      "direct_comment": "コメントを投稿",
+      "direct_target_deleted": "返信先が削除されました。別のコメントを選ぶ前に、意見をコピーしてください。",
+      "copy_note": "意見をコピー",
+      "note_copied": "意見をコピーしました",
+      "note_copy_failed": "コピーできませんでした。テキストを選択して手動でコピーしてください。",
       "confirm_add": "注釈を追加",
       "save": "注釈を保存",
       "add_comment": "コメントに追加",

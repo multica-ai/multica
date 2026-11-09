@@ -295,7 +295,9 @@ export function DesktopShell() {
                   <AppRail
                     topSlot={<RailTopSpacer />}
                     globalActions={false}
-                    className="hidden pt-0 md:flex"
+                    // The card starts right under the top bar; the 7px
+                    // centres the workspace tile on its header band.
+                    className="hidden pt-[7px] md:flex"
                   />
                 )}
                 {slug && <CompactNavSheet globalActions={false} />}

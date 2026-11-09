@@ -729,6 +729,12 @@
   "reply": {
     "placeholder": "답글 남기기...",
     "annotations": {
+      "direct_reply": "답글",
+      "direct_comment": "댓글 게시",
+      "direct_target_deleted": "답글 대상이 삭제되었습니다. 다른 댓글을 선택하기 전에 의견을 복사하세요.",
+      "copy_note": "의견 복사",
+      "note_copied": "의견을 복사했습니다",
+      "note_copy_failed": "의견을 복사하지 못했습니다. 텍스트를 선택해 직접 복사하세요.",
       "confirm_add": "주석 추가",
       "save": "주석 저장",
       "add_comment": "댓글에 추가",

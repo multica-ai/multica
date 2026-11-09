@@ -987,7 +987,7 @@ export function InboxPage() {
     if (viewLoading) {
       return (
         <div className="flex flex-1 flex-col min-h-0">
-          <div className="flex h-12 shrink-0 items-center pl-5 pr-2">
+          <div className="flex h-12 shrink-0 items-center pl-5 pr-2.5">
             <Skeleton className="h-5 w-16" />
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
@@ -1042,7 +1042,7 @@ export function InboxPage() {
     return (
       <div className="flex min-h-0 flex-1">
         <ListColumn collapsed={listCollapsed} width="list">
-          <div className="flex h-12 shrink-0 items-center pl-5 pr-2">
+          <div className="flex h-12 shrink-0 items-center pl-5 pr-2.5">
             <Skeleton className="h-5 w-16" />
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">

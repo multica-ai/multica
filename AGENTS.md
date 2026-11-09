@@ -13,18 +13,19 @@ Multica is a task management platform where people and agents collaborate on iss
 | Location | Responsibility and constraints |
 | --- | --- |
 | `server/` | Go backend; Chi, sqlc, WebSocket |
-| `packages/core/` | Headless logic, API client, Query hooks, shared Zustand stores. No UI libraries, `react-dom`, `localStorage`, or `process.env`; use `StorageAdapter` for persistence. Lint enforces this outside tests (`packages/core/eslint.config.mjs`). |
+| `packages/core/` | Headless logic, API client, Query hooks, shared Zustand stores. No UI libraries, `react-dom`, `next/*`, or `process.env`. Client persistence goes through `StorageAdapter`; only the default adapter (`platform/storage.ts`) and tab-scoped exception dedupe (`analytics/exception-dedupe.ts`) touch Web Storage. Cookies are only for values the server or Next.js proxy reads. Lint enforces the import, `process.env`, and Web Storage rules outside tests (`packages/core/eslint.config.mjs`). |
 | `packages/ui/` | UI primitives and shared styles. No business logic or `@multica/core` imports. |
-| `packages/views/` | Shared web/desktop pages and business components. No store definitions, `next/*`, or `react-router-dom`; use `NavigationAdapter`, `useNavigation()`, and `<AppLink>`. |
+| `packages/views/` | Shared web/desktop pages and business components. No store definitions, `next/*`, or `react-router-dom`; use `NavigationAdapter`, `useNavigation()`, and `<AppLink>`. Lint enforces the store rule outside tests (`packages/views/eslint.config.mjs`). |
 | `apps/web/` | Next.js routes/layouts and web-only UI. Framework APIs stay here; shared navigation adapters live in `apps/web/platform/`. |
 | `apps/desktop/` | Electron and desktop-only UI/state. Application navigation goes through `apps/desktop/src/renderer/src/platform/`. |
-| `apps/mobile/` | Independent Expo/React Native client: owns UI, state, hooks, providers, i18n, build, and release. Shares core types and pure utilities, including platform-independent schemas. |
+| `apps/mobile/` | Independent Expo/React Native client: owns UI, state, hooks, providers, i18n, build, and release. Shares core types and pure utilities, including platform-independent schemas; runtime imports use the pure module's own subpath, not a barrel that also re-exports hooks or stores (lint-enforced). |
 | `apps/docs/` | Fumadocs documentation site |
 
 - Dependency direction is `views -> core + ui`; core and ui remain independent. Shared packages export raw TypeScript compiled by consuming apps.
 - Extract logic used by both web and desktop into the appropriate shared package. Keep framework/Electron APIs in the app layer; inject platform-specific UI through props/slots.
 - Wire shared features into both web routes and the desktop router or overlay. Reuse existing guards/providers such as `DashboardGuard` in `packages/views/layout/`.
-- Each workspace declares its directly imported external dependencies. Use `catalog:` for shared dependencies; mobile pins Expo/React Native dependencies in its own manifest.
+- Each workspace declares its directly imported external dependencies. A dependency declared by two or more workspaces, or already in the `pnpm-workspace.yaml` catalog, uses `catalog:`; CI runs `scripts/check-dependency-catalog.mjs`, whose allowlist records known drift awaiting an upgrade. Mobile is exempt and pins Expo/React Native-aligned versions in its own manifest.
+- This section is the source for the package-boundary table in `apps/docs/content/docs/developers/conventions*.mdx` (every locale); change them together.
 
 ## Development and Verification
 

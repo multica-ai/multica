@@ -543,6 +543,33 @@ path-derived fallback when it is run outside `make up`.
 
 Log in with `dev@localhost` and `888888`.
 
+#### Scripting Desktop over CDP
+
+Some bugs only reproduce in Electron, so evidence for them has to come from the
+running app driven with real input. Start Desktop with a Chrome DevTools
+Protocol endpoint, then attach Playwright to it:
+
+```bash
+make up C=desktop ARGS="--ephemeral --cdp"
+make env-exec ARGS="-- node scripts/desktop-cdp.mjs --screenshot desktop.png"
+make env-exec ARGS="-- node scripts/desktop-cdp.mjs --record steps.mp4 ./steps.mjs"
+make destroy ARGS="--yes"
+```
+
+`--cdp` allocates a port for the environment, `--remote-debugging-port N`
+picks one, and `--no-cdp` drops it; later `make up` runs keep it. `make status`
+prints the endpoint, and `make status ARGS="--json"` reports `desktop_cdp_port`.
+
+`scripts/desktop-cdp.mjs` attaches to the main window of the already signed-in
+Desktop. A script argument is an ES module whose default export receives
+`{ browser, context, page, env, login, screencast, args }`. Drive it with
+`page.mouse` or locator clicks, which go through Chromium's input pipeline,
+rather than `element.click()` inside `page.evaluate`. `--login`, or `login()`
+from a script, signs `dev@localhost` back in after a step signed out.
+`--record` needs `ffmpeg` to encode; without it the frames and an ffconcat file
+stay in `<file>.frames/`. The helper only disconnects, so the app stays up for
+the next attach.
+
 ### Isolation Guarantee
 
 Nothing in this flow touches the system-installed `multica` or the default
