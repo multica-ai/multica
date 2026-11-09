@@ -140,6 +140,8 @@ describe("appearanceStylesheet", () => {
     const prefs = { ...DEFAULT_APPEARANCE, theme: "github", accent: "violet", highContrast: true } as const;
     const css = appearanceStylesheet(activeTheme(prefs), prefs);
     expect(css).toContain(":root:not(.dark) { --brand: oklch(0.52 0.2 292);");
+    expect(css).toContain("--nav-item-active-color: color-mix(in oklab, var(--brand)");
+    expect(css).toContain("--rail-item-active-background: color-mix(in srgb, var(--brand) 12%, transparent);");
     expect(css).toMatch(/:root:not\(\.dark\), :root\.dark \{ --muted-foreground: color-mix/);
     expect(activeTheme(prefs).css).toMatch(/^\.theme-light \{/);
   });

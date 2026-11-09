@@ -2,7 +2,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ACCENT_COLORS, BUILT_IN_THEMES, type ThemeTokens } from "@multica/core/appearance";
+import { ACCENT_ACTIVE_TEXT, ACCENT_ACTIVE_TINT, ACCENT_COLORS, BUILT_IN_THEMES, type ThemeTokens } from "@multica/core/appearance";
 
 /**
  * Is every tone the product paints text and marks with actually legible, and is
@@ -122,6 +122,20 @@ function oklchToRgb(value: string): Rgb {
     channel(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
     channel(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s),
   ];
+}
+
+/** `color-mix(in oklab, a share, b)` for two alpha-free oklch() colours. */
+function mixOklch(a: string, b: string, share: number): string {
+  const lab = (value: string) => {
+    const match = /^oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*\)$/.exec(value);
+    if (!match) throw new Error(`expected an alpha-free oklch() colour, got "${value}"`);
+    const [l, c, h] = match.slice(1).map(Number) as [number, number, number];
+    return [l, c * Math.cos((h * Math.PI) / 180), c * Math.sin((h * Math.PI) / 180)];
+  };
+  const [x, y] = [lab(a), lab(b)];
+  const [l, p, q] = x.map((v, i) => v * share + y[i]! * (1 - share)) as [number, number, number];
+  const hue = ((Math.atan2(q, p) * 180) / Math.PI + 360) % 360;
+  return `oklch(${l} ${Math.hypot(p, q)} ${hue})`;
 }
 
 function relativeLuminance([r, g, b]: Rgb): number {
@@ -506,6 +520,30 @@ describe("text contrast", () => {
             WCAG_AA_NORMAL_TEXT,
           );
         }
+      }
+    });
+
+    it.each(cases)("every accent keeps active items legible under %s in %s mode", (_name, mode, theme) => {
+      const page = themePalette(mode, theme.tokens[mode]);
+      const frame = layered(page, asDeclarations(theme.frame?.[mode]));
+      const tint = (brand: Rgb, behind: Rgb) =>
+        brand.map((c, i) => Math.round(c * (ACCENT_ACTIVE_TINT / 100) + behind[i]! * (1 - ACCENT_ACTIVE_TINT / 100))) as Rgb;
+      // A theme with its own frame paints the panel itself; otherwise it sits on the shell.
+      const panelBackgrounds = theme.frame?.[mode] ? ["--sidebar"] : ["--app-shell", "--sidebar"];
+      for (const [accent, colors] of Object.entries(ACCENT_COLORS)) {
+        const brand = oklchToRgb(colors[mode]);
+        const sidebarText = oklchToRgb(mixOklch(colors[mode], resolveToken(page, "--foreground"), ACCENT_ACTIVE_TEXT / 100));
+        for (const background of panelBackgrounds) {
+          const ratio = contrastRatio(sidebarText, tint(brand, oklchToRgb(resolveToken(page, background))));
+          expect(Number(ratio.toFixed(2)), `${accent} sidebar item on ${background} is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(
+            WCAG_AA_NORMAL_TEXT,
+          );
+        }
+        const railText = oklchToRgb(resolveToken(frame, "--sidebar-accent-foreground"));
+        const ratio = contrastRatio(railText, tint(brand, oklchToRgb(resolveToken(frame, "--app-shell"))));
+        expect(Number(ratio.toFixed(2)), `${accent} rail item is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(
+          WCAG_AA_NORMAL_TEXT,
+        );
       }
     });
   });

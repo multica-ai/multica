@@ -66,6 +66,14 @@ export type Density = (typeof DENSITIES)[number];
 export const ACCENTS = ["theme", "blue", "violet", "green", "orange", "pink", "graphite"] as const;
 export type Accent = (typeof ACCENTS)[number];
 
+/**
+ * An accented active item: --brand at this share over what sits behind it.
+ * Sidebar items also take --brand mixed toward --foreground as their text, so
+ * it stays legible on that tint; rail items keep the frame's own text.
+ */
+export const ACCENT_ACTIVE_TINT = 12;
+export const ACCENT_ACTIVE_TEXT = 70;
+
 /** Light and dark values of --brand per accent, and the text that sits on it. */
 export const ACCENT_COLORS: Record<
   Exclude<Accent, "theme">,
@@ -358,6 +366,16 @@ export function appearanceStylesheet(theme: Theme, prefs: AppearancePreferences)
     parts.push(
       `:root:not(.dark) { --brand: ${accent.light}; --brand-foreground: oklch(0.985 0 0); }`,
       `:root.dark { --brand: ${accent.dark}; --brand-foreground: ${accent.darkForeground ?? "oklch(0.985 0 0)"}; }`,
+    );
+    const tint = `color-mix(in srgb, var(--brand) ${ACCENT_ACTIVE_TINT}%, transparent)`;
+    const text = `color-mix(in oklab, var(--brand) ${ACCENT_ACTIVE_TEXT}%, var(--foreground))`;
+    parts.push(
+      `${BOTH_MODES} { ${declare({
+        "--nav-item-active-background": tint,
+        "--nav-item-active-color": text,
+        "--rail-item-active-background": tint,
+        "--ring": "var(--brand)",
+      })} }`,
     );
   }
   if (prefs.highContrast) {
