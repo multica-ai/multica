@@ -29,6 +29,10 @@ import { AppLink, currentPath, useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
+import { LinksSection } from "../../links/components/links-section";
+import { linkListOptions, findHomeLink } from "@multica/core/links";
+import { EmbeddedLinkFrame } from "../../links/embedded-link-page";
+import { PageHeader } from "../../layout/page-header";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
 import { ProjectWorkflowControl } from "../../workflows/project-workflow-row";
@@ -117,6 +121,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const statusLabels = useProjectStatusLabels();
   const priorityLabels = useProjectPriorityLabels();
   const wsId = useWorkspaceId();
+  const { t: tLinks } = useT("settings");
+  const { data: projectLinks = [], isLoading: linksLoading } = useQuery(linkListOptions(wsId, projectId));
+  const homeLink = findHomeLink(projectLinks);
+  const [issuesProject, setIssuesProject] = useState<string | null>(null);
+  const showHome = !!homeLink && issuesProject !== projectId;
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const userId = useAuthStore((s) => s.user?.id);
@@ -249,7 +258,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     });
   }, [project, deleteProject, router, wsPaths, t]);
 
-  if (isLoading || deleted) {
+  if (isLoading || linksLoading || deleted) {
     return (
       <div className="mx-auto w-full max-w-4xl px-8 py-10 space-y-4">
         <Skeleton className="h-5 w-32" />
@@ -514,11 +523,36 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
       {/* Resources */}
       <ProjectResourcesSection projectId={projectId} />
+      <LinksSection projectId={projectId} />
     </div>
   );
 
   return (
     <>
+    {homeLink && (
+      <PageHeader>
+        <h1 className="min-w-0 flex-1 truncate text-body font-medium">{project.title}</h1>
+        <div role="group" aria-label={tLinks(($) => $.links.home_page)} className="flex gap-1">
+          <Button
+            size="sm"
+            variant={showHome ? "secondary" : "ghost"}
+            aria-pressed={showHome}
+            onClick={() => setIssuesProject(null)}
+          >
+            {tLinks(($) => $.links.home)}
+          </Button>
+          <Button
+            size="sm"
+            variant={!showHome ? "secondary" : "ghost"}
+            aria-pressed={!showHome}
+            onClick={() => setIssuesProject(projectId)}
+          >
+            {tLinks(($) => $.links.issues)}
+          </Button>
+        </div>
+      </PageHeader>
+    )}
+    {showHome ? <EmbeddedLinkFrame link={homeLink} header={false} /> : (
     <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
       <ResizablePanel id="content" minSize="50%">
         <div ref={rightSidebarShortcutTargetRef} className="flex h-full flex-col">
@@ -625,6 +659,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           </Sheet>
         )}
       </ResizablePanelGroup>
+    )}
 
       {/* Delete confirmation */}
       {canDelete && (

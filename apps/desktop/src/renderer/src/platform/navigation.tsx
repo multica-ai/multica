@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   NavigationProvider,
   type LinkClickIntent,
@@ -13,6 +14,7 @@ import {
   useActiveTabUrl,
 } from "@/stores/tab-store";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
+import { selectWorkspaceEntry } from "./workspace-selection";
 import {
   handOffToWorkspaceWindow,
   openWorkspaceInNewWindow,
@@ -81,20 +83,21 @@ function tryRouteToOverlay(path: string): boolean {
  * full workspace URL, and on desktop we translate "target slug differs
  * from active" into "switch the tab-group that's visible in the TabBar".
  *
- * The target's bare Issues root (what the workspace switchers send, and where
- * web lands) resumes the workspace's last active tab instead, or Issues if it
- * has none. Any deeper path opens exactly that path. When another window
+ * Issues resumes the workspace's last active tab; start selects its home if
+ * configured. Any deeper path opens exactly that path. When another window
  * already shows the target workspace, that window takes the navigation.
  */
-function tryRouteToOtherWorkspace(path: string): boolean {
+function tryRouteToOtherWorkspace(path: string, client: QueryClient): boolean {
   const targetSlug = workspaceSlugForPath(path);
   if (!targetSlug) return false;
   const { activeWorkspaceSlug, switchWorkspace } = useTabStore.getState();
   if (targetSlug === activeWorkspaceSlug) return false;
-  const resume = path === paths.workspace(targetSlug).issues();
+  const isStart = path === paths.workspace(targetSlug).start();
+  const resume = path === paths.workspace(targetSlug).issues() || isStart;
   const openPath = resume ? undefined : path;
   if (handOffToWorkspaceWindow(targetSlug, openPath)) return true;
-  switchWorkspace(targetSlug, openPath);
+  if (isStart) void selectWorkspaceEntry(client, targetSlug);
+  else switchWorkspace(targetSlug, openPath);
   return true;
 }
 
@@ -174,6 +177,7 @@ export function DesktopNavigationProvider({
   children: React.ReactNode;
 }) {
   const appUrl = requireRuntimeAppUrl("DesktopNavigationProvider");
+  const client = useQueryClient();
   // The active session's url IS the location. Primitive subscription: this
   // only re-renders when the active url actually changes.
   const activeUrl = useActiveTabUrl();
@@ -197,13 +201,13 @@ export function DesktopNavigationProvider({
         const store = useTabStore.getState();
         const active = getActiveTab(store);
         if (active && active.url === path) return;
-        if (tryRouteToOtherWorkspace(path)) return;
+        if (tryRouteToOtherWorkspace(path, client)) return;
         if (tryRouteToPinnedNewTab(path)) return;
         store.navigateActiveSession(path);
       },
       replace: (path: string) => {
         if (tryRouteToOverlay(path)) return;
-        if (tryRouteToOtherWorkspace(path)) return;
+        if (tryRouteToOtherWorkspace(path, client)) return;
         useTabStore.getState().navigateActiveSession(path, { replace: true });
       },
       back: () => {
@@ -253,7 +257,7 @@ export function DesktopNavigationProvider({
       workspacesInOtherWindows: () => [...otherWindowWorkspaces()],
       getShareableUrl: (path: string) => `${appUrl}${path}`,
     }),
-    [appUrl, location],
+    [appUrl, client, location],
   );
 
   return <NavigationProvider value={adapter}>{children}</NavigationProvider>;

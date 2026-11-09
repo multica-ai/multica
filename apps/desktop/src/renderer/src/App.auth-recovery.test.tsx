@@ -15,15 +15,16 @@ const state = vi.hoisted(() => ({
 
 const tabStore = vi.hoisted(() => ({
   activeWorkspaceSlug: "acme" as string | null,
-  byWorkspace: {},
+  byWorkspace: {} as Record<string, { tabs: { url: string }[] }>,
   closeActiveTab: vi.fn(),
   reset: vi.fn(),
   switchWorkspace: vi.fn(),
   validateWorkspaceSlugs: vi.fn(),
 }));
 
-vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ setQueryData: vi.fn() }),
+vi.mock("@tanstack/react-query", async (original) => ({
+  ...await original<typeof import("@tanstack/react-query")>(),
+  useQueryClient: () => ({ setQueryData: vi.fn(), getQueryData: () => [] }),
 }));
 
 vi.mock("@multica/core/platform", () => ({
@@ -61,7 +62,8 @@ vi.mock("@multica/core/api", () => ({
   },
 }));
 
-vi.mock("@multica/core/paths", () => ({
+vi.mock("@multica/core/paths", async (original) => ({
+  ...await original<typeof import("@multica/core/paths")>(),
   useHasOnboarded: () => true,
 }));
 
@@ -160,6 +162,8 @@ beforeEach(() => {
   state.refetchWorkspaceList.mockReset();
   state.workspaceListUnavailable = false;
   tabStore.activeWorkspaceSlug = "acme";
+  tabStore.byWorkspace = {};
+  tabStore.switchWorkspace.mockReset();
 
   Object.assign(window, {
     daemonAPI: {
@@ -189,6 +193,21 @@ beforeEach(() => {
 });
 
 describe("App main-window auth recovery", () => {
+  it.each([false, true])("initial workspace selection resumes an existing group (exists=%s)", (exists) => {
+    tabStore.activeWorkspaceSlug = null;
+    if (exists) tabStore.byWorkspace.acme = { tabs: [{ url: "/acme/issues/ACME-1" }] };
+    render(<App />);
+    expect(tabStore.switchWorkspace).toHaveBeenCalledWith("acme", exists ? undefined : "/acme/start");
+  });
+
+  it("applies entry policy once to the persisted active workspace too", () => {
+    tabStore.byWorkspace.acme = { tabs: [{ url: "/acme/issues/ACME-1" }] };
+    const view = render(<App />);
+    expect(tabStore.switchWorkspace).toHaveBeenCalledWith("acme", undefined);
+    view.rerender(<App />);
+    expect(tabStore.switchWorkspace).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps auth recovery ahead of the desktop shell while the session recovers", () => {
     state.auth.status = "recovering";
 

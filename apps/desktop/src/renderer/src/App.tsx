@@ -7,6 +7,7 @@ import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useWorkspaceList } from "@multica/core/workspace";
 import { api } from "@multica/core/api";
 import { useHasOnboarded } from "@multica/core/paths";
+import { selectWorkspaceEntry } from "./platform/workspace-selection";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
@@ -282,22 +283,27 @@ function AppContent() {
   }, [user, workspaceListReady, wsCount, workspaces, hasOnboarded, qc]);
 
 
+  const initialWorkspaceSelected = useRef(false);
   // Validate persisted tab state against the current user's workspace list,
-  // and pick an active workspace if none is set. Runs in useLayoutEffect
-  // (synchronously after render, before paint) rather than the render
+  // and apply entry policy once, including the persisted active workspace.
+  // Runs in useLayoutEffect (before paint) rather than the render
   // phase — the original render-phase pattern triggered React's
   // "Cannot update a component while rendering a different component"
   // warning because `switchWorkspace` is a Zustand setState that the
-  // TabBar is subscribed to. useLayoutEffect flushes both renders before
-  // the user sees anything, so there's no visible flicker.
+  // TabBar is subscribed to. Resume is synchronous; a configured home is
+  // selected after the bounded links lookup without blocking the shell.
   //
   // Gate on authoritative data: pending and initial errors expose no data,
   // while a failed background refetch retains the last successful list.
   useLayoutEffect(() => {
+    if (!user) {
+      initialWorkspaceSelected.current = false;
+      return;
+    }
     if (!workspaceListReady) return;
     const slugs = workspaces.map((w) => w.slug);
     useTabStore.getState().validateWorkspaceSlugs(new Set(slugs));
-    const { activeWorkspaceSlug, switchWorkspace } = useTabStore.getState();
+    const { activeWorkspaceSlug } = useTabStore.getState();
     if (slugs.length === 0) return;
     const target = resolveWindowWorkspace(
       slugs,
@@ -305,8 +311,11 @@ function AppContent() {
       launchWorkspaceSlug(),
       otherWindowWorkspaces(),
     );
-    if (target && target !== activeWorkspaceSlug) switchWorkspace(target);
-  }, [workspaces, workspaceListReady]);
+    if (target && (target !== activeWorkspaceSlug || !initialWorkspaceSelected.current)) {
+      initialWorkspaceSelected.current = true;
+      void selectWorkspaceEntry(qc, target);
+    }
+  }, [user, workspaces, workspaceListReady, qc]);
 
   // null = undecided (pre-login or list hasn't settled yet)
   // true  = session started with zero workspaces; next transition to >=1 triggers restart

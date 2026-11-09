@@ -120,6 +120,17 @@ export class TestApiClient {
     return res.json();
   }
 
+  async getLinks(projectId?: string): Promise<{ id: string; name: string }[]> {
+    const res = await this.authedFetch(`/api/links${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`);
+    if (!res.ok) throw new Error(`list links failed: ${res.status}`);
+    return (await res.json()).links;
+  }
+
+  async deleteLink(id: string) {
+    const res = await this.authedFetch(`/api/links/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!res.ok && res.status !== 404) throw new Error(`delete link failed: ${res.status}`);
+  }
+
   setWorkspaceId(id: string) {
     this.workspaceId = id;
   }

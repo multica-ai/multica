@@ -116,7 +116,7 @@ describe("RailWorkspaces", () => {
     const items = within(menu).getAllByRole("menuitem").filter((el) => el.getAttribute("href") !== "/workspaces/new");
     expect(items.map((el) => el.textContent?.slice(1))).toEqual(["WS 2", "WS 3", "WS 4", "WS 5", "WS 6", "Active WS"]);
     expect(within(menu).getByRole("menuitem", { name: /Active WS$/ })).toHaveAttribute("aria-current", "page");
-    expect(within(menu).getByRole("menuitem", { name: /WS 3$/ })).toHaveAttribute("href", "/ws3/issues");
+    expect(within(menu).getByRole("menuitem", { name: /WS 3$/ })).toHaveAttribute("href", "/ws3/start");
   });
 
   it("marks pinned workspaces and offers a pin control without navigating", async () => {
@@ -124,8 +124,8 @@ describe("RailWorkspaces", () => {
     state.summary = [{ workspace_id: "ws-2", count: 1 }];
     renderWithI18n(<RailWorkspaces />);
     const menu = await openMenu();
-    const rows = within(menu).getAllByRole("menuitem").filter((item) => item.getAttribute("href")?.endsWith("/issues"));
-    expect(rows.map((item) => item.getAttribute("href"))).toEqual(["/ws2/issues", "/active/issues", "/ws3/issues"]);
+    const rows = within(menu).getAllByRole("menuitem").filter((item) => item.getAttribute("href") !== "/workspaces/new");
+    expect(rows.map((item) => item.getAttribute("href"))).toEqual(["/ws2/start", "/active/start", "/ws3/start"]);
     const pinned = within(menu).getByRole("menuitem", { name: /WS 2/ });
     expect(pinned.querySelector(".text-brand")).toBeInTheDocument();
     const button = within(pinned).getByRole("button", { name: "Unpin workspace" });

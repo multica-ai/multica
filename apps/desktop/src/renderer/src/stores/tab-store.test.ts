@@ -35,6 +35,11 @@ describe("sanitizeTabPath", () => {
   it("passes through valid workspace-scoped paths", () => {
     expect(sanitizeTabPath("/acme/issues")).toBe("/acme/issues");
     expect(sanitizeTabPath("/my-team/projects/abc")).toBe("/my-team/projects/abc");
+    expect(sanitizeTabPath("/acme/links/id")).toBe("/acme/links/id");
+  });
+
+  it("preserves embedded links restored for a reserved-name workspace", () => {
+    expect(sanitizeTabPath("/links/links/id", "links")).toBe("/links/links/id");
   });
 
   it("rejects paths whose first segment is a reserved slug (missing workspace prefix)", () => {
@@ -50,9 +55,9 @@ describe("sanitizeTabPath", () => {
     expect(sanitizeTabPath("/project-x/inbox")).toBe("/project-x/inbox");
   });
 
-  it("normalizes a bare workspace url to its default surface (replaces the in-router index redirect)", () => {
+  it("keeps upstream bare-slug behavior: Issues, not workspace home", () => {
     expect(sanitizeTabPath("/acme")).toBe("/acme/issues");
-    expect(sanitizeTabPath("/acme?welcome=1")).toBe("/acme/issues?welcome=1");
+    expect(sanitizeTabPath("/acme?welcome=1#hello")).toBe("/acme/issues?welcome=1#hello");
   });
 });
 
