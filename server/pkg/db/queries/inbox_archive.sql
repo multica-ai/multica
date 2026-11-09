@@ -91,7 +91,10 @@ SELECT sqlc.embed(i), selected.issue_status, selected.issue_priority,
        ARRAY(SELECT il.label_id::text FROM issue_to_label il
              WHERE iss.id IS NOT NULL AND il.issue_id = iss.id
              ORDER BY il.label_id)::text[] AS issue_label_ids,
-       COALESCE(anchor.comment_id, '')::text AS comment_id
+       -- The notification's own comment wins: a filter can pick an older row
+       -- (a mention of C1) under a newer comment (C2). The group's newest
+       -- anchor only fills rows that point at no comment.
+       COALESCE(NULLIF(i.details->>'comment_id', ''), anchor.comment_id, '')::text AS comment_id
 FROM selected
 JOIN inbox_item i ON i.id = selected.id
 LEFT JOIN issue iss ON iss.id = i.issue_id AND iss.workspace_id = i.workspace_id

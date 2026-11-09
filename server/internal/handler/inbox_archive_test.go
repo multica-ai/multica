@@ -68,6 +68,37 @@ func TestArchivedInboxPageBeyond200(t *testing.T) {
 	}
 }
 
+func TestArchivedInboxMatchedNotificationKeepsItsCommentAnchor(t *testing.T) {
+	ws := dbfx.Workspace(t, "Archive anchors", "archive-anchor-"+uuid.NewString())
+	dbfx.Member(t, ws, testUserID, "owner")
+	issue := dbfx.Issue(t, "Anchored", testutil.Cols{"workspace_id": ws})
+	c1, c2 := uuid.NewString(), uuid.NewString()
+	old := time.Now().UTC().Add(-time.Hour)
+	insert := func(kind string, created time.Time, comment string) string {
+		return dbfx.Insert(t, "inbox_item", testutil.Cols{
+			"workspace_id": ws, "recipient_type": "member", "recipient_id": testUserID,
+			"type": kind, "severity": "info", "title": "Anchored", "issue_id": issue,
+			"archived": true, "created_at": created, "details": `{"comment_id":"` + comment + `"}`,
+		})
+	}
+	mention := insert("mentioned", old, c1)
+	newest := insert("new_comment", old.Add(time.Minute), c2)
+	get := func(query string) archivedInboxPageResponse {
+		var page archivedInboxPageResponse
+		testutil.Call(t, inboxWorkspaceHandler(testHandler.ListArchivedInboxPage), inboxRequest(http.MethodGet, "/api/inbox/archived/page?"+query, ws)).Want(http.StatusOK).JSON(&page)
+		return page
+	}
+	for _, query := range []string{"types=mention", "group_id=" + issue + "&types=mention"} {
+		page := get(query)
+		if len(page.Items) != 1 || page.Items[0].ID != mention || string(page.Items[0].Details) != `{"comment_id":"`+c1+`"}` {
+			t.Fatalf("%s: mention lost its own comment: %+v", query, page.Items)
+		}
+	}
+	if page := get(""); len(page.Items) != 1 || page.Items[0].ID != newest || string(page.Items[0].Details) != `{"comment_id":"`+c2+`"}` {
+		t.Fatalf("unfiltered group did not show the newest comment: %+v", page.Items)
+	}
+}
+
 func TestArchivedInboxFiltersAndLookupUseLatestGroup(t *testing.T) {
 	ws := dbfx.Workspace(t, "Archive filters", "archive-filter-"+uuid.NewString())
 	dbfx.Member(t, ws, testUserID, "owner")

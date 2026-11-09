@@ -226,11 +226,26 @@ export function InboxPage() {
   const selectedOnPage = viewItems.find((i) => (i.issue_id ?? i.id) === selectedKey);
   // A deep link can point beyond every loaded page. Resolve its group directly
   // without adding it to the cursor chain or mistaking a page miss for a 404.
+  // It asks with the view's filters, so the server answers with the group's
+  // newest MATCHING notification — the row the list showed — rather than its
+  // newest one. Unread is left out: the open row is exempt from it (MUL-8073).
+  const lookupFilters = useMemo(() => ({ ...archiveFilters, unreadOnly: false }), [archiveFilters]);
+  const lookupFiltered = inboxFilterCount(lookupFilters) > 0;
+  const lookupEnabled = isArchivedView && !!selectedKey && !selectedOnPage && !archivedLoading && !archivedError;
   const lookup = useQuery({
+    ...archivedInboxLookupOptions(wsId, selectedKey, lookupFilters),
+    enabled: lookupEnabled,
+  });
+  // A filtered lookup that comes back empty cannot tell a filtered-out group
+  // from a missing one. Ask without filters only then, so a filtered-out deep
+  // link clears the selection instead of redirecting to the issue page.
+  const lookupMissed = lookupFiltered && lookup.isSuccess && !lookup.isPlaceholderData && lookup.data.items.length === 0;
+  const presence = useQuery({
     ...archivedInboxLookupOptions(wsId, selectedKey),
-    enabled: isArchivedView && !!selectedKey && !selectedOnPage && !archivedLoading && !archivedError,
+    enabled: lookupEnabled && lookupMissed,
   });
   const lookupItems = useMemo(() => deduplicateArchivedInboxItems(lookup.data?.items ?? []), [lookup.data]);
+  const presenceItems = lookupMissed ? presence.data?.items ?? [] : [];
   const selectionItems = useMemo(() => {
     if (!isArchivedView || selectedOnPage) return filteredItems;
     return deduplicateArchivedInboxItems([
@@ -251,7 +266,9 @@ export function InboxPage() {
     setInboxZeroRises(prevInboxZeroCount > 0 && inboxZeroCount === 0);
   }
   const selected = selectionItems.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
-  const selectedInView = selectedOnPage ?? (isArchivedView ? lookupItems.find((i) => (i.issue_id ?? i.id) === selectedKey) : null);
+  const selectedInView = selectedOnPage ?? (isArchivedView
+    ? [...lookupItems, ...presenceItems].find((i) => (i.issue_id ?? i.id) === selectedKey)
+    : null);
   const selectionFilteredOut = !!selectedKey && !!selectedInView && !selected;
 
   // What the DETAIL pane shows, one React transition behind the click.
@@ -321,8 +338,8 @@ export function InboxPage() {
   // pending/error states only block resolution of the off-page selection.
   const viewLoading = isArchivedView ? archivedLoading : loading;
   const needsLookup = isArchivedView && !!selectedKey && !selectedOnPage;
-  const lookupLoading = needsLookup && lookup.isLoading;
-  const lookupError = needsLookup && lookup.isError && !selected;
+  const lookupLoading = needsLookup && (lookup.isLoading || presence.isLoading);
+  const lookupError = needsLookup && (lookup.isError || presence.isError) && !selected;
 
   // Shared inbox links (?issue=<id>) may point to notifications not in this
   // user's inbox (archived, or never received). Fall back to the issue page
@@ -400,7 +417,7 @@ export function InboxPage() {
       if (isArchivedView && selected) {
         // The unread page drops this group on refetch. Seed its lookup before
         // the mutation so cache patches, rollback and deletion apply to it too.
-        queryClient.setQueryData(archivedInboxLookupOptions(wsId, selectedKey).queryKey, {
+        queryClient.setQueryData(archivedInboxLookupOptions(wsId, selectedKey, lookupFilters).queryKey, {
           items: [selected], hasMore: false, nextCursor: null,
         });
       }
@@ -413,7 +430,7 @@ export function InboxPage() {
             : t(($) => $.errors.mark_read_failed),
         ),
     });
-  }, [selectedId, selectedRead, selectedKey, selected, filters.unreadOnly, isArchivedView, queryClient, wsId, markReadMutate, t]);
+  }, [selectedId, selectedRead, selectedKey, selected, filters.unreadOnly, isArchivedView, queryClient, wsId, lookupFilters, markReadMutate, t]);
 
   // Release the guards as soon as the selection moves off their row.
   useEffect(() => {
@@ -806,7 +823,7 @@ export function InboxPage() {
           <p className="flex-1 text-caption text-muted-foreground">
             {t(($) => $.errors.archived_lookup_failed)}
           </p>
-          <Button variant="outline" size="sm" disabled={lookup.isFetching} onClick={() => void lookup.refetch()}>
+          <Button variant="outline" size="sm" disabled={lookup.isFetching || presence.isFetching} onClick={() => void (lookup.isError ? lookup.refetch() : presence.refetch())}>
             {t(($) => $.list.retry)}
           </Button>
         </div>

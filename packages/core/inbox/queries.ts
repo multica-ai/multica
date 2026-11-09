@@ -66,11 +66,19 @@ export function archivedInboxPagesOptions(wsId: string, filters: ArchivedInboxFi
 }
 
 export function archivedInboxLookupOptions(wsId: string, groupId: string, filters: ArchivedInboxFilters = EMPTY_INBOX_FILTERS) {
+  const prefix = inboxKeys.lookup(wsId);
   return queryOptions({
-    queryKey: [...inboxKeys.lookup(wsId), groupId, normalizedInboxFilters(filters)],
+    queryKey: [...prefix, groupId, normalizedInboxFilters(filters)],
     queryFn: ({ signal }) => api.listArchivedInboxPage(filters, { groupId, signal }),
     enabled: !!groupId,
     retry: false,
+    // A filter change re-asks for the same group. Its last answer stays up
+    // meanwhile, so the open row is judged by the new filters at once instead
+    // of the selection hanging on the request.
+    placeholderData: (previousData, previousQuery) =>
+      isSameWorkspace(previousQuery?.queryKey, wsId) && previousQuery?.queryKey[prefix.length] === groupId
+        ? previousData
+        : undefined,
   });
 }
 
