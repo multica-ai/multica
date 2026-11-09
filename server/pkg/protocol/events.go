@@ -138,6 +138,13 @@ const (
 	// member: it exists so their other devices follow along.
 	EventIssueViewPreferenceChanged = "issue_view_preference:changed"
 
+	EventDocCreated       = "doc:created"
+	EventDocUpdated       = "doc:updated"
+	EventDocDeleted       = "doc:deleted"
+	EventDocFolderCreated = "doc_folder:created"
+	EventDocFolderUpdated = "doc_folder:updated"
+	EventDocFolderDeleted = "doc_folder:deleted"
+
 	// Pin events
 	EventPinCreated   = "pin:created"
 	EventPinDeleted   = "pin:deleted"
