@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
+import { useAuthStore } from "@multica/core/auth";
 import { useConfigStore } from "@multica/core/config";
 import {
   workspaceKeys,
@@ -27,6 +27,8 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Loader2 } from "@multica/ui/icons";
 import { CliCallbackError } from "@/features/auth/cli-callback-error";
 import { setLoggedInCookie } from "@/features/auth/auth-cookie";
+import { readLoginReturnTo, rememberGoogleReturnTo, resolveReturnTo } from "@/features/auth/return-to";
+import { isLegacyWorkspacePath } from "@/lib/legacy-workspace-path";
 import Link from "next/link";
 import { LoginPage, validateCliCallback } from "@multica/views/auth";
 import { useT } from "@multica/views/i18n";
@@ -76,7 +78,7 @@ function LoginPageContent() {
   // "/issues" default — if `next` is absent we decide after login based on
   // the user's workspace list. Sanitize first so a crafted `?next=https://evil`
   // cannot bounce the user off-origin after a successful login.
-  const nextUrl = sanitizeNextUrl(searchParams.get("next"));
+  const nextUrl = readLoginReturnTo(searchParams.get("next"));
 
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
   const [desktopError, setDesktopError] = useState("");
@@ -122,7 +124,7 @@ function LoginPageContent() {
     // replace to /workspaces/new. handleSuccess owns post-login navigation;
     // this effect only serves visitors who arrived already authenticated.
     if (settledLoggedOutRef.current) return;
-    if (nextUrl) {
+    if (nextUrl && !isLegacyWorkspacePath(nextUrl)) {
       router.replace(nextUrl);
       return;
     }
@@ -134,7 +136,7 @@ function LoginPageContent() {
     void qc
       .ensureQueryData(workspaceListOptions())
       .catch(() => [] as Workspace[])
-      .then((list) => resolveLoggedInDestination(qc, hasOnboarded, list))
+      .then((list) => resolveReturnTo(nextUrl, list) ?? resolveLoggedInDestination(qc, hasOnboarded, list))
       .then((dest) => router.replace(dest));
   }, [isLoading, user, router, nextUrl, cliCallbackRaw, isDesktopHandoff, hasOnboarded, qc]);
 
@@ -143,29 +145,28 @@ function LoginPageContent() {
     // was captured before login completed and would be stale here.
     const currentUser = useAuthStore.getState().user;
     const onboarded = currentUser?.onboarded_at != null;
-    if (nextUrl) {
-      router.push(nextUrl);
-      return;
-    }
     const list = qc.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
-    router.push(await resolveLoggedInDestination(qc, onboarded, list));
+    router.push(resolveReturnTo(nextUrl, list) ?? await resolveLoggedInDestination(qc, onboarded, list));
   };
 
-  // Build Google OAuth state: encode platform, next URL, and CLI callback
-  // params so the callback can redirect to the right place after login.
+  // Build Google OAuth state when the user starts sign-in so the original URL
+  // can stay in this browser tab, with only its reference going to Google.
   // CLI callback/state must survive the Google OAuth round-trip so the
   // post-login callback page can redirect the JWT back to the CLI's local
   // HTTP listener (critical for headless / WSL2 environments).
-  const googleState = [
-    platform === "desktop" ? "platform:desktop" : "",
-    nextUrl ? `next:${nextUrl}` : "",
-    cliCallbackRaw && validateCliCallback(cliCallbackRaw)
-      ? `cli_callback:${encodeURIComponent(cliCallbackRaw)}`
-      : "",
-    cliState ? `cli_state:${encodeURIComponent(cliState)}` : "",
-  ]
-    .filter(Boolean)
-    .join(",") || undefined;
+  const googleState = () => {
+    const nextRef = nextUrl && !cliCallbackRaw && !isDesktopHandoff
+      ? rememberGoogleReturnTo(nextUrl)
+      : undefined;
+    return [
+      platform === "desktop" ? "platform:desktop" : "",
+      nextRef ? `next_ref:${nextRef}` : "",
+      cliCallbackRaw && validateCliCallback(cliCallbackRaw)
+        ? `cli_callback:${encodeURIComponent(cliCallbackRaw)}`
+        : "",
+      cliState ? `cli_state:${encodeURIComponent(cliState)}` : "",
+    ].filter(Boolean).join(",") || undefined;
+  };
 
   if (invalidCliCallback) return <CliCallbackError />;
 
