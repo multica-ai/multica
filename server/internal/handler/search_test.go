@@ -39,6 +39,9 @@ func TestBuildSearchQuery_SingleTerm(t *testing.T) {
 	if !strings.Contains(query, "NOT (i.status = ANY(") {
 		t.Error("query should exclude the expanded terminal status keys when includeClosed=false")
 	}
+	if !strings.Contains(query, "AND EXISTS (SELECT 1 FROM issue i WHERE i.id = c.issue_id") {
+		t.Error("comment_matches should prune terminal-issue comments via EXISTS when includeClosed=false")
+	}
 	if strings.Contains(query, "issue_effective_status") {
 		t.Error("query should not resolve status categories once per issue row")
 	}
@@ -196,10 +199,13 @@ func TestBuildSearchQuery_WithNumber(t *testing.T) {
 }
 
 func TestBuildSearchQuery_IncludeClosed(t *testing.T) {
-	query, _ := buildSearchQuery("test", []string{"test"}, 0, false, true, nil)
+	query, _ := buildSearchQuery("test", []string{"test"}, 0, false, true, []string{"done", "cancelled"})
 
 	if strings.Contains(query, "i.status = ANY(") {
 		t.Error("query should not exclude done/cancelled when includeClosed=true")
+	}
+	if strings.Contains(query, "EXISTS (SELECT 1 FROM issue i") {
+		t.Error("query should not add an issue EXISTS check to comment_matches when includeClosed=true")
 	}
 }
 
