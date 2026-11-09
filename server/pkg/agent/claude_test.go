@@ -112,7 +112,8 @@ func TestClaudeHandleUserToolResult(t *testing.T) {
 		}),
 	}
 
-	if b.handleUser(msg, ch) {
+	turn := b.handleUser(msg, ch)
+	if turn.sawAsyncLaunch {
 		t.Fatal("did not expect async launch in ordinary tool result")
 	}
 
@@ -123,6 +124,22 @@ func TestClaudeHandleUserToolResult(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected message on channel")
+	}
+}
+
+func TestClaudeHandleUserTracksFailedAndCancelledToolResults(t *testing.T) {
+	t.Parallel()
+
+	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+	msg := claudeSDKMessage{
+		Type:    "user",
+		Message: json.RawMessage(`{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-cancelled","is_error":true,"toolDenialKind":"cancelled","content":"cancelled"},{"type":"tool_result","tool_use_id":"call-ok","is_error":false,"content":"ok"}]}`),
+	}
+
+	turn := b.handleUser(msg, ch)
+	if turn.toolResultCount != 2 || turn.toolResultErrorCount != 1 || turn.cancelledToolResultCount != 1 {
+		t.Fatalf("tool result summary = %+v", turn)
 	}
 }
 
@@ -237,7 +254,7 @@ func TestClaudeHandleUserDetectsAsyncLaunchedToolResult(t *testing.T) {
 		}),
 	}
 
-	if !b.handleUser(msg, ch) {
+	if !b.handleUser(msg, ch).sawAsyncLaunch {
 		t.Fatal("expected async launch to be detected")
 	}
 }
@@ -264,7 +281,7 @@ func TestClaudeHandleUserIgnoresAsyncLaunchedTextOutput(t *testing.T) {
 		}),
 	}
 
-	if b.handleUser(msg, ch) {
+	if b.handleUser(msg, ch).sawAsyncLaunch {
 		t.Fatal("did not expect async launch to be detected in ordinary text output")
 	}
 }
