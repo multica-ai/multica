@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "在桌面版開啟"
+  },
+  "desktop": {
+    "link_other_instance": "桌面版連線的是另一個 Multica 執行個體。",
+    "link_workspace_unavailable": "此工作區在桌面版中無法使用。"
+  },
   "inline_run": {
     "label": "{{name}} 的執行",
     "stop": "停止",

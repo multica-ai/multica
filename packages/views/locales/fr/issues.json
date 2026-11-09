@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "Ouvrir dans l’application de bureau"
+  },
+  "desktop": {
+    "link_other_instance": "L’application de bureau est connectée à une autre instance Multica.",
+    "link_workspace_unavailable": "Cet espace de travail n’est pas disponible dans l’application de bureau."
+  },
   "inline_run": {
     "label": "Exécution de {{name}}",
     "stop": "Arrêter",

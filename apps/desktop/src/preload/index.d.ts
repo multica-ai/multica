@@ -45,6 +45,8 @@ interface DesktopAPI {
   onAuthToken: (callback: (token: string) => void) => () => void;
   /** Listen for invitation IDs delivered via deep link. Returns an unsubscribe function. */
   onInviteOpen: (callback: (invitationId: string) => void) => () => void;
+  /** Listen for issue links from the web once authentication is ready. */
+  onIssueOpen: (callback: (url: string) => void) => () => void;
   /** Open a URL in the default browser. */
   openExternal: (url: string) => Promise<void>;
   /** Download a file by URL through Electron's native download system.

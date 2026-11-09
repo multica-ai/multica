@@ -327,6 +327,12 @@ function handleDeepLink(url: string): void {
       if (id) dispatchToMainRenderer("invite:open", decodeURIComponent(id));
       return;
     }
+
+    if (parsed.hostname === "open" && parsed.pathname === "/issue") {
+      // Keep the source instance in the payload. The authenticated renderer
+      // validates it against runtime config before opening a workspace tab.
+      dispatchToMainRenderer("issue:open", url);
+    }
   } catch {
     // Ignore malformed URLs
   }

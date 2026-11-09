@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "데스크톱에서 열기"
+  },
+  "desktop": {
+    "link_other_instance": "데스크톱 앱이 다른 Multica 인스턴스에 연결되어 있습니다.",
+    "link_workspace_unavailable": "데스크톱 앱에서 이 워크스페이스를 사용할 수 없습니다."
+  },
   "inline_run": {
     "label": "{{name}} 실행",
     "stop": "중지",

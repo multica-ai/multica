@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "Open in Desktop"
+  },
+  "desktop": {
+    "link_other_instance": "The desktop app is connected to a different Multica instance.",
+    "link_workspace_unavailable": "This workspace is unavailable in the desktop app."
+  },
   "inline_run": {
     "label": "{{name}} run",
     "stop": "Stop",

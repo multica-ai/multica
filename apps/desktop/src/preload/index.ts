@@ -155,6 +155,8 @@ const desktopAPI = {
   /** Listen for invitation IDs delivered via deep link */
   onInviteOpen: (callback: (invitationId: string) => void) =>
     subscribeToMainRendererChannel("invite:open", callback),
+  onIssueOpen: (callback: (url: string) => void) =>
+    subscribeToMainRendererChannel("issue:open", callback),
   /** Open a URL in the default browser */
   openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
   /** Download a file by URL through Electron's native download system.
