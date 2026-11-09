@@ -1623,6 +1623,19 @@
       "row_label": "Apps autorisées",
       "row_description_one": "{{count}} app autorisée",
       "row_description_other": "{{count}} apps autorisées"
+    },
+    "saved_access": {
+      "account": "Des restrictions enregistrées bloquent encore certaines actions de ce compte.",
+      "agent": "Cette app conserve un ancien accès en lecture seule.",
+      "catalog": "Une liste enregistrée masque les autres apps.",
+      "allow_actions": "Autoriser toutes les actions",
+      "open_catalog": "Afficher toutes les apps",
+      "account_confirm": "Les agents utilisant ce compte pourront lire, écrire, envoyer, supprimer et partager. Les restrictions enregistrées seront remplacées.",
+      "agent_confirm": "Cet agent pourra lire, écrire, envoyer, supprimer et partager via cette app, dans les limites du compte.",
+      "catalog_confirm": "Toutes les apps connectables seront disponibles dans l’espace de travail. Les connexions et les attributions existantes seront conservées.",
+      "cancel": "Annuler",
+      "admin_required": "Un administrateur peut rétablir l’accès.",
+      "account_link": "Ce compte conserve des restrictions. Rétablissez l’accès dans les apps connectées."
     }
   }
 }

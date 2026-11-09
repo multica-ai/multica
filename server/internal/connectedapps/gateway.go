@@ -140,6 +140,11 @@ func (s *Service) loadRun(ctx context.Context, taskID string) (*run, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A task can remain running on another member's runtime after its
+	// initiator loses access. Recheck on every gateway request, not at enqueue.
+	if !s.mayRun(ctx, task, agent) {
+		return nil, ErrNoLongerAllowed
+	}
 	apps, err := s.q.ListAgentApps(ctx, agent.ID)
 	if err != nil {
 		return nil, err
@@ -158,6 +163,14 @@ func (s *Service) loadRun(ctx context.Context, taskID string) (*run, error) {
 		}
 	}
 	return rn, nil
+}
+
+func (s *Service) mayRun(ctx context.Context, task db.AgentTaskQueue, agent db.Agent) bool {
+	actorID := task.OriginatorUserID
+	if !actorID.Valid {
+		actorID = task.AccountableUserID
+	}
+	return !agent.ArchivedAt.Valid && (!actorID.Valid || s.mayUseAgent(ctx, agent.WorkspaceID, agent.ID, actorID))
 }
 
 func (s *Service) dispatch(ctx context.Context, rn *run, req rpcRequest) (rpcResponse, bool) {
@@ -481,6 +494,11 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 			}, NotifActionResult)
 		}
 		return textResult(fmt.Sprintf("blocked: %s calls (%s) are not allowed for you on %s. Do not work around this; tell the person what you would have done.", class, tool.Slug, slug), true)
+	}
+	// Tool lookup may involve a network call, and one gateway request may
+	// contain a batch. Check again immediately before allowing execution.
+	if !s.mayRun(ctx, rn.task, rn.agent) {
+		return textResult("the person who initiated this run can no longer use this agent", true)
 	}
 	if s.overLimit(ctx, rn.workspaceID, slug, acct) {
 		call.outcome = "rate_limited"

@@ -27,12 +27,13 @@ import (
 
 // AppConnectionResponse is one team or personal account.
 type AppConnectionResponse struct {
-	ID          string  `json:"id"`
-	ToolkitSlug string  `json:"toolkit_slug"`
-	Status      string  `json:"status"`
-	ConnectedBy *string `json:"connected_by,omitempty"`
-	ConnectedAt string  `json:"connected_at"`
-	LastUsedAt  *string `json:"last_used_at"`
+	ID             string  `json:"id"`
+	ToolkitSlug    string  `json:"toolkit_slug"`
+	Status         string  `json:"status"`
+	ConnectedBy    *string `json:"connected_by,omitempty"`
+	ConnectedAt    string  `json:"connected_at"`
+	LastUsedAt     *string `json:"last_used_at"`
+	ActionsBlocked bool    `json:"actions_blocked"`
 }
 
 // AgentAppResponse is one app attached to an agent.
@@ -225,6 +226,26 @@ func (h *Handler) GetAppsOverview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list agent apps")
 		return
 	}
+	slugs := make([]string, 0, len(team)+len(personal))
+	for _, row := range team {
+		slugs = append(slugs, row.ToolkitSlug)
+	}
+	for _, row := range personal {
+		slugs = append(slugs, row.ToolkitSlug)
+	}
+	rules, err := h.Queries.ListAppActionRulesForRun(ctx, db.ListAppActionRulesForRunParams{
+		WorkspaceID: workspaceID, ToolkitSlugs: slugs, OwnerUserID: member.UserID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load account access")
+		return
+	}
+	blocked := map[string]bool{}
+	for _, rule := range rules {
+		if rule.Policy == connectedapps.PolicyBlock {
+			blocked[uuidToString(rule.OwnerUserID)+":"+rule.ToolkitSlug] = true
+		}
+	}
 	catalog := h.ConnectedApps.Catalog(ctx, workspaceID)
 	resp := AppsOverviewResponse{
 		CatalogMode:     catalog.Mode,
@@ -235,10 +256,14 @@ func (h *Handler) GetAppsOverview(w http.ResponseWriter, r *http.Request) {
 		AgentApps:       make([]AgentAppResponse, 0, len(agentApps)),
 	}
 	for _, row := range team {
-		resp.Team = append(resp.Team, connectionFromTeam(row))
+		connection := connectionFromTeam(row)
+		connection.ActionsBlocked = blocked[uuidToString(pgtype.UUID{})+":"+row.ToolkitSlug]
+		resp.Team = append(resp.Team, connection)
 	}
 	for _, row := range personal {
-		resp.Personal = append(resp.Personal, connectionFromPersonal(row))
+		connection := connectionFromPersonal(row)
+		connection.ActionsBlocked = blocked[uuidToString(member.UserID)+":"+row.ToolkitSlug]
+		resp.Personal = append(resp.Personal, connection)
 	}
 	for _, row := range agentApps {
 		resp.AgentApps = append(resp.AgentApps, agentAppResponse(row))
@@ -597,14 +622,25 @@ func (h *Handler) UpdateAppRules(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save rules")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
 	for _, rule := range req.Rules {
-		if _, err := h.Queries.UpsertAppActionRule(r.Context(), db.UpsertAppActionRuleParams{
+		if _, err := qtx.UpsertAppActionRule(r.Context(), db.UpsertAppActionRuleParams{
 			WorkspaceID: workspaceID, OwnerUserID: owner, ToolkitSlug: slug,
 			ActionClass: rule.ActionClass, Policy: rule.Policy, UpdatedBy: member.UserID,
 		}); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to save rules")
 			return
 		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save rules")
+		return
 	}
 	rules, err := h.rulesResponse(r.Context(), workspaceID, slug, owner)
 	if err != nil {

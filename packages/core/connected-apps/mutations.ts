@@ -1,9 +1,27 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
-import type { UpdateAgentAppsRequest } from "../types";
+import type { AppAccountScope, AppActionClass, UpdateAgentAppsRequest } from "../types";
 import { workspaceKeys } from "../workspace/queries";
 import { connectedAppsKeys } from "./queries";
+
+/** Explicitly replaces saved restrictions; never runs automatically on load. */
+export function useRestoreAppAccess() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: async (target: { slug: string; scope: AppAccountScope } | { catalog: true }) => {
+      if ("catalog" in target) {
+        await api.updateAppSettings({ catalog_mode: "all", allowed_toolkits: [] });
+      } else {
+        await api.updateAppRules(target.slug, target.scope,
+          (["read", "write", "send", "delete", "share"] as AppActionClass[])
+            .map((action_class) => ({ action_class, policy: "allow" })));
+      }
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: connectedAppsKeys.all(wsId) }),
+  });
+}
 
 export function useDisconnectTeamApp() {
   const qc = useQueryClient();

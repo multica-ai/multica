@@ -23,6 +23,7 @@ import {
   connectedAppsKeys,
   teamAppImpactOptions,
   useDisconnectTeamApp,
+  useRestoreAppAccess,
 } from "@multica/core/connected-apps";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type {
@@ -31,6 +32,7 @@ import type {
   AppConnection,
 } from "@multica/core/types";
 import { ComposioToolkitLogo } from "../../common/composio-toolkit-logo";
+import { SavedAppRestriction } from "../../common/saved-app-restriction";
 import { useT, useTimeAgo } from "../../i18n";
 import { useNavigation } from "../../navigation";
 import { AddAppDialog } from "./add-app-dialog";
@@ -48,6 +50,7 @@ export function AppsSettings() {
   const navigation = useNavigation();
   const overview = useQuery(appsOverviewOptions(wsId));
   const catalog = useQuery(appCatalogOptions(wsId));
+  const restore = useRestoreAppAccess();
 
   const [adding, setAdding] = useState(false);
   const [detail, setDetail] = useState<AccountTarget | null>(null);
@@ -131,6 +134,13 @@ export function AppsSettings() {
           {t(($) => $.connected_apps.add_app)}
         </Button>
       </div>
+
+      {data.catalog_mode !== "all" && (
+        <SavedAppRestriction
+          kind="catalog"
+          onRestore={canManage ? () => restore.mutateAsync({ catalog: true }) : undefined}
+        />
+      )}
 
       <SettingsSection
         anchor="team-accounts"
@@ -217,6 +227,7 @@ function AccountRow({
   const { t } = useT("settings");
   const timeAgo = useTimeAgo();
   const { getActorName } = useActorName();
+  const restore = useRestoreAppAccess();
   const name = app?.name || connection.toolkit_slug;
   const expired = connection.status === "expired";
   const meta = [
@@ -230,35 +241,44 @@ function AccountRow({
   ].filter(Boolean);
 
   return (
-    <div className="flex items-center gap-3 px-4 py-3">
-      <ComposioToolkitLogo slug={connection.toolkit_slug} name={name} fallbackLogo={app?.logo} />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-body font-medium">{name}</p>
-        <p className="truncate text-caption text-muted-foreground">
-          {expired ? (
-            <span className="inline-flex items-center gap-1 text-warning">
-              <AlertTriangle className="size-3" />
-              {t(($) => $.connected_apps.expired)}
-            </span>
-          ) : (
-            meta.join(" · ")
-          )}
-        </p>
+    <div>
+      <div className="flex items-center gap-3 px-4 py-3">
+        <ComposioToolkitLogo slug={connection.toolkit_slug} name={name} fallbackLogo={app?.logo} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-body font-medium">{name}</p>
+          <p className="truncate text-caption text-muted-foreground">
+            {expired ? (
+              <span className="inline-flex items-center gap-1 text-warning">
+                <AlertTriangle className="size-3" />
+                {t(($) => $.connected_apps.expired)}
+              </span>
+            ) : (
+              meta.join(" · ")
+            )}
+          </p>
+        </div>
+        {canManage && (
+          <>
+            <Button variant="ghost" size="sm" onClick={onOpen}>
+              {t(($) => $.connected_apps.activity)}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t(($) => $.connected_apps.disconnect)}
+              onClick={onDisconnect}
+            >
+              <Trash2 />
+            </Button>
+          </>
+        )}
       </div>
-      {canManage && (
-        <>
-          <Button variant="ghost" size="sm" onClick={onOpen}>
-            {t(($) => $.connected_apps.activity)}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={t(($) => $.connected_apps.disconnect)}
-            onClick={onDisconnect}
-          >
-            <Trash2 />
-          </Button>
-        </>
+      {connection.actions_blocked === true && (
+        <div className="px-4 pb-3">
+          <SavedAppRestriction kind="account" onRestore={canManage
+            ? () => restore.mutateAsync({ slug: connection.toolkit_slug, scope })
+            : undefined} />
+        </div>
       )}
     </div>
   );

@@ -310,12 +310,16 @@ func (s *Service) agentApp(ctx context.Context, agentID pgtype.UUID, slug string
 // mayAct reports whether the approver is still a member who may run the
 // agent. Membership and agent access can change while a request waits.
 func (s *Service) mayAct(ctx context.Context, req db.AppActionRequest) bool {
+	return s.mayUseAgent(ctx, req.WorkspaceID, req.AgentID, req.ApproverUserID)
+}
+
+func (s *Service) mayUseAgent(ctx context.Context, workspaceID, agentID, userID pgtype.UUID) bool {
 	if _, err := s.q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-		UserID: req.ApproverUserID, WorkspaceID: req.WorkspaceID,
+		UserID: userID, WorkspaceID: workspaceID,
 	}); err != nil {
 		return false
 	}
-	return s.resumer == nil || s.resumer.CanActFor(ctx, req.WorkspaceID, req.AgentID, req.ApproverUserID)
+	return s.resumer == nil || s.resumer.CanActFor(ctx, workspaceID, agentID, userID)
 }
 
 func (s *Service) withdraw(ctx context.Context, req db.AppActionRequest) {

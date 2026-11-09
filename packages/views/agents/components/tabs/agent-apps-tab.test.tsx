@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
@@ -77,5 +77,18 @@ describe("AgentAppsTab", () => {
     renderApps();
     await user.click(await screen.findByRole("button", { name: "Remove Gmail" }));
     await waitFor(() => expect(api.updateAgentApps).toHaveBeenCalledWith("a1", { apps: [] }));
+  });
+
+  it("explains saved read-only access and only replaces it after confirmation", async () => {
+    const user = userEvent.setup();
+    renderApps();
+    expect(await screen.findByText("This app still has read-only access from an earlier setup.")).toBeVisible();
+    expect(api.updateAgentApps).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Allow all actions" }));
+    expect(api.updateAgentApps).not.toHaveBeenCalled();
+    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Allow all actions" }));
+    await waitFor(() => expect(api.updateAgentApps).toHaveBeenCalledWith("a1", {
+      apps: [{ toolkit_slug: "gmail", account_scope: "personal", level: "write" }],
+    }));
   });
 });

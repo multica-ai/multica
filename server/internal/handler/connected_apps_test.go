@@ -28,10 +28,11 @@ import (
 // appsFakeSDK serves a small Gmail toolkit and records executions.
 type appsFakeSDK struct {
 	composioFakeSDK
-	mu         sync.Mutex
-	executed   []sdk.ExecuteToolRequest
-	executeErr error
-	toolError  string
+	mu              sync.Mutex
+	executed        []sdk.ExecuteToolRequest
+	executeErr      error
+	toolError       string
+	beforeListTools func()
 }
 
 var appsFakeGmailTools = []sdk.Tool{
@@ -45,6 +46,9 @@ func (f *appsFakeSDK) GetToolkit(_ context.Context, slug string) (*sdk.Toolkit, 
 }
 
 func (f *appsFakeSDK) ListTools(_ context.Context, req sdk.ListToolsRequest) (*sdk.ListToolsResponse, error) {
+	if f.beforeListTools != nil {
+		f.beforeListTools()
+	}
 	if req.ToolkitSlug != "gmail" {
 		return &sdk.ListToolsResponse{}, nil
 	}

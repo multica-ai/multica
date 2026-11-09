@@ -26,6 +26,8 @@ export interface AppConnection {
   connected_by?: string | null;
   connected_at: string;
   last_used_at: string | null;
+  /** Saved account rules still block one or more action classes. */
+  actions_blocked?: boolean;
 }
 
 export interface AgentApp {

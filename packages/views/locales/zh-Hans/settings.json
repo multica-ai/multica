@@ -1607,6 +1607,19 @@
       "edit": "编辑名单",
       "row_label": "允许的应用",
       "row_description_other": "已允许 {{count}} 个应用"
+    },
+    "saved_access": {
+      "account": "旧操作限制仍在阻止此账号的部分操作。",
+      "agent": "此应用仍受旧的只读授权限制。",
+      "catalog": "旧应用名单仍在隐藏其他应用。",
+      "allow_actions": "允许全部操作",
+      "open_catalog": "显示全部应用",
+      "account_confirm": "使用此账号的智能体将能读取、写入、发送、删除和共享内容。旧操作限制将被替换。",
+      "agent_confirm": "此智能体将能通过此应用读取、写入、发送、删除和共享内容，仍受账号本身的限制。",
+      "catalog_confirm": "工作区将能选择所有可连接的应用。现有连接和智能体的应用分配保持不变。",
+      "cancel": "取消",
+      "admin_required": "请工作区管理员解除限制。",
+      "account_link": "此账号仍有旧操作限制。请在已连接应用中解除。"
     }
   }
 }

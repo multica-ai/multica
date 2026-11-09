@@ -18,6 +18,7 @@ import {
   appCatalogOptions,
   appsOverviewOptions,
   useUpdateAgentApps,
+  useRestoreAppAccess,
 } from "@multica/core/connected-apps";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type {
@@ -27,6 +28,7 @@ import type {
   AppCatalogEntry,
 } from "@multica/core/types";
 import { ComposioToolkitLogo } from "../../../common/composio-toolkit-logo";
+import { SavedAppRestriction } from "../../../common/saved-app-restriction";
 import { AppLink } from "../../../navigation";
 import { useT } from "../../../i18n";
 import { ObjectSectionEmpty } from "../../../layout/object-page";
@@ -44,6 +46,7 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
   const overview = useQuery(appsOverviewOptions(wsId));
   const catalog = useQuery(appCatalogOptions(wsId));
   const update = useUpdateAgentApps(agent.id);
+  const restore = useRestoreAppAccess();
 
   const canManageTeam = overview.data?.can_manage ?? false;
   const apps = useMemo(() => appsQuery.data ?? [], [appsQuery.data]);
@@ -93,6 +96,11 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
   return (
     <div className="space-y-4">
       <p className="text-caption text-muted-foreground">{t(($) => $.tab_body.connected_apps.subtitle)}</p>
+
+      {overview.data && overview.data.catalog_mode !== "all" && (
+        <SavedAppRestriction kind="catalog" onRestore={canManageTeam
+          ? () => restore.mutateAsync({ catalog: true }) : undefined} />
+      )}
 
       {hasTeamApp && agent.permission_mode !== "private" && (
         <div
@@ -163,6 +171,20 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
                 >
                   <X />
                 </Button>
+                {app.level === "read" && (
+                  <div className="w-full">
+                    <SavedAppRestriction kind="agent" onRestore={lockedTeam ? undefined : () => update.mutateAsync({
+                      apps: apps.map((a) => ({
+                        toolkit_slug: a.toolkit_slug,
+                        account_scope: a.account_scope,
+                        level: a.toolkit_slug === app.toolkit_slug ? "write" : a.level,
+                      })),
+                    })} />
+                  </div>
+                )}
+                {(overview.data?.[app.account_scope]?.some((c) => c.toolkit_slug === app.toolkit_slug && c.actions_blocked === true)) && (
+                  <p className="w-full text-caption text-warning">{ts(($) => $.connected_apps.saved_access.account_link)}</p>
+                )}
               </li>
             );
           })}

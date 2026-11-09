@@ -1623,6 +1623,19 @@
       "row_label": "Aplicaciones permitidas",
       "row_description_one": "{{count}} aplicación permitida",
       "row_description_other": "{{count}} aplicaciones permitidas"
+    },
+    "saved_access": {
+      "account": "Las restricciones guardadas aún bloquean algunas acciones de esta cuenta.",
+      "agent": "Esta app conserva un acceso anterior de solo lectura.",
+      "catalog": "Una lista guardada oculta otras apps.",
+      "allow_actions": "Permitir todas las acciones",
+      "open_catalog": "Mostrar todas las apps",
+      "account_confirm": "Los agentes que usen esta cuenta podrán leer, escribir, enviar, eliminar y compartir. Se reemplazarán las restricciones guardadas.",
+      "agent_confirm": "Este agente podrá leer, escribir, enviar, eliminar y compartir mediante esta app, dentro de los límites de la cuenta.",
+      "catalog_confirm": "Todas las apps conectables estarán disponibles en el espacio de trabajo. Se conservarán las conexiones y asignaciones existentes.",
+      "cancel": "Cancelar",
+      "admin_required": "Un administrador puede restablecer el acceso.",
+      "account_link": "Esta cuenta conserva restricciones. Restablece el acceso en Apps conectadas."
     }
   }
 }

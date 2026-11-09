@@ -11,6 +11,7 @@ export {
 } from "./queries";
 export {
   useDisconnectTeamApp,
+  useRestoreAppAccess,
   useUpdateAgentApps,
   useDecideAppRequest,
 } from "./mutations";
