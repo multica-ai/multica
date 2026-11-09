@@ -734,6 +734,12 @@
   "reply": {
     "placeholder": "Deja una respuesta...",
     "annotations": {
+      "direct_reply": "Responder",
+      "direct_comment": "Publicar comentario",
+      "direct_target_deleted": "Se eliminó el destino de la respuesta. Copia tu nota antes de seleccionar otro comentario.",
+      "copy_note": "Copiar nota",
+      "note_copied": "Nota copiada",
+      "note_copy_failed": "No se pudo copiar la nota. Selecciona y copia el texto manualmente.",
       "confirm_add": "Añadir anotación",
       "save": "Guardar anotación",
       "add_comment": "Añadir al comentario",

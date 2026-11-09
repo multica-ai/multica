@@ -1043,9 +1043,20 @@ function CommentCardImpl({
   // A deleted target's tombstone is as gone as a removed row.
   const replyTargetMissing = !!replyTarget && replyTargetId !== entry.id
     && !replies.some((r) => r.id === replyTargetId && !isDeletedComment(r));
+  // A reply here goes into the running turn of a run that belongs to this
+  // thread by default; another thread's turn is only reached by choice.
+  const steerThreadRunByDefault = useCallback(
+    (task: AgentTask) => runs.some((run) => run.task.id === task.id),
+    [runs],
+  );
   const annotation = useCommentAnnotations({
+    issueId,
+    reply: {
+      onSubmit: (sourceId, content, suppressAgentIds, steerTaskIds) => onReply(sourceId, content, undefined, suppressAgentIds, steerTaskIds),
+      onAccepted: onReplyAccepted, steerByDefault: steerThreadRunByDefault,
+    },
     draftKey: `reply:${issueId}:${entry.id}`,
-    sources: [entry, ...replies].filter((e) => e.type === "comment")
+    sources: [entry, ...replies].filter((e) => e.type === "comment" && !isDeletedComment(e))
       .map((e) => ({ id: e.id, name: e.actor_name || getActorName(e.actor_type, e.actor_id), revision: e.revision })),
     enabled: !!currentUserId,
     onAdded: () => { if (replyFolded) onResolvedExpandChange?.(entry.id, true); },
@@ -1065,12 +1076,6 @@ function CommentCardImpl({
   const canEditEntry = receipts.length === 0 && (isOwn || (canModerate && entry.actor_type === "member"));
   const canDeleteEntry = !receipts.some(isSupplementInFlight) && (isOwn || canModerate);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  // A reply here goes into the running turn of a run that belongs to this
-  // thread by default; another thread's turn is only reached by choice.
-  const steerThreadRunByDefault = useCallback(
-    (task: AgentTask) => runs.some((run) => run.task.id === task.id),
-    [runs],
-  );
 
   const allNestedReplies = replies;
   // What the thread shows. Tombstones are excluded from display and counts but
