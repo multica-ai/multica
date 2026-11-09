@@ -30,7 +30,6 @@ import { useIssueDeletion } from "@multica/core/issues/use-issue-deletion";
 import type { AgentTask, Issue } from "@multica/core/types";
 import { resolveWorkdirCopyTarget } from "@multica/core/issues";
 import { todayDateOnly, addDaysDateOnly } from "@multica/core/issues/date";
-import { api } from "@multica/core/api";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import {
   PRIORITY_DISPLAY_ORDER,
@@ -44,7 +43,7 @@ import { stepHandsOff, workflowAllowsStatus, workflowStep } from "@multica/core/
 import { useModalStore } from "@multica/core/modals";
 import { useIssueStatusOptions } from "../utils/status-options";
 import { useStatusLabel } from "../utils/status-label";
-import { issueKeys } from "@multica/core/issues/queries";
+import { issueTasksOptions } from "@multica/core/issues/queries";
 import { StatusIcon } from "../components/status-icon";
 import { PriorityIcon } from "../components/priority-icon";
 import { selectIssueTasks } from "../surface/activity";
@@ -180,9 +179,7 @@ export function IssueActionsMenuItems({
   // The query shares its key with ExecutionLogSection, so navigating from
   // the issue detail page is a free cache hit.
   const { data: tasks } = useQuery({
-    queryKey: issueKeys.tasks(issue.id),
-    queryFn: () => api.listTasksByIssue(issue.id),
-    staleTime: 30_000,
+    ...issueTasksOptions(issue.id),
     enabled: !sidebar,
   });
   const workdirCopyTarget = useMemo(
