@@ -273,7 +273,7 @@ export function useReplyAnnotations({ draftKey, sources, annotations, actions, e
         if (index < 0) return null;
         return <TextSelectionBubble key={anchor.id} range={anchor.range} source={anchor.root} owner={draftKey}
           markerRanges={markerRanges.get(anchor.root)}>
-          <IconButton variant="brandSubtle" size="icon-sm" className="size-6 rounded-full text-caption tabular-nums aria-expanded:ring-2 aria-expanded:ring-brand"
+          <IconButton variant="brandSubtle" size="icon-sm" className="size-6 text-caption tabular-nums aria-expanded:ring-2 aria-expanded:ring-brand"
             aria-expanded={editingId === anchor.id}
             label={t(($) => $.reply.annotations.edit, { number: index + 1 })}
             onClick={() => editAnnotation(anchor.id)}>{index + 1}</IconButton>
