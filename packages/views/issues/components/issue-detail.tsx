@@ -192,6 +192,8 @@ import { MetadataSection } from "./metadata-section";
 import { IssueSidebarSectionHeader, IssueSidebarStack, IssueSidebarPropertyGrid } from "./issue-sidebar-section";
 import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
+import { useIssueTimelineAnchor } from "../hooks/use-issue-timeline-anchor";
+import { scrollToTimelineComment } from "../utils/scroll-to-timeline-comment";
 import { useJumpToLatest } from "../hooks/use-jump-to-latest";
 import { useInPageFind } from "../hooks/use-in-page-find";
 import { useStickyComposer } from "../hooks/use-sticky-composer";
@@ -1968,6 +1970,33 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const handleTimelineHeightChange = useCallback((height: number) => {
     if (height > 0) setMeasuredTimelineId(id);
   }, [id]);
+  const pendingHighlight = !!highlightCommentId && consumedHighlightId !== highlightCommentId;
+  const { pending: readingAnchor, complete: completeAnchorRestore } = useIssueTimelineAnchor({
+    containerKey: scrollContainerKey,
+    container: scrollContainerEl,
+    ready: !issueLoading && !timelineLoading && !commentTasksLoading,
+    skipRestore: isPeek || pendingHighlight,
+  });
+  useEffect(() => {
+    const container = scrollContainerEl;
+    if (!readingAnchor || !container || issueLoading || timelineLoading || commentTasksLoading) return;
+    let rootId = replyToRoot.get(readingAnchor.commentId) ?? readingAnchor.commentId;
+    for (const [threadId, runs] of commentRuns) {
+      if (runs.some((run) => run.task.id === readingAnchor.commentId)) { rootId = threadId; break; }
+    }
+    const index = items.findIndex((item) => item.id === rootId);
+    if (index < 0) { completeAnchorRestore(); return; }
+    if (!isFlatTimeline && measuredTimelineId !== id) {
+      const list = virtualTimelineRef.current;
+      if (list) container.scrollTop += list.getBoundingClientRect().top - container.getBoundingClientRect().top;
+      return;
+    }
+    return scrollToTimelineComment({
+      container, virtualizer: isFlatTimeline ? null : virtuosoRef.current, index,
+      commentId: commentLandingTarget(readingAnchor.commentId, rootId, timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES),
+      offset: readingAnchor.offset, onComplete: completeAnchorRestore,
+    });
+  }, [readingAnchor, scrollContainerEl, issueLoading, timelineLoading, commentTasksLoading, replyToRoot, commentRuns, items, isFlatTimeline, measuredTimelineId, id, timelineView.threadReplies, completeAnchorRestore]);
   // Scroll a freshly posted comment into view, aligned so its bottom sits just
   // above the sticky composer (never behind it). A reply lives inside its root
   // CommentCard, so the containing top-level row is the scroll target. Flat and
@@ -2438,85 +2467,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       }
     }
 
-    // Center the target comment WITHIN its own scroll container by driving the
-    // container's scrollTop directly — never native scrollIntoView. Native
-    // scrollIntoView is spec'd to scroll EVERY scrollable ancestor: on a cold
-    // mount where the timeline is still growing (streaming agent), the inner
-    // scroller can't satisfy centering on its own, so the scroll propagates up
-    // and moves the desktop shell's `overflow:hidden` wrapper — shoving the
-    // whole page, header included, off the top with no scrollbar to recover,
-    // until a resize reflows it (#3929). Scoping the scroll to `container`
-    // keeps it contained; re-centering across frames lands the comment
-    // precisely once async heights (markdown, code highlight, streamed replies)
-    // settle, instead of leaning on the ancestor scroll the way native did.
-    let rafId = 0;
-    let mountFrames = 0;
-    let frames = 0;
-    let last = -1;
     let fade: number | undefined;
-    let cancelled = false;
-    const centerTarget = (el: HTMLElement) => {
-      const c = container.getBoundingClientRect();
-      const e = el.getBoundingClientRect();
-      const target = Math.max(0, container.scrollTop + e.top - c.top - (container.clientHeight - e.height) / 2);
-      const row = !isFlatTimeline ? el.closest<HTMLElement>("[data-item-index]") : null;
-      if (row) {
-        // Redirect pending size-correction retries to the reply, not the
-        // thread's start, or the outer list can undo the nested landing.
-        virtuosoRef.current?.scrollToIndex({
-          index: targetIdx,
-          align: "start",
-          offset: e.top - row.getBoundingClientRect().top - (container.clientHeight - e.height) / 2,
-        });
-      }
-      container.scrollTop = target;
-      return target;
-    };
-    const land = () => {
-      const el = document.getElementById(`comment-${landingId}`);
-      if (!el) {
-        if (++mountFrames < 60) rafId = requestAnimationFrame(land);
-        return;
-      }
-
-      // A reply anchor is cheap and persistent; wait for its body after revealing it.
-      if (el.dataset.virtualThreadMounted === "false") {
-        centerTarget(el);
-        if (++mountFrames < 60) rafId = requestAnimationFrame(land);
-        return;
-      }
-      didHighlightRef.current = highlightCommentId;
-      writeViewState(issueHighlightMementoKey(id), highlightCommentId);
-      const center = () => {
-        const target = centerTarget(el);
-        if (Math.abs(target - last) > 1 && ++frames < 30) {
-          last = target;
-          rafId = requestAnimationFrame(center);
-        }
-      };
-      rafId = requestAnimationFrame(center);
-      setHighlightedId(landingId);
-      fade = window.setTimeout(() => setHighlightedId(null), 2500);
-    };
-    if (isFlatTimeline) land();
-    else {
-      const queueLanding = () => {
-        if (cancelled) return;
-        cancelAnimationFrame(rafId);
-        rafId = requestAnimationFrame(land);
-      };
-      virtuosoRef.current?.scrollIntoView({
-        index: targetIdx,
-        align: "start",
-        done: queueLanding,
-      });
-      // Windowed replies can keep changing the row's size. Don't wait for
-      // Virtuoso's completion callback before revealing the nested anchor.
-      queueLanding();
-    }
+    const cancel = scrollToTimelineComment({
+      container, virtualizer: isFlatTimeline ? null : virtuosoRef.current,
+      index: targetIdx, commentId: landingId,
+      onMounted: () => {
+        didHighlightRef.current = highlightCommentId;
+        writeViewState(issueHighlightMementoKey(id), highlightCommentId);
+        setHighlightedId(landingId);
+        fade = window.setTimeout(() => setHighlightedId(null), 2500);
+      },
+    });
     return () => {
-      cancelled = true;
-      cancelAnimationFrame(rafId);
+      cancel();
       if (fade !== undefined) clearTimeout(fade);
     };
   }, [highlightCommentId, highlightRequestToken, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, isFlatTimeline, measuredTimelineId, timelineLoading, commentTasksLoading]);
@@ -2857,13 +2820,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     restoreKey: `${wsId}:${id}`,
     scrollContainerEl,
     ready: !!issue && !loading && !timelineLoading,
-    // Disabled only while the comment deep link still has a landing to run —
-    // the jump owns the scroll then. Once the landing is consumed (a tab
-    // switch back), this hook's retry loop IS the restore: the one-shot
-    // ref-attach assignment clamps against a container whose async content
-    // (markdown, images) hasn't reached its captured height yet.
+    // Comment landings and semantic reading anchors own their scroll. Pixel
+    // restoration still covers positions outside the discussion (description,
+    // sub-issues) and adapters without a saved timeline anchor.
     // A peek always opens at the top: it is a glance, not a place to return to.
-    disabled: isPeek || (!!highlightCommentId && consumedHighlightId !== highlightCommentId),
+    disabled: isPeek || pendingHighlight || !!readingAnchor,
     // The tab memento's offset, when the platform serves one. It must win
     // over this hook's module-level map — see the parameter doc.
     overrideTop: restoredScrollTop,
@@ -4055,7 +4016,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       ref={virtuosoRef}
                       customScrollParent={scrollContainerEl}
                       data={items}
-                      initialScrollTop={restoredScrollTop}
+                      initialScrollTop={readingAnchor ? undefined : restoredScrollTop}
                       increaseViewportBy={{ top: 800, bottom: 800 }}
                       totalListHeightChanged={handleTimelineHeightChange}
                       computeItemKey={(_i, item) => `${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}
