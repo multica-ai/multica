@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useStore } from "zustand";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
@@ -63,6 +63,7 @@ import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { PANEL_ROW_CLASS, PanelCount, PanelLink, PanelList, PanelSection, isPathWithin, panelRowStateClass } from "../panel-nav";
+import { useDragClickGuard } from "../use-drag-click-guard";
 import { SidebarIssueList, TREE_ROW_BUTTON_CLASS, TreeRow } from "./sidebar-tree";
 
 const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
@@ -114,9 +115,11 @@ export function ViewsSection({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const collapsed = useSidebarTreeStore((s) => s.viewsCollapsed);
   const setCollapsed = useSidebarTreeStore((s) => s.setViewsCollapsed);
+  const { arm: armClickGuard, release: releaseClickGuard } = useDragClickGuard();
 
   const onDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
+      releaseClickGuard();
       if (!over || active.id === over.id) return;
       const ids = items.map((item) => item.id);
       const from = ids.indexOf(String(active.id));
@@ -124,7 +127,7 @@ export function ViewsSection({
       if (from === -1 || to === -1) return;
       reorder(arrayMove(ids, from, to));
     },
-    [items, reorder],
+    [items, releaseClickGuard, reorder],
   );
 
   return (
@@ -153,7 +156,14 @@ export function ViewsSection({
         </IconButton>
       }
     >
-      <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={DRAG_MODIFIERS} onDragEnd={onDragEnd}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        modifiers={DRAG_MODIFIERS}
+        onDragStart={armClickGuard}
+        onDragEnd={onDragEnd}
+        onDragCancel={releaseClickGuard}
+      >
         <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
           <PanelList>
             {items.map((item) => (
@@ -226,16 +236,10 @@ function usePrefetch(wsId: string, source: string, request: SidebarIssuesRequest
 interface DragBindings {
   rowRef: (node: HTMLElement | null) => void;
   listeners: ReturnType<typeof useSortable>["listeners"];
-  /** True right after a drag, so the release does not also navigate. */
-  consumeDrag: () => boolean;
 }
 
 function SortableViewRow({ id, children }: { id: string; children: (drag: DragBindings) => React.ReactNode }) {
   const { listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id });
-  const wasDragged = useRef(false);
-  useEffect(() => {
-    if (isDragging) wasDragged.current = true;
-  }, [isDragging]);
   return (
     <li
       ref={setNodeRef}
@@ -247,11 +251,6 @@ function SortableViewRow({ id, children }: { id: string; children: (drag: DragBi
       {children({
         rowRef: setActivatorNodeRef,
         listeners,
-        consumeDrag: () => {
-          if (!wasDragged.current) return false;
-          wasDragged.current = false;
-          return true;
-        },
       })}
     </li>
   );
@@ -378,9 +377,6 @@ function BuiltinViewRow({
           event.preventDefault();
           setMenuOpen(true);
         }}
-        onNavigate={(event) => {
-          if (drag.consumeDrag()) event.preventDefault();
-        }}
         onNavigateInPlace={() => builtinNav.prepare(builtin)}
         trailing={
           <RowMenu label={t(($) => $.panels.work.view_actions, { name: label })} open={menuOpen} onOpenChange={setMenuOpen}>
@@ -474,9 +470,6 @@ function UnreadViewRow({
         onContextMenu={(event) => {
           event.preventDefault();
           setMenuOpen(true);
-        }}
-        onNavigate={(event) => {
-          if (drag.consumeDrag()) event.preventDefault();
         }}
         onNavigateInPlace={() => setActive(target.containerKey, UNREAD_VIEW_ID)}
         trailing={
@@ -603,9 +596,6 @@ function SavedViewRow({
         onContextMenu={(event) => {
           event.preventDefault();
           setMenuOpen(true);
-        }}
-        onNavigate={(event) => {
-          if (drag.consumeDrag()) event.preventDefault();
         }}
         onNavigateInPlace={() => setActive(target.containerKey, view.id)}
         trailing={
