@@ -1453,7 +1453,7 @@
     "saving": "Guardando…"
   },
   "connected_apps": {
-    "description": "Cuentas que usan tus agentes. Cada llamada pasa por Multica, que aplica tus reglas y pide confirmación antes de enviar, eliminar o compartir.",
+    "description": "Cuentas que usan tus agentes para acceder a aplicaciones externas. Las acciones permitidas se ejecutan de inmediato.",
     "add_app": "Añadir aplicación",
     "loading": "Cargando aplicaciones…",
     "load_failed": "No se pudieron cargar las aplicaciones.",
@@ -1476,7 +1476,7 @@
     "disconnect": "Desconectar",
     "catalog_title": "Aplicaciones disponibles",
     "catalog_label": "Aplicaciones que pueden añadir los miembros",
-    "catalog_description": "Las aplicaciones seleccionadas incluyen reglas predeterminadas revisadas. Todas las aplicaciones incluye todo lo que Composio puede conectar; las acciones que Multica no puede clasificar siempre piden confirmación. Una lista personalizada permite solo las aplicaciones que elijas.",
+    "catalog_description": "Multica revisa las aplicaciones seleccionadas. Todas las aplicaciones incluye todo lo que Composio puede conectar. Una lista personalizada permite solo las aplicaciones que elijas.",
     "catalog_all": "Todas las aplicaciones",
     "catalog_curated": "Solo seleccionadas",
     "catalog_custom": "Lista personalizada",

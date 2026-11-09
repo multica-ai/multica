@@ -852,6 +852,9 @@ func (h *Handler) UpdateAgentApps(w http.ResponseWriter, r *http.Request) {
 	type want struct{ slug, scope, level string }
 	var wants []want
 	for _, app := range req.Apps {
+		if app.Level == "" {
+			app.Level = connectedapps.DefaultLevel(agent.PermissionMode)
+		}
 		slug := connectedapps.NormalizeSlug(app.ToolkitSlug)
 		if slug == "" || seen[slug] || !connectedapps.ValidScope(app.AccountScope) || !connectedapps.ValidLevel(app.Level) {
 			writeError(w, http.StatusBadRequest, "invalid app")

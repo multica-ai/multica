@@ -6,12 +6,13 @@
  * the personal account of whoever triggered the run. */
 export type AppAccountScope = "team" | "personal";
 
-/** How far an agent may go with an app. Non-read calls at `confirm_writes`
- * wait for the person who triggered the run. */
+/** How far an agent may go with an app. The saved `confirm_writes` value
+ * is accepted for compatibility and now runs directly like `write`. */
 export type AppAccessLevel = "read" | "confirm_writes" | "write";
 
 export type AppActionClass = "read" | "write" | "send" | "delete" | "share";
 
+/** Saved `confirm` rules now allow calls directly. */
 export type AppActionPolicy = "allow" | "confirm" | "block";
 
 /** `all` lists every connectable app; `curated` only Multica's reviewed set;

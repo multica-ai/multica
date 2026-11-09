@@ -247,13 +247,17 @@ func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.
 		} else if _, ok := personal[app.ToolkitSlug]; ok {
 			status = "connected"
 		}
+		level := app.Level
+		if level == LevelConfirmWrites {
+			level = LevelWrite
+		}
 		meta = append(meta, runtimeapps.ConnectedApp{
 			Provider:      Provider,
 			ServerName:    GatewayServerName,
 			ToolkitSlug:   app.ToolkitSlug,
 			ToolkitName:   runtimeapps.DisplayNameForToolkitSlug(app.ToolkitSlug),
 			AccountScope:  app.AccountScope,
-			Level:         app.Level,
+			Level:         level,
 			AccountStatus: status,
 		})
 	}

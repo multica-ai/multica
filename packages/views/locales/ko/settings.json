@@ -1442,7 +1442,7 @@
     "plugins": "설치하면 도구, 예약 훅, 저장소를 추가할 수 있으며 플러그인마다 권한을 부여합니다."
   },
   "connected_apps": {
-    "description": "에이전트가 외부 앱을 사용할 때 쓰는 계정입니다. 모든 호출은 Multica를 거치며, 규칙을 적용하고 보내기·삭제·공유 전에 확인을 받습니다.",
+    "description": "에이전트가 외부 앱을 사용할 때 쓰는 계정입니다. 허용된 작업은 즉시 실행됩니다.",
     "add_app": "앱 추가",
     "loading": "앱을 불러오는 중…",
     "load_failed": "앱을 불러오지 못했습니다.",
@@ -1464,7 +1464,7 @@
     "disconnect": "연결 해제",
     "catalog_title": "사용 가능한 앱",
     "catalog_label": "멤버가 추가할 수 있는 앱",
-    "catalog_description": "엄선된 앱에는 검토된 기본 규칙이 있습니다. '모든 앱'은 Composio로 연결할 수 있는 모든 앱을 포함하며, Multica가 분류하지 못한 작업은 항상 먼저 확인을 받습니다. 사용자 지정 목록은 선택한 앱만 허용합니다.",
+    "catalog_description": "엄선된 앱은 Multica가 검토한 앱입니다. 모든 앱에는 Composio로 연결할 수 있는 모든 앱이 포함됩니다. 사용자 지정 목록은 선택한 앱만 허용합니다.",
     "catalog_all": "모든 앱",
     "catalog_curated": "엄선된 앱만",
     "catalog_custom": "사용자 지정 목록",

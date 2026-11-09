@@ -14,7 +14,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/util"
-	sdk "github.com/multica-ai/multica/server/pkg/composio"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 )
@@ -41,10 +40,6 @@ const (
 	KindAction  = "action"
 	KindConnect = "connect"
 )
-
-func (s *Service) submit(ctx context.Context, rn *run, app db.AgentApp, tool *sdk.Tool, class string, args map[string]any, summary string) (db.AppActionRequest, error) {
-	return s.createRequest(ctx, rn, KindAction, app, tool.Slug, class, args, summary)
-}
 
 func (s *Service) createRequest(ctx context.Context, rn *run, kind string, app db.AgentApp, toolSlug, class string, args map[string]any, summary string) (db.AppActionRequest, error) {
 	raw, err := json.Marshal(args)

@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/connectedapps"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -230,7 +231,28 @@ func (f *appsFixture) listRequests(t *testing.T, userID string) []AppRequestResp
 	return resp.Requests
 }
 
-func TestConnectedApps_ConfirmApproveResumes(t *testing.T) {
+// legacyRequest seeds an action submitted before per-call approval was removed.
+// Existing requests retain their approver, isolation, expiry, and execution checks.
+func (f *appsFixture) legacyRequest(t *testing.T, scope, slug, tool, class string, args map[string]any, summary string) AppRequestResponse {
+	t.Helper()
+	raw, err := json.Marshal(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := f.h.Queries.CreateAppActionRequest(context.Background(), db.CreateAppActionRequestParams{
+		WorkspaceID: parseUUID(testWorkspaceID), Kind: connectedapps.KindAction,
+		TaskID: parseUUID(f.taskID), AgentID: parseUUID(f.agentID), IssueID: parseUUID(f.issueID),
+		ApproverUserID: parseUUID(testUserID), AccountScope: scope, ToolkitSlug: slug,
+		ToolSlug: tool, ActionClass: class, Arguments: raw, Summary: summary,
+		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(connectedapps.RequestTTL), Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f.h.requestResponse(req, parseUUID(testUserID))
+}
+
+func TestConnectedApps_LegacyApprovalResumes(t *testing.T) {
 	f := newAppsFixture(t)
 
 	if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "personal", "level": "confirm_writes"}}); w.Code != http.StatusOK {
@@ -258,17 +280,8 @@ func TestConnectedApps_ConfirmApproveResumes(t *testing.T) {
 		t.Fatalf("executions after read = %d, want 1", n)
 	}
 
-	// A send waits for the person who triggered the run.
 	args := map[string]any{"to": "a@example.com", "body": "draft"}
-	_, text, isErr := f.gateway(t, token, "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL", "arguments": args, "summary": "Reply to the customer"})
-	if isErr || !strings.HasPrefix(text, "submitted") {
-		t.Fatalf("send call = %s (error %v), want submitted", text, isErr)
-	}
-	if n := len(f.sdk.executions()); n != 1 {
-		t.Fatalf("send executed before approval")
-	}
-	// Retrying the same call reuses the pending request.
-	f.gateway(t, token, "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL", "arguments": args})
+	f.legacyRequest(t, "personal", "gmail", "GMAIL_SEND_EMAIL", "send", args, "Reply to the customer")
 
 	mine := f.listRequests(t, testUserID)
 	if len(mine) != 1 || mine[0].Status != "pending" || mine[0].Redacted || mine[0].Summary != "Reply to the customer" {
@@ -277,12 +290,6 @@ func TestConnectedApps_ConfirmApproveResumes(t *testing.T) {
 	other := f.listRequests(t, f.member)
 	if len(other) != 1 || !other[0].Redacted || other[0].Arguments != nil {
 		t.Fatalf("non-approver view not redacted: %+v", other)
-	}
-
-	var inboxCount int
-	testPool.QueryRow(context.Background(), `SELECT count(*) FROM inbox_item WHERE recipient_id = $1 AND type = 'app_action_requested' AND details->>'request_id' = $2`, testUserID, mine[0].ID).Scan(&inboxCount)
-	if inboxCount != 1 {
-		t.Fatalf("inbox items = %d, want 1", inboxCount)
 	}
 
 	approve := func(userID string, body any) *httptest.ResponseRecorder {
@@ -322,6 +329,84 @@ func TestConnectedApps_ConfirmApproveResumes(t *testing.T) {
 	testPool.Exec(context.Background(), `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`, f.taskID)
 	if code, _, _ := f.gateway(t, token, "apps_list", nil); code != http.StatusUnauthorized {
 		t.Fatalf("gateway after run ended: %d, want 401", code)
+	}
+}
+
+func TestConnectedApps_RunWithoutApproval(t *testing.T) {
+	for _, scope := range []string{"personal", "team"} {
+		for _, level := range []string{"", "write", "confirm_writes"} {
+			for _, rule := range []string{"", "confirm"} {
+				t.Run(fmt.Sprintf("%s/level=%s/rule=%s", scope, level, rule), func(t *testing.T) {
+					f := newAppsFixture(t)
+					_, _, userID, accountID := f.executionAccount(t, scope)
+					app := map[string]string{"toolkit_slug": "gmail", "account_scope": scope}
+					if level != "" {
+						app["level"] = level
+					}
+					if w := f.putAgentApps(t, testUserID, []map[string]string{app}); w.Code != http.StatusOK {
+						t.Fatalf("attach app: %d %s", w.Code, w.Body.String())
+					}
+					if level == "" {
+						var saved string
+						if err := testPool.QueryRow(context.Background(), `SELECT level FROM agent_app WHERE agent_id=$1 AND toolkit_slug='gmail'`, f.agentID).Scan(&saved); err != nil || saved != "write" {
+							t.Fatalf("default level = %q, error %v", saved, err)
+						}
+					}
+					if rule != "" {
+						rules := []map[string]string{}
+						for _, class := range connectedapps.Classes {
+							rules = append(rules, map[string]string{"action_class": class, "policy": rule})
+						}
+						w := httptest.NewRecorder()
+						f.h.UpdateAppRules(w, appsReqAs(t, testUserID, http.MethodPut, "/api/apps/rules?toolkit_slug=gmail&scope="+scope, map[string]any{"rules": rules}))
+						if w.Code != http.StatusOK {
+							t.Fatalf("save rules: %d %s", w.Code, w.Body.String())
+						}
+					}
+					oldTools := appsFakeGmailTools
+					appsFakeGmailTools = append(append([]sdk.Tool{}, oldTools...),
+						sdk.Tool{Slug: "GMAIL_CREATE_EMAIL_DRAFT", Name: "Create draft", Toolkit: sdk.Toolkit{Slug: "gmail"}},
+						sdk.Tool{Slug: "GMAIL_SHARE_MAILBOX", Name: "Share mailbox", Toolkit: sdk.Toolkit{Slug: "gmail"}})
+					t.Cleanup(func() { appsFakeGmailTools = oldTools })
+					agent, err := f.h.Queries.GetAgent(context.Background(), parseUUID(f.agentID))
+					if err != nil {
+						t.Fatal(err)
+					}
+					overlay, err := f.h.ConnectedApps.BuildTaskOverlay(context.Background(), parseUUID(testUserID), agent)
+					if err != nil || len(overlay.ConnectedApps) != 1 || overlay.ConnectedApps[0].Level != "write" {
+						t.Fatalf("runtime app metadata = %+v, error %v", overlay.ConnectedApps, err)
+					}
+					token := f.token(t)
+					if _, text, isErr := f.gateway(t, token, "apps_list", nil); isErr || !strings.Contains(text, `"level": "write"`) {
+						t.Fatalf("runtime app list: %s", text)
+					}
+					for i, tool := range appsFakeGmailTools {
+						for _, discovery := range []string{"apps_get_tool", "apps_search_tools"} {
+							if _, text, isErr := f.gateway(t, token, discovery, map[string]any{"app": "gmail", "tool": tool.Slug, "query": tool.Slug}); isErr || !strings.Contains(text, `"policy": "allow"`) {
+								t.Fatalf("%s %s: %s", discovery, tool.Slug, text)
+							}
+						}
+						args := map[string]any{"user_id": "me", "body": "test message"}
+						if _, text, isErr := f.gateway(t, token, "apps_run_tool", map[string]any{"tool": tool.Slug, "arguments": args}); isErr || !strings.Contains(text, tool.Slug) || strings.HasPrefix(text, "submitted") {
+							t.Fatalf("direct call %s: %s (error %v)", tool.Slug, text, isErr)
+						}
+						execs := f.sdk.executions()
+						if len(execs) != i+1 || execs[i].UserID != userID || execs[i].ConnectedAccountID != accountID || !reflect.DeepEqual(execs[i].Arguments, args) {
+							t.Fatalf("execution %d: %+v", i, execs)
+						}
+					}
+					if requests := f.listRequests(t, testUserID); len(requests) != 0 {
+						t.Fatalf("direct calls created approval requests: %+v", requests)
+					}
+					if n := f.inboxCount(t, testUserID, connectedapps.NotifActionRequested); n != 0 {
+						t.Fatalf("direct calls created %d approval notifications", n)
+					}
+					if n := dbfx.Count(t, `SELECT count(*) FROM app_tool_call WHERE task_id=$1 AND outcome='ok' AND request_id IS NULL`, f.taskID); n != len(appsFakeGmailTools) {
+						t.Fatalf("successful audited calls = %d", n)
+					}
+				})
+			}
+		}
 	}
 }
 
@@ -436,9 +521,7 @@ func TestConnectedApps_ResultNotifications(t *testing.T) {
 
 	// An unanswered confirmation expires into a result notification.
 	f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "personal", "level": "confirm_writes"}})
-	if _, text, _ := f.gateway(t, token, "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL", "arguments": map[string]any{"to": "x"}}); !strings.HasPrefix(text, "submitted") {
-		t.Fatalf("send = %s, want submitted", text)
-	}
+	f.legacyRequest(t, "personal", "gmail", "GMAIL_SEND_EMAIL", "send", map[string]any{"to": "x"}, "")
 	testPool.Exec(context.Background(), `UPDATE app_action_request SET expires_at = now() - interval '1 minute' WHERE task_id = $1`, f.taskID)
 	f.h.ConnectedApps.Sweep(context.Background())
 	if reqs := f.listRequests(t, testUserID); len(reqs) != 1 || reqs[0].Status != "expired" {
@@ -448,7 +531,7 @@ func TestConnectedApps_ResultNotifications(t *testing.T) {
 		t.Fatalf("result notifications after expiry = %d, want 2", n)
 	}
 
-	// Muting agent activity mutes results, never confirmations.
+	// Muting agent activity also mutes expiry results for legacy requests.
 	testPool.Exec(context.Background(), `
 		INSERT INTO notification_preference (workspace_id, user_id, preferences)
 		VALUES ($1, $2, '{"agent_activity":"muted"}')
@@ -457,10 +540,7 @@ func TestConnectedApps_ResultNotifications(t *testing.T) {
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM notification_preference WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, testUserID)
 	})
-	f.gateway(t, token, "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL", "arguments": map[string]any{"to": "y"}})
-	if n := f.inboxCount(t, testUserID, connectedapps.NotifActionRequested); n != 2 {
-		t.Fatalf("confirmations with agent activity muted = %d, want 2", n)
-	}
+	f.legacyRequest(t, "personal", "gmail", "GMAIL_SEND_EMAIL", "send", map[string]any{"to": "y"}, "")
 	testPool.Exec(context.Background(), `UPDATE app_action_request SET expires_at = now() - interval '1 minute' WHERE task_id = $1 AND status = 'pending'`, f.taskID)
 	f.h.ConnectedApps.Sweep(context.Background())
 	if n := f.inboxCount(t, testUserID, connectedapps.NotifActionResult); n != 2 {
@@ -565,9 +645,15 @@ func TestConnectedApps_ToolClassOverride(t *testing.T) {
 		t.Fatalf("tools = %s", w.Body.String())
 	}
 
-	// The corrected class drives the policy: a "read" now waits for confirmation.
-	if _, text, _ := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_FETCH_EMAILS", "arguments": map[string]any{}}); !strings.HasPrefix(text, "submitted") {
-		t.Fatalf("overridden read = %s, want submitted", text)
+	// The corrected class drives explicit account restrictions.
+	w = httptest.NewRecorder()
+	f.h.UpdateAppRules(w, appsReqAs(t, testUserID, http.MethodPut, "/api/apps/rules?toolkit_slug=gmail&scope=personal",
+		map[string]any{"rules": []map[string]string{{"action_class": "send", "policy": "block"}}}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("set send rule: %d %s", w.Code, w.Body.String())
+	}
+	if _, text, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_FETCH_EMAILS", "arguments": map[string]any{}}); !isErr || !strings.HasPrefix(text, "blocked") {
+		t.Fatalf("overridden read = %s, want blocked", text)
 	}
 	if code := setClass(testUserID, ""); code != http.StatusNoContent {
 		t.Fatalf("reset override: %d", code)
@@ -657,23 +743,18 @@ func TestConnectedApps_ExecutionIdentity(t *testing.T) {
 					tool = "GMAIL_SEND_EMAIL"
 				}
 				args := map[string]any{"user_id": "me", "connected_account_id": "caller_account", "body": "private draft"}
-				_, text, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": tool, "arguments": args})
-				if isErr {
-					t.Fatalf("gateway call failed: %s", text)
+				if !approved {
+					if _, text, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": tool, "arguments": args}); isErr {
+						t.Fatalf("gateway call failed: %s", text)
+					}
 				}
 				if approved {
-					if !strings.HasPrefix(text, "submitted") || len(f.sdk.executions()) != 0 {
-						t.Fatalf("call did not wait for approval: %s", text)
-					}
-					requests := f.listRequests(t, testUserID)
-					if len(requests) != 1 {
-						t.Fatalf("requests = %+v", requests)
-					}
+					request := f.legacyRequest(t, scope, "gmail", tool, "send", args, "")
 					// Execution must resolve the current pair again after approval.
 					userID, accountID = userID+"_reconnected", accountID+"_reconnected"
 					dbfx.Exec(t, "UPDATE "+table+" SET composio_user_id = $1, connected_account_id = $2 WHERE id = $3", userID, accountID, id)
 					args["body"] = "edited draft"
-					if out := f.approve(t, requests[0].ID, args); out.Status != "approved" {
+					if out := f.approve(t, request.ID, args); out.Status != "approved" {
 						t.Fatalf("approved call = %+v", out)
 					}
 				}
@@ -701,10 +782,7 @@ func TestConnectedApps_ExecutionRejectsMissingIdentity(t *testing.T) {
 					}
 					args := map[string]any{"user_id": "me"}
 					if approved {
-						_, text, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL", "arguments": args})
-						if isErr || !strings.HasPrefix(text, "submitted") {
-							t.Fatalf("submit = %s", text)
-						}
+						f.legacyRequest(t, scope, "gmail", "GMAIL_SEND_EMAIL", "send", args, "")
 					}
 					dbfx.Exec(t, "UPDATE "+table+" SET composio_user_id = $1 WHERE id = $2", identity, id)
 					if approved {
@@ -739,7 +817,7 @@ func TestConnectedApps_ExecutionAccountIsolation(t *testing.T) {
 				args := map[string]any{"user_id": "me"}
 				var requestID string
 				if approved {
-					f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL", "arguments": args})
+					f.legacyRequest(t, scope, "gmail", "GMAIL_SEND_EMAIL", "send", args, "")
 					requests := f.listRequests(t, testUserID)
 					if len(requests) != 1 {
 						t.Fatalf("requests = %+v", requests)
@@ -799,7 +877,14 @@ func TestConnectedApps_ExecutionFailureLogs(t *testing.T) {
 				if approved {
 					tool = "GMAIL_SEND_EMAIL"
 				}
-				code, text, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": tool, "arguments": map[string]any{"body": private}})
+				var code int
+				var text string
+				var isErr bool
+				if approved {
+					f.legacyRequest(t, "personal", "gmail", tool, "send", map[string]any{"body": private}, "")
+				} else {
+					code, text, isErr = f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": tool, "arguments": map[string]any{"body": private}})
+				}
 				requestID := ""
 				if approved {
 					requests := f.listRequests(t, testUserID)

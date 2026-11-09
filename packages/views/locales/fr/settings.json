@@ -1453,7 +1453,7 @@
     "plugins": "Paquets installés pouvant ajouter des outils, des hooks planifiés et du stockage, chacun avec ses propres autorisations."
   },
   "connected_apps": {
-    "description": "Les comptes par lesquels vos agents agissent. Chaque appel passe par Multica, qui applique vos règles et demande avant d'envoyer, supprimer ou partager.",
+    "description": "Les comptes que vos agents utilisent pour accéder aux apps externes. Les actions autorisées sont exécutées immédiatement.",
     "add_app": "Ajouter une app",
     "loading": "Chargement des apps…",
     "load_failed": "Impossible de charger les apps.",
@@ -1476,7 +1476,7 @@
     "disconnect": "Déconnecter",
     "catalog_title": "Apps disponibles",
     "catalog_label": "Apps que les membres peuvent ajouter",
-    "catalog_description": "Les apps sélectionnées ont des règles par défaut vérifiées. « Toutes les apps » ajoute tout ce que Composio peut connecter ; les actions que Multica ne sait pas classer demandent toujours d'abord. Une liste personnalisée n'autorise que les apps choisies.",
+    "catalog_description": "Les apps sélectionnées sont vérifiées par Multica. « Toutes les apps » inclut tout ce que Composio peut connecter. Une liste personnalisée autorise uniquement les apps choisies.",
     "catalog_all": "Toutes les apps",
     "catalog_curated": "Sélection uniquement",
     "catalog_custom": "Liste personnalisée",

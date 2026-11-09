@@ -1442,7 +1442,7 @@
     "plugins": "安装后可提供工具、定时 hook 和存储，每个插件单独授权。"
   },
   "connected_apps": {
-    "description": "智能体通过这些账号操作外部应用。每次调用都经过 Multica：按规则执行，发送、删除、分享前先征得同意。",
+    "description": "智能体通过这些账号操作外部应用，允许的操作会直接执行。",
     "add_app": "添加应用",
     "loading": "正在加载应用…",
     "load_failed": "无法加载应用。",
@@ -1464,7 +1464,7 @@
     "disconnect": "断开",
     "catalog_title": "可用应用",
     "catalog_label": "成员可添加的应用",
-    "catalog_description": "精选应用带有审核过的默认规则。「全部应用」包含 Composio 能连接的所有应用；Multica 无法识别的操作一律先征得同意。「指定名单」只允许你选中的应用。",
+    "catalog_description": "精选应用经过 Multica 审核。「全部应用」包含 Composio 能连接的所有应用。「指定名单」只允许你选中的应用。",
     "catalog_all": "全部应用",
     "catalog_curated": "仅精选",
     "catalog_custom": "指定名单",

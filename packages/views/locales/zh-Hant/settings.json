@@ -1442,7 +1442,7 @@
     "plugins": "安裝後可提供工具、定時 hook 和儲存，每個外掛單獨授權。"
   },
   "connected_apps": {
-    "description": "AI 代理透過這些帳號操作外部應用。每次呼叫都經過 Multica：依規則執行，傳送、刪除、分享前先徵得同意。",
+    "description": "AI 代理透過這些帳號操作外部應用，允許的操作會直接執行。",
     "add_app": "新增應用",
     "loading": "正在載入應用…",
     "load_failed": "無法載入應用。",
@@ -1464,7 +1464,7 @@
     "disconnect": "中斷連線",
     "catalog_title": "可用應用",
     "catalog_label": "成員可新增的應用",
-    "catalog_description": "精選應用附有審核過的預設規則。「全部應用」包含 Composio 能連線的所有應用；Multica 無法辨識的操作一律先徵得同意。「指定名單」只允許你選中的應用。",
+    "catalog_description": "精選應用經過 Multica 審核。「全部應用」包含 Composio 能連線的所有應用。「指定名單」只允許你選中的應用。",
     "catalog_all": "全部應用",
     "catalog_curated": "僅精選",
     "catalog_custom": "指定名單",

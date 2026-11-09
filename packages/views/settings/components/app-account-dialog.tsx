@@ -35,7 +35,7 @@ import type {
 } from "@multica/core/types";
 import { useT, useTimeAgo } from "../../i18n";
 
-const POLICIES: readonly AppActionPolicy[] = ["allow", "confirm", "block"];
+const POLICIES: readonly AppActionPolicy[] = ["allow", "block"];
 const CLASSES: readonly AppActionClass[] = ["read", "write", "send", "delete", "share"];
 const AUTO = "auto";
 const MAX_TOOLS_SHOWN = 100;
@@ -131,7 +131,7 @@ function RulesEditor({ scope, slug, canEdit }: { scope: AppAccountScope; slug: s
             </div>
             <Select
               items={POLICIES.map((value) => ({ value, label: policyLabel(value) }))}
-              value={rule.policy}
+              value={rule.policy === "confirm" ? "allow" : rule.policy}
               disabled={!canEdit || update.isPending}
               onValueChange={(value) => {
                 if (value && value !== rule.policy) save(rule, value as AppActionPolicy);

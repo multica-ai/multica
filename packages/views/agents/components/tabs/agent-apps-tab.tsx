@@ -33,7 +33,7 @@ import { useT } from "../../../i18n";
 import { ObjectSectionEmpty } from "../../../layout/object-page";
 
 const SCOPES: readonly AppAccountScope[] = ["personal", "team"];
-const LEVELS: readonly AppAccessLevel[] = ["read", "confirm_writes", "write"];
+const LEVELS: readonly AppAccessLevel[] = ["read", "write"];
 
 /**
  * The agent's apps (MUL-8516): which apps it can use, whose account each acts
@@ -81,9 +81,7 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
   const add = (slug: string) => {
     const recommended = appBySlug.get(slug)?.recommended_scope;
     const scope: AppAccountScope = recommended === "team" && canManageTeam ? "team" : "personal";
-    // Only its owner runs a private agent, and would confirm each write anyway.
-    const level: AppAccessLevel = agent.permission_mode === "private" ? "write" : "confirm_writes";
-    save([...apps, { agent_id: agent.id, toolkit_slug: slug, account_scope: scope, level }]);
+    save([...apps, { agent_id: agent.id, toolkit_slug: slug, account_scope: scope, level: "write" }]);
   };
 
   const addable = (catalog.data?.apps ?? []).filter((app) => !apps.some((a) => a.toolkit_slug === app.slug));
@@ -164,7 +162,7 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
                 </Select>
                 <Select
                   items={LEVELS.map((value) => ({ value, label: levelLabel(value) }))}
-                  value={app.level}
+                  value={app.level === "confirm_writes" ? "write" : app.level}
                   disabled={update.isPending || lockedTeam}
                   onValueChange={(value) => {
                     if (value && value !== app.level) patch(app.toolkit_slug, { level: value as AppAccessLevel });
