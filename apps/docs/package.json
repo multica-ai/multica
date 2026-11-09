@@ -14,9 +14,9 @@
   },
   "dependencies": {
     "@multica/ui": "workspace:*",
-    "fumadocs-core": "^16.17.8",
-    "fumadocs-mdx": "^15.4.10",
-    "fumadocs-ui": "^16.17.8",
+    "fumadocs-core": "catalog:",
+    "fumadocs-mdx": "catalog:",
+    "fumadocs-ui": "catalog:",
     "mermaid": "catalog:",
     "next": "catalog:",
     "next-themes": "catalog:",

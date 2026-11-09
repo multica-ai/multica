@@ -618,6 +618,30 @@ Two constraints are enforced rather than documented:
   competing for its own work, so `make up C=daemon` stops with that explanation
   before spending a login on it. Use `C=api,web` there.
 
+### Web with realistic content
+
+Every `make up`, whatever components it starts, signs `dev@localhost` in,
+marks the user onboarded, and seeds the `dev` workspace with two issues. The
+token sits in the environment's CLI profile, so a Playwright script can open
+`/dev/issues` directly by setting it as `multica_token` in `localStorage`
+before the first page load.
+
+For chat and Agent Builder content without a model or a daemon, add one-shot
+fixtures:
+
+```bash
+make up C=api,web ARGS="--ephemeral"
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue, --json
+make destroy ARGS="--yes"
+```
+
+`chat` and `builder` each create a session with a user message and an assistant
+reply holding a wide table, code and a long log line; `issue` creates an issue
+with a wide description and a comment with a diff. The script registers a
+fixture runtime with the profile token and completes each task with canned
+Markdown through the daemon API, so it also works inside a daemon-managed task.
+It prints the URL of everything it created and exits.
+
 ### Desktop
 
 ```bash
@@ -660,6 +684,37 @@ from a script, signs `dev@localhost` back in after a step signed out.
 `--record` needs `ffmpeg` to encode; without it the frames and an ffconcat file
 stay in `<file>.frames/`. The helper only disconnects, so the app stays up for
 the next attach.
+
+#### Capturing the native window
+
+A renderer screenshot has no title bar or traffic lights. To capture the real
+macOS window of this environment's Desktop, start it with the debug port from
+above and run the capture script from the checkout:
+
+```bash
+make up C=desktop ARGS="--ephemeral --cdp"
+node scripts/desktop-window-capture.mjs window.png
+node scripts/desktop-window-capture.mjs --compare origin/main shots/ -- apps/desktop packages/views
+make destroy ARGS="--yes"
+```
+
+The script finds the window by its owner PID, the process listening on the
+CDP port that `make status` has verified for this environment. It never matches
+by app name or window title: a dev build is also called "Multica Canary", and
+its title is the current page, so either could pick up your own Desktop window.
+Transparent rounded corners are flattened onto white, and the colour profile is
+kept. The app running the command needs Screen Recording permission.
+
+`--compare BASE` writes `before.png` with BASE's version of the changed files
+and `after.png` with the worktree's. Desktop is stopped and relaunched for each
+state, because swapping files under HMR can leave the app stuck loading. The
+index is never touched, and the files are restored on success, failure and
+interrupt. A pathspec after `--` limits which files are swapped.
+
+`--prepare CMD` runs before every capture, in both modes, for example
+`make env-exec ARGS="-- node scripts/desktop-cdp.mjs ./open-page.mjs"` to open
+the page to show. It sees `DESKTOP_CAPTURE_STATE` set to `current`, `before` or
+`after`, and a non-zero exit aborts the run without capturing.
 
 ### Isolation Guarantee
 

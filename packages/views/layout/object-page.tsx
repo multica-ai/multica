@@ -8,13 +8,12 @@ import {
   type ComponentProps,
   type ReactNode,
   type Ref,
-  type RefObject,
 } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { ChevronRight, PanelRight, type IconComponent } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
-import { isContentTruncated, TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -362,44 +361,12 @@ export function ObjectPanelSection({
   );
 }
 
-/** Whether `ref`'s content is cut off, re-checked when it resizes or web fonts finish loading. */
-function useIsTruncated(ref: RefObject<HTMLElement | null>, content: ReactNode) {
-  const [truncated, setTruncated] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    let active = true;
-    const check = () => {
-      if (active) setTruncated(isContentTruncated(el));
-    };
-    check();
-    void document.fonts?.ready.then(check);
-    const observer = new ResizeObserver(check);
-    observer.observe(el);
-    return () => {
-      active = false;
-      observer.disconnect();
-    };
-  }, [ref, content]);
-  return truncated;
-}
-
 /** One label and value in the properties panel; the value may be a picker. */
 export function ObjectProperty({ label, children }: { label: ReactNode; children: ReactNode }) {
-  const labelRef = useRef<HTMLSpanElement>(null);
-  // A cut-off label takes keyboard focus so its tooltip can show the full text;
-  // a label that fits stays out of the tab order.
-  const truncated = useIsTruncated(labelRef, label);
   return (
     <div className="-mx-2 flex min-h-8 items-center gap-2 rounded-md px-2 transition-colors hover:bg-accent/50">
-      <TruncatedTooltip content={label}>
-        <span
-          ref={labelRef}
-          tabIndex={truncated ? 0 : undefined}
-          className="w-20 shrink-0 truncate rounded-sm text-caption text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-        >
-          {label}
-        </span>
+      <TruncatedTooltip content={label} focusable>
+        <span className="w-20 shrink-0 truncate text-caption text-muted-foreground">{label}</span>
       </TruncatedTooltip>
       <div className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-caption">{children}</div>
     </div>

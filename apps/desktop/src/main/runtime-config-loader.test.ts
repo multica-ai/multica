@@ -5,7 +5,7 @@ import { tmpdir } from "os";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({
-  app: { getPath: vi.fn() },
+  app: { getPath: () => tmpdir() },
 }));
 
 import { loadRuntimeConfig } from "./runtime-config-loader";

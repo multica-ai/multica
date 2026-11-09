@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { catalogViolations, parseWorkspaceManifest } from "./check-dependency-catalog.mjs";
 
@@ -92,4 +97,32 @@ test("allowlisted drift passes until it is gone, then must be removed", () => {
   });
   assert.equal(aligned.length, 1);
   assert.match(aligned[0], /^fumadocs-core: allowlisted but no longer/);
+});
+
+test("still checks when run through a symlinked path", (t) => {
+  // Node gives the main module its real path but keeps argv[1] as typed, so a
+  // guard comparing the two unresolved would skip main() and exit 0 silently.
+  const root = mkdtempSync(join(tmpdir(), "dependency-catalog-entry-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const repo = join(root, "repo");
+  mkdirSync(join(repo, "scripts"), { recursive: true });
+  copyFileSync(
+    fileURLToPath(new URL("./check-dependency-catalog.mjs", import.meta.url)),
+    join(repo, "scripts", "check-dependency-catalog.mjs"),
+  );
+  writeFileSync(join(repo, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n");
+  writeFileSync(join(repo, "package.json"), "{}");
+  for (const name of ["a", "b"]) {
+    mkdirSync(join(repo, "packages", name), { recursive: true });
+    writeFileSync(join(repo, "packages", name, "package.json"), JSON.stringify({ dependencies: { sonner: "^2.0.7" } }));
+  }
+  symlinkSync(repo, join(root, "link"), "dir");
+
+  const run = (dir) =>
+    spawnSync(process.execPath, [join(root, dir, "scripts", "check-dependency-catalog.mjs")], { encoding: "utf8" });
+  const linked = run("link");
+  assert.equal(linked.status, 1);
+  assert.match(linked.stderr, /sonner: declared by 2 workspaces/);
+  const direct = run("repo");
+  assert.deepEqual([linked.status, linked.stdout, linked.stderr], [direct.status, direct.stdout, direct.stderr]);
 });

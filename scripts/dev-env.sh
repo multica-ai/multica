@@ -745,6 +745,7 @@ ensure_credentials() {
       WORKSPACE_ID="$ws"
       DEV_TOKEN="$pat"
       write_profile_config "$config" "$pat" "$ws"
+      ensure_onboarded
       ok "CLI profile $PROFILE already authenticated"
       return 0
     fi
@@ -782,16 +783,30 @@ Do not retry immediately — repeated attempts lock the code. Wait ~40s and re-r
   fi
   [ -n "$ws" ] || die "Workspace creation failed: $ws_response"
 
-  # A fresh user has onboarded_at = NULL and a browser login is bounced to
-  # /onboarding, so the URL this script prints would not land in the app.
-  curl -sS -X POST "$server/api/me/onboarding/complete" \
-    -H "Authorization: Bearer $pat" -H "X-Workspace-ID: $ws" \
-    -H 'Content-Type: application/json' -d '{"exit":"existing"}' >/dev/null 2>&1 || true
-
   write_profile_config "$config" "$pat" "$ws"
   WORKSPACE_ID="$ws"
   DEV_TOKEN="$pat"
+  ensure_onboarded
   ok "Logged in as $DEV_EMAIL and wrote profile $PROFILE"
+}
+
+# A fresh user has onboarded_at = NULL and a browser login is bounced to
+# /onboarding, so the URL this script prints would not land in the app. The
+# server keeps the first completion time, so repeating this is harmless.
+ensure_onboarded() {
+  curl -sf --max-time 5 -X POST "http://localhost:${BACKEND_PORT}/api/me/onboarding/complete" \
+    -H "Authorization: Bearer $DEV_TOKEN" -H "X-Workspace-ID: $WORKSPACE_ID" \
+    -H 'Content-Type: application/json' \
+    -d "{\"completion_path\":\"skip_existing\",\"workspace_id\":\"$(json_escape "$WORKSPACE_ID")\"}" \
+    >/dev/null || warn "could not mark $DEV_EMAIL onboarded; the browser may open /onboarding"
+}
+
+# Every component set gets the same signed-in, onboarded workspace with issues
+# in it: Web, Playwright and scripts/dev-fixtures.mjs all start from the profile
+# token, and Desktop and the daemon sign in with it.
+seed_dev_workspace() {
+  ensure_credentials
+  ensure_fixture_issues
 }
 
 # A fresh workspace has no issues, so neither an issue page nor the dedicated
@@ -839,7 +854,6 @@ daemon_task_marker() {
 
 start_daemon() {
   local status state build_commit
-  ensure_credentials
 
   # Built, never `go run`: the daemon records its own executable path at startup
   # and re-execs it as the execution-environment helper for every task. Under
@@ -890,9 +904,6 @@ start_desktop() {
   if [ -n "$DESKTOP_CDP_PORT" ] && ! port_free "$DESKTOP_CDP_PORT"; then
     die "Desktop CDP port $DESKTOP_CDP_PORT is busy: $(describe_port_owner "$DESKTOP_CDP_PORT"). Pick another with --remote-debugging-port N."
   fi
-
-  ensure_credentials
-  ensure_fixture_issues
 
   write_desktop_env_file
   # Desktop's main process delivers MULTICA_DEV_AUTH_TOKEN to the renderer the
@@ -1275,6 +1286,8 @@ ${C_GREEN}✓ Environment ready.${C_OFF}
 
   ${entrypoint}
   Sign in     ${DEV_EMAIL}  ·  code ${MULTICA_DEV_VERIFICATION_CODE:-$DEV_CODE_DEFAULT}
+  Token       profile ${PROFILE} (onboarded, workspace /${WORKSPACE_SLUG})
+  Fixtures    make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"
   Backend     http://localhost:${BACKEND_PORT}   (GET /health reports pid + commit + started_at)
   Commit      $(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)
   Environment ${NAME}$( [ "${TTL_HOURS:-0}" != 0 ] && printf ' (expires %s)' "$EXPIRES_AT" )
@@ -1533,6 +1546,7 @@ Start the rest with 'make up C=api,web', or run 'make up C=daemon' from your own
 
   step "Components: $COMPONENTS"
   component_selected api && start_api
+  seed_dev_workspace
   component_selected web && start_web
   component_selected daemon && start_daemon
   component_selected desktop && start_desktop
@@ -1809,7 +1823,9 @@ Local development environments: named, listable, deletable.
 Components: api (Go backend), web (Next.js), daemon (agent daemon),
 desktop (Electron). Anything selected implies api.
 
-desktop starts signed in to an onboarded workspace. --cdp exposes a Chrome
+Every environment has an onboarded workspace with two issues, signed in
+through its CLI profile; scripts/dev-fixtures.mjs adds chat, Agent Builder and
+wide-markdown issue content. desktop starts signed in. --cdp exposes a Chrome
 DevTools Protocol port (printed by up and status --json) for Playwright's
 connectOverCDP; the port is kept for later runs until --no-cdp.
 
