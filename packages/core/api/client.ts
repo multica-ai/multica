@@ -929,7 +929,7 @@ export class ApiClient {
    * so the real case is unaffected.
    */
   private handleUnauthorized(credentialUsed: string | null) {
-    if (credentialUsed !== null && this.getToken() !== credentialUsed) {
+    if (this.getToken() !== credentialUsed) {
       this.logger.info("ignoring 401 for a credential that has since been replaced");
       return;
     }
