@@ -157,6 +157,45 @@ export function useResignedInlineMedia(
   return { url: pickedUrl, pending };
 }
 
+// useFreshStreamedMediaURL resolves the URL the viewer streams a video, audio
+// file or PDF from. Unlike an inline image, these are never loaded before the
+// viewer opens, so whatever URL the attachment record carries is used for the
+// first time here — and records live in caches that never go stale, while the
+// signed `download_url` in them expires after 30 minutes. Handing that to
+// `<video>` on a page that has been open a while plays nothing (MUL-8892).
+//
+// So for these kinds the viewer always asks the authenticated metadata
+// endpoint for a fresh signature, the same exchange the Download button makes.
+// It shares the re-sign query above, so an attachment is fetched once per TTL.
+// Proxy mode has no storage URL to sign; the picked URL stands there, as it
+// does when the request fails.
+export function useFreshStreamedMediaURL(
+  attachmentId: string | undefined,
+  pickedUrl: string,
+  enabled: boolean,
+): { url: string; pending: boolean } {
+  const active = enabled && !!attachmentId && !!pickedUrl;
+  const { data: fresh, isError, isStale, isFetching } = useQuery({
+    queryKey: ["attachment-inline-resign", attachmentId],
+    queryFn: () => api.getAttachment(attachmentId as string),
+    enabled: active,
+    staleTime: RESIGN_STALE_MS,
+    gcTime: RESIGN_STALE_MS,
+  });
+
+  if (!active) return { url: pickedUrl, pending: false };
+  // A cached answer past its stale time may hold a signature that has
+  // already expired: wait for the refetch it triggers rather than start a
+  // stream on it and restart once the new URL lands.
+  if (fresh && !(isStale && isFetching)) {
+    const dl = fresh.download_url ?? "";
+    const signed =
+      /^https?:\/\//i.test(dl) && attachmentIdFromDownloadURL(dl) === undefined;
+    return { url: signed ? dl : pickedUrl, pending: false };
+  }
+  return { url: pickedUrl, pending: !isError };
+}
+
 // useObjectURL turns a Blob into a `blob:` URL. The module cache keeps the
 // URL stable across remounts so a re-entry with a cached blob does not flash
 // the fallback pickedUrl for one frame (see #7741). Refcount + delayed GC

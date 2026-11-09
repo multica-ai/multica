@@ -19,7 +19,12 @@ const { downloadMock, getBaseUrlMock, toastErrorMock } = vi.hoisted(() => ({
 vi.mock("../platform", () => ({ openExternal: vi.fn() }));
 
 vi.mock("@multica/core/api", () => ({
-  api: { getBaseUrl: getBaseUrlMock, getAttachmentTextContent: vi.fn() },
+  api: {
+    getBaseUrl: getBaseUrlMock,
+    getAttachmentTextContent: vi.fn(),
+    // Nothing fresher to sign: streamed media keeps the record's URL.
+    getAttachment: vi.fn(() => Promise.reject(new Error("no re-sign"))),
+  },
   PreviewTooLargeError: class extends Error {},
   PreviewUnsupportedError: class extends Error {},
 }));
@@ -340,7 +345,7 @@ describe("PreviewSequenceProvider", () => {
     expectCounter("1 / 3");
   });
 
-  it("pages onto files that are not images", () => {
+  it("pages onto files that are not images", async () => {
     const mixed = [
       imageAttachment(1),
       fileAttachment(2, "spec.pdf", "application/pdf"),
@@ -359,7 +364,7 @@ describe("PreviewSequenceProvider", () => {
       fireEvent.click(nextButton());
     });
     expectCounter("2 / 3");
-    expect(screen.getByTitle("spec.pdf").tagName).toBe("IFRAME");
+    expect((await screen.findByTitle("spec.pdf")).tagName).toBe("IFRAME");
 
     act(() => {
       fireEvent.click(nextButton());
@@ -368,7 +373,7 @@ describe("PreviewSequenceProvider", () => {
     expect(screen.getByRole("dialog").querySelector("img")).not.toBeNull();
   });
 
-  it("leaves the arrow keys to a focused video", () => {
+  it("leaves the arrow keys to a focused video", async () => {
     const mixed = [
       fileAttachment(1, "demo.mp4", "video/mp4"),
       imageAttachment(2),
@@ -382,7 +387,11 @@ describe("PreviewSequenceProvider", () => {
       fireEvent.click(screen.getByText("open"));
     });
 
-    const video = screen.getByRole("dialog").querySelector("video")!;
+    const video = await waitFor(() => {
+      const el = screen.getByRole("dialog").querySelector("video");
+      expect(el).not.toBeNull();
+      return el!;
+    });
     act(() => {
       fireEvent.keyDown(video, { key: "ArrowRight" });
     });

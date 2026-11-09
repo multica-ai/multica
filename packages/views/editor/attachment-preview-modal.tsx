@@ -89,7 +89,10 @@ import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useDownloadAttachment } from "./use-download-attachment";
 import { useAttachmentDownloadState } from "./hooks/use-attachment-download-state";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
-import { useResignedInlineMedia } from "./hooks/use-inline-media-url";
+import {
+  useFreshStreamedMediaURL,
+  useResignedInlineMedia,
+} from "./hooks/use-inline-media-url";
 import { useZoomCanvas, type ZoomCanvasApi } from "./hooks/use-zoom-canvas";
 import { ZoomCanvas, ZoomControls } from "./zoom-canvas";
 import type { Size } from "./utils/zoom-transform";
@@ -773,6 +776,16 @@ function PreviewPanel({
   const imageLoadError =
     mediaUrl !== "" && mediaUrl === targetUrl ? onImageError : undefined;
 
+  // Video, audio and PDF stream straight from a URL the reader has never
+  // loaded, so they get a freshly signed one rather than the record's.
+  const cdnDomain = useConfigStore((s) => s.cdnDomain);
+  const streamed = useFreshStreamedMediaURL(
+    state.attachmentId ?? attachmentIdFromStorageURL(state.mediaUrl, cdnDomain),
+    state.mediaUrl,
+    kind === "video" || kind === "audio" || kind === "pdf",
+  );
+  const streamUrl = streamed.pending ? "" : streamed.url;
+
   // Copying reads the image's bytes from script. The desktop renderer can
   // read any origin; web script can't read the storage CDN (it sends no CORS
   // headers), and there the browser's own context menu has Copy image. Copies
@@ -1049,6 +1062,7 @@ function PreviewPanel({
                 kind={kind}
                 source={source}
                 state={state}
+                streamUrl={streamUrl}
                 view={view}
                 onDownload={handleDownload}
                 downloading={downloading}
@@ -1354,6 +1368,7 @@ function PreviewContent({
   kind,
   source,
   state,
+  streamUrl,
   view,
   onDownload,
   downloading,
@@ -1362,6 +1377,8 @@ function PreviewContent({
   kind: Exclude<PreviewKind, "image"> | null;
   source: PreviewSource;
   state: PreviewState;
+  /** Where video, audio and PDF load from; empty while it is being signed. */
+  streamUrl: string;
   view: StageView;
   onDownload: () => void;
   downloading: boolean;
@@ -1406,32 +1423,33 @@ function PreviewContent({
     </DocumentSheet>
   );
 
+  if ((kind === "pdf" || kind === "video" || kind === "audio") && !streamUrl) {
+    return <PreviewLoading />;
+  }
+
   switch (kind) {
     case "pdf":
       return (
         <div className="h-full pb-4">
           <iframe
-            src={state.mediaUrl}
+            src={streamUrl}
             className="h-full w-full rounded-lg bg-background"
             title={state.filename}
           />
         </div>
       );
     case "video":
-      return (
-        <div className="flex h-full w-full items-center justify-center pb-4">
-          <video
-            src={state.mediaUrl}
-            controls
-            className="h-full w-full object-contain"
-          />
-        </div>
-      );
     case "audio":
       return (
-        <div className="dark flex h-full w-full items-center justify-center p-8">
-          <audio src={state.mediaUrl} controls className="w-full max-w-xl" />
-        </div>
+        // Keyed on the URL: a failure belongs to the file that failed, not
+        // to the next one the sequence pages to.
+        <MediaPlayer
+          key={streamUrl}
+          kind={kind}
+          src={streamUrl}
+          onDownload={onDownload}
+          downloading={downloading}
+        />
       );
     case "markdown":
       return (
@@ -1582,14 +1600,7 @@ function TextBackedPreview({
   const { t } = useT("editor");
   const query = useAttachmentHtmlText(attachmentId);
 
-  if (query.isLoading) {
-    return (
-      <div className="dark flex h-full items-center justify-center gap-2 text-body text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" />
-        {t(($) => $.attachment.preview_loading)}
-      </div>
-    );
-  }
+  if (query.isLoading) return <PreviewLoading />;
   if (query.error) {
     if (query.error instanceof PreviewTooLargeError) {
       return (
@@ -1619,6 +1630,66 @@ function TextBackedPreview({
   }
   if (!query.data) return null;
   return <>{render(query.data.text)}</>;
+}
+
+function PreviewLoading() {
+  const { t } = useT("editor");
+  return (
+    <div className="dark flex h-full items-center justify-center gap-2 text-body text-muted-foreground">
+      <Loader2 className="size-4 animate-spin" />
+      {t(($) => $.attachment.preview_loading)}
+    </div>
+  );
+}
+
+// Video and audio — the browser's own player. A file it cannot play (an
+// unsupported container or codec, a URL that stopped working) would otherwise
+// leave an empty player with no explanation.
+function MediaPlayer({
+  kind,
+  src,
+  onDownload,
+  downloading,
+}: {
+  kind: "video" | "audio";
+  src: string;
+  onDownload: () => void;
+  downloading: boolean;
+}) {
+  const { t } = useT("editor");
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <UnsupportedFallback
+        message={t(($) => $.attachment.preview_failed)}
+        onDownload={onDownload}
+        downloading={downloading}
+      />
+    );
+  }
+  if (kind === "audio") {
+    return (
+      <div className="dark flex h-full w-full items-center justify-center p-8">
+        <audio
+          src={src}
+          controls
+          className="w-full max-w-xl"
+          onError={() => setFailed(true)}
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-full w-full items-center justify-center pb-4">
+      <video
+        src={src}
+        controls
+        className="h-full w-full object-contain"
+        onError={() => setFailed(true)}
+      />
+    </div>
+  );
 }
 
 // Fallback — used for 413 / 415 / unknown kinds. Sits on the stage, so dark.
