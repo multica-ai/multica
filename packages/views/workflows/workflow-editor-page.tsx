@@ -151,6 +151,16 @@ function sameDraft(a: Draft, b: Draft): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+function retargetHandoffs(handoffs: Draft["handoffs"], from: string, to?: string): Draft["handoffs"] {
+  return Object.fromEntries(
+    Object.entries(handoffs).map(([id, h]) => [id, {
+      ...h,
+      next_status_key: h.next_status_key === from ? to : h.next_status_key,
+      back_status_key: h.back_status_key === from ? to : h.back_status_key,
+    }]),
+  );
+}
+
 function mappingPlanFrom(err: unknown): IssueWorkflowMappingPlan | null {
   if (!(err instanceof ApiError) || err.status !== 409 || !err.body || typeof err.body !== "object") return null;
   const body = err.body as { code?: unknown; plan?: IssueWorkflowMappingPlan };
@@ -261,8 +271,6 @@ export function WorkflowEditorPage({
   const addable = statusColumnKeys(catalog).filter((key) => !isFixedWorkflowStatus(key) && !middleKeys.includes(key));
   const ids = draft.middle.map((c) => c.id);
   const targetKeys = columns.flatMap((c) => ("status_key" in c ? [c.status_key] : []));
-  // Next and back can only name statuses that exist before the save.
-  const flow = { steps: targetKeys.map((status_key) => ({ status_key, ...NO_HANDOFF })) };
   // The default next follows the whole draft, unsaved columns included —
   // the order the server resolves it in once the draft is saved.
   const draftFlow = { steps: columns.map((c) => ({ status_key: columnKey(c), ...NO_HANDOFF })) };
@@ -299,20 +307,25 @@ export function WorkflowEditorPage({
   };
 
   const save = async (mapping?: Record<string, string>) => {
-    const listed = new Set(targetKeys);
+    const listed = new Set(columns.map(columnKey));
+    const newKeys = new Set(columns.filter((c) => "new_name" in c).map(columnKey));
     const steps: IssueWorkflowStepInput[] = columns.map((c) => {
       const raw = draft.handoffs[c.id];
       const h = raw && savedHandoff(raw);
       const handoff = hasHandoff(h)
         ? {
             ...(h.handler.type !== "none" ? { handler: h.handler, instructions: h.instructions } : {}),
-            ...(h.next_status_key && listed.has(h.next_status_key) ? { next_status_key: h.next_status_key } : {}),
-            ...(h.back_status_key && listed.has(h.back_status_key) ? { back_status_key: h.back_status_key } : {}),
+            ...(h.next_status_key && listed.has(h.next_status_key)
+              ? { [newKeys.has(h.next_status_key) ? "next_step_id" : "next_status_key"]: h.next_status_key }
+              : {}),
+            ...(h.back_status_key && listed.has(h.back_status_key)
+              ? { [newKeys.has(h.back_status_key) ? "back_step_id" : "back_status_key"]: h.back_status_key }
+              : {}),
           }
         : {};
       return "status_key" in c
         ? { status_key: c.status_key, ...handoff }
-        : { new_status: { name: c.new_name, ...(c.category ? { category: c.category } : {}) }, ...handoff };
+        : { client_id: c.id, new_status: { name: c.new_name, ...(c.category ? { category: c.category } : {}) }, ...handoff };
     });
     const body = {
       ...(isDefault ? {} : { name: draft.name.trim() }),
@@ -404,13 +417,20 @@ export function WorkflowEditorPage({
       return {
         ...d,
         middle: d.middle.map((c) => (c.id === column.id ? { id: key, status_key: key } : c)),
-        handoffs: moved ? { ...rest, [key]: moved } : rest,
+        handoffs: retargetHandoffs(moved ? { ...rest, [key]: moved } : rest, columnKey(column), key),
       };
     });
     setSelected(key);
   };
   const removeColumn = (column: DraftColumn) => {
-    setDraft((d) => ({ ...d, middle: d.middle.filter((c) => c.id !== column.id) }));
+    setDraft((d) => {
+      const { [column.id]: _removed, ...handoffs } = d.handoffs;
+      return {
+        ...d,
+        middle: d.middle.filter((c) => c.id !== column.id),
+        handoffs: retargetHandoffs(handoffs, columnKey(column)),
+      };
+    });
     setSelected("todo");
   };
 
@@ -589,7 +609,8 @@ export function WorkflowEditorPage({
           column={current}
           off={isOff(current)}
           handoff={draft.handoffs[current.id]}
-          flow={flow}
+          flow={draftFlow}
+          targetLabel={columnLabel}
           defaultNextLabel={columnLabel(workflowNextStatus(draftFlow, columnKey(current)))}
           canEdit={canEdit}
           statusOptions={middleIds.has(current.id) ? addable : null}
@@ -598,6 +619,8 @@ export function WorkflowEditorPage({
           onPatch={(patch) => patchHandoff(current.id, patch)}
           onPreview={
             saved && "status_key" in current && saved.steps.some((s) => s.status_key === current.status_key)
+              && [draft.handoffs[current.id]?.next_status_key, draft.handoffs[current.id]?.back_status_key]
+                .every((key) => !key || saved.steps.some((s) => s.status_key === key))
               ? () => setPreviewOpen(true)
               : undefined
           }
@@ -810,6 +833,7 @@ function StepDetail({
   onPatch,
   onPreview,
   defaultNextLabel,
+  targetLabel,
 }: {
   column: DraftColumn;
   off: boolean;
@@ -824,6 +848,7 @@ function StepDetail({
   onPreview?: () => void;
   /** The default next status's label, resolved over the whole draft. */
   defaultNextLabel: string;
+  targetLabel: (key: string) => string;
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
@@ -916,6 +941,7 @@ function StepDetail({
               onPatch={onPatch}
               onPreview={onPreview}
               defaultNextLabel={defaultNextLabel}
+              targetLabel={targetLabel}
             />
           ) : (
             <p className="text-caption leading-5 text-muted-foreground">{t(($) => $.workflows.editor.no_handoff_step)}</p>
