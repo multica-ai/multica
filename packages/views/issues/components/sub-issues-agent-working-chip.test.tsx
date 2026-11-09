@@ -62,8 +62,8 @@ vi.mock("@multica/ui/components/ui/hover-card", () => ({
   HoverCardTrigger: ({ children }: { children: React.ReactNode }) => (
     <span data-testid="hover-card-trigger">{children}</span>
   ),
-  HoverCardContent: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
+  HoverCardContent: ({ children, align }: { children: React.ReactNode; align?: string }) => (
+    <div data-testid="hover-card-content" data-align={align}>{children}</div>
   ),
 }));
 
@@ -148,5 +148,21 @@ describe("SubIssuesAgentWorkingChip", () => {
     );
 
     expect(container.firstChild).toBeNull();
+  });
+
+  it("passes default align='start' to hover card content", () => {
+    mockState.agents = [makeAgent()];
+
+    render(<SubIssuesAgentWorkingChip parentIssueId="parent-1" />);
+
+    expect(screen.getByTestId("hover-card-content").getAttribute("data-align")).toBe("start");
+  });
+
+  it("passes custom align to hover card content", () => {
+    mockState.agents = [makeAgent()];
+
+    render(<SubIssuesAgentWorkingChip parentIssueId="parent-1" align="end" />);
+
+    expect(screen.getByTestId("hover-card-content").getAttribute("data-align")).toBe("end");
   });
 });
