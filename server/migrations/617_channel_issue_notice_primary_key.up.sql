@@ -1,0 +1,1 @@
+ALTER TABLE channel_issue_notice ADD CONSTRAINT channel_issue_notice_pkey PRIMARY KEY USING INDEX idx_channel_issue_notice_id;

@@ -396,6 +396,9 @@ func (c *httpAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 		return "", fmt.Errorf("lark http client: encode text content: %w", err)
 	}
 	path, body := outboundMessageRequest(p.ChatID, "text", string(contentBytes), p.ReplyTarget)
+	if p.UUID != "" {
+		body["uuid"] = p.UUID
+	}
 	var resp struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
