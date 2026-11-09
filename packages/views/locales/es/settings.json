@@ -937,35 +937,6 @@
     "inbound_pending_hint": "Envía un mensaje a este bot en Feishu/Lark para verificar la recepción. Si no llega, comprueba el modo de conexión persistente, la suscripción im.message.receive_v1 y la publicación o aprobación de la app. Puede que las vinculaciones existentes aún no tengan una verificación registrada.",
     "inbound_verified_hint": "Esta vinculación ha recibido un mensaje válido. Esto no confirma la conectividad continua, la ejecución del agente ni las respuestas."
   },
-  "composio": {
-    "page_description": "Conecta apps que tus agentes pueden usar.",
-    "not_enabled_title": "La integración con Composio no está activada",
-    "not_enabled_description_prefix": "Define",
-    "not_enabled_description_suffix": "en el servidor para activar las conexiones de toolkits de Composio.",
-    "loading": "Cargando toolkits…",
-    "load_failed": "Error al cargar los toolkits de Composio.",
-    "empty_title": "Aún no hay apps conectables",
-    "empty_description": "Ningún toolkit tiene aún una configuración de auth activada en tu proyecto de Composio. Activa una en el panel de Composio para que aparezca aquí.",
-    "search_placeholder": "Buscar toolkits…",
-    "connect": "Conectar",
-    "connecting": "Conectando…",
-    "connected": "Conectado",
-    "disconnect": "Desconectar",
-    "disconnecting": "Desconectando…",
-    "connect_failed": "No se ha podido iniciar la conexión. Inténtalo de nuevo.",
-    "disconnect_failed": "No se ha podido desconectar. Inténtalo de nuevo.",
-    "toast_disconnected": "Desconectado",
-    "disconnect_confirm_title": "¿Desconectar esta app?",
-    "disconnect_confirm_description": "Tu cuenta conectada se revocará en Composio y tus agentes perderán acceso a este toolkit. Puedes volver a conectarla más tarde.",
-    "disconnect_confirm_cancel": "Cancelar",
-    "connections_load_failed": "No se han podido cargar tus conexiones existentes; el estado de conexión puede estar incompleto.",
-    "toast_connected": "Conectado",
-    "toast_connect_failed": "No se ha podido completar la conexión. Inténtalo de nuevo.",
-    "last_used": "Último uso {{when}}",
-    "last_used_never": "Nunca usado",
-    "expired": "Token caducado",
-    "reconnect": "Reconectar"
-  },
   "slack": {
     "section_title": "Slack",
     "page_description": "Chatea con agentes en Slack o usa /issue para crear una tarea.",
@@ -1447,7 +1418,7 @@
     }
   },
   "mcp_sources": {
-    "apps": "Autorizadas con tu propia cuenta a través de Composio y activadas en agentes que posees.",
+    "apps": "Cuentas del equipo o personales conectadas mediante Multica, asignadas a cada agente con una cuenta y un nivel de permisos.",
     "current": "Esta página",
     "mcp": "Añadidas por administradores y compartidas en todo el espacio de trabajo, y luego asignadas por agente.",
     "plugins": "Paquetes instalados que pueden añadir herramientas, ganchos programados y almacenamiento, cada uno con sus propios permisos.",
@@ -1480,5 +1451,178 @@
     "save": "Guardar",
     "save_error": "No se ha podido guardar el valor predeterminado.",
     "saving": "Guardando…"
+  },
+  "connected_apps": {
+    "description": "Cuentas que usan tus agentes. Cada llamada pasa por Multica, que aplica tus reglas y pide confirmación antes de enviar, eliminar o compartir.",
+    "add_app": "Añadir aplicación",
+    "loading": "Cargando aplicaciones…",
+    "load_failed": "No se pudieron cargar las aplicaciones.",
+    "team_title": "Cuentas del equipo",
+    "team_description": "Cuentas compartidas del espacio de trabajo, como el buzón de soporte o el GitHub de la empresa. Los administradores las conectan; los agentes que tienen acceso actúan con esa cuenta.",
+    "team_empty": "Aún no hay cuentas del equipo.",
+    "team_empty_member": "Aún no hay cuentas del equipo. Pide a un administrador del espacio de trabajo que conecte una.",
+    "personal_title": "Mis cuentas",
+    "personal_description": "Tus propias cuentas. Cuando inicias una ejecución, los agentes las usan en las aplicaciones configuradas con la cuenta de quien inicia la ejecución.",
+    "personal_empty": "No has conectado ninguna cuenta.",
+    "connected_by": "Conectada por {{name}}",
+    "last_used": "Último uso {{when}}",
+    "last_used_never": "Sin usar",
+    "used_by_one": "La usa {{count}} agente",
+    "used_by_other": "La usan {{count}} agentes",
+    "expired": "Necesita volver a conectarse",
+    "reconnect": "Volver a conectar",
+    "rules": "Reglas",
+    "activity": "Actividad",
+    "disconnect": "Desconectar",
+    "catalog_title": "Aplicaciones disponibles",
+    "catalog_label": "Aplicaciones que pueden añadir los miembros",
+    "catalog_description": "Las aplicaciones seleccionadas incluyen reglas predeterminadas revisadas. Todas las aplicaciones incluye todo lo que Composio puede conectar; las acciones que Multica no puede clasificar siempre piden confirmación. Una lista personalizada permite solo las aplicaciones que elijas.",
+    "catalog_all": "Todas las aplicaciones",
+    "catalog_curated": "Solo seleccionadas",
+    "catalog_custom": "Lista personalizada",
+    "toast_connected": "Cuenta conectada",
+    "toast_connect_failed": "No se pudo completar la conexión. Inténtalo de nuevo.",
+    "toast_disconnected": "Desconectada",
+    "toast_failed": "Algo salió mal. Inténtalo de nuevo.",
+    "add": {
+      "title": "Añadir una aplicación",
+      "description": "Conecta una cuenta para el equipo o para ti. El acceso de cada agente se configura en su página de Aplicaciones.",
+      "search": "Buscar aplicaciones…",
+      "empty": "No hay aplicaciones que coincidan.",
+      "curated": "Seleccionada",
+      "recommended_team": "Suele usarse una cuenta del equipo",
+      "recommended_personal": "Suele usarse una cuenta personal",
+      "connect_team": "Conectar para el equipo",
+      "connect_personal": "Conectar mi cuenta",
+      "connecting": "Conectando…",
+      "connected": "Conectada"
+    },
+    "disconnect_team": {
+      "title": "¿Desconectar la cuenta del equipo de {{app}}?",
+      "description": "Los agentes que usan la cuenta del equipo perderán el acceso de inmediato.",
+      "agents": "Agentes que la usan",
+      "no_agents": "Ningún agente la usa.",
+      "active_tasks": "Ejecuciones en curso: {{count}}",
+      "active_autopilots": "Automatizaciones activas: {{count}}",
+      "pending": "Confirmaciones que se cancelarán: {{count}}",
+      "cancel": "Cancelar",
+      "confirm": "Desconectar"
+    },
+    "disconnect_personal": {
+      "title": "¿Desconectar tu cuenta de {{app}}?",
+      "description": "Las ejecuciones que inicies ya no podrán usarla. Puedes volver a conectarla más adelante.",
+      "cancel": "Cancelar",
+      "confirm": "Desconectar"
+    },
+    "detail": {
+      "team_title": "{{app}} · cuenta del equipo",
+      "personal_title": "{{app}} · mi cuenta",
+      "rules_description": "Lo que pueden hacer los agentes con esta cuenta. El nivel de un agente solo puede hacer estas reglas más estrictas.",
+      "rules_read_only": "Solo los administradores del espacio de trabajo pueden cambiar las reglas de las cuentas del equipo.",
+      "default": "Predeterminado: {{policy}}",
+      "activity_empty": "Aún no hay llamadas.",
+      "activity_failed": "No se pudo cargar la actividad."
+    },
+    "classes": {
+      "read": {
+        "label": "Leer",
+        "description": "Buscar, listar y consultar"
+      },
+      "write": {
+        "label": "Escribir",
+        "description": "Crear y actualizar contenido"
+      },
+      "send": {
+        "label": "Enviar",
+        "description": "Enviar correos o mensajes, publicar e invitar"
+      },
+      "delete": {
+        "label": "Eliminar",
+        "description": "Eliminar o archivar"
+      },
+      "share": {
+        "label": "Compartir",
+        "description": "Cambiar permisos o compartir fuera"
+      }
+    },
+    "policies": {
+      "allow": "Permitir",
+      "confirm": "Preguntar antes",
+      "block": "Bloquear"
+    },
+    "outcomes": {
+      "ok": "Ejecutada",
+      "error": "Fallida",
+      "blocked": "Bloqueada",
+      "pending": "En espera",
+      "approved": "Aprobada",
+      "rejected": "Rechazada",
+      "rate_limited": "Límite de llamadas alcanzado"
+    },
+    "scopes": {
+      "team": "Cuenta del equipo",
+      "personal": "Cuenta de quien inicia la ejecución"
+    },
+    "levels": {
+      "read": "Solo lectura",
+      "confirm_writes": "Preguntar antes de escribir",
+      "write": "Puede escribir"
+    },
+    "request": {
+      "title_action": "{{agent}} quiere ejecutar {{tool}}",
+      "title_connect": "{{agent}} te pide conectar {{app}}",
+      "pending_count_one": "{{count}} acción de aplicación pendiente de confirmación",
+      "pending_count_other": "{{count}} acciones de aplicaciones pendientes de confirmación",
+      "waiting_for": "Esperando a {{name}}",
+      "expires": "Caduca {{when}}",
+      "redacted": "Solo {{name}} puede ver los detalles.",
+      "arguments": "Argumentos",
+      "edit": "Editar",
+      "invalid_json": "Los argumentos deben ser un objeto JSON.",
+      "approve": "Aprobar y ejecutar",
+      "approve_all": "Aprobar todas",
+      "reject": "Rechazar",
+      "reject_reason": "Motivo (opcional, el agente lo verá)",
+      "connect": "Conectar {{app}}",
+      "connected_continue": "Ya la he conectado",
+      "status": {
+        "approved": "Aprobada",
+        "rejected": "Rechazada",
+        "failed": "Fallida",
+        "expired": "Caducada",
+        "cancelled": "Cancelada"
+      },
+      "toast_approved": "Aprobada. El agente continuará.",
+      "toast_rejected": "Rechazada. El agente se adaptará.",
+      "toast_failed": "No se pudo registrar tu decisión.",
+      "not_connected": "Conecta primero la cuenta.",
+      "connected_resumed": "{{app}} conectada. El agente continúa donde se detuvo.",
+      "rate_limited": "Esta cuenta alcanzó su límite de llamadas por minuto. Vuelve a aprobar la solicitud dentro de un minuto.",
+      "rate_limited_some_one": "{{count}} solicitud alcanzó el límite por minuto. Vuelve a aprobarla dentro de un minuto.",
+      "rate_limited_some_other": "{{count}} solicitudes alcanzaron el límite por minuto. Vuelve a aprobarlas dentro de un minuto.",
+      "withdrawn": "Ya no puedes usar este agente, por lo que se retiró la solicitud."
+    },
+    "tools": {
+      "tab": "Herramientas",
+      "description": "La categoría de una herramienta determina qué regla se aplica. Corrige las clasificaciones automáticas incorrectas; el cambio se aplica a todas las cuentas de esta aplicación en el espacio de trabajo.",
+      "read_only": "Solo los administradores del espacio de trabajo pueden cambiar la clasificación de las herramientas.",
+      "search": "Buscar herramientas",
+      "empty": "No hay herramientas que coincidan.",
+      "auto": "Automática ({{class}})",
+      "truncated": "Se muestran {{shown}} de {{total}}. Busca para reducir la lista."
+    },
+    "custom": {
+      "title": "Lista personalizada de aplicaciones",
+      "description": "Los agentes solo ven las aplicaciones que elijas y nadie puede conectar cuentas de otras aplicaciones.",
+      "selected_one": "{{count}} aplicación seleccionada",
+      "selected_other": "{{count}} aplicaciones seleccionadas",
+      "cancel": "Cancelar",
+      "save": "Guardar lista",
+      "saved": "Lista de aplicaciones guardada",
+      "edit": "Editar lista",
+      "row_label": "Aplicaciones permitidas",
+      "row_description_one": "{{count}} aplicación permitida",
+      "row_description_other": "{{count}} aplicaciones permitidas"
+    }
   }
 }
