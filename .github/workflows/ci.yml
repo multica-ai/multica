@@ -40,8 +40,8 @@ jobs:
         with:
           node-version: 22
 
-      - name: Test CI selection and gates
-        run: node --test scripts/ci-scope.test.mjs scripts/check-image-budget.test.mjs
+      - name: Test CI selection and repository tooling
+        run: node --test scripts/ci-scope.test.mjs scripts/check-image-budget.test.mjs scripts/pr-shots.test.mjs
 
       - name: Filter paths
         id: filter
@@ -216,6 +216,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Report runner CPU
+        run: |
+          nproc
+          lscpu
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4

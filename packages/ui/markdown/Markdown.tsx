@@ -125,6 +125,7 @@ function createComponents(
                 type="button"
                 className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                 onClick={() => window.open(href, '_blank', 'noopener,noreferrer')}
+                aria-label={filename ? `Download ${filename}` : 'Download'}
               >
                 <Download className="size-3.5" />
               </button>

@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "Abrir en la aplicación de escritorio"
+  },
+  "desktop": {
+    "link_other_instance": "La aplicación de escritorio está conectada a otra instancia de Multica.",
+    "link_workspace_unavailable": "Este espacio de trabajo no está disponible en la aplicación de escritorio."
+  },
   "inline_run": {
     "label": "Ejecución de {{name}}",
     "stop": "Detener",
@@ -732,14 +739,13 @@
     "restart_failed": "No se ha podido detener la ejecución actual. Tu mensaje no se envió."
   },
   "reply": {
+    "recipients_changed": "El destino de la respuesta ha cambiado. Revisa los destinatarios antes de volver a enviar.",
     "placeholder": "Deja una respuesta...",
     "annotations": {
-      "direct_reply": "Responder",
-      "direct_comment": "Publicar comentario",
-      "direct_target_deleted": "Se eliminó el destino de la respuesta. Copia tu nota antes de seleccionar otro comentario.",
-      "copy_note": "Copiar nota",
-      "note_copied": "Nota copiada",
-      "note_copy_failed": "No se pudo copiar la nota. Selecciona y copia el texto manualmente.",
+      "send_all": "Enviar todo",
+      "send_with_annotations_and_body": "Se enviará con las anotaciones guardadas ({{count}}) y el texto del borrador.",
+      "send_with_annotations": "Se enviará con las anotaciones guardadas ({{count}}).",
+      "send_with_body": "Se enviará con el texto del borrador.",
       "confirm_add": "Añadir anotación",
       "save": "Guardar anotación",
       "add_comment": "Añadir al comentario",
@@ -1877,6 +1883,26 @@
       "row_actions": "Acciones de {{name}}",
       "empty_title": "Aún no hay vistas guardadas",
       "empty_description": "Configura los filtros y las opciones de visualización de una lista de tareas y guárdalos como vista."
+    }
+  },
+  "app_calls": {
+    "section_title": "Aplicaciones",
+    "chips_label": "Aplicaciones usadas en esta ejecución",
+    "calls_count_one": "{{count}} llamada",
+    "calls_count_other": "{{count}} llamadas",
+    "more": "+{{count}} más",
+    "scope": {
+      "team": "Cuenta del equipo",
+      "personal": "Cuenta personal"
+    },
+    "outcome": {
+      "ok": "Ejecutada",
+      "error": "Fallida",
+      "blocked": "Bloqueada",
+      "pending": "En espera",
+      "approved": "Aprobada",
+      "rejected": "Rechazada",
+      "rate_limited": "Límite de llamadas alcanzado"
     }
   }
 }

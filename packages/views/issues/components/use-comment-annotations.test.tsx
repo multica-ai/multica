@@ -6,7 +6,6 @@ import { renderWithI18n } from "../../test/i18n";
 import { useCommentAnnotations } from "./use-comment-annotations";
 import { Profiler, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { AnnotationReplyOptions } from "./annotation-composer";
 import { toast } from "sonner";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
@@ -18,8 +17,8 @@ vi.mock("@multica/core/api", async (original) => {
 });
 vi.mock("../../editor/content-editor", async () => {
   const { forwardRef, useRef, useImperativeHandle } = await import("react");
-  return { ContentEditor: forwardRef(function Editor({ defaultValue, ariaLabel, onUpdate, onSubmit }: {
-    defaultValue?: string; ariaLabel?: string; onUpdate?: (value: string) => void; onSubmit?: () => void;
+  return { ContentEditor: forwardRef(function Editor({ defaultValue, ariaLabel, onUpdate, onSubmit, onEnter }: {
+    defaultValue?: string; ariaLabel?: string; onUpdate?: (value: string) => void; onSubmit?: () => void; onEnter?: () => void;
   }, ref) {
     const input = useRef<HTMLTextAreaElement>(null);
     useImperativeHandle(ref, () => ({
@@ -29,6 +28,9 @@ vi.mock("../../editor/content-editor", async () => {
     return <textarea ref={input} aria-label={ariaLabel} defaultValue={defaultValue}
       onChange={(event) => onUpdate?.(event.target.value)}
       onKeyDown={(event) => {
+        if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
+          event.preventDefault(); onEnter?.();
+        }
         if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing && event.keyCode !== 229) {
           event.preventDefault(); onSubmit?.();
         }
@@ -40,34 +42,35 @@ vi.mock("../../editor/content-editor", async () => {
 const entry: TimelineEntry = { type: "comment", id: "root", actor_type: "agent", actor_id: "emacs", content: "Selected text", created_at: "2026-09-10T00:00:00Z" };
 const key = "reply:issue:root" as const;
 
-function Fixture({ actorType = "agent", sourceKey = "initial", onSubmit, child = false, deleted = false }: {
-  actorType?: string; sourceKey?: string; onSubmit?: AnnotationReplyOptions["onSubmit"]; child?: boolean; deleted?: boolean;
+function Fixture({ actorType = "agent", sourceKey = "initial", child = false, deleted = false }: {
+  actorType?: string; sourceKey?: string; child?: boolean; deleted?: boolean;
 }) {
   const [client] = useState(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }));
   const annotation = useCommentAnnotations({
     issueId: "issue", draftKey: key,
     sources: [{ id: entry.id, name: actorType }, ...(child && !deleted ? [{ id: "child", name: "Child author" }] : [])], enabled: true,
-    reply: onSubmit ? { onSubmit, steerByDefault: () => false } : undefined,
   });
   return <QueryClientProvider client={client}><div ref={annotation.cardRef} {...annotation.captureProps}>
     {annotation.popup}
+    {annotation.composer?.render()}
     <div key={sourceKey} data-comment-content="root" tabIndex={0}>Selected text</div>
     {child && !deleted && <div data-comment-content="child" tabIndex={0}>Other text</div>}
   </div></QueryClientProvider>;
 }
 
-function DescriptionFixture({ issueId = "issue", loaded = true, onSubmit }: {
-  issueId?: string; loaded?: boolean; onSubmit?: AnnotationReplyOptions["onSubmit"];
+function DescriptionFixture({ issueId = "issue", loaded = true }: {
+  issueId?: string; loaded?: boolean;
 }) {
   const [client] = useState(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }));
   const sourceId = `description:${issueId}`;
   const annotations = useCommentAnnotations({
-    issueId, reply: onSubmit ? { onSubmit, steerByDefault: () => false } : undefined,
+    issueId,
     draftKey: `new:${issueId}`, sources: [{ id: sourceId, name: "Description" }], enabled: loaded, editable: true,
   });
   if (!loaded) return null;
   return <QueryClientProvider client={client}><div ref={annotations.cardRef} {...annotations.captureProps}>
     {annotations.popup}
+    {annotations.composer?.render()}
     <div data-comment-content={sourceId}><div contentEditable suppressContentEditableWarning>Selected text</div></div>
     <button onMouseDown={(event) => event.preventDefault()} onClick={annotations.addSelection}>Add to comment</button>
   </div></QueryClientProvider>;
@@ -110,63 +113,8 @@ beforeEach(() => {
 });
 
 describe("selection to reply", () => {
-  it("sends only the selected child quote and new instruction, preserving the existing draft", async () => {
-    const store = useCommentDraftStore.getState();
-    store.setDraft(key, "Keep the overall draft");
-    store.addAnnotation(key, { id: "saved", sourceCommentId: "root", sourceActorName: "Root author",
-      quote: "Selected text", note: "Keep the first annotation", start: 0, prefix: "", suffix: "" });
-    const draft = useCommentDraftStore.getState().drafts[key];
-    const onSubmit = vi.fn(async () => "posted");
-    const { container } = renderWithI18n(<Fixture onSubmit={onSubmit} child />);
-    selectText(container, "mouse", '[data-comment-content="child"]');
-    fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
-    const mention = "[@Agent](mention://agent/11111111-1111-1111-1111-111111111111)";
-    fireEvent.change(await screen.findByRole("textbox", { name: "Comment" }), { target: { value: `${mention} Please revise.` } });
-    await waitFor(() => expect(previewCommentTriggers).toHaveBeenCalledWith("issue", `> Other text\n\n${mention} Please revise.`, "child", undefined));
-    fireEvent.click(screen.getByRole("button", { name: "Reply" }));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("child", `> Other text\n\n${mention} Please revise.`, undefined, undefined));
-    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Comment" })).not.toBeInTheDocument());
-    expect(useCommentDraftStore.getState().drafts[key]).toBe(draft);
-  });
-
-  it("previews description replies without a comment parent", async () => {
-    const onSubmit = vi.fn(async () => "posted");
-    const { container } = renderWithI18n(<DescriptionFixture onSubmit={onSubmit} />);
-    selectText(container);
-    fireEvent.click(screen.getByRole("button", { name: "Add to comment" }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "Comment" }), { target: { value: "Please explain" } });
-    await waitFor(() => expect(previewCommentTriggers).toHaveBeenCalledWith("issue", "> Selected text\n\nPlease explain", undefined, undefined));
-    fireEvent.click(screen.getByRole("button", { name: "Post comment" }));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("description:issue", "> Selected text\n\nPlease explain", undefined, undefined));
-  });
-
-  it("locks dismissal and duplicate submissions in flight, then keeps a failed note for retry", async () => {
-    let finish!: (result: boolean) => void;
-    const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
-    const { container } = renderWithI18n(<Fixture onSubmit={onSubmit} />);
-    selectText(container);
-    fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
-    const note = await screen.findByRole("textbox", { name: "Comment" });
-    fireEvent.change(note, { target: { value: "Keep on failure" } });
-    const send = screen.getByRole("button", { name: "Reply" });
-    fireEvent.click(send);
-    fireEvent.click(send);
-    fireEvent.pointerDown(document.body);
-    fireEvent.keyDown(note, { key: "Escape" });
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(note).toBeInTheDocument();
-    expect(send).toBeDisabled();
-    await act(async () => { finish(false); });
-    expect(note).toHaveValue("Keep on failure");
-    expect(send).toBeEnabled();
-    onSubmit.mockResolvedValueOnce(true);
-    fireEvent.click(send);
-    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Comment" })).not.toBeInTheDocument());
-    expect(onSubmit).toHaveBeenCalledTimes(2);
-  });
-
   it("keeps owned portal controls open and lets their first Escape close only the nested control", async () => {
-    const { container } = renderWithI18n(<Fixture onSubmit={vi.fn(async () => false)} />);
+    const { container } = renderWithI18n(<Fixture />);
     selectText(container);
     fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
     const note = await screen.findByRole("textbox", { name: "Comment" });
@@ -184,37 +132,6 @@ describe("selection to reply", () => {
       fireEvent(note, escape);
       expect(note).not.toBeInTheDocument();
     } finally { portal.remove(); }
-  });
-
-  it("keeps a note visible and disables sending when its selected comment is deleted", async () => {
-    const onSubmit = vi.fn(async () => "posted");
-    const { container, rerender } = renderWithI18n(<Fixture onSubmit={onSubmit} child />);
-    selectText(container, "mouse", '[data-comment-content="child"]');
-    fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
-    const note = await screen.findByRole("textbox", { name: "Comment" });
-    fireEvent.change(note, { target: { value: "Keep this instruction" } });
-    rerender(<Fixture onSubmit={onSubmit} child deleted />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("reply target was deleted");
-    expect(note).toBeVisible();
-    expect(note).toHaveValue("Keep this instruction");
-    expect(screen.getByRole("button", { name: "Reply" })).toBeDisabled();
-    expect(onSubmit).not.toHaveBeenCalled();
-  });
-
-  it("allows a direct reply when the batch annotation quota is full", async () => {
-    for (let i = 0; i < 20; i++) useCommentDraftStore.getState().addAnnotation(key, {
-      id: `saved-${i}`, sourceCommentId: "root", sourceActorName: "Author", quote: `Other quote ${i}`,
-      note: "Keep saved", start: i, prefix: "", suffix: "",
-    });
-    const onSubmit = vi.fn(async () => "posted");
-    const { container } = renderWithI18n(<Fixture onSubmit={onSubmit} />);
-    selectText(container);
-    fireEvent.click(await screen.findByRole("button", { name: "Add to reply" }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "Comment" }), { target: { value: "Direct instruction" } });
-    expect(screen.getByRole("button", { name: "Add annotation" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Reply" }));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(20);
   });
 
   it.each([false, true])("does not rerender the host when unannotated source text changes (description: %s)", async (description) => {
@@ -387,7 +304,7 @@ describe("selection to reply", () => {
     expect(useCommentDraftStore.getState().getAnnotations(draftKey)).toHaveLength(1);
   });
 
-  it.each([false, true])("uses the editor submit shortcut and keeps plain Enter for newlines (description: %s)", async (description) => {
+  it.each([false, true])("saves on plain Enter and keeps Shift+Enter for newlines (description: %s)", async (description) => {
     const draftKey = description ? "new:issue" as const : key;
     const { container } = renderWithI18n(description ? <DescriptionFixture /> : <Fixture />);
     selectText(container);
@@ -404,7 +321,7 @@ describe("selection to reply", () => {
     fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
     expect(input).toBeInTheDocument();
     fireEvent.change(input, { target: { value: "First line\nSecond line" } });
-    fireEvent.keyDown(input, { key: "Enter", metaKey: true });
+    fireEvent.keyDown(input, { key: "Enter" });
     expect(screen.queryByRole("textbox", { name: "Comment" })).not.toBeInTheDocument();
     expect(useCommentDraftStore.getState().getAnnotations(draftKey)[0]?.note).toBe("First line\nSecond line");
   });
