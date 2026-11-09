@@ -753,7 +753,10 @@
     "annotations": {
       "direct_reply": "Reply",
       "direct_comment": "Post comment",
-      "direct_target_deleted": "The reply target was deleted. Your note is kept; select another comment to reply.",
+      "direct_target_deleted": "The reply target was deleted. Copy your note before selecting another comment.",
+      "copy_note": "Copy note",
+      "note_copied": "Note copied",
+      "note_copy_failed": "Could not copy note. Select and copy the text manually.",
       "confirm_add": "Add annotation",
       "save": "Save annotation",
       "add_comment": "Add to comment",

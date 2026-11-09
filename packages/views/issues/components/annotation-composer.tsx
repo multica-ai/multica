@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Loader2, Trash2 } from "@multica/ui/icons";
+import { toast } from "sonner";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { composeSelectionReply, MAX_REPLY_ANNOTATIONS, type ReplyAnnotation } from "@multica/core/drafts/reply-annotation";
@@ -92,6 +94,11 @@ export function AnnotationComposer({
     if (note.trim()) onSave(note);
   };
   const saveLabel = t(($) => existing ? $.reply.annotations.save : $.reply.annotations.confirm_add);
+  const copyNote = async () => {
+    const note = editorRef.current?.getMarkdown() ?? "";
+    if (await copyText(note)) toast.success(t(($) => $.reply.annotations.note_copied));
+    else toast.error(t(($) => $.reply.annotations.note_copy_failed));
+  };
 
   return <EditorOverlayOwnerContext.Provider value={owner}>
     <div className="flex w-96 max-w-[calc(100vw-26px)] flex-col gap-1" aria-busy={submitting || undefined}>
@@ -103,7 +110,11 @@ export function AnnotationComposer({
           currentIssueId={issueId} showBubbleMenu={false} debounceMs={100}
           onUpdate={onChange} onSubmit={direct ? submit : save} />
       </div>
-      {sourceMissing && <p role="alert" className="px-2 text-caption text-destructive">{t(($) => $.reply.annotations.direct_target_deleted)}</p>}
+      {sourceMissing && <div className="px-2">
+        <p role="alert" className="text-caption text-destructive">{t(($) => $.reply.annotations.direct_target_deleted)}</p>
+        <Button size="sm" variant="ghost" disabled={!annotation.note.trim() || submitting}
+          onClick={copyNote}>{t(($) => $.reply.annotations.copy_note)}</Button>
+      </div>}
       {!sourceMissing && sourceChanged && <p className="px-2 text-caption text-muted-foreground">{t(($) => $.reply.annotations.source_changed)}</p>}
       {!canSave && <p className="px-2 text-caption text-muted-foreground">{t(($) => $.reply.annotations.count_limit, { count: MAX_REPLY_ANNOTATIONS })}</p>}
       <div className="flex flex-wrap items-center gap-1 px-1 pb-1" inert={submitting || undefined}>

@@ -753,7 +753,10 @@
     "annotations": {
       "direct_reply": "Répondre",
       "direct_comment": "Publier le commentaire",
-      "direct_target_deleted": "Le commentaire ciblé a été supprimé. Votre texte est conservé ; sélectionnez un autre commentaire pour répondre.",
+      "direct_target_deleted": "Le commentaire ciblé a été supprimé. Copiez votre note avant de sélectionner un autre commentaire.",
+      "copy_note": "Copier la note",
+      "note_copied": "Note copiée",
+      "note_copy_failed": "Impossible de copier la note. Sélectionnez et copiez le texte manuellement.",
       "confirm_add": "Ajouter une annotation",
       "save": "Enregistrer l'annotation",
       "add_comment": "Ajouter au commentaire",

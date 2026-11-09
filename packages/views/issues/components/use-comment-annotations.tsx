@@ -105,7 +105,14 @@ export function useCommentAnnotations({ issueId, draftKey, sources, enabled, onA
       if (submittingRef.current) return;
       if (!(event.target instanceof Element) || selection.root.contains(event.target) ||
         event.target.closest("[data-editor-overlay-owner]")?.getAttribute("data-editor-overlay-owner") === draftKey) return;
-      setSelection(null); setEditor(null); setError(false);
+      // Clipboard fallback briefly focuses a hidden textarea, then restores
+      // the owned control synchronously. Only dismiss if focus stays outside.
+      queueMicrotask(() => {
+        const target = document.activeElement;
+        if (submittingRef.current || selection.root.contains(target) ||
+          target?.closest("[data-editor-overlay-owner]")?.getAttribute("data-editor-overlay-owner") === draftKey) return;
+        setSelection(null); setEditor(null); setError(false);
+      });
     };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
