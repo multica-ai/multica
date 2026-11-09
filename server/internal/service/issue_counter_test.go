@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -73,6 +74,53 @@ func TestIssueCreateHealsCounterDrift(t *testing.T) {
 	}
 	if counter < 6 {
 		t.Fatalf("issue_counter = %d after the create, want at least 6", counter)
+	}
+}
+
+func TestAutopilotCreateIssueHealsCounterDrift(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		numbers []int
+		counter int
+		want    int32
+	}{
+		{name: "numbered issues", numbers: []int{1, 2, 3, 4, 5}, counter: 2, want: 6},
+		{name: "reported workspace", numbers: []int{1095, 1096}, counter: 1094, want: 1097},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx, ownerID := newPrincipalFixture(t)
+			agentID := fx.privateAgentOwnedBy(t, ownerID, "counter-drift")
+			autopilotID, triggerID := fx.autopilotWithTrigger(t, agentID, ownerID, ownerID)
+			fx.Exec(t, `UPDATE autopilot SET execution_mode = 'create_issue' WHERE id = $1`, autopilotID)
+			for _, number := range tc.numbers {
+				fx.Issue(t, fmt.Sprintf("drift seed %d", number), testutil.Cols{"number": number})
+			}
+			fx.Exec(t, `UPDATE workspace SET issue_counter = $2 WHERE id = $1`, fx.WorkspaceID, tc.counter)
+			fx.Cleanup(t, `DELETE FROM issue WHERE workspace_id = $1 AND origin_type = 'autopilot' AND origin_id = $2`, fx.WorkspaceID, autopilotID)
+			fx.Cleanup(t, `DELETE FROM autopilot_run WHERE autopilot_id = $1`, autopilotID)
+			fx.Cleanup(t, `DELETE FROM agent_task_queue WHERE agent_id = $1`, agentID)
+
+			run := fx.dispatch(t, autopilotID, triggerID)
+			if run.Status != "issue_created" || !run.IssueID.Valid || !run.TaskID.Valid {
+				t.Fatalf("dispatch = %+v; want an issue_created run linked to an issue and task", run)
+			}
+
+			var number, counter int32
+			fx.QueryRow(t, `SELECT number FROM issue WHERE id = $1 AND workspace_id = $2`, run.IssueID, fx.WorkspaceID).Scan(&number)
+			if number != tc.want {
+				t.Fatalf("created issue number = %d, want %d", number, tc.want)
+			}
+			fx.QueryRow(t, `SELECT issue_counter FROM workspace WHERE id = $1`, fx.WorkspaceID).Scan(&counter)
+			if counter != tc.want {
+				t.Errorf("issue_counter = %d, want %d", counter, tc.want)
+			}
+			if n := fx.Count(t, `SELECT count(*) FROM issue WHERE workspace_id = $1 AND origin_type = 'autopilot' AND origin_id = $2`, fx.WorkspaceID, autopilotID); n != 1 {
+				t.Errorf("dispatch created %d issues, want 1", n)
+			}
+			if n := fx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2`, run.IssueID, agentID); n != 1 {
+				t.Errorf("dispatch enqueued %d tasks, want 1", n)
+			}
+		})
 	}
 }
 

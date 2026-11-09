@@ -772,7 +772,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		OriginID:      ap.ID,
 	})
 	if err != nil {
-		return fmt.Errorf("create issue: %w", err)
+		return classifyIssueNumberCollision(fmt.Errorf("create issue: %w", err), issueNumber)
 	}
 
 	// Fan out the default subscriber template inside the same tx as the

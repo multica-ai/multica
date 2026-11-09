@@ -48,12 +48,8 @@ func writeIssueLimitReached(w http.ResponseWriter, err error) bool {
 	return true
 }
 
-// writeIssueNumberCollision reports the case the service could not heal: the
-// number the workspace counter handed out is already held by another issue, so
-// workspace.issue_counter sits below MAX(issue.number). It is a 409 that names
-// the constraint and the number, not a 500 — the request was valid, and the
-// board is what needs attention. Reaching it means the automatic repair did not
-// resolve the drift, so the response also says what to run.
+// writeIssueNumberCollision reports a number conflict that automatic repair
+// could not resolve and directs the caller to a workspace administrator.
 func writeIssueNumberCollision(w http.ResponseWriter, err error) bool {
 	var collisionErr *service.IssueNumberCollisionError
 	if !errors.As(err, &collisionErr) {
@@ -64,7 +60,7 @@ func writeIssueNumberCollision(w http.ResponseWriter, err error) bool {
 		"error":      "workspace issue counter is behind its highest issue number, so card creation cannot allocate a free number",
 		"allocated":  collisionErr.Allocated,
 		"constraint": collisionErr.Constraint,
-		"repair":     "HealIssueCounter (server/pkg/db/queries/workspace.sql) scoped to this workspace",
+		"repair":     "Ask a workspace administrator to repair the issue counter, then retry.",
 	})
 	return true
 }
