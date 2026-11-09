@@ -183,6 +183,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { CollectionPageState } from "../../layout/collection-page";
 import { PAGE_GUTTER, usePageHeaderTitleBar } from "../../layout/page-header";
+import { READING_COLUMN } from "../../layout/reading-column";
 import { useShowInSidebar } from "../../layout/panels/show-in-sidebar";
 
 import { ProgressRing } from "./progress-ring";
@@ -1346,10 +1347,11 @@ export function IssueDetailSkeleton({
       <div className="flex flex-1 min-h-0">
         {/* Same scrollbar-gutter as the loaded scroller below, so the skeleton
             column doesn't shift sideways when real content mounts. */}
-        <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]">
-          {/* Gutters match the loaded column exactly (see its comment), so the
-              skeleton doesn't reflow sideways when real content mounts. */}
-          <div className="mx-auto w-full max-w-4xl px-3 py-6 space-y-6 md:px-8 md:py-8">
+        <div className="@container flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]">
+          {/* Width and gutters match the loaded column exactly (see its
+              comment), so the skeleton doesn't reflow sideways when real
+              content mounts. */}
+          <div className={cn(READING_COLUMN, "px-3 py-6 space-y-6 md:px-8 md:py-8")}>
             <Skeleton className="h-8 w-3/4" />
             <div className="space-y-2">
               <Skeleton className="h-4 w-full" />
@@ -3440,7 +3442,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <div
           ref={attachScrollContainer}
           data-tab-scroll-root={isPeek ? undefined : scrollContainerKey}
-          className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
+          className="@container relative flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
         >
         {/* Gutters: 32px is a comfortable reading margin on a desktop column
             but eats 16% of a 393px phone, so below `md` they drop to 12px.
@@ -3450,10 +3452,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             floats — once the reader scrolls to the bottom. */}
         <div
           className={cn(
-            "mx-auto w-full",
             // The peek is already a narrow column, so it takes a tighter gutter
             // and never reaches the chat launcher's corner (see IssuePeekHost).
-            isPeek ? "px-6 py-5" : "max-w-4xl px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8",
+            isPeek
+              ? "mx-auto w-full px-6 py-5"
+              : cn(READING_COLUMN, "px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8"),
           )}
         >
           <IssueDuplicateBanner
