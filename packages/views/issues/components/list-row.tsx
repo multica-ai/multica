@@ -91,6 +91,9 @@ function ListRowContent({
         ref={containerRef}
         data-slot="issue-list-row"
         data-mc="issue-row"
+        data-status={issue.status}
+        data-priority={issue.priority}
+        data-assignee-type={issue.assignee_type ?? "none"}
         {...{ [PEEK_TARGET_ATTR]: issue.id }}
         data-peeked={peeked ? "" : undefined}
         style={containerStyle}

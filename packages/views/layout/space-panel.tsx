@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { AppSpaceId } from "@multica/core/paths";
 import { cn } from "@multica/ui/lib/utils";
 import { useSidebar } from "@multica/ui/components/ui/sidebar";
@@ -46,6 +46,12 @@ export function SpacePanel() {
   const shell = useAppShell();
   const { open, isCompact } = useSidebar();
   const panelRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    // Public state hook for themes (docs/theming.md).
+    const root = document.documentElement;
+    root.classList.toggle("is-sidebar-collapsed", !open);
+    return () => root.classList.remove("is-sidebar-collapsed");
+  }, [open]);
   if (!shell) return null;
   if (isCompact) return <KeptRowsRelease />;
 

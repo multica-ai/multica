@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import {
   APPEARANCE_STORAGE_KEY,
@@ -51,6 +51,24 @@ describe("AppearanceSync", () => {
     expect(html().classList.contains("theme-light")).toBe(true);
     unmount();
     expect(html().classList.contains("theme-light")).toBe(false);
+  });
+
+  it("marks the platform and window focus on <html>", () => {
+    const { unmount } = render(<AppearanceSync />);
+    expect(html().classList.contains("is-web")).toBe(true);
+    act(() => {
+      vi.spyOn(document, "hasFocus").mockReturnValue(false);
+      window.dispatchEvent(new Event("blur"));
+    });
+    expect(html().classList.contains("is-focused")).toBe(false);
+    act(() => {
+      vi.spyOn(document, "hasFocus").mockReturnValue(true);
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(html().classList.contains("is-focused")).toBe(true);
+    unmount();
+    expect(html().classList.contains("is-web")).toBe(false);
+    expect(html().classList.contains("is-focused")).toBe(false);
   });
 
   it("mirrors the theme, its options, type and density onto <html>", () => {

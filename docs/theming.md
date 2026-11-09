@@ -172,6 +172,7 @@ notice. Anchors and slots stay until the next `apiVersion`.
 | `[data-mc="comment-composer"]` | The box for writing a new comment. |
 | `[data-mc="chat-window"]` | The chat panel. |
 | `[data-mc="chat-input"]` | The message box in chat. |
+| `[data-mc="chat-message"]` | One message in a chat; `data-role` is user or assistant. |
 | `[data-mc="inbox-item"]` | One notification in the inbox. |
 | `[data-mc="settings-page"]` | The settings page. |
 

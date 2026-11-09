@@ -37,7 +37,7 @@ const state = () => useAppearanceStore.getState();
 const themeSelect = () => screen.getByRole("combobox", { name: "Theme" });
 
 const PAPER = {
-  apiVersion: 1,
+  apiVersion: 1 as const,
   id: "paper",
   name: "Paper",
   author: "Someone",

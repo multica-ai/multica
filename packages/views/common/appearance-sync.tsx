@@ -17,6 +17,7 @@ import {
   useInstalledThemesStore,
   useThemeSafeMode,
 } from "@multica/core/appearance";
+import { getShortcutPlatform, getShortcutRuntime } from "@multica/core/shortcuts";
 
 const STYLE_ELEMENT_ID = "multica-appearance";
 const THEME_CSS_ELEMENT_ID = "multica-theme-css";
@@ -67,6 +68,28 @@ function useModeClasses() {
   }, []);
 }
 
+/** `is-desktop` / `is-web`, `mod-<os>` and `is-focused` on <html>, for theme CSS. */
+function useStateClasses() {
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    const platform = getShortcutPlatform();
+    const fixed = [
+      getShortcutRuntime() === "desktop" ? "is-desktop" : "is-web",
+      ...(platform === "unknown" ? [] : [`mod-${platform}`]),
+    ];
+    root.classList.add(...fixed);
+    const focus = () => root.classList.toggle("is-focused", document.hasFocus());
+    focus();
+    window.addEventListener("focus", focus);
+    window.addEventListener("blur", focus);
+    return () => {
+      window.removeEventListener("focus", focus);
+      window.removeEventListener("blur", focus);
+      root.classList.remove(...fixed, "is-focused");
+    };
+  }, []);
+}
+
 function clearThemeAttributes(root: HTMLElement) {
   root.removeAttribute(APPEARANCE_THEME_ATTR);
   for (const name of root.getAttributeNames()) {
@@ -89,6 +112,7 @@ export function AppearanceSync() {
   const installed = useInstalledThemesStore((s) => s.themes);
   const safeMode = useThemeSafeMode((s) => s.active);
   useModeClasses();
+  useStateClasses();
 
   useLayoutEffect(() => {
     const root = document.documentElement;

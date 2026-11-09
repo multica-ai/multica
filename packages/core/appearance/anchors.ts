@@ -13,20 +13,22 @@ export const THEME_ANCHORS = {
   "window-toolbar": "Desktop only: the toolbar above the rail with history buttons.",
   "tab-bar": "Desktop only: the tab strip above the page.",
   "issue-group-header": "A status group header in issue lists; `data-status` is the status key.",
-  "issue-row": "One issue in a list.",
+  "issue-row":
+    "One issue in a list; `data-status`, `data-priority` and `data-assignee-type` (member, agent, squad or none).",
   "board-column": "One column on a board.",
-  "board-card": "One issue card on a board.",
+  "board-card": "One issue card on a board; same attributes as `issue-row`.",
   "status-icon": "The status glyph (an svg).",
   "priority-icon": "The priority glyph (an svg).",
-  "label-chip": "A label.",
+  "label-chip": "A label; `data-color` is its hex colour.",
   content:
     "Rich text: issue descriptions, comments, chat messages and documents, in both reading and editing; `data-density` is document or compact when reading.",
-  comment: "A top-level comment card in an issue timeline.",
-  "comment-reply": "A reply inside a comment card.",
+  comment: "A top-level comment card in an issue timeline; `data-author-type` is member, agent or system.",
+  "comment-reply": "A reply inside a comment card; `data-author-type` as on `comment`.",
   "comment-composer": "The box for writing a new comment.",
   "chat-window": "The chat panel.",
   "chat-input": "The message box in chat.",
-  "inbox-item": "One notification in the inbox list.",
+  "chat-message": "One message in a chat; `data-role` is user or assistant.",
+  "inbox-item": "One notification in the inbox list; `data-read` is true or false.",
   "settings-page": "The settings page.",
 } as const;
 
