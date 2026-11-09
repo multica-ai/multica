@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Loader2, Maximize2, Square } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
-import { issueTasksOptions } from "@multica/core/issues/queries";
+import { issueKeys, issueTasksOptions } from "@multica/core/issues/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import type { AgentTask } from "@multica/core/types";
@@ -59,10 +59,8 @@ import { WakeupRunLabel } from "./wakeup-source-chip";
 //      Left text keeps flex-1 so the row never shows a mid-row gap. Do
 //      not use masks/padding gymnastics here.
 //
-// One query (`listTasksByIssue`) drives both buckets — the back-end
-// returns every status, the front-end filters into active vs past on the
-// client. WS task:* events for this issue trigger an invalidate so the
-// list updates without polling.
+// The timeline index supplies every status and usage without provider output.
+// Full run history and charts load only while the Runs dialog is open.
 
 interface ExecutionLogSectionProps {
   issueId: string;

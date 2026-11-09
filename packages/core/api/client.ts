@@ -2912,10 +2912,12 @@ export class ApiClient {
     });
   }
 
-  async listTasksByIssue(issueId: string, includeDescendants = false): Promise<AgentTask[]> {
-    const raw = await this.fetch<unknown>(
-      `/api/issues/${issueId}/task-runs${includeDescendants ? "?scope=subtree" : ""}`,
-    );
+  async listTasksByIssue(issueId: string, includeDescendants = false, options?: { view: "timeline" }): Promise<AgentTask[]> {
+    const search = new URLSearchParams();
+    if (includeDescendants) search.set("scope", "subtree");
+    if (options?.view) search.set("view", options.view);
+    const query = search.size ? `?${search}` : "";
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/task-runs${query}`);
     return parseWithFallback<AgentTask[]>(raw, AgentTaskListSchema, [], {
       endpoint: "GET /api/issues/:id/task-runs",
     });

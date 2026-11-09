@@ -1001,6 +1001,20 @@ describe("ApiClient", () => {
     }
   });
 
+  it("requests the timeline run view without changing full-history requests", async () => {
+    const fetch = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify([
+      { id: "task-1", result: { comment: "Inline reply" }, coalesced_comment_ids: "malformed", can_supplement: "malformed" },
+    ]), { status: 200, headers: { "Content-Type": "application/json" } })));
+    vi.stubGlobal("fetch", fetch);
+    const client = new ApiClient("https://api.example.test");
+    const tasks = await client.listTasksByIssue("issue-1", false, { view: "timeline" });
+    expect(String(fetch.mock.calls[0]?.[0])).toContain("/api/issues/issue-1/task-runs?view=timeline");
+    expect(tasks[0]?.result).toEqual({ comment: "Inline reply" });
+    expect(tasks[0]?.coalesced_comment_ids).toBeUndefined();
+    await client.listTasksByIssue("issue-1");
+    expect(String(fetch.mock.calls[1]?.[0])).toBe("https://api.example.test/api/issues/issue-1/task-runs");
+  });
+
   it("preserves planned and delivered comment coverage from issue task runs", async () => {
     vi.stubGlobal(
       "fetch",

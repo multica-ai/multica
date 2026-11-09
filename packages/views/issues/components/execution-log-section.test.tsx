@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTask } from "@multica/core/types";
+import { ApiClient, setApiInstance } from "@multica/core/api";
 import { renderWithI18n } from "../../test/i18n";
 
 const mockState = vi.hoisted(() => ({
@@ -557,6 +558,18 @@ describe("execution log header geometry", () => {
       </QueryClientProvider>,
     );
   }
+
+  it("requests complete run history only when its dialog opens", async () => {
+    const client = new ApiClient("http://localhost");
+    setApiInstance(client);
+    const request = vi.spyOn(client, "listTasksByIssue").mockResolvedValue([]);
+    try {
+      renderSection([makeTask({ status: "completed", completed_at: "2026-06-08T08:01:00Z" })]);
+      expect(request).not.toHaveBeenCalled();
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open timeline" })));
+      expect(request).toHaveBeenCalledWith("issue-1", false);
+    } finally { request.mockRestore(); }
+  });
 
   it("shows the running task before pending tasks in queue order", () => {
     renderSection([

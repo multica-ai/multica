@@ -6309,6 +6309,12 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	view := r.URL.Query().Get("view")
+	if view != "" && view != "timeline" {
+		writeError(w, http.StatusBadRequest, "view must be 'timeline' when specified")
+		return
+	}
+
 	scope := r.URL.Query().Get("scope")
 	if scope != "" && scope != "issue" && scope != "family" && scope != "subtree" {
 		writeError(w, http.StatusBadRequest, "scope must be 'issue', 'family', or 'subtree'")
@@ -6431,6 +6437,12 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if view == "timeline" {
+		for i := range resp {
+			resp[i] = issueTimelineTaskResponse(resp[i])
+		}
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -6454,6 +6466,18 @@ func (h *Handler) hydrateSubtreeTaskUsage(ctx context.Context, tasks []db.AgentT
 			row.CacheWriteTokens, row.CostUsdTicks, row.CreditsMicros)
 	}
 	attachTaskUsage(resp, byTask)
+}
+
+// issueTimelineTaskResponse keeps inline replies, lineage, controls and pricing.
+// Provider output and daemon handoff instructions belong to on-demand history.
+func issueTimelineTaskResponse(task AgentTaskResponse) AgentTaskResponse {
+	task.HandoffNote = ""
+	result, _ := task.Result.(map[string]any)
+	task.Result = nil
+	if comment, ok := result["comment"].(string); ok {
+		task.Result = map[string]any{"comment": comment}
+	}
+	return task
 }
 
 // hydrateTaskUsage attaches each run's own token usage to the execution-log

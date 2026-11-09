@@ -23,10 +23,13 @@ import type { SidebarIssuesRequest } from "./sidebar-list";
 import { ALL_STATUSES } from "./config";
 import { issueColumnCategory } from "./status-category";
 
-export function issueTasksOptions(issueId: string, includeDescendants = false) {
+export function issueTasksOptions(issueId: string, includeDescendants = false, view: "timeline" | "history" = "timeline") {
+  const key = includeDescendants ? issueKeys.subtreeTasks(issueId) : issueKeys.tasks(issueId);
   return queryOptions({
-    queryKey: includeDescendants ? issueKeys.subtreeTasks(issueId) : issueKeys.tasks(issueId),
-    queryFn: () => api.listTasksByIssue(issueId, includeDescendants),
+    queryKey: view === "history" ? [...key, "history"] : key,
+    queryFn: () => view === "timeline"
+      ? api.listTasksByIssue(issueId, includeDescendants, { view })
+      : api.listTasksByIssue(issueId, includeDescendants),
     enabled: !!issueId,
     staleTime: 30_000,
     refetchOnWindowFocus: true,
@@ -197,9 +200,7 @@ export const issueKeys = {
    *  click time. */
   attachments: (issueId: string) =>
     [...issueKeys.attachmentsAll(), issueId] as const,
-  /** Prefix-match key for invalidating tasks across all issues — used by
-   *  the global WS task: prefix path so any task lifecycle event refreshes
-   *  every per-issue list, regardless of which issue is currently mounted. */
+  /** Prefix for reconnects and task events without an issue scope. */
   tasksAll: () => ["issues", "tasks"] as const,
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => [...issueKeys.tasksAll(), issueId] as const,
