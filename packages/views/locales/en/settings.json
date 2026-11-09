@@ -1449,7 +1449,7 @@
     "title": "Ways to give agents tools",
     "current": "This page",
     "mcp": "Added by admins and shared across the workspace, then assigned per agent.",
-    "apps": "Team or personal accounts connected through Multica, given to each agent with an account and a permission level.",
+    "apps": "Team or personal accounts connected through Multica and added to each agent.",
     "plugins": "Installed packages that can add tools, scheduled hooks, and storage, each with its own permissions."
   },
   "connected_apps": {
@@ -1476,7 +1476,7 @@
     "disconnect": "Disconnect",
     "catalog_title": "Available apps",
     "catalog_label": "Apps members can add",
-    "catalog_description": "Curated apps are reviewed by Multica. All apps includes everything Composio can connect. A custom list allows only the apps you pick.",
+    "catalog_description": "Curated apps come with reviewed default rules. All apps adds everything Composio can connect; actions Multica can't classify always ask first. A custom list allows only the apps you pick.",
     "catalog_all": "All apps",
     "catalog_curated": "Curated only",
     "catalog_custom": "Custom list",

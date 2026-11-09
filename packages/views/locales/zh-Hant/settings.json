@@ -1438,7 +1438,7 @@
     "title": "為 AI 代理接入工具的方式",
     "current": "當前頁面",
     "mcp": "由管理員新增、在工作區內共享，再按 AI 代理分配。",
-    "apps": "透過 Multica 連線的團隊或個人帳號，依 AI 代理分配帳號和權限等級。",
+    "apps": "透過 Multica 連線團隊或個人帳號，再將應用新增至 AI 代理。",
     "plugins": "安裝後可提供工具、定時 hook 和儲存，每個外掛單獨授權。"
   },
   "connected_apps": {
@@ -1464,7 +1464,7 @@
     "disconnect": "中斷連線",
     "catalog_title": "可用應用",
     "catalog_label": "成員可新增的應用",
-    "catalog_description": "精選應用經過 Multica 審核。「全部應用」包含 Composio 能連線的所有應用。「指定名單」只允許你選中的應用。",
+    "catalog_description": "精選應用附有審核過的預設規則。「全部應用」包含 Composio 能連線的所有應用；Multica 無法辨識的操作一律先徵得同意。「指定名單」只允許你選中的應用。",
     "catalog_all": "全部應用",
     "catalog_curated": "僅精選",
     "catalog_custom": "指定名單",

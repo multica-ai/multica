@@ -15,13 +15,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@multica/ui/components/ui/select";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -30,13 +23,11 @@ import {
   connectedAppsKeys,
   teamAppImpactOptions,
   useDisconnectTeamApp,
-  useUpdateAppSettings,
 } from "@multica/core/connected-apps";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type {
   AppAccountScope,
   AppCatalogEntry,
-  AppCatalogMode,
   AppConnection,
 } from "@multica/core/types";
 import { ComposioToolkitLogo } from "../../common/composio-toolkit-logo";
@@ -44,16 +35,12 @@ import { useT, useTimeAgo } from "../../i18n";
 import { useNavigation } from "../../navigation";
 import { AddAppDialog } from "./add-app-dialog";
 import { AppAccountDialog } from "./app-account-dialog";
-import { CustomCatalogDialog } from "./custom-catalog-dialog";
-import { SettingsCard, SettingsRow, SettingsSection } from "./settings-layout";
+import { SettingsCard, SettingsSection } from "./settings-layout";
 
 type AccountTarget = { scope: AppAccountScope; connection: AppConnection; name: string };
 
-/**
- * Settings › Connected apps (MUL-8516): the workspace's team accounts, the
- * caller's own accounts, and which apps the workspace allows. Which agent
- * uses which app is set on the agent.
- */
+/** Connected team and personal accounts, with activity and disconnect actions.
+ * Which agents use each account is set on the agent. */
 export function AppsSettings() {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
@@ -61,12 +48,10 @@ export function AppsSettings() {
   const navigation = useNavigation();
   const overview = useQuery(appsOverviewOptions(wsId));
   const catalog = useQuery(appCatalogOptions(wsId));
-  const updateSettings = useUpdateAppSettings();
 
   const [adding, setAdding] = useState(false);
   const [detail, setDetail] = useState<AccountTarget | null>(null);
   const [disconnecting, setDisconnecting] = useState<AccountTarget | null>(null);
-  const [editingList, setEditingList] = useState(false);
 
   // The hosted connect flow returns with `?connected=<slug>` or
   // `?error=composio_connect_failed`. Consume it once, then drop the params so
@@ -119,14 +104,6 @@ export function AppsSettings() {
   const data = overview.data;
   const canManage = data.can_manage;
   const nameOf = (slug: string) => appBySlug.get(slug)?.name || slug;
-  const catalogModeLabel = (mode: AppCatalogMode) =>
-    mode === "curated"
-      ? t(($) => $.connected_apps.catalog_curated)
-      : mode === "custom"
-        ? t(($) => $.connected_apps.catalog_custom)
-        : t(($) => $.connected_apps.catalog_all);
-  const allowedCount = data.allowed_toolkits?.length ?? 0;
-
   const rows = (scope: AppAccountScope, connections: AppConnection[]) =>
     connections
       .filter((c) => c.status !== "revoked")
@@ -185,55 +162,6 @@ export function AppsSettings() {
         )}
       </SettingsSection>
 
-      <SettingsSection anchor="catalog" title={t(($) => $.connected_apps.catalog_title)}>
-        <SettingsCard>
-          <SettingsRow
-            label={t(($) => $.connected_apps.catalog_label)}
-            description={t(($) => $.connected_apps.catalog_description)}
-            size="select"
-          >
-            <Select
-              items={(["all", "curated", "custom"] as const).map((value) => ({
-                value,
-                label: catalogModeLabel(value),
-              }))}
-              value={data.catalog_mode}
-              disabled={!canManage || updateSettings.isPending}
-              onValueChange={(value) => {
-                if (!value || value === data.catalog_mode) return;
-                // A custom catalog is only saved together with its list.
-                if (value === "custom") {
-                  setEditingList(true);
-                  return;
-                }
-                updateSettings.mutate({ catalog_mode: value as AppCatalogMode }, {
-                  onError: () => toast.error(t(($) => $.connected_apps.toast_failed)),
-                });
-              }}
-            >
-              <SelectTrigger size="sm" className="w-full" aria-label={t(($) => $.connected_apps.catalog_label)}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent align="end">
-                <SelectItem value="all">{catalogModeLabel("all")}</SelectItem>
-                <SelectItem value="curated">{catalogModeLabel("curated")}</SelectItem>
-                <SelectItem value="custom">{catalogModeLabel("custom")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </SettingsRow>
-          {data.catalog_mode === "custom" && (
-            <SettingsRow
-              label={t(($) => $.connected_apps.custom.row_label)}
-              description={t(($) => $.connected_apps.custom.row_description, { count: allowedCount })}
-            >
-              <Button size="sm" variant="outline" disabled={!canManage} onClick={() => setEditingList(true)}>
-                {t(($) => $.connected_apps.custom.edit)}
-              </Button>
-            </SettingsRow>
-          )}
-        </SettingsCard>
-      </SettingsSection>
-
       <AddAppDialog
         open={adding}
         onOpenChange={setAdding}
@@ -248,13 +176,8 @@ export function AppsSettings() {
           scope={detail.scope}
           slug={detail.connection.toolkit_slug}
           name={detail.name}
-          canEdit={detail.scope === "personal" || canManage}
-          canClassify={canManage}
           onClose={() => setDetail(null)}
         />
-      )}
-      {editingList && (
-        <CustomCatalogDialog initial={data.allowed_toolkits ?? []} onClose={() => setEditingList(false)} />
       )}
       {disconnecting?.scope === "team" && (
         <DisconnectTeamDialog target={disconnecting} onClose={() => setDisconnecting(null)} />
@@ -322,18 +245,20 @@ function AccountRow({
           )}
         </p>
       </div>
-      <Button variant="ghost" size="sm" onClick={onOpen}>
-        {t(($) => $.connected_apps.rules)}
-      </Button>
       {canManage && (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={t(($) => $.connected_apps.disconnect)}
-          onClick={onDisconnect}
-        >
-          <Trash2 />
-        </Button>
+        <>
+          <Button variant="ghost" size="sm" onClick={onOpen}>
+            {t(($) => $.connected_apps.activity)}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t(($) => $.connected_apps.disconnect)}
+            onClick={onDisconnect}
+          >
+            <Trash2 />
+          </Button>
+        </>
       )}
     </div>
   );

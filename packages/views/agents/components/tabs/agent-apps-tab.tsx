@@ -23,7 +23,6 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import type {
   Agent,
   AgentApp,
-  AppAccessLevel,
   AppAccountScope,
   AppCatalogEntry,
 } from "@multica/core/types";
@@ -33,13 +32,9 @@ import { useT } from "../../../i18n";
 import { ObjectSectionEmpty } from "../../../layout/object-page";
 
 const SCOPES: readonly AppAccountScope[] = ["personal", "team"];
-const LEVELS: readonly AppAccessLevel[] = ["read", "write"];
 
-/**
- * The agent's apps (MUL-8516): which apps it can use, whose account each acts
- * as, and how far it may go. Editable by whoever manages the agent; giving it
- * a team account needs a workspace admin, which the server enforces too.
- */
+/** Apps this agent can use and whose account each acts as.
+ * Team account changes require a workspace admin. */
 export function AgentAppsTab({ agent }: { agent: Agent }) {
   const { t } = useT("agents");
   const { t: ts } = useT("settings");
@@ -86,7 +81,6 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
 
   const addable = (catalog.data?.apps ?? []).filter((app) => !apps.some((a) => a.toolkit_slug === app.slug));
   const scopeLabel = (scope: AppAccountScope) => ts(($) => $.connected_apps.scopes[scope]);
-  const levelLabel = (level: AppAccessLevel) => ts(($) => $.connected_apps.levels[level]);
   const hasTeamApp = apps.some((a) => a.account_scope === "team");
 
   if (appsQuery.isLoading) {
@@ -156,25 +150,6 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
                     {SCOPES.map((value) => (
                       <SelectItem key={value} value={value}>
                         {scopeLabel(value)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select
-                  items={LEVELS.map((value) => ({ value, label: levelLabel(value) }))}
-                  value={app.level === "confirm_writes" ? "write" : app.level}
-                  disabled={update.isPending || lockedTeam}
-                  onValueChange={(value) => {
-                    if (value && value !== app.level) patch(app.toolkit_slug, { level: value as AppAccessLevel });
-                  }}
-                >
-                  <SelectTrigger size="sm" className="w-40" aria-label={t(($) => $.tab_body.connected_apps.level)}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent align="end">
-                    {LEVELS.map((value) => (
-                      <SelectItem key={value} value={value}>
-                        {levelLabel(value)}
                       </SelectItem>
                     ))}
                   </SelectContent>

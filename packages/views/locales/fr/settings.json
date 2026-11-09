@@ -1449,7 +1449,7 @@
     "title": "Donner des outils aux agents",
     "current": "Cette page",
     "mcp": "Ajoutés par les administrateurs, partagés dans l'espace de travail puis attribués agent par agent.",
-    "apps": "Comptes d'équipe ou personnels connectés via Multica, attribués à chaque agent avec un compte et un niveau de permission.",
+    "apps": "Des comptes d'équipe ou personnels connectés via Multica et ajoutés à chaque agent.",
     "plugins": "Paquets installés pouvant ajouter des outils, des hooks planifiés et du stockage, chacun avec ses propres autorisations."
   },
   "connected_apps": {
@@ -1476,7 +1476,7 @@
     "disconnect": "Déconnecter",
     "catalog_title": "Apps disponibles",
     "catalog_label": "Apps que les membres peuvent ajouter",
-    "catalog_description": "Les apps sélectionnées sont vérifiées par Multica. « Toutes les apps » inclut tout ce que Composio peut connecter. Une liste personnalisée autorise uniquement les apps choisies.",
+    "catalog_description": "Les apps sélectionnées ont des règles par défaut vérifiées. « Toutes les apps » ajoute tout ce que Composio peut connecter ; les actions que Multica ne sait pas classer demandent toujours d'abord. Une liste personnalisée n'autorise que les apps choisies.",
     "catalog_all": "Toutes les apps",
     "catalog_curated": "Sélection uniquement",
     "catalog_custom": "Liste personnalisée",

@@ -453,6 +453,11 @@ func TestConnectedApps_RulesAndLevels(t *testing.T) {
 
 func TestConnectedApps_AdminOnlyTeamSurfaces(t *testing.T) {
 	f := newAppsFixture(t)
+	activity := httptest.NewRecorder()
+	f.h.ListAppActivity(activity, appsReqAs(t, f.member, http.MethodGet, "/api/apps/activity?toolkit_slug=gmail&scope=team", nil))
+	if activity.Code != http.StatusForbidden {
+		t.Fatalf("member reads team activity: %d, want 403", activity.Code)
+	}
 
 	w := f.putAgentApps(t, f.member, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "team", "level": "read"}})
 	if w.Code != http.StatusForbidden {

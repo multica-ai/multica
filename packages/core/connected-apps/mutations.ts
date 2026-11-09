@@ -1,48 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
-import type {
-  AppAccountScope,
-  AppActionClass,
-  AppActionPolicy,
-  AppCatalogMode,
-  UpdateAgentAppsRequest,
-} from "../types";
+import type { UpdateAgentAppsRequest } from "../types";
 import { workspaceKeys } from "../workspace/queries";
 import { connectedAppsKeys } from "./queries";
-
-export function useUpdateAppSettings() {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  return useMutation({
-    mutationFn: (body: { catalog_mode: AppCatalogMode; allowed_toolkits?: string[] }) =>
-      api.updateAppSettings(body),
-    onSettled: () => qc.invalidateQueries({ queryKey: connectedAppsKeys.all(wsId) }),
-  });
-}
-
-export function useUpdateAppRules(slug: string, scope: AppAccountScope) {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  return useMutation({
-    mutationFn: (rules: { action_class: AppActionClass; policy: AppActionPolicy }[]) =>
-      api.updateAppRules(slug, scope, rules),
-    onSuccess: (data) => {
-      if (data) qc.setQueryData(connectedAppsKeys.rules(wsId, slug, scope), data.rules);
-      else void qc.invalidateQueries({ queryKey: connectedAppsKeys.rules(wsId, slug, scope) });
-    },
-  });
-}
-
-export function useUpdateAppToolClass(slug: string) {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  return useMutation({
-    mutationFn: ({ tool, actionClass }: { tool: string; actionClass: AppActionClass | null }) =>
-      api.updateAppToolClass(slug, tool, actionClass),
-    onSettled: () => qc.invalidateQueries({ queryKey: connectedAppsKeys.tools(wsId, slug) }),
-  });
-}
 
 export function useDisconnectTeamApp() {
   const qc = useQueryClient();

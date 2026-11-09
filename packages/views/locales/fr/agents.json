@@ -838,7 +838,7 @@
       "queued_prefix": "Mise en file d'attente {{when}}"
     },
     "connected_apps": {
-      "subtitle": "Les apps que cet agent peut utiliser. Chacune agit avec le compte d'équipe ou celui de la personne qui lance l'exécution, au niveau choisi.",
+      "subtitle": "Les apps que cet agent peut utiliser avec le compte d'équipe ou celui de la personne qui lance l'exécution.",
       "loading": "Chargement des apps…",
       "load_failed": "Impossible de charger les apps de cet agent.",
       "empty": "Aucune app pour l'instant.",
