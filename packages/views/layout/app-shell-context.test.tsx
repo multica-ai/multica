@@ -69,12 +69,12 @@ describe("AppShellProvider", () => {
     expect(shell).toBeNull();
   });
 
-  it("gives panels to attention, work, team and autopilots only", () => {
+  it("gives panels to work, team and autopilots only", () => {
     const cases: [string, string | null, boolean][] = [
       ["/acme/my-issues", "work", true],
       ["/acme/squads/s-1", "team", true],
       ["/acme/autopilots", "autopilots", true],
-      ["/acme/inbox", "inbox", true],
+      ["/acme/inbox", "work", true],
       ["/acme/chat", "chat", false],
       ["/acme/settings", "settings", false],
       ["/acme/attachments/a-1", null, false],
@@ -86,35 +86,6 @@ describe("AppShellProvider", () => {
       expect(shell?.hasPanel).toBe(hasPanel);
       unmount();
     }
-  });
-
-  it("keeps an issue or project opened from Attention in Attention until the rail leaves it", () => {
-    const { rerender } = renderShell();
-    const visit = (pathname: string) => {
-      navigation.pathname = pathname;
-      rerender(
-        <AppShellProvider>
-          <Reader />
-        </AppShellProvider>,
-      );
-    };
-
-    visit("/acme/issues/MUL-1");
-    expect(shell!.space).toBe("work");
-
-    visit("/acme/inbox");
-    visit("/acme/issues/MUL-1");
-    expect(shell!.space).toBe("inbox");
-    visit("/acme/projects/p-1");
-    expect(shell!.space).toBe("inbox");
-    // A list page belongs to Work whichever space led there.
-    visit("/acme/issues");
-    expect(shell!.space).toBe("work");
-
-    visit("/acme/inbox");
-    visit("/acme/issues/MUL-1");
-    act(() => shell!.chooseSpace("work"));
-    expect(shell!.space).toBe("work");
   });
 
   it("opens a peek after the pointer settles and switches instantly once open", () => {
@@ -214,7 +185,7 @@ describe("AppShellProvider", () => {
     expect(shell!.spaceHref("team", "/acme/agents")).toBe("/acme/agents");
 
     // Memory is per workspace.
-    visit("/beta/inbox");
+    visit("/beta/chat");
     expect(shell!.spaceHref("work", "/beta/issues")).toBe("/beta/issues");
   });
 

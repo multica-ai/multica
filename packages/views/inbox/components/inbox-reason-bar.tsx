@@ -12,7 +12,7 @@ import { useTimeAgo } from "./inbox-list-item";
 
 /**
  * Why an issue is waiting on the user, above its title: who did what, and
- * the action that takes it out of Needs action. Once the user has acted on
+ * the action that takes it out of the Inbox. Once the user has acted on
  * the issue, it says so until they move on.
  */
 export function InboxReasonBar({

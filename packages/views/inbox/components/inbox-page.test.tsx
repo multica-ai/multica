@@ -270,7 +270,7 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
 /** The issue the detail shows, or null while the list is on screen. */
 const openIssue = () => screen.queryByTestId("detail")?.getAttribute("data-issue") ?? null;
 
-/** A selection that arrives through the URL, as from the Attention panel. */
+/** A selection that arrives through the URL, as from the Work panel. */
 function openFromUrl(rerender: (ui: React.ReactElement) => void, key: string) {
   searchParams = new URLSearchParams(key ? `issue=${key}` : "");
   rerender(<InboxPage />);
@@ -358,7 +358,7 @@ describe("InboxPage", () => {
     expect(screen.queryByTestId("row")).toBeNull();
   });
 
-  // The Attention panel beside the page lists what is waiting, so the page
+  // The Work panel beside the page lists what is waiting, so the page
   // has no list column of its own: it shows the list or the open issue.
   it("swaps the full-width list for the opened issue on desktop", () => {
     reset();
@@ -1028,7 +1028,7 @@ describe("InboxPage", () => {
   });
 
   it.each([TABLET, FOLD_INNER_LANDSCAPE])("leaves the way back to the panel at %spx", (width) => {
-    // 768px is the first desktop width. The Attention panel lists the issues
+    // 768px is the first desktop width. The Work panel lists the issues
     // there, so the detail carries no back control of its own.
     reset();
     layout.width = width;

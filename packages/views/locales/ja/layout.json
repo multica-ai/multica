@@ -1,6 +1,6 @@
 {
   "nav": {
-    "inbox": "要対応",
+    "inbox": "インボックス",
     "chat": "チャット",
     "my_issues": "マイタスク",
     "issues": "タスク",
@@ -89,13 +89,12 @@
   },
   "spaces": {
     "work": "作業",
-    "team": "チーム",
-    "attention": "注目"
+    "team": "チーム"
   },
   "rail": {
     "label": "アプリナビゲーション",
     "sheet_description": "スペースとワークスペースを切り替えます。",
-    "inbox": "注目",
+    "inbox": "受信箱",
     "work": "作業",
     "team": "チーム",
     "chat": "チャット",
@@ -149,7 +148,9 @@
       "view_remove": "サイドバーから削除",
       "view_rename": "名前を変更",
       "view_duplicate": "複製",
-      "view_delete": "ビューを削除"
+      "view_delete": "ビューを削除",
+      "inbox_view_all": "すべて表示（{{total}}）",
+      "inbox_empty": "今対応が必要なものはありません"
     },
     "team": {
       "new_agent": "新規エージェント",
@@ -171,11 +172,6 @@
       "all": "すべてのオートパイロット",
       "list": "オートパイロット",
       "templates": "テンプレートから"
-    },
-    "attention": {
-      "needs_action": "要対応",
-      "view_all": "すべて表示（{{total}}）",
-      "empty": "今対応が必要なものはありません"
     }
   },
   "account": {

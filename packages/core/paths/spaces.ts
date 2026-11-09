@@ -7,7 +7,6 @@
  */
 
 export type AppSpaceId =
-  | "inbox"
   | "work"
   | "team"
   | "chat"
@@ -19,7 +18,6 @@ export type RailSpaceId = Exclude<AppSpaceId, "settings">;
 
 /** Spaces in rail order. */
 export const RAIL_SPACES: readonly RailSpaceId[] = [
-  "inbox",
   "work",
   "team",
   "chat",
@@ -27,7 +25,7 @@ export const RAIL_SPACES: readonly RailSpaceId[] = [
 ];
 
 const SPACE_BY_SEGMENT: Record<string, AppSpaceId> = {
-  inbox: "inbox",
+  inbox: "work",
   "my-issues": "work",
   issues: "work",
   projects: "work",

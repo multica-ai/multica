@@ -8,6 +8,7 @@ import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-s
 import { issueViewPreferenceOptions } from "@multica/core/issue-views/preferences";
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
 import { issueDetailOptions, issueKeys } from "@multica/core/issues/queries";
+import { inboxUnreadSummaryOptions } from "@multica/core/inbox/queries";
 import { issueUnreadOptions } from "@multica/core/issues/unread";
 import { SIDEBAR_PROJECTS_SCOPE } from "@multica/core/issues/sidebar-project-prefs";
 import { useSidebarKeptStore } from "@multica/core/issues/stores/sidebar-kept-store";
@@ -144,6 +145,7 @@ function renderPanel(
   qc.setQueryData(issueViewEverywhereOptions("ws-1").queryKey, []);
   qc.setQueryData(issueViewPreferenceOptions("ws-1", SIDEBAR_PROJECTS_SCOPE).queryKey, EMPTY_ISSUE_VIEW_PREFERENCE);
   qc.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, []);
+  qc.setQueryData(inboxUnreadSummaryOptions().queryKey, []);
   qc.setQueryData(
     issueUnreadOptions("ws-1").queryKey,
     unreadIssueIds.map((issue_id) => ({
@@ -175,8 +177,8 @@ function renderPanel(
       <NavigationProvider value={adapter}>
         <KeptRowsRelease />
         {sheetOpen && spaceForPath(pathname) === "work" && <WorkPanel />}
-        <button type="button" onClick={() => setPathname("/acme/inbox")}>
-          Visit inbox
+        <button type="button" onClick={() => setPathname("/acme/chat")}>
+          Visit chat
         </button>
         <button type="button" onClick={() => setPathname(`/acme/issues/${ISSUE.id}`)}>
           Return to issue
@@ -224,6 +226,29 @@ beforeEach(() => {
   apiMock.listIssues.mockResolvedValue({ issues: [ISSUE, OTHER], total: 2 });
   // The issue page never finishes loading, so the panel cannot lean on it.
   apiMock.getIssue.mockReturnValue(new Promise<Issue>(() => {}));
+});
+
+describe("WorkPanel sections", () => {
+  it("leads with the Inbox, then Pinned, Views and Projects", async () => {
+    renderPanel("/acme/my-issues", [PIN]);
+    await screen.findByRole("link", { name: ISSUE.title });
+    const inbox = screen.getByRole("link", { name: "Inbox" });
+    const pinned = screen.getByRole("heading", { name: "Pinned" });
+    const views = screen.getByRole("heading", { name: "Views" });
+    const projects = screen.getByRole("heading", { name: "Projects" });
+    expect(inbox.compareDocumentPosition(pinned) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(pinned.compareDocumentPosition(views) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(views.compareDocumentPosition(projects) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("lights the Inbox on its page and counts the issues waiting there", async () => {
+    const qc = renderPanel("/acme/inbox");
+    act(() => qc.setQueryData(inboxUnreadSummaryOptions().queryKey, [{ workspace_id: "ws-1", count: 3 }]));
+    const inbox = screen.getByRole("link", { name: "Inbox" });
+    expect(inbox).toHaveAttribute("aria-current", "page");
+    await waitFor(() => expect(inbox.parentElement).toHaveTextContent("3"));
+    expect(allIssues()).not.toHaveAttribute("aria-current");
+  });
 });
 
 describe("WorkPanel issue highlight", () => {
@@ -325,7 +350,7 @@ describe("WorkPanel issue highlight", () => {
     await act(() => qc.invalidateQueries({ queryKey: issueKeys.sidebarAll("ws-1") }));
     await screen.findByRole("link", { name: "Fixed the sidebar" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Visit inbox" }));
+    fireEvent.click(screen.getByRole("button", { name: "Visit chat" }));
     fireEvent.click(screen.getByRole("button", { name: "Return to issue" }));
 
     expect(await screen.findByRole("link", { name: OTHER.title })).toBeInTheDocument();
@@ -540,7 +565,7 @@ describe("WorkPanel starred Unread view after its last issue is read", () => {
 
   it("keeps the row but drops the read issue once it is no longer the page", async () => {
     await openAndReadLastUnread();
-    fireEvent.click(screen.getByRole("button", { name: "Visit inbox" }));
+    fireEvent.click(screen.getByRole("button", { name: "Visit chat" }));
     fireEvent.click(screen.getByRole("button", { name: "Return to issue" }));
     await screen.findByRole("link", { name: "All issues" });
     expect(unreadRow()).not.toBeNull();

@@ -67,6 +67,8 @@ interface SidebarTreeState {
   projectSettings: SidebarProjectSettings;
   projectOrder: string[];
   projectsCollapsed: boolean;
+  /** The Work panel's Inbox row lists its waiting issues unless collapsed. */
+  inboxCollapsed: boolean;
   viewsCollapsed: boolean;
   pinnedCollapsed: boolean;
   workingCollapsed: boolean;
@@ -79,6 +81,7 @@ interface SidebarTreeState {
   setExpanded: (key: string, expanded: boolean) => void;
   requestLocate: (request: SidebarLocateRequest | null) => void;
   setProjectsCollapsed: (collapsed: boolean) => void;
+  setInboxCollapsed: (collapsed: boolean) => void;
   setViewsCollapsed: (collapsed: boolean) => void;
   setPinnedCollapsed: (collapsed: boolean) => void;
   setWorkingCollapsed: (collapsed: boolean) => void;
@@ -92,6 +95,7 @@ type PersistedSidebarTree = Pick<
   | "projectSettings"
   | "projectOrder"
   | "projectsCollapsed"
+  | "inboxCollapsed"
   | "viewsCollapsed"
   | "pinnedCollapsed"
   | "workingCollapsed"
@@ -104,6 +108,7 @@ const INITIAL: PersistedSidebarTree = {
   projectSettings: DEFAULT_SIDEBAR_PROJECT_SETTINGS,
   projectOrder: [],
   projectsCollapsed: false,
+  inboxCollapsed: false,
   viewsCollapsed: false,
   pinnedCollapsed: false,
   workingCollapsed: false,
@@ -122,6 +127,7 @@ export const useSidebarTreeStore = create<SidebarTreeState>()(
           return { expanded: expanded ? [...s.expanded, key] : s.expanded.filter((k) => k !== key) };
         }),
       setProjectsCollapsed: (collapsed) => set({ projectsCollapsed: collapsed }),
+      setInboxCollapsed: (collapsed) => set({ inboxCollapsed: collapsed }),
       setViewsCollapsed: (collapsed) => set({ viewsCollapsed: collapsed }),
       setPinnedCollapsed: (collapsed) => set({ pinnedCollapsed: collapsed }),
       setWorkingCollapsed: (collapsed) => set({ workingCollapsed: collapsed }),
@@ -136,6 +142,7 @@ export const useSidebarTreeStore = create<SidebarTreeState>()(
         projectSettings: state.projectSettings,
         projectOrder: state.projectOrder,
         projectsCollapsed: state.projectsCollapsed,
+        inboxCollapsed: state.inboxCollapsed,
         viewsCollapsed: state.viewsCollapsed,
         pinnedCollapsed: state.pinnedCollapsed,
         workingCollapsed: state.workingCollapsed,

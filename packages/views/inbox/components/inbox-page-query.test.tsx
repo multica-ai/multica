@@ -96,7 +96,7 @@ function renderPage() {
   return view;
 }
 
-/** An open issue fills the page, so the next one arrives through the URL, as from the Attention panel. */
+/** An open issue fills the page, so the next one arrives through the URL, as from the Work panel. */
 function navigate(query: string) {
   searchParams = new URLSearchParams(query);
   view.rerender(page$());

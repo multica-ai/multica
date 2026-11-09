@@ -8,15 +8,10 @@ import { useNavigation } from "../navigation";
 /**
  * Spaces whose navigation lives in the shell panel. Chat and Settings are
  * list-and-detail pages that already render their own list column in the
- * same card, so the shell adds no panel for them.
+ * same card, so the shell adds no panel for them. The Inbox is a page of Work,
+ * listed at the top of the Work panel.
  */
-export const PANEL_SPACES: ReadonlySet<AppSpaceId> = new Set(["inbox", "work", "team", "autopilots"]);
-
-/** An issue or project page, which Attention can open without leaving it. */
-function isWorkDetailPath(path: string): boolean {
-  const [, segment, id] = (path.split(/[?#]/)[0] ?? "").split("/").filter(Boolean);
-  return !!id && (segment === "issues" || segment === "projects");
-}
+export const PANEL_SPACES: ReadonlySet<AppSpaceId> = new Set(["work", "team", "autopilots"]);
 
 // Opening waits for the pointer to settle so sweeping across the rail does
 // not flash every panel; closing waits long enough to cross the gap between
@@ -29,8 +24,8 @@ interface AppShellContextValue {
   /** The current space has a shell panel (collapsible with the sidebar toggle). */
   hasPanel: boolean;
   /**
-   * Chat and Settings keep their own list column, which collapses with
-   * the space panel. Tracked apart from the panel's open state so the md–lg
+   * Chat and Settings keep their own list column, which collapses with the
+   * space panel. Tracked apart from the panel's open state so the md–lg
    * auto-collapse never hides a list the page needs.
    */
   listCollapsed: boolean;
@@ -47,8 +42,6 @@ interface AppShellContextValue {
    * workspace, or `home` for the current space and spaces not yet visited.
    */
   spaceHref: (space: AppSpaceId, home: string) => string;
-  /** A rail item was chosen: the page it opens belongs to that space. */
-  chooseSpace: (space: AppSpaceId) => void;
   /** Space previewed over the content while the nav is collapsed. */
   peekSpace: AppSpaceId | null;
   requestPeek: (space: AppSpaceId) => void;
@@ -74,20 +67,8 @@ export function AppShellProvider({
 }) {
   const { pathname, searchParams } = useNavigation();
   const sidebar = useSidebarSafe();
-  // An issue or project opened from Attention (a pin, a link in a comment)
-  // stays in Attention, so its panel stays beside the page. Leaving for any
-  // other page, or choosing a space on the rail, ends it.
-  const [inAttention, setInAttention] = useState(false);
-  const resolveSpace = (path: string) => {
-    const routeSpace = spaceForPath(path);
-    return routeSpace === "work" && inAttention && isWorkDetailPath(path) ? "inbox" : routeSpace;
-  };
-  const navSpace = resolveSpace(pathname);
-  const space = renderedPathname ? resolveSpace(renderedPathname) : navSpace;
-  useEffect(() => {
-    if (navSpace) setInAttention(navSpace === "inbox");
-  }, [navSpace]);
-  const chooseSpace = useCallback((target: AppSpaceId) => setInAttention(target === "inbox"), []);
+  const navSpace = spaceForPath(pathname);
+  const space = renderedPathname ? spaceForPath(renderedPathname) : navSpace;
   const workspaceSlug = pathname.split("/").filter(Boolean)[0] ?? "";
   const search = searchParams?.toString() ?? "";
   // Keyed by `${workspaceSlug}/${space}`. The fragment is left out so a
@@ -135,7 +116,7 @@ export function AppShellProvider({
   }, [clearTimers]);
 
   // Following a link out of the preview lands on its page; the preview has
-  // done its job. Inbox and Chat select rows through the query string alone.
+  // done its job. Chat selects rows through the query string alone.
   const shownPathname = renderedPathname || pathname;
   useEffect(() => {
     closePeek();
@@ -182,7 +163,6 @@ export function AppShellProvider({
       toggleNav,
       navCollapsed,
       spaceHref,
-      chooseSpace,
       peekSpace,
       requestPeek,
       holdPeek,
@@ -196,7 +176,6 @@ export function AppShellProvider({
       toggleNav,
       navCollapsed,
       spaceHref,
-      chooseSpace,
       peekSpace,
       requestPeek,
       holdPeek,

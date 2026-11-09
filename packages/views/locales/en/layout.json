@@ -1,6 +1,6 @@
 {
   "nav": {
-    "inbox": "Needs action",
+    "inbox": "Inbox",
     "chat": "Chat",
     "my_issues": "My Issues",
     "issues": "Issues",
@@ -90,13 +90,12 @@
   },
   "spaces": {
     "work": "Work",
-    "team": "Team",
-    "attention": "Attention"
+    "team": "Team"
   },
   "rail": {
     "label": "App navigation",
     "sheet_description": "Switch spaces and workspaces.",
-    "inbox": "Attention",
+    "inbox": "Inbox",
     "work": "Work",
     "team": "Team",
     "chat": "Chat",
@@ -151,7 +150,9 @@
       "view_remove": "Remove from sidebar",
       "view_rename": "Rename",
       "view_duplicate": "Duplicate",
-      "view_delete": "Delete view"
+      "view_delete": "Delete view",
+      "inbox_view_all": "View all {{total}}",
+      "inbox_empty": "Nothing needs you right now"
     },
     "team": {
       "new_agent": "New agent",
@@ -177,11 +178,6 @@
       "all": "All autopilots",
       "list": "Autopilots",
       "templates": "From a template"
-    },
-    "attention": {
-      "needs_action": "Needs action",
-      "view_all": "View all {{total}}",
-      "empty": "Nothing needs you right now"
     }
   },
   "account": {

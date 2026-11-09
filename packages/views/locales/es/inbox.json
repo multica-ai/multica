@@ -1,7 +1,7 @@
 {
   "page": {
-    "title": "Pendiente",
-    "back": "Pendiente"
+    "title": "Bandeja de entrada",
+    "back": "Bandeja de entrada"
   },
   "menu": {
     "mark_all_read": "Marcar todo como leído",
@@ -64,7 +64,7 @@
   },
   "detail": {
     "select_prompt": "Selecciona una notificación para ver los detalles",
-    "empty": "Nada te espera ahora",
+    "empty": "Tu bandeja de entrada está vacía",
     "original_input": "Entrada original",
     "retry_with_context": "Reintentar con contexto",
     "edit_advanced": "Editar como formulario avanzado",
@@ -73,7 +73,7 @@
     "archive": "Archivar",
     "unarchive": "Desarchivar",
     "done": "Hecho",
-    "handled": "Gestionado · ya no está pendiente"
+    "handled": "Gestionado · salió de la bandeja de entrada"
   },
   "types": {
     "issue_assigned": "Asignada",

@@ -1,37 +1,31 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useState } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Inbox } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
-import { useAuthStore } from "@multica/core/auth";
 import { deduplicateInboxItems, inboxListOptions, useInboxUnreadCount } from "@multica/core/inbox/queries";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { isIssueUuid } from "@multica/core/issues/canonical-id";
-import { issueDetailOptions } from "@multica/core/issues/queries";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
+import { useWorkspacePaths } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
 import { AppLink, useNavigation } from "../../navigation";
-import { IssueContextMenuProvider } from "../../issues/actions";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { issueHighlightMementoKey } from "../../issues/components/issue-detail";
 import { getInboxDisplayTitle, isAutopilotQuotaNotice } from "../../inbox/components/inbox-display";
 import { useTypeLabels } from "../../inbox/components/inbox-detail-label";
-import { useTimeAgo } from "../../inbox/components/inbox-list-item";
 import { useT } from "../../i18n";
 import { useViewStateWriter } from "../../platform";
-import { PanelBody, PanelHeader, PanelLink, PanelList, panelRowStateClass } from "../panel-nav";
-import { PinnedSection, usePanelPins } from "./pinned-section";
-import { TREE_CHILD_ROW_CLASS } from "./sidebar-tree";
-import { routeSegment } from "./work-panel";
+import { PanelList, panelRowStateClass } from "../panel-nav";
+import { TREE_CHILD_ROW_CLASS, TreeRow } from "./sidebar-tree";
 
 const EMPTY_INBOX: InboxItem[] = [];
-/** Rows listed under Needs action; the page lists the rest. */
-export const ATTENTION_PREVIEW_LIMIT = 10;
+/** Issues listed under the Inbox row; the page lists the rest. */
+export const INBOX_PREVIEW_LIMIT = 10;
 
 const itemKey = (item: InboxItem) => item.issue_id ?? item.id;
 
-/** The issues waiting on the user, marked like the rail's Attention badge. */
+/** The issues waiting on the user, marked like the rail's Work badge. */
 function PendingCount({ value }: { value: number }) {
   if (value <= 0) return null;
   return (
@@ -41,19 +35,20 @@ function PendingCount({ value }: { value: number }) {
   );
 }
 
-function AttentionRow({
+function InboxRow({
   item,
   href,
   active,
   handled,
+  onKeyDown,
 }: {
   item: InboxItem;
   href: string;
   active: boolean;
-  /** Its issue already left Needs action; the row stays until another opens. */
+  /** Its issue already left the Inbox; the row stays until another opens. */
   handled: boolean;
+  onKeyDown: (event: React.KeyboardEvent) => void;
 }) {
-  const timeAgo = useTimeAgo();
   const typeLabels = useTypeLabels();
   const statuses = useIssueStatuses(item.workspace_id);
   const writeViewState = useViewStateWriter();
@@ -67,6 +62,7 @@ function AttentionRow({
         aria-current={active ? "page" : undefined}
         data-handled={handled || undefined}
         className={cn(TREE_CHILD_ROW_CLASS, panelRowStateClass(active), handled && "opacity-50")}
+        onKeyDown={onKeyDown}
         // Like a click on the page's own row: land on the comment again even
         // when this issue was opened before.
         onClick={() => {
@@ -86,43 +82,36 @@ function AttentionRow({
         )}
         <span className={cn("min-w-0 flex-1 truncate", unread && "text-foreground")}>{title}</span>
         {unread && <span className="size-1.5 shrink-0 rounded-full bg-brand" />}
-        <span className="shrink-0 text-caption tabular-nums text-faint-foreground">{timeAgo(item.created_at)}</span>
       </AppLink>
     </li>
   );
 }
 
 /**
- * The Attention space: what the user follows (Pinned) and what is waiting on
- * them (Needs action). A row opens its issue on the Needs action page; the
- * group's own row opens that page's full list.
+ * The top of the Work panel: the Inbox row, with the first issues waiting on
+ * the user listed under it. A listed issue opens on the Inbox page; the row
+ * itself opens the page's full list.
  */
-export function AttentionPanel() {
+export function InboxSection({ wsId }: { wsId: string }) {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
   const { pathname, searchParams } = useNavigation();
-  const wsId = useCurrentWorkspace()?.id;
-  const userId = useAuthStore((s) => s.user?.id);
   const pending = useInboxUnreadCount(wsId);
-
-  const issueSegment = routeSegment(pathname, p.issues());
-  const { data: currentIssue } = useQuery({
-    ...issueDetailOptions(wsId ?? "", issueSegment ?? ""),
-    enabled: false,
-  });
-  const currentIssueId = issueSegment ? (currentIssue?.id ?? (isIssueUuid(issueSegment) ? issueSegment : null)) : null;
-  const pins = usePanelPins(wsId, userId, pathname, currentIssueId);
+  const collapsed = useSidebarTreeStore((s) => s.inboxCollapsed);
+  const setCollapsed = useSidebarTreeStore((s) => s.setInboxCollapsed);
+  const listId = useId();
+  const linkRef = useRef<HTMLAnchorElement>(null);
 
   const { data: rawItems = EMPTY_INBOX, isLoading } = useQuery({
-    ...inboxListOptions(wsId ?? ""),
-    enabled: !!wsId,
+    ...inboxListOptions(wsId),
+    enabled: !collapsed,
   });
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
   const onPage = pathname === p.inbox() && !searchParams.get("view");
   const selectedKey = onPage ? (searchParams.get("issue") ?? "") : "";
 
-  // Acting on the open issue takes it out of Needs action on the server. Its
-  // row stays where it was, dimmed, until another row opens.
+  // Acting on the open issue takes it out of the Inbox on the server. Its row
+  // stays where it was, dimmed, until another row opens.
   const [held, setHeld] = useState<{ key: string; item: InboxItem; index: number } | null>(null);
   const index = selectedKey ? items.findIndex((item) => itemKey(item) === selectedKey) : -1;
   useLayoutEffect(() => {
@@ -134,34 +123,44 @@ export function AttentionPanel() {
     const at = Math.min(held.index, items.length);
     return [...items.slice(0, at), held.item, ...items.slice(at)];
   }, [items, held, handledKey]);
-  const shown = rows.slice(0, ATTENTION_PREVIEW_LIMIT);
+  const shown = rows.slice(0, INBOX_PREVIEW_LIMIT);
+
+  const label = t(($) => $.nav.inbox);
+  const collapseFromRow = (event: React.KeyboardEvent) => {
+    if (event.key !== "ArrowLeft") return;
+    event.preventDefault();
+    setCollapsed(true);
+    linkRef.current?.focus();
+  };
 
   return (
-    <>
-      <PanelHeader title={t(($) => $.spaces.attention)} />
-      <IssueContextMenuProvider variant="sidebar">
-        <PanelBody>
-          {wsId && <PinnedSection pins={pins} wsId={wsId} />}
-          <section className="mt-5">
-            <PanelList>
-              <PanelLink
-                href={p.inbox()}
-                icon={<Inbox />}
-                label={t(($) => $.panels.attention.needs_action)}
-                active={onPage && !selectedKey}
-                trailing={<PendingCount value={pending} />}
-              />
-            </PanelList>
-            <ul className="mb-2 ml-5 border-l border-surface-border pl-[9px]">
+    <section>
+      <PanelList>
+        <li>
+          <TreeRow
+            ref={linkRef}
+            href={p.inbox()}
+            label={label}
+            icon={<Inbox className="size-4 shrink-0" />}
+            active={onPage && !selectedKey}
+            expanded={!collapsed}
+            onExpandedChange={(next) => setCollapsed(!next)}
+            listId={listId}
+            toggleLabel={t(($) => $.panels.work.project_issues, { name: label })}
+            trailing={<PendingCount value={pending} />}
+          />
+          {!collapsed && (
+            <ul id={listId} className="mb-2 ml-5 border-l border-surface-border pl-[9px]">
               {shown.map((item) => {
                 const key = itemKey(item);
                 return (
-                  <AttentionRow
+                  <InboxRow
                     key={key}
                     item={item}
                     href={`${p.inbox()}?${new URLSearchParams({ issue: key }).toString()}`}
                     active={key === selectedKey}
                     handled={key === handledKey}
+                    onKeyDown={collapseFromRow}
                   />
                 );
               })}
@@ -169,21 +168,22 @@ export function AttentionPanel() {
                 <li>
                   <AppLink
                     href={p.inbox()}
+                    onKeyDown={collapseFromRow}
                     className={cn(TREE_CHILD_ROW_CLASS, panelRowStateClass(false), "min-h-6 text-caption text-faint-foreground")}
                   >
-                    {t(($) => $.panels.attention.view_all, { total: rows.length })}
+                    {t(($) => $.panels.work.inbox_view_all, { total: rows.length })}
                   </AppLink>
                 </li>
               )}
               {!isLoading && rows.length === 0 && (
                 <li className="flex h-[26px] items-center px-2 text-caption text-faint-foreground">
-                  {t(($) => $.panels.attention.empty)}
+                  {t(($) => $.panels.work.inbox_empty)}
                 </li>
               )}
             </ul>
-          </section>
-        </PanelBody>
-      </IssueContextMenuProvider>
-    </>
+          )}
+        </li>
+      </PanelList>
+    </section>
   );
 }

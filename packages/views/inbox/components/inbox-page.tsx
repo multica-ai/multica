@@ -855,7 +855,7 @@ export function InboxPage() {
   );
 
   // The open issue fills the page, so the trip back to the list has to live
-  // inside it — except on desktop in the main view, where the Attention panel
+  // inside it — except on desktop in the main view, where the Work panel
   // beside the page lists the same issues.
   //
   // The detail owns the whole screen in four states — loaded, loading,
@@ -1115,7 +1115,7 @@ export function InboxPage() {
   }
 
   // -- Desktop layout: the open issue, or the whole list ---------------------
-  // The Attention panel beside the page lists what is waiting, so an open
+  // The Work panel beside the page lists what is waiting, so an open
   // issue takes the page's full width, and with none open the page lists all.
 
   if (viewLoading) {

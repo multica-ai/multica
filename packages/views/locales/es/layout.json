@@ -1,6 +1,6 @@
 {
   "nav": {
-    "inbox": "Pendiente",
+    "inbox": "Bandeja de entrada",
     "chat": "Chat",
     "my_issues": "Mis tareas",
     "issues": "Tareas",
@@ -90,13 +90,12 @@
   },
   "spaces": {
     "work": "Trabajo",
-    "team": "Equipo",
-    "attention": "Atención"
+    "team": "Equipo"
   },
   "rail": {
     "label": "Navegación de la app",
     "sheet_description": "Cambia de sección y de espacio de trabajo.",
-    "inbox": "Atención",
+    "inbox": "Bandeja",
     "work": "Trabajo",
     "team": "Equipo",
     "chat": "Chat",
@@ -151,7 +150,9 @@
       "view_remove": "Quitar de la barra lateral",
       "view_rename": "Renombrar",
       "view_duplicate": "Duplicar",
-      "view_delete": "Eliminar vista"
+      "view_delete": "Eliminar vista",
+      "inbox_view_all": "Ver los {{total}}",
+      "inbox_empty": "Nada te espera ahora"
     },
     "team": {
       "new_agent": "Nuevo agente",
@@ -177,11 +178,6 @@
       "all": "Todas las automatizaciones",
       "list": "Automatizaciones",
       "templates": "Desde una plantilla"
-    },
-    "attention": {
-      "needs_action": "Pendiente",
-      "view_all": "Ver los {{total}}",
-      "empty": "Nada te espera ahora"
     }
   },
   "account": {

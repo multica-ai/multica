@@ -1,12 +1,13 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { inboxKeys } from "@multica/core/inbox/queries";
+import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import type { InboxItem } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
-import { ATTENTION_PREVIEW_LIMIT, AttentionPanel } from "./attention-panel";
+import { INBOX_PREVIEW_LIMIT, InboxSection } from "./inbox-section";
 
 const writeViewState = vi.hoisted(() => vi.fn());
 
@@ -15,14 +16,6 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
   return {
     ...actual,
     useWorkspacePaths: () => actual.paths.workspace("acme"),
-    useCurrentWorkspace: () => ({ id: "ws-1" }),
-  };
-});
-vi.mock("@multica/core/auth", async (importOriginal) => {
-  const state = { user: { id: "u1" } };
-  return {
-    ...(await importOriginal<typeof import("@multica/core/auth")>()),
-    useAuthStore: (selector: (s: typeof state) => unknown) => selector(state),
   };
 });
 vi.mock("@multica/core/inbox/queries", async (importOriginal) => ({
@@ -33,13 +26,6 @@ vi.mock("@multica/core/issue-statuses/hooks", async () => {
   const { buildIssueStatusCatalog } = await import("@multica/core/issue-statuses/queries");
   return { useIssueStatuses: () => buildIssueStatusCatalog([]) };
 });
-vi.mock("./pinned-section", () => ({
-  usePanelPins: () => null,
-  PinnedSection: () => <div data-testid="pinned" />,
-}));
-vi.mock("../../issues/actions", () => ({
-  IssueContextMenuProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
-}));
 vi.mock("../../issues/components/status-icon", () => ({ StatusIcon: () => <span /> }));
 vi.mock("../../issues/components/issue-detail", () => ({
   issueHighlightMementoKey: (issueId: string) => `highlight:${issueId}`,
@@ -89,7 +75,7 @@ function renderPanel(initialUrl: string, items: InboxItem[]) {
     };
     return (
       <NavigationProvider value={adapter}>
-        <AttentionPanel />
+        <InboxSection wsId="ws-1" />
       </NavigationProvider>
     );
   }
@@ -103,33 +89,46 @@ function renderPanel(initialUrl: string, items: InboxItem[]) {
 }
 
 const row = (n: number) => document.querySelector<HTMLElement>(`a[href="/acme/inbox?issue=issue-${n}"]`);
-const needsAction = () => screen.getByRole("link", { name: /^Needs action/ });
+const inbox = () => screen.getByRole("link", { name: "Inbox" });
 
-describe("AttentionPanel", () => {
-  it("lists the first waiting issues under Needs action and links to the rest", () => {
-    const items = Array.from({ length: ATTENTION_PREVIEW_LIMIT + 2 }, (_, i) => item(i + 1));
+beforeEach(() => {
+  useSidebarTreeStore.setState({ inboxCollapsed: false });
+});
+
+describe("InboxSection", () => {
+  it("lists the first waiting issues under the Inbox row and links to the rest", () => {
+    const items = Array.from({ length: INBOX_PREVIEW_LIMIT + 2 }, (_, i) => item(i + 1));
     renderPanel("/acme/issues", items);
 
-    expect(screen.getByTestId("pinned")).toBeInTheDocument();
-    expect(needsAction()).toHaveAttribute("href", "/acme/inbox");
-    expect(needsAction()).toHaveTextContent("3");
+    expect(inbox()).toHaveAttribute("href", "/acme/inbox");
+    expect(inbox().parentElement).toHaveTextContent("3");
     expect(row(1)).toHaveTextContent("Issue 1");
-    expect(row(ATTENTION_PREVIEW_LIMIT)).not.toBeNull();
-    expect(row(ATTENTION_PREVIEW_LIMIT + 1)).toBeNull();
-    expect(screen.getByRole("link", { name: `View all ${ATTENTION_PREVIEW_LIMIT + 2}` })).toHaveAttribute(
+    expect(row(INBOX_PREVIEW_LIMIT)).not.toBeNull();
+    expect(row(INBOX_PREVIEW_LIMIT + 1)).toBeNull();
+    expect(screen.getByRole("link", { name: `View all ${INBOX_PREVIEW_LIMIT + 2}` })).toHaveAttribute(
       "href",
       "/acme/inbox",
     );
   });
 
-  it("lights the page's open issue, or the group while the page lists them all", () => {
+  it("folds its issues away like a view's", () => {
+    renderPanel("/acme/issues", [item(1), item(2)]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Issues in Inbox" }));
+
+    expect(row(1)).toBeNull();
+    expect(inbox()).toHaveAttribute("href", "/acme/inbox");
+    expect(useSidebarTreeStore.getState().inboxCollapsed).toBe(true);
+  });
+
+  it("lights the page's open issue, or the Inbox row while the page lists them all", () => {
     renderPanel("/acme/inbox", [item(1), item(2)]);
-    expect(needsAction()).toHaveAttribute("aria-current", "page");
+    expect(inbox()).toHaveAttribute("aria-current", "page");
 
     fireEvent.click(row(2)!);
 
     expect(row(2)).toHaveAttribute("aria-current", "page");
-    expect(needsAction()).not.toHaveAttribute("aria-current");
+    expect(inbox()).not.toHaveAttribute("aria-current");
     expect(writeViewState).toHaveBeenCalledWith("highlight:issue-2", undefined);
   });
 

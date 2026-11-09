@@ -17,6 +17,8 @@ import { IssueContextMenuProvider } from "../../issues/actions";
 import { useIssueViewActions } from "../../issue-views/use-view-actions";
 import { useT } from "../../i18n";
 import { PanelBody, PanelHeader, isPathWithin } from "../panel-nav";
+import { InboxSection } from "./inbox-section";
+import { PinnedSection, usePanelPins } from "./pinned-section";
 import { useKeptActiveItem } from "./sidebar-tree";
 import { ProjectsSection, useIssueInTree } from "./work-tree";
 import { ViewsSection, sidebarViewItemSource } from "./views-section";
@@ -24,12 +26,14 @@ import { ViewsSection, sidebarViewItemSource } from "./views-section";
 const EMPTY_PROJECTS: Project[] = [];
 /** The Projects section's key in the kept-rows store, apart from every sidebar source. */
 const PROJECTS_LIST = "projects";
+/** Pinned rows' place in the clicked-issue record, apart from every sidebar source. */
+const PINS_LIST = "pins";
 
 /**
  * The `{id}` of a `{base}/{id}` route — for `/issues/{id}`, a UUID or an
  * identifier like `MUL-123`.
  */
-export function routeSegment(pathname: string, base: string): string | null {
+function routeSegment(pathname: string, base: string): string | null {
   if (!pathname.startsWith(base + "/")) return null;
   const segment = pathname.slice(base.length + 1).split("/")[0];
   return segment ? decodeURIComponent(segment) : null;
@@ -84,9 +88,9 @@ export function WorkPanel() {
   const currentIssueId = issueSegment
     ? (currentIssue?.id ?? inTree.issueId ?? (isIssueUuid(issueSegment) ? issueSegment : null))
     : null;
-  // An issue can sit in several lists at once, but lights in one place: the
-  // list it was clicked in. Arriving any other way (search, a link, a
-  // shortcut) lights the first list that shows it.
+  // An issue can sit in Pinned and in several lists at once, but lights in
+  // one place: the list it was clicked in. Arriving any other way (search, a
+  // link, a shortcut) lights the pin, else the first list that shows it.
   const [clickedIssue, setClickedIssue] = useState<{ segment: string; list: string | null } | null>(null);
   const clickedList =
     clickedIssue &&
@@ -94,6 +98,8 @@ export function WorkPanel() {
     (clickedIssue.segment === currentIssueId || clickedIssue.segment === currentIssue?.identifier)
       ? clickedIssue.list
       : undefined;
+  const treeClaimsIssue = clickedList !== undefined && clickedList !== PINS_LIST;
+  const pins = usePanelPins(wsId, userId, pathname, treeClaimsIssue ? null : currentIssueId);
   const requestLocate = useSidebarTreeStore((s) => s.requestLocate);
   const rememberClickedIssue = (event: React.MouseEvent) => {
     const link = (event.target as HTMLElement).closest("a[href]");
@@ -101,7 +107,9 @@ export function WorkPanel() {
     requestLocate(null);
     const path = new URL(link.getAttribute("href") ?? "", window.location.href).pathname;
     const segment = routeSegment(path, p.issues());
-    const list = link.closest("[data-sidebar-list]")?.getAttribute("data-sidebar-list") ?? null;
+    const list = link.closest("[data-pinned-section]")
+      ? PINS_LIST
+      : (link.closest("[data-sidebar-list]")?.getAttribute("data-sidebar-list") ?? null);
     setClickedIssue(segment ? { segment, list } : null);
   };
 
@@ -112,6 +120,7 @@ export function WorkPanel() {
   );
   const openProject = projects.find((project) => isPathWithin(pathname, p.projectDetail(project.id)));
   const shownProjects = useKeptActiveItem(PROJECTS_LIST, filteredProjects, openProject?.id ?? null, openProject);
+  const plainRowsLit = !pins.isActivePinnedRoute;
 
   // Opening an issue never opens its project: the tree changes only when the
   // user toggles a row or asks to show the issue there.
@@ -130,17 +139,17 @@ export function WorkPanel() {
     ...shownProjects.map((project) => projectSidebarSource(project.id)),
   ];
   const litSource =
-    !currentIssueId
+    !plainRowsLit || !currentIssueId
       ? null
       : clickedList && listing.includes(clickedList)
         ? clickedList
         : issueProjectExpanded
           ? issueProjectSource
           : (listOrder.find((source) => listing.includes(source)) ?? null);
-  const locatedProjectId = !litSource && issueProject ? issueProject.id : null;
+  const locatedProjectId = plainRowsLit && !litSource && issueProject ? issueProject.id : null;
   // An issue in a project the panel hides, or under the collapsed Projects
   // section, stays unmarked rather than lighting a list that may not show it.
-  const issueInAllIssues = !!currentIssue && !currentIssue.project_id && litSource === null;
+  const issueInAllIssues = plainRowsLit && !!currentIssue && !currentIssue.project_id && litSource === null;
 
   const locate = useSidebarTreeStore((s) => s.locate);
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
@@ -159,11 +168,19 @@ export function WorkPanel() {
           through the React tree, and must not reach rememberClickedIssue. */}
       <IssueContextMenuProvider variant="sidebar">
         <PanelBody onClickCapture={rememberClickedIssue}>
+          {wsId && <InboxSection wsId={wsId} />}
+
+          {wsId && (
+            <div data-pinned-section className="contents">
+              <PinnedSection pins={pins} wsId={wsId} />
+            </div>
+          )}
+
           {wsId && (
             <ViewsSection
               wsId={wsId}
               pathname={pathname}
-              plainRowsLit
+              plainRowsLit={plainRowsLit}
               issueInAllIssues={issueInAllIssues}
               activeIssueId={currentIssueId}
               litSource={litSource}
@@ -178,7 +195,7 @@ export function WorkPanel() {
               pathname={pathname}
               projects={shownProjects}
               totalProjects={projects.length}
-              plainRowsLit
+              plainRowsLit={plainRowsLit}
               activeIssueId={currentIssueId}
               litSource={litSource}
               locatedProjectId={locatedProjectId}

@@ -1,7 +1,7 @@
 {
   "page": {
-    "title": "Needs action",
-    "back": "Needs action"
+    "title": "Inbox",
+    "back": "Inbox"
   },
   "menu": {
     "mark_all_read": "Mark all as read",
@@ -64,7 +64,7 @@
   },
   "detail": {
     "select_prompt": "Select a notification to view details",
-    "empty": "Nothing needs you right now",
+    "empty": "Your inbox is empty",
     "original_input": "Original input",
     "retry_with_context": "Retry with context",
     "edit_advanced": "Edit as advanced form",
@@ -73,7 +73,7 @@
     "archive": "Archive",
     "unarchive": "Unarchive",
     "done": "Done",
-    "handled": "Handled · it left Needs action"
+    "handled": "Handled · it left the Inbox"
   },
   "types": {
     "issue_assigned": "Assigned",

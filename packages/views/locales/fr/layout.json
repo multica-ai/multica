@@ -1,6 +1,6 @@
 {
   "nav": {
-    "inbox": "À traiter",
+    "inbox": "Boîte de réception",
     "chat": "Discussion",
     "my_issues": "Mes tâches",
     "issues": "Tâches",
@@ -90,13 +90,12 @@
   },
   "spaces": {
     "work": "Travail",
-    "team": "Équipe",
-    "attention": "Attention"
+    "team": "Équipe"
   },
   "rail": {
     "label": "Navigation de l'application",
     "sheet_description": "Changer d'espace et d'espace de travail.",
-    "inbox": "Attention",
+    "inbox": "Boîte",
     "work": "Travail",
     "team": "Équipe",
     "chat": "Chat",
@@ -151,7 +150,9 @@
       "view_remove": "Retirer de la barre latérale",
       "view_rename": "Renommer",
       "view_duplicate": "Dupliquer",
-      "view_delete": "Supprimer la vue"
+      "view_delete": "Supprimer la vue",
+      "inbox_view_all": "Tout voir ({{total}})",
+      "inbox_empty": "Rien ne vous attend pour l'instant"
     },
     "team": {
       "new_agent": "Nouvel agent",
@@ -177,11 +178,6 @@
       "all": "Toutes les automatisations",
       "list": "Automatisations",
       "templates": "À partir d’un modèle"
-    },
-    "attention": {
-      "needs_action": "À traiter",
-      "view_all": "Tout voir ({{total}})",
-      "empty": "Rien ne vous attend pour l'instant"
     }
   },
   "account": {

@@ -1,6 +1,6 @@
 {
   "nav": {
-    "inbox": "처리 필요",
+    "inbox": "인박스",
     "chat": "채팅",
     "my_issues": "내 태스크",
     "issues": "태스크",
@@ -89,13 +89,12 @@
   },
   "spaces": {
     "work": "작업",
-    "team": "팀",
-    "attention": "주목"
+    "team": "팀"
   },
   "rail": {
     "label": "앱 탐색",
     "sheet_description": "스페이스와 워크스페이스를 전환합니다.",
-    "inbox": "주목",
+    "inbox": "인박스",
     "work": "작업",
     "team": "팀",
     "chat": "채팅",
@@ -149,7 +148,9 @@
       "view_remove": "사이드바에서 제거",
       "view_rename": "이름 변경",
       "view_duplicate": "복제",
-      "view_delete": "뷰 삭제"
+      "view_delete": "뷰 삭제",
+      "inbox_view_all": "전체 보기 {{total}}",
+      "inbox_empty": "지금 처리할 일이 없습니다"
     },
     "team": {
       "new_agent": "새 에이전트",
@@ -171,11 +172,6 @@
       "all": "전체 오토파일럿",
       "list": "오토파일럿",
       "templates": "템플릿으로 시작"
-    },
-    "attention": {
-      "needs_action": "처리 필요",
-      "view_all": "전체 보기 {{total}}",
-      "empty": "지금 처리할 일이 없습니다"
     }
   },
   "account": {

@@ -1,7 +1,7 @@
 {
   "page": {
-    "title": "要対応",
-    "back": "要対応"
+    "title": "インボックス",
+    "back": "インボックス"
   },
   "menu": {
     "mark_all_read": "すべて既読にする",
@@ -62,7 +62,7 @@
   },
   "detail": {
     "select_prompt": "詳細を表示する通知を選択してください",
-    "empty": "今対応が必要なものはありません",
+    "empty": "インボックスは空です",
     "original_input": "元の入力",
     "retry_with_context": "コンテキストを保持して再試行",
     "edit_advanced": "詳細フォームで編集",
@@ -71,7 +71,7 @@
     "archive": "アーカイブ",
     "unarchive": "アーカイブ解除",
     "done": "完了",
-    "handled": "対応済み · 要対応から外れました"
+    "handled": "対応済み · インボックスから外れました"
   },
   "types": {
     "issue_assigned": "割り当て済み",

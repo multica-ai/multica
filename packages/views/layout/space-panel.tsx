@@ -7,14 +7,12 @@ import { useSidebar } from "@multica/ui/components/ui/sidebar";
 import { useAppShell } from "./app-shell-context";
 import { PanelResizeHandle } from "./panel-resize-handle";
 import { AutopilotsPanel } from "./panels/autopilots-panel";
-import { AttentionPanel } from "./panels/attention-panel";
 import { ChatPeek } from "./panels/list-space-peeks";
 import { LIST_COLUMN_WIDTH_CLASS, NAV_COLUMN_MOTION_CLASS, NAV_PEEK_CLASS } from "./rail-styles";
 import { TeamPanel } from "./panels/team-panel";
 import { KeptRowsRelease, WorkPanel } from "./panels/work-panel";
 
 const PANELS: Partial<Record<AppSpaceId, () => React.ReactNode>> = {
-  inbox: AttentionPanel,
   work: WorkPanel,
   team: TeamPanel,
   autopilots: AutopilotsPanel,

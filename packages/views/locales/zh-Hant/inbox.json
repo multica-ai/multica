@@ -1,7 +1,7 @@
 {
   "page": {
-    "title": "待處理",
-    "back": "待處理"
+    "title": "收件箱",
+    "back": "收件箱"
   },
   "menu": {
     "mark_all_read": "全部標為已讀",
@@ -62,7 +62,7 @@
   },
   "detail": {
     "select_prompt": "選擇一條通知檢視詳情",
-    "empty": "現在沒有需要你處理的事",
+    "empty": "收件箱為空",
     "original_input": "原始輸入",
     "retry_with_context": "保留上下文重試",
     "edit_advanced": "在完整表單中編輯",
@@ -71,7 +71,7 @@
     "archive": "歸檔",
     "unarchive": "取消歸檔",
     "done": "完成",
-    "handled": "已處理 · 已移出待處理"
+    "handled": "已處理 · 已移出收件箱"
   },
   "types": {
     "issue_assigned": "已分配",
