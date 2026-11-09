@@ -367,6 +367,9 @@ func TestResolveAgent(t *testing.T) {
 		{"id": "11111111-1111-1111-1111-111111111111", "name": "Lambda"},
 		{"id": "22222222-2222-2222-2222-222222222222", "name": "Codex Agent"},
 		{"id": "33333333-3333-3333-3333-333333333333", "name": "Claude Reviewer"},
+		{"id": "44444444-4444-4444-4444-444444444444", "name": "Reviewer"},
+		{"id": "55555555-5555-5555-5555-555555555555", "name": "Build"},
+		{"id": "66666666-6666-6666-6666-666666666666", "name": "BUILD"},
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -399,6 +402,20 @@ func TestResolveAgent(t *testing.T) {
 		}
 		if got != "11111111-1111-1111-1111-111111111111" {
 			t.Errorf("got %q, want Lambda's UUID", got)
+		}
+	})
+
+	t.Run("full name wins over substring", func(t *testing.T) {
+		got, err := resolveAgent(ctx, client, "reviewer")
+		if err != nil || got != "44444444-4444-4444-4444-444444444444" {
+			t.Fatalf("resolveAgent = %q, %v", got, err)
+		}
+	})
+
+	t.Run("duplicate full names remain ambiguous", func(t *testing.T) {
+		_, err := resolveAgent(ctx, client, "Build")
+		if err == nil || !strings.Contains(err.Error(), "ambiguous agent") {
+			t.Fatalf("expected ambiguous agent error, got %v", err)
 		}
 	})
 

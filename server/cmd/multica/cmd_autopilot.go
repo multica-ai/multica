@@ -1033,12 +1033,20 @@ func resolveAgent(ctx context.Context, client *cli.APIClient, nameOrID string) (
 
 	nameLower := strings.ToLower(nameOrID)
 	type match struct{ ID, Name string }
-	var matches []match
+	var exact, partial []match
 	for _, a := range agents {
-		aName := strVal(a, "name")
-		if strings.Contains(strings.ToLower(aName), nameLower) {
-			matches = append(matches, match{ID: strVal(a, "id"), Name: aName})
+		name := strVal(a, "name")
+		candidate := match{ID: strVal(a, "id"), Name: name}
+		switch {
+		case strings.EqualFold(name, nameOrID):
+			exact = append(exact, candidate)
+		case strings.Contains(strings.ToLower(name), nameLower):
+			partial = append(partial, candidate)
 		}
+	}
+	matches := exact
+	if len(matches) == 0 {
+		matches = partial
 	}
 
 	switch len(matches) {
