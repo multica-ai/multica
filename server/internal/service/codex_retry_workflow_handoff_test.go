@@ -67,6 +67,15 @@ func TestCodexOverloadWorkflowHandoffRetriesCurrentStep(t *testing.T) {
 	if codex, problem := svc.CodexRetryClaimProblem(ctx, child, agent); !codex || problem != "" {
 		t.Fatalf("current handoff claim: codex=%v problem=%q", codex, problem)
 	}
+	if _, err := pool.Exec(ctx, `DELETE FROM member WHERE workspace_id=$1 AND user_id=$2`, workspaceID, userID); err != nil {
+		t.Fatal(err)
+	}
+	if codex, problem := svc.CodexRetryClaimProblem(ctx, child, agent); !codex || problem == "" {
+		t.Fatalf("revoked originator admitted at claim: codex=%v problem=%q", codex, problem)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO member (workspace_id,user_id,role) VALUES ($1,$2,'owner')`, workspaceID, userID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `UPDATE issue SET revision=revision+1 WHERE id=$1`, issueID); err != nil {
 		t.Fatal(err)
 	}
