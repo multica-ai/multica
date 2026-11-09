@@ -113,15 +113,6 @@
   line-height: 1.625;
 }
 
-/* Reading measure. A wide host (READING_COLUMN) sets --reading-measure so
-   text blocks keep a readable line length while code, tables, diagrams and
-   media span the column. Direct children only: a paragraph inside a table cell
-   or list item is already bounded by its parent. Readonly markdown puts images
-   inside a <p>, so paragraphs carrying media are left uncapped. */
-.rich-text-editor > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote):not(:has(img, video)) {
-  max-width: var(--reading-measure, none);
-}
-
 /* First child should not have top margin */
 .rich-text-editor > *:first-child {
   margin-top: 0;
