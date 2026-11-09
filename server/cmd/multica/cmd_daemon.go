@@ -684,49 +684,14 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		fmt.Fprintf(os.Stderr, "Warning: could not write PID file: %v\n", err)
 	}
 
-	// Poll the health endpoint until the daemon reports ready ("running") or we
-	// time out. The daemon binds the health port almost immediately but reports
-	// status:"starting" until preflight finishes (PAT renew + initial workspace
-	// sync, which exec's every configured agent for version detection and can
-	// take ~20s on a cold cache). Wait long enough to cover that so a healthy
-	// cold start is not misreported as a failure.
-	const startupTimeout = 45 * time.Second
-	deadline := time.Now().Add(startupTimeout)
-	started := false
-	lastStatus := ""
-	for time.Now().Before(deadline) {
-		select {
-		case waitErr := <-waitCh:
-			return daemonStartupFailureError(daemonStartupLogs{
-				logPath:      logPath,
-				logOffset:    logOffset,
-				errLogPath:   errLogPath,
-				errLogOffset: errLogOffset,
-			}, waitErr, profile, resolveDaemonServerURL(cmd, profile))
-		case <-time.After(500 * time.Millisecond):
-		}
-		// The child publishes the port only after it has bound the listener.
-		// Ignore a stale record from a previous daemon, even if its port works.
-		record, ok := readDaemonPortRecord(profile)
-		if !ok || record.PID != pid {
-			continue
-		}
-		hctx, hcancel := context.WithTimeout(context.Background(), 2*time.Second)
-		health = checkDaemonHealthOnPort(hctx, record.Port)
-		hcancel()
-		lastStatus, _ = health["status"].(string)
-		if lastStatus == "running" && health["profile"] == profile && health["pid"] == float64(pid) {
-			started = true
-			break
-		}
-	}
-	if !started {
-		if lastStatus == "starting" {
-			fmt.Fprintf(os.Stderr, "Daemon is still starting after %s (agent detection / workspace sync is taking longer than expected). Check logs:\n  %s\n", startupTimeout, logPath)
-		} else {
-			fmt.Fprintf(os.Stderr, "Daemon may not have started successfully. Check logs:\n  %s\n  %s (crash output)\n", logPath, errLogPath)
-		}
-		return nil
+	started, err := waitForDaemonStartup(waitCh, pid, profile, 45*time.Second, daemonStartupLogs{
+		logPath:      logPath,
+		logOffset:    logOffset,
+		errLogPath:   errLogPath,
+		errLogOffset: errLogOffset,
+	}, resolveDaemonServerURL(cmd, profile))
+	if err != nil || !started {
+		return err
 	}
 
 	if profile != "" {
@@ -736,6 +701,49 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	}
 	fmt.Fprintf(os.Stderr, "Logs: %s\n", logPath)
 	return nil
+}
+
+func waitForDaemonStartup(waitCh <-chan error, pid int, profile string, startupTimeout time.Duration, logs daemonStartupLogs, serverURL string) (bool, error) {
+	// Poll the health endpoint until the daemon reports ready ("running") or we
+	// time out. The daemon binds the health port almost immediately but reports
+	// status:"starting" until preflight finishes (PAT renew + initial workspace
+	// sync, which exec's every configured agent for version detection and can
+	// take ~20s on a cold cache). Wait long enough to cover that so a healthy
+	// cold start is not misreported as a failure.
+	deadline := time.Now().Add(startupTimeout)
+	lastStatus := ""
+	for time.Now().Before(deadline) {
+		select {
+		case waitErr := <-waitCh:
+			return false, daemonStartupFailureError(logs, waitErr, profile, serverURL)
+		case <-time.After(500 * time.Millisecond):
+		}
+		// The child publishes the port only after it has bound the listener.
+		// Ignore a stale record from a previous daemon, even if its port works.
+		record, ok := readDaemonPortRecord(profile)
+		if !ok || record.PID != pid {
+			continue
+		}
+		hctx, hcancel := context.WithTimeout(context.Background(), 2*time.Second)
+		health := checkDaemonHealthOnPort(hctx, record.Port)
+		hcancel()
+		// Only this child's responses can establish readiness or earn the
+		// slow-start grace period. Keep the last verified status if a later
+		// probe fails or the port answers for a different daemon.
+		if health["profile"] != profile || health["pid"] != float64(pid) {
+			continue
+		}
+		lastStatus, _ = health["status"].(string)
+		if lastStatus == "running" {
+			return true, nil
+		}
+	}
+	if lastStatus == "starting" {
+		fmt.Fprintf(os.Stderr, "Daemon is still starting after %s (agent detection / workspace sync is taking longer than expected). Check logs:\n  %s\n", startupTimeout, logs.logPath)
+		return false, nil
+	}
+
+	return false, fmt.Errorf("daemon startup timed out after %s without a matching health response. Check logs:\n  %s\n  %s (crash output)", startupTimeout, logs.logPath, logs.errLogPath)
 }
 
 // resolveDaemonServerURL resolves the server URL the daemon will talk to,
