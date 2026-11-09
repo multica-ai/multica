@@ -320,8 +320,15 @@ func (s *Service) GetTool(ctx context.Context, toolkitSlug, toolSlug string) (*s
 	return t, nil
 }
 
-// ExecuteTool runs a tool against one connected account.
-func (s *Service) ExecuteTool(ctx context.Context, connectedAccountID string, tool sdk.Tool, args map[string]any) (*sdk.ExecuteToolResponse, error) {
+// ExecuteTool runs a tool against one connected account. Both identifiers must
+// come from the same authorized connection record, never from tool arguments.
+func (s *Service) ExecuteTool(ctx context.Context, connectedAccountID, composioUserID string, tool sdk.Tool, args map[string]any) (*sdk.ExecuteToolResponse, error) {
+	if strings.TrimSpace(composioUserID) == "" {
+		return nil, errors.New("composio: connected account user ID is missing; reconnect the account")
+	}
+	if strings.TrimSpace(connectedAccountID) == "" {
+		return nil, errors.New("composio: connected account ID is missing; reconnect the account")
+	}
 	tools, err := s.toolSDK()
 	if err != nil {
 		return nil, err
@@ -333,6 +340,7 @@ func (s *Service) ExecuteTool(ctx context.Context, connectedAccountID string, to
 	return tools.ExecuteTool(ctx, tool.Slug, sdk.ExecuteToolRequest{
 		Arguments:          args,
 		ConnectedAccountID: connectedAccountID,
+		UserID:             composioUserID,
 		Version:            version,
 	})
 }
