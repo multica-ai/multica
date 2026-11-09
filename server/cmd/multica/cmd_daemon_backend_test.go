@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"github.com/multica-ai/multica/server/internal/cli"
@@ -27,7 +28,13 @@ func TestBackendOperationPinsURLAcrossProfileRewrite(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("profile", "", "")
 	cmd.Flags().String("server-url", "", "")
-	const original = "https://backend-a.example.test"
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		json.NewEncoder(w).Encode(map[string]string{"id": "account"})
+	}))
+	defer server.Close()
+	original := server.URL
 	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{ServerURL: original}, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -37,11 +44,17 @@ func TestBackendOperationPinsURLAcrossProfileRewrite(t *testing.T) {
 	}
 	defer lock.Close()
 
-	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{ServerURL: "https://backend-b.example.test"}, ""); err != nil {
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{ServerURL: "https://backend-b.example.test", Token: "mul_backend_b"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := backendURLForCommand(cmd, ""); err != nil || got != original {
 		t.Fatalf("operation switched backend: %q, %v", got, err)
+	}
+	if _, _, err := daemonAccountCredentials(context.Background(), "", original); err == nil || !strings.Contains(err.Error(), "not signed in to the selected backend") {
+		t.Fatalf("expected backend mismatch, got %v", err)
+	}
+	if requests.Load() != 0 {
+		t.Fatal("sent an authentication request to the old backend")
 	}
 	args := buildDaemonStartArgs(cmd)
 	index := slices.Index(args, "--server-url")
@@ -163,7 +176,7 @@ func TestBackendRestartCannotSwitchAccount(t *testing.T) {
 	if err := writeServiceJSON(filepath.Join(dir, "active.json"), backendServiceRecord{ServerURL: serverURL, OwnerID: "account-a", Profile: "old-profile", DaemonID: "machine", PID: 123, Port: port}); err != nil {
 		t.Fatal(err)
 	}
-	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{Token: "mul_fake"}, "desktop-test"); err != nil {
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{Token: "mul_fake", ServerURL: serverURL}, "desktop-test"); err != nil {
 		t.Fatal(err)
 	}
 	cmd := &cobra.Command{}

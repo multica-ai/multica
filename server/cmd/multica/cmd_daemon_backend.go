@@ -92,24 +92,43 @@ func authenticatedDaemonOwner(ctx context.Context, profile, serverURL string) (s
 	return owner, err
 }
 
-func daemonAccountCredentials(ctx context.Context, profile, serverURL string) (string, string, error) {
+func daemonProfileToken(profile, serverURL string) (string, error) {
 	cfg, err := cli.LoadCLIConfigForProfile(profile)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	if cfg.Token == "" {
-		return "", "", fmt.Errorf("sign in before connecting to the local execution service")
+		return "", fmt.Errorf("sign in before connecting to the local execution service")
+	}
+	// Check the URL from the same config read as the token. Login can replace
+	// both while a lifecycle operation holds a lock for the previous backend.
+	loginURL := cfg.ServerURL
+	if loginURL == "" {
+		loginURL = daemon.DefaultServerURL
+	}
+	loginBackend, loginErr := daemon.BackendServiceURL(loginURL)
+	targetBackend, targetErr := daemon.BackendServiceURL(serverURL)
+	if loginErr != nil || targetErr != nil || loginBackend != targetBackend {
+		return "", fmt.Errorf("profile %q is not signed in to the selected backend; choose a matching profile or sign in and retry", profileLabel(profile))
+	}
+	return cfg.Token, nil
+}
+
+func daemonAccountCredentials(ctx context.Context, profile, serverURL string) (string, string, error) {
+	token, err := daemonProfileToken(profile, serverURL)
+	if err != nil {
+		return "", "", err
 	}
 	var me struct {
 		ID string `json:"id"`
 	}
-	if err := cli.NewAPIClient(serverURL, "", cfg.Token).GetJSON(ctx, "/api/me", &me); err != nil {
+	if err := cli.NewAPIClient(serverURL, "", token).GetJSON(ctx, "/api/me", &me); err != nil {
 		return "", "", fmt.Errorf("verify daemon account: %w", err)
 	}
 	if me.ID == "" {
 		return "", "", fmt.Errorf("backend did not identify the authenticated daemon account")
 	}
-	return me.ID, cfg.Token, nil
+	return me.ID, token, nil
 }
 
 func liveBackendService(serverURL string) (*backendServiceRecord, map[string]any, error) {

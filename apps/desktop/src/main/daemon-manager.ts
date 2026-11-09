@@ -247,14 +247,18 @@ async function fetchProfileHealth(
  * not auth. See classifyAuthProbe for the full rule set.
  */
 async function probeTokenValidity(profile: string): Promise<AuthProbeResult> {
-  if (!targetApiBaseUrl) return "unknown";
+  const target = targetApiBaseUrl;
+  if (!target) return "unknown";
   const cfg = await readProfileConfig(profile);
+  if (targetApiBaseUrl !== target || typeof cfg.server_url !== "string" || !urlsMatch(cfg.server_url, target)) {
+    return "unknown";
+  }
   const token = typeof cfg.token === "string" ? cfg.token : "";
   if (!token) return classifyAuthProbe({ noToken: true });
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 4_000);
-    const res = await fetch(`${targetApiBaseUrl.replace(/\/+$/, "")}/api/me`, {
+    const res = await fetch(`${target.replace(/\/+$/, "")}/api/me`, {
       headers: { Authorization: `Bearer ${token}` },
       signal: controller.signal,
     });
@@ -313,6 +317,9 @@ async function resolveActiveProfile(): Promise<ActiveProfile | null> {
   if (isolated!==name) { name=isolated;cfg=await readProfileConfig(name); }
 
   if (cfg.server_url !== target) {
+    if (typeof cfg.server_url !== "string" || !urlsMatch(cfg.server_url, target)) {
+      delete cfg.token;
+    }
     cfg.server_url = target;
     await writeProfileConfig(name, cfg);
     console.log(`[daemon] initialized profile "${name}" → ${target}`);
@@ -708,11 +715,8 @@ async function ensureRunningDaemonVersionMatches(): Promise<
  * daemon needs a PAT (or `mul_` / `mdt_` token) because JWTs expire in 30
  * days and signatures are tied to a specific backend instance.
  */
-async function mintPat(jwt: string): Promise<string> {
-  if (!targetApiBaseUrl) {
-    throw new Error("mint PAT: target API URL not set");
-  }
-  const url = `${targetApiBaseUrl.replace(/\/+$/, "")}/api/tokens`;
+async function mintPat(jwt: string, target: string): Promise<string> {
+  const url = `${target.replace(/\/+$/, "")}/api/tokens`;
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -758,15 +762,15 @@ async function syncToken(
   tokenFromRenderer: string,
   userId: string,
 ): Promise<{ active: ActiveProfile; userChanged: boolean }> {
+  const loginTarget = targetApiBaseUrl;
   const active = await ensureActiveProfile();
-  if (!active) {
+  if (!active || !loginTarget || targetApiBaseUrl !== loginTarget) {
     // Writing here would land the token and server_url in the user's default
     // CLI config. The renderer awaits setTargetApiUrl before calling this, so
     // reaching this branch is a real error rather than a normal startup race.
     throw new Error("daemon profile is not resolved yet; token sync skipped");
   }
   signedInUserId = userId;
-  const loginTarget = targetApiBaseUrl;
   const existingService = await fetchProfileHealth(active);
   let handoffForce: boolean | undefined;
   if (existingService?.owner_id && existingService.owner_id !== userId) {
@@ -781,6 +785,8 @@ async function syncToken(
   const sameUserWithCachedPat =
     !userChanged &&
     previousUserId === userId &&
+    typeof config.server_url === "string" &&
+    urlsMatch(config.server_url, loginTarget) &&
     typeof config.token === "string" &&
     config.token.startsWith("mul_");
 
@@ -791,7 +797,7 @@ async function syncToken(
     finalToken = config.token as string;
   } else {
     try {
-      finalToken = await mintPat(tokenFromRenderer);
+      finalToken = await mintPat(tokenFromRenderer, loginTarget);
       console.log(
         `[daemon] minted PAT for profile "${active.name}" (user_changed=${userChanged})`,
       );

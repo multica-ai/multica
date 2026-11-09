@@ -392,6 +392,13 @@ func TestBackendDiskUsageHonorsExplicitServerURL(t *testing.T) {
 	if err := cmd.Flags().Set("server-url", serverB.URL); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := resolveDiskUsageRoot(cmd, false, "", ""); err == nil || requestsA.Load() != 0 || requestsB.Load() != 0 {
+		t.Fatalf("mismatched credentials were not rejected locally: %v", err)
+	}
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{ServerURL: serverB.URL, Token: "mul_b"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MULTICA_SERVER_URL", serverA.URL)
 	got, err := resolveDiskUsageRoot(cmd, false, "", "")
 	if err != nil || got != rootB || requestsA.Load() != 0 || requestsB.Load() != 1 {
 		t.Fatalf("wrong backend selection: %q %v, requests A=%d B=%d", got, err, requestsA.Load(), requestsB.Load())

@@ -337,7 +337,7 @@ multica --profile <目标配置> daemon takeover
 
 交接先停止领取新任务，最多等待 40 秒让已领取任务完成。超时会取消暂停，保留原服务运行。显式使用 `daemon takeover --force` 会中断任务，但若无法确认进程和任务清理完成，仍不会启动替代进程。只等待并停止而不重启，可以使用 `daemon stop --drain`。
 
-`daemon logs` 仅在验证当前账号拥有运行中的守护进程后，才会跨 profile 读取该进程的日志。`daemon disk-usage` 按指定后端选择已认证账号的绑定目录，并遵循 `--server-url`。即使只保存了一个绑定，自动选择账号也需要认证。后端不可达时，用 `--workspaces-root <路径>` 明确指定目录，或用 `--all-profiles` 统计已保存的各账号目录。`daemon restart --foreground` 会在当前终端运行替代进程。
+`daemon logs` 仅在验证当前账号拥有运行中的守护进程后，才会跨 profile 读取该进程的日志。`daemon disk-usage` 按指定后端选择已认证账号的绑定目录，并遵循 `--server-url`。即使只保存了一个绑定，自动选择账号也需要认证。指定后端时，profile 的登录地址必须与其匹配。使用 `--server-url` 时，请登录该后端或选择已登录的 profile。后端不可达时，用 `--workspaces-root <路径>` 明确指定目录，或用 `--all-profiles` 统计已保存的各账号目录。`daemon restart --foreground` 会在当前终端运行替代进程。
 
 同账号的后端状态绑定会保留自己的工作目录、provider 会话命名空间及 runtime 身份。首次绑定使用配置根目录下的账号专属子目录和独立 runtime 身份；无法确认归属的历史状态不会自动导入。另一 profile 中的 workspaces_root 不会迁移或替换已绑定状态。换账号只能顺序进行，新账号使用独立状态与 runtime 归属，切回时恢复各自绑定；本轮不支持多账号并行或多个执行池。
 

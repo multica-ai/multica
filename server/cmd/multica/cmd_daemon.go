@@ -1362,11 +1362,6 @@ func requireDaemonRestartPreflight(cmd *cobra.Command, profile string) error {
 	if err := requireDaemonAuth(profile); err != nil {
 		return err
 	}
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
-	if err != nil {
-		return fmt.Errorf("load CLI config: %w", err)
-	}
-
 	rawURL := resolveDaemonServerURL(cmd, profile)
 	if rawURL == "" {
 		rawURL = daemon.DefaultServerURL
@@ -1374,6 +1369,10 @@ func requireDaemonRestartPreflight(cmd *cobra.Command, profile string) error {
 	baseURL, err := daemon.NormalizeServerBaseURL(rawURL)
 	if err != nil {
 		return fmt.Errorf("refusing to restart: invalid server URL %q: %w", rawURL, err)
+	}
+	token, err := daemonProfileToken(profile, baseURL)
+	if err != nil {
+		return err
 	}
 
 	loginHint := "multica login"
@@ -1383,7 +1382,7 @@ func requireDaemonRestartPreflight(cmd *cobra.Command, profile string) error {
 
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
-	if err := cli.NewAPIClient(baseURL, "", cfg.Token).GetJSON(ctx, "/api/me", nil); err != nil {
+	if err := cli.NewAPIClient(baseURL, "", token).GetJSON(ctx, "/api/me", nil); err != nil {
 		var httpErr *cli.HTTPError
 		if errors.As(err, &httpErr) {
 			if httpErr.StatusCode == http.StatusUnauthorized {
@@ -2240,10 +2239,6 @@ func fillDiskUsageParentStatuses(cmd *cobra.Command, profile string, report *dae
 // surface. Returns nil when this profile has no usable credentials — the
 // caller then leaves the column blank rather than erroring.
 func newParentStatusFetcher(cmd *cobra.Command, profile string) daemon.ParentStatusFetcher {
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
-	if err != nil || strings.TrimSpace(cfg.Token) == "" {
-		return nil
-	}
 	rawURL := resolveDaemonServerURL(cmd, profile)
 	if rawURL == "" {
 		rawURL = daemon.DefaultServerURL
@@ -2252,9 +2247,13 @@ func newParentStatusFetcher(cmd *cobra.Command, profile string) daemon.ParentSta
 	if err != nil {
 		return nil
 	}
+	token, err := daemonProfileToken(profile, baseURL)
+	if err != nil {
+		return nil
+	}
 
 	client := daemon.NewClient(baseURL)
-	client.SetToken(cfg.Token)
+	client.SetToken(token)
 	return func(ctx context.Context, workspaceID string, issueIDs []string) (map[string]string, error) {
 		results, err := client.GetIssueGCChecks(ctx, workspaceID, issueIDs)
 		if err != nil {
