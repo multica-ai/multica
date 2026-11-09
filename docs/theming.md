@@ -1,17 +1,34 @@
 # Theming Multica
 
-A Multica theme is one JSON file. It sets design tokens for light and dark
-mode, can declare options that appear under **Settings → Appearance → Theme
-options**, and can ship its own CSS that targets the stable anchors listed
-below. Themes never run JavaScript.
+A Multica theme is a folder with a `manifest.json` and a `theme.css`, plus any
+fonts and images the CSS uses. The CSS overrides public variables for light
+and dark mode and can restyle the stable anchors listed below; the manifest
+names the theme and can declare options that appear under **Settings →
+Appearance → Theme options**. Themes never run JavaScript.
 
-Install a theme with **Settings → Appearance → Import theme**. Themes are
-saved on the device, like every other Appearance setting.
+Install a theme with **Settings → Appearance → Import theme**, from a `.zip`
+of the folder or from the folder itself. Themes are saved on the device, like
+every other Appearance setting.
 
-The built-in themes use exactly this format; Pop's options and CSS live in
-`packages/core/appearance/themes.ts` and are a working example.
+The built-in themes compile to exactly this format. Pop's options and CSS
+live in `packages/core/appearance/themes.ts` and are a working example.
 
-## The file
+## The folder
+
+```text
+paper/
+├── manifest.json
+├── theme.css
+└── fonts/
+    └── serif.woff2
+```
+
+The folder can sit at the top of the `.zip` or be the zip's only folder.
+Files other than fonts (`woff2`, `woff`, `ttf`, `otf`) and images (`png`,
+`jpg`, `webp`, `gif`, `avif`, `svg`) are ignored. The whole theme can be at
+most 1 MB.
+
+### manifest.json
 
 ```json
 {
@@ -21,26 +38,11 @@ The built-in themes use exactly this format; Pop's options and CSS live in
   "author": "Someone",
   "version": "1.2.0",
   "description": "Warm paper, serif reading text.",
-  "tokens": {
-    "light": { "page-canvas": "#f6efdf", "font-content-latin": "\"Paper Serif\", serif" },
-    "dark": { "page-canvas": "oklch(0.2 0.01 60)" }
-  },
-  "frame": { "light": {}, "dark": {} },
   "options": [
-    {
-      "id": "header",
-      "type": "select",
-      "label": { "en": "Group headers", "zh-Hans": "分组标题" },
-      "default": "block",
-      "choices": [
-        { "value": "flat", "label": "Flat" },
-        { "value": "block", "label": "Block", "swatch": "oklch(0.85 0.1 90)" }
-      ]
-    },
+    { "id": "page", "type": "heading", "label": "Page" },
+    { "id": "paper-color", "type": "color", "label": "Paper", "default": { "light": "#f6efdf", "dark": "#1d1b16" } },
     { "id": "hyphens", "type": "toggle", "label": "Hyphenate", "default": true }
-  ],
-  "css": "@font-face { font-family: \"Paper Serif\"; src: url(fonts/serif.woff2); }",
-  "assets": { "fonts/serif.woff2": "data:font/woff2;base64,..." }
+  ]
 }
 ```
 
@@ -50,107 +52,107 @@ The built-in themes use exactly this format; Pop's options and CSS live in
 | `id` | 1–40 characters of `a-z`, `0-9` and `-`. Built-in ids (`default`, `pop`, `github`, `blueprint`, `notion`) are reserved. Importing a theme with an installed id replaces it. |
 | `name` | Required, at most 40 characters. |
 | `author`, `version`, `description` | Optional, shown when installing. |
-| `tokens.light`, `tokens.dark` | Token values per mode; see [Tokens](#tokens). Unknown names are ignored. |
-| `frame` | Tokens for what sits on the frame around the page: the rail, the desktop toolbar and the tab bar. |
-| `options` | Up to 12; see [Options](#options). |
-| `css` | Up to 512 KB; see [CSS](#css). |
-| `assets` | Up to 24 files the CSS can reference, as base64 `data:` URLs keyed by relative path. Fonts (`woff2`, `woff`, `ttf`, `otf`) and images (`png`, `jpeg`, `webp`, `gif`, `avif`, `svg+xml`). |
+| `options` | Up to 24; see [Options](#options). |
 
-The whole file can be at most 1 MB. When a file fails a check, nothing is
-installed and every problem is listed with its line in the CSS.
-
-## Tokens
-
-Token values may be colours (any CSS colour syntax), lengths, numbers,
-shadows and `var()` references. Values that could load a resource or leave
-the declaration are dropped.
-
-What the person picks on the Appearance page wins over a theme: the accent
-colour replaces `brand`, and font choices other than the defaults replace the
-font tokens.
-
-**Surfaces:** `app-shell` (the frame), `page-canvas`, `surface`,
-`surface-foreground`, `surface-raised`, `surface-hover`, `surface-selected`,
-`surface-selected-foreground`, `surface-border`, `surface-shadow`,
-`floating-shadow` (dialogs), `menu-shadow` (menus and popovers), `tooltip`,
-`tooltip-shadow`.
-
-**Text and controls:** `background`, `foreground`, `card`,
-`card-foreground`, `popover`, `popover-foreground`, `primary`,
-`primary-foreground`, `secondary`, `secondary-foreground`, `muted`,
-`muted-foreground`, `faint-foreground`, `accent`, `accent-foreground`,
-`border`, `input`, `ring`, `radius`.
-
-**Sidebar:** `sidebar`, `sidebar-foreground`, `sidebar-primary`,
-`sidebar-primary-foreground`, `sidebar-accent`, `sidebar-accent-foreground`,
-`sidebar-border`, `sidebar-ring`.
-
-**Brand and buttons:** `brand` (links, active states), `brand-foreground`,
-`button-primary`, `button-primary-foreground`, `button-primary-border`.
-`primary` also colours text, so set `button-primary` when the button fill
-would not work as a text colour.
-
-**Status:** `destructive`, `success`, `warning`, `info`, `priority-high`.
-Issue statuses use `warning` (started), `info` (done) and
-`muted-foreground` (not started, closed).
-
-**Charts, search and scrollbars:** `chart-1`, `chart-2`, `chart-3`,
-`chart-4`, `chart-5`, `find-match`, `find-match-active`,
-`find-match-foreground`, `scrollbar-track`, `scrollbar-thumb`,
-`scrollbar-thumb-hover`.
-
-**Layout and reading:** `issue-row-height`, `content-leading` (line height
-of content text), `content-leading-cjk` (the same for Chinese, Japanese and
-Korean).
-
-**Fonts:** `font-ui` (Latin interface font), `font-cjk` (CJK interface
-font), `font-content-latin` and `font-content-cjk` (content text: issue
-descriptions, comments, chat and documents), `font-mono` (code). Values are
-font stacks: family names, quoted or not, separated by commas, and `var()`
-references. Load a font file with `@font-face` in the theme's CSS.
-
-## Options
-
-An option becomes an attribute on `<html>` while the theme is active, so the
-theme's CSS can react to it:
-
-- `toggle`: `data-theme-option-<id>="on"` when on, absent when off.
-- `select`: `data-theme-option-<id>="<value>"`. Give every choice a `swatch`
-  colour and the choices render as colour dots.
-
-Option ids are 1–32 characters of `a-z`, `0-9` and `-`, starting with a
-letter; choice values the same, starting with a letter or digit. `label`,
-`description` and choice labels are a string or an object keyed by locale
-(`en`, `zh-Hans`, `zh-Hant`, `ja`, `ko`, `es`, `fr`); English is the fallback.
+### theme.css
 
 ```css
-:root[data-theme-option-header="block"] [data-mc="issue-group-header"] {
-  background: var(--muted);
+@font-face {
+  font-family: "Paper Serif";
+  src: url(fonts/serif.woff2);
+}
+
+.theme-light {
+  --page-canvas: var(--paper-color);
+  --font-content-latin: "Paper Serif", serif;
+  --h1-style: italic;
+  --blockquote-style: normal;
+}
+
+.theme-dark {
+  --page-canvas: var(--paper-color);
+}
+
+:root[data-theme-option-hyphens] [data-mc="content"] p {
+  hyphens: auto;
 }
 ```
 
-## CSS
+Set variables on `.theme-light` and `.theme-dark` (both on `<html>`). The
+CSS loads after the app's own styles while the theme is active, so at equal
+specificity the theme wins; keep selectors that simple and avoid
+`!important`. What the person picks on the Appearance page still wins over a
+theme: the accent colour replaces `--brand`, high contrast replaces the
+muted and border colours, and font choices other than the defaults replace
+the font variables.
 
-The CSS is injected after the app's own styles while the theme is active,
-and removed when someone switches theme. At equal specificity, the theme
-wins.
+## Variables
 
-**Anything that loads a resource is rejected,** because CSS can read page
-content through attribute selectors and send it out in a request. That
-means:
+Every variable a theme may set is listed in the [reference](#variable-reference)
+at the end, with its default. They come in layers:
 
-- `url()` may only name a file in `assets` (`url(fonts/serif.woff2)`) or a
-  fragment (`url(#filter)`). It is rewritten to the asset's `data:` URL.
-- `@import`, `image()`, `image-set()`, `cross-fade()`, `element()`, `src()`
-  and `expression()` are rejected, as are `behavior` and `-moz-binding`.
+- **Foundations** (colours, surfaces, shadows, `--radius`, the text scale,
+  fonts) are what everything else is built from. Changing `--surface` or
+  `--radius` moves every component that uses it.
+- **Components and product** (menus, buttons, nav rows, issue rows, the
+  board, status colours) default to a foundation. Set one to change just
+  that component: `--menu-radius: 0` squares menus and nothing else.
+- **Editor content** (headings, lists, tables, quotes, links, code and
+  syntax colours) styles issue descriptions, comments, chat and documents.
 
-Escapes, case and comments do not get around the check: it reads the CSS the
-way a browser does.
+A component variable is never declared by the app; components read it with
+their default as a fallback. So it can be set on any ancestor, not only on
+`.theme-light`:
+
+```css
+.theme-light [data-mc="chat-window"] {
+  --code-block-background: transparent;
+}
+```
+
+Values that could load a resource are rejected anywhere in `theme.css`, see
+[What CSS may not do](#what-css-may-not-do).
+
+## Options
+
+Options render on the Appearance page while the theme is active. Their
+types follow Obsidian's Style Settings. `toggle` and `select` mark `<html>`
+with an attribute; the others set the variable `--<id>` on `<html>` for both
+modes (per mode for `color`), always: the chosen value or the default. So
+`theme.css` can read them with a plain `var(--<id>)`.
+
+| Type | Fields | Result |
+| --- | --- | --- |
+| `heading` | — | Starts a group; `description` is shown under it. |
+| `toggle` | `default`: `true` or `false` | `data-theme-option-<id>="on"` when on, absent when off. |
+| `select` | `choices`: `[{ "value", "label", "swatch"? }]`, `default` | `data-theme-option-<id>="<value>"`. With a `swatch` on every choice, the choices render as colour dots. |
+| `color` | `default`: a hex colour, or `{ "light", "dark" }` | `--<id>`: a hex colour per mode, picked with a colour well for each. |
+| `number` | `default`, optional `min`, `max`, `step`, `unit` | `--<id>`: the number with `unit` appended (`px`, `rem`, `%`, …). |
+| `slider` | as `number`; `min` and `max` required | as `number`. |
+| `text` | `default`: a CSS value | `--<id>`: what was typed, when it is a safe value. |
+| `font` | `default`: a font stack | `--<id>`: a font stack (family names and `var()`). |
+| `variable-select` | `choices`: `[{ "value", "label" }]` with CSS values, `default` | `--<id>`: the chosen value. |
+
+Option ids are 1–48 characters of `a-z`, `0-9` and `-`, starting with a
+letter; `select` choice values are 1–32 of the same. `label`, `description`
+and choice labels are a string or an object keyed by locale (`en`,
+`zh-Hans`, `zh-Hant`, `ja`, `ko`, `es`, `fr`); English is the fallback.
+
+```json
+{ "id": "page-width", "type": "slider", "label": "Page width", "default": 46, "min": 30, "max": 60, "step": 2, "unit": "rem" }
+```
+
+```css
+[data-mc="content"] { max-width: var(--page-width); }
+```
+
+## Selectors
+
+Target anchors, slots and state hooks, not class names or DOM structure:
+those change without notice. Anchors, slots and hooks stay until the next
+`apiVersion`.
 
 ### Anchors
-
-Target these, not class names or DOM structure: those change without
-notice. Anchors and slots stay until the next `apiVersion`.
 
 | Anchor | What it marks |
 | --- | --- |
@@ -160,20 +162,20 @@ notice. Anchors and slots stay until the next `apiVersion`.
 | `[data-mc="window-toolbar"]` | Desktop only: the toolbar above the rail. |
 | `[data-mc="tab-bar"]` | Desktop only: the tab strip above the page. |
 | `[data-mc="issue-group-header"]` | A status group header in issue lists; `data-status` is the status key (`backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`, or a custom key). |
-| `[data-mc="issue-row"]` | One issue in a list. |
+| `[data-mc="issue-row"]` | One issue in a list; `data-status`, `data-priority` (`urgent`, `high`, `medium`, `low`, `none`) and `data-assignee-type` (`member`, `agent`, `squad` or `none`). |
 | `[data-mc="board-column"]` | One column on a board. |
-| `[data-mc="board-card"]` | One issue card on a board. |
+| `[data-mc="board-card"]` | One issue card on a board; same attributes as `issue-row`. |
 | `[data-mc="status-icon"]` | The status glyph (an `svg`). |
 | `[data-mc="priority-icon"]` | The priority glyph (an `svg`). |
-| `[data-mc="label-chip"]` | A label. |
+| `[data-mc="label-chip"]` | A label; `data-color` is its hex colour. |
 | `[data-mc="content"]` | Rich text: issue descriptions, comments, chat messages and documents, reading and editing. `data-density` is `document` or `compact` when reading. |
-| `[data-mc="comment"]` | A top-level comment card. |
-| `[data-mc="comment-reply"]` | A reply inside a comment card. |
+| `[data-mc="comment"]` | A top-level comment card; `data-author-type` is `member`, `agent` or `system`. |
+| `[data-mc="comment-reply"]` | A reply inside a comment card; `data-author-type` as on `comment`. |
 | `[data-mc="comment-composer"]` | The box for writing a new comment. |
 | `[data-mc="chat-window"]` | The chat panel. |
 | `[data-mc="chat-input"]` | The message box in chat. |
-| `[data-mc="chat-message"]` | One message in a chat; `data-role` is user or assistant. |
-| `[data-mc="inbox-item"]` | One notification in the inbox. |
+| `[data-mc="chat-message"]` | One message in a chat; `data-role` is `user` or `assistant`. |
+| `[data-mc="inbox-item"]` | One notification in the inbox; `data-read` is `true` or `false`. |
 | `[data-mc="settings-page"]` | The settings page. |
 
 UI primitives carry a `data-slot`; these are public too: `button` (also
@@ -182,10 +184,39 @@ UI primitives carry a `data-slot`; these are public too: `button` (also
 `dropdown-menu-content`, `dropdown-menu-item`, `popover-content`,
 `tooltip-content`, `dialog-overlay`, `dialog-content`,
 `alert-dialog-content`, `sheet-content`, `tabs-list`, `tabs-trigger`,
-`card`, `kbd`, `separator`.
+`card`, `kbd`, `separator`. Line icons are `svg.icon`.
 
-`<html>` carries `data-theme="<id>"`, the option attributes, and the `dark`
-class in dark mode.
+### State on `<html>`
+
+| Class or attribute | When |
+| --- | --- |
+| `.theme-light`, `.theme-dark` | The mode in use. (`.dark` is set too, in dark mode.) |
+| `.is-desktop`, `.is-web` | The Desktop app or a browser. |
+| `.mod-macos`, `.mod-windows`, `.mod-linux` | The operating system. |
+| `.is-focused` | The window has focus. |
+| `.is-sidebar-collapsed` | The navigation panel is collapsed. |
+| `[data-theme="<id>"]` | The active theme. |
+| `[data-theme-option-<id>]` | The theme's `toggle` and `select` options. |
+
+```css
+.mod-macos.is-desktop:not(.is-focused) [data-mc="app-rail"] { opacity: 0.7; }
+.theme-dark [data-mc="issue-row"][data-priority="urgent"] { box-shadow: inset 2px 0 var(--priority-urgent); }
+```
+
+## What CSS may not do
+
+**Anything that loads a resource is rejected,** because CSS can read page
+content through attribute selectors and send it out in a request. That
+means:
+
+- `url()` may only name a file in the theme folder (`url(fonts/serif.woff2)`)
+  or a fragment (`url(#filter)`). It is rewritten to the file's `data:` URL.
+- `@import`, `image()`, `image-set()`, `cross-fade()`, `element()`, `src()`
+  and `expression()` are rejected, as are `behavior` and `-moz-binding`.
+
+Escapes, case and comments do not get around the check: it reads the CSS the
+way a browser does. When a theme fails a check, nothing is installed and
+every problem is listed with its line in `theme.css`.
 
 ## Safe mode
 
@@ -199,11 +230,14 @@ back on.
 
 1. Start from the example above or from Pop in
    `packages/core/appearance/themes.ts`.
-2. Import the file. If a check fails, the dialog lists every problem.
+2. Import the folder. If a check fails, the dialog lists every problem.
 3. Edit and import again: the same `id` replaces the installed copy, and
-   option choices are kept.
+   option values are kept.
 
 ## Variable reference
+
+Generated from `packages/core/appearance/theme-variables.ts`. Where light
+and dark differ, both defaults are given.
 
 <!-- theme-variables:start (generated by packages/views/common/theme-variables.test.ts) -->
 
