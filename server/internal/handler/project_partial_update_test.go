@@ -108,7 +108,7 @@ func TestUpdateProjectNullableFieldPresence(t *testing.T) {
 	initial := map[string]string{
 		"description": "original description", "icon": "original icon",
 		"lead_type": "member", "lead_id": testUserID,
-		"start_date": "2026-03-01", "due_date": "2026-03-31",
+		"start_date": "2026-03-01", "due_date": "2026-05-31",
 	}
 	values := map[string]string{
 		"description": "new description", "icon": "new icon",
