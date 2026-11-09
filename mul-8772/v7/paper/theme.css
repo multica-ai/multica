@@ -1,0 +1,110 @@
+/* Paper: an example Multica theme. Colours come from the options in
+   manifest.json, which Multica sets as --paper, --ink, --accent-ink,
+   --corner, --reading-font and --h1-style. */
+
+.theme-light,
+.theme-dark {
+  --page-canvas: var(--paper);
+  --background: var(--paper);
+  --app-shell: color-mix(in oklab, var(--paper) 90%, var(--ink));
+  --sidebar: var(--app-shell);
+  --surface: color-mix(in oklab, var(--paper) 55%, white);
+  --surface-raised: color-mix(in oklab, var(--paper) 40%, white);
+  --surface-hover: color-mix(in oklab, var(--paper) 92%, var(--ink));
+  --surface-selected: color-mix(in oklab, var(--paper) 86%, var(--accent-ink));
+  --surface-border: color-mix(in oklab, var(--ink) 16%, transparent);
+  --surface-shadow: none;
+  --foreground: var(--ink);
+  --surface-foreground: var(--ink);
+  --card-foreground: var(--ink);
+  --popover-foreground: var(--ink);
+  --surface-selected-foreground: var(--ink);
+  --muted: color-mix(in oklab, var(--paper) 90%, var(--ink));
+  --accent: color-mix(in oklab, var(--paper) 88%, var(--ink));
+  --muted-foreground: color-mix(in oklab, var(--ink) 68%, var(--paper));
+  --border: color-mix(in oklab, var(--ink) 12%, transparent);
+  --brand: var(--accent-ink);
+  --radius: var(--corner);
+  --icon-stroke-width: 1.6;
+
+  --menu-item-hover-background: color-mix(in oklab, var(--paper) 82%, var(--accent-ink));
+  --nav-item-active-background: color-mix(in oklab, var(--paper) 84%, var(--accent-ink));
+  --nav-item-active-color: var(--accent-ink);
+  --issue-group-header-background: transparent;
+  --issue-group-header-hover-background: var(--surface-hover);
+  --issue-row-identifier-color: var(--accent-ink);
+  --board-column-background: transparent;
+  --board-card-shadow: 2px 2px 0 color-mix(in oklab, var(--ink) 14%, transparent);
+  --label-radius: 2px;
+  --avatar-radius: 3px;
+
+  --font-content-latin: var(--reading-font);
+  --h1-font: var(--reading-font);
+  --h2-font: var(--reading-font);
+  --h3-font: var(--reading-font);
+  --h1-weight: 500;
+  --h2-weight: 500;
+  --h2-style: var(--h1-style);
+  --h1-color: var(--accent-ink);
+  --blockquote-border-color: var(--accent-ink);
+  --blockquote-style: normal;
+  --blockquote-background: color-mix(in oklab, var(--paper) 92%, var(--accent-ink));
+  --blockquote-padding: 0.75rem 1rem;
+  --link-color: var(--accent-ink);
+  --link-decoration-color: color-mix(in oklab, var(--accent-ink) 45%, transparent);
+  --mention-color: var(--accent-ink);
+  --highlight-background: color-mix(in oklab, #f2c94c 55%, transparent);
+  --code-background: color-mix(in oklab, var(--paper) 85%, var(--ink));
+  --code-border-color: transparent;
+  --code-color: var(--ink);
+  --code-block-background: color-mix(in oklab, var(--paper) 93%, var(--ink));
+  --code-block-border: 1px solid var(--border);
+  --table-header-background: transparent;
+  --table-header-color: var(--accent-ink);
+  --hr-color: var(--accent-ink);
+
+  --status-in-progress: #c98a1b;
+  --status-in-review: #3f7d58;
+  --status-done: #4a6a8a;
+  --priority-urgent: #b3261e;
+}
+
+.theme-light {
+  --code-keyword: #9a3b1f;
+  --code-string: #3f7d58;
+  --code-function: #4a5a8a;
+}
+
+.theme-dark {
+  --surface: color-mix(in oklab, var(--paper) 88%, white);
+  --surface-raised: color-mix(in oklab, var(--paper) 82%, white);
+  --code-keyword: #e08a63;
+  --code-string: #93c4a0;
+  --code-function: #a9b8e0;
+}
+
+/* Hairline under issue rows, behind the "Ruled lists" option. */
+:root[data-theme-option-ruled] [data-mc="issue-row"] {
+  box-shadow: inset 0 -1px var(--border);
+}
+
+/* Urgent issues get a mark in the margin. */
+:root [data-mc="issue-row"][data-priority="urgent"],
+:root [data-mc="board-card"][data-priority="urgent"] {
+  box-shadow: inset 3px 0 var(--priority-urgent), inset 0 -1px var(--border);
+}
+
+/* Agent comments read like marginalia. */
+[data-mc="comment"][data-author-type="agent"] {
+  border-left: 3px solid var(--accent-ink);
+}
+
+/* The user's own chat messages take a tint of the accent ink. */
+[data-mc="chat-message"][data-role="user"] {
+  --muted: color-mix(in oklab, var(--paper) 84%, var(--accent-ink));
+}
+
+/* A quieter frame when the window is in the background. */
+.is-desktop:not(.is-focused) [data-mc="app-rail"] {
+  opacity: 0.6;
+}

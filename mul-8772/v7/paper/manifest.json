@@ -1,0 +1,22 @@
+{
+  "apiVersion": 1,
+  "id": "paper",
+  "name": "Paper",
+  "author": "Multica examples",
+  "version": "1.0.0",
+  "description": "Warm paper, ink text, serif reading type.",
+  "options": [
+    { "id": "colors", "type": "heading", "label": { "en": "Paper and ink", "zh-Hans": "纸与墨" } },
+    { "id": "paper", "type": "color", "label": { "en": "Paper", "zh-Hans": "纸色" }, "default": { "light": "#f4ecd8", "dark": "#1f1c17" } },
+    { "id": "ink", "type": "color", "label": { "en": "Ink", "zh-Hans": "墨色" }, "default": { "light": "#2b2620", "dark": "#e9e1cf" } },
+    { "id": "accent-ink", "type": "color", "label": { "en": "Accent ink", "zh-Hans": "朱色" }, "default": { "light": "#9a3b1f", "dark": "#e08a63" } },
+    { "id": "corner", "type": "slider", "label": { "en": "Corners", "zh-Hans": "圆角" }, "default": 3, "min": 0, "max": 12, "unit": "px" },
+    { "id": "type", "type": "heading", "label": { "en": "Reading", "zh-Hans": "阅读" }, "description": { "en": "Issue descriptions, comments and chat.", "zh-Hans": "Issue 描述、评论和对话。" } },
+    { "id": "reading-font", "type": "font", "label": { "en": "Reading font", "zh-Hans": "正文字体" }, "default": "\"Iowan Old Style\", \"Palatino Linotype\", Georgia, serif" },
+    { "id": "h1-style", "type": "variable-select", "label": { "en": "Headings", "zh-Hans": "标题" }, "default": "italic", "choices": [
+      { "value": "italic", "label": { "en": "Italic", "zh-Hans": "斜体" } },
+      { "value": "normal", "label": { "en": "Upright", "zh-Hans": "正体" } }
+    ] },
+    { "id": "ruled", "type": "toggle", "label": { "en": "Ruled lists", "zh-Hans": "列表横线" }, "description": { "en": "A hairline under every issue row.", "zh-Hans": "每行 issue 下加一条细线。" }, "default": true }
+  ]
+}
