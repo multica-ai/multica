@@ -1,6 +1,7 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { Pencil } from "@multica/ui/icons";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NavigationProvider, type NavigationAdapter } from "../navigation";
 import { renderWithI18n } from "../test/i18n";
 import {
@@ -112,5 +113,70 @@ describe("ObjectProperty label", () => {
     setWidths(label, 48);
     hover(label);
     expect(tooltip()).toBeNull();
+  });
+
+  describe("keyboard", () => {
+    // The label re-measures when it resizes; jsdom never fires that, so the
+    // test does once it has given the labels their widths.
+    let resized: (() => void)[] = [];
+    beforeEach(() => {
+      resized = [];
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          constructor(private callback: () => void) {}
+          observe() {
+            resized.push(() => this.callback());
+          }
+          disconnect() {}
+        },
+      );
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    function renderPanel() {
+      renderWithI18n(
+        <>
+          <button type="button">Before</button>
+          <ObjectProperty label="Ejecuciones (7 d)">
+            <button type="button">Runs</button>
+          </ObjectProperty>
+          <ObjectProperty label="Estado">
+            <button type="button">Status</button>
+          </ObjectProperty>
+        </>,
+      );
+      setWidths(screen.getByText("Ejecuciones (7 d)"), 98);
+      setWidths(screen.getByText("Estado"), 38);
+      act(() => resized.forEach((fire) => fire()));
+    }
+
+    it("reaches a cut-off label with Tab and shows its full text until focus leaves", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      const label = screen.getByText("Ejecuciones (7 d)");
+      screen.getByRole("button", { name: "Before" }).focus();
+
+      await user.tab();
+      expect(label).toHaveFocus();
+      expect(tooltip()).toHaveTextContent("Ejecuciones (7 d)");
+
+      await user.tab();
+      expect(screen.getByRole("button", { name: "Runs" })).toHaveFocus();
+      expect(tooltip()).toBeNull();
+    });
+
+    it("keeps a label that fits out of the tab order", async () => {
+      const user = userEvent.setup();
+      renderPanel();
+      screen.getByRole("button", { name: "Runs" }).focus();
+
+      await user.tab();
+      expect(screen.getByRole("button", { name: "Status" })).toHaveFocus();
+      expect(screen.getByText("Estado")).not.toHaveAttribute("tabindex");
+      expect(tooltip()).toBeNull();
+    });
   });
 });
