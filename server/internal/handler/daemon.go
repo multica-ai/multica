@@ -4945,7 +4945,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// transaction (force session_id NULL + flag the row), so an auto-retry the
 	// same commit creates and wakes can never observe the withheld pointer or a
 	// missing continuity-gap flag.
-	task, transitioned, err := h.TaskService.CompleteTaskWithTransition(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
+	task, transitioned, fallbackCommentID, err := h.TaskService.CompleteTaskWithTransition(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
 	if err != nil {
 		// A CompleteTask error is an infrastructure failure (transaction /
 		// assistant-outcome write), not a bad request: an already-finalized
@@ -4962,6 +4962,12 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.emitIssueExecutedOnFirstCompletion(r, task)
+
+	// GH #8719: a synthesized fallback is a platform-generated worker-to-
+	// coordinator lifecycle handoff, not generic comment routing. The shared
+	// service dispatcher applies trusted lineage, coverage and current-HEAD rules;
+	// the durable fallback sweeper recovers transient failures.
+	h.routeCompletionFallbackComment(r.Context(), task, fallbackCommentID)
 
 	// MUL-4195: guarantee at-least-once processing. If a member posted a
 	// deliberate comment while this run was executing (or one was merged into
@@ -5039,12 +5045,134 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 // Replay chronologically through normal enqueue so comments coalesce into one
 // follow-up. That follow-up's later creation time and own receipt bound repetition.
 //
-// Preserve member routing and accepted explicit agent routes, current invocation
-// permissions, and self-trigger guards. Do not invent implicit agent conversation
-// routes or wake an unrelated agent from another agent's completion.
+// Anchor = created_at + delivered-set exclusion, NOT a dispatch/start timestamp
+// (MUL-4195 review round-3 must-fix). A timestamp anchor cannot tell a
+// delivered comment from an undelivered one, and there is a race it structurally
+// misses: a comment created while the task was still queued, but whose merge
+// lost the race to the daemon claiming the task (queued→dispatched) — the merge
+// then finds no pre-claim row (ErrNoRows), the enqueue path defers to reconcile,
+// yet the comment's created_at is BEFORE dispatched_at, so a dispatched_at
+// anchor would skip it and it would vanish. Anchoring on the task's own
+// created_at reaches back over the whole run, and excluding the delivered set
+// is what prevents re-firing comments the run actually received. Together
+// they catch the pre-dispatch merge-race comment, the
+// dispatch→start comment, and the during-run comment, while never double-firing
+// a delivered one.
+//
+// Scope + loop safety:
+//   - MEMBER comments keep their full routing. AGENT comments qualify through
+//     explicit mentions, or a worker-to-leader route when the input was already
+//     accepted and recorded in this run's plan. Timestamp-only
+//     implicit agent replies are excluded: completion must not invent a new
+//     conversation. Current invocation permissions and self-trigger guards
+//     still apply to every replay.
+//   - Only comments routing to THE AGENT THAT JUST RAN earn a follow-up here;
+//     an `@other-agent` comment is left to that agent's own creation-time
+//     trigger, so a completion never re-wakes an unrelated agent.
+//   - Every undelivered qualifying comment is replayed through the normal
+//     enqueue path in chronological order, so they coalesce into a SINGLE
+//     follow-up task (the first enqueues it, the rest merge in). Bounded to one
+//     run, and terminating: the follow-up's own created_at is later than all of
+//     these comments and its delivered set will contain them, so its completion
+//     finds nothing to re-schedule.
+//
+// routeCompletionFallbackComment routes a synthesized worker completion
+// fallback as a durable, narrowly scoped worker-to-coordinator handoff, not
+// as a fresh generic agent-authored comment invocation (GH #8719).
+//
+// The fallback comment itself is the durable obligation: its row persists
+// inside the completion transaction's aftermath, so a transient routing or
+// enqueue failure can be replayed later by re-resolving the same
+// (worker task, fallback comment, parent) triple. The enqueue path coalesces
+// through the existing pending/coalescing invariant, so a replay never
+// duplicates the coordinator task. Invalid lineage fails closed permanently
+// and is never retried; transient errors are returned to the caller, which
+// preserves the obligation instead of reporting success.
+func (h *Handler) routeCompletionFallbackComment(ctx context.Context, task *db.AgentTaskQueue, fallbackCommentID pgtype.UUID) {
+	_, _, err := h.dispatchCompletionFallback(ctx, task, fallbackCommentID)
+	if err != nil {
+		slog.Warn("completion fallback handoff deferred: coordinator wake will replay from the persisted fallback comment",
+			"task_id", uuidToString(task.ID),
+			"fallback_comment_id", uuidToString(fallbackCommentID),
+			"error", err)
+	}
+}
+
+// settleInvalidCompletionFallback best-effort settles a permanently invalid
+// fallback so the bounded sweeper stops reselecting it (GH #8719).
+func (h *Handler) settleInvalidCompletionFallback(ctx context.Context, taskID, fallbackID pgtype.UUID) {
+	h.TaskService.SettleCompletionFallbackState(ctx, taskID, fallbackID)
+}
+
+// dispatchCompletionFallback resolves the fallback's coordinator and enqueues
+// exactly one handoff. The bool reports proven-invalid lineage (permanent
+// fail-closed); any error is transient and the persisted fallback comment
+// remains the replayable obligation.
+func (h *Handler) dispatchCompletionFallback(ctx context.Context, task *db.AgentTaskQueue, fallbackCommentID pgtype.UUID) (bool, bool, error) {
+	if task == nil || !fallbackCommentID.Valid || !task.IssueID.Valid || !task.AgentID.Valid {
+		return false, true, nil
+	}
+	issue, err := h.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		// A deleted issue is permanent; a read failure stays replayable.
+		if errors.Is(err, pgx.ErrNoRows) {
+			h.settleInvalidCompletionFallback(ctx, task.ID, fallbackCommentID)
+			return false, true, nil
+		}
+		return false, false, err
+	}
+	comment, err := h.Queries.GetComment(ctx, fallbackCommentID)
+	if err != nil {
+		// A deleted fallback row is permanent; a read failure is transient.
+		if errors.Is(err, pgx.ErrNoRows) {
+			h.settleInvalidCompletionFallback(ctx, task.ID, fallbackCommentID)
+			return false, true, nil
+		}
+		return false, false, err
+	}
+	var parentComment *db.Comment
+	if comment.ParentID.Valid {
+		// The parent is routing authority, not display metadata: the guest
+		// squad path restores the delegation chain through it, and without it
+		// the comment would fall through to the unrelated assigned-squad
+		// fallback. Only a PROVEN-absent parent fails closed (MUL-4252):
+		// pgx.ErrNoRows means the row genuinely does not exist in this
+		// workspace, so the lineage is permanently unprovable. Any other
+		// error is transient infrastructure failure and must stay replayable.
+		parent, err := h.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
+			ID:          comment.ParentID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				h.settleInvalidCompletionFallback(ctx, task.ID, fallbackCommentID)
+				return false, true, nil
+			}
+			return false, false, err
+		}
+		parentComment = &parent
+	}
+	routed, provenInvalid, err := h.TaskService.DispatchCompletionFallbackByLineage(ctx, issue, *task, comment, parentComment)
+	if err != nil {
+		return false, false, err
+	}
+	return routed, provenInvalid, nil
+}
+
+// reconcileCommentsOnCompletion keeps the existing best-effort MUL-4195
+// follow-up routing for input this run did not deliver. Exact recorded
+// completion fallbacks are owned by the durable fallback dispatcher.
 func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.AgentTaskQueue) {
 	if task == nil || !task.IssueID.Valid || !task.AgentID.Valid || !task.CreatedAt.Valid {
 		return
+	}
+	// Re-read the completing row: the in-memory copy predates any delivery
+	// receipts recorded while this run was finishing (e.g. a coordinator run
+	// that claimed and delivered a comment seconds earlier). The delivered
+	// set below must reflect stored rows, or already-delivered input earns a
+	// duplicate follow-up.
+	if fresh, err := h.Queries.GetAgentTask(ctx, task.ID); err == nil {
+		task = &fresh
 	}
 	plannedCommentIDs := append([]pgtype.UUID{}, task.CoalescedCommentIds...)
 	if task.TriggerCommentID.Valid {
@@ -5093,6 +5221,7 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		}
 	}
 	scheduled := 0
+
 	for i := range comments {
 		c := comments[i]
 		if _, ok := delivered[uuidToString(c.ID)]; ok {
@@ -5100,6 +5229,14 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 			continue
 		}
 		if isNoteComment(c.Content) {
+			continue
+		}
+		// Exact recorded fallback identity is the only completion special case.
+		// Its callback and service sweeper share the durable fallback dispatcher;
+		// never feed its body or mentions into generic comment routing.
+		if c.AuthorType == "agent" && c.SourceTaskID.Valid &&
+			task.CompletionFallbackCommentID.Valid &&
+			uuidToString(c.ID) == uuidToString(task.CompletionFallbackCommentID) {
 			continue
 		}
 		// A delegated failure recovery signal is platform-authored and targets
@@ -5120,11 +5257,37 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 			}
 			continue
 		}
+		// Synthesized completion fallbacks from OTHER runs are never generic
+		// input either: their source task differs from this completing run,
+		// so the narrow branch above does not own them — but routing their
+		// bodies through mention fan-out here would resurrect the terminal
+		// originator authority §1/§4 forbids. Skip them here; the sweeper's
+		// ListPendingCompletionFallbacks replay owns their durable delivery.
+		if c.AuthorType == "agent" && c.SourceTaskID.Valid {
+			srcTask, err := h.Queries.GetAgentTask(ctx, c.SourceTaskID)
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					// Permanently unverifiable lineage: the source run is
+					// gone, so this comment can neither be
+					// originator-resolved through it nor owned by the
+					// fallback sweeper. Skip it here.
+					continue
+				}
+				// Source lineage cannot be verified, so keep this agent-authored
+				// comment out of generic mention routing.
+				continue
+			}
+			if srcTask.CompletionFallbackCommentID.Valid &&
+				uuidToString(srcTask.CompletionFallbackCommentID) == uuidToString(c.ID) {
+				// Fallback identity is the exact recorded comment id -- never a
+				// shape match on completed non-leader authorship. An explicit
+				// worker reply carries the same (agent, source run) shape but has
+				// no record, so it falls through to normal reconciliation below.
+				continue
+			}
+		}
 		var parentComment *db.Comment
 		if c.ParentID.Valid {
-			// Scope to the issue's workspace; a comment's parent is always in the
-			// same workspace, so this only fails closed against a stray foreign
-			// UUID rather than changing behavior (MUL-4252).
 			if parent, err := h.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
 				ID:          c.ParentID,
 				WorkspaceID: issue.WorkspaceID,
@@ -5132,15 +5295,6 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 				parentComment = &parent
 			}
 		}
-		// Compute what this comment would trigger, then keep ONLY the agent
-		// that just completed — never the full fan-out (that would re-wake
-		// unrelated `@other-agent` targets).
-		//
-		// The comment is routed under its OWN author_type. A member is its own
-		// originator. For an agent author, the originator is the human at the
-		// top of that agent's trigger chain (resolved from the comment's source
-		// task); canInvokeAgent judges an agent→agent (A2A) mention by that
-		// originator, not the immediate agent principal (MUL-3963).
 		actorType := c.AuthorType
 		actorID := uuidToString(c.AuthorID)
 		originatorUserID := actorID
@@ -5152,10 +5306,6 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 			AuthoringTaskID:         c.SourceTaskID,
 			OriginatorUserID:        originatorUserID,
 		})
-		// Agent replies discovered only by timestamp must not start a new
-		// conversation. Replay explicit mentions, or a worker reply that the
-		// creation path already accepted and recorded in this run's input plan.
-		// Recomputed routing still checks current permissions and the self guard.
 		if actorType != "member" {
 			triggers = keepReplayableAgentTriggers(triggers, slices.Contains(plannedCommentIDs, c.ID) || unreadSteers[uuidToString(c.ID)])
 		}
@@ -5186,12 +5336,7 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 				slog.Info("reconcile comments on completion: replay blocked, obligation handed to the active task",
 					"issue_id", uuidToString(task.IssueID), "agent_id", agentID, "comment_id", uuidToString(c.ID))
 			} else {
-				// The slot is held by a DIFFERENT-head queued task: it can neither
-				// cover this comment nor accept it (merging would let an old-head
-				// run consume a new-head request — TEN-356). Today's schema has no
-				// safe place to park the obligation, so surface it loudly rather
-				// than let it disappear quietly.
-				slog.Error("reconcile comments on completion: replay blocked and obligation could not be handed off; comment needs a durable obligation record",
+				slog.Error("reconcile comments on completion: blocked input could not be handed off",
 					"issue_id", uuidToString(task.IssueID), "agent_id", agentID, "comment_id", uuidToString(c.ID),
 					"reason", res.reason)
 			}
@@ -5214,6 +5359,7 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 			"agent_id", agentID,
 			"undelivered_comments", scheduled)
 	}
+	return
 }
 
 // keepReplayableAgentTriggers preserves explicit mentions (MUL-4304) and

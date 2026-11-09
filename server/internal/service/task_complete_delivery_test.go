@@ -63,7 +63,7 @@ func (d deliveryFixture) complete(t *testing.T, task pgtype.UUID, output string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, transitioned, err := d.s.CompleteTaskWithTransition(context.Background(), task, result, "", "", "", false, "", "")
+	_, transitioned, _, err := d.s.CompleteTaskWithTransition(context.Background(), task, result, "", "", "", false, "", "")
 	if err != nil {
 		t.Fatalf("complete task: %v", err)
 	}
