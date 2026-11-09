@@ -79,11 +79,21 @@ with their tests, and use CI artifacts for temporary debugging reports. Actions
 artifacts expire, so they are unsuitable as the only copy of PR evidence.
 
 From the repository root, upload files to an existing PR with Node.js 22+ and
-[GitHub CLI 2.103.2+](https://github.com/cli/cli/releases/tag/v2.103.2):
+a logged-in [GitHub CLI](https://cli.github.com/):
 
 ```bash
 scripts/pr-shots --repo multica-ai/multica 123 ./before.png ./after.png ./demo.mp4
 ```
+
+Uploads need gh 2.103.2+. If the installed `gh` is older or missing, the
+script downloads a pinned gh release for your OS and CPU to
+`~/.cache/multica/gh/<version>/` (or under `$XDG_CACHE_HOME`), checks it against
+the SHA-256 recorded in the script, and uses it for that run only. Your
+installed `gh` and its login are not changed; the cached copy reads the same
+login (`gh auth login` or `GH_TOKEN`). Later runs reuse the cache. If the
+download or check fails, stderr gives the commands to fetch and verify the same
+file by hand. To use a specific binary instead, set `PR_SHOTS_GH=/path/to/gh`;
+the script does not replace that binary when it is too old.
 
 By default, the script appends attachments at the end of the PR description
 (after any closing issue reference), preserves its existing content, and prints
@@ -119,7 +129,8 @@ Verify the new attachments render and remain accessible to the PR's reviewers
 before deleting old storage. Check other PRs and repository references before
 removing a shared evidence branch. Preserve old links for any failed migration.
 
-You can also use the native CLI directly, including during PR creation:
+With gh 2.103.2+ installed, you can also use the native CLI directly, including
+during PR creation:
 
 ```bash
 gh pr create --body-file ./pr.md --attach ./before.png --attach ./after.png

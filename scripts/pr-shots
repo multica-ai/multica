@@ -1,16 +1,33 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, extname, join, resolve } from "node:path";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const minimumGh = [2, 103, 2];
+// Bump together with the SHA-256 values from the release's gh_<version>_checksums.txt.
+export const pinnedGh = {
+  version: "2.103.3",
+  sha256: {
+    "gh_2.103.3_macOS_amd64.zip": "a2f86418f4350ae6e9ec60d5000bdf7665728436946a97fc27fe50e6ae752682",
+    "gh_2.103.3_macOS_arm64.zip": "d700207eae9ae98fe2b89535c2c087c07823d4628c56364695a5a07ef311c062",
+    "gh_2.103.3_linux_amd64.tar.gz": "4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d",
+    "gh_2.103.3_linux_arm64.tar.gz": "ee32df2323c8847f5fac6cb6b4b69ca75828e9329a8f22f677021f7b3306ce63",
+    "gh_2.103.3_windows_amd64.zip": "98d0cfa794721665d7973dd728c78aff7bd836d58f10f6d7a03568eccb0a22e0",
+    "gh_2.103.3_windows_arm64.zip": "197211c98687d7770ac331fe8a3b6c198c389108c1536cdbedf659fe4703e484",
+  },
+};
 
 const usage = `Usage: scripts/pr-shots [--repo OWNER/REPO] [--replace OLD_URL] PR FILE...
 
 Upload screenshots or recordings to an existing GitHub PR and print attachment
 Markdown to stdout. Diagnostics go to stderr. PR may be a number or GitHub URL.
-Requires Node.js 22+ and gh 2.103.2+ with repository write access.
+Requires Node.js 22+ and a gh login with repository write access. If gh is
+missing or older than 2.103.2, a checksum-verified gh ${pinnedGh.version} is downloaded
+to ~/.cache/multica/gh and used for this script only; the installed gh and its
+login are left as they are. PR_SHOTS_GH=/path/to/gh selects a specific binary.
 
   scripts/pr-shots --repo multica-ai/multica 123 ./before.png ./after.png ./demo.mp4
   scripts/pr-shots --repo multica-ai/multica --replace https://example.com/old.png 123 ./after.png
@@ -48,10 +65,12 @@ function parseArgs(args) {
   return options;
 }
 
-function runGh(args) {
-  const result = spawnSync("gh", args, { encoding: "utf8", timeout: 120_000, maxBuffer: 4 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+function run(command, args, timeout = 120_000) {
+  const result = spawnSync(command, args, { encoding: "utf8", timeout, maxBuffer: 4 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
   return { status: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.error?.message ?? result.stderr ?? "" };
 }
+
+export function ghRunner(binary) { return (args) => run(binary, args); }
 
 function checkedGh(gh, args) {
   const result = gh(args);
@@ -59,12 +78,111 @@ function checkedGh(gh, args) {
   return result.stdout;
 }
 
-function checkVersion(gh) {
-  const match = checkedGh(gh, ["--version"]).match(/^gh version (\d+)\.(\d+)\.(\d+)/);
-  const [major, minor, patch] = match ? match.slice(1).map(Number) : [];
-  if (!(major > 2 || (major === 2 && (minor > 103 || (minor === 103 && patch >= 2))))) {
-    throw new Error("Upgrade GitHub CLI to gh 2.103.2 or newer");
+function ghVersion(gh) {
+  const result = gh(["--version"]);
+  const match = result.status === 0 && result.stdout.match(/^gh version (\d+)\.(\d+)\.(\d+)/);
+  return match ? match.slice(1).map(Number) : null;
+}
+
+function supportedGh(version) {
+  const index = version ? version.findIndex((part, i) => part !== minimumGh[i]) : 0;
+  return !!version && (index === -1 || version[index] > minimumGh[index]);
+}
+
+function ghAsset(release, platform, arch) {
+  const os = { darwin: "macOS", linux: "linux", win32: "windows" }[platform];
+  const cpu = { x64: "amd64", arm64: "arm64" }[arch];
+  const name = `gh_${release.version}_${os}_${cpu}${os === "linux" ? ".tar.gz" : ".zip"}`;
+  if (!os || !cpu || !release.sha256[name]) return null;
+  return { name, sha256: release.sha256[name], url: `https://github.com/cli/cli/releases/download/v${release.version}/${name}` };
+}
+
+function cachedGh(directory, asset) {
+  const stem = asset.name.replace(/\.(zip|tar\.gz)$/, "");
+  return [join(directory, stem, "bin", "gh"), join(directory, "bin", "gh.exe")].find((path) => existsSync(path)) ?? "";
+}
+
+function manualSteps(asset, directory, platform) {
+  if (!asset || platform === "win32") {
+    return `Install any gh ${minimumGh.join(".")}+ binary from https://github.com/cli/cli/releases (no global install needed)${asset ? `, for example ${asset.url} (SHA-256 ${asset.sha256})` : ""}, then re-run with PR_SHOTS_GH=<path to gh>.`;
   }
+  const archive = join(directory, asset.name);
+  const verify = platform === "darwin" ? "shasum -a 256 -c" : "sha256sum -c";
+  return [
+    "Set it up by hand with the same verified file, then re-run the same command:",
+    `  mkdir -p '${directory}'`,
+    `  curl -fL -o '${archive}' ${asset.url}`,
+    `  echo '${asset.sha256}  ${archive}' | ${verify}`,
+    `  tar -xf '${archive}' -C '${directory}'`,
+    `Or point PR_SHOTS_GH at any gh ${minimumGh.join(".")}+ binary.`,
+  ].join("\n");
+}
+
+function download(url, destination) {
+  const result = run("curl", ["-fsSL", "--retry", "2", "--connect-timeout", "20", "-o", destination, url], 300_000);
+  if (result.status !== 0) throw new Error(`download failed: ${result.stderr.trim() || `curl exited ${result.status}`}`);
+}
+
+function extract(archive, directory) {
+  const result = run("tar", ["-xf", archive, "-C", directory], 300_000);
+  if (result.status !== 0) throw new Error(`extract failed: ${result.stderr.trim() || `tar exited ${result.status}`}`);
+}
+
+export function installPinnedGh({
+  release = pinnedGh,
+  cacheRoot = join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "multica", "gh"),
+  platform = process.platform,
+  arch = process.arch,
+  fetch = download,
+  unpack = extract,
+  log = () => {},
+} = {}) {
+  const asset = ghAsset(release, platform, arch);
+  const directory = join(cacheRoot, release.version, `${platform}-${arch}`);
+  const fail = (reason) => new Error(`Could not set up gh ${release.version}: ${reason}\n${manualSteps(asset, directory, platform)}`);
+  if (!asset) throw fail(`no pinned build for ${platform}/${arch}`);
+  const cached = cachedGh(directory, asset);
+  if (cached) return cached;
+  log(`Downloading gh ${release.version} to ${directory}`);
+  let staging;
+  try {
+    mkdirSync(join(cacheRoot, release.version), { recursive: true });
+    staging = mkdtempSync(join(cacheRoot, release.version, ".download-"));
+    const archive = join(staging, asset.name);
+    fetch(asset.url, archive);
+    const actual = createHash("sha256").update(readFileSync(archive)).digest("hex");
+    if (actual !== asset.sha256) throw new Error(`${asset.name} has SHA-256 ${actual}, expected ${asset.sha256}`);
+    const unpacked = join(staging, "unpacked");
+    mkdirSync(unpacked);
+    unpack(archive, unpacked);
+    const binary = cachedGh(unpacked, asset);
+    if (!binary) throw new Error(`${asset.name} does not contain bin/gh`);
+    if (platform !== "win32") chmodSync(binary, 0o755);
+    if (!cachedGh(directory, asset)) rmSync(directory, { recursive: true, force: true });
+    try { renameSync(unpacked, directory); } catch (error) {
+      if (!cachedGh(directory, asset)) throw error; // A concurrent run installed it first.
+    }
+    return cachedGh(directory, asset);
+  } catch (error) {
+    throw fail(error.message);
+  } finally {
+    if (staging) rmSync(staging, { recursive: true, force: true });
+  }
+}
+
+function resolveGh(gh, { override, installGh, runner, log }) {
+  const version = ghVersion(gh);
+  if (supportedGh(version)) return gh;
+  const found = version ? `gh ${version.join(".")} is older than ${minimumGh.join(".")}` : "gh was not found or did not report a version";
+  if (override) throw new Error(`PR_SHOTS_GH=${override}: ${found}`);
+  log(`${found}; using a cached gh ${pinnedGh.version} for this run (the installed gh is unchanged)`);
+  const binary = installGh({ log });
+  const pinned = runner(binary);
+  if (!supportedGh(ghVersion(pinned))) {
+    throw new Error(`${binary} did not run as gh ${minimumGh.join(".")}+; delete ${dirname(dirname(binary))} and retry`);
+  }
+  log(`Using ${binary}`);
+  return pinned;
 }
 
 function snapshot(file) {
@@ -114,7 +232,14 @@ function replaceImage(body, oldUrl, newUrl, hash) {
   return next;
 }
 
-export function runPrShots(args, { gh = runGh, out = (text) => process.stdout.write(text), log = (text) => process.stderr.write(`${text}\n`) } = {}) {
+export function runPrShots(args, {
+  env = process.env,
+  gh = ghRunner(env.PR_SHOTS_GH || "gh"),
+  installGh = installPinnedGh,
+  runner = ghRunner,
+  out = (text) => process.stdout.write(text),
+  log = (text) => process.stderr.write(`${text}\n`),
+} = {}) {
   let directory;
   try {
     const options = parseArgs(args);
@@ -125,7 +250,7 @@ export function runPrShots(args, { gh = runGh, out = (text) => process.stdout.wr
       return [asset.hash, asset];
     })).values()];
     if (options.replace && files[0].video) throw new Error("--replace supports images; append recordings instead");
-    checkVersion(gh);
+    gh = resolveGh(gh, { override: env.PR_SHOTS_GH, installGh, runner, log });
     const readPr = (target, repo = "") => {
       const flags = repo ? ["--repo", repo] : [];
       const pr = JSON.parse(checkedGh(gh, ["pr", "view", target, ...flags, "--json", "body,url"]));
