@@ -481,29 +481,56 @@ vi.mock("@multica/core/issues/stores", async () => ({
 // layout.
 const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
 const scrollToIndexSpy = vi.hoisted(() => vi.fn());
-const mockVirtualWindow = vi.hoisted(() => ({ enabled: false, delayedViewport: false }));
+const scrollIntoViewIndexSpy = vi.hoisted(() => vi.fn());
+const mockVirtualWindow = vi.hoisted(() => ({
+  enabled: false, delayedViewport: false, lateScrollReset: false,
+  targetId: "", scrollParent: null as HTMLElement | null,
+}));
 
 vi.mock("react-virtuoso", () => ({
   Virtuoso: forwardRef(function MockVirtuoso(
-    { data, itemContent, computeItemKey }: {
+    { data, itemContent, computeItemKey, customScrollParent, totalListHeightChanged }: {
       data: unknown[];
       itemContent: (i: number, item: unknown) => unknown;
       computeItemKey: (i: number, item: unknown) => React.Key;
+      customScrollParent?: HTMLElement;
+      totalListHeightChanged?: (height: number) => void;
     },
     ref: any,
   ) {
     const [windowStart, setWindowStart] = useState(0);
     const viewportMeasured = useRef(!mockVirtualWindow.delayedViewport);
     useEffect(() => {
-      if (!mockVirtualWindow.delayedViewport) return;
-      const timer = window.setTimeout(() => { viewportMeasured.current = true; }, 100);
+      const measured = () => {
+        viewportMeasured.current = true;
+        totalListHeightChanged?.(1000);
+      };
+      if (!mockVirtualWindow.delayedViewport) { measured(); return; }
+      const timer = window.setTimeout(measured, 100);
       return () => window.clearTimeout(timer);
-    }, []);
+    }, [totalListHeightChanged]);
+    useEffect(() => {
+      if (!mockVirtualWindow.lateScrollReset || !customScrollParent) return;
+      mockVirtualWindow.scrollParent = customScrollParent;
+      Object.defineProperty(customScrollParent, "clientHeight", { configurable: true, value: 200 });
+      customScrollParent.getBoundingClientRect = () => new DOMRect(0, 0, 400, 200);
+      const target = document.getElementById(`comment-${mockVirtualWindow.targetId}`);
+      if (target) target.getBoundingClientRect = () => new DOMRect(0, 250 - customScrollParent.scrollTop, 400, 100);
+    }, [customScrollParent, windowStart, data]);
+    const jump = (location: { index: number; done?: () => void }) => {
+      if (mockVirtualWindow.enabled && viewportMeasured.current) setWindowStart(Math.max(0, location.index - 2));
+      if (mockVirtualWindow.lateScrollReset && customScrollParent) {
+        window.setTimeout(() => { customScrollParent.scrollTop = 0; location.done?.(); }, 80);
+      } else location.done?.();
+    };
     useImperativeHandle(ref, () => ({
-      scrollIntoView: vi.fn(),
+      scrollIntoView: (location: { index: number; done?: () => void }) => {
+        scrollIntoViewIndexSpy(location);
+        jump(location);
+      },
       scrollToIndex: (location: { index: number }) => {
         scrollToIndexSpy(location);
-        if (mockVirtualWindow.enabled && viewportMeasured.current) setWindowStart(Math.max(0, location.index - 2));
+        jump(location);
       },
     }));
     const start = mockVirtualWindow.enabled ? windowStart : 0;
@@ -523,6 +550,10 @@ vi.mock("react-virtuoso", () => ({
 beforeEach(() => {
   mockVirtualWindow.enabled = false;
   mockVirtualWindow.delayedViewport = false;
+  mockVirtualWindow.lateScrollReset = false;
+  mockVirtualWindow.targetId = "";
+  mockVirtualWindow.scrollParent = null;
+  scrollIntoViewIndexSpy.mockClear();
   scrollIntoViewSpy.mockClear();
   scrollToIndexSpy.mockClear();
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
@@ -2436,12 +2467,14 @@ describe("IssueDetail (shared)", () => {
 
   describe("highlightCommentId scroll-to-comment", () => {
     it.each([
-      { kind: "root", delayedViewport: false },
-      { kind: "reply", delayedViewport: false },
-      { kind: "root", delayedViewport: true },
-    ])("keeps long history virtualized for a $kind (late viewport: $delayedViewport)", async ({ kind, delayedViewport }) => {
+      { kind: "root", delayedViewport: false, lateScrollReset: false },
+      { kind: "reply", delayedViewport: false, lateScrollReset: false },
+      { kind: "root", delayedViewport: true, lateScrollReset: false },
+      { kind: "reply", delayedViewport: false, lateScrollReset: true },
+    ])("keeps long history virtualized for a $kind (late viewport: $delayedViewport, late scroll: $lateScrollReset)", async ({ kind, delayedViewport, lateScrollReset }) => {
       mockVirtualWindow.enabled = true;
       mockVirtualWindow.delayedViewport = delayedViewport;
+      mockVirtualWindow.lateScrollReset = lateScrollReset;
       const history = Array.from({ length: 120 }, (_, index) => ({
         ...mockTimeline[0]!,
         id: `history-${index}`,
@@ -2457,6 +2490,7 @@ describe("IssueDetail (shared)", () => {
         parent_id: root.id,
         content: "Offscreen reply target",
       };
+      mockVirtualWindow.targetId = target.id;
       mockApiObj.listTimeline.mockResolvedValue(kind === "root" ? history : [...history, target]);
       mockApiObj.listTasksByIssue.mockResolvedValue([]);
       renderIssueDetailWithHighlight(target.id);
@@ -2464,10 +2498,26 @@ describe("IssueDetail (shared)", () => {
       await waitFor(() => expect(hasHighlightedCommentBackground(
         document.getElementById(`comment-${target.id}`),
       )).toBe(true));
+      if (lateScrollReset) {
+        await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 150)); });
+        expect(mockVirtualWindow.scrollParent?.scrollTop).toBe(200);
+      }
       expect(screen.queryByTestId("virtuoso-mock")).not.toBeNull();
       expect(document.querySelectorAll('[id^="comment-history-"]').length).toBeLessThanOrEqual(8);
       expect(document.getElementById("comment-history-0")).toBeNull();
-      expect(scrollToIndexSpy).toHaveBeenCalledWith(expect.objectContaining({ index: 115 }));
+      expect(scrollIntoViewIndexSpy).toHaveBeenCalledWith(expect.objectContaining({ index: 115 }));
+    });
+
+    it("waits for run grouping before consuming the comment landing", async () => {
+      let finishTasks!: (tasks: AgentTask[]) => void;
+      mockApiObj.listTasksByIssue.mockReturnValue(new Promise<AgentTask[]>((resolve) => { finishTasks = resolve; }));
+      renderIssueDetailWithHighlight("comment-2");
+      await waitFor(() => expect(document.getElementById("comment-comment-2")).not.toBeNull());
+      await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 60)); });
+      const landedBeforeGrouping = hasHighlightedCommentBackground(document.getElementById("comment-comment-2"));
+      await act(async () => { finishTasks([]); });
+      await waitFor(() => expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-2"))).toBe(true));
+      expect(landedBeforeGrouping).toBe(false);
     });
 
     it("folds an assignment reply with its resolved parent and unfolds that thread for a notification", async () => {

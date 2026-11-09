@@ -1721,7 +1721,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id);
 
-  const { data: commentTasks } = useQuery(issueTasksOptions(id));
+  const { data: commentTasks, isLoading: commentTasksLoading } = useQuery(issueTasksOptions(id));
   const enteringRunIds = useNewRunIds(id, commentTasks);
   const previousCommentRuns = useRef(new Map<string, CommentRun[]>());
   const { runs: commentRuns, timeline: displayTimeline, standaloneRuns } = useMemo(() => {
@@ -1963,6 +1963,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Virtuoso instance — minimap jumps drive the scroll container directly.
   const isFlatTimeline = find.open;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const [measuredTimelineId, setMeasuredTimelineId] = useState<string | null>(null);
+  const handleTimelineHeightChange = useCallback((height: number) => {
+    if (height > 0) setMeasuredTimelineId(id);
+  }, [id]);
   // Scroll a freshly posted comment into view, aligned so its bottom sits just
   // above the sticky composer (never behind it). A reply lives inside its root
   // CommentCard, so the containing top-level row is the scroll target. Flat and
@@ -2366,7 +2370,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // ref populates only on the post-loading render, so it's the signal that
   // the timeline (and the deep-link target id) has actually rendered.
   useEffect(() => {
-    if (!highlightCommentId || items.length === 0) return;
+    if (!highlightCommentId || items.length === 0 || timelineLoading || commentTasksLoading) return;
     // An explicit replay request (re-click on the already-open notification
     // row): the host cleared the memento entry and bumped the token, so
     // re-arm the landing guard and fall through to the jump.
@@ -2418,10 +2422,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     );
     const container = scrollContainerEl;
     if (!container) return;
-    if (!isFlatTimeline) {
-      if (targetIdx < 0) return;
-      virtuosoRef.current?.scrollToIndex({ index: targetIdx, align: "center" });
-    }
+    if (!isFlatTimeline && (targetIdx < 0 || measuredTimelineId !== id)) return;
 
     // Center the target comment WITHIN its own scroll container by driving the
     // container's scrollTop directly — never native scrollIntoView. Native
@@ -2439,11 +2440,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     let frames = 0;
     let last = -1;
     let fade: number | undefined;
+    let cancelled = false;
     const land = () => {
       const el = document.getElementById(`comment-${landingId}`);
       if (!el) {
-        // The initial jump can precede Virtuoso's first viewport measurement.
-        if (!isFlatTimeline) virtuosoRef.current?.scrollToIndex({ index: targetIdx, align: "center" });
         if (++mountFrames < 60) rafId = requestAnimationFrame(land);
         return;
       }
@@ -2468,12 +2468,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       fade = window.setTimeout(() => setHighlightedId(null), 2500);
     };
     if (isFlatTimeline) land();
-    else rafId = requestAnimationFrame(land);
+    else virtuosoRef.current?.scrollIntoView({
+      index: targetIdx,
+      align: "start",
+      // Finish virtual size corrections before positioning a nested reply.
+      done: () => { if (!cancelled) rafId = requestAnimationFrame(land); },
+    });
     return () => {
+      cancelled = true;
       cancelAnimationFrame(rafId);
       if (fade !== undefined) clearTimeout(fade);
     };
-  }, [highlightCommentId, highlightRequestToken, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, isFlatTimeline]);
+  }, [highlightCommentId, highlightRequestToken, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, isFlatTimeline, measuredTimelineId, timelineLoading, commentTasksLoading]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const descriptionEditingRef = useRef(false);
@@ -4008,6 +4014,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       data={items}
                       initialScrollTop={restoredScrollTop}
                       increaseViewportBy={{ top: 800, bottom: 800 }}
+                      totalListHeightChanged={handleTimelineHeightChange}
                       computeItemKey={(_i, item) => `${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}
                       skipAnimationFrameInResizeObserver
                       // followOutput intentionally NOT set. Virtuoso treats
