@@ -280,6 +280,7 @@
       "sample": "永和九年 한글"
     },
     "follow_ui": "인터페이스와 같게",
+    "theme_font": "테마 글꼴",
     "font_size": {
       "title": "글꼴 크기",
       "description": "텍스트만 확대합니다. 간격과 레이아웃은 그대로입니다.",

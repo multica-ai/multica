@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   Monitor,
@@ -51,6 +51,7 @@ import {
   CODE_FONTS,
   CONTENT_LEADINGS,
   CONTENT_SIZES,
+  DEFAULT_APPEARANCE,
   DEFAULT_FONT_SIZE,
   DENSITIES,
   FOLLOW_UI,
@@ -111,6 +112,18 @@ const CODE_FONT_NAME: Record<CodeFont, string> = {
   jetbrains: "JetBrains Mono",
   system: "SF Mono / Consolas",
 };
+/**
+ * Whether the active theme sets a font variable. The default font choice
+ * writes nothing, so on such a theme it shows the theme's font, not its own.
+ */
+function useThemeSetsFont(variable: "font-ui" | "font-mono"): boolean {
+  const appliedMode = useAppliedMode();
+  const theme = useAppearanceStore((s) => s.theme);
+  const safeMode = useThemeSafeMode();
+  const css = activeTheme({ theme }, safeMode.active).css;
+  return useMemo(() => variable in themeModeVariables(css)[appliedMode], [css, appliedMode, variable]);
+}
+
 /** Select value that asks for the device's fonts instead of choosing one. */
 const LOAD_LOCAL_FONTS = "__load_local_fonts";
 
@@ -726,6 +739,7 @@ function InterfaceTextSection() {
   const { uiFont, uiCjkFont, fontSize, set } = useAppearanceStore(
     useShallow((s) => ({ uiFont: s.uiFont, uiCjkFont: s.uiCjkFont, fontSize: s.fontSize, set: s.set })),
   );
+  const themeUiFont = useThemeSetsFont("font-ui");
   const sizeLabel = t(($) => $.appearance.font_size.title);
 
   return (
@@ -736,7 +750,7 @@ function InterfaceTextSection() {
     >
       <SettingsCard>
         <SettingsRow label={t(($) => $.appearance.latin_font.title)} anchor="ui-latin-font" size="select">
-          <LatinFontSelect value={uiFont} onChange={(next) => set({ uiFont: next as UiFont })} />
+          <LatinFontSelect value={uiFont} themeFont={themeUiFont} onChange={(next) => set({ uiFont: next as UiFont })} />
         </SettingsRow>
         <SettingsRow
           label={t(($) => $.appearance.cjk_font.title)}
@@ -801,7 +815,12 @@ function ContentTextSection() {
   const codeLabel = t(($) => $.appearance.code_font.title);
   const sizeLabel = t(($) => $.appearance.content_size.title);
   const leadingLabel = t(($) => $.appearance.content_leading.title);
-  const codeOptions = CODE_FONTS.map((id) => ({ value: id, label: CODE_FONT_NAME[id] }));
+  const themeCodeFont = useThemeSetsFont("font-mono");
+  const themeFontLabel = t(($) => $.appearance.theme_font);
+  const fromTheme = (id: CodeFont) => themeCodeFont && id === DEFAULT_APPEARANCE.codeFont;
+  const codeName = (id: CodeFont) => (fromTheme(id) ? themeFontLabel : CODE_FONT_NAME[id]);
+  const codeSample = (id: CodeFont) => (fromTheme(id) ? "var(--font-mono)" : CODE_FONT_SAMPLE[id]);
+  const codeOptions = CODE_FONTS.map((id) => ({ value: id, label: codeName(id) }));
   const sizeName = (size: ContentSize) =>
     size === FOLLOW_UI
       ? t(($) => $.appearance.content_size.follow, { size: fontSize })
@@ -851,14 +870,14 @@ function ContentTextSection() {
           >
             <SelectTrigger size="sm" className="w-full" aria-label={codeLabel}>
               <SelectValue>
-                <span style={{ fontFamily: CODE_FONT_SAMPLE[codeFont] }}>{CODE_FONT_NAME[codeFont]}</span>
+                <span style={{ fontFamily: codeSample(codeFont) }}>{codeName(codeFont)}</span>
               </SelectValue>
             </SelectTrigger>
             <SelectContent align="end">
               {CODE_FONTS.map((id) => (
                 <SelectItem key={id} value={id}>
                   <span className="flex min-w-0 flex-1 items-baseline justify-between gap-3">
-                    <span style={{ fontFamily: CODE_FONT_SAMPLE[id] }}>{CODE_FONT_NAME[id]}</span>
+                    <span style={{ fontFamily: codeSample(id) }}>{codeName(id)}</span>
                     <span className="text-caption text-muted-foreground">
                       {t(($) => $.appearance.code_font[id])}
                     </span>
@@ -916,17 +935,24 @@ function ContentTextSection() {
 function LatinFontSelect({
   value,
   follow = false,
+  themeFont = false,
   onChange,
 }: {
   value: string;
   follow?: boolean;
+  /** The active theme sets the interface font, which the default choice keeps. */
+  themeFont?: boolean;
   onChange: (value: string) => void;
 }) {
   const { t } = useT("settings");
   const label = t(($) => $.appearance.latin_font.title);
   const followLabel = t(($) => $.appearance.follow_ui);
-  const name = (id: string) => (id === FOLLOW_UI ? followLabel : UI_FONT_NAME[id as UiFont]);
-  const family = (id: string) => (id === FOLLOW_UI ? undefined : uiFontStack(id as UiFont));
+  const themeFontLabel = t(($) => $.appearance.theme_font);
+  const fromTheme = (id: string) => themeFont && id === DEFAULT_APPEARANCE.uiFont;
+  const name = (id: string) =>
+    id === FOLLOW_UI ? followLabel : fromTheme(id) ? themeFontLabel : UI_FONT_NAME[id as UiFont];
+  const family = (id: string) =>
+    id === FOLLOW_UI ? undefined : fromTheme(id) ? "var(--font-ui)" : uiFontStack(id as UiFont);
   const ids: string[] = [...(follow ? [FOLLOW_UI] : []), ...UI_FONTS];
   return (
     <Select

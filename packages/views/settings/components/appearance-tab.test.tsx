@@ -141,6 +141,20 @@ describe("AppearanceTab", () => {
     expect(contentLatin).toHaveTextContent("Geist Mono");
   });
 
+  it("names the theme's fonts when the default choice keeps them", () => {
+    useAppearanceStore.setState({ theme: "github" });
+    const { unmount } = render(<AppearanceTab />, { wrapper: Wrapper });
+    const [uiLatin] = screen.getAllByRole("combobox", { name: "Latin font" });
+    expect(uiLatin).toHaveTextContent("Theme font");
+    expect(screen.getByRole("combobox", { name: "Code font" })).toHaveTextContent("Theme font");
+    unmount();
+
+    useAppearanceStore.setState({ theme: "default" });
+    render(<AppearanceTab />, { wrapper: Wrapper });
+    expect(screen.getAllByRole("combobox", { name: "Latin font" })[0]).toHaveTextContent("Inter");
+    expect(screen.getByRole("combobox", { name: "Code font" })).toHaveTextContent("Geist Mono");
+  });
+
   it("picks the accent and density", async () => {
     const user = userEvent.setup();
     render(<AppearanceTab />, { wrapper: Wrapper });

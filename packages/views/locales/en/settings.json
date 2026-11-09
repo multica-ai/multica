@@ -284,6 +284,7 @@
       "sample": "永和九年 汉字"
     },
     "follow_ui": "Same as interface",
+    "theme_font": "Theme font",
     "font_size": {
       "title": "Font size",
       "description": "Scales text only. Spacing and layout stay the same.",

@@ -266,6 +266,7 @@
       "sample": "永和九年 漢字"
     },
     "follow_ui": "Igual que la interfaz",
+    "theme_font": "Fuente del tema",
     "font_size": {
       "title": "Tamaño del texto",
       "description": "Solo agranda el texto. El espaciado y el diseño no cambian.",

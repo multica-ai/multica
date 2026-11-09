@@ -284,6 +284,7 @@
       "sample": "永和九年 漢字"
     },
     "follow_ui": "Comme l’interface",
+    "theme_font": "Police du thème",
     "font_size": {
       "title": "Taille du texte",
       "description": "Agrandit uniquement le texte. Les espacements et la mise en page restent identiques.",

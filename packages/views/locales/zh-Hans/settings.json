@@ -280,6 +280,7 @@
       "sample": "永和九年，岁在癸丑"
     },
     "follow_ui": "跟随界面",
+    "theme_font": "主题字体",
     "font_size": {
       "title": "字号",
       "description": "只放大文字，间距和布局不变。",
