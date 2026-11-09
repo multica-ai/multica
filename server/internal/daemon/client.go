@@ -778,6 +778,12 @@ func (c *Client) ReportUpdateResult(ctx context.Context, runtimeID, updateID str
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/update/%s/result", runtimeID, updateID), result, nil)
 }
 
+// ReportUsageLimits stores the latest plan-limit snapshot of the login a
+// runtime uses.
+func (c *Client) ReportUsageLimits(ctx context.Context, runtimeID string, snapshot agent.RateLimitSnapshot) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/usage-limits", runtimeID), snapshot, nil)
+}
+
 // ReportModelListResult sends the model-discovery result back to the server.
 func (c *Client) ReportModelListResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/models/%s/result", runtimeID, requestID), result, nil)

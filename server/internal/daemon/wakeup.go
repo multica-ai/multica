@@ -443,6 +443,12 @@ func (d *Daemon) readTaskWakeupMessagesForConnection(conn *websocket.Conn, taskW
 				d.logger.Debug("pending work websocket missing runtime_id")
 				continue
 			}
+			if payload.Kind == protocol.PendingWorkKindUsageLimits {
+				if d.findRuntime(payload.RuntimeID) != nil {
+					d.requestUsageLimitsRefresh()
+				}
+				continue
+			}
 			// Own goroutine: the hint triggers an HTTP heartbeat plus the work it
 			// claims, and the read pump must stay free for the next frame.
 			go d.handlePendingWorkHint(payload.RuntimeID, payload.Kind)

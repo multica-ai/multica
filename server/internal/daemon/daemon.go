@@ -471,6 +471,10 @@ type Daemon struct {
 	reloading          sync.Mutex         // prevents concurrent workspace syncs
 	runtimeSet         *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
 
+	// usageLimits caches each provider login's plan limits and reports them
+	// to the runtimes that use it. Zero value is ready to use.
+	usageLimits usageLimitsTracker
+
 	// lifecycleCtx is the context Run was handed, kept so background work that
 	// must outlive a single probe round — the DSH profile install — is tied to
 	// the daemon's lifetime instead of to whichever round happened to notice the
@@ -2176,6 +2180,7 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 	taskWakeups := make(chan taskWakeup, 256)
 	go d.taskWakeupLoop(ctx, taskWakeups)
 	go d.heartbeatLoop(ctx)
+	go d.usageLimitsLoop(ctx)
 	go d.gcLoop(ctx)
 	go d.autoUpdateLoop(ctx)
 	go d.tokenRenewalLoop(ctx)
@@ -9054,6 +9059,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 	stopUsageFlush := d.startUsageFlush(ctx, task.ID, &liveUsage, taskLog)
+	if !usesCustomProfileCommand && tracksUsageLimits(provider) {
+		execOpts.OnRateLimits = func(update agent.RateLimitSnapshot) { d.recordRunRateLimits(provider, update) }
+	}
 	defer stopUsageFlush()
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
 	if err != nil {

@@ -28,6 +28,10 @@ const (
 	// poller applies downward-only jitter before each sleep.
 	DefaultWSClaimPollInterval = 3 * time.Minute
 	DefaultHeartbeatInterval   = 15 * time.Second
+	// DefaultUsageLimitsInterval is how often an idle daemon asks the Claude
+	// and Codex CLIs for the plan limits of their logins. The check sends no
+	// prompt; runs report their own limits as they go.
+	DefaultUsageLimitsInterval = 15 * time.Minute
 	// DefaultAgentTimeout is the optional absolute wall-clock cap on a single
 	// agent run. 0 = no cap: a run is bounded only by the inactivity watchdog
 	// (DefaultAgentIdleWatchdog), so a session that keeps emitting events is
@@ -134,6 +138,7 @@ type Config struct {
 	PollInterval                   time.Duration
 	WSClaimPollInterval            time.Duration // upper bound for healthy WS batch-claim safety polls; actual sleeps use downward-only jitter
 	HeartbeatInterval              time.Duration
+	UsageLimitsInterval            time.Duration // idle plan-limit check cadence (default: 15m, set 0 to disable)
 	AgentTimeout                   time.Duration
 	CodexSemanticInactivityTimeout time.Duration
 	// CodexFirstTurnNoProgressTimeout is an explicit override for the Codex
@@ -556,6 +561,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	usageLimitsInterval, err := durationFromEnv("MULTICA_DAEMON_USAGE_LIMITS_INTERVAL", DefaultUsageLimitsInterval)
+	if err != nil {
+		return Config{}, err
+	}
 	gcTTL, err := durationFromEnv("MULTICA_GC_TTL", DefaultGCTTL)
 	if err != nil {
 		return Config{}, err
@@ -657,6 +666,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		PollInterval:                    pollInterval,
 		WSClaimPollInterval:             wsClaimPollInterval,
 		HeartbeatInterval:               heartbeatInterval,
+		UsageLimitsInterval:             usageLimitsInterval,
 		AgentTimeout:                    agentTimeout,
 		CodexSemanticInactivityTimeout:  codexSemanticInactivityTimeout,
 		CodexFirstTurnNoProgressTimeout: codexFirstTurnNoProgressTimeout,
