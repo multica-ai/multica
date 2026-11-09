@@ -29,6 +29,7 @@ import type { Issue, PinnedItem } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { IssueActionsContextMenu } from "../../issues/actions";
 import { useStatusLabel } from "../../issues/utils/status-label";
+import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
 import { PANEL_ROW_CLASS, PanelList, PanelSection, isPathWithin, panelRowStateClass } from "../panel-nav";
 import {
@@ -373,7 +374,9 @@ function PinRow({
       onUnpin={onUnpin}
       label={project.title}
       active={active}
-      iconNode={<Folder className="size-4 shrink-0" />}
+      iconNode={
+        project.icon ? <ProjectIcon project={project} size="md" /> : <Folder className="size-4 shrink-0" />
+      }
     />
   );
 }

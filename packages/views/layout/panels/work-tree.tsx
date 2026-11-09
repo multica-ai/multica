@@ -35,6 +35,7 @@ import {
   isPathWithin,
   panelRowStateClass,
 } from "../panel-nav";
+import { ProjectIcon } from "../../projects/components/project-icon";
 import { ProjectsSectionSettings } from "./sidebar-settings";
 import { SidebarIssueList, TreeRow } from "./sidebar-tree";
 
@@ -289,7 +290,9 @@ function ProjectTreeItem({
         {...listeners}
         href={p.projectDetail(project.id)}
         label={project.title}
-        icon={<Folder className="size-4 shrink-0" />}
+        icon={
+          project.icon ? <ProjectIcon project={project} size="md" /> : <Folder className="size-4 shrink-0" />
+        }
         active={active}
         located={located}
         expanded={expanded}
