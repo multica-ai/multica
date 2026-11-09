@@ -148,6 +148,7 @@
       "view_actions": "Acciones de {{name}}",
       "view_copy_link": "Copiar enlace",
       "view_remove": "Quitar de la barra lateral",
+      "view_edit": "Editar vista",
       "view_rename": "Renombrar",
       "view_duplicate": "Duplicar",
       "view_delete": "Eliminar vista"

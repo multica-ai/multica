@@ -1041,8 +1041,8 @@ export function IssueFilterMenu({
   onTableFacetChange?: (facet: IssueTableFacetSpec | null) => void;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
-  /** Opens the simple menu from the host, e.g. right after a view is named.
-   *  Pair it with `onOpenChange`. */
+  /** Opens the menu, or the advanced panel in advanced mode, from the host,
+   *  e.g. right after a view is named. Pair it with `onOpenChange`. */
   open?: boolean;
   /** Mirrors the menu's open state. */
   onOpenChange?: (open: boolean) => void;
@@ -1078,9 +1078,18 @@ export function IssueFilterMenu({
   const advancedMode = advancedFilter !== null;
   const [panelOpen, setPanelOpen] = useState(false);
   // Leaving advanced mode from inside the panel unmounts it with no close
-  // event; the next entry must start closed until asked.
+  // event; the next entry must start closed until asked, and a host that
+  // holds `open` must hear it closed or the simple menu pops open instead.
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
+  const wasAdvancedRef = useRef(advancedMode);
+  const menuOpen = open !== undefined && wasAdvancedRef.current && !advancedMode ? false : open;
   useEffect(() => {
-    if (!advancedMode) setPanelOpen(false);
+    if (!advancedMode) {
+      setPanelOpen(false);
+      if (wasAdvancedRef.current) onOpenChangeRef.current?.(false);
+    }
+    wasAdvancedRef.current = advancedMode;
   }, [advancedMode]);
   const [search, setSearch] = useState("");
   const query = search.trim().toLowerCase();
@@ -1144,7 +1153,7 @@ export function IssueFilterMenu({
   const [openProp, setOpenProp] = useState(open);
   if (open !== openProp) {
     setOpenProp(open);
-    if (open && activeAtOpen === null) setActiveAtOpen(new Set(chipByKey.keys()));
+    if (open && !advancedMode && activeAtOpen === null) setActiveAtOpen(new Set(chipByKey.keys()));
   }
   const activeKeys = activeAtOpen ?? new Set(chipByKey.keys());
   const dateFilterLabel = showDateFilter && dateFilter
@@ -1727,10 +1736,10 @@ export function IssueFilterMenu({
   if (advancedMode) {
     return (
       <Popover
-        open={panelOpen}
-        onOpenChange={(open) => {
-          setPanelOpen(open);
-          onOpenChange?.(open);
+        open={panelOpen || open === true}
+        onOpenChange={(next) => {
+          setPanelOpen(next);
+          onOpenChange?.(next);
         }}
       >
         {withTooltip ? (
@@ -1754,7 +1763,7 @@ export function IssueFilterMenu({
 
   return (
     <DropdownMenu
-      open={open}
+      open={menuOpen}
       onOpenChange={(next) => {
         if (freezeAnchor) {
           if (next && triggerRef.current) {

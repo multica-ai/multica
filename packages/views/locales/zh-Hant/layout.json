@@ -146,6 +146,7 @@
       "view_actions": "{{name}} 的操作",
       "view_copy_link": "複製連結",
       "view_remove": "從側欄移除",
+      "view_edit": "編輯檢視",
       "view_rename": "重新命名",
       "view_duplicate": "建立副本",
       "view_delete": "刪除檢視"
