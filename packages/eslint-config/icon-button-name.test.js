@@ -1,0 +1,75 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { ESLint, Linter } from "eslint";
+import tseslint from "typescript-eslint";
+import a11yPlugin from "./icon-button-name.js";
+
+const linter = new Linter();
+
+function flagged(code) {
+  const messages = linter.verify(
+    code,
+    [
+      {
+        files: ["**/*.tsx"],
+        languageOptions: {
+          parser: tseslint.parser,
+          parserOptions: { ecmaFeatures: { jsx: true } },
+        },
+        plugins: { "multica-a11y": a11yPlugin },
+        rules: { "multica-a11y/icon-button-name": "error" },
+      },
+    ],
+    "fixture.tsx",
+  );
+  const fatal = messages.find((m) => m.fatal);
+  if (fatal) throw new Error(`fixture failed to parse: ${fatal.message}`);
+  return messages.length > 0;
+}
+
+const FLAGGED = [
+  ["unnamed icon button", '<Button size="icon-sm"><X /></Button>'],
+  ["self-closing icon button", '<Button size="icon" />'],
+  ["icon size from a conditional", '<Button size={compact ? "icon-xs" : "icon-sm"}><X /></Button>'],
+  ["icon chosen by a conditional child", "<Button size=\"icon\">{open ? <ChevronUp /> : <ChevronDown />}</Button>"],
+  ["icon behind &&", "<Button size=\"icon\">{busy && <Spinner />}</Button>"],
+  ["unnamed render-prop trigger", '<TooltipTrigger render={<Button size="icon-sm" />}><X /></TooltipTrigger>'],
+  [
+    "render-prop trigger with content inside the Button",
+    '<TooltipTrigger render={<Button size="icon-sm"><X /></Button>} />',
+  ],
+  ["label only in a tooltip", '<Tooltip><TooltipTrigger render={<Button size="icon" />}><X /></TooltipTrigger><TooltipContent>Close</TooltipContent></Tooltip>'],
+];
+
+const ALLOWED = [
+  ["aria-label", '<Button size="icon-sm" aria-label="Close"><X /></Button>'],
+  ["translated aria-label", '<Button size="icon-sm" aria-label={t(($) => $.close)}><X /></Button>'],
+  ["aria-labelledby", '<Button size="icon" aria-labelledby="title-id"><X /></Button>'],
+  ["props spread", '<Button size="icon-sm" {...props}><X /></Button>'],
+  ["text child", '<Button size="icon">Go</Button>'],
+  ["expression child", '<Button size="icon-xs">{count}</Button>'],
+  ["sr-only child", '<Button size="icon"><X /><span className="sr-only">{t(($) => $.close)}</span></Button>'],
+  ["named render-prop trigger", '<TooltipTrigger render={<Button size="icon-sm" aria-label="More" />}><X /></TooltipTrigger>'],
+  ["render-prop trigger carrying the name", '<DropdownMenuTrigger aria-label="More" render={<Button size="icon-sm" />}><X /></DropdownMenuTrigger>'],
+  ["render-prop trigger with an sr-only child", '<TooltipTrigger render={<Button size="icon" />}><X /><span className="sr-only">Close</span></TooltipTrigger>'],
+  ["non-icon size", '<Button size="sm"><X /></Button>'],
+  ["no size", "<Button><X /></Button>"],
+  ["IconButton", '<IconButton label="Close"><X /></IconButton>'],
+];
+
+for (const [name, code] of FLAGGED) {
+  test(`flags ${name}`, () => assert.equal(flagged(code), true));
+}
+
+for (const [name, code] of ALLOWED) {
+  test(`allows ${name}`, () => assert.equal(flagged(code), false));
+}
+
+test("the shared React config turns the rule on", async () => {
+  const eslint = new ESLint({ cwd: fileURLToPath(new URL("../views", import.meta.url)) });
+  const [result] = await eslint.lintText('export const A = () => <Button size="icon" />;\n', {
+    filePath: "fixture.tsx",
+  });
+  assert.equal(result.messages.filter((m) => m.ruleId === "multica-a11y/icon-button-name").length, 1);
+});
