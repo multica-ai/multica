@@ -22,7 +22,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
 import { HERO_PROVIDERS } from "../../components/provider-marks";
-import { ThinkingMark } from "../brand-logo";
+import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 
 /*
  * Shared pieces for the landing's product mockups: the fictional Acme Labs
@@ -442,7 +442,7 @@ export function Working({ label = "Working", agents }: { label?: string; agents?
   return (
     <span className="inline-flex shrink-0 items-center gap-1">
       {agents ? <AvatarStack actors={agents} size={16} /> : null}
-      <ThinkingMark className="text-foreground" />
+      <MulticaIcon mode="think" size={12} />
       <ShimmerText className="text-micro text-muted-foreground">{label}</ShimmerText>
     </span>
   );

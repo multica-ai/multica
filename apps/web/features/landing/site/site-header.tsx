@@ -11,7 +11,7 @@ import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
 import { formatStarCount, useGithubStars } from "../utils/use-github-stars";
 import { GitHubMark, githubUrl } from "../components/shared";
 import { HERO_PROVIDERS } from "../components/provider-marks";
-import { BrandWordmark } from "./brand-logo";
+import { MulticaWordmark } from "@multica/ui/components/common/multica-wordmark";
 import { ActionLink, SiteTextLink, focusRing } from "./primitives";
 import { buildMenus, buildTopLinks, isLiveRoute, type SiteLink, type SiteLinkGroup, type SiteMenu, type SiteMenuId } from "./sitemap";
 
@@ -115,10 +115,10 @@ export function SiteHeader() {
             <Link
               href="/"
               aria-label={labels.home}
-              className={cn("group flex shrink-0 items-center rounded-sm", focusRing)}
+              className={cn("flex shrink-0 items-center rounded-sm", focusRing)}
               onClick={() => close()}
             >
-              <BrandWordmark />
+              <MulticaWordmark aria-hidden className="h-6 text-site-ink" />
             </Link>
 
             <nav aria-label={labels.primary} className="hidden items-center gap-0.5 lg:flex">
@@ -407,7 +407,7 @@ function MobileMenu({
         <SheetTitle className="sr-only">{labels.menu}</SheetTitle>
         <div className="flex h-site-header shrink-0 items-center justify-between px-site-gutter">
           <Link href="/" aria-label={labels.home} onClick={close} className={cn("flex items-center rounded-sm", focusRing)}>
-              <BrandWordmark />
+              <MulticaWordmark aria-hidden className="h-6 text-site-ink" />
           </Link>
           <button type="button" aria-label={labels.closeMenu} onClick={close} className={cn(navItemClassName, "px-2")}>
             <X className="size-5" aria-hidden />

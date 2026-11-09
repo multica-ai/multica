@@ -12,7 +12,7 @@ import {
   githubUrl,
   twitterUrl,
 } from "../components/shared";
-import { BrandWordmark } from "./brand-logo";
+import { MulticaWordmark } from "@multica/ui/components/common/multica-wordmark";
 import { FooterWordmark } from "./footer-wordmark";
 import { Container, SiteTextLink, focusRing } from "./primitives";
 import { buildFooterGroups } from "./sitemap";
@@ -35,8 +35,8 @@ export function SiteFooter() {
     <footer className="border-t border-site-rule bg-site-canvas text-site-ink">
       <Container className="grid gap-site-block py-site-section lg:grid-cols-[minmax(0,1fr)_minmax(0,3fr)] lg:gap-16">
         <div>
-          <Link href="/" aria-label={t.site.header.home} className={cn("group inline-flex items-center rounded-sm", focusRing)}>
-              <BrandWordmark />
+          <Link href="/" aria-label={t.site.header.home} className={cn("inline-flex items-center rounded-sm", focusRing)}>
+              <MulticaWordmark aria-hidden className="h-6 text-site-ink" />
           </Link>
           <p className="mt-4 max-w-[18rem] text-site-small text-site-muted">
             {labels.tagline}

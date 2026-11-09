@@ -356,38 +356,3 @@
         }
     }
 }
-
-/* Brand motion (guidelines v3.1). Letters of a wordmark inside a hovered
-   `group` hop one after another; `site-thinking` is the light that runs
-   along the m while an agent works. */
-.site-letter {
-    transform-box: fill-box;
-    transform-origin: 50% 100%;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-    .group:hover .site-letter {
-        animation: site-letter-hop 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
-        animation-delay: calc(var(--i) * 40ms);
-    }
-
-    .site-thinking {
-        stroke-dasharray: 0.24 0.76;
-        animation: site-thinking 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-    }
-}
-
-@keyframes site-letter-hop {
-    40% {
-        transform: translateY(-14%);
-    }
-}
-
-@keyframes site-thinking {
-    from {
-        stroke-dashoffset: 1;
-    }
-    to {
-        stroke-dashoffset: 0;
-    }
-}

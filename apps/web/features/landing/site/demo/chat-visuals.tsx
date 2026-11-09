@@ -9,7 +9,7 @@ import { LarkMark } from "@multica/views/settings/components/lark-mark";
 import { SlackMark } from "@multica/views/settings/components/slack-mark";
 import { TelegramMark } from "@multica/views/settings/components/telegram-mark";
 import { WecomMark } from "@multica/views/settings/components/wecom-mark";
-import { BrandAvatar } from "../brand-logo";
+import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Avatar, BACKEND, FLOATING, LEAD, LEO, MIA, SAM, TRIAGE, ZoomCanvas, type Actor } from "./mock-kit";
 
 /*
@@ -35,7 +35,7 @@ const BOT = { name: "Multica", agent: BACKEND };
 function Message({ actor, bot, time, children }: { actor: Actor; bot?: boolean; time: string; children: ReactNode }) {
   return (
     <div className="flex gap-2.5">
-      <span className="pt-0.5">{bot ? <BrandAvatar size={24} /> : <Avatar actor={actor} size={24} />}</span>
+      <span className="pt-0.5">{bot ? <MulticaIcon shape="circle" size={24} /> : <Avatar actor={actor} size={24} />}</span>
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 text-caption">
           <span className="font-semibold">{bot ? BOT.name : actor.name}</span>
