@@ -463,6 +463,13 @@ The daemon launches MiniMax Code as `mcode acp`, writes the task brief to `AGENT
 
 #### Hermes agent memory
 
+On Windows, detected Hermes versions 0.22 and later use a daemon-owned foreground
+gateway for each isolated task home. The daemon waits for its startup reservation
+before launching ACP, which performs the readiness handshake. The gateway and its
+tool descendants remain in a Windows job object and are terminated on task cleanup
+or cancellation; agent jobs do not permit breakaway. Other platforms and older or
+unrecognized Hermes versions retain their existing ACP startup behavior.
+
 Hermes discovers skills only from its own home, so binding Multica skills to a Hermes agent makes the daemon build a per-task `HERMES_HOME` overlay for that agent. The agent's long-term memory (`memories/`) does **not** live inside that task-scoped overlay: it is linked to a persistent store at
 
 ```
@@ -935,12 +942,13 @@ multica project delete <id>
 ### Associating Issues with Projects
 
 Use the `--project` flag on `issue create` / `issue update` to attach an issue to a
-project, or on `issue list` to filter issues by project:
+project, or on `issue list` / `issue search` to filter issues by project:
 
 ```bash
 multica issue create --title "Login bug" --project <project-id>
 multica issue update <issue-id> --project <project-id>
 multica issue list --project <project-id>
+multica issue search "Login" --project <project-id>
 ```
 
 ## Setup

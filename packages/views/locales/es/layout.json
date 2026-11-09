@@ -85,7 +85,7 @@
   "rail": {
     "label": "Navegación de la app",
     "sheet_description": "Cambia de sección y de espacio de trabajo.",
-    "inbox": "Bandeja de entrada",
+    "inbox": "Bandeja",
     "work": "Trabajo",
     "team": "Equipo",
     "chat": "Chat",
@@ -148,6 +148,8 @@
       "stuck_one": "{{count}} ejecución esperando un runtime desconectado",
       "stuck_other": "{{count}} ejecuciones esperando un runtime desconectado",
       "working_now": "Trabajando ahora",
+      "show_more_agents": "Mostrar {{count}} más…",
+      "show_fewer_agents": "Mostrar menos",
       "running_tasks_one": "{{count}} ejecución en curso",
       "running_tasks_other": "{{count}} ejecuciones en curso",
       "all_agents": "Todos los agentes",

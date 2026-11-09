@@ -125,7 +125,7 @@ export function useSettingsSearchIndex(
       {
         tab: "apps",
         title: t(($) => $.page.tabs.apps),
-        description: t(($) => $.composio.page_description),
+        description: t(($) => $.connected_apps.description),
       },
       // Workspace
       { tab: "workspace", anchor: "name", title: t(($) => $.workspace.name_label) },

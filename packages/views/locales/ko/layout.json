@@ -146,6 +146,8 @@
       "needs_attention": "확인 필요",
       "stuck_other": "태스크 {{count}}개가 오프라인 런타임을 기다리는 중",
       "working_now": "작업 중",
+      "show_more_agents": "{{count}}개 더 보기…",
+      "show_fewer_agents": "접기",
       "running_tasks_other": "태스크 {{count}}개 실행 중",
       "all_agents": "전체 에이전트",
       "my_agents": "내 에이전트",

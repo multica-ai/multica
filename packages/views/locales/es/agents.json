@@ -282,7 +282,7 @@
     "environment": "Entorno",
     "custom_args": "Argumentos personalizados",
     "mcp_config": "MCP",
-    "composio_mcp": "Apps MCP",
+    "composio_mcp": "Aplicaciones",
     "integrations": "Integraciones",
     "runtime_config": "Enrutado",
     "discard_dialog_title": "¿Descartar los cambios sin guardar?",
@@ -704,22 +704,6 @@
       "redacted_hint": "Solo el propietario del agente o un administrador del espacio de trabajo pueden leer esta configuración.",
       "dialog_json_help": "Edita la configuración completa del servidor como JSON."
     },
-    "composio_mcp": {
-      "subtitle": "Marca un toolkit para que este agente lo monte como servidor MCP, pero solo cuando quien dispara la ejecución eres tú (su creador), directamente o a través de una cadena de subagentes.",
-      "loading": "Cargando tus conexiones…",
-      "load_failed": "No se han podido cargar tus apps conectadas. Inténtalo de nuevo en un momento.",
-      "empty_title": "Todavía no hay apps conectadas",
-      "empty_link_to_settings": "Conecta una en Ajustes → Integraciones",
-      "connected": "Conectada",
-      "toggle_aria": "Permitir {{toolkit}} para este agente",
-      "saving": "Guardando…",
-      "save_failed_toast": "No se ha podido guardar: inténtalo de nuevo",
-      "redacted_title": "Configurado: oculto a tu vista",
-      "redacted_hint": "Solo el creador del agente puede ver o cambiar las apps que puede usar.",
-      "shared_warning": "Este agente está compartido. Las personas que puedan ejecutarlo podrán usar las apps de Composio que actives aquí. Usa Privado o reduce la lista de acceso si estas apps exponen datos sensibles.",
-      "workspace_warning": "Público para el espacio de trabajo: cualquier miembro puede usar estas apps de Composio a través de este agente.",
-      "open_settings": "Abrir ajustes"
-    },
     "runtime_config": {
       "mode_label": "Modo de enrutado",
       "mode_local": "Local",
@@ -834,6 +818,24 @@
       "started_prefix": "Iniciada {{when}}",
       "dispatched_prefix": "Enviada {{when}}",
       "queued_prefix": "En cola {{when}}"
+    },
+    "connected_apps": {
+      "subtitle": "Aplicaciones que puede usar este agente. Cada aplicación usa la cuenta del equipo o la de quien inicia la ejecución, con el nivel que elijas.",
+      "loading": "Cargando aplicaciones…",
+      "load_failed": "No se pudieron cargar las aplicaciones de este agente.",
+      "empty": "Aún no hay aplicaciones.",
+      "add_placeholder": "Añadir una aplicación…",
+      "account": "Cuenta",
+      "level": "Nivel",
+      "remove": "Eliminar {{app}}",
+      "team_connected": "Cuenta del equipo conectada",
+      "team_missing": "Cuenta del equipo sin conectar",
+      "personal_connected": "Tu cuenta está conectada",
+      "personal_missing": "No has conectado esta aplicación",
+      "team_admin_only": "Solo los administradores del espacio de trabajo pueden dar a un agente acceso a una cuenta del equipo.",
+      "team_shared_warning": "Cualquier persona que pueda ejecutar este agente usará la cuenta del equipo en estas aplicaciones.",
+      "manage_link": "Gestionar cuentas en Ajustes → Aplicaciones conectadas",
+      "save_failed_toast": "No se pudo guardar. Inténtalo de nuevo"
     }
   },
   "char_counter": {

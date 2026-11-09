@@ -160,7 +160,7 @@
     "fact_device": "Appareil",
     "fact_runtime": "Runtime",
     "fact_daemon_cli": "CLI du daemon",
-    "fact_daemon_id": "Identifiant du daemon",
+    "fact_daemon_id": "ID du daemon",
     "usage_title": "Consommation",
     "no_agents": "Aucun agent n'est encore associé à ce runtime.",
     "diagnostics_cli": "CLI",

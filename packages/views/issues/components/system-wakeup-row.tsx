@@ -185,7 +185,7 @@ function InstructionEditor({
         ) : (
           <div className="text-caption text-muted-foreground">
             <p>{t(($) => $.wakeups.system.instruction_default)}</p>
-            <TruncatedTooltip content={rule.default_instruction}>
+            <TruncatedTooltip content={rule.default_instruction} focusable>
               <p className="mt-1 line-clamp-4 whitespace-pre-wrap break-words">
                 {rule.default_instruction}
               </p>

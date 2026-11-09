@@ -297,7 +297,19 @@
       "cancel": "取消",
       "import": "匯入",
       "importing": "匯入中...",
-      "toast_imported": "已匯入 skill"
+      "toast_imported": "已匯入 skill",
+      "select_all": "全選",
+      "import_count": "匯入 {{count}} 個",
+      "done": "完成",
+      "stop": "目前項目完成後停止",
+      "unreadable": "無法讀取此 skill，請重新選擇資料夾。",
+      "uncertain": "匯入結果尚不確定。請重新整理 skill 列表並核對後再重試；已有同名項目的匯入會保持鎖定，請前往列表查看。",
+      "check_results": "重新整理並核對",
+      "retry_ready": "重新整理後的列表中未找到此 skill，可以重試。",
+      "uncertain_manual": "匯入結果尚不確定，且無法確認壓縮包內的 skill 名稱。再次匯入此壓縮包前，請先手動核對 skill 列表。",
+      "check_failed": "無法核對 skill 列表，結果不確定的匯入項目仍保持鎖定。請重新核對，或前往列表手動查看。",
+      "workspace_changed": "工作區已切換，後續匯入已停止。請關閉此對話框，並在目標工作區重新開啟。",
+      "summary": "成功 {{success}} 個 · 失敗或待核對 {{failed}} 個"
     },
     "url": {
       "url_label": "Skill URL",

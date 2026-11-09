@@ -1,5 +1,6 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { parseFrontmatter } from "./frontmatter";
+import { parseFrontmatter, skillImportReconciliationName } from "./frontmatter";
 
 describe("parseFrontmatter", () => {
   it("parses single-line values", () => {
@@ -119,5 +120,27 @@ describe("parseFrontmatter", () => {
       name: "my-skill",
       description: '{"a":1,"b":2}',
     });
+  });
+});
+
+describe("skillImportReconciliationName", () => {
+  it.each([
+    ["---\nname: [invalid\n---\n", null],
+    ["---\nname: ' alpha '\n---\n", "alpha"],
+    ["---\nname: |\n  alpha\n---\n", "alpha"],
+    ["# No frontmatter", " original folder "],
+    ["---\nname: ''\n---\n", " original folder "],
+    ["---\ndescription: text\n---\n", " original folder "],
+    ['---\nname: "\\u0085alpha\\u0085"\n---\n', "alpha"],
+    ['---\nname: "\\uFEFFalpha\\uFEFF"\n---\n', "\ufeffalpha\ufeff"],
+    ["---\nname: alpha\n? [a, b]\n: invalid-key\n---\n", null],
+    ["---\nname: 2001-01-01\n---\n", null],
+    ["---\nname: 012\n---\n", null],
+    ["---\nname: true\n---\n", null],
+    ["---\nname: { z: last, a: first }\n---\n", null],
+  ])("derives only confirmed server names for %j", (content, expected) => {
+    expect(skillImportReconciliationName(content!, " original folder ")).toBe(
+      expected,
+    );
   });
 });

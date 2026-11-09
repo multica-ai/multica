@@ -3,16 +3,41 @@ description: Suggest a new feature or improvement.
 title: "[Feature]: "
 labels: ["enhancement"]
 body:
-  - type: dropdown
-    id: deployment
+  - type: textarea
+    id: description
     attributes:
-      label: Deployment type
-      description: Are you using the Official App (multica.ai) or a self-hosted instance?
-      options:
-        - Official App
-        - self-host
+      label: Problem
+      description: What are you trying to do, what gets in the way, and who is affected?
+      placeholder: |
+        When I try to ..., I have to ... / cannot ..., which means ...
     validations:
       required: true
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What outcome would solve this problem?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposal (optional)
+      description: If you have an idea, explain the high-level design and why it would help. Keep it understandable without much project background, with minimal implementation detail.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives (optional)
+      description: Other approaches or workarounds you considered, and why they do not meet the goal.
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots (optional)
+      description: Screenshots, mockups, or sketches that help explain the problem or idea.
 
   - type: dropdown
     id: area
@@ -39,25 +64,3 @@ body:
         - Other / not sure
     validations:
       required: true
-
-  - type: textarea
-    id: description
-    attributes:
-      label: What do you want and why?
-      description: Describe the problem you're trying to solve or the improvement you'd like to see.
-      placeholder: |
-        I'm trying to do X but there's no way to...
-    validations:
-      required: true
-
-  - type: textarea
-    id: solution
-    attributes:
-      label: Proposed solution (optional)
-      description: If you have an idea for how this should work, describe it here.
-
-  - type: textarea
-    id: screenshots
-    attributes:
-      label: Screenshots / mockups (optional)
-      description: If applicable, add screenshots, mockups, or sketches to illustrate your idea.
