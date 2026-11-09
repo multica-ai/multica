@@ -16,7 +16,7 @@ import {
   focusRing,
 } from "./primitives";
 import { HERO_PROVIDERS } from "../components/provider-marks";
-import { docsHrefForLocale, toLandingDictionaryLocale, useLocale } from "../i18n";
+import { docsHrefForLocale, useLocale } from "../i18n";
 import type { HomeDict } from "../i18n/types";
 import { CUSTOMER_LOGOS, type CustomerLogo } from "./customer-logos";
 import { AutopilotsVisual, ChatVisual, RuntimesVisual, SkillsVisual, WorkflowVisual } from "./demo/feature-visuals";
@@ -161,8 +161,7 @@ function logoMaskStyle({ logo, ratio }: CustomerLogo): CSSProperties {
 }
 
 function LogoWall() {
-  const { t, locale } = useLocale();
-  const logos = CUSTOMER_LOGOS[toLandingDictionaryLocale(locale)];
+  const { t } = useLocale();
   return (
     <section aria-labelledby="logo-wall-title" className="pb-site-section">
       <Container className="max-w-site-wide">
@@ -180,7 +179,7 @@ function LogoWall() {
                   copy === 1 && "motion-reduce:hidden",
                 )}
               >
-                {logos.map((logo) => (
+                {CUSTOMER_LOGOS.map((logo) => (
                   <li key={logo.name} className="flex h-10 items-center">
                     <span
                       role="img"
