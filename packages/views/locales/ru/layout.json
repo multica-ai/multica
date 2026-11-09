@@ -240,5 +240,22 @@
     "star_label": "Поставить звезду Multica на GitHub",
     "later": "Не сейчас",
     "close": "Закрыть"
+  },
+  "usage_limits": {
+    "title": "Лимиты использования",
+    "refresh": "Проверить сейчас",
+    "stale": "Последнее обновление: {{time}}",
+    "never_checked": "Ещё не проверено",
+    "resets_in": "Сброс через {{time}}",
+    "resets_at": "Сброс: {{time}}",
+    "elapsed": "Прошло {{percent}}% периода",
+    "out_in": "кончится через {{time}}",
+    "runs_out_in": "При таком темпе кончится через {{time}}",
+    "window_week": "Неделя",
+    "window_days": "{{count}} дн",
+    "window_hours": "{{count}} ч",
+    "duration_days_hours": "{{days}} дн {{hours}} ч",
+    "duration_hours_minutes": "{{hours}} ч {{minutes}} мин",
+    "duration_minutes": "{{minutes}} мин"
   }
 }

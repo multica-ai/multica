@@ -216,5 +216,22 @@
     "go_to_slide": "{{index}}번째 슬라이드로 이동",
     "previous": "이전",
     "next": "다음"
+  },
+  "usage_limits": {
+    "title": "사용 한도",
+    "refresh": "지금 확인",
+    "stale": "마지막 업데이트 {{time}}",
+    "never_checked": "아직 확인 안 됨",
+    "resets_in": "{{time}} 후 초기화",
+    "resets_at": "초기화: {{time}}",
+    "elapsed": "기간의 {{percent}}% 경과",
+    "out_in": "{{time}} 후 소진",
+    "runs_out_in": "이 속도면 {{time}} 후 소진",
+    "window_week": "주간",
+    "window_days": "{{count}}일",
+    "window_hours": "{{count}}시간",
+    "duration_days_hours": "{{days}}일 {{hours}}시간",
+    "duration_hours_minutes": "{{hours}}시간 {{minutes}}분",
+    "duration_minutes": "{{minutes}}분"
   }
 }

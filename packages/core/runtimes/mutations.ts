@@ -99,3 +99,12 @@ export function useUpdateRuntime(wsId: string) {
     },
   });
 }
+
+// The new numbers arrive through the runtime list refetch that the daemon's
+// report triggers, so there is nothing to invalidate here.
+export function useRefreshUsageLimits() {
+  return useMutation({
+    mutationFn: (runtimeIds: string[]) =>
+      Promise.allSettled(runtimeIds.map((runtimeId) => api.refreshRuntimeUsageLimits(runtimeId))),
+  });
+}

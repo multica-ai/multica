@@ -88,6 +88,7 @@ vi.mock("@multica/views/layout", () => ({
   SearchButton: () => <div data-testid="title-bar-search" />,
   ShellRouteDataPrefetch: ({ children }: { children: ReactNode }) => <>{children}</>,
   SpacePanel: () => <div data-testid="space-panel" />,
+  UsageLimitsBar: () => <div data-testid="usage-limits-bar" />,
   useAppShell: () => ({ hasPanel: true }),
   useTabPresentation: () => ({ visual: { kind: "icon", icon: "Inbox" }, title: "" }),
   ResourceLeadingVisual: () => null,
@@ -172,6 +173,7 @@ describe("DesktopShell workspace gating", () => {
     expect(queryByTestId("modal-registry")).not.toBeNull();
     expect(queryByTestId("floating-chat")).not.toBeNull();
     expect(queryByTestId("star-prompt")).not.toBeNull();
+    expect(queryByTestId("usage-limits-bar")).not.toBeNull();
     expect(queryByRole("status", { name: /loading workspace/i })).toBeNull();
   });
 
@@ -181,6 +183,7 @@ describe("DesktopShell workspace gating", () => {
     const { container, getByRole, getByTestId, queryByTestId } = renderShell();
 
     expect(queryByTestId("app-rail")).toBeNull();
+    expect(queryByTestId("usage-limits-bar")).toBeNull();
     expect(
       container.querySelectorAll("[data-slot='sidebar-trigger']"),
     ).toHaveLength(0);

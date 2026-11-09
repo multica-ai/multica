@@ -13,6 +13,7 @@ import { ShellRouteDataPrefetch } from "./route-data-prefetch";
 import { SpacePanel } from "./space-panel";
 import { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
 import { GlobalShortcuts } from "./global-shortcuts";
+import { UsageLimitsBar } from "./usage-limits-bar";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -56,13 +57,16 @@ export function DashboardLayout({
             <WorkspacePresencePrefetch />
             <AppRail className="hidden md:flex" />
             <CompactNavSheet />
-            <AppShellCard>
-              <NavigationProgress />
-              {children}
-              <ModalRegistry />
-              <SourceBackfillModal />
-              {extra}
-            </AppShellCard>
+            <div className="flex min-w-0 flex-1 flex-col">
+              <AppShellCard>
+                <NavigationProgress />
+                {children}
+                <ModalRegistry />
+                <SourceBackfillModal />
+                {extra}
+              </AppShellCard>
+              <UsageLimitsBar />
+            </div>
           </ShellRouteDataPrefetch>
         </AppShellProvider>
       </SidebarProvider>

@@ -39,3 +39,4 @@ export { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
 export { GlobalShortcuts } from "./global-shortcuts";
 export { NewIssueButton, SearchButton } from "./global-actions";
 export { NavigationProgress } from "./navigation-progress";
+export { UsageLimitsBar } from "./usage-limits-bar";

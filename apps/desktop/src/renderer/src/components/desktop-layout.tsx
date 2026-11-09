@@ -21,6 +21,7 @@ import {
   SearchButton,
   ShellRouteDataPrefetch,
   SpacePanel,
+  UsageLimitsBar,
 } from "@multica/views/layout";
 import { SearchCommand } from "@multica/views/search";
 import { FloatingChat } from "@multica/views/chat";
@@ -317,6 +318,7 @@ export function DesktopShell() {
                     {slug && <FloatingChat />}
                     {slug && <StarPrompt />}
                   </MainCanvas>
+                  {slug && <UsageLimitsBar />}
                 </div>
               </ShellRouteDataPrefetch>
             </AppShellProvider>

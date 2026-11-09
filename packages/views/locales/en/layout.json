@@ -224,5 +224,22 @@
     "go_to_slide": "Go to slide {{index}}",
     "previous": "Previous",
     "next": "Next"
+  },
+  "usage_limits": {
+    "title": "Usage limits",
+    "refresh": "Check now",
+    "stale": "Last updated {{time}}",
+    "never_checked": "Not checked yet",
+    "resets_in": "Resets in {{time}}",
+    "resets_at": "Resets {{time}}",
+    "elapsed": "{{percent}}% of the window has passed",
+    "out_in": "out in {{time}}",
+    "runs_out_in": "Runs out in {{time}} at this pace",
+    "window_week": "Weekly",
+    "window_days": "{{count}}d",
+    "window_hours": "{{count}}h",
+    "duration_days_hours": "{{days}}d {{hours}}h",
+    "duration_hours_minutes": "{{hours}}h {{minutes}}m",
+    "duration_minutes": "{{minutes}}m"
   }
 }

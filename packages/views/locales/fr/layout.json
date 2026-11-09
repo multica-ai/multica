@@ -224,5 +224,22 @@
     "go_to_slide": "Aller à la diapositive {{index}}",
     "previous": "Précédent",
     "next": "Suivant"
+  },
+  "usage_limits": {
+    "title": "Limites d’utilisation",
+    "refresh": "Vérifier maintenant",
+    "stale": "Dernière mise à jour {{time}}",
+    "never_checked": "Pas encore vérifié",
+    "resets_in": "Réinitialisation dans {{time}}",
+    "resets_at": "Réinitialisation : {{time}}",
+    "elapsed": "{{percent}} % de la période écoulée",
+    "out_in": "épuisé dans {{time}}",
+    "runs_out_in": "À ce rythme, épuisé dans {{time}}",
+    "window_week": "Hebdomadaire",
+    "window_days": "{{count}} j",
+    "window_hours": "{{count}} h",
+    "duration_days_hours": "{{days}} j {{hours}} h",
+    "duration_hours_minutes": "{{hours}} h {{minutes}} min",
+    "duration_minutes": "{{minutes}} min"
   }
 }

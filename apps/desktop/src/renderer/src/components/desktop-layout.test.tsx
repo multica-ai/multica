@@ -75,6 +75,7 @@ vi.mock("@multica/views/layout", () => ({
   SearchButton: () => null,
   ShellRouteDataPrefetch: ({ children }: { children: ReactNode }) => <>{children}</>,
   SpacePanel: () => null,
+  UsageLimitsBar: () => null,
   // In a panel space the shell's toggleNav is the sidebar toggle.
   useAppShell: () => ({ toggleNav: useSidebar().toggleSidebar }),
   useTabPresentation: () => ({ visual: { kind: "icon", icon: "Inbox" }, title: "" }),

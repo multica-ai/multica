@@ -216,5 +216,22 @@
     "go_to_slide": "{{index}} 枚目に移動",
     "previous": "前へ",
     "next": "次へ"
+  },
+  "usage_limits": {
+    "title": "使用量の上限",
+    "refresh": "今すぐ確認",
+    "stale": "最終更新: {{time}}",
+    "never_checked": "未確認",
+    "resets_in": "{{time}}後にリセット",
+    "resets_at": "リセット: {{time}}",
+    "elapsed": "期間の{{percent}}%が経過",
+    "out_in": "あと{{time}}で上限",
+    "runs_out_in": "このペースだと{{time}}で上限に達します",
+    "window_week": "週間",
+    "window_days": "{{count}}日",
+    "window_hours": "{{count}}時間",
+    "duration_days_hours": "{{days}}日{{hours}}時間",
+    "duration_hours_minutes": "{{hours}}時間{{minutes}}分",
+    "duration_minutes": "{{minutes}}分"
   }
 }

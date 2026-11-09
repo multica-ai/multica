@@ -216,5 +216,22 @@
     "go_to_slide": "转到第 {{index}} 张",
     "previous": "上一张",
     "next": "下一张"
+  },
+  "usage_limits": {
+    "title": "用量限制",
+    "refresh": "立即检查",
+    "stale": "最后更新于{{time}}",
+    "never_checked": "尚未检查",
+    "resets_in": "{{time}}后重置",
+    "resets_at": "重置时间：{{time}}",
+    "elapsed": "时段已过 {{percent}}%",
+    "out_in": "{{time}}后用完",
+    "runs_out_in": "按此速度{{time}}后用完",
+    "window_week": "每周",
+    "window_days": "{{count}}天",
+    "window_hours": "{{count}}小时",
+    "duration_days_hours": "{{days}}天{{hours}}小时",
+    "duration_hours_minutes": "{{hours}}小时{{minutes}}分",
+    "duration_minutes": "{{minutes}}分钟"
   }
 }
