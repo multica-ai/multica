@@ -30,12 +30,14 @@ Multica 코드를 작성하거나, 번역을 변경하거나, 중국어 제품 �
 
 | 패키지 | 의존 가능 | 의존 금지 |
 | --- | --- | --- |
-| `packages/core` | 앱 종속적이지 않은 것만 | `react-dom`, `localStorage`, `process.env`, `next/*`, UI 라이브러리 |
+| `packages/core` | 앱 종속적이지 않은 것만 | `react-dom`, `next/*`, UI 라이브러리, `process.env`, `localStorage` 직접 사용(영속화는 `StorageAdapter` 경유) |
 | `packages/ui` | 없음 | `@multica/core`, 비즈니스 로직 |
-| `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, stores |
+| `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, store 정의 |
 | `apps/web/platform/` | `next/*` | 다른 앱 |
 | `apps/desktop/.../platform/` | `react-router-dom`, electron | 다른 앱 |
-| `apps/mobile/` | `@multica/core`의 유형과 순수 함수 | Web/Desktop의 React 페이지, store, 플랫폼 구현 |
+| `apps/mobile/` | `@multica/core`의 유형과 순수 함수(각 모듈 자체의 하위 경로로 import) | Web/Desktop의 React 페이지, store, 플랫폼 구현, 그리고 이를 다시 내보내는 core barrel |
+
+패키지 경계와 그 제한적인 예외는 루트 `AGENTS.md`를 기준으로 합니다. 변경할 때는 두 곳을 함께 수정하세요. `packages/core` 행은 `packages/core/eslint.config.mjs`가, mobile의 core import는 `apps/mobile/eslint.config.js`가 lint로 강제합니다.
 
 두 앱 모두에 동일한 로직이 나타난다면 반드시 공유 패키지로 추출해야 합니다. "사소한" 중복이라는 예외는 없습니다. Mobile은 독립된 UI, 데이터 계층, 출시 절차를 가지며 유형과 순수 함수만 공유합니다.
 

@@ -1,4 +1,4 @@
-import { Command, Gauge, Globe, Layers, ListPlus, PanelLeft, Terminal, Users, Workflow, type IconComponent } from "@multica/ui/icons";
+import { CircleDot, Command, Gauge, Globe, History, Layers, ListPlus, PanelLeft, Pin, Terminal, Users, Workflow, type IconComponent } from "@multica/ui/icons";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { WorkspacePaths } from "@multica/core/paths";
 import type { ReleaseStamp } from "@multica/core/whats-new";
@@ -35,6 +35,104 @@ export interface WhatsNewRelease extends ReleaseStamp {
  * match the changelog entry the highlights come from.
  */
 export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
+  {
+    version: "0.8.1",
+    date: "2026-11-06",
+    highlights: [
+      {
+        id: "skill-versions",
+        icon: History,
+        action: { kind: "route", to: (p) => p.skills() },
+        copy: {
+          en: {
+            title: "Restore an earlier version of a skill",
+            body: "Open a skill and go to History to see what each saved version contained. Restore one, and it becomes the newest version for your agents' next runs.",
+          },
+          "zh-Hans": {
+            title: "把 skill 恢复到旧版本",
+            body: "打开一个 skill，进入「历史」查看每个已保存版本的内容。恢复其中一个后，它会成为最新版本，智能体下次运行时使用。",
+          },
+          "zh-Hant": {
+            title: "把 skill 還原到舊版本",
+            body: "打開一個 skill，進入「歷史」查看每個已儲存版本的內容。還原其中一個後，它會成為最新版本，AI 代理下次執行時使用。",
+          },
+          ja: {
+            title: "スキルを以前のバージョンに復元",
+            body: "スキルを開いて「履歴」に進むと、保存した各バージョンの内容を確認できます。復元したバージョンが最新になり、エージェントは次回の実行から使います。",
+          },
+          ko: {
+            title: "스킬을 이전 버전으로 복원",
+            body: "스킬을 열고 '기록'으로 가면 저장된 버전마다 내용을 볼 수 있습니다. 하나를 복원하면 최신 버전이 되고, 에이전트는 다음 실행부터 사용합니다.",
+          },
+          fr: {
+            title: "Restaurez une ancienne version d'un skill",
+            body: "Ouvrez un skill et allez dans Historique pour voir le contenu de chaque version enregistrée. Restaurez-en une : elle devient la version la plus récente pour les prochaines exécutions de vos agents.",
+          },
+        },
+      },
+      {
+        id: "unread-view",
+        icon: CircleDot,
+        action: { kind: "route", to: (p) => p.views() },
+        copy: {
+          en: {
+            title: "See only unread issues",
+            body: "In Views, star the built-in Unread view to add it to the sidebar. You can also filter any view by Read state → Unread.",
+          },
+          "zh-Hans": {
+            title: "只看未读任务",
+            body: "在「视图」里给内置的「未读」视图加星标，就能把它放进侧栏。也可以在任何视图里按「阅读状态 → 未读」筛选。",
+          },
+          "zh-Hant": {
+            title: "只看未讀任務",
+            body: "在「檢視」裡為內建的「未讀」檢視加上星號，就能把它放進側欄。也可以在任何檢視裡按「閱讀狀態 → 未讀」篩選。",
+          },
+          ja: {
+            title: "未読のタスクだけを表示",
+            body: "「ビュー」で組み込みの「未読」ビューにスターを付けると、サイドバーに追加されます。どのビューでも「既読状態 → 未読」で絞り込めます。",
+          },
+          ko: {
+            title: "읽지 않은 태스크만 보기",
+            body: "'뷰'에서 기본 제공 '읽지 않음' 뷰에 별표를 달면 사이드바에 추가됩니다. 어느 뷰에서든 '읽음 상태 → 읽지 않음'으로 필터링할 수도 있습니다.",
+          },
+          fr: {
+            title: "N'affichez que les tâches non lues",
+            body: "Dans Vues, ajoutez l'étoile à la vue intégrée Non lu pour l'afficher dans la barre latérale. Vous pouvez aussi filtrer n'importe quelle vue par État de lecture → Non lu.",
+          },
+        },
+      },
+      {
+        id: "pin-workspaces",
+        icon: Pin,
+        copy: {
+          en: {
+            title: "Pin your main workspaces",
+            body: "Open the workspace switcher and click the pin next to a workspace to keep it at the top. Unread dots still show on pinned workspaces.",
+          },
+          "zh-Hans": {
+            title: "置顶常用工作区",
+            body: "打开工作区切换菜单，点工作区旁的图钉即可把它固定在顶部。置顶的工作区照样显示未读提示。",
+          },
+          "zh-Hant": {
+            title: "置頂常用工作區",
+            body: "打開工作區切換選單，點工作區旁的圖釘即可把它固定在頂部。置頂的工作區照樣顯示未讀提示。",
+          },
+          ja: {
+            title: "よく使うワークスペースをピン留め",
+            body: "ワークスペースの切り替えメニューを開き、ワークスペースの横にあるピンをクリックすると上部に固定されます。ピン留めしても未読の表示は残ります。",
+          },
+          ko: {
+            title: "자주 쓰는 워크스페이스 고정",
+            body: "워크스페이스 전환 메뉴를 열고 워크스페이스 옆의 핀을 누르면 맨 위에 고정됩니다. 고정한 워크스페이스에도 읽지 않음 표시는 그대로 나옵니다.",
+          },
+          fr: {
+            title: "Épinglez vos espaces de travail principaux",
+            body: "Ouvrez le sélecteur d'espaces de travail et cliquez sur l'épingle à côté d'un espace pour le garder en haut. Les indicateurs de non-lu restent visibles.",
+          },
+        },
+      },
+    ],
+  },
   {
     version: "0.8.0",
     date: "2026-11-03",

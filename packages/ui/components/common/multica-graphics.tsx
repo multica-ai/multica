@@ -10,11 +10,10 @@ interface MulticaStarRowProps extends React.ComponentProps<"svg"> {
   /** Number of stars; each one stands for a teammate. */
   count: number;
   /**
-   * `center`: stars turn into place from the middle outwards (backgrounds).
-   * `join`: left to right, and the last one arrives after a beat (someone just
-   * joined). Omit for a static row.
+   * Stars turn into place left to right and the last one arrives after a beat:
+   * someone just joined. Omit for a static row.
    */
-  enter?: "center" | "join";
+  join?: boolean;
   /** Seconds before the first star moves. */
   delay?: number;
   /** Classes for the last star, e.g. to light up the newest teammate. */
@@ -27,7 +26,7 @@ interface MulticaStarRowProps extends React.ComponentProps<"svg"> {
  */
 export function MulticaStarRow({
   count,
-  enter,
+  join = false,
   delay = 0,
   lastClassName,
   className,
@@ -35,12 +34,7 @@ export function MulticaStarRow({
 }: MulticaStarRowProps) {
   const step = 100 * (1 + ROW_GAP);
   const width = step * (count - 1) + 100;
-  const mid = (count - 1) / 2;
-  const delayOf = (i: number) => {
-    if (enter === "center") return delay + Math.abs(i - mid) * STAR_STAGGER_S;
-    if (i === count - 1) return delay + i * STAR_STAGGER_S + 0.3;
-    return delay + i * STAR_STAGGER_S;
-  };
+  const delayOf = (i: number) => delay + i * STAR_STAGGER_S + (i === count - 1 ? 0.3 : 0);
   return (
     <svg
       viewBox={`0 0 ${width} 100`}
@@ -53,8 +47,8 @@ export function MulticaStarRow({
         <g key={i} transform={`translate(${step * i} 0)`}>
           <path
             d={THIN_STAR}
-            className={cn(enter && "multica-star-enter", i === count - 1 && lastClassName)}
-            style={enter ? { animationDelay: `${delayOf(i)}s` } : undefined}
+            className={cn(join && "multica-star-enter", i === count - 1 && lastClassName)}
+            style={join ? { animationDelay: `${delayOf(i)}s` } : undefined}
           />
         </g>
       ))}

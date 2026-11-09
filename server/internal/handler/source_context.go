@@ -726,6 +726,7 @@ func (h *Handler) createManualCommentSubIssue(w http.ResponseWriter, r *http.Req
 		ParentIssueID: capture.SourceIssueID, ProjectID: projectID, StartDate: startDate, DueDate: dueDate,
 		AttachmentIDs: attachmentIDs, LabelIDs: labelIDs, Properties: properties, Stage: stage,
 		AllowDuplicate: input.AllowDuplicate, SourceContext: &capture,
+		PRAutoCompleteDisabled: input.PRAutoCompleteDisabled,
 	}, service.IssueCreateOpts{
 		ActorID: util.UUIDToString(userID),
 		BroadcastPayload: func(issue db.Issue, _ []db.Attachment, labels []db.IssueLabel) map[string]any {
@@ -743,7 +744,10 @@ func (h *Handler) createManualCommentSubIssue(w http.ResponseWriter, r *http.Req
 	labelResponses := labelsToResponse(result.Labels)
 	response.Labels = &labelResponses
 	slog.Info("sub-issue created from captured comment", append(sourceContextAuditAttrs(r, capture.ID, capture.Snapshot.SourceIssue.ID, capture.Snapshot.AnchorCommentID, userID, "manual", limits, "success"), "target_issue_id", uuidToString(result.Issue.ID))...)
-	writeJSON(w, http.StatusCreated, response)
+	if input.PRAutoCompleteDisabled {
+		h.recordPRAutoCompleteActivity(r.Context(), result.Issue, "member", uuidToString(userID), true)
+	}
+	writeJSON(w, http.StatusCreated, CreateIssueResponse{IssueResponse: response, PRAutoCompleteDisabled: input.PRAutoCompleteDisabled})
 	return nil
 }
 

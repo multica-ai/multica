@@ -177,6 +177,7 @@ import {
   useAttachmentPreview,
 } from "./attachment-preview-modal";
 import { withFragmentNavShim } from "./utils/iframe-fragment-nav";
+import { withWidthBridge } from "./utils/iframe-width-bridge";
 import { withLocationBridge } from "./utils/iframe-location-bridge";
 import { renderHook, act as hookAct } from "@testing-library/react";
 
@@ -337,11 +338,12 @@ describe("AttachmentPreviewModal — dispatch", () => {
       // (MUL-2330). The combination with `allow-same-origin` would defeat
       // the sandbox, so this assertion must stay exact.
       expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
-      // srcdoc carries the original HTML between the address bridge in
+      // srcdoc carries the original HTML (with the width bridge,
+      // utils/iframe-width-bridge.ts) between the address bridge in
       // front (utils/iframe-location-bridge.ts) and the fragment-nav shim
       // appended at the end (utils/iframe-fragment-nav.ts).
       expect(frame?.getAttribute("srcdoc")).toBe(
-        withLocationBridge(withFragmentNavShim("<p>hi</p>"), ""),
+        withLocationBridge(withFragmentNavShim(withWidthBridge("<p>hi</p>")), ""),
       );
     });
   });
@@ -360,7 +362,7 @@ describe("AttachmentPreviewModal — dispatch", () => {
 
     const frame = document.querySelector("iframe[sandbox]") as HTMLIFrameElement;
     expect(frame.getAttribute("srcdoc")).toBe(
-      withLocationBridge(withFragmentNavShim("<p>hi</p>"), "?s=overview"),
+      withLocationBridge(withFragmentNavShim(withWidthBridge("<p>hi</p>")), "?s=overview"),
     );
     expect((input as HTMLInputElement).value).toBe("?s=overview");
   });
@@ -385,7 +387,7 @@ describe("AttachmentPreviewModal — dispatch", () => {
 
     expect(screen.getByLabelText("Address")).toHaveValue("?s=ia");
     expect(document.querySelector("iframe[sandbox]")?.getAttribute("srcdoc")).toBe(
-      withLocationBridge(withFragmentNavShim("<p>hi</p>"), "?s=ia"),
+      withLocationBridge(withFragmentNavShim(withWidthBridge("<p>hi</p>")), "?s=ia"),
     );
   });
 

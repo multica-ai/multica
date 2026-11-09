@@ -111,6 +111,14 @@ Things to know:
 
 > Note: setting `ALLOW_SIGNUP=false` enables invite-only account creation. A new user with a live pending workspace invitation can create an account with the invited email; users without an allowlist match or a valid invitation remain blocked. Invitations also permit emails outside configured allowlists when `ALLOW_SIGNUP=true`. Revocation does not delete accounts already created using an invitation or prevent those accounts from signing in. Combine this with `DISABLE_WORKSPACE_CREATION=true` when invitees must join an existing workspace instead of creating their own.
 
+### GitHub Star Prompt (Optional)
+
+| Variable | Description |
+|----------|-------------|
+| `DISABLE_STAR_PROMPT` | Set to `true` to stop the app from asking users to star Multica on GitHub |
+
+The prompt is a small card that can appear after an agent has completed a few issues: at most twice per account, at least 30 days apart, and never again once the user clicks Star. Users can still star Multica from the Help menu. While the card or Help menu is open, the browser asks `api.github.com` for the star count; with the switch on, the server rejects new showings and the card never appears. Changes take effect after restarting the backend; the web UI reads the switch from `/api/config`, so no web rebuild is needed.
+
 ### File Storage (Optional)
 
 Uploads and attachments are written to local disk by default. Set `S3_BUCKET` to

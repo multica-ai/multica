@@ -529,6 +529,8 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// The .brand SVG is written by `node scripts/brand/sync.mjs` from
+// packages/ui/lib/multica-brand.ts; CI fails when it drifts.
 const callbackSuccessHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
