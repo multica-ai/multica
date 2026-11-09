@@ -7,7 +7,7 @@ import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type D
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
-import { Bot, CircleUser, Copy, EyeOff, Layers, Link2, ListTodo, MoreHorizontal, Pencil, Plus, Trash2 } from "@multica/ui/icons";
+import { Bot, CircleUser, Copy, EyeOff, Filter, Layers, Link2, ListTodo, MoreHorizontal, Pencil, Plus, Trash2 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
@@ -601,10 +601,16 @@ function SavedViewRow({
         trailing={
           <RowMenu label={t(($) => $.panels.work.view_actions, { name: view.name })} open={menuOpen} onOpenChange={setMenuOpen}>
             {canManage && (
-              <DropdownMenuItem onClick={() => startRename(view.id, "sidebar")}>
-                <Pencil className="size-3.5" />
-                {t(($) => $.panels.work.view_rename)}
-              </DropdownMenuItem>
+              <>
+                <DropdownMenuItem onClick={() => actions.edit(view)}>
+                  <Filter className="size-3.5" />
+                  {t(($) => $.panels.work.view_edit)}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => startRename(view.id, "sidebar")}>
+                  <Pencil className="size-3.5" />
+                  {t(($) => $.panels.work.view_rename)}
+                </DropdownMenuItem>
+              </>
             )}
             <DropdownMenuItem onClick={() => actions.duplicate(view, "sidebar")}>
               <Copy className="size-3.5" />
