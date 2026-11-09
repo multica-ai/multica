@@ -18,6 +18,8 @@ import type { DeliverableOrigin } from "./deliverable-details";
 import {
   DELIVERABLE_CATEGORIES,
   deliverableCategory,
+  displayDeliverableFiles,
+  displayedVersion,
   type DeliverableCategory,
 } from "./deliverable-kind";
 import { DeliverableThumbnail } from "./deliverable-thumbnail";
@@ -43,8 +45,8 @@ interface FileGroup {
  * the sidebar's "view all" and from the viewer's grid button (`G`).
  *
  * Files grouped by the comment that posted them, in page order, each group
- * one click from that comment. Files show their latest version only, so the
- * count here always equals the sidebar's.
+ * one click from a loaded comment. Every image upload stays visible; other
+ * files show their latest version, matching the sidebar count.
  *
  * A full-window Dialog: the primitive owns focus (moved in on open, trapped
  * while open, returned to the opener on close) and Escape; this only restyles
@@ -57,6 +59,7 @@ export function DeliverablesOverview({
   files,
   commentById,
   onLocate,
+  canLocateComment,
   returnKey,
 }: {
   open: boolean;
@@ -65,6 +68,7 @@ export function DeliverablesOverview({
   files: ReadonlyArray<DeliverableFile>;
   commentById: ReadonlyMap<string, TimelineEntry>;
   onLocate: (origin: DeliverableOrigin) => void;
+  canLocateComment?: (commentId: string) => boolean;
   /** The file the viewer was showing when it opened this; `G` goes back to it. */
   returnKey: string | null;
 }) {
@@ -112,6 +116,7 @@ export function DeliverablesOverview({
             identifier={identifier}
             files={files}
             commentById={commentById}
+            canLocateComment={canLocateComment}
             onClose={onClose}
             onOpenFile={(file) => {
               onClose();
@@ -131,11 +136,12 @@ export function DeliverablesOverview({
 
 function OverviewBody({
   identifier,
-  files,
+  files: groupedFiles,
   commentById,
   onClose,
   onOpenFile,
   onLocate,
+  canLocateComment,
 }: {
   identifier: string;
   files: ReadonlyArray<DeliverableFile>;
@@ -143,8 +149,10 @@ function OverviewBody({
   onClose: () => void;
   onOpenFile: (file: DeliverableFile) => void;
   onLocate: (origin: DeliverableOrigin) => void;
+  canLocateComment?: (commentId: string) => boolean;
 }) {
   const { t } = useT("issues");
+  const files = useMemo(() => displayDeliverableFiles(groupedFiles), [groupedFiles]);
   const [filter, setFilter] = useState<Filter>("all");
   const count = files.length;
 
@@ -260,7 +268,7 @@ function OverviewBody({
                 group={group}
                 onOpenFile={onOpenFile}
                 onLocate={
-                  group.comment
+                  group.comment && canLocateComment?.(group.commentId) !== false
                     ? () => onLocate({ kind: "comment", commentId: group.commentId })
                     : undefined
                 }
@@ -356,7 +364,7 @@ function FileTile({ file, onOpen }: { file: DeliverableFile; onOpen: () => void 
       <span className="mt-2 flex min-w-0 items-center gap-1.5">
         <span className="truncate text-body">{latest.filename}</span>
         {file.versions.length > 1 && (
-          <VersionBadge version={file.versions.length} className="bg-secondary" />
+          <VersionBadge version={displayedVersion(file)} className="bg-secondary" />
         )}
       </span>
       {meta.length > 0 && (

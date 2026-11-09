@@ -3334,3 +3334,15 @@ describe("ApiClient shared credential across windows", () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ApiClient complete issue deliverables", () => {
+  it("loads lightweight origins independently of timeline and tolerates malformed responses", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify([{ id:"old",type:"comment",actor_type:"agent",actor_id:"a",created_at:"2026-01-01T00:00:00Z",attachments:[] }]),{status:200}))
+      .mockResolvedValueOnce(new Response(JSON.stringify({invalid:true}),{status:200}));
+    vi.stubGlobal("fetch",fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    expect((await client.listIssueDeliverables("issue"))[0]?.id).toBe("old");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/issues/issue/deliverables");
+    expect(await client.listIssueDeliverables("issue")).toEqual([]);
+  });
+});

@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { QueryClient, QueryClientProvider, QueryObserver, type InvalidateQueryFilters, type QueryKey } from "@tanstack/react-query";
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { WSClient } from "../api/ws-client";
@@ -865,5 +865,20 @@ describe("useRealtimeSync — member:removed", () => {
     expect(forgetLocalSearchIndex).toHaveBeenCalledWith("ws-1");
     // Let the relocate lookup settle before the test tears down.
     await waitFor(() => expect(qc.getQueryData(workspaceKeys.list())).toEqual([]));
+  });
+});
+
+describe("deliverable inventory freshness", () => {
+  it.each(["comment:created", "comment:updated", "comment:deleted"])("refreshes only the affected issue on %s", (event) => {
+    const qc = new QueryClient({ defaultOptions: {queries:{retry:false,staleTime:Infinity}} });
+    const ws=createMockWs();
+    renderHook(()=>useRealtimeSync(ws,createStores()),{wrapper:createWrapper(qc)});
+    qc.setQueryData(issueKeys.deliverables("affected"),[]);
+    qc.setQueryData(issueKeys.deliverables("unrelated"),[]);
+    const listener=vi.mocked(ws.on).mock.calls.find(([name])=>name===event)?.[1];
+    act(()=>listener?.({comment:{issue_id:"affected"},issue_id:"affected"} as never));
+    expect(qc.getQueryState(issueKeys.deliverables("affected"))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(issueKeys.deliverables("unrelated"))?.isInvalidated).toBe(false);
+    qc.clear();
   });
 });

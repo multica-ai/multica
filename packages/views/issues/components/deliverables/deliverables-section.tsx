@@ -2,7 +2,7 @@
 
 import { IssueSidebarSectionHeader } from "../issue-sidebar-section";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { LayoutGrid } from "@multica/ui/icons";
 import type { DeliverableFile } from "@multica/core/attachments/deliverables";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -13,6 +13,7 @@ import { fileIcon } from "../../../editor/utils/file-icon";
 import { getPreviewKind } from "../../../editor/utils/preview";
 import { DeliverableThumbnail } from "./deliverable-thumbnail";
 import { useOpenAttachment } from "./use-open-attachment";
+import { displayDeliverableFiles, displayedVersion } from "./deliverable-kind";
 import { VersionBadge } from "./version-badge";
 
 // The sidebar is a summary, not the list: the newest few of each, and the
@@ -28,13 +29,14 @@ const RECENT_FILES = 4;
  * until a comment delivers a file.
  */
 export function DeliverablesSection({
-  files,
+  files: groupedFiles,
   onOpenOverview,
 }: {
   files: ReadonlyArray<DeliverableFile>;
   onOpenOverview: () => void;
 }) {
   const { t } = useT("issues");
+  const files = useMemo(() => displayDeliverableFiles(groupedFiles), [groupedFiles]);
   const [open, setOpen] = useState(true);
   const { open: openAttachment, modal } = useOpenAttachment();
 
@@ -97,7 +99,7 @@ function versionedName(file: DeliverableFile, t: IssuesT): string {
   return file.versions.length > 1
     ? t(($) => $.deliverables.name_with_version, {
         name: file.latest.filename,
-        version: file.versions.length,
+        version: displayedVersion(file),
       })
     : file.latest.filename;
 }
@@ -116,7 +118,7 @@ function FileRow({ file, onOpen }: { file: DeliverableFile; onOpen: () => void }
     >
       <Icon className="size-3.5 shrink-0 text-muted-foreground" />
       <span className="min-w-0 truncate">{latest.filename}</span>
-      {file.versions.length > 1 && <VersionBadge version={file.versions.length} />}
+      {file.versions.length > 1 && <VersionBadge version={displayedVersion(file)} />}
       <span className="ml-auto shrink-0 pl-2 text-micro tabular-nums text-muted-foreground">
         {latest.size_bytes > 0 ? formatBytes(latest.size_bytes) : null}
       </span>

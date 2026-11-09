@@ -129,7 +129,7 @@ import {
   useDeliverableDetails,
   type DeliverableOrigin,
 } from "./deliverables/deliverable-details";
-import { collectDeliverableFiles } from "@multica/core/attachments/deliverables";
+import { collectDeliverableFiles, mergeDeliverableSources } from "@multica/core/attachments/deliverables";
 import { AttachmentVersionsProvider } from "./deliverables/attachment-versions";
 import { useQuery } from "@tanstack/react-query";
 import { useIssueReadState } from "@multica/core/issues/read-state";
@@ -143,7 +143,7 @@ import {
 import { useRecentContextStore } from "@multica/core/chat";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useModalStore } from "@multica/core/modals";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions, issueDeliverablesOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
@@ -2243,6 +2243,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // `src`/`href` against this list to resolve an attachment id before
   // calling `/api/attachments/{id}`.
   const { data: issueAttachments } = useQuery(issueAttachmentsOptions(id));
+  const { data: deliverableInventory = EMPTY_REPLIES, error: deliverablesError } = useQuery(issueDeliverablesOptions(id));
+  useEffect(() => {
+    if (deliverablesError) toast.error(deliverablesError.message);
+  }, [deliverablesError]);
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
@@ -2582,6 +2586,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // the whole issue's (comment uploads keep `issue_id`) — it only resolves the
   // description's own references, or every comment file would be counted at
   // the description's position.
+  const deliverableSources = useMemo(
+    () => mergeDeliverableSources(deliverableInventory, timeline),
+    [deliverableInventory, timeline],
+  );
+  const loadedCommentIds = useMemo(
+    () => new Set(timeline.filter((entry) => entry.type === "comment").map((entry) => entry.id)),
+    [timeline],
+  );
+  const canLocateComment = useCallback((commentId: string) => loadedCommentIds.has(commentId), [loadedCommentIds]);
   const previewSequence = useMemo(() => {
     const blocks: ImageSequenceBlock[] = [
       {
@@ -2591,32 +2604,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         standalone: false,
       },
     ];
-    for (const item of items) {
-      if (item.kind === "activity-group" || !item.entry) continue;
-      blocks.push({
-        id: item.entry.id,
-        content: item.entry.content,
-        attachments: item.entry.attachments,
-      });
-      for (const reply of timelineView.threadReplies.get(item.entry.id) ?? []) {
-        blocks.push({ id: reply.id, content: reply.content, attachments: reply.attachments });
-      }
+    for (const entry of deliverableSources) {
+      blocks.push({ id: entry.id, content: entry.content, attachments: entry.attachments });
     }
     return collectPreviewSequence(blocks);
-  }, [issue?.description, descEditorAttachments, items, timelineView.threadReplies]);
+  }, [issue?.description, descEditorAttachments, deliverableSources]);
 
   // The files this issue has delivered as a whole: the sidebar section, the
   // overview grid, the viewer's info panel and the comments' version badges
   // all read this (MUL-7649).
-  const deliverableFiles = useMemo(() => collectDeliverableFiles(timeline), [timeline]);
+  const deliverableFiles = useMemo(() => collectDeliverableFiles(deliverableSources), [deliverableSources]);
   const commentById = useMemo(
     () =>
       new Map(
-        timeline
+        deliverableSources
           .filter((entry) => entry.type === "comment")
           .map((entry) => [entry.id, entry] as const),
       ),
-    [timeline],
+    [deliverableSources],
   );
 
   // "Show in comments" from the viewer and the overview. A reply goes through
@@ -2663,6 +2668,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     files: deliverableFiles,
     commentById,
     onLocate: locateOrigin,
+    canLocateComment,
   });
   // The overview remembers the file the viewer was showing, so `G` can go
   // back to it.
@@ -4179,6 +4185,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         files={deliverableFiles}
         commentById={commentById}
         onLocate={locateOrigin}
+        canLocateComment={canLocateComment}
       />
     </PreviewSequenceProvider>
   );

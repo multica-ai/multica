@@ -316,6 +316,7 @@ vi.mock("../../projects/components/project-picker", () => ({
 
 // Mock api
 const mockApiObj = vi.hoisted(() => ({
+  getBaseUrl: () => "",
   getIssue: vi.fn(),
   listTimeline: vi.fn().mockResolvedValue([]),
   listComments: vi.fn().mockResolvedValue([]),
@@ -344,6 +345,7 @@ const mockApiObj = vi.hoisted(() => ({
   addIssueReaction: vi.fn(),
   removeIssueReaction: vi.fn(),
   listAttachments: vi.fn().mockResolvedValue([]),
+  listIssueDeliverables: vi.fn().mockResolvedValue([]),
   addCommentReaction: vi.fn(),
   removeCommentReaction: vi.fn(),
   listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
@@ -800,6 +802,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
     // /timeline returns the entries flat in chronological order (oldest first).
     mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
+    mockApiObj.listIssueDeliverables.mockResolvedValue([]);
     mockApiObj.listIssueReactions.mockResolvedValue([]);
     mockApiObj.listIssueSubscribers.mockResolvedValue([]);
     mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
@@ -876,6 +879,20 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByRole("button", { name: "report.md, version 2" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "View all 1 deliverable" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "brief.pdf" })).toBeNull();
+  });
+
+  it("keeps images from comments outside the loaded history in deliverables", async () => {
+    const image: Attachment = { id: "historical-chart", workspace_id: "ws-1", issue_id: "issue-1", comment_id: "older-comment",
+      chat_session_id: null, chat_message_id: null, uploader_type: "agent", uploader_id: "agent-1",
+      filename: "historical-chart.png", content_type: "image/png", size_bytes: 100,
+      url: "/chart.png", download_url: "/chart.png", markdown_url: "/chart.png", created_at: "2026-01-01T00:00:00Z" };
+    mockApiObj.listTimeline.mockResolvedValue([]);
+    mockApiObj.listIssueDeliverables.mockResolvedValue([{ id: "older-comment", type: "comment", actor_type: "agent",
+      actor_id: "agent-1", created_at: image.created_at, attachments: [image] }]);
+    renderIssueDetail();
+    expect(await screen.findByRole("button", { name: "historical-chart.png" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View all 1 deliverable" }));
+    expect(await screen.findByTitle("historical-chart.png")).toBeInTheDocument();
   });
 
   it("opens source-context creation from both a root comment and a reply", async () => {

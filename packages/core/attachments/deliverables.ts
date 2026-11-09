@@ -10,14 +10,13 @@
  * across runs, and the reader wants the latest one with its history behind
  * it, not five near-identical rows.
  *
- * Built from comment entries rather than the issue-wide attachment list: the
- * list is fetched before the upload is bound to its comment and is not
- * refreshed when that bind lands, while the timeline is patched live and
- * already carries each comment's attachments.
+ * The complete attachment inventory supplies older origins; loaded timeline
+ * comments overlay it so new uploads and tombstones remain current.
  *
  * Pure — no React, no DOM, no platform APIs.
  */
 
+import type { TimelineEntry } from "../types";
 import type { Attachment } from "../types/attachment";
 
 /** The part of a timeline comment this module reads. */
@@ -110,4 +109,17 @@ export function findDeliverableVersion(
     if (index >= 0) return { file, version: index + 1 };
   }
   return undefined;
+}
+
+/** Live comments override inventory metadata, including tombstones. */
+export function mergeDeliverableSources(
+  inventory: readonly TimelineEntry[],
+  timeline: readonly TimelineEntry[],
+): TimelineEntry[] {
+  const comments = new Map(inventory.map((entry) => [entry.id, entry]));
+  for (const entry of timeline) {
+    if (entry.type === "comment") comments.set(entry.id, entry);
+  }
+  return [...comments.values()].filter((entry) => !entry.deleted_at)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
 }

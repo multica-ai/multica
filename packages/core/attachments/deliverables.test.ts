@@ -5,6 +5,7 @@ import {
   collectDeliverableFiles,
   deliverableKey,
   findDeliverableVersion,
+  mergeDeliverableSources,
 } from "./deliverables";
 
 function attachment(over: Partial<Attachment> & { id: string }): Attachment {
@@ -111,5 +112,15 @@ describe("findDeliverableVersion", () => {
   it("returns undefined for files that are not deliverables", () => {
     expect(findDeliverableVersion(files, "description-file")).toBeUndefined();
     expect(findDeliverableVersion(files, "")).toBeUndefined();
+  });
+});
+
+describe("mergeDeliverableSources", () => {
+  it("retains older image inventory, overlays live changes and excludes tombstones", () => {
+    const old = { id: "old", type: "comment" as const, actor_type: "agent", actor_id: "a", created_at: "2026-01-01", attachments: [attachment({id:"image",filename:"chart.png",content_type:"image/png"})] };
+    const gone = { ...old, id: "gone" };
+    const sources = mergeDeliverableSources([old, gone], [{...gone, deleted_at:"2026-02-01"}]);
+    expect(sources.map((entry) => entry.id)).toEqual(["old"]);
+    expect(collectDeliverableFiles(sources)[0]?.latest.id).toBe("image");
   });
 });

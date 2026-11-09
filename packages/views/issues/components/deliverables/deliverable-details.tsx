@@ -44,10 +44,12 @@ export function useDeliverableDetails({
   files,
   commentById,
   onLocate,
+  canLocateComment,
 }: {
   files: ReadonlyArray<DeliverableFile>;
   commentById: ReadonlyMap<string, TimelineEntry>;
   onLocate: (origin: DeliverableOrigin) => void;
+  canLocateComment?: (commentId: string) => boolean;
 }) {
   const { t } = useT("issues");
   return useCallback(
@@ -67,7 +69,7 @@ export function useDeliverableDetails({
           : t(($) => $.deliverables.locate_comment);
       // One action for the top bar and the info panel: the viewer covers the
       // page, so it closes before the page scrolls to the file's origin.
-      const locate = origin
+      const locate = origin && (origin.kind === "description" || canLocateComment?.(origin.commentId) !== false)
         ? () => {
             controls.close();
             onLocate(origin);
@@ -97,7 +99,7 @@ export function useDeliverableDetails({
         locate: locate ? { label: locateLabel, onSelect: locate } : undefined,
       };
     },
-    [files, commentById, onLocate, t],
+    [files, commentById, onLocate, canLocateComment, t],
   );
 }
 

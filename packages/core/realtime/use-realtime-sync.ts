@@ -1265,6 +1265,7 @@ export function useRealtimeSync(
     // through `refetchOnMount`. Active observers stay fresh via the
     // granular setQueryData handlers in `useIssueTimeline`.
     const invalidateTimeline = (issueId: string) => {
+      qc.invalidateQueries({ queryKey: issueKeys.deliverables(issueId) });
       qc.invalidateQueries({
         queryKey: issueKeys.timeline(issueId),
         refetchType: "none",
