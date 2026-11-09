@@ -751,6 +751,12 @@
   "reply": {
     "placeholder": "Laisser une réponse...",
     "annotations": {
+      "direct_reply": "Répondre",
+      "direct_comment": "Publier le commentaire",
+      "direct_target_deleted": "Le commentaire ciblé a été supprimé. Copiez votre note avant de sélectionner un autre commentaire.",
+      "copy_note": "Copier la note",
+      "note_copied": "Note copiée",
+      "note_copy_failed": "Impossible de copier la note. Sélectionnez et copiez le texte manuellement.",
       "confirm_add": "Ajouter une annotation",
       "save": "Enregistrer l'annotation",
       "add_comment": "Ajouter au commentaire",
@@ -812,6 +818,11 @@
     "cancel_failed": "Échec de l'annulation de l'exécution"
   },
   "execution_log": {
+    "latest": "Récentes",
+    "include_children": "Inclure les sous-tâches",
+    "loading": "Chargement des exécutions...",
+    "load_failed_retry": "Impossible de charger les exécutions. Réessayer",
+    "empty": "Aucune exécution dans ce périmètre.",
     "section": "Journal d'exécution",
     "cancel_task_tooltip": "Annuler l'exécution",
     "cancel_task_aria": "Annuler l'exécution",

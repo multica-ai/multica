@@ -729,6 +729,12 @@
   "reply": {
     "placeholder": "回覆...",
     "annotations": {
+      "direct_reply": "回覆",
+      "direct_comment": "發表評論",
+      "direct_target_deleted": "回覆對象已刪除。請先複製意見，再選擇其他評論。",
+      "copy_note": "複製意見",
+      "note_copied": "意見已複製",
+      "note_copy_failed": "複製失敗，請選取意見文字手動複製。",
       "confirm_add": "新增批註",
       "save": "儲存批註",
       "add_comment": "加入評論",
@@ -782,6 +788,11 @@
     "cancel_failed": "取消執行失敗"
   },
   "execution_log": {
+    "latest": "最近",
+    "include_children": "包含子任務",
+    "loading": "正在載入執行記錄...",
+    "load_failed_retry": "無法載入執行記錄，點擊重試",
+    "empty": "此範圍內暫無執行記錄。",
     "section": "執行日誌",
     "cancel_task_tooltip": "取消執行",
     "cancel_task_aria": "取消執行",

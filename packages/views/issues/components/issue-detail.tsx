@@ -182,7 +182,8 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { CollectionPageState } from "../../layout/collection-page";
-import { PAGE_GUTTER } from "../../layout/page-header";
+import { PAGE_GUTTER, usePageHeaderTitleBar } from "../../layout/page-header";
+import { READING_COLUMN } from "../../layout/reading-column";
 import { useShowInSidebar } from "../../layout/panels/show-in-sidebar";
 
 import { ProgressRing } from "./progress-ring";
@@ -1203,6 +1204,23 @@ interface IssueDetailProps {
   skipInitialRefetch?: boolean;
 }
 
+/**
+ * The header row a loading or failed detail shows where the breadcrumb goes,
+ * at the same height, so the page does not jump when the issue lands.
+ */
+function DetailStateBar({ children, trailing }: { children?: ReactNode; trailing?: ReactNode }) {
+  const titleBar = usePageHeaderTitleBar();
+  return (
+    <div
+      className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER, titleBar.className)}
+      style={titleBar.style}
+    >
+      {children}
+      {trailing && <div className="ml-auto flex shrink-0 items-center gap-1">{trailing}</div>}
+    </div>
+  );
+}
+
 // Not found
 
 /**
@@ -1230,14 +1248,12 @@ export function IssueNotFound({
   const { t } = useT("issues");
   const backOrReplace = useBackOrReplace();
   const paths = useWorkspacePaths();
+  const titleBar = usePageHeaderTitleBar();
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      {(leading || trailing) && (
-        <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>
-          {leading}
-          {trailing && <div className="ml-auto flex shrink-0 items-center gap-1">{trailing}</div>}
-        </div>
+      {(leading || trailing || titleBar.active) && (
+        <DetailStateBar trailing={trailing}>{leading}</DetailStateBar>
       )}
       <CollectionPageState
         icon={FileQuestion}
@@ -1273,14 +1289,12 @@ export function IssueLoadError({
   const { t } = useT("issues");
   const backOrReplace = useBackOrReplace();
   const paths = useWorkspacePaths();
+  const titleBar = usePageHeaderTitleBar();
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      {(leading || trailing) && (
-        <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>
-          {leading}
-          {trailing && <div className="ml-auto flex shrink-0 items-center gap-1">{trailing}</div>}
-        </div>
+      {(leading || trailing || titleBar.active) && (
+        <DetailStateBar trailing={trailing}>{leading}</DetailStateBar>
       )}
       <CollectionPageState
         icon={AlertTriangle}
@@ -1321,7 +1335,7 @@ export function IssueDetailSkeleton({
       {/* The way back is real from the first frame, not once the issue lands:
           a host that gave up its own bar for `leadingAction` has nothing else
           to offer while this skeleton owns the screen. */}
-      <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>
+      <DetailStateBar trailing={trailing}>
         {leading ?? (
           <>
             <Skeleton className="h-4 w-16" />
@@ -1329,15 +1343,15 @@ export function IssueDetailSkeleton({
             <Skeleton className="h-4 w-24" />
           </>
         )}
-        {trailing && <div className="ml-auto flex shrink-0 items-center gap-1">{trailing}</div>}
-      </div>
+      </DetailStateBar>
       <div className="flex flex-1 min-h-0">
         {/* Same scrollbar-gutter as the loaded scroller below, so the skeleton
             column doesn't shift sideways when real content mounts. */}
-        <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]">
-          {/* Gutters match the loaded column exactly (see its comment), so the
-              skeleton doesn't reflow sideways when real content mounts. */}
-          <div className="mx-auto w-full max-w-4xl px-3 py-6 space-y-6 md:px-8 md:py-8">
+        <div className="@container flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]">
+          {/* Width and gutters match the loaded column exactly (see its
+              comment), so the skeleton doesn't reflow sideways when real
+              content mounts. */}
+          <div className={cn(READING_COLUMN, "px-3 py-6 space-y-6 md:px-8 md:py-8")}>
             <Skeleton className="h-8 w-3/4" />
             <div className="space-y-2">
               <Skeleton className="h-4 w-full" />
@@ -1627,6 +1641,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   useMarkIssueInboxReadWhileViewing(wsId, issue?.id ?? "", readsInbox);
   const descriptionSourceId = `description:${id}`;
   const descriptionAnnotations = useCommentAnnotations({
+    issueId: id,
+    reply: {
+      onSubmit: (_sourceId, content, suppressAgentIds, steerTaskIds) => submitComment(content, undefined, suppressAgentIds, steerTaskIds),
+      onAccepted: (commentId) => scrollToTimelineBottom(commentId),
+      steerByDefault: (task) => !task.trigger_comment_id,
+    },
     draftKey: `new:${id}`,
     sources: [{ id: descriptionSourceId, name: "Description", revision: issue?.revision }],
     enabled: !!user && !!issue,
@@ -2946,21 +2966,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <>
                 <div className="my-1 h-px bg-border" />
                 {addable.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => addCustomProp(p.id)}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-caption text-foreground transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
-                  >
-                    {p.icon ? (
-                      <PropertyIcon property={p} className="size-3.5 text-caption" />
-                    ) : (
-                      <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    )}
-                    <TruncatedTooltip content={p.name}>
+                  <TruncatedTooltip key={p.id} content={p.name}>
+                    <button
+                      type="button"
+                      onClick={() => addCustomProp(p.id)}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-caption text-foreground transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                    >
+                      {p.icon ? (
+                        <PropertyIcon property={p} className="size-3.5 text-caption" />
+                      ) : (
+                        <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      )}
                       <span className="line-clamp-2 min-w-0 break-words [overflow-wrap:anywhere]">{p.name}</span>
-                    </TruncatedTooltip>
-                  </button>
+                    </button>
+                  </TruncatedTooltip>
                 ))}
               </>
             );
@@ -3068,7 +3087,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 label={
                   <>
                     <PropertyIcon property={p} className="size-3.5 text-caption" />
-                    <TruncatedTooltip content={p.name}>
+                    <TruncatedTooltip content={p.name} focusable>
                       <span className="line-clamp-2 min-w-0 break-words [overflow-wrap:anywhere]">{p.name}</span>
                     </TruncatedTooltip>
                   </>
@@ -3145,7 +3164,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <DeliverablesSection files={deliverableFiles} onOpenOverview={openOverview} />
 
       {/* Execution summary owns its query, realtime updates and disclosure. */}
-      <ExecutionLogSection issueId={id} identifier={issue.identifier} issueTitle={issue.title} />
+      <ExecutionLogSection key={id} issueId={id} identifier={issue.identifier} issueTitle={issue.title} hasChildren={childIssues.length > 0} />
 
       {/* Details — creator and timestamps. Sits below the execution log
           because it is the least-read block in the sidebar: the values
@@ -3423,7 +3442,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <div
           ref={attachScrollContainer}
           data-tab-scroll-root={isPeek ? undefined : scrollContainerKey}
-          className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
+          className="@container relative flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
         >
         {/* Gutters: 32px is a comfortable reading margin on a desktop column
             but eats 16% of a 393px phone, so below `md` they drop to 12px.
@@ -3433,10 +3452,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             floats — once the reader scrolls to the bottom. */}
         <div
           className={cn(
-            "mx-auto w-full",
             // The peek is already a narrow column, so it takes a tighter gutter
             // and never reaches the chat launcher's corner (see IssuePeekHost).
-            isPeek ? "px-6 py-5" : "max-w-4xl px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8",
+            isPeek
+              ? "mx-auto w-full px-6 py-5"
+              : cn(READING_COLUMN, "px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8"),
           )}
         >
           <IssueDuplicateBanner
@@ -4167,8 +4187,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         onResize={handleDesktopSidebarResize}
       >
         {/* Sections inset their own bodies and rows, so the panel itself only
-            needs a narrow gutter. */}
-        <AnimatedRightSidebar open={desktopSidebarVisualOpen} motionEnabled={desktopSidebarMotionEnabled} contentClassName="px-2 py-4">
+            needs a narrow gutter. pt-2.5 centres the first 28px section
+            header on the 48px page header beside it. */}
+        <AnimatedRightSidebar open={desktopSidebarVisualOpen} motionEnabled={desktopSidebarMotionEnabled} contentClassName="px-2 pt-2.5 pb-4">
           {sidebarContent}
         </AnimatedRightSidebar>
       </ResizablePanel>

@@ -734,6 +734,12 @@
   "reply": {
     "placeholder": "Deja una respuesta...",
     "annotations": {
+      "direct_reply": "Responder",
+      "direct_comment": "Publicar comentario",
+      "direct_target_deleted": "Se eliminó el destino de la respuesta. Copia tu nota antes de seleccionar otro comentario.",
+      "copy_note": "Copiar nota",
+      "note_copied": "Nota copiada",
+      "note_copy_failed": "No se pudo copiar la nota. Selecciona y copia el texto manualmente.",
       "confirm_add": "Añadir anotación",
       "save": "Guardar anotación",
       "add_comment": "Añadir al comentario",
@@ -795,6 +801,11 @@
     "cancel_failed": "No se ha podido cancelar la ejecución"
   },
   "execution_log": {
+    "latest": "Recientes",
+    "include_children": "Incluir subtareas",
+    "loading": "Cargando ejecuciones...",
+    "load_failed_retry": "No se han podido cargar las ejecuciones. Reintentar",
+    "empty": "No hay ejecuciones en este ámbito.",
     "section": "Registro de ejecución",
     "cancel_task_tooltip": "Cancelar ejecución",
     "cancel_task_aria": "Cancelar ejecución",

@@ -8,7 +8,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useSetWorkflowHandoff, workflowNextStatus } from "@multica/core/issue-workflows";
 import { projectListOptions } from "@multica/core/projects/queries";
-import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
+import { agentListOptions, memberListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import type { IssueWorkflow, IssueWorkflowStep, Project } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -39,19 +39,19 @@ const NOT_SET = "__not_set__";
 type HandoffMode = "none" | "agent" | "member";
 
 function modeOf(handler: IssueWorkflowStep["handler"]): HandoffMode {
-  if (handler.type === "agent") return "agent";
+  if (handler.type === "agent" || handler.type === "squad") return "agent";
   if (handler.type === "member" || handler.type === "project_lead") return "member";
   return "none";
 }
 
 /**
  * The parts of a handoff that are saved. Instructions and next/back statuses
- * only reach an agent's brief, so they are kept for agent handoffs alone.
+ * reach an agent's or squad leader's brief.
  */
 export function savedHandoff<T extends Pick<IssueWorkflowStep, "handler" | "instructions" | "next_status_key" | "back_status_key">>(
   step: T,
 ): T {
-  if (step.handler.type === "agent") return step;
+  if (step.handler.type === "agent" || step.handler.type === "squad") return step;
   return { ...step, instructions: "", next_status_key: undefined, back_status_key: undefined };
 }
 
@@ -135,7 +135,7 @@ export function WorkflowHandoffForm({
   useEffect(() => setDraft(saved), [saved]);
 
   const handler = draft.handler;
-  const needsTarget = (handler.type === "agent" || handler.type === "member") && !handler.id;
+  const needsTarget = (handler.type === "agent" || handler.type === "squad" || handler.type === "member") && !handler.id;
   const dirty = !sameStep(savedHandoff(draft), savedHandoff(saved));
   const askScope = canEdit && canCopyForProject && dirty && !!project && !workflow.is_default && sharing.others.length > 0;
   useEffect(() => {
@@ -394,8 +394,7 @@ export function HandoffFields({
 }
 
 /**
- * The agent, or the member (project lead included), a column hands the issue
- * to. Squads are left out on purpose — they route work themselves. (MUL-7420)
+ * The agent, squad or member (project lead included) a column hands the issue to.
  */
 function HandlerPicker({
   kind,
@@ -411,12 +410,14 @@ function HandlerPicker({
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: squads = [] } = useQuery({ ...squadListOptions(wsId), enabled: kind === "agent" });
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const matches = (name: string) => !q || name.toLowerCase().includes(q);
   const agentRows = kind === "agent" ? agents.filter((a) => !a.archived_at && matches(a.name)) : [];
+  const squadRows = kind === "agent" ? squads.filter((s) => !s.archived_at && matches(s.name)) : [];
   const memberRows = kind === "member" ? members.filter((m) => matches(m.name)) : [];
   const leadLabel = t(($) => $.workflows.handler.project_lead);
   const pick = (handler: IssueWorkflowStep["handler"]) => {
@@ -428,7 +429,11 @@ function HandlerPicker({
     value.type === "project_lead"
       ? leadLabel
       : value.id
-        ? (value.type === "agent" ? agents.find((a) => a.id === value.id)?.name : members.find((m) => m.user_id === value.id)?.name) ?? ""
+        ? (value.type === "agent"
+            ? agents.find((a) => a.id === value.id)?.name
+            : value.type === "squad"
+              ? squads.find((s) => s.id === value.id)?.name
+              : members.find((m) => m.user_id === value.id)?.name) ?? ""
         : "";
   const placeholder = kind === "agent" ? t(($) => $.workflows.handoff.pick_agent) : t(($) => $.workflows.handoff.pick_member);
 
@@ -451,7 +456,7 @@ function HandlerPicker({
       }
       trigger={
         <>
-          {(value.type === "agent" || value.type === "member") && value.id && (
+          {(value.type === "agent" || value.type === "squad" || value.type === "member") && value.id && (
             <ActorAvatar actorType={value.type} actorId={value.id} size="xs" profileLink={false} />
           )}
           <span className={cn("min-w-0 flex-1 truncate", !current && "text-muted-foreground")}>{current || placeholder}</span>
@@ -470,6 +475,20 @@ function HandlerPicker({
           <span className="truncate">{agent.name}</span>
         </PickerItem>
       ))}
+      {squadRows.length > 0 && (
+        <PickerSection label={t(($) => $.pickers.assignee.squads_group)}>
+          {squadRows.map((squad) => (
+            <PickerItem
+              key={squad.id}
+              selected={is("squad", squad.id)}
+              onClick={() => pick({ type: "squad", id: squad.id })}
+            >
+              <ActorAvatar actorType="squad" actorId={squad.id} size="xs" profileLink={false} />
+              <span className="truncate">{squad.name}</span>
+            </PickerItem>
+          ))}
+        </PickerSection>
+      )}
       {memberRows.length > 0 && (
         <PickerSection label={t(($) => $.workflows.handoff.members)}>
           {memberRows.map((member) => (
@@ -484,7 +503,7 @@ function HandlerPicker({
           ))}
         </PickerSection>
       )}
-      {agentRows.length === 0 && memberRows.length === 0 && (q || kind === "agent") && <PickerEmpty />}
+      {agentRows.length === 0 && squadRows.length === 0 && memberRows.length === 0 && (q || kind === "agent") && <PickerEmpty />}
     </PropertyPicker>
   );
 }

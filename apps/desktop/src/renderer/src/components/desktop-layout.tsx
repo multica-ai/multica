@@ -101,10 +101,13 @@ function MainTopBar({ railMounted }: { railMounted: boolean }) {
       >
         <TabBar />
       </div>
+      {/* pr-6 is the canvas's mr-2 plus the page header's PAGE_GUTTER (px-4),
+          and gap-1 is the page header's action gap, so each icon here stands
+          on the same column as a trailing icon of the page header below. */}
       {railMounted && (
         <div
           data-slot="title-bar-actions"
-          className="relative z-10 ml-auto flex shrink-0 items-center gap-2 pr-3"
+          className="relative z-10 ml-auto flex shrink-0 items-center gap-1 pr-6"
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         >
           <NewIssueButton className={TITLE_BAR_ACTION_CLASS} tooltipSide="bottom" />
@@ -292,7 +295,9 @@ export function DesktopShell() {
                   <AppRail
                     topSlot={<RailTopSpacer />}
                     globalActions={false}
-                    className="hidden pt-0 md:flex"
+                    // The card starts right under the top bar; the 7px
+                    // centres the workspace tile on its header band.
+                    className="hidden pt-[7px] md:flex"
                   />
                 )}
                 {slug && <CompactNavSheet globalActions={false} />}

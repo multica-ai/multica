@@ -751,6 +751,12 @@
   "reply": {
     "placeholder": "Leave a reply...",
     "annotations": {
+      "direct_reply": "Reply",
+      "direct_comment": "Post comment",
+      "direct_target_deleted": "The reply target was deleted. Copy your note before selecting another comment.",
+      "copy_note": "Copy note",
+      "note_copied": "Note copied",
+      "note_copy_failed": "Could not copy note. Select and copy the text manually.",
       "confirm_add": "Add annotation",
       "save": "Save annotation",
       "add_comment": "Add to comment",
@@ -812,6 +818,11 @@
     "cancel_failed": "Failed to cancel run"
   },
   "execution_log": {
+    "latest": "Latest",
+    "include_children": "Include sub-issues",
+    "loading": "Loading runs...",
+    "load_failed_retry": "Could not load runs. Retry",
+    "empty": "No runs in this scope.",
     "section": "Execution log",
     "cancel_task_tooltip": "Cancel run",
     "cancel_task_aria": "Cancel run",
