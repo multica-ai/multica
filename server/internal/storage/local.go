@@ -251,11 +251,16 @@ func tempPath(dest string) string {
 // be unreachable: a staging file would otherwise expose a half-written body.
 // Object keys are server-generated (UUID or hash basenames) and never start
 // with a dot, so a user uploading "notes.tmp" (key "<uuid>.tmp") is unaffected.
+//
+// The check runs on the key as the filesystem will resolve it: filepath.Join
+// cleans away a trailing "/" or "/.", and a case-insensitive filesystem
+// (macOS, Windows) opens "<key>.META.JSON" as the sidecar.
 func isInternalLocalPath(key string) bool {
-	if strings.HasSuffix(key, metaSuffix) {
+	cleaned := strings.ToLower(filepath.Clean(filepath.FromSlash(key)))
+	if strings.HasSuffix(cleaned, metaSuffix) {
 		return true
 	}
-	base := filepath.Base(key)
+	base := filepath.Base(cleaned)
 	return strings.HasPrefix(base, ".") && strings.HasSuffix(base, tempSuffix)
 }
 
@@ -268,23 +273,37 @@ func (s *LocalStorage) ServeFile(w http.ResponseWriter, r *http.Request, filenam
 	// backend; refuse to serve them directly so /uploads/<key>.meta.json (or a
 	// half-written .<key>.tmp) doesn't become a stable read API. Comes before
 	// any disk work so a path-traversal attempt at a sibling can't trigger an
-	// out-of-tree read.
-	if isInternalLocalPath(filename) {
+	// out-of-tree read. Object keys never end in "/", so a trailing slash is
+	// only ever an attempt to reach a directory.
+	if filename == "" || strings.HasSuffix(filename, "/") || isInternalLocalPath(filename) {
 		http.NotFound(w, r)
 		return
 	}
 
 	filePath := filepath.Join(s.uploadDir, filename)
 	// filepath.Join cleans the path but doesn't enforce containment, so a
-	// caller passing "../etc/passwd" lands outside uploadDir. http.ServeFile
-	// rejects such requests on r.URL.Path, but readLocalMeta runs first —
-	// without this guard a crafted path could trigger a stray disk read on
-	// an arbitrary <some-path>.meta.json before the 400 lands.
+	// caller passing "../etc/passwd" lands outside uploadDir. This is the
+	// only containment check before the open and the sidecar read.
 	if !isUnder(s.uploadDir, filePath) {
 		http.NotFound(w, r)
 		return
 	}
 	slog.Info("serving file", "filename", filename, "filepath", filePath)
+
+	// Serve only regular files. http.ServeFile renders an HTML index for a
+	// directory, which would let a caller enumerate every workspace and
+	// attachment key under the upload dir.
+	f, err := os.Open(filePath)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
+	}
 
 	// Mirror the S3 Upload path: when sidecar metadata exists for this key,
 	// set Content-Disposition with the original uploaded filename. Without
@@ -295,10 +314,9 @@ func (s *LocalStorage) ServeFile(w http.ResponseWriter, r *http.Request, filenam
 	if meta, ok := readLocalMeta(filePath); ok && meta.Filename != "" {
 		w.Header().Set("Content-Disposition", ContentDisposition(meta.ContentType, meta.Filename))
 	}
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 
-	// Use http.ServeFile which has built-in path traversal protection
-	// It sanitizes the path and prevents access outside the directory
-	http.ServeFile(w, r, filePath)
+	http.ServeContent(w, r, info.Name(), info.ModTime(), f)
 }
 
 // isUnder reports whether target resolves to a path inside dir (or equal to

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -48,6 +49,20 @@ func TestGetConfigReportsCdnSignedMode(t *testing.T) {
 	}
 	if cfg.CdnDomain != "cdn.example.com" {
 		t.Fatalf("cdn_domain: want cdn.example.com alongside cdn_signed, got %q", cfg.CdnDomain)
+	}
+
+	// Local disk with LOCAL_UPLOAD_BASE_URL: /uploads/* is session-gated
+	// (MUL-8859), so its host must not be treated as a public <img> source.
+	t.Setenv("LOCAL_UPLOAD_DIR", t.TempDir())
+	t.Setenv("LOCAL_UPLOAD_BASE_URL", "https://files.example.test")
+	testHandler.Storage = storage.NewLocalStorageFromEnv()
+	testHandler.CFSigner = nil
+	cfg = fetch()
+	if !cfg.CdnSigned {
+		t.Fatalf("cdn_signed: want true for local storage, got false")
+	}
+	if cfg.CdnDomain != "files.example.test" {
+		t.Fatalf("cdn_domain: want files.example.test, got %q", cfg.CdnDomain)
 	}
 }
 

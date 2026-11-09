@@ -79,18 +79,25 @@ func TestResolveAvatarURL_CloudFrontSignedRewrites(t *testing.T) {
 	}
 }
 
-// TestResolveAvatarURL_LocalStorageUnchanged — LocalStorage objects are served
-// by the public /uploads/* route, so they are already loadable as-is.
-func TestResolveAvatarURL_LocalStorageUnchanged(t *testing.T) {
-	local := storage.NewLocalStorageFromEnv()
-	if local == nil {
-		t.Skip("local storage unavailable")
-	}
-	withAvatarStorage(t, local, "")
+// TestResolveAvatarURL_LocalStorageRewritesToSignedEndpoint — /uploads/*
+// requires a session (MUL-8859), so a local-disk avatar must resolve to the
+// signed avatar endpoint that a credential-less <img> can load. Both the
+// site-relative and the LOCAL_UPLOAD_BASE_URL-absolute shapes are covered.
+func TestResolveAvatarURL_LocalStorageRewritesToSignedEndpoint(t *testing.T) {
+	for _, baseURL := range []string{"", "https://files.example.test"} {
+		t.Setenv("LOCAL_UPLOAD_DIR", t.TempDir())
+		t.Setenv("LOCAL_UPLOAD_BASE_URL", baseURL)
+		local := storage.NewLocalStorageFromEnv()
+		if local == nil {
+			t.Fatal("NewLocalStorageFromEnv returned nil")
+		}
+		withAvatarStorage(t, local, "")
 
-	raw := local.ObjectURL(testAvatarKey)
-	if got := testHandler.resolveAvatarURL(raw); got != raw {
-		t.Fatalf("resolveAvatarURL = %q, want unchanged %q", got, raw)
+		raw := local.ObjectURL(testAvatarKey)
+		want := avatarURLPathPrefix + signAvatarKey(testAvatarKey) + "/" + testAvatarKey
+		if got := testHandler.resolveAvatarURL(raw); got != want {
+			t.Fatalf("base %q: resolveAvatarURL(%q) = %q, want %q", baseURL, raw, got, want)
+		}
 	}
 }
 
@@ -413,6 +420,37 @@ func TestServeAvatar_AllowsUserNamespaceUpload(t *testing.T) {
 
 	if w := serveAvatarRequest(t, signAvatarKey(key), key); w.Code != http.StatusFound {
 		t.Fatalf("status = %d, want 302 for a standalone user upload", w.Code)
+	}
+}
+
+// TestServeAvatar_ProxiesLocalStorageAvatar — with /uploads/* session-gated
+// (MUL-8859), the signed avatar endpoint is how a local-disk avatar reaches a
+// credential-less <img>. The URL resolveAvatarURL emits must serve the bytes.
+func TestServeAvatar_ProxiesLocalStorageAvatar(t *testing.T) {
+	t.Setenv("LOCAL_UPLOAD_DIR", t.TempDir())
+	t.Setenv("LOCAL_UPLOAD_BASE_URL", "")
+	local := storage.NewLocalStorageFromEnv()
+	if local == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+	withAvatarStorage(t, local, "")
+	key := "users/" + testUserID + "/" + uuid.NewString() + ".png"
+	raw, err := local.Upload(context.Background(), key, []byte("PNGBYTES"), "image/png", "me.png")
+	if err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+
+	resolved := testHandler.resolveAvatarURL(raw)
+	gotKey, ok := avatarKeyFromServedURL(resolved)
+	if !ok || gotKey != key {
+		t.Fatalf("resolveAvatarURL(%q) = %q, want the signed avatar endpoint for %q", raw, resolved, key)
+	}
+	w := serveAvatarRequest(t, signAvatarKey(key), key)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "PNGBYTES" {
+		t.Fatalf("body = %q, want the stored avatar", w.Body.String())
 	}
 }
 

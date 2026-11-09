@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -344,6 +345,83 @@ func TestLocalStorage_ServeFile_RejectsSidecarSuffix(t *testing.T) {
 	}
 	if got := rec.Header().Get("Content-Disposition"); got != "" {
 		t.Errorf("Content-Disposition = %q, want empty", got)
+	}
+}
+
+// TestLocalStorage_ServeFile_RejectsSidecarSpellings covers MUL-8859: the
+// sidecar guard used to match the raw key, so "<key>.meta.json/" passed it and
+// filepath.Join's cleaning then opened the sidecar anyway.
+func TestLocalStorage_ServeFile_RejectsSidecarSpellings(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+	if _, err := store.Upload(context.Background(), "workspaces/ws-1/abc.xlsx", []byte("body"), "text/plain", "real.xlsx"); err != nil {
+		t.Fatalf("Upload failed: %v", err)
+	}
+
+	for _, key := range []string{
+		"workspaces/ws-1/abc.xlsx" + metaSuffix + "/",
+		"workspaces/ws-1/abc.xlsx" + metaSuffix + "/.",
+		"workspaces/ws-1/x/../abc.xlsx" + metaSuffix,
+		"workspaces/ws-1/abc.xlsx.META.JSON",
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/uploads/"+key, nil)
+		rec := httptest.NewRecorder()
+		store.ServeFile(rec, req, key)
+
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%q: status = %d, want 404", key, rec.Code)
+		}
+		if strings.Contains(rec.Body.String(), "real.xlsx") {
+			t.Errorf("%q: body leaked the sidecar: %q", key, rec.Body.String())
+		}
+	}
+}
+
+// TestLocalStorage_ServeFile_RejectsDirectories covers MUL-8859: http.ServeFile
+// rendered an HTML index for a directory, which listed every workspace and
+// attachment key under the upload dir.
+func TestLocalStorage_ServeFile_RejectsDirectories(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", tmpDir)
+
+	store := NewLocalStorageFromEnv()
+	if store == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+	const key = "workspaces/ws-1/0198a1b2-attachment.png"
+	if _, err := store.Upload(context.Background(), key, []byte("PNGBYTES"), "image/png", "shot.png"); err != nil {
+		t.Fatalf("Upload failed: %v", err)
+	}
+
+	for _, dirKey := range []string{"", ".", "workspaces", "workspaces/", "workspaces/ws-1", "workspaces/ws-1/"} {
+		req := httptest.NewRequest(http.MethodGet, "/uploads/"+dirKey, nil)
+		rec := httptest.NewRecorder()
+		store.ServeFile(rec, req, dirKey)
+
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%q: status = %d, want 404", dirKey, rec.Code)
+		}
+		if strings.Contains(rec.Body.String(), "0198a1b2") {
+			t.Errorf("%q: body lists directory contents: %q", dirKey, rec.Body.String())
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/uploads/"+key, nil)
+	rec := httptest.NewRecorder()
+	store.ServeFile(rec, req, key)
+	if rec.Code != http.StatusOK || rec.Body.String() != "PNGBYTES" {
+		t.Fatalf("regular file: status = %d body = %q, want 200 PNGBYTES", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/png" {
+		t.Errorf("Content-Type = %q, want image/png", got)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
 	}
 }
 

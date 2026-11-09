@@ -15,14 +15,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/attachmentpreview"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/storage"
@@ -1786,7 +1785,8 @@ func TestIsTextPreviewable(t *testing.T) {
 // Matrix:
 //
 //   - public CDN durable URL ............... reuse a.Url verbatim
-//   - LocalStorage with PublicURL set ....... reuse a.Url (already absolute)
+//   - LocalStorage with LOCAL_UPLOAD_BASE_URL  never reuse a.Url (/uploads/*
+//     is session-gated), prefer absolute API endpoint
 //   - CloudFront-signed mode ................ never reuse a.Url (raw S3),
 //                                              prefer absolute API endpoint
 //   - LocalStorage relative + PublicURL set . prefix to absolute API endpoint
@@ -1924,6 +1924,34 @@ func TestBuildMarkdownURL_RelativeStorageURLPrefixedWithPublicURL(t *testing.T) 
 	}
 }
 
+// TestBuildMarkdownURL_LocalBaseURLUsesAPIEndpoint — LOCAL_UPLOAD_BASE_URL
+// makes the stored URL absolute, but /uploads/* is session-gated (MUL-8859),
+// so persisting it would leave Desktop and mobile with an unloadable image.
+func TestBuildMarkdownURL_LocalBaseURLUsesAPIEndpoint(t *testing.T) {
+	t.Setenv("LOCAL_UPLOAD_DIR", t.TempDir())
+	t.Setenv("LOCAL_UPLOAD_BASE_URL", "https://files.multica.test")
+	local := storage.NewLocalStorageFromEnv()
+	if local == nil {
+		t.Fatal("NewLocalStorageFromEnv returned nil")
+	}
+	withAvatarStorage(t, local, "https://api.multica.test")
+
+	id := seedAttachmentURL(t, "https://files.multica.test/uploads/abc.png", "abc.png", "image/png", 1)
+	att, err := testHandler.Queries.GetAttachment(context.Background(), db.GetAttachmentParams{
+		ID:          parseUUID(id),
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("GetAttachment: %v", err)
+	}
+
+	resp := testHandler.attachmentToResponse(att, attachmentURLModeSigned)
+	want := "https://api.multica.test/api/attachments/" + id + "/download"
+	if resp.MarkdownURL != want {
+		t.Fatalf("markdown_url = %q, want absolute API endpoint %q", resp.MarkdownURL, want)
+	}
+}
+
 func TestBuildMarkdownURL_PublicURLUnsetFallsBackToSiteRelative(t *testing.T) {
 	origPublic := testHandler.cfg.PublicURL
 	origSigner := testHandler.CFSigner
@@ -2007,43 +2035,56 @@ func TestIsDurablePublicURL(t *testing.T) {
 	}
 }
 
-// TestServeLocalUpload_RelaxesFrameAncestorsForPreview covers the self-hosted
-// local-disk case where document previews (PDF/HTML) are fetched straight from
-// the public /uploads/* static route. That route inherits the global
-// "frame-ancestors 'none'" CSP from the middleware, which blocks iframe
-// previews; ServeLocalUpload must overwrite it with the same relaxed preview
-// policy the /api/attachments download endpoint uses. See MUL-3821 / #4477.
-func TestServeLocalUpload_RelaxesFrameAncestorsForPreview(t *testing.T) {
-	dir := t.TempDir()
-	key := "workspaces/ws-1/preview.pdf"
-	full := filepath.Join(dir, filepath.FromSlash(key))
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	const body = "%PDF-1.7 local-disk preview"
-	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	t.Setenv("LOCAL_UPLOAD_DIR", dir)
+// withLocalUploadStorage points testHandler at a temp-dir LocalStorage holding
+// the given objects, restoring the previous storage afterwards.
+func withLocalUploadStorage(t *testing.T, objects map[string]string) {
+	t.Helper()
+	t.Setenv("LOCAL_UPLOAD_DIR", t.TempDir())
 	t.Setenv("LOCAL_UPLOAD_BASE_URL", "")
 	local := storage.NewLocalStorageFromEnv()
 	if local == nil {
 		t.Fatal("NewLocalStorageFromEnv returned nil")
 	}
-
-	h := &Handler{
-		Storage: local,
-		cfg:     Config{AttachmentFrameAncestors: []string{"https://app.example.test"}},
+	withAvatarStorage(t, local, "")
+	for key, body := range objects {
+		if _, err := local.Upload(context.Background(), key, []byte(body), "application/octet-stream", ""); err != nil {
+			t.Fatalf("seed %q: %v", key, err)
+		}
 	}
+}
+
+// serveLocalUploadAs calls ServeLocalUpload the way middleware.Auth leaves the
+// request: X-User-ID set for an authenticated caller, absent otherwise.
+func serveLocalUploadAs(userID, key string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, "/uploads/"+key, nil)
+	if userID != "" {
+		req.Header.Set("X-User-ID", userID)
+	}
+	w := httptest.NewRecorder()
+	testHandler.ServeLocalUpload(w, req)
+	return w
+}
+
+// TestServeLocalUpload_RelaxesFrameAncestorsForPreview covers the self-hosted
+// local-disk case where document previews (PDF/HTML) are fetched straight from
+// the /uploads/* route. That route inherits the global
+// "frame-ancestors 'none'" CSP from the middleware, which blocks iframe
+// previews; ServeLocalUpload must overwrite it with the same relaxed preview
+// policy the /api/attachments download endpoint uses. See MUL-3821 / #4477.
+func TestServeLocalUpload_RelaxesFrameAncestorsForPreview(t *testing.T) {
+	key := "workspaces/" + testWorkspaceID + "/preview.pdf"
+	const body = "%PDF-1.7 local-disk preview"
+	withLocalUploadStorage(t, map[string]string{key: body})
+	testHandler.cfg.AttachmentFrameAncestors = []string{"https://app.example.test"}
 
 	req := httptest.NewRequest(http.MethodGet, "/uploads/"+key, nil)
+	req.Header.Set("X-User-ID", testUserID)
 	w := httptest.NewRecorder()
 	// Simulate the global CSP middleware having already stamped the strict
 	// policy on the response before the static route runs.
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
 
-	h.ServeLocalUpload(w, req)
+	testHandler.ServeLocalUpload(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%q", w.Code, w.Body.String())
@@ -2052,6 +2093,94 @@ func TestServeLocalUpload_RelaxesFrameAncestorsForPreview(t *testing.T) {
 		t.Fatalf("body = %q, want %q", got, body)
 	}
 	requireAttachmentPreviewCSP(t, w.Header(), "https://app.example.test")
+}
+
+// TestServeLocalUpload_RequiresUser — MUL-8859: /uploads/* served every
+// workspace's attachments to anonymous callers.
+func TestServeLocalUpload_RequiresUser(t *testing.T) {
+	key := "workspaces/" + testWorkspaceID + "/secret.png"
+	withLocalUploadStorage(t, map[string]string{key: "SECRET"})
+
+	w := serveLocalUploadAs("", key)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "SECRET") {
+		t.Fatalf("anonymous caller received the object: %q", w.Body.String())
+	}
+}
+
+// TestServeLocalUpload_DeniesNonMember — a session is not enough; the key's
+// workspace must be one the caller belongs to. 404, like /api/attachments, so
+// the route does not confirm the object exists.
+func TestServeLocalUpload_DeniesNonMember(t *testing.T) {
+	foreign := seedForeignWorkspace(t)
+	key := "workspaces/" + foreign + "/secret.png"
+	withLocalUploadStorage(t, map[string]string{key: "SECRET"})
+
+	w := serveLocalUploadAs(testUserID, key)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "SECRET") {
+		t.Fatalf("non-member received the object: %q", w.Body.String())
+	}
+}
+
+// TestServeLocalUpload_UserNamespaceIsOwnerOnly — UploadFile's no-workspace
+// branch writes users/<uploader>/…; only that user reads it here. Avatars use
+// the signed /api/avatars route instead.
+func TestServeLocalUpload_UserNamespaceIsOwnerOnly(t *testing.T) {
+	key := "users/" + testUserID + "/" + uuid.NewString() + ".png"
+	withLocalUploadStorage(t, map[string]string{key: "MINE"})
+
+	if w := serveLocalUploadAs(testUserID, key); w.Code != http.StatusOK || w.Body.String() != "MINE" {
+		t.Fatalf("owner: status = %d body = %q, want 200 MINE", w.Code, w.Body.String())
+	}
+	if w := serveLocalUploadAs(uuid.NewString(), key); w.Code != http.StatusNotFound {
+		t.Fatalf("other user: status = %d, want 404", w.Code)
+	}
+}
+
+// TestServeLocalUpload_DeniesListingsAndBypassKeys covers the rest of
+// MUL-8859 for an authenticated member: no directory listings, no sidecar via a
+// trailing slash, no walking from an authorized workspace into another one, and
+// nothing outside the two known namespaces.
+func TestServeLocalUpload_DeniesListingsAndBypassKeys(t *testing.T) {
+	foreign := seedForeignWorkspace(t)
+	own := "workspaces/" + testWorkspaceID
+	withLocalUploadStorage(t, map[string]string{
+		own + "/a.png":                     "OWN",
+		"workspaces/" + foreign + "/b.png": "FOREIGN",
+		"brand/logo.png":                   "OPERATOR",
+	})
+	// Give a.png a sidecar so the trailing-slash spelling has something to leak.
+	if _, err := testHandler.Storage.Upload(context.Background(), own+"/a.png", []byte("OWN"), "image/png", "private-name.png"); err != nil {
+		t.Fatalf("seed sidecar: %v", err)
+	}
+
+	for _, key := range []string{
+		"",
+		"workspaces/",
+		own,
+		own + "/",
+		own + "/a.png.meta.json/",
+		own + "/a.png.meta.json",
+		own + "/../" + foreign + "/b.png",
+		own + `/..\..\` + foreign + `\b.png`,
+		"workspaces/not-a-uuid/a.png",
+		"brand/logo.png",
+	} {
+		w := serveLocalUploadAs(testUserID, key)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("%q: status = %d, want 404", key, w.Code)
+		}
+		for _, leak := range []string{"FOREIGN", "OPERATOR", "private-name", "a.png"} {
+			if strings.Contains(w.Body.String(), leak) {
+				t.Errorf("%q: body leaked %q: %q", key, leak, w.Body.String())
+			}
+		}
+	}
 }
 
 // TestServeLocalUpload_NonLocalStorage404 guards the defensive branch: the

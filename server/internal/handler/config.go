@@ -8,6 +8,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/storage"
 )
 
 type AppConfig struct {
@@ -131,7 +132,10 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		config.CdnDomain = h.Storage.CdnDomain()
 	}
 	config.AttachmentPublicURL = h.cfg.PublicURL
-	config.CdnSigned = h.CFSigner != nil
+	// Local-disk URLs on LOCAL_UPLOAD_BASE_URL are session-gated (MUL-8859),
+	// which is the same "not a native <img> source" contract as signed CDN.
+	_, localStorage := h.Storage.(*storage.LocalStorage)
+	config.CdnSigned = h.CFSigner != nil || localStorage
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
 	config.DaemonSetupTarget = "self_host"
 	config.VCSIntegrationAvailable = h.cfg.VCSIntegrationEnabled

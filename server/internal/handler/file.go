@@ -75,8 +75,7 @@ type AttachmentResponse struct {
 	// SHOULD persist into markdown bodies (issue descriptions, comments,
 	// chat messages). It is computed per deployment policy by
 	// buildMarkdownURL — preferring the storage URL when it is already a
-	// public, durable absolute URL (public CDN / LocalStorage with
-	// MULTICA_LOCAL_UPLOAD_BASE_URL), and otherwise prefixing
+	// public, durable absolute URL (public CDN), and otherwise prefixing
 	// MULTICA_PUBLIC_URL onto the stable per-attachment endpoint that the
 	// server self-resigns / proxies on every request.
 	//
@@ -206,8 +205,9 @@ func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) 
 //  1. Persist `a.Url` only when the deployment has signaled the storage
 //     backend serves URLs publicly without per-request auth:
 //     - `Storage.CdnDomain()` is non-empty (operator configured a
-//     public-facing base URL — `S3_CDN_DOMAIN` for the S3 backend or
-//     `LOCAL_UPLOAD_BASE_URL` for LocalStorage), AND
+//     public-facing base URL — `S3_CDN_DOMAIN` for the S3 backend), AND
+//     - the backend is not LocalStorage, whose /uploads/* route is
+//     session-gated even with `LOCAL_UPLOAD_BASE_URL` set, AND
 //     - `h.CFSigner` is nil (no per-request CloudFront signing — when
 //     signing is on, the same CDN domain serves PRIVATE content via
 //     time-bounded signed URLs and the raw `a.Url` is unauth-deny),
@@ -219,7 +219,7 @@ func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) 
 //
 //  2. Every other shape — CloudFront-signed mode, S3 presign /proxy
 //     against a private bucket without a CDN domain, raw S3 / R2 /
-//     MinIO, LocalStorage with no `LOCAL_UPLOAD_BASE_URL` — uses the
+//     MinIO, LocalStorage — uses the
 //     stable per-attachment endpoint that the server self-signs /
 //     proxies on every request, anchored on `MULTICA_PUBLIC_URL` so the
 //     persisted URL keeps working for clients that don't share the
@@ -252,6 +252,11 @@ func (h *Handler) storageURLIsPubliclyReadable(rawURL string) bool {
 	if h.Storage == nil || h.CFSigner != nil {
 		// CFSigner != nil is per-request signing; the CDN domain serves
 		// private content via signed URLs and `a.Url` is the raw S3 URL.
+		return false
+	}
+	if _, ok := h.Storage.(*storage.LocalStorage); ok {
+		// /uploads/* requires a session even when LOCAL_UPLOAD_BASE_URL
+		// makes the URL absolute (MUL-8859).
 		return false
 	}
 	if h.Storage.CdnDomain() == "" {
@@ -967,22 +972,78 @@ func shouldProxyAttachmentURL(rawURL string) bool {
 	return false
 }
 
-// ServeLocalUpload serves a local-disk object from the public /uploads/*
-// route. It carries the same preview security headers as the authenticated
-// download endpoint so self-hosted deployments — same-origin or split
-// frontend/backend origins — can inline-render images and iframe-preview
-// documents (PDF/HTML) fetched straight from the static route. Without these
-// headers the global "frame-ancestors 'none'" policy blocks those previews.
-// See MUL-3821 / #4477.
+// ServeLocalUpload serves a local-disk object from the authenticated
+// /uploads/* route (MUL-8859). It carries the same preview security headers as
+// the /api/attachments download endpoint so self-hosted deployments — same-origin
+// or split frontend/backend origins — can inline-render images and
+// iframe-preview documents (PDF/HTML) fetched straight from this route. Without
+// these headers the global "frame-ancestors 'none'" policy blocks those
+// previews. See MUL-3821 / #4477.
+//
+// Every deny is a 404 so the route is not an oracle for which workspaces or
+// objects exist.
 func (h *Handler) ServeLocalUpload(w http.ResponseWriter, r *http.Request) {
 	local, ok := h.Storage.(*storage.LocalStorage)
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	h.setAttachmentPreviewSecurityHeaders(w)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
 	key := strings.TrimPrefix(r.URL.Path, "/uploads/")
+	if !h.canReadLocalUpload(r.Context(), userID, key) {
+		http.NotFound(w, r)
+		return
+	}
+	h.setAttachmentPreviewSecurityHeaders(w)
 	local.ServeFile(w, r, key)
+}
+
+// canReadLocalUpload authorizes a /uploads/* key by the namespace UploadFile
+// and channel media ingest write into:
+//
+//   - workspaces/<workspace-id>/… — members of that workspace
+//   - users/<user-id>/…           — that user only
+//
+// Any other key is denied, so content written under a new prefix stays
+// unreachable until it gets a rule of its own. Avatars do not need this route:
+// they resolve to the signed /api/avatars URL (see resolveAvatarURL).
+func (h *Handler) canReadLocalUpload(ctx context.Context, userID, key string) bool {
+	// A backslash is a separator to filepath on Windows, so it could step out
+	// of the workspace directory this check authorized.
+	if strings.ContainsRune(key, '\\') {
+		return false
+	}
+	segments := strings.Split(key, "/")
+	if len(segments) < 3 || segments[2] == "" {
+		return false
+	}
+	for _, s := range segments {
+		if s == "" || s == "." || s == ".." {
+			return false
+		}
+	}
+	owner := segments[1]
+	switch segments[0] {
+	case "workspaces":
+		if _, err := uuid.Parse(owner); err != nil {
+			return false
+		}
+		if h.MembershipCache.Get(ctx, userID, owner) {
+			return true
+		}
+		if _, err := h.getWorkspaceMember(ctx, userID, owner); err != nil {
+			return false
+		}
+		h.MembershipCache.Set(ctx, userID, owner)
+		return true
+	case "users":
+		return owner == userID
+	default:
+		return false
+	}
 }
 
 // proxyAttachmentDownload streams an attachment through the API instead of

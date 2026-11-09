@@ -313,11 +313,13 @@ describe("Attachment — image dispatch", () => {
     );
   });
 
-  it("prefers a local disk /uploads URL over API markdown in split-origin self-host", () => {
+  it("renders a local disk upload through the authenticated byte fetch, not /uploads (MUL-8859)", async () => {
+    // /uploads/* requires a session. Desktop, mobile and split-origin web
+    // cannot attach one to a native <img>, so the raw storage path must not be
+    // picked; the stable API URL upgrades through the proxy-mode byte fetch.
     getBaseUrlMock.mockReturnValue("https://api.example.test");
     const id = "11111111-2222-3333-4444-555555555555";
     const markdownUrl = `https://api.example.test/api/attachments/${id}/download`;
-    const mediaUrl = "https://api.example.test/uploads/workspaces/ws-1/shot.png";
     const att = makeRecord({
       id,
       url: "/uploads/workspaces/ws-1/shot.png",
@@ -325,6 +327,11 @@ describe("Attachment — image dispatch", () => {
       download_url: `/api/attachments/${id}/download`,
     });
     resolverState.attachments = [att];
+    getAttachmentMock.mockResolvedValue(
+      makeRecord({ id, download_url: `/api/attachments/${id}/signed-download?exp=1&sig=x` }),
+    );
+    const blob = new Blob(["png-bytes"], { type: "image/png" });
+    getAttachmentBlobMock.mockResolvedValue(blob);
 
     renderWithQuery(
       <Attachment
@@ -337,14 +344,37 @@ describe("Attachment — image dispatch", () => {
       />,
     );
 
-    expect(document.querySelector("img")?.getAttribute("src")).toBe(mediaUrl);
+    await waitFor(() => {
+      expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL);
+    });
+    expect(getAttachmentBlobMock).toHaveBeenCalledWith(id);
+    for (const img of document.querySelectorAll("img")) {
+      expect(img.getAttribute("src")).not.toContain("/uploads/");
+    }
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "View" }));
+  it("does not pick a LOCAL_UPLOAD_BASE_URL storage URL as a public image (MUL-8859)", () => {
+    // The server reports cdn_signed for local storage: the base URL's host
+    // matches cdn_domain but serves only to a session.
+    configStore.setState({ cdnDomain: "files.example.test", cdnSigned: true });
+    const id = "11111111-2222-3333-4444-555555555555";
+    const markdownUrl = `/api/attachments/${id}/download`;
+    resolverState.attachments = [
+      makeRecord({
+        id,
+        url: "https://files.example.test/uploads/workspaces/ws-1/shot.png",
+        markdown_url: markdownUrl,
+        download_url: markdownUrl,
+      }),
+    ];
 
-    const imageSrcs = [...document.querySelectorAll("img")].map((img) =>
-      img.getAttribute("src"),
+    renderWithQuery(
+      <Attachment
+        attachment={{ kind: "url", url: markdownUrl, filename: "shot.png", forceKind: "image" }}
+      />,
     );
-    expect(imageSrcs).toEqual([mediaUrl, mediaUrl]);
+
+    expect(document.querySelector("img")?.getAttribute("src")).toBe(markdownUrl);
   });
 
   it("opens preview with the same resolved media URL when a reopened draft record has no download_url", () => {

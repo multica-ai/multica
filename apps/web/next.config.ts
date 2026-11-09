@@ -47,6 +47,14 @@ const nextConfig: NextConfig = {
   images: {
     formats: ["image/avif", "image/webp"],
     qualities: [75, 80, 85],
+    // Only the static landing assets in public/. Without an allowlist the
+    // optimizer fetches any same-origin path, including the /uploads rewrite
+    // to private attachments, and caches the result for every visitor
+    // (MUL-8859).
+    localPatterns: [
+      { pathname: "/images/**", search: "" },
+      { pathname: "/usecases/**", search: "" },
+    ],
   },
   async rewrites() {
     return {
