@@ -95,10 +95,10 @@ function ListRowContent({
         data-peeked={peeked ? "" : undefined}
         style={containerStyle}
         {...containerProps}
-        className={`group/row flex h-[var(--issue-row-height)] items-center gap-2 px-4 text-body transition-colors ${
+        className={`group/row flex h-[var(--issue-row-height)] items-center gap-2 px-[var(--issue-row-padding-x,1rem)] text-body transition-colors ${
           selected
-            ? "bg-surface-selected hover:not-data-[popup-open]:bg-surface-selected data-[popup-open]:bg-surface-selected"
-            : "hover:not-data-[popup-open]:bg-surface-hover data-[popup-open]:bg-surface-hover"
+            ? "bg-issue-row-selected hover:not-data-[popup-open]:bg-issue-row-selected data-[popup-open]:bg-issue-row-selected"
+            : "hover:not-data-[popup-open]:bg-issue-row-hover data-[popup-open]:bg-issue-row-hover"
         } ${PEEKED_ROW_CLASS} ${isDragging ? "opacity-30" : ""}`}
       >
         <div
@@ -126,7 +126,7 @@ function ListRowContent({
           className={`flex flex-1 items-center gap-2 min-w-0 ${isDragging ? "pointer-events-none" : ""}`}
           {...peekLinkProps}
         >
-          <span className="min-w-16 shrink-0 text-caption text-muted-foreground">
+          <span className="min-w-16 shrink-0 text-caption text-issue-row-identifier">
             {issue.identifier}
           </span>
           <IssueAgentActivityIndicator issueId={issue.id} />

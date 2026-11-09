@@ -168,13 +168,13 @@ const ICON_RENDERERS: Record<IssueStatusIcon, () => React.ReactNode> = {
 };
 
 const BUILT_IN_ICON_COLOR: Record<BuiltInIssueStatus, string> = {
-  backlog: "text-muted-foreground",
-  todo: "text-muted-foreground",
-  in_progress: "text-warning",
-  in_review: "text-success",
-  done: "text-info",
-  blocked: "text-destructive",
-  cancelled: "text-muted-foreground",
+  backlog: "text-status-backlog",
+  todo: "text-status-todo",
+  in_progress: "text-status-in-progress",
+  in_review: "text-status-in-review",
+  done: "text-status-done",
+  blocked: "text-status-blocked",
+  cancelled: "text-status-cancelled",
 };
 
 // Public component

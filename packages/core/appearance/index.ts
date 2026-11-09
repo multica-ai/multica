@@ -17,6 +17,7 @@ export * from "./theme-css";
 export * from "./theme-package";
 export * from "./installed-themes";
 export * from "./anchors";
+export * from "./theme-variables";
 
 /**
  * Appearance sits on top of light/dark mode: a theme (see ./themes) with its

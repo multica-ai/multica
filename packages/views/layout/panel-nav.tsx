@@ -145,12 +145,12 @@ export function PanelList({
 }
 
 export const PANEL_ROW_CLASS =
-  "flex min-h-8 w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-left text-body transition-colors outline-none focus-visible:outline-2 focus-visible:outline-ring";
+  "flex min-h-[var(--nav-item-height,2rem)] w-full items-center gap-2.5 rounded-nav-item px-3 py-1.5 text-left text-body transition-colors outline-none focus-visible:outline-2 focus-visible:outline-ring";
 
 export function panelRowStateClass(active: boolean) {
   return active
-    ? "bg-surface-selected text-surface-selected-foreground hover:bg-surface-selected"
-    : "text-muted-foreground hover:bg-surface-hover hover:text-foreground";
+    ? "bg-nav-item-active text-nav-item-active-foreground hover:bg-nav-item-active"
+    : "text-nav-item hover:bg-nav-item-hover hover:text-nav-item-hover-foreground";
 }
 
 export function PanelCount({ value, className }: { value: number; className?: string }) {

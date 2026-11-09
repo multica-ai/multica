@@ -26,7 +26,7 @@ export function PriorityIcon({
       <svg
         data-mc="priority-icon"
         viewBox="0 0 16 16"
-        className={`h-3.5 w-3.5 ${inheritColor ? "" : "text-muted-foreground"} shrink-0 ${className}`}
+        className={`h-3.5 w-3.5 ${inheritColor ? "" : "text-priority-none"} shrink-0 ${className}`}
         fill="none"
         stroke="currentColor"
         strokeWidth="1.5"

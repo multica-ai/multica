@@ -137,7 +137,7 @@ function MainCanvas({
       data-slot="main-canvas"
       data-mc="page"
       className={cn(
-        "relative mr-2 mb-2 flex min-h-0 flex-1 flex-row overflow-hidden rounded-xl bg-page-canvas shadow-[var(--surface-shadow)] ring-1 ring-surface-border",
+        "relative mr-2 mb-2 flex min-h-0 flex-1 flex-row overflow-hidden rounded-page bg-page-canvas shadow-[var(--page-shadow,var(--surface-shadow))] ring-1 ring-page-border",
         railMounted && !isCompact ? "ml-0" : "ml-2",
       )}
     >

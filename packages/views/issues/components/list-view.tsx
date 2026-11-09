@@ -598,7 +598,7 @@ function StatusAccordionItem({
         data-slot="issue-group-header"
         data-mc="issue-group-header"
         data-status={status}
-        className={`group/header sticky top-0 z-10 flex h-10 items-center rounded-lg bg-muted transition-colors hover:bg-accent ${
+        className={`group/header sticky top-0 z-10 flex h-[var(--issue-group-header-height,2.5rem)] items-center rounded-issue-group-header bg-issue-group-header transition-colors hover:bg-issue-group-header-hover ${
           isOver && !isExpanded
             ? "ring-2 ring-brand/25 bg-accent/15"
             : ""
