@@ -87,6 +87,31 @@ describe("IssueChip detail fallback on window focus", () => {
     expect(screen.getByTestId("status-icon")).toBeInTheDocument();
   });
 
+  it("does not refetch a missing issue on repeated focus", async () => {
+    vi.mocked(api.getIssue).mockRejectedValue(
+      new ApiError("Not found", 404, "NotFound"),
+    );
+    renderChip();
+    await waitFor(() => {
+      expect(
+        queryClient.getQueryState(issueKeys.detail(issue.workspace_id, issue.id))?.status,
+      ).toBe("error");
+    });
+    expect(api.getIssue).toHaveBeenCalledTimes(2);
+
+    for (let i = 0; i < 2; i++) {
+      blurAndRefocus();
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(api.getIssue).toHaveBeenCalledTimes(2);
+    }
+
+    expect(screen.getByText(issue.identifier)).toBeInTheDocument();
+    expect(screen.queryByText(issue.title)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("status-icon")).not.toBeInTheDocument();
+  });
+
   it("does not refetch an already hydrated chip on focus", async () => {
     vi.mocked(api.getIssue).mockResolvedValue(issue);
     renderChip();
