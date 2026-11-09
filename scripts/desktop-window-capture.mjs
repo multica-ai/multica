@@ -22,12 +22,13 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -45,7 +46,9 @@ const USAGE = `Usage:
                       (still limited to the CDP owner's windows)
   --settle SECONDS    wait before capturing (default: 0, or 5 after a relaunch)
   --prepare CMD       shell command run before each capture, e.g. a
-                      Playwright script that navigates to the page to show
+                      Playwright script that navigates to the page to show;
+                      it sees DESKTOP_CAPTURE_STATE=current, before or after,
+                      and a non-zero exit aborts without capturing
   --compare BASE      capture OUT_DIR/before.png with BASE's version of the
                       changed files and OUT_DIR/after.png with the worktree's
 
@@ -361,10 +364,29 @@ export function changedFiles(repo, base, pathspecs = []) {
   return files;
 }
 
+function lstatOrNull(file) {
+  try {
+    return lstatSync(file);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+// Backups follow what is on disk, not the diff status: a path git reports as
+// deleted can still hold an untracked file (after `git rm --cached`), and it
+// must come back exactly as it was.
 export function swapToBase(repo, base, files, backupDir) {
-  const backups = files.map(({ status, path }) => {
+  const onDisk = files.map(({ path }) => {
     const file = join(repo, path);
-    if (status === "D") return { path, existed: false };
+    const stat = lstatOrNull(file);
+    if (stat && !stat.isFile()) {
+      throw new CaptureError(`${path} is not a regular file on disk; --compare only swaps files. Narrow it with a pathspec.`);
+    }
+    return { path, file, exists: Boolean(stat) };
+  });
+  const backups = onDisk.map(({ path, file, exists }) => {
+    if (!exists) return { path, existed: false };
     const backup = join(backupDir, path);
     mkdirSync(dirname(backup), { recursive: true });
     copyFileSync(file, backup);
@@ -384,7 +406,7 @@ export function swapToBase(repo, base, files, backupDir) {
     }
   };
   try {
-    for (const { status, path } of files) if (status === "A") unlinkSync(join(repo, path));
+    for (const { status, path } of files) if (status === "A") rmSync(join(repo, path), { force: true });
     const fromBase = files.filter((f) => f.status !== "A").map((f) => f.path);
     if (fromBase.length) git(repo, "restore", `--source=${base}`, "--worktree", "--", ...fromBase);
   } catch (error) {
@@ -484,11 +506,16 @@ async function main() {
     console.log(USAGE);
     return;
   }
-  if (options.compare) await compare(options);
-  else await captureWindow(options.out, { title: options.title, settle: options.settle ?? 0 });
+  if (options.compare) {
+    await compare(options);
+    return;
+  }
+  managedDesktop();
+  runPrepare(options.prepare, "current");
+  await captureWindow(options.out, { title: options.title, settle: options.settle ?? 0 });
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   main().catch((error) => {
     console.error(`[desktop-window] ${error instanceof CaptureError ? error.message : error.stack}`);
     process.exit(1);

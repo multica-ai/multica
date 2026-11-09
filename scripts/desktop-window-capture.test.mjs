@@ -1,9 +1,21 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 
 import { changedFiles, decodePng, flattenPng, parseCli, pickWindow, swapToBase } from "./desktop-window-capture.mjs";
@@ -133,6 +145,7 @@ test("compare swaps changed files to BASE without touching the index, then resto
   writeFileSync(join(repo, "modified.ts"), "base\n");
   writeFileSync(join(repo, "deleted.ts"), "only at base\n");
   writeFileSync(join(repo, "untouched.ts"), "same\n");
+  writeFileSync(join(repo, "unindexed.ts"), "base copy\n");
   git("add", ".");
   git("commit", "-m", "base");
   const base = git("rev-parse", "HEAD");
@@ -147,6 +160,9 @@ test("compare swaps changed files to BASE without touching the index, then resto
   writeFileSync(join(repo, "untracked.ts"), "scratch\n");
   writeFileSync(join(repo, "added.ts"), "staged\n");
   git("add", "added.ts");
+  // Git reports this path as deleted, but a local file still sits on disk.
+  git("rm", "-q", "--cached", "unindexed.ts");
+  writeFileSync(join(repo, "unindexed.ts"), "local edit\n");
   const indexBefore = git("diff", "--cached", "--name-status");
 
   const files = changedFiles(repo, base);
@@ -156,6 +172,7 @@ test("compare swaps changed files to BASE without touching the index, then resto
       { status: "A", path: "added.ts" },
       { status: "D", path: "deleted.ts" },
       { status: "M", path: "modified.ts" },
+      { status: "D", path: "unindexed.ts" },
     ],
   );
   assert.deepEqual(changedFiles(repo, base, ["modified.ts"]), [{ status: "M", path: "modified.ts" }]);
@@ -163,6 +180,7 @@ test("compare swaps changed files to BASE without touching the index, then resto
   const restore = swapToBase(repo, base, files, backup);
   assert.equal(readFileSync(join(repo, "modified.ts"), "utf8"), "base\n");
   assert.equal(readFileSync(join(repo, "deleted.ts"), "utf8"), "only at base\n");
+  assert.equal(readFileSync(join(repo, "unindexed.ts"), "utf8"), "base copy\n");
   assert.equal(existsSync(join(repo, "added.ts")), false);
   assert.equal(readFileSync(join(repo, "untracked.ts"), "utf8"), "scratch\n");
   assert.equal(git("diff", "--cached", "--name-status"), indexBefore);
@@ -172,9 +190,40 @@ test("compare swaps changed files to BASE without touching the index, then resto
   assert.equal(readFileSync(join(repo, "modified.ts"), "utf8"), "uncommitted change\n");
   assert.equal(statSync(join(repo, "modified.ts")).mode & 0o777, 0o755);
   assert.equal(readFileSync(join(repo, "added.ts"), "utf8"), "staged\n");
+  assert.equal(readFileSync(join(repo, "unindexed.ts"), "utf8"), "local edit\n");
   assert.equal(existsSync(join(repo, "deleted.ts")), false);
   assert.equal(git("diff", "--cached", "--name-status"), indexBefore);
   assert.deepEqual(changedFiles(repo, base), files);
+
+  // A symlink or directory in place of a file is refused before anything moves.
+  rmSync(join(repo, "unindexed.ts"));
+  symlinkSync("untracked.ts", join(repo, "unindexed.ts"));
+  assert.throws(() => swapToBase(repo, base, changedFiles(repo, base), backup), /not a regular file/);
+  assert.equal(readFileSync(join(repo, "modified.ts"), "utf8"), "uncommitted change\n");
+  assert.equal(readFileSync(join(repo, "untracked.ts"), "utf8"), "scratch\n");
+});
+
+test("a single capture runs --prepare first and stops when it fails", (t) => {
+  // REPO_ROOT is the script's parent, so a copy next to a stub dev-env.sh
+  // exercises the real entrypoint without a running Desktop.
+  const root = mkdtempSync(join(tmpdir(), "desktop-window-entry-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "scripts"));
+  copyFileSync(fileURLToPath(new URL("./desktop-window-capture.mjs", import.meta.url)), join(root, "scripts", "desktop-window-capture.mjs"));
+  writeFileSync(
+    join(root, "scripts", "dev-env.sh"),
+    `echo '{"name":"stub","desktop_cdp_port":9999,"components":{"desktop":{"state":"running"}}}'\n`,
+  );
+
+  const result = spawnSync(
+    process.execPath,
+    [join(root, "scripts", "desktop-window-capture.mjs"), "--prepare", 'echo "$DESKTOP_CAPTURE_STATE" > prepared; exit 23', join(root, "out.png")],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--prepare exited with 23 for current/);
+  assert.equal(readFileSync(join(root, "prepared"), "utf8"), "current\n");
+  assert.equal(existsSync(join(root, "out.png")), false);
 });
 
 test("pathspecs only make sense with --compare", () => {
