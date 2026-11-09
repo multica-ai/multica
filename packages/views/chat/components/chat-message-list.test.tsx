@@ -584,7 +584,7 @@ describe("ChatMessageList quick actions skeleton", () => {
     created_at: "2026-07-22T00:00:00Z",
   };
 
-  it("renders pill skeletons for the message awaiting its supplement", () => {
+  it("renders chip skeletons for the message awaiting its supplement", () => {
     const qc = new QueryClient();
     const { container } = render(
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
@@ -599,7 +599,7 @@ describe("ChatMessageList quick actions skeleton", () => {
         </QueryClientProvider>
       </I18nProvider>,
     );
-    expect(container.querySelectorAll(".rounded-full[aria-hidden] , [aria-hidden] .rounded-full").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll('[aria-hidden] [data-slot="skeleton"]').length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /suggested/i })).toBeNull();
   });
 
@@ -617,7 +617,7 @@ describe("ChatMessageList quick actions skeleton", () => {
         </QueryClientProvider>
       </I18nProvider>,
     );
-    expect(container.querySelector("[aria-hidden] .rounded-full")).toBeNull();
+    expect(container.querySelector('[aria-hidden] [data-slot="skeleton"]')).toBeNull();
   });
 });
 

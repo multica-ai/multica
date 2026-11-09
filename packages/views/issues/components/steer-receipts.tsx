@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, Check, CornerDownRight, Loader2, RotateCcw } from "lucide-react";
+import { AlertCircle, Check, CornerDownRight, Loader2, RotateCcw } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useCreateComment, useRetryTaskSupplement } from "@multica/core/issues/mutations";
 import { api } from "@multica/core/api";

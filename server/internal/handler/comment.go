@@ -62,6 +62,10 @@ type CommentResponse struct {
 	// replies.
 	ReplyCount     *int    `json:"reply_count,omitempty"`
 	LastActivityAt *string `json:"last_activity_at,omitempty"`
+	// Populated on roots_only for reply-resolved threads.
+	ResolutionID               *string `json:"resolution_id,omitempty"`
+	ResolutionContent          *string `json:"resolution_content,omitempty"`
+	ResolutionContentTruncated *bool   `json:"resolution_content_truncated,omitempty"`
 	// ContentTruncated is set only under summary=true: true when Content was
 	// clipped to the summary budget, false when it fit. nil (omitted) means the
 	// caller did not request a summary projection, so Content is verbatim.
@@ -353,14 +357,11 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 
 	var sinceTime pgtype.Timestamptz
 	if v := q.Get("since"); v != "" {
+		// RFC3339Nano parsing also accepts timestamps without fractional seconds.
 		t, err := time.Parse(time.RFC3339Nano, v)
 		if err != nil {
-			// Fall back to RFC3339 for backwards-compat with the original CLI.
-			t, err = time.Parse(time.RFC3339, v)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "invalid since parameter; expected RFC3339 format")
-				return
-			}
+			writeError(w, http.StatusBadRequest, "invalid since parameter; expected RFC3339 format")
+			return
 		}
 		sinceTime = pgtype.Timestamptz{Time: t, Valid: true}
 	}
@@ -489,11 +490,8 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	if beforeTimeStr != "" {
 		t, err := time.Parse(time.RFC3339Nano, beforeTimeStr)
 		if err != nil {
-			t, err = time.Parse(time.RFC3339, beforeTimeStr)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, "invalid before parameter; expected RFC3339 format")
-				return
-			}
+			writeError(w, http.StatusBadRequest, "invalid before parameter; expected RFC3339 format")
+			return
 		}
 		beforeCursor = pgtype.Timestamptz{Time: t, Valid: true}
 		uuid, perr := util.ParseUUID(beforeIDStr)
@@ -598,6 +596,20 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 				la := timestampToString(st.LastActivityAt)
 				resp[i].LastActivityAt = &la
 			}
+			if c.ResolvedAt.Valid || st.ResolutionID.Valid {
+				resolved := true
+				resp[i].ThreadResolved = &resolved
+			}
+			if !c.ResolvedAt.Valid && st.ResolutionID.Valid {
+				resp[i].ResolutionID = uuidToPtr(st.ResolutionID)
+				content := st.ResolutionContent.String
+				if summary {
+					clipped, truncated := summarizeContent(content)
+					content = clipped
+					resp[i].ResolutionContentTruncated = &truncated
+				}
+				resp[i].ResolutionContent = &content
+			}
 		}
 		// Attach fold annotations on a resolved thread's root (nil map elsewhere;
 		// keyed by root id, so only root comments match).
@@ -678,8 +690,10 @@ type fetchCommentsResult struct {
 // rootStat is the per-thread orientation metadata attached to each root comment
 // on the roots_only path. See CommentResponse.ReplyCount / LastActivityAt.
 type rootStat struct {
-	ReplyCount     int
-	LastActivityAt pgtype.Timestamptz
+	ReplyCount        int
+	LastActivityAt    pgtype.Timestamptz
+	ResolutionID      pgtype.UUID
+	ResolutionContent pgtype.Text
 }
 
 var (
@@ -1001,7 +1015,12 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 					SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, Revision: r.Revision,
 					DeletedAt: r.DeletedAt,
 				}
-				stats[uuidToString(r.ID)] = rootStat{ReplyCount: int(r.ReplyCount), LastActivityAt: r.LastActivityAt}
+				stats[uuidToString(r.ID)] = rootStat{
+					ReplyCount:        int(r.ReplyCount),
+					LastActivityAt:    r.LastActivityAt,
+					ResolutionID:      r.ResolutionID,
+					ResolutionContent: r.ResolutionContent,
+				}
 			}
 			return fetchCommentsResult{
 				Comments: comments, RootStats: stats, CommentsTruncated: truncated,
@@ -1032,7 +1051,12 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, Revision: r.Revision,
 				DeletedAt: r.DeletedAt,
 			}
-			stats[uuidToString(r.ID)] = rootStat{ReplyCount: int(r.ReplyCount), LastActivityAt: r.LastActivityAt}
+			stats[uuidToString(r.ID)] = rootStat{
+				ReplyCount:        int(r.ReplyCount),
+				LastActivityAt:    r.LastActivityAt,
+				ResolutionID:      r.ResolutionID,
+				ResolutionContent: r.ResolutionContent,
+			}
 		}
 		return fetchCommentsResult{
 			Comments: comments, RootStats: stats, CommentsTruncated: truncated,
@@ -1425,6 +1449,9 @@ type CreateCommentRequest struct {
 	// has ended, or cannot take additional input, is never swapped for another
 	// one: its agent keeps the normal trigger.
 	SteerTaskIDs []string `json:"steer_task_ids"`
+	// Steer adds the comment to the current running turn of every recipient
+	// that has no turn in SteerTaskIDs, with the same fallback.
+	Steer bool `json:"steer"`
 }
 
 type CommentTriggerPreviewRequest struct {
@@ -1706,8 +1733,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	// A running turn receives text only, so a comment that carries files is
 	// always a normal trigger.
+	steer := commentSteerRequest{TaskIDs: steerTaskIDs, All: req.Steer}
 	if len(attachmentIDs) > 0 {
-		steerTaskIDs = nil
+		steer = commentSteerRequest{}
 	}
 
 	// Determine author identity: agent (via X-Agent-ID header) or member.
@@ -1917,8 +1945,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// The comment is already saved; a blocked mention must not fail the whole
 	// request. Surface the per-target outcomes so the client can show partial
 	// success instead of a silent no-op (MUL-4525 §2).
-	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs, steerTaskIDs)
-	if len(steerTaskIDs) > 0 {
+	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs, steer)
+	if !steer.empty() {
 		applyCommentSupplements(&resp, h.listCommentSupplements(r.Context(), issue.WorkspaceID, []pgtype.UUID{comment.ID})[uuidToString(comment.ID)])
 	}
 
@@ -1962,9 +1990,9 @@ func isNoteComment(content string) bool {
 // deferred / blocked from enqueue. UI-suppressed triggers (the user unchecked
 // them) are removed before enqueue and produce no outcome.
 //
-// steerTaskIDs are the running turns the author chose: a recipient whose chosen
+// steer names the running turns the author chose: a recipient whose chosen
 // turn is still running receives this comment there instead of a follow-up run.
-func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs, steerTaskIDs []pgtype.UUID) []CommentTriggerOutcome {
+func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs []pgtype.UUID, steer commentSteerRequest) []CommentTriggerOutcome {
 	if isNoteComment(comment.Content) {
 		return nil
 	}
@@ -1975,12 +2003,14 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	})
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
 	h.noteBlockedRuntimeTargets(ctx, issue, targets)
-	triggers, steered := h.steerCommentAgentTriggers(ctx, issue, comment, actorType, triggers, steerTaskIDs)
+	triggers, steered := h.steerCommentAgentTriggers(ctx, issue, comment, actorType, actorID, originatorUserID, triggers, steer)
 	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
 	for agentID, result := range steered {
 		enqueued[agentID] = result
 	}
-	return commentTriggerOutcomes(targets, enqueued)
+	outcomes := commentTriggerOutcomes(targets, enqueued)
+	h.noteCommentInvocationDenied(ctx, issue, comment, outcomes)
+	return outcomes
 }
 
 // noteBlockedRuntimeTargets leaves one system comment per agent refused for an
@@ -2450,6 +2480,9 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 	// The fold re-attributes the queued run to this comment's author; record that
 	// human's action now, since the run row keeps no history of who acted.
 	h.TaskService.RecordHumanDelegation(ctx, attr)
+	// The run's status is unchanged, so no lifecycle event tells clients that it
+	// now answers this comment.
+	h.TaskService.BroadcastTaskCoalesced(ctx, row)
 	return commentMergeSucceeded
 }
 
@@ -3546,7 +3579,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, existing.ID)
-		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs, nil)
+		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs, commentSteerRequest{})
 	}
 
 	// Fetch reactions and attachments for the updated comment.

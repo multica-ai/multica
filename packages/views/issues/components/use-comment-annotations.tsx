@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { MessageSquarePlus, Trash2 } from "lucide-react";
+import { MessageSquarePlus, Trash2 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { isImeComposing } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
@@ -257,7 +257,7 @@ export function useCommentAnnotations({ draftKey, sources, enabled, onAdded, edi
         if (index < 0) return null;
         return <CommentSelectionBubble key={anchor.id} range={anchor.range} source={anchor.root} owner={draftKey}
           markerRanges={markerRanges.get(anchor.root)}>
-          <IconButton variant="brandSubtle" size="icon-sm" className="size-6 rounded-full text-caption tabular-nums aria-expanded:ring-2 aria-expanded:ring-brand"
+          <IconButton variant="brandSubtle" size="icon-sm" className="size-6 text-caption tabular-nums aria-expanded:ring-2 aria-expanded:ring-brand"
             aria-expanded={editingId === anchor.id}
             label={t(($) => $.reply.annotations.edit, { number: index + 1 })}
             onClick={() => editAnnotation(anchor.id)}>{index + 1}</IconButton>

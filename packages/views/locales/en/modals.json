@@ -61,6 +61,12 @@
     "toast_failed": "Failed to add sub-issue",
     "toast_success": "Added {{identifier}} as sub-issue"
   },
+  "add_project_issue": {
+    "title": "Add existing issue",
+    "description": "Search for an issue to move into this project",
+    "toast_success": "Moved {{identifier}} into the project",
+    "toast_failed": "Failed to move the issue"
+  },
   "run_confirm": {
     "title_assign": "Confirm assignment?",
     "assign_single": "Assign this issue to {{name}}. They'll start right away if the run conditions are met.",
@@ -252,6 +258,7 @@
       "sent_label": "Sent",
       "sent_count": "{{count}} sent",
       "version_blocked_tooltip": "Daemon CLI must be ≥ {{min}}",
+      "qoder_attachments_unsupported": "Qoder Cloud Agents can't read attachments. Remove them or pick another agent.",
       "toast_sent": "Sent to agent — you'll get an inbox notification when it's done",
       "error_agent_unavailable_fallback": "Agent is unavailable. Pick another agent.",
       "error_daemon_version": "This agent's daemon CLI ({{current}}) is below the required {{min}}. Upgrade the daemon to use Create with agent.",
@@ -266,5 +273,13 @@
     "toast_failed": "Failed to mark as duplicate",
     "error_target_is_duplicate": "{{identifier}} is itself a duplicate. Pick its original instead.",
     "error_has_duplicates": "Other issues are marked as duplicates of this one. Remove those marks first."
+  },
+  "copy_parent_fields": {
+    "trigger": "Copy parent fields",
+    "title": "Copy parent fields",
+    "description": "From {{identifier}}. Replaces selected draft values once; later changes do not sync.",
+    "apply": "Copy {{count}} fields",
+    "no_labels": "No labels",
+    "manual_only": "Labels, start date and custom properties apply only to manual creation."
   }
 }

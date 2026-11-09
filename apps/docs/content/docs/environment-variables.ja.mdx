@@ -123,6 +123,10 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 
 `S3_BUCKET` が未設定の場合、Multica はローカルディスクを使います。
 
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `MULTICA_MAX_PREVIEW_SIZE` | `2MiB` | テキストと HTML のオンラインプレビュー本文の上限。最大 `16MiB`。正の整数のバイト数、`KB`/`KiB`、`MB`/`MiB`（二進単位）を指定できます。`16MiB` を超える有効な値は `16MiB` に制限され、不正な値はデフォルトに戻ります。上限を増やすと、特に構文ハイライトや Markdown の描画でブラウザーのプレビューが遅くなる場合があります。変更後は API を再起動してください。アップロードとダウンロードの制限は変わりません。 |
+
 ### S3 または互換ストレージ
 
 | 変数 | デフォルト | 説明 |
@@ -135,6 +139,8 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | `S3_USE_PATH_STYLE` | カスタム endpoint 時は `true` | path-style アドレスを使うか |
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`、`cloudfront`、`presign`、`proxy` |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | 署名付きダウンロード URL の有効期間 |
+
+`AWS_ENDPOINT_URL` が Google Cloud Storage を指す場合、`Accept-Encoding` はリクエスト署名から自動的に除外されます。
 
 内部ネットワークの MinIO など、ブラウザから endpoint に直接到達できない場合は `ATTACHMENT_DOWNLOAD_MODE=proxy` を使ってください。
 
@@ -269,7 +275,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | `MULTICA_GC_TTL` | `24h` | タスクが `done` または `closed` カテゴリに入ってから、またはチャットセッションがアーカイブされてから、実行ディレクトリを削除するまでの時間 |
 | `MULTICA_GC_COMPLETED_TASK_TTL` | Multica Cloud は `14d`、セルフホストは `0` | タスクの実行が完了してからディレクトリ全体を削除するまでの時間。タスクが閉じているかどうかは問わない。`0` で無効。プロジェクトのローカルディレクトリでの実行には適用されない |
 | `MULTICA_GC_ORPHAN_TTL` | `72h` | 持ち主が見つからないディレクトリを、変更がないまま何時間経ったら削除するか |
-| `MULTICA_GC_ARTIFACT_TTL` | `12h` | 実行完了後、再生成できる内容（次の行のディレクトリと、デーモンが Codex 用に用意するキャッシュ）を削除するまでの時間。`0` で削除しない |
+| `MULTICA_GC_ARTIFACT_TTL` | `12h` | 実行終了からデーモンが再生成できる内容を削除するまでの時間。次の行のパターンは、まだ閉じていないタスクと、管理対象の作業ディレクトリを使う未アーカイブのチャットに適用される。デーモンが管理する Codex キャッシュにも同じ時間が適用される。`0` でこれらのキャッシュを保持する |
 | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` | 再生成できるとみなすディレクトリ名（カンマ区切り）。設定するとデフォルトの一覧を**置き換える**ため、デフォルトも残したいなら一緒に書く。`/` や `\` を含む項目は無視される |
 | `MULTICA_GC_REPO_TTL` | `30d` | どこからも参照されず worktree も残っていないベアリポジトリキャッシュを、チェックアウトがないまま何日経ったら削除するか。`0` で削除しない |
 | `MULTICA_GC_REPO_MAINTENANCE_ENABLED` | `true` | 古いエージェントブランチを消したあと、リポジトリキャッシュに `git reflog expire` と `git gc` を実行するか。`false` でこの手順だけを止める |

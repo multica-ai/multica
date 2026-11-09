@@ -76,7 +76,7 @@
     "header_rate": "失败率",
     "other_agents": "其他智能体",
     "low_sample": "所选时间范围内运行不足 {{count}} 次，失败率参考价值有限。",
-    "no_data": "所选时间范围内没有失败的运行。",
+    "no_data": "所选时间范围内没有失败的运行",
     "show_reasons": "展开错误码",
     "hide_reasons": "收起错误码",
     "show_all": "展开全部 {{count}} 个",
@@ -103,7 +103,7 @@
   },
   "empty": {
     "title": "暂无消耗数据",
-    "body": "运行智能体后可查看 token 用量和耗时。"
+    "body": "智能体开始运行后，这里会显示 token、费用和失败率。"
   },
   "duration": {
     "less_than_minute": "<1分钟"

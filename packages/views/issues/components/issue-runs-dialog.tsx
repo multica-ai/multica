@@ -3,7 +3,7 @@
 import { useId, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { issueTasksOptions } from "@multica/core/issues/queries";
-import { ArrowRight, Ban, ChevronRight, XCircle } from "lucide-react";
+import { ArrowRight, Ban, ChevronRight, XCircle } from "@multica/ui/icons";
 import type { AgentTask } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -14,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -27,6 +28,7 @@ import {
   collectUnmappedModels,
   formatTokens,
   formatUsd,
+  hasTokenFigure,
   type CostBreakdown,
 } from "../../runtimes/utils";
 import { AttributionBadge } from "./attribution-badge";
@@ -43,7 +45,7 @@ import {
 import { RunCumulativeChart } from "./issue-runs-cumulative-chart";
 import { canRetryRun, RetryRunButton } from "./retry-run-button";
 import { RunTriggerLabel } from "./run-trigger-label";
-import { useStatusLabel, useTriggerText } from "./task-run-labels";
+import { useFormatSpend, useStatusLabel, useTriggerText } from "./task-run-labels";
 
 // The issue's runs laid out in time — the surface the execution log's header
 // and cost bars open.
@@ -246,6 +248,7 @@ const UNDER_A_SECOND = "0s";
 
 function RunStats({ timeline }: { timeline: RunTimeline }) {
   const { t } = useT("issues");
+  const formatSpend = useFormatSpend();
   const percent = usePercent();
   const priced = timeline.pricedCount > 0;
   const hit = cacheHitRate(timeline.tokens);
@@ -264,12 +267,14 @@ function RunStats({ timeline }: { timeline: RunTimeline }) {
         {/* Proportional figures: a standalone hero number set in tabular
             digits reads loose. "—" when nothing reported usage — never $0. */}
         <span className="text-display-sm font-semibold">
-          {priced ? formatUsd(timeline.totalCost) : "—"}
+          {priced ? formatSpend({ cost: timeline.totalCost, credits: timeline.totalCredits }) : "—"}
         </span>
       </Stat>
       <Stat label={t(($) => $.runs_timeline.stat_tokens)}>
         <span className="text-title-sm font-medium tabular-nums">
-          {priced ? formatTokens(timeline.tokens.total) : "—"}
+          {priced && hasTokenFigure({ tokens: timeline.tokens.total, credits: timeline.totalCredits })
+            ? formatTokens(timeline.tokens.total)
+            : "—"}
         </span>
         {/* Cache reads are most of an agent's tokens; without the share the
             total reads as far more fresh work than it was. */}
@@ -631,6 +636,7 @@ function formatTick(v: number): string {
 
 function RunHoverCard({ run, parts }: { run: TimelineRun; parts: boolean }) {
   const { t } = useT("issues");
+  const formatSpend = useFormatSpend();
   const partLabel = useCostPartLabel();
   const { getActorName } = useActorName();
   const trigger = useTriggerText(run.task);
@@ -662,11 +668,13 @@ function RunHoverCard({ run, parts }: { run: TimelineRun; parts: boolean }) {
       <span className="text-micro tabular-nums">
         {run.usage ? (
           <>
-            <span className="font-medium">{formatUsd(run.usage.cost)}</span>
-            <span className="text-muted-foreground">
-              {" · "}
-              {t(($) => $.runs_timeline.tokens_count, { tokens: formatTokens(run.usage.tokens) })}
-            </span>
+            <span className="font-medium">{formatSpend(run.usage)}</span>
+            {hasTokenFigure(run.usage) && (
+              <span className="text-muted-foreground">
+                {" · "}
+                {t(($) => $.runs_timeline.tokens_count, { tokens: formatTokens(run.usage.tokens) })}
+              </span>
+            )}
           </>
         ) : (
           <span className="text-muted-foreground">{t(($) => $.runs_timeline.no_usage)}</span>
@@ -777,15 +785,17 @@ const COL = {
   model: "w-24 shrink-0",
   status: "w-20 shrink-0",
   tokens: "w-14 shrink-0 text-right",
-  cost: "w-14 shrink-0 text-right",
+  cost: "shrink-0 break-words whitespace-normal text-right",
   actions: "w-14 shrink-0",
   toggle: "w-6 shrink-0",
 } as const;
 
 function RunDayList({ timeline, issueId, showIssue }: { timeline: RunTimeline; issueId: string; showIssue: boolean }) {
   const { t } = useT("issues");
+  const formatSpend = useFormatSpend();
   const locale = useLocale();
   const groups = useMemo(() => groupRunsByDay(timeline.runs), [timeline.runs]);
+  const costWidth = timeline.totalCredits.size > 0 ? "w-44" : "w-14";
 
   const dayLabel = useMemo(() => {
     const fmt = new Intl.DateTimeFormat(locale, { weekday: "short", month: "short", day: "numeric" });
@@ -814,7 +824,7 @@ function RunDayList({ timeline, issueId, showIssue }: { timeline: RunTimeline; i
         <span className={COL.model}>{t(($) => $.runs_timeline.col_model)}</span>
         <span className={COL.status}>{t(($) => $.runs_timeline.col_duration)}</span>
         <span className={COL.tokens}>{t(($) => $.runs_timeline.col_tokens)}</span>
-        <span className={COL.cost}>{t(($) => $.runs_timeline.col_cost)}</span>
+        <span className={cn(COL.cost, costWidth)}>{t(($) => $.runs_timeline.col_cost)}</span>
         <span className={COL.actions} />
         <span className={COL.toggle} />
       </div>
@@ -830,15 +840,17 @@ function RunDayList({ timeline, issueId, showIssue }: { timeline: RunTimeline; i
                 {[
                   t(($) => $.runs_timeline.day_runs, { count: group.runs.length }),
                   group.agentMs > 0 ? formatDuration(group.agentMs / 1000, UNDER_A_SECOND) : null,
-                  priced ? t(($) => $.runs_timeline.tokens_count, { tokens: formatTokens(group.tokens) }) : null,
-                  priced ? formatUsd(group.cost) : null,
+                  priced && hasTokenFigure(group)
+                    ? t(($) => $.runs_timeline.tokens_count, { tokens: formatTokens(group.tokens) })
+                    : null,
+                  priced ? formatSpend(group) : null,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
               </span>
             </div>
             {group.runs.map((run) => (
-              <RunListRow key={run.task.id} run={run} issueId={run.task.issue_id || issueId} showIssue={showIssue} />
+              <RunListRow key={run.task.id} run={run} issueId={run.task.issue_id || issueId} showIssue={showIssue} costWidth={costWidth} />
             ))}
           </section>
         );
@@ -859,8 +871,9 @@ function useStatusReason(task: AgentTask): string | null {
   return [cancelledBy, reason].filter(Boolean).join(" · ") || null;
 }
 
-function RunListRow({ run, issueId, showIssue }: { run: TimelineRun; issueId: string; showIssue: boolean }) {
+function RunListRow({ run, issueId, showIssue, costWidth }: { run: TimelineRun; issueId: string; showIssue: boolean; costWidth: string }) {
   const { t } = useT("issues");
+  const formatSpend = useFormatSpend();
   const locale = useLocale();
   const { getActorName } = useActorName();
   const [expanded, setExpanded] = useState(false);
@@ -884,7 +897,7 @@ function RunListRow({ run, issueId, showIssue }: { run: TimelineRun; issueId: st
 
   return (
     <div className={cn("border-b", expanded && "bg-accent/40")}>
-      <div className="group/run-row flex h-9 items-center gap-2 text-caption transition-colors hover:bg-accent/40">
+      <div className="group/run-row flex min-h-9 items-center gap-2 py-1 text-caption transition-colors hover:bg-accent/40">
         <span className={cn(COL.time, "font-mono text-micro tabular-nums text-muted-foreground")}>
           {time}
         </span>
@@ -895,20 +908,21 @@ function RunListRow({ run, issueId, showIssue }: { run: TimelineRun; issueId: st
             tooltip and, whole and wrapped, at the top of the transcript. */}
         <RunTriggerLabel task={task} fallback={label}>
           {(text) => (
-            <span
-              title={text}
-              className={cn(
-                "min-w-0 flex-1 truncate text-label",
-                run.usage || run.active ? "text-foreground" : "text-muted-foreground",
-              )}
-            >
-              {showIssue && (
-                <span className="mr-2 font-mono text-micro text-muted-foreground" title={task.issue_title}>
-                  {task.issue_identifier || task.issue_id}
-                </span>
-              )}
-              {text}
-            </span>
+            <TruncatedTooltip content={text}>
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate text-label",
+                  run.usage || run.active ? "text-foreground" : "text-muted-foreground",
+                )}
+              >
+                {showIssue && (
+                  <span className="mr-2 font-mono text-micro text-muted-foreground" title={task.issue_title}>
+                    {task.issue_identifier || task.issue_id}
+                  </span>
+                )}
+                {text}
+              </span>
+            </TruncatedTooltip>
           )}
         </RunTriggerLabel>
         <ArrowRight aria-hidden className={cn(COL.arrow, "size-3 text-faint-foreground")} />
@@ -956,15 +970,15 @@ function RunListRow({ run, issueId, showIssue }: { run: TimelineRun; issueId: st
         {run.usage ? (
           <>
             <span className={cn(COL.tokens, "tabular-nums text-muted-foreground")}>
-              {formatTokens(run.usage.tokens)}
+              {hasTokenFigure(run.usage) ? formatTokens(run.usage.tokens) : "—"}
             </span>
-            <span className={cn(COL.cost, "font-medium tabular-nums")}>{formatUsd(run.usage.cost)}</span>
+            <span className={cn(COL.cost, costWidth, "font-medium tabular-nums")}>{formatSpend(run.usage)}</span>
           </>
         ) : (
           // No figure is not zero: a run without usage data was not free.
           <>
             <span className={cn(COL.tokens, "text-faint-foreground")}>—</span>
-            <span className={cn(COL.cost, "text-faint-foreground")} title={t(($) => $.runs_timeline.no_usage)}>
+            <span className={cn(COL.cost, costWidth, "text-faint-foreground")} title={t(($) => $.runs_timeline.no_usage)}>
               —
             </span>
           </>
@@ -1003,6 +1017,7 @@ function RunListRow({ run, issueId, showIssue }: { run: TimelineRun; issueId: st
 
 function RunDetails({ id, run, reason }: { id: string; run: TimelineRun; reason: string | null }) {
   const { t } = useT("issues");
+  const formatSpend = useFormatSpend();
   const locale = useLocale();
   const partLabel = useCostPartLabel();
   const percent = usePercent();
@@ -1052,8 +1067,8 @@ function RunDetails({ id, run, reason }: { id: string; run: TimelineRun; reason:
             ))}
             <span />
             <span className="font-medium">{t(($) => $.runs_timeline.detail_total)}</span>
-            <span className="text-right font-medium">{formatTokens(usage.tokens)}</span>
-            <span className="w-14 text-right font-semibold">{formatUsd(usage.cost)}</span>
+            <span className="text-right font-medium">{hasTokenFigure(usage) ? formatTokens(usage.tokens) : "—"}</span>
+            <span className="min-w-14 max-w-64 break-words text-right font-semibold">{formatSpend(usage)}</span>
             <span />
           </div>
         </div>
@@ -1087,9 +1102,11 @@ function RunDetails({ id, run, reason }: { id: string; run: TimelineRun; reason:
         {run.task.branch_name && (
           <>
             <dt className="text-muted-foreground">{t(($) => $.runs_timeline.detail_branch)}</dt>
-            <dd className="min-w-0 truncate font-mono text-micro" title={run.task.branch_name}>
-              {run.task.branch_name}
-            </dd>
+            <TruncatedTooltip content={run.task.branch_name}>
+              <dd className="min-w-0 truncate font-mono text-micro">
+                {run.task.branch_name}
+              </dd>
+            </TruncatedTooltip>
           </>
         )}
       </dl>

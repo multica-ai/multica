@@ -1166,7 +1166,7 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 			// settles the run; do not treat "not yet dispatched" as success.
 			return
 		}
-		updatedRun, err := s.completeAutopilotRun(ctx, db.UpdateAutopilotRunCompletedParams{
+		updatedRun, err := s.completeAutopilotRun(ctx, autopilotRunCompletion{
 			ID: run.ID,
 		})
 		if err != nil {
@@ -1177,7 +1177,7 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 		s.publishRunDone(wsID, updatedRun, "completed")
 	case "cancelled":
 		reason := "issue " + issue.Status
-		updatedRun, err := s.failAutopilotRun(ctx, db.UpdateAutopilotRunFailedParams{
+		updatedRun, err := s.failAutopilotRun(ctx, autopilotRunFailure{
 			ID:            run.ID,
 			FailureReason: pgtype.Text{String: reason, Valid: true},
 		})
@@ -1209,7 +1209,7 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 
 	switch task.Status {
 	case "completed":
-		updatedRun, err := s.completeAutopilotRun(ctx, db.UpdateAutopilotRunCompletedParams{
+		updatedRun, err := s.completeAutopilotRun(ctx, autopilotRunCompletion{
 			ID:     run.ID,
 			Result: task.Result,
 		})
@@ -1221,7 +1221,7 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		s.publishRunDone(wsID, updatedRun, "completed")
 	case "failed", "cancelled":
 		reason := taskFailureReasonForAutopilotRun(task)
-		updatedRun, err := s.failAutopilotRun(ctx, db.UpdateAutopilotRunFailedParams{
+		updatedRun, err := s.failAutopilotRun(ctx, autopilotRunFailure{
 			ID:            run.ID,
 			FailureReason: pgtype.Text{String: reason, Valid: reason != ""},
 		})
@@ -1311,7 +1311,7 @@ func (s *AutopilotService) settleRunFromDispatchTask(ctx context.Context, run db
 	}
 
 	reason := taskFailureReasonForAutopilotRun(task)
-	updatedRun, err := s.failAutopilotRun(ctx, db.UpdateAutopilotRunFailedParams{
+	updatedRun, err := s.failAutopilotRun(ctx, autopilotRunFailure{
 		ID:            run.ID,
 		FailureReason: pgtype.Text{String: reason, Valid: reason != ""},
 	})
@@ -1336,7 +1336,7 @@ func (s *AutopilotService) completeRunFromLinkedIssueTask(ctx context.Context, r
 	if err != nil {
 		return
 	}
-	updatedRun, err := s.completeAutopilotRun(ctx, db.UpdateAutopilotRunCompletedParams{
+	updatedRun, err := s.completeAutopilotRun(ctx, autopilotRunCompletion{
 		ID: run.ID,
 	})
 	if err != nil {
@@ -1525,7 +1525,7 @@ func (s *AutopilotService) handleDispatchSkip(ctx context.Context, ap db.Autopil
 }
 
 func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reason string) {
-	if _, err := s.failAutopilotRun(ctx, db.UpdateAutopilotRunFailedParams{
+	if _, err := s.failAutopilotRun(ctx, autopilotRunFailure{
 		ID:            runID,
 		FailureReason: pgtype.Text{String: reason, Valid: true},
 		ReasonCode:    pgtype.Text{String: string(dispatch.ReasonInternalError), Valid: true},

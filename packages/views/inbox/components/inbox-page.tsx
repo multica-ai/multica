@@ -8,9 +8,9 @@ import {
   useMemo,
   useRef,
 } from "react";
-import { useDefaultLayout } from "react-resizable-panels";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { MulticaBleedMark } from "@multica/ui/components/common/multica-graphics";
 import { ApiError, errorCode } from "@multica/core/api";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
@@ -53,6 +53,7 @@ import {
 
 import { IssueDetail, issueHighlightMementoKey } from "../../issues/components/issue-detail";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
+import { useRegisterCommandBarContext } from "../../search/register-context";
 import { IssuePeekHost } from "../../issues/components/issue-peek";
 import { useIssueSurfaceActivity } from "../../issues/surface/activity";
 import { useViewStateWriter } from "../../platform";
@@ -66,10 +67,10 @@ import {
   Archive,
   ArchiveRestore,
   BookCheck,
-  ChevronLeft,
+  ChevronDown,
   ListChecks,
   ArrowLeft,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import type { InboxItem } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -78,11 +79,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from "@multica/ui/components/ui/resizable";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { NumberFlow } from "@multica/ui/components/ui/number-flow";
 import {
@@ -90,11 +86,16 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { cn } from "@multica/ui/lib/utils";
-import { PAGE_GUTTER, PageHeader } from "../../layout/page-header";
+import { CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "../../layout/page-header";
+import { PanelHeader } from "../../layout/panel-nav";
+import { useListColumnCollapsed } from "../../layout/app-shell-context";
+import { ListColumn } from "../../layout/list-column";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
 import { InboxFilterMenu } from "./inbox-filter-menu";
@@ -111,9 +112,6 @@ import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
 import { useT } from "../../i18n";
 import { useIssueLimitUpgradePrompt } from "../../modals/use-issue-limit-upgrade-prompt";
 
-const INBOX_LIST_DEFAULT_SIZE = 260;
-const INBOX_LIST_MIN_SIZE = 240;
-const INBOX_LIST_MAX_SIZE = 400;
 
 export function InboxPage() {
   const queryClient = useQueryClient();
@@ -217,6 +215,17 @@ export function InboxPage() {
     ]);
   }, [isArchivedView, selectedOnPage, filteredItems, lookupItems, effectiveFilters, filterContext]);
   const visibleItems = isArchivedView && pinnedKey ? selectionItems : filteredItems;
+
+  // Inbox zero: the bleeding m rises once, at the moment the last notification
+  // leaves; opening an already-empty inbox shows it at rest. Archived and
+  // filtered views are not inbox zero, so they never arm it.
+  const inboxZeroCount = isArchivedView || hasActiveFilters ? -1 : visibleItems.length;
+  const [prevInboxZeroCount, setPrevInboxZeroCount] = useState(inboxZeroCount);
+  const [inboxZeroRises, setInboxZeroRises] = useState(false);
+  if (inboxZeroCount !== prevInboxZeroCount) {
+    setPrevInboxZeroCount(inboxZeroCount);
+    setInboxZeroRises(prevInboxZeroCount > 0 && inboxZeroCount === 0);
+  }
   const selected = selectionItems.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
   const selectedInView = selectedOnPage ?? (isArchivedView ? lookupItems.find((i) => (i.issue_id ?? i.id) === selectedKey) : null);
   const selectionFilteredOut = !!selectedKey && !!selectedInView && !selected;
@@ -277,10 +286,6 @@ export function InboxPage() {
     replace(buildInboxUrl(nextView, ""));
   }, [replace, buildInboxUrl]);
 
-  // Stable identity: InboxList memoizes the archive entry on this callback, so
-  // an inline arrow here would rebuild (and remount) the entry every render.
-  const openArchived = useCallback(() => setView("archived"), [setView]);
-
   // Applying a filter can remove the open row from the list. Clear that local
   // selection instead of treating it as a broken deep link and redirecting to
   // the issue page; the notification still exists, it is simply filtered out.
@@ -325,11 +330,8 @@ export function InboxPage() {
     setSelectedKey,
   ]);
 
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "multica_inbox_layout",
-  });
-
   const isCompact = useIsCompact();
+  const listCollapsed = useListColumnCollapsed();
   const unreadCount = useInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
@@ -352,16 +354,22 @@ export function InboxPage() {
   // re-opening the row later marks it read again like any other open.
   const manualUnreadIdRef = useRef<string | null>(null);
 
-  // Auto-mark-read whenever a selected item is unread — covers both click-
-  // to-select and URL-param-select (e.g. OS notification click on desktop).
-  // The mutation flips `read: true` optimistically, so this effect settles
-  // in one pass and can't loop. Kept in a `useEffect` rather than inlined
-  // in handleSelect so URL-driven selection triggers it too.
+  // Read once on opening, even if the visible row is already read: older
+  // unread notifications can still be hidden under it. Also read new unread
+  // arrivals while the row stays open. Track the opening separately from the
+  // optimistic cache patch so a read row cannot cause a request loop.
+  const openedItemIdRef = useRef<string | null>(null);
   const markReadMutate = markReadMutation.mutate;
   const selectedId = selected?.id;
   const selectedRead = selected?.read;
   useEffect(() => {
-    if (!selectedId || selectedRead) return;
+    if (!selectedId) {
+      openedItemIdRef.current = null;
+      return;
+    }
+    const justOpened = openedItemIdRef.current !== selectedId;
+    openedItemIdRef.current = selectedId;
+    if (!justOpened && selectedRead) return;
     if (manualUnreadIdRef.current === selectedId) return;
     if (filters.unreadOnly) {
       pinnedUnreadKeyRef.current = selectedKey;
@@ -571,6 +579,37 @@ export function InboxPage() {
     });
   };
 
+  // The command bar calls the page's own handlers, so archiving from it moves
+  // the selection and toasts exactly like the row actions do.
+  const commandBarHandlersRef = useRef({
+    handleArchive,
+    handleMarkUnread,
+    handleMarkAllRead,
+    handleArchiveAllRead,
+  });
+  useEffect(() => {
+    commandBarHandlersRef.current = {
+      handleArchive,
+      handleMarkUnread,
+      handleMarkAllRead,
+      handleArchiveAllRead,
+    };
+  });
+  const commandBarItem = isArchivedView ? null : selected;
+  useRegisterCommandBarContext(
+    useMemo(
+      () => ({
+        kind: "inbox",
+        item: commandBarItem,
+        archive: (id: string) => commandBarHandlersRef.current.handleArchive(id),
+        markUnread: (id: string) => commandBarHandlersRef.current.handleMarkUnread(id),
+        markAllRead: () => commandBarHandlersRef.current.handleMarkAllRead(),
+        archiveAllRead: () => commandBarHandlersRef.current.handleArchiveAllRead(),
+      }),
+      [commandBarItem],
+    ),
+  );
+
   const handleArchiveCompleted = () => {
     setSelectedKey("");
     archiveCompletedMutation.mutate(undefined, {
@@ -586,10 +625,43 @@ export function InboxPage() {
   // -- Shared sub-components --------------------------------------------------
 
   const listHeader = (
-    <PageHeader>
-      <div className="flex flex-1 items-center gap-2">
-        <h1 className="text-body font-semibold">{t(($) => $.page.title)}</h1>
-        {unreadCount > 0 && (
+    <PanelHeader
+      as="h1"
+      title={
+        // The archive is a second list of the same page, so the title doubles
+        // as the switch between the two instead of costing a row of its own.
+        <DropdownMenu>
+          <DropdownMenuTrigger className="-ml-1.5 mr-1.5 flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 outline-none transition-colors hover:bg-accent/60 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring aria-expanded:bg-accent/60">
+            <span className="min-w-0 truncate">
+              {isArchivedView ? t(($) => $.list.archived_title) : t(($) => $.page.title)}
+            </span>
+            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-auto min-w-44">
+            <DropdownMenuRadioGroup
+              value={view}
+              onValueChange={(value) => setView(value as InboxView)}
+            >
+              <DropdownMenuRadioItem value="inbox">
+                <Inbox className="h-4 w-4" />
+                <span className="flex-1">{t(($) => $.page.title)}</span>
+                {unreadCount > 0 && (
+                  <span className="text-caption tabular-nums text-muted-foreground">
+                    {unreadCount}
+                  </span>
+                )}
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="archived">
+                <Archive className="h-4 w-4" />
+                {t(($) => $.list.archived_title)}
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      }
+      leading={<CollapsedNavTrigger />}
+      meta={
+        !isArchivedView && unreadCount > 0 && (
           <NumberFlow
             value={unreadCount}
             animated={false}
@@ -597,8 +669,9 @@ export function InboxPage() {
             aria-label={String(unreadCount)}
             className="text-caption text-muted-foreground"
           />
-        )}
-      </div>
+        )
+      }
+    >
       <InboxFilterMenu
         wsId={wsId}
         items={viewItems}
@@ -643,21 +716,7 @@ export function InboxPage() {
         </DropdownMenuContent>
       </DropdownMenu>
       )}
-    </PageHeader>
-  );
-
-  // Back out of the archive. Sits inside the list panel rather than replacing
-  // the PageHeader: the user is still in the Inbox, so the page title stays put
-  // and this reads as a sub-view — the same shape chat's archived view uses.
-  const archivedBackRow = (
-    <button
-      type="button"
-      onClick={() => setView("inbox")}
-      className="flex w-full shrink-0 items-center gap-1.5 border-b px-3 py-2 text-left text-caption font-medium text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
-    >
-      <ChevronLeft className="size-4 shrink-0" />
-      <span className="truncate">{t(($) => $.list.archived_title)}</span>
-    </button>
+    </PanelHeader>
   );
 
   const list = isArchivedView && archivedError ? (
@@ -688,7 +747,6 @@ export function InboxPage() {
         loadMoreError={archiveQuery.isFetchNextPageError}
         onSelect={handleSelect}
         onAction={isArchivedView ? handleUnarchive : handleArchive}
-        onOpenArchived={openArchived}
         emptyLabel={
           hasActiveFilters && visibleItems.length === 0
             ? t(($) => $.filters.empty)
@@ -712,7 +770,6 @@ export function InboxPage() {
   const listPanel = (
     <>
       {listHeader}
-      {isArchivedView && archivedBackRow}
       {lookupLoading && (
         <p role="status" className="shrink-0 border-b px-3 py-2 text-caption text-muted-foreground">
           {t(($) => $.list.loading_selection)}
@@ -787,9 +844,13 @@ export function InboxPage() {
           layoutId="multica_inbox_issue_detail_layout"
           highlightCommentId={detailItem.details?.comment_id ?? undefined}
           highlightRequestToken={highlightRequestToken}
+          // The inbox reads the row it selected itself (see the auto-read
+          // effect above), and must keep a row marked unread while it is open.
+          readsInbox={false}
           // The split layout already has a nav trigger in the list header.
-          // Explicit false suppresses the detail header's fallback trigger.
-          leadingAction={compactBackAction ?? false}
+          // Explicit false suppresses the detail header's fallback trigger,
+          // which is the way back once the list column is collapsed.
+          leadingAction={compactBackAction ?? (listCollapsed ? undefined : false)}
           onDelete={() => {
             // Issue deletion CASCADE-deletes the inbox item server-side, and the
             // issue:deleted WS event prunes it from the inbox cache. Just clear
@@ -926,7 +987,7 @@ export function InboxPage() {
     if (viewLoading) {
       return (
         <div className="flex flex-1 flex-col min-h-0">
-          <div className={cn("flex h-12 shrink-0 items-center border-b", PAGE_GUTTER)}>
+          <div className="flex h-12 shrink-0 items-center pl-5 pr-2">
             <Skeleton className="h-5 w-16" />
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
@@ -975,74 +1036,67 @@ export function InboxPage() {
     return <div className="flex flex-1 flex-col min-h-0">{listPanel}</div>;
   }
 
-  // -- Desktop layout: resizable two-panel -----------------------------------
+  // -- Desktop layout: list column + detail ----------------------------------
 
   if (viewLoading) {
     return (
-      <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-        <ResizablePanel
-          id="list"
-          defaultSize={INBOX_LIST_DEFAULT_SIZE}
-          minSize={INBOX_LIST_MIN_SIZE}
-          maxSize={INBOX_LIST_MAX_SIZE}
-          groupResizeBehavior="preserve-pixel-size"
-        >
-          <div className="flex flex-col border-r h-full">
-            <div className={cn("flex h-12 shrink-0 items-center border-b", PAGE_GUTTER)}>
-              <Skeleton className="h-5 w-16" />
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 px-2 py-2.5">
-                  <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
-                  <div className="flex-1 space-y-2">
-                    <Skeleton className="h-4 w-3/4" />
-                    <Skeleton className="h-3 w-1/2" />
-                  </div>
+      <div className="flex min-h-0 flex-1">
+        <ListColumn collapsed={listCollapsed} width="list">
+          <div className="flex h-12 shrink-0 items-center pl-5 pr-2">
+            <Skeleton className="h-5 w-16" />
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 px-2 py-2.5">
+                <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-3 w-1/2" />
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
           </div>
-        </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel id="detail" minSize="40%">
-          <div className="p-6">
-            <Skeleton className="h-6 w-48" />
-            <Skeleton className="mt-4 h-4 w-32" />
-          </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+        </ListColumn>
+        <div className="min-w-0 flex-1 p-6">
+          <Skeleton className="h-6 w-48" />
+          <Skeleton className="mt-4 h-4 w-32" />
+        </div>
+      </div>
     );
   }
 
   return (
-    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-      <ResizablePanel
-        id="list"
-        defaultSize={INBOX_LIST_DEFAULT_SIZE}
-        minSize={INBOX_LIST_MIN_SIZE}
-        maxSize={INBOX_LIST_MAX_SIZE}
-        groupResizeBehavior="preserve-pixel-size"
-      >
-      <div className="flex flex-col border-r h-full">
-        {listPanel}
-      </div>
-      </ResizablePanel>
-      <ResizableHandle />
-      <ResizablePanel id="detail" minSize="40%">
-      <div className="flex flex-col min-h-0 h-full">
+    <div className="flex min-h-0 flex-1">
+      <ListColumn collapsed={listCollapsed} width="list">{listPanel}</ListColumn>
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
         {detailContent ?? (
-          <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-            <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
-            <p className="text-body">
-              {visibleItems.length === 0
-                ? t(($) => $.detail.empty)
-                : t(($) => $.detail.select_prompt)}
+          <>
+          {listCollapsed && (
+            <PageHeader>
+              <h1 className="text-body font-semibold">{t(($) => $.page.title)}</h1>
+            </PageHeader>
+          )}
+          <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden text-muted-foreground">
+            {inboxZeroCount === 0 ? (
+              <MulticaBleedMark
+                key={inboxZeroRises ? "rise" : "rest"}
+                enterDelay={inboxZeroRises ? 0.2 : undefined}
+                className="pointer-events-none absolute -right-[14%] -bottom-[26%] w-[min(560px,58%)] text-muted"
+              />
+            ) : (
+              <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
+            )}
+            <p className="relative text-body">
+              {visibleItems.length > 0
+                ? t(($) => $.detail.select_prompt)
+                : isArchivedView
+                  ? t(($) => $.list.archived_empty)
+                  : t(($) => $.detail.empty)}
             </p>
           </div>
+          </>
         )}
       </div>
-      </ResizablePanel>
-    </ResizablePanelGroup>
+    </div>
   );
 }

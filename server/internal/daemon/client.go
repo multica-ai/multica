@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/httptransport"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
@@ -124,28 +125,26 @@ type Client struct {
 func NewClient(baseURL string) *Client {
 	return &Client{
 		baseURL:      baseURL,
-		client:       &http.Client{Timeout: 30 * time.Second, Transport: cloneDefaultTransport()},
-		bundleClient: &http.Client{},
+		client:       &http.Client{Timeout: 30 * time.Second, Transport: httptransport.CloneDefault()},
+		bundleClient: &http.Client{Transport: httptransport.CloneDefault()},
 		platform:     "daemon",
 		os:           normalizeGOOS(runtime.GOOS),
 	}
 }
 
-func cloneDefaultTransport() http.RoundTripper {
-	if transport, ok := http.DefaultTransport.(*http.Transport); ok {
-		return transport.Clone()
-	}
-	return http.DefaultTransport
-}
-
-// CloseIdleConnections drops pooled control-plane HTTP connections. The
+// CloseIdleConnections drops pooled daemon HTTP connections. The
 // daemon calls this after repeated heartbeat transport failures so a stale
 // keep-alive socket from a server restart cannot delay recovery indefinitely.
 func (c *Client) CloseIdleConnections() {
-	if c == nil || c.client == nil {
+	if c == nil {
 		return
 	}
-	c.client.CloseIdleConnections()
+	if c.client != nil {
+		c.client.CloseIdleConnections()
+	}
+	if c.bundleClient != nil {
+		c.bundleClient.CloseIdleConnections()
+	}
 }
 
 // normalizeGOOS maps Go's runtime.GOOS values to the protocol vocabulary
@@ -205,9 +204,6 @@ func daemonCommonCapabilities() []string {
 	return []string{
 		protocol.DaemonCapabilitySkillBundlesV1,
 		protocol.DaemonCapabilityCoalescedCommentsV1,
-		protocol.DaemonCapabilityExecutionManifestV1,
-		protocol.DaemonCapabilityAgentSkillV1,
-		protocol.DaemonCapabilityRemoteMCPV1,
 		protocol.DaemonCapabilityLocalWorktreeV1,
 		protocol.DaemonCapabilitySourceContextQuickCreateV1,
 		protocol.DaemonCapabilityRPCV1,
@@ -215,6 +211,7 @@ func daemonCommonCapabilities() []string {
 		protocol.DaemonCapabilityCheckoutKeepsWorkV1,
 		protocol.DaemonCapabilityJoinedWakeupsV1,
 		protocol.DaemonCapabilityWorkflowStatusRulesV1,
+		protocol.DaemonCapabilityCLICommentSteerV1,
 	}
 }
 
@@ -440,13 +437,16 @@ func (c *Client) ExtendTaskPrepareLease(ctx context.Context, runtimeID, taskID s
 
 type TaskSupplement struct {
 	CommentID  string `json:"comment_id"`
+	AuthorType string `json:"author_type"`
 	AuthorName string `json:"author_name"`
 	Content    string `json:"content"`
 }
 
 func (c *Client) ClaimTaskSupplement(ctx context.Context, taskID string) (*TaskSupplement, error) {
 	var supplement TaskSupplement
-	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/supplements/claim", taskID), map[string]any{}, &supplement); err != nil {
+	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/supplements/claim", taskID), map[string]any{
+		"capabilities": []string{protocol.DaemonCapabilityTaskSupplementAuthorV1},
+	}, &supplement); err != nil {
 		return nil, err
 	}
 	if supplement.CommentID == "" {
@@ -664,6 +664,21 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/usage", taskID), map[string]any{
 		"usage": usage,
+	}, nil)
+}
+
+// ReportTaskUsageSnapshot posts the same rows mid-run, as a cumulative snapshot
+// of what the agent has spent so far (STOE-30). UpsertTaskUsage overwrites per
+// (task_id, provider, model), so snapshots cannot accumulate; the flag is what
+// keeps the server's additive metrics counter and per-run log on the terminal
+// report, where they would otherwise bill each flush against the last.
+func (c *Client) ReportTaskUsageSnapshot(ctx context.Context, taskID string, usage []TaskUsageEntry) error {
+	if len(usage) == 0 {
+		return nil
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/usage", taskID), map[string]any{
+		"usage":    usage,
+		"snapshot": true,
 	}, nil)
 }
 

@@ -151,8 +151,8 @@ func TestListTasksByIssueSubtreeIncludesAllDescendantsAndUsage(t *testing.T) {
 	foreignChild := dbfx.Issue(t, "foreign child", testutil.Cols{"workspace_id": otherWorkspace, "parent_issue_id": f.parentID})
 	f.task(t, foreignChild, "completed")
 	if _, err := testPool.Exec(context.Background(), `
-		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks)
-		VALUES ($1, 'openai', 'subtree-test-model', 100, 50, 20, 10, 2000000000)
+		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, credits_micros)
+		VALUES ($1, 'openai', 'subtree-test-model', 100, 50, 20, 10, 2000000000, 1250000)
 	`, grandchildRun); err != nil {
 		t.Fatal(err)
 	}
@@ -171,6 +171,8 @@ func TestListTasksByIssueSubtreeIncludesAllDescendantsAndUsage(t *testing.T) {
 		if run.ID == grandchildRun {
 			if len(run.Usage) != 1 || run.Usage[0].InputTokens != 100 || run.Usage[0].CostUsdTicks == nil || *run.Usage[0].CostUsdTicks != 2000000000 {
 				t.Errorf("grandchild usage missing or changed: %+v", run.Usage)
+			} else if run.Usage[0].CreditsMicros == nil || *run.Usage[0].CreditsMicros != 1250000 {
+				t.Errorf("grandchild credits missing or changed: %+v", run.Usage)
 			}
 		}
 	}
