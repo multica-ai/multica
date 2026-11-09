@@ -81,6 +81,62 @@
   background-color: var(--muted);
 }
 
+.image-figure[data-error] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  max-width: 100%;
+  min-height: 2rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: var(--radius);
+  border: 1px dashed var(--border);
+  background-color: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.image-figure[data-error] .image-content {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.image-error-fallback {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  max-width: 24rem;
+}
+
+.image-error-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-figure[data-error] .image-toolbar {
+  position: static;
+  padding: 0;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.image-figure[data-error] .image-toolbar button {
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--muted-foreground);
+}
+
+.image-figure[data-error] .image-toolbar button:hover {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+
 .image-uploading {
   opacity: 0.5;
   animation: rte-upload-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
@@ -166,7 +222,7 @@
   max-width: 35rem;
 }
 
-[data-comment-images="thumbnails"] .image-figure:not([data-sized], [data-pending], .image-standalone) .image-content {
+[data-comment-images="thumbnails"] .image-figure:not([data-sized], [data-pending], [data-error], .image-standalone) .image-content {
   width: auto;
   max-width: min(100%, 35rem);
   max-height: 25rem;
@@ -195,7 +251,7 @@
   width: 12rem;
 }
 
-[data-comment-images] .ProseMirror .image-figure:not([data-sized], [data-pending]) .image-content {
+[data-comment-images] .ProseMirror .image-figure:not([data-sized], [data-pending], [data-error]) .image-content {
   width: auto;
   max-width: 100%;
   max-height: 7.5rem;

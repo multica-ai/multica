@@ -71,18 +71,22 @@ vi.mock("../i18n", () => ({
   }),
 }));
 
-vi.mock("../navigation", () => ({
-  useNavigation: () => ({
-    push: vi.fn(),
-    replace: vi.fn(),
-    back: vi.fn(),
-    pathname: "/acme/issues",
-    searchParams: new URLSearchParams(),
-    hash: "",
-    openInNewTab: vi.fn(),
-    getShareableUrl: (p: string) => `https://app.example${p}`,
-  }),
-}));
+vi.mock("../navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../navigation")>();
+  return {
+    ...actual,
+    useNavigation: () => ({
+      push: vi.fn(),
+      replace: vi.fn(),
+      back: vi.fn(),
+      pathname: "/acme/issues",
+      searchParams: new URLSearchParams(),
+      hash: "",
+      openInNewTab: vi.fn(),
+      getShareableUrl: (p: string) => `https://app.example${p}`,
+    }),
+  };
+});
 
 vi.mock("@multica/core/paths", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/paths")>();
@@ -129,6 +133,8 @@ vi.mock("./attachment-download-context", () => ({
 }));
 
 import { Attachment } from "./attachment";
+import { RichContent } from "../rich-content";
+import { findContextMenuScope } from "../common/context-menu-scope";
 import { configStore } from "@multica/core/config";
 
 function makeRecord(overrides: Partial<AttachmentRecord> = {}): AttachmentRecord {
@@ -842,6 +848,142 @@ describe("Attachment — lazy images and reserved box (MUL-8182)", () => {
     fireEvent.load(img);
     expect(figure.hasAttribute("data-pending")).toBe(false);
     expect(img.hasAttribute("data-loaded")).toBe(true);
+  });
+
+  it("drops reserved dimensions, pending box, and readonly toolbar when an image fails to load", () => {
+    const att = makeRecord({ width: 1170, height: 2532 });
+    renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
+    const img = document.querySelector("img")!;
+    const figure = img.closest(".image-figure") as HTMLElement;
+    const node = figure.closest(".image-node") as HTMLElement;
+    expect(figure.hasAttribute("data-sized")).toBe(true);
+    expect(figure.hasAttribute("data-clickable")).toBe(true);
+    expect(node.hasAttribute("data-context-menu-content")).toBe(true);
+    expect(findContextMenuScope(figure).contentActions.map((a) => a.key)).toEqual([
+      "preview",
+      "download",
+      "copy-link",
+    ]);
+    expect(img.getAttribute("width")).toBe("1170");
+    expect(img.getAttribute("height")).toBe("2532");
+
+    fireEvent.error(img);
+
+    expect(figure.hasAttribute("data-pending")).toBe(false);
+    expect(figure.hasAttribute("data-sized")).toBe(false);
+    expect(figure.hasAttribute("data-clickable")).toBe(false);
+    expect(figure.hasAttribute("data-error")).toBe(true);
+    expect(node.hasAttribute("data-context-menu-content")).toBe(false);
+    expect(findContextMenuScope(figure).contentActions).toEqual([]);
+    expect(img.hasAttribute("data-loaded")).toBe(false);
+    expect(img.hasAttribute("width")).toBe(false);
+    expect(img.hasAttribute("height")).toBe(false);
+    expect(figure.querySelector(".image-error-fallback")?.textContent).toBe("shot.png");
+    expect(screen.queryByRole("button", { name: "View" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy link" })).toBeNull();
+  });
+
+  it("marks an image that already failed before ref mount as error without waiting for onError", () => {
+    const completeSpy = vi
+      .spyOn(HTMLImageElement.prototype, "complete", "get")
+      .mockReturnValue(true);
+    const naturalWidthSpy = vi
+      .spyOn(HTMLImageElement.prototype, "naturalWidth", "get")
+      .mockReturnValue(0);
+    try {
+      const att = makeRecord({ width: 1170, height: 2532 });
+      renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
+      const img = document.querySelector("img")!;
+      const figure = img.closest(".image-figure") as HTMLElement;
+
+      expect(figure.hasAttribute("data-pending")).toBe(false);
+      expect(figure.hasAttribute("data-sized")).toBe(false);
+      expect(figure.hasAttribute("data-clickable")).toBe(false);
+      expect(figure.hasAttribute("data-error")).toBe(true);
+      expect(img.hasAttribute("width")).toBe(false);
+      expect(img.hasAttribute("height")).toBe(false);
+      expect(figure.querySelector(".image-error-fallback")?.textContent).toBe("shot.png");
+      expect(screen.queryByRole("button", { name: "View" })).toBeNull();
+    } finally {
+      completeSpy.mockRestore();
+      naturalWidthSpy.mockRestore();
+    }
+  });
+
+  it("marks an image with an empty src as error immediately instead of holding a 16:10 placeholder", () => {
+    const onDelete = vi.fn();
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: "",
+          filename: "missing.png",
+          forceKind: "image",
+        }}
+        editable
+        onDelete={onDelete}
+      />,
+    );
+    const figure = document.querySelector(".image-figure") as HTMLElement;
+    expect(figure.hasAttribute("data-pending")).toBe(false);
+    expect(figure.hasAttribute("data-clickable")).toBe(false);
+    expect(figure.hasAttribute("data-error")).toBe(true);
+    expect(figure.querySelector(".image-error-fallback")?.textContent).toBe("missing.png");
+    expect(screen.queryByRole("button", { name: "View" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onDelete).toHaveBeenCalled();
+  });
+
+  it("renders a sanitized file:// markdown image in RichContent as error instead of a pending box", () => {
+    renderWithQuery(<RichContent content="![x](file:///workspaces/secret.png)" />);
+    const figure = document.querySelector(".image-figure") as HTMLElement;
+    expect(figure).toBeTruthy();
+    expect(figure.hasAttribute("data-pending")).toBe(false);
+    expect(figure.hasAttribute("data-clickable")).toBe(false);
+    expect(figure.hasAttribute("data-error")).toBe(true);
+    expect(figure.querySelector(".image-error-fallback")?.textContent).toBe("x");
+  });
+
+  it("omits the error text label when both alt and url are empty", () => {
+    renderWithQuery(<RichContent content="![](file:///workspaces/secret.png)" />);
+    const figure = document.querySelector(".image-figure") as HTMLElement;
+    expect(figure.hasAttribute("data-error")).toBe(true);
+    expect(figure.querySelector(".image-error-label")).toBeNull();
+  });
+
+  it("renders an HTML <img> with an absolute download URL as an image instead of the error fallback", () => {
+    const att = makeRecord();
+    resolverState.attachments = [att];
+    renderWithQuery(
+      <RichContent
+        content={`<img src="${att.markdown_url}" alt="shot.png">`}
+        attachments={[att]}
+      />,
+    );
+    const figure = document.querySelector(".image-figure") as HTMLElement;
+    const img = figure.querySelector("img")!;
+    expect(img.getAttribute("src")).toBe(att.download_url);
+    expect(figure.hasAttribute("data-error")).toBe(false);
+    expect(figure.querySelector(".image-error-fallback")).toBeNull();
+  });
+
+  it("keeps the Delete button available on a broken image in editable mode", () => {
+    const att = makeRecord();
+    const onDelete = vi.fn();
+    renderWithQuery(
+      <Attachment
+        attachment={{ kind: "record", attachment: att }}
+        editable
+        onDelete={onDelete}
+      />,
+    );
+    const img = document.querySelector("img")!;
+    fireEvent.error(img);
+    expect(screen.queryByRole("button", { name: "View" })).toBeNull();
+    const trash = screen.getByRole("button", { name: "Delete" });
+    fireEvent.click(trash);
+    expect(onDelete).toHaveBeenCalled();
   });
 
   it("restores the placeholder when a reused image changes source", () => {
