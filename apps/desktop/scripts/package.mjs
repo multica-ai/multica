@@ -27,7 +27,7 @@
 // real `git describe` invocation against a throwaway repo.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { realpathSync, rmSync } from "node:fs";
+import { realpathSync, rmSync, statSync } from "node:fs";
 import { delimiter, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -443,6 +443,16 @@ function main() {
         cwd: desktopRoot,
       },
     );
+
+    const binary = target.platform === "win" ? "multica.exe" : "multica";
+    const stagedCli = resolve(desktopRoot, "resources", "bin", binary);
+    const artifact = statSync(stagedCli, { throwIfNoEntry: false });
+    if (!artifact?.isFile() || artifact.size === 0) {
+      throw new Error(
+        `Packaging ${formatTarget(target)} requires a bundled CLI at ${stagedCli}. ` +
+          "Install Go or provide a prebuilt CLI for the target.",
+      );
+    }
 
     const builderArgs = builderArgsForTarget(target, parsed, version, {
       disableMacNotarize,

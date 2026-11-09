@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,3 +76,47 @@ else if (args[0] === "build") {
     });
   }
 }
+
+test("packaging stops before electron-builder if the target CLI is missing", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "multica-package-no-cli-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const scripts = join(root, "apps", "desktop", "scripts");
+  const bin = join(root, "fake-bin");
+  mkdirSync(scripts, { recursive: true });
+  mkdirSync(bin);
+  for (const name of ["bundle-cli.mjs", "package.mjs"]) {
+    copyFileSync(join(scriptDir, name), join(scripts, name));
+  }
+  const node = join(bin, process.platform === "win32" ? "node.exe" : "node");
+  if (process.platform === "win32") copyFileSync(process.execPath, node);
+  else symlinkSync(process.execPath, node);
+  // Mock the packaging tools. No Go toolchain or download is needed.
+  const marker = join(root, "builder-ran");
+  if (process.platform === "win32") {
+    writeFileSync(join(bin, "electron-vite.cmd"), "@exit /b 0\r\n");
+    writeFileSync(join(bin, "electron-builder.cmd"), '@echo built>"%BUILDER_MARKER%"\r\n');
+  } else {
+    fakeExecutable(join(bin, "electron-vite"), "process.exit(0);");
+    fakeExecutable(join(bin, "electron-builder"), `
+      const { writeFileSync } = await import("node:fs");
+      writeFileSync(process.env.BUILDER_MARKER, "built");
+    `);
+  }
+  const env = { ...process.env, PATH: bin, BUILDER_MARKER: marker };
+  const args = ["--target-platform", "win32", "--target-arch", "x64"];
+  execFileSync(node, [join(scripts, "bundle-cli.mjs"), ...args], { env });
+  const packageTarget = () => execFileSync(
+    node, [join(scripts, "package.mjs"), "--win", "--x64"], { env, stdio: "pipe" },
+  );
+  assert.throws(
+    packageTarget,
+    (error) => error.status === 1 && String(error.stderr).includes("requires a bundled CLI"),
+  );
+  assert.equal(existsSync(marker), false);
+
+  const prebuilt = join(root, "server", "bin", "windows-amd64");
+  mkdirSync(prebuilt, { recursive: true });
+  writeFileSync(join(prebuilt, "multica.exe"), "prebuilt fixture");
+  packageTarget();
+  assert.equal(existsSync(marker), true);
+});
