@@ -153,6 +153,7 @@
     "ref_default_tooltip": "未设置分支 —— 任务使用仓库当时的默认分支。"
   },
   "delete_dialog": {
+    "offline_error": "当前处于离线状态，请联网后重试删除。",
     "title": "删除项目",
     "description": "将删除这个项目。任务不会被删除，只会从项目中解除关联。",
     "confirm": "删除",

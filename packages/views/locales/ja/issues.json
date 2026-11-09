@@ -459,6 +459,8 @@
     "metadata_description": "エージェントや連携機能がワークフローを引き継ぐために記録するキーと値のデータ。",
     "section_load_failed_retry": "読み込めませんでした。再試行",
     "not_found": "このタスクはこのワークスペースに存在しないか、削除されています。",
+    "load_failed": "タスクを読み込めませんでした。",
+    "load_retry": "再試行",
     "not_found_title": "タスクが見つかりません",
     "breadcrumb_project_unknown": "不明なプロジェクト",
     "back": "戻る",
@@ -727,6 +729,12 @@
   "reply": {
     "placeholder": "返信を残す...",
     "annotations": {
+      "direct_reply": "返信",
+      "direct_comment": "コメントを投稿",
+      "direct_target_deleted": "返信先が削除されました。別のコメントを選ぶ前に、意見をコピーしてください。",
+      "copy_note": "意見をコピー",
+      "note_copied": "意見をコピーしました",
+      "note_copy_failed": "コピーできませんでした。テキストを選択して手動でコピーしてください。",
       "confirm_add": "注釈を追加",
       "save": "注釈を保存",
       "add_comment": "コメントに追加",
@@ -780,6 +788,11 @@
     "cancel_failed": "実行をキャンセルできませんでした"
   },
   "execution_log": {
+    "latest": "最新",
+    "include_children": "サブタスクを含める",
+    "loading": "実行履歴を読み込み中...",
+    "load_failed_retry": "実行履歴を読み込めませんでした。再試行",
+    "empty": "この範囲には実行履歴がありません。",
     "section": "実行ログ",
     "cancel_task_tooltip": "実行をキャンセル",
     "cancel_task_aria": "実行をキャンセル",
@@ -935,6 +948,7 @@
     "unassigned": "未割り当て",
     "open_in_new_tab": "新しいタブで開く",
     "pin_to_sidebar": "サイドバーにピン留め",
+    "locate_in_sidebar": "サイドバーで表示",
     "unpin_from_sidebar": "サイドバーのピン留めを解除",
     "restore_to_inbox": "インボックスに戻す",
     "mark_read": "既読にする",
@@ -1794,6 +1808,25 @@
       "row_actions": "{{name}} の操作",
       "empty_title": "保存したビューはまだありません",
       "empty_description": "タスク一覧でフィルターと表示方法を調整し、ビューとして保存します。"
+    }
+  },
+  "app_calls": {
+    "section_title": "アプリ",
+    "chips_label": "この実行で使ったアプリ",
+    "calls_count_other": "{{count}} 回",
+    "more": "ほか {{count}} 件",
+    "scope": {
+      "team": "チームアカウント",
+      "personal": "個人アカウント"
+    },
+    "outcome": {
+      "ok": "実行済み",
+      "error": "失敗",
+      "blocked": "ブロック",
+      "pending": "確認待ち",
+      "approved": "承認済み",
+      "rejected": "却下",
+      "rate_limited": "レート制限"
     }
   }
 }

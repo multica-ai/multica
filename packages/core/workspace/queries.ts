@@ -205,6 +205,9 @@ export function myInvitationListOptions() {
   return queryOptions({
     queryKey: workspaceKeys.myInvitations(),
     queryFn: () => api.listMyInvitations(),
+    // Recover missed realtime events without refetching on every tab switch.
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: true,
   });
 }
 

@@ -604,6 +604,8 @@ function createIssueWindow(context: IssueWindowContext): void {
     minHeight: 520,
     title: context.title,
     titleBarStyle: "hiddenInset",
+    // Center the native controls in the issue page's 48px header, which is
+    // this window's title bar.
     trafficLightPosition: { x: 16, y: 17 },
     show: false,
     autoHideMenuBar: true,
@@ -747,6 +749,15 @@ if (!gotTheLock) {
     arg.startsWith(`${PROTOCOL}://`),
   );
   if (coldStartDeepLink) handleDeepLink(coldStartDeepLink);
+
+  // scripts/dev-env.sh starts a managed dev Desktop signed in by handing it
+  // the token a browser login would deliver. An environment variable rather
+  // than argv keeps the token out of other users' `ps`; it is removed before
+  // any child process (the daemon, agent CLIs) can inherit it. Packaged builds
+  // never read it.
+  const devAuthToken = is.dev ? process.env.MULTICA_DEV_AUTH_TOKEN : undefined;
+  delete process.env.MULTICA_DEV_AUTH_TOKEN;
+  if (devAuthToken) dispatchToMainRenderer("auth:token", devAuthToken);
 
   app.whenReady().then(async () => {
     const viteEnv = import.meta.env as ImportMetaEnv & {

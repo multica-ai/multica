@@ -24,7 +24,7 @@ import { cn } from "@multica/ui/lib/utils";
 // `--avatar-slot-size` (read by the base avatar), label chips by dropping
 // their vertical padding.
 const PILL_CHROME =
-  "inline-flex h-[var(--button-height-xs)] items-center rounded-full border text-caption min-w-0 max-w-56 overflow-hidden transition-colors " +
+  "inline-flex h-[var(--button-height-xs)] items-center rounded-md border text-caption min-w-0 max-w-56 overflow-hidden transition-colors " +
   "[--avatar-slot-size:1rem] [&_[data-slot=label-chip]]:py-0";
 
 export function PillButton({
@@ -37,7 +37,7 @@ export function PillButton({
       type="button"
       className={cn(
         PILL_CHROME,
-        "gap-1.5 px-2.5",
+        "gap-1.5 px-2",
         "hover:bg-accent/60 cursor-pointer",
         "data-popup-open:bg-accent data-popup-open:text-accent-foreground",
         "disabled:cursor-not-allowed disabled:hover:bg-transparent",
@@ -103,8 +103,8 @@ export function ClearablePillButton({
         type="button"
         disabled={disabled}
         className={cn(
-          "flex h-full min-w-0 items-center gap-1.5 overflow-hidden pl-2.5 cursor-pointer",
-          clearable ? "pr-1" : "pr-2.5",
+          "flex h-full min-w-0 items-center gap-1.5 overflow-hidden pl-2 cursor-pointer",
+          clearable ? "pr-1" : "pr-2",
           "disabled:cursor-not-allowed",
         )}
         {...props}

@@ -147,6 +147,8 @@
   "run": {
     "issue_linked": "Tarea enlazada",
     "view_log": "Ver log de ejecución",
+    "stop": "Detener ejecución",
+    "stop_failed": "No se ha podido detener la ejecución.",
     "skipped_group": {
       "label": "Omitidas",
       "summary": "{{count}} ejecuciones omitidas"

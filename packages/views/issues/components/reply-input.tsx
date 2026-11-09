@@ -322,6 +322,7 @@ function ReplyInput({
             <Button
               size="sm"
               variant="destructive"
+              // eslint-disable-next-line no-restricted-syntax -- composer send button, the one round button
               className="rounded-full"
               onClick={submit}
               disabled={!canSend || submitting || gate.uploading}

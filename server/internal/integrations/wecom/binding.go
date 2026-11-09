@@ -48,12 +48,15 @@ const BindingTokenTTL = 15 * time.Minute
 // with "tap the link I sent you", pointing at something that never arrived,
 // and the user cannot link their account until the window passes.
 //
-// That covers the send we never hear back about, and equally the send we know
+// That covers the send we never hear back about, and most sends we know
 // failed: the row is written before delivery is attempted, so a prompt the
 // transport refused outright (no live connection mid-reconnect or lease flip)
-// still suppresses the next minute of mints. Nothing here reacts to that
-// error — the window itself, not a delivery receipt, is what bounds the
-// damage, which is the other reason to keep it short.
+// still suppresses the next minute of mints. The window itself, not a delivery
+// receipt, is what bounds that damage, which is the other reason to keep it
+// short. The one exception is errcodeUserMustMessageFirst: the replier
+// withdraws that link (Withdraw), because the room has just been asked to open
+// the 1:1 and the user's next message there must get a link, not a pointer to
+// one.
 //
 // Sixty seconds does the job the throttle was written for: six lines typed in
 // one breath still write one row, at a cost of at most one row a minute for a
@@ -100,13 +103,14 @@ type RedeemedBindingToken struct {
 	WecomUserID    string
 }
 
-// bindingMintQueries is the slice of generated queries the mint path uses.
-// Narrow on purpose: mint is the only part of the service that runs outside a
-// transaction, so it is the only part a unit test can drive with a fake.
-// *db.Queries satisfies it.
+// bindingMintQueries is the slice of generated queries the mint and withdraw
+// paths use. Narrow on purpose: they are the parts of the service that run
+// outside a transaction, so they are the parts a unit test can drive with a
+// fake. *db.Queries satisfies it.
 type bindingMintQueries interface {
 	CreateChannelBindingToken(ctx context.Context, arg db.CreateChannelBindingTokenParams) (db.ChannelBindingToken, error)
 	FindLiveChannelBindingToken(ctx context.Context, arg db.FindLiveChannelBindingTokenParams) (db.ChannelBindingToken, error)
+	ConsumeChannelBindingToken(ctx context.Context, tokenHash string) (db.ChannelBindingToken, error)
 }
 
 // BindingTokenService mints and redeems WeCom binding tokens. Redemption is
@@ -180,6 +184,21 @@ func (s *BindingTokenService) Mint(ctx context.Context, workspaceID, installatio
 		return BindingToken{}, fmt.Errorf("wecom: persist token: %w", err)
 	}
 	return BindingToken{Raw: raw, ExpiresAt: expiresAt}, nil
+}
+
+// Withdraw retires a link that never reached its user, so the throttle stops
+// pointing them back at it and their next message mints one that can. It
+// spends the token the way a redemption does (consumed_at), which is also what
+// makes it unredeemable — harmless for a link nobody received. A token already
+// spent or expired is not an error: there is nothing left to withdraw.
+func (s *BindingTokenService) Withdraw(ctx context.Context, raw string) error {
+	if s.mint == nil {
+		return errors.New("wecom: BindingTokenService missing queries")
+	}
+	if _, err := s.mint.ConsumeChannelBindingToken(ctx, hashBindingToken(raw)); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("wecom: withdraw token: %w", err)
+	}
+	return nil
 }
 
 // RedeemAndBind atomically consumes a raw token and binds the WeCom userid

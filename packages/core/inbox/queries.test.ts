@@ -141,8 +141,8 @@ describe("deduplicateArchivedInboxItems", () => {
 });
 
 describe("archived inbox options", () => {
-  it("keeps an idle selection out of archive query keys", () => {
-    const idle: InboxFilters = { ...EMPTY_INBOX_FILTERS, idleOnly: true };
+  it("keeps an agent selection out of archive query keys", () => {
+    const idle: InboxFilters = { ...EMPTY_INBOX_FILTERS, agent: "idle" };
 
     expect(archivedInboxPagesOptions("ws", idle).queryKey).toEqual(
       archivedInboxPagesOptions("ws", EMPTY_INBOX_FILTERS).queryKey,
@@ -150,6 +150,21 @@ describe("archived inbox options", () => {
     expect(archivedInboxFacetsOptions("ws", idle).queryKey).toEqual(
       archivedInboxFacetsOptions("ws", EMPTY_INBOX_FILTERS).queryKey,
     );
+  });
+
+  it("carries the previous result across a filter change but never across workspaces", () => {
+    const todo: InboxFilters = { ...EMPTY_INBOX_FILTERS, statuses: ["todo"] };
+    for (const options of [archivedInboxPagesOptions, archivedInboxFacetsOptions]) {
+      const placeholder = options("ws", todo).placeholderData as (
+        previousData: unknown,
+        previousQuery: { queryKey: readonly unknown[] } | undefined,
+      ) => unknown;
+      const previous = { cached: true };
+
+      expect(placeholder(previous, { queryKey: options("ws", EMPTY_INBOX_FILTERS).queryKey })).toBe(previous);
+      expect(placeholder(previous, { queryKey: options("other-ws", todo).queryKey })).toBeUndefined();
+      expect(placeholder(undefined, undefined)).toBeUndefined();
+    }
   });
 });
 
