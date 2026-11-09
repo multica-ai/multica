@@ -12,7 +12,8 @@
     "runtimes": "Runtimes",
     "skills": "Skills",
     "settings": "Settings",
-    "views": "Views"
+    "views": "Views",
+    "docs": "Docs"
   },
   "tab": {
     "issue": "Issue",
@@ -27,7 +28,9 @@
     "attachment": "Attachment",
     "create_agent": "Create Agent",
     "my_agents": "My agents' work",
-    "unknown": "Unknown page"
+    "unknown": "Unknown page",
+    "doc": "Docs",
+    "docFolder": "Folder"
   },
   "help": {
     "trigger": "Help",
@@ -98,7 +101,8 @@
     "open_in_new_window_click": "Click",
     "open_in_other_window": "Already open in another window",
     "in_other_window": "Other window",
-    "all_workspaces_open": "Every workspace is already open in a window"
+    "all_workspaces_open": "Every workspace is already open in a window",
+    "docs": "Docs"
   },
   "panels": {
     "work": {

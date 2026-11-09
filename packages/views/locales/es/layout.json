@@ -12,7 +12,8 @@
     "runtimes": "Runtimes",
     "skills": "Skills",
     "settings": "Ajustes",
-    "views": "Vistas"
+    "views": "Vistas",
+    "docs": "Documentos"
   },
   "tab": {
     "issue": "Tarea",
@@ -27,7 +28,9 @@
     "attachment": "Adjunto",
     "create_agent": "Crear agente",
     "unknown": "Página desconocida",
-    "my_agents": "Trabajo de mis agentes"
+    "my_agents": "Trabajo de mis agentes",
+    "doc": "Documentos",
+    "docFolder": "Carpeta"
   },
   "help": {
     "trigger": "Ayuda",
@@ -98,7 +101,8 @@
     "open_in_new_window_click": "Clic",
     "open_in_other_window": "Ya está abierto en otra ventana",
     "in_other_window": "Otra ventana",
-    "all_workspaces_open": "Todos los espacios de trabajo ya están abiertos en una ventana"
+    "all_workspaces_open": "Todos los espacios de trabajo ya están abiertos en una ventana",
+    "docs": "Documentos"
   },
   "panels": {
     "work": {

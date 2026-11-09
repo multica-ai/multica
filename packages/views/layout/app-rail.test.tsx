@@ -128,11 +128,11 @@ describe("AppRail global actions", () => {
 describe("AppRail order", () => {
   it("lists the spaces in the default order", () => {
     renderRail();
-    expect(railOrder()).toEqual(["inbox", "work", "team", "chat", "autopilots"]);
+    expect(railOrder()).toEqual(["inbox", "work", "docs", "team", "chat", "autopilots"]);
   });
 
   it("follows the saved order", () => {
-    const order = ["chat", "inbox", "work", "team", "autopilots"] as const;
+    const order = ["chat", "inbox", "work", "docs", "team", "autopilots"] as const;
     useRailOrderStore.getState().setOrder(order);
     renderRail();
     expect(railOrder()).toEqual(order);

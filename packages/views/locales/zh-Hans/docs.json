@@ -1,0 +1,57 @@
+{
+  "untitled": "未命名",
+  "version_number": "v{{number}}",
+  "kb": "知识库",
+  "actions": {
+    "new": "新建",
+    "new_doc": "新建文档",
+    "new_folder": "新建文件夹",
+    "rename": "重命名",
+    "move": "移动到...",
+    "delete": "删除",
+    "cancel": "取消",
+    "history": "历史",
+    "more": "更多"
+  },
+  "errors": {
+    "move": "移动失败",
+    "delete": "删除失败",
+    "save": "保存失败"
+  },
+  "move": {
+    "title": "移动\"{{title}}\"",
+    "destination": "目标位置",
+    "root": "知识库（顶层）",
+    "current": "当前",
+    "confirm": "移动"
+  },
+  "delete": {
+    "title": "删除这篇文档？",
+    "description": "\"{{title}}\"及其全部历史都会被删除，无法撤销。",
+    "confirm": "删除",
+    "folder_title": "删除文件夹？",
+    "folder_description": "只能删除空文件夹。"
+  },
+  "tree": {
+    "more": "{{title}} 的更多操作",
+    "empty": "还没有文档"
+  },
+  "editor": {
+    "placeholder": "开始写，或输入 / 调出命令...",
+    "title_label": "标题",
+    "saving": "保存中...",
+    "saved": "已保存",
+    "save_failed": "保存失败 · 重试",
+    "retry": "重试",
+    "conflict": "{{name}} 已更新文档。草稿已保留，刷新后继续编辑。",
+    "reload": "刷新最新版本",
+    "draft": "保留的草稿"
+  },
+  "history": {
+    "title": "历史",
+    "current": "当前",
+    "restore": "恢复此版本",
+    "loading": "加载中..."
+  },
+  "updated": "{{name}} 更新于 {{time}}"
+}

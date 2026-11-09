@@ -1,0 +1,57 @@
+{
+  "untitled": "Untitled",
+  "version_number": "v{{number}}",
+  "kb": "Docs",
+  "actions": {
+    "new": "New",
+    "new_doc": "New doc",
+    "new_folder": "New folder",
+    "rename": "Rename",
+    "move": "Move to...",
+    "delete": "Delete",
+    "cancel": "Cancel",
+    "history": "History",
+    "more": "More"
+  },
+  "errors": {
+    "move": "Couldn't move it",
+    "delete": "Couldn't delete it",
+    "save": "Couldn't save"
+  },
+  "move": {
+    "title": "Move \"{{title}}\"",
+    "destination": "Destination",
+    "root": "Knowledge base (top level)",
+    "current": "Current",
+    "confirm": "Move"
+  },
+  "delete": {
+    "title": "Delete this doc?",
+    "description": "\"{{title}}\" and its whole history will be deleted. This can't be undone.",
+    "confirm": "Delete",
+    "folder_title": "Delete this folder?",
+    "folder_description": "Only empty folders can be deleted."
+  },
+  "tree": {
+    "more": "More actions for {{title}}",
+    "empty": "No docs yet"
+  },
+  "editor": {
+    "placeholder": "Write, or type / for commands...",
+    "title_label": "Title",
+    "saving": "Saving...",
+    "saved": "Saved",
+    "save_failed": "Not saved · Retry",
+    "retry": "Retry",
+    "conflict": "Updated by {{name}}. Your draft is kept. Reload to continue.",
+    "reload": "Reload latest",
+    "draft": "Your saved draft"
+  },
+  "history": {
+    "title": "History",
+    "current": "Current",
+    "restore": "Restore this version",
+    "loading": "Loading..."
+  },
+  "updated": "Updated by {{name}} · {{time}}"
+}

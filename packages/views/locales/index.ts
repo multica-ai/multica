@@ -1,3 +1,11 @@
+import ruDocs from "./ru/docs.json";
+import esDocs from "./es/docs.json";
+import frDocs from "./fr/docs.json";
+import koDocs from "./ko/docs.json";
+import jaDocs from "./ja/docs.json";
+import zhHantDocs from "./zh-Hant/docs.json";
+import zhHansDocs from "./zh-Hans/docs.json";
+import enDocs from "./en/docs.json";
 import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
 import enCommon from "./en/common.json";
 import enAuth from "./en/auth.json";
@@ -206,6 +214,7 @@ import esBilling from "./es/billing.json";
 export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
   en: {
     common: enCommon,
+    docs: enDocs,
     auth: enAuth,
     settings: enSettings,
     issues: enIssues,
@@ -233,6 +242,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
   },
   "zh-Hans": {
     common: zhHansCommon,
+    docs: zhHansDocs,
     auth: zhHansAuth,
     settings: zhHansSettings,
     issues: zhHansIssues,
@@ -260,6 +270,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
   },
   "zh-Hant": {
     common: zhHantCommon,
+    docs: zhHantDocs,
     auth: zhHantAuth,
     settings: zhHantSettings,
     issues: zhHantIssues,
@@ -287,6 +298,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
   },
   ko: {
     common: koCommon,
+    docs: koDocs,
     auth: koAuth,
     settings: koSettings,
     issues: koIssues,
@@ -314,6 +326,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
   },
   ja: {
     common: jaCommon,
+    docs: jaDocs,
     auth: jaAuth,
     settings: jaSettings,
     issues: jaIssues,
@@ -341,6 +354,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
   },
   ru: {
     common: ruCommon,
+    docs: ruDocs,
     auth: ruAuth,
     settings: ruSettings,
     issues: ruIssues,
@@ -368,6 +382,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
   },
   fr: {
     common: frCommon,
+    docs: frDocs,
     auth: frAuth,
     settings: frSettings,
     issues: frIssues,
@@ -395,6 +410,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
   },
   es: {
     common: esCommon,
+    docs: esDocs,
     auth: esAuth,
     settings: esSettings,
     issues: esIssues,

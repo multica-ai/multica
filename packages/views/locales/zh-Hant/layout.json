@@ -12,7 +12,8 @@
     "runtimes": "執行時",
     "skills": "Skills",
     "settings": "設定",
-    "views": "檢視"
+    "views": "檢視",
+    "docs": "知識庫"
   },
   "tab": {
     "issue": "任務",
@@ -27,7 +28,9 @@
     "attachment": "附件",
     "create_agent": "建立 AI 代理",
     "my_agents": "我的 AI 代理在做",
-    "unknown": "未知頁面"
+    "unknown": "未知頁面",
+    "doc": "知識庫",
+    "docFolder": "資料夾"
   },
   "help": {
     "trigger": "幫助",
@@ -98,7 +101,8 @@
     "open_in_new_window_click": "點擊",
     "open_in_other_window": "已在其他視窗開啟",
     "in_other_window": "其他視窗",
-    "all_workspaces_open": "所有工作區都已在視窗中開啟"
+    "all_workspaces_open": "所有工作區都已在視窗中開啟",
+    "docs": "知識庫"
   },
   "panels": {
     "work": {

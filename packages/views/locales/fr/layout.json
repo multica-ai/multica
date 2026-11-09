@@ -12,7 +12,8 @@
     "runtimes": "Runtimes",
     "skills": "Skills",
     "settings": "Paramètres",
-    "views": "Vues"
+    "views": "Vues",
+    "docs": "Documents"
   },
   "tab": {
     "issue": "Tâche",
@@ -27,7 +28,9 @@
     "attachment": "Pièce jointe",
     "create_agent": "Créer un agent",
     "my_agents": "Travail de mes agents",
-    "unknown": "Page inconnue"
+    "unknown": "Page inconnue",
+    "doc": "Documents",
+    "docFolder": "Dossier"
   },
   "help": {
     "trigger": "Aide",
@@ -98,7 +101,8 @@
     "open_in_new_window_click": "Clic",
     "open_in_other_window": "Déjà ouvert dans une autre fenêtre",
     "in_other_window": "Autre fenêtre",
-    "all_workspaces_open": "Chaque espace de travail est déjà ouvert dans une fenêtre"
+    "all_workspaces_open": "Chaque espace de travail est déjà ouvert dans une fenêtre",
+    "docs": "Documents"
   },
   "panels": {
     "work": {
