@@ -795,6 +795,11 @@
     "cancel_failed": "No se ha podido cancelar la ejecución"
   },
   "execution_log": {
+    "latest": "Recientes",
+    "include_children": "Incluir subtareas",
+    "loading": "Cargando ejecuciones...",
+    "load_failed_retry": "No se han podido cargar las ejecuciones. Reintentar",
+    "empty": "No hay ejecuciones en este ámbito.",
     "section": "Registro de ejecución",
     "cancel_task_tooltip": "Cancelar ejecución",
     "cancel_task_aria": "Cancelar ejecución",
