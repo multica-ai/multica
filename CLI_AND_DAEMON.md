@@ -297,6 +297,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Qwen Code](https://github.com/QwenLM/qwen-code) | `qwen` | Alibaba Qwen Code (`qwen -p` with stream-json) |
 | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) | `qwenpaw` | QwenPaw ACP coding agent (ACP via `qwenpaw acp`; model is fixed by its own configuration) |
 | [MiniMax Code](https://github.com/MiniMax-AI/minimax-code) | `mcode` | MiniMax Code ACP coding agent (ACP via `mcode acp`; model is managed by MCode) |
+| [P-ai](https://github.com/kawayiYokami/P-ai) | `p-ai` | P-ai desktop AI work system (ACP via `p-ai acp`; models come from the providers configured inside P-ai) |
 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | `dsh` | DeepSeek Harness (`dsh --profile multica --stdio`; requires the Multica runtime profile to be installed; reads AGENTS.md and .dsh/skills/) |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
@@ -413,6 +414,8 @@ Agent-specific overrides:
 | `MULTICA_CURSOR_MODEL` | Override the Cursor Agent model used |
 | `MULTICA_KIMI_PATH` | Custom path to the `kimi` binary |
 | `MULTICA_KIMI_MODEL` | Override the Kimi model used |
+| `MULTICA_PAI_PATH` | Custom path to the `p-ai` binary |
+| `MULTICA_PAI_MODEL` | Default P-ai model (an api_config id from the user's P-ai config) |
 | `MULTICA_REASONIX_PATH` | Custom path to the `reasonix` binary |
 | `MULTICA_REASONIX_MODEL` | Override the Reasonix model used |
 | `MULTICA_DIM_PATH` | Custom path to the `dim` binary |

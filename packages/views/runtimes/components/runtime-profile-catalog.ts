@@ -35,6 +35,7 @@ export const RUNTIME_TYPES = RUNTIME_PROFILE_RUNTIME_TYPES;
 // targets whose product name differs from the stored id need an entry here.
 const RUNTIME_TYPE_LABELS: Partial<Record<RuntimeProfileType, string>> = {
   omp: "Oh-My-Pi",
+  pai: "P-ai",
 };
 
 // runtimeTypeLabel is what the user should read for a runtime target. Every

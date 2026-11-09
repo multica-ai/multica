@@ -473,6 +473,10 @@ export function ProviderLogo({
       return <ZeroClawLogo className={className} />;
     case "zcode":
       return <ZCodeLogo className={className} />;
+    case "pai":
+      // P-ai has no brand asset in this repo yet; fall through to the
+      // neutral monitor icon until one is contributed.
+      return <Monitor className={className} />;
     default:
       return <Monitor className={className} />;
   }
