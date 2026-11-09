@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Squad } from "@multica/core/types";
 import type { SquadsScope } from "@multica/core/squads/stores";
@@ -152,14 +152,19 @@ describe("SquadsPage header", () => {
     expect(mocks.openModal).toHaveBeenCalledWith("create-squad");
   });
 
-  it("offers to create the first squad from the empty state", async () => {
+  it("introduces squads and offers to create the first one when there are none", async () => {
     const user = userEvent.setup();
     mocks.squads = [];
     renderPage();
 
-    expect(screen.getByText("No squads yet.")).toBeInTheDocument();
-    const buttons = screen.getAllByRole("button", { name: "New squad" });
-    await user.click(buttons[buttons.length - 1]!);
+    const intro = screen.getByRole("region", {
+      name: "Put agents in a squad and they work like a team",
+    });
+    expect(screen.getByRole("link", { name: "Read the docs" })).toHaveAttribute(
+      "href",
+      "https://multica.ai/docs/squads",
+    );
+    await user.click(within(intro).getByRole("button", { name: "New squad" }));
     expect(mocks.openModal).toHaveBeenCalledWith("create-squad");
   });
 });

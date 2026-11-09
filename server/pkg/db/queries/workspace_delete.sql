@@ -490,6 +490,9 @@ deleted_channel_user_bindings AS (
 deleted_channel_binding_tokens AS (
     DELETE FROM channel_binding_token WHERE workspace_id = $1
 ),
+deleted_wecom_install_sessions AS (
+    DELETE FROM wecom_install_session WHERE workspace_id = $1
+),
 deleted_lark_chat_bindings AS (
     DELETE FROM lark_chat_session_binding
     WHERE installation_id IN (SELECT id FROM ws_lark_installations)
@@ -625,6 +628,11 @@ DELETE FROM vcs_connection WHERE vcs_connection.workspace_id = $1;
 -- name: DeleteWorkspaceSquadsAndSkills :exec
 WITH deleted_squads AS (
     DELETE FROM squad WHERE squad.workspace_id = $1
+),
+deleted_skill_versions AS (
+    -- Keyed by skill_id so the delete uses idx_skill_version_skill_version.
+    DELETE FROM skill_version
+    WHERE skill_version.skill_id IN (SELECT skill.id FROM skill WHERE skill.workspace_id = $1)
 )
 DELETE FROM skill WHERE skill.workspace_id = $1;
 

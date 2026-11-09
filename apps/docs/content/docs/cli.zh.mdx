@@ -143,6 +143,8 @@ multica issue comment add MUL-123 --content-file note.md --steer-active
 
 同一项目、同一父任务下已有标题相同（不区分大小写，忽略多余空格）且未关闭的任务时，`issue create` 会拒绝创建并给出那个任务。确实要再建一个，加 `--allow-duplicate`；要把一个任务标为另一个的重复，用 `multica issue status MUL-124 cancelled --duplicate-of MUL-123`。
 
+一个任务要依次提交多个 PR 时，用 `issue create --title "..." --pr-auto-complete off` 或 `issue update <id> --pr-auto-complete off`，让这个任务在 PR 合并后保持原状态。用 `--pr-auto-complete on` 恢复工作区规则，从下一次 PR 事件起生效。`issue pull-requests <id>` 会显示任务开关、工作区开关、目标状态和判断结果，没有关联 PR 时也会显示。支持该字段的服务端会在创建事务内保存开关；旧服务端会补调一次 PUT，失败时 CLI 会给出已创建的任务 ID 和重试用的 update 命令，请勿重复创建。
+
 ### 时间线
 
 `issue get` 给出任务现在的状态；`issue timeline` 按时间顺序列出状态、优先级、负责人、标题、日期的改动和运行结果，并混排评论，用来回答"什么时候进入 in_review""卡在当前状态多久了"：
@@ -171,6 +173,15 @@ multica issue comment list MUL-123 --thread <comment-id> --tail 5 --output json 
 - 已解决的线程默认折叠成首条评论和结论，需要原文时加 `--full`。
 
 列表也可以只取需要的字段：`multica issue list --output json --fields id,identifier,title,status`。筛选在 CLI 本地完成，减少的是输出和上下文，不是请求量。
+
+按最近更新时间列出任务时，同时传入 RFC3339 时间戳 `--updated-since` 和 `--updated-until`。服务端返回当前 `updated_at` 大于等于 `since`、小于 `until` 的任务，即 `[since, until)`。这两个参数可与现有筛选、排序和分页参数组合使用。翻页时保持时间范围一致；分页不提供快照，并发更新可能改变结果集。
+
+```bash
+multica issue list --updated-since 2026-11-05T10:00:00Z \
+  --updated-until 2026-11-05T10:01:00Z \
+  --sort created_at --direction asc --limit 100 --offset 0 \
+  --output json --fields id,workspace_id,project_id,title
+```
 
 ### 唤醒
 
@@ -288,6 +299,7 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 | `project` | 管理项目、项目资源和项目使用的工作流 |
 | `workflow` | 管理工作流：状态以及每个状态交给谁处理 |
 | `label`、`property` | 管理工作区标签和自定义属性 |
+| `view` | 读取保存的视图，列出视图里的任务 |
 | `agent`、`skill`、`squad` | 管理智能体、skill 和小队 |
 | `autopilot` | 管理自动化、触发器和运行历史 |
 | `workspace` | 创建、查看、切换工作区和邀请成员 |
@@ -343,18 +355,24 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 
 下表覆盖当前全部顶层命令，按 CLI 自身的分组排列。所有命令都接受全局 flag `--server-url`、`--workspace-id`、`--profile` 和 `--debug`。`--output` 是逐命令注册的 flag，默认格式因命令而异：`list` 类默认表格，`get`、`create` 类多默认 JSON。完整参数以 `multica <command> --help` 为准。
 
+### 任务附件
+
+`issue create`、`issue update` 和 `issue comment add` 的每个 `--attachment` 接受一个完整文件路径，保留文件名中的逗号和双引号。多个文件须重复 flag，例如 `--attachment 'report,final.csv' --attachment notes.txt`。省略 flag 时不添加附件；显式传入空路径会报错。所有本地路径都通过检查后才开始上传。
+
+从旧 CSV 解析方式迁移：要添加两个文件，将 `--attachment a,b` 改为 `--attachment a --attachment b`。前一种写法现在只选择名为 `a,b` 的单个文件。旧用法 `--attachment '"report,final.csv"'` 中额外的 CSV 双引号也须移除，改用 `--attachment 'report,final.csv'`；只有文件名本身包含双引号时才保留。
+
 ### Core
 
 | 命令 | 子命令 | 用途 | 关键 flag |
 | --- | --- | --- | --- |
-| `issue` | `list` | 列出任务 | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（可重复）、`--property`（可重复，`"名称=值"` 或 `"Score>=3"`、`"Due<2026-01-01"`、`"Notes~=text"` 这样的比较；`__none__` 匹配未设置）、`--limit`、`--offset`、`--sort`（支持 `property:<名称或 id>`）、`--full-id`、`--fields`（仅 JSON；逗号分隔，只输出这些字段）、`--resolve-properties`（仅 JSON；在保存的 id 旁附上属性、选项和成员名称） |
+| `issue` | `list` | 列出任务 | `--status`、`--priority`、`--assignee`、`--project`、`--updated-since` / `--updated-until`（配套的 RFC3339 时间范围）、`--metadata`（可重复）、`--property`（可重复，`"名称=值"` 或 `"Score>=3"`、`"Due<2026-01-01"`、`"Notes~=text"` 这样的比较；`__none__` 匹配未设置）、`--limit`、`--offset`、`--sort`（支持 `property:<名称或 id>`）、`--full-id`、`--fields`（仅 JSON；逗号分隔，只输出这些字段）、`--resolve-properties`（仅 JSON；在保存的 id 旁附上属性、选项和成员名称） |
 | | `get <id>` | 查看单个任务 | `--resolve-properties`（仅 JSON；在保存的 id 旁附上属性、选项和成员名称） |
-| | `create` | 创建任务 | `--title`（必填）、`--description` / `--description-stdin` / `--description-file`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（可重复）、`--property`（可重复）、`--allow-duplicate`（已有同名未关闭任务时仍创建） |
+| | `create` | 创建任务 | `--title`（必填）、`--description` / `--description-stdin` / `--description-file`、`--pr-auto-complete on/off`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（可重复）、`--property`（可重复）、`--allow-duplicate`（已有同名未关闭任务时仍创建） |
 | | `update <id>` | 更新任务字段 | 与 `create` 同类字段，另有 `--position`、`--no-start`、`--duplicate-of` |
 | | `assign <id>` | 指派或取消指派 | `--to`（名称模糊匹配成员、智能体或小队）、`--to-id`、`--unassign`、`--no-start` |
 | | `status <id> <status>` | 修改状态 | `--no-start`、`--duplicate-of` |
 | | `reorder <id>` | 在列内移动 | |
-| | `search <query>` | 搜索任务 | `--limit`、`--include-closed` |
+| | `search <query>` | 搜索任务 | `--limit`、`--include-closed`、`--project` |
 | | `children <id>` | 按阶段分组列出子任务 | |
 | | `pull-requests <id>` | 列出关联的 PR | |
 | | `comment list/add/update/delete/resolve/unresolve` | 管理评论 | `add`：`--content` / `--content-stdin` / `--content-file`、`--parent`、`--attachment`；`update`：`--expected-revision`（必填）、`--content` / `--content-stdin` / `--content-file`；`list`：`--since`、`--thread`、`--tail`、`--recent`、`--roots-only`、`--summary`、`--compact`、`--full` |
@@ -377,6 +395,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `handoff set <workflow> <status-key>` | 设置单个步骤的处理人、说明和下一步/退回状态，未指定的字段保持不变 | `--handler`（`none`、`project_lead`、`creator`，或成员/智能体/小队的名称或 UUID）、`--instructions` / `--instructions-file`、`--next`、`--back`、`--copy-for-project` |
 | `label` | `list/get/create/update/delete` | 管理工作区标签 | `list`：`--resource-type`（`issue` 或 `skill`）、`--full-id`；`create`：`--name`、`--color`、`--resource-type`（`issue` 或 `skill`）、`--description` |
 | `property` | `list/get/create/update/archive/unarchive` | 管理工作区自定义属性 | `create`：`--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`、`multi_text`、`multi_url`）、`--option`（可重复，仅 select 类型）；`list`：`--include-archived`；类型创建后不可修改 |
+| `view` | `list/get/issues` | 读取你能打开的视图（自己的和工作区共享的）；`issues` 按视图保存的排序列出视图里的任务，视图保存的全部筛选条件都由服务端执行。在智能体运行中，看到的视图和其中「我的」条件都属于运行时的所有者 | `<view>` 接受 ID、ID 前缀或完整名称；`list`：`--scope`（`workspace`、`my`、`project`）、`--project`、`--full-id`；`issues`：`--limit`（最多 100）、`--cursor`（上一页的 `next_cursor`）、`--today`（相对到期日筛选按哪一天计算，默认今天）、`--fields`（仅 JSON）、`--full-id` |
 | `agent` | `list/get/create/update/archive/restore` | 管理智能体 | `--name`、`--runtime-id`（`create` 必填）、`--instructions`、`--conversation-starters`、`--model`、`--thinking-level`、`--custom-env` / `--custom-env-file` / `--custom-env-stdin`（仅 `create`）、`--custom-args`、`--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`、`--permission-mode`、`--visibility`（旧写法）、`--max-concurrent-tasks` |
 | | `copy <agent-id>` | 复制为新智能体，原智能体不受影响 | `--name`（默认为原名加 ` (copy)`）、`--runtime-id`（复制到其他运行时时必须同时指定 `--model`）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` 等机密配置不会复制，需用与 `create` 相同的 flag 重新提供 |
 | | `tasks <id>` | 查看智能体的运行 | |

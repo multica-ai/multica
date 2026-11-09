@@ -38,6 +38,21 @@
     "feedback": "피드백",
     "server_version": "서버 버전 {{version}}"
   },
+  "whats_new": {
+    "trigger": "새 기능",
+    "panel": {
+      "title": "새 기능",
+      "close": "닫기",
+      "new": "읽지 않음",
+      "release_notes": "v{{version}} 변경 로그",
+      "full_changelog": "전체 변경 로그"
+    },
+    "action": {
+      "try": "사용해 보기",
+      "open": "열기",
+      "learn_more": "자세히 알아보기"
+    }
+  },
   "workspace_loader": {
     "loading_workspace": "워크스페이스 로딩 중...",
     "loading_named_prefix": "로딩 중"
@@ -77,6 +92,8 @@
     "autopilots": "자동화",
     "switch_workspace": "워크스페이스 전환",
     "invitation_from": "{{name}} 님이 초대했습니다",
+    "pin_workspace": "작업 공간 고정",
+    "unpin_workspace": "고정 해제",
     "open_in_new_window": "새 창에서 열기",
     "open_in_new_window_click": "클릭",
     "open_in_other_window": "다른 창에서 열려 있음",
@@ -87,6 +104,7 @@
     "work": {
       "my_agents": "내 에이전트의 작업",
       "all_issues": "전체 태스크",
+      "unread": "읽지 않음",
       "views": "뷰",
       "new_project": "새 프로젝트",
       "new_issue_in_project": "{{name}}에 새 태스크",
@@ -94,6 +112,7 @@
       "project_issues": "{{name}}의 태스크",
       "project_issues_empty": "태스크가 없습니다",
       "project_issues_error": "태스크를 불러오지 못했습니다",
+      "project_issues_retry": "다시 시도",
       "project_issues_settings": "프로젝트 태스크",
       "settings_status": "상태",
       "settings_assignee": "담당자",
@@ -127,13 +146,15 @@
       "needs_attention": "확인 필요",
       "stuck_other": "태스크 {{count}}개가 오프라인 런타임을 기다리는 중",
       "working_now": "작업 중",
+      "show_more_agents": "{{count}}개 더 보기…",
+      "show_fewer_agents": "접기",
       "running_tasks_other": "태스크 {{count}}개 실행 중",
       "all_agents": "전체 에이전트",
       "my_agents": "내 에이전트",
       "squads_and_members": "스쿼드 및 멤버",
       "members_other": "멤버 {{count}}명",
       "resources": "리소스",
-      "runtimes_offline_other": "{{count}}개 오프라인",
+      "runtimes_online_other": "{{count}}대 온라인",
       "invite_member": "멤버 초대"
     },
     "autopilots": {
@@ -158,6 +179,9 @@
     "filter": "필터",
     "filter_count_other": "필터 {{count}}개",
     "reset": "초기화",
+    "clear_search": "검색 지우기",
+    "clear_filters": "필터 지우기",
+    "clear_filters_and_search": "필터와 검색 지우기",
     "display": "표시 설정",
     "selected_other": "{{count}}개 선택됨",
     "clear_selection": "선택 해제",
@@ -174,5 +198,14 @@
   "object_page": {
     "toggle_panel": "오른쪽 사이드바 전환",
     "properties": "속성"
+  },
+  "feature_intro": {
+    "read_docs": "문서 읽기",
+    "carousel": "캐러셀",
+    "slide": "슬라이드",
+    "slide_position": "{{total}}개 중 {{current}}번째",
+    "go_to_slide": "{{index}}번째 슬라이드로 이동",
+    "previous": "이전",
+    "next": "다음"
   }
 }

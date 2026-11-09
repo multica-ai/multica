@@ -204,6 +204,12 @@ type TaskProgressPayload struct {
 	Total   int    `json:"total,omitempty"`
 }
 
+// TaskUsageUpdatedPayload invalidates cached usage after a successful report.
+// It carries no usage values; clients refetch through their authorized APIs.
+type TaskUsageUpdatedPayload struct {
+	TaskID string `json:"task_id"`
+}
+
 // TaskCompletedPayload is sent from daemon to server when a task finishes.
 type TaskCompletedPayload struct {
 	TaskID string `json:"task_id"`

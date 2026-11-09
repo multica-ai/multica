@@ -6,8 +6,9 @@
 -- cost_usd_ticks is the provider's own price for this usage (1e-10 USD), NULL
 -- when it reports none. It is overwritten like the token counters so a
 -- corrected report replaces the previous figure rather than accumulating.
-INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, sqlc.narg('cost_usd_ticks'), now())
+-- credits_micros follows the same rule for providers that bill in credits.
+INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, credits_micros, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, sqlc.narg('cost_usd_ticks'), sqlc.narg('credits_micros'), now())
 ON CONFLICT (task_id, provider, model)
 DO UPDATE SET
     input_tokens = EXCLUDED.input_tokens,
@@ -15,6 +16,7 @@ DO UPDATE SET
     cache_read_tokens = EXCLUDED.cache_read_tokens,
     cache_write_tokens = EXCLUDED.cache_write_tokens,
     cost_usd_ticks = EXCLUDED.cost_usd_ticks,
+    credits_micros = EXCLUDED.credits_micros,
     updated_at = now();
 
 -- name: GetTaskUsage :many
@@ -43,11 +45,20 @@ SELECT
     tu.output_tokens,
     tu.cache_read_tokens,
     tu.cache_write_tokens,
-    tu.cost_usd_ticks
+    tu.cost_usd_ticks,
+    tu.credits_micros
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id = $1
 ORDER BY tu.task_id, tu.model;
+
+-- name: ListTaskUsageByIDs :many
+-- Only called with task IDs selected through an authorized issue scope.
+SELECT task_id, provider, model, input_tokens, output_tokens,
+       cache_read_tokens, cache_write_tokens, cost_usd_ticks, credits_micros
+FROM task_usage
+WHERE task_id = ANY(sqlc.arg(task_ids)::uuid[])
+ORDER BY task_id, model;
 
 -- name: ListAgentTaskUsage :many
 -- Per-(task, provider, model) usage rows for one agent's explicitly requested
@@ -62,7 +73,8 @@ SELECT
     tu.output_tokens,
     tu.cache_read_tokens,
     tu.cache_write_tokens,
-    tu.cost_usd_ticks
+    tu.cost_usd_ticks,
+    tu.credits_micros
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.agent_id = sqlc.arg('agent_id')

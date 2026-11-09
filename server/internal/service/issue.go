@@ -89,6 +89,8 @@ type IssueCreateParams struct {
 	// used by the standalone PUT path, then inserts the complete bag atomically.
 	Properties     map[pgtype.UUID]json.RawMessage
 	AllowDuplicate bool
+	// PRAutoCompleteDisabled is persisted before the issue becomes visible.
+	PRAutoCompleteDisabled bool
 	// Stage groups this issue into an ordered barrier group under its parent
 	// (NULL = unstaged). See issue_wakeup_system.go for the staged-barrier wake.
 	Stage pgtype.Int4
@@ -426,6 +428,15 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			return IssueCreateResult{}, ErrIssuePropertiesTooLarge
 		}
 		return IssueCreateResult{}, fmt.Errorf("create issue: %w", err)
+	}
+
+	if p.PRAutoCompleteDisabled {
+		if err := qtx.SetIssuePRAutoCompleteDisabled(ctx, db.SetIssuePRAutoCompleteDisabledParams{
+			IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, AutoCompleteDisabled: true,
+			UpdatedByType: pgtype.Text{String: p.CreatorType, Valid: true}, UpdatedByID: p.CreatorID,
+		}); err != nil {
+			return IssueCreateResult{}, fmt.Errorf("set issue PR auto-complete: %w", err)
+		}
 	}
 
 	if p.SourceContext != nil {

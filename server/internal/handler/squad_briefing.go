@@ -136,7 +136,18 @@ const (
 	// in_progress first and in_review on delivery, so responsibility 6 has
 	// to rule those moves out for this issue.
 	leaderWorkflowLegacyDaemon
+	// leaderWorkflowStepMoved: the run's binding no longer matches the issue,
+	// so it must leave status unchanged even when its squad owns the issue.
+	leaderWorkflowStepMoved
 )
+
+const squadParentStatusStepMoved = `6. **Leave the parent issue's status unchanged for this run.** This issue
+   is assigned to your squad, but this run's workflow binding no longer matches
+   the issue's current step. Follow the explanation in ` + "`" + `[Project workflow]` + "`" + `.
+   Keep the current status even when you confirm the overall goal is met; do
+   not change it to mark progress or delivery. This overrides the status rules
+   in your runtime instructions. Leave a comment if something needs attention;
+   a member can review the current state and explicitly rerun the work.`
 
 // squadParentStatusOwnedInWorkflow is responsibility 6 for an owning leader
 // whose issue follows a project workflow that came with the claim (MUL-8145).
@@ -227,6 +238,8 @@ const squadSteerRule = `- A worker already running on this issue gets a new comm
 func squadOperatingProtocolFor(ownsIssueStatus bool, workflow leaderWorkflow) string {
 	status := squadParentStatusNotOwned
 	switch {
+	case ownsIssueStatus && workflow == leaderWorkflowStepMoved:
+		status = squadParentStatusStepMoved
 	case ownsIssueStatus && workflow == leaderWorkflowCurrentDaemon:
 		status = squadParentStatusOwnedInWorkflow
 	case ownsIssueStatus && workflow == leaderWorkflowLegacyDaemon:

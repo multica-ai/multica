@@ -384,3 +384,33 @@ it("opens the create form for the picked issue", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
   expect(onOpenChange).toHaveBeenCalledWith(false);
 });
+
+it("introduces wakeups when the workspace has none yet", async () => {
+  const user = userEvent.setup();
+  list.mockResolvedValue({
+    items: [],
+    total: 0,
+    counts: { all: 0, active: 0, paused: 0, disabled: 0, ended: 0 },
+    agents: [],
+  });
+  mount();
+  const intro = await screen.findByRole("region", { name: "Bring agents back at the right moment" });
+  expect(within(intro).getByRole("link", { name: /Read the docs/ })).toHaveAttribute(
+    "href",
+    "https://multica.ai/docs/issue-wakeups",
+  );
+  await user.click(within(intro).getByRole("button", { name: "New wakeup" }));
+  expect(await screen.findByRole("dialog", { name: "Pick issue" })).toBeVisible();
+});
+
+it("keeps the empty list when only the current scope has no wakeups", async () => {
+  list.mockResolvedValue({
+    items: [],
+    total: 0,
+    counts: { all: 2, active: 0, paused: 0, disabled: 0, ended: 2 },
+    agents: [],
+  });
+  mount();
+  expect(await screen.findByText("No matching wakeups")).toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Bring agents back at the right moment" })).toBeNull();
+});

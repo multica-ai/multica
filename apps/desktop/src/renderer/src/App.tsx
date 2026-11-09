@@ -53,6 +53,7 @@ const HTML_LANG: Record<SupportedLocale, string> = {
   ko: "ko-KR",
   ja: "ja-JP",
   fr: "fr-FR",
+  es: "es",
 };
 
 
@@ -102,7 +103,7 @@ function IssueWindowContent() {
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <MulticaIcon className="size-6 animate-pulse" />
+        <MulticaIcon mode="think" size={40} />
       </div>
     );
   }
@@ -332,7 +333,7 @@ function AppContent() {
   if (isLoading || bootstrapping) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <MulticaIcon className="size-6 animate-pulse" />
+        <MulticaIcon mode="think" size={40} />
       </div>
     );
   }

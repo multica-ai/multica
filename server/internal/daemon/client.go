@@ -667,6 +667,21 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}, nil)
 }
 
+// ReportTaskUsageSnapshot posts the same rows mid-run, as a cumulative snapshot
+// of what the agent has spent so far (STOE-30). UpsertTaskUsage overwrites per
+// (task_id, provider, model), so snapshots cannot accumulate; the flag is what
+// keeps the server's additive metrics counter and per-run log on the terminal
+// report, where they would otherwise bill each flush against the last.
+func (c *Client) ReportTaskUsageSnapshot(ctx context.Context, taskID string, usage []TaskUsageEntry) error {
+	if len(usage) == 0 {
+		return nil
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/usage", taskID), map[string]any{
+		"usage":    usage,
+		"snapshot": true,
+	}, nil)
+}
+
 func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) error {
 	return c.failTaskWithRetrySchedule(ctx, taskID, errMsg, sessionID, workDir, branchName, failureReason, sessionRolloutMissing, retiredSessionID, durableWorkDir, defaultTerminalRetrySchedule)
 }

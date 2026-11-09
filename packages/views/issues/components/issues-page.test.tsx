@@ -56,6 +56,10 @@ vi.mock("../../navigation", () => ({
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
+vi.mock("../../chat/use-start-chat-with-draft", () => ({
+  useStartChatWithDraft: () => null,
+}));
+
 // Mock workspace avatar
 vi.mock("../../workspace/workspace-avatar", () => ({
   WorkspaceAvatar: ({ name }: { name: string }) => <span data-testid="workspace-avatar">{name.charAt(0)}</span>,
