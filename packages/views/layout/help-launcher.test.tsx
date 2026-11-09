@@ -13,6 +13,12 @@ vi.mock("../platform/local-directory", () => ({
   isDesktopShell: vi.fn(() => false),
 }));
 
+// The What's new entry is covered with the real menu in whats-new-menu-panel.test.tsx.
+vi.mock("../whats-new/whats-new-menu-panel", () => ({
+  useWhatsNewMenuPanel: () => ({ available: false }),
+  WhatsNewMenuPanel: () => null,
+}));
+
 // The UI language the mocked i18n instance reports; drives locale-aware links.
 const i18nState = vi.hoisted(() => ({ language: "en" }));
 
@@ -110,6 +116,7 @@ describe("HelpLauncher", () => {
   it.each([
     ["en", "https://multica.ai/docs"],
     ["zh-Hans", "https://multica.ai/docs/zh"],
+    ["zh-Hant", "https://multica.ai/docs/zh-Hant"],
     ["fr", "https://multica.ai/docs/fr"],
   ])("links Docs to the %s docs", (language, href) => {
     i18nState.language = language;

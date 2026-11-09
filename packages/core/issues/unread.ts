@@ -49,6 +49,21 @@ export function useIssueUnread(wsId: string, issueId: string): IssueUnread | nul
   return data;
 }
 
+const selectUnreadIssueIds = (items: IssueUnread[]) => items.map((item) => item.issue_id);
+
+/** The ids of the viewer's unread issues, shaped as a `FilterDependencySource`.
+ *  `data` stays `undefined` until the list loads (or while `enabled` is
+ *  false); `isError` means it failed with nothing cached and no retry in
+ *  flight. */
+export function useIssueUnreadIds(wsId: string, enabled = true) {
+  const { data, isError, isFetching, refetch } = useQuery({
+    ...issueUnreadOptions(wsId),
+    select: selectUnreadIssueIds,
+    enabled: enabled && !!wsId,
+  });
+  return { data, isError: isError && !isFetching && data === undefined, refetch };
+}
+
 function useSetIssueUnread(wsId: string, unread: boolean) {
   const qc = useQueryClient();
   const key = issueUnreadKeys.all(wsId);

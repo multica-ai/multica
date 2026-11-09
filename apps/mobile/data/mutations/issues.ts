@@ -695,20 +695,8 @@ export function useCreateIssue() {
 }
 
 /**
- * Delete an issue. Mirrors `useDeleteProject` (mutations/projects.ts:103-128)
- * but the cache surface is wider:
- *   - issueKeys.list(wsId)             — workspace-wide flat list
- *   - issueKeys.myList(wsId, ...)      — three scopes × N filter combos
- *
- * Both are flat `Issue[]` caches. We use `setQueriesData` with the
- * `myAll(wsId)` prefix to filter the issue out of every `myList` key in one
- * pass, snapshot the previous data for rollback, and remove the detail /
- * timeline / tasks caches on settle so a stale return-trip can't surface
- * 404-y data.
- *
- * The WS `issue:deleted` event is already handled in `use-issue-realtime.ts`
- * (callers like the detail screen pass `() => router.back()`), so the other
- * tab/client case is covered.
+ * Keep the issue visible until the server confirms deletion. A rejected delete
+ * leaves list, detail, timeline and run caches intact for retry.
  */
 export function useDeleteIssue() {
   const qc = useQueryClient();
@@ -716,44 +704,25 @@ export function useDeleteIssue() {
 
   return useMutation({
     mutationFn: (id: string) => api.deleteIssue(id),
-    onMutate: async (id) => {
+    onSuccess: async (_data, id) => {
       const listKey = issueKeys.list(wsId);
       const myAllKey = issueKeys.myAll(wsId);
       await Promise.all([
         qc.cancelQueries({ queryKey: listKey }),
         qc.cancelQueries({ queryKey: myAllKey }),
       ]);
-
-      // Snapshot every matching cache (flat list + each my-issues scope×filter)
-      // so we can roll back per-key on error.
-      const prevList = qc.getQueryData<Issue[]>(listKey);
-      const prevMy = qc.getQueriesData<Issue[]>({ queryKey: myAllKey });
-
       qc.setQueryData<Issue[]>(listKey, (old) =>
-        old ? old.filter((i) => i.id !== id) : old,
+        old ? old.filter((issue) => issue.id !== id) : old,
       );
       qc.setQueriesData<Issue[]>({ queryKey: myAllKey }, (old) =>
-        old ? old.filter((i) => i.id !== id) : old,
+        old ? old.filter((issue) => issue.id !== id) : old,
       );
-
-      return { prevList, prevMy, listKey, myAllKey };
-    },
-    onError: (_err, _id, ctx) => {
-      if (!ctx) return;
-      if (ctx.prevList !== undefined) {
-        qc.setQueryData(ctx.listKey, ctx.prevList);
-      }
-      for (const [key, value] of ctx.prevMy) {
-        qc.setQueryData(key, value);
-      }
-    },
-    onSettled: (_data, _err, id) => {
-      qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
-      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
       qc.removeQueries({ queryKey: issueKeys.detail(wsId, id) });
       qc.removeQueries({ queryKey: issueKeys.timeline(wsId, id) });
       qc.removeQueries({ queryKey: issueKeys.activeTasks(wsId, id) });
       qc.removeQueries({ queryKey: issueKeys.tasks(wsId, id) });
+      qc.invalidateQueries({ queryKey: listKey });
+      qc.invalidateQueries({ queryKey: myAllKey });
     },
   });
 }

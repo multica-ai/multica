@@ -12,7 +12,12 @@ import {
   pruneIssueSurfaceViewStates,
 } from "@multica/core/issues/stores/surface-view-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
-import type { IssueStatusEntry, IssueTableGroupsRequest, IssueTableRowsRequest } from "@multica/core/types";
+import type {
+  Issue,
+  IssueStatusEntry,
+  IssueTableGroupsRequest,
+  IssueTableRowsRequest,
+} from "@multica/core/types";
 import { useIssueSurfaceController } from "./use-issue-surface-controller";
 
 /**
@@ -62,6 +67,7 @@ let rowRequests: IssueTableRowsRequest[] = [];
 function installApi(
   listIssueStatuses: () => Promise<unknown>,
   listProjects: () => Promise<unknown> = async () => ({ projects: [], total: 0 }),
+  listIssues: () => Promise<unknown> = async () => ({ issues: [], total: 0 }),
 ) {
   groupRequests = [];
   rowRequests = [];
@@ -85,7 +91,7 @@ function installApi(
       };
     },
     listIssueTableFacets: async () => ({ query_fingerprint: "test", total: 0, facets: [] }),
-    listIssues: async () => ({ issues: [], total: 0 }),
+    listIssues,
     getWorkspaceWorkingAgents: async () => [],
     getChildIssueProgress: async () => ({ progress: [] }),
     getAgentTaskSnapshot: async () => ({ tasks: [] }),
@@ -153,8 +159,11 @@ describe("useIssueSurfaceController — custom status filter vs a late catalog",
   });
 
   it("surfaces a retryable error instead of a silent empty board when the catalog fails", async () => {
-    const catalog = deferred<never>();
-    installApi(() => catalog.promise);
+    const listIssueStatuses = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("catalog unavailable"))
+      .mockResolvedValue({ statuses: [QA_ENTRY], categories: [], total: 1 });
+    installApi(listIssueStatuses);
     const { store, Wrapper } = makeWrapper(qc, "workspace:catalog-failed");
     act(() => store.getState().toggleStatusFilter("qa"));
 
@@ -167,14 +176,18 @@ describe("useIssueSurfaceController — custom status filter vs a late catalog",
       { wrapper: Wrapper },
     );
 
-    await act(async () => {
-      catalog.reject(new Error("catalog unavailable"));
-      await catalog.promise.catch(() => {});
-    });
-
-    await waitFor(() => expect(result.current.isStatusCatalogError).toBe(true));
+    await waitFor(() => expect(result.current.filterDependencyError?.kind).toBe("status"));
     // Not "no issues" — the surface cannot answer the question that was asked.
     expect(result.current.isEmpty).toBe(false);
+    expect(rowRequests).toEqual([]);
+
+    act(() => result.current.filterDependencyError!.retry());
+    await waitFor(() => expect(result.current.filterDependencyError).toBeNull());
+    await waitFor(() => expect(result.current.visibleStatuses).toEqual(["qa"]));
+    await waitFor(() => expect(rowRequests.length).toBeGreaterThan(0));
+    for (const request of rowRequests) {
+      expect(request.query.filters.statuses).toEqual(["qa"]);
+    }
   });
 });
 
@@ -223,8 +236,104 @@ describe("useIssueSurfaceController — project-status filter vs a late catalog"
       await projects.promise.catch(() => {});
     });
 
-    await waitFor(() => expect(result.current.isStatusCatalogError).toBe(true));
+    await waitFor(() => expect(result.current.filterDependencyError?.kind).toBe("status"));
     expect(result.current.isEmpty).toBe(false);
+  });
+
+  describe("on a project Gantt", () => {
+    const row = (id: string, projectId: string) =>
+      ({
+        id,
+        workspace_id: "ws-1",
+        number: 1,
+        identifier: id,
+        title: id,
+        description: null,
+        status: "todo",
+        priority: "none",
+        assignee_type: null,
+        assignee_id: null,
+        creator_type: "member",
+        creator_id: "user-1",
+        parent_issue_id: null,
+        project_id: projectId,
+        position: 1,
+        stage: null,
+        start_date: "2026-01-01",
+        due_date: "2026-01-05",
+        metadata: {},
+        properties: {},
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      }) as Issue;
+    const ROWS = [row("active-row", "p-active"), row("paused-row", "p-paused")];
+    const PROJECTS = {
+      projects: [
+        { id: "p-active", status: "in_progress" },
+        { id: "p-paused", status: "paused" },
+      ],
+      total: 2,
+    };
+
+    function renderProjectGantt(surfaceKey: string, listProjects: () => Promise<unknown>) {
+      installApi(
+        async () => ({ statuses: [], categories: [], total: 0 }),
+        listProjects,
+        async () => ({ issues: ROWS, total: ROWS.length }),
+      );
+      const { store, Wrapper } = makeWrapper(qc, surfaceKey);
+      act(() => {
+        store.getState().setViewMode("gantt");
+        store.getState().toggleProjectStatusFilter("in_progress");
+      });
+      return renderHook(
+        () =>
+          useIssueSurfaceController({
+            scope: { type: "project", projectId: "p-active" },
+            modes: ["gantt"],
+          }),
+        { wrapper: Wrapper },
+      );
+    }
+
+    it("draws only matching rows after a retry recovers the project list", async () => {
+      const listProjects = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("projects unavailable"))
+        .mockResolvedValue(PROJECTS);
+      const { result } = renderProjectGantt("project:pstatus-retry", listProjects);
+
+      await waitFor(() => expect(result.current.filterDependencyError?.kind).toBe("status"));
+      expect(result.current.ganttIssues).toHaveLength(ROWS.length);
+
+      act(() => result.current.filterDependencyError!.retry());
+      await waitFor(() => expect(result.current.filterDependencyError).toBeNull());
+      await waitFor(() =>
+        expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["active-row"]),
+      );
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    it("keeps filtering by the last project list when a refetch fails", async () => {
+      const listProjects = vi
+        .fn()
+        .mockResolvedValueOnce(PROJECTS)
+        .mockRejectedValue(new Error("refetch failed"));
+      const { result } = renderProjectGantt("project:pstatus-stale", listProjects);
+      await waitFor(() =>
+        expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["active-row"]),
+      );
+
+      await act(async () => {
+        await qc.refetchQueries({ queryKey: ["projects", "ws-1", "list"] }).catch(() => {});
+        // Query observers notify on a timer; let the failure reach the hook.
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+
+      expect(qc.getQueryState(["projects", "ws-1", "list"])?.status).toBe("error");
+      expect(result.current.filterDependencyError).toBeNull();
+      expect(result.current.filteredGanttIssues.map((issue) => issue.id)).toEqual(["active-row"]);
+    });
   });
 
   it("does not hold the surface when no project-status filter is active", async () => {
@@ -246,7 +355,7 @@ describe("useIssueSurfaceController — project-status filter vs a late catalog"
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(result.current.isStatusCatalogError).toBe(false);
+    expect(result.current.filterDependencyError).toBeNull();
   });
 });
 

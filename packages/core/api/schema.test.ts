@@ -1,7 +1,9 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ApiClient, ApiError } from "./client";
 import { parseWithFallback } from "./schema";
+import { CreateIssueResponseSchema } from "./schemas";
 
 // Helper: stub fetch with a single JSON response. Status defaults to 200.
 function stubFetchJson(body: unknown, status = 200) {
@@ -24,6 +26,20 @@ afterEach(() => {
 // app in past incidents. The contract is: a malformed response degrades to
 // an empty/safe shape, never throws into React.
 describe("ApiClient schema fallback", () => {
+  describe("workspace pin responses", () => {
+    it("defaults missing or malformed pinned_at to null and falls back on malformed lists", async () => {
+      const ws = { id: "ws-1", name: "One", slug: "one", description: null, context: null, settings: {}, repos: [], issue_prefix: "ONE", avatar_url: null, created_at: "2026-01-01", updated_at: "2026-01-01" };
+      const client = new ApiClient("https://api.example.test");
+      stubFetchJson([ws, { ...ws, id: "ws-2", pinned_at: 123 }]);
+      expect((await client.listWorkspaces()).map((item) => item.pinned_at)).toEqual([null, null]);
+      stubFetchJson({ invalid: true });
+      await expect(client.listWorkspaces()).resolves.toEqual([]);
+      stubFetchJson({ pinned_at: 123 });
+      await expect(client.setWorkspacePinned("ws-1", true)).resolves.toEqual({ pinned_at: null });
+      expect(vi.mocked(fetch).mock.calls[0]?.[1]).toMatchObject({ method: "PUT", body: JSON.stringify({ pinned: true }) });
+    });
+  });
+
   describe("GitHub repository import", () => {
     it("falls back safely when installation or repository responses are malformed", async () => {
       stubFetchJson({ installations: "not-an-array", configured: true });
@@ -155,6 +171,32 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const res = await client.listSkills();
       expect(res).toEqual([]);
+    });
+
+    it.each([{ body: { skills: [] } }, { body: null }, { body: [{ id: "missing-identity" }] }])(
+      "rejects malformed skill lists for absence checks while preserving rendering fallback: %j",
+      async ({ body }) => {
+        stubFetchJson(body);
+        const client = new ApiClient("https://api.example.test");
+        await expect(client.listSkills()).resolves.toEqual([]);
+        stubFetchJson(body);
+        await expect(client.listSkills({ requireValidResponse: true })).rejects.toThrow("Invalid skill list response");
+      },
+    );
+
+    it("does not accept a defaulted 204 response as proof of absence", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => new Response(null, { status: 204 })));
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listSkills()).resolves.toEqual([]);
+      await expect(client.listSkills({ requireValidResponse: true })).rejects.toThrow("Invalid skill list response");
+    });
+
+    it("accepts a verified empty list and older valid rows for absence checks", async () => {
+      const client = new ApiClient("https://api.example.test");
+      stubFetchJson([]);
+      await expect(client.listSkills({ requireValidResponse: true })).resolves.toEqual([]);
+      stubFetchJson([baseSkill]);
+      await expect(client.listSkills({ requireValidResponse: true })).resolves.toMatchObject([{ id: "skill-1", name: "review-helper" }]);
     });
 
     it("treats a missing labels field as an empty array (older backends)", async () => {
@@ -300,6 +342,11 @@ describe("ApiClient schema fallback", () => {
       const issue = await client.createIssue({ title: "Created" });
       expect(issue.id).toBe("issue-1");
       expect(issue.labels).toBeUndefined();
+    });
+
+    it.each([true, false, undefined, null, "off"])("validates the create PR override %s without breaking older responses", (value) => {
+      const parsed = CreateIssueResponseSchema.parse({ ...validIssue, pr_auto_complete_disabled: value });
+      expect(parsed.pr_auto_complete_disabled).toBe(typeof value === "boolean" ? value : undefined);
     });
 
     it("validates a well-formed labels array", async () => {

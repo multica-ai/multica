@@ -66,7 +66,7 @@ export function ChatAddMenu({
               size="icon-sm"
               disabled={disabled}
               label={t(($) => $.input.add_tooltip)}
-              className="rounded-full text-muted-foreground"
+              className="text-muted-foreground"
             >
               <Plus />
             </IconButton>

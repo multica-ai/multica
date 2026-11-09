@@ -257,7 +257,7 @@ export function ChatPage() {
   );
 
   const listBody = (
-    <div className="px-2 py-1">
+    <div className="min-h-0 flex-1 px-2 py-1">
       <ChatThreadList
         sessions={c.sessions}
         agents={c.agents}
@@ -450,7 +450,7 @@ export function ChatPage() {
         {noAgentPage ? (
           noAgentState
         ) : (
-          <div className="flex-1 min-h-0 overflow-y-auto">{listBody}</div>
+          <div className="flex min-h-0 flex-1 flex-col">{listBody}</div>
         )}
       </div>
     );
@@ -465,7 +465,7 @@ export function ChatPage() {
     <div className="flex min-h-0 flex-1">
       <ListColumn collapsed={listCollapsed} width="list">
         {listHeader}
-        <div className="flex-1 min-h-0 overflow-y-auto">{listBody}</div>
+        <div className="flex min-h-0 flex-1 flex-col">{listBody}</div>
       </ListColumn>
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
         {listCollapsed && !c.currentSession && <PageHeader>{newChatButton}</PageHeader>}

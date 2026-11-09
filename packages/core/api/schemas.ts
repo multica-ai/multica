@@ -62,6 +62,8 @@ import type {
   InboxWorkspaceUnread,
   IssueUnread,
   Label,
+  Project,
+  ListProjectsResponse,
   MemberWithUser,
   IssueProperty,
   ListPropertiesResponse,
@@ -95,6 +97,8 @@ import type {
   Skill,
   SkillImportResult,
   SkillSummary,
+  SkillVersion,
+  SkillVersionSummary,
   Squad,
   TimelineEntry,
   User,
@@ -978,8 +982,14 @@ const ReactionSchema = z.object({
 // Nested attachments embedded in timeline/comment responses stay lenient on
 // purpose: a single malformed attachment must not knock the whole timeline
 // into the fallback `[]`.
+const AttachmentImageFields = {
+  width: z.number().int().positive().optional().catch(undefined),
+  height: z.number().int().positive().optional().catch(undefined),
+};
+
 const AttachmentSchema = z.object({
   id: z.string(),
+  ...AttachmentImageFields,
 }).loose();
 
 const ChatQuickActionSchema = z.object({
@@ -1045,6 +1055,9 @@ export const AttachmentResponseSchema = z.object({
   filename: z.string(),
   chat_session_id: z.string().nullable().optional(),
   chat_message_id: z.string().nullable().optional(),
+  // Image metadata is optional and degrades on its own: a malformed value
+  // means "unknown dimensions", never a lost attachment.
+  ...AttachmentImageFields,
 }).loose();
 
 export const EMPTY_ATTACHMENT: Attachment = {
@@ -1537,6 +1550,7 @@ export const ListIssuesResponseSchema = z.object({
 export const CreateIssueResponseSchema = IssueSchema.extend({
   id: z.string().min(1),
   labels: z.array(LabelSchema).optional().catch(undefined),
+  pr_auto_complete_disabled: z.boolean().optional().catch(undefined),
 }).loose();
 
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
@@ -1559,7 +1573,7 @@ export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
   issues: [],
 };
 
-const ProjectSchema = z.object({
+export const ProjectSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
   title: z.string(),
@@ -1569,6 +1583,8 @@ const ProjectSchema = z.object({
   priority: z.string(),
   lead_type: z.string().nullable(),
   lead_id: z.string().nullable(),
+  creator_type: z.string().nullable().default(null).catch(null),
+  creator_id: z.string().nullable().default(null).catch(null),
   // .default(null) so a project from an older backend (frontend deploys before
   // backend) that omits these keys parses to null instead of failing the whole
   // object — which would degrade a search/list batch to the empty fallback.
@@ -1581,6 +1597,20 @@ const ProjectSchema = z.object({
   resource_count: z.number().default(0),
   workflow_id: z.string().nullable().default(null),
 }).loose();
+
+export const EMPTY_PROJECT: Project = {
+  id: "", workspace_id: "", title: "", description: null, icon: null,
+  status: "planned", priority: "none", lead_type: null, lead_id: null,
+  creator_type: null, creator_id: null, start_date: null, due_date: null,
+  created_at: "", updated_at: "", issue_count: 0, done_count: 0, resource_count: 0,
+};
+
+export const ListProjectsResponseSchema = z.object({
+  projects: z.array(ProjectSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_PROJECTS_RESPONSE: ListProjectsResponse = { projects: [], total: 0 };
 
 const SearchProjectResultSchema = ProjectSchema.extend({
   match_source: z.string(),
@@ -2068,6 +2098,8 @@ export const AgentTaskSchema = z.object({
   agent_id: z.string().default(""),
   runtime_id: z.string().default(""),
   issue_id: z.string().default(""),
+  issue_identifier: z.string().optional().catch(undefined),
+  issue_title: z.string().optional().catch(undefined),
   status: z.string().default("cancelled"),
   priority: z.number().default(0),
   dispatched_at: z.string().nullable().default(null),
@@ -2797,6 +2829,28 @@ export const EMPTY_ISSUE_UNREAD_PAGE: { items: IssueUnread[]; next_cursor: strin
   next_cursor: null,
 };
 
+// Reading one issue's notifications (`/api/inbox/issues/{id}/read` POST).
+// `count` is how many rows the write read; the client refreshes its inbox
+// caches only when it is above zero. A body without a usable count cannot say
+// that nothing changed, so the client treats it as unknown and refreshes.
+export const IssueInboxReadSchema = z
+  .object({
+    count: z.number().int().nonnegative(),
+  })
+  .loose();
+
+// The viewer's subscribed issue ids (`/api/issues/subscribed` GET), behind the
+// "subscribed" relation filter on client-filtered surfaces. A non-string entry
+// is dropped; a body without the list has no safe fallback — an empty set
+// would hide every row under the filter — so the client fails the request.
+export const SubscribedIssueIdsSchema = z
+  .object({
+    issue_ids: z
+      .array(z.unknown())
+      .transform((ids) => ids.filter((id): id is string => typeof id === "string" && id.length > 0)),
+  })
+  .loose();
+
 // Inbox items (`/api/inbox` and `/api/inbox/archived` GET).
 // Lenient per the usual rules: `severity` / `type` / `recipient_type` stay
 // `z.string()` so a notification kind this client doesn't know yet still
@@ -2821,6 +2875,11 @@ export const InboxItemListSchema = z.array(
       body: z.string().nullish(),
       issue_status: z.string().nullish(),
       issue_priority: z.string().nullish(),
+      issue_project_id: z.string().nullish(),
+      issue_assignee_type: z.string().nullish(),
+      issue_assignee_id: z.string().nullish(),
+      issue_due_date: z.string().nullish(),
+      issue_label_ids: z.array(z.string()).nullish(),
       read: z.boolean(),
       archived: z.boolean(),
       created_at: z.string(),
@@ -2836,14 +2895,24 @@ export const ArchivedInboxPageSchema = z.object({
   (!page.has_more || page.items.length > 0))
   .transform((page) => ({ items: page.items, nextCursor: page.next_cursor, hasMore: page.has_more }));
 
+const FacetCountsSchema = z.record(z.string(), z.number().int().nonnegative());
+
+// The type / project / assignee / label counts arrived later; an older server
+// omits them, so they default to empty rather than failing the whole menu.
 export const ArchivedInboxFacetsSchema = z.object({
-  statuses: z.record(z.string(), z.number().int().nonnegative()),
-  priorities: z.record(z.string(), z.number().int().nonnegative()),
-  actors: z.record(z.string(), z.number().int().nonnegative()),
+  statuses: FacetCountsSchema,
+  priorities: FacetCountsSchema,
+  actors: FacetCountsSchema,
+  types: FacetCountsSchema.optional(),
+  projects: FacetCountsSchema.optional(),
+  assignees: FacetCountsSchema.optional(),
+  labels: FacetCountsSchema.optional(),
   unread_count: z.number().int().nonnegative(),
 }).transform((facets) => ({
   statuses: facets.statuses, priorities: facets.priorities,
-  actors: facets.actors, unreadCount: facets.unread_count,
+  actors: facets.actors, types: facets.types ?? {},
+  projects: facets.projects ?? {}, assignees: facets.assignees ?? {},
+  labels: facets.labels ?? {}, unreadCount: facets.unread_count,
 }));
 
 export const EMPTY_INBOX_ITEMS: InboxItem[] = [];
@@ -3665,6 +3734,55 @@ export const EMPTY_SKILL: Skill = {
 
 export const SkillSummaryListSchema = z.array(SkillSummarySchema).default([]);
 
+const SKILL_VERSION_SOURCES = [
+  "baseline",
+  "create",
+  "update",
+  "import",
+  "refresh",
+  "restore",
+] as const;
+
+export const SkillVersionSummarySchema = z.object({
+  id: z.string(),
+  skill_id: z.string(),
+  version: z.number(),
+  name: z.string().optional().default(""),
+  source: z.enum(SKILL_VERSION_SOURCES).catch("update"),
+  restored_from_version: z.number().nullable().optional().default(null),
+  created_by: z.string().nullable().optional().default(null),
+  created_at: z.string().optional().default(""),
+}).loose();
+
+export const SkillVersionSummaryListSchema = z
+  .array(SkillVersionSummarySchema)
+  .default([]);
+
+export const EMPTY_SKILL_VERSION_SUMMARY_LIST: SkillVersionSummary[] = [];
+
+export const SkillVersionSchema = SkillVersionSummarySchema.extend({
+  description: z.string().optional().default(""),
+  content: z.string().optional().default(""),
+  files: z
+    .array(z.object({ path: z.string(), content: z.string().optional().default("") }).loose())
+    .optional()
+    .default([]),
+}).loose();
+
+export const EMPTY_SKILL_VERSION: SkillVersion = {
+  id: "",
+  skill_id: "",
+  version: 0,
+  name: "",
+  source: "update",
+  restored_from_version: null,
+  created_by: null,
+  created_at: "",
+  description: "",
+  content: "",
+  files: [],
+};
+
 export const EMPTY_SKILL_SUMMARY_LIST: SkillSummary[] = [];
 
 export const SkillImportExistingSkillSchema = z.object({
@@ -4129,3 +4247,17 @@ export const EMPTY_TEAM_APP_IMPACT: TeamAppImpact = {
   active_autopilots: 0,
   pending_requests: 0,
 };
+
+// Only `pinned_at` is new here; every other field keeps its pre-schema
+// leniency so one odd workspace can never empty the whole switcher.
+export const WorkspaceListItemSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  created_at: z.string(),
+  pinned_at: z.iso.datetime({ offset: true }).nullable().optional().catch(null).default(null),
+}).loose();
+
+export const WorkspacePinnedSchema = z.object({
+  pinned_at: z.iso.datetime({ offset: true }).nullable().catch(null),
+});

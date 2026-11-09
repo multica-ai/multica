@@ -41,6 +41,7 @@ export interface IssueViewBaseline {
   /** Dimensions the view saved as "is not". */
   negated: Set<NegatableFilterDimension>;
   agentRunning: boolean;
+  unread: boolean;
   /** Property definition id → fixed member keys (`propertyFilterValueKey`). */
   property: Map<string, Set<string>>;
   /** Enum-sanitized snapshot, safe to hand straight to `resetFiltersTo`. */
@@ -125,6 +126,7 @@ export function baselineFromQuery(query: Record<string, unknown>): IssueViewBase
   const includeNoAssignee = query.includeNoAssignee === true;
   const includeNoProject = query.includeNoProject === true;
   const agentRunningFilter = query.agentRunningFilter === true;
+  const unreadFilter = query.unreadFilter === true;
 
   const propertyFilters: Record<string, PropertyFilterValue[]> = {};
   const property = new Map<string, Set<string>>();
@@ -154,6 +156,7 @@ export function baselineFromQuery(query: Record<string, unknown>): IssueViewBase
     dueDate: new Set(dueDateFilters),
     negated: new Set(negatedFilters),
     agentRunning: agentRunningFilter,
+    unread: unreadFilter,
     property,
     raw: {
       statusFilters,
@@ -171,6 +174,7 @@ export function baselineFromQuery(query: Record<string, unknown>): IssueViewBase
       propertyFilters,
       advancedFilter,
       agentRunningFilter,
+      unreadFilter,
     },
   };
 }
@@ -190,6 +194,7 @@ export function issueViewFilterCount(query: Record<string, unknown>): number {
       raw.relationFilters.length,
       raw.dueDateFilters.length,
       raw.agentRunningFilter,
+      raw.unreadFilter,
     ].filter(Boolean).length +
     Object.keys(raw.propertyFilters).length +
     countAdvancedConditions(raw.advancedFilter)

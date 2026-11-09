@@ -124,6 +124,31 @@ import jaUsage from "./ja/usage.json";
 import jaUi from "./ja/ui.json";
 import jaSquads from "./ja/squads.json";
 import jaBilling from "./ja/billing.json";
+import ruCommon from "./ru/common.json";
+import ruAuth from "./ru/auth.json";
+import ruSettings from "./ru/settings.json";
+import ruIssues from "./ru/issues.json";
+import ruAgents from "./ru/agents.json";
+import ruEditor from "./ru/editor.json";
+import ruOnboarding from "./ru/onboarding.json";
+import ruInvite from "./ru/invite.json";
+import ruLabels from "./ru/labels.json";
+import ruMembers from "./ru/members.json";
+import ruMyIssues from "./ru/my-issues.json";
+import ruSearch from "./ru/search.json";
+import ruInbox from "./ru/inbox.json";
+import ruWorkspace from "./ru/workspace.json";
+import ruProjects from "./ru/projects.json";
+import ruAutopilots from "./ru/autopilots.json";
+import ruSkills from "./ru/skills.json";
+import ruChat from "./ru/chat.json";
+import ruModals from "./ru/modals.json";
+import ruRuntimes from "./ru/runtimes.json";
+import ruLayout from "./ru/layout.json";
+import ruUsage from "./ru/usage.json";
+import ruUi from "./ru/ui.json";
+import ruSquads from "./ru/squads.json";
+import ruBilling from "./ru/billing.json";
 import frCommon from "./fr/common.json";
 import frAuth from "./fr/auth.json";
 import frSettings from "./fr/settings.json";
@@ -149,6 +174,31 @@ import frUsage from "./fr/usage.json";
 import frUi from "./fr/ui.json";
 import frSquads from "./fr/squads.json";
 import frBilling from "./fr/billing.json";
+import esCommon from "./es/common.json";
+import esAuth from "./es/auth.json";
+import esSettings from "./es/settings.json";
+import esIssues from "./es/issues.json";
+import esAgents from "./es/agents.json";
+import esEditor from "./es/editor.json";
+import esOnboarding from "./es/onboarding.json";
+import esInvite from "./es/invite.json";
+import esLabels from "./es/labels.json";
+import esMembers from "./es/members.json";
+import esMyIssues from "./es/my-issues.json";
+import esSearch from "./es/search.json";
+import esInbox from "./es/inbox.json";
+import esWorkspace from "./es/workspace.json";
+import esProjects from "./es/projects.json";
+import esAutopilots from "./es/autopilots.json";
+import esSkills from "./es/skills.json";
+import esChat from "./es/chat.json";
+import esModals from "./es/modals.json";
+import esRuntimes from "./es/runtimes.json";
+import esLayout from "./es/layout.json";
+import esUsage from "./es/usage.json";
+import esUi from "./es/ui.json";
+import esSquads from "./es/squads.json";
+import esBilling from "./es/billing.json";
 
 // Single source of truth for the resource bundle. Both apps (web layout +
 // desktop App.tsx) import from here so adding a locale or namespace happens
@@ -289,6 +339,33 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     squads: jaSquads,
     billing: jaBilling,
   },
+  ru: {
+    common: ruCommon,
+    auth: ruAuth,
+    settings: ruSettings,
+    issues: ruIssues,
+    agents: ruAgents,
+    editor: ruEditor,
+    onboarding: ruOnboarding,
+    invite: ruInvite,
+    labels: ruLabels,
+    members: ruMembers,
+    "my-issues": ruMyIssues,
+    search: ruSearch,
+    inbox: ruInbox,
+    workspace: ruWorkspace,
+    projects: ruProjects,
+    autopilots: ruAutopilots,
+    skills: ruSkills,
+    chat: ruChat,
+    modals: ruModals,
+    runtimes: ruRuntimes,
+    layout: ruLayout,
+    usage: ruUsage,
+    ui: ruUi,
+    squads: ruSquads,
+    billing: ruBilling,
+  },
   fr: {
     common: frCommon,
     auth: frAuth,
@@ -315,5 +392,32 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: frUi,
     squads: frSquads,
     billing: frBilling,
+  },
+  es: {
+    common: esCommon,
+    auth: esAuth,
+    settings: esSettings,
+    issues: esIssues,
+    agents: esAgents,
+    editor: esEditor,
+    onboarding: esOnboarding,
+    invite: esInvite,
+    labels: esLabels,
+    members: esMembers,
+    "my-issues": esMyIssues,
+    search: esSearch,
+    inbox: esInbox,
+    workspace: esWorkspace,
+    projects: esProjects,
+    autopilots: esAutopilots,
+    skills: esSkills,
+    chat: esChat,
+    modals: esModals,
+    runtimes: esRuntimes,
+    layout: esLayout,
+    usage: esUsage,
+    ui: esUi,
+    squads: esSquads,
+    billing: esBilling,
   },
 };

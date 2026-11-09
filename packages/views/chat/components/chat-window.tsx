@@ -76,6 +76,7 @@ import { ChatQueue } from "./chat-queue";
 import { ChatAppRequests } from "../../common/app-requests";
 import { EmptyState } from "./chat-empty-state";
 import { SessionRenameInput } from "./session-rename-input";
+import { SessionHistoryList } from "./session-history-list";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
@@ -800,6 +801,13 @@ export function ChatWindow() {
   const contextItems = useChatContextItems(wsId);
   const queuedTasks = pendingTask?.queued_tasks ?? [];
 
+  const showRestore = isExpanded || isAtMax;
+  const newChatLabel = t(($) => $.window.new_chat_tooltip);
+  const expandLabel = showRestore
+    ? t(($) => $.window.restore_tooltip)
+    : t(($) => $.window.expand_tooltip);
+  const minimizeLabel = t(($) => $.window.minimize_tooltip);
+
   return (
     <motion.div
       ref={windowRef}
@@ -828,14 +836,15 @@ export function ChatWindow() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="rounded-full text-muted-foreground"
+                  className="text-muted-foreground"
+                  aria-label={newChatLabel}
                   onClick={handleNewChat}
                 />
               }
             >
               <Plus />
             </TooltipTrigger>
-            <TooltipContent side="top">{t(($) => $.window.new_chat_tooltip)}</TooltipContent>
+            <TooltipContent side="top">{newChatLabel}</TooltipContent>
           </Tooltip>
           <SessionDropdown
             sessions={sessions}
@@ -855,15 +864,14 @@ export function ChatWindow() {
                     variant="ghost"
                     size="icon-sm"
                     className="text-muted-foreground"
+                    aria-label={expandLabel}
                     onClick={toggleExpand}
                   />
                 }
               >
-                {isExpanded || isAtMax ? <Minimize2 /> : <Maximize2 />}
+                {showRestore ? <Minimize2 /> : <Maximize2 />}
               </TooltipTrigger>
-              <TooltipContent side="top">
-                {isExpanded || isAtMax ? t(($) => $.window.restore_tooltip) : t(($) => $.window.expand_tooltip)}
-              </TooltipContent>
+              <TooltipContent side="top">{expandLabel}</TooltipContent>
             </Tooltip>
           )}
           <Tooltip>
@@ -873,6 +881,7 @@ export function ChatWindow() {
                   variant="ghost"
                   size="icon-sm"
                   className="text-muted-foreground"
+                  aria-label={minimizeLabel}
                   onClick={handleMinimize}
                 />
               }
@@ -880,7 +889,7 @@ export function ChatWindow() {
               <Minus />
             </TooltipTrigger>
             <TooltipContent side="top">
-              {t(($) => $.window.minimize_tooltip)}
+              {minimizeLabel}
               <ActionShortcutKeycaps action="toggleChat" />
             </TooltipContent>
           </Tooltip>
@@ -1586,7 +1595,7 @@ function SessionDropdown({
         </div>
         <PopoverContent
           align="start"
-          className="max-h-96 w-auto min-w-[max(16rem,var(--anchor-width,16rem))] max-w-96 gap-0 overflow-y-auto p-1"
+          className="max-h-96 w-auto min-w-[max(16rem,var(--anchor-width,16rem))] max-w-96 gap-0 overflow-hidden p-1"
           onClick={(e) => e.stopPropagation()}
         >
           {historySessions.length === 0 ? (
@@ -1598,7 +1607,12 @@ function SessionDropdown({
               <div className="px-1.5 py-1 text-caption font-medium text-muted-foreground">
                 {t(($) => $.window.history_group)}
               </div>
-              {historySessions.map(renderRow)}
+              <SessionHistoryList
+                sessions={historySessions}
+                renderRow={renderRow}
+                estimatedRowHeight={44}
+                maxHeight={320}
+              />
             </div>
           )}
         </PopoverContent>

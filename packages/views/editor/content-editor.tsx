@@ -125,6 +125,7 @@ function isInNodeViewChrome(target: HTMLElement): boolean {
 // Types
 
 interface ContentEditorBaseProps {
+  ariaLabel?: string;
   /**
    * `baseMarkdown` is the last authoritative controlled value this editor
    * actually adopted before producing `markdown`. A dirty-editor realtime
@@ -363,6 +364,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
   function ContentEditor(
     {
       defaultValue,
+      ariaLabel,
       value,
       onUpdate,
       placeholder: placeholderText = "",
@@ -622,10 +624,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             quickActionMenuListeners.current.add(refresh);
             return () => { quickActionMenuListeners.current.delete(refresh); };
           },
-          renderQuickAction: (id: string) =>
-            quickActionMenuRef.current?.renderQuickAction?.(id) ?? Promise.resolve(""),
-          onRenderError: (error: unknown) =>
-            quickActionMenuRef.current?.onRenderError?.(error),
+          getQuickActionContent: (id: string) =>
+            quickActionMenuRef.current?.getQuickActionContent?.(id) ?? "",
         },
         resolveIssueIdentifierRef,
       }),
@@ -691,6 +691,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         },
         attributes: {
           class: cn("flex-1 rich-text-editor text-body outline-none", className),
+          ...(ariaLabel ? { role: "textbox", "aria-label": ariaLabel, "aria-multiline": "true" } : {}),
         },
       },
     });
