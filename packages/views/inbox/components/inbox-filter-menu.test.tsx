@@ -193,12 +193,12 @@ describe("InboxFilterMenu", () => {
     renderMenu({
       items: [
         item("mention", "todo", "high"),
-        item("comment", "todo", "high", { type: "new_comment" }),
+        item("assigned", "todo", "high", { type: "issue_assigned" }),
       ],
     });
     await openSubmenu("Type");
-    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: /Comments & reactions.*1 notification/ }));
-    expect(storedFilters()?.types).toEqual(["comment"]);
+    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: /Assignments & subscriptions.*1 notification/ }));
+    expect(storedFilters()?.types).toEqual(["assign"]);
 
     fireEvent.click(screen.getByRole("menuitemradio", { name: "is not" }));
     expect(storedFilters()?.negated).toEqual(["type"]);

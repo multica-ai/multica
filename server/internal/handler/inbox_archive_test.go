@@ -82,7 +82,7 @@ func TestArchivedInboxMatchedNotificationKeepsItsCommentAnchor(t *testing.T) {
 		})
 	}
 	mention := insert("mentioned", old, c1)
-	newest := insert("new_comment", old.Add(time.Minute), c2)
+	newest := insert("agent_completed", old.Add(time.Minute), c2)
 	get := func(query string) archivedInboxPageResponse {
 		var page archivedInboxPageResponse
 		testutil.Call(t, inboxWorkspaceHandler(testHandler.ListArchivedInboxPage), inboxRequest(http.MethodGet, "/api/inbox/archived/page?"+query, ws)).Want(http.StatusOK).JSON(&page)
@@ -203,8 +203,8 @@ func TestArchivedInboxNotificationAndIssueFilters(t *testing.T) {
 		})
 	}
 	mention := insert(&tracked, "mentioned", base)
-	change := insert(&tracked, "status_changed", base.Add(time.Minute))
-	comment := insert(&bare, "new_comment", base)
+	change := insert(&tracked, "agent_completed", base.Add(time.Minute))
+	comment := insert(&bare, "issue_assigned", base)
 	issueless := insert(nil, "quick_create_failed", base)
 
 	ids := func(query string) []string {
@@ -228,8 +228,8 @@ func TestArchivedInboxNotificationAndIssueFilters(t *testing.T) {
 	}{
 		// The type filter picks the matching notification, not the newest one.
 		{"types=mention", []string{mention}},
-		{"types=comment,mention", sorted(mention, comment)},
-		{"types=change&negated=type", sorted(mention, comment, issueless)},
+		{"types=assign,mention", sorted(mention, comment)},
+		{"types=run&negated=type", sorted(mention, comment, issueless)},
 		{"projects=" + project, []string{change}},
 		{"projects=none", []string{comment}},
 		// Issue filters, negated ones too, never match an issue-less notification.
@@ -257,14 +257,14 @@ func TestArchivedInboxNotificationAndIssueFilters(t *testing.T) {
 	}
 	// Each count ignores its own dimension, and an issue filter drops the
 	// issue-less notification from every other count.
-	if got := facets("types=mention&projects=none"); got.Types["mention"] != 0 || got.Types["comment"] != 1 || got.Types["system"] != 0 ||
+	if got := facets("types=mention&projects=none"); got.Types["mention"] != 0 || got.Types["assign"] != 1 || got.Types["system"] != 0 ||
 		got.Projects[project] != 1 || got.Projects["none"] != 0 {
 		t.Fatalf("facets with type and project filters: %+v", got)
 	}
 	if got := facets("types=mention"); got.Labels[label] != 1 || got.Assignees["member:"+testUserID] != 1 || got.Projects["none"] != 0 {
 		t.Fatalf("facets with a type filter: %+v", got)
 	}
-	if got := facets(""); got.Types["mention"] != 1 || got.Types["change"] != 1 || got.Types["system"] != 1 || got.Projects["none"] != 1 || got.Assignees["none"] != 1 {
+	if got := facets(""); got.Types["mention"] != 1 || got.Types["run"] != 1 || got.Types["system"] != 1 || got.Projects["none"] != 1 || got.Assignees["none"] != 1 {
 		t.Fatalf("unfiltered facets: %+v", got)
 	}
 

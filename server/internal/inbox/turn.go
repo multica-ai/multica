@@ -2,8 +2,10 @@ package inbox
 
 // TurnTypes are the notification types that put an issue in its recipient's
 // Inbox: the issue was handed to them. An agent finished a run they started,
-// someone @-mentioned them, the issue was assigned to them, or a result they
-// asked for (quick create, an autopilot they follow, a finished stage) arrived.
+// someone @-mentioned them, the issue was assigned to them, an agent waits on
+// them to confirm an app call or connect an account, or a result they asked
+// for (quick create, an autopilot they follow, a finished stage, an app call)
+// arrived.
 //
 // Every other type (status, comment, date and priority changes, reactions) is
 // still recorded, but it does not ask anything of the recipient, so the Inbox
@@ -22,6 +24,10 @@ var TurnTypes = []string{
 	"quick_create_unconfirmed",
 	"autopilot_paused",
 	"autopilot_quota_exceeded",
+	"app_action_requested",
+	"app_action_reminder",
+	"app_connect_requested",
+	"app_action_result",
 }
 
 var turnTypeSet = func() map[string]bool {
