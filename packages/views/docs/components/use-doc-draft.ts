@@ -2,7 +2,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
+import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { getCurrentWsId } from "@multica/core/platform";
 import {
   docKeys,
   isDocRevisionConflict,
@@ -29,10 +31,25 @@ export function useDocDraft(doc: Doc) {
   >("saved");
   const saving = useRef(false);
   const alive = useRef(true);
+  const ownerId = useRef(useAuthStore.getState().user?.id).current;
+  const statusRef = useRef(status);
+  const saveRef = useRef<() => Promise<void>>(async () => {});
+  const inScope = () =>
+    getCurrentWsId() === wsId && useAuthStore.getState().user?.id === ownerId;
+  const updateStatus = (next: typeof status) => {
+    statusRef.current = next;
+    if (alive.current) setStatus(next);
+  };
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
+      // Child editor cleanup can still publish its final pending update.
+      // StrictMode's effect replay remounts before this microtask runs.
+      queueMicrotask(() => {
+        if (!alive.current && statusRef.current === "saved")
+          void saveRef.current();
+      });
     };
   }, []);
   useEffect(() => {
@@ -55,12 +72,14 @@ export function useDocDraft(doc: Doc) {
     const sent = useDocDraftStore.getState().draft.entries[key];
     if (
       !sent ||
+      !inScope() ||
       saving.current ||
       (sent.title === sent.baseTitle && sent.content === sent.baseContent)
     )
       return;
     saving.current = true;
-    setStatus("saving");
+    updateStatus("saving");
+    let saved = false;
     try {
       const updated = await api.updateDoc(doc.id, {
         baseRevision: sent.baseRevision,
@@ -68,34 +87,44 @@ export function useDocDraft(doc: Doc) {
         content: sent.content,
       });
       const current = useDocDraftStore.getState().draft.entries[key];
-      qc.setQueryData(docKeys.detail(wsId, doc.id), updated);
-      if (current) {
-        const next = {
-          ...current,
-          title: current.title === sent.title ? updated.title : current.title,
-          baseRevision: updated.revision,
-          baseTitle: updated.title,
-          baseContent: updated.content,
-        };
-        if (
-          next.title === next.baseTitle &&
-          next.content === next.baseContent &&
-          !next.backup
-        )
-          removeDocDraft(key);
-        else setDocDraft(key, next);
+      // Session cleanup must stay final even if an older request completes.
+      if (!inScope() || !current) {
+        updateStatus("saved");
+        return;
       }
+      qc.setQueryData(docKeys.detail(wsId, doc.id), updated);
+      const next = {
+        ...current,
+        title: current.title === sent.title ? updated.title : current.title,
+        baseRevision: updated.revision,
+        baseTitle: updated.title,
+        baseContent: updated.content,
+      };
+      if (
+        next.title === next.baseTitle &&
+        next.content === next.baseContent &&
+        !next.backup
+      )
+        removeDocDraft(key);
+      else setDocDraft(key, next);
       void qc.invalidateQueries({ queryKey: docKeys.all(wsId) });
-      if (alive.current) setStatus("saved");
+      saved = true;
+      updateStatus("saved");
     } catch (error) {
-      if (alive.current)
-        setStatus(isDocRevisionConflict(error) ? "conflict" : "error");
+      if (!inScope()) {
+        updateStatus("saved");
+        return;
+      }
+      updateStatus(isDocRevisionConflict(error) ? "conflict" : "error");
       if (isDocRevisionConflict(error))
         void qc.invalidateQueries({ queryKey: docKeys.detail(wsId, doc.id) });
     } finally {
       saving.current = false;
+      // Edits made during the request still need saving after navigation.
+      if (saved && !alive.current) void save();
     }
   };
+  saveRef.current = save;
   useEffect(() => {
     if (!dirty || status !== "saved") return;
     const timer = setTimeout(() => {
@@ -104,6 +133,7 @@ export function useDocDraft(doc: Doc) {
     return () => clearTimeout(timer);
   });
   const change = (patch: Partial<Pick<DocDraft, "title" | "content">>) => {
+    if (!inScope()) return;
     const current =
       useDocDraftStore.getState().draft.entries[key] ?? fromDoc(doc);
     setDocDraft(key, { ...current, ...patch });
@@ -111,6 +141,7 @@ export function useDocDraft(doc: Doc) {
   const reload = async () => {
     try {
       const latest = await api.getDoc(doc.id);
+      if (!inScope()) return;
       const current = useDocDraftStore.getState().draft.entries[key];
       setDocDraft(key, {
         ...fromDoc(latest),
@@ -119,9 +150,9 @@ export function useDocDraft(doc: Doc) {
           : undefined,
       });
       qc.setQueryData(docKeys.detail(wsId, doc.id), latest);
-      setStatus("saved");
+      updateStatus("saved");
     } catch {
-      setStatus("error");
+      if (inScope()) updateStatus("error");
     }
   };
   return { draft: value, status, dirty, change, retry: save, reload };
