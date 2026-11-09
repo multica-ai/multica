@@ -362,6 +362,7 @@
     "description": "新增後需在 AI 代理的 MCP 頁面分配。",
     "servers_title": "共享 MCP Server",
     "write_only_note": "為保護敏感資訊，配置儲存後不會再次顯示。需要調整時，請填寫一份完整的新配置；只修改名稱不會影響當前配置和 AI 代理分配。",
+    "microsoft_learn_preset": "使用 Microsoft Learn 預設",
     "add_server": "新增 MCP Server",
     "rename_server": "重新命名 MCP Server",
     "rename_action": "重新命名",

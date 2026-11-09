@@ -362,6 +362,7 @@
     "description": "添加后需在智能体的 MCP 页面分配。",
     "servers_title": "共享 MCP Server",
     "write_only_note": "为保护敏感信息，配置保存后不会再次显示。需要调整时，请填写一份完整的新配置；只修改名称不会影响当前配置和智能体分配。",
+    "microsoft_learn_preset": "使用 Microsoft Learn 预设",
     "add_server": "添加 MCP Server",
     "rename_server": "重命名 MCP Server",
     "rename_action": "重命名",

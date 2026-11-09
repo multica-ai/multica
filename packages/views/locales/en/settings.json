@@ -364,6 +364,7 @@
     "description": "After adding a server, assign it from an agent's MCP tab.",
     "servers_title": "Shared servers",
     "write_only_note": "For security, saved URLs, commands, headers, and environment values aren't shown again. To change them, enter a complete new configuration. Renaming keeps the current configuration and agent assignments.",
+    "microsoft_learn_preset": "Use Microsoft Learn preset",
     "add_server": "Add server",
     "rename_server": "Rename server",
     "rename_action": "Rename",

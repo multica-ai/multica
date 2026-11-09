@@ -364,6 +364,7 @@
     "description": "Après l’ajout d’un serveur, assignez-le depuis l’onglet MCP d’un agent.",
     "servers_title": "Serveurs partagés",
     "write_only_note": "Pour votre sécurité, les URL, commandes, en-têtes et valeurs d'environnement enregistrés ne sont plus affichés. Pour les modifier, saisissez une nouvelle configuration complète. Renommer conserve la configuration et les assignations aux agents.",
+    "microsoft_learn_preset": "Utiliser le préréglage Microsoft Learn",
     "add_server": "Ajouter un serveur",
     "rename_server": "Renommer le serveur",
     "rename_action": "Renommer",

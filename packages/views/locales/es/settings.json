@@ -346,6 +346,7 @@
     "description": "Tras añadir un servidor, asígnalo desde la pestaña MCP de un agente.",
     "servers_title": "Servidores compartidos",
     "write_only_note": "Por seguridad, las URL, comandos, cabeceras y valores de entorno guardados no se vuelven a mostrar. Para cambiarlos, introduce una configuración nueva completa. Al renombrar se conservan la configuración actual y las asignaciones a agentes.",
+    "microsoft_learn_preset": "Usar la configuración predefinida de Microsoft Learn",
     "add_server": "Añadir servidor",
     "rename_server": "Renombrar servidor",
     "rename_action": "Renombrar",

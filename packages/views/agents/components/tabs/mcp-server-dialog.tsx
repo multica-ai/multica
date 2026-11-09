@@ -210,6 +210,7 @@ export function McpServerDialog({
   open,
   server,
   existingNames,
+  createPreset,
   lockName = false,
   replacementMode = false,
   hideNameWhenEditing = false,
@@ -219,6 +220,7 @@ export function McpServerDialog({
   open: boolean;
   server: ManagedMcpServer | null;
   existingNames: Set<string>;
+  createPreset?: { label: string; name: string; config: Record<string, unknown> };
   /**
    * Pins the name while editing. Callers whose backend has no atomic rename
    * must set this: letting the field change would turn "save" into "create a
@@ -293,6 +295,10 @@ export function McpServerDialog({
           : existingNames.has(submittedName) && submittedName !== server?.name
             ? "duplicate"
             : null;
+  const canApplyPreset =
+    mode === "form" && name === "" && form.command === "" && form.url === "" &&
+    form.args.length === 0 && form.env.length === 0 && form.headers.length === 0 &&
+    Object.keys(form.extras).length === 0;
   const formError =
     form.transport === "stdio"
       ? form.command.trim() === ""
@@ -408,6 +414,22 @@ export function McpServerDialog({
               }}
             >
                 <FieldGroup className="gap-8">
+                  {createPreset && !server && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-fit"
+                      disabled={!canApplyPreset}
+                      onClick={() => {
+                        setName(createPreset.name);
+                        setForm(formFromConfig(createPreset.config));
+                        setSaveAttempted(false);
+                      }}
+                    >
+                      {createPreset.label}
+                    </Button>
+                  )}
                   {!nameHidden ? (
                     <Field>
                       <FieldLabel htmlFor="mcp-server-name">

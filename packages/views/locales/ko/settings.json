@@ -362,6 +362,7 @@
     "description": "추가 후 에이전트의 MCP 탭에서 할당하세요.",
     "servers_title": "공유 서버",
     "write_only_note": "민감한 정보를 보호하기 위해 저장된 URL, 명령, 헤더, 환경 변수는 다시 표시되지 않습니다. 변경하려면 새 설정을 모두 입력하세요. 이름만 바꾸면 현재 설정과 에이전트 할당은 그대로 유지됩니다.",
+    "microsoft_learn_preset": "Microsoft Learn 사전 설정 사용",
     "add_server": "서버 추가",
     "rename_server": "서버 이름 변경",
     "rename_action": "이름 변경",

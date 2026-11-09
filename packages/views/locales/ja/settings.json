@@ -362,6 +362,7 @@
     "description": "追加後、エージェントの MCP タブで割り当てます。",
     "servers_title": "共有サーバー",
     "write_only_note": "機密情報を保護するため、保存した URL、コマンド、ヘッダー、環境変数は再表示されません。変更する場合は、新しい設定をすべて入力してください。名前だけを変更しても、現在の設定とエージェントへの割り当ては維持されます。",
+    "microsoft_learn_preset": "Microsoft Learn のプリセットを使う",
     "add_server": "サーバーを追加",
     "rename_server": "サーバー名を変更",
     "rename_action": "名前を変更",
