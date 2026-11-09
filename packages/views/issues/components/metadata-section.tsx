@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Copy, Maximize2, Minimize2, X } from "@multica/ui/icons";
 import { toast } from "sonner";
 import type { IssueMetadata } from "@multica/core/types";
@@ -11,11 +11,19 @@ import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
 
-export function MetadataSection({ metadata }: { metadata: IssueMetadata }) {
+export function MetadataSection({ metadata, active = true }: { metadata: IssueMetadata; active?: boolean }) {
   const { t } = useT("issues");
   const [open, setOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const count = Object.keys(metadata).length;
+  useEffect(() => {
+    if (!active) {
+      setOpen(false);
+      setDialogOpen(false);
+      setExpanded(false);
+    }
+  }, [active]);
   if (count === 0) return null;
 
   const copy = async () => {
@@ -29,7 +37,7 @@ export function MetadataSection({ metadata }: { metadata: IssueMetadata }) {
 
   return (
     <section>
-      <Dialog onOpenChange={(next) => { if (!next) setExpanded(false); }}>
+      <Dialog open={active && dialogOpen} onOpenChange={(next) => { setDialogOpen(next); if (!next) setExpanded(false); }}>
         <IssueSidebarSectionHeader title={t(($) => $.detail.section_metadata)} count={count} open={open} onOpenChange={setOpen}
           actions={<>
             {copyButton()}

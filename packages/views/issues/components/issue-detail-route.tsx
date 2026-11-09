@@ -15,6 +15,8 @@ interface IssueDetailRouteProps {
    * human-readable identifier such as `MUL-123`.
    */
   routeId: string;
+  /** Whether this retained surface currently owns the issue route. */
+  active?: boolean;
   onDelete?: () => void;
 }
 
@@ -29,6 +31,7 @@ export function useCanonicalIssueUrl(
   routeId: string,
   identifier: string | undefined,
   hash = "",
+  active = true,
 ) {
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
@@ -39,11 +42,15 @@ export function useCanonicalIssueUrl(
   const replacedRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!active) {
+      replacedRef.current = null;
+      return;
+    }
     if (!canonicalHref || routeId === identifier) return;
     if (replacedRef.current === canonicalHref) return;
     replacedRef.current = canonicalHref;
     navigation.replace(canonicalHref);
-  }, [canonicalHref, identifier, routeId, navigation]);
+  }, [active, canonicalHref, identifier, routeId, navigation]);
 }
 
 export function parseCommentHighlightHash(hash: string): string | undefined {
@@ -68,14 +75,14 @@ function useCommentHighlightHash(): { hash: string; commentId?: string } {
  *    the route and only the route — the inbox renders `IssueDetail` in a side
  *    panel, where replacing the URL would navigate the user out of the inbox.
  */
-export function IssueDetailRoute({ routeId, onDelete }: IssueDetailRouteProps) {
+export function IssueDetailRoute({ routeId, active = true, onDelete }: IssueDetailRouteProps) {
   const wsId = useWorkspaceId();
   const {
     canonicalId, issue, isResolving, notFound, loadFailed, isRetrying, retry, hasLoaded,
   } = useCanonicalIssue(wsId, routeId);
   const highlight = useCommentHighlightHash();
 
-  useCanonicalIssueUrl(routeId, issue?.identifier, highlight.hash);
+  useCanonicalIssueUrl(routeId, issue?.identifier, highlight.hash, active);
 
   if (loadFailed) {
     return <IssueLoadError showBackLink={!onDelete} onRetry={retry} isRetrying={isRetrying} />;
@@ -96,6 +103,7 @@ export function IssueDetailRoute({ routeId, onDelete }: IssueDetailRouteProps) {
     <IssuePeekHost key={canonicalId}>
       <IssueDetail
         issueId={canonicalId}
+        active={active}
         skipInitialRefetch={hasLoaded}
         onDelete={onDelete}
         highlightCommentId={highlight.commentId}

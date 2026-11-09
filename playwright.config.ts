@@ -13,6 +13,11 @@ export default defineConfig({
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? process.env.FRONTEND_ORIGIN ?? "http://localhost:3000",
     headless: true,
   },
+  // Chromium is the whole default matrix: a bare `playwright test` must run
+  // the canonical suite once, and this repo's Playwright browsers are
+  // installed Chromium-only (.github/workflows/ui-performance.yml). WebKit is
+  // a separate, explicitly invoked config (`playwright.webkit.config.ts`)
+  // scoped to the MUL-7095 description re-entry spec.
   projects: [
     {
       name: "chromium",
