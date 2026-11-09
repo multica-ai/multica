@@ -834,24 +834,10 @@ ensure_fixture_issues() {
   ok "seeded 2 issues in workspace $WORKSPACE_SLUG"
 }
 
-# The CLI refuses `daemon start` anywhere under a daemon-task marker, so a task
-# cannot spawn a second daemon that competes for its own work. Checking the
-# marker here turns that refusal into one actionable line, before this component
-# has spent a login and a CLI build on an outcome it cannot reach.
-daemon_task_marker() {
-  local dir="$REPO_ROOT" marker
-  while :; do
-    marker="$dir/.multica/daemon_task_context.json"
-    if [ -f "$marker" ] && grep -q 'multica-daemon-task' "$marker" 2>/dev/null; then
-      printf '%s' "$marker"
-      return 0
-    fi
-    [ "$dir" != "/" ] || break
-    dir="$(dirname "$dir")"
-  done
-  return 0
-}
-
+# Under a daemon-task marker the CLI refuses daemon commands for every profile
+# except one this registry assigns to an environment, reached without the task's
+# identity and pointed at that environment's API — exactly how CLEAN_ENV and
+# the profile written above launch it (server/cmd/multica/dev_env_profile.go).
 start_daemon() {
   local status state build_commit
 
@@ -1415,15 +1401,6 @@ cmd_up() {
     export TMPDIR="$DEV_TMPDIR" TMP="$DEV_TMPDIR" TEMP="$DEV_TMPDIR"
   fi
   ok "node, go, curl found"
-
-  if component_selected daemon; then
-    local marker
-    marker="$(daemon_task_marker)"
-    [ -z "$marker" ] || die "The daemon component cannot start under a daemon-managed task.
-This checkout sits below $marker, and the CLI refuses 'daemon start' there so a
-task cannot spawn a second daemon competing for its own work.
-Start the rest with 'make up C=api,web', or run 'make up C=daemon' from your own shell."
-  fi
 
   step "Environment"
   ENV_FILE="$(detect_env_file)"
