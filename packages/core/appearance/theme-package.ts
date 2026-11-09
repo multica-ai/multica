@@ -1,9 +1,9 @@
+import { findBuiltInTheme } from "./built-in-themes";
 import { readZip, type ArchiveFile } from "./theme-archive";
 import { isSafeThemeAsset, sanitizeThemeCss, themeAssetPath } from "./theme-css";
 import {
   HEX_COLOR,
   THEME_API_VERSION,
-  findBuiltInTheme,
   isSafeFontValue,
   isSafeThemeValue,
   type LocalizedText,

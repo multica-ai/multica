@@ -2,7 +2,8 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { defaultStorage } from "../platform/storage";
 import { parseStoredTheme } from "./theme-package";
-import { findBuiltInTheme, type Theme } from "./themes";
+import { findBuiltInTheme } from "./built-in-themes";
+import type { Theme } from "./themes";
 
 /**
  * Themes installed from a folder or .zip, saved on this device. Stored packages are

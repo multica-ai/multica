@@ -3,9 +3,8 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { defaultStorage } from "../platform/storage";
 import { findTheme } from "./installed-themes";
 import { THEME_ID_PATTERN, themeCss } from "./theme-package";
+import { DEFAULT_THEME_ID, findBuiltInTheme } from "./built-in-themes";
 import {
-  DEFAULT_THEME_ID,
-  findBuiltInTheme,
   themeOptionAttributes,
   themeOptionVariables,
   type Theme,
@@ -14,6 +13,7 @@ import {
 } from "./themes";
 
 export * from "./themes";
+export * from "./built-in-themes";
 export * from "./theme-css";
 export * from "./theme-package";
 export * from "./installed-themes";
