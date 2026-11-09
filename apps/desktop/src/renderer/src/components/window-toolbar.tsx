@@ -161,17 +161,17 @@ function HistoryMenuItem({
   const { visual, title } = useTabPresentation(url, fallbackTitle);
 
   return (
-    <DropdownMenuItem
-      className="h-8 min-w-0 gap-2 px-2"
-      onClick={onSelect}
-    >
-      <ResourceLeadingVisual visual={visual} />
-      <TruncatedTooltip content={title}>
+    <TruncatedTooltip content={title}>
+      <DropdownMenuItem
+        className="h-8 min-w-0 gap-2 px-2"
+        onClick={onSelect}
+      >
+        <ResourceLeadingVisual visual={visual} />
         <span className="min-w-0 flex-1 truncate">
           {title}
         </span>
-      </TruncatedTooltip>
-    </DropdownMenuItem>
+      </DropdownMenuItem>
+    </TruncatedTooltip>
   );
 }
 

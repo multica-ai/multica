@@ -181,7 +181,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
       <div ref={animationVisibility.ref} className="flex min-h-7 min-w-0 items-center gap-2" data-run-summary-row>
         {showIdentity && <>
           <ActorAvatar actorType="agent" actorId={task.agent_id} size="md" enableHoverCard showStatusDot />
-          <TruncatedTooltip content={name}>
+          <TruncatedTooltip content={name} focusable>
             <span className="max-w-[30%] shrink-0 truncate text-body font-medium">{name}</span>
           </TruncatedTooltip>
           {!active && task.completed_at && <Tooltip>
@@ -202,7 +202,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
               <span>{statusText}</span>
               <span className="break-all font-mono text-muted-foreground">{rawError}</span>
             </TooltipContent>
-          </Tooltip> : <TruncatedTooltip content={statusText}>
+          </Tooltip> : <TruncatedTooltip content={statusText} focusable>
             <span className="truncate">{statusText}</span>
           </TruncatedTooltip>}
         </span>
@@ -234,7 +234,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
       <div className={cn(showIdentity && "pl-8")}>
         {replyTo}
         {output && <div className="mt-2 text-body"><ReadonlyContent content={redactSecrets(output)} /></div>}
-        {needsAction && rawError && <TruncatedTooltip content={rawError}>
+        {needsAction && rawError && <TruncatedTooltip content={rawError} focusable>
           <p
             className="mt-1.5 line-clamp-4 whitespace-pre-wrap break-words rounded-md border bg-muted/50 px-2.5 py-1.5 font-mono text-caption text-muted-foreground">
             {rawError}
@@ -349,17 +349,17 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
     : row.kind === "thinking" ? thinkingPreview(row.item.content, formatText) || t(($) => $.inline_run.thinking)
     : t(($) => $.inline_run.error);
   return <details className="min-w-0 text-caption" onToggle={onToggle}>
-    <summary onClick={disclosure.onTrigger} className="flex cursor-pointer list-none items-center gap-2 rounded-xs py-1.5 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-      {pending ? <Loader2 aria-hidden className="size-3.5 shrink-0 animate-spin text-info motion-reduce:animate-none" />
-        : <Icon aria-hidden className={cn("size-3.5 shrink-0", error ? "text-destructive" : "text-muted-foreground")} />}
-      <TruncatedTooltip content={summary}>
+    <TruncatedTooltip content={summary}>
+      <summary onClick={disclosure.onTrigger} className="flex cursor-pointer list-none items-center gap-2 rounded-xs py-1.5 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        {pending ? <Loader2 aria-hidden className="size-3.5 shrink-0 animate-spin text-info motion-reduce:animate-none" />
+          : <Icon aria-hidden className={cn("size-3.5 shrink-0", error ? "text-destructive" : "text-muted-foreground")} />}
         <span className={cn("min-w-0 flex-1 truncate", error && "text-destructive")}>{summary}</span>
-      </TruncatedTooltip>
-      {(grouped || call) && <span className="shrink-0 text-micro text-muted-foreground">
-        {grouped ? t(($) => $.inline_run.steps, { count: row.steps.length }) : row.tool}
-      </span>}
-      <ChevronRight ref={disclosure.chevronRef} aria-hidden className={cn("size-3 shrink-0 text-muted-foreground", open && "rotate-90")} />
-    </summary>
+        {(grouped || call) && <span className="shrink-0 text-micro text-muted-foreground">
+          {grouped ? t(($) => $.inline_run.steps, { count: row.steps.length }) : row.tool}
+        </span>}
+        <ChevronRight ref={disclosure.chevronRef} aria-hidden className={cn("size-3 shrink-0 text-muted-foreground", open && "rotate-90")} />
+      </summary>
+    </TruncatedTooltip>
     {open && <div className="min-w-0 space-y-2 overflow-hidden pl-5.5">
       {grouped ? <>
         {row.steps.length > limit && <button type="button" className="py-1 text-muted-foreground" onClick={() => setLimit((value) => value + 12)}>

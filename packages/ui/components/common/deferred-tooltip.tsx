@@ -49,7 +49,8 @@ export function DeferredTooltip({
    *  tooltip stays closed when it returns false. */
   shouldOpen?: (el: HTMLElement) => boolean;
   /** Also open on keyboard focus (and close on blur), gated by the same
-   *  checks as hover. Focus that follows a pointer press stays closed. */
+   *  checks as hover. Focus that follows a pointer press stays closed, and
+   *  focus under a hovering pointer leaves the open to the hover delay. */
   openOnFocus?: boolean;
   contentClassName?: string;
 }) {
@@ -59,6 +60,8 @@ export function DeferredTooltip({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Set by a pointer press so the focus it causes is not treated as keyboard focus.
   const pointerFocusRef = useRef(false);
+  // Menus move focus to the item under the pointer; that focus waits for the hover delay.
+  const hoveringRef = useRef(false);
 
   const clearTimer = () => {
     if (timerRef.current !== null) {
@@ -90,6 +93,7 @@ export function DeferredTooltip({
     },
     onPointerEnter: (e: React.PointerEvent) => {
       (trigger.props.onPointerEnter as ((e: React.PointerEvent) => void) | undefined)?.(e);
+      hoveringRef.current = true;
       setWarm(true);
       clearTimer();
       // Same delay as every other tooltip, and the same instant hand-off: when
@@ -103,6 +107,7 @@ export function DeferredTooltip({
     },
     onPointerLeave: (e: React.PointerEvent) => {
       (trigger.props.onPointerLeave as ((e: React.PointerEvent) => void) | undefined)?.(e);
+      hoveringRef.current = false;
       clearTimer();
       setOpen(false);
     },
@@ -123,7 +128,7 @@ export function DeferredTooltip({
             (trigger.props.onFocus as ((e: React.FocusEvent) => void) | undefined)?.(e);
             const fromPointer = pointerFocusRef.current;
             pointerFocusRef.current = false;
-            if (fromPointer) return;
+            if (fromPointer || hoveringRef.current) return;
             setWarm(true);
             clearTimer();
             if (canOpen()) setOpen(true);
