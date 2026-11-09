@@ -3,6 +3,8 @@
 import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTask, TaskUsage } from "@multica/core/types";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { issueKeys } from "@multica/core/issues/queries";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { renderWithI18n } from "../../test/i18n";
 
@@ -61,15 +63,18 @@ function usage(overrides: Partial<TaskUsage> = {}): TaskUsage {
 }
 
 function open(tasks: AgentTask[], locale?: "zh-Hans") {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClient.setQueryData(issueKeys.tasks("issue-1"), tasks);
   return renderWithI18n(
-    <IssueRunsDialog
-      open
-      onOpenChange={() => {}}
-      issueId="issue-1"
-      identifier="MUL-7680"
-      issueTitle="Issue wakeups v2"
-      tasks={tasks}
-    />,
+    <QueryClientProvider client={queryClient}>
+      <IssueRunsDialog
+        open
+        onOpenChange={() => {}}
+        issueId="issue-1"
+        identifier="MUL-7680"
+        issueTitle="Issue wakeups v2"
+      />
+    </QueryClientProvider>,
     { locale },
   );
 }

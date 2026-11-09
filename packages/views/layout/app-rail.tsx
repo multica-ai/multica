@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   DndContext,
@@ -26,6 +26,7 @@ import {
   type RailSpaceId,
 } from "@multica/core/paths";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { CappedNumberFlow } from "@multica/ui/components/ui/number-flow";
 import { cn } from "@multica/ui/lib/utils";
 import { useAppForeground } from "../common/use-app-foreground";
@@ -40,6 +41,7 @@ import { useTeamAgentStatus } from "./panels/team-status";
 import { RAIL_ICON_BUTTON_CLASS } from "./rail-styles";
 import { RailWorkspaces } from "./rail-workspaces";
 import { routeIconForPath } from "./route-icon-components";
+import { useDragClickGuard } from "./use-drag-click-guard";
 
 type RailBadge =
   | { kind: "count"; value: number; tone: "brand" | "neutral" }
@@ -147,21 +149,33 @@ function RailSpaceLink({
   badge?: RailBadge;
 }) {
   const peekHandlers = usePeekHandlers(space, true);
+  const link = (
+    <AppLink
+      href={href}
+      data-space={space}
+      newTabTitle={fullLabel}
+      draggable={false}
+      aria-current={active ? "page" : undefined}
+      {...peekHandlers}
+      className="group relative flex size-12 flex-col items-center justify-center gap-1 rounded-xl text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground"
+    >
+      <Icon className="size-5" />
+      <span className="max-w-full truncate px-0.5 text-micro leading-[14px]">{label}</span>
+      {badge && <RailBadgeMark badge={badge} />}
+    </AppLink>
+  );
+  // A label the same as the full name still needs the tooltip whenever a
+  // locale's text doesn't fit the 48px item.
+  if (label === fullLabel) {
+    return (
+      <TruncatedTooltip content={fullLabel} side="right">
+        {link}
+      </TruncatedTooltip>
+    );
+  }
   return (
-    <TooltipHint label={label === fullLabel ? null : fullLabel} side="right">
-      <AppLink
-        href={href}
-        data-space={space}
-        newTabTitle={fullLabel}
-        draggable={false}
-        aria-current={active ? "page" : undefined}
-        {...peekHandlers}
-        className="group relative flex size-12 flex-col items-center justify-center gap-1 rounded-xl text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground"
-      >
-        <Icon className="size-5" />
-        <span className="max-w-full truncate px-0.5 text-micro leading-[14px]">{label}</span>
-        {badge && <RailBadgeMark badge={badge} />}
-      </AppLink>
+    <TooltipHint label={fullLabel} side="right">
+      {link}
     </TooltipHint>
   );
 }
@@ -182,37 +196,6 @@ function SortableRailItem({ id, children }: { id: RailSpaceId; children: React.R
 }
 
 const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
-// dnd-kit keeps swallowing clicks for this long after a drag ends.
-const DRAG_CLICK_GUARD_MS = 50;
-
-function preventDefault(event: Event) {
-  event.preventDefault();
-}
-
-/**
- * The release that ends a drag must not also open the space. Once a drag
- * activates, dnd-kit stops that click's propagation at the document but
- * leaves its default, so the link would still navigate natively. A window
- * capture listener runs first and cancels it.
- */
-function useDragClickGuard() {
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const disarm = useCallback(() => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
-    window.removeEventListener("click", preventDefault, true);
-  }, []);
-  useEffect(() => disarm, [disarm]);
-  return {
-    arm: useCallback(() => {
-      disarm();
-      window.addEventListener("click", preventDefault, true);
-    }, [disarm]),
-    release: useCallback(() => {
-      timer.current = setTimeout(disarm, DRAG_CLICK_GUARD_MS);
-    }, [disarm]),
-  };
-}
 
 /**
  * The app rail: workspaces, New issue and search, the five spaces in the
@@ -287,12 +270,16 @@ export function AppRail({
     },
   };
 
+  // The 34px workspace tile is centred on the card's 48px header band, so it
+  // shares a centre line with the column and page titles: the card starts
+  // 8px down, plus (48 - 34) / 2. Desktop's card starts below its title bar,
+  // so it passes its own top inset with the same 7px.
   return (
     <nav
       aria-label={t(($) => $.rail.label)}
       data-slot="app-rail"
       className={cn(
-        "flex h-full w-14 shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden pt-3 pb-2.5 [scrollbar-width:none]",
+        "flex h-full w-14 shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden pt-[15px] pb-2.5 [scrollbar-width:none]",
         className,
       )}
     >

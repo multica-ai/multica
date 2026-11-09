@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "在桌面端打开"
+  },
+  "desktop": {
+    "link_other_instance": "桌面端连接的是另一个 Multica 实例。",
+    "link_workspace_unavailable": "此工作区在桌面端不可用。"
+  },
   "inline_run": {
     "label": "{{name}} 的运行",
     "stop": "停止",
@@ -727,8 +734,13 @@
     "restart_failed": "没能停止当前运行，消息还没有发送。"
   },
   "reply": {
+    "recipients_changed": "回复目标已变化。请重新确认接收者后再发送。",
     "placeholder": "回复...",
     "annotations": {
+      "send_all": "全部发送",
+      "send_with_annotations_and_body": "将连同下方 {{count}} 条批注和正文一起发送",
+      "send_with_annotations": "将连同下方 {{count}} 条批注一起发送",
+      "send_with_body": "将连同下方正文一起发送",
       "confirm_add": "添加批注",
       "save": "保存批注",
       "add_comment": "加入评论",
@@ -782,6 +794,11 @@
     "cancel_failed": "取消运行失败"
   },
   "execution_log": {
+    "latest": "最近",
+    "include_children": "包含子任务",
+    "loading": "正在加载运行记录...",
+    "load_failed_retry": "无法加载运行记录，点击重试",
+    "empty": "此范围内暂无运行记录。",
     "section": "执行日志",
     "cancel_task_tooltip": "取消运行",
     "cancel_task_aria": "取消运行",
@@ -1797,6 +1814,25 @@
       "row_actions": "{{name}} 的操作",
       "empty_title": "还没有保存的视图",
       "empty_description": "在任务列表里调好筛选和显示方式，然后另存为视图。"
+    }
+  },
+  "app_calls": {
+    "section_title": "应用",
+    "chips_label": "本次运行用到的应用",
+    "calls_count_other": "{{count}} 次调用",
+    "more": "还有 {{count}} 个",
+    "scope": {
+      "team": "团队账号",
+      "personal": "个人账号"
+    },
+    "outcome": {
+      "ok": "已执行",
+      "error": "失败",
+      "blocked": "已拦截",
+      "pending": "等待确认",
+      "approved": "已批准",
+      "rejected": "已拒绝",
+      "rate_limited": "已限流"
     }
   }
 }

@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "데스크톱에서 열기"
+  },
+  "desktop": {
+    "link_other_instance": "데스크톱 앱이 다른 Multica 인스턴스에 연결되어 있습니다.",
+    "link_workspace_unavailable": "데스크톱 앱에서 이 워크스페이스를 사용할 수 없습니다."
+  },
   "inline_run": {
     "label": "{{name}} 실행",
     "stop": "중지",
@@ -727,8 +734,13 @@
     "restart_failed": "현재 실행을 중지하지 못했습니다. 메시지는 보내지 않았습니다."
   },
   "reply": {
+    "recipients_changed": "답글 대상이 변경되었습니다. 받는 사람을 확인한 뒤 다시 보내 주세요.",
     "placeholder": "답글 남기기...",
     "annotations": {
+      "send_all": "모두 보내기",
+      "send_with_annotations_and_body": "저장된 주석 {{count}}개 및 초안 본문과 함께 보냅니다.",
+      "send_with_annotations": "저장된 주석 {{count}}개와 함께 보냅니다.",
+      "send_with_body": "초안 본문과 함께 보냅니다.",
       "confirm_add": "주석 추가",
       "save": "주석 저장",
       "add_comment": "댓글에 추가",
@@ -782,6 +794,11 @@
     "cancel_failed": "실행을 취소하지 못했습니다"
   },
   "execution_log": {
+    "latest": "최근",
+    "include_children": "하위 태스크 포함",
+    "loading": "실행 기록 불러오는 중...",
+    "load_failed_retry": "실행 기록을 불러올 수 없습니다. 다시 시도",
+    "empty": "이 범위에 실행 기록이 없습니다.",
     "section": "실행 로그",
     "cancel_task_tooltip": "실행 취소",
     "cancel_task_aria": "실행 취소",
@@ -1797,6 +1814,25 @@
       "row_actions": "{{name}} 작업",
       "empty_title": "아직 저장된 뷰가 없습니다",
       "empty_description": "태스크 목록에서 필터와 표시 방식을 맞춘 뒤 뷰로 저장하세요."
+    }
+  },
+  "app_calls": {
+    "section_title": "앱",
+    "chips_label": "이 실행에서 사용한 앱",
+    "calls_count_other": "{{count}}회 호출",
+    "more": "+{{count}}개 더",
+    "scope": {
+      "team": "팀 계정",
+      "personal": "개인 계정"
+    },
+    "outcome": {
+      "ok": "실행됨",
+      "error": "실패",
+      "blocked": "차단됨",
+      "pending": "대기 중",
+      "approved": "승인됨",
+      "rejected": "거절됨",
+      "rate_limited": "속도 제한"
     }
   }
 }

@@ -77,6 +77,8 @@ export type WSEventType =
   | "label:deleted"
   | "issue_labels:changed"
   | "issue_unread:changed"
+  | "app_request:changed"
+  | "app_call:created"
   | "issue_metadata:changed"
   | "issue_properties:changed"
   | "property:created"
@@ -123,6 +125,9 @@ export interface IssueUpdatedPayload {
   assignee_changed?: boolean;
   status_changed?: boolean;
   project_changed?: boolean;
+  title_changed?: boolean;
+  parent_changed?: boolean;
+  prev_parent_issue_id?: string | null;
   // Both ends of a duplicate-mark change (MUL-7349). The mark is not on Issue,
   // so these tell the realtime layer whose duplicate relations to refresh.
   duplicate_of_issue_id?: string | null;

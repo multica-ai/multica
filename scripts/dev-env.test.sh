@@ -319,6 +319,8 @@ node -e '
   const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
   if (payload.name !== "probe-901") throw new Error("name = " + payload.name);
   if (payload.backend_port !== 18981) throw new Error("backend_port = " + payload.backend_port);
+  if (payload.desktop_cdp_port !== null) throw new Error("desktop_cdp_port = " + payload.desktop_cdp_port);
+  if (payload.workspace_slug !== "dev") throw new Error("workspace_slug = " + payload.workspace_slug);
   for (const key of ["api", "web", "daemon", "desktop"]) {
     if (!payload.components[key]) throw new Error("missing component " + key);
     if (payload.components[key].state !== "stopped") {
@@ -356,6 +358,18 @@ MULTICA_WORKSPACES_ROOT=/owner/workspaces \
     test "$MULTICA_WORKSPACES_ROOT" = "$1"
   ' _ "$MULTICA_DEV_WORKSPACES_PARENT/multica_workspaces_dev-dev-env-test-903" \
   > "$out" 2>&1 || fail "env-exec leaked daemon task identity or owner workspaces root"
+
+# scripts/desktop-cdp.mjs finds Desktop through env-exec: a recorded CDP port
+# becomes its endpoint, and an environment without one never inherits a URL.
+write_manifest "cdp-exec-906" "$root_dir" 906
+printf 'DESKTOP_CDP_PORT=10129\n' >> "$MULTICA_DEV_HOME/envs/cdp-exec-906/manifest.env"
+dev_env exec cdp-exec-906 -- sh -c '
+  test "$MULTICA_DEV_DESKTOP_CDP_URL" = http://127.0.0.1:10129 &&
+  test "$MULTICA_DEV_DESKTOP_RENDERER_URL" = http://localhost:6080
+' > "$out" 2>&1 || fail "env-exec did not export the Desktop CDP and renderer URLs"
+MULTICA_DEV_DESKTOP_CDP_URL=http://127.0.0.1:1 dev_env exec clean-env-903 -- sh -c '
+  test -z "${MULTICA_DEV_DESKTOP_CDP_URL:-}"
+' > "$out" 2>&1 || fail "env-exec leaked a CDP URL into an environment without one"
 
 # A health response without process identity is never proof that the process is
 # this checkout's freshly launched API.
@@ -396,6 +410,126 @@ assert_start_web compiling 200 3 0 "web already running on :13000 (pid 200)" ""
 assert_start_web hung 200 never 0 "did not answer within 300s; restarting it" $'stop web\nlaunch web'
 assert_start_web foreign 999 0 1 "Port 13000 is busy: pid 999" ""
 assert_start_web foreign-silent 999 never 1 "Port 13000 is busy: pid 999" ""
+
+# ---------------------------------------------------------------------------
+# Desktop: CDP port, env file, process tree, and the daemon Desktop starts.
+# ---------------------------------------------------------------------------
+
+# A recorded CDP port is reported for Playwright, and the next allocation skips
+# a port another environment already holds.
+write_manifest "cdp-905" "$tmp_dir/checkout" 905
+printf 'DESKTOP_CDP_PORT=19999\n' >> "$MULTICA_DEV_HOME/envs/cdp-905/manifest.env"
+dev_env status cdp-905 --json > "$out" 2>&1 || fail "status --json with a CDP port must succeed"
+node -e '
+  const payload = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  if (payload.desktop_cdp_port !== 19999) throw new Error("desktop_cdp_port = " + payload.desktop_cdp_port);
+' "$out" || fail "status --json did not report the recorded CDP port"
+allocated="$(bash -c 'source "$1"; port_free() { :; }; allocate_cdp_port self 19999' _ "$root_dir/scripts/dev-env.sh")"
+[ "$allocated" = 20000 ] || fail "CDP allocation reused another environment's port: $allocated"
+dev_env destroy cdp-905 --yes > "$out" 2>&1 || fail "destroying the CDP fixture failed"
+
+status=0
+dev_env up --components api --cdp > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "up accepted --cdp without the desktop component"
+require_contains "$out" "need the desktop component"
+
+# Clearing the port without the desktop component would leave a running
+# Desktop serving it while status reports null.
+status=0
+dev_env up --components api --no-cdp > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "up accepted --no-cdp without the desktop component"
+require_contains "$out" "need the desktop component"
+
+status=0
+dev_env up --components desktop --remote-debugging-port 80 > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "up accepted a privileged CDP port"
+require_contains "$out" "between 1024 and 65535"
+
+# `up` without the desktop component still points a missing or managed env
+# file at this backend, and never rewrites a file a human wrote.
+assert_desktop_env_sync() (
+  local case_name=$1 initial=$2 expected=$3
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  NAME=sync-env BACKEND_PORT=18555 FRONTEND_PORT=13555
+  DESKTOP_ENV_FILE="$tmp_dir/desktop-env-$case_name"
+  rm -f "$DESKTOP_ENV_FILE"
+  [ -z "$initial" ] || printf '%s\n' "$initial" > "$DESKTOP_ENV_FILE"
+  sync_desktop_env_file > "$out" 2>&1
+  grep -Fqx "$expected" "$DESKTOP_ENV_FILE" \
+    || fail "$case_name env file = $(cat "$DESKTOP_ENV_FILE"), want a line: $expected"
+)
+assert_desktop_env_sync missing "" "VITE_API_URL=http://localhost:18555"
+assert_desktop_env_sync managed-elsewhere "# Managed by scripts/dev-env.sh for environment old-env." \
+  "VITE_API_URL=http://localhost:18555"
+assert_desktop_env_sync managed-missing-app "# Managed by scripts/dev-env.sh for environment sync-env.
+VITE_API_URL=http://localhost:18555
+VITE_WS_URL=ws://localhost:18555/ws" "VITE_APP_URL=http://localhost:13555"
+assert_desktop_env_sync hand-written "VITE_API_URL=https://staging.example" "VITE_API_URL=https://staging.example"
+
+# Turbo puts Electron in a nested process group; the stop path finds it through
+# the launcher's PPID chain instead.
+bash -c 'sleep 30 & bash -c "sleep 30; :" & wait' 2>/dev/null &
+tree_root=$!
+sleep 0.5
+tree="$(bash -c 'source "$1"; descendant_pids "$2"' _ "$root_dir/scripts/dev-env.sh" "$tree_root" | sort)"
+for child in $tree; do kill "$child" 2>/dev/null || true; done
+wait "$tree_root" 2>/dev/null || true
+[ "$(printf '%s\n' "$tree" | grep -c .)" -ge 3 ] \
+  || fail "descendant_pids found $(printf '%s' "$tree" | tr '\n' ' ') under $tree_root, want both sleeps and the nested shell"
+
+# Desktop's own daemon outlives Electron. Stopping Desktop stops it, and only a
+# confirmed stop lets destroy remove the profile Desktop derived from this
+# backend's URL; that profile holds the pid a retried destroy needs.
+desktop_profile_dir="$MULTICA_DEV_PROFILES_HOME/desktop-localhost-18080"
+mkdir -p "$desktop_profile_dir"
+desktop_daemon="$(sleep 60 > /dev/null 2>&1 & printf '%s' "$!")"
+printf '%s\n' "$desktop_daemon" > "$desktop_profile_dir/daemon.pid"
+fake_checkout="$tmp_dir/fake-checkout"
+stop_mode="$tmp_dir/daemon-stop-mode"
+mkdir -p "$fake_checkout/server/bin"
+# The fake CLI stops the daemon only in "kill" mode. "lies" exits 0 with the
+# daemon still alive, like a plain `daemon stop` that is still finishing a run.
+cat > "$fake_checkout/server/bin/multica" <<EOF
+#!/usr/bin/env bash
+[ "\$*" = "daemon stop --force --profile desktop-localhost-18080" ] || exit 0
+case "\$(cat "$stop_mode")" in
+  kill)
+    kill -KILL $desktop_daemon
+    while kill -0 $desktop_daemon 2>/dev/null; do sleep 0.1; done
+    ;;
+  lies) ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod +x "$fake_checkout/server/bin/multica"
+
+printf 'lies' > "$stop_mode"
+status=0
+(
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  BACKEND_PORT=18080 MULTICA_BIN="$fake_checkout/server/bin/multica" DIR="$fake_checkout"
+  stop_desktop_daemon
+) > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "stop_desktop_daemon trusted a stop that left the daemon running"
+kill -0 "$desktop_daemon" 2>/dev/null || fail "the fake daemon died before the retry test"
+
+printf 'fails' > "$stop_mode"
+write_manifest "desktop-profile-906" "$fake_checkout" 0
+status=0
+dev_env destroy desktop-profile-906 --yes > "$out" 2>&1 || status=$?
+[ "$status" -ne 0 ] || fail "destroy succeeded while Desktop's daemon was still running"
+[ -f "$desktop_profile_dir/daemon.pid" ] || fail "a failed destroy removed Desktop's daemon pid"
+[ -f "$MULTICA_DEV_HOME/envs/desktop-profile-906/manifest.env" ] \
+  || fail "a failed destroy discarded the manifest"
+require_contains "$out" "kept Desktop's CLI profile desktop-localhost-18080"
+
+printf 'kill' > "$stop_mode"
+dev_env destroy desktop-profile-906 --yes > "$out" 2>&1 \
+  || { sed 's/^/  /' "$out" >&2; fail "retrying destroy after the daemon could be stopped failed"; }
+! kill -0 "$desktop_daemon" 2>/dev/null || fail "Desktop's daemon is still running after destroy"
+[ ! -d "$desktop_profile_dir" ] || fail "destroy left Desktop's CLI profile behind"
 
 # ---------------------------------------------------------------------------
 # Unknown names and components fail loudly instead of doing something else.

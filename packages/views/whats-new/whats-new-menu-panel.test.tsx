@@ -1,12 +1,12 @@
 import type { ReactNode } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useSearchStore } from "@multica/core/command-bar";
 import { configStore } from "@multica/core/config";
 import { Command, Globe, Terminal } from "@multica/ui/icons";
 import type { User } from "@multica/core/types";
 import enLayout from "../locales/en/layout.json";
 import { HelpLauncher } from "../layout/help-launcher";
-import { useSearchStore } from "../search/search-store";
 import type { WhatsNewRelease } from "./releases";
 
 const mocks = vi.hoisted(() => ({

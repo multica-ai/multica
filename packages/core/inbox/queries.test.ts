@@ -141,8 +141,8 @@ describe("deduplicateArchivedInboxItems", () => {
 });
 
 describe("archived inbox options", () => {
-  it("keeps an idle selection out of archive query keys", () => {
-    const idle: InboxFilters = { ...EMPTY_INBOX_FILTERS, idleOnly: true };
+  it("keeps an agent selection out of archive query keys", () => {
+    const idle: InboxFilters = { ...EMPTY_INBOX_FILTERS, agent: "idle" };
 
     expect(archivedInboxPagesOptions("ws", idle).queryKey).toEqual(
       archivedInboxPagesOptions("ws", EMPTY_INBOX_FILTERS).queryKey,
