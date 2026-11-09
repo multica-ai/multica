@@ -178,10 +178,13 @@ The overlay mirrors the resident owner's gateway records, logs, sessions, and cr
 
 Before launching a Hermes run, the daemon atomically writes `.multica_resident_task.json` in the run's environment root with mode `0600`, containing its task, agent, workspace, optional chat session, and task-scoped `mat_` token. It removes the file when the run finishes. Multica CLI tools under the resident owner walk up from their current directory to the nearest context file and use its task credential and identity only when no explicit task identity is present in their environment. Explicit `MULTICA_TASK_ID` or a `mat_` token takes precedence.
 
+Per-run tool environments require a Hermes build with turn_env support. Multica declares task identity and allowed agent `custom_env` names in the overlay's `terminal.client_env_turn_passthrough`. Each `hermes acp` forwards their current values per prompt through `turn_env`; Hermes keeps those values in memory only. The declaration contains names, never environment values. User overrides of `MULTICA_*`, `PATH`, `HOME`, and the other daemon-blocked keys remain blocked; `HERMES_HOME` stays an ACP overlay control rather than a tool override. Without resident mode, the generated configuration and one-shot execution path are unchanged.
+
+When resume reuses a predecessor's environment root, the handoff is also written at the current run's stable root, so both workdir-based discovery and stable-root lookups find the current credential. Both files are removed when the run finishes.
+
 Known limits:
 
 - Bound skills prepared in the run's task home are not read by the resident owner.
-- Per-run `custom_env` does not reach the resident owner's tools.
 - Tools belonging to one owner share one OS user. A same-UID process can read another live run's context file despite its `0600` permissions. Use this mode only where all agents in the runtime trust each other.
 
 ### Codex native memory and subagents [#codex-memory]
