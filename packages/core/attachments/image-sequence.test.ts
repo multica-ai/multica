@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { Attachment } from "../types/attachment";
 import {
@@ -70,6 +71,20 @@ describe("matchAttachmentByURL", () => {
       url: "/uploads/k?exp=1&sig=2",
     });
     expect(matchAttachmentByURL("/uploads/k?exp=9&sig=9", [legacy])).toBe(legacy);
+  });
+
+  it("matches encoded Markdown destinations to raw metadata without changing signed URLs", () => {
+    const legacy = attachment({
+      id: UUID_B,
+      url: "https://cdn.example/图 v2.png",
+      download_url: "https://cdn.example/signed.png?Signature=raw%2Bvalue",
+    });
+    const content = "![shot](<https://cdn.example/图 v2.png>)";
+    const items = collectImageSequence([{ content, attachments: [legacy], standalone: false }]);
+    expect(items).toHaveLength(1);
+    expect(items[0]?.attachment).toBe(legacy);
+    expect(items[0]?.key).toBe(UUID_B);
+    expect(items[0]?.url).toBe(legacy.download_url);
   });
 
   it("returns undefined for unrelated URLs", () => {
@@ -201,6 +216,64 @@ describe("collectImageSequence", () => {
     ]);
   });
 
+  it.each([
+    ["full reference", "![A][shot]", "[shot]: /a.png", "/a.png"],
+    ["collapsed reference", "![shot][]", "[shot]: /a.png", "/a.png"],
+    ["shortcut reference", "![shot]", "[shot]: /a.png", "/a.png"],
+    ["normalized reference", "![A][ShOt  Name]", "[shot name]: /a.png", "/a.png"],
+    ["angle destination", "![A](</chart v2.png>)", "", "/chart%20v2.png"],
+    ["Unicode destination", "![A](/图.png)", "", "/%E5%9B%BE.png"],
+    ["balanced parentheses", "![A](/chart(v2).png)", "", "/chart(v2).png"],
+    ["escaped destination", String.raw`![A](/chart\(v2\).png)`, "", "/chart(v2).png"],
+    ["encoded destination", "![A](/chart.png?a=1&amp;b=2)", "", "/chart.png?a=1&b=2"],
+  ])("collects %s using Markdown semantics", (_name, image, definition, url) => {
+    const content = `${image}\n\n${definition}`;
+    expect(collectImageSequence([{ content }]).map((item) => item.key)).toEqual([url]);
+  });
+
+  it("uses the first definition and keeps definitions local to each block", () => {
+    const content = "![A][shot]\n\n[shot]: /first.png\n\n[shot]: /second.png";
+    expect(collectImageSequence([{ content }, { content: "![B][shot]" }]).map((item) => item.key))
+      .toEqual(["/first.png"]);
+  });
+
+  it("ignores HTML and file-card examples inside code", () => {
+    const content = [
+      "```html", '<img src="/hidden.png">', "!file[hidden.png](/hidden.png)", "```",
+      "!file[visible.png](/visible.png)",
+    ].join("\n");
+    expect(collectImageSequence([{ content }]).map((item) => item.key)).toEqual(["/visible.png"]);
+  });
+
+  it("resolves reference attachments in occurrence order, not definition order", () => {
+    const a = attachment({ id: UUID_A });
+    const b = attachment({ id: UUID_B });
+    const content = [
+      "![B][second]", "![A][first]", "![again][second]",
+      `[first]: /api/attachments/${UUID_A}/download`,
+      `[second]: /api/attachments/${UUID_B}/download`,
+    ].join("\n\n");
+    const items = collectImageSequence([{ content, attachments: [a, b], standalone: false }]);
+    expect(items.map((item) => item.key)).toEqual([UUID_B, UUID_A]);
+    expect(items.map((item) => item.attachment)).toEqual([b, a]);
+  });
+
+  it.each([
+    String.raw`\![literal](/hidden.png)`,
+    "    ![indented](/hidden.png)",
+    "> ```md\n> ![quoted](/hidden.png)\n> ```",
+    "`![multiline](/hidden.png)\ncode`",
+    "![undefined][missing]",
+  ])("does not collect non-rendered images in %s", (content) => {
+    expect(collectImageSequence([{ content }])).toEqual([]);
+  });
+
+  it("includes indented file cards that the renderer trims into images", () => {
+    const content = "    !file[photo.png](https://cdn.example/photo.png)";
+    expect(collectImageSequence([{ content }]).map((item) => item.key))
+      .toEqual(["https://cdn.example/photo.png"]);
+  });
+
   it("returns an empty sequence for empty input", () => {
     expect(collectImageSequence([])).toEqual([]);
     expect(collectImageSequence([null, undefined, {}])).toEqual([]);
@@ -208,6 +281,39 @@ describe("collectImageSequence", () => {
 });
 
 describe("collectAttachmentSequence", () => {
+  it("resolves current attachments, filters, and block ids when reusing body refs", () => {
+    const content = "!file[report.pdf](https://cdn.example/report.pdf)";
+    const blocks = [{ id: "first", content, standalone: false }];
+    expect(collectImageSequence(blocks)).toEqual([]);
+    expect(collectAttachmentSequence(blocks, () => true)).toEqual([
+      expect.objectContaining({
+        key: "https://cdn.example/report.pdf",
+        blockId: "first",
+        filename: "report.pdf",
+      }),
+    ]);
+
+    const record = attachment({
+      id: UUID_A,
+      filename: "report.pdf",
+      content_type: "application/pdf",
+      url: "https://cdn.example/report.pdf",
+      download_url: "https://cdn.example/report.pdf?signature=first",
+    });
+    const withRecord = [{ ...blocks[0]!, id: "second", attachments: [record] }];
+    expect(collectAttachmentSequence(withRecord, () => true)).toEqual([
+      expect.objectContaining({ key: UUID_A, url: record.download_url, attachment: record, blockId: "second" }),
+    ]);
+
+    const refreshed = { ...record, download_url: "https://cdn.example/report.pdf?signature=refreshed" };
+    const result = collectAttachmentSequence([{ ...withRecord[0]!, attachments: [refreshed] }], () => true);
+    expect(result[0]?.url).toBe(refreshed.download_url);
+    expect(result[0]?.attachment).toBe(refreshed);
+    result[0]!.filename = "changed by caller";
+    expect(collectAttachmentSequence(blocks, () => true)[0]?.filename).toBe("report.pdf");
+    expect(collectImageSequence(withRecord)).toEqual([]);
+  });
+
   // The web / desktop rule: anything the viewer can open.
   const previewable = ({ contentType, filename }: { contentType: string; filename: string }) =>
     isImageAttachment(contentType, filename) ||

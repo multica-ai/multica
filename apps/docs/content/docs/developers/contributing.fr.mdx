@@ -198,6 +198,13 @@ make start
 
 `make db-reset` supprime puis recrée la base `POSTGRES_DB` courante et refuse de se connecter à une base de données distante. Avant de l'exécuter, vérifiez `.env` ou `.env.worktree` et confirmez la base de données cible.
 
+## Ouvrir une issue GitHub
+
+- **[Demande de fonctionnalité](https://github.com/multica-ai/multica/blob/main/.github/ISSUE_TEMPLATE/feature_request.yml) :** Décrivez le **problème (Problem)** et l'**objectif (Goal)**. La conception générale (Proposal), les alternatives et les captures d'écran sont facultatives ; vous pouvez signaler un problème sans en concevoir la solution.
+- **[Rapport de bug](https://github.com/multica-ai/multica/blob/main/.github/ISSUE_TEMPLATE/bug_report.yml) :** Séparez le **problème**, le **comportement attendu** et les **étapes de reproduction**. Si le bug est intermittent, indiquez les actions essayées et sa fréquence. Les captures, les logs et les informations d'environnement sont facultatifs.
+
+Sélectionnez le domaine concerné pour orienter le rapport. Les rapports de bug demandent aussi le type de déploiement. Les captures sont facultatives pour les issues ; l'obligation de captures pour les PR modifiant l'interface ou les interactions ne s'applique pas aux signalements.
+
 ## Avant de soumettre
 
 - Lisez le `AGENTS.md` racine et les instructions imbriquées pertinentes.
@@ -205,7 +212,18 @@ make start
 - Rédigez les commentaires de code en anglais.
 - Ne committez pas `.env`, des jetons, des artefacts de build ni des chemins locaux.
 - Utilisez des conventional commits tels que `feat(scope)`, `fix(scope)` ou `docs`.
-- Dans la PR, décrivez les changements de comportement et les commandes de vérification réellement exécutées.
+
+### Exigences pour les pull requests
+
+Utilisez le [modèle de PR](https://github.com/multica-ai/multica/blob/main/.github/PULL_REQUEST_TEMPLATE.md) et respectez les [exigences de contribution](https://github.com/multica-ai/multica/blob/main/CONTRIBUTING.md#pull-request-requirements) :
+
+1. **Problème (Problem) :** Décrivez le problème concret, les personnes concernées et pourquoi il compte.
+2. **Objectif (Goal) :** Indiquez le résultat attendu du changement.
+3. **Proposition (Proposal) :** Présentez les grandes lignes de la conception et expliquez comment elle atteint l'objectif. Le texte doit rester compréhensible sans connaissance approfondie du projet, avec un minimum de détails d'implémentation.
+4. **Alternatives (facultatif) :** Si cela aide à comprendre la proposition, décrivez brièvement les autres approches et pourquoi vous ne les avez pas retenues.
+5. **Captures d'écran (Screenshots) :** Pour toute modification de l'interface ou des interactions, joignez des captures d'écran ou un enregistrement vidéo de l'application en cours d'exécution montrant les écrans et états concernés. Une comparaison avant/après est fortement recommandée ; pour un nouvel écran, montrez l'état après modification. Si l'interface et les interactions ne sont pas affectées, indiquez "N/A" et expliquez pourquoi.
+
+**Les PR modifiant l'interface ou les interactions sans captures d'écran ni enregistrement vidéo sont rejetées par défaut.** Les personnes chargées de la revue doivent demander des modifications ou fermer la PR jusqu'à l'ajout de l'un ou de l'autre. Une PR sans description du problème, de l'objectif ou des grandes lignes de la conception n'est pas non plus prête pour la revue.
 
 ## Étapes suivantes
 

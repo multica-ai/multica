@@ -636,6 +636,19 @@ describe("InboxPage", () => {
     expect(issueDetailProps.at(-1)?.highlightRequestToken).toBe(1);
   });
 
+  it("keeps its own detail pane from reading the inbox, so a row marked unread stays unread", () => {
+    // The detail reads an issue's notifications when it is opened anywhere
+    // else (MUL-8588). Here the page reads the row it selected itself, and a
+    // row the reader marks unread while it is open must not be read again.
+    reset();
+    layout.width = DESKTOP;
+    listData.active = [item()];
+
+    render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+    expect(issueDetailProps.at(-1)).toMatchObject({ readsInbox: false });
+  });
+
   it("keeps the archived view in the URL when selecting an item there", () => {
     // A bare `?issue=` write would silently drop the user back to the main
     // inbox on the next refresh — both pieces of state travel together.

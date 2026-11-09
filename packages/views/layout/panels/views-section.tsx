@@ -24,11 +24,14 @@ import {
   SIDEBAR_FIRST_PAGE,
   builtinSidebarRequest,
   builtinSidebarSource,
+  viewSidebarNeedsUnread,
   viewSidebarRequest,
   viewSidebarSource,
   type SidebarIssuesRequest,
 } from "@multica/core/issues/sidebar-list";
 import { todayDateOnly } from "@multica/core/issues/date";
+import { useIssueUnreadIds } from "@multica/core/issues/unread";
+import { filterDependencyState, statusCatalogSource } from "@multica/core/issues/surface/filter-dependency";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useSidebarProjectPrefs } from "@multica/core/issues/sidebar-project-prefs";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
@@ -44,11 +47,18 @@ import {
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
 import { issueViewSeedDefinition } from "@multica/core/issue-views/definition";
 import { useIssueViewRenameStore } from "@multica/core/issue-views/rename-store";
-import { builtinViewItemId, type BuiltinViewKey, type SidebarViewItem } from "@multica/core/issue-views/sidebar-views";
+import {
+  BUILTIN_VIEW_KEYS,
+  builtinViewItemId,
+  type BuiltinViewKey,
+  type SidebarViewItem,
+} from "@multica/core/issue-views/sidebar-views";
 import { issueViewTarget } from "@multica/core/issue-views/view-target";
-import { useIssueViewActions, type IssueViewActions } from "../../issue-views/use-view-actions";
+import { UNREAD_VIEW, UNREAD_VIEW_ID } from "@multica/core/issue-views/unread-view";
+import type { IssueViewActions } from "../../issue-views/use-view-actions";
 import { DeleteViewDialog } from "../../issue-views/delete-view-dialog";
 import { ViewNameInput } from "../../issue-views/view-name-input";
+import { UnreadViewIcon } from "../../issue-views/unread-view-icon";
 import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
@@ -69,9 +79,18 @@ interface ViewsSectionProps {
   wsId: string;
   pathname: string;
   plainRowsLit: boolean;
-  /** An expanded tree row lists the current issue, so "All issues" stays unlit. */
-  issueLitInTree: boolean;
+  /** No other row marks the open issue and it has no project, so "All issues" lights for it. */
+  issueInAllIssues: boolean;
   activeIssueId: string | null;
+  /** The one list that lights the open issue. */
+  litSource: string | null;
+  actions: IssueViewActions;
+}
+
+/** The sidebar source of a starred view's issue list. */
+export function sidebarViewItemSource(item: SidebarViewItem): string {
+  if (item.kind === "view") return viewSidebarSource(item.view.id);
+  return item.key === "unread" ? viewSidebarSource(UNREAD_VIEW_ID) : builtinSidebarSource(item.key);
 }
 
 /**
@@ -82,12 +101,13 @@ export function ViewsSection({
   wsId,
   pathname,
   plainRowsLit,
-  issueLitInTree,
+  issueInAllIssues,
   activeIssueId,
+  litSource,
+  actions,
 }: ViewsSectionProps) {
   const { t } = useT("layout");
   const p = useWorkspacePaths();
-  const actions = useIssueViewActions();
   const { items, reorder } = actions.sidebar;
   const { data: allViews = EMPTY_VIEWS } = useQuery(issueViewEverywhereOptions(wsId));
   const [deleteTarget, setDeleteTarget] = useState<IssueView | null>(null);
@@ -139,26 +159,35 @@ export function ViewsSection({
             {items.map((item) => (
               <SortableViewRow key={item.id} id={item.id}>
                 {(drag) =>
-                  item.kind === "builtin" ? (
-                    <BuiltinViewRow
-                      wsId={wsId}
-                      builtin={item.key}
-                      pathname={pathname}
-                      plainRowsLit={plainRowsLit}
-                      issueLitInTree={issueLitInTree}
-                      activeIssueId={activeIssueId}
-                      actions={actions}
-                      drag={drag}
-                    />
-                  ) : (
+                  item.kind === "view" ? (
                     <SavedViewRow
                       wsId={wsId}
                       item={item}
                       pathname={pathname}
                       plainRowsLit={plainRowsLit}
-                      activeIssueId={activeIssueId}
+                      activeIssueId={litSource === sidebarViewItemSource(item) ? activeIssueId : null}
                       actions={actions}
                       onDelete={setDeleteTarget}
+                      drag={drag}
+                    />
+                  ) : item.key === "unread" ? (
+                    <UnreadViewRow
+                      wsId={wsId}
+                      pathname={pathname}
+                      plainRowsLit={plainRowsLit}
+                      activeIssueId={litSource === sidebarViewItemSource(item) ? activeIssueId : null}
+                      actions={actions}
+                      drag={drag}
+                    />
+                  ) : (
+                    <BuiltinViewRow
+                      wsId={wsId}
+                      builtin={item.key}
+                      pathname={pathname}
+                      plainRowsLit={plainRowsLit}
+                      issueInAllIssues={issueInAllIssues}
+                      activeIssueId={litSource === sidebarViewItemSource(item) ? activeIssueId : null}
+                      actions={actions}
                       drag={drag}
                     />
                   )
@@ -174,7 +203,7 @@ export function ViewsSection({
           icon={<span className="size-4" aria-hidden />}
           label={t(($) => $.panels.work.all_views)}
           active={pathname === p.views()}
-          trailing={<PanelCount value={allViews.length + 3} />}
+          trailing={<PanelCount value={allViews.length + BUILTIN_VIEW_KEYS.length} />}
           className="text-caption"
         />
       </PanelList>
@@ -233,11 +262,13 @@ function RowMenu({
   label,
   open,
   onOpenChange,
+  className,
   children,
 }: {
   label: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -248,7 +279,7 @@ function RowMenu({
             type="button"
             aria-label={label}
             onPointerDown={(event) => event.stopPropagation()}
-            className={ROW_MENU_CLASS}
+            className={cn(ROW_MENU_CLASS, className)}
           />
         }
       >
@@ -261,7 +292,9 @@ function RowMenu({
   );
 }
 
-const BUILTIN_ICON: Record<BuiltinViewKey, React.ReactNode> = {
+type ScopeBuiltinViewKey = Exclude<BuiltinViewKey, "unread">;
+
+const BUILTIN_ICON: Record<ScopeBuiltinViewKey, React.ReactNode> = {
   my_issues: <CircleUser className="size-4 shrink-0" />,
   my_agents: <Bot className="size-4 shrink-0" />,
   all_issues: <ListTodo className="size-4 shrink-0" />,
@@ -272,16 +305,16 @@ function BuiltinViewRow({
   builtin,
   pathname,
   plainRowsLit,
-  issueLitInTree,
+  issueInAllIssues,
   activeIssueId,
   actions,
   drag,
 }: {
   wsId: string;
-  builtin: BuiltinViewKey;
+  builtin: ScopeBuiltinViewKey;
   pathname: string;
   plainRowsLit: boolean;
-  issueLitInTree: boolean;
+  issueInAllIssues: boolean;
   activeIssueId: string | null;
   actions: IssueViewActions;
   drag: DragBindings;
@@ -312,7 +345,7 @@ function BuiltinViewRow({
     (builtin === "all_issues"
       ? pathname === p.issues()
         ? activeWorkspaceView === null
-        : !issueLitInTree && isPathWithin(pathname, p.issues())
+        : issueInAllIssues && isPathWithin(pathname, p.issues())
       : onMyIssues && activeMyView === null && (builtin === "my_agents") === isMyAgentsSearch(searchParams));
 
   const source = builtinSidebarSource(builtin);
@@ -320,9 +353,10 @@ function BuiltinViewRow({
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
   const statusCatalog = useIssueStatuses(wsId);
   const { issueSettings } = useSidebarProjectPrefs(wsId);
-  const request = statusCatalog.isLoaded
-    ? builtinSidebarRequest(builtin, myIssuesRelationFromScope(myScope), issueSettings, statusCatalog.statuses)
-    : undefined;
+  const catalogDependency = filterDependencyState(true, [statusCatalogSource(statusCatalog)]);
+  const request = catalogDependency.unresolved
+    ? undefined
+    : builtinSidebarRequest(builtin, myIssuesRelationFromScope(myScope), issueSettings, statusCatalog.statuses);
   const prefetch = usePrefetch(wsId, source, request);
 
   return (
@@ -368,6 +402,117 @@ function BuiltinViewRow({
           wsId={wsId}
           source={source}
           params={request}
+          paramsError={catalogDependency.error}
+          onRetry={catalogDependency.retry}
+          activeIssueId={activeIssueId}
+          onCollapse={() => {
+            setExpanded(source, false);
+            linkRef.current?.focus();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * The built-in Unread view, once the user stars it. The row stays when
+ * nothing is unread; only the count goes.
+ */
+function UnreadViewRow({
+  wsId,
+  pathname,
+  plainRowsLit,
+  activeIssueId,
+  actions,
+  drag,
+}: {
+  wsId: string;
+  pathname: string;
+  plainRowsLit: boolean;
+  activeIssueId: string | null;
+  actions: IssueViewActions;
+  drag: DragBindings;
+}) {
+  const { t } = useT("layout");
+  const p = useWorkspacePaths();
+  const listId = useId();
+  const linkRef = useRef<HTMLAnchorElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const target = issueViewTarget(wsId, UNREAD_VIEW, p);
+  const open = useActiveIssueViewStore(
+    (s) => pathname === target.path && s.active[target.containerKey] === UNREAD_VIEW_ID,
+  );
+  const setActive = useActiveIssueViewStore((s) => s.setActive);
+  const source = viewSidebarSource(UNREAD_VIEW_ID);
+  const expanded = useSidebarTreeStore((s) => s.expanded.includes(source));
+  const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
+  const unread = useIssueUnreadIds(wsId);
+  const unreadDependency = filterDependencyState(true, [unread]);
+  const count = unread.data?.length ?? 0;
+  const request = unreadDependency.unresolved
+    ? undefined
+    : viewSidebarRequest(UNREAD_VIEW, todayDateOnly(), unread.data);
+  const prefetch = usePrefetch(wsId, source, request);
+  const label = t(($) => $.panels.work.unread);
+
+  return (
+    <>
+      <TreeRow
+        ref={linkRef}
+        rowRef={drag.rowRef}
+        {...drag.listeners}
+        href={target.href}
+        label={label}
+        icon={<UnreadViewIcon />}
+        active={plainRowsLit && open}
+        expanded={expanded}
+        onExpandedChange={(next) => setExpanded(source, next)}
+        listId={listId}
+        toggleLabel={t(($) => $.panels.work.project_issues, { name: label })}
+        onPrefetch={prefetch}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setMenuOpen(true);
+        }}
+        onNavigate={(event) => {
+          if (drag.consumeDrag()) event.preventDefault();
+        }}
+        onNavigateInPlace={() => setActive(target.containerKey, UNREAD_VIEW_ID)}
+        trailing={
+          // The menu button takes the count's place, so the row never reflows.
+          <span className="relative flex h-5 min-w-5 items-center justify-end">
+            <PanelCount
+              value={count}
+              className="font-medium text-brand transition-opacity group-focus-within/row:opacity-0 group-hover/row:opacity-0 group-has-[[data-popup-open]]/row:opacity-0 [@media(pointer:coarse)]:opacity-0"
+            />
+            <RowMenu
+              label={t(($) => $.panels.work.view_actions, { name: label })}
+              open={menuOpen}
+              onOpenChange={setMenuOpen}
+              className="absolute right-0"
+            >
+              <DropdownMenuItem onClick={() => actions.copyLink(target.href)}>
+                <Link2 className="size-3.5" />
+                {t(($) => $.panels.work.view_copy_link)}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => actions.sidebar.unstar(builtinViewItemId("unread"))}>
+                <EyeOff className="size-3.5" />
+                {t(($) => $.panels.work.view_remove)}
+              </DropdownMenuItem>
+            </RowMenu>
+          </span>
+        }
+      />
+      {expanded && (
+        <SidebarIssueList
+          id={listId}
+          wsId={wsId}
+          source={source}
+          params={request}
+          paramsError={unreadDependency.error}
+          onRetry={unreadDependency.retry}
           activeIssueId={activeIssueId}
           onCollapse={() => {
             setExpanded(source, false);
@@ -417,7 +562,12 @@ function SavedViewRow({
   const source = viewSidebarSource(view.id);
   const expanded = useSidebarTreeStore((s) => s.expanded.includes(source));
   const setExpanded = useSidebarTreeStore((s) => s.setExpanded);
-  const request = viewSidebarRequest(view, todayDateOnly());
+  const needsUnread = viewSidebarNeedsUnread(view);
+  const unread = useIssueUnreadIds(wsId, needsUnread);
+  const unreadDependency = filterDependencyState(needsUnread, [unread]);
+  const request = unreadDependency.unresolved
+    ? undefined
+    : viewSidebarRequest(view, todayDateOnly(), unread.data);
   const prefetch = usePrefetch(wsId, source, request);
   const canManage = actions.canManage(view);
 
@@ -497,6 +647,8 @@ function SavedViewRow({
           wsId={wsId}
           source={source}
           params={request}
+          paramsError={unreadDependency.error}
+          onRetry={unreadDependency.retry}
           activeIssueId={activeIssueId}
           onCollapse={() => {
             setExpanded(source, false);

@@ -9,7 +9,8 @@
   "exports": {
     "./base": "./base.js",
     "./react": "./react.js",
-    "./next": "./next.js"
+    "./next": "./next.js",
+    "./control-shape": "./control-shape.js"
   },
   "dependencies": {
     "@eslint/js": "^9.28.0",

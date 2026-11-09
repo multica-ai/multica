@@ -147,6 +147,8 @@
   "run": {
     "issue_linked": "태스크 연결됨",
     "view_log": "실행 로그 보기",
+    "stop": "실행 중지",
+    "stop_failed": "실행을 중지하지 못했습니다.",
     "skipped_group": {
       "label": "건너뜀",
       "summary": "건너뛴 실행 {{count}}개"

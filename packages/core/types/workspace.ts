@@ -17,6 +17,7 @@ export interface Workspace {
   avatar_url: string | null;
   created_at: string;
   updated_at: string;
+  pinned_at?: string | null;
 }
 
 /**

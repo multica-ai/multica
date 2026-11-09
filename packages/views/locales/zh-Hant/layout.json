@@ -40,13 +40,6 @@
   },
   "whats_new": {
     "trigger": "新功能",
-    "card": {
-      "eyebrow": "Multica 已更新 · {{range}}",
-      "title_other": "自你上次造訪以來，新增了 {{count}} 項功能",
-      "dismiss": "關閉",
-      "view_details": "查看詳情",
-      "got_it": "知道了"
-    },
     "panel": {
       "title": "新功能",
       "close": "關閉",
@@ -99,6 +92,8 @@
     "autopilots": "自動化",
     "switch_workspace": "切換工作區",
     "invitation_from": "{{name}} 邀請你加入",
+    "pin_workspace": "置頂工作區",
+    "unpin_workspace": "取消置頂",
     "open_in_new_window": "在新視窗開啟",
     "open_in_new_window_click": "點擊",
     "open_in_other_window": "已在其他視窗開啟",
@@ -109,6 +104,7 @@
     "work": {
       "my_agents": "我的 AI 代理在做",
       "all_issues": "全部任務",
+      "unread": "未讀",
       "views": "檢視",
       "new_project": "新建專案",
       "new_issue_in_project": "在 {{name}} 中新建任務",
@@ -116,6 +112,7 @@
       "project_issues": "{{name}} 的任務",
       "project_issues_empty": "沒有任務",
       "project_issues_error": "無法載入任務",
+      "project_issues_retry": "重試",
       "project_issues_settings": "專案中的任務",
       "settings_status": "狀態",
       "settings_assignee": "負責人",
@@ -149,13 +146,15 @@
       "needs_attention": "需要處理",
       "stuck_other": "{{count}} 個任務在等待離線的執行時",
       "working_now": "正在工作",
+      "show_more_agents": "再顯示 {{count}} 項...",
+      "show_fewer_agents": "收起",
       "running_tasks_other": "{{count}} 個任務執行中",
       "all_agents": "全部 AI 代理",
       "my_agents": "我的 AI 代理",
       "squads_and_members": "小隊與成員",
       "members_other": "{{count}} 位成員",
       "resources": "資源",
-      "runtimes_offline_other": "{{count}} 個離線",
+      "runtimes_online_other": "{{count}} 台線上",
       "invite_member": "邀請成員"
     },
     "autopilots": {

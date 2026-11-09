@@ -301,6 +301,17 @@ The daemon auto-detects these AI CLIs on your PATH:
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
+Pi and Oh-My-Pi require kernel support for process identity signalling to clean
+up detached tools safely: on Linux, `pidfd_open` and `pidfd_send_signal` (kernel
+5.3 or newer); on macOS, kernel-checked process identity signalling. Each run
+checks these operations before launching the runtime. An unsupported or denied
+probe operation, including one blocked by a sandbox, fails startup with a
+compatibility error instead of allowing work to start without the required cleanup
+capability. This is a capability check, not a kernel version check, and a passing
+probe does not guarantee permission to signal every descendant process. Existing runs blocked by
+unconfirmed cleanup still require inspection and a manual rerun; the startup check
+does not clear those blocks or establish that earlier background processes exited.
+
 ### How It Works
 
 1. On start, the daemon detects installed agent CLIs and registers a runtime for each agent in each watched workspace
@@ -346,14 +357,14 @@ Daemon behavior is configured via flags or environment variables:
 
 #### Workspace garbage collection
 
-The daemon periodically scans `MULTICA_WORKSPACES_ROOT` and applies several disk-reclamation policies:
+The daemon periodically scans `MULTICA_WORKSPACES_ROOT` for cleanup. The active-directory guard uses the resolved path so a symlink or Windows junction and its target share the same guard.
 
 - **Full task cleanup** — when an issue's status is `done` or `cancelled` and has been idle for `MULTICA_GC_TTL`, the entire task directory is removed.
 - **Completed-task retention bound** — `MULTICA_GC_COMPLETED_TASK_TTL` fully removes an inactive issue task once its `.gc_meta.json` `completed_at` age exceeds the configured duration, even while the parent issue remains open. Cleanup waits for a successful parent-issue status check, never removes an active environment, and never fully removes a `local_directory` environment. A later rerun provisions a fresh environment instead of resuming the removed checkout.
   - The default depends on where the daemon points: `14d` against Multica Cloud, and `0` (disabled, retain indefinitely) for self-host and every other origin — including cloud staging and previews. Set the variable to opt in or out on either side; an explicit `0` disables the policy on Cloud too.
   - Removing an environment discards work an agent left uncommitted or unpushed on its branch, along with that task's `output/` and `logs/`. The per-issue Codex session store lives outside `MULTICA_WORKSPACES_ROOT` under its own TTL, so a later rerun still resumes the agent's prior session — it just starts from a fresh checkout. Size the TTL against that trade, and keep it comfortably above `MULTICA_GC_INTERVAL`: the active-root guard protects a task that is currently running, not one whose follow-up run is queued but unclaimed.
 - **Orphan cleanup** — task directories with no `.gc_meta.json` (e.g. left over from a daemon crash) are removed once they exceed `MULTICA_GC_ORPHAN_TTL`.
-- **Artifact-only cleanup** — when a task has been completed for at least `MULTICA_GC_ARTIFACT_TTL` but the issue is still open, regenerable build outputs whose directory basename matches `MULTICA_GC_ARTIFACT_PATTERNS` are removed. The daemon also reclaims the exact managed path `codex-home/.sandbox-bin`; old task metadata without `completed_at` becomes eligible for this managed-only cleanup after its `.gc_meta.json` file has been idle for `MULTICA_GC_ORPHAN_TTL`. The rest of the task (source, `.git`, `output/`, `logs/`, `.gc_meta.json`, Codex auth/config/session state) is preserved so the agent can resume it.
+- **Artifact-only cleanup** — when a task has been completed for at least `MULTICA_GC_ARTIFACT_TTL` but the issue is still open, regenerable build outputs whose directory basename matches `MULTICA_GC_ARTIFACT_PATTERNS` are removed. The daemon also reclaims the exact managed path `codex-home/.sandbox-bin`; old task metadata without `completed_at` becomes eligible for this managed-only cleanup after its `.gc_meta.json` file has been idle for `MULTICA_GC_ORPHAN_TTL`. The rest of the task (source, `.git`, `output/`, `logs/`, `.gc_meta.json`, Codex auth/config/session state) is preserved so the agent can resume it. The same basename patterns apply to unarchived chats that use a daemon-managed work directory once the chat status check succeeds and the last run has been complete for `MULTICA_GC_ARTIFACT_TTL`. After a successful cleanup, the daemon skips repeat scans for that run. A later completed run becomes eligible again after the same delay.
 - **Managed-cache reclamation** — the exact managed path above is reclaimed for *every* task kind once the task has been completed for `MULTICA_GC_ARTIFACT_TTL`, not just for issue tasks whose issue is still open. It applies even while the parent record says the directory itself must stay — an active chat session, a still-running autopilot run — and even when the parent record could not be reached this cycle, because the contents are regenerable and the next run re-provisions them on demand. A task currently running on the directory is never touched. Set `MULTICA_GC_ARTIFACT_TTL=0` to disable this along with the rest of artifact cleanup.
 
 - **Repo cache eviction** — the bare git clones under `.repos/` are shared object stores: each task workdir is a `git worktree` off one of them rather than its own clone, so a task's `.git` is only a pointer file. They are evicted only when all of the following hold: the repo is no longer attached to any workspace this daemon watches, it has no worktrees left, and no task has created a worktree from it for `MULTICA_GC_REPO_TTL`. A cache created before this stamp existed is not treated as ancient — its clock starts at the first GC cycle that sees it, so upgrading does not wipe every cache. Evicting is safe by construction: the next task that needs the repo re-clones it on demand, so a wrong eviction costs a clone, not a failure.
@@ -451,6 +462,13 @@ The daemon launches QwenPaw as `qwenpaw acp --workspace <per-task dir>`. It writ
 The daemon launches MiniMax Code as `mcode acp`, writes the task brief to `AGENTS.md`, and injects bound skills under `.minimax/skills/`. MCode owns model selection and currently advertises `loadSession: false`; Multica therefore starts a fresh MCode session when a later run cannot load the saved session.
 
 #### Hermes agent memory
+
+On Windows, detected Hermes versions 0.22 and later use a daemon-owned foreground
+gateway for each isolated task home. The daemon waits for its startup reservation
+before launching ACP, which performs the readiness handshake. The gateway and its
+tool descendants remain in a Windows job object and are terminated on task cleanup
+or cancellation; agent jobs do not permit breakaway. Other platforms and older or
+unrecognized Hermes versions retain their existing ACP startup behavior.
 
 Hermes discovers skills only from its own home, so binding Multica skills to a Hermes agent makes the daemon build a per-task `HERMES_HOME` overlay for that agent. The agent's long-term memory (`memories/`) does **not** live inside that task-scoped overlay: it is linked to a persistent store at
 
@@ -924,12 +942,13 @@ multica project delete <id>
 ### Associating Issues with Projects
 
 Use the `--project` flag on `issue create` / `issue update` to attach an issue to a
-project, or on `issue list` to filter issues by project:
+project, or on `issue list` / `issue search` to filter issues by project:
 
 ```bash
 multica issue create --title "Login bug" --project <project-id>
 multica issue update <issue-id> --project <project-id>
 multica issue list --project <project-id>
+multica issue search "Login" --project <project-id>
 ```
 
 ## Setup

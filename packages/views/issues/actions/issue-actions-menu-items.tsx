@@ -15,6 +15,7 @@ import {
   FolderOpen,
   Hash,
   Link2,
+  LocateFixed,
   Network,
   Pin,
   PinOff,
@@ -25,6 +26,7 @@ import {
   Unlink,
   UserMinus,
 } from "@multica/ui/icons";
+import { useIssueDeletion } from "@multica/core/issues/use-issue-deletion";
 import type { AgentTask, Issue } from "@multica/core/types";
 import { resolveWorkdirCopyTarget } from "@multica/core/issues";
 import { todayDateOnly, addDaysDateOnly } from "@multica/core/issues/date";
@@ -119,6 +121,8 @@ interface IssueActionsMenuItemsProps {
   variant?: "full" | "sidebar";
   /** Sidebar variant: asks the parent to confirm stopping a running task. */
   onStopRun?: (task: AgentTask) => void;
+  /** Adds "Show in sidebar", for the page the issue is open on. */
+  onShowInSidebar?: () => void;
 }
 
 export function IssueActionsMenuItems({
@@ -130,9 +134,11 @@ export function IssueActionsMenuItems({
   archivedInboxItemId,
   variant = "full",
   onStopRun,
+  onShowInSidebar,
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  const { canDelete } = useIssueDeletion(wsId);
   const sidebar = variant === "sidebar";
   const statusLabel = useStatusLabel(wsId);
   // Only the statuses the issue's workflow allows; entering a step that hands
@@ -419,6 +425,12 @@ export function IssueActionsMenuItems({
         )}
         {isPinned ? t(($) => $.actions.unpin_from_sidebar) : t(($) => $.actions.pin_to_sidebar)}
       </P.Item>
+      {onShowInSidebar && (
+        <P.Item onClick={onShowInSidebar}>
+          <LocateFixed className="h-3.5 w-3.5" />
+          {t(($) => $.actions.locate_in_sidebar)}
+        </P.Item>
+      )}
       {archivedInboxItemId && <InboxRestoreMenuItem itemId={archivedInboxItemId} Item={P.Item} />}
       {sidebar &&
         (unread ? (
@@ -505,6 +517,8 @@ export function IssueActionsMenuItems({
           <P.Separator />
 
           <P.Item
+            disabled={!canDelete(issue)}
+            title={!canDelete(issue) ? t(($) => $.batch.delete_restricted) : undefined}
             variant="destructive"
             onClick={() => openDeleteConfirm({ onDeletedFallbackPath })}
           >

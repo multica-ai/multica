@@ -826,7 +826,7 @@ function QuickActions({
                   type="button"
                   variant={action.primary ? "brandSubtle" : "outline"}
                   size="sm"
-                  className="max-w-full rounded-full px-3"
+                  className="max-w-full px-3"
                   disabled={blocked}
                   onClick={() => void handleSelect(action)}
                 />
@@ -848,7 +848,7 @@ function QuickActions({
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  className="shrink-0 rounded-full text-faint-foreground hover:text-foreground"
+                  className="shrink-0 text-faint-foreground hover:text-foreground"
                   disabled={blocked}
                   aria-label={regenerateLabel}
                   onClick={() => void handleRegenerate()}
@@ -884,7 +884,7 @@ function QuickActionsHeading() {
   );
 }
 
-// Pill-shaped placeholders shown between chat:done (which declared a pending
+// Chip-shaped placeholders shown between chat:done (which declared a pending
 // supplement) and chat:quick_actions. Widths are staggered so the row reads
 // as "buttons coming", not a loading bar. aria-hidden: nothing actionable to
 // announce yet.
@@ -897,9 +897,9 @@ function QuickActionsSkeleton() {
     <div className="mt-2 border-t border-border/40 pt-2 animate-in fade-in duration-300">
       <div className="flex flex-wrap items-center gap-2" aria-hidden="true">
         <QuickActionsHeading />
-        <Skeleton className="h-8 w-24 rounded-full" />
-        <Skeleton className="h-8 w-32 rounded-full" />
-        <Skeleton className="h-8 w-28 rounded-full" />
+        <Skeleton className="h-7 w-24" />
+        <Skeleton className="h-7 w-32" />
+        <Skeleton className="h-7 w-28" />
       </div>
     </div>
   );

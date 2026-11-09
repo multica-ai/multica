@@ -172,6 +172,94 @@ assert_stop_handles_listener() {
   )
 }
 
+# Launcher 100 owns listener 200; listener 999 is someone else's.
+assert_component_state() {
+  local case_name=$1 component=$2 listener=$3 reported_commit=$4 probe_ok=$5
+  local expected_state=$6 expected_detail=$7
+  (
+    # shellcheck disable=SC1090
+    source "$root_dir/scripts/dev-env.sh"
+    STATE_DIR="$tmp_dir/state-$case_name"
+    mkdir -p "$STATE_DIR"
+    BACKEND_PORT=18080
+    FRONTEND_PORT=13000
+    TEST_LISTENER=$listener
+    TEST_COMMIT=$reported_commit
+    TEST_PROBE_OK=$probe_ok
+
+    component_pid() { printf '100'; }
+    port_listener_pid() { printf '%s' "$TEST_LISTENER"; }
+    process_group_id() { [ "$1" = 200 ] && printf '100' || printf '%s' "$1"; }
+    process_parent_id() { printf '1'; }
+    checkout_commit() { printf 'bbb2222'; }
+    health_json() {
+      printf '{"pid":%s,"commit":"%s","started_at":"2026-01-01T00:00:00Z"}' "$TEST_LISTENER" "$TEST_COMMIT"
+    }
+    curl() { [ "$TEST_PROBE_OK" = 1 ]; }
+
+    local row state detail
+    row="$(component_state "$component")"
+    state="${row%%|*}"
+    detail="${row##*|}"
+    [ "$state" = "$expected_state" ] \
+      || fail "$case_name state = $state, want $expected_state ($row)"
+    case "$detail" in
+      *"$expected_detail"*) ;;
+      *) fail "$case_name detail = $detail, want it to contain: $expected_detail" ;;
+    esac
+  )
+}
+
+# Launcher 100 owns listener 200; listener 999 is someone else's. The probe of
+# `/` fails `failed_probes` times before answering ("never" keeps failing), and
+# every clock read advances 10s so the 300s wait runs out without sleeping.
+assert_start_web() {
+  local case_name=$1 listener=$2 failed_probes=$3 expected_status=$4
+  local expected_output=$5 expected_events=$6
+  (
+    # shellcheck disable=SC1090
+    source "$root_dir/scripts/dev-env.sh"
+    STATE_DIR="$tmp_dir/start-web-$case_name"
+    mkdir -p "$STATE_DIR"
+    FRONTEND_PORT=13000
+    ENV_FILE=.env.example
+    local events="$STATE_DIR/events" probes="$STATE_DIR/probes" clock="$STATE_DIR/clock"
+    printf '%s' "$listener" > "$STATE_DIR/listener"
+    : > "$events"
+    TEST_FAILED_PROBES=$failed_probes
+
+    component_pid() { printf '100'; }
+    port_listener_pid() { cat "$STATE_DIR/listener"; }
+    process_group_id() { [ "$1" = 200 ] && printf '100' || printf '%s' "$1"; }
+    process_parent_id() { printf '1'; }
+    describe_port_owner() { printf 'pid %s' "$(port_listener_pid "$1")"; }
+    curl() {
+      local count
+      count=$(($(cat "$probes" 2>/dev/null || echo 0) + 1))
+      printf '%s' "$count" > "$probes"
+      [ "$TEST_FAILED_PROBES" != never ] && [ "$count" -gt "$TEST_FAILED_PROBES" ]
+    }
+    now_epoch() {
+      local now
+      now=$(($(cat "$clock" 2>/dev/null || echo 1000) + 10))
+      printf '%s' "$now" > "$clock"
+      printf '%s' "$now"
+    }
+    sleep() { :; }
+    kill() { printf 'kill %s\n' "$*" >> "$events"; }
+    stop_component() { printf 'stop %s\n' "$1" >> "$events"; : > "$STATE_DIR/listener"; }
+    launch_detached() { printf 'launch %s\n' "$1" >> "$events"; exit 0; }
+
+    local status=0
+    ( start_web ) > "$out" 2>&1 || status=$?
+    [ "$status" = "$expected_status" ] \
+      || { sed 's/^/  /' "$out" >&2; fail "$case_name start_web exited $status, want $expected_status"; }
+    require_contains "$out" "$expected_output"
+    [ "$(cat "$events")" = "$expected_events" ] \
+      || fail "$case_name events = $(cat "$events"), want $expected_events"
+  )
+}
+
 # ---------------------------------------------------------------------------
 # An empty registry is a normal state, not an error.
 # ---------------------------------------------------------------------------
@@ -288,6 +376,26 @@ assert_nested_listener_is_recorded
 # process group. An unrelated port occupant never receives a signal.
 assert_stop_handles_listener nested 420 310 200 "" 420
 assert_stop_handles_listener external 999 999 1 888
+
+# Status separates "ours but out of date or busy" from "not ours". Only the
+# latter means inspecting the port for an external listener; a commit after
+# `make up` or a slow Next compile must not read like a hijacked port.
+assert_component_state api-current api 200 bbb2222 1 running "commit bbb2222"
+assert_component_state api-stale api 200 aaa1111 1 stale "running aaa1111, checkout at bbb2222; run make up"
+assert_component_state api-foreign api 999 bbb2222 1 mismatch "not this checkout/process"
+assert_component_state api-foreign-old api 999 aaa1111 1 mismatch "not this checkout/process"
+assert_component_state web-running web 200 - 1 running "pid 200"
+assert_component_state web-busy web 200 - 0 busy "pid 200 is ours but not responding"
+assert_component_state web-foreign web 999 - 1 mismatch "listener pid 999 is not owned"
+assert_component_state web-foreign-silent web 999 - 0 mismatch "listener pid 999 is not owned"
+
+# `make up` waits for its own web server while Next compiles instead of calling
+# the port busy, restarts it only once the launch timeout runs out, and still
+# refuses a listener it does not own.
+assert_start_web compiling 200 3 0 "web already running on :13000 (pid 200)" ""
+assert_start_web hung 200 never 0 "did not answer within 300s; restarting it" $'stop web\nlaunch web'
+assert_start_web foreign 999 0 1 "Port 13000 is busy: pid 999" ""
+assert_start_web foreign-silent 999 never 1 "Port 13000 is busy: pid 999" ""
 
 # ---------------------------------------------------------------------------
 # Unknown names and components fail loudly instead of doing something else.
