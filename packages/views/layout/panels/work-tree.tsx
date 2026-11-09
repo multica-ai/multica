@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useId, useMemo, useRef, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -35,6 +35,8 @@ import {
   isPathWithin,
   panelRowStateClass,
 } from "../panel-nav";
+import { ProjectIcon } from "../../projects/components/project-icon";
+import { useDragClickGuard } from "../use-drag-click-guard";
 import { ProjectsSectionSettings } from "./sidebar-settings";
 import { SidebarIssueList, TreeRow } from "./sidebar-tree";
 
@@ -145,9 +147,11 @@ export function ProjectsSection({
   const { projectSettings, issueSettings, projectOrder } = useSidebarProjectPrefs(wsId);
   const updatePrefs = useUpdateSidebarProjectPrefs(wsId);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const { arm: armClickGuard, release: releaseClickGuard } = useDragClickGuard();
 
   const onDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
+      releaseClickGuard();
       if (!over || active.id === over.id) return;
       const ids = projects.map((project) => project.id);
       const from = ids.indexOf(String(active.id));
@@ -160,7 +164,7 @@ export function ProjectsSection({
         projectSettings: { ordering: "manual" },
       });
     },
-    [projects, projectOrder, updatePrefs],
+    [projects, projectOrder, releaseClickGuard, updatePrefs],
   );
 
   return (
@@ -182,7 +186,14 @@ export function ProjectsSection({
         </>
       }
     >
-      <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={DRAG_MODIFIERS} onDragEnd={onDragEnd}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        modifiers={DRAG_MODIFIERS}
+        onDragStart={armClickGuard}
+        onDragEnd={onDragEnd}
+        onDragCancel={releaseClickGuard}
+      >
         <SortableContext items={projects.map((project) => project.id)} strategy={verticalListSortingStrategy}>
           <PanelList>
             {projects.map((project) => (
@@ -269,10 +280,6 @@ function ProjectTreeItem({
   const prefetch = usePrefetch(wsId, source, params);
 
   const { listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: project.id });
-  const wasDragged = useRef(false);
-  useEffect(() => {
-    if (isDragging) wasDragged.current = true;
-  }, [isDragging]);
 
   return (
     <li
@@ -289,7 +296,9 @@ function ProjectTreeItem({
         {...listeners}
         href={p.projectDetail(project.id)}
         label={project.title}
-        icon={<Folder className="size-4 shrink-0" />}
+        icon={
+          project.icon ? <ProjectIcon project={project} size="md" /> : <Folder className="size-4 shrink-0" />
+        }
         active={active}
         located={located}
         expanded={expanded}
@@ -297,11 +306,6 @@ function ProjectTreeItem({
         listId={listId}
         toggleLabel={t(($) => $.panels.work.project_issues, { name: project.title })}
         onPrefetch={prefetch}
-        onNavigate={(event) => {
-          if (!wasDragged.current) return;
-          wasDragged.current = false;
-          event.preventDefault();
-        }}
         trailing={
           // The button takes the count's place on hover, so the row never reflows.
           <span className="relative flex h-5 min-w-5 items-center justify-end">

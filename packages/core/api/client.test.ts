@@ -959,6 +959,21 @@ describe("ApiClient Inbox response schemas", () => {
 });
 
 describe("ApiClient", () => {
+  it("requests recursive issue history and tolerates malformed issue labels", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([
+      { id: "child-run", issue_id: "child", issue_identifier: "MUL-2", issue_title: "Child", usage: [{ model: "test", input_tokens: 10 }] },
+      { id: "deep-run", issue_id: "grandchild", issue_identifier: 42, issue_title: { malformed: true } },
+    ]), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    const tasks = await client.listTasksByIssue("parent", true);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/issues/parent/task-runs?scope=subtree");
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0]).toMatchObject({ issue_id: "child", issue_identifier: "MUL-2", issue_title: "Child" });
+    expect(tasks[0]?.usage?.[0]?.input_tokens).toBe(10);
+    expect(tasks[1]?.issue_identifier).toBeUndefined();
+    expect(tasks[1]?.issue_title).toBeUndefined();
+  });
   it("preserves HTTP status on failed requests", async () => {
     vi.stubGlobal(
       "fetch",
@@ -2793,6 +2808,26 @@ describe("ApiClient workspace MCP servers", () => {
 });
 
 describe("importSkillArchive", () => {
+  it("pins archive upload and CSRF retry headers to the original workspace", async () => {
+    setCurrentWorkspace("workspace-a", "ws-1");
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => {
+        setCurrentWorkspace("workspace-b", "ws-2");
+        return new Response(JSON.stringify({ error: "CSRF validation failed" }), { status: 403 });
+      })
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: "created", skill: { id: "alpha", workspace_id: "ws-1", name: "alpha" } }), { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const result = await new ApiClient("https://api.example.test").importSkillArchive(
+        new File(["zip"], "alpha.skill"), "fail", { workspaceSlug: "workspace-a" },
+      );
+      expect(result.workspace_id).toBe("ws-1");
+      expect(fetchMock.mock.calls.map((call) => call[1].headers["X-Workspace-Slug"])).toEqual(["workspace-a", "workspace-a"]);
+    } finally {
+      setCurrentWorkspace(null, null);
+    }
+  });
+
   it("POSTs multipart form data without a JSON content-type", async () => {
     const skill = {
       id: "skill-1",
