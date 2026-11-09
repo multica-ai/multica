@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -59,8 +61,12 @@ func createCommentWithAttachment(t *testing.T, h *Handler, issueID, attachmentID
 
 func unlinkedIssueAttachment(t *testing.T, issueID string) string {
 	t.Helper()
+	var owner any
+	if issueID != "" {
+		owner = issueID
+	}
 	return dbfx.Insert(t, "attachment", testutil.Cols{
-		"workspace_id": testWorkspaceID, "issue_id": issueID,
+		"workspace_id": testWorkspaceID, "issue_id": owner,
 		"uploader_type": "member", "uploader_id": testUserID,
 		"filename": "shot.png", "url": "https://example.test/shot.png",
 		"content_type": "image/png", "size_bytes": 1,
@@ -71,16 +77,132 @@ func TestCreateCommentLinksItsAttachmentsInOneTransaction(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
-	issueID := dbfx.Issue(t, "comment with attachments")
-	attachmentID := unlinkedIssueAttachment(t, issueID)
+	for _, unbound := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unbound=%t", unbound), func(t *testing.T) {
+			issueID := dbfx.Issue(t, "comment with attachments")
+			owner := issueID
+			if unbound {
+				owner = ""
+			}
+			attachmentID := unlinkedIssueAttachment(t, owner)
+			var revision int64
+			dbfx.QueryRow(t, `SELECT revision FROM issue WHERE id = $1`, issueID).Scan(&revision)
 
-	var resp CommentResponse
-	createCommentWithAttachment(t, testHandler, issueID, attachmentID).Want(http.StatusCreated).JSON(&resp)
-	if len(resp.Attachments) != 1 || resp.Attachments[0].ID != attachmentID {
-		t.Fatalf("response attachments = %+v, want the posted one", resp.Attachments)
+			var resp CommentResponse
+			createCommentWithAttachment(t, testHandler, issueID, attachmentID).Want(http.StatusCreated).JSON(&resp)
+			if len(resp.Attachments) != 1 || resp.Attachments[0].ID != attachmentID {
+				t.Fatalf("response attachments = %+v, want the posted one", resp.Attachments)
+			}
+			att := resp.Attachments[0]
+			if att.IssueID == nil || *att.IssueID != issueID || att.CommentID == nil || *att.CommentID != resp.ID {
+				t.Fatalf("attachment owners = %+v, want issue %s and comment %s", att, issueID, resp.ID)
+			}
+			if n := dbfx.Count(t, `SELECT count(*) FROM attachment WHERE id = $1 AND issue_id = $2 AND comment_id = $3`, attachmentID, issueID, resp.ID); n != 1 {
+				t.Fatalf("attachment linked rows = %d, want 1", n)
+			}
+			if resp.IssueRevision != revision+1 {
+				t.Fatalf("issue revision = %d, want %d", resp.IssueRevision, revision+1)
+			}
+		})
 	}
-	if n := dbfx.Count(t, `SELECT count(*) FROM attachment WHERE id = $1 AND comment_id = $2`, attachmentID, resp.ID); n != 1 {
-		t.Fatalf("attachment linked rows = %d, want 1", n)
+}
+
+func TestCreateCommentRejectedLeavesUploadUnbound(t *testing.T) {
+	issueID := dbfx.Issue(t, "rejected comment with upload")
+	attachmentID := unlinkedIssueAttachment(t, "")
+	runtimeID := dbfx.Runtime(t, "comment admission runtime")
+	agentID := dbfx.Agent(t, "comment admission agent", runtimeID)
+	parentID := dbfx.Comment(t, issueID, "reply here")
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id": issueID, "trigger_comment_id": parentID, "runtime_id": runtimeID,
+	})
+	req := newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "missing required reply parent", "attachment_ids": []string{attachmentID},
+	})
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+	testutil.Call(t, testHandler.CreateComment, withURLParam(req, "id", issueID)).Want(http.StatusConflict)
+	if n := dbfx.Count(t, `SELECT count(*) FROM attachment WHERE id = $1 AND issue_id IS NULL AND comment_id IS NULL`, attachmentID); n != 1 {
+		t.Fatal("rejected comment bound its upload")
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM comment WHERE issue_id = $1 AND id <> $2`, issueID, parentID); n != 0 {
+		t.Fatalf("rejected comment left %d comments", n)
+	}
+}
+
+func TestCreateCommentRejectsUnavailableAttachmentsAtomically(t *testing.T) {
+	for _, kind := range []string{"other workspace", "other issue", "existing comment", "source context", "chat session", "chat message", "task", "missing"} {
+		t.Run(kind, func(t *testing.T) {
+			issueID := dbfx.Issue(t, "attachment isolation")
+			validID := unlinkedIssueAttachment(t, "")
+			invalidID := unlinkedIssueAttachment(t, "")
+			attachmentWorkspaceID := testWorkspaceID
+			wantComments := 0
+			switch kind {
+			case "other workspace":
+				ws := dbfx.Workspace(t, "other attachment workspace", "comment-att-"+invalidID)
+				dbfx.Exec(t, `UPDATE attachment SET workspace_id = $2 WHERE id = $1`, invalidID, ws)
+				attachmentWorkspaceID = ws
+			case "other issue":
+				other := dbfx.Issue(t, "other attachment issue")
+				dbfx.Exec(t, `UPDATE attachment SET issue_id = $2 WHERE id = $1`, invalidID, other)
+			case "existing comment":
+				commentID := dbfx.Comment(t, issueID, "already owns upload")
+				dbfx.Exec(t, `UPDATE attachment SET comment_id = $2 WHERE id = $1`, invalidID, commentID)
+				wantComments = 1
+			case "source context":
+				dbfx.Exec(t, `UPDATE attachment SET source_context_id = $2 WHERE id = $1`, invalidID, issueID)
+			case "chat session", "chat message":
+				runtimeID := dbfx.Runtime(t, "private chat attachment runtime")
+				agentID := dbfx.Agent(t, "private chat attachment agent", runtimeID)
+				sessionID := dbfx.ChatSession(t, agentID)
+				if kind == "chat session" {
+					dbfx.Exec(t, `UPDATE attachment SET chat_session_id = $2 WHERE id = $1`, invalidID, sessionID)
+				} else {
+					messageID := dbfx.Insert(t, "chat_message", testutil.Cols{"chat_session_id": sessionID, "role": "user", "content": "private file"})
+					dbfx.Exec(t, `UPDATE attachment SET chat_message_id = $2 WHERE id = $1`, invalidID, messageID)
+				}
+			case "task":
+				dbfx.Exec(t, `UPDATE attachment SET task_id = $2 WHERE id = $1`, invalidID, issueID)
+			case "missing":
+				dbfx.Exec(t, `DELETE FROM attachment WHERE id = $1`, invalidID)
+			}
+			var before db.Attachment
+			if kind != "missing" {
+				var err error
+				before, err = testHandler.Queries.GetAttachment(context.Background(), db.GetAttachmentParams{
+					ID: parseUUID(invalidID), WorkspaceID: parseUUID(attachmentWorkspaceID),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			var revision int64
+			dbfx.QueryRow(t, `SELECT revision FROM issue WHERE id = $1`, issueID).Scan(&revision)
+			req := newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{
+				"content": "all or nothing", "attachment_ids": []string{validID, invalidID},
+			})
+			testutil.Call(t, testHandler.CreateComment, withURLParam(req, "id", issueID)).Want(http.StatusConflict)
+			if n := dbfx.Count(t, `SELECT count(*) FROM comment WHERE issue_id = $1`, issueID); n != wantComments {
+				t.Fatalf("refused attachment left %d comments, want %d", n, wantComments)
+			}
+			if n := dbfx.Count(t, `SELECT count(*) FROM attachment WHERE id = $1 AND issue_id IS NULL AND comment_id IS NULL`, validID); n != 1 {
+				t.Fatal("refused batch bound its valid upload")
+			}
+			if kind != "missing" {
+				after, err := testHandler.Queries.GetAttachment(context.Background(), db.GetAttachmentParams{
+					ID: parseUUID(invalidID), WorkspaceID: parseUUID(attachmentWorkspaceID),
+				})
+				if err != nil || after != before {
+					t.Fatalf("refused attachment changed: before=%+v after=%+v err=%v", before, after, err)
+				}
+			}
+			var afterRevision int64
+			dbfx.QueryRow(t, `SELECT revision FROM issue WHERE id = $1`, issueID).Scan(&afterRevision)
+			if afterRevision != revision {
+				t.Fatalf("refused attachment bumped issue revision from %d to %d", revision, afterRevision)
+			}
+		})
 	}
 }
 
@@ -90,18 +212,98 @@ func TestCreateCommentRollsBackWhenAttachmentLinkFails(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
-	issueID := dbfx.Issue(t, "comment attachment link failure")
-	attachmentID := unlinkedIssueAttachment(t, issueID)
+	for _, unbound := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unbound=%t", unbound), func(t *testing.T) {
+			issueID := dbfx.Issue(t, "comment attachment link failure")
+			owner := issueID
+			if unbound {
+				owner = ""
+			}
+			attachmentID := unlinkedIssueAttachment(t, owner)
 
-	h := *testHandler
-	h.TxStarter = &failLinkAttachmentsTxStarter{delegate: testPool}
-	createCommentWithAttachment(t, &h, issueID, attachmentID).Want(http.StatusInternalServerError)
+			h := *testHandler
+			h.TxStarter = &failLinkAttachmentsTxStarter{delegate: testPool}
+			createCommentWithAttachment(t, &h, issueID, attachmentID).Want(http.StatusInternalServerError)
 
-	if n := dbfx.Count(t, `SELECT count(*) FROM comment WHERE issue_id = $1`, issueID); n != 0 {
-		t.Fatalf("issue has %d comments after a failed link, want none", n)
+			if n := dbfx.Count(t, `SELECT count(*) FROM comment WHERE issue_id = $1`, issueID); n != 0 {
+				t.Fatalf("issue has %d comments after a failed link, want none", n)
+			}
+			if n := dbfx.Count(t, `SELECT count(*) FROM attachment WHERE id = $1 AND comment_id IS NULL AND COALESCE(issue_id::text, '') = $2`, attachmentID, owner); n != 1 {
+				t.Fatal("failed link changed attachment ownership")
+			}
+		})
 	}
-	if n := dbfx.Count(t, `SELECT count(*) FROM attachment WHERE id = $1 AND comment_id IS NULL`, attachmentID); n != 1 {
-		t.Fatalf("attachment was left linked after the rollback")
+}
+
+func TestCreateCommentUnboundAttachmentDoesNotDeadlockWithIssueLink(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	issueID := dbfx.Issue(t, "unbound attachment vs issue link")
+	attachmentID := unlinkedIssueAttachment(t, "")
+	holder, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback(context.Background())
+	qtx := testHandler.Queries.WithTx(holder)
+	if _, err := qtx.LockAttachmentsForIssueLink(ctx, db.LockAttachmentsForIssueLinkParams{
+		WorkspaceID: parseUUID(testWorkspaceID), AttachmentIds: []pgtype.UUID{parseUUID(attachmentID)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var got *testutil.Response
+	done := make(chan error, 1)
+	go func() {
+		got = createCommentWithAttachment(t, testHandler, issueID, attachmentID)
+		done <- nil
+	}()
+	waitForBlockedQuery(t, done, "LockUnboundAttachmentsForCommentLink", "LockAttachmentsForCommentLink")
+
+	// The issue update already holds the ownerless upload. It must be able to
+	// take the issue next while comment creation waits without holding it.
+	_, linkErr := qtx.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
+		IssueID: parseUUID(issueID), WorkspaceID: parseUUID(testWorkspaceID),
+		AttachmentIds: []pgtype.UUID{parseUUID(attachmentID)}, BumpRevision: true,
+	})
+	if linkErr == nil {
+		linkErr = holder.Commit(ctx)
+	}
+	<-done
+	if linkErr != nil {
+		t.Fatalf("issue link deadlocked or failed: %v", linkErr)
+	}
+	got.Want(http.StatusCreated)
+}
+
+func TestCreateCommentUnboundAttachmentCanOnlyBeClaimedOnce(t *testing.T) {
+	attachmentID := unlinkedIssueAttachment(t, "")
+	issues := []string{dbfx.Issue(t, "first claimant"), dbfx.Issue(t, "second claimant")}
+	responses := make(chan *testutil.Response, len(issues))
+	for _, issueID := range issues {
+		go func() {
+			responses <- createCommentWithAttachment(t, testHandler, issueID, attachmentID)
+		}()
+	}
+	var winner CommentResponse
+	codes := map[int]int{}
+	for range issues {
+		resp := <-responses
+		codes[resp.Code]++
+		if resp.Code == http.StatusCreated {
+			resp.JSON(&winner)
+		} else {
+			resp.Want(http.StatusConflict)
+		}
+	}
+	if codes[http.StatusCreated] != 1 || codes[http.StatusConflict] != 1 {
+		t.Fatalf("competing comment statuses = %v, want one 201 and one 409", codes)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM comment WHERE issue_id = ANY($1::uuid[])`, issues); n != 1 {
+		t.Fatalf("competing claims left %d comments, want one", n)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM attachment WHERE id = $1 AND comment_id = $2 AND issue_id = $3`, attachmentID, winner.ID, winner.IssueID); n != 1 {
+		t.Fatal("attachment does not belong to winning comment")
 	}
 }
 
