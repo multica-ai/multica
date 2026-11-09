@@ -34,6 +34,7 @@
     "placeholder": "Titre du projet",
     "submit": "Enregistrer",
     "title_required": "Saisissez un titre",
+    "offline_error": "Vous êtes hors ligne. Reconnectez-vous, puis réessayez de renommer le projet.",
     "toast_renamed": "Projet renommé",
     "toast_failed": "Échec du renommage du projet"
   },

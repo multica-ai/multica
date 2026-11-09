@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, fireEvent, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, screen, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Project, UpdateProjectRequest } from "@multica/core/types";
 import { renderWithI18n } from "../test/i18n";
 import { RenameProjectModal } from "./rename-project";
@@ -53,16 +54,21 @@ function renderModal(modalData: Record<string, unknown> | null = data) {
       <RenameProjectModal onClose={onClose} data={modalData} />
     </QueryClientProvider>,
   );
-  return { onClose, input: screen.getByRole("textbox", { name: "Rename project" }) };
+  return { onClose, queryClient, input: screen.getByRole("textbox", { name: "Rename project" }) };
 }
 
 describe("RenameProjectModal", () => {
   beforeEach(() => {
+    onlineManager.setOnline(true);
     vi.clearAllMocks();
     mockUpdate.mockImplementation(async (_id: string, updates: UpdateProjectRequest) => ({
       ...project,
       ...updates,
     }));
+  });
+
+  afterEach(() => {
+    onlineManager.setOnline(true);
   });
 
   it("opens with the current name selected", async () => {
@@ -132,6 +138,61 @@ describe("RenameProjectModal", () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(input).toHaveValue("New name");
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  it.each(["Cancel", "Close", "Escape"])(
+    "allows %s after an offline save without renaming on reconnect",
+    async (dismiss) => {
+      const user = userEvent.setup();
+      const { onClose, input, queryClient } = renderModal();
+      onlineManager.setOnline(false);
+
+      fireEvent.change(input, { target: { value: "New name" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() =>
+        expect(toastErrorMock).toHaveBeenCalledWith("You're offline. Reconnect and try renaming again."),
+      );
+      expect(input).toHaveValue("New name");
+      expect(input).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(mockUpdate).not.toHaveBeenCalled();
+
+      if (dismiss === "Escape") await user.keyboard("{Escape}");
+      else await user.click(screen.getByRole("button", { name: dismiss }));
+      expect(onClose).toHaveBeenCalledOnce();
+
+      await act(async () => {
+        onlineManager.setOnline(true);
+        await queryClient.resumePausedMutations();
+      });
+      expect(mockUpdate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("requires an explicit retry after reconnecting and saves the retained draft", async () => {
+    const { onClose, input, queryClient } = renderModal();
+    onlineManager.setOnline(false);
+    fireEvent.change(input, { target: { value: "New name" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(toastErrorMock).toHaveBeenCalledWith("You're offline. Reconnect and try renaming again."),
+    );
+    await act(async () => {
+      onlineManager.setOnline(true);
+      await queryClient.resumePausedMutations();
+    });
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(input).toHaveValue("New name");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(mockUpdate).toHaveBeenCalledExactlyOnceWith("project-1", { title: "New name" });
+    expect(toastSuccessMock).toHaveBeenCalledWith("Project renamed");
   });
 
   it("closes from Cancel without a write", () => {

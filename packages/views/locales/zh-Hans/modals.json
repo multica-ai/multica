@@ -34,6 +34,7 @@
     "placeholder": "项目标题",
     "submit": "保存",
     "title_required": "请输入标题",
+    "offline_error": "当前处于离线状态，请联网后重试。",
     "toast_renamed": "项目名称已更新",
     "toast_failed": "重命名项目失败"
   },

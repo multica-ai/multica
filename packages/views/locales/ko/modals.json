@@ -34,6 +34,7 @@
     "placeholder": "프로젝트 제목",
     "submit": "저장",
     "title_required": "제목을 입력하세요",
+    "offline_error": "오프라인 상태입니다. 다시 연결한 후 이름 변경을 재시도하세요.",
     "toast_renamed": "프로젝트 이름이 변경되었습니다",
     "toast_failed": "프로젝트 이름을 변경하지 못했습니다"
   },

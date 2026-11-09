@@ -34,6 +34,7 @@
     "placeholder": "專案標題",
     "submit": "儲存",
     "title_required": "請輸入標題",
+    "offline_error": "目前處於離線狀態，請連線後重試。",
     "toast_renamed": "專案名稱已更新",
     "toast_failed": "重新命名專案失敗"
   },

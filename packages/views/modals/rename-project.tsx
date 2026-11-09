@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { onlineManager } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -65,6 +66,10 @@ export function RenameProjectModal({
     }
     if (unchanged) {
       onClose();
+      return;
+    }
+    if (!onlineManager.isOnline()) {
+      toast.error(t(($) => $.rename_project.offline_error));
       return;
     }
     try {

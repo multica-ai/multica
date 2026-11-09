@@ -34,6 +34,7 @@
     "placeholder": "Project title",
     "submit": "Save",
     "title_required": "Enter a title",
+    "offline_error": "You're offline. Reconnect and try renaming again.",
     "toast_renamed": "Project renamed",
     "toast_failed": "Failed to rename project"
   },
