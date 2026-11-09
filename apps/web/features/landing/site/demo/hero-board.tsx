@@ -255,7 +255,7 @@ export function HeroBoard({ workflow, label, onLoop }: { workflow: Workflow; lab
           >
             <div
               ref={boardRef}
-              className="flex items-start gap-4 p-2 transition-transform duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
+              className="flex h-full gap-4 p-2 transition-transform duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none"
               style={{ width: boardWidth, transform: pan ? `translateX(${-pan}px)` : undefined }}
             >
               {statuses.map((status) => {
@@ -305,7 +305,7 @@ const PANEL_ROW = "flex min-h-8 items-center gap-2.5 rounded-lg px-3 py-1.5 text
 const PANEL_ROW_ACTIVE = "bg-surface-selected text-surface-selected-foreground";
 /** A working agent's issue title in the panel: dimmer at rest, with a wider highlight. */
 const PANEL_SHIMMER = "[--shimmer-text-base:var(--faint-foreground)] [--shimmer-text-spread:22%]";
-const TREE_SIZE = 5;
+const TREE_SIZE = 3;
 
 function PanelSection({ label, children }: { label: string; children: ReactNode }) {
   return (
