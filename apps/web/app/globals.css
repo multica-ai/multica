@@ -6,7 +6,10 @@
 @import "./custom.css";
 @import "./landing.css";
 
-@custom-variant dark (&:is(.dark *));
+/* The marketing site is light-only: `.landing-light` re-declares the tokens
+   (custom.css), and `dark:` utilities inside it must not fire either. The
+   exclusion sits in `:where()` so `dark:` keeps its (0,2,0) specificity. */
+@custom-variant dark (&:is(.dark *):where(:not(.landing-light, .landing-light *)));
 
 @source "../../../packages/ui/**/*.{ts,tsx}";
 @source "../../../packages/core/**/*.{ts,tsx}";
