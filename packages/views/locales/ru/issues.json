@@ -871,6 +871,11 @@
     "tool_count_many": "{{count}} инструментов"
   },
   "execution_log": {
+    "latest": "Последний",
+    "include_children": "Включая подзадачи",
+    "loading": "Загрузка запусков...",
+    "load_failed_retry": "Не удалось загрузить запуски. Повторить",
+    "empty": "В этой области нет запусков.",
     "section": "Журнал выполнения",
     "cancel_task_tooltip": "Отменить запуск",
     "cancel_task_aria": "Отменить запуск",
