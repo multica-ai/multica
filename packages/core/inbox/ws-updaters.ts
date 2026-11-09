@@ -169,6 +169,17 @@ export async function onInboxIssueDeleted(
   ]);
 }
 
+// An issue field the archive filters and counts on changed. Loaded rows are
+// patched in place, but which groups match and the facet counts are decided
+// by the server: an issue that newly matches a filter would never appear, and
+// with `staleTime: Infinity` an empty result would stay empty. Marked
+// synchronously so an archive that is not mounted re-reads on its next visit.
+export async function refreshArchivedInboxMatches(qc: QueryClient, wsId: string) {
+  const keys = [inboxKeys.pages(wsId), inboxKeys.lookup(wsId), inboxKeys.facets(wsId)];
+  for (const queryKey of keys) void qc.invalidateQueries({ queryKey, refetchType: "none" });
+  await Promise.all(keys.map((queryKey) => refreshInboxQuery(qc, queryKey)));
+}
+
 // Whether a request for either inbox list is out (paused ones included).
 export function isInboxListRequestInFlight(
   qc: QueryClient,

@@ -22,7 +22,7 @@ import {
   patchIssueInBuckets,
 } from "./cache-helpers";
 import { cleanupDeletedIssueCaches } from "./delete-cache";
-import { patchInboxIssueProjection } from "../inbox/ws-updaters";
+import { patchInboxIssueProjection, refreshArchivedInboxMatches } from "../inbox/ws-updaters";
 import type {
   Issue,
   IssueLabelsResponse,
@@ -557,6 +557,9 @@ export function onIssueLabelsChanged(
   labels: Label[],
   revision?: number,
 ) {
+  // Runs after the change is committed (event or mutation success), so the
+  // archive can be asked again; the optimistic patch below cannot.
+  void refreshArchivedInboxMatches(qc, wsId);
   if (refetchForUnversionedIssueEvent(qc, wsId, issueId, revision)) {
     qc.invalidateQueries({ queryKey: labelKeys.byIssue(wsId, issueId) });
     return;

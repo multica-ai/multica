@@ -15,6 +15,7 @@ import {
   inboxPriorityFilterSupport,
   inboxReceivedAfter,
   inboxTypeGroup,
+  isEmptyInboxFilters,
   sanitizeInboxFilters,
   useInboxFilterStore,
   type InboxFilters,
@@ -393,18 +394,38 @@ describe("useInboxFilterStore", () => {
     });
   });
 
-  it("drops a dimension's negation with its last value", () => {
+  it("keeps is not when it is chosen before the first value", () => {
+    const store = useInboxFilterStore.getState();
+    store.setFilterNegated("ws-1", "type", true);
+    useInboxFilterStore.getState().toggleFilterValue("ws-1", "type", "run");
+
+    const filters = useInboxFilterStore.getState().filtersByWorkspace["ws-1"]!;
+    expect(filters).toMatchObject({ types: ["run"], negated: ["type"] });
+    expect(inboxFilterCount(filters)).toBe(1);
+  });
+
+  it("keeps a dimension's operator across its values and drops it when the field is cleared", () => {
     const store = useInboxFilterStore.getState();
     store.toggleFilterValue("ws-1", "type", "mention");
     store.setFilterNegated("ws-1", "type", true);
-    store.toggleUnreadOnly("ws-1");
-    expect(useInboxFilterStore.getState().filtersByWorkspace["ws-1"]?.negated).toEqual(["type"]);
-
     useInboxFilterStore.getState().toggleFilterValue("ws-1", "type", "mention");
-    expect(useInboxFilterStore.getState().filtersByWorkspace["ws-1"]).toEqual({
-      ...EMPTY_INBOX_FILTERS,
-      unreadOnly: true,
+    useInboxFilterStore.getState().toggleFilterValue("ws-1", "type", "run");
+    expect(useInboxFilterStore.getState().filtersByWorkspace["ws-1"]).toMatchObject({
+      types: ["run"], negated: ["type"],
     });
+
+    useInboxFilterStore.getState().clearFilter("ws-1", "type");
+    expect(useInboxFilterStore.getState().filtersByWorkspace["ws-1"]).toBeUndefined();
+  });
+
+  it("does not count or send an operator with no value, and forgets it on reload", () => {
+    useInboxFilterStore.getState().setFilterNegated("ws-1", "label", true);
+    const filters = useInboxFilterStore.getState().filtersByWorkspace["ws-1"]!;
+
+    expect(inboxFilterCount(filters)).toBe(0);
+    expect(archivedInboxQuery(filters).negated).toBeUndefined();
+    expect(isEmptyInboxFilters(sanitizeInboxFilters(filters))).toBe(true);
+    expect(sanitizeInboxFilters(filters).negated).toEqual([]);
   });
 
   it("selects a single received window and agent state, toggling off on reselect", () => {

@@ -46,8 +46,9 @@ function update(
   const next = change(current);
   if (next === current) return state;
   // Emptiness is asked of every dimension: an entry is dropped only when
-  // nothing in it narrows the list any more.
-  if (isEmptyInboxFilters(next)) {
+  // nothing in it narrows the list any more. An "is not" picked before its
+  // first value narrows nothing yet but must survive until that value comes.
+  if (isEmptyInboxFilters(next) && next.negated.length === 0) {
     if (!state.filtersByWorkspace[wsId]) return state;
     const { [wsId]: _removed, ...filtersByWorkspace } = state.filtersByWorkspace;
     return { filtersByWorkspace };
@@ -57,15 +58,9 @@ function update(
 
 function toggleListValue(current: InboxFilters, dimension: InboxListDimension, value: string): InboxFilters {
   const field = INBOX_DIMENSION_FIELD[dimension];
-  const values = toggleInboxFilterValue(current[field] as readonly string[], value);
-  return {
-    ...current,
-    [field]: values,
-    // "Is not" belongs to the selection; it goes when the last value does.
-    negated: values.length === 0
-      ? current.negated.filter((candidate) => candidate !== dimension)
-      : current.negated,
-  };
+  // "Is not" stays when the last value goes, as in the issue filter: the
+  // operator is the submenu's own setting, and clearing the field resets it.
+  return { ...current, [field]: toggleInboxFilterValue(current[field] as readonly string[], value) };
 }
 
 export const useInboxFilterStore = create<InboxFilterState>()(

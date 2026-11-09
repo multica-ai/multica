@@ -204,6 +204,16 @@ describe("InboxFilterMenu", () => {
     expect(storedFilters()?.negated).toEqual(["type"]);
   });
 
+  it("keeps is not when it is chosen before the first type", async () => {
+    renderMenu({ items: [item("mention", "todo", "high")] });
+    await openSubmenu("Type");
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "is not" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /^Agent runs/ }));
+
+    expect(storedFilters()).toMatchObject({ types: ["run"], negated: ["type"] });
+    expect(screen.getByRole("menuitemradio", { name: "is not" })).toHaveAttribute("aria-checked", "true");
+  });
+
   it("finds a value by search and adds it in one click", async () => {
     renderMenu();
     openMenu();
