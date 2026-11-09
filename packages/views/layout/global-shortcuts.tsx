@@ -11,6 +11,7 @@ import {
   type ShortcutActionId,
 } from "@multica/core/shortcuts";
 import { useChatStore } from "@multica/core/chat";
+import { useSearchStore } from "@multica/core/command-bar";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { isImeComposing } from "@multica/core/utils";
@@ -18,7 +19,6 @@ import { isFloatingChatRouteSuppressed } from "../chat/floating-chat-visibility"
 import { useAppShell } from "./app-shell-context";
 import { openCreateIssueForPath } from "./global-actions";
 import { useNavigation } from "../navigation";
-import { useSearchStore } from "../search/search-store";
 
 const GLOBAL_ACTIONS: readonly ShortcutActionId[] = [
   "openSearch",
