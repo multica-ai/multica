@@ -268,6 +268,14 @@
     "toast_renamed": "Tarea renombrada",
     "toast_failed": "No se ha podido renombrar la tarea"
   },
+  "rename_project": {
+    "title": "Renombrar proyecto",
+    "placeholder": "Título del proyecto",
+    "submit": "Guardar",
+    "title_required": "Escribe un título",
+    "toast_renamed": "Proyecto renombrado",
+    "toast_failed": "No se ha podido renombrar el proyecto"
+  },
   "add_project_issue": {
     "title": "Añadir tarea existente",
     "description": "Busca una tarea para moverla a este proyecto",

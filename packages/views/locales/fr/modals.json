@@ -29,6 +29,14 @@
     "toast_renamed": "Tâche renommée",
     "toast_failed": "Échec du renommage de la tâche"
   },
+  "rename_project": {
+    "title": "Renommer le projet",
+    "placeholder": "Titre du projet",
+    "submit": "Enregistrer",
+    "title_required": "Saisissez un titre",
+    "toast_renamed": "Projet renommé",
+    "toast_failed": "Échec du renommage du projet"
+  },
   "feedback": {
     "title": "Faire un retour",
     "placeholder": "Parlez-nous de votre expérience, des bugs rencontrés ou des fonctionnalités que vous aimeriez voir…",

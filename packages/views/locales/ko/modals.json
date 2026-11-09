@@ -29,6 +29,14 @@
     "toast_renamed": "태스크 이름이 변경되었습니다",
     "toast_failed": "태스크 이름을 변경하지 못했습니다"
   },
+  "rename_project": {
+    "title": "프로젝트 이름 변경",
+    "placeholder": "프로젝트 제목",
+    "submit": "저장",
+    "title_required": "제목을 입력하세요",
+    "toast_renamed": "프로젝트 이름이 변경되었습니다",
+    "toast_failed": "프로젝트 이름을 변경하지 못했습니다"
+  },
   "feedback": {
     "title": "피드백",
     "placeholder": "사용 경험, 발견한 버그, 필요한 기능을 알려주세요...",

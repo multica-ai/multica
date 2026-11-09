@@ -29,6 +29,14 @@
     "toast_renamed": "任务名称已更新",
     "toast_failed": "重命名任务失败"
   },
+  "rename_project": {
+    "title": "重命名项目",
+    "placeholder": "项目标题",
+    "submit": "保存",
+    "title_required": "请输入标题",
+    "toast_renamed": "项目名称已更新",
+    "toast_failed": "重命名项目失败"
+  },
   "feedback": {
     "title": "反馈",
     "placeholder": "聊聊你的体验、遇到的 bug，或想看到的功能...",

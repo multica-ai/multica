@@ -29,6 +29,14 @@
     "toast_renamed": "Issue renamed",
     "toast_failed": "Failed to rename issue"
   },
+  "rename_project": {
+    "title": "Rename project",
+    "placeholder": "Project title",
+    "submit": "Save",
+    "title_required": "Enter a title",
+    "toast_renamed": "Project renamed",
+    "toast_failed": "Failed to rename project"
+  },
   "feedback": {
     "title": "Feedback",
     "placeholder": "Tell us about your experience, bugs you've found, or features you'd like to see…",
