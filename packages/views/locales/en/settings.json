@@ -990,6 +990,8 @@
     "feature_pr_sidebar_label": "Pull Request sidebar",
     "feature_pr_sidebar_description": "Show linked pull requests inside the issue detail sidebar.",
     "feature_co_author_label": "Co-authored-by trailer",
+    "feature_commit_author_label": "Use run initiator as commit author",
+    "feature_commit_author_description": "Uses the human initiator's name and email for new commits in managed checkouts. The runtime remains the committer. Off by default.",
     "feature_co_author_description_prefix": "Append",
     "feature_co_author_description_suffix": "to commits authored by agents.",
     "feature_auto_link_label": "Auto-link issues and PRs",

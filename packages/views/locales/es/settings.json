@@ -990,6 +990,8 @@
     "feature_pr_sidebar_label": "Barra lateral de pull requests",
     "feature_pr_sidebar_description": "Muestra los pull requests vinculados dentro de la barra lateral del detalle de la tarea.",
     "feature_co_author_label": "Trailer Co-authored-by",
+    "feature_commit_author_label": "Usar al iniciador de la ejecución como autor de los commits",
+    "feature_commit_author_description": "Usa el nombre y el correo de quien inició la ejecución en los nuevos commits de las copias de trabajo gestionadas. La identidad Git del entorno sigue siendo el committer. Desactivado por defecto.",
     "feature_co_author_description_prefix": "Añade",
     "feature_co_author_description_suffix": "a los commits creados por agentes.",
     "feature_auto_link_label": "Vincular tareas y PR automáticamente",

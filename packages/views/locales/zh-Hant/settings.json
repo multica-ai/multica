@@ -981,6 +981,8 @@
     "feature_pr_sidebar_label": "Pull Request 側欄",
     "feature_pr_sidebar_description": "在任務詳情側欄中展示關聯的 Pull Request。",
     "feature_co_author_label": "Co-authored-by trailer",
+    "feature_commit_author_label": "將執行發起人設為 commit 作者",
+    "feature_commit_author_description": "在託管檢出目錄中建立 commit 時，使用發起執行的使用者姓名和電子郵件。提交者仍為執行環境的 Git 身分。預設關閉。",
     "feature_co_author_description_prefix": "在 AI 代理提交的 commit 中追加",
     "feature_co_author_description_suffix": "。",
     "feature_auto_link_label": "任務 ↔ PR 自動關聯",

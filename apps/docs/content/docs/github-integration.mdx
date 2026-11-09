@@ -40,17 +40,20 @@ The **GitHub connection** decides which repositories Multica receives PR events 
 
 ## Feature switches
 
-The **Pull requests & issues** section of **Settings → Code** has these settings. **Pause GitHub features** in the GitHub row's **⋯** menu stops the three switches below without disconnecting the GitHub App.
+The **Pull requests & issues** section of **Settings → Code** has these settings. **Pause GitHub features** in the GitHub row's **⋯** menu stops the PR sidebar, Co-authored-by trailers, automatic PR linking, and initiator commit attribution without disconnecting the GitHub App.
 
 | Switch | Effect |
 |---|---|
 | PR sidebar | Shows linked pull requests in issue detail. |
 | Co-authored-by | Adds `Co-authored-by: multica-agent <github@multica.ai>` to commits created by agents. |
 | Auto-link PRs | Links a PR to the issue whose identifier is in its branch name or title, or follows a closing keyword in its body. |
+| Use run initiator as commit author | Off by default. Uses the human initiator's name and email as the author of new agent commits in managed checkouts; the runtime's Git identity remains the committer. |
 | After PRs merge, move the issue to | What merging every PR linked to an issue does: move it to a status (`Done` by default) or leave it alone. See [When merged PRs move an issue](#when-merged-prs-move-an-issue). |
 | PR card → CI & mergeability | For each linked PR, Multica fetches a GitHub API snapshot as the App and shows its CI status and mergeability on the card. See [View PRs on an issue](#view-prs-on-an-issue). |
 
 **After PRs merge, move the issue to** applies to every code host, including [self-hosted Git hosting](/vcs-integration).
+
+Commit author attribution uses the workspace setting `commit_author_is_initiator_enabled`. It applies when the daemon prepares or reuses a checkout, not retroactively to running agents or existing commits. Agent-initiated runs and runs without a valid human name and email keep the normal Git identity. Reusing a checkout removes a previous run's managed author override when it no longer applies, preserving any pre-existing author settings. Linked worktrees use private worktree config rather than the shared cache config. Explicit Git environment variables and `git commit --author` still take precedence. The Co-authored-by trailer is independent of this setting; neither setting changes push credentials or commit signing.
 
 ## Link a PR to an issue
 

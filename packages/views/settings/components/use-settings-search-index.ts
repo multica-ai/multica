@@ -275,6 +275,11 @@ export function useSettingsSearchIndex(
       },
       {
         tab: "code",
+        anchor: "commit-author",
+        title: t(($) => $.github.feature_commit_author_label),
+      },
+      {
+        tab: "code",
         anchor: "pr-merge-status",
         title: t(($) => $.pr_merge_status.label),
         description: t(($) => $.pr_merge_status.description),

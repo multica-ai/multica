@@ -990,6 +990,8 @@
     "feature_pr_sidebar_label": "Barre latérale des pull requests",
     "feature_pr_sidebar_description": "Afficher les pull requests liées dans la barre latérale de la tâche.",
     "feature_co_author_label": "Mention Co-authored-by",
+    "feature_commit_author_label": "Utiliser l’initiateur de l’exécution comme auteur des commits",
+    "feature_commit_author_description": "Utilise le nom et l’adresse e-mail de la personne ayant lancé l’exécution pour les nouveaux commits des copies de travail gérées. L’identité Git de l’environnement reste le committer. Désactivé par défaut.",
     "feature_co_author_description_prefix": "Ajouter",
     "feature_co_author_description_suffix": "aux commits rédigés par des agents.",
     "feature_auto_link_label": "Lier automatiquement tâches et PR",

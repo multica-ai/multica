@@ -40,17 +40,20 @@ GitHub 集成只读取安装时授权的仓库，不会提交代码、评论或 
 
 ## 功能开关
 
-**设置 → 代码** 的 **PR 与任务联动** 中有以下设置。在 GitHub 一行的 **⋯** 菜单中选择 **暂停 GitHub 功能** 后，下面三项开关不再生效，但不会断开 GitHub App。
+**设置 → 代码** 的 **PR 与任务联动** 中有以下设置。在 GitHub 一行的 **⋯** 菜单中选择 **暂停 GitHub 功能** 后，PR 侧栏、Co-authored-by trailer、自动关联 PR 和发起人 commit 作者归属不再生效，但不会断开 GitHub App。
 
 | 设置 | 作用 |
 |---|---|
 | PR 侧栏 | 在任务详情中显示关联的 pull request。 |
 | Co-authored-by | 在智能体创建的 commit 中加入 `Co-authored-by: multica-agent <github@multica.ai>`。 |
 | 自动关联 PR | 分支名或标题含任务编号、或正文中关闭语句后写了任务编号的 PR，会关联到对应任务。 |
+| 将运行发起人设为 commit 作者 | 默认关闭。在托管检出目录中新建 commit 时，将发起运行的用户姓名和邮箱设为作者；提交者仍为运行环境的 Git 身份。 |
 | PR 合并后，任务状态改为 | 任务关联的 PR 全部合并后，把任务改成某个状态（默认 `Done`），或者不改。见[PR 合并后怎样改状态](#pr-合并后怎样改状态)。 |
 | PR 卡片 → CI 与可合并性 | 对每个关联的 PR，Multica 以 App 身份从 GitHub API 拉取快照，把 CI 状态和可合并性显示在卡片上，见[在任务中查看 PR](#在任务中查看-pr)。 |
 
 **PR 合并后，任务状态改为** 对所有代码托管平台生效，包括[自托管 Git 代码托管](/vcs-integration)。
+
+Commit 作者归属由工作区设置 `commit_author_is_initiator_enabled` 控制，在 daemon 准备或复用检出目录时生效，不追溯修改正在运行的智能体或已有 commit。智能体发起的运行，以及缺少有效用户姓名和邮箱的运行，沿用正常的 Git 身份。复用目录时，如果设置不再适用，会移除上次运行留下的托管作者覆盖，并保留原有作者配置。Linked worktree 使用独立的 worktree 配置，不修改共享缓存的配置。显式 Git 环境变量和 `git commit --author` 仍具有更高优先级。Co-authored-by trailer 与此设置独立；两项设置都不会改变推送凭据或 commit 签名。
 
 ## 让 PR 关联到任务
 
