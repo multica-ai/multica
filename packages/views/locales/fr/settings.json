@@ -683,6 +683,11 @@
         "description": "Lorsqu'une exécution d'agent échoue"
       }
     },
+    "auto_archive": {
+      "title": "Archivage",
+      "label": "Archiver après une action",
+      "description": "Répondre, changer le statut ou réassigner retire la tâche de votre boîte de réception. Désactivé, elle reste jusqu'à ce que vous l'archiviez."
+    },
     "system": {
       "title": "Notifications système",
       "label": "Afficher les notifications système lorsque Multica est en arrière-plan"

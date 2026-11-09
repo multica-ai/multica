@@ -56,6 +56,17 @@ describe("notification preference patches", () => {
     ).toEqual({ comments: "muted", mentions: "muted" });
   });
 
+  it("treats auto_archive as off when absent", () => {
+    expect(deriveNotificationPreferencePatch({}, { auto_archive: "on" })).toEqual({ auto_archive: "on" });
+    expect(deriveNotificationPreferencePatch({ auto_archive: "on" }, {})).toEqual({ auto_archive: "off" });
+    expect(applyNotificationPreferencePatch({ comments: "muted" }, { auto_archive: "on" })).toEqual({
+      comments: "muted",
+      auto_archive: "on",
+    });
+    expect(applyNotificationPreferencePatch({ auto_archive: "on" }, { auto_archive: "off" })).toEqual({});
+    expect(rollbackNotificationPreferencePatch({ auto_archive: "on" }, { auto_archive: "on" }, {})).toEqual({});
+  });
+
   it("does not roll back a key that a later mutation already changed", () => {
     expect(
       rollbackNotificationPreferencePatch(

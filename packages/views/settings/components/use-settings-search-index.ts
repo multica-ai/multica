@@ -99,6 +99,12 @@ export function useSettingsSearchIndex(
       })),
       {
         tab: "notifications",
+        anchor: "auto-archive",
+        title: t(($) => $.notifications.auto_archive.label),
+        description: t(($) => $.notifications.auto_archive.description),
+      },
+      {
+        tab: "notifications",
         anchor: "system",
         title: t(($) => $.notifications.system.label),
       },

@@ -149,8 +149,28 @@ func publishComment(bus *events.Bus, issueID, authorType, authorID string) {
 	})
 }
 
-// Replying moves the issue on, so it leaves the replier's Inbox and no one
-// else's; an agent's comment leaves every Inbox alone.
+// enableAutoArchive turns on the member's auto_archive preference.
+func enableAutoArchive(t *testing.T, userID string) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO notification_preference (workspace_id, user_id, preferences)
+		VALUES ($1, $2, '{"auto_archive":"on"}'::jsonb)
+		ON CONFLICT (workspace_id, user_id)
+		DO UPDATE SET preferences = notification_preference.preferences || EXCLUDED.preferences
+	`, testWorkspaceID, userID); err != nil {
+		t.Fatalf("enable auto_archive: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `
+			UPDATE notification_preference SET preferences = preferences - 'auto_archive'
+			WHERE workspace_id = $1 AND user_id = $2
+		`, testWorkspaceID, userID)
+	})
+}
+
+// By default a reply leaves the Inbox alone: the member archives it. With
+// auto_archive on, it leaves the replier's Inbox and no one else's; an
+// agent's comment leaves every Inbox alone either way.
 func TestNotification_MemberCommentClearsOwnInbox(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
@@ -184,6 +204,15 @@ func TestNotification_MemberCommentClearsOwnInbox(t *testing.T) {
 	}
 
 	publishComment(bus, issueID, "member", testUserID)
+	if active, _ := countInboxByTypeForIssue(t, testUserID, issueID, "agent_completed"); active != 1 {
+		t.Fatalf("without auto_archive a reply must not clear the Inbox, got %d active", active)
+	}
+	if len(batchArchived) != 0 {
+		t.Fatalf("expected no inbox:batch-archived event, got %d", len(batchArchived))
+	}
+
+	enableAutoArchive(t, testUserID)
+	publishComment(bus, issueID, "member", testUserID)
 	if active, archived := countInboxByTypeForIssue(t, testUserID, issueID, "agent_completed"); active != 0 || archived != 1 {
 		t.Fatalf("replier: expected the row archived, got active=%d archived=%d", active, archived)
 	}
@@ -199,10 +228,11 @@ func TestNotification_MemberCommentClearsOwnInbox(t *testing.T) {
 	}
 }
 
-// Changing the status is acting on the issue too.
+// With auto_archive on, changing the status is acting on the issue too.
 func TestNotification_MemberStatusChangeClearsOwnInbox(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
+	enableAutoArchive(t, testUserID)
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() {

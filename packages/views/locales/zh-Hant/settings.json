@@ -678,6 +678,11 @@
         "description": "AI 代理執行失敗時"
       }
     },
+    "auto_archive": {
+      "title": "歸檔",
+      "label": "操作後自動歸檔",
+      "description": "你回覆、改狀態或改負責人後，任務自動移出收件箱。關閉時，任務會留在收件箱，直到你手動歸檔。"
+    },
     "system": {
       "title": "系統通知",
       "label": "Multica 在背景時顯示系統通知"

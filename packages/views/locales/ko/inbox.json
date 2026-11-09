@@ -70,7 +70,9 @@
     "autopilot_quota_upgrade": "업그레이드 옵션 보기",
     "archive": "보관",
     "unarchive": "보관 해제",
-    "handled": "처리됨 · 인박스에서 빠졌습니다"
+    "handled": "처리됨 · 인박스에서 빠졌습니다",
+    "acted_replied": "답장했습니다 · 끝나면 보관하세요",
+    "acted_updated": "이 태스크를 업데이트했습니다 · 끝나면 보관하세요"
   },
   "types": {
     "issue_assigned": "할당됨",

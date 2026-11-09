@@ -683,6 +683,11 @@
         "description": "When an agent run fails"
       }
     },
+    "auto_archive": {
+      "title": "Archiving",
+      "label": "Archive after you act",
+      "description": "Replying, changing the status or reassigning takes the issue out of your Inbox. When off, it stays until you archive it."
+    },
     "system": {
       "title": "System Notifications",
       "label": "Show system notifications when Multica is in the background"

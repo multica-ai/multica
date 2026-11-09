@@ -77,6 +77,11 @@ vi.mock("@multica/core/modals", () => ({
   useModalStore: { getState: () => modalState },
 }));
 
+const actedState = vi.hoisted(() => ({ value: null as "replied" | "updated" | null }));
+vi.mock("./use-acted-on-issue", () => ({
+  useActedOnIssue: () => actedState.value,
+}));
+
 vi.mock("@multica/core/issues/stores/draft-store", () => ({
   useIssueDraftStore: { getState: () => ({ setDraft: vi.fn() }) },
 }));
@@ -390,6 +395,24 @@ describe("InboxPage", () => {
     act(() => notice.props.onArchive());
 
     expect(archiveMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
+  });
+
+  it("keeps an issue the user replied on in the list, with Archive as the next step", () => {
+    reset();
+    layout.width = DESKTOP;
+    actedState.value = "replied";
+    listData.active = [item({ id: "inbox-a", issue_id: "issue-a" })];
+    render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+
+    const notice = issueDetailProps.at(-1)?.notice as React.ReactElement<{
+      handled: boolean;
+      acted: string | null;
+    }>;
+    expect(notice.props.handled).toBe(false);
+    expect(notice.props.acted).toBe("replied");
+    expect(archiveMutate).not.toHaveBeenCalled();
+    actedState.value = null;
   });
 
   it("leaves the reason bar out of the archive", () => {

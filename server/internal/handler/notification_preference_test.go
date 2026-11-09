@@ -176,3 +176,43 @@ func TestPatchNotificationPreferencesRejectsUnknownGroups(t *testing.T) {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
+
+// auto_archive takes on/off rather than a group's all/muted.
+func TestPatchNotificationPreferencesAutoArchiveValues(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `
+			DELETE FROM notification_preference
+			WHERE workspace_id = $1 AND user_id = $2
+		`, testWorkspaceID, testUserID)
+	})
+
+	recorder := httptest.NewRecorder()
+	testHandler.PatchNotificationPreferences(
+		recorder,
+		notificationPreferenceRequest(t, http.MethodPatch, map[string]string{"auto_archive": "on"}),
+	)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Preferences map[string]string `json:"preferences"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Preferences["auto_archive"] != "on" {
+		t.Fatalf("auto_archive not persisted: %#v", response.Preferences)
+	}
+
+	for _, prefs := range []map[string]string{{"auto_archive": "muted"}, {"comments": "on"}} {
+		recorder := httptest.NewRecorder()
+		testHandler.PatchNotificationPreferences(recorder, notificationPreferenceRequest(t, http.MethodPatch, prefs))
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("%v: status=%d body=%s", prefs, recorder.Code, recorder.Body.String())
+		}
+	}
+}

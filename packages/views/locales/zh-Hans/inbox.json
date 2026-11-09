@@ -70,7 +70,9 @@
     "autopilot_quota_upgrade": "查看升级方案",
     "archive": "归档",
     "unarchive": "取消归档",
-    "handled": "已处理 · 已移出收件箱"
+    "handled": "已处理 · 已移出收件箱",
+    "acted_replied": "你已回复 · 处理完就归档",
+    "acted_updated": "你已更新这个任务 · 处理完就归档"
   },
   "types": {
     "issue_assigned": "已分配",

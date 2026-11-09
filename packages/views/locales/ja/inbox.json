@@ -70,7 +70,9 @@
     "autopilot_quota_upgrade": "アップグレード方法を見る",
     "archive": "アーカイブ",
     "unarchive": "アーカイブ解除",
-    "handled": "対応済み · インボックスから外れました"
+    "handled": "対応済み · インボックスから外れました",
+    "acted_replied": "返信しました · 終わったらアーカイブ",
+    "acted_updated": "このタスクを更新しました · 終わったらアーカイブ"
   },
   "types": {
     "issue_assigned": "割り当て済み",

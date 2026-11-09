@@ -25,12 +25,26 @@ var validNotifGroups = map[string]bool{
 	"updates":              true,
 	"agent_activity":       true,
 	"system_notifications": true,
+	AutoArchivePref:        true,
 }
 
-// validNotifValues is the set of allowed preference values per group.
+// AutoArchivePref is not a group either: set to AutoArchiveOn, a member's
+// reply, status change or reassignment archives their Inbox rows on that
+// issue. Absent or "off", rows leave only when the member archives them.
+const (
+	AutoArchivePref = "auto_archive"
+	AutoArchiveOn   = "on"
+)
+
+// validNotifValues is the set of allowed values for the groups.
 var validNotifValues = map[string]bool{
 	"all":   true,
 	"muted": true,
+}
+
+var validAutoArchiveValues = map[string]bool{
+	AutoArchiveOn: true,
+	"off":         true,
 }
 
 func (h *Handler) GetNotificationPreferences(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +103,11 @@ func decodeNotificationPreferenceRequest(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusBadRequest, "invalid preference group: "+k)
 			return nil, false
 		}
-		if !validNotifValues[v] {
+		valid := validNotifValues
+		if k == AutoArchivePref {
+			valid = validAutoArchiveValues
+		}
+		if !valid[v] {
 			writeError(w, http.StatusBadRequest, "invalid preference value: "+v)
 			return nil, false
 		}

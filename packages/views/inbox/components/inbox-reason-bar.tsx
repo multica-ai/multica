@@ -9,19 +9,23 @@ import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useT } from "../../i18n";
 import { InboxDetailLabel } from "./inbox-detail-label";
 import { useTimeAgo } from "./inbox-list-item";
+import type { InboxAction } from "./use-acted-on-issue";
 
 /**
  * Why an issue is waiting on the user, above its title: who did what, and
- * the action that takes it out of the Inbox. Once the user has acted on
- * the issue, it says so until they move on.
+ * the action that takes it out of the Inbox. Once the user has acted on the
+ * issue, it says so: taken out already (`handled`, with auto-archive on), or
+ * still here, with Archive as the next step (`acted`).
  */
 export function InboxReasonBar({
   item,
   handled,
+  acted = null,
   onArchive,
 }: {
   item: InboxItem;
   handled: boolean;
+  acted?: InboxAction | null;
   onArchive: () => void;
 }) {
   const { t } = useT("inbox");
@@ -44,15 +48,26 @@ export function InboxReasonBar({
       data-testid="inbox-reason-bar"
       className="mb-4 flex min-h-10 items-center gap-2 rounded-md border bg-muted/40 py-1 pl-3 pr-1 text-body"
     >
-      <ActorAvatar actorType={item.actor_type ?? item.recipient_type} actorId={item.actor_id ?? item.recipient_id} size="sm" />
-      <span className="min-w-0 flex-1 truncate text-muted-foreground">
-        <InboxDetailLabel item={item} />
-      </span>
-      <span className="shrink-0 text-caption text-faint-foreground">{timeAgo(item.created_at)}</span>
+      {acted ? (
+        <>
+          <Check className="size-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">
+            {acted === "replied" ? t(($) => $.detail.acted_replied) : t(($) => $.detail.acted_updated)}
+          </span>
+        </>
+      ) : (
+        <>
+          <ActorAvatar actorType={item.actor_type ?? item.recipient_type} actorId={item.actor_id ?? item.recipient_id} size="sm" />
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">
+            <InboxDetailLabel item={item} />
+          </span>
+          <span className="shrink-0 text-caption text-faint-foreground">{timeAgo(item.created_at)}</span>
+        </>
+      )}
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button variant="ghost" size="sm" className="shrink-0" onClick={onArchive}>
+            <Button variant={acted ? "default" : "ghost"} size="sm" className="shrink-0" onClick={onArchive}>
               <Archive className="mr-1.5 size-3.5" />
               {t(($) => $.detail.archive)}
             </Button>

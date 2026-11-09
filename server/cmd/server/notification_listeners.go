@@ -293,9 +293,11 @@ func archiveStaleTaskFailedInbox(
 }
 
 // archiveInboxForActor clears a member's Inbox for an issue they just acted
-// on. Replying, changing the status or reassigning moves the issue on, so it
-// is no longer waiting on them; a later hand-back delivers a fresh row.
-// Opening the issue alone is not acting, and does not come through here.
+// on, when they turned on auto_archive. Replying, changing the status or
+// reassigning usually moves the issue on, but not always (a reply can be a
+// question, or answer only one of several reasons), so by default the member
+// archives it themselves. A later hand-back delivers a fresh row. Opening the
+// issue alone is not acting, and does not come through here.
 func archiveInboxForActor(
 	ctx context.Context,
 	queries *db.Queries,
@@ -304,6 +306,9 @@ func archiveInboxForActor(
 	issueID string,
 ) {
 	if e.ActorType != "member" || e.ActorID == "" || issueID == "" {
+		return
+	}
+	if loadUserPrefs(ctx, queries, e.WorkspaceID, []string{e.ActorID})[e.ActorID][handler.AutoArchivePref] != handler.AutoArchiveOn {
 		return
 	}
 	count, err := queries.ArchiveInboxByIssue(ctx, db.ArchiveInboxByIssueParams{

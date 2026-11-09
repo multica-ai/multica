@@ -54,6 +54,7 @@ vi.mock("./inbox-filter-menu", () => ({
   },
 }));
 vi.mock("./inbox-list-item", () => ({ useTimeAgo: () => vi.fn() }));
+vi.mock("./use-acted-on-issue", () => ({ useActedOnIssue: () => null }));
 vi.mock("./inbox-context-menu", () => ({
   InboxContextMenuProvider: ({ children }: { children: ReactNode }) => children,
 }));

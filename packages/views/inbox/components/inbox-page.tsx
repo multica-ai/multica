@@ -100,6 +100,7 @@ import { PanelHeader } from "../../layout/panel-nav";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
 import { InboxReasonBar } from "./inbox-reason-bar";
+import { useActedOnIssue } from "./use-acted-on-issue";
 import { InboxFilterMenu } from "./inbox-filter-menu";
 import { InboxFilterChipsBar } from "./inbox-filter-options";
 import { InboxContextMenuProvider } from "./inbox-context-menu";
@@ -307,6 +308,7 @@ export function InboxPage() {
   const detailKey = useDeferredValue(selectedKey);
   const detailSwapping = detailKey !== selectedKey;
   const detailItem = resolveDetailItem(selectionItems, selectedKey, detailKey);
+  const acted = useActedOnIssue(isArchivedView ? null : (detailItem?.issue_id ?? null));
 
   // The gap above is invisible to the navigation adapter — the inbox stays on
   // the same route and only rewrites `?issue=` — so report it explicitly and
@@ -915,6 +917,7 @@ export function InboxPage() {
               <InboxReasonBar
                 item={detailItem}
                 handled={handled?.key === detailItem.issue_id}
+                acted={acted}
                 onArchive={() => handleArchive(detailItem.id)}
               />
             )
