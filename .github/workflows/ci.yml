@@ -217,6 +217,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Report runner CPU
+        run: |
+          nproc
+          lscpu
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
