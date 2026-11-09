@@ -93,7 +93,11 @@
     "quick_create_unconfirmed": "에이전트 생성 결과 미확인",
     "autopilot_paused": "자동화 일시 중지됨",
     "children_done": "하위 태스크가 모두 끝났습니다",
-    "autopilot_quota_exceeded": "자동화 실행 한도 도달"
+    "autopilot_quota_exceeded": "자동화 실행 한도 도달",
+    "app_action_requested": "확인 필요",
+    "app_action_reminder": "확인 곧 만료",
+    "app_connect_requested": "앱 연결 요청",
+    "app_action_result": "앱 작업 결과"
   },
   "labels": {
     "set_status_to": "상태 변경:",

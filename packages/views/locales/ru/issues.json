@@ -2022,5 +2022,27 @@
   },
   "unread_filter_error": {
     "title": "Не удалось загрузить непрочитанные задачи"
+  },
+  "app_calls": {
+    "section_title": "Приложения",
+    "chips_label": "Приложения в этом выполнении",
+    "calls_count_one": "{{count}} вызов",
+    "calls_count_few": "{{count}} вызова",
+    "calls_count_many": "{{count}} вызовов",
+    "calls_count_other": "{{count}} вызова",
+    "more": "Ещё {{count}}",
+    "scope": {
+      "team": "Аккаунт команды",
+      "personal": "Личный аккаунт"
+    },
+    "outcome": {
+      "ok": "Выполнено",
+      "error": "Ошибка",
+      "blocked": "Заблокировано",
+      "pending": "Ожидание",
+      "approved": "Одобрено",
+      "rejected": "Отклонено",
+      "rate_limited": "Лимит вызовов достигнут"
+    }
   }
 }

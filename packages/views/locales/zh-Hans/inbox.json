@@ -93,7 +93,11 @@
     "quick_create_unconfirmed": "通过智能体创建结果未确认",
     "autopilot_paused": "自动化已暂停",
     "children_done": "子任务已全部结束",
-    "autopilot_quota_exceeded": "自动化执行次数已用完"
+    "autopilot_quota_exceeded": "自动化执行次数已用完",
+    "app_action_requested": "等待你确认",
+    "app_action_reminder": "确认即将过期",
+    "app_connect_requested": "请连接应用",
+    "app_action_result": "应用操作结果"
   },
   "labels": {
     "set_status_to": "状态设为",

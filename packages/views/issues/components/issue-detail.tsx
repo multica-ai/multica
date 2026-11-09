@@ -7,6 +7,7 @@ import {
   issueStatusCategory,
 } from "@multica/core/issues";
 import { IssueFlowCard } from "../../workflows/issue-flow-card";
+import { IssueAppRequests } from "../../common/app-requests";
 import { useStatusLabel } from "../utils/status-label";
 import { priorityLabel } from "../utils/priority-label";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
@@ -123,6 +124,7 @@ import { PluginPanelSection } from "../../plugins";
 import { PullRequestsSection } from "./pull-requests-section";
 import { useGitHubSettings } from "@multica/core/github";
 import { DeliverablesSection } from "./deliverables/deliverables-section";
+import { IssueAppsSection } from "./issue-apps-section";
 import { DeliverablesOverview } from "./deliverables/deliverables-overview";
 import {
   DESCRIPTION_BLOCK_ID,
@@ -1178,6 +1180,9 @@ interface IssueDetailProps {
    * guard and forces the render that re-reads the cleared memento entry.
    */
   highlightRequestToken?: number;
+  /** The app confirmation an Inbox notification points at; its card scrolls
+   * into view and flashes, replayed by `highlightRequestToken`. */
+  highlightAppRequestId?: string;
   /**
    * Far-left header slot, replacing the mobile sidebar trigger. A host that
    * embeds this detail one level deep (the inbox, on a phone) passes its own
@@ -1395,7 +1400,7 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, highlightAppRequestId, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -3163,6 +3168,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           while there are none. */}
       <DeliverablesSection files={deliverableFiles} onOpenOverview={openOverview} />
 
+      {/* Apps the issue's runs used. Hidden until one makes a call. */}
+      <IssueAppsSection issueId={id} />
+
       {/* Execution summary owns its query, realtime updates and disclosure. */}
       <ExecutionLogSection key={id} issueId={id} identifier={issue.identifier} issueTitle={issue.title} hasChildren={childIssues.length > 0} />
 
@@ -4063,6 +4071,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <JumpToLatestButton onClick={jumpToLatest.jump} label={t(($) => $.timeline.jump_to_latest)} />
             </div>
           )}
+          <IssueAppRequests issueId={id} highlightId={highlightAppRequestId} highlightToken={highlightRequestToken} />
           <div
             ref={composerRef}
             className={cn(
