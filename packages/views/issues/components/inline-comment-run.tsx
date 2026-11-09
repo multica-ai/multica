@@ -202,7 +202,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
               <span>{statusText}</span>
               <span className="break-all font-mono text-muted-foreground">{rawError}</span>
             </TooltipContent>
-          </Tooltip> : <TruncatedTooltip content={statusText} focusable>
+          </Tooltip> : <TruncatedTooltip content={statusText} focusable={!showProgress}>
             <span className="truncate">{statusText}</span>
           </TruncatedTooltip>}
         </span>

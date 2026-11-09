@@ -215,6 +215,25 @@ describe("TruncatedTooltip focusable", () => {
     await waitFor(() => expect(tooltipPopup()).toBeNull());
   });
 
+  it("still opens for Tab and Shift+Tab while the pointer rests on the text", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    const text = screen.getByText("feature/very-long-branch-name");
+    fireEvent.pointerEnter(text, { pointerType: "mouse" });
+    screen.getByRole("button", { name: "Before" }).focus();
+
+    await user.tab();
+    expect(text).toHaveFocus();
+    expect(tooltipPopup()).toHaveTextContent("feature/very-long-branch-name");
+
+    await user.tab();
+    await waitFor(() => expect(tooltipPopup()).toBeNull());
+
+    await user.tab({ shift: true });
+    expect(text).toHaveFocus();
+    expect(tooltipPopup()).toHaveTextContent("feature/very-long-branch-name");
+  });
+
   it("keeps text that fits out of the tab order", async () => {
     const user = userEvent.setup();
     renderPanel();

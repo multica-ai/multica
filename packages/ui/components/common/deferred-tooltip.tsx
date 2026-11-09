@@ -16,6 +16,21 @@ import {
   isTooltipInstantPhase,
 } from "@multica/ui/components/ui/tooltip";
 
+// Counts key presses page-wide, so a focus can tell whether a key moved it.
+let keyPresses = 0;
+let keyListenerInstalled = false;
+function watchKeyPresses() {
+  if (keyListenerInstalled) return;
+  keyListenerInstalled = true;
+  document.addEventListener(
+    "keydown",
+    () => {
+      keyPresses += 1;
+    },
+    true,
+  );
+}
+
 /**
  * Tooltip whose machinery mounts only on first hover.
  *
@@ -60,8 +75,11 @@ export function DeferredTooltip({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Set by a pointer press so the focus it causes is not treated as keyboard focus.
   const pointerFocusRef = useRef(false);
-  // Menus move focus to the item under the pointer; that focus waits for the hover delay.
+  // Menus move focus to the item under the pointer. Focus that arrives while
+  // hovering with no key pressed since the pointer entered waits for the
+  // hover delay; a Tab under a resting pointer still opens at once.
   const hoveringRef = useRef(false);
+  const keyPressesAtHoverRef = useRef(0);
 
   const clearTimer = () => {
     if (timerRef.current !== null) {
@@ -93,7 +111,9 @@ export function DeferredTooltip({
     },
     onPointerEnter: (e: React.PointerEvent) => {
       (trigger.props.onPointerEnter as ((e: React.PointerEvent) => void) | undefined)?.(e);
+      if (openOnFocus) watchKeyPresses();
       hoveringRef.current = true;
+      keyPressesAtHoverRef.current = keyPresses;
       setWarm(true);
       clearTimer();
       // Same delay as every other tooltip, and the same instant hand-off: when
@@ -128,7 +148,9 @@ export function DeferredTooltip({
             (trigger.props.onFocus as ((e: React.FocusEvent) => void) | undefined)?.(e);
             const fromPointer = pointerFocusRef.current;
             pointerFocusRef.current = false;
-            if (fromPointer || hoveringRef.current) return;
+            const fromHover =
+              hoveringRef.current && keyPresses === keyPressesAtHoverRef.current;
+            if (fromPointer || fromHover) return;
             setWarm(true);
             clearTimer();
             if (canOpen()) setOpen(true);
