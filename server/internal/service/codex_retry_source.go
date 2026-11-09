@@ -10,22 +10,25 @@ import (
 )
 
 type codexRetrySource struct {
-	Route          string `json:"route"`
-	CommentID      string `json:"comment_id"`
-	Revision       int64  `json:"revision"`
-	ParentID       string `json:"parent_id"`
-	ParentRevision int64  `json:"parent_revision"`
-	RootID         string `json:"root_id"`
-	RootRevision   int64  `json:"root_revision"`
+	Route           string `json:"route"`
+	CommentID       string `json:"comment_id"`
+	Revision        int64  `json:"revision"`
+	ParentID        string `json:"parent_id"`
+	ParentRevision  int64  `json:"parent_revision"`
+	RootID          string `json:"root_id"`
+	RootRevision    int64  `json:"root_revision"`
+	HandoffRevision int64  `json:"-"`
 }
 
 func retrySourceSnapshot(task db.AgentTaskQueue) (codexRetrySource, bool) {
 	var value struct {
-		Source codexRetrySource `json:"codex_retry_source"`
+		Source          codexRetrySource `json:"codex_retry_source"`
+		HandoffRevision int64            `json:"workflow_handoff_revision"`
 	}
 	if json.Unmarshal(task.Context, &value) != nil || value.Source.Route == "" {
 		return codexRetrySource{}, false
 	}
+	value.Source.HandoffRevision = value.HandoffRevision
 	return value.Source, true
 }
 
@@ -46,12 +49,36 @@ func (s *TaskService) codexRetrySourceProblem(ctx context.Context, task db.Agent
 		return ""
 	}
 	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
-	if err != nil || (issue.Status != "todo" && issue.Status != "in_progress") || issue.WorkspaceID != agent.WorkspaceID {
+	if err != nil || issue.WorkspaceID != agent.WorkspaceID || issue.Status == "cancelled" {
 		return "Codex retry stopped because the issue is no longer runnable."
 	}
 	source, ok := retrySourceSnapshot(task)
 	if !ok {
 		return "Codex retry stopped because its original trigger route cannot be verified."
+	}
+	if source.Route == "workflow_squad_handoff" {
+		if !task.IsLeaderTask || !task.SquadID.Valid || task.TriggerCommentID.Valid ||
+			!task.WorkflowStep.Valid || issue.Status != task.WorkflowStep.String ||
+			source.HandoffRevision < 1 || issue.Revision != source.HandoffRevision ||
+			issue.AssigneeType.String != "squad" || issue.AssigneeID != task.SquadID {
+			return "Codex retry stopped because the workflow handoff changed."
+		}
+		squad, err := s.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{ID: task.SquadID, WorkspaceID: issue.WorkspaceID})
+		if err != nil || squad.ArchivedAt.Valid || squad.LeaderID != task.AgentID {
+			return "Codex retry stopped because the workflow squad leader changed."
+		}
+		if task.OriginatorUserID.Valid {
+			if _, err := s.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: task.OriginatorUserID, WorkspaceID: issue.WorkspaceID}); err != nil ||
+				!CanMemberInvokeAgent(ctx, s.Queries, agent, task.OriginatorUserID, issue.WorkspaceID) {
+				return "Codex retry stopped because the workflow handoff originator lost access."
+			}
+		} else if !s.canDelegationInvokeAgent(ctx, agent, pgtype.UUID{}, issue.WorkspaceID) {
+			return "Codex retry stopped because workflow handoff invocation is no longer allowed."
+		}
+		return ""
+	}
+	if issue.Status != "todo" && issue.Status != "in_progress" {
+		return "Codex retry stopped because the issue is no longer runnable."
 	}
 	if source.Route == "issue_assignee" {
 		assigned := issue.AssigneeType.String == "agent" && issue.AssigneeID == task.AgentID

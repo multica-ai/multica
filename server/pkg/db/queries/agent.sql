@@ -576,7 +576,11 @@ WHERE p.id = $1
     AND (p.context->>'codex_retry_deadline')::timestamptz > COALESCE(sqlc.narg(fire_at)::timestamptz, now())
     AND EXISTS (SELECT 1 FROM agent a WHERE a.id = p.agent_id AND a.archived_at IS NULL AND a.runtime_id = p.runtime_id AND a.model = p.context->>'codex_retry_model')
     AND (p.issue_id IS NULL OR (
-        EXISTS (SELECT 1 FROM issue i WHERE i.id = p.issue_id AND i.status IN ('todo', 'in_progress'))
+        EXISTS (SELECT 1 FROM issue i WHERE i.id = p.issue_id AND i.status <> 'cancelled' AND (
+            i.status IN ('todo', 'in_progress')
+            OR (p.context #>> '{codex_retry_source,route}' = 'workflow_squad_handoff'
+                AND p.workflow_step IS NOT NULL AND i.status = p.workflow_step
+                AND i.revision::text = p.context->>'workflow_handoff_revision')))
         AND (p.trigger_comment_id IS NULL OR EXISTS (SELECT 1 FROM comment c
             WHERE c.id = p.trigger_comment_id AND c.issue_id = p.issue_id AND c.deleted_at IS NULL
               AND c.id::text = p.context #>> '{codex_retry_source,comment_id}'
@@ -590,6 +594,23 @@ WHERE p.id = $1
                          WHERE s.id = i.assignee_id AND s.leader_id = p.agent_id AND s.archived_at IS NULL)))))
             OR (p.context #>> '{codex_retry_source,route}' IN ('mention_agent', 'mention_squad_leader', 'thread_parent', 'conversation', 'conversation_continuation')
                 AND p.trigger_comment_id IS NOT NULL)
+            OR (p.context #>> '{codex_retry_source,route}' = 'workflow_squad_handoff'
+                AND p.trigger_comment_id IS NULL AND p.is_leader_task AND p.squad_id IS NOT NULL
+                AND EXISTS (SELECT 1 FROM issue i JOIN squad s ON s.id = p.squad_id JOIN agent a ON a.id = p.agent_id
+                    WHERE i.id = p.issue_id AND i.assignee_type = 'squad' AND i.assignee_id = p.squad_id
+                      AND i.workspace_id = s.workspace_id AND a.workspace_id = i.workspace_id
+                      AND s.archived_at IS NULL AND s.leader_id = p.agent_id
+                      AND p.workflow_step IS NOT NULL AND i.status = p.workflow_step
+                      AND i.revision::text = p.context->>'workflow_handoff_revision'
+                      AND ((p.originator_user_id IS NOT NULL
+                          AND EXISTS (SELECT 1 FROM member m WHERE m.workspace_id = i.workspace_id AND m.user_id = p.originator_user_id)
+                          AND (a.owner_id = p.originator_user_id OR (a.permission_mode = 'public_to'
+                              AND EXISTS (SELECT 1 FROM agent_invocation_target t WHERE t.agent_id = a.id
+                                  AND ((t.target_type = 'member' AND t.target_id = p.originator_user_id)
+                                      OR (t.target_type = 'workspace' AND t.target_id = i.workspace_id))))))
+                        OR (p.originator_user_id IS NULL AND a.permission_mode = 'public_to'
+                            AND EXISTS (SELECT 1 FROM agent_invocation_target t WHERE t.agent_id = a.id
+                                AND t.target_type = 'workspace' AND t.target_id = i.workspace_id)))))
         )
     ))
   ))

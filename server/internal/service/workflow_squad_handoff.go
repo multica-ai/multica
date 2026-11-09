@@ -13,7 +13,7 @@ import (
 // EnqueueTaskForWorkflowSquadLeader preserves each stage handoff even when an
 // older stage or another squad already holds the leader's pending-task slot.
 func (s *TaskService) EnqueueTaskForWorkflowSquadLeader(ctx context.Context, issue db.Issue, leaderID, squadID pgtype.UUID, handoffNote string, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, leaderID, pgtype.UUID{}, nil, true, squadID, false, handoffNote, actorUserID, pgtype.UUID{}, OriginDerived, false, "", true)
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, leaderID, pgtype.UUID{}, nil, true, squadID, false, handoffNote, actorUserID, pgtype.UUID{}, OriginDerived, false, "workflow_squad_handoff", true)
 }
 
 func (s *TaskService) createWorkflowSquadHandoffTask(ctx context.Context, issue db.Issue, params db.CreateAgentTaskParams) (db.AgentTaskQueue, error) {
