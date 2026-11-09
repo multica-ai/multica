@@ -276,7 +276,21 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !contains(h.cfg.WorkspaceCreationAllowedEmails, strings.TrimSpace(user.Email)) {
-			writeError(w, http.StatusForbidden, "workspace creation is restricted to selected users on this instance")
+			// The refusal has to name who can act in the caller's place: the
+			// allowlist is the only contact list the deployment has, and the UI
+			// keeps the create entry point visible for everyone, so this 403 is
+			// where the user first learns they need help. `allowed_emails` lets
+			// the web client localize the sentence; `error` stays self-contained
+			// for the CLI and already-shipped clients.
+			allowed := h.cfg.WorkspaceCreationAllowedEmails
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error": fmt.Sprintf(
+					"workspace creation is restricted to selected users on this instance. Ask one of these people to create it for you: %s",
+					strings.Join(allowed, ", "),
+				),
+				"code":           "workspace_creation_restricted",
+				"allowed_emails": allowed,
+			})
 			return
 		}
 	}

@@ -123,14 +123,18 @@ func TestCreateWorkspace_AllowedEmails(t *testing.T) {
 	}
 
 	cases := []struct {
-		name     string
-		cfg      Config
-		wantCode int
+		name              string
+		cfg               Config
+		wantCode          int
+		wantErrorCode     string
+		wantAllowedEmails []string
 	}{
 		{
-			name:     "caller not in allowlist",
-			cfg:      Config{WorkspaceCreationAllowedEmails: []string{"someone-else@example.com"}},
-			wantCode: http.StatusForbidden,
+			name:              "caller not in allowlist",
+			cfg:               Config{WorkspaceCreationAllowedEmails: []string{"someone-else@example.com"}},
+			wantCode:          http.StatusForbidden,
+			wantErrorCode:     "workspace_creation_restricted",
+			wantAllowedEmails: []string{"someone-else@example.com"},
 		},
 		{
 			name:     "caller in allowlist (case-insensitive)",
@@ -163,7 +167,27 @@ func TestCreateWorkspace_AllowedEmails(t *testing.T) {
 				"name": "Allowlist Create",
 				"slug": slug,
 			})
-			testutil.Call(t, testHandler.CreateWorkspace, req).Want(tc.wantCode)
+			var body struct {
+				Error         string   `json:"error"`
+				Code          string   `json:"code"`
+				AllowedEmails []string `json:"allowed_emails"`
+			}
+			testutil.Call(t, testHandler.CreateWorkspace, req).Want(tc.wantCode).JSON(&body)
+
+			if body.Code != tc.wantErrorCode {
+				t.Fatalf("error code = %q, want %q", body.Code, tc.wantErrorCode)
+			}
+			// The refusal must name who can act in the caller's place, both for
+			// the localized UI (allowed_emails) and for clients that only read
+			// the sentence (CLI, already-shipped desktop builds).
+			if got, want := strings.Join(body.AllowedEmails, ","), strings.Join(tc.wantAllowedEmails, ","); got != want {
+				t.Fatalf("allowed_emails = %q, want %q", got, want)
+			}
+			for _, email := range tc.wantAllowedEmails {
+				if !strings.Contains(body.Error, email) {
+					t.Fatalf("error message %q does not mention %q", body.Error, email)
+				}
+			}
 
 			var count int
 			dbfx.QueryRow(t, `SELECT count(*) FROM workspace WHERE slug = $1`, slug).Scan(&count)

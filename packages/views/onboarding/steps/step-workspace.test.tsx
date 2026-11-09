@@ -37,15 +37,22 @@ vi.mock("@multica/core/config", () => ({
 }));
 
 const mockCreateMutate = vi.hoisted(() => vi.fn());
+const mockToastError = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/workspace/mutations", () => ({
   useCreateWorkspace: () => ({ mutate: mockCreateMutate, isPending: false }),
 }));
 
-vi.mock("@multica/core/api", () => ({
+vi.mock("sonner", () => ({
+  toast: { error: mockToastError, success: vi.fn() },
+}));
+
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/api")>()),
   api: { getBaseUrl: () => "http://127.0.0.1:8080" },
 }));
 
+import { ApiError } from "@multica/core/api";
 import { StepWorkspace } from "./step-workspace";
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -326,5 +333,43 @@ describe("StepWorkspace — issue prefix", () => {
     expect(mockCreateMutate.mock.calls[0]![0]).toMatchObject({
       issue_prefix: "ACME",
     });
+  });
+});
+
+// Self-host WORKSPACE_CREATION_ALLOWED_EMAILS: the server refuses callers who
+// are not on the allowlist. That list is the deployment's only contact route,
+// so the toast has to name its people — "failed to create workspace" leaves the
+// user with no idea who to ask.
+describe("StepWorkspace — creation allowlist", () => {
+  it("names the people who can create a workspace", () => {
+    mockCreateMutate.mockClear();
+    mockToastError.mockClear();
+    renderStep({ existing: null, disabled: false });
+
+    fireEvent.change(screen.getByLabelText("Workspace name"), {
+      target: { value: "Acme Inc" },
+    });
+
+    mockCreateMutate.mockImplementation(
+      (_data: unknown, options?: { onError?: (error: unknown) => void }) => {
+        options?.onError?.(
+          new ApiError(
+            "workspace creation is restricted to selected users on this instance",
+            403,
+            "Forbidden",
+            {
+              code: "workspace_creation_restricted",
+              allowed_emails: ["alice@example.com", "bob@example.com"],
+            },
+          ),
+        );
+      },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Create Acme Inc$/ }));
+
+    expect(mockToastError).toHaveBeenCalledWith(
+      "Only selected people can create workspaces on this instance. Ask alice@example.com, bob@example.com to create one for you.",
+    );
   });
 });

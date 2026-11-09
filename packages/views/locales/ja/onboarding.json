@@ -161,6 +161,7 @@
     "slug_reserved_error": "そのワークスペース URL は予約済みのため使用できません。",
     "slug_conflict_toast": "別のワークスペース URL を選んでください",
     "create_failed_toast": "ワークスペースを作成できませんでした",
+    "creation_restricted_toast": "このインスタンスでは指定されたユーザーだけがワークスペースを作成できます。{{emails}} に作成を依頼してください。",
     "creation_disabled_headline": "管理者に招待を依頼してください。",
     "creation_disabled_lede": "この Multica インスタンスでは新しいワークスペースを作成できません。管理者からワークスペースに招待されたら、招待を承諾して更新し、続けてください。",
     "creation_disabled_logout": "ログアウト",

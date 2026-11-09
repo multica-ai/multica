@@ -14,6 +14,7 @@ import {
 } from "@multica/ui/components/ui/field";
 import { cn } from "@multica/ui/lib/utils";
 import { useCreateWorkspace } from "@multica/core/workspace/mutations";
+import { errorAllowedEmails, errorCode } from "@multica/core/api";
 import type { Workspace } from "@multica/core/types";
 import { isImeComposing } from "@multica/core/utils";
 import { matchLocale } from "@multica/core/i18n";
@@ -216,6 +217,20 @@ export function StepWorkspace({
             setSlugServerError(t(($) => $.step_workspace.slug_taken_error));
             toast.error(t(($) => $.step_workspace.slug_conflict_toast));
             return;
+          }
+          // The allowlist is the deployment's only contact list, so name its
+          // people instead of leaving the user to guess who can help. Older
+          // servers send no code and fall through to their own sentence.
+          if (errorCode(error) === "workspace_creation_restricted") {
+            const emails = errorAllowedEmails(error);
+            if (emails.length > 0) {
+              toast.error(
+                t(($) => $.step_workspace.creation_restricted_toast, {
+                  emails: emails.join(", "),
+                }),
+              );
+              return;
+            }
           }
           toast.error(
             error instanceof Error && error.message

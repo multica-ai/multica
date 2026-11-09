@@ -161,6 +161,7 @@
     "slug_reserved_error": "Cette URL d'espace de travail est réservée et ne peut pas être utilisée.",
     "slug_conflict_toast": "Choisissez une autre URL d'espace de travail",
     "create_failed_toast": "Échec de la création de l'espace de travail",
+    "creation_restricted_toast": "Seules certaines personnes peuvent créer des espaces de travail sur cette instance. Demandez à {{emails}} d'en créer un pour vous.",
     "creation_disabled_headline": "Demandez une invitation à votre administrateur.",
     "creation_disabled_lede": "Cette instance Multica n'autorise pas la création de nouveaux espaces de travail. Dès qu'un administrateur vous invite, acceptez l'invitation et actualisez pour continuer.",
     "creation_disabled_logout": "Se déconnecter",
