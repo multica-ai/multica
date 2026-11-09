@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { HomePage } from "@/features/landing/site/home-page";
+import { getHomeDownload } from "@/features/landing/utils/home-download";
 import { SHARE_IMAGE } from "@/features/landing/share-image";
 
 export const metadata: Metadata = {
@@ -18,6 +19,6 @@ export const metadata: Metadata = {
   },
 };
 
-export default function HomepagePage() {
-  return <HomePage />;
+export default async function HomepagePage() {
+  return <HomePage download={await getHomeDownload()} />;
 }

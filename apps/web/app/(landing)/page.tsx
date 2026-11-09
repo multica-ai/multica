@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { HomePage } from "@/features/landing/site/home-page";
+import { getHomeDownload } from "@/features/landing/utils/home-download";
 import { RedirectIfAuthenticated } from "@/features/landing/components/redirect-if-authenticated";
 import { SHARE_IMAGE } from "@/features/landing/share-image";
 
@@ -21,11 +22,11 @@ export const metadata: Metadata = {
   },
 };
 
-export default function LandingPage() {
+export default async function LandingPage() {
   return (
     <>
       <RedirectIfAuthenticated />
-      <HomePage />
+      <HomePage download={await getHomeDownload()} />
     </>
   );
 }

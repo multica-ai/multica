@@ -10,6 +10,7 @@ import { anchorId } from "../components/changelog-page-client";
 import {
   ActionLink,
   Container,
+  actionClassName,
   Eyebrow,
   Section,
   SectionHeader,
@@ -18,6 +19,11 @@ import {
 import { HERO_PROVIDERS } from "../components/provider-marks";
 import { docsHrefForLocale, useLocale } from "../i18n";
 import type { HomeDict } from "../i18n/types";
+import { DownloadLink } from "../components/download/download-link";
+import { OSIcon, OS_NAMES } from "../components/download/os-icons";
+import { useDetectedPlatform } from "../components/download/use-detected-platform";
+import { osOf, platformOf, resolvePrimary } from "../utils/download-target";
+import type { HomeDownload } from "../utils/home-download";
 import { CUSTOMER_LOGOS, type CustomerLogo } from "./customer-logos";
 import { AutopilotsVisual, ChatVisual, RuntimesVisual, SkillsVisual, WorkflowVisual } from "./demo/feature-visuals";
 import { HeroDemo } from "./demo/hero-demo";
@@ -25,10 +31,10 @@ import { PROVIDER_MARKS, useStoryLoop } from "./demo/mock-kit";
 import { CtaBand, SitePage } from "./site-page";
 import { SITE_PREVIEW } from "./sitemap";
 
-export function HomePage() {
+export function HomePage({ download }: { download: HomeDownload }) {
   return (
     <SitePage>
-      <Hero />
+      <Hero download={download} />
       <LogoWall />
       <div className="site-rails">
         <Features />
@@ -46,8 +52,11 @@ const ANNOUNCEMENT: { label: string; href: string } | null = SITE_PREVIEW
   ? { label: "Announcement placeholder", href: "/blog" }
   : null;
 
-function Hero() {
-  const copy = useLocale().t.home.hero;
+function Hero({ download }: { download: HomeDownload }) {
+  const { t } = useLocale();
+  const copy = t.home.hero;
+  const primary = resolvePrimary(useDetectedPlatform(download.platform), download.assets);
+  const os = primary ? osOf(primary.key) : null;
 
   return (
     <section className="pt-site-hero pb-site-section">
@@ -68,13 +77,31 @@ function Hero() {
         <HeroHeadline />
         <p className="mt-3 max-w-[38rem] text-site-body text-site-muted text-pretty">{copy.lead}</p>
         <div className="mt-6 flex flex-wrap gap-2.5">
-          <ActionLink href="/download" size="lg">
-            {copy.download}
-          </ActionLink>
+          {primary && os ? (
+            <DownloadLink downloadKey={primary.key} href={primary.href} handoff className={actionClassName("primary", "lg")}>
+              <OSIcon os={os} size={16} aria-hidden />
+              {copy.downloadFor.replace("{os}", OS_NAMES[os])}
+            </DownloadLink>
+          ) : (
+            <ActionLink href="/download" size="lg">
+              {copy.download}
+            </ActionLink>
+          )}
           <ActionLink href="/contact-sales" size="lg" tone="secondary">
             {copy.bookDemo}
           </ActionLink>
         </div>
+        {primary ? (
+          <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-site-small text-site-muted">
+            <span>{[download.version, t.download.platforms[platformOf(primary.key)]].filter(Boolean).join(" · ")}</span>
+            <Link
+              href="/download"
+              className={cn("rounded-sm text-site-ink-secondary underline decoration-site-line-strong underline-offset-4 hover:text-site-ink", focusRing)}
+            >
+              {copy.otherPlatforms}
+            </Link>
+          </p>
+        ) : null}
       </Container>
       <Container className="mt-10 max-w-site-wide lg:mt-12">
         <HeroDemo />

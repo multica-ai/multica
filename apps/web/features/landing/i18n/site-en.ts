@@ -49,6 +49,8 @@ export const enSiteCopy: Pick<LandingDict, "site" | "home"> = {
       headlineSuffix: " into a teammate.",
       lead: "One workspace for your team and its agents: assign the work, track it, and review it. You stay in control.",
       download: "Download",
+      downloadFor: "Download for {os}",
+      otherPlatforms: "Other platforms",
       bookDemo: "Book a demo",
       workflowGroup: "Workflow",
       workflows: {

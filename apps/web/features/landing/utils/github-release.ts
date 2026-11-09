@@ -1,7 +1,10 @@
 import {
   hasCompleteAssetSet,
   parseReleaseAssets,
+  parseReleaseAssetSizes,
   type DownloadAssets,
+  type DownloadSizes,
+  type GitHubAsset,
 } from "./parse-release-assets";
 
 /**
@@ -30,6 +33,7 @@ export interface LatestRelease {
   publishedAt: string | null;
   htmlUrl: string | null;
   assets: DownloadAssets;
+  sizes: DownloadSizes;
 }
 
 // Five candidates tolerates four consecutive incomplete releases before
@@ -47,7 +51,7 @@ interface GitHubReleasePayload {
   html_url?: string;
   prerelease?: boolean;
   draft?: boolean;
-  assets?: Array<{ name: string; browser_download_url: string }>;
+  assets?: GitHubAsset[];
 }
 
 export async function fetchLatestRelease(): Promise<LatestRelease> {
@@ -91,6 +95,7 @@ export async function fetchLatestRelease(): Promise<LatestRelease> {
       publishedAt: chosen.release.published_at ?? null,
       htmlUrl: chosen.release.html_url ?? null,
       assets: chosen.assets,
+      sizes: parseReleaseAssetSizes(chosen.release.assets ?? []),
     };
   } catch (err) {
     console.warn("[download] fetchLatestRelease failed:", err);
@@ -138,5 +143,6 @@ function emptyRelease(): LatestRelease {
     publishedAt: null,
     htmlUrl: null,
     assets: {},
+    sizes: {},
   };
 }

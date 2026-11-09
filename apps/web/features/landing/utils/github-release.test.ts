@@ -158,6 +158,7 @@ describe("fetchLatestRelease", () => {
       publishedAt: null,
       htmlUrl: null,
       assets: {},
+      sizes: {},
     });
     expect(warnSpy).toHaveBeenCalled();
   });

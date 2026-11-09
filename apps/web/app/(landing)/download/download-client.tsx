@@ -1,114 +1,57 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { SiteHeader } from "@/features/landing/site/site-header";
-import { SiteFooter } from "@/features/landing/site/site-footer";
+import { useRouter } from "next/navigation";
+import { SitePage } from "@/features/landing/site/site-page";
 import { DownloadHero } from "@/features/landing/components/download/hero";
-import { AllPlatforms } from "@/features/landing/components/download/all-platforms";
 import { CliSection } from "@/features/landing/components/download/cli-section";
-import { CloudSection } from "@/features/landing/components/download/cloud-section";
-import { useLocale } from "@/features/landing/i18n";
-import {
-  detectOS,
-  type DetectResult,
-} from "@/features/landing/utils/os-detect";
+import { DownloadStarted } from "@/features/landing/components/download/started";
+import { useDetectedPlatform } from "@/features/landing/components/download/use-detected-platform";
+import { takePendingDownload } from "@/features/landing/utils/download-target";
 import type { LatestRelease } from "@/features/landing/utils/github-release";
+import type { DetectResult } from "@/features/landing/utils/os-detect";
+import type { DownloadKey } from "@/features/landing/utils/parse-release-assets";
 
-const ALL_RELEASES_URL =
-  "https://github.com/multica-ai/multica/releases";
-
-export function DownloadClient({ release }: { release: LatestRelease }) {
-  const [detected, setDetected] = useState<DetectResult | null>(null);
-  const versionUnavailable = release.version === null;
-
-  useEffect(() => {
-    let cancelled = false;
-    detectOS().then((result) => {
-      if (cancelled) return;
-      setDetected(result);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const releaseHtmlUrl = release.htmlUrl ?? ALL_RELEASES_URL;
-
-  return (
-    <>
-      <SiteHeader />
-      <DownloadHero
-        detected={detected}
-        assets={release.assets}
-        versionUnavailable={versionUnavailable}
-      />
-
-      <AllPlatforms
-        assets={release.assets}
-        fallbackHref={ALL_RELEASES_URL}
-      />
-      <CliSection />
-      <CloudSection />
-      <VersionInfoFooter
-        version={release.version}
-        releaseHtmlUrl={releaseHtmlUrl}
-      />
-      <SiteFooter />
-    </>
-  );
-}
-
-function VersionInfoFooter({
-  version,
-  releaseHtmlUrl,
+export function DownloadClient({
+  release,
+  platform,
+  started: startedFromUrl,
 }: {
-  version: string | null;
-  releaseHtmlUrl: string;
+  release: LatestRelease;
+  platform: DetectResult;
+  /** Set when a homepage download button sent the visitor here. */
+  started: DownloadKey | null;
 }) {
-  const { t } = useLocale();
-  const d = t.download.footer;
+  const router = useRouter();
+  const detected = useDetectedPlatform(platform);
+  const [started, setStarted] = useState(startedFromUrl);
+  const startedHref = started ? release.assets[started] : undefined;
+
+  // The homepage click left a pending flag; start that file once. A reload
+  // or a shared link shows the same page without downloading again.
+  useEffect(() => {
+    const href = startedFromUrl ? release.assets[startedFromUrl] : undefined;
+    if (startedFromUrl && href && takePendingDownload(startedFromUrl)) window.location.assign(href);
+  }, [startedFromUrl, release.assets]);
 
   return (
-    <section className="bg-white pb-16 text-[#0a0d12] sm:pb-20">
-      <div className="mx-auto flex max-w-[920px] flex-wrap items-center gap-x-6 gap-y-2 border-t border-[#0a0d12]/8 px-4 pt-8 text-label text-[#0a0d12]/60 sm:px-6 lg:px-8">
-        {version ? (
-          <>
-            <span>
-              {d.currentVersion.replace("{version}", version)}
-            </span>
-            <span aria-hidden className="text-[#0a0d12]/25">
-              ·
-            </span>
-            <Link
-              href={releaseHtmlUrl}
-              className="underline decoration-[#0a0d12]/30 underline-offset-4 hover:text-[#0a0d12] hover:decoration-[#0a0d12]/70"
-              target="_blank"
-              rel="noreferrer"
-            >
-              {d.releaseNotes.replace("{version}", version)}
-            </Link>
-            <span aria-hidden className="text-[#0a0d12]/25">
-              ·
-            </span>
-          </>
-        ) : (
-          <>
-            <span>{d.versionUnavailable}</span>
-            <span aria-hidden className="text-[#0a0d12]/25">
-              ·
-            </span>
-          </>
-        )}
-        <Link
-          href={ALL_RELEASES_URL}
-          className="underline decoration-[#0a0d12]/30 underline-offset-4 hover:text-[#0a0d12] hover:decoration-[#0a0d12]/70"
-          target="_blank"
-          rel="noreferrer"
-        >
-          {d.allReleases}
-        </Link>
-      </div>
-    </section>
+    <SitePage>
+      {started && startedHref ? (
+        <DownloadStarted
+          downloadKey={started}
+          href={startedHref}
+          size={release.sizes[started]}
+          onBack={() => {
+            setStarted(null);
+            if (startedFromUrl) router.replace("/download", { scroll: false });
+          }}
+        />
+      ) : (
+        <>
+          <DownloadHero detected={detected} release={release} onStart={setStarted} />
+          <CliSection />
+        </>
+      )}
+    </SitePage>
   );
 }

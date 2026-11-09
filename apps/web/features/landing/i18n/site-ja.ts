@@ -49,6 +49,8 @@ export const jaSiteCopy: Pick<LandingDict, "site" | "home"> = {
       headlineSuffix: " を、チームの一員に。",
       lead: "チームとエージェントがひとつのワークスペースで働きます。仕事を割り当て、進み具合を追い、結果をレビュー。主導権はいつもあなたにあります。",
       download: "ダウンロード",
+      downloadFor: "{os} 版をダウンロード",
+      otherPlatforms: "ほかのプラットフォーム",
       bookDemo: "デモを予約",
       workflowGroup: "ワークフロー",
       workflows: {

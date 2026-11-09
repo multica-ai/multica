@@ -95,6 +95,9 @@ export type HomeDict = {
     headlineSuffix: string;
     lead: string;
     download: string;
+    /** `{os}` is macOS, Windows or Linux. */
+    downloadFor: string;
+    otherPlatforms: string;
     bookDemo: string;
     workflowGroup: string;
     workflows: { ship: HeroWorkflow; launch: HeroWorkflow; triage: HeroWorkflow };
@@ -184,39 +187,31 @@ export type LandingDict = {
     }[];
   };
   download: {
+    platforms: { macArm64: string; macX64: string; winX64: string; winArm64: string; linuxX64: string; linuxArm64: string };
     hero: {
-      macArm64: {
-        title: string;
-        sub: string;
-        primary: string;
-        altZip: string;
+      eyebrow: string;
+      title: { mac: string; windows: string; linux: string; other: string };
+      lead: string;
+      leadOther: string;
+      mobileNote: string;
+      primary: {
+        macArm64Dmg: string;
+        macX64Dmg: string;
+        winX64Exe: string;
+        winArm64Exe: string;
+        linuxAmd64AppImage: string;
+        linuxArm64AppImage: string;
       };
-      macIntel: {
-        title: string;
-        sub: string;
-        primary: string;
-        altZip: string;
-      };
-      winX64: { title: string; sub: string; primary: string };
-      winArm64: { title: string; sub: string; primary: string };
-      linux: {
-        title: string;
-        sub: string;
-        primary: string;
-        altFormats: string;
-      };
-      unknown: { title: string; sub: string };
-      safariMacHint: string;
-      archFallbackHint: string;
+      /** The other Mac architecture, offered beside a guessed one. */
+      alternate: { macArm64Dmg: string; macX64Dmg: string };
+      /** `{date}` is the release date. */
+      released: string;
+      whatsNew: string;
+      versionUnavailable: string;
     };
     allPlatforms: {
       title: string;
-      macArm64Label: string;
-      macX64Label: string;
-      winX64Label: string;
-      winArm64Label: string;
-      linuxX64Label: string;
-      linuxArm64Label: string;
+      thisDevice: string;
       formatDmg: string;
       formatZip: string;
       formatExe: string;
@@ -224,6 +219,7 @@ export type LandingDict = {
       formatDeb: string;
       formatRpm: string;
       unavailable: string;
+      allReleases: string;
     };
     cli: {
       title: string;
@@ -233,16 +229,30 @@ export type LandingDict = {
       platformMacosLinux: string;
       platformWindows: string;
       startLabel: string;
-      sshNote: string;
       copyLabel: string;
       copiedLabel: string;
     };
-    cloud: { title: string; sub: string };
-    footer: {
-      releaseNotes: string;
-      allReleases: string;
-      currentVersion: string;
-      versionUnavailable: string;
+    started: {
+      title: string;
+      retry: string;
+      allDownloads: string;
+      install: { title: string; dmg: string; zip: string; exe: string; appImage: string; deb: string; rpm: string };
+      signIn: { title: string; body: string; installed: string; open: string };
+      agents: { title: string; body: string };
+      community: {
+        label: string;
+        githubTitle: string;
+        githubBody: string;
+        star: string;
+        /** `{count}` is the repo's star count. */
+        stars: string;
+        discordTitle: string;
+        discordBody: string;
+        join: string;
+        xTitle: string;
+        xBody: string;
+        follow: string;
+      };
     };
   };
   contactSales: {
