@@ -39,6 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
+import { Input } from "@multica/ui/components/ui/input";
 import { Slider } from "@multica/ui/components/ui/slider";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
@@ -59,6 +60,8 @@ import {
   cjkFontStack,
   isDefaultAppearance,
   isLocalFont,
+  isSafeFontValue,
+  isSafeThemeValue,
   localFontFamily,
   localizedText,
   readThemePackage,
@@ -75,6 +78,8 @@ import {
   type FontSize,
   type Theme,
   type ThemeOption,
+  type ThemeOptionValue,
+  type ThemedColor,
   type UiFont,
 } from "@multica/core/appearance";
 import { useLocale, useT } from "../../i18n";
@@ -354,6 +359,7 @@ function ImportThemeButton() {
     />
   );
   const assetCount = pending ? Object.keys(pending.assets ?? {}).length : 0;
+  const optionCount = pending?.options?.filter((option) => option.type !== "heading").length ?? 0;
 
   return (
     <>
@@ -404,7 +410,7 @@ function ImportThemeButton() {
                 {[
                   "theme.css",
                   assetCount > 0 ? t(($) => $.appearance.import.has_assets, { count: assetCount }) : null,
-                  pending.options ? t(($) => $.appearance.import.has_options, { count: pending.options.length }) : null,
+                  optionCount > 0 ? t(($) => $.appearance.import.has_options, { count: optionCount }) : null,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
@@ -469,19 +475,50 @@ function ThemeOptionsSection() {
         </Button>
       }
     >
-      <SettingsCard>
-        {options.map((option) => (
-          <ThemeOptionRow
-            key={option.id}
-            option={option}
-            locale={locale}
-            value={themeOptionValue(option, chosen?.[option.id])}
-            onChange={(value) => setThemeOption(theme.id, option.id, value)}
-          />
+      <div className="space-y-5">
+        {optionGroups(options).map((group, index) => (
+          <div key={group.heading?.id ?? index} className="space-y-2">
+            {group.heading ? (
+              <div className="px-1">
+                <h3 className="text-label font-medium">{localizedText(group.heading.label, locale)}</h3>
+                {group.heading.description ? (
+                  <p className="text-caption text-muted-foreground">
+                    {localizedText(group.heading.description, locale)}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+            {group.options.length > 0 ? (
+              <SettingsCard>
+                {group.options.map((option) => (
+                  <ThemeOptionRow
+                    key={option.id}
+                    option={option}
+                    locale={locale}
+                    value={themeOptionValue(option, chosen?.[option.id])}
+                    onChange={(value) => setThemeOption(theme.id, option.id, value)}
+                  />
+                ))}
+              </SettingsCard>
+            ) : null}
+          </div>
         ))}
-      </SettingsCard>
+      </div>
     </SettingsSection>
   );
+}
+
+type HeadingOption = Extract<ThemeOption, { type: "heading" }>;
+
+/** Splits options at each heading. */
+function optionGroups(options: readonly ThemeOption[]) {
+  const groups: { heading?: HeadingOption; options: Exclude<ThemeOption, HeadingOption>[] }[] = [];
+  for (const option of options) {
+    if (option.type === "heading") groups.push({ heading: option, options: [] });
+    else if (groups.length === 0) groups.push({ options: [option] });
+    else groups[groups.length - 1]!.options.push(option);
+  }
+  return groups;
 }
 
 function ThemeOptionRow({
@@ -490,47 +527,168 @@ function ThemeOptionRow({
   value,
   onChange,
 }: {
-  option: ThemeOption;
+  option: Exclude<ThemeOption, HeadingOption>;
   locale: string;
-  value: string | boolean;
-  onChange: (value: string | boolean) => void;
+  value: ThemeOptionValue;
+  onChange: (value: ThemeOptionValue) => void;
 }) {
+  const { t } = useT("settings");
   const label = localizedText(option.label, locale);
   const description = localizedText(option.description, locale) || undefined;
-  if (option.type === "toggle") {
-    return (
-      <SettingsRow label={label} description={description}>
-        <Switch checked={value === true} onCheckedChange={onChange} aria-label={label} />
-      </SettingsRow>
-    );
-  }
-  const swatches = option.choices.every((choice) => choice.swatch);
-  return (
-    <SettingsRow label={label} description={description}>
-      {swatches ? (
-        <div role="radiogroup" aria-label={label} className="flex items-center gap-2.5">
-          {option.choices.map((choice) => (
-            <AccentSwatch
-              key={choice.value}
-              label={localizedText(choice.label, locale)}
-              color={choice.swatch!}
-              selected={value === choice.value}
-              onSelect={() => onChange(choice.value)}
+  switch (option.type) {
+    case "toggle":
+      return (
+        <SettingsRow label={label} description={description}>
+          <Switch checked={value === true} onCheckedChange={onChange} aria-label={label} />
+        </SettingsRow>
+      );
+    case "select": {
+      const swatches = option.choices.every((choice) => choice.swatch);
+      return (
+        <SettingsRow label={label} description={description}>
+          {swatches ? (
+            <div role="radiogroup" aria-label={label} className="flex items-center gap-2.5">
+              {option.choices.map((choice) => (
+                <AccentSwatch
+                  key={choice.value}
+                  label={localizedText(choice.label, locale)}
+                  color={choice.swatch!}
+                  selected={value === choice.value}
+                  onSelect={() => onChange(choice.value)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div role="group" aria-label={label}>
+              <SegmentedToggle
+                value={String(value)}
+                onChange={onChange}
+                buttonClassName="px-3 py-1 text-label"
+                options={option.choices.map((choice) => [choice.value, localizedText(choice.label, locale)] as const)}
+              />
+            </div>
+          )}
+        </SettingsRow>
+      );
+    }
+    case "variable-select": {
+      const items = option.choices.map((choice) => ({ value: choice.value, label: localizedText(choice.label, locale) }));
+      return (
+        <SettingsRow label={label} description={description}>
+          <Select items={items} value={String(value)} onValueChange={(next) => next && onChange(next)}>
+            <SelectTrigger size="sm" className="w-40" aria-label={label}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="end">
+              {items.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+      );
+    }
+    case "color": {
+      const color = value as ThemedColor;
+      return (
+        <SettingsRow label={label} description={description}>
+          <div role="group" aria-label={label} className="flex items-center gap-3">
+            {(["light", "dark"] as const).map((mode) => {
+              const modeLabel = t(($) => $.appearance.mode[mode]);
+              return (
+                <label key={mode} className="flex items-center gap-1.5 text-caption text-muted-foreground">
+                  <input
+                    type="color"
+                    aria-label={`${label} (${modeLabel})`}
+                    value={color[mode].length === 4 ? expandHex(color[mode]) : color[mode].slice(0, 7)}
+                    onChange={(event) => onChange({ ...color, [mode]: event.target.value })}
+                    className="size-6 cursor-pointer rounded-md border border-input bg-transparent p-0.5 [&::-webkit-color-swatch]:rounded-[3px] [&::-webkit-color-swatch]:border-0 [&::-webkit-color-swatch-wrapper]:p-0"
+                  />
+                  {modeLabel}
+                </label>
+              );
+            })}
+          </div>
+        </SettingsRow>
+      );
+    }
+    case "slider":
+      return (
+        <SettingsRow label={label} description={description} size="text">
+          <div className="flex w-full items-center gap-3">
+            <Slider
+              aria-label={label}
+              min={option.min}
+              max={option.max}
+              step={option.step ?? 1}
+              value={value as number}
+              onValueChange={(next) => {
+                const n = Array.isArray(next) ? next[0] : next;
+                if (typeof n === "number") onChange(n);
+              }}
+              className="flex-1"
             />
-          ))}
-        </div>
-      ) : (
-        <div role="group" aria-label={label}>
-          <SegmentedToggle
-            value={String(value)}
-            onChange={onChange}
-            buttonClassName="px-3 py-1 text-label"
-            options={option.choices.map((choice) => [choice.value, localizedText(choice.label, locale)] as const)}
+            <span className="w-14 shrink-0 text-right text-label tabular-nums text-muted-foreground">
+              {String(value)}
+              {option.unit}
+            </span>
+          </div>
+        </SettingsRow>
+      );
+    case "number":
+      return (
+        <SettingsRow label={label} description={description}>
+          <div className="flex items-center gap-1.5">
+            <Input
+              type="number"
+              aria-label={label}
+              className="h-8 w-24 text-right tabular-nums"
+              min={option.min}
+              max={option.max}
+              step={option.step ?? "any"}
+              defaultValue={String(value)}
+              key={String(value)}
+              onBlur={(event) => {
+                const n = event.target.valueAsNumber;
+                if (Number.isFinite(n)) onChange(n);
+                else event.target.value = String(value);
+              }}
+            />
+            {option.unit ? <span className="text-label text-muted-foreground">{option.unit}</span> : null}
+          </div>
+        </SettingsRow>
+      );
+    case "text":
+    case "font": {
+      const valid = option.type === "font" ? isSafeFontValue : isSafeThemeValue;
+      return (
+        <SettingsRow label={label} description={description} size="text">
+          <Input
+            aria-label={label}
+            className="h-8"
+            defaultValue={String(value)}
+            key={String(value)}
+            spellCheck={false}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+            onBlur={(event) => {
+              const next = event.target.value.trim();
+              if (next !== value && valid(next)) onChange(next);
+              else event.target.value = String(value);
+            }}
           />
-        </div>
-      )}
-    </SettingsRow>
-  );
+        </SettingsRow>
+      );
+    }
+  }
+}
+
+/** `#abc` to `#aabbcc`, which is all a colour input accepts. */
+function expandHex(hex: string): string {
+  return `#${[...hex.slice(1)].map((c) => c + c).join("")}`;
 }
 
 function AccentSwatch({
@@ -979,13 +1137,31 @@ const THEME_SWATCH_BASE: Record<PreviewMode, SwatchTokens> = {
 
 const swatchCache = new WeakMap<Theme, ReturnType<typeof themeModeVariables>>();
 
+/**
+ * Resolves `var()` references a swatch can know without the theme applied:
+ * the theme's own variables for the mode and its colour options' defaults.
+ */
+function resolveSwatchValue(value: string, theme: Theme, variables: Record<string, string>, mode: PreviewMode, depth = 0): string {
+  return value.replace(/var\(--([a-z0-9-]+)\)/g, (reference, name: string) => {
+    const option = theme.options?.find((o) => o.id === name);
+    if (option?.type === "color") return option.default[mode];
+    const own = variables[name];
+    return own && depth < 4 ? resolveSwatchValue(own, theme, variables, mode, depth + 1) : reference;
+  });
+}
+
 function swatchTokens(theme: Theme, mode: PreviewMode): SwatchTokens {
   let variables = swatchCache.get(theme);
   if (!variables) {
     variables = themeModeVariables(theme.css);
     swatchCache.set(theme, variables);
   }
-  return { ...THEME_SWATCH_BASE[mode], ...variables[mode] };
+  const tokens = { ...THEME_SWATCH_BASE[mode] };
+  for (const name of Object.keys(tokens) as (keyof SwatchTokens)[]) {
+    const own = variables[mode][name];
+    if (own) tokens[name] = resolveSwatchValue(own, theme, variables[mode], mode);
+  }
+  return tokens;
 }
 
 /** A theme in miniature: its frame, page, ink and brand colour. */

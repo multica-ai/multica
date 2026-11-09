@@ -94,7 +94,7 @@ describe("sanitizeAppearance", () => {
 
   it("drops malformed theme options", () => {
     expect(
-      sanitizeAppearance({ themeOptions: { pop: { signal: "mint", "Bad Key": true, big: "x".repeat(40) }, "!": {} } })
+      sanitizeAppearance({ themeOptions: { pop: { signal: "mint", "Bad Key": true, big: "x".repeat(301) }, "!": {} } })
         .themeOptions,
     ).toEqual({ pop: { signal: "mint" } });
   });
@@ -157,6 +157,42 @@ describe("appearanceStylesheet", () => {
       "data-theme-option-status-blocks": null,
       "data-theme-option-outlined-chips": "on",
     });
+  });
+
+  it("writes option variables per mode, from valid choices or the defaults", () => {
+    const theme: Theme = {
+      apiVersion: 1,
+      id: "paper",
+      name: "Paper",
+      css: "",
+      options: [
+        { id: "paper-color", type: "color", label: "Paper", default: { light: "#f6efdf", dark: "#1d1b16" } },
+        { id: "page-width", type: "slider", label: "Width", default: 46, min: 30, max: 60, unit: "rem" },
+        { id: "h1-style", type: "text", label: "H1", default: "normal" },
+        { id: "hyphens", type: "toggle", label: "Hyphens", default: true },
+      ],
+    };
+    const prefs: AppearancePreferences = {
+      ...DEFAULT_APPEARANCE,
+      themeOptions: { paper: { "paper-color": { dark: "#000000" }, "page-width": 99, "h1-style": "x; }" } },
+    };
+    expect(appearanceStylesheet(theme, prefs)).toBe(
+      [
+        ":root.theme-light { --paper-color: #f6efdf; --page-width: 60rem; --h1-style: normal; }",
+        ":root.theme-dark { --paper-color: #000000; --page-width: 60rem; --h1-style: normal; }",
+      ].join("\n"),
+    );
+    expect(appearanceThemeAttributes(theme, prefs)).toEqual({
+      "data-theme": "paper",
+      "data-theme-option-hyphens": "on",
+    });
+  });
+
+  it("keeps stored option values of every type", () => {
+    const stored = sanitizeAppearance({
+      themeOptions: { paper: { a: true, b: "sky", c: 1.5, d: { light: "#fff", dark: 3 }, e: Number.NaN, f: [] } },
+    });
+    expect(stored.themeOptions).toEqual({ paper: { a: true, b: "sky", c: 1.5, d: { light: "#fff" } } });
   });
 
   it("falls back to the default theme in safe mode or when the theme is missing", () => {

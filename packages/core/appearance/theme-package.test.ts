@@ -65,6 +65,35 @@ describe("parseTheme", () => {
     expect(errors).toMatch(/at least two/);
   });
 
+  it("reads every option type and rejects ones it cannot render", () => {
+    const options = [
+      { id: "look", type: "heading", label: "Look" },
+      { id: "paper-color", type: "color", label: "Paper", default: { light: "#f6efdf", dark: "#1d1b16" } },
+      { id: "ink", type: "color", label: "Ink", default: "#222" },
+      { id: "page-width", type: "slider", label: "Width", default: 46, min: 30, max: 60, step: 2, unit: "rem" },
+      { id: "line-height", type: "number", label: "Leading", default: 1.6, step: 0.05 },
+      { id: "h1-style", type: "text", label: "H1 style", default: "italic" },
+      { id: "h1-font", type: "font", label: "H1 font", default: '"Paper Serif", serif' },
+      { id: "rule", type: "variable-select", label: "Rule", default: "2px", choices: [
+        { value: "1px", label: "Thin" },
+        { value: "2px", label: "Thick" },
+      ] },
+      { id: "bad-color", type: "color", label: "Bad", default: "red" },
+      { id: "bad-slider", type: "slider", label: "Bad", default: 1 },
+      { id: "bad-unit", type: "number", label: "Bad", default: 1, unit: "px;" },
+      { id: "bad-text", type: "text", label: "Bad", default: "x; } body { display: none" },
+    ];
+    const result = parseTheme({ ...paper, manifest: { ...manifest, options } });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.filter((e) => /^Option "bad-/.test(e))).toHaveLength(4);
+    const good = parseTheme({ ...paper, manifest: { ...manifest, options: options.slice(0, 8) } });
+    expect(good.ok && good.theme.options?.map((o) => o.type)).toEqual([
+      "heading", "color", "color", "slider", "number", "text", "font", "variable-select",
+    ]);
+    expect(good.ok && good.theme.options?.[2]).toMatchObject({ default: { light: "#222", dark: "#222" } });
+  });
+
   it("needs a theme.css and refuses to shadow a built-in theme", () => {
     expect(parseTheme({ manifest, css: undefined }).ok).toBe(false);
     expect(parseTheme({ ...paper, manifest: { ...manifest, id: "pop" } }).ok).toBe(false);

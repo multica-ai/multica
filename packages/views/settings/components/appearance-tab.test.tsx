@@ -160,10 +160,14 @@ describe("AppearanceTab", () => {
     await user.click(screen.getByRole("button", { name: "Import theme" }));
     expect(await screen.findByRole("menuitem", { name: "Theme file (.zip)" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
-    await user.upload(folderInput(), themeFolder(PAPER, PAPER_CSS));
+    const options = [
+      { id: "reading", type: "heading", label: "Reading" },
+      { id: "hyphens", type: "toggle", label: "Hyphens", default: false },
+    ];
+    await user.upload(folderInput(), themeFolder({ ...PAPER, options }, PAPER_CSS));
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText("Install “Paper”?")).toBeInTheDocument();
-    expect(within(dialog).getByText("theme.css")).toBeInTheDocument();
+    expect(within(dialog).getByText("theme.css · 1 option")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Install and use" }));
 
     expect(useInstalledThemesStore.getState().themes.map((t) => t.id)).toEqual(["paper"]);
@@ -187,6 +191,54 @@ describe("AppearanceTab", () => {
     expect(within(dialog).getByText("Couldn't install this theme")).toBeInTheDocument();
     expect(within(dialog).getByText(/theme\.css line 1: url\("https:\/\/evil.test\/x"\)/)).toBeInTheDocument();
     expect(useInstalledThemesStore.getState().themes).toEqual([]);
+  });
+
+  it("renders every option type a theme declares, grouped under its headings", async () => {
+    const user = userEvent.setup();
+    useInstalledThemesStore.setState({
+      themes: [
+        {
+          ...PAPER,
+          css: PAPER_CSS,
+          options: [
+            { id: "page", type: "heading", label: "Page", description: "The paper itself." },
+            { id: "paper-color", type: "color", label: "Paper", default: { light: "#f6efdf", dark: "#1d1b16" } },
+            { id: "page-width", type: "slider", label: "Width", default: 46, min: 30, max: 60, unit: "rem" },
+            { id: "type", type: "heading", label: "Type" },
+            { id: "h1-font", type: "font", label: "Heading font", default: "Georgia, serif" },
+            { id: "leading", type: "number", label: "Leading", default: 1.6, step: 0.1 },
+            { id: "rule", type: "variable-select", label: "Rule", default: "1px", choices: [
+              { value: "1px", label: "Thin" },
+              { value: "2px", label: "Thick" },
+            ] },
+          ],
+        },
+      ],
+    });
+    useAppearanceStore.setState({ theme: "paper" });
+    render(<AppearanceTab />, { wrapper: Wrapper });
+
+    expect(screen.getByRole("heading", { name: "Page" })).toBeInTheDocument();
+    expect(screen.getByText("The paper itself.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Type" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Paper (Dark)")).toHaveValue("#1d1b16");
+    expect(screen.getByText("46rem")).toBeInTheDocument();
+
+    const font = () => screen.getByRole("textbox", { name: "Heading font" });
+    await user.clear(font());
+    await user.type(font(), '"Paper Serif", serif{Enter}');
+    expect(state().themeOptions.paper?.["h1-font"]).toBe('"Paper Serif", serif');
+
+    await user.clear(font());
+    await user.type(font(), "x; color: red{Enter}");
+    expect(state().themeOptions.paper?.["h1-font"]).toBe('"Paper Serif", serif');
+    expect(font()).toHaveValue('"Paper Serif", serif');
+
+    const leading = screen.getByRole("spinbutton", { name: "Leading" });
+    await user.clear(leading);
+    await user.type(leading, "1.8");
+    await user.tab();
+    expect(state().themeOptions.paper?.leading).toBe(1.8);
   });
 
   it("resets to the defaults, and only once something changed", async () => {

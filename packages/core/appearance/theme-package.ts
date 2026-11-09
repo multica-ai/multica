@@ -1,8 +1,10 @@
 import { readZip, type ArchiveFile } from "./theme-archive";
 import { isSafeThemeAsset, sanitizeThemeCss, themeAssetPath } from "./theme-css";
 import {
+  HEX_COLOR,
   THEME_API_VERSION,
   findBuiltInTheme,
+  isSafeFontValue,
   isSafeThemeValue,
   type LocalizedText,
   type Theme,
@@ -24,6 +26,7 @@ const MAX_CHOICES = 8;
 export const THEME_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const OPTION_ID = /^[a-z][a-z0-9-]{0,47}$/;
 const CHOICE_VALUE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const UNIT = /^(?:[a-z]{1,4}|%)?$/;
 const LOCALE_KEY = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
 
 export type ThemePackageResult = { ok: true; theme: Theme } | { ok: false; errors: string[] };
@@ -57,6 +60,65 @@ function option(value: unknown, errors: string[]): ThemeOption | null {
     return null;
   }
   const description = localized(value.description, 200);
+  const base = { id, label, description };
+  if (value.type === "heading") return { ...base, type: "heading" };
+  if (value.type === "color") {
+    const def = value.default;
+    const light = typeof def === "string" ? def : isRecord(def) ? def.light : undefined;
+    const dark = typeof def === "string" ? def : isRecord(def) ? def.dark : undefined;
+    if (typeof light !== "string" || typeof dark !== "string" || !HEX_COLOR.test(light) || !HEX_COLOR.test(dark)) {
+      errors.push(`Option "${id}" needs a hex default, or one for light and one for dark`);
+      return null;
+    }
+    return { ...base, type: "color", default: { light, dark } };
+  }
+  if (value.type === "number" || value.type === "slider") {
+    const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+    const min = num(value.min);
+    const max = num(value.max);
+    const step = num(value.step);
+    const def = num(value.default);
+    const unit = typeof value.unit === "string" && UNIT.test(value.unit) ? value.unit : undefined;
+    if (
+      def === undefined ||
+      (value.unit !== undefined && unit === undefined) ||
+      (step !== undefined && step <= 0) ||
+      (min !== undefined && max !== undefined && min >= max) ||
+      (value.type === "slider" && (min === undefined || max === undefined))
+    ) {
+      errors.push(`Option "${id}" needs a numeric default${value.type === "slider" ? ", min and max" : ""} and a unit of letters or %`);
+      return null;
+    }
+    return { ...base, type: value.type, default: def, min, max, step, unit };
+  }
+  if (value.type === "text" || value.type === "font") {
+    const valid = value.type === "font" ? isSafeFontValue(value.default) : isSafeThemeValue(value.default);
+    if (!valid) {
+      errors.push(`Option "${id}" needs a default ${value.type === "font" ? "font stack" : "CSS value"}`);
+      return null;
+    }
+    return { ...base, type: value.type, default: value.default as string };
+  }
+  if (value.type === "variable-select" && Array.isArray(value.choices)) {
+    const choices = value.choices
+      .slice(0, MAX_CHOICES)
+      .filter(isRecord)
+      .flatMap((choice) => {
+        const l = localized(choice.label, 40);
+        return isSafeThemeValue(choice.value) && l ? [{ value: choice.value, label: l }] : [];
+      });
+    if (choices.length < 2) {
+      errors.push(`Option "${id}" needs at least two valid choices`);
+      return null;
+    }
+    const preferred = typeof value.default === "string" ? value.default : choices[0]!.value;
+    return {
+      ...base,
+      type: "variable-select",
+      default: choices.some((c) => c.value === preferred) ? preferred : choices[0]!.value,
+      choices,
+    };
+  }
   if (value.type === "toggle") {
     return { id, type: "toggle", label, description, default: value.default === true };
   }

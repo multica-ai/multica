@@ -16,11 +16,21 @@ export const THEME_API_VERSION = 1;
 /** Text a theme shows on the Appearance page: one string, or one per locale. */
 export type LocalizedText = string | Readonly<Record<string, string>>;
 
+/**
+ * Options a theme declares in its manifest, rendered on the Appearance page
+ * (the types follow Obsidian's Style Settings). `toggle` and `select` become
+ * `data-theme-option-<id>` on <html>; the others set the variable `--<id>`
+ * for both modes, or per mode for `color`.
+ */
 interface ThemeOptionBase {
-  /** Becomes `data-theme-option-<id>` on <html> while the theme is active. */
   id: string;
   label: LocalizedText;
   description?: LocalizedText;
+}
+
+/** Starts a group of options. */
+export interface ThemeHeadingOption extends ThemeOptionBase {
+  type: "heading";
 }
 
 /** On: the attribute is present with the value `on`. Off: it is absent. */
@@ -36,7 +46,48 @@ export interface ThemeSelectOption extends ThemeOptionBase {
   choices: readonly { value: string; label: LocalizedText; swatch?: string }[];
 }
 
-export type ThemeOption = ThemeToggleOption | ThemeSelectOption;
+/** A hex colour per mode. */
+export interface ThemeColorOption extends ThemeOptionBase {
+  type: "color";
+  default: ThemedColor;
+}
+
+/** `slider` needs `min` and `max`; the value is written with `unit` appended. */
+export interface ThemeNumberOption extends ThemeOptionBase {
+  type: "number" | "slider";
+  default: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+}
+
+/** Free text: a CSS value for `text`, a font stack for `font`. */
+export interface ThemeTextOption extends ThemeOptionBase {
+  type: "text" | "font";
+  default: string;
+}
+
+/** A choice between CSS values. */
+export interface ThemeVariableSelectOption extends ThemeOptionBase {
+  type: "variable-select";
+  default: string;
+  choices: readonly { value: string; label: LocalizedText }[];
+}
+
+export type ThemeOption =
+  | ThemeHeadingOption
+  | ThemeToggleOption
+  | ThemeSelectOption
+  | ThemeColorOption
+  | ThemeNumberOption
+  | ThemeTextOption
+  | ThemeVariableSelectOption;
+
+export interface ThemedColor {
+  light: string;
+  dark: string;
+}
 
 /** manifest.json */
 export interface ThemeManifest {
@@ -587,14 +638,60 @@ export function themeModeVariables(css: string): { light: Record<string, string>
 
 export const THEME_OPTION_ATTR_PREFIX = "data-theme-option-";
 
-export type ThemeOptionValues = Readonly<Record<string, string | boolean>>;
+export type ThemeOptionValue = string | boolean | number | Readonly<Partial<ThemedColor>>;
+export type ThemeOptionValues = Readonly<Record<string, ThemeOptionValue>>;
+
+export const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 
 /** The value an option has: the person's choice when it is still valid, else the default. */
-export function themeOptionValue(option: ThemeOption, chosen: unknown): string | boolean {
-  if (option.type === "toggle") return typeof chosen === "boolean" ? chosen : option.default;
-  return typeof chosen === "string" && option.choices.some((c) => c.value === chosen)
-    ? chosen
-    : option.default;
+export function themeOptionValue(option: ThemeOption, chosen: unknown): ThemeOptionValue {
+  switch (option.type) {
+    case "heading":
+      return "";
+    case "toggle":
+      return typeof chosen === "boolean" ? chosen : option.default;
+    case "select":
+    case "variable-select":
+      return typeof chosen === "string" && option.choices.some((c) => c.value === chosen) ? chosen : option.default;
+    case "color": {
+      const pick = (mode: keyof ThemedColor) => {
+        const value = chosen && typeof chosen === "object" ? (chosen as Partial<ThemedColor>)[mode] : undefined;
+        return typeof value === "string" && HEX_COLOR.test(value) ? value : option.default[mode];
+      };
+      return { light: pick("light"), dark: pick("dark") };
+    }
+    case "number":
+    case "slider": {
+      if (typeof chosen !== "number" || !Number.isFinite(chosen)) return option.default;
+      return Math.min(option.max ?? Infinity, Math.max(option.min ?? -Infinity, chosen));
+    }
+    case "text":
+      return isSafeThemeValue(chosen) ? chosen : option.default;
+    case "font":
+      return isSafeFontValue(chosen) ? chosen : option.default;
+  }
+}
+
+/** The variables the theme's options set, per mode. */
+export function themeOptionVariables(
+  theme: ThemeManifest,
+  chosen: ThemeOptionValues | undefined,
+): { light: Record<string, string>; dark: Record<string, string> } {
+  const out = { light: {} as Record<string, string>, dark: {} as Record<string, string> };
+  for (const option of theme.options ?? []) {
+    const name = `--${option.id}`;
+    const value = themeOptionValue(option, chosen?.[option.id]);
+    if (option.type === "color") {
+      const color = value as ThemedColor;
+      out.light[name] = color.light;
+      out.dark[name] = color.dark;
+    } else if (option.type === "number" || option.type === "slider") {
+      out.light[name] = out.dark[name] = `${value}${option.unit ?? ""}`;
+    } else if (option.type === "text" || option.type === "font" || option.type === "variable-select") {
+      out.light[name] = out.dark[name] = value as string;
+    }
+  }
+  return out;
 }
 
 /** `data-theme-option-*` attributes for <html>; `null` means absent. */
@@ -604,9 +701,10 @@ export function themeOptionAttributes(
 ): Record<string, string | null> {
   const attributes: Record<string, string | null> = {};
   for (const option of theme.options ?? []) {
+    if (option.type !== "toggle" && option.type !== "select") continue;
     const value = themeOptionValue(option, chosen?.[option.id]);
     attributes[`${THEME_OPTION_ATTR_PREFIX}${option.id}`] =
-      value === true ? "on" : value === false ? null : value;
+      value === true ? "on" : value === false ? null : String(value);
   }
   return attributes;
 }

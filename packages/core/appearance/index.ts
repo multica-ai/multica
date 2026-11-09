@@ -7,7 +7,9 @@ import {
   DEFAULT_THEME_ID,
   findBuiltInTheme,
   themeOptionAttributes,
+  themeOptionVariables,
   type Theme,
+  type ThemeOptionValue,
   type ThemeOptionValues,
 } from "./themes";
 
@@ -141,17 +143,30 @@ export function localFontFamily(choice: LocalFont): string {
 }
 
 const isCjkChoice = (v: unknown): v is CjkFontChoice => oneOf(CJK_FONTS)(v) || isLocalFont(v);
-const OPTION_KEY = /^[a-z][a-z0-9-]{0,31}$/;
+const OPTION_KEY = /^[a-z][a-z0-9-]{0,47}$/;
+
+function sanitizeOptionValue(v: unknown): ThemeOptionValue | undefined {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return Number.isFinite(v) ? v : undefined;
+  if (typeof v === "string") return v.length <= 300 ? v : undefined;
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const color: { light?: string; dark?: string } = {};
+  for (const mode of ["light", "dark"] as const) {
+    const value = (v as Record<string, unknown>)[mode];
+    if (typeof value === "string" && value.length <= 16) color[mode] = value;
+  }
+  return Object.keys(color).length > 0 ? color : undefined;
+}
 
 function sanitizeThemeOptions(value: unknown): Record<string, ThemeOptionValues> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const out: Record<string, ThemeOptionValues> = {};
   for (const [themeId, options] of Object.entries(value).slice(0, 40)) {
     if (!THEME_ID_PATTERN.test(themeId) || !options || typeof options !== "object") continue;
-    const clean: Record<string, string | boolean> = {};
-    for (const [key, v] of Object.entries(options).slice(0, 12)) {
-      if (!OPTION_KEY.test(key)) continue;
-      if (typeof v === "boolean" || (typeof v === "string" && v.length <= 32)) clean[key] = v;
+    const clean: Record<string, ThemeOptionValue> = {};
+    for (const [key, v] of Object.entries(options).slice(0, 24)) {
+      const value = sanitizeOptionValue(v);
+      if (OPTION_KEY.test(key) && value !== undefined) clean[key] = value;
     }
     if (Object.keys(clean).length > 0) out[themeId] = clean;
   }
@@ -322,13 +337,22 @@ export function activeTheme(prefs: Pick<AppearancePreferences, "theme">, safeMod
 
 const BOTH_MODES = ":root:not(.dark), :root.dark";
 
+const declare = (variables: Record<string, string>) =>
+  Object.entries(variables)
+    .map(([name, value]) => `${name}: ${value};`)
+    .join(" ");
+
 /**
- * What the person chose on top of the theme: accent and contrast. Written
- * after the theme's CSS, with selectors that outrank `.theme-light` and
- * `.theme-dark`, so they hold whichever theme is active.
+ * What the person chose on top of the theme: its option values, accent and
+ * contrast. Written after the theme's CSS, with selectors that outrank
+ * `.theme-light` and `.theme-dark`, so they hold whichever theme is active.
  */
-export function appearanceStylesheet(_theme: Theme, prefs: AppearancePreferences): string {
+export function appearanceStylesheet(theme: Theme, prefs: AppearancePreferences): string {
   const parts: string[] = [];
+  const options = themeOptionVariables(theme, prefs.themeOptions[theme.id]);
+  if (Object.keys(options.light).length > 0) {
+    parts.push(`:root.theme-light { ${declare(options.light)} }`, `:root.theme-dark { ${declare(options.dark)} }`);
+  }
   if (prefs.accent !== "theme") {
     const accent = ACCENT_COLORS[prefs.accent];
     parts.push(
@@ -370,7 +394,7 @@ export function appearanceThemeAttributes(
 
 interface AppearanceState extends AppearancePreferences {
   set: (patch: Partial<AppearancePreferences>) => void;
-  setThemeOption: (themeId: string, optionId: string, value: string | boolean) => void;
+  setThemeOption: (themeId: string, optionId: string, value: ThemeOptionValue) => void;
   reset: () => void;
 }
 
