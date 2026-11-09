@@ -10,8 +10,9 @@ Install a theme with **Settings → Appearance → Import theme**, from a `.zip`
 of the folder or from the folder itself. Themes are saved on the device, like
 every other Appearance setting.
 
-The built-in themes compile to exactly this format. Pop's options and CSS
-live in `packages/core/appearance/themes.ts` and are a working example.
+The built-in themes compile to exactly this format and live in
+`packages/core/appearance/built-in-themes.ts`: Pop shows options and CSS,
+GitHub, Blueprint and Notion show fonts, content styling and anchor CSS.
 
 ## The folder
 
@@ -159,6 +160,7 @@ those change without notice. Anchors, slots and hooks stay until the next
 | --- | --- |
 | `[data-mc="app-rail"]` | The icon rail on the far left. |
 | `[data-mc="sidebar"]` | The navigation panel next to the rail; `data-state` is `expanded` or `collapsed`. |
+| `[data-mc="nav-item"]` | A row in the sidebar; `data-active` is `true` on the current one. |
 | `[data-mc="page"]` | The rounded canvas that holds the current page. |
 | `[data-mc="window-toolbar"]` | Desktop only: the toolbar above the rail. |
 | `[data-mc="tab-bar"]` | Desktop only: the tab strip above the page. |

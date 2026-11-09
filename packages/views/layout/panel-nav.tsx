@@ -147,6 +147,11 @@ export function PanelList({
 export const PANEL_ROW_CLASS =
   "flex min-h-[var(--nav-item-height,2rem)] w-full items-center gap-2.5 rounded-nav-item px-3 py-1.5 text-left text-body transition-colors outline-none focus-visible:outline-2 focus-visible:outline-ring";
 
+/** The `nav-item` theme anchor; every row with an active state carries it. */
+export function panelRowAnchor(active: boolean) {
+  return { "data-mc": "nav-item", "data-active": active ? "true" : "false" } as const;
+}
+
 export function panelRowStateClass(active: boolean) {
   return active
     ? "bg-nav-item-active text-nav-item-active-foreground hover:bg-nav-item-active"
@@ -194,6 +199,7 @@ export function PanelLink({
         newTabTitle={label}
         aria-current={active ? "page" : undefined}
         onClick={onNavigate}
+        {...panelRowAnchor(active)}
         className={cn(
           PANEL_ROW_CLASS,
           panelRowStateClass(active),

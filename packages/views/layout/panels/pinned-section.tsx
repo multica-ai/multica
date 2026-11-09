@@ -30,7 +30,7 @@ import { AppLink } from "../../navigation";
 import { IssueActionsContextMenu } from "../../issues/actions";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { useT } from "../../i18n";
-import { PANEL_ROW_CLASS, PanelList, PanelSection, isPathWithin, panelRowStateClass } from "../panel-nav";
+import { PANEL_ROW_CLASS, PanelList, PanelSection, isPathWithin, panelRowAnchor, panelRowStateClass } from "../panel-nav";
 import {
   ISSUE_ROW_LINK_CLASS,
   IssueAgentBadge,
@@ -223,6 +223,7 @@ function SortablePinItem({
 
   const row = (
     <div
+      {...panelRowAnchor(active)}
       className={cn(
         PANEL_ROW_CLASS,
         panelRowStateClass(active),

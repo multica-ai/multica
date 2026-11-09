@@ -9,6 +9,7 @@
 export const THEME_ANCHORS = {
   "app-rail": "The icon rail on the far left.",
   sidebar: "The navigation panel next to the rail; `data-state` is expanded or collapsed.",
+  "nav-item": "A row in the sidebar; `data-active` is true on the current one.",
   page: "The rounded canvas that holds the current page.",
   "window-toolbar": "Desktop only: the toolbar above the rail with history buttons.",
   "tab-bar": "Desktop only: the tab strip above the page.",
