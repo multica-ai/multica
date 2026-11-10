@@ -268,7 +268,7 @@
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  padding: 1px;
+  padding: var(--border-beam-width, 1px);
   overflow: hidden;
   pointer-events: none;
   container-type: size;

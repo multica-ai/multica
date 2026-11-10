@@ -15,7 +15,6 @@ vi.mock("../../i18n", () => ({
           platformMacosLinux: "macOS / Linux",
           platformWindows: "Windows",
           startLabel: "Start daemon",
-          sshNote: "Already on a server?",
           copyLabel: "Copy",
           copiedLabel: "Copied",
         },

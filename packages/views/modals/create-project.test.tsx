@@ -48,7 +48,7 @@ vi.mock("@multica/core/auth", () => {
   const state = { user: { id: "user-1" } };
   return {
     useAuthStore: Object.assign(
-      (selector: (value: typeof state) => unknown) => selector(state),
+      (selector: (s: typeof state) => unknown) => selector(state),
       { getState: () => state },
     ),
   };
