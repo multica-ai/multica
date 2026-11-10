@@ -21,7 +21,7 @@ describe("theme check", () => {
     "passes %s, duplicated as a theme folder",
     (_name, theme) => {
       const report = checkThemeFiles(exportTheme(theme, themeCopyTarget(theme, [])), base);
-      expect(report.issues.filter((issue) => issue.level === "error")).toEqual([]);
+      expect(report.issues).toEqual([]);
       expect(report.contrast.length).toBeGreaterThan(0);
     },
   );
@@ -87,6 +87,61 @@ describe("theme check", () => {
     expect(found[1]).toMatch(/^Contrast, dark mode: --brand is below 4\.5:1 on .*--page-canvas/);
     const afterStatement = errors('@charset "utf-8";\n.theme-light { --muted-foreground: #a0a0a0; }');
     expect(afterStatement).toEqual([expect.stringMatching(/^Contrast, light mode: --muted-foreground is below .*--page-canvas/)]);
+  });
+
+  it("reads :root and mode rules in the order the browser applies them", () => {
+    const white = "--foreground: #ffffff; --page-canvas: #ffffff;";
+    expect(errors(`:root { ${white} }`).some((m) => /light mode: --foreground is below .*--page-canvas \(1\.00:1\)/.test(m))).toBe(true);
+    expect(errors(`:root.dark { ${white} }`).some((m) => /^Contrast, dark mode: --foreground/.test(m))).toBe(true);
+    // An element selector is less specific than the base tokens on :root.
+    expect(check(`html { ${white} }`).ok).toBe(true);
+    // At equal specificity the later rule wins (and :root reaches dark mode too).
+    const later = errors(`.theme-light { ${white} }\n:root { --foreground: #111111; }`);
+    expect(later.length).toBeGreaterThan(0);
+    expect(later.every((m) => m.startsWith("Contrast, dark mode"))).toBe(true);
+  });
+
+  it("applies option values over the theme's CSS, as the app does", () => {
+    const found = errors(".theme-light { --foreground: #000000; --page-canvas: #ffffff; }", {
+      options: [{ id: "foreground", type: "color", label: "Text", default: "#ffffff" }],
+    });
+    expect(found.some((m) => /light mode: --foreground is below .*--page-canvas \(1\.00:1\)/.test(m))).toBe(true);
+  });
+
+  it("measures option rules at the options' defaults", () => {
+    const options = [
+      { id: "ink", type: "select", label: "Ink", default: "dark", choices: [{ value: "dark", label: "Dark" }, { value: "pale", label: "Pale" }] },
+      { id: "wash", type: "toggle", label: "Wash", default: true },
+    ];
+    // Only applies when the person picks "pale", so the default check skips it.
+    expect(check(':root[data-theme-option-ink="pale"] { --foreground: #ffffff; }', { options }).issues).toEqual([]);
+    expect(check(":root[data-theme-option-ink]:not([data-theme-option-ink=\"dark\"]) { --foreground: #ffffff; }", { options }).issues).toEqual([]);
+    // The toggle is on by default, so this one applies.
+    expect(errors(":root[data-theme-option-wash].theme-light { --page-canvas: #444444; }", { options }).length).toBeGreaterThan(0);
+  });
+
+  it("keeps a selector list inside :is() together", () => {
+    const report = check('.theme-light :is([data-mc="app-rail"], [data-mc="tab-bar"]) { --foreground: #ffffff; --app-shell: #000000; }');
+    expect(report.issues.filter((i) => i.level === "warning")).toEqual([]);
+    expect(report.contrast.some((c) => c.area === "frame")).toBe(true);
+  });
+
+  it("says what it did not measure instead of passing it", () => {
+    const report = check(
+      [
+        "@media (prefers-contrast: more) { .theme-light { --foreground: #ffffff; } }",
+        "body { --page-canvas: #ffffff; }",
+        '.theme-light [data-mc="chat-window"] { --background: #ffffff; }',
+      ].join("\n"),
+    );
+    const warnings = report.issues.filter((i) => i.level === "warning").map((i) => i.message);
+    expect(warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/line 1 sets --foreground under `\.theme-light`, which the check does not follow/),
+        expect.stringMatching(/line 2 sets --page-canvas under `body`/),
+      ]),
+    );
+    expect(warnings.some((m) => m.includes("chat-window"))).toBe(false);
   });
 
   it("checks the primary button label and a frame of its own", () => {

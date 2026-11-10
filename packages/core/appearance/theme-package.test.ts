@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { INSTALLED_THEMES_STORAGE_KEY, findTheme, useInstalledThemesStore } from "./installed-themes";
 import { readZip, writeZip } from "./theme-archive";
 import { parseStoredTheme, parseTheme, themeCss, themeFromFiles } from "./theme-package";
@@ -132,7 +132,9 @@ describe("themeFromFiles", () => {
 });
 
 /** A minimal zip writer for the reader to read. */
-async function zip(entries: { path: string; data: Uint8Array; deflate: boolean }[]): Promise<Uint8Array> {
+async function zip(
+  entries: { path: string; data: Uint8Array; deflate: boolean; declaredSize?: number }[],
+): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];
   const central: Uint8Array[] = [];
   let offset = 0;
@@ -154,13 +156,13 @@ async function zip(entries: { path: string; data: Uint8Array; deflate: boolean }
     local.setUint32(0, 0x04034b50, true);
     local.setUint16(8, entry.deflate ? 8 : 0, true);
     local.setUint32(18, body.length, true);
-    local.setUint32(22, entry.data.length, true);
+    local.setUint32(22, entry.declaredSize ?? entry.data.length, true);
     local.setUint16(26, name.length, true);
     const header = new DataView(new ArrayBuffer(46));
     header.setUint32(0, 0x02014b50, true);
     header.setUint16(10, entry.deflate ? 8 : 0, true);
     header.setUint32(20, body.length, true);
-    header.setUint32(24, entry.data.length, true);
+    header.setUint32(24, entry.declaredSize ?? entry.data.length, true);
     header.setUint16(28, name.length, true);
     header.setUint32(42, offset, true);
     chunks.push(new Uint8Array(local.buffer), name, body);
@@ -214,6 +216,42 @@ describe("readZip", () => {
       ok: false,
       error: "Not a zip file",
     });
+  });
+
+  it("does not inflate an entry past the size it declares", async () => {
+    const bytes = await zip([{ path: "theme.css", data: new Uint8Array(4 * 1024 * 1024).fill(65), deflate: true, declaredSize: 1 }]);
+    const Native = globalThis.DecompressionStream;
+    let inflated = 0;
+    vi.stubGlobal(
+      "DecompressionStream",
+      class {
+        readable: ReadableStream<Uint8Array>;
+        writable: WritableStream<Uint8Array>;
+        constructor(format: CompressionFormat) {
+          const inner = new Native(format) as ReadableWritablePair<Uint8Array, Uint8Array>;
+          this.writable = inner.writable;
+          this.readable = inner.readable.pipeThrough(
+            new TransformStream<Uint8Array, Uint8Array>({
+              transform(chunk, controller) {
+                inflated += chunk.length;
+                controller.enqueue(chunk);
+              },
+            }),
+          );
+        }
+      },
+    );
+    try {
+      expect(await readZip(bytes, 1024 * 1024)).toEqual({ ok: false, error: "The zip file is damaged" });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(inflated).toBeLessThan(256 * 1024);
+  });
+
+  it("rejects a stored entry whose length is not the size it declares", async () => {
+    const bytes = await zip([{ path: "theme.css", data: encode("x".repeat(64)), deflate: false, declaredSize: 8 }]);
+    expect(await readZip(bytes, 1024 * 1024)).toEqual({ ok: false, error: "The zip file is damaged" });
   });
 });
 

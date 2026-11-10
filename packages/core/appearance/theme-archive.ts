@@ -14,7 +14,12 @@ const END_OF_CENTRAL_DIRECTORY = 0x06054b50;
 const CENTRAL_FILE_HEADER = 0x02014b50;
 const LOCAL_FILE_HEADER = 0x04034b50;
 
-async function inflate(data: Uint8Array): Promise<Uint8Array> {
+/**
+ * Inflates `data`, or `null` when the output is not exactly `size` bytes.
+ * Reading stops as soon as the output passes `size`, so an entry that
+ * understates its size cannot inflate further than it claimed.
+ */
+async function inflate(data: Uint8Array, size: number): Promise<Uint8Array | null> {
   const source = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(data);
@@ -22,12 +27,26 @@ async function inflate(data: Uint8Array): Promise<Uint8Array> {
     },
   });
   const stream = source.pipeThrough(new DecompressionStream("deflate-raw") as ReadableWritablePair<Uint8Array, Uint8Array>);
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+  const reader = stream.getReader();
+  const out = new Uint8Array(size);
+  let length = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (length + value.length > size) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    out.set(value, length);
+    length += value.length;
+  }
+  return length === size ? out : null;
 }
 
 /**
- * Every file in the archive, or an error message. Stops reading once the
- * uncompressed total passes `maxBytes`, so a zip bomb cannot exhaust memory.
+ * Every file in the archive, or an error message. The declared sizes must add
+ * up to at most `maxBytes`, and no entry is inflated past its declared size,
+ * so a zip bomb cannot exhaust memory.
  */
 export async function readZip(
   bytes: Uint8Array,
@@ -73,10 +92,13 @@ export async function readZip(
     }
     const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
     const raw = bytes.subarray(start, start + compressedSize);
-    if (method === 0) files.push({ path, data: raw });
-    else if (method === 8) {
-      const data = await inflate(raw).catch(() => null);
-      if (!data || data.length !== size) return { ok: false, error: "The zip file is damaged" };
+    if (raw.length !== compressedSize) return { ok: false, error: "The zip file is damaged" };
+    if (method === 0) {
+      if (raw.length !== size) return { ok: false, error: "The zip file is damaged" };
+      files.push({ path, data: raw });
+    } else if (method === 8) {
+      const data = await inflate(raw, size).catch(() => null);
+      if (!data) return { ok: false, error: "The zip file is damaged" };
       files.push({ path, data });
     } else return { ok: false, error: "The zip file uses an unsupported compression method" };
   }

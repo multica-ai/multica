@@ -247,7 +247,11 @@ that breaks them:
   `--muted-foreground` need 4.5:1 on every surface, `--brand` 4.5:1 on the
   reading surfaces, the primary button label 4.5:1 on the button, and
   `--faint-foreground` 3:1. A frame (rules on the rail, window toolbar or
-  tab bar) is checked against its own colours.
+  tab bar) is checked against its own colours. The check follows `:root`,
+  `html`, the mode classes and option attributes the way the browser does,
+  with every option at its default; when a colour it measures is also set
+  somewhere else, such as inside `@media` or on `body`, it says so instead
+  of passing it.
 
 ## Safe mode
 

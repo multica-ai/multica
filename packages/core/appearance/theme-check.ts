@@ -84,15 +84,115 @@ const lineAt = (css: string, index: number) => css.slice(0, index).split("\n").l
 interface Rule {
   selectors: string[];
   body: string;
+  /** Offset of the selector in the CSS, for line numbers. */
+  index: number;
+  /** Inside an at-rule or another rule, so it applies only under a condition. */
+  nested: boolean;
 }
 
-/** Top-level and nested rules with their declarations, enough to find variables. */
+type Mode = "light" | "dark";
+
+/**
+ * Where a selector on <html> applies and how specific it is, for the
+ * selectors the contrast check follows: `:root` or `html`, the mode
+ * classes, and the theme's option attributes, read at their defaults.
+ * `"inactive"` when the default options do not match; `null` for any
+ * other selector.
+ */
+function rootSelector(
+  selector: string,
+  attributes: ReadonlyMap<string, string>,
+): { modes: Mode[]; specificity: number } | "inactive" | null {
+  const root = /^(:root|html)/.exec(selector)?.[1];
+  let specificity = root === ":root" ? 10 : root ? 1 : 0;
+  let rest = selector.slice(root?.length ?? 0);
+  let mode: Mode | undefined;
+  let matches = true;
+  const ATTRIBUTE = String.raw`\[data-theme-option-([a-z0-9-]+)(?:="([^"]*)")?\]`;
+  while (rest.length > 0) {
+    const token =
+      /^\.(theme-light|theme-dark|dark)/.exec(rest) ??
+      new RegExp(`^${ATTRIBUTE}`).exec(rest) ??
+      new RegExp(`^:not\\(${ATTRIBUTE}\\)`).exec(rest);
+    if (!token) return null;
+    specificity += 10;
+    if (token[0].startsWith(".")) {
+      const next = token[1] === "theme-light" ? "light" : "dark";
+      if (mode && mode !== next) matches = false;
+      mode = next;
+    } else {
+      const value = attributes.get(token[1]!);
+      const present = value !== undefined && (token[2] === undefined || token[2] === value);
+      if (present === token[0].startsWith(":not")) matches = false;
+    }
+    rest = rest.slice(token[0].length);
+  }
+  if (specificity === 0) return null;
+  if (!matches) return "inactive";
+  return { modes: mode ? [mode] : ["light", "dark"], specificity };
+}
+
+/** The `data-theme-option-*` attributes the theme's default options set. */
+function optionAttributes(manifest: unknown): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const option of manifestOptions(manifest)) {
+    if (option.type === "toggle" && option.default === true) out.set(String(option.id), "on");
+    if (option.type === "select" && typeof option.default === "string") out.set(String(option.id), option.default);
+  }
+  return out;
+}
+
+/** Selectors in a list, split on the commas outside parentheses. */
+function splitSelectors(prelude: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < prelude.length; i += 1) {
+    if (prelude[i] === "(") depth += 1;
+    else if (prelude[i] === ")") depth = Math.max(0, depth - 1);
+    else if (prelude[i] === "," && depth === 0) {
+      out.push(prelude.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  out.push(prelude.slice(start).trim());
+  return out;
+}
+
+/** A palette that records which variables a contrast check read. */
+class ReadTracker extends Map<string, string> {
+  private readonly read: Set<string>;
+  constructor(read: Set<string>, entries: Iterable<readonly [string, string]>) {
+    super(entries);
+    this.read = read;
+  }
+  override get(name: string) {
+    this.read.add(name);
+    return super.get(name);
+  }
+}
+
+/** Rules that hold declarations, top-level or nested, enough to find variables. */
 function rules(css: string): Rule[] {
-  // A statement before the rule (`@import …;`) ends at its semicolon.
-  return [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
-    selectors: m[1]!.slice(m[1]!.lastIndexOf(";") + 1).split(",").map((s) => s.trim()),
-    body: m[2]!,
-  }));
+  const out: Rule[] = [];
+  let depth = 0;
+  let scanned = 0;
+  for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    for (; scanned < m.index; scanned += 1) {
+      if (css[scanned] === "{") depth += 1;
+      else if (css[scanned] === "}") depth = Math.max(0, depth - 1);
+    }
+    // A statement before the rule (`@import …;`) ends at its semicolon.
+    const cut = m[1]!.lastIndexOf(";") + 1;
+    const prelude = m[1]!.slice(cut);
+    out.push({
+      selectors: splitSelectors(prelude),
+      body: m[2]!,
+      index: m.index + cut + (prelude.length - prelude.trimStart().length),
+      nested: depth > 0,
+    });
+  }
+  return out;
 }
 
 function declarations(body: string): [string, string][] {
@@ -193,23 +293,52 @@ function checkContrast(
   issues: ThemeCheckIssue[],
 ): ContrastCheck[] {
   const clean = stripComments(css);
-  const mode = { light: [] as [string, string][], dark: [] as [string, string][] };
+  // The cascade on <html>, per mode: the base tokens (`:root` and `.dark`),
+  // then the theme's root and mode rules by specificity and order.
+  const cascade = {
+    light: new Map([...base.light].map(([name, value]) => [name, { value, specificity: 10 }])),
+    dark: new Map([...base.dark].map(([name, value]) => [name, { value, specificity: 10 }])),
+  };
   const frame = { light: [] as [string, string][], dark: [] as [string, string][] };
+  const unmodelled = new Map<string, string>();
+  const attributes = optionAttributes(manifest);
   for (const rule of rules(clean)) {
     for (const selector of rule.selectors) {
-      const modeOnly = /^(?::root|html)?\.theme-(light|dark)$/.exec(selector)?.[1] as "light" | "dark" | undefined;
-      if (modeOnly) mode[modeOnly].push(...declarations(rule.body));
+      const target = rule.nested ? null : rootSelector(selector, attributes);
+      if (target === "inactive") continue;
+      if (target) {
+        for (const m of target.modes) {
+          for (const [name, value] of declarations(rule.body)) {
+            const current = cascade[m].get(name);
+            if (!current || target.specificity >= current.specificity) {
+              cascade[m].set(name, { value, specificity: target.specificity });
+            }
+          }
+        }
+      } else if (!/[\s>+~]/.test(selector)) {
+        // Sets variables on <html> or <body> in a way the check does not follow.
+        for (const [name] of declarations(rule.body)) {
+          if (!unmodelled.has(name)) {
+            unmodelled.set(name, `theme.css line ${lineAt(clean, rule.index)} sets ${name} under \`${selector}\``);
+          }
+        }
+      }
     }
     const joined = rule.selectors.join(", ");
     const frameMode = /^(?::root|html)?\.theme-(light|dark)\s/.exec(joined)?.[1] as "light" | "dark" | undefined;
-    if (frameMode && FRAME_ANCHOR.test(joined)) frame[frameMode].push(...declarations(rule.body));
+    if (!rule.nested && frameMode && FRAME_ANCHOR.test(joined)) frame[frameMode].push(...declarations(rule.body));
   }
   const defaults = optionDefaults(manifest);
   const results: ContrastCheck[] = [];
   const unresolved = new Set<string>();
+  const read = new Set<string>();
 
   for (const m of ["light", "dark"] as const) {
-    const palette = new Map([...base[m], ...defaults[m], ...mode[m]]);
+    // Option values are written after the theme as `:root.theme-<mode>`, so they win.
+    const palette = new ReadTracker(read, [
+      ...[...cascade[m]].map(([name, { value }]) => [name, value] as const),
+      ...defaults[m],
+    ]);
     const measure = (
       area: ContrastCheck["area"],
       p: Map<string, string>,
@@ -247,12 +376,16 @@ function checkContrast(
       measure("page", palette, label, ["--button-primary"], TEXT);
     }
     if (hasFrame) {
-      const framePalette = new Map([...palette, ...frame[m]]);
+      const framePalette = new ReadTracker(read, [...palette, ...frame[m]]);
       for (const tone of ["--foreground", "--muted-foreground", "--sidebar-accent-foreground"]) {
         measure("frame", framePalette, tone, FRAME_BACKGROUNDS, TEXT);
       }
       measure("frame", framePalette, "--faint-foreground", FRAME_BACKGROUNDS, NON_TEXT);
     }
+  }
+
+  for (const [name, where] of unmodelled) {
+    if (read.has(name)) unresolved.add(`${where}, which the check does not follow`);
   }
 
   const failing = new Map<string, ContrastCheck[]>();
