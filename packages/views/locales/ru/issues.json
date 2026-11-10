@@ -2054,5 +2054,46 @@
       "rejected": "Отклонено",
       "rate_limited": "Лимит вызовов достигнут"
     }
+  },
+  "environments": {
+    "section_title": "Окружения",
+    "running_count_one": "{{count}} работает",
+    "running_count_few": "{{count}} работают",
+    "running_count_many": "{{count}} работают",
+    "running_count_other": "{{count}} работают",
+    "this_machine": "Это устройство",
+    "unknown_machine": "Неизвестное устройство",
+    "state": {
+      "starting": "Запускается",
+      "running": "Работает",
+      "exited": "Завершилось",
+      "stopped": "Остановлено",
+      "unreachable": "Не отвечает"
+    },
+    "expires_in_minutes_one": "Истекает через {{count}} мин",
+    "expires_in_minutes_few": "Истекает через {{count}} мин",
+    "expires_in_minutes_many": "Истекает через {{count}} мин",
+    "expires_in_minutes_other": "Истекает через {{count}} мин",
+    "expires_in_hours_one": "Истекает через {{count}} ч",
+    "expires_in_hours_few": "Истекает через {{count}} ч",
+    "expires_in_hours_many": "Истекает через {{count}} ч",
+    "expires_in_hours_other": "Истекает через {{count}} ч",
+    "expires_in_days_one": "Истекает через {{count}} д",
+    "expires_in_days_few": "Истекает через {{count}} д",
+    "expires_in_days_many": "Истекает через {{count}} д",
+    "expires_in_days_other": "Истекает через {{count}} д",
+    "started_ago": "Запущено {{time}}",
+    "ended_ago": "Завершено {{time}}",
+    "last_seen": "Последний ответ {{time}}",
+    "ended_count_one": "{{count}} завершено",
+    "ended_count_few": "{{count}} завершено",
+    "ended_count_many": "{{count}} завершено",
+    "ended_count_other": "{{count}} завершено",
+    "detected_hint": "Сервер, найденный в каталоге одного из выполнений этой задачи",
+    "remote_hint": "Работает на {{machine}}. Адрес localhost открывается только на этом устройстве.",
+    "open": "Открыть",
+    "copy_url": "Копировать URL",
+    "copied": "URL скопирован",
+    "copy_failed": "Не удалось скопировать URL"
   }
 }

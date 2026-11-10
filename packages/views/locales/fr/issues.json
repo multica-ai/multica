@@ -1908,5 +1908,36 @@
       "rejected": "Refusé",
       "rate_limited": "Limite atteinte"
     }
+  },
+  "environments": {
+    "section_title": "Environnements",
+    "running_count_one": "{{count}} en cours",
+    "running_count_other": "{{count}} en cours",
+    "this_machine": "Cet appareil",
+    "unknown_machine": "Appareil inconnu",
+    "state": {
+      "starting": "Démarrage",
+      "running": "En cours",
+      "exited": "Terminé",
+      "stopped": "Arrêté",
+      "unreachable": "Sans réponse"
+    },
+    "expires_in_minutes_one": "Expire dans {{count}} min",
+    "expires_in_minutes_other": "Expire dans {{count}} min",
+    "expires_in_hours_one": "Expire dans {{count}} h",
+    "expires_in_hours_other": "Expire dans {{count}} h",
+    "expires_in_days_one": "Expire dans {{count}} j",
+    "expires_in_days_other": "Expire dans {{count}} j",
+    "started_ago": "Démarré {{time}}",
+    "ended_ago": "Terminé {{time}}",
+    "last_seen": "Dernière réponse {{time}}",
+    "ended_count_one": "{{count}} terminé",
+    "ended_count_other": "{{count}} terminés",
+    "detected_hint": "Serveur trouvé dans le répertoire d'une exécution de cette tâche",
+    "remote_hint": "S'exécute sur {{machine}}. Une URL localhost ne s'ouvre que sur cet appareil.",
+    "open": "Ouvrir",
+    "copy_url": "Copier l'URL",
+    "copied": "URL copiée",
+    "copy_failed": "Impossible de copier l'URL"
   }
 }
