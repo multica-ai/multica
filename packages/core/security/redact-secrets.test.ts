@@ -81,6 +81,18 @@ describe("redactSecrets", () => {
     expect(result).not.toContain("s3cret");
   });
 
+  it("keeps a prefixed env var name and redacts only the value", () => {
+    const cases: [string, string][] = [
+      [`GITEA_TOKEN=${["0123456789", "abcdef0123456789abcdef0123456789abcd"].join("")}`, "GITEA_TOKEN=[REDACTED CREDENTIAL]"],
+      [`JELLYFIN_API_KEY=${["a1b2c3d4", "e5f60718293a4b5c6d7e8f90"].join("")}`, "JELLYFIN_API_KEY=[REDACTED CREDENTIAL]"],
+      [`export DB_PASSWORD: ${["hunter2", "-extra"].join("")}`, "export DB_PASSWORD: [REDACTED CREDENTIAL]"],
+      [`gitea_token=${["abc123", "def456"].join("")}`, "gitea_token=[REDACTED CREDENTIAL]"],
+    ];
+    for (const [input, want] of cases) {
+      expect(redactSecrets(input)).toBe(want);
+    }
+  });
+
   it("redacts generic credential env vars", () => {
     for (const key of ["PASSWORD", "SECRET", "TOKEN", "DATABASE_URL", "API_KEY"]) {
       const result = redactSecrets(`${key}=supersecretvalue123`);

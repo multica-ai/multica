@@ -1677,7 +1677,8 @@ func TestScanKimiMainTurnFailureErrorMessageFormats(t *testing.T) {
 		{name: "array", raw: `["private-details"]`},
 		{name: "number", raw: `42`},
 		{name: "boolean", raw: `true`},
-		{name: "redacted object", raw: `{"code":"provider.failure","message":"api_key=fixture-secret","details":"private-details"}`, want: "[provider.failure] [REDACTED CREDENTIAL]"},
+		// The name stays: credential redaction masks the value only (#10269).
+		{name: "redacted object", raw: `{"code":"provider.failure","message":"api_key=fixture-secret","details":"private-details"}`, want: "[provider.failure] api_key=[REDACTED CREDENTIAL]"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
