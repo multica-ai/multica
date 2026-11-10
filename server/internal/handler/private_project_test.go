@@ -824,3 +824,67 @@ func TestPrivateProjectWakeupListsSkipOutsiders(t *testing.T) {
 		}
 	}
 }
+
+// A public parent can hold sub-issues from a private project. Its child-done
+// system rule counts and names only the sub-issues the viewer can see.
+func TestPrivateProjectSystemWakeupSkipsHiddenChildren(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	dbfx.Exec(t, "UPDATE issue SET parent_issue_id=$1 WHERE id=$2", f.publicIssue, f.secretIssue)
+	publicChild := dbfx.Issue(t, f.marker+" public child", testutil.Cols{"parent_issue_id": f.publicIssue})
+	var secretNumber int
+	dbfx.QueryRow(t, "SELECT number FROM issue WHERE id=$1", f.secretIssue).Scan(&secretNumber)
+	secretSuffix := fmt.Sprintf("-%d", secretNumber)
+
+	childDone := func(userID string) []systemWakeupResponse {
+		t.Helper()
+		var rules []systemWakeupResponse
+		req := withURLParam(asUser(newRequest(http.MethodGet, "/api/issues/"+f.publicIssue+"/system-wakeups", nil), userID), "id", f.publicIssue)
+		testutil.Call(t, testHandler.ListIssueSystemWakeups, req).Want(http.StatusOK).JSON(&rules)
+		return rules
+	}
+	namesSecretChild := func(rule systemWakeupResponse) bool {
+		for _, identifier := range rule.Waiting {
+			if strings.HasSuffix(identifier, secretSuffix) {
+				return true
+			}
+		}
+		return false
+	}
+	viewers := []struct {
+		name    string
+		userID  string
+		visible bool
+	}{
+		{"project member", f.insider, true},
+		{"workspace owner outside the member list", testUserID, true},
+		{"workspace member outside the project", f.outsider, false},
+	}
+	for _, tc := range viewers {
+		rules := childDone(tc.userID)
+		if len(rules) != 1 {
+			t.Fatalf("%s: got %d system rules, want the child-done rule", tc.name, len(rules))
+		}
+		want := 1
+		if tc.visible {
+			want = 2
+		}
+		if rule := rules[0]; rule.Total != want || rule.Remaining != want || len(rule.Waiting) != want || namesSecretChild(rule) != tc.visible {
+			t.Errorf("%s: child-done rule waits for %d of %d (%v), want %d sub-issues and the private one named = %v", tc.name, rule.Remaining, rule.Total, rule.Waiting, want, tc.visible)
+		}
+	}
+
+	// Only the private sub-issue is still open.
+	dbfx.Exec(t, "UPDATE issue SET status='done' WHERE id=$1", publicChild)
+	for _, tc := range viewers {
+		rules := childDone(tc.userID)
+		if !tc.visible {
+			if len(rules) != 0 {
+				t.Errorf("%s: child-done rule still reported for a private sub-issue: %+v", tc.name, rules)
+			}
+			continue
+		}
+		if len(rules) != 1 || rules[0].Total != 2 || rules[0].Remaining != 1 || !namesSecretChild(rules[0]) {
+			t.Errorf("%s: child-done rule = %+v, want 1 of 2 left and the private one named", tc.name, rules)
+		}
+	}
+}
