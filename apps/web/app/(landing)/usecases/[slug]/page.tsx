@@ -15,6 +15,7 @@ import {
 import type { SupportedLocale } from "@multica/core/i18n";
 import { SHARE_IMAGE } from "@/features/landing/share-image";
 import { landingAlternates, localizeHref } from "@/lib/landing-locale-path";
+import { liveMetadata, requireLiveRoute } from "@/features/landing/site/sitemap";
 
 type Params = { slug: string };
 
@@ -29,7 +30,7 @@ export async function generateMetadata(props: {
   if (!page) return {};
 
   const path = `/usecases/${slug}`;
-  return {
+  return liveMetadata("/usecases", {
     title: page.data.title,
     description: page.data.description,
     openGraph: {
@@ -42,7 +43,7 @@ export async function generateMetadata(props: {
       canonical: localizeHref(locale, path),
       languages: landingAlternates(path),
     },
-  };
+  });
 }
 
 function nodeToString(node: ReactNode): string {
@@ -210,6 +211,7 @@ function createMdxComponents(locale: SupportedLocale) {
 }
 
 export default async function UseCasePage(props: { params: Promise<Params> }) {
+  requireLiveRoute("/usecases");
   const { slug } = await props.params;
   const locale = await getUseCaseLocale();
   const text = useCaseText[locale];

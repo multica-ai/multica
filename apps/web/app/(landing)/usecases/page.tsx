@@ -7,6 +7,7 @@ import { getUseCasePagesForLocale } from "@/lib/use-cases-source";
 import { getUseCaseLocale, useCaseText } from "@/lib/use-cases-i18n";
 import { SHARE_IMAGE } from "@/features/landing/share-image";
 import { landingAlternates, localizeHref } from "@/lib/landing-locale-path";
+import { liveMetadata, requireLiveRoute } from "@/features/landing/site/sitemap";
 
 type ExtraFrontmatter = {
   category?: string;
@@ -17,7 +18,7 @@ type ExtraFrontmatter = {
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getUseCaseLocale();
   const text = useCaseText[locale];
-  return {
+  return liveMetadata("/usecases", {
     title: text.indexMetadataTitle,
     description: text.indexMetadataDescription,
     openGraph: {
@@ -30,10 +31,11 @@ export async function generateMetadata(): Promise<Metadata> {
       canonical: localizeHref(locale, "/usecases"),
       languages: landingAlternates("/usecases"),
     },
-  };
+  });
 }
 
 export default async function UseCasesIndexPage() {
+  requireLiveRoute("/usecases");
   const locale = await getUseCaseLocale();
   const text = useCaseText[locale];
   const pages = getUseCasePagesForLocale(locale)

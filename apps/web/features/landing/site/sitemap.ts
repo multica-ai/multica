@@ -111,13 +111,19 @@ const EXISTING_ROUTES = [
   "/usecases",
 ] as const;
 
+/** Existing pages taken down for now. They are treated like unreleased pages until removed from here. */
+const WITHDRAWN_ROUTES: ReadonlySet<string> = new Set(["/usecases"]);
+
 /**
  * Routes released to the public. Every other page is still being built: it is
  * left out of the menus, the footer, and the sitemap, and its route answers
  * 404, unless the build sets NEXT_PUBLIC_SITE_PREVIEW=1. Release a page by
  * adding its route here.
  */
-const LIVE_ROUTES: ReadonlySet<string> = new Set(["/", ...EXISTING_ROUTES]);
+const LIVE_ROUTES: ReadonlySet<string> = new Set([
+  "/",
+  ...EXISTING_ROUTES.filter((route) => !WITHDRAWN_ROUTES.has(route)),
+]);
 
 export const SITE_PREVIEW = process.env.NEXT_PUBLIC_SITE_PREVIEW === "1";
 

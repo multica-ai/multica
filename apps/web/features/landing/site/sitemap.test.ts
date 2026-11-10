@@ -67,6 +67,12 @@ describe("site map", () => {
     expect(buildFooterGroups("/docs", nav, () => false).find((group) => group.title === nav.product)).toBeUndefined();
   });
 
+  it("takes withdrawn pages out of the footer while keeping their routes", () => {
+    expect(isLiveRoute("/usecases")).toBe(false);
+    expect(internalLinks(navLinks()).map((link) => link.href)).not.toContain("/usecases");
+    expect(siteRoutes()).toContain("/usecases");
+  });
+
   it("withholds the metadata of unreleased pages", () => {
     const metadata = { title: "Pricing" };
     expect(liveMetadata("/pricing", metadata)).toEqual({});
