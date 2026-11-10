@@ -297,8 +297,8 @@ func TestInboxListBodyPreview(t *testing.T) {
 	})
 }
 
-// The archived list ships the preview, the stored row keeps the whole
-// comment, and a notification that needs its full body still gets it.
+// Both inbox lists ship the preview, the stored row keeps the whole comment,
+// and a notification that needs its full body still gets it.
 func TestInboxListsShipCommentPreviewNotFullComment(t *testing.T) {
 	workspaceID := dbfx.Workspace(t, "Inbox body preview", "inbox-preview-"+uuid.NewString())
 	dbfx.Member(t, workspaceID, testUserID, "owner")
@@ -344,11 +344,9 @@ func TestInboxListsShipCommentPreviewNotFullComment(t *testing.T) {
 		inboxRequest(http.MethodGet, "/api/inbox", workspaceID)).
 		Want(http.StatusOK).
 		JSON(&active)
-	// A comment records activity; it does not put the issue in the Inbox.
-	for _, item := range active {
-		if item.IssueID != nil && *item.IssueID == activeIssue {
-			t.Errorf("main list shipped the new_comment row for issue %s", activeIssue)
-		}
+	if got := bodyOf(active, activeIssue); got != wantPreview {
+		t.Errorf("main list body = %d characters, want the %d-character preview",
+			utf8.RuneCountInString(got), inboxListBodyPreviewLimit)
 	}
 	var issueLess *string
 	for _, item := range active {

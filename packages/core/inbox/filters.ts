@@ -22,9 +22,9 @@ export type InboxTypeGroup =
   | "run"
   | "system";
 
-/** The groups a filter offers. Comments and reactions never put an issue in the Inbox. */
 export const INBOX_TYPE_GROUPS: readonly InboxTypeGroup[] = [
   "mention",
+  "comment",
   "assign",
   "review",
   "change",

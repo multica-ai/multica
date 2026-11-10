@@ -1056,8 +1056,8 @@ func TestInboxUnreadSummaryThroughRouter(t *testing.T) {
 	}
 }
 
-// One issue counts once however many turns it has, and notifications that
-// only record activity (comments, status changes) do not count.
+// One issue counts once however many rows it has. A comment counts; field
+// changes (status, priority) do not.
 func TestInboxUnreadSummaryDedupesByIssue(t *testing.T) {
 	ctx := context.Background()
 	base := pendingSummaryCount(t)
@@ -1069,21 +1069,23 @@ func TestInboxUnreadSummaryDedupesByIssue(t *testing.T) {
 		return issueID
 	}
 	turnIssue := seedIssue()
-	activityIssue := seedIssue()
+	commentIssue := seedIssue()
+	changeIssue := seedIssue()
 
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, read)
 		VALUES
-			($1, 'member', $2, 'issue_assigned', 'assigned',  $3, true),
-			($1, 'member', $2, 'mentioned',      'mentioned', $3, false),
-			($1, 'member', $2, 'new_comment',    'comment',   $4, false),
-			($1, 'member', $2, 'status_changed', 'status',    $4, false)
-	`, testWorkspaceID, testUserID, turnIssue, activityIssue); err != nil {
+			($1, 'member', $2, 'issue_assigned',   'assigned',  $3, true),
+			($1, 'member', $2, 'mentioned',        'mentioned', $3, false),
+			($1, 'member', $2, 'new_comment',      'comment',   $4, false),
+			($1, 'member', $2, 'status_changed',   'status',    $5, false),
+			($1, 'member', $2, 'priority_changed', 'priority',  $5, false)
+	`, testWorkspaceID, testUserID, turnIssue, commentIssue, changeIssue); err != nil {
 		t.Fatalf("failed to seed inbox items: %v", err)
 	}
 
-	if got := pendingSummaryCount(t); got != base+1 {
-		t.Fatalf("count = %d, want %d", got, base+1)
+	if got := pendingSummaryCount(t); got != base+2 {
+		t.Fatalf("count = %d, want %d", got, base+2)
 	}
 }
 

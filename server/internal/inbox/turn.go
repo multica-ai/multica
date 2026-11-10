@@ -1,17 +1,20 @@
 package inbox
 
 // TurnTypes are the notification types that put an issue in its recipient's
-// Inbox: the issue was handed to them. An agent finished a run they started,
-// someone @-mentioned them, the issue was assigned to them, an agent waits on
-// them to confirm an app call or connect an account, or a result they asked
-// for (quick create, an autopilot they follow, a finished stage, an app call)
-// arrived.
+// Inbox: someone wrote or reacted to them, an agent finished a run they
+// started, someone @-mentioned them, the issue was assigned to or taken from
+// them, an agent waits on them to confirm an app call or connect an account,
+// or a result they asked for (quick create, an autopilot they follow, a
+// finished stage, an app call) arrived.
 //
-// Every other type (status, comment, date and priority changes, reactions) is
-// still recorded, but it does not ask anything of the recipient, so the Inbox
-// neither lists nor announces it. The issue's own timeline shows that history.
+// Field changes on an issue they follow (status, priority, start and due
+// dates, someone else's assignee) are still recorded, but the Inbox neither
+// lists nor announces them. The issue's own timeline shows that history.
 var TurnTypes = []string{
+	"new_comment",
+	"reaction_added",
 	"issue_assigned",
+	"unassigned",
 	"mentioned",
 	"agent_completed",
 	"agent_blocked",
