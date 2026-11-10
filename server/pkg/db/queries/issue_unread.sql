@@ -40,6 +40,12 @@ LEFT JOIN LATERAL (
 ) run_comment ON true
 WHERE u.workspace_id = sqlc.arg(workspace_id)
   AND u.user_id = sqlc.arg(user_id)
+  -- MUL-8472: private projects the caller cannot see.
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT EXISTS (
+    SELECT 1 FROM issue hidden_issue
+    WHERE hidden_issue.id = u.issue_id
+      AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
+  ))
   AND (
     sqlc.narg(before_created_at)::timestamptz IS NULL
     OR (u.created_at, u.issue_id) < (sqlc.narg(before_created_at)::timestamptz, sqlc.narg(before_issue_id)::uuid)

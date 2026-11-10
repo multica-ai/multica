@@ -159,12 +159,6 @@
     "toast_saved": "Changes saved"
   },
   "preferences": {
-    "theme": {
-      "title": "Theme",
-      "light": "Light",
-      "dark": "Dark",
-      "system": "System"
-    },
     "language": {
       "title": "Language",
       "english": "English",
@@ -196,13 +190,151 @@
     },
     "comments_title": "Comments & chat",
     "region_title": "Language & region",
-    "appearance_title": "Appearance",
     "issue_fields_title": "Fields shown when creating issues",
     "issue_fields": {
       "field": "Field",
       "quick": "Create with agent",
       "manual": "Manual create",
       "unsupported": "Not available when creating with an agent"
+    }
+  },
+  "appearance": {
+    "reset": "Reset to defaults",
+    "color": {
+      "title": "Color"
+    },
+    "mode": {
+      "title": "Mode",
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    },
+    "theme": {
+      "title": "Theme",
+      "description": "Colors, borders, shadows and corners across the app. Import a theme file to add more.",
+      "default": "Default",
+      "pop": "Pop",
+      "built_in": "Built in",
+      "installed": "Installed",
+      "remove": "Remove {{name}}",
+      "safe_mode": "Safe mode: your theme is paused until you close this window.",
+      "safe_mode_exit": "Use my theme",
+      "folder": "Themes folder",
+      "folder_problems": "Some themes in the themes folder don't pass the checks. Fix them and save; the last version that passed stays in use."
+    },
+    "import": {
+      "button": "Import theme",
+      "from_zip": "Theme file (.zip)",
+      "from_folder": "Theme folder",
+      "storage_full": "There isn't enough space on this device to save the theme. Remove another theme and try again.",
+      "confirm_title": "Install “{{name}}”?",
+      "warning": "A theme can restyle every page, including dialogs and warnings. Only install themes from people you trust.",
+      "author": "Author",
+      "version": "Version",
+      "replaces": "{{to}} (replaces {{from}})",
+      "includes": "Includes",
+      "cancel": "Cancel",
+      "confirm": "Install and use",
+      "error_title": "Couldn't install this theme",
+      "error_description": "Nothing was changed. The theme file has these problems:",
+      "close": "Close",
+      "has_options_one": "{{count}} option",
+      "has_options_other": "{{count}} options",
+      "has_assets_one": "{{count}} font or image",
+      "has_assets_other": "{{count}} fonts and images",
+      "menu_label": "Custom themes",
+      "beta": "Beta",
+      "beta_note": "Custom themes are in beta. The variables and manifest a theme uses may change, and a theme may need updating."
+    },
+    "tools": {
+      "label": "More theme actions",
+      "duplicate": "Duplicate “{{name}}” as a new theme",
+      "open_folder": "Open themes folder",
+      "guide": "How to make a theme",
+      "duplicated_web": "Downloaded {{file}}. Unzip it, edit theme.css, then import the folder.",
+      "duplicated_desktop": "Created “{{name}}” in the themes folder. Edits to its theme.css apply when you save.",
+      "duplicate_failed": "Couldn't create the copy: {{error}}"
+    },
+    "theme_options": {
+      "title": "Theme options",
+      "description": "Provided by {{name}}.",
+      "reset": "Reset options"
+    },
+    "ui_text": {
+      "title": "Interface text",
+      "description": "Menus, buttons, lists, the sidebar and headings."
+    },
+    "latin_font": {
+      "title": "Latin font"
+    },
+    "ui_font": {
+      "inter": "Default",
+      "system": "System",
+      "serif": "Serif",
+      "mono": "Monospace"
+    },
+    "cjk_font": {
+      "title": "CJK font",
+      "description": "Chinese characters; Japanese and Korean follow it.",
+      "sans": "Sans",
+      "serif": "Serif",
+      "kai": "Kai",
+      "built_in": "Built in",
+      "local": "On this device",
+      "load_local": "Show fonts on this device…",
+      "loading": "Looking for fonts…",
+      "none": "No fonts with Chinese characters on this device.",
+      "load_failed": "Couldn't read this device's fonts.",
+      "sample": "永和九年 汉字"
+    },
+    "follow_ui": "Same as interface",
+    "theme_font": "Theme font",
+    "font_size": {
+      "title": "Font size",
+      "description": "Scales text only. Spacing and layout stay the same.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · Default"
+    },
+    "content_text": {
+      "title": "Content text",
+      "description": "Issue descriptions, comments, chat and documents.",
+      "sample": "Descriptions and comments are read in full, so they can use a font made for reading while lists and buttons stay compact."
+    },
+    "code_font": {
+      "title": "Code font",
+      "description": "Code blocks, inline code and logs.",
+      "geist": "Default",
+      "jetbrains": "Ligatures",
+      "system": "System monospace"
+    },
+    "content_size": {
+      "title": "Font size",
+      "description": "Only content text; the interface keeps its size.",
+      "follow": "Same as interface ({{size}} px)"
+    },
+    "content_leading": {
+      "title": "Line height",
+      "compact": "Compact",
+      "default": "Default",
+      "relaxed": "Relaxed"
+    },
+    "layout": {
+      "title": "Layout and accessibility"
+    },
+    "density": {
+      "title": "Density",
+      "description": "Row height in issue lists and search.",
+      "compact": "Compact",
+      "default": "Default",
+      "comfortable": "Comfortable"
+    },
+    "reduce_motion": {
+      "title": "Reduce motion",
+      "description": "Turn off animations and transitions. When off, your system setting still applies."
+    },
+    "high_contrast": {
+      "title": "Increase contrast",
+      "description": "Darker secondary text and stronger borders."
     }
   },
   "shortcuts": {
@@ -396,6 +528,7 @@
     "tabs": {
       "profile": "Profile",
       "preferences": "Preferences",
+      "appearance": "Appearance",
       "shortcuts": "Shortcuts",
       "issue": "Issue",
       "notifications": "Notifications",
@@ -1487,12 +1620,11 @@
     "title": "Ways to give agents tools",
     "current": "This page",
     "mcp": "Added by admins and shared across the workspace, then assigned per agent.",
-    "apps": "Team or personal accounts connected through Multica, given to each agent with an account and a permission level.",
+    "apps": "Team or personal accounts connected through Multica and added to each agent.",
     "plugins": "Installed packages that can add tools, scheduled hooks, and storage, each with its own permissions."
   },
   "connected_apps": {
-    "description": "Accounts your agents act through. Every call goes through Multica, which applies your rules and asks before sending, deleting or sharing.",
-    "add_app": "Add app",
+    "description": "Accounts your agents use to access external apps. Allowed actions run immediately.",
     "loading": "Loading apps…",
     "load_failed": "Couldn't load apps.",
     "team_title": "Team accounts",
@@ -1523,17 +1655,18 @@
     "toast_disconnected": "Disconnected",
     "toast_failed": "Something went wrong. Please try again.",
     "add": {
-      "title": "Add an app",
-      "description": "Connect an account for the team or for yourself. Which agents use it is set on each agent's Apps page.",
       "search": "Search apps…",
       "empty": "No apps match.",
       "curated": "Curated",
       "recommended_team": "Usually a team account",
       "recommended_personal": "Usually a personal account",
-      "connect_team": "Connect for team",
+      "connect_team": "Connect team account",
       "connect_personal": "Connect my account",
       "connecting": "Connecting…",
-      "connected": "Connected"
+      "connected": "Connected",
+      "connect": "Connect",
+      "team_description": "A shared workspace account. Choose which agents can use it on each agent’s Apps page.",
+      "personal_description": "Your own account. Apps set to the triggerer’s account use it when you trigger a run."
     },
     "disconnect_team": {
       "title": "Disconnect the team {{app}} account?",
@@ -1661,6 +1794,19 @@
       "row_label": "Allowed apps",
       "row_description_one": "{{count}} app allowed",
       "row_description_other": "{{count}} apps allowed"
+    },
+    "saved_access": {
+      "account": "Saved action restrictions are still blocking this account.",
+      "agent": "This app still has read-only access from an earlier setup.",
+      "catalog": "A saved app list is hiding other apps.",
+      "allow_actions": "Allow all actions",
+      "open_catalog": "Show all apps",
+      "account_confirm": "Agents assigned this account will be able to read, write, send, delete, and share through it. Saved action restrictions will be replaced.",
+      "agent_confirm": "This agent will be able to read, write, send, delete, and share through this app, within the account’s allowed actions.",
+      "catalog_confirm": "All connectable apps will be available to the workspace. Existing connections and agent assignments will stay as they are.",
+      "cancel": "Cancel",
+      "admin_required": "A workspace admin can restore access.",
+      "account_link": "This account has saved action restrictions. Restore access in Connected apps."
     }
   }
 }

@@ -17,6 +17,13 @@ export {
   type ValidateLocalDirectoryResult,
 } from "./local-directory";
 export {
+  themeFolderAPI,
+  type ThemeFolderAPI,
+  type ThemeFolderFile,
+  type ThemeFolderSnapshot,
+  type ThemeFolderWriteResult,
+} from "./theme-folder";
+export {
   useLocalDaemonStatus,
   type LocalDaemonStatus,
 } from "./use-local-daemon-status";

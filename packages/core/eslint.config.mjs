@@ -94,10 +94,10 @@ export default [
     files: ["platform/storage.ts"],
     rules: boundaryRules(["localStorage"]),
   },
-  // Exception dedupe is scoped to the browser tab session, which the
-  // StorageAdapter cannot express.
+  // Exception dedupe and theme safe mode are scoped to the browser tab
+  // session, which the StorageAdapter cannot express.
   {
-    files: ["analytics/exception-dedupe.ts"],
+    files: ["analytics/exception-dedupe.ts", "appearance/safe-mode.ts"],
     rules: boundaryRules(["sessionStorage"]),
   },
 ];

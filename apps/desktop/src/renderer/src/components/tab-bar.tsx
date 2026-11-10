@@ -6,7 +6,8 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { X, Plus, Pin, PinOff, ListX, AppWindow } from "@multica/ui/icons";
 import {
   DndContext,
@@ -491,7 +492,7 @@ export function TabBar() {
   const group = useActiveGroup();
   const moveTab = useTabStore((s) => s.moveTab);
   const activeWorkspaceSlug = useTabStore((s) => s.activeWorkspaceSlug);
-  const shouldReduceMotion = useReducedMotion() ?? false;
+  const shouldReduceMotion = useReducedMotion();
   const tabScrollRef = useRef<HTMLDivElement>(null);
   const previousTabsRef = useRef<TabSnapshot | null>(null);
   const tabFadeStyle = useScrollFade(

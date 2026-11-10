@@ -61,6 +61,7 @@ import type {
   GroupedIssuesResponse,
   GitHubConnectResponse,
   IssuePullRequestsResponse,
+  IssueEnvironmentsResponse,
   InboxItem,
   InboxWorkspaceUnread,
   IssueUnread,
@@ -466,6 +467,44 @@ export const IssuePullRequestsResponseSchema = z.object({
 export const EMPTY_ISSUE_PULL_REQUESTS_RESPONSE: IssuePullRequestsResponse = {
   pull_requests: [],
   auto_complete: null,
+};
+
+// One malformed environment drops out of the list instead of taking the
+// whole section with it; an unknown state from a newer server reads as
+// unreachable, which offers no Open action.
+export const IssueEnvironmentSchema = z.object({
+  id: z.string(),
+  issue_id: z.string(),
+  task_id: z.string(),
+  runtime_id: z.string().nullable().optional().default(null),
+  agent_id: z.string().nullable().optional().default(null),
+  source: z.enum(["config", "detected"]).catch("detected"),
+  name: z.string(),
+  label: z.string().optional().default(""),
+  url: z.string().optional().default(""),
+  port: z.number().nullable().optional().default(null),
+  state: z.enum(["starting", "running", "exited", "stopped", "unreachable"]).catch("unreachable"),
+  detail: z.string().optional().default(""),
+  started_at: z.string(),
+  expires_at: z.string().nullable().optional().default(null),
+  last_seen_at: z.string(),
+  ended_at: z.string().nullable().optional().default(null),
+}).loose();
+
+export const IssueEnvironmentsResponseSchema = z.object({
+  environments: z
+    .array(z.unknown())
+    .default([])
+    .transform((items) =>
+      items.flatMap((item) => {
+        const parsed = IssueEnvironmentSchema.safeParse(item);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    ),
+}).loose();
+
+export const EMPTY_ISSUE_ENVIRONMENTS_RESPONSE: IssueEnvironmentsResponse = {
+  environments: [],
 };
 
 // Label responses are consumed by settings tables and resource pickers. Keep
@@ -921,8 +960,6 @@ export interface AppConfigResponse {
   daemon_app_url?: string;
   daemon_setup_target?: "cloud" | "self_host" | "unknown";
   workspace_creation_disabled?: boolean;
-  /** DISABLE_STAR_PROMPT on the server. Absent means the prompt is allowed. */
-  star_prompt_disabled?: boolean;
   /** Whether this deployment offers the self-hosted Git provider integration
    * (self-host only; off on the managed cloud). Absent/false hides the whole
    * Settings → Integrations "Git providers" section. */
@@ -1210,7 +1247,6 @@ export const AppConfigSchema = z.object({
   daemon_app_url: OptionalStringSchema,
   daemon_setup_target: z.enum(["cloud", "self_host", "unknown"]).optional().catch("unknown"),
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
-  star_prompt_disabled: BooleanWithDefaultSchema(false).optional(),
   vcs_integration_available: BooleanWithDefaultSchema(false).optional(),
   feature_flags: FeatureFlagsSchema,
   local_worktree_supported: BooleanWithDefaultSchema(false),
@@ -1230,7 +1266,6 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   daemon_app_url: "",
   daemon_setup_target: "unknown",
   workspace_creation_disabled: false,
-  star_prompt_disabled: false,
   vcs_integration_available: false,
   // Fail closed: an unreadable config must not look like a server that
   // validates execution_mode.
@@ -1584,6 +1619,7 @@ export const ProjectSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
   title: z.string(),
+  visibility: z.enum(["workspace", "private"]).default("workspace").catch("private"),
   description: z.string().nullable(),
   icon: z.string().nullable(),
   status: z.string(),
@@ -1618,6 +1654,19 @@ export const ListProjectsResponseSchema = z.object({
 }).loose();
 
 export const EMPTY_LIST_PROJECTS_RESPONSE: ListProjectsResponse = { projects: [], total: 0 };
+
+export const ProjectMemberSchema = z.object({
+  project_id: z.string(),
+  user_id: z.string(),
+  name: z.string(),
+  email: z.string(),
+  avatar_url: z.string().nullable().default(null),
+}).loose();
+
+export const ListProjectMembersResponseSchema = z.object({
+  members: z.array(ProjectMemberSchema),
+  total: z.number(),
+}).loose();
 
 const SearchProjectResultSchema = ProjectSchema.extend({
   match_source: z.string(),
@@ -4152,6 +4201,7 @@ const AppConnectionSchema = z.object({
   connected_by: appNullableString,
   connected_at: z.string().default(""),
   last_used_at: appNullableString,
+  actions_blocked: z.boolean().default(false).catch(false),
 }).loose();
 
 const AgentAppSchema = z.object({

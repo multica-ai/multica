@@ -587,7 +587,9 @@
   },
   "timeline": {
     "loading": "Chargement...",
-    "jump_to_latest": "Aller au plus récent"
+    "jump_to_latest": "Aller au plus récent",
+    "new_comments_one": "{{count}} nouveau commentaire",
+    "new_comments_other": "{{count}} nouveaux commentaires"
   },
   "activity": {
     "created": "a créé cette tâche",
@@ -765,6 +767,8 @@
       "send_with_body": "Sera envoyé avec le texte du brouillon.",
       "confirm_add": "Ajouter une annotation",
       "save": "Enregistrer l'annotation",
+      "confirm_add_short": "Ajouter",
+      "save_short": "Enregistrer",
       "add_comment": "Ajouter au commentaire",
       "add": "Ajouter à la réponse",
       "note_label": "Commenter",
@@ -1520,6 +1524,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "Afficher dans les commentaires",
     "locate_description": "Afficher dans la description",
+    "copy_link": "Copier le lien vers la dernière version",
+    "not_found": "Aucun livrable nommé « {{name}} » sur ce ticket",
+    "link_load_failed": "Impossible de charger les livrables de ce ticket pour ouvrir « {{name}} ». Rechargez pour réessayer.",
     "version_label": "Version {{version}} sur {{total}}",
     "version_of": "v{{version}} sur {{total}}",
     "info_source": "Source",
@@ -1735,7 +1742,6 @@
       "brief_header": "Les consignes de workflow reçues par cette exécution"
     },
     "detail": {
-      "follows_project": "(selon le projet)",
       "card_title": "{{workflow}} · selon {{project}}"
     },
     "list_separator": ", ",
@@ -1775,16 +1781,13 @@
       "name_placeholder": "Nom de l’état",
       "add": "Ajouter"
     },
-    "menu": {
-      "view_flow": "Voir tout le flux",
-      "switch": "Changer de workflow"
-    },
     "flow": {
       "title": "Workflow {{workflow}}",
       "scope_own": "Seul ce projet utilise ce workflow.",
       "no_handoff_here": "Pas de relais",
       "scope_shared_one": "{{count}} projet utilise ce workflow. Ses transferts s’appliquent à chaque projet qui l’utilise.",
-      "scope_shared_other": "{{count}} projets utilisent ce workflow. Ses transferts s’appliquent à tous."
+      "scope_shared_other": "{{count}} projets utilisent ce workflow. Ses transferts s’appliquent à tous.",
+      "switch": "Changer de workflow"
     },
     "templates": {
       "delivery": {
@@ -1904,5 +1907,37 @@
       "rejected": "Refusé",
       "rate_limited": "Limite atteinte"
     }
+  },
+  "environments": {
+    "section_title": "Environnements",
+    "running_count_one": "{{count}} en cours",
+    "running_count_other": "{{count}} en cours",
+    "this_machine": "Cet appareil",
+    "unknown_machine": "Appareil inconnu",
+    "state": {
+      "starting": "Démarrage",
+      "running": "En cours",
+      "exited": "Terminé",
+      "stopped": "Arrêté",
+      "unreachable": "Sans réponse"
+    },
+    "expires_in_minutes_one": "Expire dans {{count}} min",
+    "expires_in_minutes_other": "Expire dans {{count}} min",
+    "expires_in_hours_one": "Expire dans {{count}} h",
+    "expires_in_hours_other": "Expire dans {{count}} h",
+    "expires_in_days_one": "Expire dans {{count}} j",
+    "expires_in_days_other": "Expire dans {{count}} j",
+    "started_ago": "Démarré {{time}}",
+    "ended_ago": "Terminé {{time}}",
+    "last_seen": "Dernière réponse {{time}}",
+    "ended_count_one": "{{count}} terminé",
+    "ended_count_other": "{{count}} terminés",
+    "detected_hint": "Serveur trouvé dans le répertoire d'une exécution de cette tâche",
+    "remote_hint": "S'exécute sur {{machine}}. Une URL localhost ne s'ouvre que sur cet appareil.",
+    "localhost_hint": "Une URL localhost ne s'ouvre que sur l'appareil qui l'exécute.",
+    "open": "Ouvrir",
+    "copy_url": "Copier l'URL",
+    "copied": "URL copiée",
+    "copy_failed": "Impossible de copier l'URL"
   }
 }

@@ -579,7 +579,8 @@
   },
   "timeline": {
     "loading": "載入中…",
-    "jump_to_latest": "跳到最新"
+    "jump_to_latest": "跳到最新",
+    "new_comments_other": "{{count}} 則新評論"
   },
   "activity": {
     "created": "建立了這個任務",
@@ -743,6 +744,8 @@
       "send_with_body": "將連同下方正文一起傳送",
       "confirm_add": "新增批註",
       "save": "儲存批註",
+      "confirm_add_short": "新增",
+      "save_short": "儲存",
       "add_comment": "加入評論",
       "add": "加入回覆",
       "note_label": "批註",
@@ -1469,6 +1472,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "定位到評論",
     "locate_description": "定位到描述",
+    "copy_link": "複製最新版連結",
+    "not_found": "這個任務裡沒有名為「{{name}}」的產物",
+    "link_load_failed": "沒能載入這個任務的產物，打不開「{{name}}」。重新整理頁面再試一次。",
     "version_label": "第 {{version}} 版，共 {{total}} 版",
     "version_of": "v{{version}}（共 {{total}} 版）",
     "info_source": "來源",
@@ -1668,7 +1674,6 @@
       "brief_header": "這次執行收到的工作流說明"
     },
     "detail": {
-      "follows_project": "（跟隨專案）",
       "card_title": "「{{workflow}}」· 跟隨專案「{{project}}」"
     },
     "list_separator": "、",
@@ -1708,15 +1713,12 @@
       "name_placeholder": "狀態名稱",
       "add": "新增"
     },
-    "menu": {
-      "view_flow": "檢視完整流程",
-      "switch": "切換工作流"
-    },
     "flow": {
       "title": "「{{workflow}}」工作流",
       "scope_own": "只有這個專案使用這個工作流。",
       "no_handoff_here": "不交接",
-      "scope_shared_other": "{{count}} 個專案使用這個工作流，它的交接對這些專案都生效。"
+      "scope_shared_other": "{{count}} 個專案使用這個工作流，它的交接對這些專案都生效。",
+      "switch": "切換工作流"
     },
     "templates": {
       "delivery": {
@@ -1834,5 +1836,32 @@
       "rejected": "已拒絕",
       "rate_limited": "已限流"
     }
+  },
+  "environments": {
+    "section_title": "環境",
+    "running_count_other": "{{count}} 個執行中",
+    "this_machine": "本機",
+    "unknown_machine": "未知裝置",
+    "state": {
+      "starting": "啟動中",
+      "running": "執行中",
+      "exited": "已退出",
+      "stopped": "已停止",
+      "unreachable": "無回應"
+    },
+    "expires_in_minutes_other": "{{count}} 分鐘後到期",
+    "expires_in_hours_other": "{{count}} 小時後到期",
+    "expires_in_days_other": "{{count}} 天後到期",
+    "started_ago": "{{time}}啟動",
+    "ended_ago": "{{time}}結束",
+    "last_seen": "{{time}}最後回應",
+    "ended_count_other": "{{count}} 個已結束",
+    "detected_hint": "在這個任務某次執行的目錄中發現的服務",
+    "remote_hint": "執行於 {{machine}}，localhost 位址只能在那台機器上開啟。",
+    "localhost_hint": "localhost 位址只能在執行它的那台機器上開啟。",
+    "open": "開啟",
+    "copy_url": "複製位址",
+    "copied": "已複製位址",
+    "copy_failed": "無法複製位址"
   }
 }

@@ -49,6 +49,8 @@ LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
    AND t.status IN ('queued','deferred','dispatched','running','waiting_local_directory')
  ) r ON true
  WHERE w.workspace_id= $4 AND w.system_rule IS NULL
+  -- MUL-8472: private projects the caller cannot see.
+  AND ($5::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($5::uuid[])))
  UNION ALL
  -- The child-done system rule of each open parent that still waits for a
  -- sub-issue: every child when unstaged, else its lowest unfinished stage.
@@ -87,6 +89,8 @@ LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
    AND t.status IN ('queued','deferred','dispatched','running','waiting_local_directory')
  ) sr ON true
  WHERE w.workspace_id= $4 AND w.system_rule IS NOT NULL AND agg.open_count>0
+  -- MUL-8472: private projects the caller cannot see.
+  AND ($5::uuid[] IS NULL OR p.project_id IS NULL OR NOT (p.project_id = ANY($5::uuid[])))
   AND p.status NOT IN ('done','cancelled')
   AND NOT EXISTS(SELECT 1 FROM issue_status s WHERE s.workspace_id=p.workspace_id AND s.key=p.status AND s.category IN ('done','closed'))
 ), classified AS (
@@ -95,13 +99,13 @@ LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
   WHEN NOT issue_closed AND (disabled_at IS NOT NULL OR source='system') THEN 'disabled' ELSE 'ended' END AS scope
  FROM base
 ), filtered AS (
- SELECT id, issue_id, issue_title, issue_identifier, agent_id, agent_name, kind, mode, event_types, filter_actor_type, filter_actor_id, filter_actor_name, filter_agent_id, filter_agent_name, filter_task_id, interval_seconds, cron_expression, timezone, next_fire_at, enabled, revision, disabled_at, last_task_id, last_error, created_at, expires_at, expiry_seconds, on_timeout, timed_out_at, condition, max_fires, fire_count, paused_reason, created_by_agent, created_by_name, source_agent_id, source_agent_name, issue_closed, can_manage, active_runs, source, rule, system_stage, target_type, system_remaining, scope FROM classified WHERE ($5::text='all' OR scope= $5)
-  AND ($6::text='all' OR ($6='event' AND kind='event') OR ($6='at' AND kind='at') OR ($6='recurring' AND kind IN ('every','cron')))
-  AND ($7::text='' OR source= $7)
-  AND ($8::text='' OR agent_id::text= $8)
-  AND ($9::text='' OR strpos(lower(issue_title||' '||issue_identifier||' '||agent_name),lower($9))>0)
+ SELECT id, issue_id, issue_title, issue_identifier, agent_id, agent_name, kind, mode, event_types, filter_actor_type, filter_actor_id, filter_actor_name, filter_agent_id, filter_agent_name, filter_task_id, interval_seconds, cron_expression, timezone, next_fire_at, enabled, revision, disabled_at, last_task_id, last_error, created_at, expires_at, expiry_seconds, on_timeout, timed_out_at, condition, max_fires, fire_count, paused_reason, created_by_agent, created_by_name, source_agent_id, source_agent_name, issue_closed, can_manage, active_runs, source, rule, system_stage, target_type, system_remaining, scope FROM classified WHERE ($6::text='all' OR scope= $6)
+  AND ($7::text='all' OR ($7='event' AND kind='event') OR ($7='at' AND kind='at') OR ($7='recurring' AND kind IN ('every','cron')))
+  AND ($8::text='' OR source= $8)
+  AND ($9::text='' OR agent_id::text= $9)
+  AND ($10::text='' OR strpos(lower(issue_title||' '||issue_identifier||' '||agent_name),lower($10))>0)
 ), page AS (
- SELECT id, issue_id, issue_title, issue_identifier, agent_id, agent_name, kind, mode, event_types, filter_actor_type, filter_actor_id, filter_actor_name, filter_agent_id, filter_agent_name, filter_task_id, interval_seconds, cron_expression, timezone, next_fire_at, enabled, revision, disabled_at, last_task_id, last_error, created_at, expires_at, expiry_seconds, on_timeout, timed_out_at, condition, max_fires, fire_count, paused_reason, created_by_agent, created_by_name, source_agent_id, source_agent_name, issue_closed, can_manage, active_runs, source, rule, system_stage, target_type, system_remaining, scope FROM filtered ORDER BY created_at DESC,id DESC LIMIT $11::int OFFSET $10::int
+ SELECT id, issue_id, issue_title, issue_identifier, agent_id, agent_name, kind, mode, event_types, filter_actor_type, filter_actor_id, filter_actor_name, filter_agent_id, filter_agent_name, filter_task_id, interval_seconds, cron_expression, timezone, next_fire_at, enabled, revision, disabled_at, last_task_id, last_error, created_at, expires_at, expiry_seconds, on_timeout, timed_out_at, condition, max_fires, fire_count, paused_reason, created_by_agent, created_by_name, source_agent_id, source_agent_name, issue_closed, can_manage, active_runs, source, rule, system_stage, target_type, system_remaining, scope FROM filtered ORDER BY created_at DESC,id DESC LIMIT $12::int OFFSET $11::int
 ), details AS (
  SELECT p.id, p.issue_id, p.issue_title, p.issue_identifier, p.agent_id, p.agent_name, p.kind, p.mode, p.event_types, p.filter_actor_type, p.filter_actor_id, p.filter_actor_name, p.filter_agent_id, p.filter_agent_name, p.filter_task_id, p.interval_seconds, p.cron_expression, p.timezone, p.next_fire_at, p.enabled, p.revision, p.disabled_at, p.last_task_id, p.last_error, p.created_at, p.expires_at, p.expiry_seconds, p.on_timeout, p.timed_out_at, p.condition, p.max_fires, p.fire_count, p.paused_reason, p.created_by_agent, p.created_by_name, p.source_agent_id, p.source_agent_name, p.issue_closed, p.can_manage, p.active_runs, p.source, p.rule, p.system_stage, p.target_type, p.system_remaining, p.scope,r.status AS last_task_status,
   (SELECT count(*) FROM agent_task_queue t7 WHERE t7.context->>'wakeup_id'=p.id::text AND t7.issue_id=p.issue_id
@@ -137,17 +141,18 @@ SELECT jsonb_build_object(
 `
 
 type ListWorkspaceWakeupsParams struct {
-	AgentIds    []pgtype.UUID `json:"agent_ids"`
-	MemberID    pgtype.UUID   `json:"member_id"`
-	IsAdmin     bool          `json:"is_admin"`
-	WorkspaceID pgtype.UUID   `json:"workspace_id"`
-	Scope       string        `json:"scope"`
-	Kind        string        `json:"kind"`
-	Source      string        `json:"source"`
-	AgentID     string        `json:"agent_id"`
-	Search      string        `json:"search"`
-	PageOffset  int32         `json:"page_offset"`
-	PageLimit   int32         `json:"page_limit"`
+	AgentIds         []pgtype.UUID `json:"agent_ids"`
+	MemberID         pgtype.UUID   `json:"member_id"`
+	IsAdmin          bool          `json:"is_admin"`
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	HiddenProjectIds []pgtype.UUID `json:"hidden_project_ids"`
+	Scope            string        `json:"scope"`
+	Kind             string        `json:"kind"`
+	Source           string        `json:"source"`
+	AgentID          string        `json:"agent_id"`
+	Search           string        `json:"search"`
+	PageOffset       int32         `json:"page_offset"`
+	PageLimit        int32         `json:"page_limit"`
 }
 
 // Counts, filter choices, and page share one snapshot and the same access scope.
@@ -157,6 +162,7 @@ func (q *Queries) ListWorkspaceWakeups(ctx context.Context, arg ListWorkspaceWak
 		arg.MemberID,
 		arg.IsAdmin,
 		arg.WorkspaceID,
+		arg.HiddenProjectIds,
 		arg.Scope,
 		arg.Kind,
 		arg.Source,

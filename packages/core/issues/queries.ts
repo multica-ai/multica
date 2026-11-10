@@ -23,10 +23,13 @@ import type { SidebarIssuesRequest } from "./sidebar-list";
 import { ALL_STATUSES } from "./config";
 import { issueColumnCategory } from "./status-category";
 
-export function issueTasksOptions(issueId: string, includeDescendants = false) {
+export function issueTasksOptions(issueId: string, includeDescendants = false, view: "timeline" | "history" = "timeline") {
+  const key = includeDescendants ? issueKeys.subtreeTasks(issueId) : issueKeys.tasks(issueId);
   return queryOptions({
-    queryKey: includeDescendants ? issueKeys.subtreeTasks(issueId) : issueKeys.tasks(issueId),
-    queryFn: () => api.listTasksByIssue(issueId, includeDescendants),
+    queryKey: view === "history" ? [...key, "history"] : key,
+    queryFn: () => view === "timeline"
+      ? api.listTasksByIssue(issueId, includeDescendants, { view })
+      : api.listTasksByIssue(issueId, includeDescendants),
     enabled: !!issueId,
     staleTime: 30_000,
     refetchOnWindowFocus: true,
@@ -159,6 +162,11 @@ export const issueKeys = {
     [...issueKeys.childrenByParentsAll(wsId), parentIds] as const,
   childProgress: (wsId: string) =>
     [...issueKeys.all(wsId), "child-progress"] as const,
+  /** Prefix for every per-issue environments query in a workspace. */
+  environmentsAll: (wsId: string) =>
+    [...issueKeys.all(wsId), "environments"] as const,
+  environments: (wsId: string, issueId: string) =>
+    [...issueKeys.environmentsAll(wsId), issueId] as const,
   /** Prefix-match keys for invalidating the per-issue caches below across
    *  all issues. These keys carry no wsId, so `issueKeys.all(wsId)` does NOT
    *  cover them — WS reconnect recovery must invalidate these `*All`
@@ -168,6 +176,8 @@ export const issueKeys = {
   /** Full-issue timeline (single TanStack Query, no cursor). */
   timeline: (issueId: string) =>
     [...issueKeys.timelineAll(), issueId] as const,
+  commentThread: (issueId: string, commentId: string) =>
+    [...issueKeys.timeline(issueId), "thread", commentId] as const,
   /** Prefix across all issues — WS task lifecycle events invalidate here so
    *  an open composer's trigger preview refreshes when an agent's queue
    *  state changes (the dedup guard makes the answer queue-dependent). */
@@ -197,9 +207,9 @@ export const issueKeys = {
    *  click time. */
   attachments: (issueId: string) =>
     [...issueKeys.attachmentsAll(), issueId] as const,
-  /** Prefix-match key for invalidating tasks across all issues — used by
-   *  the global WS task: prefix path so any task lifecycle event refreshes
-   *  every per-issue list, regardless of which issue is currently mounted. */
+  deliverables: (issueId: string) =>
+    [...issueKeys.attachments(issueId), "deliverables"] as const,
+  /** Prefix for reconnects and task events without an issue scope. */
   tasksAll: () => ["issues", "tasks"] as const,
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => [...issueKeys.tasksAll(), issueId] as const,
@@ -684,6 +694,19 @@ export function issueTimelineOptions(issueId: string) {
   });
 }
 
+export function issueCommentThreadOptions(issueId: string, commentId: string) {
+  return queryOptions({
+    queryKey: issueKeys.commentThread(issueId, commentId),
+    queryFn: async () => {
+      const comments = await api.listComments(issueId, { thread: commentId });
+      if (!comments.some((comment) => comment.id === commentId)) {
+        throw new Error("Comment not found in thread");
+      }
+      return comments;
+    },
+  });
+}
+
 export function issueReactionsOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.reactions(issueId),
@@ -698,6 +721,17 @@ export function issueSubscribersOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.subscribers(issueId),
     queryFn: () => api.listIssueSubscribers(issueId),
+  });
+}
+
+// Reports arrive over realtime; the interval only re-derives "unreachable"
+// once a daemon goes quiet, which no event announces.
+export function issueEnvironmentsOptions(wsId: string, issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.environments(wsId, issueId),
+    queryFn: () => api.listIssueEnvironments(issueId),
+    enabled: !!wsId && !!issueId,
+    refetchInterval: 60_000,
   });
 }
 
@@ -716,5 +750,13 @@ export function issueAttachmentsOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.attachments(issueId),
     queryFn: () => api.listAttachments(issueId),
+  });
+}
+
+/** Complete attachment inventory; independent of the bounded discussion feed. */
+export function issueDeliverablesOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.deliverables(issueId),
+    queryFn: () => api.listIssueDeliverables(issueId),
   });
 }

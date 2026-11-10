@@ -27,12 +27,13 @@ import (
 
 // AppConnectionResponse is one team or personal account.
 type AppConnectionResponse struct {
-	ID          string  `json:"id"`
-	ToolkitSlug string  `json:"toolkit_slug"`
-	Status      string  `json:"status"`
-	ConnectedBy *string `json:"connected_by,omitempty"`
-	ConnectedAt string  `json:"connected_at"`
-	LastUsedAt  *string `json:"last_used_at"`
+	ID             string  `json:"id"`
+	ToolkitSlug    string  `json:"toolkit_slug"`
+	Status         string  `json:"status"`
+	ConnectedBy    *string `json:"connected_by,omitempty"`
+	ConnectedAt    string  `json:"connected_at"`
+	LastUsedAt     *string `json:"last_used_at"`
+	ActionsBlocked bool    `json:"actions_blocked"`
 }
 
 // AgentAppResponse is one app attached to an agent.
@@ -225,6 +226,26 @@ func (h *Handler) GetAppsOverview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list agent apps")
 		return
 	}
+	slugs := make([]string, 0, len(team)+len(personal))
+	for _, row := range team {
+		slugs = append(slugs, row.ToolkitSlug)
+	}
+	for _, row := range personal {
+		slugs = append(slugs, row.ToolkitSlug)
+	}
+	rules, err := h.Queries.ListAppActionRulesForRun(ctx, db.ListAppActionRulesForRunParams{
+		WorkspaceID: workspaceID, ToolkitSlugs: slugs, OwnerUserID: member.UserID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load account access")
+		return
+	}
+	blocked := map[string]bool{}
+	for _, rule := range rules {
+		if rule.Policy == connectedapps.PolicyBlock {
+			blocked[uuidToString(rule.OwnerUserID)+":"+rule.ToolkitSlug] = true
+		}
+	}
 	catalog := h.ConnectedApps.Catalog(ctx, workspaceID)
 	resp := AppsOverviewResponse{
 		CatalogMode:     catalog.Mode,
@@ -235,10 +256,14 @@ func (h *Handler) GetAppsOverview(w http.ResponseWriter, r *http.Request) {
 		AgentApps:       make([]AgentAppResponse, 0, len(agentApps)),
 	}
 	for _, row := range team {
-		resp.Team = append(resp.Team, connectionFromTeam(row))
+		connection := connectionFromTeam(row)
+		connection.ActionsBlocked = blocked[uuidToString(pgtype.UUID{})+":"+row.ToolkitSlug]
+		resp.Team = append(resp.Team, connection)
 	}
 	for _, row := range personal {
-		resp.Personal = append(resp.Personal, connectionFromPersonal(row))
+		connection := connectionFromPersonal(row)
+		connection.ActionsBlocked = blocked[uuidToString(member.UserID)+":"+row.ToolkitSlug]
+		resp.Personal = append(resp.Personal, connection)
 	}
 	for _, row := range agentApps {
 		resp.AgentApps = append(resp.AgentApps, agentAppResponse(row))
@@ -597,14 +622,25 @@ func (h *Handler) UpdateAppRules(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save rules")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
 	for _, rule := range req.Rules {
-		if _, err := h.Queries.UpsertAppActionRule(r.Context(), db.UpsertAppActionRuleParams{
+		if _, err := qtx.UpsertAppActionRule(r.Context(), db.UpsertAppActionRuleParams{
 			WorkspaceID: workspaceID, OwnerUserID: owner, ToolkitSlug: slug,
 			ActionClass: rule.ActionClass, Policy: rule.Policy, UpdatedBy: member.UserID,
 		}); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to save rules")
 			return
 		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save rules")
+		return
 	}
 	rules, err := h.rulesResponse(r.Context(), workspaceID, slug, owner)
 	if err != nil {
@@ -852,6 +888,9 @@ func (h *Handler) UpdateAgentApps(w http.ResponseWriter, r *http.Request) {
 	type want struct{ slug, scope, level string }
 	var wants []want
 	for _, app := range req.Apps {
+		if app.Level == "" {
+			app.Level = connectedapps.DefaultLevel(agent.PermissionMode)
+		}
 		slug := connectedapps.NormalizeSlug(app.ToolkitSlug)
 		if slug == "" || seen[slug] || !connectedapps.ValidScope(app.AccountScope) || !connectedapps.ValidLevel(app.Level) {
 			writeError(w, http.StatusBadRequest, "invalid app")
@@ -1144,20 +1183,22 @@ func (h *Handler) AppsGateway(w http.ResponseWriter, r *http.Request) {
 	h.ConnectedApps.ServeHTTP(w, r)
 }
 
-// ResumeAfterDecision implements connectedapps.Resumer: a run on the issue,
-// or a message in the chat from the person who decided.
 // CanActFor applies the rule that admits a new run of the agent to the
-// person a request waits on, so a decision never runs or resumes an agent
-// they could not start themselves.
+// authorizing human, or to a system principal when no human originator exists.
 func (h *Handler) CanActFor(ctx context.Context, workspaceID, agentID, userID pgtype.UUID) bool {
 	agent, err := h.Queries.GetAgent(ctx, agentID)
 	if err != nil || agent.WorkspaceID != workspaceID || agent.ArchivedAt.Valid {
 		return false
 	}
+	if !userID.Valid {
+		return h.canInvokeAgent(ctx, agent, "system", "", "", uuidToString(workspaceID))
+	}
 	uid := uuidToString(userID)
 	return h.canInvokeAgent(ctx, agent, "member", uid, uid, uuidToString(workspaceID))
 }
 
+// ResumeAfterDecision implements connectedapps.Resumer: a run on the issue,
+// or a message in the chat from the person who decided.
 func (h *Handler) ResumeAfterDecision(ctx context.Context, req db.AppActionRequest, actorID pgtype.UUID, note string) error {
 	if req.IssueID.Valid {
 		return h.TaskService.EnqueueAppDecisionRun(ctx, req.IssueID, req.AgentID, actorID, req.ID, note)

@@ -23,10 +23,8 @@ import { HighlightText } from "../highlight-text";
 import { scoreRow, scoreText } from "../matching";
 import { usePalette } from "../palette-context";
 import { PaletteGroup, ROW_CLASS, ROW_ICON_CLASS, RowCheck } from "../rows";
-import { ActorRow, AgentPresenceText, IssueResultRow } from "../result-rows";
+import { IssueResultRow } from "../result-rows";
 import { useServerSearch } from "../use-server-search";
-import type { DelegateActor } from "../types";
-import { useDelegateCandidates } from "../delegate/use-delegate";
 
 type ThemeValue = "light" | "dark" | "system";
 
@@ -218,73 +216,5 @@ export function ChatProjectPage({
         </CommandPrimitive.Item>
       ))}
     </PaletteGroup>
-  );
-}
-
-export function DelegateTargetPage({
-  query,
-  onSubmit,
-}: {
-  query: string;
-  onSubmit: (actor: DelegateActor) => void;
-}) {
-  const { t } = useT("search");
-  const { t: tIssues } = useT("issues");
-  const palette = usePalette();
-  const { actors, agentEntries } = useDelegateCandidates(true);
-  const q = query.trim().toLowerCase();
-  const visible = q ? actors.filter((actor) => scoreText(actor.name, q) > 0) : actors;
-  const agents = visible.filter((actor) => actor.type === "agent");
-  const squads = visible.filter((actor) => actor.type === "squad");
-  const entryOf = (id: string) => agentEntries.find((entry) => entry.agent.id === id) ?? null;
-  const select = (actor: DelegateActor) => {
-    palette.close();
-    onSubmit(actor);
-  };
-  return (
-    <>
-      {agents.length > 0 && (
-        <PaletteGroup heading={tIssues(($) => $.pickers.assignee.agents_group)}>
-          {agents.map((actor) => {
-            const entry = entryOf(actor.id);
-            return (
-              <ActorRow
-                key={actor.id}
-                value={`delegate-target:agent:${actor.id}`}
-                actorType="agent"
-                actorId={actor.id}
-                name={actor.name}
-                query={query}
-                showStatusDot
-                onSelect={() => select(actor)}
-                detail={
-                  entry ? (
-                    <AgentPresenceText availability={entry.availability} runtimeLabel={entry.runtimeLabel} />
-                  ) : undefined
-                }
-              />
-            );
-          })}
-        </PaletteGroup>
-      )}
-      {squads.length > 0 && (
-        <PaletteGroup heading={tIssues(($) => $.pickers.assignee.squads_group)}>
-          {squads.map((actor) => (
-            <ActorRow
-              key={actor.id}
-              value={`delegate-target:squad:${actor.id}`}
-              actorType="squad"
-              actorId={actor.id}
-              name={actor.name}
-              query={query}
-              onSelect={() => select(actor)}
-            />
-          ))}
-        </PaletteGroup>
-      )}
-      {visible.length === 0 && (
-        <div className="py-8 text-center text-body text-muted-foreground">{t(($) => $.empty.no_results)}</div>
-      )}
-    </>
   );
 }

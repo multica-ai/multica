@@ -667,22 +667,25 @@
       "queued_prefix": "{{when}} 대기 시작"
     },
     "connected_apps": {
-      "subtitle": "이 에이전트가 사용할 수 있는 앱입니다. 각 앱은 팀 계정 또는 실행한 사람의 계정으로, 선택한 수준에서 동작합니다.",
       "loading": "앱을 불러오는 중…",
       "load_failed": "이 에이전트의 앱을 불러오지 못했습니다.",
-      "empty": "아직 앱이 없습니다.",
-      "add_placeholder": "앱 추가…",
-      "account": "계정",
+      "empty": "연결된 앱이 없습니다.",
       "level": "수준",
-      "remove": "{{app}} 제거",
       "team_connected": "팀 계정 연결됨",
       "team_missing": "팀 계정 미연결",
       "personal_connected": "내 계정 연결됨",
       "personal_missing": "이 앱을 아직 연결하지 않았습니다",
       "team_admin_only": "에이전트에 팀 계정을 부여할 수 있는 사람은 워크스페이스 관리자뿐입니다.",
-      "team_shared_warning": "이 에이전트를 실행할 수 있는 사람은 누구나 이 앱들을 팀 계정으로 사용합니다.",
+      "team_shared_warning": "이 에이전트를 실행할 수 있는 사람은 누구나 이 팀 계정으로 작업할 수 있습니다.",
       "manage_link": "설정 → 연결된 앱에서 계정 관리",
-      "save_failed_toast": "저장하지 못했습니다. 다시 시도하세요"
+      "save_failed_toast": "저장하지 못했습니다. 다시 시도하세요",
+      "team_help": "관리자가 연결하는 워크스페이스 공용 계정입니다.",
+      "personal_help": "실행을 시작한 사람의 계정을 사용합니다. 각자 계정을 연결해야 합니다.",
+      "available_accounts": "사용 가능: {{accounts}}",
+      "enable": "{{app}} 활성화",
+      "account_for": "{{app}} 계정",
+      "connect_hint": "필요한 앱이 없나요? 설정에서 계정을 연결하세요.",
+      "available_personal": "내 계정"
     }
   },
   "char_counter": {

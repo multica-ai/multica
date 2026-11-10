@@ -159,12 +159,6 @@
     "toast_saved": "Modifications enregistrées"
   },
   "preferences": {
-    "theme": {
-      "title": "Thème",
-      "light": "Clair",
-      "dark": "Sombre",
-      "system": "Système"
-    },
     "language": {
       "title": "Langue",
       "english": "English",
@@ -196,13 +190,151 @@
     },
     "comments_title": "Commentaires et discussion",
     "region_title": "Langue et région",
-    "appearance_title": "Apparence",
     "issue_fields_title": "Champs affichés à la création de tâches",
     "issue_fields": {
       "field": "Champ",
       "quick": "Création avec un agent",
       "manual": "Création manuelle",
       "unsupported": "Indisponible lors de la création avec un agent"
+    }
+  },
+  "appearance": {
+    "reset": "Rétablir les valeurs par défaut",
+    "color": {
+      "title": "Couleur"
+    },
+    "mode": {
+      "title": "Mode",
+      "light": "Clair",
+      "dark": "Sombre",
+      "system": "Système"
+    },
+    "theme": {
+      "title": "Thème",
+      "description": "Couleurs, bordures, ombres et coins de toute l’app. Importez un fichier de thème pour en ajouter.",
+      "default": "Par défaut",
+      "pop": "Pop",
+      "built_in": "Intégrés",
+      "installed": "Installés",
+      "remove": "Retirer {{name}}",
+      "safe_mode": "Mode sans échec : votre thème est suspendu jusqu’à la fermeture de cette fenêtre.",
+      "safe_mode_exit": "Utiliser mon thème",
+      "folder": "Dossier des thèmes",
+      "folder_problems": "Certains thèmes du dossier des thèmes ne passent pas les vérifications. Corrigez-les et enregistrez ; la dernière version valide reste utilisée."
+    },
+    "import": {
+      "button": "Importer un thème",
+      "from_zip": "Fichier de thème (.zip)",
+      "from_folder": "Dossier du thème",
+      "storage_full": "Pas assez d’espace sur cet appareil pour enregistrer le thème. Retirez un autre thème et réessayez.",
+      "confirm_title": "Installer « {{name}} » ?",
+      "warning": "Un thème peut modifier l’apparence de toutes les pages, y compris les boîtes de dialogue et les avertissements. N’installez que des thèmes de personnes de confiance.",
+      "author": "Auteur",
+      "version": "Version",
+      "replaces": "{{to}} (remplace {{from}})",
+      "includes": "Contient",
+      "cancel": "Annuler",
+      "confirm": "Installer et utiliser",
+      "error_title": "Impossible d’installer ce thème",
+      "error_description": "Rien n’a été modifié. Le fichier de thème présente ces problèmes :",
+      "close": "Fermer",
+      "has_options_one": "{{count}} option",
+      "has_options_other": "{{count}} options",
+      "has_assets_one": "{{count}} police ou image",
+      "has_assets_other": "{{count}} polices et images",
+      "menu_label": "Thèmes personnalisés",
+      "beta": "Bêta",
+      "beta_note": "Les thèmes personnalisés sont en bêta. Les variables et le manifeste qu’un thème utilise peuvent changer, et le thème devra peut-être être mis à jour."
+    },
+    "tools": {
+      "label": "Autres actions de thème",
+      "duplicate": "Dupliquer « {{name}} » en nouveau thème",
+      "open_folder": "Ouvrir le dossier des thèmes",
+      "guide": "Créer un thème",
+      "duplicated_web": "{{file}} a été téléchargé. Décompressez-le, modifiez theme.css, puis importez le dossier.",
+      "duplicated_desktop": "« {{name}} » a été créé dans le dossier des thèmes. Les modifications de son theme.css s’appliquent à l’enregistrement.",
+      "duplicate_failed": "Impossible de créer la copie : {{error}}"
+    },
+    "theme_options": {
+      "title": "Options du thème",
+      "description": "Proposées par {{name}}.",
+      "reset": "Réinitialiser les options"
+    },
+    "ui_text": {
+      "title": "Texte de l’interface",
+      "description": "Menus, boutons, listes, barre latérale et titres."
+    },
+    "latin_font": {
+      "title": "Police latine"
+    },
+    "ui_font": {
+      "inter": "Par défaut",
+      "system": "Système",
+      "serif": "Serif",
+      "mono": "Chasse fixe"
+    },
+    "cjk_font": {
+      "title": "Police CJK",
+      "description": "Caractères chinois ; le japonais et le coréen suivent ce réglage.",
+      "sans": "Sans",
+      "serif": "Serif",
+      "kai": "Kai",
+      "built_in": "Intégrées",
+      "local": "Sur cet appareil",
+      "load_local": "Afficher les polices de cet appareil…",
+      "loading": "Recherche des polices…",
+      "none": "Aucune police avec des caractères chinois sur cet appareil.",
+      "load_failed": "Impossible de lire les polices de cet appareil.",
+      "sample": "永和九年 漢字"
+    },
+    "follow_ui": "Comme l’interface",
+    "theme_font": "Police du thème",
+    "font_size": {
+      "title": "Taille du texte",
+      "description": "Agrandit uniquement le texte. Les espacements et la mise en page restent identiques.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · Par défaut"
+    },
+    "content_text": {
+      "title": "Texte du contenu",
+      "description": "Descriptions de tickets, commentaires, chat et documents.",
+      "sample": "Les descriptions et commentaires se lisent en entier : ils peuvent utiliser une police faite pour la lecture, tandis que listes et boutons restent compacts."
+    },
+    "code_font": {
+      "title": "Police du code",
+      "description": "Blocs de code, code en ligne et journaux.",
+      "geist": "Par défaut",
+      "jetbrains": "Ligatures",
+      "system": "Chasse fixe système"
+    },
+    "content_size": {
+      "title": "Taille du texte",
+      "description": "Seulement le texte du contenu ; l’interface garde sa taille.",
+      "follow": "Comme l’interface ({{size}} px)"
+    },
+    "content_leading": {
+      "title": "Interligne",
+      "compact": "Serré",
+      "default": "Par défaut",
+      "relaxed": "Aéré"
+    },
+    "layout": {
+      "title": "Mise en page et accessibilité"
+    },
+    "density": {
+      "title": "Densité",
+      "description": "Hauteur des lignes dans les listes de tickets et la recherche.",
+      "compact": "Compacte",
+      "default": "Par défaut",
+      "comfortable": "Aérée"
+    },
+    "reduce_motion": {
+      "title": "Réduire les animations",
+      "description": "Désactive les animations et transitions. Désactivé, le réglage du système s’applique toujours."
+    },
+    "high_contrast": {
+      "title": "Augmenter le contraste",
+      "description": "Texte secondaire plus foncé et bordures plus marquées."
     }
   },
   "shortcuts": {
@@ -396,6 +528,7 @@
     "tabs": {
       "profile": "Profil",
       "preferences": "Préférences",
+      "appearance": "Apparence",
       "shortcuts": "Raccourcis",
       "issue": "Tâche",
       "notifications": "Notifications",
@@ -1487,12 +1620,11 @@
     "title": "Donner des outils aux agents",
     "current": "Cette page",
     "mcp": "Ajoutés par les administrateurs, partagés dans l'espace de travail puis attribués agent par agent.",
-    "apps": "Comptes d'équipe ou personnels connectés via Multica, attribués à chaque agent avec un compte et un niveau de permission.",
+    "apps": "Des comptes d'équipe ou personnels connectés via Multica et ajoutés à chaque agent.",
     "plugins": "Paquets installés pouvant ajouter des outils, des hooks planifiés et du stockage, chacun avec ses propres autorisations."
   },
   "connected_apps": {
-    "description": "Les comptes par lesquels vos agents agissent. Chaque appel passe par Multica, qui applique vos règles et demande avant d'envoyer, supprimer ou partager.",
-    "add_app": "Ajouter une app",
+    "description": "Les comptes que vos agents utilisent pour accéder aux apps externes. Les actions autorisées sont exécutées immédiatement.",
     "loading": "Chargement des apps…",
     "load_failed": "Impossible de charger les apps.",
     "team_title": "Comptes d'équipe",
@@ -1523,17 +1655,18 @@
     "toast_disconnected": "Déconnecté",
     "toast_failed": "Une erreur est survenue. Veuillez réessayer.",
     "add": {
-      "title": "Ajouter une app",
-      "description": "Connectez un compte pour l'équipe ou pour vous. Les agents qui l'utilisent se choisissent sur la page Apps de chaque agent.",
       "search": "Rechercher une app…",
       "empty": "Aucune app ne correspond.",
       "curated": "Sélection",
       "recommended_team": "Souvent un compte d'équipe",
       "recommended_personal": "Souvent un compte personnel",
-      "connect_team": "Connecter pour l'équipe",
+      "connect_team": "Connecter un compte d’équipe",
       "connect_personal": "Connecter mon compte",
       "connecting": "Connexion…",
-      "connected": "Connecté"
+      "connected": "Connecté",
+      "connect": "Connecter",
+      "team_description": "Connectez un compte partagé de l’espace de travail. Autorisez son utilisation sur la page Apps de chaque agent.",
+      "personal_description": "Connectez votre compte personnel. Les apps utilisant le compte de la personne qui déclenche l’exécution l’utilisent lorsque vous lancez une exécution."
     },
     "disconnect_team": {
       "title": "Déconnecter le compte {{app}} de l'équipe ?",
@@ -1661,6 +1794,19 @@
       "row_label": "Apps autorisées",
       "row_description_one": "{{count}} app autorisée",
       "row_description_other": "{{count}} apps autorisées"
+    },
+    "saved_access": {
+      "account": "Des restrictions enregistrées bloquent encore certaines actions de ce compte.",
+      "agent": "Cette app conserve un ancien accès en lecture seule.",
+      "catalog": "Une liste enregistrée masque les autres apps.",
+      "allow_actions": "Autoriser toutes les actions",
+      "open_catalog": "Afficher toutes les apps",
+      "account_confirm": "Les agents utilisant ce compte pourront lire, écrire, envoyer, supprimer et partager. Les restrictions enregistrées seront remplacées.",
+      "agent_confirm": "Cet agent pourra lire, écrire, envoyer, supprimer et partager via cette app, dans les limites du compte.",
+      "catalog_confirm": "Toutes les apps connectables seront disponibles dans l’espace de travail. Les connexions et les attributions existantes seront conservées.",
+      "cancel": "Annuler",
+      "admin_required": "Un administrateur peut rétablir l’accès.",
+      "account_link": "Ce compte conserve des restrictions. Rétablissez l’accès dans les apps connectées."
     }
   }
 }

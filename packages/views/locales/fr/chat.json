@@ -52,6 +52,8 @@
     "action_failed_toast": "Impossible de mettre à jour le message en file d'attente"
   },
   "message_list": {
+    "jump_to_latest": "Aller au plus récent",
+    "new_reply": "Nouvelle réponse",
     "show_details": "Afficher les détails",
     "replied_in": "Réponse en {{elapsed}}",
     "failed_after": "Échec après {{elapsed}}",

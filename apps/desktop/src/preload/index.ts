@@ -20,6 +20,15 @@ import {
   type IssueWindowRequest,
 } from "../shared/issue-window";
 import { AUTH_SESSION_STATE_CHANNEL } from "../shared/auth-session";
+import {
+  THEME_FOLDER_CHANGED_CHANNEL,
+  THEME_FOLDER_OPEN_CHANNEL,
+  THEME_FOLDER_READ_CHANNEL,
+  THEME_FOLDER_WRITE_CHANNEL,
+  type ThemeFolderFile,
+  type ThemeFolderSnapshot,
+  type ThemeFolderWriteResult,
+} from "../shared/theme-folder";
 import type {
   DaemonStatus,
   LocalRuntimeProbe,
@@ -223,6 +232,23 @@ const desktopAPI = {
   /** Validate that a path is an existing readable+writable directory. */
   validateLocalDirectory: (path: string) =>
     ipcRenderer.invoke("local-directory:validate", path),
+  /** Read every theme in the themes folder, and start watching it. */
+  readThemeFolder: (): Promise<ThemeFolderSnapshot> =>
+    ipcRenderer.invoke(THEME_FOLDER_READ_CHANNEL),
+  /** Called once a change in the themes folder settles. Returns an unsubscribe fn. */
+  onThemeFolderChange: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on(THEME_FOLDER_CHANGED_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(THEME_FOLDER_CHANGED_CHANNEL, handler);
+    };
+  },
+  /** Open the themes folder, or one theme's folder in it, in the file manager. */
+  openThemeFolder: (name?: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke(THEME_FOLDER_OPEN_CHANNEL, name),
+  /** Create a theme folder from files; never replaces an existing one. */
+  writeThemeFolder: (name: string, files: ThemeFolderFile[]): Promise<ThemeFolderWriteResult> =>
+    ipcRenderer.invoke(THEME_FOLDER_WRITE_CHANNEL, name, files),
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  The renderer should close the active tab; if it was the last tab,
    *  call `closeWindow()` to dismiss the window. Returns an unsubscribe fn. */
