@@ -1,17 +1,20 @@
 /**
- * Client-side OS + architecture detection for the /download page.
+ * OS + architecture detection for the desktop download buttons.
  *
- * Prefers the modern `navigator.userAgentData.getHighEntropyValues`
- * API (Chromium), falling back to the UA string.
+ * The server reads the request's User-Agent (and the low-entropy
+ * `Sec-CH-UA-Platform` / `Sec-CH-UA-Mobile` hints Chromium always sends)
+ * so the first paint already names the visitor's platform. In the
+ * browser, `navigator.userAgentData.getHighEntropyValues` can then
+ * confirm the CPU architecture on Chromium.
  *
  * Known limitation: Safari on macOS always reports `Intel Mac OS X`
  * in the UA string even on Apple Silicon, and Safari does not
- * implement userAgentData. This function therefore returns `arm64`
- * as the best default for any Mac — UI surfaces a small hint that
- * points Intel users to the architecture-specific download below.
+ * implement userAgentData. Detection therefore returns `arm64` as the
+ * best default for any Mac, with `archConfident: false` so the UI can
+ * point Intel users to the Intel build.
  */
 
-export type OSName = "mac" | "windows" | "linux" | "unknown";
+export type OSName = "mac" | "windows" | "linux" | "mobile" | "unknown";
 export type Arch = "arm64" | "x64" | "unknown";
 
 export interface DetectResult {
@@ -19,24 +22,29 @@ export interface DetectResult {
   arch: Arch;
   /** True when arch came from userAgentData high-entropy values
    *  (i.e. we can trust the Intel vs arm distinction). False when
-   *  we defaulted — UI should show the Intel Mac disclaimer. */
+   *  we defaulted — UI should offer the other architecture. */
   archConfident: boolean;
 }
+
+const UNKNOWN_PLATFORM: DetectResult = { os: "unknown", arch: "unknown", archConfident: false };
 
 interface UADataRecord {
   platform: string;
   architecture: string;
+  mobile?: boolean;
 }
 
 interface UserAgentDataLike {
+  mobile?: boolean;
   getHighEntropyValues?: (hints: string[]) => Promise<UADataRecord>;
 }
 
 function normalizePlatform(raw: string): OSName {
   const p = raw.toLowerCase();
+  if (p.includes("android") || p.includes("ios")) return "mobile";
   if (p.includes("mac") || p === "darwin") return "mac";
   if (p.includes("win")) return "windows";
-  if (p.includes("linux")) return "linux";
+  if (p.includes("linux") || p.includes("chrome os")) return "linux";
   return "unknown";
 }
 
@@ -47,10 +55,44 @@ function normalizeArch(raw: string): Arch {
   return "unknown";
 }
 
-export async function detectOS(): Promise<DetectResult> {
-  if (typeof navigator === "undefined") {
-    return { os: "unknown", arch: "unknown", archConfident: false };
+/**
+ * Platform from a User-Agent string, optionally sharpened by the
+ * `Sec-CH-UA-Platform` and `Sec-CH-UA-Mobile` request hints.
+ */
+export function detectFromUserAgent(
+  ua: string,
+  hints: { platform?: string | null; mobile?: string | null } = {},
+): DetectResult {
+  const hinted = hints.platform ? normalizePlatform(hints.platform.replace(/"/g, "")) : "unknown";
+  const mobile =
+    hints.mobile === "?1" || hinted === "mobile" || /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+  if (mobile) return { os: "mobile", arch: "unknown", archConfident: false };
+
+  const os: OSName =
+    hinted !== "unknown"
+      ? hinted
+      : /Mac OS X|Macintosh/i.test(ua)
+        ? "mac"
+        : /Windows/i.test(ua)
+          ? "windows"
+          : /Linux|X11|CrOS/i.test(ua)
+            ? "linux"
+            : "unknown";
+
+  let arch: Arch = "unknown";
+  if (os === "mac") {
+    // Best default. Intel Mac users get the Intel build offered beside it.
+    arch = "arm64";
+  } else if (/arm|aarch/i.test(ua)) {
+    arch = "arm64";
+  } else if (os !== "unknown") {
+    arch = "x64";
   }
+  return { os, arch, archConfident: false };
+}
+
+export async function detectOS(): Promise<DetectResult> {
+  if (typeof navigator === "undefined") return UNKNOWN_PLATFORM;
 
   // Modern Chromium: userAgentData with high-entropy values gives
   // both the platform name and CPU architecture unambiguously.
@@ -62,6 +104,7 @@ export async function detectOS(): Promise<DetectResult> {
         "platform",
         "architecture",
       ]);
+      if (data.mobile ?? uaData.mobile) return { os: "mobile", arch: "unknown", archConfident: false };
       const os = normalizePlatform(data.platform);
       const arch = normalizeArch(data.architecture);
       return { os, arch, archConfident: arch !== "unknown" };
@@ -70,28 +113,9 @@ export async function detectOS(): Promise<DetectResult> {
     }
   }
 
-  // Fallback: UA + navigator.platform. Safari on Mac lands here and
-  // cannot distinguish Apple Silicon from Intel.
-  const ua = navigator.userAgent;
-  const platform = navigator.platform || "";
-
-  const os: OSName = /Mac|iPhone|iPad|iPod/i.test(platform) || /Mac OS X/i.test(ua)
-    ? "mac"
-    : /Win/i.test(platform) || /Windows/i.test(ua)
-      ? "windows"
-      : /Linux/i.test(platform) || /Linux/i.test(ua)
-        ? "linux"
-        : "unknown";
-
-  let arch: Arch = "unknown";
-  if (os === "mac") {
-    // Best default. Real Intel Mac users will see the architecture hint.
-    arch = "arm64";
-  } else if (/arm|aarch/i.test(ua)) {
-    arch = "arm64";
-  } else if (os !== "unknown") {
-    arch = "x64";
+  // iPadOS Safari presents itself as a Mac; touch support gives it away.
+  if (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1) {
+    return { os: "mobile", arch: "unknown", archConfident: false };
   }
-
-  return { os, arch, archConfident: false };
+  return detectFromUserAgent(navigator.userAgent, { platform: navigator.platform });
 }

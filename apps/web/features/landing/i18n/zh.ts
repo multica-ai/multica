@@ -1,194 +1,10 @@
 import { githubUrl, discordUrl } from "../components/shared";
 import type { LandingDict } from "./types";
+import { zhSiteCopy } from "./site-zh";
 
-export function createZhDict(
-  allowSignup: boolean,
-  docsHref: string,
-): LandingDict {
+export function createZhDict(): LandingDict {
   return {
-  header: {
-    github: "GitHub",
-    cta: "\u5f00\u59cb\u4f7f\u7528",
-    dashboard: "\u8fdb\u5165\u5de5\u4f5c\u53f0",
-    docs: "\u6587\u6863",
-    changelog: "\u66f4\u65b0\u65e5\u5fd7",
-    useCases: "\u6848\u4f8b",
-    navigation: "\u4e3b\u5bfc\u822a",
-    openMenu: "\u6253\u5f00\u5bfc\u822a\u83dc\u5355",
-    closeMenu: "\u5173\u95ed\u5bfc\u822a\u83dc\u5355",
-  },
-
-  hero: {
-    headlineLine1: "\u4f60\u7684\u4e0b\u4e00\u6279\u5458\u5de5",
-    headlineLine2: "\u4e0d\u662f\u4eba\u7c7b\u3002",
-    subheading:
-      "Multica 是一个源码公开的平台，\u5c06\u7f16\u7801 智能体 \u53d8\u6210\u771f\u6b63\u7684\u961f\u53cb\u3002\u5206\u914d\u4efb\u52a1\u3001\u8ddf\u8e2a\u8fdb\u5ea6\u3001\u79ef\u7d2f\u6280\u80fd\u2014\u2014\u5728\u4e00\u4e2a\u5730\u65b9\u7ba1\u7406\u4f60\u7684\u4eba\u7c7b + 智能体 \u56e2\u961f\u3002",
-    cta: "免费开始",
-    downloadDesktop: "下载桌面端",
-    talkToSales: "联系商务",
-    worksWith: "支持 20+ 种 AI 编程工具",
-    imageAlt: "Multica \u770b\u677f\u89c6\u56fe\u2014\u2014\u4eba\u7c7b\u548c 智能体 \u534f\u540c\u7ba1\u7406\u4efb\u52a1",
-  },
-
-  features: {
-    teammates: {
-      label: "\u56e2\u961f\u534f\u4f5c",
-      title: "\u50cf\u5206\u914d\u7ed9\u540c\u4e8b\u4e00\u6837\u5206\u914d\u7ed9 智能体",
-      description:
-        "智能体 \u4e0d\u662f\u88ab\u52a8\u5de5\u5177\u2014\u2014\u5b83\u4eec\u662f\u4e3b\u52a8\u53c2\u4e0e\u8005\u3002\u5b83\u4eec\u62e5\u6709\u4e2a\u4eba\u8d44\u6599\u3001\u62a5\u544a\u72b6\u6001\u3001\u521b\u5efa\u4efb\u52a1\u3001\u53d1\u8868\u8bc4\u8bba\u3001\u66f4\u65b0\u72b6\u6001\u3002\u4f60\u7684\u6d3b\u52a8\u6d41\u5c55\u793a\u4eba\u7c7b\u548c 智能体 \u5e76\u80a9\u5de5\u4f5c\u3002",
-      cards: [
-        {
-          title: "智能体 \u51fa\u73b0\u5728\u6307\u6d3e\u4eba\u9009\u62e9\u5668\u4e2d",
-          description:
-            "\u4eba\u7c7b\u548c 智能体 \u51fa\u73b0\u5728\u540c\u4e00\u4e2a\u4e0b\u62c9\u83dc\u5355\u91cc\u3002\u628a\u4efb\u52a1\u5206\u914d\u7ed9 智能体 \u548c\u5206\u914d\u7ed9\u540c\u4e8b\u6ca1\u6709\u4efb\u4f55\u533a\u522b\u3002",
-        },
-        {
-          title: "\u81ea\u4e3b\u53c2\u4e0e",
-          description:
-            "智能体 \u4e3b\u52a8\u521b\u5efa\u4efb\u52a1\u3001\u53d1\u8868\u8bc4\u8bba\u3001\u66f4\u65b0\u72b6\u6001\u2014\u2014\u800c\u4e0d\u662f\u53ea\u5728\u88ab\u63d0\u793a\u65f6\u624d\u884c\u52a8\u3002",
-        },
-        {
-          title: "\u7edf\u4e00\u7684\u6d3b\u52a8\u65f6\u95f4\u7ebf",
-          description:
-            "\u6574\u4e2a\u56e2\u961f\u5171\u7528\u4e00\u4e2a\u6d3b\u52a8\u6d41\u3002\u4eba\u7c7b\u548c 智能体 \u7684\u64cd\u4f5c\u4ea4\u66ff\u5c55\u793a\uff0c\u4f60\u59cb\u7ec8\u77e5\u9053\u53d1\u751f\u4e86\u4ec0\u4e48\u3001\u662f\u8c01\u505a\u7684\u3002",
-        },
-      ],
-    },
-    autonomous: {
-      label: "\u81ea\u4e3b\u6267\u884c",
-      title: "\u8bbe\u7f6e\u540e\u65e0\u9700\u7ba1\u7406\u2014\u2014智能体 \u5728\u4f60\u7761\u89c9\u65f6\u5de5\u4f5c",
-      description:
-        "不只是提示-响应。完整的 task 生命周期管理：入队、领取、启动、完成或失败。智能体 主动报告阻塞，你通过 WebSocket 获取实时进度。",
-      cards: [
-        {
-          title: "\u5b8c\u6574\u7684\u4efb\u52a1\u751f\u547d\u5468\u671f",
-          description:
-            "\u6bcf\u4e2a\u4efb\u52a1\u7ecf\u5386\u5165\u961f \u2192 \u9886\u53d6 \u2192 \u542f\u52a8 \u2192 \u5b8c\u6210/\u5931\u8d25\u3002\u6ca1\u6709\u65e0\u58f0\u5931\u8d25\u2014\u2014\u6bcf\u6b21\u72b6\u6001\u8f6c\u6362\u90fd\u88ab\u8ddf\u8e2a\u548c\u5e7f\u64ad\u3002",
-        },
-        {
-          title: "\u4e3b\u52a8\u62a5\u544a\u963b\u585e",
-          description:
-            "\u5f53 智能体 \u9047\u5230\u56f0\u96be\u65f6\uff0c\u4f1a\u7acb\u5373\u53d1\u51fa\u8b66\u62a5\u3002\u4e0d\u7528\u7b49\u51e0\u4e2a\u5c0f\u65f6\u540e\u624d\u53d1\u73b0\u4ec0\u4e48\u90fd\u6ca1\u53d1\u751f\u3002",
-        },
-        {
-          title: "\u5b9e\u65f6\u8fdb\u5ea6\u63a8\u9001",
-          description:
-            "\u57fa\u4e8e WebSocket \u7684\u5b9e\u65f6\u66f4\u65b0\u3002\u5b9e\u65f6\u89c2\u770b 智能体 \u5de5\u4f5c\uff0c\u6216\u968f\u65f6\u67e5\u770b\u2014\u2014\u65f6\u95f4\u7ebf\u59cb\u7ec8\u662f\u6700\u65b0\u7684\u3002",
-        },
-      ],
-    },
-    skills: {
-      label: "\u6280\u80fd\u5e93",
-      title: "\u6bcf\u4e2a\u89e3\u51b3\u65b9\u6848\u90fd\u6210\u4e3a\u5168\u56e2\u961f\u53ef\u590d\u7528\u7684\u6280\u80fd",
-      description:
-        "\u6280\u80fd\u662f\u53ef\u590d\u7528\u7684\u80fd\u529b\u5b9a\u4e49\u2014\u2014\u4ee3\u7801\u3001\u914d\u7f6e\u548c\u4e0a\u4e0b\u6587\u6253\u5305\u5728\u4e00\u8d77\u3002\u53ea\u9700\u7f16\u5199\u4e00\u6b21\uff0c\u56e2\u961f\u4e2d\u6bcf\u4e2a 智能体 \u90fd\u80fd\u4f7f\u7528\u3002\u4f60\u7684\u6280\u80fd\u5e93\u968f\u65f6\u95f4\u4e0d\u65ad\u79ef\u7d2f\u3002",
-      cards: [
-        {
-          title: "\u53ef\u590d\u7528\u7684\u6280\u80fd\u5b9a\u4e49",
-          description:
-            "\u5c06\u77e5\u8bc6\u5c01\u88c5\u6210\u4efb\u4f55 智能体 \u90fd\u80fd\u6267\u884c\u7684\u6280\u80fd\u3002\u90e8\u7f72\u5230\u6d4b\u8bd5\u73af\u5883\u3001\u7f16\u5199\u8fc1\u79fb\u3001\u5ba1\u67e5 PR\u2014\u2014\u5168\u90e8\u4ee3\u7801\u5316\u3002",
-        },
-        {
-          title: "\u5168\u56e2\u961f\u5171\u4eab",
-          description:
-            "\u4e00\u4e2a\u4eba\u7684\u6280\u80fd\u5c31\u662f\u6bcf\u4e2a 智能体 \u7684\u6280\u80fd\u3002\u7f16\u5199\u4e00\u6b21\uff0c\u5168\u56e2\u961f\u53d7\u76ca\u3002",
-        },
-        {
-          title: "\u590d\u5408\u589e\u957f",
-          description:
-            "\u7b2c 1 \u5929\uff1a\u4f60\u6559 智能体 \u90e8\u7f72\u3002\u7b2c 30 \u5929\uff1a\u6bcf\u4e2a 智能体 \u90fd\u80fd\u90e8\u7f72\u3001\u5199\u6d4b\u8bd5\u3001\u505a\u4ee3\u7801\u5ba1\u67e5\u3002\u56e2\u961f\u80fd\u529b\u6307\u6570\u7ea7\u589e\u957f\u3002",
-        },
-      ],
-    },
-    runtimes: {
-      label: "\u8fd0\u884c\u65f6",
-      title: "\u4e00\u4e2a\u63a7\u5236\u53f0\u7ba1\u7406\u6240\u6709\u7b97\u529b",
-      description:
-        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 29 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
-      cards: [
-        {
-          title: "\u7edf\u4e00\u8fd0\u884c\u65f6\u9762\u677f",
-          description:
-            "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\u5728\u540c\u4e00\u89c6\u56fe\u4e2d\u3002\u65e0\u9700\u5728\u4e0d\u540c\u7ba1\u7406\u754c\u9762\u4e4b\u95f4\u5207\u6362\u3002",
-        },
-        {
-          title: "\u5b9e\u65f6\u76d1\u63a7",
-          description:
-            "\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u968f\u65f6\u4e86\u89e3\u4f60\u7684\u7b97\u529b\u5728\u505a\u4ec0\u4e48\u3002",
-        },
-        {
-          title: "\u9996\u6b21\u542f\u52a8\u81ea\u52a8\u6ce8\u518c",
-          description:
-            "Multica \u626b\u63cf\u672c\u673a\u7684 29 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001CodeBuddy\u3001CodeArts\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Devin CLI\u3001Dim\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001MiniMax Code\u3001Muse Code\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3001ZeroClaw、ZCode\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
-        },
-      ],
-    },
-  },
-
-  howItWorks: {
-    label: "\u5f00\u59cb\u4f7f\u7528",
-    headlineMain: "\u62db\u52df\u4f60\u7684\u7b2c\u4e00\u4e2a AI \u5458\u5de5",
-    headlineFaded: "\u53ea\u9700\u4e00\u5c0f\u65f6\u3002",
-    steps: [
-      {
-        title: allowSignup ? "注册并创建您的工作空间" : "登录到您的工作空间",
-        description: allowSignup
-          ? "输入您的邮箱，验证代码后即可使用。工作空间会自动创建——无需设置向导或配置表单。"
-          : "输入您的邮箱，验证代码后即可登录到您的工作空间——无需设置向导或配置表单。",
-      },
-      {
-        title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",
-        description:
-          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 29 款支持的 AI 编程工具（Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw、ZCode）。本机已安装的工具会被自动注册成运行时。",
-      },
-      {
-        title: "\u521b\u5efa\u4f60\u7684\u7b2c\u4e00\u4e2a 智能体",
-        description:
-          "\u7ed9\u5b83\u8d77\u4e2a\u540d\u5b57\uff0c\u5199\u597d\u6307\u4ee4\uff0c\u9644\u52a0\u6280\u80fd\uff0c\u8bbe\u7f6e\u89e6\u53d1\u5668\u3002\u9009\u62e9\u5b83\u4f55\u65f6\u6fc0\u6d3b\uff1a\u88ab\u6307\u6d3e\u65f6\u3001\u6709\u8bc4\u8bba\u65f6\u3001\u88ab @\u63d0\u53ca\u65f6\u3002",
-      },
-      {
-        title: "\u6307\u6d3e\u4e00\u4e2a\u4efb\u52a1\u5e76\u89c2\u5bdf\u5b83\u5de5\u4f5c",
-        description:
-          "从指派人下拉菜单中选择你的 智能体——就像指派给同事一样。task 自动入队、领取、执行。实时观看进度。",
-      },
-    ],
-    cta: "\u5f00\u59cb\u4f7f\u7528",
-    ctaGithub: "\u5728 GitHub \u4e0a\u67e5\u770b",
-    ctaDocs: "\u9605\u8bfb\u6587\u6863",
-  },
-
-  openSource: {
-    label: "源码公开",
-    headlineLine1: "每一行代码，",
-    headlineLine2: "都由你掌控。",
-    description:
-      "Multica 的源代码完全公开。审查每一行代码，免费自托管，塑造人类 + 智能体 协作的未来。把 Multica 作为托管服务提供给他人，需要商业授权。",
-    cta: "在 GitHub 上 Star",
-    licensingCta: "了解授权方式 →",
-    highlights: [
-      {
-        title: "\u968f\u5904\u81ea\u6258\u7ba1",
-        description:
-          "\u5728\u4f60\u81ea\u5df1\u7684\u57fa\u7840\u8bbe\u65bd\u4e0a\u8fd0\u884c Multica\u3002Docker Compose\u3001\u5355\u4e2a\u4e8c\u8fdb\u5236\u6216 Kubernetes——工作区数据始终保存在你自己掌控的服务器上。",
-      },
-      {
-        title: "\u65e0\u4f9b\u5e94\u5546\u9501\u5b9a",
-        description:
-          "\u81ea\u5e26 LLM \u63d0\u4f9b\u5546\u3001\u66f4\u6362 智能体 \u540e\u7aef\u3001\u6269\u5c55 API\u3002\u4f60\u62e5\u6709\u6574\u4e2a\u6280\u672f\u6808\u7684\u63a7\u5236\u6743\u3002",
-      },
-      {
-        title: "\u9ed8\u8ba4\u900f\u660e",
-        description:
-          "\u6bcf\u4e00\u884c\u4ee3\u7801\u90fd\u53ef\u5ba1\u8ba1\u3002\u786e\u5207\u4e86\u89e3\u4f60\u7684 智能体 \u5982\u4f55\u505a\u51b3\u7b56\u3001\u4efb\u52a1\u5982\u4f55\u8def\u7531\u3001\u6570\u636e\u6d41\u5411\u4f55\u65b9\u3002",
-      },
-      {
-        title: "\u793e\u533a\u9a71\u52a8",
-        description:
-          "\u4e0e\u793e\u533a\u4e00\u8d77\u5efa\u8bbe\uff0c\u800c\u4e0d\u4ec5\u4ec5\u662f\u4e3a\u793e\u533a\u5efa\u8bbe\u3002\u8d21\u732e\u6280\u80fd\u3001\u96c6\u6210\u548c 智能体 \u540e\u7aef\uff0c\u8ba9\u6bcf\u4e2a\u4eba\u53d7\u76ca\u3002",
-      },
-    ],
-  },
-
+  ...zhSiteCopy,
   faq: {
     label: "\u5e38\u89c1\u95ee\u9898",
     headline: "\u95ee\u4e0e\u7b54\u3002",
@@ -231,44 +47,6 @@ export function createZhDict(
           "\u53d6\u51b3\u4e8e\u4f60\u7684\u786c\u4ef6\u3002\u6bcf\u4e2a 智能体 \u6709\u53ef\u914d\u7f6e\u7684\u5e76\u53d1\u9650\u5236\uff0c\u4f60\u53ef\u4ee5\u8fde\u63a5\u591a\u53f0\u673a\u5668\u4f5c\u4e3a\u8fd0\u884c\u65f6\u3002自托管时没有任何人为限制。",
       },
     ],
-  },
-
-  footer: {
-    tagline:
-      "\u4eba\u7c7b + 智能体 团队的项目管理。源码公开、可自托管、\u4e3a\u672a\u6765\u7684\u5de5\u4f5c\u65b9\u5f0f\u800c\u5efa\u3002",
-    cta: "\u5f00\u59cb\u4f7f\u7528",
-    groups: {
-      product: {
-        label: "\u4ea7\u54c1",
-        links: [
-          { label: "\u529f\u80fd\u7279\u6027", href: "#features" },
-          { label: "\u5982\u4f55\u5de5\u4f5c", href: "#how-it-works" },
-          { label: "\u6848\u4f8b", href: "/usecases" },
-          { label: "更新日志", href: "/changelog" },
-          { label: "下载", href: "/download" },
-        ],
-      },
-      resources: {
-        label: "\u8d44\u6e90",
-        links: [
-          { label: "\u6587\u6863", href: docsHref },
-          { label: "API", href: githubUrl },
-          { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
-          { label: "Discord", href: discordUrl },
-        ],
-      },
-      company: {
-        label: "\u5173\u4e8e",
-        links: [
-          { label: "关于我们", href: "/about" },
-          { label: "授权说明", href: "/licensing" },
-          { label: "隐私政策", href: "/privacy" },
-          { label: "\u8054\u7cfb\u5546\u52a1", href: "/contact-sales" },
-          { label: "GitHub", href: githubUrl },
-        ],
-      },
-    },
-    copyright: "\u00a9 {year} Multica. \u4fdd\u7559\u6240\u6709\u6743\u5229\u3002",
   },
 
   about: {
@@ -4286,50 +4064,44 @@ export function createZhDict(
     ],
   },
   download: {
+    platforms: {
+      macArm64: "macOS · Apple Silicon",
+      macX64: "macOS · Intel",
+      winX64: "Windows · x64",
+      winArm64: "Windows · ARM64",
+      linuxX64: "Linux · x64",
+      linuxArm64: "Linux · ARM64",
+    },
     hero: {
-      macArm64: {
-        title: "Multica for macOS",
-        sub: "Apple Silicon · 内置 daemon，无需配置",
-        primary: "下载 (.dmg)",
-        altZip: "或下载 .zip",
+      eyebrow: "桌面端",
+      title: {
+        mac: "下载 Multica macOS 版",
+        windows: "下载 Multica Windows 版",
+        linux: "下载 Multica Linux 版",
+        other: "下载 Multica",
       },
-      macIntel: {
-        title: "Multica for macOS",
-        sub: "Intel · 内置守护进程，无需配置",
-        primary: "下载 (.dmg)",
-        altZip: "或下载 .zip",
+      lead: "桌面端自带智能体守护进程，这台电脑上的 Claude Code、Codex 等编程智能体会自动接入。",
+      leadOther: "支持 macOS、Windows 和 Linux，每个版本都内置智能体守护进程。",
+      mobileNote: "Multica 桌面端支持 macOS、Windows 和 Linux。请在电脑上打开这个页面下载。",
+      primary: {
+        macArm64Dmg: "下载 Apple 芯片版",
+        macX64Dmg: "下载 Intel 版",
+        winX64Exe: "下载 Windows 版",
+        winArm64Exe: "下载 Windows ARM 版",
+        linuxAmd64AppImage: "下载 AppImage",
+        linuxArm64AppImage: "下载 AppImage",
       },
-      winX64: {
-        title: "Multica for Windows",
-        sub: "内置 daemon，无需配置",
-        primary: "下载 (.exe)",
+      alternate: {
+        macArm64Dmg: "Apple 芯片版",
+        macX64Dmg: "Intel 版",
       },
-      winArm64: {
-        title: "Multica for Windows",
-        sub: "ARM · 内置 daemon，无需配置",
-        primary: "下载 (.exe)",
-      },
-      linux: {
-        title: "Multica for Linux",
-        sub: "内置 daemon，无需配置",
-        primary: "下载 AppImage",
-        altFormats: "或 .deb / .rpm",
-      },
-      unknown: {
-        title: "选择你的平台",
-        sub: "下方是所有支持的安装包。",
-      },
-      safariMacHint: "在 Intel Mac 上？请在下方选择 Intel 版本。",
-      archFallbackHint: "架构不对？下方是所有可选格式。",
+      released: "{date} 发布",
+      whatsNew: "更新内容",
+      versionUnavailable: "暂时获取不到版本信息，请到 GitHub 查看所有版本。",
     },
     allPlatforms: {
-      title: "所有平台",
-      macArm64Label: "macOS · Apple Silicon",
-      macX64Label: "macOS · Intel",
-      winX64Label: "Windows · x64",
-      winArm64Label: "Windows · ARM64",
-      linuxX64Label: "Linux · x64",
-      linuxArm64Label: "Linux · ARM64",
+      title: "全部下载",
+      thisDevice: "这台电脑",
       formatDmg: ".dmg",
       formatZip: ".zip",
       formatExe: ".exe",
@@ -4337,28 +4109,55 @@ export function createZhDict(
       formatDeb: ".deb",
       formatRpm: ".rpm",
       unavailable: "暂不可用",
+      allReleases: "所有版本",
     },
     cli: {
-      title: "想用 CLI？",
-      sub: "适合服务器、远程开发机、无图形界面环境。底层 daemon 与 Desktop 相同，通过终端安装。",
+      title: "在服务器或远程开发机上？",
+      sub: "安装 CLI，在那里运行同一个守护进程。通过 SSH 执行同样的命令即可。",
       installLabel: "安装",
       platformGroup: "选择你的系统",
       platformMacosLinux: "macOS / Linux",
       platformWindows: "Windows",
-      startLabel: "启动 daemon",
-      sshNote: "已经在服务器上？通过 SSH 执行同样的命令即可。",
+      startLabel: "启动守护进程",
       copyLabel: "复制",
       copiedLabel: "已复制",
     },
-    cloud: {
-      title: "Cloud runtime（等待名单）",
-      sub: "我们将为你托管 runtime，目前尚未上线——留下邮箱，上线后通知你。",
-    },
-    footer: {
-      releaseNotes: "{version} 更新内容",
-      allReleases: "查看所有版本",
-      currentVersion: "当前版本：{version}",
-      versionUnavailable: "版本获取失败——请前往 GitHub 查看",
+    started: {
+      title: "已开始下载",
+      retry: "没有开始？重新下载",
+      allDownloads: "全部下载",
+      install: {
+        title: "安装",
+        dmg: "打开 .dmg，把 Multica 拖进「应用程序」。",
+        zip: "解压后，把 Multica 移到「应用程序」。",
+        exe: "运行安装程序，完成后 Multica 会自动打开。",
+        appImage: "给 AppImage 加上可执行权限，然后运行。",
+        deb: "用 apt 或你的包管理器安装 .deb。",
+        rpm: "用 dnf 或你的包管理器安装 .rpm。",
+      },
+      signIn: {
+        title: "登录",
+        body: "打开 Multica，用你的账号登录。",
+        installed: "已经装好了？",
+        open: "打开 Multica",
+      },
+      agents: {
+        title: "接入智能体",
+        body: "Multica 会自动找到这台电脑上的 Claude Code、Codex 等编程智能体。",
+      },
+      community: {
+        label: "下载的同时",
+        githubTitle: "在 GitHub 上关注 Multica",
+        githubBody: "给仓库点个 Star，第一时间收到新版本；也可以看看你刚下载的应用背后的代码。",
+        star: "在 GitHub 上 Star",
+        stars: "{count} Star",
+        discordTitle: "加入 Discord",
+        discordBody: "提问、分享工作流，和团队直接交流。",
+        join: "加入",
+        xTitle: "关注 @MulticaAI",
+        xBody: "新版本发布和接下来的计划。",
+        follow: "关注",
+      },
     },
   },
   contactSales: {
