@@ -57,6 +57,23 @@ const RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000] as const;
  */
 const MIN_CHECK_INTERVAL_MS = 5 * 1000;
 
+/**
+ * Whether a stored credential is the kind `/api/auth/refresh` can renew.
+ *
+ * The server renews only its own UI session JWTs and answers 400 for anything
+ * else (RefreshSession in server/internal/handler/session.go). A personal
+ * access token (`mul_`), agent task token (`mat_`) or cloud-node PAT (`mcn_`)
+ * still authenticates every other request, so it can legitimately sit in
+ * `multica_token` — the local dev environment signs the browser in with its
+ * profile's PAT. Those are opaque strings, never three-part JWTs, so the shape
+ * alone tells them apart. Asking anyway would fail on every launch and every
+ * backoff retry, and renewing it is not ours to do: a PAT has its own lifetime.
+ */
+export function isRenewableSessionToken(token: string): boolean {
+  const parts = token.split(".");
+  return parts.length === 3 && parts.every((part) => /^[A-Za-z0-9_-]+$/.test(part));
+}
+
 export interface SessionRenewalOptions {
   api: ApiClient;
   storage: StorageAdapter;
@@ -116,6 +133,7 @@ export function createSessionRenewal({
     // write anything back.
     const startedFrom = storage.getItem(TOKEN_STORAGE_KEY);
     if (!startedFrom) return;
+    if (!isRenewableSessionToken(startedFrom)) return;
 
     inFlight = api
       .refreshSession()
