@@ -11,6 +11,7 @@
   "exports": {
     "./navigation": "./navigation/index.ts",
     "./common/actor-avatar": "./common/actor-avatar.tsx",
+    "./common/appearance-sync": "./common/appearance-sync.tsx",
     "./common/cli-install-command": "./common/cli-install-command.tsx",
     "./common/shortcut-keycaps": "./common/shortcut-keycaps.tsx",
     "./editor": "./editor/index.ts",

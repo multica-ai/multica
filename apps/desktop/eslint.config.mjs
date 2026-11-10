@@ -1,6 +1,6 @@
 import globals from "globals";
 import reactConfig from "@multica/eslint-config/react";
-import { ICON_LIBRARY_IMPORT_PATTERNS } from "@multica/eslint-config/base";
+import { ICON_LIBRARY_IMPORT_PATTERNS, REDUCED_MOTION_IMPORT } from "@multica/eslint-config/base";
 import { NO_ROUND_CONTROLS } from "@multica/eslint-config/control-shape";
 
 export default [
@@ -64,6 +64,7 @@ export default [
               message:
                 "Direct navigation from application code breaks the Coordinator protocol (MUL-4741). Use the navigation adapter from src/platform instead.",
             },
+            REDUCED_MOTION_IMPORT,
           ],
           patterns: ICON_LIBRARY_IMPORT_PATTERNS,
         },

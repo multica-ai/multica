@@ -114,6 +114,7 @@ import type {
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
+  ListProjectMembersResponse,
   ProjectResource,
   CreateProjectResourceRequest,
   UpdateProjectResourceRequest,
@@ -185,6 +186,7 @@ import type {
   PluginInstallRequest,
   PluginConfigRequest,
   IssuePullRequestsResponse,
+  IssueEnvironmentsResponse,
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
@@ -365,6 +367,7 @@ import {
   RuntimeUsageListSchema,
   SearchIssuesResponseSchema,
   ProjectSchema,
+  ListProjectMembersResponseSchema,
   ListProjectsResponseSchema,
   EMPTY_PROJECT,
   EMPTY_LIST_PROJECTS_RESPONSE,
@@ -489,6 +492,8 @@ import {
   EMPTY_ISSUE_PROPERTIES_RESPONSE,
   EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
   IssuePullRequestsResponseSchema,
+  EMPTY_ISSUE_ENVIRONMENTS_RESPONSE,
+  IssueEnvironmentsResponseSchema,
   ResourceLabelsResponseSchema,
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
@@ -4274,8 +4279,8 @@ export class ApiClient {
   // Callers must only reach for this once the metadata refresh has shown
   // there is no signed URL: in the other modes the endpoint 302s to storage,
   // where CORS is not configured for a JS fetch.
-  async getAttachmentBlob(id: string): Promise<Blob> {
-    const res = await this.fetchRaw(`/api/attachments/${id}/download`);
+  async getAttachmentBlob(id: string, signal?: AbortSignal): Promise<Blob> {
+    const res = await this.fetchRaw(`/api/attachments/${id}/download`, { signal });
     return res.blob();
   }
 
@@ -4312,6 +4317,26 @@ export class ApiClient {
 
   async deleteProject(id: string): Promise<void> {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  async getProjectMembers(id: string): Promise<ListProjectMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/members`);
+    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0 }, {
+      endpoint: "GET /api/projects/:id/members",
+    });
+  }
+
+  async addProjectMembers(id: string, userIds: string[]): Promise<ListProjectMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/members`, {
+      method: "POST", body: JSON.stringify({ user_ids: userIds }),
+    });
+    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0 }, {
+      endpoint: "POST /api/projects/:id/members",
+    });
+  }
+
+  async removeProjectMember(id: string, userId: string): Promise<void> {
+    await this.fetch(`/api/projects/${id}/members/${userId}`, { method: "DELETE" });
   }
 
   // Project resources
@@ -5223,6 +5248,17 @@ export class ApiClient {
       IssuePullRequestsResponseSchema,
       EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
       { endpoint: "GET /api/issues/:id/pull-requests" },
+    );
+  }
+
+  /** Environments the issue's runs started, live ones plus recently ended. */
+  async listIssueEnvironments(issueId: string): Promise<IssueEnvironmentsResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/environments`);
+    return parseWithFallback(
+      raw,
+      IssueEnvironmentsResponseSchema,
+      EMPTY_ISSUE_ENVIRONMENTS_RESPONSE,
+      { endpoint: "GET /api/issues/:id/environments" },
     );
   }
 

@@ -17,6 +17,28 @@ import { extendTailwindMerge } from "tailwind-merge"
  */
 const twMerge = extendTailwindMerge({
   extend: {
+    // Component radii from packages/ui/styles/theme-variables.css.
+    theme: {
+      radius: [
+        "page",
+        "card",
+        "menu",
+        "menu-item",
+        "popover",
+        "dialog",
+        "tooltip",
+        "input",
+        "button",
+        "button-sm",
+        "avatar",
+        "nav-item",
+        "rail-item",
+        "label",
+        "issue-group-header",
+        "board-column",
+        "board-card",
+      ],
+    },
     classGroups: {
       "font-size": [
         {

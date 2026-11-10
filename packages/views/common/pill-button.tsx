@@ -31,7 +31,7 @@ export function PillButton({
   children,
   className,
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+}: React.ComponentPropsWithRef<"button">) {
   return (
     <button
       type="button"

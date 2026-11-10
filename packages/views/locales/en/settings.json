@@ -159,12 +159,6 @@
     "toast_saved": "Changes saved"
   },
   "preferences": {
-    "theme": {
-      "title": "Theme",
-      "light": "Light",
-      "dark": "Dark",
-      "system": "System"
-    },
     "language": {
       "title": "Language",
       "english": "English",
@@ -196,13 +190,111 @@
     },
     "comments_title": "Comments & chat",
     "region_title": "Language & region",
-    "appearance_title": "Appearance",
     "issue_fields_title": "Fields shown when creating issues",
     "issue_fields": {
       "field": "Field",
       "quick": "Create with agent",
       "manual": "Manual create",
       "unsupported": "Not available when creating with an agent"
+    }
+  },
+  "appearance": {
+    "reset": "Reset to defaults",
+    "color": {
+      "title": "Color"
+    },
+    "mode": {
+      "title": "Mode",
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    },
+    "theme": {
+      "title": "Theme",
+      "description": "Colors, borders, shadows and corners across the app.",
+      "default": "Default",
+      "pop": "Pop"
+    },
+    "theme_options": {
+      "title": "Theme options",
+      "description": "Provided by {{name}}.",
+      "reset": "Reset options"
+    },
+    "ui_text": {
+      "title": "Interface text",
+      "description": "Menus, buttons, lists, the sidebar and headings."
+    },
+    "latin_font": {
+      "title": "Latin font"
+    },
+    "ui_font": {
+      "inter": "Default",
+      "system": "System",
+      "serif": "Serif",
+      "mono": "Monospace"
+    },
+    "cjk_font": {
+      "title": "CJK font",
+      "description": "Chinese characters; Japanese and Korean follow it.",
+      "sans": "Sans",
+      "serif": "Serif",
+      "kai": "Kai",
+      "built_in": "Built in",
+      "local": "On this device",
+      "load_local": "Show fonts on this device…",
+      "loading": "Looking for fonts…",
+      "none": "No fonts with Chinese characters on this device.",
+      "load_failed": "Couldn't read this device's fonts.",
+      "sample": "永和九年 汉字"
+    },
+    "follow_ui": "Same as interface",
+    "theme_font": "Theme font",
+    "font_size": {
+      "title": "Font size",
+      "description": "Scales text only. Spacing and layout stay the same.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · Default"
+    },
+    "content_text": {
+      "title": "Content text",
+      "description": "Issue descriptions, comments, chat and documents.",
+      "sample": "Descriptions and comments are read in full, so they can use a font made for reading while lists and buttons stay compact."
+    },
+    "code_font": {
+      "title": "Code font",
+      "description": "Code blocks, inline code and logs.",
+      "geist": "Default",
+      "jetbrains": "Ligatures",
+      "system": "System monospace"
+    },
+    "content_size": {
+      "title": "Font size",
+      "description": "Only content text; the interface keeps its size.",
+      "follow": "Same as interface ({{size}} px)"
+    },
+    "content_leading": {
+      "title": "Line height",
+      "compact": "Compact",
+      "default": "Default",
+      "relaxed": "Relaxed"
+    },
+    "layout": {
+      "title": "Layout and accessibility"
+    },
+    "density": {
+      "title": "Density",
+      "description": "Row height in issue lists and search.",
+      "compact": "Compact",
+      "default": "Default",
+      "comfortable": "Comfortable"
+    },
+    "reduce_motion": {
+      "title": "Reduce motion",
+      "description": "Turn off animations and transitions. When off, your system setting still applies."
+    },
+    "high_contrast": {
+      "title": "Increase contrast",
+      "description": "Darker secondary text and stronger borders."
     }
   },
   "shortcuts": {
@@ -396,6 +488,7 @@
     "tabs": {
       "profile": "Profile",
       "preferences": "Preferences",
+      "appearance": "Appearance",
       "shortcuts": "Shortcuts",
       "issue": "Issue",
       "notifications": "Notifications",
@@ -1454,7 +1547,6 @@
   },
   "connected_apps": {
     "description": "Accounts your agents use to access external apps. Allowed actions run immediately.",
-    "add_app": "Add app",
     "loading": "Loading apps…",
     "load_failed": "Couldn't load apps.",
     "team_title": "Team accounts",
@@ -1485,17 +1577,18 @@
     "toast_disconnected": "Disconnected",
     "toast_failed": "Something went wrong. Please try again.",
     "add": {
-      "title": "Add an app",
-      "description": "Connect an account for the team or for yourself. Which agents use it is set on each agent's Apps page.",
       "search": "Search apps…",
       "empty": "No apps match.",
       "curated": "Curated",
       "recommended_team": "Usually a team account",
       "recommended_personal": "Usually a personal account",
-      "connect_team": "Connect for team",
+      "connect_team": "Connect team account",
       "connect_personal": "Connect my account",
       "connecting": "Connecting…",
-      "connected": "Connected"
+      "connected": "Connected",
+      "connect": "Connect",
+      "team_description": "A shared workspace account. Choose which agents can use it on each agent’s Apps page.",
+      "personal_description": "Your own account. Apps set to the triggerer’s account use it when you trigger a run."
     },
     "disconnect_team": {
       "title": "Disconnect the team {{app}} account?",

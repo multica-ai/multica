@@ -206,5 +206,26 @@
       "issue_pricing": "定价页对比表",
       "issue_blog": "博客列表分页"
     }
+  },
+  "access": {
+    "label": "访问权限",
+    "title": "{{title}}的访问权限",
+    "description": "控制谁能查看项目及其中的任务、评论和附件。",
+    "workspace": "整个工作区",
+    "private": "仅项目成员",
+    "members_count": "项目成员 · {{count}}",
+    "add": "添加工作区成员",
+    "search": "搜索姓名或邮箱...",
+    "no_members": "没有匹配的成员",
+    "no_selected": "暂无项目成员",
+    "admin_notice": "工作区 owner 和 admin 始终可以访问。",
+    "you": "你",
+    "remove": "移除{{name}}",
+    "failed": "无法保存访问权限。",
+    "load_failed": "无法加载项目成员。",
+    "publish_title": "将项目设为整个工作区可见？",
+    "publish_description": "工作区所有成员都将能查看这个项目及其中的任务、评论和附件。",
+    "done": "完成",
+    "retry": "重试"
   }
 }
