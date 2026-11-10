@@ -165,6 +165,10 @@ type DaemonReauthResult =
   | { ok: false; reason: "session_invalid" }
   | { ok: false; reason: "transient"; message: string };
 
+type FocusEnvironmentResult =
+  | { ok: true }
+  | { ok: false; reason: "gone" | "unsupported" | "unavailable" | "failed"; error?: string };
+
 interface DaemonAPI {
   start: () => Promise<{ success: boolean; error?: string }>;
   stop: () => Promise<{ success: boolean; error?: string }>;
@@ -172,6 +176,8 @@ interface DaemonAPI {
   getStatus: () => Promise<DaemonStatus>;
   probeRuntimes: () => Promise<LocalRuntimeProbe>;
   getHostName: () => Promise<string>;
+  /** Brings forward a desktop app environment the local daemon detected. */
+  focusEnvironment: (key: string) => Promise<FocusEnvironmentResult>;
   onStatusChange: (callback: (status: DaemonStatus) => void) => () => void;
   setTargetApiUrl: (url: string) => Promise<void>;
   syncToken: (token: string, userId: string) => Promise<void>;

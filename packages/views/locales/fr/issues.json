@@ -1938,6 +1938,13 @@
     "open": "Ouvrir",
     "copy_url": "Copier l'URL",
     "copied": "URL copiée",
-    "copy_failed": "Impossible de copier l'URL"
+    "copy_failed": "Impossible de copier l'URL",
+    "app_desktop_hint": "Une app de bureau. Basculez vers sa fenêtre depuis Multica Desktop sur la machine qui l'exécute.",
+    "app_remote_hint": "S'exécute sur {{machine}}. Basculez vers sa fenêtre depuis Multica Desktop sur cette machine.",
+    "focus": "Afficher la fenêtre",
+    "focus_gone": "{{name}} ne s'exécute plus",
+    "focus_unsupported": "Le daemon de cette machine ne peut pas encore basculer vers les fenêtres d'apps. Mettez à jour Multica et réessayez.",
+    "focus_unavailable": "Le daemon local n'est pas en cours d'exécution",
+    "focus_failed": "Impossible de basculer vers {{name}}"
   }
 }

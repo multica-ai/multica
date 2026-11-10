@@ -1938,6 +1938,13 @@
     "open": "Open",
     "copy_url": "Copy URL",
     "copied": "URL copied",
-    "copy_failed": "Couldn't copy the URL"
+    "copy_failed": "Couldn't copy the URL",
+    "app_desktop_hint": "A desktop app. Switch to its window from Multica Desktop on the machine running it.",
+    "app_remote_hint": "Runs on {{machine}}. Switch to its window from Multica Desktop on that machine.",
+    "focus": "Switch to window",
+    "focus_gone": "{{name}} is no longer running",
+    "focus_unsupported": "This machine's daemon can't switch to app windows yet. Update Multica and try again.",
+    "focus_unavailable": "The local daemon isn't running",
+    "focus_failed": "Couldn't switch to {{name}}"
   }
 }

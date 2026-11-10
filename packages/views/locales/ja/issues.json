@@ -1862,6 +1862,13 @@
     "open": "開く",
     "copy_url": "URL をコピー",
     "copied": "URL をコピーしました",
-    "copy_failed": "URL をコピーできませんでした"
+    "copy_failed": "URL をコピーできませんでした",
+    "app_desktop_hint": "デスクトップアプリです。実行中のマシンの Multica Desktop からウィンドウに切り替えられます。",
+    "app_remote_hint": "{{machine}} で実行中です。そのマシンの Multica Desktop からウィンドウに切り替えられます。",
+    "focus": "ウィンドウに切り替え",
+    "focus_gone": "{{name}} はもう実行されていません",
+    "focus_unsupported": "このマシンのデーモンはまだアプリのウィンドウに切り替えられません。Multica を更新してもう一度お試しください。",
+    "focus_unavailable": "ローカルのデーモンが実行されていません",
+    "focus_failed": "{{name}} に切り替えられませんでした"
   }
 }

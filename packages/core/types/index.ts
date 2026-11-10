@@ -238,6 +238,7 @@ export type {
 export type {
   IssueEnvironment,
   IssueEnvironmentSource,
+  IssueEnvironmentKind,
   IssueEnvironmentState,
   IssueEnvironmentsResponse,
 } from "./environment";

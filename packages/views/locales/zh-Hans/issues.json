@@ -1862,6 +1862,13 @@
     "open": "打开",
     "copy_url": "复制地址",
     "copied": "已复制地址",
-    "copy_failed": "无法复制地址"
+    "copy_failed": "无法复制地址",
+    "app_desktop_hint": "桌面 App。在运行它的那台机器上，用 Multica Desktop 切到它的窗口。",
+    "app_remote_hint": "运行在 {{machine}} 上。在那台机器上用 Multica Desktop 切到它的窗口。",
+    "focus": "切到窗口",
+    "focus_gone": "{{name}} 已经不在运行",
+    "focus_unsupported": "这台机器的 daemon 暂时不能切换 App 窗口。更新 Multica 后再试。",
+    "focus_unavailable": "本机 daemon 没有运行",
+    "focus_failed": "无法切到 {{name}}"
   }
 }
