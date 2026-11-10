@@ -1010,7 +1010,7 @@ function SquadProperties({
   );
 }
 
-// Two-step add-member dialog (mirrors CreateAgentDialog's compact layout):
+// Two-step add-member dialog:
 // 1) pick a target — Members + Agents in one searchable popover, each row
 //    with an avatar so visual recognition matches the issue assignee picker;
 // 2) optionally describe the role they'll play in this squad. Description
