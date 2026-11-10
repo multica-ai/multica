@@ -1860,6 +1860,12 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
+		// A run on a private project's issue is listed as restricted to
+		// members outside the project (MUL-8472); its id alone must not
+		// let them stop it.
+		if !h.requireIssueIDVisible(w, r, workspaceID, task.IssueID, http.StatusNotFound, "task not found") {
+			return
+		}
 		// Issue / autopilot / quick_create tasks are all visible on the
 		// agent Activity tab + workspace snapshot, which gate private
 		// agents. Mirror that gate here.
