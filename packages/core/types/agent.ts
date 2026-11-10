@@ -1177,6 +1177,36 @@ export interface RuntimeUpdate {
   updated_at: string;
 }
 
+// One managed agent CLI (codex, claude, or grok) on a runtime host.
+// `status` stays an open string so a newer server value renders as unknown
+// instead of failing the response parse.
+export interface AgentCLIStatus {
+  cli: string;
+  current: string;
+  latest: string;
+  status: string;
+  upgradable: boolean;
+  path?: string;
+  channel?: string;
+  probed_at?: string;
+}
+
+export interface RuntimeCLIStatusResponse {
+  runtime_id: string;
+  clis: AgentCLIStatus[];
+}
+
+// Upgrade job returned by POST/GET of the agent CLI upgrade API.
+// `status` is open for the same reason as AgentCLIStatus.status.
+export interface AgentCLIUpgradeJob {
+  job_id: string;
+  runtime_id: string;
+  cli: string;
+  status: string;
+  error?: string;
+  current?: string;
+}
+
 export interface RuntimeModel {
   id: string;
   label: string;

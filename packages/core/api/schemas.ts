@@ -3495,6 +3495,52 @@ const RuntimeUnavailableModelSchema = z.object({
   reason: z.string().optional(),
 }).loose();
 
+// Agent CLI status (GET /api/runtimes/:id/cli-status) and upgrade jobs.
+// Strings stay open and booleans catch invalid values so one drifted row
+// does not blank the rest of the card list.
+
+const AgentCLIStatusSchema = z
+  .object({
+    cli: z.string().catch(""),
+    current: z.string().catch(""),
+    latest: z.string().catch(""),
+    status: z.string().catch("unknown"),
+    upgradable: z.boolean().catch(false),
+    path: z.string().optional().catch(undefined),
+    channel: z.string().optional().catch(undefined),
+    probed_at: z.string().optional().catch(undefined),
+  })
+  .loose();
+
+export const RuntimeCLIStatusResponseSchema = z
+  .object({
+    runtime_id: z.string().catch(""),
+    clis: z.preprocess(
+      (value) =>
+        Array.isArray(value)
+          ? value.filter((row) => row !== null && typeof row === "object")
+          : [],
+      z.array(AgentCLIStatusSchema),
+    ),
+  })
+  .loose();
+
+export const EMPTY_RUNTIME_CLI_STATUS = {
+  runtime_id: "",
+  clis: [] as Array<z.infer<typeof AgentCLIStatusSchema>>,
+};
+
+export const AgentCLIUpgradeJobSchema = z
+  .object({
+    job_id: z.string().catch(""),
+    runtime_id: z.string().catch(""),
+    cli: z.string().catch(""),
+    status: z.string().catch("failed"),
+    error: z.string().optional().catch(undefined),
+    current: z.string().optional().catch(undefined),
+  })
+  .loose();
+
 export const RuntimeModelListRequestSchema = z.object({
   id: z.string().default(""),
   runtime_id: z.string().default(""),

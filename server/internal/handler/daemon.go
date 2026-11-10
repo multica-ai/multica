@@ -33,6 +33,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/agentcli"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -341,6 +342,7 @@ type DaemonRegisterRequest struct {
 		CommandName string `json:"command_name"`
 		Reason      string `json:"reason"`
 	} `json:"failed_profiles"`
+	AgentCLIProbes []agentcli.Probe `json:"agent_cli_probes,omitempty"`
 }
 
 type daemonWorkspaceReposResponse struct {
@@ -780,6 +782,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			"launched_by":  req.LaunchedBy,
 			"capabilities": requestClientCapabilities(r),
 		})
+		metadata = withAgentCLIProbes(metadata, req.AgentCLIProbes)
 
 		var registered db.AgentRuntime
 		var inserted bool
@@ -1026,6 +1029,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 					"runtime_profile_failure_reason":     reason,
 					"command_name":                       resolvedCommandName,
 				})
+				metadata = withAgentCLIProbes(metadata, req.AgentCLIProbes)
 				return db.UpsertAgentRuntimeWithProfileParams{
 					WorkspaceID:     wsUUID,
 					DaemonID:        strToText(req.DaemonID),
@@ -1401,8 +1405,9 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 }
 
 type DaemonHeartbeatRequest struct {
-	RuntimeID           string `json:"runtime_id"`
-	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
+	RuntimeID           string           `json:"runtime_id"`
+	SupportsBatchImport bool             `json:"supports_batch_import,omitempty"`
+	AgentCLIProbes      []agentcli.Probe `json:"agent_cli_probes,omitempty"`
 }
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
@@ -1544,6 +1549,8 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	updateMs = time.Since(updateStart).Milliseconds()
 
+	h.persistAgentCLIProbes(r.Context(), runtimeID, req.AgentCLIProbes)
+
 	ack, m, err := h.processHeartbeat(r.Context(), runtimeID, req.SupportsBatchImport)
 	probeModelMs = m.ProbeModelMs
 	popModelMs = m.PopModelMs
@@ -1580,6 +1587,9 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if len(ack.PendingLocalSkillImports) > 0 {
 		resp["pending_local_skill_imports"] = ack.PendingLocalSkillImports
 	}
+	if ack.PendingAgentCLIUpgrade != nil {
+		resp["pending_agent_cli_upgrade"] = ack.PendingAgentCLIUpgrade
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1588,7 +1598,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 // captured each runtime's liveness state in a connection lease, so the hot
 // path never reads agent_runtime. HTTP heartbeat remains the stateless lookup
 // fallback for a daemon that stops receiving WebSocket acknowledgements.
-func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error) {
+func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool, probes []protocol.AgentCLIProbe) (*protocol.DaemonHeartbeatAckPayload, error) {
 	lease := identity.RuntimeLeases[runtimeID]
 	if lease == nil {
 		return nil, fmt.Errorf("runtime not in connection lease")
@@ -1607,6 +1617,19 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 			return runtimeGoneHeartbeatAck(runtimeID), nil
 		}
 		return nil, err
+	}
+	if len(probes) > 0 {
+		converted := make([]agentcli.Probe, 0, len(probes))
+		for _, probe := range probes {
+			converted = append(converted, agentcli.Probe{
+				CLI:      probe.CLI,
+				Current:  probe.Current,
+				Path:     probe.Path,
+				Channel:  probe.Channel,
+				ProbedAt: probe.ProbedAt,
+			})
+		}
+		h.persistAgentCLIProbes(ctx, runtimeID, converted)
 	}
 	ack, _, err := h.processHeartbeat(ctx, runtimeID, supportsBatchImport)
 	return ack, err
@@ -1778,6 +1801,30 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 			slog.Warn("update HasPending timed out", "runtime_id", runtimeID)
 		} else {
 			slog.Warn("update HasPending failed", "error", probeUpdateErr, "runtime_id", runtimeID)
+		}
+	}
+
+	if h.CLIUpgradeStore != nil {
+		probeCLICtx, cancelProbeCLI := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
+		hasCLI, probeCLIErr := h.CLIUpgradeStore.HasPending(probeCLICtx, runtimeID)
+		cancelProbeCLI()
+		switch {
+		case probeCLIErr == nil && hasCLI:
+			pendingCLI, popCLIErr := h.CLIUpgradeStore.PopPending(ctx, runtimeID)
+			if popCLIErr != nil {
+				slog.Warn("cli upgrade PopPending failed", "error", popCLIErr, "runtime_id", runtimeID)
+			} else if pendingCLI != nil {
+				ack.PendingAgentCLIUpgrade = &protocol.DaemonHeartbeatPendingAgentCLIUpgrade{
+					ID:  pendingCLI.ID,
+					CLI: pendingCLI.CLI,
+				}
+			}
+		case probeCLIErr != nil:
+			if errors.Is(probeCLIErr, context.DeadlineExceeded) || errors.Is(probeCLIErr, context.Canceled) {
+				slog.Warn("cli upgrade HasPending timed out", "runtime_id", runtimeID)
+			} else {
+				slog.Warn("cli upgrade HasPending failed", "error", probeCLIErr, "runtime_id", runtimeID)
+			}
 		}
 	}
 

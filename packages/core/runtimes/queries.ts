@@ -12,6 +12,8 @@ export const runtimeKeys = {
   // by-hour now follows the viewer's tz, like the other reports.
   usageByHour: (rid: string, days: number, tz: string) =>
     ["runtimes", "usage", "by-hour", rid, days, tz] as const,
+  // Per-runtime agent CLI status (codex / claude / grok), not the daemon version.
+  cliStatus: (rid: string) => ["runtimes", "cli-status", rid] as const,
 };
 
 // `tz` is the viewer's IANA name — all reports follow the viewer's tz.
@@ -44,6 +46,14 @@ export function runtimeUsageByHourOptions(runtimeId: string, days: number, tz: s
     queryKey: runtimeKeys.usageByHour(runtimeId, days, tz),
     queryFn: () => api.getRuntimeUsageByHour(runtimeId, { days, tz }),
     staleTime: 60 * 1000,
+  });
+}
+
+export function runtimeCLIStatusOptions(runtimeId: string) {
+  return queryOptions({
+    queryKey: runtimeKeys.cliStatus(runtimeId),
+    queryFn: () => api.getRuntimeCLIStatus(runtimeId),
+    enabled: runtimeId.length > 0,
   });
 }
 
