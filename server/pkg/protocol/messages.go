@@ -186,6 +186,7 @@ const (
 	PendingWorkKindModelList        = "model_list"
 	PendingWorkKindLocalSkills      = "local_skills"
 	PendingWorkKindLocalSkillImport = "local_skill_import"
+	PendingWorkKindAgentCLIUpgrade  = "agent_cli_upgrade"
 )
 
 // PendingWorkPayload is sent from server to daemon as a wakeup hint when a
@@ -418,13 +419,24 @@ type ChatSessionUpdatedPayload struct {
 	UpdatedAt string  `json:"updated_at"`
 }
 
+// AgentCLIProbe is one daemon observation of a managed agent CLI
+// (codex, claude, or grok). It is not the Multica daemon's own cli_version.
+type AgentCLIProbe struct {
+	CLI      string `json:"cli"`
+	Current  string `json:"current,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Channel  string `json:"channel,omitempty"`
+	ProbedAt string `json:"probed_at,omitempty"`
+}
+
 // DaemonHeartbeatRequestPayload is sent from daemon to server over WebSocket
 // to update last_seen_at and pull pending actions for a single runtime.
 // Mirrors the body of POST /api/daemon/heartbeat so both transports share
 // identical semantics.
 type DaemonHeartbeatRequestPayload struct {
-	RuntimeID           string `json:"runtime_id"`
-	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
+	RuntimeID           string          `json:"runtime_id"`
+	SupportsBatchImport bool            `json:"supports_batch_import,omitempty"`
+	AgentCLIProbes      []AgentCLIProbe `json:"agent_cli_probes,omitempty"`
 }
 
 // DaemonHeartbeatAckPayload is the server's reply to DaemonHeartbeatRequestPayload.
@@ -453,6 +465,14 @@ type DaemonHeartbeatAckPayload struct {
 	// that don't know this field silently ignore it (standard JSON behavior)
 	// and fall back to the singular PendingLocalSkillImport above.
 	PendingLocalSkillImports []DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_imports,omitempty"`
+	PendingAgentCLIUpgrade   *DaemonHeartbeatPendingAgentCLIUpgrade   `json:"pending_agent_cli_upgrade,omitempty"`
+}
+
+// DaemonHeartbeatPendingAgentCLIUpgrade asks the daemon to drain in-flight
+// tasks and upgrade one managed agent CLI.
+type DaemonHeartbeatPendingAgentCLIUpgrade struct {
+	ID  string `json:"id"`
+	CLI string `json:"cli"`
 }
 
 // HeartbeatStatusRuntimeGone is the ack Status used when the runtime row no

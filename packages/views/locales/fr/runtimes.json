@@ -353,6 +353,31 @@
       "timeout": "Délai dépassé"
     }
   },
+  "agent_cli": {
+    "title": "CLI des agents",
+    "loading": "Chargement de l'état du CLI…",
+    "load_failed": "Impossible de charger l'état du CLI.",
+    "not_installed": "Non installé",
+    "manual_install": "Installer ou mettre à niveau manuellement",
+    "latest": "À jour",
+    "update": "Mettre à jour",
+    "retry": "Réessayer",
+    "unknown_error": "Erreur inconnue",
+    "initiate_failed": "Impossible de lancer la mise à niveau",
+    "status": {
+      "up_to_date": "À jour",
+      "outdated": "Mise à jour disponible",
+      "missing": "Non installé",
+      "unknown": "Version inconnue"
+    },
+    "stage": {
+      "queued": "En file",
+      "draining": "Attente de la fin des tâches",
+      "upgrading": "Mise à niveau",
+      "succeeded": "Mis à jour",
+      "failed": "Échec de la mise à jour"
+    }
+  },
   "charts": {
     "heatmap_less": "Moins",
     "heatmap_more": "Plus",

@@ -90,6 +90,8 @@ import type {
   DashboardFailureDaily,
   DashboardFailureByAgent,
   RuntimeUpdate,
+  RuntimeCLIStatusResponse,
+  AgentCLIUpgradeJob,
   RuntimeModelListRequest,
   RuntimeLocalSkillListRequest,
   CreateRuntimeLocalSkillImportRequest,
@@ -508,6 +510,9 @@ import {
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
   RuntimeModelListRequestSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+  RuntimeCLIStatusResponseSchema,
+  EMPTY_RUNTIME_CLI_STATUS,
+  AgentCLIUpgradeJobSchema,
   SkillSchema,
   EMPTY_SKILL,
   SkillSummaryListSchema,
@@ -2817,6 +2822,68 @@ export class ApiClient {
     updateId: string,
   ): Promise<RuntimeUpdate> {
     return this.fetch(`/api/runtimes/${runtimeId}/update/${updateId}`);
+  }
+
+  // Agent CLI status and upgrade. Handlers are part of the runtime CLI
+  // upgrade API:
+  //   GET  /api/runtimes/{runtimeId}/cli-status
+  //   POST /api/runtimes/{runtimeId}/cli/{cli}/upgrade
+  //   GET  /api/runtimes/{runtimeId}/cli-upgrade/{jobId}
+  // A missing or malformed body degrades to an empty status list or a
+  // failed job so the page can render without a cast.
+  async getRuntimeCLIStatus(
+    runtimeId: string,
+  ): Promise<RuntimeCLIStatusResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/cli-status`,
+    );
+    return parseWithFallback(
+      raw,
+      RuntimeCLIStatusResponseSchema,
+      { ...EMPTY_RUNTIME_CLI_STATUS, runtime_id: runtimeId },
+      { endpoint: "GET /api/runtimes/:id/cli-status" },
+    );
+  }
+
+  async initiateAgentCLIUpgrade(
+    runtimeId: string,
+    cli: string,
+  ): Promise<AgentCLIUpgradeJob> {
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/cli/${encodeURIComponent(cli)}/upgrade`,
+      { method: "POST" },
+    );
+    return parseWithFallback(
+      raw,
+      AgentCLIUpgradeJobSchema,
+      {
+        job_id: "",
+        runtime_id: runtimeId,
+        cli,
+        status: "failed",
+      },
+      { endpoint: "POST /api/runtimes/:id/cli/:cli/upgrade" },
+    );
+  }
+
+  async getAgentCLIUpgrade(
+    runtimeId: string,
+    jobId: string,
+  ): Promise<AgentCLIUpgradeJob> {
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/cli-upgrade/${encodeURIComponent(jobId)}`,
+    );
+    return parseWithFallback(
+      raw,
+      AgentCLIUpgradeJobSchema,
+      {
+        job_id: jobId,
+        runtime_id: runtimeId,
+        cli: "",
+        status: "failed",
+      },
+      { endpoint: "GET /api/runtimes/:id/cli-upgrade/:jobId" },
+    );
   }
 
   // Both discovery endpoints feed a UI state machine (poll while

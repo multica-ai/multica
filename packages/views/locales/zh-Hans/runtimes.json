@@ -342,6 +342,31 @@
       "timeout": "超时"
     }
   },
+  "agent_cli": {
+    "title": "Agent CLI",
+    "loading": "正在加载 CLI 状态…",
+    "load_failed": "无法加载 CLI 状态。",
+    "not_installed": "未安装",
+    "manual_install": "请手动安装或升级",
+    "latest": "最新",
+    "update": "更新",
+    "retry": "重试",
+    "unknown_error": "未知错误",
+    "initiate_failed": "无法启动升级",
+    "status": {
+      "up_to_date": "已是最新",
+      "outdated": "有可用更新",
+      "missing": "未安装",
+      "unknown": "版本未知"
+    },
+    "stage": {
+      "queued": "排队中",
+      "draining": "等待任务结束",
+      "upgrading": "升级中",
+      "succeeded": "已更新",
+      "failed": "更新失败"
+    }
+  },
   "charts": {
     "heatmap_less": "少",
     "heatmap_more": "多",

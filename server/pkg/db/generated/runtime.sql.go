@@ -1848,6 +1848,32 @@ func (q *Queries) SelectStaleOnlineRuntimes(ctx context.Context, staleSeconds fl
 	return items, nil
 }
 
+const setAgentRuntimeAgentCLIProbes = `-- name: SetAgentRuntimeAgentCLIProbes :exec
+UPDATE agent_runtime
+SET metadata = jsonb_set(
+        COALESCE(metadata, '{}'::jsonb),
+        '{agent_cli_probes}',
+        $1::jsonb,
+        true
+    ),
+    updated_at = now()
+WHERE id = $2
+  AND (metadata -> 'agent_cli_probes') IS DISTINCT FROM $1::jsonb
+`
+
+type SetAgentRuntimeAgentCLIProbesParams struct {
+	Probes []byte      `json:"probes"`
+	ID     pgtype.UUID `json:"id"`
+}
+
+// Merges the machine's agent CLI probe snapshot into runtime metadata.
+// Other keys, including cli_version, stay put. A no-op when the snapshot
+// is unchanged so a heartbeat does not rewrite the row every tick.
+func (q *Queries) SetAgentRuntimeAgentCLIProbes(ctx context.Context, arg SetAgentRuntimeAgentCLIProbesParams) error {
+	_, err := q.db.Exec(ctx, setAgentRuntimeAgentCLIProbes, arg.Probes, arg.ID)
+	return err
+}
+
 const setAgentRuntimeOffline = `-- name: SetAgentRuntimeOffline :exec
 UPDATE agent_runtime
 SET status = 'offline', updated_at = now()

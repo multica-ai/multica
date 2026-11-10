@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/agentcli"
 	"github.com/multica-ai/multica/server/pkg/httptransport"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
@@ -790,14 +791,23 @@ type (
 	PendingModelList        = protocol.DaemonHeartbeatPendingModelList
 	PendingLocalSkills      = protocol.DaemonHeartbeatPendingLocalSkills
 	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
+	PendingAgentCLIUpgrade  = protocol.DaemonHeartbeatPendingAgentCLIUpgrade
 )
 
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
-	var resp HeartbeatResponse
-	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
+	return c.sendHeartbeat(ctx, runtimeID, true, nil)
+}
+
+func (c *Client) sendHeartbeat(ctx context.Context, runtimeID string, supportsBatchImport bool, probes []agentcli.Probe) (*HeartbeatResponse, error) {
+	body := map[string]any{
 		"runtime_id":            runtimeID,
-		"supports_batch_import": true,
-	}, &resp); err != nil {
+		"supports_batch_import": supportsBatchImport,
+	}
+	if len(probes) > 0 {
+		body["agent_cli_probes"] = probes
+	}
+	var resp HeartbeatResponse
+	if err := c.postJSON(ctx, "/api/daemon/heartbeat", body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -806,6 +816,11 @@ func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*Heartbea
 // ReportUpdateResult sends the CLI update result back to the server.
 func (c *Client) ReportUpdateResult(ctx context.Context, runtimeID, updateID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/update/%s/result", runtimeID, updateID), result, nil)
+}
+
+// ReportCLIUpgradeResult sends agent-CLI upgrade progress back to the server.
+func (c *Client) ReportCLIUpgradeResult(ctx context.Context, runtimeID, jobID string, result map[string]any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/cli-upgrade/%s/result", runtimeID, jobID), result, nil)
 }
 
 // ReportModelListResult sends the model-discovery result back to the server.

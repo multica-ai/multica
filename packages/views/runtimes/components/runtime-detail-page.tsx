@@ -7,7 +7,10 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import { runtimeProfileListOptions } from "@multica/core/runtimes";
+import {
+  canUpgradeAgentCLI,
+  runtimeProfileListOptions,
+} from "@multica/core/runtimes";
 import { runtimeKeys, runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useWSEvent } from "@multica/core/realtime";
 import {
@@ -51,9 +54,11 @@ import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
 import { pendingRuntimesForProfiles } from "./pending-runtime";
 import {
   MachineCliSection,
+  machineAgentCLIRuntime,
   machineHasCliInfo,
   machineUpdateRuntime,
 } from "./machine-cli-section";
+import { AgentCliSection } from "./agent-cli-section";
 import { isQoderLocator, QoderDetailPage } from "./qoder-detail-page";
 import {
   HealthIcon,
@@ -267,6 +272,7 @@ export function RuntimeDetailPage({
 
   const Icon = machineIcon(machine);
   const updateRuntime = machineUpdateRuntime(machine, currentUserId, isAdmin);
+  const agentRuntime = machineAgentCLIRuntime(machine, currentUserId, isAdmin);
   const daemonActions = machine.isCurrent ? localMachineActions : null;
   const hasCliInfo = machineHasCliInfo(machine, updateRuntime);
   const summary = [
@@ -323,6 +329,21 @@ export function RuntimeDetailPage({
                   />
                 </ObjectSectionCard>
               )}
+            </ObjectSection>
+          )}
+
+          {agentRuntime && (
+            <ObjectSection title={t(($) => $.agent_cli.title)}>
+              <AgentCliSection
+                runtimeId={agentRuntime.id}
+                isOnline={agentRuntime.status === "online"}
+                canUpgrade={canUpgradeAgentCLI({
+                  runtimeMode: agentRuntime.runtime_mode,
+                  isRuntimeOwner:
+                    !!currentUserId && agentRuntime.owner_id === currentUserId,
+                  isWorkspaceAdmin: isAdmin,
+                })}
+              />
             </ObjectSection>
           )}
 

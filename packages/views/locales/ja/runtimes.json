@@ -342,6 +342,31 @@
       "timeout": "タイムアウト"
     }
   },
+  "agent_cli": {
+    "title": "エージェント CLI",
+    "loading": "CLI の状態を読み込み中…",
+    "load_failed": "CLI の状態を読み込めませんでした。",
+    "not_installed": "未インストール",
+    "manual_install": "手動でインストールまたはアップグレード",
+    "latest": "最新",
+    "update": "更新",
+    "retry": "再試行",
+    "unknown_error": "不明なエラー",
+    "initiate_failed": "アップグレードを開始できませんでした",
+    "status": {
+      "up_to_date": "最新です",
+      "outdated": "更新があります",
+      "missing": "未インストール",
+      "unknown": "バージョン不明"
+    },
+    "stage": {
+      "queued": "待機中",
+      "draining": "タスクの終了を待っています",
+      "upgrading": "アップグレード中",
+      "succeeded": "更新しました",
+      "failed": "更新に失敗しました"
+    }
+  },
   "charts": {
     "heatmap_less": "少ない",
     "heatmap_more": "多い",
