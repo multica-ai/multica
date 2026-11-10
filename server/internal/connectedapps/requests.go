@@ -14,7 +14,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/util"
-	sdk "github.com/multica-ai/multica/server/pkg/composio"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 )
@@ -41,10 +40,6 @@ const (
 	KindAction  = "action"
 	KindConnect = "connect"
 )
-
-func (s *Service) submit(ctx context.Context, rn *run, app db.AgentApp, tool *sdk.Tool, class string, args map[string]any, summary string) (db.AppActionRequest, error) {
-	return s.createRequest(ctx, rn, KindAction, app, tool.Slug, class, args, summary)
-}
 
 func (s *Service) createRequest(ctx context.Context, rn *run, kind string, app db.AgentApp, toolSlug, class string, args map[string]any, summary string) (db.AppActionRequest, error) {
 	raw, err := json.Marshal(args)
@@ -315,12 +310,16 @@ func (s *Service) agentApp(ctx context.Context, agentID pgtype.UUID, slug string
 // mayAct reports whether the approver is still a member who may run the
 // agent. Membership and agent access can change while a request waits.
 func (s *Service) mayAct(ctx context.Context, req db.AppActionRequest) bool {
+	return s.mayUseAgent(ctx, req.WorkspaceID, req.AgentID, req.ApproverUserID)
+}
+
+func (s *Service) mayUseAgent(ctx context.Context, workspaceID, agentID, userID pgtype.UUID) bool {
 	if _, err := s.q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-		UserID: req.ApproverUserID, WorkspaceID: req.WorkspaceID,
+		UserID: userID, WorkspaceID: workspaceID,
 	}); err != nil {
 		return false
 	}
-	return s.resumer == nil || s.resumer.CanActFor(ctx, req.WorkspaceID, req.AgentID, req.ApproverUserID)
+	return s.resumer == nil || s.resumer.CanActFor(ctx, workspaceID, agentID, userID)
 }
 
 func (s *Service) withdraw(ctx context.Context, req db.AppActionRequest) {

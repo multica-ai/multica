@@ -1449,12 +1449,11 @@
     "title": "Ways to give agents tools",
     "current": "This page",
     "mcp": "Added by admins and shared across the workspace, then assigned per agent.",
-    "apps": "Team or personal accounts connected through Multica, given to each agent with an account and a permission level.",
+    "apps": "Team or personal accounts connected through Multica and added to each agent.",
     "plugins": "Installed packages that can add tools, scheduled hooks, and storage, each with its own permissions."
   },
   "connected_apps": {
-    "description": "Accounts your agents act through. Every call goes through Multica, which applies your rules and asks before sending, deleting or sharing.",
-    "add_app": "Add app",
+    "description": "Accounts your agents use to access external apps. Allowed actions run immediately.",
     "loading": "Loading apps…",
     "load_failed": "Couldn't load apps.",
     "team_title": "Team accounts",
@@ -1485,17 +1484,18 @@
     "toast_disconnected": "Disconnected",
     "toast_failed": "Something went wrong. Please try again.",
     "add": {
-      "title": "Add an app",
-      "description": "Connect an account for the team or for yourself. Which agents use it is set on each agent's Apps page.",
       "search": "Search apps…",
       "empty": "No apps match.",
       "curated": "Curated",
       "recommended_team": "Usually a team account",
       "recommended_personal": "Usually a personal account",
-      "connect_team": "Connect for team",
+      "connect_team": "Connect team account",
       "connect_personal": "Connect my account",
       "connecting": "Connecting…",
-      "connected": "Connected"
+      "connected": "Connected",
+      "connect": "Connect",
+      "team_description": "A shared workspace account. Choose which agents can use it on each agent’s Apps page.",
+      "personal_description": "Your own account. Apps set to the triggerer’s account use it when you trigger a run."
     },
     "disconnect_team": {
       "title": "Disconnect the team {{app}} account?",
@@ -1623,6 +1623,19 @@
       "row_label": "Allowed apps",
       "row_description_one": "{{count}} app allowed",
       "row_description_other": "{{count}} apps allowed"
+    },
+    "saved_access": {
+      "account": "Saved action restrictions are still blocking this account.",
+      "agent": "This app still has read-only access from an earlier setup.",
+      "catalog": "A saved app list is hiding other apps.",
+      "allow_actions": "Allow all actions",
+      "open_catalog": "Show all apps",
+      "account_confirm": "Agents assigned this account will be able to read, write, send, delete, and share through it. Saved action restrictions will be replaced.",
+      "agent_confirm": "This agent will be able to read, write, send, delete, and share through this app, within the account’s allowed actions.",
+      "catalog_confirm": "All connectable apps will be available to the workspace. Existing connections and agent assignments will stay as they are.",
+      "cancel": "Cancel",
+      "admin_required": "A workspace admin can restore access.",
+      "account_link": "This account has saved action restrictions. Restore access in Connected apps."
     }
   }
 }

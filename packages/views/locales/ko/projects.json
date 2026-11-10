@@ -11,6 +11,7 @@
     "view_table": "테이블",
     "view_cards": "카드",
     "row_menu": "프로젝트 작업",
+    "rename": "이름 변경",
     "pin": "사이드바에 고정",
     "unpin": "고정 해제",
     "delete": "삭제",
@@ -62,6 +63,7 @@
     "pin_tooltip": "사이드바에 고정",
     "unpin_tooltip": "사이드바 고정 해제",
     "sidebar_tooltip": "오른쪽 사이드바 열기/닫기",
+    "rename_action": "프로젝트 이름 변경",
     "copy_link": "링크 복사",
     "delete_action": "프로젝트 삭제",
     "section_properties": "속성",
@@ -204,5 +206,26 @@
       "issue_pricing": "요금제 비교표",
       "issue_blog": "블로그 목록 페이지네이션"
     }
+  },
+  "access": {
+    "label": "접근 권한",
+    "title": "{{title}} 접근 권한",
+    "description": "프로젝트와 해당 태스크, 댓글, 첨부 파일을 볼 수 있는 사람을 설정합니다.",
+    "workspace": "전체 워크스페이스",
+    "private": "프로젝트 멤버만",
+    "members_count": "프로젝트 멤버 · {{count}}",
+    "add": "워크스페이스 멤버 추가",
+    "search": "이름 또는 이메일로 검색...",
+    "no_members": "일치하는 멤버가 없습니다",
+    "no_selected": "프로젝트 멤버가 없습니다",
+    "admin_notice": "워크스페이스 owner와 admin은 항상 접근할 수 있습니다.",
+    "you": "나",
+    "remove": "{{name}} 제거",
+    "failed": "접근 권한을 저장할 수 없습니다.",
+    "load_failed": "멤버를 불러올 수 없습니다.",
+    "publish_title": "전체 워크스페이스에 공개할까요?",
+    "publish_description": "모든 워크스페이스 멤버가 프로젝트와 해당 태스크, 댓글, 첨부 파일을 볼 수 있게 됩니다.",
+    "done": "완료",
+    "retry": "다시 시도"
   }
 }

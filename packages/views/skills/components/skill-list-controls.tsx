@@ -33,6 +33,7 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
+import { stopMenuSearchKeys } from "../../issues/components/advanced-filter-panel";
 import {
   type SkillListFilters,
   type SkillOriginType,
@@ -276,6 +277,7 @@ export function SkillFilterMenu({
                   type="text"
                   value={labelSearch}
                   onChange={(e) => setLabelSearch(e.target.value)}
+                  onKeyDown={stopMenuSearchKeys}
                   placeholder={t(($) => $.toolbar.filter_search_placeholder)}
                   className="w-full bg-transparent text-body outline-none placeholder:text-muted-foreground"
                   autoFocus

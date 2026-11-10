@@ -743,6 +743,8 @@
       "send_with_body": "초안 본문과 함께 보냅니다.",
       "confirm_add": "주석 추가",
       "save": "주석 저장",
+      "confirm_add_short": "추가",
+      "save_short": "저장",
       "add_comment": "댓글에 추가",
       "add": "답글에 추가",
       "note_label": "코멘트",
@@ -1469,6 +1471,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "댓글에서 보기",
     "locate_description": "설명에서 보기",
+    "copy_link": "최신 버전 링크 복사",
+    "not_found": "이 이슈에 “{{name}}” 산출물이 없습니다",
+    "link_load_failed": "“{{name}}”을(를) 열기 위한 산출물을 불러오지 못했습니다. 새로고침해서 다시 시도하세요.",
     "version_label": "버전 {{version}} / 전체 {{total}}개",
     "version_of": "v{{version}} / 전체 {{total}}개",
     "info_source": "출처",
@@ -1668,7 +1673,6 @@
       "brief_header": "이번 실행이 받은 워크플로 설명"
     },
     "detail": {
-      "follows_project": "(프로젝트 기준)",
       "card_title": "“{{workflow}}” · “{{project}}” 기준"
     },
     "list_separator": ", ",
@@ -1834,5 +1838,32 @@
       "rejected": "거절됨",
       "rate_limited": "속도 제한"
     }
+  },
+  "environments": {
+    "section_title": "환경",
+    "running_count_other": "{{count}}개 실행 중",
+    "this_machine": "이 기기",
+    "unknown_machine": "알 수 없는 기기",
+    "state": {
+      "starting": "시작 중",
+      "running": "실행 중",
+      "exited": "종료됨",
+      "stopped": "중지됨",
+      "unreachable": "응답 없음"
+    },
+    "expires_in_minutes_other": "{{count}}분 후 만료",
+    "expires_in_hours_other": "{{count}}시간 후 만료",
+    "expires_in_days_other": "{{count}}일 후 만료",
+    "started_ago": "시작: {{time}}",
+    "ended_ago": "종료: {{time}}",
+    "last_seen": "마지막 응답: {{time}}",
+    "ended_count_other": "종료됨 {{count}}개",
+    "detected_hint": "이 태스크의 실행 디렉터리에서 발견된 서버",
+    "remote_hint": "{{machine}}에서 실행 중입니다. localhost URL은 해당 기기에서만 열 수 있습니다.",
+    "localhost_hint": "localhost URL은 이를 실행 중인 기기에서만 열 수 있습니다.",
+    "open": "열기",
+    "copy_url": "URL 복사",
+    "copied": "URL을 복사했습니다",
+    "copy_failed": "URL을 복사할 수 없습니다"
   }
 }

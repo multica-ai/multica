@@ -212,7 +212,7 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) 
 			continue
 		}
 		taskDir := filepath.Join(wsDir, entry.Name())
-		if d.isActiveEnvRoot(taskDir) {
+		if d.isActiveEnvRoot(taskDir) || d.environments.servesFrom(taskDir) {
 			stats.skipped++
 			continue
 		}
@@ -422,8 +422,8 @@ func (d *Daemon) taskDirGCDecision(ctx context.Context, taskDir string) (gcActio
 	// still-running task can reuse the prior workdir of an already-done issue
 	// whose updated_at is older than the TTL (a task re-claim doesn't advance
 	// updated_at), so the regular TTL check alone wouldn't notice the resumed
-	// activity.
-	if d.isActiveEnvRoot(taskDir) {
+	// activity. A directory a running environment serves from is in use too.
+	if d.isActiveEnvRoot(taskDir) || d.environments.servesFrom(taskDir) {
 		return gcActionSkip, nil
 	}
 

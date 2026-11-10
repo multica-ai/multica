@@ -748,6 +748,8 @@
       "send_with_body": "Se enviará con el texto del borrador.",
       "confirm_add": "Añadir anotación",
       "save": "Guardar anotación",
+      "confirm_add_short": "Añadir",
+      "save_short": "Guardar",
       "add_comment": "Añadir al comentario",
       "add": "Añadir a la respuesta",
       "note_label": "Comentario",
@@ -1513,6 +1515,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "Mostrar en comentarios",
     "locate_description": "Mostrar en la descripción",
+    "copy_link": "Copiar enlace a la última versión",
+    "not_found": "Esta incidencia no tiene ningún entregable llamado «{{name}}»",
+    "link_load_failed": "No se pudieron cargar los entregables de esta incidencia para abrir «{{name}}». Recarga para intentarlo de nuevo.",
     "version_label": "Versión {{version}} de {{total}}",
     "version_of": "v{{version}} de {{total}}",
     "info_source": "Origen",
@@ -1728,7 +1733,6 @@
       "brief_header": "El encargo del flujo de trabajo que recibió esta ejecución"
     },
     "detail": {
-      "follows_project": "(del proyecto)",
       "card_title": "{{workflow}} · de {{project}}"
     },
     "list_separator": ", ",
@@ -1904,5 +1908,37 @@
       "rejected": "Rechazada",
       "rate_limited": "Límite de llamadas alcanzado"
     }
+  },
+  "environments": {
+    "section_title": "Entornos",
+    "running_count_one": "{{count}} en ejecución",
+    "running_count_other": "{{count}} en ejecución",
+    "this_machine": "Este equipo",
+    "unknown_machine": "Equipo desconocido",
+    "state": {
+      "starting": "Iniciando",
+      "running": "En ejecución",
+      "exited": "Terminado",
+      "stopped": "Detenido",
+      "unreachable": "Sin respuesta"
+    },
+    "expires_in_minutes_one": "Caduca en {{count}} min",
+    "expires_in_minutes_other": "Caduca en {{count}} min",
+    "expires_in_hours_one": "Caduca en {{count}} h",
+    "expires_in_hours_other": "Caduca en {{count}} h",
+    "expires_in_days_one": "Caduca en {{count}} d",
+    "expires_in_days_other": "Caduca en {{count}} d",
+    "started_ago": "Iniciado {{time}}",
+    "ended_ago": "Finalizado {{time}}",
+    "last_seen": "Última respuesta {{time}}",
+    "ended_count_one": "{{count}} finalizado",
+    "ended_count_other": "{{count}} finalizados",
+    "detected_hint": "Servidor encontrado en el directorio de una ejecución de esta tarea",
+    "remote_hint": "Se ejecuta en {{machine}}. Una URL localhost solo se abre en ese equipo.",
+    "localhost_hint": "Una URL localhost solo se abre en el equipo que la ejecuta.",
+    "open": "Abrir",
+    "copy_url": "Copiar URL",
+    "copied": "URL copiada",
+    "copy_failed": "No se pudo copiar la URL"
   }
 }

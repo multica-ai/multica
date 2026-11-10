@@ -765,6 +765,8 @@
       "send_with_body": "Will send with the draft text.",
       "confirm_add": "Add annotation",
       "save": "Save annotation",
+      "confirm_add_short": "Add",
+      "save_short": "Save",
       "add_comment": "Add to comment",
       "add": "Add to reply",
       "note_label": "Comment",
@@ -1520,6 +1522,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "Show in comments",
     "locate_description": "Show in description",
+    "copy_link": "Copy link to latest version",
+    "not_found": "No deliverable named “{{name}}” on this issue",
+    "link_load_failed": "Couldn’t load this issue’s deliverables to open “{{name}}”. Reload to try again.",
     "version_label": "Version {{version}} of {{total}}",
     "version_of": "v{{version}} of {{total}}",
     "info_source": "Source",
@@ -1735,7 +1740,6 @@
       "brief_header": "The workflow brief this run received"
     },
     "detail": {
-      "follows_project": "(from project)",
       "card_title": "{{workflow}} · from {{project}}"
     },
     "list_separator": ", ",
@@ -1904,5 +1908,37 @@
       "rejected": "Declined",
       "rate_limited": "Rate limited"
     }
+  },
+  "environments": {
+    "section_title": "Environments",
+    "running_count_one": "{{count}} running",
+    "running_count_other": "{{count}} running",
+    "this_machine": "This machine",
+    "unknown_machine": "Unknown machine",
+    "state": {
+      "starting": "Starting",
+      "running": "Running",
+      "exited": "Exited",
+      "stopped": "Stopped",
+      "unreachable": "Not responding"
+    },
+    "expires_in_minutes_one": "Expires in {{count}}m",
+    "expires_in_minutes_other": "Expires in {{count}}m",
+    "expires_in_hours_one": "Expires in {{count}}h",
+    "expires_in_hours_other": "Expires in {{count}}h",
+    "expires_in_days_one": "Expires in {{count}}d",
+    "expires_in_days_other": "Expires in {{count}}d",
+    "started_ago": "Started {{time}}",
+    "ended_ago": "Ended {{time}}",
+    "last_seen": "Last seen {{time}}",
+    "ended_count_one": "{{count}} ended",
+    "ended_count_other": "{{count}} ended",
+    "detected_hint": "Found listening in the directory of one of this issue's runs",
+    "remote_hint": "Runs on {{machine}}. A localhost URL opens only on that machine.",
+    "localhost_hint": "A localhost URL opens only on the machine running it.",
+    "open": "Open",
+    "copy_url": "Copy URL",
+    "copied": "URL copied",
+    "copy_failed": "Couldn't copy the URL"
   }
 }

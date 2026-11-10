@@ -3,18 +3,14 @@ import { api } from "../api";
 import type { AppAccountScope } from "../types";
 
 /** Query keys for Connected Apps (MUL-8516). Everything sits under the
- * workspace id: team accounts, rules, and requests are workspace data. */
+ * workspace id: team accounts, activity, and requests are workspace data. */
 export const connectedAppsKeys = {
   all: (wsId: string) => ["connected-apps", wsId] as const,
   overview: (wsId: string) => [...connectedAppsKeys.all(wsId), "overview"] as const,
   catalog: (wsId: string) => [...connectedAppsKeys.all(wsId), "catalog"] as const,
-  fullCatalog: (wsId: string) => [...connectedAppsKeys.all(wsId), "catalog", "all"] as const,
-  tools: (wsId: string, slug: string) => [...connectedAppsKeys.all(wsId), "tools", slug] as const,
   issueCalls: (wsId: string, issueId: string) =>
     [...connectedAppsKeys.all(wsId), "calls", issueId] as const,
   calls: (wsId: string) => [...connectedAppsKeys.all(wsId), "calls"] as const,
-  rules: (wsId: string, slug: string, scope: AppAccountScope) =>
-    [...connectedAppsKeys.all(wsId), "rules", slug, scope] as const,
   activity: (wsId: string, slug: string, scope: AppAccountScope) =>
     [...connectedAppsKeys.all(wsId), "activity", slug, scope] as const,
   impact: (wsId: string, slug: string) => [...connectedAppsKeys.all(wsId), "impact", slug] as const,
@@ -41,31 +37,11 @@ export const appCatalogOptions = (wsId: string) =>
     staleTime: 5 * 60 * 1000,
   });
 
-/** Every connectable app, for an admin editing a custom catalog. */
-export const fullAppCatalogOptions = (wsId: string) =>
-  queryOptions({
-    queryKey: connectedAppsKeys.fullCatalog(wsId),
-    queryFn: () => api.listAppCatalog("all"),
-    staleTime: 5 * 60 * 1000,
-  });
-
-export const appToolsOptions = (wsId: string, slug: string) =>
-  queryOptions({
-    queryKey: connectedAppsKeys.tools(wsId, slug),
-    queryFn: () => api.listAppTools(slug).then((r) => r.tools),
-  });
-
 /** One fetch per issue backs both the comment chips and the sidebar. */
 export const issueAppCallsOptions = (wsId: string, issueId: string) =>
   queryOptions({
     queryKey: connectedAppsKeys.issueCalls(wsId, issueId),
     queryFn: () => api.listIssueAppCalls(issueId).then((r) => r.calls),
-  });
-
-export const appRulesOptions = (wsId: string, slug: string, scope: AppAccountScope) =>
-  queryOptions({
-    queryKey: connectedAppsKeys.rules(wsId, slug, scope),
-    queryFn: () => api.getAppRules(slug, scope).then((r) => r.rules),
   });
 
 export const appActivityOptions = (wsId: string, slug: string, scope: AppAccountScope) =>
