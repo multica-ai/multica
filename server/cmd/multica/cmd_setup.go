@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -227,18 +229,20 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Probe before persisting anything. A failed setup must never overwrite a
-	// working config or wipe the saved token: persistSelfHostConfigIfReachable
-	// writes only when the server answers, so an unreachable host leaves the
-	// existing config untouched and the user stays logged in.
-	reachable, err := persistSelfHostConfigIfReachable(serverURL, appURL, profile, probeServer)
+	// Verify backend health before writing so a failed setup preserves the profile.
+	probeResult, err := persistSelfHostConfigIfReachable(serverURL, appURL, profile, probeServer)
 	if err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
-	if !reachable {
-		fmt.Fprintf(os.Stderr, "\n⚠ Server at %s is not reachable.\n", serverURL)
+	if probeResult != serverProbeHealthy {
+		if probeResult == serverProbeUnreachable {
+			fmt.Fprintf(os.Stderr, "\n⚠ Server at %s is not reachable.\n", serverURL)
+		} else {
+			fmt.Fprintf(os.Stderr, "\n⚠ Server at %s did not return a healthy Multica backend response.\n", serverURL)
+			fmt.Fprintln(os.Stderr, "  A login gateway may be intercepting the request to /health.")
+		}
 		fmt.Fprintln(os.Stderr, "  Your existing configuration was left unchanged.")
-		fmt.Fprintln(os.Stderr, "  Verify the URL, then re-run 'multica setup self-host' once it's reachable.")
+		fmt.Fprintln(os.Stderr, "  Verify the URL, then re-run 'multica setup self-host' once the backend is healthy.")
 		return nil
 	}
 
@@ -330,25 +334,21 @@ func daemonActiveTaskCount(health map[string]any) int64 {
 	}
 }
 
-// persistSelfHostConfigIfReachable probes serverURL and, only when it answers,
-// overwrites the profile config with the given self-host URLs. When the server
-// is unreachable it leaves any existing config — and its auth token — untouched
-// and returns false, so a failed `setup self-host` never logs the user out or
-// clobbers a working config (the original ordering saved first, then probed,
-// then bailed — wiping the token on every failed probe). The prober is injected
-// so tests can exercise both branches without real network I/O.
-func persistSelfHostConfigIfReachable(serverURL, appURL, profile string, probe func(string) bool) (bool, error) {
-	if !probe(serverURL) {
-		return false, nil
+// persistSelfHostConfigIfReachable writes the self-host URLs only after a
+// healthy Multica response, preserving the existing profile on probe failure.
+func persistSelfHostConfigIfReachable(serverURL, appURL, profile string, probe func(string) serverProbeResult) (serverProbeResult, error) {
+	result := probe(serverURL)
+	if result != serverProbeHealthy {
+		return result, nil
 	}
 	cfg := cli.CLIConfig{
 		ServerURL: serverURL,
 		AppURL:    appURL,
 	}
 	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
-		return false, err
+		return result, err
 	}
-	return true, nil
+	return result, nil
 }
 
 // resolveSelfHostServerURL picks the backend URL for `setup self-host`: the
@@ -436,21 +436,45 @@ func promptAppURL(serverURL string) (string, error) {
 	return strings.TrimRight(strings.TrimSpace(line), "/"), nil
 }
 
-// probeServer checks whether a Multica backend is reachable at the given URL.
-func probeServer(baseURL string) bool {
+type serverProbeResult int
+
+const (
+	serverProbeUnreachable serverProbeResult = iota
+	serverProbeInvalidHealth
+	serverProbeHealthy
+)
+
+const maxServerHealthResponseBytes = 4 * 1024
+
+// probeServer requires a healthy Multica payload, including after redirects.
+func probeServer(baseURL string) serverProbeResult {
 	url := strings.TrimRight(baseURL, "/") + "/health"
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return false
+		return serverProbeUnreachable
 	}
 
 	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
 	if err != nil {
-		return false
+		return serverProbeUnreachable
 	}
 	defer resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	if resp.StatusCode != http.StatusOK {
+		return serverProbeInvalidHealth
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxServerHealthResponseBytes+1))
+	if err != nil || len(body) > maxServerHealthResponseBytes {
+		return serverProbeInvalidHealth
+	}
+	var health struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(body, &health); err != nil || health.Status != "ok" {
+		return serverProbeInvalidHealth
+	}
+	return serverProbeHealthy
 }

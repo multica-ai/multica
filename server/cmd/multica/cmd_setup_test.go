@@ -1,6 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +14,168 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 )
+
+func TestSelfHostSetupHealthResponses(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		body     string
+		status   int
+		redirect bool
+		healthy  bool
+	}{
+		{name: "HTML login page", body: "<html>Sign in</html>"},
+		{name: "redirect to HTML login page", body: "<html>Sign in</html>", redirect: true},
+		{name: "unrelated JSON", body: `{"status":"healthy"}`},
+		{name: "unhealthy status", body: `{"status":"error"}`},
+		{name: "missing status", body: `{"pid":123}`},
+		{name: "non-string status", body: `{"status":true}`},
+		{name: "null response", body: `null`},
+		{name: "empty response"},
+		{name: "malformed JSON", body: `{"status":"ok"`},
+		{name: "trailing content", body: `{"status":"ok"}<html>Sign in</html>`},
+		{name: "oversized response", body: `{"status":"ok","extra":"` + strings.Repeat("x", 4096) + `"}`},
+		{name: "non-200 response", body: `{"status":"ok"}`, status: http.StatusServiceUnavailable},
+		{name: "legacy healthy response", body: `{"status":"ok"}`, healthy: true},
+		{name: "healthy response with extra fields", body: `{"status":"ok","pid":123,"commit":"abc123","started_at":"2026-11-10T00:00:00Z","future":{"key":true}}`, healthy: true},
+		{name: "healthy response after redirect", body: `{"status":"ok"}`, redirect: true, healthy: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			redirectTestHome(t, t.TempDir())
+			const profile = "self-host-health-test"
+			existing := cli.CLIConfig{
+				ServerURL:   "https://api.old.example",
+				AppURL:      "https://old.example",
+				WorkspaceID: "ws-1",
+				Token:       "mul_existing_token",
+				DeviceName:  "existing-device",
+				RuntimeName: "existing-runtime",
+			}
+			if err := cli.SaveCLIConfigForProfile(existing, profile); err != nil {
+				t.Fatal(err)
+			}
+			path, err := cli.CLIConfigPathForProfile(profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.redirect && r.URL.Path == "/health" {
+					http.Redirect(w, r, "/redirected", http.StatusFound)
+					return
+				}
+				// A proxy may rewrite Content-Type, so only the payload matters.
+				w.Header().Set("Content-Type", "text/plain")
+				if tc.status != 0 {
+					w.WriteHeader(tc.status)
+				}
+				fmt.Fprint(w, tc.body)
+			}))
+			defer server.Close()
+
+			result, err := persistSelfHostConfigIfReachable(server.URL, "https://new.example", profile, probeServer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (result == serverProbeHealthy) != tc.healthy {
+				t.Errorf("healthy = %v, want %v", result == serverProbeHealthy, tc.healthy)
+			}
+			if !tc.healthy {
+				after, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(before, after) {
+					t.Error("failed health probe changed the existing profile")
+				}
+				return
+			}
+			got, err := cli.LoadCLIConfigForProfile(profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.ServerURL != server.URL || got.AppURL != "https://new.example" {
+				t.Error("healthy backend URLs were not saved")
+			}
+		})
+	}
+}
+
+func TestSetupSelfHostProbeFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		existing    bool
+		unreachable bool
+		wantMessage string
+	}{
+		{name: "invalid health preserves profile", existing: true, wantMessage: "did not return a healthy Multica backend response"},
+		{name: "invalid health creates no profile", wantMessage: "did not return a healthy Multica backend response"},
+		{name: "connection failure preserves profile", existing: true, unreachable: true, wantMessage: "is not reachable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			redirectTestHome(t, t.TempDir())
+			if tc.existing {
+				if err := cli.SaveCLIConfig(cli.CLIConfig{
+					ServerURL: "https://api.old.example", Token: "mul_existing_token", DeviceName: "existing-device",
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path, err := cli.CLIConfigPathForProfile("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, "<html>Sign in</html>")
+			}))
+			defer server.Close()
+			if tc.unreachable {
+				server.Close()
+			}
+			cmd := testCmd()
+			cmd.Flags().String("server-url", "", "")
+			cmd.Flags().String("app-url", "", "")
+			cmd.Flags().Int("frontend-port", 3000, "")
+			if err := cmd.Flags().Set("server-url", server.URL); err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Flags().Set("app-url", "https://new.example"); err != nil {
+				t.Fatal(err)
+			}
+
+			stderr := captureStderr(t)
+			defer stderr.restore()
+			pipeStdin(t, "y\n", func() {
+				if err := runSetupSelfHost(cmd, nil); err != nil {
+					t.Fatalf("setup: %v", err)
+				}
+			})
+			output := stderr.read()
+			if !strings.Contains(output, tc.wantMessage) || !strings.Contains(output, "configuration was left unchanged") {
+				t.Errorf("missing probe failure message: %s", output)
+			}
+			if strings.Contains(output, "login gateway") == tc.unreachable {
+				t.Errorf("gateway hint should appear only for invalid health responses: %s", output)
+			}
+			after, err := os.ReadFile(path)
+			if !tc.existing {
+				if !os.IsNotExist(err) {
+					t.Errorf("failed setup created a profile: read error = %v", err)
+				}
+			} else if err != nil || !bytes.Equal(before, after) {
+				t.Errorf("failed setup changed the existing profile: read error = %v", err)
+			}
+		})
+	}
+}
 
 // TestPersistSelfHostConfigIfReachable verifies the fix for the
 // setup-wipes-token bug: a failed reachability probe must leave the existing
@@ -30,13 +196,13 @@ func TestPersistSelfHostConfigIfReachable(t *testing.T) {
 
 		proceed, err := persistSelfHostConfigIfReachable(
 			"https://api.new.example", "https://new.example", "",
-			func(string) bool { return false },
+			func(string) serverProbeResult { return serverProbeUnreachable },
 		)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if proceed {
-			t.Fatalf("proceed: want false for unreachable server")
+		if proceed != serverProbeUnreachable {
+			t.Fatalf("probe result = %v, want unreachable", proceed)
 		}
 
 		got, err := cli.LoadCLIConfig()
@@ -56,13 +222,13 @@ func TestPersistSelfHostConfigIfReachable(t *testing.T) {
 
 		proceed, err := persistSelfHostConfigIfReachable(
 			"https://api.new.example", "https://new.example", "",
-			func(string) bool { return true },
+			func(string) serverProbeResult { return serverProbeHealthy },
 		)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !proceed {
-			t.Fatalf("proceed: want true for reachable server")
+		if proceed != serverProbeHealthy {
+			t.Fatalf("probe result = %v, want healthy", proceed)
 		}
 
 		got, err := cli.LoadCLIConfig()
