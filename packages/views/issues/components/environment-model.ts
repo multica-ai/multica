@@ -49,7 +49,8 @@ type ControlRecord = IssueEnvironmentActionRecord & { action: "stop" | "restart"
 
 /** 1-based position of each run on the issue, oldest first. */
 export function runOrdinals(tasks: readonly AgentTask[]): Map<string, number> {
-  const ordered = [...tasks].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  // Ids are time-ordered, which settles runs created in the same second.
+  const ordered = [...tasks].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
   return new Map(ordered.map((task, index) => [task.id, index + 1]));
 }
 

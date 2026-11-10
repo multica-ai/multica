@@ -269,7 +269,9 @@ export function IssueEnvironmentsSection({
       group.offline = group.offline && isOffline(runtimeId);
       byMachine.set(key, group);
     }
-    return [...byMachine.values()].sort((a, b) => Number(b.machine?.isCurrent ?? false) - Number(a.machine?.isCurrent ?? false));
+    return [...byMachine.values()].sort((a, b) =>
+      Number(a.offline) - Number(b.offline) ||
+      Number(b.machine?.isCurrent ?? false) - Number(a.machine?.isCurrent ?? false));
   };
 
   const access = (env: IssueEnvironment, group: MachineGroup<unknown>): RowAccess => {
