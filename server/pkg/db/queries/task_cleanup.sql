@@ -66,6 +66,23 @@ SET result = result - 'process_cleanup_pending'
 WHERE id = @id AND status IN ('cancelled', 'failed')
   AND result->>'process_cleanup_pending' = 'true';
 
+-- name: MarkMuseAppRecoveryCleanupUnconfirmed :many
+-- Run inside the bulk terminal-write transaction, before its rows reach the
+-- retry pipeline. Losing a daemon cannot stop an independently running worker.
+-- Keep the start-time capability as evidence if the runtime was later changed
+-- or removed; legacy Muse daemons are recognized by their runtime provider.
+UPDATE agent_task_queue task
+SET failure_reason = 'cleanup_unconfirmed',
+    error = concat_ws('; ', NULLIF(task.error, ''),
+        'Muse worker may still be running after daemon recovery or loss of contact. Check and stop it before manually rerunning.')
+WHERE task.id = ANY(@task_ids::uuid[])
+  AND task.status = 'failed' AND task.started_at IS NOT NULL
+  AND task.failure_reason IN ('runtime_recovery', 'runtime_offline', 'timeout')
+  AND (task.result->>'process_cleanup_capability' = 'museapp-process-cleanup-v1'
+    OR EXISTS (SELECT 1 FROM agent_runtime runtime
+               WHERE runtime.id = task.runtime_id AND runtime.provider = 'museapp'))
+RETURNING task.*;
+
 -- name: TaskWaitingForProcessCleanup :one
 SELECT EXISTS (
     SELECT 1 FROM agent_task_queue candidate

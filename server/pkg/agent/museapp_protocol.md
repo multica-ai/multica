@@ -42,3 +42,10 @@ An execute response lost after submission is also an unknown execution
 outcome. Without a task id to cancel, the daemon reports unconfirmed cleanup
 instead of allowing an automatic retry to launch duplicate work. Explicit
 pre-execution HTTP 400/401/403 refusals remain ordinary launch errors.
+
+Daemon restart recovery, prolonged runtime disconnection, and stale-task expiry
+also cannot prove a started Muse worker stopped. The server persists
+`cleanup_unconfirmed` in the same transaction as these terminal transitions,
+before processing retries or exposing the failure to new claims. This applies
+to started Muse tasks, including tasks from older Muse daemons; queued or
+not-yet-started tasks and other providers retain their normal recovery policy.

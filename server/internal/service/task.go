@@ -6270,6 +6270,26 @@ func (s *TaskService) terminateTasksInTx(ctx context.Context, fail func(*db.Quer
 		if err != nil {
 			return err
 		}
+		// A terminal infrastructure error does not stop an independent Muse
+		// worker. Persist that uncertainty in this transaction, before retry
+		// decisions or another claim can observe the failed rows.
+		var startedIDs []pgtype.UUID
+		indices := make(map[pgtype.UUID]int)
+		for i, task := range failed {
+			if task.Status == "failed" && task.StartedAt.Valid {
+				startedIDs = append(startedIDs, task.ID)
+				indices[task.ID] = i
+			}
+		}
+		if len(startedIDs) > 0 {
+			unconfirmed, err := qtx.MarkMuseAppRecoveryCleanupUnconfirmed(ctx, startedIDs)
+			if err != nil {
+				return fmt.Errorf("record Muse recovery cleanup: %w", err)
+			}
+			for _, task := range unconfirmed {
+				failed[indices[task.ID]] = task
+			}
+		}
 		return SettleTerminalTaskState(ctx, qtx, failed...)
 	}); err != nil {
 		return nil, err
@@ -6308,12 +6328,14 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 			}
 		}
 		if !retryPending {
-			if _, err := s.recoverDelegatedTaskFailure(ctx, t); err != nil {
-				slog.Warn("handle failed tasks: delegated failure recovery failed",
-					"task_id", util.UUIDToString(t.ID),
-					"delegated_from_task_id", util.UUIDToString(t.DelegatedFromTaskID),
-					"error", err,
-				)
+			if t.FailureReason.String != taskfailure.ReasonProcessCleanupUnconfirmed.String() && t.FailureReason.String != taskfailure.ReasonProcessCleanupBlocked.String() {
+				if _, err := s.recoverDelegatedTaskFailure(ctx, t); err != nil {
+					slog.Warn("handle failed tasks: delegated failure recovery failed",
+						"task_id", util.UUIDToString(t.ID),
+						"delegated_from_task_id", util.UUIDToString(t.DelegatedFromTaskID),
+						"error", err,
+					)
+				}
 			}
 			// Same terminal-failure comment FailTaskWithTransition posts, so
 			// swept tasks are not silent on their issue.
