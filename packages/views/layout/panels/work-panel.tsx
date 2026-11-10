@@ -16,6 +16,7 @@ import { useNavigation } from "../../navigation";
 import { IssueContextMenuProvider } from "../../issues/actions";
 import { useIssueViewActions } from "../../issue-views/use-view-actions";
 import { useT } from "../../i18n";
+import { GettingStartedCard } from "../../onboarding/getting-started/getting-started-card";
 import { PanelBody, PanelHeader, isPathWithin } from "../panel-nav";
 import { PinnedSection, usePanelPins } from "./pinned-section";
 import { useKeptActiveItem } from "./sidebar-tree";
@@ -200,6 +201,7 @@ export function WorkPanel() {
           )}
         </PanelBody>
       </IssueContextMenuProvider>
+      <GettingStartedCard />
     </>
   );
 }
