@@ -17,6 +17,26 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func freeProfileName(t *testing.T, prefix string, used map[int]bool) string {
+	t.Helper()
+	for i := 0; i < 2000; i++ {
+		name := fmt.Sprintf("%s-%d-%d", prefix, time.Now().UnixNano(), i)
+		port := healthPortForProfile(name)
+		if used[port] {
+			continue
+		}
+		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			continue
+		}
+		_ = ln.Close()
+		used[port] = true
+		return name
+	}
+	t.Fatal("could not find an unused daemon health port for test profile")
+	return ""
+}
+
 // blockingChildEnv marks a re-executed copy of this test binary as the
 // stand-in daemon process rather than a normal test run.
 const blockingChildEnv = "MULTICA_TEST_BLOCKING_CHILD"
@@ -152,6 +172,64 @@ func TestDaemonIdentityMismatch(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRequireNoSameWorkspaceDaemon(t *testing.T) {
+	t.Run("named profile refuses another profile daemon on same workspace", func(t *testing.T) {
+		usedPorts := make(map[int]bool)
+		ownerProfile := freeProfileName(t, "same-workspace-owner", usedPorts)
+		targetProfile := freeProfileName(t, "same-workspace-target", usedPorts)
+		mkProfiles(t, ownerProfile, targetProfile)
+		serveHealthAs(t, ownerProfile, map[string]any{
+			"profile":    ownerProfile,
+			"workspaces": []any{map[string]any{"id": "ws-1"}},
+		})
+
+		err := requireNoSameWorkspaceDaemon(targetProfile, "ws-1")
+		var conflict *sameWorkspaceDaemonConflictError
+		if !errors.As(err, &conflict) {
+			t.Fatalf("requireNoSameWorkspaceDaemon = %v, want same-workspace conflict", err)
+		}
+		if conflict.WorkspaceID != "ws-1" || conflict.GotProfile != ownerProfile || conflict.WantProfile != targetProfile {
+			t.Fatalf("conflict = %+v, want ws-1/%s/%s", conflict, ownerProfile, targetProfile)
+		}
+		if !strings.Contains(err.Error(), "refusing to start") || !strings.Contains(err.Error(), "already has a live daemon for workspace_id ws-1") {
+			t.Fatalf("error = %q, want actionable same-workspace refusal", err.Error())
+		}
+	})
+
+	t.Run("default profile refuses named daemon on same workspace", func(t *testing.T) {
+		usedPorts := make(map[int]bool)
+		ownerProfile := freeProfileName(t, "same-workspace-owner", usedPorts)
+		mkProfiles(t, ownerProfile)
+		serveHealthAs(t, ownerProfile, map[string]any{
+			"profile":    ownerProfile,
+			"workspaces": []any{map[string]any{"id": "ws-1"}},
+		})
+
+		err := requireNoSameWorkspaceDaemon("", "ws-1")
+		var conflict *sameWorkspaceDaemonConflictError
+		if !errors.As(err, &conflict) {
+			t.Fatalf("requireNoSameWorkspaceDaemon = %v, want same-workspace conflict", err)
+		}
+		if conflict.GotProfile != ownerProfile || conflict.WantProfile != "" {
+			t.Fatalf("conflict = %+v, want %s/default", conflict, ownerProfile)
+		}
+	})
+
+	t.Run("different workspace does not block", func(t *testing.T) {
+		usedPorts := make(map[int]bool)
+		otherProfile := freeProfileName(t, "same-workspace-other", usedPorts)
+		mkProfiles(t, otherProfile)
+		serveHealthAs(t, otherProfile, map[string]any{
+			"profile":    otherProfile,
+			"workspaces": []any{map[string]any{"id": "ws-2"}},
+		})
+
+		if err := requireNoSameWorkspaceDaemon("", "ws-1"); err != nil {
+			t.Fatalf("requireNoSameWorkspaceDaemon = %v, want nil for different workspace", err)
+		}
+	})
 }
 
 func TestDaemonProfileMismatchErrorNamesBothSides(t *testing.T) {
