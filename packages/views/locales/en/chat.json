@@ -26,6 +26,8 @@
     "more_other": "{{count}} more chats"
   },
   "input": {
+    "page_context_add": "Add this page as context",
+    "page_context_remove": "Remove page context",
     "placeholder_no_agent": "Create an agent to start chatting",
     "placeholder_archived": "This session is archived",
     "placeholder_archived_agent": "This agent has been archived",

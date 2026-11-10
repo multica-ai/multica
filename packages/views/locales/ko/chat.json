@@ -24,6 +24,8 @@
     "more_other": "채팅 {{count}}개 더 보기"
   },
   "input": {
+    "page_context_add": "이 페이지를 컨텍스트로 추가",
+    "page_context_remove": "페이지 컨텍스트 제거",
     "placeholder_no_agent": "채팅을 시작하려면 에이전트를 만드세요",
     "placeholder_archived": "보관된 세션입니다",
     "placeholder_archived_agent": "보관된 에이전트입니다",

@@ -24,6 +24,8 @@
     "more_other": "他 {{count}} 件のチャット"
   },
   "input": {
+    "page_context_add": "このページをコンテキストに追加",
+    "page_context_remove": "ページのコンテキストを削除",
     "placeholder_no_agent": "チャットを始めるにはエージェントを作成してください",
     "placeholder_archived": "このセッションはアーカイブされています",
     "placeholder_archived_agent": "このエージェントはアーカイブされています",

@@ -24,6 +24,8 @@
     "more_other": "另外 {{count}} 个对话"
   },
   "input": {
+    "page_context_add": "将当前页面添加为上下文",
+    "page_context_remove": "移除页面上下文",
     "placeholder_no_agent": "创建一个智能体后才能开始对话",
     "placeholder_archived": "此会话已归档",
     "placeholder_archived_agent": "该智能体已归档",

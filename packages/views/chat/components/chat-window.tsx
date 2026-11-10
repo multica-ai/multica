@@ -812,6 +812,7 @@ export function ChatWindow() {
     : { width: renderWidth, height: renderHeight };
 
   const contextItems = useChatContextItems(wsId);
+  const pageContext = contextItems.find((item) => item.group === "current") ?? null;
   const queuedTasks = pendingTask?.queued_tasks ?? [];
 
   const showRestore = isExpanded || isAtMax;
@@ -1021,6 +1022,7 @@ export function ChatWindow() {
           />
         }
         contextItems={contextItems}
+        pageContext={pageContext}
         focusRequest={focusRequest}
         annotations={annotations}
       />

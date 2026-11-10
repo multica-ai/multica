@@ -24,6 +24,8 @@
     "more_other": "另外 {{count}} 個對話"
   },
   "input": {
+    "page_context_add": "將目前頁面加入為上下文",
+    "page_context_remove": "移除頁面上下文",
     "placeholder_no_agent": "建立一個 AI 代理後才能開始對話",
     "placeholder_archived": "此會話已歸檔",
     "placeholder_archived_agent": "該 AI 代理已歸檔",

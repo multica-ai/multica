@@ -30,6 +30,8 @@
     "more_other": "Ещё {{count}} чата"
   },
   "input": {
+    "page_context_add": "Добавить эту страницу в контекст",
+    "page_context_remove": "Убрать контекст страницы",
     "placeholder_no_agent": "Создайте агента, чтобы начать общение",
     "placeholder_archived": "Эта сессия архивирована",
     "placeholder_archived_agent": "Этот агент был архивирован",
