@@ -300,13 +300,8 @@
     "duplicate_title": "Dupliquer {{name}}",
     "step_ai": "Construire par la conversation",
     "modes": {
-      "template": {
-        "title": "Partir d'un modèle",
-        "description": "Partez d'instructions et de skills sélectionnés, puis adaptez chaque détail à votre espace de travail."
-      },
       "ai": {
-        "title": "Construire avec l'IA",
-        "description": "Créez une configuration modifiable par la conversation."
+        "title": "Construire avec l'IA"
       }
     },
     "sections": {
@@ -334,10 +329,6 @@
       }
     },
     "builder": {
-      "setup_title": "Choisir un runtime pour l'Agent Builder",
-      "setup_description": "Ce runtime sert à la configuration et sera celui du nouvel agent par défaut.",
-      "start": "Démarrer la conversation",
-      "connect_runtime": "Connecter un runtime",
       "draft_parse_failed": "Cette réponse n’a pas permis de remplir le formulaire. Demandez à l’agent de générer à nouveau le brouillon ou remplissez le formulaire manuellement.",
       "start_failed": "Impossible de démarrer l'Agent Builder.",
       "send_failed": "Impossible d'envoyer votre message.",

@@ -873,13 +873,8 @@
     "duplicate_title": "{{name}} を複製",
     "step_ai": "会話で作成",
     "modes": {
-      "template": {
-        "title": "テンプレートを使用",
-        "description": "整理された指示とスキルを基に、ワークスペースに合わせて詳細を調整します。"
-      },
       "ai": {
-        "title": "AI で作成",
-        "description": "対話で編集可能な設定の下書きを作成します。"
+        "title": "AI で作成"
       }
     },
     "sections": {
@@ -907,10 +902,6 @@
       }
     },
     "builder": {
-      "setup_title": "Agent Builder のランタイムを選択",
-      "setup_description": "このランタイムは作成時の対話と、新しいエージェントの既定値に使われます。",
-      "start": "会話を開始",
-      "connect_runtime": "ランタイムを接続",
       "draft_parse_failed": "この返信からフォームを入力できませんでした。エージェントに下書きの再生成を依頼するか、手動で入力してください。",
       "start_failed": "Agent Builder を開始できませんでした。",
       "send_failed": "メッセージを送信できませんでした。",
