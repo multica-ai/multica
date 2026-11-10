@@ -1504,6 +1504,7 @@
     "locate_description": "Show in description",
     "copy_link": "Copy link to latest version",
     "not_found": "No deliverable named “{{name}}” on this issue",
+    "link_load_failed": "Couldn’t load this issue’s deliverables to open “{{name}}”. Reload to try again.",
     "version_label": "Version {{version}} of {{total}}",
     "version_of": "v{{version}} of {{total}}",
     "info_source": "Source",

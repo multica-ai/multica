@@ -131,7 +131,11 @@ import {
 } from "./deliverables/deliverable-details";
 import { collectDeliverableFiles } from "@multica/core/attachments/deliverables";
 import { AttachmentVersionsProvider } from "./deliverables/attachment-versions";
-import { OpenDeliverableOnLoad, useCopyDeliverableLink } from "./deliverables/deliverable-link";
+import {
+  OpenDeliverableOnLoad,
+  useCopyDeliverableLink,
+  useFreshTimelineRead,
+} from "./deliverables/deliverable-link";
 import { useQuery } from "@tanstack/react-query";
 import { useIssueReadState } from "@multica/core/issues/read-state";
 import { useAuthStore } from "@multica/core/auth";
@@ -1707,7 +1711,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   // Custom hooks — encapsulate timeline, reactions, subscribers
   const {
-    timeline, loading: timelineLoading,
+    timeline, loading: timelineLoading, dataUpdatedAt: timelineUpdatedAt,
     submitComment, submitReply,
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id);
@@ -2610,6 +2614,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     onLocate: locateOrigin,
     onCopyLink: copyDeliverableLink,
   });
+  const deliverableLinkRead = useFreshTimelineRead(id, openDeliverable, timelineUpdatedAt);
   // A `/deliverables/<name>` link opened the viewer: when it closes, however
   // it closes, the address goes back to the plain issue page. Viewer sessions
   // the reader opens themselves leave the address alone.
@@ -4154,7 +4159,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         <OpenDeliverableOnLoad
           name={openDeliverable}
           files={deliverableFiles}
-          ready={!timelineLoading}
+          read={deliverableLinkRead}
           onOpenedInViewer={onDeliverableOpenedInViewer}
           onDone={onDeliverableLinkDoneStable}
         />

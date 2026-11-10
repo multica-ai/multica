@@ -1497,6 +1497,7 @@
     "locate_description": "Mostrar en la descripción",
     "copy_link": "Copiar enlace a la última versión",
     "not_found": "Esta incidencia no tiene ningún entregable llamado «{{name}}»",
+    "link_load_failed": "No se pudieron cargar los entregables de esta incidencia para abrir «{{name}}». Recarga para intentarlo de nuevo.",
     "version_label": "Versión {{version}} de {{total}}",
     "version_of": "v{{version}} de {{total}}",
     "info_source": "Origen",

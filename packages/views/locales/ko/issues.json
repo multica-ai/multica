@@ -1453,6 +1453,7 @@
     "locate_description": "설명에서 보기",
     "copy_link": "최신 버전 링크 복사",
     "not_found": "이 이슈에 “{{name}}” 산출물이 없습니다",
+    "link_load_failed": "“{{name}}”을(를) 열기 위한 산출물을 불러오지 못했습니다. 새로고침해서 다시 시도하세요.",
     "version_label": "버전 {{version}} / 전체 {{total}}개",
     "version_of": "v{{version}} / 전체 {{total}}개",
     "info_source": "출처",

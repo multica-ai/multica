@@ -87,7 +87,7 @@ describe("OpenDeliverableOnLoad", () => {
     const all = {
       name: "调研 报告.html",
       files: ONE_VERSION,
-      ready: true,
+      read: "ready" as const,
       onOpenedInViewer,
       onDone,
       ...props,
@@ -116,12 +116,12 @@ describe("OpenDeliverableOnLoad", () => {
   });
 
   it("waits for the timeline before deciding", () => {
-    const { rerender, onDone, props } = renderOpener({ files: [], ready: false });
+    const { rerender, onDone, props } = renderOpener({ files: [], read: "pending" });
     expect(openAtMock).not.toHaveBeenCalled();
     expect(onDone).not.toHaveBeenCalled();
     expect(toastMock.error).not.toHaveBeenCalled();
 
-    rerender(<OpenDeliverableOnLoad {...props} files={ONE_VERSION} ready />);
+    rerender(<OpenDeliverableOnLoad {...props} files={ONE_VERSION} read="ready" />);
     expect(openAtMock).toHaveBeenCalledWith("v1", { stayOnError: true });
     expect(toastMock.error).not.toHaveBeenCalled();
   });

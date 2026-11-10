@@ -1453,6 +1453,7 @@
     "locate_description": "説明で表示",
     "copy_link": "最新版へのリンクをコピー",
     "not_found": "この課題に「{{name}}」という成果物はありません",
+    "link_load_failed": "「{{name}}」を開くための成果物を読み込めませんでした。再読み込みしてもう一度お試しください。",
     "version_label": "バージョン {{version}}（全 {{total}} 版）",
     "version_of": "v{{version}}（全 {{total}} 版）",
     "info_source": "投稿元",

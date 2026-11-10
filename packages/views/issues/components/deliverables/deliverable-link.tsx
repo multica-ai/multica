@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   findDeliverableByName,
   type DeliverableFile,
 } from "@multica/core/attachments/deliverables";
+import { issueTimelineOptions } from "@multica/core/issues/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useNavigation } from "../../../navigation";
@@ -47,9 +49,66 @@ export function useCopyDeliverableLink(
   return issueRef ? copy : undefined;
 }
 
+/** Where a deliverable link's read of the issue timeline stands. */
+export type TimelineReadStatus = "pending" | "ready" | "failed";
+
 /**
- * Opens the deliverable a `/deliverables/<name>` link names, once the
- * issue's timeline has loaded. Mount inside the issue's
+ * One current read of the issue's timeline for a `/deliverables/<name>` link.
+ *
+ * The link must name the file as it is now, not as a cached timeline from an
+ * earlier visit remembers it: that cache may predate the upload the link was
+ * shared for (open v1, upload v2 elsewhere, follow the link), or be empty. The
+ * query's loading flag cannot tell, because it is false whenever cached data
+ * exists, and with the app's `staleTime: Infinity` mounting does not refetch.
+ * So this asks the server once per link, and reports `ready` only when the
+ * cache the page renders from (`dataUpdatedAt`, from `useIssueTimeline`) has
+ * taken that answer, so `files` built from it already include any new upload.
+ *
+ * `failed` means the read itself failed: the caller must not conclude that
+ * the file is missing.
+ */
+export function useFreshTimelineRead(
+  issueId: string,
+  name: string | undefined,
+  dataUpdatedAt: number,
+): TimelineReadStatus {
+  const qc = useQueryClient();
+  const [read, setRead] = useState<{
+    key: string;
+    status: "pending" | "done" | "failed";
+    at: number;
+  } | null>(null);
+  const key = name === undefined ? null : `${issueId}\u0000${name}`;
+
+  useEffect(() => {
+    if (key === null) return;
+    let cancelled = false;
+    setRead({ key, status: "pending", at: 0 });
+    // staleTime 0: fetch even when the cache counts as fresh. `retry: 1`
+    // matches the app's default for queries; fetchQuery's own default is none.
+    qc.fetchQuery({ ...issueTimelineOptions(issueId), staleTime: 0, retry: 1 }).then(
+      () => {
+        if (cancelled) return;
+        const at = qc.getQueryState(issueTimelineOptions(issueId).queryKey)?.dataUpdatedAt ?? 0;
+        setRead({ key, status: "done", at });
+      },
+      () => {
+        if (!cancelled) setRead({ key, status: "failed", at: 0 });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [qc, issueId, key]);
+
+  if (!read || read.key !== key || read.status === "pending") return "pending";
+  if (read.status === "failed") return "failed";
+  return dataUpdatedAt >= read.at ? "ready" : "pending";
+}
+
+/**
+ * Opens the deliverable a `/deliverables/<name>` link names, once
+ * `useFreshTimelineRead` reports a current timeline. Mount inside the issue's
  * `PreviewSequenceProvider`, so the file opens in the page's viewer with its
  * versions and info panel.
  *
@@ -64,14 +123,17 @@ export function useCopyDeliverableLink(
 export function OpenDeliverableOnLoad({
   name,
   files,
-  ready,
+  read,
   onOpenedInViewer,
   onDone,
 }: {
   name: string;
   files: ReadonlyArray<DeliverableFile>;
-  /** The timeline has loaded, so a missing file really is missing. */
-  ready: boolean;
+  /**
+   * From `useFreshTimelineRead`. Only `ready` lets a missing file count as
+   * missing; on `failed` the link stays in the address, so reloading retries.
+   */
+  read: TimelineReadStatus;
   onOpenedInViewer: () => void;
   onDone: () => void;
 }) {
@@ -81,8 +143,12 @@ export function OpenDeliverableOnLoad({
   const handledRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!ready || handledRef.current === name) return;
+    if (read === "pending" || handledRef.current === name) return;
     handledRef.current = name;
+    if (read === "failed") {
+      toast.error(t(($) => $.deliverables.link_load_failed, { name }));
+      return;
+    }
     const file = findDeliverableByName(files, name);
     if (!file) {
       toast.error(t(($) => $.deliverables.not_found, { name }));
@@ -97,7 +163,7 @@ export function OpenDeliverableOnLoad({
     }
     open(file.latest);
     onDone();
-  }, [ready, name, files, openAt, open, onOpenedInViewer, onDone, t]);
+  }, [read, name, files, openAt, open, onOpenedInViewer, onDone, t]);
 
   return modal;
 }
