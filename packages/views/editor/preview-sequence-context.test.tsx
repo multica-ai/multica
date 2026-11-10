@@ -10,9 +10,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactElement } from "react";
 import type { Attachment } from "@multica/core/types";
 
-const { downloadMock, getBaseUrlMock, toastErrorMock } = vi.hoisted(() => ({
+const { downloadMock, getBaseUrlMock, getAttachmentMock, toastErrorMock } = vi.hoisted(() => ({
   downloadMock: vi.fn(),
   getBaseUrlMock: vi.fn(() => ""),
+  getAttachmentMock: vi.fn(),
   toastErrorMock: vi.fn(),
 }));
 
@@ -22,8 +23,7 @@ vi.mock("@multica/core/api", () => ({
   api: {
     getBaseUrl: getBaseUrlMock,
     getAttachmentTextContent: vi.fn(),
-    // Nothing fresher to sign: streamed media keeps the record's URL.
-    getAttachment: vi.fn(() => Promise.reject(new Error("no re-sign"))),
+    getAttachment: getAttachmentMock,
   },
   PreviewTooLargeError: class extends Error {},
   PreviewUnsupportedError: class extends Error {},
@@ -177,6 +177,9 @@ function nextButton(): HTMLButtonElement {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Navigation tests use successful metadata; retry behavior belongs to the
+  // streamed-media tests, rather than delaying keyboard and paging assertions.
+  getAttachmentMock.mockImplementation(async (id: string) => imageAttachment(Number(id[0])));
 });
 
 describe("PreviewSequenceProvider", () => {

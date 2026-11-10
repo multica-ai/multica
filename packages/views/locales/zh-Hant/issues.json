@@ -1838,5 +1838,32 @@
       "rejected": "已拒絕",
       "rate_limited": "已限流"
     }
+  },
+  "environments": {
+    "section_title": "環境",
+    "running_count_other": "{{count}} 個執行中",
+    "this_machine": "本機",
+    "unknown_machine": "未知裝置",
+    "state": {
+      "starting": "啟動中",
+      "running": "執行中",
+      "exited": "已退出",
+      "stopped": "已停止",
+      "unreachable": "無回應"
+    },
+    "expires_in_minutes_other": "{{count}} 分鐘後到期",
+    "expires_in_hours_other": "{{count}} 小時後到期",
+    "expires_in_days_other": "{{count}} 天後到期",
+    "started_ago": "{{time}}啟動",
+    "ended_ago": "{{time}}結束",
+    "last_seen": "{{time}}最後回應",
+    "ended_count_other": "{{count}} 個已結束",
+    "detected_hint": "在這個任務某次執行的目錄中發現的服務",
+    "remote_hint": "執行於 {{machine}}，localhost 位址只能在那台機器上開啟。",
+    "localhost_hint": "localhost 位址只能在執行它的那台機器上開啟。",
+    "open": "開啟",
+    "copy_url": "複製位址",
+    "copied": "已複製位址",
+    "copy_failed": "無法複製位址"
   }
 }
