@@ -96,6 +96,15 @@ vi.mock("@multica/core/config", () => ({
 }));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
+vi.mock("@multica/core/auth", () => {
+  const state = { user: { id: "user-1" } };
+  return {
+    useAuthStore: Object.assign(
+      (selector: (value: typeof state) => unknown) => selector(state),
+      { getState: () => state },
+    ),
+  };
+});
 vi.mock("../workflows/workflow-pill", () => ({ WorkflowPill: () => null }));
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "workspace-1", slug: "ws", repos: [] }),
