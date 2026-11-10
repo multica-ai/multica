@@ -492,6 +492,18 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "Métadonnées",
     "section_details": "Détails",
+    "sidebar_tabs": {
+      "tab_overview": "Aperçu",
+      "tab_delivery": "Livraison",
+      "tab_runs": "Exécutions",
+      "layout_menu": "Disposition de la barre latérale",
+      "split_below": "Déplacer {{tab}} dans un nouveau groupe en dessous",
+      "merge_all": "Fusionner tous les groupes",
+      "reset": "Réinitialiser la disposition",
+      "drop_above": "Nouveau groupe au-dessus",
+      "drop_below": "Nouveau groupe en dessous",
+      "empty": "Rien pour l'instant"
+    },
     "section_quick_actions": "Actions rapides",
     "quick_actions_more": "Afficher {{count}} de plus",
     "quick_action_runs_as": "S'exécute en tant que {{name}}",

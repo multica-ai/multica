@@ -486,6 +486,18 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "メタデータ",
     "section_details": "詳細",
+    "sidebar_tabs": {
+      "tab_overview": "概要",
+      "tab_delivery": "納品",
+      "tab_runs": "実行",
+      "layout_menu": "サイドバーのレイアウト",
+      "split_below": "{{tab}}を下の新しいグループに移動",
+      "merge_all": "すべてのグループを結合",
+      "reset": "レイアウトをリセット",
+      "drop_above": "上に新しいグループ",
+      "drop_below": "下に新しいグループ",
+      "empty": "まだ何もありません"
+    },
     "section_quick_actions": "クイックアクション",
     "quick_actions_more": "残り {{count}} 件を表示",
     "quick_action_runs_as": "{{name}} が実行します",

@@ -492,6 +492,18 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "Metadata",
     "section_details": "Details",
+    "sidebar_tabs": {
+      "tab_overview": "Overview",
+      "tab_delivery": "Delivery",
+      "tab_runs": "Runs",
+      "layout_menu": "Sidebar layout",
+      "split_below": "Move {{tab}} to a new group below",
+      "merge_all": "Merge all groups",
+      "reset": "Reset layout",
+      "drop_above": "New group above",
+      "drop_below": "New group below",
+      "empty": "Nothing here yet"
+    },
     "section_quick_actions": "Quick Actions",
     "quick_actions_more": "Show {{count}} more",
     "quick_action_runs_as": "Runs as {{name}}",

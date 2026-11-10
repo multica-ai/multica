@@ -486,6 +486,18 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "메타데이터",
     "section_details": "세부 정보",
+    "sidebar_tabs": {
+      "tab_overview": "개요",
+      "tab_delivery": "결과물",
+      "tab_runs": "실행",
+      "layout_menu": "사이드바 레이아웃",
+      "split_below": "{{tab}}을(를) 아래 새 그룹으로 이동",
+      "merge_all": "모든 그룹 합치기",
+      "reset": "레이아웃 초기화",
+      "drop_above": "위에 새 그룹",
+      "drop_below": "아래에 새 그룹",
+      "empty": "아직 없습니다"
+    },
     "section_quick_actions": "퀵 액션",
     "quick_actions_more": "{{count}}개 더 보기",
     "quick_action_runs_as": "{{name}}이(가) 실행합니다",

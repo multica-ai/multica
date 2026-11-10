@@ -464,6 +464,18 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "Metadatos",
     "section_details": "Detalles",
+    "sidebar_tabs": {
+      "tab_overview": "Resumen",
+      "tab_delivery": "Entrega",
+      "tab_runs": "Ejecuciones",
+      "layout_menu": "Diseño de la barra lateral",
+      "split_below": "Mover {{tab}} a un grupo nuevo debajo",
+      "merge_all": "Unir todos los grupos",
+      "reset": "Restablecer diseño",
+      "drop_above": "Grupo nuevo arriba",
+      "drop_below": "Grupo nuevo abajo",
+      "empty": "Todavía no hay nada"
+    },
     "section_quick_actions": "Acciones rápidas",
     "quick_actions_more": "Mostrar {{count}} más",
     "quick_action_runs_as": "Se ejecuta como {{name}}",

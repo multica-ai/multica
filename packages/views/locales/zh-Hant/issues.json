@@ -486,6 +486,18 @@
     "section_pull_requests": "Pull Request",
     "section_metadata": "後設資料",
     "section_details": "詳情",
+    "sidebar_tabs": {
+      "tab_overview": "概覽",
+      "tab_delivery": "交付",
+      "tab_runs": "執行",
+      "layout_menu": "側邊欄版面配置",
+      "split_below": "把{{tab}}拆到下方",
+      "merge_all": "合併所有群組",
+      "reset": "恢復預設版面配置",
+      "drop_above": "在上方新增群組",
+      "drop_below": "在下方新增群組",
+      "empty": "尚無內容"
+    },
     "section_quick_actions": "快捷操作",
     "quick_actions_more": "顯示其餘 {{count}} 條",
     "quick_action_runs_as": "由 {{name}} 執行",

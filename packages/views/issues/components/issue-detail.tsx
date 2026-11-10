@@ -106,7 +106,7 @@ import { LocalDirectoryHint } from "../../projects/components/local-directory-hi
 import { useNewRunIds } from "./use-run-comment-motion";
 import { AgentRunComment, CommentCard } from "./comment-card";
 import { EMPTY_COMMENT_RUNS, buildCommentRunView, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
-import { issueTasksOptions } from "@multica/core/issues/queries";
+import { issueEnvironmentsOptions, issueTasksOptions } from "@multica/core/issues/queries";
 import { SourceContextBadge } from "./source-context-viewer";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
 import { CommentInput } from "./comment-input";
@@ -122,8 +122,8 @@ import { WakeupsSection } from "./wakeups-section";
 import { QuickActionsSection } from "./quick-actions-section";
 import { PluginPanelSection } from "../../plugins";
 import { PullRequestsSection } from "./pull-requests-section";
-import { IssueEnvironmentsSection } from "./issue-environments-section";
-import { useGitHubSettings } from "@multica/core/github";
+import { IssueEnvironmentsSection, isLive } from "./issue-environments-section";
+import { issuePullRequestsOptions, useGitHubSettings } from "@multica/core/github";
 import { DeliverablesSection } from "./deliverables/deliverables-section";
 import { IssueAppsSection } from "./issue-apps-section";
 import { DeliverablesOverview } from "./deliverables/deliverables-overview";
@@ -165,6 +165,7 @@ import {
   useResolvedExpandStore,
   useSubIssuesCollapseStore,
   useSubIssueDisplayStore,
+  useIssueSidebarLayoutStore,
   SUB_ISSUE_ROW_PROPERTY_KEYS,
   type SubIssueRowProperties,
   type SubIssueRowPropertyKey,
@@ -198,7 +199,8 @@ import { useShowInSidebar } from "../../layout/panels/show-in-sidebar";
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { MetadataSection } from "./metadata-section";
-import { IssueSidebarSectionHeader, IssueSidebarStack, IssueSidebarPropertyGrid } from "./issue-sidebar-section";
+import { IssueSidebarSectionHeader, IssueSidebarPropertyGrid } from "./issue-sidebar-section";
+import { IssueSidebarTabs } from "./issue-sidebar-tabs";
 import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
 import { useIssueTimelineAnchor } from "../hooks/use-issue-timeline-anchor";
@@ -2649,6 +2651,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // overview grid, the viewer's info panel and the comments' version badges
   // all read this (MUL-7649).
   const deliverableFiles = useMemo(() => collectDeliverableFiles(deliverableSources), [deliverableSources]);
+  const deliveryCount = useIssueDeliveryCount(id, githubSettings.prSidebar) + deliverableFiles.length;
+  const sidebarCounts = useMemo(() => ({ delivery: deliveryCount }), [deliveryCount]);
   const commentById = useMemo(
     () =>
       new Map(
@@ -2870,9 +2874,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     });
   }, [beginDesktopSidebarToggle, isMobile, sidebarRef]);
 
-  // The header's wakeup chip opens the sidebar and brings the Wakeups section
-  // into view with focus on its heading.
+  // The header's wakeup chip opens the sidebar on the Runs tab and brings the
+  // Wakeups section into view with focus on its heading.
   const openWakeups = useCallback(() => {
+    useIssueSidebarLayoutStore.getState().selectTab("runs");
     if (!sidebarOpen) handleToggleSidebar();
     window.requestAnimationFrame(() => {
       const heading = document.getElementById(`issue-wakeups-${id}`);
@@ -3072,216 +3077,222 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     </div>
   );
 
-  const sidebarContent = (
-    <IssueSidebarStack>
-      {/* Properties */}
-      <div>
-        <IssueSidebarSectionHeader title={t(($) => $.detail.section_properties)} open={propertiesOpen} onOpenChange={setPropertiesOpen}  />
-        {propertiesOpen && <IssueSidebarPropertyGrid>
-          {/* Core props — always rendered. */}
-          <PropRow label={t(($) => $.detail.prop_status)}>
-            <StatusPicker
-              status={issue.status}
-              onUpdate={handleUpdateField}
-              align="start"
-              projectId={issue.project_id}
-              issue={issue}
-              onMarkDuplicate={actions.openMarkDuplicate}
-              isDuplicate={isDuplicateIssue(issue)}
-            />
-          </PropRow>
-          <PropRow label={t(($) => $.detail.prop_assignee)}>
-            <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
-          </PropRow>
-          <PropRow label={t(($) => $.detail.prop_project)}>
-            <IssueProjectPicker
-              projectId={issue.project_id}
-              onUpdate={handleUpdateField}
-              issue={issue}
-            />
-          </PropRow>
-          <IssueWorkflowPropRow projectId={issue.project_id} status={issue.status} label={t(($) => $.workflows.project.label)} />
+  const sidebarPanels = {
+    overview: (
+      <>
+        {/* Properties */}
+        <div>
+          <IssueSidebarSectionHeader title={t(($) => $.detail.section_properties)} open={propertiesOpen} onOpenChange={setPropertiesOpen}  />
+          {propertiesOpen && <IssueSidebarPropertyGrid>
+            {/* Core props — always rendered. */}
+            <PropRow label={t(($) => $.detail.prop_status)}>
+              <StatusPicker
+                status={issue.status}
+                onUpdate={handleUpdateField}
+                align="start"
+                projectId={issue.project_id}
+                issue={issue}
+                onMarkDuplicate={actions.openMarkDuplicate}
+                isDuplicate={isDuplicateIssue(issue)}
+              />
+            </PropRow>
+            <PropRow label={t(($) => $.detail.prop_assignee)}>
+              <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
+            </PropRow>
+            <PropRow label={t(($) => $.detail.prop_project)}>
+              <IssueProjectPicker
+                projectId={issue.project_id}
+                onUpdate={handleUpdateField}
+                issue={issue}
+              />
+            </PropRow>
+            <IssueWorkflowPropRow projectId={issue.project_id} status={issue.status} label={t(($) => $.workflows.project.label)} />
 
-          {/* Optional props — rendered only when set on the issue OR added
-              via "+ Add property" in this session. Row order follows the
-              order of `OPTIONAL_PROP_KEYS`. */}
-          {visibleOptionalProps.has("priority") && (
-            <PropRow label={t(($) => $.detail.prop_priority)}>
-              <PriorityPicker
-                priority={issue.priority}
-                onUpdate={handleUpdateField}
-                align="start"
-                defaultOpen={autoOpenProp === "priority"}
-              />
-            </PropRow>
-          )}
-          {issue.parent_issue_id != null && visibleOptionalProps.has("stage") && (
-            <PropRow label={t(($) => $.detail.prop_stage)}>
-              <StagePicker
-                stage={issue.stage}
-                onUpdate={handleUpdateField}
-                maxStage={maxSiblingStage(parentChildIssues)}
-                align="start"
-                defaultOpen={autoOpenProp === "stage"}
-              />
-            </PropRow>
-          )}
-          {visibleOptionalProps.has("start_date") && (
-            <PropRow label={t(($) => $.detail.prop_start_date)}>
-              <StartDatePicker
-                startDate={issue.start_date}
-                onUpdate={handleUpdateField}
-                defaultOpen={autoOpenProp === "start_date"}
-              />
-            </PropRow>
-          )}
-          {visibleOptionalProps.has("due_date") && (
-            <PropRow label={t(($) => $.detail.prop_due_date)}>
-              <DueDatePicker
-                dueDate={issue.due_date}
-                onUpdate={handleUpdateField}
-                defaultOpen={autoOpenProp === "due_date"}
-              />
-            </PropRow>
-          )}
-          {visibleOptionalProps.has("labels") && (
-            <PropRow label={t(($) => $.detail.prop_labels)}>
-              <LabelPicker
-                issueId={issue.id}
-                align="start"
-                defaultOpen={autoOpenProp === "labels"}
-              />
-            </PropRow>
-          )}
-
-          {/* Custom properties — same progressive disclosure as the
-              built-in optional props: a row renders when the issue has a
-              value OR the user added the property this session. Archived
-              definitions render read-only until their value is cleared. */}
-          {workspaceProperties
-            .filter(
-              (p) =>
-                issue.properties?.[p.id] !== undefined ||
-                (!p.archived && visibleCustomProps.has(p.id)),
-            )
-            .map((p) => (
-              <PropRow
-                key={p.id}
-                label={
-                  <>
-                    <PropertyIcon property={p} className="size-3.5 text-caption" />
-                    <TruncatedTooltip content={p.name} focusable>
-                      <span className="line-clamp-2 min-w-0 break-words [overflow-wrap:anywhere]">{p.name}</span>
-                    </TruncatedTooltip>
-                  </>
-                }
-              >
-                <CustomPropertyValueEditor
-                  issue={issue}
-                  property={p}
-                  defaultOpen={autoOpenCustomProp === p.id}
+            {/* Optional props — rendered only when set on the issue OR added
+                via "+ Add property" in this session. Row order follows the
+                order of `OPTIONAL_PROP_KEYS`. */}
+            {visibleOptionalProps.has("priority") && (
+              <PropRow label={t(($) => $.detail.prop_priority)}>
+                <PriorityPicker
+                  priority={issue.priority}
+                  onUpdate={handleUpdateField}
+                  align="start"
+                  defaultOpen={autoOpenProp === "priority"}
                 />
               </PropRow>
-            ))}
-
-          {addPropertyRow}
-        </IssueSidebarPropertyGrid>}
-      </div>
-
-      <QuickActionsSection issueId={issue.id} />
-
-      <WakeupsSection
-        issueId={issue.id}
-        closed={["done", "closed"].includes(resolveStatusCategory(issue.status))}
-        defaultAgentId={issue.assignee_type === "agent" ? (issue.assignee_id ?? undefined) : undefined}
-      />
-
-      <PluginPanelSection issueId={issue.id} />
-
-      {/* Parent issue — standalone section, only when the issue has a
-          parent. Setting a parent is reachable via the issue actions menu;
-          this card surfaces an existing parent without occupying sidebar
-          space for issues that don't have one. */}
-      {parentIssue && (
-        <div>
-          <IssueSidebarSectionHeader title={t(($) => $.detail.section_parent_issue)} open={parentIssueOpen} onOpenChange={setParentIssueOpen}
-            actions={<IconButton size="icon-xs" label={t(($) => $.actions.remove_parent_issue)} onClick={() => actions.removeParent()}><Unlink /></IconButton>} />
-          {parentIssueOpen && <div className="px-2">
-            <div className="flex items-center gap-0.5 rounded-md px-2 hover:bg-accent/50 transition-colors group">
-              <AppLink
-                href={paths.issueDetail(parentIssue.id)}
-                className="flex flex-1 min-w-0 items-center gap-1.5 py-2 text-label"
-              >
-                <StatusIcon
-                  status={parentIssue.status}
-                  color={resolveStatusColor(parentIssue.status)}
-                  icon={resolveStatusIcon(parentIssue.status)}
-                  category={issueStatusCategory(parentIssue) ?? undefined}
-                  className="h-3.5 w-3.5 shrink-0"
+            )}
+            {issue.parent_issue_id != null && visibleOptionalProps.has("stage") && (
+              <PropRow label={t(($) => $.detail.prop_stage)}>
+                <StagePicker
+                  stage={issue.stage}
+                  onUpdate={handleUpdateField}
+                  maxStage={maxSiblingStage(parentChildIssues)}
+                  align="start"
+                  defaultOpen={autoOpenProp === "stage"}
                 />
-                <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
-                <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
-              </AppLink>
+              </PropRow>
+            )}
+            {visibleOptionalProps.has("start_date") && (
+              <PropRow label={t(($) => $.detail.prop_start_date)}>
+                <StartDatePicker
+                  startDate={issue.start_date}
+                  onUpdate={handleUpdateField}
+                  defaultOpen={autoOpenProp === "start_date"}
+                />
+              </PropRow>
+            )}
+            {visibleOptionalProps.has("due_date") && (
+              <PropRow label={t(($) => $.detail.prop_due_date)}>
+                <DueDatePicker
+                  dueDate={issue.due_date}
+                  onUpdate={handleUpdateField}
+                  defaultOpen={autoOpenProp === "due_date"}
+                />
+              </PropRow>
+            )}
+            {visibleOptionalProps.has("labels") && (
+              <PropRow label={t(($) => $.detail.prop_labels)}>
+                <LabelPicker
+                  issueId={issue.id}
+                  align="start"
+                  defaultOpen={autoOpenProp === "labels"}
+                />
+              </PropRow>
+            )}
 
-            </div>
-          </div>}
+            {/* Custom properties — same progressive disclosure as the
+                built-in optional props: a row renders when the issue has a
+                value OR the user added the property this session. Archived
+                definitions render read-only until their value is cleared. */}
+            {workspaceProperties
+              .filter(
+                (p) =>
+                  issue.properties?.[p.id] !== undefined ||
+                  (!p.archived && visibleCustomProps.has(p.id)),
+              )
+              .map((p) => (
+                <PropRow
+                  key={p.id}
+                  label={
+                    <>
+                      <PropertyIcon property={p} className="size-3.5 text-caption" />
+                      <TruncatedTooltip content={p.name} focusable>
+                        <span className="line-clamp-2 min-w-0 break-words [overflow-wrap:anywhere]">{p.name}</span>
+                      </TruncatedTooltip>
+                    </>
+                  }
+                >
+                  <CustomPropertyValueEditor
+                    issue={issue}
+                    property={p}
+                    defaultOpen={autoOpenCustomProp === p.id}
+                  />
+                </PropRow>
+              ))}
+
+            {addPropertyRow}
+          </IssueSidebarPropertyGrid>}
         </div>
-      )}
 
-      <IssueDuplicatesSection issueId={issue.id} />
+        <QuickActionsSection issueId={issue.id} />
 
-      {/* Pull requests — hidden when the workspace disables the PR sidebar
-          (or the GitHub master switch is off). Backend data is kept either
-          way so re-enabling restores the section instantly. */}
-      {githubSettings.prSidebar && (
-        <PullRequestsSection
-          issueId={id}
-          identifier={issue.identifier}
-          open={pullRequestsOpen}
-          onOpenChange={setPullRequestsOpen}
+        {/* Parent issue — standalone section, only when the issue has a
+            parent. Setting a parent is reachable via the issue actions menu;
+            this card surfaces an existing parent without occupying sidebar
+            space for issues that don't have one. */}
+        {parentIssue && (
+          <div>
+            <IssueSidebarSectionHeader title={t(($) => $.detail.section_parent_issue)} open={parentIssueOpen} onOpenChange={setParentIssueOpen}
+              actions={<IconButton size="icon-xs" label={t(($) => $.actions.remove_parent_issue)} onClick={() => actions.removeParent()}><Unlink /></IconButton>} />
+            {parentIssueOpen && <div className="px-2">
+              <div className="flex items-center gap-0.5 rounded-md px-2 hover:bg-accent/50 transition-colors group">
+                <AppLink
+                  href={paths.issueDetail(parentIssue.id)}
+                  className="flex flex-1 min-w-0 items-center gap-1.5 py-2 text-label"
+                >
+                  <StatusIcon
+                    status={parentIssue.status}
+                    color={resolveStatusColor(parentIssue.status)}
+                    icon={resolveStatusIcon(parentIssue.status)}
+                    category={issueStatusCategory(parentIssue) ?? undefined}
+                    className="h-3.5 w-3.5 shrink-0"
+                  />
+                  <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
+                  <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
+                </AppLink>
+
+              </div>
+            </div>}
+          </div>
+        )}
+
+        <IssueDuplicatesSection issueId={issue.id} />
+
+        {/* Details — creator and timestamps. Last but metadata: the values
+            never change once the issue exists. */}
+        <div>
+          <IssueSidebarSectionHeader title={t(($) => $.detail.section_details)} open={detailsOpen} onOpenChange={setDetailsOpen} />
+          {detailsOpen && <IssueSidebarPropertyGrid>
+            <PropRow interactive={false} label={t(($) => $.detail.prop_created_by)}>
+              <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size="sm" enableHoverCard />
+              <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
+            </PropRow>
+            <PropRow interactive={false} label={t(($) => $.detail.prop_created)}>
+              <span className="text-muted-foreground">{shortDate(issue.created_at, locale)}</span>
+            </PropRow>
+            <PropRow interactive={false} label={t(($) => $.detail.prop_updated)}>
+              <span className="text-muted-foreground">{shortDate(issue.updated_at, locale)}</span>
+            </PropRow>
+          </IssueSidebarPropertyGrid>}
+        </div>
+
+        <MetadataSection metadata={issue.metadata ?? {}} />
+      </>
+    ),
+    delivery: (
+      <>
+        {/* Pull requests — hidden when the workspace disables the PR sidebar
+            (or the GitHub master switch is off). Backend data is kept either
+            way so re-enabling restores the section instantly. */}
+        {githubSettings.prSidebar && (
+          <PullRequestsSection
+            issueId={id}
+            identifier={issue.identifier}
+            open={pullRequestsOpen}
+            onOpenChange={setPullRequestsOpen}
+          />
+        )}
+
+        {/* Environments the issue's runs left running. Hidden until one starts. */}
+        <IssueEnvironmentsSection issueId={id} />
+
+        {/* Deliverables — the files this issue's comments delivered. Hidden
+            while there are none. */}
+        <DeliverablesSection
+          files={deliverableFiles}
+          onOpenOverview={openOverview}
+          onCopyLink={copyDeliverableLink}
         />
-      )}
 
-      {/* Environments the issue's runs left running. Hidden until one starts. */}
-      <IssueEnvironmentsSection issueId={id} />
+        {/* Apps the issue's runs used. Hidden until one makes a call. */}
+        <IssueAppsSection issueId={id} />
 
-      {/* Deliverables — the files this issue's comments delivered. Hidden
-          while there are none. */}
-      <DeliverablesSection
-        files={deliverableFiles}
-        onOpenOverview={openOverview}
-        onCopyLink={copyDeliverableLink}
-      />
+        <PluginPanelSection issueId={issue.id} />
+      </>
+    ),
+    runs: (
+      <>
+        <WakeupsSection
+          issueId={issue.id}
+          closed={["done", "closed"].includes(resolveStatusCategory(issue.status))}
+          defaultAgentId={issue.assignee_type === "agent" ? (issue.assignee_id ?? undefined) : undefined}
+        />
 
-      {/* Apps the issue's runs used. Hidden until one makes a call. */}
-      <IssueAppsSection issueId={id} />
-
-      {/* Execution summary owns its query, realtime updates and disclosure. */}
-      <ExecutionLogSection key={id} issueId={id} identifier={issue.identifier} issueTitle={issue.title} hasChildren={childIssues.length > 0} />
-
-      {/* Details — creator and timestamps. Sits below the execution log
-          because it is the least-read block in the sidebar: the values
-          never change once the issue exists, while the log above it is
-          what people actually come here to check. */}
-      <div>
-        <IssueSidebarSectionHeader title={t(($) => $.detail.section_details)} open={detailsOpen} onOpenChange={setDetailsOpen} />
-        {detailsOpen && <IssueSidebarPropertyGrid>
-          <PropRow interactive={false} label={t(($) => $.detail.prop_created_by)}>
-            <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size="sm" enableHoverCard />
-            <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
-          </PropRow>
-          <PropRow interactive={false} label={t(($) => $.detail.prop_created)}>
-            <span className="text-muted-foreground">{shortDate(issue.created_at, locale)}</span>
-          </PropRow>
-          <PropRow interactive={false} label={t(($) => $.detail.prop_updated)}>
-            <span className="text-muted-foreground">{shortDate(issue.updated_at, locale)}</span>
-          </PropRow>
-        </IssueSidebarPropertyGrid>}
-      </div>
-
-      <MetadataSection metadata={issue.metadata ?? {}} />
-    </IssueSidebarStack>
-  );
+        {/* Execution summary owns its query, realtime updates and disclosure. */}
+        <ExecutionLogSection key={id} issueId={id} identifier={issue.identifier} issueTitle={issue.title} hasChildren={childIssues.length > 0} />
+      </>
+    ),
+  };
 
   // Shared row renderer for both timeline render modes (flat / virtualized).
   // The wrapper `id="comment-..."` is the deep-link target — equivalent to
@@ -4233,8 +4244,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <div className="flex flex-1 min-h-0">
         {detailContent}
         <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-          <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto [scrollbar-gutter:stable] px-2 py-4">
-            {sidebarContent}
+          <SheetContent side="right" showCloseButton={false} className="w-[320px] gap-0">
+            <IssueSidebarTabs compact panels={sidebarPanels} counts={sidebarCounts} />
           </SheetContent>
         </Sheet>
       </div>,
@@ -4259,15 +4270,26 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         panelRef={sidebarRef}
         onResize={handleDesktopSidebarResize}
       >
-        {/* Sections inset their own bodies and rows, so the panel itself only
-            needs a narrow gutter. pt-2.5 centres the first 28px section
-            header on the 48px page header beside it. */}
-        <AnimatedRightSidebar open={desktopSidebarVisualOpen} motionEnabled={desktopSidebarMotionEnabled} contentClassName="px-2 pt-2.5 pb-4">
-          {sidebarContent}
+        {/* Each tab panel scrolls on its own, below its tab strip. */}
+        <AnimatedRightSidebar
+          open={desktopSidebarVisualOpen}
+          motionEnabled={desktopSidebarMotionEnabled}
+          className="overflow-y-hidden [scrollbar-gutter:auto]"
+          contentClassName="h-full"
+        >
+          <IssueSidebarTabs panels={sidebarPanels} counts={sidebarCounts} />
         </AnimatedRightSidebar>
       </ResizablePanel>
     </ResizablePanelGroup>,
   );
+}
+
+/** Pull requests and live environments, as counted on the Delivery tab. */
+function useIssueDeliveryCount(issueId: string, prSidebar: boolean) {
+  const wsId = useWorkspaceId();
+  const { data: prs } = useQuery({ ...issuePullRequestsOptions(issueId), enabled: prSidebar });
+  const { data: envs } = useQuery(issueEnvironmentsOptions(wsId, issueId));
+  return (prSidebar ? (prs?.pull_requests.length ?? 0) : 0) + (envs?.environments.filter(isLive).length ?? 0);
 }
 
 /** The workflow the issue follows through its project (MUL-7420). */

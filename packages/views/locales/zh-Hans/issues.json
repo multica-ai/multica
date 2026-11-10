@@ -486,6 +486,18 @@
     "section_pull_requests": "Pull Request",
     "section_metadata": "元数据",
     "section_details": "详情",
+    "sidebar_tabs": {
+      "tab_overview": "概览",
+      "tab_delivery": "交付",
+      "tab_runs": "运行",
+      "layout_menu": "侧边栏布局",
+      "split_below": "把{{tab}}拆到下方",
+      "merge_all": "合并所有分组",
+      "reset": "恢复默认布局",
+      "drop_above": "在上方新建分组",
+      "drop_below": "在下方新建分组",
+      "empty": "暂无内容"
+    },
     "section_quick_actions": "快捷操作",
     "quick_actions_more": "显示其余 {{count}} 条",
     "quick_action_runs_as": "由 {{name}} 执行",

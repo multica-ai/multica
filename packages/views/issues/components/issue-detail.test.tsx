@@ -9,7 +9,7 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import { ApiError } from "@multica/core/api/client";
 import { toast } from "sonner";
 import { useResolvedExpandStore } from "@multica/core/issues/stores/resolved-expand-store";
-import { useCommentCollapseStore } from "@multica/core/issues/stores";
+import { useCommentCollapseStore, useIssueSidebarLayoutStore } from "@multica/core/issues/stores";
 import {
   DEFAULT_SUB_ISSUE_ROW_PROPERTIES,
   useSubIssueDisplayStore,
@@ -389,6 +389,10 @@ vi.mock("@multica/core/issues/stores", async () => ({
   ...(await vi.importActual<
     typeof import("@multica/core/issues/stores/sub-issues-collapse-store")
   >("@multica/core/issues/stores/sub-issues-collapse-store")),
+  // Real store: the header's wakeup chip switches the sidebar tab through it.
+  ...(await vi.importActual<
+    typeof import("@multica/core/issues/stores/issue-sidebar-layout-store")
+  >("@multica/core/issues/stores/issue-sidebar-layout-store")),
   useRecentIssuesStore: Object.assign(
     (selector?: any) => {
       const state = { byWorkspace: {}, recordVisit: mockRecordVisit, pruneWorkspaces: vi.fn() };
@@ -800,6 +804,7 @@ describe("IssueDetail (shared)", () => {
     readonlyContentRenders.length = 0;
     descriptionSelectionAction.current = undefined;
     mockViewport.isMobile = false;
+    useIssueSidebarLayoutStore.getState().reset();
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
     mockApiObj.listPins.mockResolvedValue([]);
@@ -876,6 +881,7 @@ describe("IssueDetail (shared)", () => {
       { ...mockTimeline[1]!, attachments: [v2] },
     ]);
 
+    useIssueSidebarLayoutStore.getState().selectTab("delivery");
     renderIssueDetail();
 
     const header = await screen.findByRole("button", { name: /^Deliverables/ });
@@ -903,6 +909,7 @@ describe("IssueDetail (shared)", () => {
       ...root, id: "older-comment", parent_id: root.id,
       content: "Historical chart explanation", attachments: [image],
     }]);
+    useIssueSidebarLayoutStore.getState().selectTab("delivery");
     renderIssueDetail();
     expect(await screen.findByRole("button", { name: "historical-chart.png" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "View all 1 deliverable" }));
@@ -938,6 +945,7 @@ describe("IssueDetail (shared)", () => {
       ...root, id: "image-reply", parent_id: root.id, content: "Deep image explanation", attachments: [image],
     }]);
     mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    useIssueSidebarLayoutStore.getState().selectTab("delivery");
     renderIssueDetail();
     fireEvent.click(await screen.findByRole("button", { name: "View all 1 deliverable" }));
     fireEvent.click(screen.getByRole("button", { name: "Show in comments" }));
@@ -2018,7 +2026,7 @@ describe("IssueDetail (shared)", () => {
 
   // Details is creator + immutable timestamps, so it ranks below the
   // execution log, which is what people actually open the sidebar for.
-  it("orders the Details section after the execution log", async () => {
+  it("keeps Details on the Overview tab and the execution log on the Runs tab", async () => {
     mockApiObj.listTasksByIssue.mockResolvedValue([
       {
         id: "task-past",
@@ -2040,12 +2048,15 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     const executionLog = await screen.findByText("Execution log");
-    const details = screen.getByText("Details");
+    const panelOf = (element: Element) => element.closest('[role="tabpanel"]');
+    expect(panelOf(screen.getByText("Details"))).not.toHaveAttribute("hidden");
+    expect(panelOf(executionLog)).toHaveAttribute("hidden");
 
-    // DOCUMENT_POSITION_FOLLOWING: Details comes after the execution log.
-    expect(
-      executionLog.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Runs" }));
+
+    await waitFor(() => expect(panelOf(executionLog)).not.toHaveAttribute("hidden"));
+    expect(panelOf(screen.getByText("Details"))).toHaveAttribute("hidden");
+    expect(useIssueSidebarLayoutStore.getState().layout?.[0]?.active).toBe("runs");
   });
 
   it("keeps an unsaved comment mounted when the primary background refresh fails", async () => {
@@ -3096,6 +3107,7 @@ describe("IssueDetail (shared)", () => {
         } as TimelineEntry,
       ]);
 
+      useIssueSidebarLayoutStore.getState().selectTab("delivery");
       renderIssueDetail();
 
       fireEvent.click(await screen.findByRole("button", { name: "View all 1 deliverable" }));
@@ -3144,6 +3156,7 @@ describe("IssueDetail (shared)", () => {
         } as TimelineEntry,
       ]);
 
+      useIssueSidebarLayoutStore.getState().selectTab("delivery");
       renderIssueDetail();
 
       fireEvent.click(await screen.findByRole("button", { name: "View all 1 deliverable" }));

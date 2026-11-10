@@ -28,7 +28,7 @@ const STATE_TONE: Record<IssueEnvironmentState, string> = {
   stopped: "text-muted-foreground",
 };
 
-const isLive = (env: IssueEnvironment) => env.ended_at === null;
+export const isLive = (env: IssueEnvironment) => env.ended_at === null;
 const isApp = (env: IssueEnvironment) => env.kind === "app";
 
 type MachineGroup = { key: string; machine: RuntimeMachine | null; envs: IssueEnvironment[] };

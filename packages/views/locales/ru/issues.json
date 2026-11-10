@@ -500,6 +500,18 @@
     "section_pull_requests": "Pull request'ы",
     "section_metadata": "Метаданные",
     "section_details": "Детали",
+    "sidebar_tabs": {
+      "tab_overview": "Обзор",
+      "tab_delivery": "Результаты",
+      "tab_runs": "Запуски",
+      "layout_menu": "Макет боковой панели",
+      "split_below": "Переместить «{{tab}}» в новую группу ниже",
+      "merge_all": "Объединить все группы",
+      "reset": "Сбросить макет",
+      "drop_above": "Новая группа выше",
+      "drop_below": "Новая группа ниже",
+      "empty": "Пока пусто"
+    },
     "section_quick_actions": "Быстрые действия",
     "quick_actions_more": "Показать ещё: {{count}}",
     "quick_action_runs_as": "Выполняется от имени {{name}}",
