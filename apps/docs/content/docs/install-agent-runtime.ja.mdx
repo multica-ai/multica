@@ -36,6 +36,7 @@ Multica は現在、次のコマンドを検出します。
 | Kiro CLI | `kiro-cli` | [Kiro CLI のインストール](https://kiro.dev/docs/cli/installation/) |
 | MiniMax Code | `mcode` | [MiniMax Code CLI のインストール](https://www.npmjs.com/package/@minimax-ai/code) |
 | Muse Code | `muse` | [Muse Code のインストール](https://dev.meta.ai/docs/muse-code) |
+| ZCode | `zcode` / ZCode Desktop | [ZCode](https://zcode.z.ai/) |
 | Devin CLI | `devin` | [Devin CLI のインストール](https://docs.devin.ai/cli/quickstart)（3000.3.22+）。ローカル ACP。先に `devin auth login` を実行 |
 | OpenClaw | `openclaw` | [OpenClaw のインストール](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode クイックスタート](https://opencode.ai/en/docs) |
@@ -72,9 +73,12 @@ Multica は現在、次のコマンドを検出します。
 | Grok | 0.2.89 |
 | Qwen Code | 0.20.0 |
 | MiniMax Code | 0.1.2 |
+| Muse Code | 1.4.10 |
 | OpenCode | 1.1.54 |
 | Dim | 0.3.10 |
+| Devin CLI | 3000.3.22 |
 | ZeroClaw | 0.8.0 |
+| ZCode | 0.16.0 |
 
 次のツールは、ログインのほかに追加の設定が必要です。
 
@@ -209,3 +213,5 @@ Multica Desktop を終了して開き直してください。
 - [エージェントを作成・設定する](/agents-create) — 接続したランタイムを選択する
 - [デーモンとランタイム](/daemon-runtimes) — オンライン状態、同時実行、カスタムランタイムについて確認する
 - [AI コーディングツール比較](/providers) — Multica で使える機能をツールごとに比較する
+
+macOS の ZCode Desktop はアプリケーションバンドルから自動検出されます。Node.js をインストールし、デスクトップアプリで利用可能な API 接続を有効にしてください。モデルと推論レベルの選択肢は ZCode が提供します。[ツールの比較](/providers#zcode)を参照してください。
