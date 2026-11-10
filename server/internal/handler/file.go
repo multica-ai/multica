@@ -807,10 +807,8 @@ func (h *Handler) loadAttachmentForRequest(w http.ResponseWriter, r *http.Reques
 // workspace. This helper keeps the URL clean (`/api/attachments/{id}/download`)
 // and treats the attachment id + cookie/Bearer auth as sufficient.
 //
-// Membership uses the same 404-on-deny shape as ServeLocalUpload so the
-// route does not act as an IDOR oracle for attachment IDs that happen to
-// belong to a different workspace. The membership cache fast path mirrors
-// canReadWorkspaceUpload exactly.
+// A denied membership check returns 404 so the route does not reveal
+// attachment IDs belonging to a different workspace.
 func (h *Handler) loadAttachmentForDownload(w http.ResponseWriter, r *http.Request) (db.Attachment, bool) {
 	attachmentID := chi.URLParam(r, "id")
 	attUUID, ok := parseUUIDOrBadRequest(w, attachmentID, "attachment id")
@@ -819,9 +817,7 @@ func (h *Handler) loadAttachmentForDownload(w http.ResponseWriter, r *http.Reque
 	}
 	att, err := h.Queries.GetAttachmentByIDOnly(r.Context(), attUUID)
 	if err != nil {
-		// 404 (not 403/401) so non-member and non-existent look identical
-		// to outside callers. Same shape as ServeLocalUpload's
-		// canReadWorkspaceUpload deny path.
+		// Non-member and non-existent look identical to outside callers.
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}
@@ -965,24 +961,6 @@ func shouldProxyAttachmentURL(rawURL string) bool {
 			addr.IsUnspecified()
 	}
 	return false
-}
-
-// ServeLocalUpload serves a local-disk object from the public /uploads/*
-// route. It carries the same preview security headers as the authenticated
-// download endpoint so self-hosted deployments — same-origin or split
-// frontend/backend origins — can inline-render images and iframe-preview
-// documents (PDF/HTML) fetched straight from the static route. Without these
-// headers the global "frame-ancestors 'none'" policy blocks those previews.
-// See MUL-3821 / #4477.
-func (h *Handler) ServeLocalUpload(w http.ResponseWriter, r *http.Request) {
-	local, ok := h.Storage.(*storage.LocalStorage)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	h.setAttachmentPreviewSecurityHeaders(w)
-	key := strings.TrimPrefix(r.URL.Path, "/uploads/")
-	local.ServeFile(w, r, key)
 }
 
 // proxyAttachmentDownload streams an attachment through the API instead of

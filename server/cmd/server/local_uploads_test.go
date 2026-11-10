@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -56,6 +57,7 @@ func TestLocalUploadEntryIsDisabled(t *testing.T) {
 }
 
 func TestLocalAttachmentAPIStillRequiresMembership(t *testing.T) {
+	t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.test")
 	t.Setenv("S3_BUCKET", "")
 	t.Setenv("LOCAL_UPLOAD_BASE_URL", "")
 	dir := t.TempDir()
@@ -104,6 +106,12 @@ func TestLocalAttachmentAPIStillRequiresMembership(t *testing.T) {
 			if tc.code == http.StatusOK {
 				if got := w.Body.String(); got != body {
 					t.Fatalf("body = %q, want %q", got, body)
+				}
+				if got := w.Header().Get("Content-Disposition"); got != `inline; filename="private.png"` {
+					t.Errorf("Content-Disposition = %q, want original filename", got)
+				}
+				if got := w.Header().Get("Content-Security-Policy"); !strings.Contains(got, "frame-ancestors 'self' https://app.example.test") {
+					t.Errorf("Content-Security-Policy = %q, want configured preview origin", got)
 				}
 			}
 		})
