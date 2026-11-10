@@ -24,6 +24,7 @@
     "./lib/code-style": "./lib/code-style.ts",
     "./lib/clipboard": "./lib/clipboard.ts",
     "./lib/motion": "./lib/motion.ts",
+    "./lib/multica-brand": "./lib/multica-brand.ts",
     "./icons": "./icons/index.ts",
     "./i18n-types": "./types/i18next.ts",
     "./styles/tokens.css": "./styles/tokens.css",

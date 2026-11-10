@@ -119,7 +119,7 @@ export function SiteFooter() {
       </Container>
 
       <Container>
-        <FooterWordmark className="pb-10" />
+        <FooterWordmark />
       </Container>
     </footer>
   );
