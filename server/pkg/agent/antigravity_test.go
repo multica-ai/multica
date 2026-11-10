@@ -1464,7 +1464,7 @@ cat <<'JSONL'
 ` + tc.steps + fmt.Sprintf("{\"event\":\"result\",\"result\":{\"status\":%q,\"response\":%q,\"error\":%q}}\nJSONL\nexit %d\n", tc.status, tc.response, tc.cause, tc.exit)
 			fakePath := filepath.Join(t.TempDir(), "agy")
 			writeTestExecutable(t, fakePath, []byte(script))
-			logs := &syncBuffer{}
+			logs := &strings.Builder{}
 			backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: slog.New(slog.NewTextHandler(logs, nil))})
 			if err != nil {
 				t.Fatal(err)
