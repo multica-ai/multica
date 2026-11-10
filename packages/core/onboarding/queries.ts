@@ -4,7 +4,7 @@ import { issueKeys } from "../issues/queries";
 
 /**
  * Count of issues in the workspace completed by an AI assignee (agent
- * or squad). Sole consumer is the source-backfill gate: the prompt
+ * or squad), custom statuses in the done category included. Sole consumer is the source-backfill gate: the prompt
  * waits until the user has watched agents finish real work before
  * asking the attribution question (SOURCE_BACKFILL_MIN_AGENT_DONE_ISSUES
  * in `needs-backfill.ts`).
@@ -23,7 +23,7 @@ export function agentCompletedIssueCountOptions(wsId: string) {
     queryFn: async () => {
       const res = await api.listIssues({
         workspace_id: wsId,
-        statuses: ["done"],
+        status_categories: ["done"],
         assignee_types: ["agent", "squad"],
         limit: 1,
       });

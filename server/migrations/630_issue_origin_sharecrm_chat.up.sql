@@ -2,9 +2,8 @@
 -- command. The shared channel Router stamps origin_type='sharecrm_chat'.
 -- Same NOT VALID + separate VALIDATE pattern as Telegram (366/367).
 -- The full list is respecified and must include every prior origin
--- (including telegram_chat from migration 366). Numbers 629/630 follow
--- upstream 628 (app_action_request_chat_idx). Upstream took 617-628 for
--- connected apps.
+-- (including telegram_chat from migration 366). Numbers 630/631 follow
+-- upstream 629 (user_star_prompt).
 ALTER TABLE issue DROP CONSTRAINT IF EXISTS issue_origin_type_check;
 ALTER TABLE issue ADD CONSTRAINT issue_origin_type_check
     CHECK (origin_type IN ('autopilot', 'quick_create', 'lark_chat', 'slack_chat', 'agent_create', 'dingtalk_chat', 'wecom_chat', 'telegram_chat', 'sharecrm_chat'))

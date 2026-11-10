@@ -284,27 +284,28 @@ describe("AttachmentPreviewModal — dispatch", () => {
     expect(img?.getAttribute("src")).toBe(url);
   });
 
-  it("renders a PDF iframe pointing at the signed download URL", () => {
+  it("renders a PDF iframe pointing at the signed download URL", async () => {
     const att = makeAttachment({ filename: "manual.pdf", content_type: "application/pdf" });
     render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
-    const iframe = document.querySelector("iframe");
-    expect(iframe).toBeTruthy();
-    expect(iframe?.getAttribute("src")).toBe(att.download_url);
+    await waitFor(() => {
+      expect(document.querySelector("iframe")?.getAttribute("src")).toBe(att.download_url);
+    });
   });
 
-  it("renders a <video> for video/* content types", () => {
+  it("renders a <video> for video/* content types", async () => {
     const att = makeAttachment({ filename: "clip.mp4", content_type: "video/mp4" });
     render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
-    const video = document.querySelector("video");
-    expect(video).toBeTruthy();
-    expect(video?.getAttribute("src")).toBe(att.download_url);
+    await waitFor(() => {
+      expect(document.querySelector("video")?.getAttribute("src")).toBe(att.download_url);
+    });
   });
 
-  it("renders an <audio> for audio/* content types", () => {
+  it("renders an <audio> for audio/* content types", async () => {
     const att = makeAttachment({ filename: "note.mp3", content_type: "audio/mpeg" });
     render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
-    const audio = document.querySelector("audio");
-    expect(audio).toBeTruthy();
+    await waitFor(() => {
+      expect(document.querySelector("audio")).toBeTruthy();
+    });
   });
 
   it("fetches text and hands it to ReadonlyContent for Markdown", async () => {
@@ -504,7 +505,7 @@ describe("AttachmentPreviewModal — server-relative download_url resolution (MU
     expect(onImageError).not.toHaveBeenCalled();
   });
 
-  it("prefixes the configured API base for PDF previews when download_url is server-relative", () => {
+  it("prefixes the configured API base for PDF previews when download_url is server-relative", async () => {
     getBaseUrlMock.mockReturnValue("https://api.example.test");
     const att = makeAttachment({
       filename: "manual.pdf",
@@ -518,10 +519,11 @@ describe("AttachmentPreviewModal — server-relative download_url resolution (MU
         onClose={() => {}}
       />,
     );
-    const iframe = document.querySelector("iframe");
-    expect(iframe?.getAttribute("src")).toBe(
-      "https://api.example.test/api/attachments/att-1/download",
-    );
+    await waitFor(() => {
+      expect(document.querySelector("iframe")?.getAttribute("src")).toBe(
+        "https://api.example.test/api/attachments/att-1/download",
+      );
+    });
   });
 
   it("keeps a same-origin relative URL untouched when the configured base is empty (web)", () => {
@@ -610,6 +612,91 @@ describe("AttachmentPreviewModal — error states", () => {
     await waitFor(() => {
       expect(screen.getByText("Couldn't load preview")).toBeTruthy();
     });
+  });
+});
+
+describe("AttachmentPreviewModal — streamed media (MUL-8892)", () => {
+  // The record comes from a cache that never goes stale; its signed
+  // download_url may have expired long before the reader clicks play.
+  const staleVideo = () =>
+    makeAttachment({
+      filename: "clip.mp4",
+      content_type: "video/mp4",
+      download_url: "https://cdn.example.test/clip.mp4?Signature=expired",
+    });
+
+  it("plays a video from a freshly signed URL, not the one cached on the record", async () => {
+    let resolveMeta: (value: Attachment) => void = () => {};
+    getAttachmentMock.mockImplementationOnce(
+      () => new Promise<Attachment>((resolve) => { resolveMeta = resolve; }),
+    );
+    const att = staleVideo();
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
+
+    expect(getAttachmentMock).toHaveBeenCalledWith("att-1");
+    expect(document.querySelector("video")).toBeNull();
+    expect(screen.getByText("Loading preview…")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveMeta({ ...att, download_url: "https://cdn.example.test/clip.mp4?Signature=fresh" });
+    });
+    await waitFor(() => {
+      expect(document.querySelector("video")?.getAttribute("src")).toBe(
+        "https://cdn.example.test/clip.mp4?Signature=fresh",
+      );
+    });
+  });
+
+  it("signs a PDF afresh too", async () => {
+    getAttachmentMock.mockResolvedValueOnce(
+      makeAttachment({ download_url: "https://cdn.example.test/manual.pdf?Signature=fresh" }),
+    );
+    const att = makeAttachment({
+      filename: "manual.pdf",
+      content_type: "application/pdf",
+      download_url: "https://cdn.example.test/manual.pdf?Signature=expired",
+    });
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
+    await waitFor(() => {
+      expect(document.querySelector("iframe")?.getAttribute("src")).toBe(
+        "https://cdn.example.test/manual.pdf?Signature=fresh",
+      );
+    });
+  });
+
+  it("keeps the record's URL when the server has no storage URL to sign (proxy mode)", async () => {
+    getAttachmentMock.mockResolvedValueOnce(
+      makeAttachment({ download_url: "/api/attachments/att-1/capability?token=t" }),
+    );
+    const att = makeAttachment({
+      filename: "clip.mp4",
+      content_type: "video/mp4",
+      download_url: "/api/attachments/att-1/download",
+    });
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
+    await waitFor(() => {
+      expect(document.querySelector("video")?.getAttribute("src")).toBe(
+        "/api/attachments/att-1/download",
+      );
+    });
+  });
+
+  it("says so, with a download, when the video cannot be played", async () => {
+    const att = staleVideo();
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
+    const video = await waitFor(() => {
+      const el = document.querySelector("video");
+      expect(el).toBeTruthy();
+      return el!;
+    });
+
+    fireEvent.error(video);
+
+    expect(document.querySelector("video")).toBeNull();
+    expect(screen.getByText("Couldn't load preview")).toBeInTheDocument();
+    const downloads = screen.getAllByRole("button", { name: "Download" });
+    fireEvent.click(downloads[downloads.length - 1]!);
+    expect(downloadMock).toHaveBeenCalledWith("att-1");
   });
 });
 
