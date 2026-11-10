@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -38,6 +39,8 @@ type audienceQuerier interface {
 	GetIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	GetCommentIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
+	GetAutopilotRun(ctx context.Context, id pgtype.UUID) (db.AutopilotRun, error)
+	GetAutopilot(ctx context.Context, id pgtype.UUID) (db.Autopilot, error)
 }
 
 // dbPrivateProjectAudience caches each workspace's private projects and their
@@ -107,11 +110,25 @@ func (a *dbPrivateProjectAudience) Audience(ctx context.Context, e events.Event)
 	if len(ws.projects) == 0 {
 		return nil, false, nil
 	}
-	projectID, err := a.eventProjectID(ctx, e)
+	projectIDs, err := a.eventProjectIDs(ctx, e)
 	if err != nil {
 		return nil, false, err
 	}
-	members, private := ws.projects[projectID]
+	// A run can read more than one project (a quick-create into one project
+	// under a parent in another); only members of every private one may see it.
+	var members []string
+	private := false
+	for _, projectID := range projectIDs {
+		projectMembers, ok := ws.projects[projectID]
+		if !ok {
+			continue
+		}
+		if !private {
+			members, private = projectMembers, true
+			continue
+		}
+		members = intersect(members, projectMembers)
+	}
 	if !private {
 		return nil, false, nil
 	}
@@ -127,6 +144,20 @@ func (a *dbPrivateProjectAudience) Audience(ctx context.Context, e events.Event)
 		}
 	}
 	return out, true, nil
+}
+
+func intersect(a, b []string) []string {
+	in := make(map[string]struct{}, len(b))
+	for _, id := range b {
+		in[id] = struct{}{}
+	}
+	out := a[:0:0]
+	for _, id := range a {
+		if _, ok := in[id]; ok {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func (a *dbPrivateProjectAudience) workspace(ctx context.Context, workspaceID string) (workspaceAudience, error) {
@@ -168,27 +199,27 @@ func (a *dbPrivateProjectAudience) workspace(ctx context.Context, workspaceID st
 	return loaded, nil
 }
 
-// eventProjectID resolves the project an event is about, or "" when it is
-// about none. It reads the payload's own references first and only falls back
-// to the database for a bare issue, comment or task id.
-func (a *dbPrivateProjectAudience) eventProjectID(ctx context.Context, e events.Event) (string, error) {
+// eventProjectIDs resolves the projects an event is about, or none. It reads
+// the payload's own references first and only falls back to the database for
+// a bare issue, comment or task id.
+func (a *dbPrivateProjectAudience) eventProjectIDs(ctx context.Context, e events.Event) ([]string, error) {
 	refs := extractEventRefs(e.Type, e.Payload)
 	if refs.projectKnown {
-		return refs.projectID, nil
+		return []string{refs.projectID}, nil
 	}
-	lookup := func(id string, get func(context.Context, pgtype.UUID) (pgtype.UUID, error)) (string, error) {
+	lookup := func(id string, get func(context.Context, pgtype.UUID) (pgtype.UUID, error)) ([]string, error) {
 		uid, err := util.ParseUUID(id)
 		if err != nil {
-			return "", nil
+			return nil, nil
 		}
 		projectID, err := get(ctx, uid)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", nil
+			return nil, nil
 		}
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return util.UUIDToString(projectID), nil
+		return []string{util.UUIDToString(projectID)}, nil
 	}
 	if refs.issueID != "" {
 		return lookup(refs.issueID, a.q.GetIssueProjectID)
@@ -199,21 +230,30 @@ func (a *dbPrivateProjectAudience) eventProjectID(ctx context.Context, e events.
 	if e.TaskID != "" && e.ChatSessionID == "" {
 		taskUUID, err := util.ParseUUID(e.TaskID)
 		if err != nil {
-			return "", nil
+			return nil, nil
 		}
 		task, err := a.q.GetAgentTask(ctx, taskUUID)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", nil
+			return nil, nil
 		}
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		if !task.IssueID.Valid {
-			return "", nil
+		// Issue-less runs (autopilot, quick-create) resolve through the same
+		// chain the run's HTTP routes use.
+		projects, err := projectaccess.TaskProjects(ctx, a.q, task)
+		if err != nil {
+			return nil, err
 		}
-		return lookup(util.UUIDToString(task.IssueID), a.q.GetIssueProjectID)
+		out := make([]string, 0, len(projects))
+		for _, p := range projects {
+			if p.Valid {
+				out = append(out, util.UUIDToString(p))
+			}
+		}
+		return out, nil
 	}
-	return "", nil
+	return nil, nil
 }
 
 type eventRefs struct {

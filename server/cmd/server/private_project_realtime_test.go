@@ -26,6 +26,16 @@ const (
 	ppPublicIssue   = "00000000-0000-0000-0000-0000000000d2"
 	ppSecretTask    = "00000000-0000-0000-0000-0000000000e1"
 	ppSecretComment = "00000000-0000-0000-0000-0000000000f1"
+
+	// A second private project with its own member, and issue-less runs.
+	ppPrivate2         = "00000000-0000-0000-0000-0000000000b3"
+	ppOther            = "00000000-0000-0000-0000-0000000000c3"
+	ppSecretIssue2     = "00000000-0000-0000-0000-0000000000d3"
+	ppAutopilotRun     = "00000000-0000-0000-0000-0000000000a3"
+	ppAutopilot        = "00000000-0000-0000-0000-0000000000a4"
+	ppAutopilotTask    = "00000000-0000-0000-0000-0000000000e2"
+	ppQuickCreateTask  = "00000000-0000-0000-0000-0000000000e3"
+	ppCrossProjectTask = "00000000-0000-0000-0000-0000000000e4"
 )
 
 type fakeAudienceQuerier struct {
@@ -44,7 +54,10 @@ func (f fakeAudienceQuerier) ListPrivateProjectAudience(context.Context, pgtype.
 	if f.fail {
 		return nil, errors.New("db down")
 	}
-	return []db.ListPrivateProjectAudienceRow{{ProjectID: ppUUID(ppPrivate), UserID: ppUUID(ppMember)}}, nil
+	return []db.ListPrivateProjectAudienceRow{
+		{ProjectID: ppUUID(ppPrivate), UserID: ppUUID(ppMember)},
+		{ProjectID: ppUUID(ppPrivate2), UserID: ppUUID(ppOther)},
+	}, nil
 }
 
 func (fakeAudienceQuerier) ListWorkspaceManagerUserIDs(context.Context, pgtype.UUID) ([]pgtype.UUID, error) {
@@ -57,6 +70,8 @@ func (fakeAudienceQuerier) GetIssueProjectID(_ context.Context, id pgtype.UUID) 
 		return ppUUID(ppPrivate), nil
 	case ppPublicIssue:
 		return ppUUID(ppPublic), nil
+	case ppSecretIssue2:
+		return ppUUID(ppPrivate2), nil
 	}
 	return pgtype.UUID{}, pgx.ErrNoRows
 }
@@ -69,10 +84,31 @@ func (fakeAudienceQuerier) GetCommentIssueProjectID(_ context.Context, id pgtype
 }
 
 func (fakeAudienceQuerier) GetAgentTask(_ context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
-	if util.UUIDToString(id) == ppSecretTask {
+	switch util.UUIDToString(id) {
+	case ppSecretTask:
 		return db.AgentTaskQueue{ID: id, IssueID: ppUUID(ppSecretIssue)}, nil
+	case ppAutopilotTask:
+		return db.AgentTaskQueue{ID: id, AutopilotRunID: ppUUID(ppAutopilotRun)}, nil
+	case ppQuickCreateTask:
+		return db.AgentTaskQueue{ID: id, Context: []byte(`{"type":"quick_create","project_id":"` + ppPrivate + `"}`)}, nil
+	case ppCrossProjectTask:
+		return db.AgentTaskQueue{ID: id, Context: []byte(`{"type":"quick_create","project_id":"` + ppPrivate + `","parent_issue_id":"` + ppSecretIssue2 + `"}`)}, nil
 	}
 	return db.AgentTaskQueue{}, pgx.ErrNoRows
+}
+
+func (fakeAudienceQuerier) GetAutopilotRun(_ context.Context, id pgtype.UUID) (db.AutopilotRun, error) {
+	if util.UUIDToString(id) == ppAutopilotRun {
+		return db.AutopilotRun{ID: id, AutopilotID: ppUUID(ppAutopilot)}, nil
+	}
+	return db.AutopilotRun{}, pgx.ErrNoRows
+}
+
+func (fakeAudienceQuerier) GetAutopilot(_ context.Context, id pgtype.UUID) (db.Autopilot, error) {
+	if util.UUIDToString(id) == ppAutopilot {
+		return db.Autopilot{ID: id, ProjectID: ppUUID(ppPrivate)}, nil
+	}
+	return db.Autopilot{}, pgx.ErrNoRows
 }
 
 func privateAudienceScopes(fb *fakeBroadcaster) []string {
@@ -101,6 +137,11 @@ func TestRegisterListeners_PrivateProjectEventsReachOnlyItsAudience(t *testing.T
 		{Type: protocol.EventProjectUpdated, Payload: map[string]any{"project": map[string]any{"id": ppPrivate}}},
 		{Type: protocol.EventProjectMembersChanged, Payload: map[string]any{"project_id": ppPrivate}},
 		{Type: protocol.EventTaskMessage, TaskID: ppSecretTask, Payload: map[string]any{"task_id": ppSecretTask}},
+		// Issue-less runs read the project too: a run-only autopilot and a
+		// quick-create into it.
+		{Type: protocol.EventTaskMessage, TaskID: ppAutopilotTask, Payload: map[string]any{"task_id": ppAutopilotTask}},
+		{Type: protocol.EventTaskProgress, TaskID: ppAutopilotTask, Payload: map[string]any{"task_id": ppAutopilotTask}},
+		{Type: protocol.EventTaskMessage, TaskID: ppQuickCreateTask, Payload: map[string]any{"task_id": ppQuickCreateTask}},
 	}
 	for _, e := range private {
 		bus := events.New()
@@ -167,5 +208,17 @@ func TestRegisterListeners_PrivateTaskLifecycleKeepsWorkspaceFanout(t *testing.T
 		Payload: protocol.TaskProgressPayload{TaskID: ppSecretTask, Summary: "secret step"}})
 	if len(fb.workspaceCalls) != 0 || len(privateAudienceScopes(fb)) != 2 {
 		t.Errorf("task:progress: workspace=%d scoped=%v; want only the project audience", len(fb.workspaceCalls), privateAudienceScopes(fb))
+	}
+}
+
+func TestRegisterListeners_RunAcrossPrivateProjectsReachesOnlyTheirCommonAudience(t *testing.T) {
+	bus := events.New()
+	fb := &fakeBroadcaster{}
+	registerListeners(bus, fb, newPrivateProjectAudience(fakeAudienceQuerier{}))
+	bus.Publish(events.Event{Type: protocol.EventTaskMessage, WorkspaceID: ppWorkspace, TaskID: ppCrossProjectTask,
+		Payload: map[string]any{"task_id": ppCrossProjectTask}})
+	want := []string{realtime.WorkspaceMemberScopeID(ppWorkspace, ppAdmin)}
+	if got := privateAudienceScopes(fb); len(fb.workspaceCalls) != 0 || len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("workspace=%d scoped=%v, want only %v: a member of one project must not read a run that also reads the other", len(fb.workspaceCalls), got, want)
 	}
 }

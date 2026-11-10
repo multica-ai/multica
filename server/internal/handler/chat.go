@@ -1860,10 +1860,10 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		// A run on a private project's issue is listed as restricted to
-		// members outside the project (MUL-8472); its id alone must not
-		// let them stop it.
-		if !h.requireIssueIDVisible(w, r, workspaceID, task.IssueID, http.StatusNotFound, "task not found") {
+		// A run on a private project is listed as restricted to members
+		// outside the project (MUL-8472); its id alone must not let them
+		// stop it.
+		if !h.requireTaskVisible(w, r, workspaceID, task, http.StatusNotFound, "task not found") {
 			return
 		}
 		// Issue / autopilot / quick_create tasks are all visible on the

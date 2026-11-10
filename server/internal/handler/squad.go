@@ -663,6 +663,24 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Issues in private projects the caller cannot see (MUL-8472) are left
+	// out of active_issues; the member's working status stays.
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(squad.WorkspaceID))
+	if !ok {
+		return
+	}
+	var taskIssueIDs []pgtype.UUID
+	for _, row := range rows {
+		if row.TaskIssueID.Valid {
+			taskIssueIDs = append(taskIssueIDs, row.TaskIssueID)
+		}
+	}
+	hiddenIssues, err := h.hiddenIssueIDs(r, hidden, taskIssueIDs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+		return
+	}
+
 	prefix := h.getIssuePrefix(r.Context(), squad.WorkspaceID)
 	now := time.Now()
 
@@ -712,7 +730,7 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 				entry.hasWorkingTask = true
 			}
 
-			if row.TaskIssueID.Valid {
+			if _, hide := hiddenIssues[row.TaskIssueID]; row.TaskIssueID.Valid && !hide {
 				brief := SquadActiveIssueBrief{
 					IssueID:    uuidToString(row.TaskIssueID),
 					Identifier: prefix + "-" + strconv.Itoa(int(row.IssueNumber.Int32)),
