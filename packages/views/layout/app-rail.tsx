@@ -250,6 +250,12 @@ export function AppRail({
       label: t(($) => $.rail.work),
       fullLabel: t(($) => $.spaces.work),
     },
+    docs: {
+      href: p.docs(),
+      icon: routeIconForPath(p.docs()),
+      label: t(($) => $.rail.docs),
+      fullLabel: t(($) => $.nav.docs),
+    },
     team: {
       href: p.agents(),
       icon: Users,

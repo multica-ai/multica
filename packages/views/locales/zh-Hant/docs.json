@@ -1,0 +1,57 @@
+{
+  "untitled": "未命名",
+  "version_number": "v{{number}}",
+  "kb": "知識庫",
+  "actions": {
+    "new": "新增",
+    "new_doc": "新增文件",
+    "new_folder": "新增資料夾",
+    "rename": "重新命名",
+    "move": "移動到...",
+    "delete": "刪除",
+    "cancel": "取消",
+    "history": "歷史",
+    "more": "更多"
+  },
+  "errors": {
+    "move": "移動失敗",
+    "delete": "刪除失敗",
+    "save": "儲存失敗"
+  },
+  "move": {
+    "title": "移動\"{{title}}\"",
+    "destination": "目標位置",
+    "root": "知識庫（最上層）",
+    "current": "目前",
+    "confirm": "移動"
+  },
+  "delete": {
+    "title": "刪除這份文件？",
+    "description": "\"{{title}}\"及其全部歷史都會被刪除，無法復原。",
+    "confirm": "刪除",
+    "folder_title": "刪除資料夾？",
+    "folder_description": "只能刪除空資料夾。"
+  },
+  "tree": {
+    "more": "{{title}} 的更多操作",
+    "empty": "還沒有文件"
+  },
+  "editor": {
+    "placeholder": "開始寫，或輸入 / 叫出命令...",
+    "title_label": "標題",
+    "saving": "儲存中...",
+    "saved": "已儲存",
+    "save_failed": "儲存失敗 · 重試",
+    "retry": "重試",
+    "conflict": "{{name}} 已更新文件。草稿已保留，重新載入後繼續編輯。",
+    "reload": "載入最新版本",
+    "draft": "保留的草稿"
+  },
+  "history": {
+    "title": "歷史",
+    "current": "目前",
+    "restore": "還原此版本",
+    "loading": "載入中..."
+  },
+  "updated": "{{name}} 更新於 {{time}}"
+}

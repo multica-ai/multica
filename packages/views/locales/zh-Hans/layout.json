@@ -12,7 +12,8 @@
     "runtimes": "运行时",
     "skills": "Skills",
     "settings": "设置",
-    "views": "视图"
+    "views": "视图",
+    "docs": "知识库"
   },
   "tab": {
     "issue": "任务",
@@ -27,7 +28,9 @@
     "attachment": "附件",
     "create_agent": "创建智能体",
     "my_agents": "我的智能体在做",
-    "unknown": "未知页面"
+    "unknown": "未知页面",
+    "doc": "知识库",
+    "docFolder": "文件夹"
   },
   "help": {
     "trigger": "帮助",
@@ -107,7 +110,8 @@
     "open_in_new_window_click": "点击",
     "open_in_other_window": "已在其他窗口打开",
     "in_other_window": "其他窗口",
-    "all_workspaces_open": "所有工作区都已在窗口中打开"
+    "all_workspaces_open": "所有工作区都已在窗口中打开",
+    "docs": "知识库"
   },
   "panels": {
     "work": {

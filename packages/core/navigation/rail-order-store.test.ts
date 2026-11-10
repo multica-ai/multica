@@ -7,16 +7,21 @@ describe("resolveRailOrder", () => {
     expect(resolveRailOrder(null)).toEqual(RAIL_SPACES);
   });
 
+  it("inserts Docs into a saved layout from before Docs existed", () => {
+    expect(resolveRailOrder(["chat", "inbox", "work", "team", "autopilots"])).toEqual(["chat", "inbox", "work", "docs", "team", "autopilots"]);
+  });
+
   it("keeps a saved order", () => {
-    const saved = ["chat", "inbox", "work", "team", "autopilots"];
+    const saved = ["chat", "inbox", "work", "docs", "team", "autopilots"];
     expect(resolveRailOrder(saved)).toEqual(saved);
   });
 
   it("drops unknown and repeated ids", () => {
-    expect(resolveRailOrder(["chat", "settings", 3, "chat", "inbox", "work", "team", "autopilots"])).toEqual([
+    expect(resolveRailOrder(["chat", "settings", 3, "chat", "inbox", "work", "docs", "team", "autopilots"])).toEqual([
       "chat",
       "inbox",
       "work",
+      "docs",
       "team",
       "autopilots",
     ]);
@@ -28,12 +33,14 @@ describe("resolveRailOrder", () => {
       "inbox",
       "autopilots",
       "work",
+      "docs",
       "team",
     ]);
-    expect(resolveRailOrder(["chat", "work", "team", "autopilots"])).toEqual([
+    expect(resolveRailOrder(["chat", "work", "docs", "team", "autopilots"])).toEqual([
       "inbox",
       "chat",
       "work",
+      "docs",
       "team",
       "autopilots",
     ]);
@@ -46,7 +53,7 @@ describe("useRailOrderStore", () => {
   });
 
   it("saves a custom order", () => {
-    const order = ["chat", "inbox", "work", "team", "autopilots"] as const;
+    const order = ["chat", "inbox", "work", "docs", "team", "autopilots"] as const;
     useRailOrderStore.getState().setOrder(order);
     expect(useRailOrderStore.getState().order).toEqual(order);
   });

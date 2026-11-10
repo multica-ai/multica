@@ -1,4 +1,5 @@
 "use client";
+import { DocTree } from "../docs/components/doc-tree";
 
 import { useRef } from "react";
 import type { AppSpaceId } from "@multica/core/paths";
@@ -14,6 +15,7 @@ import { KeptRowsRelease, WorkPanel } from "./panels/work-panel";
 
 const PANELS: Partial<Record<AppSpaceId, () => React.ReactNode>> = {
   work: WorkPanel,
+  docs: DocTree,
   team: TeamPanel,
   autopilots: AutopilotsPanel,
 };

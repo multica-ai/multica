@@ -12,7 +12,8 @@
     "runtimes": "런타임",
     "skills": "스킬",
     "settings": "설정",
-    "views": "뷰"
+    "views": "뷰",
+    "docs": "문서"
   },
   "tab": {
     "issue": "태스크",
@@ -27,7 +28,9 @@
     "attachment": "첨부파일",
     "create_agent": "에이전트 만들기",
     "my_agents": "내 에이전트의 작업",
-    "unknown": "알 수 없는 페이지"
+    "unknown": "알 수 없는 페이지",
+    "doc": "문서",
+    "docFolder": "폴더"
   },
   "help": {
     "trigger": "도움말",
@@ -107,7 +110,8 @@
     "open_in_new_window_click": "클릭",
     "open_in_other_window": "다른 창에서 열려 있음",
     "in_other_window": "다른 창",
-    "all_workspaces_open": "모든 워크스페이스가 이미 창에 열려 있습니다"
+    "all_workspaces_open": "모든 워크스페이스가 이미 창에 열려 있습니다",
+    "docs": "문서"
   },
   "panels": {
     "work": {

@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS doc_version;
+DROP TABLE IF EXISTS doc;
+DROP TABLE IF EXISTS doc_folder;

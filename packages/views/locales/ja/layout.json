@@ -12,7 +12,8 @@
     "runtimes": "ランタイム",
     "skills": "スキル",
     "settings": "設定",
-    "views": "ビュー"
+    "views": "ビュー",
+    "docs": "ドキュメント"
   },
   "tab": {
     "issue": "タスク",
@@ -27,7 +28,9 @@
     "attachment": "添付ファイル",
     "create_agent": "エージェントを作成",
     "my_agents": "マイエージェントの作業",
-    "unknown": "不明なページ"
+    "unknown": "不明なページ",
+    "doc": "ドキュメント",
+    "docFolder": "フォルダー"
   },
   "help": {
     "trigger": "ヘルプ",
@@ -107,7 +110,8 @@
     "open_in_new_window_click": "クリック",
     "open_in_other_window": "別のウィンドウで開いています",
     "in_other_window": "別ウィンドウ",
-    "all_workspaces_open": "すべてのワークスペースがすでにウィンドウで開いています"
+    "all_workspaces_open": "すべてのワークスペースがすでにウィンドウで開いています",
+    "docs": "ドキュメント"
   },
   "panels": {
     "work": {

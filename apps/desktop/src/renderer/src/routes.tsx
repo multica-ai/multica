@@ -1,3 +1,5 @@
+import { DocsHomePage } from "@multica/views/docs";
+import { DocRoute, DocHistoryRoute, DocFolderRoute } from "./pages/doc-pages";
 import { useEffect, useLayoutEffect } from "react";
 import { createMemoryRouter, Outlet, useLocation, useMatches } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
@@ -212,6 +214,10 @@ export const appRoutes: RouteObject[] = [
             element: <RuntimeSettingsPage />,
             handle: { title: "Runtime" },
           },
+          {path: "docs", element: <DocsHomePage />, handle: {title: "Docs"}},
+          {path: "docs/folders/:id", element: <DocFolderRoute />, handle: {title: "Folder"}},
+          {path: "docs/:id", element: <DocRoute />, handle: {title: "Doc"}},
+          {path: "docs/:id/history", element: <DocHistoryRoute />, handle: {title: "History"}},
           { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
           {
             path: "skills/:id",

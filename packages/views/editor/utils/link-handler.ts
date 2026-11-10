@@ -25,6 +25,7 @@ import type { LinkClickIntent } from "../../navigation/click-intent";
  * as intentional. Only "/issues/..." style paths get auto-prefixed.
  */
 const WORKSPACE_ROUTE_SEGMENTS = new Set([
+  "docs",
   "usage",
   "issues",
   "projects",

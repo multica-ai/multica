@@ -52,6 +52,8 @@ export class TestApiClient {
   private email: string | null = null;
   private createdIssueIds: string[] = [];
   private createdProjectIds: string[] = [];
+  private createdDocIds: string[] = [];
+  private createdDocFolderIds: string[] = [];
   private seededIssueIds: string[] = [];
   private createdPropertyIds: string[] = [];
 
@@ -184,6 +186,28 @@ export class TestApiClient {
     } finally {
       await client.end();
     }
+  }
+
+  async createDoc(title: string, content: string, folderId?: string) {
+    const res = await this.authedFetch("/api/docs", {method: "POST", body: JSON.stringify({title, content, folder_id: folderId})});
+    if (!res.ok) throw new Error(`create doc: ${res.status} ${await res.text()}`);
+    const doc = await res.json() as {id: string; revision: number; title: string; content: string};
+    this.createdDocIds.push(doc.id); return doc;
+  }
+  async getDoc(id: string) {
+    const res = await this.authedFetch(`/api/docs/${id}`);
+    if (!res.ok) throw new Error(`get doc: ${res.status}`);
+    return await res.json() as {id: string; revision: number; title: string; content: string; folder_id: string | null; version_count: number};
+  }
+  async updateDoc(id: string, base: number, content: string) {
+    const res = await this.authedFetch(`/api/docs/${id}`, {method: "PATCH", body: JSON.stringify({base_revision: base, content})});
+    if (!res.ok) throw new Error(`update doc: ${res.status} ${await res.text()}`);
+    return await res.json() as {revision: number};
+  }
+  async createDocFolder(title: string) {
+    const res = await this.authedFetch("/api/doc-folders", {method: "POST", body: JSON.stringify({title})});
+    if (!res.ok) throw new Error(`create folder: ${res.status}`);
+    const folder = await res.json() as {id: string}; this.createdDocFolderIds.push(folder.id); return folder;
   }
 
   /** Create a project and register it for cleanup. */
@@ -436,6 +460,11 @@ export class TestApiClient {
 
   /** Clean up all issues created during this test. */
   async cleanup() {
+    for (const id of this.createdDocIds) await this.authedFetch(`/api/docs/${id}`, {method: "DELETE"});
+    this.createdDocIds = [];
+    for (const id of this.createdDocFolderIds.reverse()) await this.authedFetch(`/api/doc-folders/${id}`, {method: "DELETE"});
+    this.createdDocFolderIds = [];
+
     if (this.seededIssueIds.length > 0 && this.workspaceId) {
       const client = new pg.Client(DATABASE_URL);
       await client.connect();
