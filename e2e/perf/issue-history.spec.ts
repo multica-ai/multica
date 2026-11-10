@@ -33,7 +33,7 @@ test("measure issue history entry against the local API", async ({ browser }) =>
   try {
     const workspace = (await api.getWorkspaces())[0]!;
     const userId = (await db.query('SELECT id FROM "user" WHERE email=$1', [api.getEmail()])).rows[0].id;
-    for (const dataset of datasets.filter((item) => !process.env.PERF_DATASET || item.name === process.env.PERF_DATASET)) {
+    for (const dataset of datasets.filter((item) => !process.env.PERF_DATASET || process.env.PERF_DATASET.split(",").includes(item.name))) {
       const title = `History benchmark ${dataset.name}`;
       const issue = await api.createIssue(title, { description: "Local performance comparison." });
       let rootId = "";

@@ -156,7 +156,7 @@ tasks, live heap after explicit GC, mounted comment bodies, DOM nodes and actual
 task-response body bytes (decompressed). CPU is unthrottled. Direct entry
 includes application boot; Inbox entry starts with the shell already loaded.
 Long tasks are snapshotted before the instrumentation's forced GC. Set
-`PERF_DATASET` to one of the dataset names or `PERF_ENTRY=direct|inbox` to
+`PERF_DATASET` to dataset names separated by commas or `PERF_ENTRY=direct|inbox` to
 repeat a focused case in alternating product order.
 These are observed local measurements, not latency thresholds. Stop other
 run-owned builds/tests before measuring; the report also records system load.
