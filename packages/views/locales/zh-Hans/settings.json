@@ -1483,7 +1483,10 @@
       "connect_team": "连接团队账号",
       "connect_personal": "连接我的账号",
       "connecting": "正在连接…",
-      "connected": "已连接"
+      "connected": "已连接",
+      "connect": "连接",
+      "team_description": "连接工作区共用的账号。哪些智能体可以使用，在各智能体的「应用」页设置。",
+      "personal_description": "连接你自己的账号。应用设为「触发者账号」时，由你触发的运行会使用它。"
     },
     "disconnect_team": {
       "title": "断开团队的 {{app}} 账号？",

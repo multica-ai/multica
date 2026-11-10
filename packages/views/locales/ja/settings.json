@@ -1480,10 +1480,13 @@
       "curated": "厳選",
       "recommended_team": "通常はチームアカウント",
       "recommended_personal": "通常は個人アカウント",
-      "connect_team": "チーム用に接続",
+      "connect_team": "チームアカウントを接続",
       "connect_personal": "自分のアカウントを接続",
       "connecting": "接続中…",
-      "connected": "接続済み"
+      "connected": "接続済み",
+      "connect": "接続",
+      "team_description": "ワークスペース共有のアカウントを接続します。利用するエージェントは、各エージェントの「アプリ」で設定します。",
+      "personal_description": "自分のアカウントを接続します。「実行者のアカウント」に設定されたアプリは、自分が実行を開始するときにこのアカウントを使います。"
     },
     "disconnect_team": {
       "title": "チームの {{app}} アカウントの接続を解除しますか？",

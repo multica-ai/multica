@@ -841,7 +841,7 @@
       "subtitle": "Les apps que cet agent peut utiliser avec le compte d'équipe ou celui de la personne qui lance l'exécution.",
       "loading": "Chargement des apps…",
       "load_failed": "Impossible de charger les apps de cet agent.",
-      "empty": "Aucune app pour l'instant.",
+      "empty": "Aucune app connectée disponible.",
       "add_placeholder": "Ajouter une app…",
       "account": "Compte",
       "level": "Niveau",
@@ -851,9 +851,16 @@
       "personal_connected": "Votre compte est connecté",
       "personal_missing": "Vous n'avez pas connecté cette app",
       "team_admin_only": "Seuls les admins de l'espace peuvent donner un compte d'équipe à un agent.",
-      "team_shared_warning": "Toute personne qui peut lancer cet agent agit avec le compte d'équipe pour ces apps.",
+      "team_shared_warning": "Toute personne pouvant exécuter cet agent peut utiliser ce compte d’équipe par son intermédiaire.",
       "manage_link": "Gérer les comptes dans Paramètres → Applications connectées",
-      "save_failed_toast": "Échec de l'enregistrement, veuillez réessayer"
+      "save_failed_toast": "Échec de l'enregistrement, veuillez réessayer",
+      "team_help": "Compte partagé de l’espace de travail, connecté par les administrateurs.",
+      "personal_help": "Chaque exécution utilise le compte de la personne qui la déclenche. Chacun doit connecter son compte.",
+      "available_accounts": "Disponible : {{accounts}}",
+      "enable": "Activer {{app}}",
+      "account_for": "Compte pour {{app}}",
+      "connect_hint": "Vous ne trouvez pas l’app souhaitée ? Connectez un compte dans les paramètres.",
+      "available_personal": "Votre compte"
     }
   },
   "char_counter": {

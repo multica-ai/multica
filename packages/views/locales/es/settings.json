@@ -1492,10 +1492,13 @@
       "curated": "Seleccionada",
       "recommended_team": "Suele usarse una cuenta del equipo",
       "recommended_personal": "Suele usarse una cuenta personal",
-      "connect_team": "Conectar para el equipo",
+      "connect_team": "Conectar cuenta de equipo",
       "connect_personal": "Conectar mi cuenta",
       "connecting": "Conectando…",
-      "connected": "Conectada"
+      "connected": "Conectada",
+      "connect": "Conectar",
+      "team_description": "Conecta una cuenta compartida del espacio de trabajo. Decide qué agentes pueden usarla en la página Apps de cada agente.",
+      "personal_description": "Conecta tu propia cuenta. Las apps configuradas para usar la cuenta de quien inicia la ejecución la usarán cuando tú inicies una ejecución."
     },
     "disconnect_team": {
       "title": "¿Desconectar la cuenta del equipo de {{app}}?",

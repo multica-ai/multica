@@ -1492,10 +1492,13 @@
       "curated": "Curated",
       "recommended_team": "Usually a team account",
       "recommended_personal": "Usually a personal account",
-      "connect_team": "Connect for team",
+      "connect_team": "Connect team account",
       "connect_personal": "Connect my account",
       "connecting": "Connecting…",
-      "connected": "Connected"
+      "connected": "Connected",
+      "connect": "Connect",
+      "team_description": "A shared workspace account. Choose which agents can use it on each agent’s Apps page.",
+      "personal_description": "Your own account. Apps set to the triggerer’s account use it when you trigger a run."
     },
     "disconnect_team": {
       "title": "Disconnect the team {{app}} account?",

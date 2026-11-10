@@ -1483,7 +1483,10 @@
       "connect_team": "팀 계정 연결",
       "connect_personal": "내 계정 연결",
       "connecting": "연결 중…",
-      "connected": "연결됨"
+      "connected": "연결됨",
+      "connect": "연결",
+      "team_description": "워크스페이스 공용 계정을 연결합니다. 사용할 에이전트는 각 에이전트의 앱 페이지에서 설정합니다.",
+      "personal_description": "내 계정을 연결합니다. 트리거한 사람의 계정을 사용하도록 설정된 앱은 내가 실행을 시작할 때 이 계정을 사용합니다."
     },
     "disconnect_team": {
       "title": "팀 {{app}} 계정 연결을 해제할까요?",
