@@ -616,6 +616,39 @@ describe("AttachmentPreviewModal — error states", () => {
 });
 
 describe("AttachmentPreviewModal — streamed media (MUL-8892)", () => {
+  it.each(["video", "audio"] as const)("renews an expired local %s and restores the seek and play state", async (kind) => {
+    const id = "11111111-2222-3333-4444-555555555555";
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    const cap = (suffix: string, exp: number) => `/api/attachments/${id}/signed-download?exp=${exp}&sig=${suffix}`;
+    const old = cap("first", Math.floor(now / 1000) + 60);
+    const fresh = cap("renewed", Math.floor(now / 1000) + 120);
+    const att = makeAttachment({ id, filename: kind === "audio" ? "clip.wav" : "clip.mp4", content_type: `${kind}/${kind === "audio" ? "wav" : "mp4"}`, download_url: `/api/attachments/${id}/download` });
+    getAttachmentMock.mockResolvedValueOnce({ ...att, download_url: old }).mockResolvedValueOnce({ ...att, download_url: fresh });
+    try {
+      render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
+      const media = await waitFor(() => {
+        const el = document.querySelector<HTMLMediaElement>(kind);
+        expect(el?.getAttribute("src")).toBe(old);
+        return el!;
+      });
+      media.currentTime = 23;
+      media.playbackRate = 1.5;
+      Object.defineProperty(media, "paused", { configurable: true, value: false });
+      const play = vi.spyOn(media, "play").mockResolvedValue();
+      clock.mockReturnValue(now + 61000);
+      fireEvent.error(media);
+      await waitFor(() => expect(media.getAttribute("src")).toBe(fresh));
+      expect(document.querySelector(kind)).toBe(media);
+      media.currentTime = 0;
+      fireEvent.loadedMetadata(media);
+      expect(media.currentTime).toBe(23);
+      expect(media.playbackRate).toBe(1.5);
+      expect(play).toHaveBeenCalledOnce();
+      expect(getAttachmentMock).toHaveBeenCalledTimes(2);
+    } finally { clock.mockRestore(); }
+  });
+
   // The record comes from a cache that never goes stale; its signed
   // download_url may have expired long before the reader clicks play.
   const staleVideo = () =>
@@ -692,7 +725,7 @@ describe("AttachmentPreviewModal — streamed media (MUL-8892)", () => {
 
     fireEvent.error(video);
 
-    expect(document.querySelector("video")).toBeNull();
+    await waitFor(() => expect(document.querySelector("video")).toBeNull());
     expect(screen.getByText("Couldn't load preview")).toBeInTheDocument();
     const downloads = screen.getAllByRole("button", { name: "Download" });
     fireEvent.click(downloads[downloads.length - 1]!);

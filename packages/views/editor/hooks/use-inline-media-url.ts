@@ -12,7 +12,11 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
-import { attachmentIdFromDownloadURL } from "@multica/core/types/attachment-url";
+import {
+  attachmentDownloadPath,
+  attachmentIdFromDownloadURL,
+  attachmentIdFromLocalUploadURL,
+} from "@multica/core/types/attachment-url";
 
 // Keep refetches well inside the server's signed-URL TTL (30 min default,
 // server/internal/handler/file.go) so a re-render never serves an expired
@@ -61,16 +65,12 @@ export function __resetInlineMediaBlobCacheForTests(): void {
 // the same re-sign the click-time download path already does — and swap in
 // the response's signed `download_url`.
 //
-// The server only has a signed URL to offer under CloudFront signing or
-// presign mode. In **proxy** download mode `GetAttachmentByID` hands back the
-// auth-gated API path again, and before MUL-5445 the renderer simply kept the
-// original URL — the image stayed broken and the metadata request was pure
-// overhead. Proxy is not an exotic setting: the default `auto` mode forces it
-// whenever the storage URL points at an internal host, which is exactly the
-// docker-compose MinIO (`http://minio:9000`) self-host shape. So when the
-// refreshed metadata confirms there is no signed URL, fall back to pulling the
-// bytes through the authenticated client and rendering them from an object
-// URL. `blobFallback` gates that on the caller actually rendering a native
+// CloudFront and presign URLs can load natively. Proxy capabilities last just
+// 60 seconds, so images deliberately ignore those and fetch durable bytes
+// through the authenticated client instead. Proxy is the default when `auto`
+// mode encounters an internal storage host, such as docker-compose MinIO
+// (`http://minio:9000`). Without a storage signature, pull authenticated bytes
+// and render an object URL. `blobFallback` gates that on rendering a native
 // `<img>`: a file card only needs a link, and downloading a 100 MB archive
 // into renderer memory to draw a chip would be a bad trade.
 //
@@ -80,9 +80,10 @@ export function __resetInlineMediaBlobCacheForTests(): void {
 // instead of rendering it.
 export function useResignedInlineMedia(
   attachmentId: string | undefined,
-  pickedUrl: string,
+  rawPickedUrl: string,
   blobFallback: boolean,
 ): { url: string; pending: boolean } {
+  const pickedUrl = resolveLegacyLocalMediaURL(rawPickedUrl);
   const idFromPickedUrl = attachmentIdFromDownloadURL(pickedUrl);
   const resignAttachmentId = attachmentId ?? idFromPickedUrl;
   const isCrossOriginWebURL = (() => {
@@ -166,24 +167,47 @@ export function useResignedInlineMedia(
 //
 // So for these kinds the viewer always asks the authenticated metadata
 // endpoint for a fresh signature, the same exchange the Download button makes.
-// It shares the re-sign query above, so an attachment is fetched once per TTL.
-// Proxy mode has no storage URL to sign; the picked URL stands there, as it
-// does when the request fails.
+// Proxy capabilities last only 60 seconds. Keep them in a separate query so
+// image metadata caching cannot pin one into a native stream after it expires.
+// Reopen always authenticates again; an open viewer renews before expiry.
 export function useFreshStreamedMediaURL(
   attachmentId: string | undefined,
-  pickedUrl: string,
+  rawPickedUrl: string,
   enabled: boolean,
-): { url: string; pending: boolean } {
-  const active = enabled && !!attachmentId && !!pickedUrl;
-  const { data: fresh, isError, isStale, isFetching } = useQuery({
-    queryKey: ["attachment-inline-resign", attachmentId],
-    queryFn: () => api.getAttachment(attachmentId as string),
+): { url: string; pending: boolean; refreshIfExpired: () => Promise<boolean> } {
+  const pickedUrl = resolveLegacyLocalMediaURL(rawPickedUrl);
+  const id = attachmentId ?? attachmentIdFromDownloadURL(pickedUrl);
+  const active = enabled && !!id && !!pickedUrl;
+  const { data: fresh, isError, isStale, isFetching, refetch } = useQuery({
+    queryKey: ["attachment-stream-resign", id],
+    queryFn: () => api.getAttachment(id as string),
     enabled: active,
     staleTime: RESIGN_STALE_MS,
-    gcTime: RESIGN_STALE_MS,
+    gcTime: 0,
+    retry: false,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+    refetchInterval: (query) => {
+      if (query.state.status === "error") return false;
+      const expiresAt = capabilityExpiresAt(query.state.data?.download_url ?? "");
+      return expiresAt === undefined
+        ? false
+        : Math.max(1000, expiresAt - Date.now() - 5000);
+    },
   });
 
-  if (!active) return { url: pickedUrl, pending: false };
+  const dl = fresh?.download_url ?? "";
+  const expiresAt = capabilityExpiresAt(dl);
+  const refreshIfExpired = async () => {
+    if (!active || expiresAt === undefined || expiresAt > Date.now() + 5000) return false;
+    const result = await refetch();
+    return !result.isError && !!result.data?.download_url && result.data.download_url !== dl;
+  };
+  if (!active || isError) return { url: pickedUrl, pending: false, refreshIfExpired };
+  if (expiresAt !== undefined) {
+    if (expiresAt <= Date.now() && !isFetching) return { url: pickedUrl, pending: false, refreshIfExpired };
+    return { url: absolutizeAPIPath(dl), pending: false, refreshIfExpired };
+  }
   // A cached answer past its stale time may hold a signature that has
   // already expired: wait for the refetch it triggers rather than start a
   // stream on it and restart once the new URL lands.
@@ -191,9 +215,32 @@ export function useFreshStreamedMediaURL(
     const dl = fresh.download_url ?? "";
     const signed =
       /^https?:\/\//i.test(dl) && attachmentIdFromDownloadURL(dl) === undefined;
-    return { url: signed ? dl : pickedUrl, pending: false };
+    return { url: signed ? dl : pickedUrl, pending: false, refreshIfExpired };
   }
-  return { url: pickedUrl, pending: !isError };
+  return { url: pickedUrl, pending: true, refreshIfExpired };
+}
+
+function absolutizeAPIPath(url: string): string {
+  if (!url.startsWith("/") || url.startsWith("//")) return url;
+  return `${(api.getBaseUrl?.() ?? "").replace(/\/+$/, "")}${url}`;
+}
+
+function resolveLegacyLocalMediaURL(url: string): string {
+  const id = attachmentIdFromLocalUploadURL(url);
+  return id ? absolutizeAPIPath(attachmentDownloadPath(id)) : url;
+}
+
+function capabilityExpiresAt(url: string): number | undefined {
+  // Only the server's per-attachment capability has the short proxy TTL.
+  try {
+    const parsed = new URL(url, "https://attachment.invalid");
+    if (!/^\/api\/attachments\/[^/]+\/signed-download$/.test(parsed.pathname)) return undefined;
+    if (!parsed.searchParams.get("sig")) return undefined;
+    const exp = Number(parsed.searchParams.get("exp"));
+    return Number.isFinite(exp) && exp > 0 ? exp * 1000 : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // useObjectURL turns a Blob into a `blob:` URL. The module cache keeps the
