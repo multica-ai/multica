@@ -76,7 +76,7 @@ func TestOutboundFlushesTextAThrottledFrameLeftBehind(t *testing.T) {
 	schedule := o.streams[taskID].schedule
 	o.mu.Unlock()
 	schedule.mu.Lock()
-	schedule.lastEdit = time.Now().Add(150*time.Millisecond - editInterval)
+	schedule.lastEdit = time.Now().Add(150*time.Millisecond - privateEditInterval)
 	schedule.mu.Unlock()
 
 	o.handleTaskMessage(frame(" will check the open pull requests"))

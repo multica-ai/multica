@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -29,8 +30,9 @@ import (
 // Streaming: Telegram has no stream-update protocol, so the "stream 帧" UX is
 // simulated with the platform's canonical pattern — post one placeholder
 // message on the first partial, then throttled editMessageText calls as the
-// agent's transcript grows (EventTaskMessage text frames), and a final edit /
-// send on EventChatDone. Edits are throttled per chat to stay inside
+// agent's transcript grows (EventTaskMessage text frames, with the tool calls
+// in between shown as steps under the text — outbound_progress.go), and a
+// final edit / send on EventChatDone. Edits are throttled per chat to stay inside
 // Telegram's editMessageText rate budget; on a 429 the streamer backs off and
 // the final content always lands via the EventChatDone path.
 type Outbound struct {
@@ -51,6 +53,13 @@ type Outbound struct {
 	botFallbackBackoff map[string]time.Time
 	now                func() time.Time
 	wait               func(context.Context, time.Duration) error
+
+	// progress is how much of a run's tool calls a chat is shown. Set before
+	// Register and not changed after.
+	progress ProgressMode
+	// heartbeat is how long to wait before moving the clock under a list of
+	// steps. A field so a test need not wait out the real cadence.
+	heartbeat func(chatID int64, quiet time.Duration) time.Duration
 
 	// flushCtx is the worker context from Start. Deferred pushes of held-back
 	// stream text run on it; nil until Start, and then nothing is deferred.
@@ -120,9 +129,23 @@ type streamState struct {
 	lastFrameAt time.Time
 	accumulated string
 	schedule    *chatSchedule
-	// flushArmed is set while a deferred push is waiting for the chat's next
-	// edit slot, so held-back text arms one timer, not one per frame.
-	flushArmed bool
+	// target is where the reply goes, resolved by the frame that opened the
+	// stream and reused by every later one.
+	target *replyTarget
+	// steps is what the agent is doing right now, shown under the text.
+	steps stepFeed
+	// startedAt is when this process first saw the run; the clock under the
+	// steps counts from it.
+	startedAt time.Time
+	// lastPushed is the body the chat shows, so a push that would change
+	// nothing is not sent.
+	lastPushed string
+	// flushAt is when the stream's deferred push is due; zero when none is
+	// armed. One per stream: held-back frames and the clock share it.
+	// flushGen names the timer that is current.
+	flushAt    time.Time
+	flushTimer *time.Timer
+	flushGen   uint64
 }
 
 // chatSchedule serializes Telegram delivery and owns rate-limit state shared
@@ -168,6 +191,8 @@ type terminalReply struct {
 	turn            replyTurn
 	turnResolved    bool
 	lease           *deliveryLease
+	// remnant is the steps a turn that ends without an answer left on screen.
+	remnant         *streamRemnant
 	acquireAttempts int
 	editAttempts    int
 	cleanupOnce     sync.Once
@@ -218,11 +243,26 @@ func (h *terminalRetryHeap) Pop() any {
 	return x
 }
 
-// editInterval is the minimum spacing between editMessageText calls per chat.
-// Telegram tolerates roughly one edit per second per chat, with a much
-// stricter per-group budget (~20 messages/min); 2.5s keeps a long generation
-// well inside both without feeling static.
-const editInterval = 2500 * time.Millisecond
+// The minimum spacing between two requests to one chat, edits included:
+// Telegram counts an editMessageText against the same allowance as a
+// sendMessage. It allows a chat about one message a second and a group 20 a
+// minute, so each kind of chat is paced at its own limit. One spacing for both
+// either stalls a group on a 429 or makes a private chat update in jumps.
+const (
+	privateEditInterval = time.Second
+	groupEditInterval   = 3 * time.Second
+)
+
+// editIntervalFor picks the spacing from the chat id: Telegram gives users
+// positive ids and groups, supergroups and channels negative ones.
+func editIntervalFor(chatID int64) time.Duration {
+	if chatID < 0 {
+		return groupEditInterval
+	}
+	return privateEditInterval
+}
+
+func (s *chatSchedule) editInterval() time.Duration { return editIntervalFor(s.key.chatID) }
 
 // placeholderSettleRetry re-checks a stream whose placeholder sendMessage is
 // still in flight. A check costs one map lookup — the delivery target is
@@ -297,6 +337,8 @@ func NewOutbound(q outboundQueries, decrypt Decrypter, apiBase string, client *h
 		botFallbackBackoff: make(map[string]time.Time),
 		now:                time.Now,
 		wait:               waitForOutbound,
+		progress:           ProgressAuto,
+		heartbeat:          heartbeatInterval,
 		terminalSessions:   make(map[string]*terminalSession),
 		terminalWake:       make(chan struct{}, 1),
 		terminalWork:       make(chan terminalWork, terminalWorkerCount),
@@ -309,6 +351,9 @@ func NewOutbound(q outboundQueries, decrypt Decrypter, apiBase string, client *h
 // Register subscribes to the transcript / completion / failure events.
 func (o *Outbound) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventTaskMessage, o.handleTaskMessage)
+	if o.progress != ProgressOff {
+		bus.Subscribe(protocol.EventTaskProgress, o.handleTaskProgress)
+	}
 	bus.Subscribe(protocol.EventChatDone, o.enqueueTerminalReply)
 	bus.Subscribe(protocol.EventTaskFailed, o.handleTaskFailed)
 	bus.Subscribe(protocol.EventTaskCancelled, o.handleTaskCancelled)
@@ -349,55 +394,93 @@ func (o *Outbound) WaitWithTimeout(timeout time.Duration) bool {
 	}
 }
 
-// handleTaskMessage streams a partial: on each agent text frame, update the
-// placeholder message (throttled). Bus delivery is synchronous, so all work
-// runs under a tight timeout and never propagates errors.
+// handleTaskMessage streams a partial: each agent text frame grows the reply,
+// and each tool call or error is a step shown under it. Bus delivery is
+// synchronous, so all work runs under a tight timeout and never propagates
+// errors.
 func (o *Outbound) handleTaskMessage(e events.Event) {
 	payload, ok := e.Payload.(protocol.TaskMessagePayload)
-	if !ok || payload.Type != "text" || payload.Content == "" {
+	if !ok {
+		return
+	}
+	switch payload.Type {
+	case "text":
+		if payload.Content == "" {
+			return
+		}
+	case "tool_use", "error":
+		if o.progress == ProgressOff {
+			return
+		}
+	default:
+		// A tool's output above all: it is most of the event's volume and none
+		// of it belongs in the chat.
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	target, err := o.resolveTarget(ctx, e, true)
-	if err != nil || target == nil {
+	target, turn, ok := o.streamTarget(ctx, e)
+	if !ok {
 		return
 	}
-
-	o.mu.Lock()
-	st, exists := o.streams[target.streamKey]
-	turn := replyTurn{}
-	if exists {
-		turn = st.turn
-	}
-	o.mu.Unlock()
-	if !turn.id.Valid {
-		resolved, err := o.turnFor(ctx, target.taskID)
-		if err != nil {
-			// Treating the task as its own turn here would open a second reply
-			// beside the one a previous attempt is still holding.
-			o.logger.WarnContext(ctx, "telegram outbound: skipping stream frame; reply turn unresolved", "error", err)
+	frame := streamFrame{text: payload.Content}
+	if payload.Type != "text" {
+		step, ok := o.stepFor(target, payload)
+		if !ok {
 			return
 		}
-		turn = resolved
+		frame = streamFrame{step: &step}
 	}
-
-	o.advanceStream(ctx, target, turn, payload.Content)
+	o.advanceStream(ctx, target, turn, frame)
 }
 
-// advanceStream adds content to the task's streamed reply and pushes the
-// result to Telegram. Empty content is the deferred flush: it pushes what a
-// held-back frame left behind and never opens a stream.
-func (o *Outbound) advanceStream(ctx context.Context, target *replyTarget, turn replyTurn, content string) {
-	// Keep the text before asking for the turn. The deferred flush holds the
+// streamTarget is where a frame's reply goes and which turn it belongs to.
+// Both are fixed for a run, so a reply already streaming answers from memory:
+// frames arrive several a second on the synchronous bus, and resolving each
+// one cost two database reads.
+func (o *Outbound) streamTarget(ctx context.Context, e events.Event) (*replyTarget, replyTurn, bool) {
+	if taskID, ok := eventTaskID(e); ok {
+		o.mu.Lock()
+		st := o.streams[util.UUIDToString(taskID)]
+		o.mu.Unlock()
+		if st != nil && st.target != nil {
+			return st.target, st.turn, true
+		}
+	}
+	target, err := o.resolveTarget(ctx, e, true)
+	if err != nil || target == nil {
+		return nil, replyTurn{}, false
+	}
+	turn, err := o.turnFor(ctx, target.taskID)
+	if err != nil {
+		// Treating the task as its own turn here would open a second reply
+		// beside the one a previous attempt is still holding.
+		o.logger.WarnContext(ctx, "telegram outbound: skipping stream frame; reply turn unresolved", "error", err)
+		return nil, replyTurn{}, false
+	}
+	return target, turn, true
+}
+
+// advanceStream adds a frame to the task's streamed reply and pushes the
+// result to Telegram. An empty frame is the deferred push: it sends what an
+// earlier frame left behind, or moves the clock, and never opens a stream.
+func (o *Outbound) advanceStream(ctx context.Context, target *replyTarget, turn replyTurn, frame streamFrame) {
+	// Keep the frame before asking for the turn. The deferred push holds the
 	// turn while it talks to Telegram, and a frame that arrives meanwhile must
 	// not leave a hole in what the next push shows.
 	o.mu.Lock()
 	st := o.streams[target.streamKey]
-	if st != nil && content != "" {
-		st.accumulated += content
-		st.lastFrameAt = o.now()
-		content = ""
+	if st != nil && !frame.empty() {
+		now := o.now()
+		st.absorb(frame, now)
+		frame = streamFrame{}
+		if !st.flushAt.IsZero() && st.flushAt.Sub(now) <= st.schedule.editInterval() {
+			// A push is already waiting for the chat's next slot and carries
+			// this frame with it. A burst of tool calls costs one edit and no
+			// database round trip per call.
+			o.mu.Unlock()
+			return
+		}
 	}
 	o.mu.Unlock()
 
@@ -420,10 +503,10 @@ func (o *Outbound) advanceStream(ctx context.Context, target *replyTarget, turn 
 	}
 	if status != deliveryAcquired {
 		// Another path owns the turn right now. A stream frame is decoration —
-		// the answer still lands — so it steps aside. Text it has already kept
+		// the answer still lands — so it steps aside. What it has already kept
 		// is pushed once the turn is free again.
 		if st != nil {
-			o.deferFlush(target, st, o.now().Add(deliveryBusyRetry))
+			o.armFlush(target, st, o.now().Add(deliveryBusyRetry))
 		}
 		return
 	}
@@ -435,8 +518,9 @@ func (o *Outbound) advanceStream(ctx context.Context, target *replyTarget, turn 
 
 	o.mu.Lock()
 	st, exists := o.streams[target.streamKey]
+	now := o.now()
 	if !exists {
-		if content == "" {
+		if frame.empty() {
 			o.mu.Unlock()
 			return
 		}
@@ -447,7 +531,7 @@ func (o *Outbound) advanceStream(ctx context.Context, target *replyTarget, turn 
 		}
 		st = &streamState{
 			chatID: target.chatID, threadID: target.threadID, replyTo: target.replyTo,
-			turn: turn, schedule: schedule, lastFrameAt: o.now(),
+			target: target, turn: turn, schedule: schedule, startedAt: now, lastFrameAt: now,
 		}
 		o.streams[target.streamKey] = st
 	}
@@ -458,38 +542,78 @@ func (o *Outbound) advanceStream(ctx context.Context, target *replyTarget, turn 
 	if msgID := lease.messageID(); msgID != 0 {
 		st.messageID = msgID
 	}
-	st.accumulated += content
-	snapshot := st.accumulated
-	msgID := st.messageID
+	st.absorb(frame, now)
+	body := st.render(now)
+	unchanged := st.messageID != 0 && body == st.lastPushed
 	o.mu.Unlock()
 
-	if retryAt := o.pushPartial(ctx, target, st, lease, msgID, snapshot); !retryAt.IsZero() {
-		o.deferFlush(target, st, retryAt)
+	if unchanged {
+		// The chat already shows exactly this. Not asking Telegram to confirm
+		// it keeps the request for an edit that changes something.
+		o.armHeartbeat(target, st)
+		return
+	}
+	pushed, retryAt := o.pushPartial(ctx, target, st, lease, body)
+	switch {
+	case !retryAt.IsZero():
+		o.armFlush(target, st, retryAt)
+	case pushed:
+		o.armHeartbeat(target, st)
 	}
 }
 
-// deferFlush arms one push for text a frame could not send yet. Without it
-// the text waits for the next frame, and an agent that writes a sentence and
-// then works in tools for minutes sends none: the chat shows the first word
-// until the final answer.
+// armFlush arms the stream's one deferred push, for what a frame could not
+// send yet. Without it that waits for the next frame, and an agent that writes
+// a sentence and then works in tools for minutes sends none: the chat shows
+// the first word until the final answer.
 //
+// A push already armed for an earlier moment stands; a later one gives way.
 // It needs the worker context from Start, so the timer ends with the process.
-func (o *Outbound) deferFlush(target *replyTarget, st *streamState, at time.Time) {
+func (o *Outbound) armFlush(target *replyTarget, st *streamState, at time.Time) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if o.flushCtx == nil || st.flushArmed || o.streams[target.streamKey] != st {
+	if o.flushCtx == nil || o.streams[target.streamKey] != st {
 		return
 	}
-	st.flushArmed = true
-	time.AfterFunc(max(at.Sub(o.now()), 0), func() { o.flushStream(target, st) })
+	if !st.flushAt.IsZero() && !st.flushAt.After(at) {
+		return
+	}
+	if st.flushTimer != nil {
+		st.flushTimer.Stop()
+	}
+	st.flushGen++
+	gen := st.flushGen
+	st.flushAt = at
+	st.flushTimer = time.AfterFunc(max(at.Sub(o.now()), 0), func() { o.flushStream(target, st, gen) })
+}
+
+// armHeartbeat keeps the clock under a list of steps moving while the agent
+// is quiet. A tool can run for minutes without a frame, and a message that
+// does not change for that long is indistinguishable from a run that hung.
+func (o *Outbound) armHeartbeat(target *replyTarget, st *streamState) {
+	o.mu.Lock()
+	now := o.now()
+	wait := time.Duration(0)
+	if len(st.steps.lines) > 0 {
+		wait = o.heartbeat(st.chatID, now.Sub(st.lastFrameAt))
+	}
+	o.mu.Unlock()
+	if wait > 0 {
+		o.armFlush(target, st, now.Add(wait))
+	}
 }
 
 // flushStream is the deferred push. The stream may be gone by now — finished,
 // cancelled, or taken over by the final answer — and then there is nothing to
-// do.
-func (o *Outbound) flushStream(target *replyTarget, st *streamState) {
+// do. gen tells a timer that was replaced after it fired from the current one.
+func (o *Outbound) flushStream(target *replyTarget, st *streamState, gen uint64) {
 	o.mu.Lock()
-	st.flushArmed = false
+	if st.flushGen != gen {
+		o.mu.Unlock()
+		return
+	}
+	st.flushAt = time.Time{}
+	st.flushTimer = nil
 	live := o.streams[target.streamKey] == st
 	turn := st.turn
 	flushCtx := o.flushCtx
@@ -499,40 +623,35 @@ func (o *Outbound) flushStream(target *replyTarget, st *streamState) {
 	}
 	ctx, cancel := context.WithTimeout(flushCtx, 10*time.Second)
 	defer cancel()
-	o.advanceStream(ctx, target, turn, "")
+	o.advanceStream(ctx, target, turn, streamFrame{})
 }
 
-// pushPartial sends the placeholder on the first flush and edits it after. It
+// pushPartial sends the placeholder on the first push and edits it after. It
 // runs under the turn's lease, so the final answer cannot take the reply over
 // between the decision made here and the call that acts on it.
 //
-// A non-zero result is when the chat can next take an edit: the snapshot was
-// held back, and the caller arranges for it to be pushed then.
-func (o *Outbound) pushPartial(ctx context.Context, target *replyTarget, st *streamState, lease *deliveryLease, msgID int64, snapshot string) time.Time {
+// It reports whether the chat now shows body. A non-zero time is when the
+// chat can next take an edit: body was held back, and the caller arranges for
+// the stream to be pushed then.
+func (o *Outbound) pushPartial(ctx context.Context, target *replyTarget, st *streamState, lease *deliveryLease, body string) (bool, time.Time) {
 	if !st.schedule.mu.TryLock() {
 		// A request to this chat is in flight, so its next slot is one
 		// interval away.
-		return o.now().Add(editInterval)
+		return false, o.now().Add(st.schedule.editInterval())
 	}
 	defer st.schedule.mu.Unlock()
 	now := o.now()
 	if available := o.terminalAvailableAt(st.schedule, target.botKey, now); available.After(now) {
-		return available
+		return false, available
 	}
 
 	api := newBotAPI(o.apiBase, target.botToken, o.client)
-	text := snapshot
-	if utf16Units(text) > maxMessageUnits {
-		// Mid-stream overflow: freeze the streamed message at the cap; the full
-		// reply is delivered in chunks by the final EventChatDone send.
-		text = chunkMessage(text, maxMessageUnits)[0]
-	}
 	o.mu.Lock()
 	if o.streams[target.streamKey] != st {
 		o.mu.Unlock()
-		return time.Time{}
+		return false, time.Time{}
 	}
-	msgID = st.messageID
+	msgID := st.messageID
 	o.mu.Unlock()
 
 	if msgID != 0 {
@@ -541,28 +660,31 @@ func (o *Outbound) pushPartial(ctx context.Context, target *replyTarget, st *str
 		// lease, and an edit made afterwards overwrites whatever the process
 		// that took over has already published as the final answer.
 		if !o.renewDelivery(ctx, lease) {
-			return time.Time{}
+			return false, time.Time{}
 		}
 		ctx, cancel := o.callContext(ctx)
 		defer cancel()
 		err := api.EditMessageText(ctx, editMessageTextParams{
 			ChatID:    st.chatID,
 			MessageID: msgID,
-			Text:      formatHTML(text),
+			Text:      body,
 			ParseMode: "HTML",
 		})
 		if err != nil && !isNotModified(err) {
-			return o.noteEditFailure(st.schedule, err)
+			return false, o.noteEditFailure(st.schedule, err)
 		}
 		st.schedule.lastEdit = o.now()
-		return time.Time{}
+		o.mu.Lock()
+		st.lastPushed = body
+		o.mu.Unlock()
+		return true, time.Time{}
 	}
 
 	// Exactly one placeholder per turn, published before the call goes out so
 	// that any other process reads "a send is outstanding" rather than
 	// "nothing has been sent".
 	if !o.claimSend(ctx, lease) {
-		return time.Time{}
+		return false, time.Time{}
 	}
 	ctx, cancel := o.callContext(ctx)
 	defer cancel()
@@ -572,22 +694,23 @@ func (o *Outbound) pushPartial(ctx context.Context, target *replyTarget, st *str
 	}
 	m, err := api.SendMessage(ctx, sendMessageParams{
 		ChatID:          st.chatID,
-		Text:            firstNonEmpty(formatHTML(text), streamPlaceholder),
+		Text:            firstNonEmpty(body, streamPlaceholder),
 		ParseMode:       "HTML",
 		MessageThreadID: st.threadID,
 		ReplyParameters: reply,
 	})
 	if o.recordSend(ctx, lease, true, m.MessageID, 0, err) != deliveryAccepted {
 		if err != nil {
-			return o.noteEditFailure(st.schedule, err)
+			return false, o.noteEditFailure(st.schedule, err)
 		}
-		return time.Time{}
+		return false, time.Time{}
 	}
 	st.schedule.lastEdit = o.now()
 	o.mu.Lock()
 	st.messageID = m.MessageID
+	st.lastPushed = body
 	o.mu.Unlock()
-	return time.Time{}
+	return true, time.Time{}
 }
 
 // noteEditFailure applies the 429-mandated backoff to the stream and returns
@@ -613,17 +736,18 @@ func (o *Outbound) enqueueTerminalReply(e events.Event) {
 	// close itself is a database write and belongs on a worker, not on the
 	// synchronous bus.
 	if settleOnly := chatDoneContent(e.Payload) == ""; settleOnly {
-		o.clearStream(e)
-		o.enqueueTerminal(e, terminalKindClose, "empty_reply")
+		o.enqueueTerminal(e, terminalKindClose, "empty_reply", o.takeStream(e))
 		return
 	}
-	o.enqueueTerminal(e, terminalKindAnswer, "")
+	o.enqueueTerminal(e, terminalKindAnswer, "", nil)
 }
 
 // enqueueTerminal appends to a bounded keyed FIFO. events.Bus is synchronous,
 // so nothing here may touch Telegram or the database — that work belongs to
 // the terminal workers.
-func (o *Outbound) enqueueTerminal(e events.Event, kind terminalKind, settleReason string) {
+//
+// remnant is what a turn ending without an answer left in the chat to tidy.
+func (o *Outbound) enqueueTerminal(e events.Event, kind terminalKind, settleReason string, remnant *streamRemnant) {
 	_, hasTaskID := eventTaskID(e)
 	sessionID, sessionErr := util.ParseUUID(e.ChatSessionID)
 	if !hasTaskID || sessionErr != nil || !sessionID.Valid {
@@ -664,7 +788,7 @@ func (o *Outbound) enqueueTerminal(e events.Event, kind terminalKind, settleReas
 		return
 	}
 	session.queue = append(session.queue, &terminalReply{
-		event: e, byteSize: replyBytes, kind: kind, settleReason: settleReason,
+		event: e, byteSize: replyBytes, kind: kind, settleReason: settleReason, remnant: remnant,
 	})
 	o.queuedTerminalReplyCount++
 	o.queuedTerminalReplyBytes += replyBytes
@@ -921,6 +1045,9 @@ func (o *Outbound) initializeTerminalReply(ctx context.Context, reply *terminalR
 			return terminalRequestResult{done: true}
 		}
 		o.clearStream(reply.event)
+		if outcome == closedNow {
+			o.tidyRemnant(ctx, reply.remnant)
+		}
 		if outcome == closedNow && reply.settleReason == "empty_reply" {
 			// The agent may have said nothing and bound a file instead; the
 			// files are then the whole reply. Only the call that ended the
@@ -1081,7 +1208,7 @@ func (o *Outbound) editStreamedReply(ctx context.Context, api *botAPI, reply *te
 		o.deliverAttachments(ctx, reply)
 		return terminalRequestResult{done: true}
 	}
-	return terminalRequestResult{retryAt: schedule.lastEdit.Add(editInterval)}
+	return terminalRequestResult{retryAt: schedule.lastEdit.Add(schedule.editInterval())}
 }
 
 // sendReplyChunk posts one part of the final answer. The send is published
@@ -1138,7 +1265,7 @@ func (o *Outbound) sendReplyChunk(ctx context.Context, api *botAPI, reply *termi
 		o.deliverAttachments(ctx, reply)
 		return terminalRequestResult{done: true}
 	}
-	return terminalRequestResult{retryAt: schedule.lastEdit.Add(editInterval)}
+	return terminalRequestResult{retryAt: schedule.lastEdit.Add(schedule.editInterval())}
 }
 
 func (o *Outbound) cleanupTerminalReply(reply *terminalReply) {
@@ -1170,7 +1297,7 @@ func (o *Outbound) handleTaskFailed(e events.Event) {
 		o.clearStream(e)
 		return
 	}
-	o.enqueueTerminal(e, terminalKindNotice, "failure_notice")
+	o.enqueueTerminal(e, terminalKindNotice, "failure_notice", nil)
 }
 
 // deliverFailureNotice posts the run-failed notice, one Telegram call per
@@ -1276,8 +1403,7 @@ func (o *Outbound) editNoticeOntoPlaceholder(ctx context.Context, api *botAPI, r
 // synthetic notice is worse than keeping it — but closes the reply so a text
 // frame still in flight cannot open a second message beside it.
 func (o *Outbound) handleTaskCancelled(e events.Event) {
-	o.clearStream(e)
-	o.enqueueTerminal(e, terminalKindClose, "cancelled")
+	o.enqueueTerminal(e, terminalKindClose, "cancelled", o.takeStream(e))
 }
 
 func taskFailureRetryPending(payload any) bool {
@@ -1302,6 +1428,9 @@ func (o *Outbound) clearStreamKey(key string) {
 	st := o.streams[key]
 	delete(o.streams, key)
 	if st != nil {
+		if st.flushTimer != nil {
+			st.flushTimer.Stop()
+		}
 		o.releaseChatLocked(st.schedule, st.chatID)
 	}
 	o.mu.Unlock()
@@ -1434,7 +1563,7 @@ func (o *Outbound) makeChatScheduleRoomLocked(now time.Time) bool {
 	var inactive *chatSchedule
 	for key, schedule := range o.chats {
 		if schedule.refs != 0 || schedule.idleSince.IsZero() ||
-			now.Sub(schedule.idleSince) < editInterval || schedule.hasActiveBackoff(now) {
+			now.Sub(schedule.idleSince) < schedule.editInterval() || schedule.hasActiveBackoff(now) {
 			continue
 		}
 		if inactive == nil || schedule.idleSince.Before(inactive.idleSince) {
@@ -1450,7 +1579,7 @@ func (o *Outbound) makeChatScheduleRoomLocked(now time.Time) bool {
 	var active *chatSchedule
 	for key, schedule := range o.chats {
 		if schedule.refs != 0 || schedule.idleSince.IsZero() ||
-			now.Sub(schedule.idleSince) < editInterval || !schedule.hasActiveBackoff(now) {
+			now.Sub(schedule.idleSince) < schedule.editInterval() || !schedule.hasActiveBackoff(now) {
 			continue
 		}
 		if !o.canMergeBotFallbackLocked(schedule.key.botKey, now) {
@@ -1500,7 +1629,7 @@ func (o *Outbound) botFallbackTill(botKey string, now time.Time) time.Time {
 
 func (o *Outbound) terminalAvailableAt(schedule *chatSchedule, botKey string, now time.Time) time.Time {
 	available := schedule.backoffTill
-	if editAvailable := schedule.lastEdit.Add(editInterval); editAvailable.After(available) {
+	if editAvailable := schedule.lastEdit.Add(schedule.editInterval()); editAvailable.After(available) {
 		available = editAvailable
 	}
 	if fallback := o.botFallbackTill(botKey, now); fallback.After(available) {
@@ -1574,6 +1703,8 @@ type replyTarget struct {
 	threadID  int64
 	replyTo   int64
 	botToken  string
+	// private is a one-to-one chat with the person the run belongs to.
+	private bool
 
 	// Identity of the reply this target belongs to, for the ownership row.
 	taskID         pgtype.UUID
@@ -1624,6 +1755,7 @@ func (o *Outbound) resolveTarget(ctx context.Context, e events.Event, _ bool) (*
 		threadID:       threadID,
 		replyTo:        replyTo,
 		botToken:       creds.BotToken,
+		private:        delivery.ChatType == string(channel.ChatTypeP2P),
 		taskID:         taskID,
 		bindingID:      delivery.BindingID,
 		installationID: inst.ID,
