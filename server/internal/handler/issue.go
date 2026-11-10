@@ -2736,9 +2736,14 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to resolve status categories")
 		return
 	}
+	hidden, ok := h.requestHiddenProjects(w, r, wsID)
+	if !ok {
+		return
+	}
 	rows, err := h.Queries.ChildIssueProgress(r.Context(), db.ChildIssueProgressParams{
 		WorkspaceID:        wsUUID,
 		TerminalStatusKeys: terminalStatusKeys,
+		HiddenProjectIds:   hidden.Param(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
