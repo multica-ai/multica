@@ -84,6 +84,7 @@ import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
 import { useVisualViewportKeyboard } from "./use-visual-viewport-keyboard";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+import { CHAT_WINDOW_INSET, useChatWindowAnchor } from "./use-chat-window-anchor";
 import {
   hasInFlightPendingTask,
   isStillOnComposeTarget,
@@ -758,7 +759,7 @@ export function ChatWindow() {
     "absolute z-50 flex flex-col overflow-hidden bg-surface-raised @container",
     isMobile
       ? "inset-x-0"
-      : "right-2 rounded-xl shadow-[var(--floating-shadow)] ring-1 ring-surface-border",
+      : "rounded-xl shadow-[var(--floating-shadow)] ring-1 ring-surface-border",
   );
   // Soft keyboards shrink only the *visual* viewport — the layout viewport
   // (and this panel's bottom-anchored parent) keeps its full height, so
@@ -774,6 +775,7 @@ export function ChatWindow() {
   // disappears from the style prop, so a conditional spread here would
   // leave the keyboard geometry stuck on the DOM after the keyboard closes.
   const keyboard = useVisualViewportKeyboard();
+  const anchorRight = useChatWindowAnchor(windowRef, isOpen);
   const containerStyle: React.CSSProperties = {
     transformOrigin: "bottom right",
     pointerEvents: isOpen ? "auto" : "none",
@@ -782,13 +784,15 @@ export function ChatWindow() {
           // Full-screen panel anchored to the visible bottom edge;
           // width/height live in the motion animate below.
           top: "auto",
+          right: 0,
           bottom: keyboard ? keyboard.occludedBottom : 0,
           maxHeight: "none",
         }
       : {
           // Floating card; only the anchor and the height cap live here.
           top: "auto",
-          bottom: keyboard ? keyboard.occludedBottom + 8 : 8,
+          right: anchorRight,
+          bottom: keyboard ? keyboard.occludedBottom + CHAT_WINDOW_INSET : CHAT_WINDOW_INSET,
           maxHeight: keyboard ? keyboard.viewportHeight - 16 : "none",
         }),
   };

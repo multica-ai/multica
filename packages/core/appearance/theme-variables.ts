@@ -75,7 +75,7 @@ function section(name: ThemeVariableSection, entries: readonly Entry[]): ThemeVa
 }
 
 const COLORS: Entry[] = [
-  ["app-shell", "The frame around the page: rail, desktop toolbar and tab bar."],
+  ["app-shell", "The frame around the page: rail, bottom bar, desktop toolbar and tab bar."],
   ["page-canvas", "The page that lists, boards and conversations sit on."],
   ["surface", "Bounded content groups: cards, board cards, panels."],
   ["surface-foreground", "Text on a surface."],

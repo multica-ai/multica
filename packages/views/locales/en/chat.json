@@ -13,6 +13,11 @@
     "unread_other": "{{count}} unread chats",
     "default": "Ask Multica"
   },
+  "bar": {
+    "all_chats": "All chats",
+    "more_one": "{{count}} more chat",
+    "more_other": "{{count}} more chats"
+  },
   "input": {
     "placeholder_no_agent": "Create an agent to start chatting",
     "placeholder_archived": "This session is archived",

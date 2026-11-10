@@ -12,6 +12,10 @@
     "unread_other": "{{count}} 條未讀對話",
     "default": "問 Multica"
   },
+  "bar": {
+    "all_chats": "全部對話",
+    "more_other": "另外 {{count}} 個對話"
+  },
   "input": {
     "placeholder_no_agent": "建立一個 AI 代理後才能開始對話",
     "placeholder_archived": "此會話已歸檔",

@@ -15,6 +15,13 @@
     "unread_few": "{{count}} непрочитанных чата",
     "unread_many": "{{count}} непрочитанных чатов"
   },
+  "bar": {
+    "all_chats": "Все чаты",
+    "more_one": "Ещё {{count}} чат",
+    "more_few": "Ещё {{count}} чата",
+    "more_many": "Ещё {{count}} чатов",
+    "more_other": "Ещё {{count}} чата"
+  },
   "input": {
     "placeholder_no_agent": "Создайте агента, чтобы начать общение",
     "placeholder_archived": "Эта сессия архивирована",

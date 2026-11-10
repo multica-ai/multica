@@ -12,6 +12,10 @@
     "unread_other": "未読のチャット {{count}}件",
     "default": "Multica に質問"
   },
+  "bar": {
+    "all_chats": "すべてのチャット",
+    "more_other": "他 {{count}} 件のチャット"
+  },
   "input": {
     "placeholder_no_agent": "チャットを始めるにはエージェントを作成してください",
     "placeholder_archived": "このセッションはアーカイブされています",

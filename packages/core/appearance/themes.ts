@@ -113,11 +113,11 @@ export type ThemeTokens = Readonly<Record<string, string>>;
 
 export interface BuiltInTheme extends Theme {
   tokens: { light: ThemeTokens; dark: ThemeTokens };
-  /** Tokens for what sits on the frame: the rail, desktop toolbar and tab bar. */
+  /** Tokens for what sits on the frame: the rail, desktop toolbar, tab bar and bottom bar. */
   frame?: { light?: ThemeTokens; dark?: ThemeTokens };
 }
 
-const FRAME_ANCHORS = ':is([data-mc="app-rail"], [data-mc="window-toolbar"], [data-mc="tab-bar"])';
+const FRAME_ANCHORS = ':is([data-mc="app-rail"], [data-mc="window-toolbar"], [data-mc="tab-bar"], [data-mc="bottom-bar"])';
 
 /**
  * The CSS a token table stands for: one line per rule, or with `readable`

@@ -12,6 +12,7 @@ import {
 } from "@multica/ui/components/ui/sidebar";
 import { ModalRegistry } from "@multica/views/modals/registry";
 import {
+  AppBottomBar,
   AppRail,
   AppShellProvider,
   CompactNavSheet,
@@ -141,8 +142,11 @@ function MainCanvas({
       data-slot="main-canvas"
       data-mc="page"
       className={cn(
-        "relative mr-2 mb-2 flex min-h-0 flex-1 flex-row overflow-hidden rounded-page bg-page-canvas shadow-[var(--page-shadow,var(--surface-shadow))] ring-1 ring-page-border",
+        "relative mr-2 flex min-h-0 flex-1 flex-row overflow-hidden rounded-page bg-page-canvas shadow-[var(--page-shadow,var(--surface-shadow))] ring-1 ring-page-border",
         railMounted && !isCompact ? "ml-0" : "ml-2",
+        // In a workspace the bottom bar takes the place of the bottom margin
+        // from `md` up.
+        railMounted ? "mb-2 md:mb-0" : "mb-2",
       )}
     >
       {railMounted && <SpacePanel />}
@@ -319,6 +323,7 @@ export function DesktopShell() {
                     {slug && <FloatingChat />}
                     {slug && <StarPrompt />}
                   </MainCanvas>
+                  {slug && <AppBottomBar />}
                 </div>
               </ShellRouteDataPrefetch>
             </AppShellProvider>

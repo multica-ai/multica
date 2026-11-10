@@ -45,7 +45,7 @@ const POP_SIGNALS = {
   coral: "oklch(0.8 0.13 30)",
 };
 
-const POP_FRAME_ANCHORS = ':is([data-mc="app-rail"], [data-mc="window-toolbar"], [data-mc="tab-bar"])';
+const POP_FRAME_ANCHORS = ':is([data-mc="app-rail"], [data-mc="window-toolbar"], [data-mc="tab-bar"], [data-mc="bottom-bar"])';
 const POP_STATUS_BLOCKS: [string, string][] = [
   ['[data-status="backlog"], [data-status="todo"]', "oklch(0.88 0.035 250)"],
   ['[data-status="in_progress"]', "oklch(0.84 0.13 68)"],

@@ -13,6 +13,11 @@
     "unread_other": "{{count}} chats sin leer",
     "default": "Pregunta a Multica"
   },
+  "bar": {
+    "all_chats": "Todos los chats",
+    "more_one": "{{count}} chat más",
+    "more_other": "{{count}} chats más"
+  },
   "input": {
     "placeholder_no_agent": "Crea un agente para empezar a chatear",
     "placeholder_archived": "Esta sesión está archivada",
