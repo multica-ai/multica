@@ -102,13 +102,18 @@ export function InboxSection({ wsId }: { wsId: string }) {
   const listId = useId();
   const linkRef = useRef<HTMLAnchorElement>(null);
 
-  const { data: rawItems = EMPTY_INBOX, isLoading } = useQuery({
-    ...inboxListOptions(wsId),
-    enabled: !collapsed,
-  });
-  const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
   const onPage = pathname === p.inbox() && !searchParams.get("view");
   const selectedKey = onPage ? (searchParams.get("issue") ?? "") : "";
+  // The page's own list is on screen: the same issues listed twice, side by
+  // side, would only compete. The row and its count stay.
+  const onList = onPage && !selectedKey;
+  const listed = !collapsed && !onList;
+
+  const { data: rawItems = EMPTY_INBOX, isLoading } = useQuery({
+    ...inboxListOptions(wsId),
+    enabled: listed,
+  });
+  const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
 
   // Acting on the open issue takes it out of the Inbox on the server. Its row
   // stays where it was, dimmed, until another row opens.
@@ -143,13 +148,13 @@ export function InboxSection({ wsId }: { wsId: string }) {
             label={label}
             icon={<Inbox className="size-4 shrink-0" />}
             active={onPage && !selectedKey}
-            expanded={!collapsed}
-            onExpandedChange={(next) => setCollapsed(!next)}
+            expanded={listed}
+            onExpandedChange={onList ? undefined : (next) => setCollapsed(!next)}
             listId={listId}
             toggleLabel={t(($) => $.panels.work.project_issues, { name: label })}
             trailing={<PendingCount value={pending} />}
           />
-          {!collapsed && (
+          {listed && (
             <ul id={listId} className="mb-2 ml-5 border-l border-surface-border pl-[9px]">
               {shown.map((item) => {
                 const key = itemKey(item);

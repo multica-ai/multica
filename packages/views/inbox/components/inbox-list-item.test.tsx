@@ -122,6 +122,7 @@ function renderRow(props: {
   adapter?: NavigationAdapter;
   onClick?: () => void;
   handled?: boolean;
+  summary?: { more: number; preview: string | null };
 }) {
   return render(
     <WorkspaceSlugProvider slug="acme">
@@ -131,6 +132,7 @@ function renderRow(props: {
           view={props.view}
           isSelected={false}
           handled={props.handled}
+          summary={props.summary}
           onClick={props.onClick ?? vi.fn()}
           onAction={vi.fn()}
         />
@@ -432,5 +434,28 @@ describe("InboxListItem status glyph", () => {
     const icon = getByTestId("status-icon");
     expect(icon.getAttribute("data-status")).toBe("human_review");
     expect(icon.getAttribute("data-color")).toBe("");
+  });
+
+  it("shows what was written and how many other notifications the issue has", () => {
+    const { container } = renderRow({
+      item: item(),
+      view: "inbox",
+      summary: { more: 2, preview: "Fixed the flaky test" },
+    });
+
+    expect(container.textContent).toContain(" · Fixed the flaky test");
+    // The i18n stub answers every key with "label"; the count has its own.
+    expect(container.querySelector(".tabular-nums")).toHaveTextContent("label");
+  });
+
+  it("leaves both out of a row with nothing else on its issue", () => {
+    const { container } = renderRow({
+      item: item(),
+      view: "inbox",
+      summary: { more: 0, preview: null },
+    });
+
+    expect(container.textContent).not.toContain(" · ");
+    expect(container.querySelector(".tabular-nums")).toBeNull();
   });
 });

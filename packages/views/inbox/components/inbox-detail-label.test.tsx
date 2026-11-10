@@ -148,4 +148,24 @@ describe("InboxDetailLabel localized values", () => {
     expect(container.textContent).toContain("8月21日");
     expect(container.textContent).not.toContain("Aug");
   });
+
+  // The stubbed catalog answers a status with its own key as the category.
+  it.each([
+    ["blocked", en.labels.waiting_answer],
+    ["started", en.labels.awaiting_review],
+    ["in_progress", en.labels.run_finished],
+    ["done", en.labels.run_finished],
+  ])("reads a finished run by where it left the issue: %s", (status, label) => {
+    const { container } = render(
+      <InboxDetailLabel item={item({ type: "agent_completed", issue_id: "issue-1", issue_status: status })} />,
+    );
+    expect(container.textContent).toBe(label);
+  });
+
+  it("keeps a comment to its reason when the host shows what was written", () => {
+    const comment = item({ type: "new_comment", body: "Looks good" });
+
+    expect(render(<InboxDetailLabel item={comment} />).container.textContent).toBe("Looks good");
+    expect(render(<InboxDetailLabel item={comment} reasonOnly />).container.textContent).toBe(en.types.new_comment);
+  });
 });

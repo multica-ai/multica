@@ -9,6 +9,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { Archive, ArchiveRestore } from "@multica/ui/icons";
 import type { InboxItem } from "@multica/core/types";
+import type { InboxGroupSummary } from "@multica/core/inbox/queries";
 import type { InboxView } from "./inbox-view";
 import { InboxDetailLabel, useTypeLabels } from "./inbox-detail-label";
 import {
@@ -45,6 +46,7 @@ export function InboxListItem({
   view,
   isSelected,
   handled = false,
+  summary,
   onClick,
   onAction,
 }: {
@@ -53,6 +55,8 @@ export function InboxListItem({
   isSelected: boolean;
   /** Its issue already left the Inbox; the row stays until the selection moves. */
   handled?: boolean;
+  /** What else is on the issue: its other notifications and the newest comment. */
+  summary?: InboxGroupSummary;
   onClick: () => void;
   // Archive in the main list, unarchive in the archived one — the row action is
   // always the reversal of the current view, so the two lists share this row.
@@ -180,10 +184,20 @@ export function InboxListItem({
           </div>}
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground"}`}>
-            <InboxDetailLabel item={item} />
+          {/* The reason first, then what was written: the reason says what
+              the row asks for, the preview whether it can wait. */}
+          <p className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-caption text-muted-foreground">
+            <span className={summary?.preview && showUnread ? "text-foreground" : undefined}>
+              <InboxDetailLabel item={item} reasonOnly={!!summary?.preview} />
+            </span>
+            {summary?.preview && <> · {summary.preview}</>}
           </p>
           <div className="flex shrink-0 items-center gap-1.5">
+            {!!summary && summary.more > 0 && (
+              <span className="text-caption tabular-nums text-faint-foreground">
+                {t(($) => $.labels.more, { count: summary.more })}
+              </span>
+            )}
             {/* Badge only, no hover card (MUL-5189). "An agent is on this"
                 is worth showing while triaging; the card behind it adds only
                 elapsed time, which does not change whether you open the row.

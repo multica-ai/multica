@@ -74,7 +74,15 @@
     "unarchive": "Unarchive",
     "handled": "Handled · it left the Inbox",
     "acted_replied": "You replied · archive it once you're done",
-    "acted_updated": "You updated this issue · archive it once you're done"
+    "acted_updated": "You updated this issue · archive it once you're done",
+    "handled_notice": "Just a notice · it left the Inbox when you opened it",
+    "handled_closed": "Done or cancelled · it left the Inbox",
+    "handled_agent": "An agent is on it · it comes back when the run ends",
+    "restore": "Put back in Inbox",
+    "unread_from": "{{count}} unread · starts here",
+    "position": "{{index}} / {{total}}",
+    "previous": "Previous",
+    "next": "Next"
   },
   "types": {
     "issue_assigned": "Assigned",
@@ -117,7 +125,12 @@
     "created_with_agent": "Created with agent: {{identifier}}",
     "failed_with_detail": "Failed: {{detail}}",
     "autopilot_quota_blocked": "Run blocked because the limit was reached",
-    "children_done_stage": "Stage {{stage}}'s sub-issues finished"
+    "children_done_stage": "Stage {{stage}}'s sub-issues finished",
+    "awaiting_review": "Awaiting your review",
+    "waiting_answer": "Waiting on your answer",
+    "run_finished": "Run finished",
+    "mentioned_you": "Mentioned you",
+    "more": "+{{count}} more"
   },
   "toasts": {
     "source_context_retry_started": "Retry started with the original context",

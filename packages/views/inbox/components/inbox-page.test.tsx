@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { ApiError } from "@multica/core/api";
@@ -21,11 +21,14 @@ const listData: {
   tasks: AgentTask[];
   /** Issues whose detail is in the cache (a deleted issue's is dropped). */
   cachedIssues: string[];
+  /** The status a cached issue's detail carries. */
+  issueStatus: Record<string, string>;
 } = {
   active: [],
   archived: [],
   tasks: [],
   cachedIssues: [],
+  issueStatus: {},
 };
 
 const queryCalls: Array<{ queryKey: readonly unknown[]; enabled?: boolean }> = [];
@@ -39,7 +42,7 @@ vi.mock("@tanstack/react-query", () => ({
     const detailId = options.queryKey.includes("detail") ? String(options.queryKey.at(-1)) : null;
     return ({
     data: detailId !== null
-      ? (listData.cachedIssues.includes(detailId) ? { id: detailId } : undefined)
+      ? (listData.cachedIssues.includes(detailId) ? { id: detailId, status: listData.issueStatus[detailId] ?? "todo" } : undefined)
       : options.queryKey.includes("archived")
       ? { items: listData.lookup ?? listData.archived, hasMore: false, nextCursor: null }
       : options.queryKey.includes("agent-task-snapshot") ? listData.tasks : listData.active,
@@ -86,14 +89,27 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({
   useIssueDraftStore: { getState: () => ({ setDraft: vi.fn() }) },
 }));
 
-vi.mock("@multica/core/inbox/queries", () => ({
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  useIssueStatuses: () => ({
+    categoryOf: (status: string) =>
+      status === "done" ? "done" : status === "cancelled" ? "closed" : "unstarted",
+  }),
+}));
+
+vi.mock("@multica/core/inbox/queries", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/inbox/queries")>();
+  return {
+  inboxGroupUnread: actual.inboxGroupUnread,
+  isInboxNotice: actual.isInboxNotice,
+  summarizeInboxGroups: actual.summarizeInboxGroups,
   inboxListOptions: () => ({ queryKey: ["inbox", "workspace-1", "list"] }),
   archivedInboxPagesOptions: () => ({ queryKey: ["inbox", "workspace-1", "archived", "pages"] }),
   archivedInboxLookupOptions: () => ({ queryKey: ["inbox", "workspace-1", "archived", "lookup"] }),
   deduplicateInboxItems: (items: InboxItem[]) => items.filter((i) => !i.archived),
   deduplicateArchivedInboxItems: (items: InboxItem[]) => items.filter((i) => i.archived),
   useInboxUnreadCount: () => 2,
-}));
+  };
+});
 
 // Stable spies: the auto-mark-read effect keys on the mutate identity, so a
 // fresh `vi.fn()` per render would make the effect's deps churn.
@@ -287,6 +303,7 @@ function reset() {
   listData.lookup = undefined;
   listData.tasks = [];
   listData.cachedIssues = [];
+  listData.issueStatus = {};
   lookupState.isLoading = false;
   lookupState.isError = false;
   lookupState.refetch.mockClear();
@@ -388,10 +405,10 @@ describe("InboxPage", () => {
     fireEvent.click(screen.getByTestId("row"));
 
     const notice = issueDetailProps.at(-1)?.notice as React.ReactElement<{
-      handled: boolean;
+      handled: string | null;
       onArchive: () => void;
     }>;
-    expect(notice.props.handled).toBe(false);
+    expect(notice.props.handled).toBeNull();
     act(() => notice.props.onArchive());
 
     expect(archiveMutate).toHaveBeenCalledWith("inbox-a", expect.anything());
@@ -406,10 +423,10 @@ describe("InboxPage", () => {
     fireEvent.click(screen.getByTestId("row"));
 
     const notice = issueDetailProps.at(-1)?.notice as React.ReactElement<{
-      handled: boolean;
+      handled: string | null;
       acted: string | null;
     }>;
-    expect(notice.props.handled).toBe(false);
+    expect(notice.props.handled).toBeNull();
     expect(notice.props.acted).toBe("replied");
     expect(archiveMutate).not.toHaveBeenCalled();
     actedState.value = null;
@@ -947,8 +964,8 @@ describe("InboxPage", () => {
   });
 
   it("keeps a handled issue open, marked handled, until the selection moves", () => {
-    // Replying or changing the status from the detail takes the issue out of
-    // the Inbox on the server. The issue being worked must not be pulled away.
+    // Handing the issue to an agent or closing it from the detail takes it out
+    // of the Inbox on the server. The issue being worked must not be pulled away.
     reset();
     layout.width = DESKTOP;
     const rows = [
@@ -966,14 +983,86 @@ describe("InboxPage", () => {
     rerender(<InboxPage />);
 
     expect(openIssue()).toBe("issue-b");
-    expect(
-      (issueDetailProps.at(-1)?.notice as React.ReactElement<{ handled: boolean }>).props.handled,
-    ).toBe(true);
+    const notice = issueDetailProps.at(-1)?.notice as React.ReactElement<{
+      handled: string | null;
+      onRestore: () => void;
+    }>;
+    expect(notice.props.handled).toBe("archived");
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
+
+    // Putting it back restores it in place: the selection does not move.
+    act(() => notice.props.onRestore());
+    expect(unarchiveMutate).toHaveBeenCalledWith("inbox-b", expect.anything());
+    expect(openIssue()).toBe("issue-b");
 
     openFromUrl(rerender, "issue-a");
     openFromUrl(rerender, "");
     expect(screen.getAllByTestId("row").map((row) => row.textContent)).toEqual(["inbox-a", "inbox-c"]);
+  });
+
+  it.each([
+    ["notice", { type: "reaction_added" as const }, {}],
+    ["closed", {}, { status: "done" }],
+    ["agent", {}, { running: true }],
+  ])("says why the open issue left the Inbox: %s", (reason, overrides, state) => {
+    reset();
+    layout.width = DESKTOP;
+    const row = item({ id: "inbox-a", issue_id: "issue-a", ...overrides });
+    listData.active = [row];
+    listData.cachedIssues = ["issue-a"];
+
+    const { rerender } = render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+    rerender(<InboxPage />);
+    listData.active = [];
+    if ("status" in state) listData.issueStatus = { "issue-a": state.status };
+    if ("running" in state) {
+      listData.tasks = [{ id: "task-a", agent_id: "agent-1", issue_id: "issue-a", status: "running" }] as AgentTask[];
+    }
+    rerender(<InboxPage />);
+
+    expect(
+      (issueDetailProps.at(-1)?.notice as React.ReactElement<{ handled: string | null }>).props.handled,
+    ).toBe(reason);
+  });
+
+  it("steps to the neighbouring issues from the open one", () => {
+    reset();
+    layout.width = DESKTOP;
+    listData.active = [
+      item({ id: "inbox-a", issue_id: "issue-a" }),
+      item({ id: "inbox-b", issue_id: "issue-b" }),
+      item({ id: "inbox-c", issue_id: "issue-c" }),
+    ];
+    render(<InboxPage />);
+    fireEvent.click(screen.getAllByTestId("row")[1]!);
+
+    render(<>{issueDetailProps.at(-1)?.leadingAction as React.ReactNode}</>);
+    const [previous, next] = within(screen.getByTestId("inbox-stepper")).getAllByRole("button");
+    expect(previous).toBeEnabled();
+    fireEvent.click(next!);
+
+    expect(replace).toHaveBeenLastCalledWith("/acme/inbox?issue=issue-c");
+    expect(openIssue()).toBe("issue-c");
+  });
+
+  it("lands on the oldest unread comment and marks where the unread part starts", () => {
+    reset();
+    layout.width = DESKTOP;
+    listData.active = [
+      item({ id: "inbox-new", issue_id: "issue-a", read: false, created_at: "2026-01-03T00:00:00Z", details: { comment_id: "c-new" } }),
+      item({ id: "inbox-old", issue_id: "issue-a", read: false, created_at: "2026-01-02T00:00:00Z", details: { comment_id: "c-old" } }),
+    ];
+    const { rerender } = render(<InboxPage />);
+    fireEvent.click(screen.getAllByTestId("row")[0]!);
+    // Opening reads the issue's notifications; the landing must not move.
+    listData.active = listData.active.map((row) => ({ ...row, read: true }));
+    rerender(<InboxPage />);
+
+    const props = issueDetailProps.at(-1)!;
+    expect(props.highlightCommentId).toBe("c-old");
+    render(<>{props.highlightMarker as React.ReactNode}</>);
+    expect(screen.getByTestId("inbox-unread-marker")).toBeInTheDocument();
   });
 
   it("does not keep the row of an issue deleted while it was open", () => {

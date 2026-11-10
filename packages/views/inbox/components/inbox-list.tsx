@@ -12,6 +12,7 @@ import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { isEditableShortcutTarget } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
 import type { InboxItem } from "@multica/core/types";
+import type { InboxGroupSummary } from "@multica/core/inbox/queries";
 import type { InboxView } from "./inbox-view";
 import { InboxListItem } from "./inbox-list-item";
 import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
@@ -50,6 +51,7 @@ export function InboxList({
   view,
   selectedKey,
   handledKey,
+  summaries,
   onLoadMore,
   loadingMore = false,
   loadMoreError = false,
@@ -64,6 +66,8 @@ export function InboxList({
   selectedKey: string;
   /** The open row, kept in place after its issue left the Inbox. */
   handledKey?: string;
+  /** Per issue row: its other notifications and newest comment. */
+  summaries?: ReadonlyMap<string, InboxGroupSummary>;
   onLoadMore?: () => void;
   loadingMore?: boolean;
   loadMoreError?: boolean;
@@ -206,6 +210,7 @@ export function InboxList({
       view={view}
       isSelected={(item.issue_id ?? item.id) === selectedKey}
       handled={!!handledKey && (item.issue_id ?? item.id) === handledKey}
+      summary={summaries?.get(item.issue_id ?? item.id)}
       onClick={() => selectItem(item)}
       onAction={() => onAction(item.id)}
     />

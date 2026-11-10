@@ -39,3 +39,73 @@ export function groupInboxItemsByIssue(items: readonly InboxItem[]): InboxItem[]
 export function sortInboxNewestFirst(items: InboxItem[]): InboxItem[] {
   return items.sort(byNewest);
 }
+
+/**
+ * Notifications that only tell the user something. The server archives them
+ * when their issue is opened (inbox.NoticeTypes); every other type waits for
+ * the user to archive it or for the issue to move on.
+ */
+const INBOX_NOTICE_TYPES: ReadonlySet<string> = new Set([
+  "reaction_added",
+  "unassigned",
+  "issue_subscribed",
+  "quick_create_done",
+  "app_action_result",
+]);
+
+export function isInboxNotice(type: InboxItem["type"]): boolean {
+  return INBOX_NOTICE_TYPES.has(type);
+}
+
+export interface InboxGroupSummary {
+  /** Notifications on the issue besides the one its row shows. */
+  more: number;
+  /** The newest thing someone wrote on it, on one line. */
+  preview: string | null;
+}
+
+/** What each issue's row says beyond its newest notification, keyed like the rows. */
+export function summarizeInboxGroups(items: readonly InboxItem[]): Map<string, InboxGroupSummary> {
+  const out = new Map<string, InboxGroupSummary>();
+  for (const group of groupInboxRows(items)) {
+    const first = group[0];
+    if (!first) continue;
+    const written = group.find(
+      (item) => (item.type === "new_comment" || item.type === "mentioned") && item.body?.trim(),
+    );
+    out.set(first.issue_id ?? first.id, {
+      more: group.length - 1,
+      preview: written?.body ? written.body.replace(/\s+/g, " ").trim() : null,
+    });
+  }
+  return out;
+}
+
+export interface InboxGroupUnread {
+  /** The oldest unread comment or run on the issue, where reading starts. */
+  target: string | null;
+  /** Unread notifications that point at the timeline, that one included. */
+  count: number;
+}
+
+/**
+ * Where the unread part of an issue's timeline starts. A reaction points at a
+ * comment the user wrote earlier, so it neither counts nor anchors.
+ */
+export function inboxGroupUnread(items: readonly InboxItem[], key: string): InboxGroupUnread {
+  const unread = items
+    .filter(
+      (item) =>
+        (item.issue_id ?? item.id) === key &&
+        !item.read &&
+        !item.archived &&
+        item.type !== "reaction_added" &&
+        !!(item.details?.comment_id ?? item.details?.task_id),
+    )
+    .sort(byNewest);
+  const oldest = unread[unread.length - 1];
+  return {
+    target: oldest?.details?.comment_id ?? oldest?.details?.task_id ?? null,
+    count: unread.length,
+  };
+}

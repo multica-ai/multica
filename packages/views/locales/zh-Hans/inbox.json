@@ -72,7 +72,15 @@
     "unarchive": "取消归档",
     "handled": "已处理 · 已移出收件箱",
     "acted_replied": "你已回复 · 处理完就归档",
-    "acted_updated": "你已更新这个任务 · 处理完就归档"
+    "acted_updated": "你已更新这个任务 · 处理完就归档",
+    "handled_notice": "只是告知 · 打开后已移出收件箱",
+    "handled_closed": "已完成或已取消 · 已移出收件箱",
+    "handled_agent": "智能体正在处理 · 运行结束后会回到收件箱",
+    "restore": "放回收件箱",
+    "unread_from": "{{count}} 条未读 · 从这里开始",
+    "position": "{{index}} / {{total}}",
+    "previous": "上一条",
+    "next": "下一条"
   },
   "types": {
     "issue_assigned": "已分配",
@@ -115,7 +123,12 @@
     "created_with_agent": "通过智能体创建：{{identifier}}",
     "failed_with_detail": "失败：{{detail}}",
     "autopilot_quota_blocked": "执行已被阻止：额度已用完",
-    "children_done_stage": "第 {{stage}} 阶段的子任务已全部结束"
+    "children_done_stage": "第 {{stage}} 阶段的子任务已全部结束",
+    "awaiting_review": "等你验收",
+    "waiting_answer": "等你回答",
+    "run_finished": "运行已结束",
+    "mentioned_you": "提到了你",
+    "more": "另有 {{count}} 条"
   },
   "toasts": {
     "source_context_retry_started": "已使用原始上下文开始重试",

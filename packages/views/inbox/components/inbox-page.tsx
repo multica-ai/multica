@@ -22,6 +22,7 @@ import {
 } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
 import { issueDetailOptions } from "@multica/core/issues/queries";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
   inboxListOptions,
@@ -29,6 +30,9 @@ import {
   archivedInboxLookupOptions,
   deduplicateInboxItems,
   deduplicateArchivedInboxItems,
+  inboxGroupUnread,
+  isInboxNotice,
+  summarizeInboxGroups,
   useInboxUnreadCount,
 } from "@multica/core/inbox/queries";
 import {
@@ -71,6 +75,7 @@ import {
   ArchiveRestore,
   BookCheck,
   ChevronDown,
+  ChevronUp,
   ListChecks,
   ArrowLeft,
 } from "@multica/ui/icons";
@@ -99,7 +104,7 @@ import { CollapsedNavTrigger, PAGE_GUTTER } from "../../layout/page-header";
 import { PanelHeader } from "../../layout/panel-nav";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
-import { InboxReasonBar } from "./inbox-reason-bar";
+import { InboxReasonBar, type InboxHandledReason } from "./inbox-reason-bar";
 import { useActedOnIssue } from "./use-acted-on-issue";
 import { useInboxLanding } from "./use-inbox-landing";
 import { InboxFilterMenu } from "./inbox-filter-menu";
@@ -166,6 +171,7 @@ export function InboxPage() {
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
   // The filters read every notification of an issue, not just its newest.
   const activeRows = useMemo(() => rawItems.filter((item) => !item.archived), [rawItems]);
+  const summaries = useMemo(() => summarizeInboxGroups(activeRows), [activeRows]);
   // The archive is filtered by the server, so its capability can only be
   // proven by the rows those filters return. An empty answer proves nothing
   // and must not flip what is sent, so only a confirmed older server — rows
@@ -245,6 +251,19 @@ export function InboxPage() {
     handledRowRef.current?.key === selectedKey
       ? handledRowRef.current
       : null;
+  // Why it left, read off what is true of the issue now: the server does not
+  // say, and these are the only three ways an open issue leaves on its own.
+  const { categoryOf: statusCategoryOf } = useIssueStatuses(wsId);
+  const handledCategory = handled && selectedIssue ? statusCategoryOf(selectedIssue.status) : null;
+  const handledReason: InboxHandledReason | null = !handled
+    ? null
+    : isInboxNotice(handled.item.type)
+      ? "notice"
+      : handledCategory === "done" || handledCategory === "closed"
+        ? "closed"
+        : activeIssueIds.has(handled.key)
+          ? "agent"
+          : "archived";
   const filteredItems = useMemo(() => {
     if (!handled) return matchedItems;
     const at = Math.min(handled.index, matchedItems.length);
@@ -297,6 +316,16 @@ export function InboxPage() {
     : null);
   const selectionFilteredOut = !!selectedKey && !!selectedInView && !selected;
 
+  // Where the unread part of the open issue starts, taken as the row opens:
+  // opening it reads every notification on the issue, and the line marking
+  // where reading starts must outlive that.
+  const [opened, setOpened] = useState<{ key: string; target: string | null; count: number } | null>(null);
+  if (!isArchivedView && selected && opened?.key !== selectedKey) {
+    setOpened({ key: selectedKey, ...inboxGroupUnread(activeRows, selectedKey) });
+  } else if (opened && !selectedKey) {
+    setOpened(null);
+  }
+
   // What the DETAIL pane shows, one React transition behind the click.
   //
   // Mounting `IssueDetail` is the expensive half of switching rows, and driven
@@ -311,6 +340,8 @@ export function InboxPage() {
   const detailItem = resolveDetailItem(selectionItems, selectedKey, detailKey);
   const acted = useActedOnIssue(isArchivedView ? null : (detailItem?.issue_id ?? null));
   const landing = useInboxLanding(wsId, detailItem);
+  const unreadFrom =
+    opened && opened.key === detailItem?.issue_id && opened.target && opened.count > 0 ? opened : null;
 
   // The gap above is invisible to the navigation adapter — the inbox stays on
   // the same route and only rewrites `?issue=` — so report it explicitly and
@@ -584,6 +615,19 @@ export function InboxPage() {
     });
   };
 
+  // The issue left the Inbox on its own while open; bring it back in place.
+  // Unlike `handleUnarchive` the selection stays: the row returns under it.
+  const handleRestore = (id: string) => {
+    unarchiveMutation.mutate(id, {
+      onError: (err) =>
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.errors.unarchive_failed),
+        ),
+    });
+  };
+
   // Keep the listener stable while using the latest selected-item action.
   const actionOnSelectedRef = useRef<(() => void) | null>(null);
   useEffect(() => {
@@ -810,6 +854,7 @@ export function InboxPage() {
         view={view}
         selectedKey={selectedKey}
         handledKey={handled?.key}
+        summaries={isArchivedView ? undefined : summaries}
         onLoadMore={isArchivedView && archiveQuery.hasNextPage ? loadNextArchivedPage : undefined}
         loadingMore={archiveQuery.isFetchingNextPage}
         loadMoreError={archiveQuery.isFetchNextPageError}
@@ -879,6 +924,42 @@ export function InboxPage() {
     </Button>
   ) : undefined;
 
+  // Position among the issues waiting, and the step to its neighbours, so the
+  // reader works down the Inbox without going back to the list.
+  const stepIndex = isArchivedView ? -1 : visibleItems.findIndex((i) => (i.issue_id ?? i.id) === selectedKey);
+  const stepTo = (offset: number) => {
+    const next = visibleItems[stepIndex + offset];
+    if (!next) return;
+    if (next.issue_id) writeViewState(issueHighlightMementoKey(next.issue_id), undefined);
+    setSelectedKey(next.issue_id ?? next.id);
+  };
+  const stepper = stepIndex >= 0 && visibleItems.length > 1 ? (
+    <div className="flex shrink-0 items-center gap-0.5" data-testid="inbox-stepper">
+      <IconButton
+        label={t(($) => $.detail.previous)}
+        tooltipSide="bottom"
+        className="text-muted-foreground"
+        disabled={stepIndex === 0}
+        onClick={() => stepTo(-1)}
+      >
+        <ChevronUp className="h-4 w-4" />
+      </IconButton>
+      <IconButton
+        label={t(($) => $.detail.next)}
+        tooltipSide="bottom"
+        className="text-muted-foreground"
+        disabled={stepIndex === visibleItems.length - 1}
+        onClick={() => stepTo(1)}
+      >
+        <ChevronDown className="h-4 w-4" />
+      </IconButton>
+      <span className="px-1 text-caption tabular-nums text-muted-foreground">
+        {t(($) => $.detail.position, { index: stepIndex + 1, total: visibleItems.length })}
+      </span>
+    </div>
+  ) : null;
+  const leadingAction = backAction || stepper ? <>{backAction}{stepper}</> : undefined;
+
   const backBar = backAction ? (
     <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>
       {backAction}
@@ -910,7 +991,19 @@ export function InboxPage() {
           key={detailItem.issue_id}
           issueId={detailItem.issue_id}
           layoutId="multica_inbox_issue_detail_layout"
-          highlightCommentId={landing}
+          highlightCommentId={unreadFrom?.target ?? landing}
+          highlightMarker={
+            unreadFrom ? (
+              <div
+                data-testid="inbox-unread-marker"
+                className="flex items-center gap-2 pb-3 text-caption font-medium text-brand"
+              >
+                <span className="h-px flex-1 bg-brand/40" />
+                {t(($) => $.detail.unread_from, { count: unreadFrom.count })}
+                <span className="h-px flex-1 bg-brand/40" />
+              </div>
+            ) : undefined
+          }
           highlightAppRequestId={
             detailItem.type.startsWith("app_") ? (detailItem.details?.request_id ?? undefined) : undefined
           }
@@ -918,16 +1011,18 @@ export function InboxPage() {
             isArchivedView ? undefined : (
               <InboxReasonBar
                 item={detailItem}
-                handled={handled?.key === detailItem.issue_id}
+                handled={handled?.key === detailItem.issue_id ? handledReason : null}
                 acted={acted}
+                more={summaries.get(detailItem.issue_id)?.more ?? 0}
                 onArchive={() => handleArchive(detailItem.id)}
+                onRestore={() => handleRestore(detailItem.id)}
               />
             )
           }
           // The inbox reads the row it selected itself (see the auto-read
           // effect above), and must keep a row marked unread while it is open.
           readsInbox={false}
-          leadingAction={backAction}
+          leadingAction={leadingAction}
           onDelete={() => {
             // Issue deletion CASCADE-deletes the inbox item server-side, and the
             // issue:deleted WS event prunes it from the inbox cache. Just clear

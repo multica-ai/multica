@@ -121,15 +121,25 @@ describe("InboxSection", () => {
     expect(useSidebarTreeStore.getState().inboxCollapsed).toBe(true);
   });
 
-  it("lights the page's open issue, or the Inbox row while the page lists them all", () => {
-    renderPanel("/acme/inbox", [item(1), item(2)]);
-    expect(inbox()).toHaveAttribute("aria-current", "page");
+  it("lights the page's open issue", () => {
+    renderPanel("/acme/issues", [item(1), item(2)]);
 
     fireEvent.click(row(2)!);
 
     expect(row(2)).toHaveAttribute("aria-current", "page");
     expect(inbox()).not.toHaveAttribute("aria-current");
     expect(writeViewState).toHaveBeenCalledWith("highlight:issue-2", undefined);
+  });
+
+  it("keeps to its row and count while the page lists the issues itself", () => {
+    renderPanel("/acme/inbox", [item(1), item(2)]);
+
+    expect(inbox()).toHaveAttribute("aria-current", "page");
+    expect(inbox().parentElement).toHaveTextContent("3");
+    expect(row(1)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Issues in Inbox" })).toBeNull();
+    // Folding is a preference, and the page did not change it.
+    expect(useSidebarTreeStore.getState().inboxCollapsed).toBe(false);
   });
 
   it("keeps a handled issue in place, dimmed, until another one opens", async () => {
@@ -145,7 +155,7 @@ describe("InboxSection", () => {
   });
 
   it("says so when nothing is waiting", () => {
-    renderPanel("/acme/inbox", []);
+    renderPanel("/acme/issues", []);
     expect(screen.getByText("Nothing needs you right now")).toBeInTheDocument();
   });
 });

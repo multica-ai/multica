@@ -2,6 +2,14 @@ import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import type { ArchivedInboxPage } from "../types/inbox";
 import { EMPTY_INBOX_FILTERS, archivedInboxQuery, type ArchivedInboxFilters } from "./filters";
 import { groupInboxItemsByIssue } from "./group";
+
+export {
+  inboxGroupUnread,
+  isInboxNotice,
+  summarizeInboxGroups,
+  type InboxGroupSummary,
+  type InboxGroupUnread,
+} from "./group";
 import { infiniteQueryOptions, keepPreviousData, queryOptions, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";

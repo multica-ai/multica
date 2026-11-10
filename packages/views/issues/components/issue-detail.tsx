@@ -1194,6 +1194,11 @@ interface IssueDetailProps {
   /** Above the title: why the host opened this issue (the Inbox's reason bar). */
   notice?: ReactNode;
   /**
+   * A host's marker in the timeline, drawn above the `highlightCommentId`
+   * target's row (the Inbox's "unread starts here" line).
+   */
+  highlightMarker?: ReactNode;
+  /**
    * `"peek"` renders the detail inside the board's side peek (`IssuePeekHost`):
    * a single column with the core properties as pills under the title, no
    * properties sidebar, and `trailingActions` where the sidebar toggle sits.
@@ -1402,7 +1407,7 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, highlightAppRequestId, leadingAction, notice, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, highlightAppRequestId, leadingAction, notice, highlightMarker, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -3199,7 +3204,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // The wrapper `id="comment-..."` is the deep-link target — equivalent to
   // a native `<a href="#comment-...">` anchor. A run that left no comment is
   // addressed by its task id, which the sidebar's unread link lands on.
-  const renderItem = (_i: number, item: TimelineItem): React.ReactElement => {
+  const renderItem = (i: number, item: TimelineItem): React.ReactElement => {
+    if (highlightMarker && i === targetIdx) {
+      return <>{highlightMarker}{renderTimelineItem(item)}</>;
+    }
+    return renderTimelineItem(item);
+  };
+  const renderTimelineItem = (item: TimelineItem): React.ReactElement => {
     if (item.kind === "run") {
       const reply = item.entry;
       return <div className="pb-3" id={`comment-${item.id}`}>
