@@ -28,6 +28,8 @@ type progressHarness struct {
 
 	mu       sync.Mutex
 	requests []progressRequest
+	// hold, when set, keeps every sendMessage unanswered until it is closed.
+	hold chan struct{}
 }
 
 type progressRequest struct {
@@ -49,9 +51,13 @@ func newProgressHarness(t *testing.T, chatType channel.ChatType, configure ...fu
 		h.requests = append(h.requests, progressRequest{
 			method: r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:], text: text,
 		})
+		hold := h.hold
 		h.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasSuffix(r.URL.Path, "/sendMessage") {
+			if hold != nil {
+				<-hold
+			}
 			_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":99,"chat":{"id":42,"type":"private"},"date":0,"text":"x"}}`))
 			return
 		}
@@ -345,6 +351,46 @@ func TestOutboundTakesTheStepsOffACancelledReply(t *testing.T) {
 			t.Fatalf("after cancel = %+v", got)
 		}
 	})
+
+	// Text that is waiting for the chat's next edit has already taken the
+	// steps' place in memory, but the chat still shows them.
+	t.Run("steps go when text was waiting to replace them", func(t *testing.T) {
+		h := newProgressHarness(t, channel.ChatTypeP2P)
+		h.text("Checking the build.")
+		h.tool("exec_command", map[string]any{"command": "make test"})
+		h.last(2)
+		// Inside the edit interval: kept, not sent.
+		h.o.handleTaskMessage(events.Event{
+			TaskID: h.taskID, Type: protocol.EventTaskMessage,
+			Payload: protocol.TaskMessagePayload{TaskID: h.taskID, Type: "text", Content: "It fails."},
+		})
+		cancelled(h)
+		if got := h.last(3); got.method != "editMessageText" || got.text != "Checking the build.\n\nIt fails." {
+			t.Fatalf("after cancel = %+v", got)
+		}
+	})
+
+	// The cancel can arrive while the message that opens the reply is still
+	// on its way to Telegram. Nothing would ever edit it again.
+	t.Run("a message still on its way is removed when it lands", func(t *testing.T) {
+		h := newProgressHarness(t, channel.ChatTypeP2P)
+		hold := make(chan struct{})
+		h.mu.Lock()
+		h.hold = hold
+		h.mu.Unlock()
+		sent := make(chan struct{})
+		go func() {
+			defer close(sent)
+			h.launch()
+		}()
+		h.last(1)
+		cancelled(h)
+		close(hold)
+		<-sent
+		if got := h.last(2); got.method != "deleteMessage" {
+			t.Fatalf("after cancel = %+v", got)
+		}
+	})
 }
 
 // Who sees a step's argument is the mode's decision and the chat's.
@@ -394,6 +440,12 @@ func TestUnwrapShellCommand(t *testing.T) {
 		{"no wrapper", map[string]any{"command": "git status"}, "git status"},
 		{"argv", map[string]any{"cmd": []any{"bash", "-lc", "go build ./..."}}, "go build ./..."},
 		{"argv without a shell", map[string]any{"command": []any{"git", "status"}}, "git status"},
+		// An agent often sends a whole script as one command. Its first line
+		// says where it starts; the rest would be a patch body in the chat.
+		{"script in a wrapper", map[string]any{"command": "/bin/zsh -lc \"mkdir run-b\napply_patch <<'PATCH'\n*** Begin Patch\n+First line.\nPATCH\""}, "mkdir run-b …"},
+		{"script without a wrapper", map[string]any{"command": "\nset -e\nmake test\n"}, "set -e …"},
+		{"argv script", map[string]any{"cmd": []any{"bash", "-lc", "cd server\ngo build ./..."}}, "cd server …"},
+		{"one line with a trailing newline", map[string]any{"command": "bash -lc 'git status\n'"}, "git status"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

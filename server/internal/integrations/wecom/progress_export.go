@@ -1,6 +1,7 @@
 package wecom
 
 import (
+	"regexp"
 	"strings"
 	"time"
 )
@@ -58,7 +59,9 @@ func DescribeStep(payload any, l Locale, withArgument bool) (Step, bool) {
 	}
 	if !withArgument {
 		step.args = ""
-		if step.kind != progressService && step.kind != progressTool {
+		named := step.kind == progressService ||
+			(step.kind == progressTool && toolIdentifier.MatchString(step.arg))
+		if !named {
 			step.arg = ""
 		}
 	}
@@ -68,6 +71,11 @@ func DescribeStep(payload any, l Locale, withArgument bool) (Step, bool) {
 	}
 	return Step{Kind: exportedKind(step.kind), Text: text}, true
 }
+
+// toolIdentifier is a tool's own name: `frobnicate`, `web.run`. Some agent
+// backends pass a call's title as its name instead, and the agent composed the
+// title: "Delete /srv/acme/customers.csv".
+var toolIdentifier = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,48}$`)
 
 // StartingStep is the run getting under way, before its first tool call.
 func StartingStep(l Locale) Step {

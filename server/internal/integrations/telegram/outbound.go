@@ -140,6 +140,12 @@ type streamState struct {
 	// lastPushed is the body the chat shows, so a push that would change
 	// nothing is not sent.
 	lastPushed string
+	// stepsShown is whether that body carries the steps, which a run that
+	// ends without an answer has to take off again.
+	stepsShown bool
+	// ended is set when the run is over and the stream is released, for a
+	// request that was with Telegram at that moment.
+	ended bool
 	// flushAt is when the stream's deferred push is due; zero when none is
 	// armed. One per stream: held-back frames and the clock share it.
 	// flushGen names the timer that is current.
@@ -544,6 +550,7 @@ func (o *Outbound) advanceStream(ctx context.Context, target *replyTarget, turn 
 	}
 	st.absorb(frame, now)
 	body := st.render(now)
+	showsSteps := len(st.steps.lines) > 0
 	unchanged := st.messageID != 0 && body == st.lastPushed
 	o.mu.Unlock()
 
@@ -554,6 +561,22 @@ func (o *Outbound) advanceStream(ctx context.Context, target *replyTarget, turn 
 		return
 	}
 	pushed, retryAt := o.pushPartial(ctx, target, st, lease, body)
+	if pushed {
+		o.mu.Lock()
+		st.stepsShown = showsSteps
+		var remnant *streamRemnant
+		if st.ended {
+			// The run was cancelled while this request was with Telegram, so
+			// what it put in the chat was not there to be tidied. This frame
+			// still holds the turn: tidy it now.
+			remnant = o.remnantLocked(st)
+		}
+		o.mu.Unlock()
+		if remnant != nil {
+			o.tidyRemnant(ctx, remnant)
+			return
+		}
+	}
 	switch {
 	case !retryAt.IsZero():
 		o.armFlush(target, st, retryAt)
@@ -1109,6 +1132,9 @@ func (o *Outbound) initializeTerminalReply(ctx context.Context, reply *terminalR
 			return terminalRequestResult{retryAt: o.now().Add(chatCapacityRetry)}
 		}
 	}
+	if st := o.streams[target.streamKey]; st != nil && st.flushTimer != nil {
+		st.flushTimer.Stop()
+	}
 	delete(o.streams, target.streamKey)
 	o.mu.Unlock()
 
@@ -1514,6 +1540,9 @@ func (o *Outbound) sweepSettledStreams(ctx context.Context) {
 		// Re-check under the lock: a frame may have arrived while we were
 		// asking, which both revives the stream and makes the answer stale.
 		if current, ok := o.streams[c.key]; ok && current == c.stream && current.lastFrameAt.Equal(c.seenAt) {
+			if current.flushTimer != nil {
+				current.flushTimer.Stop()
+			}
 			delete(o.streams, c.key)
 			o.releaseChatLocked(current.schedule, current.chatID)
 			o.logger.Info("telegram outbound: released local state for a turn that ended elsewhere",

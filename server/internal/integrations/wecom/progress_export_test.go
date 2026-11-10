@@ -43,6 +43,9 @@ func TestDescribeStepWithoutArgumentKeepsOnlyTheKindOfWork(t *testing.T) {
 		{"an error", protocol.TaskMessagePayload{Type: "error", Content: "open /srv/acme/key: denied"}, StepError, "That step errored — carrying on", "acme"},
 		{"an MCP call", toolUse("mcp__calendar__list_events", map[string]any{"owner": "ada@acme.test"}), StepService, "Calling calendar · list_events", "ada"},
 		{"an unknown tool", toolUse("frobnicate", map[string]any{"target": "acme-prod"}), StepTool, "Using frobnicate", "acme"},
+		// Some agent backends pass the call's title as the tool's name, and
+		// the agent composed the title.
+		{"a tool named by its title", toolUse("Delete /srv/acme/customers.csv", nil), StepTool, "Working", "acme"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

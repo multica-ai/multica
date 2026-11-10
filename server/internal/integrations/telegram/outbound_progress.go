@@ -231,7 +231,7 @@ func (o *Outbound) stepFor(target *replyTarget, payload protocol.TaskMessagePayl
 
 // shellWrapper matches a command handed to a shell to run: `bash -lc "…"`,
 // `/bin/zsh -c '…'`.
-var shellWrapper = regexp.MustCompile(`^\s*(?:\S*/)?(?:ba|z|da|k)?sh\s+-[a-z]*c\s+(.+?)\s*$`)
+var shellWrapper = regexp.MustCompile(`(?s)^\s*(?:\S*/)?(?:ba|z|da|k)?sh\s+-[a-z]*c\s+(.+?)\s*$`)
 
 // unwrapShellCommand returns the input with the wrapper shell taken off its
 // command. Half of all commands arrive as `/bin/bash -lc "git status"`, and
@@ -243,7 +243,7 @@ func unwrapShellCommand(input map[string]any) map[string]any {
 		var inner string
 		switch v := input[key].(type) {
 		case string:
-			inner = unwrapShell(v)
+			inner = scriptHead(unwrapShell(v))
 			if inner == v {
 				return input
 			}
@@ -264,6 +264,7 @@ func unwrapShellCommand(input map[string]any) map[string]any {
 			if len(parts) == 3 && shellWrapper.MatchString(parts[0]+" "+parts[1]+" x") {
 				inner = parts[2]
 			}
+			inner = scriptHead(inner)
 		default:
 			continue
 		}
@@ -294,6 +295,18 @@ func unwrapShell(command string) string {
 		inner = strings.ReplaceAll(inner[1:len(inner)-1], `'\''`, `'`)
 	}
 	return inner
+}
+
+// scriptHead reduces a script to its first line. An agent often sends several
+// commands, or a patch in a here-document, as one command: the first line says
+// where it starts, and the rest would put file contents into the chat.
+func scriptHead(command string) string {
+	lines := strings.Split(strings.TrimSpace(command), "\n")
+	head := strings.TrimSpace(lines[0])
+	if len(lines) == 1 {
+		return head
+	}
+	return head + " …"
 }
 
 // shellEscapes are the characters a backslash protects inside double quotes.
@@ -376,16 +389,30 @@ func (o *Outbound) takeStream(e events.Event) *streamRemnant {
 	key := util.UUIDToString(taskID)
 	var remnant *streamRemnant
 	o.mu.Lock()
-	if st := o.streams[key]; st != nil && st.messageID != 0 && len(st.steps.lines) > 0 && st.target != nil {
-		st.steps.lines = nil
-		remnant = &streamRemnant{
-			chatID: st.chatID, messageID: st.messageID, botToken: st.target.botToken,
-			body: st.render(o.now()),
-		}
+	if st := o.streams[key]; st != nil {
+		// A request already on its way to Telegram finds this when it lands.
+		st.ended = true
+		remnant = o.remnantLocked(st)
 	}
 	o.mu.Unlock()
 	o.clearStreamKey(key)
 	return remnant
+}
+
+// remnantLocked reports what the chat still shows of st's steps, and takes
+// them off st. It goes by what was last sent, not by the list in memory: text
+// waiting for the chat's next edit has emptied the list while the chat still
+// shows it. The caller holds o.mu.
+func (o *Outbound) remnantLocked(st *streamState) *streamRemnant {
+	if st.messageID == 0 || !st.stepsShown || st.target == nil {
+		return nil
+	}
+	st.steps.lines = nil
+	st.stepsShown = false
+	return &streamRemnant{
+		chatID: st.chatID, messageID: st.messageID, botToken: st.target.botToken,
+		body: st.render(o.now()),
+	}
 }
 
 // tidyRemnant takes the steps off a message whose run is over: the text stays
