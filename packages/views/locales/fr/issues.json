@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "Ouvrir dans l’application de bureau"
+  },
+  "desktop": {
+    "link_other_instance": "L’application de bureau est connectée à une autre instance Multica.",
+    "link_workspace_unavailable": "Cet espace de travail n’est pas disponible dans l’application de bureau."
+  },
   "inline_run": {
     "label": "Exécution de {{name}}",
     "stop": "Arrêter",
@@ -749,8 +756,13 @@
     "restart_failed": "Impossible d'arrêter l'exécution en cours. Votre message n'a pas été envoyé."
   },
   "reply": {
+    "recipients_changed": "La cible de la réponse a changé. Vérifiez les destinataires avant de réessayer.",
     "placeholder": "Laisser une réponse...",
     "annotations": {
+      "send_all": "Tout envoyer",
+      "send_with_annotations_and_body": "Sera envoyé avec les annotations enregistrées ({{count}}) et le texte du brouillon.",
+      "send_with_annotations": "Sera envoyé avec les annotations enregistrées ({{count}}).",
+      "send_with_body": "Sera envoyé avec le texte du brouillon.",
       "confirm_add": "Ajouter une annotation",
       "save": "Enregistrer l'annotation",
       "add_comment": "Ajouter au commentaire",
@@ -812,6 +824,11 @@
     "cancel_failed": "Échec de l'annulation de l'exécution"
   },
   "execution_log": {
+    "latest": "Récentes",
+    "include_children": "Inclure les sous-tâches",
+    "loading": "Chargement des exécutions...",
+    "load_failed_retry": "Impossible de charger les exécutions. Réessayer",
+    "empty": "Aucune exécution dans ce périmètre.",
     "section": "Journal d'exécution",
     "cancel_task_tooltip": "Annuler l'exécution",
     "cancel_task_aria": "Annuler l'exécution",
@@ -982,6 +999,7 @@
     "unassigned": "Non assigné",
     "open_in_new_tab": "Ouvrir dans un nouvel onglet",
     "pin_to_sidebar": "Épingler à la barre latérale",
+    "locate_in_sidebar": "Afficher dans la barre latérale",
     "unpin_from_sidebar": "Détacher de la barre latérale",
     "restore_to_inbox": "Restaurer dans la boîte de réception",
     "mark_read": "Marquer comme lu",
@@ -1868,6 +1886,26 @@
       "row_actions": "Actions pour {{name}}",
       "empty_title": "Aucune vue enregistrée pour l'instant",
       "empty_description": "Réglez les filtres et l'affichage d'une liste de tâches, puis enregistrez-les comme vue."
+    }
+  },
+  "app_calls": {
+    "section_title": "Apps",
+    "chips_label": "Apps utilisées dans cette exécution",
+    "calls_count_one": "{{count}} appel",
+    "calls_count_other": "{{count}} appels",
+    "more": "+{{count}} de plus",
+    "scope": {
+      "team": "Compte d'équipe",
+      "personal": "Compte personnel"
+    },
+    "outcome": {
+      "ok": "Exécuté",
+      "error": "Échec",
+      "blocked": "Bloqué",
+      "pending": "En attente",
+      "approved": "Approuvé",
+      "rejected": "Refusé",
+      "rate_limited": "Limite atteinte"
     }
   }
 }

@@ -3,7 +3,7 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, FileQuestion, Link2, PanelRight, Pin, PinOff, Trash2, UserMinus } from "@multica/ui/icons";
+import { Check, ChevronRight, FileQuestion, Link2, PanelRight, Pencil, Pin, PinOff, Trash2, UserMinus } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -16,6 +16,7 @@ import { Spinner } from "@multica/ui/components/ui/spinner";
 import { useUpdateProject, useDeleteProject, ProjectDeletionOfflineError } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
+import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssuesScope } from "@multica/core/issues/stores";
@@ -533,6 +534,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                     base={{ kind: "project", project }}
                     baseMenu={
                       <>
+                        <DropdownMenuItem
+                          onClick={() =>
+                            useModalStore
+                              .getState()
+                              .open("project-rename", { projectId: project.id, title: project.title })
+                          }
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          {t(($) => $.detail.rename_action)}
+                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => {
                           void copyText(router.getShareableUrl(currentPath(router))).then((ok) => {
                             if (ok) toast.success(t(($) => $.detail.toast_link_copied));

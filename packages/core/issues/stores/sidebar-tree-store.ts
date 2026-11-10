@@ -45,6 +45,12 @@ export const DEFAULT_SIDEBAR_PROJECT_SETTINGS: SidebarProjectSettings = {
 };
 
 
+export interface SidebarLocateRequest {
+  issueId: string;
+  /** The project row's sidebar source, `project:{id}`. */
+  source: string;
+}
+
 /**
  * This device's sidebar layout. The Projects section's settings and order are
  * per user on the server (see `sidebar-project-prefs`); what is left here is
@@ -65,7 +71,13 @@ interface SidebarTreeState {
   pinnedCollapsed: boolean;
   workingCollapsed: boolean;
   needsAttentionCollapsed: boolean;
+  /**
+   * An issue the user asked to show in its project's row, until the Work
+   * panel has opened that row and scrolled to it. Not persisted.
+   */
+  locate: SidebarLocateRequest | null;
   setExpanded: (key: string, expanded: boolean) => void;
+  requestLocate: (request: SidebarLocateRequest | null) => void;
   setProjectsCollapsed: (collapsed: boolean) => void;
   setViewsCollapsed: (collapsed: boolean) => void;
   setPinnedCollapsed: (collapsed: boolean) => void;
@@ -102,6 +114,8 @@ export const useSidebarTreeStore = create<SidebarTreeState>()(
   persist(
     (set) => ({
       ...INITIAL,
+      locate: null,
+      requestLocate: (locate) => set({ locate }),
       setExpanded: (key, expanded) =>
         set((s) => {
           if (s.expanded.includes(key) === expanded) return s;

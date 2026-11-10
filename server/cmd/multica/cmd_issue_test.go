@@ -567,6 +567,56 @@ func newIssueCommentAddTestCmd() *cobra.Command {
 	return cmd
 }
 
+func TestRunIssueCommentAddUploadsAttachmentWithoutIssueID(t *testing.T) {
+	const issueRef = "MUL-1"
+	t.Chdir(t.TempDir())
+	attachmentPath := "comment.txt"
+	if err := os.WriteFile(attachmentPath, []byte("comment attachment"), 0o644); err != nil {
+		t.Fatalf("write attachment: %v", err)
+	}
+
+	var uploadedIssueID string
+	var commentBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/"+issueRef:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": issueRef})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/upload-file":
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Fatalf("parse upload: %v", err)
+			}
+			uploadedIssueID = r.FormValue("issue_id")
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "attachment-1"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/issue-1/comments":
+			if err := json.NewDecoder(r.Body).Decode(&commentBody); err != nil {
+				t.Fatalf("decode comment body: %v", err)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "comment-1", "content": "with attachment"})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "with attachment")
+	_ = cmd.Flags().Set("attachment", attachmentPath)
+	if err := runIssueCommentAdd(cmd, []string{issueRef}); err != nil {
+		t.Fatalf("runIssueCommentAdd: %v", err)
+	}
+	if uploadedIssueID != "" {
+		t.Fatalf("upload issue_id = %q, want empty for a comment attachment", uploadedIssueID)
+	}
+	attachmentIDs, ok := commentBody["attachment_ids"].([]any)
+	if !ok || len(attachmentIDs) != 1 || attachmentIDs[0] != "attachment-1" {
+		t.Fatalf("comment attachment_ids = %#v, want [attachment-1]", commentBody["attachment_ids"])
+	}
+}
+
 func TestRunIssueCommentAddSteering(t *testing.T) {
 	const (
 		issueID   = "11111111-1111-4111-8111-111111111111"
@@ -6043,5 +6093,129 @@ func TestRunIssueCommentDeleteKeepsReplies(t *testing.T) {
 				t.Fatalf("requests = %v, want only %v", paths, want)
 			}
 		})
+	}
+}
+
+func newIssueSearchTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "search"}
+	cmd.Flags().Int("limit", 20, "")
+	cmd.Flags().Bool("include-closed", false, "")
+	cmd.Flags().String("project", "", "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestRunIssueSearchSendsProjectID(t *testing.T) {
+	const projectID = "11111111-2222-3333-4444-555555555555"
+	var gotQuery url.Values
+	var requestPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPaths = append(requestPaths, r.URL.Path)
+		gotQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issues": []any{},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueSearchTestCmd()
+	_ = cmd.Flags().Set("project", projectID)
+	_, err := captureStdout(t, func() error {
+		return runIssueSearch(cmd, []string{"auth bug"})
+	})
+	if err != nil {
+		t.Fatalf("runIssueSearch: %v", err)
+	}
+	if want := []string{"/api/issues/search"}; !slices.Equal(requestPaths, want) {
+		t.Fatalf("requests = %v, want %v", requestPaths, want)
+	}
+	if got := gotQuery.Get("q"); got != "auth bug" {
+		t.Errorf("q = %q, want %q", got, "auth bug")
+	}
+	if got := gotQuery.Get("project_id"); got != projectID {
+		t.Errorf("project_id = %q, want %q", got, projectID)
+	}
+}
+
+func TestRunIssueSearchResolvesProjectPrefix(t *testing.T) {
+	const fullProjectID = "11111111-2222-3333-4444-555555555555"
+	var gotSearchProjectID string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/projects":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"projects": []map[string]any{
+					{"id": fullProjectID, "title": "Core Platform", "status": "in_progress"},
+				},
+			})
+		case "/api/issues/search":
+			gotSearchProjectID = r.URL.Query().Get("project_id")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issues": []any{},
+			})
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueSearchTestCmd()
+	_ = cmd.Flags().Set("project", "11111111")
+	_, err := captureStdout(t, func() error {
+		return runIssueSearch(cmd, []string{"deployment"})
+	})
+	if err != nil {
+		t.Fatalf("runIssueSearch: %v", err)
+	}
+	if gotSearchProjectID != fullProjectID {
+		t.Fatalf("project_id = %q, want %q", gotSearchProjectID, fullProjectID)
+	}
+}
+
+func TestRunIssueSearchProjectFilterErrors(t *testing.T) {
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+
+	cmd := newIssueSearchTestCmd()
+	_ = cmd.Flags().Set("project", "xyz")
+	err := runIssueSearch(cmd, []string{"deployment"})
+	if err == nil {
+		t.Fatal("expected error for malformed project prefix")
+	}
+	if count := strings.Count(err.Error(), "resolve project:"); count != 1 {
+		t.Fatalf("expected single 'resolve project:' prefix, got %d in %q", count, err.Error())
+	}
+
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+	cmdMissingWS := newIssueSearchTestCmd()
+	_ = cmdMissingWS.Flags().Set("project", "11111111")
+	err = runIssueSearch(cmdMissingWS, []string{"deployment"})
+	if err == nil {
+		t.Fatal("expected error when workspace_id is missing for --project")
+	}
+	if !strings.Contains(err.Error(), "workspace_id is required") || strings.Contains(err.Error(), "resolve project:") {
+		t.Fatalf("expected requireWorkspaceID error, got %q", err.Error())
+	}
+}
+
+func TestIssueSearchCommandRegistration(t *testing.T) {
+	for _, flagName := range []string{"limit", "include-closed", "project", "output"} {
+		if issueSearchCmd.Flags().Lookup(flagName) == nil {
+			t.Errorf("expected --%s flag on issue search command", flagName)
+		}
+	}
+	if got := issueSearchCmd.Flags().Lookup("project").Usage; got != "Filter by project ID" {
+		t.Errorf("project flag usage = %q, want %q", got, "Filter by project ID")
 	}
 }

@@ -532,19 +532,21 @@ export function applyIssueChange(
     if (!prevIssue) prevIssue = prevDetail;
   }
 
-  // Inbox rows carry issue status/priority snapshots used by presentation and
-  // filtering. The issue is the real state, so both projections follow every
+  // Inbox rows carry snapshots of the issue fields used by presentation and
+  // filtering. The issue is the real state, so the projections follow every
   // write immediately.
   let prevInboxList: InboxItem[] | undefined;
   let prevArchivedInboxCaches: [QueryKey, ArchivedInboxCache | undefined][] | undefined;
-  if (patch.status !== undefined || patch.priority !== undefined) {
+  const inboxFields = ["project_id", "assignee_type", "assignee_id", "due_date"] as const;
+  if (patch.status !== undefined || patch.priority !== undefined || inboxFields.some((field) => patch[field] !== undefined)) {
     prevInboxList = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
     prevArchivedInboxCaches = qc.getQueriesData<ArchivedInboxCache>({ queryKey: inboxKeys.archived(wsId) });
     // Membership and facets are server-owned; callers refresh after commit.
-    // Full issue events also carry unchanged status/priority on title edits.
+    // Full issue events also carry unchanged fields on title edits.
     const archiveProjectionChanged =
       (patch.status !== undefined && (changed.status || !prevIssue || prevIssue.status !== patch.status)) ||
-      (patch.priority !== undefined && (!prevIssue || prevIssue.priority !== patch.priority));
+      (patch.priority !== undefined && (!prevIssue || prevIssue.priority !== patch.priority)) ||
+      inboxFields.some((field) => patch[field] !== undefined && (!prevIssue || prevIssue[field] !== patch[field]));
     if (archiveProjectionChanged) {
       staleKeys.push(...qc.getQueryCache().findAll({ queryKey: inboxKeys.archived(wsId) })
         .filter((query) => query.queryKey.length > inboxKeys.archived(wsId).length)
@@ -554,6 +556,10 @@ export function applyIssueChange(
     patchInboxIssueProjection(qc, wsId, id, {
       status: patch.status,
       priority: patch.priority,
+      project_id: patch.project_id,
+      assignee_type: patch.assignee_type,
+      assignee_id: patch.assignee_id,
+      due_date: patch.due_date,
     });
   }
 

@@ -24,6 +24,10 @@ func TestMain(m *testing.M) {
 		"MULTICA_WORKSPACE_ID",
 		"MULTICA_SERVER_URL",
 		"MULTICA_TASK_CONFIG_ROOT",
+		"MULTICA_TASK_WORKSPACES_ROOT",
+		"MULTICA_AGENT_NAME",
+		devEnvHomeEnv,
+		devEnvNameEnv,
 	} {
 		os.Unsetenv(key)
 	}
@@ -41,10 +45,31 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	// The daemon-task marker lookup walks up from the working directory. Run
+	// from a checkout inside an agent task workdir, the package directory sits
+	// below that task's real marker, and every API, config and daemon path
+	// refuses. Tests that need a marker create one and t.Chdir into it.
+	testLaunchDir, err = os.Getwd()
+	if err == nil {
+		err = os.Chdir(scratchHome)
+	}
+	if err != nil {
+		_ = os.RemoveAll(scratchHome)
+		fmt.Fprintf(os.Stderr, "move cmd/multica tests into scratch home: %v\n", err)
+		os.Exit(1)
+	}
+
 	code := m.Run()
+	// Windows cannot remove the current working directory.
+	_ = os.Chdir(os.TempDir())
 	_ = os.RemoveAll(scratchHome)
 	os.Exit(code)
 }
+
+// testLaunchDir is the working directory the test binary started in, before
+// TestMain moved it into the scratch home. A helper process whose parent set
+// exec.Cmd.Dir reads its fixtures from there.
+var testLaunchDir string
 
 var redirectTestHome = testutil.RedirectUserHome
 

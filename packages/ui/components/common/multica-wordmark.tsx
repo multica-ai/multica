@@ -7,15 +7,12 @@ interface MulticaWordmarkProps extends React.ComponentProps<"svg"> {
    * (M1, ~2s), starting after this many ms. Omit for the static mark.
    */
   writeDelayMs?: number;
-  /** Letters hop one after another and the star turns 45° on hover. Website nav only. */
-  hop?: boolean;
   /** Accessible name; the drawn letters carry no text. */
   title?: string;
 }
 
 const LETTER_MS = 150;
 const STAR_AFTER_MS = 6 * LETTER_MS + 420;
-const HOP_STAGGER_MS = 40;
 
 /**
  * The Multica wordmark (G2 with the star on the i). Drawn, not typed — never
@@ -24,7 +21,6 @@ const HOP_STAGGER_MS = 40;
  */
 export function MulticaWordmark({
   writeDelayMs,
-  hop = false,
   title = "Multica",
   className,
   ...props
@@ -38,11 +34,11 @@ export function MulticaWordmark({
       fill="none"
       stroke="currentColor"
       strokeWidth={WORDMARK_STROKE}
-      className={cn("inline-block h-[1em] w-auto shrink-0 overflow-visible", hop && "multica-hop-on-hover", className)}
+      className={cn("inline-block h-[1em] w-auto shrink-0 overflow-visible", className)}
       {...props}
     >
       {WORDMARK.letters.map((letter, i) => (
-        <g key={i} style={hop ? { animationDelay: `${i * HOP_STAGGER_MS}ms` } : undefined}>
+        <g key={i}>
           <path
             d={letter.d}
             pathLength={write ? 1 : undefined}

@@ -36,6 +36,32 @@
   bottom: calc(var(--chat-launcher-clearance) + var(--chat-launcher-inset));
 }
 
+/* The 6px ::-webkit-scrollbar below is ignored by Chromium (Chrome 121+, so
+ * every Electron build we ship) on any element whose scrollbar-width or
+ * scrollbar-color is set, which the base layer does for all elements; with
+ * always-on macOS scrollbars that leaves the native `thin`, 11px wide. This
+ * resets both so the 6px bar applies. A styled scrollbar is never an overlay,
+ * so the thumb only shows while the pointer is over the scroller — trackpad
+ * users would otherwise get a permanent bar where they had none. The thumb
+ * colour goes through a custom property because Chromium does not repaint
+ * scrollbar pseudo-elements on the scroller's own :hover. Firefox keeps the
+ * standard properties. */
+@utility scrollbar-slim {
+  @supports selector(::-webkit-scrollbar) {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+  &:hover {
+    --scrollbar-slim-thumb: var(--scrollbar-thumb);
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-slim-thumb, transparent);
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+  }
+}
+
 /* Shiki dual themes: CSS-only light/dark switching via CSS variables */
 /* @see https://shiki.style/guide/dual-themes */
 .shiki,
@@ -59,8 +85,6 @@
 @keyframes multica-arm-fade { from { opacity: 1; } to { opacity: 0.16; } }
 @keyframes multica-star-in { from { transform: scale(0) rotate(-135deg); } }
 @keyframes multica-star-enter { from { transform: rotate(-45deg) scale(0.6); opacity: 0; } }
-@keyframes multica-hop { 40% { transform: translateY(-14%); } }
-
 .multica-pop {
   transform-box: fill-box;
   transform-origin: 50% 50%;
@@ -87,20 +111,12 @@
   transform-box: fill-box;
   transform-origin: 50% 50%;
 }
-/* `backwards`, not `both`: a held end state would block the hover turn. */
 .multica-star-in { animation: multica-star-in 0.9s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
 .multica-star-enter {
   transform-box: fill-box;
   transform-origin: 50% 50%;
   animation: multica-star-enter 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-/* Website nav only — the product never animates the wordmark on hover. */
-.multica-hop-on-hover > g { transform-box: fill-box; transform-origin: 50% 100%; }
-.multica-hop-on-hover:hover > g {
-  animation: multica-hop 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-.multica-hop-on-hover .multica-star { transition: transform 0.7s cubic-bezier(0.34, 1.56, 0.64, 1); }
-.multica-hop-on-hover:hover .multica-star { transform: rotate(45deg); }
 
 /* Onboarding: step / phase entry — 400ms fade.
  * Applied on mount so every new step (and intra-step phase switch, via
@@ -389,17 +405,12 @@ html[data-sidebar-resizing="true"] {
   .multica-arm-fade,
   .multica-star-in,
   .multica-star-enter,
-  .multica-hop-on-hover:hover > g,
   .animate-onboarding-enter,
   .animate-chat-impulse,
   .shimmer-text-window,
   .shimmer-text-copy,
   .animate-nav-progress-sweep {
     animation: none;
-  }
-
-  .multica-hop-on-hover:hover .multica-star {
-    transform: none;
   }
 
   .animate-skeleton {

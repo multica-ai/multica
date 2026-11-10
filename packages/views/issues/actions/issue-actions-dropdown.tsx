@@ -23,6 +23,8 @@ interface IssueActionsDropdownProps {
   onDeletedFallbackPath?: string;
   /** The reader's archived inbox notification for this issue; adds "Restore to inbox". */
   archivedInboxItemId?: string;
+  /** Adds "Show in sidebar". */
+  onShowInSidebar?: () => void;
 }
 
 export function IssueActionsDropdown({
@@ -31,6 +33,7 @@ export function IssueActionsDropdown({
   align = "end",
   onDeletedFallbackPath,
   archivedInboxItemId,
+  onShowInSidebar,
 }: IssueActionsDropdownProps) {
   const actions = useIssueActions(issue);
   const [open, setOpen] = useState(false);
@@ -46,6 +49,7 @@ export function IssueActionsDropdown({
           onClose={() => setOpen(false)}
           onDeletedFallbackPath={onDeletedFallbackPath}
           archivedInboxItemId={archivedInboxItemId}
+          onShowInSidebar={onShowInSidebar}
         />
       </DropdownMenuContent>
     </DropdownMenu>

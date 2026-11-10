@@ -17,7 +17,8 @@ vi.mock("@multica/core/api", () => ({
 vi.mock("../../../platform", () => ({ openExternal: vi.fn(), useImmersiveMode: () => {} }));
 vi.mock("../../../editor/use-download-attachment", () => ({ useDownloadAttachment: () => vi.fn() }));
 vi.mock("../../../editor/readonly-content", () => ({ ReadonlyContent: () => null }));
-vi.mock("../../../editor/hooks/use-inline-media-url", () => ({
+vi.mock("../../../editor/hooks/use-inline-media-url", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../editor/hooks/use-inline-media-url")>()),
   useResignedInlineMedia: (_id: string | undefined, url: string) => ({ url, pending: false }),
 }));
 vi.mock("@multica/core/workspace/avatar-url", () => ({ resolvePublicFileUrl: (url: string) => url }));

@@ -29,6 +29,15 @@
     "toast_renamed": "任務名稱已更新",
     "toast_failed": "重新命名任務失敗"
   },
+  "rename_project": {
+    "title": "重新命名專案",
+    "placeholder": "專案標題",
+    "submit": "儲存",
+    "title_required": "請輸入標題",
+    "offline_error": "目前處於離線狀態，請連線後重試。",
+    "toast_renamed": "專案名稱已更新",
+    "toast_failed": "重新命名專案失敗"
+  },
   "feedback": {
     "title": "反饋",
     "placeholder": "聊聊你的體驗、遇到的 bug，或想看到的功能...",
@@ -154,7 +163,8 @@
     "local_pick_failed": "無法開啟目錄選擇器。",
     "local_invalid_dir": "該目錄不可用，請重新選擇。",
     "local_hint": "其他機器上的 AI 代理看不到這個路徑，會啟動失敗。需要協作請用倉庫模式。",
-    "repos_ref_default": "預設分支"
+    "repos_ref_default": "預設分支",
+    "repos_remove_aria": "移除 {{repo}}"
   },
   "create_issue": {
     "sr_manual": "新建任務",

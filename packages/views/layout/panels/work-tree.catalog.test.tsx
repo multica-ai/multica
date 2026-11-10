@@ -70,6 +70,8 @@ function renderSection() {
           totalProjects={1}
           plainRowsLit
           activeIssueId={null}
+          litSource={null}
+          locatedProjectId={null}
         />
       </NavigationProvider>
     </QueryClientProvider>,
