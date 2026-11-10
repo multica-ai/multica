@@ -985,7 +985,6 @@ func TestAntigravityBackendRecoveredStreamInterruption(t *testing.T) {
 			script := strings.ReplaceAll(fakeAgyTrailingNetworkErrorScript(tc.done), antigravityNetworkIssueError,
 				"The stream was interrupted. Please continue the task you were working on.")
 			script = strings.ReplaceAll(script, "exit 1", fmt.Sprintf("exit %d", tc.exitCode))
-			script = strings.Replace(script, "#!/bin/sh\n", "#!/bin/sh\nprintf '%s\\n' '{\"event\":\"step_update\",\"step_update\":{\"step_index\":0,\"state\":\"DONE\",\"step_type\":\"user_input\"}}'\n", 1)
 			writeTestExecutable(t, fakePath, []byte(script))
 
 			backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
@@ -1405,6 +1404,7 @@ func TestAntigravityCurrentTurnRecovery(t *testing.T) {
 	boundary := step(10, "user_input", "DONE", "")
 	answer := step(14, "agent_response", "ACTIVE", "Final answer.") + step(14, "agent_response", "DONE", "\n")
 	const retryError = "Malformed function call: Function call is empty - no input to parse. Retries remaining: 3"
+	const resumeEOF = "API error (attempt 3): request failed: Post \"https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse\": EOF"
 	for _, tc := range []struct {
 		name, steps, status, response, cause string
 		exit                                 int
@@ -1437,10 +1437,12 @@ func TestAntigravityCurrentTurnRecovery(t *testing.T) {
 		{name: "permission without recovery", steps: boundary + step(13, "error_message", "DONE", ""), cause: "PERMISSION_DENIED (403)"},
 		{name: "cancelled result", steps: boundary + answer, status: "CANCELLED"},
 		{name: "legacy fresh transport", steps: answer, cause: antigravityNetworkIssueError, exit: 1, completed: true},
+		{name: "legacy resumed EOF exit 0", steps: step(1, "agent_response", "DONE", "RESUME-BC-OK"), response: "RESUME-BC-OK\n", cause: resumeEOF, exit: 0, resumed: true, completed: true},
+		{name: "legacy resumed EOF exit 1", steps: step(1, "agent_response", "DONE", "RESUME-BC-OK"), response: "RESUME-BC-OK\n", cause: resumeEOF, exit: 1, resumed: true, completed: true},
 		{name: "legacy trailing error", steps: answer + step(15, "error_message", "DONE", ""), cause: antigravityNetworkIssueError},
 		{name: "legacy trailing tool", steps: answer + step(15, "tool", "ACTIVE", ""), cause: antigravityNetworkIssueError},
 		{name: "legacy unfinished metadata", steps: answer + step(15, "checkpoint", "ACTIVE", ""), cause: antigravityNetworkIssueError},
-		{name: "resumed without boundary", steps: answer, cause: antigravityNetworkIssueError, resumed: true},
+		{name: "resumed without boundary", steps: answer, resumed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -1491,7 +1493,7 @@ cat <<'JSONL'
 			if result.Status != want || result.Output != tc.response || (result.Error == "") != tc.completed {
 				t.Fatalf("result = %+v, want %s preserving canonical response", result, want)
 			}
-			if tc.completed && (!strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), tc.cause)) {
+			if tc.completed && (!strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), fmt.Sprintf("err=%q", tc.cause))) {
 				t.Fatalf("missing warning with original error: %s", logs.String())
 			}
 		})

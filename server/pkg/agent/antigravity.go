@@ -546,7 +546,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			finalError = "execution cancelled"
 		} else if status := antigravityResultStatus(streamResultStatus); finalStatus == "completed" && status != "completed" {
 			recovered := strings.EqualFold(strings.TrimSpace(streamResultStatus), "ERROR") && waitErr == nil && turn.completed(streamResponse)
-			if latest := turn.settledResponse(); turn.start == nil && opts.ResumeSessionID == "" && latest >= 0 {
+			if latest := turn.settledResponse(); turn.start == nil && latest >= 0 {
 				recovered = antigravityCompletedDespiteTrailingNetworkError(streamResultError, streamResponse, turn.steps[latest].state == "DONE", waitErr == nil)
 			}
 			if recovered {
