@@ -382,7 +382,7 @@ function ThemeOptionRow({
                     aria-label={`${label} (${modeLabel})`}
                     value={color[mode].length === 4 ? expandHex(color[mode]) : color[mode].slice(0, 7)}
                     onChange={(event) => onChange({ ...color, [mode]: event.target.value })}
-                    className="size-6 cursor-pointer rounded-md border border-input bg-transparent p-0.5 [&::-webkit-color-swatch]:rounded-[3px] [&::-webkit-color-swatch]:border-0 [&::-webkit-color-swatch-wrapper]:p-0"
+                    className="size-6 cursor-pointer rounded-md border border-input bg-transparent p-0.5 [&::-webkit-color-swatch]:rounded-xs [&::-webkit-color-swatch]:border-0 [&::-webkit-color-swatch-wrapper]:p-0"
                   />
                   {modeLabel}
                 </label>
@@ -964,11 +964,11 @@ function ThemeSwatch({ theme, mode }: { theme: Theme; mode: PreviewMode }) {
       aria-hidden="true"
       data-theme-swatch={theme.id}
       data-swatch-mode={mode}
-      className="flex h-4 w-6 shrink-0 items-end overflow-hidden rounded-[3px] p-[2px] ring-1 ring-foreground/10"
+      className="flex h-4 w-6 shrink-0 items-end overflow-hidden rounded-xs p-[2px] ring-1 ring-foreground/10"
       style={{ background: tokens["app-shell"] }}
     >
       <span
-        className="flex size-full flex-col justify-center gap-[2px] rounded-[1.5px] px-[2px]"
+        className="flex size-full flex-col justify-center gap-[2px] rounded-[calc(var(--radius-xs)/2)] px-[2px]"
         style={{ background: tokens["page-canvas"], boxShadow: `inset 0 0 0 0.5px ${tokens["surface-border"]}` }}
       >
         <span className="h-[2px] w-3/5 rounded-full" style={{ background: tokens.foreground }} />
