@@ -133,14 +133,8 @@
     "type_to_find_people": "输入关键词查找成员和智能体"
   },
   "delegate": {
-    "heading": "交给智能体",
-    "create_and_assign": "新建任务并指派给 {{name}}",
-    "squad": "小队",
-    "context_aria": "附带上下文",
-    "parent": "挂在 {{identifier}} 下",
-    "pick_crumb": "选择",
-    "pick_another": "换一个智能体或小队...",
-    "detected": "识别为指令"
+    "row": "交给智能体：「{{prompt}}」",
+    "hint": "快速创建"
   },
   "best": {
     "assign": "把 {{subject}} 指派给 {{name}}",
@@ -159,8 +153,6 @@
     "navigate": "选择",
     "select": "执行",
     "open_in_new_tab": "在新标签页打开",
-    "delegate": "新建并交给 {{name}}",
-    "search_instead": "仅作为关键词搜索",
     "back": "返回",
     "prefix_commands": "命令",
     "prefix_issues": "任务",

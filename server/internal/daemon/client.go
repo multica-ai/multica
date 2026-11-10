@@ -681,6 +681,7 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 type TaskEnvironmentReport struct {
 	Key       string     `json:"key"`
 	Source    string     `json:"source"`
+	Kind      string     `json:"kind,omitempty"`
 	Name      string     `json:"name"`
 	Label     string     `json:"label"`
 	URL       string     `json:"url"`

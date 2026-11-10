@@ -23,10 +23,13 @@ import type { SidebarIssuesRequest } from "./sidebar-list";
 import { ALL_STATUSES } from "./config";
 import { issueColumnCategory } from "./status-category";
 
-export function issueTasksOptions(issueId: string, includeDescendants = false) {
+export function issueTasksOptions(issueId: string, includeDescendants = false, view: "timeline" | "history" = "timeline") {
+  const key = includeDescendants ? issueKeys.subtreeTasks(issueId) : issueKeys.tasks(issueId);
   return queryOptions({
-    queryKey: includeDescendants ? issueKeys.subtreeTasks(issueId) : issueKeys.tasks(issueId),
-    queryFn: () => api.listTasksByIssue(issueId, includeDescendants),
+    queryKey: view === "history" ? [...key, "history"] : key,
+    queryFn: () => view === "timeline"
+      ? api.listTasksByIssue(issueId, includeDescendants, { view })
+      : api.listTasksByIssue(issueId, includeDescendants),
     enabled: !!issueId,
     staleTime: 30_000,
     refetchOnWindowFocus: true,
@@ -173,6 +176,8 @@ export const issueKeys = {
   /** Full-issue timeline (single TanStack Query, no cursor). */
   timeline: (issueId: string) =>
     [...issueKeys.timelineAll(), issueId] as const,
+  commentThread: (issueId: string, commentId: string) =>
+    [...issueKeys.timeline(issueId), "thread", commentId] as const,
   /** Prefix across all issues — WS task lifecycle events invalidate here so
    *  an open composer's trigger preview refreshes when an agent's queue
    *  state changes (the dedup guard makes the answer queue-dependent). */
@@ -202,9 +207,9 @@ export const issueKeys = {
    *  click time. */
   attachments: (issueId: string) =>
     [...issueKeys.attachmentsAll(), issueId] as const,
-  /** Prefix-match key for invalidating tasks across all issues — used by
-   *  the global WS task: prefix path so any task lifecycle event refreshes
-   *  every per-issue list, regardless of which issue is currently mounted. */
+  deliverables: (issueId: string) =>
+    [...issueKeys.attachments(issueId), "deliverables"] as const,
+  /** Prefix for reconnects and task events without an issue scope. */
   tasksAll: () => ["issues", "tasks"] as const,
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => [...issueKeys.tasksAll(), issueId] as const,
@@ -464,7 +469,7 @@ export function projectGanttIssuesOptions(
   });
 }
 
-/** Both list endpoints cap a page here, so a longer sidebar list is fetched in pages. */
+/** The table endpoint caps a page here, so a longer sidebar list is fetched in pages. */
 const SIDEBAR_MAX_PAGE = 100;
 
 async function listSidebarTableIssues(query: IssueTableQuerySpec, limit: number): Promise<ListIssuesResponse> {
@@ -487,22 +492,6 @@ async function listSidebarTableIssues(query: IssueTableQuerySpec, limit: number)
   return { issues, total };
 }
 
-async function listSidebarIssues(params: ListIssuesParams, limit: number): Promise<ListIssuesResponse> {
-  const issues: Issue[] = [];
-  let total = 0;
-  do {
-    const page = await api.listIssues({
-      ...params,
-      limit: Math.min(limit - issues.length, SIDEBAR_MAX_PAGE),
-      offset: issues.length,
-    });
-    issues.push(...page.issues);
-    total = page.total;
-    if (page.issues.length === 0) break;
-  } while (issues.length < limit && issues.length < total);
-  return { issues, total };
-}
-
 /** The first `limit` issues of a sidebar list, with the filtered total. */
 export function sidebarIssuesOptions(
   wsId: string,
@@ -512,10 +501,7 @@ export function sidebarIssuesOptions(
 ) {
   return queryOptions({
     queryKey: issueKeys.sidebar(wsId, source, request, limit),
-    queryFn: () =>
-      "table" in request
-        ? listSidebarTableIssues(request.table, limit)
-        : listSidebarIssues(request, limit),
+    queryFn: () => listSidebarTableIssues(request.table, limit),
   });
 }
 
@@ -689,6 +675,19 @@ export function issueTimelineOptions(issueId: string) {
   });
 }
 
+export function issueCommentThreadOptions(issueId: string, commentId: string) {
+  return queryOptions({
+    queryKey: issueKeys.commentThread(issueId, commentId),
+    queryFn: async () => {
+      const comments = await api.listComments(issueId, { thread: commentId });
+      if (!comments.some((comment) => comment.id === commentId)) {
+        throw new Error("Comment not found in thread");
+      }
+      return comments;
+    },
+  });
+}
+
 export function issueReactionsOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.reactions(issueId),
@@ -732,5 +731,13 @@ export function issueAttachmentsOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.attachments(issueId),
     queryFn: () => api.listAttachments(issueId),
+  });
+}
+
+/** Complete attachment inventory; independent of the bounded discussion feed. */
+export function issueDeliverablesOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.deliverables(issueId),
+    queryFn: () => api.listIssueDeliverables(issueId),
   });
 }

@@ -56,7 +56,7 @@
   },
   "relation_filter_error": {
     "title": "Couldn't load the \"Relation to me\" filter",
-    "hint": "Issues filtered by \"Subscribed by me\" or \"Assigned to my agents\" can't be shown until your subscriptions and agents load."
+    "hint": "Issues filtered by \"Subscribed by me\" or \"My agents' work\" can't be shown until your subscriptions and agents load."
   },
   "source_context": {
     "create_action": "Create sub-issue from here",
@@ -194,7 +194,7 @@
     "section_relation": "Relation to me",
     "relation_assigned": "Assigned to me",
     "relation_created": "Created by me",
-    "relation_my_agents": "Assigned to my agents",
+    "relation_my_agents": "My agents' work",
     "relation_subscribed": "Subscribed by me",
     "section_agent_status": "Agent status",
     "agent_status_running": "Running",
@@ -587,7 +587,9 @@
   },
   "timeline": {
     "loading": "Loading...",
-    "jump_to_latest": "Jump to latest"
+    "jump_to_latest": "Jump to latest",
+    "new_comments_one": "{{count}} new comment",
+    "new_comments_other": "{{count}} new comments"
   },
   "activity": {
     "created": "created this issue",
@@ -1115,7 +1117,7 @@
     "variant_my_any": "Any relation",
     "variant_my_assigned": "Assigned to me",
     "variant_my_created": "Created by me",
-    "variant_my_involved": "Involved"
+    "variant_my_involved": "My agents' work"
   },
   "plugins": {
     "panels": "Plugins",
@@ -1779,16 +1781,13 @@
       "name_placeholder": "Status name",
       "add": "Add"
     },
-    "menu": {
-      "view_flow": "View full flow",
-      "switch": "Switch workflow"
-    },
     "flow": {
       "title": "{{workflow}} workflow",
       "scope_own": "Only this project uses this workflow.",
       "no_handoff_here": "No handoff",
       "scope_shared_one": "{{count}} project uses this workflow. Its handoffs apply to every project using it.",
-      "scope_shared_other": "{{count}} projects use this workflow. Its handoffs apply to all of them."
+      "scope_shared_other": "{{count}} projects use this workflow. Its handoffs apply to all of them.",
+      "switch": "Switch workflow"
     },
     "templates": {
       "delivery": {
@@ -1939,6 +1938,13 @@
     "open": "Open",
     "copy_url": "Copy URL",
     "copied": "URL copied",
-    "copy_failed": "Couldn't copy the URL"
+    "copy_failed": "Couldn't copy the URL",
+    "app_desktop_hint": "A desktop app. Switch to its window from Multica Desktop on the machine running it.",
+    "app_remote_hint": "Runs on {{machine}}. Switch to its window from Multica Desktop on that machine.",
+    "focus": "Switch to window",
+    "focus_gone": "{{name}} is no longer running",
+    "focus_unsupported": "This machine's daemon can't switch to app windows yet. Update Multica and try again.",
+    "focus_unavailable": "The local daemon isn't running",
+    "focus_failed": "Couldn't switch to {{name}}"
   }
 }

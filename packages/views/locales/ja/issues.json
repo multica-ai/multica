@@ -55,7 +55,7 @@
   },
   "relation_filter_error": {
     "title": "「自分との関係」フィルターを読み込めませんでした",
-    "hint": "「自分が購読中」または「自分のエージェントが担当」で絞り込んだタスクは、購読とエージェントを読み込むまで表示できません。"
+    "hint": "「自分が購読中」または「マイエージェントの作業」で絞り込んだタスクは、購読とエージェントを読み込むまで表示できません。"
   },
   "source_context": {
     "create_action": "このコメントからサブタスクを作成",
@@ -192,7 +192,7 @@
     "section_relation": "自分との関係",
     "relation_assigned": "自分が担当",
     "relation_created": "自分が作成",
-    "relation_my_agents": "自分のエージェントが担当",
+    "relation_my_agents": "マイエージェントの作業",
     "relation_subscribed": "自分が購読中",
     "section_agent_status": "エージェントの状態",
     "agent_status_running": "実行中",
@@ -579,7 +579,8 @@
   },
   "timeline": {
     "loading": "読み込み中...",
-    "jump_to_latest": "最新に移動"
+    "jump_to_latest": "最新に移動",
+    "new_comments_other": "新しいコメント {{count}} 件"
   },
   "activity": {
     "created": "このタスクを作成しました",
@@ -1070,7 +1071,7 @@
     "variant_my_any": "何らかの関わり",
     "variant_my_assigned": "自分に割り当て",
     "variant_my_created": "自分が作成",
-    "variant_my_involved": "関与中"
+    "variant_my_involved": "マイエージェントの作業"
   },
   "plugins": {
     "panels": "Plugins",
@@ -1712,15 +1713,12 @@
       "name_placeholder": "ステータス名",
       "add": "追加"
     },
-    "menu": {
-      "view_flow": "フロー全体を見る",
-      "switch": "ワークフローを切り替え"
-    },
     "flow": {
       "title": "ワークフロー「{{workflow}}」",
       "scope_own": "このワークフローを使用しているのはこのプロジェクトだけです。",
       "no_handoff_here": "引き継ぎなし",
-      "scope_shared_other": "{{count}} 件のプロジェクトがこのワークフローを使用しています。引き継ぎはそのすべてに適用されます。"
+      "scope_shared_other": "{{count}} 件のプロジェクトがこのワークフローを使用しています。引き継ぎはそのすべてに適用されます。",
+      "switch": "ワークフローを切り替え"
     },
     "templates": {
       "delivery": {
@@ -1864,6 +1862,13 @@
     "open": "開く",
     "copy_url": "URL をコピー",
     "copied": "URL をコピーしました",
-    "copy_failed": "URL をコピーできませんでした"
+    "copy_failed": "URL をコピーできませんでした",
+    "app_desktop_hint": "デスクトップアプリです。実行中のマシンの Multica Desktop からウィンドウに切り替えられます。",
+    "app_remote_hint": "{{machine}} で実行中です。そのマシンの Multica Desktop からウィンドウに切り替えられます。",
+    "focus": "ウィンドウに切り替え",
+    "focus_gone": "{{name}} はもう実行されていません",
+    "focus_unsupported": "このマシンのデーモンはまだアプリのウィンドウに切り替えられません。Multica を更新してもう一度お試しください。",
+    "focus_unavailable": "ローカルのデーモンが実行されていません",
+    "focus_failed": "{{name}} に切り替えられませんでした"
   }
 }

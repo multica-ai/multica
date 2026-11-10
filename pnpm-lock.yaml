@@ -69,6 +69,9 @@ catalogs:
     cmdk:
       specifier: ^1.1.1
       version: 1.1.1
+    entities:
+      specifier: ^6.0.1
+      version: 6.0.1
     eslint-plugin-i18next:
       specifier: ^6.1.4
       version: 6.1.4
@@ -735,6 +738,9 @@ importers:
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.96.2(react@19.2.3)
+      entities:
+        specifier: 'catalog:'
+        version: 6.0.1
       i18next:
         specifier: 'catalog:'
         version: 26.0.8(@typescript/typescript6@6.0.2)

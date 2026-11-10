@@ -29,10 +29,18 @@ var issueEnvironmentSources = map[string]bool{"config": true, "detected": true}
 
 var issueEnvironmentStates = map[string]bool{"starting": true, "running": true, "exited": true, "stopped": true}
 
+// A server is reached at its URL; an app is a desktop window that only the
+// machine running it can bring forward.
+const (
+	issueEnvironmentKindServer = "server"
+	issueEnvironmentKindApp    = "app"
+)
+
 // IssueEnvironmentReport is one environment in a daemon's per-task snapshot.
 type IssueEnvironmentReport struct {
 	Key       string     `json:"key"`
 	Source    string     `json:"source"`
+	Kind      string     `json:"kind"`
 	Name      string     `json:"name"`
 	Label     string     `json:"label"`
 	URL       string     `json:"url"`
@@ -53,7 +61,11 @@ type IssueEnvironmentResponse struct {
 	TaskID     string  `json:"task_id"`
 	RuntimeID  *string `json:"runtime_id"`
 	AgentID    *string `json:"agent_id"`
+	// LocalKey is how the daemon that reported the environment names it, so
+	// Desktop on that machine can ask the daemon to act on it.
+	LocalKey   string  `json:"local_key"`
 	Source     string  `json:"source"`
+	Kind       string  `json:"kind"`
 	Name       string  `json:"name"`
 	Label      string  `json:"label"`
 	URL        string  `json:"url"`
@@ -77,6 +89,11 @@ func validateIssueEnvironmentReport(env *IssueEnvironmentReport, now time.Time) 
 	env.Name = strings.TrimSpace(env.Name)
 	env.Label = strings.TrimSpace(env.Label)
 	env.URL = strings.TrimSpace(env.URL)
+	// A daemon older than kinds sends none, and one newer than this server may
+	// send a kind it does not know; both are shown as a server.
+	if env.Kind != issueEnvironmentKindApp {
+		env.Kind = issueEnvironmentKindServer
+	}
 	switch {
 	case env.Key == "" || len(env.Key) > 128:
 		return "key must be 1-128 characters"
@@ -177,6 +194,7 @@ func (h *Handler) ReportTaskEnvironments(w http.ResponseWriter, r *http.Request)
 			AgentID:     task.AgentID,
 			LocalKey:    env.Key,
 			Source:      env.Source,
+			Kind:        env.Kind,
 			Name:        env.Name,
 			Label:       env.Label,
 			Url:         env.URL,
@@ -196,7 +214,7 @@ func (h *Handler) ReportTaskEnvironments(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		prev, wasOpen := open[env.Key]
-		if !wasOpen || prev.State != env.State || prev.Url != env.URL || prev.Label != env.Label || prev.Detail != env.Detail {
+		if !wasOpen || prev.State != env.State || prev.Kind != env.Kind || prev.Url != env.URL || prev.Label != env.Label || prev.Detail != env.Detail {
 			changed = true
 		}
 	}
@@ -262,7 +280,9 @@ func issueEnvironmentToResponse(row db.IssueEnvironment, now time.Time) IssueEnv
 		TaskID:     uuidToString(row.TaskID),
 		RuntimeID:  uuidToPtr(row.RuntimeID),
 		AgentID:    uuidToPtr(row.AgentID),
+		LocalKey:   row.LocalKey,
 		Source:     row.Source,
+		Kind:       row.Kind,
 		Name:       row.Name,
 		Label:      row.Label,
 		URL:        row.Url,

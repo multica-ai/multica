@@ -459,6 +459,7 @@ import {
   TeamAppImpactSchema,
   EMPTY_ISSUE_UNREAD_PAGE,
   SubscribedIssueIdsSchema,
+  InvolvedSquadIdsSchema,
   IssueInboxReadSchema,
   InboxItemListSchema,
   ArchivedInboxPageSchema,
@@ -1751,8 +1752,16 @@ export class ApiClient {
   }
 
   // Comments
-  async listComments(issueId: string): Promise<Comment[]> {
-    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/comments`);
+  async listIssueDeliverables(issueId: string): Promise<TimelineEntry[]> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/deliverables`);
+    return parseWithFallback(raw, TimelineEntriesSchema, [], {
+      endpoint: "GET /api/issues/:id/deliverables",
+    });
+  }
+
+  async listComments(issueId: string, options?: { thread: string }): Promise<Comment[]> {
+    const query = options ? `?${new URLSearchParams({ thread: options.thread })}` : "";
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/comments${query}`);
     return parseWithFallback(raw, CommentsListSchema, [], {
       endpoint: "GET /api/issues/:id/comments",
     });
@@ -2971,10 +2980,12 @@ export class ApiClient {
     });
   }
 
-  async listTasksByIssue(issueId: string, includeDescendants = false): Promise<AgentTask[]> {
-    const raw = await this.fetch<unknown>(
-      `/api/issues/${issueId}/task-runs${includeDescendants ? "?scope=subtree" : ""}`,
-    );
+  async listTasksByIssue(issueId: string, includeDescendants = false, options?: { view: "timeline" }): Promise<AgentTask[]> {
+    const search = new URLSearchParams();
+    if (includeDescendants) search.set("scope", "subtree");
+    if (options?.view) search.set("view", options.view);
+    const query = search.size ? `?${search}` : "";
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/task-runs${query}`);
     return parseWithFallback<AgentTask[]>(raw, AgentTaskListSchema, [], {
       endpoint: "GET /api/issues/:id/task-runs",
     });
@@ -4934,6 +4945,15 @@ export class ApiClient {
     return parseWithFallback(raw, SquadListSchema, EMPTY_SQUAD_LIST, {
       endpoint: "GET /api/squads",
     }) as Squad[];
+  }
+
+  async listInvolvedSquadIds(): Promise<string[]> {
+    const raw = await this.fetch<unknown>("/api/squads/involved");
+    const parsed = parseWithFallback<{ squad_ids: string[] } | null>(raw, InvolvedSquadIdsSchema, null, {
+      endpoint: "GET /api/squads/involved",
+    });
+    if (!parsed) throw new Error("GET /api/squads/involved returned a malformed body");
+    return parsed.squad_ids;
   }
 
   async getSquad(id: string): Promise<Squad> {

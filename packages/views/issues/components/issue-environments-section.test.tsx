@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { AgentRuntime, IssueEnvironment } from "@multica/core/types";
@@ -35,6 +35,9 @@ vi.mock("../../platform/use-local-daemon-status", () => ({
 }));
 const copyText = vi.hoisted(() => vi.fn(async () => true));
 vi.mock("@multica/ui/lib/clipboard", () => ({ copyText }));
+const toastError = vi.hoisted(() => vi.fn());
+vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
+const focusEnvironment = vi.fn();
 
 import { IssueEnvironmentsSection } from "./issue-environments-section";
 
@@ -68,7 +71,9 @@ function environment(overrides: Partial<IssueEnvironment>): IssueEnvironment {
     task_id: "task-1",
     runtime_id: "rt-1",
     agent_id: "agent-1",
+    local_key: "config:abc",
     source: "config",
+    kind: "server",
     name: "web",
     label: "Web app",
     url: "http://localhost:41000",
@@ -100,6 +105,9 @@ describe("IssueEnvironmentsSection", () => {
     mockRuntimes = [runtime({}), runtime({ id: "rt-2", daemon_id: "daemon-2", name: "Codex (build-02)", device_info: "build-02" })];
     mockLocalDaemonId = null;
     copyText.mockClear();
+    toastError.mockClear();
+    focusEnvironment.mockReset();
+    delete (window as { daemonAPI?: unknown }).daemonAPI;
   });
 
   it("renders nothing while the issue has no environments", async () => {
@@ -173,6 +181,104 @@ describe("IssueEnvironmentsSection", () => {
     expect(screen.getByText("exit status 1")).toBeVisible();
     const ended = screen.getAllByTestId("environment-row")[1]!;
     expect(within(ended).queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  describe("desktop apps", () => {
+    const app = (overrides: Partial<IssueEnvironment> = {}) =>
+      environment({
+        id: "env-app",
+        local_key: "detected:app",
+        source: "detected",
+        kind: "app",
+        name: "Multica Canary multica-501",
+        label: "",
+        url: "",
+        port: null,
+        detail: "Remote debugging on localhost:9724",
+        expires_at: null,
+        ...overrides,
+      });
+    const onDesktop = () => {
+      mockLocalDaemonId = "daemon-1";
+      (window as { daemonAPI?: unknown }).daemonAPI = { focusEnvironment };
+    };
+
+    it("switches to the app's window on the machine whose daemon found it", async () => {
+      onDesktop();
+      focusEnvironment.mockResolvedValue({ ok: true });
+      mockEnvironments = [app()];
+      renderSection();
+
+      const row = await screen.findByTestId("environment-row");
+      expect(within(row).getByText("Multica Canary multica-501")).toBeVisible();
+      expect(within(row).queryByText(/localhost/)).not.toBeInTheDocument();
+      expect(within(row).queryByRole("link")).not.toBeInTheDocument();
+      expect(row).toHaveAttribute("title", expect.stringContaining("Remote debugging on localhost:9724"));
+
+      fireEvent.click(within(row).getByText("Multica Canary multica-501"));
+      fireEvent.click(within(row).getByRole("button", { name: "Switch to window" }));
+      await waitFor(() => expect(focusEnvironment).toHaveBeenCalledTimes(2));
+      expect(focusEnvironment).toHaveBeenCalledWith("detected:app");
+      expect(toastError).not.toHaveBeenCalled();
+    });
+
+    it("offers no switch for an app whose key did not arrive", async () => {
+      onDesktop();
+      mockEnvironments = [app({ local_key: "" })];
+      renderSection();
+
+      const row = await screen.findByTestId("environment-row");
+      expect(within(row).queryByRole("button")).not.toBeInTheDocument();
+      fireEvent.click(within(row).getByText("Multica Canary multica-501"));
+      expect(focusEnvironment).not.toHaveBeenCalled();
+    });
+
+    it("says so when the app has exited instead of opening anything", async () => {
+      onDesktop();
+      focusEnvironment.mockResolvedValue({ ok: false, reason: "gone" });
+      mockEnvironments = [app()];
+      renderSection();
+
+      fireEvent.click(await screen.findByRole("button", { name: "Switch to window" }));
+      await waitFor(() => expect(toastError).toHaveBeenCalledWith("Multica Canary multica-501 is no longer running"));
+    });
+
+    it("cannot be switched to from another machine", async () => {
+      onDesktop();
+      mockEnvironments = [app({ runtime_id: "rt-2" })];
+      renderSection();
+
+      const row = await screen.findByTestId("environment-row");
+      expect(within(row).queryByRole("button")).not.toBeInTheDocument();
+      expect(row).toHaveAttribute("title", expect.stringContaining("Runs on build-02. Switch to its window from Multica Desktop on that machine."));
+    });
+
+    it("cannot be switched to on web", async () => {
+      mockEnvironments = [app(), app({ id: "env-app-2", runtime_id: "rt-gone", name: "Other App" })];
+      renderSection();
+
+      await screen.findByText("Multica Canary multica-501");
+      const rows = screen.getAllByTestId("environment-row");
+      for (const row of rows) {
+        expect(within(row).queryByRole("button")).not.toBeInTheDocument();
+        expect(within(row).queryByRole("link")).not.toBeInTheDocument();
+      }
+      const row = (name: string) => rows.find((r) => within(r).queryByText(name))!;
+      expect(row("Multica Canary multica-501")).toHaveAttribute("title", expect.stringContaining("Runs on studio.local. Switch to its window from Multica Desktop on that machine."));
+      expect(row("Other App")).toHaveAttribute("title", expect.stringContaining("Switch to its window from Multica Desktop on the machine running it."));
+      expect(focusEnvironment).not.toHaveBeenCalled();
+    });
+
+    it("cannot be switched to once it has ended", async () => {
+      onDesktop();
+      mockEnvironments = [environment({}), app({ state: "stopped", ended_at: new Date().toISOString() })];
+      renderSection();
+
+      fireEvent.click(await screen.findByRole("button", { name: /1 ended/ }));
+      const ended = screen.getAllByTestId("environment-row")[1]!;
+      expect(within(ended).getByText("Multica Canary multica-501")).toBeVisible();
+      expect(within(ended).queryByRole("button")).not.toBeInTheDocument();
+    });
   });
 
   it("offers no link for an environment whose daemon went quiet", async () => {

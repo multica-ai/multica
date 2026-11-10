@@ -989,6 +989,7 @@ type IssueEnvironment struct {
 	EndedAt     pgtype.Timestamptz `json:"ended_at"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Kind        string             `json:"kind"`
 }
 
 type IssueLabel struct {

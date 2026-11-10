@@ -55,7 +55,7 @@
   },
   "relation_filter_error": {
     "title": "“与我的关系”筛选加载失败",
-    "hint": "加载订阅和智能体后才能显示按“我订阅的”或“分配给我的智能体的”筛选的任务。"
+    "hint": "加载订阅和智能体后才能显示按“我订阅的”或“我的智能体在做”筛选的任务。"
   },
   "source_context": {
     "create_action": "从这条评论创建子任务",
@@ -192,7 +192,7 @@
     "section_relation": "与我的关系",
     "relation_assigned": "分配给我的",
     "relation_created": "我创建的",
-    "relation_my_agents": "分配给我的智能体的",
+    "relation_my_agents": "我的智能体在做",
     "relation_subscribed": "我订阅的",
     "section_agent_status": "智能体状态",
     "agent_status_running": "运行中",
@@ -579,7 +579,8 @@
   },
   "timeline": {
     "loading": "加载中…",
-    "jump_to_latest": "跳到最新"
+    "jump_to_latest": "跳到最新",
+    "new_comments_other": "{{count}} 条新评论"
   },
   "activity": {
     "created": "创建了这个任务",
@@ -1070,7 +1071,7 @@
     "variant_my_any": "任何相关",
     "variant_my_assigned": "分配给我",
     "variant_my_created": "我创建的",
-    "variant_my_involved": "我参与的"
+    "variant_my_involved": "我的智能体在做"
   },
   "plugins": {
     "panels": "Plugins",
@@ -1712,15 +1713,12 @@
       "name_placeholder": "状态名称",
       "add": "添加"
     },
-    "menu": {
-      "view_flow": "查看完整流程",
-      "switch": "切换工作流"
-    },
     "flow": {
       "title": "「{{workflow}}」工作流",
       "scope_own": "只有这个项目使用这个工作流。",
       "no_handoff_here": "不交接",
-      "scope_shared_other": "{{count}} 个项目使用这个工作流，它的交接对这些项目都生效。"
+      "scope_shared_other": "{{count}} 个项目使用这个工作流，它的交接对这些项目都生效。",
+      "switch": "切换工作流"
     },
     "templates": {
       "delivery": {
@@ -1864,6 +1862,13 @@
     "open": "打开",
     "copy_url": "复制地址",
     "copied": "已复制地址",
-    "copy_failed": "无法复制地址"
+    "copy_failed": "无法复制地址",
+    "app_desktop_hint": "桌面 App。在运行它的那台机器上，用 Multica Desktop 切到它的窗口。",
+    "app_remote_hint": "运行在 {{machine}} 上。在那台机器上用 Multica Desktop 切到它的窗口。",
+    "focus": "切到窗口",
+    "focus_gone": "{{name}} 已经不在运行",
+    "focus_unsupported": "这台机器的 daemon 暂时不能切换 App 窗口。更新 Multica 后再试。",
+    "focus_unavailable": "本机 daemon 没有运行",
+    "focus_failed": "无法切到 {{name}}"
   }
 }

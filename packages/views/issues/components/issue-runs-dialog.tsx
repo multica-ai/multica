@@ -141,7 +141,7 @@ function IssueRunsDialogContent({
   const [includeChildren, setIncludeChildren] = useState(includeDescendants);
   const scopeLabelId = useId();
   const { data: tasks = [], isPending, isError, refetch } = useQuery(
-    issueTasksOptions(issueId, includeChildren),
+    issueTasksOptions(issueId, includeChildren, "history"),
   );
   // `estimateCost` reads custom rates imperatively out of the Zustand store,
   // so nothing re-renders this dialog when the user saves a new rate. Subscribe
