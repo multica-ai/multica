@@ -41,7 +41,7 @@ export function AnnotationComposer({
   issueId, owner, annotation, existing, number, editorRef, controls,
   sourceMissing, sourceChanged, canSave, onChange, onSave, onRemove, onBusyChange,
 }: {
-  issueId: string;
+  issueId?: string;
   owner: string;
   annotation: ReplyAnnotation;
   existing: boolean;

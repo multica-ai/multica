@@ -31,6 +31,10 @@ import type { Attachment, Project } from "@multica/core/types";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ClearablePillButton } from "../../common/pill-button";
 import { useT } from "../../i18n";
+import { useCommentDraftStore } from "@multica/core/issues/stores";
+import { composeAnnotatedReply, EMPTY_REPLY_ANNOTATIONS, hasReplyIntent } from "@multica/core/drafts/reply-annotation";
+import { ReplyAnnotations } from "../../issues/components/reply-annotations";
+import type { ChatAnnotations } from "./use-chat-annotations";
 
 const logger = createLogger("chat.ui");
 const EMPTY_UPLOADS: DraftUpload[] = [];
@@ -146,6 +150,8 @@ interface ChatInputProps {
    */
   draftKeyOverride?: string;
   editorKeyOverride?: string;
+  /** Saved quotes from this session's replies, sent ahead of the typed text. */
+  annotations?: Pick<ChatAnnotations, "draftKey" | "composer" | "editAnnotation">;
 }
 
 export function ChatInput({
@@ -174,6 +180,7 @@ export function ChatInput({
   focusRequest,
   draftKeyOverride,
   editorKeyOverride,
+  annotations: annotationSlot,
 }: ChatInputProps) {
   const { t } = useT("chat");
   const { t: tEditor } = useT("editor");
@@ -228,7 +235,11 @@ export function ChatInput({
   // restored or parked one, or any persisted draft the user typed in another
   // session) still enables the button. A false enable costs nothing: handleSend
   // reads the live editor and bails when it is empty.
-  const hasNothingToSend = isEmpty && !inputDraft.trim();
+  const annotationDraftKey = annotationSlot?.draftKey;
+  const annotations = useCommentDraftStore((s) =>
+    annotationDraftKey ? s.getAnnotations(annotationDraftKey) : EMPTY_REPLY_ANNOTATIONS);
+  // Saved annotations always carry a note, so they are sendable on their own.
+  const hasNothingToSend = isEmpty && !inputDraft.trim() && annotations.length === 0;
   const appliedRestoreIdRef = useRef<string | null>(null);
   const appliedConversationStarterIdRef = useRef<number | null>(null);
   const editorKey = editorKeyOverride ?? CHAT_COMPOSER_EDITOR_KEY;
@@ -453,8 +464,19 @@ export function ChatInput({
     // the same place), except when the commit left the editor alone — see
     // `editorScrubbedRef`.
     afterAccepted: () => (editorScrubbedRef.current ? "refocus" : "none"),
+    normalize: (raw) => {
+      const current = annotationDraftKey
+        ? useCommentDraftStore.getState().getAnnotations(annotationDraftKey)
+        : EMPTY_REPLY_ANNOTATIONS;
+      return hasReplyIntent(raw, current) ? composeAnnotatedReply(raw, current) : "";
+    },
     onSubmit: async (content: string): Promise<boolean> => {
       editorScrubbedRef.current = false;
+      // Same tick as `normalize`, so this is exactly what `content` quotes.
+      const annotationKeyAtSend = annotationDraftKey;
+      const sentAnnotationIds = annotationKeyAtSend
+        ? useCommentDraftStore.getState().getAnnotations(annotationKeyAtSend).map((a) => a.id)
+        : [];
       // These states disable the SubmitButton, but Mod+Enter bypasses it — so a
       // read-only or busy composer must still refuse the keyboard path.
       if (disabled || noAgent || (isRunning && !allowSubmitWhileRunning)) {
@@ -532,6 +554,12 @@ export function ChatInput({
         if (untouched) clearInputDraft(keyAtSend);
         for (const key of options?.extraDraftKeys ?? []) {
           if (key !== keyAtSend) clearInputDraft(key);
+        }
+        // The quotes are in the sent message (and in any restore of it); only
+        // annotations saved during the request stay for the next turn.
+        if (annotationKeyAtSend) {
+          const store = useCommentDraftStore.getState();
+          for (const id of sentAnnotationIds) store.removeAnnotation(annotationKeyAtSend, id);
         }
       };
       logger.info("input.send", {
@@ -629,8 +657,14 @@ export function ChatInput({
     !submitting &&
     !isProjectUpdating;
   const selectedProject = projects.find((project) => project.id === projectId);
+  const canSubmitNow = !disabled && !noAgent && (!isRunning || !!allowSubmitWhileRunning);
 
   return (
+    <>
+    {annotationSlot?.composer?.render(canSubmitNow ? {
+      submit, submitting, uploading: gate.uploading, restart: false,
+      recipients: null, draftContent: inputDraft, annotations,
+    } : undefined)}
     <div
       ref={composerRef}
       className={cn(
@@ -677,6 +711,12 @@ export function ChatInput({
         )}
         aria-disabled={noAgent || undefined}
       >
+        {annotationDraftKey && annotations.length > 0 && (
+          <div className="px-3 pt-2">
+            <ReplyAnnotations draftKey={annotationDraftKey} annotations={annotations} disabled={submitting}
+              onEditAnnotation={(id) => annotationSlot.editAnnotation(id, true)} />
+          </div>
+        )}
         {selectedProject && (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pt-2">
             <div
@@ -803,5 +843,6 @@ export function ChatInput({
         {uploadEnabled && isDragOver && <FileDropOverlay />}
       </div>
     </div>
+    </>
   );
 }
