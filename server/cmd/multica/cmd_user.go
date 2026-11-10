@@ -11,11 +11,11 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
-// User namespace exists so the daemon-injected `## Requesting User` brief
-// has a CLI surface a human can mirror without having to construct
-// PATCH /api/me by hand. Today only profile-description is wired; future
-// per-user knobs (e.g. preferred language) should land as further
-// subcommands here rather than expand the verb surface elsewhere.
+// User namespace holds per-user knobs: `profile` mirrors the daemon-injected
+// `## Requesting User` brief (PATCH /api/me) and `notifications` manages the
+// per-workspace inbox filter (cmd_user_notifications.go). Future per-user
+// settings should land as further subcommands here rather than expand the
+// verb surface elsewhere.
 
 var userCmd = &cobra.Command{
 	Use:   "user",
