@@ -23,7 +23,6 @@ import { api, dispatchReasonCode } from "@multica/core/api";
 import {
   isAgentRuntimeBound,
   useAgentPresenceDetail,
-  useCustomizeConversationStartersHref,
   useWorkspaceAgentAvailability,
 } from "@multica/core/agents";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -246,13 +245,6 @@ export function ChatWindow() {
   // user types (MUL-6380). Mirrors use-chat-controller.ts.
   const isAgentAccessRevoked =
     !!activeAgent && !canAssignAgent(activeAgent, user?.id, memberRole);
-
-  // "Customize" under the starter buttons — the only place the empty state
-  // admits that those buttons are configuration at all.
-  const customizeConversationStartersHref = useCustomizeConversationStartersHref(
-    activeAgent,
-    wsId,
-  );
 
   const projectContextSupport = useChatProjectContextSupport(wsId, activeAgent);
 
@@ -932,7 +924,6 @@ export function ChatWindow() {
               agent={activeAgent}
               hasSessions={sessions.length > 0}
               onPickPrompt={sendConversationStarter}
-              customizeHref={customizeConversationStartersHref}
             />
           </ChatWindowMessages>
         )}

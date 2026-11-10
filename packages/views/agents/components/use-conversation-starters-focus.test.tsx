@@ -15,8 +15,7 @@ function Harness({ agentId }: { agentId: string }) {
   return <div ref={ref} data-focused={focused ? "true" : "false"} />;
 }
 
-// The "customize" link in a chat's empty state lands on General settings with
-// ?focus=. The page must bring the editor into view and then clear the param,
+// The conversation-starters deep link lands on General settings with ?focus=. The page must bring the editor into view and then clear the param,
 // so a refresh or a later tab switch does not replay the flash.
 describe("useConversationStartersFocus", () => {
   // A fresh adapter object per render — what the web platform actually hands
