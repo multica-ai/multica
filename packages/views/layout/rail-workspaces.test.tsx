@@ -45,6 +45,7 @@ vi.mock("../navigation", () => ({
 vi.mock("@multica/core/paths", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/paths")>()),
   useCurrentWorkspace: () => ({ id: "ws-1", name: "Active WS", slug: "active" }),
+  useHasOnboarded: () => true,
 }));
 vi.mock("@multica/core/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/api")>();
@@ -275,16 +276,15 @@ describe("pending invitation self-heal", () => {
     renderWithI18n(<RailWorkspaces />);
     expect(state.mutations).toHaveLength(2);
 
+    const invitation = { id: "inv-1", workspace_id: "ws-9" };
     for (const options of state.mutations as Array<{
-      mutationFn: (id: string) => Promise<unknown>;
-      onError?: (...args: unknown[]) => unknown;
+      mutationFn: (invitation: { id: string; workspace_id: string }) => Promise<unknown>;
       onSettled?: (...args: unknown[]) => unknown;
     }>) {
-      const settle = options.onError ?? options.onSettled;
-      expect(settle).toBeTypeOf("function");
+      expect(options.onSettled).toBeTypeOf("function");
       state.invalidateQueries.mockClear();
-      await expect(options.mutationFn("inv-1")).rejects.toThrow("invitation is not pending");
-      await settle!(new Error("invitation is not pending"), "inv-1", undefined, undefined);
+      await expect(options.mutationFn(invitation)).rejects.toThrow("invitation is not pending");
+      await options.onSettled!(undefined, new Error("invitation is not pending"), invitation, undefined);
       expect(state.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["invitations"] });
     }
     expect(state.accept).toHaveBeenCalledTimes(1);

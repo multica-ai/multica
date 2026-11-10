@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useState, type MouseEvent } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { AppWindow, ArrowBigUp, Check, Pin, Plus } from "@multica/ui/icons";
-import { api } from "@multica/core/api";
+import type { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import {
   inboxUnreadSummaryEnabled,
@@ -14,7 +14,6 @@ import { paths, useCurrentWorkspace } from "@multica/core/paths";
 import type { Invitation, Workspace } from "@multica/core/types";
 import {
   myInvitationListOptions,
-  workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
 import { useSetWorkspacePinned } from "@multica/core/workspace/mutations";
@@ -35,6 +34,7 @@ import { Kbd, KbdGroup } from "@multica/ui/components/ui/kbd";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
 import { AppLink, useNavigation } from "../navigation";
+import { useInvitationActions } from "../invitations/use-invitation-actions";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 
 // Stable empty defaults: an inline `= []` is a new array every render.
@@ -123,39 +123,6 @@ function OtherWindowMarker() {
   );
 }
 
-function useInvitationActions(invitations: Invitation[]) {
-  const queryClient = useQueryClient();
-  const { push } = useNavigation();
-  const accept = useMutation({
-    mutationFn: (id: string) => api.acceptInvitation(id),
-    // Land inside the joined workspace; staying put and just adding a menu
-    // row reads as nothing happened (MUL-820).
-    onSuccess: async (_, invitationId) => {
-      const invitation = invitations.find((i) => i.id === invitationId);
-      queryClient.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
-      // staleTime: 0 forces a real fetch — the joined workspace has to be in
-      // the list before its slug can be resolved.
-      const list = await queryClient.fetchQuery({ ...workspaceListOptions(), staleTime: 0 });
-      const joined = invitation ? list.find((w) => w.id === invitation.workspace_id) : null;
-      if (joined) push(paths.workspace(joined.slug).issues());
-    },
-    // "Invitation is not pending": it was concluded on another surface while
-    // this row was on screen. Refetch so the stale row drops.
-    onError: () => {
-      queryClient.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
-    },
-  });
-  const decline = useMutation({
-    mutationFn: (id: string) => api.declineInvitation(id),
-    // Success drops the declined row; failure means it was concluded
-    // elsewhere. Either way the list is stale.
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
-    },
-  });
-  return { accept, decline };
-}
-
 function InvitationItem({
   invitation,
   actions,
@@ -181,10 +148,10 @@ function InvitationItem({
             </DropdownMenuLabel>
           </DropdownMenuGroup>
         )}
-        <DropdownMenuItem disabled={pending} onClick={() => actions.accept.mutate(invitation.id)}>
+        <DropdownMenuItem disabled={pending} onClick={() => actions.accept.mutate(invitation)}>
           {t(($) => $.sidebar.invitation_join)}
         </DropdownMenuItem>
-        <DropdownMenuItem disabled={pending} onClick={() => actions.decline.mutate(invitation.id)}>
+        <DropdownMenuItem disabled={pending} onClick={() => actions.decline.mutate(invitation)}>
           {t(($) => $.sidebar.invitation_decline)}
         </DropdownMenuItem>
       </DropdownMenuSubContent>
@@ -214,7 +181,7 @@ export function RailWorkspaces() {
     enabled: inboxUnreadSummaryEnabled(wsId),
   });
   const unreadIds = useMemo(() => unreadWorkspaceIds(unreadSummary), [unreadSummary]);
-  const actions = useInvitationActions(invitations);
+  const actions = useInvitationActions();
   const setPinned = useSetWorkspacePinned();
   const { openWorkspaceInNewWindow, workspacesInOtherWindows } = useNavigation();
   // Read when the menu opens: other windows switch workspaces independently.

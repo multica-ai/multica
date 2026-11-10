@@ -1,145 +1,75 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
-import { useAuthStore } from "@multica/core/auth";
 import {
   myInvitationListOptions,
-  workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
-import { paths } from "@multica/core/paths";
+import {
+  paths,
+  resolvePostAuthDestination,
+  useHasOnboarded,
+} from "@multica/core/paths";
 import type { Invitation } from "@multica/core/types";
-import { AppLink, useNavigation } from "../navigation";
+import { AppLink } from "../navigation";
 import { useLogout } from "../auth";
 import { DragStrip } from "../platform";
 import { useT } from "../i18n";
+import { WorkspaceAvatar } from "../workspace/workspace-avatar";
+import { useInvitationActions } from "./use-invitation-actions";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
-import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { LogOut, Mail, Users } from "@multica/ui/icons";
+import { cn } from "@multica/ui/lib/utils";
+import { ArrowLeft, LogOut, Mail, Users } from "@multica/ui/icons";
+
+export interface InvitationsPageProps {
+  /**
+   * The invitation the user followed a link for (`/invite/:id`). It is pinned
+   * to the top and highlighted; when it can no longer be joined, the page
+   * says why above the remaining invitations.
+   */
+  invitationId?: string;
+  /**
+   * Optional "go back" handler. Callers pass it only when there's somewhere
+   * to go (the user has a workspace). Otherwise Log out is the only exit.
+   */
+  onBack?: () => void;
+}
 
 /**
- * Batch invitation handling page for first-contact users who land here
- * because callback / login detected pending invitations on their email.
+ * The one place to answer workspace invitations before entering a
+ * workspace. Shared between web (`/invitations`, `/invite/[id]`) and the
+ * desktop window overlay.
  *
- * Design:
- *  - This route is only reachable for un-onboarded users (the entry-point
- *    judgment in callback/login routes already-onboarded users straight
- *    into their workspace; new invites for those users surface in the
- *    sidebar's pending-invitations dropdown instead).
- *  - The user picks zero or more invitations to accept. "Submit" then:
- *      • zero selected → continue to /onboarding
- *      • ≥1 selected → accept each, mark onboarding complete, navigate
- *        into the first accepted workspace.
- *  - Unselected invitations are intentionally left as `pending` in the DB.
- *    The user can later decline them from the sidebar; we don't auto-decline
- *    here because closing/refreshing this page should not be a destructive
- *    action.
+ * Each invitation is joined or declined on its own row. Joining navigates
+ * into that workspace; the rest stay pending and remain reachable from the
+ * workspace switcher. Un-onboarded users also get a way to skip to
+ * onboarding — leaving this page never declines anything.
  */
-export function InvitationsPage() {
+export function InvitationsPage({ invitationId, onBack }: InvitationsPageProps) {
   const { t } = useT("invite");
-  const { push } = useNavigation();
-  const qc = useQueryClient();
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [submitting, setSubmitting] = useState(false);
+  const hasOnboarded = useHasOnboarded();
+  const { accept, decline } = useInvitationActions();
   const [error, setError] = useState<string | null>(null);
 
-  const {
-    data: invitations,
-    isLoading,
-    error: fetchError,
-    refetch,
-  } = useQuery(myInvitationListOptions());
+  const { data: pending = [], isLoading } = useQuery(myInvitationListOptions());
+  // Read once on arrival so the notice explains why a linked invitation is
+  // missing from the list; declining it here must not turn into "already
+  // declined", so this query is never invalidated by the actions.
+  const linked = useQuery({
+    queryKey: ["invitation", invitationId],
+    queryFn: () => api.getInvitation(invitationId!),
+    enabled: !!invitationId,
+    staleTime: 0,
+  });
+  const { data: workspaces = [] } = useQuery(workspaceListOptions());
 
-  const toggle = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const handleSubmit = async () => {
-    setError(null);
-
-    // Zero selected: hand off to onboarding. Pending invites stay pending and
-    // can be picked up later from the sidebar.
-    if (selected.size === 0) {
-      push(paths.onboarding());
-      return;
-    }
-
-    setSubmitting(true);
-    const acceptedIds: string[] = [];
-    try {
-      for (const id of selected) {
-        await api.acceptInvitation(id);
-        acceptedIds.push(id);
-      }
-
-      const firstAcceptedInvite = invitations?.find(
-        (inv) => inv.id === acceptedIds[0],
-      );
-
-      // markOnboardingComplete is a frontend-side belt to the backend braces:
-      // each AcceptInvitation transaction already sets onboarded_at via
-      // MarkUserOnboarded, but calling this from the client makes sure the
-      // returned `User` is freshly written and gives refreshMe something
-      // canonical to read.
-      await api.markOnboardingComplete({
-        completion_path: "invite_accept",
-        workspace_id: firstAcceptedInvite?.workspace_id,
-      });
-      await useAuthStore.getState().refreshMe();
-
-      qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
-      const wsList = await qc.fetchQuery({
-        ...workspaceListOptions(),
-        staleTime: 0,
-      });
-
-      const targetWs = firstAcceptedInvite
-        ? wsList.find((w) => w.id === firstAcceptedInvite.workspace_id)
-        : undefined;
-
-      // If we can't resolve the just-accepted workspace by id (shouldn't
-      // happen — the backend just inserted the membership and we just
-      // refetched), fall back to the resolver. Don't blindly route to
-      // wsList[0]: that could teleport the user into an unrelated old
-      // workspace they happen to also belong to.
-      push(
-        targetWs ? paths.workspace(targetWs.slug).issues() : paths.newWorkspace(),
-      );
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : t(($) => $.batch.error_generic),
-      );
-      // Partial success: any accepts that landed before the failure ALREADY
-      // set onboarded_at on the backend (the AcceptInvitation transaction
-      // is atomic per invite). Refresh local user + workspace state so the
-      // sidebar reflects the partial accept and the user isn't stuck with a
-      // stale `onboarded_at == null` view. The next submit is safe — the
-      // server returns 4xx on re-accept and the catch path will surface that.
-      if (acceptedIds.length > 0) {
-        await useAuthStore.getState().refreshMe().catch(() => {});
-        qc.invalidateQueries({ queryKey: workspaceKeys.list() });
-      }
-      qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
-      refetch();
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  if (isLoading) {
+  if (isLoading || linked.isLoading) {
     return (
-      <InvitationsShell>
+      <InvitationsShell onBack={onBack}>
         <Card className="w-full max-w-lg">
           <CardContent className="flex flex-col gap-4 py-12">
             <Skeleton className="h-6 w-48" />
@@ -152,40 +82,57 @@ export function InvitationsPage() {
     );
   }
 
-  // Empty / error: send the user on to onboarding so they're never stuck.
-  // Genuine fetch failure is rare; treating it as "no invites" is safer than
-  // trapping the user on an error screen they can't act on.
-  if (fetchError || !invitations || invitations.length === 0) {
+  const highlighted = pending.find((inv) => inv.id === invitationId);
+  const rows = highlighted
+    ? [highlighted, ...pending.filter((inv) => inv.id !== invitationId)]
+    : pending;
+  const notice =
+    invitationId && !highlighted ? linkedNotice(linked.data, linked.isError) : null;
+  const busy = accept.isPending || decline.isPending;
+
+  const handleAccept = (invitation: Invitation) => {
+    setError(null);
+    accept.mutate(invitation, {
+      onError: (e) => setError(e instanceof Error ? e.message : t(($) => $.errors.accept_failed)),
+    });
+  };
+  const handleDecline = (invitation: Invitation) => {
+    setError(null);
+    decline.mutate(invitation, {
+      onError: (e) => setError(e instanceof Error ? e.message : t(($) => $.errors.decline_failed)),
+    });
+  };
+
+  if (rows.length === 0) {
     return (
-      <InvitationsShell>
+      <InvitationsShell onBack={onBack}>
         <Card className="w-full max-w-md">
           <CardContent className="flex flex-col items-center gap-4 py-12">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
               <Mail className="h-6 w-6 text-muted-foreground" />
             </div>
-            <h2 className="text-title font-semibold">{t(($) => $.batch.empty_title)}</h2>
-            <p className="text-body text-muted-foreground text-center">
-              {t(($) => $.batch.empty_hint)}
-            </p>
+            <h2 className="text-title font-semibold">{t(($) => $.empty.title)}</h2>
+            {(notice || !hasOnboarded) && (
+              <p className="text-body text-muted-foreground text-center">
+                {notice ? t(($) => $.linked[notice]) : t(($) => $.empty.hint)}
+              </p>
+            )}
             <Button
-              render={<AppLink href={paths.onboarding()} />}
+              variant={hasOnboarded ? "outline" : "default"}
+              render={<AppLink href={resolvePostAuthDestination(workspaces, hasOnboarded)} />}
               nativeButton={false}
             >
-              {t(($) => $.batch.empty_continue)}
+              {hasOnboarded ? t(($) => $.empty.go_to_dashboard) : t(($) => $.empty.continue)}
             </Button>
+            {error && <p className="text-body text-destructive text-center">{error}</p>}
           </CardContent>
         </Card>
       </InvitationsShell>
     );
   }
 
-  const submitLabel =
-    selected.size === 0
-      ? t(($) => $.batch.submit_skip)
-      : t(($) => $.batch.submit_join, { count: selected.size });
-
   return (
-    <InvitationsShell>
+    <InvitationsShell onBack={onBack}>
       <Card className="w-full max-w-lg">
         <CardContent className="flex flex-col gap-6 py-10">
           <div className="flex flex-col items-center gap-3 text-center">
@@ -193,90 +140,147 @@ export function InvitationsPage() {
               <Users className="h-6 w-6 text-primary" />
             </div>
             <div className="space-y-1">
-              <h2 className="text-title-lg font-semibold">
-                {t(($) => $.batch.title)}
-              </h2>
-              <p className="text-body text-muted-foreground">
-                {t(($) => $.batch.subtitle)}
-              </p>
+              <h2 className="text-title-lg font-semibold">{t(($) => $.list.title)}</h2>
+              {rows.length > 1 && (
+                <p className="text-body text-muted-foreground">{t(($) => $.list.subtitle)}</p>
+              )}
             </div>
           </div>
 
+          {notice && (
+            <p className="rounded-md bg-muted px-4 py-3 text-body text-muted-foreground">
+              {t(($) => $.linked[notice])}
+            </p>
+          )}
+
           <ul className="flex flex-col gap-2">
-            {invitations.map((inv) => (
+            {rows.map((inv) => (
               <InvitationRow
                 key={inv.id}
                 invitation={inv}
-                checked={selected.has(inv.id)}
-                onToggle={() => toggle(inv.id)}
+                highlighted={inv === highlighted}
+                primary={!highlighted || inv === highlighted}
+                disabled={busy}
+                joining={accept.isPending && accept.variables?.id === inv.id}
+                declining={decline.isPending && decline.variables?.id === inv.id}
+                onAccept={() => handleAccept(inv)}
+                onDecline={() => handleDecline(inv)}
               />
             ))}
           </ul>
 
-          <Button
-            className="w-full"
-            onClick={handleSubmit}
-            disabled={submitting}
-          >
-            {submitting ? t(($) => $.batch.joining) : submitLabel}
-          </Button>
-
-          {error && (
-            <p className="text-body text-destructive text-center">{error}</p>
+          {!hasOnboarded && (
+            <AppLink
+              href={paths.onboarding()}
+              className="self-center text-body text-muted-foreground hover:text-foreground"
+            >
+              {t(($) => $.list.skip)}
+            </AppLink>
           )}
+
+          {error && <p className="text-body text-destructive text-center">{error}</p>}
         </CardContent>
       </Card>
     </InvitationsShell>
   );
 }
 
+type LinkedNotice = "not_found" | "accepted" | "declined" | "expired";
+
+/**
+ * Why a linked invitation is not among the pending ones. A still-pending,
+ * unexpired invitation gets no notice: it was just declined on this page.
+ */
+function linkedNotice(invitation: Invitation | undefined, failed: boolean): LinkedNotice | null {
+  if (failed || !invitation) return "not_found";
+  if (invitation.status === "accepted" || invitation.status === "declined") {
+    return invitation.status;
+  }
+  if (invitation.status !== "pending" || Date.parse(invitation.expires_at) <= Date.now()) {
+    return "expired";
+  }
+  return null;
+}
+
 function InvitationRow({
   invitation,
-  checked,
-  onToggle,
+  highlighted,
+  primary,
+  disabled,
+  joining,
+  declining,
+  onAccept,
+  onDecline,
 }: {
   invitation: Invitation;
-  checked: boolean;
-  onToggle: () => void;
+  highlighted: boolean;
+  primary: boolean;
+  disabled: boolean;
+  joining: boolean;
+  declining: boolean;
+  onAccept: () => void;
+  onDecline: () => void;
 }) {
   const { t } = useT("invite");
+  const name = invitation.workspace_name ?? t(($) => $.list.workspace_fallback);
   const inviter =
-    invitation.inviter_name ||
-    invitation.inviter_email ||
-    t(($) => $.batch.row_inviter_fallback);
-  const roleLine =
-    invitation.role === "admin"
-      ? t(($) => $.batch.row_invited_admin, { inviter })
-      : t(($) => $.batch.row_invited_member, { inviter });
+    invitation.inviter_name || invitation.inviter_email || t(($) => $.list.inviter_fallback);
   return (
-    <li>
-      <label
-        className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-card p-4 hover:bg-accent/40"
-      >
-        <Checkbox
-          checked={checked}
-          onCheckedChange={onToggle}
-          className="mt-1"
-        />
-        <div className="flex-1 min-w-0 space-y-1">
-          <div className="font-medium truncate">
-            {invitation.workspace_name ?? t(($) => $.batch.row_workspace_fallback)}
-          </div>
-          <div className="text-caption text-muted-foreground truncate">
-            {roleLine}
-          </div>
+    <li
+      aria-current={highlighted ? "true" : undefined}
+      className={cn(
+        "flex items-center gap-3 rounded-md border p-4",
+        highlighted ? "border-primary/40 bg-primary/5" : "border-border bg-card",
+      )}
+    >
+      <WorkspaceAvatar name={name} size="lg" className="rounded-md" />
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="truncate font-medium">{name}</div>
+        <div className="truncate text-caption text-muted-foreground">
+          {invitation.role === "admin"
+            ? t(($) => $.list.invited_admin, { inviter })
+            : t(($) => $.list.invited_member, { inviter })}
         </div>
-      </label>
+      </div>
+      <Button variant="ghost" size="sm" onClick={onDecline} disabled={disabled} aria-busy={declining}>
+        {declining ? t(($) => $.list.declining) : t(($) => $.list.decline)}
+      </Button>
+      <Button
+        variant={primary ? "default" : "outline"}
+        size="sm"
+        onClick={onAccept}
+        disabled={disabled}
+        aria-busy={joining}
+      >
+        {joining ? t(($) => $.list.joining) : t(($) => $.list.accept)}
+      </Button>
     </li>
   );
 }
 
-function InvitationsShell({ children }: { children: ReactNode }) {
+function InvitationsShell({
+  onBack,
+  children,
+}: {
+  onBack?: () => void;
+  children: ReactNode;
+}) {
   const { t } = useT("invite");
   const logout = useLogout();
   return (
     <div className="relative flex min-h-svh flex-col bg-background">
       <DragStrip />
+      {onBack && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="absolute top-16 left-12 text-muted-foreground"
+          onClick={onBack}
+        >
+          <ArrowLeft />
+          {t(($) => $.header.back)}
+        </Button>
+      )}
       <Button
         variant="ghost"
         size="sm"
@@ -284,7 +288,7 @@ function InvitationsShell({ children }: { children: ReactNode }) {
         onClick={logout}
       >
         <LogOut />
-        {t(($) => $.batch.log_out)}
+        {t(($) => $.header.log_out)}
       </Button>
       <div className="flex flex-1 flex-col items-center justify-center px-6 pb-12">
         {children}

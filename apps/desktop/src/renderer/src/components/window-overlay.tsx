@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { InvitePage } from "@multica/views/invite";
 import { InvitationsPage } from "@multica/views/invitations";
 import { OnboardingFlow } from "@multica/views/onboarding";
 import { useNavigation } from "@multica/views/navigation";
@@ -16,7 +15,7 @@ import { useLocalRuntimesPending } from "../platform/use-local-runtimes-pending"
  * This component is intentionally thin — just a fixed positioning shell
  * that covers the tab system. It does NOT hide traffic lights or provide
  * a drag strip: each contained view (OnboardingFlow, NewWorkspacePage,
- * InvitePage) renders its own `<DragStrip />` as a flex-child at top so
+ * InvitationsPage) renders its own `<DragStrip />` as a flex-child at top so
  * native macOS traffic lights stay visible and the page content can fill
  * the window edge-to-edge. This matches the Linear/Notion/Arc pattern for
  * pre-dashboard flows and keeps platform chrome consistent across every
@@ -79,13 +78,12 @@ function WindowOverlayInner() {
           }}
         />
       )}
-      {overlay.type === "invite" && (
-        <InvitePage
+      {overlay.type === "invitations" && (
+        <InvitationsPage
           invitationId={overlay.invitationId}
           onBack={onBack}
         />
       )}
-      {overlay.type === "invitations" && <InvitationsPage />}
       {overlay.type === "onboarding" && (
         <OnboardingFlow
           onComplete={(ws, destination) => {

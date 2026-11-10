@@ -62,7 +62,7 @@ function tryRouteToOverlay(path: string): boolean {
       return true;
     }
     if (id) {
-      overlay.open({ type: "invite", invitationId: id });
+      overlay.open({ type: "invitations", invitationId: id });
       return true;
     }
   }
