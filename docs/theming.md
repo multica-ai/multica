@@ -20,7 +20,7 @@ const PAPER = builtInTheme({
   name: "Paper",
   author: "Someone",
   tokens: {
-    light: { "page-canvas": "#f6efdf", "font-content-latin": "Georgia, serif", "h1-style": "italic" },
+    light: { "page-canvas": "#f6efdf", "font-content-latin": "Georgia, Times New Roman", "h1-style": "italic" },
     dark: { "page-canvas": "#1d1b16" },
   },
   options: [
@@ -315,6 +315,12 @@ and dark differ, both defaults are given.
 | `--text-display-sm--line-height` | `calc(32px * var(--font-scale, 1))` | Line height of `text-display-sm`. |
 | `--text-display` | `calc(36px * var(--font-scale, 1))` | Hero numbers and empty-state headlines. |
 | `--text-display--line-height` | `calc(40px * var(--font-scale, 1))` | Line height of `text-display`. |
+
+`--font-ui` and `--font-content-latin` are followed by the CJK font, so they
+name families only: no `sans-serif`, `serif` or other generic family, and no
+`ui-*` keyword. A generic family matches Han through the browser's default
+for the page language, and the person's CJK choice would never apply. The
+CJK stack ends with its own generic family.
 
 ### Controls and overlays
 

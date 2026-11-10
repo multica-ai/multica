@@ -293,7 +293,13 @@ const POP = builtInTheme({
 });
 
 /** Primer's font stacks, shared by GitHub. */
-const SYSTEM_SANS = "-apple-system, BlinkMacSystemFont, Segoe UI, Noto Sans, Helvetica, Arial, sans-serif";
+/**
+ * Latin stacks name families only. A generic family (`sans-serif`, `serif`)
+ * matches Han through the browser's per-language default, so the CJK stack
+ * after it, which carries the person's CJK choice and its own generic, would
+ * never apply.
+ */
+const SYSTEM_SANS = "-apple-system, BlinkMacSystemFont, Segoe UI, Noto Sans, Helvetica, Arial";
 const SYSTEM_MONO = "ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono, monospace";
 
 /** Shape and content treatments GitHub uses in both modes. */
@@ -506,7 +512,7 @@ const GITHUB = builtInTheme({
 
 /** Shape and content treatments Blueprint uses in both modes. */
 const BLUEPRINT_SHARED: ThemeTokens = {
-  "font-ui": "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, Cantarell, Open Sans, Helvetica Neue, sans-serif",
+  "font-ui": "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, Cantarell, Open Sans, Helvetica Neue",
   "font-mono": SYSTEM_MONO,
   radius: "0.125rem",
   "menu-radius": "0.25rem",
@@ -702,7 +708,7 @@ const BLUEPRINT = builtInTheme({
 
 /** Shape and content treatments Notion uses in both modes. */
 const NOTION_SHARED: ThemeTokens = {
-  "font-ui": "ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI Variable Display, Segoe UI, Helvetica, Apple Color Emoji, Arial, sans-serif",
+  "font-ui": "-apple-system, BlinkMacSystemFont, Segoe UI Variable Display, Segoe UI, Helvetica, Apple Color Emoji, Arial",
   "font-mono": "SFMono-Regular, Menlo, Consolas, PT Mono, Liberation Mono, Courier, monospace",
   radius: "0.375rem",
   "menu-radius": "0.625rem",
@@ -766,8 +772,8 @@ const NOTION_PAGE_FONT = {
   default: "var(--font-ui)",
   choices: [
     { value: "var(--font-ui)", label: { en: "Default", "zh-Hans": "默认", "zh-Hant": "預設", ja: "デフォルト", ko: "기본", es: "Predeterminada", fr: "Par défaut" } },
-    { value: "Lyon-Text, Georgia, ui-serif, serif", label: { en: "Serif", "zh-Hans": "衬线", "zh-Hant": "襯線", ja: "セリフ", ko: "세리프", es: "Serif", fr: "Serif" } },
-    { value: "iawriter-mono, Nitti, Menlo, Courier, monospace", label: { en: "Mono", "zh-Hans": "等宽", "zh-Hant": "等寬", ja: "等幅", ko: "고정폭", es: "Monoespaciada", fr: "Mono" } },
+    { value: "Lyon-Text, Georgia", label: { en: "Serif", "zh-Hans": "衬线", "zh-Hant": "襯線", ja: "セリフ", ko: "세리프", es: "Serif", fr: "Serif" } },
+    { value: "iawriter-mono, Nitti, Menlo, Courier", label: { en: "Mono", "zh-Hans": "等宽", "zh-Hant": "等寬", ja: "等幅", ko: "고정폭", es: "Monoespaciada", fr: "Mono" } },
   ],
 } as const;
 

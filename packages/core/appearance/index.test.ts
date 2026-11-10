@@ -219,6 +219,25 @@ describe("built-in themes", () => {
     }
   });
 
+  it("leave Han to the CJK choice: Latin font stacks name no generic family", () => {
+    const generic = /^(?:serif|sans-serif|monospace|cursive|fantasy|system-ui|math|emoji|fangsong|ui-[a-z-]+)$/;
+    const latin = ["font-ui", "font-content-latin"];
+    for (const theme of BUILT_IN_THEMES) {
+      const stacks = [theme.tokens.light, theme.tokens.dark].flatMap((tokens) =>
+        latin.flatMap((name) => (tokens[name] ? [tokens[name]] : [])),
+      );
+      for (const option of theme.options ?? []) {
+        if (option.type === "variable-select" && latin.includes(option.id)) {
+          stacks.push(...option.choices.map((choice) => choice.value));
+        }
+      }
+      for (const stack of stacks) {
+        const families = stack.split(",").map((family) => family.trim());
+        expect(families.filter((family) => generic.test(family)), `${theme.id}: ${stack}`).toEqual([]);
+      }
+    }
+  });
+
   it("compile their token tables to mode rules a preview can read back", () => {
     const github = findBuiltInTheme("github")!;
     expect(themeModeVariables(github.css).light).toEqual(github.tokens.light);
