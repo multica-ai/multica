@@ -1968,6 +1968,7 @@
     "add": "선행 작업 추가",
     "remove": "{{identifier}} 제거",
     "count": "작업 {{count}}개 대기 중",
+    "count_other": "작업 {{count}}개 대기 중",
     "stage": "이전 단계 · {{finished}}/{{total}}개 종료",
     "hint": "모두 종료되면 담당자가 자동으로 시작하거나 알림을 받습니다.",
     "empty": "대기할 작업 없음",

@@ -2047,6 +2047,8 @@
     "add": "Ajouter un prérequis",
     "remove": "Retirer {{identifier}}",
     "count": "En attente de {{count}} tâches",
+    "count_one": "En attente de {{count}} tâche",
+    "count_other": "En attente de {{count}} tâches",
     "stage": "Étapes précédentes · {{finished}}/{{total}} terminées",
     "hint": "Une fois ces tâches terminées, le responsable démarre automatiquement ou reçoit une notification.",
     "empty": "Aucune tâche à attendre",

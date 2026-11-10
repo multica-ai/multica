@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/data/api";
 import { appConfigOptions } from "@/data/queries/billing";
 import { issueKeys } from "@/data/queries/issue-keys";
-import { useCancelTask, useDeleteComment, useDeleteIssue } from "./issues";
+import { useCancelTask, useDeleteComment, useDeleteIssue, useUpdateIssue } from "./issues";
 
 const state = vi.hoisted(() => ({
   qc: undefined as unknown as QueryClient,
@@ -44,6 +44,7 @@ vi.mock("@/data/api", () => ({
     deleteComment: vi.fn(async () => undefined),
     cancelTaskById: vi.fn(async () => undefined),
     deleteIssue: vi.fn(async () => undefined),
+    updateIssue: vi.fn(async () => ({} as Issue)),
   },
 }));
 
@@ -140,6 +141,33 @@ function deferred() {
   const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej; });
   return { promise, resolve, reject };
 }
+
+describe("useUpdateIssue blocker references", () => {
+  it("keeps reference objects while blocker IDs are submitted and accepts the server result", async () => {
+    state.wsId = wsId;
+    state.reuseObserver = false;
+    state.qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const key = issueKeys.detail(wsId, issueId);
+    const blocker = { id: "blocker-1", identifier: "TEST-1", title: "Prerequisite", status: "todo", via: "manual", closed: false };
+    const previous = { id: issueId, revision: 1, title: "Before", blocked_by: [blocker], blocked_count: 1 } as Issue;
+    const server = { ...previous, revision: 2, title: "After", blocked_by: [], blocked_count: 0 };
+    state.qc.setQueryData(key, previous);
+    const request = deferred();
+    vi.mocked(api.updateIssue).mockImplementationOnce(async () => {
+      await request.promise;
+      return server;
+    });
+    const patch = { title: "After", blocked_by: ["blocker-2"], remove_blocked_by: ["blocker-1"] };
+    const mutation = useUpdateIssue(issueId).mutateAsync(patch);
+    await vi.waitFor(() => expect(api.updateIssue).toHaveBeenCalledWith(issueId, patch));
+    expect(state.qc.getQueryData<Issue>(key)).toMatchObject({ title: "After", blocked_by: [blocker], blocked_count: 1 });
+    expect(state.qc.getQueryData<Issue>(key)).not.toHaveProperty("remove_blocked_by");
+    request.resolve();
+    await mutation;
+    expect(state.qc.getQueryData<Issue>(key)).toEqual(server);
+    state.qc.clear();
+  });
+});
 
 const activeKey = issueKeys.activeTasks(wsId, issueId);
 const tasksKey = issueKeys.tasks(wsId, issueId);

@@ -2047,6 +2047,8 @@
     "add": "Añadir requisito",
     "remove": "Quitar {{identifier}}",
     "count": "Esperando {{count}} tareas",
+    "count_one": "Esperando {{count}} tarea",
+    "count_other": "Esperando {{count}} tareas",
     "stage": "Etapas anteriores · {{finished}}/{{total}} terminadas",
     "hint": "Al terminar estas tareas, el responsable comienza automáticamente o recibe una notificación.",
     "empty": "Sin tareas pendientes",

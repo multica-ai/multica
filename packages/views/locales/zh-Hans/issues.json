@@ -1968,6 +1968,7 @@
     "add": "添加前置任务",
     "remove": "移除 {{identifier}}",
     "count": "等待 {{count}} 个任务",
+    "count_other": "等待 {{count}} 个任务",
     "stage": "更早阶段 · {{finished}}/{{total}} 已结束",
     "hint": "全部结束后，负责人将自动开工或收到通知。",
     "empty": "没有等待的任务",
