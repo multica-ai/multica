@@ -63,6 +63,8 @@ type TimelineEntry struct {
 // like commentHardCap; nothing outside tests assigns it.
 var timelineHardCap = 2000
 
+const projectActivityHardCap = 2000
+
 // timelineProbeLimit reads one row past the cap so "we hit the cap" can be
 // distinguished from "the issue happens to have exactly timelineHardCap rows".
 // Without the probe row an issue sitting exactly on the boundary would report a
@@ -251,6 +253,41 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	writeJSON(w, http.StatusOK, entries)
+}
+
+// ListProjectActivities returns the newest project activities in chronological order.
+func (h *Handler) ListProjectActivities(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "project id")
+	if !ok {
+		return
+	}
+	workspaceID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
+	if !ok {
+		return
+	}
+	if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+		ID: id, WorkspaceID: workspaceID,
+	}); err != nil {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+
+	activities, err := h.Queries.ListActivitiesForEntity(r.Context(), db.ListActivitiesForEntityParams{
+		WorkspaceID: workspaceID,
+		EntityType:  pgtype.Text{String: "project", Valid: true},
+		EntityID:    id,
+		LimitCount:  projectActivityHardCap,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list project activities")
+		return
+	}
+	entries := make([]TimelineEntry, len(activities))
+	for i, activity := range activities {
+		entries[i] = activityToEntry(activity)
+	}
+	h.hydrateTimelineMemberActors(r.Context(), entries)
 	writeJSON(w, http.StatusOK, entries)
 }
 

@@ -35,6 +35,73 @@ func cleanupActivities(t *testing.T, issueID string) {
 	testPool.Exec(context.Background(), `DELETE FROM activity_log WHERE issue_id = $1`, issueID)
 }
 
+func listActivitiesForProject(t *testing.T, queries *db.Queries, projectID string) []db.ActivityLog {
+	t.Helper()
+	activities, err := queries.ListActivitiesForEntity(context.Background(), db.ListActivitiesForEntityParams{
+		WorkspaceID: util.MustParseUUID(testWorkspaceID),
+		EntityType:  util.StrToText("project"),
+		EntityID:    util.MustParseUUID(projectID),
+		LimitCount:  100,
+	})
+	if err != nil {
+		t.Fatalf("ListActivitiesForEntity: %v", err)
+	}
+	return activities
+}
+
+func TestActivityProjectLifecycle(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerActivityListeners(bus, queries)
+	projectID := workspaceFixture(t).Project(t, "Activity project")
+	project := handler.ProjectResponse{
+		ID: projectID, WorkspaceID: testWorkspaceID, Title: "Activity project",
+		Status: "planned", Priority: "none",
+	}
+
+	bus.Publish(events.Event{
+		Type: protocol.EventProjectCreated, WorkspaceID: testWorkspaceID,
+		ActorType: "member", ActorID: testUserID,
+		Payload: map[string]any{"project": project},
+	})
+	updated := project
+	updated.Title = "Updated project"
+	updated.Status = "in_progress"
+	startDate := "2026-01-10"
+	description := "New description is not stored in activity details"
+	updated.StartDate = &startDate
+	updated.Description = &description
+	bus.Publish(events.Event{
+		Type: protocol.EventProjectUpdated, WorkspaceID: testWorkspaceID,
+		ActorType: "member", ActorID: testUserID,
+		Payload: map[string]any{"project": updated, "prev_project": project},
+	})
+
+	activities := listActivitiesForProject(t, queries, projectID)
+	want := []string{
+		"project_created", "project_title_changed", "project_status_changed",
+		"project_start_date_changed", "project_description_updated",
+	}
+	if len(activities) != len(want) {
+		t.Fatalf("activity count = %d, want %d: %+v", len(activities), len(want), activities)
+	}
+	for i, action := range want {
+		if activities[i].Action != action {
+			t.Fatalf("activity %d action = %q, want %q", i, activities[i].Action, action)
+		}
+		if activities[i].EntityType.String != "project" || util.UUIDToString(activities[i].EntityID) != projectID {
+			t.Fatalf("activity %d has wrong entity: %+v", i, activities[i])
+		}
+	}
+	var details map[string]string
+	if err := json.Unmarshal(activities[4].Details, &details); err != nil {
+		t.Fatal(err)
+	}
+	if len(details) != 0 {
+		t.Fatalf("description activity leaked content: %#v", details)
+	}
+}
+
 func TestActivityIssueCreated(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()

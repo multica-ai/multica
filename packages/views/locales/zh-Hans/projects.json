@@ -67,6 +67,7 @@
     "copy_link": "复制链接",
     "delete_action": "删除项目",
     "section_properties": "属性",
+    "section_activity_history": "操作记录",
     "section_progress": "进度",
     "section_description": "描述",
     "prop_start_date": "开始日期",
@@ -83,6 +84,15 @@
     "toast_link_copied": "已复制链接",
     "toast_project_deleted": "已删除项目",
     "toast_move_issue_failed": "移动任务失败"
+  },
+  "activity": {
+    "created": "创建了这个项目",
+    "changed": "将{{field}}从“{{from}}”改为“{{to}}”",
+    "set": "将{{field}}设为“{{value}}”",
+    "removed": "移除了{{field}}",
+    "description_updated": "更新了项目描述",
+    "icon_changed": "更换了项目图标",
+    "fields": { "title": "标题", "status": "状态", "priority": "优先级", "lead": "负责人", "start_date": "开始日期", "due_date": "截止日期" }
   },
   "resources": {
     "section_header": "资源",

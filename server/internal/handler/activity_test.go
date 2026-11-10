@@ -28,6 +28,42 @@ func fetchTimeline(t *testing.T, issueID string) ([]TimelineEntry, int) {
 	return entries, w.Code
 }
 
+func fetchProjectActivities(t *testing.T, projectID, workspaceID string) ([]TimelineEntry, int) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/projects/"+projectID+"/activities?workspace_id="+workspaceID, nil)
+	req = withURLParam(req, "id", projectID)
+	testHandler.ListProjectActivities(w, req)
+	var entries []TimelineEntry
+	if w.Code == http.StatusOK {
+		json.NewDecoder(w.Body).Decode(&entries)
+	}
+	return entries, w.Code
+}
+
+func TestListProjectActivitiesScopesByWorkspace(t *testing.T) {
+	projectID := dbfx.Project(t, "Activity scope project")
+	dbfx.Insert(t, "activity_log", testutil.Cols{
+		"workspace_id": testWorkspaceID,
+		"entity_type":  "project",
+		"entity_id":    projectID,
+		"actor_type":   "member",
+		"actor_id":     testUserID,
+		"action":       "project_created",
+		"details":      map[string]any{},
+	})
+
+	entries, status := fetchProjectActivities(t, projectID, testWorkspaceID)
+	if status != http.StatusOK || len(entries) != 1 {
+		t.Fatalf("own workspace status=%d entries=%d", status, len(entries))
+	}
+	foreignWorkspaceID := dbfx.Workspace(t, "Foreign activity workspace", testUserID)
+	entries, status = fetchProjectActivities(t, projectID, foreignWorkspaceID)
+	if status != http.StatusNotFound || len(entries) != 0 {
+		t.Fatalf("foreign workspace status=%d entries=%d, want 404/0", status, len(entries))
+	}
+}
+
 // createIssueForTimeline returns a freshly-created issue id and registers a
 // cleanup so its timeline rows are deleted after the test.
 func createIssueForTimeline(t *testing.T, title string) string {

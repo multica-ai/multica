@@ -26,6 +26,34 @@ afterEach(() => {
 // app in past incidents. The contract is: a malformed response degrades to
 // an empty/safe shape, never throws into React.
 describe("ApiClient schema fallback", () => {
+  describe("listProjectActivities", () => {
+    it("falls back to an empty array when the response is malformed", async () => {
+      stubFetchJson({ wrong: "shape" });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listProjectActivities("project-1")).resolves.toEqual([]);
+    });
+
+    it("parses project activity entries", async () => {
+      stubFetchJson([
+        {
+          type: "activity",
+          id: "activity-1",
+          actor_type: "member",
+          actor_id: "user-1",
+          action: "project_title_changed",
+          details: { from: "Old", to: "New" },
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const entries = await client.listProjectActivities("project-1");
+      expect(entries[0]).toMatchObject({
+        action: "project_title_changed",
+        details: { from: "Old", to: "New" },
+      });
+    });
+  });
+
   describe("workspace pin responses", () => {
     it("defaults missing or malformed pinned_at to null and falls back on malformed lists", async () => {
       const ws = { id: "ws-1", name: "One", slug: "one", description: null, context: null, settings: {}, repos: [], issue_prefix: "ONE", avatar_url: null, created_at: "2026-01-01", updated_at: "2026-01-01" };

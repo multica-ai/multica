@@ -65,6 +65,7 @@
     "copy_link": "Скопировать ссылку",
     "delete_action": "Удалить проект",
     "section_properties": "Свойства",
+    "section_activity_history": "История действий",
     "section_progress": "Прогресс",
     "section_description": "Описание",
     "prop_start_date": "Дата начала",
@@ -83,6 +84,15 @@
     "not_found_description": "Возможно, он удалён или у вас нет доступа.",
     "back_to_list": "Все проекты",
     "empty_issues_add_existing": "Добавить существующую задачу"
+  },
+  "activity": {
+    "created": "создал(а) этот проект",
+    "changed": "изменил(а) {{field}} с «{{from}}» на «{{to}}»",
+    "set": "установил(а) {{field}}: «{{value}}»",
+    "removed": "удалил(а) {{field}}",
+    "description_updated": "обновил(а) описание проекта",
+    "icon_changed": "изменил(а) значок проекта",
+    "fields": { "title": "название", "status": "статус", "priority": "приоритет", "lead": "ответственного", "start_date": "дату начала", "due_date": "срок" }
   },
   "resources": {
     "section_header": "Ресурсы",

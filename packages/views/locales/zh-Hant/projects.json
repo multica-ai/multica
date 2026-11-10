@@ -67,6 +67,7 @@
     "copy_link": "複製連結",
     "delete_action": "刪除專案",
     "section_properties": "屬性",
+    "section_activity_history": "操作記錄",
     "section_progress": "進度",
     "section_description": "描述",
     "prop_start_date": "開始日期",
@@ -83,6 +84,15 @@
     "toast_link_copied": "已複製連結",
     "toast_project_deleted": "已刪除專案",
     "toast_move_issue_failed": "移動任務失敗"
+  },
+  "activity": {
+    "created": "建立了這個專案",
+    "changed": "將{{field}}從「{{from}}」改為「{{to}}」",
+    "set": "將{{field}}設為「{{value}}」",
+    "removed": "移除了{{field}}",
+    "description_updated": "更新了專案描述",
+    "icon_changed": "更換了專案圖示",
+    "fields": { "title": "標題", "status": "狀態", "priority": "優先順序", "lead": "負責人", "start_date": "開始日期", "due_date": "截止日期" }
   },
   "resources": {
     "section_header": "資源",

@@ -65,6 +65,7 @@
     "copy_link": "Copiar enlace",
     "delete_action": "Eliminar proyecto",
     "section_properties": "Propiedades",
+    "section_activity_history": "Historial de actividad",
     "section_progress": "Progreso",
     "section_description": "Descripción",
     "prop_start_date": "Fecha de inicio",
@@ -83,6 +84,15 @@
     "not_found_description": "Puede haberse eliminado o puede que no tengas acceso.",
     "back_to_list": "Todos los proyectos",
     "empty_issues_add_existing": "Añadir tarea existente"
+  },
+  "activity": {
+    "created": "creó este proyecto",
+    "changed": "cambió {{field}} de «{{from}}» a «{{to}}»",
+    "set": "estableció {{field}} en «{{value}}»",
+    "removed": "eliminó {{field}}",
+    "description_updated": "actualizó la descripción del proyecto",
+    "icon_changed": "cambió el icono del proyecto",
+    "fields": { "title": "el título", "status": "el estado", "priority": "la prioridad", "lead": "el responsable", "start_date": "la fecha de inicio", "due_date": "la fecha límite" }
   },
   "resources": {
     "section_header": "Recursos",

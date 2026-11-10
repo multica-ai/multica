@@ -21,6 +21,74 @@ import (
 func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 	ctx := context.Background()
 
+	bus.Subscribe(protocol.EventProjectCreated, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		project, ok := payload["project"].(handler.ProjectResponse)
+		if !ok {
+			return
+		}
+		recordProjectActivity(ctx, bus, queries, e, project, "project_created", map[string]string{
+			"title": project.Title,
+		})
+	})
+
+	bus.Subscribe(protocol.EventProjectUpdated, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		project, projectOK := payload["project"].(handler.ProjectResponse)
+		previous, previousOK := payload["prev_project"].(handler.ProjectResponse)
+		if !projectOK || !previousOK {
+			return
+		}
+
+		if previous.Title != project.Title {
+			recordProjectActivity(ctx, bus, queries, e, project, "project_title_changed", map[string]string{
+				"from": previous.Title, "to": project.Title,
+			})
+		}
+		if previous.Status != project.Status {
+			recordProjectActivity(ctx, bus, queries, e, project, "project_status_changed", map[string]string{
+				"from": previous.Status, "to": project.Status,
+			})
+		}
+		if previous.Priority != project.Priority {
+			recordProjectActivity(ctx, bus, queries, e, project, "project_priority_changed", map[string]string{
+				"from": previous.Priority, "to": project.Priority,
+			})
+		}
+		if !sameOptionalString(previous.LeadType, project.LeadType) || !sameOptionalString(previous.LeadID, project.LeadID) {
+			details := map[string]string{}
+			addOptionalDetail(details, "from_type", previous.LeadType)
+			addOptionalDetail(details, "from_id", previous.LeadID)
+			addOptionalDetail(details, "to_type", project.LeadType)
+			addOptionalDetail(details, "to_id", project.LeadID)
+			recordProjectActivity(ctx, bus, queries, e, project, "project_lead_changed", details)
+		}
+		if !sameOptionalString(previous.StartDate, project.StartDate) {
+			details := map[string]string{}
+			addOptionalDetail(details, "from", previous.StartDate)
+			addOptionalDetail(details, "to", project.StartDate)
+			recordProjectActivity(ctx, bus, queries, e, project, "project_start_date_changed", details)
+		}
+		if !sameOptionalString(previous.DueDate, project.DueDate) {
+			details := map[string]string{}
+			addOptionalDetail(details, "from", previous.DueDate)
+			addOptionalDetail(details, "to", project.DueDate)
+			recordProjectActivity(ctx, bus, queries, e, project, "project_due_date_changed", details)
+		}
+		if !sameOptionalString(previous.Description, project.Description) {
+			recordProjectActivity(ctx, bus, queries, e, project, "project_description_updated", map[string]string{})
+		}
+		if !sameOptionalString(previous.Icon, project.Icon) {
+			recordProjectActivity(ctx, bus, queries, e, project, "project_icon_changed", map[string]string{})
+		}
+	})
+
 	// issue:created — record "created" activity
 	bus.Subscribe(protocol.EventIssueCreated, func(e events.Event) {
 		payload, ok := e.Payload.(map[string]any)
@@ -288,6 +356,73 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 	// task:failed — record "task_failed" activity
 	bus.Subscribe(protocol.EventTaskFailed, func(e events.Event) {
 		handleTaskActivity(ctx, bus, queries, e, "task_failed")
+	})
+}
+
+func sameOptionalString(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func addOptionalDetail(details map[string]string, key string, value *string) {
+	if value != nil && *value != "" {
+		details[key] = *value
+	}
+}
+
+func recordProjectActivity(
+	ctx context.Context,
+	bus *events.Bus,
+	queries *db.Queries,
+	e events.Event,
+	project handler.ProjectResponse,
+	action string,
+	detailsMap map[string]string,
+) {
+	details, _ := json.Marshal(detailsMap)
+	activity, err := queries.CreateEntityActivity(ctx, db.CreateEntityActivityParams{
+		ID:          dbid.NewV7(),
+		WorkspaceID: parseUUID(project.WorkspaceID),
+		EntityType:  util.StrToText("project"),
+		EntityID:    parseUUID(project.ID),
+		ActorType:   util.StrToText(e.ActorType),
+		ActorID:     optionalUUID(e.ActorID),
+		Action:      action,
+		Details:     details,
+	})
+	if err != nil {
+		slog.Error("activity: failed to record project activity",
+			"project_id", project.ID, "action", action, "error", err)
+		return
+	}
+	publishProjectActivityEvent(bus, e, activity)
+}
+
+func publishProjectActivityEvent(bus *events.Bus, original events.Event, activity db.ActivityLog) {
+	actorType := ""
+	if activity.ActorType.Valid {
+		actorType = activity.ActorType.String
+	}
+	bus.Publish(events.Event{
+		Type:        protocol.EventActivityCreated,
+		WorkspaceID: original.WorkspaceID,
+		ActorType:   original.ActorType,
+		ActorID:     original.ActorID,
+		Payload: map[string]any{
+			"entity_type": "project",
+			"entity_id":   util.UUIDToString(activity.EntityID),
+			"entry": map[string]any{
+				"type":       "activity",
+				"id":         util.UUIDToString(activity.ID),
+				"actor_type": actorType,
+				"actor_id":   util.UUIDToString(activity.ActorID),
+				"action":     activity.Action,
+				"details":    json.RawMessage(activity.Details),
+				"created_at": util.TimestampToString(activity.CreatedAt),
+			},
+		},
 	})
 }
 

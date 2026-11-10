@@ -1348,8 +1348,12 @@ export function useRealtimeSync(
     });
 
     const unsubActivityCreated = ws.on("activity:created", (p) => {
-      const { issue_id } = p as ActivityCreatedPayload;
+      const { issue_id, entity_type, entity_id } = p as ActivityCreatedPayload;
       if (issue_id) invalidateTimeline(issue_id);
+      if (entity_type === "project" && entity_id) {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: projectKeys.activities(wsId, entity_id) });
+      }
     });
 
     const unsubReactionAdded = ws.on("reaction:added", (p) => {

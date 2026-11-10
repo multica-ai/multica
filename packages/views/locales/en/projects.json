@@ -67,6 +67,7 @@
     "copy_link": "Copy link",
     "delete_action": "Delete project",
     "section_properties": "Properties",
+    "section_activity_history": "Activity history",
     "section_progress": "Progress",
     "section_description": "Description",
     "prop_start_date": "Start date",
@@ -83,6 +84,15 @@
     "toast_link_copied": "Link copied",
     "toast_project_deleted": "Project deleted",
     "toast_move_issue_failed": "Failed to move issue"
+  },
+  "activity": {
+    "created": "created this project",
+    "changed": "changed {{field}} from \"{{from}}\" to \"{{to}}\"",
+    "set": "set {{field}} to \"{{value}}\"",
+    "removed": "removed {{field}}",
+    "description_updated": "updated the project description",
+    "icon_changed": "changed the project icon",
+    "fields": { "title": "title", "status": "status", "priority": "priority", "lead": "lead", "start_date": "start date", "due_date": "due date" }
   },
   "resources": {
     "section_header": "Resources",

@@ -326,7 +326,9 @@ export interface SubscriberRemovedPayload {
 }
 
 export interface ActivityCreatedPayload {
-  issue_id: string;
+  issue_id?: string;
+  entity_type?: "issue" | "project";
+  entity_id?: string;
   entry: TimelineEntry;
 }
 

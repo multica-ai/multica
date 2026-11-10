@@ -67,6 +67,7 @@
     "copy_link": "リンクをコピー",
     "delete_action": "プロジェクトを削除",
     "section_properties": "プロパティ",
+    "section_activity_history": "アクティビティ履歴",
     "section_progress": "進捗",
     "section_description": "説明",
     "prop_start_date": "開始日",
@@ -83,6 +84,15 @@
     "toast_link_copied": "リンクをコピーしました",
     "toast_project_deleted": "プロジェクトを削除しました",
     "toast_move_issue_failed": "タスクを移動できませんでした"
+  },
+  "activity": {
+    "created": "このプロジェクトを作成しました",
+    "changed": "{{field}}を「{{from}}」から「{{to}}」に変更しました",
+    "set": "{{field}}を「{{value}}」に設定しました",
+    "removed": "{{field}}を削除しました",
+    "description_updated": "プロジェクトの説明を更新しました",
+    "icon_changed": "プロジェクトのアイコンを変更しました",
+    "fields": { "title": "タイトル", "status": "ステータス", "priority": "優先度", "lead": "担当者", "start_date": "開始日", "due_date": "期限" }
   },
   "resources": {
     "section_header": "リソース",
