@@ -7,6 +7,7 @@ import type { DraftUpload } from "@multica/core/drafts";
 import enCommon from "../../locales/en/common.json";
 import enChat from "../../locales/en/chat.json";
 import enEditor from "../../locales/en/editor.json";
+import enIssues from "../../locales/en/issues.json";
 
 // Uploads flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2). Tests drive uploads by
@@ -54,7 +55,7 @@ function makeUpload(overrides: Partial<UploadResult> & { id: string; link: strin
   };
 }
 
-const TEST_RESOURCES = { en: { common: enCommon, chat: enChat, editor: enEditor } };
+const TEST_RESOURCES = { en: { common: enCommon, chat: enChat, editor: enEditor, issues: enIssues } };
 
 // Track drop-zone callbacks so the test can simulate a real drop.
 const dropHandlers = vi.hoisted(() => ({
@@ -248,6 +249,8 @@ vi.mock("@multica/core/chat", () => {
 
 import { ChatInput } from "./chat-input";
 import { useChatStore } from "@multica/core/chat";
+import { useCommentDraftStore } from "@multica/core/issues/stores";
+import { composeAnnotatedReply } from "@multica/core/drafts/reply-annotation";
 
 type ChatInputOnSend = React.ComponentProps<typeof ChatInput>["onSend"];
 type ChatInputCommit = Parameters<ChatInputOnSend>[2];
@@ -381,6 +384,68 @@ function element(props: Partial<React.ComponentProps<typeof ChatInput>>) {
     </I18nProvider>
   );
 }
+
+describe("ChatInput annotations", () => {
+  const key = "chat:session-1" as const;
+  const annotation = {
+    id: "ann-1", sourceCommentId: "msg-1", sourceActorName: "Multica",
+    quote: "Use the cache.", note: "Why not the DB?", start: 0, prefix: "", suffix: "",
+  };
+  const slot = { draftKey: key, composer: undefined, editAnnotation: () => true };
+  function lastButton() {
+    const buttons = screen.getAllByRole("button");
+    return buttons[buttons.length - 1]!;
+  }
+
+  beforeEach(() => {
+    (useChatStore.getState() as unknown as { activeSessionId: string | null }).activeSessionId = "session-1";
+    useCommentDraftStore.setState({ drafts: {} });
+    useCommentDraftStore.getState().addAnnotation(key, annotation);
+  });
+
+  it("sends saved annotations on their own, then drops the sent ones", async () => {
+    const onSend = vi.fn<ChatInputOnSend>((_content, _ids, commitInput) => {
+      commitInput();
+      return true;
+    });
+    renderInput({ onSend, annotations: slot });
+
+    expect(screen.getByRole("button", { name: "1 annotation" })).toBeInTheDocument();
+    await waitFor(() => expect(lastButton()).not.toBeDisabled());
+    fireEvent.click(lastButton());
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]![0]).toBe(composeAnnotatedReply("", [annotation]));
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toEqual([]);
+    expect(screen.queryByRole("button", { name: "1 annotation" })).not.toBeInTheDocument();
+  });
+
+  it("quotes annotations ahead of the typed text and keeps them when the send is rejected", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(() => false);
+    renderInput({ onSend, annotations: slot });
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "Also check retries" } });
+    fireEvent.click(lastButton());
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    const sent = onSend.mock.calls[0]![0];
+    expect(sent).toBe(composeAnnotatedReply("Also check retries", [annotation]));
+    expect(sent.startsWith("> Use the cache")).toBe(true);
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(1);
+  });
+
+  it("leaves sends untouched without an annotation slot", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(() => true);
+    renderInput({ onSend });
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "plain" } });
+    fireEvent.click(lastButton());
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]![0]).toBe("plain");
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(1);
+  });
+});
 
 // MUL-4864: an uncreated chat has ONE draft per workspace. `selectedAgentId`
 // picks where the first send goes; it does not own the draft. Switching agent

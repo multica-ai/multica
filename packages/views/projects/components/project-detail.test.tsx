@@ -28,8 +28,9 @@ vi.mock("@multica/ui/lib/clipboard", () => ({
   copyText: mocks.copyText,
 }));
 
-vi.mock("../../workflows/project-workflow-menu", () => ({
-  ProjectWorkflowMenuHost: ({ children }: { children: (submenu: null) => React.ReactNode }) => children(null),
+vi.mock("../../workflows/project-workflow-sheet", () => ({
+  ProjectWorkflowMenuItem: () => null,
+  ProjectWorkflowSheet: () => null,
 }));
 vi.mock("../../workflows/project-workflow-row", () => ({ ProjectWorkflowControl: () => null }));
 

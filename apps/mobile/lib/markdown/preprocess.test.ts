@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { preprocessMobileMarkdown } from "./preprocess";
+import { splitMarkdown } from "./split-markdown";
 
 const UUID = "019f49e2-5b07-7970-beef-c0d537fb8c1d";
 const ABS_URL = `https://multica-app.copilothub.ai/api/attachments/${UUID}/download`;
@@ -74,5 +75,53 @@ describe("preprocessMobileMarkdown — angle-bracket image destinations", () => 
   it("still strips HTML tags while preserving text and hard breaks", () => {
     expect(preprocessMobileMarkdown('<div class="note">A<br/><b>B</b></div>'))
       .toBe("A  \nB");
+  });
+});
+
+describe("preprocessMobileMarkdown — HTML images", () => {
+  it("renders an HTML <img> as an image segment", () => {
+    const out = preprocessMobileMarkdown(
+      'Text\n\n<img src="https://host/a.png" width="400" />\n\nEnd',
+    );
+    expect(out).toBe("Text\n\n![](https://host/a.png)\n\nEnd");
+    expect(splitMarkdown(out)).toEqual([
+      { type: "prose", content: "Text" },
+      { type: "image", uri: "https://host/a.png", alt: "" },
+      { type: "prose", content: "End" },
+    ]);
+  });
+
+  it.each([
+    ['<img alt="a [b]" src=\'https://host/a.png\'>', "![a \\[b\\]](https://host/a.png)"],
+    ["<IMG SRC=https://host/a.png ALT=chart>", "![chart](https://host/a.png)"],
+    ['<img\n  src="https://host/a.png"\n  alt="multi\nline"\n/>', "![multi line](https://host/a.png)"],
+    ['<img src="https://host/a(1).png">', "![](<https://host/a(1).png>)"],
+    ['<p align="center"><a href="https://host/a.png"><img src="https://host/a.png"></a></p>', "![](https://host/a.png)"],
+  ])("rewrites %j", (input, expected) => {
+    expect(preprocessMobileMarkdown(input)).toBe(expected);
+  });
+
+  it.each([
+    '<img src="javascript:alert(1)">',
+    '<img src="data:image/png;base64,AAAA">',
+    '<img src="/uploads/a.png">',
+    '<img alt="no source">',
+  ])("drops %j without an http(s) source", (input) => {
+    expect(preprocessMobileMarkdown(input)).toBe("");
+  });
+
+  it.each([
+    'Use `<img src="https://host/a.png">` here',
+    '```html\n<img src="https://host/a.png" width="400" />\n<br>\n```',
+    '- item\n\n  ~~~\n  <img src="https://host/a.png">\n  ~~~',
+    '    <img src="https://host/a.png">',
+  ])("keeps HTML inside code literal: %j", (input) => {
+    expect(preprocessMobileMarkdown(input)).toBe(input);
+  });
+
+  it("rewrites images around code without touching the code", () => {
+    const input = '<img src="https://host/a.png">\n\n`<img src="https://host/b.png">` <b>x</b>';
+    expect(preprocessMobileMarkdown(input))
+      .toBe('![](https://host/a.png)\n\n`<img src="https://host/b.png">` x');
   });
 });

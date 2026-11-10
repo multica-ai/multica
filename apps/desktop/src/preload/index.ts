@@ -339,6 +339,10 @@ type DaemonReauthResult =
   | { ok: false; reason: "session_invalid" }
   | { ok: false; reason: "transient"; message: string };
 
+type FocusEnvironmentResult =
+  | { ok: true }
+  | { ok: false; reason: "gone" | "unsupported" | "unavailable" | "failed"; error?: string };
+
 const daemonAPI = {
   start: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("daemon:start"),
@@ -352,6 +356,8 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:probe-runtimes"),
   getHostName: (): Promise<string> =>
     ipcRenderer.invoke("daemon:get-host-name"),
+  focusEnvironment: (key: string): Promise<FocusEnvironmentResult> =>
+    ipcRenderer.invoke("daemon:focus-environment", key),
   onStatusChange: (callback: (status: DaemonStatus) => void) => {
     const handler = (_: unknown, status: DaemonStatus) => callback(status);
     ipcRenderer.on("daemon:status", handler);

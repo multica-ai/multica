@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -143,6 +145,24 @@ func (s *environmentService) servesFrom(dir string) bool {
 		}
 	}
 	return false
+}
+
+// focus brings forward the desktop app last detected under key.
+func (s *environmentService) focus(ctx context.Context, key string) error {
+	s.mu.Lock()
+	var target *localenv.Environment
+	for i := range s.detected {
+		if s.detected[i].Key == key && s.detected[i].Kind == localenv.KindApp {
+			env := s.detected[i]
+			target = &env
+			break
+		}
+	}
+	s.mu.Unlock()
+	if target == nil {
+		return localenv.ErrAppGone
+	}
+	return target.Focus(ctx)
 }
 
 func (s *environmentService) nudge() {
@@ -337,7 +357,7 @@ func environmentFingerprint(envs []localenv.Environment) string {
 		if env.ExpiresAt != nil {
 			expires = env.ExpiresAt.UTC().Format(time.RFC3339)
 		}
-		parts = append(parts, strings.Join([]string{env.Key, env.State, env.URL, env.Label, env.Detail, expires}, "\x1f"))
+		parts = append(parts, strings.Join([]string{env.Key, env.Kind, env.State, env.URL, env.Label, env.Detail, expires}, "\x1f"))
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, "\x1e")
@@ -347,7 +367,7 @@ func toEnvironmentReports(envs []localenv.Environment) []TaskEnvironmentReport {
 	out := make([]TaskEnvironmentReport, 0, len(envs))
 	for _, env := range envs {
 		out = append(out, TaskEnvironmentReport{
-			Key: env.Key, Source: env.Source, Name: env.Name, Label: env.Label, URL: env.URL,
+			Key: env.Key, Source: env.Source, Kind: env.Kind, Name: env.Name, Label: env.Label, URL: env.URL,
 			Port: env.Port, State: env.State, Detail: env.Detail, StartedAt: env.StartedAt, ExpiresAt: env.ExpiresAt,
 		})
 	}
@@ -470,6 +490,60 @@ func (d *Daemon) environmentListHandler() http.HandlerFunc {
 		}
 		writeEnvironmentResponse(w, environmentResponse{Environments: envs})
 	}
+}
+
+type environmentFocusRequest struct {
+	Key string `json:"key"`
+}
+
+// environmentFocusHandler brings a detected desktop app's window forward.
+// Desktop calls it on behalf of whoever sits at this machine, so unlike its
+// siblings there is no task credential to check. A request can only raise a
+// window this daemon already found in a task directory. Browsers cannot send
+// it: a page's POST always carries an Origin header, and a JSON body needs a
+// CORS preflight this server never answers.
+func (d *Daemon) environmentFocusHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if r.Header.Get("Origin") != "" || mediaType != "application/json" {
+			writeEnvironmentFocusError(w, http.StatusForbidden, "forbidden", "focus requests come from Desktop, as JSON, without an Origin")
+			return
+		}
+		if d.environments == nil {
+			writeEnvironmentFocusError(w, http.StatusServiceUnavailable, "unavailable", "environments are not available on this daemon")
+			return
+		}
+		var req environmentFocusRequest
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil {
+			writeEnvironmentFocusError(w, http.StatusBadRequest, "invalid", "invalid request body: "+err.Error())
+			return
+		}
+		err := d.environments.focus(r.Context(), strings.TrimSpace(req.Key))
+		switch {
+		case err == nil:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]bool{"focused": true})
+		case errors.Is(err, localenv.ErrAppGone):
+			writeEnvironmentFocusError(w, http.StatusNotFound, "gone", err.Error())
+		case errors.Is(err, localenv.ErrFocusUnsupported):
+			writeEnvironmentFocusError(w, http.StatusNotImplemented, "unsupported", err.Error())
+		default:
+			d.logger.Warn("environments: focus failed", "error", err)
+			writeEnvironmentFocusError(w, http.StatusInternalServerError, "failed", err.Error())
+		}
+	}
+}
+
+// The reason lets Desktop tell the user what happened; a daemon too old for
+// this endpoint answers the mux's plain-text 404 instead.
+func writeEnvironmentFocusError(w http.ResponseWriter, status int, reason, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"reason": reason, "error": message})
 }
 
 func writeEnvironmentResponse(w http.ResponseWriter, resp environmentResponse) {

@@ -210,7 +210,7 @@
     "section_relation": "Relación conmigo",
     "relation_assigned": "Asignadas a mí",
     "relation_created": "Creadas por mí",
-    "relation_my_agents": "Asignadas a mis agentes",
+    "relation_my_agents": "Trabajo de mis agentes",
     "relation_subscribed": "Suscrito por mí",
     "section_agent_status": "Estado del agente",
     "agent_status_running": "En ejecución",
@@ -1031,7 +1031,7 @@
     "variant_my_any": "Cualquier relación",
     "variant_my_assigned": "Asignadas a mí",
     "variant_my_created": "Creadas por mí",
-    "variant_my_involved": "En las que participo"
+    "variant_my_involved": "Trabajo de mis agentes"
   },
   "plugins": {
     "panels": "Plugins",
@@ -1774,16 +1774,13 @@
       "name_placeholder": "Nombre del estado",
       "add": "Añadir"
     },
-    "menu": {
-      "view_flow": "Ver el flujo completo",
-      "switch": "Cambiar de flujo de trabajo"
-    },
     "flow": {
       "title": "Flujo de trabajo {{workflow}}",
       "scope_own": "Solo este proyecto usa este flujo de trabajo.",
       "no_handoff_here": "Sin traspaso",
       "scope_shared_one": "{{count}} proyecto usa este flujo de trabajo. Sus traspasos se aplican a todos los proyectos que lo usan.",
-      "scope_shared_other": "{{count}} proyectos usan este flujo de trabajo. Sus traspasos se aplican a todos ellos."
+      "scope_shared_other": "{{count}} proyectos usan este flujo de trabajo. Sus traspasos se aplican a todos ellos.",
+      "switch": "Cambiar de flujo de trabajo"
     },
     "templates": {
       "delivery": {
@@ -1821,7 +1818,7 @@
   },
   "relation_filter_error": {
     "title": "No se ha podido cargar el filtro «Relación conmigo»",
-    "hint": "Las tareas filtradas por «Suscrito por mí» o «Asignadas a mis agentes» no se pueden mostrar hasta que se carguen tus suscripciones y agentes."
+    "hint": "Las tareas filtradas por «Suscrito por mí» o «Trabajo de mis agentes» no se pueden mostrar hasta que se carguen tus suscripciones y agentes."
   },
   "views": {
     "builtin": {
@@ -1941,6 +1938,13 @@
     "open": "Abrir",
     "copy_url": "Copiar URL",
     "copied": "URL copiada",
-    "copy_failed": "No se pudo copiar la URL"
+    "copy_failed": "No se pudo copiar la URL",
+    "app_desktop_hint": "Una app de escritorio. Cambia a su ventana desde Multica Desktop en la máquina que la ejecuta.",
+    "app_remote_hint": "Se ejecuta en {{machine}}. Cambia a su ventana desde Multica Desktop en esa máquina.",
+    "focus": "Ir a la ventana",
+    "focus_gone": "{{name}} ya no se está ejecutando",
+    "focus_unsupported": "El daemon de esta máquina aún no puede cambiar a ventanas de apps. Actualiza Multica e inténtalo de nuevo.",
+    "focus_unavailable": "El daemon local no se está ejecutando",
+    "focus_failed": "No se pudo cambiar a {{name}}"
   }
 }

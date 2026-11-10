@@ -34,7 +34,7 @@ func (q *Queries) EndIssueEnvironmentsMissingFromSnapshot(ctx context.Context, a
 }
 
 const listIssueEnvironments = `-- name: ListIssueEnvironments :many
-SELECT id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at FROM issue_environment
+SELECT id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind FROM issue_environment
 WHERE issue_id = $1
   AND workspace_id = $2
   AND (ended_at IS NULL OR ended_at > $3::timestamptz)
@@ -79,6 +79,7 @@ func (q *Queries) ListIssueEnvironments(ctx context.Context, arg ListIssueEnviro
 			&i.EndedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Kind,
 		); err != nil {
 			return nil, err
 		}
@@ -91,7 +92,7 @@ func (q *Queries) ListIssueEnvironments(ctx context.Context, arg ListIssueEnviro
 }
 
 const listOpenIssueEnvironmentsByTask = `-- name: ListOpenIssueEnvironmentsByTask :many
-SELECT id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at FROM issue_environment
+SELECT id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind FROM issue_environment
 WHERE task_id = $1 AND ended_at IS NULL
 `
 
@@ -125,6 +126,7 @@ func (q *Queries) ListOpenIssueEnvironmentsByTask(ctx context.Context, taskID pg
 			&i.EndedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Kind,
 		); err != nil {
 			return nil, err
 		}
@@ -139,14 +141,15 @@ func (q *Queries) ListOpenIssueEnvironmentsByTask(ctx context.Context, taskID pg
 const upsertIssueEnvironment = `-- name: UpsertIssueEnvironment :one
 INSERT INTO issue_environment (
     workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source,
-    name, label, url, port, state, detail, started_at, expires_at, ended_at
+    kind, name, label, url, port, state, detail, started_at, expires_at, ended_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
-    $8, $9, $10, $11, $12, $13, $14, $15,
-    CASE WHEN $12::text IN ('exited', 'stopped') THEN now() END
+    $8, $9, $10, $11, $12, $13, $14, $15, $16,
+    CASE WHEN $13::text IN ('exited', 'stopped') THEN now() END
 )
 ON CONFLICT (task_id, local_key) DO UPDATE SET
     source = EXCLUDED.source,
+    kind = EXCLUDED.kind,
     name = EXCLUDED.name,
     label = EXCLUDED.label,
     url = EXCLUDED.url,
@@ -160,7 +163,7 @@ ON CONFLICT (task_id, local_key) DO UPDATE SET
         WHEN EXCLUDED.state IN ('exited', 'stopped') THEN COALESCE(issue_environment.ended_at, now())
     END,
     updated_at = now()
-RETURNING id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at
+RETURNING id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind
 `
 
 type UpsertIssueEnvironmentParams struct {
@@ -171,6 +174,7 @@ type UpsertIssueEnvironmentParams struct {
 	AgentID     pgtype.UUID        `json:"agent_id"`
 	LocalKey    string             `json:"local_key"`
 	Source      string             `json:"source"`
+	Kind        string             `json:"kind"`
 	Name        string             `json:"name"`
 	Label       string             `json:"label"`
 	Url         string             `json:"url"`
@@ -192,6 +196,7 @@ func (q *Queries) UpsertIssueEnvironment(ctx context.Context, arg UpsertIssueEnv
 		arg.AgentID,
 		arg.LocalKey,
 		arg.Source,
+		arg.Kind,
 		arg.Name,
 		arg.Label,
 		arg.Url,
@@ -223,6 +228,7 @@ func (q *Queries) UpsertIssueEnvironment(ctx context.Context, arg UpsertIssueEnv
 		&i.EndedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Kind,
 	)
 	return i, err
 }

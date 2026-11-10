@@ -7,14 +7,15 @@ WHERE task_id = $1 AND ended_at IS NULL;
 -- so re-reporting the same snapshot does not move it.
 INSERT INTO issue_environment (
     workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source,
-    name, label, url, port, state, detail, started_at, expires_at, ended_at
+    kind, name, label, url, port, state, detail, started_at, expires_at, ended_at
 ) VALUES (
     @workspace_id, @issue_id, @task_id, @runtime_id, @agent_id, @local_key, @source,
-    @name, @label, @url, @port, @state, @detail, @started_at, @expires_at,
+    @kind, @name, @label, @url, @port, @state, @detail, @started_at, @expires_at,
     CASE WHEN @state::text IN ('exited', 'stopped') THEN now() END
 )
 ON CONFLICT (task_id, local_key) DO UPDATE SET
     source = EXCLUDED.source,
+    kind = EXCLUDED.kind,
     name = EXCLUDED.name,
     label = EXCLUDED.label,
     url = EXCLUDED.url,

@@ -114,8 +114,12 @@ export interface IssueFilterContext {
 export interface IssueRelationContext {
   userId: string;
   /** Agents the viewer owns. Loaded only while a filter tests "my_agents";
-   *  without it that relation is left to the server. */
+   *  without it that relation is left to the server for agent rows. */
   myAgentIds?: ReadonlySet<string>;
+  /** Squads the viewer or one of their agents is in, the other half of
+   *  "my_agents"; without it that relation is left to the server for squad
+   *  rows. */
+  mySquadIds?: ReadonlySet<string>;
   /** Issues the viewer subscribes to. Loaded only while a filter tests the
    *  relation; without it "subscribed" is left to the server. */
   subscribedIssueIds?: ReadonlySet<string>;
@@ -399,13 +403,17 @@ function issueMatchesRelation(
       return issue.assignee_type === "member" && issue.assignee_id === context.userId;
     case "created":
       return issue.creator_type === "member" && issue.creator_id === context.userId;
-    case "my_agents":
-      if (!context.myAgentIds) return undefined;
-      return (
-        issue.assignee_type === "agent" &&
-        !!issue.assignee_id &&
-        context.myAgentIds.has(issue.assignee_id)
-      );
+    case "my_agents": {
+      const ids =
+        issue.assignee_type === "agent"
+          ? context.myAgentIds
+          : issue.assignee_type === "squad"
+            ? context.mySquadIds
+            : null;
+      if (ids === null) return false;
+      if (!ids) return undefined;
+      return !!issue.assignee_id && ids.has(issue.assignee_id);
+    }
   }
 }
 

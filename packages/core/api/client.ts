@@ -461,6 +461,7 @@ import {
   TeamAppImpactSchema,
   EMPTY_ISSUE_UNREAD_PAGE,
   SubscribedIssueIdsSchema,
+  InvolvedSquadIdsSchema,
   IssueInboxReadSchema,
   InboxItemListSchema,
   ArchivedInboxPageSchema,
@@ -4970,6 +4971,15 @@ export class ApiClient {
     return parseWithFallback(raw, SquadListSchema, EMPTY_SQUAD_LIST, {
       endpoint: "GET /api/squads",
     }) as Squad[];
+  }
+
+  async listInvolvedSquadIds(): Promise<string[]> {
+    const raw = await this.fetch<unknown>("/api/squads/involved");
+    const parsed = parseWithFallback<{ squad_ids: string[] } | null>(raw, InvolvedSquadIdsSchema, null, {
+      endpoint: "GET /api/squads/involved",
+    });
+    if (!parsed) throw new Error("GET /api/squads/involved returned a malformed body");
+    return parsed.squad_ids;
   }
 
   async getSquad(id: string): Promise<Squad> {

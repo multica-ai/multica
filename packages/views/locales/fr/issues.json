@@ -56,7 +56,7 @@
   },
   "relation_filter_error": {
     "title": "Impossible de charger le filtre « Lien avec moi »",
-    "hint": "Les tâches filtrées par « Auxquels je suis abonné » ou « Assignés à mes agents » s'affichent une fois vos abonnements et agents chargés."
+    "hint": "Les tâches filtrées par « Auxquels je suis abonné » ou « Travail de mes agents » s'affichent une fois vos abonnements et agents chargés."
   },
   "source_context": {
     "create_action": "Créer une sous-tâche à partir d'ici",
@@ -194,7 +194,7 @@
     "section_relation": "Lien avec moi",
     "relation_assigned": "Qui me sont assignés",
     "relation_created": "Créés par moi",
-    "relation_my_agents": "Assignés à mes agents",
+    "relation_my_agents": "Travail de mes agents",
     "relation_subscribed": "Auxquels je suis abonné",
     "section_agent_status": "Statut de l'agent",
     "agent_status_running": "En cours d'exécution",
@@ -1117,7 +1117,7 @@
     "variant_my_any": "Toute relation",
     "variant_my_assigned": "Qui me sont assignés",
     "variant_my_created": "Que j'ai créés",
-    "variant_my_involved": "Impliqué"
+    "variant_my_involved": "Travail de mes agents"
   },
   "plugins": {
     "panels": "Plugins",
@@ -1781,16 +1781,13 @@
       "name_placeholder": "Nom de l’état",
       "add": "Ajouter"
     },
-    "menu": {
-      "view_flow": "Voir tout le flux",
-      "switch": "Changer de workflow"
-    },
     "flow": {
       "title": "Workflow {{workflow}}",
       "scope_own": "Seul ce projet utilise ce workflow.",
       "no_handoff_here": "Pas de relais",
       "scope_shared_one": "{{count}} projet utilise ce workflow. Ses transferts s’appliquent à chaque projet qui l’utilise.",
-      "scope_shared_other": "{{count}} projets utilisent ce workflow. Ses transferts s’appliquent à tous."
+      "scope_shared_other": "{{count}} projets utilisent ce workflow. Ses transferts s’appliquent à tous.",
+      "switch": "Changer de workflow"
     },
     "templates": {
       "delivery": {
@@ -1941,6 +1938,13 @@
     "open": "Ouvrir",
     "copy_url": "Copier l'URL",
     "copied": "URL copiée",
-    "copy_failed": "Impossible de copier l'URL"
+    "copy_failed": "Impossible de copier l'URL",
+    "app_desktop_hint": "Une app de bureau. Basculez vers sa fenêtre depuis Multica Desktop sur la machine qui l'exécute.",
+    "app_remote_hint": "S'exécute sur {{machine}}. Basculez vers sa fenêtre depuis Multica Desktop sur cette machine.",
+    "focus": "Afficher la fenêtre",
+    "focus_gone": "{{name}} ne s'exécute plus",
+    "focus_unsupported": "Le daemon de cette machine ne peut pas encore basculer vers les fenêtres d'apps. Mettez à jour Multica et réessayez.",
+    "focus_unavailable": "Le daemon local n'est pas en cours d'exécution",
+    "focus_failed": "Impossible de basculer vers {{name}}"
   }
 }

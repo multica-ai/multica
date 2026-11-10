@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronRight, Copy, ExternalLink, Globe, Laptop, Server } from "@multica/ui/icons";
+import { AppWindow, ArrowUpRight, ChevronRight, Copy, ExternalLink, Globe, Laptop, Server } from "@multica/ui/icons";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueEnvironmentsOptions } from "@multica/core/issues/queries";
@@ -13,6 +13,7 @@ import { IconButton } from "@multica/ui/components/common/icon-button";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
 import { useT, useTimeAgo } from "../../i18n";
+import { canFocusLocalEnvironments, focusLocalEnvironment } from "../../platform/environment-focus";
 import { useLocalDaemonStatus } from "../../platform/use-local-daemon-status";
 import { buildRuntimeMachines, type RuntimeMachine } from "../../runtimes/components/runtime-machines";
 import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
@@ -28,6 +29,7 @@ const STATE_TONE: Record<IssueEnvironmentState, string> = {
 };
 
 const isLive = (env: IssueEnvironment) => env.ended_at === null;
+const isApp = (env: IssueEnvironment) => env.kind === "app";
 
 type MachineGroup = { key: string; machine: RuntimeMachine | null; envs: IssueEnvironment[] };
 
@@ -35,8 +37,9 @@ type MachineGroup = { key: string; machine: RuntimeMachine | null; envs: IssueEn
  * "Environments" in the issue sidebar: the servers this issue's runs left
  * running — declared in the repository's `.multica/environments.toml` or
  * found listening in a run's directory — grouped by the machine they run on,
- * because a localhost URL only opens there. Renders nothing until a run
- * starts one.
+ * because a localhost URL only opens there. A desktop app has no URL; Desktop
+ * brings its window forward, but only through the daemon that found it.
+ * Renders nothing until a run starts one.
  */
 export function IssueEnvironmentsSection({ issueId }: { issueId: string }) {
   const { t } = useT("issues");
@@ -77,6 +80,16 @@ export function IssueEnvironmentsSection({ issueId }: { issueId: string }) {
       ? t(($) => $.environments.remote_hint, { machine: machine.title })
       : t(($) => $.environments.localhost_hint);
   };
+  // Only the daemon that detected an app knows its process, so a machine
+  // that is merely named like this one does not count.
+  const focusesHere = (machine: RuntimeMachine | null) =>
+    canFocusLocalEnvironments() && knowsLocal && machine?.daemonId === local.daemonId;
+  const appHint = (machine: RuntimeMachine | null) => {
+    if (focusesHere(machine)) return null;
+    return machine && !(knowsLocal && machine.isCurrent)
+      ? t(($) => $.environments.app_remote_hint, { machine: machine.title })
+      : t(($) => $.environments.app_desktop_hint);
+  };
 
   const groups = (list: IssueEnvironment[]) => {
     const byMachine = new Map<string, MachineGroup>();
@@ -105,6 +118,7 @@ export function IssueEnvironmentsSection({ issueId }: { issueId: string }) {
             key={env.id}
             env={env}
             localhostHint={localhostHint(group.machine)}
+            appHint={appHint(group.machine)}
           />
         ))}
       </div>
@@ -147,27 +161,49 @@ export function IssueEnvironmentsSection({ issueId }: { issueId: string }) {
   );
 }
 
-function EnvironmentRow({ env, localhostHint }: { env: IssueEnvironment; localhostHint: string | null }) {
+function EnvironmentRow({
+  env,
+  localhostHint,
+  appHint,
+}: {
+  env: IssueEnvironment;
+  localhostHint: string | null;
+  /** Why this machine cannot switch to an app's window; null when it can. */
+  appHint: string | null;
+}) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const live = isLive(env);
-  const openable = live && env.url !== "" && env.state !== "unreachable";
-  const Icon = env.url ? Globe : Server;
-  const host = env.url ? displayHost(env.url) : null;
-  const title = env.source === "config" ? env.label || env.name : host ?? env.name;
+  const app = isApp(env);
+  const openable = !app && live && env.url !== "" && env.state !== "unreachable";
+  // Without the daemon's key for it there is nothing to ask the daemon for.
+  const focusable = app && live && env.state === "running" && appHint === null && env.local_key !== "";
+  const Icon = app ? AppWindow : env.url ? Globe : Server;
+  const host = !app && env.url ? displayHost(env.url) : null;
+  const title = app || env.source === "config" ? env.label || env.name : host ?? env.name;
 
   const parts: string[] = [];
   if (env.source === "config") {
     if (host) parts.push(host);
-  } else {
+  } else if (!app) {
     parts.push(env.name);
   }
   const meta = environmentMeta(env, t, timeAgo);
   const tooltip = [
     env.source === "detected" ? t(($) => $.environments.detected_hint) : null,
     env.detail || null,
-    isLoopbackUrl(env.url) ? localhostHint : null,
+    app ? appHint : isLoopbackUrl(env.url) ? localhostHint : null,
   ].filter(Boolean).join("\n");
+
+  const focus = () => {
+    void focusLocalEnvironment(env.local_key).then((result) => {
+      if (result.ok) return;
+      if (result.reason === "gone") toast.error(t(($) => $.environments.focus_gone, { name: title }));
+      else if (result.reason === "unsupported") toast.error(t(($) => $.environments.focus_unsupported));
+      else if (result.reason === "unavailable") toast.error(t(($) => $.environments.focus_unavailable));
+      else toast.error(t(($) => $.environments.focus_failed, { name: title }));
+    });
+  };
 
   const body = (
     <>
@@ -179,7 +215,7 @@ function EnvironmentRow({ env, localhostHint }: { env: IssueEnvironment; localho
             className={cn(
               "shrink-0 text-caption",
               STATE_TONE[env.state] ?? "text-muted-foreground",
-              openable && "group-hover/env:invisible group-has-[:focus-visible]/env:invisible [@media(pointer:coarse)]:invisible",
+              (openable || focusable) && "group-hover/env:invisible group-has-[:focus-visible]/env:invisible [@media(pointer:coarse)]:invisible",
             )}
           >
             {t(($) => $.environments.state[env.state])}
@@ -200,8 +236,19 @@ function EnvironmentRow({ env, localhostHint }: { env: IssueEnvironment; localho
         <a href={env.url} target="_blank" rel="noreferrer noopener" className="flex items-start gap-2 rounded-md px-2 py-2">
           {body}
         </a>
+      ) : focusable ? (
+        <button type="button" onClick={focus} className="flex w-full items-start gap-2 rounded-md px-2 py-2 text-left">
+          {body}
+        </button>
       ) : (
         <div className="flex items-start gap-2 px-2 py-2">{body}</div>
+      )}
+      {focusable && (
+        <div className="absolute top-1 right-1 flex items-center gap-0.5 opacity-0 group-hover/env:opacity-100 group-has-[:focus-visible]/env:opacity-100 [@media(pointer:coarse)]:opacity-100">
+          <IconButton variant="ghost" size="icon-xs" label={t(($) => $.environments.focus)} onClick={focus}>
+            <ArrowUpRight />
+          </IconButton>
+        </div>
       )}
       {openable && (
         <div className="absolute top-1 right-1 flex items-center gap-0.5 opacity-0 group-hover/env:opacity-100 group-has-[:focus-visible]/env:opacity-100 [@media(pointer:coarse)]:opacity-100">

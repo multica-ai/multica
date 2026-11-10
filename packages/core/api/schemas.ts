@@ -468,14 +468,19 @@ export const EMPTY_ISSUE_PULL_REQUESTS_RESPONSE: IssuePullRequestsResponse = {
 
 // One malformed environment drops out of the list instead of taking the
 // whole section with it; an unknown state from a newer server reads as
-// unreachable, which offers no Open action.
+// unreachable, which offers no Open action. A kind this client does not know,
+// or none from an older server, reads as a server: the row then opens its URL
+// if it has one and offers nothing otherwise. A missing or malformed
+// local_key reads as empty, which leaves an app row without its switch action.
 export const IssueEnvironmentSchema = z.object({
   id: z.string(),
   issue_id: z.string(),
   task_id: z.string(),
   runtime_id: z.string().nullable().optional().default(null),
   agent_id: z.string().nullable().optional().default(null),
+  local_key: z.string().catch(""),
   source: z.enum(["config", "detected"]).catch("detected"),
+  kind: z.enum(["server", "app"]).catch("server"),
   name: z.string(),
   label: z.string().optional().default(""),
   url: z.string().optional().default(""),
@@ -2958,6 +2963,17 @@ export const IssueInboxReadSchema = z
 export const SubscribedIssueIdsSchema = z
   .object({
     issue_ids: z
+      .array(z.unknown())
+      .transform((ids) => ids.filter((id): id is string => typeof id === "string" && id.length > 0)),
+  })
+  .loose();
+
+// The squads behind the viewer's "my agents" relation (`/api/squads/involved`
+// GET). Same rules as `SubscribedIssueIdsSchema`: an empty set would hide
+// every squad row under the filter, so a body without the list fails.
+export const InvolvedSquadIdsSchema = z
+  .object({
+    squad_ids: z
       .array(z.unknown())
       .transform((ids) => ids.filter((id): id is string => typeof id === "string" && id.length > 0)),
   })

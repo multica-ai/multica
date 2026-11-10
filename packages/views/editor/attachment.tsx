@@ -328,8 +328,8 @@ export function Attachment({
   const shareUrl = isObjectURL(mediaUrl) ? state.url : mediaUrl;
 
   // Identity this attachment has in the surrounding surface's sequence: the
-  // attachment id once the URL resolves to a record, otherwise the URL exactly
-  // as written in the body — the same pair `collectAttachmentSequence` keys on.
+  // attachment id once the URL resolves to a record, otherwise the URL as the
+  // renderer received it — the same pair `collectAttachmentSequence` keys on.
   const sequenceKey =
     state.attachmentId ?? (attachment.kind === "url" ? attachment.url : "");
 
@@ -493,12 +493,12 @@ function ImageAttachmentView({
     }
   };
 
-  // Click on figure opens the preview only in non-editor / non-uploading
-  // surfaces — inside the editor we let ProseMirror own the click for
-  // selection / cursor placement and route preview through the explicit
-  // Maximize button. The CSS rule `.image-figure[data-clickable="true"] {
-  // cursor: zoom-in }` keys off this same flag for the cursor affordance.
-  const clickable = !editable && !uploading;
+  // Click on figure opens the preview on every surface once the upload has
+  // settled, editors included: an issue description is always an editor, and
+  // its images must open the same way a comment's do. The CSS rule
+  // `.image-figure[data-clickable="true"] { cursor: zoom-in }` keys off this
+  // same flag for the cursor affordance.
+  const clickable = !uploading;
 
   // An image that has not loaded has no size of its own (the figure shrinks
   // to it), so its box is reserved up front: from its pixel size when known,

@@ -105,6 +105,7 @@
       "assignee_me": "Я",
       "assignee_my_agents": "Мои агенты",
       "assignee_me_and_my_agents": "Я и мои агенты",
+      "assignee_projects_only": "Действует только на задачи в разделе «Проекты»",
       "reset": "Сбросить",
       "load_more": "Загрузить ещё",
       "show_less": "Показать меньше",

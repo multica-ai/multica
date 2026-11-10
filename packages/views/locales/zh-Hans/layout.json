@@ -129,6 +129,7 @@
       "assignee_me": "我",
       "assignee_my_agents": "我的智能体",
       "assignee_me_and_my_agents": "我和我的智能体",
+      "assignee_projects_only": "仅作用于侧边栏“项目”下展开的任务",
       "reset": "重置",
       "load_more": "加载更多",
       "show_less": "收起",

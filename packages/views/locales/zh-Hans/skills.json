@@ -243,15 +243,9 @@
     }
   },
   "create": {
-    "back": "返回",
-    "back_aria": "返回方式选择",
     "close": "关闭",
     "close_aria": "关闭",
     "method": {
-      "chooser": {
-        "title": "新建 skill",
-        "desc": "选择添加 skill 的方式。"
-      },
       "manual": {
         "title": "手动创建",
         "desc": "从空白 SKILL.md 开始写。"

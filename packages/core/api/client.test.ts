@@ -296,7 +296,9 @@ describe("ApiClient issue environments response schema", () => {
     task_id: "task-1",
     runtime_id: "rt-1",
     agent_id: "agent-1",
+    local_key: "config:web",
     source: "config",
+    kind: "server",
     name: "web",
     label: "Web app",
     url: "http://localhost:41000",
@@ -337,6 +339,34 @@ describe("ApiClient issue environments response schema", () => {
     stubEnvironments({ environments: [{ ...validEnvironment, state: "hibernating", source: "remote" }] });
     const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
     expect(result.environments[0]).toMatchObject({ state: "unreachable", source: "detected" });
+  });
+
+  it("keeps a desktop app's kind and the key its daemon knows it by", async () => {
+    stubEnvironments({
+      environments: [{ ...validEnvironment, kind: "app", local_key: "detected:app", url: "", port: null }],
+    });
+    const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
+    expect(result.environments[0]).toMatchObject({ kind: "app", local_key: "detected:app" });
+  });
+
+  it("reads an older server's environment, with no kind or key, as a server", async () => {
+    const { kind: _kind, local_key: _key, ...older } = validEnvironment;
+    stubEnvironments({ environments: [older] });
+    const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
+    expect(result.environments[0]).toMatchObject({ kind: "server", local_key: "", url: "http://localhost:41000" });
+  });
+
+  it("reads an unknown kind as a server and a malformed key as none", async () => {
+    stubEnvironments({
+      environments: [
+        { ...validEnvironment, kind: "tunnel", local_key: { key: "config:web" } },
+        { ...validEnvironment, id: "env-2", kind: "app", local_key: null },
+      ],
+    });
+    const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
+    expect(result.environments).toHaveLength(2);
+    expect(result.environments[0]).toMatchObject({ kind: "server", local_key: "" });
+    expect(result.environments[1]).toMatchObject({ kind: "app", local_key: "" });
   });
 
   it("falls back to an empty list when the body is not a list", async () => {
