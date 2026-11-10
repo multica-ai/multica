@@ -153,6 +153,14 @@ load_manifest() {
   # shellcheck disable=SC1090
   . "$file"
   [ "$NAME" = "$1" ] || die "Manifest $file declares NAME=$NAME; expected $1."
+  # Run from an agent task, everything launched for this environment loses the
+  # task's MULTICA_* identity (CLEAN_ENV) but still sits under the task's
+  # marker. This tells the CLI why, so its refusal does not call the task's own
+  # marker a leftover to delete. A human's run exports nothing: a marker in
+  # their checkout really can be a leftover.
+  if [ -n "${MULTICA_TASK_ID:-}${MULTICA_AGENT_ID:-}${MULTICA_TASK_CONFIG_ROOT:-}" ]; then
+    export MULTICA_DEV_ENV="$NAME"
+  fi
 }
 
 # Prints nothing (and succeeds) for a missing manifest or key: callers compare
@@ -834,24 +842,10 @@ ensure_fixture_issues() {
   ok "seeded 2 issues in workspace $WORKSPACE_SLUG"
 }
 
-# The CLI refuses `daemon start` anywhere under a daemon-task marker, so a task
-# cannot spawn a second daemon that competes for its own work. Checking the
-# marker here turns that refusal into one actionable line, before this component
-# has spent a login and a CLI build on an outcome it cannot reach.
-daemon_task_marker() {
-  local dir="$REPO_ROOT" marker
-  while :; do
-    marker="$dir/.multica/daemon_task_context.json"
-    if [ -f "$marker" ] && grep -q 'multica-daemon-task' "$marker" 2>/dev/null; then
-      printf '%s' "$marker"
-      return 0
-    fi
-    [ "$dir" != "/" ] || break
-    dir="$(dirname "$dir")"
-  done
-  return 0
-}
-
+# Under a daemon-task marker the CLI refuses daemon commands for every profile
+# except one this registry assigns to an environment, reached without the task's
+# identity and pointed at that environment's API — exactly how CLEAN_ENV and
+# the profile written above launch it (server/cmd/multica/dev_env_profile.go).
 start_daemon() {
   local status state build_commit
 
@@ -1415,15 +1409,6 @@ cmd_up() {
     export TMPDIR="$DEV_TMPDIR" TMP="$DEV_TMPDIR" TEMP="$DEV_TMPDIR"
   fi
   ok "node, go, curl found"
-
-  if component_selected daemon; then
-    local marker
-    marker="$(daemon_task_marker)"
-    [ -z "$marker" ] || die "The daemon component cannot start under a daemon-managed task.
-This checkout sits below $marker, and the CLI refuses 'daemon start' there so a
-task cannot spawn a second daemon competing for its own work.
-Start the rest with 'make up C=api,web', or run 'make up C=daemon' from your own shell."
-  fi
 
   step "Environment"
   ENV_FILE="$(detect_env_file)"

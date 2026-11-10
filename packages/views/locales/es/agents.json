@@ -820,7 +820,7 @@
       "queued_prefix": "En cola {{when}}"
     },
     "connected_apps": {
-      "subtitle": "Aplicaciones que puede usar este agente. Cada aplicación usa la cuenta del equipo o la de quien inicia la ejecución, con el nivel que elijas.",
+      "subtitle": "Aplicaciones que puede usar este agente con la cuenta del equipo o la de quien inicia la ejecución.",
       "loading": "Cargando aplicaciones…",
       "load_failed": "No se pudieron cargar las aplicaciones de este agente.",
       "empty": "Aún no hay aplicaciones.",

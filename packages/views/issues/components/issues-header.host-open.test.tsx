@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createStore } from "zustand/vanilla";
 import { setApiInstance } from "@multica/core/api";
@@ -71,5 +71,17 @@ describe("IssueFilterMenu opened by its host", () => {
 
     fireEvent.keyDown(search, { key: "Escape" });
     await waitFor(() => expect(screen.getByTestId("host-open")).toHaveTextContent("false"));
+  });
+
+  it("opens the advanced panel in advanced mode, and closes it on leaving that mode", async () => {
+    const store = renderHost();
+    act(() => store.getState().enterAdvancedFilter());
+    fireEvent.click(screen.getByRole("button", { name: "Open from host" }));
+    expect(await screen.findByTestId("advanced-filter-panel")).toBeInTheDocument();
+
+    act(() => store.getState().exitAdvancedFilter());
+    await waitFor(() => expect(screen.getByTestId("host-open")).toHaveTextContent("false"));
+    expect(screen.queryByTestId("advanced-filter-panel")).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Filter by field or value…" })).toBeNull();
   });
 });

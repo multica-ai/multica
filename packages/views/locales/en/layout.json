@@ -148,6 +148,7 @@
       "view_actions": "Actions for {{name}}",
       "view_copy_link": "Copy link",
       "view_remove": "Remove from sidebar",
+      "view_edit": "Edit view",
       "view_rename": "Rename",
       "view_duplicate": "Duplicate",
       "view_delete": "Delete view",

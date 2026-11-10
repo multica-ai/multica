@@ -748,6 +748,8 @@
       "send_with_body": "Se enviará con el texto del borrador.",
       "confirm_add": "Añadir anotación",
       "save": "Guardar anotación",
+      "confirm_add_short": "Añadir",
+      "save_short": "Guardar",
       "add_comment": "Añadir al comentario",
       "add": "Añadir a la respuesta",
       "note_label": "Comentario",
@@ -1513,6 +1515,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "Mostrar en comentarios",
     "locate_description": "Mostrar en la descripción",
+    "copy_link": "Copiar enlace a la última versión",
+    "not_found": "Esta incidencia no tiene ningún entregable llamado «{{name}}»",
+    "link_load_failed": "No se pudieron cargar los entregables de esta incidencia para abrir «{{name}}». Recarga para intentarlo de nuevo.",
     "version_label": "Versión {{version}} de {{total}}",
     "version_of": "v{{version}} de {{total}}",
     "info_source": "Origen",
@@ -1728,7 +1733,6 @@
       "brief_header": "El encargo del flujo de trabajo que recibió esta ejecución"
     },
     "detail": {
-      "follows_project": "(del proyecto)",
       "card_title": "{{workflow}} · de {{project}}"
     },
     "list_separator": ", ",

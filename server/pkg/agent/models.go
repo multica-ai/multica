@@ -341,6 +341,12 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// ModelSelectionSupported. Return an empty list rather than spawning
 		// an ACP subprocess that can only ever come back empty.
 		return Catalog{Models: []Model{}}, nil
+	case "museapp":
+		// museapp (muse.ai) is a single personal agent behind a remote receptionist, not a
+		// model family: there is no catalog to discover and no session-scoped
+		// model selection to consume one. An empty list keeps manual entry
+		// available without spawning anything.
+		return Catalog{Models: []Model{}}, nil
 	case "zcode":
 		// ZCode has no model-catalog command or RPC — the catalog lives only
 		// inside a running session's snapshot (settings.model.available,
@@ -461,7 +467,7 @@ func QualifyModelID(catalog Catalog, model string) (string, bool) {
 // in splitZcodeModelSelection.
 func ModelSelectionSupported(providerType string) bool {
 	switch providerType {
-	case "qwenpaw", "mcode", "zeroclaw":
+	case "qwenpaw", "mcode", "zeroclaw", "museapp":
 		// QwenPaw's `session/set_model` persists to agent.json at the agent
 		// scope, not the session scope. Calling it would mutate the user's
 		// shared, persistent agent config. Model override is therefore
@@ -473,7 +479,9 @@ func ModelSelectionSupported(providerType string) bool {
 		// its ACP dispatch table at all (0.8.4 answers -32601) and no handler
 		// reads a model param, so the model comes from the ZeroClaw agent
 		// profile (`agents.<alias>.model_provider`) and nothing Multica sends
-		// can change it.
+		// can change it. museapp is a single personal agent behind a remote
+		// receptionist: the wire protocol has no model parameter, so the
+		// receptionist's own configuration is the source of truth.
 		return false
 	default:
 		return true

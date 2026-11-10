@@ -146,6 +146,7 @@
       "view_actions": "{{name}} の操作",
       "view_copy_link": "リンクをコピー",
       "view_remove": "サイドバーから削除",
+      "view_edit": "ビューを編集",
       "view_rename": "名前を変更",
       "view_duplicate": "複製",
       "view_delete": "ビューを削除",

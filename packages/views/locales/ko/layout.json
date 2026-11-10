@@ -146,6 +146,7 @@
       "view_actions": "{{name}} 작업",
       "view_copy_link": "링크 복사",
       "view_remove": "사이드바에서 제거",
+      "view_edit": "뷰 편집",
       "view_rename": "이름 변경",
       "view_duplicate": "복제",
       "view_delete": "뷰 삭제",

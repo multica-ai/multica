@@ -76,7 +76,7 @@ export function PanelBody({
       ref={ref}
       style={fadeStyle}
       onClickCapture={onClickCapture}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4 [&>section:first-child]:mt-0"
+      className="scrollbar-slim min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4 [&>section:first-child]:mt-0"
     >
       {children}
     </div>
