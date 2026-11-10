@@ -320,6 +320,7 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 | `env` | 启动、停止和列出仓库声明的环境（只能在智能体的运行中使用） |
 | `attachment` | 上传或下载附件 |
 | `user profile` | 查看或更新当前用户资料 |
+| `user notifications` | 查看或设置当前工作区的收件箱过滤 |
 | `auth`、`login`、`setup` | 登录、查看认证状态和初始化连接 |
 | `config` | 查看或修改当前 CLI profile 的本地配置 |
 | `update`、`version` | 更新 CLI 或查看版本 |
@@ -455,6 +456,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | --- | --- | --- | --- |
 | `auth` | `status` / `logout` | 查看认证状态；`logout` 只删除本地保存的令牌，不吊销服务端令牌 | |
 | `user` | `profile get/update` | 查看或更新当前用户资料 | |
+| | `notifications get/set` | 查看或设置当前工作区的[收件箱过滤](/inbox#focused-mode)；只发送你传入的参数 | `set`: `--mode` (`all`, `focused`), `--assigned`, `--blocked`, `--mentioned`, `--thread-reply`, `--agent-activity`（用 `=false` 关闭某个事件） |
 | `login` | — | 浏览器登录并自动配置全部工作区 | `--token`（不带值时在终端交互式输入） |
 | `setup` | `cloud`（默认）、`self-host` | 保存服务地址、完成登录并启动守护进程 | `self-host`：`--server-url`、`--app-url`、`--port`、`--frontend-port` |
 | `attachment` | `download <attachment-id>`、`upload <path>` | 下载或上传附件 | `download`：`--output-dir`；`upload`：`--task` |

@@ -317,6 +317,7 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 | `env` | 啟動、停止和列出倉庫宣告的環境（只能在 AI 代理的執行中使用） |
 | `attachment` | 上傳或下載附件 |
 | `user profile` | 檢視或更新當前使用者資料 |
+| `user notifications` | 檢視或設定當前工作區的收件箱過濾 |
 | `auth`、`login`、`setup` | 登入、檢視認證狀態和初始化連線 |
 | `config` | 檢視或修改當前 CLI profile 的本地配置 |
 | `update`、`version` | 更新 CLI 或檢視版本 |
@@ -452,6 +453,7 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | --- | --- | --- | --- |
 | `auth` | `status` / `logout` | 檢視認證狀態；`logout` 只刪除本地儲存的令牌，不弔銷服務端令牌 | |
 | `user` | `profile get/update` | 檢視或更新當前使用者資料 | |
+| | `notifications get/set` | 檢視或設定當前工作區的[收件箱過濾](/inbox#focused-mode)；只傳送你傳入的參數 | `set`: `--mode` (`all`, `focused`), `--assigned`, `--blocked`, `--mentioned`, `--thread-reply`, `--agent-activity`（用 `=false` 關閉某個事件） |
 | `login` | — | 瀏覽器登入並自動配置全部工作區 | `--token`（不帶值時在終端互動式輸入） |
 | `setup` | `cloud`（預設）、`self-host` | 儲存服務地址、完成登入並啟動守護程序 | `self-host`：`--server-url`、`--app-url`、`--port`、`--frontend-port` |
 | `attachment` | `download <attachment-id>`、`upload <path>` | 下載或上傳附件 | `download`：`--output-dir`；`upload`：`--task` |

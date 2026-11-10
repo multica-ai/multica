@@ -335,6 +335,7 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Europ
 | `env` | Start, stop, and list the environments a repository declares (inside agent runs only) |
 | `attachment` | Upload or download attachments |
 | `user profile` | View or update the current user's profile |
+| `user notifications` | View or set your inbox filter for the current workspace |
 | `auth`, `login`, `setup` | Log in, check auth status, and initialize a connection |
 | `config` | View or edit the current CLI profile's local configuration |
 | `update`, `version` | Update the CLI or print the version |
@@ -478,6 +479,7 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | --- | --- | --- | --- |
 | `auth` | `status` / `logout` | Check auth status; `logout` only deletes the locally saved token and does not revoke it on the server | |
 | `user` | `profile get/update` | View or update the current user's profile | |
+| | `notifications get/set` | View or set your [inbox filter](/inbox#focused-mode) for the current workspace; only the flags you pass are sent | `set`: `--mode` (`all`, `focused`), `--assigned`, `--blocked`, `--mentioned`, `--thread-reply`, `--agent-activity` (pass `=false` to turn an event off) |
 | `login` | — | Sign in via the browser and configure all workspaces automatically | `--token` (prompts interactively in the terminal when passed without a value) |
 | `setup` | `cloud` (default), `self-host` | Save the server address, complete sign-in, and start the daemon | `self-host`: `--server-url`, `--app-url`, `--port`, `--frontend-port` |
 | `attachment` | `download <attachment-id>`, `upload <path>` | Download or upload attachments | `download`: `--output-dir`; `upload`: `--task` |

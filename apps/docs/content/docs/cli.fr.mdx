@@ -318,6 +318,7 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Europ
 | `env` | Démarrer, arrêter et lister les environnements déclarés par un dépôt (pendant l'exécution d'un agent uniquement) |
 | `attachment` | Envoyer ou télécharger des pièces jointes |
 | `user profile` | Consulter ou mettre à jour le profil de l'utilisateur actuel |
+| `user notifications` | Consulter ou régler le filtre de votre boîte de réception pour l'espace de travail actuel |
 | `auth`, `login`, `setup` | Se connecter, vérifier l'état de l'authentification et initialiser une connexion |
 | `config` | Consulter ou modifier la configuration locale du profil CLI actuel |
 | `update`, `version` | Mettre à jour le CLI ou afficher la version |
@@ -451,6 +452,7 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | --- | --- | --- | --- |
 | `auth` | `status` / `logout` | Vérifier l'état de l'authentification ; `logout` supprime seulement le jeton enregistré localement et ne le révoque pas côté serveur | |
 | `user` | `profile get/update` | Consulter ou mettre à jour le profil de l'utilisateur actuel | |
+| | `notifications get/set` | Consulter ou régler le [filtre de la boîte de réception](/inbox#focused-mode) pour l'espace de travail actuel ; seuls les flags passés sont envoyés | `set`: `--mode` (`all`, `focused`), `--assigned`, `--blocked`, `--mentioned`, `--thread-reply`, `--agent-activity` (`=false` pour désactiver un événement) |
 | `login` | — | Se connecter via le navigateur et configurer automatiquement tous les espaces de travail | `--token` (demande la saisie de façon interactive dans le terminal lorsque l'option est passée sans valeur) |
 | `setup` | `cloud` (par défaut), `self-host` | Enregistrer l'adresse du serveur, finaliser la connexion et démarrer le daemon | `self-host` : `--server-url`, `--app-url`, `--port`, `--frontend-port` |
 | `attachment` | `download <attachment-id>`, `upload <path>` | Télécharger ou envoyer des pièces jointes | `download` : `--output-dir` ; `upload` : `--task` |

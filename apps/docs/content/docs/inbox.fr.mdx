@@ -76,6 +76,18 @@ Ouvrez **Paramètres → Notifications** pour activer ou désactiver chaque grou
 
 Désactiver un groupe n'empêche pas l'enregistrement des changements sur la tâche — cela arrête seulement les notifications dans la boîte de réception. Quelques types, comme les réactions, les résultats de création rapide et les mises en pause d'automatisation, ne relèvent pas de ces six groupes et sont toujours envoyés. Les notifications système et du navigateur contrôlent les bannières sur le bureau et ne modifient pas la boîte de réception elle-même.
 
+## Mode « L'essentiel » [#focused-mode]
+
+Dans **Paramètres → Notifications**, passez le **Mode de la boîte de réception** de **Toutes** à **L'essentiel** pour ne recevoir que ce qui vous concerne directement. Ce mode ignore les groupes ci-dessus et ne livre que les événements cochés :
+
+- vous devenez l'assigné ;
+- une tâche qui vous est assignée passe en `blocked` ;
+- quelqu'un vous @-mentionne directement dans un commentaire (`@all`, les squads et les mentions dans la description ne comptent pas) ;
+- quelqu'un répond dans un fil de commentaires que vous avez lancé ;
+- un agent commente une tâche qui vous est assignée ou en change le statut.
+
+Dans ce mode, les autres notifications groupées et les réactions ne sont plus envoyées ; les résultats de création rapide et les avis d'automatisation le sont toujours. Le mode se règle par espace de travail et ne s'applique qu'aux nouvelles notifications : les entrées existantes restent et vos abonnements ne changent pas. Depuis le terminal : `multica user notifications set --mode focused`.
+
 ## Étapes suivantes
 
 - [Commentaires](/comments) — réponses, mentions et fils de discussion.

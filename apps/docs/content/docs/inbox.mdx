@@ -76,6 +76,18 @@ Open **Settings → Notifications** to toggle each group separately:
 
 Turning a group off doesn't stop the changes from being recorded on the issue — it only stops the inbox notifications. A few types, such as reactions, quick-create results, and autopilot pauses, sit outside these six groups and are always delivered. System and browser notifications control desktop banners and don't change the inbox itself.
 
+## Focused mode
+
+In **Settings → Notifications**, switch **Inbox mode** from **All** to **Focused** to get only what needs you. Focused mode ignores the group switches above and delivers just the events you keep checked:
+
+- you are made the assignee;
+- an issue assigned to you moves to `blocked`;
+- someone @-mentions you directly in a comment (`@all`, squads, and description mentions don't count);
+- someone replies in a comment thread you started;
+- an agent comments on, or changes the status of, an issue assigned to you.
+
+Other grouped notifications and reactions are not delivered in focused mode; quick-create results and autopilot notices still are. The mode is set per workspace and applies to new notifications only: existing inbox entries stay, and your subscriptions don't change. From the terminal, use `multica user notifications set --mode focused`.
+
 ## Next steps
 
 - [Comments](/comments) — replies, mentions, and discussion threads.

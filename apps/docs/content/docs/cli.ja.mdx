@@ -318,6 +318,7 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 | `env` | リポジトリが宣言した環境の起動・停止・一覧（エージェントの実行の中でのみ） |
 | `attachment` | 添付ファイルのアップロードとダウンロード |
 | `user profile` | 現在のユーザーのプロフィールを表示・更新 |
+| `user notifications` | 現在のワークスペースのインボックスフィルターを表示・設定 |
 | `auth`、`login`、`setup` | サインイン、認証状態の確認、接続の初期化 |
 | `config` | 現在の CLI プロファイルのローカル設定を表示・編集 |
 | `update`、`version` | CLI の更新とバージョンの表示 |
@@ -443,6 +444,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | --- | --- | --- | --- |
 | `auth` | `status` / `logout` | 認証状態を確認。`logout` はローカルに保存されたトークンを削除するだけで、サーバー側のトークンは失効させません | |
 | `user` | `profile get/update` | 現在のユーザーのプロフィールを表示・更新 | |
+| | `notifications get/set` | 現在のワークスペースの[インボックスフィルター](/inbox#focused-mode)を表示・設定。指定したフラグだけが送信されます | `set`: `--mode` (`all`, `focused`), `--assigned`, `--blocked`, `--mentioned`, `--thread-reply`, `--agent-activity`（イベントをオフにするには `=false`） |
 | `login` | — | ブラウザでサインインし、すべてのワークスペースを自動設定 | `--token`（値なしで渡すとターミナルで対話的に入力） |
 | `setup` | `cloud`（デフォルト）、`self-host` | サーバーアドレスを保存し、サインインを完了してデーモンを起動 | `self-host`: `--server-url`、`--app-url`、`--port`、`--frontend-port` |
 | `attachment` | `download <attachment-id>`、`upload <path>` | 添付ファイルのダウンロードとアップロード | `download`: `--output-dir`；`upload`: `--task` |

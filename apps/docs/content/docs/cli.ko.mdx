@@ -318,6 +318,7 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 | `env` | 저장소가 선언한 환경 시작, 중지, 나열(에이전트의 실행 안에서만) |
 | `attachment` | 첨부 파일 업로드 또는 다운로드 |
 | `user profile` | 현재 사용자 profile 확인 또는 업데이트 |
+| `user notifications` | 현재 워크스페이스의 인박스 필터 확인 또는 설정 |
 | `auth`, `login`, `setup` | 로그인, 인증 상태 확인, 연결 초기화 |
 | `config` | 현재 CLI profile의 로컬 설정 확인 또는 변경 |
 | `update`, `version` | CLI 업데이트 또는 버전 확인 |
@@ -443,6 +444,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | --- | --- | --- | --- |
 | `auth` | `status` / `logout` | 인증 상태 확인. `logout`은 로컬에 저장된 token만 삭제하고 서버 token은 취소하지 않음 | |
 | `user` | `profile get/update` | 현재 사용자 profile 확인 또는 업데이트 | |
+| | `notifications get/set` | 현재 워크스페이스의 [인박스 필터](/inbox#focused-mode) 확인 또는 설정. 전달한 플래그만 전송됩니다 | `set`: `--mode` (`all`, `focused`), `--assigned`, `--blocked`, `--mentioned`, `--thread-reply`, `--agent-activity` (이벤트를 끄려면 `=false`) |
 | `login` | — | 브라우저에서 로그인하고 모든 워크스페이스 자동 설정 | `--token`(값을 함께 쓰지 않으면 터미널에서 대화형 입력) |
 | `setup` | `cloud`(기본), `self-host` | 서비스 주소 저장, 로그인 완료, 데몬 시작 | `self-host`: `--server-url`, `--app-url`, `--port`, `--frontend-port` |
 | `attachment` | `download <attachment-id>`, `upload <path>` | 첨부 파일 다운로드 또는 업로드 | `download`: `--output-dir`. `upload`: `--task` |
