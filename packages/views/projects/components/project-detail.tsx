@@ -12,6 +12,7 @@ import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/type
 import { useAuthStore } from "@multica/core/auth";
 import { useConfigStore } from "@multica/core/config";
 import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
+import { canManageProjectAccess } from "@multica/core/projects/access";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import { useUpdateProject, useDeleteProject, ProjectDeletionOfflineError } from "@multica/core/projects/mutations";
@@ -161,6 +162,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   });
   const isPinned = pinnedItems.some((p) => p.item_type === "project" && p.item_id === projectId);
   const role = members.find((m) => m.user_id === userId)?.role ?? null;
+  const canManageAccess = !!project && canManageProjectAccess(project, userId, role);
   const canDelete = !!project && canDeleteProject(project, userId ?? null, role, agents);
   const createPin = useCreatePin();
   const deletePinMut = useDeletePin();
@@ -382,8 +384,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             <ProjectAccessControl project={project} />
           </PropRow>}
           <PropRow label={t(($) => $.table.lead)}>
-            <Popover open={leadOpen} onOpenChange={(v) => { setLeadOpen(v); if (!v) setLeadFilter(""); }}>
+            <Popover open={leadOpen && canManageAccess} onOpenChange={(v) => { setLeadOpen(v); if (!v) setLeadFilter(""); }}>
               <PopoverTrigger
+                disabled={!canManageAccess}
                 render={
                   <button type="button" className="inline-flex items-center gap-1.5 text-caption hover:text-foreground transition-colors">
                     {project.lead_type && project.lead_id ? (

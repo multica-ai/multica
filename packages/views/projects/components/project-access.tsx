@@ -10,7 +10,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { projectMembersOptions } from "@multica/core/projects/queries";
-import { useProjectAccessMutation } from "@multica/core/projects/access";
+import { canManageProjectAccess, useProjectAccessMutation } from "@multica/core/projects/access";
 import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@multica/ui/components/ui/dialog";
@@ -144,7 +144,7 @@ function ProjectAccessEditor({ project, enabled, onClose, changeAccess }: { proj
   const role = members.find((member) => member.user_id === userId)?.role;
   const isManager = role === "owner" || role === "admin";
   const leadId = project.lead_type === "member" ? project.lead_id : null;
-  const canManage = isManager || (!!userId && userId === leadId);
+  const canManage = canManageProjectAccess(project, userId, role);
   const currentIds = projectMembers.data?.members.map((member) => member.user_id) ?? EMPTY_IDS;
   const selected = project.visibility === "private" ? currentIds : (draftIds ?? Array.from(new Set([...currentIds, ...(userId ? [userId] : []), ...(leadId ? [leadId] : [])])));
   const loading = workspaceMembers.isPending || projectMembers.isPending;
@@ -167,7 +167,7 @@ function ProjectAccessEditor({ project, enabled, onClose, changeAccess }: { proj
         ) : (
           <AccessFields visibility={visibility} onVisibilityChange={setVisibility} members={members} selected={selected} userId={userId} leadId={leadId}
             disabled={pending} canChangeScope={canManage} canUsePrivate={enabled || project.visibility === "private"}
-            canAdd={canManage || (!!userId && currentIds.includes(userId))}
+            canAdd={canManage}
             canRemove={(id) => id !== leadId && (canManage || id === userId)}
             onAdd={async (id) => { if (project.visibility === "private") return run({ type: "add", userId: id }); setDraftIds([...selected, id]); return true; }}
             onRemove={async (id) => {

@@ -129,14 +129,6 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenuSeparator: () => <hr />,
 }));
 
-vi.mock("@multica/ui/components/ui/popover", () => ({
-  Popover: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  PopoverTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
-  PopoverContent: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-}));
-
 vi.mock("@multica/ui/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
@@ -289,6 +281,16 @@ beforeEach(() => {
 afterEach(() => {
   onlineManager.setOnline(true);
   qc.clear();
+});
+
+describe("ProjectDetail lead permissions", () => {
+  it("does not let ordinary members open the lead picker", async () => {
+    mocks.role = "member";
+    renderProjectDetail();
+    expect(screen.getByRole("button", { name: "No lead" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "No lead" }));
+    expect(screen.queryByPlaceholderText("Assign lead...")).not.toBeInTheDocument();
+  });
 });
 
 describe("ProjectDetail sharing", () => {

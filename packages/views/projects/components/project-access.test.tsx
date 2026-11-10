@@ -9,6 +9,7 @@ import type { Project, MemberWithUser } from "@multica/core/types";
 import { EMPTY_PROJECT } from "@multica/core/api/schemas";
 import { renderWithI18n } from "../../test/i18n";
 import { ProjectAccessControl, ProjectAccessDraftPicker } from "./project-access";
+import { ProjectLeadPicker } from "./project-lead-picker";
 
 const state = vi.hoisted(() => ({ viewer: "owner", push: vi.fn() }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
@@ -16,6 +17,7 @@ vi.mock("@multica/core/auth", () => ({ useAuthStore: Object.assign((selector: (s
 vi.mock("@multica/core/paths", () => ({ useWorkspacePaths: () => ({ projects: () => "/dev/projects" }) }));
 vi.mock("../../navigation", () => ({ useNavigation: () => ({ push: state.push }) }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => <span aria-hidden="true" /> }));
+vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: () => "Lead" }) }));
 
 const members: MemberWithUser[] = [
   { id: "1", workspace_id: "ws", user_id: "owner", name: "Owner", email: "owner@test", role: "owner", avatar_url: null, created_at: "" },
@@ -26,7 +28,7 @@ const members: MemberWithUser[] = [
 const project = { ...EMPTY_PROJECT, id: "p1", workspace_id: "ws", title: "Secret Plan", visibility: "private" as const, lead_type: "member" as const, lead_id: "lead" };
 let qc: QueryClient;
 let ids: string[];
-let api: { listMembers: ReturnType<typeof vi.fn>; getProjectMembers: ReturnType<typeof vi.fn>; addProjectMembers: ReturnType<typeof vi.fn>; removeProjectMember: ReturnType<typeof vi.fn>; updateProject: ReturnType<typeof vi.fn> };
+let api: { listMembers: ReturnType<typeof vi.fn>; listAgents: ReturnType<typeof vi.fn>; getProjectMembers: ReturnType<typeof vi.fn>; addProjectMembers: ReturnType<typeof vi.fn>; removeProjectMember: ReturnType<typeof vi.fn>; updateProject: ReturnType<typeof vi.fn> };
 
 function renderControl(value: Project = project) {
   return renderWithI18n(<QueryClientProvider client={qc}><ProjectAccessControl project={value} /></QueryClientProvider>);
@@ -41,6 +43,7 @@ beforeEach(() => {
   const response = () => ({ members: members.filter((m) => ids.includes(m.user_id)).map((m) => ({ ...m, project_id: "p1" })), total: ids.length });
   api = {
     listMembers: vi.fn().mockResolvedValue(members),
+    listAgents: vi.fn().mockResolvedValue([]),
     getProjectMembers: vi.fn().mockImplementation(async () => response()),
     addProjectMembers: vi.fn().mockImplementation(async (_id, added: string[]) => { ids = [...ids, ...added]; return response(); }),
     removeProjectMember: vi.fn().mockImplementation(async (_id, removed: string) => { ids = ids.filter((id) => id !== removed); }),
@@ -68,19 +71,47 @@ it("loads the member list, finds people by email, and adds and removes only afte
   expect(screen.getByRole("dialog")).toBeVisible();
 });
 
-it("restricts scope changes and removal of other people for a regular project member", async () => {
+it("prevents a regular project member from adding people, removing others, or changing scope", async () => {
   state.viewer = "member";
   const user = userEvent.setup();
   renderControl();
   await user.click(screen.getByRole("button", { name: "Access" }));
   await screen.findByText("member@test");
   expect(screen.getByRole("radio", { name: "Entire workspace" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Add workspace member" })).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "Add workspace member" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Remove Owner" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Remove Lead" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Remove Member" }));
   await waitFor(() => expect(state.push).toHaveBeenCalledWith("/dev/projects"));
   expect(api.removeProjectMember).toHaveBeenCalledWith("p1", "member");
+});
+
+it.each(["owner", "lead"])("allows %s to manage project members", async (viewer) => {
+  state.viewer = viewer;
+  renderControl();
+  await userEvent.click(screen.getByRole("button", { name: "Access" }));
+  await screen.findByText("member@test");
+  expect(screen.getByRole("button", { name: "Add workspace member" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Remove Member" })).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "Remove Lead" })).not.toBeInTheDocument();
+});
+
+it.each(["owner", "lead", "member"])("guards the lead picker for %s", async (viewer) => {
+  state.viewer = viewer;
+  const update = vi.fn();
+  renderWithI18n(<QueryClientProvider client={qc}><ProjectLeadPicker project={project} handleUpdate={update} renderTrigger={() => <button type="button">Change lead</button>} /></QueryClientProvider>);
+  const trigger = screen.getByRole("button", { name: "Change lead" });
+  if (viewer === "member") {
+    expect(trigger).toBeDisabled();
+    await userEvent.click(trigger);
+    expect(screen.queryByPlaceholderText("Assign lead...")).not.toBeInTheDocument();
+    expect(update).not.toHaveBeenCalled();
+  } else {
+    await waitFor(() => expect(trigger).toBeEnabled());
+    await userEvent.click(trigger);
+    await userEvent.click(screen.getByRole("button", { name: "Outside Person" }));
+    expect(update).toHaveBeenCalledWith({ lead_type: "member", lead_id: "outsider" });
+  }
 });
 
 it("requires confirmation before making private content visible to the workspace", async () => {

@@ -309,13 +309,18 @@ func TestPrivateProjectVisibilityAndMembersAPI(t *testing.T) {
 		t.Fatalf("members = %+v, want only the creator", list.Members)
 	}
 
-	// A project member may add; adding a non-workspace user is rejected.
+	// Only an access manager may add; unknown workspace users are rejected.
 	add := func(userID string, ids ...string) *testutil.Response {
 		req := withURLParam(asUser(newRequest(http.MethodPost, "/api/projects/"+project.ID+"/members", map[string]any{"user_ids": ids}), userID), "id", project.ID)
 		return testutil.Call(t, testHandler.AddProjectMembers, req)
 	}
-	add(f.insider, "00000000-0000-0000-0000-00000000beef").Want(http.StatusBadRequest)
-	add(f.insider, f.outsider).Want(http.StatusOK)
+	add(f.insider, f.outsider).Want(http.StatusForbidden)
+	members(testUserID).Want(http.StatusOK).JSON(&list)
+	if len(list.Members) != 1 || list.Members[0].UserID != f.insider {
+		t.Fatal("refused add changed project membership")
+	}
+	add(testUserID, "00000000-0000-0000-0000-00000000beef").Want(http.StatusBadRequest)
+	add(testUserID, f.outsider).Want(http.StatusOK)
 
 	remove := func(actor, target string) *testutil.Response {
 		req := testutil.WithURLParams(asUser(newRequest(http.MethodDelete, "/api/projects/"+project.ID+"/members/"+target, nil), actor), "id", project.ID, "userId", target)
@@ -585,10 +590,90 @@ func TestPrivateProjectLeadChangeCannotGrantAccess(t *testing.T) {
 		t.Fatalf("refused update still wrote lead_id = %s", *lead)
 	}
 
-	// A human project member may, and the new lead becomes a member.
-	setLead(asUser(newRequest(http.MethodPut, "/api/projects/"+f.projectID, body), f.insider)).Want(http.StatusOK)
+	// A human workspace owner may, and the new lead becomes a member.
+	setLead(asUser(newRequest(http.MethodPut, "/api/projects/"+f.projectID, body), testUserID)).Want(http.StatusOK)
 	if !isMember(f.outsider) {
 		t.Fatal("a member lead of a private project must be a project member")
+	}
+}
+
+func TestProjectLeadChangeRequiresAccessManager(t *testing.T) {
+	for _, visibility := range []string{projectaccess.VisibilityPrivate, projectaccess.VisibilityWorkspace} {
+		for _, change := range []string{"self", "outsider", "clear", "id_only", "type_only"} {
+			t.Run(visibility+"/"+change, func(t *testing.T) {
+				f := newPrivateProjectFixture(t)
+				lead := createPlainMember(t, f.marker+"-lead@multica.test")
+				addProjectMemberRow(t, f.projectID, lead)
+				dbfx.Exec(t, `UPDATE project SET visibility = $1, lead_type = 'member', lead_id = $2 WHERE id = $3`, visibility, lead, f.projectID)
+				body := map[string]any{"lead_type": "member", "lead_id": f.insider, "title": "must not change"}
+				switch change {
+				case "outsider":
+					body["lead_id"] = f.outsider
+				case "clear":
+					body["lead_type"], body["lead_id"] = nil, nil
+				case "id_only":
+					delete(body, "lead_type")
+				case "type_only":
+					body["lead_type"] = nil
+					delete(body, "lead_id")
+				}
+				req := withURLParam(asUser(newRequest(http.MethodPut, "/api/projects/"+f.projectID, body), f.insider), "id", f.projectID)
+				testutil.Call(t, testHandler.UpdateProject, req).Want(http.StatusForbidden)
+				var title, storedLead string
+				if err := testPool.QueryRow(context.Background(), `SELECT title, lead_id::text FROM project WHERE id = $1`, f.projectID).Scan(&title, &storedLead); err != nil {
+					t.Fatal(err)
+				}
+				if storedLead != lead || title == "must not change" {
+					t.Fatal("refused lead change still changed the project")
+				}
+			})
+		}
+	}
+}
+
+func TestPrivateProjectAccessManagersCanAddAndTransferLead(t *testing.T) {
+	for _, actor := range []string{"owner", "admin", "lead"} {
+		t.Run(actor, func(t *testing.T) {
+			f := newPrivateProjectFixture(t)
+			dbfx.Exec(t, `UPDATE project SET lead_type = 'member', lead_id = $1 WHERE id = $2`, f.insider, f.projectID)
+			userID := testUserID
+			if actor == "lead" {
+				userID = f.insider
+			} else if actor == "admin" {
+				userID = createPlainMember(t, f.marker+"-admin@multica.test")
+				dbfx.Exec(t, `UPDATE member SET role = 'admin' WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, userID)
+			}
+			added := createPlainMember(t, f.marker+"-added@multica.test")
+			req := withURLParam(asUser(newRequest(http.MethodPost, "/api/projects/"+f.projectID+"/members", map[string]any{"user_ids": []string{added}}), userID), "id", f.projectID)
+			testutil.Call(t, testHandler.AddProjectMembers, req).Want(http.StatusOK)
+			req = withURLParam(asUser(newRequest(http.MethodPut, "/api/projects/"+f.projectID, map[string]any{"lead_type": "member", "lead_id": f.outsider}), userID), "id", f.projectID)
+			testutil.Call(t, testHandler.UpdateProject, req).Want(http.StatusOK)
+			var newLeadIsMember, oldLeadIsMember bool
+			if err := testPool.QueryRow(context.Background(), `SELECT
+				EXISTS(SELECT 1 FROM project_member WHERE project_id = $1 AND user_id = $2),
+				EXISTS(SELECT 1 FROM project_member WHERE project_id = $1 AND user_id = $3)`, f.projectID, f.outsider, f.insider).Scan(&newLeadIsMember, &oldLeadIsMember); err != nil {
+				t.Fatal(err)
+			}
+			if !newLeadIsMember || !oldLeadIsMember {
+				t.Fatal("lead transfer must add the new lead and retain the old lead's membership")
+			}
+		})
+	}
+}
+
+func TestPrivateProjectCurrentLeadCannotBeRemoved(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	dbfx.Exec(t, `UPDATE project SET lead_type = 'member', lead_id = $1 WHERE id = $2`, f.insider, f.projectID)
+	for _, actor := range []string{testUserID, f.insider} {
+		req := testutil.WithURLParams(asUser(newRequest(http.MethodDelete, "/api/projects/"+f.projectID+"/members/"+f.insider, nil), actor), "id", f.projectID, "userId", f.insider)
+		testutil.Call(t, testHandler.RemoveProjectMember, req).Want(http.StatusConflict)
+	}
+	var exists bool
+	if err := testPool.QueryRow(context.Background(), `SELECT EXISTS(SELECT 1 FROM project_member WHERE project_id = $1 AND user_id = $2)`, f.projectID, f.insider).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Fatal("current lead lost project membership")
 	}
 }
 

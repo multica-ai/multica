@@ -18,9 +18,8 @@ import (
 
 // Private projects (MUL-8472). Who may do what:
 //
-//   - change visibility, remove other members: workspace owner/admin, or the
-//     project's member lead
-//   - add members: the above, or any project member
+//   - change visibility or lead, add/remove other members: workspace
+//     owner/admin, or the project's member lead
 //   - remove yourself: any project member
 //   - agents: none of these; an agent's access is derived from humans
 //
@@ -101,6 +100,22 @@ func (h *Handler) prepareProjectAccessUpdate(w http.ResponseWriter, r *http.Requ
 	current := projectVisibilityOrDefault(project.Visibility)
 	memberLead := newLeadType.Valid && newLeadType.String == "member" && newLeadID.Valid
 
+	// A lead controls project access. Protect every lead change, including
+	// assigning an existing member, clearing the lead, and public projects.
+	if leadChanged {
+		if !h.requireHumanProjectAccessActor(w, r, workspaceID) {
+			return projectAccessUpdate{}, false
+		}
+		member, ok := h.workspaceMember(w, r, workspaceID)
+		if !ok {
+			return projectAccessUpdate{}, false
+		}
+		if !canManageProjectAccess(member, project) {
+			writeError(w, http.StatusForbidden, "only workspace admins and the project lead can change the project lead")
+			return projectAccessUpdate{}, false
+		}
+	}
+
 	if requested != nil && *requested != current {
 		target := *requested
 		if !projectaccess.ValidVisibility(target) {
@@ -149,25 +164,6 @@ func (h *Handler) prepareProjectAccessUpdate(w http.ResponseWriter, r *http.Requ
 	}
 	if isMember {
 		return projectAccessUpdate{}, true
-	}
-	if actorType, _ := h.resolveActor(r, requestUserID(r), workspaceID); actorType == "agent" {
-		writeError(w, http.StatusForbidden, "agents cannot change project access; the lead of a private project must already be a project member")
-		return projectAccessUpdate{}, false
-	}
-	member, ok := h.workspaceMember(w, r, workspaceID)
-	if !ok {
-		return projectAccessUpdate{}, false
-	}
-	if !canManageProjectAccess(member, project) {
-		callerIsMember, err := h.isProjectMember(r, project, member.UserID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to check project membership")
-			return projectAccessUpdate{}, false
-		}
-		if !callerIsMember {
-			writeError(w, http.StatusForbidden, "only project members can add members")
-			return projectAccessUpdate{}, false
-		}
 	}
 	return projectAccessUpdate{addIDs: []pgtype.UUID{newLeadID}}, true
 }
@@ -364,15 +360,8 @@ func (h *Handler) AddProjectMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canManageProjectAccess(member, project) {
-		isMember, err := h.isProjectMember(r, project, member.UserID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to check project membership")
-			return
-		}
-		if !isMember {
-			writeError(w, http.StatusForbidden, "only project members can add members")
-			return
-		}
+		writeError(w, http.StatusForbidden, "only workspace admins and the project lead can add members")
+		return
 	}
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -426,6 +415,10 @@ func (h *Handler) RemoveProjectMember(w http.ResponseWriter, r *http.Request) {
 	}
 	if target != member.UserID && !canManageProjectAccess(member, project) {
 		writeError(w, http.StatusForbidden, "only workspace admins and the project lead can remove other members")
+		return
+	}
+	if project.LeadType.Valid && project.LeadType.String == "member" && project.LeadID == target {
+		writeError(w, http.StatusConflict, "change the project lead before removing the current lead")
 		return
 	}
 	removed, err := h.Queries.DeleteProjectMember(r.Context(), db.DeleteProjectMemberParams{

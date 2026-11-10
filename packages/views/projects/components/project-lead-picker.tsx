@@ -5,6 +5,8 @@ import { UserMinus } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useAuthStore } from "@multica/core/auth";
+import { canManageProjectAccess } from "@multica/core/projects/access";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import type { Project, UpdateProjectRequest } from "@multica/core/types";
@@ -23,6 +25,8 @@ export function ProjectLeadPicker({ project, handleUpdate, renderTrigger, align 
   const { getActorName } = useActorName();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const userId = useAuthStore((s) => s.user?.id);
+  const canManage = canManageProjectAccess(project, userId, members.find((m) => m.user_id === userId)?.role);
 
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
@@ -36,8 +40,8 @@ export function ProjectLeadPicker({ project, handleUpdate, renderTrigger, align 
   const leadName = leadId && leadType ? getActorName(leadType, leadId) : null;
 
   return (
-    <Popover open={leadOpen} onOpenChange={(v) => { setLeadOpen(v); if (!v) setLeadFilter(""); }}>
-      <PopoverTrigger render={renderTrigger(leadName)} />
+    <Popover open={leadOpen && canManage} onOpenChange={(v) => { setLeadOpen(v); if (!v) setLeadFilter(""); }}>
+      <PopoverTrigger disabled={!canManage} render={renderTrigger(leadName)} />
       <PopoverContent align={align} className="w-52 p-0">
         <div className="px-2 py-1.5 border-b">
           <input

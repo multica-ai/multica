@@ -2,7 +2,11 @@ import { onlineManager, useMutation, useQueryClient } from "@tanstack/react-quer
 import { api } from "../api";
 import { projectKeys } from "./queries";
 import { issueKeys } from "../issues/queries";
-import type { ProjectVisibility } from "../types";
+import type { Project, ProjectVisibility } from "../types";
+
+export function canManageProjectAccess(project: Pick<Project, "lead_type" | "lead_id">, userId: string | null | undefined, role: string | null | undefined): boolean {
+  return !!userId && (role === "owner" || role === "admin" || (project.lead_type === "member" && project.lead_id === userId));
+}
 
 type AccessChange =
   | { type: "visibility"; visibility: ProjectVisibility; memberIds: string[] }
