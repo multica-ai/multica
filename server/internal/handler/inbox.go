@@ -271,6 +271,22 @@ func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Opening the issue archives the notices on it. The item was active when
+	// loaded, so an archived one stays where the reader left it.
+	if !prev.Archived && item.IssueID.Valid && item.RecipientType == "member" {
+		archived, err := h.Queries.ArchiveNoticeInboxByIssue(r.Context(), db.ArchiveNoticeInboxByIssueParams{
+			WorkspaceID: item.WorkspaceID,
+			RecipientID: item.RecipientID,
+			IssueID:     item.IssueID,
+			NoticeTypes: inbox.NoticeTypes,
+		})
+		if err != nil {
+			slog.Warn("inbox: archive opened notices failed", "item_id", id, "error", err)
+		} else if archived > 0 && inbox.IsNotice(item.Type) {
+			item.Archived = true
+		}
+	}
+
 	userID := requestUserID(r)
 	workspaceID := uuidToString(item.WorkspaceID)
 	h.publish(protocol.EventInboxRead, workspaceID, "member", userID, map[string]any{
@@ -509,6 +525,26 @@ func (h *Handler) MarkIssueInboxRead(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to mark issue inbox read")
 		return
+	}
+
+	// Opening the issue archives the notices on it, read or not.
+	archived, err := h.Queries.ArchiveNoticeInboxByIssue(r.Context(), db.ArchiveNoticeInboxByIssueParams{
+		WorkspaceID: wsUUID,
+		RecipientID: parseUUID(userID),
+		IssueID:     issueUUID,
+		NoticeTypes: inbox.NoticeTypes,
+	})
+	if err != nil {
+		slog.Warn("inbox: archive opened notices failed", "issue_id", uuidToString(issueUUID), "error", err)
+		archived = 0
+	}
+	if archived > 0 {
+		h.publish(protocol.EventInboxBatchArchived, workspaceID, "member", userID, map[string]any{
+			"recipient_id": userID,
+			"count":        archived,
+			"issue_id":     uuidToString(issueUUID),
+			"reason":       "notice_opened",
+		})
 	}
 
 	// Opening an issue with nothing unread is the common case. It changes no

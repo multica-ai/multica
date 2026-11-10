@@ -292,49 +292,92 @@ func archiveStaleTaskFailedInbox(
 		"row_count", len(rows), "recipient_count", len(counts))
 }
 
-// archiveInboxForActor clears a member's Inbox for an issue they just acted
-// on, when they turned on auto_archive. Replying, changing the status or
-// reassigning usually moves the issue on, but not always (a reply can be a
-// question, or answer only one of several reasons), so by default the member
-// archives it themselves. A later hand-back delivers a fresh row. Opening the
-// issue alone is not acting, and does not come through here.
-func archiveInboxForActor(
-	ctx context.Context,
-	queries *db.Queries,
-	bus *events.Bus,
-	e events.Event,
-	issueID string,
-) {
-	if e.ActorType != "member" || e.ActorID == "" || issueID == "" {
+// publishInboxArchived tells each member whose rows were just archived, so
+// connected clients drop the issue without a reload.
+func publishInboxArchived(bus *events.Bus, workspaceID, issueID, reason string, counts map[string]int64) {
+	for recipientID, count := range counts {
+		bus.Publish(events.Event{
+			Type:        protocol.EventInboxBatchArchived,
+			WorkspaceID: workspaceID,
+			Payload: map[string]any{
+				"recipient_id": recipientID,
+				"count":        count,
+				"issue_id":     issueID,
+				"reason":       reason,
+			},
+		})
+	}
+}
+
+// archiveInboxOnRunStart takes an issue out of a member's Inbox when their
+// own action starts an agent run on it: the issue is with the agent now, and
+// comes back through notifyRunEnded or the task:failed listener when the run
+// ends. Runs the member did not start themselves (delegation, automation, a
+// retry of an earlier attempt) leave the Inbox alone.
+func archiveInboxOnRunStart(ctx context.Context, queries *db.Queries, bus *events.Bus, e events.Event) {
+	payload, ok := e.Payload.(map[string]any)
+	if !ok {
 		return
 	}
-	if loadUserPrefs(ctx, queries, e.WorkspaceID, []string{e.ActorID})[e.ActorID][handler.AutoArchivePref] != handler.AutoArchiveOn {
+	issueID, _ := payload["issue_id"].(string)
+	taskID, _ := payload["task_id"].(string)
+	issueUUID, err := util.ParseUUID(issueID)
+	if err != nil {
 		return
 	}
+	taskUUID, err := util.ParseUUID(taskID)
+	if err != nil {
+		return
+	}
+	task, err := queries.GetAgentTask(ctx, taskUUID)
+	if err != nil {
+		slog.Error("archive handed-over inbox: failed to get task", "task_id", taskID, "error", err)
+		return
+	}
+	if !task.OriginatorUserID.Valid ||
+		task.OriginatorSource.String != string(attribution.SourceDirectHuman) ||
+		task.RetryOfTaskID.Valid {
+		return
+	}
+	originator := util.UUIDToString(task.OriginatorUserID)
 	count, err := queries.ArchiveInboxByIssue(ctx, db.ArchiveInboxByIssueParams{
 		WorkspaceID:   parseUUID(e.WorkspaceID),
 		RecipientType: "member",
-		RecipientID:   parseUUID(e.ActorID),
-		IssueID:       parseUUID(issueID),
+		RecipientID:   task.OriginatorUserID,
+		IssueID:       issueUUID,
 	})
 	if err != nil {
-		slog.Error("archive acted-on inbox: query failed",
-			"workspace_id", e.WorkspaceID, "issue_id", issueID, "actor_id", e.ActorID, "error", err)
+		slog.Error("archive handed-over inbox: query failed",
+			"workspace_id", e.WorkspaceID, "issue_id", issueID, "member_id", originator, "error", err)
 		return
 	}
 	if count == 0 {
 		return
 	}
-	bus.Publish(events.Event{
-		Type:        protocol.EventInboxBatchArchived,
-		WorkspaceID: e.WorkspaceID,
-		Payload: map[string]any{
-			"recipient_id": e.ActorID,
-			"count":        count,
-			"issue_id":     issueID,
-			"reason":       "acted_on_issue",
-		},
+	publishInboxArchived(bus, e.WorkspaceID, issueID, "handed_to_agent", map[string]int64{originator: count})
+}
+
+// archiveInboxForClosedIssue takes an issue out of every Inbox once it
+// reaches a done or cancelled status, whoever moved it there: nothing on it
+// waits on anyone. A later comment or run delivers a fresh row.
+func archiveInboxForClosedIssue(ctx context.Context, queries *db.Queries, bus *events.Bus, workspaceID, issueID string) {
+	rows, err := queries.ArchiveInboxByIssueForAll(ctx, db.ArchiveInboxByIssueForAllParams{
+		WorkspaceID: parseUUID(workspaceID),
+		IssueID:     parseUUID(issueID),
 	})
+	if err != nil {
+		slog.Error("archive closed-issue inbox: query failed",
+			"workspace_id", workspaceID, "issue_id", issueID, "error", err)
+		return
+	}
+	counts := map[string]int64{}
+	for _, row := range rows {
+		if row.RecipientType != "member" {
+			continue
+		}
+		counts[util.UUIDToString(row.RecipientID)]++
+	}
+	publishInboxArchived(bus, workspaceID, issueID, "issue_closed", counts)
 }
 
 // notifyRunEnded hands an issue back when an agent's run on it completes: to
@@ -850,10 +893,6 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		prevAssigneeID, _ := payload["prev_assignee_id"].(*string)
 		prevDescription, _ := payload["prev_description"].(*string)
 
-		if assigneeChanged || statusChanged {
-			archiveInboxForActor(ctx, queries, bus, e, issue.ID)
-		}
-
 		if assigneeChanged {
 			// Build structured details for assignee change.
 			//
@@ -921,6 +960,18 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		}
 
 		if statusChanged {
+			// A done or cancelled issue leaves every Inbox, before this change
+			// is recorded so its own notification stays as it was written.
+			// FAIL CLOSED: an unresolved custom status keeps the rows, since
+			// hiding what waits on someone is worse than leaving it listed.
+			category, categoryErr := issuestatus.CategoryWithError(ctx, queries, parseUUID(e.WorkspaceID), issue.Status)
+			if categoryErr != nil {
+				slog.Warn("resolve issue status category for inbox archive; keeping rows",
+					"issue_id", issue.ID, "status", issue.Status, "error", categoryErr)
+			} else if category == issuestatus.CategoryDone || category == issuestatus.CategoryClosed {
+				archiveInboxForClosedIssue(ctx, queries, bus, e.WorkspaceID, issue.ID)
+			}
+
 			prevStatus, _ := payload["prev_status"].(string)
 			statusDetails, _ := json.Marshal(map[string]string{
 				"from": prevStatus,
@@ -1068,10 +1119,6 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		issueTitle, _ := payload["issue_title"].(string)
 		issueStatus, _ := payload["issue_status"].(string)
 
-		if authorType == "member" {
-			archiveInboxForActor(ctx, queries, bus, e, issueID)
-		}
-
 		commentDetails := emptyDetails
 		if commentID != "" {
 			commentDetails, _ = json.Marshal(map[string]string{
@@ -1166,6 +1213,11 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			issueTitle, "",
 			details,
 		)
+	})
+
+	// task:queued — the member who started the run has handed the issue over
+	bus.Subscribe(protocol.EventTaskQueued, func(e events.Event) {
+		archiveInboxOnRunStart(ctx, queries, bus, e)
 	})
 
 	// task:completed — hand the issue back to whoever handed it over

@@ -45,3 +45,28 @@ var turnTypeSet = func() map[string]bool {
 func IsTurn(notifType string) bool {
 	return turnTypeSet[notifType]
 }
+
+// NoticeTypes are the Inbox notifications that only tell the recipient
+// something and ask nothing of them. Opening the issue is all there is to do
+// with one, so reading it archives it; every other type waits for the
+// recipient to archive it or for the issue to move on.
+var NoticeTypes = []string{
+	"reaction_added",
+	"unassigned",
+	"issue_subscribed",
+	"quick_create_done",
+	"app_action_result",
+}
+
+var noticeTypeSet = func() map[string]bool {
+	set := make(map[string]bool, len(NoticeTypes))
+	for _, t := range NoticeTypes {
+		set[t] = true
+	}
+	return set
+}()
+
+// IsNotice reports whether a notification of this type is a notice.
+func IsNotice(notifType string) bool {
+	return noticeTypeSet[notifType]
+}

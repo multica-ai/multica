@@ -179,29 +179,83 @@ func publishComment(bus *events.Bus, issueID, authorType, authorID string) {
 	})
 }
 
-// enableAutoArchive turns on the member's auto_archive preference.
-func enableAutoArchive(t *testing.T, userID string) {
+// seedInboxRow puts one active Inbox row on the issue for the member.
+func seedInboxRow(t *testing.T, recipientID, issueID, notifType string) {
 	t.Helper()
 	if _, err := testPool.Exec(context.Background(), `
-		INSERT INTO notification_preference (workspace_id, user_id, preferences)
-		VALUES ($1, $2, '{"auto_archive":"on"}'::jsonb)
-		ON CONFLICT (workspace_id, user_id)
-		DO UPDATE SET preferences = notification_preference.preferences || EXCLUDED.preferences
-	`, testWorkspaceID, userID); err != nil {
-		t.Fatalf("enable auto_archive: %v", err)
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, details)
+		VALUES ($1, 'member', $2, $4, 'info', $3, 'turn', '{}')
+	`, testWorkspaceID, recipientID, issueID, notifType); err != nil {
+		t.Fatalf("seed inbox row: %v", err)
+	}
+}
+
+// Replying is not handling: a member's comment leaves their Inbox alone, and
+// so does an agent's. The member archives the issue when they are done.
+func TestNotification_MemberCommentKeepsInbox(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+	seedInboxRow(t, testUserID, issueID, "agent_completed")
+
+	var batchArchived []events.Event
+	bus.Subscribe(protocol.EventInboxBatchArchived, func(e events.Event) {
+		batchArchived = append(batchArchived, e)
+	})
+
+	publishComment(bus, issueID, "agent", "00000000-0000-0000-0000-aaaaaaaaaaaa")
+	publishComment(bus, issueID, "member", testUserID)
+	if active, _ := countInboxByTypeForIssue(t, testUserID, issueID, "agent_completed"); active != 1 {
+		t.Fatalf("a comment must not clear the Inbox, got %d active", active)
+	}
+	if len(batchArchived) != 0 {
+		t.Fatalf("expected no inbox:batch-archived event, got %d", len(batchArchived))
+	}
+}
+
+// seedStartedTask records a run that just started, with its originator
+// resolved by source. Only one task per issue and agent can be pending, so
+// the row is stored as already finished.
+func seedStartedTask(t *testing.T, issueID, originatorID, source string, retryOf *string) string {
+	t.Helper()
+	agentID := getAgentID(t)
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, originator_user_id, accountable_user_id, originator_source, retry_of_task_id)
+		SELECT id, runtime_id, $2, 'completed', 0, $3, $3, $4, $5 FROM agent WHERE id = $1
+		RETURNING id
+	`, agentID, issueID, originatorID, source, retryOf).Scan(&taskID); err != nil {
+		t.Fatalf("seed task: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `
-			UPDATE notification_preference SET preferences = preferences - 'auto_archive'
-			WHERE workspace_id = $1 AND user_id = $2
-		`, testWorkspaceID, userID)
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+	return taskID
+}
+
+func publishTaskQueued(bus *events.Bus, issueID, taskID string) {
+	bus.Publish(events.Event{
+		Type:        protocol.EventTaskQueued,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "system",
+		Payload: map[string]any{
+			"task_id":  taskID,
+			"agent_id": "00000000-0000-0000-0000-aaaaaaaaaaaa",
+			"issue_id": issueID,
+			"status":   "queued",
+		},
 	})
 }
 
-// By default a reply leaves the Inbox alone: the member archives it. With
-// auto_archive on, it leaves the replier's Inbox and no one else's; an
-// agent's comment leaves every Inbox alone either way.
-func TestNotification_MemberCommentClearsOwnInbox(t *testing.T) {
+// Starting an agent run hands the issue over, so it leaves the Inbox of the
+// member whose own action started it and no one else's. A delegated run or a
+// retry is not the member handing it over.
+func TestNotification_RunStartClearsOriginatorInbox(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
 
@@ -214,90 +268,67 @@ func TestNotification_MemberCommentClearsOwnInbox(t *testing.T) {
 		cleanupInboxForIssue(t, issueID)
 		cleanupTestIssue(t, issueID)
 	})
-	for _, recipient := range []string{testUserID, otherID} {
-		if _, err := testPool.Exec(context.Background(), `
-			INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, details)
-			VALUES ($1, 'member', $2, 'agent_completed', 'action_required', $3, 'turn', '{}')
-		`, testWorkspaceID, recipient, issueID); err != nil {
-			t.Fatalf("seed inbox row: %v", err)
-		}
-	}
+	seedInboxRow(t, testUserID, issueID, "mentioned")
+	seedInboxRow(t, otherID, issueID, "mentioned")
 
 	var batchArchived []events.Event
 	bus.Subscribe(protocol.EventInboxBatchArchived, func(e events.Event) {
 		batchArchived = append(batchArchived, e)
 	})
 
-	publishComment(bus, issueID, "agent", "00000000-0000-0000-0000-aaaaaaaaaaaa")
-	if active, _ := countInboxByTypeForIssue(t, testUserID, issueID, "agent_completed"); active != 1 {
-		t.Fatalf("an agent comment must not clear the Inbox, got %d active", active)
+	delegated := seedStartedTask(t, issueID, testUserID, "delegation", nil)
+	publishTaskQueued(bus, issueID, delegated)
+	first := seedStartedTask(t, issueID, otherID, "direct_human", nil)
+	publishTaskQueued(bus, issueID, seedStartedTask(t, issueID, testUserID, "direct_human", &first))
+	if active, _ := countInboxByTypeForIssue(t, testUserID, issueID, "mentioned"); active != 1 {
+		t.Fatalf("a delegated run or a retry must not clear the Inbox, got %d active", active)
 	}
 
-	publishComment(bus, issueID, "member", testUserID)
-	if active, _ := countInboxByTypeForIssue(t, testUserID, issueID, "agent_completed"); active != 1 {
-		t.Fatalf("without auto_archive a reply must not clear the Inbox, got %d active", active)
+	publishTaskQueued(bus, issueID, seedStartedTask(t, issueID, testUserID, "direct_human", nil))
+	if active, archived := countInboxByTypeForIssue(t, testUserID, issueID, "mentioned"); active != 0 || archived != 1 {
+		t.Fatalf("originator: expected the row archived, got active=%d archived=%d", active, archived)
 	}
-	if len(batchArchived) != 0 {
-		t.Fatalf("expected no inbox:batch-archived event, got %d", len(batchArchived))
-	}
-
-	enableAutoArchive(t, testUserID)
-	publishComment(bus, issueID, "member", testUserID)
-	if active, archived := countInboxByTypeForIssue(t, testUserID, issueID, "agent_completed"); active != 0 || archived != 1 {
-		t.Fatalf("replier: expected the row archived, got active=%d archived=%d", active, archived)
-	}
-	if active, _ := countInboxByTypeForIssue(t, otherID, issueID, "agent_completed"); active != 1 {
+	if active, _ := countInboxByTypeForIssue(t, otherID, issueID, "mentioned"); active != 1 {
 		t.Fatalf("another member's row must stay, got %d active", active)
 	}
 	if len(batchArchived) != 1 {
 		t.Fatalf("expected 1 inbox:batch-archived event, got %d", len(batchArchived))
 	}
 	payload, _ := batchArchived[0].Payload.(map[string]any)
-	if payload["recipient_id"] != testUserID || payload["reason"] != "acted_on_issue" {
+	if payload["recipient_id"] != testUserID || payload["reason"] != "handed_to_agent" {
 		t.Fatalf("unexpected inbox:batch-archived payload %+v", payload)
 	}
 }
 
-// With auto_archive on, changing the status is acting on the issue too.
-func TestNotification_MemberStatusChangeClearsOwnInbox(t *testing.T) {
+// A done or cancelled issue waits on no one, so it leaves every Inbox; any
+// other status change leaves the Inbox to its owner.
+func TestNotification_ClosedIssueLeavesEveryInbox(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
-	enableAutoArchive(t, testUserID)
 
-	issueID := createTestIssue(t, testWorkspaceID, testUserID)
-	t.Cleanup(func() {
-		cleanupInboxForIssue(t, issueID)
-		cleanupTestIssue(t, issueID)
-	})
-	if _, err := testPool.Exec(context.Background(), `
-		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, details)
-		VALUES ($1, 'member', $2, 'mentioned', 'info', $3, 'turn', '{}')
-	`, testWorkspaceID, testUserID, issueID); err != nil {
-		t.Fatalf("seed inbox row: %v", err)
-	}
+	otherEmail := "notif-turn-closed@multica.ai"
+	otherID := createNotificationMember(t, otherEmail)
+	t.Cleanup(func() { cleanupTestUser(t, otherEmail) })
 
-	bus.Publish(events.Event{
-		Type:        protocol.EventIssueUpdated,
-		WorkspaceID: testWorkspaceID,
-		ActorType:   "member",
-		ActorID:     testUserID,
-		Payload: map[string]any{
-			"issue": handler.IssueResponse{
-				ID:          issueID,
-				WorkspaceID: testWorkspaceID,
-				Title:       "turn test issue",
-				Status:      "in_progress",
-				Priority:    "medium",
-				CreatorType: "member",
-				CreatorID:   testUserID,
-			},
-			"assignee_changed": false,
-			"status_changed":   true,
-			"prev_status":      "todo",
-		},
-	})
+	for _, status := range []string{"done", "cancelled"} {
+		issueID := createTestIssue(t, testWorkspaceID, testUserID)
+		t.Cleanup(func() {
+			cleanupInboxForIssue(t, issueID)
+			cleanupTestIssue(t, issueID)
+		})
+		seedInboxRow(t, testUserID, issueID, "mentioned")
+		seedInboxRow(t, otherID, issueID, "mentioned")
 
-	if active, archived := countInboxByTypeForIssue(t, testUserID, issueID, "mentioned"); active != 0 || archived != 1 {
-		t.Fatalf("expected the row archived, got active=%d archived=%d", active, archived)
+		publishStatusChange(bus, issueID, "in_review", "in_progress")
+		if active, _ := countInboxByTypeForIssue(t, testUserID, issueID, "mentioned"); active != 1 {
+			t.Fatalf("%s: a status change that does not close the issue must keep the row, got %d active", status, active)
+		}
+
+		publishStatusChange(bus, issueID, status, "in_review")
+		for _, recipient := range []string{testUserID, otherID} {
+			if active, archived := countInboxByTypeForIssue(t, recipient, issueID, "mentioned"); active != 0 || archived != 1 {
+				t.Fatalf("%s: expected the row archived for %s, got active=%d archived=%d", status, recipient, active, archived)
+			}
+		}
 	}
 }

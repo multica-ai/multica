@@ -158,6 +158,44 @@ func (q *Queries) ArchiveInboxByIssueAndType(ctx context.Context, arg ArchiveInb
 	return items, nil
 }
 
+const archiveInboxByIssueForAll = `-- name: ArchiveInboxByIssueForAll :many
+UPDATE inbox_item SET archived = true
+WHERE workspace_id = $1 AND issue_id = $2 AND archived = false
+RETURNING recipient_type, recipient_id
+`
+
+type ArchiveInboxByIssueForAllParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+type ArchiveInboxByIssueForAllRow struct {
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+}
+
+// An issue that reached a done or cancelled status waits on no one, so it
+// leaves every recipient's Inbox at once.
+func (q *Queries) ArchiveInboxByIssueForAll(ctx context.Context, arg ArchiveInboxByIssueForAllParams) ([]ArchiveInboxByIssueForAllRow, error) {
+	rows, err := q.db.Query(ctx, archiveInboxByIssueForAll, arg.WorkspaceID, arg.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ArchiveInboxByIssueForAllRow{}
+	for rows.Next() {
+		var i ArchiveInboxByIssueForAllRow
+		if err := rows.Scan(&i.RecipientType, &i.RecipientID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const archiveInboxItem = `-- name: ArchiveInboxItem :one
 UPDATE inbox_item SET archived = true
 WHERE id = $1
@@ -186,6 +224,36 @@ func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxIt
 		&i.Section,
 	)
 	return i, err
+}
+
+const archiveNoticeInboxByIssue = `-- name: ArchiveNoticeInboxByIssue :execrows
+UPDATE inbox_item SET archived = true
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
+  AND issue_id = $3 AND archived = false
+  AND type = ANY($4::text[])
+`
+
+type ArchiveNoticeInboxByIssueParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	NoticeTypes []string    `json:"notice_types"`
+}
+
+// Reading an issue archives the notices on it (inbox.NoticeTypes): they ask
+// nothing of the member, so having seen them is having handled them. Rows of
+// any other type keep the issue in the Inbox.
+func (q *Queries) ArchiveNoticeInboxByIssue(ctx context.Context, arg ArchiveNoticeInboxByIssueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, archiveNoticeInboxByIssue,
+		arg.WorkspaceID,
+		arg.RecipientID,
+		arg.IssueID,
+		arg.NoticeTypes,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const countPendingInboxByWorkspace = `-- name: CountPendingInboxByWorkspace :many

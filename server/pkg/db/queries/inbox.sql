@@ -190,6 +190,22 @@ UPDATE inbox_item SET archived = true
 WHERE workspace_id = $1 AND issue_id = $2 AND type = $3 AND archived = false
 RETURNING recipient_type, recipient_id;
 
+-- name: ArchiveInboxByIssueForAll :many
+-- An issue that reached a done or cancelled status waits on no one, so it
+-- leaves every recipient's Inbox at once.
+UPDATE inbox_item SET archived = true
+WHERE workspace_id = $1 AND issue_id = $2 AND archived = false
+RETURNING recipient_type, recipient_id;
+
+-- name: ArchiveNoticeInboxByIssue :execrows
+-- Reading an issue archives the notices on it (inbox.NoticeTypes): they ask
+-- nothing of the member, so having seen them is having handled them. Rows of
+-- any other type keep the issue in the Inbox.
+UPDATE inbox_item SET archived = true
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
+  AND issue_id = $3 AND archived = false
+  AND type = ANY(sqlc.arg(notice_types)::text[]);
+
 -- name: CountUnreadInbox :one
 SELECT count(*) FROM inbox_item
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read = false AND archived = false;
