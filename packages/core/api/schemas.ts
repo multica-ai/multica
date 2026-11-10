@@ -2908,6 +2908,17 @@ export const SubscribedIssueIdsSchema = z
   })
   .loose();
 
+// The squads behind the viewer's "my agents" relation (`/api/squads/involved`
+// GET). Same rules as `SubscribedIssueIdsSchema`: an empty set would hide
+// every squad row under the filter, so a body without the list fails.
+export const InvolvedSquadIdsSchema = z
+  .object({
+    squad_ids: z
+      .array(z.unknown())
+      .transform((ids) => ids.filter((id): id is string => typeof id === "string" && id.length > 0)),
+  })
+  .loose();
+
 // Inbox items (`/api/inbox` and `/api/inbox/archived` GET).
 // Lenient per the usual rules: `severity` / `type` / `recipient_type` stay
 // `z.string()` so a notification kind this client doesn't know yet still

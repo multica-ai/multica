@@ -55,7 +55,7 @@
   },
   "relation_filter_error": {
     "title": "'나와의 관계' 필터를 불러오지 못했습니다",
-    "hint": "구독과 에이전트를 불러온 후에 '내가 구독 중' 또는 '내 에이전트가 담당' 필터의 태스크를 표시할 수 있습니다."
+    "hint": "구독과 에이전트를 불러온 후에 '내가 구독 중' 또는 '내 에이전트의 작업' 필터의 태스크를 표시할 수 있습니다."
   },
   "source_context": {
     "create_action": "이 댓글에서 하위 태스크 만들기",
@@ -192,7 +192,7 @@
     "section_relation": "나와의 관계",
     "relation_assigned": "내가 담당",
     "relation_created": "내가 생성",
-    "relation_my_agents": "내 에이전트가 담당",
+    "relation_my_agents": "내 에이전트의 작업",
     "relation_subscribed": "내가 구독 중",
     "section_agent_status": "에이전트 상태",
     "agent_status_running": "실행 중",
@@ -1071,7 +1071,7 @@
     "variant_my_any": "모든 관련",
     "variant_my_assigned": "나에게 할당됨",
     "variant_my_created": "내가 생성함",
-    "variant_my_involved": "참여 중"
+    "variant_my_involved": "내 에이전트의 작업"
   },
   "plugins": {
     "panels": "Plugins",

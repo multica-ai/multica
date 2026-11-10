@@ -55,7 +55,7 @@
   },
   "relation_filter_error": {
     "title": "“与我的关系”筛选加载失败",
-    "hint": "加载订阅和智能体后才能显示按“我订阅的”或“分配给我的智能体的”筛选的任务。"
+    "hint": "加载订阅和智能体后才能显示按“我订阅的”或“我的智能体在做”筛选的任务。"
   },
   "source_context": {
     "create_action": "从这条评论创建子任务",
@@ -192,7 +192,7 @@
     "section_relation": "与我的关系",
     "relation_assigned": "分配给我的",
     "relation_created": "我创建的",
-    "relation_my_agents": "分配给我的智能体的",
+    "relation_my_agents": "我的智能体在做",
     "relation_subscribed": "我订阅的",
     "section_agent_status": "智能体状态",
     "agent_status_running": "运行中",
@@ -1071,7 +1071,7 @@
     "variant_my_any": "任何相关",
     "variant_my_assigned": "分配给我",
     "variant_my_created": "我创建的",
-    "variant_my_involved": "我参与的"
+    "variant_my_involved": "我的智能体在做"
   },
   "plugins": {
     "panels": "Plugins",

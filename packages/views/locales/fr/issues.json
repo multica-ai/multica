@@ -56,7 +56,7 @@
   },
   "relation_filter_error": {
     "title": "Impossible de charger le filtre « Lien avec moi »",
-    "hint": "Les tâches filtrées par « Auxquels je suis abonné » ou « Assignés à mes agents » s'affichent une fois vos abonnements et agents chargés."
+    "hint": "Les tâches filtrées par « Auxquels je suis abonné » ou « Travail de mes agents » s'affichent une fois vos abonnements et agents chargés."
   },
   "source_context": {
     "create_action": "Créer une sous-tâche à partir d'ici",
@@ -194,7 +194,7 @@
     "section_relation": "Lien avec moi",
     "relation_assigned": "Qui me sont assignés",
     "relation_created": "Créés par moi",
-    "relation_my_agents": "Assignés à mes agents",
+    "relation_my_agents": "Travail de mes agents",
     "relation_subscribed": "Auxquels je suis abonné",
     "section_agent_status": "Statut de l'agent",
     "agent_status_running": "En cours d'exécution",
@@ -1117,7 +1117,7 @@
     "variant_my_any": "Toute relation",
     "variant_my_assigned": "Qui me sont assignés",
     "variant_my_created": "Que j'ai créés",
-    "variant_my_involved": "Impliqué"
+    "variant_my_involved": "Travail de mes agents"
   },
   "plugins": {
     "panels": "Plugins",
