@@ -1857,8 +1857,13 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	//
 	// Attachments are excluded: their ids are minted per upload, so a re-send
 	// carries different ones and the bodies alone no longer identify a repeat.
+	//
+	// The lookup here only skips the write transaction for the common
+	// sequential re-send; the check that holds under concurrency is repeated
+	// inside it, under the issue lock (see the CreateComment call below).
+	var dedupe *db.GetCommentBySourceTaskAndContentParams
 	if sourceTaskID.Valid && len(attachmentIDs) == 0 {
-		existing, lookupErr := h.Queries.GetCommentBySourceTaskAndContent(r.Context(), db.GetCommentBySourceTaskAndContentParams{
+		dedupe = &db.GetCommentBySourceTaskAndContentParams{
 			IssueID:      issue.ID,
 			WorkspaceID:  issue.WorkspaceID,
 			SourceTaskID: sourceTaskID,
@@ -1866,7 +1871,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 			Content:      req.Content,
 			Type:         req.Type,
 			ParentID:     parentID,
-		})
+		}
+		existing, lookupErr := h.Queries.GetCommentBySourceTaskAndContent(r.Context(), *dedupe)
 		switch {
 		case lookupErr == nil:
 			h.respondWithExistingComment(w, r, issue, existing, authorType, authorID, steer)
@@ -1945,9 +1951,35 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 			err = tx.Commit(r.Context())
 		}
 	} else {
+		var resent *db.Comment
 		created, err = wakeupWrite(h, r, func(q *db.Queries) (db.CreateCommentRow, error) {
+			if dedupe != nil {
+				// The lookup above runs before this transaction, so two copies of
+				// one re-send can both miss it and both insert. Take the issue row
+				// in the mode CreateComment's bump takes (FOR NO KEY UPDATE), so
+				// copies queue here, then look again: the second one now sees the
+				// first one's committed comment.
+				if _, lockErr := q.LockIssueForAttachmentWrite(r.Context(), db.LockIssueForAttachmentWriteParams{
+					ID:          issue.ID,
+					WorkspaceID: issue.WorkspaceID,
+				}); lockErr != nil {
+					return db.CreateCommentRow{}, lockErr
+				}
+				existing, lookupErr := q.GetCommentBySourceTaskAndContent(r.Context(), *dedupe)
+				switch {
+				case lookupErr == nil:
+					resent = &existing
+					return db.CreateCommentRow{}, errCommentResent
+				case !errors.Is(lookupErr, pgx.ErrNoRows):
+					return db.CreateCommentRow{}, lookupErr
+				}
+			}
 			return q.CreateComment(r.Context(), createParams)
 		})
+		if errors.Is(err, errCommentResent) {
+			h.respondWithExistingComment(w, r, issue, *resent, authorType, authorID, steer)
+			return
+		}
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The issue was deleted, possibly while this waited for its row lock.
@@ -1992,6 +2024,10 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusCreated, resp)
 }
+
+// errCommentResent aborts a comment write transaction whose locked re-check
+// found the run's identical comment already committed.
+var errCommentResent = errors.New("comment already posted by this run")
 
 // respondWithExistingComment answers a re-send with the comment the run already
 // posted, without repeating the side effects that post already had.

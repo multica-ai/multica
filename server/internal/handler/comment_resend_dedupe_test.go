@@ -2,8 +2,10 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 )
 
@@ -96,5 +98,65 @@ func TestCreateComment_DifferentContentFromSameRunIsNotCollapsed(t *testing.T) {
 
 	if got := countAgentCommentsForIssue(t, fx.IssueID, fx.LeaderID); got != 2 {
 		t.Fatalf("expected 2 distinct comments to be kept, got %d", got)
+	}
+}
+
+// TestCreateComment_ConcurrentIdenticalResendsCollapse covers the overlapping
+// case the guard exists for: one run firing the CLI twice at once. Both
+// requests are in flight together, so a lookup taken before the write
+// transaction lets each see "no existing comment" and both insert. The check
+// has to run under the issue lock it shares with CreateComment.
+func TestCreateComment_ConcurrentIdenticalResendsCollapse(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	const writers = 8
+	for round := 0; round < 5; round++ {
+		round := round
+		t.Run(fmt.Sprintf("round%d", round), func(t *testing.T) {
+			fx := newRunningSquadLeaderTaskFixture(t)
+			verdict := fmt.Sprintf("【验收结果】并发重发 round %d", round)
+
+			codes := make([]int, writers)
+			ids := make([]string, writers)
+			start := make(chan struct{})
+			var wg sync.WaitGroup
+			for i := 0; i < writers; i++ {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					<-start
+					w := postAgentReply(t, fx, verdict)
+					codes[i] = w.Code
+					if w.Code == http.StatusCreated || w.Code == http.StatusOK {
+						var body map[string]any
+						_ = json.NewDecoder(w.Body).Decode(&body)
+						ids[i], _ = body["id"].(string)
+					}
+				}(i)
+			}
+			close(start)
+			wg.Wait()
+
+			created := 0
+			for i, code := range codes {
+				switch code {
+				case http.StatusCreated:
+					created++
+				case http.StatusOK:
+				default:
+					t.Fatalf("round %d writer %d: unexpected status %d", round, i, code)
+				}
+			}
+			if got := countAgentCommentsForIssue(t, fx.IssueID, fx.LeaderID); got != 1 || created != 1 {
+				t.Fatalf("round %d: %d concurrent identical re-sends left %d comments (%d created), want exactly 1", round, writers, got, created)
+			}
+			for i := 1; i < writers; i++ {
+				if ids[i] != ids[0] {
+					t.Fatalf("round %d: writer %d got comment %s, writer 0 got %s; all must converge on one", round, i, ids[i], ids[0])
+				}
+			}
+		})
 	}
 }
