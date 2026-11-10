@@ -13,8 +13,8 @@ import { cn } from "@multica/ui/lib/utils";
  * Under the pointer a soft spotlight fills the dither in and deepens it to the
  * ink, trailing the pointer slightly and fading when it leaves.
  *
- * Over the wordmark the pointer becomes a bulb blower aimed at the star on
- * the i. Each click squeezes the bulb and sends a puff of air, drawn in the
+ * Over the wordmark, and over the host's top padding left open above it, the
+ * pointer becomes a bulb blower aimed at the star on the i. Each click squeezes the bulb and sends a puff of air, drawn in the
  * same cells, towards the star; every bit of air that reaches it pushes it
  * round like a pinwheel, so closer and faster clicking spins it harder. It
  * slows under friction and settles back upright on one of its eight arms.
@@ -125,6 +125,8 @@ export function FooterWordmark({ className }: { className?: string }) {
     const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
     let width = 0;
     let height = 0;
+    // The host's top padding: open air above the letters, to blow from.
+    let band = 0;
     let cols = 0;
     let rows = 0;
     let scale = 1;
@@ -240,25 +242,26 @@ export function FooterWordmark({ className }: { className?: string }) {
     const layout = () => {
       width = host.clientWidth;
       height = Math.round((width * VIEW_H) / VIEW_W);
+      band = Math.round(parseFloat(getComputedStyle(host).paddingTop) || 0);
+      const full = band + height;
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       canvas.width = Math.round(width * dpr);
-      canvas.height = Math.round(height * dpr);
-      canvas.style.height = `${height}px`;
+      canvas.height = Math.round(full * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       cols = Math.ceil(width / CELL);
-      rows = Math.ceil(height / CELL);
+      rows = Math.ceil(full / CELL);
       scale = width / VIEW_W;
       letters =
         width && height
-          ? sampleCells(width, height, cols, rows, (scratch) => {
-              scratch.setTransform(scale, 0, 0, scale, -VIEW_X * scale, -VIEW_Y * scale);
+          ? sampleCells(width, full, cols, rows, (scratch) => {
+              scratch.setTransform(scale, 0, 0, scale, -VIEW_X * scale, band - VIEW_Y * scale);
               scratch.lineWidth = WORDMARK_STROKE;
               for (const d of LETTER_PATHS) scratch.stroke(new Path2D(d));
             })
           : new Uint8Array();
       inside = letters.slice();
       star.x = (STAR.cx - VIEW_X) * scale;
-      star.y = (STAR.cy - VIEW_Y) * scale;
+      star.y = band + (STAR.cy - VIEW_Y) * scale;
       star.reach = STAR.r * scale;
       star.col0 = Math.floor((star.x - star.reach) / CELL) - 1;
       star.row0 = Math.floor((star.y - star.reach) / CELL) - 1;
@@ -306,13 +309,13 @@ export function FooterWordmark({ className }: { className?: string }) {
       const spinning = coast(dt);
       placeStar();
 
-      ctx.clearRect(0, 0, width, height);
+      ctx.clearRect(0, 0, width, band + height);
       ctx.fillStyle = getComputedStyle(host).color;
       const radius = Math.max(1, width * SPOT_RADIUS * spot.r);
       const lit = spot.r > 0.01;
       for (let row = 0; row < rows; row++) {
         const y = row * CELL + CELL / 2;
-        const base = developed * 1.4 - y / height > 0 ? rowDensity(y, height) : 0;
+        const base = developed * 1.4 - (y - band) / height > 0 ? rowDensity(y - band, height) : 0;
         for (let col = 0; col < cols; col++) {
           if (!inside[row * cols + col]) continue;
           let glow = 0;
@@ -423,12 +426,8 @@ export function FooterWordmark({ className }: { className?: string }) {
 
   return (
     <div ref={box} className={cn("relative text-site-ink", className)}>
-      <canvas
-        ref={canvasRef}
-        aria-hidden
-        className="block w-full cursor-none select-none"
-        style={{ aspectRatio: `${VIEW_W} / ${VIEW_H}` }}
-      />
+      <div style={{ aspectRatio: `${VIEW_W} / ${VIEW_H}` }} />
+      <canvas ref={canvasRef} aria-hidden className="absolute inset-0 size-full cursor-none select-none" />
       <svg
         ref={blowerRef}
         aria-hidden

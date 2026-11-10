@@ -37,7 +37,7 @@ export function SiteFooter() {
 
   return (
     <footer className="border-t border-site-rule bg-site-canvas text-site-ink">
-      <Container className="grid gap-site-block py-site-section lg:grid-cols-[minmax(0,1fr)_minmax(0,3fr)] lg:gap-16">
+      <Container className="grid gap-site-block pt-site-section lg:grid-cols-[minmax(0,1fr)_minmax(0,3fr)] lg:gap-16">
         <div>
           <Link href="/" aria-label={t.site.header.home} className={cn("inline-flex items-center rounded-sm", focusRing)}>
               <MulticaWordmark aria-hidden className="h-6 text-site-ink" />
@@ -119,7 +119,7 @@ export function SiteFooter() {
       </Container>
 
       <Container>
-        <FooterWordmark />
+        <FooterWordmark className="pt-site-section" />
       </Container>
     </footer>
   );
