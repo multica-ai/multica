@@ -746,3 +746,81 @@ func TestPrivateProjectCommentSubIssuePreviewHidden(t *testing.T) {
 	}
 	preview(f.insider).Want(http.StatusOK)
 }
+
+// The workspace-wide wakeup lists (the Wakeups page, the board's paused cue
+// and the per-issue summaries) are not read through an issue, so each one has
+// to leave out rules on issues in a project the caller cannot see.
+func TestPrivateProjectWakeupListsSkipOutsiders(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	agent := dbfx.Agent(t, f.marker+" wake target", testRuntimeID)
+	dbfx.Cleanup(t, "DELETE FROM activity_log WHERE issue_id=$1", f.secretIssue)
+	dbfx.Cleanup(t, "DELETE FROM issue_wakeup WHERE issue_id=$1", f.secretIssue)
+	dbfx.Cleanup(t, "DELETE FROM issue_wakeup_receipt WHERE wakeup_id IN (SELECT id FROM issue_wakeup WHERE issue_id=$1)", f.secretIssue)
+	svc := service.IssueWakeupService{Tasks: testHandler.TaskService}
+	create := func() string {
+		t.Helper()
+		w, err := svc.Create(context.Background(), parseUUID(f.secretIssue), parseUUID(testUserID), pgtype.UUID{}, service.WakeupInput{
+			AgentID: agent, Kind: "event", Mode: "continuous", EventTypes: []string{"comment.created"}, Instruction: "check",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return uuidToString(w.ID)
+	}
+	create()
+	paused := create()
+	dbfx.Exec(t, "UPDATE issue_wakeup SET enabled=false,paused_reason='rate',disabled_at=now() WHERE id=$1", paused)
+	// An open sub-issue makes the secret issue's child-done system rule listable.
+	dbfx.Issue(t, f.marker+" secret child", testutil.Cols{"project_id": f.projectID, "parent_issue_id": f.secretIssue})
+	if w := putChildDoneRule(t, f.secretIssue, map[string]any{"instruction": "Advance."}); w.Code != http.StatusOK {
+		t.Fatalf("create system rule: %d %s", w.Code, w.Body.String())
+	}
+
+	onSecretIssue := func(userID string, list http.HandlerFunc, path string) int {
+		t.Helper()
+		var rows []struct {
+			IssueID string `json:"issue_id"`
+		}
+		testutil.Call(t, list, asUser(newRequest(http.MethodGet, path, nil), userID)).Want(http.StatusOK).JSON(&rows)
+		n := 0
+		for _, row := range rows {
+			if row.IssueID == f.secretIssue {
+				n++
+			}
+		}
+		return n
+	}
+	for _, tc := range []struct {
+		name    string
+		userID  string
+		visible bool
+	}{
+		{"project member", f.insider, true},
+		{"workspace owner outside the member list", testUserID, true},
+		{"workspace member outside the project", f.outsider, false},
+	} {
+		// The marker is in the secret issue's title and nowhere else, so the
+		// search narrows the page and its total to this fixture's rules.
+		var page struct {
+			Items []struct {
+				IssueID string `json:"issue_id"`
+			} `json:"items"`
+			Total int `json:"total"`
+		}
+		req := asUser(newRequest(http.MethodGet, "/api/issue-wakeups?scope=all&limit=100&search="+f.marker, nil), tc.userID)
+		testutil.Call(t, testHandler.ListWorkspaceWakeups, req).Want(http.StatusOK).JSON(&page)
+		want := 0
+		if tc.visible {
+			want = 3 // the active rule, the paused rule and the system rule
+		}
+		if len(page.Items) != want || page.Total != want {
+			t.Errorf("%s: wakeup list has %d rules (total %d) on the secret issue, want %d", tc.name, len(page.Items), page.Total, want)
+		}
+		if got := onSecretIssue(tc.userID, testHandler.ListWorkspaceWakeupSummaries, "/api/issue-wakeup-summaries") > 0; got != tc.visible {
+			t.Errorf("%s: wakeup summaries include the secret issue = %v, want %v", tc.name, got, tc.visible)
+		}
+		if got := onSecretIssue(tc.userID, testHandler.ListPausedWakeups, "/api/issue-wakeup-paused") > 0; got != tc.visible {
+			t.Errorf("%s: paused wakeups include the secret issue = %v, want %v", tc.name, got, tc.visible)
+		}
+	}
+}
