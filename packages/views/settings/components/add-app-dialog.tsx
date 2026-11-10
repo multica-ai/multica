@@ -83,11 +83,10 @@ export function AddAppDialog({
         </span>
       );
     }
-    const recommended = (app.recommended_scope ?? "personal") === scope;
     return (
       <Button
         size="xs"
-        variant={recommended ? "default" : "outline"}
+        variant="outline"
         disabled={connecting !== null || (scope === "team" && !canManage)}
         onClick={() => connect(app)}
       >
