@@ -85,6 +85,7 @@ export const enSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
       navigation: "Footer",
       language: "Language",
       copyright: "© {year} Multica. All rights reserved.",
+      starTurns: "Everyone has blown the star round {count} times",
     },
     localeSuggestion: {
       message: "Multica is available in English.",

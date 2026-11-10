@@ -83,6 +83,7 @@ export const jaSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
       navigation: "フッター",
       language: "言語",
       copyright: "© {year} Multica. All rights reserved.",
+      starTurns: "みんなでこの星を {count} 回転させました",
     },
     localeSuggestion: {
       message: "Multica は日本語でもご覧いただけます。",

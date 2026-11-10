@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { WORDMARK, WORDMARK_STAR, WORDMARK_STROKE } from "@multica/ui/lib/multica-brand";
 import { cn } from "@multica/ui/lib/utils";
+import { Container } from "./primitives";
 
 /*
- * The footer's closing wordmark, at the full width of the page, drawn as a
+ * The footer's closing wordmark, at the width of the page frame, drawn as a
  * halftone: square cells in a faint tint of the ink, solid at the top and
  * thinning out towards the bottom edge through an ordered dither.
  *
@@ -13,11 +14,20 @@ import { cn } from "@multica/ui/lib/utils";
  * Under the pointer a soft spotlight fills the dither in and deepens it to the
  * ink, trailing the pointer slightly and fading when it leaves.
  *
- * Over the wordmark, and over the host's top padding left open above it, the
- * pointer becomes a bulb blower aimed at the star on the i. Each click squeezes the bulb and sends a puff of air, drawn in the
- * same cells, towards the star; every bit of air that reaches it pushes it
- * round like a pinwheel, so closer and faster clicking spins it harder. It
- * slows under friction and settles back upright on one of its eight arms.
+ * The canvas spans the whole width of the page and the host's top padding, so
+ * anywhere around the wordmark the pointer becomes a bulb blower aimed at the
+ * star on the i. Each click squeezes the bulb and sends a puff of air, drawn
+ * in the same cells, towards the star; every bit of air that reaches it pushes
+ * it round like a pinwheel, so closer and faster clicking spins it harder. It
+ * slows under friction and settles back upright on one of its eight arms. Air
+ * that crosses the letters knocks their cells loose; they drift, then are
+ * drawn back home.
+ *
+ * Every visitor shares the star: the turns each one blows are added to a
+ * running total on the server, shown above the wordmark, and turns blown
+ * elsewhere since the last look spin this star too. Without the server the
+ * total stays hidden and the star is local.
+ *
  * Under reduced motion the wordmark is the finished frame, the spotlight
  * tracks without easing and a click turns the star one arm with no puff.
  */
@@ -59,6 +69,30 @@ const FRICTION = 1;
 const SETTLE_SPEED = 2.4;
 const SETTLE_STIFFNESS = 90;
 const ARM_STEP = Math.PI / 4;
+
+/** Cells a bit of air can knock loose, and the chance per cell it passes at full speed. */
+const MAX_KNOCKS = 3;
+const KNOCK_CHANCE = 0.35;
+/** Loose cells drift for this long (s), then a spring pulls them home, ramping up over `DOT_RAMP` (s). */
+const DOT_HOLD = 0.7;
+const DOT_RAMP = 0.8;
+const DOT_DRAG = 2.4;
+const DOT_PULL = 26;
+/** A loose cell in flight is drawn at least this dark, and is put back after `DOT_MAX_AGE` (s) whatever happens. */
+const DOT_ALPHA = 0.3;
+const DOT_MAX_AGE = 6;
+const MAX_DOTS = 3000;
+
+const STAR_API = "/api/site/star";
+const STAR_TURNS_API = "/api/site/star/turns";
+/** How often (ms) the page reports its own turns, and the longest it waits (ms) between reads of the total. */
+const SYNC_EVERY = 2000;
+const READ_EVERY = 6000;
+/** The server's cap on turns per report. */
+const MAX_REPORT = 30;
+/** Spin (rad/s) a turn blown elsewhere adds here, capped so a busy moment still reads as a nudge. */
+const REMOTE_PUSH = Math.PI;
+const MAX_REMOTE_SPIN = 18;
 
 /** 8×8 Bayer thresholds in (0, 1): a cell shows when its density exceeds its threshold. */
 const BAYER = (() => {
@@ -106,37 +140,47 @@ function sampleCells(
   return cells;
 }
 
-type Air = { x: number; y: number; vx: number; vy: number; age: number; big: boolean; hit: boolean };
+type Air = { x: number; y: number; vx: number; vy: number; age: number; big: boolean; hit: boolean; knocks: number };
+type Dot = { i: number; hx: number; hy: number; x: number; y: number; vx: number; vy: number; age: number; alpha: number };
 
-export function FooterWordmark({ className }: { className?: string }) {
+export function FooterWordmark({ className, label, locale }: { className?: string; label: string; locale: string }) {
   const box = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const blowerRef = useRef<SVGSVGElement>(null);
   const bulbRef = useRef<SVGGElement>(null);
+  const [total, setTotal] = useState<number | null>(null);
 
   useEffect(() => {
     const host = box.current;
+    const frameEl = frameRef.current;
     const canvas = canvasRef.current;
     const blower = blowerRef.current;
     const bulb = bulbRef.current;
     const ctx = canvas?.getContext("2d");
-    if (!host || !canvas || !blower || !bulb || !ctx) return;
+    if (!host || !frameEl || !canvas || !blower || !bulb || !ctx) return;
 
     const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // The canvas is `width` × `fullHeight`; the wordmark is `markWidth` ×
+    // `height` within it, offset by the page gutter and the host's top padding.
     let width = 0;
+    let fullHeight = 0;
+    let markWidth = 0;
     let height = 0;
-    // The host's top padding: open air above the letters, to blow from.
-    let band = 0;
+    let ox = 0;
+    let oy = 0;
     let cols = 0;
     let rows = 0;
     let scale = 1;
     let letters: Uint8Array = new Uint8Array();
     let inside: Uint8Array = new Uint8Array();
+    let loose: Uint8Array = new Uint8Array();
     let developed = still ? 1 : 0;
     let inView = false;
     let frame = 0;
     let lastFrame = 0;
     const spot = { x: 0, y: 0, tx: 0, ty: 0, r: 0, tr: 0 };
+    let spotRadius = 1;
 
     // The star: its centre and radius in CSS pixels, the block of cells it can
     // sweep, and its spin.
@@ -145,7 +189,28 @@ export function FooterWordmark({ className }: { className?: string }) {
     // The blower sits with its nozzle on the pointer, aimed at the star.
     const nozzle = { x: 0, y: 0, aim: 0, shown: false };
     let air: Air[] = [];
+    let dots: Dot[] = [];
     let hideTimer = 0;
+
+    // The shared total: what the server last reported and has been accounted
+    // for here, and this page's own turns not yet reported.
+    let known: number | null = null;
+    let pending = 0;
+    let reporting = 0;
+    let shownTotal = -1;
+    let syncing = false;
+    let lastRead = 0;
+    let near = false;
+    let syncTimer = 0;
+
+    const showTotal = () => {
+      if (known === null) return;
+      const next = Math.floor(known + reporting + pending);
+      if (next !== shownTotal) {
+        shownTotal = next;
+        setTotal(next);
+      }
+    };
 
     const aimAt = (x: number, y: number) => {
       nozzle.x = x;
@@ -163,14 +228,24 @@ export function FooterWordmark({ className }: { className?: string }) {
       bulb.style.transform = pressed ? "scale(1.05, 0.68)" : "";
     };
 
-    const kick = (amount: number) => {
-      spin.speed = Math.min(MAX_SPIN, spin.speed + amount);
+    /** Adds spin; returns how much was taken, after the cap. */
+    const kick = (amount: number, cap = MAX_SPIN) => {
+      const before = spin.speed;
+      spin.speed = Math.max(before, Math.min(cap, before + amount));
       spin.free = true;
       spin.settling = false;
+      return spin.speed - before;
+    };
+    // Under friction a spin of v rad/s coasts v / FRICTION radians, so the
+    // spin this page adds is the turns it will be credited with.
+    const credit = (radians: number) => {
+      pending += radians / (2 * Math.PI);
+      showTotal();
     };
     const puff = () => {
       if (still) {
         spin.angle += ARM_STEP;
+        credit(ARM_STEP);
         return;
       }
       for (let n = 0; n < PUFF_SIZE; n++) {
@@ -184,9 +259,58 @@ export function FooterWordmark({ className }: { className?: string }) {
           age: Math.random() * -0.05,
           big: Math.random() < 0.3,
           hit: false,
+          knocks: 0,
         });
       }
       lastFrame = 0;
+    };
+
+    /** The alpha a wordmark cell is drawn at right now, or 0 when the dither leaves it out. */
+    const shade = (row: number, col: number) => {
+      const y = row * CELL + CELL / 2;
+      const base = developed * 1.4 - (y - oy) / height > 0 ? rowDensity(y - oy, height) : 0;
+      let glow = 0;
+      if (spot.r > 0.01) {
+        const d = Math.hypot(col * CELL + CELL / 2 - spot.x, y - spot.y) / spotRadius;
+        glow = Math.max(0, 1 - d * d);
+      }
+      if (Math.max(base, glow) <= BAYER[(row % 8) * 8 + (col % 8)]!) return 0;
+      return BASE_ALPHA + glow * SPOT_ALPHA;
+    };
+
+    /** Knocks loose the drawn letter cells around a bit of air. */
+    const knock = (a: Air) => {
+      const col = Math.floor(a.x / CELL);
+      const row = Math.floor(a.y / CELL);
+      const chance = KNOCK_CHANCE * Math.min(1, Math.hypot(a.vx, a.vy) / PUFF_SPEED);
+      for (let r = row - 1; r <= row + 1 && a.knocks < MAX_KNOCKS; r++) {
+        if (r < 0 || r >= rows) continue;
+        for (let c = col - 1; c <= col + 1 && a.knocks < MAX_KNOCKS; c++) {
+          if (c < 0 || c >= cols) continue;
+          const i = r * cols + c;
+          if (!letters[i] || loose[i] || dots.length >= MAX_DOTS || Math.random() > chance) continue;
+          const alpha = shade(r, c);
+          if (!alpha) continue;
+          loose[i] = 1;
+          a.knocks++;
+          const hx = c * CELL;
+          const hy = r * CELL;
+          const jitter = 120;
+          dots.push({
+            i,
+            hx,
+            hy,
+            x: hx,
+            y: hy,
+            vx: a.vx * (0.35 + Math.random() * 0.35) + (Math.random() - 0.5) * jitter,
+            vy: a.vy * (0.35 + Math.random() * 0.35) + (Math.random() - 0.5) * jitter,
+            age: 0,
+            alpha,
+          });
+          a.vx *= 0.92;
+          a.vy *= 0.92;
+        }
+      }
     };
 
     /** Moves the air on by `dt` seconds; what reaches the star pushes it round and swirls off it. */
@@ -205,14 +329,42 @@ export function FooterWordmark({ className }: { className?: string }) {
         if (!a.hit && r < star.reach) {
           a.hit = true;
           const v = Math.hypot(a.vx, a.vy);
-          kick((AIR_PUSH * v) / PUFF_SPEED);
+          credit(kick((AIR_PUSH * v) / PUFF_SPEED) / FRICTION);
           // Off along the star's clockwise turn.
           a.vx = ((-dy / r) * v * 0.55 + a.vx * 0.25) || 0;
           a.vy = ((dx / r) * v * 0.55 + a.vy * 0.25) || 0;
+        } else if (a.knocks < MAX_KNOCKS) {
+          knock(a);
         }
         return a.age < AIR_LIFE && Math.hypot(a.vx, a.vy) > 30;
       });
       return air.length > 0;
+    };
+
+    /** Lets loose cells drift, then springs them home; true while any are away. */
+    const scatter = (dt: number) => {
+      if (!dots.length) return false;
+      const slow = Math.exp(-DOT_DRAG * dt);
+      dots = dots.filter((d) => {
+        d.age += dt;
+        if (d.age > DOT_HOLD) {
+          const k = DOT_PULL * Math.min(1, (d.age - DOT_HOLD) / DOT_RAMP);
+          const damping = 2 * Math.sqrt(k);
+          d.vx += ((d.hx - d.x) * k - damping * d.vx) * dt;
+          d.vy += ((d.hy - d.y) * k - damping * d.vy) * dt;
+        } else {
+          d.vx *= slow;
+          d.vy *= slow;
+        }
+        d.x += d.vx * dt;
+        d.y += d.vy * dt;
+        const home =
+          d.age > DOT_MAX_AGE ||
+          (d.age > DOT_HOLD && Math.hypot(d.hx - d.x, d.hy - d.y) < CELL / 2 && Math.hypot(d.vx, d.vy) < 20);
+        if (home) loose[d.i] = 0;
+        return !home;
+      });
+      return dots.length > 0;
     };
 
     /** Re-samples the star's cells at its current angle into `inside`. */
@@ -240,28 +392,34 @@ export function FooterWordmark({ className }: { className?: string }) {
     };
 
     const layout = () => {
+      const hostRect = host.getBoundingClientRect();
+      const frameRect = frameEl.getBoundingClientRect();
       width = host.clientWidth;
-      height = Math.round((width * VIEW_H) / VIEW_W);
-      band = Math.round(parseFloat(getComputedStyle(host).paddingTop) || 0);
-      const full = band + height;
+      fullHeight = host.clientHeight;
+      markWidth = frameRect.width;
+      height = Math.round((markWidth * VIEW_H) / VIEW_W);
+      ox = Math.round(frameRect.left - hostRect.left);
+      oy = Math.round(frameRect.top - hostRect.top);
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       canvas.width = Math.round(width * dpr);
-      canvas.height = Math.round(full * dpr);
+      canvas.height = Math.round(fullHeight * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       cols = Math.ceil(width / CELL);
-      rows = Math.ceil(full / CELL);
-      scale = width / VIEW_W;
+      rows = Math.ceil(fullHeight / CELL);
+      scale = markWidth / VIEW_W;
       letters =
         width && height
-          ? sampleCells(width, full, cols, rows, (scratch) => {
-              scratch.setTransform(scale, 0, 0, scale, -VIEW_X * scale, band - VIEW_Y * scale);
+          ? sampleCells(width, fullHeight, cols, rows, (scratch) => {
+              scratch.setTransform(scale, 0, 0, scale, ox - VIEW_X * scale, oy - VIEW_Y * scale);
               scratch.lineWidth = WORDMARK_STROKE;
               for (const d of LETTER_PATHS) scratch.stroke(new Path2D(d));
             })
           : new Uint8Array();
       inside = letters.slice();
-      star.x = (STAR.cx - VIEW_X) * scale;
-      star.y = band + (STAR.cy - VIEW_Y) * scale;
+      loose = new Uint8Array(letters.length);
+      dots = [];
+      star.x = ox + (STAR.cx - VIEW_X) * scale;
+      star.y = oy + (STAR.cy - VIEW_Y) * scale;
       star.reach = STAR.r * scale;
       star.col0 = Math.floor((star.x - star.reach) / CELL) - 1;
       star.row0 = Math.floor((star.y - star.reach) / CELL) - 1;
@@ -304,30 +462,29 @@ export function FooterWordmark({ className }: { className?: string }) {
       spot.x += (spot.tx - spot.x) * ease;
       spot.y += (spot.ty - spot.y) * ease;
       spot.r += (spot.tr - spot.r) * (still ? 1 : SPOT_FADE);
+      spotRadius = Math.max(1, markWidth * SPOT_RADIUS * spot.r);
       if (inView && developed < 1) developed = Math.min(1, developed + DEVELOP_STEP);
       const blowing = blow(dt);
+      const scattered = scatter(dt);
       const spinning = coast(dt);
       placeStar();
 
-      ctx.clearRect(0, 0, width, band + height);
+      ctx.clearRect(0, 0, width, fullHeight);
       ctx.fillStyle = getComputedStyle(host).color;
-      const radius = Math.max(1, width * SPOT_RADIUS * spot.r);
-      const lit = spot.r > 0.01;
       for (let row = 0; row < rows; row++) {
-        const y = row * CELL + CELL / 2;
-        const base = developed * 1.4 - (y - band) / height > 0 ? rowDensity(y - band, height) : 0;
         for (let col = 0; col < cols; col++) {
-          if (!inside[row * cols + col]) continue;
-          let glow = 0;
-          if (lit) {
-            const x = col * CELL + CELL / 2;
-            const d = Math.hypot(x - spot.x, y - spot.y) / radius;
-            glow = Math.max(0, 1 - d * d);
-          }
-          if (Math.max(base, glow) <= BAYER[(row % 8) * 8 + (col % 8)]!) continue;
-          ctx.globalAlpha = BASE_ALPHA + glow * SPOT_ALPHA;
+          const i = row * cols + col;
+          if (!inside[i] || loose[i]) continue;
+          const alpha = shade(row, col);
+          if (!alpha) continue;
+          ctx.globalAlpha = alpha;
           ctx.fillRect(col * CELL, row * CELL, CELL, CELL);
         }
+      }
+      for (const d of dots) {
+        const away = Math.min(1, Math.hypot(d.hx - d.x, d.hy - d.y) / 30);
+        ctx.globalAlpha = d.alpha + Math.max(0, DOT_ALPHA - d.alpha) * away;
+        ctx.fillRect(Math.round(d.x / CELL) * CELL, Math.round(d.y / CELL) * CELL, CELL, CELL);
       }
       for (const a of air) {
         if (a.age < 0) continue;
@@ -338,11 +495,72 @@ export function FooterWordmark({ className }: { className?: string }) {
       ctx.globalAlpha = 1;
 
       const moving = Math.abs(spot.tx - spot.x) + Math.abs(spot.ty - spot.y) > 0.5 || Math.abs(spot.tr - spot.r) > 0.01;
-      if (moving || blowing || spinning || (inView && developed < 1)) frame = requestAnimationFrame(draw);
+      if (moving || blowing || scattered || spinning || (inView && developed < 1)) frame = requestAnimationFrame(draw);
       else lastFrame = 0;
     };
     const schedule = () => {
       if (!frame) frame = requestAnimationFrame(draw);
+    };
+
+    /** Takes in a total from the server; turns blown elsewhere since the last one spin this star too. */
+    const absorb = (turns: number, reported: number) => {
+      if (known !== null) {
+        const elsewhere = turns - known - reported;
+        if (elsewhere > 0 && !still) {
+          kick(elsewhere * REMOTE_PUSH, MAX_REMOTE_SPIN);
+          schedule();
+        }
+      }
+      known = turns;
+      showTotal();
+    };
+    const sync = async (final = false) => {
+      if (syncing) return;
+      syncing = true;
+      try {
+        if (known !== null && pending >= 1) {
+          const turns = Math.min(MAX_REPORT, Math.floor(pending));
+          pending -= turns;
+          reporting = turns;
+          try {
+            const res = await fetch(STAR_TURNS_API, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ turns }),
+              keepalive: final,
+            });
+            reporting = 0;
+            if (res.ok) {
+              absorb(((await res.json()) as { turns: number }).turns, turns);
+              lastRead = Date.now();
+            } else {
+              showTotal();
+            }
+          } catch {
+            reporting = 0;
+            pending += turns;
+          }
+        } else if (!final && Date.now() - lastRead >= READ_EVERY) {
+          lastRead = Date.now();
+          const res = await fetch(STAR_API, { cache: "no-store" });
+          if (res.ok) absorb(((await res.json()) as { turns: number }).turns, 0);
+        }
+      } catch {
+        // The total is a garnish; a failed read leaves it as it was.
+      } finally {
+        syncing = false;
+      }
+    };
+    const watchTotal = () => {
+      const active = near && !document.hidden;
+      if (active && !syncTimer) {
+        void sync();
+        syncTimer = window.setInterval(() => void sync(), SYNC_EVERY);
+      } else if (!active && syncTimer) {
+        clearInterval(syncTimer);
+        syncTimer = 0;
+        void sync(true);
+      }
     };
 
     const onMove = (event: PointerEvent) => {
@@ -398,12 +616,21 @@ export function FooterWordmark({ className }: { className?: string }) {
       },
       { threshold: 0.3 },
     );
+    const proximity = new IntersectionObserver(
+      ([entry]) => {
+        near = !!entry?.isIntersecting;
+        watchTotal();
+      },
+      { rootMargin: "200px 0px" },
+    );
     const resize = new ResizeObserver(() => {
       layout();
       schedule();
     });
     view.observe(canvas);
+    proximity.observe(host);
     resize.observe(host);
+    document.addEventListener("visibilitychange", watchTotal);
     canvas.addEventListener("pointermove", onMove);
     canvas.addEventListener("pointerleave", onLeave);
     canvas.addEventListener("pointerdown", onDown);
@@ -413,8 +640,12 @@ export function FooterWordmark({ className }: { className?: string }) {
     return () => {
       cancelAnimationFrame(frame);
       clearTimeout(hideTimer);
+      clearInterval(syncTimer);
+      void sync(true);
       view.disconnect();
+      proximity.disconnect();
       resize.disconnect();
+      document.removeEventListener("visibilitychange", watchTotal);
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerleave", onLeave);
       canvas.removeEventListener("pointerdown", onDown);
@@ -424,9 +655,25 @@ export function FooterWordmark({ className }: { className?: string }) {
     };
   }, []);
 
+  const [before, after = ""] = label.split("{count}");
+
   return (
     <div ref={box} className={cn("relative text-site-ink", className)}>
-      <div style={{ aspectRatio: `${VIEW_W} / ${VIEW_H}` }} />
+      <Container>
+        <div ref={frameRef} className="relative" style={{ aspectRatio: `${VIEW_W} / ${VIEW_H}` }}>
+          <p
+            className={cn(
+              "pointer-events-none absolute right-0 bottom-full mb-2 select-none text-site-small text-site-muted transition-opacity duration-500",
+              total === null && "opacity-0",
+            )}
+            aria-live="off"
+          >
+            {before}
+            <span className="tabular-nums text-site-ink">{new Intl.NumberFormat(locale).format(total ?? 0)}</span>
+            {after}
+          </p>
+        </div>
+      </Container>
       <canvas ref={canvasRef} aria-hidden className="absolute inset-0 size-full cursor-none select-none" />
       <svg
         ref={blowerRef}

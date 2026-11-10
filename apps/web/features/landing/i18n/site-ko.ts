@@ -82,6 +82,7 @@ export const koSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
       navigation: "푸터",
       language: "언어",
       copyright: "© {year} Multica. All rights reserved.",
+      starTurns: "모두 함께 이 별을 {count}바퀴 돌렸어요",
     },
     localeSuggestion: {
       message: "Multica를 한국어로 볼 수 있어요.",

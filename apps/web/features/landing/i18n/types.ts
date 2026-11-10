@@ -83,6 +83,8 @@ export type SiteDict = {
     language: string;
     /** `{year}` is the current year. */
     copyright: string;
+    /** Above the wordmark: how far every visitor together has blown the star. `{count}` is the number of turns. */
+    starTurns: string;
   };
   /** The bar offering a visitor's browser language on the English pages, written in that language. */
   localeSuggestion: { message: string; action: string; dismiss: string };

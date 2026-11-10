@@ -118,9 +118,7 @@ export function SiteFooter() {
         </nav>
       </Container>
 
-      <Container>
-        <FooterWordmark className="pt-site-section" />
-      </Container>
+      <FooterWordmark className="pt-site-section" label={labels.starTurns} locale={locale} />
     </footer>
   );
 }

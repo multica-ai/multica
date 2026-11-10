@@ -81,6 +81,7 @@ export const zhSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
       navigation: "页脚导航",
       language: "语言",
       copyright: "© {year} Multica. 保留所有权利。",
+      starTurns: "大家已经把这颗星吹转了 {count} 圈",
     },
     localeSuggestion: {
       message: "Multica 提供中文版。",
