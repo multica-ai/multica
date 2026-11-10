@@ -13,11 +13,13 @@ import { cn } from "@multica/ui/lib/utils";
  * Under the pointer a soft spotlight fills the dither in and deepens it to the
  * ink, trailing the pointer slightly and fading when it leaves.
  *
- * The star on the i can be grabbed and turned. Let go mid-turn and it keeps
- * spinning at the speed of the flick, slows under friction and settles back
- * upright on one of its eight arms. Under reduced motion the wordmark is the
- * finished frame, the spotlight tracks without easing and the star stays
- * where it is let go.
+ * Over the wordmark the pointer becomes a bulb blower aimed at the star on
+ * the i. Each click squeezes the bulb and sends a puff of air, drawn in the
+ * same cells, towards the star; every bit of air that reaches it pushes it
+ * round like a pinwheel, so closer and faster clicking spins it harder. It
+ * slows under friction and settles back upright on one of its eight arms.
+ * Under reduced motion the wordmark is the finished frame, the spotlight
+ * tracks without easing and a click turns the star one arm with no puff.
  */
 
 const [VIEW_X, VIEW_Y, VIEW_W, VIEW_H] = WORDMARK.viewBox.split(" ").map(Number) as [number, number, number, number];
@@ -38,14 +40,21 @@ const FOLLOW = 0.2;
 const SPOT_FADE = 0.14;
 const DEVELOP_STEP = 0.022;
 
-/** How far from the star's centre a press still grabs it, in star radii. */
-const STAR_GRAB = 1.8;
-/** The release speed is measured over the last stretch of the drag, in ms. */
-const FLICK_WINDOW = 90;
+/** Air per puff, its launch speed (px/s), half-width of its cone (rad) and how quickly it dies down. */
+const PUFF_SIZE = 26;
+const PUFF_SPEED = 820;
+const PUFF_SPREAD = 0.2;
+const AIR_DRAG = 1.1;
+const AIR_LIFE = 1.4;
+const AIR_ALPHA = 0.32;
+/** Spin (rad/s) a bit of air adds when it reaches the star at full speed. */
+const AIR_PUSH = 0.45;
 /** Spin speed cap, in radians per second (about six turns). */
 const MAX_SPIN = 38;
+/** The blower's nozzle tip within its drawing, which points right. */
+const BLOWER_TIP = { x: 54, y: 15 };
 /** Exponential slow-down of a free spin, per second. */
-const FRICTION = 1.7;
+const FRICTION = 1;
 /** Below this speed (rad/s) the star stops coasting and springs to the nearest arm. */
 const SETTLE_SPEED = 2.4;
 const SETTLE_STIFFNESS = 90;
@@ -97,20 +106,21 @@ function sampleCells(
   return cells;
 }
 
-/** Shortest signed turn from angle `a` to angle `b`. */
-function turn(a: number, b: number) {
-  return Math.atan2(Math.sin(b - a), Math.cos(b - a));
-}
+type Air = { x: number; y: number; vx: number; vy: number; age: number; big: boolean; hit: boolean };
 
 export function FooterWordmark({ className }: { className?: string }) {
   const box = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const blowerRef = useRef<SVGSVGElement>(null);
+  const bulbRef = useRef<SVGGElement>(null);
 
   useEffect(() => {
     const host = box.current;
     const canvas = canvasRef.current;
+    const blower = blowerRef.current;
+    const bulb = bulbRef.current;
     const ctx = canvas?.getContext("2d");
-    if (!host || !canvas || !ctx) return;
+    if (!host || !canvas || !blower || !bulb || !ctx) return;
 
     const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
     let width = 0;
@@ -126,19 +136,81 @@ export function FooterWordmark({ className }: { className?: string }) {
     let lastFrame = 0;
     const spot = { x: 0, y: 0, tx: 0, ty: 0, r: 0, tr: 0 };
 
-    // The star: its centre and grab radius in CSS pixels, the block of cells it
-    // can sweep, and its spin.
+    // The star: its centre and radius in CSS pixels, the block of cells it can
+    // sweep, and its spin.
     const star = { x: 0, y: 0, reach: 0, col0: 0, row0: 0, span: 0, drawnAt: Number.NaN };
     const spin = { angle: 0, speed: 0, free: false, settling: false, target: 0 };
-    let drag: { id: number; from: number; samples: { t: number; angle: number }[] } | null = null;
+    // The blower sits with its nozzle on the pointer, aimed at the star.
+    const nozzle = { x: 0, y: 0, aim: 0, shown: false };
+    let air: Air[] = [];
+    let hideTimer = 0;
 
-    const pointAngle = (clientX: number, clientY: number) => {
-      const rect = canvas.getBoundingClientRect();
-      return Math.atan2(clientY - rect.top - star.y, clientX - rect.left - star.x);
+    const aimAt = (x: number, y: number) => {
+      nozzle.x = x;
+      nozzle.y = y;
+      // Right on the star the aim is meaningless; keep the last one.
+      if (Math.hypot(star.x - x, star.y - y) > star.reach) nozzle.aim = Math.atan2(star.y - y, star.x - x);
+      blower.style.transform = `translate(${x - BLOWER_TIP.x}px, ${y - BLOWER_TIP.y}px) rotate(${nozzle.aim}rad)`;
     };
-    const onStar = (clientX: number, clientY: number) => {
-      const rect = canvas.getBoundingClientRect();
-      return Math.hypot(clientX - rect.left - star.x, clientY - rect.top - star.y) <= star.reach * STAR_GRAB;
+    const showBlower = (shown: boolean) => {
+      nozzle.shown = shown;
+      blower.style.opacity = shown ? "1" : "0";
+    };
+    const squeeze = (pressed: boolean) => {
+      bulb.style.transition = still ? "none" : pressed ? "transform 70ms ease-in" : "transform 260ms cubic-bezier(.3,1.8,.5,1)";
+      bulb.style.transform = pressed ? "scale(1.05, 0.68)" : "";
+    };
+
+    const kick = (amount: number) => {
+      spin.speed = Math.min(MAX_SPIN, spin.speed + amount);
+      spin.free = true;
+      spin.settling = false;
+    };
+    const puff = () => {
+      if (still) {
+        spin.angle += ARM_STEP;
+        return;
+      }
+      for (let n = 0; n < PUFF_SIZE; n++) {
+        const angle = nozzle.aim + (Math.random() + Math.random() - 1) * PUFF_SPREAD;
+        const speed = PUFF_SPEED * (0.7 + Math.random() * 0.45);
+        air.push({
+          x: nozzle.x,
+          y: nozzle.y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          age: Math.random() * -0.05,
+          big: Math.random() < 0.3,
+          hit: false,
+        });
+      }
+      lastFrame = 0;
+    };
+
+    /** Moves the air on by `dt` seconds; what reaches the star pushes it round and swirls off it. */
+    const blow = (dt: number) => {
+      const slow = Math.exp(-AIR_DRAG * dt);
+      air = air.filter((a) => {
+        a.age += dt;
+        if (a.age < 0) return true;
+        a.vx *= slow;
+        a.vy *= slow;
+        a.x += a.vx * dt;
+        a.y += a.vy * dt;
+        const dx = a.x - star.x;
+        const dy = a.y - star.y;
+        const r = Math.hypot(dx, dy);
+        if (!a.hit && r < star.reach) {
+          a.hit = true;
+          const v = Math.hypot(a.vx, a.vy);
+          kick((AIR_PUSH * v) / PUFF_SPEED);
+          // Off along the star's clockwise turn.
+          a.vx = ((-dy / r) * v * 0.55 + a.vx * 0.25) || 0;
+          a.vy = ((dx / r) * v * 0.55 + a.vy * 0.25) || 0;
+        }
+        return a.age < AIR_LIFE && Math.hypot(a.vx, a.vy) > 30;
+      });
+      return air.length > 0;
     };
 
     /** Re-samples the star's cells at its current angle into `inside`. */
@@ -195,9 +267,9 @@ export function FooterWordmark({ className }: { className?: string }) {
       placeStar();
     };
 
-    /** Advances the let-go star by `dt` seconds; true while it is still moving. */
+    /** Advances the blown star by `dt` seconds; true while it is still moving. */
     const coast = (dt: number) => {
-      if (drag || !spin.free) return false;
+      if (!spin.free) return false;
       if (!spin.settling && Math.abs(spin.speed) < SETTLE_SPEED) {
         spin.settling = true;
         const ahead = spin.angle + Math.sign(spin.speed) * ARM_STEP * 0.25;
@@ -230,6 +302,7 @@ export function FooterWordmark({ className }: { className?: string }) {
       spot.y += (spot.ty - spot.y) * ease;
       spot.r += (spot.tr - spot.r) * (still ? 1 : SPOT_FADE);
       if (inView && developed < 1) developed = Math.min(1, developed + DEVELOP_STEP);
+      const blowing = blow(dt);
       const spinning = coast(dt);
       placeStar();
 
@@ -253,10 +326,16 @@ export function FooterWordmark({ className }: { className?: string }) {
           ctx.fillRect(col * CELL, row * CELL, CELL, CELL);
         }
       }
+      for (const a of air) {
+        if (a.age < 0) continue;
+        const size = a.big && a.age > 0.12 ? 2 : 1;
+        ctx.globalAlpha = AIR_ALPHA * (1 - a.age / AIR_LIFE);
+        ctx.fillRect(Math.floor(a.x / CELL) * CELL, Math.floor(a.y / CELL) * CELL, CELL * size, CELL * size);
+      }
       ctx.globalAlpha = 1;
 
       const moving = Math.abs(spot.tx - spot.x) + Math.abs(spot.ty - spot.y) > 0.5 || Math.abs(spot.tr - spot.r) > 0.01;
-      if (moving || spinning || (inView && developed < 1)) frame = requestAnimationFrame(draw);
+      if (moving || blowing || spinning || (inView && developed < 1)) frame = requestAnimationFrame(draw);
       else lastFrame = 0;
     };
     const schedule = () => {
@@ -272,60 +351,40 @@ export function FooterWordmark({ className }: { className?: string }) {
         spot.y = spot.ty;
       }
       spot.tr = 1;
-      if (drag && event.pointerId === drag.id) {
-        const angle = pointAngle(event.clientX, event.clientY);
-        spin.angle += turn(drag.from, angle);
-        drag.from = angle;
-        const t = event.timeStamp;
-        drag.samples.push({ t, angle: spin.angle });
-        while (drag.samples.length > 2 && t - drag.samples[0]!.t > FLICK_WINDOW) drag.samples.shift();
-      } else if (!drag) {
-        canvas.style.cursor = onStar(event.clientX, event.clientY) ? "grab" : "";
+      if (event.pointerType !== "touch") {
+        aimAt(spot.tx, spot.ty);
+        if (!nozzle.shown) showBlower(true);
       }
       schedule();
     };
     const onLeave = () => {
       spot.tr = 0;
+      showBlower(false);
+      squeeze(false);
       schedule();
     };
     const onDown = (event: PointerEvent) => {
-      if (drag || event.button !== 0 || !onStar(event.clientX, event.clientY)) return;
-      event.preventDefault();
-      canvas.setPointerCapture(event.pointerId);
-      canvas.style.cursor = "grabbing";
-      drag = {
-        id: event.pointerId,
-        from: pointAngle(event.clientX, event.clientY),
-        samples: [{ t: event.timeStamp, angle: spin.angle }],
-      };
-      spin.speed = 0;
-      spin.free = false;
-      spin.settling = false;
-    };
-    const onUp = (event: PointerEvent) => {
-      if (!drag || event.pointerId !== drag.id) return;
-      const { samples } = drag;
-      const first = samples[0]!;
-      const last = samples[samples.length - 1]!;
-      // Held still before letting go: no flick.
-      const fresh = event.timeStamp - last.t < FLICK_WINDOW / 2;
-      const span = (last.t - first.t) / 1000;
-      const speed = fresh && span > 0 ? (last.angle - first.angle) / span : 0;
-      drag = null;
-      canvas.style.cursor = onStar(event.clientX, event.clientY) ? "grab" : "";
-      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
-      if (still) return;
-      spin.speed = Math.max(-MAX_SPIN, Math.min(MAX_SPIN, speed));
-      spin.free = true;
-      spin.settling = false;
-      lastFrame = 0;
+      if (event.button !== 0) return;
+      const rect = canvas.getBoundingClientRect();
+      aimAt(event.clientX - rect.left, event.clientY - rect.top);
+      squeeze(true);
+      puff();
+      if (event.pointerType === "touch") {
+        // No hover on touch: the blower shows for the tap, then goes.
+        showBlower(true);
+        clearTimeout(hideTimer);
+        hideTimer = window.setTimeout(() => {
+          squeeze(false);
+          showBlower(false);
+        }, 500);
+      }
       schedule();
     };
-    // Touches that start on the star turn it instead of scrolling the page.
-    const onTouchStart = (event: TouchEvent) => {
-      const touch = event.touches[0];
-      if (event.touches.length === 1 && touch && onStar(touch.clientX, touch.clientY)) event.preventDefault();
+    const onUp = (event: PointerEvent) => {
+      if (event.pointerType !== "touch") squeeze(false);
     };
+    // Rapid clicks would otherwise select the text around the footer.
+    const onMouseDown = (event: MouseEvent) => event.preventDefault();
 
     const view = new IntersectionObserver(
       ([entry]) => {
@@ -347,9 +406,10 @@ export function FooterWordmark({ className }: { className?: string }) {
     canvas.addEventListener("pointerdown", onDown);
     canvas.addEventListener("pointerup", onUp);
     canvas.addEventListener("pointercancel", onUp);
-    canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+    canvas.addEventListener("mousedown", onMouseDown);
     return () => {
       cancelAnimationFrame(frame);
+      clearTimeout(hideTimer);
       view.disconnect();
       resize.disconnect();
       canvas.removeEventListener("pointermove", onMove);
@@ -357,18 +417,34 @@ export function FooterWordmark({ className }: { className?: string }) {
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointerup", onUp);
       canvas.removeEventListener("pointercancel", onUp);
-      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("mousedown", onMouseDown);
     };
   }, []);
 
   return (
-    <div ref={box} className={cn("text-site-ink", className)}>
+    <div ref={box} className={cn("relative text-site-ink", className)}>
       <canvas
         ref={canvasRef}
         aria-hidden
-        className="block w-full select-none"
+        className="block w-full cursor-none select-none"
         style={{ aspectRatio: `${VIEW_W} / ${VIEW_H}` }}
       />
+      <svg
+        ref={blowerRef}
+        aria-hidden
+        width="56"
+        height="30"
+        viewBox="-54 -15 56 30"
+        className="pointer-events-none absolute left-0 top-0 overflow-visible opacity-0 transition-opacity duration-150"
+        style={{ transformOrigin: `${BLOWER_TIP.x}px ${BLOWER_TIP.y}px` }}
+      >
+        <path d="M-1 -1.7 L-18 -3.1 L-18 3.1 L-1 1.7 Q0.4 1.7 0.4 0 Q0.4 -1.7 -1 -1.7 Z" fill="currentColor" />
+        <rect x="-23" y="-5" width="6" height="10" rx="1.6" fill="currentColor" />
+        <g ref={bulbRef} style={{ transformBox: "fill-box", transformOrigin: "100% 50%" }}>
+          <ellipse cx="-36" cy="0" rx="14.5" ry="12" fill="currentColor" />
+          <ellipse cx="-40" cy="-5" rx="5" ry="2.4" fill="white" opacity="0.3" />
+        </g>
+      </svg>
     </div>
   );
 }
