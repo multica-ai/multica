@@ -21,7 +21,9 @@ import { Container } from "./primitives";
  * it round like a pinwheel, so closer and faster clicking spins it harder. It
  * slows under friction and settles back upright on one of its eight arms. Air
  * that crosses the letters knocks their cells loose; they drift, then are
- * drawn back home.
+ * drawn back home. The spinning star powers the wordmark like a dynamo: the
+ * faster it turns the more the dither fills in and darkens towards the ink,
+ * fading back as it slows.
  *
  * Every visitor shares the star: the turns each one blows are added to a
  * running total on the server, shown above the wordmark, and turns blown
@@ -69,6 +71,12 @@ const FRICTION = 1;
 const SETTLE_SPEED = 2.4;
 const SETTLE_STIFFNESS = 90;
 const ARM_STEP = Math.PI / 4;
+
+/** The spin (rad/s) at which the wordmark is fully powered, how quickly power follows the spin, and what full power adds. */
+const FULL_POWER_SPIN = 24;
+const POWER_FOLLOW = 3;
+const POWER_ALPHA = 0.55;
+const POWER_FILL = 0.7;
 
 /** Cells a bit of air can knock loose, and the chance per cell it passes at full speed. */
 const MAX_KNOCKS = 3;
@@ -181,6 +189,7 @@ export function FooterWordmark({ className, label, locale }: { className?: strin
     let lastFrame = 0;
     const spot = { x: 0, y: 0, tx: 0, ty: 0, r: 0, tr: 0 };
     let spotRadius = 1;
+    let power = 0;
 
     // The star: its centre and radius in CSS pixels, the block of cells it can
     // sweep, and its spin.
@@ -268,14 +277,14 @@ export function FooterWordmark({ className, label, locale }: { className?: strin
     /** The alpha a wordmark cell is drawn at right now, or 0 when the dither leaves it out. */
     const shade = (row: number, col: number) => {
       const y = row * CELL + CELL / 2;
-      const base = developed * 1.4 - (y - oy) / height > 0 ? rowDensity(y - oy, height) : 0;
+      const base = developed * 1.4 - (y - oy) / height > 0 ? rowDensity(y - oy, height) + power * POWER_FILL : 0;
       let glow = 0;
       if (spot.r > 0.01) {
         const d = Math.hypot(col * CELL + CELL / 2 - spot.x, y - spot.y) / spotRadius;
         glow = Math.max(0, 1 - d * d);
       }
       if (Math.max(base, glow) <= BAYER[(row % 8) * 8 + (col % 8)]!) return 0;
-      return BASE_ALPHA + glow * SPOT_ALPHA;
+      return Math.min(1, BASE_ALPHA + power * POWER_ALPHA + glow * SPOT_ALPHA);
     };
 
     /** Knocks loose the drawn letter cells around a bit of air. */
@@ -467,6 +476,9 @@ export function FooterWordmark({ className, label, locale }: { className?: strin
       const blowing = blow(dt);
       const scattered = scatter(dt);
       const spinning = coast(dt);
+      const charge = Math.min(1, Math.abs(spin.speed) / FULL_POWER_SPIN);
+      power += (charge - power) * (1 - Math.exp(-POWER_FOLLOW * dt));
+      if (!charge && power < 0.003) power = 0;
       placeStar();
 
       ctx.clearRect(0, 0, width, fullHeight);
@@ -495,7 +507,7 @@ export function FooterWordmark({ className, label, locale }: { className?: strin
       ctx.globalAlpha = 1;
 
       const moving = Math.abs(spot.tx - spot.x) + Math.abs(spot.ty - spot.y) > 0.5 || Math.abs(spot.tr - spot.r) > 0.01;
-      if (moving || blowing || scattered || spinning || (inView && developed < 1)) frame = requestAnimationFrame(draw);
+      if (moving || blowing || scattered || spinning || power > 0 || (inView && developed < 1)) frame = requestAnimationFrame(draw);
       else lastFrame = 0;
     };
     const schedule = () => {
