@@ -1395,3 +1395,104 @@ func TestAntigravityBackendSumsCompletedStepsWhenCancelled(t *testing.T) {
 		t.Fatalf("usage = %+v, want %+v", got, want)
 	}
 }
+
+func TestAntigravityCurrentTurnRecovery(t *testing.T) {
+	t.Parallel()
+	step := func(index int, kind, state, text string) string {
+		return fmt.Sprintf("{\"event\":\"step_update\",\"step_update\":{\"step_index\":%d,\"step_type\":%q,\"state\":%q,\"text_delta\":%q}}\n", index, kind, state, text)
+	}
+	boundary := step(10, "user_input", "DONE", "")
+	answer := step(14, "agent_response", "ACTIVE", "Final answer.") + step(14, "agent_response", "DONE", "\n")
+	const retryError = "Malformed function call: Function call is empty - no input to parse. Retries remaining: 3"
+	for _, tc := range []struct {
+		name, steps, status, response, cause string
+		exit                                 int
+		resumed, completed                   bool
+	}{
+		{name: "retry with narration and executor log", steps: boundary + step(11, "agent_response", "DONE", "Working.\n") + step(12, "tool", "DONE", "") + step(13, "error_message", "DONE", "") + answer, completed: true},
+		{name: "partial attempt before retry", steps: boundary + step(11, "agent_response", "ACTIVE", "Partial attempt") + step(13, "error_message", "DONE", "") + answer, completed: true},
+		{name: "canonical response need not equal deltas", steps: boundary + answer, response: "Canonical answer from agy.", completed: true},
+		{name: "historical quota", steps: step(1, "error_message", "DONE", "") + boundary + answer, cause: "RESOURCE_EXHAUSTED (429)", resumed: true, completed: true},
+		{name: "historical unavailable", steps: boundary + answer, cause: "UNAVAILABLE (503)", resumed: true, completed: true},
+		{name: "diagnostic line", steps: "CLI diagnostic\n" + boundary + answer, completed: true},
+		{name: "completed metadata", steps: boundary + answer + step(15, "checkpoint", "DONE", ""), completed: true},
+		{name: "exit 1", steps: boundary + answer, exit: 1},
+		{name: "exit 3", steps: boundary + answer, exit: 3},
+		{name: "active final response", steps: boundary + step(14, "agent_response", "ACTIVE", "Partial answer.")},
+		{name: "newer active response", steps: boundary + answer + step(15, "agent_response", "ACTIVE", "Partial answer.")},
+		{name: "empty final response", steps: boundary + step(14, "agent_response", "DONE", " \n")},
+		{name: "empty result response", steps: boundary + answer, response: " \n"},
+		{name: "unfinished boundary", steps: step(10, "user_input", "ACTIVE", "") + answer},
+		{name: "two boundaries", steps: boundary + step(11, "user_input", "DONE", "") + answer},
+		{name: "missing index", steps: boundary + "{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"tool\",\"state\":\"DONE\"}}\n" + answer},
+		{name: "negative index", steps: boundary + step(-1, "tool", "DONE", "") + answer},
+		{name: "history is not an answer", steps: step(1, "agent_response", "DONE", "Old answer.") + boundary},
+		{name: "error after answer", steps: boundary + answer + step(15, "error_message", "DONE", "")},
+		{name: "unfinished tool after answer", steps: boundary + answer + step(15, "tool", "ACTIVE", "")},
+		{name: "done tool after answer", steps: boundary + answer + step(15, "tool", "DONE", "")},
+		{name: "subagent after answer", steps: boundary + answer + step(15, "subagent", "DONE", "")},
+		{name: "unfinished metadata", steps: boundary + answer + step(15, "checkpoint", "ACTIVE", "")},
+		{name: "quota without recovery", steps: boundary + step(13, "error_message", "DONE", ""), cause: "RESOURCE_EXHAUSTED (429)"},
+		{name: "permission without recovery", steps: boundary + step(13, "error_message", "DONE", ""), cause: "PERMISSION_DENIED (403)"},
+		{name: "cancelled result", steps: boundary + answer, status: "CANCELLED"},
+		{name: "legacy fresh transport", steps: answer, cause: antigravityNetworkIssueError, exit: 1, completed: true},
+		{name: "legacy trailing error", steps: answer + step(15, "error_message", "DONE", ""), cause: antigravityNetworkIssueError},
+		{name: "legacy trailing tool", steps: answer + step(15, "tool", "ACTIVE", ""), cause: antigravityNetworkIssueError},
+		{name: "legacy unfinished metadata", steps: answer + step(15, "checkpoint", "ACTIVE", ""), cause: antigravityNetworkIssueError},
+		{name: "resumed without boundary", steps: answer, cause: antigravityNetworkIssueError, resumed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if tc.status == "" {
+				tc.status = "ERROR"
+			}
+			if tc.response == "" {
+				tc.response = "Working.\nFinal answer.\n"
+			}
+			if tc.cause == "" {
+				tc.cause = retryError
+			}
+			script := `#!/bin/sh
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --log-file) printf '%s\n' 'agent executor error: recovered attempt' > "$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+cat <<'JSONL'
+` + tc.steps + fmt.Sprintf("{\"event\":\"result\",\"result\":{\"status\":%q,\"response\":%q,\"error\":%q}}\nJSONL\nexit %d\n", tc.status, tc.response, tc.cause, tc.exit)
+			fakePath := filepath.Join(t.TempDir(), "agy")
+			writeTestExecutable(t, fakePath, []byte(script))
+			logs := &syncBuffer{}
+			backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: slog.New(slog.NewTextHandler(logs, nil))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts := ExecOptions{}
+			if tc.resumed {
+				opts.ResumeSessionID = "fixture-conversation"
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			session, err := backend.Execute(ctx, "fixture prompt", opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range session.Messages {
+			}
+			result := <-session.Result
+			want := "failed"
+			if tc.completed {
+				want = "completed"
+			} else if tc.status == "CANCELLED" {
+				want = "cancelled"
+			}
+			if result.Status != want || result.Output != tc.response || (result.Error == "") != tc.completed {
+				t.Fatalf("result = %+v, want %s preserving canonical response", result, want)
+			}
+			if tc.completed && (!strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), tc.cause)) {
+				t.Fatalf("missing warning with original error: %s", logs.String())
+			}
+		})
+	}
+}
