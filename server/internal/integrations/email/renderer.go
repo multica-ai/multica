@@ -112,6 +112,14 @@ func actionVerb(notifType string) string {
 		return "Autopilot run limit reached"
 	case "children_done":
 		return "Sub-issues finished"
+	case "app_action_requested":
+		return "Needs your confirmation"
+	case "app_action_reminder":
+		return "Confirmation expiring soon"
+	case "app_connect_requested":
+		return "Connect an app"
+	case "app_action_result":
+		return "App action result"
 	default:
 		return "Update"
 	}
