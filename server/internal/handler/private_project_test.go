@@ -13,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -280,12 +279,6 @@ func TestPrivateProjectVisibilityAndMembersAPI(t *testing.T) {
 		}), f.insider))
 	}
 
-	withFeatureFlag(t, testHandler, featureflags.PrivateProjectsV1, false)
-	if got := createPrivate().Want(http.StatusForbidden).Map()["code"]; got != "private_projects_disabled" {
-		t.Fatalf("flag off: code = %v", got)
-	}
-
-	withFeatureFlag(t, testHandler, featureflags.PrivateProjectsV1, true)
 	var project ProjectResponse
 	createPrivate().Want(http.StatusCreated).JSON(&project)
 	t.Cleanup(func() {
@@ -328,9 +321,6 @@ func TestPrivateProjectVisibilityAndMembersAPI(t *testing.T) {
 	}
 	// Every removal takes an admin or the lead, including self-removal.
 	remove(f.outsider, f.insider).Want(http.StatusForbidden)
-	remove(f.outsider, f.outsider).Want(http.StatusForbidden)
-	members(f.outsider).Want(http.StatusOK)
-	withFeatureFlag(t, testHandler, featureflags.PrivateProjectsV1, false)
 	remove(f.outsider, f.outsider).Want(http.StatusForbidden)
 	members(f.outsider).Want(http.StatusOK)
 	remove(testUserID, f.outsider).Want(http.StatusNoContent)
@@ -638,7 +628,6 @@ func TestPrivateProjectLeadChangeRequiresAccessManager(t *testing.T) {
 // (or agent) may set it, as before private projects. Leading one therefore
 // grants nothing; in particular it does not let a member make it private.
 func TestWorkspaceProjectLeadStaysOpenButGrantsNoAccess(t *testing.T) {
-	withFeatureFlag(t, testHandler, featureflags.PrivateProjectsV1, true)
 	f := newPrivateProjectFixture(t)
 	dbfx.Exec(t, `UPDATE project SET visibility = 'workspace' WHERE id = $1`, f.projectID)
 	update := func(body map[string]any) *testutil.Response {

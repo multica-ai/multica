@@ -225,7 +225,6 @@
     "load_failed": "Impossible de charger les membres.",
     "publish_title": "Rendre ce projet visible à tout l’espace de travail ?",
     "publish_description": "Tous les membres pourront voir ce projet, ses tâches, commentaires et pièces jointes.",
-    "disabled": "Les projets privés ne sont pas activés sur ce serveur.",
     "done": "Terminé",
     "retry": "Réessayer"
   }

@@ -225,7 +225,6 @@
     "load_failed": "Could not load project members.",
     "publish_title": "Make this project visible to the workspace?",
     "publish_description": "All workspace members will be able to see this project and its issues, comments, and attachments.",
-    "disabled": "Private projects are not enabled on this server.",
     "done": "Done",
     "retry": "Retry"
   }

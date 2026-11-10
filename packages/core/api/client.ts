@@ -4300,9 +4300,6 @@ export class ApiClient {
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {
-    if (data.visibility === "private" && configStore.getState().featureFlags.private_projects_v1 !== true) {
-      throw new Error("Private projects are not enabled on this server.");
-    }
     const raw = await this.fetch<unknown>("/api/projects", {
       method: "POST",
       body: JSON.stringify(data),

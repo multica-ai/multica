@@ -173,7 +173,6 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [dueDate, setDueDate] = useState<string>(draft.dueDate ?? "");
   const [visibility, setVisibility] = useState<ProjectVisibility>(draft.visibility ?? "workspace");
   const [memberIds, setMemberIds] = useState<string[]>(draft.memberIds ?? []);
-  const privateEnabled = useConfigStore((s) => s.featureFlags.private_projects_v1 === true);
   // Optional properties stay in the ⋯ menu until selected or opened.
   const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
   const [dueDatePickerOpen, setDueDatePickerOpen] = useState(false);
@@ -359,10 +358,6 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     // Checked here as well as on the button: TitleEditor's onSubmit calls this
     // directly, so a disabled button alone leaves the keyboard path open.
     if (!title.trim() || submitting) return;
-    if (visibility === "private" && !privateEnabled) {
-      toast.error(tProjects(($) => $.access.disabled));
-      return;
-    }
     if (sourceMode === "repos" && hasRejectedRepoRef) return;
     // `sourceMode` decides which side's stash gets persisted — the other
     // side is silently dropped, so repos picked then abandoned for local
@@ -632,7 +627,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           </DropdownMenu>
 
           <WorkflowPill value={workflowId} onChange={setWorkflowId} />
-          {(privateEnabled || visibility === "private") && <ProjectAccessDraftPicker visibility={visibility} memberIds={memberIds} members={members}
+          {<ProjectAccessDraftPicker visibility={visibility} memberIds={memberIds} members={members}
             leadId={leadType === "member" ? leadId : undefined}
             onChange={(value, ids) => { setVisibility(value); setMemberIds(ids); setDraft({ visibility: value, memberIds: ids }); }} />}
 
@@ -1156,7 +1151,6 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             disabled={
               !title.trim() ||
               submitting ||
-              (visibility === "private" && !privateEnabled) ||
               (sourceMode === "repos" && hasRejectedRepoRef)
             }
             className="shrink-0"
