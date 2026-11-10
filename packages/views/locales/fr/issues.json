@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "Ouvrir dans l’application de bureau"
+  },
+  "desktop": {
+    "link_other_instance": "L’application de bureau est connectée à une autre instance Multica.",
+    "link_workspace_unavailable": "Cet espace de travail n’est pas disponible dans l’application de bureau."
+  },
   "inline_run": {
     "label": "Exécution de {{name}}",
     "stop": "Arrêter",
@@ -749,10 +756,17 @@
     "restart_failed": "Impossible d'arrêter l'exécution en cours. Votre message n'a pas été envoyé."
   },
   "reply": {
+    "recipients_changed": "La cible de la réponse a changé. Vérifiez les destinataires avant de réessayer.",
     "placeholder": "Laisser une réponse...",
     "annotations": {
+      "send_all": "Tout envoyer",
+      "send_with_annotations_and_body": "Sera envoyé avec les annotations enregistrées ({{count}}) et le texte du brouillon.",
+      "send_with_annotations": "Sera envoyé avec les annotations enregistrées ({{count}}).",
+      "send_with_body": "Sera envoyé avec le texte du brouillon.",
       "confirm_add": "Ajouter une annotation",
       "save": "Enregistrer l'annotation",
+      "confirm_add_short": "Ajouter",
+      "save_short": "Enregistrer",
       "add_comment": "Ajouter au commentaire",
       "add": "Ajouter à la réponse",
       "note_label": "Commenter",
@@ -1508,6 +1522,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "Afficher dans les commentaires",
     "locate_description": "Afficher dans la description",
+    "copy_link": "Copier le lien vers la dernière version",
+    "not_found": "Aucun livrable nommé « {{name}} » sur ce ticket",
+    "link_load_failed": "Impossible de charger les livrables de ce ticket pour ouvrir « {{name}} ». Rechargez pour réessayer.",
     "version_label": "Version {{version}} sur {{total}}",
     "version_of": "v{{version}} sur {{total}}",
     "info_source": "Source",
@@ -1723,7 +1740,6 @@
       "brief_header": "Les consignes de workflow reçues par cette exécution"
     },
     "detail": {
-      "follows_project": "(selon le projet)",
       "card_title": "{{workflow}} · selon {{project}}"
     },
     "list_separator": ", ",
@@ -1871,6 +1887,26 @@
       "row_actions": "Actions pour {{name}}",
       "empty_title": "Aucune vue enregistrée pour l'instant",
       "empty_description": "Réglez les filtres et l'affichage d'une liste de tâches, puis enregistrez-les comme vue."
+    }
+  },
+  "app_calls": {
+    "section_title": "Apps",
+    "chips_label": "Apps utilisées dans cette exécution",
+    "calls_count_one": "{{count}} appel",
+    "calls_count_other": "{{count}} appels",
+    "more": "+{{count}} de plus",
+    "scope": {
+      "team": "Compte d'équipe",
+      "personal": "Compte personnel"
+    },
+    "outcome": {
+      "ok": "Exécuté",
+      "error": "Échec",
+      "blocked": "Bloqué",
+      "pending": "En attente",
+      "approved": "Approuvé",
+      "rejected": "Refusé",
+      "rate_limited": "Limite atteinte"
     }
   }
 }

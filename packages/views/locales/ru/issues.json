@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "Открыть в приложении"
+  },
+  "desktop": {
+    "link_other_instance": "Приложение подключено к другому экземпляру Multica.",
+    "link_workspace_unavailable": "Это рабочее пространство недоступно в приложении."
+  },
   "inline_run": {
     "label": "Запуск {{name}}",
     "stop": "Остановить",
@@ -792,10 +799,17 @@
     "recipient_count_many": "{{count}} агентов получат это"
   },
   "reply": {
+    "recipients_changed": "Адресат ответа изменился. Проверьте получателей перед повторной отправкой.",
     "placeholder": "Оставить ответ...",
     "annotations": {
+      "send_all": "Отправить всё",
+      "send_with_annotations_and_body": "Будут отправлены сохранённые аннотации ({{count}}) и текст черновика.",
+      "send_with_annotations": "Будут отправлены сохранённые аннотации ({{count}}).",
+      "send_with_body": "Будет отправлен и текст черновика.",
       "confirm_add": "Добавить аннотацию",
       "save": "Сохранить аннотацию",
+      "confirm_add_short": "Добавить",
+      "save_short": "Сохранить",
       "add_comment": "Добавить к комментарию",
       "add": "Добавить к ответу",
       "note_label": "Комментарий",
@@ -1607,6 +1621,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "Показать в комментариях",
     "locate_description": "Показать в описании",
+    "copy_link": "Скопировать ссылку на последнюю версию",
+    "not_found": "В этой задаче нет результата с именем «{{name}}»",
+    "link_load_failed": "Не удалось загрузить результаты задачи, чтобы открыть «{{name}}». Обновите страницу, чтобы попробовать снова.",
     "version_label": "Версия {{version}} из {{total}}",
     "version_of": "v{{version}} из {{total}}",
     "info_source": "Источник",
@@ -1856,7 +1873,6 @@
       "brief_header": "Задание рабочего процесса, переданное этому запуску"
     },
     "detail": {
-      "follows_project": "(из проекта)",
       "card_title": "{{workflow}} · из {{project}}"
     },
     "list_separator": ", ",
@@ -2016,5 +2032,27 @@
   },
   "unread_filter_error": {
     "title": "Не удалось загрузить непрочитанные задачи"
+  },
+  "app_calls": {
+    "section_title": "Приложения",
+    "chips_label": "Приложения в этом выполнении",
+    "calls_count_one": "{{count}} вызов",
+    "calls_count_few": "{{count}} вызова",
+    "calls_count_many": "{{count}} вызовов",
+    "calls_count_other": "{{count}} вызова",
+    "more": "Ещё {{count}}",
+    "scope": {
+      "team": "Аккаунт команды",
+      "personal": "Личный аккаунт"
+    },
+    "outcome": {
+      "ok": "Выполнено",
+      "error": "Ошибка",
+      "blocked": "Заблокировано",
+      "pending": "Ожидание",
+      "approved": "Одобрено",
+      "rejected": "Отклонено",
+      "rate_limited": "Лимит вызовов достигнут"
+    }
   }
 }

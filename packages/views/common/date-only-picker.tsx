@@ -8,7 +8,7 @@ import {
   isPastDateOnly,
 } from "@multica/core/issues/date";
 import { Check } from "@multica/ui/icons";
-import { Calendar } from "@multica/ui/components/ui/calendar";
+import { LazyCalendar } from "@multica/ui/components/ui/lazy-calendar";
 import {
   Popover,
   PopoverTrigger,
@@ -176,7 +176,7 @@ function DateOnlyPickerImpl({
           </span>
           <Check className={`h-3.5 w-3.5 shrink-0 text-muted-foreground ${date ? "invisible" : ""}`} />
         </button>
-        <Calendar
+        <LazyCalendar
           mode="single"
           selected={date}
           onSelect={(d: Date | undefined) => {

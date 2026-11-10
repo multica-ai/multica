@@ -152,6 +152,8 @@ backend:
     # create workspaces. Empty = every signed-in user may create one.
     # disableWorkspaceCreation=true still blocks everyone.
     workspaceCreationAllowedEmails: ""
+    # Set to true to stop the app from asking users to star Multica on GitHub.
+    disableStarPrompt: false
     # Set to "1" or "true" to disable first-party anonymous self-host
     # telemetry collection and delivery.
     doNotTrack: ""
@@ -192,7 +194,7 @@ frontend:
   replicas: 1
   config:
     # Backend origin used by the frontend runtime proxy for /v1, /api, /auth,
-    # /uploads, and /ws. Empty defaults to this release's backend Service.
+    # /health, and /ws. Empty defaults to this release's backend Service.
     remoteApiUrl: ""
     # Optional docs origin used by the frontend runtime proxy for /docs.
     docsUrl: ""

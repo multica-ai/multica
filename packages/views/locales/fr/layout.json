@@ -35,6 +35,7 @@
     "docs": "Documentation",
     "changelog": "Journal des modifications",
     "discord": "Discord",
+    "star_on_github": "Mettre une étoile sur GitHub",
     "feedback": "Faire un retour",
     "server_version": "Version du serveur {{version}}"
   },
@@ -52,6 +53,15 @@
       "open": "Ouvrir",
       "learn_more": "En savoir plus"
     }
+  },
+  "star_prompt": {
+    "title_one": "{{agent}} a terminé {{count}} tâche",
+    "title_other": "{{agent}} a terminé {{count}} tâches",
+    "body": "Si Multica vous est utile, une étoile sur GitHub aide d'autres équipes à le découvrir.",
+    "star": "Star",
+    "star_label": "Mettre une Star à Multica sur GitHub",
+    "later": "Plus tard",
+    "close": "Fermer"
   },
   "workspace_loader": {
     "loading_workspace": "Chargement de l'espace de travail…",
@@ -138,6 +148,7 @@
       "view_actions": "Actions pour {{name}}",
       "view_copy_link": "Copier le lien",
       "view_remove": "Retirer de la barre latérale",
+      "view_edit": "Modifier la vue",
       "view_rename": "Renommer",
       "view_duplicate": "Dupliquer",
       "view_delete": "Supprimer la vue"

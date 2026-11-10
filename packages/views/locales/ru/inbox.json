@@ -16,8 +16,6 @@
     "status": "Статус",
     "priority": "Приоритет",
     "from": "От",
-    "unread_only": "Только непрочитанные",
-    "no_agents_working": "Нет работающих агентов",
     "notification_count_one": "{{count}} уведомление",
     "notification_count_other": "{{count}} уведомления",
     "clear": "Очистить фильтры",
@@ -25,7 +23,22 @@
     "active_count_few": "{{count}} активных фильтра",
     "active_count_many": "{{count}} активных фильтров",
     "notification_count_few": "{{count}} уведомления",
-    "notification_count_many": "{{count}} уведомлений"
+    "notification_count_many": "{{count}} уведомлений",
+    "section_notification": "Уведомление",
+    "section_issue": "Задача",
+    "type": "Тип",
+    "received": "Получено",
+    "type_mention": "Упоминания",
+    "type_comment": "Комментарии и реакции",
+    "type_assign": "Назначения и подписки",
+    "type_review": "Запросы на ревью",
+    "type_change": "Изменения задачи",
+    "type_run": "Запуски агентов",
+    "type_system": "Система",
+    "received_today": "Сегодня",
+    "received_last_7_days": "Последние 7 дней",
+    "received_last_30_days": "Последние 30 дней",
+    "agent_idle": "Простаивает"
   },
   "context_menu": {
     "mark_read": "Отметить как прочитанное",
@@ -86,7 +99,11 @@
     "quick_create_unconfirmed": "Создание с помощью агента не подтверждено",
     "autopilot_paused": "Автопилот приостановлен",
     "children_done": "Подзадачи завершены",
-    "autopilot_quota_exceeded": "Достигнут лимит запусков Автопилота"
+    "autopilot_quota_exceeded": "Достигнут лимит запусков Автопилота",
+    "app_action_requested": "Требуется ваше подтверждение",
+    "app_action_reminder": "Срок подтверждения скоро истечёт",
+    "app_connect_requested": "Подключить приложение",
+    "app_action_result": "Результат действия приложения"
   },
   "labels": {
     "set_status_to": "Установлен статус",

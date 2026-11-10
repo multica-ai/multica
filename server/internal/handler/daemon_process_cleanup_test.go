@@ -116,7 +116,7 @@ func TestProcessCleanupCapabilityNegotiation(t *testing.T) {
 	if testHandler == nil {
 		t.Fatal("PostgreSQL is required")
 	}
-	for _, provider := range []string{"pi", "omp", "codex"} {
+	for _, provider := range []string{"pi", "omp", "codex", "museapp"} {
 		for _, capable := range []bool{false, true} {
 			for _, claimFenced := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/capable=%v/claim=%v", provider, capable, claimFenced), func(t *testing.T) {
@@ -125,8 +125,12 @@ func TestProcessCleanupCapabilityNegotiation(t *testing.T) {
 					issue := dbfx.Issue(t, "cleanup negotiation")
 					id := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtime, "issue_id": issue, "status": "dispatched", "dispatched_at": time.Now().UTC()})
 					body := map[string]any{}
+					capability := "pi-process-cleanup-v1"
+					if provider == "museapp" {
+						capability = "museapp-process-cleanup-v1"
+					}
 					if capable {
-						body["capabilities"] = []string{"pi-process-cleanup-v1"}
+						body["capabilities"] = []string{capability}
 					}
 					if claimFenced {
 						var generation pgtype.Timestamptz
@@ -135,8 +139,8 @@ func TestProcessCleanupCapabilityNegotiation(t *testing.T) {
 					}
 					req := withURLParam(newOwnerDaemonRequest("POST", "/api/daemon/tasks/"+id+"/start", body), "taskId", id)
 					started := testutil.Decode[map[string]any](t, testHandler.StartTask, req, http.StatusOK)
-					wantPending := capable && (provider == "pi" || provider == "omp")
-					if got := started["process_cleanup_capability"] == "pi-process-cleanup-v1"; got != wantPending {
+					wantPending := capable && (provider == "pi" || provider == "omp" || provider == "museapp")
+					if got := started["process_cleanup_capability"] == capability; got != wantPending {
 						t.Fatalf("negotiated cleanup=%v, want %v", got, wantPending)
 					}
 					if claimFenced {
@@ -144,7 +148,7 @@ func TestProcessCleanupCapabilityNegotiation(t *testing.T) {
 						if capable {
 							delete(body, "capabilities")
 						} else {
-							body["capabilities"] = []string{"pi-process-cleanup-v1"}
+							body["capabilities"] = []string{capability}
 						}
 						req = withURLParam(newOwnerDaemonRequest("POST", "/api/daemon/tasks/"+id+"/start", body), "taskId", id)
 						testutil.Call(t, testHandler.StartTask, req).Want(http.StatusOK)
