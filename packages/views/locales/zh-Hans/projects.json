@@ -225,7 +225,6 @@
     "load_failed": "无法加载项目成员。",
     "publish_title": "将项目设为整个工作区可见？",
     "publish_description": "工作区所有成员都将能查看这个项目及其中的任务、评论和附件。",
-    "disabled": "此服务器尚未启用私有项目。",
     "done": "完成",
     "retry": "重试"
   }

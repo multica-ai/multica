@@ -1842,5 +1842,32 @@
       "rejected": "已拒绝",
       "rate_limited": "已限流"
     }
+  },
+  "environments": {
+    "section_title": "环境",
+    "running_count_other": "{{count}} 个运行中",
+    "this_machine": "本机",
+    "unknown_machine": "未知设备",
+    "state": {
+      "starting": "启动中",
+      "running": "运行中",
+      "exited": "已退出",
+      "stopped": "已停止",
+      "unreachable": "无响应"
+    },
+    "expires_in_minutes_other": "{{count}} 分钟后过期",
+    "expires_in_hours_other": "{{count}} 小时后过期",
+    "expires_in_days_other": "{{count}} 天后过期",
+    "started_ago": "{{time}}启动",
+    "ended_ago": "{{time}}结束",
+    "last_seen": "{{time}}最后响应",
+    "ended_count_other": "{{count}} 个已结束",
+    "detected_hint": "在这个任务某次运行的目录中发现的服务",
+    "remote_hint": "运行在 {{machine}} 上，localhost 地址只能在那台机器上打开。",
+    "localhost_hint": "localhost 地址只能在运行它的那台机器上打开。",
+    "open": "打开",
+    "copy_url": "复制地址",
+    "copied": "已复制地址",
+    "copy_failed": "无法复制地址"
   }
 }

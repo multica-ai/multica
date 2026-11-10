@@ -1842,5 +1842,32 @@
       "rejected": "却下",
       "rate_limited": "レート制限"
     }
+  },
+  "environments": {
+    "section_title": "環境",
+    "running_count_other": "{{count}} 件実行中",
+    "this_machine": "このマシン",
+    "unknown_machine": "不明なマシン",
+    "state": {
+      "starting": "起動中",
+      "running": "実行中",
+      "exited": "終了",
+      "stopped": "停止",
+      "unreachable": "応答なし"
+    },
+    "expires_in_minutes_other": "{{count}}分後に期限切れ",
+    "expires_in_hours_other": "{{count}}時間後に期限切れ",
+    "expires_in_days_other": "{{count}}日後に期限切れ",
+    "started_ago": "起動: {{time}}",
+    "ended_ago": "終了: {{time}}",
+    "last_seen": "最終応答: {{time}}",
+    "ended_count_other": "終了済み {{count}} 件",
+    "detected_hint": "このタスクの実行ディレクトリで待ち受けていたサーバー",
+    "remote_hint": "{{machine}} で実行中です。localhost の URL はそのマシンでのみ開けます。",
+    "localhost_hint": "localhost の URL は、それを実行しているマシンでのみ開けます。",
+    "open": "開く",
+    "copy_url": "URL をコピー",
+    "copied": "URL をコピーしました",
+    "copy_failed": "URL をコピーできませんでした"
   }
 }

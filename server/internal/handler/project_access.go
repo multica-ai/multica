@@ -19,10 +19,6 @@ import (
 // hiddenProjects returns the private projects (MUL-8472) this request may not
 // see. A member request is bounded by the member; an agent request by the
 // run's originator and the agent's owner together (projectaccess.RunPrincipals).
-//
-// Enforcement does not read the private_projects_v1 flag: the flag gates
-// creating private projects, and a project that is already private stays
-// private whatever the flag says.
 func (h *Handler) hiddenProjects(r *http.Request, workspaceID string) (projectaccess.Hidden, error) {
 	ctx := r.Context()
 	wsUUID, err := util.ParseUUID(workspaceID)

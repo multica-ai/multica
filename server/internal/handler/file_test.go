@@ -1784,7 +1784,7 @@ func TestIsTextPreviewable(t *testing.T) {
 // Matrix:
 //
 //   - public CDN durable URL ............... reuse a.Url verbatim
-//   - LocalStorage with PublicURL set ....... reuse a.Url (already absolute)
+//   - LocalStorage with PublicURL set ....... absolute API endpoint
 //   - CloudFront-signed mode ................ never reuse a.Url (raw S3),
 //                                              prefer absolute API endpoint
 //   - LocalStorage relative + PublicURL set . prefix to absolute API endpoint

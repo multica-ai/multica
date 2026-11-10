@@ -202,10 +202,14 @@ export const BoardCardContent = memo(function BoardCardContent({
 
   return (
     <div
+      data-mc="board-card"
+      data-status={issue.status}
+      data-priority={issue.priority}
+      data-assignee-type={issue.assignee_type ?? "none"}
       className={
         framed
-          ? "rounded-lg border-[0.5px] border-surface-border bg-surface py-3 px-2.5 shadow-[var(--surface-shadow)] transition-colors group-hover/card:border-foreground/15 group-hover/card:bg-surface-hover group-data-[popup-open]/card:border-foreground/15 group-data-[popup-open]/card:bg-surface-hover group-data-[peeked]/card:ring-2 group-data-[peeked]/card:ring-brand/50"
-          : "rounded-t-lg py-3 px-2.5 transition-colors group-hover/card:bg-surface-hover group-data-[peeked]/card:bg-surface-hover"
+          ? "rounded-board-card border-[0.5px] border-board-card-border bg-board-card py-3 px-2.5 shadow-[var(--board-card-shadow,var(--surface-shadow))] transition-colors group-hover/card:border-foreground/15 group-hover/card:bg-board-card-hover group-data-[popup-open]/card:border-foreground/15 group-data-[popup-open]/card:bg-board-card-hover group-data-[peeked]/card:ring-2 group-data-[peeked]/card:ring-brand/50"
+          : "rounded-t-board-card py-3 px-2.5 transition-colors group-hover/card:bg-board-card-hover group-data-[peeked]/card:bg-board-card-hover"
       }
     >
       {/* Row 1: priority + identifier (left), agent activity + assignee (right) */}
@@ -443,7 +447,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
         }
       >
         {nested ? (
-          <div className="rounded-lg border-[0.5px] border-surface-border bg-surface shadow-[var(--surface-shadow)]">
+          <div className="rounded-board-card border-[0.5px] border-board-card-border bg-board-card shadow-[var(--board-card-shadow,var(--surface-shadow))]">
             {/* Hover and peek styling stay on this card's own section, so
                 hovering a nested sub-issue does not light up the parent. */}
             <div className="group/card" data-peeked={peeked ? "" : undefined}>

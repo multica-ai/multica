@@ -52,7 +52,7 @@ export function AppsSettings() {
   const catalog = useQuery(appCatalogOptions(wsId));
   const restore = useRestoreAppAccess();
 
-  const [adding, setAdding] = useState(false);
+  const [addingScope, setAddingScope] = useState<AppAccountScope | null>(null);
   const [detail, setDetail] = useState<AccountTarget | null>(null);
   const [disconnecting, setDisconnecting] = useState<AccountTarget | null>(null);
 
@@ -127,13 +127,7 @@ export function AppsSettings() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between gap-4">
-        <p className="text-caption text-muted-foreground">{t(($) => $.connected_apps.description)}</p>
-        <Button size="sm" onClick={() => setAdding(true)}>
-          <Plus />
-          {t(($) => $.connected_apps.add_app)}
-        </Button>
-      </div>
+      <p className="text-caption text-muted-foreground">{t(($) => $.connected_apps.description)}</p>
 
       {data.catalog_mode !== "all" && (
         <SavedAppRestriction
@@ -146,6 +140,12 @@ export function AppsSettings() {
         anchor="team-accounts"
         title={t(($) => $.connected_apps.team_title)}
         description={t(($) => $.connected_apps.team_description)}
+        action={canManage ? (
+          <Button size="sm" onClick={() => setAddingScope("team")}>
+            <Plus />
+            {t(($) => $.connected_apps.add.connect_team)}
+          </Button>
+        ) : undefined}
       >
         {teamRows.length > 0 ? (
           <SettingsCard>{teamRows}</SettingsCard>
@@ -164,6 +164,12 @@ export function AppsSettings() {
         anchor="my-accounts"
         title={t(($) => $.connected_apps.personal_title)}
         description={t(($) => $.connected_apps.personal_description)}
+        action={(
+          <Button size="sm" onClick={() => setAddingScope("personal")}>
+            <Plus />
+            {t(($) => $.connected_apps.add.connect_personal)}
+          </Button>
+        )}
       >
         {personalRows.length > 0 ? (
           <SettingsCard>{personalRows}</SettingsCard>
@@ -172,15 +178,19 @@ export function AppsSettings() {
         )}
       </SettingsSection>
 
-      <AddAppDialog
-        open={adding}
-        onOpenChange={setAdding}
-        canManage={canManage}
-        overview={data}
-        catalog={catalog.data?.apps ?? []}
-        catalogLoading={catalog.isLoading}
-        catalogError={catalog.isError}
-      />
+      {addingScope && (
+        <AddAppDialog
+          key={addingScope}
+          scope={addingScope}
+          open
+          onOpenChange={(open) => { if (!open) setAddingScope(null); }}
+          canManage={canManage}
+          overview={data}
+          catalog={catalog.data?.apps ?? []}
+          catalogLoading={catalog.isLoading}
+          catalogError={catalog.isError}
+        />
+      )}
       {detail && (
         <AppAccountDialog
           scope={detail.scope}
