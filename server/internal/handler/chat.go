@@ -90,6 +90,9 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "you do not have access to this agent")
 		return
 	}
+	if !h.requireChatProjectVisible(w, r, workspaceID, projectID, agent.ID) {
+		return
+	}
 
 	// Create inside a tx that first takes a FOR KEY SHARE lock on the workspace
 	// row: it conflicts with DeleteWorkspace's FOR UPDATE, so a session cannot be
@@ -411,6 +414,9 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 			}
 			projectID, ok = parseUUIDOrBadRequest(w, rawProjectID, "project_id")
 			if !ok {
+				return
+			}
+			if !h.requireChatProjectVisible(w, r, workspaceID, projectID, session.AgentID) {
 				return
 			}
 		}

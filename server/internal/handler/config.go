@@ -8,6 +8,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/storage"
 )
 
 type AppConfig struct {
@@ -16,8 +17,8 @@ type AppConfig struct {
 	// use it only to recognize links belonging to this deployment.
 	AttachmentPublicURL string `json:"attachment_public_url,omitempty"`
 	// CdnSigned tells clients that the CDN domain above serves PRIVATE
-	// content through time-bounded signed URLs (CloudFront signing is
-	// enabled). When true, a raw storage URL on the CDN domain is NOT
+	// content through authenticated downloads or time-bounded signed URLs.
+	// When true, a raw storage URL on the CDN domain is NOT
 	// publicly fetchable — renderers must not pick it as a native
 	// <img>/<video> source and should fall back to the per-attachment
 	// API endpoint or a freshly signed download_url instead (MUL-3254).
@@ -132,6 +133,9 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	config.AttachmentPublicURL = h.cfg.PublicURL
 	config.CdnSigned = h.CFSigner != nil
+	if _, local := h.Storage.(*storage.LocalStorage); local {
+		config.CdnSigned = true
+	}
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
 	config.DaemonSetupTarget = "self_host"
 	config.VCSIntegrationAvailable = h.cfg.VCSIntegrationEnabled

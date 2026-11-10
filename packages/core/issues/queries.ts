@@ -162,6 +162,11 @@ export const issueKeys = {
     [...issueKeys.childrenByParentsAll(wsId), parentIds] as const,
   childProgress: (wsId: string) =>
     [...issueKeys.all(wsId), "child-progress"] as const,
+  /** Prefix for every per-issue environments query in a workspace. */
+  environmentsAll: (wsId: string) =>
+    [...issueKeys.all(wsId), "environments"] as const,
+  environments: (wsId: string, issueId: string) =>
+    [...issueKeys.environmentsAll(wsId), issueId] as const,
   /** Prefix-match keys for invalidating the per-issue caches below across
    *  all issues. These keys carry no wsId, so `issueKeys.all(wsId)` does NOT
    *  cover them — WS reconnect recovery must invalidate these `*All`
@@ -716,6 +721,17 @@ export function issueSubscribersOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.subscribers(issueId),
     queryFn: () => api.listIssueSubscribers(issueId),
+  });
+}
+
+// Reports arrive over realtime; the interval only re-derives "unreachable"
+// once a daemon goes quiet, which no event announces.
+export function issueEnvironmentsOptions(wsId: string, issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.environments(wsId, issueId),
+    queryFn: () => api.listIssueEnvironments(issueId),
+    enabled: !!wsId && !!issueId,
+    refetchInterval: 60_000,
   });
 }
 

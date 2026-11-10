@@ -54,6 +54,14 @@ describe("isImageAttachment", () => {
 describe("matchAttachmentByURL", () => {
   const a = attachment({ id: UUID_A });
 
+  it("matches historical local URLs after the backend aliases the storage URL", () => {
+    const local = attachment({ id: UUID_A, url: `/api/attachments/${UUID_A}/download` });
+    const url = `/uploads/workspaces/${UUID_B}/${UUID_A}.png`;
+    expect(matchAttachmentByURL(url, [local])).toBe(local);
+    expect(selectStandaloneAttachments(`![](${url})`, [local])).toEqual([]);
+    expect(collectImageSequence([{ content: `![](${url})`, attachments: [local] }])).toHaveLength(1);
+  });
+
   it("matches the stable download path regardless of host and query", () => {
     expect(
       matchAttachmentByURL(

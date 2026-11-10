@@ -78,3 +78,23 @@ it("lets a member recover only their personal account and keeps failed confirmat
   await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
   expect(screen.getAllByText("Saved action restrictions are still blocking this account.")).toHaveLength(1);
 });
+
+it("opens a connection dialog for the section that launched it", async () => {
+  const user = userEvent.setup();
+  renderSettings();
+  expect(await screen.findByRole("button", { name: "Connect team account" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Add app" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Connect team account" }));
+  expect(screen.getByRole("dialog", { name: "Connect team account" })).toBeVisible();
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  await user.click(screen.getByRole("button", { name: "Connect my account" }));
+  expect(screen.getByRole("dialog", { name: "Connect my account" })).toBeVisible();
+});
+
+it("only offers members the personal connection entry", async () => {
+  overview.can_manage = false;
+  renderSettings();
+  expect(await screen.findByRole("button", { name: "Connect my account" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Connect team account" })).not.toBeInTheDocument();
+});

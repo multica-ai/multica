@@ -289,6 +289,64 @@ describe("ApiClient pull-request response schema", () => {
   });
 });
 
+describe("ApiClient issue environments response schema", () => {
+  const validEnvironment = {
+    id: "env-1",
+    issue_id: "issue-1",
+    task_id: "task-1",
+    runtime_id: "rt-1",
+    agent_id: "agent-1",
+    source: "config",
+    name: "web",
+    label: "Web app",
+    url: "http://localhost:41000",
+    port: 41000,
+    state: "running",
+    detail: "",
+    started_at: "2026-11-10T09:00:00Z",
+    expires_at: "2026-11-11T09:00:00Z",
+    last_seen_at: "2026-11-10T09:05:00Z",
+    ended_at: null,
+  };
+
+  function stubEnvironments(body: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+  }
+
+  it("parses a valid environment list", async () => {
+    stubEnvironments({ environments: [validEnvironment] });
+    const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
+    expect(result.environments).toEqual([validEnvironment]);
+  });
+
+  it("drops a malformed environment and keeps the rest", async () => {
+    stubEnvironments({ environments: [{ ...validEnvironment, id: 7 }, { ...validEnvironment, id: "env-2" }] });
+    const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
+    expect(result.environments.map((env) => env.id)).toEqual(["env-2"]);
+  });
+
+  it("reads an unknown state from a newer server as unreachable", async () => {
+    stubEnvironments({ environments: [{ ...validEnvironment, state: "hibernating", source: "remote" }] });
+    const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
+    expect(result.environments[0]).toMatchObject({ state: "unreachable", source: "detected" });
+  });
+
+  it("falls back to an empty list when the body is not a list", async () => {
+    stubEnvironments({ environments: "nope" });
+    await expect(
+      new ApiClient("https://api.example.test").listIssueEnvironments("issue-1"),
+    ).resolves.toEqual({ environments: [] });
+  });
+});
+
 describe("ApiClient Plugin preview response schema", () => {
   it("degrades a malformed preview so a blank scope list is never shown as approval", async () => {
     vi.stubGlobal(

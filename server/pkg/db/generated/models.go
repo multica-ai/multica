@@ -968,6 +968,29 @@ type IssueDependency struct {
 	Type             string      `json:"type"`
 }
 
+type IssueEnvironment struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	TaskID      pgtype.UUID        `json:"task_id"`
+	RuntimeID   pgtype.UUID        `json:"runtime_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	LocalKey    string             `json:"local_key"`
+	Source      string             `json:"source"`
+	Name        string             `json:"name"`
+	Label       string             `json:"label"`
+	Url         string             `json:"url"`
+	Port        pgtype.Int4        `json:"port"`
+	State       string             `json:"state"`
+	Detail      string             `json:"detail"`
+	StartedAt   pgtype.Timestamptz `json:"started_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	LastSeenAt  pgtype.Timestamptz `json:"last_seen_at"`
+	EndedAt     pgtype.Timestamptz `json:"ended_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type IssueLabel struct {
 	ID           pgtype.UUID        `json:"id"`
 	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
@@ -1466,6 +1489,15 @@ type Project struct {
 	WorkflowID  pgtype.UUID        `json:"workflow_id"`
 	CreatorType pgtype.Text        `json:"creator_type"`
 	CreatorID   pgtype.UUID        `json:"creator_id"`
+	Visibility  string             `json:"visibility"`
+}
+
+type ProjectMember struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	AddedBy     pgtype.UUID        `json:"added_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type ProjectResource struct {

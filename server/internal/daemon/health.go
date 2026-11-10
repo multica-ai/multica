@@ -126,6 +126,7 @@ type repoCheckoutRequest struct {
 type activeRepoCheckoutTask struct {
 	WorkspaceID string
 	TaskID      string
+	IssueID     string
 	AgentID     string
 	AgentName   string
 	WorkDir     string
@@ -413,6 +414,9 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
+	mux.HandleFunc("/environments/start", d.environmentStartHandler())
+	mux.HandleFunc("/environments/stop", d.environmentStopHandler())
+	mux.HandleFunc("/environments/list", d.environmentListHandler())
 
 	srv := &http.Server{Handler: mux}
 
