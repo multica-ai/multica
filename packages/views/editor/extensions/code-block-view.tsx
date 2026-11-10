@@ -22,6 +22,7 @@ import {
   htmlBlockTheme,
   mentionsThemeTokens,
 } from "../utils/html-block-document";
+import { DrawioEditorPreview, useDrawioViewerUrl } from "../drawio-preview";
 
 // Coalesces fast keystrokes before re-rendering live previews.
 // `mermaid.initialize()` mutates a process-global config, so back-to-back
@@ -40,15 +41,26 @@ function CodeBlockView({ node }: NodeViewProps) {
   const [fullscreen, setFullscreen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const reload = () => setReloadKey((key) => key + 1);
-  // HTML blocks default to "preview"; the user can flip to "source" to
-  // edit the markup directly. Note: the source `<pre>` MUST stay mounted
+  // HTML and draw.io blocks default to "preview"; the user can flip to
+  // "source" to edit the markup directly. Note: the source `<pre>` MUST stay mounted
   // (just hidden) so ProseMirror keeps its NodeView bindings — unmounting
   // it would break editing.
-  const [view, setView] = useState<"preview" | "source">("preview");
   const language = node.attrs.language || "";
+  // A draw.io block created empty opens on its source: there is no diagram
+  // to preview yet, and hiding the source would leave nothing to type into.
+  const [view, setView] = useState<"preview" | "source">(() =>
+    language === "drawio" && !node.textContent.trim() ? "source" : "preview",
+  );
   const isMermaid = language === "mermaid";
   const isHtml = language === "html";
   const showHtmlPreview = isHtml && view === "preview";
+  // draw.io previews only while the deployment has a viewer; otherwise the
+  // block is plain XML with no toggle, like any other language.
+  const drawioViewerUrl = useDrawioViewerUrl();
+  const hasDrawioPreview = language === "drawio" && drawioViewerUrl != null;
+  const showDrawioPreview = hasDrawioPreview && view === "preview";
+  const hasSourceToggle = isHtml || hasDrawioPreview;
+  const sourceHidden = showHtmlPreview || showDrawioPreview;
   const chart = node.textContent;
   const debouncedChart = useDebouncedValue(
     isMermaid ? chart : "",
@@ -77,6 +89,11 @@ function CodeBlockView({ node }: NodeViewProps) {
       : NO_HTML_BLOCK_THEME;
     setSrcDoc(buildHtmlBlockDocument(debouncedHtml, theme));
   }, [debouncedHtml, themeVersion]);
+  const debouncedXml = useDebouncedValue(
+    hasDrawioPreview ? chart : "",
+    PREVIEW_DEBOUNCE_MS,
+    showDrawioPreview,
+  );
 
   const handleCopy = async () => {
     const text = node.textContent;
@@ -127,6 +144,11 @@ function CodeBlockView({ node }: NodeViewProps) {
           </HtmlPreviewSurface>
         </div>
       )}
+      {showDrawioPreview && debouncedXml.trim() && (
+        <div contentEditable={false} className="mb-1">
+          <DrawioEditorPreview xml={debouncedXml} viewerUrl={drawioViewerUrl!} />
+        </div>
+      )}
       <div
         contentEditable={false}
         className="code-block-header absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100 focus-within:opacity-100"
@@ -136,7 +158,7 @@ function CodeBlockView({ node }: NodeViewProps) {
             {language}
           </span>
         )}
-        {isHtml && (
+        {hasSourceToggle && (
           <TooltipHint
             label={
               view === "preview"
@@ -207,8 +229,8 @@ function CodeBlockView({ node }: NodeViewProps) {
           we just visually hide it — ProseMirror still tracks it. */}
       <pre
         spellCheck={false}
-        className={cn(showHtmlPreview && "sr-only")}
-        aria-hidden={showHtmlPreview ? "true" : undefined}
+        className={cn(sourceHidden && "sr-only")}
+        aria-hidden={sourceHidden ? "true" : undefined}
       >
         {/* @ts-expect-error -- NodeViewContent supports as="code" at runtime */}
         <NodeViewContent as="code" />
