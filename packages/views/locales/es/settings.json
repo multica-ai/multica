@@ -243,6 +243,8 @@
       "none_installed": "Aún no hay temas instalados.",
       "no_results": "Ningún tema coincide con «{{query}}».",
       "by": "de {{author}}",
+      "downloads_one": "{{downloads}} descarga",
+      "downloads_other": "{{downloads}} descargas",
       "source": "{{repo}} en GitHub",
       "no_preview": "Sin vista previa",
       "screenshot_alt": "{{name}} en modo {{mode}}",

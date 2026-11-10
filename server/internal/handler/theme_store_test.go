@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -76,7 +77,14 @@ func TestThemeStoreRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := themeStoreRouter(&Handler{ThemeStore: store})
+	clearDownloads := func() {
+		if _, err := testPool.Exec(context.Background(), `DELETE FROM theme_store_download WHERE theme_id IN ('sample', 'unlisted')`); err != nil {
+			t.Fatalf("clear theme_store_download: %v", err)
+		}
+	}
+	clearDownloads()
+	t.Cleanup(clearDownloads)
+	router := themeStoreRouter(&Handler{ThemeStore: store, Queries: testHandler.Queries})
 	get := func(path string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
@@ -93,7 +101,7 @@ func TestThemeStoreRoutes(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
 		t.Fatal(err)
 	}
-	if len(list.Themes) != 1 || list.Themes[0].Version != "1.0.0" || strings.Join(list.Themes[0].Screenshots, ",") != "light" {
+	if len(list.Themes) != 1 || list.Themes[0].Version != "1.0.0" || strings.Join(list.Themes[0].Screenshots, ",") != "light" || list.Themes[0].Downloads != 0 {
 		t.Fatalf("list = %+v", list.Themes)
 	}
 	if strings.Contains(w.Body.String(), "registry.test") || strings.Contains(w.Body.String(), "shots/") {
@@ -104,6 +112,10 @@ func TestThemeStoreRoutes(t *testing.T) {
 	if w.Code != http.StatusOK || w.Body.String() != string(zip) || w.Header().Get("X-Theme-Version") != "1.0.0" {
 		t.Fatalf("package: %d %q %v", w.Code, w.Body.String(), w.Header())
 	}
+	// An install and an update are both a download.
+	if w := get("/api/theme-store/themes/sample/package"); w.Code != http.StatusOK {
+		t.Fatalf("second package: %d", w.Code)
+	}
 	w = get("/api/theme-store/themes/sample/screenshots/light")
 	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/png" {
 		t.Fatalf("screenshot: %d %v", w.Code, w.Header())
@@ -113,6 +125,17 @@ func TestThemeStoreRoutes(t *testing.T) {
 	}
 	if w := get("/api/theme-store/themes/unlisted/package"); w.Code != http.StatusNotFound {
 		t.Fatalf("unlisted theme: want 404, got %d", w.Code)
+	}
+	var downloads int64
+	if err := testPool.QueryRow(context.Background(), `SELECT downloads FROM theme_store_download WHERE theme_id = 'sample'`).Scan(&downloads); err != nil || downloads != 2 {
+		t.Fatalf("downloads = %d (%v), want 2", downloads, err)
+	}
+	if err := json.Unmarshal(get("/api/theme-store/themes").Body.Bytes(), &list); err != nil || list.Themes[0].Downloads != 2 {
+		t.Fatalf("listed downloads = %+v (%v), want 2", list.Themes, err)
+	}
+	var unlisted int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM theme_store_download WHERE theme_id = 'unlisted'`).Scan(&unlisted); err != nil || unlisted != 0 {
+		t.Fatalf("a failed download was counted: %d (%v)", unlisted, err)
 	}
 	if n := upstream.Load(); n != 3 {
 		t.Fatalf("upstream requests = %d, want 3 (index, zip, screenshot)", n)

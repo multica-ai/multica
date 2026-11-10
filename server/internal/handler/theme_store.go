@@ -25,6 +25,8 @@ type ThemeStoreTheme struct {
 	Size        int64    `json:"size"`
 	Screenshots []string `json:"screenshots"`
 	UpdatedAt   string   `json:"updated_at,omitempty"`
+	// Downloads counts installs and updates served by this server.
+	Downloads int64 `json:"downloads"`
 }
 
 func (h *Handler) themeStore(w http.ResponseWriter) *themestore.Store {
@@ -54,6 +56,7 @@ func (h *Handler) ListStoreThemes(w http.ResponseWriter, r *http.Request) {
 		writeThemeStoreError(w, r, err)
 		return
 	}
+	downloads := h.themeStoreDownloads(r)
 	out := make([]ThemeStoreTheme, 0, len(themes))
 	for _, t := range themes {
 		shots := []string{}
@@ -73,6 +76,7 @@ func (h *Handler) ListStoreThemes(w http.ResponseWriter, r *http.Request) {
 			Size:        t.Package.Size,
 			Screenshots: shots,
 			UpdatedAt:   t.UpdatedAt,
+			Downloads:   downloads[t.ID],
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"themes": out})
@@ -95,7 +99,32 @@ func (h *Handler) GetStoreThemePackage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Theme-Version", theme.Version)
 	w.Header().Set("Cache-Control", "private, no-cache")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_, _ = w.Write(data)
+	if _, err := w.Write(data); err != nil {
+		return
+	}
+	if h.Queries != nil {
+		if err := h.Queries.AddThemeStoreDownload(r.Context(), theme.ID); err != nil {
+			slog.WarnContext(r.Context(), "theme store: count download", "theme", theme.ID, "error", err)
+		}
+	}
+}
+
+// themeStoreDownloads is the download count of every theme served so far. A
+// failed read leaves the counts out rather than failing the list.
+func (h *Handler) themeStoreDownloads(r *http.Request) map[string]int64 {
+	counts := map[string]int64{}
+	if h.Queries == nil {
+		return counts
+	}
+	rows, err := h.Queries.ListThemeStoreDownloads(r.Context())
+	if err != nil {
+		slog.WarnContext(r.Context(), "theme store: read download counts", "error", err)
+		return counts
+	}
+	for _, row := range rows {
+		counts[row.ThemeID] = row.Downloads
+	}
+	return counts
 }
 
 // GetStoreThemeScreenshot returns the screenshot the registry CI rendered

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
-import type { StoreTheme } from "../api/schemas";
+import { StoreThemeListSchema, type StoreTheme } from "../api/schemas";
 import { INSTALLED_THEMES_STORAGE_KEY, useInstalledThemesStore } from "./installed-themes";
 import { writeZip } from "./theme-archive";
 import { parseTheme } from "./theme-package";
@@ -25,6 +25,7 @@ const entry = (overrides: Partial<StoreTheme> = {}): StoreTheme => ({
   version: "1.0.0",
   size: 100,
   screenshots: ["light", "dark"],
+  downloads: 0,
   ...overrides,
 });
 const theme = (id: string, version = "1.0.0") => {
@@ -32,6 +33,19 @@ const theme = (id: string, version = "1.0.0") => {
   if (!parsed.ok) throw new Error("fixture");
   return parsed.theme;
 };
+
+describe("StoreThemeListSchema", () => {
+  it("reads the download count, and counts none from a server that sends none", () => {
+    const { downloads: _, ...withoutCount } = entry();
+    const parsed = StoreThemeListSchema.parse({
+      themes: [entry({ downloads: 12 }), { ...withoutCount, id: "sand" }],
+    });
+    expect(parsed.themes.map((t) => [t.id, t.downloads])).toEqual([
+      ["ink", 12],
+      ["sand", 0],
+    ]);
+  });
+});
 
 describe("readStoreTheme", () => {
   it("reads the release like an imported theme", async () => {

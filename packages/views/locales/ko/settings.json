@@ -256,6 +256,7 @@
       "none_installed": "아직 설치된 테마가 없습니다.",
       "no_results": "“{{query}}”와 일치하는 테마가 없습니다.",
       "by": "작성자: {{author}}",
+      "downloads_other": "다운로드 {{downloads}}회",
       "source": "GitHub에서 {{repo}} 보기",
       "no_preview": "미리보기 없음",
       "screenshot_alt": "{{mode}} 모드의 {{name}}",

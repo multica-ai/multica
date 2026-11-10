@@ -339,6 +339,11 @@ fails keeps the previous one listed. The app only installs the exact
 `theme.zip` the checks passed, and reads it with the same parser and CSS
 sanitizer as an imported theme.
 
+Each store card shows how many times the theme was downloaded from the
+Multica server it lists on: every install and every update counts once.
+Themes not yet installed are listed most downloaded first. A self-hosted
+server counts its own downloads.
+
 A self-hosted server reads the official registry by default.
 `MULTICA_THEME_STORE=off` turns the store off: **Manage** lists only the
 themes on the device, and the server makes no registry requests. `MULTICA_THEME_REGISTRY_URL` points it at

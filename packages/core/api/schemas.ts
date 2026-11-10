@@ -1304,6 +1304,8 @@ export interface StoreTheme {
   /** Modes the registry rendered a screenshot for. */
   screenshots: StoreThemeMode[];
   updated_at?: string;
+  /** Installs and updates served by this server, all users together. */
+  downloads: number;
 }
 
 const StoreThemeModesSchema = z.preprocess(
@@ -1323,6 +1325,7 @@ const StoreThemeSchema = z
     size: z.number(),
     screenshots: StoreThemeModesSchema,
     updated_at: OptionalStringSchema,
+    downloads: z.number().catch(0).default(0),
   })
   .loose();
 

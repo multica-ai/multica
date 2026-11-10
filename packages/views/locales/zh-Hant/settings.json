@@ -256,6 +256,7 @@
       "none_installed": "還沒有安裝任何主題。",
       "no_results": "沒有符合「{{query}}」的主題。",
       "by": "作者：{{author}}",
+      "downloads_other": "{{downloads}} 次下載",
       "source": "在 GitHub 上查看 {{repo}}",
       "no_preview": "暫無預覽",
       "screenshot_alt": "{{name}}（{{mode}}模式）",

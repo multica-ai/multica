@@ -261,6 +261,8 @@
       "none_installed": "Aucun thème n’est encore installé.",
       "no_results": "Aucun thème ne correspond à « {{query}} ».",
       "by": "par {{author}}",
+      "downloads_one": "{{downloads}} téléchargement",
+      "downloads_other": "{{downloads}} téléchargements",
       "source": "{{repo}} sur GitHub",
       "no_preview": "Pas d’aperçu",
       "screenshot_alt": "{{name}} en mode {{mode}}",

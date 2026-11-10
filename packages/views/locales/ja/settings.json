@@ -256,6 +256,7 @@
       "none_installed": "インストール済みのテーマはまだありません。",
       "no_results": "「{{query}}」に一致するテーマはありません。",
       "by": "作者：{{author}}",
+      "downloads_other": "{{downloads}} 回ダウンロード",
       "source": "GitHub で {{repo}} を見る",
       "no_preview": "プレビューなし",
       "screenshot_alt": "{{name}}（{{mode}}モード）",

@@ -52,7 +52,7 @@ const release = (id: string, name: string, version: string) =>
     { path: "manifest.json", data: encoder.encode(JSON.stringify(manifest(id, name, version))) },
     { path: "theme.css", data: encoder.encode(css) },
   ]);
-const listed = (id: string, name: string, version = "1.0.0"): StoreTheme => ({
+const listed = (id: string, name: string, version = "1.0.0", downloads = 0): StoreTheme => ({
   id,
   name,
   author: "Someone",
@@ -62,6 +62,7 @@ const listed = (id: string, name: string, version = "1.0.0"): StoreTheme => ({
   version,
   size: 100,
   screenshots: ["light", "dark"],
+  downloads,
 });
 
 describe("ThemesButton", () => {
@@ -126,6 +127,22 @@ describe("ThemesButton", () => {
     await user.click(screen.getByRole("button", { name: "Remove Ink" }));
     expect(useInstalledThemesStore.getState().themes).toEqual([]);
     expect(useAppearanceStore.getState().theme).toBe("default");
+  });
+
+  it("shows how often each store theme was downloaded, most downloaded first, and recounts after an install", async () => {
+    api.listStoreThemes.mockResolvedValue([listed("ink", "Ink", "1.0.0", 1), listed("sand", "Sand", "1.0.0", 1250)]);
+    const user = userEvent.setup();
+    renderButton();
+    await user.click(screen.getByRole("button", { name: "Manage" }));
+    expect(await screen.findByText("by Someone · 1.3K downloads")).toBeTruthy();
+    expect(screen.getByText("by Someone · 1 download")).toBeTruthy();
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent).slice(-2)).toEqual(["Sand", "Ink"]);
+
+    api.listStoreThemes.mockResolvedValue([listed("ink", "Ink", "1.0.0", 2), listed("sand", "Sand", "1.0.0", 1250)]);
+    const [installSand] = screen.getAllByRole("button", { name: "Install" });
+    await user.click(installSand!);
+    expect(await screen.findByText("by Someone · 2 downloads")).toBeTruthy();
+    expect(api.listStoreThemes).toHaveBeenCalledTimes(2);
   });
 
   it("offers the listed release as an update", async () => {

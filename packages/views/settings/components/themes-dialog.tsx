@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ExternalLink, Search } from "@multica/ui/icons";
 import { Badge } from "@multica/ui/components/ui/badge";
@@ -23,10 +23,11 @@ import {
   storeThemeScreenshotOptions,
   storeThemeState,
   storeThemesOptions,
+  themeStoreKeys,
   type StoreTheme,
   type StoreThemeMode,
 } from "@multica/core/appearance/theme-store";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 import { SegmentedToggle } from "../../common/segmented-toggle";
 import { openExternal } from "../../platform/open-external";
 import { ThemePreview, useAppliedMode, useThemeLabel } from "./theme-swatch";
@@ -60,12 +61,14 @@ export function ThemesButton() {
  */
 export function useStoreThemeInstall() {
   const { t } = useT("settings");
+  const queryClient = useQueryClient();
   return useCallback(
     async (theme: StoreTheme) => {
       const themes = useInstalledThemesStore.getState();
       const update = storeThemeState(theme, themes) === "update";
       try {
         const result = await readStoreTheme(theme);
+        void queryClient.invalidateQueries({ queryKey: themeStoreKeys.themes() });
         if (!result.ok) {
           toast.error(t(($) => $.appearance.store.install_failed, { name: theme.name }), {
             description: result.errors.join("\n"),
@@ -95,7 +98,7 @@ export function useStoreThemeInstall() {
         });
       }
     },
-    [t],
+    [t, queryClient],
   );
 }
 
@@ -132,7 +135,7 @@ function Themes() {
         };
   };
   const entries = [...installed.map((theme) => local(theme, true)), ...BUILT_IN_THEMES.map((theme) => local(theme, false))];
-  for (const theme of listed.values()) {
+  for (const theme of [...listed.values()].sort((a, b) => b.downloads - a.downloads)) {
     // A listed theme whose id is taken on this device is shown next to the one that has it.
     const taken = entries.some((entry) => entry.key === theme.id);
     entries.push({
@@ -364,6 +367,7 @@ function LocalThemeCard({ theme, name, installed }: { theme: Theme; name: string
 
 function StoreThemeCard({ theme }: { theme: StoreTheme }) {
   const { t } = useT("settings");
+  const locale = useLocale();
   const appMode = useAppliedMode();
   const supported = theme.screenshots.length > 0 ? theme.screenshots : theme.modes;
   const [mode, setMode] = useState<StoreThemeMode>(supported.includes(appMode) ? appMode : supported[0] ?? appMode);
@@ -420,7 +424,13 @@ function StoreThemeCard({ theme }: { theme: StoreTheme }) {
           <ExternalLink />
         </Button>
       }
-      subtitle={t(($) => $.appearance.store.by, { author: theme.author })}
+      subtitle={[
+        t(($) => $.appearance.store.by, { author: theme.author }),
+        t(($) => $.appearance.store.downloads, {
+          count: theme.downloads,
+          downloads: new Intl.NumberFormat(locale, { notation: "compact" }).format(theme.downloads),
+        }),
+      ].join(" · ")}
       description={theme.description}
     >
       {onDevice ? (

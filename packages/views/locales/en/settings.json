@@ -261,6 +261,8 @@
       "none_installed": "No themes are installed yet.",
       "no_results": "No themes match “{{query}}”.",
       "by": "by {{author}}",
+      "downloads_one": "{{downloads}} download",
+      "downloads_other": "{{downloads}} downloads",
       "source": "{{repo}} on GitHub",
       "no_preview": "No preview",
       "screenshot_alt": "{{name}} in {{mode}} mode",

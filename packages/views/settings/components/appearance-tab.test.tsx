@@ -266,6 +266,7 @@ describe("AppearanceTab", () => {
       version,
       size: 100,
       screenshots: [],
+      downloads: 0,
     });
     api.listStoreThemes.mockResolvedValueOnce([listed("0.9.0")]).mockResolvedValue([listed("1.0.0")]);
     api.getStoreThemePackage.mockResolvedValue(
