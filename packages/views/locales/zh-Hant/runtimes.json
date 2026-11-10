@@ -598,6 +598,7 @@
       "environment_waiting": "令牌驗證後自動載入",
       "repo_count_other": "{{count}} 個倉庫",
       "optional": "可選",
+      "auto_authorized": "已透過 GitHub 整合自動授權",
       "execution_summary": "最多同時 {{concurrency}} 個 · 單次超時 {{timeout}} 分鐘"
     },
     "stop_confirm": {
@@ -630,6 +631,9 @@
       "save": "儲存",
       "token_saved": "已儲存",
       "repositories_hint": "AI 代理只能克隆這裡授權的倉庫。",
+      "github_app_auto_auth": "{{accounts}} 名下的倉庫已透過工作區 GitHub 整合自動授權。",
+      "github_app_auto_auth_hint": "每次執行都會按需簽發僅限該倉庫、1 小時有效的臨時憑證，無需手動填寫權杖。",
+      "repositories_hint_override": "僅為不在已連接帳號範圍內的倉庫新增權杖，或用於覆蓋其自動授權。",
       "repo_token_saved": "令牌已儲存",
       "repo_actions": "{{repo}} 的操作",
       "replace_token": "更換令牌",

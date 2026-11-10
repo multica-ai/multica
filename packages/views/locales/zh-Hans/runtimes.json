@@ -598,6 +598,7 @@
       "environment_waiting": "令牌验证后自动加载",
       "repo_count_other": "{{count}} 个仓库",
       "optional": "可选",
+      "auto_authorized": "已通过 GitHub 集成自动授权",
       "execution_summary": "最多同时 {{concurrency}} 个 · 单次超时 {{timeout}} 分钟"
     },
     "stop_confirm": {
@@ -630,6 +631,9 @@
       "save": "保存",
       "token_saved": "已保存",
       "repositories_hint": "智能体只能克隆这里授权的仓库。",
+      "github_app_auto_auth": "{{accounts}} 名下的仓库已通过工作区 GitHub 集成自动授权。",
+      "github_app_auto_auth_hint": "每次运行都会按需签发仅限该仓库、1 小时有效的临时凭证，无需手动填写令牌。",
+      "repositories_hint_override": "仅为不在已连接账号范围内的仓库添加令牌，或用于覆盖其自动授权。",
       "repo_token_saved": "令牌已保存",
       "repo_actions": "{{repo}} 的操作",
       "replace_token": "更换令牌",
