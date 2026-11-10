@@ -1,0 +1,94 @@
+{
+  "manifest_version": 1,
+  "key": "ai.multica.jira-link",
+  "name": "Jira Link",
+  "description": "Links Multica issues to Jira issues. Records the Jira key on the issue's metadata, creates a Jira issue from a Multica one, and moves the linked Jira issue when the Multica status changes.",
+  "version": "0.1.0",
+  "author": {
+    "name": "multica",
+    "url": "https://multica.ai"
+  },
+  "scopes": [
+    "issues:read",
+    "issues:write",
+    "net:jira-link.example.com"
+  ],
+  "config": {
+    "project_key": {
+      "type": "string",
+      "label": "Jira project key",
+      "description": "Project new Jira issues are created in.",
+      "required": true,
+      "placeholder": "OPS"
+    }
+  },
+  "contributes": {
+    "surfaces": [
+      {
+        "key": "jira",
+        "type": "issue_panel",
+        "name": "Jira",
+        "entry": "ui/main.js",
+        "platforms": [
+          "web",
+          "desktop"
+        ]
+      }
+    ],
+    "hooks": [
+      {
+        "key": "link_issue",
+        "name": "Link a Jira issue",
+        "description": "Checks that the Jira issue exists and records its key, URL and status on this issue.",
+        "input_schema": {
+          "type": "object",
+          "required": ["key"],
+          "properties": {
+            "key": {
+              "type": "string"
+            }
+          }
+        },
+        "triggers": [
+          "ui",
+          "manual"
+        ],
+        "transport": {
+          "type": "http",
+          "url": "https://jira-link.example.com/hooks/link"
+        },
+        "timeout_ms": 8000
+      },
+      {
+        "key": "create_issue",
+        "name": "Create in Jira",
+        "description": "Creates a Jira issue from this issue's title and description and links it.",
+        "triggers": [
+          "ui",
+          "manual"
+        ],
+        "transport": {
+          "type": "http",
+          "url": "https://jira-link.example.com/hooks/create"
+        },
+        "timeout_ms": 8000
+      },
+      {
+        "key": "sync_status",
+        "name": "Sync status to Jira",
+        "description": "When a linked issue changes status, applies the Jira transition into the matching status category.",
+        "triggers": [
+          "event"
+        ],
+        "events": [
+          "issue.status_changed"
+        ],
+        "transport": {
+          "type": "http",
+          "url": "https://jira-link.example.com/hooks/sync"
+        },
+        "timeout_ms": 8000
+      }
+    ]
+  }
+}
