@@ -69,6 +69,38 @@ func TestDetectorReportsServersInTaskDirectories(t *testing.T) {
 	}
 }
 
+func TestDetectorLeavesOutADeclaredEnvironmentsServersAndKeepsItsApp(t *testing.T) {
+	listeners := []Listener{
+		{PID: 10, Port: 9724, Command: "Electron", Cwd: "/ws/task-a/workdir/apps/desktop"},
+		{PID: 11, Port: 5173, Command: "node", Cwd: "/ws/task-a/workdir/apps/desktop"},
+		{PID: 12, Port: 8080, Command: "server", Cwd: "/ws/task-a/workdir/server"},
+		{PID: 13, Port: 6006, Command: "node", Cwd: "/ws/task-a/workdir"},
+	}
+	procs := map[int]Process{
+		10: {Args: electronBundle + "/Contents/MacOS/Electron . --remote-debugging-port=9724", App: "Multica Canary", Bundle: electronBundle},
+	}
+	owner := func(pid int) string {
+		if pid == 13 {
+			return ""
+		}
+		return "config:abc"
+	}
+	d := fakeDetector(&listeners, procs, nil)
+
+	d.Detect(context.Background(), resolveTaskA, owner)
+	envs, _ := d.Detect(context.Background(), resolveTaskA, owner)
+	if len(envs) != 2 {
+		t.Fatalf("detected = %+v, want the environment's app and the one server nobody declared", envs)
+	}
+	app, other := byKind(envs, KindApp), byKind(envs, KindServer)
+	if app.Key != "config:abc" || app.Source != SourceConfig || app.pid != 10 || app.bundle != electronBundle {
+		t.Fatalf("app = %+v, want it under the environment's key with the config source", app)
+	}
+	if other.Source != SourceDetected || other.Port != 6006 {
+		t.Fatalf("other = %+v, want the server on 6006 as detected", other)
+	}
+}
+
 const electronBundle = "/ws/task-a/workdir/node_modules/electron/dist/Electron.app"
 
 func TestDetectorReportsADesktopAppInsteadOfItsDebugPort(t *testing.T) {
@@ -305,7 +337,7 @@ func resolveTaskA(cwd string) (Task, bool) {
 	return Task{}, false
 }
 
-func notOwned(int) bool { return false }
+func notOwned(int) string { return "" }
 
 func byKind(envs []Environment, kind string) Environment {
 	for _, env := range envs {

@@ -917,6 +917,9 @@ jobs:
       - name: Test development environment registry
         run: bash scripts/dev-env.test.sh
 
+      - name: Test agent environment lifecycle
+        run: bash scripts/agent-environment.test.sh
+
       - name: Test UI performance comparison runner
         run: bash scripts/perf-compare.test.sh
 
