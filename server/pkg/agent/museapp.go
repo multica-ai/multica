@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -28,7 +30,7 @@ import (
 //	POST /v1/execute            {prompt, session_id?, timeout_s?, workdir?} -> {task_id}
 //	GET  /v1/tasks/{id}        -> {status, result?, error?}
 //	GET  /v1/tasks/{id}/events -> {events: [{seq, type, content}]}
-//	POST /v1/tasks/{id}/cancel -> {ok}
+//	POST /v1/tasks/{id}/cancel -> {execution_stopped?}
 //	GET  /v1/health            -> {protocol_version, version}
 //
 // "result" on a completed task is the final answer. Event types are exactly
@@ -46,7 +48,8 @@ import (
 //	MULTICA_MUSEAPP_TOKEN     bearer token for the receptionist (optional; sent only when set)
 //	MULTICA_MUSEAPP_MODEL     informational model label reported in the probe entry
 //
-// cfg.Env is deliberately NOT consulted. It carries the agent's custom_env,
+// Endpoint and receptionist-token resolution deliberately ignore cfg.Env.
+// It carries the agent's custom_env,
 // which any member who can edit the agent controls; honouring MULTICA_MUSEAPP_ENDPOINT
 // there would let them point this daemon at an arbitrary URL, and MULTICA_MUSEAPP_TOKEN
 // (which they cannot see) would still ride along from the process environment.
@@ -159,7 +162,20 @@ type museappTaskStatus struct {
 	Status string `json:"status"`
 	Result string `json:"result,omitempty"`
 	Error  string `json:"error,omitempty"`
+	// Cancellation or timeout bookkeeping alone does not prove a worker stopped.
+	ExecutionStopped bool `json:"execution_stopped,omitempty"`
 }
+
+type museappCancelResponse struct {
+	ExecutionStopped bool `json:"execution_stopped"`
+}
+
+type museappHTTPStatusError struct {
+	code    int
+	message string
+}
+
+func (e *museappHTTPStatusError) Error() string { return e.message }
 
 type museappEvent struct {
 	Seq     int64  `json:"seq"`
@@ -246,6 +262,10 @@ func (b *museappBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	// the Session; the goroutine below owns the context lifetime and
 	// cancels it when the run finishes.
 	runCtx, cancel := runContext(ctx, opts.Timeout)
+	if err := runCtx.Err(); err != nil {
+		cancel()
+		return nil, err
+	}
 
 	// timeoutS rounds up: a sub-second timeout must not truncate to 0,
 	// which would tell the receptionist "no timeout".
@@ -264,7 +284,7 @@ func (b *museappBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	// callers without a health endpoint.)
 	var execResp museappExecuteResponse
 	if err := b.postExecute(runCtx, mc, museappExecuteRequest{
-		Prompt:          prompt,
+		Prompt:          museappTaskPrompt(prompt, b.cfg.Env, opts, runtime.GOOS),
 		SessionID:       opts.ResumeSessionID,
 		TimeoutS:        timeoutS,
 		WorkDir:         opts.Cwd,
@@ -273,14 +293,23 @@ func (b *museappBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		WorkspaceID:     opts.MulticaWorkspaceID,
 		ProtocolVersion: museappProtocolVersion,
 	}, &execResp); err != nil {
-		// R2: Release the runContext on early failure. The success path
-		// hands ownership to the polling goroutine (which defers cancel).
 		cancel()
-		return nil, err
+		var rejected *museappHTTPStatusError
+		if errors.As(err, &rejected) && (rejected.code == 400 || rejected.code == 401 || rejected.code == 403) {
+			return nil, err // Explicit refusal before a task could be queued.
+		}
+		if execResp.TaskID != "" {
+			if cleanupErr := b.cancelRemoteTask(mc, execResp.TaskID); cleanupErr == nil {
+				return nil, err
+			} else {
+				err = errors.Join(err, cleanupErr)
+			}
+		}
+		return museappUnconfirmedSession(err), nil
 	}
 	if execResp.TaskID == "" {
 		cancel()
-		return nil, fmt.Errorf("museapp backend: receptionist returned an empty task id")
+		return museappUnconfirmedSession(fmt.Errorf("museapp backend: receptionist returned an empty task id")), nil
 	}
 	taskID := execResp.TaskID
 	logger.Info("muse task started", "task_id", taskID, "cwd", opts.Cwd, "model", opts.Model)
@@ -302,6 +331,7 @@ func (b *museappBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
+	var terminalObserved atomic.Bool
 
 	go func() {
 		defer close(msgCh)
@@ -332,6 +362,12 @@ func (b *museappBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 				Error:      finalError,
 				DurationMs: time.Since(startTime).Milliseconds(),
 				SessionID:  "muse:" + taskID,
+			}
+		}
+		stopRemote := func() {
+			if err := b.cancelRemoteTask(mc, taskID); err != nil {
+				finalStatus = "cleanup_unconfirmed"
+				finalError += "; " + err.Error()
 			}
 		}
 
@@ -378,10 +414,6 @@ func (b *museappBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		for {
 			select {
 			case <-runCtx.Done():
-				// Best-effort remote cancel; the local verdict is authoritative.
-				cancelCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				_ = b.postCancel(cancelCtx, mc, taskID)
-				cancel()
 				if runCtx.Err() == context.DeadlineExceeded {
 					finalStatus = "timeout"
 					finalError = "muse task timed out"
@@ -392,6 +424,7 @@ func (b *museappBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 					finalStatus = "aborted"
 					finalError = "muse execution cancelled"
 				}
+				stopRemote()
 				finish()
 				return
 			case <-ticker.C:
@@ -408,16 +441,9 @@ func (b *museappBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 			var st museappTaskStatus
 			if err := b.getJSON(runCtx, mc, museappTaskPath(taskID, ""), &st); err != nil {
 				if museappPollFailed(&pollErrs, err, logger, taskID) {
-					// B2: Local polling failed but the remote task may still be
-					// running. Best-effort cancel it so we don't leave an
-					// orphaned worker. The local verdict stays "failed" —
-					// a cancel failure doesn't change that, and we don't
-					// claim the remote worker actually stopped.
-					cancelCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-					_ = b.postCancel(cancelCtx, mc, taskID)
-					cancel()
 					finalStatus = "failed"
 					finalError = fmt.Sprintf("museapp backend: receptionist unreachable: %v", err)
+					stopRemote()
 					finish()
 					return
 				}
@@ -426,6 +452,9 @@ func (b *museappBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 
 			switch st.Status {
 			case "completed", "failed", "cancelled":
+				if st.Status == "completed" || st.ExecutionStopped {
+					terminalObserved.Store(true)
+				}
 				// The events and status polls are two requests, so the
 				// receptionist can emit its last events (the tail of the
 				// answer) between them. Once the task is terminal nothing more
@@ -456,6 +485,9 @@ func (b *museappBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 						finalError = "muse task failed without an error message"
 					}
 				}
+				if st.Status != "completed" && !st.ExecutionStopped {
+					stopRemote()
+				}
 				finish()
 				return
 			case "queued", "running":
@@ -470,14 +502,9 @@ func (b *museappBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 				// budget so a receptionist speaking a newer protocol fails
 				// loudly instead of polling forever.
 				if museappPollFailed(&pollErrs, fmt.Errorf("unknown status %q", st.Status), logger, taskID) {
-					// B2: Same as the poll-failure branch — best-effort
-					// cancel the remote task before returning the local
-					// failure verdict.
-					cancelCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-					_ = b.postCancel(cancelCtx, mc, taskID)
-					cancel()
 					finalStatus = "failed"
 					finalError = fmt.Sprintf("museapp backend: receptionist reported unknown status %q", st.Status)
+					stopRemote()
 					finish()
 					return
 				}
@@ -485,7 +512,16 @@ func (b *museappBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		}
 	}()
 
-	return &Session{Messages: msgCh, Result: resCh}, nil
+	return &Session{Messages: msgCh, Result: resCh, CleanupRequired: true, TerminalObserved: terminalObserved.Load}, nil
+}
+
+func museappUnconfirmedSession(err error) *Session {
+	messages := make(chan Message)
+	results := make(chan Result, 1)
+	results <- Result{Status: "cleanup_unconfirmed", Error: err.Error() + "; remote execution may still be active; check the Muse worker before manually rerunning"}
+	close(messages)
+	close(results)
+	return &Session{Messages: messages, Result: results, CleanupRequired: true, TerminalObserved: func() bool { return false }}
 }
 
 // museappTaskPath builds a /v1/tasks/{id}[/suffix] path. The task id comes from
@@ -510,18 +546,8 @@ func (b *museappBackend) postExecute(ctx context.Context, mc museappEndpointConf
 	}
 	// Go-B3: The receptionist reports its protocol version in the execute
 	// response. If it speaks a different version, fail fast.
-	// The receptionist validates req.protocol_version BEFORE creating the
-	// task, so a mismatch here means either an old receptionist (no
-	// validation) or a race. If we got a task_id, try to cancel it —
-	// don't leave an orphaned task that we'll never poll.
+	// Execute must confirm cleanup of an accepted task before returning an error.
 	if out.ProtocolVersion != 0 && out.ProtocolVersion != museappProtocolVersion {
-		if out.TaskID != "" {
-			// Best-effort cleanup of the orphaned task. Use a separate
-			// bounded context; don't let cancel failure mask the skew error.
-			cancelCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			_ = b.postCancel(cancelCtx, mc, out.TaskID)
-			cancel()
-		}
 		return fmt.Errorf("%w: receptionist speaks v%d, backend implements v%d",
 			ErrMuseAppProtocolSkew, out.ProtocolVersion, museappProtocolVersion)
 	}
@@ -532,8 +558,17 @@ func (b *museappBackend) getJSON(ctx context.Context, mc museappEndpointConfig, 
 	return b.doJSONWithConfig(ctx, mc, http.MethodGet, path, nil, out)
 }
 
-func (b *museappBackend) postCancel(ctx context.Context, mc museappEndpointConfig, taskID string) error {
-	return b.doJSONWithConfig(ctx, mc, http.MethodPost, museappTaskPath(taskID, "/cancel"), nil, nil)
+func (b *museappBackend) cancelRemoteTask(mc museappEndpointConfig, taskID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var response museappCancelResponse
+	if err := b.doJSONWithConfig(ctx, mc, http.MethodPost, museappTaskPath(taskID, "/cancel"), nil, &response); err != nil {
+		return fmt.Errorf("Muse worker stop unconfirmed: %w", err)
+	}
+	if !response.ExecutionStopped {
+		return fmt.Errorf("Muse worker stop unconfirmed: receptionist must confirm execution_stopped=true after the worker and its tools stop; check the worker before manually rerunning")
+	}
+	return nil
 }
 
 func (b *museappBackend) doJSONWithConfig(ctx context.Context, mc museappEndpointConfig, method, path string, body any, out any) error {
@@ -563,10 +598,10 @@ func (b *museappBackend) doJSONWithConfig(ctx context.Context, mc museappEndpoin
 		return fmt.Errorf("museapp backend: read response: %w", err)
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return fmt.Errorf("museapp backend: %s %s: HTTP %d: receptionist rejected credentials (check MULTICA_MUSEAPP_TOKEN)", method, path, resp.StatusCode)
+		return &museappHTTPStatusError{code: resp.StatusCode, message: fmt.Sprintf("museapp backend: %s %s: HTTP %d: receptionist rejected credentials (check MULTICA_MUSEAPP_TOKEN)", method, path, resp.StatusCode)}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("museapp backend: %s %s: HTTP %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(raw)))
+		return &museappHTTPStatusError{code: resp.StatusCode, message: fmt.Sprintf("museapp backend: %s %s: HTTP %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(raw)))}
 	}
 	if out == nil {
 		return nil

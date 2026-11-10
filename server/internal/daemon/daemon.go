@@ -6035,7 +6035,7 @@ func taskCancelAcknowledgement(result TaskResult, runErr error, provider string)
 		ack.FailureReason = "local_directory_error"
 	}
 	confirmed := result.FailureReason != taskfailure.ReasonProcessCleanupUnconfirmed.String()
-	if provider == "pi" || provider == "omp" {
+	if provider == "pi" || provider == "omp" || provider == "museapp" {
 		ack.ProcessCleanupConfirmed = &confirmed
 	}
 	if !confirmed {
@@ -8642,6 +8642,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var taskCapabilities []string
 	if provider == "pi" || provider == "omp" {
 		taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilityPiProcessCleanupV1)
+	}
+	if provider == "museapp" {
+		taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilityMuseAppProcessCleanupV1)
 	}
 	var cursorHookCommand []string
 	supplementSupported := agent.SupportsTaskSupplement(provider, resolvedVersion) && task.IssueID != ""

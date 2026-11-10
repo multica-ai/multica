@@ -53,8 +53,12 @@ RETURNING *;
 UPDATE agent_task_queue task
 SET result = COALESCE(task.result, '{}'::jsonb) || '{"process_cleanup_pending":true}'::jsonb
 WHERE task.id = @id AND task.status = 'cancelled' AND task.started_at IS NOT NULL
-  AND task.result->>'process_cleanup_capability' = 'pi-process-cleanup-v1'
-  AND EXISTS (SELECT 1 FROM agent_runtime runtime WHERE runtime.id = task.runtime_id AND runtime.provider IN ('pi', 'omp'));
+  AND EXISTS (
+      SELECT 1 FROM agent_runtime runtime
+      WHERE runtime.id = task.runtime_id
+        AND ((runtime.provider IN ('pi', 'omp') AND task.result->>'process_cleanup_capability' = 'pi-process-cleanup-v1')
+          OR (runtime.provider = 'museapp' AND task.result->>'process_cleanup_capability' = 'museapp-process-cleanup-v1'))
+  );
 
 -- name: ClearTaskProcessCleanupPending :exec
 UPDATE agent_task_queue

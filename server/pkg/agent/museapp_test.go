@@ -19,19 +19,20 @@ import (
 // polling, streaming and failure mapping are all exercised without any
 // real network or agent run.
 type fakeMuseAppReceptionist struct {
-	mu           sync.Mutex
-	statuses     []museappTaskStatus
-	statusCalls  int
-	events       []museappEvent
-	cancelCalls  int
-	executeCalls int
-	executeCode  int
-	statusCode   int // HTTP code for /v1/tasks polls; 0 means 200
-	healthCode   int
-	health       museappHealthResponse
-	authHeaders  []string
-	executeBody  []byte
-	sinceParams  []string // ?since= values seen on /events polls
+	mu            sync.Mutex
+	statuses      []museappTaskStatus
+	statusCalls   int
+	events        []museappEvent
+	cancelCalls   int
+	cancelStopped bool
+	executeCalls  int
+	executeCode   int
+	statusCode    int // HTTP code for /v1/tasks polls; 0 means 200
+	healthCode    int
+	health        museappHealthResponse
+	authHeaders   []string
+	executeBody   []byte
+	sinceParams   []string // ?since= values seen on /events polls
 }
 
 func (f *fakeMuseAppReceptionist) statusForCall() museappTaskStatus {
@@ -89,7 +90,7 @@ func (f *fakeMuseAppReceptionist) handler() http.Handler {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.cancelCalls++
-		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+		_ = json.NewEncoder(w).Encode(museappCancelResponse{ExecutionStopped: f.cancelStopped})
 	})
 	mux.HandleFunc("/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -264,7 +265,7 @@ func TestMuseAppExecuteForwardsTaskToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New(museapp) = %v", err)
 	}
-	_, err = b.Execute(context.Background(), "do the thing", ExecOptions{
+	session, err := b.Execute(context.Background(), "do the thing", ExecOptions{
 		Cwd:                "/tmp/work-1",
 		TaskToken:          "mat_abc123",
 		MulticaServerURL:   "https://multica.example.com",
@@ -273,6 +274,7 @@ func TestMuseAppExecuteForwardsTaskToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute = %v", err)
 	}
+	drainMuseAppSession(t, session)
 	var body museappExecuteRequest
 	if err := json.Unmarshal(fake.executeBody, &body); err != nil {
 		t.Fatalf("decode execute body: %v", err)
@@ -333,10 +335,13 @@ func TestMuseAppExecuteHTTPError(t *testing.T) {
 	defer srv.Close()
 
 	b, _ := New("museapp", museappTestConfig(t, srv.URL, ""))
-	if _, err := b.Execute(context.Background(), "hi", ExecOptions{}); err == nil {
-		t.Fatal("Execute succeeded on HTTP 500, want error")
-	} else if !strings.Contains(err.Error(), "500") {
-		t.Errorf("error = %q, want HTTP status", err)
+	session, err := b.Execute(context.Background(), "hi", ExecOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, _ := drainMuseAppSession(t, session)
+	if result.Status != "cleanup_unconfirmed" || !strings.Contains(result.Error, "500") {
+		t.Fatalf("ambiguous submission result = %+v", result)
 	}
 }
 
@@ -356,7 +361,7 @@ func TestMuseAppExecuteUnauthorized(t *testing.T) {
 func TestMuseAppExecuteRemoteFailure(t *testing.T) {
 	fastMuseAppPolls(t)
 	fake := &fakeMuseAppReceptionist{
-		statuses: []museappTaskStatus{{Status: "failed", Error: "boom"}},
+		statuses: []museappTaskStatus{{Status: "failed", Error: "boom", ExecutionStopped: true}},
 	}
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
@@ -377,7 +382,7 @@ func TestMuseAppExecuteRemoteFailure(t *testing.T) {
 
 func TestMuseAppExecuteCancel(t *testing.T) {
 	fastMuseAppPolls(t)
-	fake := &fakeMuseAppReceptionist{} // never completes: always "running"
+	fake := &fakeMuseAppReceptionist{cancelStopped: true} // never completes: always "running"
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
@@ -402,7 +407,7 @@ func TestMuseAppExecuteCancel(t *testing.T) {
 
 func TestMuseAppExecuteTimeout(t *testing.T) {
 	fastMuseAppPolls(t)
-	fake := &fakeMuseAppReceptionist{} // never completes
+	fake := &fakeMuseAppReceptionist{cancelStopped: true} // never completes
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
@@ -421,7 +426,7 @@ func TestMuseAppExecuteTimeout(t *testing.T) {
 
 func TestMuseAppExecutePollBudgetExhausted(t *testing.T) {
 	fastMuseAppPolls(t)
-	fake := &fakeMuseAppReceptionist{statusCode: 500} // polls always fail
+	fake := &fakeMuseAppReceptionist{statusCode: 500, cancelStopped: true} // polls always fail
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
 
@@ -745,17 +750,21 @@ func TestMuseAppExecuteEmptyTaskID(t *testing.T) {
 	defer srv.Close()
 
 	b, _ := New("museapp", museappTestConfig(t, srv.URL, ""))
-	if _, err := b.Execute(context.Background(), "hi", ExecOptions{}); err == nil {
-		t.Fatal("Execute succeeded on empty task id, want error")
-	} else if !strings.Contains(err.Error(), "empty task id") {
-		t.Errorf("error = %q, want empty task id", err)
+	session, err := b.Execute(context.Background(), "hi", ExecOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, _ := drainMuseAppSession(t, session)
+	if result.Status != "cleanup_unconfirmed" || !strings.Contains(result.Error, "empty task id") {
+		t.Fatalf("missing submission handle result = %+v", result)
 	}
 }
 
 func TestMuseAppExecuteUnknownStatus(t *testing.T) {
 	fastMuseAppPolls(t)
 	fake := &fakeMuseAppReceptionist{
-		statuses: []museappTaskStatus{{Status: "vaporware"}},
+		statuses:      []museappTaskStatus{{Status: "vaporware"}},
+		cancelStopped: true,
 	}
 	srv := httptest.NewServer(fake.handler())
 	defer srv.Close()
@@ -864,12 +873,13 @@ func TestMuseAppProtocolSkewCancelsOrphanedTask(t *testing.T) {
 	defer srv.Close()
 
 	b, _ := New("museapp", museappTestConfig(t, srv.URL, ""))
-	_, err := b.Execute(context.Background(), "hi", ExecOptions{})
-	if err == nil {
-		t.Fatal("Execute should fail on protocol skew")
+	session, err := b.Execute(context.Background(), "hi", ExecOptions{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "protocol skew") {
-		t.Errorf("Error = %q, want protocol skew", err.Error())
+	result, _ := drainMuseAppSession(t, session)
+	if result.Status != "cleanup_unconfirmed" || !strings.Contains(result.Error, "protocol skew") {
+		t.Fatalf("protocol-skew orphan result = %+v", result)
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -994,7 +1004,7 @@ func TestMuseAppPollFailureCancelsRemote(t *testing.T) {
 		mu.Lock()
 		cancelCalls++
 		mu.Unlock()
-		w.WriteHeader(200)
+		_ = json.NewEncoder(w).Encode(museappCancelResponse{ExecutionStopped: true})
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
