@@ -14,7 +14,9 @@
  *      turns it into HTML, which mobile can't render natively. Rewriting
  *      to a normal link with a 📎 emoji makes it a tappable link that
  *      `Linking.openURL` opens in the system viewer (Safari for PDFs,
- *      QuickLook for docs, share sheet for arbitrary files).
+ *      QuickLook for docs, share sheet for arbitrary files). An image card
+ *      becomes `![name](url)` instead, as web renders it inline, so it is
+ *      tappable and part of the screen's lightbox sequence.
  *
  * NOTE: Web's preprocess also has a third pass that detects bare CDN
  * URLs as legacy file links. We skip that because mobile doesn't bootstrap
@@ -22,6 +24,11 @@
  * hyperlinks — same tap behavior, just no 📎 prefix. Acceptable degradation.
  */
 import { preprocessMentionShortcodes } from "@multica/core/markdown";
+import {
+  isImageAttachment,
+  matchAttachmentByURL,
+} from "@multica/core/attachments/image-sequence";
+import type { Attachment } from "@multica/core/types";
 import { fromMarkdown } from "mdast-util-from-markdown";
 
 // File-card line matcher, kept in sync with web's parser in
@@ -58,13 +65,36 @@ function escapeLinkLabel(name: string): string {
   return name.replace(/([\\[\]])/g, "\\$1");
 }
 
-function preprocessFileCards(input: string): string {
+// Same candidate `collectImageSequence` builds for an inline file card, so the
+// lightbox counts exactly the cards this renders as images. Core only reads
+// cards whose URL has no whitespace.
+function isImageFileCard(
+  name: string,
+  url: string,
+  attachments: readonly Attachment[] | undefined,
+): boolean {
+  if (/\s/.test(url)) return false;
+  const record = matchAttachmentByURL(url, attachments);
+  return isImageAttachment(record?.content_type ?? "", record?.filename || name || url);
+}
+
+// An angle-bracket destination with every metacharacter escaped decodes back
+// to the card's raw URL, which is what the sequence matches against.
+function imageDestination(url: string): string {
+  return `<${url.replace(/[\\<>&]/g, "\\$&")}>`;
+}
+
+function preprocessFileCards(input: string, attachments: readonly Attachment[] | undefined): string {
   return input
     .split("\n")
     .map((line) => {
       const m = line.trim().match(FILE_LINE_RE);
       if (!m) return line;
-      const label = escapeLinkLabel(unescapeFileLabel(m[1]!));
+      const name = unescapeFileLabel(m[1]!);
+      const label = escapeLinkLabel(name);
+      if (isImageFileCard(name, m[2]!, attachments)) {
+        return `![${label}](${imageDestination(m[2]!)})`;
+      }
       return `[📎 ${label}](${m[2]})`;
     })
     .join("\n");
@@ -191,9 +221,12 @@ export function stripHtml(input: string): string {
   return out + stripHtmlOutsideCode(input.slice(cursor));
 }
 
-export function preprocessMobileMarkdown(input: string): string {
+export function preprocessMobileMarkdown(
+  input: string,
+  attachments?: readonly Attachment[],
+): string {
   if (!input) return "";
   return preprocessTaskListStrikethrough(
-    preprocessFileCards(preprocessMentionShortcodes(stripHtml(input))),
+    preprocessFileCards(preprocessMentionShortcodes(stripHtml(input)), attachments),
   );
 }

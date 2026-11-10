@@ -104,6 +104,47 @@ describe("mobile Markdown image sequence wiring", () => {
     expect(renderedUri).toBe(expectedUri);
   });
 
+  it.each([
+    ["image name", "!file[photo.png](https://cdn.example/photo.png)", "https://cdn.example/photo.png", []],
+    ["image record", `!file[screenshot](/api/attachments/${ID}/download)`, attachment.download_url!, [attachment]],
+    ["Unicode URL", "!file[photo.png](https://cdn.example/图.png)", "https://cdn.example/%E5%9B%BE.png", []],
+    ["entity-like URL", "!file[photo.png](https://cdn.example/a.png?a=1&amp;b=2)", "https://cdn.example/a.png?a=1&amp;b=2", []],
+    ["backslash and brackets in URL", String.raw`!file[photo.png](https://cdn.example/a\b<c(d>.png)`, "https://cdn.example/a%5Cb%3Cc(d%3E.png", []],
+  ] as const)("renders an image file card (%s) inline at its sequence position", (_name, card, expectedUri, attachments) => {
+    const content = `![first](https://cdn.example/first.png)\n\n${card}\n\n![last](https://cdn.example/last.png)`;
+    const segments = splitMarkdown(preprocessMobileMarkdown(content, attachments));
+    expect(segments.map((segment) => segment.type)).toEqual(["image", "image", "image"]);
+    const lightbox = LightboxProvider({ children: null });
+    state.contexts.set(lightbox.type, lightbox.props.value);
+    const provider = ImageSequenceProvider({ blocks: [{ content, attachments }], children: null });
+    state.contexts.set(provider.type, provider.props.value);
+    const image = MarkdownImage({ uri: (segments[1] as { uri: string }).uri, attachments: [...attachments] });
+    image.props.onPress();
+    expect(state.setters[0]).toHaveBeenCalledExactlyOnceWith({
+      images: [
+        { uri: "https://cdn.example/first.png" },
+        { uri: expectedUri },
+        { uri: "https://cdn.example/last.png" },
+      ],
+      index: 1,
+    });
+  });
+
+  it.each([
+    ["non-image name", "!file[report.pdf](https://cdn.example/report.pdf)", []],
+    ["non-image record", `!file[photo.png](/api/attachments/${ID}/download)`, [{ ...attachment, filename: "report.pdf", content_type: "application/pdf" }]],
+  ] as const)("keeps a %s file card as a link outside the sequence", (_name, card, attachments) => {
+    const content = `![first](https://cdn.example/first.png)\n\n${card}\n\n![last](https://cdn.example/last.png)`;
+    const segments = splitMarkdown(preprocessMobileMarkdown(content, attachments));
+    expect(segments.map((segment) => segment.type)).toEqual(["image", "prose", "image"]);
+    expect((segments[1] as { content: string }).content).toMatch(/^\[📎 /);
+    const provider = ImageSequenceProvider({ blocks: [{ content, attachments }], children: null });
+    expect(provider.props.value).toEqual([
+      "https://cdn.example/first.png",
+      "https://cdn.example/last.png",
+    ]);
+  });
+
   it("does not count an HTML image shown literally in code", () => {
     const content = '![first](https://cdn.example/first.png)\n\n`<img src="https://cdn.example/a.png">`\n\n![last](https://cdn.example/last.png)';
     const provider = ImageSequenceProvider({ blocks: [{ content }], children: null });
