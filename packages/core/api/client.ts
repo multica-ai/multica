@@ -1749,13 +1749,6 @@ export class ApiClient {
   }
 
   // Comments
-  async listIssueDeliverables(issueId: string): Promise<TimelineEntry[]> {
-    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/deliverables`);
-    return parseWithFallback(raw, TimelineEntriesSchema, [], {
-      endpoint: "GET /api/issues/:id/deliverables",
-    });
-  }
-
   async listComments(issueId: string, options?: { thread: string }): Promise<Comment[]> {
     const query = options ? `?${new URLSearchParams({ thread: options.thread })}` : "";
     const raw = await this.fetch<unknown>(`/api/issues/${issueId}/comments${query}`);

@@ -126,6 +126,33 @@ export function findDeliverableVersion(
   return undefined;
 }
 
+/**
+ * The issue's complete file inventory as comment entries, built from the
+ * issue attachment list, which carries every comment file with its comment's
+ * author and time. A file without that origin (description, older server)
+ * contributes nothing; the loaded timeline still supplies its own comments.
+ */
+export function deliverableInventoryFromAttachments(
+  attachments: readonly Attachment[],
+): TimelineEntry[] {
+  const comments = new Map<string, { entry: TimelineEntry; files: Attachment[] }>();
+  for (const attachment of attachments) {
+    const { comment_id: id, comment_author_type: actorType, comment_author_id: actorId, comment_created_at: createdAt } = attachment;
+    if (!id || !actorType || !actorId || !createdAt) continue;
+    let comment = comments.get(id);
+    if (!comment) {
+      const files: Attachment[] = [];
+      comment = {
+        entry: { type: "comment", id, actor_type: actorType, actor_id: actorId, created_at: createdAt, attachments: files },
+        files,
+      };
+      comments.set(id, comment);
+    }
+    comment.files.push(attachment);
+  }
+  return [...comments.values()].map(({ entry }) => entry);
+}
+
 /** Live comments override inventory metadata, including tombstones. */
 export function mergeDeliverableSources(
   inventory: readonly TimelineEntry[],

@@ -132,7 +132,7 @@ import {
   useDeliverableDetails,
   type DeliverableOrigin,
 } from "./deliverables/deliverable-details";
-import { collectDeliverableFiles, mergeDeliverableSources } from "@multica/core/attachments/deliverables";
+import { collectDeliverableFiles, deliverableInventoryFromAttachments, mergeDeliverableSources } from "@multica/core/attachments/deliverables";
 import { AttachmentVersionsProvider } from "./deliverables/attachment-versions";
 import {
   OpenDeliverableOnLoad,
@@ -152,7 +152,7 @@ import {
 import { useRecentContextStore } from "@multica/core/chat";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useModalStore } from "@multica/core/modals";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions, issueDeliverablesOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
@@ -2304,11 +2304,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // editor's click-time fresh-sign download: NodeViews match
   // `src`/`href` against this list to resolve an attachment id before
   // calling `/api/attachments/{id}`.
+  // The same list is the issue's complete file inventory: it labels each
+  // comment file with its comment, independent of the bounded timeline.
   const { data: issueAttachments } = useQuery(issueAttachmentsOptions(id));
-  const { data: deliverableInventory = EMPTY_REPLIES, error: deliverablesError } = useQuery(issueDeliverablesOptions(id));
-  useEffect(() => {
-    if (deliverablesError) toast.error(deliverablesError.message);
-  }, [deliverablesError]);
+  const deliverableInventory = useMemo(
+    () => deliverableInventoryFromAttachments(issueAttachments ?? []),
+    [issueAttachments],
+  );
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
