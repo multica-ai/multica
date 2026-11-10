@@ -23,6 +23,7 @@ import { normalizeUri } from "micromark-util-sanitize-uri";
 import type { Attachment } from "../types/attachment";
 import {
   attachmentIdFromDownloadURL,
+  attachmentIdFromLocalUploadURL,
   contentReferencesAttachment,
 } from "../types/attachment-url";
 
@@ -109,7 +110,7 @@ export function matchAttachmentByURL(
   attachments: ReadonlyArray<Attachment> | null | undefined,
 ): Attachment | undefined {
   if (!url || !attachments?.length) return undefined;
-  const idFromUrl = attachmentIdFromDownloadURL(url);
+  const idFromUrl = attachmentIdFromDownloadURL(url) ?? attachmentIdFromLocalUploadURL(url);
   if (idFromUrl) {
     const byId = attachments.find((a) => a.id === idFromUrl);
     if (byId) return byId;

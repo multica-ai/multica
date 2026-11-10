@@ -62,6 +62,32 @@ UPDATE workspace SET issue_counter = issue_counter + 1
 WHERE id = $1
 RETURNING issue_counter;
 
+-- name: HealIssueCounter :one
+-- Operator-shaped repair for a workspace whose issue_counter sits below
+-- MAX(issue.number): something persisted a numbered issue row without this
+-- counter ever being advanced for it. Deliberately a separate statement from
+-- IncrementIssueCounter so a healthy create pays nothing for it, and scoped to
+-- one workspace.
+--
+-- The WHERE guard is what makes a retry meaningful: no row is updated, and sqlc
+-- returns no row, unless the counter really is behind — so a collision caused by
+-- anything else is never retried against the same taken number. It returns the
+-- value it wrote, the value it replaced and the highest number the workspace
+-- holds, so a repair can be logged with its before and after instead of leaving
+-- no trace for whoever debugs the next occurrence.
+WITH target AS (
+    SELECT w.id, w.issue_counter,
+           (SELECT COALESCE(MAX(i.number), 0)::int FROM issue i WHERE i.workspace_id = w.id) AS max_number
+    FROM workspace w
+    WHERE w.id = $1
+)
+UPDATE workspace w SET issue_counter = t.max_number
+FROM target t
+WHERE w.id = t.id AND w.issue_counter < t.max_number
+RETURNING w.issue_counter AS issue_counter,
+          t.issue_counter AS previous_counter,
+          t.max_number AS max_number;
+
 -- name: LockWorkspaceForDelete :one
 -- Taken first by DeleteWorkspace, before it enumerates the workspace's chat
 -- sessions. LockChatSessionsByWorkspace only covers sessions that exist when it

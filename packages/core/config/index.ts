@@ -22,6 +22,9 @@ interface ConfigState {
   // TOTP 2FA support flag. Defaults to false so older servers that don't
   // advertise this field degrade gracefully (no TOTP UI shown).
   totpSupported: boolean;
+  // DISABLE_STAR_PROMPT: the deployment opted out of the "Star us on GitHub"
+  // prompt. Defaults to false so older servers keep the prompt.
+  starPromptDisabled: boolean;
   // Self-host-only gate for the Git provider integration (Forgejo / Gitea /
   // GitLab). When false the whole Settings → Integrations "Git providers"
   // section is hidden. Defaults to false so unknown / older servers and the
@@ -65,6 +68,7 @@ interface ConfigState {
     daemonSetupTarget?: DaemonSetupTarget;
   }) => void;
   setDaemonConfigStatus: (status: DaemonConfigStatus) => void;
+  setStarPromptDisabled: (disabled?: boolean) => void;
   setFeatureFlags: (flags?: Record<string, boolean>) => void;
   setServerVersion: (version?: string) => void;
   setLocalWorktreeSupported: (supported?: boolean) => void;
@@ -85,6 +89,7 @@ export const configStore = createStore<ConfigState>((set) => ({
   daemonSetupTarget: "unknown",
   workspaceCreationDisabled: false,
   totpSupported: false,
+  starPromptDisabled: false,
   vcsIntegrationAvailable: false,
   featureFlags: {},
   serverVersion: "",
@@ -119,6 +124,7 @@ export const configStore = createStore<ConfigState>((set) => ({
     daemonConfigStatus: "ready",
   }),
   setDaemonConfigStatus: (daemonConfigStatus) => set({ daemonConfigStatus }),
+  setStarPromptDisabled: (disabled = false) => set({ starPromptDisabled: disabled === true }),
   setFeatureFlags: (flags = {}) => set({ featureFlags: { ...flags } }),
   setServerVersion: (version = "") => set({ serverVersion: version }),
   setLocalWorktreeSupported: (supported = false) =>

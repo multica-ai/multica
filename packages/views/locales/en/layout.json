@@ -35,6 +35,7 @@
     "docs": "Docs",
     "changelog": "Change log",
     "discord": "Discord",
+    "star_on_github": "Star on GitHub",
     "feedback": "Feedback",
     "server_version": "Server version {{version}}"
   },
@@ -52,6 +53,15 @@
       "open": "Open",
       "learn_more": "Learn more"
     }
+  },
+  "star_prompt": {
+    "title_one": "{{agent}} has completed {{count}} issue",
+    "title_other": "{{agent}} has completed {{count}} issues",
+    "body": "If Multica has been useful, a star on GitHub helps other teams find it.",
+    "star": "Star",
+    "star_label": "Star Multica on GitHub",
+    "later": "Not now",
+    "close": "Close"
   },
   "workspace_loader": {
     "loading_workspace": "Loading workspace…",
@@ -138,6 +148,7 @@
       "view_actions": "Actions for {{name}}",
       "view_copy_link": "Copy link",
       "view_remove": "Remove from sidebar",
+      "view_edit": "Edit view",
       "view_rename": "Rename",
       "view_duplicate": "Duplicate",
       "view_delete": "Delete view"
@@ -148,6 +159,8 @@
       "stuck_one": "{{count}} task waiting on an offline runtime",
       "stuck_other": "{{count}} tasks waiting on an offline runtime",
       "working_now": "Working now",
+      "show_more_agents": "Show {{count}} more…",
+      "show_fewer_agents": "Show fewer",
       "running_tasks_one": "{{count}} task running",
       "running_tasks_other": "{{count}} tasks running",
       "all_agents": "All agents",

@@ -69,7 +69,7 @@ func writeBackgroundTaskSafetySlim(b *strings.Builder) {
 	b.WriteString("## Background Task Safety\n\n")
 	b.WriteString("Multica marks the task terminal the moment your top-level turn exits — any run-owned work still active is orphaned, its result lost, and the final comment you meant to post never sends. There is no background-completion wakeup, whatever a tool response promises; an issue wakeup (`multica issue wakeup create`) is different — the platform stores it and starts a new run later. Never background-and-yield: collect required results inside foreground tool calls that block to completion, run unobservable work synchronously, and never end a turn \"standing by\" for something to finish — that message becomes your final output.\n\n")
 	b.WriteString("External systems triggered by your completed actions — CI, GitHub Actions after a successful push — are not run-owned: do not wait for them, and do not run `gh pr checks --watch`, `gh run watch`, or sleep/retry polls. A repo's merge gate (\"CI must be green before merge\") is NOT your delivery acceptance criteria. Deliver what you have — \"Local tests pass; CI running: <PR link>\" is a complete hand-off. The one exception: when the trigger comment or the issue's acceptance criteria explicitly ask for the CI result, collect it as ONE foreground blocking call (`gh pr checks <pr> --watch`) inside this same turn.\n\n")
-	b.WriteString("A user explicitly asking for a local service to stay available after the turn is a persistent service handoff, not background-and-yield — allowed only when the running service itself is the requested deliverable. Detach its lifecycle from this run first (durable logs, a recorded cleanup handle such as PID/profile), verify readiness, and reply with the URL, logs, and stop instructions. Without a supervisor, describe survival as best-effort, not guaranteed.\n\n")
+	b.WriteString("A user explicitly asking for a local service to stay available after the turn is a persistent service handoff, not background-and-yield — allowed only when the running service itself is the requested deliverable. Detach its lifecycle from this run first (durable logs, a recorded cleanup handle such as PID/profile), verify readiness, and reply with the URL, logs, and stop instructions. Without a supervisor, describe survival as best-effort, not guaranteed. When the repository declares the service in `.multica/environments.toml`, start it with `multica env start <name>` instead: the daemon supervises it, keeps its log, stops it at its TTL, and shows it in the issue sidebar.\n\n")
 	b.WriteString("Never terminate `multica` or `multica.exe` by executable name: a long-lived matching process may be the workspace daemon. Cancel only the exact child PID you started, and before terminating it compare that PID with `multica daemon status --output json`; never kill it if it is the reported daemon PID.\n\n")
 }
 
@@ -166,6 +166,7 @@ func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
 	}
 	var b strings.Builder
 	var lines strings.Builder
+	gateway := ""
 	for _, app := range apps {
 		serverName := sanitizeBriefCodeToken(app.ServerName)
 		toolkitSlug := sanitizeBriefCodeToken(app.ToolkitSlug)
@@ -179,6 +180,11 @@ func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
 		if name == "" {
 			name = toolkitSlug
 		}
+		if app.Provider == "multica" {
+			gateway = serverName
+			fmt.Fprintf(&lines, "- %s (`%s`) via MCP server `%s`%s\n", name, toolkitSlug, serverName, gatewayAppDetail(app))
+			continue
+		}
 		fmt.Fprintf(&lines, "- %s (`%s`) via MCP server `%s`\n", name, toolkitSlug, serverName)
 	}
 	if lines.Len() == 0 {
@@ -186,8 +192,39 @@ func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
 	}
 	b.WriteString("## Connected Apps\n\n")
 	b.WriteString(lines.String())
-	b.WriteString("\nUse the listed MCP server when the task asks to read or act in one of these apps.\n\n")
+	b.WriteString("\nUse the listed MCP server when the task asks to read or act in one of these apps.\n")
+	if gateway != "" {
+		fmt.Fprintf(&b, "On `%s`, find tools with `apps_search_tools`, read the schema with `apps_get_tool`, then call `apps_run_tool`. "+
+			"Allowed calls run immediately and return their result. Never work around a blocked call. "+
+			"For a `not connected` account, call `apps_request_connection` and end your turn.\n", gateway)
+	}
+	b.WriteString("\n")
 	return b.String()
+}
+
+// gatewayAppDetail is the account, level and connection note for one
+// gateway app line.
+func gatewayAppDetail(app runtimeapps.ConnectedApp) string {
+	var parts []string
+	switch app.AccountScope {
+	case "team":
+		parts = append(parts, "team account")
+	case "personal":
+		parts = append(parts, "account of the person who triggered this run")
+	}
+	switch app.Level {
+	case "read":
+		parts = append(parts, "read only")
+	case "write", "confirm_writes":
+		parts = append(parts, "can write")
+	}
+	if app.AccountStatus == "not_connected" {
+		parts = append(parts, "not connected")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " — " + strings.Join(parts, ", ")
 }
 
 func sanitizeBriefCodeToken(s string) string {

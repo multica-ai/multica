@@ -443,7 +443,7 @@ function ShareLinkRow({
           <span>{t(($) => $.members.share_link_uses, { used: link.use_count, max: link.max_uses ?? "∞" })}</span>
           {link.expires_at && <span>· {t(($) => $.members.share_link_expires, { date: new Date(link.expires_at).toLocaleDateString(locale) })}</span>}
         </div>
-        <TruncatedTooltip content={joinUrl}>
+        <TruncatedTooltip content={joinUrl} focusable>
           <div
             className="truncate font-mono text-caption text-muted-foreground"
           >

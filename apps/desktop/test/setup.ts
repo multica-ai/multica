@@ -21,4 +21,14 @@ if (typeof window !== "undefined") {
         dispatchEvent: () => false,
       }) as MediaQueryList;
   }
+
+  // jsdom doesn't provide ResizeObserver; a focusable TruncatedTooltip
+  // observes its trigger. Mirrors packages/views/test/setup.ts.
+  if (typeof globalThis.ResizeObserver === "undefined") {
+    globalThis.ResizeObserver = class ResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+  }
 }

@@ -92,6 +92,7 @@ export function AuthInitializer({
           daemonAppUrl: cfg.daemon_app_url,
           daemonSetupTarget,
         });
+        configStore.getState().setStarPromptDisabled(cfg.star_prompt_disabled);
         configStore.getState().setFeatureFlags(cfg.feature_flags);
         configStore.getState().setServerVersion(cfg.server_version);
         // Absent on every server that predates the worktree save gate, which

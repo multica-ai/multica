@@ -52,7 +52,78 @@ export function useSettingsSearchIndex(
         title: t(($) => $.preferences.timezone.title),
         description: t(($) => $.preferences.timezone.hint),
       },
-      { tab: "preferences", anchor: "theme", title: t(($) => $.preferences.theme.title) },
+      { tab: "appearance", anchor: "mode", title: t(($) => $.appearance.mode.title) },
+      {
+        tab: "appearance",
+        anchor: "theme",
+        title: t(($) => $.appearance.theme.title),
+        description: t(($) => $.appearance.theme.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "ui-text",
+        title: t(($) => $.appearance.ui_text.title),
+        description: t(($) => $.appearance.ui_text.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "ui-cjk-font",
+        title: `${t(($) => $.appearance.ui_text.title)} · ${t(($) => $.appearance.cjk_font.title)}`,
+        description: t(($) => $.appearance.cjk_font.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "font-size",
+        title: t(($) => $.appearance.font_size.title),
+        description: t(($) => $.appearance.font_size.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "content-text",
+        title: t(($) => $.appearance.content_text.title),
+        description: t(($) => $.appearance.content_text.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "content-cjk-font",
+        title: `${t(($) => $.appearance.content_text.title)} · ${t(($) => $.appearance.cjk_font.title)}`,
+        description: t(($) => $.appearance.cjk_font.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "code-font",
+        title: t(($) => $.appearance.code_font.title),
+        description: t(($) => $.appearance.code_font.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "content-size",
+        title: `${t(($) => $.appearance.content_text.title)} · ${t(($) => $.appearance.content_size.title)}`,
+        description: t(($) => $.appearance.content_size.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "content-leading",
+        title: t(($) => $.appearance.content_leading.title),
+      },
+      {
+        tab: "appearance",
+        anchor: "density",
+        title: t(($) => $.appearance.density.title),
+        description: t(($) => $.appearance.density.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "reduce-motion",
+        title: t(($) => $.appearance.reduce_motion.title),
+        description: t(($) => $.appearance.reduce_motion.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "high-contrast",
+        title: t(($) => $.appearance.high_contrast.title),
+        description: t(($) => $.appearance.high_contrast.description),
+      },
       {
         tab: "preferences",
         anchor: "sticky-comment-bar",
@@ -131,7 +202,7 @@ export function useSettingsSearchIndex(
       {
         tab: "apps",
         title: t(($) => $.page.tabs.apps),
-        description: t(($) => $.composio.page_description),
+        description: t(($) => $.connected_apps.description),
       },
       // Workspace
       { tab: "workspace", anchor: "name", title: t(($) => $.workspace.name_label) },

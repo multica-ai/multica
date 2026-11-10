@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   ArrowUpRight,
   BookOpen,
@@ -9,6 +10,7 @@ import {
   History,
   Megaphone,
   MessageCircle,
+  Star,
 } from "@multica/ui/icons";
 import {
   DropdownMenu,
@@ -22,14 +24,19 @@ import {
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useModalStore } from "@multica/core/modals";
 import { useConfigStore } from "@multica/core/config";
+import { formatStarCount, githubStarsOptions, MULTICA_GITHUB_URL } from "@multica/core/github/stars";
+import { createLogger } from "@multica/core/logger";
+import { markStarPromptStarred } from "@multica/core/star-prompt";
 import { isDesktopShell } from "../platform/local-directory";
 import { DISCORD_URL, DiscordIcon } from "./discord";
+import { GitHubIcon } from "../onboarding/components/brand-icons";
 import { useT } from "../i18n";
 import { docsLocalePrefix } from "../common/docs-locale";
 import { RAIL_ICON_BUTTON_CLASS } from "./rail-styles";
 import { CHANGELOG_URL, DOCS_URL, DOWNLOAD_URL } from "./help-links";
 import { useWhatsNewMenuPanel, WhatsNewMenuPanel } from "../whats-new/whats-new-menu-panel";
 
+const logger = createLogger("help-launcher");
 
 export function HelpLauncher() {
   const { t, i18n } = useT("layout");
@@ -46,9 +53,12 @@ export function HelpLauncher() {
   const desktop = isDesktopShell();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const whatsNew = useWhatsNewMenuPanel();
+  const [open, setOpen] = useState(false);
+  // Asked only once the menu opens, so closed sessions never call GitHub.
+  const { data: stars } = useQuery({ ...githubStarsOptions(), enabled: open });
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu open={open} onOpenChange={setOpen}>
         <TooltipHint label={t(($) => $.help.trigger)} side="right">
           <DropdownMenuTrigger
             ref={triggerRef}
@@ -130,6 +140,25 @@ export function HelpLauncher() {
             <DiscordIcon className="h-3.5 w-3.5" />
             {t(($) => $.help.discord)}
             <ArrowUpRight className="size-3 translate-y-px text-faint-foreground" />
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            render={
+              <a href={MULTICA_GITHUB_URL} target="_blank" rel="noopener noreferrer" />
+            }
+            onClick={() => {
+              markStarPromptStarred().catch((err) => logger.warn("failed to record star click", err));
+            }}
+          >
+            <GitHubIcon className="h-3.5 w-3.5" />
+            {t(($) => $.help.star_on_github)}
+            {typeof stars === "number" ? (
+              <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-caption whitespace-nowrap text-muted-foreground tabular-nums">
+                <Star aria-hidden="true" className="size-3" />
+                {formatStarCount(stars)}
+              </span>
+            ) : (
+              <ArrowUpRight className="size-3 translate-y-px text-faint-foreground" />
+            )}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => useModalStore.getState().open("feedback")}
