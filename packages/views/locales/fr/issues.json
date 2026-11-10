@@ -765,6 +765,8 @@
       "send_with_body": "Sera envoyé avec le texte du brouillon.",
       "confirm_add": "Ajouter une annotation",
       "save": "Enregistrer l'annotation",
+      "confirm_add_short": "Ajouter",
+      "save_short": "Enregistrer",
       "add_comment": "Ajouter au commentaire",
       "add": "Ajouter à la réponse",
       "note_label": "Commenter",
@@ -1520,6 +1522,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "Afficher dans les commentaires",
     "locate_description": "Afficher dans la description",
+    "copy_link": "Copier le lien vers la dernière version",
+    "not_found": "Aucun livrable nommé « {{name}} » sur ce ticket",
+    "link_load_failed": "Impossible de charger les livrables de ce ticket pour ouvrir « {{name}} ». Rechargez pour réessayer.",
     "version_label": "Version {{version}} sur {{total}}",
     "version_of": "v{{version}} sur {{total}}",
     "info_source": "Source",
@@ -1735,7 +1740,6 @@
       "brief_header": "Les consignes de workflow reçues par cette exécution"
     },
     "detail": {
-      "follows_project": "(selon le projet)",
       "card_title": "{{workflow}} · selon {{project}}"
     },
     "list_separator": ", ",

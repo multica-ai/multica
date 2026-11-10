@@ -38,6 +38,7 @@
     "docs": "ドキュメント",
     "changelog": "変更ログ",
     "discord": "Discord",
+    "star_on_github": "GitHub でスターする",
     "feedback": "フィードバック",
     "server_version": "サーバーバージョン {{version}}"
   },
@@ -55,6 +56,14 @@
       "open": "開く",
       "learn_more": "詳しく見る"
     }
+  },
+  "star_prompt": {
+    "title_other": "{{agent}} がタスクを {{count}} 件完了しました",
+    "body": "Multica がお役に立っていたら、GitHub でスターをお願いします。ほかのチームが Multica を見つけやすくなります。",
+    "star": "Star",
+    "star_label": "GitHub で Multica にスターする",
+    "later": "あとで",
+    "close": "閉じる"
   },
   "workspace_loader": {
     "loading_workspace": "ワークスペースを読み込み中…",
@@ -141,6 +150,7 @@
       "view_actions": "{{name}} の操作",
       "view_copy_link": "リンクをコピー",
       "view_remove": "サイドバーから削除",
+      "view_edit": "ビューを編集",
       "view_rename": "名前を変更",
       "view_duplicate": "複製",
       "view_delete": "ビューを削除"

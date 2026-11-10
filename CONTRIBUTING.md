@@ -613,10 +613,16 @@ Two constraints are enforced rather than documented:
   execution-environment helper for every task; `go run` deletes that binary when
   the launcher exits, so the daemon would register, heartbeat, and then fail
   every task with `fork/exec …/go-build…/exe/multica: no such file or directory`.
-- **`daemon start` is refused under a daemon-managed task.** A checkout below a
-  `.multica/daemon_task_context.json` marker cannot start a second daemon
-  competing for its own work, so `make up C=daemon` stops with that explanation
-  before spending a login on it. Use `C=api,web` there.
+- **Under a daemon-managed task, only the environment's own daemon starts.** A
+  checkout below a `.multica/daemon_task_context.json` marker is an agent's
+  workdir, and the CLI refuses `daemon start`, `stop` and `status` there so a
+  task never operates your own daemon or profile. It makes one exception: an
+  explicit `--profile` that the dev-env registry assigns to an environment (its
+  CLI profile, or the `desktop-localhost-<backend port>` profile its Desktop
+  signs in), pointed at that environment's API, from a process the task's
+  `MULTICA_*` identity was stripped from. `make up` launches the daemon and
+  Desktop exactly that way, so an agent can run `make up C=api,web,daemon` and
+  test a real agent run. `make destroy` stops the daemon and removes its profile.
 
 ### Web with realistic content
 

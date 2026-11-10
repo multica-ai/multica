@@ -743,6 +743,8 @@
       "send_with_body": "下書きの本文もまとめて送信します。",
       "confirm_add": "注釈を追加",
       "save": "注釈を保存",
+      "confirm_add_short": "追加",
+      "save_short": "保存",
       "add_comment": "コメントに追加",
       "add": "返信に追加",
       "note_label": "コメント",
@@ -1469,6 +1471,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "コメントで表示",
     "locate_description": "説明で表示",
+    "copy_link": "最新版へのリンクをコピー",
+    "not_found": "この課題に「{{name}}」という成果物はありません",
+    "link_load_failed": "「{{name}}」を開くための成果物を読み込めませんでした。再読み込みしてもう一度お試しください。",
     "version_label": "バージョン {{version}}（全 {{total}} 版）",
     "version_of": "v{{version}}（全 {{total}} 版）",
     "info_source": "投稿元",
@@ -1668,7 +1673,6 @@
       "brief_header": "この実行が受け取ったワークフローの説明"
     },
     "detail": {
-      "follows_project": "（プロジェクトに従う）",
       "card_title": "「{{workflow}}」· プロジェクト「{{project}}」に従う"
     },
     "list_separator": "、",

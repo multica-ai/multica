@@ -38,6 +38,7 @@
     "docs": "Документация",
     "changelog": "История изменений",
     "discord": "Discord",
+    "star_on_github": "Поставить звезду на GitHub",
     "feedback": "Обратная связь",
     "server_version": "Версия сервера {{version}}"
   },
@@ -125,6 +126,7 @@
       "view_actions": "Действия с «{{name}}»",
       "view_copy_link": "Копировать ссылку",
       "view_remove": "Убрать с боковой панели",
+      "view_edit": "Изменить представление",
       "view_rename": "Переименовать",
       "view_duplicate": "Дублировать",
       "view_delete": "Удалить представление",
@@ -232,5 +234,16 @@
       "title": "Что нового"
     },
     "trigger": "Что нового"
+  },
+  "star_prompt": {
+    "title_one": "{{agent}}: {{count}} задача выполнена",
+    "title_few": "{{agent}}: {{count}} задачи выполнены",
+    "title_many": "{{agent}}: {{count}} задач выполнено",
+    "title_other": "{{agent}}: выполнено задач — {{count}}",
+    "body": "Если Multica оказалась полезной, поставьте звезду на GitHub — так её найдут другие команды.",
+    "star": "Star",
+    "star_label": "Поставить звезду Multica на GitHub",
+    "later": "Не сейчас",
+    "close": "Закрыть"
   }
 }

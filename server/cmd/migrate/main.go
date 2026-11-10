@@ -140,12 +140,12 @@ var pgBigmOperatorClass = extensionOperatorClass{
 // they are still pending: a fresh self-hosted install, which is exactly where an
 // interrupted build would otherwise leave a permanently unusable index.
 var concurrentIndexCleanups = map[string]string{
-	"638_doc_version_workspace_idx":                             "doc_version_workspace_idx",
-	"637_doc_workspace_idx":                                     "doc_workspace_idx",
-	"636_doc_folder_workspace_idx":                              "doc_folder_workspace_idx",
-	"634_doc_version_pkey_index":                                "doc_version_pkey_idx",
-	"632_doc_pkey_index":                                        "doc_pkey_idx",
-	"630_doc_folder_pkey_index":                                 "doc_folder_pkey_idx",
+	"639_doc_version_workspace_idx":                             "doc_version_workspace_idx",
+	"638_doc_workspace_idx":                                     "doc_workspace_idx",
+	"637_doc_folder_workspace_idx":                              "doc_folder_workspace_idx",
+	"635_doc_version_pkey_index":                                "doc_version_pkey_idx",
+	"633_doc_pkey_index":                                        "doc_pkey_idx",
+	"631_doc_folder_pkey_index":                                 "doc_folder_pkey_idx",
 	"628_app_action_request_chat_idx":                           "idx_app_action_request_chat",
 	"627_app_tool_call_issue_idx":                               "idx_app_tool_call_issue",
 	"626_app_action_request_task_idx":                           "idx_app_action_request_task",
