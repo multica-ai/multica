@@ -42,6 +42,14 @@ export interface Issue {
   priority: string;
 }
 
+export type IssueMetadataValue = string | number | boolean;
+
+/** The issue's whole metadata map after a write, and the revision it produced. */
+export interface IssueMetadataWriteResult {
+  metadata: Record<string, IssueMetadataValue>;
+  issue_revision: number;
+}
+
 export interface Comment {
   id: string;
   author_type: string;
@@ -227,6 +235,32 @@ export const multica = {
         content: input.body,
         parent_id: input.parentId,
       });
+    },
+    /**
+     * Writes one key of the issue's flat metadata map. Values are a string,
+     * number or bool; keys match `^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$`. Needs the
+     * `issues:write` scope. Pass `expectedRevision` (an `issue_revision` you
+     * read) to make the write fail with 409 if the issue changed since.
+     */
+    async setMetadata(
+      key: string,
+      value: IssueMetadataValue,
+      options: { issueId?: string; expectedRevision?: number } = {},
+    ): Promise<IssueMetadataWriteResult> {
+      const id = options.issueId ?? (await requireIssueId());
+      return bridge.request<IssueMetadataWriteResult>(
+        "PUT",
+        `/issues/${encodeURIComponent(id)}/metadata/${encodeURIComponent(key)}`,
+        { value, expected_revision: options.expectedRevision },
+      );
+    },
+    /** Removes one metadata key. Removing an absent key succeeds unchanged. */
+    async deleteMetadata(key: string, issueId?: string): Promise<IssueMetadataWriteResult> {
+      const id = issueId ?? (await requireIssueId());
+      return bridge.request<IssueMetadataWriteResult>(
+        "DELETE",
+        `/issues/${encodeURIComponent(id)}/metadata/${encodeURIComponent(key)}`,
+      );
     },
   },
 

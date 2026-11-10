@@ -8,6 +8,7 @@ import { multica } from "@multica/plugin-sdk";
 const ctx   = await multica.context.get();
 const issue = await multica.issue.get();
 await multica.issue.comment({ body: "hello" });
+await multica.issue.setMetadata("jira.key", "OPS-42"); // needs issues:write
 const note  = await multica.storage.user.get("note");
 multica.ui.resize(320);
 ```

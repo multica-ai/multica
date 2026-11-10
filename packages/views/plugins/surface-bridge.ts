@@ -26,6 +26,7 @@ const ALLOWED_PATHS: RegExp[] = [
   /^\/context$/,
   /^\/issues\/[^/]+$/,
   /^\/issues\/[^/]+\/comments$/,
+  /^\/issues\/[^/]+\/metadata\/[^/]+$/,
   /^\/storage\/(workspace|user)$/,
   /^\/storage\/(workspace|user)\/[^/]+$/,
   // A surface invoking its OWN plugin's hook: the `ui` trigger. The server

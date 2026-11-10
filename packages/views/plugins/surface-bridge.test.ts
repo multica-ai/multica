@@ -80,6 +80,34 @@ describe("surface bridge", () => {
     expect(posted).toContainEqual(expect.objectContaining({ id: "bad-path", ok: false, status: 400 }));
   });
 
+  it("forwards issue metadata writes and refuses nested metadata paths", async () => {
+    mockCall.mockResolvedValue({ metadata: { "jira.key": "OPS-1" }, issue_revision: 2 });
+    const { port, posted } = connectedBridge();
+    port.postMessage({ id: "set", kind: "action", method: "PUT", path: "/issues/i1/metadata/jira.key", body: { value: "OPS-1" } });
+    port.postMessage({ id: "nested", kind: "action", method: "PUT", path: "/issues/i1/metadata/a/b", body: { value: 1 } });
+    await vi.waitFor(() => expect(posted).toHaveLength(2));
+
+    expect(mockCall).toHaveBeenCalledTimes(1);
+    expect(mockCall).toHaveBeenCalledWith(
+      "installation-1",
+      expect.objectContaining({ method: "PUT", path: "/issues/i1/metadata/jira.key", body: { value: "OPS-1" } }),
+    );
+    expect(posted).toContainEqual(expect.objectContaining({ id: "nested", ok: false, status: 400 }));
+  });
+
+  it("forwards issue metadata deletes", async () => {
+    mockCall.mockResolvedValue({ metadata: {}, issue_revision: 3 });
+    const { port, posted } = connectedBridge();
+    port.postMessage({ id: "delete", kind: "action", method: "DELETE", path: "/issues/i1/metadata/jira.key" });
+    await vi.waitFor(() => expect(posted).toHaveLength(1));
+
+    expect(mockCall).toHaveBeenCalledWith(
+      "installation-1",
+      expect.objectContaining({ method: "DELETE", path: "/issues/i1/metadata/jira.key" }),
+    );
+    expect(posted).toContainEqual(expect.objectContaining({ id: "delete", ok: true }));
+  });
+
   it("passes a refusal status through to the plugin", async () => {
     mockCall.mockRejectedValue(Object.assign(new Error("not granted"), { status: 403 }));
     const { port, posted } = connectedBridge();
