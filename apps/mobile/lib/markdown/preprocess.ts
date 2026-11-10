@@ -179,7 +179,7 @@ function findCodeRanges(input: string): [number, number][] {
  * regex. Cannot handle nested tags with attributes containing `>`, but those
  * don't appear in our editor output.
  */
-function stripHtml(input: string): string {
+export function stripHtml(input: string): string {
   if (!input.includes("<")) return input;
   let out = "";
   let cursor = 0;
