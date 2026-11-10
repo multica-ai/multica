@@ -64,14 +64,6 @@
     "search_runtime_filtered": "\"{{machine}}\"에서 \"{{query}}\"와 일치하는 에이전트가 없습니다.",
     "runtime_filtered": "\"{{machine}}\"에 에이전트가 없습니다."
   },
-  "runtime_filter": {
-    "all": "모든 런타임",
-    "section_local": "로컬",
-    "section_remote": "원격",
-    "section_cloud": "클라우드",
-    "agent_count_other": "에이전트 {{count}}개",
-    "empty": "아직 기기가 없습니다"
-  },
   "columns": {
     "agent": "에이전트",
     "status": "상태",
@@ -199,7 +191,6 @@
     "rename_required": "이름은 필수입니다",
     "edit_description_title": "설명 수정",
     "description_placeholder": "이 에이전트는 무엇을 하나요?",
-    "save": "저장",
     "cancel": "취소"
   },
   "overview": {
@@ -222,12 +213,7 @@
     "edit_access_aria": "접근 권한: {{value}}. 접근 권한 변경",
     "all_settings": "모든 설정"
   },
-  "skill_attach": {
-    "trigger_aria": "워크스페이스 스킬 연결",
-    "trigger_label": "연결"
-  },
   "pickers": {
-    "concurrency_tooltip": "동시 실행 · 최대 {{value}}개",
     "concurrency_range": "최대 동시 실행 수({{min}}-{{max}})",
     "runtime_none": "런타임 없음",
     "runtime_tooltip": "런타임 · {{name}} · {{status}}",
@@ -298,23 +284,17 @@
     "discard_confirm": "변경사항 버리기"
   },
   "create_dialog": {
-    "title_create": "에이전트 만들기",
-    "title_duplicate": "에이전트 복제",
-    "description_duplicate": "\"{{name}}\"을(를) 바탕으로 새 에이전트를 만듭니다. 지침, 환경 변수, 스킬이 복사됩니다.",
     "name_label": "이름",
     "name_placeholder": "예: 심층 리서치 에이전트",
     "description_label": "설명",
     "description_placeholder": "이 에이전트는 무엇을 하나요?",
-    "visibility_label": "공개 범위",
     "access": {
-      "label": "액세스",
       "private_title": "비공개",
       "private_desc": "본인만 이 에이전트를 실행할 수 있습니다",
       "public_title": "공개",
       "public_desc": "이 에이전트를 실행할 수 있는 사람을 선택하세요",
       "public_workspace_option": "이 워크스페이스의 모든 사람",
       "public_members_group": "특정 사용자",
-      "public_members_empty": "선택할 수 있는 워크스페이스 멤버가 없습니다",
       "public_targets_empty_hint": "아래에서 최소 하나 이상을 선택하세요. 그렇지 않으면 에이전트는 비공개로 유지됩니다."
     },
     "runtime_label": "런타임",
@@ -329,17 +309,10 @@
     "runtime_no_results": "일치하는 기기가 없습니다",
     "runtime_group_online": "{{online}}/{{total}} 온라인",
     "duplicate_copy_suffix": " (사본)",
-    "create": "만들기",
-    "creating": "만드는 중...",
-    "cancel": "취소",
-    "create_failed_toast": "에이전트를 만들지 못했습니다",
     "skill_attach_failed_toast": "에이전트는 만들었지만 스킬을 연결하지 못했습니다: {{error}}",
     "squad_join_failed_toast": "에이전트 \"{{name}}\"은(는) 만들었지만 스쿼드에 참가하지 못했습니다: {{error}}. 멤버에서 직접 추가할 수 있습니다.",
     "instructions": {
       "label": "지침",
-      "placeholder_blank": "클릭해서 지침 작성...",
-      "placeholder_duplicate": "클릭해서 복제된 지침 보기 또는 수정",
-      "collapse": "접기",
       "editor_placeholder": "이 에이전트가 무엇을 해야 하는지, 무엇에 집중해야 하는지, 무엇을 피해야 하는지 작성하세요..."
     },
     "skills_section": {
