@@ -197,6 +197,10 @@ const (
 	EventPullRequestUpdated        = "pull_request:updated"
 	EventPullRequestUnlinked       = "pull_request:unlinked"
 
+	// An issue's local environments changed: one started, stopped, changed
+	// state, or its daemon stopped reporting it.
+	EventEnvironmentChanged = "environment:changed"
+
 	// VCS integration events (Forgejo / Gitea / GitLab)
 	EventVCSConnectionCreated = "vcs_connection:created"
 	EventVCSConnectionDeleted = "vcs_connection:deleted"

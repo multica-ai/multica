@@ -1908,5 +1908,37 @@
       "rejected": "Declined",
       "rate_limited": "Rate limited"
     }
+  },
+  "environments": {
+    "section_title": "Environments",
+    "running_count_one": "{{count}} running",
+    "running_count_other": "{{count}} running",
+    "this_machine": "This machine",
+    "unknown_machine": "Unknown machine",
+    "state": {
+      "starting": "Starting",
+      "running": "Running",
+      "exited": "Exited",
+      "stopped": "Stopped",
+      "unreachable": "Not responding"
+    },
+    "expires_in_minutes_one": "Expires in {{count}}m",
+    "expires_in_minutes_other": "Expires in {{count}}m",
+    "expires_in_hours_one": "Expires in {{count}}h",
+    "expires_in_hours_other": "Expires in {{count}}h",
+    "expires_in_days_one": "Expires in {{count}}d",
+    "expires_in_days_other": "Expires in {{count}}d",
+    "started_ago": "Started {{time}}",
+    "ended_ago": "Ended {{time}}",
+    "last_seen": "Last seen {{time}}",
+    "ended_count_one": "{{count}} ended",
+    "ended_count_other": "{{count}} ended",
+    "detected_hint": "Found listening in the directory of one of this issue's runs",
+    "remote_hint": "Runs on {{machine}}. A localhost URL opens only on that machine.",
+    "localhost_hint": "A localhost URL opens only on the machine running it.",
+    "open": "Open",
+    "copy_url": "Copy URL",
+    "copied": "URL copied",
+    "copy_failed": "Couldn't copy the URL"
   }
 }
