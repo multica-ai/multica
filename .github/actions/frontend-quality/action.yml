@@ -21,6 +21,11 @@ runs:
         node --test scripts/check-dependency-catalog.test.mjs
         node scripts/check-dependency-catalog.mjs
 
+    - name: Check the theme validator CLI
+      shell: bash
+      run: |
+        node --test scripts/theme-check.test.mjs
+
     # Keep existing knip findings advisory in either caller.
     - name: Check for dead code and phantom dependencies (knip)
       continue-on-error: true

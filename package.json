@@ -27,6 +27,7 @@
     "check:ui-exports": "node scripts/check-ui-wildcard-exports.mjs",
     "check:ui-radii": "node scripts/check-ui-radius-tokens.mjs",
     "check:deps-catalog": "node scripts/check-dependency-catalog.mjs",
+    "theme:check": "node scripts/theme-check.mjs",
     "clean": "turbo clean && rm -rf node_modules",
     "ui:add": "cd packages/ui && npx shadcn@latest add",
     "generate:brand": "node scripts/brand/generate.mjs",

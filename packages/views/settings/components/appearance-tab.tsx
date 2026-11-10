@@ -1,15 +1,43 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { toast } from "sonner";
 import {
+  BookOpen,
+  Copy,
+  Ellipsis,
+  FolderOpen,
   Monitor,
   Moon,
   RotateCcw,
   Sun,
+  Trash2,
+  TriangleAlert,
+  Upload,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
+import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -38,18 +66,26 @@ import {
   UI_FONTS,
   activeTheme,
   cjkFontStack,
+  exportTheme,
   isDefaultAppearance,
   isLocalFont,
   isSafeFontValue,
   isSafeThemeValue,
   localFontFamily,
   localizedText,
+  readThemePackage,
   selectAppearance,
+  themeCopyTarget,
+  themeFromFiles,
   themeModeVariables,
   themeOptionValue,
   uiFontStack,
   useAppearanceStore,
   useLocalCjkFonts,
+  useInstalledThemesStore,
+  useThemeFolderStatus,
+  useThemeSafeMode,
+  writeZip,
   type CjkFontChoice,
   type CodeFont,
   type ContentSize,
@@ -62,6 +98,8 @@ import {
 } from "@multica/core/appearance";
 import { useLocale, useT } from "../../i18n";
 import { SegmentedToggle } from "../../common/segmented-toggle";
+import { openExternal } from "../../platform/open-external";
+import { themeFolderAPI } from "../../platform/theme-folder";
 import {
   SettingsCard,
   SettingsRow,
@@ -95,7 +133,8 @@ const CODE_FONT_NAME: Record<CodeFont, string> = {
 function useThemeSetsFont(variable: "font-ui" | "font-mono"): boolean {
   const appliedMode = useAppliedMode();
   const theme = useAppearanceStore((s) => s.theme);
-  const css = activeTheme({ theme }).css;
+  const safeMode = useThemeSafeMode();
+  const css = activeTheme({ theme }, safeMode.active).css;
   return useMemo(() => variable in themeModeVariables(css)[appliedMode], [css, appliedMode, variable]);
 }
 
@@ -159,15 +198,35 @@ function ColorSection() {
   const appliedMode = useAppliedMode();
   const theme = useAppearanceStore((s) => s.theme);
   const set = useAppearanceStore((s) => s.set);
+  const installed = useInstalledThemesStore((s) => s.themes);
+  const folders = useInstalledThemesStore((s) => s.folders);
+  const uninstall = useInstalledThemesStore((s) => s.uninstall);
+  const folderProblems = useThemeFolderStatus((s) => s.problems);
+  const safeMode = useThemeSafeMode();
   const themeLabelFor = useThemeLabel();
   const modeValue: ModeChoice = mode === "light" || mode === "dark" ? mode : "system";
   const modeLabel = t(($) => $.appearance.mode.title);
   const themeLabel = t(($) => $.appearance.theme.title);
-  const selected = BUILT_IN_THEMES.find((manifest) => manifest.id === theme);
-  const items = BUILT_IN_THEMES.map((manifest) => ({
+  const imported = installed.filter((manifest) => !(manifest.id in folders));
+  const fromFolder = installed.filter((manifest) => manifest.id in folders);
+  const selected = [...BUILT_IN_THEMES, ...installed].find((manifest) => manifest.id === theme);
+  const selectedInstalled = imported.find((manifest) => manifest.id === theme);
+  const items = [...BUILT_IN_THEMES, ...installed].map((manifest) => ({
     value: manifest.id,
     label: themeLabelFor(manifest),
   }));
+
+  const option = (manifest: Theme, author?: string) => (
+    <SelectItem key={manifest.id} value={manifest.id}>
+      <span className="flex min-w-0 flex-1 items-center gap-2.5">
+        <ThemeSwatch theme={manifest} mode={appliedMode} />
+        <span className="truncate">{themeLabelFor(manifest)}</span>
+        {author ? (
+          <span className="ml-auto shrink-0 pl-3 text-caption text-muted-foreground">{author}</span>
+        ) : null}
+      </span>
+    </SelectItem>
+  );
 
   return (
     <SettingsSection title={t(($) => $.appearance.color.title)} anchor="color">
@@ -187,37 +246,329 @@ function ColorSection() {
           </div>
         </SettingsRow>
         <SettingsRow label={themeLabel} description={t(($) => $.appearance.theme.description)} anchor="theme">
-          <Select
-            items={items}
-            value={selected ? theme : "default"}
-            onValueChange={(next) => {
-              if (next) set({ theme: next });
-            }}
-          >
-            <SelectTrigger size="sm" className="w-48" aria-label={themeLabel}>
-              <SelectValue>
-                {selected ? (
-                  <span className="flex min-w-0 items-center gap-2">
-                    <ThemeSwatch theme={selected} mode={appliedMode} />
-                    <span className="truncate">{themeLabelFor(selected)}</span>
-                  </span>
+          <div className="flex items-center gap-2">
+            {selectedInstalled ? (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-muted-foreground"
+                aria-label={t(($) => $.appearance.theme.remove, { name: selectedInstalled.name })}
+                title={t(($) => $.appearance.theme.remove, { name: selectedInstalled.name })}
+                onClick={() => {
+                  set({ theme: "default" });
+                  uninstall(selectedInstalled.id);
+                }}
+              >
+                <Trash2 />
+              </Button>
+            ) : null}
+            <Select
+              items={items}
+              value={selected ? theme : "default"}
+              onValueChange={(next) => {
+                if (next) set({ theme: next });
+              }}
+            >
+              <SelectTrigger size="sm" className="w-48" aria-label={themeLabel}>
+                <SelectValue>
+                  {selected ? (
+                    <span className="flex min-w-0 items-center gap-2">
+                      <ThemeSwatch theme={selected} mode={appliedMode} />
+                      <span className="truncate">{themeLabelFor(selected)}</span>
+                    </span>
+                  ) : null}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent align="end" className="min-w-64">
+                <SelectGroup>
+                  <SelectLabel>{t(($) => $.appearance.theme.built_in)}</SelectLabel>
+                  {BUILT_IN_THEMES.map((manifest) => option(manifest))}
+                </SelectGroup>
+                {imported.length > 0 ? (
+                  <>
+                    <SelectSeparator />
+                    <SelectGroup>
+                      <SelectLabel>{t(($) => $.appearance.theme.installed)}</SelectLabel>
+                      {imported.map((manifest) => option(manifest, manifest.author))}
+                    </SelectGroup>
+                  </>
                 ) : null}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent align="end" className="min-w-48">
-              {BUILT_IN_THEMES.map((manifest) => (
-                <SelectItem key={manifest.id} value={manifest.id}>
-                  <span className="flex min-w-0 flex-1 items-center gap-2.5">
-                    <ThemeSwatch theme={manifest} mode={appliedMode} />
-                    <span className="truncate">{themeLabelFor(manifest)}</span>
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+                {fromFolder.length > 0 ? (
+                  <>
+                    <SelectSeparator />
+                    <SelectGroup>
+                      <SelectLabel>{t(($) => $.appearance.theme.folder)}</SelectLabel>
+                      {fromFolder.map((manifest) => option(manifest, folders[manifest.id]))}
+                    </SelectGroup>
+                  </>
+                ) : null}
+              </SelectContent>
+            </Select>
+            <ImportThemeButton />
+            <ThemeToolsMenu theme={activeTheme({ theme }, safeMode.active)} />
+          </div>
         </SettingsRow>
+        {folderProblems.length > 0 ? (
+          <div role="status" className="space-y-1.5 px-4 py-3 text-caption">
+            <div className="flex items-center gap-2">
+              <TriangleAlert aria-hidden="true" className="size-3.5 shrink-0 text-warning" />
+              <span>{t(($) => $.appearance.theme.folder_problems)}</span>
+            </div>
+            <ul className="space-y-1 pl-5.5 font-mono text-muted-foreground">
+              {folderProblems.flatMap(({ folder, errors }) =>
+                errors.map((error, i) => (
+                  <li key={`${folder}:${i}`} className="break-words">
+                    <span className="text-foreground">{folder}</span> {error}
+                  </li>
+                )),
+              )}
+            </ul>
+          </div>
+        ) : null}
+        {safeMode.active ? (
+          <div role="status" className="flex items-center gap-3 px-4 py-3 text-caption">
+            <TriangleAlert aria-hidden="true" className="size-3.5 shrink-0 text-warning" />
+            <span className="min-w-0 flex-1">{t(($) => $.appearance.theme.safe_mode)}</span>
+            <Button variant="outline" size="xs" onClick={safeMode.exit}>
+              {t(($) => $.appearance.theme.safe_mode_exit)}
+            </Button>
+          </div>
+        ) : null}
       </SettingsCard>
     </SettingsSection>
+  );
+}
+
+/**
+ * Reads a theme from a .zip or a folder, shows what it is and that it can
+ * restyle every page, and installs it on confirmation. Problems are listed
+ * as the checks report them, which is what someone writing a theme needs.
+ */
+function ImportThemeButton() {
+  const { t } = useT("settings");
+  const zipRef = useRef<HTMLInputElement>(null);
+  const folderRef = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState<Theme | null>(null);
+  const [errors, setErrors] = useState<string[] | null>(null);
+  const installed = useInstalledThemesStore((s) => s.themes);
+  const install = useInstalledThemesStore((s) => s.install);
+  const uninstall = useInstalledThemesStore((s) => s.uninstall);
+  const set = useAppearanceStore((s) => s.set);
+  const previous = pending ? installed.find((theme) => theme.id === pending.id) : undefined;
+
+  useEffect(() => {
+    // Not in React's input props; it makes the picker choose a folder.
+    folderRef.current?.setAttribute("webkitdirectory", "");
+  }, []);
+
+  const read = async (files: File[]) => {
+    if (files.length === 0) return;
+    const result = await readThemePackage(files);
+    if (result.ok) setPending(result.theme);
+    else setErrors(result.errors);
+  };
+
+  const confirm = () => {
+    if (!pending) return;
+    const replaced = previous;
+    try {
+      install(pending);
+      set({ theme: pending.id });
+    } catch {
+      if (replaced) install(replaced);
+      else uninstall(pending.id);
+      setErrors([t(($) => $.appearance.import.storage_full)]);
+    }
+    setPending(null);
+  };
+
+  const picker = (ref: React.RefObject<HTMLInputElement | null>, props: React.ComponentProps<"input">) => (
+    <input
+      ref={ref}
+      type="file"
+      className="hidden"
+      onChange={(event) => {
+        const files = Array.from(event.target.files ?? []);
+        event.target.value = "";
+        void read(files);
+      }}
+      {...props}
+    />
+  );
+  const assetCount = pending ? Object.keys(pending.assets ?? {}).length : 0;
+  const optionCount = pending?.options?.filter((option) => option.type !== "heading").length ?? 0;
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
+          <Upload />
+          {t(($) => $.appearance.import.button)}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuGroup>
+            <DropdownMenuLabel className="flex items-center gap-2">
+              {t(($) => $.appearance.import.menu_label)}
+              <Badge variant="secondary">{t(($) => $.appearance.import.beta)}</Badge>
+            </DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => zipRef.current?.click()}>
+              {t(($) => $.appearance.import.from_zip)}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => folderRef.current?.click()}>
+              {t(($) => $.appearance.import.from_folder)}
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {picker(zipRef, { accept: ".zip,application/zip", "aria-label": t(($) => $.appearance.import.from_zip) })}
+      {picker(folderRef, { multiple: true, "aria-label": t(($) => $.appearance.import.from_folder) })}
+      <AlertDialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <span className="min-w-0 truncate">
+                {t(($) => $.appearance.import.confirm_title, { name: pending?.name ?? "" })}
+              </span>
+              <Badge variant="secondary">{t(($) => $.appearance.import.beta)}</Badge>
+            </AlertDialogTitle>
+            <AlertDialogDescription>{t(($) => $.appearance.import.warning)}</AlertDialogDescription>
+          </AlertDialogHeader>
+          {pending ? (
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-md bg-muted px-3 py-2.5 text-caption">
+              {pending.author ? (
+                <>
+                  <dt className="text-muted-foreground">{t(($) => $.appearance.import.author)}</dt>
+                  <dd className="min-w-0 truncate">{pending.author}</dd>
+                </>
+              ) : null}
+              {pending.version ? (
+                <>
+                  <dt className="text-muted-foreground">{t(($) => $.appearance.import.version)}</dt>
+                  <dd>
+                    {previous?.version
+                      ? t(($) => $.appearance.import.replaces, { from: previous.version, to: pending.version })
+                      : pending.version}
+                  </dd>
+                </>
+              ) : null}
+              <dt className="text-muted-foreground">{t(($) => $.appearance.import.includes)}</dt>
+              <dd>
+                {[
+                  "theme.css",
+                  assetCount > 0 ? t(($) => $.appearance.import.has_assets, { count: assetCount }) : null,
+                  optionCount > 0 ? t(($) => $.appearance.import.has_options, { count: optionCount }) : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </dd>
+            </dl>
+          ) : null}
+          <p className="text-caption text-muted-foreground">{t(($) => $.appearance.import.beta_note)}</p>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t(($) => $.appearance.import.cancel)}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirm}>{t(($) => $.appearance.import.confirm)}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={errors !== null} onOpenChange={(open) => !open && setErrors(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t(($) => $.appearance.import.error_title)}</AlertDialogTitle>
+            <AlertDialogDescription>{t(($) => $.appearance.import.error_description)}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <ul className="max-h-60 list-disc space-y-1 overflow-y-auto rounded-md bg-muted py-2.5 pr-3 pl-7 font-mono text-caption">
+            {errors?.map((error, i) => <li key={i}>{error}</li>)}
+          </ul>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t(($) => $.appearance.import.close)}</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
+const THEME_GUIDE_URL = "https://github.com/multica-ai/multica/blob/main/docs/theming.md";
+
+function downloadFile(data: Uint8Array<ArrayBuffer>, name: string, type: string) {
+  const url = URL.createObjectURL(new Blob([data], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+/**
+ * Tools for writing a theme: duplicate the active theme as a starting point
+ * and, on Desktop, open the themes folder. On Desktop the copy is written
+ * into the themes folder, applied, and edits to it apply as they are saved;
+ * on web it downloads as a .zip to edit and import.
+ */
+function ThemeToolsMenu({ theme }: { theme: Theme }) {
+  const { t } = useT("settings");
+  const themeLabelFor = useThemeLabel();
+  const install = useInstalledThemesStore((s) => s.install);
+  const set = useAppearanceStore((s) => s.set);
+  const folder = themeFolderAPI();
+
+  const duplicate = async () => {
+    const taken = [...BUILT_IN_THEMES, ...useInstalledThemesStore.getState().themes].map((t) => t.id);
+    if (!folder) {
+      const target = themeCopyTarget(theme, taken);
+      const file = `${target.id}.zip`;
+      downloadFile(writeZip(exportTheme(theme, target)), file, "application/zip");
+      toast.success(t(($) => $.appearance.tools.duplicated_web, { file }));
+      return;
+    }
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const target = themeCopyTarget(theme, taken);
+      const files = exportTheme(theme, target);
+      const result = await folder.writeThemeFolder(target.id, files);
+      if (result.ok) {
+        const copy = themeFromFiles(files);
+        if (copy.ok) install(copy.theme);
+        set({ theme: target.id });
+        void folder.openThemeFolder(target.id);
+        toast.success(t(($) => $.appearance.tools.duplicated_desktop, { name: target.name }));
+        return;
+      }
+      if (result.reason !== "exists") {
+        toast.error(t(($) => $.appearance.tools.duplicate_failed, { error: result.error ?? result.reason }));
+        return;
+      }
+      taken.push(target.id);
+    }
+    toast.error(t(($) => $.appearance.tools.duplicate_failed, { error: "exists" }));
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={<Button variant="ghost" size="icon-sm" className="text-muted-foreground" />}
+        aria-label={t(($) => $.appearance.tools.label)}
+        title={t(($) => $.appearance.tools.label)}
+      >
+        <Ellipsis />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-56">
+        <DropdownMenuItem onClick={() => void duplicate()}>
+          <Copy />
+          {t(($) => $.appearance.tools.duplicate, { name: themeLabelFor(theme) })}
+        </DropdownMenuItem>
+        {folder ? (
+          <DropdownMenuItem onClick={() => void folder.openThemeFolder()}>
+            <FolderOpen />
+            {t(($) => $.appearance.tools.open_folder)}
+          </DropdownMenuItem>
+        ) : null}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => openExternal(THEME_GUIDE_URL)}>
+          <BookOpen />
+          {t(($) => $.appearance.tools.guide)}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -228,8 +579,10 @@ function ThemeOptionsSection() {
   const prefs = useAppearanceStore(useShallow(selectAppearance));
   const setThemeOption = useAppearanceStore((s) => s.setThemeOption);
   const set = useAppearanceStore((s) => s.set);
+  useInstalledThemesStore((s) => s.themes);
+  const safeMode = useThemeSafeMode((s) => s.active);
   const themeLabelFor = useThemeLabel();
-  const theme = activeTheme(prefs);
+  const theme = activeTheme(prefs, safeMode);
   const options = theme.options ?? [];
   if (options.length === 0) return null;
   const chosen = prefs.themeOptions[theme.id];
