@@ -78,6 +78,10 @@ describe("mobile Markdown image sequence wiring", () => {
     ["nested entity", "![middle](https://cdn.example/a.png?a=1&amp;amp;b=2)", "https://cdn.example/a.png?a=1&amp;b=2", []],
     ["reference", "![middle][shot]\n\n[shot]: https://cdn.example/图.png", "https://cdn.example/%E5%9B%BE.png", []],
     ["attachment", `![middle](/api/attachments/${ID}/download)`, attachment.download_url!, [attachment]],
+    ["HTML", '<img src="https://cdn.example/a.png" width="400" />', "https://cdn.example/a.png", []],
+    ["HTML named entity", '<img src="https://cdn.example/a.png?a=1&amp;b=2">', "https://cdn.example/a.png?a=1&b=2", []],
+    ["HTML Unicode", '<img src="https://cdn.example/图.png">', "https://cdn.example/%E5%9B%BE.png", []],
+    ["HTML block", '<p align="center">\n<img src="https://cdn.example/图.png">\n</p>', "https://cdn.example/%E5%9B%BE.png", []],
   ] as const)("keeps the %s image inside the screen sequence", (_name, middle, expectedUri, attachments) => {
     const content = `![first](https://cdn.example/first.png)\n\n${middle}\n\n![last](https://cdn.example/last.png)`;
     const segments = splitMarkdown(preprocessMobileMarkdown(content)).filter((segment) => segment.type === "image");
@@ -98,5 +102,14 @@ describe("mobile Markdown image sequence wiring", () => {
       index: 1,
     });
     expect(renderedUri).toBe(expectedUri);
+  });
+
+  it("does not count an HTML image shown literally in code", () => {
+    const content = '![first](https://cdn.example/first.png)\n\n`<img src="https://cdn.example/a.png">`\n\n![last](https://cdn.example/last.png)';
+    const provider = ImageSequenceProvider({ blocks: [{ content }], children: null });
+    expect(provider.props.value).toEqual([
+      "https://cdn.example/first.png",
+      "https://cdn.example/last.png",
+    ]);
   });
 });

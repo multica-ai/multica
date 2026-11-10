@@ -16,7 +16,9 @@
  *
  * The URIs are resolved the same way `MarkdownImage` resolves the one it
  * renders — same attachment match, same `resolveAttachmentUrl` pass — so the
- * URI a tap reports is the one the sequence holds.
+ * URI a tap reports is the one the sequence holds. Bodies go through the
+ * renderer's HTML pass first: mobile shows `<img>` as a Markdown image, whose
+ * URL is entity-decoded and normalized, and drops the tags around it.
  */
 import { createContext, use, useMemo, type ReactNode } from "react";
 import {
@@ -24,6 +26,7 @@ import {
   type ImageSequenceBlock,
 } from "@multica/core/attachments/image-sequence";
 import { resolveAttachmentUrl } from "@/lib/attachment-url";
+import { stripHtml } from "./preprocess";
 
 const ImageSequenceContext = createContext<readonly string[]>([]);
 
@@ -44,7 +47,11 @@ export function ImageSequenceProvider({
 }) {
   const uris = useMemo(
     () =>
-      collectImageSequence(blocks).map(
+      collectImageSequence(
+        blocks.map((block) =>
+          block?.content ? { ...block, content: stripHtml(block.content) } : block,
+        ),
+      ).map(
         (item) => resolveAttachmentUrl(item.url) ?? item.url,
       ),
     [blocks],
