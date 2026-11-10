@@ -279,9 +279,6 @@ func TestPrivateProjectVisibilityAndMembersAPI(t *testing.T) {
 		}), f.insider))
 	}
 
-	// Creating a private project is open to every member; there is no
-	// rollout flag. A retired FF_PRIVATE_PROJECTS_V1=off must not block it.
-	withFeatureFlag(t, testHandler, "private_projects_v1", false)
 	var project ProjectResponse
 	createPrivate().Want(http.StatusCreated).JSON(&project)
 	t.Cleanup(func() {

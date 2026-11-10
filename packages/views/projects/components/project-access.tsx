@@ -5,7 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import { Globe, Lock, Shield, UserPlus, X } from "@multica/ui/icons";
 import type { MemberWithUser, Project, ProjectVisibility } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
-import { useConfigStore } from "@multica/core/config";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { projectMembersOptions } from "@multica/core/projects/queries";
@@ -108,24 +107,22 @@ function AccessFields({ visibility, onVisibilityChange, members, selected, leadI
 
 export function ProjectAccessControl({ project }: { project: Project }) {
   const { t } = useT("projects");
-  const enabled = useConfigStore((s) => s.featureFlags.private_projects_v1 === true);
   const [open, setOpen] = useState(false);
   const wsId = useWorkspaceId();
   const changeAccess = useProjectAccessMutation(wsId, project.id);
-  if (!enabled && project.visibility !== "private") return null;
   const Icon = project.visibility === "private" ? Lock : Globe;
   return (
     <Dialog open={open} onOpenChange={(value) => { if (!changeAccess.isPending) setOpen(value); }}>
       <DialogTrigger render={<Button type="button" variant="ghost" size="sm" className="h-auto min-h-7 max-w-full justify-start px-0" aria-label={t(($) => $.access.label)}><Icon /><span className="truncate">{project.visibility === "private" ? t(($) => $.access.private) : t(($) => $.access.workspace)}</span></Button>} />
       <DialogContent className="flex max-h-[90dvh] flex-col sm:max-w-lg">
         <DialogHeader><DialogTitle>{t(($) => $.access.title, { title: project.title })}</DialogTitle><DialogDescription>{t(($) => $.access.description)}</DialogDescription></DialogHeader>
-        {open ? <ProjectAccessEditor project={project} onClose={() => setOpen(false)} enabled={enabled} changeAccess={changeAccess} /> : null}
+        {open ? <ProjectAccessEditor project={project} onClose={() => setOpen(false)} changeAccess={changeAccess} /> : null}
       </DialogContent>
     </Dialog>
   );
 }
 
-function ProjectAccessEditor({ project, enabled, onClose, changeAccess }: { project: Project; enabled: boolean; onClose: () => void; changeAccess: ReturnType<typeof useProjectAccessMutation> }) {
+function ProjectAccessEditor({ project, onClose, changeAccess }: { project: Project; onClose: () => void; changeAccess: ReturnType<typeof useProjectAccessMutation> }) {
   const { t } = useT("projects");
   const { t: tc } = useT("common");
   const wsId = useWorkspaceId();
@@ -161,7 +158,7 @@ function ProjectAccessEditor({ project, enabled, onClose, changeAccess }: { proj
           <div role="alert" className="space-y-2 text-body"><p>{t(($) => $.access.load_failed)}</p><Button variant="outline" size="sm" onClick={() => { void workspaceMembers.refetch(); void projectMembers.refetch(); }}>{t(($) => $.access.retry)}</Button></div>
         ) : (
           <AccessFields visibility={visibility} onVisibilityChange={setVisibility} members={members} selected={selected} userId={userId} leadId={leadId}
-            disabled={pending} canChangeScope={canManage} canUsePrivate={enabled || project.visibility === "private"}
+            disabled={pending} canChangeScope={canManage} canUsePrivate
             canAdd={canManage}
             canRemove={(id) => canManage && id !== leadId}
             onAdd={async (id) => { if (project.visibility === "private") return run({ type: "add", userId: id }); setDraftIds([...selected, id]); return true; }}
@@ -198,9 +195,7 @@ export function ProjectAccessDraftPicker({ visibility, memberIds, leadId, member
   onChange: (visibility: ProjectVisibility, ids: string[]) => void;
 }) {
   const { t } = useT("projects");
-  const enabled = useConfigStore((s) => s.featureFlags.private_projects_v1 === true);
   const userId = useAuthStore((s) => s.user?.id);
-  if (!enabled && visibility !== "private") return null;
   const fixed = [userId, leadId].filter((id): id is string => !!id);
   const selected = Array.from(new Set([...memberIds, ...fixed]));
   const Icon = visibility === "private" ? Lock : Globe;
@@ -209,7 +204,7 @@ export function ProjectAccessDraftPicker({ visibility, memberIds, leadId, member
       <PopoverTrigger render={<Button type="button" variant="outline" size="sm" aria-label={t(($) => $.access.label)}><Icon />{visibility === "private" ? t(($) => $.access.private) : t(($) => $.access.workspace)}</Button>} />
       <PopoverContent side="top" align="end" className="max-h-[70dvh] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto">
         <AccessFields visibility={visibility} onVisibilityChange={(value) => onChange(value, selected)} members={members} selected={selected} leadId={leadId} userId={userId}
-          disabled={false} canChangeScope canUsePrivate={enabled} canAdd
+          disabled={false} canChangeScope canUsePrivate canAdd
           canRemove={(id) => !fixed.includes(id)}
           onAdd={(id) => onChange(visibility, [...selected, id])}
           onRemove={(id) => onChange(visibility, selected.filter((value) => value !== id))} />

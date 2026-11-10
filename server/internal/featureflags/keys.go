@@ -53,13 +53,6 @@ const (
 	// projectWorkflowsCompat keeps workflow UI available in installed desktop
 	// clients that still gate it on this config decision and default to false.
 	projectWorkflowsCompat = "project_workflows_v1"
-	// privateProjectsCompat is no longer a release flag: private projects
-	// (MUL-8472) are on for everyone. Keep publishing the key as enabled.
-	// Web/Desktop clients read it as "this server supports private projects"
-	// and hide the access controls without it, so a newer client talking to
-	// an older server cannot create a project it believes is private while
-	// the server drops the visibility field and makes it public.
-	privateProjectsCompat = "private_projects_v1"
 )
 
 var frontendPublicFlags = []string{
@@ -89,7 +82,7 @@ func LocalSearchIndexEnabled(ctx context.Context, flags *featureflag.Service) bo
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {
-	out := make(map[string]bool, len(frontendPublicFlags)+5)
+	out := make(map[string]bool, len(frontendPublicFlags)+4)
 	for _, key := range frontendPublicFlags {
 		out[key] = flags.IsEnabled(ctx, key, false)
 	}
@@ -97,6 +90,5 @@ func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service
 	out[agentSkillTogglesCompat] = true
 	out[resourceLabelsCompat] = true
 	out[projectWorkflowsCompat] = true
-	out[privateProjectsCompat] = true
 	return out
 }

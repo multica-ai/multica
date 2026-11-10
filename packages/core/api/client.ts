@@ -4297,12 +4297,6 @@ export class ApiClient {
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {
-    // private_projects_v1 is a capability signal, always true on servers that
-    // support private projects. An older server would drop `visibility` and
-    // create a project the user believes is private as a public one.
-    if (data.visibility === "private" && configStore.getState().featureFlags.private_projects_v1 !== true) {
-      throw new Error("Private projects are not enabled on this server.");
-    }
     const raw = await this.fetch<unknown>("/api/projects", {
       method: "POST",
       body: JSON.stringify(data),
