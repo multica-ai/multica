@@ -58,11 +58,12 @@ const (
 	OriginNamed
 )
 
+// ErrIssueHasBlockers refuses derived runs until all prerequisites end.
+var ErrIssueHasBlockers = errors.New("the issue is waiting for unfinished blockers")
+
 // ErrIssueInTriage is returned by a derived enqueue path when the issue is
 // waiting in Triage. Handlers render it as 403 issue_in_triage; background
 // callers log it and drop the trigger.
-var ErrIssueHasBlockers = errors.New("the issue is waiting for unfinished blockers")
-
 var ErrIssueInTriage = errors.New("the issue is in triage, so nothing derived from it runs")
 
 // ErrRerunSourceIsTriage is returned when a manual rerun names a triage run as
