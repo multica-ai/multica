@@ -73,6 +73,8 @@ Installed desktop clients may talk to newer backends. Preserve response compatib
 
 - Do not add foreign keys, cascading deletes, or cascading updates. Validate relationships and clean up dependents in application code, using a transaction when the operation must be atomic.
 - Every migration-created index, including indexes on new tables, uses `CREATE [UNIQUE] INDEX CONCURRENTLY`. Each concurrent index build gets its own single-statement migration file; the runner executes files outside an explicit transaction.
+- Register every concurrent index build in `server/cmd/migrate/main.go` so an interrupted build's INVALID index is dropped before retry: up-direction builds in `concurrentIndexCleanups`, down-direction rebuilds in `concurrentDownIndexCleanups` (version → index name).
+- Before pushing a migration, rebase onto the latest `origin/main`, number it as the current highest prefix plus one, and run `go test ./cmd/migrate ./internal/migrations` from `server/`.
 - Conditionally skipped migrations are still recorded in `schema_migrations`. Later DDL touching conditional objects must be idempotent (`IF EXISTS` / `IF NOT EXISTS`); document recovery if the missing object would break runtime behavior.
 
 ## Backend UUID Rules

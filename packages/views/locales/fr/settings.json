@@ -159,12 +159,6 @@
     "toast_saved": "Modifications enregistrées"
   },
   "preferences": {
-    "theme": {
-      "title": "Thème",
-      "light": "Clair",
-      "dark": "Sombre",
-      "system": "Système"
-    },
     "language": {
       "title": "Langue",
       "english": "English",
@@ -196,13 +190,111 @@
     },
     "comments_title": "Commentaires et discussion",
     "region_title": "Langue et région",
-    "appearance_title": "Apparence",
     "issue_fields_title": "Champs affichés à la création de tâches",
     "issue_fields": {
       "field": "Champ",
       "quick": "Création avec un agent",
       "manual": "Création manuelle",
       "unsupported": "Indisponible lors de la création avec un agent"
+    }
+  },
+  "appearance": {
+    "reset": "Rétablir les valeurs par défaut",
+    "color": {
+      "title": "Couleur"
+    },
+    "mode": {
+      "title": "Mode",
+      "light": "Clair",
+      "dark": "Sombre",
+      "system": "Système"
+    },
+    "theme": {
+      "title": "Thème",
+      "description": "Couleurs, bordures, ombres et coins de toute l’app.",
+      "default": "Par défaut",
+      "pop": "Pop"
+    },
+    "theme_options": {
+      "title": "Options du thème",
+      "description": "Proposées par {{name}}.",
+      "reset": "Réinitialiser les options"
+    },
+    "ui_text": {
+      "title": "Texte de l’interface",
+      "description": "Menus, boutons, listes, barre latérale et titres."
+    },
+    "latin_font": {
+      "title": "Police latine"
+    },
+    "ui_font": {
+      "inter": "Par défaut",
+      "system": "Système",
+      "serif": "Serif",
+      "mono": "Chasse fixe"
+    },
+    "cjk_font": {
+      "title": "Police CJK",
+      "description": "Caractères chinois ; le japonais et le coréen suivent ce réglage.",
+      "sans": "Sans",
+      "serif": "Serif",
+      "kai": "Kai",
+      "built_in": "Intégrées",
+      "local": "Sur cet appareil",
+      "load_local": "Afficher les polices de cet appareil…",
+      "loading": "Recherche des polices…",
+      "none": "Aucune police avec des caractères chinois sur cet appareil.",
+      "load_failed": "Impossible de lire les polices de cet appareil.",
+      "sample": "永和九年 漢字"
+    },
+    "follow_ui": "Comme l’interface",
+    "theme_font": "Police du thème",
+    "font_size": {
+      "title": "Taille du texte",
+      "description": "Agrandit uniquement le texte. Les espacements et la mise en page restent identiques.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · Par défaut"
+    },
+    "content_text": {
+      "title": "Texte du contenu",
+      "description": "Descriptions de tickets, commentaires, chat et documents.",
+      "sample": "Les descriptions et commentaires se lisent en entier : ils peuvent utiliser une police faite pour la lecture, tandis que listes et boutons restent compacts."
+    },
+    "code_font": {
+      "title": "Police du code",
+      "description": "Blocs de code, code en ligne et journaux.",
+      "geist": "Par défaut",
+      "jetbrains": "Ligatures",
+      "system": "Chasse fixe système"
+    },
+    "content_size": {
+      "title": "Taille du texte",
+      "description": "Seulement le texte du contenu ; l’interface garde sa taille.",
+      "follow": "Comme l’interface ({{size}} px)"
+    },
+    "content_leading": {
+      "title": "Interligne",
+      "compact": "Serré",
+      "default": "Par défaut",
+      "relaxed": "Aéré"
+    },
+    "layout": {
+      "title": "Mise en page et accessibilité"
+    },
+    "density": {
+      "title": "Densité",
+      "description": "Hauteur des lignes dans les listes de tickets et la recherche.",
+      "compact": "Compacte",
+      "default": "Par défaut",
+      "comfortable": "Aérée"
+    },
+    "reduce_motion": {
+      "title": "Réduire les animations",
+      "description": "Désactive les animations et transitions. Désactivé, le réglage du système s’applique toujours."
+    },
+    "high_contrast": {
+      "title": "Augmenter le contraste",
+      "description": "Texte secondaire plus foncé et bordures plus marquées."
     }
   },
   "shortcuts": {
@@ -396,6 +488,7 @@
     "tabs": {
       "profile": "Profil",
       "preferences": "Préférences",
+      "appearance": "Apparence",
       "shortcuts": "Raccourcis",
       "issue": "Tâche",
       "notifications": "Notifications",

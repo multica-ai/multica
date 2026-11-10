@@ -4281,8 +4281,8 @@ export class ApiClient {
   // Callers must only reach for this once the metadata refresh has shown
   // there is no signed URL: in the other modes the endpoint 302s to storage,
   // where CORS is not configured for a JS fetch.
-  async getAttachmentBlob(id: string): Promise<Blob> {
-    const res = await this.fetchRaw(`/api/attachments/${id}/download`);
+  async getAttachmentBlob(id: string, signal?: AbortSignal): Promise<Blob> {
+    const res = await this.fetchRaw(`/api/attachments/${id}/download`, { signal });
     return res.blob();
   }
 
@@ -4302,9 +4302,6 @@ export class ApiClient {
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {
-    if (data.visibility === "private" && configStore.getState().featureFlags.private_projects_v1 !== true) {
-      throw new Error("Private projects are not enabled on this server.");
-    }
     const raw = await this.fetch<unknown>("/api/projects", {
       method: "POST",
       body: JSON.stringify(data),

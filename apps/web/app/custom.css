@@ -76,8 +76,8 @@
 /* -----------------------------------------------------------------------------
  * Landing editorial serif
  *
- * The landing tree swaps the app's `--font-serif` (Source Serif 4, set on <html>
- * by app/layout.tsx) for Instrument Serif, loaded by app/(landing)/layout.tsx as
+ * The landing tree swaps the app's `--font-serif` (Source Serif 4, composed in
+ * app/globals.css) for Instrument Serif, loaded by app/(landing)/layout.tsx as
  * `--font-instrument-serif`. The stack is composed here in static CSS rather
  * than in next/font's `fallback` for the same reasons `--font-sans` is composed
  * in app/globals.css: it has to be overridable per `<html lang>`, and it stays

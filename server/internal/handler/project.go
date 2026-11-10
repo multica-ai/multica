@@ -14,7 +14,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
@@ -132,8 +131,7 @@ type CreateProjectRequest struct {
 	StartDate   *string                               `json:"start_date"`
 	DueDate     *string                               `json:"due_date"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
-	// Visibility "private" creates a private project (MUL-8472, behind
-	// private_projects_v1). MemberIDs seeds its member list; the creator is
+	// Visibility "private" creates a private project (MUL-8472). MemberIDs seeds its member list; the creator is
 	// always added.
 	Visibility *string  `json:"visibility,omitempty"`
 	MemberIDs  []string `json:"member_ids,omitempty"`
@@ -444,10 +442,6 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !h.requireHumanProjectAccessActor(w, r, workspaceID) {
-			return
-		}
-		if !featureflags.PrivateProjectsV1Enabled(r.Context(), h.FeatureFlags) {
-			writeFeatureDisabled(w, "private_projects_disabled", "private projects are not enabled")
 			return
 		}
 		ids, ok := parseProjectMemberIDs(w, req.MemberIDs, "member_ids")
