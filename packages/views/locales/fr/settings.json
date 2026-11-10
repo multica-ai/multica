@@ -248,8 +248,8 @@
     "store": {
       "manage": "Gérer",
       "title": "Thèmes",
-      "description": "Les thèmes intégrés, ceux que vous avez installés et ceux créés par la communauté.",
-      "description_local": "Les thèmes intégrés et ceux que vous avez installés.",
+      "description": "Les thèmes que vous avez installés et ceux créés par la communauté.",
+      "description_local": "Les thèmes que vous avez installés.",
       "search": "Rechercher des thèmes",
       "installed_only": "Afficher uniquement les thèmes installés",
       "showing_one": "{{count}} thème affiché",

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -216,18 +216,10 @@ describe("AppearanceTab", () => {
 
     await user.click(screen.getByRole("button", { name: "Manage" }));
     const themes = await screen.findByRole("dialog");
-    expect(within(themes).getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual([
-      "Paper",
-      "Default",
-      "Pop",
-      "GitHub",
-      "Blueprint",
-      "Notion",
-    ]);
-    expect(within(themes).getByText("Showing 6 themes")).toBeInTheDocument();
-    expect(themes.querySelector('[data-theme-preview="paper"]')).not.toBeNull();
-    await user.click(within(themes).getByRole("switch", { name: "Show installed only" }));
     expect(within(themes).getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Paper"]);
+    expect(within(themes).getByText("Showing 1 theme")).toBeInTheDocument();
+    expect(themes.querySelector('[data-theme-preview="paper"]')).not.toBeNull();
+    expect(within(themes).queryByRole("switch", { name: "Show installed only" })).toBeNull();
     await user.click(within(themes).getByRole("button", { name: "Remove Paper" }));
     expect(useInstalledThemesStore.getState().themes).toEqual([]);
     expect(state().theme).toBe("default");
@@ -235,18 +227,17 @@ describe("AppearanceTab", () => {
     expect(api.listStoreThemes).not.toHaveBeenCalled();
   });
 
-  it("picks a built-in theme in the Manage window", async () => {
+  it("keeps built-in themes in the picker only, and offers Manage once there is something to manage", async () => {
     const user = userEvent.setup();
     render(<AppearanceTab />, { wrapper: Wrapper });
+    expect(screen.queryByRole("button", { name: "Manage" })).toBeNull();
 
+    act(() => configStore.getState().setThemeStoreEnabled(true));
+    api.listStoreThemes.mockResolvedValue([]);
     await user.click(screen.getByRole("button", { name: "Manage" }));
     const themes = await screen.findByRole("dialog");
-    await user.type(within(themes).getByRole("textbox", { name: "Search themes" }), "blue");
-    expect(within(themes).getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Blueprint"]);
-    expect(within(themes).queryByRole("button", { name: /^Remove/ })).toBeNull();
-    await user.click(within(themes).getByRole("button", { name: "Use" }));
-    expect(state().theme).toBe("blueprint");
-    expect(within(themes).getByRole("button", { name: "In use" })).toBeDisabled();
+    expect(await within(themes).findByText("No themes are installed yet.")).toBeInTheDocument();
+    expect(within(themes).queryByRole("heading", { name: "Blueprint" })).toBeNull();
   });
 
   it("checks the store for updates when asked, and updates every theme that has one", async () => {

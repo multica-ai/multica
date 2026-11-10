@@ -230,8 +230,8 @@
     "store": {
       "manage": "Gestionar",
       "title": "Temas",
-      "description": "Temas integrados, los que has instalado y temas creados por la comunidad.",
-      "description_local": "Temas integrados y los que has instalado.",
+      "description": "Los temas que has instalado y temas creados por la comunidad.",
+      "description_local": "Los temas que has instalado.",
       "search": "Buscar temas",
       "installed_only": "Mostrar solo instalados",
       "showing_one": "Mostrando {{count}} tema",

@@ -248,8 +248,8 @@
     "store": {
       "manage": "Manage",
       "title": "Themes",
-      "description": "Built-in themes, the ones you installed, and themes made by the community.",
-      "description_local": "Built-in themes and the ones you installed.",
+      "description": "The themes you installed, and themes made by the community.",
+      "description_local": "The themes you installed.",
       "search": "Search themes",
       "installed_only": "Show installed only",
       "showing_one": "Showing {{count}} theme",

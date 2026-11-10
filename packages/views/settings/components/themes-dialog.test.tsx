@@ -82,14 +82,19 @@ describe("ThemesButton", () => {
     vi.clearAllMocks();
   });
 
-  it("lists only the themes on this device and makes no requests when the server has no store", async () => {
+  it("lists only the installed themes and makes no requests when the server has no store", async () => {
     configStore.getState().setThemeStoreEnabled(false);
     const user = userEvent.setup();
-    renderButton();
+    const { rerender } = renderButton();
+    expect(screen.queryByRole("button", { name: "Manage" })).toBeNull();
+
+    const parsed = parseTheme({ manifest: manifest("paper", "Paper", "1.0.0"), css });
+    if (!parsed.ok) throw new Error("fixture");
+    useInstalledThemesStore.getState().install(parsed.theme);
+    rerender(<ThemesButton />);
     await user.click(screen.getByRole("button", { name: "Manage" }));
-    expect(await screen.findByRole("heading", { name: "Default" })).toBeTruthy();
-    expect(screen.getByText("Built-in themes and the ones you installed.")).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "Ink" })).toBeNull();
+    expect(screen.getByText("The themes you installed.")).toBeTruthy();
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Paper"]);
     expect(api.listStoreThemes).not.toHaveBeenCalled();
   });
 
@@ -99,7 +104,8 @@ describe("ThemesButton", () => {
     await user.click(screen.getByRole("button", { name: "Manage" }));
     expect(await screen.findByRole("heading", { name: "Ink" })).toBeTruthy();
     expect(screen.getByText("Beta")).toBeTruthy();
-    expect(screen.getByText("Showing 7 themes")).toBeTruthy();
+    expect(screen.getByText("Showing 2 themes")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Default" })).toBeNull();
 
     await user.type(screen.getByRole("textbox", { name: "Search themes" }), "san");
     expect(screen.queryByRole("heading", { name: "Ink" })).toBeNull();
@@ -112,15 +118,7 @@ describe("ThemesButton", () => {
     expect(useAppearanceStore.getState().theme).toBe("ink");
     expect(await screen.findByRole("button", { name: "In use" })).toBeTruthy();
     // The card stays where it was while the window is open.
-    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual([
-      "Default",
-      "Pop",
-      "GitHub",
-      "Blueprint",
-      "Notion",
-      "Ink",
-      "Sand",
-    ]);
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Ink", "Sand"]);
     await user.click(screen.getByRole("switch", { name: "Show installed only" }));
     expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Ink"]);
 
@@ -136,7 +134,7 @@ describe("ThemesButton", () => {
     await user.click(screen.getByRole("button", { name: "Manage" }));
     expect(await screen.findByText("by Someone · 1.3K downloads")).toBeTruthy();
     expect(screen.getByText("by Someone · 1 download")).toBeTruthy();
-    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent).slice(-2)).toEqual(["Sand", "Ink"]);
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Sand", "Ink"]);
 
     api.listStoreThemes.mockResolvedValue([listed("ink", "Ink", "1.0.0", 2), listed("sand", "Sand", "1.0.0", 1250)]);
     const [installSand] = screen.getAllByRole("button", { name: "Install" });

@@ -244,8 +244,8 @@
     "store": {
       "manage": "管理",
       "title": "テーマ",
-      "description": "内蔵テーマ、インストールしたテーマ、コミュニティが作ったテーマです。",
-      "description_local": "内蔵テーマとインストールしたテーマです。",
+      "description": "インストールしたテーマと、コミュニティが作ったテーマです。",
+      "description_local": "インストールしたテーマです。",
       "search": "テーマを検索",
       "installed_only": "インストール済みのみ表示",
       "showing_other": "{{count}} 個のテーマを表示中",

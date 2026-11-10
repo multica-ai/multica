@@ -244,8 +244,8 @@
     "store": {
       "manage": "관리",
       "title": "테마",
-      "description": "기본 테마, 설치한 테마, 커뮤니티가 만든 테마입니다.",
-      "description_local": "기본 테마와 설치한 테마입니다.",
+      "description": "설치한 테마와 커뮤니티가 만든 테마입니다.",
+      "description_local": "설치한 테마입니다.",
       "search": "테마 검색",
       "installed_only": "설치된 테마만 보기",
       "showing_other": "테마 {{count}}개 표시 중",

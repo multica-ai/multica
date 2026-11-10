@@ -244,8 +244,8 @@
     "store": {
       "manage": "管理",
       "title": "主题",
-      "description": "内置主题、你安装的主题，以及社区制作的主题。",
-      "description_local": "内置主题和你安装的主题。",
+      "description": "你安装的主题，以及社区制作的主题。",
+      "description_local": "你安装的主题。",
       "search": "搜索主题",
       "installed_only": "只看已安装",
       "showing_other": "共 {{count}} 个主题",

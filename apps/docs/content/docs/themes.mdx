@@ -16,7 +16,7 @@ import { Step, Steps } from "fumadocs-ui/components/steps";
 
 **Mode** is Light, Dark, or System (follows your operating system). You can also type "theme" in the search box (`⌘K`) to switch it.
 
-**Theme** sets the colors, borders, shadows, and corners across the app. Multica comes with Default, Pop, GitHub, Blueprint, and Notion; pick one from the dropdown, or open **Manage** to see every theme with a preview. A theme supports light mode, dark mode, or both, and follows the mode you picked.
+**Theme** sets the colors, borders, shadows, and corners across the app. Multica comes with Default, Pop, GitHub, Blueprint, and Notion; pick one from the dropdown. **Manage**, next to it, is where you install, update, and remove other themes. A theme supports light mode, dark mode, or both, and follows the mode you picked.
 
 Some themes come with options, such as an accent color or a page width. They show up under **Theme options** while that theme is in use; **Reset options** puts them back to the theme's defaults.
 
@@ -32,7 +32,7 @@ When you pick a font other than the default, or turn on Increase contrast, your 
 
 ## The theme store
 
-**Manage** opens one window with every theme: the built-in ones, the ones on this device, and the community theme store. Search by name or author, and turn on **Show installed only** to hide what you don't have.
+**Manage** opens one window with the themes you installed and the community theme store. The built-in themes aren't listed there; they are always in the dropdown. Search by name or author, and turn on **Show installed only** to hide what you don't have.
 
 Each store theme has a card with a screenshot (switch between its light and dark screenshot in the corner), its author, a description, how many times it has been downloaded, and a link to its GitHub repository. Themes you haven't installed are listed most downloaded first.
 
@@ -48,7 +48,7 @@ Click **Install** on a card. The theme is downloaded, checked, saved on this dev
 
 ### Switch
 
-Click **Use** on any installed or built-in theme. The theme in use is marked **In use**.
+Click **Use** on an installed theme, or pick any theme from the dropdown. The theme in use is marked **In use**.
 
 </Step>
 <Step>
@@ -100,7 +100,7 @@ A self-hosted server lists the official registry, [multica-ai/multica-themes](ht
 
 | Variable | Effect |
 |---|---|
-| `MULTICA_THEME_STORE` | `off` turns the store off. **Manage** then lists only the themes on each device, and the server makes no registry requests. |
+| `MULTICA_THEME_STORE` | `off` turns the store off. **Manage** then lists only the themes installed on each device, and appears once one is installed; the server makes no registry requests. |
 | `MULTICA_THEME_REGISTRY_URL` | Points the store at another registry's `index.json`, for example a fork of the official one. |
 
 See [Environment variables](/environment-variables) for the rest of the server configuration.

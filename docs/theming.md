@@ -10,8 +10,8 @@ Appearance → Theme options**. Themes never run JavaScript.
 > API. They may change without notice until it is declared stable; check
 > this page when a theme stops looking right after an update.
 
-**Settings → Appearance → Manage** lists every theme: the built-in ones, the
-ones on the device, and the community theme store. Install a theme from the
+**Settings → Appearance → Manage** lists the themes installed on the device
+and the community theme store; the built-in themes are in the theme picker. Install a theme from the
 store there, or with **Import theme**, from a `.zip` of the folder or from the
 folder itself. Themes are saved on the device, like every other Appearance
 setting; **Remove** on a theme's card deletes it, and goes back to Default

@@ -17,7 +17,7 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { useConfigStore } from "@multica/core/config";
-import { BUILT_IN_THEMES, useAppearanceStore, useInstalledThemesStore, type Theme } from "@multica/core/appearance";
+import { useAppearanceStore, useInstalledThemesStore, type Theme } from "@multica/core/appearance";
 import {
   readStoreTheme,
   storeThemeScreenshotOptions,
@@ -33,14 +33,18 @@ import { openExternal } from "../../platform/open-external";
 import { ThemePreview, useAppliedMode, useThemeLabel } from "./theme-swatch";
 
 /**
- * Settings → Appearance → Manage: every theme in one place. The built-in
- * themes and the ones on this device are always listed; when the server
- * serves the community theme store (beta), its themes are listed with them.
- * A deployment that turned the store off makes no store requests.
+ * Settings → Appearance → Manage: the themes installed on this device and,
+ * when the server serves the community theme store (beta), the store's
+ * themes. Built-in themes are only in the theme picker. A deployment that
+ * turned the store off makes no store requests, and with nothing installed
+ * there is nothing to manage.
  */
 export function ThemesButton() {
   const { t } = useT("settings");
   const [open, setOpen] = useState(false);
+  const storeEnabled = useConfigStore((s) => s.themeStoreEnabled);
+  const hasInstalled = useInstalledThemesStore((s) => s.themes.length > 0);
+  if (!storeEnabled && !hasInstalled && !open) return null;
   return (
     <>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
@@ -117,24 +121,17 @@ function Themes() {
   const [installedOnly, setInstalledOnly] = useState(false);
   const needle = query.trim().toLowerCase();
 
-  // Installed themes, then the built-in ones, then what the store offers. A
-  // theme installed from the store is shown as the store lists it.
+  // Installed themes, then what the store offers. A theme installed from the
+  // store is shown as the store lists it.
   const listed = new Map((listing.data ?? []).map((theme) => [theme.id, theme]));
-  const local = (theme: Theme, isInstalled: boolean): Entry => {
-    const store = isInstalled && theme.id in fromStore ? listed.get(theme.id) : undefined;
+  const local = (theme: Theme): Entry => {
+    const store = theme.id in fromStore ? listed.get(theme.id) : undefined;
     if (store) listed.delete(theme.id);
     return store
       ? { kind: "store", key: store.id, name: store.name, author: store.author, installed: true, theme: store }
-      : {
-          kind: "local",
-          key: theme.id,
-          name: themeLabelFor(theme),
-          author: theme.author ?? "",
-          installed: isInstalled,
-          theme,
-        };
+      : { kind: "local", key: theme.id, name: themeLabelFor(theme), author: theme.author ?? "", installed: true, theme };
   };
-  const entries = [...installed.map((theme) => local(theme, true)), ...BUILT_IN_THEMES.map((theme) => local(theme, false))];
+  const entries = installed.map(local);
   for (const theme of [...listed.values()].sort((a, b) => b.downloads - a.downloads)) {
     // A listed theme whose id is taken on this device is shown next to the one that has it.
     const taken = entries.some((entry) => entry.key === theme.id);
@@ -184,14 +181,16 @@ function Themes() {
               className="pl-8"
             />
           </div>
-          <label className="flex shrink-0 items-center gap-2 text-label">
-            <Switch
-              checked={installedOnly}
-              onCheckedChange={setInstalledOnly}
-              aria-label={t(($) => $.appearance.store.installed_only)}
-            />
-            <span aria-hidden="true">{t(($) => $.appearance.store.installed_only)}</span>
-          </label>
+          {storeEnabled ? (
+            <label className="flex shrink-0 items-center gap-2 text-label">
+              <Switch
+                checked={installedOnly}
+                onCheckedChange={setInstalledOnly}
+                aria-label={t(($) => $.appearance.store.installed_only)}
+              />
+              <span aria-hidden="true">{t(($) => $.appearance.store.installed_only)}</span>
+            </label>
+          ) : null}
         </div>
       </DialogHeader>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
@@ -212,7 +211,7 @@ function Themes() {
                   {entry.kind === "store" ? (
                     <StoreThemeCard theme={entry.theme} />
                   ) : (
-                    <LocalThemeCard theme={entry.theme} name={entry.name} installed={entry.installed} />
+                    <LocalThemeCard theme={entry.theme} name={entry.name} />
                   )}
                 </li>
               ))}
@@ -319,12 +318,12 @@ function useRemoveTheme(id: string) {
 }
 
 /**
- * A theme that is on this device and not listed by the store: built in,
- * imported, or in the themes folder. It has no screenshot, so it is drawn
+ * An installed theme the store does not list: imported, or in the themes
+ * folder. It has no screenshot, so it is drawn
  * from its tokens. Only an imported theme can be removed here; a theme in
  * the themes folder is removed by deleting its folder.
  */
-function LocalThemeCard({ theme, name, installed }: { theme: Theme; name: string; installed: boolean }) {
+function LocalThemeCard({ theme, name }: { theme: Theme; name: string }) {
   const { t } = useT("settings");
   const mode = useAppliedMode();
   const inFolder = useInstalledThemesStore((s) => theme.id in s.folders);
@@ -338,19 +337,17 @@ function LocalThemeCard({ theme, name, installed }: { theme: Theme; name: string
         </div>
       }
       name={name}
-      version={installed ? theme.version : undefined}
-      badge={<StateBadge inUse={inUse} installed={installed} />}
+      version={theme.version}
+      badge={<StateBadge inUse={inUse} installed />}
       subtitle={
-        !installed
-          ? t(($) => $.appearance.theme.built_in)
-          : inFolder
-            ? t(($) => $.appearance.theme.folder)
-            : theme.author
-              ? t(($) => $.appearance.store.by, { author: theme.author })
-              : t(($) => $.appearance.theme.installed)
+        inFolder
+          ? t(($) => $.appearance.theme.folder)
+          : theme.author
+            ? t(($) => $.appearance.store.by, { author: theme.author })
+            : t(($) => $.appearance.theme.installed)
       }
     >
-      {installed && !inFolder ? (
+      {!inFolder ? (
         <Button
           variant="ghost"
           size="xs"
