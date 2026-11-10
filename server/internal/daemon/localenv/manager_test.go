@@ -9,9 +9,11 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -29,10 +31,12 @@ func TestHelperProcess(t *testing.T) {
 		fmt.Println("serving", os.Getenv("MULTICA_ENVIRONMENT"))
 		http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "ok") }))
 	case "crash":
-		fmt.Println("boom: missing DATABASE_URL")
+		fmt.Println("boom: cannot reach postgres://demo:" + crashSecret + "@db.invalid/app")
 		os.Exit(3)
 	}
 }
+
+const crashSecret = "fake-password-for-tests"
 
 func helperCommand(mode string) string {
 	return fmt.Sprintf("LOCALENV_HELPER=%s exec '%s' -test.run='^TestHelperProcess$'", mode, os.Args[0])
@@ -111,11 +115,47 @@ func TestManagerReportsACrash(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	env = waitReady(t, m, env.Key)
-	if env.State != StateExited || !strings.Contains(env.Detail, "exit status 3") || !strings.Contains(env.Detail, "missing DATABASE_URL") {
-		t.Fatalf("crashed environment = %+v, want exited with the exit status and last log line", env)
+	if env.State != StateExited || env.Detail != "exit status 3" {
+		t.Fatalf("crashed environment = %+v, want exited with only its exit status", env)
 	}
 	if env.ExpiresAt != nil {
 		t.Fatalf("an ended environment has no expiry, got %v", env.ExpiresAt)
+	}
+	log, err := os.ReadFile(env.LogPath)
+	if err != nil || !strings.Contains(string(log), crashSecret) {
+		t.Fatalf("local log = %q, %v; want the command's output kept there", log, err)
+	}
+}
+
+func TestManagerWaitsForAHealthyReadyCheck(t *testing.T) {
+	var healthy atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if !healthy.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		io.WriteString(w, "ok")
+	}))
+	defer srv.Close()
+	root := t.TempDir()
+	writeConfig(t, root, fmt.Sprintf("[environments.web]\nstart = \"exec sleep 60\"\nurl = %q\n", srv.URL))
+	m := NewManager(t.TempDir(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	task := Task{TaskID: "task-1", IssueID: "issue-1", WorkspaceID: "ws-1", RootDir: root}
+	env, err := m.Start(task, root, "web", os.Getenv("PATH"))
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { m.Stop(task, "web") })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	got := m.WaitReady(ctx, env.Key)
+	cancel()
+	if got.State != StateStarting {
+		t.Fatalf("state while the ready check answers 503 = %q, want starting", got.State)
+	}
+	healthy.Store(true)
+	if got = waitReady(t, m, env.Key); got.State != StateRunning {
+		t.Fatalf("state once the ready check answers 200 = %q, want running", got.State)
 	}
 }
 

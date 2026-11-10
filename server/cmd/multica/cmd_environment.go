@@ -39,7 +39,7 @@ var environmentStartCmd = &cobra.Command{
 	Short: "Start a declared environment, or return it if it is already running",
 	Long: "Starts the named environment from the .multica/environments.toml found in the current directory or a parent. " +
 		"Starting one that is already running on this issue returns it unchanged. " +
-		"By default the command waits until the environment answers at its ready URL and prints its URL.",
+		"By default the command waits until the environment answers at its ready URL with a status below 500 and prints its URL.",
 	Args: exactArgs(1),
 	RunE: runEnvironmentStart,
 }
@@ -118,7 +118,14 @@ func runEnvironmentStart(cmd *cobra.Command, args []string) error {
 	}
 	switch env.State {
 	case "exited", "stopped":
-		return fmt.Errorf("environment %s %s: %s (log: %s)", env.Name, env.State, env.Detail, env.LogPath)
+		if tail := logTail(env.LogPath, 20); tail != "" {
+			fmt.Fprintf(os.Stderr, "Last lines of %s:\n%s\n", env.LogPath, tail)
+		}
+		reason := env.State
+		if env.Detail != "" {
+			reason += " (" + env.Detail + ")"
+		}
+		return fmt.Errorf("environment %s %s; log: %s", env.Name, reason, env.LogPath)
 	case "starting":
 		if wait {
 			fmt.Fprintf(os.Stderr, "Environment %s is still starting: %s (log: %s)\n", env.Name, env.Detail, env.LogPath)
@@ -127,6 +134,34 @@ func runEnvironmentStart(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintln(os.Stderr, environmentStartSummary(env))
 	return nil
+}
+
+// logTail returns the last n lines of the environment's log, read locally:
+// the daemon never sends its output anywhere.
+func logTail(path string, n int) string {
+	if path == "" {
+		return ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	const maxTail = 16 << 10
+	if info, err := f.Stat(); err == nil && info.Size() > maxTail {
+		if _, err := f.Seek(-maxTail, io.SeekEnd); err != nil {
+			return ""
+		}
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func environmentStartSummary(env daemonEnvironment) string {

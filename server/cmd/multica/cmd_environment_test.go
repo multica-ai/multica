@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -60,12 +62,29 @@ func TestEnvironmentStartSendsTheTaskContextAndPrintsTheURL(t *testing.T) {
 func TestEnvironmentStartFailsWhenTheEnvironmentExited(t *testing.T) {
 	fakeEnvironmentDaemon(t, func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"environment": map[string]any{
-			"name": "web", "state": "exited", "detail": "exit status 1: missing DATABASE_URL", "log_path": "/tmp/web.log",
+			"name": "web", "state": "exited", "detail": "exit status 1", "log_path": "/tmp/web.log",
 		}})
 	})
 	_, err := captureStdout(t, func() error { return runEnvironmentStart(newEnvironmentTestCmd(nil), []string{"web"}) })
-	if err == nil || !strings.Contains(err.Error(), "missing DATABASE_URL") || !strings.Contains(err.Error(), "/tmp/web.log") {
-		t.Fatalf("err = %v, want the exit detail and log path", err)
+	if err == nil || !strings.Contains(err.Error(), "exited (exit status 1)") || !strings.Contains(err.Error(), "/tmp/web.log") {
+		t.Fatalf("err = %v, want the exit status and log path", err)
+	}
+}
+
+func TestEnvironmentLogTailReadsTheLastLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "output.log")
+	var lines []string
+	for i := 1; i <= 30; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := logTail(path, 3), "line 28\nline 29\nline 30"; got != want {
+		t.Fatalf("logTail = %q, want %q", got, want)
+	}
+	if got := logTail(filepath.Join(t.TempDir(), "missing.log"), 3); got != "" {
+		t.Fatalf("logTail of a missing log = %q, want empty", got)
 	}
 }
 

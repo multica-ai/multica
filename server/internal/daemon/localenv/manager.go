@@ -336,7 +336,7 @@ func (m *Manager) Tick() {
 			e.stopping = true
 			expired = append(expired, e)
 		case e.live() && e.leaderGone() && !groupAlive(e.rec.PID):
-			m.endLocked(e, StateExited, lastLogLine(filepath.Join(m.dir, id, outputFile)))
+			m.endLocked(e, StateExited, "")
 		case !e.live() && now.Sub(*e.rec.EndedAt) > endedRetention:
 			delete(m.envs, id)
 			os.Remove(filepath.Join(m.dir, id, stateFile))
@@ -393,7 +393,7 @@ func (m *Manager) wait(e *entry, cmd *exec.Cmd, logFile *os.File) {
 		return
 	}
 	if e.live() {
-		state, detail := StateExited, exitDetail(err, filepath.Join(m.dir, e.rec.ID, outputFile))
+		state, detail := StateExited, exitDetail(err)
 		if e.stopping {
 			state, detail = StateStopped, e.rec.Detail
 		}
@@ -401,7 +401,9 @@ func (m *Manager) wait(e *entry, cmd *exec.Cmd, logFile *os.File) {
 	}
 }
 
-// probe marks the environment running once its ready URL answers. An
+// probe marks the environment running once its ready URL answers with a
+// status below 500. A 404 still counts, since a server with no route at "/"
+// is up; a 5xx is a server still warming up or failing its health check. An
 // environment with no URL is running as soon as it starts.
 func (m *Manager) probe(e *entry) {
 	m.mu.Lock()
@@ -411,6 +413,7 @@ func (m *Manager) probe(e *entry) {
 		m.setRunning(e)
 		return
 	}
+	detail := "not answering at " + ready
 	deadline := m.now().Add(readyTimeout)
 	for m.now().Before(deadline) {
 		m.mu.Lock()
@@ -422,15 +425,18 @@ func (m *Manager) probe(e *entry) {
 		if resp, err := m.client.Get(ready); err == nil {
 			io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 			resp.Body.Close()
-			m.setRunning(e)
-			return
+			if resp.StatusCode < http.StatusInternalServerError {
+				m.setRunning(e)
+				return
+			}
+			detail = fmt.Sprintf("%s answered %d", ready, resp.StatusCode)
 		}
 		time.Sleep(time.Second)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if e.live() && e.rec.State == StateStarting {
-		e.rec.Detail = "not answering at " + ready
+		e.rec.Detail = detail
 		m.persistLocked(e)
 	}
 }
@@ -620,37 +626,15 @@ func childEnv(pathEnv string, port int, name string) []string {
 	return append(env, fmt.Sprintf("MULTICA_PORT=%d", port), "MULTICA_ENVIRONMENT="+name)
 }
 
-func exitDetail(err error, logPath string) string {
-	parts := []string{}
+// exitDetail says how the start command ended and nothing it printed: the
+// detail is reported to the server, and output can carry secrets such as a
+// connection string. The output stays in the local log.
+func exitDetail(err error) string {
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		parts = append(parts, exitErr.Error())
-	} else if err == nil {
-		parts = append(parts, "exited")
+		return exitErr.Error()
 	}
-	if line := lastLogLine(logPath); line != "" {
-		parts = append(parts, line)
-	}
-	return strings.Join(parts, ": ")
-}
-
-func lastLogLine(path string) string {
-	f, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	const tail = 2048
-	if info, err := f.Stat(); err == nil && info.Size() > tail {
-		f.Seek(-tail, io.SeekEnd)
-	}
-	data, _ := io.ReadAll(f)
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	line := strings.TrimSpace(lines[len(lines)-1])
-	if r := []rune(line); len(r) > 300 {
-		line = string(r[:300])
-	}
-	return line
+	return ""
 }
 
 func runWithContext(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
