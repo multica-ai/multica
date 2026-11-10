@@ -253,6 +253,14 @@ describe("traceEventDetail", () => {
     ).toEqual({ kind: "command", command: "git status", params: '{\n  "workdir": "/repo"\n}' });
   });
 
+  it("keeps a file editor's `command` operation as JSON, not shell code", () => {
+    const input = { command: "view", path: "/repo/a.ts" };
+    expect(traceEventDetail({ type: "tool_use", tool: "str_replace_editor", input })).toEqual({
+      kind: "text",
+      text: JSON.stringify(input, null, 2),
+    });
+  });
+
   it("falls back to pretty JSON for a tool call that is not an edit or a command", () => {
     const detail = traceEventDetail({
       type: "tool_use",

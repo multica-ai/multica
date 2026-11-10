@@ -518,17 +518,29 @@ function readFileMutation(input: Record<string, unknown>): FileMutation | null {
 }
 
 /**
- * A command tool's input. Keyed on shape like the summary: `command` (Claude,
+ * A shell command and the call's other arguments, or null when the input is
+ * not a shell command. Keyed on shape like the summary: `command` (Claude,
  * most providers) or `cmd` (Codex `exec_command`), as a non-empty string.
+ *
+ * Shape, not tool name: every backend names its shell differently (Bash,
+ * shell, terminal, exec_command, run_shell_command…). What does share the
+ * `command` key is a file editor such as `str_replace_editor`, where it
+ * selects an operation (`view`, `create`) on a `path`. A call that targets a
+ * file is that editor, not a shell line — the same precedence the summary
+ * gives `path` over `command`.
  */
-function readCommand(input: Record<string, unknown>): TraceEventDetail | null {
+export function readCommandInput(
+  input: Record<string, unknown> | undefined,
+): { command: string; params: string | null } | null {
+  if (!input) return null;
+  if (typeof input.path === "string" || typeof input.file_path === "string") return null;
   const key = typeof input.command === "string" ? "command" : typeof input.cmd === "string" ? "cmd" : null;
   if (key === null) return null;
   const command = input[key] as string;
   if (command.trim().length === 0) return null;
   const rest = Object.entries(input).filter(([k]) => k !== key);
   const params = rest.length > 0 ? JSON.stringify(Object.fromEntries(rest), null, 2) : null;
-  return { kind: "command", command, params };
+  return { command, params };
 }
 
 /**
@@ -560,8 +572,8 @@ export function traceEventDetail(event: TraceEvent): TraceEventDetail {
           lineCount: toLines(mutation.content).length,
         };
       }
-      const command = readCommand(event.input);
-      if (command !== null) return command;
+      const command = readCommandInput(event.input);
+      if (command !== null) return { kind: "command", ...command };
       return { kind: "text", text: JSON.stringify(event.input, null, 2) };
     }
     case "tool_result":
