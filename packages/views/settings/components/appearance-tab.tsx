@@ -490,6 +490,7 @@ function ColorSwatch({
       onClick={onSelect}
       style={{ backgroundColor: color }}
       className={cn(
+        // eslint-disable-next-line no-restricted-syntax -- color swatch
         "flex size-5 items-center justify-center rounded-full text-white outline-none ring-offset-2 ring-offset-surface transition-shadow focus-visible:ring-2 focus-visible:ring-ring",
         selected && "ring-2 ring-foreground",
       )}
