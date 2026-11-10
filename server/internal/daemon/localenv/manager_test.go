@@ -1,0 +1,226 @@
+//go:build !windows
+
+package localenv
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+// TestHelperProcess is the environment under test: the test binary re-run as
+// a server on MULTICA_PORT, or as a command that fails on start.
+func TestHelperProcess(t *testing.T) {
+	switch os.Getenv("LOCALENV_HELPER") {
+	case "serve":
+		ln, err := net.Listen("tcp", "127.0.0.1:"+os.Getenv("MULTICA_PORT"))
+		if err != nil {
+			fmt.Println("listen:", err)
+			os.Exit(2)
+		}
+		fmt.Println("serving", os.Getenv("MULTICA_ENVIRONMENT"))
+		http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "ok") }))
+	case "crash":
+		fmt.Println("boom: missing DATABASE_URL")
+		os.Exit(3)
+	}
+}
+
+func helperCommand(mode string) string {
+	return fmt.Sprintf("LOCALENV_HELPER=%s exec '%s' -test.run='^TestHelperProcess$'", mode, os.Args[0])
+}
+
+func newTestManager(t *testing.T) (*Manager, Task) {
+	t.Helper()
+	root := t.TempDir()
+	writeConfig(t, root, fmt.Sprintf(`
+[environments.web]
+label = "Web app"
+start = "%s"
+
+[environments.broken]
+start = "%s"
+`, helperCommand("serve"), helperCommand("crash")))
+	m := NewManager(t.TempDir(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	task := Task{TaskID: "task-1", IssueID: "issue-1", WorkspaceID: "ws-1", RootDir: root}
+	t.Cleanup(func() {
+		for _, env := range m.Snapshot() {
+			if env.State == StateStarting || env.State == StateRunning {
+				m.Stop(task, env.Name)
+			}
+		}
+	})
+	return m, task
+}
+
+func waitReady(t *testing.T, m *Manager, key string) Environment {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return m.WaitReady(ctx, key)
+}
+
+func TestManagerStartsSupervisesAndStops(t *testing.T) {
+	m, task := newTestManager(t)
+	env, err := m.Start(task, task.RootDir, "web", os.Getenv("PATH"))
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	env = waitReady(t, m, env.Key)
+	if env.State != StateRunning || env.Label != "Web app" || env.URL != fmt.Sprintf("http://localhost:%d", env.Port) {
+		t.Fatalf("started environment = %+v", env)
+	}
+	if env.ExpiresAt == nil || env.ExpiresAt.Sub(env.StartedAt) != DefaultTTL {
+		t.Fatalf("ExpiresAt = %v, want start + %s", env.ExpiresAt, DefaultTTL)
+	}
+	resp, err := http.Get(env.URL)
+	if err != nil {
+		t.Fatalf("environment is not serving: %v", err)
+	}
+	resp.Body.Close()
+
+	again, err := m.Start(task, task.RootDir, "web", "")
+	if err != nil || again.Key != env.Key {
+		t.Fatalf("second Start = %+v, %v; want the running environment back", again, err)
+	}
+
+	stopped, err := m.Stop(task, "web")
+	if err != nil || stopped.State != StateStopped {
+		t.Fatalf("Stop = %+v, %v", stopped, err)
+	}
+	if groupAlive(env.pgid) {
+		t.Fatal("process group still alive after Stop")
+	}
+	if _, err := m.Stop(task, "web"); err != ErrNotFound {
+		t.Fatalf("second Stop = %v, want ErrNotFound", err)
+	}
+}
+
+func TestManagerReportsACrash(t *testing.T) {
+	m, task := newTestManager(t)
+	env, err := m.Start(task, task.RootDir, "broken", "")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	env = waitReady(t, m, env.Key)
+	if env.State != StateExited || !strings.Contains(env.Detail, "exit status 3") || !strings.Contains(env.Detail, "missing DATABASE_URL") {
+		t.Fatalf("crashed environment = %+v, want exited with the exit status and last log line", env)
+	}
+	if env.ExpiresAt != nil {
+		t.Fatalf("an ended environment has no expiry, got %v", env.ExpiresAt)
+	}
+}
+
+func TestManagerStopsAnExpiredEnvironment(t *testing.T) {
+	m, task := newTestManager(t)
+	env, err := m.Start(task, task.RootDir, "web", "")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitReady(t, m, env.Key)
+	m.now = func() time.Time { return time.Now().Add(DefaultTTL + time.Minute) }
+	m.Tick()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := m.List(task)[0]; got.State == StateStopped {
+			if got.Detail != "expired" {
+				t.Fatalf("expired environment detail = %q", got.Detail)
+			}
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("environment past its TTL is still %+v", m.List(task)[0])
+}
+
+func TestManagerAdoptsEnvironmentsAfterRestart(t *testing.T) {
+	m, task := newTestManager(t)
+	env, err := m.Start(task, task.RootDir, "web", "")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitReady(t, m, env.Key)
+
+	restarted := NewManager(m.dir, m.logger)
+	if err := restarted.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	adopted := restarted.List(task)
+	if len(adopted) != 1 || adopted[0].Key != env.Key || adopted[0].State != StateRunning {
+		t.Fatalf("adopted = %+v, want the running environment", adopted)
+	}
+	if !restarted.Owns(env.pgid) {
+		t.Fatal("restarted manager does not own the adopted process group")
+	}
+	if _, err := restarted.Stop(task, "web"); err != nil {
+		t.Fatalf("Stop after restart: %v", err)
+	}
+	if groupAlive(env.pgid) {
+		t.Fatal("adopted environment still alive after Stop")
+	}
+}
+
+func TestManagerScopesEnvironmentsToTheIssue(t *testing.T) {
+	m, task := newTestManager(t)
+	env, err := m.Start(task, task.RootDir, "web", "")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitReady(t, m, env.Key)
+
+	laterTask := task
+	laterTask.TaskID = "task-2"
+	if got := m.List(laterTask); len(got) != 1 {
+		t.Fatalf("a later task on the same issue sees %d environments, want 1", len(got))
+	}
+	otherIssue := Task{TaskID: "task-3", IssueID: "issue-2", WorkspaceID: "ws-1", RootDir: task.RootDir}
+	if got := m.List(otherIssue); len(got) != 0 {
+		t.Fatalf("another issue sees %d environments", len(got))
+	}
+	if _, err := m.Stop(otherIssue, "web"); err != ErrNotFound {
+		t.Fatalf("another issue stopped the environment: %v", err)
+	}
+}
+
+func TestManagerRefusesDirectoriesOutsideTheTask(t *testing.T) {
+	m, task := newTestManager(t)
+	outside := t.TempDir()
+	writeConfig(t, outside, fmt.Sprintf("[environments.web]\nstart = \"%s\"", helperCommand("serve")))
+	if _, err := m.Start(task, outside, "web", ""); err == nil {
+		t.Fatal("Start accepted a directory outside the task")
+	}
+	if _, err := m.Start(task, task.RootDir, "missing", ""); err == nil || !strings.Contains(err.Error(), "declared: broken, web") {
+		t.Fatalf("Start of an undeclared environment = %v", err)
+	}
+	if len(m.Snapshot()) != 0 {
+		t.Fatal("refused starts left environments behind")
+	}
+}
+
+func TestManagerAllocatesDistinctPortBlocks(t *testing.T) {
+	m, task := newTestManager(t)
+	first, err := m.Start(task, task.RootDir, "web", "")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	other := Task{TaskID: "task-9", IssueID: "issue-9", WorkspaceID: "ws-1", RootDir: task.RootDir}
+	second, err := m.Start(other, task.RootDir, "web", "")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { m.Stop(other, "web") })
+	if first.Port == second.Port || first.Port%portBlock != 0 || second.Port%portBlock != 0 {
+		t.Fatalf("ports = %d and %d, want distinct block starts", first.Port, second.Port)
+	}
+	if _, err := os.Stat(filepath.Join(m.dir, strings.TrimPrefix(first.Key, "config:"), stateFile)); err != nil {
+		t.Fatalf("state was not persisted: %v", err)
+	}
+}
