@@ -157,6 +157,8 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"app_action_request":                 workspaceDelete,
 	"app_tool_call":                      workspaceDelete,
 	"issue_environment":                  workspaceDelete,
+	"issue_environment_command":          workspaceDelete,
+	"issue_environment_config":           workspaceDelete,
 	"workspace_app_setting":              workspaceDelete,
 	"app_tool_class_override":            workspaceDelete,
 	"workspace":                          workspaceDelete,

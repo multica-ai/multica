@@ -60,8 +60,19 @@ func TestInspectProcessesReadsArgumentsOfAProcessWithoutWindows(t *testing.T) {
 	}
 	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
 
-	procs := inspectProcesses(context.Background(), []int{cmd.Process.Pid})
-	p, ok := procs[cmd.Process.Pid]
+	// Start can return while the kernel is still finishing the exec, before
+	// /proc/<pid>/cmdline holds the new arguments.
+	var procs map[int]Process
+	var p Process
+	var ok bool
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		procs = inspectProcesses(context.Background(), []int{cmd.Process.Pid})
+		p, ok = procs[cmd.Process.Pid]
+		if (ok && p.debugs(9333)) || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	if !ok || !p.debugs(9333) {
 		t.Fatalf("inspected = %+v, want the arguments the process was started with", procs)
 	}

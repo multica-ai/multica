@@ -46,6 +46,7 @@
     "./issues/canonical-id": "./issues/canonical-id.ts",
     "./issues/queries": "./issues/queries.ts",
     "./issues/wakeups": "./issues/wakeups.ts",
+    "./issues/environments": "./issues/environments.ts",
     "./issues/mutations": "./issues/mutations.ts",
     "./issues/timeline-sort": "./issues/timeline-sort.ts",
     "./issues/comment-thread": "./issues/comment-thread.ts",

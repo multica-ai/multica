@@ -151,8 +151,7 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex-1 overflow-y-auto p-5">
           <div className="space-y-4 min-w-0">
-            {/* Identity row mirrors CreateAgentDialog so the two creates read
-                as siblings — avatar (left) + name/description stack (right). */}
+            {/* Identity row: avatar (left) + name/description stack (right). */}
             <div className="flex items-start gap-4">
               <AvatarUploadControl
                 variant="squad"
@@ -221,7 +220,7 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        {/* Inline footer — see CreateAgentDialog: shadcn DialogFooter applies
+        {/* Inline footer: shadcn DialogFooter applies
             negative margins assuming a padded DialogContent. Our content is
             p-0, so a plain bordered row is the right call. */}
         <div className="flex items-center justify-end gap-2 border-t bg-background px-5 py-3">

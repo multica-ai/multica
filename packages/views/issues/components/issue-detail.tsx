@@ -463,6 +463,17 @@ function formatActivity(
           return t(($) => $.activity.squad_leader_evaluated);
       }
     }
+    case "environment_controlled": {
+      const name = details.label || details.name || "?";
+      switch (details.action) {
+        case "stop":
+          return t(($) => $.activity.environment_stopped, { name });
+        case "restart":
+          return t(($) => $.activity.environment_restarted, { name });
+        default:
+          return t(($) => $.activity.environment_started, { name });
+      }
+    }
     default:
       return entry.action ?? "";
   }
@@ -3242,8 +3253,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         />
       )}
 
-      {/* Environments the issue's runs left running. Hidden until one starts. */}
-      <IssueEnvironmentsSection issueId={id} />
+      {/* Environments the issue's runs left running, and the "+" that starts one. */}
+      <IssueEnvironmentsSection issueId={id} assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} />
 
       {/* Deliverables — the files this issue's comments delivered. Hidden
           while there are none. */}
