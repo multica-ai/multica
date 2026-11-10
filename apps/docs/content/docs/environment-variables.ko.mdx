@@ -199,6 +199,8 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 | Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | 백엔드로 라우팅되는 쿠키 없는 전용 origin. app/API origin과 달라야 하며 `Host`를 보존해야 함 |
 | Plugins | `MULTICA_PLUGIN_API_URL` | 버전을 포함한 Plugin Public API의 전체 Base URL(예: `https://plugin-api.example.com/v1`). 설정하지 않으면 `MULTICA_PUBLIC_URL` + `/v1` 사용 |
 | Plugins | `MULTICA_PLUGIN_DIR` | 개발 중 로컬 plugin bundle을 게시하는 선택적 절대 디렉터리 |
+| 테마 스토어 | `MULTICA_THEME_STORE` | 기본으로 켜져 있으며 공식 [multica-themes](https://github.com/multica-ai/multica-themes) 레지스트리를 읽습니다. `off`로 커뮤니티 테마 스토어를 끄고 레지스트리 요청을 모두 멈춥니다 |
+| 테마 스토어 | `MULTICA_THEME_REGISTRY_URL` | 공식 레지스트리의 fork 등 다른 레지스트리의 `index.json`. [테마와 모양](/themes#셀프-호스팅)을 참고하세요 |
 
 `GITHUB_APP_ID`와 private key를 설정하지 않아도 PR 연결, 미러링, merge 시 상태 변경은 정상적으로 작동합니다. 다만 카드에 CI와 merge 가능 상태가 표시되지 않고 "GitHub에서 선택" 저장소 메뉴도 비활성화됩니다.
 

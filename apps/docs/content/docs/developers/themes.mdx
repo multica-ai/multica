@@ -1,0 +1,234 @@
+---
+title: Make a theme
+description: The Multica theme format — manifest, CSS variables, options, and anchors — how to write and check a theme, and how to publish it to the theme store.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+A Multica theme is a folder with a `manifest.json` and a `theme.css`, plus any fonts and images the CSS uses. The CSS sets public variables for light and dark mode and can restyle a set of stable anchors; the manifest names the theme and can declare options that people adjust in **Settings → Appearance**. Themes never run JavaScript.
+
+<Callout type="warn">
+  The theme format is a beta API. Variables, anchors, and the manifest may change until it is declared stable. The complete, generated list of variables and anchors is in [`docs/theming.md`](https://github.com/multica-ai/multica/blob/main/docs/theming.md); this page covers how they fit together.
+</Callout>
+
+## Quick start
+
+<Steps>
+<Step>
+
+### Start from a copy
+
+In **Settings → Appearance**, pick the theme closest to what you want, then choose **Make your own → Import theme → Duplicate "…" as a new theme**. The copy gets its own id (`pop-copy`, `pop-copy-2`, …), the original's options, and a `theme.css` with one declaration per line. Unchanged, it looks exactly like the original.
+
+</Step>
+<Step>
+
+### Edit it
+
+- **Desktop** writes the copy into its themes folder and opens it. Edit `theme.css` in any editor: every open window picks up a saved change within about a second.
+- **Web** downloads the copy as a `.zip`. Unzip it, edit it, and import the folder again with **Import theme → Theme folder**. The same `id` replaces the installed copy and keeps its option values.
+
+</Step>
+<Step>
+
+### Check it
+
+Run the checks from a checkout of the [Multica repository](https://github.com/multica-ai/multica) before you share it (see [Check and preview](#check-and-preview)).
+
+</Step>
+</Steps>
+
+## The folder
+
+```text
+paper/
+├── manifest.json
+├── theme.css
+└── fonts/
+    └── serif.woff2
+```
+
+The folder can be at the top of a `.zip` or be its only folder. Files other than fonts (`woff2`, `woff`, `ttf`, `otf`) and images (`png`, `jpg`, `webp`, `gif`, `avif`, `svg`) are ignored. A theme is at most 1 MB.
+
+### manifest.json
+
+```json
+{
+  "apiVersion": 1,
+  "id": "paper",
+  "name": "Paper",
+  "author": "Someone",
+  "version": "1.2.0",
+  "description": "Warm paper, serif reading text.",
+  "options": [
+    { "id": "page", "type": "heading", "label": "Page" },
+    { "id": "paper-color", "type": "color", "label": "Paper", "default": { "light": "#f6efdf", "dark": "#1d1b16" } },
+    { "id": "hyphens", "type": "toggle", "label": "Hyphenate", "default": true }
+  ]
+}
+```
+
+| Field | Rules |
+|---|---|
+| `apiVersion` | Must be `1`. |
+| `id` | 1–40 characters of `a-z`, `0-9`, and `-`. The built-in ids (`default`, `pop`, `github`, `blueprint`, `notion`) are reserved. Importing a theme with an installed id replaces it. |
+| `name` | Required, at most 40 characters. |
+| `author`, `version`, `description` | Optional; shown when installing. The theme store requires `version`. |
+| `options` | Up to 24; see [Options](#options). |
+
+### theme.css
+
+```css
+@font-face {
+  font-family: "Paper Serif";
+  src: url(fonts/serif.woff2);
+}
+
+.theme-light {
+  --page-canvas: var(--paper-color);
+  --brand: #8b4513;
+  --font-content-latin: "Paper Serif", Georgia;
+  --h1-style: italic;
+}
+
+.theme-dark {
+  --page-canvas: var(--paper-color);
+}
+
+:root[data-theme-option-hyphens] [data-mc="content"] p {
+  hyphens: auto;
+}
+```
+
+Set variables on `.theme-light` and `.theme-dark`, which are on `<html>`. The theme's CSS loads after the app's own styles, so at equal specificity the theme wins: keep selectors that simple and avoid `!important`.
+
+A person's own Appearance choices still win over a theme: Increase contrast replaces the muted and border colors, and any font other than the default replaces the font variables. Color belongs to the theme alone; to let people choose one, declare an option.
+
+## Variables
+
+Variables come in layers:
+
+- **Foundations** — colors, surfaces, shadows, `--radius`, the text scale, and fonts — are what everything else is built from. Changing `--surface` or `--radius` moves every component that uses it.
+- **Components and product** — menus, buttons, navigation rows, issue rows, the board, status colors — default to a foundation. Set one to change only that component: `--menu-radius: 0` squares menus and nothing else.
+- **Editor content** — headings, lists, tables, quotes, links, code, and syntax colors — styles issue descriptions, comments, chat, and documents.
+
+The app never declares a component variable; components read it with their default as a fallback. So it can be set on any ancestor, not only on `.theme-light`:
+
+```css
+.theme-light [data-mc="chat-window"] {
+  --code-block-background: transparent;
+}
+```
+
+The [variable reference](https://github.com/multica-ai/multica/blob/main/docs/theming.md#variable-reference) lists every variable with its light and dark default.
+
+## Options
+
+Options are rendered under **Theme options** on the Appearance page while the theme is in use. `toggle` and `select` set an attribute on `<html>`; the other types always set the variable `--<id>` on `<html>` — the chosen value or the default — so `theme.css` can read it with a plain `var(--<id>)`.
+
+| Type | Fields | Result |
+|---|---|---|
+| `heading` | — | Starts a group; its `description` is shown under it. |
+| `toggle` | `default`: `true` or `false` | `data-theme-option-<id>="on"` when on, absent when off. |
+| `select` | `choices`: `[{ "value", "label", "swatch"? }]`, `default` | `data-theme-option-<id>="<value>"`. With a `swatch` on every choice, the choices render as color dots. |
+| `color` | `default`: a hex color, or `{ "light", "dark" }` | `--<id>`: a hex color per mode. |
+| `number` | `default`, optional `min`, `max`, `step`, `unit` | `--<id>`: the number with `unit` appended (`px`, `rem`, `%`, …). |
+| `slider` | as `number`, with `min` and `max` required | as `number`. |
+| `text` | `default`: a CSS value | `--<id>`: what was typed, when it is a safe value. |
+| `font` | `default`: a font stack | `--<id>`: a font stack. |
+| `variable-select` | `choices`: `[{ "value", "label" }]` with CSS values, `default` | `--<id>`: the chosen value. |
+
+Option ids are 1–48 characters of `a-z`, `0-9`, and `-`, starting with a letter. `label`, `description`, and choice labels are a string or an object keyed by locale (`en`, `zh-Hans`, `zh-Hant`, `ja`, `ko`, `es`, `fr`); English is the fallback.
+
+```json
+{ "id": "page-width", "type": "slider", "label": "Page width", "default": 46, "min": 30, "max": 60, "step": 2, "unit": "rem" }
+```
+
+```css
+[data-mc="content"] { max-width: var(--page-width); }
+```
+
+## Selectors
+
+Target anchors, slots, and state hooks — not class names or DOM structure, which change without notice. Anchors, slots, and hooks stay until the next `apiVersion`.
+
+- **Anchors** are `data-mc` attributes on the main parts of the app: `app-rail`, `sidebar`, `nav-item`, `page`, `issue-row`, `board-card`, `content` (rich text), `comment`, `chat-window`, `inbox-item`, and more. Many carry state, such as `data-status` and `data-priority` on an issue row.
+- **Slots** are the `data-slot` attributes of UI primitives: `button` (with `data-variant` and `data-size`), `input`, `dialog-content`, `dropdown-menu-item`, and others.
+- **State on `<html>`**: `.theme-light` / `.theme-dark`, `.is-desktop` / `.is-web`, `.mod-macos` / `.mod-windows` / `.mod-linux`, `.is-focused`, `.is-sidebar-collapsed`, `[data-theme="<id>"]`, and the theme's own `[data-theme-option-<id>]`.
+
+```css
+.mod-macos.is-desktop:not(.is-focused) [data-mc="app-rail"] { opacity: 0.7; }
+.theme-dark [data-mc="issue-row"][data-priority="urgent"] { box-shadow: inset 2px 0 var(--priority-urgent); }
+```
+
+The [selector reference](https://github.com/multica-ai/multica/blob/main/docs/theming.md#selectors) lists every anchor, its attributes, and every slot.
+
+## What CSS may not do
+
+Anything that loads a resource is rejected, because CSS can read page content through attribute selectors and send it out in a request:
+
+- `url()` may only name a file in the theme folder (`url(fonts/serif.woff2)`) or a fragment (`url(#filter)`). It is rewritten to the file's `data:` URL.
+- `@import`, `image()`, `image-set()`, `cross-fade()`, `element()`, `src()`, and `expression()` are rejected, as are `behavior` and `-moz-binding`.
+
+Escapes, case, and comments don't get around the check; it reads the CSS the way a browser does. When a theme fails, nothing is installed and every problem is listed with its line in `theme.css`.
+
+`pnpm theme:check` also fails a theme that:
+
+- uses a variable that isn't public, unless it is an option id or the theme reads it itself with `var()`;
+- sets variables anywhere other than `.theme-light` and `.theme-dark` without a descendant selector, so the theme picker can't read the theme's colors back;
+- names a generic family (`sans-serif`, `serif`, …) or a `ui-*` keyword in a font stack, which would override the person's CJK font;
+- misses WCAG AA contrast in either mode: `--foreground` and `--muted-foreground` need 4.5:1 on every surface, `--brand` 4.5:1 on reading surfaces, the primary button label 4.5:1 on the button, and `--faint-foreground` 3:1.
+
+## Check and preview
+
+From a checkout of the [Multica repository](https://github.com/multica-ai/multica):
+
+```bash
+pnpm theme:check path/to/paper          # a folder
+pnpm theme:check paper.zip --json       # a zip, as JSON for CI
+pnpm theme:preview path/to/paper --out preview   # preview/light.png and preview/dark.png
+```
+
+`theme:check` reports manifest errors, blocked CSS, non-public variables, generic font families, and contrast in both modes, each with its line in `theme.css`, and exits with status 1 on an error. Warnings, such as a color it can't resolve, don't fail it.
+
+`theme:preview` renders the screenshots the theme store shows: an issue list next to an open issue, built from the app's own styles, with the theme at its option defaults.
+
+If a theme hides or breaks part of the interface while you work on it, open the app with `?theme=default`, or hold **Shift** right after it loads; see [When a theme breaks something](/themes#when-a-theme-breaks-something).
+
+## Publish to the theme store
+
+The theme store lists themes from the [multica-ai/multica-themes](https://github.com/multica-ai/multica-themes) registry. Its [contributing guide](https://github.com/multica-ai/multica-themes/blob/main/CONTRIBUTING.md) has the details; in short:
+
+<Steps>
+<Step>
+
+### Give the theme its own repository
+
+Keep the theme in a public GitHub repository. [multica-ai/multica-theme-sample](https://github.com/multica-ai/multica-theme-sample) is a template with a release workflow.
+
+</Step>
+<Step>
+
+### Publish a release
+
+Tag the release with the manifest's `version` (`1.0.0` or `v1.0.0`) and attach the zipped theme as `theme.zip`.
+
+</Step>
+<Step>
+
+### Add it to the registry
+
+Open a pull request that adds the theme to `themes.json` in the registry. The pull request runs `theme:check` and `theme:preview` on the release and comments with the result; a maintainer merges it once it passes.
+
+</Step>
+</Steps>
+
+New releases reach the store within about an hour, after they pass the same checks; people who installed the theme then see an update. A release that fails keeps the previous one listed. The app only installs the exact `theme.zip` that passed, and reads it with the same parser and CSS checks as an imported theme.
+
+Each store card shows how many times the theme has been downloaded from that Multica server. Every install and every update counts once, and themes people haven't installed yet are listed most downloaded first.
+
+## Next steps
+
+- [Themes and appearance](/themes) — installing, updating, and removing themes.
+- [`docs/theming.md`](https://github.com/multica-ai/multica/blob/main/docs/theming.md) — the generated variable and selector reference.

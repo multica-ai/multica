@@ -1,0 +1,111 @@
+---
+title: Thèmes et apparence
+description: Choisir le mode clair ou sombre et un thème, installer des thèmes de la communauté depuis la boutique, les tenir à jour, importer les vôtres et revenir au thème par défaut quand un thème casse quelque chose.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+**Paramètres → Apparence** règle l'aspect de Multica sur cet appareil : le mode, le thème, le texte et la mise en page. Chaque changement s'applique immédiatement.
+
+<Callout type="info">
+  Les thèmes et la boutique de thèmes sont en bêta. Un thème qui s'affiche bien aujourd'hui peut avoir besoin d'une mise à jour de son auteur après une version de Multica.
+</Callout>
+
+## Mode et thème
+
+Le **Mode** est Clair, Sombre ou Système (suit votre système d'exploitation). Vous pouvez aussi taper « thème » dans la recherche (`⌘K`) pour en changer.
+
+Le **Thème** définit les couleurs, bordures, ombres et coins de toute l'app. Multica inclut Default, Pop, GitHub, Blueprint et Notion ; choisissez-en un dans la liste, ou ouvrez **Gérer** pour voir tous les thèmes avec un aperçu. Un thème prend en charge le mode clair, le mode sombre ou les deux, et suit le mode choisi.
+
+Certains thèmes ont des options, comme une couleur d'accent ou une largeur de page. Elles apparaissent sous **Options du thème** tant que ce thème est utilisé ; **Réinitialiser les options** rétablit les valeurs par défaut du thème.
+
+Le reste de la page ne dépend pas du thème :
+
+| Groupe | Ce qu'il règle |
+|---|---|
+| **Texte de l'interface** | Police et taille des menus, boutons, listes, de la barre latérale et des titres. |
+| **Texte du contenu** | Police, taille et interligne des descriptions de tâches, commentaires, discussions et documents, ainsi que la police du code. |
+| **Mise en page et accessibilité** | Densité, Réduire les animations et Augmenter le contraste. |
+
+Si vous choisissez une police autre que celle par défaut, ou activez Augmenter le contraste, votre choix l'emporte sur celui du thème. Les couleurs appartiennent au thème ; pour une couleur qu'il ne propose pas en option, choisissez un autre thème ou [créez le vôtre](/developers/themes).
+
+## La boutique de thèmes
+
+**Gérer** ouvre une fenêtre avec tous les thèmes : ceux intégrés, ceux de cet appareil et ceux de la boutique de la communauté. Cherchez par nom ou par auteur, et activez **Afficher uniquement les thèmes installés** pour masquer le reste.
+
+Chaque thème de la boutique a une carte avec une capture d'écran (basculez entre la capture claire et sombre dans le coin), son auteur, une description, son nombre de téléchargements et un lien vers son dépôt GitHub. Les thèmes que vous n'avez pas installés sont classés du plus téléchargé au moins téléchargé.
+
+<Steps>
+<Step>
+
+### Installer
+
+Cliquez sur **Installer** sur une carte. Le thème est téléchargé, vérifié, enregistré sur cet appareil et utilisé.
+
+</Step>
+<Step>
+
+### Changer
+
+Cliquez sur **Utiliser** sur n'importe quel thème installé ou intégré. Le thème actif est marqué **Utilisé**.
+
+</Step>
+<Step>
+
+### Supprimer
+
+Cliquez sur **Supprimer** sur un thème installé. S'il était utilisé, Multica revient à Default.
+
+</Step>
+</Steps>
+
+Les thèmes de la boutique sont créés par la communauté et vérifiés automatiquement avant d'être listés : ils ne peuvent pas exécuter de code, charger quoi que ce soit depuis Internet ni utiliser de fichiers hors du thème. Un thème peut tout de même modifier le style de toutes les pages, y compris les boîtes de dialogue et les avertissements.
+
+Le nombre de téléchargements compte chaque installation et chaque mise à jour, de toutes les personnes qui utilisent le même serveur Multica.
+
+## Mises à jour
+
+Dès que vous avez installé un thème de la boutique, la page Apparence affiche une ligne **Thèmes de la boutique**. Cliquez sur **Rechercher des mises à jour**, puis sur **Tout mettre à jour**, ou mettez à jour un seul thème depuis sa carte avec **Mettre à jour vers …**. Une mise à jour conserve les valeurs des options du thème et ne change pas le thème que vous utilisez.
+
+Les thèmes ne sont jamais mis à jour sans votre demande.
+
+## Importer un thème
+
+Un thème reçu sous forme de fichier, ou que vous avez créé, s'installe depuis **Créer le vôtre → Importer un thème** :
+
+- **Fichier de thème (.zip)** installe un thème compressé.
+- **Dossier du thème** installe un thème décompressé.
+
+Multica affiche le nom, l'auteur et la version du thème avant de l'installer. N'installez que des thèmes de personnes de confiance. Importer un thème qui a le même id qu'un thème installé le remplace.
+
+Pour créer votre propre thème, voir [Créer un thème](/developers/themes).
+
+## Quand un thème casse quelque chose
+
+Un thème peut masquer ou casser une partie de l'interface. Pour revenir à Default :
+
+- ouvrez Multica avec `?theme=default` à la fin de l'adresse, ou
+- maintenez **Maj** enfoncée un instant juste après le chargement de la page. Dans l'application de bureau, rechargez avec `⌘R` (`Ctrl+R` sous Windows et Linux) puis maintenez **Maj**.
+
+Le thème reste en pause jusqu'à la fermeture de la fenêtre. La page Apparence affiche un avis avec **Utiliser mon thème** pour le réactiver ; vous pouvez aussi y choisir un autre thème ou supprimer celui qui pose problème.
+
+## Où c'est enregistré
+
+Le mode, le thème, ses options et les thèmes installés sont enregistrés sur cet appareil et ne sont pas synchronisés avec votre compte. Chaque navigateur et chaque application de bureau a les siens. Ils sont identiques dans tous les espaces de travail sur cet appareil.
+
+## Auto-hébergement
+
+Un serveur auto-hébergé liste par défaut le registre officiel, [multica-ai/multica-themes](https://github.com/multica-ai/multica-themes). Le serveur récupère les thèmes et les captures sur GitHub et les met en cache ; l'app les télécharge depuis votre serveur. Les téléchargements sont comptés par serveur.
+
+| Variable | Effet |
+|---|---|
+| `MULTICA_THEME_STORE` | `off` désactive la boutique. **Gérer** ne liste alors que les thèmes de chaque appareil, et le serveur n'envoie aucune requête au registre. |
+| `MULTICA_THEME_REGISTRY_URL` | Fait lire à la boutique l'`index.json` d'un autre registre, par exemple un fork de l'officiel. |
+
+Voir [Variables d'environnement](/environment-variables) pour le reste de la configuration du serveur.
+
+## Étapes suivantes
+
+- [Créer un thème](/developers/themes) — le format des thèmes, les vérifications et la publication dans la boutique.
+- [Recherche, raccourcis et préférences](/shortcuts) — les autres réglages personnels.

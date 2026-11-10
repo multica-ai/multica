@@ -29,7 +29,6 @@
     "check:deps-catalog": "node scripts/check-dependency-catalog.mjs",
     "theme:check": "node scripts/theme-check.mjs",
     "theme:preview": "node scripts/theme-preview.mjs",
-    "theme:preview": "node scripts/theme-preview.mjs",
     "clean": "turbo clean && rm -rf node_modules",
     "ui:add": "cd packages/ui && npx shadcn@latest add",
     "generate:brand": "node scripts/brand/generate.mjs",

@@ -99,6 +99,7 @@ import { storeThemeState, storeThemesOptions } from "@multica/core/appearance/th
 import { useConfigStore } from "@multica/core/config";
 import { useLocale, useT } from "../../i18n";
 import { SegmentedToggle } from "../../common/segmented-toggle";
+import { docsLocalePrefix } from "../../common/docs-locale";
 import { openExternal } from "../../platform/open-external";
 import { themeFolderAPI } from "../../platform/theme-folder";
 import { ThemesButton, useStoreThemeInstall } from "./themes-dialog";
@@ -447,7 +448,9 @@ function useThemeImport(): ThemeImport {
   return { chooseZip: () => zipRef.current?.click(), chooseFolder: () => folderRef.current?.click(), element };
 }
 
-const THEME_GUIDE_URL = "https://github.com/multica-ai/multica/blob/main/docs/theming.md";
+function themeGuideUrl(language: string): string {
+  return `https://multica.ai/docs${docsLocalePrefix(language)}/developers/themes`;
+}
 
 function downloadFile(data: Uint8Array<ArrayBuffer>, name: string, type: string) {
   const url = URL.createObjectURL(new Blob([data], { type }));
@@ -524,6 +527,7 @@ function StoreThemesRow() {
  */
 function OwnThemeRow({ theme }: { theme: Theme }) {
   const { t } = useT("settings");
+  const locale = useLocale();
   const themeLabelFor = useThemeLabel();
   const importer = useThemeImport();
   const install = useInstalledThemesStore((s) => s.install);
@@ -576,7 +580,7 @@ function OwnThemeRow({ theme }: { theme: Theme }) {
           variant="ghost"
           size="icon-sm"
           className="text-muted-foreground"
-          onClick={() => openExternal(THEME_GUIDE_URL)}
+          onClick={() => openExternal(themeGuideUrl(locale))}
           aria-label={t(($) => $.appearance.tools.guide)}
           title={t(($) => $.appearance.tools.guide)}
         >

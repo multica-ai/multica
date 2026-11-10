@@ -1,0 +1,234 @@
+---
+title: テーマを作る
+description: Multica のテーマ形式（マニフェスト、CSS 変数、オプション、アンカー）、テーマの書き方とチェック方法、テーマストアへの公開方法。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+Multica のテーマは、`manifest.json` と `theme.css`、それに CSS が使うフォントや画像を入れたフォルダです。CSS はライトとダークのモードごとに公開変数を設定し、安定したアンカーのスタイルを変更できます。マニフェストはテーマに名前を付け、**設定 → 外観** で調整できるオプションを宣言できます。テーマが JavaScript を実行することはありません。
+
+<Callout type="warn">
+  テーマの形式はベータ版の API です。安定版と宣言されるまで、変数、アンカー、マニフェストは変わる可能性があります。自動生成された変数とアンカーの完全な一覧は [`docs/theming.md`](https://github.com/multica-ai/multica/blob/main/docs/theming.md) にあります。このページではそれらの組み合わせ方を説明します。
+</Callout>
+
+## クイックスタート
+
+<Steps>
+<Step>
+
+### コピーから始める
+
+**設定 → 外観** で目的に近いテーマを選び、**自分で作る → テーマを読み込む → 「…」を複製して新しいテーマにする** を選びます。コピーには独自の id（`pop-copy`、`pop-copy-2` …）、元のテーマのオプション、1 行に 1 宣言の `theme.css` が付きます。変更しなければ元のテーマとまったく同じ見た目です。
+
+</Step>
+<Step>
+
+### 編集する
+
+- **デスクトップアプリ** はコピーをテーマフォルダに書き出して開きます。好きなエディタで `theme.css` を編集すると、保存した変更が開いているすべてのウィンドウに約 1 秒で反映されます。
+- **Web** ではコピーが `.zip` としてダウンロードされます。展開して編集し、**テーマを読み込む → テーマフォルダ** で読み込み直します。同じ `id` ならインストール済みのコピーが置き換わり、オプションの値は保たれます。
+
+</Step>
+<Step>
+
+### チェックする
+
+共有する前に、[Multica リポジトリ](https://github.com/multica-ai/multica)のクローンでチェックを実行します（[チェックとプレビュー](#チェックとプレビュー)を参照）。
+
+</Step>
+</Steps>
+
+## フォルダ
+
+```text
+paper/
+├── manifest.json
+├── theme.css
+└── fonts/
+    └── serif.woff2
+```
+
+フォルダは `.zip` の最上位に置くか、`.zip` 内の唯一のフォルダにします。フォント（`woff2`、`woff`、`ttf`、`otf`）と画像（`png`、`jpg`、`webp`、`gif`、`avif`、`svg`）以外のファイルは無視されます。テーマ全体の上限は 1 MB です。
+
+### manifest.json
+
+```json
+{
+  "apiVersion": 1,
+  "id": "paper",
+  "name": "Paper",
+  "author": "Someone",
+  "version": "1.2.0",
+  "description": "Warm paper, serif reading text.",
+  "options": [
+    { "id": "page", "type": "heading", "label": "Page" },
+    { "id": "paper-color", "type": "color", "label": "Paper", "default": { "light": "#f6efdf", "dark": "#1d1b16" } },
+    { "id": "hyphens", "type": "toggle", "label": "Hyphenate", "default": true }
+  ]
+}
+```
+
+| フィールド | ルール |
+|---|---|
+| `apiVersion` | `1` でなければなりません。 |
+| `id` | `a-z`、`0-9`、`-` からなる 1〜40 文字。組み込みの id（`default`、`pop`、`github`、`blueprint`、`notion`）は予約済みです。インストール済みの id のテーマを読み込むと置き換わります。 |
+| `name` | 必須、40 文字以内。 |
+| `author`、`version`、`description` | 任意。インストール時に表示されます。テーマストアでは `version` が必須です。 |
+| `options` | 24 個まで。[オプション](#オプション)を参照。 |
+
+### theme.css
+
+```css
+@font-face {
+  font-family: "Paper Serif";
+  src: url(fonts/serif.woff2);
+}
+
+.theme-light {
+  --page-canvas: var(--paper-color);
+  --brand: #8b4513;
+  --font-content-latin: "Paper Serif", Georgia;
+  --h1-style: italic;
+}
+
+.theme-dark {
+  --page-canvas: var(--paper-color);
+}
+
+:root[data-theme-option-hyphens] [data-mc="content"] p {
+  hyphens: auto;
+}
+```
+
+変数は `<html>` に付く `.theme-light` と `.theme-dark` に設定します。テーマの CSS はアプリ自身のスタイルの後に読み込まれるので、詳細度が同じならテーマが優先されます。セレクタはこの程度に単純にし、`!important` は避けてください。
+
+外観ページでの本人の選択はテーマより優先されます。コントラストを上げるはミュートされた色と枠線の色を置き換え、既定以外のフォントはフォント変数を置き換えます。色はテーマだけが決めます。色を選べるようにしたい場合はオプションを宣言します。
+
+## 変数
+
+変数はいくつかの層に分かれています。
+
+- **基盤**：色、サーフェス、影、`--radius`、文字サイズの段階、フォント。ほかのすべてはこれを元に作られています。`--surface` や `--radius` を変えると、それを使うすべてのコンポーネントが変わります。
+- **コンポーネントとプロダクト**：メニュー、ボタン、ナビゲーション行、タスク行、ボード、ステータスの色。既定ではいずれかの基盤変数を使います。1 つ設定するとそのコンポーネントだけが変わります。`--menu-radius: 0` はメニューだけを角丸なしにします。
+- **エディタの内容**：見出し、リスト、表、引用、リンク、コード、シンタックスハイライトの色。タスクの説明、コメント、チャット、ドキュメントに適用されます。
+
+アプリはコンポーネント変数を宣言しません。コンポーネントは既定値をフォールバックにして読み取ります。そのため `.theme-light` に限らず、任意の祖先要素に設定できます。
+
+```css
+.theme-light [data-mc="chat-window"] {
+  --code-block-background: transparent;
+}
+```
+
+[変数リファレンス](https://github.com/multica-ai/multica/blob/main/docs/theming.md#variable-reference)に、すべての変数とライト・ダークの既定値があります。
+
+## オプション
+
+オプションは、そのテーマを使っている間、外観ページの **テーマのオプション** に表示されます。`toggle` と `select` は `<html>` に属性を付けます。そのほかの型は常に `<html>` に変数 `--<id>`（選んだ値または既定値）を設定するので、`theme.css` ではそのまま `var(--<id>)` で読めます。
+
+| 型 | フィールド | 結果 |
+|---|---|---|
+| `heading` | — | グループを始めます。`description` はその下に表示されます。 |
+| `toggle` | `default`：`true` または `false` | オンのとき `data-theme-option-<id>="on"`、オフのときは属性なし。 |
+| `select` | `choices`：`[{ "value", "label", "swatch"? }]`、`default` | `data-theme-option-<id>="<value>"`。すべての選択肢に `swatch` があると色の丸で表示されます。 |
+| `color` | `default`：16 進カラー、または `{ "light", "dark" }` | `--<id>`：モードごとの 16 進カラー。 |
+| `number` | `default`、任意で `min`、`max`、`step`、`unit` | `--<id>`：数値に `unit`（`px`、`rem`、`%` …）を付けた値。 |
+| `slider` | `number` と同じ。`min` と `max` は必須 | `number` と同じ。 |
+| `text` | `default`：CSS の値 | `--<id>`：入力された値（安全な値の場合）。 |
+| `font` | `default`：フォントスタック | `--<id>`：フォントスタック。 |
+| `variable-select` | `choices`：CSS の値を持つ `[{ "value", "label" }]`、`default` | `--<id>`：選んだ値。 |
+
+オプションの id は `a-z`、`0-9`、`-` からなる 1〜48 文字で、英字で始まります。`label`、`description`、選択肢のラベルは文字列か、ロケールをキーにしたオブジェクト（`en`、`zh-Hans`、`zh-Hant`、`ja`、`ko`、`es`、`fr`）です。フォールバックは英語です。
+
+```json
+{ "id": "page-width", "type": "slider", "label": "Page width", "default": 46, "min": 30, "max": 60, "step": 2, "unit": "rem" }
+```
+
+```css
+[data-mc="content"] { max-width: var(--page-width); }
+```
+
+## セレクタ
+
+クラス名や DOM 構造ではなく、アンカー、スロット、状態フックを対象にしてください。前者は予告なく変わります。アンカー、スロット、フックは次の `apiVersion` まで維持されます。
+
+- **アンカー** はアプリの主要な部分に付く `data-mc` 属性です：`app-rail`、`sidebar`、`nav-item`、`page`、`issue-row`、`board-card`、`content`（リッチテキスト）、`comment`、`chat-window`、`inbox-item` など。多くは状態も持ちます。たとえばタスク行の `data-status` と `data-priority` です。
+- **スロット** は UI 部品の `data-slot` 属性です：`button`（`data-variant` と `data-size` も）、`input`、`dialog-content`、`dropdown-menu-item` など。
+- **`<html>` の状態**：`.theme-light` / `.theme-dark`、`.is-desktop` / `.is-web`、`.mod-macos` / `.mod-windows` / `.mod-linux`、`.is-focused`、`.is-sidebar-collapsed`、`[data-theme="<id>"]`、テーマ自身の `[data-theme-option-<id>]`。
+
+```css
+.mod-macos.is-desktop:not(.is-focused) [data-mc="app-rail"] { opacity: 0.7; }
+.theme-dark [data-mc="issue-row"][data-priority="urgent"] { box-shadow: inset 2px 0 var(--priority-urgent); }
+```
+
+[セレクタリファレンス](https://github.com/multica-ai/multica/blob/main/docs/theming.md#selectors)に、すべてのアンカーとその属性、すべてのスロットがあります。
+
+## CSS でできないこと
+
+リソースを読み込むものはすべて拒否されます。CSS は属性セレクタでページの内容を読み取り、リクエストで外部に送れてしまうからです。
+
+- `url()` に指定できるのは、テーマフォルダ内のファイル（`url(fonts/serif.woff2)`）かフラグメント（`url(#filter)`）だけです。ファイルの `data:` URL に書き換えられます。
+- `@import`、`image()`、`image-set()`、`cross-fade()`、`element()`、`src()`、`expression()` は拒否されます。`behavior` と `-moz-binding` も同様です。
+
+エスケープ、大文字小文字、コメントではチェックを回避できません。チェックはブラウザと同じように CSS を読みます。テーマがチェックに失敗すると何もインストールされず、すべての問題が `theme.css` の行番号付きで表示されます。
+
+`pnpm theme:check` は次のテーマも失敗にします。
+
+- 公開されていない変数を使っている（オプションの id か、テーマ自身が `var()` で読む変数を除く）。
+- `.theme-light` と `.theme-dark` 以外の場所で、子孫セレクタなしに変数を設定している。テーマピッカーがテーマの色を読み取れなくなります。
+- フォントスタックに汎用ファミリー（`sans-serif`、`serif` …）や `ui-*` キーワードがある。本人が選んだ CJK フォントが効かなくなります。
+- どちらかのモードで WCAG AA のコントラストを満たさない：`--foreground` と `--muted-foreground` はすべてのサーフェスで 4.5:1、`--brand` は読むためのサーフェスで 4.5:1、プライマリボタンのラベルはボタン上で 4.5:1、`--faint-foreground` は 3:1 が必要です。
+
+## チェックとプレビュー
+
+[Multica リポジトリ](https://github.com/multica-ai/multica)のクローンで実行します。
+
+```bash
+pnpm theme:check path/to/paper          # フォルダ
+pnpm theme:check paper.zip --json       # zip、CI 向けに JSON で出力
+pnpm theme:preview path/to/paper --out preview   # preview/light.png と preview/dark.png
+```
+
+`theme:check` はマニフェストのエラー、ブロックされた CSS、公開されていない変数、汎用フォントファミリー、両モードのコントラストを `theme.css` の行番号付きで報告し、エラーがあれば終了コード 1 で終わります。解決できない色などの警告では失敗しません。
+
+`theme:preview` はテーマストアに表示されるスクリーンショットを描画します。アプリ自身のスタイルで作ったタスク一覧と開いたタスクを、オプションを既定値にしたテーマで表示します。
+
+作業中にテーマでインターフェースが隠れたり崩れたりしたら、`?theme=default` を付けてアプリを開くか、読み込み直後に **Shift** を押し続けます。[テーマで表示が崩れたとき](/themes#テーマで表示が崩れたとき)を参照してください。
+
+## テーマストアに公開する
+
+テーマストアには [multica-ai/multica-themes](https://github.com/multica-ai/multica-themes) レジストリのテーマが並びます。詳しくはその[コントリビューションガイド](https://github.com/multica-ai/multica-themes/blob/main/CONTRIBUTING.md)を参照してください。要点は次のとおりです。
+
+<Steps>
+<Step>
+
+### テーマ専用のリポジトリを用意する
+
+テーマを公開 GitHub リポジトリに置きます。[multica-ai/multica-theme-sample](https://github.com/multica-ai/multica-theme-sample) はリリース用のワークフロー付きのテンプレートです。
+
+</Step>
+<Step>
+
+### リリースを公開する
+
+マニフェストの `version`（`1.0.0` または `v1.0.0`）でタグを付け、zip にしたテーマを `theme.zip` として添付します。
+
+</Step>
+<Step>
+
+### レジストリに追加する
+
+レジストリの `themes.json` にテーマを追加する pull request を作ります。pull request はリリースに対して `theme:check` と `theme:preview` を実行して結果をコメントし、通過したらメンテナーがマージします。
+
+</Step>
+</Steps>
+
+新しいリリースは同じチェックを通過してから約 1 時間でストアに反映され、テーマをインストールした人にはアップデートが表示されます。失敗したリリースは前のリリースを置き換えません。アプリはチェックを通過した `theme.zip` そのものだけをインストールし、読み込んだテーマと同じパーサーと CSS チェックで読み込みます。
+
+ストアのカードには、その Multica サーバーからテーマがダウンロードされた回数が表示されます。インストールとアップデートはそれぞれ 1 回と数えられ、まだインストールされていないテーマはダウンロード数の多い順に並びます。
+
+## 次のステップ
+
+- [テーマと外観](/themes) — テーマのインストール、アップデート、削除。
+- [`docs/theming.md`](https://github.com/multica-ai/multica/blob/main/docs/theming.md) — 自動生成された変数とセレクタのリファレンス。
