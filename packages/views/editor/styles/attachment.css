@@ -106,17 +106,8 @@
   z-index: 1;
 }
 
-.image-figure:hover .image-toolbar,
-.image-toolbar:focus-within {
+.image-figure:hover .image-toolbar {
   opacity: 1;
-}
-
-/* A touch screen never hovers, and an image in an editor does not open the
-   viewer on tap, so the toolbar is the only way to reach it there. */
-@media (hover: none) {
-  .image-toolbar {
-    opacity: 1;
-  }
 }
 
 .image-toolbar button {
