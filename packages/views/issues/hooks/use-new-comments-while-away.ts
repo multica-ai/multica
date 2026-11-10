@@ -24,6 +24,10 @@ export function useNewCommentsWhileAway(
 ): { ids: readonly string[]; clear: () => void } {
   const [ids, setIds] = useState<string[]>([]);
   const seenRef = useRef<Set<string> | null>(null);
+  // The timeline is bounded, and an older thread can be merged in later (a
+  // deliverable or deep-link landing); only comments newer than everything
+  // seen so far are arrivals.
+  const newestRef = useRef(Number.NEGATIVE_INFINITY);
   const keyRef = useRef(resetKey);
   // Read inside the timeline effect: an arrival grows the page before the
   // away flag is re-measured, so this is still the state the reader was in.
@@ -34,19 +38,28 @@ export function useNewCommentsWhileAway(
     if (keyRef.current !== resetKey) {
       keyRef.current = resetKey;
       seenRef.current = null;
+      newestRef.current = Number.NEGATIVE_INFINITY;
       setIds((prev) => (prev.length === 0 ? prev : []));
     }
     if (!ready) return;
     const comments = timeline.filter((entry) => entry.type === "comment");
     if (seenRef.current === null) {
       seenRef.current = new Set(comments.map((entry) => entry.id));
+      newestRef.current = comments.reduce((newest, entry) => {
+        const at = createdAt(entry);
+        return at > newest ? at : newest;
+      }, Number.NEGATIVE_INFINITY);
       return;
     }
     const seen = seenRef.current;
+    const since = newestRef.current;
     const arrived: string[] = [];
     for (const entry of comments) {
       if (seen.has(entry.id)) continue;
       seen.add(entry.id);
+      const at = createdAt(entry);
+      if (!(at > since)) continue;
+      if (at > newestRef.current) newestRef.current = at;
       if (!awayRef.current || isDeletedComment(entry)) continue;
       if (entry.actor_type === "member" && entry.actor_id === userId) continue;
       arrived.push(entry.id);
@@ -70,4 +83,8 @@ export function useNewCommentsWhileAway(
   }, [ids, timeline]);
 
   return { ids: live, clear };
+}
+
+function createdAt(entry: TimelineEntry): number {
+  return Date.parse(entry.created_at);
 }

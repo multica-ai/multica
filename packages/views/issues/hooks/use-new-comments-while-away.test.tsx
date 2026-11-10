@@ -4,14 +4,16 @@ import type { TimelineEntry } from "@multica/core/types";
 import { useNewCommentsWhileAway } from "./use-new-comments-while-away";
 
 const ME = "user-me";
+let clock = Date.parse("2026-11-10T00:00:00Z");
 
 function comment(id: string, actor: { type?: string; id?: string } = {}, extra: Partial<TimelineEntry> = {}): TimelineEntry {
+  clock += 1000;
   return {
     type: "comment",
     id,
     actor_type: actor.type ?? "agent",
     actor_id: actor.id ?? "agent-1",
-    created_at: "2026-11-10T00:00:00Z",
+    created_at: new Date(clock).toISOString(),
     content: id,
     ...extra,
   } as TimelineEntry;
@@ -34,6 +36,17 @@ describe("useNewCommentsWhileAway", () => {
 
     rerender({ timeline: [...base, comment("c3"), comment("c4")], ready: true, away: true, resetKey: "i1" });
     expect(result.current.ids).toEqual(["c3", "c4"]);
+  });
+
+  it("ignores an older thread merged into the bounded timeline", () => {
+    const old = comment("old", {}, { created_at: "2026-01-01T00:00:00Z" });
+    const base = [comment("c1")];
+    const { result, rerender } = setup({ timeline: base, ready: true, away: true, resetKey: "i1" });
+    rerender({ timeline: [old, ...base], ready: true, away: true, resetKey: "i1" });
+    expect(result.current.ids).toEqual([]);
+
+    rerender({ timeline: [old, ...base, comment("c2")], ready: true, away: true, resetKey: "i1" });
+    expect(result.current.ids).toEqual(["c2"]);
   });
 
   it("waits for the timeline to load before taking the baseline", () => {
