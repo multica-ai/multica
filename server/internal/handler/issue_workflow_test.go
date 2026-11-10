@@ -285,6 +285,100 @@ func lookupStatusName(t *testing.T, key string) string {
 	return name
 }
 
+func lookupStatusIcon(t *testing.T, key string) string {
+	t.Helper()
+	var icon string
+	dbfx.QueryRow(t, `SELECT icon FROM issue_status WHERE workspace_id = $1 AND key = $2`, testWorkspaceID, key).Scan(&icon)
+	return icon
+}
+
+// new_status.icon reaches the catalog: a fresh workspace that applies a
+// workflow definition renders the glyph its author declared instead of the
+// category default. Before the field existed the key was dropped by JSON
+// decoding and the apply still reported success.
+func TestCreateIssueWorkflowNewStatusCarriesIcon(t *testing.T) {
+	seedTestCatalog(t)
+	resetDefaultWorkflow(t)
+	statusName := "Icon " + workflowTestSuffix()
+	var created IssueWorkflowResponse
+	testutil.Call(t, testHandler.CreateIssueWorkflow, workflowRequest("POST", "/api/issue-workflows", map[string]any{
+		"name":  "Icon template " + workflowTestSuffix(),
+		"steps": []map[string]any{{"new_status": map[string]any{"name": statusName, "category": "started", "icon": "three_quarters"}}, {"status_key": "in_review"}},
+	})).Want(http.StatusCreated).JSON(&created)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_workflow WHERE id = $1`, created.ID)
+		testPool.Exec(context.Background(), `DELETE FROM issue_status WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, statusName)
+	})
+
+	var newKey string
+	for _, s := range created.Steps {
+		if lookupStatusName(t, s.StatusKey) == statusName {
+			newKey = s.StatusKey
+		}
+	}
+	if newKey == "" {
+		t.Fatalf("workflow steps %+v lack the new status", created.Steps)
+	}
+	if icon := lookupStatusIcon(t, newKey); icon != "three_quarters" {
+		t.Fatalf("icon = %q, want three_quarters", icon)
+	}
+}
+
+// An icon outside the catalog vocabulary fails the workflow write instead of
+// being written through or silently replaced.
+func TestCreateIssueWorkflowNewStatusRejectsUnknownIcon(t *testing.T) {
+	seedTestCatalog(t)
+	resetDefaultWorkflow(t)
+	statusName := "Bad icon " + workflowTestSuffix()
+	testutil.Call(t, testHandler.CreateIssueWorkflow, workflowRequest("POST", "/api/issue-workflows", map[string]any{
+		"name":  "Bad icon template " + workflowTestSuffix(),
+		"steps": []map[string]any{{"new_status": map[string]any{"name": statusName, "category": "started", "icon": "in_review"}}},
+	})).Want(http.StatusBadRequest)
+	var count int
+	dbfx.QueryRow(t, `SELECT count(*) FROM issue_status WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, statusName).Scan(&count)
+	if count != 0 {
+		t.Fatalf("invalid icon still created %d status rows", count)
+	}
+}
+
+// Applying a template whose status already exists reuses that status without
+// rewriting its icon: the catalog row is shared by every workflow, and a
+// per-workflow write would silently revert a local edit.
+func TestCreateIssueWorkflowNewStatusReuseKeepsIcon(t *testing.T) {
+	seedTestCatalog(t)
+	resetDefaultWorkflow(t)
+	statusName := "Reused " + workflowTestSuffix()
+	create := func(name, icon string) IssueWorkflowResponse {
+		t.Helper()
+		var wf IssueWorkflowResponse
+		testutil.Call(t, testHandler.CreateIssueWorkflow, workflowRequest("POST", "/api/issue-workflows", map[string]any{
+			"name":  name,
+			"steps": []map[string]any{{"new_status": map[string]any{"name": statusName, "category": "started", "icon": icon}}},
+		})).Want(http.StatusCreated).JSON(&wf)
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM issue_workflow WHERE id = $1`, wf.ID)
+		})
+		return wf
+	}
+	first := create("Reuse one "+workflowTestSuffix(), "three_quarters")
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_status WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, statusName)
+	})
+	var key string
+	for _, s := range first.Steps {
+		if lookupStatusName(t, s.StatusKey) == statusName {
+			key = s.StatusKey
+		}
+	}
+	if key == "" {
+		t.Fatalf("first workflow %+v lacks the new status", first.Steps)
+	}
+	create("Reuse two "+workflowTestSuffix(), "check")
+	if icon := lookupStatusIcon(t, key); icon != "three_quarters" {
+		t.Fatalf("reuse rewrote the shared icon to %q", icon)
+	}
+}
+
 func TestDefaultWorkflowIsEditableButNotDeletable(t *testing.T) {
 	seedTestCatalog(t)
 	resetDefaultWorkflow(t)

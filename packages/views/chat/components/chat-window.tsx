@@ -73,6 +73,7 @@ import { useChatOpenReveal } from "./use-chat-open-reveal";
 import { ChatWindowMessages } from "./chat-window-messages";
 import { ChatInput } from "./chat-input";
 import { ChatQueue } from "./chat-queue";
+import { ChatAppRequests } from "../../common/app-requests";
 import { EmptyState } from "./chat-empty-state";
 import { SessionRenameInput } from "./session-rename-input";
 import { SessionHistoryList } from "./session-history-list";
@@ -948,6 +949,10 @@ export function ChatWindow() {
       ) : (
         <OfflineBanner agentName={activeAgent?.name} availability={availability} />
       )}
+
+      <div className="px-4">
+        <ChatAppRequests sessionId={activeSessionId} />
+      </div>
 
       <ChatQueue
         tasks={queuedTasks}

@@ -397,6 +397,10 @@ type TaskCancellationActor struct {
 }
 
 type AgentTaskResponse struct {
+	// Restricted marks a run on an issue in a private project the caller
+	// cannot see (MUL-8472): only identity, status, timing and usage remain.
+	Restricted bool `json:"restricted,omitempty"`
+
 	StartClaimSupported      bool                   `json:"start_claim_supported,omitempty"`
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
@@ -1722,6 +1726,12 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to save agent access")
 		return
 	}
+	if len(allowlist) > 0 {
+		if err := syncAgentAppsFromAllowlist(r.Context(), qtx, created, allowlist, parseUUID(ownerID)); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to save agent apps")
+			return
+		}
+	}
 	for _, skillID := range skillUUIDs {
 		if err := qtx.AddAgentSkill(r.Context(), db.AddAgentSkillParams{
 			AgentID: created.ID,
@@ -2560,6 +2570,13 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if shouldClearComposioAllowlist || params.ComposioToolkitAllowlist != nil {
+		if err := syncAgentAppsFromAllowlist(r.Context(), h.Queries, updated, params.ComposioToolkitAllowlist, parseUUID(requestUserID(r))); err != nil {
+			slog.Warn("update agent: sync agent apps failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to update agent apps")
+			return
+		}
+	}
 
 	// Invocation targets (MUL-3963): replace wholesale when the owner touched
 	// permission. Done after the row update so a permission_mode flip and its
@@ -3029,6 +3046,11 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.hydrateTaskSupplementMetadata(r.Context(), r, agent.WorkspaceID, tasks, resp)
+	if err := h.redactHiddenProjectTasks(r, workspaceID, tasks, resp); err != nil {
+		slog.Warn("list agent tasks: resolve project access failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to list agent tasks")
+		return
+	}
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 	if includeUsage {
 		if err := h.hydrateAgentTaskUsage(r.Context(), agent.ID, taskIDs, resp); err != nil {
@@ -3327,6 +3349,11 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 	}
 	if err := h.redactForeignChatTaskContent(r.Context(), requestUserID(r), kept, resp); err != nil {
 		slog.Warn("agent task snapshot: resolve chat owners failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to list agent task snapshot")
+		return
+	}
+	if err := h.redactHiddenProjectTasks(r, workspaceID, kept, resp); err != nil {
+		slog.Warn("agent task snapshot: resolve project access failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to list agent task snapshot")
 		return
 	}

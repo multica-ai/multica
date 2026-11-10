@@ -95,7 +95,11 @@
     "quick_create_unconfirmed": "Creación con agente sin confirmar",
     "autopilot_paused": "Automatización en pausa",
     "children_done": "Sub-tareas finalizadas",
-    "autopilot_quota_exceeded": "Límite de ejecuciones de automatizaciones alcanzado"
+    "autopilot_quota_exceeded": "Límite de ejecuciones de automatizaciones alcanzado",
+    "app_action_requested": "Necesita tu confirmación",
+    "app_action_reminder": "La confirmación caduca pronto",
+    "app_connect_requested": "Conectar una aplicación",
+    "app_action_result": "Resultado de la acción de la aplicación"
   },
   "labels": {
     "set_status_to": "Establecer estado en",

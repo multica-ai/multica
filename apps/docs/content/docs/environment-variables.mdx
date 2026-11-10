@@ -391,6 +391,8 @@ Supported keys:
 | `ws_claim_poll_interval` | `3m` | Upper bound for healthy WebSocket claim safety polls, independent of `poll_interval`; the daemon applies downward-only jitter |
 | `heartbeat_interval` | `15s` | Heartbeat interval |
 | `agent_timeout` | unlimited | Absolute time limit per run |
+| `agent_idle_watchdog` | `2h` | Silence ceiling when no tool call is in flight; `0s` turns off the daemon watchdog entirely, including `agent_tool_watchdog` |
+| `agent_tool_watchdog` | same as `agent_idle_watchdog` | Silence ceiling while a tool call is in flight; `0s` means the daemon watchdog never stops a run over a silent tool call, so the run is bounded only by `agent_timeout`, which is unlimited by default |
 | `codex_semantic_inactivity_timeout` | derived | Codex semantic-silence threshold. With nothing set it takes the larger of the idle and tool watchdog budgets; a tool budget of `0` falls back to the idle budget, and only when the whole watchdog suite is disabled does Codex keep its own `10m` |
 | `codex_handshake_timeout` | `30s`; `thread/start`, `thread/resume`: `60s` | Codex app-server startup handshake ceilings. An explicit value overrides both budgets globally |
 | `disable_auto_update` | follows environment | `true` turns auto-update off; `false` clears the local override and returns to the env var or default |
@@ -399,7 +401,7 @@ Supported keys:
 
 A few value rules:
 
-- Duration keys accept positive Go durations (such as `10s`, `2h`); `0s` and negative values are rejected. The one exception is `agent_timeout`: `0s` is valid and explicitly disables the run time limit.
+- Duration keys take a positive Go duration such as `10s` or `2h`; negative values are always rejected. Only `agent_timeout`, `agent_idle_watchdog`, and `agent_tool_watchdog` also accept `0s`: for `agent_timeout` it removes the run time limit, and for the two watchdog keys the table says what it turns off.
 - Passing an empty string clears a persisted value and falls back to the env var or built-in default, for example `multica config set poll_interval ""`.
 - `max_concurrent_tasks` requires a non-negative integer.
 - Relative `workspaces_root` values are converted to absolute paths when saved.

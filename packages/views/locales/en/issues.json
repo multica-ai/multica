@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "Open in Desktop"
+  },
+  "desktop": {
+    "link_other_instance": "The desktop app is connected to a different Multica instance.",
+    "link_workspace_unavailable": "This workspace is unavailable in the desktop app."
+  },
   "inline_run": {
     "label": "{{name}} run",
     "stop": "Stop",
@@ -754,16 +761,17 @@
     "restart_failed": "Couldn't stop the current run. Your message wasn't sent."
   },
   "reply": {
+    "recipients_changed": "Reply target changed. Review the recipients before sending again.",
     "placeholder": "Leave a reply...",
     "annotations": {
-      "direct_reply": "Reply",
-      "direct_comment": "Post comment",
-      "direct_target_deleted": "The reply target was deleted. Copy your note before selecting another comment.",
-      "copy_note": "Copy note",
-      "note_copied": "Note copied",
-      "note_copy_failed": "Could not copy note. Select and copy the text manually.",
+      "send_all": "Send all",
+      "send_with_annotations_and_body": "Will send with saved annotations ({{count}}) and draft text.",
+      "send_with_annotations": "Will send with saved annotations ({{count}}).",
+      "send_with_body": "Will send with the draft text.",
       "confirm_add": "Add annotation",
       "save": "Save annotation",
+      "confirm_add_short": "Add",
+      "save_short": "Save",
       "add_comment": "Add to comment",
       "add": "Add to reply",
       "note_label": "Comment",
@@ -1519,6 +1527,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "Show in comments",
     "locate_description": "Show in description",
+    "copy_link": "Copy link to latest version",
+    "not_found": "No deliverable named “{{name}}” on this issue",
+    "link_load_failed": "Couldn’t load this issue’s deliverables to open “{{name}}”. Reload to try again.",
     "version_label": "Version {{version}} of {{total}}",
     "version_of": "v{{version}} of {{total}}",
     "info_source": "Source",
@@ -1734,7 +1745,6 @@
       "brief_header": "The workflow brief this run received"
     },
     "detail": {
-      "follows_project": "(from project)",
       "card_title": "{{workflow}} · from {{project}}"
     },
     "list_separator": ", ",
@@ -1882,6 +1892,26 @@
       "row_actions": "Actions for {{name}}",
       "empty_title": "No saved views yet",
       "empty_description": "Set up filters and display options in an issue list, then save them as a view."
+    }
+  },
+  "app_calls": {
+    "section_title": "Apps",
+    "chips_label": "Apps used in this run",
+    "calls_count_one": "{{count}} call",
+    "calls_count_other": "{{count}} calls",
+    "more": "+{{count}} more",
+    "scope": {
+      "team": "Team account",
+      "personal": "Personal account"
+    },
+    "outcome": {
+      "ok": "Ran",
+      "error": "Failed",
+      "blocked": "Blocked",
+      "pending": "Waiting",
+      "approved": "Approved",
+      "rejected": "Declined",
+      "rate_limited": "Rate limited"
     }
   }
 }

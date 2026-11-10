@@ -38,6 +38,8 @@ import {
   OPEN_WORKSPACE_WINDOW_CHANNEL,
   OTHER_WINDOW_WORKSPACES_CHANNEL,
   WINDOW_WORKSPACE_REPORT_CHANNEL,
+  type WorkspacePathOptions,
+  type WorkspacePathRequest,
 } from "../shared/workspace-window";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
@@ -155,6 +157,8 @@ const desktopAPI = {
   /** Listen for invitation IDs delivered via deep link */
   onInviteOpen: (callback: (invitationId: string) => void) =>
     subscribeToMainRendererChannel("invite:open", callback),
+  onIssueOpen: (callback: (url: string) => void) =>
+    subscribeToMainRendererChannel("issue:open", callback),
   /** Open a URL in the default browser */
   openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
   /** Download a file by URL through Electron's native download system.
@@ -268,12 +272,17 @@ const desktopAPI = {
   },
   /** Hand a workspace (and optionally a path inside it) to the other main
    *  window that shows it. Returns false when no other window does. */
-  focusWorkspaceWindow: (workspaceSlug: string, path?: string): boolean => {
+  focusWorkspaceWindow: (
+    workspaceSlug: string,
+    path?: string,
+    options?: WorkspacePathOptions,
+  ): boolean => {
     try {
       return (
         ipcRenderer.sendSync(FOCUS_WORKSPACE_WINDOW_CHANNEL, {
           workspaceSlug,
           ...(path === undefined ? {} : { path }),
+          navigate: options?.navigate === true,
         }) === true
       );
     } catch {
@@ -284,11 +293,14 @@ const desktopAPI = {
   openWorkspaceWindow: (workspaceSlug: string) =>
     ipcRenderer.invoke(OPEN_WORKSPACE_WINDOW_CHANNEL, workspaceSlug),
   /** Listen for workspace paths routed here from another window. */
-  onOpenWorkspacePath: (callback: (path: string) => void) =>
+  onOpenWorkspacePath: (callback: (request: WorkspacePathRequest) => void) =>
     subscribeToMainRendererChannel<unknown>(
       WORKSPACE_OPEN_PATH_CHANNEL,
-      (path) => {
-        if (typeof path === "string") callback(path);
+      (payload) => {
+        const request = payload as Partial<WorkspacePathRequest> | null;
+        if (typeof request?.path === "string") {
+          callback({ path: request.path, navigate: request.navigate === true });
+        }
       },
     ),
   /** Listen for Cmd/Ctrl+Shift+N new-window requests. */

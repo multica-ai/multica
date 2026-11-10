@@ -559,7 +559,7 @@ function SkillsVisual() {
         <div className="w-[200px] shrink-0 border-r flex flex-col">
           <div className="flex items-center justify-between border-b px-3 py-2">
             <span className="text-caption font-semibold">Skills</span>
-            <button type="button" className="rounded-xs p-0.5 text-muted-foreground hover:bg-accent transition-colors">
+            <button type="button" aria-label="New skill" className="rounded-xs p-0.5 text-muted-foreground hover:bg-accent transition-colors">
               <Sparkles className="h-3.5 w-3.5" />
             </button>
           </div>

@@ -3008,7 +3008,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// logged but never fail the claim: a broken overlay must not prevent
 	// the agent from running with its base config.
 	if composioMCPEnabled && len(task.RuntimeMcpOverlay) > 0 {
-		if merged, err := mergeMCPOverlay(mcpConfig, json.RawMessage(task.RuntimeMcpOverlay)); err != nil {
+		overlay := json.RawMessage(task.RuntimeMcpOverlay)
+		// The stored overlay names the apps gateway without a credential; the
+		// run's token is minted here, once the task id is final.
+		if h.ConnectedApps != nil {
+			if authorized, err := h.ConnectedApps.AuthorizeOverlay(overlay, task.ID); err != nil {
+				slog.Warn("daemon claim: authorize apps gateway overlay failed", "task_id", uuidToString(task.ID), "error", err)
+			} else {
+				overlay = authorized
+			}
+		}
+		if merged, err := mergeMCPOverlay(mcpConfig, overlay); err != nil {
 			slog.Warn("daemon claim: merge runtime_mcp_overlay failed; falling back to agent mcp_config", "task_id", uuidToString(task.ID), "error", err)
 		} else {
 			mcpConfig = merged
@@ -4714,7 +4724,7 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	}
 	offered := service.TaskStartCapabilities{
 		Supplement:     slices.Contains(req.Capabilities, protocol.DaemonCapabilityTaskSupplementV1),
-		ProcessCleanup: slices.Contains(req.Capabilities, protocol.DaemonCapabilityPiProcessCleanupV1),
+		ProcessCleanup: slices.Contains(req.Capabilities, protocol.DaemonCapabilityPiProcessCleanupV1) || slices.Contains(req.Capabilities, protocol.DaemonCapabilityMuseAppProcessCleanupV1),
 	}
 	var task *db.AgentTaskQueue
 	var err error
@@ -5931,7 +5941,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 // transcript (#5219); idempotent when nothing was deferred.
 // TaskCancelAckRequest is the body of the daemon's cancel acknowledgement.
 type TaskCancelAckRequest struct {
-	// Absent on older daemons: a pending Pi cleanup cannot be assumed clean.
+	// Absent on older daemons: negotiated cleanup cannot be assumed complete.
 	ProcessCleanupConfirmed *bool `json:"process_cleanup_confirmed,omitempty"`
 	// BranchName: a cancelled worktree task has already committed whatever the
 	// agent produced — the worktree is finalized before the daemon learns of
@@ -6431,6 +6441,13 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if scope == "subtree" {
+		if err := h.redactHiddenProjectTasks(r, workspaceID, tasks, resp); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check project access")
+			return
+		}
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -6597,6 +6614,12 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 	// to anyone else it does not exist either.
 	if task.ChatSessionID.Valid && (scope.ChatSessionOwnerID == "" || scope.ChatSessionOwnerID != requestUserID(r)) {
 		writeError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	// An issue run's transcript is visible exactly where its issue is
+	// (MUL-8472). Task ids reach every member through task lifecycle events,
+	// so this cannot rely on the issue page being unreachable.
+	if !h.requireIssueIDVisible(w, r, wsID, task.IssueID, http.StatusNotFound, "task not found") {
 		return
 	}
 

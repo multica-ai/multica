@@ -70,6 +70,97 @@ default.** Reviewers should request changes or close the PR until one is
 provided. PRs
 missing the problem, goal, or high-level proposal are also not ready for review.
 
+### Screenshots and Recordings
+
+Store PR evidence as [GitHub attachments](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli).
+Their URLs do not depend on a temporary Git branch and have no preset expiry;
+GitHub does not promise permanent archival. Keep visual-test reference images
+with their tests, and use CI artifacts for temporary debugging reports. Actions
+artifacts expire, so they are unsuitable as the only copy of PR evidence.
+
+From the repository root, upload files to an existing PR with Node.js 22+ and
+[GitHub CLI 2.103.2+](https://github.com/cli/cli/releases/tag/v2.103.2):
+
+```bash
+scripts/pr-shots --repo multica-ai/multica 123 ./before.png ./after.png ./demo.mp4
+```
+
+By default, the script appends attachments at the end of the PR description
+(after any closing issue reference), preserves its existing content, and prints
+the resulting attachment Markdown to stdout. A PR URL can replace the number;
+`--repo` is optional when `gh` can identify the repository. Diagnostics
+go to stderr. Files are identified by SHA-256 in hidden comments next to the
+attachments in the PR body, so retries and renamed files reuse uploaded content
+across checkouts. Keep those comments if you want that retry behavior. Changed
+file content produces a new attachment.
+
+The attachments are already in the PR description; do not paste another copy
+of the stdout Markdown into it. To place an attachment under Screenshots, move
+its entire block from the end of the description: the hidden hash comment,
+blank lines, and image Markdown or video URL together.
+
+Uploads run one file at a time and stop at the first failure. Already confirmed
+files remain saved; stderr identifies the failed and unattempted files. The
+script reads back the PR even when `gh` exits nonzero, because a write may have
+succeeded. Re-run the same command to reuse confirmed attachments and upload
+the missing ones. Run one uploader per PR at a time and avoid editing the
+description during an upload; GitHub body edits are not conditional writes.
+
+To migrate an existing screenshot while keeping its caption and position, use
+`--replace` with exactly one image file. The old URL must occur in a standalone
+Markdown image, such as `![Original caption](https://example.com/old.png)`:
+
+```bash
+scripts/pr-shots --repo multica-ai/multica \
+  --replace https://example.com/old.png 123 ./after.png
+```
+
+Verify the new attachments render and remain accessible to the PR's reviewers
+before deleting old storage. Check other PRs and repository references before
+removing a shared evidence branch. Preserve old links for any failed migration.
+
+You can also use the native CLI directly, including during PR creation:
+
+```bash
+gh pr create --body-file ./pr.md --attach ./before.png --attach ./after.png
+gh pr edit 123 --attach ./demo.mp4
+```
+
+In `pr.md`, write `![Before](./before.png)` and `![After](./after.png)` where
+the images should appear. For video, put `![](./demo.mp4)` in its own paragraph.
+The CLI replaces these local references with uploaded URLs; unreferenced
+attachments are appended. Native `gh --attach` does not deduplicate retries.
+
+CLI uploads require **push access to the target repository** and a credential
+accepted by GitHub's upload endpoint. Version 2.103.2 lets that endpoint decide
+which GitHub App tokens can upload; it does not guarantee support for every App
+or an Actions `GITHUB_TOKEN`. Verify the actual agent/CI credential. Without
+push access, upload through the PR editor in GitHub's web interface. Contributors
+who must stay in the CLI should ask a maintainer in the PR to upload their files;
+opening a fork PR alone does not grant upload permission on the upstream repo.
+This helper targets GitHub.com, not GitHub Enterprise Server.
+
+Supported files are PNG, JPEG, GIF, WebP, SVG, MP4, MOV, and WebM. Images are
+limited to 10 MB; video limits are 10 MB on Free plans and 100 MB on paid plans.
+Use H.264 MP4 for broad playback support. Public-repository attachments are
+publicly accessible: use test data and inspect captures before uploading.
+
+Capture the affected screens from the running application and record the
+commit, viewport, theme, and reproduction steps with the evidence. Use the
+local environment workflow below; for Desktop recording, see
+[Scripting Desktop over CDP](#scripting-desktop-over-cdp). For stable screenshots:
+
+```js
+await page.screenshot({ path: "after.png", animations: "disabled" });
+```
+
+This completes finite CSS/Web Animations and resets infinite ones to their
+initial frame during capture. To compare a particular animation frame, pause
+`document.getAnimations()` and set each animation's `currentTime` to the same
+timestamp on both versions instead. Hold a loading state with a controlled
+local API response, rather than relying on a fixed sleep. Include a short
+recording when the motion or sequence itself is the change under review.
+
 ## Development Model
 
 Local development uses one shared PostgreSQL container and one database per checkout.
@@ -522,10 +613,16 @@ Two constraints are enforced rather than documented:
   execution-environment helper for every task; `go run` deletes that binary when
   the launcher exits, so the daemon would register, heartbeat, and then fail
   every task with `fork/exec …/go-build…/exe/multica: no such file or directory`.
-- **`daemon start` is refused under a daemon-managed task.** A checkout below a
-  `.multica/daemon_task_context.json` marker cannot start a second daemon
-  competing for its own work, so `make up C=daemon` stops with that explanation
-  before spending a login on it. Use `C=api,web` there.
+- **Under a daemon-managed task, only the environment's own daemon starts.** A
+  checkout below a `.multica/daemon_task_context.json` marker is an agent's
+  workdir, and the CLI refuses `daemon start`, `stop` and `status` there so a
+  task never operates your own daemon or profile. It makes one exception: an
+  explicit `--profile` that the dev-env registry assigns to an environment (its
+  CLI profile, or the `desktop-localhost-<backend port>` profile its Desktop
+  signs in), pointed at that environment's API, from a process the task's
+  `MULTICA_*` identity was stripped from. `make up` launches the daemon and
+  Desktop exactly that way, so an agent can run `make up C=api,web,daemon` and
+  test a real agent run. `make destroy` stops the daemon and removes its profile.
 
 ### Web with realistic content
 

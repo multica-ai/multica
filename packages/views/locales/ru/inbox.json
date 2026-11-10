@@ -99,7 +99,11 @@
     "quick_create_unconfirmed": "Создание с помощью агента не подтверждено",
     "autopilot_paused": "Автопилот приостановлен",
     "children_done": "Подзадачи завершены",
-    "autopilot_quota_exceeded": "Достигнут лимит запусков Автопилота"
+    "autopilot_quota_exceeded": "Достигнут лимит запусков Автопилота",
+    "app_action_requested": "Требуется ваше подтверждение",
+    "app_action_reminder": "Срок подтверждения скоро истечёт",
+    "app_connect_requested": "Подключить приложение",
+    "app_action_result": "Результат действия приложения"
   },
   "labels": {
     "set_status_to": "Установлен статус",

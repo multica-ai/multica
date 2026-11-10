@@ -220,9 +220,8 @@ func applyConfigSet(cfg *cli.CLIConfig, key, value string) error {
 			return err
 		}
 	case "agent_timeout":
-		// agent_timeout is the one duration knob where "0s" is a
-		// meaningful persisted value (it explicitly disables the
-		// wall-clock cap; see cli.CLIConfig.AgentTimeout). Store the raw
+		// agent_timeout accepts "0s" to explicitly disable the
+		// wall-clock cap (see cli.CLIConfig.AgentTimeout). Store the raw
 		// string via a pointer so we can distinguish "not set" (nil)
 		// from "disabled" (non-nil, "0s") and any positive value.
 		if value == "" {
@@ -288,8 +287,9 @@ func assignBool(dst *bool, key, value string) error {
 }
 
 // assignPositiveDuration parses value as a strictly-positive Go duration
-// and writes the raw string into dst. Shared by every persisted daemon
-// duration knob except agent_timeout, whose zero value is meaningful.
+// and writes the raw string into dst. Not used by agent_timeout,
+// agent_idle_watchdog, or agent_tool_watchdog, whose zero values are
+// meaningful.
 // Empty string clears the field.
 func assignPositiveDuration(dst *string, key, value string) error {
 	if value == "" {
