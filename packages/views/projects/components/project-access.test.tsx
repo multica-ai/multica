@@ -123,7 +123,7 @@ it("requires confirmation before making private content visible to the workspace
   await waitFor(() => expect(api.updateProject).toHaveBeenCalledWith("p1", { visibility: "workspace", member_ids: ["owner", "lead", "member"] }));
 });
 
-it("keeps existing private memberships manageable with the creation flag off", async () => {
+it("keeps existing private memberships manageable on a server without private project support", async () => {
   configStore.getState().setFeatureFlags({ private_projects_v1: false });
   const user = userEvent.setup();
   renderControl();

@@ -486,6 +486,9 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	if !cfg.FeatureFlags["project_workflows_v1"] {
 		t.Fatal("project_workflows_v1: want true for installed clients")
 	}
+	if !cfg.FeatureFlags["private_projects_v1"] {
+		t.Fatal("private_projects_v1: want true; clients read it as private project support")
+	}
 	if !cfg.FeatureFlags["agents_agent_builder"] {
 		t.Fatalf("agents_agent_builder: want true for installed clients, got false")
 	}
@@ -552,6 +555,24 @@ func TestGetConfigKeepsProjectWorkflowsEnabledForInstalledClients(t *testing.T) 
 	}
 	if !cfg.FeatureFlags["project_workflows_v1"] {
 		t.Fatal("retired project_workflows_v1 overrides must not hide workflows in installed clients")
+	}
+}
+
+func TestGetConfigKeepsPrivateProjectsEnabled(t *testing.T) {
+	h := &Handler{}
+	withFeatureFlag(t, h, "private_projects_v1", false)
+
+	w := httptest.NewRecorder()
+	h.GetConfig(w, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if !cfg.FeatureFlags["private_projects_v1"] {
+		t.Fatal("a retired private_projects_v1 override must not hide private projects")
 	}
 }
 
