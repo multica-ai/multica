@@ -15,19 +15,6 @@
 const encode = (id: string) => encodeURIComponent(id);
 
 /**
- * Undo `encode` for a route parameter the router handed over still encoded.
- * A segment that isn't valid percent-encoding is returned as is, so a
- * hand-typed `%` can't throw while the page renders.
- */
-export function decodeRouteSegment(segment: string): string {
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return segment;
-  }
-}
-
-/**
  * `?focus=` token that scrolls the agent's General settings to its
  * conversation-starters editor and flashes it. Lives here because it is URL
  * vocabulary: `agentConversationStarters()` writes it and the page reads it,
