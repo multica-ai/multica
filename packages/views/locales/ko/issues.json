@@ -1713,15 +1713,12 @@
       "name_placeholder": "상태 이름",
       "add": "추가"
     },
-    "menu": {
-      "view_flow": "전체 흐름 보기",
-      "switch": "워크플로 전환"
-    },
     "flow": {
       "title": "“{{workflow}}” 워크플로",
       "scope_own": "이 워크플로는 이 프로젝트만 사용합니다.",
       "no_handoff_here": "인계 없음",
-      "scope_shared_other": "프로젝트 {{count}}개가 이 워크플로를 사용합니다. 인계는 모두에 적용됩니다."
+      "scope_shared_other": "프로젝트 {{count}}개가 이 워크플로를 사용합니다. 인계는 모두에 적용됩니다.",
+      "switch": "워크플로 전환"
     },
     "templates": {
       "delivery": {

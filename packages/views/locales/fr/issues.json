@@ -1781,16 +1781,13 @@
       "name_placeholder": "Nom de l’état",
       "add": "Ajouter"
     },
-    "menu": {
-      "view_flow": "Voir tout le flux",
-      "switch": "Changer de workflow"
-    },
     "flow": {
       "title": "Workflow {{workflow}}",
       "scope_own": "Seul ce projet utilise ce workflow.",
       "no_handoff_here": "Pas de relais",
       "scope_shared_one": "{{count}} projet utilise ce workflow. Ses transferts s’appliquent à chaque projet qui l’utilise.",
-      "scope_shared_other": "{{count}} projets utilisent ce workflow. Ses transferts s’appliquent à tous."
+      "scope_shared_other": "{{count}} projets utilisent ce workflow. Ses transferts s’appliquent à tous.",
+      "switch": "Changer de workflow"
     },
     "templates": {
       "delivery": {
