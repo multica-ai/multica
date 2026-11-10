@@ -3303,6 +3303,19 @@ describe("ApiClient shared credential across windows", () => {
     expect(onUnauthorized).not.toHaveBeenCalled();
   });
 
+  it("ignores a late 401 if a bearer session started after the request", async () => {
+    const onUnauthorized = vi.fn();
+    const client = new ApiClient("https://api.example.test", { onUnauthorized });
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      client.setToken("signed-in");
+      return jsonResponse({ error: "unauthorized" }, 401);
+    }));
+
+    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(client.getToken()).toBe("signed-in");
+  });
+
   // ...but a genuine expiry still ends the session: nothing replaced the
   // credential, so the 401 is about the one still in use.
   it("still ends the session on a 401 for the credential in use", async () => {
