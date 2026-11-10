@@ -248,6 +248,12 @@ afterEach(() => {
   cleanup();
 });
 
+// Highlighting splits a code block into token spans, so match the block's
+// whole text rather than a single text node.
+function codeBlock(text: string) {
+  return Array.from(document.querySelectorAll("pre")).find((pre) => pre.textContent === text);
+}
+
 describe("AgentTranscriptDialog", () => {
   it.each([
     { type: "text", label: "Agent", icon: ".icon-bot" },
@@ -397,13 +403,11 @@ describe("AgentTranscriptDialog", () => {
     // The report is the narrative and renders whole; a tool call is a line
     // whose body waits in the inspector. This inversion is the redesign.
     expect(screen.getByTestId("rich-content")).toHaveTextContent("Agent hidden detail");
-    const commandBlock = () =>
-      Array.from(document.querySelectorAll("pre")).find((pre) => pre.textContent === "pnpm test");
-    expect(commandBlock()).toBeUndefined();
+    expect(codeBlock("pnpm test")).toBeUndefined();
 
     fireEvent.click(screen.getByRole("button", { name: /pnpm test/ }));
 
-    expect(commandBlock()).toBeDefined();
+    expect(codeBlock("pnpm test")).toBeDefined();
   });
 
   it("shows a command in a code block with its other arguments as JSON below", () => {
@@ -418,12 +422,7 @@ describe("AgentTranscriptDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Bash/ }));
 
-    // Bash highlighting splits the command into token spans, so match the
-    // block's whole text rather than a single text node.
-    const command = Array.from(document.querySelectorAll("pre")).find(
-      (pre) => pre.textContent === "pnpm test\npnpm lint",
-    );
-    expect(command?.parentElement).toHaveClass("bg-muted");
+    expect(codeBlock("pnpm test\npnpm lint")?.parentElement).toHaveClass("bg-muted");
     expect(screen.queryByText(/"command":/)).not.toBeInTheDocument();
     expect(screen.getByText(/"description": "Run checks"/, { selector: "pre" })).toBeInTheDocument();
   });

@@ -519,28 +519,27 @@ function readFileMutation(input: Record<string, unknown>): FileMutation | null {
 
 /**
  * A shell command and the call's other arguments, or null when the input is
- * not a shell command. Keyed on shape like the summary: `command` (Claude,
- * most providers) or `cmd` (Codex `exec_command`), as a non-empty string.
+ * not a shell command. Keyed on shape like the summary, not on tool name:
+ * every backend names its shell differently, but they all pass a non-empty
+ * `command` (or `cmd`) string.
  *
- * Shape, not tool name: every backend names its shell differently (Bash,
- * shell, terminal, exec_command, run_shell_command…). What does share the
- * `command` key is a file editor such as `str_replace_editor`, where it
- * selects an operation (`view`, `create`) on a `path`. A call that targets a
- * file is that editor, not a shell line — the same precedence the summary
- * gives `path` over `command`.
+ * A file editor such as `str_replace_editor` uses the same key for an
+ * operation (`view`, `create`) on a `path`, so a call that targets a file
+ * is not a command — the precedence the summary gives `path` over `command`.
  */
 export function readCommandInput(
   input: Record<string, unknown> | undefined,
 ): { command: string; params: string | null } | null {
   if (!input) return null;
   if (typeof input.path === "string" || typeof input.file_path === "string") return null;
-  const key = typeof input.command === "string" ? "command" : typeof input.cmd === "string" ? "cmd" : null;
-  if (key === null) return null;
-  const command = input[key] as string;
-  if (command.trim().length === 0) return null;
-  const rest = Object.entries(input).filter(([k]) => k !== key);
-  const params = rest.length > 0 ? JSON.stringify(Object.fromEntries(rest), null, 2) : null;
-  return { command, params };
+  for (const key of ["command", "cmd"]) {
+    const command = input[key];
+    if (typeof command !== "string" || command.trim().length === 0) continue;
+    const { [key]: _, ...rest } = input;
+    const params = Object.keys(rest).length > 0 ? JSON.stringify(rest, null, 2) : null;
+    return { command, params };
+  }
+  return null;
 }
 
 /**

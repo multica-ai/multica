@@ -1872,7 +1872,7 @@ export function StepBody({ item }: { item: TimelineItem }) {
       return (
         <CommandDetailSurface
           command={clipForDisplay(detail.command)}
-          params={detail.params === null ? null : clipForDisplay(detail.params)}
+          params={detail.params && clipForDisplay(detail.params)}
         />
       );
     default: {
