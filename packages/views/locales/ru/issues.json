@@ -602,7 +602,11 @@
   },
   "timeline": {
     "loading": "Загрузка...",
-    "jump_to_latest": "К последним событиям"
+    "jump_to_latest": "К последним событиям",
+    "new_comments_one": "{{count}} новый комментарий",
+    "new_comments_few": "{{count}} новых комментария",
+    "new_comments_many": "{{count}} новых комментариев",
+    "new_comments_other": "{{count}} новых комментария"
   },
   "activity": {
     "created": "создал(а) эту задачу",
