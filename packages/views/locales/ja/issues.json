@@ -1712,15 +1712,12 @@
       "name_placeholder": "ステータス名",
       "add": "追加"
     },
-    "menu": {
-      "view_flow": "フロー全体を見る",
-      "switch": "ワークフローを切り替え"
-    },
     "flow": {
       "title": "ワークフロー「{{workflow}}」",
       "scope_own": "このワークフローを使用しているのはこのプロジェクトだけです。",
       "no_handoff_here": "引き継ぎなし",
-      "scope_shared_other": "{{count}} 件のプロジェクトがこのワークフローを使用しています。引き継ぎはそのすべてに適用されます。"
+      "scope_shared_other": "{{count}} 件のプロジェクトがこのワークフローを使用しています。引き継ぎはそのすべてに適用されます。",
+      "switch": "ワークフローを切り替え"
     },
     "templates": {
       "delivery": {

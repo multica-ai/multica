@@ -1772,16 +1772,13 @@
       "name_placeholder": "Nombre del estado",
       "add": "Añadir"
     },
-    "menu": {
-      "view_flow": "Ver el flujo completo",
-      "switch": "Cambiar de flujo de trabajo"
-    },
     "flow": {
       "title": "Flujo de trabajo {{workflow}}",
       "scope_own": "Solo este proyecto usa este flujo de trabajo.",
       "no_handoff_here": "Sin traspaso",
       "scope_shared_one": "{{count}} proyecto usa este flujo de trabajo. Sus traspasos se aplican a todos los proyectos que lo usan.",
-      "scope_shared_other": "{{count}} proyectos usan este flujo de trabajo. Sus traspasos se aplican a todos ellos."
+      "scope_shared_other": "{{count}} proyectos usan este flujo de trabajo. Sus traspasos se aplican a todos ellos.",
+      "switch": "Cambiar de flujo de trabajo"
     },
     "templates": {
       "delivery": {

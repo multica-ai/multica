@@ -1712,15 +1712,12 @@
       "name_placeholder": "狀態名稱",
       "add": "新增"
     },
-    "menu": {
-      "view_flow": "檢視完整流程",
-      "switch": "切換工作流"
-    },
     "flow": {
       "title": "「{{workflow}}」工作流",
       "scope_own": "只有這個專案使用這個工作流。",
       "no_handoff_here": "不交接",
-      "scope_shared_other": "{{count}} 個專案使用這個工作流，它的交接對這些專案都生效。"
+      "scope_shared_other": "{{count}} 個專案使用這個工作流，它的交接對這些專案都生效。",
+      "switch": "切換工作流"
     },
     "templates": {
       "delivery": {
