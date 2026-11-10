@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -112,6 +113,23 @@ var acpSessionUnusableRe = regexp.MustCompile(
 // which is why it is a stop-list rather than a redesign.
 var acpSessionRequestComplaintRe = regexp.MustCompile(
 	`(no such|unknown|invalid|expired|unrecogni[sz]ed|nonexistent|missing)\s+(session|conversation|thread)\s+(params?|parameters?|request|requests|config|configuration|option|options|capability|capabilities|mode|setup)`)
+
+// acpDataDetailsNotFound reports whether an error's `data` is the structured
+// {"details":"not_found"} that Hermes' gateway-backed ACP adapter (v0.22+)
+// returns under a bare -32603 "Internal error" when session/resume names a
+// session the gateway does not know (GH #10071). None of the wording checks
+// can see it: the message says nothing, and the only evidence is this token.
+//
+// It is an exact match on a parsed field, not a word search, because the same
+// envelope carries other gateway codes that are not about the id —
+// {"details":"not_ready"} is a gateway still starting (GH #9272), and retiring
+// a pointer over that would fork a healthy conversation.
+func acpDataDetailsNotFound(data string) bool {
+	var payload struct {
+		Details string `json:"details"`
+	}
+	return json.Unmarshal([]byte(data), &payload) == nil && payload.Details == "not_found"
+}
 
 // setupFailureWithholdsSessionID reports whether a run that failed during setup
 // — after session/new, before session/prompt — must report an empty SessionID

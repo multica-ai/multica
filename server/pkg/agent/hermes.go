@@ -1707,6 +1707,8 @@ func isACPSessionErrorCode(code int) bool {
 // wording is discriminating and all of them are matched. The wording check
 // still carries the decision: -32000 is a generic server-error code, and a
 // transient failure reported under it must not read as a lost session.
+// Hermes' gateway adapter also reports a lost session via {"details":"not_found"}
+// with a bare "Internal error" message, which acpDataDetailsNotFound recognizes.
 func isACPSessionNotFound(err error) bool {
 	var rpcErr *acpRPCError
 	if !errors.As(err, &rpcErr) {
@@ -1714,6 +1716,9 @@ func isACPSessionNotFound(err error) bool {
 	}
 	if !isACPSessionErrorCode(rpcErr.Code) {
 		return false
+	}
+	if acpDataDetailsNotFound(rpcErr.Data) {
+		return true
 	}
 	return acpSessionNotFoundWording(strings.ToLower(rpcErr.Message + " " + rpcErr.Data))
 }
