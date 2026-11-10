@@ -351,6 +351,28 @@ describe("SquadDetailPage", () => {
     expect(screen.queryByRole("textbox", { name: "What is this squad responsible for?" })).toBeNull();
   });
 
+  it("keeps a description draft whose save failed so it can be retried", async () => {
+    const user = userEvent.setup();
+    mocks.api.updateSquad.mockRejectedValueOnce(new Error("offline"));
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Ships the risky stuff" }));
+    await user.type(screen.getByRole("textbox", { name: "What is this squad responsible for?" }), " carefully");
+    await user.tab();
+    expect(mocks.api.updateSquad).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("button", { name: "Ships the risky stuff" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Ships the risky stuff" }));
+    expect(screen.getByRole("textbox", { name: "What is this squad responsible for?" })).toHaveValue(
+      "Ships the risky stuff carefully",
+    );
+    await user.tab();
+    expect(mocks.api.updateSquad).toHaveBeenCalledTimes(2);
+    expect(mocks.api.updateSquad).toHaveBeenLastCalledWith("sq-1", {
+      description: "Ships the risky stuff carefully",
+    });
+  });
+
   it("lists the squad's properties in the panel", () => {
     renderPage();
 

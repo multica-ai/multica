@@ -1233,7 +1233,8 @@ const INLINE_FIELD = "rounded-sm px-1 transition-colors hover:bg-accent/50 focus
 
 // Click-to-edit description for the identity block. Same rules as the name:
 // blur or the send shortcut saves, Escape discards. The saved text stays on
-// screen while the request is in flight instead of flashing the old value.
+// screen while the request is in flight instead of flashing the old value, and
+// a failed save keeps its text so reopening the editor picks it up to retry.
 function SquadDescriptionEditor({
   value,
   onSave,
@@ -1245,24 +1246,31 @@ function SquadDescriptionEditor({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [pending, setPending] = useState<string | null>(null);
+  const [unsaved, setUnsaved] = useState<string | null>(null);
   const discardRef = useRef(false);
   const shown = pending ?? value;
   const placeholder = t(($) => $.description_editor.placeholder);
 
   const startEditing = () => {
     discardRef.current = false;
-    setDraft(shown);
+    setDraft(unsaved ?? shown);
     setEditing(true);
   };
 
   const finish = () => {
     setEditing(false);
-    if (discardRef.current || draft === shown) return;
-    setPending(draft);
-    onSave(draft)
-      .catch(() => {
+    if (discardRef.current || draft === shown) {
+      setUnsaved(null);
+      return;
+    }
+    const next = draft;
+    setPending(next);
+    onSave(next)
+      .then(
+        () => setUnsaved(null),
         // toast handled by the mutation
-      })
+        () => setUnsaved(next),
+      )
       .finally(() => setPending(null));
   };
 
