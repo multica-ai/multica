@@ -18,28 +18,25 @@ import {
   appCatalogOptions,
   appsOverviewOptions,
   useUpdateAgentApps,
+  useRestoreAppAccess,
 } from "@multica/core/connected-apps";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type {
   Agent,
   AgentApp,
-  AppAccessLevel,
   AppAccountScope,
   AppCatalogEntry,
 } from "@multica/core/types";
 import { ComposioToolkitLogo } from "../../../common/composio-toolkit-logo";
+import { SavedAppRestriction } from "../../../common/saved-app-restriction";
 import { AppLink } from "../../../navigation";
 import { useT } from "../../../i18n";
 import { ObjectSectionEmpty } from "../../../layout/object-page";
 
 const SCOPES: readonly AppAccountScope[] = ["personal", "team"];
-const LEVELS: readonly AppAccessLevel[] = ["read", "confirm_writes", "write"];
 
-/**
- * The agent's apps (MUL-8516): which apps it can use, whose account each acts
- * as, and how far it may go. Editable by whoever manages the agent; giving it
- * a team account needs a workspace admin, which the server enforces too.
- */
+/** Apps this agent can use and whose account each acts as.
+ * Team account changes require a workspace admin. */
 export function AgentAppsTab({ agent }: { agent: Agent }) {
   const { t } = useT("agents");
   const { t: ts } = useT("settings");
@@ -49,6 +46,7 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
   const overview = useQuery(appsOverviewOptions(wsId));
   const catalog = useQuery(appCatalogOptions(wsId));
   const update = useUpdateAgentApps(agent.id);
+  const restore = useRestoreAppAccess();
 
   const canManageTeam = overview.data?.can_manage ?? false;
   const apps = useMemo(() => appsQuery.data ?? [], [appsQuery.data]);
@@ -81,14 +79,11 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
   const add = (slug: string) => {
     const recommended = appBySlug.get(slug)?.recommended_scope;
     const scope: AppAccountScope = recommended === "team" && canManageTeam ? "team" : "personal";
-    // Only its owner runs a private agent, and would confirm each write anyway.
-    const level: AppAccessLevel = agent.permission_mode === "private" ? "write" : "confirm_writes";
-    save([...apps, { agent_id: agent.id, toolkit_slug: slug, account_scope: scope, level }]);
+    save([...apps, { agent_id: agent.id, toolkit_slug: slug, account_scope: scope, level: "write" }]);
   };
 
   const addable = (catalog.data?.apps ?? []).filter((app) => !apps.some((a) => a.toolkit_slug === app.slug));
   const scopeLabel = (scope: AppAccountScope) => ts(($) => $.connected_apps.scopes[scope]);
-  const levelLabel = (level: AppAccessLevel) => ts(($) => $.connected_apps.levels[level]);
   const hasTeamApp = apps.some((a) => a.account_scope === "team");
 
   if (appsQuery.isLoading) {
@@ -101,6 +96,11 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
   return (
     <div className="space-y-4">
       <p className="text-caption text-muted-foreground">{t(($) => $.tab_body.connected_apps.subtitle)}</p>
+
+      {overview.data && overview.data.catalog_mode !== "all" && (
+        <SavedAppRestriction kind="catalog" onRestore={canManageTeam
+          ? () => restore.mutateAsync({ catalog: true }) : undefined} />
+      )}
 
       {hasTeamApp && agent.permission_mode !== "private" && (
         <div
@@ -162,25 +162,6 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
                     ))}
                   </SelectContent>
                 </Select>
-                <Select
-                  items={LEVELS.map((value) => ({ value, label: levelLabel(value) }))}
-                  value={app.level}
-                  disabled={update.isPending || lockedTeam}
-                  onValueChange={(value) => {
-                    if (value && value !== app.level) patch(app.toolkit_slug, { level: value as AppAccessLevel });
-                  }}
-                >
-                  <SelectTrigger size="sm" className="w-40" aria-label={t(($) => $.tab_body.connected_apps.level)}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent align="end">
-                    {LEVELS.map((value) => (
-                      <SelectItem key={value} value={value}>
-                        {levelLabel(value)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
                 <Button
                   variant="ghost"
                   size="icon-sm"
@@ -190,6 +171,20 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
                 >
                   <X />
                 </Button>
+                {app.level === "read" && (
+                  <div className="w-full">
+                    <SavedAppRestriction kind="agent" onRestore={lockedTeam ? undefined : () => update.mutateAsync({
+                      apps: apps.map((a) => ({
+                        toolkit_slug: a.toolkit_slug,
+                        account_scope: a.account_scope,
+                        level: a.toolkit_slug === app.toolkit_slug ? "write" : a.level,
+                      })),
+                    })} />
+                  </div>
+                )}
+                {(overview.data?.[app.account_scope]?.some((c) => c.toolkit_slug === app.toolkit_slug && c.actions_blocked === true)) && (
+                  <p className="w-full text-caption text-warning">{ts(($) => $.connected_apps.saved_access.account_link)}</p>
+                )}
               </li>
             );
           })}

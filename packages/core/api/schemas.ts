@@ -4104,6 +4104,7 @@ const AppConnectionSchema = z.object({
   connected_by: appNullableString,
   connected_at: z.string().default(""),
   last_used_at: appNullableString,
+  actions_blocked: z.boolean().default(false).catch(false),
 }).loose();
 
 const AgentAppSchema = z.object({

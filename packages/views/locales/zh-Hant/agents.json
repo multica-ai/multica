@@ -817,7 +817,7 @@
       "queued_prefix": "{{when}}排隊"
     },
     "connected_apps": {
-      "subtitle": "這個 AI 代理可以使用的應用。每個應用以團隊帳號或觸發者的帳號身分操作，權限等級由你設定。",
+      "subtitle": "這個 AI 代理可以使用的應用，以團隊帳號或發起執行的成員帳號操作。",
       "loading": "正在載入應用…",
       "load_failed": "無法載入此 AI 代理的應用。",
       "empty": "還沒有應用。",

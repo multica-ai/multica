@@ -838,7 +838,7 @@
       "queued_prefix": "Queued {{when}}"
     },
     "connected_apps": {
-      "subtitle": "Apps this agent can use. Each app acts as the team account or as the account of whoever triggers the run, at the level you choose.",
+      "subtitle": "Apps this agent can use, through the team account or the account of whoever triggers the run.",
       "loading": "Loading apps…",
       "load_failed": "Couldn't load this agent's apps.",
       "empty": "No apps yet.",
