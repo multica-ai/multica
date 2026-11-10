@@ -23,6 +23,29 @@ func countInboxByTypeForIssue(t *testing.T, recipientID, issueID, notifType stri
 	return active, archived
 }
 
+// inboxTaskIDs lists the runs a member's rows of one type on one issue name.
+func inboxTaskIDs(t *testing.T, recipientID, issueID, notifType string) []string {
+	t.Helper()
+	rows, err := testPool.Query(context.Background(), `
+		SELECT coalesce(details->>'task_id', '') FROM inbox_item
+		WHERE recipient_type = 'member' AND recipient_id = $1 AND issue_id = $2 AND type = $3
+		ORDER BY created_at
+	`, recipientID, issueID, notifType)
+	if err != nil {
+		t.Fatalf("inboxTaskIDs: %v", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("inboxTaskIDs scan: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // seedFinishedTask records a run whose originator was resolved by source.
 func seedFinishedTask(t *testing.T, issueID, originatorID, source string) string {
 	t.Helper()
@@ -79,11 +102,15 @@ func TestNotification_TaskCompleted_HandsBackToDirectOriginator(t *testing.T) {
 		inboxEvents = append(inboxEvents, e)
 	})
 
-	publishTaskCompleted(bus, issueID, seedFinishedTask(t, issueID, directID, "direct_human"))
+	directTask := seedFinishedTask(t, issueID, directID, "direct_human")
+	publishTaskCompleted(bus, issueID, directTask)
 	publishTaskCompleted(bus, issueID, seedFinishedTask(t, issueID, delegatedID, "delegation"))
 
 	if active, _ := countInboxByTypeForIssue(t, directID, issueID, "agent_completed"); active != 1 {
 		t.Fatalf("direct originator: expected 1 agent_completed row, got %d", active)
+	}
+	if ids := inboxTaskIDs(t, directID, issueID, "agent_completed"); len(ids) != 1 || ids[0] != directTask {
+		t.Fatalf("direct originator: expected the row to name run %s, got %v", directTask, ids)
 	}
 	if active, _ := countInboxByTypeForIssue(t, delegatedID, issueID, "agent_completed"); active != 0 {
 		t.Fatalf("delegated originator: expected no agent_completed row, got %d", active)
@@ -125,6 +152,9 @@ func TestNotification_TaskFailed_RetryPendingIsSilent(t *testing.T) {
 
 	if active, _ := countInboxByTypeForIssue(t, testUserID, issueID, "task_failed"); active != 1 {
 		t.Fatalf("expected only the final failure to reach the Inbox, got %d rows", active)
+	}
+	if ids := inboxTaskIDs(t, testUserID, issueID, "task_failed"); len(ids) != 1 || ids[0] != "00000000-0000-0000-0000-bbbbbbbbbbbb" {
+		t.Fatalf("expected the failure row to name its run, got %v", ids)
 	}
 }
 

@@ -101,6 +101,7 @@ import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
 import { InboxReasonBar } from "./inbox-reason-bar";
 import { useActedOnIssue } from "./use-acted-on-issue";
+import { useInboxLanding } from "./use-inbox-landing";
 import { InboxFilterMenu } from "./inbox-filter-menu";
 import { InboxFilterChipsBar } from "./inbox-filter-options";
 import { InboxContextMenuProvider } from "./inbox-context-menu";
@@ -309,6 +310,7 @@ export function InboxPage() {
   const detailSwapping = detailKey !== selectedKey;
   const detailItem = resolveDetailItem(selectionItems, selectedKey, detailKey);
   const acted = useActedOnIssue(isArchivedView ? null : (detailItem?.issue_id ?? null));
+  const landing = useInboxLanding(wsId, detailItem);
 
   // The gap above is invisible to the navigation adapter — the inbox stays on
   // the same route and only rewrites `?issue=` — so report it explicitly and
@@ -908,7 +910,7 @@ export function InboxPage() {
           key={detailItem.issue_id}
           issueId={detailItem.issue_id}
           layoutId="multica_inbox_issue_detail_layout"
-          highlightCommentId={detailItem.details?.comment_id ?? undefined}
+          highlightCommentId={landing}
           highlightAppRequestId={
             detailItem.type.startsWith("app_") ? (detailItem.details?.request_id ?? undefined) : undefined
           }

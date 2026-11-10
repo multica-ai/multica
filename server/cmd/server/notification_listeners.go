@@ -382,15 +382,26 @@ func notifyRunEnded(ctx context.Context, queries *db.Queries, bus *events.Bus, e
 		ActorType:   "agent",
 		ActorID:     agentID,
 	}
+	details := runDetails(taskID)
 	for _, recipientID := range recipients {
 		notifyDirect(ctx, queries, bus,
 			"member", recipientID,
 			e.WorkspaceID, agentEvent, issueID, issue.Status,
 			"agent_completed", "action_required",
 			issue.Title, "",
-			emptyDetails,
+			details,
 		)
 	}
+}
+
+// runDetails names the run an inbox row reports, so opening the row can land
+// on what that run left in the timeline.
+func runDetails(taskID string) []byte {
+	if taskID == "" {
+		return emptyDetails
+	}
+	details, _ := json.Marshal(map[string]string{"task_id": taskID})
+	return details
 }
 
 // notifySubscribers queries the subscriber table for an issue, excludes the
@@ -1174,6 +1185,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		}
 		agentID, _ := payload["agent_id"].(string)
 		issueID, _ := payload["issue_id"].(string)
+		taskID, _ := payload["task_id"].(string)
 		if issueID == "" {
 			return
 		}
@@ -1198,7 +1210,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			},
 			exclude, "task_failed", "action_required",
 			issue.Title, "",
-			emptyDetails)
+			runDetails(taskID))
 	})
 }
 
