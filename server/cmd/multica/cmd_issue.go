@@ -544,7 +544,7 @@ var validIssueSortColumns = []string{
 var validIssueFields = []string{
 	"id", "workspace_id", "number", "identifier", "title", "description",
 	"status", "status_category", "status_name", "priority", "assignee_type",
-	"assignee_id", "creator_type", "creator_id", "parent_issue_id",
+	"assignee_id", "creator_type", "creator_id", "requester_id", "parent_issue_id",
 	"duplicate_of", "project_id", "position", "stage", "start_date", "due_date", "created_at",
 	"updated_at", "revision", "last_activity_at", "metadata", "properties",
 	"labels",
