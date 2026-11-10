@@ -222,6 +222,17 @@ describe("IssueEnvironmentsSection", () => {
       expect(toastError).not.toHaveBeenCalled();
     });
 
+    it("offers no switch for an app whose key did not arrive", async () => {
+      onDesktop();
+      mockEnvironments = [app({ local_key: "" })];
+      renderSection();
+
+      const row = await screen.findByTestId("environment-row");
+      expect(within(row).queryByRole("button")).not.toBeInTheDocument();
+      fireEvent.click(within(row).getByText("Multica Canary multica-501"));
+      expect(focusEnvironment).not.toHaveBeenCalled();
+    });
+
     it("says so when the app has exited instead of opening anything", async () => {
       onDesktop();
       focusEnvironment.mockResolvedValue({ ok: false, reason: "gone" });

@@ -176,7 +176,8 @@ function EnvironmentRow({
   const live = isLive(env);
   const app = isApp(env);
   const openable = !app && live && env.url !== "" && env.state !== "unreachable";
-  const focusable = app && live && env.state === "running" && appHint === null;
+  // Without the daemon's key for it there is nothing to ask the daemon for.
+  const focusable = app && live && env.state === "running" && appHint === null && env.local_key !== "";
   const Icon = app ? AppWindow : env.url ? Globe : Server;
   const host = !app && env.url ? displayHost(env.url) : null;
   const title = app || env.source === "config" ? env.label || env.name : host ?? env.name;

@@ -33,6 +33,10 @@ type Process struct {
 	// lives; both are empty for a process without windows of its own.
 	App    string
 	Bundle string
+	// Unsettled marks a process that may yet turn out to be an app: its
+	// executable lives in an app bundle, but it has not shown itself as an
+	// app so far, as one that is still starting has not.
+	Unsettled bool
 }
 
 var remoteDebuggingPort = regexp.MustCompile(`--remote-debugging-port[= ]+(\d+)`)

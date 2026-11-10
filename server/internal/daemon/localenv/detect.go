@@ -36,9 +36,31 @@ type Detector struct {
 	mu   sync.Mutex
 	seen map[string]*sighting
 	// procs and cdp remember what a process is and which of its ports speak
-	// DevTools, so each is looked up once rather than every scan.
-	procs map[int]Process
-	cdp   map[[2]int]bool
+	// DevTools, so a settled answer is looked up once rather than every scan.
+	// An answer that can still change -- a process not yet showing as an app,
+	// a port not yet answering as DevTools -- is asked again, per the recheck
+	// kept for it.
+	procs       map[int]Process
+	cdp         map[[2]int]bool
+	procChecks  map[int]*recheck
+	probeChecks map[[2]int]*recheck
+}
+
+// recheck paces repeated lookups of an answer that may still change: every
+// scan for the first few, when a starting app settles, then every tenth, so a
+// process that never becomes an app costs next to nothing.
+type recheck struct{ tries, wait int }
+
+func (r *recheck) due() bool {
+	if r.wait > 0 {
+		r.wait--
+		return false
+	}
+	r.tries++
+	if r.tries > 5 {
+		r.wait = 9
+	}
+	return true
 }
 
 type sighting struct {
@@ -56,6 +78,7 @@ func NewDetector(ignoreCommands []string) *Detector {
 	return &Detector{
 		ignore: ignore, list: listListeners, inspect: inspectProcesses, isCDP: probeCDP, now: time.Now,
 		seen: make(map[string]*sighting), procs: make(map[int]Process), cdp: make(map[[2]int]bool),
+		procChecks: make(map[int]*recheck), probeChecks: make(map[[2]int]*recheck),
 	}
 }
 
@@ -101,7 +124,9 @@ func (d *Detector) Detect(ctx context.Context, resolve func(cwd string) (Task, b
 	debugPorts := make(map[string][]int)
 	for _, c := range candidates {
 		proc := procs[c.PID]
-		debug := proc.debugs(c.Port) || (proc.App != "" && d.speaksCDP(ctx, c.PID, c.Port))
+		// A process that may yet be an app is probed like one, so its debug
+		// port is not offered as a link while it starts.
+		debug := proc.debugs(c.Port) || ((proc.App != "" || proc.Unsettled) && d.speaksCDP(ctx, c.PID, c.Port))
 		if proc.App != "" {
 			key := detectedAppKey(c.task.RootDir, proc)
 			if _, dup := found[key]; !dup {
@@ -163,36 +188,59 @@ func (d *Detector) Detect(ctx context.Context, resolve func(cwd string) (Task, b
 	return out, nil
 }
 
-// processes returns what each pid is, asking only about pids not seen in an
-// earlier scan, and forgets pids that stopped listening.
+// processes returns what each pid is, asking about pids not seen in an
+// earlier scan and those whose answer may still change, and forgets pids that
+// stopped listening.
 func (d *Detector) processes(ctx context.Context, pids []int) map[int]Process {
 	d.mu.Lock()
-	var unknown []int
+	var ask []int
 	live := make(map[int]bool, len(pids))
 	for _, pid := range pids {
-		if _, ok := d.procs[pid]; !ok && !live[pid] {
-			unknown = append(unknown, pid)
+		if live[pid] {
+			continue
 		}
 		live[pid] = true
+		known, ok := d.procs[pid]
+		if !ok {
+			ask = append(ask, pid)
+		} else if known.Unsettled {
+			check := d.procChecks[pid]
+			if check == nil {
+				check = &recheck{tries: 1}
+				d.procChecks[pid] = check
+			}
+			if check.due() {
+				ask = append(ask, pid)
+			}
+		}
 	}
 	d.mu.Unlock()
 	var learned map[int]Process
-	if len(unknown) > 0 {
-		learned = d.inspect(ctx, unknown)
+	if len(ask) > 0 {
+		learned = d.inspect(ctx, ask)
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for pid, p := range learned {
 		d.procs[pid] = p
+		if !p.Unsettled {
+			delete(d.procChecks, pid)
+		}
 	}
 	for pid := range d.procs {
 		if !live[pid] {
 			delete(d.procs, pid)
+			delete(d.procChecks, pid)
 		}
 	}
 	for k := range d.cdp {
 		if !live[k[0]] {
 			delete(d.cdp, k)
+		}
+	}
+	for k := range d.probeChecks {
+		if !live[k[0]] {
+			delete(d.probeChecks, k)
 		}
 	}
 	out := make(map[int]Process, len(pids))
@@ -202,19 +250,30 @@ func (d *Detector) processes(ctx context.Context, pids []int) map[int]Process {
 	return out
 }
 
+// speaksCDP remembers a port that answered as DevTools. One that did not may
+// simply not be serving yet, so it is probed again rather than written off.
 func (d *Detector) speaksCDP(ctx context.Context, pid, port int) bool {
 	k := [2]int{pid, port}
 	d.mu.Lock()
-	known, ok := d.cdp[k]
-	d.mu.Unlock()
-	if ok {
-		return known
+	if d.cdp[k] {
+		d.mu.Unlock()
+		return true
 	}
-	known = d.isCDP(ctx, port)
-	d.mu.Lock()
-	d.cdp[k] = known
+	check := d.probeChecks[k]
+	if check == nil {
+		check = &recheck{}
+		d.probeChecks[k] = check
+	}
+	due := check.due()
 	d.mu.Unlock()
-	return known
+	if !due || !d.isCDP(ctx, port) {
+		return false
+	}
+	d.mu.Lock()
+	d.cdp[k] = true
+	delete(d.probeChecks, k)
+	d.mu.Unlock()
+	return true
 }
 
 func truncateName(name string) string {

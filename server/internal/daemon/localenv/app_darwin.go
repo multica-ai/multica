@@ -75,7 +75,7 @@ func inspectProcesses(ctx context.Context, pids []int) map[int]Process {
 	var candidates []string
 	for pid, p := range procs {
 		// Only an executable inside an app bundle can be an app; asking AppKit
-		// about anything else would start osascript every scan for nothing.
+		// about anything else would start osascript for nothing.
 		if strings.Contains(p.Args, ".app/Contents/MacOS/") {
 			candidates = append(candidates, strconv.Itoa(pid))
 		}
@@ -83,14 +83,16 @@ func inspectProcesses(ctx context.Context, pids []int) map[int]Process {
 	if len(candidates) == 0 {
 		return procs
 	}
+	// Until AppKit names a candidate as an app the answer is not final: it
+	// may still be starting, or osascript may have failed this once.
+	for _, c := range candidates {
+		pid, _ := strconv.Atoi(c)
+		p := procs[pid]
+		p.Unsettled = true
+		procs[pid] = p
+	}
 	raw, err := exec.CommandContext(ctx, "osascript", append([]string{"-l", "JavaScript", "-e", runningAppsScript}, candidates...)...).Output()
 	if err != nil {
-		// Without AppKit's answer the candidates cannot be classified yet;
-		// leave them out so the next scan asks again.
-		for _, c := range candidates {
-			pid, _ := strconv.Atoi(c)
-			delete(procs, pid)
-		}
 		return procs
 	}
 	var apps map[string]struct {
@@ -103,7 +105,7 @@ func inspectProcesses(ctx context.Context, pids []int) map[int]Process {
 	for key, app := range apps {
 		pid, _ := strconv.Atoi(key)
 		if p, ok := procs[pid]; ok && app.Name != "" {
-			p.App, p.Bundle = app.Name, app.Bundle
+			p.App, p.Bundle, p.Unsettled = app.Name, app.Bundle, false
 			procs[pid] = p
 		}
 	}

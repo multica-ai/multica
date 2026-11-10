@@ -134,8 +134,76 @@ func TestDetectorFindsADebugPortTheAppOpenedItself(t *testing.T) {
 	if server := byKind(envs, KindServer); server.URL != "http://localhost:3000" {
 		t.Fatalf("the app's own HTTP server = %+v, want it still opened in a browser", server)
 	}
-	if probes[9222] != 1 || probes[3000] != 1 {
-		t.Fatalf("probes = %v, want each port probed once across scans", probes)
+	if probes[9222] != 1 {
+		t.Fatalf("probes = %v, want a port that answered as DevTools probed once across scans", probes)
+	}
+}
+
+func TestDetectorNoticesAnAppThatWasStillStarting(t *testing.T) {
+	listeners := []Listener{{PID: 10, Port: 9724, Command: "Electron", Cwd: "/ws/task-a/workdir"}}
+	args := electronBundle + "/Contents/MacOS/Electron . --remote-debugging-port=9724"
+	procs := map[int]Process{10: {Args: args, Unsettled: true}}
+	d := fakeDetector(&listeners, procs, nil)
+
+	d.Detect(context.Background(), resolveTaskA, notOwned)
+	if envs, _ := d.Detect(context.Background(), resolveTaskA, notOwned); len(envs) != 0 {
+		t.Fatalf("before the app shows itself = %+v, want its debug port left out", envs)
+	}
+	procs[10] = Process{Args: args, App: "My App", Bundle: electronBundle}
+	var envs []Environment
+	for i := 0; i < 2; i++ {
+		envs, _ = d.Detect(context.Background(), resolveTaskA, notOwned)
+	}
+	if len(envs) != 1 || envs[0].Kind != KindApp || envs[0].Name != "My App" || envs[0].pid != 10 {
+		t.Fatalf("after the app showed itself = %+v, want the app row", envs)
+	}
+	if len(d.procChecks) != 0 {
+		t.Fatalf("procChecks = %v, want a settled process no longer rechecked", d.procChecks)
+	}
+}
+
+func TestDetectorNoticesADebugPortThatWasNotServingYet(t *testing.T) {
+	listeners := []Listener{{PID: 10, Port: 9222, Command: "Electron", Cwd: "/ws/task-a/workdir"}}
+	procs := map[int]Process{10: {Args: electronBundle + "/Contents/MacOS/Electron .", App: "My App", Bundle: electronBundle}}
+	ready, probes := false, 0
+	d := fakeDetector(&listeners, procs, func(int) bool { probes++; return ready })
+
+	d.Detect(context.Background(), resolveTaskA, notOwned)
+	envs, _ := d.Detect(context.Background(), resolveTaskA, notOwned)
+	if server := byKind(envs, KindServer); server.URL != "http://localhost:9222" {
+		t.Fatalf("while the port does not answer as DevTools = %+v, want it shown as a server", envs)
+	}
+	ready = true
+	envs, _ = d.Detect(context.Background(), resolveTaskA, notOwned)
+	if len(envs) != 1 || envs[0].Kind != KindApp || envs[0].Detail != "Remote debugging on localhost:9222" {
+		t.Fatalf("once it answers as DevTools = %+v, want only the app with the port as detail", envs)
+	}
+	settled := probes
+	d.Detect(context.Background(), resolveTaskA, notOwned)
+	if probes != settled {
+		t.Fatalf("probed %d more times after the port was recognized", probes-settled)
+	}
+}
+
+func TestDetectorSpacesOutRechecksThatNeverSettle(t *testing.T) {
+	listeners := []Listener{{PID: 10, Port: 3000, Command: "Electron", Cwd: "/ws/task-a/workdir"}}
+	procs := map[int]Process{10: {Args: electronBundle + "/Contents/MacOS/Electron .", Unsettled: true}}
+	inspected, probes := 0, 0
+	d := fakeDetector(&listeners, procs, func(int) bool { probes++; return false })
+	inner := d.inspect
+	d.inspect = func(ctx context.Context, pids []int) map[int]Process { inspected++; return inner(ctx, pids) }
+
+	for i := 0; i < 45; i++ {
+		d.Detect(context.Background(), resolveTaskA, notOwned)
+	}
+	// Five scans in a row, then every tenth.
+	if inspected != 9 || probes != 9 {
+		t.Fatalf("inspected %d times and probed %d times over 45 scans, want 9 each", inspected, probes)
+	}
+	listeners = nil
+	d.Detect(context.Background(), resolveTaskA, notOwned)
+	if len(d.procChecks) != 0 || len(d.probeChecks) != 0 {
+		t.Fatal("rechecks outlived the process")
 	}
 }
 
