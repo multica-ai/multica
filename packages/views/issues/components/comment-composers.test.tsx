@@ -440,6 +440,24 @@ describe("comment composers", () => {
     expect(shell.className).not.toContain("h-[60vh]");
   });
 
+  it("makes room for recipients a pending annotation previews while the reply is empty", async () => {
+    apiListTasksByIssue.mockResolvedValue([]);
+    apiPreviewCommentTriggers.mockResolvedValue({
+      agents: [{ id: "agent-1", name: "Lambda", source: "thread_parent", reason: "" }],
+    });
+    const pending = { id: "a", sourceCommentId: "comment-1", sourceActorName: "Lambda", quote: "Selected text",
+      note: "Please revise", start: 0, prefix: "", suffix: "" };
+    renderWithProviders(
+      <ReplyInput issueId="issue-1" parentId="comment-1" avatarType="member" avatarId="user-1"
+        onSubmit={vi.fn()} draftKey="reply:issue-1:comment-1"
+        annotationComposer={{ pending, render: () => null }} />,
+    );
+
+    expect(screen.getByTestId("reply-composer-shell")).toBeInTheDocument();
+    await screen.findByRole("button", { name: /Lambda trigger/ }, { timeout: 5000 });
+    expect(screen.getByTestId("drop-zone").className).toContain("pb-9");
+  });
+
   it("keeps main comment submission wired after removing expand", async () => {
     const { container, onSubmit } = renderCommentInput();
 
