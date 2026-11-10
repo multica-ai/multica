@@ -49,6 +49,7 @@ import {
   themeOptionValue,
   uiFontStack,
   useAppearanceStore,
+  useLocalCjkFonts,
   type CjkFontChoice,
   type CodeFont,
   type ContentSize,
@@ -67,7 +68,6 @@ import {
   SettingsSection,
   SettingsTab,
 } from "./settings-layout";
-import { useLocalCjkFonts } from "./local-fonts";
 
 type PreviewMode = "light" | "dark";
 type ModeChoice = PreviewMode | "system";

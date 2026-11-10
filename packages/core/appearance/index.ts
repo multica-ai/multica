@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { defaultStorage } from "../platform/storage";
 import { DEFAULT_THEME_ID, findBuiltInTheme } from "./built-in-themes";
+import { isLocalFont, localFontFamily, type LocalFont } from "./local-fonts";
 import {
   themeOptionAttributes,
   themeOptionVariables,
@@ -14,6 +15,7 @@ export * from "./themes";
 export * from "./built-in-themes";
 export * from "./anchors";
 export * from "./theme-variables";
+export * from "./local-fonts";
 
 /**
  * Appearance sits on top of light/dark mode: a theme (see ./themes) with its
@@ -31,8 +33,6 @@ export type UiFont = (typeof UI_FONTS)[number];
 export const CJK_FONTS = ["sans", "serif", "kai"] as const;
 export type CjkFont = (typeof CJK_FONTS)[number];
 
-/** A family installed on this device, as `local:<family name>`. */
-export type LocalFont = `local:${string}`;
 export type CjkFontChoice = CjkFont | LocalFont;
 
 /** Content settings can follow the interface instead of naming a value. */
@@ -96,22 +96,6 @@ const oneOf =
   <T,>(values: readonly T[]) =>
   (v: unknown): v is T =>
     (values as readonly unknown[]).includes(v);
-
-const LOCAL_FAMILY = /^[\p{L}\p{N} ._-]{1,64}$/u;
-
-/** `local:<family>` with a family name that is safe to quote in CSS. */
-export function isLocalFont(value: unknown): value is LocalFont {
-  return (
-    typeof value === "string" &&
-    value.startsWith("local:") &&
-    LOCAL_FAMILY.test(value.slice(6)) &&
-    value.slice(6).trim() === value.slice(6)
-  );
-}
-
-export function localFontFamily(choice: LocalFont): string {
-  return choice.slice(6);
-}
 
 const isCjkChoice = (v: unknown): v is CjkFontChoice => oneOf(CJK_FONTS)(v) || isLocalFont(v);
 const OPTION_KEY = /^[a-z][a-z0-9-]{0,47}$/;

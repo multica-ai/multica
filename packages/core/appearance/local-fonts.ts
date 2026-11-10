@@ -1,12 +1,29 @@
-"use client";
-
 import { create } from "zustand";
-import { isLocalFont } from "@multica/core/appearance";
+
+/** A family installed on this device, as `local:<family name>`. */
+export type LocalFont = `local:${string}`;
+
+const LOCAL_FAMILY = /^[\p{L}\p{N} ._-]{1,64}$/u;
+
+/** `local:<family>` with a family name that is safe to quote in CSS. */
+export function isLocalFont(value: unknown): value is LocalFont {
+  return (
+    typeof value === "string" &&
+    value.startsWith("local:") &&
+    LOCAL_FAMILY.test(value.slice(6)) &&
+    value.slice(6).trim() === value.slice(6)
+  );
+}
+
+export function localFontFamily(choice: LocalFont): string {
+  return choice.slice(6);
+}
 
 /**
  * Font families installed on this device that can draw Han characters, for
  * the CJK font pickers. Uses the Local Font Access API: available in Desktop
- * and Chromium browsers (which ask for permission), absent elsewhere.
+ * and Chromium browsers (which ask for permission), absent elsewhere. Kept
+ * in a store so the scan, and its permission prompt, runs once per session.
  */
 
 type LocalFontsStatus = "idle" | "loading" | "ready" | "unavailable" | "error";
