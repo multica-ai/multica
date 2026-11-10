@@ -187,6 +187,11 @@ Keep the CSS to variables, anchors, public slots and the state above:
 - Set variables on `.theme-light` and `.theme-dark`, and keep everything
   else behind a descendant selector, so the theme picker can read a
   theme's colours back from its CSS.
+- Name font families only in `--font-ui` and `--font-content-latin`: no
+  `sans-serif`, `serif` or other generic family, and no `ui-*` keyword. The
+  CJK font follows them, and a generic family matches Han through the
+  browser's default for the page language, so the person's CJK choice would
+  never apply. The CJK stack ends with its own generic family.
 
 ## Variable reference
 
@@ -315,12 +320,6 @@ and dark differ, both defaults are given.
 | `--text-display-sm--line-height` | `calc(32px * var(--font-scale, 1))` | Line height of `text-display-sm`. |
 | `--text-display` | `calc(36px * var(--font-scale, 1))` | Hero numbers and empty-state headlines. |
 | `--text-display--line-height` | `calc(40px * var(--font-scale, 1))` | Line height of `text-display`. |
-
-`--font-ui` and `--font-content-latin` are followed by the CJK font, so they
-name families only: no `sans-serif`, `serif` or other generic family, and no
-`ui-*` keyword. A generic family matches Han through the browser's default
-for the page language, and the person's CJK choice would never apply. The
-CJK stack ends with its own generic family.
 
 ### Controls and overlays
 
