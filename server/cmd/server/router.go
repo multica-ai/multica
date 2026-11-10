@@ -45,6 +45,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
+	"github.com/multica-ai/multica/server/internal/themestore"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	composiosdk "github.com/multica-ai/multica/server/pkg/composio"
@@ -462,6 +463,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.InvitationRateLimiters = handler.NewMemoryInvitationRateLimiters(invitationRateLimits)
 	h.Metrics = opts.BusinessMetrics
 	h.FeatureFlags = opts.FeatureFlags
+	h.ThemeStore = themeStoreFromEnv()
 	h.TaskService.FeatureFlags = opts.FeatureFlags
 	h.TaskService.Metrics = opts.BusinessMetrics
 	h.IssueService.Metrics = opts.BusinessMetrics
@@ -1734,6 +1736,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// against it. Sits in the user-scoped group for that reason: there is
 		// no workspace in the path to gate on.
 		// --- User-scoped routes (no workspace context required) ---
+		r.Get("/api/theme-store/themes", h.ListStoreThemes)
+		r.Get("/api/theme-store/themes/{themeId}/package", h.GetStoreThemePackage)
+		r.Get("/api/theme-store/themes/{themeId}/screenshots/{mode}", h.GetStoreThemeScreenshot)
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
@@ -2823,6 +2828,26 @@ func optionalUUID(s string) pgtype.UUID {
 		return pgtype.UUID{}
 	}
 	return util.MustParseUUID(s)
+}
+
+// themeStoreFromEnv builds the community theme store. MULTICA_THEME_STORE=off
+// (or false / 0) turns it off; MULTICA_THEME_REGISTRY_URL points it at
+// another registry's index.json. A URL that does not parse turns the store
+// off rather than failing the boot.
+func themeStoreFromEnv() *themestore.Store {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("MULTICA_THEME_STORE"))) {
+	case "off", "false", "0", "disabled":
+		slog.Info("theme store: turned off by MULTICA_THEME_STORE")
+		return nil
+	}
+	store, err := themestore.New(themestore.Config{
+		IndexURL: strings.TrimSpace(os.Getenv("MULTICA_THEME_REGISTRY_URL")),
+	})
+	if err != nil {
+		slog.Error("theme store: turned off", "error", err)
+		return nil
+	}
+	return store
 }
 
 func splitAndTrim(s string) []string {

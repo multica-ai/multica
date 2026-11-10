@@ -100,6 +100,7 @@ import { useLocale, useT } from "../../i18n";
 import { SegmentedToggle } from "../../common/segmented-toggle";
 import { openExternal } from "../../platform/open-external";
 import { themeFolderAPI } from "../../platform/theme-folder";
+import { ThemeStoreButton } from "./theme-store-dialog";
 import {
   SettingsCard,
   SettingsRow,
@@ -304,6 +305,7 @@ function ColorSection() {
                 ) : null}
               </SelectContent>
             </Select>
+            <ThemeStoreButton />
             <ImportThemeButton />
             <ThemeToolsMenu theme={activeTheme({ theme }, safeMode.active)} />
           </div>

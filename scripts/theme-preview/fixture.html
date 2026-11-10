@@ -1,0 +1,120 @@
+<!--
+  The page theme screenshots are rendered on: an issue list next to an open
+  issue, built from the app's own styles and its public `data-mc` anchors
+  (packages/core/appearance/anchors.ts), so a theme's variables and anchor
+  rules apply as they do in the app. Class names here are only for the
+  fixture; themes must not rely on them.
+-->
+<div class="flex h-screen gap-0 bg-app-shell font-sans text-body text-foreground antialiased">
+  <nav data-mc="app-rail" class="flex w-12 shrink-0 flex-col items-center gap-2 py-3">
+    <span class="mb-2 flex size-7 items-center justify-center rounded-lg bg-primary text-micro font-semibold text-primary-foreground">M</span>
+    <span class="size-7 rounded-md bg-sidebar-accent"></span>
+    <span class="size-7 rounded-md"></span>
+    <span class="size-7 rounded-md"></span>
+  </nav>
+  <aside data-mc="sidebar" data-state="expanded" class="flex w-56 shrink-0 flex-col gap-0.5 bg-sidebar px-2 py-3 text-sidebar-foreground">
+    <div class="mb-2 px-2 text-label font-medium">Acme</div>
+    <a data-mc="nav-item" data-active="false" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-label text-sidebar-foreground">Inbox<span class="ml-auto rounded-sm bg-brand px-1.5 text-micro text-brand-foreground">3</span></a>
+    <a data-mc="nav-item" data-active="true" class="flex items-center gap-2 rounded-md bg-sidebar-accent px-2 py-1.5 text-label font-medium text-sidebar-accent-foreground">Issues</a>
+    <a data-mc="nav-item" data-active="false" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-label text-sidebar-foreground">Projects</a>
+    <a data-mc="nav-item" data-active="false" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-label text-sidebar-foreground">Agents</a>
+    <a data-mc="nav-item" data-active="false" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-label text-sidebar-foreground">Autopilots</a>
+    <div class="mt-4 mb-1 px-2 text-micro font-medium text-muted-foreground uppercase">Teams</div>
+    <a data-mc="nav-item" data-active="false" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-label text-sidebar-foreground">Design</a>
+    <a data-mc="nav-item" data-active="false" class="flex items-center gap-2 rounded-md px-2 py-1.5 text-label text-sidebar-foreground">Platform</a>
+  </aside>
+  <main data-mc="page" class="my-2 mr-2 flex min-w-0 flex-1 overflow-hidden rounded-xl bg-page-canvas ring-1 ring-surface-border">
+    <section class="flex w-[56%] min-w-0 flex-col border-r border-border">
+      <header class="flex items-center gap-3 border-b border-border px-4 py-2.5">
+        <h1 class="text-title-sm font-medium">Issues</h1>
+        <div data-slot="tabs-list" class="flex gap-0.5 rounded-lg bg-muted p-0.5">
+          <span data-slot="tabs-trigger" data-active class="rounded-md bg-background px-2 py-0.5 text-caption font-medium shadow-sm">All</span>
+          <span data-slot="tabs-trigger" class="rounded-md px-2 py-0.5 text-caption text-muted-foreground">Active</span>
+          <span data-slot="tabs-trigger" class="rounded-md px-2 py-0.5 text-caption text-muted-foreground">Backlog</span>
+        </div>
+        <button data-slot="button" data-variant="default" data-size="sm" class="ml-auto rounded-lg bg-primary px-2.5 py-1 text-caption font-medium text-primary-foreground">New issue</button>
+      </header>
+      <div class="flex-1 overflow-hidden">
+        <div data-mc="issue-group-header" data-status="in_progress" class="flex items-center gap-2 bg-muted/60 px-4 py-1.5 text-label font-medium">
+          <svg data-mc="status-icon" class="size-3.5 text-warning" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M7 1.5a5.5 5.5 0 0 1 0 11z" fill="currentColor"/></svg>
+          In Progress <span class="text-muted-foreground">2</span>
+        </div>
+        <div data-mc="issue-row" data-status="in_progress" data-priority="high" data-assignee-type="agent" class="flex items-center gap-3 border-b border-border/60 bg-surface-selected px-4 py-2 text-surface-selected-foreground">
+          <svg data-mc="priority-icon" class="size-3.5 text-priority-high" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="8" width="3" height="5" rx="1"/><rect x="5.5" y="5" width="3" height="8" rx="1"/><rect x="10" y="2" width="3" height="11" rx="1"/></svg>
+          <span class="w-14 shrink-0 text-caption text-muted-foreground">ACM-142</span>
+          <svg data-mc="status-icon" class="size-3.5 shrink-0 text-warning" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M7 1.5a5.5 5.5 0 0 1 0 11z" fill="currentColor"/></svg>
+          <span class="truncate">Ship the onboarding checklist</span>
+          <span data-mc="label-chip" data-color="#8b5cf6" class="ml-auto rounded-full border border-border px-2 text-caption">Design</span>
+        </div>
+        <div data-mc="issue-row" data-status="in_progress" data-priority="medium" data-assignee-type="member" class="flex items-center gap-3 border-b border-border/60 px-4 py-2">
+          <svg data-mc="priority-icon" class="size-3.5 text-muted-foreground" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="8" width="3" height="5" rx="1"/><rect x="5.5" y="5" width="3" height="8" rx="1"/><rect x="10" y="2" width="3" height="11" rx="1" opacity=".3"/></svg>
+          <span class="w-14 shrink-0 text-caption text-muted-foreground">ACM-139</span>
+          <svg data-mc="status-icon" class="size-3.5 shrink-0 text-warning" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M7 1.5a5.5 5.5 0 0 1 0 11z" fill="currentColor"/></svg>
+          <span class="truncate">Retry failed webhook deliveries</span>
+          <span data-mc="label-chip" data-color="#0ea5e9" class="ml-auto rounded-full border border-border px-2 text-caption">Platform</span>
+        </div>
+        <div data-mc="issue-group-header" data-status="todo" class="flex items-center gap-2 bg-muted/60 px-4 py-1.5 text-label font-medium">
+          <svg data-mc="status-icon" class="size-3.5 text-muted-foreground" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5"/></svg>
+          Todo <span class="text-muted-foreground">3</span>
+        </div>
+        <div data-mc="issue-row" data-status="todo" data-priority="low" data-assignee-type="none" class="flex items-center gap-3 border-b border-border/60 px-4 py-2">
+          <svg data-mc="priority-icon" class="size-3.5 text-muted-foreground" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="8" width="3" height="5" rx="1"/><rect x="5.5" y="5" width="3" height="8" rx="1" opacity=".3"/><rect x="10" y="2" width="3" height="11" rx="1" opacity=".3"/></svg>
+          <span class="w-14 shrink-0 text-caption text-muted-foreground">ACM-151</span>
+          <svg data-mc="status-icon" class="size-3.5 shrink-0 text-muted-foreground" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5"/></svg>
+          <span class="truncate">Dark mode for exported PDFs</span>
+        </div>
+        <div data-mc="issue-row" data-status="todo" data-priority="high" data-assignee-type="squad" class="flex items-center gap-3 border-b border-border/60 px-4 py-2">
+          <svg data-mc="priority-icon" class="size-3.5 text-priority-high" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="8" width="3" height="5" rx="1"/><rect x="5.5" y="5" width="3" height="8" rx="1"/><rect x="10" y="2" width="3" height="11" rx="1"/></svg>
+          <span class="w-14 shrink-0 text-caption text-muted-foreground">ACM-148</span>
+          <svg data-mc="status-icon" class="size-3.5 shrink-0 text-muted-foreground" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5"/></svg>
+          <span class="truncate">Audit log export for workspace admins</span>
+          <span data-mc="label-chip" data-color="#ef4444" class="ml-auto rounded-full border border-border px-2 text-caption">Security</span>
+        </div>
+        <div data-mc="issue-row" data-status="todo" data-priority="medium" data-assignee-type="agent" class="flex items-center gap-3 border-b border-border/60 px-4 py-2">
+          <svg data-mc="priority-icon" class="size-3.5 text-muted-foreground" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="8" width="3" height="5" rx="1"/><rect x="5.5" y="5" width="3" height="8" rx="1"/><rect x="10" y="2" width="3" height="11" rx="1" opacity=".3"/></svg>
+          <span class="w-14 shrink-0 text-caption text-muted-foreground">ACM-147</span>
+          <svg data-mc="status-icon" class="size-3.5 shrink-0 text-muted-foreground" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.5"/></svg>
+          <span class="truncate">Summarise weekly agent activity</span>
+        </div>
+        <div data-mc="issue-group-header" data-status="done" class="flex items-center gap-2 bg-muted/60 px-4 py-1.5 text-label font-medium">
+          <svg data-mc="status-icon" class="size-3.5 text-success" viewBox="0 0 14 14"><circle cx="7" cy="7" r="6" fill="currentColor"/><path d="m4.5 7 1.8 1.8L9.7 5.4" stroke="white" stroke-width="1.5" fill="none"/></svg>
+          Done <span class="text-muted-foreground">1</span>
+        </div>
+        <div data-mc="issue-row" data-status="done" data-priority="low" data-assignee-type="member" class="flex items-center gap-3 border-b border-border/60 px-4 py-2 text-muted-foreground">
+          <svg data-mc="priority-icon" class="size-3.5" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="8" width="3" height="5" rx="1"/><rect x="5.5" y="5" width="3" height="8" rx="1" opacity=".3"/><rect x="10" y="2" width="3" height="11" rx="1" opacity=".3"/></svg>
+          <span class="w-14 shrink-0 text-caption">ACM-120</span>
+          <svg data-mc="status-icon" class="size-3.5 shrink-0 text-success" viewBox="0 0 14 14"><circle cx="7" cy="7" r="6" fill="currentColor"/><path d="m4.5 7 1.8 1.8L9.7 5.4" stroke="white" stroke-width="1.5" fill="none"/></svg>
+          <span class="truncate">Invite links that expire</span>
+        </div>
+      </div>
+    </section>
+    <section class="flex min-w-0 flex-1 flex-col gap-4 overflow-hidden px-6 py-5">
+      <div class="text-caption text-muted-foreground">ACM-142</div>
+      <h2 class="-mt-3 text-title-lg font-semibold">Ship the onboarding checklist</h2>
+      <div data-mc="content" class="space-y-2.5 text-body leading-relaxed">
+        <p>New workspaces should see a short checklist on the dashboard: connect a repository, create an agent and assign it a first issue.</p>
+        <ul class="list-disc space-y-1 pl-5">
+          <li>Hide it once every step is done.</li>
+          <li>Keep the copy in <code class="rounded-sm bg-muted px-1 py-0.5 font-mono text-caption">checklist.json</code>.</li>
+        </ul>
+        <blockquote class="border-l-2 border-border pl-3 text-muted-foreground">Measure how many teams finish it in a week.</blockquote>
+      </div>
+      <div data-mc="comment" data-author-type="agent" data-slot="card" class="rounded-xl border border-surface-border bg-surface p-3 text-surface-foreground">
+        <div class="mb-1.5 flex items-center gap-2 text-label">
+          <span class="size-5 rounded-full bg-info"></span><span class="font-medium">Lambda</span><span class="text-caption text-muted-foreground">2h ago</span>
+        </div>
+        <div data-mc="content" data-density="compact" class="text-body">Opened a draft PR with the checklist and its empty state.</div>
+        <div data-mc="comment-reply" data-author-type="member" class="mt-2.5 border-t border-border pt-2.5 text-body">
+          <span class="font-medium">Ada</span> <span class="text-muted-foreground">Looks good, ship it.</span>
+        </div>
+      </div>
+      <div data-mc="comment-composer" class="mt-auto rounded-xl border border-input bg-background p-3">
+        <div data-slot="textarea" class="h-10 text-body text-muted-foreground">Leave a comment…</div>
+        <div class="flex justify-end gap-2">
+          <button data-slot="button" data-variant="outline" data-size="sm" class="rounded-lg border border-border bg-background px-2.5 py-1 text-caption">Attach</button>
+          <button data-slot="button" data-variant="default" data-size="sm" class="rounded-lg bg-primary px-2.5 py-1 text-caption font-medium text-primary-foreground">Comment</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
