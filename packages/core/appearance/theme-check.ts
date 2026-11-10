@@ -2,7 +2,13 @@ import type { ArchiveFile } from "./theme-archive";
 import { parseTheme, readThemeFiles, type ThemePackageInput } from "./theme-package";
 import { THEME_VARIABLE_NAMES } from "./theme-variables";
 import { contrastRatio, resolveColor, type BasePalette } from "./theme-contrast";
-import type { Theme } from "./themes";
+import {
+  THEME_OPTION_ATTR_PREFIX,
+  themeOptionAttributes,
+  themeOptionVariables,
+  type Theme,
+  type ThemeManifest,
+} from "./themes";
 
 /**
  * The theme validator behind `pnpm theme:check` and the theme store's
@@ -132,16 +138,6 @@ function rootSelector(
   return { modes: mode ? [mode] : ["light", "dark"], specificity };
 }
 
-/** The `data-theme-option-*` attributes the theme's default options set. */
-function optionAttributes(manifest: unknown): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const option of manifestOptions(manifest)) {
-    if (option.type === "toggle" && option.default === true) out.set(String(option.id), "on");
-    if (option.type === "select" && typeof option.default === "string") out.set(String(option.id), option.default);
-  }
-  return out;
-}
-
 /** Selectors in a list, split on the commas outside parentheses. */
 function splitSelectors(prelude: string): string[] {
   const out: string[] = [];
@@ -265,30 +261,13 @@ function checkFonts(css: string, manifest: unknown, issues: ThemeCheckIssue[]) {
   }
 }
 
-/** Variables the default option values set, per mode. */
-function optionDefaults(manifest: unknown): { light: [string, string][]; dark: [string, string][] } {
-  const out = { light: [] as [string, string][], dark: [] as [string, string][] };
-  for (const option of manifestOptions(manifest)) {
-    const name = `--${String(option.id)}`;
-    const def = option.default;
-    if (option.type === "color") {
-      const light = typeof def === "string" ? def : isRecord(def) ? def.light : undefined;
-      const dark = typeof def === "string" ? def : isRecord(def) ? def.dark : undefined;
-      if (typeof light === "string") out.light.push([name, light]);
-      if (typeof dark === "string") out.dark.push([name, dark]);
-    } else if (option.type === "text" || option.type === "font" || option.type === "variable-select") {
-      if (typeof def === "string") {
-        out.light.push([name, def]);
-        out.dark.push([name, def]);
-      }
-    }
-  }
-  return out;
-}
-
+/**
+ * Contrast with the options at their defaults, through the same helpers the
+ * app uses to apply them. Without a parsed theme there are no options to apply.
+ */
 function checkContrast(
   css: string,
-  manifest: unknown,
+  theme: ThemeManifest | undefined,
   base: BasePalette,
   issues: ThemeCheckIssue[],
 ): ContrastCheck[] {
@@ -301,7 +280,10 @@ function checkContrast(
   };
   const frame = { light: [] as [string, string][], dark: [] as [string, string][] };
   const unmodelled = new Map<string, string>();
-  const attributes = optionAttributes(manifest);
+  const attributes = new Map<string, string>();
+  for (const [name, value] of Object.entries(theme ? themeOptionAttributes(theme, undefined) : {})) {
+    if (value !== null) attributes.set(name.slice(THEME_OPTION_ATTR_PREFIX.length), value);
+  }
   for (const rule of rules(clean)) {
     for (const selector of rule.selectors) {
       const target = rule.nested ? null : rootSelector(selector, attributes);
@@ -328,7 +310,7 @@ function checkContrast(
     const frameMode = /^(?::root|html)?\.theme-(light|dark)\s/.exec(joined)?.[1] as "light" | "dark" | undefined;
     if (!rule.nested && frameMode && FRAME_ANCHOR.test(joined)) frame[frameMode].push(...declarations(rule.body));
   }
-  const defaults = optionDefaults(manifest);
+  const options = theme ? themeOptionVariables(theme, undefined) : { light: {}, dark: {} };
   const results: ContrastCheck[] = [];
   const unresolved = new Set<string>();
   const read = new Set<string>();
@@ -337,7 +319,7 @@ function checkContrast(
     // Option values are written after the theme as `:root.theme-<mode>`, so they win.
     const palette = new ReadTracker(read, [
       ...[...cascade[m]].map(([name, { value }]) => [name, value] as const),
-      ...defaults[m],
+      ...Object.entries(options[m]),
     ]);
     const measure = (
       area: ContrastCheck["area"],
@@ -418,7 +400,14 @@ export function checkThemePackage(input: ThemePackageInput, base: BasePalette): 
   if (typeof input.css === "string") {
     checkVariables(input.css, input.manifest, issues);
     checkFonts(input.css, input.manifest, issues);
-    contrast = checkContrast(input.css, input.manifest, base, issues);
+    const theme = parsed.ok ? parsed.theme : undefined;
+    if (!theme && manifestOptions(input.manifest).length > 0) {
+      issues.push({
+        level: "warning",
+        message: "Contrast was checked without the theme's options, because the theme did not pass the checks above.",
+      });
+    }
+    contrast = checkContrast(input.css, theme, base, issues);
   }
   return {
     ok: !issues.some((issue) => issue.level === "error"),

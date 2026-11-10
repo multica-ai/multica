@@ -120,6 +120,33 @@ describe("theme check", () => {
     expect(errors(":root[data-theme-option-wash].theme-light { --page-canvas: #444444; }", { options }).length).toBeGreaterThan(0);
   });
 
+  it("fills in a missing default the way import does: the first choice", () => {
+    const light = ".theme-light { --foreground: #000000; --page-canvas: #ffffff; }";
+    const pale = [{ value: "pale", label: "Pale" }, { value: "dark", label: "Dark" }];
+    const select = errors(`${light}\n:root[data-theme-option-ink="pale"] { --foreground: #ffffff; }`, {
+      options: [{ id: "ink", type: "select", label: "Ink", choices: pale }],
+    });
+    expect(select.some((m) => /light mode: --foreground is below .*--page-canvas \(1\.00:1\)/.test(m))).toBe(true);
+    const variable = errors(light, {
+      options: [{ id: "foreground", type: "variable-select", label: "Ink", choices: [
+        { value: "#ffffff", label: "Pale" },
+        { value: "#000000", label: "Dark" },
+      ] }],
+    });
+    expect(variable.some((m) => /light mode: --foreground is below .*--page-canvas \(1\.00:1\)/.test(m))).toBe(true);
+  });
+
+  it("says when it could not apply the options", () => {
+    const report = check(".theme-light { --radius: 0; }", {
+      id: "Bad",
+      options: [{ id: "wash", type: "toggle", label: "Wash", default: true }],
+    });
+    expect(report.issues).toContainEqual({
+      level: "warning",
+      message: "Contrast was checked without the theme's options, because the theme did not pass the checks above.",
+    });
+  });
+
   it("keeps a selector list inside :is() together", () => {
     const report = check('.theme-light :is([data-mc="app-rail"], [data-mc="tab-bar"]) { --foreground: #ffffff; --app-shell: #000000; }');
     expect(report.issues.filter((i) => i.level === "warning")).toEqual([]);
