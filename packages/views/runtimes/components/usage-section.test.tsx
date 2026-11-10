@@ -2,13 +2,16 @@
 
 import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import type { AgentRuntime } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enRuntimes from "../../locales/en/runtimes.json";
+import enUsage from "../../locales/en/usage.json";
 
-const TEST_RESOURCES = { en: { common: enCommon, runtimes: enRuntimes } };
+const TEST_RESOURCES = {
+  en: { common: enCommon, runtimes: enRuntimes, usage: enUsage },
+};
 
 // The viewer's tz (Viewing layer) drives both the trend and the heatmap.
 const VIEWER_TZ = "Asia/Tokyo";
@@ -193,6 +196,69 @@ describe("UsageSection — Viewing timezone wiring", () => {
     fireEvent.click(screen.getByRole("button", { name: "7d" }));
 
     expect(flows.at(-1)).toHaveAttribute("aria-label", "1K");
+  });
+});
+
+describe("UsageSection — period and grain", () => {
+  beforeEach(() => {
+    usageOverride.rows = null;
+  });
+
+  const periodGroup = () => screen.getByRole("group", { name: "Period" });
+  const dimGroup = () => screen.queryByRole("group", { name: "Dimension" });
+
+  it("offers every period up front, so 180d is one click", () => {
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    for (const label of ["7d", "30d", "90d", "180d"]) {
+      expect(
+        within(periodGroup()).getByRole("button", { name: label }),
+      ).toBeInTheDocument();
+    }
+
+    fireEvent.click(within(periodGroup()).getByRole("button", { name: "180d" }));
+
+    expect(screen.getByText("Cost · 180D")).toBeInTheDocument();
+    expect(screen.getByTestId("weekly-cost-chart")).toBeInTheDocument();
+    // 180d allows only the weekly grain — a one-option toggle is not shown.
+    expect(dimGroup()).toBeNull();
+  });
+
+  it("switching the grain never changes the period", () => {
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    fireEvent.click(within(dimGroup()!).getByRole("button", { name: "Weekly" }));
+
+    expect(screen.getByTestId("weekly-cost-chart")).toBeInTheDocument();
+    expect(screen.getByText("Cost · 30D")).toBeInTheDocument();
+    expect(
+      within(periodGroup()).getByRole("button", { name: "30d" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("draws 7d daily without forgetting the reader's weekly choice", () => {
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    // Tokens, because the 7d fixture's cost rounds to $0 and would render
+    // the empty state instead of a chart.
+    fireEvent.click(screen.getByRole("button", { name: "Tokens" }));
+    fireEvent.click(within(dimGroup()!).getByRole("button", { name: "Weekly" }));
+    fireEvent.click(within(periodGroup()).getByRole("button", { name: "7d" }));
+
+    expect(screen.getByTestId("daily-tokens-chart")).toBeInTheDocument();
+    expect(dimGroup()).toBeNull();
+
+    fireEvent.click(within(periodGroup()).getByRole("button", { name: "30d" }));
+
+    expect(screen.getByTestId("weekly-tokens-chart")).toBeInTheDocument();
+  });
+
+  it("hides the grain toggle while the heatmap is on", () => {
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    fireEvent.click(screen.getByRole("button", { name: "Heatmap" }));
+
+    expect(dimGroup()).toBeNull();
   });
 });
 
