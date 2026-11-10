@@ -1598,6 +1598,7 @@ export const IssueSchema = z.object({
   assignee_id: z.string().nullable(),
   creator_type: z.string(),
   creator_id: z.string(),
+  requester_id: z.string().nullable().optional().catch(undefined),
   parent_issue_id: z.string().nullable(),
   // Additive pointer (MUL-7349); same disproportionate-failure reasoning as
   // status_name above, and older backends do not send it at all.

@@ -3531,3 +3531,36 @@ describe("ApiClient issue environments", () => {
     expect(result).toMatchObject({ id: "cmd-3", status: "pending", output: null });
   });
 });
+
+describe("created-by filter compatibility", () => {
+  it.each([false, true])("retries literal creator filtering on an old server (POST=%s)", async (post) => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ issues: [], total: 0 }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    await client.listIssues({ created_by_user_id: "me", ...(post ? { ids: ["issue"] } : {}) });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    if (post) {
+      expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toMatchObject({ creator_id: "me" });
+    } else {
+      expect(new URL(fetchMock.mock.calls[1]![0]).searchParams.get("creator_id")).toBe("me");
+    }
+  });
+  it("accepts a server acknowledgment without narrowing agent-created results", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ issues: [], total: 0, created_by_user_id: "me" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await new ApiClient("https://api.example.test").listIssues({ created_by_user_id: "me" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new URL(fetchMock.mock.calls[0]![0]).searchParams.get("created_by_user_id")).toBe("me");
+  });
+});
+
+
+describe("grouped created-by compatibility", () => {
+  it("retries a legacy server with literal creator_id", async () => {
+    const fetchMock = vi.fn(async (_url: string) => Response.json({ groups: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await new ApiClient("https://api.example.test").listGroupedIssues({ group_by: "assignee", created_by_user_id: "me" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new URL(fetchMock.mock.calls[1]![0]).searchParams.get("creator_id")).toBe("me");
+  });
+});
