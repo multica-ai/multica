@@ -806,6 +806,22 @@
     "stop_tooltip": "Detener agente",
     "cancel_failed": "No se ha podido cancelar la ejecución"
   },
+  "agent_question": {
+    "title": "{{name}} tiene una pregunta",
+    "title_fallback": "El agente tiene una pregunta",
+    "pick_single": "Elige una opción",
+    "pick_multiple": "Elige todas las que correspondan",
+    "other_option": "Otra",
+    "other_placeholder": "Escribe tu propia respuesta",
+    "submit": "Enviar respuesta",
+    "sending": "Enviando…",
+    "submit_failed": "No se pudo enviar la respuesta",
+    "answered": "Respondida",
+    "resume_hint": "El agente continúa en cuanto respondas.",
+    "waiting_chip": "{{name}} espera tu respuesta",
+    "waiting_chip_fallback": "Un agente espera tu respuesta",
+    "option_group_label": "Opciones para: {{question}}"
+  },
   "execution_log": {
     "latest": "Recientes",
     "include_children": "Incluir subtareas",

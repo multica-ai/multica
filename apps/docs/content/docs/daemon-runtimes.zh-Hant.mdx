@@ -250,7 +250,7 @@ Codex 原生子 AI 代理同樣預設關閉：父執行緒結束時，Multica �
 另外：
 
 - **衝突時以 Multica 的值為準。** 如果固定引數設定了 Multica 也會設定的 flag，Multica 的值排在後面並最終生效。最典型的是：在 Agent 上選擇的模型會覆蓋 profile 裡固定的 `--model`。若要為所有人固定模型，請把 Agent 的模型欄位留空。
-- **協議關鍵 flag 會被忽略。** `-p`、`--output-format`、`--input-format`、`--permission-mode` 以及其他協議族的對應 flag 會從固定引數中被剔除，因為覆蓋它們會切斷 daemon 與工具之間的通訊。子命令和其他位置引數始終原樣傳遞。
+- **協議關鍵 flag 會被忽略。** `-p`、`--output-format`、`--input-format`、`--permission-mode`、`--permission-prompt-tool` 以及其他協議族的對應 flag 會從固定引數中被剔除，因為覆蓋它們會切斷 daemon 與工具之間的通訊。子命令和其他位置引數始終原樣傳遞。
 
 如果 Desktop 啟動的守護程序找不到終端裡能夠執行的命令，可以為當前電腦設定絕對路徑：
 

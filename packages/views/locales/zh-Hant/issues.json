@@ -793,6 +793,22 @@
     "stop_tooltip": "停止 AI 代理",
     "cancel_failed": "取消執行失敗"
   },
+  "agent_question": {
+    "title": "{{name}} 有一個問題",
+    "title_fallback": "AI 代理有一個問題",
+    "pick_single": "選擇一項",
+    "pick_multiple": "選擇所有適用項",
+    "other_option": "其他",
+    "other_placeholder": "寫下你自己的回答",
+    "submit": "傳送回答",
+    "sending": "傳送中…",
+    "submit_failed": "回答傳送失敗",
+    "answered": "已回答",
+    "resume_hint": "你回覆後 AI 代理會立即繼續。",
+    "waiting_chip": "{{name}} 正在等待你的回答",
+    "waiting_chip_fallback": "有 AI 代理正在等待你的回答",
+    "option_group_label": "「{{question}}」的選項"
+  },
   "execution_log": {
     "latest": "最近",
     "include_children": "包含子任務",
@@ -917,7 +933,7 @@
     "confirm": "停止執行"
   },
   "batch": {
-    "delete_restricted": "你可以刪除本人或本人擁有的智慧體建立的任務。工作區 owner 和 admin 可以刪除任意任務。",
+    "delete_restricted": "你可以刪除本人或本人擁有的AI 代理建立的任務。工作區 owner 和 admin 可以刪除任意任務。",
     "selected": "已選擇 {{count}} 個",
     "status": "狀態",
     "priority": "優先順序",

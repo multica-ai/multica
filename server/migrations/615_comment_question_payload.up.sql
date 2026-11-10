@@ -1,0 +1,23 @@
+-- Agent questions (GitHub #8048).
+--
+-- When a Claude Code agent calls AskUserQuestion under the daemon, the daemon
+-- posts the question to the issue as an ORDINARY agent comment (type stays
+-- 'comment') and marks it with the structured question payload. The timeline
+-- renders an interactive card off this column; the human's answer is a plain
+-- reply in the same thread, which triggers the agent's next run.
+--
+-- Same shape as quick_action_id (migration 239), for the same two reasons:
+--
+--   1. A new `type` value would mean dropping and re-adding comment_type_check,
+--      which takes ACCESS EXCLUSIVE on `comment` while it scans the table.
+--      A nullable column with no default is metadata-only and instant.
+--
+--   2. `type` is client-supplied on the generic POST /comments path. There is
+--      no request field for question_payload — only the daemon's task
+--      question endpoint sets it — so a member cannot forge a question card.
+--
+-- Shape: {"questions": [{"question", "header", "multi_select", "options":
+-- [{"label", "description"}]}]}. Validated by the server before insert; the
+-- render path treats an unreadable payload as an ordinary comment.
+-- No index: the column is only read alongside the comment row it sits on.
+ALTER TABLE comment ADD COLUMN IF NOT EXISTS question_payload JSONB;
