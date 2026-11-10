@@ -381,6 +381,8 @@ multica config show
 | `ws_claim_poll_interval` | `3m` | 健康 WebSocket 下 claim 安全輪詢的上限，與 `poll_interval` 獨立配置；Daemon 會應用向下抖動 |
 | `heartbeat_interval` | `15s` | 心跳間隔 |
 | `agent_timeout` | 不限制 | 單次執行的絕對時限 |
+| `agent_idle_watchdog` | `2h` | 沒有工具執行時的靜默上限；`0s` 關閉守護程序的整套 watchdog，`agent_tool_watchdog` 也隨之失效 |
+| `agent_tool_watchdog` | 同 `agent_idle_watchdog` | 工具執行期間的靜默上限；`0s` 表示守護程序的 watchdog 不會因工具靜默而停止執行，此時執行只受 `agent_timeout` 限制，而它預設不限制 |
 | `codex_semantic_inactivity_timeout` | 派生 | Codex 語義靜默閾值。未設定時取 idle 與 tool watchdog 預算中較大的那個；tool 預算為 `0` 時回落到 idle 預算；只有整套 watchdog 關閉時才保留 Codex 自己的 `10m` |
 | `codex_handshake_timeout` | `30s`；`thread/start`、`thread/resume`：`60s` | Codex app-server 啟動握手上限；顯式設定後會統一覆蓋兩類預算 |
 | `disable_auto_update` | 跟隨環境 | `true` 關閉自動更新；`false` 清除本地覆蓋，回到環境變數或預設 |
@@ -389,7 +391,7 @@ multica config show
 
 幾條取值規則：
 
-- duration 類鍵接受正的 Go duration（如 `10s`、`2h`），`0s` 和負值會被拒絕。唯一例外是 `agent_timeout`：`0s` 合法，表示明確關閉執行時限。
+- duration 類鍵接受正的 Go duration（如 `10s`、`2h`），負值一律拒絕。只有 `agent_timeout`、`agent_idle_watchdog`、`agent_tool_watchdog` 還接受 `0s`：`agent_timeout` 設為 `0s` 表示明確關閉執行時限，兩個 watchdog 鍵設為 `0s` 關閉什麼見上表。
 - 傳空字串清除已持久化的值，回到環境變數或內建預設，例如 `multica config set poll_interval ""`。
 - `max_concurrent_tasks` 要求非負整數。
 - 相對的 `workspaces_root` 值在儲存時會轉換為絕對路徑。
