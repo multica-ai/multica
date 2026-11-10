@@ -1,5 +1,24 @@
 export { useIssueSelectionStore } from "./selection-store";
 export {
+  useIssueSidebarLayoutStore,
+  selectIssueSidebarLayout,
+  ISSUE_SIDEBAR_TABS,
+  DEFAULT_ISSUE_SIDEBAR_LAYOUT,
+  dropIssueSidebarTab,
+  groupOfTab,
+  isDefaultIssueSidebarLayout,
+  mergeIssueSidebarGroups,
+  moveIssueSidebarTab,
+  normalizeIssueSidebarLayout,
+  resolveIssueSidebarLayout,
+  selectIssueSidebarTab,
+  splitIssueSidebarTab,
+  type IssueSidebarDropTarget,
+  type IssueSidebarGroup,
+  type IssueSidebarLayout,
+  type IssueSidebarTab,
+} from "./issue-sidebar-layout-store";
+export {
   useCreateModeStore,
   openCreateIssueWithPreference,
   type CreateMode,
