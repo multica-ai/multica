@@ -15,8 +15,10 @@ import {
 } from "@multica/core/paths";
 import { AppLink, useNavigation } from "../navigation";
 import { useLogout } from "../auth";
-import { DragStrip } from "../platform";
+import { DragStrip, isDesktopShell } from "../platform";
+import { ConnectToolsStep } from "../onboarding/join/connect-tools-step";
 import { useT } from "../i18n";
+import type { Workspace } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -48,6 +50,7 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
   const [declining, setDeclining] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<"accepted" | "declined" | null>(null);
+  const [connectTools, setConnectTools] = useState<{ workspace: Workspace; dest: string } | null>(null);
 
   const { data: invitation, isLoading, error: fetchError } = useQuery({
     queryKey: ["invitation", invitationId],
@@ -87,6 +90,12 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
       const dest = joined
         ? paths.workspace(joined.slug).issues()
         : fallbackDest;
+      // Desktop can bring this computer's coding tools along as the member's
+      // own agents before they land; on web there is no local daemon to ask.
+      if (joined && isDesktopShell()) {
+        setConnectTools({ workspace: joined, dest });
+        return;
+      }
       setTimeout(() => push(dest), 1000);
     } catch (e) {
       setError(e instanceof Error ? e.message : t(($) => $.errors.accept_failed));
@@ -146,6 +155,15 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
           </CardContent>
         </Card>
       </InviteShell>
+    );
+  }
+
+  if (connectTools) {
+    return (
+      <ConnectToolsStep
+        workspace={connectTools.workspace}
+        onDone={() => push(connectTools.dest)}
+      />
     );
   }
 
