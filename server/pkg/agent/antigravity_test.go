@@ -985,6 +985,7 @@ func TestAntigravityBackendRecoveredStreamInterruption(t *testing.T) {
 			script := strings.ReplaceAll(fakeAgyTrailingNetworkErrorScript(tc.done), antigravityNetworkIssueError,
 				"The stream was interrupted. Please continue the task you were working on.")
 			script = strings.ReplaceAll(script, "exit 1", fmt.Sprintf("exit %d", tc.exitCode))
+			script = strings.Replace(script, "#!/bin/sh\n", "#!/bin/sh\nprintf '%s\\n' '{\"event\":\"step_update\",\"step_update\":{\"step_index\":0,\"state\":\"DONE\",\"step_type\":\"user_input\"}}'\n", 1)
 			writeTestExecutable(t, fakePath, []byte(script))
 
 			backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
