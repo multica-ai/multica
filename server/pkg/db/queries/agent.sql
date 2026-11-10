@@ -58,14 +58,15 @@ INSERT INTO agent (
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
     service_tier, conversation_starters,
-    composio_toolkit_allowlist, permission_mode
+    composio_toolkit_allowlist, permission_mode, queued_ttl_seconds
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
     $17, COALESCE(sqlc.narg('conversation_starters')::jsonb, '[]'::jsonb),
     sqlc.narg('composio_toolkit_allowlist')::text[],
-    COALESCE(sqlc.narg('permission_mode'), 'private')
+    COALESCE(sqlc.narg('permission_mode'), 'private'),
+    sqlc.narg('queued_ttl_seconds')
 )
 RETURNING *;
 
@@ -133,6 +134,7 @@ UPDATE agent SET
     runtime_id = COALESCE(sqlc.narg('runtime_id'), runtime_id),
     visibility = COALESCE(sqlc.narg('visibility'), visibility),
     permission_mode = COALESCE(sqlc.narg('permission_mode'), permission_mode),
+    queued_ttl_seconds = COALESCE(sqlc.narg('queued_ttl_seconds'), queued_ttl_seconds),
     status = COALESCE(sqlc.narg('status'), status),
     max_concurrent_tasks = COALESCE(sqlc.narg('max_concurrent_tasks'), max_concurrent_tasks),
     instructions = COALESCE(sqlc.narg('instructions'), instructions),
@@ -176,6 +178,11 @@ RETURNING *;
 
 -- name: ClearAgentMcpConfig :one
 UPDATE agent SET mcp_config = NULL, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentQueuedTTLSeconds :one
+UPDATE agent SET queued_ttl_seconds = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -1340,29 +1347,42 @@ RETURNING *;
 -- Select bounded victims with SKIP LOCKED, then re-check status and liveness in
 -- the update so concurrent claims cannot be overwritten.
 WITH victims AS (
-    SELECT id FROM agent_task_queue
-    WHERE status = 'queued' AND context->>'wakeup_id' IS NULL
-      AND created_at < now() - make_interval(secs => @reconnect_grace_secs::double precision)
+    SELECT t.id, t.agent_id
+    FROM agent_task_queue t
+    JOIN agent a ON a.id = t.agent_id
+    WHERE t.status = 'queued'
+      AND t.context->>'wakeup_id' IS NULL
+      AND t.created_at < now() - make_interval(
+          secs => COALESCE(
+              CASE
+                  WHEN a.queued_ttl_seconds > 0
+                      AND a.queued_ttl_seconds::text <> 'NaN'
+                      AND a.queued_ttl_seconds NOT IN ('Infinity'::double precision, '-Infinity'::double precision)
+                  THEN a.queued_ttl_seconds
+              END,
+              @reconnect_grace_secs::double precision
+          )
+      )
       AND (
-          runtime_id IS NULL
+          t.runtime_id IS NULL
           OR NOT EXISTS (
-              SELECT 1 FROM agent_runtime r WHERE r.id = agent_task_queue.runtime_id
+              SELECT 1 FROM agent_runtime r WHERE r.id = t.runtime_id
           )
           OR EXISTS (
               SELECT 1 FROM agent_runtime r
-              WHERE r.id = agent_task_queue.runtime_id
+              WHERE r.id = t.runtime_id
                 AND COALESCE(r.last_seen_at, r.updated_at) <
                     now() - make_interval(secs => @reconnect_grace_secs::double precision)
           )
       )
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue retry_parent
-          WHERE retry_parent.id = agent_task_queue.parent_task_id
+          WHERE retry_parent.id = t.parent_task_id
             AND retry_parent.failure_reason = 'runtime_offline'
       )
-    ORDER BY created_at ASC
+    ORDER BY t.created_at ASC
     LIMIT @max_per_tick::int
-    FOR UPDATE SKIP LOCKED
+    FOR UPDATE OF t SKIP LOCKED
 )
 UPDATE agent_task_queue t
 SET status = 'failed',
@@ -1371,9 +1391,20 @@ SET status = 'failed',
     failure_reason = 'queued_expired',
     prepare_lease_expires_at = NULL
 FROM victims v
+JOIN agent a ON a.id = v.agent_id
 WHERE t.id = v.id
   AND t.status = 'queued'
-  AND t.created_at < now() - make_interval(secs => @reconnect_grace_secs::double precision)
+  AND t.created_at < now() - make_interval(
+      secs => COALESCE(
+          CASE
+              WHEN a.queued_ttl_seconds > 0
+                  AND a.queued_ttl_seconds::text <> 'NaN'
+                  AND a.queued_ttl_seconds NOT IN ('Infinity'::double precision, '-Infinity'::double precision)
+              THEN a.queued_ttl_seconds
+          END,
+          @reconnect_grace_secs::double precision
+      )
+  )
   AND (
       t.runtime_id IS NULL
       OR NOT EXISTS (SELECT 1 FROM agent_runtime r WHERE r.id = t.runtime_id)
