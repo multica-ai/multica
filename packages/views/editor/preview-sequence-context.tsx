@@ -164,6 +164,7 @@ export function PreviewSequenceProvider({
   items,
   describeItem,
   onOpenOverview,
+  onOpened,
   onClosed,
   children,
 }: {
@@ -177,6 +178,11 @@ export function PreviewSequenceProvider({
    * showing, so the overview can offer a way back to it.
    */
   onOpenOverview?: (currentKey: string) => void;
+  /**
+   * `openAt` opened the viewer. Called synchronously, inside `openAt`, so a
+   * host can tell a handoff into the viewer from the reader leaving.
+   */
+  onOpened?: () => void;
   /** The viewer finished closing, by any means. */
   onClosed?: () => void;
   children: ReactNode;
@@ -186,6 +192,8 @@ export function PreviewSequenceProvider({
   // context value (and re-render every image) on every incoming message.
   const itemsRef = useRef(items);
   itemsRef.current = items;
+  const onOpenedRef = useRef(onOpened);
+  onOpenedRef.current = onOpened;
 
   const [session, setSession] = useState<Session | null>(null);
   const [open, setOpen] = useState(false);
@@ -218,6 +226,7 @@ export function PreviewSequenceProvider({
           pinnedKey: options?.stayOnError ? key : undefined,
         });
         setOpen(true);
+        onOpenedRef.current?.();
         return true;
       },
     }),

@@ -134,6 +134,7 @@ import { AttachmentVersionsProvider } from "./deliverables/attachment-versions";
 import {
   OpenDeliverableOnLoad,
   useCopyDeliverableLink,
+  useDeliverableLinkSession,
   useFreshTimelineRead,
 } from "./deliverables/deliverable-link";
 import { useQuery } from "@tanstack/react-query";
@@ -2615,19 +2616,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     onCopyLink: copyDeliverableLink,
   });
   const deliverableLinkRead = useFreshTimelineRead(id, openDeliverable, timelineUpdatedAt);
-  // A `/deliverables/<name>` link opened the viewer: when it closes, however
-  // it closes, the address goes back to the plain issue page. Viewer sessions
-  // the reader opens themselves leave the address alone.
-  const deliverableLinkSessionRef = useRef(false);
-  const onDeliverableOpenedInViewer = useCallback(() => {
-    deliverableLinkSessionRef.current = true;
-  }, []);
+  // A `/deliverables/<name>` link that opened the viewer gives the address
+  // back once the reader is done with the file, through the viewer and the
+  // overview alike. Viewer sessions the reader opens themselves leave the
+  // address alone.
+  const deliverableLink = useDeliverableLinkSession(onDeliverableLinkDone);
   const onDeliverableLinkDoneStable = useCallback(() => {
-    onDeliverableLinkDone?.();
-  }, [onDeliverableLinkDone]);
-  const onPreviewClosed = useCallback(() => {
-    if (!deliverableLinkSessionRef.current) return;
-    deliverableLinkSessionRef.current = false;
     onDeliverableLinkDone?.();
   }, [onDeliverableLinkDone]);
   // The overview remembers the file the viewer was showing, so `G` can go
@@ -2640,14 +2634,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     setOverview({ open: false, returnKey: null });
   }, [id]);
   const openOverview = useCallback(() => setOverview({ open: true, returnKey: null }), []);
+  const { onOverviewOpenedFromViewer, onOverviewClosed } = deliverableLink;
   const openOverviewFromViewer = useCallback(
-    (key: string) => setOverview({ open: true, returnKey: key }),
-    [],
+    (key: string) => {
+      onOverviewOpenedFromViewer();
+      setOverview({ open: true, returnKey: key });
+    },
+    [onOverviewOpenedFromViewer],
   );
-  const closeOverview = useCallback(
-    () => setOverview((current) => ({ ...current, open: false })),
-    [],
-  );
+  const closeOverview = useCallback(() => {
+    setOverview((current) => ({ ...current, open: false }));
+    onOverviewClosed();
+  }, [onOverviewClosed]);
 
   const handleDescriptionUpload = useCallback(
     async (file: File) => {
@@ -4152,7 +4150,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       items={previewSequence}
       describeItem={describeDeliverable}
       onOpenOverview={openOverviewFromViewer}
-      onClosed={onPreviewClosed}
+      onOpened={deliverableLink.onViewerOpened}
+      onClosed={deliverableLink.onViewerClosed}
     >
       <AttachmentVersionsProvider files={deliverableFiles}>{layout}</AttachmentVersionsProvider>
       {openDeliverable && (
@@ -4160,7 +4159,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           name={openDeliverable}
           files={deliverableFiles}
           read={deliverableLinkRead}
-          onOpenedInViewer={onDeliverableOpenedInViewer}
+          onOpenedInViewer={deliverableLink.onOpenedInViewer}
           onDone={onDeliverableLinkDoneStable}
         />
       )}

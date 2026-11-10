@@ -107,6 +107,62 @@ export function useFreshTimelineRead(
 }
 
 /**
+ * Tracks the reader through the file a `/deliverables/<name>` link opened, and
+ * calls `onDone` (which gives the address back) once they are done with it.
+ *
+ * Done is not the viewer closing, nor the overview closing: the reader can go
+ * from the viewer to the overview (All deliverables, `G`) and from there back
+ * into the viewer. Giving the address back during such a handoff would, on
+ * web, swap the deliverable route's page for the issue route's and unmount
+ * the surface just opened. So the session follows the reader across both and
+ * ends only when neither is left open.
+ *
+ * Wire `onViewerOpened` / `onViewerClosed` to the `PreviewSequenceProvider`,
+ * and the overview callbacks to the host's overview state.
+ */
+export function useDeliverableLinkSession(onDone: (() => void) | undefined) {
+  const sessionRef = useRef<"off" | "viewer" | "overview">("off");
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+
+  const finish = useCallback(() => {
+    if (sessionRef.current === "off") return;
+    sessionRef.current = "off";
+    onDoneRef.current?.();
+  }, []);
+
+  return {
+    /** The link opened its file in the viewer. */
+    onOpenedInViewer: useCallback(() => {
+      sessionRef.current = "viewer";
+    }, []),
+    /** The viewer opened; from the overview, the session moves back into it. */
+    onViewerOpened: useCallback(() => {
+      if (sessionRef.current === "overview") sessionRef.current = "viewer";
+    }, []),
+    /** The viewer finished closing; handed to the overview, it goes on there. */
+    onViewerClosed: useCallback(() => {
+      if (sessionRef.current === "viewer") finish();
+    }, [finish]),
+    /** The viewer handed over to the overview. Runs before the viewer closes. */
+    onOverviewOpenedFromViewer: useCallback(() => {
+      if (sessionRef.current === "viewer") sessionRef.current = "overview";
+    }, []),
+    /**
+     * The overview closed. It closes first and then, in the same handler, may
+     * open a file in the viewer (`G`, a card), so decide once that handler
+     * has run: if the viewer took over, the session goes on there.
+     */
+    onOverviewClosed: useCallback(() => {
+      if (sessionRef.current !== "overview") return;
+      queueMicrotask(() => {
+        if (sessionRef.current === "overview") finish();
+      });
+    }, [finish]),
+  };
+}
+
+/**
  * Opens the deliverable a `/deliverables/<name>` link names, once
  * `useFreshTimelineRead` reports a current timeline. Mount inside the issue's
  * `PreviewSequenceProvider`, so the file opens in the page's viewer with its
