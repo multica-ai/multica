@@ -90,6 +90,7 @@ import {
 } from "./trace-event-presenter";
 import type { TraceSummaryLabels } from "./trace-event-presenter";
 import {
+  CommandDetailSurface,
   DiffDetailSurface,
   FileWriteSurface,
   PatchDetailSurface,
@@ -1841,6 +1842,12 @@ export function StepBody({ item }: { item: TimelineItem }) {
     );
   }
 
+  // Tool input has no server-side budget, so it is clipped for display.
+  const clipForDisplay = (text: string) =>
+    text.length > DISPLAY_CLIP_CHARS
+      ? `${redactSecrets(text.slice(0, DISPLAY_CLIP_CHARS))}\n${t(($) => $.transcript.display_clipped)}`
+      : redactSecrets(text);
+
   switch (detail.kind) {
     case "diff":
       return <DiffDetailSurface lines={detail.lines} path={detail.path} />;
@@ -1848,18 +1855,19 @@ export function StepBody({ item }: { item: TimelineItem }) {
       return <PatchDetailSurface files={detail.files} truncated={detail.truncated} />;
     case "file":
       return <FileWriteSurface text={detail.text} lineCount={detail.lineCount} path={detail.path} />;
+    case "command":
+      return (
+        <CommandDetailSurface
+          command={clipForDisplay(detail.command)}
+          params={detail.params === null ? null : clipForDisplay(detail.params)}
+        />
+      );
     default: {
-      const text = detail.text;
       // A stored tool result is already capped at 8192 bytes by the daemon, so
       // clipping it again could only shave a couple of hundred more characters
-      // — under a note that already reports the same loss. Tool input has no
-      // server-side budget and keeps the clip at its existing length; nothing
-      // about how long an input renders is this change's business.
-      const clip = item.type === "tool_result" ? null : DISPLAY_CLIP_CHARS;
+      // — under a note that already reports the same loss.
       const clipped =
-        clip !== null && text.length > clip
-          ? `${redactSecrets(text.slice(0, clip))}\n${t(($) => $.transcript.display_clipped)}`
-          : redactSecrets(text);
+        item.type === "tool_result" ? redactSecrets(detail.text) : clipForDisplay(detail.text);
       const path = item.type === "tool_use" ? readPathFromInput(item.input) : undefined;
       return (
         <ToolDetailSurface

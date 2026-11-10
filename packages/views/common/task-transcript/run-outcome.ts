@@ -68,6 +68,7 @@ export function buildRunOutcome(steps: TraceStep[]): RunOutcome | null {
         }
         break;
       }
+      case "command":
       case "text": {
         // Shell-shaped by input, not by tool name: every backend names its
         // shell differently (Bash, shell, run_command, terminal) but they all
