@@ -181,6 +181,24 @@ describe("InvitationsPage", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  // The invitation was concluded on another surface while this row was on
+  // screen: show why, and refetch so the stale row drops.
+  it("a failed join surfaces the error and refetches the pending list", async () => {
+    listMyInvitations
+      .mockResolvedValueOnce([mkInvite("inv-1", "ws-1", "Acme"), mkInvite("inv-2", "ws-2", "Beta")])
+      .mockResolvedValue([mkInvite("inv-2", "ws-2", "Beta")]);
+    acceptInvitation.mockRejectedValue(new Error("invitation is not pending"));
+    renderPage();
+    await waitFor(() => screen.getByText("Acme"));
+
+    fireEvent.click(within(row("Acme")).getByRole("button", { name: "Join" }));
+
+    await waitFor(() => expect(screen.getByText("invitation is not pending")).toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("Acme")).toBeNull());
+    expect(navigate).not.toHaveBeenCalled();
+    expect(markOnboardingComplete).not.toHaveBeenCalled();
+  });
+
   it("pins and highlights the linked invitation for an onboarded user", async () => {
     auth.user = { onboarded_at: "2026-01-01T00:00:00Z" };
     const linked = mkInvite("inv-2", "ws-2", "Beta");

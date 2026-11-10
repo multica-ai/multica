@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type MouseEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AppWindow, ArrowBigUp, Check, Pin, Plus } from "@multica/ui/icons";
+import { AppWindow, ArrowBigUp, Check, Mail, Pin, Plus } from "@multica/ui/icons";
 import type { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import {
@@ -25,16 +25,12 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Kbd, KbdGroup } from "@multica/ui/components/ui/kbd";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
 import { AppLink, useNavigation } from "../navigation";
-import { useInvitationActions } from "../invitations/use-invitation-actions";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 
 // Stable empty defaults: an inline `= []` is a new array every render.
@@ -123,47 +119,11 @@ function OtherWindowMarker() {
   );
 }
 
-function InvitationItem({
-  invitation,
-  actions,
-}: {
-  invitation: Invitation;
-  actions: ReturnType<typeof useInvitationActions>;
-}) {
-  const { t } = useT("layout");
-  const name = invitation.workspace_name ?? t(($) => $.sidebar.invitation_workspace_fallback);
-  const pending = actions.accept.isPending || actions.decline.isPending;
-  return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger>
-        <WorkspaceAvatar name={name} size="sm" />
-        <span className="min-w-0 flex-1 truncate">{name}</span>
-        <UnreadDot />
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent className="min-w-44">
-        {invitation.inviter_name && (
-          <DropdownMenuGroup>
-            <DropdownMenuLabel className="text-caption text-muted-foreground">
-              {t(($) => $.rail.invitation_from, { name: invitation.inviter_name })}
-            </DropdownMenuLabel>
-          </DropdownMenuGroup>
-        )}
-        <DropdownMenuItem disabled={pending} onClick={() => actions.accept.mutate(invitation)}>
-          {t(($) => $.sidebar.invitation_join)}
-        </DropdownMenuItem>
-        <DropdownMenuItem disabled={pending} onClick={() => actions.decline.mutate(invitation)}>
-          {t(($) => $.sidebar.invitation_decline)}
-        </DropdownMenuItem>
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
-  );
-}
-
 /**
  * The workspace switcher at the top of the rail: one tile for the current
  * workspace, whatever the workspace count, so the spaces below never move.
- * Its menu lists every workspace, pending invitations, and workspace
- * creation. The tile carries a dot while another workspace has unread inbox
+ * Its menu lists every workspace, an entry to the invitations page while
+ * any are pending, and workspace creation. The tile carries a dot while another workspace has unread inbox
  * items or an invitation waits; the current workspace's unread shows on the
  * Inbox space instead.
  */
@@ -181,7 +141,6 @@ export function RailWorkspaces() {
     enabled: inboxUnreadSummaryEnabled(wsId),
   });
   const unreadIds = useMemo(() => unreadWorkspaceIds(unreadSummary), [unreadSummary]);
-  const actions = useInvitationActions();
   const setPinned = useSetWorkspacePinned();
   const { openWorkspaceInNewWindow, workspacesInOtherWindows } = useNavigation();
   // Read when the menu opens: other windows switch workspaces independently.
@@ -266,12 +225,16 @@ export function RailWorkspaces() {
           <>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuLabel className="text-caption text-muted-foreground">
-                {t(($) => $.sidebar.pending_invitations_label)}
-              </DropdownMenuLabel>
-              {invitations.map((invitation) => (
-                <InvitationItem key={invitation.id} invitation={invitation} actions={actions} />
-              ))}
+              <DropdownMenuItem render={<AppLink href={paths.invitations()} />}>
+                <Mail />
+                <span className="min-w-0 flex-1 truncate">
+                  {t(($) => $.sidebar.pending_invitations_label)}
+                </span>
+                <span className="text-caption text-muted-foreground tabular-nums">
+                  {invitations.length}
+                </span>
+                <UnreadDot />
+              </DropdownMenuItem>
             </DropdownMenuGroup>
           </>
         )}

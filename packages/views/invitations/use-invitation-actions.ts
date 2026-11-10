@@ -10,8 +10,8 @@ import {
 import { useNavigation } from "../navigation";
 
 /**
- * Accept / decline for a pending invitation, shared by the invitations page
- * and the workspace switcher menu so both surfaces join the same way.
+ * Accept / decline for a pending invitation. The invitations page is the only
+ * surface that answers invitations; the workspace switcher links to it.
  */
 export function useInvitationActions() {
   const queryClient = useQueryClient();
