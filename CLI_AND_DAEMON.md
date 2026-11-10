@@ -320,6 +320,34 @@ does not clear those blocks or establish that earlier background processes exite
 4. Heartbeats are sent periodically (default: 15s) so the server knows the daemon is alive
 5. On shutdown, all runtimes are deregistered
 
+### Local Environments
+
+The issue sidebar's **Environments** section lists the servers an issue's runs left running, grouped by the machine they run on. A localhost URL opens only on that machine. The daemon reports environments in two ways:
+
+- **Detected.** On macOS and Linux, any process listening on a TCP port whose working directory is inside a run's directory shows up. It has to be seen on two scans in a row, about 30 seconds apart, so short-lived test servers stay out. The agent CLIs themselves are ignored, and so are servers in a project's own local directory, which the user started.
+- **Declared.** A repository can describe its environments in `.multica/environments.toml`. An agent starts one with `multica env start <name>`. The daemon then supervises it: the environment keeps running after the run ends and stops at its TTL. If it is still running when the daemon restarts, the new daemon process picks it back up.
+
+```toml
+[environments.web]
+label = "Web app"
+start = "pnpm dev --port $MULTICA_PORT"
+# url defaults to http://localhost:$MULTICA_PORT; set url = "" when there is none
+# ready = "http://localhost:$MULTICA_PORT/health"   # defaults to url
+# stop = "docker compose down"                      # runs before the process group is signalled
+ttl = "24h"                                         # 1m to 7d, default 24h
+```
+
+Each environment gets ten ports, `MULTICA_PORT` through `MULTICA_PORT+9`. Parallel runs therefore never collide. `start` runs with `/bin/sh -c` from the directory that holds `.multica/`, with the caller's `PATH`. The daemon's `MULTICA_*` credentials are not passed to it. Output goes to a log under `<workspaces root>/.environments/v1/`, and `multica env start` prints its path.
+
+```bash
+multica env start web          # waits until the ready URL answers, then prints the URL
+multica env start web --wait=false
+multica env list
+multica env stop web
+```
+
+These commands use the running task's credential, so they work only inside a run. Environments belong to the issue, which means a later run on the same issue can list and stop what an earlier one started. Neither detected nor declared environments are supported on Windows yet.
+
 ### Configuration
 
 Daemon behavior is configured via flags or environment variables:
