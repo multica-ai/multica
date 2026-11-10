@@ -727,14 +727,15 @@ jobs:
         # since Go 1.23 os.Lstat reports it as ModeDir|ModeIrregular with no
         # ModeSymlink bit, while its DirEntry still answers IsDir() == true, so
         # filepath.WalkDir descends into the target. Two claims about Windows
-        # itself cannot be made on ubuntu: that the per-task skills wipe
-        # (os.RemoveAll) drops the junction rather than the user's files, and
-        # that the GC's artifact sweep and size accounting refuse to walk
-        # through one. The tests call mklink /J directly so the junction shape
-        # is exercised even on a runner where symlinks are permitted.
+        # itself cannot be made on ubuntu: that the per-task skills wipe and
+        # worktree removal fallback (os.RemoveAll) drop the junction rather than
+        # the user's files, and that the GC's artifact sweep and size accounting
+        # refuse to walk through one. The tests call mklink /J directly so the
+        # junction shape is exercised even where symlinks are permitted.
         # -v so a skip is visible instead of passing silently as "ok".
         run: |
-          go test ./internal/daemon/execenv -v -run '^(TestSeedUserCodexSkills|TestHydrateCodexSkills)' -count=1 -timeout=5m
+          go test ./internal/daemon/execenv -v -run '^(TestSeedUserCodexSkills|TestHydrateCodexSkills|TestRemoveLocalWorktreeDir(KeepsJunctionTarget|RemovesDanglingJunction)$)' -count=1 -timeout=5m
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go test ./internal/daemon -v -run '^(TestCleanTaskArtifacts_DoesNotFollowDirectoryJunction|TestTaskSize_DoesNotCountDirectoryJunction)$' -count=1 -timeout=5m
 
       - name: Test Windows task temp dir sweep survives a sharing violation

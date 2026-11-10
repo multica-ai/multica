@@ -1053,28 +1053,39 @@ func worktreeIsDirty(worktreePath string) (bool, error) {
 // deletes its directory. The branch is deliberately left alone — it is the
 // task's deliverable.
 func removeLocalWorktreeDir(gitRoot, worktreePath string, logger *slog.Logger) error {
-	var removeErr error
-	if out, err := runGit(gitRoot, "worktree", "remove", "--force", worktreePath); err != nil {
-		removeErr = err
+	return removeLocalWorktreeDirWithGit(gitRoot, worktreePath, logger, runGit)
+}
+
+func removeLocalWorktreeDirWithGit(gitRoot, worktreePath string, logger *slog.Logger, git func(string, ...string) (string, error)) error {
+	out, gitErr := git(gitRoot, "worktree", "remove", "--force", worktreePath)
+	if gitErr == nil {
+		// Git for Windows can report success while leaving directory junctions
+		// behind. Check the entry itself so a broken link counts as a leftover.
+		if _, statErr := os.Lstat(worktreePath); errors.Is(statErr, os.ErrNotExist) {
+			return nil
+		} else if statErr != nil {
+			return fmt.Errorf("confirm worktree removal: %w", statErr)
+		}
+	} else if logger != nil {
+		logger.Warn("execenv: git worktree remove failed; pruning registration",
+			"path", worktreePath, "output", out, "error", gitErr)
+	}
+
+	// RemoveAll removes symlinks and Windows directory junctions without
+	// removing their targets.
+	removeErr := gitErr
+	if rmErr := os.RemoveAll(worktreePath); rmErr != nil {
+		removeErr = errors.Join(removeErr, rmErr)
 		if logger != nil {
-			logger.Warn("execenv: git worktree remove failed; pruning registration",
-				"path", worktreePath, "output", out, "error", err)
+			logger.Warn("execenv: remove worktree directory failed", "path", worktreePath, "error", rmErr)
 		}
-		// Fall back to deleting the directory ourselves and dropping the now
-		// dangling registration, so the user's repo isn't left listing a
-		// worktree that no longer exists.
-		if rmErr := os.RemoveAll(worktreePath); rmErr != nil {
-			removeErr = errors.Join(removeErr, rmErr)
-			if logger != nil {
-				logger.Warn("execenv: remove worktree directory failed", "path", worktreePath, "error", rmErr)
-			}
-		}
-		if out, pruneErr := runGit(gitRoot, "worktree", "prune"); pruneErr != nil && logger != nil {
+	}
+	if gitErr != nil {
+		// Git may have left a dangling registration on failure.
+		if out, pruneErr := git(gitRoot, "worktree", "prune"); pruneErr != nil && logger != nil {
 			logger.Warn("execenv: git worktree prune failed", "output", out, "error", pruneErr)
 		}
 	}
-	// Lstat verifies the path entry itself is gone. Stat would treat a broken
-	// symlink as absent even though a stale entry still occupies the handoff path.
 	if _, statErr := os.Lstat(worktreePath); errors.Is(statErr, os.ErrNotExist) {
 		return nil
 	} else if statErr != nil {
@@ -1083,7 +1094,7 @@ func removeLocalWorktreeDir(gitRoot, worktreePath string, logger *slog.Logger) e
 	if removeErr != nil {
 		return fmt.Errorf("worktree directory still exists after removal fallback: %w", removeErr)
 	}
-	return errors.New("worktree directory still exists after git removal reported success")
+	return errors.New("worktree directory still exists after removal fallback")
 }
 
 // deleteBranch drops a task branch that carries nothing worth keeping — an
