@@ -234,12 +234,15 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
-	if probeResult != serverProbeHealthy {
-		if probeResult == serverProbeUnreachable {
+	if !probeResult.healthy {
+		switch probeResult.statusCode {
+		case 0:
 			fmt.Fprintf(os.Stderr, "\n⚠ Server at %s is not reachable.\n", serverURL)
-		} else {
+		case http.StatusOK:
 			fmt.Fprintf(os.Stderr, "\n⚠ Server at %s did not return a healthy Multica backend response.\n", serverURL)
 			fmt.Fprintln(os.Stderr, "  A login gateway may be intercepting the request to /health.")
+		default:
+			fmt.Fprintf(os.Stderr, "\n⚠ Server at %s returned HTTP %d (%s) from /health.\n", serverURL, probeResult.statusCode, http.StatusText(probeResult.statusCode))
 		}
 		fmt.Fprintln(os.Stderr, "  Your existing configuration was left unchanged.")
 		fmt.Fprintln(os.Stderr, "  Verify the URL, then re-run 'multica setup self-host' once the backend is healthy.")
@@ -338,7 +341,7 @@ func daemonActiveTaskCount(health map[string]any) int64 {
 // healthy Multica response, preserving the existing profile on probe failure.
 func persistSelfHostConfigIfReachable(serverURL, appURL, profile string, probe func(string) serverProbeResult) (serverProbeResult, error) {
 	result := probe(serverURL)
-	if result != serverProbeHealthy {
+	if !result.healthy {
 		return result, nil
 	}
 	cfg := cli.CLIConfig{
@@ -436,13 +439,10 @@ func promptAppURL(serverURL string) (string, error) {
 	return strings.TrimRight(strings.TrimSpace(line), "/"), nil
 }
 
-type serverProbeResult int
-
-const (
-	serverProbeUnreachable serverProbeResult = iota
-	serverProbeInvalidHealth
-	serverProbeHealthy
-)
+type serverProbeResult struct {
+	statusCode int
+	healthy    bool
+}
 
 const maxServerHealthResponseBytes = 4 * 1024
 
@@ -454,27 +454,29 @@ func probeServer(baseURL string) serverProbeResult {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return serverProbeUnreachable
+		return serverProbeResult{}
 	}
 
 	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
 	if err != nil {
-		return serverProbeUnreachable
+		return serverProbeResult{}
 	}
 	defer resp.Body.Close()
+	result := serverProbeResult{statusCode: resp.StatusCode}
 	if resp.StatusCode != http.StatusOK {
-		return serverProbeInvalidHealth
+		return result
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxServerHealthResponseBytes+1))
 	if err != nil || len(body) > maxServerHealthResponseBytes {
-		return serverProbeInvalidHealth
+		return result
 	}
 	var health struct {
 		Status string `json:"status"`
 	}
 	if err := json.Unmarshal(body, &health); err != nil || health.Status != "ok" {
-		return serverProbeInvalidHealth
+		return result
 	}
-	return serverProbeHealthy
+	result.healthy = true
+	return result
 }

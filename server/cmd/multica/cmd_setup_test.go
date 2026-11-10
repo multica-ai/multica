@@ -80,8 +80,8 @@ func TestSelfHostSetupHealthResponses(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if (result == serverProbeHealthy) != tc.healthy {
-				t.Errorf("healthy = %v, want %v", result == serverProbeHealthy, tc.healthy)
+			if result.healthy != tc.healthy {
+				t.Errorf("healthy = %v, want %v", result.healthy, tc.healthy)
 			}
 			if !tc.healthy {
 				after, err := os.ReadFile(path)
@@ -106,14 +106,19 @@ func TestSelfHostSetupHealthResponses(t *testing.T) {
 
 func TestSetupSelfHostProbeFailure(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		existing    bool
-		unreachable bool
-		wantMessage string
+		name            string
+		existing        bool
+		unreachable     bool
+		status          int
+		wantMessage     string
+		wantGatewayHint bool
 	}{
-		{name: "invalid health preserves profile", existing: true, wantMessage: "did not return a healthy Multica backend response"},
-		{name: "invalid health creates no profile", wantMessage: "did not return a healthy Multica backend response"},
+		{name: "invalid health preserves profile", existing: true, wantMessage: "did not return a healthy Multica backend response", wantGatewayHint: true},
+		{name: "invalid health creates no profile", wantMessage: "did not return a healthy Multica backend response", wantGatewayHint: true},
 		{name: "connection failure preserves profile", existing: true, unreachable: true, wantMessage: "is not reachable"},
+		{name: "unauthorized response", existing: true, status: http.StatusUnauthorized, wantMessage: "returned HTTP 401 (Unauthorized) from /health"},
+		{name: "bad gateway response", existing: true, status: http.StatusBadGateway, wantMessage: "returned HTTP 502 (Bad Gateway) from /health"},
+		{name: "unavailable response", existing: true, status: http.StatusServiceUnavailable, wantMessage: "returned HTTP 503 (Service Unavailable) from /health"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			redirectTestHome(t, t.TempDir())
@@ -134,6 +139,9 @@ func TestSetupSelfHostProbeFailure(t *testing.T) {
 			}
 
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.status != 0 {
+					w.WriteHeader(tc.status)
+				}
 				fmt.Fprint(w, "<html>Sign in</html>")
 			}))
 			defer server.Close()
@@ -162,8 +170,8 @@ func TestSetupSelfHostProbeFailure(t *testing.T) {
 			if !strings.Contains(output, tc.wantMessage) || !strings.Contains(output, "configuration was left unchanged") {
 				t.Errorf("missing probe failure message: %s", output)
 			}
-			if strings.Contains(output, "login gateway") == tc.unreachable {
-				t.Errorf("gateway hint should appear only for invalid health responses: %s", output)
+			if strings.Contains(output, "login gateway") != tc.wantGatewayHint {
+				t.Errorf("gateway hint should appear only for invalid HTTP 200 health responses: %s", output)
 			}
 			after, err := os.ReadFile(path)
 			if !tc.existing {
@@ -196,12 +204,12 @@ func TestPersistSelfHostConfigIfReachable(t *testing.T) {
 
 		proceed, err := persistSelfHostConfigIfReachable(
 			"https://api.new.example", "https://new.example", "",
-			func(string) serverProbeResult { return serverProbeUnreachable },
+			func(string) serverProbeResult { return serverProbeResult{} },
 		)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if proceed != serverProbeUnreachable {
+		if proceed.statusCode != 0 || proceed.healthy {
 			t.Fatalf("probe result = %v, want unreachable", proceed)
 		}
 
@@ -222,12 +230,12 @@ func TestPersistSelfHostConfigIfReachable(t *testing.T) {
 
 		proceed, err := persistSelfHostConfigIfReachable(
 			"https://api.new.example", "https://new.example", "",
-			func(string) serverProbeResult { return serverProbeHealthy },
+			func(string) serverProbeResult { return serverProbeResult{statusCode: http.StatusOK, healthy: true} },
 		)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if proceed != serverProbeHealthy {
+		if !proceed.healthy {
 			t.Fatalf("probe result = %v, want healthy", proceed)
 		}
 
