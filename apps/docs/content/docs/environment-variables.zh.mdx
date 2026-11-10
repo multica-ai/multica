@@ -126,6 +126,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `MULTICA_MAX_PREVIEW_SIZE` | `2MiB` | 文本和 HTML 在线预览的正文大小上限，最大 `16MiB`。支持正整数字节数或 `KB`/`KiB`、`MB`/`MiB`（均按二进制单位计算）。超过 `16MiB` 的有效值截断为 `16MiB`，非法值回退到默认值。调大上限可能拖慢浏览器预览，尤其是语法高亮和 Markdown 渲染。修改后需重启 API；不改变上传或下载限制。 |
+| `DRAWIO_VIEWER_URL` | `https://viewer.diagrams.net` | 渲染 ```` ```drawio ```` 代码块和 `.drawio` / `.dio` 附件的 draw.io viewer，嵌在沙盒 iframe 里。想让图表不出内网，可以指向自建的 `jgraph/drawio`，它必须使用独立的域名，不能和 Multica 应用同源。必须是不带查询参数和片段的 `http`/`https` 绝对地址；地址无效时预览关闭。如果反向代理设置了 Content-Security-Policy，需要在 `frame-src` 和 `connect-src` 中放行这个地址。 |
+| `DRAWIO_PREVIEW_DISABLED` | `false` | 设为 `true` 关闭内嵌的 draw.io 预览。关闭后图表显示为 XML 源码，附件仍可下载。 |
 
 ### S3 或兼容存储
 

@@ -126,6 +126,8 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | 変数 | デフォルト | 説明 |
 |---|---|---|
 | `MULTICA_MAX_PREVIEW_SIZE` | `2MiB` | テキストと HTML のオンラインプレビュー本文の上限。最大 `16MiB`。正の整数のバイト数、`KB`/`KiB`、`MB`/`MiB`（二進単位）を指定できます。`16MiB` を超える有効な値は `16MiB` に制限され、不正な値はデフォルトに戻ります。上限を増やすと、特に構文ハイライトや Markdown の描画でブラウザーのプレビューが遅くなる場合があります。変更後は API を再起動してください。アップロードとダウンロードの制限は変わりません。 |
+| `DRAWIO_VIEWER_URL` | `https://viewer.diagrams.net` | ```` ```drawio ```` ブロックと `.drawio` / `.dio` 添付ファイルをサンドボックス化した iframe で描画する draw.io ビューアー。図をネットワーク内に留めたい場合は、セルフホストの `jgraph/drawio` を指定できます。Multica アプリとは別のオリジンに置いてください。クエリやフラグメントを含まない `http`/`https` の絶対 URL が必要で、不正な値の場合はプレビューが無効になります。リバースプロキシで Content-Security-Policy を設定している場合は、このオリジンを `frame-src` と `connect-src` で許可してください。 |
+| `DRAWIO_PREVIEW_DISABLED` | `false` | `true` にすると埋め込みの draw.io プレビューを無効にします。図は XML ソースとして表示され、添付ファイルは引き続きダウンロードできます。 |
 
 ### S3 または互換ストレージ
 

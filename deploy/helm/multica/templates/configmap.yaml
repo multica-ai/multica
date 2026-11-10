@@ -33,6 +33,8 @@ data:
   CLOUDFRONT_DOMAIN: {{ .Values.backend.config.cloudfrontDomain | quote }}
   CLOUDFRONT_KEY_PAIR_ID: {{ .Values.backend.config.cloudfrontKeyPairId | quote }}
   MULTICA_MAX_PREVIEW_SIZE: {{ .Values.backend.config.maxPreviewSize | quote }}
+  DRAWIO_VIEWER_URL: {{ .Values.backend.config.drawioViewerUrl | quote }}
+  DRAWIO_PREVIEW_DISABLED: {{ .Values.backend.config.drawioPreviewDisabled | quote }}
   LOCAL_UPLOAD_BASE_URL: {{ .Values.backend.config.localUploadBaseUrl | quote }}
 
   {{- if not .Values.postgres.external.enabled }}
