@@ -223,6 +223,10 @@ services:
       # instead. zh-Hans (default) or en; an unrecognised value leaves the
       # default in place and the resolved one is logged at boot.
       MULTICA_WECOM_DEFAULT_LOCALE: ${MULTICA_WECOM_DEFAULT_LOCALE:-}
+      # Optional per-member task notification redirect to a separate group webhook.
+      MULTICA_WECOM_NOTIFICATION_WEBHOOK_URL: ${MULTICA_WECOM_NOTIFICATION_WEBHOOK_URL:-}
+      MULTICA_WECOM_NOTIFICATION_WORKSPACE_ID: ${MULTICA_WECOM_NOTIFICATION_WORKSPACE_ID:-}
+      MULTICA_WECOM_NOTIFICATION_MEMBER_ID: ${MULTICA_WECOM_NOTIFICATION_MEMBER_ID:-}
       # Telegram bot integration. MULTICA_TELEGRAM_SECRET_KEY is the
       # opt-in: unset = integration disabled. It decrypts the
       # per-installation bot token stored in channel_installation.config

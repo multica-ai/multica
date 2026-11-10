@@ -801,8 +801,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		if statusChanged {
 			prevStatus, _ := payload["prev_status"].(string)
 			statusDetails, _ := json.Marshal(map[string]string{
-				"from": prevStatus,
-				"to":   issue.Status,
+				"from":       prevStatus,
+				"to":         issue.Status,
+				"changed_at": issue.UpdatedAt,
 			})
 			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
 				nil, "status_changed", "info",

@@ -33,6 +33,14 @@ import (
 // Locale names the language an installation's users are answered in.
 type Locale string
 
+type inboxWebhookCopy struct {
+	Priority, Due, Actor, When, Changed, Commented                             string
+	Priorities                                                                 map[string]string
+	Unknown, Notified, Timezone, ViewTask                                      string
+	AssignedTo, UnassignedFrom, NoAssignee, MentionComment, MentionDescription string
+	Statuses                                                                   map[string]string
+}
+
 const (
 	LocaleZhHans Locale = "zh-Hans"
 	LocaleEn     Locale = "en"
@@ -234,6 +242,7 @@ type copyPack struct {
 	InboxDetailLink   string
 	InboxTypeLabels   map[string]string
 	InboxTypeFallback string
+	InboxWebhook      inboxWebhookCopy
 	// MediaTooLarge / MediaUnreadable tell the sender that an attachment did
 	// not make it. Two reasons rather than one because the fix differs: a
 	// file over the limit needs splitting or a link, whereas an expired or
@@ -450,6 +459,19 @@ var copyPacks = map[Locale]copyPack{
 		},
 
 		InboxDetailLink: "查看详情",
+		InboxWebhook: inboxWebhookCopy{
+			Unknown:  "未知",
+			Priority: "优先级", Due: "截止时间", Actor: "操作者", When: "时间", Changed: "变更时间", Commented: "评论时间",
+			Priorities: map[string]string{"urgent": "紧急", "high": "高", "medium": "普通", "low": "低", "none": "未设置", "": "未设置"},
+			AssignedTo: "指派给：%s", UnassignedFrom: "取消指派：%s", NoAssignee: "未指派",
+			MentionComment: "评论中提及你", MentionDescription: "任务描述中提及你",
+			Notified: "通知时间",
+			Timezone: "（北京时间）", ViewTask: "查看任务",
+			Statuses: map[string]string{
+				"backlog": "待规划", "todo": "待办", "in_progress": "进行中", "in_review": "审核中",
+				"done": "已完成", "blocked": "阻塞", "cancelled": "已取消",
+			},
+		},
 		InboxTypeLabels: map[string]string{
 			"issue_assigned":     "任务指派",
 			"mentioned":          "提及你",
@@ -528,6 +550,19 @@ var copyPacks = map[Locale]copyPack{
 		},
 
 		InboxDetailLink: "View details",
+		InboxWebhook: inboxWebhookCopy{
+			Unknown:  "Unknown",
+			Priority: "Prio.", Due: "Due", Actor: "By", When: "Time", Changed: "Changed", Commented: "Commented",
+			Priorities: map[string]string{"urgent": "Urgent", "high": "High", "medium": "Normal", "low": "Low", "none": "Not set", "": "Not set"},
+			AssignedTo: "Assigned to: %s", UnassignedFrom: "Unassigned: %s", NoAssignee: "Unassigned",
+			MentionComment: "Mentioned you in a comment", MentionDescription: "Mentioned you in the description",
+			Notified: "Notified",
+			Timezone: " UTC", ViewTask: "View task",
+			Statuses: map[string]string{
+				"backlog": "Backlog", "todo": "Todo", "in_progress": "In Progress", "in_review": "In Review",
+				"done": "Done", "blocked": "Blocked", "cancelled": "Cancelled",
+			},
+		},
 		InboxTypeLabels: map[string]string{
 			"issue_assigned":     "Assigned",
 			"mentioned":          "Mentioned",

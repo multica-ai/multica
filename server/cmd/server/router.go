@@ -932,6 +932,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("dingtalk integration disabled (MULTICA_DINGTALK_SECRET_KEY not set)")
 	}
 
+	// Group webhooks do not require a smart-bot installation or live socket.
+	slog.Info("wecom deployment locale",
+		"locale", wecom.SetDeploymentLocale(os.Getenv("MULTICA_WECOM_DEFAULT_LOCALE")))
+	wecomInboxWebhook, webhookErr := wecom.NewInboxWebhookFromEnv(queries, slog.Default())
+	if webhookErr != nil {
+		slog.Error("wecom notification webhook configuration rejected; original route retained", "error", webhookErr)
+	} else {
+		wecomInboxWebhook.Register(bus)
+		if wecomInboxWebhook != nil {
+			slog.Info("wecom task notification webhook enabled")
+		}
+	}
+
 	// WeCom smart-bot integration ("智能机器人" / aibot). Per-installation
 	// WebSocket long connection to wss://openws.work.weixin.qq.com; the
 	// Supervisor drives one connection per active wecom installation, gated
@@ -979,15 +992,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// bubble ended — which is why the outbound subscriber takes
 				// no sink of its own.
 				wecomSenders.WithMetrics(wecomMetricsOrNil(opts.WecomMetrics))
-
-				// Which language the bot writes its OWN copy in for readers
-				// it cannot look a language up for — a group chat, or anyone
-				// not linked to a Multica account yet. A linked person always
-				// overrides this with their profile language. An unrecognised
-				// value leaves the default (zh-Hans) in place, which is why
-				// the resolved one is logged rather than the raw one.
-				slog.Info("wecom deployment locale",
-					"locale", wecom.SetDeploymentLocale(os.Getenv("MULTICA_WECOM_DEFAULT_LOCALE")))
 
 				wecomReplier := wecom.NewOutboundReplier(wecom.OutboundReplierConfig{
 					Binding: wecomBinding,
@@ -1142,6 +1146,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// by writing the answer into it, so both sides must hold the
 				// one instance or the answer lands as a new message and the
 				// bubble spins until the protocol's window runs out on it.
+				wecomOutboundOpts = append(wecomOutboundOpts, wecom.WithInboxWebhook(wecomInboxWebhook))
 				wecomOutbound := wecom.NewOutbound(queries, wecomSenders, wecomStreams, slog.Default(), wecomOutboundOpts...)
 				wecomOutbound.Register(bus)
 				// The dispatcher has been consuming since before this router
