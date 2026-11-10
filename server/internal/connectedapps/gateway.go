@@ -166,11 +166,15 @@ func (s *Service) loadRun(ctx context.Context, taskID string) (*run, error) {
 }
 
 func (s *Service) mayRun(ctx context.Context, task db.AgentTaskQueue, agent db.Agent) bool {
-	actorID := task.OriginatorUserID
-	if !actorID.Valid {
-		actorID = task.AccountableUserID
+	if agent.ArchivedAt.Valid || s.resumer == nil {
+		return false
 	}
-	return !agent.ArchivedAt.Valid && (!actorID.Valid || s.mayUseAgent(ctx, agent.WorkspaceID, agent.ID, actorID))
+	if task.OriginatorUserID.Valid {
+		return s.mayUseAgent(ctx, agent.WorkspaceID, agent.ID, task.OriginatorUserID)
+	}
+	// Without a human originator, use the system invocation grant. The
+	// accountable member is audit metadata and must never lend authority.
+	return s.resumer.CanActFor(ctx, agent.WorkspaceID, agent.ID, pgtype.UUID{})
 }
 
 func (s *Service) dispatch(ctx context.Context, rn *run, req rpcRequest) (rpcResponse, bool) {
@@ -498,7 +502,7 @@ func (s *Service) toolRun(ctx context.Context, rn *run, toolSlug string, args ma
 	// Tool lookup may involve a network call, and one gateway request may
 	// contain a batch. Check again immediately before allowing execution.
 	if !s.mayRun(ctx, rn.task, rn.agent) {
-		return textResult("the person who initiated this run can no longer use this agent", true)
+		return textResult("this run is no longer allowed to use this agent", true)
 	}
 	if s.overLimit(ctx, rn.workspaceID, slug, acct) {
 		call.outcome = "rate_limited"

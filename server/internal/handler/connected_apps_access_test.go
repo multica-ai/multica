@@ -13,7 +13,7 @@ import (
 )
 
 func TestConnectedApps_GatewayRechecksAccess(t *testing.T) {
-	for _, change := range []string{"departed", "private", "archived", "accountable_departed"} {
+	for _, change := range []string{"departed", "private", "archived"} {
 		t.Run(change, func(t *testing.T) {
 			f := newAppsFixture(t)
 			ctx := context.Background()
@@ -29,10 +29,7 @@ func TestConnectedApps_GatewayRechecksAccess(t *testing.T) {
 				t.Fatalf("authorized call: %d %s", code, response)
 			}
 			switch change {
-			case "departed", "accountable_departed":
-				if change == "accountable_departed" {
-					dbfx.Exec(t, `UPDATE agent_task_queue SET originator_user_id=NULL WHERE id=$1`, f.taskID)
-				}
+			case "departed":
 				member, err := f.h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: parseUUID(f.member), WorkspaceID: parseUUID(testWorkspaceID)})
 				if err != nil {
 					t.Fatal(err)
@@ -55,6 +52,109 @@ func TestConnectedApps_GatewayRechecksAccess(t *testing.T) {
 			}
 			if n := len(f.sdk.executions()); n != 1 {
 				t.Fatalf("executions = %d, want only the initial authorized send", n)
+			}
+		})
+	}
+}
+
+func TestConnectedApps_SystemRunRechecksInvocationPermission(t *testing.T) {
+	for _, accountable := range []string{"none", "owner", "departed_member"} {
+		for _, revoke := range []string{"private", "member_only", "no_workspace_grant"} {
+			t.Run(accountable+"/"+revoke, func(t *testing.T) {
+				f := newAppsFixture(t)
+				ctx := context.Background()
+				f.executionAccount(t, "team")
+				if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "team", "level": "write"}}); w.Code != http.StatusOK {
+					t.Fatalf("attach: %d %s", w.Code, w.Body.String())
+				}
+				var accountableID any
+				if accountable == "owner" {
+					accountableID = testUserID
+				} else if accountable == "departed_member" {
+					accountableID = f.member
+				}
+				dbfx.Exec(t, `UPDATE agent_task_queue SET originator_user_id=NULL, accountable_user_id=$1 WHERE id=$2`, accountableID, f.taskID)
+				if accountable == "departed_member" {
+					member, err := f.h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: parseUUID(f.member), WorkspaceID: parseUUID(testWorkspaceID)})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := f.h.revokeAndRemoveMember(ctx, member.WorkspaceID, member.UserID, member.ID, parseUUID(testUserID)); err != nil {
+						t.Fatal(err)
+					}
+				}
+				agent, err := f.h.Queries.GetAgent(ctx, parseUUID(f.agentID))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !f.h.canInvokeAgent(ctx, agent, "system", "", "", testWorkspaceID) {
+					t.Fatal("workspace-wide agent must initially admit a system run")
+				}
+				if code, response, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_FETCH_EMAILS"}); code != http.StatusOK || isErr {
+					t.Fatalf("authorized system call: %d %s", code, response)
+				}
+				switch revoke {
+				case "private":
+					dbfx.Exec(t, `UPDATE agent SET permission_mode='private' WHERE id=$1`, f.agentID)
+				case "member_only":
+					dbfx.Exec(t, `UPDATE agent_invocation_target SET target_type='member', target_id=$1 WHERE agent_id=$2`, testUserID, f.agentID)
+				case "no_workspace_grant":
+					dbfx.Exec(t, `DELETE FROM agent_invocation_target WHERE agent_id=$1`, f.agentID)
+				}
+				if code, response, _ := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL"}); code != http.StatusUnauthorized {
+					t.Fatalf("revoked system call: %d %s", code, response)
+				}
+				if n := len(f.sdk.executions()); n != 1 {
+					t.Fatalf("executions = %d, want only the initial authorized read", n)
+				}
+			})
+		}
+	}
+}
+
+func TestConnectedApps_SystemAccessRevokedDuringToolLookup(t *testing.T) {
+	for _, accountable := range []string{"none", "owner"} {
+		t.Run(accountable, func(t *testing.T) {
+			f := newAppsFixture(t)
+			f.executionAccount(t, "team")
+			if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "team", "level": "write"}}); w.Code != http.StatusOK {
+				t.Fatalf("attach: %d %s", w.Code, w.Body.String())
+			}
+			var accountableID any
+			if accountable == "owner" {
+				accountableID = testUserID
+			}
+			dbfx.Exec(t, `UPDATE agent_task_queue SET originator_user_id=NULL, accountable_user_id=$1 WHERE id=$2`, accountableID, f.taskID)
+			f.sdk.beforeListTools = func() {
+				dbfx.Exec(t, `UPDATE agent SET permission_mode='private' WHERE id=$1`, f.agentID)
+			}
+			if _, text, isErr := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL"}); !isErr {
+				t.Fatalf("system access revoked during lookup: %s", text)
+			}
+			if n := len(f.sdk.executions()); n != 0 {
+				t.Fatalf("executed %d system calls after revocation during lookup", n)
+			}
+		})
+	}
+}
+
+func TestConnectedApps_GatewayRequiresInvocationAuthorizer(t *testing.T) {
+	for _, principal := range []string{"human", "system"} {
+		t.Run(principal, func(t *testing.T) {
+			f := newAppsFixture(t)
+			f.executionAccount(t, "team")
+			if w := f.putAgentApps(t, testUserID, []map[string]string{{"toolkit_slug": "gmail", "account_scope": "team", "level": "write"}}); w.Code != http.StatusOK {
+				t.Fatalf("attach: %d %s", w.Code, w.Body.String())
+			}
+			if principal == "system" {
+				dbfx.Exec(t, `UPDATE agent_task_queue SET originator_user_id=NULL WHERE id=$1`, f.taskID)
+			}
+			f.h.ConnectedApps.SetResumer(nil)
+			if code, response, _ := f.gateway(t, f.token(t), "apps_run_tool", map[string]any{"tool": "GMAIL_SEND_EMAIL"}); code != http.StatusUnauthorized {
+				t.Fatalf("call without invocation authorizer: %d %s", code, response)
+			}
+			if n := len(f.sdk.executions()); n != 0 {
+				t.Fatalf("executed %d calls without an invocation authorizer", n)
 			}
 		})
 	}

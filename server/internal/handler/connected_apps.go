@@ -1183,20 +1183,22 @@ func (h *Handler) AppsGateway(w http.ResponseWriter, r *http.Request) {
 	h.ConnectedApps.ServeHTTP(w, r)
 }
 
-// ResumeAfterDecision implements connectedapps.Resumer: a run on the issue,
-// or a message in the chat from the person who decided.
 // CanActFor applies the rule that admits a new run of the agent to the
-// person a request waits on, so a decision never runs or resumes an agent
-// they could not start themselves.
+// authorizing human, or to a system principal when no human originator exists.
 func (h *Handler) CanActFor(ctx context.Context, workspaceID, agentID, userID pgtype.UUID) bool {
 	agent, err := h.Queries.GetAgent(ctx, agentID)
 	if err != nil || agent.WorkspaceID != workspaceID || agent.ArchivedAt.Valid {
 		return false
 	}
+	if !userID.Valid {
+		return h.canInvokeAgent(ctx, agent, "system", "", "", uuidToString(workspaceID))
+	}
 	uid := uuidToString(userID)
 	return h.canInvokeAgent(ctx, agent, "member", uid, uid, uuidToString(workspaceID))
 }
 
+// ResumeAfterDecision implements connectedapps.Resumer: a run on the issue,
+// or a message in the chat from the person who decided.
 func (h *Handler) ResumeAfterDecision(ctx context.Context, req db.AppActionRequest, actorID pgtype.UUID, note string) error {
 	if req.IssueID.Valid {
 		return h.TaskService.EnqueueAppDecisionRun(ctx, req.IssueID, req.AgentID, actorID, req.ID, note)
