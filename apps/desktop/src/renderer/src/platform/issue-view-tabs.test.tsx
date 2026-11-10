@@ -127,4 +127,44 @@ describe("desktop issue views per tab", () => {
     expect(activeUrl()).toBe("/acme/issues");
     expect(shown()).toBe("none");
   });
+
+  it("leaves the outgoing page's view alone while the tab moves to another page", () => {
+    // The tab's URL changes before the router swaps pages, so My issues is
+    // still mounted when the URL already names the Issues page's view.
+    useTabStore.getState().navigateActiveSession("/acme/my-issues?view=m");
+    render(
+      <DesktopNavigationProvider>
+        <IssueViewUrlSync scope={{ scope_type: "my" }}>
+          <span />
+        </IssueViewUrlSync>
+      </DesktopNavigationProvider>,
+    );
+    expect(useActiveIssueViewStore.getState().active["ws-1:my"]).toBe("m");
+
+    act(() => useTabStore.getState().navigateActiveSession("/acme/issues?view=w"));
+
+    expect(useActiveIssueViewStore.getState().active["ws-1:my"]).toBe("m");
+    expect(activeUrl()).toBe("/acme/issues?view=w");
+  });
+
+  it("adopts the next project's view once the reused page renders that project", () => {
+    const sync = (id: string) => (
+      <DesktopNavigationProvider>
+        <IssueViewUrlSync scope={{ scope_type: "project", scope_id: id }}>
+          <span />
+        </IssueViewUrlSync>
+      </DesktopNavigationProvider>
+    );
+    const active = () => useActiveIssueViewStore.getState().active;
+    useTabStore.getState().navigateActiveSession("/acme/projects/p1?view=a");
+    const { rerender } = render(sync("p1"));
+
+    act(() => useTabStore.getState().navigateActiveSession("/acme/projects/p2?view=b"));
+    expect(active()["ws-1:project:p1"]).toBe("a");
+
+    rerender(sync("p2"));
+    expect(active()["ws-1:project:p1"]).toBe("a");
+    expect(active()["ws-1:project:p2"]).toBe("b");
+    expect(activeUrl()).toBe("/acme/projects/p2?view=b");
+  });
 });

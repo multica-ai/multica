@@ -5,6 +5,7 @@ import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { projectKeys } from "@multica/core/projects/queries";
+import { useModalStore } from "@multica/core/modals";
 import userEvent from "@testing-library/user-event";
 import type { Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -27,8 +28,9 @@ vi.mock("@multica/ui/lib/clipboard", () => ({
   copyText: mocks.copyText,
 }));
 
-vi.mock("../../workflows/project-workflow-menu", () => ({
-  ProjectWorkflowMenuHost: ({ children }: { children: (submenu: null) => React.ReactNode }) => children(null),
+vi.mock("../../workflows/project-workflow-sheet", () => ({
+  ProjectWorkflowMenuItem: () => null,
+  ProjectWorkflowSheet: () => null,
 }));
 vi.mock("../../workflows/project-workflow-row", () => ({ ProjectWorkflowControl: () => null }));
 
@@ -127,14 +129,6 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
     </button>
   ),
   DropdownMenuSeparator: () => <hr />,
-}));
-
-vi.mock("@multica/ui/components/ui/popover", () => ({
-  Popover: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  PopoverTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
-  PopoverContent: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
 }));
 
 vi.mock("@multica/ui/components/ui/tooltip", () => ({
@@ -289,6 +283,40 @@ beforeEach(() => {
 afterEach(() => {
   onlineManager.setOnline(true);
   qc.clear();
+  useModalStore.getState().close();
+});
+
+describe("ProjectDetail rename", () => {
+  it("opens the rename dialog with the current name from the header menu", async () => {
+    const user = userEvent.setup();
+    renderProjectDetail();
+
+    await user.click(screen.getByRole("button", { name: "Rename project" }));
+
+    expect(useModalStore.getState()).toMatchObject({
+      modal: "project-rename",
+      data: { projectId: "project-1", title: "Launch Plan" },
+    });
+  });
+});
+
+describe("ProjectDetail lead permissions", () => {
+  it("does not let ordinary members change the lead of a private project", async () => {
+    mocks.role = "member";
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, visibility: "private" });
+    renderProjectDetail();
+    expect(screen.getByRole("button", { name: "No lead" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "No lead" }));
+    expect(screen.queryByPlaceholderText("Assign lead...")).not.toBeInTheDocument();
+  });
+
+  it("keeps the lead of a workspace project editable for ordinary members", async () => {
+    mocks.role = "member";
+    renderProjectDetail();
+    expect(screen.getByRole("button", { name: "No lead" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "No lead" }));
+    expect(screen.getByPlaceholderText("Assign lead...")).toBeInTheDocument();
+  });
 });
 
 describe("ProjectDetail sharing", () => {

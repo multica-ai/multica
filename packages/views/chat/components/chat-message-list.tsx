@@ -50,6 +50,7 @@ import { TaskStatusPill } from "./task-status-pill";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-follow";
 import { LIVE_END_ROW_ATTR, useStickToBottom } from "./stick-to-bottom";
+import { JumpToLiveEndButton, useJumpToLiveEnd } from "./jump-to-live-end";
 import { formatElapsedMs } from "../lib/format";
 import {
   canonicalAnswerText,
@@ -296,7 +297,17 @@ export function ChatMessageList({
   }, [messages, hasLive, pendingTaskId]);
 
   const firstIndex = renderItems.length > 0 ? firstItemIndex : 0;
-  const liveEndKey = renderItems[renderItems.length - 1]?.key ?? null;
+  const tailItem = renderItems[renderItems.length - 1];
+  const liveEndKey = tailItem?.key ?? null;
+  // Changes when the last row is new or a live reply streamed more output.
+  const tailKey = tailItem
+    ? `${tailItem.key}:${tailItem.kind === "live" ? (liveTaskMessages?.length ?? 0) : "persisted"}`
+    : null;
+  const jumpToLiveEnd = useJumpToLiveEnd(scrollContainerEl, pinToLiveEnd, {
+    enabled: active && hasReachedLiveEnd,
+    tailKey,
+    tailIsReply: tailItem?.kind === "live" || tailItem?.message.role === "assistant",
+  });
 
   const listContext: ChatListContext = {
     isFetchingOlderMessages,
@@ -327,6 +338,9 @@ export function ChatMessageList({
 
   return (
     <PreviewSequenceProvider items={previewSequence}>
+    {/* Positioning box for the floating "Jump to latest" button, so it stays
+     *  pinned above the composer instead of scrolling with the rows. */}
+    <div className="relative flex min-h-0 flex-1 flex-col">
     <div
       ref={setScrollContainerRef}
       data-tab-scroll-root
@@ -393,6 +407,8 @@ export function ChatMessageList({
         itemContent={(_, item) => (
           <div
             className={cn(CHAT_COLUMN, "py-2")}
+            data-mc="chat-message"
+            data-role={item.kind === "live" ? "assistant" : item.message.role}
             {...(item.key === liveEndKey ? { [LIVE_END_ROW_ATTR]: "" } : {})}
           >
             <MessageBubble
@@ -411,6 +427,14 @@ export function ChatMessageList({
       />
       </RichContentScrollRootProvider>
       )}
+    </div>
+    {jumpToLiveEnd.visible && (
+      <JumpToLiveEndButton
+        hasNewReply={jumpToLiveEnd.hasNewReply}
+        onClick={jumpToLiveEnd.jump}
+        className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2"
+      />
+    )}
     </div>
     </PreviewSequenceProvider>
   );
@@ -785,7 +809,7 @@ function QuickActions({
                   type="button"
                   variant={action.primary ? "brandSubtle" : "outline"}
                   size="sm"
-                  className="max-w-full rounded-full px-3"
+                  className="max-w-full px-3"
                   disabled={blocked}
                   onClick={() => void handleSelect(action)}
                 />
@@ -807,7 +831,7 @@ function QuickActions({
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  className="shrink-0 rounded-full text-faint-foreground hover:text-foreground"
+                  className="shrink-0 text-faint-foreground hover:text-foreground"
                   disabled={blocked}
                   aria-label={regenerateLabel}
                   onClick={() => void handleRegenerate()}
@@ -843,7 +867,7 @@ function QuickActionsHeading() {
   );
 }
 
-// Pill-shaped placeholders shown between chat:done (which declared a pending
+// Chip-shaped placeholders shown between chat:done (which declared a pending
 // supplement) and chat:quick_actions. Widths are staggered so the row reads
 // as "buttons coming", not a loading bar. aria-hidden: nothing actionable to
 // announce yet.
@@ -856,9 +880,9 @@ function QuickActionsSkeleton() {
     <div className="mt-2 border-t border-border/40 pt-2 animate-in fade-in duration-300">
       <div className="flex flex-wrap items-center gap-2" aria-hidden="true">
         <QuickActionsHeading />
-        <Skeleton className="h-8 w-24 rounded-full" />
-        <Skeleton className="h-8 w-32 rounded-full" />
-        <Skeleton className="h-8 w-28 rounded-full" />
+        <Skeleton className="h-7 w-24" />
+        <Skeleton className="h-7 w-32" />
+        <Skeleton className="h-7 w-28" />
       </div>
     </div>
   );

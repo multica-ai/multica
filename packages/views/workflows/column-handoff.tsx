@@ -49,7 +49,7 @@ export function ColumnHandoff({
           label ? (
             <button
               type="button"
-              className="inline-flex min-w-0 max-w-32 items-center gap-1 rounded-full border border-surface-border bg-background/70 py-0.5 pl-0.5 pr-2 text-caption transition-colors hover:bg-accent"
+              className="inline-flex min-w-0 max-w-32 items-center gap-1 rounded-md border border-surface-border bg-background/70 py-0.5 pl-0.5 pr-2 text-caption transition-colors hover:bg-accent"
               aria-label={t(($) => $.workflows.hands_off_to, { name: label })}
               title={t(($) => $.workflows.hands_off_to, { name: label })}
             >
@@ -59,7 +59,7 @@ export function ColumnHandoff({
           ) : (
             <button
               type="button"
-              className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-caption text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/column:opacity-100 data-popup-open:opacity-100"
+              className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-caption text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/column:opacity-100 data-popup-open:opacity-100"
             >
               <Plus aria-hidden className="size-3" />
               {t(($) => $.workflows.handoff.add)}

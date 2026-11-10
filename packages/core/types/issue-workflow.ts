@@ -10,6 +10,8 @@
  * none use the workspace's Default workflow.
  */
 
+import type { IssueStatusIcon } from "./issue-status";
+
 export type IssueWorkflowHandlerType =
   | "none"
   | "agent"
@@ -61,6 +63,8 @@ export interface NewWorkflowStatus {
   name: string;
   category?: string;
   color?: string;
+  /** Presentation-only; empty/absent keeps the category default. */
+  icon?: IssueStatusIcon | "";
 }
 
 /** A column of a workflow write: an existing status or a new one, with its handoff. */

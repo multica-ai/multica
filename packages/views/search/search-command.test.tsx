@@ -3,7 +3,11 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
-import { useCommandBarContextStore, type CommandBarContext } from "@multica/core/command-bar";
+import {
+  useCommandBarContextStore,
+  useSearchStore,
+  type CommandBarContext,
+} from "@multica/core/command-bar";
 import { inboxUnreadSummaryOptions } from "@multica/core/inbox/queries";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
@@ -19,7 +23,6 @@ import { RESOURCES } from "../locales";
 import enLayout from "../locales/en/layout.json";
 import zhHansProjects from "../locales/zh-Hans/projects.json";
 import { SearchCommand } from "./search-command";
-import { useSearchStore } from "./search-store";
 
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog([]),
@@ -987,109 +990,69 @@ describe("SearchCommand", () => {
   });
 
   describe("hand to agent", () => {
-    beforeEach(() => {
-      seed(agentListOptions("ws-test"), [
-        makeAgent("agent-lambda", "Lambda"),
-        makeAgent("agent-sigma", "Sigma"),
-      ]);
-      api("quickCreateIssue").mockResolvedValue({ task_id: "task-1" });
-    });
+    const prompt = "fix the Safari login callback 500";
+    const handRow = () =>
+      document.querySelector<HTMLElement>('[cmdk-item=""][data-value="hand-to-agent"]');
 
-    it("turns an instruction naming an agent into a quick-create for it", async () => {
+    it("ends the results with a fixed row and leaves Enter on the top result", async () => {
       const user = userEvent.setup();
-      const prompt = "让 Lambda 修一下 Safari 登录回调的 500";
+      api("searchIssues").mockResolvedValue({
+        issues: [{ ...makeIssue({ id: "issue-812", identifier: "MUL-812", title: prompt }), match_source: "title" }],
+        total: 1,
+      });
       renderSearch();
       await user.type(input(), prompt);
 
-      await waitFor(() => expect(renderedValues()[0]).toBe("delegate:submit"));
-      expect(await rowText("New issue and assign to Lambda")).toBeInTheDocument();
+      await waitFor(() => expect(selectedValue()).toBe("issue-812"), { timeout: 2000 });
+      expect(renderedValues().at(-1)).toBe("hand-to-agent");
+      expect(handRow()).toHaveTextContent(`Hand to agent: “${prompt}”`);
       fireEvent.keyDown(input(), { key: "Enter" });
 
-      await waitFor(() =>
-        expect(api("quickCreateIssue")).toHaveBeenCalledWith({
-          agent_id: "agent-lambda",
-          prompt,
-          project_id: undefined,
-          parent_issue_id: undefined,
-        }),
-      );
-      expect(mockToast.success).toHaveBeenCalled();
-      expect(useSearchStore.getState().open).toBe(false);
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-812");
+      expect(mockOpenModal).not.toHaveBeenCalled();
+      expect(api("quickCreateIssue")).not.toHaveBeenCalled();
     });
 
-    it("attaches the open issue as parent", async () => {
+    it("opens quick create prefilled with the input, project and open issue", async () => {
       const user = userEvent.setup();
-      const parent = makeIssue({ id: "issue-9", identifier: "MUL-9" });
+      const parent = makeIssue({ id: "issue-9", identifier: "MUL-9", project_id: "proj-1" });
       registerContext({ kind: "issue", issue: parent });
       renderSearch();
-      await user.type(input(), "ask Sigma to write the release notes");
+      await user.type(input(), "让 Lambda 写一下发布说明");
 
-      await waitFor(() => expect(renderedValues()[0]).toBe("delegate:submit"));
-      expect(screen.getByText("Under MUL-9")).toBeInTheDocument();
-      fireEvent.keyDown(input(), { key: "Enter" });
+      await waitFor(() => expect(handRow()).not.toHaveAttribute("data-disabled", "true"), { timeout: 2000 });
+      fireEvent.click(handRow()!);
 
-      await waitFor(() =>
-        expect(api("quickCreateIssue")).toHaveBeenCalledWith(
-          expect.objectContaining({ agent_id: "agent-sigma", parent_issue_id: "issue-9" }),
-        ),
-      );
-    });
-
-    it("Shift+Enter falls back to a keyword search", async () => {
-      const user = userEvent.setup();
-      renderSearch();
-      await user.type(input(), "fix the Safari login callback 500");
-      await waitFor(() => expect(renderedValues()[0]).toBe("delegate:submit"));
-
-      fireEvent.keyDown(input(), { key: "Enter", shiftKey: true });
-
-      await waitFor(() => expect(renderedValues()).not.toContain("delegate:submit"));
+      expect(mockOpenModal).toHaveBeenCalledWith("quick-create-issue", {
+        prompt: "让 Lambda 写一下发布说明",
+        project_id: "proj-1",
+        parent_issue_id: "issue-9",
+        parent_issue_identifier: "MUL-9",
+      });
+      expect(useSearchStore.getState().open).toBe(false);
       expect(api("quickCreateIssue")).not.toHaveBeenCalled();
     });
 
-    it.each([
-      { isComposing: true, keyCode: 13 },
-      { isComposing: false, keyCode: 229 },
-    ])("preserves delegation during IME Shift+Enter ($isComposing, $keyCode)", async (ime) => {
+    it("is what Enter opens when nothing matches", async () => {
       const user = userEvent.setup();
-      const prompt = "fix the Safari login callback 500";
       renderSearch();
       await user.type(input(), prompt);
-      await waitFor(() => expect(selectedValue()).toBe("delegate:submit"));
 
-      fireEvent.compositionStart(input());
-      const event = new KeyboardEvent("keydown", {
-        key: "Enter",
-        shiftKey: true,
-        ...ime,
-        bubbles: true,
-        cancelable: true,
-      });
-      fireEvent(input(), event);
+      await waitFor(() => expect(selectedValue()).toBe("hand-to-agent"), { timeout: 2000 });
+      expect(screen.getByText("No results found.")).toBeInTheDocument();
+      fireEvent.keyDown(input(), { key: "Enter" });
 
-      expect.soft(event.defaultPrevented).toBe(false);
-      expect.soft(renderedValues()).toContain("delegate:submit");
-      expect(input()).toHaveValue(prompt);
-      expect(useSearchStore.getState().open).toBe(true);
-      expect(api("quickCreateIssue")).not.toHaveBeenCalled();
-      expect(mockOpenModal).not.toHaveBeenCalled();
-      expect(mockPush).not.toHaveBeenCalled();
-
-      fireEvent.compositionEnd(input());
-      fireEvent.keyDown(input(), { key: "Enter", shiftKey: true });
-      await waitFor(() => expect(renderedValues()).not.toContain("delegate:submit"));
-      expect(input()).toHaveValue(prompt);
-      expect(useSearchStore.getState().open).toBe(true);
+      expect(mockOpenModal).toHaveBeenCalledWith("quick-create-issue", { prompt });
       expect(api("quickCreateIssue")).not.toHaveBeenCalled();
     });
 
-    it("does not read a plain keyword as an instruction", async () => {
+    it("is not offered in a scoped search", async () => {
       const user = userEvent.setup();
       renderSearch();
-      await user.type(input(), "login");
+      await user.type(input(), ">theme");
 
-      await waitFor(() => expect(api("searchIssues")).toHaveBeenCalled(), { timeout: 2000 });
-      expect(renderedValues()).not.toContain("delegate:submit");
+      await waitFor(() => expect(renderedValues()).toContain("command:theme"));
+      expect(handRow()).toBeNull();
     });
   });
 
@@ -1212,6 +1175,7 @@ describe("SearchCommand", () => {
       fireEvent.keyDown(input(), { key: "Enter" });
 
       expect(mockPush).not.toHaveBeenCalled();
+      expect(mockOpenModal).not.toHaveBeenCalled();
       expect(useSearchStore.getState().open).toBe(true);
     });
 

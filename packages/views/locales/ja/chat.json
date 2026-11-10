@@ -50,6 +50,8 @@
     "action_failed_toast": "キュー内のメッセージを更新できませんでした"
   },
   "message_list": {
+    "jump_to_latest": "最新に移動",
+    "new_reply": "新しい返信",
     "show_details": "詳細を表示",
     "replied_in": "{{elapsed}}で返信",
     "failed_after": "{{elapsed}}後に失敗",

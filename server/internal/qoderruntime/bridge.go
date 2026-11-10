@@ -21,24 +21,29 @@ import (
 const Provider = "qoder_cloud"
 
 type Config struct {
-	DaemonID          string                                `json:"daemon_id,omitempty"`
-	LoadState         func(context.Context) ([]byte, error) `json:"-"`
-	SaveState         func(context.Context, []byte) error   `json:"-"`
-	BeforeStep        func(context.Context) (func(), error) `json:"-"`
-	OnReady           func(context.Context, string) error   `json:"-"`
-	GitHubTokens      map[string]string                     `json:"-"`
-	GitHubTokenFiles  map[string]string                     `json:"github_token_files,omitempty"`
-	MulticaURL        string                                `json:"multica_url"`
-	MulticaToken      string                                `json:"multica_token"`
-	WorkspaceID       string                                `json:"workspace_id"`
-	QoderURL          string                                `json:"qoder_url"`
-	QoderToken        string                                `json:"qoder_token"`
-	EnvironmentID     string                                `json:"environment_id"`
-	StateDir          string                                `json:"state_dir"`
-	Name              string                                `json:"name,omitempty"`
-	RunTimeout        time.Duration                         `json:"-"`
-	SubmissionTimeout time.Duration                         `json:"-"`
-	PollInterval      time.Duration                         `json:"-"`
+	DaemonID         string                                `json:"daemon_id,omitempty"`
+	LoadState        func(context.Context) ([]byte, error) `json:"-"`
+	SaveState        func(context.Context, []byte) error   `json:"-"`
+	BeforeStep       func(context.Context) (func(), error) `json:"-"`
+	OnReady          func(context.Context, string) error   `json:"-"`
+	GitHubTokens     map[string]string                     `json:"-"`
+	GitHubTokenFiles map[string]string                     `json:"github_token_files,omitempty"`
+	// GitHubAppToken issues a short-lived installation token restricted to one
+	// repository through the workspace's GitHub App integration. It returns
+	// ErrGitHubAppNotCovered when no bound installation authorizes the
+	// repository. The token stays in the transient request copy only.
+	GitHubAppToken    func(ctx context.Context, owner, repo string) (string, int64, error) `json:"-"`
+	MulticaURL        string                                                               `json:"multica_url"`
+	MulticaToken      string                                                               `json:"multica_token"`
+	WorkspaceID       string                                                               `json:"workspace_id"`
+	QoderURL          string                                                               `json:"qoder_url"`
+	QoderToken        string                                                               `json:"qoder_token"`
+	EnvironmentID     string                                                               `json:"environment_id"`
+	StateDir          string                                                               `json:"state_dir"`
+	Name              string                                                               `json:"name,omitempty"`
+	RunTimeout        time.Duration                                                        `json:"-"`
+	SubmissionTimeout time.Duration                                                        `json:"-"`
+	PollInterval      time.Duration                                                        `json:"-"`
 	// MaxConcurrency bounds simultaneous remote sessions; extra tasks stay queued in Multica.
 	MaxConcurrency int `json:"max_concurrency,omitempty"`
 }
@@ -403,6 +408,11 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 	if time.Now().Before(r.RetryAt) {
 		return nil
 	}
+	if r.Phase == "running" {
+		if err := b.refreshRunningCredentials(ctx, r); err != nil {
+			return err
+		}
+	}
 	if r.Phase == "creating" {
 		// The provider may have created a session before the response was lost.
 		// Never create a second session automatically for the same run.
@@ -418,11 +428,18 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 	if r.Phase == "prepared" {
 		// Resolve credentials before reusing a session too, so a revoked or
 		// changed repository credential is never carried into a follow-up.
-		resources, err := b.sessionResources(r.Resources)
+		resources, fingerprint, rotating, err := b.sessionResources(ctx, r.Resources)
 		if err != nil {
 			return b.reject(ctx, r, err.Error())
 		}
-		fingerprint := resourceFingerprint(resources)
+		// A rotating credential is timestamped for the live refresh; only the
+		// timestamp is journaled, never the token.
+		if rotating {
+			r.CredentialIssuedAt = time.Now()
+		} else {
+			r.CredentialIssuedAt = time.Time{}
+		}
+		repositoryCopies := resources
 		resources = append(resources, r.Files...)
 		if r.PriorSessionID != "" && (len(r.Files) == 0 || r.MountFiles) {
 			continued, err := b.continueSession(ctx, r, fingerprint)
@@ -432,13 +449,47 @@ func (b *Bridge) stepRun(ctx context.Context, r *run) error {
 			if continued {
 				r.SessionID = r.PriorSessionID
 				r.Continued = true
-				r.Phase = "created"
-				if err := b.persist(); err != nil {
-					return err
+				// A GitHub App credential rotates on every resolution; push the
+				// fresh token into the reused session before any message goes
+				// out. The run stays "prepared" until the refresh completed, so
+				// a rate-limited or failed refresh retries the whole continue
+				// path next tick instead of sending with a stale credential.
+				if rotating {
+					switch err := b.refreshRepositoryCredentials(ctx, r.SessionID, repositoryCopies); {
+					case err == nil:
+					case errors.Is(err, errRefreshDeferred):
+						r.RetryAt = time.Now().Add(30 * time.Second)
+						return b.persist()
+					case errors.Is(err, errRefreshRefused):
+						// The session cannot take the update (for example the
+						// repository is no longer mounted there); start a fresh
+						// session below.
+						r.SessionID, r.PriorSessionID, r.Continued = "", "", false
+						r.Credits = runCredits{}
+						r.MountedFiles = 0
+					default:
+						return err
+					}
+				}
+				if r.Continued {
+					// One journal write covers both the completed refresh and
+					// the phase flip.
+					r.Phase = "created"
+					if err := b.persist(); err != nil {
+						return err
+					}
 				}
 			}
 		}
 		if r.Phase == "prepared" {
+			if r.Continued {
+				// A deferred refresh left the run bound to a prior session
+				// that is no longer continuable; start clean so the fresh
+				// session is not treated as continued (no history cursor, no
+				// remounted files, no stale credit base).
+				r.SessionID, r.PriorSessionID, r.Continued = "", "", false
+				r.Credits = runCredits{}
+			}
 			if err := b.createSession(ctx, r, resources, fingerprint); err != nil || r.Phase != "created" {
 				return err
 			}
@@ -562,16 +613,21 @@ func (b *Bridge) createSession(ctx context.Context, r *run, resources []map[stri
 // resourcesMetadataKey stores resourceFingerprint on each session Multica creates.
 const resourcesMetadataKey = "multica_resources"
 
+// fingerprintEntry is one repository's stable credential identity: a manual
+// token hashes as itself (rotation must invalidate session reuse), a GitHub
+// App token hashes as its installation binding so rotating short-lived tokens
+// keep the fingerprint stable.
+type fingerprintEntry struct {
+	key, branch, credential string
+}
+
 // resourceFingerprint identifies the repositories, branches and credentials a
 // session was created with. Only this digest leaves the bridge.
-func resourceFingerprint(resources []map[string]any) string {
+func resourceFingerprint(entries []fingerprintEntry) string {
 	h := sha256.New()
 	h.Write([]byte("multica-qoder-resources-v1\n"))
-	for _, res := range resources {
-		raw, _ := res["url"].(string)
-		key, _ := repositoryKey(raw)
-		token, _ := res["authorization_token"].(string)
-		fmt.Fprintf(h, "%s\x00%s\x00%s\n", key, checkoutBranch(res["checkout"]), token)
+	for _, entry := range entries {
+		fmt.Fprintf(h, "%s\x00%s\x00%s\n", entry.key, entry.branch, entry.credential)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -620,6 +676,7 @@ func (b *Bridge) continueSession(ctx context.Context, r *run, fingerprint string
 	if id := sessionAgentID(s.Agent); (id != "" && id != r.AgentID) || (s.EnvironmentID != "" && s.EnvironmentID != b.cfg.EnvironmentID) {
 		return false, nil
 	}
+
 	if s.Metadata[resourcesMetadataKey] != fingerprint {
 		return false, nil
 	}
@@ -629,6 +686,131 @@ func (b *Bridge) continueSession(ctx context.Context, r *run, fingerprint string
 		r.Credits.Base = &base
 	}
 	return true, nil
+}
+
+// errRefreshDeferred and errRefreshRefused classify a repository credential
+// refresh: the session's provider asked us to retry later, or refused the
+// update (including a repository that is no longer mounted), respectively.
+var (
+	errRefreshDeferred = errors.New("session resource update rate limited")
+	errRefreshRefused  = errors.New("session refused the repository credential update")
+)
+
+// sessionRepositoryResourceID finds the mounted-resource ID of one GitHub
+// repository in a session, following the resource list's pagination.
+func (b *Bridge) sessionRepositoryResourceID(ctx context.Context, sessionID, key string) (string, error) {
+	page := ""
+	for range 100 {
+		path := "/sessions/" + url.PathEscape(sessionID) + "/resources"
+		if page != "" {
+			path += "?page=" + url.QueryEscape(page)
+		}
+		var response struct {
+			Data []struct {
+				ID   string `json:"id"`
+				Type string `json:"type"`
+				URL  string `json:"url"`
+			} `json:"data"`
+			NextPage string `json:"next_page"`
+		}
+		if err := b.qoder.call(ctx, http.MethodGet, path, nil, &response); err != nil {
+			return "", err
+		}
+		for _, resource := range response.Data {
+			if resource.Type != "github_repository" {
+				continue
+			}
+			if candidate, err := repositoryKey(resource.URL); err == nil && candidate == key {
+				return resource.ID, nil
+			}
+		}
+		if response.NextPage == "" {
+			return "", nil
+		}
+		page = response.NextPage
+	}
+	return "", fmt.Errorf("session resource list did not settle")
+}
+
+// refreshRepositoryCredentials pushes fresh tokens into a session's mounted
+// repositories. The add-resource endpoint only accepts files, so an existing
+// repository is updated through its per-resource credential endpoint, matched
+// by canonical repository URL so a token never lands on another resource.
+func (b *Bridge) refreshRepositoryCredentials(ctx context.Context, sessionID string, resources []map[string]any) error {
+	for i := range resources {
+		raw, _ := resources[i]["url"].(string)
+		key, err := repositoryKey(raw)
+		if err != nil {
+			return fmt.Errorf("refresh session repository credential: %w", err)
+		}
+		token, _ := resources[i]["authorization_token"].(string)
+		resourceID, err := b.sessionRepositoryResourceID(ctx, sessionID, key)
+		if err != nil {
+			if rateLimited(err) {
+				return errRefreshDeferred
+			}
+			if definitelyRejected(err) {
+				return errRefreshRefused
+			}
+			return err
+		}
+		if resourceID == "" {
+			return errRefreshRefused
+		}
+		err = b.qoder.call(ctx, http.MethodPost, "/sessions/"+url.PathEscape(sessionID)+"/resources/"+url.PathEscape(resourceID), map[string]string{"authorization_token": token}, nil)
+		if err != nil {
+			if rateLimited(err) {
+				return errRefreshDeferred
+			}
+			if definitelyRejected(err) {
+				return errRefreshRefused
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// credentialRefreshInterval is how long a run waits before re-issuing a
+// rotating GitHub App credential into its live session; GitHub installation
+// tokens expire after one hour, so the refresh lands with margin to spare.
+const credentialRefreshInterval = 45 * time.Minute
+
+// refreshRunningCredentials keeps a live session's short-lived GitHub token
+// usable for runs longer than the token's lifetime: about 45 minutes after
+// the last issuance it re-resolves the credentials and pushes them into the
+// session. Only the issuance timestamp is journaled, never the token; its
+// zero value disables the refresh (static credentials, or a session that
+// refused the update for good). Transient failures back off and retry.
+func (b *Bridge) refreshRunningCredentials(ctx context.Context, r *run) error {
+	if r.CredentialIssuedAt.IsZero() || time.Now().Before(r.CredentialIssuedAt.Add(credentialRefreshInterval)) {
+		return nil
+	}
+	resources, _, rotating, err := b.sessionResources(ctx, r.Resources)
+	if err != nil {
+		// The run is already executing; a failed refresh (for example a
+		// just-revoked installation) must not kill it. Retry next tick.
+		b.log.WarnContext(ctx, "Qoder credential refresh failed", "task_id", r.TaskID, "error", err)
+		r.CredentialIssuedAt = time.Now().Add(-credentialRefreshInterval + time.Minute)
+		return b.persist()
+	}
+	if !rotating {
+		// Credentials became manual mid-flight (for example an operator bound
+		// a PAT); nothing expires anymore.
+		r.CredentialIssuedAt = time.Time{}
+		return b.persist()
+	}
+	if err := b.refreshRepositoryCredentials(ctx, r.SessionID, resources); err != nil {
+		b.log.WarnContext(ctx, "Qoder credential refresh push failed", "task_id", r.TaskID, "error", err)
+		if errors.Is(err, errRefreshRefused) {
+			r.CredentialIssuedAt = time.Time{}
+		} else {
+			r.CredentialIssuedAt = time.Now().Add(-credentialRefreshInterval + time.Minute)
+		}
+		return b.persist()
+	}
+	r.CredentialIssuedAt = time.Now()
+	return b.persist()
 }
 
 // sessionAgentID accepts the agent as a bare ID or as an object with an id.

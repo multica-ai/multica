@@ -157,12 +157,6 @@
     "toast_saved": "更改已保存"
   },
   "preferences": {
-    "theme": {
-      "title": "主题",
-      "light": "浅色",
-      "dark": "深色",
-      "system": "跟随系统"
-    },
     "language": {
       "title": "语言",
       "english": "English",
@@ -172,6 +166,7 @@
       "japanese": "日本語",
       "french": "Français",
       "spanish": "Español",
+      "russian": "Русский",
       "sync_failed": "语言已在本设备保存，但同步到账号失败。其他设备可能仍显示旧语言。"
     },
     "timezone": {
@@ -193,13 +188,149 @@
     },
     "comments_title": "评论与聊天",
     "region_title": "语言与地区",
-    "appearance_title": "外观",
     "issue_fields_title": "创建任务时显示的字段",
     "issue_fields": {
       "field": "字段",
       "quick": "智能体创建",
       "manual": "手动创建",
       "unsupported": "智能体创建时不支持此字段"
+    }
+  },
+  "appearance": {
+    "reset": "恢复默认",
+    "color": {
+      "title": "颜色"
+    },
+    "mode": {
+      "title": "模式",
+      "light": "浅色",
+      "dark": "深色",
+      "system": "跟随系统"
+    },
+    "theme": {
+      "title": "主题",
+      "description": "全局的颜色、边框、阴影和圆角。可以导入主题文件添加更多主题。",
+      "default": "默认",
+      "pop": "波普",
+      "built_in": "内置",
+      "installed": "已安装",
+      "remove": "移除 {{name}}",
+      "safe_mode": "安全模式：关闭这个窗口之前，你的主题暂停生效。",
+      "safe_mode_exit": "恢复我的主题",
+      "folder": "主题文件夹",
+      "folder_problems": "主题文件夹里有主题没通过检查。修改后保存即可；在此之前继续使用最后一个通过检查的版本。"
+    },
+    "import": {
+      "button": "导入主题",
+      "from_zip": "主题文件（.zip）",
+      "from_folder": "主题文件夹",
+      "storage_full": "这台设备的存储空间不够保存这个主题。移除别的主题后再试。",
+      "confirm_title": "安装「{{name}}」？",
+      "warning": "主题可以改变每个页面的样式，包括弹窗和警告。只安装你信任的人做的主题。",
+      "author": "作者",
+      "version": "版本",
+      "replaces": "{{to}}（替换 {{from}}）",
+      "includes": "包含",
+      "cancel": "取消",
+      "confirm": "安装并使用",
+      "error_title": "无法安装这个主题",
+      "error_description": "没有做任何改动。主题文件有以下问题：",
+      "close": "关闭",
+      "has_options_other": "{{count}} 个选项",
+      "has_assets_other": "{{count}} 个字体和图片",
+      "menu_label": "自定义主题",
+      "beta": "Beta",
+      "beta_note": "自定义主题处于 Beta 阶段。主题用到的变量和清单可能会变，主题可能需要更新。"
+    },
+    "tools": {
+      "label": "更多主题操作",
+      "duplicate": "复制「{{name}}」为新主题",
+      "open_folder": "打开主题文件夹",
+      "guide": "如何制作主题",
+      "duplicated_web": "已下载 {{file}}。解压后编辑 theme.css，再导入这个文件夹。",
+      "duplicated_desktop": "已在主题文件夹中创建「{{name}}」。保存 theme.css 后改动立即生效。",
+      "duplicate_failed": "无法创建副本：{{error}}"
+    },
+    "theme_options": {
+      "title": "主题选项",
+      "description": "由 {{name}} 提供。",
+      "reset": "恢复主题默认"
+    },
+    "ui_text": {
+      "title": "界面文字",
+      "description": "菜单、按钮、列表、侧栏和标题。"
+    },
+    "latin_font": {
+      "title": "西文字体"
+    },
+    "ui_font": {
+      "inter": "默认",
+      "system": "系统",
+      "serif": "衬线",
+      "mono": "等宽"
+    },
+    "cjk_font": {
+      "title": "中文字体",
+      "description": "汉字字形；日文、韩文跟着这里走。",
+      "sans": "黑体",
+      "serif": "宋体",
+      "kai": "楷体",
+      "built_in": "常用",
+      "local": "本机字体",
+      "load_local": "显示本机字体…",
+      "loading": "正在查找字体…",
+      "none": "这台设备上没有含汉字的字体。",
+      "load_failed": "无法读取本机字体。",
+      "sample": "永和九年，岁在癸丑"
+    },
+    "follow_ui": "跟随界面",
+    "theme_font": "主题字体",
+    "font_size": {
+      "title": "字号",
+      "description": "只放大文字，间距和布局不变。",
+      "value": "{{size}} px",
+      "default": "{{size}} px · 默认"
+    },
+    "content_text": {
+      "title": "内容文字",
+      "description": "任务描述、评论、对话和文档里的正文。",
+      "sample": "描述和评论需要整段阅读，可以换成更适合阅读的字体；列表和按钮仍然保持紧凑。"
+    },
+    "code_font": {
+      "title": "代码字体",
+      "description": "代码块、行内代码和日志。",
+      "geist": "默认",
+      "jetbrains": "连字",
+      "system": "系统等宽"
+    },
+    "content_size": {
+      "title": "字号",
+      "description": "只改内容文字，界面不变。",
+      "follow": "跟随界面（{{size}} px）"
+    },
+    "content_leading": {
+      "title": "行高",
+      "compact": "紧凑",
+      "default": "标准",
+      "relaxed": "宽松"
+    },
+    "layout": {
+      "title": "布局与辅助功能"
+    },
+    "density": {
+      "title": "信息密度",
+      "description": "任务列表和搜索结果的行高。",
+      "compact": "紧凑",
+      "default": "标准",
+      "comfortable": "宽松"
+    },
+    "reduce_motion": {
+      "title": "减少动态效果",
+      "description": "关闭动画和过渡。关掉时仍遵循系统设置。"
+    },
+    "high_contrast": {
+      "title": "提高对比度",
+      "description": "次要文字更深，边框更明显。"
     }
   },
   "shortcuts": {
@@ -393,6 +524,7 @@
     "tabs": {
       "profile": "个人资料",
       "preferences": "偏好设置",
+      "appearance": "外观",
       "shortcuts": "快捷键",
       "issue": "任务",
       "notifications": "通知",
@@ -949,35 +1081,6 @@
     "inbound_pending_hint": "请在飞书/Lark 中给此机器人发送消息以验证接收。若未收到，请检查长连接模式、im.message.receive_v1 事件订阅以及应用发布和审批状态。已有绑定可能尚无验证记录。",
     "inbound_verified_hint": "本次绑定已收到有效消息；这不代表持续在线、智能体执行成功或回复成功。"
   },
-  "composio": {
-    "page_description": "连接智能体可使用的应用。",
-    "not_enabled_title": "Composio 集成未启用",
-    "not_enabled_description_prefix": "在服务器上设置",
-    "not_enabled_description_suffix": "以启用 Composio toolkit 连接。",
-    "loading": "正在加载 toolkit…",
-    "load_failed": "加载 Composio toolkit 失败。",
-    "empty_title": "还没有可连接的应用",
-    "empty_description": "你的 Composio 项目里还没有启用 auth config 的 toolkit。请在 Composio 后台启用一个 auth config，它才会出现在这里。",
-    "search_placeholder": "搜索 toolkit…",
-    "connect": "连接",
-    "connecting": "连接中…",
-    "connected": "已连接",
-    "disconnect": "断开",
-    "disconnecting": "断开中...",
-    "connect_failed": "无法发起连接，请重试。",
-    "disconnect_failed": "无法断开连接，请重试。",
-    "toast_disconnected": "已断开",
-    "disconnect_confirm_title": "断开这个应用？",
-    "disconnect_confirm_description": "你的已连接账号将在 Composio 侧被撤销，你的智能体将失去对该 toolkit 的访问权限。你可以稍后重新连接。",
-    "disconnect_confirm_cancel": "取消",
-    "connections_load_failed": "无法加载你已有的连接，连接状态可能不完整。",
-    "toast_connected": "已连接",
-    "toast_connect_failed": "连接未能完成，请重试。",
-    "last_used": "最近使用 {{when}}",
-    "last_used_never": "从未使用",
-    "expired": "令牌已过期",
-    "reconnect": "重新连接"
-  },
   "slack": {
     "section_title": "Slack",
     "page_description": "在 Slack 中与智能体对话，或用 /issue 创建任务。",
@@ -1466,7 +1569,188 @@
     "title": "为智能体接入工具的方式",
     "current": "当前页面",
     "mcp": "由管理员添加、在工作区内共享，再按智能体分配。",
-    "apps": "用你自己的账号通过 Composio 授权，在你拥有的智能体上启用。",
+    "apps": "通过 Multica 连接团队或个人账号，再将应用添加到智能体。",
     "plugins": "安装后可提供工具、定时 hook 和存储，每个插件单独授权。"
+  },
+  "connected_apps": {
+    "description": "智能体通过这些账号操作外部应用，允许的操作会直接执行。",
+    "loading": "正在加载应用…",
+    "load_failed": "无法加载应用。",
+    "team_title": "团队账号",
+    "team_description": "工作区共有的账号，例如客服邮箱或公司 GitHub。由管理员连接；被授予团队账号的智能体以该账号身份操作。",
+    "team_empty": "还没有团队账号。",
+    "team_empty_member": "还没有团队账号。请联系工作区管理员连接。",
+    "personal_title": "我的账号",
+    "personal_description": "你自己的账号。由你触发的运行中，设为「触发者账号」的应用会使用这些账号。",
+    "personal_empty": "你还没有连接任何账号。",
+    "connected_by": "由 {{name}} 连接",
+    "last_used": "最近使用 {{when}}",
+    "last_used_never": "尚未使用",
+    "used_by_other": "{{count}} 个智能体在用",
+    "expired": "需要重新连接",
+    "reconnect": "重新连接",
+    "rules": "规则",
+    "activity": "调用记录",
+    "disconnect": "断开",
+    "catalog_title": "可用应用",
+    "catalog_label": "成员可添加的应用",
+    "catalog_description": "精选应用带有审核过的默认规则。「全部应用」包含 Composio 能连接的所有应用；Multica 无法识别的操作一律先征得同意。「指定名单」只允许你选中的应用。",
+    "catalog_all": "全部应用",
+    "catalog_curated": "仅精选",
+    "catalog_custom": "指定名单",
+    "toast_connected": "账号已连接",
+    "toast_connect_failed": "连接未完成，请重试。",
+    "toast_disconnected": "已断开",
+    "toast_failed": "操作失败，请重试。",
+    "add": {
+      "search": "搜索应用…",
+      "empty": "没有匹配的应用。",
+      "curated": "精选",
+      "recommended_team": "通常用团队账号",
+      "recommended_personal": "通常用个人账号",
+      "connect_team": "连接团队账号",
+      "connect_personal": "连接我的账号",
+      "connecting": "正在连接…",
+      "connected": "已连接",
+      "connect": "连接",
+      "team_description": "连接工作区共用的账号。哪些智能体可以使用，在各智能体的「应用」页设置。",
+      "personal_description": "连接你自己的账号。应用设为「触发者账号」时，由你触发的运行会使用它。"
+    },
+    "disconnect_team": {
+      "title": "断开团队的 {{app}} 账号？",
+      "description": "使用团队账号的智能体会立即失去访问权限。",
+      "agents": "正在使用的智能体",
+      "no_agents": "没有智能体在用。",
+      "active_tasks": "进行中的运行：{{count}}",
+      "active_autopilots": "启用中的自动化：{{count}}",
+      "pending": "将被取消的待确认请求：{{count}}",
+      "cancel": "取消",
+      "confirm": "断开"
+    },
+    "disconnect_personal": {
+      "title": "断开你的 {{app}} 账号？",
+      "description": "你触发的运行将无法再使用它。之后可以重新连接。",
+      "cancel": "取消",
+      "confirm": "断开"
+    },
+    "detail": {
+      "team_title": "{{app}} · 团队账号",
+      "personal_title": "{{app}} · 我的账号",
+      "rules_description": "智能体可以通过这个账号做什么。智能体的权限级别只会让规则更严格。",
+      "rules_read_only": "只有工作区管理员可以修改团队账号的规则。",
+      "default": "默认：{{policy}}",
+      "activity_empty": "还没有调用。",
+      "activity_failed": "无法加载调用记录。"
+    },
+    "classes": {
+      "read": {
+        "label": "读取",
+        "description": "搜索、列出、获取"
+      },
+      "write": {
+        "label": "写入",
+        "description": "创建和更新内容"
+      },
+      "send": {
+        "label": "发送",
+        "description": "发邮件或消息、发布、邀请"
+      },
+      "delete": {
+        "label": "删除",
+        "description": "删除或归档"
+      },
+      "share": {
+        "label": "分享",
+        "description": "修改权限或对外分享"
+      }
+    },
+    "policies": {
+      "allow": "允许",
+      "confirm": "先确认",
+      "block": "禁止"
+    },
+    "outcomes": {
+      "ok": "已执行",
+      "error": "失败",
+      "blocked": "已拦截",
+      "pending": "等待确认",
+      "approved": "已批准",
+      "rejected": "已拒绝",
+      "rate_limited": "已限流"
+    },
+    "scopes": {
+      "team": "团队账号",
+      "personal": "触发者的账号"
+    },
+    "levels": {
+      "read": "只读",
+      "confirm_writes": "写操作先确认",
+      "write": "可写"
+    },
+    "request": {
+      "title_action": "{{agent}} 想执行 {{tool}}",
+      "title_connect": "{{agent}} 请你连接 {{app}}",
+      "pending_count_other": "{{count}} 个应用操作等待确认",
+      "waiting_for": "等待 {{name}} 确认",
+      "expires": "{{when}}过期",
+      "redacted": "只有 {{name}} 能看到详情。",
+      "arguments": "参数",
+      "edit": "编辑",
+      "invalid_json": "参数必须是 JSON 对象。",
+      "approve": "批准并执行",
+      "approve_all": "全部批准",
+      "reject": "拒绝",
+      "reject_reason": "原因（可选，智能体会看到）",
+      "connect": "连接 {{app}}",
+      "connected_continue": "我已连接",
+      "status": {
+        "approved": "已批准",
+        "rejected": "已拒绝",
+        "failed": "执行失败",
+        "expired": "已过期",
+        "cancelled": "已取消"
+      },
+      "toast_approved": "已批准，智能体将继续。",
+      "toast_rejected": "已拒绝，智能体会调整做法。",
+      "toast_failed": "无法记录你的决定。",
+      "not_connected": "请先连接账号。",
+      "connected_resumed": "{{app}} 已连接，智能体会从中断处继续。",
+      "rate_limited": "这个账号已达到每分钟调用上限，请一分钟后再批准。",
+      "rate_limited_some_other": "有 {{count}} 个请求触发了每分钟上限，请一分钟后再批准。",
+      "withdrawn": "你已无法使用这个智能体，请求已撤回。"
+    },
+    "tools": {
+      "tab": "工具",
+      "description": "工具的分类决定适用哪条规则。自动分类有误的工具可以在这里纠正，改动对本工作区里这个应用的所有账号生效。",
+      "read_only": "只有工作区管理员可以修改工具分类。",
+      "search": "搜索工具",
+      "empty": "没有匹配的工具。",
+      "auto": "自动（{{class}}）",
+      "truncated": "共 {{total}} 个，显示前 {{shown}} 个。搜索可缩小范围。"
+    },
+    "custom": {
+      "title": "指定应用名单",
+      "description": "智能体只能看到你选中的应用，其他应用也无法再连接账号。",
+      "selected_other": "已选 {{count}} 个应用",
+      "cancel": "取消",
+      "save": "保存名单",
+      "saved": "应用名单已保存",
+      "edit": "编辑名单",
+      "row_label": "允许的应用",
+      "row_description_other": "已允许 {{count}} 个应用"
+    },
+    "saved_access": {
+      "account": "旧操作限制仍在阻止此账号的部分操作。",
+      "agent": "此应用仍受旧的只读授权限制。",
+      "catalog": "旧应用名单仍在隐藏其他应用。",
+      "allow_actions": "允许全部操作",
+      "open_catalog": "显示全部应用",
+      "account_confirm": "使用此账号的智能体将能读取、写入、发送、删除和共享内容。旧操作限制将被替换。",
+      "agent_confirm": "此智能体将能通过此应用读取、写入、发送、删除和共享内容，仍受账号本身的限制。",
+      "catalog_confirm": "工作区将能选择所有可连接的应用。现有连接和智能体的应用分配保持不变。",
+      "cancel": "取消",
+      "admin_required": "请工作区管理员解除限制。",
+      "account_link": "此账号仍有旧操作限制。请在已连接应用中解除。"
+    }
   }
 }

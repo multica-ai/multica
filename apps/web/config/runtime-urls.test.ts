@@ -52,7 +52,7 @@ describe("resolveRemoteApiUrl", () => {
   });
 
   // Same defect as the browser base, same fix: the rewrite target already
-  // appends the full incoming pathname (`/api/**`, `/uploads/**`, `/ws`), so a
+  // appends the full incoming pathname (`/api/**`, `/ws`), so a
   // configured `/api` suffix would double it (MUL-5922).
   it("strips a trailing /api from server-side rewrite targets", () => {
     expect(
@@ -64,10 +64,10 @@ describe("resolveRemoteApiUrl", () => {
       }),
     ).toBe("https://app.example.com/api/config");
     expect(
-      runtimeRewriteDestination("/uploads/workspaces/a.png", {
+      runtimeRewriteDestination("/api/avatars/signature/avatar.png", {
         NEXT_PUBLIC_API_URL: "https://app.example.com/api",
       }),
-    ).toBe("https://app.example.com/uploads/workspaces/a.png");
+    ).toBe("https://app.example.com/api/avatars/signature/avatar.png");
   });
 
   it("ignores whitespace-only or invalid backend URL values", () => {
@@ -112,8 +112,7 @@ describe("browser runtime URLs", () => {
   });
 
   // #6619: these two values used to reach the browser untouched and became the
-  // XHR base, so every request went to `/api/api/**` and every avatar to
-  // `<base>/uploads/**` — which the backend serves at the root, hence 404.
+  // XHR base, so every request went to `/api/api/**` instead of `/api/**`.
   it("rejects a relative public API URL so the browser stays same-origin", () => {
     expect(
       resolveBrowserApiBaseUrl({ NEXT_PUBLIC_API_URL: "/api" }),
@@ -145,32 +144,32 @@ describe("browser runtime URLs", () => {
     ).toBe("http://api:8080");
   });
 
-  // The XHR base doubles as the base for `/uploads/**` (avatars, attachment
-  // previews) via resolvePublicFileUrlWithBase in packages/core. Assert the
+  // The XHR base doubles as the base for `/api/avatars/**` via
+  // resolvePublicFileUrlWithBase in packages/core. Assert the
   // joined result, not just the base, because that join is what users saw fail.
-  it("produces working /api and /uploads targets for every supported value", () => {
+  it("produces working API and avatar targets for every supported value", () => {
     const cases: Array<[string | undefined, string, string]> = [
-      [undefined, "/api/issues", "/uploads/avatars/a.png"],
-      ["/api", "/api/issues", "/uploads/avatars/a.png"],
+      [undefined, "/api/issues", "/api/avatars/signature/a.png"],
+      ["/api", "/api/issues", "/api/avatars/signature/a.png"],
       [
         "https://app.example.com/api",
         "https://app.example.com/api/issues",
-        "https://app.example.com/uploads/avatars/a.png",
+        "https://app.example.com/api/avatars/signature/a.png",
       ],
       [
         "https://api.example.com",
         "https://api.example.com/api/issues",
-        "https://api.example.com/uploads/avatars/a.png",
+        "https://api.example.com/api/avatars/signature/a.png",
       ],
     ];
 
-    for (const [configured, expectedApi, expectedUpload] of cases) {
+    for (const [configured, expectedApi, expectedAvatar] of cases) {
       // Mirrors the browser: CoreProvider defaults an absent base to "" and the
       // api client concatenates `${baseUrl}${path}`.
       const base =
         resolveBrowserApiBaseUrl({ NEXT_PUBLIC_API_URL: configured }) ?? "";
       expect(`${base}/api/issues`).toBe(expectedApi);
-      expect(`${base}/uploads/avatars/a.png`).toBe(expectedUpload);
+      expect(`${base}/api/avatars/signature/a.png`).toBe(expectedAvatar);
     }
   });
 
@@ -211,6 +210,17 @@ describe("browser runtime URLs", () => {
 });
 
 describe("runtimeRewriteDestination", () => {
+  it.each(["/uploads", "/uploads/", "/uploads/workspaces/a.png"])(
+    "does not forward the retired file entry: %s",
+    (pathname) => {
+      expect(
+        runtimeRewriteDestination(pathname, {
+          REMOTE_API_URL: "http://backend:8080",
+        }),
+      ).toBeUndefined();
+    },
+  );
+
   it("keeps same-origin fallback when no runtime upstreams are configured", () => {
     expect(runtimeRewriteDestination("/api/config", {})).toBeUndefined();
     expect(runtimeRewriteDestination("/v1/context", {})).toBeUndefined();
@@ -255,10 +265,10 @@ describe("runtimeRewriteDestination", () => {
       }),
     ).toBe("http://backend:8080/auth/send-code");
     expect(
-      runtimeRewriteDestination("/uploads/workspaces/a.png", {
+      runtimeRewriteDestination("/api/avatars/signature/a.png", {
         REMOTE_API_URL: "http://backend:8080",
       }),
-    ).toBe("http://backend:8080/uploads/workspaces/a.png");
+    ).toBe("http://backend:8080/api/avatars/signature/a.png");
   });
 
   it("does not rewrite frontend auth callback pages", () => {

@@ -28,12 +28,14 @@ monorepo 的包边界是硬约束：
 
 | 包 | 可依赖 | 不能依赖 |
 | --- | --- | --- |
-| `packages/core` | 仅平台无关基础库 | `react-dom`、`localStorage`、`process.env`、`next/*`、UI 库 |
+| `packages/core` | 仅平台无关基础库 | `react-dom`、`next/*`、UI 库、`process.env`、直接使用 `localStorage` 或 `sessionStorage`（持久化走 `StorageAdapter`；仅 `analytics/exception-dedupe.ts` 和 `appearance/safe-mode.ts` 使用标签页级的 `sessionStorage`） |
 | `packages/ui` | 无业务依赖 | `@multica/core`、业务逻辑 |
-| `packages/views` | `core/`、`ui/` | `next/*`、`react-router-dom`、stores |
+| `packages/views` | `core/`、`ui/` | `next/*`、`react-router-dom`、store 定义 |
 | `apps/web/platform/` | `next/*` | 其他 app |
 | `apps/desktop/.../platform/` | `react-router-dom`、electron | 其他 app |
-| `apps/mobile/` | `@multica/core` 的类型和纯函数 | Web/Desktop 的 React 页面、store 和平台实现 |
+| `apps/mobile/` | `@multica/core` 的类型和纯函数，通过各模块自己的子路径导入 | Web/Desktop 的 React 页面、store 和平台实现，以及重新导出它们的 core barrel |
+
+包边界及其少数例外以根目录 `AGENTS.md` 为准，修改时两处同步。`packages/core` 这一行由 `packages/core/eslint.config.mjs` 通过 lint 强制，mobile 对 core 的导入由 `apps/mobile/eslint.config.js` 强制。
 
 Web 和 Desktop 都有的逻辑，**必须**抽到共享包。"小段重复"也不算例外。Mobile 拥有独立的 UI、数据层和发布流程，只共享类型与纯函数。
 

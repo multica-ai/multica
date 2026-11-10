@@ -157,12 +157,6 @@
     "toast_saved": "변경사항을 저장했습니다"
   },
   "preferences": {
-    "theme": {
-      "title": "테마",
-      "light": "라이트",
-      "dark": "다크",
-      "system": "시스템"
-    },
     "language": {
       "title": "언어",
       "english": "English",
@@ -172,6 +166,7 @@
       "japanese": "日本語",
       "french": "Français",
       "spanish": "Español",
+      "russian": "Русский",
       "sync_failed": "이 기기에는 언어가 저장되었지만 계정 동기화에 실패했습니다. 다른 기기에서는 이전 언어가 표시될 수 있습니다."
     },
     "timezone": {
@@ -193,13 +188,149 @@
     },
     "comments_title": "댓글 및 채팅",
     "region_title": "언어 및 지역",
-    "appearance_title": "모양",
     "issue_fields_title": "태스크 생성 시 표시할 필드",
     "issue_fields": {
       "field": "필드",
       "quick": "에이전트로 생성",
       "manual": "수동 생성",
       "unsupported": "에이전트로 생성할 때는 사용할 수 없습니다"
+    }
+  },
+  "appearance": {
+    "reset": "기본값으로 재설정",
+    "color": {
+      "title": "색상"
+    },
+    "mode": {
+      "title": "모드",
+      "light": "라이트",
+      "dark": "다크",
+      "system": "시스템"
+    },
+    "theme": {
+      "title": "테마",
+      "description": "앱 전체의 색상, 테두리, 그림자, 모서리. 테마 파일을 가져와 더 추가할 수 있어요.",
+      "default": "기본",
+      "pop": "팝",
+      "built_in": "기본 제공",
+      "installed": "설치됨",
+      "remove": "{{name}} 제거",
+      "safe_mode": "안전 모드: 이 창을 닫을 때까지 테마가 꺼져 있어요.",
+      "safe_mode_exit": "내 테마 사용",
+      "folder": "테마 폴더",
+      "folder_problems": "테마 폴더의 일부 테마가 검사를 통과하지 못했어요. 고친 뒤 저장하세요. 그동안은 마지막으로 통과한 버전을 사용해요."
+    },
+    "import": {
+      "button": "테마 가져오기",
+      "from_zip": "테마 파일(.zip)",
+      "from_folder": "테마 폴더",
+      "storage_full": "이 기기에 테마를 저장할 공간이 부족해요. 다른 테마를 제거한 뒤 다시 시도하세요.",
+      "confirm_title": "‘{{name}}’을(를) 설치할까요?",
+      "warning": "테마는 대화상자와 경고를 포함한 모든 화면의 모양을 바꿀 수 있어요. 신뢰하는 사람이 만든 테마만 설치하세요.",
+      "author": "만든 사람",
+      "version": "버전",
+      "replaces": "{{to}} ({{from}} 대체)",
+      "includes": "포함",
+      "cancel": "취소",
+      "confirm": "설치하고 사용",
+      "error_title": "이 테마를 설치할 수 없어요",
+      "error_description": "아무것도 바뀌지 않았어요. 테마 파일에 다음 문제가 있어요:",
+      "close": "닫기",
+      "has_options_other": "옵션 {{count}}개",
+      "has_assets_other": "글꼴·이미지 {{count}}개",
+      "menu_label": "사용자 테마",
+      "beta": "베타",
+      "beta_note": "사용자 테마는 베타예요. 테마가 쓰는 변수와 매니페스트가 바뀔 수 있어 테마를 업데이트해야 할 수도 있어요."
+    },
+    "tools": {
+      "label": "테마 작업 더 보기",
+      "duplicate": "“{{name}}” 복제해서 새 테마 만들기",
+      "open_folder": "테마 폴더 열기",
+      "guide": "테마 만드는 방법",
+      "duplicated_web": "{{file}}을(를) 내려받았어요. 압축을 풀고 theme.css를 고친 다음 폴더를 가져오세요.",
+      "duplicated_desktop": "테마 폴더에 “{{name}}”을(를) 만들었어요. theme.css를 저장하면 바로 반영돼요.",
+      "duplicate_failed": "복사본을 만들지 못했어요: {{error}}"
+    },
+    "theme_options": {
+      "title": "테마 옵션",
+      "description": "{{name}}에서 제공해요.",
+      "reset": "옵션 초기화"
+    },
+    "ui_text": {
+      "title": "인터페이스 글자",
+      "description": "메뉴, 버튼, 목록, 사이드바, 제목."
+    },
+    "latin_font": {
+      "title": "라틴 글꼴"
+    },
+    "ui_font": {
+      "inter": "기본",
+      "system": "시스템",
+      "serif": "세리프",
+      "mono": "고정폭"
+    },
+    "cjk_font": {
+      "title": "CJK 글꼴",
+      "description": "한자 글꼴. 일본어와 한국어도 이 설정을 따라요.",
+      "sans": "고딕",
+      "serif": "명조",
+      "kai": "해서",
+      "built_in": "기본",
+      "local": "이 기기",
+      "load_local": "이 기기의 글꼴 보기…",
+      "loading": "글꼴을 찾는 중…",
+      "none": "이 기기에 한자가 있는 글꼴이 없어요.",
+      "load_failed": "이 기기의 글꼴을 읽을 수 없어요.",
+      "sample": "永和九年 한글"
+    },
+    "follow_ui": "인터페이스와 같게",
+    "theme_font": "테마 글꼴",
+    "font_size": {
+      "title": "글꼴 크기",
+      "description": "텍스트만 확대합니다. 간격과 레이아웃은 그대로입니다.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · 기본"
+    },
+    "content_text": {
+      "title": "본문 글자",
+      "description": "이슈 설명, 댓글, 채팅, 문서의 본문.",
+      "sample": "설명과 댓글은 길게 읽으니 읽기 좋은 글꼴로 바꿀 수 있어요. 목록과 버튼은 그대로 촘촘하게 유지돼요."
+    },
+    "code_font": {
+      "title": "코드 글꼴",
+      "description": "코드 블록, 인라인 코드, 로그.",
+      "geist": "기본",
+      "jetbrains": "합자",
+      "system": "시스템 고정폭"
+    },
+    "content_size": {
+      "title": "글자 크기",
+      "description": "본문만 바뀌고 인터페이스는 그대로예요.",
+      "follow": "인터페이스와 같게 ({{size}}px)"
+    },
+    "content_leading": {
+      "title": "줄 간격",
+      "compact": "좁게",
+      "default": "기본",
+      "relaxed": "넓게"
+    },
+    "layout": {
+      "title": "레이아웃 및 접근성"
+    },
+    "density": {
+      "title": "밀도",
+      "description": "이슈 목록과 검색 결과의 행 높이.",
+      "compact": "좁게",
+      "default": "기본",
+      "comfortable": "넓게"
+    },
+    "reduce_motion": {
+      "title": "동작 줄이기",
+      "description": "애니메이션과 전환 효과를 끕니다. 꺼져 있어도 시스템 설정은 적용됩니다."
+    },
+    "high_contrast": {
+      "title": "대비 높이기",
+      "description": "보조 텍스트를 진하게, 테두리를 뚜렷하게 합니다."
     }
   },
   "shortcuts": {
@@ -393,6 +524,7 @@
     "tabs": {
       "profile": "프로필",
       "preferences": "환경설정",
+      "appearance": "모양",
       "shortcuts": "단축키",
       "issue": "태스크",
       "notifications": "알림",
@@ -1218,35 +1350,6 @@
     "inbound_pending_hint": "Feishu/Lark에서 이 봇에 메시지를 보내 수신을 확인하세요. 도착하지 않으면 지속 연결 모드, im.message.receive_v1 구독, 앱 게시 및 승인 상태를 확인하세요. 기존 연결에는 확인 기록이 없을 수 있습니다.",
     "inbound_verified_hint": "이번 연결에서 유효한 메시지를 받았습니다. 지속적인 연결, 에이전트 실행 또는 답장 성공을 의미하지는 않습니다."
   },
-  "composio": {
-    "page_description": "에이전트가 사용할 앱을 연결하세요.",
-    "not_enabled_title": "Composio integration not enabled",
-    "not_enabled_description_prefix": "Set",
-    "not_enabled_description_suffix": "on the server to enable Composio toolkit connections.",
-    "loading": "Loading toolkits…",
-    "load_failed": "Failed to load Composio toolkits.",
-    "empty_title": "No connectable apps yet",
-    "empty_description": "No toolkit has an enabled auth config in your Composio project yet. Enable one in the Composio dashboard to make it available here.",
-    "search_placeholder": "Search toolkits…",
-    "connect": "Connect",
-    "connecting": "Connecting…",
-    "connected": "Connected",
-    "disconnect": "Disconnect",
-    "disconnecting": "Disconnecting…",
-    "connect_failed": "Couldn't start the connection. Please try again.",
-    "disconnect_failed": "Couldn't disconnect. Please try again.",
-    "toast_disconnected": "Disconnected",
-    "disconnect_confirm_title": "Disconnect this app?",
-    "disconnect_confirm_description": "Your connected account will be revoked at Composio and your agents will lose access to this toolkit. You can reconnect later.",
-    "disconnect_confirm_cancel": "Cancel",
-    "connections_load_failed": "Couldn't load your existing connections, so connected status may be incomplete.",
-    "toast_connected": "연결되었습니다",
-    "toast_connect_failed": "연결을 완료하지 못했습니다. 다시 시도해 주세요.",
-    "last_used": "마지막 사용 {{when}}",
-    "last_used_never": "사용한 적 없음",
-    "expired": "토큰 만료됨",
-    "reconnect": "다시 연결"
-  },
   "slack": {
     "section_title": "Slack",
     "page_description": "Slack에서 에이전트와 대화하거나 /issue로 태스크를 만드세요.",
@@ -1466,7 +1569,188 @@
     "title": "에이전트에 도구를 제공하는 방법",
     "current": "현재 페이지",
     "mcp": "관리자가 추가해 워크스페이스에서 공유하고, 에이전트별로 할당합니다.",
-    "apps": "내 계정으로 Composio를 통해 승인하고, 내가 소유한 에이전트에서 사용합니다.",
+    "apps": "Multica로 연결한 팀 또는 개인 계정을 각 에이전트에 추가합니다.",
     "plugins": "설치하면 도구, 예약 훅, 저장소를 추가할 수 있으며 플러그인마다 권한을 부여합니다."
+  },
+  "connected_apps": {
+    "description": "에이전트가 외부 앱을 사용할 때 쓰는 계정입니다. 허용된 작업은 즉시 실행됩니다.",
+    "loading": "앱을 불러오는 중…",
+    "load_failed": "앱을 불러오지 못했습니다.",
+    "team_title": "팀 계정",
+    "team_description": "고객 지원 메일함이나 회사 GitHub처럼 워크스페이스가 소유한 공유 계정입니다. 관리자가 연결하며, 팀 계정을 받은 에이전트는 그 계정으로 작업합니다.",
+    "team_empty": "아직 팀 계정이 없습니다.",
+    "team_empty_member": "아직 팀 계정이 없습니다. 워크스페이스 관리자에게 연결을 요청하세요.",
+    "personal_title": "내 계정",
+    "personal_description": "내 계정입니다. 내가 실행을 시작하면 '실행한 사람의 계정'으로 설정된 앱이 이 계정을 사용합니다.",
+    "personal_empty": "아직 연결한 계정이 없습니다.",
+    "connected_by": "{{name}} 님이 연결",
+    "last_used": "마지막 사용 {{when}}",
+    "last_used_never": "사용한 적 없음",
+    "used_by_other": "에이전트 {{count}}개가 사용 중",
+    "expired": "다시 연결 필요",
+    "reconnect": "다시 연결",
+    "rules": "규칙",
+    "activity": "활동",
+    "disconnect": "연결 해제",
+    "catalog_title": "사용 가능한 앱",
+    "catalog_label": "멤버가 추가할 수 있는 앱",
+    "catalog_description": "엄선된 앱에는 검토된 기본 규칙이 있습니다. '모든 앱'은 Composio로 연결할 수 있는 모든 앱을 포함하며, Multica가 분류하지 못한 작업은 항상 먼저 확인을 받습니다. 사용자 지정 목록은 선택한 앱만 허용합니다.",
+    "catalog_all": "모든 앱",
+    "catalog_curated": "엄선된 앱만",
+    "catalog_custom": "사용자 지정 목록",
+    "toast_connected": "계정이 연결되었습니다",
+    "toast_connect_failed": "연결을 완료하지 못했습니다. 다시 시도하세요.",
+    "toast_disconnected": "연결이 해제되었습니다",
+    "toast_failed": "문제가 발생했습니다. 다시 시도하세요.",
+    "add": {
+      "search": "앱 검색…",
+      "empty": "일치하는 앱이 없습니다.",
+      "curated": "엄선",
+      "recommended_team": "보통 팀 계정",
+      "recommended_personal": "보통 개인 계정",
+      "connect_team": "팀 계정 연결",
+      "connect_personal": "내 계정 연결",
+      "connecting": "연결 중…",
+      "connected": "연결됨",
+      "connect": "연결",
+      "team_description": "워크스페이스 공용 계정을 연결합니다. 사용할 에이전트는 각 에이전트의 앱 페이지에서 설정합니다.",
+      "personal_description": "내 계정을 연결합니다. 트리거한 사람의 계정을 사용하도록 설정된 앱은 내가 실행을 시작할 때 이 계정을 사용합니다."
+    },
+    "disconnect_team": {
+      "title": "팀 {{app}} 계정 연결을 해제할까요?",
+      "description": "팀 계정을 쓰는 에이전트는 즉시 접근 권한을 잃습니다.",
+      "agents": "사용 중인 에이전트",
+      "no_agents": "사용 중인 에이전트가 없습니다.",
+      "active_tasks": "진행 중인 실행: {{count}}",
+      "active_autopilots": "활성 오토파일럿: {{count}}",
+      "pending": "취소될 확인 요청: {{count}}",
+      "cancel": "취소",
+      "confirm": "연결 해제"
+    },
+    "disconnect_personal": {
+      "title": "내 {{app}} 계정 연결을 해제할까요?",
+      "description": "내가 시작한 실행에서 더 이상 사용할 수 없습니다. 나중에 다시 연결할 수 있습니다.",
+      "cancel": "취소",
+      "confirm": "연결 해제"
+    },
+    "detail": {
+      "team_title": "{{app}} · 팀 계정",
+      "personal_title": "{{app}} · 내 계정",
+      "rules_description": "에이전트가 이 계정으로 할 수 있는 일입니다. 에이전트 수준은 이 규칙을 더 엄격하게만 만들 수 있습니다.",
+      "rules_read_only": "팀 계정 규칙은 워크스페이스 관리자만 변경할 수 있습니다.",
+      "default": "기본값: {{policy}}",
+      "activity_empty": "아직 호출이 없습니다.",
+      "activity_failed": "활동을 불러오지 못했습니다."
+    },
+    "classes": {
+      "read": {
+        "label": "읽기",
+        "description": "검색, 목록, 가져오기"
+      },
+      "write": {
+        "label": "쓰기",
+        "description": "콘텐츠 생성 및 수정"
+      },
+      "send": {
+        "label": "보내기",
+        "description": "메일·메시지 보내기, 게시, 초대"
+      },
+      "delete": {
+        "label": "삭제",
+        "description": "삭제 또는 보관"
+      },
+      "share": {
+        "label": "공유",
+        "description": "권한 변경 또는 외부 공유"
+      }
+    },
+    "policies": {
+      "allow": "허용",
+      "confirm": "먼저 확인",
+      "block": "차단"
+    },
+    "outcomes": {
+      "ok": "실행됨",
+      "error": "실패",
+      "blocked": "차단됨",
+      "pending": "확인 대기",
+      "approved": "승인됨",
+      "rejected": "거절됨",
+      "rate_limited": "속도 제한"
+    },
+    "scopes": {
+      "team": "팀 계정",
+      "personal": "실행한 사람의 계정"
+    },
+    "levels": {
+      "read": "읽기 전용",
+      "confirm_writes": "쓰기 전 확인",
+      "write": "쓰기 가능"
+    },
+    "request": {
+      "title_action": "{{agent}}이(가) {{tool}} 실행을 요청합니다",
+      "title_connect": "{{agent}}이(가) {{app}} 연결을 요청합니다",
+      "pending_count_other": "앱 작업 {{count}}개가 확인 대기 중",
+      "waiting_for": "{{name}} 님의 확인 대기 중",
+      "expires": "{{when}} 만료",
+      "redacted": "세부 내용은 {{name}} 님만 볼 수 있습니다.",
+      "arguments": "인수",
+      "edit": "편집",
+      "invalid_json": "인수는 JSON 객체여야 합니다.",
+      "approve": "승인 후 실행",
+      "approve_all": "모두 승인",
+      "reject": "거절",
+      "reject_reason": "이유 (선택, 에이전트에게 표시됨)",
+      "connect": "{{app}} 연결",
+      "connected_continue": "연결했습니다",
+      "status": {
+        "approved": "승인됨",
+        "rejected": "거절됨",
+        "failed": "실패",
+        "expired": "만료됨",
+        "cancelled": "취소됨"
+      },
+      "toast_approved": "승인했습니다. 에이전트가 이어서 진행합니다.",
+      "toast_rejected": "거절했습니다. 에이전트가 방식을 조정합니다.",
+      "toast_failed": "결정을 기록하지 못했습니다.",
+      "not_connected": "먼저 계정을 연결하세요.",
+      "connected_resumed": "{{app}} 연결됨. 에이전트가 멈춘 곳부터 이어서 진행합니다.",
+      "rate_limited": "이 계정이 분당 호출 한도에 도달했습니다. 1분 후에 다시 승인하세요.",
+      "rate_limited_some_other": "요청 {{count}}개가 분당 한도에 걸렸습니다. 1분 후에 다시 승인하세요.",
+      "withdrawn": "이 에이전트를 더 이상 사용할 수 없어 요청이 철회되었습니다."
+    },
+    "tools": {
+      "tab": "도구",
+      "description": "도구의 분류에 따라 적용되는 규칙이 정해집니다. 자동 분류가 잘못된 도구는 수정할 수 있으며, 변경 사항은 워크스페이스에서 이 앱의 모든 계정에 적용됩니다.",
+      "read_only": "도구 분류는 워크스페이스 관리자만 변경할 수 있습니다.",
+      "search": "도구 검색",
+      "empty": "일치하는 도구가 없습니다.",
+      "auto": "자동 ({{class}})",
+      "truncated": "{{total}}개 중 {{shown}}개 표시 중. 검색해서 좁혀 보세요."
+    },
+    "custom": {
+      "title": "사용자 지정 앱 목록",
+      "description": "에이전트는 선택한 앱만 볼 수 있고, 다른 앱의 계정은 누구도 연결할 수 없습니다.",
+      "selected_other": "앱 {{count}}개 선택됨",
+      "cancel": "취소",
+      "save": "목록 저장",
+      "saved": "앱 목록을 저장했습니다",
+      "edit": "목록 편집",
+      "row_label": "허용된 앱",
+      "row_description_other": "앱 {{count}}개 허용"
+    },
+    "saved_access": {
+      "account": "저장된 작업 제한이 이 계정의 일부 작업을 차단하고 있습니다.",
+      "agent": "이 앱에 이전 읽기 전용 설정이 남아 있습니다.",
+      "catalog": "저장된 앱 목록이 다른 앱을 숨기고 있습니다.",
+      "allow_actions": "모든 작업 허용",
+      "open_catalog": "모든 앱 표시",
+      "account_confirm": "이 계정이 할당된 에이전트는 읽기, 쓰기, 전송, 삭제, 공유를 할 수 있게 됩니다. 저장된 작업 제한이 대체됩니다.",
+      "agent_confirm": "이 에이전트는 계정에서 허용한 범위 내에서 이 앱의 읽기, 쓰기, 전송, 삭제, 공유를 할 수 있게 됩니다.",
+      "catalog_confirm": "워크스페이스에서 연결 가능한 모든 앱을 선택할 수 있게 됩니다. 기존 연결과 에이전트 앱 할당은 유지됩니다.",
+      "cancel": "취소",
+      "admin_required": "워크스페이스 관리자가 제한을 해제할 수 있습니다.",
+      "account_link": "이 계정에 저장된 작업 제한이 있습니다. 연결된 앱에서 해제하세요."
+    }
   }
 }

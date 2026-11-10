@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/
 import { cn } from "@multica/ui/lib/utils";
 import { AgentStatusDot } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
+import { useEditorOverlayOwner } from "../../editor/overlay-owner";
 import { blockedReasonLabel, blockedShortReasonLabel } from "../blocked-trigger-copy";
 import type { RecipientEntry } from "../hooks/use-recipient-actions";
 
@@ -245,12 +246,13 @@ function RecipientActionMenu({
   trigger: ReactElement;
   t: IssuesT;
 }) {
+  const overlayOwner = useEditorOverlayOwner();
   const presenceLine = useTriggerPresenceLine(entry.agent.id, t);
   const state = stateLabel(entry.state, t);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger render={trigger} />
-      <DropdownMenuContent side="top" align="start" className="w-80">
+      <DropdownMenuContent side="top" align="start" className="w-80" data-editor-overlay-owner={overlayOwner}>
         <div className="flex min-w-0 items-center gap-2 px-1.5 pt-1 pb-1.5 text-caption text-muted-foreground">
           <TriggerAgentAvatar agent={entry.agent} suppressed={false} />
           <span className="min-w-0 truncate font-medium text-foreground">{entry.agent.name}</span>
@@ -324,6 +326,7 @@ function MultiRecipientChip({
   onActionChange: (agentId: string, action: RecipientAction) => void;
   t: IssuesT;
 }) {
+  const overlayOwner = useEditorOverlayOwner();
   const [open, setOpen] = useState(false);
   const [tooltipHover, setTooltipHover] = useState(false);
   const activeCount = recipients.filter((r) => r.action !== "skip").length;
@@ -388,7 +391,7 @@ function MultiRecipientChip({
           {t(($) => $.comment.trigger_click_to_manage)}
         </TooltipContent>
       </Tooltip>
-      <PopoverContent align="start" className="w-80 p-2">
+      <PopoverContent align="start" className="w-80 p-2" data-editor-overlay-owner={overlayOwner}>
         <div className="px-1.5 pb-1 text-caption font-medium text-muted-foreground">
           {t(($) => $.comment.trigger_preview_title)}
         </div>

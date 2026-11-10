@@ -1,6 +1,13 @@
 export { useImmersiveMode } from "./use-immersive-mode";
 export { useDesktopUnreadBadge } from "./use-desktop-unread-badge";
 export { DragStrip } from "./drag-strip";
+export {
+  WindowTitleBarProvider,
+  useWindowTitleBar,
+  WINDOW_TITLE_BAR_CLASS,
+  windowTitleBarStyle,
+  type WindowTitleBar,
+} from "./window-title-bar";
 export { openExternal } from "./open-external";
 export {
   isDesktopShell,
@@ -9,6 +16,13 @@ export {
   type PickDirectoryResult,
   type ValidateLocalDirectoryResult,
 } from "./local-directory";
+export {
+  themeFolderAPI,
+  type ThemeFolderAPI,
+  type ThemeFolderFile,
+  type ThemeFolderSnapshot,
+  type ThemeFolderWriteResult,
+} from "./theme-folder";
 export {
   useLocalDaemonStatus,
   type LocalDaemonStatus,

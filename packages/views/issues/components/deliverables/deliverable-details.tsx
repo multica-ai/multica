@@ -38,16 +38,20 @@ export type DeliverableOrigin =
 
 /**
  * The issue page's `describeItem` for its preview sequence: the version
- * switcher next to the file name, the info panel, and "show in comments".
+ * switcher next to the file name, the info panel, "show in comments", and
+ * "copy link to latest version" for deliverables.
  */
 export function useDeliverableDetails({
   files,
   commentById,
   onLocate,
+  onCopyLink,
 }: {
   files: ReadonlyArray<DeliverableFile>;
   commentById: ReadonlyMap<string, TimelineEntry>;
   onLocate: (origin: DeliverableOrigin) => void;
+  /** Copies a deliverable's latest-version link, by file name. */
+  onCopyLink?: (filename: string) => void;
 }) {
   const { t } = useT("issues");
   return useCallback(
@@ -95,9 +99,18 @@ export function useDeliverableDetails({
           />
         ),
         locate: locate ? { label: locateLabel, onSelect: locate } : undefined,
+        // Only a deliverable has a latest version to link to; a description
+        // file is an input, and the link would name no deliverable.
+        copyLink:
+          deliverable && onCopyLink
+            ? {
+                label: t(($) => $.deliverables.copy_link),
+                onSelect: () => onCopyLink(deliverable.file.latest.filename),
+              }
+            : undefined,
       };
     },
-    [files, commentById, onLocate, t],
+    [files, commentById, onLocate, onCopyLink, t],
   );
 }
 

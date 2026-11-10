@@ -17,6 +17,15 @@ import type {
   LocalRuntimeProbe,
 } from "../shared/daemon-types";
 import type { TabSelectionShortcutKey } from "../shared/main-renderer-messages";
+import type {
+  ThemeFolderFile,
+  ThemeFolderSnapshot,
+  ThemeFolderWriteResult,
+} from "../shared/theme-folder";
+import type {
+  WorkspacePathOptions,
+  WorkspacePathRequest,
+} from "../shared/workspace-window";
 
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
@@ -45,6 +54,8 @@ interface DesktopAPI {
   onAuthToken: (callback: (token: string) => void) => () => void;
   /** Listen for invitation IDs delivered via deep link. Returns an unsubscribe function. */
   onInviteOpen: (callback: (invitationId: string) => void) => () => void;
+  /** Listen for issue links from the web once authentication is ready. */
+  onIssueOpen: (callback: (url: string) => void) => () => void;
   /** Open a URL in the default browser. */
   openExternal: (url: string) => Promise<void>;
   /** Download a file by URL through Electron's native download system.
@@ -103,6 +114,14 @@ interface DesktopAPI {
      *  Drives the worktree execution-mode option in the resource UI. */
     is_git_repo?: boolean;
   }>;
+  /** Read every theme in the themes folder in user data, and start watching it. */
+  readThemeFolder: () => Promise<ThemeFolderSnapshot>;
+  /** Called once a change in the themes folder settles. Returns an unsubscribe function. */
+  onThemeFolderChange: (callback: () => void) => () => void;
+  /** Open the themes folder, or one theme's folder in it, in the file manager. */
+  openThemeFolder: (name?: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Create a theme folder from files; never replaces an existing one. */
+  writeThemeFolder: (name: string, files: ThemeFolderFile[]) => Promise<ThemeFolderWriteResult>;
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  Returns an unsubscribe function. */
   onCloseActiveTab: (callback: () => void) => () => void;
@@ -126,12 +145,16 @@ interface DesktopAPI {
   getOtherWindowWorkspaces: () => string[];
   /** Hand a workspace (and optionally a path inside it) to the other main
    *  window that shows it. Returns false when no other window does. */
-  focusWorkspaceWindow: (workspaceSlug: string, path?: string) => boolean;
+  focusWorkspaceWindow: (
+    workspaceSlug: string,
+    path?: string,
+    options?: WorkspacePathOptions,
+  ) => boolean;
   /** Open a workspace in its own main window, or focus the one showing it. */
   openWorkspaceWindow: (workspaceSlug: string) => Promise<{ ok: boolean }>;
   /** Listen for workspace paths routed here from another window.
    *  Returns an unsubscribe function. */
-  onOpenWorkspacePath: (callback: (path: string) => void) => () => void;
+  onOpenWorkspacePath: (callback: (request: WorkspacePathRequest) => void) => () => void;
   /** Listen for Cmd/Ctrl+Shift+N new-window requests. Returns an
    *  unsubscribe function. */
   onNewWindowShortcut: (callback: () => void) => () => void;

@@ -52,6 +52,8 @@
     "action_failed_toast": "No se ha podido actualizar el mensaje en cola"
   },
   "message_list": {
+    "jump_to_latest": "Ir a lo más reciente",
+    "new_reply": "Nueva respuesta",
     "show_details": "Mostrar detalles",
     "replied_in": "Respondió en {{elapsed}}",
     "failed_after": "Falló tras {{elapsed}}",

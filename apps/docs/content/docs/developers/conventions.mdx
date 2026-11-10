@@ -30,12 +30,14 @@ The monorepo enforces strict package boundaries:
 
 | Package | May depend on | Must NOT depend on |
 | --- | --- | --- |
-| `packages/core` | nothing app-specific | `react-dom`, `localStorage`, `process.env`, `next/*`, UI libraries |
+| `packages/core` | nothing app-specific | `react-dom`, `next/*`, UI libraries, `process.env`, direct `localStorage` or `sessionStorage` (persist through `StorageAdapter`; only `analytics/exception-dedupe.ts` and `appearance/safe-mode.ts` use tab-scoped `sessionStorage`) |
 | `packages/ui` | nothing | `@multica/core`, business logic |
-| `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, stores |
+| `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, store definitions |
 | `apps/web/platform/` | `next/*` | other apps |
 | `apps/desktop/.../platform/` | `react-router-dom`, electron | other apps |
-| `apps/mobile/` | types and pure functions from `@multica/core` | Web/Desktop React pages, stores, and platform implementations |
+| `apps/mobile/` | types and pure functions from `@multica/core`, through each module's own subpath | Web/Desktop React pages, stores, and platform implementations, including core barrels that re-export them |
+
+The root `AGENTS.md` is the source for these boundaries and their narrow exceptions; change both together. Lint enforces the `packages/core` row (`packages/core/eslint.config.mjs`) and mobile's core imports (`apps/mobile/eslint.config.js`).
 
 If logic appears in both apps, it MUST be extracted to a shared package. There are no exceptions for "small" duplication. Mobile owns a separate UI, data layer, and release process; it shares only types and pure functions.
 
