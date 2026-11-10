@@ -1935,6 +1935,7 @@
     "ended_count_other": "{{count}} finalizados",
     "detected_hint": "Servidor encontrado en el directorio de una ejecución de esta tarea",
     "remote_hint": "Se ejecuta en {{machine}}. Una URL localhost solo se abre en ese equipo.",
+    "localhost_hint": "Una URL localhost solo se abre en el equipo que la ejecuta.",
     "open": "Abrir",
     "copy_url": "Copiar URL",
     "copied": "URL copiada",

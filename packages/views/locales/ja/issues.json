@@ -1860,6 +1860,7 @@
     "ended_count_other": "終了済み {{count}} 件",
     "detected_hint": "このタスクの実行ディレクトリで待ち受けていたサーバー",
     "remote_hint": "{{machine}} で実行中です。localhost の URL はそのマシンでのみ開けます。",
+    "localhost_hint": "localhost の URL は、それを実行しているマシンでのみ開けます。",
     "open": "開く",
     "copy_url": "URL をコピー",
     "copied": "URL をコピーしました",

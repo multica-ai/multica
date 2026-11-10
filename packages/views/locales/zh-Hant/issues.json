@@ -1860,6 +1860,7 @@
     "ended_count_other": "{{count}} 個已結束",
     "detected_hint": "在這個任務某次執行的目錄中發現的服務",
     "remote_hint": "執行於 {{machine}}，localhost 位址只能在那台機器上開啟。",
+    "localhost_hint": "localhost 位址只能在執行它的那台機器上開啟。",
     "open": "開啟",
     "copy_url": "複製位址",
     "copied": "已複製位址",

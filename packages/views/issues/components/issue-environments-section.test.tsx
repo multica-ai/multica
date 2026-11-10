@@ -128,9 +128,26 @@ describe("IssueEnvironmentsSection", () => {
     expect(within(local!).getAllByRole("link")[0]).toHaveAttribute("href", "http://localhost:41000");
     expect(within(remote!).getByText("localhost:5173")).toBeVisible();
     expect(remote).toHaveAttribute("title", expect.stringContaining("Runs on build-02"));
+    expect(local).not.toHaveAttribute("title");
 
     fireEvent.click(within(local!).getByRole("button", { name: "Copy URL" }));
     expect(copyText).toHaveBeenCalledWith("http://localhost:41000");
+  });
+
+  it("tells a viewer who may be on another machine where each localhost URL opens", async () => {
+    mockEnvironments = [
+      environment({ runtime_id: "rt-2" }),
+      environment({ id: "env-2", runtime_id: "rt-gone", name: "api", label: "API", url: "http://127.0.0.1:41010", port: 41010 }),
+      environment({ id: "env-3", runtime_id: "rt-2", name: "docs", label: "Docs", url: "https://docs.example.com", port: 0 }),
+    ];
+    renderSection();
+
+    await screen.findByText("Web app");
+    const rows = screen.getAllByTestId("environment-row");
+    const row = (label: string) => rows.find((r) => within(r).queryByText(label))!;
+    expect(row("Web app")).toHaveAttribute("title", "Runs on build-02. A localhost URL opens only on that machine.");
+    expect(row("API")).toHaveAttribute("title", "A localhost URL opens only on the machine running it.");
+    expect(row("Docs")).not.toHaveAttribute("title");
   });
 
   it("folds ended environments and shows why one exited", async () => {
@@ -141,7 +158,7 @@ describe("IssueEnvironmentsSection", () => {
         name: "api",
         label: "API",
         state: "exited",
-        detail: "exit status 1: missing DATABASE_URL",
+        detail: "exit status 1",
         ended_at: new Date().toISOString(),
         expires_at: null,
       }),
@@ -153,7 +170,7 @@ describe("IssueEnvironmentsSection", () => {
     fireEvent.click(fold);
     expect(screen.getByText("API")).toBeVisible();
     expect(screen.getByText("Exited")).toBeVisible();
-    expect(screen.getByText("exit status 1: missing DATABASE_URL")).toBeVisible();
+    expect(screen.getByText("exit status 1")).toBeVisible();
     const ended = screen.getAllByTestId("environment-row")[1]!;
     expect(within(ended).queryByRole("link")).not.toBeInTheDocument();
   });

@@ -337,10 +337,10 @@ start = "pnpm dev --port $MULTICA_PORT"
 ttl = "24h"                                         # 1m to 7d, default 24h
 ```
 
-Each environment gets ten ports, `MULTICA_PORT` through `MULTICA_PORT+9`. Parallel runs therefore never collide. `start` runs with `/bin/sh -c` from the directory that holds `.multica/`, with the caller's `PATH`. The daemon's `MULTICA_*` credentials are not passed to it. Output goes to a log under `<workspaces root>/.environments/v1/`, and `multica env start` prints its path.
+Each environment gets ten ports, `MULTICA_PORT` through `MULTICA_PORT+9`. Parallel runs therefore never collide. `start` runs with `/bin/sh -c` from the directory that holds `.multica/`, with the caller's `PATH`. The daemon's `MULTICA_*` credentials are not passed to it. Output goes to a log under `<workspaces root>/.environments/v1/`, and `multica env start` prints its path. The log stays on the machine. Output can contain secrets such as a connection string, so for an environment that crashed the sidebar shows only its exit status, while `multica env start` prints the log's last lines locally.
 
 ```bash
-multica env start web          # waits until the ready URL answers, then prints the URL
+multica env start web          # waits until the ready URL answers below 500, then prints the URL
 multica env start web --wait=false
 multica env list
 multica env stop web

@@ -1860,6 +1860,7 @@
     "ended_count_other": "종료됨 {{count}}개",
     "detected_hint": "이 태스크의 실행 디렉터리에서 발견된 서버",
     "remote_hint": "{{machine}}에서 실행 중입니다. localhost URL은 해당 기기에서만 열 수 있습니다.",
+    "localhost_hint": "localhost URL은 이를 실행 중인 기기에서만 열 수 있습니다.",
     "open": "열기",
     "copy_url": "URL 복사",
     "copied": "URL을 복사했습니다",

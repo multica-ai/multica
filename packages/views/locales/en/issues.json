@@ -1935,6 +1935,7 @@
     "ended_count_other": "{{count}} ended",
     "detected_hint": "Found listening in the directory of one of this issue's runs",
     "remote_hint": "Runs on {{machine}}. A localhost URL opens only on that machine.",
+    "localhost_hint": "A localhost URL opens only on the machine running it.",
     "open": "Open",
     "copy_url": "Copy URL",
     "copied": "URL copied",

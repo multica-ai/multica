@@ -68,9 +68,15 @@ export function IssueEnvironmentsSection({ issueId }: { issueId: string }) {
   const live = envs.filter(isLive);
   const ended = envs.filter((env) => !isLive(env));
   const running = live.filter((env) => env.state === "running").length;
-  // Only Desktop knows which machine it is on; on the web every machine is
-  // equally "somewhere else", so no row claims otherwise.
+  // Only Desktop knows which machine it is on. Anywhere else, every
+  // localhost URL may belong to another machine, so every row says whose it is.
   const knowsLocal = !!local.daemonId;
+  const localhostHint = (machine: RuntimeMachine | null) => {
+    if (knowsLocal && machine?.isCurrent) return null;
+    return machine
+      ? t(($) => $.environments.remote_hint, { machine: machine.title })
+      : t(($) => $.environments.localhost_hint);
+  };
 
   const groups = (list: IssueEnvironment[]) => {
     const byMachine = new Map<string, MachineGroup>();
@@ -98,7 +104,7 @@ export function IssueEnvironmentsSection({ issueId }: { issueId: string }) {
           <EnvironmentRow
             key={env.id}
             env={env}
-            remoteMachine={knowsLocal && group.machine && !group.machine.isCurrent ? group.machine.title : null}
+            localhostHint={localhostHint(group.machine)}
           />
         ))}
       </div>
@@ -141,7 +147,7 @@ export function IssueEnvironmentsSection({ issueId }: { issueId: string }) {
   );
 }
 
-function EnvironmentRow({ env, remoteMachine }: { env: IssueEnvironment; remoteMachine: string | null }) {
+function EnvironmentRow({ env, localhostHint }: { env: IssueEnvironment; localhostHint: string | null }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const live = isLive(env);
@@ -160,7 +166,7 @@ function EnvironmentRow({ env, remoteMachine }: { env: IssueEnvironment; remoteM
   const tooltip = [
     env.source === "detected" ? t(($) => $.environments.detected_hint) : null,
     env.detail || null,
-    remoteMachine ? t(($) => $.environments.remote_hint, { machine: remoteMachine }) : null,
+    isLoopbackUrl(env.url) ? localhostHint : null,
   ].filter(Boolean).join("\n");
 
   const body = (
@@ -241,6 +247,15 @@ function environmentMeta(env: IssueEnvironment, t: IssuesT, timeAgo: (iso: strin
     return t(($) => $.environments.expires_in_days, { count: Math.round(hours / 24) });
   }
   return t(($) => $.environments.started_ago, { time: timeAgo(env.started_at) });
+}
+
+function isLoopbackUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return host === "localhost" || host.endsWith(".localhost") || host === "[::1]" || host === "0.0.0.0" || host.startsWith("127.");
+  } catch {
+    return false;
+  }
 }
 
 function displayHost(url: string): string | null {

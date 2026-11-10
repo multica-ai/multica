@@ -1860,6 +1860,7 @@
     "ended_count_other": "{{count}} 个已结束",
     "detected_hint": "在这个任务某次运行的目录中发现的服务",
     "remote_hint": "运行在 {{machine}} 上，localhost 地址只能在那台机器上打开。",
+    "localhost_hint": "localhost 地址只能在运行它的那台机器上打开。",
     "open": "打开",
     "copy_url": "复制地址",
     "copied": "已复制地址",
