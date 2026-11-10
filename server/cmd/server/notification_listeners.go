@@ -165,6 +165,231 @@ func isNotifMuted(prefs map[string]string, notifType string) bool {
 	return prefs[group] == "muted"
 }
 
+// Focused inbox preference keys. Absent keys take the defaults: mode "all",
+// every rule "on".
+const (
+	prefInboxMode            = "inbox_mode"
+	inboxModeFocused         = "focused"
+	prefFocusedAssigned      = "focused_assigned"
+	prefFocusedBlocked       = "focused_blocked"
+	prefFocusedMentioned     = "focused_mentioned"
+	prefFocusedThreadReply   = "focused_thread_reply"
+	prefFocusedAgentActivity = "focused_agent_activity"
+)
+
+// inboxFocusFacts answers the questions focused mode asks about one
+// notification. Implementations may query lazily; all mode never calls them.
+type inboxFocusFacts interface {
+	targetAssignee() (assigneeType, assigneeID string)
+	newStatus() string
+	actorType() string
+	commentAuthorType() string
+	threadRootAuthor() (authorType, authorID string, isReply bool)
+	directCommentMention(recipientID string) bool
+}
+
+// shouldDeliverInbox decides whether a member recipient gets an inbox row.
+// All mode is exactly isNotifMuted. Focused mode ignores the group mutes and
+// delivers a filtered type only when one enabled rule matches. Cheap facts are
+// checked before the assignee so a lazy implementation skips the issue read
+// when no rule can match anyway.
+func shouldDeliverInbox(prefs map[string]string, notifType, recipientID string, facts inboxFocusFacts) bool {
+	if prefs[prefInboxMode] != inboxModeFocused {
+		return !isNotifMuted(prefs, notifType)
+	}
+	if _, filtered := notifTypeToGroup[notifType]; !filtered && notifType != "reaction_added" {
+		return true
+	}
+
+	ruleOn := func(key string) bool { return prefs[key] != "off" }
+	isAssignee := func() bool {
+		assigneeType, assigneeID := facts.targetAssignee()
+		return assigneeType == "member" && assigneeID == recipientID
+	}
+
+	switch notifType {
+	case "issue_assigned":
+		return ruleOn(prefFocusedAssigned)
+	case "mentioned":
+		return ruleOn(prefFocusedMentioned) && facts.directCommentMention(recipientID)
+	case "status_changed":
+		blocked := ruleOn(prefFocusedBlocked) && facts.newStatus() == issuestatus.Blocked
+		byAgent := ruleOn(prefFocusedAgentActivity) && facts.actorType() == "agent"
+		return (blocked || byAgent) && isAssignee()
+	case "new_comment":
+		if ruleOn(prefFocusedThreadReply) {
+			authorType, authorID, isReply := facts.threadRootAuthor()
+			if isReply && authorType == "member" && authorID == recipientID {
+				return true
+			}
+		}
+		return ruleOn(prefFocusedAgentActivity) && facts.commentAuthorType() == "agent" && isAssignee()
+	}
+	return false
+}
+
+// lazyFocusFacts resolves inboxFocusFacts from the triggering event, reading
+// the target issue and thread root at most once each and only when asked.
+type lazyFocusFacts struct {
+	ctx           context.Context
+	queries       *db.Queries
+	event         events.Event
+	targetIssueID string
+	issueStatus   string
+
+	// Mention origin; set only on the mention path.
+	fromComment    bool
+	directMentions map[string]bool
+
+	assigneeLoaded bool
+	assigneeType   string
+	assigneeID     string
+
+	rootLoaded     bool
+	rootAuthorType string
+	rootAuthorID   string
+	isReply        bool
+}
+
+func newLazyFocusFacts(
+	ctx context.Context,
+	queries *db.Queries,
+	e events.Event,
+	targetIssueID string,
+	issueStatus string,
+) *lazyFocusFacts {
+	return &lazyFocusFacts{
+		ctx:           ctx,
+		queries:       queries,
+		event:         e,
+		targetIssueID: targetIssueID,
+		issueStatus:   issueStatus,
+	}
+}
+
+func (f *lazyFocusFacts) newStatus() string { return f.issueStatus }
+
+func (f *lazyFocusFacts) actorType() string { return f.event.ActorType }
+
+func (f *lazyFocusFacts) directCommentMention(recipientID string) bool {
+	return f.fromComment && f.directMentions[recipientID]
+}
+
+func (f *lazyFocusFacts) commentAuthorType() string {
+	c, _ := commentFromEvent(f.event)
+	return c.AuthorType
+}
+
+func (f *lazyFocusFacts) targetAssignee() (string, string) {
+	if f.assigneeLoaded {
+		return f.assigneeType, f.assigneeID
+	}
+	f.assigneeLoaded = true
+
+	// issue:updated already carries the post-update issue.
+	if payload, ok := f.event.Payload.(map[string]any); ok {
+		if issue, ok := payload["issue"].(handler.IssueResponse); ok && issue.ID == f.targetIssueID {
+			if issue.AssigneeType != nil && issue.AssigneeID != nil {
+				f.assigneeType, f.assigneeID = *issue.AssigneeType, *issue.AssigneeID
+			}
+			return f.assigneeType, f.assigneeID
+		}
+	}
+
+	issue, err := f.queries.GetIssue(f.ctx, parseUUID(f.targetIssueID))
+	if err != nil {
+		slog.Warn("focused inbox: load target issue", "issue_id", f.targetIssueID, "error", err)
+		return "", ""
+	}
+	if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
+		f.assigneeType = issue.AssigneeType.String
+		f.assigneeID = util.UUIDToString(issue.AssigneeID)
+	}
+	return f.assigneeType, f.assigneeID
+}
+
+func (f *lazyFocusFacts) threadRootAuthor() (string, string, bool) {
+	if f.rootLoaded {
+		return f.rootAuthorType, f.rootAuthorID, f.isReply
+	}
+	f.rootLoaded = true
+
+	c, ok := commentFromEvent(f.event)
+	if !ok || c.ID == "" || (c.ParentKnown && c.ParentID == "") {
+		return "", "", false
+	}
+	root, err := f.queries.GetThreadRoot(f.ctx, db.GetThreadRootParams{
+		CommentID:   parseUUID(c.ID),
+		WorkspaceID: parseUUID(f.event.WorkspaceID),
+	})
+	if err != nil {
+		slog.Warn("focused inbox: load thread root", "comment_id", c.ID, "error", err)
+		return "", "", false
+	}
+	if util.UUIDToString(root.ID) == c.ID {
+		return "", "", false
+	}
+	f.rootAuthorType = root.AuthorType
+	f.rootAuthorID = util.UUIDToString(root.AuthorID)
+	f.isReply = true
+	return f.rootAuthorType, f.rootAuthorID, f.isReply
+}
+
+// eventComment is the part of a comment:created payload the listeners read.
+type eventComment struct {
+	ID         string
+	IssueID    string
+	Content    string
+	AuthorType string
+	ParentID   string
+	// ParentKnown is false when the payload omits parent_id entirely.
+	ParentKnown bool
+}
+
+// commentFromEvent reads the comment from a comment:created payload, which is
+// handler.CommentResponse from HTTP handlers and map[string]any from service
+// paths such as TaskService.createAgentComment.
+func commentFromEvent(e events.Event) (eventComment, bool) {
+	payload, ok := e.Payload.(map[string]any)
+	if !ok {
+		return eventComment{}, false
+	}
+	switch c := payload["comment"].(type) {
+	case handler.CommentResponse:
+		out := eventComment{
+			ID:          c.ID,
+			IssueID:     c.IssueID,
+			Content:     c.Content,
+			AuthorType:  c.AuthorType,
+			ParentKnown: true,
+		}
+		if c.ParentID != nil {
+			out.ParentID = *c.ParentID
+		}
+		return out, true
+	case map[string]any:
+		out := eventComment{}
+		out.IssueID, _ = c["issue_id"].(string)
+		out.ID, _ = c["id"].(string)
+		out.Content, _ = c["content"].(string)
+		out.AuthorType, _ = c["author_type"].(string)
+		if raw, present := c["parent_id"]; present {
+			out.ParentKnown = true
+			switch parent := raw.(type) {
+			case *string:
+				if parent != nil {
+					out.ParentID = *parent
+				}
+			case string:
+				out.ParentID = parent
+			}
+		}
+		return out, true
+	default:
+		return eventComment{}, false
+	}
+}
+
 // loadUserPrefs loads notification preferences for a set of user IDs in a
 // workspace. Returns a map from user_id string to parsed preferences.
 func loadUserPrefs(
@@ -279,8 +504,10 @@ func notifySubscribers(
 	body string,
 	details []byte,
 ) {
+	// One resolver for every pass: the inbox row always targets this issue.
+	facts := newLazyFocusFacts(ctx, queries, e, issueID, issueStatus)
 	notified := notifyIssueAndParentSubscribers(ctx, queries, bus, issueID, issueStatus,
-		workspaceID, e, exclude, notifType, severity, title, body, details)
+		workspaceID, e, exclude, notifType, severity, title, body, details, facts)
 
 	// Project watchers hear about every issue in the project, after the
 	// issue-level fanout so nobody receives the same event twice.
@@ -292,7 +519,7 @@ func notifySubscribers(
 		projectExclude[id] = true
 	}
 	notifyProjectSubscribers(ctx, queries, bus, issueID, issueStatus, workspaceID, e,
-		projectExclude, notifType, severity, title, body, details)
+		projectExclude, notifType, severity, title, body, details, facts)
 }
 
 // notifyIssueAndParentSubscribers is the issue-level half of notifySubscribers:
@@ -312,10 +539,11 @@ func notifyIssueAndParentSubscribers(
 	title string,
 	body string,
 	details []byte,
+	facts inboxFocusFacts,
 ) map[string]bool {
 	notified, tierSuppressed := notifyIssueSubscribers(ctx, queries, bus,
 		issueID, issueID, issueStatus, workspaceID, e, exclude,
-		notifType, severity, title, body, details)
+		notifType, severity, title, body, details, facts)
 
 	// Only a small allowlist of event types bubbles to parent subscribers.
 	if !parentBubbleNotifTypes[notifType] {
@@ -357,7 +585,7 @@ func notifyIssueAndParentSubscribers(
 	parentID := util.UUIDToString(issue.ParentIssueID)
 	parentNotified, _ := notifyIssueSubscribers(ctx, queries, bus,
 		parentID, issueID, issueStatus, workspaceID, e, parentExclude,
-		notifType, severity, title, body, details)
+		notifType, severity, title, body, details, facts)
 	for id := range parentNotified {
 		notified[id] = true
 	}
@@ -367,8 +595,8 @@ func notifyIssueAndParentSubscribers(
 // notifyProjectSubscribers delivers an issue event to the members watching the
 // issue's project. A project subscription is an explicit request to hear about
 // every issue in it, so the delegated delivery tier does not narrow it; the
-// actor, the exclude set, muted preference groups and per-issue opt-outs
-// (ListProjectSubscribersForIssue) still apply.
+// actor, the exclude set, the recipient's inbox preferences and per-issue
+// opt-outs (ListProjectSubscribersForIssue) still apply.
 func notifyProjectSubscribers(
 	ctx context.Context,
 	queries *db.Queries,
@@ -383,6 +611,7 @@ func notifyProjectSubscribers(
 	title string,
 	body string,
 	details []byte,
+	facts inboxFocusFacts,
 ) {
 	subscribers, err := queries.ListProjectSubscribersForIssue(ctx, parseUUID(issueID))
 	if err != nil {
@@ -405,7 +634,7 @@ func notifyProjectSubscribers(
 	userPrefs := loadUserPrefs(ctx, queries, workspaceID, recipients)
 
 	for _, subID := range recipients {
-		if prefs, ok := userPrefs[subID]; ok && isNotifMuted(prefs, notifType) {
+		if !shouldDeliverInbox(userPrefs[subID], notifType, subID, facts) {
 			continue
 		}
 		createMemberInboxItem(ctx, queries, bus, subID, workspaceID, e, issueID, issueStatus,
@@ -488,6 +717,7 @@ func notifyIssueSubscribers(
 	title string,
 	body string,
 	details []byte,
+	facts inboxFocusFacts,
 ) (map[string]bool, map[string]bool) {
 	notified := map[string]bool{}
 	tierSuppressed := map[string]bool{}
@@ -541,8 +771,7 @@ func notifyIssueSubscribers(
 			continue
 		}
 
-		// Skip if this notification type is muted by the user
-		if prefs, ok := userPrefs[subID]; ok && isNotifMuted(prefs, notifType) {
+		if !shouldDeliverInbox(userPrefs[subID], notifType, subID, facts) {
 			continue
 		}
 
@@ -588,7 +817,8 @@ func notifyDirect(
 	// Check notification preferences for member recipients.
 	if recipientType == "member" {
 		prefs := loadUserPrefs(ctx, queries, workspaceID, []string{recipientID})
-		if p, ok := prefs[recipientID]; ok && isNotifMuted(p, notifType) {
+		facts := newLazyFocusFacts(ctx, queries, e, issueID, issueStatus)
+		if !shouldDeliverInbox(prefs[recipientID], notifType, recipientID, facts) {
 			return
 		}
 	}
@@ -642,8 +872,10 @@ func notifyMentionedMembers(
 	skip map[string]bool,
 	details []byte,
 ) {
-	// Collect the set of member IDs to notify.
+	// Collect the set of member IDs to notify. directIDs keeps the ones named
+	// individually; focused mode ignores @all and @squad expansion.
 	recipientIDs := map[string]bool{}
+	directIDs := map[string]bool{}
 
 	hasAll := false
 	var squadIDs []string
@@ -657,6 +889,7 @@ func notifyMentionedMembers(
 				continue
 			}
 			recipientIDs[m.ID] = true
+			directIDs[m.ID] = true
 		}
 		if m.Type == "squad" {
 			squadIDs = append(squadIDs, m.ID)
@@ -703,6 +936,9 @@ func notifyMentionedMembers(
 		}
 	}
 	mentionPrefs := loadUserPrefs(context.Background(), queries, e.WorkspaceID, mentionUserIDs)
+	facts := newLazyFocusFacts(context.Background(), queries, e, issueID, issueStatus)
+	facts.fromComment = e.Type == protocol.EventCommentCreated
+	facts.directMentions = directIDs
 
 	for id := range recipientIDs {
 		if id == e.ActorID || skip[id] {
@@ -711,7 +947,7 @@ func notifyMentionedMembers(
 		// Skip if mentions are muted by this user. This is deliberately a
 		// different group from `comments`: muting comment volume must not
 		// silence someone asking for you by name.
-		if p, ok := mentionPrefs[id]; ok && isNotifMuted(p, "mentioned") {
+		if !shouldDeliverInbox(mentionPrefs[id], "mentioned", id, facts) {
 			continue
 		}
 		item, inserted, err := inbox.CreateIfEligible(context.Background(), queries, db.CreateInboxItemParams{
@@ -795,7 +1031,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			notifyProjectSubscribers(ctx, queries, bus, issue.ID, issue.Status, issue.WorkspaceID, e,
 				skip, "issue_created", "info",
 				issue.Title, "",
-				emptyDetails)
+				emptyDetails, newLazyFocusFacts(ctx, queries, e, issue.ID, issue.Status))
 		}
 	})
 
@@ -996,24 +1232,12 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			return
 		}
 
-		// The comment payload can come as handler.CommentResponse from the
-		// HTTP handler, or as map[string]any from the agent comment path in
-		// task.go. Handle both.
-		var issueID, commentID, commentContent, authorType string
-		switch c := payload["comment"].(type) {
-		case handler.CommentResponse:
-			issueID = c.IssueID
-			commentID = c.ID
-			commentContent = c.Content
-			authorType = c.AuthorType
-		case map[string]any:
-			issueID, _ = c["issue_id"].(string)
-			commentID, _ = c["id"].(string)
-			commentContent, _ = c["content"].(string)
-			authorType, _ = c["author_type"].(string)
-		default:
+		comment, ok := commentFromEvent(e)
+		if !ok {
 			return
 		}
+		issueID, commentID := comment.IssueID, comment.ID
+		commentContent, authorType := comment.Content, comment.AuthorType
 
 		// Platform-authored system comments (MUL-2538 child-done parent
 		// notify) must NOT create inbox rows or parse mentions from their
