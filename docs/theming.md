@@ -1,52 +1,91 @@
 # Theming Multica
 
-A Multica theme is a manifest and some CSS. The CSS overrides public
-variables for light and dark mode and can restyle the stable anchors listed
-below; the manifest names the theme and can declare options that appear
-under **Settings → Appearance → Theme options**. Themes never run
-JavaScript.
+A Multica theme is a folder with a `manifest.json` and a `theme.css`, plus any
+fonts and images the CSS uses. The CSS overrides public variables for light
+and dark mode and can restyle the stable anchors listed below; the manifest
+names the theme and can declare options that appear under **Settings →
+Appearance → Theme options**. Themes never run JavaScript.
 
-Only the built-in themes exist for now: Default, Pop, GitHub, Blueprint and
-Notion, in `packages/core/appearance/built-in-themes.ts`. People cannot
-import their own. The variables, anchors and options below are what the
-built-in themes are written against, and what an imported theme would use
-if that comes later.
+> **Beta.** The variables, anchors and manifest format below are a beta
+> API. They may change without notice until it is declared stable; check
+> this page when a theme stops looking right after an update.
 
-## A built-in theme
+Install a theme with **Settings → Appearance → Import theme**, from a `.zip`
+of the folder or from the folder itself. Themes are saved on the device, like
+every other Appearance setting, and **Remove theme** deletes one and goes
+back to Default.
 
-```ts
-const PAPER = builtInTheme({
-  id: "paper",
-  name: "Paper",
-  author: "Someone",
-  tokens: {
-    light: { "page-canvas": "#f6efdf", "font-content-latin": "Georgia, Times New Roman", "h1-style": "italic" },
-    dark: { "page-canvas": "#1d1b16" },
-  },
-  options: [
-    { id: "hyphens", type: "toggle", label: "Hyphenate", default: true },
-  ],
-  css: ':root[data-theme-option-hyphens] [data-mc="content"] p { hyphens: auto; }',
-});
+The built-in themes compile to exactly this format and live in
+`packages/core/appearance/built-in-themes.ts`: Pop shows options and CSS,
+GitHub, Blueprint and Notion show fonts, content styling and anchor CSS.
+Duplicating one turns it into a folder you can edit; see
+[Writing a theme](#writing-a-theme).
+
+## The folder
+
+```text
+paper/
+├── manifest.json
+├── theme.css
+└── fonts/
+    └── serif.woff2
 ```
 
-Add it to `BUILT_IN_THEMES` to list it in Settings. `tokens` compile to
-`.theme-light { … }` and `.theme-dark { … }` rules, and `frame` (optional)
-to rules for the rail, the window toolbar and the tab bar. Written as
-tables, the tokens can be read by the contrast test
-(`apps/web/app/text-contrast.test.ts`), which checks every built-in palette
-against WCAG AA. `css` holds anything a token cannot express: selectors on
-anchors and option attributes.
+The folder can sit at the top of the `.zip` or be the zip's only folder.
+Files other than fonts (`woff2`, `woff`, `ttf`, `otf`) and images (`png`,
+`jpg`, `webp`, `gif`, `avif`, `svg`) are ignored. The whole theme can be at
+most 1 MB.
+
+### manifest.json
+
+```json
+{
+  "apiVersion": 1,
+  "id": "paper",
+  "name": "Paper",
+  "author": "Someone",
+  "version": "1.2.0",
+  "description": "Warm paper, serif reading text.",
+  "options": [
+    { "id": "page", "type": "heading", "label": "Page" },
+    { "id": "paper-color", "type": "color", "label": "Paper", "default": { "light": "#f6efdf", "dark": "#1d1b16" } },
+    { "id": "hyphens", "type": "toggle", "label": "Hyphenate", "default": true }
+  ]
+}
+```
 
 | Field | Rules |
 | --- | --- |
-| `id` | 1–40 characters of `a-z`, `0-9` and `-`, unique among the built-in themes. |
-| `name` | Shown in the theme picker. |
-| `author` | Optional; the design system the theme follows. |
-| `tokens` | Light and dark values for public variables, without `--`. |
-| `frame` | Optional light and dark values for the frame around the page. |
+| `apiVersion` | Must be `1`. |
+| `id` | 1–40 characters of `a-z`, `0-9` and `-`. Built-in ids (`default`, `pop`, `github`, `blueprint`, `notion`) are reserved. Importing a theme with an installed id replaces it. |
+| `name` | Required, at most 40 characters. |
+| `author`, `version`, `description` | Optional, shown when installing. |
 | `options` | Up to 24; see [Options](#options). |
-| `css` | Optional extra CSS. |
+
+### theme.css
+
+```css
+@font-face {
+  font-family: "Paper Serif";
+  src: url(fonts/serif.woff2);
+}
+
+.theme-light {
+  --page-canvas: var(--paper-color);
+  --brand: #8b4513;
+  --font-content-latin: "Paper Serif", Georgia;
+  --h1-style: italic;
+  --blockquote-style: normal;
+}
+
+.theme-dark {
+  --page-canvas: var(--paper-color);
+}
+
+:root[data-theme-option-hyphens] [data-mc="content"] p {
+  hyphens: auto;
+}
+```
 
 Set variables on `.theme-light` and `.theme-dark` (both on `<html>`). The
 CSS loads after the app's own styles while the theme is active, so at equal
@@ -80,9 +119,8 @@ their default as a fallback. So it can be set on any ancestor, not only on
 }
 ```
 
-Token values may only use letters, digits, spaces and `#.,%()/+-`, and font
-stacks are family names and `var()`; a test checks every built-in theme
-against both.
+Values that could load a resource are rejected anywhere in `theme.css`, see
+[What CSS may not do](#what-css-may-not-do).
 
 ## Options
 
@@ -90,7 +128,7 @@ Options render on the Appearance page while the theme is active. Their
 types follow Obsidian's Style Settings. `toggle` and `select` mark `<html>`
 with an attribute; the others set the variable `--<id>` on `<html>` for both
 modes (per mode for `color`), always: the chosen value or the default. So
-the theme's CSS can read them with a plain `var(--<id>)`.
+`theme.css` can read them with a plain `var(--<id>)`.
 
 | Type | Fields | Result |
 | --- | --- | --- |
@@ -175,15 +213,28 @@ UI primitives carry a `data-slot`; these are public too: `button` (also
 .theme-dark [data-mc="issue-row"][data-priority="urgent"] { box-shadow: inset 2px 0 var(--priority-urgent); }
 ```
 
-## Rules for theme CSS
+## What CSS may not do
 
-Keep the CSS to variables, anchors, public slots and the state above:
+**Anything that loads a resource is rejected,** because CSS can read page
+content through attribute selectors and send it out in a request. That
+means:
+
+- `url()` may only name a file in the theme folder (`url(fonts/serif.woff2)`)
+  or a fragment (`url(#filter)`). It is rewritten to the file's `data:` URL.
+- `@import`, `image()`, `image-set()`, `cross-fade()`, `element()`, `src()`
+  and `expression()` are rejected, as are `behavior` and `-moz-binding`.
+
+Escapes, case and comments do not get around the check: it reads the CSS the
+way a browser does. When a theme fails a check, nothing is installed and
+every problem is listed with its line in `theme.css`.
+
+These are also good practice, and `pnpm theme:check` (below) fails a theme
+that breaks them:
 
 - Use only public variables and anchors. Class names and DOM structure
-  change without notice; a test fails when a theme sets a variable that is
-  not public.
-- Do not load anything: no `url()`, `@import` or `image-set()`. CSS can
-  read page content through attribute selectors, so a request is a way out.
+  change without notice. A variable that is not in the
+  [reference](#variable-reference) is allowed only when it is an option id
+  or the theme reads it itself with `var()`.
 - Set variables on `.theme-light` and `.theme-dark`, and keep everything
   else behind a descendant selector, so the theme picker can read a
   theme's colours back from its CSS.
@@ -192,6 +243,63 @@ Keep the CSS to variables, anchors, public slots and the state above:
   CJK font follows them, and a generic family matches Han through the
   browser's default for the page language, so the person's CJK choice would
   never apply. The CJK stack ends with its own generic family.
+- Keep text readable in both modes (WCAG AA): `--foreground` and
+  `--muted-foreground` need 4.5:1 on every surface, `--brand` 4.5:1 on the
+  reading surfaces, the primary button label 4.5:1 on the button, and
+  `--faint-foreground` 3:1. A frame (rules on the rail, window toolbar or
+  tab bar) is checked against its own colours.
+
+## Safe mode
+
+A theme can hide or break parts of the interface. To get back, open the app
+with `?theme=default` in the address, or hold Shift for a moment right after
+it loads (on Desktop: reload with ⌘R / Ctrl+R, then hold Shift). The theme is
+paused until the window is closed, and the Appearance page offers to turn it
+back on.
+
+## Writing a theme
+
+Start from a built-in theme: pick it in **Settings → Appearance**, then
+choose **Duplicate “…” as a new theme** from the **⋯** menu next to
+**Import theme**. The
+copy gets its own id (`pop-copy`, `pop-copy-2`, …), a manifest with the
+theme's options, and a `theme.css` with one declaration per line. Importing
+the copy unchanged looks exactly like the original.
+
+### On Desktop: the themes folder
+
+Desktop keeps a `themes` folder in its user data folder. **Open themes
+folder** in the same menu shows it. Every folder (or `.zip`) in it is
+installed when the app starts and listed under **Themes folder** in the
+picker. Save a file in it and every open window picks the change up within
+about a second, so edit `theme.css` in any editor and watch the app.
+
+Duplicating on Desktop writes the copy straight into this folder and
+opens it. A symlinked folder works too, so a theme can live in its own git
+repository. If a file stops passing its checks, the last version that did
+stays in use and the Appearance page lists the problem. To remove a theme
+from the folder, delete its folder. The folder wins over an imported theme
+with the same id whenever it is read: on a change and at every start.
+
+### On the web
+
+Duplicating downloads a `.zip`. Unzip it, edit, and import the folder
+again: the same `id` replaces the installed copy, and option values are
+kept. If a check fails, the import dialog lists every problem.
+
+### Checking a theme
+
+Before importing or sharing a theme, run the same checks from the repository:
+
+```sh
+pnpm theme:check path/to/paper          # a folder
+pnpm theme:check paper.zip --json       # a zip, as JSON for CI
+```
+
+It reports manifest errors, blocked CSS, non-public variables, generic
+families in font stacks and WCAG contrast in both modes, each with its line
+in `theme.css`, and exits with status 1 when there is an error. Warnings,
+such as a colour it cannot resolve, do not fail the check.
 
 ## Variable reference
 

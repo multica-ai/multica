@@ -18,6 +18,11 @@ import type {
 } from "../shared/daemon-types";
 import type { TabSelectionShortcutKey } from "../shared/main-renderer-messages";
 import type {
+  ThemeFolderFile,
+  ThemeFolderSnapshot,
+  ThemeFolderWriteResult,
+} from "../shared/theme-folder";
+import type {
   WorkspacePathOptions,
   WorkspacePathRequest,
 } from "../shared/workspace-window";
@@ -109,6 +114,14 @@ interface DesktopAPI {
      *  Drives the worktree execution-mode option in the resource UI. */
     is_git_repo?: boolean;
   }>;
+  /** Read every theme in the themes folder in user data, and start watching it. */
+  readThemeFolder: () => Promise<ThemeFolderSnapshot>;
+  /** Called once a change in the themes folder settles. Returns an unsubscribe function. */
+  onThemeFolderChange: (callback: () => void) => () => void;
+  /** Open the themes folder, or one theme's folder in it, in the file manager. */
+  openThemeFolder: (name?: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Create a theme folder from files; never replaces an existing one. */
+  writeThemeFolder: (name: string, files: ThemeFolderFile[]) => Promise<ThemeFolderWriteResult>;
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  Returns an unsubscribe function. */
   onCloseActiveTab: (callback: () => void) => () => void;

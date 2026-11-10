@@ -15,10 +15,12 @@ import {
   isSafeThemeValue,
   localizedText,
   sanitizeAppearance,
+  sanitizeThemeCss,
   THEME_VARIABLE_NAMES,
   themeModeVariables,
   themeTokensCss,
   useAppearanceStore,
+  useInstalledThemesStore,
   type AppearancePreferences,
   type Theme,
 } from ".";
@@ -81,12 +83,8 @@ describe("sanitizeAppearance", () => {
     expect(sanitizeAppearance(null)).toEqual(DEFAULT_APPEARANCE);
   });
 
-  it("keeps only built-in theme ids, and their options", () => {
-    expect(sanitizeAppearance({ theme: "notion" }).theme).toBe("notion");
-    expect(sanitizeAppearance({ theme: "solarized" }).theme).toBe("default");
-    expect(sanitizeAppearance({ themeOptions: { solarized: { a: true }, pop: { signal: "sky" } } }).themeOptions).toEqual({
-      pop: { signal: "sky" },
-    });
+  it("keeps the id of a theme that may be installed later", () => {
+    expect(sanitizeAppearance({ theme: "solarized" }).theme).toBe("solarized");
   });
 
   it("accepts installed CJK families and follow-the-interface values", () => {
@@ -193,21 +191,33 @@ describe("appearanceStylesheet", () => {
 
   it("keeps stored option values of every type", () => {
     const stored = sanitizeAppearance({
-      themeOptions: { pop: { a: true, b: "sky", c: 1.5, d: { light: "#fff", dark: 3 }, e: Number.NaN, f: [] } },
+      themeOptions: { paper: { a: true, b: "sky", c: 1.5, d: { light: "#fff", dark: 3 }, e: Number.NaN, f: [] } },
     });
-    expect(stored.themeOptions).toEqual({ pop: { a: true, b: "sky", c: 1.5, d: { light: "#fff" } } });
+    expect(stored.themeOptions).toEqual({ paper: { a: true, b: "sky", c: 1.5, d: { light: "#fff" } } });
   });
 
-  it("applies a built-in theme and its CSS, and Default for anything else", () => {
-    const active = activeTheme({ ...DEFAULT_APPEARANCE, theme: "notion" });
-    expect(active.id).toBe("notion");
-    expect(appearanceThemeCss(active)).toBe(active.css);
-    expect(activeTheme({ ...DEFAULT_APPEARANCE, theme: "not-built-in" }).id).toBe("default");
+  it("falls back to the default theme in safe mode or when the theme is missing", () => {
+    expect(activeTheme({ ...DEFAULT_APPEARANCE, theme: "pop" }, true).id).toBe("default");
+    expect(activeTheme({ ...DEFAULT_APPEARANCE, theme: "not-installed" }).id).toBe("default");
+  });
+
+  it("applies an installed theme and its CSS", () => {
+    const theme: Theme = {
+      apiVersion: 1,
+      id: "paper",
+      name: "Paper",
+      css: '.theme-light { --page-canvas: oklch(0.97 0.02 85); }\n[data-mc="content"] p { hyphens: auto; }',
+    };
+    useInstalledThemesStore.setState({ themes: [theme] });
+    const active = activeTheme({ ...DEFAULT_APPEARANCE, theme: "paper" });
+    expect(active).toBe(theme);
+    expect(appearanceThemeCss(active)).toContain("hyphens: auto");
+    useInstalledThemesStore.setState({ themes: [] });
   });
 });
 
 describe("built-in themes", () => {
-  it("set only public variables with values a declaration cannot escape", () => {
+  it("set only public variables, and their CSS passes the same check as installed themes", () => {
     expect(new Set(BUILT_IN_THEMES.map((t) => t.id)).size).toBe(BUILT_IN_THEMES.length);
     for (const theme of BUILT_IN_THEMES) {
       for (const tokens of [theme.tokens.light, theme.tokens.dark, theme.frame?.light, theme.frame?.dark]) {
@@ -216,6 +226,7 @@ describe("built-in themes", () => {
           expect(isSafeFontValue(value) || isSafeThemeValue(value), `${name}: ${value}`).toBe(true);
         }
       }
+      expect(sanitizeThemeCss(theme.css, theme.assets)).toEqual({ ok: true, css: theme.css });
     }
   });
 
