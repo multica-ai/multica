@@ -385,6 +385,8 @@ multica config show
 | `ws_claim_poll_interval` | `3m` | 정상 WebSocket에서 claim 안전 polling의 상한. `poll_interval`과 독립적으로 설정되며 Daemon은 하향 jitter를 적용합니다 |
 | `heartbeat_interval` | `15s` | heartbeat 간격 |
 | `agent_timeout` | 제한 없음 | 단일 실행의 절대 시간 제한 |
+| `agent_idle_watchdog` | `2h` | 실행 중인 도구 호출이 없을 때의 무응답 상한. `0s`이면 데몬 watchdog 전체가 꺼지며 `agent_tool_watchdog`도 적용되지 않습니다 |
+| `agent_tool_watchdog` | `agent_idle_watchdog`와 동일 | 도구 호출이 실행 중일 때의 무응답 상한. `0s`이면 데몬 watchdog이 무응답 도구 호출 때문에 실행을 멈추지 않으며, 실행은 `agent_timeout`(기본값은 제한 없음)으로만 제한됩니다 |
 | `codex_semantic_inactivity_timeout` | 파생 | Codex 의미 활동 없음 기준값. 설정하지 않으면 idle과 tool watchdog 예산 중 큰 값을 따르고, tool 예산이 `0`이면 idle 예산으로 되돌아갑니다. Codex 자체의 `10m`은 watchdog 전체를 비활성화했을 때만 유지됩니다 |
 | `codex_handshake_timeout` | `30s`, `thread/start`·`thread/resume`: `60s` | Codex app-server 시작 handshake 상한. 명시적으로 설정한 값은 두 예산을 모두 일괄 재정의합니다 |
 | `disable_auto_update` | 환경을 따름 | `true`는 자동 업데이트를 끔. `false`는 로컬 덮어쓰기를 지우고 환경 변수 또는 기본값으로 복귀 |
@@ -393,7 +395,7 @@ multica config show
 
 값에는 다음 규칙이 적용됩니다.
 
-- duration key는 양의 Go duration(예: `10s`, `2h`)을 허용하며 `0s`와 음수는 거부합니다. 유일한 예외는 `agent_timeout`입니다. `0s`가 유효하며 실행 시간 제한을 명시적으로 끕니다.
+- duration key는 양의 Go duration(예: `10s`, `2h`)을 허용하며 음수는 항상 거부합니다. `0s`까지 허용하는 key는 `agent_timeout`, `agent_idle_watchdog`, `agent_tool_watchdog`뿐입니다. `agent_timeout`의 `0s`는 실행 시간 제한을 명시적으로 끄고, 두 watchdog key에서 `0s`가 무엇을 끄는지는 표를 참고하세요.
 - 빈 문자열을 전달하면 저장된 값을 지우고 환경 변수 또는 내장 기본값으로 돌아갑니다. 예: `multica config set poll_interval ""`
 - `max_concurrent_tasks`는 0 이상의 정수여야 합니다.
 - 상대 `workspaces_root` 값은 저장할 때 절대 경로로 변환됩니다.
