@@ -6,8 +6,12 @@
 @import "../../../packages/ui/styles/appearance.css";
 @import "../../../packages/ui/styles/base.css";
 @import "./custom.css";
+@import "./landing.css";
 
-@custom-variant dark (&:is(.dark *));
+/* The marketing site is light-only: `.landing-light` re-declares the tokens
+   (custom.css), and `dark:` utilities inside it must not fire either. The
+   exclusion sits in `:where()` so `dark:` keeps its (0,2,0) specificity. */
+@custom-variant dark (&:is(.dark *):where(:not(.landing-light, .landing-light *)));
 
 @source "../../../packages/ui/**/*.{ts,tsx}";
 @source "../../../packages/core/**/*.{ts,tsx}";
@@ -72,7 +76,3 @@ html[lang="zh-TW"] {
     "Microsoft YaHei", "Noto Sans CJK SC", "Apple SD Gothic Neo", "Malgun Gothic",
     "Noto Sans CJK KR", sans-serif;
 }
-
-/* The landing tree overrides `--font-serif` with its own Instrument Serif +
-   per-locale CJK chain, built on the same structure; see "Landing editorial
-   serif" in ./custom.css and keep the two CJK orderings in sync. */
