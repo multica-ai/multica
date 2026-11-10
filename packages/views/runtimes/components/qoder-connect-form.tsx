@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
 import {
   CheckCircle2,
   ChevronRight,
@@ -12,7 +11,6 @@ import {
   Settings2,
   ShieldCheck,
 } from "@multica/ui/icons";
-import { githubInstallationsOptions } from "@multica/core/github";
 import {
   MAX_CONCURRENCY,
   MAX_RUN_TIMEOUT,
@@ -107,14 +105,6 @@ export function QoderConnectForm({
   const save = useSaveQoder(wsId);
   const environments = useQoderEnvironments(wsId);
   const { mutate: loadEnvironments, reset: resetEnvironments } = environments;
-  const { data: installationData } = useQuery({
-    ...githubInstallationsOptions(wsId),
-    enabled: !!wsId,
-  });
-  const autoAccounts = (installationData?.installations ?? [])
-    .map((installation) => installation.account_login)
-    .filter(Boolean)
-    .join(", ");
 
   const [region, setRegion] = useState<QoderRegion>(() =>
     regionOf(connection.baseUrl),
@@ -322,31 +312,14 @@ export function QoderConnectForm({
           summary={
             repos.length > 0
               ? t(($) => $.qoder.connect.repo_count, { count: repos.length })
-              : autoAccounts
-                ? t(($) => $.qoder.connect.auto_authorized)
-                : t(($) => $.qoder.connect.optional)
+              : t(($) => $.qoder.connect.optional)
           }
           open={showRepos}
           onToggle={() => setShowRepos((open) => !open)}
         >
-          {autoAccounts ? (
-            <div className="flex items-start gap-2 rounded-md bg-muted/60 p-2.5">
-              <ShieldCheck
-                aria-hidden="true"
-                className="mt-0.5 size-3.5 shrink-0 text-success"
-              />
-              <p className="leading-relaxed text-caption text-muted-foreground">
-                {t(($) => $.qoder.page.github_app_auto_auth, {
-                  accounts: autoAccounts,
-                })}{" "}
-                {t(($) => $.qoder.page.github_app_auto_auth_hint)}
-              </p>
-            </div>
-          ) : (
-            <p className="text-caption text-muted-foreground">
-              {t(($) => $.qoder.repositories_hint)}
-            </p>
-          )}
+          <p className="text-caption text-muted-foreground">
+            {t(($) => $.qoder.repositories_hint)}
+          </p>
           {repos.map((row, index) => (
             <div key={index} className="space-y-2 rounded-md bg-muted/40 p-2.5">
               <Input

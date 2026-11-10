@@ -615,7 +615,6 @@
       "repo_count_one": "{{count}} repository",
       "repo_count_other": "{{count}} repositories",
       "optional": "Optional",
-      "auto_authorized": "Auto-authorized via GitHub integration",
       "execution_summary": "Up to {{concurrency}} at once · {{timeout}} min timeout"
     },
     "stop_confirm": {
@@ -649,9 +648,6 @@
       "save": "Save",
       "token_saved": "Saved",
       "repositories_hint": "Agents can only clone the repositories authorized here.",
-      "github_app_auto_auth": "Repositories under {{accounts}} are authorized automatically through the workspace GitHub integration.",
-      "github_app_auto_auth_hint": "Each run mounts them with a fresh 1-hour token limited to that single repository — no manual token needed.",
-      "repositories_hint_override": "Add a personal access token only for repositories outside the connected accounts, or to override their authorization.",
       "repo_token_saved": "Token saved",
       "repo_actions": "Actions for {{repo}}",
       "replace_token": "Replace token",

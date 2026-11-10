@@ -598,7 +598,6 @@
       "environment_waiting": "トークンの確認後に読み込まれます",
       "repo_count_other": "{{count}} 件のリポジトリ",
       "optional": "任意",
-      "auto_authorized": "GitHub 連携で自動承認済み",
       "execution_summary": "同時に最大 {{concurrency}} 件 · タイムアウト {{timeout}} 分"
     },
     "stop_confirm": {
@@ -631,9 +630,6 @@
       "save": "保存",
       "token_saved": "保存済み",
       "repositories_hint": "エージェントがクローンできるのは、ここで許可したリポジトリだけです。",
-      "github_app_auto_auth": "{{accounts}} 配下のリポジトリは、ワークスペースの GitHub 連携により自動的に承認されます。",
-      "github_app_auto_auth_hint": "実行ごとにそのリポジトリ限定・1 時間有効のトークンが発行されるため、手動での登録は不要です。",
-      "repositories_hint_override": "接続済みアカウントの範囲外のリポジトリや、承認を上書きしたい場合のみトークンを追加してください。",
       "repo_token_saved": "トークン保存済み",
       "repo_actions": "{{repo}} の操作",
       "replace_token": "トークンを差し替え",

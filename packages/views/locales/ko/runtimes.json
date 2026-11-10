@@ -598,7 +598,6 @@
       "environment_waiting": "토큰을 확인하면 불러옵니다",
       "repo_count_other": "저장소 {{count}}개",
       "optional": "선택 사항",
-      "auto_authorized": "GitHub 연동으로 자동 승인됨",
       "execution_summary": "동시에 최대 {{concurrency}}개 · 제한 시간 {{timeout}}분"
     },
     "stop_confirm": {
@@ -631,9 +630,6 @@
       "save": "저장",
       "token_saved": "저장됨",
       "repositories_hint": "에이전트는 여기서 승인한 저장소만 복제할 수 있습니다.",
-      "github_app_auto_auth": "{{accounts}} 소속 저장소는 워크스페이스 GitHub 연동으로 자동 승인됩니다.",
-      "github_app_auto_auth_hint": "실행 시 해당 저장소 전용 1시간 토큰이 자동 발급되므로 수동 등록이 필요 없습니다.",
-      "repositories_hint_override": "연결된 계정 범위 밖의 저장소나 승인을 덮어쓸 때만 토큰을 추가하세요.",
       "repo_token_saved": "토큰 저장됨",
       "repo_actions": "{{repo}} 작업",
       "replace_token": "토큰 교체",

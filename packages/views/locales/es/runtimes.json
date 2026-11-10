@@ -615,7 +615,6 @@
       "repo_count_one": "{{count}} repositorio",
       "repo_count_other": "{{count}} repositorios",
       "optional": "Opcional",
-      "auto_authorized": "Autorizado automáticamente vía integración de GitHub",
       "execution_summary": "Hasta {{concurrency}} a la vez · tiempo de espera de {{timeout}} min"
     },
     "stop_confirm": {
@@ -649,9 +648,6 @@
       "save": "Guardar",
       "token_saved": "Guardado",
       "repositories_hint": "Los agentes solo pueden clonar los repositorios autorizados aquí.",
-      "github_app_auto_auth": "Los repositorios de {{accounts}} se autorizan automáticamente mediante la integración de GitHub del espacio de trabajo.",
-      "github_app_auto_auth_hint": "Cada ejecución monta un token temporal de 1 hora limitado a ese único repositorio; no hace falta darlo de alta a mano.",
-      "repositories_hint_override": "Añade un token solo para repositorios fuera de las cuentas conectadas, o para anular su autorización.",
       "repo_token_saved": "Token guardado",
       "repo_actions": "Acciones para {{repo}}",
       "replace_token": "Sustituir token",

@@ -615,7 +615,6 @@
       "repo_count_one": "{{count}} dépôt",
       "repo_count_other": "{{count}} dépôts",
       "optional": "Facultatif",
-      "auto_authorized": "Autorisé automatiquement via l'intégration GitHub",
       "execution_summary": "Jusqu'à {{concurrency}} à la fois · délai de {{timeout}} min"
     },
     "stop_confirm": {
@@ -649,9 +648,6 @@
       "save": "Enregistrer",
       "token_saved": "Enregistré",
       "repositories_hint": "Les agents ne peuvent cloner que les dépôts autorisés ici.",
-      "github_app_auto_auth": "Les dépôts de {{accounts}} sont autorisés automatiquement via l'intégration GitHub de l'espace de travail.",
-      "github_app_auto_auth_hint": "Chaque exécution monte un jeton temporaire d'une heure limité à ce seul dépôt ; aucune saisie manuelle n'est nécessaire.",
-      "repositories_hint_override": "Ajoutez un jeton uniquement pour les dépôts hors des comptes connectés, ou pour remplacer leur autorisation.",
       "repo_token_saved": "Jeton enregistré",
       "repo_actions": "Actions pour {{repo}}",
       "replace_token": "Remplacer le jeton",
