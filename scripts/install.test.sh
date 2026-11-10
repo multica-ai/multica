@@ -350,8 +350,16 @@ STUB
   chmod +x "$stub_bin/docker"
 
   # git: the installer takes the "existing installation" path, so only the
-  # fetch/checkout calls run and they are all tolerant of failure.
-  printf '#!/usr/bin/env bash\nexit 0\n' >"$stub_bin/git"
+  # fetch/checkout calls run and they tolerate a failing remote. The installer
+  # still verifies that the checkout landed on the requested ref, so rev-parse
+  # has to answer consistently: HEAD and origin/main are the same commit here.
+  cat >"$stub_bin/git" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  rev-parse) printf '1111111111111111111111111111111111111111\n' ;;
+esac
+exit 0
+STUB
   chmod +x "$stub_bin/git"
 
   # brew: pretend the CLI installs cleanly so the run reaches the summary.
@@ -509,10 +517,84 @@ STUB
   fi
 }
 
+test_cli_lookup_failure_does_not_claim_up_to_date() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  _setup_server_sandbox "$tmp"
+  cp "$tmp/server/.env.example" "$tmp/server/.env"
+
+  # The curl stub answers nothing, so the latest release cannot be determined.
+  # The installed CLI still works: the installer must say so instead of the old
+  # "Multica CLI is up to date (<old version>)".
+  _run_with_server "$tmp" || return 1
+
+  if grep -q "is up to date" "$tmp/install.out"; then
+    echo "installer claimed the CLI was up to date without knowing the latest release" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+  if ! grep -q "Could not determine the latest Multica CLI release" "$tmp/install.out" "$tmp/install.err"; then
+    echo "expected an explicit note that the latest CLI release could not be determined" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+  if ! grep -q "Multica server is running and CLI is ready" "$tmp/install.out"; then
+    echo "installer should still finish successfully with the installed CLI" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+}
+
+test_with_server_fails_when_checkout_does_not_land() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  _setup_server_sandbox "$tmp"
+  cp "$tmp/server/.env.example" "$tmp/server/.env"
+
+  # Every git call "succeeds", but HEAD never becomes the requested main. The
+  # installer used to print "Repository ready" and continue against whatever
+  # commit happened to be checked out.
+  cat >"$tmp/stub-bin/git" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  rev-parse)
+    case "$*" in
+      *origin/main*) printf '2222222222222222222222222222222222222222\n' ;;
+      *) printf '3333333333333333333333333333333333333333\n' ;;
+    esac
+    ;;
+esac
+exit 0
+STUB
+  chmod +x "$tmp/stub-bin/git"
+
+  if _run_with_server "$tmp" >/dev/null 2>&1; then
+    echo "installer must not report success when the checkout did not land on the requested ref" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+  if ! grep -q "Could not check out" "$tmp/install.err"; then
+    echo "expected an explicit failure about the checkout" >&2
+    cat "$tmp/install.err" >&2 || true
+    return 1
+  fi
+  if grep -q "Repository ready" "$tmp/install.out"; then
+    echo "installer claimed the repository was ready despite a failed checkout" >&2
+    cat "$tmp/install.out" >&2 || true
+    return 1
+  fi
+}
+
 test_brew_install_failure_falls_back_to_release_binary
 test_brew_tap_failure_falls_back_to_release_binary
 test_remote_ssh_install_prints_token_login_hint
 test_local_install_does_not_print_token_login_hint
 test_with_server_uses_compose_published_ports
 test_with_server_fails_when_compose_port_is_unavailable
+test_with_server_fails_when_checkout_does_not_land
+test_cli_lookup_failure_does_not_claim_up_to_date
 echo "install.sh tests passed"
