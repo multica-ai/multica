@@ -41,6 +41,7 @@ import {
   FileVideo,
   ImageIcon,
   LayoutGrid,
+  Link2,
   ListTree,
   Loader2,
   Maximize2,
@@ -224,6 +225,15 @@ export interface PreviewLocateAction {
   onSelect: () => void;
 }
 
+/**
+ * Copy a link to the file on screen — labelled by the host, which knows what
+ * the link points at (for an issue deliverable, its newest version).
+ */
+export interface PreviewCopyLinkAction {
+  label: string;
+  onSelect: () => void;
+}
+
 /** The info panel beside the stage (MUL-7649). Its open state outlives the file. */
 export interface PreviewInfoPanel {
   content: ReactNode;
@@ -238,12 +248,19 @@ interface AttachmentPreviewModalProps {
   sequence?: PreviewSequence;
   /** Fired when the image kind fails to load — lets a gallery skip the frame. */
   onImageError?: () => void;
+  /**
+   * The image failed and the host is staying on it: show the failure on the
+   * stage (with a download) instead of a broken frame.
+   */
+  imageFailed?: boolean;
   /** Rendered after the file name, e.g. a version switcher. */
   titleAccessory?: ReactNode;
   /** Adds the info button and `I`. */
   info?: PreviewInfoPanel;
   /** Adds "show where this was posted": the caller closes the viewer and scrolls. */
   locate?: PreviewLocateAction;
+  /** Adds a "copy link" button for the file on screen. */
+  copyLink?: PreviewCopyLinkAction;
   /** Adds the overview button and `G`. */
   onOpenOverview?: () => void;
 }
@@ -417,9 +434,11 @@ export function AttachmentPreviewModal({
   onExitComplete,
   sequence,
   onImageError,
+  imageFailed,
   titleAccessory,
   info,
   locate,
+  copyLink,
   onOpenOverview,
 }: AttachmentPreviewModalProps & { onExitComplete?: () => void }) {
   const download = useDownloadAttachment();
@@ -592,10 +611,12 @@ export function AttachmentPreviewModal({
             onOpenInNewTab={canOpenInNewTab ? handleOpenInNewTab : undefined}
             sequence={sequence}
             onImageError={onImageError}
+            imageFailed={imageFailed}
             reduceMotion={shouldReduceMotion}
             titleAccessory={titleAccessory}
             info={info}
             locate={locate}
+            copyLink={copyLink}
             onOpenOverview={onOpenOverview}
             onHtmlAddressChange={handleHtmlAddressChange}
           />
@@ -681,10 +702,12 @@ function PreviewPanel({
   onOpenInNewTab,
   sequence,
   onImageError,
+  imageFailed,
   reduceMotion,
   titleAccessory,
   info,
   locate,
+  copyLink,
   onOpenOverview,
   renderHtmlFrame = renderViewerHtmlFrame,
   initialHtmlAddress = "",
@@ -699,10 +722,12 @@ function PreviewPanel({
   onOpenInNewTab?: () => void;
   sequence?: PreviewSequence;
   onImageError?: () => void;
+  imageFailed?: boolean;
   reduceMotion: boolean;
   titleAccessory?: ReactNode;
   info?: PreviewInfoPanel;
   locate?: PreviewLocateAction;
+  copyLink?: PreviewCopyLinkAction;
   onOpenOverview?: () => void;
   renderHtmlFrame?: HtmlFrameRenderer;
   /** Query and fragment an HTML file opens at. */
@@ -975,6 +1000,11 @@ function PreviewPanel({
               <MessageSquareText className="size-4" />
             </ChromeButton>
           )}
+          {copyLink && (
+            <ChromeButton label={copyLink.label} onClick={copyLink.onSelect}>
+              <Link2 className="size-4" />
+            </ChromeButton>
+          )}
           {onOpenInNewTab && (
             <ChromeButton
               label={t(($) => $.attachment.open_in_new_tab)}
@@ -1048,7 +1078,13 @@ function PreviewPanel({
               },
             }}
           >
-            {kind === "image" ? (
+            {kind === "image" && imageFailed ? (
+              <UnsupportedFallback
+                message={t(($) => $.attachment.preview_failed)}
+                onDownload={handleDownload}
+                downloading={downloading}
+              />
+            ) : kind === "image" ? (
               <ImagePreview
                 state={state}
                 mediaUrl={mediaUrl}
