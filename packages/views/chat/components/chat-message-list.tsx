@@ -44,7 +44,8 @@ import type {
 } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
 import { buildTimeline } from "../../common/task-transcript";
-import { traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
+import { readCommandInput, traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
+import { CommandDetailSurface } from "../../common/task-transcript/detail-surfaces";
 import { OnboardingStarterCards } from "./onboarding-starter-cards";
 import { TaskStatusPill } from "./task-status-pill";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
@@ -1330,6 +1331,7 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
       t(($) => $.transcript.patch_summary_more, { path, extra: extraCount }),
   });
   const hasInput = item.input && Object.keys(item.input).length > 0;
+  const command = useMemo(() => readCommandInput(item.input), [item.input]);
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -1346,9 +1348,17 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
       </CollapsibleTrigger>
       {hasInput && (
         <CollapsibleContent>
-          <pre className="ml-[18px] mt-0.5 max-h-32 overflow-auto rounded-xs bg-muted/50 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
-            {JSON.stringify(item.input, null, 2)}
-          </pre>
+          {command ? (
+            // The surface insets its code block by 12px; this lines the block
+            // and the params under it up with the 18px chevron gutter.
+            <div className="-mr-3 ml-1.5">
+              <CommandDetailSurface command={command.command} params={command.params} />
+            </div>
+          ) : (
+            <pre className="ml-[18px] mt-0.5 max-h-32 overflow-auto rounded-xs bg-muted/50 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
+              {JSON.stringify(item.input, null, 2)}
+            </pre>
+          )}
         </CollapsibleContent>
       )}
     </Collapsible>
