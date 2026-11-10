@@ -225,6 +225,7 @@ const POP = builtInTheme({
         ko: "시그널 색상",
         es: "Color de señal",
         fr: "Couleur signal",
+        ru: "Сигнальный цвет",
       },
       description: {
         en: "Primary buttons, selection and focus.",
@@ -234,19 +235,20 @@ const POP = builtInTheme({
         ko: "기본 버튼, 선택 항목, 포커스.",
         es: "Botones principales, selección y foco.",
         fr: "Boutons principaux, sélection et focus.",
+        ru: "Основные кнопки, выделение и фокус.",
       },
       default: "yellow",
       choices: [
-        { value: "yellow", label: { en: "Yellow", "zh-Hans": "黄", "zh-Hant": "黃", ja: "イエロー", ko: "노랑", es: "Amarillo", fr: "Jaune" }, swatch: POP_SIGNALS.yellow },
-        { value: "mint", label: { en: "Mint", "zh-Hans": "薄荷", "zh-Hant": "薄荷", ja: "ミント", ko: "민트", es: "Menta", fr: "Menthe" }, swatch: POP_SIGNALS.mint },
-        { value: "sky", label: { en: "Sky", "zh-Hans": "天蓝", "zh-Hant": "天藍", ja: "スカイ", ko: "하늘", es: "Cielo", fr: "Ciel" }, swatch: POP_SIGNALS.sky },
-        { value: "coral", label: { en: "Coral", "zh-Hans": "珊瑚", "zh-Hant": "珊瑚", ja: "コーラル", ko: "코랄", es: "Coral", fr: "Corail" }, swatch: POP_SIGNALS.coral },
+        { value: "yellow", label: { en: "Yellow", "zh-Hans": "黄", "zh-Hant": "黃", ja: "イエロー", ko: "노랑", es: "Amarillo", fr: "Jaune", ru: "Жёлтый" }, swatch: POP_SIGNALS.yellow },
+        { value: "mint", label: { en: "Mint", "zh-Hans": "薄荷", "zh-Hant": "薄荷", ja: "ミント", ko: "민트", es: "Menta", fr: "Menthe", ru: "Мятный" }, swatch: POP_SIGNALS.mint },
+        { value: "sky", label: { en: "Sky", "zh-Hans": "天蓝", "zh-Hant": "天藍", ja: "スカイ", ko: "하늘", es: "Cielo", fr: "Ciel", ru: "Небесный" }, swatch: POP_SIGNALS.sky },
+        { value: "coral", label: { en: "Coral", "zh-Hans": "珊瑚", "zh-Hant": "珊瑚", ja: "コーラル", ko: "코랄", es: "Coral", fr: "Corail", ru: "Коралловый" }, swatch: POP_SIGNALS.coral },
       ],
     },
     {
       id: "offset-shadow",
       type: "toggle",
-      label: { en: "Hard shadows", "zh-Hans": "硬投影", "zh-Hant": "硬投影", ja: "ハードシャドウ", ko: "하드 섀도", es: "Sombras duras", fr: "Ombres franches" },
+      label: { en: "Hard shadows", "zh-Hans": "硬投影", "zh-Hant": "硬投影", ja: "ハードシャドウ", ko: "하드 섀도", es: "Sombras duras", fr: "Ombres franches", ru: "Жёсткие тени" },
       description: {
         en: "Primary buttons lift onto a solid offset shadow on hover.",
         "zh-Hans": "悬停时主按钮浮起，露出实色投影。",
@@ -255,13 +257,14 @@ const POP = builtInTheme({
         ko: "마우스를 올리면 기본 버튼이 떠오르며 단색 그림자가 생깁니다.",
         es: "Los botones principales se elevan sobre una sombra sólida al pasar el cursor.",
         fr: "Les boutons principaux se soulèvent sur une ombre pleine au survol.",
+        ru: "При наведении основные кнопки приподнимаются над сплошной тенью.",
       },
       default: true,
     },
     {
       id: "status-blocks",
       type: "toggle",
-      label: { en: "Status blocks", "zh-Hans": "状态色块", "zh-Hant": "狀態色塊", ja: "ステータスブロック", ko: "상태 블록", es: "Bloques de estado", fr: "Blocs de statut" },
+      label: { en: "Status blocks", "zh-Hans": "状态色块", "zh-Hant": "狀態色塊", ja: "ステータスブロック", ko: "상태 블록", es: "Bloques de estado", fr: "Blocs de statut", ru: "Блоки статусов" },
       description: {
         en: "Group headers in issue lists fill with their status color.",
         "zh-Hans": "列表按状态分组时，分组标题整块填色。",
@@ -270,13 +273,14 @@ const POP = builtInTheme({
         ko: "이슈 목록의 그룹 제목을 상태 색으로 채웁니다.",
         es: "Los encabezados de grupo se rellenan con el color de su estado.",
         fr: "Les en-têtes de groupe prennent la couleur de leur statut.",
+        ru: "Заголовки групп окрашиваются в цвет своего статуса.",
       },
       default: true,
     },
     {
       id: "outlined-chips",
       type: "toggle",
-      label: { en: "Outlined labels", "zh-Hans": "标签描边", "zh-Hant": "標籤描邊", ja: "ラベルの枠線", ko: "라벨 테두리", es: "Etiquetas con contorno", fr: "Étiquettes contourées" },
+      label: { en: "Outlined labels", "zh-Hans": "标签描边", "zh-Hant": "標籤描邊", ja: "ラベルの枠線", ko: "라벨 테두리", es: "Etiquetas con contorno", fr: "Étiquettes contourées", ru: "Метки с обводкой" },
       description: {
         en: "Label chips get an ink outline.",
         "zh-Hans": "标签加一圈墨线。",
@@ -285,6 +289,7 @@ const POP = builtInTheme({
         ko: "라벨에 먹색 테두리를 둘러요.",
         es: "Las etiquetas llevan un contorno de tinta.",
         fr: "Les étiquettes reçoivent un contour encre.",
+        ru: "Метки получают чернильную обводку.",
       },
       default: true,
     },
@@ -759,7 +764,7 @@ const NOTION_SHARED: ThemeTokens = {
 const NOTION_PAGE_FONT = {
   id: "font-content-latin",
   type: "variable-select",
-  label: { en: "Page font", "zh-Hans": "页面字体", "zh-Hant": "頁面字體", ja: "ページのフォント", ko: "페이지 글꼴", es: "Fuente de página", fr: "Police de page" },
+  label: { en: "Page font", "zh-Hans": "页面字体", "zh-Hant": "頁面字體", ja: "ページのフォント", ko: "페이지 글꼴", es: "Fuente de página", fr: "Police de page", ru: "Шрифт страницы" },
   description: {
     en: "Descriptions, comments and chat. Your Content text font still wins.",
     "zh-Hans": "描述、评论和对话。你在「内容文字」里选的字体优先。",
@@ -768,12 +773,13 @@ const NOTION_PAGE_FONT = {
     ko: "설명, 댓글, 채팅. ‘콘텐츠 글자’에서 고른 글꼴이 우선합니다.",
     es: "Descripciones, comentarios y chat. Tu fuente de Texto del contenido tiene prioridad.",
     fr: "Descriptions, commentaires et chat. Votre police de Texte du contenu reste prioritaire.",
+    ru: "Описания, комментарии и чат. Ваш шрифт для текста содержимого имеет приоритет.",
   },
   default: "var(--font-ui)",
   choices: [
-    { value: "var(--font-ui)", label: { en: "Default", "zh-Hans": "默认", "zh-Hant": "預設", ja: "デフォルト", ko: "기본", es: "Predeterminada", fr: "Par défaut" } },
-    { value: "Lyon-Text, Georgia", label: { en: "Serif", "zh-Hans": "衬线", "zh-Hant": "襯線", ja: "セリフ", ko: "세리프", es: "Serif", fr: "Serif" } },
-    { value: "iawriter-mono, Nitti, Menlo, Courier", label: { en: "Mono", "zh-Hans": "等宽", "zh-Hant": "等寬", ja: "等幅", ko: "고정폭", es: "Monoespaciada", fr: "Mono" } },
+    { value: "var(--font-ui)", label: { en: "Default", "zh-Hans": "默认", "zh-Hant": "預設", ja: "デフォルト", ko: "기본", es: "Predeterminada", fr: "Par défaut", ru: "По умолчанию" } },
+    { value: "Lyon-Text, Georgia", label: { en: "Serif", "zh-Hans": "衬线", "zh-Hant": "襯線", ja: "セリフ", ko: "세리프", es: "Serif", fr: "Serif", ru: "С засечками" } },
+    { value: "iawriter-mono, Nitti, Menlo, Courier", label: { en: "Mono", "zh-Hans": "等宽", "zh-Hant": "等寬", ja: "等幅", ko: "고정폭", es: "Monoespaciada", fr: "Mono", ru: "Моноширинный" } },
   ],
 } as const;
 
