@@ -397,11 +397,35 @@ describe("AgentTranscriptDialog", () => {
     // The report is the narrative and renders whole; a tool call is a line
     // whose body waits in the inspector. This inversion is the redesign.
     expect(screen.getByTestId("rich-content")).toHaveTextContent("Agent hidden detail");
-    expect(screen.queryByText(/"command": "pnpm test"/)).not.toBeInTheDocument();
+    const commandBlock = () =>
+      Array.from(document.querySelectorAll("pre")).find((pre) => pre.textContent === "pnpm test");
+    expect(commandBlock()).toBeUndefined();
 
     fireEvent.click(screen.getByRole("button", { name: /pnpm test/ }));
 
-    expect(screen.getByText(/"command": "pnpm test"/)).toBeInTheDocument();
+    expect(commandBlock()).toBeDefined();
+  });
+
+  it("shows a command in a code block with its other arguments as JSON below", () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Bash",
+        input: { command: "pnpm test\npnpm lint", description: "Run checks" },
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Bash/ }));
+
+    // Bash highlighting splits the command into token spans, so match the
+    // block's whole text rather than a single text node.
+    const command = Array.from(document.querySelectorAll("pre")).find(
+      (pre) => pre.textContent === "pnpm test\npnpm lint",
+    );
+    expect(command?.parentElement).toHaveClass("bg-muted");
+    expect(screen.queryByText(/"command":/)).not.toBeInTheDocument();
+    expect(screen.getByText(/"description": "Run checks"/, { selector: "pre" })).toBeInTheDocument();
   });
 
   // Regression, #7125: a run of short prose steps under a long agent name put
