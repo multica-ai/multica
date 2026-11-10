@@ -1671,7 +1671,6 @@
       "brief_header": "이번 실행이 받은 워크플로 설명"
     },
     "detail": {
-      "follows_project": "(프로젝트 기준)",
       "card_title": "“{{workflow}}” · “{{project}}” 기준"
     },
     "list_separator": ", ",

@@ -1871,7 +1871,6 @@
       "brief_header": "Задание рабочего процесса, переданное этому запуску"
     },
     "detail": {
-      "follows_project": "(из проекта)",
       "card_title": "{{workflow}} · из {{project}}"
     },
     "list_separator": ", ",

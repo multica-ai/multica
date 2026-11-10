@@ -1671,7 +1671,6 @@
       "brief_header": "这次运行收到的工作流说明"
     },
     "detail": {
-      "follows_project": "（跟随项目）",
       "card_title": "「{{workflow}}」· 跟随项目「{{project}}」"
     },
     "list_separator": "、",

@@ -1671,7 +1671,6 @@
       "brief_header": "この実行が受け取ったワークフローの説明"
     },
     "detail": {
-      "follows_project": "（プロジェクトに従う）",
       "card_title": "「{{workflow}}」· プロジェクト「{{project}}」に従う"
     },
     "list_separator": "、",

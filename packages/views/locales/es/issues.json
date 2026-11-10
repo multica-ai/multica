@@ -1731,7 +1731,6 @@
       "brief_header": "El encargo del flujo de trabajo que recibió esta ejecución"
     },
     "detail": {
-      "follows_project": "(del proyecto)",
       "card_title": "{{workflow}} · de {{project}}"
     },
     "list_separator": ", ",
