@@ -796,8 +796,9 @@ describe("relation filters", () => {
     expect(ids({ relationFilters: ["assigned"] })).toEqual(["1"]);
     expect(ids({ relationFilters: ["my_agents"] })).toEqual(["2"]);
     expect(ids({ relationFilters: ["assigned", "my_agents"] })).toEqual(["1", "2"]);
-    // Issue 2 was created by agent a-1, not by the member u-1.
-    expect(ids({ relationFilters: ["created"] })).toEqual(["1", "4"]);
+    // Issue 2 was filed by agent a-1: only the server knows whether that was a
+    // quick-create for u-1, so the client keeps it either way round.
+    expect(ids({ relationFilters: ["created"] })).toEqual(["1", "2", "4"]);
   });
 
   it("can be negated", () => {

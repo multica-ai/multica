@@ -402,7 +402,11 @@ function issueMatchesRelation(
     case "assigned":
       return issue.assignee_type === "member" && issue.assignee_id === context.userId;
     case "created":
-      return issue.creator_type === "member" && issue.creator_id === context.userId;
+      if (issue.creator_type === "member") return issue.creator_id === context.userId;
+      // An agent-filed issue counts when it was quick-created for this member.
+      // That provenance lives on the server (the run that filed it), so leave
+      // the decision to the server rather than dropping the row (#4673).
+      return issue.creator_type === "agent" ? undefined : false;
     case "my_agents": {
       const ids =
         issue.assignee_type === "agent"

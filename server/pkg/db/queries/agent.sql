@@ -2616,9 +2616,24 @@ WHERE a.workspace_id = $1
             AND i.assignee_id = @member_id::uuid
           )
           OR (
+            -- Same meaning as the issue table's "created" relation: filed by
+            -- the member, or quick-created for them by a run they started
+            -- directly (#4673).
             @mine_relation::text IN ('created', 'any')
-            AND i.creator_type = 'member'
-            AND i.creator_id = @member_id::uuid
+            AND (
+              (i.creator_type = 'member' AND i.creator_id = @member_id::uuid)
+              OR (
+                i.creator_type = 'agent'
+                AND i.origin_type = 'quick_create'
+                AND EXISTS (
+                  SELECT 1
+                  FROM agent_task_queue origin_task
+                  WHERE origin_task.id = i.origin_id
+                    AND origin_task.originator_user_id = @member_id::uuid
+                    AND origin_task.originator_source = 'direct_human'
+                )
+              )
+            )
           )
           OR (
             @mine_relation::text IN ('involved', 'any')
