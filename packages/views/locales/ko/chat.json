@@ -50,6 +50,8 @@
     "action_failed_toast": "대기 중인 메시지를 업데이트하지 못했습니다"
   },
   "message_list": {
+    "jump_to_latest": "최신으로 이동",
+    "new_reply": "새 답장",
     "show_details": "세부 정보 보기",
     "replied_in": "{{elapsed}} 만에 답변",
     "failed_after": "{{elapsed}} 후 실패",

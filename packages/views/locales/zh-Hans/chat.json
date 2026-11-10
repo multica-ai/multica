@@ -50,6 +50,8 @@
     "action_failed_toast": "无法更新排队消息"
   },
   "message_list": {
+    "jump_to_latest": "跳到最新",
+    "new_reply": "新回复",
     "show_details": "查看详情",
     "replied_in": "{{elapsed}} 内回复",
     "failed_after": "{{elapsed}} 后失败",
