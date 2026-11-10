@@ -209,7 +209,7 @@
     },
     "theme": {
       "title": "테마",
-      "description": "앱 전체의 색상, 테두리, 그림자, 모서리. 테마 파일을 가져와 더 추가할 수 있어요.",
+      "description": "앱 전체의 색상, 테두리, 그림자, 모서리.",
       "default": "기본",
       "pop": "팝",
       "built_in": "기본 제공",
@@ -238,7 +238,6 @@
       "close": "닫기",
       "has_options_other": "옵션 {{count}}개",
       "has_assets_other": "글꼴·이미지 {{count}}개",
-      "menu_label": "사용자 테마",
       "beta": "베타",
       "beta_note": "사용자 테마는 베타예요. 테마가 쓰는 변수와 매니페스트가 바뀔 수 있어 테마를 업데이트해야 할 수도 있어요."
     },

@@ -209,7 +209,7 @@
     },
     "theme": {
       "title": "主题",
-      "description": "全局的颜色、边框、阴影和圆角。可以导入主题文件添加更多主题。",
+      "description": "全局的颜色、边框、阴影和圆角。",
       "default": "默认",
       "pop": "波普",
       "built_in": "内置",
@@ -238,7 +238,6 @@
       "close": "关闭",
       "has_options_other": "{{count}} 个选项",
       "has_assets_other": "{{count}} 个字体和图片",
-      "menu_label": "自定义主题",
       "beta": "Beta",
       "beta_note": "自定义主题处于 Beta 阶段。主题用到的变量和清单可能会变，主题可能需要更新。"
     },

@@ -193,7 +193,7 @@
     },
     "theme": {
       "title": "Tema",
-      "description": "Colores, bordes, sombras y esquinas de toda la app. Importa un archivo de tema para añadir más.",
+      "description": "Colores, bordes, sombras y esquinas de toda la app.",
       "default": "Predeterminado",
       "pop": "Pop",
       "built_in": "Integrados",
@@ -224,7 +224,6 @@
       "has_options_other": "{{count}} opciones",
       "has_assets_one": "{{count}} fuente o imagen",
       "has_assets_other": "{{count}} fuentes e imágenes",
-      "menu_label": "Temas personalizados",
       "beta": "Beta",
       "beta_note": "Los temas personalizados están en beta. Las variables y el manifiesto que usa un tema pueden cambiar, y puede que haya que actualizarlo."
     },

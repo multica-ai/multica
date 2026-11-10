@@ -174,8 +174,9 @@ describe("AppearanceTab", () => {
     const user = userEvent.setup();
     render(<AppearanceTab />, { wrapper: Wrapper });
 
-    await user.click(screen.getByRole("button", { name: "Import theme" }));
+    await user.click(screen.getByRole("button", { name: "More theme actions" }));
     expect(await screen.findByRole("menuitem", { name: "Theme file (.zip)" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /^Remove/ })).toBeNull();
     await user.keyboard("{Escape}");
     const options = [
       { id: "reading", type: "heading", label: "Reading" },
@@ -196,7 +197,8 @@ describe("AppearanceTab", () => {
     expect(await screen.findByText("Installed")).toBeInTheDocument();
     await user.keyboard("{Escape}");
 
-    await user.click(screen.getByRole("button", { name: "Remove Paper" }));
+    await user.click(screen.getByRole("button", { name: "More theme actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Remove Paper" }));
     expect(useInstalledThemesStore.getState().themes).toEqual([]);
     expect(state().theme).toBe("default");
   });
@@ -267,7 +269,6 @@ describe("AppearanceTab", () => {
       useAppearanceStore.setState({ theme: "paper" });
       render(<AppearanceTab />, { wrapper: Wrapper });
 
-      expect(screen.queryByRole("button", { name: "Remove Paper" })).toBeNull();
       expect(screen.getByText(/Some themes in the themes folder don't pass the checks/)).toBeInTheDocument();
       expect(screen.getByText("theme.css line 2: @import is not allowed")).toBeInTheDocument();
 
@@ -276,6 +277,7 @@ describe("AppearanceTab", () => {
       await user.keyboard("{Escape}");
 
       await user.click(screen.getByRole("button", { name: "More theme actions" }));
+      expect(screen.queryByRole("menuitem", { name: "Remove Paper" })).toBeNull();
       await user.click(await screen.findByRole("menuitem", { name: "Open themes folder" }));
       expect(desktop.openThemeFolder).toHaveBeenCalledWith();
     });

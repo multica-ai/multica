@@ -209,7 +209,7 @@
     },
     "theme": {
       "title": "主題",
-      "description": "全域的顏色、邊框、陰影和圓角。可以匯入主題檔案加入更多主題。",
+      "description": "全域的顏色、邊框、陰影和圓角。",
       "default": "預設",
       "pop": "普普",
       "built_in": "內建",
@@ -238,7 +238,6 @@
       "close": "關閉",
       "has_options_other": "{{count}} 個選項",
       "has_assets_other": "{{count}} 個字型和圖片",
-      "menu_label": "自訂主題",
       "beta": "Beta",
       "beta_note": "自訂主題處於 Beta 階段。主題用到的變數和清單可能會變，主題可能需要更新。"
     },

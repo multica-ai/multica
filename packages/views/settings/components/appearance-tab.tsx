@@ -7,6 +7,8 @@ import {
   BookOpen,
   Copy,
   Ellipsis,
+  FileArchive,
+  FolderInput,
   FolderOpen,
   Monitor,
   Moon,
@@ -14,7 +16,6 @@ import {
   Sun,
   Trash2,
   TriangleAlert,
-  Upload,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { Badge } from "@multica/ui/components/ui/badge";
@@ -212,6 +213,7 @@ function ColorSection() {
   const fromFolder = installed.filter((manifest) => manifest.id in folders);
   const selected = [...BUILT_IN_THEMES, ...installed].find((manifest) => manifest.id === theme);
   const selectedInstalled = imported.find((manifest) => manifest.id === theme);
+  const importer = useThemeImport();
   const items = [...BUILT_IN_THEMES, ...installed].map((manifest) => ({
     value: manifest.id,
     label: themeLabelFor(manifest),
@@ -248,21 +250,6 @@ function ColorSection() {
         </SettingsRow>
         <SettingsRow label={themeLabel} description={t(($) => $.appearance.theme.description)} anchor="theme">
           <div className="flex items-center gap-2">
-            {selectedInstalled ? (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="text-muted-foreground"
-                aria-label={t(($) => $.appearance.theme.remove, { name: selectedInstalled.name })}
-                title={t(($) => $.appearance.theme.remove, { name: selectedInstalled.name })}
-                onClick={() => {
-                  set({ theme: "default" });
-                  uninstall(selectedInstalled.id);
-                }}
-              >
-                <Trash2 />
-              </Button>
-            ) : null}
             <Select
               items={items}
               value={selected ? theme : "default"}
@@ -306,8 +293,16 @@ function ColorSection() {
               </SelectContent>
             </Select>
             <ThemeStoreButton />
-            <ImportThemeButton />
-            <ThemeToolsMenu theme={activeTheme({ theme }, safeMode.active)} />
+            <ThemeToolsMenu
+              theme={activeTheme({ theme }, safeMode.active)}
+              importer={importer}
+              removable={selectedInstalled}
+              onRemove={(removed) => {
+                set({ theme: "default" });
+                uninstall(removed.id);
+              }}
+            />
+            {importer.element}
           </div>
         </SettingsRow>
         {folderProblems.length > 0 ? (
@@ -341,12 +336,19 @@ function ColorSection() {
   );
 }
 
+interface ThemeImport {
+  chooseZip: () => void;
+  chooseFolder: () => void;
+  /** The file pickers and the confirm and error dialogs; render it once. */
+  element: React.ReactNode;
+}
+
 /**
  * Reads a theme from a .zip or a folder, shows what it is and that it can
  * restyle every page, and installs it on confirmation. Problems are listed
  * as the checks report them, which is what someone writing a theme needs.
  */
-function ImportThemeButton() {
+function useThemeImport(): ThemeImport {
   const { t } = useT("settings");
   const zipRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
@@ -400,28 +402,8 @@ function ImportThemeButton() {
   const assetCount = pending ? Object.keys(pending.assets ?? {}).length : 0;
   const optionCount = pending?.options?.filter((option) => option.type !== "heading").length ?? 0;
 
-  return (
+  const element = (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
-          <Upload />
-          {t(($) => $.appearance.import.button)}
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuGroup>
-            <DropdownMenuLabel className="flex items-center gap-2">
-              {t(($) => $.appearance.import.menu_label)}
-              <Badge variant="secondary">{t(($) => $.appearance.import.beta)}</Badge>
-            </DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => zipRef.current?.click()}>
-              {t(($) => $.appearance.import.from_zip)}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => folderRef.current?.click()}>
-              {t(($) => $.appearance.import.from_folder)}
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
       {picker(zipRef, { accept: ".zip,application/zip", "aria-label": t(($) => $.appearance.import.from_zip) })}
       {picker(folderRef, { multiple: true, "aria-label": t(($) => $.appearance.import.from_folder) })}
       <AlertDialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
@@ -488,6 +470,7 @@ function ImportThemeButton() {
       </AlertDialog>
     </>
   );
+  return { chooseZip: () => zipRef.current?.click(), chooseFolder: () => folderRef.current?.click(), element };
 }
 
 const THEME_GUIDE_URL = "https://github.com/multica-ai/multica/blob/main/docs/theming.md";
@@ -502,12 +485,23 @@ function downloadFile(data: Uint8Array<ArrayBuffer>, name: string, type: string)
 }
 
 /**
- * Tools for writing a theme: duplicate the active theme as a starting point
- * and, on Desktop, open the themes folder. On Desktop the copy is written
- * into the themes folder, applied, and edits to it apply as they are saved;
- * on web it downloads as a .zip to edit and import.
+ * Everything else about themes: import one, duplicate the active theme as a
+ * starting point, on Desktop open the themes folder, and remove the selected
+ * installed theme. On Desktop the copy is written into the themes folder,
+ * applied, and edits to it apply as they are saved; on web it downloads as a
+ * .zip to edit and import.
  */
-function ThemeToolsMenu({ theme }: { theme: Theme }) {
+function ThemeToolsMenu({
+  theme,
+  importer,
+  removable,
+  onRemove,
+}: {
+  theme: Theme;
+  importer: ThemeImport;
+  removable: Theme | undefined;
+  onRemove: (theme: Theme) => void;
+}) {
   const { t } = useT("settings");
   const themeLabelFor = useThemeLabel();
   const install = useInstalledThemesStore((s) => s.install);
@@ -554,6 +548,21 @@ function ThemeToolsMenu({ theme }: { theme: Theme }) {
         <Ellipsis />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-56">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="flex items-center gap-2">
+            {t(($) => $.appearance.import.button)}
+            <Badge variant="secondary">{t(($) => $.appearance.import.beta)}</Badge>
+          </DropdownMenuLabel>
+          <DropdownMenuItem onClick={importer.chooseZip}>
+            <FileArchive />
+            {t(($) => $.appearance.import.from_zip)}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={importer.chooseFolder}>
+            <FolderInput />
+            {t(($) => $.appearance.import.from_folder)}
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => void duplicate()}>
           <Copy />
           {t(($) => $.appearance.tools.duplicate, { name: themeLabelFor(theme) })}
@@ -569,6 +578,15 @@ function ThemeToolsMenu({ theme }: { theme: Theme }) {
           <BookOpen />
           {t(($) => $.appearance.tools.guide)}
         </DropdownMenuItem>
+        {removable ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onClick={() => onRemove(removable)}>
+              <Trash2 />
+              {t(($) => $.appearance.theme.remove, { name: removable.name })}
+            </DropdownMenuItem>
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );

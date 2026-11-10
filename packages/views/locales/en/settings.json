@@ -211,7 +211,7 @@
     },
     "theme": {
       "title": "Theme",
-      "description": "Colors, borders, shadows and corners across the app. Import a theme file to add more.",
+      "description": "Colors, borders, shadows and corners across the app.",
       "default": "Default",
       "pop": "Pop",
       "built_in": "Built in",
@@ -242,7 +242,6 @@
       "has_options_other": "{{count}} options",
       "has_assets_one": "{{count}} font or image",
       "has_assets_other": "{{count}} fonts and images",
-      "menu_label": "Custom themes",
       "beta": "Beta",
       "beta_note": "Custom themes are in beta. The variables and manifest a theme uses may change, and a theme may need updating."
     },

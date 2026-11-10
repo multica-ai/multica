@@ -211,7 +211,7 @@
     },
     "theme": {
       "title": "Thème",
-      "description": "Couleurs, bordures, ombres et coins de toute l’app. Importez un fichier de thème pour en ajouter.",
+      "description": "Couleurs, bordures, ombres et coins de toute l’app.",
       "default": "Par défaut",
       "pop": "Pop",
       "built_in": "Intégrés",
@@ -242,7 +242,6 @@
       "has_options_other": "{{count}} options",
       "has_assets_one": "{{count}} police ou image",
       "has_assets_other": "{{count}} polices et images",
-      "menu_label": "Thèmes personnalisés",
       "beta": "Bêta",
       "beta_note": "Les thèmes personnalisés sont en bêta. Les variables et le manifeste qu’un thème utilise peuvent changer, et le thème devra peut-être être mis à jour."
     },
