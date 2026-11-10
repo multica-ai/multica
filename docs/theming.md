@@ -274,8 +274,8 @@ the copy unchanged looks exactly like the original.
 
 ### On Desktop: the themes folder
 
-Desktop keeps a `themes` folder in its user data folder. **Open themes
-folder** in the same menu shows it. Every folder (or `.zip`) in it is
+Desktop keeps a `themes` folder in its user data folder. The **Open themes
+folder** button next to **Import theme** shows it. Every folder (or `.zip`) in it is
 installed when the app starts and listed under **Themes folder** in the
 picker. Save a file in it and every open window picks the change up within
 about a second, so edit `theme.css` in any editor and watch the app.
