@@ -14,7 +14,6 @@
       "created": "Ngày tạo"
     },
     "last_run_empty": "--",
-    "empty": {},
     "no_matches": "Không có autopilot nào khớp",
     "retry": "Thử lại"
   },
@@ -62,6 +61,8 @@
   },
   "detail": {
     "not_found": "Không tìm thấy autopilot",
+    "not_found_description": "Có thể nó đã bị xóa hoặc bạn không có quyền truy cập.",
+    "back_to_list": "Tất cả autopilot",
     "pause_aria": "Tạm dừng autopilot",
     "activate_aria": "Kích hoạt autopilot",
     "paused_runtime_required": "Đã tạm dừng vì người được giao đã mất runtime. Hãy gắn một runtime, rồi kích hoạt lại autopilot này.",
@@ -92,6 +93,16 @@
     "field_prompt": "Prompt",
     "field_subscribers": "Người theo dõi",
     "field_subscribers_none": "Không có",
+    "no_prompt": "Chưa có prompt nào.",
+    "copy_link": "Sao chép liên kết",
+    "link_copied": "Đã sao chép liên kết",
+    "link_copy_failed": "Không sao chép được liên kết",
+    "open_project": "Mở dự án",
+    "summary": {
+      "create_issue": "{{agent}} tạo một công việc mỗi lần chạy",
+      "run_only": "{{agent}} chỉ chạy mà không tạo công việc",
+      "with_trigger": "{{trigger}} · {{action}}"
+    },
     "add_trigger": "Thêm trigger",
     "no_triggers": "Chưa cấu hình trigger nào. Thêm lịch để chạy tự động.",
     "no_runs": "Chưa có lần chạy nào. Nhấn \"Chạy ngay\" để kích hoạt thủ công.",
@@ -104,18 +115,6 @@
       "cancel": "Hủy",
       "confirm": "Xóa",
       "deleting": "Đang xóa..."
-    },
-    "not_found_description": "Có thể nó đã bị xóa hoặc bạn không có quyền truy cập.",
-    "back_to_list": "Tất cả autopilot",
-    "no_prompt": "Chưa có prompt nào.",
-    "copy_link": "Sao chép liên kết",
-    "link_copied": "Đã sao chép liên kết",
-    "link_copy_failed": "Không sao chép được liên kết",
-    "open_project": "Mở dự án",
-    "summary": {
-      "create_issue": "{{agent}} tạo một công việc mỗi lần chạy",
-      "run_only": "{{agent}} chỉ chạy mà không tạo công việc",
-      "with_trigger": "{{trigger}} · {{action}}"
     }
   },
   "access": {
@@ -148,6 +147,8 @@
   "run": {
     "issue_linked": "Đã liên kết công việc",
     "view_log": "Xem nhật ký thực thi",
+    "stop": "Dừng lượt chạy",
+    "stop_failed": "Không dừng được lượt chạy.",
     "skipped_group": {
       "label": "Đã bỏ qua",
       "summary": "{{count}} lần chạy bị bỏ qua"
@@ -542,6 +543,25 @@
         "reply": "\"PR đã merge. Đang cập nhật docs và đóng công việc.\"",
         "event_examples": "PR đã merge, bình luận mới"
       }
+    },
+    "defaults": {
+      "title": "Khi các công việc con hoàn thành",
+      "description": "Đánh thức người được giao của công việc cha khi một giai đoạn hoàn thành và có giai đoạn sau đang chờ, và một lần nữa khi mọi công việc con đã đóng. Nếu người được giao là thành viên thì nhận thông báo trong Hộp thư đến.",
+      "badge": "Mặc định của không gian làm việc",
+      "enabled": "Bật theo mặc định",
+      "instruction": "Hướng dẫn mặc định",
+      "instruction_hint": "Gửi cho agent được đánh thức. Để trống để dùng hướng dẫn tích hợp bên dưới.",
+      "instruction_placeholder": "Để trống để dùng hướng dẫn tích hợp",
+      "builtin": "Hướng dẫn tích hợp",
+      "instruction_invalid": "Giữ hướng dẫn trong giới hạn 4.000 byte.",
+      "save": "Lưu",
+      "saving": "Đang lưu…",
+      "save_error": "Không lưu được mặc định.",
+      "customized_other": "{{count}} công việc đang mở có cài đặt riêng và bỏ qua mặc định này.",
+      "admin_only": "Chỉ chủ sở hữu và quản trị viên mới thay đổi được các mặc định này.",
+      "load_error": "Không tải được mặc định wakeup.",
+      "edit_instruction": "Sửa hướng dẫn mặc định",
+      "view_instruction": "Xem hướng dẫn mặc định"
     }
   },
   "intro": {

@@ -2,12 +2,12 @@
   "page": {
     "title": "Agent",
     "new_agent": "Agent mới",
+    "search": "Tìm kiếm agent",
     "show_archived": "Hiện đã lưu trữ ({{count}}) →",
     "of_total": "{{visible}} / {{total}}",
     "list_load_failed": "Không tải được agent",
     "list_load_failed_default": "Đã xảy ra lỗi khi lấy danh sách agent.",
     "try_again": "Thử lại",
-    "search": "Tìm kiếm agent",
     "scope_title": {
       "mine": "Agent của tôi",
       "all": "Tất cả agent",
@@ -56,21 +56,13 @@
   },
   "no_matches": {
     "title": "Không có kết quả phù hợp",
-    "search_archived": "Không có agent đã lưu trữ nào khớp với \"{{query}}\".",
-    "no_archived": "Chưa có agent đã lưu trữ nào.",
     "search_active": "Không có agent nào khớp với \"{{query}}\".",
     "search_active_filtered": "Không có agent nào khớp với \"{{query}}\" trong bộ lọc này.",
+    "no_archived": "Chưa có agent đã lưu trữ nào.",
+    "search_archived": "Không có agent đã lưu trữ nào khớp với \"{{query}}\".",
     "no_filter_match": "Không có agent nào khớp với bộ lọc này.",
     "search_runtime_filtered": "Không có agent nào trên \"{{machine}}\" khớp với \"{{query}}\".",
     "runtime_filtered": "Không có agent nào trên \"{{machine}}\"."
-  },
-  "runtime_filter": {
-    "all": "Tất cả runtime",
-    "section_local": "Cục bộ",
-    "section_remote": "Từ xa",
-    "section_cloud": "Đám mây",
-    "agent_count_other": "{{count}} agent",
-    "empty": "Chưa có máy nào"
   },
   "columns": {
     "agent": "Agent",
@@ -199,19 +191,29 @@
     "rename_required": "Tên là bắt buộc",
     "edit_description_title": "Chỉnh sửa mô tả",
     "description_placeholder": "Agent này làm gì?",
-    "save": "Lưu",
     "cancel": "Hủy"
   },
   "overview": {
     "attention_title": "Các lượt chạy cần chú ý",
     "attention_queued_other": "{{count}} lượt chạy đang chờ trong khi runtime không khả dụng."
   },
-  "skill_attach": {
-    "trigger_aria": "Gắn skill của không gian làm việc",
-    "trigger_label": "Gắn"
+  "sections": {
+    "runs_count_other": "{{count}} lần chạy",
+    "recent_this_week_other": "{{count}} trong tuần này",
+    "view_all": "Xem tất cả",
+    "open": "Mở",
+    "edit": "Sửa",
+    "add": "Thêm",
+    "manage": "Quản lý",
+    "instructions_empty": "Chưa có hướng dẫn nào."
+  },
+  "panel": {
+    "status": "Trạng thái",
+    "runs_7d": "Lần chạy (7 ngày)",
+    "edit_access_aria": "Quyền truy cập: {{value}}. Đổi quyền truy cập",
+    "all_settings": "Tất cả cài đặt"
   },
   "pickers": {
-    "concurrency_tooltip": "Đồng thời · tối đa {{value}} lượt chạy đồng thời",
     "concurrency_range": "Số lượt chạy đồng thời tối đa ({{min}}–{{max}})",
     "runtime_none": "Không có runtime",
     "runtime_tooltip": "Runtime · {{name}} · {{status}}",
@@ -287,13 +289,8 @@
     "duplicate_title": "Nhân bản {{name}}",
     "step_ai": "Xây dựng qua trò chuyện",
     "modes": {
-      "template": {
-        "title": "Dùng mẫu",
-        "description": "Bắt đầu từ hướng dẫn và các skill có sẵn, rồi tùy chỉnh mọi chi tiết cho không gian làm việc của bạn."
-      },
       "ai": {
-        "title": "Xây dựng bằng AI",
-        "description": "Tạo cấu hình có thể chỉnh sửa thông qua trò chuyện."
+        "title": "Xây dựng bằng AI"
       }
     },
     "sections": {
@@ -321,10 +318,6 @@
       }
     },
     "builder": {
-      "setup_title": "Chọn runtime cho Agent Builder",
-      "setup_description": "Runtime này hỗ trợ quá trình thiết lập và là mặc định cho agent mới.",
-      "start": "Bắt đầu trò chuyện",
-      "connect_runtime": "Kết nối runtime",
       "draft_parse_failed": "Không thể điền bản trả lời này vào biểu mẫu. Hãy yêu cầu trợ lý tạo lại bản nháp, hoặc tự điền thủ công.",
       "start_failed": "Không bắt đầu được Agent Builder.",
       "send_failed": "Không gửi được tin nhắn của bạn.",
@@ -332,6 +325,7 @@
       "switch_runtime_failed": "Không chuyển được runtime. Cuộc trò chuyện vẫn chạy trên runtime trước đó.",
       "switch_runtime_pending": "Hãy dừng bản trả lời hiện tại để chuyển runtime.",
       "switch_runtime_success": "Đã chuyển runtime. Bản nháp của bạn được giữ lại và cuộc trò chuyện tiếp tục trên runtime mới với phiên model mới.",
+      "conversation_tab": "Trò chuyện",
       "chat_title": "Agent Builder",
       "runtime_online": "Runtime trực tuyến",
       "runtime_offline": "Runtime ngoại tuyến",
@@ -342,8 +336,7 @@
       "prompt_assistant": "Giúp nhóm của chúng tôi lên kế hoạch và viết dự án",
       "thinking": "Đang cập nhật bản nháp…",
       "placeholder": "Mô tả agent bạn cần…",
-      "send": "Gửi tin nhắn",
-      "conversation_tab": "Trò chuyện"
+      "send": "Gửi tin nhắn"
     },
     "live_draft": "Cấu hình agent",
     "live_draft_hint": "Bạn có thể chỉnh sửa trực tiếp bản nháp.",
@@ -432,23 +425,17 @@
     }
   },
   "create_dialog": {
-    "title_create": "Tạo Agent",
-    "title_duplicate": "Nhân bản Agent",
-    "description_duplicate": "Tạo agent mới dựa trên \"{{name}}\". Hướng dẫn, biến môi trường và skill được sao chép sẵn cho bạn.",
     "name_label": "Tên",
     "name_placeholder": "ví dụ: Deep Research Agent",
     "description_label": "Mô tả",
     "description_placeholder": "Agent này làm gì?",
-    "visibility_label": "Mức hiển thị",
     "access": {
-      "label": "Quyền truy cập",
       "private_title": "Riêng tư",
       "private_desc": "Chỉ bạn mới chạy được agent này",
       "public_title": "Công khai",
       "public_desc": "Chọn người có thể chạy agent này",
       "public_workspace_option": "Mọi người trong không gian làm việc này",
       "public_members_group": "Người cụ thể",
-      "public_members_empty": "Không có thành viên nào trong không gian làm việc để chọn",
       "public_targets_empty_hint": "Hãy chọn ít nhất một tùy chọn bên dưới — nếu không agent sẽ ở trạng thái riêng tư."
     },
     "runtime_label": "Runtime",
@@ -463,17 +450,10 @@
     "runtime_no_results": "Không có máy phù hợp",
     "runtime_group_online": "{{online}}/{{total}} trực tuyến",
     "duplicate_copy_suffix": " (Bản sao)",
-    "create": "Tạo",
-    "creating": "Đang tạo...",
-    "cancel": "Hủy",
-    "create_failed_toast": "Tạo agent thất bại",
     "skill_attach_failed_toast": "Đã tạo agent, nhưng gắn skill thất bại: {{error}}",
     "squad_join_failed_toast": "Agent \"{{name}}\" đã được tạo nhưng không tham gia được squad: {{error}}. Bạn có thể thêm thủ công từ mục Thành viên.",
     "instructions": {
       "label": "Hướng dẫn",
-      "placeholder_blank": "Nhấn để viết hướng dẫn…",
-      "placeholder_duplicate": "Nhấn để xem hoặc sửa hướng dẫn đã nhân bản",
-      "collapse": "Thu gọn",
       "editor_placeholder": "Viết những gì agent này nên làm, nên tập trung vào điều gì, nên tránh điều gì…"
     },
     "skills_section": {
@@ -550,6 +530,7 @@
       "bulk_placeholder": "API_KEY=value\nBASE_URL=https://example.com",
       "bulk_plaintext_notice": "Giá trị hiển thị dạng văn bản thuần khi sửa hàng loạt.",
       "bulk_unsupported_toast": "\"{{key}}\" không thể hiển thị dạng văn bản — hãy sửa nó theo hàng",
+      "bulk_invalid_key_toast": "Văn bản hàng loạt chỉ hỗ trợ tên dạng API_KEY — hãy sửa \"{{key}}\" theo hàng",
       "parse_error_malformed": "Dòng {{line}} không phải là phép gán KEY=value",
       "parse_error_duplicate": "Khóa \"{{key}}\" bị trùng ở dòng {{line}}",
       "paste_invalid_toast": "Không phân tích được các biến môi trường đã dán",
@@ -687,26 +668,13 @@
       "redacted_hint": "Chỉ chủ sở hữu của agent hoặc quản trị viên của không gian làm việc mới đọc được cấu hình này.",
       "dialog_json_help": "Chỉnh sửa toàn bộ cấu hình máy chủ dưới dạng JSON."
     },
-    "composio_mcp": {
-      "subtitle": "Đánh dấu một bộ công cụ để agent này gắn nó làm máy chủ MCP — nhưng chỉ khi bạn (người tạo ra nó) là người kích hoạt lượt chạy, trực tiếp hoặc qua chuỗi agent con.",
-      "loading": "Đang tải các kết nối của bạn…",
-      "load_failed": "Không tải được các ứng dụng đã kết nối của bạn. Hãy thử lại sau giây lát.",
-      "empty_title": "Chưa có ứng dụng đã kết nối nào",
-      "empty_link_to_settings": "Kết nối một ứng dụng trong Cài đặt → Tích hợp",
-      "connected": "Đã kết nối",
-      "toggle_aria": "Cho phép {{toolkit}} cho agent này",
-      "saving": "Đang lưu…",
-      "save_failed_toast": "Không lưu được — hãy thử lại",
-      "redacted_title": "Đã cấu hình — ẩn khỏi tầm nhìn của bạn",
-      "redacted_hint": "Chỉ người tạo agent mới xem hoặc thay đổi được những ứng dụng nó được phép dùng.",
-      "shared_warning": "Agent này được chia sẻ. Những người có thể chạy agent này có thể dùng các ứng dụng Composio bạn bật ở đây. Hãy dùng Riêng tư hoặc thu hẹp danh sách truy cập nếu các ứng dụng này để lộ dữ liệu nhạy cảm.",
-      "workspace_warning": "Công khai với không gian làm việc: mọi thành viên đều có thể dùng các ứng dụng Composio này thông qua agent này.",
-      "open_settings": "Mở cài đặt"
-    },
     "runtime_config": {
       "mode_label": "Chế độ định tuyến",
       "mode_local": "Cục bộ",
       "mode_gateway": "Gateway",
+      "model_override_label": "Ghi đè model nền",
+      "model_override_hint": "Áp dụng cho mọi lần chạy mà agent này nhận cho tới khi thay đổi hoặc xoá. Xoá sẽ dùng model gắn với OpenClaw agent đã chọn; danh tính của nó giữ nguyên.",
+      "model_override_placeholder": "openrouter/@preset/agent-reasoning",
       "mode_local_hint": "Chạy trên máy tính này.",
       "mode_gateway_hint": "Daemon quay số tới một OpenClaw Gateway. Để trống các trường endpoint để kế thừa chúng từ `~/.openclaw/openclaw.json` trên máy chủ của daemon.",
       "gateway_legend": "Endpoint của gateway",
@@ -720,10 +688,7 @@
       "tls_label": "Dùng TLS",
       "tls_hint": "Quay số qua https:// thay vì http://",
       "saved_toast": "Đã lưu cấu hình định tuyến",
-      "save_failed_toast": "Lưu cấu hình định tuyến thất bại",
-      "model_override_label": "Ghi đè model nền",
-      "model_override_hint": "Áp dụng cho mọi lần chạy mà agent này nhận cho tới khi thay đổi hoặc xoá. Xoá sẽ dùng model gắn với OpenClaw agent đã chọn; danh tính của nó giữ nguyên.",
-      "model_override_placeholder": "openrouter/@preset/agent-reasoning"
+      "save_failed_toast": "Lưu cấu hình định tuyến thất bại"
     },
     "skills": {
       "assigned_title": "Đã gán cho agent",
@@ -815,6 +780,27 @@
       "started_prefix": "Bắt đầu {{when}}",
       "dispatched_prefix": "Đã điều phối {{when}}",
       "queued_prefix": "Đã xếp hàng {{when}}"
+    },
+    "connected_apps": {
+      "loading": "Đang tải ứng dụng…",
+      "load_failed": "Không tải được các ứng dụng của agent này.",
+      "empty": "Chưa có ứng dụng đã kết nối nào.",
+      "level": "Cấp độ",
+      "team_connected": "Đã kết nối tài khoản nhóm",
+      "team_missing": "Chưa kết nối tài khoản nhóm",
+      "personal_connected": "Tài khoản của bạn đã kết nối",
+      "personal_missing": "Bạn chưa kết nối ứng dụng này",
+      "team_admin_only": "Chỉ quản trị viên không gian làm việc mới được cấp tài khoản nhóm cho agent.",
+      "team_shared_warning": "Bất kỳ ai chạy được agent này đều có thể dùng tài khoản nhóm này thông qua nó.",
+      "manage_link": "Quản lý tài khoản trong Cài đặt → Ứng dụng đã kết nối",
+      "save_failed_toast": "Không lưu được — hãy thử lại",
+      "team_help": "Tài khoản dùng chung của không gian làm việc, do quản trị viên kết nối.",
+      "personal_help": "Mỗi lượt chạy dùng tài khoản của người kích hoạt nó. Họ phải tự kết nối tài khoản của mình.",
+      "available_accounts": "Có sẵn: {{accounts}}",
+      "enable": "Bật {{app}}",
+      "account_for": "Tài khoản cho {{app}}",
+      "connect_hint": "Kết nối thêm tài khoản trong Cài đặt nếu bạn không thấy ứng dụng mình cần.",
+      "available_personal": "Tài khoản của bạn"
     }
   },
   "char_counter": {
@@ -1024,22 +1010,6 @@
     "section_model": "Model"
   },
   "actions": {},
-  "sections": {
-    "runs_count_other": "{{count}} lần chạy",
-    "recent_this_week_other": "{{count}} trong tuần này",
-    "view_all": "Xem tất cả",
-    "open": "Mở",
-    "edit": "Sửa",
-    "add": "Thêm",
-    "manage": "Quản lý",
-    "instructions_empty": "Chưa có hướng dẫn nào."
-  },
-  "panel": {
-    "status": "Trạng thái",
-    "runs_7d": "Lần chạy (7 ngày)",
-    "edit_access_aria": "Quyền truy cập: {{value}}. Đổi quyền truy cập",
-    "all_settings": "Tất cả cài đặt"
-  },
   "intro": {
     "title": "Thuê đồng đội AI đầu tiên của bạn",
     "description": "Agent nhận công việc như đồng đội: làm trên runtime của bạn bằng các công cụ như Claude Code và Codex, rồi trả kết quả trong phần bình luận.",

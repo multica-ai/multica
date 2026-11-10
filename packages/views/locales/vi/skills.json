@@ -1,6 +1,7 @@
 {
   "page": {
     "title": "Skills",
+    "search": "Tìm kiếm skill",
     "new_skill": "Skill mới",
     "scopes": {
       "all": {
@@ -20,7 +21,6 @@
         "description": "Skill do bạn tạo"
       }
     },
-    "empty": {},
     "no_matches": {
       "title": "Không có kết quả phù hợp",
       "with_query": "Không có skill nào khớp với \"{{query}}\"{{filterSuffix}}.",
@@ -28,14 +28,12 @@
       "filter_only": "Không có skill nào khớp với bộ lọc này.",
       "try_different": " Hãy thử từ khóa khác."
     },
-    "intro_banner": {},
     "list_error": {
       "title": "Không tải được danh sách skill",
       "fallback": "Đã xảy ra lỗi khi tải danh sách skill.",
       "retry": "Thử lại"
     },
-    "supporting_data_warning": "Một số dữ liệu của không gian làm việc không tải được. Thông tin người tạo, tên runtime hoặc quyền chỉnh sửa có thể hiển thị không đầy đủ.",
-    "search": "Tìm kiếm skill"
+    "supporting_data_warning": "Một số dữ liệu của không gian làm việc không tải được. Thông tin người tạo, tên runtime hoặc quyền chỉnh sửa có thể hiển thị không đầy đủ."
   },
   "table": {
     "name": "Tên",
@@ -92,9 +90,7 @@
     "section_labels": "Nhãn",
     "filter_search_placeholder": "Lọc...",
     "no_labels": "Chưa có nhãn nào",
-    "no_results": "Không có kết quả",
-    "manage_labels": "Quản lý nhãn...",
-    "manage_labels_title": "Nhãn skill"
+    "no_results": "Không có kết quả"
   },
   "detail": {
     "read_only": "Chỉ đọc",
@@ -129,6 +125,8 @@
     },
     "toast_saved": "Đã lưu skill",
     "toast_save_failed": "Không lưu được skill",
+    "toast_saved_version": "Đã lưu thành v{{version}}",
+    "toast_view_history": "Xem lịch sử",
     "toast_deleted": "Đã xóa skill",
     "toast_delete_failed": "Không xóa được skill",
     "refresh": {
@@ -172,7 +170,6 @@
     "header": {
       "files_other": "{{count}} tệp"
     },
-    "tabs": {},
     "overview": {
       "properties": "Thuộc tính",
       "name": "Tên",
@@ -196,27 +193,6 @@
       "mode_edit": "Chỉnh sửa",
       "mode_raw": "Văn bản thuần"
     },
-    "sections": {
-      "content": "Nội dung",
-      "files": "Tệp",
-      "edit": "Sửa",
-      "open": "Mở",
-      "add": "Thêm",
-      "history": "Lịch sử"
-    },
-    "menu": {
-      "copy_link": "Sao chép liên kết",
-      "link_copied": "Đã sao chép liên kết",
-      "delete": "Xóa skill",
-      "version_history": "Lịch sử phiên bản"
-    },
-    "panel": {
-      "add_description": "Thêm mô tả",
-      "version": "Phiên bản",
-      "no_versions": "Chưa có phiên bản nào"
-    },
-    "toast_saved_version": "Đã lưu thành v{{version}}",
-    "toast_view_history": "Xem lịch sử",
     "versions": {
       "list_aria": "Các phiên bản skill",
       "version_label": "v{{version}}",
@@ -243,18 +219,31 @@
         "confirm": "Khôi phục",
         "restoring": "Đang khôi phục..."
       }
+    },
+    "sections": {
+      "content": "Nội dung",
+      "files": "Tệp",
+      "edit": "Sửa",
+      "open": "Mở",
+      "add": "Thêm",
+      "history": "Lịch sử"
+    },
+    "menu": {
+      "copy_link": "Sao chép liên kết",
+      "link_copied": "Đã sao chép liên kết",
+      "delete": "Xóa skill",
+      "version_history": "Lịch sử phiên bản"
+    },
+    "panel": {
+      "add_description": "Thêm mô tả",
+      "version": "Phiên bản",
+      "no_versions": "Chưa có phiên bản nào"
     }
   },
   "create": {
-    "back": "Quay lại",
-    "back_aria": "Quay lại phần chọn cách tạo",
     "close": "Đóng",
     "close_aria": "Đóng",
     "method": {
-      "chooser": {
-        "title": "Skill mới",
-        "desc": "Chọn cách thêm skill vào không gian làm việc này."
-      },
       "manual": {
         "title": "Tạo thủ công",
         "desc": "Bắt đầu từ một tệp SKILL.md trống."
@@ -300,7 +289,19 @@
       "cancel": "Hủy",
       "import": "Nhập",
       "importing": "Đang nhập…",
-      "toast_imported": "Đã nhập skill"
+      "toast_imported": "Đã nhập skill",
+      "select_all": "Chọn tất cả",
+      "import_count": "Nhập {{count}}",
+      "done": "Xong",
+      "stop": "Dừng sau mục hiện tại",
+      "unreadable": "Không đọc được skill này. Hãy chọn lại thư mục.",
+      "uncertain": "Kết quả chưa chắc chắn. Hãy kiểm tra danh sách skill đã làm mới trước khi thử lại. Tên đã có vẫn bị khóa; xem lại trong danh sách.",
+      "check_results": "Kết quả kiểm tra",
+      "retry_ready": "Không thấy trong danh sách đã làm mới. Bạn có thể thử lại mục này.",
+      "uncertain_manual": "Kết quả chưa chắc chắn và không biết tên skill trong file nén. Hãy kiểm tra danh sách skill thủ công trước khi nhập lại file này.",
+      "check_failed": "Không kiểm chứng được danh sách skill. Các mục nhập có kết quả chưa chắc chắn vẫn bị khóa. Hãy kiểm tra lại hoặc xem danh sách thủ công.",
+      "workspace_changed": "Không gian làm việc đã thay đổi. Các lượt nhập còn lại đã dừng. Hãy đóng hộp thoại này rồi mở lại trong không gian làm việc muốn dùng.",
+      "summary": "Đã nhập: {{success}} · Thất bại hoặc chưa chắc chắn: {{failed}}"
     },
     "url": {
       "url_label": "URL skill",

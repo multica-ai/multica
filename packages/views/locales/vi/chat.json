@@ -1,18 +1,31 @@
 {
   "page": {
     "title": "Trò chuyện",
-    "select_prompt": "Chọn một cuộc trò chuyện, hoặc bắt đầu cuộc mới bằng nút +",
-    "agent_link_no_access": "Bạn không có quyền trò chuyện với agent này.",
     "no_agent_title": "Chưa có agent nào để trò chuyện",
     "no_agent_description": "Tạo một agent, rồi trao đổi yêu cầu tại đây và để nó biến yêu cầu thành công việc.",
-    "no_agent_action": "Agent mới"
+    "no_agent_action": "Agent mới",
+    "select_prompt": "Chọn một cuộc trò chuyện, hoặc bắt đầu cuộc mới bằng nút +",
+    "agent_link_no_access": "Bạn không có quyền trò chuyện với agent này."
   },
   "fab": {
     "running": "Multica đang làm việc...",
     "unread_other": "{{count}} cuộc trò chuyện chưa đọc",
     "default": "Hỏi Multica"
   },
+  "bar": {
+    "history": "Lịch sử trò chuyện",
+    "history_group": {
+      "today": "Hôm nay",
+      "week": "7 ngày qua",
+      "older": "Cũ hơn"
+    },
+    "close_chip": "Đóng {{title}}",
+    "all_chats": "Tất cả cuộc trò chuyện",
+    "more_other": "{{count}} cuộc trò chuyện nữa"
+  },
   "input": {
+    "page_context_add": "Thêm trang này làm ngữ cảnh",
+    "page_context_remove": "Gỡ ngữ cảnh trang",
     "placeholder_no_agent": "Tạo một agent để bắt đầu trò chuyện",
     "placeholder_archived": "Phiên này đã được lưu trữ",
     "placeholder_archived_agent": "Agent này đã được lưu trữ",
@@ -50,6 +63,8 @@
     "action_failed_toast": "Không cập nhật được tin nhắn đang xếp hàng"
   },
   "message_list": {
+    "jump_to_latest": "Nhảy tới mới nhất",
+    "new_reply": "Trả lời mới",
     "show_details": "Hiện chi tiết",
     "replied_in": "Đã trả lời trong {{elapsed}}",
     "failed_after": "Thất bại sau {{elapsed}}",
@@ -129,6 +144,7 @@
     "restore_tooltip": "Khôi phục",
     "expand_tooltip": "Mở rộng",
     "minimize_tooltip": "Thu nhỏ",
+    "close_tooltip": "Đóng",
     "another_running": "Một cuộc trò chuyện khác đang chạy",
     "another_unread": "Một cuộc trò chuyện khác có câu trả lời chưa đọc",
     "running": "Đang chạy",
@@ -168,7 +184,6 @@
       "label": "Đề xuất một hành động",
       "prompt": "Hãy xem lại những gì bạn biết về không gian làm việc của tôi và đề xuất một hành động đầu tiên hữu ích."
     },
-    "customize": "Tùy chỉnh câu mở đầu",
     "uploading": "Hãy chờ tải lên hoàn tất trước khi dùng câu mở đầu.",
     "draft_in_progress": "Hãy gửi hoặc xóa bản nháp của bạn trước khi dùng câu mở đầu."
   },
@@ -234,8 +249,6 @@
     "no_response_preview": "Không có câu trả lời bằng văn bản",
     "quick_agents": "Agent thường dùng",
     "add": "Thêm",
-    "add_agent": "Thêm một agent thường dùng",
-    "unpin_agent": "Loại bỏ khỏi mục thường dùng",
     "waiting": "Đang chờ câu trả lời",
     "pin": "Ghim",
     "unpin": "Bỏ ghim",
@@ -246,10 +259,10 @@
     "row_actions_aria": "Thao tác trò chuyện"
   },
   "header": {
+    "agent_settings": "Cài đặt agent",
     "rename": "Đổi tên cuộc trò chuyện",
     "archive": "Lưu trữ cuộc trò chuyện",
     "unarchive": "Bỏ lưu trữ cuộc trò chuyện",
-    "delete": "Xóa cuộc trò chuyện",
-    "agent_settings": "Cài đặt agent"
+    "delete": "Xóa cuộc trò chuyện"
   }
 }
