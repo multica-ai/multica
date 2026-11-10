@@ -73,6 +73,7 @@ import { useChatInputFocus } from "./use-chat-input-focus";
 import { useChatOpenReveal } from "./use-chat-open-reveal";
 import { ChatWindowMessages } from "./chat-window-messages";
 import { ChatInput } from "./chat-input";
+import { useChatAnnotations } from "./use-chat-annotations";
 import { ChatQueue } from "./chat-queue";
 import { ChatAppRequests } from "../../common/app-requests";
 import { EmptyState } from "./chat-empty-state";
@@ -261,6 +262,11 @@ export function ChatWindow() {
   // (server confirmed: zero usable agents) drives the disabled UI.
   const agentAvailability = useWorkspaceAgentAvailability();
   const noAgent = agentAvailability === "none";
+  const annotations = useChatAnnotations({
+    sessionId: activeSessionId,
+    agentName: activeAgent?.name,
+    enabled: !isSessionArchived && !isAgentArchived && !isAgentAccessRevoked && activeAgentRuntimeBound && !noAgent,
+  });
 
   // Presence drives both the avatar status dot (via ActorAvatar) and the
   // OfflineBanner / TaskStatusPill availability copy. `useAgentPresenceDetail`
@@ -920,6 +926,7 @@ export function ChatWindow() {
             }
             quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
             onReady={markContentReady}
+            annotations={annotations}
           >
             <EmptyState
               agent={activeAgent}
@@ -1010,6 +1017,7 @@ export function ChatWindow() {
         }
         contextItems={contextItems}
         focusRequest={focusRequest}
+        annotations={annotations}
       />
     </motion.div>
   );
