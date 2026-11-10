@@ -1203,6 +1203,7 @@ export class ApiClient {
   // Issues
   async listIssues(params?: ListIssuesParams): Promise<ListIssuesResponse> {
     const search = new URLSearchParams();
+    if (params?.blocked) search.set("blocked", "true");
     if (params?.limit) search.set("limit", String(params.limit));
     if (params?.offset) search.set("offset", String(params.offset));
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);

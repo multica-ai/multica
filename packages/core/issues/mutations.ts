@@ -210,6 +210,8 @@ export function useUpdateIssue() {
         duplicate_of_issue_id: _duplicateOfIssueId,
         description: _description,
         description_base: _descriptionBase,
+        blocked_by: _blockedBy,
+        remove_blocked_by: _removeBlockedBy,
         title_base: _titleBase,
         expected_revision: _expectedRevision,
         ...patch
@@ -323,6 +325,8 @@ export function useUpdateIssue() {
         enter_workflow_step: _enterWorkflowStep,
         duplicate_of_issue_id: _duplicateOfIssueId,
         description_base: _descriptionBase,
+        blocked_by: _blockedBy,
+        remove_blocked_by: _removeBlockedBy,
         move_intent: _moveIntent,
         id: _id,
         ...intent
@@ -565,6 +569,8 @@ export function useBatchUpdateIssues() {
         enter_workflow_step: _enterWorkflowStep,
         description: _description,
         description_base: _descriptionBase,
+        blocked_by: _blockedBy,
+        remove_blocked_by: _removeBlockedBy,
         ...patch
       } = updates;
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });

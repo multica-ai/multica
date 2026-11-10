@@ -188,7 +188,7 @@
     "section_project": "Проект",
     "section_project_status": "Статус проекта",
     "section_label": "Метка",
-    "section_relation": "Отношение ко мне",
+    "section_relation": "Связи",
     "relation_assigned": "Назначено мне",
     "relation_created": "Создано мной",
     "relation_my_agents": "Работа моих агентов",
@@ -289,7 +289,8 @@
     "advanced_conditions_many": "{{count}} условий",
     "read_state_unread": "Непрочитанные",
     "relation_subscribed": "За которыми я слежу",
-    "section_read_state": "Состояние прочтения"
+    "section_read_state": "Состояние прочтения",
+    "relation_blocked": "Заблокировано"
   },
   "display": {
     "tooltip": "Настройки отображения",
@@ -2204,5 +2205,15 @@
     "focus_failed": "Не удалось переключиться на {{name}}",
     "retry": "Повторить",
     "dismiss": "Скрыть"
+  },
+  "waiting": {
+    "title": "Ожидание",
+    "add": "Добавить зависимость",
+    "remove": "Удалить {{identifier}}",
+    "count": "Ожидание задач: {{count}}",
+    "stage": "Предыдущие этапы · {{finished}}/{{total}} завершено",
+    "hint": "После завершения этих задач исполнитель начнёт работу автоматически или получит уведомление.",
+    "empty": "Нет ожидаемых задач",
+    "picker_hint": "Выберите задачу, которая должна завершиться раньше этой."
   }
 }

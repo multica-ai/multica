@@ -125,6 +125,10 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 	// Leaving Triage needs no case of its own. Triage is not a status, so accept
 	// clears this field and then takes the ordinary create / assign path; there
 	// is no "was in triage" transition for this predicate to recognise.
+	blocked, err := s.Queries.HasOpenIssueBlockers(ctx, db.HasOpenIssueBlockersParams{WorkspaceID: issue.WorkspaceID, IssueID: issue.ID})
+	if err != nil || blocked {
+		return IssueRunTrigger{}, false
+	}
 	if issue.TriageState.Valid {
 		return IssueRunTrigger{}, false
 	}

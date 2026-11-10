@@ -487,6 +487,9 @@ cleared_wakeup_receipts AS (
 cleared_wakeups AS (
  DELETE FROM issue_wakeup WHERE issue_id IN (SELECT target.id FROM target)
 ),
+cleared_blockers AS (
+ DELETE FROM issue_blocker WHERE workspace_id=$2 AND (issue_id IN (SELECT target.id FROM target) OR blocker_issue_id IN (SELECT target.id FROM target))
+),
 cleared_child_events AS (
  DELETE FROM issue_child_event WHERE parent_id IN (SELECT target.id FROM target) OR child_id IN (SELECT target.id FROM target)
 ),
@@ -528,6 +531,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.revision, i.duplicate_of_issue_id
 FROM issue i
 WHERE i.workspace_id = $1
+ AND (NOT sqlc.arg(blocked_only)::boolean OR issue_has_open_blockers(i.workspace_id,i.id))
   -- Negate only known terminal keys so an unknown legacy key remains visible.
   AND NOT (i.status = ANY(sqlc.arg('terminal_status_keys')::text[]))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))

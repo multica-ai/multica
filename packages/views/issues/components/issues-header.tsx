@@ -15,6 +15,7 @@ import {
   Columns3,
   Eye,
   Filter,
+  Flag,
   FolderKanban,
   FolderMinus,
   List,
@@ -959,6 +960,7 @@ const RELATION_ICONS: Record<IssueRelationFilter, typeof User> = {
   created: UserPen,
   my_agents: Bot,
   subscribed: BellRing,
+  blocked: Flag,
 };
 
 /** Read-only sentence form of the active filters, shown on hover so a closed

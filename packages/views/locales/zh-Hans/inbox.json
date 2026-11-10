@@ -98,7 +98,8 @@
     "app_action_requested": "等待你确认",
     "app_action_reminder": "确认即将过期",
     "app_connect_requested": "请连接应用",
-    "app_action_result": "应用操作结果"
+    "app_action_result": "应用操作结果",
+    "blockers_done": "等待的任务已结束"
   },
   "labels": {
     "set_status_to": "状态设为",

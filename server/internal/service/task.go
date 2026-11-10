@@ -7995,6 +7995,7 @@ func builtInStatusCategory(status string) string {
 type IssueMapQuerier interface {
 	issuestatus.Querier
 	GetIssueRefInWorkspace(ctx context.Context, arg db.GetIssueRefInWorkspaceParams) (db.GetIssueRefInWorkspaceRow, error)
+	ListIssueBlockers(ctx context.Context, arg db.ListIssueBlockersParams) ([]db.ListIssueBlockersRow, error)
 }
 
 // IssueToMapResolved is IssueToMap with an AUTHORITATIVE status_category and
@@ -8014,6 +8015,18 @@ func IssueToMapResolved(ctx context.Context, q IssueMapQuerier, issue db.Issue, 
 	category, name := issuestatus.CategoryAndName(ctx, q, issue.WorkspaceID, issue.Status)
 	m["status_category"] = issuestatus.WireCategory(issue.Status, category)
 	m["status_name"] = name
+
+	if blockers, err := q.ListIssueBlockers(ctx, db.ListIssueBlockersParams{WorkspaceID: issue.WorkspaceID, IssueIds: []pgtype.UUID{issue.ID}}); err == nil {
+		refs := make([]map[string]any, 0, len(blockers))
+		count := 0
+		for _, b := range blockers {
+			refs = append(refs, map[string]any{"id": util.UUIDToString(b.ID), "identifier": IssueIdentifier(issuePrefix, b.Number), "title": b.Title, "status": b.Status, "via": b.Via, "closed": b.Closed.Bool})
+			if !b.Closed.Bool {
+				count++
+			}
+		}
+		m["blocked_by"], m["blocked_count"] = refs, count
+	}
 	if ref := resolveDuplicateOf(ctx, q, issue, issuePrefix); ref != nil {
 		m["duplicate_of"] = ref
 	}
@@ -8073,6 +8086,8 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"parent_issue_id": util.UUIDToPtr(issue.ParentIssueID),
 		// Mirrors handler.IssueResponse.DuplicateOf. Null is only true for a
 		// row with no live mark; IssueToMapResolved resolves it for the rest.
+		"blocked_by":       []any{},
+		"blocked_count":    0,
 		"duplicate_of":     nil,
 		"project_id":       util.UUIDToPtr(issue.ProjectID),
 		"position":         issue.Position,

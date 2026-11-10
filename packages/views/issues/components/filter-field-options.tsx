@@ -4,6 +4,7 @@ import { useMemo, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   BellRing,
+  Flag,
   Bot,
   CalendarClock,
   CircleDashed,
@@ -59,6 +60,7 @@ const RELATION_ICONS: Record<IssueRelationFilter, IconComponent> = {
   created: UserPen,
   my_agents: Bot,
   subscribed: BellRing,
+  blocked: Flag,
 };
 
 export const DUE_DATE_LABEL_KEY: Record<
@@ -74,12 +76,13 @@ export const DUE_DATE_LABEL_KEY: Record<
 
 export const RELATION_LABEL_KEY: Record<
   IssueRelationFilter,
-  "relation_assigned" | "relation_created" | "relation_my_agents" | "relation_subscribed"
+  "relation_assigned" | "relation_created" | "relation_my_agents" | "relation_subscribed" | "relation_blocked"
 > = {
   assigned: "relation_assigned",
   created: "relation_created",
   my_agents: "relation_my_agents",
   subscribed: "relation_subscribed",
+  blocked: "relation_blocked",
 };
 
 export function useFilterFieldLabels(): Record<NegatableFilterDimension, string> {

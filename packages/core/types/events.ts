@@ -126,6 +126,7 @@ export interface IssueUpdatedPayload {
   assignee_changed?: boolean;
   status_changed?: boolean;
   project_changed?: boolean;
+  stage_changed?: boolean;
   title_changed?: boolean;
   parent_changed?: boolean;
   prev_parent_issue_id?: string | null;

@@ -15,6 +15,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, useId, Fragment, typ
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
+import { IssueBlockersSection } from "./issue-blockers";
 import { IssueDuplicateBanner, IssueDuplicatesSection, isDuplicateIssue } from "./issue-duplicates";
 import {
   AlertTriangle,
@@ -3275,6 +3276,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>}
         </div>
     ),
+    waiting: <IssueBlockersSection issue={issue} />,
     duplicates: <IssueDuplicatesSection issueId={issue.id} />,
     // Pull requests — unavailable when the workspace disables the PR sidebar
     // (or the GitHub master switch is off). Backend data is kept either

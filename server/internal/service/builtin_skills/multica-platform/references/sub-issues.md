@@ -39,8 +39,7 @@ not need to restate every decision made on the parent.
 ## Sub-issues: todo starts work now, backlog parks it
 
 On an agent-assigned issue, create status decides whether the assignee fires
-immediately. A non-backlog status (e.g. `todo`) enqueues the agent at create
-time; `backlog` sets the assignee without triggering.
+immediately. A non-backlog status (e.g. `todo`) enqueues the agent when no unfinished blockers remain; `backlog` sets the assignee without triggering, even after blockers end.
 
 Parallel children — all start now:
 
@@ -55,22 +54,33 @@ multica issue create --title "Step 2: ..." --parent <issue-id> --assignee <agent
 multica issue status <child-id> todo   # promote when the previous step is truly done
 ```
 
-Creating every serial step as `todo` enqueues the whole chain at once.
+For automatic serial work, create later tasks as `todo` with repeatable
+`--blocked-by <issue>` flags. They start after all blockers enter done or closed
+categories (including cancellation). `issue get` lists `blocked_by` references,
+each with `via: manual|stage`, and `issue list --blocked` finds waiting work.
+`issue update --remove-blocked-by <issue>` removes a manual dependency.
+Blockers never change issue status; use the manual `blocked` status for missing
+information or external conditions. Explicit mentions and replies still run.
 
 ### Stages: order sub-issues into barrier groups
 
 `--stage <N>` (N >= 1) groups sub-issues under the same parent into ordered
 stages. The platform's sub-issue wakeup **wakes the parent assignee when a stage
-closes while a later stage is waiting** — every sub-issue up to that stage has
+closes while the next stage has backlog work to promote** — every sub-issue up to that stage has
 reached a terminal status (`done`/`cancelled`) — and **once more when every
 sub-issue, staged or not, is closed**. A completion that closes nothing is
 silent. A sibling set with **no** stages wakes the parent once, when the *last*
 sub-issue finishes. A parent in `backlog` is not woken; it catches up once it
 leaves backlog. A member assignee gets an inbox notification instead of a run.
 
-Advancement is agent-driven: the server only detects the closed barrier and
-wakes the parent assignee, who then decides whether to promote the next stage's
-`backlog` sub-issues to `todo`.
+Stage waits are computed from all earlier staged siblings under the current
+parent; no dependency edges are stored for them. A later stage created as
+`todo` starts automatically once earlier stages end. Use this as the default.
+Create the later stage as `backlog` when the parent must review results before
+promoting it: only this case wakes the parent at an intermediate stage. The
+parent is also woken when all children end. Moving, restaging or deleting a
+sibling immediately changes the implied wait. Manual blockers combine with
+stage waits; a manual edge that cycles through a stage is rejected.
 
 ```bash
 # Stage 1 runs now; later stages parked until promoted

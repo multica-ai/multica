@@ -189,7 +189,7 @@
     "section_project": "项目",
     "section_project_status": "项目状态",
     "section_label": "标签",
-    "section_relation": "与我的关系",
+    "section_relation": "任务关系",
     "relation_assigned": "分配给我的",
     "relation_created": "我创建的",
     "relation_my_agents": "我的智能体在做",
@@ -272,7 +272,8 @@
     "advanced_group_match_trailing": "条件",
     "advanced_group_hint": "组内条件之间用「{{word}}」连接",
     "advanced_add_to_group": "添加到条件组",
-    "advanced_turn_into_group": "转为条件组"
+    "advanced_turn_into_group": "转为条件组",
+    "relation_blocked": "被阻塞"
   },
   "display": {
     "tooltip": "显示设置",
@@ -1961,5 +1962,15 @@
     "focus_failed": "无法切到 {{name}}",
     "retry": "重试",
     "dismiss": "忽略"
+  },
+  "waiting": {
+    "title": "等待",
+    "add": "添加前置任务",
+    "remove": "移除 {{identifier}}",
+    "count": "等待 {{count}} 个任务",
+    "stage": "更早阶段 · {{finished}}/{{total}} 已结束",
+    "hint": "全部结束后，负责人将自动开工或收到通知。",
+    "empty": "没有等待的任务",
+    "picker_hint": "选择一个必须先结束的任务。"
   }
 }

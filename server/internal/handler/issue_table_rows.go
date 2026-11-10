@@ -513,14 +513,16 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 	prefix := baseHandler.getIssuePrefix(r.Context(), compiled.workspaceID)
 	issueIDs := make([]pgtype.UUID, len(scanned))
 	var originals []pgtype.UUID
+	var blockerPageIDs []pgtype.UUID
 	for index, row := range scanned {
 		issueIDs[index] = row.issue.ID
 		originals = appendDuplicateOriginal(originals, row.issue.Status, row.issue.DuplicateOfIssueID)
+		blockerPageIDs = append(blockerPageIDs, row.issue.ID)
 	}
 	labelsByIssue := baseHandler.labelsByIssue(r.Context(), compiled.workspaceID, issueIDs)
 	// One Resolver and one originals read for the page — see
 	// newStatusCategoryFiller. (MUL-6243, MUL-7349)
-	fillTableRow := baseHandler.newStatusCategoryFiller(r.Context(), compiled.workspaceID, originals...)
+	fillTableRow := baseHandler.newStatusCategoryFiller(r.Context(), compiled.workspaceID, originals, blockerPageIDs...)
 	responseRows := make([]issueTableRowResponse, len(scanned))
 	for index, row := range scanned {
 		issue := issueListRowToResponse(row.issue, prefix)

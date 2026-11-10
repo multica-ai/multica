@@ -34,6 +34,7 @@ export type InboxItemType =
   // Sub-issues of an issue assigned to the recipient closed (the child_done
   // system rule notifies a member assignee instead of waking an agent).
   | "children_done"
+  | "blockers_done"
   // Connected Apps (MUL-8516): an agent waits on the recipient to confirm an
   // app call, or to connect their account.
   | "app_action_requested"

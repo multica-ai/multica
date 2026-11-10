@@ -189,7 +189,7 @@
     "section_project": "프로젝트",
     "section_project_status": "프로젝트 상태",
     "section_label": "라벨",
-    "section_relation": "나와의 관계",
+    "section_relation": "관계",
     "relation_assigned": "내가 담당",
     "relation_created": "내가 생성",
     "relation_my_agents": "내 에이전트의 작업",
@@ -272,7 +272,8 @@
     "advanced_group_match_trailing": "충족",
     "advanced_group_hint": "이 그룹의 조건은 '{{word}}'(으)로 연결됩니다",
     "advanced_add_to_group": "그룹에 추가",
-    "advanced_turn_into_group": "그룹으로 전환"
+    "advanced_turn_into_group": "그룹으로 전환",
+    "relation_blocked": "차단됨"
   },
   "display": {
     "tooltip": "보기 설정",
@@ -1961,5 +1962,15 @@
     "focus_failed": "{{name}}(으)로 전환할 수 없습니다",
     "retry": "다시 시도",
     "dismiss": "닫기"
+  },
+  "waiting": {
+    "title": "대기",
+    "add": "선행 작업 추가",
+    "remove": "{{identifier}} 제거",
+    "count": "작업 {{count}}개 대기 중",
+    "stage": "이전 단계 · {{finished}}/{{total}}개 종료",
+    "hint": "모두 종료되면 담당자가 자동으로 시작하거나 알림을 받습니다.",
+    "empty": "대기할 작업 없음",
+    "picker_hint": "이 작업보다 먼저 종료되어야 하는 작업을 선택하세요."
   }
 }

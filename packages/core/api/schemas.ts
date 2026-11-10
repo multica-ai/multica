@@ -1655,6 +1655,11 @@ export const CommentSubIssueTaskResponseSchema = z.object({
 }).loose();
 
 export const IssueSchema = z.object({
+  blocked_count: z.number().int().nonnegative().optional().catch(undefined),
+  blocked_by: z.array(z.object({
+    id: z.string(), identifier: z.string(), title: z.string(), status: z.string(),
+    via: z.string(), closed: z.boolean(),
+  })).optional().catch(undefined),
   id: z.string(),
   workspace_id: z.string(),
   number: z.number(),

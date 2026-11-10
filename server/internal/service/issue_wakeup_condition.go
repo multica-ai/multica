@@ -227,6 +227,8 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 		return false, "", nil, err
 	}
 	switch c.Type {
+	case "blockers_done":
+		return evaluateIssueBlockers(ctx, tx, q, w)
 	case "issue_field":
 		var status, assigneeType string
 		var assigneeID pgtype.UUID
@@ -581,6 +583,7 @@ type subIssue struct {
 	Stage     pgtype.Int4
 	Closed    bool
 	Cancelled bool
+	Backlog   bool
 }
 
 func loadSubIssues(ctx context.Context, tx pgx.Tx, q *db.Queries, parent, workspace pgtype.UUID) ([]subIssue, error) {
@@ -613,6 +616,7 @@ func loadSubIssues(ctx context.Context, tx pgx.Tx, q *db.Queries, parent, worksp
 			}
 			categories[status] = category
 		}
+		children[i].Backlog = statuses[i] == "backlog"
 		children[i].Closed = category == "done" || category == "closed"
 		children[i].Cancelled = category == "closed"
 	}
@@ -703,7 +707,7 @@ func stageProgress(children []subIssue) (bool, string, map[string]any) {
 	case len(children) > 0 && closed == len(children):
 		observed["all"] = true
 		return true, "all", observed
-	case frontier && waiting:
+	case frontier && waiting && stageNeedsPromotion(children, nextStage):
 		observed["stage"], observed["next_stage"] = closedStage, nextStage
 		return true, fmt.Sprintf("stage:%d", closedStage), observed
 	}
@@ -720,4 +724,13 @@ func recordConditionMet(ctx context.Context, q *db.Queries, w db.IssueWakeup, ob
 	payload, _ := json.Marshal(facts)
 	_, err := q.RecordWakeupReceipt(ctx, db.RecordWakeupReceiptParams{ID: dbid.NewV7(), WakeupID: w.ID, Revision: w.Revision, EventKey: "condition:" + now.UTC().Format(time.RFC3339Nano), EventType: wakeupConditionEventType, Payload: payload})
 	return err
+}
+
+func stageNeedsPromotion(children []subIssue, stage int32) bool {
+	for _, ch := range children {
+		if ch.Stage.Valid && ch.Stage.Int32 == stage && ch.Backlog && !ch.Closed {
+			return true
+		}
+	}
+	return false
 }

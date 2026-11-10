@@ -165,6 +165,7 @@ import {
 import type { ChildProgress } from "./list-row";
 import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { IssueBlockedMarker } from "./issue-blockers";
 import { IssueDuplicateOfMarker } from "./issue-duplicates";
 
 // Enough placeholder rows to cover a typical viewport; the virtualizer only
@@ -777,6 +778,7 @@ export function InlineTitle({
           >
             {row.issue.title}
           </button>
+          <IssueBlockedMarker issue={row.issue} />
           <IssueDuplicateOfMarker issue={row.issue} />
           {/* Lifted out of the flex flow, the way SidebarMenuAction is. Laid
             * out inline these two reserved ~40px of the title column for
