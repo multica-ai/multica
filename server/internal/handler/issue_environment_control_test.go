@@ -238,8 +238,11 @@ func TestEnvironmentCommandsAreRefusedWhereTheyCannotWork(t *testing.T) {
 	f.commandAs(t, testUserID, "stop", vite.ID).Want(http.StatusAccepted)
 
 	f.report(t, true, webEnvironment("exited"), detectedEnvironment(),
-		map[string]any{"key": "detected:app", "source": "detected", "kind": "app", "name": "Multica Canary", "state": "running"})
+		map[string]any{"key": "detected:app", "source": "detected", "kind": "app", "name": "Multica Canary", "state": "running"},
+		map[string]any{"key": "config:desktop", "source": "config", "kind": "app", "name": "desktop", "state": "running"})
 	f.commandAs(t, testUserID, "stop", f.env(t, "Multica Canary").ID).Want(http.StatusConflict)
+	// A desktop app the repository declares is supervised like any declared environment.
+	f.commandAs(t, testUserID, "stop", f.env(t, "desktop").ID).Want(http.StatusAccepted)
 
 	dbfx.Exec(t, `UPDATE agent_runtime SET status = 'offline' WHERE id = $1`, f.runtimeID)
 	f.commandAs(t, testUserID, "restart", web.ID).Want(http.StatusConflict)

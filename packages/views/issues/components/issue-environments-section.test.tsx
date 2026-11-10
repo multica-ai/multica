@@ -353,6 +353,21 @@ describe("IssueEnvironmentsSection", () => {
       expect(toastError).not.toHaveBeenCalled();
     });
 
+    it("keeps the controls of a desktop app the repository declares", async () => {
+      onDesktop();
+      focusEnvironment.mockResolvedValue({ ok: true });
+      mockEnvironments = [app({ id: "env-desktop", source: "config", local_key: "config:desktop", name: "desktop", label: "Desktop", repo: "app" })];
+      renderSection();
+
+      const row = await screen.findByTestId("environment-row");
+      fireEvent.click(within(row).getByRole("button", { name: "Switch to window" }));
+      await waitFor(() => expect(focusEnvironment).toHaveBeenCalledWith("config:desktop"));
+      const menu = await openRowMenu(row);
+      expect(within(menu).getByRole("menuitem", { name: /View logs/ })).not.toHaveAttribute("aria-disabled", "true");
+      fireEvent.click(within(menu).getByRole("menuitem", { name: /^Stop$/ }));
+      expect(control).toHaveBeenCalledWith({ action: "stop", environmentId: "env-desktop" }, expect.anything());
+    });
+
     it("offers no switch for an app whose key did not arrive", async () => {
       onDesktop();
       mockEnvironments = [app({ local_key: "" })];

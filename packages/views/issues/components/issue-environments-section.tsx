@@ -585,8 +585,9 @@ function EnvironmentRow({
 
   const showRestartIcon = !live && !pinned && canRestart;
   // A detected app has no logs and is not stopped from here: it may be the
-  // reader's own app, and the daemon knows its process, not its listener.
-  const hasMenu = !app && (live || declared);
+  // reader's own app, and the daemon knows its process, not its listener. A
+  // declared one is supervised like any declared environment.
+  const hasMenu = (declared || !app) && (live || declared);
   const hasActions = openable || focusable || hasMenu || showRestartIcon;
 
   const body = (

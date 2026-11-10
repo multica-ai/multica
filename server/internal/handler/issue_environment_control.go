@@ -244,8 +244,8 @@ func (h *Handler) commandIssueEnvironment(w http.ResponseWriter, r *http.Request
 	case action == "stop" && env.EndedAt.Valid:
 		writeError(w, http.StatusConflict, "the environment is not running")
 		return
-	case env.Kind == issueEnvironmentKindApp:
-		writeError(w, http.StatusConflict, "desktop apps cannot be controlled from the sidebar")
+	case env.Kind == issueEnvironmentKindApp && env.Source != "config":
+		writeError(w, http.StatusConflict, "only desktop apps the repository declares can be controlled from the sidebar")
 		return
 	case action != "stop" && env.Source != "config":
 		writeError(w, http.StatusConflict, "only environments the repository declares can be restarted or have a log")
