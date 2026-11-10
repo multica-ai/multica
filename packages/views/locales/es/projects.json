@@ -41,6 +41,7 @@
     "none": "Sin prioridad"
   },
   "lead": {
+    "membership_notice": "Elegir a una persona ajena al proyecto la añade como miembro y le da acceso a su contenido.",
     "no_lead": "Sin responsable",
     "assign_placeholder": "Asignar responsable...",
     "members_group": "Miembros",

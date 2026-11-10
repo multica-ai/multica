@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { UserMinus } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
@@ -21,6 +21,8 @@ export function ProjectLeadPicker({ project, handleUpdate, renderTrigger, align 
   align?: "start" | "end" | "center"
 }) {
   const { t } = useT("projects");
+  const membershipNoticeId = useId();
+  const isPrivate = project.visibility === "private";
   const wsId = useWorkspaceId();
   const { getActorName } = useActorName();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -42,16 +44,18 @@ export function ProjectLeadPicker({ project, handleUpdate, renderTrigger, align 
   return (
     <Popover open={leadOpen && canManage} onOpenChange={(v) => { setLeadOpen(v); if (!v) setLeadFilter(""); }}>
       <PopoverTrigger disabled={!canManage} render={renderTrigger(leadName)} />
-      <PopoverContent align={align} className="w-52 p-0">
+      <PopoverContent align={align} className={isPrivate ? "w-64 p-0" : "w-52 p-0"}>
         <div className="px-2 py-1.5 border-b">
           <input
             type="text"
             value={leadFilter}
             onChange={(e) => setLeadFilter(e.target.value)}
             placeholder={t(($) => $.lead.assign_placeholder)}
+            aria-describedby={isPrivate ? membershipNoticeId : undefined}
             className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
           />
         </div>
+        {isPrivate ? <p id={membershipNoticeId} className="border-b px-3 py-2 text-caption text-muted-foreground">{t(($) => $.lead.membership_notice)}</p> : null}
         <div className="p-1 max-h-48 overflow-y-auto">
           <button
             type="button"

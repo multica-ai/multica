@@ -41,6 +41,7 @@
     "none": "Aucune priorité"
   },
   "lead": {
+    "membership_notice": "Choisir une personne hors du projet l'ajoute aux membres et lui donne accès à son contenu.",
     "no_lead": "Aucun responsable",
     "assign_placeholder": "Assigner un responsable...",
     "members_group": "Membres",

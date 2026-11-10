@@ -300,6 +300,13 @@ describe("ProjectDetail rename", () => {
 });
 
 describe("ProjectDetail lead permissions", () => {
+  it("explains membership changes in the private project's lead picker", async () => {
+    qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, visibility: "private" });
+    renderProjectDetail();
+    await userEvent.click(screen.getByRole("button", { name: "No lead" }));
+    expect(screen.getByText("Selecting a person outside the project adds them as a member with access to its content.")).toBeVisible();
+  });
+
   it("does not let ordinary members change the lead of a private project", async () => {
     mocks.role = "member";
     qc.setQueryData(projectKeys.detail("workspace-1", PROJECT.id), { ...PROJECT, visibility: "private" });

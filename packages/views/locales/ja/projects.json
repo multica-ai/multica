@@ -41,6 +41,7 @@
     "none": "優先度なし"
   },
   "lead": {
+    "membership_notice": "プロジェクト外のユーザーを選ぶと、メンバーに追加され、プロジェクトの内容にアクセスできるようになります。",
     "no_lead": "リードなし",
     "assign_placeholder": "リードを割り当て...",
     "members_group": "メンバー",

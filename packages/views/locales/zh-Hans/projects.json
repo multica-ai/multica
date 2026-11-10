@@ -41,6 +41,7 @@
     "none": "无优先级"
   },
   "lead": {
+    "membership_notice": "选择尚未加入项目的人员，会将其加入项目成员并授予访问权限。",
     "no_lead": "无负责人",
     "assign_placeholder": "指派负责人...",
     "members_group": "成员",

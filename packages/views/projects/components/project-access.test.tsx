@@ -108,6 +108,17 @@ it.each(["owner", "lead", "member"])("guards the lead picker for %s", async (vie
   }
 });
 
+it.each(["private", "workspace"] as const)("explains automatic membership only for a %s project lead", async (visibility) => {
+  renderWithI18n(<QueryClientProvider client={qc}><ProjectLeadPicker project={{ ...project, visibility }} handleUpdate={vi.fn()} renderTrigger={() => <button type="button">Change lead</button>} /></QueryClientProvider>);
+  const trigger = screen.getByRole("button", { name: "Change lead" });
+  await waitFor(() => expect(trigger).toBeEnabled());
+  await userEvent.click(trigger);
+  const notice = screen.queryByText("Selecting a person outside the project adds them as a member with access to its content.");
+  if (visibility === "private") expect(notice).toBeVisible();
+  else expect(notice).not.toBeInTheDocument();
+  expect(api.addProjectMembers).not.toHaveBeenCalled();
+});
+
 it("requires confirmation before making private content visible to the workspace", async () => {
   const user = userEvent.setup();
   renderControl();

@@ -41,6 +41,7 @@
     "none": "우선순위 없음"
   },
   "lead": {
+    "membership_notice": "프로젝트 외부의 사용자를 선택하면 멤버로 추가되고 프로젝트 내용에 접근할 수 있습니다.",
     "no_lead": "리드 없음",
     "assign_placeholder": "리드 지정...",
     "members_group": "멤버",

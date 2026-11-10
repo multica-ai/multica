@@ -41,6 +41,7 @@
     "none": "No priority"
   },
   "lead": {
+    "membership_notice": "Selecting a person outside the project adds them as a member with access to its content.",
     "no_lead": "No lead",
     "assign_placeholder": "Assign lead...",
     "members_group": "Members",

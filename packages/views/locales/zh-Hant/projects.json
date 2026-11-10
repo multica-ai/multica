@@ -41,6 +41,7 @@
     "none": "無優先順序"
   },
   "lead": {
+    "membership_notice": "選擇尚未加入專案的人員，會將其加入專案成員並授予存取權限。",
     "no_lead": "無負責人",
     "assign_placeholder": "指派負責人...",
     "members_group": "成員",
