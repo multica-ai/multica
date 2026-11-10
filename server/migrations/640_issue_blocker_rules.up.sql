@@ -63,12 +63,20 @@ BEGIN
  ) SELECT 1 FROM chain WHERE id=target) THEN
   RAISE EXCEPTION 'Blockers cannot form a cycle (including stages)' USING ERRCODE='23514',CONSTRAINT='issue_blocker_cycle';
  END IF;
- IF EXISTS(WITH RECURSIVE ancestors(child,ancestor) AS (
-  SELECT id,parent_issue_id FROM issue WHERE workspace_id=ws AND parent_issue_id IS NOT NULL
-  UNION SELECT a.child,i.parent_issue_id FROM ancestors a JOIN issue i ON i.id=a.ancestor AND i.workspace_id=ws WHERE i.parent_issue_id IS NOT NULL
- ) SELECT 1 FROM issue_blocker b JOIN ancestors a ON
-  (a.child=b.issue_id AND a.ancestor=b.blocker_issue_id) OR (a.child=b.blocker_issue_id AND a.ancestor=b.issue_id)
- WHERE b.workspace_id=ws) THEN
+ -- Reparenting can make any descendant related to a new ancestor, even
+ -- when the moved issue is not an endpoint of their manual dependency.
+ IF EXISTS(WITH RECURSIVE ancestors(id) AS (
+  SELECT target
+  UNION SELECT i.parent_issue_id FROM issue i JOIN ancestors a ON i.id=a.id
+   WHERE i.workspace_id=ws AND i.parent_issue_id IS NOT NULL
+ ), descendants(id) AS (
+  SELECT target
+  UNION SELECT i.id FROM issue i JOIN descendants d ON i.parent_issue_id=d.id WHERE i.workspace_id=ws
+ ) SELECT 1 FROM issue_blocker b JOIN ancestors a ON a.id=b.issue_id
+   JOIN descendants d ON d.id=b.blocker_issue_id WHERE b.workspace_id=ws
+ UNION ALL
+ SELECT 1 FROM issue_blocker b JOIN ancestors a ON a.id=b.blocker_issue_id
+   JOIN descendants d ON d.id=b.issue_id WHERE b.workspace_id=ws) THEN
   RAISE EXCEPTION 'Parent and child issues cannot block each other' USING ERRCODE='23514',CONSTRAINT='issue_blocker_ancestor';
  END IF;
 END $$;
