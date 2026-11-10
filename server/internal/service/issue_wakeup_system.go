@@ -566,6 +566,9 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	// assignee whose agent cannot run.
 	if current.Type == "member" || !current.Agent.ID.Valid {
 		facts["outcome"] = "none"
+		if w.SystemRule.String == SystemRuleBlockersDone && current.Type != "member" {
+			facts["reason"] = "assignee_unavailable"
+		}
 		if current.Type == "member" {
 			facts["outcome"] = "notified"
 			details, _ := json.Marshal(facts)
@@ -637,7 +640,7 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	}
 	if w.SystemRule.String == SystemRuleBlockersDone {
 		var running bool
-		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2 AND status IN ('queued','dispatched','running'))", issue.ID, agent.ID).Scan(&running); err != nil {
+		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2 AND status IN ('queued','deferred','dispatched','running','waiting_local_directory'))", issue.ID, agent.ID).Scan(&running); err != nil {
 			return err
 		}
 		if running {
@@ -655,6 +658,22 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if err != nil {
 		return err
 	}
+	if w.SystemRule.String == SystemRuleBlockersDone {
+		if accessErr := s.Tasks.guardRunProjectAccess(ctx, issue, agent, attr.UserID, attr.AccountableUserID); accessErr != nil {
+			if !errors.Is(accessErr, ErrProjectAccessDenied) {
+				return accessErr
+			}
+			if err = q.ConsumeWakeupReceipts(ctx, db.ConsumeWakeupReceiptsParams{Ids: ids}); err != nil {
+				return err
+			}
+			facts["outcome"], facts["reason"] = "none", "project_access_denied"
+			if err = note(wakeupActivityTriggered, facts); err != nil {
+				return err
+			}
+			return commit()
+		}
+	}
+
 	waiting, err := hasWaitingRun(ctx, q, issue.ID, agent.ID, attr.UserID)
 	if err != nil {
 		return err
@@ -666,7 +685,8 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if err != nil {
 		return err
 	}
-	if recent >= wakeupHourlyRunLimit {
+	// Dependency completion is the queue's automatic admission path; it cannot be paused.
+	if recent >= wakeupHourlyRunLimit && w.SystemRule.String != SystemRuleBlockersDone {
 		if err = q.PauseIssueWakeup(ctx, db.PauseIssueWakeupParams{ID: w.ID, PausedReason: pgtype.Text{String: wakeupPausedRate, Valid: true}, BlockRuns: true}); err != nil {
 			return err
 		}

@@ -8020,10 +8020,13 @@ func IssueToMapResolved(ctx context.Context, q IssueMapQuerier, issue db.Issue, 
 		refs := make([]map[string]any, 0, len(blockers))
 		count := 0
 		for _, b := range blockers {
-			refs = append(refs, map[string]any{"id": util.UUIDToString(b.ID), "identifier": IssueIdentifier(issuePrefix, b.Number), "title": b.Title, "status": b.Status, "via": b.Via, "closed": b.Closed.Bool})
 			if !b.Closed.Bool {
 				count++
 			}
+			if b.Private && b.ProjectID != issue.ProjectID {
+				continue
+			}
+			refs = append(refs, map[string]any{"id": util.UUIDToString(b.ID), "identifier": IssueIdentifier(issuePrefix, b.Number), "title": b.Title, "status": b.Status, "via": b.Via, "closed": b.Closed.Bool})
 		}
 		m["blocked_by"], m["blocked_count"] = refs, count
 	}

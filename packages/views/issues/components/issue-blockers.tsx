@@ -29,11 +29,13 @@ export function IssueBlockersSection({ issue }: { issue: Issue }) {
   const [open, setOpen] = useState(true);
   const [pickerOpen, setPickerOpen] = useState(false);
   const mutation = useUpdateIssueBlockers(wsId, issue.id);
-  const blockers = issue.blocked_by ?? [];
+  if (issue.blocked_by === undefined) return null;
+  const blockers = issue.blocked_by;
   const manual = blockers.filter((b) => b.via === "manual");
   const stages = blockers.filter((b) => b.via === "stage");
   const activeStages = stages.filter((b) => !b.closed);
   const stageCount = stages.length - activeStages.length;
+  const restrictedCount = Math.max(0, (issue.blocked_count ?? 0) - blockers.filter((b) => !b.closed).length);
   return <div>
     <IssueSidebarSectionHeader title={t(($) => $.waiting.title)} open={open} onOpenChange={setOpen} count={issue.blocked_count}
       actions={<Button variant="ghost" size="icon-xs" aria-label={t(($) => $.waiting.add)} onClick={() => { mutation.reset(); setPickerOpen(true); }}><Plus /></Button>} />
@@ -52,8 +54,9 @@ export function IssueBlockersSection({ issue }: { issue: Issue }) {
           <span className="text-muted-foreground">{blocker.identifier}</span>{" "}{blocker.title}
         </AppLink>)}
       </div>}
+      {restrictedCount > 0 && <p className="text-muted-foreground">{t(($) => $.waiting.restricted, {count: restrictedCount})}</p>}
       {(issue.blocked_count ?? 0) > 0 && <p className="text-muted-foreground">{t(($) => $.waiting.hint)}</p>}
-      {blockers.length === 0 && <p className="text-muted-foreground">{t(($) => $.waiting.empty)}</p>}
+      {blockers.length === 0 && !restrictedCount && <p className="text-muted-foreground">{t(($) => $.waiting.empty)}</p>}
       {mutation.isError && <p role="alert" className="text-destructive">{mutation.error.message}</p>}
     </div>}
     <IssuePickerModal error={mutation.isError ? mutation.error.message : undefined} pending={mutation.isPending} closeOnSelect={false} open={pickerOpen} onOpenChange={setPickerOpen} title={t(($) => $.waiting.add)} description={t(($) => $.waiting.picker_hint)}

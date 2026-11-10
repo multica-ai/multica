@@ -2050,6 +2050,8 @@
     "stage": "Étapes précédentes · {{finished}}/{{total}} terminées",
     "hint": "Une fois ces tâches terminées, le responsable démarre automatiquement ou reçoit une notification.",
     "empty": "Aucune tâche à attendre",
-    "picker_hint": "Sélectionnez une tâche qui doit se terminer avant celle-ci."
+    "picker_hint": "Sélectionnez une tâche qui doit se terminer avant celle-ci.",
+    "restricted": "{{count}} prérequis à accès restreint",
+    "ended": "Les tâches attendues sont terminées"
   }
 }

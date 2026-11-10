@@ -31,7 +31,7 @@ BEGIN
   UPDATE issue_wakeup SET next_fire_at=clock_timestamp() WHERE issue_id=target AND workspace_id=ws AND system_rule='blockers_done';
   RETURN;
  END IF;
- SELECT jsonb_agg(jsonb_build_object('id',i.id,'identifier',w.issue_prefix||'-'||i.number,'title',i.title,'status',i.status,'via',b.via)) INTO facts
+ SELECT jsonb_agg(jsonb_build_object('id',i.id,'identifier',w.issue_prefix||'-'||i.number,'title',i.title,'status',i.status,'via',b.via,'project_id',i.project_id,'private',EXISTS(SELECT 1 FROM project p WHERE p.id=i.project_id AND p.visibility='private'))) INTO facts
  FROM effective_issue_blocker b JOIN issue i ON i.id=b.blocker_issue_id AND i.workspace_id=ws
  JOIN workspace w ON w.id=ws WHERE b.workspace_id=ws AND b.issue_id=target;
  INSERT INTO issue_wakeup(id,workspace_id,issue_id,instruction,kind,mode,event_types,timezone,condition,condition_state,enabled,system_rule,next_fire_at)

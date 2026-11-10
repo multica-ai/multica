@@ -231,6 +231,7 @@ func normalizeIssueTableGroupKey(w http.ResponseWriter, group issueTableGroupSpe
 }
 
 func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	if h.DB == nil {
 		writeError(w, http.StatusInternalServerError, "database is unavailable")
 		return

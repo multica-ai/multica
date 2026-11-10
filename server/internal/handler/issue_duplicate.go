@@ -138,6 +138,7 @@ func liveDuplicateMark(status string, id pgtype.UUID) *string {
 // ListIssueDuplicates returns both sides of an issue's duplicate relation: the
 // original it duplicates, if any, and the issues marked as its duplicates.
 func (h *Handler) ListIssueDuplicates(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
 	if !ok {
 		return

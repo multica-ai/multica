@@ -3844,6 +3844,25 @@ func compactComments(comments []map[string]any) {
 
 // applyIssueBlockerFlags resolves each reference before any issue mutation.
 func applyIssueBlockerFlags(ctx context.Context, client *cli.APIClient, cmd *cobra.Command, body map[string]any) error {
+	changed := false
+	for _, flag := range []string{"blocked-by", "remove-blocked-by"} {
+		if cmd.Flags().Lookup(flag) != nil && cmd.Flags().Changed(flag) {
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	var capabilities struct {
+		IssueBlockersSupported bool `json:"issue_blockers_supported"`
+	}
+	if err := client.GetJSON(ctx, "/api/config", &capabilities); err != nil {
+		return fmt.Errorf("check blocker support: %w", err)
+	}
+	if !capabilities.IssueBlockersSupported {
+		return errors.New("this server does not support issue blockers; update the server before using --blocked-by or --remove-blocked-by")
+	}
+
 	for _, flag := range []string{"blocked-by", "remove-blocked-by"} {
 		if cmd.Flags().Lookup(flag) == nil || !cmd.Flags().Changed(flag) {
 			continue

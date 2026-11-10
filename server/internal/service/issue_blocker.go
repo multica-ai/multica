@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -28,10 +28,15 @@ func evaluateIssueBlockers(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.I
 	}
 	// The snapshot preserves names of deleted or detached blockers. Statuses
 	// come from current rows, including cancellations since the wait was armed.
-	rows, err := tx.Query(ctx, `SELECT b.value || jsonb_build_object('status',COALESCE(i.status,'deleted'),'removed',NOT EXISTS(
- SELECT 1 FROM effective_issue_blocker e WHERE e.workspace_id=$2 AND e.issue_id=$3 AND e.blocker_issue_id=(b.value->>'id')::uuid))
+	rows, err := tx.Query(ctx, `SELECT CASE
+ WHEN COALESCE(p.visibility='private',(b.value->>'private')::boolean,false)
+ THEN jsonb_build_object('restricted',true,'status','ended')
+ ELSE (b.value-'private'-'project_id') || jsonb_build_object('status',COALESCE(i.status,'deleted'),'removed',NOT EXISTS(
+ SELECT 1 FROM effective_issue_blocker e WHERE e.workspace_id=$2 AND e.issue_id=$3 AND e.blocker_issue_id=(b.value->>'id')::uuid)) END
  FROM jsonb_array_elements(COALESCE($1::jsonb->'blockers','[]'::jsonb)) b
- LEFT JOIN issue i ON i.id=(b.value->>'id')::uuid AND i.workspace_id=$2`, w.Condition, w.WorkspaceID, w.IssueID)
+ LEFT JOIN issue i ON i.id=(b.value->>'id')::uuid AND i.workspace_id=$2
+ JOIN issue owner ON owner.id=$3 AND owner.workspace_id=$2
+ LEFT JOIN project p ON p.id=COALESCE(i.project_id,(b.value->>'project_id')::uuid) AND p.workspace_id=$2`, w.Condition, w.WorkspaceID, w.IssueID)
 	if err != nil {
 		return false, "", nil, err
 	}
@@ -134,4 +139,12 @@ func AddIssueBlocker(ctx context.Context, q *db.Queries, workspace, issue, block
 		return err
 	}
 	return q.AddIssueBlocker(ctx, db.AddIssueBlockerParams{WorkspaceID: workspace, IssueID: issue, BlockerIssueID: blocker, CreatedByType: actorType, CreatedByID: actorID})
+}
+
+// PublicWakeupCondition omits the dependency snapshot owned by the queue.
+func PublicWakeupCondition(w db.IssueWakeup) json.RawMessage {
+	if w.SystemRule.String == SystemRuleBlockersDone {
+		return json.RawMessage(`{"type":"blockers_done"}`)
+	}
+	return w.Condition
 }

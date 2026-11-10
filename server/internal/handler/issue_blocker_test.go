@@ -2,15 +2,18 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func blockerTestIssue(t *testing.T, body map[string]any) IssueResponse {
@@ -102,4 +105,82 @@ func TestIssueBlockerRejectsMissingReferenceAtomically(t *testing.T) {
 	a := blockerTestIssue(t, map[string]any{})
 	req := withURLParam(newRequest("PUT", "/api/issues/"+a.ID, map[string]any{"blocked_by": []string{"malformed"}}), "id", a.ID)
 	testutil.Call(t, testHandler.UpdateIssue, req).Want(400)
+}
+
+func TestIssueBlockerPrivateReferencesStayPrivate(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	ctx := context.Background()
+	if err := service.AddIssueBlocker(ctx, testHandler.Queries, parseUUID(testWorkspaceID), parseUUID(f.publicIssue), parseUUID(f.secretIssue), "member", parseUUID(testUserID)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		dbfx.Exec(t, "DELETE FROM issue_blocker WHERE issue_id=$1", f.publicIssue)
+		cleanupChildDoneIssue(f.publicIssue)
+	})
+	get := func(user string) IssueResponse {
+		t.Helper()
+		var issue IssueResponse
+		req := withURLParam(asUser(newRequest("GET", "/api/issues/"+f.publicIssue, nil), user), "id", f.publicIssue)
+		testutil.Call(t, testHandler.GetIssue, req).Want(200).JSON(&issue)
+		return issue
+	}
+	owner := get(testUserID)
+	if len(owner.BlockedBy) != 1 || owner.BlockedBy[0].ID != f.secretIssue {
+		t.Fatalf("authorized owner lost the reference: %+v", owner.BlockedBy)
+	}
+	outsider := get(f.outsider)
+	if len(outsider.BlockedBy) != 0 || outsider.BlockedCount != 1 {
+		t.Fatalf("outsider projection = %+v", outsider)
+	}
+	publisher := *testHandler
+	publisher.Bus = events.New()
+	var broadcast string
+	publisher.Bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) { raw, _ := json.Marshal(e.Payload); broadcast = string(raw) })
+	update := withURLParam(newRequest("PUT", "/api/issues/"+f.publicIssue, map[string]any{"title": f.marker + " updated public issue"}), "id", f.publicIssue)
+	testutil.Call(t, publisher.UpdateIssue, update).Want(200)
+	if broadcast == "" || strings.Contains(broadcast, f.secretIssue) || strings.Contains(broadcast, f.marker+" secret issue") {
+		t.Fatalf("public broadcast leaked or was missing: %s", broadcast)
+	}
+	req := withURLParam(asUser(newRequest("PUT", "/api/issues/"+f.publicIssue, map[string]any{"blocked_by": []string{f.secretIssue}}), f.outsider), "id", f.publicIssue)
+	testutil.Call(t, testHandler.UpdateIssue, req).Want(400)
+	dbfx.Exec(t, "UPDATE issue SET assignee_type='member',assignee_id=$2 WHERE id=$1", f.publicIssue, f.outsider)
+	dbfx.Exec(t, "UPDATE issue SET status='done' WHERE id=$1", f.secretIssue)
+	svc := service.IssueWakeupService{Tasks: testHandler.TaskService}
+	if err := svc.TickWorkspaces(ctx, parseUUID(testWorkspaceID)); err != nil {
+		t.Fatal(err)
+	}
+	var details string
+	dbfx.QueryRow(t, "SELECT details::text FROM inbox_item WHERE issue_id=$1 AND type='blockers_done'", f.publicIssue).Scan(&details)
+	if strings.Contains(details, f.secretIssue) || strings.Contains(details, f.marker+" secret issue") {
+		t.Fatalf("inbox leaked a private prerequisite: %s", details)
+	}
+	var activity string
+	dbfx.QueryRow(t, "SELECT details::text FROM activity_log WHERE issue_id=$1 AND action='wakeup_triggered' ORDER BY created_at DESC LIMIT 1", f.publicIssue).Scan(&activity)
+	if strings.Contains(activity, f.secretIssue) || strings.Contains(activity, f.marker+" secret issue") {
+		t.Fatalf("activity leaked a private prerequisite: %s", activity)
+	}
+}
+
+func TestIssueBlockerDeletingStagePredecessorReleasesWaitingIssue(t *testing.T) {
+	parent := blockerTestIssue(t, map[string]any{"status": "todo"})
+	earlier := dbfx.Issue(t, "deleted stage predecessor", testutil.Cols{"parent_issue_id": parent.ID, "stage": 1})
+	waiting := blockerTestIssue(t, map[string]any{"status": "todo", "parent_issue_id": parent.ID, "stage": 2, "assignee_type": "agent", "assignee_id": handlerTestAgentID(t)})
+	if waiting.BlockedCount != 1 {
+		t.Fatalf("later stage was not waiting: %+v", waiting)
+	}
+	req := withURLParam(newRequest("DELETE", "/api/issues/"+earlier, nil), "id", earlier)
+	testutil.Call(t, testHandler.DeleteIssue, req).Want(204)
+	svc := service.IssueWakeupService{Tasks: testHandler.TaskService}
+	if err := svc.TickWorkspaces(context.Background(), parseUUID(testWorkspaceID)); err != nil {
+		t.Fatal(err)
+	}
+	if n := dbfx.Count(t, "SELECT count(*) FROM agent_task_queue WHERE issue_id=$1 AND context->>'wakeup_system'='blockers_done'", waiting.ID); n != 1 {
+		t.Fatalf("deleting predecessor queued %d runs", n)
+	}
+	var current IssueResponse
+	req = withURLParam(newRequest("GET", "/api/issues/"+waiting.ID, nil), "id", waiting.ID)
+	testutil.Call(t, testHandler.GetIssue, req).Want(200).JSON(&current)
+	if current.BlockedCount != 0 || current.Status != "todo" {
+		t.Fatalf("release changed status or left a blocker: %+v", current)
+	}
 }

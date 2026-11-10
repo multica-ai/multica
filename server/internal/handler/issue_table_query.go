@@ -701,7 +701,13 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 			writeError(w, http.StatusUnauthorized, "user not authenticated")
 			return issueTableSQL{}, false
 		}
-		userRef := addArg(userUUID)
+		userRef := ""
+		for _, relation := range relations {
+			if relation != "blocked" {
+				userRef = addArg(userUUID)
+				break
+			}
+		}
 		ors := make([]string, 0, len(relations))
 		for _, relation := range relations {
 			ors = append(ors, issueTableRelationPredicate(relation, userRef))

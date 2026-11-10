@@ -41,7 +41,7 @@ func wakeupPreview(w db.IssueWakeup) map[string]any {
 		"agent_id": util.UUIDToString(w.AgentID), "timezone": w.Timezone,
 	}
 	if len(w.Condition) > 0 {
-		preview["condition"] = json.RawMessage(w.Condition)
+		preview["condition"] = PublicWakeupCondition(w)
 	}
 	if w.FilterActorType.Valid {
 		preview["filter_actor_type"] = w.FilterActorType.String

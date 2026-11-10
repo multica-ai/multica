@@ -717,7 +717,7 @@ func stageProgress(children []subIssue) (bool, string, map[string]any) {
 // recordConditionMet turns a newly satisfied condition into one run input. It
 // names the agent runs whose changes satisfied it, when all of them are known.
 func recordConditionMet(ctx context.Context, q *db.Queries, w db.IssueWakeup, observed map[string]any, causes []string, now time.Time) error {
-	facts := map[string]any{"condition": json.RawMessage(w.Condition), "observed": observed, "observed_at": now.UTC().Format(time.RFC3339)}
+	facts := map[string]any{"condition": PublicWakeupCondition(w), "observed": observed, "observed_at": now.UTC().Format(time.RFC3339)}
 	if len(causes) > 0 {
 		facts["source_task_ids"] = causes
 	}

@@ -2050,6 +2050,10 @@
     "stage": "Earlier stages · {{finished}}/{{total}} ended",
     "hint": "After these tasks end, the assignee starts automatically or receives a notification.",
     "empty": "No tasks to wait for",
-    "picker_hint": "Select a task that must end before this one can start."
+    "picker_hint": "Select a task that must end before this one can start.",
+    "restricted": "{{count}} restricted prerequisites",
+    "ended": "Waiting tasks ended",
+    "count_one": "Waiting for {{count}} task",
+    "count_other": "Waiting for {{count}} tasks"
   }
 }

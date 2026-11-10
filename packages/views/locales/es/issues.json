@@ -2050,6 +2050,8 @@
     "stage": "Etapas anteriores · {{finished}}/{{total}} terminadas",
     "hint": "Al terminar estas tareas, el responsable comienza automáticamente o recibe una notificación.",
     "empty": "Sin tareas pendientes",
-    "picker_hint": "Selecciona una tarea que deba terminar antes que esta."
+    "picker_hint": "Selecciona una tarea que deba terminar antes que esta.",
+    "restricted": "{{count}} requisitos restringidos",
+    "ended": "Las tareas en espera terminaron"
   }
 }
