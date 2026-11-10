@@ -102,3 +102,15 @@ export function useDeleteProject() {
     },
   });
 }
+
+export function useSetProjectSubscription() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, subscribed }: { id: string; subscribed: boolean }) =>
+      api.setProjectSubscription(id, subscribed),
+    onSuccess: (subscribed, { id }) => {
+      qc.setQueryData(projectKeys.subscription(wsId, id), subscribed);
+    },
+  });
+}

@@ -46,6 +46,7 @@
   "type": {
     "assigned": "Assigned",
     "subscribed": "Subscribed",
+    "issue_created": "New issue",
     "unassigned": "Unassigned",
     "reassigned": "Reassigned",
     "status_changed": "Status changed",

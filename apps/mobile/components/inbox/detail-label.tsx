@@ -37,6 +37,7 @@ const PRIORITY_LABEL: Record<IssuePriority, string> = {
 const TYPE_KEY: Record<InboxItemType, string> = {
   issue_assigned: "type.assigned",
   issue_subscribed: "type.subscribed",
+  issue_created: "type.issue_created",
   unassigned: "type.unassigned",
   assignee_changed: "type.reassigned",
   status_changed: "type.status_changed",
