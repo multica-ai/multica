@@ -326,9 +326,14 @@ func TestPrivateProjectVisibilityAndMembersAPI(t *testing.T) {
 		req := testutil.WithURLParams(asUser(newRequest(http.MethodDelete, "/api/projects/"+project.ID+"/members/"+target, nil), actor), "id", project.ID, "userId", target)
 		return testutil.Call(t, testHandler.RemoveProjectMember, req)
 	}
-	// Removing someone else takes an admin or the lead; leaving does not.
+	// Every removal takes an admin or the lead, including self-removal.
 	remove(f.outsider, f.insider).Want(http.StatusForbidden)
-	remove(f.outsider, f.outsider).Want(http.StatusNoContent)
+	remove(f.outsider, f.outsider).Want(http.StatusForbidden)
+	members(f.outsider).Want(http.StatusOK)
+	withFeatureFlag(t, testHandler, featureflags.PrivateProjectsV1, false)
+	remove(f.outsider, f.outsider).Want(http.StatusForbidden)
+	members(f.outsider).Want(http.StatusOK)
+	remove(testUserID, f.outsider).Want(http.StatusNoContent)
 	members(f.outsider).Want(http.StatusNotFound)
 
 	// Only an admin or the lead switches visibility; the owner can.

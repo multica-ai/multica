@@ -11,7 +11,7 @@ export function canManageProjectAccess(project: Pick<Project, "lead_type" | "lea
 type AccessChange =
   | { type: "visibility"; visibility: ProjectVisibility; memberIds: string[] }
   | { type: "add"; userId: string }
-  | { type: "remove"; userId: string; leave?: boolean };
+  | { type: "remove"; userId: string };
 
 export function useProjectAccessMutation(wsId: string, projectId: string) {
   const qc = useQueryClient();
@@ -28,14 +28,8 @@ export function useProjectAccessMutation(wsId: string, projectId: string) {
         await api.removeProjectMember(projectId, change.userId);
       }
     },
-    onSettled: async (_data, error, change) => {
-      if (!error && change.type === "remove" && change.leave) {
-        await qc.cancelQueries({ queryKey: projectKeys.detail(wsId, projectId) });
-        qc.removeQueries({ queryKey: projectKeys.detail(wsId, projectId) });
-        await qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
-      } else {
-        await qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
-      }
+    onSettled: async () => {
+      await qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       await qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
     },
   });

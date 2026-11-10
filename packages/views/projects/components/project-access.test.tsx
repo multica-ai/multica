@@ -11,11 +11,9 @@ import { renderWithI18n } from "../../test/i18n";
 import { ProjectAccessControl, ProjectAccessDraftPicker } from "./project-access";
 import { ProjectLeadPicker } from "./project-lead-picker";
 
-const state = vi.hoisted(() => ({ viewer: "owner", push: vi.fn() }));
+const state = vi.hoisted(() => ({ viewer: "owner" }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
 vi.mock("@multica/core/auth", () => ({ useAuthStore: Object.assign((selector: (s: { user: { id: string } }) => unknown) => selector({ user: { id: state.viewer } }), { getState: () => ({ user: { id: state.viewer } }) }) }));
-vi.mock("@multica/core/paths", () => ({ useWorkspacePaths: () => ({ projects: () => "/dev/projects" }) }));
-vi.mock("../../navigation", () => ({ useNavigation: () => ({ push: state.push }) }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => <span aria-hidden="true" /> }));
 vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: () => "Lead" }) }));
 
@@ -36,7 +34,6 @@ function renderControl(value: Project = project) {
 
 beforeEach(() => {
   state.viewer = "owner";
-  state.push.mockReset();
   configStore.getState().setFeatureFlags({ private_projects_v1: true });
   qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   ids = ["owner", "lead", "member"];
@@ -71,7 +68,7 @@ it("loads the member list, finds people by email, and adds and removes only afte
   expect(screen.getByRole("dialog")).toBeVisible();
 });
 
-it("prevents a regular project member from adding people, removing others, or changing scope", async () => {
+it("keeps project membership read-only for a regular member, including their own membership", async () => {
   state.viewer = "member";
   const user = userEvent.setup();
   renderControl();
@@ -81,9 +78,8 @@ it("prevents a regular project member from adding people, removing others, or ch
   expect(screen.queryByRole("button", { name: "Add workspace member" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Remove Owner" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Remove Lead" })).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Remove Member" }));
-  await waitFor(() => expect(state.push).toHaveBeenCalledWith("/dev/projects"));
-  expect(api.removeProjectMember).toHaveBeenCalledWith("p1", "member");
+  expect(screen.queryByRole("button", { name: "Remove Member" })).not.toBeInTheDocument();
+  expect(api.removeProjectMember).not.toHaveBeenCalled();
 });
 
 it.each(["owner", "lead"])("allows %s to manage project members", async (viewer) => {

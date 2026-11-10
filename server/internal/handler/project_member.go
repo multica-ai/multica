@@ -18,9 +18,9 @@ import (
 
 // Private projects (MUL-8472). Who may do what:
 //
-//   - change visibility or lead, add/remove other members: workspace
+//   - change visibility or lead, add/remove members: workspace
 //     owner/admin, or the project's member lead
-//   - remove yourself: any project member
+//   - ordinary project members: read-only membership, no self-removal
 //   - agents: none of these; an agent's access is derived from humans
 //
 // Only switching a project TO private is behind private_projects_v1. Making
@@ -413,8 +413,8 @@ func (h *Handler) RemoveProjectMember(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if target != member.UserID && !canManageProjectAccess(member, project) {
-		writeError(w, http.StatusForbidden, "only workspace admins and the project lead can remove other members")
+	if !canManageProjectAccess(member, project) {
+		writeError(w, http.StatusForbidden, "only workspace admins and the project lead can remove project members")
 		return
 	}
 	if project.LeadType.Valid && project.LeadType.String == "member" && project.LeadID == target {

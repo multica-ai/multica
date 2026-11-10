@@ -7,7 +7,6 @@ import type { MemberWithUser, Project, ProjectVisibility } from "@multica/core/t
 import { useAuthStore } from "@multica/core/auth";
 import { useConfigStore } from "@multica/core/config";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { projectMembersOptions } from "@multica/core/projects/queries";
 import { canManageProjectAccess, useProjectAccessMutation } from "@multica/core/projects/access";
@@ -18,7 +17,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@multica/ui/components/ui/command";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@multica/ui/components/ui/alert-dialog";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
 const EMPTY_IDS: string[] = [];
@@ -132,8 +130,6 @@ function ProjectAccessEditor({ project, enabled, onClose, changeAccess }: { proj
   const { t: tc } = useT("common");
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
-  const router = useNavigation();
-  const paths = useWorkspacePaths();
   const workspaceMembers = useQuery(memberListOptions(wsId));
   const projectMembers = useQuery(projectMembersOptions(wsId, project.id));
   const [visibility, setVisibility] = useState<ProjectVisibility>(project.visibility ?? "workspace");
@@ -142,7 +138,6 @@ function ProjectAccessEditor({ project, enabled, onClose, changeAccess }: { proj
   const [confirmPublic, setConfirmPublic] = useState(false);
   const members = workspaceMembers.data ?? [];
   const role = members.find((member) => member.user_id === userId)?.role;
-  const isManager = role === "owner" || role === "admin";
   const leadId = project.lead_type === "member" ? project.lead_id : null;
   const canManage = canManageProjectAccess(project, userId, role);
   const currentIds = projectMembers.data?.members.map((member) => member.user_id) ?? EMPTY_IDS;
@@ -168,12 +163,11 @@ function ProjectAccessEditor({ project, enabled, onClose, changeAccess }: { proj
           <AccessFields visibility={visibility} onVisibilityChange={setVisibility} members={members} selected={selected} userId={userId} leadId={leadId}
             disabled={pending} canChangeScope={canManage} canUsePrivate={enabled || project.visibility === "private"}
             canAdd={canManage}
-            canRemove={(id) => id !== leadId && (canManage || id === userId)}
+            canRemove={(id) => canManage && id !== leadId}
             onAdd={async (id) => { if (project.visibility === "private") return run({ type: "add", userId: id }); setDraftIds([...selected, id]); return true; }}
             onRemove={async (id) => {
               if (project.visibility !== "private") { setDraftIds(selected.filter((value) => value !== id)); return; }
-              const leave = id === userId && !isManager;
-              if (await run({ type: "remove", userId: id, leave }) && leave) { onClose(); router.push(paths.projects()); }
+              await run({ type: "remove", userId: id });
             }} />
         )}
         {error ? <p role="alert" className="mt-3 text-body text-destructive">{error}</p> : null}
