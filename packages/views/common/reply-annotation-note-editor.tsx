@@ -5,11 +5,10 @@ import { isImeComposing } from "@multica/core/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../i18n";
 
-/** 任务评论和私聊选区共用的行内批注编辑器。 */
-export function ReplyAnnotationNoteEditor({ inputRef, note, confirmLabel, onChange, onConfirm, onCancel, children }: {
+export function ReplyAnnotationNoteEditor({ inputRef, note, existing, onChange, onConfirm, onCancel, children }: {
   inputRef: Ref<HTMLTextAreaElement>;
   note: string;
-  confirmLabel: string;
+  existing: boolean;
   onChange: (note: string) => void;
   onConfirm: () => void;
   onCancel: () => void;
@@ -33,8 +32,9 @@ export function ReplyAnnotationNoteEditor({ inputRef, note, confirmLabel, onChan
     <div className="flex items-center justify-end gap-1 px-1 pb-1">
       {children}
       <Button type="button" size="sm" disabled={!note.trim()}
-        aria-label={confirmLabel} aria-keyshortcuts="Enter"
-        onClick={onConfirm}>{confirmLabel}</Button>
+        aria-label={t(($) => existing ? $.reply.annotations.save : $.reply.annotations.confirm_add)}
+        aria-keyshortcuts="Enter"
+        onClick={onConfirm}>{t(($) => existing ? $.reply.annotations.save_short : $.reply.annotations.confirm_add_short)}</Button>
     </div>
   </div>;
 }

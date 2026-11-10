@@ -1005,11 +1005,13 @@ describe("ChatMessageList reply selections", () => {
     fireEvent.click(screen.getByText("Add to reply"));
     expect(saved()).toEqual([]);
     const note = (await screen.findByRole("textbox", { name: "Comment" }));
-    expect(screen.getByRole("button", { name: "Add annotation" })).toBeDisabled();
+    const addButton = screen.getByRole("button", { name: "Add annotation" });
+    expect(addButton).toHaveTextContent(/^Add$/);
+    expect(addButton).toBeDisabled();
     fireEvent.change(note, { target: { value: "First note\nwith details" } });
     fireEvent(document, new Event("selectionchange"));
     expect(note).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Add annotation" }));
+    fireEvent.click(addButton);
     expect(saved()[0]).toMatchObject({ quote: "bold line\n\nSecond code line", note: "First note\nwith details" });
     const user = container.querySelector('[data-chat-reply-content="user"] p')!.firstChild!;
     select(user);
@@ -1022,7 +1024,9 @@ describe("ChatMessageList reply selections", () => {
     const edit = await screen.findByRole("textbox", { name: "Comment" });
     expect(edit).toHaveValue("First note\nwith details");
     fireEvent.change(edit, { target: { value: "Revised first note" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save annotation" }));
+    const saveButton = screen.getByRole("button", { name: "Save annotation" });
+    expect(saveButton).toHaveTextContent(/^Save$/);
+    fireEvent.click(saveButton);
     expect(saved()[0]!.note).toBe("Revised first note");
   });
 

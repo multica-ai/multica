@@ -244,8 +244,6 @@ export function useReplyAnnotations({ draftKey, sources, annotations, actions, e
     CSS.highlights.set(name, new Highlight(selection.range));
     return () => { CSS.highlights.delete(name); };
   }, [enabled, selection, editingId, highlightName]);
-  const confirmLabel = t(($) => editor?.existing ? $.reply.annotations.save : $.reply.annotations.confirm_add);
-
   return {
     cardRef,
     editAnnotation,
@@ -281,7 +279,7 @@ export function useReplyAnnotations({ draftKey, sources, annotations, actions, e
       })}
       {enabled && selection && <TextSelectionBubble range={selection.range} source={selection.root} owner={draftKey} onPositioned={focusNote}>
         <div className="bubble-menu max-w-[calc(100vw-16px)] focus-within:outline-1 focus-within:outline-ring">
-          {editing ? <ReplyAnnotationNoteEditor inputRef={inputRef} note={editing.note} confirmLabel={confirmLabel}
+          {editing ? <ReplyAnnotationNoteEditor inputRef={inputRef} note={editing.note} existing={editingExisting}
             onChange={(note) => {
               setEditor({ annotation: { ...editing, note }, existing: editingExisting });
               setError(false);
