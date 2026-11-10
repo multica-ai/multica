@@ -570,7 +570,9 @@
   },
   "timeline": {
     "loading": "Cargando...",
-    "jump_to_latest": "Ir a lo más reciente"
+    "jump_to_latest": "Ir a lo más reciente",
+    "new_comments_one": "{{count}} comentario nuevo",
+    "new_comments_other": "{{count}} comentarios nuevos"
   },
   "activity": {
     "created": "creó esta tarea",

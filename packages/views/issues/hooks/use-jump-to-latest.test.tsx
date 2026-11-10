@@ -31,9 +31,15 @@ function defineMetrics(el: HTMLElement, metrics: { scrollHeight: number; clientH
   });
 }
 
-function Harness({ metrics }: { metrics: { scrollHeight: number; clientHeight: number } }) {
+function Harness({
+  metrics,
+  nearTopOnly = false,
+}: {
+  metrics: { scrollHeight: number; clientHeight: number };
+  nearTopOnly?: boolean;
+}) {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
-  const { visible, jump } = useJumpToLatest(el);
+  const { visible, jump } = useJumpToLatest(el, { nearTopOnly });
   return (
     <div
       data-testid="scroller"
@@ -77,8 +83,18 @@ describe("useJumpToLatest", () => {
     expect(screen.queryByRole("button", { name: "latest" })).toBeNull();
   });
 
-  it("hides once the reader has scrolled past the top fifth of the page", () => {
+  it("stays up anywhere more than a screen from the bottom", () => {
     render(<Harness metrics={{ scrollHeight: 4000, clientHeight: 500 }} />);
+    const scroller = screen.getByTestId("scroller");
+
+    scroller.scrollTop = 2900; // 600px from the bottom, far past the top fifth
+    fireEvent.scroll(scroller);
+    flushFrame();
+    expect(screen.getByRole("button", { name: "latest" })).toBeTruthy();
+  });
+
+  it("near-top-only: hides once the reader has scrolled past the top fifth of the page", () => {
+    render(<Harness metrics={{ scrollHeight: 4000, clientHeight: 500 }} nearTopOnly />);
     const scroller = screen.getByTestId("scroller");
 
     scroller.scrollTop = 800; // exactly 20% of the page
@@ -92,8 +108,8 @@ describe("useJumpToLatest", () => {
     expect(screen.queryByRole("button", { name: "latest" })).toBeNull();
   });
 
-  it("stays hidden when the view opens restored past the top fifth", () => {
-    render(<Harness metrics={{ scrollHeight: 4000, clientHeight: 500 }} />);
+  it("near-top-only: stays hidden when the view opens restored past the top fifth", () => {
+    render(<Harness metrics={{ scrollHeight: 4000, clientHeight: 500 }} nearTopOnly />);
     const scroller = screen.getByTestId("scroller");
     scroller.scrollTop = 2000;
     fireEvent.scroll(scroller);

@@ -587,7 +587,9 @@
   },
   "timeline": {
     "loading": "Loading...",
-    "jump_to_latest": "Jump to latest"
+    "jump_to_latest": "Jump to latest",
+    "new_comments_one": "{{count}} new comment",
+    "new_comments_other": "{{count}} new comments"
   },
   "activity": {
     "created": "created this issue",

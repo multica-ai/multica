@@ -587,7 +587,9 @@
   },
   "timeline": {
     "loading": "Chargement...",
-    "jump_to_latest": "Aller au plus récent"
+    "jump_to_latest": "Aller au plus récent",
+    "new_comments_one": "{{count}} nouveau commentaire",
+    "new_comments_other": "{{count}} nouveaux commentaires"
   },
   "activity": {
     "created": "a créé cette tâche",
