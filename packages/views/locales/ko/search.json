@@ -133,14 +133,8 @@
     "type_to_find_people": "입력해서 멤버와 에이전트 찾기"
   },
   "delegate": {
-    "heading": "에이전트에게 맡기기",
-    "create_and_assign": "새 태스크를 만들어 {{name}}에게 지정",
-    "squad": "스쿼드",
-    "context_aria": "함께 보낼 컨텍스트",
-    "parent": "{{identifier}} 하위",
-    "pick_crumb": "선택",
-    "pick_another": "다른 에이전트나 스쿼드에게 맡기기...",
-    "detected": "지시로 인식"
+    "row": "에이전트에게 맡기기: “{{prompt}}”",
+    "hint": "빠른 만들기"
   },
   "best": {
     "assign": "{{subject}}를 {{name}}에게 지정",
@@ -159,8 +153,6 @@
     "navigate": "선택",
     "select": "실행",
     "open_in_new_tab": "새 탭에서 열기",
-    "delegate": "만들어서 {{name}}에게 맡기기",
-    "search_instead": "키워드로 검색",
     "back": "뒤로",
     "prefix_commands": "명령어",
     "prefix_issues": "태스크",

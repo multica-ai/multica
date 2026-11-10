@@ -206,5 +206,26 @@
       "issue_pricing": "Pricing comparison table",
       "issue_blog": "Paginate the blog list"
     }
+  },
+  "access": {
+    "label": "Access",
+    "title": "Access to {{title}}",
+    "description": "Controls who can see this project and its issues, comments, and attachments.",
+    "workspace": "Entire workspace",
+    "private": "Project members only",
+    "members_count": "Project members · {{count}}",
+    "add": "Add workspace member",
+    "search": "Search name or email...",
+    "no_members": "No matching members",
+    "no_selected": "No project members",
+    "admin_notice": "Workspace owners and admins always have access.",
+    "you": "You",
+    "remove": "Remove {{name}}",
+    "failed": "Could not save access changes.",
+    "load_failed": "Could not load project members.",
+    "publish_title": "Make this project visible to the workspace?",
+    "publish_description": "All workspace members will be able to see this project and its issues, comments, and attachments.",
+    "done": "Done",
+    "retry": "Retry"
   }
 }

@@ -50,6 +50,8 @@
     "action_failed_toast": "無法更新排隊訊息"
   },
   "message_list": {
+    "jump_to_latest": "跳到最新",
+    "new_reply": "新回覆",
     "show_details": "檢視詳情",
     "replied_in": "{{elapsed}} 內回覆",
     "failed_after": "{{elapsed}} 後失敗",

@@ -289,6 +289,10 @@ type NewWorkflowStatus struct {
 	Name     string `json:"name"`
 	Category string `json:"category"`
 	Color    string `json:"color"`
+	// Icon is presentation-only geometry (see validIssueStatusIcon). Empty
+	// keeps the category default, which is what every status created before
+	// this field existed carries.
+	Icon string `json:"icon,omitempty"`
 }
 
 // IssueWorkflowStepInput names a step by an existing status key or by a
@@ -375,6 +379,9 @@ func createWorkflowStatus(ctx context.Context, qtx *db.Queries, wsUUID pgtype.UU
 	if !ok {
 		category = "started"
 	}
+	if !validIssueStatusIcon(in.Icon) {
+		return db.IssueStatus{}, false, "invalid status icon", nil
+	}
 	color := newStatusDefaultColor[category]
 	if strings.TrimSpace(in.Color) != "" {
 		c, err := normalizeColor(in.Color)
@@ -402,6 +409,7 @@ func createWorkflowStatus(ctx context.Context, qtx *db.Queries, wsUUID pgtype.UU
 		Name:        name,
 		Category:    category,
 		Color:       color,
+		Icon:        in.Icon,
 	})
 	if err != nil && isUniqueViolation(err) {
 		return db.IssueStatus{}, false, fmt.Sprintf("a status named %q already exists", name), nil
@@ -906,6 +914,9 @@ func (h *Handler) loadProjectForWorkflowWrite(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusNotFound, "project not found")
 		return db.Project{}, db.Member{}, "", false
 	}
+	if !h.requireProjectVisible(w, r, workspaceID, project.ID, http.StatusNotFound, "project not found") {
+		return db.Project{}, db.Member{}, "", false
+	}
 	if !canManageProjectWorkflow(member, project) {
 		writeError(w, http.StatusForbidden, "only workspace admins and the project lead can change this project's workflow")
 		return db.Project{}, db.Member{}, "", false
@@ -1389,6 +1400,9 @@ func (h *Handler) PreviewWorkflowHandoff(w http.ResponseWriter, r *http.Request)
 		}
 		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{ID: projectID, WorkspaceID: issue.WorkspaceID}); err != nil {
 			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		if !h.requireProjectVisible(w, r, uuidToString(issue.WorkspaceID), projectID, http.StatusNotFound, "project not found") {
 			return
 		}
 		params.ProjectID = projectID

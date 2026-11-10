@@ -303,10 +303,9 @@ func (h *Handler) ownedStorageKey(rawURL string) string {
 // already loadable by an unauthenticated browser fetch, in which case
 // rewriting it would only add a pointless hop through the API.
 func (h *Handler) avatarObjectLoadsUnauthenticated(rawURL string) bool {
-	// LocalStorage objects are served by the public /uploads/* route, whether
-	// the stored URL is site-relative or absolute via LOCAL_UPLOAD_BASE_URL.
+	// Direct local-file serving is disabled, even when a base URL is configured.
 	if _, ok := h.Storage.(*storage.LocalStorage); ok {
-		return true
+		return false
 	}
 	// Otherwise: a public CDN domain with no per-request CloudFront signing.
 	// In signed-CloudFront mode the same domain serves private content and the

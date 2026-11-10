@@ -157,12 +157,6 @@
     "toast_saved": "변경사항을 저장했습니다"
   },
   "preferences": {
-    "theme": {
-      "title": "테마",
-      "light": "라이트",
-      "dark": "다크",
-      "system": "시스템"
-    },
     "language": {
       "title": "언어",
       "english": "English",
@@ -194,13 +188,149 @@
     },
     "comments_title": "댓글 및 채팅",
     "region_title": "언어 및 지역",
-    "appearance_title": "모양",
     "issue_fields_title": "태스크 생성 시 표시할 필드",
     "issue_fields": {
       "field": "필드",
       "quick": "에이전트로 생성",
       "manual": "수동 생성",
       "unsupported": "에이전트로 생성할 때는 사용할 수 없습니다"
+    }
+  },
+  "appearance": {
+    "reset": "기본값으로 재설정",
+    "color": {
+      "title": "색상"
+    },
+    "mode": {
+      "title": "모드",
+      "light": "라이트",
+      "dark": "다크",
+      "system": "시스템"
+    },
+    "theme": {
+      "title": "테마",
+      "description": "앱 전체의 색상, 테두리, 그림자, 모서리. 테마 파일을 가져와 더 추가할 수 있어요.",
+      "default": "기본",
+      "pop": "팝",
+      "built_in": "기본 제공",
+      "installed": "설치됨",
+      "remove": "{{name}} 제거",
+      "safe_mode": "안전 모드: 이 창을 닫을 때까지 테마가 꺼져 있어요.",
+      "safe_mode_exit": "내 테마 사용",
+      "folder": "테마 폴더",
+      "folder_problems": "테마 폴더의 일부 테마가 검사를 통과하지 못했어요. 고친 뒤 저장하세요. 그동안은 마지막으로 통과한 버전을 사용해요."
+    },
+    "import": {
+      "button": "테마 가져오기",
+      "from_zip": "테마 파일(.zip)",
+      "from_folder": "테마 폴더",
+      "storage_full": "이 기기에 테마를 저장할 공간이 부족해요. 다른 테마를 제거한 뒤 다시 시도하세요.",
+      "confirm_title": "‘{{name}}’을(를) 설치할까요?",
+      "warning": "테마는 대화상자와 경고를 포함한 모든 화면의 모양을 바꿀 수 있어요. 신뢰하는 사람이 만든 테마만 설치하세요.",
+      "author": "만든 사람",
+      "version": "버전",
+      "replaces": "{{to}} ({{from}} 대체)",
+      "includes": "포함",
+      "cancel": "취소",
+      "confirm": "설치하고 사용",
+      "error_title": "이 테마를 설치할 수 없어요",
+      "error_description": "아무것도 바뀌지 않았어요. 테마 파일에 다음 문제가 있어요:",
+      "close": "닫기",
+      "has_options_other": "옵션 {{count}}개",
+      "has_assets_other": "글꼴·이미지 {{count}}개",
+      "menu_label": "사용자 테마",
+      "beta": "베타",
+      "beta_note": "사용자 테마는 베타예요. 테마가 쓰는 변수와 매니페스트가 바뀔 수 있어 테마를 업데이트해야 할 수도 있어요."
+    },
+    "tools": {
+      "label": "테마 작업 더 보기",
+      "duplicate": "“{{name}}” 복제해서 새 테마 만들기",
+      "open_folder": "테마 폴더 열기",
+      "guide": "테마 만드는 방법",
+      "duplicated_web": "{{file}}을(를) 내려받았어요. 압축을 풀고 theme.css를 고친 다음 폴더를 가져오세요.",
+      "duplicated_desktop": "테마 폴더에 “{{name}}”을(를) 만들었어요. theme.css를 저장하면 바로 반영돼요.",
+      "duplicate_failed": "복사본을 만들지 못했어요: {{error}}"
+    },
+    "theme_options": {
+      "title": "테마 옵션",
+      "description": "{{name}}에서 제공해요.",
+      "reset": "옵션 초기화"
+    },
+    "ui_text": {
+      "title": "인터페이스 글자",
+      "description": "메뉴, 버튼, 목록, 사이드바, 제목."
+    },
+    "latin_font": {
+      "title": "라틴 글꼴"
+    },
+    "ui_font": {
+      "inter": "기본",
+      "system": "시스템",
+      "serif": "세리프",
+      "mono": "고정폭"
+    },
+    "cjk_font": {
+      "title": "CJK 글꼴",
+      "description": "한자 글꼴. 일본어와 한국어도 이 설정을 따라요.",
+      "sans": "고딕",
+      "serif": "명조",
+      "kai": "해서",
+      "built_in": "기본",
+      "local": "이 기기",
+      "load_local": "이 기기의 글꼴 보기…",
+      "loading": "글꼴을 찾는 중…",
+      "none": "이 기기에 한자가 있는 글꼴이 없어요.",
+      "load_failed": "이 기기의 글꼴을 읽을 수 없어요.",
+      "sample": "永和九年 한글"
+    },
+    "follow_ui": "인터페이스와 같게",
+    "theme_font": "테마 글꼴",
+    "font_size": {
+      "title": "글꼴 크기",
+      "description": "텍스트만 확대합니다. 간격과 레이아웃은 그대로입니다.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · 기본"
+    },
+    "content_text": {
+      "title": "본문 글자",
+      "description": "이슈 설명, 댓글, 채팅, 문서의 본문.",
+      "sample": "설명과 댓글은 길게 읽으니 읽기 좋은 글꼴로 바꿀 수 있어요. 목록과 버튼은 그대로 촘촘하게 유지돼요."
+    },
+    "code_font": {
+      "title": "코드 글꼴",
+      "description": "코드 블록, 인라인 코드, 로그.",
+      "geist": "기본",
+      "jetbrains": "합자",
+      "system": "시스템 고정폭"
+    },
+    "content_size": {
+      "title": "글자 크기",
+      "description": "본문만 바뀌고 인터페이스는 그대로예요.",
+      "follow": "인터페이스와 같게 ({{size}}px)"
+    },
+    "content_leading": {
+      "title": "줄 간격",
+      "compact": "좁게",
+      "default": "기본",
+      "relaxed": "넓게"
+    },
+    "layout": {
+      "title": "레이아웃 및 접근성"
+    },
+    "density": {
+      "title": "밀도",
+      "description": "이슈 목록과 검색 결과의 행 높이.",
+      "compact": "좁게",
+      "default": "기본",
+      "comfortable": "넓게"
+    },
+    "reduce_motion": {
+      "title": "동작 줄이기",
+      "description": "애니메이션과 전환 효과를 끕니다. 꺼져 있어도 시스템 설정은 적용됩니다."
+    },
+    "high_contrast": {
+      "title": "대비 높이기",
+      "description": "보조 텍스트를 진하게, 테두리를 뚜렷하게 합니다."
     }
   },
   "shortcuts": {
@@ -394,6 +524,7 @@
     "tabs": {
       "profile": "프로필",
       "preferences": "환경설정",
+      "appearance": "모양",
       "shortcuts": "단축키",
       "issue": "태스크",
       "notifications": "알림",
@@ -1476,12 +1607,11 @@
     "title": "에이전트에 도구를 제공하는 방법",
     "current": "현재 페이지",
     "mcp": "관리자가 추가해 워크스페이스에서 공유하고, 에이전트별로 할당합니다.",
-    "apps": "Multica로 연결한 팀 또는 개인 계정으로, 에이전트마다 계정과 권한 수준을 지정합니다.",
+    "apps": "Multica로 연결한 팀 또는 개인 계정을 각 에이전트에 추가합니다.",
     "plugins": "설치하면 도구, 예약 훅, 저장소를 추가할 수 있으며 플러그인마다 권한을 부여합니다."
   },
   "connected_apps": {
-    "description": "에이전트가 외부 앱을 사용할 때 쓰는 계정입니다. 모든 호출은 Multica를 거치며, 규칙을 적용하고 보내기·삭제·공유 전에 확인을 받습니다.",
-    "add_app": "앱 추가",
+    "description": "에이전트가 외부 앱을 사용할 때 쓰는 계정입니다. 허용된 작업은 즉시 실행됩니다.",
     "loading": "앱을 불러오는 중…",
     "load_failed": "앱을 불러오지 못했습니다.",
     "team_title": "팀 계정",
@@ -1511,8 +1641,6 @@
     "toast_disconnected": "연결이 해제되었습니다",
     "toast_failed": "문제가 발생했습니다. 다시 시도하세요.",
     "add": {
-      "title": "앱 추가",
-      "description": "팀 또는 나를 위해 계정을 연결하세요. 어떤 에이전트가 사용할지는 각 에이전트의 앱 페이지에서 설정합니다.",
       "search": "앱 검색…",
       "empty": "일치하는 앱이 없습니다.",
       "curated": "엄선",
@@ -1521,7 +1649,10 @@
       "connect_team": "팀 계정 연결",
       "connect_personal": "내 계정 연결",
       "connecting": "연결 중…",
-      "connected": "연결됨"
+      "connected": "연결됨",
+      "connect": "연결",
+      "team_description": "워크스페이스 공용 계정을 연결합니다. 사용할 에이전트는 각 에이전트의 앱 페이지에서 설정합니다.",
+      "personal_description": "내 계정을 연결합니다. 트리거한 사람의 계정을 사용하도록 설정된 앱은 내가 실행을 시작할 때 이 계정을 사용합니다."
     },
     "disconnect_team": {
       "title": "팀 {{app}} 계정 연결을 해제할까요?",
@@ -1645,6 +1776,19 @@
       "edit": "목록 편집",
       "row_label": "허용된 앱",
       "row_description_other": "앱 {{count}}개 허용"
+    },
+    "saved_access": {
+      "account": "저장된 작업 제한이 이 계정의 일부 작업을 차단하고 있습니다.",
+      "agent": "이 앱에 이전 읽기 전용 설정이 남아 있습니다.",
+      "catalog": "저장된 앱 목록이 다른 앱을 숨기고 있습니다.",
+      "allow_actions": "모든 작업 허용",
+      "open_catalog": "모든 앱 표시",
+      "account_confirm": "이 계정이 할당된 에이전트는 읽기, 쓰기, 전송, 삭제, 공유를 할 수 있게 됩니다. 저장된 작업 제한이 대체됩니다.",
+      "agent_confirm": "이 에이전트는 계정에서 허용한 범위 내에서 이 앱의 읽기, 쓰기, 전송, 삭제, 공유를 할 수 있게 됩니다.",
+      "catalog_confirm": "워크스페이스에서 연결 가능한 모든 앱을 선택할 수 있게 됩니다. 기존 연결과 에이전트 앱 할당은 유지됩니다.",
+      "cancel": "취소",
+      "admin_required": "워크스페이스 관리자가 제한을 해제할 수 있습니다.",
+      "account_link": "이 계정에 저장된 작업 제한이 있습니다. 연결된 앱에서 해제하세요."
     }
   }
 }

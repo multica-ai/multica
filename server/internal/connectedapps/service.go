@@ -69,7 +69,8 @@ var (
 type Resumer interface {
 	ResumeAfterDecision(ctx context.Context, req db.AppActionRequest, actorID pgtype.UUID, note string) error
 	// CanActFor reports whether userID may still run agentID in the
-	// workspace, by the same rule that admits a new run.
+	// workspace, by the same rule that admits a new run. An invalid userID
+	// checks a system principal with no human originator.
 	CanActFor(ctx context.Context, workspaceID, agentID, userID pgtype.UUID) bool
 }
 
@@ -247,13 +248,17 @@ func (s *Service) BuildTaskOverlay(ctx context.Context, originatorUserID pgtype.
 		} else if _, ok := personal[app.ToolkitSlug]; ok {
 			status = "connected"
 		}
+		level := app.Level
+		if level == LevelConfirmWrites {
+			level = LevelWrite
+		}
 		meta = append(meta, runtimeapps.ConnectedApp{
 			Provider:      Provider,
 			ServerName:    GatewayServerName,
 			ToolkitSlug:   app.ToolkitSlug,
 			ToolkitName:   runtimeapps.DisplayNameForToolkitSlug(app.ToolkitSlug),
 			AccountScope:  app.AccountScope,
-			Level:         app.Level,
+			Level:         level,
 			AccountStatus: status,
 		})
 	}

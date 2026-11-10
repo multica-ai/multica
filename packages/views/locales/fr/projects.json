@@ -206,5 +206,26 @@
       "issue_pricing": "Tableau comparatif des tarifs",
       "issue_blog": "Paginer la liste du blog"
     }
+  },
+  "access": {
+    "label": "Accès",
+    "title": "Accès à {{title}}",
+    "description": "Définit qui peut voir ce projet, ses tâches, commentaires et pièces jointes.",
+    "workspace": "Tout l’espace de travail",
+    "private": "Membres du projet uniquement",
+    "members_count": "Membres du projet · {{count}}",
+    "add": "Ajouter un membre",
+    "search": "Rechercher un nom ou un e-mail...",
+    "no_members": "Aucun membre correspondant",
+    "no_selected": "Aucun membre du projet",
+    "admin_notice": "Les owner et admin de l’espace de travail ont toujours accès.",
+    "you": "Vous",
+    "remove": "Retirer {{name}}",
+    "failed": "Impossible d’enregistrer les accès.",
+    "load_failed": "Impossible de charger les membres.",
+    "publish_title": "Rendre ce projet visible à tout l’espace de travail ?",
+    "publish_description": "Tous les membres pourront voir ce projet, ses tâches, commentaires et pièces jointes.",
+    "done": "Terminé",
+    "retry": "Réessayer"
   }
 }

@@ -157,12 +157,6 @@
     "toast_saved": "更改已保存"
   },
   "preferences": {
-    "theme": {
-      "title": "主题",
-      "light": "浅色",
-      "dark": "深色",
-      "system": "跟随系统"
-    },
     "language": {
       "title": "语言",
       "english": "English",
@@ -194,13 +188,149 @@
     },
     "comments_title": "评论与聊天",
     "region_title": "语言与地区",
-    "appearance_title": "外观",
     "issue_fields_title": "创建任务时显示的字段",
     "issue_fields": {
       "field": "字段",
       "quick": "智能体创建",
       "manual": "手动创建",
       "unsupported": "智能体创建时不支持此字段"
+    }
+  },
+  "appearance": {
+    "reset": "恢复默认",
+    "color": {
+      "title": "颜色"
+    },
+    "mode": {
+      "title": "模式",
+      "light": "浅色",
+      "dark": "深色",
+      "system": "跟随系统"
+    },
+    "theme": {
+      "title": "主题",
+      "description": "全局的颜色、边框、阴影和圆角。可以导入主题文件添加更多主题。",
+      "default": "默认",
+      "pop": "波普",
+      "built_in": "内置",
+      "installed": "已安装",
+      "remove": "移除 {{name}}",
+      "safe_mode": "安全模式：关闭这个窗口之前，你的主题暂停生效。",
+      "safe_mode_exit": "恢复我的主题",
+      "folder": "主题文件夹",
+      "folder_problems": "主题文件夹里有主题没通过检查。修改后保存即可；在此之前继续使用最后一个通过检查的版本。"
+    },
+    "import": {
+      "button": "导入主题",
+      "from_zip": "主题文件（.zip）",
+      "from_folder": "主题文件夹",
+      "storage_full": "这台设备的存储空间不够保存这个主题。移除别的主题后再试。",
+      "confirm_title": "安装「{{name}}」？",
+      "warning": "主题可以改变每个页面的样式，包括弹窗和警告。只安装你信任的人做的主题。",
+      "author": "作者",
+      "version": "版本",
+      "replaces": "{{to}}（替换 {{from}}）",
+      "includes": "包含",
+      "cancel": "取消",
+      "confirm": "安装并使用",
+      "error_title": "无法安装这个主题",
+      "error_description": "没有做任何改动。主题文件有以下问题：",
+      "close": "关闭",
+      "has_options_other": "{{count}} 个选项",
+      "has_assets_other": "{{count}} 个字体和图片",
+      "menu_label": "自定义主题",
+      "beta": "Beta",
+      "beta_note": "自定义主题处于 Beta 阶段。主题用到的变量和清单可能会变，主题可能需要更新。"
+    },
+    "tools": {
+      "label": "更多主题操作",
+      "duplicate": "复制「{{name}}」为新主题",
+      "open_folder": "打开主题文件夹",
+      "guide": "如何制作主题",
+      "duplicated_web": "已下载 {{file}}。解压后编辑 theme.css，再导入这个文件夹。",
+      "duplicated_desktop": "已在主题文件夹中创建「{{name}}」。保存 theme.css 后改动立即生效。",
+      "duplicate_failed": "无法创建副本：{{error}}"
+    },
+    "theme_options": {
+      "title": "主题选项",
+      "description": "由 {{name}} 提供。",
+      "reset": "恢复主题默认"
+    },
+    "ui_text": {
+      "title": "界面文字",
+      "description": "菜单、按钮、列表、侧栏和标题。"
+    },
+    "latin_font": {
+      "title": "西文字体"
+    },
+    "ui_font": {
+      "inter": "默认",
+      "system": "系统",
+      "serif": "衬线",
+      "mono": "等宽"
+    },
+    "cjk_font": {
+      "title": "中文字体",
+      "description": "汉字字形；日文、韩文跟着这里走。",
+      "sans": "黑体",
+      "serif": "宋体",
+      "kai": "楷体",
+      "built_in": "常用",
+      "local": "本机字体",
+      "load_local": "显示本机字体…",
+      "loading": "正在查找字体…",
+      "none": "这台设备上没有含汉字的字体。",
+      "load_failed": "无法读取本机字体。",
+      "sample": "永和九年，岁在癸丑"
+    },
+    "follow_ui": "跟随界面",
+    "theme_font": "主题字体",
+    "font_size": {
+      "title": "字号",
+      "description": "只放大文字，间距和布局不变。",
+      "value": "{{size}} px",
+      "default": "{{size}} px · 默认"
+    },
+    "content_text": {
+      "title": "内容文字",
+      "description": "任务描述、评论、对话和文档里的正文。",
+      "sample": "描述和评论需要整段阅读，可以换成更适合阅读的字体；列表和按钮仍然保持紧凑。"
+    },
+    "code_font": {
+      "title": "代码字体",
+      "description": "代码块、行内代码和日志。",
+      "geist": "默认",
+      "jetbrains": "连字",
+      "system": "系统等宽"
+    },
+    "content_size": {
+      "title": "字号",
+      "description": "只改内容文字，界面不变。",
+      "follow": "跟随界面（{{size}} px）"
+    },
+    "content_leading": {
+      "title": "行高",
+      "compact": "紧凑",
+      "default": "标准",
+      "relaxed": "宽松"
+    },
+    "layout": {
+      "title": "布局与辅助功能"
+    },
+    "density": {
+      "title": "信息密度",
+      "description": "任务列表和搜索结果的行高。",
+      "compact": "紧凑",
+      "default": "标准",
+      "comfortable": "宽松"
+    },
+    "reduce_motion": {
+      "title": "减少动态效果",
+      "description": "关闭动画和过渡。关掉时仍遵循系统设置。"
+    },
+    "high_contrast": {
+      "title": "提高对比度",
+      "description": "次要文字更深，边框更明显。"
     }
   },
   "shortcuts": {
@@ -394,6 +524,7 @@
     "tabs": {
       "profile": "个人资料",
       "preferences": "偏好设置",
+      "appearance": "外观",
       "shortcuts": "快捷键",
       "issue": "任务",
       "notifications": "通知",
@@ -1476,12 +1607,11 @@
     "title": "为智能体接入工具的方式",
     "current": "当前页面",
     "mcp": "由管理员添加、在工作区内共享，再按智能体分配。",
-    "apps": "通过 Multica 连接的团队或个人账号，按智能体分配账号和权限级别。",
+    "apps": "通过 Multica 连接团队或个人账号，再将应用添加到智能体。",
     "plugins": "安装后可提供工具、定时 hook 和存储，每个插件单独授权。"
   },
   "connected_apps": {
-    "description": "智能体通过这些账号操作外部应用。每次调用都经过 Multica：按规则执行，发送、删除、分享前先征得同意。",
-    "add_app": "添加应用",
+    "description": "智能体通过这些账号操作外部应用，允许的操作会直接执行。",
     "loading": "正在加载应用…",
     "load_failed": "无法加载应用。",
     "team_title": "团队账号",
@@ -1511,8 +1641,6 @@
     "toast_disconnected": "已断开",
     "toast_failed": "操作失败，请重试。",
     "add": {
-      "title": "添加应用",
-      "description": "为团队或为自己连接账号。哪些智能体使用它，在各智能体的「应用」页设置。",
       "search": "搜索应用…",
       "empty": "没有匹配的应用。",
       "curated": "精选",
@@ -1521,7 +1649,10 @@
       "connect_team": "连接团队账号",
       "connect_personal": "连接我的账号",
       "connecting": "正在连接…",
-      "connected": "已连接"
+      "connected": "已连接",
+      "connect": "连接",
+      "team_description": "连接工作区共用的账号。哪些智能体可以使用，在各智能体的「应用」页设置。",
+      "personal_description": "连接你自己的账号。应用设为「触发者账号」时，由你触发的运行会使用它。"
     },
     "disconnect_team": {
       "title": "断开团队的 {{app}} 账号？",
@@ -1645,6 +1776,19 @@
       "edit": "编辑名单",
       "row_label": "允许的应用",
       "row_description_other": "已允许 {{count}} 个应用"
+    },
+    "saved_access": {
+      "account": "旧操作限制仍在阻止此账号的部分操作。",
+      "agent": "此应用仍受旧的只读授权限制。",
+      "catalog": "旧应用名单仍在隐藏其他应用。",
+      "allow_actions": "允许全部操作",
+      "open_catalog": "显示全部应用",
+      "account_confirm": "使用此账号的智能体将能读取、写入、发送、删除和共享内容。旧操作限制将被替换。",
+      "agent_confirm": "此智能体将能通过此应用读取、写入、发送、删除和共享内容，仍受账号本身的限制。",
+      "catalog_confirm": "工作区将能选择所有可连接的应用。现有连接和智能体的应用分配保持不变。",
+      "cancel": "取消",
+      "admin_required": "请工作区管理员解除限制。",
+      "account_link": "此账号仍有旧操作限制。请在已连接应用中解除。"
     }
   }
 }

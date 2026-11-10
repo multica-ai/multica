@@ -579,7 +579,8 @@
   },
   "timeline": {
     "loading": "加载中…",
-    "jump_to_latest": "跳到最新"
+    "jump_to_latest": "跳到最新",
+    "new_comments_other": "{{count}} 条新评论"
   },
   "activity": {
     "created": "创建了这个任务",
@@ -743,6 +744,8 @@
       "send_with_body": "将连同下方正文一起发送",
       "confirm_add": "添加批注",
       "save": "保存批注",
+      "confirm_add_short": "添加",
+      "save_short": "保存",
       "add_comment": "加入评论",
       "add": "加入回复",
       "note_label": "批注",
@@ -1469,6 +1472,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "定位到评论",
     "locate_description": "定位到描述",
+    "copy_link": "复制最新版链接",
+    "not_found": "这个任务里没有名为“{{name}}”的产物",
+    "link_load_failed": "没能加载这个任务的产物，打不开“{{name}}”。刷新页面重试。",
     "version_label": "第 {{version}} 版，共 {{total}} 版",
     "version_of": "v{{version}}（共 {{total}} 版）",
     "info_source": "来源",
@@ -1668,7 +1674,6 @@
       "brief_header": "这次运行收到的工作流说明"
     },
     "detail": {
-      "follows_project": "（跟随项目）",
       "card_title": "「{{workflow}}」· 跟随项目「{{project}}」"
     },
     "list_separator": "、",
@@ -1708,15 +1713,12 @@
       "name_placeholder": "状态名称",
       "add": "添加"
     },
-    "menu": {
-      "view_flow": "查看完整流程",
-      "switch": "切换工作流"
-    },
     "flow": {
       "title": "「{{workflow}}」工作流",
       "scope_own": "只有这个项目使用这个工作流。",
       "no_handoff_here": "不交接",
-      "scope_shared_other": "{{count}} 个项目使用这个工作流，它的交接对这些项目都生效。"
+      "scope_shared_other": "{{count}} 个项目使用这个工作流，它的交接对这些项目都生效。",
+      "switch": "切换工作流"
     },
     "templates": {
       "delivery": {
@@ -1834,5 +1836,32 @@
       "rejected": "已拒绝",
       "rate_limited": "已限流"
     }
+  },
+  "environments": {
+    "section_title": "环境",
+    "running_count_other": "{{count}} 个运行中",
+    "this_machine": "本机",
+    "unknown_machine": "未知设备",
+    "state": {
+      "starting": "启动中",
+      "running": "运行中",
+      "exited": "已退出",
+      "stopped": "已停止",
+      "unreachable": "无响应"
+    },
+    "expires_in_minutes_other": "{{count}} 分钟后过期",
+    "expires_in_hours_other": "{{count}} 小时后过期",
+    "expires_in_days_other": "{{count}} 天后过期",
+    "started_ago": "{{time}}启动",
+    "ended_ago": "{{time}}结束",
+    "last_seen": "{{time}}最后响应",
+    "ended_count_other": "{{count}} 个已结束",
+    "detected_hint": "在这个任务某次运行的目录中发现的服务",
+    "remote_hint": "运行在 {{machine}} 上，localhost 地址只能在那台机器上打开。",
+    "localhost_hint": "localhost 地址只能在运行它的那台机器上打开。",
+    "open": "打开",
+    "copy_url": "复制地址",
+    "copied": "已复制地址",
+    "copy_failed": "无法复制地址"
   }
 }

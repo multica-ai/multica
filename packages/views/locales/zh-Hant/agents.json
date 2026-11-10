@@ -817,22 +817,25 @@
       "queued_prefix": "{{when}}排隊"
     },
     "connected_apps": {
-      "subtitle": "這個 AI 代理可以使用的應用。每個應用以團隊帳號或觸發者的帳號身分操作，權限等級由你設定。",
       "loading": "正在載入應用…",
       "load_failed": "無法載入此 AI 代理的應用。",
-      "empty": "還沒有應用。",
-      "add_placeholder": "新增應用…",
-      "account": "帳號",
+      "empty": "尚無已連線的應用程式。",
       "level": "權限",
-      "remove": "移除 {{app}}",
       "team_connected": "團隊帳號已連線",
       "team_missing": "團隊帳號未連線",
       "personal_connected": "你的帳號已連線",
       "personal_missing": "你還沒有連線這個應用",
       "team_admin_only": "只有工作區管理員可以給 AI 代理團隊帳號。",
-      "team_shared_warning": "能執行這個 AI 代理的人，都會以團隊帳號身分使用這些應用。",
+      "team_shared_warning": "能執行這個 AI 代理的人，都能透過它使用該團隊帳號。",
       "manage_link": "在 設定 → 已連線應用 中管理帳號",
-      "save_failed_toast": "儲存失敗，請重試"
+      "save_failed_toast": "儲存失敗，請重試",
+      "team_help": "工作區共用的帳號，由管理員連線。",
+      "personal_help": "每次執行使用觸發者自己已連線的帳號；尚未連線時須先連線。",
+      "available_accounts": "可用：{{accounts}}",
+      "enable": "啟用 {{app}}",
+      "account_for": "{{app}} 的帳號",
+      "connect_hint": "找不到需要的應用程式？前往設定連線帳號。",
+      "available_personal": "你的帳號"
     }
   },
   "char_counter": {

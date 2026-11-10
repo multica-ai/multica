@@ -388,6 +388,8 @@ multica config show
 | `ws_claim_poll_interval` | `3m` | 正常な WebSocket での claim 安全ポーリング上限。`poll_interval` とは独立して設定され、Daemon は下方向のジッターを適用します |
 | `heartbeat_interval` | `15s` | ハートビート間隔 |
 | `agent_timeout` | 無制限 | 1 回の実行の絶対時間上限 |
+| `agent_idle_watchdog` | `2h` | ツール実行中でないときの静穏上限。`0s` でデーモンの watchdog 全体を無効化し、`agent_tool_watchdog` も効かなくなります |
+| `agent_tool_watchdog` | `agent_idle_watchdog` と同じ | ツール実行中の静穏上限。`0s` にするとデーモンの watchdog は静穏なツール呼び出しを理由に実行を停止しなくなり、実行の上限は `agent_timeout`（デフォルトは無制限）だけになります |
 | `codex_semantic_inactivity_timeout` | 派生値 | Codex のセマンティック静穏しきい値。未設定なら idle と tool の watchdog 予算のうち大きい方を採用し、tool 予算が `0` の場合は idle 予算に回帰します。Codex 自身の `10m` が残るのは watchdog 一式を無効化したときだけです |
 | `codex_handshake_timeout` | `30s`、`thread/start`・`thread/resume`：`60s` | Codex app-server 起動ハンドシェイクの上限。明示的な値は両方の予算を一括で上書きします |
 | `disable_auto_update` | 環境に従う | `true` で自動更新を無効化。`false` はローカルの上書きをクリアし、環境変数またはデフォルトに戻します |
@@ -396,7 +398,7 @@ multica config show
 
 値のルール:
 
-- duration 系のキーは正の Go duration（`10s`、`2h` など）を受け付け、`0s` と負の値は拒否されます。唯一の例外は `agent_timeout` で、`0s` は有効な値として実行時間上限を明示的に無効化します。
+- duration 系のキーは正の Go duration（`10s`、`2h` など）を受け付け、負の値は常に拒否されます。`0s` も受け付けるのは `agent_timeout`、`agent_idle_watchdog`、`agent_tool_watchdog` だけです。`agent_timeout` の `0s` は実行時間上限を明示的に無効化します。watchdog の 2 キーで `0s` が何を無効にするかは表を参照してください。
 - 空文字列を渡すと永続化された値がクリアされ、環境変数または組み込みデフォルトに戻ります。例: `multica config set poll_interval ""`。
 - `max_concurrent_tasks` には非負の整数が必要です。
 - 相対パスの `workspaces_root` は保存時に絶対パスへ変換されます。

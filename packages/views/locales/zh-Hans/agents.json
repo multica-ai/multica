@@ -817,22 +817,25 @@
       "queued_prefix": "{{when}}排队"
     },
     "connected_apps": {
-      "subtitle": "这个智能体可以使用的应用。每个应用以团队账号或触发者的账号身份操作，权限级别由你设定。",
       "loading": "正在加载应用…",
       "load_failed": "无法加载此智能体的应用。",
-      "empty": "还没有应用。",
-      "add_placeholder": "添加应用…",
-      "account": "账号",
+      "empty": "暂无已连接的应用。",
       "level": "权限",
-      "remove": "移除 {{app}}",
       "team_connected": "团队账号已连接",
       "team_missing": "团队账号未连接",
       "personal_connected": "你的账号已连接",
       "personal_missing": "你还没有连接这个应用",
       "team_admin_only": "只有工作区管理员可以给智能体团队账号。",
-      "team_shared_warning": "能运行这个智能体的人，都会以团队账号身份使用这些应用。",
+      "team_shared_warning": "能运行这个智能体的人，都能通过它使用该团队账号。",
       "manage_link": "在 设置 → 已连接应用 中管理账号",
-      "save_failed_toast": "保存失败，请重试"
+      "save_failed_toast": "保存失败，请重试",
+      "team_help": "工作区共用的账号，由管理员连接。",
+      "personal_help": "每次运行使用触发者自己已连接的账号；未连接时需先连接。",
+      "available_accounts": "可用：{{accounts}}",
+      "enable": "启用 {{app}}",
+      "account_for": "{{app}} 的账号",
+      "connect_hint": "没看到想要的应用？前往设置连接账号。",
+      "available_personal": "你的账号"
     }
   },
   "char_counter": {

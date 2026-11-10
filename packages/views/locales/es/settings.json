@@ -141,12 +141,6 @@
     "toast_saved": "Cambios guardados"
   },
   "preferences": {
-    "theme": {
-      "title": "Tema",
-      "light": "Claro",
-      "dark": "Oscuro",
-      "system": "Sistema"
-    },
     "language": {
       "title": "Idioma",
       "english": "English",
@@ -177,7 +171,6 @@
       "hint": "Solo establece el valor predeterminado. Puedes cambiarlo para cualquier mensaje antes de enviarlo."
     },
     "comments_title": "Comentarios",
-    "appearance_title": "Apariencia",
     "issue_fields": {
       "field": "Campo",
       "manual": "Creación manual",
@@ -186,6 +179,145 @@
     },
     "issue_fields_title": "Campos al crear tareas",
     "region_title": "Idioma y región"
+  },
+  "appearance": {
+    "reset": "Restablecer valores predeterminados",
+    "color": {
+      "title": "Color"
+    },
+    "mode": {
+      "title": "Modo",
+      "light": "Claro",
+      "dark": "Oscuro",
+      "system": "Sistema"
+    },
+    "theme": {
+      "title": "Tema",
+      "description": "Colores, bordes, sombras y esquinas de toda la app. Importa un archivo de tema para añadir más.",
+      "default": "Predeterminado",
+      "pop": "Pop",
+      "built_in": "Integrados",
+      "installed": "Instalados",
+      "remove": "Quitar {{name}}",
+      "safe_mode": "Modo seguro: tu tema está en pausa hasta que cierres esta ventana.",
+      "safe_mode_exit": "Usar mi tema",
+      "folder": "Carpeta de temas",
+      "folder_problems": "Algunos temas de la carpeta de temas no pasan las comprobaciones. Corrígelos y guarda; mientras tanto se usa la última versión que las pasó."
+    },
+    "import": {
+      "button": "Importar tema",
+      "from_zip": "Archivo de tema (.zip)",
+      "from_folder": "Carpeta del tema",
+      "storage_full": "No hay espacio suficiente en este dispositivo para guardar el tema. Quita otro tema e inténtalo de nuevo.",
+      "confirm_title": "¿Instalar «{{name}}»?",
+      "warning": "Un tema puede cambiar el aspecto de todas las páginas, incluidos los diálogos y avisos. Instala solo temas de personas de confianza.",
+      "author": "Autor",
+      "version": "Versión",
+      "replaces": "{{to}} (sustituye a {{from}})",
+      "includes": "Incluye",
+      "cancel": "Cancelar",
+      "confirm": "Instalar y usar",
+      "error_title": "No se pudo instalar este tema",
+      "error_description": "No se ha cambiado nada. El archivo de tema tiene estos problemas:",
+      "close": "Cerrar",
+      "has_options_one": "{{count}} opción",
+      "has_options_other": "{{count}} opciones",
+      "has_assets_one": "{{count}} fuente o imagen",
+      "has_assets_other": "{{count}} fuentes e imágenes",
+      "menu_label": "Temas personalizados",
+      "beta": "Beta",
+      "beta_note": "Los temas personalizados están en beta. Las variables y el manifiesto que usa un tema pueden cambiar, y puede que haya que actualizarlo."
+    },
+    "tools": {
+      "label": "Más acciones de tema",
+      "duplicate": "Duplicar «{{name}}» como tema nuevo",
+      "open_folder": "Abrir carpeta de temas",
+      "guide": "Cómo crear un tema",
+      "duplicated_web": "Se descargó {{file}}. Descomprímelo, edita theme.css e importa la carpeta.",
+      "duplicated_desktop": "Se creó «{{name}}» en la carpeta de temas. Los cambios en su theme.css se aplican al guardar.",
+      "duplicate_failed": "No se pudo crear la copia: {{error}}"
+    },
+    "theme_options": {
+      "title": "Opciones del tema",
+      "description": "Las ofrece {{name}}.",
+      "reset": "Restablecer opciones"
+    },
+    "ui_text": {
+      "title": "Texto de la interfaz",
+      "description": "Menús, botones, listas, la barra lateral y los títulos."
+    },
+    "latin_font": {
+      "title": "Fuente latina"
+    },
+    "ui_font": {
+      "inter": "Predeterminada",
+      "system": "Sistema",
+      "serif": "Serif",
+      "mono": "Monoespaciada"
+    },
+    "cjk_font": {
+      "title": "Fuente CJK",
+      "description": "Caracteres chinos; el japonés y el coreano lo siguen.",
+      "sans": "Sans",
+      "serif": "Serif",
+      "kai": "Kai",
+      "built_in": "Integradas",
+      "local": "En este dispositivo",
+      "load_local": "Mostrar las fuentes de este dispositivo…",
+      "loading": "Buscando fuentes…",
+      "none": "No hay fuentes con caracteres chinos en este dispositivo.",
+      "load_failed": "No se pudieron leer las fuentes de este dispositivo.",
+      "sample": "永和九年 漢字"
+    },
+    "follow_ui": "Igual que la interfaz",
+    "theme_font": "Fuente del tema",
+    "font_size": {
+      "title": "Tamaño del texto",
+      "description": "Solo agranda el texto. El espaciado y el diseño no cambian.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · Predeterminado"
+    },
+    "content_text": {
+      "title": "Texto del contenido",
+      "description": "Descripciones de incidencias, comentarios, chat y documentos.",
+      "sample": "Las descripciones y los comentarios se leen enteros, así que pueden usar una fuente pensada para leer mientras listas y botones siguen compactos."
+    },
+    "code_font": {
+      "title": "Fuente del código",
+      "description": "Bloques de código, código en línea y registros.",
+      "geist": "Predeterminada",
+      "jetbrains": "Ligaduras",
+      "system": "Monoespaciada del sistema"
+    },
+    "content_size": {
+      "title": "Tamaño de letra",
+      "description": "Solo el texto del contenido; la interfaz mantiene su tamaño.",
+      "follow": "Igual que la interfaz ({{size}} px)"
+    },
+    "content_leading": {
+      "title": "Interlineado",
+      "compact": "Compacto",
+      "default": "Predeterminado",
+      "relaxed": "Amplio"
+    },
+    "layout": {
+      "title": "Diseño y accesibilidad"
+    },
+    "density": {
+      "title": "Densidad",
+      "description": "Altura de las filas en listas de incidencias y búsqueda.",
+      "compact": "Compacta",
+      "default": "Predeterminada",
+      "comfortable": "Amplia"
+    },
+    "reduce_motion": {
+      "title": "Reducir movimiento",
+      "description": "Desactiva animaciones y transiciones. Si está desactivado, se sigue aplicando el ajuste del sistema."
+    },
+    "high_contrast": {
+      "title": "Aumentar contraste",
+      "description": "Texto secundario más oscuro y bordes más marcados."
+    }
   },
   "shortcuts": {
     "title": "Atajos de teclado",
@@ -378,6 +510,7 @@
     "tabs": {
       "profile": "Perfil",
       "preferences": "Preferencias",
+      "appearance": "Apariencia",
       "shortcuts": "Atajos",
       "issue": "Tarea",
       "notifications": "Notificaciones",
@@ -1456,7 +1589,7 @@
     }
   },
   "mcp_sources": {
-    "apps": "Cuentas del equipo o personales conectadas mediante Multica, asignadas a cada agente con una cuenta y un nivel de permisos.",
+    "apps": "Cuentas del equipo o personales conectadas a través de Multica y añadidas a cada agente.",
     "current": "Esta página",
     "mcp": "Añadidas por administradores y compartidas en todo el espacio de trabajo, y luego asignadas por agente.",
     "plugins": "Paquetes instalados que pueden añadir herramientas, ganchos programados y almacenamiento, cada uno con sus propios permisos.",
@@ -1491,8 +1624,7 @@
     "saving": "Guardando…"
   },
   "connected_apps": {
-    "description": "Cuentas que usan tus agentes. Cada llamada pasa por Multica, que aplica tus reglas y pide confirmación antes de enviar, eliminar o compartir.",
-    "add_app": "Añadir aplicación",
+    "description": "Cuentas que usan tus agentes para acceder a aplicaciones externas. Las acciones permitidas se ejecutan de inmediato.",
     "loading": "Cargando aplicaciones…",
     "load_failed": "No se pudieron cargar las aplicaciones.",
     "team_title": "Cuentas del equipo",
@@ -1523,17 +1655,18 @@
     "toast_disconnected": "Desconectada",
     "toast_failed": "Algo salió mal. Inténtalo de nuevo.",
     "add": {
-      "title": "Añadir una aplicación",
-      "description": "Conecta una cuenta para el equipo o para ti. El acceso de cada agente se configura en su página de Aplicaciones.",
       "search": "Buscar aplicaciones…",
       "empty": "No hay aplicaciones que coincidan.",
       "curated": "Seleccionada",
       "recommended_team": "Suele usarse una cuenta del equipo",
       "recommended_personal": "Suele usarse una cuenta personal",
-      "connect_team": "Conectar para el equipo",
+      "connect_team": "Conectar cuenta de equipo",
       "connect_personal": "Conectar mi cuenta",
       "connecting": "Conectando…",
-      "connected": "Conectada"
+      "connected": "Conectada",
+      "connect": "Conectar",
+      "team_description": "Conecta una cuenta compartida del espacio de trabajo. Decide qué agentes pueden usarla en la página Apps de cada agente.",
+      "personal_description": "Conecta tu propia cuenta. Las apps configuradas para usar la cuenta de quien inicia la ejecución la usarán cuando tú inicies una ejecución."
     },
     "disconnect_team": {
       "title": "¿Desconectar la cuenta del equipo de {{app}}?",
@@ -1661,6 +1794,19 @@
       "row_label": "Aplicaciones permitidas",
       "row_description_one": "{{count}} aplicación permitida",
       "row_description_other": "{{count}} aplicaciones permitidas"
+    },
+    "saved_access": {
+      "account": "Las restricciones guardadas aún bloquean algunas acciones de esta cuenta.",
+      "agent": "Esta app conserva un acceso anterior de solo lectura.",
+      "catalog": "Una lista guardada oculta otras apps.",
+      "allow_actions": "Permitir todas las acciones",
+      "open_catalog": "Mostrar todas las apps",
+      "account_confirm": "Los agentes que usen esta cuenta podrán leer, escribir, enviar, eliminar y compartir. Se reemplazarán las restricciones guardadas.",
+      "agent_confirm": "Este agente podrá leer, escribir, enviar, eliminar y compartir mediante esta app, dentro de los límites de la cuenta.",
+      "catalog_confirm": "Todas las apps conectables estarán disponibles en el espacio de trabajo. Se conservarán las conexiones y asignaciones existentes.",
+      "cancel": "Cancelar",
+      "admin_required": "Un administrador puede restablecer el acceso.",
+      "account_link": "Esta cuenta conserva restricciones. Restablece el acceso en Apps conectadas."
     }
   }
 }

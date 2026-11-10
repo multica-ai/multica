@@ -1,7 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { X } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -29,7 +30,7 @@ export function CollectionBatchBar({
   children: ReactNode;
 }) {
   const { t } = useT("layout");
-  const reduceMotion = useReducedMotion() ?? false;
+  const reduceMotion = useReducedMotion();
   const offset = reduceMotion ? "translateY(0)" : "translateY(8px)";
 
   return (

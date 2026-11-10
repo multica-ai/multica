@@ -30,7 +30,7 @@ Le monorepo impose des frontières strictes entre les packages :
 
 | Package | Peut dépendre de | Ne doit PAS dépendre de |
 | --- | --- | --- |
-| `packages/core` | rien de spécifique à une application | `react-dom`, `next/*`, bibliothèques d'UI, `process.env`, `localStorage` en direct (persister via `StorageAdapter`) |
+| `packages/core` | rien de spécifique à une application | `react-dom`, `next/*`, bibliothèques d'UI, `process.env`, `localStorage` ou `sessionStorage` en direct (persister via `StorageAdapter` ; seuls `analytics/exception-dedupe.ts` et `appearance/safe-mode.ts` utilisent `sessionStorage`, limité à l'onglet) |
 | `packages/ui` | rien | `@multica/core`, logique métier |
 | `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, définitions de stores |
 | `apps/web/platform/` | `next/*` | autres applications |

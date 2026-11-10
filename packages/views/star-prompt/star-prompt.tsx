@@ -7,7 +7,6 @@ import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
-import { useConfigStore } from "@multica/core/config";
 import { formatStarCount, githubStarsOptions, MULTICA_GITHUB_URL } from "@multica/core/github/stars";
 import { createLogger } from "@multica/core/logger";
 import { needsSourceBackfill } from "@multica/core/onboarding";
@@ -70,7 +69,6 @@ export function StarPrompt() {
   const wsId = useCurrentWorkspace()?.id ?? null;
   const qc = useQueryClient();
   const moment = useStarPromptStore((s) => s.moment);
-  const disabled = useConfigStore((s) => s.starPromptDisabled);
   const chatOpen = useChatStore((s) => s.isOpen);
   const floatingChatEnabled = useChatStore((s) => s.floatingChatEnabled);
   const { pathname } = useNavigation();
@@ -92,7 +90,7 @@ export function StarPrompt() {
     if (!moment || !wsId) return;
 
     const consider = async (m: StarPromptMoment, workspaceId: string) => {
-      if (m.wsId !== workspaceId || disabled) return;
+      if (m.wsId !== workspaceId) return;
       if (useSessionPromptStore.getState().prompted) return;
       const user = useAuthStore.getState().user;
       if (!starPromptDue(user, Date.now())) return;
@@ -116,7 +114,7 @@ export function StarPrompt() {
       consider(moment, wsId).catch((err) => logger.warn("failed to evaluate star prompt", err));
     }, STAR_PROMPT_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [moment, wsId, disabled, qc]);
+  }, [moment, wsId, qc]);
 
   // The chat window covers this corner while it is open.
   if (!showing || chatOpen) return null;

@@ -16,6 +16,7 @@
 export interface GitHubAsset {
   name: string;
   browser_download_url: string;
+  size?: number;
 }
 
 export interface DownloadAssets {
@@ -43,53 +44,57 @@ function normalizeLinuxArch(arch: string): "amd64" | "arm64" | null {
   return null;
 }
 
+export type DownloadKey = keyof DownloadAssets;
+
+/** Byte size per desktop asset, for the download page's file details. */
+export type DownloadSizes = Partial<Record<DownloadKey, number>>;
+
+const MAC_KEYS: Record<string, Partial<Record<string, DownloadKey>>> = {
+  arm64: { dmg: "macArm64Dmg", zip: "macArm64Zip" },
+  x64: { dmg: "macX64Dmg", zip: "macX64Zip" },
+};
+const WINDOWS_KEYS: Partial<Record<string, DownloadKey>> = { x64: "winX64Exe", arm64: "winArm64Exe" };
+const LINUX_KEYS: Record<"amd64" | "arm64", Partial<Record<string, DownloadKey>>> = {
+  amd64: { appimage: "linuxAmd64AppImage", deb: "linuxAmd64Deb", rpm: "linuxAmd64Rpm" },
+  arm64: { appimage: "linuxArm64AppImage", deb: "linuxArm64Deb", rpm: "linuxArm64Rpm" },
+};
+
+/** Which desktop artifact a release file is, if any. */
+function assetKey(name: string): DownloadKey | undefined {
+  // Skip auxiliary files that share the release (update manifests,
+  // blockmaps, checksums). CLI tarballs and other non-desktop
+  // artifacts are excluded automatically because they don't match
+  // DESKTOP_ARTIFACT_RE below.
+  if (name.endsWith(".blockmap") || name.endsWith(".yml")) return undefined;
+  if (name.startsWith("checksums")) return undefined;
+
+  const match = DESKTOP_ARTIFACT_RE.exec(name);
+  if (!match) return undefined;
+  const [, platform, arch, ext] = match;
+  if (!platform || !arch || !ext) return undefined;
+  const archLower = arch.toLowerCase();
+  const extLower = ext.toLowerCase();
+
+  if (platform === "mac") return MAC_KEYS[archLower]?.[extLower];
+  if (platform === "windows") return extLower === "exe" ? WINDOWS_KEYS[archLower] : undefined;
+  const normalized = normalizeLinuxArch(arch);
+  return normalized ? LINUX_KEYS[normalized][extLower] : undefined;
+}
+
 export function parseReleaseAssets(raw: GitHubAsset[]): DownloadAssets {
   const out: DownloadAssets = {};
   for (const asset of raw) {
-    const name = asset.name;
-    // Skip auxiliary files that share the release (update manifests,
-    // blockmaps, checksums). CLI tarballs and other non-desktop
-    // artifacts are excluded automatically because they don't match
-    // DESKTOP_ARTIFACT_RE below.
-    if (name.endsWith(".blockmap") || name.endsWith(".yml")) continue;
-    if (name.startsWith("checksums")) continue;
+    const key = assetKey(asset.name);
+    if (key) out[key] = asset.browser_download_url;
+  }
+  return out;
+}
 
-    const match = DESKTOP_ARTIFACT_RE.exec(name);
-    if (!match) continue;
-    const platform = match[1];
-    const arch = match[2];
-    const ext = match[3];
-    if (!platform || !arch || !ext) continue;
-    const archLower = arch.toLowerCase();
-    const extLower = ext.toLowerCase();
-    const url = asset.browser_download_url;
-
-    if (platform === "mac") {
-      if (archLower === "arm64") {
-        if (extLower === "dmg") out.macArm64Dmg = url;
-        else if (extLower === "zip") out.macArm64Zip = url;
-      } else if (archLower === "x64") {
-        if (extLower === "dmg") out.macX64Dmg = url;
-        else if (extLower === "zip") out.macX64Zip = url;
-      }
-    } else if (platform === "windows") {
-      if (extLower !== "exe") continue;
-      if (archLower === "x64") out.winX64Exe = url;
-      else if (archLower === "arm64") out.winArm64Exe = url;
-    } else if (platform === "linux") {
-      const normalized = normalizeLinuxArch(arch);
-      if (!normalized) continue;
-      const e = extLower;
-      if (normalized === "amd64") {
-        if (e === "appimage") out.linuxAmd64AppImage = url;
-        else if (e === "deb") out.linuxAmd64Deb = url;
-        else if (e === "rpm") out.linuxAmd64Rpm = url;
-      } else {
-        if (e === "appimage") out.linuxArm64AppImage = url;
-        else if (e === "deb") out.linuxArm64Deb = url;
-        else if (e === "rpm") out.linuxArm64Rpm = url;
-      }
-    }
+export function parseReleaseAssetSizes(raw: GitHubAsset[]): DownloadSizes {
+  const out: DownloadSizes = {};
+  for (const asset of raw) {
+    const key = assetKey(asset.name);
+    if (key && typeof asset.size === "number") out[key] = asset.size;
   }
   return out;
 }

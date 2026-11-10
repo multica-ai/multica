@@ -838,22 +838,25 @@
       "queued_prefix": "Queued {{when}}"
     },
     "connected_apps": {
-      "subtitle": "Apps this agent can use. Each app acts as the team account or as the account of whoever triggers the run, at the level you choose.",
       "loading": "Loading apps…",
       "load_failed": "Couldn't load this agent's apps.",
-      "empty": "No apps yet.",
-      "add_placeholder": "Add an app…",
-      "account": "Account",
+      "empty": "No connected apps available.",
       "level": "Level",
-      "remove": "Remove {{app}}",
       "team_connected": "Team account connected",
       "team_missing": "Team account not connected",
       "personal_connected": "Your account is connected",
       "personal_missing": "You haven't connected this app",
       "team_admin_only": "Only workspace admins can give an agent a team account.",
-      "team_shared_warning": "Anyone who can run this agent acts as the team account for these apps.",
+      "team_shared_warning": "Anyone who can run this agent can use this team account through it.",
       "manage_link": "Manage accounts in Settings → Connected apps",
-      "save_failed_toast": "Couldn't save — please try again"
+      "save_failed_toast": "Couldn't save — please try again",
+      "team_help": "Shared workspace account, connected by admins.",
+      "personal_help": "Each run uses the account of whoever triggers it. They must connect their own account.",
+      "available_accounts": "Available: {{accounts}}",
+      "enable": "Enable {{app}}",
+      "account_for": "Account for {{app}}",
+      "connect_hint": "Connect another account in Settings if you don’t see the app you need.",
+      "available_personal": "Your account"
     }
   },
   "char_counter": {

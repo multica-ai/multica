@@ -26,10 +26,12 @@ export function SystemWakeupRow({
   rule,
   workspaceId,
   issueId,
+  onTurnedOff,
 }: {
   rule: SystemWakeup;
   workspaceId: string;
   issueId: string;
+  onTurnedOff?: () => void;
 }) {
   const { t } = useT("issues");
   const text = useWakeupText();
@@ -62,10 +64,12 @@ export function SystemWakeupRow({
         : [target, t(($) => $.wakeups.system.remaining, { count: rule.remaining })].join(" · "));
   const save = (input: { enabled: boolean; instruction: string }) =>
     update.mutateAsync({ rule: rule.rule, ...input });
-  const toggle = (enabled: boolean) =>
+  const toggle = (enabled: boolean) => {
+    if (!enabled) onTurnedOff?.();
     void save({ enabled, instruction: rule.instruction }).catch(() =>
       toast.error(t(($) => $.wakeups.system.save_error)),
     );
+  };
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto]" aria-busy={update.isPending}>
       <Popover>
