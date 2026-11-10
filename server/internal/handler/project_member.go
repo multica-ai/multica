@@ -59,12 +59,15 @@ func (h *Handler) requireHumanProjectAccessActor(w http.ResponseWriter, r *http.
 	return true
 }
 
-// canManageProjectAccess: workspace owner/admin, or the project's member lead.
+// canManageProjectAccess: workspace owner/admin, or the member lead of a
+// private project. Any member may set the lead of a workspace-visible project,
+// so leading one grants nothing; making it private takes an owner/admin.
 func canManageProjectAccess(member db.Member, project db.Project) bool {
 	if projectaccess.IsManagerRole(member.Role) {
 		return true
 	}
-	return project.LeadType.Valid && project.LeadType.String == "member" && project.LeadID == member.UserID
+	return projectVisibilityOrDefault(project.Visibility) == projectaccess.VisibilityPrivate &&
+		project.LeadType.Valid && project.LeadType.String == "member" && project.LeadID == member.UserID
 }
 
 func parseProjectMemberIDs(w http.ResponseWriter, raw []string, field string) ([]pgtype.UUID, bool) {
@@ -100,9 +103,10 @@ func (h *Handler) prepareProjectAccessUpdate(w http.ResponseWriter, r *http.Requ
 	current := projectVisibilityOrDefault(project.Visibility)
 	memberLead := newLeadType.Valid && newLeadType.String == "member" && newLeadID.Valid
 
-	// A lead controls project access. Protect every lead change, including
-	// assigning an existing member, clearing the lead, and public projects.
-	if leadChanged {
+	// The lead of a private project manages its access, so changing it is an
+	// access change. On a workspace-visible project the lead is an ordinary
+	// field anyone can set, as it was before private projects existed.
+	if leadChanged && current == projectaccess.VisibilityPrivate {
 		if !h.requireHumanProjectAccessActor(w, r, workspaceID) {
 			return projectAccessUpdate{}, false
 		}

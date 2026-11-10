@@ -4,8 +4,19 @@ import { projectKeys } from "./queries";
 import { issueKeys } from "../issues/queries";
 import type { Project, ProjectVisibility } from "../types";
 
-export function canManageProjectAccess(project: Pick<Project, "lead_type" | "lead_id">, userId: string | null | undefined, role: string | null | undefined): boolean {
-  return !!userId && (role === "owner" || role === "admin" || (project.lead_type === "member" && project.lead_id === userId));
+// Mirrors the server: owners/admins, or the member lead of a private project.
+// Anyone may set the lead of a workspace-visible project, so leading one
+// grants nothing; making it private takes an owner/admin.
+export function canManageProjectAccess(project: Pick<Project, "lead_type" | "lead_id" | "visibility">, userId: string | null | undefined, role: string | null | undefined): boolean {
+  if (!userId) return false;
+  if (role === "owner" || role === "admin") return true;
+  return project.visibility === "private" && project.lead_type === "member" && project.lead_id === userId;
+}
+
+// The lead of a private project manages its access, so only access managers
+// may change it there; elsewhere the lead stays an ordinary field.
+export function canChangeProjectLead(project: Pick<Project, "lead_type" | "lead_id" | "visibility">, userId: string | null | undefined, role: string | null | undefined): boolean {
+  return project.visibility !== "private" || canManageProjectAccess(project, userId, role);
 }
 
 type AccessChange =

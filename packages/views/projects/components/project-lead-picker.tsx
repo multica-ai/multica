@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
-import { canManageProjectAccess } from "@multica/core/projects/access";
+import { canChangeProjectLead } from "@multica/core/projects/access";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import type { Project, UpdateProjectRequest } from "@multica/core/types";
@@ -26,7 +26,7 @@ export function ProjectLeadPicker({ project, handleUpdate, renderTrigger, align 
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const userId = useAuthStore((s) => s.user?.id);
-  const canManage = canManageProjectAccess(project, userId, members.find((m) => m.user_id === userId)?.role);
+  const canManage = canChangeProjectLead(project, userId, members.find((m) => m.user_id === userId)?.role);
 
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");

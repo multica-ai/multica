@@ -12,7 +12,7 @@ import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/type
 import { useAuthStore } from "@multica/core/auth";
 import { useConfigStore } from "@multica/core/config";
 import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
-import { canManageProjectAccess } from "@multica/core/projects/access";
+import { canChangeProjectLead } from "@multica/core/projects/access";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import { useUpdateProject, useDeleteProject, ProjectDeletionOfflineError } from "@multica/core/projects/mutations";
@@ -163,7 +163,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   });
   const isPinned = pinnedItems.some((p) => p.item_type === "project" && p.item_id === projectId);
   const role = members.find((m) => m.user_id === userId)?.role ?? null;
-  const canManageAccess = !!project && canManageProjectAccess(project, userId, role);
+  const canManageAccess = !!project && canChangeProjectLead(project, userId, role);
   const canDelete = !!project && canDeleteProject(project, userId ?? null, role, agents);
   const createPin = useCreatePin();
   const deletePinMut = useDeletePin();

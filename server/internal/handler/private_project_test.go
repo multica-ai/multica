@@ -602,37 +602,59 @@ func TestPrivateProjectLeadChangeCannotGrantAccess(t *testing.T) {
 	}
 }
 
-func TestProjectLeadChangeRequiresAccessManager(t *testing.T) {
-	for _, visibility := range []string{projectaccess.VisibilityPrivate, projectaccess.VisibilityWorkspace} {
-		for _, change := range []string{"self", "outsider", "clear", "id_only", "type_only"} {
-			t.Run(visibility+"/"+change, func(t *testing.T) {
-				f := newPrivateProjectFixture(t)
-				lead := createPlainMember(t, f.marker+"-lead@multica.test")
-				addProjectMemberRow(t, f.projectID, lead)
-				dbfx.Exec(t, `UPDATE project SET visibility = $1, lead_type = 'member', lead_id = $2 WHERE id = $3`, visibility, lead, f.projectID)
-				body := map[string]any{"lead_type": "member", "lead_id": f.insider, "title": "must not change"}
-				switch change {
-				case "outsider":
-					body["lead_id"] = f.outsider
-				case "clear":
-					body["lead_type"], body["lead_id"] = nil, nil
-				case "id_only":
-					delete(body, "lead_type")
-				case "type_only":
-					body["lead_type"] = nil
-					delete(body, "lead_id")
-				}
-				req := withURLParam(asUser(newRequest(http.MethodPut, "/api/projects/"+f.projectID, body), f.insider), "id", f.projectID)
-				testutil.Call(t, testHandler.UpdateProject, req).Want(http.StatusForbidden)
-				var title, storedLead string
-				if err := testPool.QueryRow(context.Background(), `SELECT title, lead_id::text FROM project WHERE id = $1`, f.projectID).Scan(&title, &storedLead); err != nil {
-					t.Fatal(err)
-				}
-				if storedLead != lead || title == "must not change" {
-					t.Fatal("refused lead change still changed the project")
-				}
-			})
-		}
+func TestPrivateProjectLeadChangeRequiresAccessManager(t *testing.T) {
+	for _, change := range []string{"self", "outsider", "clear", "id_only", "type_only"} {
+		t.Run(change, func(t *testing.T) {
+			f := newPrivateProjectFixture(t)
+			lead := createPlainMember(t, f.marker+"-lead@multica.test")
+			addProjectMemberRow(t, f.projectID, lead)
+			dbfx.Exec(t, `UPDATE project SET lead_type = 'member', lead_id = $1 WHERE id = $2`, lead, f.projectID)
+			body := map[string]any{"lead_type": "member", "lead_id": f.insider, "title": "must not change"}
+			switch change {
+			case "outsider":
+				body["lead_id"] = f.outsider
+			case "clear":
+				body["lead_type"], body["lead_id"] = nil, nil
+			case "id_only":
+				delete(body, "lead_type")
+			case "type_only":
+				body["lead_type"] = nil
+				delete(body, "lead_id")
+			}
+			req := withURLParam(asUser(newRequest(http.MethodPut, "/api/projects/"+f.projectID, body), f.insider), "id", f.projectID)
+			testutil.Call(t, testHandler.UpdateProject, req).Want(http.StatusForbidden)
+			var title, storedLead string
+			if err := testPool.QueryRow(context.Background(), `SELECT title, lead_id::text FROM project WHERE id = $1`, f.projectID).Scan(&title, &storedLead); err != nil {
+				t.Fatal(err)
+			}
+			if storedLead != lead || title == "must not change" {
+				t.Fatal("refused lead change still changed the project")
+			}
+		})
+	}
+}
+
+// On a workspace-visible project the lead stays an ordinary field: any member
+// (or agent) may set it, as before private projects. Leading one therefore
+// grants nothing; in particular it does not let a member make it private.
+func TestWorkspaceProjectLeadStaysOpenButGrantsNoAccess(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.PrivateProjectsV1, true)
+	f := newPrivateProjectFixture(t)
+	dbfx.Exec(t, `UPDATE project SET visibility = 'workspace' WHERE id = $1`, f.projectID)
+	update := func(body map[string]any) *testutil.Response {
+		req := withURLParam(asUser(newRequest(http.MethodPut, "/api/projects/"+f.projectID, body), f.outsider), "id", f.projectID)
+		return testutil.Call(t, testHandler.UpdateProject, req)
+	}
+	update(map[string]any{"lead_type": "member", "lead_id": f.outsider}).Want(http.StatusOK)
+	update(map[string]any{"visibility": "private"}).Want(http.StatusForbidden)
+	addReq := withURLParam(asUser(newRequest(http.MethodPost, "/api/projects/"+f.projectID+"/members", map[string]any{"user_ids": []string{f.outsider}}), f.outsider), "id", f.projectID)
+	testutil.Call(t, testHandler.AddProjectMembers, addReq).Want(http.StatusForbidden)
+	var visibility string
+	if err := testPool.QueryRow(context.Background(), `SELECT visibility FROM project WHERE id = $1`, f.projectID).Scan(&visibility); err != nil {
+		t.Fatal(err)
+	}
+	if visibility != projectaccess.VisibilityWorkspace {
+		t.Fatalf("visibility = %q after a self-appointed lead tried to make it private", visibility)
 	}
 }
 
