@@ -17,6 +17,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@multica/ui/components/ui/command";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@multica/ui/components/ui/alert-dialog";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { PillButton } from "../../common/pill-button";
 import { useT } from "../../i18n";
 
 const EMPTY_IDS: string[] = [];
@@ -206,7 +207,12 @@ export function ProjectAccessDraftPicker({ visibility, memberIds, leadId, member
   const Icon = visibility === "private" ? Lock : Globe;
   return (
     <Popover>
-      <PopoverTrigger render={<Button type="button" variant="outline" size="sm" aria-label={t(($) => $.access.label)}><Icon />{visibility === "private" ? t(($) => $.access.private) : t(($) => $.access.workspace)}</Button>} />
+      <PopoverTrigger render={
+        <PillButton aria-label={t(($) => $.access.label)}>
+          <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate">{visibility === "private" ? t(($) => $.access.private) : t(($) => $.access.workspace)}</span>
+        </PillButton>
+      } />
       <PopoverContent side="top" align="end" className="max-h-[70dvh] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto">
         <AccessFields visibility={visibility} onVisibilityChange={(value) => onChange(value, selected)} members={members} selected={selected} leadId={leadId} userId={userId}
           disabled={false} canChangeScope canUsePrivate={enabled} canAdd
