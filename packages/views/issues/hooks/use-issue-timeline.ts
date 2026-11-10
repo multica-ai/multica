@@ -21,6 +21,7 @@ import type {
   ActivityCreatedPayload,
   ReactionAddedPayload,
   ReactionRemovedPayload,
+  TaskCompletedPayload,
 } from "@multica/core/types";
 import {
   issueTimelineOptions,
@@ -269,6 +270,29 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         if (missingRevision) {
           qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
         }
+      },
+      [qc, issueId],
+    ),
+  );
+
+  // #10311: the run card reads the task list, which the global sync
+  // refetches on task:completed, but the discussion does not. comment:created
+  // is written into the cache in place, and the global fallback only marks an
+  // active timeline stale (`refetchType: "none"`), so a comment frame dropped
+  // while the run was in flight leaves the open Issue without the reply the
+  // agent posted. One refetch when the run ends closes that gap. A repeated
+  // completion for the same task (a replayed broadcast) must not refetch again.
+  const completedTaskRef = useRef<string | null>(null);
+  useWSEvent(
+    "task:completed",
+    useCallback(
+      (payload: unknown) => {
+        const { task_id: taskId, issue_id: eventIssueId } =
+          payload as TaskCompletedPayload;
+        if (eventIssueId !== issueId || !taskId) return;
+        if (completedTaskRef.current === taskId) return;
+        completedTaskRef.current = taskId;
+        qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
       },
       [qc, issueId],
     ),

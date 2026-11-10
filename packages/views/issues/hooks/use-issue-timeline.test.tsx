@@ -593,4 +593,35 @@ describe("useIssueTimeline", () => {
     });
     expect(cacheUpdates.last).toBeNull();
   });
+
+  // #10311: an open Issue shows the run as Completed (the task list refetches
+  // on task:completed) while the reply the agent posted during the run is
+  // still missing. comment:created is supposed to append it, but the global
+  // sync marks the timeline stale without refetching an active observer, so a
+  // dropped comment frame leaves the mounted page stale forever. Completing
+  // the run must refetch this Issue's timeline exactly once.
+  it("task:completed refetches the open issue timeline once", () => {
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    const handler = wsHandlers.get("task:completed");
+    expect(handler).toBeTypeOf("function");
+
+    act(() => {
+      handler!({ task_id: "task-1", agent_id: "agent-1", issue_id: "issue-1", status: "completed" });
+      handler!({ task_id: "task-1", agent_id: "agent-1", issue_id: "issue-1", status: "completed" });
+    });
+
+    expect(cacheUpdates.invalidations).toBe(1);
+  });
+
+  it("task:completed ignores a run that belongs to another issue", () => {
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+    const handler = wsHandlers.get("task:completed");
+
+    act(() => {
+      handler!({ task_id: "task-2", agent_id: "agent-1", issue_id: "issue-2", status: "completed" });
+      handler!({ task_id: "task-3", agent_id: "agent-1", status: "completed" });
+    });
+
+    expect(cacheUpdates.invalidations).toBe(0);
+  });
 });
