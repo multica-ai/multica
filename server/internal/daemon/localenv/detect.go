@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,12 +27,18 @@ type Listener struct {
 type Detector struct {
 	// ignore holds command names that are never an environment: the agent
 	// CLIs themselves and the multica binary.
-	ignore map[string]bool
-	list   func(ctx context.Context) ([]Listener, error)
-	now    func() time.Time
+	ignore  map[string]bool
+	list    func(ctx context.Context) ([]Listener, error)
+	inspect func(ctx context.Context, pids []int) map[int]Process
+	isCDP   func(ctx context.Context, port int) bool
+	now     func() time.Time
 
 	mu   sync.Mutex
 	seen map[string]*sighting
+	// procs and cdp remember what a process is and which of its ports speak
+	// DevTools, so each is looked up once rather than every scan.
+	procs map[int]Process
+	cdp   map[[2]int]bool
 }
 
 type sighting struct {
@@ -46,20 +53,30 @@ func NewDetector(ignoreCommands []string) *Detector {
 			ignore[c] = true
 		}
 	}
-	return &Detector{ignore: ignore, list: listListeners, now: time.Now, seen: make(map[string]*sighting)}
+	return &Detector{
+		ignore: ignore, list: listListeners, inspect: inspectProcesses, isCDP: probeCDP, now: time.Now,
+		seen: make(map[string]*sighting), procs: make(map[int]Process), cdp: make(map[[2]int]bool),
+	}
 }
 
 // Detect lists the servers whose working directory belongs to a task.
 // resolve maps a working directory to its task; owned reports process groups
 // the manager already supervises. A server is reported from its second
 // sighting on, so test servers that live for a moment never show up.
+//
+// A desktop app is reported once, as an app with no URL, however many ports
+// it listens on. A DevTools port is never reported as a URL: opening it shows
+// a debugger page, not the app.
 func (d *Detector) Detect(ctx context.Context, resolve func(cwd string) (Task, bool), owned func(pgid int) bool) ([]Environment, error) {
 	listeners, err := d.list(ctx)
 	if err != nil {
 		return nil, err
 	}
-	now := d.now()
-	found := make(map[string]Environment)
+	type candidate struct {
+		Listener
+		task Task
+	}
+	var candidates []candidate
 	for _, l := range listeners {
 		if l.Cwd == "" || d.ignore[strings.ToLower(l.Command)] {
 			continue
@@ -71,19 +88,55 @@ func (d *Detector) Detect(ctx context.Context, resolve func(cwd string) (Task, b
 		if pgid := processGroup(l.PID); pgid > 0 && owned(pgid) {
 			continue
 		}
-		key := detectedKey(task.RootDir, l.Port)
+		candidates = append(candidates, candidate{l, task})
+	}
+	pids := make([]int, 0, len(candidates))
+	for _, c := range candidates {
+		pids = append(pids, c.PID)
+	}
+	procs := d.processes(ctx, pids)
+
+	now := d.now()
+	found := make(map[string]Environment)
+	debugPorts := make(map[string][]int)
+	for _, c := range candidates {
+		proc := procs[c.PID]
+		debug := proc.debugs(c.Port) || (proc.App != "" && d.speaksCDP(ctx, c.PID, c.Port))
+		if proc.App != "" {
+			key := detectedAppKey(c.task.RootDir, proc)
+			if _, dup := found[key]; !dup {
+				found[key] = Environment{
+					Key: key, TaskID: c.task.TaskID, IssueID: c.task.IssueID, Source: SourceDetected, Kind: KindApp,
+					Name: truncateName(proc.App), State: StateRunning, Dir: c.task.RootDir,
+					pid: c.PID, bundle: proc.Bundle,
+				}
+			}
+			if debug {
+				debugPorts[key] = append(debugPorts[key], c.Port)
+			}
+		}
+		if debug {
+			continue
+		}
+		key := detectedKey(c.task.RootDir, c.Port)
 		if _, dup := found[key]; dup {
 			continue
 		}
-		name := l.Command
-		if r := []rune(name); len(r) > 64 {
-			name = string(r[:64])
-		}
 		found[key] = Environment{
-			Key: key, TaskID: task.TaskID, IssueID: task.IssueID, Source: SourceDetected,
-			Name: name, URL: fmt.Sprintf("http://localhost:%d", l.Port), Port: l.Port, State: StateRunning,
-			Dir: task.RootDir,
+			Key: key, TaskID: c.task.TaskID, IssueID: c.task.IssueID, Source: SourceDetected, Kind: KindServer,
+			Name: truncateName(c.Command), URL: fmt.Sprintf("http://localhost:%d", c.Port), Port: c.Port, State: StateRunning,
+			Dir: c.task.RootDir,
 		}
+	}
+	for key, ports := range debugPorts {
+		sort.Ints(ports)
+		hosts := make([]string, len(ports))
+		for i, port := range ports {
+			hosts[i] = fmt.Sprintf("localhost:%d", port)
+		}
+		env := found[key]
+		env.Detail = "Remote debugging on " + strings.Join(hosts, ", ")
+		found[key] = env
 	}
 
 	d.mu.Lock()
@@ -110,11 +163,99 @@ func (d *Detector) Detect(ctx context.Context, resolve func(cwd string) (Task, b
 	return out, nil
 }
 
+// processes returns what each pid is, asking only about pids not seen in an
+// earlier scan, and forgets pids that stopped listening.
+func (d *Detector) processes(ctx context.Context, pids []int) map[int]Process {
+	d.mu.Lock()
+	var unknown []int
+	live := make(map[int]bool, len(pids))
+	for _, pid := range pids {
+		if _, ok := d.procs[pid]; !ok && !live[pid] {
+			unknown = append(unknown, pid)
+		}
+		live[pid] = true
+	}
+	d.mu.Unlock()
+	var learned map[int]Process
+	if len(unknown) > 0 {
+		learned = d.inspect(ctx, unknown)
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for pid, p := range learned {
+		d.procs[pid] = p
+	}
+	for pid := range d.procs {
+		if !live[pid] {
+			delete(d.procs, pid)
+		}
+	}
+	for k := range d.cdp {
+		if !live[k[0]] {
+			delete(d.cdp, k)
+		}
+	}
+	out := make(map[int]Process, len(pids))
+	for _, pid := range pids {
+		out[pid] = d.procs[pid]
+	}
+	return out
+}
+
+func (d *Detector) speaksCDP(ctx context.Context, pid, port int) bool {
+	k := [2]int{pid, port}
+	d.mu.Lock()
+	known, ok := d.cdp[k]
+	d.mu.Unlock()
+	if ok {
+		return known
+	}
+	known = d.isCDP(ctx, port)
+	d.mu.Lock()
+	d.cdp[k] = known
+	d.mu.Unlock()
+	return known
+}
+
+func truncateName(name string) string {
+	if r := []rune(name); len(r) > 64 {
+		return string(r[:64])
+	}
+	return name
+}
+
 // detectedKey is stable across restarts of the same server, and carries no
 // local path to the server.
 func detectedKey(root string, port int) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%d", root, port)))
 	return "detected:" + hex.EncodeToString(sum[:8])
+}
+
+// detectedAppKey is stable across restarts of the same app, whatever ports
+// it listens on this time.
+func detectedAppKey(root string, p Process) string {
+	id := p.Bundle
+	if id == "" {
+		id = p.App
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00app\x00%s", root, id)))
+	return "detected:" + hex.EncodeToString(sum[:8])
+}
+
+// parsePsArgs reads `ps -o pid=,args=` output into pid → process.
+func parsePsArgs(out string) map[int]Process {
+	procs := make(map[int]Process)
+	scanner := bufio.NewScanner(strings.NewReader(out))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		pidField, args, _ := strings.Cut(strings.TrimSpace(scanner.Text()), " ")
+		pid, err := strconv.Atoi(pidField)
+		if err != nil || pid <= 0 {
+			continue
+		}
+		procs[pid] = Process{Args: strings.TrimSpace(args)}
+	}
+	return procs
 }
 
 // parseLsofListeners reads `lsof -nP -iTCP -sTCP:LISTEN -Fpcn` output.

@@ -1938,6 +1938,13 @@
     "open": "Abrir",
     "copy_url": "Copiar URL",
     "copied": "URL copiada",
-    "copy_failed": "No se pudo copiar la URL"
+    "copy_failed": "No se pudo copiar la URL",
+    "app_desktop_hint": "Una app de escritorio. Cambia a su ventana desde Multica Desktop en la máquina que la ejecuta.",
+    "app_remote_hint": "Se ejecuta en {{machine}}. Cambia a su ventana desde Multica Desktop en esa máquina.",
+    "focus": "Ir a la ventana",
+    "focus_gone": "{{name}} ya no se está ejecutando",
+    "focus_unsupported": "El daemon de esta máquina aún no puede cambiar a ventanas de apps. Actualiza Multica e inténtalo de nuevo.",
+    "focus_unavailable": "El daemon local no se está ejecutando",
+    "focus_failed": "No se pudo cambiar a {{name}}"
   }
 }

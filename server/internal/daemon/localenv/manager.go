@@ -69,6 +69,7 @@ type Environment struct {
 	TaskID    string     `json:"task_id"`
 	IssueID   string     `json:"issue_id"`
 	Source    string     `json:"source"`
+	Kind      string     `json:"kind,omitempty"`
 	Name      string     `json:"name"`
 	Label     string     `json:"label"`
 	URL       string     `json:"url"`
@@ -82,6 +83,10 @@ type Environment struct {
 	// leave it in place; it is never reported.
 	Dir  string `json:"-"`
 	pgid int
+	// pid and bundle name a detected app's process for Focus; like Dir they
+	// never leave this machine.
+	pid    int
+	bundle string
 }
 
 // record is what survives a daemon restart, in <dir>/<id>/state.json.
@@ -529,7 +534,7 @@ func (m *Manager) viewLocked(e *entry) Environment {
 	rec := e.rec
 	view := Environment{
 		Key: "config:" + rec.ID, TaskID: rec.TaskID, IssueID: rec.IssueID,
-		Source: SourceConfig, Name: rec.Name, Label: rec.Label, URL: rec.URL, Port: rec.Port,
+		Source: SourceConfig, Kind: KindServer, Name: rec.Name, Label: rec.Label, URL: rec.URL, Port: rec.Port,
 		State: rec.State, Detail: rec.Detail, StartedAt: rec.StartedAt,
 		LogPath: filepath.Join(m.dir, rec.ID, outputFile), Dir: rec.RepoRoot, pgid: rec.PID,
 	}
