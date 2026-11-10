@@ -2582,3 +2582,18 @@ describe("Issue requester compatibility", () => {
     expect(IssueSchema.parse({ ...baseIssue, requester_id: 42 }).requester_id).toBeUndefined();
   });
 });
+
+describe("AppConfigSchema drawio_viewer_url drift", () => {
+  it.each([
+    [undefined, undefined],
+    [42, undefined],
+    [null, undefined],
+    ["https://viewer.diagrams.net", "https://viewer.diagrams.net"],
+  ])("%j parses as %j", (value, expected) => {
+    const parsed = AppConfigSchema.parse({
+      cdn_domain: "cdn.example.com",
+      drawio_viewer_url: value,
+    });
+    expect(parsed.drawio_viewer_url).toBe(expected);
+  });
+});

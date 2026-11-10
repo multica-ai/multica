@@ -283,6 +283,25 @@ describe("AuthInitializer recovery", () => {
     });
   });
 
+  it("publishes the draw.io viewer and keeps it off when the server omits it", async () => {
+    configStore.setState({ drawioViewerUrl: "https://stale.example" });
+    renderInitializer({ api: makeApi({ getConfig: vi.fn().mockResolvedValue({}) }) });
+    await waitFor(() => {
+      expect(configStore.getState().daemonConfigStatus).toBe("ready");
+    });
+    expect(configStore.getState().drawioViewerUrl).toBe("");
+
+    const api = makeApi({
+      getConfig: vi.fn().mockResolvedValue({
+        drawio_viewer_url: "https://drawio.internal.example",
+      }),
+    });
+    renderInitializer({ api });
+    await waitFor(() => {
+      expect(configStore.getState().drawioViewerUrl).toBe("https://drawio.internal.example");
+    });
+  });
+
   it("keeps the token and recovers on the online event after a network failure", async () => {
     const storage = makeStorage({ multica_token: "token-1" });
     const getMe = vi
