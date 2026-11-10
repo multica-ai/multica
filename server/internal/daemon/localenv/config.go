@@ -89,6 +89,8 @@ func FindConfig(dir, boundary string) (Config, error) {
 	if !within(dir, boundary) {
 		return Config{}, fmt.Errorf("%s is outside the task directory", dir)
 	}
+	start := dir
+	notFound := fmt.Errorf("%w in %s or its parent directories; run from inside the repository", ErrNoConfig, start)
 	for {
 		path := filepath.Join(dir, filepath.FromSlash(ConfigPath))
 		data, err := os.ReadFile(path)
@@ -104,11 +106,11 @@ func FindConfig(dir, boundary string) (Config, error) {
 			return Config{}, err
 		}
 		if dir == boundary {
-			return Config{}, ErrNoConfig
+			return Config{}, notFound
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return Config{}, ErrNoConfig
+			return Config{}, notFound
 		}
 		dir = parent
 	}

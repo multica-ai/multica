@@ -78,7 +78,10 @@ type Environment struct {
 	StartedAt time.Time  `json:"started_at"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	LogPath   string     `json:"log_path,omitempty"`
-	pgid      int
+	// Dir is the directory the environment runs from, kept local so GC can
+	// leave it in place; it is never reported.
+	Dir  string `json:"-"`
+	pgid int
 }
 
 // record is what survives a daemon restart, in <dir>/<id>/state.json.
@@ -522,7 +525,7 @@ func (m *Manager) viewLocked(e *entry) Environment {
 		Key: "config:" + rec.ID, TaskID: rec.TaskID, IssueID: rec.IssueID,
 		Source: SourceConfig, Name: rec.Name, Label: rec.Label, URL: rec.URL, Port: rec.Port,
 		State: rec.State, Detail: rec.Detail, StartedAt: rec.StartedAt,
-		LogPath: filepath.Join(m.dir, rec.ID, outputFile), pgid: rec.PID,
+		LogPath: filepath.Join(m.dir, rec.ID, outputFile), Dir: rec.RepoRoot, pgid: rec.PID,
 	}
 	if e.live() {
 		expires := rec.ExpiresAt

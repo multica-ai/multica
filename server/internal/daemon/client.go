@@ -677,6 +677,31 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 // (task_id, provider, model), so snapshots cannot accumulate; the flag is what
 // keeps the server's additive metrics counter and per-run log on the terminal
 // report, where they would otherwise bill each flush against the last.
+// TaskEnvironmentReport is one entry of a task's environment snapshot.
+type TaskEnvironmentReport struct {
+	Key       string     `json:"key"`
+	Source    string     `json:"source"`
+	Name      string     `json:"name"`
+	Label     string     `json:"label"`
+	URL       string     `json:"url"`
+	Port      int        `json:"port"`
+	State     string     `json:"state"`
+	Detail    string     `json:"detail"`
+	StartedAt time.Time  `json:"started_at"`
+	ExpiresAt *time.Time `json:"expires_at"`
+}
+
+// ReportTaskEnvironments replaces the task's environment snapshot; whatever
+// it leaves out the server records as stopped.
+func (c *Client) ReportTaskEnvironments(ctx context.Context, taskID string, envs []TaskEnvironmentReport) error {
+	if envs == nil {
+		envs = []TaskEnvironmentReport{}
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/environments", taskID), map[string]any{
+		"environments": envs,
+	}, nil)
+}
+
 func (c *Client) ReportTaskUsageSnapshot(ctx context.Context, taskID string, usage []TaskUsageEntry) error {
 	if len(usage) == 0 {
 		return nil
