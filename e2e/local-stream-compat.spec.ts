@@ -35,12 +35,25 @@ test("native local audio survives capability renewal", async ({ page, baseURL },
     expect(expires * 1000 - Date.now()).toBeLessThanOrEqual(60000);
     await page.locator("body").click({ position: { x: 10, y: 100 } });
     await audio.evaluate(async (el: HTMLAudioElement) => { el.currentTime = 12; await el.play(); });
-    await expect.poll(() => audio.getAttribute("src"), { timeout: 70000 }).not.toBe(first);
-    await expect.poll(() => audio.evaluate((el: HTMLAudioElement) => el.readyState)).toBeGreaterThan(0);
+    // A loaded stream must not be replaced just because its capability expires.
+    await expect.poll(() => Date.now(), { timeout: 70000 }).toBeGreaterThan((expires + 2) * 1000);
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    expect(await audio.getAttribute("src")).toBe(first);
     expect(await audio.evaluate((el: HTMLAudioElement) => el.currentTime)).toBeGreaterThan(60);
-    expect(await audio.evaluate((el: HTMLAudioElement) => el.paused)).toBe(false);
-    await expect.poll(() => Date.now(), { timeout: 10000 }).toBeGreaterThan((expires + 1) * 1000);
     expect((await fetch(first)).status).toBe(403);
+    // A late native error renews on demand. The first metadata request fails
+    // to cover bounded recovery from a transient network outage as well.
+    let outage = true;
+    await page.route(`**/api/attachments/${att.id}`, async (route) => {
+      if (outage) { outage = false; await route.abort("failed"); }
+      else await route.continue();
+    });
+    const position = await audio.evaluate((el: HTMLAudioElement) => el.currentTime);
+    await audio.dispatchEvent("error");
+    await expect.poll(() => audio.getAttribute("src"), { timeout: 10000 }).not.toBe(first);
+    await expect.poll(() => audio.evaluate((el: HTMLAudioElement) => el.readyState)).toBeGreaterThan(0);
+    expect(await audio.evaluate((el: HTMLAudioElement) => el.currentTime)).toBeGreaterThanOrEqual(position - 1);
+    expect(await audio.evaluate((el: HTMLAudioElement) => el.paused)).toBe(false);
     await testInfo.attach("stream-after-renewal", { body: await page.screenshot(), contentType: "image/png" });
   } finally { await api.cleanup(); }
 });

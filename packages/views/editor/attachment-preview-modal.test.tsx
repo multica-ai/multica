@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactElement } from "react";
 import type { Attachment } from "@multica/core/types";
+import { ApiError } from "@multica/core/api/client";
 
 const { openExternalMock, isDesktopShellMock, copyImageMock, toastMock } =
   vi.hoisted(() => ({
@@ -224,6 +225,7 @@ function ClosablePreview({ attachment }: { attachment: Attachment }) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  getAttachmentMock.mockReset().mockRejectedValue(new ApiError("no re-sign", 404, "Not Found"));
   downloadMock.mockReset();
   // Drops any body a test queued but never consumed (a media kind skips the
   // text fetch), so it cannot answer the next test's request.
@@ -284,11 +286,11 @@ describe("AttachmentPreviewModal — dispatch", () => {
     expect(img?.getAttribute("src")).toBe(url);
   });
 
-  it("renders a PDF iframe pointing at the signed download URL", async () => {
+  it("renders a same-origin PDF through the stable authenticated URL", async () => {
     const att = makeAttachment({ filename: "manual.pdf", content_type: "application/pdf" });
     render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
     await waitFor(() => {
-      expect(document.querySelector("iframe")?.getAttribute("src")).toBe(att.download_url);
+      expect(document.querySelector("iframe")?.getAttribute("src")).toBe(`/api/attachments/${att.id}/download`);
     });
   });
 
@@ -616,6 +618,51 @@ describe("AttachmentPreviewModal — error states", () => {
 });
 
 describe("AttachmentPreviewModal — streamed media (MUL-8892)", () => {
+  it.each(["video", "audio"] as const)("restores %s and its playback position after signing recovers from an outage", async (kind) => {
+    const id = "11111111-2222-3333-4444-555555555555";
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    const cap = (sig: string, exp: number) => `/api/attachments/${id}/signed-download?exp=${exp}&sig=${sig}`;
+    const old = cap("first", Math.floor(now / 1000) + 60);
+    const fresh = cap("recovered", Math.floor(now / 1000) + 120);
+    const att = makeAttachment({ id, filename: kind === "audio" ? "clip.wav" : "clip.mp4", content_type: `${kind}/${kind === "audio" ? "wav" : "mp4"}`, download_url: `/api/attachments/${id}/download` });
+    getAttachmentMock.mockReset();
+    getAttachmentMock.mockResolvedValueOnce({ ...att, download_url: old })
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValue({ ...att, download_url: fresh });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    try {
+      rtlRender(<QueryClientProvider client={qc}><AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} /></QueryClientProvider>);
+      const audio = await waitFor(() => {
+        const el = document.querySelector<HTMLMediaElement>(kind);
+        expect(el?.getAttribute("src")).toBe(old);
+        return el!;
+      });
+      audio.currentTime = 23;
+      audio.playbackRate = 1.5;
+      Object.defineProperty(audio, "paused", { configurable: true, value: false });
+      const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+      clock.mockReturnValue(now + 61000);
+      fireEvent.error(audio);
+      await waitFor(() => expect(screen.getByText("Couldn't load preview")).toBeInTheDocument(), { timeout: 6000 });
+      act(() => { focusManager.setFocused(false); focusManager.setFocused(true); });
+      await waitFor(() => expect(getAttachmentMock).toHaveBeenCalledTimes(5));
+      expect(qc.getQueryData<Attachment>(["attachment-stream-resign", id])?.download_url).toBe(fresh);
+      const restored = await waitFor(() => {
+        const el = document.querySelector<HTMLMediaElement>(kind);
+        expect(el?.getAttribute("src")).toBe(fresh);
+        return el!;
+      });
+      fireEvent.loadedMetadata(restored);
+      expect(restored.currentTime).toBe(23);
+      expect(restored.playbackRate).toBe(1.5);
+      expect(play).toHaveBeenCalled();
+      play.mockRestore();
+    } finally { clock.mockRestore(); qc.clear(); focusManager.setFocused(undefined); }
+  });
+
   it.each(["video", "audio"] as const)("renews an expired local %s and restores the seek and play state", async (kind) => {
     const id = "11111111-2222-3333-4444-555555555555";
     const now = Date.now();
@@ -681,6 +728,7 @@ describe("AttachmentPreviewModal — streamed media (MUL-8892)", () => {
   });
 
   it("signs a PDF afresh too", async () => {
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
     getAttachmentMock.mockResolvedValueOnce(
       makeAttachment({ download_url: "https://cdn.example.test/manual.pdf?Signature=fresh" }),
     );

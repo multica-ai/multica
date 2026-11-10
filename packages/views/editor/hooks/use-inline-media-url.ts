@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
+import { ApiError } from "@multica/core/api/client";
 import {
   attachmentDownloadPath,
   attachmentIdFromDownloadURL,
@@ -169,55 +170,112 @@ export function useResignedInlineMedia(
 // endpoint for a fresh signature, the same exchange the Download button makes.
 // Proxy capabilities last only 60 seconds. Keep them in a separate query so
 // image metadata caching cannot pin one into a native stream after it expires.
-// Reopen always authenticates again; an open viewer renews before expiry.
+// Reopen authenticates again. Loaded media keeps its source until a native
+// request fails after expiry, so reading/playing never triggers a periodic reload.
 export function useFreshStreamedMediaURL(
   attachmentId: string | undefined,
   rawPickedUrl: string,
   enabled: boolean,
-): { url: string; pending: boolean; refreshIfExpired: () => Promise<boolean> } {
+  pdf = false,
+): { url: string; pending: boolean; failed: boolean; refreshIfExpired: () => Promise<boolean> } {
   const pickedUrl = resolveLegacyLocalMediaURL(rawPickedUrl);
   const id = attachmentId ?? attachmentIdFromDownloadURL(pickedUrl);
   const active = enabled && !!id && !!pickedUrl;
-  const { data: fresh, isError, isStale, isFetching, refetch } = useQuery({
+  const stablePDFURL = id ? absolutizeAPIPath(attachmentDownloadPath(id)) : "";
+  const sameOriginPDF = active && pdf && isSameOriginHTTPURL(stablePDFURL);
+  const { data: fresh, error, isError, refetch } = useQuery({
     queryKey: ["attachment-stream-resign", id],
     queryFn: () => api.getAttachment(id as string),
-    enabled: active,
-    staleTime: RESIGN_STALE_MS,
+    enabled: active && !sameOriginPDF,
+    staleTime: Infinity,
     gcTime: 0,
-    retry: false,
+    retry: retryAttachmentPreview,
+    retryDelay: (attempt) => 1000 * 2 ** attempt,
     refetchOnMount: "always",
-    refetchOnWindowFocus: "always",
-    refetchInterval: (query) => {
-      if (query.state.status === "error") return false;
-      const expiresAt = capabilityExpiresAt(query.state.data?.download_url ?? "");
-      return expiresAt === undefined
-        ? false
-        : Math.max(1000, expiresAt - Date.now() - 5000);
-    },
+    refetchOnWindowFocus: recoverFailedPreview,
+    refetchOnReconnect: recoverFailedPreview,
   });
 
   const dl = fresh?.download_url ?? "";
   const expiresAt = capabilityExpiresAt(dl);
+  const proxyPDF = active && pdf && !sameOriginPDF && expiresAt !== undefined;
+  const pdfBytes = useQuery({
+    queryKey: ["attachment-preview-pdf", id],
+    queryFn: async ({ signal }) => {
+      const blob = await api.getAttachmentBlob(id as string, signal);
+      // Never let an HTML file named *.pdf become same-origin active content.
+      return blob.slice(0, blob.size, "application/pdf");
+    },
+    enabled: proxyPDF && !isError,
+    staleTime: Infinity,
+    gcTime: 0,
+    retry: retryAttachmentPreview,
+    retryDelay: (attempt) => 1000 * 2 ** attempt,
+    refetchOnWindowFocus: recoverFailedPreview,
+    refetchOnReconnect: recoverFailedPreview,
+  });
+  const pdfURL = usePDFObjectURL(proxyPDF && !isPermanentAttachmentError(error) ? pdfBytes.data : undefined);
   const refreshIfExpired = async () => {
-    if (!active || expiresAt === undefined || expiresAt > Date.now() + 5000) return false;
+    if (!active || isPermanentAttachmentError(error) || expiresAt === undefined || expiresAt > Date.now() + 5000) return false;
     const result = await refetch();
     return !result.isError && !!result.data?.download_url && result.data.download_url !== dl;
   };
-  if (!active || isError) return { url: pickedUrl, pending: false, refreshIfExpired };
-  if (expiresAt !== undefined) {
-    if (expiresAt <= Date.now() && !isFetching) return { url: pickedUrl, pending: false, refreshIfExpired };
-    return { url: absolutizeAPIPath(dl), pending: false, refreshIfExpired };
+  if (!active) return { url: pickedUrl, pending: false, failed: false, refreshIfExpired };
+  if (sameOriginPDF) return { url: stablePDFURL, pending: false, failed: false, refreshIfExpired };
+  // Cross-origin proxy PDFs cannot depend on iframe error events. Fetch their
+  // complete authenticated bytes once; the local blob has no signature expiry.
+  if (proxyPDF) {
+    const failed = isError || pdfBytes.isError;
+    return { url: pdfURL, pending: !failed && !pdfURL, failed, refreshIfExpired };
   }
-  // A cached answer past its stale time may hold a signature that has
-  // already expired: wait for the refetch it triggers rather than start a
-  // stream on it and restart once the new URL lands.
-  if (fresh && !(isStale && isFetching)) {
-    const dl = fresh.download_url ?? "";
+  if (expiresAt !== undefined) {
+    return { url: absolutizeAPIPath(dl), pending: false, failed: false, refreshIfExpired };
+  }
+  if (fresh) {
     const signed =
       /^https?:\/\//i.test(dl) && attachmentIdFromDownloadURL(dl) === undefined;
-    return { url: signed ? dl : pickedUrl, pending: false, refreshIfExpired };
+    return { url: signed ? dl : pickedUrl, pending: false, failed: false, refreshIfExpired };
   }
-  return { url: pickedUrl, pending: true, refreshIfExpired };
+  const privatePDF = pdf && (attachmentIdFromDownloadURL(pickedUrl) !== undefined || capabilityExpiresAt(pickedUrl) !== undefined);
+  return { url: pickedUrl, pending: !isError, failed: privatePDF && isError, refreshIfExpired };
+}
+
+function isPermanentAttachmentError(error: unknown): boolean {
+  return error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
+}
+
+function retryAttachmentPreview(failures: number, error: unknown): boolean {
+  return failures < 2 && !isPermanentAttachmentError(error);
+}
+
+function recoverFailedPreview(query: { state: { status: string; error: unknown } }): "always" | false {
+  return query.state.status === "error" && !isPermanentAttachmentError(query.state.error) ? "always" : false;
+}
+
+function isSameOriginHTTPURL(url: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const parsed = new URL(url, window.location.href);
+    return /^https?:$/.test(parsed.protocol) && parsed.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+// PDFs can be large. Keep one local URL only while its viewer is mounted;
+// unlike inline images, do not retain its bytes in the five-minute image cache.
+function usePDFObjectURL(blob: Blob | undefined): string {
+  const [current, setCurrent] = useState<{ blob: Blob; url: string }>();
+  useEffect(() => {
+    if (!blob) {
+      setCurrent(undefined);
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    setCurrent({ blob, url });
+    return () => URL.revokeObjectURL(url);
+  }, [blob]);
+  return current?.blob === blob ? current?.url ?? "" : "";
 }
 
 function absolutizeAPIPath(url: string): string {
