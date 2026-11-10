@@ -5,7 +5,7 @@
   },
   "list": {
     "title": "You've been invited",
-    "subtitle": "Joining takes you into that workspace. Your other invitations stay pending.",
+    "subtitle": "Joining opens that workspace. Other invitations stay pending.",
     "workspace_fallback": "Workspace",
     "inviter_fallback": "Someone",
     "invited_admin": "{{inviter}} invited you as an admin",

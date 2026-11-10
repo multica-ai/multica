@@ -230,7 +230,7 @@ function InvitationRow({
       aria-current={highlighted ? "true" : undefined}
       className={cn(
         "flex items-center gap-3 rounded-md border p-4",
-        highlighted ? "border-primary/40 bg-primary/5" : "border-border bg-card",
+        highlighted ? "border-brand/50 bg-brand/5" : "border-border bg-card",
       )}
     >
       <WorkspaceAvatar name={name} size="lg" className="rounded-md" />
