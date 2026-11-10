@@ -124,7 +124,45 @@ survives an interrupted exit. It also checks that the message list's ancestor
 is never scaled, and that a reopened window never paints before its message
 list does. HTTP and WebSocket traffic is synthetic; no backend is needed.
 
-## When to run it
+## Issue history with a real local API
+
+`issue-history.spec.ts` measures direct issue entry and Inbox selection on the
+production UI against an isolated, migrated local API/database. It seeds and
+cleans up its own issues through `TestApiClient`; completed execution rows are
+inserted locally without dispatching agents. It never mocks HTTP or WebSocket
+responses. Run it explicitly with `PERF_SCENARIO=issue-history`.
+
+Start the API with `make up C=api ARGS="--ephemeral"`. Build each compared ref
+with `NEXT_PUBLIC_API_URL='' NEXT_PUBLIC_WS_URL='' pnpm --filter @multica/web build`,
+then run its production server with `REMOTE_API_URL` pointing at that API.
+Run the **same spec from the head checkout** against each server:
+
+```bash
+PERF_SCENARIO=issue-history PERF_REPEATS=5 \
+  PLAYWRIGHT_BASE_URL=http://localhost:<production-web-port> \
+  PERF_REPORT_PATH=<absolute-report-path> \
+  make env-exec ARGS="-- pnpm exec playwright test --config=playwright.perf.config.ts issue-history.spec.ts"
+```
+
+Each scenario gets one warmup and five fresh-browser-context samples. The
+default datasets have 120 or 716 Markdown replies and 20 completed runs with
+64 KiB outputs. An optional `PERF_ISSUE_SOURCE` JSON array of `{content}` adds
+a local discussion-text workload; keep private content outside Git and do not
+publish its screenshots. Reports contain only counts, byte sizes and a content
+digest. Compare digests before comparing samples.
+
+Reports include entry-to-visible-target time, main-thread task duration, long
+tasks, live heap after explicit GC, mounted comment bodies, DOM nodes and actual
+task-response body bytes (decompressed). CPU is unthrottled. Direct entry
+includes application boot; Inbox entry starts with the shell already loaded.
+Long tasks are snapshotted before the instrumentation's forced GC. Set
+`PERF_DATASET` to one of the dataset names or `PERF_ENTRY=direct|inbox` to
+repeat a focused case in alternating product order.
+These are observed local measurements, not latency thresholds. Stop other
+run-owned builds/tests before measuring; the report also records system load.
+Destroy the API environment after the comparison with `make destroy ARGS="--yes"`.
+
+## When to run the typing scenarios
 
 Nothing runs this automatically. The routine guard is the component test from
 #8260, which pins the exact failure mode behind MUL-7227 — a streamed message
