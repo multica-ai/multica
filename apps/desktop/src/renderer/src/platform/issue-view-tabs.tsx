@@ -55,19 +55,27 @@ export function IssueViewUrlSync({ scope, children }: { scope: IssueViewScope; c
   const activeViewId = useActiveIssueViewStore((s) => s.active[containerKey] ?? null);
   const setActive = useActiveIssueViewStore((s) => s.setActive);
   const seenUrlView = useRef<string | null | undefined>(undefined);
+  // The page this sync belongs to. The tab's URL moves to the next page a few
+  // frames before the router swaps this one out (see rendered-route-store);
+  // in that gap `?view=` names the next page's view, which this page must
+  // neither adopt nor write over.
+  const page = useRef<{ containerKey: string; pathname: string } | null>(null);
   // Until the URL is adopted the store can still hold another surface's view;
   // rendering against it would mount (and fetch) that view first.
   const [adopting, setAdopting] = useState(() => urlView !== null && urlView !== activeViewId);
 
   useLayoutEffect(() => {
+    if (page.current?.containerKey !== containerKey) page.current = { containerKey, pathname: navigation.pathname };
+    if (navigation.pathname !== page.current.pathname) return;
     const mounting = seenUrlView.current === undefined;
     if (urlView === seenUrlView.current) return;
     seenUrlView.current = urlView;
     if (!mounting || urlView) setActive(containerKey, urlView);
     setAdopting(false);
-  }, [containerKey, urlView, setActive]);
+  }, [containerKey, urlView, navigation.pathname, setActive]);
 
   useEffect(() => {
+    if (navigation.pathname !== page.current?.pathname) return;
     const current = useActiveIssueViewStore.getState().active[containerKey] ?? null;
     if (current === seenUrlView.current) return;
     const params = new URLSearchParams(navigation.searchParams);
