@@ -198,6 +198,14 @@ test("quality checks have exactly one runner and reuse the product build install
   assert.doesNotMatch(action, /pnpm install/);
 });
 
+test("CI and local runs share one entry point for script tests", () => {
+  const action = readFileSync(new URL("../.github/actions/frontend-quality/action.yml", import.meta.url), "utf8");
+  const { scripts } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.match(action, /run: pnpm test:scripts\n/);
+  assert.equal(scripts["test:scripts"], 'node --test "scripts/**/*.test.mjs"');
+  assert.ok(filters.quality.includes("package.json"));
+});
+
 test("the CLI writes real Actions outputs and exits nonzero on a failed gate", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "ci-scope-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

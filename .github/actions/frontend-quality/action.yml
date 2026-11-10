@@ -3,6 +3,12 @@ description: Shared UI checks using the caller's installed dependencies
 runs:
   using: composite
   steps:
+    # Same entry point as local runs, so a new scripts/**/*.test.mjs file is
+    # picked up here without being listed.
+    - name: Test repository scripts
+      shell: bash
+      run: pnpm test:scripts
+
     - name: Check packages/ui wildcard exports
       shell: bash
       run: |
@@ -11,20 +17,11 @@ runs:
 
     - name: Check UI radius tokens
       shell: bash
-      run: |
-        node --test scripts/check-ui-radius-tokens.test.mjs
-        node scripts/check-ui-radius-tokens.mjs
+      run: node scripts/check-ui-radius-tokens.mjs
 
     - name: Check shared dependencies use the pnpm catalog
       shell: bash
-      run: |
-        node --test scripts/check-dependency-catalog.test.mjs
-        node scripts/check-dependency-catalog.mjs
-
-    - name: Check the theme validator CLI
-      shell: bash
-      run: |
-        node --test scripts/theme-check.test.mjs
+      run: node scripts/check-dependency-catalog.mjs
 
     - name: Check for dead code and phantom dependencies (knip)
       shell: bash
