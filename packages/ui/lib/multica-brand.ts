@@ -67,8 +67,8 @@ export interface IconStar {
 /** The star inside a tile (`square`) or avatar disc (`circle`) at a rendered size. */
 export function iconStar(sizePx: number | undefined, shape: "square" | "circle" = "square"): IconStar {
   const small = sizePx == null || sizePx <= ICON_SMALL_MAX_PX;
-  if (shape === "circle") return small ? { scale: 0.64, stroke: 16 } : { scale: 0.56, stroke: 12 };
-  return small ? { scale: 0.7, stroke: 16 } : { scale: 0.6, stroke: 12 };
+  if (shape === "circle") return small ? { scale: 0.64, stroke: 16 } : { scale: 0.56, stroke: 10 };
+  return small ? { scale: 0.7, stroke: 16 } : { scale: 0.6, stroke: 10 };
 }
 
 /** Centres a star of the given scale on the 100×100 tile. */
