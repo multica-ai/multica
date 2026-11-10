@@ -19,6 +19,25 @@
     "toast_deleted": "Đã xóa công việc",
     "toast_delete_failed": "Không xóa được công việc"
   },
+  "rename_issue": {
+    "title": "Đổi tên công việc",
+    "placeholder": "Tiêu đề công việc",
+    "input_aria_label": "Đổi tên {{identifier}}",
+    "submit": "Lưu",
+    "saving": "Đang lưu...",
+    "title_required": "Hãy nhập tiêu đề",
+    "toast_renamed": "Đã đổi tên công việc",
+    "toast_failed": "Đổi tên công việc thất bại"
+  },
+  "rename_project": {
+    "title": "Đổi tên dự án",
+    "placeholder": "Tiêu đề dự án",
+    "submit": "Lưu",
+    "title_required": "Nhập tiêu đề",
+    "offline_error": "Bạn đang ngoại tuyến. Hãy kết nối lại rồi thử đổi tên.",
+    "toast_renamed": "Đã đổi tên dự án",
+    "toast_failed": "Đổi tên dự án thất bại"
+  },
   "feedback": {
     "title": "Phản hồi",
     "placeholder": "Hãy cho chúng tôi biết trải nghiệm của bạn, lỗi bạn gặp phải, hoặc tính năng bạn muốn thấy…",
@@ -50,6 +69,12 @@
     "description": "Tìm kiếm một công việc để thêm làm công việc con",
     "toast_failed": "Không thêm được công việc con",
     "toast_success": "Đã thêm {{identifier}} làm công việc con"
+  },
+  "add_project_issue": {
+    "title": "Thêm công việc có sẵn",
+    "description": "Tìm một công việc để chuyển vào dự án này",
+    "toast_success": "Đã chuyển {{identifier}} vào dự án",
+    "toast_failed": "Không chuyển được công việc"
   },
   "run_confirm": {
     "title_assign": "Xác nhận giao việc?",
@@ -117,8 +142,8 @@
     "toast_failed": "Không tạo được dự án",
     "repos_pill": "Repo",
     "repos_pill_count_other": "{{count}} repo",
-    "repos_heading": "Đính kèm repo GitHub vào dự án này",
-    "repos_empty": "Chưa có repo ở cấp không gian làm việc. Dán URL bên dưới để đính kèm một repo ngay.",
+    "repos_heading": "Thêm repo GitHub vào dự án này",
+    "repos_empty": "Chưa có repo nào của không gian làm việc. Dán URL bên dưới để thêm một repo.",
     "repos_search_placeholder": "Tìm kiếm repo...",
     "repos_search_empty": "Không có repo nào khớp với tìm kiếm của bạn.",
     "repos_url_placeholder": "https://github.com/owner/repo or git@github.com:owner/repo.git",
@@ -130,7 +155,7 @@
     "local_heading": "Dùng thư mục làm việc cục bộ trên máy này",
     "local_on_device": "Gắn với {{device}}",
     "local_this_machine": "máy này",
-    "local_daemon_offline": "Daemon đang ngoại tuyến — hãy khởi động để gắn một thư mục cục bộ.",
+    "local_daemon_offline": "Daemon đang ngoại tuyến. Hãy khởi động để chọn thư mục.",
     "local_pick": "Chọn thư mục…",
     "local_picking": "Đang mở trình chọn…",
     "local_change": "Đổi thư mục…",
@@ -138,7 +163,8 @@
     "local_pick_failed": "Không mở được trình chọn thư mục.",
     "local_invalid_dir": "Không dùng được thư mục này. Hãy chọn thư mục khác.",
     "local_hint": "Agent trên các máy khác sẽ không thấy đường dẫn này — chúng sẽ không khởi động được. Hãy dùng repo cho công việc dùng chung.",
-    "repos_ref_default": "Nhánh mặc định"
+    "repos_ref_default": "Nhánh mặc định",
+    "repos_remove_aria": "Gỡ {{repo}}"
   },
   "create_issue": {
     "sr_manual": "Công việc mới",
@@ -240,12 +266,12 @@
       "sent_label": "Đã gửi",
       "sent_count": "{{count}} đã gửi",
       "version_blocked_tooltip": "CLI của daemon phải ≥ {{min}}",
+      "qoder_attachments_unsupported": "Qoder Cloud Agents không đọc được tệp đính kèm. Hãy gỡ chúng hoặc chọn agent khác.",
       "toast_sent": "Đã gửi cho agent — bạn sẽ nhận thông báo trong hộp thư đến khi hoàn tất",
       "error_agent_unavailable_fallback": "Agent không khả dụng. Hãy chọn agent khác.",
       "error_daemon_version": "CLI của daemon của agent này ({{current}}) thấp hơn mức yêu cầu {{min}}. Hãy nâng cấp daemon để dùng Tạo bằng agent.",
       "error_unknown": "Không gửi được. Hãy thử lại.",
-      "sub_issue_of": "Công việc con của {{identifier}}",
-      "qoder_attachments_unsupported": "Qoder Cloud Agents không đọc được tệp đính kèm. Hãy gỡ chúng hoặc chọn agent khác."
+      "sub_issue_of": "Công việc con của {{identifier}}"
     }
   },
   "mark_duplicate": {
@@ -255,22 +281,6 @@
     "toast_failed": "Không đánh dấu trùng lặp được",
     "error_target_is_duplicate": "{{identifier}} tự nó cũng là bản trùng lặp. Hãy chọn công việc gốc của nó.",
     "error_has_duplicates": "Có các công việc khác đang được đánh dấu trùng lặp với công việc này. Hãy gỡ các đánh dấu đó trước."
-  },
-  "rename_issue": {
-    "title": "Đổi tên công việc",
-    "placeholder": "Tiêu đề công việc",
-    "input_aria_label": "Đổi tên {{identifier}}",
-    "submit": "Lưu",
-    "saving": "Đang lưu...",
-    "title_required": "Hãy nhập tiêu đề",
-    "toast_renamed": "Đã đổi tên công việc",
-    "toast_failed": "Đổi tên công việc thất bại"
-  },
-  "add_project_issue": {
-    "title": "Thêm công việc có sẵn",
-    "description": "Tìm một công việc để chuyển vào dự án này",
-    "toast_success": "Đã chuyển {{identifier}} vào dự án",
-    "toast_failed": "Không chuyển được công việc"
   },
   "copy_parent_fields": {
     "trigger": "Sao chép trường của công việc cha",

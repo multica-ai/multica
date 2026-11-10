@@ -15,11 +15,24 @@
     "status": "Trạng thái",
     "priority": "Mức ưu tiên",
     "from": "Từ",
-    "unread_only": "Chỉ chưa đọc",
-    "no_agents_working": "Không có agent nào đang làm việc",
     "notification_count_other": "{{count}} thông báo",
     "clear": "Xóa bộ lọc",
-    "empty": "Không có thông báo nào khớp với bộ lọc của bạn"
+    "empty": "Không có thông báo nào khớp với bộ lọc của bạn",
+    "section_notification": "Thông báo",
+    "section_issue": "Công việc",
+    "type": "Loại",
+    "received": "Đã nhận",
+    "type_mention": "Nhắc đến",
+    "type_comment": "Bình luận và phản ứng",
+    "type_assign": "Giao việc và theo dõi",
+    "type_review": "Yêu cầu review",
+    "type_change": "Thay đổi công việc",
+    "type_run": "Lượt chạy của agent",
+    "type_system": "Hệ thống",
+    "received_today": "Hôm nay",
+    "received_last_7_days": "7 ngày qua",
+    "received_last_30_days": "30 ngày qua",
+    "agent_idle": "Nhàn rỗi"
   },
   "context_menu": {
     "mark_read": "Đánh dấu là đã đọc",
@@ -61,6 +74,7 @@
   "types": {
     "issue_assigned": "Đã giao",
     "issue_subscribed": "Đã theo dõi",
+    "issue_created": "Công việc mới",
     "unassigned": "Đã gỡ giao việc",
     "assignee_changed": "Người được giao đã thay đổi",
     "status_changed": "Trạng thái đã thay đổi",
@@ -80,7 +94,11 @@
     "quick_create_unconfirmed": "Tạo bằng agent chưa được xác nhận",
     "autopilot_paused": "Autopilot đã tạm dừng",
     "children_done": "Các công việc con đã hoàn thành",
-    "autopilot_quota_exceeded": "Đã đạt giới hạn số lần chạy autopilot"
+    "autopilot_quota_exceeded": "Đã đạt giới hạn số lần chạy autopilot",
+    "app_action_requested": "Cần bạn xác nhận",
+    "app_action_reminder": "Sắp hết hạn xác nhận",
+    "app_connect_requested": "Kết nối ứng dụng",
+    "app_action_result": "Kết quả thao tác ứng dụng"
   },
   "labels": {
     "set_status_to": "Đặt trạng thái thành",

@@ -222,8 +222,8 @@
   },
   "errors": {
     "skip_failed": "Không hoàn tất được quá trình thiết lập ban đầu",
-    "mika_setup_failed": "Không khởi động được không gian làm việc Mika của bạn",
-    "guide_failed": "Không tạo được hướng dẫn runtime. Vui lòng thử lại."
+    "guide_failed": "Không tạo được hướng dẫn runtime. Vui lòng thử lại.",
+    "mika_setup_failed": "Không khởi động được không gian làm việc Mika của bạn"
   },
   "mika_intro": {
     "headline": "Gặp gỡ Mika, đồng đội agent đầu tiên của bạn.",
