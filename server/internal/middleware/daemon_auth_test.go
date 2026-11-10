@@ -189,6 +189,49 @@ func TestDaemonAuth_StripsForgedAgentIdentityHeaders(t *testing.T) {
 	}
 }
 
+// TestDaemonAuth_StripsClientSuppliedUserID: a daemon token carries no user,
+// so the user identity a handler reads must be empty on the mdt_ path rather
+// than whatever the client sent. The PAT branch still stamps its own user.
+func TestDaemonAuth_StripsClientSuppliedUserID(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	cache := auth.NewDaemonTokenCache(rdb)
+
+	const rawToken = "mdt_user_header_strip_test"
+	cache.Set(context.Background(), auth.HashToken(rawToken), auth.DaemonTokenIdentity{
+		WorkspaceID: "ws-1",
+		DaemonID:    "daemon-1",
+		OwnerID:     "33333333-3333-3333-3333-333333333333",
+	}, auth.AuthCacheTTL)
+	const rawPAT = "mul_user_header_strip_test"
+	patCache := auth.NewPATCache(rdb)
+	patCache.Set(context.Background(), auth.HashToken(rawPAT), "44444444-4444-4444-4444-444444444444", auth.AuthCacheTTL)
+
+	var gotUserID string
+	mw := DaemonAuth(nil, patCache, cache, nil)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUserID = r.Header.Get("X-User-ID")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	for _, tc := range []struct{ token, want string }{
+		{rawToken, ""},
+		{rawPAT, "44444444-4444-4444-4444-444444444444"},
+	} {
+		gotUserID = "unset"
+		req := httptest.NewRequest("GET", "/api/daemon/workspaces", nil)
+		req.Header.Set("Authorization", "Bearer "+tc.token)
+		req.Header.Set("X-User-ID", "11111111-1111-1111-1111-111111111111")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d: %s", tc.token, w.Code, w.Body.String())
+		}
+		if gotUserID != tc.want {
+			t.Fatalf("%s: X-User-ID = %q, want %q", tc.token, gotUserID, tc.want)
+		}
+	}
+}
+
 func TestDaemonAuth_InvalidMDT_NilQueries(t *testing.T) {
 	mw := DaemonAuth(nil, nil, nil, nil) // no caches, no DB
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
