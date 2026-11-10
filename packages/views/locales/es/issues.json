@@ -2051,6 +2051,7 @@
     "count_other": "Esperando {{count}} tareas",
     "stage": "Etapas anteriores · {{finished}}/{{total}} terminadas",
     "hint": "Al terminar estas tareas, el responsable comienza automáticamente o recibe una notificación.",
+    "hint_backlog": "Esta tarea está en Backlog, así que no comenzará automáticamente cuando terminen estas tareas. Comenzará cuando salga de Backlog.",
     "empty": "Sin tareas pendientes",
     "picker_hint": "Selecciona una tarea que deba terminar antes que esta.",
     "restricted": "{{count}} requisitos restringidos",

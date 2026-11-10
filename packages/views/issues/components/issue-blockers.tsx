@@ -55,7 +55,10 @@ export function IssueBlockersSection({ issue }: { issue: Issue }) {
         </AppLink>)}
       </div>}
       {restrictedCount > 0 && <p className="text-muted-foreground">{t(($) => $.waiting.restricted, {count: restrictedCount})}</p>}
-      {(issue.blocked_count ?? 0) > 0 && <p className="text-muted-foreground">{t(($) => $.waiting.hint)}</p>}
+      {/* Only the fixed backlog key parks work, matching the server's queue admission. */}
+      {(issue.blocked_count ?? 0) > 0 && <p className="text-muted-foreground">
+        {issue.status === "backlog" ? t(($) => $.waiting.hint_backlog) : t(($) => $.waiting.hint)}
+      </p>}
       {blockers.length === 0 && !restrictedCount && <p className="text-muted-foreground">{t(($) => $.waiting.empty)}</p>}
       {mutation.isError && <p role="alert" className="text-destructive">{mutation.error.message}</p>}
     </div>}

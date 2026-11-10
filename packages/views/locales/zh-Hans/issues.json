@@ -1971,6 +1971,7 @@
     "count_other": "等待 {{count}} 个任务",
     "stage": "更早阶段 · {{finished}}/{{total}} 已结束",
     "hint": "全部结束后，负责人将自动开工或收到通知。",
+    "hint_backlog": "任务在待规划中，全部结束后不会自动开始，移出待规划后才会开始。",
     "empty": "没有等待的任务",
     "picker_hint": "选择一个必须先结束的任务。",
     "restricted": "{{count}} 个无权查看的前置任务",

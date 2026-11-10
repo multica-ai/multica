@@ -2049,6 +2049,7 @@
     "count": "Waiting for {{count}} tasks",
     "stage": "Earlier stages · {{finished}}/{{total}} ended",
     "hint": "After these tasks end, the assignee starts automatically or receives a notification.",
+    "hint_backlog": "This task is in Backlog, so it won't start automatically when these tasks end. It starts once it leaves Backlog.",
     "empty": "No tasks to wait for",
     "picker_hint": "Select a task that must end before this one can start.",
     "restricted": "{{count}} restricted prerequisites",
