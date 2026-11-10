@@ -157,12 +157,6 @@
     "toast_saved": "変更を保存しました"
   },
   "preferences": {
-    "theme": {
-      "title": "テーマ",
-      "light": "ライト",
-      "dark": "ダーク",
-      "system": "システム"
-    },
     "language": {
       "title": "言語",
       "english": "English",
@@ -194,13 +188,111 @@
     },
     "comments_title": "コメントとチャット",
     "region_title": "言語と地域",
-    "appearance_title": "外観",
     "issue_fields_title": "タスク作成時に表示するフィールド",
     "issue_fields": {
       "field": "フィールド",
       "quick": "エージェントで作成",
       "manual": "手動作成",
       "unsupported": "エージェントでの作成では使用できません"
+    }
+  },
+  "appearance": {
+    "reset": "デフォルトに戻す",
+    "color": {
+      "title": "カラー"
+    },
+    "mode": {
+      "title": "モード",
+      "light": "ライト",
+      "dark": "ダーク",
+      "system": "システム"
+    },
+    "theme": {
+      "title": "テーマ",
+      "description": "アプリ全体の色、枠線、影、角丸。",
+      "default": "デフォルト",
+      "pop": "ポップ"
+    },
+    "theme_options": {
+      "title": "テーマのオプション",
+      "description": "{{name}} が提供しています。",
+      "reset": "オプションをリセット"
+    },
+    "ui_text": {
+      "title": "インターフェースの文字",
+      "description": "メニュー、ボタン、リスト、サイドバー、見出し。"
+    },
+    "latin_font": {
+      "title": "欧文フォント"
+    },
+    "ui_font": {
+      "inter": "デフォルト",
+      "system": "システム",
+      "serif": "セリフ",
+      "mono": "等幅"
+    },
+    "cjk_font": {
+      "title": "和文フォント",
+      "description": "漢字の字形。仮名とハングルもこれに従います。",
+      "sans": "ゴシック",
+      "serif": "明朝",
+      "kai": "楷書",
+      "built_in": "標準",
+      "local": "このデバイス",
+      "load_local": "このデバイスのフォントを表示…",
+      "loading": "フォントを探しています…",
+      "none": "このデバイスに漢字を含むフォントはありません。",
+      "load_failed": "このデバイスのフォントを読み込めませんでした。",
+      "sample": "永和九年 いろは"
+    },
+    "follow_ui": "インターフェースと同じ",
+    "theme_font": "テーマのフォント",
+    "font_size": {
+      "title": "文字サイズ",
+      "description": "文字だけを拡大します。余白とレイアウトは変わりません。",
+      "value": "{{size}} px",
+      "default": "{{size}} px · デフォルト"
+    },
+    "content_text": {
+      "title": "本文の文字",
+      "description": "課題の説明、コメント、チャット、ドキュメントの本文。",
+      "sample": "説明やコメントはじっくり読むものなので、読みやすい書体にできます。リストやボタンはコンパクトなままです。"
+    },
+    "code_font": {
+      "title": "コードフォント",
+      "description": "コードブロック、インラインコード、ログ。",
+      "geist": "デフォルト",
+      "jetbrains": "合字",
+      "system": "システム等幅"
+    },
+    "content_size": {
+      "title": "文字サイズ",
+      "description": "本文だけ。インターフェースは変わりません。",
+      "follow": "インターフェースと同じ（{{size}} px）"
+    },
+    "content_leading": {
+      "title": "行の高さ",
+      "compact": "詰める",
+      "default": "標準",
+      "relaxed": "ゆったり"
+    },
+    "layout": {
+      "title": "レイアウトとアクセシビリティ"
+    },
+    "density": {
+      "title": "表示密度",
+      "description": "課題リストと検索結果の行の高さ。",
+      "compact": "コンパクト",
+      "default": "標準",
+      "comfortable": "ゆったり"
+    },
+    "reduce_motion": {
+      "title": "視差効果を減らす",
+      "description": "アニメーションとトランジションをオフにします。オフでもシステム設定は適用されます。"
+    },
+    "high_contrast": {
+      "title": "コントラストを上げる",
+      "description": "補助テキストを濃く、枠線をはっきりさせます。"
     }
   },
   "shortcuts": {
@@ -394,6 +486,7 @@
     "tabs": {
       "profile": "プロフィール",
       "preferences": "環境設定",
+      "appearance": "外観",
       "shortcuts": "ショートカット",
       "issue": "タスク",
       "notifications": "通知",

@@ -157,12 +157,6 @@
     "toast_saved": "更改已保存"
   },
   "preferences": {
-    "theme": {
-      "title": "主题",
-      "light": "浅色",
-      "dark": "深色",
-      "system": "跟随系统"
-    },
     "language": {
       "title": "语言",
       "english": "English",
@@ -194,13 +188,111 @@
     },
     "comments_title": "评论与聊天",
     "region_title": "语言与地区",
-    "appearance_title": "外观",
     "issue_fields_title": "创建任务时显示的字段",
     "issue_fields": {
       "field": "字段",
       "quick": "智能体创建",
       "manual": "手动创建",
       "unsupported": "智能体创建时不支持此字段"
+    }
+  },
+  "appearance": {
+    "reset": "恢复默认",
+    "color": {
+      "title": "颜色"
+    },
+    "mode": {
+      "title": "模式",
+      "light": "浅色",
+      "dark": "深色",
+      "system": "跟随系统"
+    },
+    "theme": {
+      "title": "主题",
+      "description": "全局的颜色、边框、阴影和圆角。",
+      "default": "默认",
+      "pop": "波普"
+    },
+    "theme_options": {
+      "title": "主题选项",
+      "description": "由 {{name}} 提供。",
+      "reset": "恢复主题默认"
+    },
+    "ui_text": {
+      "title": "界面文字",
+      "description": "菜单、按钮、列表、侧栏和标题。"
+    },
+    "latin_font": {
+      "title": "西文字体"
+    },
+    "ui_font": {
+      "inter": "默认",
+      "system": "系统",
+      "serif": "衬线",
+      "mono": "等宽"
+    },
+    "cjk_font": {
+      "title": "中文字体",
+      "description": "汉字字形；日文、韩文跟着这里走。",
+      "sans": "黑体",
+      "serif": "宋体",
+      "kai": "楷体",
+      "built_in": "常用",
+      "local": "本机字体",
+      "load_local": "显示本机字体…",
+      "loading": "正在查找字体…",
+      "none": "这台设备上没有含汉字的字体。",
+      "load_failed": "无法读取本机字体。",
+      "sample": "永和九年，岁在癸丑"
+    },
+    "follow_ui": "跟随界面",
+    "theme_font": "主题字体",
+    "font_size": {
+      "title": "字号",
+      "description": "只放大文字，间距和布局不变。",
+      "value": "{{size}} px",
+      "default": "{{size}} px · 默认"
+    },
+    "content_text": {
+      "title": "内容文字",
+      "description": "任务描述、评论、对话和文档里的正文。",
+      "sample": "描述和评论需要整段阅读，可以换成更适合阅读的字体；列表和按钮仍然保持紧凑。"
+    },
+    "code_font": {
+      "title": "代码字体",
+      "description": "代码块、行内代码和日志。",
+      "geist": "默认",
+      "jetbrains": "连字",
+      "system": "系统等宽"
+    },
+    "content_size": {
+      "title": "字号",
+      "description": "只改内容文字，界面不变。",
+      "follow": "跟随界面（{{size}} px）"
+    },
+    "content_leading": {
+      "title": "行高",
+      "compact": "紧凑",
+      "default": "标准",
+      "relaxed": "宽松"
+    },
+    "layout": {
+      "title": "布局与辅助功能"
+    },
+    "density": {
+      "title": "信息密度",
+      "description": "任务列表和搜索结果的行高。",
+      "compact": "紧凑",
+      "default": "标准",
+      "comfortable": "宽松"
+    },
+    "reduce_motion": {
+      "title": "减少动态效果",
+      "description": "关闭动画和过渡。关掉时仍遵循系统设置。"
+    },
+    "high_contrast": {
+      "title": "提高对比度",
+      "description": "次要文字更深，边框更明显。"
     }
   },
   "shortcuts": {
@@ -394,6 +486,7 @@
     "tabs": {
       "profile": "个人资料",
       "preferences": "偏好设置",
+      "appearance": "外观",
       "shortcuts": "快捷键",
       "issue": "任务",
       "notifications": "通知",

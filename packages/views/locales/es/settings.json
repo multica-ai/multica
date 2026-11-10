@@ -141,12 +141,6 @@
     "toast_saved": "Cambios guardados"
   },
   "preferences": {
-    "theme": {
-      "title": "Tema",
-      "light": "Claro",
-      "dark": "Oscuro",
-      "system": "Sistema"
-    },
     "language": {
       "title": "Idioma",
       "english": "English",
@@ -177,7 +171,6 @@
       "hint": "Solo establece el valor predeterminado. Puedes cambiarlo para cualquier mensaje antes de enviarlo."
     },
     "comments_title": "Comentarios",
-    "appearance_title": "Apariencia",
     "issue_fields": {
       "field": "Campo",
       "manual": "Creación manual",
@@ -186,6 +179,105 @@
     },
     "issue_fields_title": "Campos al crear tareas",
     "region_title": "Idioma y región"
+  },
+  "appearance": {
+    "reset": "Restablecer valores predeterminados",
+    "color": {
+      "title": "Color"
+    },
+    "mode": {
+      "title": "Modo",
+      "light": "Claro",
+      "dark": "Oscuro",
+      "system": "Sistema"
+    },
+    "theme": {
+      "title": "Tema",
+      "description": "Colores, bordes, sombras y esquinas de toda la app.",
+      "default": "Predeterminado",
+      "pop": "Pop"
+    },
+    "theme_options": {
+      "title": "Opciones del tema",
+      "description": "Las ofrece {{name}}.",
+      "reset": "Restablecer opciones"
+    },
+    "ui_text": {
+      "title": "Texto de la interfaz",
+      "description": "Menús, botones, listas, la barra lateral y los títulos."
+    },
+    "latin_font": {
+      "title": "Fuente latina"
+    },
+    "ui_font": {
+      "inter": "Predeterminada",
+      "system": "Sistema",
+      "serif": "Serif",
+      "mono": "Monoespaciada"
+    },
+    "cjk_font": {
+      "title": "Fuente CJK",
+      "description": "Caracteres chinos; el japonés y el coreano lo siguen.",
+      "sans": "Sans",
+      "serif": "Serif",
+      "kai": "Kai",
+      "built_in": "Integradas",
+      "local": "En este dispositivo",
+      "load_local": "Mostrar las fuentes de este dispositivo…",
+      "loading": "Buscando fuentes…",
+      "none": "No hay fuentes con caracteres chinos en este dispositivo.",
+      "load_failed": "No se pudieron leer las fuentes de este dispositivo.",
+      "sample": "永和九年 漢字"
+    },
+    "follow_ui": "Igual que la interfaz",
+    "theme_font": "Fuente del tema",
+    "font_size": {
+      "title": "Tamaño del texto",
+      "description": "Solo agranda el texto. El espaciado y el diseño no cambian.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · Predeterminado"
+    },
+    "content_text": {
+      "title": "Texto del contenido",
+      "description": "Descripciones de incidencias, comentarios, chat y documentos.",
+      "sample": "Las descripciones y los comentarios se leen enteros, así que pueden usar una fuente pensada para leer mientras listas y botones siguen compactos."
+    },
+    "code_font": {
+      "title": "Fuente del código",
+      "description": "Bloques de código, código en línea y registros.",
+      "geist": "Predeterminada",
+      "jetbrains": "Ligaduras",
+      "system": "Monoespaciada del sistema"
+    },
+    "content_size": {
+      "title": "Tamaño de letra",
+      "description": "Solo el texto del contenido; la interfaz mantiene su tamaño.",
+      "follow": "Igual que la interfaz ({{size}} px)"
+    },
+    "content_leading": {
+      "title": "Interlineado",
+      "compact": "Compacto",
+      "default": "Predeterminado",
+      "relaxed": "Amplio"
+    },
+    "layout": {
+      "title": "Diseño y accesibilidad"
+    },
+    "density": {
+      "title": "Densidad",
+      "description": "Altura de las filas en listas de incidencias y búsqueda.",
+      "compact": "Compacta",
+      "default": "Predeterminada",
+      "comfortable": "Amplia"
+    },
+    "reduce_motion": {
+      "title": "Reducir movimiento",
+      "description": "Desactiva animaciones y transiciones. Si está desactivado, se sigue aplicando el ajuste del sistema."
+    },
+    "high_contrast": {
+      "title": "Aumentar contraste",
+      "description": "Texto secundario más oscuro y bordes más marcados."
+    }
   },
   "shortcuts": {
     "title": "Atajos de teclado",
@@ -378,6 +470,7 @@
     "tabs": {
       "profile": "Perfil",
       "preferences": "Preferencias",
+      "appearance": "Apariencia",
       "shortcuts": "Atajos",
       "issue": "Tarea",
       "notifications": "Notificaciones",

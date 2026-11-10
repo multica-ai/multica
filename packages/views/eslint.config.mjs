@@ -1,5 +1,5 @@
 import reactConfig from "@multica/eslint-config/react";
-import { ICON_LIBRARY_IMPORT_PATTERNS } from "@multica/eslint-config/base";
+import { ICON_LIBRARY_IMPORT_PATTERNS, REDUCED_MOTION_IMPORT } from "@multica/eslint-config/base";
 import { NO_ROUND_CONTROLS } from "@multica/eslint-config/control-shape";
 import i18next from "eslint-plugin-i18next";
 import {
@@ -50,7 +50,7 @@ export default [
       "no-restricted-imports": [
         "error",
         {
-          paths: STORE_FACTORY_IMPORTS,
+          paths: [...STORE_FACTORY_IMPORTS, REDUCED_MOTION_IMPORT],
           patterns: ICON_LIBRARY_IMPORT_PATTERNS,
         },
       ],
