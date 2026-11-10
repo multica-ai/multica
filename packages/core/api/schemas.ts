@@ -466,6 +466,29 @@ export const EMPTY_ISSUE_PULL_REQUESTS_RESPONSE: IssuePullRequestsResponse = {
   auto_complete: null,
 };
 
+// An action record from a newer server with an unknown action is dropped;
+// an unknown status reads as failed, which offers a retry.
+export const IssueEnvironmentActionSchema = z.object({
+  id: z.string(),
+  action: z.enum(["stop", "restart", "start", "logs"]),
+  status: z.enum(["pending", "succeeded", "failed", "expired"]).catch("failed"),
+  error: z.string().optional().default(""),
+  environment_id: z.string().nullable().optional().default(null),
+  runtime_id: z.string().optional().default(""),
+  repo: z.string().optional().default(""),
+  name: z.string().optional().default(""),
+  actor_type: z.string().optional().default("member"),
+  actor_id: z.string().nullable().optional().default(null),
+  created_at: z.string(),
+  completed_at: z.string().nullable().optional().default(null),
+}).loose();
+
+const OptionalIssueEnvironmentActionSchema = IssueEnvironmentActionSchema.nullable().optional().default(null).catch(null);
+
+export const IssueEnvironmentCommandSchema = IssueEnvironmentActionSchema.extend({
+  output: z.string().nullable().optional().default(null),
+}).loose();
+
 // One malformed environment drops out of the list instead of taking the
 // whole section with it; an unknown state from a newer server reads as
 // unreachable, which offers no Open action. A kind this client does not know,
@@ -487,26 +510,57 @@ export const IssueEnvironmentSchema = z.object({
   port: z.number().nullable().optional().default(null),
   state: z.enum(["starting", "running", "exited", "stopped", "unreachable"]).catch("unreachable"),
   detail: z.string().optional().default(""),
+  excerpt: z.string().optional().default(""),
   started_at: z.string(),
   expires_at: z.string().nullable().optional().default(null),
   last_seen_at: z.string(),
   ended_at: z.string().nullable().optional().default(null),
+  // Older servers predate sidebar control: everything reads as read-only.
+  controllable: z.boolean().optional().default(false),
+  can_control: z.boolean().optional().default(false),
+  pending_action: OptionalIssueEnvironmentActionSchema,
+  last_action: OptionalIssueEnvironmentActionSchema,
+  origin: OptionalIssueEnvironmentActionSchema,
 }).loose();
 
-export const IssueEnvironmentsResponseSchema = z.object({
-  environments: z
+const DeclaredEnvironmentSchema = z.object({
+  repo: z.string(),
+  name: z.string(),
+  label: z.string().optional().default(""),
+  start: z.string().optional().default(""),
+}).loose();
+
+const IssueEnvironmentConfigSchema = z.object({
+  runtime_id: z.string(),
+  task_id: z.string(),
+  reported_at: z.string(),
+  can_control: z.boolean().optional().default(false),
+  environments: z.array(DeclaredEnvironmentSchema).default([]),
+}).loose();
+
+function lenientArray<T extends z.ZodType>(schema: T) {
+  return z
     .array(z.unknown())
+    .optional()
     .default([])
     .transform((items) =>
       items.flatMap((item) => {
-        const parsed = IssueEnvironmentSchema.safeParse(item);
-        return parsed.success ? [parsed.data] : [];
+        const parsed = schema.safeParse(item);
+        return parsed.success ? [parsed.data as z.infer<T>] : [];
       }),
-    ),
+    );
+}
+
+export const IssueEnvironmentsResponseSchema = z.object({
+  environments: lenientArray(IssueEnvironmentSchema),
+  configs: lenientArray(IssueEnvironmentConfigSchema),
+  pending_starts: lenientArray(IssueEnvironmentActionSchema),
 }).loose();
 
 export const EMPTY_ISSUE_ENVIRONMENTS_RESPONSE: IssueEnvironmentsResponse = {
   environments: [],
+  configs: [],
+  pending_starts: [],
 };
 
 // Label responses are consumed by settings tables and resource pickers. Keep
