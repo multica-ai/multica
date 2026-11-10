@@ -1543,7 +1543,7 @@
       "account": "帳號 · 所有裝置同步",
       "device": "僅本裝置",
       "device_workspace": "僅本裝置 · {{name}}",
-      "workspace": "{{name}} 工作區",
+      "workspace": "{{name}}",
       "workspace_only": "僅對 {{name}} 生效"
     },
     "read_only": {

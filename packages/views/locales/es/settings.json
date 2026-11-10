@@ -1546,7 +1546,7 @@
       "account": "Cuenta · sincronizado",
       "device": "Solo este dispositivo",
       "device_workspace": "Este dispositivo · {{name}}",
-      "workspace": "Espacio de trabajo {{name}}",
+      "workspace": "{{name}}",
       "workspace_only": "Solo en {{name}}"
     }
   },

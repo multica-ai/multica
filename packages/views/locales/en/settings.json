@@ -1555,7 +1555,7 @@
       "account": "Account · synced",
       "device": "This device only",
       "device_workspace": "This device · {{name}}",
-      "workspace": "{{name}} workspace",
+      "workspace": "{{name}}",
       "workspace_only": "Only in {{name}}"
     },
     "read_only": {

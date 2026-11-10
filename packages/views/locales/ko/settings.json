@@ -1543,7 +1543,7 @@
       "account": "계정 · 모든 기기에 동기화",
       "device": "이 기기에만",
       "device_workspace": "이 기기에만 · {{name}}",
-      "workspace": "{{name}} 워크스페이스",
+      "workspace": "{{name}}",
       "workspace_only": "{{name}}에만 적용"
     },
     "read_only": {

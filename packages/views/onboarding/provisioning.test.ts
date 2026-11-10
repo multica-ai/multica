@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import type { Agent, Workspace } from "@multica/core/types";
 import {
+  compareTools,
   createDefaultWorkspace,
   defaultWorkspaceSlugBase,
   findReusableAgent,
   splitTaskText,
+  tightenCjkSpacing,
   uniqueAgentName,
 } from "./provisioning";
 import { parseInviteEmails } from "./getting-started/invite-teammates-dialog";
@@ -25,6 +27,19 @@ describe("uniqueAgentName", () => {
     expect(
       uniqueAgentName("Claude Code", ["Claude Code", "Claude Code · Jiayuan"], "Jiayuan"),
     ).toBe("Claude Code · Jiayuan 2");
+  });
+});
+
+describe("compareTools", () => {
+  it("puts the familiar tools first, then the rest by name", () => {
+    expect(["opencode", "dsh", "cursor", "claude", "kimi", "codex"].sort(compareTools)).toEqual([
+      "claude",
+      "codex",
+      "cursor",
+      "dsh",
+      "kimi",
+      "opencode",
+    ]);
   });
 });
 
@@ -82,6 +97,16 @@ describe("defaultWorkspaceSlugBase", () => {
   });
 });
 
+describe("tightenCjkSpacing", () => {
+  it("drops the space between a CJK name and the CJK template, and only there", () => {
+    expect(tightenCjkSpacing("张三 的工作区")).toBe("张三的工作区");
+    expect(tightenCjkSpacing("Jiayuan 的工作区")).toBe("Jiayuan 的工作区");
+    expect(tightenCjkSpacing("さくら のワークスペース")).toBe("さくらのワークスペース");
+    expect(tightenCjkSpacing("Ada's workspace")).toBe("Ada's workspace");
+    expect(tightenCjkSpacing("지수 워크스페이스")).toBe("지수 워크스페이스");
+  });
+});
+
 describe("createDefaultWorkspace", () => {
   const ws = { id: "ws", slug: "ada" } as Workspace;
   const conflict = () => new ApiError("taken", 409, "Conflict");
@@ -120,6 +145,13 @@ describe("parseInviteEmails", () => {
     expect(parseInviteEmails("a@x.io, B@x.io;\nb@x.io  nope")).toEqual({
       valid: ["a@x.io", "b@x.io"],
       invalid: ["nope"],
+    });
+  });
+
+  it("accepts a domain without a dot, like the members page does, but not an empty label", () => {
+    expect(parseInviteEmails("dev@localhost a@b. c@.io")).toEqual({
+      valid: ["dev@localhost"],
+      invalid: ["a@b.", "c@.io"],
     });
   });
 });

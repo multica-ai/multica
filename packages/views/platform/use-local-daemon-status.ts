@@ -8,8 +8,9 @@ export interface LocalDaemonStatus {
   daemonId: string | null;
   deviceName: string | null;
   running: boolean;
-  /** The daemon is booting or installing its CLI, so the runtimes it will
-   *  register have not had a chance to appear yet. */
+  /** Not running yet, but on its way: booting, installing its CLI, or
+   *  restarting (Desktop stops and restarts it when the signed-in account
+   *  changes). Its agent list is not meaningful until it is running. */
   starting: boolean;
   /** Provider slugs of the agent CLIs the daemon found on this machine. */
   agents: string[];
@@ -40,6 +41,13 @@ function readDaemonAPI(): DaemonAPILike | undefined {
   return (window as unknown as { daemonAPI?: DaemonAPILike }).daemonAPI;
 }
 
+const STARTING_STATES = new Set<DaemonStatusLike["state"]>([
+  "starting",
+  "installing_cli",
+  "stopping",
+  "stopped",
+]);
+
 function toStatus(s: DaemonStatusLike | undefined): LocalDaemonStatus {
   if (!s) {
     return { daemonId: null, deviceName: null, running: false, starting: false, agents: [] };
@@ -48,7 +56,7 @@ function toStatus(s: DaemonStatusLike | undefined): LocalDaemonStatus {
     daemonId: s.daemonId ?? null,
     deviceName: s.deviceName ?? null,
     running: s.state === "running",
-    starting: s.state === "starting" || s.state === "installing_cli",
+    starting: STARTING_STATES.has(s.state),
     agents: Array.isArray(s.agents) ? s.agents : [],
   };
 }

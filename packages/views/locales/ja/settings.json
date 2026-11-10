@@ -1543,7 +1543,7 @@
       "account": "アカウント · 全デバイスで同期",
       "device": "このデバイスのみ",
       "device_workspace": "このデバイスのみ · {{name}}",
-      "workspace": "{{name}} ワークスペース",
+      "workspace": "{{name}}",
       "workspace_only": "{{name}} のみに適用"
     },
     "read_only": {

@@ -1543,7 +1543,7 @@
       "account": "账号 · 所有设备同步",
       "device": "仅本设备",
       "device_workspace": "仅本设备 · {{name}}",
-      "workspace": "{{name}} 工作区",
+      "workspace": "{{name}}",
       "workspace_only": "仅对 {{name}} 生效"
     },
     "read_only": {

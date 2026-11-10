@@ -35,10 +35,14 @@ export function parseInviteEmails(raw: string): { valid: string[]; invalid: stri
     .filter(Boolean);
   const unique = [...new Set(tokens.map((token) => token.toLowerCase()))];
   return {
-    valid: unique.filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)),
-    invalid: unique.filter((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)),
+    valid: unique.filter((email) => EMAIL_RE.test(email)),
+    invalid: unique.filter((email) => !EMAIL_RE.test(email)),
   };
 }
+
+/** As permissive as the members page's `type="email"` field: the domain
+ *  needs no dot (`name@localhost`), but no label may be empty. */
+const EMAIL_RE = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)*$/;
 
 function usableShareLink(links: ShareLink[]): ShareLink | undefined {
   const now = Date.now();
@@ -255,7 +259,9 @@ export function InviteTeammatesDialog({
           </Button>
           <Button onClick={send} disabled={!canSend} aria-busy={sending}>
             {sending ? <Loader2 className="animate-spin" /> : null}
-            {parsed.valid.length > 0 ? t(($) => $.invite.send) : t(($) => $.invite.save)}
+            {parsed.valid.length + parsed.invalid.length > 0
+              ? t(($) => $.invite.send)
+              : t(($) => $.invite.save)}
           </Button>
         </DialogFooter>
       </DialogContent>

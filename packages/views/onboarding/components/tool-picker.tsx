@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, RefreshCw } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
@@ -33,8 +33,10 @@ export const EMPTY_TOOL_SELECTION: ToolSelection = {
  * pick, with the model and thinking level inline under the picked one; the
  * popular tools that are not installed follow, each with how to install it.
  *
- * Selection is controlled. The picker only picks for the member when nothing
- * is picked yet, so a tool registering later never steals a manual choice.
+ * Selection is controlled. Until the member picks a row themselves the picker
+ * keeps the top one selected, because the daemon registers its tools one by
+ * one and the first to arrive is rarely the one to suggest. A manual pick is
+ * never overridden.
  */
 export function ToolPicker({
   runtimes,
@@ -61,11 +63,21 @@ export function ToolPicker({
 
   const installedProviders = new Set(runtimes.map((r) => r.provider));
   const missing = INSTALLABLE_TOOLS.filter((tool) => !installedProviders.has(tool.provider));
+  // A selection already present on mount was made before Back left this
+  // step, so it is kept like a manual pick.
+  const pickedByMember = useRef(value.runtimeId !== "");
+  const pick = (next: ToolSelection) => {
+    pickedByMember.current = true;
+    onChange(next);
+  };
 
   useEffect(() => {
-    if (value.runtimeId && runtimes.some((r) => r.id === value.runtimeId)) return;
+    const current = runtimes.some((r) => r.id === value.runtimeId);
+    if (current && pickedByMember.current) return;
     const preferred = runtimes.find((r) => r.status === "online") ?? runtimes[0];
-    if (preferred) onChange({ ...EMPTY_TOOL_SELECTION, runtimeId: preferred.id });
+    if (preferred && preferred.id !== value.runtimeId) {
+      onChange({ ...EMPTY_TOOL_SELECTION, runtimeId: preferred.id });
+    }
   }, [runtimes, value.runtimeId, onChange]);
 
   // The tool being installed just registered: the dialog's job is done, and
@@ -75,6 +87,7 @@ export function ToolPicker({
     const arrived = runtimes.find((r) => r.provider === installing.provider);
     if (!arrived) return;
     setInstalling(null);
+    pickedByMember.current = true;
     onChange({ ...EMPTY_TOOL_SELECTION, runtimeId: arrived.id });
   }, [installing, runtimes, onChange]);
 
@@ -96,7 +109,7 @@ export function ToolPicker({
           workspaceSlug={workspaceSlug}
           selected={runtime.id === value.runtimeId}
           value={value}
-          onChange={onChange}
+          onChange={pick}
           disabled={disabled}
         />
       ))}
@@ -186,13 +199,9 @@ function RuntimeRow({
 }) {
   const { t } = useT("onboarding");
   const online = runtime.status === "online";
-  const version =
-    typeof runtime.metadata?.cli_version === "string" ? runtime.metadata.cli_version : "";
-  const meta = [
-    version ? `v${version.replace(/^v/, "")}` : "",
-    runtime.device_info,
-    online ? "" : t(($) => $.tool_picker.offline),
-  ]
+  // device_info is "host · tool version"; metadata.cli_version is Multica's
+  // own CLI, which says nothing about the tool.
+  const meta = [runtime.device_info, online ? "" : t(($) => $.tool_picker.offline)]
     .filter(Boolean)
     .join(" · ");
 

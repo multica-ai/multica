@@ -15,6 +15,23 @@ describe("StepWelcome", () => {
     ).toBeInTheDocument();
   });
 
+  it("lists the familiar tools first, whatever order the daemon reports", () => {
+    renderWithI18n(
+      <StepWelcome onStart={vi.fn()} detectedProviders={["opencode", "codex", "claude"]} />,
+    );
+
+    expect(
+      screen.getByText("Found Claude Code, Codex, and OpenCode on this computer."),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps looking while the daemon is still starting, instead of reporting none", () => {
+    renderWithI18n(<StepWelcome onStart={vi.fn()} detectedProviders={[]} detecting />);
+
+    expect(screen.getByText("Looking for coding tools on this computer…")).toBeInTheDocument();
+    expect(screen.queryByText(/No coding tools found/)).not.toBeInTheDocument();
+  });
+
   it("says when nothing was found, so the next step's install rows are expected", () => {
     renderWithI18n(<StepWelcome onStart={vi.fn()} detectedProviders={[]} />);
 

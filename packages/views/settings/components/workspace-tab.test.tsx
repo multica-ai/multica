@@ -229,7 +229,8 @@ describe("WorkspaceTab — automatic updates", () => {
 
     expect(screen.getByRole("note")).toHaveTextContent("Ask Grace Hopper");
     expect(screen.queryByDisplayValue("Test Workspace")).toBeNull();
-    expect(screen.getByText("Test Workspace")).toBeInTheDocument();
+    // Once as the read-only value, once in the scope badge.
+    expect(screen.getAllByText("Test Workspace")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: "Change prefix..." })).toBeNull();
   });
 });

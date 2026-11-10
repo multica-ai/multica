@@ -221,7 +221,7 @@ describe("SettingsPage header", () => {
     const back = title.getByRole("link", { name: "Messaging" });
     expect(back.getAttribute("href")).toContain("tab=channels");
     expect(back.getAttribute("href")).not.toContain("integration");
-    expect(header.getByText("Acme workspace")).toBeInTheDocument();
+    expect(header.getByText("Acme")).toBeInTheDocument();
     expect(screen.queryByText("Messaging", { selector: "nav" })).toBeNull();
   });
 });

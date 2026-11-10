@@ -1578,7 +1578,7 @@
       "account": "Аккаунт · синхронизировано",
       "device": "Только это устройство",
       "device_workspace": "Это устройство · {{name}}",
-      "workspace": "Рабочее пространство {{name}}",
+      "workspace": "{{name}}",
       "workspace_only": "Только в {{name}}"
     },
     "read_only": {

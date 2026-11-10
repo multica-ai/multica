@@ -1,13 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { useLocale, useT } from "../../i18n";
 import { formatAgentNames } from "../../issues/components/steer-receipts";
 import { StepFooter } from "../components/step-shell";
-import { toolDisplayName } from "../provisioning";
+import { compareTools, toolDisplayName } from "../provisioning";
+
+/** Same ceiling as the tool step: a daemon that never comes up must not keep
+ *  the welcome screen looking forever. */
+const DETECT_TIMEOUT_MS = 20_000;
 
 /**
  * What onboarding is about to do, in the order it will do it, plus the coding
@@ -19,6 +23,7 @@ export function StepWelcome({
   onSkip,
   isWeb = false,
   detectedProviders = [],
+  detecting = false,
 }: {
   onStart: () => Promise<void>;
   /** Shown only to someone who already has a workspace. */
@@ -26,6 +31,8 @@ export function StepWelcome({
   isWeb?: boolean;
   /** Provider slugs the local daemon found on PATH (desktop). */
   detectedProviders?: string[];
+  /** The daemon is not running yet, so an empty list means nothing. */
+  detecting?: boolean;
 }) {
   const { t } = useT("onboarding");
   const locale = useLocale();
@@ -53,7 +60,15 @@ export function StepWelcome({
         [t(($) => $.welcome.plan_watch_title), t(($) => $.welcome.plan_watch_body)],
       ];
 
-  const found = detectedProviders.map(toolDisplayName);
+  const providers = [...detectedProviders].sort(compareTools);
+  const found = providers.map(toolDisplayName);
+  const [timedOut, setTimedOut] = useState(false);
+  useEffect(() => {
+    if (!detecting) return;
+    const timer = window.setTimeout(() => setTimedOut(true), DETECT_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [detecting]);
+  const looking = detecting && !timedOut && found.length === 0;
 
   return (
     <>
@@ -85,7 +100,7 @@ export function StepWelcome({
           {found.length > 0 ? (
             <>
               <span className="flex shrink-0 -space-x-1">
-                {detectedProviders.slice(0, 3).map((p) => (
+                {providers.slice(0, 3).map((p) => (
                   <span
                     key={p}
                     className="flex size-6 items-center justify-center rounded-md border bg-card"
@@ -98,6 +113,14 @@ export function StepWelcome({
                 {t(($) => $.welcome.detected, { tools: formatAgentNames(locale, found) })}
               </span>
             </>
+          ) : looking ? (
+            <span
+              aria-busy
+              className="flex items-center gap-2 text-caption text-muted-foreground"
+            >
+              <Loader2 className="size-3.5 animate-spin" />
+              {t(($) => $.tool_picker.detecting)}
+            </span>
           ) : (
             <span className="text-caption text-muted-foreground">
               {t(($) => $.welcome.detected_none)}

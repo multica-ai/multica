@@ -27,6 +27,7 @@ import {
   createDefaultWorkspace,
   createFirstTask,
   defaultWorkspaceSlugBase,
+  tightenCjkSpacing,
   ensureToolAgent,
   type FirstTaskFolder,
 } from "./provisioning";
@@ -131,7 +132,7 @@ export function OnboardingFlow({
     const ownerName = user.name.trim().split(/\s+/)[0] || user.email.split("@")[0] || "";
     try {
       const ws = await createDefaultWorkspace({
-        name: t(($) => $.defaults.workspace_name, { name: ownerName }),
+        name: tightenCjkSpacing(t(($) => $.defaults.workspace_name, { name: ownerName })),
         slugBase: defaultWorkspaceSlugBase(user, matchLocale([locale])),
         create: (input) => createWorkspace.mutateAsync(input),
       });
@@ -165,6 +166,7 @@ export function OnboardingFlow({
           onSkip={canSkipWelcome ? handleWelcomeSkip : undefined}
           isWeb={isWeb}
           detectedProviders={daemon.agents}
+          detecting={daemon.starting}
         />
       </OnboardingPage>
     );

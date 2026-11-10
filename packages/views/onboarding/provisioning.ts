@@ -27,6 +27,18 @@ export function toolDisplayName(provider: string): string {
   return TOOL_NAMES[provider] ?? providerDisplayName(provider);
 }
 
+/** The tools most people arrive with lead; the rest follow by name. The
+ *  daemon reports its tools in no stable order. */
+const TOOL_RANK = ["claude", "codex", "cursor", "copilot"];
+
+export function compareTools(a: string, b: string): number {
+  const rank = (p: string) => {
+    const i = TOOL_RANK.indexOf(p);
+    return i === -1 ? TOOL_RANK.length : i;
+  };
+  return rank(a) - rank(b) || toolDisplayName(a).localeCompare(toolDisplayName(b));
+}
+
 function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] ?? "";
 }
@@ -176,6 +188,16 @@ export async function createFirstTask({
     workspace.slug,
   );
   return { issueId: issue.id };
+}
+
+// Kana and Han only: Korean separates words with spaces.
+const CJK_GAP = /([\u3040-\u30ff\u3400-\u9fff]) (?=[\u3040-\u30ff\u3400-\u9fff])/g;
+
+/** The CJK templates put a space after the name, which is right next to a
+ *  Latin name ("Jiayuan 的工作区") and wrong between two CJK characters
+ *  ("张三的工作区"). */
+export function tightenCjkSpacing(text: string): string {
+  return text.replace(CJK_GAP, "$1");
 }
 
 const SLUG_SUFFIX_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";

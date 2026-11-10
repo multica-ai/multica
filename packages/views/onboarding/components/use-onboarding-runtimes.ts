@@ -13,6 +13,7 @@ import {
   restartLocalDaemon,
   useLocalDaemonStatus,
 } from "../../platform";
+import { compareTools } from "../provisioning";
 
 /** Ceiling on "still detecting": a version probe that never finishes must
  *  not keep the picker on its loading rows forever. */
@@ -83,6 +84,6 @@ export function useOnboardingRuntimes(wsId: string, wsSlug?: string) {
 function sortRuntimes(runtimes: AgentRuntime[]): AgentRuntime[] {
   return [...runtimes].sort((a, b) => {
     if (a.status !== b.status) return a.status === "online" ? -1 : 1;
-    return a.created_at.localeCompare(b.created_at);
+    return compareTools(a.provider, b.provider) || a.created_at.localeCompare(b.created_at);
   });
 }
