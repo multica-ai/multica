@@ -215,7 +215,7 @@ function StoreThemeCard({ theme }: { theme: StoreTheme }) {
           <Button
             variant="ghost"
             size="xs"
-            className="-ml-2 min-w-0 text-muted-foreground"
+            className="-ml-2 min-w-0 shrink text-muted-foreground"
             onClick={() => openExternal(`https://github.com/${theme.repo}`)}
             title={theme.repo}
           >
