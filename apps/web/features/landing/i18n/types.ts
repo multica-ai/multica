@@ -84,6 +84,8 @@ export type SiteDict = {
     /** `{year}` is the current year. */
     copyright: string;
   };
+  /** The bar offering a visitor's browser language on the English pages, written in that language. */
+  localeSuggestion: { message: string; action: string; dismiss: string };
   cta: { title: string; lead: string; getStarted: string; bookDemo: string };
 };
 

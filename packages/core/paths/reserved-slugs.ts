@@ -68,6 +68,14 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "solutions",
   "customers",
 
+  // Marketing site language prefixes
+  // The marketing pages in other languages live under `/zh`, `/ko` and `/ja`
+  // (apps/web/lib/landing-locale-path.ts), matching the docs. A workspace with
+  // one of these slugs would have its root shadowed by that language's homepage.
+  "zh",
+  "ko",
+  "ja",
+
   // Account / billing (likely-future global routes in the avatar menu)
   "profile",
   "account",

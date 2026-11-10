@@ -1,4 +1,5 @@
 import { LocaleProvider } from "@/features/landing/i18n";
+import { LocaleSuggestion } from "@/features/landing/site/locale-suggestion";
 import { getRequestLocale } from "@/lib/request-locale";
 
 const jsonLd = {
@@ -40,7 +41,10 @@ export default async function LandingLayout({
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
       <div className="landing-light h-full overflow-x-hidden overflow-y-auto bg-white">
-        <LocaleProvider initialLocale={initialLocale}>{children}</LocaleProvider>
+        <LocaleProvider initialLocale={initialLocale}>
+          <LocaleSuggestion />
+          {children}
+        </LocaleProvider>
       </div>
     </>
   );

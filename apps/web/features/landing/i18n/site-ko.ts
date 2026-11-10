@@ -83,6 +83,11 @@ export const koSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
       language: "언어",
       copyright: "© {year} Multica. All rights reserved.",
     },
+    localeSuggestion: {
+      message: "Multica를 한국어로 볼 수 있어요.",
+      action: "한국어로 보기",
+      dismiss: "닫기",
+    },
     cta: {
       title: "오늘 첫 에이전트에게 일을 맡겨 보세요",
       lead: "이미 쓰고 있는 에이전트를 연결하고, 첫 Issue를 맡겨 보세요.",

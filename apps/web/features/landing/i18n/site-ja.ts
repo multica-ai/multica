@@ -84,6 +84,11 @@ export const jaSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
       language: "言語",
       copyright: "© {year} Multica. All rights reserved.",
     },
+    localeSuggestion: {
+      message: "Multica は日本語でもご覧いただけます。",
+      action: "日本語で表示",
+      dismiss: "閉じる",
+    },
     cta: {
       title: "最初のエージェントを、今日から動かそう",
       lead: "いま使っているエージェントをつないで、最初の Issue を任せてみましょう。",

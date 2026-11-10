@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/features/landing/components/landing-link";
 import { ChevronDown, ChevronRight } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import {

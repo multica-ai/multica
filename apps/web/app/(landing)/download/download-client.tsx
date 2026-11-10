@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useLocale } from "@/features/landing/i18n";
 import { SitePage } from "@/features/landing/site/site-page";
+import { localizeHref } from "@/lib/landing-locale-path";
 import { DownloadHero } from "@/features/landing/components/download/hero";
 import { CliSection } from "@/features/landing/components/download/cli-section";
 import { DownloadStarted } from "@/features/landing/components/download/started";
@@ -23,6 +25,7 @@ export function DownloadClient({
   started: DownloadKey | null;
 }) {
   const router = useRouter();
+  const { locale } = useLocale();
   const detected = useDetectedPlatform(platform);
   const [started, setStarted] = useState(startedFromUrl);
   const startedHref = started ? release.assets[started] : undefined;
@@ -43,7 +46,7 @@ export function DownloadClient({
           size={release.sizes[started]}
           onBack={() => {
             setStarted(null);
-            if (startedFromUrl) router.replace("/download", { scroll: false });
+            if (startedFromUrl) router.replace(localizeHref(locale, "/download"), { scroll: false });
           }}
         />
       ) : (

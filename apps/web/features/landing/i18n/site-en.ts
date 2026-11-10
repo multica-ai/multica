@@ -86,6 +86,11 @@ export const enSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
       language: "Language",
       copyright: "© {year} Multica. All rights reserved.",
     },
+    localeSuggestion: {
+      message: "Multica is available in English.",
+      action: "View in English",
+      dismiss: "Dismiss",
+    },
     cta: {
       title: "Put your first agent to work today",
       lead: "Connect the agents you already use and give one its first issue.",

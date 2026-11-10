@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/features/landing/components/landing-link";
 import { SiteHeader } from "../site/site-header";
 import { SiteFooter } from "../site/site-footer";
 import { GitHubMark, githubUrl } from "./shared";

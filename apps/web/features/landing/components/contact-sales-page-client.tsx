@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/features/landing/components/landing-link";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { SiteHeader } from "../site/site-header";
 import { SiteFooter } from "../site/site-footer";

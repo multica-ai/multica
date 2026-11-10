@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
-import Link from "next/link";
+import Link from "@/features/landing/components/landing-link";
 import { notFound } from "next/navigation";
 import { cn } from "@multica/ui/lib/utils";
 import { SiteHeader } from "@/features/landing/site/site-header";
@@ -14,6 +14,7 @@ import {
 } from "@/lib/use-cases-i18n";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { SHARE_IMAGE } from "@/features/landing/share-image";
+import { landingAlternates, localizeHref } from "@/lib/landing-locale-path";
 
 type Params = { slug: string };
 
@@ -27,6 +28,7 @@ export async function generateMetadata(props: {
   const page = getUseCasePageForLocale([slug], locale);
   if (!page) return {};
 
+  const path = `/usecases/${slug}`;
   return {
     title: page.data.title,
     description: page.data.description,
@@ -34,10 +36,11 @@ export async function generateMetadata(props: {
       images: [SHARE_IMAGE],
       title: page.data.title,
       description: page.data.description,
-      url: `/usecases/${slug}`,
+      url: localizeHref(locale, path),
     },
     alternates: {
-      canonical: `/usecases/${slug}`,
+      canonical: localizeHref(locale, path),
+      languages: landingAlternates(path),
     },
   };
 }

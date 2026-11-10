@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import Link from "@/features/landing/components/landing-link";
 import Image from "next/image";
 import { SiteHeader } from "@/features/landing/site/site-header";
 import { SiteFooter } from "@/features/landing/site/site-footer";
 import { getUseCasePagesForLocale } from "@/lib/use-cases-source";
 import { getUseCaseLocale, useCaseText } from "@/lib/use-cases-i18n";
 import { SHARE_IMAGE } from "@/features/landing/share-image";
+import { landingAlternates, localizeHref } from "@/lib/landing-locale-path";
 
 type ExtraFrontmatter = {
   category?: string;
@@ -23,10 +24,11 @@ export async function generateMetadata(): Promise<Metadata> {
       images: [SHARE_IMAGE],
       title: text.indexMetadataTitle,
       description: text.indexMetadataDescription,
-      url: "/usecases",
+      url: localizeHref(locale, "/usecases"),
     },
     alternates: {
-      canonical: "/usecases",
+      canonical: localizeHref(locale, "/usecases"),
+      languages: landingAlternates("/usecases"),
     },
   };
 }

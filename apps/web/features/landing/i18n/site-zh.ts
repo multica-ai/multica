@@ -82,6 +82,11 @@ export const zhSiteCopy: Pick<LandingDict, "site" | "home" | "demo" | "meta"> = 
       language: "语言",
       copyright: "© {year} Multica. 保留所有权利。",
     },
+    localeSuggestion: {
+      message: "Multica 提供中文版。",
+      action: "切换到中文",
+      dismiss: "关闭",
+    },
     cta: {
       title: "今天就让第一个智能体开工",
       lead: "接入你已经在用的智能体，给它派第一个 Issue。",

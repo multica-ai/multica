@@ -2,6 +2,8 @@
 
 import type { ComponentProps, MouseEvent } from "react";
 import { useRouter } from "next/navigation";
+import { localizeHref } from "@/lib/landing-locale-path";
+import { useOptionalLocale } from "../../i18n/context";
 import { markPendingDownload } from "../../utils/download-target";
 import type { DownloadKey } from "../../utils/parse-release-assets";
 
@@ -30,6 +32,7 @@ export function DownloadLink({
   onStart?: (key: DownloadKey) => void;
 }) {
   const router = useRouter();
+  const locale = useOptionalLocale() ?? "en";
   return (
     <a
       href={href}
@@ -39,7 +42,7 @@ export function DownloadLink({
         if (handoff) {
           event.preventDefault();
           markPendingDownload(downloadKey);
-          router.push(`/download?started=${downloadKey}`);
+          router.push(localizeHref(locale, `/download?started=${downloadKey}`));
           return;
         }
         // After the click's default action, so the link is still in place when the download begins.

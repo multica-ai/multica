@@ -1,5 +1,5 @@
 import type { ComponentProps, CSSProperties, ReactNode } from "react";
-import Link from "next/link";
+import Link from "@/features/landing/components/landing-link";
 import { ArrowUpRight } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 
