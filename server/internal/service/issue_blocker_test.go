@@ -106,6 +106,97 @@ func TestIssueBlockerBacklogAndMember(t *testing.T) {
 	}
 }
 
+func TestIssueBlockerRulesSleepUntilChanged(t *testing.T) {
+	for _, status := range []string{"todo", "backlog", "done", "cancelled"} {
+		t.Run(status, func(t *testing.T) {
+			f, s, parent, agent := wakeFixture(t)
+			ctx := context.Background()
+			first := f.Issue(t, "unfinished predecessor", testutil.Cols{"parent_issue_id": parent, "stage": 1})
+			later := f.Issue(t, "waiting successor", testutil.Cols{"parent_issue_id": parent, "stage": 2, "status": status, "assignee_type": "agent", "assignee_id": agent})
+			issue := parseTestUUID(t, later)
+			f.Cleanup(t, "DELETE FROM issue_wakeup WHERE issue_id=$1", issue)
+			f.Cleanup(t, "DELETE FROM agent_task_queue WHERE issue_id=$1", issue)
+			f.Cleanup(t, "DELETE FROM issue_wakeup_receipt WHERE wakeup_id IN(SELECT id FROM issue_wakeup WHERE issue_id=$1)", issue)
+			rule := blockerRule(t, f, issue)
+			if err := s.TickWorkspaces(ctx, parseTestUUID(t, f.WorkspaceID)); err != nil {
+				t.Fatal(err)
+			}
+			if got := blockerRule(t, f, issue); got.NextFireAt.Valid {
+				t.Fatalf("waiting %s rule still scheduled at %v", status, got.NextFireAt.Time)
+			}
+			for i := 0; i < 3; i++ {
+				err := s.tickWith(ctx, []pgtype.UUID{parseTestUUID(t, f.WorkspaceID)}, tickLimits{beforeDispatch: func(w db.IssueWakeup) {
+					if w.ID == rule.ID {
+						t.Error("unchanged waiting rule occupied another scheduler pass")
+					}
+				}})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			f.Exec(t, "UPDATE issue SET status='done' WHERE id=$1", first)
+			if !blockerRule(t, f, issue).NextFireAt.Valid {
+				t.Fatal("predecessor completion did not rearm the rule")
+			}
+			if err := s.TickWorkspaces(ctx, parseTestUUID(t, f.WorkspaceID)); err != nil {
+				t.Fatal(err)
+			}
+			if status != "todo" {
+				if n := wakeRuns(t, f, rule.ID); n != 0 {
+					t.Fatalf("parked or closed issue started %d runs", n)
+				}
+				if blockerRule(t, f, issue).NextFireAt.Valid {
+					t.Fatal("parked or closed issue stayed scheduled after release")
+				}
+				f.Exec(t, "UPDATE issue SET status='todo' WHERE id=$1", issue)
+			}
+			if err := s.TickWorkspaces(ctx, parseTestUUID(t, f.WorkspaceID)); err != nil {
+				t.Fatal(err)
+			}
+			if n := wakeRuns(t, f, rule.ID); n != 1 {
+				t.Fatalf("released issue started %d runs, want one", n)
+			}
+		})
+	}
+}
+
+func TestIssueBlockerHoldsChildDoneWithoutRetryingQueue(t *testing.T) {
+	f, s, parent, agent := wakeFixture(t)
+	ctx := context.Background()
+	f.Exec(t, "UPDATE issue SET status='todo',assignee_type='agent',assignee_id=$2 WHERE id=$1", parent, agent)
+	child := f.Issue(t, "child work", testutil.Cols{"parent_issue_id": parent})
+	if err := s.ProcessChildEvents(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	prerequisite := f.Issue(t, "parent prerequisite")
+	if err := AddIssueBlocker(ctx, f.q, parseTestUUID(t, f.WorkspaceID), parent, parseTestUUID(t, prerequisite), "member", parseTestUUID(t, f.UserID)); err != nil {
+		t.Fatal(err)
+	}
+	f.Cleanup(t, "DELETE FROM issue_blocker WHERE issue_id=$1", parent)
+	f.Exec(t, "UPDATE issue SET status='done' WHERE id=$1", child)
+	if err := s.ProcessChildEvents(ctx, parent); err != nil {
+		t.Fatalf("blocked parent's child completion retried the queue: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := s.TickWorkspaces(ctx, parseTestUUID(t, f.WorkspaceID)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := f.Count(t, "SELECT count(*) FROM agent_task_queue WHERE issue_id=$1", parent); n != 0 {
+		t.Fatalf("blocked parent started %d runs", n)
+	}
+	if n := f.Count(t, "SELECT count(*) FROM issue_wakeup_receipt r JOIN issue_wakeup w ON w.id=r.wakeup_id WHERE w.issue_id=$1 AND r.processed_at IS NULL", parent); n != 0 {
+		t.Fatalf("blocked parent retained %d retry inputs", n)
+	}
+	f.Exec(t, "UPDATE issue SET status='done' WHERE id=$1", prerequisite)
+	if err := s.TickWorkspaces(ctx, parseTestUUID(t, f.WorkspaceID)); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.Count(t, "SELECT count(*) FROM agent_task_queue WHERE issue_id=$1", parent); n != 1 {
+		t.Fatalf("released parent started %d runs, want one", n)
+	}
+}
+
 func TestIssueStageBlockersAreLiveAndRejectCycles(t *testing.T) {
 	f, s, parent, agent := wakeFixture(t)
 	ctx := context.Background()
@@ -132,6 +223,36 @@ func TestIssueStageBlockersAreLiveAndRejectCycles(t *testing.T) {
 	}
 	if err := guardIssueNotInTriage(ctx, f.q, issue, OriginDerived); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestIssueBlockerReparentChecksMovedDescendants(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		reverse bool
+	}{{"descendant_waits", false}, {"ancestor_waits", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, _, ancestor, _ := wakeFixture(t)
+			ctx := context.Background()
+			branch := f.Issue(t, "separate branch")
+			leaf := f.Issue(t, "nested work", testutil.Cols{"parent_issue_id": branch})
+			issue, blocker := parseTestUUID(t, leaf), ancestor
+			if tc.reverse {
+				issue, blocker = blocker, issue
+			}
+			if err := AddIssueBlocker(ctx, f.q, parseTestUUID(t, f.WorkspaceID), issue, blocker, "member", parseTestUUID(t, f.UserID)); err != nil {
+				t.Fatal(err)
+			}
+			f.Cleanup(t, "DELETE FROM issue_blocker WHERE issue_id=$1", issue)
+			// Neither manual edge endpoint is the issue being moved.
+			if _, err := f.Pool.Exec(ctx, "UPDATE issue SET parent_issue_id=$2 WHERE id=$1", branch, ancestor); err == nil || !strings.Contains(err.Error(), "Parent and child issues") {
+				t.Fatalf("reparenting should reject an ancestor dependency: %v", err)
+			}
+			unrelated := f.Issue(t, "valid new parent")
+			if _, err := f.Pool.Exec(ctx, "UPDATE issue SET parent_issue_id=$2 WHERE id=$1", branch, unrelated); err != nil {
+				t.Fatalf("unrelated reparent rejected: %v", err)
+			}
+		})
 	}
 }
 

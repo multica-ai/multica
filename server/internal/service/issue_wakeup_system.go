@@ -455,21 +455,40 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if err != nil {
 		return err
 	}
+	sleep := func(state string) error {
+		if err := q.SetWakeupConditionState(ctx, db.SetWakeupConditionStateParams{ID: w.ID, ConditionState: state}); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
 	// A closed parent or a rule that is off or paused keeps its state; a
 	// system rule is never disabled by the platform for a closed issue.
 	if !active || !w.Enabled {
 		if err = q.DiscardWakeupReceipts(ctx, w.ID); err != nil {
 			return err
 		}
-		return tx.Commit(ctx)
+		return sleep(w.ConditionState)
+	}
+	blocked, err := q.HasOpenIssueBlockers(ctx, db.HasOpenIssueBlockersParams{WorkspaceID: issue.WorkspaceID, IssueID: issue.ID})
+	if err != nil {
+		return err
 	}
 	// A parked parent holds: nothing fires and nothing is marked as seen, so
 	// a stage that closed meanwhile wakes the assignee once it leaves backlog.
-	if issue.TriageState.Valid || issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == "backlog" {
+	if issue.TriageState.Valid || issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == "backlog" || blocked {
 		if _, _, err = consumeConditionHints(ctx, tx, w.ID); err != nil {
 			return err
 		}
-		return tx.Commit(ctx)
+		state := w.ConditionState
+		if blocked || w.SystemRule.String == SystemRuleBlockersDone {
+			// Dependency completion owns the continuation of a blocked parent.
+			// Retaining old completion inputs would retry the same queue gate.
+			if err = q.DiscardWakeupReceipts(ctx, w.ID); err != nil {
+				return err
+			}
+			state = ""
+		}
+		return sleep(state)
 	}
 	var now time.Time
 	if err = tx.QueryRow(ctx, "SELECT now()").Scan(&now); err != nil {
@@ -498,11 +517,9 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	case !met:
 		state = ""
 	}
-	var nextBlockerCheck pgtype.Timestamptz
-	if w.SystemRule.String == SystemRuleBlockersDone && !met {
-		nextBlockerCheck = pgtype.Timestamptz{Time: now.Add(30 * time.Second), Valid: true}
-	}
-	if err = q.SetWakeupConditionState(ctx, db.SetWakeupConditionStateParams{ID: w.ID, ConditionState: state, NextFireAt: nextBlockerCheck}); err != nil {
+	// Issue and dependency writes rearm these rules transactionally. Status
+	// categories are immutable through the API, so waiting needs no polling.
+	if err = q.SetWakeupConditionState(ctx, db.SetWakeupConditionStateParams{ID: w.ID, ConditionState: state}); err != nil {
 		return err
 	}
 	receipts, err := q.ListPendingWakeupReceipts(ctx, db.ListPendingWakeupReceiptsParams{WakeupID: w.ID, Revision: w.Revision})
