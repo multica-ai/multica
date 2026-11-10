@@ -108,3 +108,47 @@ func TestEnvironmentReportKeepsACrashedEnvironmentsOutputLocal(t *testing.T) {
 		t.Fatalf("local log = %q, want the command's output kept there", log)
 	}
 }
+
+func TestEnvironmentReportShowsADeclaredEnvironmentAsItsApp(t *testing.T) {
+	s, reporter := newTestEnvironmentService(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".multica"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := "[environments.desktop]\nlabel = \"Desktop app\"\nstart = \"exec sleep 60\"\nurl = \"\"\n"
+	if err := os.WriteFile(filepath.Join(root, ".multica", "environments.toml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	task := localenv.Task{TaskID: "task-a", IssueID: "issue-a", WorkspaceID: "ws", RootDir: root}
+	env, err := s.manager.Start(task, root, "desktop", os.Getenv("PATH"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.manager.Stop(task, "desktop") })
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if env = s.manager.WaitReady(ctx, env.Key); env.State != localenv.StateRunning {
+		t.Fatalf("environment = %+v, want running", env)
+	}
+
+	s.report(context.Background(), time.Now())
+	calls := reporter.take()
+	if len(calls) != 1 || len(calls[0].envs) != 1 || calls[0].envs[0].Kind != localenv.KindServer {
+		t.Fatalf("before its app is found = %+v, want the environment alone, as a server", calls)
+	}
+
+	// What detection returns once it finds an app among the environment's
+	// processes: the app, under the environment's key.
+	s.detected = []localenv.Environment{{
+		Key: env.Key, TaskID: "task-a", IssueID: "issue-a", Source: localenv.SourceConfig, Kind: localenv.KindApp,
+		Name: "Multica Canary", State: localenv.StateRunning,
+	}}
+	s.report(context.Background(), time.Now())
+	calls = reporter.take()
+	if len(calls) != 1 || len(calls[0].envs) != 1 {
+		t.Fatalf("reports = %+v, want one row: the app is the environment, not a second entry", calls)
+	}
+	if got := calls[0].envs[0]; got.Key != env.Key || got.Kind != localenv.KindApp || got.Source != localenv.SourceConfig || got.Label != "Desktop app" {
+		t.Fatalf("reported %+v, want the declared environment as an app", got)
+	}
+}

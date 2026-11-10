@@ -2,13 +2,24 @@
 # The daemon supervises them, lists them in the issue sidebar and stops them at
 # their TTL. Format: CLI_AND_DAEMON.md → Local Environments.
 #
-# Each one is this checkout's `make up` environment (scripts/dev-env.sh), which
-# keeps owning the ports, database and CLI profile. scripts/agent-environment.sh
-# connects it to the daemon: it answers on $MULTICA_PORT with a redirect to the
-# web app, and `stop` runs `make destroy`.
+# Both are this checkout's `make up` environment (scripts/dev-env.sh), which
+# keeps owning the ports, database and CLI profile, and they share one API and
+# database. scripts/agent-environment.sh connects it to the daemon; stopping
+# the last of the two runs `make destroy`.
 
+# API + web app. $MULTICA_PORT redirects to the web app's own port.
 [environments.web]
 label = "Web app"
-start = "bash scripts/agent-environment.sh start api,web"
-stop = "bash scripts/agent-environment.sh stop"
+start = "bash scripts/agent-environment.sh start web"
+stop = "bash scripts/agent-environment.sh stop web"
+ttl = "24h"
+
+# API + Electron Desktop, signed in. It has no URL: Desktop's issue sidebar
+# brings its window forward instead. $MULTICA_PORT answers once the app is up.
+[environments.desktop]
+label = "Desktop app"
+start = "bash scripts/agent-environment.sh start desktop"
+stop = "bash scripts/agent-environment.sh stop desktop"
+url = ""
+ready = "http://localhost:$MULTICA_PORT"
 ttl = "24h"

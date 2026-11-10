@@ -346,6 +346,8 @@ multica env list
 multica env stop web
 ```
 
+A declared environment's own servers are not listed a second time as detected ones. That includes servers its `start` command detaches into process groups of their own, as long as they stay in the session `start` runs in. When such an environment has no URL and one of its processes is a desktop app, the sidebar shows the environment as that app, and Desktop on the same machine can bring its window forward.
+
 These commands use the running task's credential, so they work only inside a run. Environments belong to the issue, which means a later run on the same issue can list and stop what an earlier one started. Neither detected nor declared environments are supported on Windows yet.
 
 ### Configuration

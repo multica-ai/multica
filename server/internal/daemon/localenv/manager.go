@@ -360,17 +360,21 @@ func (m *Manager) Tick() {
 	}
 }
 
-// Owns reports whether pgid is the process group of a live environment this
-// manager started, so detection does not list it a second time.
-func (m *Manager) Owns(pgid int) bool {
+// Owner returns the key of the live environment that pid belongs to, or ""
+// when it belongs to none, so detection does not list an environment's own
+// servers a second time. A process belongs to an environment through its
+// process group or, once a script has detached it into a group of its own,
+// through its session.
+func (m *Manager) Owner(pid int) string {
+	pgid, sid := processGroup(pid), processSession(pid)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.envs {
-		if e.live() && e.rec.PID == pgid {
-			return true
+		if e.live() && e.rec.PID > 0 && (e.rec.PID == pgid || e.rec.PID == sid) {
+			return "config:" + e.rec.ID
 		}
 	}
-	return false
+	return ""
 }
 
 func (e *entry) leaderGone() bool {

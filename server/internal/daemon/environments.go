@@ -147,7 +147,9 @@ func (s *environmentService) servesFrom(dir string) bool {
 	return false
 }
 
-// focus brings forward the desktop app last detected under key.
+// focus brings forward the desktop app last detected under key: an app found
+// on its own, or the app of a declared environment, under that environment's
+// key.
 func (s *environmentService) focus(ctx context.Context, key string) error {
 	s.mu.Lock()
 	var target *localenv.Environment
@@ -203,7 +205,7 @@ func (s *environmentService) run(ctx context.Context) {
 }
 
 func (s *environmentService) detect(ctx context.Context) {
-	found, err := s.detector.Detect(ctx, s.resolve, s.manager.Owns)
+	found, err := s.detector.Detect(ctx, s.resolve, s.manager.Owner)
 	if err != nil {
 		s.logger.Debug("environments: detection failed", "error", err)
 		return
@@ -247,14 +249,31 @@ func (s *environmentService) resolve(cwd string) (localenv.Task, bool) {
 // is not empty, and once more as empty after its last environment is gone.
 func (s *environmentService) report(ctx context.Context, now time.Time) {
 	groups := make(map[string][]localenv.Environment)
-	for _, env := range s.manager.Snapshot() {
-		if env.IssueID != "" {
-			groups[env.TaskID] = append(groups[env.TaskID], env)
+	declared := s.manager.Snapshot()
+	s.mu.Lock()
+	// A desktop app found among a declared environment's processes is not a
+	// row of its own: the environment is shown as that app when it has no URL
+	// to open instead.
+	apps := make(map[string]bool)
+	for _, env := range s.detected {
+		if env.Source == localenv.SourceConfig {
+			apps[env.Key] = true
 		}
 	}
-	s.mu.Lock()
+	for _, env := range declared {
+		if env.IssueID == "" {
+			continue
+		}
+		if env.URL == "" && env.State == localenv.StateRunning && apps[env.Key] {
+			env.Kind = localenv.KindApp
+		}
+		groups[env.TaskID] = append(groups[env.TaskID], env)
+	}
 	live := make(map[string]bool, len(s.detected))
 	for _, env := range s.detected {
+		if env.Source == localenv.SourceConfig {
+			continue
+		}
 		live[env.Key] = true
 		if owner, ok := s.sticky[env.Key]; ok {
 			env.TaskID = owner
