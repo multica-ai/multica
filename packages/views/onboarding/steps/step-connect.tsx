@@ -15,15 +15,20 @@ const DOWNLOAD_PAGE_URL = "/download";
  * Web only: agents run on a computer the member owns, and a browser is not
  * one. Desktop bundles the daemon; the terminal path installs the CLI and
  * runs `multica setup`. Either way the computer registers on its own and this
- * step moves on by itself.
+ * step moves on by itself. Someone who already uses Multica usually arrives
+ * with a computer online (the daemon joins new workspaces on its own), and
+ * passes straight through.
  */
 export function StepConnect({
   runtimes,
+  returning,
   cliInstructions,
   onNext,
   onSkip,
 }: {
   runtimes: AgentRuntime[];
+  /** Came Back here from the tool step. */
+  returning: boolean;
   cliInstructions: ReactNode;
   onNext: () => void;
   onSkip: () => Promise<void>;
@@ -31,11 +36,11 @@ export function StepConnect({
   const { t } = useT("onboarding");
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [skipping, setSkipping] = useState(false);
-  const connected = runtimes.length > 0;
+  const connected = runtimes.some((r) => r.status === "online");
 
-  // Only advance on a computer that connected while this step was on screen;
-  // someone who came Back here from the tool step chose to be here.
-  const connectedOnEntry = useRef(connected);
+  // Someone who came Back here chose to be here: only a computer that
+  // connects after that moves them on.
+  const connectedOnEntry = useRef(returning && connected);
   useEffect(() => {
     if (connected && !connectedOnEntry.current) onNext();
   }, [connected, onNext]);

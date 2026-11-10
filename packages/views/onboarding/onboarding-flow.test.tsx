@@ -17,6 +17,7 @@ const m = vi.hoisted(() => ({
   activate: vi.fn(),
   toastError: vi.fn(),
   creationDisabled: false,
+  runtimes: [] as unknown[],
 }));
 
 vi.mock("sonner", () => ({ toast: { error: m.toastError, success: vi.fn() } }));
@@ -82,7 +83,7 @@ const RUNTIME = {
 
 vi.mock("./components/use-onboarding-runtimes", () => ({
   useOnboardingRuntimes: () => ({
-    runtimes: [RUNTIME],
+    runtimes: m.runtimes,
     detecting: false,
     canRescan: false,
     rescan: vi.fn(),
@@ -140,6 +141,7 @@ async function startAndPickTool() {
 beforeEach(() => {
   for (const fn of Object.values(m)) if (typeof fn === "function") fn.mockReset();
   m.creationDisabled = false;
+  m.runtimes = [RUNTIME];
   m.listWorkspaces.mockResolvedValue([]);
   m.createWorkspace.mockResolvedValue(NEW_WORKSPACE);
   m.listAgents.mockResolvedValue([]);
@@ -263,5 +265,40 @@ describe("OnboardingFlow — new-workspace mode", () => {
 
     expect(await screen.findByRole("button", { name: "pick claude" })).toBeInTheDocument();
     expect(m.createWorkspace).not.toHaveBeenCalled();
+  });
+});
+
+describe("OnboardingFlow — web connect step", () => {
+  const web = { runtimeInstructions: <div>cli steps</div> };
+
+  it("passes straight through when a computer is already online", async () => {
+    renderFlow({ ...web, mode: "new_workspace", onCancel: vi.fn() });
+
+    fireEvent.click(screen.getByRole("button", { name: "create workspace" }));
+
+    expect(await screen.findByRole("button", { name: "pick claude" })).toBeInTheDocument();
+  });
+
+  it("stays when the member comes Back to it", async () => {
+    renderFlow({ ...web, mode: "new_workspace", onCancel: vi.fn() });
+    fireEvent.click(screen.getByRole("button", { name: "create workspace" }));
+    await screen.findByRole("button", { name: "pick claude" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(await screen.findByRole("heading", { name: "Connect a computer" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "pick claude" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+  });
+
+  it("waits while the only computer is offline", async () => {
+    m.runtimes = [{ ...RUNTIME, status: "offline" }];
+    renderFlow(web);
+
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+    expect(await screen.findByRole("heading", { name: "Connect a computer" })).toBeInTheDocument();
+    expect(screen.getByText("Waiting for a computer to connect…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
   });
 });

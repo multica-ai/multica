@@ -241,6 +241,7 @@ function WorkspaceSteps({
   // A retry after completeOnboarding failed must open the task it already
   // made rather than file a second one.
   const firstIssueRef = useRef<string | null>(null);
+  const [returnedToConnect, setReturnedToConnect] = useState(false);
 
   // Back never walks into the workspace step: once the workspace exists, a
   // second-workspace run has nothing left to cancel, and leaving would strand
@@ -248,7 +249,10 @@ function WorkspaceSteps({
   const previous = order[order.indexOf(step) - 1];
   const onBack =
     previous && previous !== "workspace"
-      ? () => setStep(previous)
+      ? () => {
+          if (previous === "connect") setReturnedToConnect(true);
+          setStep(previous);
+        }
       : isNewWorkspace
         ? undefined
         : () => setStep("welcome");
@@ -320,6 +324,7 @@ function WorkspaceSteps({
       {step === "connect" ? (
         <StepConnect
           runtimes={runtimes}
+          returning={returnedToConnect}
           cliInstructions={cliInstructions}
           onNext={toTool}
           onSkip={skip}
