@@ -785,6 +785,8 @@ const defaultSchemaMigrationsTable = "schema_migrations"
 // that doesn't collide with any other migration runner sharing the same
 // Postgres instance.
 type runOptions struct {
+	// DDLLockTimeout is applied only after migration runners have serialized.
+	DDLLockTimeout string
 	// Direction is "up" or "down".
 	Direction string
 	// Files is the ordered list of .sql files to apply. Production callers
@@ -854,10 +856,11 @@ func main() {
 	}
 
 	options := runOptions{
-		Direction:  direction,
-		Files:      files,
-		Hooks:      hooksForDirection(direction),
-		Conditions: conditionsForDirection(direction),
+		DDLLockTimeout: strings.TrimSpace(os.Getenv("MULTICA_MIGRATION_LOCK_TIMEOUT")),
+		Direction:      direction,
+		Files:          files,
+		Hooks:          hooksForDirection(direction),
+		Conditions:     conditionsForDirection(direction),
 	}
 	startupCtx, stopStartup := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopStartup()
@@ -979,6 +982,9 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, opts runOptions) err
 		return fmt.Errorf("acquire migration connection: %w", err)
 	}
 	defer conn.Release()
+	if opts.DDLLockTimeout != "" {
+		defer conn.Conn().Close(context.Background())
+	}
 
 	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", lockKey); err != nil {
 		return fmt.Errorf("acquire migration advisory lock: %w", err)
@@ -993,6 +999,14 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, opts runOptions) err
 			slog.Warn("failed to release migration advisory lock", "error", err)
 		}
 	}()
+
+	if opts.DDLLockTimeout != "" {
+		// Use this session only for this run. Returning a modified session
+		// to the pool could apply the limit to the next advisory lock wait.
+		if _, err := conn.Exec(ctx, "SELECT set_config('lock_timeout', $1, false)", opts.DDLLockTimeout); err != nil {
+			return fmt.Errorf("configure migration DDL lock timeout: %w", err)
+		}
+	}
 
 	// Create migrations tracking table.
 	if _, err := conn.Exec(ctx, fmt.Sprintf(`
