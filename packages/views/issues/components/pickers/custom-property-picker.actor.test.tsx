@@ -1,5 +1,6 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { IssueProperty } from "@multica/core/types";
 import enIssues from "../../../locales/en/issues.json";
@@ -30,14 +31,57 @@ function renderDisplay(ids: string[], compact: boolean) {
   );
 }
 
+const tooltip = () => document.querySelector("[data-slot=tooltip-content]");
+
+function hover(el: HTMLElement) {
+  vi.useFakeTimers();
+  fireEvent.pointerEnter(el, { pointerType: "mouse" });
+  act(() => {
+    vi.advanceTimersByTime(550);
+  });
+}
+
 describe("actor property display", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("collapses several people onto one line when compact", () => {
     renderDisplay(["a", "b", "c"], true);
 
     expect(screen.getAllByTestId("avatar")).toHaveLength(1);
     expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
     expect(screen.getByText("+2")).toBeInTheDocument();
-    expect(screen.getByTitle("Ada Lovelace, Grace Hopper, Alan Turing")).not.toHaveClass("flex-wrap");
+    expect(screen.getByRole("group", { name: "Ada Lovelace, Grace Hopper, Alan Turing" })).not.toHaveClass("flex-wrap");
+  });
+
+  it("names everyone on hover when some people are hidden", () => {
+    renderDisplay(["a", "b", "c"], true);
+
+    hover(screen.getByRole("group"));
+
+    expect(tooltip()).toHaveTextContent("Ada Lovelace, Grace Hopper, Alan Turing");
+  });
+
+  it("names everyone on keyboard focus until focus leaves", async () => {
+    const user = userEvent.setup();
+    renderDisplay(["a", "b"], true);
+
+    await user.tab();
+    expect(screen.getByRole("group")).toHaveFocus();
+    expect(tooltip()).toHaveTextContent("Ada Lovelace, Grace Hopper");
+
+    await user.tab();
+    expect(tooltip()).toBeNull();
+  });
+
+  it("keeps one person who fits quiet and out of the tab order", () => {
+    renderDisplay(["a"], true);
+    const pill = screen.getByRole("group");
+
+    expect(pill).not.toHaveAttribute("tabindex");
+    hover(pill);
+    expect(tooltip()).toBeNull();
   });
 
   it("has no overflow count for one person", () => {
