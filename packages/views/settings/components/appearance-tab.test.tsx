@@ -3,11 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
-import {
-  DEFAULT_APPEARANCE,
-  useAppearanceStore,
-  useInstalledThemesStore,
-} from "@multica/core/appearance";
+import { DEFAULT_APPEARANCE, useAppearanceStore, type Theme } from "@multica/core/appearance";
 import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
 
@@ -19,6 +15,17 @@ const themeState = vi.hoisted(() => ({
 vi.mock("@multica/ui/components/common/theme-provider", () => ({
   useTheme: () => themeState,
 }));
+
+/** A theme the next render treats as active, for option types no built-in theme uses. */
+const testTheme = vi.hoisted(() => ({ current: null as Theme | null }));
+vi.mock("@multica/core/appearance", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/appearance")>();
+  return {
+    ...actual,
+    activeTheme: (prefs: { theme: string }) =>
+      testTheme.current && prefs.theme === testTheme.current.id ? testTheme.current : actual.activeTheme(prefs),
+  };
+});
 
 import { AppearanceTab } from "./appearance-tab";
 
@@ -36,27 +43,6 @@ const group = (name: string) => screen.getByRole("group", { name });
 const state = () => useAppearanceStore.getState();
 const themeSelect = () => screen.getByRole("combobox", { name: "Theme" });
 
-const PAPER = {
-  apiVersion: 1 as const,
-  id: "paper",
-  name: "Paper",
-  author: "Someone",
-  version: "1.0.0",
-};
-const PAPER_CSS = '.theme-light { --page-canvas: #f6efdf; }\n[data-mc="content"] p { hyphens: auto; }';
-
-/** The files of a theme folder, as the folder picker returns them. */
-function themeFolder(manifest: unknown, css: string) {
-  return [
-    new File([JSON.stringify(manifest)], "manifest.json", { type: "application/json" }),
-    new File([css], "theme.css", { type: "text/css" }),
-  ];
-}
-
-function folderInput() {
-  return document.querySelector<HTMLInputElement>('input[type="file"][webkitdirectory]')!;
-}
-
 describe("AppearanceTab", () => {
   beforeEach(() => {
     themeState.theme = "light";
@@ -64,7 +50,7 @@ describe("AppearanceTab", () => {
     themeState.setTheme.mockClear();
     localStorage.clear();
     useAppearanceStore.setState(DEFAULT_APPEARANCE);
-    useInstalledThemesStore.setState({ themes: [] });
+    testTheme.current = null;
   });
   afterEach(() => {
     cleanup();
@@ -98,6 +84,7 @@ describe("AppearanceTab", () => {
 
     expect(state().theme).toBe("github");
     expect(themeSelect()).toHaveTextContent("GitHub");
+    expect(screen.queryByRole("button", { name: /import/i })).not.toBeInTheDocument();
   });
 
   it("renders the options the active theme declares and saves them per theme", async () => {
@@ -166,54 +153,14 @@ describe("AppearanceTab", () => {
     expect(state()).toMatchObject({ density: "compact", highContrast: true });
   });
 
-  it("imports a theme file after confirmation, and removes it again", async () => {
-    const user = userEvent.setup();
-    render(<AppearanceTab />, { wrapper: Wrapper });
-
-    await user.click(screen.getByRole("button", { name: "Import theme" }));
-    expect(await screen.findByRole("menuitem", { name: "Theme file (.zip)" })).toBeInTheDocument();
-    await user.keyboard("{Escape}");
-    const options = [
-      { id: "reading", type: "heading", label: "Reading" },
-      { id: "hyphens", type: "toggle", label: "Hyphens", default: false },
-    ];
-    await user.upload(folderInput(), themeFolder({ ...PAPER, options }, PAPER_CSS));
-    const dialog = await screen.findByRole("alertdialog");
-    expect(within(dialog).getByText("Install “Paper”?")).toBeInTheDocument();
-    expect(within(dialog).getByText("theme.css · 1 option")).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "Install and use" }));
-
-    expect(useInstalledThemesStore.getState().themes.map((t) => t.id)).toEqual(["paper"]);
-    expect(state().theme).toBe("paper");
-    expect(themeSelect()).toHaveTextContent("Paper");
-    await user.click(themeSelect());
-    expect(await screen.findByText("Installed")).toBeInTheDocument();
-    await user.keyboard("{Escape}");
-
-    await user.click(screen.getByRole("button", { name: "Remove Paper" }));
-    expect(useInstalledThemesStore.getState().themes).toEqual([]);
-    expect(state().theme).toBe("default");
-  });
-
-  it("lists what is wrong with a theme it cannot install", async () => {
-    const user = userEvent.setup();
-    render(<AppearanceTab />, { wrapper: Wrapper });
-
-    await user.upload(folderInput(), themeFolder(PAPER, "body { background: url(https://evil.test/x); }"));
-    const dialog = await screen.findByRole("alertdialog");
-    expect(within(dialog).getByText("Couldn't install this theme")).toBeInTheDocument();
-    expect(within(dialog).getByText(/theme\.css line 1: url\("https:\/\/evil.test\/x"\)/)).toBeInTheDocument();
-    expect(useInstalledThemesStore.getState().themes).toEqual([]);
-  });
-
   it("renders every option type a theme declares, grouped under its headings", async () => {
     const user = userEvent.setup();
-    useInstalledThemesStore.setState({
-      themes: [
-        {
-          ...PAPER,
-          css: PAPER_CSS,
-          options: [
+    testTheme.current = {
+      apiVersion: 1,
+      id: "paper",
+      name: "Paper",
+      css: "",
+      options: [
             { id: "page", type: "heading", label: "Page", description: "The paper itself." },
             { id: "paper-color", type: "color", label: "Paper", default: { light: "#f6efdf", dark: "#1d1b16" } },
             { id: "page-width", type: "slider", label: "Width", default: 46, min: 30, max: 60, unit: "rem" },
@@ -223,11 +170,9 @@ describe("AppearanceTab", () => {
             { id: "rule", type: "variable-select", label: "Rule", default: "1px", choices: [
               { value: "1px", label: "Thin" },
               { value: "2px", label: "Thick" },
-            ] },
-          ],
-        },
+        ] },
       ],
-    });
+    };
     useAppearanceStore.setState({ theme: "paper" });
     render(<AppearanceTab />, { wrapper: Wrapper });
 

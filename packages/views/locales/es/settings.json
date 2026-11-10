@@ -192,35 +192,9 @@
     },
     "theme": {
       "title": "Tema",
-      "description": "Colores, bordes, sombras y esquinas de toda la app. Importa un archivo de tema para añadir más.",
+      "description": "Colores, bordes, sombras y esquinas de toda la app.",
       "default": "Predeterminado",
-      "pop": "Pop",
-      "built_in": "Integrados",
-      "installed": "Instalados",
-      "remove": "Quitar {{name}}",
-      "safe_mode": "Modo seguro: tu tema está en pausa hasta que cierres esta ventana.",
-      "safe_mode_exit": "Usar mi tema"
-    },
-    "import": {
-      "button": "Importar tema",
-      "from_zip": "Archivo de tema (.zip)",
-      "from_folder": "Carpeta del tema",
-      "storage_full": "No hay espacio suficiente en este dispositivo para guardar el tema. Quita otro tema e inténtalo de nuevo.",
-      "confirm_title": "¿Instalar «{{name}}»?",
-      "warning": "Un tema puede cambiar el aspecto de todas las páginas, incluidos los diálogos y avisos. Instala solo temas de personas de confianza.",
-      "author": "Autor",
-      "version": "Versión",
-      "replaces": "{{to}} (sustituye a {{from}})",
-      "includes": "Incluye",
-      "cancel": "Cancelar",
-      "confirm": "Instalar y usar",
-      "error_title": "No se pudo instalar este tema",
-      "error_description": "No se ha cambiado nada. El archivo de tema tiene estos problemas:",
-      "close": "Cerrar",
-      "has_options_one": "{{count}} opción",
-      "has_options_other": "{{count}} opciones",
-      "has_assets_one": "{{count}} fuente o imagen",
-      "has_assets_other": "{{count}} fuentes e imágenes"
+      "pop": "Pop"
     },
     "theme_options": {
       "title": "Opciones del tema",

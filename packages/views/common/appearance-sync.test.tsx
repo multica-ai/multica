@@ -3,10 +3,7 @@ import { act, cleanup, render } from "@testing-library/react";
 import {
   APPEARANCE_STORAGE_KEY,
   DEFAULT_APPEARANCE,
-  INSTALLED_THEMES_STORAGE_KEY,
   useAppearanceStore,
-  useInstalledThemesStore,
-  useThemeSafeMode,
 } from "@multica/core/appearance";
 import { AppearanceSync } from "./appearance-sync";
 
@@ -14,20 +11,10 @@ const html = () => document.documentElement;
 const sheet = () => document.getElementById("multica-appearance");
 const themeCss = () => document.getElementById("multica-theme-css");
 
-const PAPER = {
-  apiVersion: 1,
-  id: "paper",
-  name: "Paper",
-  css: '.theme-light { --page-canvas: #f6efdf; }\n[data-mc="content"] p { hyphens: auto; }',
-} as const;
-
 describe("AppearanceSync", () => {
   beforeEach(() => {
     localStorage.clear();
-    sessionStorage.clear();
     useAppearanceStore.setState(DEFAULT_APPEARANCE);
-    useInstalledThemesStore.setState({ themes: [] });
-    useThemeSafeMode.setState({ active: false });
   });
   afterEach(cleanup);
 
@@ -109,22 +96,6 @@ describe("AppearanceSync", () => {
     expect(themeCss()!.compareDocumentPosition(sheet()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("applies an installed theme's CSS, and nothing of it in safe mode", () => {
-    useInstalledThemesStore.setState({ themes: [PAPER] });
-    useAppearanceStore.setState({ theme: "paper" });
-    render(<AppearanceSync />);
-    expect(html().getAttribute("data-theme")).toBe("paper");
-    expect(themeCss()?.textContent).toContain("hyphens: auto");
-
-    act(() => useThemeSafeMode.getState().enter());
-    expect(html().hasAttribute("data-theme")).toBe(false);
-    expect(themeCss()).toBeNull();
-    expect(useAppearanceStore.getState().theme).toBe("paper");
-
-    act(() => useThemeSafeMode.getState().exit());
-    expect(html().getAttribute("data-theme")).toBe("paper");
-  });
-
   it("clears everything when the product UI unmounts", () => {
     useAppearanceStore.setState({ theme: "pop", highContrast: true, codeFont: "system" });
     const { unmount } = render(<AppearanceSync />);
@@ -141,17 +112,12 @@ describe("AppearanceSync", () => {
   it("follows changes saved by another window", async () => {
     render(<AppearanceSync />);
     localStorage.setItem(
-      INSTALLED_THEMES_STORAGE_KEY,
-      JSON.stringify({ state: { themes: [PAPER] }, version: 0 }),
-    );
-    localStorage.setItem(
       APPEARANCE_STORAGE_KEY,
-      JSON.stringify({ state: { theme: "paper" }, version: 0 }),
+      JSON.stringify({ state: { theme: "notion" }, version: 0 }),
     );
     await act(async () => {
-      window.dispatchEvent(new StorageEvent("storage", { key: INSTALLED_THEMES_STORAGE_KEY }));
       window.dispatchEvent(new StorageEvent("storage", { key: APPEARANCE_STORAGE_KEY }));
     });
-    expect(html().getAttribute("data-theme")).toBe("paper");
+    expect(html().getAttribute("data-theme")).toBe("notion");
   });
 });

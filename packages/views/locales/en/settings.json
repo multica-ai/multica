@@ -210,35 +210,9 @@
     },
     "theme": {
       "title": "Theme",
-      "description": "Colors, borders, shadows and corners across the app. Import a theme file to add more.",
+      "description": "Colors, borders, shadows and corners across the app.",
       "default": "Default",
-      "pop": "Pop",
-      "built_in": "Built in",
-      "installed": "Installed",
-      "remove": "Remove {{name}}",
-      "safe_mode": "Safe mode: your theme is paused until you close this window.",
-      "safe_mode_exit": "Use my theme"
-    },
-    "import": {
-      "button": "Import theme",
-      "from_zip": "Theme file (.zip)",
-      "from_folder": "Theme folder",
-      "storage_full": "There isn't enough space on this device to save the theme. Remove another theme and try again.",
-      "confirm_title": "Install “{{name}}”?",
-      "warning": "A theme can restyle every page, including dialogs and warnings. Only install themes from people you trust.",
-      "author": "Author",
-      "version": "Version",
-      "replaces": "{{to}} (replaces {{from}})",
-      "includes": "Includes",
-      "cancel": "Cancel",
-      "confirm": "Install and use",
-      "error_title": "Couldn't install this theme",
-      "error_description": "Nothing was changed. The theme file has these problems:",
-      "close": "Close",
-      "has_options_one": "{{count}} option",
-      "has_options_other": "{{count}} options",
-      "has_assets_one": "{{count}} font or image",
-      "has_assets_other": "{{count}} fonts and images"
+      "pop": "Pop"
     },
     "theme_options": {
       "title": "Theme options",

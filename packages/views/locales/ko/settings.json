@@ -208,33 +208,9 @@
     },
     "theme": {
       "title": "테마",
-      "description": "앱 전체의 색상, 테두리, 그림자, 모서리. 테마 파일을 가져와 더 추가할 수 있어요.",
+      "description": "앱 전체의 색상, 테두리, 그림자, 모서리.",
       "default": "기본",
-      "pop": "팝",
-      "built_in": "기본 제공",
-      "installed": "설치됨",
-      "remove": "{{name}} 제거",
-      "safe_mode": "안전 모드: 이 창을 닫을 때까지 테마가 꺼져 있어요.",
-      "safe_mode_exit": "내 테마 사용"
-    },
-    "import": {
-      "button": "테마 가져오기",
-      "from_zip": "테마 파일(.zip)",
-      "from_folder": "테마 폴더",
-      "storage_full": "이 기기에 테마를 저장할 공간이 부족해요. 다른 테마를 제거한 뒤 다시 시도하세요.",
-      "confirm_title": "‘{{name}}’을(를) 설치할까요?",
-      "warning": "테마는 대화상자와 경고를 포함한 모든 화면의 모양을 바꿀 수 있어요. 신뢰하는 사람이 만든 테마만 설치하세요.",
-      "author": "만든 사람",
-      "version": "버전",
-      "replaces": "{{to}} ({{from}} 대체)",
-      "includes": "포함",
-      "cancel": "취소",
-      "confirm": "설치하고 사용",
-      "error_title": "이 테마를 설치할 수 없어요",
-      "error_description": "아무것도 바뀌지 않았어요. 테마 파일에 다음 문제가 있어요:",
-      "close": "닫기",
-      "has_options_other": "옵션 {{count}}개",
-      "has_assets_other": "글꼴·이미지 {{count}}개"
+      "pop": "팝"
     },
     "theme_options": {
       "title": "테마 옵션",

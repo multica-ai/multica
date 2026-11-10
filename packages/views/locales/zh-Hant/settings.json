@@ -208,33 +208,9 @@
     },
     "theme": {
       "title": "主題",
-      "description": "全域的顏色、邊框、陰影和圓角。可以匯入主題檔案加入更多主題。",
+      "description": "全域的顏色、邊框、陰影和圓角。",
       "default": "預設",
-      "pop": "普普",
-      "built_in": "內建",
-      "installed": "已安裝",
-      "remove": "移除 {{name}}",
-      "safe_mode": "安全模式：關閉這個視窗之前，你的主題暫停生效。",
-      "safe_mode_exit": "恢復我的主題"
-    },
-    "import": {
-      "button": "匯入主題",
-      "from_zip": "主題檔案（.zip）",
-      "from_folder": "主題資料夾",
-      "storage_full": "這台裝置的儲存空間不夠儲存這個主題。移除其他主題後再試。",
-      "confirm_title": "安裝「{{name}}」？",
-      "warning": "主題可以改變每個頁面的樣式，包括對話框和警告。只安裝你信任的人做的主題。",
-      "author": "作者",
-      "version": "版本",
-      "replaces": "{{to}}（取代 {{from}}）",
-      "includes": "包含",
-      "cancel": "取消",
-      "confirm": "安裝並使用",
-      "error_title": "無法安裝這個主題",
-      "error_description": "沒有做任何變更。主題檔案有以下問題：",
-      "close": "關閉",
-      "has_options_other": "{{count}} 個選項",
-      "has_assets_other": "{{count}} 個字型和圖片"
+      "pop": "普普"
     },
     "theme_options": {
       "title": "主題選項",

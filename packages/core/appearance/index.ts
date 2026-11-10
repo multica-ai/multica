@@ -1,8 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { defaultStorage } from "../platform/storage";
-import { findTheme } from "./installed-themes";
-import { THEME_ID_PATTERN, themeCss } from "./theme-package";
 import { DEFAULT_THEME_ID, findBuiltInTheme } from "./built-in-themes";
 import {
   themeOptionAttributes,
@@ -14,12 +12,8 @@ import {
 
 export * from "./themes";
 export * from "./built-in-themes";
-export * from "./theme-css";
-export * from "./theme-package";
-export * from "./installed-themes";
 export * from "./anchors";
 export * from "./theme-variables";
-export * from "./theme-archive";
 
 /**
  * Appearance sits on top of light/dark mode: a theme (see ./themes) with its
@@ -139,7 +133,7 @@ function sanitizeThemeOptions(value: unknown): Record<string, ThemeOptionValues>
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const out: Record<string, ThemeOptionValues> = {};
   for (const [themeId, options] of Object.entries(value).slice(0, 40)) {
-    if (!THEME_ID_PATTERN.test(themeId) || !options || typeof options !== "object") continue;
+    if (!findBuiltInTheme(themeId) || !options || typeof options !== "object") continue;
     const clean: Record<string, ThemeOptionValue> = {};
     for (const [key, v] of Object.entries(options).slice(0, 24)) {
       const value = sanitizeOptionValue(v);
@@ -168,7 +162,7 @@ export function sanitizeAppearance(stored: unknown): AppearancePreferences {
   return {
     theme: pick(
       "theme",
-      (v): v is string => typeof v === "string" && THEME_ID_PATTERN.test(v),
+      (v): v is string => typeof v === "string" && findBuiltInTheme(v) !== undefined,
       p.theme ?? p.style,
     ),
     themeOptions: sanitizeThemeOptions(p.themeOptions),
@@ -259,56 +253,9 @@ export function appearanceRootVariables(
   };
 }
 
-/* ── Safe mode ──────────────────────────────────────────────────────────────
- * Ignores the chosen theme for the rest of the browser session, so a theme
- * that hides or breaks the interface can always be undone. Entered with
- * `?theme=default` in the URL or by holding Shift while the app loads. */
-
-const SAFE_MODE_KEY = "multica_theme_safe_mode";
-
-function readSafeMode(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    if (new URLSearchParams(window.location.search).get("theme") === DEFAULT_THEME_ID) {
-      window.sessionStorage.setItem(SAFE_MODE_KEY, "1");
-    }
-    return window.sessionStorage.getItem(SAFE_MODE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-interface SafeModeState {
-  active: boolean;
-  enter: () => void;
-  exit: () => void;
-}
-
-export const useThemeSafeMode = create<SafeModeState>()((set) => ({
-  active: readSafeMode(),
-  enter: () => {
-    try {
-      window.sessionStorage.setItem(SAFE_MODE_KEY, "1");
-    } catch {
-      // Session storage can be unavailable; safe mode then lasts until reload.
-    }
-    set({ active: true });
-  },
-  exit: () => {
-    try {
-      window.sessionStorage.removeItem(SAFE_MODE_KEY);
-    } catch {
-      // Nothing stored to clear.
-    }
-    set({ active: false });
-  },
-}));
-
-/** The theme to render: the chosen one, or Default in safe mode or when it is not installed. */
-export function activeTheme(prefs: Pick<AppearancePreferences, "theme">, safeMode = false): Theme {
-  const fallback = findBuiltInTheme(DEFAULT_THEME_ID)!;
-  if (safeMode) return fallback;
-  return findTheme(prefs.theme) ?? fallback;
+/** The theme to render: the chosen one, or Default when it is not a built-in theme. */
+export function activeTheme(prefs: Pick<AppearancePreferences, "theme">): Theme {
+  return findBuiltInTheme(prefs.theme) ?? findBuiltInTheme(DEFAULT_THEME_ID)!;
 }
 
 const BOTH_MODES = ":root:not(.dark), :root.dark";
@@ -344,9 +291,9 @@ export function appearanceStylesheet(theme: Theme, prefs: AppearancePreferences)
   return parts.filter(Boolean).join("\n");
 }
 
-/** The theme's own CSS, checked and with assets resolved. */
+/** The theme's own CSS. */
 export function appearanceThemeCss(theme: Theme): string {
-  return themeCss(theme);
+  return theme.css ?? "";
 }
 
 /** Attributes for <html>: `data-theme` and the theme's options; `null` removes one. */

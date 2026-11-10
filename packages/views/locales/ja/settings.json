@@ -208,33 +208,9 @@
     },
     "theme": {
       "title": "テーマ",
-      "description": "アプリ全体の色、枠線、影、角丸。テーマファイルを読み込んで追加できます。",
+      "description": "アプリ全体の色、枠線、影、角丸。",
       "default": "デフォルト",
-      "pop": "ポップ",
-      "built_in": "組み込み",
-      "installed": "インストール済み",
-      "remove": "{{name}} を削除",
-      "safe_mode": "セーフモード：このウィンドウを閉じるまでテーマを停止しています。",
-      "safe_mode_exit": "テーマを戻す"
-    },
-    "import": {
-      "button": "テーマを読み込む",
-      "from_zip": "テーマファイル（.zip）",
-      "from_folder": "テーマフォルダ",
-      "storage_full": "このデバイスにテーマを保存する空き容量がありません。ほかのテーマを削除してからもう一度お試しください。",
-      "confirm_title": "「{{name}}」をインストールしますか？",
-      "warning": "テーマはダイアログや警告を含むすべての画面の見た目を変えられます。信頼できる作者のテーマだけをインストールしてください。",
-      "author": "作者",
-      "version": "バージョン",
-      "replaces": "{{to}}（{{from}} を置き換え）",
-      "includes": "内容",
-      "cancel": "キャンセル",
-      "confirm": "インストールして使う",
-      "error_title": "このテーマをインストールできません",
-      "error_description": "何も変更していません。テーマファイルに次の問題があります：",
-      "close": "閉じる",
-      "has_options_other": "オプション {{count}} 個",
-      "has_assets_other": "フォント・画像 {{count}} 個"
+      "pop": "ポップ"
     },
     "theme_options": {
       "title": "テーマのオプション",

@@ -1,13 +1,11 @@
 /**
- * A theme is a folder: `manifest.json` names it and declares its options,
- * `theme.css` overrides the public variables (./theme-variables) under
- * `.theme-light` and `.theme-dark` and may restyle the public anchors
- * (./anchors), and any fonts or images the CSS references sit next to it.
+ * A theme is a manifest that names it and declares its options, plus CSS that
+ * overrides the public variables (./theme-variables) under `.theme-light` and
+ * `.theme-dark` and may restyle the public anchors (./anchors).
  *
- * Built-in themes (./built-in-themes) are written as token tables so the
- * contrast test can read them, and compiled to the same CSS an outside theme
- * ships. Everything a theme ships goes through `sanitizeThemeCss` (./theme-css).
- * docs/theming.md is the public reference; keep it in step with this file.
+ * Only the built-in themes (./built-in-themes) exist for now. They are written
+ * as token tables so the contrast test can read them, and compiled to that
+ * CSS. docs/theming.md is the reference; keep it in step with this file.
  */
 
 /** Bumped only for changes that would break existing themes. */
@@ -101,11 +99,9 @@ export interface ThemeManifest {
   options?: readonly ThemeOption[];
 }
 
-/** A theme ready to apply: its manifest, theme.css and the files the CSS references. */
+/** A theme ready to apply: its manifest and CSS. */
 export interface Theme extends ThemeManifest {
   css: string;
-  /** Relative path to a base64 `data:` URL. */
-  assets?: Readonly<Record<string, string>>;
 }
 
 /** Variable name (without `--`) to value. */

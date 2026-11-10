@@ -1,34 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   Monitor,
   Moon,
   RotateCcw,
   Sun,
-  Trash2,
-  TriangleAlert,
-  Upload,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@multica/ui/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -63,14 +44,11 @@ import {
   isSafeThemeValue,
   localFontFamily,
   localizedText,
-  readThemePackage,
   selectAppearance,
   themeModeVariables,
   themeOptionValue,
   uiFontStack,
   useAppearanceStore,
-  useInstalledThemesStore,
-  useThemeSafeMode,
   type CjkFontChoice,
   type CodeFont,
   type ContentSize,
@@ -117,8 +95,7 @@ const CODE_FONT_NAME: Record<CodeFont, string> = {
 function useThemeSetsFont(variable: "font-ui" | "font-mono"): boolean {
   const appliedMode = useAppliedMode();
   const theme = useAppearanceStore((s) => s.theme);
-  const safeMode = useThemeSafeMode();
-  const css = activeTheme({ theme }, safeMode.active).css;
+  const css = activeTheme({ theme }).css;
   return useMemo(() => variable in themeModeVariables(css)[appliedMode], [css, appliedMode, variable]);
 }
 
@@ -182,31 +159,15 @@ function ColorSection() {
   const appliedMode = useAppliedMode();
   const theme = useAppearanceStore((s) => s.theme);
   const set = useAppearanceStore((s) => s.set);
-  const installed = useInstalledThemesStore((s) => s.themes);
-  const uninstall = useInstalledThemesStore((s) => s.uninstall);
-  const safeMode = useThemeSafeMode();
   const themeLabelFor = useThemeLabel();
   const modeValue: ModeChoice = mode === "light" || mode === "dark" ? mode : "system";
   const modeLabel = t(($) => $.appearance.mode.title);
   const themeLabel = t(($) => $.appearance.theme.title);
-  const selected = [...BUILT_IN_THEMES, ...installed].find((manifest) => manifest.id === theme);
-  const selectedInstalled = installed.find((manifest) => manifest.id === theme);
-  const items = [...BUILT_IN_THEMES, ...installed].map((manifest) => ({
+  const selected = BUILT_IN_THEMES.find((manifest) => manifest.id === theme);
+  const items = BUILT_IN_THEMES.map((manifest) => ({
     value: manifest.id,
     label: themeLabelFor(manifest),
   }));
-
-  const option = (manifest: Theme, author?: string) => (
-    <SelectItem key={manifest.id} value={manifest.id}>
-      <span className="flex min-w-0 flex-1 items-center gap-2.5">
-        <ThemeSwatch theme={manifest} mode={appliedMode} />
-        <span className="truncate">{themeLabelFor(manifest)}</span>
-        {author ? (
-          <span className="ml-auto shrink-0 pl-3 text-caption text-muted-foreground">{author}</span>
-        ) : null}
-      </span>
-    </SelectItem>
-  );
 
   return (
     <SettingsSection title={t(($) => $.appearance.color.title)} anchor="color">
@@ -226,208 +187,37 @@ function ColorSection() {
           </div>
         </SettingsRow>
         <SettingsRow label={themeLabel} description={t(($) => $.appearance.theme.description)} anchor="theme">
-          <div className="flex items-center gap-2">
-            {selectedInstalled ? (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="text-muted-foreground"
-                aria-label={t(($) => $.appearance.theme.remove, { name: selectedInstalled.name })}
-                title={t(($) => $.appearance.theme.remove, { name: selectedInstalled.name })}
-                onClick={() => {
-                  set({ theme: "default" });
-                  uninstall(selectedInstalled.id);
-                }}
-              >
-                <Trash2 />
-              </Button>
-            ) : null}
-            <Select
-              items={items}
-              value={selected ? theme : "default"}
-              onValueChange={(next) => {
-                if (next) set({ theme: next });
-              }}
-            >
-              <SelectTrigger size="sm" className="w-48" aria-label={themeLabel}>
-                <SelectValue>
-                  {selected ? (
-                    <span className="flex min-w-0 items-center gap-2">
-                      <ThemeSwatch theme={selected} mode={appliedMode} />
-                      <span className="truncate">{themeLabelFor(selected)}</span>
-                    </span>
-                  ) : null}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent align="end" className="min-w-64">
-                <SelectGroup>
-                  <SelectLabel>{t(($) => $.appearance.theme.built_in)}</SelectLabel>
-                  {BUILT_IN_THEMES.map((manifest) => option(manifest))}
-                </SelectGroup>
-                {installed.length > 0 ? (
-                  <>
-                    <SelectSeparator />
-                    <SelectGroup>
-                      <SelectLabel>{t(($) => $.appearance.theme.installed)}</SelectLabel>
-                      {installed.map((manifest) => option(manifest, manifest.author))}
-                    </SelectGroup>
-                  </>
+          <Select
+            items={items}
+            value={selected ? theme : "default"}
+            onValueChange={(next) => {
+              if (next) set({ theme: next });
+            }}
+          >
+            <SelectTrigger size="sm" className="w-48" aria-label={themeLabel}>
+              <SelectValue>
+                {selected ? (
+                  <span className="flex min-w-0 items-center gap-2">
+                    <ThemeSwatch theme={selected} mode={appliedMode} />
+                    <span className="truncate">{themeLabelFor(selected)}</span>
+                  </span>
                 ) : null}
-              </SelectContent>
-            </Select>
-            <ImportThemeButton />
-          </div>
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent align="end" className="min-w-48">
+              {BUILT_IN_THEMES.map((manifest) => (
+                <SelectItem key={manifest.id} value={manifest.id}>
+                  <span className="flex min-w-0 flex-1 items-center gap-2.5">
+                    <ThemeSwatch theme={manifest} mode={appliedMode} />
+                    <span className="truncate">{themeLabelFor(manifest)}</span>
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </SettingsRow>
-        {safeMode.active ? (
-          <div role="status" className="flex items-center gap-3 px-4 py-3 text-caption">
-            <TriangleAlert aria-hidden="true" className="size-3.5 shrink-0 text-warning" />
-            <span className="min-w-0 flex-1">{t(($) => $.appearance.theme.safe_mode)}</span>
-            <Button variant="outline" size="xs" onClick={safeMode.exit}>
-              {t(($) => $.appearance.theme.safe_mode_exit)}
-            </Button>
-          </div>
-        ) : null}
       </SettingsCard>
     </SettingsSection>
-  );
-}
-
-/**
- * Reads a theme from a .zip or a folder, shows what it is and that it can
- * restyle every page, and installs it on confirmation. Problems are listed
- * as the checks report them, which is what someone writing a theme needs.
- */
-function ImportThemeButton() {
-  const { t } = useT("settings");
-  const zipRef = useRef<HTMLInputElement>(null);
-  const folderRef = useRef<HTMLInputElement>(null);
-  const [pending, setPending] = useState<Theme | null>(null);
-  const [errors, setErrors] = useState<string[] | null>(null);
-  const installed = useInstalledThemesStore((s) => s.themes);
-  const install = useInstalledThemesStore((s) => s.install);
-  const uninstall = useInstalledThemesStore((s) => s.uninstall);
-  const set = useAppearanceStore((s) => s.set);
-  const previous = pending ? installed.find((theme) => theme.id === pending.id) : undefined;
-
-  useEffect(() => {
-    // Not in React's input props; it makes the picker choose a folder.
-    folderRef.current?.setAttribute("webkitdirectory", "");
-  }, []);
-
-  const read = async (files: File[]) => {
-    if (files.length === 0) return;
-    const result = await readThemePackage(files);
-    if (result.ok) setPending(result.theme);
-    else setErrors(result.errors);
-  };
-
-  const confirm = () => {
-    if (!pending) return;
-    const replaced = previous;
-    try {
-      install(pending);
-      set({ theme: pending.id });
-    } catch {
-      if (replaced) install(replaced);
-      else uninstall(pending.id);
-      setErrors([t(($) => $.appearance.import.storage_full)]);
-    }
-    setPending(null);
-  };
-
-  const picker = (ref: React.RefObject<HTMLInputElement | null>, props: React.ComponentProps<"input">) => (
-    <input
-      ref={ref}
-      type="file"
-      className="hidden"
-      onChange={(event) => {
-        const files = Array.from(event.target.files ?? []);
-        event.target.value = "";
-        void read(files);
-      }}
-      {...props}
-    />
-  );
-  const assetCount = pending ? Object.keys(pending.assets ?? {}).length : 0;
-  const optionCount = pending?.options?.filter((option) => option.type !== "heading").length ?? 0;
-
-  return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
-          <Upload />
-          {t(($) => $.appearance.import.button)}
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={() => zipRef.current?.click()}>
-            {t(($) => $.appearance.import.from_zip)}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => folderRef.current?.click()}>
-            {t(($) => $.appearance.import.from_folder)}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {picker(zipRef, { accept: ".zip,application/zip", "aria-label": t(($) => $.appearance.import.from_zip) })}
-      {picker(folderRef, { multiple: true, "aria-label": t(($) => $.appearance.import.from_folder) })}
-      <AlertDialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t(($) => $.appearance.import.confirm_title, { name: pending?.name ?? "" })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>{t(($) => $.appearance.import.warning)}</AlertDialogDescription>
-          </AlertDialogHeader>
-          {pending ? (
-            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-md bg-muted px-3 py-2.5 text-caption">
-              {pending.author ? (
-                <>
-                  <dt className="text-muted-foreground">{t(($) => $.appearance.import.author)}</dt>
-                  <dd className="min-w-0 truncate">{pending.author}</dd>
-                </>
-              ) : null}
-              {pending.version ? (
-                <>
-                  <dt className="text-muted-foreground">{t(($) => $.appearance.import.version)}</dt>
-                  <dd>
-                    {previous?.version
-                      ? t(($) => $.appearance.import.replaces, { from: previous.version, to: pending.version })
-                      : pending.version}
-                  </dd>
-                </>
-              ) : null}
-              <dt className="text-muted-foreground">{t(($) => $.appearance.import.includes)}</dt>
-              <dd>
-                {[
-                  "theme.css",
-                  assetCount > 0 ? t(($) => $.appearance.import.has_assets, { count: assetCount }) : null,
-                  optionCount > 0 ? t(($) => $.appearance.import.has_options, { count: optionCount }) : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </dd>
-            </dl>
-          ) : null}
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t(($) => $.appearance.import.cancel)}</AlertDialogCancel>
-            <AlertDialogAction onClick={confirm}>{t(($) => $.appearance.import.confirm)}</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <AlertDialog open={errors !== null} onOpenChange={(open) => !open && setErrors(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t(($) => $.appearance.import.error_title)}</AlertDialogTitle>
-            <AlertDialogDescription>{t(($) => $.appearance.import.error_description)}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <ul className="max-h-60 list-disc space-y-1 overflow-y-auto rounded-md bg-muted py-2.5 pr-3 pl-7 font-mono text-caption">
-            {errors?.map((error, i) => <li key={i}>{error}</li>)}
-          </ul>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t(($) => $.appearance.import.close)}</AlertDialogCancel>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
   );
 }
 
@@ -438,10 +228,8 @@ function ThemeOptionsSection() {
   const prefs = useAppearanceStore(useShallow(selectAppearance));
   const setThemeOption = useAppearanceStore((s) => s.setThemeOption);
   const set = useAppearanceStore((s) => s.set);
-  useInstalledThemesStore((s) => s.themes);
-  const safeMode = useThemeSafeMode((s) => s.active);
   const themeLabelFor = useThemeLabel();
-  const theme = activeTheme(prefs, safeMode);
+  const theme = activeTheme(prefs);
   const options = theme.options ?? [];
   if (options.length === 0) return null;
   const chosen = prefs.themeOptions[theme.id];

@@ -210,35 +210,9 @@
     },
     "theme": {
       "title": "Thème",
-      "description": "Couleurs, bordures, ombres et coins de toute l’app. Importez un fichier de thème pour en ajouter.",
+      "description": "Couleurs, bordures, ombres et coins de toute l’app.",
       "default": "Par défaut",
-      "pop": "Pop",
-      "built_in": "Intégrés",
-      "installed": "Installés",
-      "remove": "Retirer {{name}}",
-      "safe_mode": "Mode sans échec : votre thème est suspendu jusqu’à la fermeture de cette fenêtre.",
-      "safe_mode_exit": "Utiliser mon thème"
-    },
-    "import": {
-      "button": "Importer un thème",
-      "from_zip": "Fichier de thème (.zip)",
-      "from_folder": "Dossier du thème",
-      "storage_full": "Pas assez d’espace sur cet appareil pour enregistrer le thème. Retirez un autre thème et réessayez.",
-      "confirm_title": "Installer « {{name}} » ?",
-      "warning": "Un thème peut modifier l’apparence de toutes les pages, y compris les boîtes de dialogue et les avertissements. N’installez que des thèmes de personnes de confiance.",
-      "author": "Auteur",
-      "version": "Version",
-      "replaces": "{{to}} (remplace {{from}})",
-      "includes": "Contient",
-      "cancel": "Annuler",
-      "confirm": "Installer et utiliser",
-      "error_title": "Impossible d’installer ce thème",
-      "error_description": "Rien n’a été modifié. Le fichier de thème présente ces problèmes :",
-      "close": "Fermer",
-      "has_options_one": "{{count}} option",
-      "has_options_other": "{{count}} options",
-      "has_assets_one": "{{count}} police ou image",
-      "has_assets_other": "{{count}} polices et images"
+      "pop": "Pop"
     },
     "theme_options": {
       "title": "Options du thème",
