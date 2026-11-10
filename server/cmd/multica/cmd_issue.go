@@ -2705,7 +2705,8 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 	var attachmentIDs []string
 	for _, att := range pending {
-		id, uploadErr := client.UploadFile(ctx, att.data, att.path, issueID)
+		// Comment attachments are linked by the comment request; upload them unbound first.
+		id, uploadErr := client.UploadFile(ctx, att.data, att.path, "")
 		if uploadErr != nil {
 			return fmt.Errorf("upload attachment %s: %w", att.path, uploadErr)
 		}

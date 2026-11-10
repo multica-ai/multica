@@ -158,6 +158,25 @@ describe("ApiClient edit guards", () => {
     expect(parsedLegacy.issues[0]).not.toHaveProperty("revision");
     await expect(client.listIssues()).resolves.toEqual({ issues: [], total: 0 });
   });
+
+  it("sends status category filters so custom statuses count with their phase", async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(JSON.stringify({ issues: [], total: 0 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await client.listIssues({ status_categories: ["done", "closed"] });
+    await client.listIssues({ status_category: "started" });
+
+    const query = (call: number) => new URL(fetchMock.mock.calls[call]![0]).searchParams;
+    expect(query(0).get("status_categories")).toBe("done,closed");
+    expect(query(1).get("status_category")).toBe("started");
+  });
 });
 
 describe("ApiClient pull-request response schema", () => {
@@ -3296,6 +3315,19 @@ describe("ApiClient shared credential across windows", () => {
     await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
 
     expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it("ignores a late 401 if a bearer session started after the request", async () => {
+    const onUnauthorized = vi.fn();
+    const client = new ApiClient("https://api.example.test", { onUnauthorized });
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      client.setToken("signed-in");
+      return jsonResponse({ error: "unauthorized" }, 401);
+    }));
+
+    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(client.getToken()).toBe("signed-in");
   });
 
   // ...but a genuine expiry still ends the session: nothing replaced the

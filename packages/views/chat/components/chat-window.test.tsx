@@ -61,6 +61,7 @@ vi.mock("./use-chat-resize", () => ({
 }));
 vi.mock("./use-chat-context-items", () => ({ useChatContextItems: () => [] }));
 vi.mock("./chat-window-messages", () => ({ ChatWindowMessages: () => null }));
+vi.mock("../../common/app-requests", () => ({ ChatAppRequests: () => null }));
 vi.mock("./chat-input", () => ({ ChatInput: () => null }));
 vi.mock("./chat-queue", () => ({ ChatQueue: () => null }));
 vi.mock("./chat-empty-state", () => ({ EmptyState: () => null }));

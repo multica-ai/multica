@@ -95,6 +95,21 @@ export function collectDeliverableFiles(
 }
 
 /**
+ * The deliverable a "latest version" link names: the file called `filename`,
+ * compared after trimming like `deliverableKey` does. A name uploaded under
+ * two content types is two deliverables; the link means whichever was
+ * uploaded most recently. `files` is newest first, so that is the first match.
+ */
+export function findDeliverableByName(
+  files: ReadonlyArray<DeliverableFile>,
+  filename: string,
+): DeliverableFile | undefined {
+  const name = (filename ?? "").trim();
+  if (!name) return undefined;
+  return files.find((file) => (file.latest.filename ?? "").trim() === name);
+}
+
+/**
  * The deliverable an attachment belongs to and its 1-based version number, or
  * undefined when the attachment is not a deliverable (a description file, a
  * file from another surface).

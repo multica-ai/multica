@@ -95,7 +95,7 @@ export function useIssueTimeline(issueId: string, userId?: string, focusCommentI
   const qc = useQueryClient();
 
   const query = useQuery(issueTimelineOptions(issueId));
-  const { data, isLoading: loading } = query;
+  const { data, isLoading: loading, dataUpdatedAt } = query;
 
   const needsThread = !!focusCommentId && !loading && !data?.some((entry) => entry.id === focusCommentId);
   const threadQuery = useQuery({
@@ -512,6 +512,12 @@ export function useIssueTimeline(issueId: string, userId?: string, focusCommentI
   return {
     timeline: optimisticTimeline,
     loading: loading || (needsThread && threadQuery.isPending),
+    /**
+     * When the cached timeline was last written (Query's `dataUpdatedAt`).
+     * Lets a caller tell whether `timeline` already reflects a read it
+     * started; `loading` cannot, as it is false while cached data refreshes.
+     */
+    dataUpdatedAt,
     submitComment,
     submitReply,
     editComment,

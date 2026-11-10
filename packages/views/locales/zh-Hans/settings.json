@@ -950,35 +950,6 @@
     "inbound_pending_hint": "请在飞书/Lark 中给此机器人发送消息以验证接收。若未收到，请检查长连接模式、im.message.receive_v1 事件订阅以及应用发布和审批状态。已有绑定可能尚无验证记录。",
     "inbound_verified_hint": "本次绑定已收到有效消息；这不代表持续在线、智能体执行成功或回复成功。"
   },
-  "composio": {
-    "page_description": "连接智能体可使用的应用。",
-    "not_enabled_title": "Composio 集成未启用",
-    "not_enabled_description_prefix": "在服务器上设置",
-    "not_enabled_description_suffix": "以启用 Composio toolkit 连接。",
-    "loading": "正在加载 toolkit…",
-    "load_failed": "加载 Composio toolkit 失败。",
-    "empty_title": "还没有可连接的应用",
-    "empty_description": "你的 Composio 项目里还没有启用 auth config 的 toolkit。请在 Composio 后台启用一个 auth config，它才会出现在这里。",
-    "search_placeholder": "搜索 toolkit…",
-    "connect": "连接",
-    "connecting": "连接中…",
-    "connected": "已连接",
-    "disconnect": "断开",
-    "disconnecting": "断开中...",
-    "connect_failed": "无法发起连接，请重试。",
-    "disconnect_failed": "无法断开连接，请重试。",
-    "toast_disconnected": "已断开",
-    "disconnect_confirm_title": "断开这个应用？",
-    "disconnect_confirm_description": "你的已连接账号将在 Composio 侧被撤销，你的智能体将失去对该 toolkit 的访问权限。你可以稍后重新连接。",
-    "disconnect_confirm_cancel": "取消",
-    "connections_load_failed": "无法加载你已有的连接，连接状态可能不完整。",
-    "toast_connected": "已连接",
-    "toast_connect_failed": "连接未能完成，请重试。",
-    "last_used": "最近使用 {{when}}",
-    "last_used_never": "从未使用",
-    "expired": "令牌已过期",
-    "reconnect": "重新连接"
-  },
   "slack": {
     "section_title": "Slack",
     "page_description": "在 Slack 中与智能体对话，或用 /issue 创建任务。",
@@ -1467,7 +1438,188 @@
     "title": "为智能体接入工具的方式",
     "current": "当前页面",
     "mcp": "由管理员添加、在工作区内共享，再按智能体分配。",
-    "apps": "用你自己的账号通过 Composio 授权，在你拥有的智能体上启用。",
+    "apps": "通过 Multica 连接团队或个人账号，再将应用添加到智能体。",
     "plugins": "安装后可提供工具、定时 hook 和存储，每个插件单独授权。"
+  },
+  "connected_apps": {
+    "description": "智能体通过这些账号操作外部应用，允许的操作会直接执行。",
+    "add_app": "添加应用",
+    "loading": "正在加载应用…",
+    "load_failed": "无法加载应用。",
+    "team_title": "团队账号",
+    "team_description": "工作区共有的账号，例如客服邮箱或公司 GitHub。由管理员连接；被授予团队账号的智能体以该账号身份操作。",
+    "team_empty": "还没有团队账号。",
+    "team_empty_member": "还没有团队账号。请联系工作区管理员连接。",
+    "personal_title": "我的账号",
+    "personal_description": "你自己的账号。由你触发的运行中，设为「触发者账号」的应用会使用这些账号。",
+    "personal_empty": "你还没有连接任何账号。",
+    "connected_by": "由 {{name}} 连接",
+    "last_used": "最近使用 {{when}}",
+    "last_used_never": "尚未使用",
+    "used_by_other": "{{count}} 个智能体在用",
+    "expired": "需要重新连接",
+    "reconnect": "重新连接",
+    "rules": "规则",
+    "activity": "调用记录",
+    "disconnect": "断开",
+    "catalog_title": "可用应用",
+    "catalog_label": "成员可添加的应用",
+    "catalog_description": "精选应用带有审核过的默认规则。「全部应用」包含 Composio 能连接的所有应用；Multica 无法识别的操作一律先征得同意。「指定名单」只允许你选中的应用。",
+    "catalog_all": "全部应用",
+    "catalog_curated": "仅精选",
+    "catalog_custom": "指定名单",
+    "toast_connected": "账号已连接",
+    "toast_connect_failed": "连接未完成，请重试。",
+    "toast_disconnected": "已断开",
+    "toast_failed": "操作失败，请重试。",
+    "add": {
+      "title": "添加应用",
+      "description": "为团队或为自己连接账号。哪些智能体使用它，在各智能体的「应用」页设置。",
+      "search": "搜索应用…",
+      "empty": "没有匹配的应用。",
+      "curated": "精选",
+      "recommended_team": "通常用团队账号",
+      "recommended_personal": "通常用个人账号",
+      "connect_team": "连接团队账号",
+      "connect_personal": "连接我的账号",
+      "connecting": "正在连接…",
+      "connected": "已连接"
+    },
+    "disconnect_team": {
+      "title": "断开团队的 {{app}} 账号？",
+      "description": "使用团队账号的智能体会立即失去访问权限。",
+      "agents": "正在使用的智能体",
+      "no_agents": "没有智能体在用。",
+      "active_tasks": "进行中的运行：{{count}}",
+      "active_autopilots": "启用中的自动化：{{count}}",
+      "pending": "将被取消的待确认请求：{{count}}",
+      "cancel": "取消",
+      "confirm": "断开"
+    },
+    "disconnect_personal": {
+      "title": "断开你的 {{app}} 账号？",
+      "description": "你触发的运行将无法再使用它。之后可以重新连接。",
+      "cancel": "取消",
+      "confirm": "断开"
+    },
+    "detail": {
+      "team_title": "{{app}} · 团队账号",
+      "personal_title": "{{app}} · 我的账号",
+      "rules_description": "智能体可以通过这个账号做什么。智能体的权限级别只会让规则更严格。",
+      "rules_read_only": "只有工作区管理员可以修改团队账号的规则。",
+      "default": "默认：{{policy}}",
+      "activity_empty": "还没有调用。",
+      "activity_failed": "无法加载调用记录。"
+    },
+    "classes": {
+      "read": {
+        "label": "读取",
+        "description": "搜索、列出、获取"
+      },
+      "write": {
+        "label": "写入",
+        "description": "创建和更新内容"
+      },
+      "send": {
+        "label": "发送",
+        "description": "发邮件或消息、发布、邀请"
+      },
+      "delete": {
+        "label": "删除",
+        "description": "删除或归档"
+      },
+      "share": {
+        "label": "分享",
+        "description": "修改权限或对外分享"
+      }
+    },
+    "policies": {
+      "allow": "允许",
+      "confirm": "先确认",
+      "block": "禁止"
+    },
+    "outcomes": {
+      "ok": "已执行",
+      "error": "失败",
+      "blocked": "已拦截",
+      "pending": "等待确认",
+      "approved": "已批准",
+      "rejected": "已拒绝",
+      "rate_limited": "已限流"
+    },
+    "scopes": {
+      "team": "团队账号",
+      "personal": "触发者的账号"
+    },
+    "levels": {
+      "read": "只读",
+      "confirm_writes": "写操作先确认",
+      "write": "可写"
+    },
+    "request": {
+      "title_action": "{{agent}} 想执行 {{tool}}",
+      "title_connect": "{{agent}} 请你连接 {{app}}",
+      "pending_count_other": "{{count}} 个应用操作等待确认",
+      "waiting_for": "等待 {{name}} 确认",
+      "expires": "{{when}}过期",
+      "redacted": "只有 {{name}} 能看到详情。",
+      "arguments": "参数",
+      "edit": "编辑",
+      "invalid_json": "参数必须是 JSON 对象。",
+      "approve": "批准并执行",
+      "approve_all": "全部批准",
+      "reject": "拒绝",
+      "reject_reason": "原因（可选，智能体会看到）",
+      "connect": "连接 {{app}}",
+      "connected_continue": "我已连接",
+      "status": {
+        "approved": "已批准",
+        "rejected": "已拒绝",
+        "failed": "执行失败",
+        "expired": "已过期",
+        "cancelled": "已取消"
+      },
+      "toast_approved": "已批准，智能体将继续。",
+      "toast_rejected": "已拒绝，智能体会调整做法。",
+      "toast_failed": "无法记录你的决定。",
+      "not_connected": "请先连接账号。",
+      "connected_resumed": "{{app}} 已连接，智能体会从中断处继续。",
+      "rate_limited": "这个账号已达到每分钟调用上限，请一分钟后再批准。",
+      "rate_limited_some_other": "有 {{count}} 个请求触发了每分钟上限，请一分钟后再批准。",
+      "withdrawn": "你已无法使用这个智能体，请求已撤回。"
+    },
+    "tools": {
+      "tab": "工具",
+      "description": "工具的分类决定适用哪条规则。自动分类有误的工具可以在这里纠正，改动对本工作区里这个应用的所有账号生效。",
+      "read_only": "只有工作区管理员可以修改工具分类。",
+      "search": "搜索工具",
+      "empty": "没有匹配的工具。",
+      "auto": "自动（{{class}}）",
+      "truncated": "共 {{total}} 个，显示前 {{shown}} 个。搜索可缩小范围。"
+    },
+    "custom": {
+      "title": "指定应用名单",
+      "description": "智能体只能看到你选中的应用，其他应用也无法再连接账号。",
+      "selected_other": "已选 {{count}} 个应用",
+      "cancel": "取消",
+      "save": "保存名单",
+      "saved": "应用名单已保存",
+      "edit": "编辑名单",
+      "row_label": "允许的应用",
+      "row_description_other": "已允许 {{count}} 个应用"
+    },
+    "saved_access": {
+      "account": "旧操作限制仍在阻止此账号的部分操作。",
+      "agent": "此应用仍受旧的只读授权限制。",
+      "catalog": "旧应用名单仍在隐藏其他应用。",
+      "allow_actions": "允许全部操作",
+      "open_catalog": "显示全部应用",
+      "account_confirm": "使用此账号的智能体将能读取、写入、发送、删除和共享内容。旧操作限制将被替换。",
+      "agent_confirm": "此智能体将能通过此应用读取、写入、发送、删除和共享内容，仍受账号本身的限制。",
+      "catalog_confirm": "工作区将能选择所有可连接的应用。现有连接和智能体的应用分配保持不变。",
+      "cancel": "取消",
+      "admin_required": "请工作区管理员解除限制。",
+      "account_link": "此账号仍有旧操作限制。请在已连接应用中解除。"
+    }
   }
 }

@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "데스크톱에서 열기"
+  },
+  "desktop": {
+    "link_other_instance": "데스크톱 앱이 다른 Multica 인스턴스에 연결되어 있습니다.",
+    "link_workspace_unavailable": "데스크톱 앱에서 이 워크스페이스를 사용할 수 없습니다."
+  },
   "inline_run": {
     "label": "{{name}} 실행",
     "stop": "중지",
@@ -727,16 +734,17 @@
     "restart_failed": "현재 실행을 중지하지 못했습니다. 메시지는 보내지 않았습니다."
   },
   "reply": {
+    "recipients_changed": "답글 대상이 변경되었습니다. 받는 사람을 확인한 뒤 다시 보내 주세요.",
     "placeholder": "답글 남기기...",
     "annotations": {
-      "direct_reply": "답글",
-      "direct_comment": "댓글 게시",
-      "direct_target_deleted": "답글 대상이 삭제되었습니다. 다른 댓글을 선택하기 전에 의견을 복사하세요.",
-      "copy_note": "의견 복사",
-      "note_copied": "의견을 복사했습니다",
-      "note_copy_failed": "의견을 복사하지 못했습니다. 텍스트를 선택해 직접 복사하세요.",
+      "send_all": "모두 보내기",
+      "send_with_annotations_and_body": "저장된 주석 {{count}}개 및 초안 본문과 함께 보냅니다.",
+      "send_with_annotations": "저장된 주석 {{count}}개와 함께 보냅니다.",
+      "send_with_body": "초안 본문과 함께 보냅니다.",
       "confirm_add": "주석 추가",
       "save": "주석 저장",
+      "confirm_add_short": "추가",
+      "save_short": "저장",
       "add_comment": "댓글에 추가",
       "add": "답글에 추가",
       "note_label": "코멘트",
@@ -1463,6 +1471,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "댓글에서 보기",
     "locate_description": "설명에서 보기",
+    "copy_link": "최신 버전 링크 복사",
+    "not_found": "이 이슈에 “{{name}}” 산출물이 없습니다",
+    "link_load_failed": "“{{name}}”을(를) 열기 위한 산출물을 불러오지 못했습니다. 새로고침해서 다시 시도하세요.",
     "version_label": "버전 {{version}} / 전체 {{total}}개",
     "version_of": "v{{version}} / 전체 {{total}}개",
     "info_source": "출처",
@@ -1662,7 +1673,6 @@
       "brief_header": "이번 실행이 받은 워크플로 설명"
     },
     "detail": {
-      "follows_project": "(프로젝트 기준)",
       "card_title": "“{{workflow}}” · “{{project}}” 기준"
     },
     "list_separator": ", ",
@@ -1808,6 +1818,25 @@
       "row_actions": "{{name}} 작업",
       "empty_title": "아직 저장된 뷰가 없습니다",
       "empty_description": "태스크 목록에서 필터와 표시 방식을 맞춘 뒤 뷰로 저장하세요."
+    }
+  },
+  "app_calls": {
+    "section_title": "앱",
+    "chips_label": "이 실행에서 사용한 앱",
+    "calls_count_other": "{{count}}회 호출",
+    "more": "+{{count}}개 더",
+    "scope": {
+      "team": "팀 계정",
+      "personal": "개인 계정"
+    },
+    "outcome": {
+      "ok": "실행됨",
+      "error": "실패",
+      "blocked": "차단됨",
+      "pending": "대기 중",
+      "approved": "승인됨",
+      "rejected": "거절됨",
+      "rate_limited": "속도 제한"
     }
   }
 }

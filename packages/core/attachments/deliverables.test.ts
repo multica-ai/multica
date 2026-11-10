@@ -4,6 +4,7 @@ import type { Attachment } from "../types/attachment";
 import {
   collectDeliverableFiles,
   deliverableKey,
+  findDeliverableByName,
   findDeliverableVersion,
   mergeDeliverableSources,
 } from "./deliverables";
@@ -122,5 +123,52 @@ describe("mergeDeliverableSources", () => {
     const sources = mergeDeliverableSources([old, gone], [{...gone, deleted_at:"2026-02-01"}]);
     expect(sources.map((entry) => entry.id)).toEqual(["old"]);
     expect(collectDeliverableFiles(sources)[0]?.latest.id).toBe("image");
+  });
+});
+
+describe("findDeliverableByName", () => {
+  it("returns the file whose latest upload is the newest version", () => {
+    const v1 = attachment({ id: "a1", filename: "report.html", content_type: "text/html", created_at: "2026-09-20T10:00:00Z" });
+    const v2 = attachment({ id: "a2", filename: "report.html", content_type: "text/html", created_at: "2026-09-21T10:00:00Z" });
+    const other = attachment({ id: "b1", filename: "notes.md", created_at: "2026-09-22T10:00:00Z" });
+    const files = collectDeliverableFiles([{ id: "c1", attachments: [v1, other, v2] }]);
+    expect(findDeliverableByName(files, "report.html")?.latest.id).toBe("a2");
+  });
+
+  it("follows a new version as soon as it is in the timeline", () => {
+    const v1 = attachment({ id: "a1", filename: "report.html", content_type: "text/html", created_at: "2026-09-20T10:00:00Z" });
+    const v2 = attachment({ id: "a2", filename: "report.html", content_type: "text/html", created_at: "2026-09-21T10:00:00Z" });
+    const before = collectDeliverableFiles([{ id: "c1", attachments: [v1] }]);
+    const after = collectDeliverableFiles([
+      { id: "c1", attachments: [v1] },
+      { id: "c2", attachments: [v2] },
+    ]);
+    expect(findDeliverableByName(before, "report.html")?.latest.id).toBe("a1");
+    expect(findDeliverableByName(after, "report.html")?.latest.id).toBe("a2");
+  });
+
+  it("matches names with spaces and non-ASCII characters exactly", () => {
+    const spaced = attachment({ id: "s1", filename: "Q3 report final.html", content_type: "text/html" });
+    const cjk = attachment({ id: "z1", filename: "调研 报告.md" });
+    const files = collectDeliverableFiles([{ id: "c1", attachments: [spaced, cjk] }]);
+    expect(findDeliverableByName(files, "Q3 report final.html")?.latest.id).toBe("s1");
+    expect(findDeliverableByName(files, "调研 报告.md")?.latest.id).toBe("z1");
+    expect(findDeliverableByName(files, "  调研 报告.md ")?.latest.id).toBe("z1");
+    expect(findDeliverableByName(files, "调研报告.md")).toBeUndefined();
+  });
+
+  it("picks the most recent upload when one name has two content types", () => {
+    const plain = attachment({ id: "p1", filename: "a.md", content_type: "text/plain", created_at: "2026-09-20T10:00:00Z" });
+    const md = attachment({ id: "m1", filename: "a.md", content_type: "text/markdown", created_at: "2026-09-21T10:00:00Z" });
+    const files = collectDeliverableFiles([{ id: "c1", attachments: [plain, md] }]);
+    expect(files).toHaveLength(2);
+    expect(findDeliverableByName(files, "a.md")?.latest.id).toBe("m1");
+  });
+
+  it("returns undefined for unknown or empty names", () => {
+    const files = collectDeliverableFiles([{ id: "c1", attachments: [attachment({ id: "a1" })] }]);
+    expect(findDeliverableByName(files, "missing.html")).toBeUndefined();
+    expect(findDeliverableByName(files, "")).toBeUndefined();
+    expect(findDeliverableByName(files, "   ")).toBeUndefined();
   });
 });
