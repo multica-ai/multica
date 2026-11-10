@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -76,7 +77,7 @@ func TestSelfHostSetupHealthResponses(t *testing.T) {
 			}))
 			defer server.Close()
 
-			result, err := persistSelfHostConfigIfReachable(server.URL, "https://new.example", profile, probeServer)
+			result, err := persistSelfHostConfigIfReachable(server.URL, "https://new.example", profile, existing, probeServer)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -203,7 +204,7 @@ func TestPersistSelfHostConfigIfReachable(t *testing.T) {
 		}
 
 		proceed, err := persistSelfHostConfigIfReachable(
-			"https://api.new.example", "https://new.example", "",
+			"https://api.new.example", "https://new.example", "", existing,
 			func(string) serverProbeResult { return serverProbeResult{} },
 		)
 		if err != nil {
@@ -229,7 +230,7 @@ func TestPersistSelfHostConfigIfReachable(t *testing.T) {
 		redirectTestHome(t, t.TempDir())
 
 		proceed, err := persistSelfHostConfigIfReachable(
-			"https://api.new.example", "https://new.example", "",
+			"https://api.new.example", "https://new.example", "", cli.CLIConfig{},
 			func(string) serverProbeResult { return serverProbeResult{statusCode: http.StatusOK, healthy: true} },
 		)
 		if err != nil {
@@ -606,5 +607,182 @@ func TestSetupCommandsFailClosedInTaskContext(t *testing.T) {
 	}
 	if string(after) != string(ownerBytes) {
 		t.Fatalf("owner config content changed: got %q", after)
+	}
+}
+
+func TestSetupKeepsProfileOnlyForTheSameBackend(t *testing.T) {
+	for _, tc := range []struct {
+		target string
+		keep   bool
+	}{
+		{"https://example.invalid/team/", true},
+		{"https://example.invalid/another", false},
+		{"https://example.invalid:8443/team", false},
+		{"http://example.invalid/team", false},
+		{"https://other.invalid/team", false},
+	} {
+		t.Run(tc.target, func(t *testing.T) {
+			redirectTestHome(t, t.TempDir())
+			old := cli.CLIConfig{ServerURL: "https://example.invalid/team", Token: "test-only", WorkspaceID: "w", DeviceName: "workstation", PollInterval: "1m"}
+			if err := cli.SaveCLIConfigForProfile(old, "dev"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := persistSelfHostConfigIfReachable(tc.target, "https://app.invalid", "dev", old, func(string) serverProbeResult { return serverProbeResult{statusCode: http.StatusOK, healthy: true} }); err != nil {
+				t.Fatal(err)
+			}
+			got, err := cli.LoadCLIConfigForProfile("dev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.keep && (got.Token != old.Token || got.WorkspaceID != old.WorkspaceID || got.DeviceName != old.DeviceName || got.PollInterval != old.PollInterval) {
+				t.Fatal("same backend lost profile settings")
+			}
+			if !tc.keep && (got.Token != "" || got.WorkspaceID != "" || got.DeviceName != "") {
+				t.Fatal("different backend inherited profile")
+			}
+		})
+	}
+}
+
+func TestSetupReusesAuthenticatedSession(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	for _, status := range []int{http.StatusOK, http.StatusServiceUnavailable} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/workspaces" || r.Header.Get("Authorization") != "Bearer test-only" {
+				t.Error("unexpected authentication path")
+			}
+			w.WriteHeader(status)
+			if status == http.StatusOK {
+				_, _ = w.Write([]byte(`[{"id":"chosen","name":"fixture"}]`))
+			}
+		}))
+		cfg := cli.CLIConfig{ServerURL: srv.URL, Token: "test-only", WorkspaceID: "chosen", DeviceName: "fixture"}
+		if err := cli.SaveCLIConfigForProfile(cfg, "dev"); err != nil {
+			t.Fatal(err)
+		}
+		cmd := &cobra.Command{}
+		cmd.SetContext(context.Background())
+		cmd.Flags().String("profile", "dev", "")
+		err := authenticateSetupProfile(cmd, nil)
+		srv.Close()
+		if (err != nil) != (status != http.StatusOK) {
+			t.Fatalf("status %d: %v", status, err)
+		}
+		got, err := cli.LoadCLIConfigForProfile("dev")
+		if err != nil || got.Token != cfg.Token || got.WorkspaceID != cfg.WorkspaceID {
+			t.Fatal("existing session lost")
+		}
+	}
+}
+
+func TestSetupDoesNotRestorePreviousProfileAfterConcurrentSignIn(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	const profile = "staging"
+	next := cli.CLIConfig{ServerURL: "https://new.example.invalid", Token: "new-fixture", DeviceName: "new-device"}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := cli.SaveCLIConfigForProfile(next, profile); err != nil {
+			t.Error(err)
+		}
+		_, _ = w.Write([]byte(`[{"id":"old-workspace"}]`))
+	}))
+	defer srv.Close()
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{ServerURL: srv.URL, Token: "old-fixture"}, profile); err != nil {
+		t.Fatal(err)
+	}
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	cmd.Flags().String("profile", profile, "")
+	if err := authenticateSetupProfile(cmd, nil); err == nil {
+		t.Fatal("expected changed-profile error")
+	}
+	got, err := cli.LoadCLIConfigForProfile(profile)
+	if err != nil || got.ServerURL != next.ServerURL || got.Token != next.Token || got.DeviceName != next.DeviceName {
+		t.Fatal("new login was overwritten")
+	}
+}
+
+func TestSetupRejectsProfileChangedDuringConfirmationOrProbe(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	const profile = "setup-change"
+	old := cli.CLIConfig{ServerURL: "https://a.invalid", AppURL: "https://a.invalid", Token: "old-fixture"}
+	newLogin := cli.CLIConfig{ServerURL: "https://b.invalid", AppURL: "https://b.invalid", Token: "new-fixture", DeviceName: "new-device"}
+	for _, stage := range []string{"while confirming", "during health check"} {
+		t.Run(stage, func(t *testing.T) {
+			if err := cli.SaveCLIConfigForProfile(old, profile); err != nil {
+				t.Fatal(err)
+			}
+			if stage == "while confirming" {
+				if err := cli.SaveCLIConfigForProfile(newLogin, profile); err != nil {
+					t.Fatal(err)
+				}
+			}
+			ok, err := persistSelfHostConfigIfReachable(old.ServerURL, old.AppURL, profile, old, func(string) serverProbeResult {
+				if stage == "during health check" {
+					if err := cli.SaveCLIConfigForProfile(newLogin, profile); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return serverProbeResult{statusCode: http.StatusOK, healthy: true}
+			})
+			if err == nil || !strings.Contains(err.Error(), "profile changed") {
+				t.Fatalf("setup accepted stale confirmation: %v, %v", ok, err)
+			}
+			got, err := cli.LoadCLIConfigForProfile(profile)
+			if err != nil || got.ServerURL != newLogin.ServerURL || got.Token != newLogin.Token || got.DeviceName != newLogin.DeviceName {
+				t.Fatal("setup replaced a concurrently changed login")
+			}
+		})
+	}
+}
+
+func TestSetupDoesNotRewriteAnUnchangedTarget(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	cfg := cli.CLIConfig{ServerURL: "https://example.test", AppURL: "https://app.example.test", Token: "fixture"}
+	if err := cli.SaveCLIConfigForProfile(cfg, "dev"); err != nil {
+		t.Fatal(err)
+	}
+	path, err := cli.CLIConfigPathForProfile("dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := persistSelfHostConfigIfReachable(cfg.ServerURL+"/", cfg.AppURL+"/", "dev", cfg, func(string) serverProbeResult { return serverProbeResult{statusCode: http.StatusOK, healthy: true} })
+	if err != nil || !ok.healthy {
+		t.Fatalf("setup = %v, %v", ok, err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("unchanged profile was rewritten")
+	}
+}
+
+func TestSetupSavedLoginNeverFollowsRedirect(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("setup followed a redirect when verifying the saved login")
+		_, _ = w.Write([]byte("[]"))
+	}))
+	defer destination.Close()
+	source := httptest.NewServer(http.RedirectHandler(destination.URL+"/other", http.StatusFound))
+	defer source.Close()
+	cfg := cli.CLIConfig{ServerURL: source.URL, Token: "private-fixture"}
+	if err := cli.SaveCLIConfigForProfile(cfg, "dev"); err != nil {
+		t.Fatal(err)
+	}
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	cmd.Flags().String("profile", "dev", "")
+	if err := authenticateSetupProfile(cmd, nil); err == nil {
+		t.Fatal("expected redirected login verification to fail")
+	}
+	current, err := cli.LoadCLIConfigForProfile("dev")
+	if err != nil || current.ServerURL != cfg.ServerURL || current.Token != cfg.Token {
+		t.Fatal("redirected login verification changed the profile")
 	}
 }

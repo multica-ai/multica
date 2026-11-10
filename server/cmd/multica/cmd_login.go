@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -81,6 +83,47 @@ func runLogin(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "\n→ Run 'multica daemon start' to start your local agent runtime.\n")
 	return nil
+}
+
+func authenticateSetupProfile(cmd *cobra.Command, args []string) error {
+	profile := resolveProfile(cmd)
+	cfg, err := cli.LoadCLIConfigForProfile(profile)
+	if err != nil {
+		return err
+	}
+	if cfg.Token == "" {
+		return runLogin(cmd, args)
+	}
+
+	// Verify without saving a copy of the profile read before the network
+	// request: another setup or login may have switched deployments meanwhile.
+	client := cli.NewAPIClient(normalizeAPIBaseURL(cfg.ServerURL), "", cfg.Token)
+	// Session verification is scoped to this exact backend. Go normally
+	// forwards Authorization across some redirects, including a port change.
+	client.HTTPClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return errors.New("refusing to redirect a saved login credential")
+	}
+	ctx, cancel := cli.APIContext(cmd.Context())
+	defer cancel()
+	var workspaces []struct {
+		ID string `json:"id"`
+	}
+	verifyErr := client.GetJSON(ctx, "/api/workspaces", &workspaces)
+	current, err := cli.LoadCLIConfigForProfile(profile)
+	if err != nil {
+		return err
+	}
+	if current.ServerURL != cfg.ServerURL || current.AppURL != cfg.AppURL || current.Token != cfg.Token {
+		return fmt.Errorf("profile changed while checking the existing login; rerun setup")
+	}
+	if verifyErr == nil {
+		return nil
+	}
+	var httpErr *cli.HTTPError
+	if !errors.As(verifyErr, &httpErr) || httpErr.StatusCode != http.StatusUnauthorized {
+		return fmt.Errorf("verify existing login: %w", verifyErr)
+	}
+	return runLogin(cmd, args)
 }
 
 func autoWatchWorkspaces(cmd *cobra.Command) error {
