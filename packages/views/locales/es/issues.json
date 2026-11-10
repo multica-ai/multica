@@ -443,7 +443,12 @@
     "empty_grouping": "Ninguna tarea coincide",
     "no_value": "Sin valor",
     "ordered_by": "Tablero ordenado por {{field}}",
-    "manual_reorder_hint": "Cambia a la ordenación Manual para reorganizar las tareas dentro de una columna."
+    "manual_reorder_hint": "Cambia a la ordenación Manual para reorganizar las tareas dentro de una columna.",
+    "sub_issue_count_one": "{{count}} subtarea",
+    "sub_issue_count_other": "{{count}} subtareas",
+    "filter_to_status": "Filtrar por este estado",
+    "outside_workflow": "Fuera del flujo de trabajo de este tablero",
+    "workflow_columns_note": "Las columnas vienen del flujo de trabajo del tablero; las vistas fuera de un proyecto usan Predeterminado."
   },
   "detail": {
     "not_found": "Esta tarea no existe o se ha eliminado de este espacio de trabajo.",
