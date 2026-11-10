@@ -383,11 +383,12 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(parentCtx, repoCheckoutTimeout)
 	defer cancel()
 	client := &http.Client{}
 	checkoutURL := fmt.Sprintf("http://127.0.0.1:%s/repo/checkout", daemonPort)
 	var body []byte
+	busyRetries := 0
 	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, checkoutURL, bytes.NewReader(data))
 		if err != nil {
@@ -408,12 +409,16 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("close daemon checkout response: %w", closeErr)
 		}
 		if resp.StatusCode == http.StatusServiceUnavailable && resp.Header.Get("X-Multica-Retryable") == "repo-busy" {
+			busyRetries++
+			if busyRetries >= repoCheckoutBusyRetryLimit {
+				return fmt.Errorf("repository is busy on the daemon; gave up after %d retries — another checkout is still holding it", busyRetries)
+			}
 			delay := repoCheckoutRetryDelay(resp.Header.Get("Retry-After"), time.Now())
 			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return fmt.Errorf("connect to daemon: %w", context.Cause(ctx))
+				return fmt.Errorf("repository is busy on the daemon and did not become available within %s", repoCheckoutTimeout)
 			case <-timer.C:
 				continue
 			}
@@ -491,17 +496,40 @@ func repoCheckoutFetchWarning(result repoCheckoutResult) string {
 		"Fetch error: " + result.FetchError
 }
 
+const (
+	repoCheckoutTimeout = 5 * time.Minute
+	// maxRepoCheckoutBusyRetries is how many repo-busy replies checkout waits
+	// through. The daemon's usual Retry-After is 2s, so 150 keeps the old
+	// 5-minute budget (150 x 2s). Retry-After: 0 falls back to 1s, which caps
+	// that worst case at 150s instead of a tight loop.
+	maxRepoCheckoutBusyRetries = 150
+)
+
+// repoCheckoutBusyRetryLimit is how many repo-busy responses checkout waits
+// through before giving up. Tests lower it; production keeps
+// maxRepoCheckoutBusyRetries.
+var repoCheckoutBusyRetryLimit = maxRepoCheckoutBusyRetries
+
 func repoCheckoutRetryDelay(value string, now time.Time) time.Duration {
 	const (
 		defaultDelay = time.Second
 		maxDelay     = 30 * time.Second
 	)
 	value = strings.TrimSpace(value)
-	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
+	// A zero or negative delay is a tight loop: the daemon sends Retry-After: 0
+	// while another checkout still holds the repository. Wait the default instead.
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds <= 0 {
+			return defaultDelay
+		}
 		return min(time.Duration(seconds)*time.Second, maxDelay)
 	}
 	if retryAt, err := http.ParseTime(value); err == nil {
-		return min(max(retryAt.Sub(now), time.Duration(0)), maxDelay)
+		delay := retryAt.Sub(now)
+		if delay <= 0 {
+			return defaultDelay
+		}
+		return min(delay, maxDelay)
 	}
 	return defaultDelay
 }
