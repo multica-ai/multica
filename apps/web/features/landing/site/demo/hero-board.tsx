@@ -239,7 +239,7 @@ export function HeroBoard({ workflow, label, onLoop }: { workflow: Workflow; lab
       ref={windowRef}
       role="img"
       aria-label={label}
-      className="absolute inset-0 overflow-hidden rounded-[12px] border border-site-line-strong bg-app-shell shadow-site-float"
+      className="absolute inset-0 overflow-hidden rounded-xl border border-site-line-strong bg-app-shell shadow-site-float"
     >
       <div
         aria-hidden

@@ -316,7 +316,7 @@ export function ConnectVisual() {
       />
       <Field label="Region">
         <div className="flex rounded-md bg-muted p-0.5 text-caption">
-          <span className="flex-1 rounded-[5px] bg-background py-0.5 text-center font-medium shadow-xs">Global (qoder.com)</span>
+          <span className="flex-1 rounded-sm bg-background py-0.5 text-center font-medium shadow-xs">Global (qoder.com)</span>
           <span className="flex-1 py-0.5 text-center text-muted-foreground">China</span>
         </div>
       </Field>

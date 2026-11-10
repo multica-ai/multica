@@ -49,7 +49,7 @@ function StatusBar() {
             <span key={h} className="w-[3px] rounded-[1px] bg-foreground" style={{ height: h }} />
           ))}
         </span>
-        <span className="ml-1 h-[11px] w-[22px] rounded-[3px] border border-foreground/40 p-px">
+        <span className="ml-1 h-[11px] w-[22px] rounded-xs border border-foreground/40 p-px">
           <span className="block h-full w-3/4 rounded-[1.5px] bg-foreground" />
         </span>
       </span>

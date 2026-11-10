@@ -39,7 +39,7 @@ function Message({ actor, bot, time, children }: { actor: Actor; bot?: boolean; 
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 text-caption">
           <span className="font-semibold">{bot ? BOT.name : actor.name}</span>
-          {bot ? <span className="rounded bg-muted px-1 text-micro font-medium text-muted-foreground">App</span> : null}
+          {bot ? <span className="rounded-sm bg-muted px-1 text-micro font-medium text-muted-foreground">App</span> : null}
           <span className="text-muted-foreground tabular-nums">{time}</span>
         </p>
         <div className="mt-0.5 text-label leading-relaxed">{children}</div>
@@ -49,7 +49,7 @@ function Message({ actor, bot, time, children }: { actor: Actor; bot?: boolean; 
 }
 
 function Mention({ children }: { children: ReactNode }) {
-  return <span className="rounded bg-brand/10 px-0.5 font-medium text-brand">{children}</span>;
+  return <span className="rounded-sm bg-brand/10 px-0.5 font-medium text-brand">{children}</span>;
 }
 
 function Slash({ children }: { children: ReactNode }) {

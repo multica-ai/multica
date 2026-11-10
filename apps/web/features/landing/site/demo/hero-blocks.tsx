@@ -34,7 +34,7 @@ export function Checklist({ title, items }: { title: string; items: string[] }) 
             className="flex items-center gap-2 animate-in fade-in slide-in-from-left-1 duration-300 fill-mode-both motion-reduce:animate-none"
             style={{ animationDelay: `${200 + index * 180}ms` }}
           >
-            <span className="flex size-3.5 shrink-0 items-center justify-center rounded-[4px] border border-border bg-background" />
+            <span className="flex size-3.5 shrink-0 items-center justify-center rounded-sm border border-border bg-background" />
             {item}
           </li>
         ))}
@@ -231,7 +231,7 @@ export function ReportCluster({ reports }: { reports: { source: keyof typeof SOU
             className="flex items-center gap-2 rounded-md bg-background px-2 py-1.5 text-caption shadow-[var(--surface-shadow)] animate-in fade-in slide-in-from-bottom-1 duration-300 fill-mode-both motion-reduce:animate-none"
             style={{ animationDelay: `${200 + index * 200}ms` }}
           >
-            <span className={cn("flex size-4 shrink-0 items-center justify-center rounded-[4px] text-white", SOURCE_TONE[report.source])}>
+            <span className={cn("flex size-4 shrink-0 items-center justify-center rounded-sm text-white", SOURCE_TONE[report.source])}>
               <MessageCircle className="size-2.5" />
             </span>
             <span className="min-w-0 flex-1 truncate">“{report.quote}”</span>
