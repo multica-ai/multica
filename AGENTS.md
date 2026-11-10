@@ -41,7 +41,7 @@ Run these from the repository root:
 | Scope | Checks |
 | --- | --- |
 | Frontend excluding mobile | `pnpm typecheck`, `pnpm lint`, `pnpm test` |
-| `.github/` or `scripts/` | `pnpm test:scripts` (every `scripts/**/*.test.mjs`, including the assertions on CI configuration), plus `bash scripts/<name>.test.sh` for a shell script you changed |
+| `.github/` or `scripts/` | `pnpm test:scripts` (every `scripts/**/*.test.mjs`, including CI path selection and gates), plus `bash scripts/<name>.test.sh` for a shell script you changed |
 | Go backend | `make test` |
 | End-to-end | `pnpm exec playwright test` |
 | Combined web/backend verification | `make check` |
