@@ -800,7 +800,7 @@ type searchResult struct {
 // case-insensitive LIKE semantics as the legacy query. The pipeline deliberately
 // trades the title, description, and comment content GIN fast paths for one
 // predictable pass over each relation within the selected workspace.
-func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, terminalStatusKeys []string, projectID pgtype.UUID) (string, []any) {
+func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, terminalStatusKeys []string, projectID pgtype.UUID, hiddenProjectIDs ...pgtype.UUID) (string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
 	for i, term := range terms {
@@ -836,6 +836,11 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		// Negate only known terminal keys so an unknown legacy key remains
 		// searchable instead of disappearing from the default result set.
 		terminalStatusesParam = nextArg(terminalStatusKeys)
+	}
+
+	hiddenProjectsParam := ""
+	if len(hiddenProjectIDs) > 0 {
+		hiddenProjectsParam = nextArg(hiddenProjectIDs)
 	}
 
 	// Bound before limit/offset so the handler's args[len-2]/args[len-1] fill
@@ -892,6 +897,11 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	}
 	if terminalStatusesParam != "" {
 		issueWhere += fmt.Sprintf(" AND NOT (i.status = ANY(%s::text[]))", terminalStatusesParam)
+	}
+	// Comment matches only reach the result through issue_matches, so this
+	// one predicate also drops comments on hidden issues.
+	if hiddenProjectsParam != "" {
+		issueWhere += " AND " + hiddenProjectPredicate("i.project_id", hiddenProjectsParam)
 	}
 	// PostgreSQL otherwise inlines scalar LATERAL subqueries and recomputes the
 	// LOWER expressions for every flag. The OFFSET 0 fences cache the normalized
@@ -1191,7 +1201,11 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 		terminalStatusKeys = resolvedKeys
 	}
 
-	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, terminalStatusKeys, projectFilter)
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(wsUUID))
+	if !ok {
+		return
+	}
+	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, terminalStatusKeys, projectFilter, hidden.Param()...)
 	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
 	args[3] = wsUUID
 	args[len(args)-2] = limit
@@ -1416,6 +1430,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to resolve status categories")
 			return
 		}
+		openHidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+		if !ok {
+			return
+		}
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
 			WorkspaceID:        wsUUID,
 			TerminalStatusKeys: terminalStatusKeys,
@@ -1427,6 +1445,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			InvolvesUserID:     involvesUserFilter,
 			MetadataFilter:     metadataFilter,
 			PropertiesFilter:   openPropertiesFilter,
+			HiddenProjectIds:   openHidden.Param(),
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -1583,6 +1602,13 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	addArg := func(v any) string {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
+	}
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(wsUUID))
+	if !ok {
+		return
+	}
+	if ids := hidden.Param(); ids != nil {
+		where = append(where, hiddenProjectPredicate("i.project_id", addArg(ids)))
 	}
 	if len(statusCategoriesFilter) > 0 {
 		// Expanded to concrete status keys rather than filtered through
@@ -2074,6 +2100,13 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	addArg := func(v any) string {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
+	}
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(wsUUID))
+	if !ok {
+		return
+	}
+	if ids := hidden.Param(); ids != nil {
+		where = append(where, hiddenProjectPredicate("i.project_id", addArg(ids)))
 	}
 
 	statuses := splitCommaParam(r.URL.Query().Get("statuses"))
@@ -2568,6 +2601,11 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
 		return
 	}
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(issue.WorkspaceID))
+	if !ok {
+		return
+	}
+	children = filterVisibleIssues(hidden, children)
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	ids := make([]pgtype.UUID, len(children))
 	for i, child := range children {
@@ -2654,6 +2692,11 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
 		return
 	}
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(wsUUID))
+	if !ok {
+		return
+	}
+	children = filterVisibleIssues(hidden, children)
 	prefix := h.getIssuePrefix(r.Context(), wsUUID)
 	ids := make([]pgtype.UUID, len(children))
 	for i, child := range children {
@@ -2930,6 +2973,9 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "project not found")
 			return
 		}
+		if !h.requireProjectVisible(w, r, uuidToString(wsUUID), pid, http.StatusBadRequest, "project not found") {
+			return
+		}
 		projectUUID = pid
 	}
 
@@ -2951,12 +2997,19 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
 			return
 		}
+		if !h.requireProjectVisible(w, r, uuidToString(wsUUID), parent.ProjectID, http.StatusBadRequest, "parent issue not found in this workspace") {
+			return
+		}
 		parentIssueUUID = pid
 	}
 
 	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs)
 	if err != nil {
 		if writeIssueLimitReached(w, err) {
+			return
+		}
+		if errors.Is(err, service.ErrProjectAccessDenied) {
+			h.writeDispatchBlocked(w, http.StatusForbidden, ReasonProjectAccessBlocked)
 			return
 		}
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -3341,6 +3394,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		projectID = id
 	}
+	// MUL-8472: an issue can only be filed into, or under a parent in, a
+	// project the caller can see.
+	if !h.requireProjectVisible(w, r, workspaceID, projectID, http.StatusBadRequest, "project not found in this workspace") {
+		return
+	}
+	if !h.requireIssueIDVisible(w, r, workspaceID, parentIssueID, http.StatusBadRequest, "parent issue not found in this workspace") {
+		return
+	}
 
 	// Project workflow (MUL-7420). A new issue in a project on a named
 	// workflow must start on a status the workflow lists, and a column the
@@ -3354,6 +3415,9 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}); err == nil {
 			workflowProjectID = parent.ProjectID
 		}
+	}
+	if !h.requireAssigneeCanAccessProject(w, r, wsUUID, assigneeType, assigneeID, workflowProjectID) {
+		return
 	}
 	createWorkflow, createWorkflowProject, err := issueworkflow.ForProject(r.Context(), h.Queries, wsUUID, workflowProjectID)
 	if err != nil {
@@ -4016,11 +4080,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// Validate parent exists in the same workspace.
-			if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			newParent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 				ID:          newParentID,
 				WorkspaceID: prevIssue.WorkspaceID,
-			}); err != nil {
+			})
+			if err != nil {
 				writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
+				return
+			}
+			if !h.requireProjectVisible(w, r, uuidToString(prevIssue.WorkspaceID), newParent.ProjectID, http.StatusBadRequest, "parent issue not found in this workspace") {
 				return
 			}
 			// Cycle detection: walk up from the new parent to ensure we don't reach this issue.
@@ -4058,6 +4126,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				writeError(w, http.StatusBadRequest, "project not found in this workspace")
+				return
+			}
+			if !h.requireProjectVisible(w, r, uuidToString(prevIssue.WorkspaceID), projectUUID, http.StatusBadRequest, "project not found in this workspace") {
 				return
 			}
 			params.ProjectID = projectUUID
@@ -4111,6 +4182,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if touchedType || touchedID || handoff != nil {
 		if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
 			writeError(w, status, msg)
+			return
+		}
+	}
+	if _, projectTouched := rawFields["project_id"]; touchedType || touchedID || handoff != nil || projectTouched {
+		if !h.requireAssigneeCanAccessProject(w, r, prevIssue.WorkspaceID, params.AssigneeType, params.AssigneeID, params.ProjectID) {
 			return
 		}
 	}
@@ -4776,6 +4852,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "project not found in this workspace")
 			return
 		}
+		if !h.requireProjectVisible(w, r, uuidToString(wsUUID), projectUUID, http.StatusBadRequest, "project not found in this workspace") {
+			return
+		}
 		batchProjectID = projectUUID
 	}
 
@@ -4787,6 +4866,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// once after the loop against the final state (MUL-4155), not per child
 	// against a mid-batch snapshot.
 	var changedParents []pgtype.UUID
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(wsUUID))
+	if !ok {
+		return
+	}
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
@@ -4796,7 +4879,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			ID:          issueUUID,
 			WorkspaceID: wsUUID,
 		})
-		if err != nil {
+		if err != nil || !hidden.CanSeeProject(prevIssue.ProjectID) {
 			continue
 		}
 
@@ -4879,10 +4962,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				// Validate parent exists in the same workspace.
-				if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+				newParent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 					ID:          newParentID,
 					WorkspaceID: prevIssue.WorkspaceID,
-				}); err != nil {
+				})
+				if err != nil || !hidden.CanSeeProject(newParent.ProjectID) {
 					continue
 				}
 				// Cycle detection: walk up from the new parent to ensure we don't reach this issue.
@@ -5083,6 +5167,10 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 	}
 	issues := make([]db.Issue, 0, len(req.IssueIDs))
 	excludedIDs := make([]pgtype.UUID, 0, len(req.IssueIDs))
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
 	seenIssueIDs := make(map[pgtype.UUID]struct{}, len(req.IssueIDs))
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
@@ -5096,7 +5184,7 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 			ID:          issueUUID,
 			WorkspaceID: wsUUID,
 		})
-		if err != nil {
+		if err != nil || !hidden.CanSeeProject(issue.ProjectID) {
 			continue
 		}
 

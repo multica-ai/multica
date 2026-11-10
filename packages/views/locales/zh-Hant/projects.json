@@ -206,5 +206,27 @@
       "issue_pricing": "定價頁對比表",
       "issue_blog": "部落格列表分頁"
     }
+  },
+  "access": {
+    "label": "存取權限",
+    "title": "{{title}}的存取權限",
+    "description": "控制誰能查看專案及其中的任務、評論和附件。",
+    "workspace": "整個工作區",
+    "private": "僅專案成員",
+    "members_count": "專案成員 · {{count}}",
+    "add": "新增工作區成員",
+    "search": "搜尋姓名或電子郵件...",
+    "no_members": "沒有相符的成員",
+    "no_selected": "尚無專案成員",
+    "admin_notice": "工作區 owner 和 admin 一律可以存取。",
+    "you": "你",
+    "remove": "移除{{name}}",
+    "failed": "無法儲存存取權限。",
+    "load_failed": "無法載入專案成員。",
+    "publish_title": "讓整個工作區都能看到專案？",
+    "publish_description": "工作區所有成員都將能查看這個專案及其中的任務、評論和附件。",
+    "disabled": "此伺服器尚未啟用私人專案。",
+    "done": "完成",
+    "retry": "重試"
   }
 }
