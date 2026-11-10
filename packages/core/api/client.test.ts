@@ -328,6 +328,7 @@ describe("ApiClient issue environments response schema", () => {
     const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
     expect(result.environments).toEqual([{
       ...validEnvironment,
+      repo: "",
       excerpt: "",
       controllable: false,
       can_control: false,
@@ -381,7 +382,7 @@ describe("ApiClient issue environments response schema", () => {
     stubEnvironments({ environments: "nope" });
     await expect(
       new ApiClient("https://api.example.test").listIssueEnvironments("issue-1"),
-    ).resolves.toEqual({ environments: [], configs: [], pending_starts: [] });
+    ).resolves.toEqual({ environments: [], configs: [], pending_starts: [], failed_starts: [] });
   });
 });
 
@@ -3502,8 +3503,9 @@ describe("ApiClient issue environments", () => {
     const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
     expect(result.configs).toEqual([]);
     expect(result.pending_starts).toEqual([]);
+    expect(result.failed_starts).toEqual([]);
     expect(result.environments[0]).toMatchObject({
-      excerpt: "", controllable: false, can_control: false, pending_action: null, last_action: null, origin: null,
+      repo: "", excerpt: "", controllable: false, can_control: false, pending_action: null, last_action: null, origin: null,
     });
   });
 
@@ -3512,11 +3514,13 @@ describe("ApiClient issue environments", () => {
       environments: [{ ...env, controllable: true, can_control: true, pending_action: { id: "cmd-1", action: "teleport", created_at: "x" } }],
       configs: [{ runtime_id: "rt-1", task_id: "task-1", reported_at: "x", environments: [{ repo: "app", name: "web" }] }, { bad: true }],
       pending_starts: [{ id: "cmd-2", action: "start", status: "queued", created_at: "x" }],
+      failed_starts: [{ id: "cmd-4", action: "start", status: "expired", task_id: "task-1", created_at: "x" }, { id: "cmd-5" }],
     });
     const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
     expect(result.environments[0]).toMatchObject({ controllable: true, can_control: true, pending_action: null });
     expect(result.configs).toEqual([{ runtime_id: "rt-1", task_id: "task-1", reported_at: "x", can_control: false, environments: [{ repo: "app", name: "web", label: "", start: "" }] }]);
     expect(result.pending_starts[0]).toMatchObject({ id: "cmd-2", status: "failed" });
+    expect(result.failed_starts).toEqual([expect.objectContaining({ id: "cmd-4", status: "expired", task_id: "task-1" })]);
   });
 
   it("posts a start with the run and environment it names", async () => {

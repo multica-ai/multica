@@ -40,9 +40,11 @@ const (
 
 // IssueEnvironmentReport is one environment in a daemon's per-task snapshot.
 type IssueEnvironmentReport struct {
-	Key       string     `json:"key"`
-	Source    string     `json:"source"`
-	Kind      string     `json:"kind"`
+	Key    string `json:"key"`
+	Source string `json:"source"`
+	Kind   string `json:"kind"`
+	// Repo is the checkout directory a declared environment runs from.
+	Repo      string     `json:"repo,omitempty"`
 	Name      string     `json:"name"`
 	Label     string     `json:"label"`
 	URL       string     `json:"url"`
@@ -62,16 +64,17 @@ type ReportTaskEnvironmentsRequest struct {
 }
 
 type IssueEnvironmentResponse struct {
-	ID           string  `json:"id"`
-	IssueID      string  `json:"issue_id"`
-	TaskID       string  `json:"task_id"`
-	RuntimeID    *string `json:"runtime_id"`
-	AgentID      *string `json:"agent_id"`
+	ID        string  `json:"id"`
+	IssueID   string  `json:"issue_id"`
+	TaskID    string  `json:"task_id"`
+	RuntimeID *string `json:"runtime_id"`
+	AgentID   *string `json:"agent_id"`
 	// LocalKey is how the daemon that reported the environment names it, so
 	// Desktop on that machine can ask the daemon to act on it.
 	LocalKey     string  `json:"local_key"`
 	Source       string  `json:"source"`
 	Kind         string  `json:"kind"`
+	Repo         string  `json:"repo"`
 	Name         string  `json:"name"`
 	Label        string  `json:"label"`
 	URL          string  `json:"url"`
@@ -100,6 +103,9 @@ type IssueEnvironmentsResponse struct {
 	Configs []IssueEnvironmentConfigResponse `json:"configs"`
 	// PendingStarts are sidebar starts whose environment has not appeared yet.
 	PendingStarts []IssueEnvironmentActionResponse `json:"pending_starts"`
+	// FailedStarts are recent sidebar starts that failed or were never
+	// answered, and have not been started again since.
+	FailedStarts []IssueEnvironmentActionResponse `json:"failed_starts"`
 }
 
 // validateIssueEnvironmentReport normalizes one reported environment and
@@ -109,6 +115,10 @@ func validateIssueEnvironmentReport(env *IssueEnvironmentReport, now time.Time) 
 	env.Name = strings.TrimSpace(env.Name)
 	env.Label = strings.TrimSpace(env.Label)
 	env.URL = strings.TrimSpace(env.URL)
+	env.Repo = strings.TrimSpace(env.Repo)
+	if env.Source != "config" {
+		env.Repo = ""
+	}
 	// A daemon older than kinds sends none, and one newer than this server may
 	// send a kind it does not know; both are shown as a server.
 	if env.Kind != issueEnvironmentKindApp {
@@ -125,6 +135,8 @@ func validateIssueEnvironmentReport(env *IssueEnvironmentReport, now time.Time) 
 		return "name must be 1-64 characters"
 	case utf8.RuneCountInString(env.Label) > 120:
 		return "label must be at most 120 characters"
+	case len(env.Repo) > maxDeclaredEnvironmentRepoLen:
+		return "repo too long"
 	case env.Port < 0 || env.Port > 65535:
 		return "port out of range"
 	}
@@ -222,6 +234,7 @@ func (h *Handler) ReportTaskEnvironments(w http.ResponseWriter, r *http.Request)
 			LocalKey:     env.Key,
 			Source:       env.Source,
 			Kind:         env.Kind,
+			Repo:         env.Repo,
 			Name:         env.Name,
 			Label:        env.Label,
 			Url:          env.URL,
@@ -243,7 +256,7 @@ func (h *Handler) ReportTaskEnvironments(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		prev, wasOpen := open[env.Key]
-		if !wasOpen || prev.State != env.State || prev.Kind != env.Kind || prev.Url != env.URL || prev.Label != env.Label || prev.Detail != env.Detail ||
+		if !wasOpen || prev.State != env.State || prev.Kind != env.Kind || prev.Repo != env.Repo || prev.Url != env.URL || prev.Label != env.Label || prev.Detail != env.Detail ||
 			prev.Excerpt != env.Excerpt || prev.Controllable != req.Controllable {
 			changed = true
 		}
@@ -315,7 +328,10 @@ func (h *Handler) ListIssueEnvironments(w http.ResponseWriter, r *http.Request) 
 	pending := make(map[string]*IssueEnvironmentActionResponse)
 	last := make(map[string]*IssueEnvironmentActionResponse)
 	origin := make(map[string]*IssueEnvironmentActionResponse)
-	var pendingStarts []IssueEnvironmentActionResponse
+	pendingStarts := []IssueEnvironmentActionResponse{}
+	failedStarts := []IssueEnvironmentActionResponse{}
+	// Only the newest start of each declared environment says how it went.
+	seenStart := make(map[string]bool)
 	for _, c := range controls {
 		action := issueEnvironmentActionToResponse(c, now)
 		envID := uuidToString(c.EnvironmentID)
@@ -326,8 +342,18 @@ func (h *Handler) ListIssueEnvironments(w http.ResponseWriter, r *http.Request) 
 		}
 		switch {
 		case c.Action == "start":
-			if action.Status == "pending" {
+			startKey := uuidToString(c.RuntimeID) + "\x00" + c.Repo + "\x00" + c.Name
+			if seenStart[startKey] {
+				break
+			}
+			seenStart[startKey] = true
+			switch action.Status {
+			case "pending":
 				pendingStarts = append(pendingStarts, action)
+			case "failed", "expired":
+				if now.Sub(startEndedAt(c)) < environmentStartFailureWindow {
+					failedStarts = append(failedStarts, action)
+				}
 			}
 		case !c.EnvironmentID.Valid:
 		case action.Status == "pending":
@@ -364,10 +390,21 @@ func (h *Handler) ListIssueEnvironments(w http.ResponseWriter, r *http.Request) 
 			Environments: envs,
 		})
 	}
-	if pendingStarts == nil {
-		pendingStarts = []IssueEnvironmentActionResponse{}
+	writeJSON(w, http.StatusOK, IssueEnvironmentsResponse{
+		Environments: out, Configs: configOut, PendingStarts: pendingStarts, FailedStarts: failedStarts,
+	})
+}
+
+// startEndedAt is when a start stopped being pending: its answer, or for one
+// never answered, the end of its pending window.
+func startEndedAt(c db.ListIssueEnvironmentControlsRow) time.Time {
+	if c.CompletedAt.Valid {
+		return c.CompletedAt.Time
 	}
-	writeJSON(w, http.StatusOK, IssueEnvironmentsResponse{Environments: out, Configs: configOut, PendingStarts: pendingStarts})
+	if c.ClaimedAt.Valid {
+		return c.ClaimedAt.Time.Add(environmentCommandClaimedWindow)
+	}
+	return c.CreatedAt.Time.Add(environmentCommandPendingWindow)
 }
 
 func issueEnvironmentToResponse(row db.IssueEnvironment, now time.Time) IssueEnvironmentResponse {
@@ -384,6 +421,7 @@ func issueEnvironmentToResponse(row db.IssueEnvironment, now time.Time) IssueEnv
 		LocalKey:     row.LocalKey,
 		Source:       row.Source,
 		Kind:         row.Kind,
+		Repo:         row.Repo,
 		Name:         row.Name,
 		Label:        row.Label,
 		URL:          row.Url,

@@ -73,11 +73,14 @@ type Task struct {
 
 // Environment is one environment as the daemon reports and the CLI prints it.
 type Environment struct {
-	Key       string     `json:"key"`
-	TaskID    string     `json:"task_id"`
-	IssueID   string     `json:"issue_id"`
-	Source    string     `json:"source"`
-	Kind      string     `json:"kind,omitempty"`
+	Key     string `json:"key"`
+	TaskID  string `json:"task_id"`
+	IssueID string `json:"issue_id"`
+	Source  string `json:"source"`
+	Kind    string `json:"kind,omitempty"`
+	// Repo names the checkout a declared environment runs from, as
+	// DiscoverDeclared does, so two repositories can declare the same name.
+	Repo      string     `json:"repo,omitempty"`
 	Name      string     `json:"name"`
 	Label     string     `json:"label"`
 	URL       string     `json:"url"`
@@ -590,7 +593,7 @@ func (m *Manager) viewLocked(e *entry) Environment {
 	rec := e.rec
 	view := Environment{
 		Key: "config:" + rec.ID, TaskID: rec.TaskID, IssueID: rec.IssueID,
-		Source: SourceConfig, Kind: KindServer, Name: rec.Name, Label: rec.Label, URL: rec.URL, Port: rec.Port,
+		Source: SourceConfig, Kind: KindServer, Repo: filepath.Base(rec.RepoRoot), Name: rec.Name, Label: rec.Label, URL: rec.URL, Port: rec.Port,
 		State: rec.State, Detail: rec.Detail, Excerpt: rec.Excerpt, StartedAt: rec.StartedAt,
 		LogPath: filepath.Join(m.dir, rec.ID, outputFile), Dir: rec.RepoRoot, pgid: rec.PID,
 	}

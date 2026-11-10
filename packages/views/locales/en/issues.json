@@ -2022,6 +2022,8 @@
     "focus_gone": "{{name}} is no longer running",
     "focus_unsupported": "This machine's daemon can't switch to app windows yet. Update Multica and try again.",
     "focus_unavailable": "The local daemon isn't running",
-    "focus_failed": "Couldn't switch to {{name}}"
+    "focus_failed": "Couldn't switch to {{name}}",
+    "retry": "Retry",
+    "dismiss": "Dismiss"
   }
 }

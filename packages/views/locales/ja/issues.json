@@ -1944,6 +1944,8 @@
     "focus_gone": "{{name}} はもう実行されていません",
     "focus_unsupported": "このマシンのデーモンはまだアプリのウィンドウに切り替えられません。Multica を更新してもう一度お試しください。",
     "focus_unavailable": "ローカルのデーモンが実行されていません",
-    "focus_failed": "{{name}} に切り替えられませんでした"
+    "focus_failed": "{{name}} に切り替えられませんでした",
+    "retry": "再試行",
+    "dismiss": "閉じる"
   }
 }

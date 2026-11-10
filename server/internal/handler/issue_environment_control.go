@@ -37,6 +37,9 @@ const (
 	environmentCommandClaimedWindow = 2 * time.Minute
 	// Log reads carry output, so they are deleted soon after.
 	environmentLogCommandRetention = 10 * time.Minute
+	// A sidebar start that failed or was never answered stays in the list
+	// this long, so the member sees why and can retry it.
+	environmentStartFailureWindow = 10 * time.Minute
 
 	maxEnvironmentLogBytes        = 256 * 1024
 	maxEnvironmentCommandError    = 500
@@ -73,6 +76,7 @@ type IssueEnvironmentActionResponse struct {
 	Error         string  `json:"error"`
 	EnvironmentID *string `json:"environment_id"`
 	RuntimeID     string  `json:"runtime_id"`
+	TaskID        *string `json:"task_id"`
 	Repo          string  `json:"repo"`
 	Name          string  `json:"name"`
 	ActorType     string  `json:"actor_type"`
@@ -117,6 +121,7 @@ func issueEnvironmentActionToResponse(c db.ListIssueEnvironmentControlsRow, now 
 		Error:         c.Error,
 		EnvironmentID: uuidToPtr(c.EnvironmentID),
 		RuntimeID:     uuidToString(c.RuntimeID),
+		TaskID:        uuidToPtr(c.TaskID),
 		Repo:          c.Repo,
 		Name:          c.Name,
 		ActorType:     c.ActorType,
@@ -238,6 +243,9 @@ func (h *Handler) commandIssueEnvironment(w http.ResponseWriter, r *http.Request
 	switch {
 	case action == "stop" && env.EndedAt.Valid:
 		writeError(w, http.StatusConflict, "the environment is not running")
+		return
+	case env.Kind == issueEnvironmentKindApp:
+		writeError(w, http.StatusConflict, "desktop apps cannot be controlled from the sidebar")
 		return
 	case action != "stop" && env.Source != "config":
 		writeError(w, http.StatusConflict, "only environments the repository declares can be restarted or have a log")

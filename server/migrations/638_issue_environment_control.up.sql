@@ -1,10 +1,13 @@
 -- Controlling an issue's local environments from the sidebar (MUL-8923).
 --
+-- repo is the checkout directory a declared environment runs from, which
+-- tells apart two repositories in one run that declare the same name.
 -- excerpt holds the last redacted lines a crashed environment printed, so the
 -- sidebar can say why it crashed while its machine is offline. controllable
 -- marks rows reported by a daemon that accepts the commands below; rows from
 -- older daemons stay read-only.
 ALTER TABLE issue_environment
+    ADD COLUMN IF NOT EXISTS repo TEXT NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS excerpt TEXT NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS controllable BOOLEAN NOT NULL DEFAULT false;
 

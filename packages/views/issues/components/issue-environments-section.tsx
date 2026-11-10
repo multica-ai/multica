@@ -14,6 +14,7 @@ import {
   Laptop,
   MoreHorizontal,
   RotateCw,
+  X,
   ScrollText,
   Server,
   Square,
@@ -70,6 +71,7 @@ import {
   displayHost,
   environmentTitle,
   exitCode,
+  isDeclaredAs,
   isLive,
   isLoopbackUrl,
   isPinnedCrash,
@@ -164,6 +166,8 @@ export function IssueEnvironmentsSection({
   const envs = data?.environments ?? [];
   const configs = data?.configs ?? [];
   const pendingStarts = data?.pending_starts ?? [];
+  const failedStarts = data?.failed_starts ?? [];
+  const [dismissedStarts, setDismissedStarts] = useState<ReadonlySet<string>>(() => new Set());
   const now = Date.now();
 
   // An unknown runtime is one this member cannot see; only a known one reads offline.
@@ -244,16 +248,20 @@ export function IssueEnvironmentsSection({
   const live = envs.filter(isLive);
   const pinned = envs.filter((env) => isPinnedCrash(env, envs, now));
   const ended = envs.filter((env) => !isLive(env) && !pinned.includes(env));
-  const shownStarts = pendingStarts.filter((start) =>
-    !live.some((env) => env.runtime_id === start.runtime_id && env.name === start.name && env.started_at >= start.created_at),
-  );
+  // A start is settled once the environment it asked for has come up since,
+  // however it got there.
+  const startedSince = (start: IssueEnvironmentActionRecord) =>
+    live.some((env) => isDeclaredAs(env, start.runtime_id, start.repo, start.name) && env.started_at >= start.created_at);
+  const shownStarts = pendingStarts.filter((start) => !startedSince(start));
+  const shownFailures = failedStarts.filter((start) => !startedSince(start) && !dismissedStarts.has(start.id));
   const running = live.filter((env) => env.state === "running").length;
   const knowsLocal = !!local.daemonId;
 
   const declaredState = (config: IssueEnvironmentConfig, declared: DeclaredEnvironment): DeclaredState => {
-    const sameEnv = (runtimeId: string | null, name: string) => runtimeId === config.runtime_id && name === declared.name;
-    if (pendingStarts.some((start) => sameEnv(start.runtime_id, start.name))) return "starting";
-    const current = live.find((env) => env.source === "config" && sameEnv(env.runtime_id, env.name));
+    if (pendingStarts.some((start) =>
+      start.runtime_id === config.runtime_id && start.repo === declared.repo && start.name === declared.name,
+    )) return "starting";
+    const current = live.find((env) => isDeclaredAs(env, config.runtime_id, declared.repo, declared.name));
     if (!current) return "available";
     return current.state === "starting" || pendingAction(current)?.action === "restart" ? "starting" : "running";
   };
@@ -297,10 +305,11 @@ export function IssueEnvironmentsSection({
     };
   };
 
-  type MainItem = { kind: "env"; env: IssueEnvironment } | { kind: "start"; start: IssueEnvironmentActionRecord };
+  type MainItem = { kind: "env"; env: IssueEnvironment } | { kind: "start" | "failed"; start: IssueEnvironmentActionRecord };
   const mainItems: MainItem[] = [
     ...[...live, ...pinned].map((env) => ({ kind: "env" as const, env })),
     ...shownStarts.map((start) => ({ kind: "start" as const, start })),
+    ...shownFailures.map((start) => ({ kind: "failed" as const, start })),
   ];
 
   const renderGroupHeader = (group: MachineGroup<unknown>) => (
@@ -331,10 +340,40 @@ export function IssueEnvironmentsSection({
     />
   );
 
+  const declaringConfig = (start: IssueEnvironmentActionRecord) => {
+    for (const config of configs) {
+      if (config.runtime_id !== start.runtime_id) continue;
+      const declared = config.environments.find((env) => env.repo === start.repo && env.name === start.name);
+      if (declared) return { config, declared };
+    }
+    return null;
+  };
+
+  const renderFailedStart = (start: IssueEnvironmentActionRecord) => {
+    const found = declaringConfig(start);
+    // Retry against the run that declares it now; the one first asked may
+    // have been cleaned up since.
+    const taskId = found?.config.task_id ?? start.task_id;
+    const canRetry = !!taskId && (found?.config.can_control ?? true) && !isOffline(start.runtime_id);
+    const expired = start.status === "expired";
+    return (
+      <FailedStartRow
+        key={start.id}
+        title={found?.declared.label || start.name}
+        state={expired ? t(($) => $.environments.no_response) : t(($) => $.environments.action_failed.start)}
+        meta={`${t(($) => $.environments.started_by, { name: actorName(start) })} · ${
+          expired ? t(($) => $.environments.log.no_response) : start.error || t(($) => $.environments.action_failed.start)
+        }`}
+        error={start.error}
+        canRetry={canRetry}
+        onRetry={() => taskId && runControl({ action: "start", body: { task_id: taskId, repo: start.repo, name: start.name } })}
+        onDismiss={() => setDismissedStarts((prev) => new Set(prev).add(start.id))}
+      />
+    );
+  };
+
   const renderStart = (start: IssueEnvironmentActionRecord) => {
-    const declared = configs
-      .find((config) => config.runtime_id === start.runtime_id)
-      ?.environments.find((env) => env.repo === start.repo && env.name === start.name);
+    const declared = declaringConfig(start)?.declared;
     return (
       <StatusRow
         key={start.id}
@@ -388,7 +427,9 @@ export function IssueEnvironmentsSection({
           {groupBy(mainItems, (item) => (item.kind === "env" ? item.env.runtime_id : item.start.runtime_id)).map((group) => (
             <div key={group.key}>
               {renderGroupHeader(group)}
-              {group.items.map((item) => (item.kind === "env" ? renderEnv(item.env, group) : renderStart(item.start)))}
+              {group.items.map((item) =>
+                item.kind === "env" ? renderEnv(item.env, group) : item.kind === "start" ? renderStart(item.start) : renderFailedStart(item.start),
+              )}
             </div>
           ))}
           {ended.length > 0 && (
@@ -435,6 +476,50 @@ function StatusRow({ icon, title, state, meta }: { icon: ReactNode; title: strin
           {state}
         </p>
         <p className="mt-1 truncate text-caption text-muted-foreground">{meta}</p>
+      </div>
+    </div>
+  );
+}
+
+function FailedStartRow({
+  title,
+  state,
+  meta,
+  error,
+  canRetry,
+  onRetry,
+  onDismiss,
+}: {
+  title: string;
+  state: string;
+  meta: string;
+  error: string;
+  canRetry: boolean;
+  onRetry: () => void;
+  onDismiss: () => void;
+}) {
+  const { t } = useT("issues");
+  return (
+    <div data-testid="environment-failed-start" className="group/env relative rounded-md px-2 py-2" title={error || undefined}>
+      <div className="flex items-start gap-2">
+        <Server className="mt-px size-3.5 shrink-0 text-destructive" />
+        <div className="min-w-0 flex-1">
+          <p className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 flex-1 truncate text-label font-medium">{title}</span>
+            <span className="shrink-0 text-caption text-destructive">{state}</span>
+          </p>
+          <p className="mt-1 truncate text-caption text-muted-foreground">{meta}</p>
+          <div className="mt-2 flex items-center gap-1.5">
+            <Button variant="outline" size="xs" onClick={onRetry} disabled={!canRetry}>
+              <RotateCw />
+              {t(($) => $.environments.retry)}
+            </Button>
+            <Button variant="ghost" size="xs" onClick={onDismiss}>
+              <X />
+              {t(($) => $.environments.dismiss)}
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -18,6 +18,7 @@ const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 let mockEnvironments: IssueEnvironment[] = [];
 let mockConfigs: IssueEnvironmentConfig[] = [];
 let mockPendingStarts: IssueEnvironmentActionRecord[] = [];
+let mockFailedStarts: IssueEnvironmentActionRecord[] = [];
 let mockRuntimes: AgentRuntime[] = [];
 let mockTasks: AgentTask[] = [];
 let mockAgents: Agent[] = [];
@@ -27,7 +28,7 @@ vi.mock("@multica/core/issues/queries", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/issues/queries")>()),
   issueEnvironmentsOptions: (wsId: string, issueId: string) => ({
     queryKey: ["issues", wsId, "environments", issueId],
-    queryFn: async () => ({ environments: mockEnvironments, configs: mockConfigs, pending_starts: mockPendingStarts }),
+    queryFn: async () => ({ environments: mockEnvironments, configs: mockConfigs, pending_starts: mockPendingStarts, failed_starts: mockFailedStarts }),
   }),
   issueTasksOptions: (issueId: string) => ({
     queryKey: ["issues", "tasks", issueId],
@@ -116,6 +117,7 @@ function environment(overrides: Partial<IssueEnvironment>): IssueEnvironment {
     local_key: "config:abc",
     source: "config",
     kind: "server",
+    repo: "",
     name: "web",
     label: "Web app",
     url: "http://localhost:41000",
@@ -144,6 +146,7 @@ function action(overrides: Partial<IssueEnvironmentActionRecord>): IssueEnvironm
     error: "",
     environment_id: "env-1",
     runtime_id: "rt-1",
+    task_id: null,
     repo: "app",
     name: "web",
     actor_type: "member",
@@ -195,6 +198,7 @@ describe("IssueEnvironmentsSection", () => {
     mockEnvironments = [];
     mockConfigs = [];
     mockPendingStarts = [];
+    mockFailedStarts = [];
     mockRuntimes = [runtime({}), runtime({ id: "rt-2", daemon_id: "daemon-2", name: "Codex (build-02)", device_info: "build-02" })];
     mockTasks = [task({})];
     mockAgents = [lambda];
@@ -534,6 +538,84 @@ describe("IssueEnvironmentsSection", () => {
       { action: "start", body: { task_id: "task-1", repo: "app", name: "api" } },
       expect.anything(),
     );
+  });
+
+  it("tells apart two repositories in one run that declare the same name", async () => {
+    mockConfigs = [{
+      runtime_id: "rt-1",
+      task_id: "task-1",
+      reported_at: new Date().toISOString(),
+      can_control: true,
+      environments: [
+        { repo: "app", name: "web", label: "App web", start: "pnpm dev:web" },
+        { repo: "docs", name: "web", label: "Docs web", start: "pnpm docs" },
+      ],
+    }];
+    mockEnvironments = [environment({ repo: "app", label: "App web" })];
+    mockPendingStarts = [];
+    renderSection();
+    await screen.findByTestId("environment-row");
+    fireEvent.click(screen.getByRole("button", { name: "Start an environment" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: /App web/ })).toHaveAttribute("aria-disabled", "true");
+    const docs = within(menu).getByRole("menuitem", { name: /Docs web/ });
+    expect(docs).not.toHaveAttribute("aria-disabled", "true");
+    expect(within(docs).getByText("pnpm docs")).toBeInTheDocument();
+    fireEvent.click(docs);
+    expect(control).toHaveBeenCalledWith(
+      { action: "start", body: { task_id: "task-1", repo: "docs", name: "web" } },
+      expect.anything(),
+    );
+  });
+
+  it("keeps a start the machine accepted and then failed, with its reason and a retry", async () => {
+    mockConfigs = [{
+      runtime_id: "rt-1",
+      task_id: "task-2",
+      reported_at: new Date().toISOString(),
+      can_control: true,
+      environments: [{ repo: "app", name: "web", label: "Web app", start: "pnpm dev:web" }],
+    }];
+    mockFailedStarts = [action({
+      id: "cmd-9", action: "start", status: "failed", environment_id: null, task_id: "task-1",
+      error: "the run's checkout was cleaned up", completed_at: new Date().toISOString(),
+    })];
+    renderSection();
+    const row = await screen.findByTestId("environment-failed-start");
+    expect(within(row).getByText("Web app")).toBeVisible();
+    expect(within(row).getByText("Couldn't start")).toBeVisible();
+    expect(within(row).getByText(/the run's checkout was cleaned up/)).toBeVisible();
+    fireEvent.click(within(row).getByRole("button", { name: /Retry/ }));
+    expect(control).toHaveBeenCalledWith(
+      { action: "start", body: { task_id: "task-2", repo: "app", name: "web" } },
+      expect.anything(),
+    );
+    fireEvent.click(within(row).getByRole("button", { name: /Dismiss/ }));
+    await waitFor(() => expect(screen.queryByTestId("environment-failed-start")).not.toBeInTheDocument());
+  });
+
+  it("says when a start was never answered and lets it be retried", async () => {
+    mockFailedStarts = [action({ id: "cmd-10", action: "start", status: "expired", environment_id: null, task_id: "task-1" })];
+    renderSection();
+    const row = await screen.findByTestId("environment-failed-start");
+    expect(within(row).getByText("No response")).toBeVisible();
+    expect(within(row).getByText(/The machine didn't respond/)).toBeVisible();
+    fireEvent.click(within(row).getByRole("button", { name: /Retry/ }));
+    expect(control).toHaveBeenCalledWith(
+      { action: "start", body: { task_id: "task-1", repo: "app", name: "web" } },
+      expect.anything(),
+    );
+  });
+
+  it("drops a failed start once the environment came up another way", async () => {
+    mockFailedStarts = [action({
+      id: "cmd-11", action: "start", status: "failed", environment_id: null, task_id: "task-1",
+      created_at: new Date(Date.now() - 60_000).toISOString(),
+    })];
+    mockEnvironments = [environment({ repo: "app", started_at: new Date().toISOString() })];
+    renderSection();
+    await screen.findByTestId("environment-row");
+    expect(screen.queryByTestId("environment-failed-start")).not.toBeInTheDocument();
   });
 
   it("asks the agent to start it when nothing can be started directly", async () => {

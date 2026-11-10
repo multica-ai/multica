@@ -5316,7 +5316,7 @@ export class ApiClient {
   private async issueEnvironmentCommand(path: string, action: IssueEnvironmentAction, init?: RequestInit): Promise<IssueEnvironmentCommand> {
     const raw = await this.fetch<unknown>(path, init);
     const fallback: IssueEnvironmentCommand = {
-      id: "", action, status: "failed", error: "", environment_id: null, runtime_id: "", repo: "", name: "",
+      id: "", action, status: "failed", error: "", environment_id: null, runtime_id: "", task_id: null, repo: "", name: "",
       actor_type: "member", actor_id: null, created_at: new Date().toISOString(), completed_at: null, output: null,
     };
     return parseWithFallback(raw, IssueEnvironmentCommandSchema, fallback, { endpoint: `${init?.method ?? "GET"} ${path.replace(/[0-9a-f-]{36}/g, ":id")}` });

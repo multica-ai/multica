@@ -382,7 +382,7 @@ func environmentFingerprint(envs []localenv.Environment) string {
 		if env.ExpiresAt != nil {
 			expires = env.ExpiresAt.UTC().Format(time.RFC3339)
 		}
-		parts = append(parts, strings.Join([]string{env.Key, env.Kind, env.State, env.URL, env.Label, env.Detail, expires, env.Excerpt}, "\x1f"))
+		parts = append(parts, strings.Join([]string{env.Key, env.Kind, env.Repo, env.State, env.URL, env.Label, env.Detail, expires, env.Excerpt}, "\x1f"))
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, "\x1e")
@@ -392,7 +392,7 @@ func toEnvironmentReports(envs []localenv.Environment) []TaskEnvironmentReport {
 	out := make([]TaskEnvironmentReport, 0, len(envs))
 	for _, env := range envs {
 		out = append(out, TaskEnvironmentReport{
-			Key: env.Key, Source: env.Source, Kind: env.Kind, Name: env.Name, Label: env.Label, URL: env.URL,
+			Key: env.Key, Source: env.Source, Kind: env.Kind, Repo: env.Repo, Name: env.Name, Label: env.Label, URL: env.URL,
 			Port: env.Port, State: env.State, Detail: env.Detail, StartedAt: env.StartedAt, ExpiresAt: env.ExpiresAt,
 			Excerpt: env.Excerpt,
 		})

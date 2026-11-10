@@ -683,6 +683,7 @@ type TaskEnvironmentReport struct {
 	Key       string     `json:"key"`
 	Source    string     `json:"source"`
 	Kind      string     `json:"kind,omitempty"`
+	Repo      string     `json:"repo,omitempty"`
 	Name      string     `json:"name"`
 	Label     string     `json:"label"`
 	URL       string     `json:"url"`

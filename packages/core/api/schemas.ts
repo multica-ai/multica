@@ -475,6 +475,7 @@ export const IssueEnvironmentActionSchema = z.object({
   error: z.string().optional().default(""),
   environment_id: z.string().nullable().optional().default(null),
   runtime_id: z.string().optional().default(""),
+  task_id: z.string().nullable().optional().default(null),
   repo: z.string().optional().default(""),
   name: z.string().optional().default(""),
   actor_type: z.string().optional().default("member"),
@@ -504,6 +505,7 @@ export const IssueEnvironmentSchema = z.object({
   local_key: z.string().catch(""),
   source: z.enum(["config", "detected"]).catch("detected"),
   kind: z.enum(["server", "app"]).catch("server"),
+  repo: z.string().optional().default(""),
   name: z.string(),
   label: z.string().optional().default(""),
   url: z.string().optional().default(""),
@@ -555,12 +557,14 @@ export const IssueEnvironmentsResponseSchema = z.object({
   environments: lenientArray(IssueEnvironmentSchema),
   configs: lenientArray(IssueEnvironmentConfigSchema),
   pending_starts: lenientArray(IssueEnvironmentActionSchema),
+  failed_starts: lenientArray(IssueEnvironmentActionSchema),
 }).loose();
 
 export const EMPTY_ISSUE_ENVIRONMENTS_RESPONSE: IssueEnvironmentsResponse = {
   environments: [],
   configs: [],
   pending_starts: [],
+  failed_starts: [],
 };
 
 // Label responses are consumed by settings tables and resource pickers. Keep

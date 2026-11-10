@@ -1944,6 +1944,8 @@
     "focus_gone": "{{name}} 已不在執行",
     "focus_unsupported": "這台機器的 daemon 暫時無法切換 App 視窗。更新 Multica 後再試。",
     "focus_unavailable": "本機 daemon 沒有執行",
-    "focus_failed": "無法切到 {{name}}"
+    "focus_failed": "無法切到 {{name}}",
+    "retry": "重試",
+    "dismiss": "忽略"
   }
 }

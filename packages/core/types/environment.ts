@@ -25,6 +25,8 @@ export interface IssueEnvironmentActionRecord {
   error: string;
   environment_id: string | null;
   runtime_id: string;
+  /** The run a start was asked of. */
+  task_id: string | null;
   repo: string;
   name: string;
   actor_type: string;
@@ -48,6 +50,9 @@ export interface IssueEnvironment {
   local_key: string;
   source: IssueEnvironmentSource;
   kind: IssueEnvironmentKind;
+  /** The checkout a declared environment runs from; empty for detected ones
+   *  and from older daemons. */
+  repo: string;
   name: string;
   label: string;
   url: string;
@@ -92,6 +97,9 @@ export interface IssueEnvironmentsResponse {
   configs: IssueEnvironmentConfig[];
   /** Sidebar starts whose environment has not been reported yet. */
   pending_starts: IssueEnvironmentActionRecord[];
+  /** Recent sidebar starts that failed or were never answered, and have not
+   *  been tried again since. */
+  failed_starts: IssueEnvironmentActionRecord[];
 }
 
 export interface StartIssueEnvironmentRequest {

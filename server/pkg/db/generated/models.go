@@ -990,6 +990,7 @@ type IssueEnvironment struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	Kind         string             `json:"kind"`
+	Repo         string             `json:"repo"`
 	Excerpt      string             `json:"excerpt"`
 	Controllable bool               `json:"controllable"`
 }

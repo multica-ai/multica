@@ -17,6 +17,13 @@ export function exitCode(env: IssueEnvironment): number | null {
 
 /** A declared environment that crashed stays in the main list for a day, or
  *  until it is restarted or another one with its name starts on the machine. */
+/** Whether a reported environment is the one `repo` declares as `name` on a
+ *  machine. Two repositories in one run may declare the same name; rows from
+ *  daemons that predate reporting the repository match on the name alone. */
+export function isDeclaredAs(env: IssueEnvironment, runtimeId: string | null, repo: string, name: string): boolean {
+  return env.source === "config" && env.runtime_id === runtimeId && env.name === name && (env.repo === "" || env.repo === repo);
+}
+
 export function isPinnedCrash(env: IssueEnvironment, all: IssueEnvironment[], now: number): boolean {
   if (env.source !== "config" || env.state !== "exited" || !env.ended_at) return false;
   const code = exitCode(env);
@@ -25,9 +32,7 @@ export function isPinnedCrash(env: IssueEnvironment, all: IssueEnvironment[], no
   if (now - ended > DAY) return false;
   return !all.some((other) =>
     other.id !== env.id &&
-    other.runtime_id === env.runtime_id &&
-    other.name === env.name &&
-    other.source === "config" &&
+    isDeclaredAs(other, env.runtime_id, env.repo, env.name) &&
     new Date(other.started_at).getTime() >= ended,
   );
 }

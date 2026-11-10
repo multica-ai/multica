@@ -237,6 +237,10 @@ func TestEnvironmentCommandsAreRefusedWhereTheyCannotWork(t *testing.T) {
 	f.commandAs(t, testUserID, "logs", vite.ID).Want(http.StatusConflict)
 	f.commandAs(t, testUserID, "stop", vite.ID).Want(http.StatusAccepted)
 
+	f.report(t, true, webEnvironment("exited"), detectedEnvironment(),
+		map[string]any{"key": "detected:app", "source": "detected", "kind": "app", "name": "Multica Canary", "state": "running"})
+	f.commandAs(t, testUserID, "stop", f.env(t, "Multica Canary").ID).Want(http.StatusConflict)
+
 	dbfx.Exec(t, `UPDATE agent_runtime SET status = 'offline' WHERE id = $1`, f.runtimeID)
 	f.commandAs(t, testUserID, "restart", web.ID).Want(http.StatusConflict)
 	f.commandAs(t, testUserID, "logs", web.ID).Want(http.StatusConflict)
@@ -381,5 +385,84 @@ func TestEnvironmentStartFromDeclaredConfig(t *testing.T) {
 	reportConfigs().Want(http.StatusOK)
 	if list := f.list(t, testUserID); len(list.Configs) != 1 || len(list.Configs[0].Environments) != 0 {
 		t.Fatalf("configs after an empty report = %+v", list.Configs)
+	}
+}
+
+func TestEnvironmentStartFailuresStayVisibleUntilRetried(t *testing.T) {
+	f := newEnvironmentControlFixture(t)
+	req := withURLParam(newOwnerDaemonRequest(http.MethodPost, "/api/daemon/tasks/"+f.taskID+"/environment-configs",
+		ReportTaskEnvironmentConfigsRequest{Environments: []DeclaredEnvironment{
+			{Repo: "multica", Name: "web", Start: "make dev-web"},
+			{Repo: "multica", Name: "api", Start: "make server"},
+		}}), "taskId", f.taskID)
+	testutil.Call(t, testHandler.ReportTaskEnvironmentConfigs, req).Want(http.StatusOK)
+	start := func(name string) IssueEnvironmentCommandResponse {
+		var queued IssueEnvironmentCommandResponse
+		req := withURLParam(newRequestAs(testUserID, http.MethodPost, "/api/issues/"+f.issueID+"/environments/start",
+			StartIssueEnvironmentRequest{TaskID: f.taskID, Repo: "multica", Name: name}), "id", f.issueID)
+		testutil.Call(t, testHandler.StartIssueEnvironment, req).Want(http.StatusAccepted).JSON(&queued)
+		return queued
+	}
+
+	t.Run("failed after the machine accepted it", func(t *testing.T) {
+		queued := start("web")
+		f.claim(t)
+		f.result(t, queued.ID, EnvironmentCommandResultRequest{Error: "the run's checkout was cleaned up"}).Want(http.StatusOK)
+
+		list := f.list(t, testUserID)
+		if len(list.PendingStarts) != 0 || len(list.FailedStarts) != 1 {
+			t.Fatalf("pending = %+v, failed = %+v", list.PendingStarts, list.FailedStarts)
+		}
+		failed := list.FailedStarts[0]
+		if failed.ID != queued.ID || failed.Status != "failed" || failed.Error != "the run's checkout was cleaned up" ||
+			failed.TaskID == nil || *failed.TaskID != f.taskID {
+			t.Fatalf("failed start = %+v", failed)
+		}
+
+		// Retrying replaces the failure with the new attempt.
+		start("web")
+		list = f.list(t, testUserID)
+		if len(list.PendingStarts) != 1 || len(list.FailedStarts) != 0 {
+			t.Fatalf("after retry: pending = %+v, failed = %+v", list.PendingStarts, list.FailedStarts)
+		}
+		f.claim(t)
+	})
+
+	t.Run("never answered", func(t *testing.T) {
+		queued := start("api")
+		dbfx.Exec(t, `UPDATE issue_environment_command SET created_at = now() - interval '1 minute' WHERE id = $1`, queued.ID)
+		list := f.list(t, testUserID)
+		var found *IssueEnvironmentActionResponse
+		for i := range list.FailedStarts {
+			if list.FailedStarts[i].ID == queued.ID {
+				found = &list.FailedStarts[i]
+			}
+		}
+		if found == nil || found.Status != "expired" {
+			t.Fatalf("failed starts = %+v, want the unanswered start as expired", list.FailedStarts)
+		}
+
+		// An old failure is no longer news.
+		dbfx.Exec(t, `UPDATE issue_environment_command SET created_at = now() - interval '20 minutes' WHERE id = $1`, queued.ID)
+		for _, s := range f.list(t, testUserID).FailedStarts {
+			if s.ID == queued.ID {
+				t.Fatalf("a start that expired 20 minutes ago is still listed: %+v", s)
+			}
+		}
+	})
+}
+
+func TestEnvironmentReportsKeepTheirRepository(t *testing.T) {
+	f := newEnvironmentControlFixture(t)
+	web := webEnvironment("running")
+	web["repo"] = "multica"
+	detected := detectedEnvironment()
+	detected["repo"] = "multica"
+	f.report(t, true, web, detected)
+	if got := f.env(t, "web").Repo; got != "multica" {
+		t.Fatalf("declared environment repo = %q", got)
+	}
+	if got := f.env(t, "vite").Repo; got != "" {
+		t.Fatalf("detected environment repo = %q, want none", got)
 	}
 }

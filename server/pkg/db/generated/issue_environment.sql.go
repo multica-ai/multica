@@ -227,7 +227,7 @@ func (q *Queries) EndIssueEnvironmentsMissingFromSnapshot(ctx context.Context, a
 }
 
 const getIssueEnvironment = `-- name: GetIssueEnvironment :one
-SELECT id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind, excerpt, controllable FROM issue_environment
+SELECT id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind, repo, excerpt, controllable FROM issue_environment
 WHERE id = $1 AND issue_id = $2 AND workspace_id = $3
 `
 
@@ -262,6 +262,7 @@ func (q *Queries) GetIssueEnvironment(ctx context.Context, arg GetIssueEnvironme
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Kind,
+		&i.Repo,
 		&i.Excerpt,
 		&i.Controllable,
 	)
@@ -445,7 +446,7 @@ func (q *Queries) ListIssueEnvironmentControls(ctx context.Context, arg ListIssu
 }
 
 const listIssueEnvironments = `-- name: ListIssueEnvironments :many
-SELECT id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind, excerpt, controllable FROM issue_environment
+SELECT id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind, repo, excerpt, controllable FROM issue_environment
 WHERE issue_id = $1
   AND workspace_id = $2
   AND (ended_at IS NULL OR ended_at > $3::timestamptz)
@@ -491,6 +492,7 @@ func (q *Queries) ListIssueEnvironments(ctx context.Context, arg ListIssueEnviro
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Kind,
+			&i.Repo,
 			&i.Excerpt,
 			&i.Controllable,
 		); err != nil {
@@ -545,7 +547,7 @@ func (q *Queries) ListLatestIssueEnvironmentConfigs(ctx context.Context, arg Lis
 }
 
 const listOpenIssueEnvironmentsByTask = `-- name: ListOpenIssueEnvironmentsByTask :many
-SELECT id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind, excerpt, controllable FROM issue_environment
+SELECT id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind, repo, excerpt, controllable FROM issue_environment
 WHERE task_id = $1 AND ended_at IS NULL
 `
 
@@ -580,6 +582,7 @@ func (q *Queries) ListOpenIssueEnvironmentsByTask(ctx context.Context, taskID pg
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Kind,
+			&i.Repo,
 			&i.Excerpt,
 			&i.Controllable,
 		); err != nil {
@@ -596,17 +599,18 @@ func (q *Queries) ListOpenIssueEnvironmentsByTask(ctx context.Context, taskID pg
 const upsertIssueEnvironment = `-- name: UpsertIssueEnvironment :one
 INSERT INTO issue_environment (
     workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source,
-    kind, name, label, url, port, state, detail, started_at, expires_at, ended_at,
+    kind, repo, name, label, url, port, state, detail, started_at, expires_at, ended_at,
     excerpt, controllable
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
-    $8, $9, $10, $11, $12, $13, $14, $15, $16,
-    CASE WHEN $13::text IN ('exited', 'stopped') THEN now() END,
-    $17, $18
+    $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+    CASE WHEN $14::text IN ('exited', 'stopped') THEN now() END,
+    $18, $19
 )
 ON CONFLICT (task_id, local_key) DO UPDATE SET
     source = EXCLUDED.source,
     kind = EXCLUDED.kind,
+    repo = EXCLUDED.repo,
     name = EXCLUDED.name,
     label = EXCLUDED.label,
     url = EXCLUDED.url,
@@ -622,7 +626,7 @@ ON CONFLICT (task_id, local_key) DO UPDATE SET
         WHEN EXCLUDED.state IN ('exited', 'stopped') THEN COALESCE(issue_environment.ended_at, now())
     END,
     updated_at = now()
-RETURNING id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind, excerpt, controllable
+RETURNING id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind, repo, excerpt, controllable
 `
 
 type UpsertIssueEnvironmentParams struct {
@@ -634,6 +638,7 @@ type UpsertIssueEnvironmentParams struct {
 	LocalKey     string             `json:"local_key"`
 	Source       string             `json:"source"`
 	Kind         string             `json:"kind"`
+	Repo         string             `json:"repo"`
 	Name         string             `json:"name"`
 	Label        string             `json:"label"`
 	Url          string             `json:"url"`
@@ -658,6 +663,7 @@ func (q *Queries) UpsertIssueEnvironment(ctx context.Context, arg UpsertIssueEnv
 		arg.LocalKey,
 		arg.Source,
 		arg.Kind,
+		arg.Repo,
 		arg.Name,
 		arg.Label,
 		arg.Url,
@@ -692,6 +698,7 @@ func (q *Queries) UpsertIssueEnvironment(ctx context.Context, arg UpsertIssueEnv
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Kind,
+		&i.Repo,
 		&i.Excerpt,
 		&i.Controllable,
 	)
