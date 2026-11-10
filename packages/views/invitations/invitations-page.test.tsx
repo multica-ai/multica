@@ -166,6 +166,20 @@ describe("InvitationsPage", () => {
     expect(acceptInvitation).toHaveBeenCalledTimes(1);
   });
 
+  it("still enters the joined workspace when recording onboarding fails", async () => {
+    listMyInvitations.mockResolvedValue([mkInvite("inv-1", "ws-1", "Acme")]);
+    listWorkspaces.mockResolvedValue([mkWs("ws-1", "acme")]);
+    markOnboardingComplete.mockRejectedValue(new Error("boom"));
+    renderPage();
+    await waitFor(() => screen.getByText("Acme"));
+
+    fireEvent.click(within(row("Acme")).getByRole("button", { name: "Join" }));
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/acme/issues"));
+    expect(refreshMe).toHaveBeenCalled();
+    expect(screen.queryByText("boom")).toBeNull();
+  });
+
   it("declining a row drops it and keeps the user on the page", async () => {
     listMyInvitations
       .mockResolvedValueOnce([mkInvite("inv-1", "ws-1", "Acme"), mkInvite("inv-2", "ws-2", "Beta")])

@@ -23,13 +23,16 @@ export function useInvitationActions() {
       await api.acceptInvitation(invitation.id);
       // The accept transaction already sets onboarded_at; this records the
       // completion path and brings the local user out of the
-      // un-onboarded state before guards look at it.
+      // un-onboarded state before guards look at it. The user has joined by
+      // now, so neither step may stop the workspace list refresh below.
       if (!hasOnboarded) {
-        await api.markOnboardingComplete({
-          completion_path: "invite_accept",
-          workspace_id: invitation.workspace_id,
-        });
-        await useAuthStore.getState().refreshMe();
+        await api
+          .markOnboardingComplete({
+            completion_path: "invite_accept",
+            workspace_id: invitation.workspace_id,
+          })
+          .catch(() => {});
+        await useAuthStore.getState().refreshMe().catch(() => {});
       }
       // staleTime: 0 forces a real fetch — the joined workspace has to be in
       // the list before its slug can be resolved.
@@ -42,9 +45,11 @@ export function useInvitationActions() {
       if (joined) push(paths.workspace(joined.slug).issues());
     },
     // On failure the invitation was usually concluded on another surface
-    // while it was on screen; refetch so the stale row drops.
+    // while it was on screen, or the join went through and a later step
+    // failed; refetch both so the page reflects what the server has.
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.list() });
     },
   });
 
