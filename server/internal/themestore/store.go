@@ -34,7 +34,8 @@ import (
 )
 
 // DefaultIndexURL is the official registry, github.com/multica-ai/multica-themes.
-const DefaultIndexURL = "https://raw.githubusercontent.com/multica-ai/multica-themes/main/index.json"
+// Its index is generated onto the `index` branch.
+const DefaultIndexURL = "https://raw.githubusercontent.com/multica-ai/multica-themes/index/index.json"
 
 const (
 	// MaxPackageBytes matches THEME_PACKAGE_MAX_BYTES in packages/core/appearance.
