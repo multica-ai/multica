@@ -149,7 +149,9 @@
       "view_edit": "뷰 편집",
       "view_rename": "이름 변경",
       "view_duplicate": "복제",
-      "view_delete": "뷰 삭제"
+      "view_delete": "뷰 삭제",
+      "inbox_view_all": "전체 보기 {{total}}",
+      "inbox_empty": "지금 처리할 일이 없습니다"
     },
     "team": {
       "new_agent": "새 에이전트",

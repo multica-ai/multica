@@ -151,7 +151,9 @@
       "view_edit": "Edit view",
       "view_rename": "Rename",
       "view_duplicate": "Duplicate",
-      "view_delete": "Delete view"
+      "view_delete": "Delete view",
+      "inbox_view_all": "View all {{total}}",
+      "inbox_empty": "Nothing needs you right now"
     },
     "team": {
       "new_agent": "New agent",

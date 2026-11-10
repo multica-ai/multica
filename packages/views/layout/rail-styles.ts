@@ -11,7 +11,7 @@ export const NAV_COLUMN_MOTION_CLASS =
   "transition-[width] duration-(--nav-panel-duration) ease-(--nav-panel-easing) motion-reduce:transition-none";
 
 /**
- * The Inbox and Chat list width. Capped against the viewport so a column
+ * The Chat list width. Capped against the viewport so a column
  * dragged wide on a large display leaves the detail pane usable on a smaller
  * one.
  */

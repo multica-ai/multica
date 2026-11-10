@@ -9,6 +9,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { Archive, ArchiveRestore } from "@multica/ui/icons";
 import type { InboxItem } from "@multica/core/types";
+import type { InboxGroupSummary } from "@multica/core/inbox/queries";
 import type { InboxView } from "./inbox-view";
 import { InboxDetailLabel, useTypeLabels } from "./inbox-detail-label";
 import {
@@ -44,12 +45,18 @@ export function InboxListItem({
   item,
   view,
   isSelected,
+  handled = false,
+  summary,
   onClick,
   onAction,
 }: {
   item: InboxItem;
   view: InboxView;
   isSelected: boolean;
+  /** Its issue already left the Inbox; the row stays until the selection moves. */
+  handled?: boolean;
+  /** What else is on the issue: its other notifications and the newest comment. */
+  summary?: InboxGroupSummary;
   onClick: () => void;
   // Archive in the main list, unarchive in the archived one — the row action is
   // always the reversal of the current view, so the two lists share this row.
@@ -126,13 +133,14 @@ export function InboxListItem({
       // `select-none` mirrors what Base UI's own trigger used to merge in, so
       // right-clicking a row never starts a text selection.
       onContextMenu={
-        openContextMenu ? (e) => openContextMenu(item, e) : undefined
+        openContextMenu && !handled ? (e) => openContextMenu(item, e) : undefined
       }
+      data-handled={handled || undefined}
       className={`group flex w-full cursor-default select-none items-center gap-2.5 rounded-md px-2 py-2.5 text-left outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring ${
         isSelected
           ? "bg-accent"
           : "hover:bg-accent/50 data-[popup-open]:bg-accent/50"
-      }`}
+      } ${handled ? "opacity-50" : ""}`}
     >
       <ActorAvatar
         actorType={actorType}
@@ -152,7 +160,8 @@ export function InboxListItem({
               {displayTitle}
             </span>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
+          {/* A handled row has nothing left to archive or mark. */}
+          {!handled && <div className="flex shrink-0 items-center gap-1">
             {/* Pointer-only affordance: revealed on hover, and on keyboard
                 focus anywhere in the row so it is reachable by Tab. Touch has
                 neither, so it stays hidden on a pointer that cannot hover and
@@ -174,13 +183,23 @@ export function InboxListItem({
               }
             />
             <InboxRowMenu item={item} view={view} />
-          </div>
+          </div>}
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-caption ${showUnread ? "text-muted-foreground" : "text-muted-foreground"}`}>
-            <InboxDetailLabel item={item} />
+          {/* The reason first, then what was written: the reason says what
+              the row asks for, the preview whether it can wait. */}
+          <p className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-caption text-muted-foreground">
+            <span className={summary?.preview && showUnread ? "text-foreground" : undefined}>
+              <InboxDetailLabel item={item} reasonOnly={!!summary?.preview} />
+            </span>
+            {summary?.preview && <> · {summary.preview}</>}
           </p>
           <div className="flex shrink-0 items-center gap-1.5">
+            {!!summary && summary.more > 0 && (
+              <span className="text-caption tabular-nums text-faint-foreground">
+                {t(($) => $.labels.more, { count: summary.more })}
+              </span>
+            )}
             {/* Badge only, no hover card (MUL-5189). "An agent is on this"
                 is worth showing while triaging; the card behind it adds only
                 elapsed time, which does not change whether you open the row.

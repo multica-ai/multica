@@ -17,6 +17,7 @@ import { IssueContextMenuProvider } from "../../issues/actions";
 import { useIssueViewActions } from "../../issue-views/use-view-actions";
 import { useT } from "../../i18n";
 import { PanelBody, PanelHeader, isPathWithin } from "../panel-nav";
+import { InboxSection } from "./inbox-section";
 import { PinnedSection, usePanelPins } from "./pinned-section";
 import { useKeptActiveItem } from "./sidebar-tree";
 import { ProjectsSection, useIssueInTree } from "./work-tree";
@@ -167,6 +168,14 @@ export function WorkPanel() {
           through the React tree, and must not reach rememberClickedIssue. */}
       <IssueContextMenuProvider variant="sidebar">
         <PanelBody onClickCapture={rememberClickedIssue}>
+          {wsId && <InboxSection wsId={wsId} />}
+
+          {wsId && (
+            <div data-pinned-section className="contents">
+              <PinnedSection pins={pins} wsId={wsId} />
+            </div>
+          )}
+
           {wsId && (
             <ViewsSection
               wsId={wsId}
@@ -177,12 +186,6 @@ export function WorkPanel() {
               litSource={litSource}
               actions={viewActions}
             />
-          )}
-
-          {wsId && (
-            <div data-pinned-section className="contents">
-              <PinnedSection pins={pins} wsId={wsId} />
-            </div>
           )}
 
           {wsId && (

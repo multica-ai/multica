@@ -6,6 +6,8 @@
 
 -- name: ListArchivedInboxPage :many
 -- Select narrow group representatives before loading bodies or comment anchors.
+-- Only types the Inbox lists (inbox.TurnTypes) are history here, and only an
+-- active row of one of them keeps an issue out of this list.
 WITH base AS MATERIALIZED (
     SELECT i.id, i.issue_id, COALESCE(i.issue_id, i.id) AS group_id, i.created_at, i.read,
            CASE
@@ -24,6 +26,7 @@ WITH base AS MATERIALIZED (
       AND i.recipient_type = 'member'
       AND i.recipient_id = sqlc.arg(recipient_id)::uuid
       AND i.archived = true
+      AND i.type = ANY(sqlc.arg(turn_types)::text[])
       -- MUL-8472: private projects the caller cannot see.
       AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM issue hidden_issue
@@ -38,6 +41,7 @@ WITH base AS MATERIALIZED (
             AND active.recipient_type = i.recipient_type
             AND active.recipient_id = i.recipient_id
             AND active.issue_id = i.issue_id AND active.archived = false
+            AND active.type = ANY(sqlc.arg(turn_types)::text[])
       ))
 ), newest AS (
     SELECT DISTINCT ON (group_id) base.*
@@ -137,6 +141,7 @@ WITH base AS MATERIALIZED (
       AND i.recipient_type = 'member'
       AND i.recipient_id = sqlc.arg(recipient_id)::uuid
       AND i.archived = true
+      AND i.type = ANY(sqlc.arg(turn_types)::text[])
       -- MUL-8472: private projects the caller cannot see.
       AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM issue hidden_issue
@@ -149,6 +154,7 @@ WITH base AS MATERIALIZED (
             AND active.recipient_type = i.recipient_type
             AND active.recipient_id = i.recipient_id
             AND active.issue_id = i.issue_id AND active.archived = false
+            AND active.type = ANY(sqlc.arg(turn_types)::text[])
       ))
 ), notification_match AS MATERIALIZED (
     SELECT base.*,

@@ -69,7 +69,18 @@
     "autopilot_quota_exceeded_body": "當前週期的 {{limit}} 次自動化執行額度已用完。在 {{resetAt}} 重置前，後續自動化執行將不會啟動。",
     "autopilot_quota_upgrade": "檢視升級方案",
     "archive": "歸檔",
-    "unarchive": "取消歸檔"
+    "unarchive": "取消歸檔",
+    "handled": "已處理 · 已移出收件箱",
+    "acted_replied": "你已回覆 · 處理完就歸檔",
+    "acted_updated": "你已更新這個任務 · 處理完就歸檔",
+    "handled_notice": "只是告知 · 開啟後已移出收件箱",
+    "handled_closed": "已完成或已取消 · 已移出收件箱",
+    "handled_agent": "AI 代理正在處理 · 執行結束後會回到收件箱",
+    "restore": "放回收件箱",
+    "unread_from": "{{count}} 則未讀 · 從這裡開始",
+    "position": "{{index}} / {{total}}",
+    "previous": "上一則",
+    "next": "下一則"
   },
   "types": {
     "issue_assigned": "已分配",
@@ -112,7 +123,12 @@
     "created_with_agent": "透過 AI 代理建立：{{identifier}}",
     "failed_with_detail": "失敗：{{detail}}",
     "autopilot_quota_blocked": "執行已被阻止：額度已用完",
-    "children_done_stage": "第 {{stage}} 階段的子任務已全部結束"
+    "children_done_stage": "第 {{stage}} 階段的子任務已全部結束",
+    "awaiting_review": "等你驗收",
+    "waiting_answer": "等你回答",
+    "run_finished": "執行已結束",
+    "mentioned_you": "提到了你",
+    "more": "另有 {{count}} 則"
   },
   "toasts": {
     "source_context_retry_started": "已使用原始上下文開始重試",

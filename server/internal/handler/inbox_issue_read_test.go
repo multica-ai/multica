@@ -198,9 +198,9 @@ func (f issueInboxFixture) rawUnread() int64 {
 		f.workspaceID, testUserID))
 }
 
-// unreadRows is the issue's row in the unread badge: 1 while its newest
-// active row is unread.
-func (f issueInboxFixture) unreadRows() int64 {
+// pendingRows is the issue's row in the Inbox badge: 1 while it has an active
+// row the Inbox lists, read or not.
+func (f issueInboxFixture) pendingRows() int64 {
 	f.t.Helper()
 	var summary []InboxWorkspaceUnreadResponse
 	testutil.Call(f.t, inboxWorkspaceHandler(testHandler.UnreadInboxSummary),
@@ -239,8 +239,12 @@ func TestMarkIssueInboxReadReadsItemsThatNeedHandling(t *testing.T) {
 			if got := f.openIssue(); got != 2 {
 				t.Fatalf("count = %d, want both rows read", got)
 			}
-			if !f.read(pendingID) || !f.read(comment) || f.unreadRows() != 0 || f.rawUnread() != 0 {
+			if !f.read(pendingID) || !f.read(comment) || f.rawUnread() != 0 {
 				t.Fatalf("opening the issue left %s unread", pending.notifType)
+			}
+			// Opening is not handling: the issue still waits in the Inbox.
+			if f.pendingRows() != 1 {
+				t.Fatalf("opening the issue took %s out of the Inbox", pending.notifType)
 			}
 		})
 	}
@@ -342,5 +346,52 @@ func TestMarkInboxReadWithoutAnIssueReadsOnlyTheItem(t *testing.T) {
 	f.markRead(first)
 	if !f.read(first) || f.read(second) {
 		t.Fatal("reading an item without an issue should read only that item")
+	}
+}
+
+func (f issueInboxFixture) archived(id string) bool {
+	f.t.Helper()
+	var archived bool
+	dbfx.QueryRow(f.t, `SELECT archived FROM inbox_item WHERE id = $1`, id).Scan(&archived)
+	return archived
+}
+
+// A notice asks nothing of the member, so opening the issue takes it out of
+// the Inbox, from the inbox row and from the issue page alike.
+func TestOpeningAnIssueArchivesItsNotices(t *testing.T) {
+	for _, open := range []struct {
+		name string
+		run  func(f issueInboxFixture)
+	}{
+		{"in the inbox", func(f issueInboxFixture) { f.openInInbox() }},
+		{"outside the inbox", func(f issueInboxFixture) { f.openIssue() }},
+	} {
+		t.Run(open.name, func(t *testing.T) {
+			f := newIssueInboxFixture(t, "notice "+open.name)
+			reaction := f.notify("reaction_added", "info", 1)
+			if f.pendingRows() != 1 {
+				t.Fatal("a notice should count in the Inbox until it is opened")
+			}
+			open.run(f)
+			if !f.archived(reaction) || f.pendingRows() != 0 {
+				t.Fatal("opening the issue left its notice in the Inbox")
+			}
+		})
+	}
+}
+
+// Only the notices leave: a row that waits on the member keeps the issue in
+// the Inbox after it is opened.
+func TestOpeningAnIssueKeepsRowsThatWaitOnTheMember(t *testing.T) {
+	f := newIssueInboxFixture(t, "notice beside a mention")
+	mention := f.notify("mentioned", "info", 2)
+	reaction := f.notify("reaction_added", "info", 1)
+
+	f.openInInbox()
+	if !f.archived(reaction) {
+		t.Fatal("opening the issue left its notice in the Inbox")
+	}
+	if f.archived(mention) || f.pendingRows() != 1 {
+		t.Fatal("opening the issue archived a row that waits on the member")
 	}
 }

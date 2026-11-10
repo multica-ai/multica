@@ -30,11 +30,12 @@ WITH base AS MATERIALIZED (
       AND i.recipient_type = 'member'
       AND i.recipient_id = $2::uuid
       AND i.archived = true
+      AND i.type = ANY($3::text[])
       -- MUL-8472: private projects the caller cannot see.
-      AND ($3::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
+      AND ($4::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM issue hidden_issue
           WHERE hidden_issue.id = i.issue_id
-            AND hidden_issue.project_id = ANY($3::uuid[])
+            AND hidden_issue.project_id = ANY($4::uuid[])
       ))
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM inbox_item active
@@ -42,14 +43,15 @@ WITH base AS MATERIALIZED (
             AND active.recipient_type = i.recipient_type
             AND active.recipient_id = i.recipient_id
             AND active.issue_id = i.issue_id AND active.archived = false
+            AND active.type = ANY($3::text[])
       ))
 ), notification_match AS MATERIALIZED (
     SELECT base.id, base.issue_id, base.group_id, base.created_at, base.read, base.type_group, base.actor,
-           (cardinality($4::text[]) = 0
-            OR (type_group = ANY($4::text[])) <> ('type' = ANY($5::text[]))) AS type_match,
-           (cardinality($6::text[]) = 0
-            OR COALESCE(actor = ANY($6::text[]), false) <> ('actor' = ANY($5::text[]))) AS actor_match,
-           ($7::timestamptz IS NULL OR created_at >= $7::timestamptz) AS received_match
+           (cardinality($5::text[]) = 0
+            OR (type_group = ANY($5::text[])) <> ('type' = ANY($6::text[]))) AS type_match,
+           (cardinality($7::text[]) = 0
+            OR COALESCE(actor = ANY($7::text[]), false) <> ('actor' = ANY($6::text[]))) AS actor_match,
+           ($8::timestamptz IS NULL OR created_at >= $8::timestamptz) AS received_match
     FROM base
 ), groups AS (
     SELECT DISTINCT group_id, issue_id FROM base
@@ -67,26 +69,26 @@ WITH base AS MATERIALIZED (
       AND iss.workspace_id = $1::uuid
 ), issue_match AS MATERIALIZED (
     SELECT projected.group_id, projected.issue_ref, projected.issue_status, projected.issue_priority, projected.project_key, projected.assignee_key, projected.due_date, projected.label_ids,
-           (cardinality($8::text[]) = 0 OR (issue_ref IS NOT NULL
-            AND (issue_status = ANY($8::text[])) <> ('status' = ANY($5::text[])))) AS status_match,
            (cardinality($9::text[]) = 0 OR (issue_ref IS NOT NULL
-            AND (issue_priority = ANY($9::text[])) <> ('priority' = ANY($5::text[])))) AS priority_match,
+            AND (issue_status = ANY($9::text[])) <> ('status' = ANY($6::text[])))) AS status_match,
            (cardinality($10::text[]) = 0 OR (issue_ref IS NOT NULL
-            AND (project_key = ANY($10::text[])) <> ('project' = ANY($5::text[])))) AS project_match,
+            AND (issue_priority = ANY($10::text[])) <> ('priority' = ANY($6::text[])))) AS priority_match,
            (cardinality($11::text[]) = 0 OR (issue_ref IS NOT NULL
-            AND (assignee_key = ANY($11::text[])) <> ('assignee' = ANY($5::text[])))) AS assignee_match,
+            AND (project_key = ANY($11::text[])) <> ('project' = ANY($6::text[])))) AS project_match,
            (cardinality($12::text[]) = 0 OR (issue_ref IS NOT NULL
-            AND (label_ids && $12::text[]) <> ('label' = ANY($5::text[])))) AS label_match,
-           (cardinality($13::text[]) = 0 OR (issue_ref IS NOT NULL AND COALESCE(
-                ('overdue' = ANY($13::text[]) AND due_date < $14::date)
-             OR ('today' = ANY($13::text[]) AND due_date = $14::date)
-             OR ('this_week' = ANY($13::text[])
-                 AND due_date >= $14::date - (EXTRACT(ISODOW FROM $14::date)::int - 1)
-                 AND due_date < $14::date - (EXTRACT(ISODOW FROM $14::date)::int - 1) + 7)
-             OR ('next_7_days' = ANY($13::text[])
-                 AND due_date >= $14::date AND due_date < $14::date + 7)
-             OR ('none' = ANY($13::text[]) AND due_date IS NULL), false)
-            <> ('dueDate' = ANY($5::text[])))) AS due_match
+            AND (assignee_key = ANY($12::text[])) <> ('assignee' = ANY($6::text[])))) AS assignee_match,
+           (cardinality($13::text[]) = 0 OR (issue_ref IS NOT NULL
+            AND (label_ids && $13::text[]) <> ('label' = ANY($6::text[])))) AS label_match,
+           (cardinality($14::text[]) = 0 OR (issue_ref IS NOT NULL AND COALESCE(
+                ('overdue' = ANY($14::text[]) AND due_date < $15::date)
+             OR ('today' = ANY($14::text[]) AND due_date = $15::date)
+             OR ('this_week' = ANY($14::text[])
+                 AND due_date >= $15::date - (EXTRACT(ISODOW FROM $15::date)::int - 1)
+                 AND due_date < $15::date - (EXTRACT(ISODOW FROM $15::date)::int - 1) + 7)
+             OR ('next_7_days' = ANY($14::text[])
+                 AND due_date >= $15::date AND due_date < $15::date + 7)
+             OR ('none' = ANY($14::text[]) AND due_date IS NULL), false)
+            <> ('dueDate' = ANY($6::text[])))) AS due_match
     FROM projected
 ), reps AS (
     SELECT DISTINCT ON (group_id) group_id, read
@@ -94,7 +96,7 @@ WITH base AS MATERIALIZED (
     WHERE type_match AND actor_match AND received_match
     ORDER BY group_id, created_at DESC, id DESC
 ), matched AS (
-    SELECT issue_match.group_id, issue_match.issue_ref, issue_match.issue_status, issue_match.issue_priority, issue_match.project_key, issue_match.assignee_key, issue_match.due_date, issue_match.label_ids, issue_match.status_match, issue_match.priority_match, issue_match.project_match, issue_match.assignee_match, issue_match.label_match, issue_match.due_match, (NOT $15::boolean OR NOT reps.read) AS read_match, reps.read
+    SELECT issue_match.group_id, issue_match.issue_ref, issue_match.issue_status, issue_match.issue_priority, issue_match.project_key, issue_match.assignee_key, issue_match.due_date, issue_match.label_ids, issue_match.status_match, issue_match.priority_match, issue_match.project_match, issue_match.assignee_match, issue_match.label_match, issue_match.due_match, (NOT $16::boolean OR NOT reps.read) AS read_match, reps.read
     FROM reps JOIN issue_match USING (group_id)
 ), type_reps AS (
     SELECT DISTINCT ON (group_id, type_group) group_id, type_group, read
@@ -129,12 +131,12 @@ FROM matched, unnest(label_ids) AS label GROUP BY label
 UNION ALL
 SELECT 'types'::text, type_reps.type_group::text,
        count(*) FILTER (WHERE status_match AND priority_match AND project_match AND assignee_match AND label_match AND due_match
-                        AND (NOT $15::boolean OR NOT type_reps.read))::bigint
+                        AND (NOT $16::boolean OR NOT type_reps.read))::bigint
 FROM type_reps JOIN issue_match USING (group_id) GROUP BY type_reps.type_group
 UNION ALL
 SELECT 'actors'::text, actor_reps.actor::text,
        count(*) FILTER (WHERE status_match AND priority_match AND project_match AND assignee_match AND label_match AND due_match
-                        AND (NOT $15::boolean OR NOT actor_reps.read))::bigint
+                        AND (NOT $16::boolean OR NOT actor_reps.read))::bigint
 FROM actor_reps JOIN issue_match USING (group_id) GROUP BY actor_reps.actor
 UNION ALL
 SELECT 'unread'::text, 'unread'::text,
@@ -145,6 +147,7 @@ FROM matched
 type ArchivedInboxFacetsParams struct {
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
 	RecipientID      pgtype.UUID        `json:"recipient_id"`
+	TurnTypes        []string           `json:"turn_types"`
 	HiddenProjectIds []pgtype.UUID      `json:"hidden_project_ids"`
 	Types            []string           `json:"types"`
 	Negated          []string           `json:"negated"`
@@ -173,6 +176,7 @@ func (q *Queries) ArchivedInboxFacets(ctx context.Context, arg ArchivedInboxFace
 	rows, err := q.db.Query(ctx, archivedInboxFacets,
 		arg.WorkspaceID,
 		arg.RecipientID,
+		arg.TurnTypes,
 		arg.HiddenProjectIds,
 		arg.Types,
 		arg.Negated,
@@ -225,29 +229,31 @@ WITH base AS MATERIALIZED (
       AND i.recipient_type = 'member'
       AND i.recipient_id = $2::uuid
       AND i.archived = true
+      AND i.type = ANY($3::text[])
       -- MUL-8472: private projects the caller cannot see.
-      AND ($3::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
+      AND ($4::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM issue hidden_issue
           WHERE hidden_issue.id = i.issue_id
-            AND hidden_issue.project_id = ANY($3::uuid[])
+            AND hidden_issue.project_id = ANY($4::uuid[])
       ))
-      AND ($4::uuid IS NULL OR i.issue_id = $4::uuid
-           OR (i.issue_id IS NULL AND i.id = $4::uuid))
+      AND ($5::uuid IS NULL OR i.issue_id = $5::uuid
+           OR (i.issue_id IS NULL AND i.id = $5::uuid))
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM inbox_item active
           WHERE active.workspace_id = i.workspace_id
             AND active.recipient_type = i.recipient_type
             AND active.recipient_id = i.recipient_id
             AND active.issue_id = i.issue_id AND active.archived = false
+            AND active.type = ANY($3::text[])
       ))
 ), newest AS (
     SELECT DISTINCT ON (group_id) base.id, base.issue_id, base.group_id, base.created_at, base.read, base.type_group, base.actor
     FROM base
-    WHERE (cardinality($5::text[]) = 0
-           OR (type_group = ANY($5::text[])) <> ('type' = ANY($6::text[])))
-      AND (cardinality($7::text[]) = 0
-           OR COALESCE(actor = ANY($7::text[]), false) <> ('actor' = ANY($6::text[])))
-      AND ($8::timestamptz IS NULL OR created_at >= $8::timestamptz)
+    WHERE (cardinality($6::text[]) = 0
+           OR (type_group = ANY($6::text[])) <> ('type' = ANY($7::text[])))
+      AND (cardinality($8::text[]) = 0
+           OR COALESCE(actor = ANY($8::text[]), false) <> ('actor' = ANY($7::text[])))
+      AND ($9::timestamptz IS NULL OR created_at >= $9::timestamptz)
     ORDER BY group_id, created_at DESC, id DESC
 ), projected AS (
     SELECT newest.id, newest.created_at, newest.read,
@@ -264,31 +270,31 @@ WITH base AS MATERIALIZED (
 ), selected AS (
     SELECT projected.id, projected.created_at, projected.issue_status, projected.issue_priority
     FROM projected
-    WHERE (cardinality($9::text[]) = 0 OR (issue_ref IS NOT NULL
-           AND (issue_status = ANY($9::text[])) <> ('status' = ANY($6::text[]))))
-      AND (cardinality($10::text[]) = 0 OR (issue_ref IS NOT NULL
-           AND (issue_priority = ANY($10::text[])) <> ('priority' = ANY($6::text[]))))
+    WHERE (cardinality($10::text[]) = 0 OR (issue_ref IS NOT NULL
+           AND (issue_status = ANY($10::text[])) <> ('status' = ANY($7::text[]))))
       AND (cardinality($11::text[]) = 0 OR (issue_ref IS NOT NULL
-           AND (project_key = ANY($11::text[])) <> ('project' = ANY($6::text[]))))
+           AND (issue_priority = ANY($11::text[])) <> ('priority' = ANY($7::text[]))))
       AND (cardinality($12::text[]) = 0 OR (issue_ref IS NOT NULL
-           AND (assignee_key = ANY($12::text[])) <> ('assignee' = ANY($6::text[]))))
+           AND (project_key = ANY($12::text[])) <> ('project' = ANY($7::text[]))))
       AND (cardinality($13::text[]) = 0 OR (issue_ref IS NOT NULL
-           AND (label_ids && $13::text[]) <> ('label' = ANY($6::text[]))))
-      AND (cardinality($14::text[]) = 0 OR (issue_ref IS NOT NULL AND COALESCE(
-               ('overdue' = ANY($14::text[]) AND due_date < $15::date)
-            OR ('today' = ANY($14::text[]) AND due_date = $15::date)
-            OR ('this_week' = ANY($14::text[])
-                AND due_date >= $15::date - (EXTRACT(ISODOW FROM $15::date)::int - 1)
-                AND due_date < $15::date - (EXTRACT(ISODOW FROM $15::date)::int - 1) + 7)
-            OR ('next_7_days' = ANY($14::text[])
-                AND due_date >= $15::date AND due_date < $15::date + 7)
-            OR ('none' = ANY($14::text[]) AND due_date IS NULL), false)
-           <> ('dueDate' = ANY($6::text[]))))
-      AND (NOT $16::boolean OR NOT read)
-      AND ($17::timestamptz IS NULL OR
-           (created_at, id) < ($17::timestamptz, $18::uuid))
+           AND (assignee_key = ANY($13::text[])) <> ('assignee' = ANY($7::text[]))))
+      AND (cardinality($14::text[]) = 0 OR (issue_ref IS NOT NULL
+           AND (label_ids && $14::text[]) <> ('label' = ANY($7::text[]))))
+      AND (cardinality($15::text[]) = 0 OR (issue_ref IS NOT NULL AND COALESCE(
+               ('overdue' = ANY($15::text[]) AND due_date < $16::date)
+            OR ('today' = ANY($15::text[]) AND due_date = $16::date)
+            OR ('this_week' = ANY($15::text[])
+                AND due_date >= $16::date - (EXTRACT(ISODOW FROM $16::date)::int - 1)
+                AND due_date < $16::date - (EXTRACT(ISODOW FROM $16::date)::int - 1) + 7)
+            OR ('next_7_days' = ANY($15::text[])
+                AND due_date >= $16::date AND due_date < $16::date + 7)
+            OR ('none' = ANY($15::text[]) AND due_date IS NULL), false)
+           <> ('dueDate' = ANY($7::text[]))))
+      AND (NOT $17::boolean OR NOT read)
+      AND ($18::timestamptz IS NULL OR
+           (created_at, id) < ($18::timestamptz, $19::uuid))
     ORDER BY created_at DESC, id DESC
-    LIMIT $19::int
+    LIMIT $20::int
 )
 SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, selected.issue_status, selected.issue_priority,
        iss.project_id AS issue_project_id,
@@ -320,6 +326,7 @@ ORDER BY i.created_at DESC, i.id DESC
 type ListArchivedInboxPageParams struct {
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
 	RecipientID      pgtype.UUID        `json:"recipient_id"`
+	TurnTypes        []string           `json:"turn_types"`
 	HiddenProjectIds []pgtype.UUID      `json:"hidden_project_ids"`
 	GroupID          pgtype.UUID        `json:"group_id"`
 	Types            []string           `json:"types"`
@@ -357,10 +364,13 @@ type ListArchivedInboxPageRow struct {
 // "unread" then test that group. Issue filters never match a notification
 // without an issue, "is not" included. Type groups mirror INBOX_TYPE_GROUPS.
 // Select narrow group representatives before loading bodies or comment anchors.
+// Only types the Inbox lists (inbox.TurnTypes) are history here, and only an
+// active row of one of them keeps an issue out of this list.
 func (q *Queries) ListArchivedInboxPage(ctx context.Context, arg ListArchivedInboxPageParams) ([]ListArchivedInboxPageRow, error) {
 	rows, err := q.db.Query(ctx, listArchivedInboxPage,
 		arg.WorkspaceID,
 		arg.RecipientID,
+		arg.TurnTypes,
 		arg.HiddenProjectIds,
 		arg.GroupID,
 		arg.Types,

@@ -69,7 +69,18 @@
     "autopilot_quota_exceeded_body": "이 워크스페이스는 현재 기간의 자동화 실행 한도 {{limit}}회에 도달했습니다. 한도가 {{resetAt}}에 초기화될 때까지 이후 자동화 실행은 시작되지 않습니다.",
     "autopilot_quota_upgrade": "업그레이드 옵션 보기",
     "archive": "보관",
-    "unarchive": "보관 해제"
+    "unarchive": "보관 해제",
+    "handled": "처리됨 · 인박스에서 빠졌습니다",
+    "acted_replied": "답장했습니다 · 끝나면 보관하세요",
+    "acted_updated": "이 태스크를 업데이트했습니다 · 끝나면 보관하세요",
+    "handled_notice": "단순 알림 · 열어서 인박스에서 빠졌습니다",
+    "handled_closed": "완료 또는 취소됨 · 인박스에서 빠졌습니다",
+    "handled_agent": "에이전트가 작업 중 · 실행이 끝나면 돌아옵니다",
+    "restore": "인박스로 되돌리기",
+    "unread_from": "읽지 않음 {{count}}건 · 여기부터",
+    "position": "{{index}} / {{total}}",
+    "previous": "이전",
+    "next": "다음"
   },
   "types": {
     "issue_assigned": "할당됨",
@@ -112,7 +123,12 @@
     "created_with_agent": "에이전트가 생성: {{identifier}}",
     "failed_with_detail": "실패: {{detail}}",
     "autopilot_quota_blocked": "한도에 도달하여 실행이 차단됨",
-    "children_done_stage": "{{stage}}단계 하위 태스크가 모두 끝났습니다"
+    "children_done_stage": "{{stage}}단계 하위 태스크가 모두 끝났습니다",
+    "awaiting_review": "검토를 기다리는 중",
+    "waiting_answer": "답변을 기다리는 중",
+    "run_finished": "실행 종료",
+    "mentioned_you": "나를 멘션함",
+    "more": "외 {{count}}건"
   },
   "toasts": {
     "source_context_retry_started": "원본 컨텍스트로 재시도를 시작했습니다",

@@ -149,7 +149,9 @@
       "view_edit": "ビューを編集",
       "view_rename": "名前を変更",
       "view_duplicate": "複製",
-      "view_delete": "ビューを削除"
+      "view_delete": "ビューを削除",
+      "inbox_view_all": "すべて表示（{{total}}）",
+      "inbox_empty": "今対応が必要なものはありません"
     },
     "team": {
       "new_agent": "新規エージェント",

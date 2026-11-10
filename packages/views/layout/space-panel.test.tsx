@@ -19,7 +19,6 @@ vi.mock("./panels/autopilots-panel", () => ({
   AutopilotsPanel: () => <div data-testid="autopilots-panel" />,
 }));
 vi.mock("./panels/list-space-peeks", () => ({
-  InboxPeek: () => <div data-testid="inbox-peek" />,
   ChatPeek: () => <div data-testid="chat-peek" />,
 }));
 
@@ -57,11 +56,18 @@ describe("SpacePanel", () => {
     expect(screen.getByTestId("work-panel")).toBeInTheDocument();
   });
 
-  // Inbox, Chat and Settings render their own list column in the card.
+  // Chat and Settings render their own list column in the card.
   it("renders nothing for spaces that bring their own column", () => {
-    navigation.pathname = "/acme/inbox";
+    navigation.pathname = "/acme/chat";
     renderPanel();
     expect(panel()).toBeNull();
+  });
+
+  it("keeps the Work panel beside the Inbox", () => {
+    navigation.pathname = "/acme/inbox";
+    renderPanel();
+    expect(panel()).toHaveAttribute("data-state", "expanded");
+    expect(screen.getByTestId("work-panel")).toBeInTheDocument();
   });
 
   it("collapses from a click on its edge and keeps its content out of reach", () => {
@@ -107,15 +113,13 @@ describe("SpacePanel", () => {
     }
   });
 
-  it("previews Inbox and Chat from another space, not over their own page", () => {
+  it("previews Chat from another space, not over its own page", () => {
     vi.useFakeTimers();
     try {
       renderPanel();
       act(() => shell!.toggleNav());
-      act(() => shell!.requestPeek("inbox"));
-      act(() => vi.advanceTimersByTime(200));
-      expect(screen.getByTestId("inbox-peek")).toBeInTheDocument();
       act(() => shell!.requestPeek("chat"));
+      act(() => vi.advanceTimersByTime(200));
       expect(screen.getByTestId("chat-peek")).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -124,11 +128,11 @@ describe("SpacePanel", () => {
 
   // There the page's own list column floats instead (ListColumn).
   it("leaves the current list space's preview to its list column", () => {
-    navigation.pathname = "/acme/inbox";
+    navigation.pathname = "/acme/chat";
     renderPanel();
     act(() => shell!.toggleNav());
-    act(() => shell!.requestPeek("inbox"));
-    act(() => shell!.requestPeek("inbox"));
+    act(() => shell!.requestPeek("chat"));
+    act(() => shell!.requestPeek("chat"));
     expect(peek()).toBeNull();
   });
 });

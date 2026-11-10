@@ -71,7 +71,18 @@
     "autopilot_quota_exceeded_body": "Este espacio de trabajo ha alcanzado su límite de {{limit}} ejecuciones de automatizaciones para el periodo actual. No se iniciarán más ejecuciones de automatizaciones hasta que se reinicie la cuota {{resetAt}}.",
     "autopilot_quota_upgrade": "Ver opciones de mejora del plan",
     "archive": "Archivar",
-    "unarchive": "Desarchivar"
+    "unarchive": "Desarchivar",
+    "handled": "Gestionado · salió de la bandeja de entrada",
+    "acted_replied": "Respondiste · archívala cuando termines",
+    "acted_updated": "Actualizaste esta tarea · archívala cuando termines",
+    "handled_notice": "Solo un aviso · salió de la bandeja de entrada al abrirlo",
+    "handled_closed": "Hecho o cancelado · salió de la bandeja de entrada",
+    "handled_agent": "Un agente se encarga · volverá cuando termine la ejecución",
+    "restore": "Devolver a la bandeja de entrada",
+    "unread_from": "{{count}} sin leer · empieza aquí",
+    "position": "{{index}} / {{total}}",
+    "previous": "Anterior",
+    "next": "Siguiente"
   },
   "types": {
     "issue_assigned": "Asignada",
@@ -114,7 +125,12 @@
     "created_with_agent": "Creada con agente: {{identifier}}",
     "failed_with_detail": "Falló: {{detail}}",
     "autopilot_quota_blocked": "Ejecución bloqueada porque se alcanzó el límite",
-    "children_done_stage": "Sub-tareas de la etapa {{stage}} finalizadas"
+    "children_done_stage": "Sub-tareas de la etapa {{stage}} finalizadas",
+    "awaiting_review": "Espera tu revisión",
+    "waiting_answer": "Espera tu respuesta",
+    "run_finished": "Ejecución finalizada",
+    "mentioned_you": "Te mencionó",
+    "more": "+{{count}} más"
   },
   "toasts": {
     "source_context_retry_started": "Reintento iniciado con el contexto original",

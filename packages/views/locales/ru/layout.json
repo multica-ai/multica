@@ -129,7 +129,9 @@
       "all_projects_few": "Всего {{count}} проекта",
       "all_projects_many": "Всего {{count}} проектов",
       "project_issues_retry": "Повторить",
-      "unread": "Непрочитанные"
+      "unread": "Непрочитанные",
+      "inbox_view_all": "Показать все ({{total}})",
+      "inbox_empty": "Сейчас ничего не ждёт вас"
     },
     "team": {
       "new_agent": "Новый агент",

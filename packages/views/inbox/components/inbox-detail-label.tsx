@@ -51,7 +51,11 @@ function shortDate(dateStr: string, locale: string): string {
   return formatDateOnly(dateStr, { month: "short", day: "numeric" }, locale);
 }
 
-export function InboxDetailLabel({ item }: { item: InboxItem }) {
+/**
+ * Why a notification is in the Inbox, in one phrase. `reasonOnly` keeps a
+ * comment to its reason, for hosts that show what was written beside it.
+ */
+export function InboxDetailLabel({ item, reasonOnly = false }: { item: InboxItem; reasonOnly?: boolean }) {
   const { t } = useT("inbox");
   const { t: tIssues } = useT("issues");
   const locale = useLocale();
@@ -113,8 +117,24 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
       if (details.to) return <span>{t(($) => $.labels.set_due_date_to, { date: shortDate(details.to, locale) })}</span>;
       return <span>{t(($) => $.labels.removed_due_date)}</span>;
     }
+    // What an agent's finished run asks of the reader is where it left the
+    // issue: a review status hands over a result, blocked asks a question.
+    case "agent_completed": {
+      const status = item.issue_status;
+      if (status === "blocked") return <span>{t(($) => $.labels.waiting_answer)}</span>;
+      if (status && status !== "in_progress" && categoryOf(status) === "started") {
+        return <span>{t(($) => $.labels.awaiting_review)}</span>;
+      }
+      return <span>{t(($) => $.labels.run_finished)}</span>;
+    }
+    case "agent_blocked":
+      return <span>{t(($) => $.labels.waiting_answer)}</span>;
+    case "review_requested":
+      return <span>{t(($) => $.labels.awaiting_review)}</span>;
+    case "mentioned":
+      return <span>{t(($) => $.labels.mentioned_you)}</span>;
     case "new_comment": {
-      if (item.body) return <span>{item.body}</span>;
+      if (item.body && !reasonOnly) return <span>{item.body}</span>;
       return <span>{typeLabels[item.type]}</span>;
     }
     case "reaction_added": {

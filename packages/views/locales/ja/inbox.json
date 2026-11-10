@@ -69,7 +69,18 @@
     "autopilot_quota_exceeded_body": "このワークスペースは現在の期間の自動化実行上限 {{limit}} 回に達しました。実行枠が {{resetAt}} にリセットされるまで、以降の自動化は開始されません。",
     "autopilot_quota_upgrade": "アップグレード方法を見る",
     "archive": "アーカイブ",
-    "unarchive": "アーカイブ解除"
+    "unarchive": "アーカイブ解除",
+    "handled": "対応済み · インボックスから外れました",
+    "acted_replied": "返信しました · 終わったらアーカイブ",
+    "acted_updated": "このタスクを更新しました · 終わったらアーカイブ",
+    "handled_notice": "お知らせのみ · 開いたのでインボックスから外れました",
+    "handled_closed": "完了またはキャンセル済み · インボックスから外れました",
+    "handled_agent": "エージェントが対応中 · 実行が終わると戻ります",
+    "restore": "インボックスに戻す",
+    "unread_from": "未読 {{count}} 件 · ここから",
+    "position": "{{index}} / {{total}}",
+    "previous": "前へ",
+    "next": "次へ"
   },
   "types": {
     "issue_assigned": "割り当て済み",
@@ -112,7 +123,12 @@
     "created_with_agent": "エージェントで作成: {{identifier}}",
     "failed_with_detail": "失敗: {{detail}}",
     "autopilot_quota_blocked": "上限に達したため実行をブロックしました",
-    "children_done_stage": "ステージ {{stage}} のサブタスクがすべて終わりました"
+    "children_done_stage": "ステージ {{stage}} のサブタスクがすべて終わりました",
+    "awaiting_review": "あなたのレビュー待ち",
+    "waiting_answer": "あなたの回答待ち",
+    "run_finished": "実行が終了しました",
+    "mentioned_you": "あなたをメンションしました",
+    "more": "他 {{count}} 件"
   },
   "toasts": {
     "source_context_retry_started": "元のコンテキストで再試行を開始しました",

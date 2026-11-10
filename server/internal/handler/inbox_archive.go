@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -144,7 +145,7 @@ func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) 
 		Types: filters.Types, Negated: filters.Negated, Actors: filters.Actors, ReceivedAfter: filters.ReceivedAfter,
 		Statuses: filters.Statuses, Priorities: filters.Priorities, Projects: filters.Projects,
 		Assignees: filters.Assignees, Labels: filters.Labels, DueDates: filters.DueDates, Today: filters.Today,
-		UnreadOnly: filters.UnreadOnly,
+		UnreadOnly: filters.UnreadOnly, TurnTypes: inbox.TurnTypes,
 	}
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -236,6 +237,7 @@ func (h *Handler) GetArchivedInboxFacets(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	p.TurnTypes = inbox.TurnTypes
 	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(p.WorkspaceID))
 	if !ok {
 		return

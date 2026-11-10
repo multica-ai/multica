@@ -149,7 +149,9 @@
       "view_edit": "編輯檢視",
       "view_rename": "重新命名",
       "view_duplicate": "建立副本",
-      "view_delete": "刪除檢視"
+      "view_delete": "刪除檢視",
+      "inbox_view_all": "查看全部 {{total}} 件",
+      "inbox_empty": "現在沒有需要你處理的事"
     },
     "team": {
       "new_agent": "新建 AI 代理",

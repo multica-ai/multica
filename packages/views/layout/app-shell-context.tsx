@@ -6,9 +6,10 @@ import { useSidebarSafe } from "@multica/ui/components/ui/sidebar";
 import { useNavigation } from "../navigation";
 
 /**
- * Spaces whose navigation lives in the shell panel. Inbox, Chat and Settings
- * are list-and-detail pages that already render their own list column in the
- * same card, so the shell adds no panel for them.
+ * Spaces whose navigation lives in the shell panel. Chat and Settings are
+ * list-and-detail pages that already render their own list column in the
+ * same card, so the shell adds no panel for them. The Inbox is a page of Work,
+ * listed at the top of the Work panel.
  */
 export const PANEL_SPACES: ReadonlySet<AppSpaceId> = new Set(["work", "team", "autopilots"]);
 
@@ -23,8 +24,8 @@ interface AppShellContextValue {
   /** The current space has a shell panel (collapsible with the sidebar toggle). */
   hasPanel: boolean;
   /**
-   * Inbox, Chat and Settings keep their own list column, which collapses with
-   * the space panel. Tracked apart from the panel's open state so the md–lg
+   * Chat and Settings keep their own list column, which collapses with the
+   * space panel. Tracked apart from the panel's open state so the md–lg
    * auto-collapse never hides a list the page needs.
    */
   listCollapsed: boolean;
@@ -115,7 +116,7 @@ export function AppShellProvider({
   }, [clearTimers]);
 
   // Following a link out of the preview lands on its page; the preview has
-  // done its job. Inbox and Chat select rows through the query string alone.
+  // done its job. Chat selects rows through the query string alone.
   const shownPathname = renderedPathname || pathname;
   useEffect(() => {
     closePeek();
@@ -192,7 +193,7 @@ export function useAppShell(): AppShellContextValue | null {
 }
 
 /**
- * Whether a list-and-detail page (Inbox, Chat, Settings) hides its list
+ * Whether a list-and-detail page (Chat, Settings) hides its list
  * column. Below `md` those pages manage the list themselves.
  */
 export function useListColumnCollapsed(): boolean {

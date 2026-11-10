@@ -71,7 +71,18 @@
     "autopilot_quota_exceeded_body": "Cet espace de travail a atteint sa limite de {{limit}} exécutions d'automatisation pour la période actuelle. Les prochaines exécutions d'automatisation ne démarreront qu'après la réinitialisation du quota {{resetAt}}.",
     "autopilot_quota_upgrade": "Voir les options de mise à niveau",
     "archive": "Archiver",
-    "unarchive": "Désarchiver"
+    "unarchive": "Désarchiver",
+    "handled": "Traité · retiré de la boîte de réception",
+    "acted_replied": "Vous avez répondu · archivez-la une fois terminé",
+    "acted_updated": "Vous avez mis à jour cette tâche · archivez-la une fois terminé",
+    "handled_notice": "Simple information · retirée de la boîte de réception à l'ouverture",
+    "handled_closed": "Terminé ou annulé · retiré de la boîte de réception",
+    "handled_agent": "Un agent s'en occupe · reviendra à la fin de l'exécution",
+    "restore": "Remettre dans la boîte de réception",
+    "unread_from": "{{count}} non lus · commence ici",
+    "position": "{{index}} / {{total}}",
+    "previous": "Précédent",
+    "next": "Suivant"
   },
   "types": {
     "issue_assigned": "Assigné",
@@ -114,7 +125,12 @@
     "created_with_agent": "Créé avec un agent : {{identifier}}",
     "failed_with_detail": "Échec : {{detail}}",
     "autopilot_quota_blocked": "Exécution bloquée car la limite a été atteinte",
-    "children_done_stage": "Sous-tâches de l’étape {{stage}} terminées"
+    "children_done_stage": "Sous-tâches de l’étape {{stage}} terminées",
+    "awaiting_review": "En attente de votre revue",
+    "waiting_answer": "En attente de votre réponse",
+    "run_finished": "Exécution terminée",
+    "mentioned_you": "Vous a mentionné",
+    "more": "+{{count}} de plus"
   },
   "toasts": {
     "source_context_retry_started": "Nouvelle tentative démarrée avec le contexte d'origine",

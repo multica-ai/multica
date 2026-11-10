@@ -149,7 +149,9 @@
       "view_edit": "编辑视图",
       "view_rename": "重命名",
       "view_duplicate": "创建副本",
-      "view_delete": "删除视图"
+      "view_delete": "删除视图",
+      "inbox_view_all": "查看全部 {{total}} 件",
+      "inbox_empty": "现在没有需要你处理的事"
     },
     "team": {
       "new_agent": "新建智能体",

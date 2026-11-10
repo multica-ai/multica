@@ -214,6 +214,22 @@ UPDATE inbox_item SET archived = true
 WHERE workspace_id = $1 AND issue_id = $2 AND type = $3 AND archived = false
 RETURNING recipient_type, recipient_id;
 
+-- name: ArchiveInboxByIssueForAll :many
+-- An issue that reached a done or cancelled status waits on no one, so it
+-- leaves every recipient's Inbox at once.
+UPDATE inbox_item SET archived = true
+WHERE workspace_id = $1 AND issue_id = $2 AND archived = false
+RETURNING recipient_type, recipient_id;
+
+-- name: ArchiveNoticeInboxByIssue :execrows
+-- Reading an issue archives the notices on it (inbox.NoticeTypes): they ask
+-- nothing of the member, so having seen them is having handled them. Rows of
+-- any other type keep the issue in the Inbox.
+UPDATE inbox_item SET archived = true
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
+  AND issue_id = $3 AND archived = false
+  AND type = ANY(sqlc.arg(notice_types)::text[]);
+
 -- name: CountUnreadInbox :one
 SELECT count(*) FROM inbox_item i
 WHERE i.workspace_id = sqlc.arg('workspace_id')
@@ -228,43 +244,34 @@ WHERE i.workspace_id = sqlc.arg('workspace_id')
         AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
   ));
 
--- name: CountUnreadInboxByWorkspace :many
--- Per-workspace unread inbox counts for a recipient member, matching the
--- inbox UI's deduplicated view: notifications are grouped per issue
--- (Linear-style, one row per issue) and an issue counts as unread only when
--- its NEWEST non-archived item is unread. Opening an issue reads the whole
--- group now (MUL-8618), but rows read before that read only the newest item,
--- so counting raw unread rows would keep those older siblings alive and light
--- the switcher dot for a workspace whose inbox the user sees as empty
--- (MUL-3695). Items without an issue group on their own id. The
--- member join keeps counts scoped to workspaces the user still belongs to,
--- so a stale item left behind in a workspace the user has since left cannot
--- light the dot.
-SELECT newest.workspace_id, count(*) AS count
-FROM (
-    SELECT DISTINCT ON (i.workspace_id, COALESCE(i.issue_id, i.id))
-        i.workspace_id, i.read
-    FROM inbox_item i
-    JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id
-    WHERE i.recipient_type = 'member'
-      AND i.recipient_id = $1
-      AND i.archived = false
-      -- MUL-8472: issues in private projects the recipient is outside of
-      -- (neither a project member nor a workspace owner/admin) do not count.
-      AND NOT (m.role NOT IN ('owner', 'admin') AND EXISTS (
-          SELECT 1 FROM issue private_issue
-          JOIN project private_project ON private_project.id = private_issue.project_id
-          WHERE private_issue.id = i.issue_id
-            AND private_project.visibility = 'private'
-            AND NOT EXISTS (
-                SELECT 1 FROM project_member pm
-                WHERE pm.project_id = private_project.id AND pm.user_id = i.recipient_id
-            )
-      ))
-    ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
-) newest
-WHERE newest.read = false
-GROUP BY newest.workspace_id;
+-- name: CountPendingInboxByWorkspace :many
+-- Per-workspace count of issues waiting on a recipient member, matching the
+-- rows the Inbox lists: one per issue (items without an issue count on their
+-- own id) with an active item of a type the Inbox shows (inbox.TurnTypes).
+-- Read state does not matter: opening an issue is not handling it, so the
+-- issue counts until the member acts on it or archives it. The member join
+-- keeps counts scoped to workspaces the user still belongs to, so a stale item
+-- left behind in a workspace the user has since left cannot light the dot.
+SELECT i.workspace_id, count(DISTINCT COALESCE(i.issue_id, i.id)) AS count
+FROM inbox_item i
+JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id
+WHERE i.recipient_type = 'member'
+  AND i.recipient_id = sqlc.arg(recipient_id)
+  AND i.archived = false
+  AND i.type = ANY(sqlc.arg(types)::text[])
+  -- MUL-8472: issues in private projects the recipient is outside of
+  -- (neither a project member nor a workspace owner/admin) do not count.
+  AND NOT (m.role NOT IN ('owner', 'admin') AND EXISTS (
+      SELECT 1 FROM issue private_issue
+      JOIN project private_project ON private_project.id = private_issue.project_id
+      WHERE private_issue.id = i.issue_id
+        AND private_project.visibility = 'private'
+        AND NOT EXISTS (
+            SELECT 1 FROM project_member pm
+            WHERE pm.project_id = private_project.id AND pm.user_id = i.recipient_id
+        )
+  ))
+GROUP BY i.workspace_id;
 
 -- name: MarkAllInboxRead :execrows
 UPDATE inbox_item SET read = true

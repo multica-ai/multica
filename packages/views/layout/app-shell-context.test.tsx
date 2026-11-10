@@ -74,7 +74,7 @@ describe("AppShellProvider", () => {
       ["/acme/my-issues", "work", true],
       ["/acme/squads/s-1", "team", true],
       ["/acme/autopilots", "autopilots", true],
-      ["/acme/inbox", "inbox", false],
+      ["/acme/inbox", "work", true],
       ["/acme/chat", "chat", false],
       ["/acme/settings", "settings", false],
       ["/acme/attachments/a-1", null, false],
@@ -145,7 +145,7 @@ describe("AppShellProvider", () => {
 
     act(() => shell!.toggleNav());
     expect(sidebarState).toBe("collapsed");
-    visit("/acme/inbox");
+    visit("/acme/chat");
     expect(listColumnCollapsed).toBe(true);
 
     act(() => shell!.toggleNav());
@@ -155,7 +155,7 @@ describe("AppShellProvider", () => {
   });
 
   it("collapses a list column the md–lg auto-collapse left open", () => {
-    navigation.pathname = "/acme/inbox";
+    navigation.pathname = "/acme/chat";
     renderNavShell();
     act(() => setSidebarOpen!(false));
     expect(listColumnCollapsed).toBe(false);
@@ -185,7 +185,7 @@ describe("AppShellProvider", () => {
     expect(shell!.spaceHref("team", "/acme/agents")).toBe("/acme/agents");
 
     // Memory is per workspace.
-    visit("/beta/inbox");
+    visit("/beta/chat");
     expect(shell!.spaceHref("work", "/beta/issues")).toBe("/beta/issues");
   });
 
@@ -197,17 +197,17 @@ describe("AppShellProvider", () => {
     );
     const { rerender } = render(shellAt("/acme/issues"));
 
-    // Leaving Work for Inbox: the issues page is still mounted, so it keeps
-    // its panel until the inbox page commits.
-    navigation.pathname = "/acme/inbox";
+    // Leaving Work for Chat: the issues page is still mounted, so it keeps
+    // its panel until the chat page commits.
+    navigation.pathname = "/acme/chat";
     rerender(shellAt("/acme/issues"));
     expect(shell!.space).toBe("work");
     expect(shell!.hasPanel).toBe(true);
     // Space memory follows the navigation, not the lagging page.
-    expect(shell!.spaceHref("inbox", "/acme/inbox")).toBe("/acme/inbox");
+    expect(shell!.spaceHref("chat", "/acme/chat")).toBe("/acme/chat");
 
-    rerender(shellAt("/acme/inbox"));
-    expect(shell!.space).toBe("inbox");
+    rerender(shellAt("/acme/chat"));
+    expect(shell!.space).toBe("chat");
     expect(shell!.hasPanel).toBe(false);
     expect(shell!.spaceHref("work", "/acme/issues")).toBe("/acme/issues");
   });

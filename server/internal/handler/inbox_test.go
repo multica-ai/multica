@@ -44,7 +44,7 @@ func TestListInboxProjectsCurrentIssueStatusAndPriority(t *testing.T) {
 		"workspace_id":   workspaceID,
 		"recipient_type": "member",
 		"recipient_id":   testUserID,
-		"type":           "system",
+		"type":           "autopilot_paused",
 		"severity":       "info",
 		"title":          "Issue-less",
 	})
@@ -52,7 +52,7 @@ func TestListInboxProjectsCurrentIssueStatusAndPriority(t *testing.T) {
 		"workspace_id":   workspaceID,
 		"recipient_type": "member",
 		"recipient_id":   testUserID,
-		"type":           "status_changed",
+		"type":           "issue_assigned",
 		"severity":       "info",
 		"issue_id":       issueID,
 		"title":          "Projected issue",

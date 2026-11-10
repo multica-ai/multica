@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/inbox"
@@ -291,9 +292,165 @@ func archiveStaleTaskFailedInbox(
 		"row_count", len(rows), "recipient_count", len(counts))
 }
 
+// publishInboxArchived tells each member whose rows were just archived, so
+// connected clients drop the issue without a reload.
+func publishInboxArchived(bus *events.Bus, workspaceID, issueID, reason string, counts map[string]int64) {
+	for recipientID, count := range counts {
+		bus.Publish(events.Event{
+			Type:        protocol.EventInboxBatchArchived,
+			WorkspaceID: workspaceID,
+			Payload: map[string]any{
+				"recipient_id": recipientID,
+				"count":        count,
+				"issue_id":     issueID,
+				"reason":       reason,
+			},
+		})
+	}
+}
+
+// archiveInboxOnRunStart takes an issue out of a member's Inbox when their
+// own action starts an agent run on it: the issue is with the agent now, and
+// comes back through notifyRunEnded or the task:failed listener when the run
+// ends. Runs the member did not start themselves (delegation, automation, a
+// retry of an earlier attempt) leave the Inbox alone.
+func archiveInboxOnRunStart(ctx context.Context, queries *db.Queries, bus *events.Bus, e events.Event) {
+	payload, ok := e.Payload.(map[string]any)
+	if !ok {
+		return
+	}
+	issueID, _ := payload["issue_id"].(string)
+	taskID, _ := payload["task_id"].(string)
+	issueUUID, err := util.ParseUUID(issueID)
+	if err != nil {
+		return
+	}
+	taskUUID, err := util.ParseUUID(taskID)
+	if err != nil {
+		return
+	}
+	task, err := queries.GetAgentTask(ctx, taskUUID)
+	if err != nil {
+		slog.Error("archive handed-over inbox: failed to get task", "task_id", taskID, "error", err)
+		return
+	}
+	if !task.OriginatorUserID.Valid ||
+		task.OriginatorSource.String != string(attribution.SourceDirectHuman) ||
+		task.RetryOfTaskID.Valid {
+		return
+	}
+	originator := util.UUIDToString(task.OriginatorUserID)
+	count, err := queries.ArchiveInboxByIssue(ctx, db.ArchiveInboxByIssueParams{
+		WorkspaceID:   parseUUID(e.WorkspaceID),
+		RecipientType: "member",
+		RecipientID:   task.OriginatorUserID,
+		IssueID:       issueUUID,
+	})
+	if err != nil {
+		slog.Error("archive handed-over inbox: query failed",
+			"workspace_id", e.WorkspaceID, "issue_id", issueID, "member_id", originator, "error", err)
+		return
+	}
+	if count == 0 {
+		return
+	}
+	publishInboxArchived(bus, e.WorkspaceID, issueID, "handed_to_agent", map[string]int64{originator: count})
+}
+
+// archiveInboxForClosedIssue takes an issue out of every Inbox once it
+// reaches a done or cancelled status, whoever moved it there: nothing on it
+// waits on anyone. A later comment or run delivers a fresh row.
+func archiveInboxForClosedIssue(ctx context.Context, queries *db.Queries, bus *events.Bus, workspaceID, issueID string) {
+	rows, err := queries.ArchiveInboxByIssueForAll(ctx, db.ArchiveInboxByIssueForAllParams{
+		WorkspaceID: parseUUID(workspaceID),
+		IssueID:     parseUUID(issueID),
+	})
+	if err != nil {
+		slog.Error("archive closed-issue inbox: query failed",
+			"workspace_id", workspaceID, "issue_id", issueID, "error", err)
+		return
+	}
+	counts := map[string]int64{}
+	for _, row := range rows {
+		if row.RecipientType != "member" {
+			continue
+		}
+		counts[util.UUIDToString(row.RecipientID)]++
+	}
+	publishInboxArchived(bus, workspaceID, issueID, "issue_closed", counts)
+}
+
+// notifyRunEnded hands an issue back when an agent's run on it completes: to
+// the issue's creator, and to the member whose own action started the run.
+// Runs one agent started for another (delegation, a reaction to an agent's
+// comment) leave the human alone; they hear when the issue they handed over
+// comes back. Agent-created issues therefore reach no one by creator.
+func notifyRunEnded(ctx context.Context, queries *db.Queries, bus *events.Bus, e events.Event) {
+	payload, ok := e.Payload.(map[string]any)
+	if !ok {
+		return
+	}
+	issueID, _ := payload["issue_id"].(string)
+	taskID, _ := payload["task_id"].(string)
+	agentID, _ := payload["agent_id"].(string)
+	issueUUID, err := util.ParseUUID(issueID)
+	if err != nil {
+		return
+	}
+	issue, err := queries.GetIssue(ctx, issueUUID)
+	if err != nil {
+		slog.Error("run ended notification: failed to get issue", "issue_id", issueID, "error", err)
+		return
+	}
+
+	recipients := []string{}
+	if issue.CreatorType == "member" && issue.CreatorID.Valid {
+		recipients = append(recipients, util.UUIDToString(issue.CreatorID))
+	}
+	if taskUUID, err := util.ParseUUID(taskID); err == nil {
+		task, err := queries.GetAgentTask(ctx, taskUUID)
+		if err != nil {
+			slog.Error("run ended notification: failed to get task", "task_id", taskID, "error", err)
+		} else if task.OriginatorUserID.Valid && task.OriginatorSource.String == string(attribution.SourceDirectHuman) {
+			originator := util.UUIDToString(task.OriginatorUserID)
+			if len(recipients) == 0 || recipients[0] != originator {
+				recipients = append(recipients, originator)
+			}
+		}
+	}
+
+	agentEvent := events.Event{
+		Type:        e.Type,
+		WorkspaceID: e.WorkspaceID,
+		ActorType:   "agent",
+		ActorID:     agentID,
+	}
+	details := runDetails(taskID)
+	for _, recipientID := range recipients {
+		notifyDirect(ctx, queries, bus,
+			"member", recipientID,
+			e.WorkspaceID, agentEvent, issueID, issue.Status,
+			"agent_completed", "action_required",
+			issue.Title, "",
+			details,
+		)
+	}
+}
+
+// runDetails names the run an inbox row reports, so opening the row can land
+// on what that run left in the timeline.
+func runDetails(taskID string) []byte {
+	if taskID == "" {
+		return emptyDetails
+	}
+	details, _ := json.Marshal(map[string]string{"task_id": taskID})
+	return details
+}
+
 // notifySubscribers queries the subscriber table for an issue, excludes the
 // actor and any extra IDs, and creates inbox items for each remaining member
-// subscriber. Publishes an inbox:new event for each notification.
+// subscriber. Publishes an inbox:new event for each notification the Inbox
+// lists (inbox.IsTurn); the rest are recorded without being announced.
 // If the issue has a parent and the notification type is in the bubble
 // allowlist, parent issue subscribers are also notified (deduplicated
 // against direct subscribers).
@@ -472,6 +629,9 @@ func notifyIssueSubscribers(
 		}
 
 		notified[subID] = true
+		if !inbox.IsTurn(notifType) {
+			continue
+		}
 		resp := inboxItemToResponse(item)
 		resp["issue_status"] = issueStatus
 		bus.Publish(events.Event{
@@ -487,7 +647,8 @@ func notifyIssueSubscribers(
 }
 
 // notifyDirect creates an inbox item for a specific recipient. Skips if the
-// recipient is the actor. Publishes an inbox:new event on success.
+// recipient is the actor. Publishes an inbox:new event on success when the
+// Inbox lists the type (inbox.IsTurn).
 func notifyDirect(
 	ctx context.Context,
 	queries *db.Queries,
@@ -536,7 +697,7 @@ func notifyDirect(
 			"issue_id", issueID, "recipient_id", recipientID, "type", notifType, "error", err)
 		return
 	}
-	if !inserted {
+	if !inserted || !inbox.IsTurn(notifType) {
 		return
 	}
 
@@ -799,6 +960,18 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		}
 
 		if statusChanged {
+			// A done or cancelled issue leaves every Inbox, before this change
+			// is recorded so its own notification stays as it was written.
+			// FAIL CLOSED: an unresolved custom status keeps the rows, since
+			// hiding what waits on someone is worse than leaving it listed.
+			category, categoryErr := issuestatus.CategoryWithError(ctx, queries, parseUUID(e.WorkspaceID), issue.Status)
+			if categoryErr != nil {
+				slog.Warn("resolve issue status category for inbox archive; keeping rows",
+					"issue_id", issue.ID, "status", issue.Status, "error", categoryErr)
+			} else if category == issuestatus.CategoryDone || category == issuestatus.CategoryClosed {
+				archiveInboxForClosedIssue(ctx, queries, bus, e.WorkspaceID, issue.ID)
+			}
+
 			prevStatus, _ := payload["prev_status"].(string)
 			statusDetails, _ := json.Marshal(map[string]string{
 				"from": prevStatus,
@@ -1042,16 +1215,29 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		)
 	})
 
-	// task:completed — no inbox notification (completion is visible from status change)
+	// task:queued — the member who started the run has handed the issue over
+	bus.Subscribe(protocol.EventTaskQueued, func(e events.Event) {
+		archiveInboxOnRunStart(ctx, queries, bus, e)
+	})
 
-	// task:failed — notify all subscribers except the agent
+	// task:completed — hand the issue back to whoever handed it over
+	bus.Subscribe(protocol.EventTaskCompleted, func(e events.Event) {
+		notifyRunEnded(ctx, queries, bus, e)
+	})
+
+	// task:failed — notify all subscribers except the agent, once the failure
+	// is final: an attempt with a retry pending has not ended the run.
 	bus.Subscribe(protocol.EventTaskFailed, func(e events.Event) {
 		payload, ok := e.Payload.(map[string]any)
 		if !ok {
 			return
 		}
+		if retryPending, _ := payload["retry_pending"].(bool); retryPending {
+			return
+		}
 		agentID, _ := payload["agent_id"].(string)
 		issueID, _ := payload["issue_id"].(string)
+		taskID, _ := payload["task_id"].(string)
 		if issueID == "" {
 			return
 		}
@@ -1076,7 +1262,7 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			},
 			exclude, "task_failed", "action_required",
 			issue.Title, "",
-			emptyDetails)
+			runDetails(taskID))
 	})
 }
 
