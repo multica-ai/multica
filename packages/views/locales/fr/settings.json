@@ -1454,7 +1454,6 @@
   },
   "connected_apps": {
     "description": "Les comptes que vos agents utilisent pour accéder aux apps externes. Les actions autorisées sont exécutées immédiatement.",
-    "add_app": "Ajouter une app",
     "loading": "Chargement des apps…",
     "load_failed": "Impossible de charger les apps.",
     "team_title": "Comptes d'équipe",
@@ -1485,8 +1484,6 @@
     "toast_disconnected": "Déconnecté",
     "toast_failed": "Une erreur est survenue. Veuillez réessayer.",
     "add": {
-      "title": "Ajouter une app",
-      "description": "Connectez un compte pour l'équipe ou pour vous. Les agents qui l'utilisent se choisissent sur la page Apps de chaque agent.",
       "search": "Rechercher une app…",
       "empty": "Aucune app ne correspond.",
       "curated": "Sélection",

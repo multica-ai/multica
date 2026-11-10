@@ -2,10 +2,11 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Radio } from "@base-ui/react/radio";
+import { RadioGroup } from "@base-ui/react/radio-group";
 import { toast } from "sonner";
 import { AlertTriangle, Loader2, Lock, Plug, User, Users } from "@multica/ui/icons";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { Tabs, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   agentAppsOptions,
@@ -60,13 +61,13 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
     const slugs = new Set(apps.map((app) => app.toolkit_slug));
     for (const scope of SCOPES) {
       for (const connection of overview.data?.[scope] ?? []) {
-        if (connection.status === "active" && appBySlug.has(connection.toolkit_slug)) {
+        if (connection.status === "active") {
           slugs.add(connection.toolkit_slug);
         }
       }
     }
     return [...slugs];
-  }, [apps, overview.data, appBySlug]);
+  }, [apps, overview.data]);
 
   const save = (next: AgentApp[]) => {
     update.mutate(
@@ -84,10 +85,10 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
     save(apps.map((a) => (a.toolkit_slug === slug ? { ...a, ...change } : a)));
   const scopeLabel = (scope: AppAccountScope) => ts(($) => $.connected_apps.scopes[scope]);
 
-  if (appsQuery.isLoading || overview.isLoading || catalog.isLoading) {
+  if (appsQuery.isLoading || overview.isLoading) {
     return <p className="text-body text-muted-foreground">{t(($) => $.tab_body.connected_apps.loading)}</p>;
   }
-  if (appsQuery.isError || overview.isError || catalog.isError) {
+  if (appsQuery.isError || overview.isError) {
     return <p className="text-body text-destructive">{t(($) => $.tab_body.connected_apps.load_failed)}</p>;
   }
 
@@ -125,7 +126,7 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
             const scope = app?.account_scope ?? defaultScope;
             const isConnected = connected.has(`${scope}:${slug}`);
             const lockedTeam = scope === "team" && !canManageTeam;
-            const canEnable = !!entry && entry.allowed !== false && (hasPersonal || (hasTeam && canManageTeam));
+            const canEnable = catalog.isSuccess && !!entry && entry.allowed !== false && (hasPersonal || (hasTeam && canManageTeam));
             const AccountIcon = scope === "team" ? Users : User;
             const status =
               scope === "team"
@@ -138,7 +139,13 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
             return (
               <li key={slug} className="space-y-2 p-3">
                 <div className="flex flex-wrap items-center gap-3">
-                  <ComposioToolkitLogo slug={slug} name={name} fallbackLogo={entry?.logo} className={app ? undefined : "grayscale"} />
+                  {entry ? (
+                    <ComposioToolkitLogo slug={slug} name={name} fallbackLogo={entry.logo} className={app ? undefined : "grayscale"} />
+                  ) : (
+                    <span aria-hidden="true" className="flex size-8 shrink-0 items-center justify-center rounded-xs bg-muted text-caption font-semibold text-muted-foreground">
+                      {name.charAt(0).toUpperCase()}
+                    </span>
+                  )}
                   <div className="min-w-0 flex-1 basis-40">
                     <p className={cn("truncate text-body font-medium", !app && "text-muted-foreground")}>{name}</p>
                     <p className={cn("mt-0.5 flex items-start gap-1 text-caption", app && !isConnected ? "text-warning" : "text-muted-foreground")}>
@@ -160,24 +167,28 @@ export function AgentAppsTab({ agent }: { agent: Agent }) {
                     )}
                   </div>
                   {app && hasTeam && hasPersonal && (
-                    <Tabs className="shrink-0" value={scope} onValueChange={(value) => {
-                      if ((value === "team" || value === "personal") && value !== scope && canManageTeam && entry && entry.allowed !== false) patch(slug, { account_scope: value });
-                    }}>
-                      <TabsList className="group-data-horizontal/tabs:h-7" aria-label={t(($) => $.tab_body.connected_apps.account_for, { app: name })}>
-                        {SCOPES.map((value) => (
-                          <TabsTrigger
-                            key={value}
-                            value={value}
-                            className="text-caption"
-                            disabled={update.isPending || lockedTeam || !entry || entry.allowed === false || (value === "team" && !canManageTeam)}
-                            title={!canManageTeam && value === "team" ? t(($) => $.tab_body.connected_apps.team_admin_only) : undefined}
-                          >
-                            {value === "team" && !canManageTeam && <Lock className="size-3" />}
-                            {scopeLabel(value)}
-                          </TabsTrigger>
-                        ))}
-                      </TabsList>
-                    </Tabs>
+                    <RadioGroup
+                      className="inline-flex h-7 shrink-0 items-center rounded-lg bg-muted p-[3px]"
+                      aria-label={t(($) => $.tab_body.connected_apps.account_for, { app: name })}
+                      value={scope}
+                      disabled={update.isPending || lockedTeam || entry?.allowed === false}
+                      onValueChange={(value) => {
+                        if ((value === "team" || value === "personal") && value !== scope && canManageTeam && entry?.allowed !== false && !update.isPending) patch(slug, { account_scope: value });
+                      }}
+                    >
+                      {SCOPES.map((value) => (
+                        <Radio.Root
+                          key={value}
+                          value={value}
+                          className="inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-[calc(var(--radius)-3px)] border border-transparent px-1.5 py-0.5 text-caption font-medium whitespace-nowrap text-muted-foreground transition-[color,background-color,border-color,box-shadow] hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring data-disabled:pointer-events-none data-disabled:opacity-50 data-checked:bg-background data-checked:text-foreground data-checked:shadow-sm dark:data-checked:bg-input/60"
+                          disabled={value === "team" && !canManageTeam}
+                          title={!canManageTeam && value === "team" ? t(($) => $.tab_body.connected_apps.team_admin_only) : undefined}
+                        >
+                          {value === "team" && !canManageTeam && <Lock className="size-3" />}
+                          {scopeLabel(value)}
+                        </Radio.Root>
+                      ))}
+                    </RadioGroup>
                   )}
                   <Switch
                     checked={!!app}

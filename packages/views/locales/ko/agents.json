@@ -667,14 +667,10 @@
       "queued_prefix": "{{when}} 대기 시작"
     },
     "connected_apps": {
-      "subtitle": "이 에이전트가 사용할 수 있는 앱입니다. 팀 계정 또는 실행한 사람의 계정으로 동작합니다.",
       "loading": "앱을 불러오는 중…",
       "load_failed": "이 에이전트의 앱을 불러오지 못했습니다.",
       "empty": "연결된 앱이 없습니다.",
-      "add_placeholder": "앱 추가…",
-      "account": "계정",
       "level": "수준",
-      "remove": "{{app}} 제거",
       "team_connected": "팀 계정 연결됨",
       "team_missing": "팀 계정 미연결",
       "personal_connected": "내 계정 연결됨",

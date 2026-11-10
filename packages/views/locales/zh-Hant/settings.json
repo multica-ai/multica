@@ -1443,7 +1443,6 @@
   },
   "connected_apps": {
     "description": "AI 代理透過這些帳號操作外部應用，允許的操作會直接執行。",
-    "add_app": "新增應用",
     "loading": "正在載入應用…",
     "load_failed": "無法載入應用。",
     "team_title": "團隊帳號",
@@ -1473,8 +1472,6 @@
     "toast_disconnected": "已中斷連線",
     "toast_failed": "操作失敗，請重試。",
     "add": {
-      "title": "新增應用",
-      "description": "為團隊或為自己連線帳號。哪些 AI 代理使用它，在各 AI 代理的「應用」頁設定。",
       "search": "搜尋應用…",
       "empty": "沒有符合的應用。",
       "curated": "精選",

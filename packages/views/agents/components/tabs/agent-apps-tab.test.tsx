@@ -80,7 +80,7 @@ describe("AgentAppsTab", () => {
     renderApps();
     await screen.findByText("Gmail");
     expect(screen.queryByRole("combobox", { name: "Level" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
     await user.click(screen.getByRole("switch", { name: "Enable Notion" }));
     await waitFor(() => expect(api.updateAgentApps).toHaveBeenCalledWith("a1", {
       apps: [
@@ -121,8 +121,11 @@ describe("AgentAppsTab", () => {
     overview.personal.push({ id: "my-gmail", toolkit_slug: "gmail", status: "active", connected_at: "", last_used_at: null });
     const user = userEvent.setup();
     renderApps();
-    const sources = await screen.findByRole("tablist", { name: "Account for Gmail" });
-    await user.click(within(sources).getByRole("tab", { name: "Team account" }));
+    const sources = await screen.findByRole("radiogroup", { name: "Account for Gmail" });
+    const personal = within(sources).getByRole("radio", { name: "Triggerer's account" });
+    expect(personal).toBeChecked();
+    personal.focus();
+    await user.keyboard("{ArrowLeft}");
     await waitFor(() => expect(api.updateAgentApps).toHaveBeenCalledWith("a1", {
       apps: [{ toolkit_slug: "gmail", account_scope: "team", level: "read" }],
     }));
@@ -144,8 +147,8 @@ describe("AgentAppsTab", () => {
         { toolkit_slug: "slack", account_scope: "personal", level: "write" },
       ],
     }));
-    const sources = await screen.findByRole("tablist", { name: "Account for Slack" });
-    expect(within(sources).getByRole("tab", { name: "Team account" })).toHaveAttribute("aria-disabled", "true");
+    const sources = await screen.findByRole("radiogroup", { name: "Account for Slack" });
+    expect(within(sources).getByRole("radio", { name: "Team account" })).toHaveAttribute("aria-disabled", "true");
     expect(api.updateAgentApps).toHaveBeenCalledTimes(1);
   });
 
@@ -164,6 +167,61 @@ describe("AgentAppsTab", () => {
     const user = userEvent.setup();
     renderApps();
     await user.click(await screen.findByRole("switch", { name: "Enable gmail" }));
+    await waitFor(() => expect(api.updateAgentApps).toHaveBeenCalledWith("a1", { apps: [] }));
+  });
+
+  it.each(["loading", "failed"])("keeps saved grants editable and new grants disabled while the catalog is %s", async (state) => {
+    if (state === "loading") vi.mocked(api.listAppCatalog).mockReturnValue(new Promise(() => {}));
+    else vi.mocked(api.listAppCatalog).mockRejectedValue(new Error("offline"));
+    overview.team.push({ id: "team-gmail", toolkit_slug: "gmail", status: "active", connected_at: "", last_used_at: null });
+    overview.personal.push({ id: "my-gmail", toolkit_slug: "gmail", status: "active", connected_at: "", last_used_at: null });
+    const user = userEvent.setup();
+    renderApps();
+    const sources = await screen.findByRole("radiogroup", { name: "Account for gmail" });
+    expect(screen.getByText("gmail").closest("li")).toHaveTextContent("G");
+    const newGrant = screen.getByRole("switch", { name: "Enable notion" });
+    expect(newGrant).toHaveAttribute("aria-disabled", "true");
+    await user.click(newGrant);
+    expect(api.updateAgentApps).not.toHaveBeenCalled();
+    await user.click(within(sources).getByRole("radio", { name: "Team account" }));
+    await waitFor(() => expect(api.updateAgentApps).toHaveBeenCalledWith("a1", {
+      apps: [{ toolkit_slug: "gmail", account_scope: "team", level: "read" }],
+    }));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Enable gmail" })).not.toHaveAttribute("aria-disabled", "true"));
+    await user.click(screen.getByRole("switch", { name: "Enable gmail" }));
+    await waitFor(() => expect(api.updateAgentApps).toHaveBeenLastCalledWith("a1", { apps: [] }));
+  });
+
+  it("keeps team grants locked for members when the catalog fails", async () => {
+    overview.can_manage = false;
+    overview.personal.push({ id: "my-notion", toolkit_slug: "notion", status: "active", connected_at: "", last_used_at: null });
+    vi.mocked(api.listAgentApps).mockResolvedValue({ apps: [{ agent_id: "a1", toolkit_slug: "notion", account_scope: "team", level: "read" }] });
+    vi.mocked(api.listAppCatalog).mockRejectedValue(new Error("offline"));
+    const user = userEvent.setup();
+    renderApps();
+    const toggle = await screen.findByRole("switch", { name: "Enable notion" });
+    expect(toggle).toHaveAttribute("aria-disabled", "true");
+    await user.click(toggle);
+    const sources = screen.getByRole("radiogroup", { name: "Account for notion" });
+    for (const source of within(sources).getAllByRole("radio")) {
+      expect(source).toHaveAttribute("aria-disabled", "true");
+      await user.click(source);
+    }
+    expect(api.updateAgentApps).not.toHaveBeenCalled();
+  });
+
+  it("keeps known catalog restrictions on source changes while allowing revocation", async () => {
+    overview.team.push({ id: "team-gmail", toolkit_slug: "gmail", status: "active", connected_at: "", last_used_at: null });
+    overview.personal.push({ id: "my-gmail", toolkit_slug: "gmail", status: "active", connected_at: "", last_used_at: null });
+    vi.mocked(api.listAppCatalog).mockResolvedValue({ catalog_mode: "custom", apps: [{ slug: "gmail", name: "Gmail", curated: true, allowed: false }] });
+    const user = userEvent.setup();
+    renderApps();
+    const sources = await screen.findByRole("radiogroup", { name: "Account for Gmail" });
+    const team = within(sources).getByRole("radio", { name: "Team account" });
+    expect(team).toHaveAttribute("aria-disabled", "true");
+    await user.click(team);
+    expect(api.updateAgentApps).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("switch", { name: "Enable Gmail" }));
     await waitFor(() => expect(api.updateAgentApps).toHaveBeenCalledWith("a1", { apps: [] }));
   });
 

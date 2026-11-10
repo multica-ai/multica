@@ -817,14 +817,10 @@
       "queued_prefix": "{{when}}排隊"
     },
     "connected_apps": {
-      "subtitle": "這個 AI 代理可以使用的應用，以團隊帳號或發起執行的成員帳號操作。",
       "loading": "正在載入應用…",
       "load_failed": "無法載入此 AI 代理的應用。",
       "empty": "尚無已連線的應用程式。",
-      "add_placeholder": "新增應用…",
-      "account": "帳號",
       "level": "權限",
-      "remove": "移除 {{app}}",
       "team_connected": "團隊帳號已連線",
       "team_missing": "團隊帳號未連線",
       "personal_connected": "你的帳號已連線",

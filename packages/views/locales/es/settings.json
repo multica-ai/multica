@@ -1454,7 +1454,6 @@
   },
   "connected_apps": {
     "description": "Cuentas que usan tus agentes para acceder a aplicaciones externas. Las acciones permitidas se ejecutan de inmediato.",
-    "add_app": "Añadir aplicación",
     "loading": "Cargando aplicaciones…",
     "load_failed": "No se pudieron cargar las aplicaciones.",
     "team_title": "Cuentas del equipo",
@@ -1485,8 +1484,6 @@
     "toast_disconnected": "Desconectada",
     "toast_failed": "Algo salió mal. Inténtalo de nuevo.",
     "add": {
-      "title": "Añadir una aplicación",
-      "description": "Conecta una cuenta para el equipo o para ti. El acceso de cada agente se configura en su página de Aplicaciones.",
       "search": "Buscar aplicaciones…",
       "empty": "No hay aplicaciones que coincidan.",
       "curated": "Seleccionada",

@@ -838,14 +838,10 @@
       "queued_prefix": "Mise en file d'attente {{when}}"
     },
     "connected_apps": {
-      "subtitle": "Les apps que cet agent peut utiliser avec le compte d'équipe ou celui de la personne qui lance l'exécution.",
       "loading": "Chargement des apps…",
       "load_failed": "Impossible de charger les apps de cet agent.",
       "empty": "Aucune app connectée disponible.",
-      "add_placeholder": "Ajouter une app…",
-      "account": "Compte",
       "level": "Niveau",
-      "remove": "Retirer {{app}}",
       "team_connected": "Compte d'équipe connecté",
       "team_missing": "Compte d'équipe non connecté",
       "personal_connected": "Votre compte est connecté",

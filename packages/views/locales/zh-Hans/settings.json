@@ -1443,7 +1443,6 @@
   },
   "connected_apps": {
     "description": "智能体通过这些账号操作外部应用，允许的操作会直接执行。",
-    "add_app": "添加应用",
     "loading": "正在加载应用…",
     "load_failed": "无法加载应用。",
     "team_title": "团队账号",
@@ -1473,8 +1472,6 @@
     "toast_disconnected": "已断开",
     "toast_failed": "操作失败，请重试。",
     "add": {
-      "title": "添加应用",
-      "description": "为团队或为自己连接账号。哪些智能体使用它，在各智能体的「应用」页设置。",
       "search": "搜索应用…",
       "empty": "没有匹配的应用。",
       "curated": "精选",

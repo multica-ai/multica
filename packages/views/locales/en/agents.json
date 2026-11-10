@@ -838,14 +838,10 @@
       "queued_prefix": "Queued {{when}}"
     },
     "connected_apps": {
-      "subtitle": "Apps this agent can use, through the team account or the account of whoever triggers the run.",
       "loading": "Loading apps…",
       "load_failed": "Couldn't load this agent's apps.",
       "empty": "No connected apps available.",
-      "add_placeholder": "Add an app…",
-      "account": "Account",
       "level": "Level",
-      "remove": "Remove {{app}}",
       "team_connected": "Team account connected",
       "team_missing": "Team account not connected",
       "personal_connected": "Your account is connected",

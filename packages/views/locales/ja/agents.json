@@ -659,14 +659,10 @@
       "queued_prefix": "{{when}} に待機開始"
     },
     "connected_apps": {
-      "subtitle": "このエージェントが使えるアプリです。チームアカウントか、実行を起動した人のアカウントとして動作します。",
       "loading": "アプリを読み込み中…",
       "load_failed": "このエージェントのアプリを読み込めませんでした。",
       "empty": "接続済みのアプリはありません。",
-      "add_placeholder": "アプリを追加…",
-      "account": "アカウント",
       "level": "レベル",
-      "remove": "{{app}} を削除",
       "team_connected": "チームアカウント接続済み",
       "team_missing": "チームアカウント未接続",
       "personal_connected": "あなたのアカウントは接続済み",

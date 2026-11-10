@@ -817,14 +817,10 @@
       "queued_prefix": "{{when}}排队"
     },
     "connected_apps": {
-      "subtitle": "这个智能体可以使用的应用，以团队账号或发起运行的成员账号操作。",
       "loading": "正在加载应用…",
       "load_failed": "无法加载此智能体的应用。",
       "empty": "暂无已连接的应用。",
-      "add_placeholder": "添加应用…",
-      "account": "账号",
       "level": "权限",
-      "remove": "移除 {{app}}",
       "team_connected": "团队账号已连接",
       "team_missing": "团队账号未连接",
       "personal_connected": "你的账号已连接",
