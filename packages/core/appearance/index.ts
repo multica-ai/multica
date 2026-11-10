@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { defaultStorage } from "../platform/storage";
@@ -338,4 +339,31 @@ export function selectAppearance(state: AppearanceState): AppearancePreferences 
     reduceMotion: state.reduceMotion,
     highContrast: state.highContrast,
   };
+}
+
+const SYSTEM_REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
+
+function systemReducedMotion(): boolean {
+  return typeof window !== "undefined" && window.matchMedia?.(SYSTEM_REDUCED_MOTION).matches === true;
+}
+
+function subscribeSystemReducedMotion(onChange: () => void): () => void {
+  const query = typeof window !== "undefined" ? window.matchMedia?.(SYSTEM_REDUCED_MOTION) : undefined;
+  query?.addEventListener?.("change", onChange);
+  return () => query?.removeEventListener?.("change", onChange);
+}
+
+/**
+ * Whether to skip motion: the Appearance switch or the system preference.
+ * For animation driven from JS; CSS durations already follow both.
+ */
+export function useReducedMotion(): boolean {
+  const reduceMotion = useAppearanceStore((state) => state.reduceMotion);
+  const system = useSyncExternalStore(subscribeSystemReducedMotion, systemReducedMotion, () => false);
+  return reduceMotion || system;
+}
+
+/** `useReducedMotion` read once, for code outside render. */
+export function prefersReducedMotion(): boolean {
+  return useAppearanceStore.getState().reduceMotion || systemReducedMotion();
 }
