@@ -1,194 +1,10 @@
 import { githubUrl, discordUrl } from "../components/shared";
 import type { LandingDict } from "./types";
+import { enSiteCopy } from "./site-en";
 
-export function createEnDict(
-  allowSignup: boolean,
-  docsHref: string,
-): LandingDict {
+export function createEnDict(): LandingDict {
   return {
-  header: {
-    github: "GitHub",
-    cta: "Get started",
-    dashboard: "Dashboard",
-    docs: "Docs",
-    changelog: "Changelog",
-    useCases: "Use cases",
-    navigation: "Primary navigation",
-    openMenu: "Open navigation menu",
-    closeMenu: "Close navigation menu",
-  },
-
-  hero: {
-    headlineLine1: "Your next 10 hires",
-    headlineLine2: "won\u2019t be human.",
-    subheading:
-      "Multica is a source-available platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills \u2014 manage your human + agent workforce in one place.",
-    cta: "Start free trial",
-    downloadDesktop: "Download Desktop",
-    talkToSales: "Talk to sales",
-    worksWith: "Works with 20+ AI coding tools",
-    imageAlt: "Multica board view \u2014 issues managed by humans and agents",
-  },
-
-  features: {
-    teammates: {
-      label: "TEAMMATES",
-      title: "Assign to an agent like you\u2019d assign to a colleague",
-      description:
-        "Agents aren\u2019t passive tools \u2014 they\u2019re active participants. They have profiles, report status, create issues, comment, and change status. Your activity feed shows humans and agents working side by side.",
-      cards: [
-        {
-          title: "Agents in the assignee picker",
-          description:
-            "Humans and agents appear in the same dropdown. Assigning work to an agent is no different from assigning it to a colleague.",
-        },
-        {
-          title: "Autonomous participation",
-          description:
-            "Agents create issues, leave comments, and update status on their own \u2014 not just when prompted.",
-        },
-        {
-          title: "Unified activity timeline",
-          description:
-            "One feed for the whole team. Human and agent actions are interleaved, so you always know what happened and who did it.",
-        },
-      ],
-    },
-    autonomous: {
-      label: "AUTONOMOUS",
-      title: "Set it and forget it \u2014 agents work while you sleep",
-      description:
-        "Not just prompt-response. Full task lifecycle management: enqueue, claim, start, complete or fail. Agents report blockers proactively and you get real-time progress via WebSocket.",
-      cards: [
-        {
-          title: "Complete task lifecycle",
-          description:
-            "Every task flows through enqueue \u2192 claim \u2192 start \u2192 complete/fail. No silent failures \u2014 every transition is tracked and broadcast.",
-        },
-        {
-          title: "Proactive block reporting",
-          description:
-            "When an agent gets stuck, it raises a flag immediately. No more checking back hours later to find nothing happened.",
-        },
-        {
-          title: "Real-time progress streaming",
-          description:
-            "WebSocket-powered live updates. Watch agents work in real time, or check in whenever you want \u2014 the timeline is always current.",
-        },
-      ],
-    },
-    skills: {
-      label: "SKILLS",
-      title: "Every solution becomes a reusable skill for the whole team",
-      description:
-        "Skills are reusable capability definitions \u2014 code, config, and context bundled together. Write a skill once, and every agent on your team can use it. Your skill library compounds over time.",
-      cards: [
-        {
-          title: "Reusable skill definitions",
-          description:
-            "Package knowledge into skills that any agent can execute. Deploy to staging, write migrations, review PRs \u2014 all codified.",
-        },
-        {
-          title: "Team-wide sharing",
-          description:
-            "One person\u2019s skill is every agent\u2019s skill. Build once, benefit everywhere across your team.",
-        },
-        {
-          title: "Compound growth",
-          description:
-            "Day 1: you teach an agent to deploy. Day 30: every agent deploys, writes tests, and does code review. Your team\u2019s capabilities grow exponentially.",
-        },
-      ],
-    },
-    runtimes: {
-      label: "RUNTIMES",
-      title: "One dashboard for all your compute",
-      description:
-        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 29 supported coding tools on your machine.",
-      cards: [
-        {
-          title: "Unified runtime panel",
-          description:
-            "Local daemons and cloud runtimes in one view. No context switching between different management interfaces.",
-        },
-        {
-          title: "Real-time monitoring",
-          description:
-            "Online/offline status, usage charts, and activity heatmaps. Know exactly what your compute is doing at any moment.",
-        },
-        {
-          title: "Auto-detection on first run",
-          description:
-            "Multica scans for 29 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZeroClaw, ZCode \u2014 and registers a runtime for each one it finds.",
-        },
-      ],
-    },
-  },
-
-  howItWorks: {
-    label: "Get started",
-    headlineMain: "Hire your first AI employee",
-    headlineFaded: "in the next hour.",
-    steps: [
-      {
-        title: allowSignup ? "Sign up & create your workspace" : "Login to your workspace",
-        description: allowSignup
-          ? "Enter your email, verify with a code, and you\u2019re in. Your workspace is created automatically \u2014 no setup wizard, no configuration forms."
-          : "Enter your email, verify with a code, and you\u2019re logged into your workspace \u2014 no setup wizard, no configuration forms.",
-      },
-      {
-        title: "Install the CLI & connect your machine",
-        description:
-          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 29 supported coding tools (Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw, ZCode). Whichever ones you already have installed get registered as runtimes automatically.",
-      },
-      {
-        title: "Create your first agent",
-        description:
-          "Give it a name, write instructions, and attach skills. Agents automatically activate on assignment, on comment, or on mention.",
-      },
-      {
-        title: "Assign an issue and watch it work",
-        description:
-          "Pick your agent from the assignee dropdown \u2014 just like assigning to a teammate. The task is queued, claimed, and executed automatically. Watch progress in real time.",
-      },
-    ],
-    cta: "Get started",
-    ctaGithub: "View on GitHub",
-    ctaDocs: "Read the docs",
-  },
-
-  openSource: {
-    label: "Source available",
-    headlineLine1: "Every line,",
-    headlineLine2: "on your terms.",
-    description:
-      "Multica\u2019s source code is public. Inspect every line, self-host it for free, and shape the future of human + agent collaboration. Offering Multica to others as a hosted service requires a commercial license.",
-    cta: "Star on GitHub",
-    licensingCta: "How licensing works \u2192",
-    highlights: [
-      {
-        title: "Self-host anywhere",
-        description:
-          "Run Multica on your own infrastructure. Docker Compose, single binary, or Kubernetes — your workspace data stays on servers you control.",
-      },
-      {
-        title: "No vendor lock-in",
-        description:
-          "Bring your own LLM provider, swap agent backends, extend the API. You own the stack, top to bottom.",
-      },
-      {
-        title: "Transparent by default",
-        description:
-          "Every line of code is auditable. See exactly how your agents make decisions, how tasks are routed, and where your data flows.",
-      },
-      {
-        title: "Community-driven",
-        description:
-          "Built with the community, not just for it. Contribute skills, integrations, and agent backends that benefit everyone.",
-      },
-    ],
-  },
-
+  ...enSiteCopy,
   faq: {
     label: "FAQ",
     headline: "Questions & answers.",
@@ -230,44 +46,6 @@ export function createEnDict(
           "As many as your hardware supports. Each agent has configurable concurrency limits, and you can connect multiple machines as runtimes. There are no artificial caps when you self-host.",
       },
     ],
-  },
-
-  footer: {
-    tagline:
-      "Project management for human + agent teams. Source-available, self-hostable, built for the future of work.",
-    cta: "Get started",
-    groups: {
-      product: {
-        label: "Product",
-        links: [
-          { label: "Features", href: "#features" },
-          { label: "How it Works", href: "#how-it-works" },
-          { label: "Use cases", href: "/usecases" },
-          { label: "Changelog", href: "/changelog" },
-          { label: "Download", href: "/download" },
-        ],
-      },
-      resources: {
-        label: "Resources",
-        links: [
-          { label: "Documentation", href: docsHref },
-          { label: "API", href: githubUrl },
-          { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
-          { label: "Discord", href: discordUrl },
-        ],
-      },
-      company: {
-        label: "Company",
-        links: [
-          { label: "About", href: "/about" },
-          { label: "Licensing", href: "/licensing" },
-          { label: "Privacy", href: "/privacy" },
-          { label: "Contact Sales", href: "/contact-sales" },
-          { label: "GitHub", href: githubUrl },
-        ],
-      },
-    },
-    copyright: "\u00a9 {year} Multica. All rights reserved.",
   },
 
   about: {
@@ -522,6 +300,84 @@ export function createEnDict(
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.8.1",
+        date: "2026-11-06",
+        title: "Skill version history, an Unread view, and pinned workspaces",
+        changes: [],
+        features: [
+          "Skills keep a version history. Open a skill's History to see an older version and restore it as the newest one.",
+          "Filter Issues by Read state → Unread, or star the built-in Unread view to add it to the sidebar. It opens at the latest unread run, and a row you just read stays in place.",
+          "A \"Subscribed by me\" filter finds Issues you follow that aren't assigned to you or your agents.",
+          "Set filters and sorting right where you name a new view.",
+          "Pin workspaces to the top of the workspace switcher.",
+          "When creating a sub-Issue, you can copy fields from its parent Issue.",
+          "Open ? → What's new to see the highlights of each release.",
+          "Multica is available in Spanish (Spain). Switch the language in Settings or from the account menu.",
+          "Qoder Cloud Agents can connect IM integrations, receive chat attachments and send files back to the chat, and be picked as a squad leader in quick create.",
+          "Agents can read saved views with view list and view issues, using the same filters and paging as the app.",
+          "Plugins can read a task's messages with GET /v1/tasks/{task_id}/messages and fetch only new ones by seq.",
+          "Slack history and task context include the channel ID, the channel name when available, and a link to the original thread.",
+          "issue list in the CLI can filter by a range of update times.",
+        ],
+        improvements: [
+          "Empty pages for agents, projects, skills, squads, runtimes, autopilots, and wakeups explain what they are for and how to get started.",
+          "Inbox and Chat lists remember their own widths, and Inbox rows are more compact.",
+          "Opening an Issue from anywhere marks all of its Inbox notifications as read, and Inbox rows show what needs action ahead of newer updates.",
+          "Restore to inbox is now in the Issue's more actions menu.",
+          "Issue panels sort by last updated by default. A sort you already picked is kept.",
+          "Search the skill list.",
+          "See and set an agent's thinking level from its properties sidebar. Kiro now uses the thinking level you set.",
+          "Set the daemon's idle and silent-tool watchdogs in the config file or with flags. 0s turns a watchdog off.",
+          "Set the inline preview limit for text and HTML attachments with MULTICA_MAX_PREVIEW_SIZE: 2 MiB by default, up to 16 MiB.",
+          "Images in comments load as you scroll and keep their space, so long threads jump less.",
+          "Long chat histories and an agent's recent work list stay fast.",
+          "The Runtimes sidebar shows how many machines are online.",
+          "The docs are available in Traditional Chinese, and the app links to them when you use Traditional Chinese.",
+          "Multica has a Japanese README.",
+          "In every workspace, owners and admins can delete any Issue, while members can delete only Issues they or their agents created, and agents only their own. This applies to single and bulk deletes.",
+          "Project creators can delete their own projects. Deleting asks for confirmation and closes only after the server confirms.",
+          "Filters show a loading state while their data loads and a retry if it fails, instead of an empty list.",
+          "When the CLI can't do something on the platform, agents report the gap in their result instead of mentioning the workspace owner.",
+        ],
+        fixes: [
+          "Work delivered from a worktree includes only what the agent committed, and leftover files are kept aside. Checkouts left behind by a cancelled setup are cleaned up so the next run doesn't get stuck.",
+          "Quoted or forwarded media you select in Lark is kept when it becomes an Issue.",
+          "When WeCom blocks a private reply, the bot asks you in the group to open a direct chat with it first.",
+          "The web app and docs are updated to Next.js 16.4.5 for a security fix.",
+          "CLI login explains when a callback address isn't supported instead of waiting forever.",
+          "The CLI confirms that labels were added even when the list it reads back is missing them.",
+          "Advanced filters with equivalent conditions keep paging, and spaces in custom property values are kept.",
+          "Saving Markdown keeps nested code fences, indented code, and literal backslashes such as LaTeX.",
+          "Live updates no longer overwrite a text, number, or date property you are typing.",
+          "While typing with Chinese or Japanese input, Enter and Escape no longer submit filters, renames, or find early, and Shift+Enter no longer cancels a delegation preview in the command bar.",
+          "Hermes keeps its locally installed dependencies between runs.",
+          "Quick Actions in comments insert right away.",
+          "Downloading a CDN image referenced from another comment no longer opens a MissingKey error page.",
+          "A deleted skill is removed from a new agent draft, TRAE reads task skills from their files, and built-in skills work when a user skill has the same name.",
+          "After a reply is sent, focus leaves the input so page shortcuts work. If sending fails, the draft and focus are kept.",
+          "Quick create and task commands always use the CLI the daemon provides, not an older one found on PATH.",
+          "Runtime and model detection works again when a wrapper prints logs.",
+          "Pi and omp check before starting that the system can clean up their processes safely (identity signals on macOS, pidfd on Linux). If it can't, or a sandbox blocks it, the run fails with an error before it starts.",
+          "Large uploads through the web app are no longer cut off at about 10 MiB. The 100 MiB limit applies, with a clear error above it.",
+          "After an agent switches runtimes, its queued and deferred tasks move to the new runtime.",
+          "The Inbox archive filter menu stays open while the list loads.",
+          "Clicking outside a nested parent or sub-Issue picker closes only the picker and keeps your draft.",
+          "Long runtime and model names no longer stretch the settings dialog.",
+          "Attachment downloads show progress and ignore repeat clicks. A CLI download that disconnects midway keeps the original file.",
+          "Saving an avatar can't be cancelled halfway or saved twice.",
+          "In the calendar, arrow keys move the selection and Enter picks the highlighted date.",
+          "Time inputs let Ctrl, Cmd, and Alt shortcuts through.",
+          "Copying when the clipboard is unavailable keeps your text selection.",
+          "After a desktop restart, background Issue tabs show their title and status.",
+          "When a wakeup or follow-up run starts from an outdated workflow step, agents and squad leaders are told and leave the status as is.",
+          "An Issue that fails to load shows a retry instead of saying it was deleted, and the sidebar's project status list can be retried.",
+          "Retrying chats after switching workspaces no longer mixes data between workspaces.",
+          "Hover or focus a cut-off project name or Issue title in the sidebar to see it in full.",
+          "Image previews in Markdown are in the same order on every client, and long threads render faster.",
+          "Update links on the Chinese download page and the docs favicon work again.",
+        ],
+      },
       {
         version: "0.8.0",
         date: "2026-11-03",
@@ -4227,50 +4083,44 @@ export function createEnDict(
     ],
   },
   download: {
+    platforms: {
+      macArm64: "macOS · Apple Silicon",
+      macX64: "macOS · Intel",
+      winX64: "Windows · x64",
+      winArm64: "Windows · ARM64",
+      linuxX64: "Linux · x64",
+      linuxArm64: "Linux · ARM64",
+    },
     hero: {
-      macArm64: {
-        title: "Multica for macOS",
-        sub: "Apple Silicon · bundled daemon, zero setup",
-        primary: "Download (.dmg)",
-        altZip: "or download .zip",
+      eyebrow: "Desktop app",
+      title: {
+        mac: "Download Multica for macOS",
+        windows: "Download Multica for Windows",
+        linux: "Download Multica for Linux",
+        other: "Download Multica",
       },
-      macIntel: {
-        title: "Multica for macOS",
-        sub: "Intel · bundled daemon, zero setup",
-        primary: "Download (.dmg)",
-        altZip: "or download .zip",
+      lead: "The desktop app comes with the agent daemon, so Claude Code, Codex and the other coding agents on this computer connect on their own.",
+      leadOther: "Desktop apps for macOS, Windows and Linux, each with the agent daemon built in.",
+      mobileNote: "Multica’s desktop app runs on macOS, Windows and Linux. Open this page on your computer to download it.",
+      primary: {
+        macArm64Dmg: "Download for Apple Silicon",
+        macX64Dmg: "Download for Intel",
+        winX64Exe: "Download for Windows",
+        winArm64Exe: "Download for Windows ARM",
+        linuxAmd64AppImage: "Download AppImage",
+        linuxArm64AppImage: "Download AppImage",
       },
-      winX64: {
-        title: "Multica for Windows",
-        sub: "Bundled daemon, zero setup",
-        primary: "Download (.exe)",
+      alternate: {
+        macArm64Dmg: "Apple Silicon Mac",
+        macX64Dmg: "Intel Mac",
       },
-      winArm64: {
-        title: "Multica for Windows",
-        sub: "ARM · bundled daemon, zero setup",
-        primary: "Download (.exe)",
-      },
-      linux: {
-        title: "Multica for Linux",
-        sub: "Bundled daemon, zero setup",
-        primary: "Download AppImage",
-        altFormats: "or .deb / .rpm",
-      },
-      unknown: {
-        title: "Choose your platform",
-        sub: "All installers are listed below.",
-      },
-      safariMacHint: "On an Intel Mac? Choose the Intel download below.",
-      archFallbackHint: "Wrong architecture? See all formats below.",
+      released: "Released {date}",
+      whatsNew: "What’s new",
+      versionUnavailable: "Version unavailable. See all releases on GitHub.",
     },
     allPlatforms: {
-      title: "All platforms",
-      macArm64Label: "macOS · Apple Silicon",
-      macX64Label: "macOS · Intel",
-      winX64Label: "Windows · x64",
-      winArm64Label: "Windows · ARM64",
-      linuxX64Label: "Linux · x64",
-      linuxArm64Label: "Linux · ARM64",
+      title: "All downloads",
+      thisDevice: "This computer",
       formatDmg: ".dmg",
       formatZip: ".zip",
       formatExe: ".exe",
@@ -4278,28 +4128,55 @@ export function createEnDict(
       formatDeb: ".deb",
       formatRpm: ".rpm",
       unavailable: "Not available",
+      allReleases: "All releases",
     },
     cli: {
-      title: "Prefer the CLI?",
-      sub: "For servers, remote dev boxes, and headless setups. Same daemon as Desktop, installed via terminal.",
+      title: "On a server or a remote dev box?",
+      sub: "Install the CLI and run the same daemon there. The commands work over SSH too.",
       installLabel: "Install",
       platformGroup: "Choose your platform",
       platformMacosLinux: "macOS / Linux",
       platformWindows: "Windows",
       startLabel: "Start daemon",
-      sshNote: "Already on a server? Same commands work over SSH.",
       copyLabel: "Copy",
       copiedLabel: "Copied",
     },
-    cloud: {
-      title: "Cloud runtime (waitlist)",
-      sub: "We’ll host the runtime for you. Not live yet — leave your email to be notified.",
-    },
-    footer: {
-      releaseNotes: "What’s new in {version}",
-      allReleases: "View all releases",
-      currentVersion: "Current version: {version}",
-      versionUnavailable: "Version unavailable — check GitHub",
+    started: {
+      title: "Your download has started",
+      retry: "Didn’t start? Try again",
+      allDownloads: "All downloads",
+      install: {
+        title: "Install",
+        dmg: "Open the .dmg and drag Multica into Applications.",
+        zip: "Unzip it and move Multica into Applications.",
+        exe: "Run the installer. Multica opens when it finishes.",
+        appImage: "Make the AppImage executable, then run it.",
+        deb: "Install the .deb with apt or your package manager.",
+        rpm: "Install the .rpm with dnf or your package manager.",
+      },
+      signIn: {
+        title: "Sign in",
+        body: "Open Multica and sign in with your account.",
+        installed: "Already installed?",
+        open: "Open Multica",
+      },
+      agents: {
+        title: "Bring your agents",
+        body: "Multica finds Claude Code, Codex and the other coding agents on this computer.",
+      },
+      community: {
+        label: "While it downloads",
+        githubTitle: "Follow Multica on GitHub",
+        githubBody: "Star the repo to hear about new releases, or read the code behind the app you just downloaded.",
+        star: "Star on GitHub",
+        stars: "{count} stars",
+        discordTitle: "Join the Discord",
+        discordBody: "Ask questions, share workflows and talk to the team.",
+        join: "Join",
+        xTitle: "Follow @MulticaAI",
+        xBody: "Release notes and what’s coming next.",
+        follow: "Follow",
+      },
     },
   },
   contactSales: {

@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "デスクトップで開く"
+  },
+  "desktop": {
+    "link_other_instance": "デスクトップアプリは別の Multica インスタンスに接続されています。",
+    "link_workspace_unavailable": "このワークスペースはデスクトップアプリでは利用できません。"
+  },
   "inline_run": {
     "label": "{{name}} の実行",
     "stop": "停止",
@@ -727,10 +734,17 @@
     "restart_failed": "現在の実行を停止できませんでした。メッセージは送信されていません。"
   },
   "reply": {
+    "recipients_changed": "返信先が変更されました。送信先を確認してから、もう一度送信してください。",
     "placeholder": "返信を残す...",
     "annotations": {
+      "send_all": "すべて送信",
+      "send_with_annotations_and_body": "保存済みの注釈 {{count}} 件と下書きの本文もまとめて送信します。",
+      "send_with_annotations": "保存済みの注釈 {{count}} 件もまとめて送信します。",
+      "send_with_body": "下書きの本文もまとめて送信します。",
       "confirm_add": "注釈を追加",
       "save": "注釈を保存",
+      "confirm_add_short": "追加",
+      "save_short": "保存",
       "add_comment": "コメントに追加",
       "add": "返信に追加",
       "note_label": "コメント",
@@ -782,6 +796,11 @@
     "cancel_failed": "実行をキャンセルできませんでした"
   },
   "execution_log": {
+    "latest": "最新",
+    "include_children": "サブタスクを含める",
+    "loading": "実行履歴を読み込み中...",
+    "load_failed_retry": "実行履歴を読み込めませんでした。再試行",
+    "empty": "この範囲には実行履歴がありません。",
     "section": "実行ログ",
     "cancel_task_tooltip": "実行をキャンセル",
     "cancel_task_aria": "実行をキャンセル",
@@ -937,6 +956,7 @@
     "unassigned": "未割り当て",
     "open_in_new_tab": "新しいタブで開く",
     "pin_to_sidebar": "サイドバーにピン留め",
+    "locate_in_sidebar": "サイドバーで表示",
     "unpin_from_sidebar": "サイドバーのピン留めを解除",
     "restore_to_inbox": "インボックスに戻す",
     "mark_read": "既読にする",
@@ -1451,6 +1471,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "コメントで表示",
     "locate_description": "説明で表示",
+    "copy_link": "最新版へのリンクをコピー",
+    "not_found": "この課題に「{{name}}」という成果物はありません",
+    "link_load_failed": "「{{name}}」を開くための成果物を読み込めませんでした。再読み込みしてもう一度お試しください。",
     "version_label": "バージョン {{version}}（全 {{total}} 版）",
     "version_of": "v{{version}}（全 {{total}} 版）",
     "info_source": "投稿元",
@@ -1650,7 +1673,6 @@
       "brief_header": "この実行が受け取ったワークフローの説明"
     },
     "detail": {
-      "follows_project": "（プロジェクトに従う）",
       "card_title": "「{{workflow}}」· プロジェクト「{{project}}」に従う"
     },
     "list_separator": "、",
@@ -1797,5 +1819,51 @@
       "empty_title": "保存したビューはまだありません",
       "empty_description": "タスク一覧でフィルターと表示方法を調整し、ビューとして保存します。"
     }
+  },
+  "app_calls": {
+    "section_title": "アプリ",
+    "chips_label": "この実行で使ったアプリ",
+    "calls_count_other": "{{count}} 回",
+    "more": "ほか {{count}} 件",
+    "scope": {
+      "team": "チームアカウント",
+      "personal": "個人アカウント"
+    },
+    "outcome": {
+      "ok": "実行済み",
+      "error": "失敗",
+      "blocked": "ブロック",
+      "pending": "確認待ち",
+      "approved": "承認済み",
+      "rejected": "却下",
+      "rate_limited": "レート制限"
+    }
+  },
+  "environments": {
+    "section_title": "環境",
+    "running_count_other": "{{count}} 件実行中",
+    "this_machine": "このマシン",
+    "unknown_machine": "不明なマシン",
+    "state": {
+      "starting": "起動中",
+      "running": "実行中",
+      "exited": "終了",
+      "stopped": "停止",
+      "unreachable": "応答なし"
+    },
+    "expires_in_minutes_other": "{{count}}分後に期限切れ",
+    "expires_in_hours_other": "{{count}}時間後に期限切れ",
+    "expires_in_days_other": "{{count}}日後に期限切れ",
+    "started_ago": "起動: {{time}}",
+    "ended_ago": "終了: {{time}}",
+    "last_seen": "最終応答: {{time}}",
+    "ended_count_other": "終了済み {{count}} 件",
+    "detected_hint": "このタスクの実行ディレクトリで待ち受けていたサーバー",
+    "remote_hint": "{{machine}} で実行中です。localhost の URL はそのマシンでのみ開けます。",
+    "localhost_hint": "localhost の URL は、それを実行しているマシンでのみ開けます。",
+    "open": "開く",
+    "copy_url": "URL をコピー",
+    "copied": "URL をコピーしました",
+    "copy_failed": "URL をコピーできませんでした"
   }
 }

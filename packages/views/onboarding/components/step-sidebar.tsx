@@ -166,7 +166,7 @@ export function StepSidebar({
           <header className="flex min-h-9 shrink-0 items-center justify-between gap-3">
             <MulticaWordmark
               title={t(($) => $.step_nav.wordmark)}
-              className="h-4 text-foreground"
+              className="h-[17px] text-foreground"
             />
             {onBack ? (
               <IconButton

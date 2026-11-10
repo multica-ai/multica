@@ -8,6 +8,7 @@
     "view_table": "Tabla",
     "view_cards": "Tarjetas",
     "row_menu": "Acciones del proyecto",
+    "rename": "Renombrar",
     "pin": "Fijar en la barra lateral",
     "unpin": "Dejar de fijar",
     "delete": "Eliminar",
@@ -60,6 +61,7 @@
     "pin_tooltip": "Fijar en la barra lateral",
     "unpin_tooltip": "Dejar de fijar de la barra lateral",
     "sidebar_tooltip": "Mostrar u ocultar la barra lateral derecha",
+    "rename_action": "Renombrar proyecto",
     "copy_link": "Copiar enlace",
     "delete_action": "Eliminar proyecto",
     "section_properties": "Propiedades",
@@ -204,5 +206,26 @@
       "issue_pricing": "Tabla comparativa de precios",
       "issue_blog": "Paginar la lista del blog"
     }
+  },
+  "access": {
+    "label": "Acceso",
+    "title": "Acceso a {{title}}",
+    "description": "Define quién puede ver este proyecto, sus tareas, comentarios y archivos adjuntos.",
+    "workspace": "Todo el espacio de trabajo",
+    "private": "Solo miembros del proyecto",
+    "members_count": "Miembros del proyecto · {{count}}",
+    "add": "Añadir miembro",
+    "search": "Buscar nombre o correo...",
+    "no_members": "No hay miembros coincidentes",
+    "no_selected": "No hay miembros del proyecto",
+    "admin_notice": "Los owner y admin del espacio de trabajo siempre tienen acceso.",
+    "you": "Tú",
+    "remove": "Quitar a {{name}}",
+    "failed": "No se pudieron guardar los permisos.",
+    "load_failed": "No se pudieron cargar los miembros.",
+    "publish_title": "¿Hacer visible el proyecto a todo el espacio de trabajo?",
+    "publish_description": "Todos los miembros podrán ver este proyecto, sus tareas, comentarios y archivos adjuntos.",
+    "done": "Listo",
+    "retry": "Reintentar"
   }
 }

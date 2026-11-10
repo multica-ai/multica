@@ -1218,7 +1218,7 @@ export function ManualCreatePanel({
                       data-property-error={propertyErrorId === property.id || undefined}
                       className={cn(
                         propertyErrorId === property.id &&
-                          "rounded-full ring-2 ring-destructive",
+                          "rounded-md ring-2 ring-destructive",
                       )}
                     >
                       <CustomPropertyValueInput
@@ -1252,7 +1252,7 @@ export function ManualCreatePanel({
               {parentIssueId && parentIssueLocked ? (
                 <span
                   data-testid="manual-sub-issue-chip"
-                  className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-caption text-muted-foreground"
+                  className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-caption text-muted-foreground"
                 >
                   {t(($) => $.create_issue.subissue_of, {
                     identifier: parentIssue?.identifier
@@ -1261,11 +1261,11 @@ export function ManualCreatePanel({
                   })}
                 </span>
               ) : parentIssueId && parentIssue ? (
-                <div className="inline-flex items-center rounded-full border text-caption transition-colors hover:bg-accent/60">
+                <div className="inline-flex items-center rounded-md border text-caption transition-colors hover:bg-accent/60">
                   <button
                     type="button"
                     onClick={() => setParentPickerOpen(true)}
-                    className="flex items-center gap-1.5 py-1 pl-2.5 cursor-pointer"
+                    className="flex items-center gap-1.5 py-1 pl-2 cursor-pointer"
                   >
                     <ArrowUp className="size-3 text-muted-foreground" />
                     <span>
@@ -1290,9 +1290,9 @@ export function ManualCreatePanel({
               {childIssues.map((c) => (
                 <div
                   key={c.id}
-                  className="inline-flex items-center rounded-full border text-caption transition-colors hover:bg-accent/60"
+                  className="inline-flex items-center rounded-md border text-caption transition-colors hover:bg-accent/60"
                 >
-                  <div className="flex items-center gap-1.5 py-1 pl-2.5">
+                  <div className="flex items-center gap-1.5 py-1 pl-2">
                     <ArrowDown className="size-3 text-muted-foreground" />
                     <span>{t(($) => $.create_issue.subissue_chip, { identifier: c.identifier })}</span>
                   </div>

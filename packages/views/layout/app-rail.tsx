@@ -1,20 +1,32 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Settings, Users, type IconComponent } from "@multica/ui/icons";
 import { useChatStore } from "@multica/core/chat";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useInboxUnreadCount } from "@multica/core/inbox/queries";
+import { resolveRailOrder, useRailOrderStore } from "@multica/core/navigation";
 import {
-  RAIL_SPACES,
   useCurrentWorkspace,
   useWorkspacePaths,
   type AppSpaceId,
   type RailSpaceId,
 } from "@multica/core/paths";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { CappedNumberFlow } from "@multica/ui/components/ui/number-flow";
 import { cn } from "@multica/ui/lib/utils";
 import { useAppForeground } from "../common/use-app-foreground";
@@ -29,6 +41,7 @@ import { useTeamAgentStatus } from "./panels/team-status";
 import { RAIL_ICON_BUTTON_CLASS } from "./rail-styles";
 import { RailWorkspaces } from "./rail-workspaces";
 import { routeIconForPath } from "./route-icon-components";
+import { useDragClickGuard } from "./use-drag-click-guard";
 
 type RailBadge =
   | { kind: "count"; value: number; tone: "brand" | "neutral" }
@@ -84,7 +97,7 @@ function RailBadgeMark({ badge }: { badge: RailBadge }) {
       <span
         aria-hidden
         className={cn(
-          "absolute top-1.5 right-3.5 size-2 rounded-full bg-warning",
+          "absolute top-1 right-3 size-2 rounded-full bg-warning",
           ring,
         )}
       />
@@ -95,7 +108,7 @@ function RailBadgeMark({ badge }: { badge: RailBadge }) {
       value={badge.value}
       animated={false}
       className={cn(
-        "absolute top-0.5 right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-medium tabular-nums",
+        "absolute top-0 right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] leading-none font-medium tabular-nums",
         ring,
         badge.tone === "brand" ? "bg-brand text-brand-foreground" : "bg-foreground text-background",
       )}
@@ -136,31 +149,60 @@ function RailSpaceLink({
   badge?: RailBadge;
 }) {
   const peekHandlers = usePeekHandlers(space, true);
+  const link = (
+    <AppLink
+      href={href}
+      data-space={space}
+      newTabTitle={fullLabel}
+      draggable={false}
+      aria-current={active ? "page" : undefined}
+      {...peekHandlers}
+      className="group relative flex size-12 flex-col items-center justify-center gap-1 rounded-rail-item text-rail-item transition-colors outline-none hover:bg-rail-item-hover hover:text-rail-item-active-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-rail-item-active aria-[current=page]:font-medium aria-[current=page]:text-rail-item-active-foreground"
+    >
+      <Icon className="size-5" />
+      <span className="max-w-full truncate px-0.5 text-micro leading-[14px]">{label}</span>
+      {badge && <RailBadgeMark badge={badge} />}
+    </AppLink>
+  );
+  // A label the same as the full name still needs the tooltip whenever a
+  // locale's text doesn't fit the 48px item.
+  if (label === fullLabel) {
+    return (
+      <TruncatedTooltip content={fullLabel} side="right">
+        {link}
+      </TruncatedTooltip>
+    );
+  }
   return (
-    <li>
-      <TooltipHint label={label === fullLabel ? null : fullLabel} side="right">
-        <AppLink
-          href={href}
-          data-space={space}
-          newTabTitle={fullLabel}
-          aria-current={active ? "page" : undefined}
-          {...peekHandlers}
-          className="group relative flex h-[52px] w-[52px] flex-col items-center justify-center gap-1 rounded-xl text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground"
-        >
-          <Icon className="size-5" />
-          <span className="max-w-full truncate px-1 text-micro leading-[14px]">{label}</span>
-          {badge && <RailBadgeMark badge={badge} />}
-        </AppLink>
-      </TooltipHint>
+    <TooltipHint label={fullLabel} side="right">
+      {link}
+    </TooltipHint>
+  );
+}
+
+function SortableRailItem({ id, children }: { id: RailSpaceId; children: React.ReactNode }) {
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <li
+      ref={setNodeRef}
+      data-rail-item={id}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={cn("relative rounded-xl", isDragging && "z-10 bg-app-shell shadow-[var(--menu-shadow)]")}
+      {...listeners}
+    >
+      {children}
     </li>
   );
 }
 
+const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
+
 /**
- * The app rail: workspaces, New issue and search, the five spaces, then help,
- * settings and the account. It sits on the app shell, outside the content
- * card, and stays put while the panel beside it collapses. Desktop passes
- * `globalActions={false}`: its title bar carries New issue and search.
+ * The app rail: workspaces, New issue and search, the five spaces in the
+ * user's order (drag to reorder), then help, settings and the account. It
+ * sits on the app shell, outside the content card, and stays put while the
+ * panel beside it collapses. Desktop passes `globalActions={false}`: its
+ * title bar carries New issue and search.
  */
 export function AppRail({
   topSlot,
@@ -177,6 +219,23 @@ export function AppRail({
   const badges = useRailBadges();
   const space = shell?.space ?? null;
   const settingsPeek = usePeekHandlers("settings", space === "settings");
+  const savedOrder = useRailOrderStore((s) => s.order);
+  const setOrder = useRailOrderStore((s) => s.setOrder);
+  const order = useMemo(() => resolveRailOrder(savedOrder), [savedOrder]);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const { arm: armClickGuard, release: releaseClickGuard } = useDragClickGuard();
+
+  const onDragEnd = useCallback(
+    ({ active, over }: DragEndEvent) => {
+      releaseClickGuard();
+      if (!over || active.id === over.id) return;
+      const from = order.indexOf(active.id as RailSpaceId);
+      const to = order.indexOf(over.id as RailSpaceId);
+      if (from === -1 || to === -1) return;
+      setOrder(arrayMove(order, from, to));
+    },
+    [order, releaseClickGuard, setOrder],
+  );
 
   const items: Record<RailSpaceId, { href: string; icon: IconComponent; label: string; fullLabel: string }> = {
     inbox: {
@@ -211,12 +270,17 @@ export function AppRail({
     },
   };
 
+  // The 34px workspace tile is centred on the card's 48px header band, so it
+  // shares a centre line with the column and page titles: the card starts
+  // 8px down, plus (48 - 34) / 2. Desktop's card starts below its title bar,
+  // so it passes its own top inset with the same 7px.
   return (
     <nav
       aria-label={t(($) => $.rail.label)}
       data-slot="app-rail"
+      data-mc="app-rail"
       className={cn(
-        "flex h-full w-16 shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden pt-3 pb-2.5 [scrollbar-width:none]",
+        "flex h-full w-14 shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden pt-[15px] pb-2.5 [scrollbar-width:none]",
         className,
       )}
     >
@@ -230,18 +294,30 @@ export function AppRail({
       ) : (
         <div className="h-2 shrink-0" />
       )}
-      <ul className="flex flex-col items-center gap-0.5">
-        {RAIL_SPACES.map((id) => (
-          <RailSpaceLink
-            key={id}
-            space={id}
-            {...items[id]}
-            href={shell?.spaceHref(id, items[id].href) ?? items[id].href}
-            active={space === id}
-            badge={badges[id]}
-          />
-        ))}
-      </ul>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        modifiers={DRAG_MODIFIERS}
+        onDragStart={armClickGuard}
+        onDragEnd={onDragEnd}
+        onDragCancel={releaseClickGuard}
+      >
+        <SortableContext items={order} strategy={verticalListSortingStrategy}>
+          <ul className="flex flex-col items-center gap-0.5">
+            {order.map((id) => (
+              <SortableRailItem key={id} id={id}>
+                <RailSpaceLink
+                  space={id}
+                  {...items[id]}
+                  href={shell?.spaceHref(id, items[id].href) ?? items[id].href}
+                  active={space === id}
+                  badge={badges[id]}
+                />
+              </SortableRailItem>
+            ))}
+          </ul>
+        </SortableContext>
+      </DndContext>
       <div className="mt-auto flex flex-col items-center gap-1 pt-2">
         <HelpLauncher />
         <TooltipHint label={t(($) => $.nav.settings)} side="right">

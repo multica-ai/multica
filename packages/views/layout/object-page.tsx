@@ -13,6 +13,7 @@ import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { ChevronRight, PanelRight, type IconComponent } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -364,7 +365,9 @@ export function ObjectPanelSection({
 export function ObjectProperty({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
     <div className="-mx-2 flex min-h-8 items-center gap-2 rounded-md px-2 transition-colors hover:bg-accent/50">
-      <span className="w-20 shrink-0 truncate text-caption text-muted-foreground">{label}</span>
+      <TruncatedTooltip content={label} focusable>
+        <span className="w-20 shrink-0 truncate text-caption text-muted-foreground">{label}</span>
+      </TruncatedTooltip>
       <div className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-caption">{children}</div>
     </div>
   );

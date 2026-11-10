@@ -26,20 +26,6 @@ const state = vi.hoisted(() => ({
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog([]),
 }));
-vi.mock("@dnd-kit/core", () => ({
-  DndContext: ({ children }: { children: ReactNode }) => <>{children}</>,
-  PointerSensor: vi.fn(),
-  closestCenter: vi.fn(),
-  useSensor: vi.fn(),
-  useSensors: vi.fn(),
-}));
-vi.mock("@dnd-kit/sortable", () => ({
-  SortableContext: ({ children }: { children: ReactNode }) => <>{children}</>,
-  useSortable: () => ({ attributes: {}, listeners: {}, setNodeRef: vi.fn() }),
-  verticalListSortingStrategy: vi.fn(),
-  arrayMove: vi.fn(),
-}));
-vi.mock("@dnd-kit/utilities", () => ({ CSS: { Translate: { toString: () => undefined } } }));
 vi.mock("../../navigation", () => ({
   AppLink: ({ children, href, ...props }: { children: ReactNode; href: string } & React.ComponentProps<"a">) => (
     <a href={href} {...props}>
@@ -69,7 +55,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
   useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
     if (queryKey[0] === "pins") return { data: state.pins };
-    if (queryKey[0] === "issue") return state.detail;
+    if (queryKey[0] === "issue" || queryKey[0] === "project") return state.detail;
     return { isPending: true, isError: false, data: undefined, error: null };
   },
 }));
@@ -184,6 +170,44 @@ describe("PinnedSection", () => {
     expect(screen.queryByText("Keep this pin")).toBeNull();
     expect(screen.getByRole("button", { name: "Pinned" })).toHaveAttribute("aria-expanded", "false");
     expect(activePinnedRoute).toBe(false);
+  });
+
+  it("shows a pinned project's chosen icon, keeping the folder when it has none", async () => {
+    state.pins = [{ ...pin(1), item_type: "project", item_id: "project-1" }];
+    state.detail = { isPending: false, isError: false, data: { title: "Rocket launch", icon: "🚀" }, error: null };
+    const { unmount } = renderWithI18n(<Harness pathname="/acme/issues" />);
+    const iconSlot = async () => (await screen.findByText("Rocket launch")).closest("a")!.previousElementSibling;
+    expect(await iconSlot()).toHaveTextContent("🚀");
+    expect((await iconSlot())?.matches("svg")).toBe(false);
+    unmount();
+
+    state.detail = { isPending: false, isError: false, data: { title: "Rocket launch", icon: null }, error: null };
+    renderWithI18n(<Harness pathname="/acme/issues" />);
+    expect(await iconSlot()).not.toHaveTextContent("🚀");
+    expect((await iconSlot())?.matches("svg")).toBe(true);
+  });
+
+  // dnd-kit stops the release's click at the document without cancelling
+  // it. Where React listens below the document (Desktop), it never sees that
+  // click, so the row must not wait for it before opening on the next one.
+  it("does not open the pin released at the end of a drag, and opens it on the next click", async () => {
+    state.detail = {
+      isPending: false,
+      isError: false,
+      data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" },
+      error: null,
+    };
+    renderWithI18n(<Harness pathname="/acme/issues" />);
+    const row = (await screen.findByText("Keep this pin")).closest("a")!;
+    const pointer = { isPrimary: true, button: 0, clientX: 30, clientY: 100 };
+    fireEvent.pointerDown(row, pointer);
+    fireEvent.pointerMove(document, { ...pointer, clientY: 110 });
+    fireEvent.pointerUp(document, { ...pointer, clientY: 110 });
+
+    expect(fireEvent.click(row)).toBe(false);
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(fireEvent.click(row)).toBe(true);
   });
 
   it("renders nothing without pins", () => {

@@ -143,6 +143,8 @@ multica issue comment add MUL-123 --content-file note.md --steer-active
 
 Si une tâche ouverte portant le même titre (sans tenir compte de la casse ni des espaces en trop) existe déjà sous le même projet et le même parent, `issue create` refuse et indique cette tâche. Pour en créer une autre malgré tout, ajoutez `--allow-duplicate`. Pour marquer une tâche comme doublon d'une autre, utilisez `multica issue status MUL-124 cancelled --duplicate-of MUL-123`.
 
+Pour livrer plusieurs PR successives, utilisez `issue create --title "..." --pr-auto-complete off` ou `issue update <id> --pr-auto-complete off` pour conserver le statut de cette tâche après fusion. `--pr-auto-complete on` rétablit la règle de l'espace de travail au prochain événement PR. `issue pull-requests <id>` affiche le réglage de la tâche, celui de l'espace de travail, le statut cible et la décision, même sans PR liée. Les serveurs compatibles enregistrent le réglage dans la transaction de création ; les anciens reçoivent un PUT supplémentaire. En cas d'échec, le CLI indique l'ID créé et la commande update à réessayer : ne répétez pas create.
+
 ### Chronologie
 
 `issue get` montre la tâche telle qu'elle est maintenant. `issue timeline` liste dans l'ordre les changements de statut, de priorité, d'assigné, de titre et de dates ainsi que les résultats des exécutions, entremêlés avec les commentaires. C'est la commande pour savoir « quand est-elle passée en in_review » ou « depuis combien de temps est-elle bloquée dans ce statut » :
@@ -366,12 +368,12 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | --- | --- | --- | --- |
 | `issue` | `list` | Lister les tâches | `--status`, `--priority`, `--assignee`, `--project`, `--updated-since` / `--updated-until` (bornes RFC3339 à fournir ensemble), `--metadata` (répétable), `--property` (répétable, `"Name=Value"` ; `__none__` correspond à une valeur non définie), `--limit`, `--offset`, `--sort` (y compris `property:<name-or-id>`), `--full-id`, `--resolve-properties` (JSON uniquement ; lignes avec les noms de propriété, d'option et de membre à côté des ID enregistrés), `--fields` (JSON uniquement ; champs à conserver, séparés par des virgules) |
 | | `get <id>` | Afficher une tâche | `--resolve-properties` (JSON uniquement ; lignes avec les noms de propriété, d'option et de membre à côté des ID enregistrés) |
-| | `create` | Créer une tâche | `--title` (obligatoire), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (répétable), `--property` (répétable), `--allow-duplicate` (crée même si une tâche ouverte porte le même titre) |
+| | `create` | Créer une tâche | `--title` (obligatoire), `--description` / `--description-stdin` / `--description-file`, `--pr-auto-complete on/off`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (répétable), `--property` (répétable), `--allow-duplicate` (crée même si une tâche ouverte porte le même titre) |
 | | `update <id>` | Mettre à jour les champs d'une tâche | Mêmes champs que `create`, plus `--position`, `--no-start`, `--duplicate-of` |
 | | `assign <id>` | Assigner ou désassigner | `--to` (correspondance approximative sur le nom parmi les membres, les agents et les squads), `--to-id`, `--unassign`, `--no-start` |
 | | `status <id> <status>` | Changer le statut | `--no-start`, `--duplicate-of` |
 | | `reorder <id>` | Déplacer au sein d'une colonne | |
-| | `search <query>` | Rechercher des tâches | `--limit`, `--include-closed` |
+| | `search <query>` | Rechercher des tâches | `--limit`, `--include-closed`, `--project` |
 | | `children <id>` | Lister les sous-tâches regroupées par étape | |
 | | `pull-requests <id>` | Lister les PR associées | |
 | | `comment list/add/update/delete/resolve/unresolve` | Gérer les commentaires | `add` : `--content` / `--content-stdin` / `--content-file`, `--parent`, `--attachment` ; `update` : `--expected-revision` (obligatoire), `--content` / `--content-stdin` / `--content-file` ; `list` : `--since`, `--thread`, `--tail`, `--recent`, `--roots-only`, `--summary`, `--compact`, `--full` |

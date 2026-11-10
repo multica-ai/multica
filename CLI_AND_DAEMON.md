@@ -320,6 +320,34 @@ does not clear those blocks or establish that earlier background processes exite
 4. Heartbeats are sent periodically (default: 15s) so the server knows the daemon is alive
 5. On shutdown, all runtimes are deregistered
 
+### Local Environments
+
+The issue sidebar's **Environments** section lists the servers an issue's runs left running, grouped by the machine they run on. A localhost URL opens only on that machine. The daemon reports environments in two ways:
+
+- **Detected.** On macOS and Linux, any process listening on a TCP port whose working directory is inside a run's directory shows up. It has to be seen on two scans in a row, about 30 seconds apart, so short-lived test servers stay out. The agent CLIs themselves are ignored, and so are servers in a project's own local directory, which the user started.
+- **Declared.** A repository can describe its environments in `.multica/environments.toml`. An agent starts one with `multica env start <name>`. The daemon then supervises it: the environment keeps running after the run ends and stops at its TTL. If it is still running when the daemon restarts, the new daemon process picks it back up.
+
+```toml
+[environments.web]
+label = "Web app"
+start = "pnpm dev --port $MULTICA_PORT"
+# url defaults to http://localhost:$MULTICA_PORT; set url = "" when there is none
+# ready = "http://localhost:$MULTICA_PORT/health"   # defaults to url
+# stop = "docker compose down"                      # runs before the process group is signalled
+ttl = "24h"                                         # 1m to 7d, default 24h
+```
+
+Each environment gets ten ports, `MULTICA_PORT` through `MULTICA_PORT+9`. Parallel runs therefore never collide. `start` runs with `/bin/sh -c` from the directory that holds `.multica/`, with the caller's `PATH`. The daemon's `MULTICA_*` credentials are not passed to it. Output goes to a log under `<workspaces root>/.environments/v1/`, and `multica env start` prints its path. The log stays on the machine. Output can contain secrets such as a connection string, so for an environment that crashed the sidebar shows only its exit status, while `multica env start` prints the log's last lines locally.
+
+```bash
+multica env start web          # waits until the ready URL answers below 500, then prints the URL
+multica env start web --wait=false
+multica env list
+multica env stop web
+```
+
+These commands use the running task's credential, so they work only inside a run. Environments belong to the issue, which means a later run on the same issue can list and stop what an earlier one started. Neither detected nor declared environments are supported on Windows yet.
+
 ### Configuration
 
 Daemon behavior is configured via flags or environment variables:
@@ -357,14 +385,14 @@ Daemon behavior is configured via flags or environment variables:
 
 #### Workspace garbage collection
 
-The daemon periodically scans `MULTICA_WORKSPACES_ROOT` and applies several disk-reclamation policies:
+The daemon periodically scans `MULTICA_WORKSPACES_ROOT` for cleanup. The active-directory guard uses the resolved path so a symlink or Windows junction and its target share the same guard.
 
 - **Full task cleanup** — when an issue's status is `done` or `cancelled` and has been idle for `MULTICA_GC_TTL`, the entire task directory is removed.
 - **Completed-task retention bound** — `MULTICA_GC_COMPLETED_TASK_TTL` fully removes an inactive issue task once its `.gc_meta.json` `completed_at` age exceeds the configured duration, even while the parent issue remains open. Cleanup waits for a successful parent-issue status check, never removes an active environment, and never fully removes a `local_directory` environment. A later rerun provisions a fresh environment instead of resuming the removed checkout.
   - The default depends on where the daemon points: `14d` against Multica Cloud, and `0` (disabled, retain indefinitely) for self-host and every other origin — including cloud staging and previews. Set the variable to opt in or out on either side; an explicit `0` disables the policy on Cloud too.
   - Removing an environment discards work an agent left uncommitted or unpushed on its branch, along with that task's `output/` and `logs/`. The per-issue Codex session store lives outside `MULTICA_WORKSPACES_ROOT` under its own TTL, so a later rerun still resumes the agent's prior session — it just starts from a fresh checkout. Size the TTL against that trade, and keep it comfortably above `MULTICA_GC_INTERVAL`: the active-root guard protects a task that is currently running, not one whose follow-up run is queued but unclaimed.
 - **Orphan cleanup** — task directories with no `.gc_meta.json` (e.g. left over from a daemon crash) are removed once they exceed `MULTICA_GC_ORPHAN_TTL`.
-- **Artifact-only cleanup** — when a task has been completed for at least `MULTICA_GC_ARTIFACT_TTL` but the issue is still open, regenerable build outputs whose directory basename matches `MULTICA_GC_ARTIFACT_PATTERNS` are removed. The daemon also reclaims the exact managed path `codex-home/.sandbox-bin`; old task metadata without `completed_at` becomes eligible for this managed-only cleanup after its `.gc_meta.json` file has been idle for `MULTICA_GC_ORPHAN_TTL`. The rest of the task (source, `.git`, `output/`, `logs/`, `.gc_meta.json`, Codex auth/config/session state) is preserved so the agent can resume it.
+- **Artifact-only cleanup** — when a task has been completed for at least `MULTICA_GC_ARTIFACT_TTL` but the issue is still open, regenerable build outputs whose directory basename matches `MULTICA_GC_ARTIFACT_PATTERNS` are removed. The daemon also reclaims the exact managed path `codex-home/.sandbox-bin`; old task metadata without `completed_at` becomes eligible for this managed-only cleanup after its `.gc_meta.json` file has been idle for `MULTICA_GC_ORPHAN_TTL`. The rest of the task (source, `.git`, `output/`, `logs/`, `.gc_meta.json`, Codex auth/config/session state) is preserved so the agent can resume it. The same basename patterns apply to unarchived chats that use a daemon-managed work directory once the chat status check succeeds and the last run has been complete for `MULTICA_GC_ARTIFACT_TTL`. After a successful cleanup, the daemon skips repeat scans for that run. A later completed run becomes eligible again after the same delay.
 - **Managed-cache reclamation** — the exact managed path above is reclaimed for *every* task kind once the task has been completed for `MULTICA_GC_ARTIFACT_TTL`, not just for issue tasks whose issue is still open. It applies even while the parent record says the directory itself must stay — an active chat session, a still-running autopilot run — and even when the parent record could not be reached this cycle, because the contents are regenerable and the next run re-provisions them on demand. A task currently running on the directory is never touched. Set `MULTICA_GC_ARTIFACT_TTL=0` to disable this along with the rest of artifact cleanup.
 
 - **Repo cache eviction** — the bare git clones under `.repos/` are shared object stores: each task workdir is a `git worktree` off one of them rather than its own clone, so a task's `.git` is only a pointer file. They are evicted only when all of the following hold: the repo is no longer attached to any workspace this daemon watches, it has no worktrees left, and no task has created a worktree from it for `MULTICA_GC_REPO_TTL`. A cache created before this stamp existed is not treated as ancient — its clock starts at the first GC cycle that sees it, so upgrading does not wipe every cache. Evicting is safe by construction: the next task that needs the repo re-clones it on demand, so a wrong eviction costs a clone, not a failure.
@@ -462,6 +490,13 @@ The daemon launches QwenPaw as `qwenpaw acp --workspace <per-task dir>`. It writ
 The daemon launches MiniMax Code as `mcode acp`, writes the task brief to `AGENTS.md`, and injects bound skills under `.minimax/skills/`. MCode owns model selection and currently advertises `loadSession: false`; Multica therefore starts a fresh MCode session when a later run cannot load the saved session.
 
 #### Hermes agent memory
+
+On Windows, detected Hermes versions 0.22 and later use a daemon-owned foreground
+gateway for each isolated task home. The daemon waits for its startup reservation
+before launching ACP, which performs the readiness handshake. The gateway and its
+tool descendants remain in a Windows job object and are terminated on task cleanup
+or cancellation; agent jobs do not permit breakaway. Other platforms and older or
+unrecognized Hermes versions retain their existing ACP startup behavior.
 
 Hermes discovers skills only from its own home, so binding Multica skills to a Hermes agent makes the daemon build a per-task `HERMES_HOME` overlay for that agent. The agent's long-term memory (`memories/`) does **not** live inside that task-scoped overlay: it is linked to a persistent store at
 
@@ -935,12 +970,13 @@ multica project delete <id>
 ### Associating Issues with Projects
 
 Use the `--project` flag on `issue create` / `issue update` to attach an issue to a
-project, or on `issue list` to filter issues by project:
+project, or on `issue list` / `issue search` to filter issues by project:
 
 ```bash
 multica issue create --title "Login bug" --project <project-id>
 multica issue update <issue-id> --project <project-id>
 multica issue list --project <project-id>
+multica issue search "Login" --project <project-id>
 ```
 
 ## Setup

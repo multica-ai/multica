@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -48,6 +49,13 @@ func TestGetConfigReportsCdnSignedMode(t *testing.T) {
 	}
 	if cfg.CdnDomain != "cdn.example.com" {
 		t.Fatalf("cdn_domain: want cdn.example.com alongside cdn_signed, got %q", cfg.CdnDomain)
+	}
+	t.Setenv("LOCAL_UPLOAD_DIR", t.TempDir())
+	t.Setenv("LOCAL_UPLOAD_BASE_URL", "https://local.example.test")
+	testHandler.CFSigner = nil
+	testHandler.Storage = storage.NewLocalStorageFromEnv()
+	if cfg := fetch(); !cfg.CdnSigned || cfg.CdnDomain != "local.example.test" {
+		t.Fatalf("local storage must declare private downloads even with a base URL: %+v", cfg)
 	}
 }
 

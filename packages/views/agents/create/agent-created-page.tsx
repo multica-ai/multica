@@ -13,7 +13,7 @@ import {
   agentListOptions,
   squadListOptions,
 } from "@multica/core/workspace/queries";
-import { MulticaArcade } from "@multica/ui/components/common/multica-graphics";
+import { MulticaStarRow } from "@multica/ui/components/common/multica-graphics";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
@@ -41,9 +41,9 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
   const squad = squadId ? squads.find((item) => item.id === squadId) ?? null : null;
   const name = agent?.name ?? "";
   const { data: agents } = useQuery(agentListOptions(wsId));
-  // One arch per active agent, the newest last. Clamped so a tiny workspace
+  // One star per active agent, the newest last. Clamped so a tiny workspace
   // still reads as a row and a huge one still fits the banner.
-  const arches = agents
+  const stars = agents
     ? Math.min(Math.max(agents.filter((item) => !item.archived_at).length, 3), 11)
     : null;
 
@@ -57,13 +57,12 @@ export function AgentCreatedPage({ agentId }: { agentId: string }) {
       <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 py-12">
         <div className="m-auto w-full max-w-xl">
           <div aria-hidden="true" className="relative mb-10 h-36 overflow-hidden rounded-xl bg-multica-ink">
-            {arches && agent ? (
-              <MulticaArcade
-                count={arches}
-                legs={100}
-                rise="join"
+            {stars && agent ? (
+              <MulticaStarRow
+                count={stars}
+                join
                 delay={0.2}
-                className="absolute bottom-0 left-1/2 h-24 w-auto -translate-x-1/2 text-multica-paper/15"
+                className="absolute top-1/2 left-1/2 h-8 w-auto -translate-x-1/2 -translate-y-1/2 text-multica-paper/15"
                 lastClassName="fill-multica-paper"
               />
             ) : null}

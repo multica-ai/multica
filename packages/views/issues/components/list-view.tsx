@@ -513,6 +513,7 @@ function StatusAccordionItem({
   const isOver = droppableIsOver && !statusCatalog.entryOf(status)?.archived_at;
 
   const disableSorting = !!sortLabel;
+  const addIssueLabel = t(($) => $.list.add_issue_tooltip);
 
   // The infinite-scroll sentinel rides Virtuoso's Footer so it sits at the true
   // end of the virtualized rows and still fires loadMore when scrolled to it.
@@ -595,7 +596,10 @@ function StatusAccordionItem({
   return (
     <Accordion.Item value={status} ref={dragEnabled ? setDroppableRef : undefined}>
       <Accordion.Header
-        className={`group/header sticky top-0 z-10 flex h-10 items-center rounded-lg bg-muted transition-colors hover:bg-accent ${
+        data-slot="issue-group-header"
+        data-mc="issue-group-header"
+        data-status={status}
+        className={`group/header sticky top-0 z-10 flex h-[var(--issue-group-header-height,2.5rem)] items-center rounded-issue-group-header bg-issue-group-header transition-colors hover:bg-issue-group-header-hover ${
           isOver && !isExpanded
             ? "ring-2 ring-brand/25 bg-accent/15"
             : ""
@@ -626,12 +630,13 @@ function StatusAccordionItem({
           <div className="pr-2">
             {/* Lazy-mounted tooltip machinery — see DeferredTooltip. */}
             <DeferredTooltip
-              content={t(($) => $.list.add_issue_tooltip)}
+              content={addIssueLabel}
               trigger={
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="rounded-full text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
+                  className="text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
+                  aria-label={addIssueLabel}
                   onClick={() => {
                     const defaults = {
                       status: status,
@@ -656,6 +661,16 @@ function StatusAccordionItem({
           ) : (
             rows
           )
+        ) : page.isError ? (
+          <ListLoadMoreFooter
+            hasMore={page.hasMore}
+            isLoading={page.isLoading || page.isFetching}
+            total={page.total}
+            onLoadMore={page.loadMore}
+            isError
+            onRetry={page.retry}
+            errorLabel={t(($) => $.detail.section_load_failed_retry)}
+          />
         ) : (
           <p className="py-6 text-center text-caption text-muted-foreground">
             {t(($) => $.list.empty_status)}

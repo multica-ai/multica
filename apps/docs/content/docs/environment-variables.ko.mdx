@@ -275,7 +275,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | `MULTICA_GC_TTL` | `24h` | 태스크가 `done` 또는 `closed` 분류에 들어가거나 채팅 세션이 보관된 뒤, 실행 디렉터리를 삭제하기까지의 시간 |
 | `MULTICA_GC_COMPLETED_TASK_TTL` | Multica Cloud `14d`, 셀프 호스팅 `0` | 태스크 실행이 완료된 뒤 디렉터리 전체를 삭제하기까지의 시간. 태스크가 닫혔는지와 관계없음. `0`이면 끔. 프로젝트 로컬 디렉터리에서의 실행에는 적용되지 않음 |
 | `MULTICA_GC_ORPHAN_TTL` | `72h` | 소속을 찾을 수 없는 디렉터리가 변경 없이 얼마나 지나면 삭제할지 |
-| `MULTICA_GC_ARTIFACT_TTL` | `12h` | 실행 완료 후 다시 만들 수 있는 내용(다음 행의 디렉터리와 데몬이 Codex용으로 준비하는 캐시)을 삭제하기까지의 시간. `0`이면 삭제하지 않음 |
+| `MULTICA_GC_ARTIFACT_TTL` | `12h` | 실행이 끝난 뒤 데몬이 다시 만들 수 있는 내용을 정리하기까지의 시간. 다음 행의 패턴은 열린 태스크와 관리되는 작업 디렉터리를 쓰는 미보관 채팅에 적용됨. 데몬이 관리하는 Codex 캐시에도 같은 시간이 적용됨. `0`이면 이 캐시를 유지함 |
 | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` | 다시 만들 수 있다고 보는 디렉터리 이름(쉼표로 구분). 설정하면 기본 목록을 **대체**하므로 기본 항목도 유지하려면 함께 적어야 함. `/`나 `\`가 들어간 항목은 무시됨 |
 | `MULTICA_GC_REPO_TTL` | `30d` | 더 이상 참조되지 않고 worktree도 없는 bare 저장소 캐시를, 체크아웃 없이 얼마나 지나면 삭제할지. `0`이면 삭제하지 않음 |
 | `MULTICA_GC_REPO_MAINTENANCE_ENABLED` | `true` | 오래된 에이전트 브랜치를 지운 뒤 저장소 캐시에 `git reflog expire`와 `git gc`를 실행할지. `false`면 이 단계만 끔 |
@@ -385,6 +385,8 @@ multica config show
 | `ws_claim_poll_interval` | `3m` | 정상 WebSocket에서 claim 안전 polling의 상한. `poll_interval`과 독립적으로 설정되며 Daemon은 하향 jitter를 적용합니다 |
 | `heartbeat_interval` | `15s` | heartbeat 간격 |
 | `agent_timeout` | 제한 없음 | 단일 실행의 절대 시간 제한 |
+| `agent_idle_watchdog` | `2h` | 실행 중인 도구 호출이 없을 때의 무응답 상한. `0s`이면 데몬 watchdog 전체가 꺼지며 `agent_tool_watchdog`도 적용되지 않습니다 |
+| `agent_tool_watchdog` | `agent_idle_watchdog`와 동일 | 도구 호출이 실행 중일 때의 무응답 상한. `0s`이면 데몬 watchdog이 무응답 도구 호출 때문에 실행을 멈추지 않으며, 실행은 `agent_timeout`(기본값은 제한 없음)으로만 제한됩니다 |
 | `codex_semantic_inactivity_timeout` | 파생 | Codex 의미 활동 없음 기준값. 설정하지 않으면 idle과 tool watchdog 예산 중 큰 값을 따르고, tool 예산이 `0`이면 idle 예산으로 되돌아갑니다. Codex 자체의 `10m`은 watchdog 전체를 비활성화했을 때만 유지됩니다 |
 | `codex_handshake_timeout` | `30s`, `thread/start`·`thread/resume`: `60s` | Codex app-server 시작 handshake 상한. 명시적으로 설정한 값은 두 예산을 모두 일괄 재정의합니다 |
 | `disable_auto_update` | 환경을 따름 | `true`는 자동 업데이트를 끔. `false`는 로컬 덮어쓰기를 지우고 환경 변수 또는 기본값으로 복귀 |
@@ -393,7 +395,7 @@ multica config show
 
 값에는 다음 규칙이 적용됩니다.
 
-- duration key는 양의 Go duration(예: `10s`, `2h`)을 허용하며 `0s`와 음수는 거부합니다. 유일한 예외는 `agent_timeout`입니다. `0s`가 유효하며 실행 시간 제한을 명시적으로 끕니다.
+- duration key는 양의 Go duration(예: `10s`, `2h`)을 허용하며 음수는 항상 거부합니다. `0s`까지 허용하는 key는 `agent_timeout`, `agent_idle_watchdog`, `agent_tool_watchdog`뿐입니다. `agent_timeout`의 `0s`는 실행 시간 제한을 명시적으로 끄고, 두 watchdog key에서 `0s`가 무엇을 끄는지는 표를 참고하세요.
 - 빈 문자열을 전달하면 저장된 값을 지우고 환경 변수 또는 내장 기본값으로 돌아갑니다. 예: `multica config set poll_interval ""`
 - `max_concurrent_tasks`는 0 이상의 정수여야 합니다.
 - 상대 `workspaces_root` 값은 저장할 때 절대 경로로 변환됩니다.

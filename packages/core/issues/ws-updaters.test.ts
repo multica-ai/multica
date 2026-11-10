@@ -18,6 +18,8 @@ import {
 } from "./ws-updaters";
 import { issueKeys } from "./queries";
 import { labelKeys } from "../labels/queries";
+import { EMPTY_INBOX_FILTERS } from "../inbox/filters";
+import { archivedInboxFacetsOptions, archivedInboxPagesOptions } from "../inbox/queries";
 import { projectKeys } from "../projects/queries";
 import type {
   AgentActivityBucket,
@@ -203,6 +205,28 @@ describe("onIssueLabelsChanged", () => {
       labels: [labelB],
       issue_revision: 4,
     });
+  });
+
+  it("re-asks a label-filtered archive and its facets once a label change lands", () => {
+    const filters = { ...EMPTY_INBOX_FILTERS, labels: [labelB.id] };
+    const pages = archivedInboxPagesOptions(WS_ID, filters).queryKey;
+    const facets = archivedInboxFacetsOptions(WS_ID, filters).queryKey;
+    qc.setQueryData(pages, { pages: [{ items: [], nextCursor: null, hasMore: false }], pageParams: [null] });
+    qc.setQueryData(facets, { statuses: {}, priorities: {}, actors: {}, types: {}, projects: {}, assignees: {}, labels: {}, unreadCount: 0 });
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB], 2);
+
+    expectInvalidated(qc, pages);
+    expectInvalidated(qc, facets);
+  });
+
+  it("leaves the archive alone for an optimistic label patch", () => {
+    const pages = archivedInboxPagesOptions(WS_ID, EMPTY_INBOX_FILTERS).queryKey;
+    qc.setQueryData(pages, { pages: [{ items: [], nextCursor: null, hasMore: false }], pageParams: [null] });
+
+    patchIssueLabels(qc, WS_ID, ISSUE_ID, [labelB]);
+
+    expect(qc.getQueryState(pages)?.isInvalidated).toBe(false);
   });
 
   it("leaves the per-issue label cache untouched when the picker has not fetched", () => {

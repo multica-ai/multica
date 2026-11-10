@@ -41,7 +41,12 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
-import { attachmentIdFromStorageURL } from "@multica/core/types/attachment-url";
+import {
+  attachmentDownloadPath,
+  attachmentIdFromDownloadURL,
+  attachmentIdFromLocalUploadURL,
+  attachmentIdFromStorageURL,
+} from "@multica/core/types/attachment-url";
 import { useT } from "../i18n";
 import { DeferredTooltip } from "../common/deferred-tooltip";
 import { useAttachmentDownloadResolver } from "./attachment-download-context";
@@ -228,8 +233,8 @@ function absolutizeMediaURL(rawUrl: string): string {
 // for rendering but must not replace durable Markdown references.
 //
 // Use known public/CDN URLs directly only when cdn_signed is false; unsigned URLs
-// on a private CDN fail even when the domain matches. Local /uploads paths remain
-// valid after origin normalization. Otherwise prefer the server's markdown_url,
+// on a private CDN fail even when the domain matches. Historical local uploads
+// use the authenticated API. Otherwise prefer the server's markdown_url,
 // then legacy storage URLs, then the original input.
 function pickInlineMediaURL(
   record: AttachmentRecord,
@@ -244,17 +249,11 @@ function pickInlineMediaURL(
   ) {
     return dl;
   }
+  if (attachmentIdFromLocalUploadURL(record.url)) return attachmentDownloadPath(record.id);
   if (!cdnSigned && storageURLMatchesCdnDomain(record.url, cdnDomain)) return record.url;
-  if (isSiteRelativeLocalUploadURL(record.url)) return record.url;
   if (record.markdown_url) return record.markdown_url;
   if (record.url) return record.url;
   return fallback;
-}
-
-function isSiteRelativeLocalUploadURL(rawURL: string): boolean {
-  if (!rawURL || !rawURL.startsWith("/")) return false;
-  const path = rawURL.split(/[?#]/, 1)[0] ?? "";
-  return path === "/uploads" || path.startsWith("/uploads/");
 }
 
 function storageURLMatchesCdnDomain(rawURL: string, cdnDomain: string): boolean {
@@ -353,7 +352,7 @@ export function Attachment({
     if (mediaUrl) {
       preview.tryOpen({
         kind: "url",
-        url: mediaUrl,
+        url: isObjectURL(mediaUrl) ? state.url : mediaUrl,
         filename: state.filename,
         // This dispatcher has already decided what the slot is — from the
         // call site's `forceKind`, or from a content-type the modal's
@@ -371,7 +370,10 @@ export function Attachment({
     // its attachment id, so re-sign it instead of opening the bare URL,
     // which a signed CDN rejects outside the app.
     const attachmentId =
-      state.attachmentId ?? attachmentIdFromStorageURL(shareUrl, cdnDomain);
+      state.attachmentId ??
+      attachmentIdFromDownloadURL(shareUrl) ??
+      attachmentIdFromLocalUploadURL(shareUrl) ??
+      attachmentIdFromStorageURL(shareUrl, cdnDomain);
     if (attachmentId) {
       return download(attachmentId);
     }
