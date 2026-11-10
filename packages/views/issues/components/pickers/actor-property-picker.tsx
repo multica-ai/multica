@@ -151,9 +151,11 @@ export function ActorPropertyPicker({
 export function ActorPropertyDisplay({
   value,
   emptyLabel,
+  compact = false,
 }: {
   value: IssuePropertyValue | undefined;
   emptyLabel: React.ReactNode;
+  compact?: boolean;
 }) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
@@ -167,6 +169,19 @@ export function ActorPropertyDisplay({
       );
     }
     return <>{emptyLabel}</>;
+  }
+  if (compact) {
+    const first = refs[0]!;
+    return (
+      <span
+        className="flex min-w-0 items-center gap-1"
+        title={refs.map((ref) => getActorName(ref.kind, ref.id)).join(", ")}
+      >
+        <ActorAvatar actorType={first.kind} actorId={first.id} size="sm" />
+        <span className="truncate">{getActorName(first.kind, first.id)}</span>
+        {refs.length > 1 && <span className="shrink-0">+{refs.length - 1}</span>}
+      </span>
+    );
   }
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-1">

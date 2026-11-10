@@ -167,7 +167,7 @@ function ListRowContent({
                     className="inline-flex max-w-[120px] items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-micro text-muted-foreground"
                   >
                     <PropertyIcon property={property} className="size-3 text-micro" />
-                    <CustomPropertyValueDisplay property={property} value={issue.properties?.[property.id]} />
+                    <CustomPropertyValueDisplay property={property} value={issue.properties?.[property.id]} compact />
                   </span>
                 ))}
               </span>
