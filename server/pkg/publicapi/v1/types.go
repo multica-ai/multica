@@ -1,5 +1,7 @@
 package publicapiv1
 
+import "encoding/json"
+
 // Context is Plugin-specific bootstrap data. It lives in the versioned
 // contract package so service-layer fields cannot leak into the wire format.
 type Context struct {
@@ -63,6 +65,20 @@ type PatchIssueRequest struct {
 	ExpectedRevision *int64  `json:"expected_revision,omitempty"`
 	Title            *string `json:"title,omitempty"`
 	Description      *string `json:"description,omitempty"`
+}
+
+// SetIssueMetadataRequest carries one primitive JSON value (string, number or
+// bool). Raw so integer fidelity survives to PostgreSQL.
+type SetIssueMetadataRequest struct {
+	ExpectedRevision *int64          `json:"expected_revision,omitempty"`
+	Value            json.RawMessage `json:"value"`
+}
+
+// IssueMetadataResponse is the whole metadata bag after a write, plus the
+// issue revision that write produced.
+type IssueMetadataResponse struct {
+	Metadata      map[string]any `json:"metadata"`
+	IssueRevision int64          `json:"issue_revision"`
 }
 
 type Comment struct {

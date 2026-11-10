@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -181,72 +182,14 @@ func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 
-	// Enforce the key-count cap in the handler. The DB only guards size,
-	// and a clear 4xx for "too many keys" beats a CHECK violation that
-	// happens to fire on the size cap once enough keys accumulate.
-	existing := parseIssueMetadata(issue.Metadata)
-	if _, present := existing[key]; !present && len(existing) >= maxIssueMetadataKeys {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("metadata cannot exceed %d keys", maxIssueMetadataKeys))
-		return
-	}
-
-	queryStarted := time.Now()
-	updated, err := wakeupWrite(h, r, func(q *db.Queries) (db.SetIssueMetadataKeyRow, error) {
-		return q.SetIssueMetadataKey(r.Context(), db.SetIssueMetadataKeyParams{
-			ID:          issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-			Key:         key,
-			Value:       []byte(req.Value),
-		})
-	})
-	queryDuration := time.Since(queryStarted)
+	result, err := h.setIssueMetadataKey(r, issue, key, req.Value, issueMetadataWriter{actorType: actorType, actorID: actorID})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			fallbackStarted := time.Now()
-			current, getErr := h.Queries.GetIssueMetadataInWorkspace(r.Context(), db.GetIssueMetadataInWorkspaceParams{
-				ID:          issue.ID,
-				WorkspaceID: issue.WorkspaceID,
-			})
-			queryDuration += time.Since(fallbackStarted)
-			if errors.Is(getErr, pgx.ErrNoRows) {
-				h.recordIssueMetadataMutation(r, "set", "not_found", issueID, key, queryDuration)
-				writeError(w, http.StatusNotFound, "issue not found")
-				return
-			}
-			if getErr != nil {
-				h.recordIssueMetadataMutation(r, "set", "error", issueID, key, queryDuration)
-				slog.Warn("GetIssueMetadataInWorkspace after metadata set no-op failed", append(logger.RequestAttrs(r), "error", getErr, "issue_id", issueID, "key", key)...)
-				writeError(w, http.StatusInternalServerError, "failed to load issue metadata")
-				return
-			}
-			h.recordIssueMetadataMutation(r, "set", "noop", issueID, key, queryDuration)
-			writeJSON(w, http.StatusOK, map[string]any{
-				"metadata":       parseIssueMetadata(current.Metadata),
-				"issue_revision": current.Revision,
-			})
-			return
-		}
-		h.recordIssueMetadataMutation(r, "set", "error", issueID, key, queryDuration)
-		if isCheckViolation(err) {
-			writeError(w, http.StatusBadRequest, "metadata exceeds the 8KB size limit")
-			return
-		}
-		slog.Warn("SetIssueMetadataKey failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID, "key", key)...)
-		writeError(w, http.StatusInternalServerError, "failed to set metadata key")
+		writeIssueMetadataAppError(w, err, "failed to set metadata key")
 		return
 	}
-	h.recordIssueMetadataMutation(r, "set", "changed", issueID, key, queryDuration)
-
-	workspaceID := uuidToString(updated.WorkspaceID)
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	metadata := parseIssueMetadata(updated.Metadata)
-	h.publish(protocol.EventIssueMetadataChanged, workspaceID, actorType, actorID, map[string]any{
-		"issue_id":       uuidToString(updated.ID),
-		"metadata":       metadata,
-		"issue_revision": updated.Revision,
-	})
-	writeJSON(w, http.StatusOK, map[string]any{"metadata": metadata, "issue_revision": updated.Revision})
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) DeleteIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
@@ -266,56 +209,199 @@ func (h *Handler) DeleteIssueMetadataKey(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+
+	result, err := h.deleteIssueMetadataKey(r, issue, key, issueMetadataWriter{actorType: actorType, actorID: actorID})
+	if err != nil {
+		writeIssueMetadataAppError(w, err, "failed to delete metadata key")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// Failures shared by every caller of the metadata mutation core. Each surface
+// (App API, Plugin Action API) maps them onto its own error envelope.
+var (
+	errIssueMetadataNotFound     = errors.New("issue not found")
+	errIssueMetadataTooManyKeys  = fmt.Errorf("metadata cannot exceed %d keys", maxIssueMetadataKeys)
+	errIssueMetadataSizeExceeded = errors.New("metadata exceeds the 8KB size limit")
+	errIssueMetadataConflict     = errors.New("issue changed since the expected revision")
+	errIssueMetadataLoad         = errors.New(issueMetadataLoadMessage)
+)
+
+const issueMetadataLoadMessage = "failed to load issue metadata"
+
+// issueMetadataWriter is who a metadata mutation is attributed to and,
+// optionally, the issue revision it was computed against.
+type issueMetadataWriter struct {
+	actorType string
+	actorID   string
+	// viaPluginID names the installation that made a write on a member's
+	// behalf (a ui/manual hook or a panel), so the change stays traceable to
+	// the plugin while remaining the member's.
+	viaPluginID string
+	// expectedRevision, when set, makes the write conditional: it applies only
+	// if the issue is still at that revision.
+	expectedRevision *int64
+}
+
+// issueMetadataResult is the response body every metadata mutation returns:
+// the whole bag after the write plus the revision it produced, so a caller can
+// chain an If-Match write on the issue without a second read.
+type issueMetadataResult struct {
+	Metadata      map[string]any `json:"metadata"`
+	IssueRevision int64          `json:"issue_revision"`
+}
+
+func writeIssueMetadataAppError(w http.ResponseWriter, err error, fallback string) {
+	switch {
+	case errors.Is(err, errIssueMetadataNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, errIssueMetadataTooManyKeys), errors.Is(err, errIssueMetadataSizeExceeded):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, errIssueMetadataLoad):
+		writeError(w, http.StatusInternalServerError, issueMetadataLoadMessage)
+	default:
+		writeError(w, http.StatusInternalServerError, fallback)
+	}
+}
+
+// setIssueMetadataKey is the single-key write shared by the App API and the
+// Plugin Action API. The caller has already validated key and value and
+// authorized access to issue; this enforces the key cap, writes through the
+// wakeup-attributed transaction, and publishes issue:metadata_changed only
+// when the bag actually changed.
+func (h *Handler) setIssueMetadataKey(r *http.Request, issue db.Issue, key string, value json.RawMessage, writer issueMetadataWriter) (issueMetadataResult, error) {
+	issueID := uuidToString(issue.ID)
+	if writer.expectedRevision != nil && issue.Revision != *writer.expectedRevision {
+		return issueMetadataResult{}, errIssueMetadataConflict
+	}
+	// Enforce the key-count cap in the handler. The DB only guards size,
+	// and a clear 4xx for "too many keys" beats a CHECK violation that
+	// happens to fire on the size cap once enough keys accumulate.
+	existing := parseIssueMetadata(issue.Metadata)
+	if _, present := existing[key]; !present && len(existing) >= maxIssueMetadataKeys {
+		return issueMetadataResult{}, errIssueMetadataTooManyKeys
+	}
 
 	queryStarted := time.Now()
-	updated, err := wakeupWrite(h, r, func(q *db.Queries) (db.DeleteIssueMetadataKeyRow, error) {
-		return q.DeleteIssueMetadataKey(r.Context(), db.DeleteIssueMetadataKeyParams{
+	updated, err := wakeupWrite(h, r, func(q *db.Queries) (db.SetIssueMetadataKeyRow, error) {
+		row, err := q.SetIssueMetadataKey(r.Context(), db.SetIssueMetadataKeyParams{
 			ID:          issue.ID,
 			WorkspaceID: issue.WorkspaceID,
 			Key:         key,
+			Value:       []byte(value),
 		})
+		if err == nil && !writer.revisionFollows(row.Revision) {
+			return row, errIssueMetadataConflict
+		}
+		return row, err
 	})
 	queryDuration := time.Since(queryStarted)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			fallbackStarted := time.Now()
-			current, getErr := h.Queries.GetIssueMetadataInWorkspace(r.Context(), db.GetIssueMetadataInWorkspaceParams{
-				ID:          issue.ID,
-				WorkspaceID: issue.WorkspaceID,
-			})
-			queryDuration += time.Since(fallbackStarted)
-			if errors.Is(getErr, pgx.ErrNoRows) {
-				h.recordIssueMetadataMutation(r, "delete", "not_found", issueID, key, queryDuration)
-				writeError(w, http.StatusNotFound, "issue not found")
-				return
-			}
-			if getErr != nil {
-				h.recordIssueMetadataMutation(r, "delete", "error", issueID, key, queryDuration)
-				slog.Warn("GetIssueMetadataInWorkspace after metadata delete no-op failed", append(logger.RequestAttrs(r), "error", getErr, "issue_id", issueID, "key", key)...)
-				writeError(w, http.StatusInternalServerError, "failed to load issue metadata")
-				return
-			}
-			h.recordIssueMetadataMutation(r, "delete", "noop", issueID, key, queryDuration)
-			writeJSON(w, http.StatusOK, map[string]any{
-				"metadata":       parseIssueMetadata(current.Metadata),
-				"issue_revision": current.Revision,
-			})
-			return
+			return h.issueMetadataNoop(r, "set", issue, key, writer, queryDuration)
+		}
+		if errors.Is(err, errIssueMetadataConflict) {
+			h.recordIssueMetadataMutation(r, "set", "conflict", issueID, key, queryDuration)
+			return issueMetadataResult{}, err
+		}
+		h.recordIssueMetadataMutation(r, "set", "error", issueID, key, queryDuration)
+		if isCheckViolation(err) {
+			return issueMetadataResult{}, errIssueMetadataSizeExceeded
+		}
+		slog.Warn("SetIssueMetadataKey failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID, "key", key)...)
+		return issueMetadataResult{}, err
+	}
+	h.recordIssueMetadataMutation(r, "set", "changed", issueID, key, queryDuration)
+	return h.publishIssueMetadataChanged(updated.ID, updated.WorkspaceID, updated.Metadata, updated.Revision, writer), nil
+}
+
+// revisionFollows reports whether a write that produced revision was applied
+// on top of the expected one. The UPDATE bumps revision by exactly one under
+// its row lock, so this is the atomic form of the If-Match check: a stale
+// write is rolled back instead of committed.
+func (w issueMetadataWriter) revisionFollows(revision int64) bool {
+	return w.expectedRevision == nil || revision == *w.expectedRevision+1
+}
+
+// deleteIssueMetadataKey is the single-key delete shared by the App API and
+// the Plugin Action API. Deleting an absent key is a successful no-op.
+func (h *Handler) deleteIssueMetadataKey(r *http.Request, issue db.Issue, key string, writer issueMetadataWriter) (issueMetadataResult, error) {
+	issueID := uuidToString(issue.ID)
+	if writer.expectedRevision != nil && issue.Revision != *writer.expectedRevision {
+		return issueMetadataResult{}, errIssueMetadataConflict
+	}
+	queryStarted := time.Now()
+	updated, err := wakeupWrite(h, r, func(q *db.Queries) (db.DeleteIssueMetadataKeyRow, error) {
+		row, err := q.DeleteIssueMetadataKey(r.Context(), db.DeleteIssueMetadataKeyParams{
+			ID:          issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			Key:         key,
+		})
+		if err == nil && !writer.revisionFollows(row.Revision) {
+			return row, errIssueMetadataConflict
+		}
+		return row, err
+	})
+	queryDuration := time.Since(queryStarted)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return h.issueMetadataNoop(r, "delete", issue, key, writer, queryDuration)
+		}
+		if errors.Is(err, errIssueMetadataConflict) {
+			h.recordIssueMetadataMutation(r, "delete", "conflict", issueID, key, queryDuration)
+			return issueMetadataResult{}, err
 		}
 		h.recordIssueMetadataMutation(r, "delete", "error", issueID, key, queryDuration)
 		slog.Warn("DeleteIssueMetadataKey failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID, "key", key)...)
-		writeError(w, http.StatusInternalServerError, "failed to delete metadata key")
-		return
+		return issueMetadataResult{}, err
 	}
 	h.recordIssueMetadataMutation(r, "delete", "changed", issueID, key, queryDuration)
+	return h.publishIssueMetadataChanged(updated.ID, updated.WorkspaceID, updated.Metadata, updated.Revision, writer), nil
+}
 
-	workspaceID := uuidToString(updated.WorkspaceID)
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	metadata := parseIssueMetadata(updated.Metadata)
-	h.publish(protocol.EventIssueMetadataChanged, workspaceID, actorType, actorID, map[string]any{
-		"issue_id":       uuidToString(updated.ID),
-		"metadata":       metadata,
-		"issue_revision": updated.Revision,
+// issueMetadataNoop handles a mutation whose UPDATE matched no row: either
+// the write would not change the bag (same value, or deleting an absent key)
+// or the issue vanished in between. Re-read to tell the two apart.
+//
+// A conditional write that changed nothing still has to be current: a value
+// that happens to be stored already does not make a stale request valid.
+func (h *Handler) issueMetadataNoop(r *http.Request, op string, issue db.Issue, key string, writer issueMetadataWriter, queryDuration time.Duration) (issueMetadataResult, error) {
+	issueID := uuidToString(issue.ID)
+	fallbackStarted := time.Now()
+	current, err := h.Queries.GetIssueMetadataInWorkspace(r.Context(), db.GetIssueMetadataInWorkspaceParams{
+		ID:          issue.ID,
+		WorkspaceID: issue.WorkspaceID,
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"metadata": metadata, "issue_revision": updated.Revision})
+	queryDuration += time.Since(fallbackStarted)
+	if errors.Is(err, pgx.ErrNoRows) {
+		h.recordIssueMetadataMutation(r, op, "not_found", issueID, key, queryDuration)
+		return issueMetadataResult{}, errIssueMetadataNotFound
+	}
+	if err != nil {
+		h.recordIssueMetadataMutation(r, op, "error", issueID, key, queryDuration)
+		slog.Warn("GetIssueMetadataInWorkspace after metadata "+op+" no-op failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID, "key", key)...)
+		return issueMetadataResult{}, fmt.Errorf("%w: %w", errIssueMetadataLoad, err)
+	}
+	if writer.expectedRevision != nil && current.Revision != *writer.expectedRevision {
+		h.recordIssueMetadataMutation(r, op, "conflict", issueID, key, queryDuration)
+		return issueMetadataResult{}, errIssueMetadataConflict
+	}
+	h.recordIssueMetadataMutation(r, op, "noop", issueID, key, queryDuration)
+	return issueMetadataResult{Metadata: parseIssueMetadata(current.Metadata), IssueRevision: current.Revision}, nil
+}
+
+func (h *Handler) publishIssueMetadataChanged(id, workspace pgtype.UUID, raw []byte, revision int64, writer issueMetadataWriter) issueMetadataResult {
+	metadata := parseIssueMetadata(raw)
+	payload := map[string]any{
+		"issue_id":       uuidToString(id),
+		"metadata":       metadata,
+		"issue_revision": revision,
+	}
+	if writer.viaPluginID != "" {
+		payload["via_plugin_id"] = writer.viaPluginID
+	}
+	h.publish(protocol.EventIssueMetadataChanged, uuidToString(workspace), writer.actorType, writer.actorID, payload)
+	return issueMetadataResult{Metadata: metadata, IssueRevision: revision}
 }

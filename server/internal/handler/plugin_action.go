@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -831,4 +832,125 @@ func (h *Handler) DeletePluginStorage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Issue metadata ---
+
+// SetPluginIssueMetadata — PUT /v1/issues/{issue_ref}/metadata/{key}
+//
+// The same single-key write as the App API (key pattern, primitive values, the
+// 50-key cap and the 8KB size limit), so an integration plugin can record where
+// an issue lives in another system — jira.key, linear.id, zendesk.ticket — on
+// the issue itself, where agents and the UI already read it, instead of in
+// private plugin storage nobody else can see.
+//
+// Writes are attributed to the actor decided by how the caller authenticated,
+// exactly like comments: a person when one is behind the call (with
+// via_plugin_id on the event naming the installation), otherwise the
+// installation. A real change publishes issue:metadata_changed and may wake
+// agents subscribed to it, the same as a member's write would.
+//
+// If-Match (or expected_revision) makes the write conditional on the issue
+// revision, the same contract as PATCH /v1/issues/{issue_ref}.
+func (h *Handler) SetPluginIssueMetadata(w http.ResponseWriter, r *http.Request) {
+	caller, actor, ok := h.pluginCaller(w, r, plugincontract.ScopeIssuesWrite)
+	if !ok {
+		return
+	}
+	key := chi.URLParam(r, "key")
+	if err := validateIssueMetadataKey(key); err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	var req publicapiv1.SetIssueMetadataRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	if err := validateIssueMetadataValue(req.Value); err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	expectedRevision, ok := publicIssueExpectedRevision(w, r, req.ExpectedRevision)
+	if !ok {
+		return
+	}
+	issue, ok := h.pluginIssueForUser(w, r, caller, chi.URLParam(r, "issue_ref"))
+	if !ok {
+		return
+	}
+
+	writer := pluginMetadataWriter(caller, actor, expectedRevision)
+	result, err := h.setIssueMetadataKey(withPluginWakeupActor(r, writer), issue, key, req.Value, writer)
+	if err != nil {
+		writePluginIssueMetadataError(w, r, err, "failed to set the metadata key")
+		return
+	}
+	setPublicIssueETag(w, result.IssueRevision)
+	writeJSON(w, http.StatusOK, publicapiv1.IssueMetadataResponse{Metadata: result.Metadata, IssueRevision: result.IssueRevision})
+}
+
+// DeletePluginIssueMetadata — DELETE /v1/issues/{issue_ref}/metadata/{key}
+//
+// Removing an absent key succeeds without a change, so an unlink can be
+// retried safely.
+func (h *Handler) DeletePluginIssueMetadata(w http.ResponseWriter, r *http.Request) {
+	caller, actor, ok := h.pluginCaller(w, r, plugincontract.ScopeIssuesWrite)
+	if !ok {
+		return
+	}
+	key := chi.URLParam(r, "key")
+	if err := validateIssueMetadataKey(key); err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	expectedRevision, ok := publicIssueExpectedRevision(w, r, nil)
+	if !ok {
+		return
+	}
+	issue, ok := h.pluginIssueForUser(w, r, caller, chi.URLParam(r, "issue_ref"))
+	if !ok {
+		return
+	}
+
+	writer := pluginMetadataWriter(caller, actor, expectedRevision)
+	result, err := h.deleteIssueMetadataKey(withPluginWakeupActor(r, writer), issue, key, writer)
+	if err != nil {
+		writePluginIssueMetadataError(w, r, err, "failed to delete the metadata key")
+		return
+	}
+	setPublicIssueETag(w, result.IssueRevision)
+	writeJSON(w, http.StatusOK, publicapiv1.IssueMetadataResponse{Metadata: result.Metadata, IssueRevision: result.IssueRevision})
+}
+
+// pluginMetadataWriter names who a plugin write is attributed to, by the same
+// rule CreatePluginComment uses for authorship: the member when one is behind
+// the call, with the installation recorded as via_plugin_id; otherwise the
+// installation itself.
+func pluginMetadataWriter(caller service.PluginActionCaller, actor pluginActor, expectedRevision *int64) issueMetadataWriter {
+	installationID := uuidToString(caller.Installation.ID)
+	if actor.isMember() {
+		return issueMetadataWriter{actorType: "member", actorID: uuidToString(actor.Member.UserID), viaPluginID: installationID, expectedRevision: expectedRevision}
+	}
+	return issueMetadataWriter{actorType: "plugin", actorID: installationID, expectedRevision: expectedRevision}
+}
+
+// withPluginWakeupActor pins the transaction-local wakeup attribution to the
+// plugin actor. Without it withWakeupActor would resolve identity from the
+// request, which for an install token has no user at all.
+func withPluginWakeupActor(r *http.Request, writer issueMetadataWriter) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), wakeupActorKey{}, wakeupActor{kind: writer.actorType, id: writer.actorID}))
+}
+
+func writePluginIssueMetadataError(w http.ResponseWriter, r *http.Request, err error, fallback string) {
+	switch {
+	case errors.Is(err, errIssueMetadataNotFound):
+		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "issue not found")
+	case errors.Is(err, errIssueMetadataTooManyKeys), errors.Is(err, errIssueMetadataSizeExceeded):
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", err.Error())
+	case errors.Is(err, errIssueMetadataConflict):
+		writePublicIssueRevisionConflict(w, r)
+	default:
+		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", fallback)
+	}
 }

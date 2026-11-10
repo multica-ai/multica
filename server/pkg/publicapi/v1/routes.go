@@ -14,6 +14,7 @@ const (
 	PathContext       = "/context"
 	PathIssue         = "/issues/{issue_ref}"
 	PathIssueComments = "/issues/{issue_ref}/comments"
+	PathIssueMetadata = "/issues/{issue_ref}/metadata/{key}"
 	PathTaskMessages  = "/tasks/{task_id}/messages"
 	PathStorageScope  = "/storage/{scope}"
 	PathStorageValue  = "/storage/{scope}/{key}"
@@ -59,6 +60,8 @@ var Operations = []Operation{
 	{Method: http.MethodGet, Path: PathContext, Contract: ContractPluginExtension, Policy: OperationPolicy{Credentials: pluginCredentials, Risk: RiskRead, Audit: AuditNotRequired, RateLimits: pluginRateLimits}},
 	{Method: http.MethodGet, Path: PathIssue, Contract: ContractSharedResource, Policy: OperationPolicy{Credentials: sharedCredentials, Scope: "issues:read", Risk: RiskRead, Audit: AuditPlanned, RateLimits: sharedRateLimits}},
 	{Method: http.MethodPatch, Path: PathIssue, Contract: ContractSharedResource, Policy: OperationPolicy{Credentials: sharedCredentials, Scope: "issues:write", Risk: RiskContentWrite, Audit: AuditPlanned, RateLimits: sharedRateLimits}},
+	{Method: http.MethodPut, Path: PathIssueMetadata, Contract: ContractSharedResource, Policy: OperationPolicy{Credentials: sharedCredentials, Scope: "issues:write", Risk: RiskContentWrite, Audit: AuditPlanned, RateLimits: sharedRateLimits}},
+	{Method: http.MethodDelete, Path: PathIssueMetadata, Contract: ContractSharedResource, Policy: OperationPolicy{Credentials: sharedCredentials, Scope: "issues:write", Risk: RiskContentWrite, Audit: AuditPlanned, RateLimits: sharedRateLimits}},
 	{Method: http.MethodGet, Path: PathIssueComments, Contract: ContractSharedResource, Policy: OperationPolicy{Credentials: sharedCredentials, Scope: "comments:read", Risk: RiskRead, Audit: AuditPlanned, RateLimits: sharedRateLimits}},
 	{Method: http.MethodPost, Path: PathIssueComments, Contract: ContractSharedResource, Policy: OperationPolicy{Credentials: sharedCredentials, Scope: "comments:write", Risk: RiskContentWrite, Audit: AuditPlanned, RateLimits: sharedRateLimits}},
 	{Method: http.MethodGet, Path: PathTaskMessages, Contract: ContractSharedResource, Policy: OperationPolicy{Credentials: sharedCredentials, Scope: "tasks:read", Risk: RiskRead, Audit: AuditPlanned, RateLimits: sharedRateLimits}},

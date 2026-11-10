@@ -47,7 +47,8 @@ endpoint-specific concurrency rules.
 
 ## Rollout ledger
 
-The migrated slice is Issue read/content update and Comment read/create. Context
+The migrated slice is Issue read/content update, Issue metadata key set/delete,
+and Comment read/create. Context
 and Storage remain Plugin extensions; Hook and invocation delivery remain on
 the bridge. Projects, Members, Issue search/create/transition, Agents, Squads,
 Skills, Tasks/Runs, and Autopilots are subsequent vertical slices. Each slice

@@ -108,6 +108,67 @@ paths:
                 $ref: "#/components/schemas/Comment"
         default:
           $ref: "#/components/responses/Problem"
+  /issues/{issue_ref}/metadata/{key}:
+    parameters:
+      - $ref: "#/components/parameters/IssueRef"
+      - $ref: "#/components/parameters/IssueMetadataKey"
+    put:
+      operationId: setIssueMetadataValue
+      summary: Set one issue metadata key
+      description: >-
+        Single-key atomic write to the issue's flat metadata map, with the same
+        rules as the App API: keys match ^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$, values
+        are a string, number or bool, at most 50 keys and 8KB per issue. Writing
+        the value already stored is a no-op that keeps the revision. A real
+        change publishes issue:metadata_changed attributed to the member behind
+        the call (with via_plugin_id naming the installation), or to the
+        installation when no member is behind it. If-Match or expected_revision
+        makes the write conditional on the issue revision and returns 409
+        revision_conflict when it moved.
+      x-multica-contract: shared_resource
+      x-multica-scope: issues:write
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetIssueMetadataRequest"
+      responses:
+        "200":
+          description: Metadata after the write
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssueMetadataResponse"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteIssueMetadataValue
+      summary: Delete one issue metadata key
+      description: >-
+        Deleting a key that is not present succeeds without a change. If-Match
+        makes the delete conditional on the issue revision.
+      x-multica-contract: shared_resource
+      x-multica-scope: issues:write
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Metadata after the delete
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssueMetadataResponse"
+        default:
+          $ref: "#/components/responses/Problem"
   /tasks/{task_id}/messages:
     parameters:
       - $ref: "#/components/parameters/TaskId"
@@ -216,6 +277,13 @@ components:
       description: Issue UUID or workspace identifier such as MUL-123
       schema:
         type: string
+    IssueMetadataKey:
+      name: key
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$"
     TaskId:
       name: task_id
       in: path
@@ -395,6 +463,24 @@ components:
       anyOf:
         - required: [title]
         - required: [description]
+    SetIssueMetadataRequest:
+      type: object
+      required: [value]
+      properties:
+        expected_revision: { type: integer, format: int64, minimum: 1 }
+        value:
+          $ref: "#/components/schemas/IssueMetadataValue"
+    IssueMetadataValue:
+      type: [string, number, boolean]
+    IssueMetadataResponse:
+      type: object
+      required: [metadata, issue_revision]
+      properties:
+        metadata:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/IssueMetadataValue"
+        issue_revision: { type: integer, format: int64, minimum: 1 }
     Comment:
       type: object
       required: [id, author_type, author_id, content, type, created_at]
