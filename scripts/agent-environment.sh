@@ -25,12 +25,18 @@
 # its `start` exiting, gives up the claim; whoever gives up the last one
 # destroys the environment. Claims are read and changed under one lock per
 # checkout, so two stops at once still leave exactly one of them to destroy.
+#
+# Someone may use the same environment through a plain `make up`, with no
+# claim. So a component that is running counts as in use whether or not it is
+# claimed, and an environment that existed before the first claim was made is
+# never destroyed, and keeps its owner and TTL: it belongs to whoever made it.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEV_ENV="$REPO_ROOT/scripts/dev-env.sh"
 STATE_DIR="$REPO_ROOT/.multica/agent-environments"
 LOCK_DIR="$STATE_DIR/lock.d"
+BORROWED="$STATE_DIR/borrowed"
 
 # One hour longer than the ttl in environments.toml: the daemon's stop runs
 # first, and dev-env's own expiry only collects what a dead daemon left behind.
@@ -92,9 +98,21 @@ release_component() {
   bash "$DEV_ENV" down --components "$component"
   if [ -n "$(claim_holder "$other")" ]; then
     echo "$other still uses the API and database; kept them."
+  elif [ "$(component_state "$other")" != stopped ]; then
+    echo "$other is running outside 'multica env'; kept the API and database."
+  elif [ -f "$BORROWED" ]; then
+    echo "The environment existed before 'multica env start'; kept it."
   else
     bash "$DEV_ENV" destroy --yes
   fi
+}
+
+# The component's state in `dev-env.sh status --json`: running, stopped, ...
+component_state() {
+  node -e '
+    const status = JSON.parse(process.argv[1]);
+    process.stdout.write(String(status.components?.[process.argv[2]]?.state ?? "stopped"));
+  ' "$(bash "$DEV_ENV" status --json)" "$1"
 }
 
 # Runs when `start` exits for any reason: the component went away, `up`
@@ -124,11 +142,16 @@ cmd_start() {
   [ "$component" != desktop ] || flags+=(--cdp)
 
   acquire_lock
+  if [ -z "$(claim_holder web)$(claim_holder desktop)" ]; then
+    rm -f "$BORROWED"
+    ! bash "$DEV_ENV" status --json >/dev/null 2>&1 || touch "$BORROWED"
+  fi
   printf '%s\n' "$$" > "$(claim_file "$component")"
   release_lock
   trap "finish_start $component \$?" EXIT
+  [ -f "$BORROWED" ] || flags+=(--ttl "$DEV_ENV_TTL_HOURS")
 
-  bash "$DEV_ENV" up --components "api,$component" --ttl "$DEV_ENV_TTL_HOURS" ${flags[@]+"${flags[@]}"}
+  bash "$DEV_ENV" up --components "api,$component" ${flags[@]+"${flags[@]}"}
   status="$(bash "$DEV_ENV" status --json)"
 
   node -e '

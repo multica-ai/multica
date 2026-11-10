@@ -26,7 +26,8 @@ free_port() {
 }
 
 # A fresh fake checkout: the real script next to a dev-env.sh that records
-# each verb and keeps "registered" as the environment's existence.
+# each verb, keeps "registered" as the environment's existence and
+# "<component>.running" as each component's state.
 new_repo() {
   repo="$tmp_dir/repo-$1"
   mkdir -p "$repo/scripts"
@@ -36,13 +37,17 @@ new_repo() {
 #!/usr/bin/env bash
 set -eu
 cd "$repo"
+state() { [ -f "\$1.running" ] && echo running || echo stopped; }
 case "\$1" in
-  up) echo "up \$*" >> calls.log; touch registered ;;
+  up)
+    echo "\$*" >> calls.log; touch registered
+    case "\$3" in *web*) touch web.running ;; *desktop*) touch desktop.running ;; esac ;;
   status)
     [ -f registered ] || exit 1
-    printf '{"frontend_port":%s,"desktop_renderer_port":%s,"workspace_slug":"dev"}\n' "$component_port" "$component_port" ;;
-  down) sleep 0.3; echo "down \$3" >> calls.log ;;
-  destroy) sleep 0.3; echo destroy >> calls.log; rm -f registered ;;
+    printf '{"frontend_port":%s,"desktop_renderer_port":%s,"workspace_slug":"dev","components":{"web":{"state":"%s"},"desktop":{"state":"%s"}}}\n' \
+      "$component_port" "$component_port" "\$(state web)" "\$(state desktop)" ;;
+  down) sleep 0.3; echo "down \$3" >> calls.log; rm -f "\$3.running" ;;
+  destroy) sleep 0.3; echo destroy >> calls.log; rm -f registered web.running desktop.running ;;
 esac
 EOF
   : > "$repo/calls.log"
@@ -142,5 +147,49 @@ wait "$dead"
 printf '%s\n' "$dead" > "$repo/.multica/agent-environments/desktop.claim"
 bash "$repo/scripts/agent-environment.sh" stop web > /dev/null
 [ "$(count destroy)" = 1 ] || fail "a stale claim kept the environment alive"
+
+# 6. A component started with a plain `make up` has no claim, but is in use:
+#    stopping or losing the managed one next to it keeps what it uses. Both
+#    orders, through both ways a managed component ends.
+for pair in "desktop web" "web desktop"; do
+  set -- $pair
+  unmanaged=$1 managed=$2
+
+  new_repo "unmanaged-$unmanaged-exit"
+  touch "$repo/registered" "$repo/$unmanaged.running"
+  serve_component
+  start_in_background "$managed"
+  stop_job "$component_pid"
+  wait_for_exit "$start_pid"
+  [ "$(count "down $managed")" = 1 ] && [ "$(count destroy)" = 0 ] \
+    || fail "$managed exiting destroyed the environment $unmanaged runs in"
+
+  new_repo "unmanaged-$unmanaged-stop"
+  touch "$repo/registered" "$repo/$unmanaged.running"
+  serve_component
+  start_in_background "$managed"
+  bash "$repo/scripts/agent-environment.sh" stop "$managed" > /dev/null
+  stop_job "$start_pid"
+  [ "$(count "down $managed")" = 1 ] && [ "$(count destroy)" = 0 ] \
+    || fail "stopping $managed destroyed the environment $unmanaged runs in"
+done
+
+# 7. An environment that existed before the first claim is someone else's:
+#    start keeps its owner and TTL, and the last stop leaves it in place.
+new_repo borrowed
+touch "$repo/registered"
+serve_component
+start_in_background web
+grep -q -- "--ttl" "$repo/calls.log" && fail "start gave an existing environment a TTL"
+bash "$repo/scripts/agent-environment.sh" stop web > /dev/null
+stop_job "$start_pid"
+[ "$(count "down web")" = 1 ] && [ "$(count destroy)" = 0 ] || fail "the last stop destroyed an environment it did not create"
+
+# 8. ...while one start created fresh still gets the TTL.
+new_repo fresh
+serve_component
+start_in_background web
+grep -q -- "--ttl 25" "$repo/calls.log" || fail "start did not give a new environment its TTL"
+stop_job "$start_pid"
 
 echo "✓ agent-environment.sh lifecycle verified"
