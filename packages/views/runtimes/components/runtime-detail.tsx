@@ -53,6 +53,7 @@ import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
 import { HealthBadge, HealthIcon, shortDaemonId, useHealthLabel } from "./shared";
 import { ProviderLogo } from "./provider-logo";
+import { canShowSubscriptionQuota, SubscriptionQuotaCard } from "./subscription-quota";
 import { UsageSection } from "./usage-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { RuntimeAccessEditor, RuntimeAccessReadout } from "./runtime-access-editor";
@@ -233,6 +234,15 @@ export function RuntimeDetail({
 
           {canReadRuntime && (
             <ObjectSection title={t(($) => $.detail.usage_title)}>
+              {canShowSubscriptionQuota(runtime, user?.id) && (
+                <SubscriptionQuotaCard
+                  key={runtime.id}
+                  runtime={runtime}
+                  wsId={wsId}
+                  now={now}
+                  online={health === "online"}
+                />
+              )}
               <UsageSection runtime={runtime} />
             </ObjectSection>
           )}

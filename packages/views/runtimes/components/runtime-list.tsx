@@ -43,6 +43,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { canShowSubscriptionQuota, SubscriptionQuotaSummary } from "./subscription-quota";
 import { useIntentNavigate } from "../../navigation";
 import {
   CollectionEmptyValue,
@@ -678,6 +679,16 @@ export function RuntimeList({
           />
         ),
     },
+    ...(rows.some((row) => canShowSubscriptionQuota(row.runtime, user?.id))
+      ? [{
+          key: "subscription-quota",
+          header: t(($) => $.quota.column),
+          width: 152,
+          cell: (row: RuntimeRow) => canShowSubscriptionQuota(row.runtime, user?.id)
+            ? <SubscriptionQuotaSummary snapshot={row.runtime.subscription_quota} now={now} />
+            : <CollectionEmptyValue />,
+        }]
+      : []),
     {
       key: "cli",
       header: t(($) => $.list.col_cli),

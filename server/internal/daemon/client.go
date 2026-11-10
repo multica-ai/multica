@@ -203,6 +203,7 @@ func daemonHTTPClientCapabilities() string {
 func daemonCommonCapabilities() []string {
 	return []string{
 		protocol.DaemonCapabilitySkillBundlesV1,
+		protocol.DaemonCapabilitySubscriptionQuotaV1,
 		protocol.DaemonCapabilityCoalescedCommentsV1,
 		protocol.DaemonCapabilityLocalWorktreeV1,
 		protocol.DaemonCapabilitySourceContextQuickCreateV1,
@@ -762,12 +763,9 @@ type (
 	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
 )
 
-func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
+func (c *Client) SendHeartbeat(ctx context.Context, req protocol.DaemonHeartbeatRequestPayload) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
-	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
-		"runtime_id":            runtimeID,
-		"supports_batch_import": true,
-	}, &resp); err != nil {
+	if err := c.postJSON(ctx, "/api/daemon/heartbeat", req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

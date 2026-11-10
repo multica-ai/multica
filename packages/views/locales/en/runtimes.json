@@ -1,4 +1,25 @@
 {
+  "quota": {
+    "title": "{{provider}} quota",
+    "exhausted": "Quota exhausted",
+    "claude_observed": "Updates when a task reports subscription usage.",
+    "dsh_observed": "Shows the most recent quota exhaustion reported by a task.",
+    "column": "Quota used",
+    "refresh": "Refresh",
+    "refreshing": "Refreshing…",
+    "stale": "Out of date",
+    "primary": "Primary window",
+    "secondary": "Secondary window",
+    "used": "{{percent}} used",
+    "resets": "Resets {{time}}",
+    "observed": "Checked {{time}}",
+    "upgrade_daemon": "Update Multica on this machine to refresh quota.",
+    "offline": "Connect this runtime to refresh its quota.",
+    "timeout": "Quota refresh timed out.",
+    "failed": "Could not refresh quota.",
+    "unavailable": "No ChatGPT subscription quota for this login.",
+    "empty": "No quota snapshot yet."
+  },
   "page": {
     "title": "Runtimes",
     "connect_remote": "Add a machine",

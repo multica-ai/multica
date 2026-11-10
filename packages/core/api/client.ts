@@ -1,5 +1,6 @@
 import type { ZodType } from "zod";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
+import { subscriptionQuotaReportSchema, type SubscriptionQuotaReport } from "../runtimes/subscription-quota-schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
 import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema } from "./schemas";
@@ -2602,6 +2603,20 @@ export class ApiClient {
       `/api/workspaces/${workspaceId}/runtime-profiles/${profileId}`,
       { method: "DELETE" },
     );
+  }
+
+  async runtimeSubscriptionQuota(
+    runtimeId: string,
+    method: "GET" | "POST" = "GET",
+    ifStale = false,
+  ) {
+    const raw = await this.fetch<unknown>(
+      `/api/runtimes/${runtimeId}/subscription-quota${ifStale ? "?if_stale=true" : ""}`,
+      { method },
+    );
+    return parseWithFallback<SubscriptionQuotaReport>(raw, subscriptionQuotaReportSchema, { status: "failed" }, {
+      endpoint: `${method} /api/runtimes/:id/subscription-quota`,
+    });
   }
 
   async getRuntimeUsage(

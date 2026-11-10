@@ -641,6 +641,7 @@ type Daemon struct {
 	pendingWorkMu       sync.Mutex
 	pendingWorkInflight map[string]struct{}  // runtime_id -> hint-driven heartbeat in flight
 	pendingWorkLastRun  map[string]time.Time // runtime_id -> when the last hint-driven heartbeat started
+	quotaRequests       sync.Map             // request ID -> in flight or recently reported
 
 	cancelFunc context.CancelFunc // set by Run(); called by triggerRestart
 	rootCtx    context.Context    // set by Run(); used by long-running recoveries that must survive per-runtime ctx cancellation
@@ -4501,7 +4502,7 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 		return false
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
-	resp, err := d.client.SendHeartbeat(ctx, rid)
+	resp, err := d.client.SendHeartbeat(ctx, d.heartbeatRequest(rid))
 	if err != nil {
 		if ctx.Err() == nil {
 			if isRuntimeNotFoundError(err) {
@@ -4544,6 +4545,9 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 			"local_skills", resp.PendingLocalSkills != nil,
 			"local_skill_import", resp.PendingLocalSkillImport != nil,
 		)
+	}
+	if resp.PendingSubscriptionQuota != "" {
+		go d.handleSubscriptionQuota(ctx, runtimeID, resp.PendingSubscriptionQuota)
 	}
 	if resp.PendingUpdate != nil {
 		go d.handleUpdate(ctx, runtimeID, resp.PendingUpdate)
@@ -4646,7 +4650,7 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 		return
 	}
 	hbCtx, cancel := context.WithTimeout(ctx, pendingWorkHeartbeatTimeout)
-	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID)
+	resp, err := d.client.SendHeartbeat(hbCtx, d.heartbeatRequest(runtimeID))
 	cancel()
 	if err != nil {
 		if isRuntimeNotFoundError(err) {
@@ -9056,6 +9060,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	stopUsageFlush := d.startUsageFlush(ctx, task.ID, &liveUsage, taskLog)
 	defer stopUsageFlush()
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
+	// A task with its own launch or environment settings can use a
+	// different provider account from the registered runtime.
+	if protocol.ObservesTaskSubscriptionQuota(provider) && !usesCustomProfileCommand &&
+		len(agentCustomEnv) == 0 && len(customArgs) == 0 && len(extraArgs) == 0 {
+		defer func() {
+			d.reportObservedSubscriptionQuota(ctx, task.RuntimeID, result.SubscriptionQuota)
+		}()
+	}
 	if err != nil {
 		return TaskResult{}, err
 	}

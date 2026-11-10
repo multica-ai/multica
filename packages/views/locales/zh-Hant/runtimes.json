@@ -1,4 +1,25 @@
 {
+  "quota": {
+    "title": "{{provider}} 額度",
+    "exhausted": "額度已用盡",
+    "claude_observed": "工作回報方案用量時更新。",
+    "dsh_observed": "顯示工作最近一次回報的額度用盡。",
+    "column": "額度已用",
+    "refresh": "重新整理",
+    "refreshing": "正在重新整理…",
+    "stale": "已過期",
+    "primary": "主要時段",
+    "secondary": "次要時段",
+    "used": "已用 {{percent}}",
+    "resets": "重設時間 {{time}}",
+    "observed": "查詢時間 {{time}}",
+    "upgrade_daemon": "更新這台機器上的 Multica 後即可重新查詢額度。",
+    "offline": "執行環境連線後即可重新查詢額度。",
+    "timeout": "額度查詢逾時。",
+    "failed": "無法重新查詢額度。",
+    "unavailable": "目前登入的帳號沒有可查詢的 ChatGPT 方案額度。",
+    "empty": "目前沒有額度紀錄。"
+  },
   "page": {
     "title": "執行時",
     "connect_remote": "新增機器",

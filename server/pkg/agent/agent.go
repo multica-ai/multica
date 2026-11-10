@@ -12,6 +12,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // Backend is the unified interface for executing prompts via coding agents.
@@ -285,12 +287,13 @@ const CostUSDTicksPerUSD = 10_000_000_000
 
 // Result is the final outcome after an agent session completes.
 type Result struct {
-	Status     string // "completed", "failed", "aborted", "timeout", "cancelled"
-	Output     string // final user-facing output selected by the backend
-	Error      string // error message if failed
-	DurationMs int64
-	SessionID  string
-	Usage      map[string]TokenUsage // keyed by model name
+	SubscriptionQuota *protocol.SubscriptionQuotaSnapshot
+	Status            string // "completed", "failed", "aborted", "timeout", "cancelled"
+	Output            string // final user-facing output selected by the backend
+	Error             string // error message if failed
+	DurationMs        int64
+	SessionID         string
+	Usage             map[string]TokenUsage // keyed by model name
 	// ResumeRejected is positive evidence that this run's requested resume
 	// was permanently refused — the transcript is gone, the session belongs to
 	// another provider account, OR the session still exists but its history

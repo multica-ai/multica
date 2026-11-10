@@ -47,7 +47,8 @@ type AgentRuntimeResponse struct {
 	SharedWith []string `json:"shared_with"`
 	// ProfileID is set when this runtime is an instance of a custom
 	// runtime_profile (MUL-3284); null for built-in runtimes.
-	ProfileID *string `json:"profile_id"`
+	ProfileID         *string                             `json:"profile_id"`
+	SubscriptionQuota *protocol.SubscriptionQuotaSnapshot `json:"subscription_quota,omitempty"`
 	// MaxConcurrentTasks caps tasks running at once across every agent bound
 	// to this runtime (GitHub #9626); null means no runtime-wide cap.
 	MaxConcurrentTasks *int32  `json:"max_concurrent_tasks"`
@@ -1274,8 +1275,23 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := make([]AgentRuntimeResponse, len(runtimes))
+	quotaIDs := make([]string, 0)
 	for i, rt := range runtimes {
 		resp[i] = runtimeToResponse(rt)
+		if runtimeSupportsSubscriptionQuota(rt) && uuidToString(rt.OwnerID) == userID {
+			quotaIDs = append(quotaIDs, resp[i].ID)
+		}
+	}
+	if len(quotaIDs) != 0 {
+		ctx, cancel := context.WithTimeout(r.Context(), heartbeatHasPendingTimeout)
+		states, err := h.quotaStore.read(ctx, quotaIDs)
+		cancel()
+		if err == nil {
+			now := time.Now()
+			for i := range resp {
+				resp[i].SubscriptionQuota = states[resp[i].ID].reportFor(userID, now).Snapshot
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)
