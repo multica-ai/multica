@@ -1838,5 +1838,32 @@
       "rejected": "거절됨",
       "rate_limited": "속도 제한"
     }
+  },
+  "environments": {
+    "section_title": "환경",
+    "running_count_other": "{{count}}개 실행 중",
+    "this_machine": "이 기기",
+    "unknown_machine": "알 수 없는 기기",
+    "state": {
+      "starting": "시작 중",
+      "running": "실행 중",
+      "exited": "종료됨",
+      "stopped": "중지됨",
+      "unreachable": "응답 없음"
+    },
+    "expires_in_minutes_other": "{{count}}분 후 만료",
+    "expires_in_hours_other": "{{count}}시간 후 만료",
+    "expires_in_days_other": "{{count}}일 후 만료",
+    "started_ago": "시작: {{time}}",
+    "ended_ago": "종료: {{time}}",
+    "last_seen": "마지막 응답: {{time}}",
+    "ended_count_other": "종료됨 {{count}}개",
+    "detected_hint": "이 태스크의 실행 디렉터리에서 발견된 서버",
+    "remote_hint": "{{machine}}에서 실행 중입니다. localhost URL은 해당 기기에서만 열 수 있습니다.",
+    "localhost_hint": "localhost URL은 이를 실행 중인 기기에서만 열 수 있습니다.",
+    "open": "열기",
+    "copy_url": "URL 복사",
+    "copied": "URL을 복사했습니다",
+    "copy_failed": "URL을 복사할 수 없습니다"
   }
 }

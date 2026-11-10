@@ -35,11 +35,6 @@ const (
 	// makes those endpoints answer 404, so clients stop syncing and search
 	// through the server again without a client release.
 	LocalSearchIndex = "local_search_index"
-	// PrivateProjectsV1 gates CREATING private projects (MUL-8472): a new
-	// private project, or switching a project to private. It does not gate
-	// enforcement: a project that is already private stays private when the
-	// flag is off, and its members stay manageable. Off by default.
-	PrivateProjectsV1 = "private_projects_v1"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -64,7 +59,6 @@ var frontendPublicFlags = []string{
 	BillingWorkspaceSubscriptions,
 	ComposioMCPApps,
 	PluginsV1,
-	PrivateProjectsV1,
 }
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -81,10 +75,6 @@ func PluginsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 
 func TriageV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, TriageV1, false)
-}
-
-func PrivateProjectsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
-	return flags.IsEnabled(ctx, PrivateProjectsV1, false)
 }
 
 func LocalSearchIndexEnabled(ctx context.Context, flags *featureflag.Service) bool {

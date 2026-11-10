@@ -24,7 +24,6 @@ import {
   CommandItem,
   CommandList,
 } from "@multica/ui/components/ui/command";
-import { useTheme } from "@multica/ui/components/common/theme-provider";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
@@ -57,9 +56,10 @@ import {
 
 /**
  * Preferences on one page. The settings here are stored in three different
- * places — the account (language, timezone), this device (theme, composer,
- * chat) and this device for the current workspace (create-dialog fields) —
- * so each section carries a scope badge instead of splitting them into tabs.
+ * places — the account (language, timezone), this device (composer, chat,
+ * opening issues) and this device for the current workspace (create-dialog
+ * fields) — so each section carries a scope badge instead of splitting them
+ * into tabs. Theme, style and frame colour live on the Appearance page.
  * Changes apply immediately; only failures are announced.
  */
 export function PreferencesTab() {
@@ -74,16 +74,6 @@ export function PreferencesTab() {
         <SettingsCard>
           <LanguageRow />
           <TimezoneRow />
-        </SettingsCard>
-      </SettingsSection>
-
-      <SettingsSection
-        title={t(($) => $.preferences.appearance_title)}
-        scope="device"
-        anchor="appearance"
-      >
-        <SettingsCard>
-          <ThemeRow />
         </SettingsCard>
       </SettingsSection>
 
@@ -118,28 +108,6 @@ export function PreferencesTab() {
         <IssueFieldsMatrix />
       </SettingsSection>
     </SettingsTab>
-  );
-}
-
-function ThemeRow() {
-  const { t } = useT("settings");
-  const { theme, setTheme } = useTheme();
-  const value = theme === "light" || theme === "dark" ? theme : "system";
-  return (
-    <SettingsRow anchor="theme" label={t(($) => $.preferences.theme.title)}>
-      <div role="group" aria-label={t(($) => $.preferences.theme.title)}>
-        <SegmentedToggle
-          value={value}
-          onChange={setTheme}
-          buttonClassName="px-3 py-1 text-label"
-          options={[
-            ["light", t(($) => $.preferences.theme.light)],
-            ["dark", t(($) => $.preferences.theme.dark)],
-            ["system", t(($) => $.preferences.theme.system)],
-          ]}
-        />
-      </div>
-    </SettingsRow>
   );
 }
 

@@ -20,13 +20,13 @@ import { useT } from "../../i18n";
 
 /**
  * The add-app dialog: every app the workspace allows, curated ones first.
- * Each row connects a team account (admins) or the caller's own; the
- * recommended one is the primary button.
+ * The section that opened it determines the account scope.
  */
 export function AddAppDialog({
   open,
   onOpenChange,
   canManage,
+  scope,
   overview,
   catalog,
   catalogLoading,
@@ -35,6 +35,7 @@ export function AddAppDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   canManage: boolean;
+  scope: AppAccountScope;
   overview: AppsOverview;
   catalog: AppCatalogEntry[];
   catalogLoading: boolean;
@@ -46,10 +47,9 @@ export function AddAppDialog({
 
   const connected = useMemo(() => {
     const set = new Set<string>();
-    for (const c of overview.team) if (c.status === "active") set.add(`team:${c.toolkit_slug}`);
-    for (const c of overview.personal) if (c.status === "active") set.add(`personal:${c.toolkit_slug}`);
+    for (const c of overview[scope]) if (c.status === "active") set.add(c.toolkit_slug);
     return set;
-  }, [overview]);
+  }, [overview, scope]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -62,9 +62,9 @@ export function AddAppDialog({
     );
   }, [catalog, query]);
 
-  async function connect(app: AppCatalogEntry, scope: AppAccountScope) {
-    if (connecting) return;
-    setConnecting(`${scope}:${app.slug}`);
+  async function connect(app: AppCatalogEntry) {
+    if (connecting || (scope === "team" && !canManage)) return;
+    setConnecting(app.slug);
     try {
       const { redirect_url } = await api.connectApp(scope, app.slug);
       window.location.href = redirect_url;
@@ -74,31 +74,24 @@ export function AddAppDialog({
     }
   }
 
-  const connectButton = (app: AppCatalogEntry, scope: AppAccountScope) => {
-    const key = `${scope}:${app.slug}`;
-    const label =
-      scope === "team"
-        ? t(($) => $.connected_apps.add.connect_team)
-        : t(($) => $.connected_apps.add.connect_personal);
-    if (connected.has(key)) {
+  const connectButton = (app: AppCatalogEntry) => {
+    if (connected.has(app.slug)) {
       return (
-        <span key={scope} className="inline-flex items-center gap-1 text-caption text-muted-foreground">
+        <span className="inline-flex items-center gap-1 text-caption text-muted-foreground">
           <Check className="size-3" />
-          {label}
+          {t(($) => $.connected_apps.add.connected)}
         </span>
       );
     }
-    const recommended = (app.recommended_scope ?? "personal") === scope;
     return (
       <Button
-        key={scope}
         size="xs"
-        variant={recommended ? "default" : "outline"}
-        disabled={connecting !== null}
-        onClick={() => connect(app, scope)}
+        variant="outline"
+        disabled={connecting !== null || (scope === "team" && !canManage)}
+        onClick={() => connect(app)}
       >
-        {connecting === key && <Loader2 className="animate-spin" />}
-        {connecting === key ? t(($) => $.connected_apps.add.connecting) : label}
+        {connecting === app.slug && <Loader2 className="animate-spin" />}
+        {connecting === app.slug ? t(($) => $.connected_apps.add.connecting) : t(($) => $.connected_apps.add.connect)}
       </Button>
     );
   };
@@ -107,8 +100,8 @@ export function AddAppDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{t(($) => $.connected_apps.add.title)}</DialogTitle>
-          <DialogDescription>{t(($) => $.connected_apps.add.description)}</DialogDescription>
+          <DialogTitle>{scope === "team" ? t(($) => $.connected_apps.add.connect_team) : t(($) => $.connected_apps.add.connect_personal)}</DialogTitle>
+          <DialogDescription>{scope === "team" ? t(($) => $.connected_apps.add.team_description) : t(($) => $.connected_apps.add.personal_description)}</DialogDescription>
         </DialogHeader>
         <Input
           autoFocus
@@ -143,10 +136,7 @@ export function AddAppDialog({
                           : app.category}
                     </p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {canManage && connectButton(app, "team")}
-                    {connectButton(app, "personal")}
-                  </div>
+                  <div className="shrink-0">{connectButton(app)}</div>
                 </li>
               ))}
             </ul>

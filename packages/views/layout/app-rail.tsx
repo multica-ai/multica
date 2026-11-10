@@ -157,7 +157,7 @@ function RailSpaceLink({
       draggable={false}
       aria-current={active ? "page" : undefined}
       {...peekHandlers}
-      className="group relative flex size-12 flex-col items-center justify-center gap-1 rounded-xl text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground"
+      className="group relative flex size-12 flex-col items-center justify-center gap-1 rounded-rail-item text-rail-item transition-colors outline-none hover:bg-rail-item-hover hover:text-rail-item-active-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-rail-item-active aria-[current=page]:font-medium aria-[current=page]:text-rail-item-active-foreground"
     >
       <Icon className="size-5" />
       <span className="max-w-full truncate px-0.5 text-micro leading-[14px]">{label}</span>
@@ -272,6 +272,7 @@ export function AppRail({
     <nav
       aria-label={t(($) => $.rail.label)}
       data-slot="app-rail"
+      data-mc="app-rail"
       className={cn(
         "flex h-full w-14 shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden pt-[15px] pb-2.5 [scrollbar-width:none]",
         className,

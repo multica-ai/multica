@@ -3,6 +3,7 @@ import { CheckCircle2, ChevronRight } from "@multica/ui/icons";
 import type { TimelineEntry } from "@multica/core/types";
 import { isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { useReducedMotion } from "@multica/core/appearance";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -408,7 +409,11 @@ export function ThreadMinimap({
   // per frame. The same rect pass selects the corresponding outline row.
   const waveRafRef = useRef(0);
   const pointerYRef = useRef<number | null>(null);
-  const reducedMotionRef = useRef(false);
+  const reducedMotion = useReducedMotion();
+  const reducedMotionRef = useRef(reducedMotion);
+  useEffect(() => {
+    reducedMotionRef.current = reducedMotion;
+  }, [reducedMotion]);
 
   const [preview, setPreview] = useState<PreviewAnchor | null>(null);
   const previewRef = useRef<PreviewAnchor | null>(null);
@@ -424,7 +429,6 @@ export function ThreadMinimap({
   }, []);
 
   useEffect(() => {
-    reducedMotionRef.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     return () => {
       if (waveRafRef.current) cancelAnimationFrame(waveRafRef.current);
       if (openTimerRef.current !== null) window.clearTimeout(openTimerRef.current);

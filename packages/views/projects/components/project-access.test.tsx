@@ -2,7 +2,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { configStore } from "@multica/core/config";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import type { Project, MemberWithUser } from "@multica/core/types";
@@ -34,7 +33,6 @@ function renderControl(value: Project = project) {
 
 beforeEach(() => {
   state.viewer = "owner";
-  configStore.getState().setFeatureFlags({ private_projects_v1: true });
   qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   ids = ["owner", "lead", "member"];
   const response = () => ({ members: members.filter((m) => ids.includes(m.user_id)).map((m) => ({ ...m, project_id: "p1" })), total: ids.length });
@@ -48,7 +46,7 @@ beforeEach(() => {
   };
   setApiInstance(api as unknown as ApiClient);
 });
-afterEach(() => { qc.clear(); configStore.getState().setFeatureFlags({}); });
+afterEach(() => { qc.clear(); });
 
 it("loads the member list, finds people by email, and adds and removes only after success", async () => {
   const user = userEvent.setup();
@@ -121,21 +119,6 @@ it("requires confirmation before making private content visible to the workspace
   expect(api.updateProject).not.toHaveBeenCalled();
   await user.click(within(confirmation).getByRole("button", { name: "Confirm" }));
   await waitFor(() => expect(api.updateProject).toHaveBeenCalledWith("p1", { visibility: "workspace", member_ids: ["owner", "lead", "member"] }));
-});
-
-it("keeps existing private memberships manageable with the creation flag off", async () => {
-  configStore.getState().setFeatureFlags({ private_projects_v1: false });
-  const user = userEvent.setup();
-  renderControl();
-  await user.click(screen.getByRole("button", { name: "Access" }));
-  await screen.findByText("member@test");
-  expect(screen.getByRole("button", { name: "Add workspace member" })).toBeEnabled();
-});
-
-it("does not show private creation controls when the backend has not enabled them", () => {
-  configStore.getState().setFeatureFlags({});
-  renderControl({ ...project, visibility: "workspace" });
-  expect(screen.queryByRole("button", { name: "Access" })).not.toBeInTheDocument();
 });
 
 it("keeps new-project access in the draft until the project is created", async () => {

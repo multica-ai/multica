@@ -1,0 +1,70 @@
+/* Component theme variables (docs/theming.md, "Components" and "Product").
+ *
+ * Themes set public names such as --menu-radius or --issue-row-hover-background;
+ * components read them through these Tailwind aliases. Nothing here declares
+ * the public names: each alias carries the default as a var() fallback and is
+ * inlined into the utility, so it resolves on the element that uses it. A
+ * default declared on :root would be resolved there instead and stop
+ * following tokens a theme restates further down (Pop's frame, a status
+ * block's ink). Keep this file in step with packages/core/appearance/theme-variables.ts. */
+
+@theme inline {
+    --radius-page: var(--page-radius, calc(var(--radius) * 1.5));
+    --radius-card: var(--card-radius, calc(var(--radius) * 1.5));
+    --radius-menu: var(--menu-radius, calc(var(--radius) * 1.5));
+    --radius-menu-item: var(--menu-item-radius, calc(var(--radius) * 0.75));
+    --radius-popover: var(--popover-radius, var(--radius));
+    --radius-dialog: var(--dialog-radius, calc(var(--radius) * 1.5));
+    --radius-tooltip: var(--tooltip-radius, var(--radius));
+    --radius-input: var(--input-radius, var(--radius));
+    --radius-button: var(--button-radius, var(--radius));
+    --radius-button-sm: var(--button-radius-sm, calc(var(--radius) * 0.75));
+    --radius-avatar: var(--avatar-radius, calc(infinity * 1px));
+    --radius-nav-item: var(--nav-item-radius, var(--radius));
+    --radius-rail-item: var(--rail-item-radius, calc(var(--radius) * 1.5));
+    --radius-label: var(--label-radius, calc(infinity * 1px));
+    --radius-issue-group-header: var(--issue-group-header-radius, var(--radius));
+    --radius-board-column: var(--board-column-radius, calc(var(--radius) * 1.5));
+    --radius-board-card: var(--board-card-radius, var(--radius));
+
+    --color-page-border: var(--page-border-color, var(--surface-border));
+    --color-menu-item-hover: var(--menu-item-hover-background, var(--accent));
+    --color-menu-item-hover-foreground: var(--menu-item-hover-color, var(--accent-foreground));
+    --color-nav-item: var(--nav-item-color, var(--muted-foreground));
+    --color-nav-item-hover: var(--nav-item-hover-background, var(--surface-hover));
+    --color-nav-item-hover-foreground: var(--nav-item-hover-color, var(--foreground));
+    --color-nav-item-active: var(--nav-item-active-background, var(--surface-selected));
+    --color-nav-item-active-foreground: var(--nav-item-active-color, var(--surface-selected-foreground));
+    --color-rail-item: var(--rail-item-color, var(--muted-foreground));
+    --color-rail-item-hover: var(--rail-item-hover-background, color-mix(in oklab, var(--sidebar-accent) 60%, transparent));
+    --color-rail-item-active: var(--rail-item-active-background, var(--sidebar-accent));
+    --color-rail-item-active-foreground: var(--rail-item-active-color, var(--sidebar-accent-foreground));
+
+    --color-issue-row-hover: var(--issue-row-hover-background, var(--surface-hover));
+    --color-issue-row-selected: var(--issue-row-selected-background, var(--surface-selected));
+    --color-issue-row-identifier: var(--issue-row-identifier-color, var(--muted-foreground));
+    --color-issue-group-header: var(--issue-group-header-background, var(--muted));
+    --color-issue-group-header-hover: var(--issue-group-header-hover-background, var(--accent));
+    --color-board-column: var(--board-column-background, color-mix(in oklab, var(--muted) 40%, transparent));
+    --color-board-card: var(--board-card-background, var(--surface));
+    --color-board-card-hover: var(--board-card-hover-background, var(--surface-hover));
+    --color-board-card-border: var(--board-card-border-color, var(--surface-border));
+
+    --color-status-backlog: var(--status-backlog, var(--muted-foreground));
+    --color-status-todo: var(--status-todo, var(--muted-foreground));
+    --color-status-in-progress: var(--status-in-progress, var(--warning));
+    --color-status-in-review: var(--status-in-review, var(--success));
+    --color-status-done: var(--status-done, var(--info));
+    --color-status-blocked: var(--status-blocked, var(--destructive));
+    --color-status-cancelled: var(--status-cancelled, var(--muted-foreground));
+    --color-priority-urgent: var(--priority-urgent, var(--destructive));
+    --color-priority-medium: var(--priority-medium, var(--warning));
+    --color-priority-low: var(--priority-low, var(--info));
+    --color-priority-none: var(--priority-none, var(--muted-foreground));
+}
+
+/* Icon stroke: only glyphs drawn at the default width follow it, so a call
+   site that asks for a specific stroke keeps it. */
+svg.icon[stroke-width="2"] {
+    stroke-width: var(--icon-stroke-width, 2);
+}

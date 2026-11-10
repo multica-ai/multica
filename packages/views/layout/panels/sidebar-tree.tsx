@@ -28,7 +28,7 @@ import { selectIssueTasks } from "../../issues/surface/activity";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { DeferredPopup } from "../../common/deferred-popup";
 import { useT, useTimeAgo } from "../../i18n";
-import { PANEL_ROW_CLASS, panelRowStateClass } from "../panel-nav";
+import { PANEL_ROW_CLASS, panelRowAnchor, panelRowStateClass } from "../panel-nav";
 
 /** A working agent's issue title: dimmer at rest and a wider highlight than
  *  the default shimmer, so the sweep reads at sidebar size. */
@@ -99,6 +99,7 @@ export const TreeRow = forwardRef<HTMLAnchorElement, TreeRowProps>(function Tree
   return (
     <div
       {...rowProps}
+      {...panelRowAnchor(active)}
       ref={rowRef}
       data-located={located && !active ? "" : undefined}
       className={cn(
@@ -528,6 +529,7 @@ const SidebarIssueRow = memo(function SidebarIssueRow({
   return (
     <IssueActionsContextMenu issue={issue}>
       <div
+        {...panelRowAnchor(active)}
         ref={rowRef}
         className={cn(TREE_CHILD_ROW_CLASS, panelRowStateClass(active), issueRowMenuOpenClass(active), "relative")}
       >
