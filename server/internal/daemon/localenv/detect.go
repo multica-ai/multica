@@ -5,11 +5,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -163,7 +166,7 @@ func (d *Detector) Detect(ctx context.Context, resolve func(cwd string) (Task, b
 		found[key] = Environment{
 			Key: key, TaskID: c.task.TaskID, IssueID: c.task.IssueID, Source: SourceDetected, Kind: KindServer,
 			Name: truncateName(c.Command), URL: fmt.Sprintf("http://localhost:%d", c.Port), Port: c.Port, State: StateRunning,
-			Dir: c.task.RootDir,
+			Dir: c.task.RootDir, pid: c.PID,
 		}
 	}
 	for key, ports := range debugPorts {
@@ -294,6 +297,57 @@ func truncateName(name string) string {
 		return string(r[:64])
 	}
 	return name
+}
+
+// Stop ends a detected server and waits for its port to be released. It
+// signals the listening process only, never its process group: a server an
+// agent started in the background shares the agent's group.
+func (d *Detector) Stop(ctx context.Context, env Environment) error {
+	if !supported {
+		return ErrUnsupported
+	}
+	if env.Source != SourceDetected || env.pid <= 0 || env.pid == os.Getpid() {
+		return ErrUnknown
+	}
+	listening := func() bool {
+		listeners, err := d.list(ctx)
+		if err != nil {
+			return true
+		}
+		for _, l := range listeners {
+			if l.PID == env.pid && l.Port == env.Port {
+				return true
+			}
+		}
+		return false
+	}
+	// The process may have exited, and its pid been reused, since detection.
+	if !listening() {
+		return nil
+	}
+	for _, step := range []struct {
+		sig  syscall.Signal
+		wait time.Duration
+	}{{syscall.SIGTERM, stopGrace}, {syscall.SIGKILL, 2 * time.Second}} {
+		if err := signalProcess(env.pid, step.sig); err != nil {
+			if errors.Is(err, syscall.ESRCH) {
+				return nil
+			}
+			return fmt.Errorf("stop %s: %w", env.Name, err)
+		}
+		deadline := time.Now().Add(step.wait)
+		for time.Now().Before(deadline) {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(500 * time.Millisecond):
+			}
+			if !listening() {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("%s is still listening on port %d", env.Name, env.Port)
 }
 
 // detectedKey is stable across restarts of the same server, and carries no

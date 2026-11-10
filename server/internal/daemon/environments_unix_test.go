@@ -72,7 +72,9 @@ func TestEnvironmentHandlersStartListAndStop(t *testing.T) {
 	}
 }
 
-func TestEnvironmentReportKeepsACrashedEnvironmentsOutputLocal(t *testing.T) {
+// The full output stays in the local log; only a short excerpt of a crash is
+// reported, which the server redacts before storing.
+func TestEnvironmentReportSendsOnlyACrashExcerpt(t *testing.T) {
 	const secret = "fake-password-for-tests"
 	s, reporter := newTestEnvironmentService(t)
 	root := t.TempDir()
@@ -101,8 +103,9 @@ func TestEnvironmentReportKeepsACrashedEnvironmentsOutputLocal(t *testing.T) {
 	if len(calls) != 1 || len(calls[0].envs) != 1 {
 		t.Fatalf("reports = %+v, want one snapshot with the crashed environment", calls)
 	}
-	if got := calls[0].envs[0]; got.State != localenv.StateExited || got.Detail != "exit status 3" {
-		t.Fatalf("reported %+v, want exited with only its exit status", got)
+	if got := calls[0].envs[0]; got.State != localenv.StateExited || got.Detail != "exit status 3" ||
+		!strings.HasPrefix(got.Excerpt, "cannot reach postgres://") {
+		t.Fatalf("reported %+v, want exited with its exit status and last output line", got)
 	}
 	if log, _ := os.ReadFile(env.LogPath); !strings.Contains(string(log), secret) {
 		t.Fatalf("local log = %q, want the command's output kept there", log)

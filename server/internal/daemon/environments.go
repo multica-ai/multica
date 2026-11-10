@@ -57,6 +57,10 @@ type environmentService struct {
 	sticky map[string]string
 	// reported is owned by the report loop: task ID → the last snapshot sent.
 	reported map[string]reportedSnapshot
+	// claiming marks runtimes with a command claim in flight; claimAgain
+	// asks that claim to run once more for a hint that arrived meanwhile.
+	claiming   map[string]bool
+	claimAgain map[string]bool
 }
 
 type reportedSnapshot struct {
@@ -84,6 +88,8 @@ func newEnvironmentService(cfg Config, client environmentReporter, ignoreCommand
 		tasks:          make(map[string]localenv.Task),
 		sticky:         make(map[string]string),
 		reported:       make(map[string]reportedSnapshot),
+		claiming:       make(map[string]bool),
+		claimAgain:     make(map[string]bool),
 	}
 }
 
@@ -376,7 +382,7 @@ func environmentFingerprint(envs []localenv.Environment) string {
 		if env.ExpiresAt != nil {
 			expires = env.ExpiresAt.UTC().Format(time.RFC3339)
 		}
-		parts = append(parts, strings.Join([]string{env.Key, env.Kind, env.State, env.URL, env.Label, env.Detail, expires}, "\x1f"))
+		parts = append(parts, strings.Join([]string{env.Key, env.Kind, env.State, env.URL, env.Label, env.Detail, expires, env.Excerpt}, "\x1f"))
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, "\x1e")
@@ -388,6 +394,7 @@ func toEnvironmentReports(envs []localenv.Environment) []TaskEnvironmentReport {
 		out = append(out, TaskEnvironmentReport{
 			Key: env.Key, Source: env.Source, Kind: env.Kind, Name: env.Name, Label: env.Label, URL: env.URL,
 			Port: env.Port, State: env.State, Detail: env.Detail, StartedAt: env.StartedAt, ExpiresAt: env.ExpiresAt,
+			Excerpt: env.Excerpt,
 		})
 	}
 	return out

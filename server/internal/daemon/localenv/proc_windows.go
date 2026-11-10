@@ -15,6 +15,8 @@ func setProcessGroup(*exec.Cmd) {}
 
 func signalGroup(int, syscall.Signal) error { return ErrUnsupported }
 
+func signalProcess(int, syscall.Signal) error { return ErrUnsupported }
+
 func groupAlive(int) bool { return false }
 
 func processGroup(int) int { return 0 }

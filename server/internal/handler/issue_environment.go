@@ -14,6 +14,7 @@ import (
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 const (
@@ -21,8 +22,9 @@ const (
 	// that has not been seen for a few minutes is on a machine that went away.
 	issueEnvironmentUnreachableAfter = 3 * time.Minute
 	// Ended environments stay listed this long so the sidebar can show what ran.
-	issueEnvironmentHistoryWindow = 7 * 24 * time.Hour
+	issueEnvironmentHistoryWindow   = 7 * 24 * time.Hour
 	maxIssueEnvironmentsPerSnapshot = 50
+	maxIssueEnvironmentExcerpt      = 600
 )
 
 var issueEnvironmentSources = map[string]bool{"config": true, "detected": true}
@@ -49,37 +51,55 @@ type IssueEnvironmentReport struct {
 	Detail    string     `json:"detail"`
 	StartedAt time.Time  `json:"started_at"`
 	ExpiresAt *time.Time `json:"expires_at"`
+	// Excerpt is the last lines a crashed environment printed.
+	Excerpt string `json:"excerpt,omitempty"`
 }
 
 type ReportTaskEnvironmentsRequest struct {
 	Environments []IssueEnvironmentReport `json:"environments"`
+	// Controllable is set by daemons that claim environment commands.
+	Controllable bool `json:"controllable,omitempty"`
 }
 
 type IssueEnvironmentResponse struct {
-	ID         string  `json:"id"`
-	IssueID    string  `json:"issue_id"`
-	TaskID     string  `json:"task_id"`
-	RuntimeID  *string `json:"runtime_id"`
-	AgentID    *string `json:"agent_id"`
+	ID           string  `json:"id"`
+	IssueID      string  `json:"issue_id"`
+	TaskID       string  `json:"task_id"`
+	RuntimeID    *string `json:"runtime_id"`
+	AgentID      *string `json:"agent_id"`
 	// LocalKey is how the daemon that reported the environment names it, so
 	// Desktop on that machine can ask the daemon to act on it.
-	LocalKey   string  `json:"local_key"`
-	Source     string  `json:"source"`
-	Kind       string  `json:"kind"`
-	Name       string  `json:"name"`
-	Label      string  `json:"label"`
-	URL        string  `json:"url"`
-	Port       *int32  `json:"port"`
-	State      string  `json:"state"`
-	Detail     string  `json:"detail"`
-	StartedAt  string  `json:"started_at"`
-	ExpiresAt  *string `json:"expires_at"`
-	LastSeenAt string  `json:"last_seen_at"`
-	EndedAt    *string `json:"ended_at"`
+	LocalKey     string  `json:"local_key"`
+	Source       string  `json:"source"`
+	Kind         string  `json:"kind"`
+	Name         string  `json:"name"`
+	Label        string  `json:"label"`
+	URL          string  `json:"url"`
+	Port         *int32  `json:"port"`
+	State        string  `json:"state"`
+	Detail       string  `json:"detail"`
+	Excerpt      string  `json:"excerpt"`
+	StartedAt    string  `json:"started_at"`
+	ExpiresAt    *string `json:"expires_at"`
+	LastSeenAt   string  `json:"last_seen_at"`
+	EndedAt      *string `json:"ended_at"`
+	Controllable bool    `json:"controllable"`
+	// CanControl says whether the caller may stop or restart it.
+	CanControl bool `json:"can_control"`
+	// PendingAction is a stop or restart the machine has not finished yet.
+	PendingAction *IssueEnvironmentActionResponse `json:"pending_action"`
+	// LastAction is the most recent finished stop or restart of this row.
+	LastAction *IssueEnvironmentActionResponse `json:"last_action"`
+	// Origin is the sidebar start or restart that created this row.
+	Origin *IssueEnvironmentActionResponse `json:"origin"`
 }
 
 type IssueEnvironmentsResponse struct {
 	Environments []IssueEnvironmentResponse `json:"environments"`
+	// Configs lists, per machine, what the latest run's repositories declare.
+	Configs []IssueEnvironmentConfigResponse `json:"configs"`
+	// PendingStarts are sidebar starts whose environment has not appeared yet.
+	PendingStarts []IssueEnvironmentActionResponse `json:"pending_starts"`
 }
 
 // validateIssueEnvironmentReport normalizes one reported environment and
@@ -116,6 +136,13 @@ func validateIssueEnvironmentReport(env *IssueEnvironmentReport, now time.Time) 
 	}
 	if utf8.RuneCountInString(env.Detail) > 500 {
 		env.Detail = string([]rune(env.Detail)[:500])
+	}
+	env.Excerpt = redact.Text(strings.TrimSpace(env.Excerpt))
+	if utf8.RuneCountInString(env.Excerpt) > maxIssueEnvironmentExcerpt {
+		env.Excerpt = string([]rune(env.Excerpt)[:maxIssueEnvironmentExcerpt])
+	}
+	if env.State != "exited" {
+		env.Excerpt = ""
 	}
 	if env.StartedAt.IsZero() {
 		env.StartedAt = now
@@ -187,20 +214,22 @@ func (h *Handler) ReportTaskEnvironments(w http.ResponseWriter, r *http.Request)
 	for _, env := range req.Environments {
 		keep = append(keep, env.Key)
 		params := db.UpsertIssueEnvironmentParams{
-			WorkspaceID: wsUUID,
-			IssueID:     task.IssueID,
-			TaskID:      task.ID,
-			RuntimeID:   task.RuntimeID,
-			AgentID:     task.AgentID,
-			LocalKey:    env.Key,
-			Source:      env.Source,
-			Kind:        env.Kind,
-			Name:        env.Name,
-			Label:       env.Label,
-			Url:         env.URL,
-			State:       env.State,
-			Detail:      env.Detail,
-			StartedAt:   pgtype.Timestamptz{Time: env.StartedAt, Valid: true},
+			WorkspaceID:  wsUUID,
+			IssueID:      task.IssueID,
+			TaskID:       task.ID,
+			RuntimeID:    task.RuntimeID,
+			AgentID:      task.AgentID,
+			LocalKey:     env.Key,
+			Source:       env.Source,
+			Kind:         env.Kind,
+			Name:         env.Name,
+			Label:        env.Label,
+			Url:          env.URL,
+			State:        env.State,
+			Detail:       env.Detail,
+			Excerpt:      env.Excerpt,
+			Controllable: req.Controllable,
+			StartedAt:    pgtype.Timestamptz{Time: env.StartedAt, Valid: true},
 		}
 		if env.Port > 0 {
 			params.Port = pgtype.Int4{Int32: int32(env.Port), Valid: true}
@@ -214,7 +243,8 @@ func (h *Handler) ReportTaskEnvironments(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		prev, wasOpen := open[env.Key]
-		if !wasOpen || prev.State != env.State || prev.Kind != env.Kind || prev.Url != env.URL || prev.Label != env.Label || prev.Detail != env.Detail {
+		if !wasOpen || prev.State != env.State || prev.Kind != env.Kind || prev.Url != env.URL || prev.Label != env.Label || prev.Detail != env.Detail ||
+			prev.Excerpt != env.Excerpt || prev.Controllable != req.Controllable {
 			changed = true
 		}
 	}
@@ -262,11 +292,82 @@ func (h *Handler) ListIssueEnvironments(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to list environments")
 		return
 	}
+	controls, err := h.Queries.ListIssueEnvironmentControls(r.Context(), db.ListIssueEnvironmentControlsParams{
+		IssueID:      issue.ID,
+		WorkspaceID:  issue.WorkspaceID,
+		CreatedAfter: pgtype.Timestamptz{Time: now.Add(-issueEnvironmentHistoryWindow), Valid: true},
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list environments")
+		return
+	}
+	configs, err := h.Queries.ListLatestIssueEnvironmentConfigs(r.Context(), db.ListLatestIssueEnvironmentConfigsParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list environments")
+		return
+	}
+	canControl := h.environmentControlChecker(r, issue)
+
+	// controls is newest first, so the first match per key wins.
+	pending := make(map[string]*IssueEnvironmentActionResponse)
+	last := make(map[string]*IssueEnvironmentActionResponse)
+	origin := make(map[string]*IssueEnvironmentActionResponse)
+	var pendingStarts []IssueEnvironmentActionResponse
+	for _, c := range controls {
+		action := issueEnvironmentActionToResponse(c, now)
+		envID := uuidToString(c.EnvironmentID)
+		if c.ResultKey != "" && action.Status == "succeeded" {
+			if _, ok := origin[c.ResultKey]; !ok {
+				origin[c.ResultKey] = &action
+			}
+		}
+		switch {
+		case c.Action == "start":
+			if action.Status == "pending" {
+				pendingStarts = append(pendingStarts, action)
+			}
+		case !c.EnvironmentID.Valid:
+		case action.Status == "pending":
+			if _, ok := pending[envID]; !ok {
+				pending[envID] = &action
+			}
+		default:
+			if _, ok := last[envID]; !ok {
+				last[envID] = &action
+			}
+		}
+	}
+
 	out := make([]IssueEnvironmentResponse, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, issueEnvironmentToResponse(row, now))
+		resp := issueEnvironmentToResponse(row, now)
+		resp.CanControl = row.Controllable && canControl(row.RuntimeID)
+		resp.PendingAction = pending[resp.ID]
+		resp.LastAction = last[resp.ID]
+		resp.Origin = origin[row.LocalKey]
+		out = append(out, resp)
 	}
-	writeJSON(w, http.StatusOK, IssueEnvironmentsResponse{Environments: out})
+	configOut := make([]IssueEnvironmentConfigResponse, 0, len(configs))
+	for _, cfg := range configs {
+		var envs []DeclaredEnvironment
+		if err := json.Unmarshal(cfg.Environments, &envs); err != nil {
+			continue
+		}
+		configOut = append(configOut, IssueEnvironmentConfigResponse{
+			RuntimeID:    uuidToString(cfg.RuntimeID),
+			TaskID:       uuidToString(cfg.TaskID),
+			ReportedAt:   timestampToString(cfg.ReportedAt),
+			CanControl:   canControl(cfg.RuntimeID),
+			Environments: envs,
+		})
+	}
+	if pendingStarts == nil {
+		pendingStarts = []IssueEnvironmentActionResponse{}
+	}
+	writeJSON(w, http.StatusOK, IssueEnvironmentsResponse{Environments: out, Configs: configOut, PendingStarts: pendingStarts})
 }
 
 func issueEnvironmentToResponse(row db.IssueEnvironment, now time.Time) IssueEnvironmentResponse {
@@ -275,23 +376,25 @@ func issueEnvironmentToResponse(row db.IssueEnvironment, now time.Time) IssueEnv
 		state = "unreachable"
 	}
 	resp := IssueEnvironmentResponse{
-		ID:         uuidToString(row.ID),
-		IssueID:    uuidToString(row.IssueID),
-		TaskID:     uuidToString(row.TaskID),
-		RuntimeID:  uuidToPtr(row.RuntimeID),
-		AgentID:    uuidToPtr(row.AgentID),
-		LocalKey:   row.LocalKey,
-		Source:     row.Source,
-		Kind:       row.Kind,
-		Name:       row.Name,
-		Label:      row.Label,
-		URL:        row.Url,
-		State:      state,
-		Detail:     row.Detail,
-		StartedAt:  timestampToString(row.StartedAt),
-		ExpiresAt:  timestampToPtr(row.ExpiresAt),
-		LastSeenAt: timestampToString(row.LastSeenAt),
-		EndedAt:    timestampToPtr(row.EndedAt),
+		ID:           uuidToString(row.ID),
+		IssueID:      uuidToString(row.IssueID),
+		TaskID:       uuidToString(row.TaskID),
+		RuntimeID:    uuidToPtr(row.RuntimeID),
+		AgentID:      uuidToPtr(row.AgentID),
+		LocalKey:     row.LocalKey,
+		Source:       row.Source,
+		Kind:         row.Kind,
+		Name:         row.Name,
+		Label:        row.Label,
+		URL:          row.Url,
+		State:        state,
+		Detail:       row.Detail,
+		Excerpt:      row.Excerpt,
+		StartedAt:    timestampToString(row.StartedAt),
+		ExpiresAt:    timestampToPtr(row.ExpiresAt),
+		LastSeenAt:   timestampToString(row.LastSeenAt),
+		EndedAt:      timestampToPtr(row.EndedAt),
+		Controllable: row.Controllable,
 	}
 	if row.Port.Valid {
 		port := row.Port.Int32

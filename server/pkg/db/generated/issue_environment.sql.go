@@ -11,6 +11,199 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimIssueEnvironmentCommands = `-- name: ClaimIssueEnvironmentCommands :many
+UPDATE issue_environment_command
+SET status = 'claimed', claimed_at = now()
+WHERE id IN (
+    SELECT c.id FROM issue_environment_command c
+    WHERE c.runtime_id = $1
+      AND c.status = 'pending'
+      AND c.created_at > $2::timestamptz
+    ORDER BY c.created_at
+    LIMIT 20
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, workspace_id, issue_id, runtime_id, environment_id, task_id, action, local_key, repo, name, actor_type, actor_id, status, error, output, result_key, created_at, claimed_at, completed_at
+`
+
+type ClaimIssueEnvironmentCommandsParams struct {
+	RuntimeID    pgtype.UUID        `json:"runtime_id"`
+	PendingAfter pgtype.Timestamptz `json:"pending_after"`
+}
+
+// Commands older than the pending window were already reported to the member
+// as unanswered, so they are never carried out late.
+func (q *Queries) ClaimIssueEnvironmentCommands(ctx context.Context, arg ClaimIssueEnvironmentCommandsParams) ([]IssueEnvironmentCommand, error) {
+	rows, err := q.db.Query(ctx, claimIssueEnvironmentCommands, arg.RuntimeID, arg.PendingAfter)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IssueEnvironmentCommand{}
+	for rows.Next() {
+		var i IssueEnvironmentCommand
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.RuntimeID,
+			&i.EnvironmentID,
+			&i.TaskID,
+			&i.Action,
+			&i.LocalKey,
+			&i.Repo,
+			&i.Name,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Status,
+			&i.Error,
+			&i.Output,
+			&i.ResultKey,
+			&i.CreatedAt,
+			&i.ClaimedAt,
+			&i.CompletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const completeIssueEnvironmentCommand = `-- name: CompleteIssueEnvironmentCommand :one
+UPDATE issue_environment_command
+SET status = $1,
+    error = $2,
+    output = $3,
+    result_key = $4,
+    completed_at = now()
+WHERE id = $5 AND runtime_id = $6 AND status = 'claimed'
+RETURNING id, workspace_id, issue_id, runtime_id, environment_id, task_id, action, local_key, repo, name, actor_type, actor_id, status, error, output, result_key, created_at, claimed_at, completed_at
+`
+
+type CompleteIssueEnvironmentCommandParams struct {
+	Status    string      `json:"status"`
+	Error     string      `json:"error"`
+	Output    pgtype.Text `json:"output"`
+	ResultKey string      `json:"result_key"`
+	ID        pgtype.UUID `json:"id"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+}
+
+func (q *Queries) CompleteIssueEnvironmentCommand(ctx context.Context, arg CompleteIssueEnvironmentCommandParams) (IssueEnvironmentCommand, error) {
+	row := q.db.QueryRow(ctx, completeIssueEnvironmentCommand,
+		arg.Status,
+		arg.Error,
+		arg.Output,
+		arg.ResultKey,
+		arg.ID,
+		arg.RuntimeID,
+	)
+	var i IssueEnvironmentCommand
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.RuntimeID,
+		&i.EnvironmentID,
+		&i.TaskID,
+		&i.Action,
+		&i.LocalKey,
+		&i.Repo,
+		&i.Name,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Status,
+		&i.Error,
+		&i.Output,
+		&i.ResultKey,
+		&i.CreatedAt,
+		&i.ClaimedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
+const createIssueEnvironmentCommand = `-- name: CreateIssueEnvironmentCommand :one
+INSERT INTO issue_environment_command (
+    workspace_id, issue_id, runtime_id, environment_id, task_id, action,
+    local_key, repo, name, actor_type, actor_id
+) VALUES (
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9, $10, $11
+)
+RETURNING id, workspace_id, issue_id, runtime_id, environment_id, task_id, action, local_key, repo, name, actor_type, actor_id, status, error, output, result_key, created_at, claimed_at, completed_at
+`
+
+type CreateIssueEnvironmentCommandParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+	RuntimeID     pgtype.UUID `json:"runtime_id"`
+	EnvironmentID pgtype.UUID `json:"environment_id"`
+	TaskID        pgtype.UUID `json:"task_id"`
+	Action        string      `json:"action"`
+	LocalKey      string      `json:"local_key"`
+	Repo          string      `json:"repo"`
+	Name          string      `json:"name"`
+	ActorType     string      `json:"actor_type"`
+	ActorID       pgtype.UUID `json:"actor_id"`
+}
+
+func (q *Queries) CreateIssueEnvironmentCommand(ctx context.Context, arg CreateIssueEnvironmentCommandParams) (IssueEnvironmentCommand, error) {
+	row := q.db.QueryRow(ctx, createIssueEnvironmentCommand,
+		arg.WorkspaceID,
+		arg.IssueID,
+		arg.RuntimeID,
+		arg.EnvironmentID,
+		arg.TaskID,
+		arg.Action,
+		arg.LocalKey,
+		arg.Repo,
+		arg.Name,
+		arg.ActorType,
+		arg.ActorID,
+	)
+	var i IssueEnvironmentCommand
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.RuntimeID,
+		&i.EnvironmentID,
+		&i.TaskID,
+		&i.Action,
+		&i.LocalKey,
+		&i.Repo,
+		&i.Name,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Status,
+		&i.Error,
+		&i.Output,
+		&i.ResultKey,
+		&i.CreatedAt,
+		&i.ClaimedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
+const deleteIssueEnvironmentLogCommandsBefore = `-- name: DeleteIssueEnvironmentLogCommandsBefore :execrows
+DELETE FROM issue_environment_command
+WHERE action = 'logs' AND created_at < $1::timestamptz
+`
+
+func (q *Queries) DeleteIssueEnvironmentLogCommandsBefore(ctx context.Context, createdBefore pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteIssueEnvironmentLogCommandsBefore, createdBefore)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const endIssueEnvironmentsMissingFromSnapshot = `-- name: EndIssueEnvironmentsMissingFromSnapshot :exec
 UPDATE issue_environment
 SET ended_at = now(),
@@ -33,8 +226,226 @@ func (q *Queries) EndIssueEnvironmentsMissingFromSnapshot(ctx context.Context, a
 	return err
 }
 
+const getIssueEnvironment = `-- name: GetIssueEnvironment :one
+SELECT id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind, excerpt, controllable FROM issue_environment
+WHERE id = $1 AND issue_id = $2 AND workspace_id = $3
+`
+
+type GetIssueEnvironmentParams struct {
+	ID          pgtype.UUID `json:"id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetIssueEnvironment(ctx context.Context, arg GetIssueEnvironmentParams) (IssueEnvironment, error) {
+	row := q.db.QueryRow(ctx, getIssueEnvironment, arg.ID, arg.IssueID, arg.WorkspaceID)
+	var i IssueEnvironment
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.TaskID,
+		&i.RuntimeID,
+		&i.AgentID,
+		&i.LocalKey,
+		&i.Source,
+		&i.Name,
+		&i.Label,
+		&i.Url,
+		&i.Port,
+		&i.State,
+		&i.Detail,
+		&i.StartedAt,
+		&i.ExpiresAt,
+		&i.LastSeenAt,
+		&i.EndedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Kind,
+		&i.Excerpt,
+		&i.Controllable,
+	)
+	return i, err
+}
+
+const getIssueEnvironmentCommand = `-- name: GetIssueEnvironmentCommand :one
+SELECT id, workspace_id, issue_id, runtime_id, environment_id, task_id, action, local_key, repo, name, actor_type, actor_id, status, error, output, result_key, created_at, claimed_at, completed_at FROM issue_environment_command
+WHERE id = $1 AND issue_id = $2 AND workspace_id = $3
+`
+
+type GetIssueEnvironmentCommandParams struct {
+	ID          pgtype.UUID `json:"id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetIssueEnvironmentCommand(ctx context.Context, arg GetIssueEnvironmentCommandParams) (IssueEnvironmentCommand, error) {
+	row := q.db.QueryRow(ctx, getIssueEnvironmentCommand, arg.ID, arg.IssueID, arg.WorkspaceID)
+	var i IssueEnvironmentCommand
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.RuntimeID,
+		&i.EnvironmentID,
+		&i.TaskID,
+		&i.Action,
+		&i.LocalKey,
+		&i.Repo,
+		&i.Name,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Status,
+		&i.Error,
+		&i.Output,
+		&i.ResultKey,
+		&i.CreatedAt,
+		&i.ClaimedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
+const getIssueEnvironmentConfig = `-- name: GetIssueEnvironmentConfig :one
+SELECT task_id, workspace_id, issue_id, runtime_id, environments, reported_at FROM issue_environment_config
+WHERE task_id = $1 AND issue_id = $2 AND workspace_id = $3
+`
+
+type GetIssueEnvironmentConfigParams struct {
+	TaskID      pgtype.UUID `json:"task_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetIssueEnvironmentConfig(ctx context.Context, arg GetIssueEnvironmentConfigParams) (IssueEnvironmentConfig, error) {
+	row := q.db.QueryRow(ctx, getIssueEnvironmentConfig, arg.TaskID, arg.IssueID, arg.WorkspaceID)
+	var i IssueEnvironmentConfig
+	err := row.Scan(
+		&i.TaskID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.RuntimeID,
+		&i.Environments,
+		&i.ReportedAt,
+	)
+	return i, err
+}
+
+const hasOpenIssueEnvironmentControl = `-- name: HasOpenIssueEnvironmentControl :one
+SELECT EXISTS (
+    SELECT 1 FROM issue_environment_command
+    WHERE issue_id = $1
+      AND environment_id = $2
+      AND action IN ('stop', 'restart')
+      AND (
+          (status = 'pending' AND created_at > $3::timestamptz)
+          OR (status = 'claimed' AND claimed_at > $4::timestamptz)
+      )
+)
+`
+
+type HasOpenIssueEnvironmentControlParams struct {
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	EnvironmentID pgtype.UUID        `json:"environment_id"`
+	PendingAfter  pgtype.Timestamptz `json:"pending_after"`
+	ClaimedAfter  pgtype.Timestamptz `json:"claimed_after"`
+}
+
+// A stop or restart still waiting on the daemon for the same environment.
+func (q *Queries) HasOpenIssueEnvironmentControl(ctx context.Context, arg HasOpenIssueEnvironmentControlParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasOpenIssueEnvironmentControl,
+		arg.IssueID,
+		arg.EnvironmentID,
+		arg.PendingAfter,
+		arg.ClaimedAfter,
+	)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const listIssueEnvironmentControls = `-- name: ListIssueEnvironmentControls :many
+SELECT id, workspace_id, issue_id, runtime_id, environment_id, task_id, action,
+       local_key, repo, name, actor_type, actor_id, status, error, result_key,
+       created_at, claimed_at, completed_at
+FROM issue_environment_command
+WHERE issue_id = $1
+  AND workspace_id = $2
+  AND action <> 'logs'
+  AND created_at > $3::timestamptz
+ORDER BY created_at DESC
+LIMIT 100
+`
+
+type ListIssueEnvironmentControlsParams struct {
+	IssueID      pgtype.UUID        `json:"issue_id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	CreatedAfter pgtype.Timestamptz `json:"created_after"`
+}
+
+type ListIssueEnvironmentControlsRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	RuntimeID     pgtype.UUID        `json:"runtime_id"`
+	EnvironmentID pgtype.UUID        `json:"environment_id"`
+	TaskID        pgtype.UUID        `json:"task_id"`
+	Action        string             `json:"action"`
+	LocalKey      string             `json:"local_key"`
+	Repo          string             `json:"repo"`
+	Name          string             `json:"name"`
+	ActorType     string             `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
+	Status        string             `json:"status"`
+	Error         string             `json:"error"`
+	ResultKey     string             `json:"result_key"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	ClaimedAt     pgtype.Timestamptz `json:"claimed_at"`
+	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
+}
+
+// Recent stops, restarts and starts, without log reads.
+func (q *Queries) ListIssueEnvironmentControls(ctx context.Context, arg ListIssueEnvironmentControlsParams) ([]ListIssueEnvironmentControlsRow, error) {
+	rows, err := q.db.Query(ctx, listIssueEnvironmentControls, arg.IssueID, arg.WorkspaceID, arg.CreatedAfter)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueEnvironmentControlsRow{}
+	for rows.Next() {
+		var i ListIssueEnvironmentControlsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.RuntimeID,
+			&i.EnvironmentID,
+			&i.TaskID,
+			&i.Action,
+			&i.LocalKey,
+			&i.Repo,
+			&i.Name,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Status,
+			&i.Error,
+			&i.ResultKey,
+			&i.CreatedAt,
+			&i.ClaimedAt,
+			&i.CompletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIssueEnvironments = `-- name: ListIssueEnvironments :many
-SELECT id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind FROM issue_environment
+SELECT id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind, excerpt, controllable FROM issue_environment
 WHERE issue_id = $1
   AND workspace_id = $2
   AND (ended_at IS NULL OR ended_at > $3::timestamptz)
@@ -80,6 +491,48 @@ func (q *Queries) ListIssueEnvironments(ctx context.Context, arg ListIssueEnviro
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Kind,
+			&i.Excerpt,
+			&i.Controllable,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLatestIssueEnvironmentConfigs = `-- name: ListLatestIssueEnvironmentConfigs :many
+SELECT DISTINCT ON (runtime_id) task_id, workspace_id, issue_id, runtime_id, environments, reported_at
+FROM issue_environment_config
+WHERE issue_id = $1 AND workspace_id = $2
+ORDER BY runtime_id, reported_at DESC
+`
+
+type ListLatestIssueEnvironmentConfigsParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// The most recent task on each machine that declared environments.
+func (q *Queries) ListLatestIssueEnvironmentConfigs(ctx context.Context, arg ListLatestIssueEnvironmentConfigsParams) ([]IssueEnvironmentConfig, error) {
+	rows, err := q.db.Query(ctx, listLatestIssueEnvironmentConfigs, arg.IssueID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IssueEnvironmentConfig{}
+	for rows.Next() {
+		var i IssueEnvironmentConfig
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.RuntimeID,
+			&i.Environments,
+			&i.ReportedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -92,7 +545,7 @@ func (q *Queries) ListIssueEnvironments(ctx context.Context, arg ListIssueEnviro
 }
 
 const listOpenIssueEnvironmentsByTask = `-- name: ListOpenIssueEnvironmentsByTask :many
-SELECT id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind FROM issue_environment
+SELECT id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind, excerpt, controllable FROM issue_environment
 WHERE task_id = $1 AND ended_at IS NULL
 `
 
@@ -127,6 +580,8 @@ func (q *Queries) ListOpenIssueEnvironmentsByTask(ctx context.Context, taskID pg
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Kind,
+			&i.Excerpt,
+			&i.Controllable,
 		); err != nil {
 			return nil, err
 		}
@@ -141,11 +596,13 @@ func (q *Queries) ListOpenIssueEnvironmentsByTask(ctx context.Context, taskID pg
 const upsertIssueEnvironment = `-- name: UpsertIssueEnvironment :one
 INSERT INTO issue_environment (
     workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source,
-    kind, name, label, url, port, state, detail, started_at, expires_at, ended_at
+    kind, name, label, url, port, state, detail, started_at, expires_at, ended_at,
+    excerpt, controllable
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7,
     $8, $9, $10, $11, $12, $13, $14, $15, $16,
-    CASE WHEN $13::text IN ('exited', 'stopped') THEN now() END
+    CASE WHEN $13::text IN ('exited', 'stopped') THEN now() END,
+    $17, $18
 )
 ON CONFLICT (task_id, local_key) DO UPDATE SET
     source = EXCLUDED.source,
@@ -156,6 +613,8 @@ ON CONFLICT (task_id, local_key) DO UPDATE SET
     port = EXCLUDED.port,
     state = EXCLUDED.state,
     detail = EXCLUDED.detail,
+    excerpt = EXCLUDED.excerpt,
+    controllable = EXCLUDED.controllable,
     started_at = EXCLUDED.started_at,
     expires_at = EXCLUDED.expires_at,
     last_seen_at = now(),
@@ -163,26 +622,28 @@ ON CONFLICT (task_id, local_key) DO UPDATE SET
         WHEN EXCLUDED.state IN ('exited', 'stopped') THEN COALESCE(issue_environment.ended_at, now())
     END,
     updated_at = now()
-RETURNING id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind
+RETURNING id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind, excerpt, controllable
 `
 
 type UpsertIssueEnvironmentParams struct {
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	IssueID     pgtype.UUID        `json:"issue_id"`
-	TaskID      pgtype.UUID        `json:"task_id"`
-	RuntimeID   pgtype.UUID        `json:"runtime_id"`
-	AgentID     pgtype.UUID        `json:"agent_id"`
-	LocalKey    string             `json:"local_key"`
-	Source      string             `json:"source"`
-	Kind        string             `json:"kind"`
-	Name        string             `json:"name"`
-	Label       string             `json:"label"`
-	Url         string             `json:"url"`
-	Port        pgtype.Int4        `json:"port"`
-	State       string             `json:"state"`
-	Detail      string             `json:"detail"`
-	StartedAt   pgtype.Timestamptz `json:"started_at"`
-	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	IssueID      pgtype.UUID        `json:"issue_id"`
+	TaskID       pgtype.UUID        `json:"task_id"`
+	RuntimeID    pgtype.UUID        `json:"runtime_id"`
+	AgentID      pgtype.UUID        `json:"agent_id"`
+	LocalKey     string             `json:"local_key"`
+	Source       string             `json:"source"`
+	Kind         string             `json:"kind"`
+	Name         string             `json:"name"`
+	Label        string             `json:"label"`
+	Url          string             `json:"url"`
+	Port         pgtype.Int4        `json:"port"`
+	State        string             `json:"state"`
+	Detail       string             `json:"detail"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
+	Excerpt      string             `json:"excerpt"`
+	Controllable bool               `json:"controllable"`
 }
 
 // A reported environment that has exited or stopped keeps its first ended_at,
@@ -205,6 +666,8 @@ func (q *Queries) UpsertIssueEnvironment(ctx context.Context, arg UpsertIssueEnv
 		arg.Detail,
 		arg.StartedAt,
 		arg.ExpiresAt,
+		arg.Excerpt,
+		arg.Controllable,
 	)
 	var i IssueEnvironment
 	err := row.Scan(
@@ -229,6 +692,36 @@ func (q *Queries) UpsertIssueEnvironment(ctx context.Context, arg UpsertIssueEnv
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Kind,
+		&i.Excerpt,
+		&i.Controllable,
 	)
 	return i, err
+}
+
+const upsertIssueEnvironmentConfig = `-- name: UpsertIssueEnvironmentConfig :exec
+INSERT INTO issue_environment_config (task_id, workspace_id, issue_id, runtime_id, environments)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (task_id) DO UPDATE SET
+    runtime_id = EXCLUDED.runtime_id,
+    environments = EXCLUDED.environments,
+    reported_at = now()
+`
+
+type UpsertIssueEnvironmentConfigParams struct {
+	TaskID       pgtype.UUID `json:"task_id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	IssueID      pgtype.UUID `json:"issue_id"`
+	RuntimeID    pgtype.UUID `json:"runtime_id"`
+	Environments []byte      `json:"environments"`
+}
+
+func (q *Queries) UpsertIssueEnvironmentConfig(ctx context.Context, arg UpsertIssueEnvironmentConfigParams) error {
+	_, err := q.db.Exec(ctx, upsertIssueEnvironmentConfig,
+		arg.TaskID,
+		arg.WorkspaceID,
+		arg.IssueID,
+		arg.RuntimeID,
+		arg.Environments,
+	)
+	return err
 }
