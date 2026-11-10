@@ -16,6 +16,14 @@ Une discussion n'est **liée à aucune tâche**. L'agent ne regarde pas votre ta
 
 Une discussion peut aussi porter un contexte. Cliquez sur **+** en bas à gauche de la zone de saisie et choisissez **Contexte de projet** pour rattacher un [projet](/projects) à la conversation ; lorsque l'agent s'exécute, il reçoit la description, les dépôts et les autres ressources de ce projet.
 
+## Choisir un répertoire de travail
+
+Dans Web ou Desktop, sélectionnez un agent puis ouvrez **+ → Répertoire de travail** pour parcourir les dossiers de la machine du runtime ou saisir un chemin absolu. Sélectionnez le répertoire avant d'envoyer le message. Même depuis un autre ordinateur, vous choisissez un dossier sur la machine du runtime.
+
+Cette option exige un runtime local en ligne dont vous êtes propriétaire et un daemon compatible. Elle n'est pas disponible pour les runtimes cloud ni pour le mode gateway d'OpenClaw. Les droits d'accès et les restrictions sur les répertoires racines restent applicables.
+
+L'agent travaille directement dans le dossier choisi, que les messages suivants réutilisent. Modifier ou retirer le répertoire dans une discussion existante démarre une nouvelle discussion. Le répertoire choisi prévaut sur celui du projet, tout en conservant son contexte. Si la machine ou le répertoire est indisponible, l'exécution signale une erreur au lieu de changer silencieusement de dossier.
+
 ## Démarrer une conversation
 
 <Steps>

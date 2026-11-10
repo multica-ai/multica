@@ -119,6 +119,29 @@ func (a *localDirectoryAssignment) ValidateExecutionMode() error {
 // assignment" there to free the lock would have silently moved chat out of the
 // user's directory as well.
 func localDirectoryAssignmentForTask(task Task, daemonID string) (*localDirectoryAssignment, error) {
+	if directory := task.WorkingDirectory; directory != nil {
+		if task.ChatSessionID == "" {
+			return nil, errors.New("working_directory: only chat tasks can select a working directory")
+		}
+		if directory.DaemonID == "" || directory.DaemonID != daemonID {
+			return nil, errors.New("working_directory: selected directory belongs to a different machine")
+		}
+		if !filepath.IsAbs(directory.Path) || strings.ContainsRune(directory.Path, '\x00') {
+			return nil, errors.New("working_directory: path must be absolute")
+		}
+		absPath := filepath.Clean(directory.Path)
+		realPath, err := resolveRealPath(absPath)
+		if err != nil {
+			return nil, err
+		}
+		return &localDirectoryAssignment{
+			Ref: localDirectoryRef{
+				DaemonID:  directory.DaemonID,
+				LocalPath: absPath,
+			},
+			AbsPath: absPath, RealPath: realPath,
+		}, nil
+	}
 	if task.IsLeaderTask {
 		return nil, nil
 	}

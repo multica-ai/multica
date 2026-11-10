@@ -15,6 +15,8 @@ const h = vi.hoisted(() => {
     activeSessionId: null as string | null,
     selectedAgentId: null as string | null,
     selectedProjectId: null as string | null,
+    workingDirectoryDraft: null as { agentId: string; runtimeId: string; directory: { daemon_id: string; path: string } } | null,
+    setWorkingDirectoryDraft: vi.fn((value) => { store.workingDirectoryDraft = value; }),
     setActiveSession: vi.fn((id: string | null) => {
       store.activeSessionId = id;
     }),
@@ -73,6 +75,7 @@ const h = vi.hoisted(() => {
     setProjectMutate: vi.fn(),
     removeFromCaches: vi.fn(),
     // useQuery reads these so each test can vary the loaded data.
+    runtimes: [] as unknown[],
     sessions: [] as ChatSession[],
     agents: [] as Agent[],
     projects: [] as Project[],
@@ -173,7 +176,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
       if (key.includes("members")) {
         return { data: [{ user_id: "user-1", role: "admin" }] };
       }
-      if (key.includes("runtimes")) return { data: [] };
+      if (key.includes("runtimes")) return { data: h.runtimes };
       if (key.includes("sessions")) return { data: h.sessions, isSuccess: true };
       if (key.includes("projects")) return { data: h.projects, isSuccess: true };
       if (key.includes("pending-task")) return { data: h.pendingTask };
@@ -240,6 +243,8 @@ function setup(
   h.store.activeSessionId = activeSessionId;
   h.store.selectedAgentId = null;
   h.store.selectedProjectId = null;
+  h.store.workingDirectoryDraft = null;
+  h.runtimes = [];
   h.sessions = sessions;
   h.agents = agents;
   h.projects = [];
@@ -1230,5 +1235,38 @@ describe("useChatController revoked invoke permission", () => {
     expect(sent).toBe(false);
     expect(vi.mocked(api.sendChatMessage)).not.toHaveBeenCalled();
     expect(h.createSessionMutate).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("useChatController working directory sends", () => {
+  it("clears a directory when explicitly starting a new chat", () => {
+    const result = setup(null, [], [agentA]);
+    h.store.workingDirectoryDraft = { agentId: "agent-a", runtimeId: "runtime-a", directory: { daemon_id: "daemon", path: "/selected" } };
+    act(() => result.current.handleNewChat());
+    expect(h.store.workingDirectoryDraft).toBeNull();
+  });
+  it("retains the explicit execution directory when switching project context", () => {
+    const result = setup("sA", [makeSession({ id: "sA", agent_id: "agent-a", working_directory: { daemon_id: "daemon", path: "/selected" } })], [agentA]);
+    act(() => result.current.handleProjectChange("new-project"));
+    expect(h.store.activeSessionId).toBeNull();
+    expect(h.store.workingDirectoryDraft).toEqual({ agentId: "agent-a", runtimeId: "runtime-a", directory: { daemon_id: "daemon", path: "/selected" } });
+  });
+
+  it("includes the selected directory in the new session and continues that session", async () => {
+    setup(null, [], [agentA]);
+    h.runtimes = [{ id: "runtime-a", daemon_id: "daemon", owner_id: "user-1", runtime_mode: "local", status: "online", metadata: { capabilities: ["chat-working-directory-v1"] } }];
+    const { result: composed, rerender } = renderHook(() => useChatController());
+    vi.mocked(api.sendChatMessage).mockResolvedValue({ message_id: "m", task_id: "task", created_at: "2026-10-28T00:00:00Z" });
+    h.createSessionMutate.mockClear();
+    act(() => composed.current.directorySelection.onChange({ daemon_id: "daemon", path: "/home/me/项目 files" }));
+    rerender();
+    await act(async () => { await composed.current.handleSend("first"); });
+    expect(h.createSessionMutate).toHaveBeenCalledWith(expect.objectContaining({ working_directory: { daemon_id: "daemon", path: "/home/me/项目 files" } }));
+    h.sessions = [makeSession({ id: "new-session", agent_id: "agent-a", working_directory: { daemon_id: "daemon", path: "/home/me/项目 files" } })];
+    rerender();
+    await act(async () => { await composed.current.handleSend("continue"); });
+    expect(h.createSessionMutate).toHaveBeenCalledTimes(1);
+    expect(api.sendChatMessage).toHaveBeenLastCalledWith("new-session", "continue", undefined);
   });
 });
