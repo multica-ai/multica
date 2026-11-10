@@ -243,7 +243,9 @@ JOIN issue i ON i.id = s.issue_id
 WHERE i.workspace_id = sqlc.arg(workspace_id)
   AND s.user_type = 'member'
   AND s.user_id = sqlc.arg(user_id)
-  AND s.unsubscribed_at IS NULL;
+  AND s.unsubscribed_at IS NULL
+  -- MUL-8472: private projects the caller cannot see.
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])));
 
 -- name: IsIssueSubscriber :one
 SELECT EXISTS(

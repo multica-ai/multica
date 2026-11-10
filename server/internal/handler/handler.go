@@ -1295,5 +1295,10 @@ func (h *Handler) loadInboxItemForUser(w http.ResponseWriter, r *http.Request, i
 		writeError(w, http.StatusNotFound, "inbox item not found")
 		return db.InboxItem{}, false
 	}
+	// An item on an issue in a private project the caller cannot see (never
+	// granted, or revoked since it was delivered) answers like a missing one.
+	if !h.requireIssueIDVisible(w, r, workspaceID, item.IssueID, http.StatusNotFound, "inbox item not found") {
+		return db.InboxItem{}, false
+	}
 	return item, true
 }

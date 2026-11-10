@@ -519,7 +519,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 	labelsByIssue := baseHandler.labelsByIssue(r.Context(), compiled.workspaceID, issueIDs)
 	// One Resolver and one originals read for the page — see
 	// newStatusCategoryFiller. (MUL-6243, MUL-7349)
-	fillTableRow := baseHandler.newStatusCategoryFiller(r.Context(), compiled.workspaceID, originals...)
+	fillTableRow := baseHandler.newStatusCategoryFiller(r.Context(), compiled.workspaceID, compiled.hidden, originals...)
 	responseRows := make([]issueTableRowResponse, len(scanned))
 	for index, row := range scanned {
 		issue := issueListRowToResponse(row.issue, prefix)

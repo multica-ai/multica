@@ -346,17 +346,20 @@ WHERE i.workspace_id = $1
   AND s.user_type = 'member'
   AND s.user_id = $2
   AND s.unsubscribed_at IS NULL
+  -- MUL-8472: private projects the caller cannot see.
+  AND ($3::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($3::uuid[])))
 `
 
 type ListSubscribedIssueIDsParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	UserID           pgtype.UUID   `json:"user_id"`
+	HiddenProjectIds []pgtype.UUID `json:"hidden_project_ids"`
 }
 
 // Every issue in the workspace the member actively subscribes to; opt-out
 // tombstones do not count.
 func (q *Queries) ListSubscribedIssueIDs(ctx context.Context, arg ListSubscribedIssueIDsParams) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listSubscribedIssueIDs, arg.WorkspaceID, arg.UserID)
+	rows, err := q.db.Query(ctx, listSubscribedIssueIDs, arg.WorkspaceID, arg.UserID, arg.HiddenProjectIds)
 	if err != nil {
 		return nil, err
 	}

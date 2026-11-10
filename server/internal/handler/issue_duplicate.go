@@ -147,7 +147,7 @@ func (h *Handler) ListIssueDuplicates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
-	fill := h.newStatusCategoryFiller(r.Context(), issue.WorkspaceID)
+	fill := h.newStatusCategoryFiller(r.Context(), issue.WorkspaceID, hidden)
 
 	var duplicateOf *IssueResponse
 	if issue.Status == issuestatus.Cancelled && issue.DuplicateOfIssueID.Valid {

@@ -62,13 +62,19 @@ func (h *Handler) ListSubscribedIssueIDs(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	wsUUID, ok := parseUUIDOrBadRequest(w, ctxWorkspaceID(r.Context()), "workspace id")
+	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
 	if !ok {
 		return
 	}
 	ids, err := h.Queries.ListSubscribedIssueIDs(r.Context(), db.ListSubscribedIssueIDsParams{
-		WorkspaceID: wsUUID,
-		UserID:      parseUUID(userID),
+		WorkspaceID:      wsUUID,
+		UserID:           parseUUID(userID),
+		HiddenProjectIds: hidden.Param(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list subscribed issues")

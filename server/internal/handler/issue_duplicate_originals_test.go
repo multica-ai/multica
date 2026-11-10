@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -179,7 +180,7 @@ func TestDuplicateOriginalResolvesWithoutPriming(t *testing.T) {
 		t.Fatalf("GetIssue: %v", err)
 	}
 	resp := issueToResponse(row, "MUL")
-	testHandler.newStatusCategoryFiller(context.Background(), row.WorkspaceID)(&resp)
+	testHandler.newStatusCategoryFiller(context.Background(), row.WorkspaceID, projectaccess.Hidden{})(&resp)
 	if resp.DuplicateOf == nil || resp.DuplicateOf.ID != original {
 		t.Fatalf("duplicate_of = %+v, want %s", resp.DuplicateOf, original)
 	}

@@ -167,6 +167,12 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "too many issue_ids")
 		return
 	}
+	// MUL-8472: an issue or project the caller cannot see previews like an
+	// unknown one.
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
 
 	// Resolve the prospective assignee once — a malformed id is a deterministic
 	// 400, never a silent miscount.
@@ -218,7 +224,7 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 		// Mirror CreateIssue's workflow handling: the starting column's
 		// handoff when no assignee was picked. (MUL-7420)
 		if req.ProjectID != nil && *req.ProjectID != "" {
-			if projectUUID, err := util.ParseUUID(*req.ProjectID); err == nil {
+			if projectUUID, err := util.ParseUUID(*req.ProjectID); err == nil && hidden.CanSeeProject(projectUUID) {
 				if def, project, err := issueworkflow.ForProject(r.Context(), h.Queries, wsUUID, projectUUID); err == nil && def != nil {
 					if step, ok := def.Step(candidate.Status); ok && step.HandsOff() && !hasNewAssignee {
 						if t, id, ok := issueworkflow.ResolveHandler(step, project, actorType, parseUUID(actorID)); ok {
@@ -244,8 +250,8 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 			ID:          issueUUID,
 			WorkspaceID: parseUUID(workspaceID),
 		})
-		if err != nil {
-			continue // cross-workspace / unknown id contributes no trigger
+		if err != nil || !hidden.CanSeeProject(loaded.ProjectID) {
+			continue // cross-workspace / unknown / hidden id contributes no trigger
 		}
 
 		post := loaded

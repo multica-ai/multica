@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
@@ -244,7 +245,11 @@ func sourceContextThreadChangeReasons(captured, current service.SourceContextSna
 	return sourceContextThreadChangeDetails(captured, current).Reasons
 }
 
-func (h *Handler) issueSourceContextDetail(ctx context.Context, issue db.Issue) (*sourceContextDetailResponse, error) {
+// issueSourceContextDetail renders an issue's frozen source context for one
+// reader. hidden is the reader's hidden projects: when the live source issue
+// is in one, only the frozen snapshot is returned and the live source reads as
+// unavailable, so nothing posted there after capture reaches this reader.
+func (h *Handler) issueSourceContextDetail(ctx context.Context, issue db.Issue, hidden projectaccess.Hidden) (*sourceContextDetailResponse, error) {
 	row, err := h.Queries.GetIssueSourceContextByIssue(ctx, db.GetIssueSourceContextByIssueParams{WorkspaceID: issue.WorkspaceID, IssueID: issue.ID})
 	if err != nil {
 		return nil, err
@@ -273,6 +278,25 @@ func (h *Handler) issueSourceContextDetail(ctx context.Context, issue db.Issue) 
 		response.CanOpenCurrentSource = true
 	} else if errors.Is(anchorErr, pgx.ErrNoRows) || anchorErr == nil {
 		response.AnchorCommentState = "deleted"
+	}
+	liveSourceID := row.SourceIssueID
+	if anchorExists {
+		liveSourceID = anchor.IssueID
+	}
+	if !hidden.Empty() {
+		projectID, err := h.Queries.GetIssueProjectID(ctx, liveSourceID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("resolve source issue project: %w", err)
+		}
+		if err == nil && !hidden.CanSeeProject(projectID) {
+			response.DisplayState = "unavailable"
+			response.SourceIssueState = "unavailable"
+			response.CommentThreadState = "unavailable"
+			response.AnchorCommentState = "unavailable"
+			response.CanOpenCurrentSource = false
+			response.CurrentSource = nil
+			return response, nil
+		}
 	}
 
 	var currentIssue service.SourceContextIssueSnapshot
@@ -485,8 +509,18 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 	}
 	build, err := service.BuildSourceContext(r.Context(), h.Queries, wsUUID, anchorCommentID)
 	if errors.Is(err, service.ErrAnchorCommentDeleted) {
-		if _, issueErr := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: tokenIssueID, WorkspaceID: wsUUID}); errors.Is(issueErr, pgx.ErrNoRows) {
+		// The token's issue id comes from the client; one in a project the
+		// caller cannot see answers like a deleted one.
+		tokenIssue, issueErr := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: tokenIssueID, WorkspaceID: wsUUID})
+		if errors.Is(issueErr, pgx.ErrNoRows) {
 			err = service.ErrSourceIssueDeleted
+		} else if issueErr == nil {
+			hidden, hiddenErr := h.hiddenProjects(r, workspaceID)
+			if hiddenErr != nil {
+				err = hiddenErr
+			} else if !hidden.CanSeeProject(tokenIssue.ProjectID) {
+				err = service.ErrSourceIssueDeleted
+			}
 		}
 	}
 	if err != nil {
@@ -707,6 +741,10 @@ func (h *Handler) createManualCommentSubIssue(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return errSourceContextResponseWritten
 	}
+	attachmentIDs, ok = h.visibleAttachmentIDs(w, r, workspaceID, attachmentIDs)
+	if !ok {
+		return errSourceContextResponseWritten
+	}
 	labelIDs, ok := parseUUIDSliceOrBadRequest(w, input.LabelIDs, "label_ids")
 	if !ok {
 		return errSourceContextResponseWritten
@@ -761,7 +799,7 @@ func (h *Handler) createManualCommentSubIssue(w http.ResponseWriter, r *http.Req
 		return err
 	}
 	response := issueToResponse(result.Issue, prefix)
-	h.fillStatusCategory(r.Context(), workspaceID, &response)
+	h.fillStatusCategory(r.Context(), workspaceID, projectaccess.Hidden{}, &response)
 	labelResponses := labelsToResponse(result.Labels)
 	response.Labels = &labelResponses
 	slog.Info("sub-issue created from captured comment", append(sourceContextAuditAttrs(r, capture.ID, capture.Snapshot.SourceIssue.ID, capture.Snapshot.AnchorCommentID, userID, "manual", limits, "success"), "target_issue_id", uuidToString(result.Issue.ID))...)
@@ -852,6 +890,10 @@ func (h *Handler) prepareAgentCommentSubIssue(w http.ResponseWriter, r *http.Req
 		}
 	}
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, input.AttachmentIDs, "attachment_ids")
+	if !ok {
+		return nil, errSourceContextResponseWritten
+	}
+	attachmentIDs, ok = h.visibleAttachmentIDs(w, r, workspaceID, attachmentIDs)
 	if !ok {
 		return nil, errSourceContextResponseWritten
 	}
