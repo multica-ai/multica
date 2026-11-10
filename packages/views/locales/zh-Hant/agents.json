@@ -288,7 +288,7 @@
     "environment": "環境變數",
     "custom_args": "自定義引數",
     "mcp_config": "MCP",
-    "composio_mcp": "MCP 應用",
+    "composio_mcp": "應用",
     "integrations": "整合",
     "runtime_config": "路由",
     "qoder_agent": "Qoder Cloud Agents",
@@ -703,22 +703,6 @@
       "redacted_hint": "只有 AI 代理 owner 或工作區 admin 可以檢視此配置。",
       "dialog_json_help": "以 JSON 編輯完整的伺服器配置。"
     },
-    "composio_mcp": {
-      "subtitle": "勾選 toolkit，只在你自己（這個 AI 代理的建立者）直接或透過下級 AI 代理鏈路觸發這個 AI 代理時，才把它掛載為 MCP server。",
-      "loading": "正在載入你的連線…",
-      "load_failed": "無法載入你已連線的應用，請稍後重試。",
-      "empty_title": "還沒有已連線的應用",
-      "empty_link_to_settings": "去 \"設定 → 整合\" 連一個",
-      "open_settings": "開啟設定",
-      "connected": "已連線",
-      "toggle_aria": "允許該 AI 代理使用 {{toolkit}}",
-      "saving": "正在儲存…",
-      "save_failed_toast": "儲存失敗，請重試",
-      "redacted_title": "已配置——對你隱藏",
-      "redacted_hint": "只有該 AI 代理的建立者才能檢視或修改它可使用的應用。",
-      "shared_warning": "該 AI 代理已共享。能夠執行該 AI 代理的人可以透過它使用你在此啟用的 Composio 應用。如果這些應用涉及敏感資料，請改用\"私有\"或縮小訪問範圍。",
-      "workspace_warning": "公開給工作區：工作區內任何成員都可以透過該 AI 代理使用這些 Composio 應用。"
-    },
     "runtime_config": {
       "mode_label": "路由模式",
       "mode_local": "Local",
@@ -831,6 +815,24 @@
       "started_prefix": "{{when}}啟動",
       "dispatched_prefix": "{{when}}派發",
       "queued_prefix": "{{when}}排隊"
+    },
+    "connected_apps": {
+      "subtitle": "這個 AI 代理可以使用的應用，以團隊帳號或發起執行的成員帳號操作。",
+      "loading": "正在載入應用…",
+      "load_failed": "無法載入此 AI 代理的應用。",
+      "empty": "還沒有應用。",
+      "add_placeholder": "新增應用…",
+      "account": "帳號",
+      "level": "權限",
+      "remove": "移除 {{app}}",
+      "team_connected": "團隊帳號已連線",
+      "team_missing": "團隊帳號未連線",
+      "personal_connected": "你的帳號已連線",
+      "personal_missing": "你還沒有連線這個應用",
+      "team_admin_only": "只有工作區管理員可以給 AI 代理團隊帳號。",
+      "team_shared_warning": "能執行這個 AI 代理的人，都會以團隊帳號身分使用這些應用。",
+      "manage_link": "在 設定 → 已連線應用 中管理帳號",
+      "save_failed_toast": "儲存失敗，請重試"
     }
   },
   "char_counter": {

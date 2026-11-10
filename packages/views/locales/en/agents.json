@@ -300,7 +300,7 @@
     "environment": "Environment",
     "custom_args": "Custom Args",
     "mcp_config": "MCP",
-    "composio_mcp": "MCP Apps",
+    "composio_mcp": "Apps",
     "integrations": "Integrations",
     "runtime_config": "Routing",
     "qoder_agent": "Qoder Cloud Agents",
@@ -722,22 +722,6 @@
       "redacted_hint": "Only the agent owner or a workspace admin can read this config.",
       "dialog_json_help": "Edit the full server configuration as JSON."
     },
-    "composio_mcp": {
-      "subtitle": "Check a toolkit to let this agent mount it as an MCP server — but only when you (its creator) are the one who triggered the run, directly or down a sub-agent chain.",
-      "loading": "Loading your connections…",
-      "load_failed": "Couldn't load your connected apps. Try again shortly.",
-      "empty_title": "No connected apps yet",
-      "empty_link_to_settings": "Connect one in Settings → Integrations",
-      "open_settings": "Open settings",
-      "connected": "Connected",
-      "toggle_aria": "Allow {{toolkit}} for this agent",
-      "saving": "Saving…",
-      "save_failed_toast": "Couldn't save — please try again",
-      "redacted_title": "Configured — hidden from your view",
-      "redacted_hint": "Only the agent's creator can view or change which apps it may use.",
-      "shared_warning": "This agent is shared. People who can run this agent may use the Composio apps you enable here. Use Private or narrow the access list if these apps expose sensitive data.",
-      "workspace_warning": "Public to workspace: any workspace member may use these Composio apps through this agent."
-    },
     "runtime_config": {
       "mode_label": "Routing mode",
       "mode_local": "Local",
@@ -852,6 +836,24 @@
       "started_prefix": "Started {{when}}",
       "dispatched_prefix": "Dispatched {{when}}",
       "queued_prefix": "Queued {{when}}"
+    },
+    "connected_apps": {
+      "subtitle": "Apps this agent can use, through the team account or the account of whoever triggers the run.",
+      "loading": "Loading apps…",
+      "load_failed": "Couldn't load this agent's apps.",
+      "empty": "No apps yet.",
+      "add_placeholder": "Add an app…",
+      "account": "Account",
+      "level": "Level",
+      "remove": "Remove {{app}}",
+      "team_connected": "Team account connected",
+      "team_missing": "Team account not connected",
+      "personal_connected": "Your account is connected",
+      "personal_missing": "You haven't connected this app",
+      "team_admin_only": "Only workspace admins can give an agent a team account.",
+      "team_shared_warning": "Anyone who can run this agent acts as the team account for these apps.",
+      "manage_link": "Manage accounts in Settings → Connected apps",
+      "save_failed_toast": "Couldn't save — please try again"
     }
   },
   "char_counter": {

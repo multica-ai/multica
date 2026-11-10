@@ -10,7 +10,7 @@ vi.mock("fumadocs-core/source", () => ({
   loader: vi.fn(() => mockUseCasesSource),
 }));
 
-vi.mock("@/.source", () => ({
+vi.mock("@/.source/server", () => ({
   useCases: {
     toFumadocsSource: vi.fn(() => ({})),
   },

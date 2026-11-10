@@ -166,6 +166,7 @@
       "japanese": "日本語",
       "french": "Français",
       "spanish": "Español",
+      "russian": "Русский",
       "sync_failed": "語言已在本裝置儲存，但同步到帳號失敗。其他裝置可能仍顯示舊語言。"
     },
     "timezone": {
@@ -1042,35 +1043,6 @@
     "inbound_pending_hint": "請在飛書/Lark 中傳送訊息給此機器人以驗證接收。若未收到，請檢查長連線模式、im.message.receive_v1 事件訂閱，以及應用程式發布和審核狀態。既有綁定可能尚無驗證紀錄。",
     "inbound_verified_hint": "本次綁定已收到有效訊息；這不代表持續連線、AI 代理執行成功或回覆成功。"
   },
-  "composio": {
-    "page_description": "連線 AI 代理可使用的應用。",
-    "not_enabled_title": "Composio 整合未啟用",
-    "not_enabled_description_prefix": "在伺服器上設定",
-    "not_enabled_description_suffix": "以啟用 Composio toolkit 連線。",
-    "loading": "正在載入 toolkit…",
-    "load_failed": "載入 Composio toolkit 失敗。",
-    "empty_title": "還沒有可連線的應用",
-    "empty_description": "你的 Composio 專案裡還沒有啟用 auth config 的 toolkit。請在 Composio 後臺啟用一個 auth config，它才會出現在這裡。",
-    "search_placeholder": "搜尋 toolkit…",
-    "connect": "連線",
-    "connecting": "連線中…",
-    "connected": "已連線",
-    "disconnect": "斷開",
-    "disconnecting": "斷開中...",
-    "connect_failed": "無法發起連線，請重試。",
-    "disconnect_failed": "無法斷開連線，請重試。",
-    "toast_disconnected": "已斷開",
-    "disconnect_confirm_title": "斷開這個應用？",
-    "disconnect_confirm_description": "你的已連線帳號將在 Composio 側被撤銷，你的 AI 代理將失去對該 toolkit 的訪問權限。你可以稍後重新連線。",
-    "disconnect_confirm_cancel": "取消",
-    "connections_load_failed": "無法載入你已有的連線，連線狀態可能不完整。",
-    "toast_connected": "已連線",
-    "toast_connect_failed": "連線未能完成，請重試。",
-    "last_used": "最近使用 {{when}}",
-    "last_used_never": "從未使用",
-    "expired": "令牌已過期",
-    "reconnect": "重新連線"
-  },
   "slack": {
     "section_title": "Slack",
     "page_description": "在 Slack 中與 AI 代理對話，或用 /issue 建立任務。",
@@ -1559,7 +1531,188 @@
     "title": "為 AI 代理接入工具的方式",
     "current": "當前頁面",
     "mcp": "由管理員新增、在工作區內共享，再按 AI 代理分配。",
-    "apps": "用你自己的帳號透過 Composio 授權，在你擁有的 AI 代理上啟用。",
+    "apps": "透過 Multica 連線團隊或個人帳號，再將應用新增至 AI 代理。",
     "plugins": "安裝後可提供工具、定時 hook 和儲存，每個外掛單獨授權。"
+  },
+  "connected_apps": {
+    "description": "AI 代理透過這些帳號操作外部應用，允許的操作會直接執行。",
+    "add_app": "新增應用",
+    "loading": "正在載入應用…",
+    "load_failed": "無法載入應用。",
+    "team_title": "團隊帳號",
+    "team_description": "工作區共有的帳號，例如客服信箱或公司 GitHub。由管理員連線；被授予團隊帳號的 AI 代理以該帳號身分操作。",
+    "team_empty": "還沒有團隊帳號。",
+    "team_empty_member": "還沒有團隊帳號。請聯絡工作區管理員連線。",
+    "personal_title": "我的帳號",
+    "personal_description": "你自己的帳號。由你觸發的執行中，設為「觸發者帳號」的應用會使用這些帳號。",
+    "personal_empty": "你還沒有連線任何帳號。",
+    "connected_by": "由 {{name}} 連線",
+    "last_used": "最近使用 {{when}}",
+    "last_used_never": "尚未使用",
+    "used_by_other": "{{count}} 個 AI 代理在用",
+    "expired": "需要重新連線",
+    "reconnect": "重新連線",
+    "rules": "規則",
+    "activity": "呼叫紀錄",
+    "disconnect": "中斷連線",
+    "catalog_title": "可用應用",
+    "catalog_label": "成員可新增的應用",
+    "catalog_description": "精選應用附有審核過的預設規則。「全部應用」包含 Composio 能連線的所有應用；Multica 無法辨識的操作一律先徵得同意。「指定名單」只允許你選中的應用。",
+    "catalog_all": "全部應用",
+    "catalog_curated": "僅精選",
+    "catalog_custom": "指定名單",
+    "toast_connected": "帳號已連線",
+    "toast_connect_failed": "連線未完成，請重試。",
+    "toast_disconnected": "已中斷連線",
+    "toast_failed": "操作失敗，請重試。",
+    "add": {
+      "title": "新增應用",
+      "description": "為團隊或為自己連線帳號。哪些 AI 代理使用它，在各 AI 代理的「應用」頁設定。",
+      "search": "搜尋應用…",
+      "empty": "沒有符合的應用。",
+      "curated": "精選",
+      "recommended_team": "通常用團隊帳號",
+      "recommended_personal": "通常用個人帳號",
+      "connect_team": "連線團隊帳號",
+      "connect_personal": "連線我的帳號",
+      "connecting": "正在連線…",
+      "connected": "已連線"
+    },
+    "disconnect_team": {
+      "title": "中斷團隊的 {{app}} 帳號？",
+      "description": "使用團隊帳號的 AI 代理會立即失去存取權限。",
+      "agents": "正在使用的 AI 代理",
+      "no_agents": "沒有 AI 代理在用。",
+      "active_tasks": "進行中的執行：{{count}}",
+      "active_autopilots": "啟用中的自動化：{{count}}",
+      "pending": "將被取消的待確認請求：{{count}}",
+      "cancel": "取消",
+      "confirm": "中斷連線"
+    },
+    "disconnect_personal": {
+      "title": "中斷你的 {{app}} 帳號？",
+      "description": "你觸發的執行將無法再使用它。之後可以重新連線。",
+      "cancel": "取消",
+      "confirm": "中斷連線"
+    },
+    "detail": {
+      "team_title": "{{app}} · 團隊帳號",
+      "personal_title": "{{app}} · 我的帳號",
+      "rules_description": "AI 代理可以透過這個帳號做什麼。AI 代理的權限等級只會讓規則更嚴格。",
+      "rules_read_only": "只有工作區管理員可以修改團隊帳號的規則。",
+      "default": "預設：{{policy}}",
+      "activity_empty": "還沒有呼叫。",
+      "activity_failed": "無法載入呼叫紀錄。"
+    },
+    "classes": {
+      "read": {
+        "label": "讀取",
+        "description": "搜尋、列出、取得"
+      },
+      "write": {
+        "label": "寫入",
+        "description": "建立和更新內容"
+      },
+      "send": {
+        "label": "傳送",
+        "description": "寄信或傳訊息、發布、邀請"
+      },
+      "delete": {
+        "label": "刪除",
+        "description": "刪除或封存"
+      },
+      "share": {
+        "label": "分享",
+        "description": "修改權限或對外分享"
+      }
+    },
+    "policies": {
+      "allow": "允許",
+      "confirm": "先確認",
+      "block": "禁止"
+    },
+    "outcomes": {
+      "ok": "已執行",
+      "error": "失敗",
+      "blocked": "已攔截",
+      "pending": "等待確認",
+      "approved": "已核准",
+      "rejected": "已拒絕",
+      "rate_limited": "已限流"
+    },
+    "scopes": {
+      "team": "團隊帳號",
+      "personal": "觸發者的帳號"
+    },
+    "levels": {
+      "read": "唯讀",
+      "confirm_writes": "寫入前先確認",
+      "write": "可寫入"
+    },
+    "request": {
+      "title_action": "{{agent}} 想執行 {{tool}}",
+      "title_connect": "{{agent}} 請你連線 {{app}}",
+      "pending_count_other": "{{count}} 個應用操作等待確認",
+      "waiting_for": "等待 {{name}} 確認",
+      "expires": "{{when}}過期",
+      "redacted": "只有 {{name}} 能看到詳情。",
+      "arguments": "參數",
+      "edit": "編輯",
+      "invalid_json": "參數必須是 JSON 物件。",
+      "approve": "核准並執行",
+      "approve_all": "全部核准",
+      "reject": "拒絕",
+      "reject_reason": "原因（選填，AI 代理會看到）",
+      "connect": "連線 {{app}}",
+      "connected_continue": "我已連線",
+      "status": {
+        "approved": "已核准",
+        "rejected": "已拒絕",
+        "failed": "執行失敗",
+        "expired": "已過期",
+        "cancelled": "已取消"
+      },
+      "toast_approved": "已核准，AI 代理將繼續。",
+      "toast_rejected": "已拒絕，AI 代理會調整做法。",
+      "toast_failed": "無法記錄你的決定。",
+      "not_connected": "請先連線帳號。",
+      "connected_resumed": "{{app}} 已連線，代理會從中斷處繼續。",
+      "rate_limited": "這個帳號已達到每分鐘呼叫上限，請一分鐘後再核准。",
+      "rate_limited_some_other": "有 {{count}} 個請求觸發了每分鐘上限，請一分鐘後再核准。",
+      "withdrawn": "你已無法使用這個代理，請求已撤回。"
+    },
+    "tools": {
+      "tab": "工具",
+      "description": "工具的分類決定適用哪條規則。自動分類有誤的工具可以在這裡修正，變更對本工作區裡這個應用的所有帳號生效。",
+      "read_only": "只有工作區管理員可以修改工具分類。",
+      "search": "搜尋工具",
+      "empty": "沒有符合的工具。",
+      "auto": "自動（{{class}}）",
+      "truncated": "共 {{total}} 個，顯示前 {{shown}} 個。搜尋可縮小範圍。"
+    },
+    "custom": {
+      "title": "指定應用名單",
+      "description": "代理只能看到你選中的應用，其他應用也無法再連線帳號。",
+      "selected_other": "已選 {{count}} 個應用",
+      "cancel": "取消",
+      "save": "儲存名單",
+      "saved": "應用名單已儲存",
+      "edit": "編輯名單",
+      "row_label": "允許的應用",
+      "row_description_other": "已允許 {{count}} 個應用"
+    },
+    "saved_access": {
+      "account": "舊操作限制仍在阻擋此帳號的部分操作。",
+      "agent": "此應用仍受舊的唯讀授權限制。",
+      "catalog": "舊應用清單仍在隱藏其他應用。",
+      "allow_actions": "允許全部操作",
+      "open_catalog": "顯示全部應用",
+      "account_confirm": "使用此帳號的 AI 代理將能讀取、寫入、傳送、刪除和共享內容。舊操作限制將被取代。",
+      "agent_confirm": "此 AI 代理將能透過此應用讀取、寫入、傳送、刪除和共享內容，仍受帳號本身的限制。",
+      "catalog_confirm": "工作區將能選擇所有可連接的應用。現有連線和 AI 代理的應用指派維持不變。",
+      "cancel": "取消",
+      "admin_required": "請工作區管理員解除限制。",
+      "account_link": "此帳號仍有舊操作限制。請在已連接應用中解除。"
+    }
   }
 }

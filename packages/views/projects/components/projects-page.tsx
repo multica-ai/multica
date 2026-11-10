@@ -5,6 +5,7 @@ import {
   ExternalLink,
   FolderKanban,
   LayoutGrid,
+  Pencil,
   Pin,
   PinOff,
   Rows3,
@@ -253,6 +254,16 @@ function ProjectRowActions({
   return (
     <>
       <CollectionRowMenu label={t(($) => $.page.row_menu)} contentClassName="w-44">
+        <DropdownMenuItem
+          onClick={() =>
+            useModalStore
+              .getState()
+              .open("project-rename", { projectId: project.id, title: project.title })
+          }
+        >
+          <Pencil className="size-3.5" />
+          {t(($) => $.page.rename)}
+        </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() =>
             intentNavigate(

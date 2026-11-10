@@ -352,6 +352,7 @@ const mockApiObj = vi.hoisted(() => ({
   listRuntimes: vi.fn().mockResolvedValue([]),
   getProject: vi.fn(),
   listProjects: vi.fn().mockResolvedValue({ projects: [] }),
+  listPins: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -626,6 +627,7 @@ const mockTimeline: TimelineEntry[] = [
 // ---------------------------------------------------------------------------
 
 import { IssueDetail, groupSubIssuesByStage } from "./issue-detail";
+import { READING_COLUMN } from "../../layout/reading-column";
 import {
   IssueSurfaceSelectionProvider,
   useCreateIssueSurfaceSelection,
@@ -634,6 +636,8 @@ import {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const READING_COLUMN_SELECTOR = READING_COLUMN.split(" ").map((cls) => `.${CSS.escape(cls)}`).join("");
 
 function createTestQueryClient() {
   return new QueryClient({
@@ -729,6 +733,7 @@ describe("IssueDetail (shared)", () => {
     mockViewport.isMobile = false;
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
+    mockApiObj.listPins.mockResolvedValue([]);
     // /timeline returns the entries flat in chronological order (oldest first).
     mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
     mockApiObj.listIssueReactions.mockResolvedValue([]);
@@ -869,6 +874,27 @@ describe("IssueDetail (shared)", () => {
     ).toBe(true);
   });
 
+  it("sizes the skeleton and the loaded column from the same reading container", async () => {
+    // The column's cap is relative to its scroller (`cqi`), so both scrollers
+    // have to be the container or the skeleton and the loaded column resolve
+    // the same clamp against different widths and jump when content mounts.
+    mockApiObj.getIssue.mockReturnValue(new Promise(() => {}));
+    const loadingRender = renderIssueDetail();
+    const skeletonColumn = loadingRender.container.querySelector(READING_COLUMN_SELECTOR);
+    expect(skeletonColumn).toBeTruthy();
+    expect(skeletonColumn!.parentElement).toHaveClass("@container");
+    loadingRender.unmount();
+
+    mockApiObj.getIssue.mockResolvedValue(mockIssue);
+    const { container } = renderIssueDetail();
+    await waitFor(() => {
+      expect(screen.getByText("Implement authentication")).toBeInTheDocument();
+    });
+    const column = container.querySelector(READING_COLUMN_SELECTOR);
+    expect(column).toBeTruthy();
+    expect(column!.parentElement).toHaveClass("@container");
+  });
+
   it("gives the skeleton the same horizontal gutters as the loaded column", async () => {
     // The skeleton is the loaded column's stand-in, so a gutter change has to
     // land on both or the column jumps sideways at the moment the issue
@@ -884,7 +910,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.getIssue.mockReturnValue(new Promise(() => {}));
     const loadingRender = renderIssueDetail();
     const skeletonGutters = horizontalGutters(
-      loadingRender.container.querySelector(".max-w-4xl"),
+      loadingRender.container.querySelector(READING_COLUMN_SELECTOR),
     );
     loadingRender.unmount();
 
@@ -897,7 +923,7 @@ describe("IssueDetail (shared)", () => {
     // Non-empty guard: without it a renamed column class passes vacuously.
     expect(skeletonGutters.length).toBeGreaterThan(0);
     expect(skeletonGutters).toEqual(
-      horizontalGutters(container.querySelector(".max-w-4xl")),
+      horizontalGutters(container.querySelector(READING_COLUMN_SELECTOR)),
     );
   });
 
@@ -1268,6 +1294,65 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByRole("button", { name: "Close preview" })).toBeInTheDocument();
     // The header leaf names the issue by identifier only — the title is right below.
     expect(screen.getByRole("link", { name: mockIssue.identifier })).toBeInTheDocument();
+  });
+
+  describe("header icon buttons", () => {
+    function renderWithDone() {
+      const queryClient = createTestQueryClient();
+      return render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <IssueDetail issueId="issue-1" onDone={() => {}} />
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+    }
+
+    it("names Mark as done and Pin after their tooltips on an open issue", async () => {
+      renderWithDone();
+
+      expect(
+        await screen.findByRole("button", { name: enIssues.detail.mark_done_tooltip }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: enIssues.detail.pin_tooltip })).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: enIssues.detail.archive_tooltip }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("names Archive after its tooltip once the issue is done", async () => {
+      mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, status: "done" });
+      renderWithDone();
+
+      expect(
+        await screen.findByRole("button", { name: enIssues.detail.archive_tooltip }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: enIssues.detail.mark_done_tooltip }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("names the pin toggle Unpin while the issue is pinned", async () => {
+      mockApiObj.listPins.mockResolvedValue([
+        {
+          id: "pin-1",
+          workspace_id: "ws-1",
+          user_id: "user-1",
+          item_type: "issue",
+          item_id: "issue-1",
+          position: 0,
+          created_at: "2026-01-15T00:00:00Z",
+        },
+      ]);
+      renderIssueDetail();
+
+      expect(
+        await screen.findByRole("button", { name: enIssues.detail.unpin_tooltip }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: enIssues.detail.pin_tooltip }),
+      ).not.toBeInTheDocument();
+    });
   });
 
   it("pins the comment composer to the scroll viewport on a wide screen", async () => {

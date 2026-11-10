@@ -1458,10 +1458,10 @@ func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, 
 }
 
 func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, origin, false)
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, origin, false, false)
 }
 
-func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin, freshRerun bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin, freshRerun, workflowHandoff bool) (db.AgentTaskQueue, error) {
 	if err := guardIssueNotInTriage(ctx, s.Queries, issue.ID, origin); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
@@ -1494,7 +1494,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+	params := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              agentID,
 		RuntimeID:            agent.RuntimeID,
@@ -1521,14 +1521,20 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
-	})
+	}
+	var task db.AgentTaskQueue
+	if workflowHandoff {
+		task, err = s.createWorkflowSquadHandoffTask(ctx, issue, params)
+	} else {
+		task, err = s.Queries.CreateAgentTask(ctx, params)
+	}
 	if err != nil {
 		// A concurrent enqueue for the same (issue, agent) won the race and the
 		// unique index rejected this insert. That is benign — a sibling run
 		// already covers this target — so log it at debug and return a typed
 		// sentinel the caller maps to a coalesced outcome / 409 rather than a
 		// 500 that leaks the raw constraint name (#5914).
-		if isDuplicatePendingTaskErr(err) {
+		if errors.Is(err, ErrDuplicatePendingTask) || isDuplicatePendingTaskErr(err) {
 			slog.Debug("mention task enqueue coalesced: pending task already exists", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 			return db.AgentTaskQueue{}, ErrDuplicatePendingTask
 		}
@@ -1538,6 +1544,18 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 
 	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader)
 	s.RecordHumanDelegation(ctx, attr)
+	if workflowHandoff {
+		// Publish the durable waiting task before promotion can publish queued
+		// or the daemon can claim it. Existing promotion handles occupied slots.
+		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+		s.notifyTaskAvailable(task)
+		if err := s.PromoteDueDeferredTasksForRuntime(ctx, task.RuntimeID); err != nil {
+			// The handoff is already durable; the daemon's next claim retries
+			// promotion, including after a server restart.
+			slog.Warn("promote workflow squad handoff failed", "task_id", util.UUIDToString(task.ID), "error", err)
+		}
+		return task, nil
+	}
 	// See EnqueueTaskForIssue for ordering rationale.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
@@ -6186,7 +6204,7 @@ func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agen
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
 		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, true, "", actorUserID, rerunOfTaskID, pgtype.Timestamptz{}, origin, fresh)
 	}
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID, origin, fresh)
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID, origin, fresh, false)
 }
 
 // The bulk terminal writes below are the sweeper, archive and daemon-recovery
@@ -6270,6 +6288,26 @@ func (s *TaskService) terminateTasksInTx(ctx context.Context, fail func(*db.Quer
 		if err != nil {
 			return err
 		}
+		// A terminal infrastructure error does not stop an independent Muse
+		// worker. Persist that uncertainty in this transaction, before retry
+		// decisions or another claim can observe the failed rows.
+		var startedIDs []pgtype.UUID
+		indices := make(map[pgtype.UUID]int)
+		for i, task := range failed {
+			if task.Status == "failed" && task.StartedAt.Valid {
+				startedIDs = append(startedIDs, task.ID)
+				indices[task.ID] = i
+			}
+		}
+		if len(startedIDs) > 0 {
+			unconfirmed, err := qtx.MarkMuseAppRecoveryCleanupUnconfirmed(ctx, startedIDs)
+			if err != nil {
+				return fmt.Errorf("record Muse recovery cleanup: %w", err)
+			}
+			for _, task := range unconfirmed {
+				failed[indices[task.ID]] = task
+			}
+		}
 		return SettleTerminalTaskState(ctx, qtx, failed...)
 	}); err != nil {
 		return nil, err
@@ -6308,12 +6346,14 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 			}
 		}
 		if !retryPending {
-			if _, err := s.recoverDelegatedTaskFailure(ctx, t); err != nil {
-				slog.Warn("handle failed tasks: delegated failure recovery failed",
-					"task_id", util.UUIDToString(t.ID),
-					"delegated_from_task_id", util.UUIDToString(t.DelegatedFromTaskID),
-					"error", err,
-				)
+			if t.FailureReason.String != taskfailure.ReasonProcessCleanupUnconfirmed.String() && t.FailureReason.String != taskfailure.ReasonProcessCleanupBlocked.String() {
+				if _, err := s.recoverDelegatedTaskFailure(ctx, t); err != nil {
+					slog.Warn("handle failed tasks: delegated failure recovery failed",
+						"task_id", util.UUIDToString(t.ID),
+						"delegated_from_task_id", util.UUIDToString(t.DelegatedFromTaskID),
+						"error", err,
+					)
+				}
 			}
 			// Same terminal-failure comment FailTaskWithTransition posts, so
 			// swept tasks are not silent on their issue.

@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { LayoutGrid, MessageSquareText, X } from "@multica/ui/icons";
+import { LayoutGrid, Link2, MessageSquareText, X } from "@multica/ui/icons";
 import type { DeliverableFile } from "@multica/core/attachments/deliverables";
 import type { TimelineEntry } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { useLocale, useT, useTimeAgo } from "../../../i18n";
 import { ActorAvatar } from "../../../common/actor-avatar";
@@ -57,6 +58,7 @@ export function DeliverablesOverview({
   files,
   commentById,
   onLocate,
+  onCopyLink,
   returnKey,
 }: {
   open: boolean;
@@ -65,6 +67,8 @@ export function DeliverablesOverview({
   files: ReadonlyArray<DeliverableFile>;
   commentById: ReadonlyMap<string, TimelineEntry>;
   onLocate: (origin: DeliverableOrigin) => void;
+  /** Copies a deliverable's latest-version link, by file name. */
+  onCopyLink?: (filename: string) => void;
   /** The file the viewer was showing when it opened this; `G` goes back to it. */
   returnKey: string | null;
 }) {
@@ -121,6 +125,7 @@ export function DeliverablesOverview({
               onClose();
               onLocate(origin);
             }}
+            onCopyLink={onCopyLink}
           />
         </DialogContent>
       </Dialog>
@@ -136,6 +141,7 @@ function OverviewBody({
   onClose,
   onOpenFile,
   onLocate,
+  onCopyLink,
 }: {
   identifier: string;
   files: ReadonlyArray<DeliverableFile>;
@@ -143,6 +149,7 @@ function OverviewBody({
   onClose: () => void;
   onOpenFile: (file: DeliverableFile) => void;
   onLocate: (origin: DeliverableOrigin) => void;
+  onCopyLink?: (filename: string) => void;
 }) {
   const { t } = useT("issues");
   const [filter, setFilter] = useState<Filter>("all");
@@ -259,6 +266,7 @@ function OverviewBody({
                 key={group.commentId}
                 group={group}
                 onOpenFile={onOpenFile}
+                onCopyLink={onCopyLink}
                 onLocate={
                   group.comment
                     ? () => onLocate({ kind: "comment", commentId: group.commentId })
@@ -286,10 +294,12 @@ function CommentGroup({
   group,
   onOpenFile,
   onLocate,
+  onCopyLink,
 }: {
   group: FileGroup;
   onOpenFile: (file: DeliverableFile) => void;
   onLocate?: () => void;
+  onCopyLink?: (filename: string) => void;
 }) {
   const { t } = useT("issues");
   const locale = useLocale();
@@ -335,21 +345,65 @@ function CommentGroup({
       </div>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-x-4 gap-y-5">
         {group.files.map((file) => (
-          <FileTile key={file.key} file={file} onOpen={() => onOpenFile(file)} />
+          <FileTile
+            key={file.key}
+            file={file}
+            onOpen={() => onOpenFile(file)}
+            onCopyLink={onCopyLink ? () => onCopyLink(file.latest.filename) : undefined}
+          />
         ))}
       </div>
     </section>
   );
 }
 
-function FileTile({ file, onOpen }: { file: DeliverableFile; onOpen: () => void }) {
+function FileTile({
+  file,
+  onOpen,
+  onCopyLink,
+}: {
+  file: DeliverableFile;
+  onOpen: () => void;
+  onCopyLink?: () => void;
+}) {
+  const { t } = useT("issues");
   const { latest } = file;
   const meta = [
     fileTypeLabel(latest.filename),
     latest.size_bytes > 0 ? formatBytes(latest.size_bytes) : "",
   ].filter(Boolean);
+  // The copy button sits over the thumbnail's corner as a sibling of the
+  // tile's button, since a button can't contain another.
   return (
-    <button type="button" className="group min-w-0 text-left" onClick={onOpen} title={latest.filename}>
+    <div className="group/tile relative min-w-0">
+      <FileTileButton file={file} meta={meta} onOpen={onOpen} />
+      {onCopyLink && (
+        <IconButton
+          size="icon-xs"
+          variant="secondary"
+          label={t(($) => $.deliverables.copy_link)}
+          className="absolute right-1.5 top-1.5 opacity-0 focus-visible:opacity-100 group-hover/tile:opacity-100"
+          onClick={onCopyLink}
+        >
+          <Link2 />
+        </IconButton>
+      )}
+    </div>
+  );
+}
+
+function FileTileButton({
+  file,
+  meta,
+  onOpen,
+}: {
+  file: DeliverableFile;
+  meta: string[];
+  onOpen: () => void;
+}) {
+  const { latest } = file;
+  return (
+    <button type="button" className="group w-full min-w-0 text-left" onClick={onOpen} title={latest.filename}>
       <span className="block aspect-[16/10] overflow-hidden rounded-lg ring-1 ring-border transition-shadow group-hover:ring-foreground/40 group-focus-visible:ring-2 group-focus-visible:ring-ring">
         <DeliverableThumbnail attachment={latest} className="size-full" />
       </span>

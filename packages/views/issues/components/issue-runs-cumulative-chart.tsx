@@ -402,7 +402,7 @@ function PeakLabel({
     >
       <span className="font-medium text-foreground">+{formatUsd(run.usage?.cost ?? 0)}</span>
       <RunTriggerLabel task={run.task} fallback={trigger}>
-        {(label) => <span className="truncate text-muted-foreground">{label}</span>}
+        {(label) => <span className="truncate text-muted-foreground">{[run.task.issue_identifier, label].filter(Boolean).join(" · ")}</span>}
       </RunTriggerLabel>
     </span>
   );
@@ -430,7 +430,7 @@ function CumulativeRunCard({ run }: { run: TimelineRun }) {
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <RunTriggerLabel task={run.task} fallback={trigger}>
-        {(label) => <span className="truncate font-medium">{label}</span>}
+        {(label) => <span className="truncate font-medium">{[run.task.issue_identifier, label].filter(Boolean).join(" · ")}</span>}
       </RunTriggerLabel>
       <span className="flex min-w-0 items-center gap-1.5 text-micro text-muted-foreground">
         <ActorAvatar actorType="agent" actorId={run.task.agent_id} size="xs" />

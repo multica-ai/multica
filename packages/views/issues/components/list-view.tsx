@@ -513,6 +513,7 @@ function StatusAccordionItem({
   const isOver = droppableIsOver && !statusCatalog.entryOf(status)?.archived_at;
 
   const disableSorting = !!sortLabel;
+  const addIssueLabel = t(($) => $.list.add_issue_tooltip);
 
   // The infinite-scroll sentinel rides Virtuoso's Footer so it sits at the true
   // end of the virtualized rows and still fires loadMore when scrolled to it.
@@ -629,12 +630,13 @@ function StatusAccordionItem({
           <div className="pr-2">
             {/* Lazy-mounted tooltip machinery — see DeferredTooltip. */}
             <DeferredTooltip
-              content={t(($) => $.list.add_issue_tooltip)}
+              content={addIssueLabel}
               trigger={
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="rounded-full text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
+                  className="text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
+                  aria-label={addIssueLabel}
                   onClick={() => {
                     const defaults = {
                       status: status,

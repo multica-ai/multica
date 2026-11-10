@@ -38,8 +38,11 @@ export function PanelHeader({
   /** Trailing actions (icon buttons). */
   children?: React.ReactNode;
 }) {
+  // `pr-2.5` centres a 28px action on the same line as a section's 24px
+  // action (`PanelBody px-2` + `PanelSection pr-1`), so the trailing column
+  // does not step between the header and the sections under it.
   return (
-    <div className="flex h-12 shrink-0 items-center gap-1 pl-5 pr-2">
+    <div className="flex h-12 shrink-0 items-center gap-1 pl-5 pr-2.5">
       {leading}
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {/* A control passed as the title truncates its own label; clipping
@@ -73,7 +76,7 @@ export function PanelBody({
       ref={ref}
       style={fadeStyle}
       onClickCapture={onClickCapture}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4 [&>section:first-child]:mt-0"
+      className="scrollbar-slim min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4 [&>section:first-child]:mt-0"
     >
       {children}
     </div>

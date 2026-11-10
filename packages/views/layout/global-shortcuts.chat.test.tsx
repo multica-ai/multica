@@ -48,7 +48,7 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   useSidebar: () => ({ toggleSidebar: h.toggleSidebar }),
 }));
 vi.mock("../navigation", () => ({ useNavigation: () => h.navigation }));
-vi.mock("../search/search-store", () => ({
+vi.mock("@multica/core/command-bar", () => ({
   useSearchStore: { getState: () => ({ toggle: h.searchToggle }) },
 }));
 

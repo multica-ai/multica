@@ -288,7 +288,7 @@
     "environment": "환경",
     "custom_args": "사용자 지정 인자",
     "mcp_config": "MCP",
-    "composio_mcp": "MCP 앱",
+    "composio_mcp": "앱",
     "integrations": "연동",
     "runtime_config": "라우팅",
     "qoder_agent": "Qoder Cloud Agents",
@@ -553,22 +553,6 @@
       "redacted_hint": "에이전트 소유자 또는 워크스페이스 관리자만 이 config를 읽을 수 있습니다.",
       "dialog_json_help": "전체 서버 설정을 JSON으로 편집합니다."
     },
-    "composio_mcp": {
-      "subtitle": "툴킷을 선택하면, 본인(이 에이전트의 생성자)이 직접 또는 하위 에이전트 체인을 통해 이 에이전트를 트리거할 때만 MCP 서버로 마운트됩니다.",
-      "loading": "연결을 불러오는 중…",
-      "load_failed": "연결된 앱을 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
-      "empty_title": "아직 연결된 앱이 없습니다",
-      "empty_link_to_settings": "설정 → 연동에서 연결하기",
-      "open_settings": "설정 열기",
-      "connected": "연결됨",
-      "toggle_aria": "이 에이전트에 {{toolkit}} 허용",
-      "saving": "저장 중…",
-      "save_failed_toast": "저장하지 못했습니다. 다시 시도하세요",
-      "redacted_title": "설정됨 — 보기에서 숨김",
-      "redacted_hint": "이 에이전트가 사용할 수 있는 앱은 생성자만 보거나 변경할 수 있습니다.",
-      "shared_warning": "이 에이전트는 공유되어 있습니다. 이 에이전트를 실행할 수 있는 사람은 여기서 활성화한 Composio 앱을 사용할 수 있습니다. 이러한 앱이 민감한 데이터를 노출한다면 Private로 설정하거나 접근 범위를 좁히세요.",
-      "workspace_warning": "워크스페이스에 공개: 워크스페이스의 모든 구성원이 이 에이전트를 통해 이러한 Composio 앱을 사용할 수 있습니다."
-    },
     "runtime_config": {
       "mode_label": "라우팅 모드",
       "mode_local": "Local",
@@ -681,6 +665,24 @@
       "started_prefix": "{{when}} 시작됨",
       "dispatched_prefix": "{{when}} 디스패치됨",
       "queued_prefix": "{{when}} 대기 시작"
+    },
+    "connected_apps": {
+      "subtitle": "이 에이전트가 사용할 수 있는 앱입니다. 팀 계정 또는 실행한 사람의 계정으로 동작합니다.",
+      "loading": "앱을 불러오는 중…",
+      "load_failed": "이 에이전트의 앱을 불러오지 못했습니다.",
+      "empty": "아직 앱이 없습니다.",
+      "add_placeholder": "앱 추가…",
+      "account": "계정",
+      "level": "수준",
+      "remove": "{{app}} 제거",
+      "team_connected": "팀 계정 연결됨",
+      "team_missing": "팀 계정 미연결",
+      "personal_connected": "내 계정 연결됨",
+      "personal_missing": "이 앱을 아직 연결하지 않았습니다",
+      "team_admin_only": "에이전트에 팀 계정을 부여할 수 있는 사람은 워크스페이스 관리자뿐입니다.",
+      "team_shared_warning": "이 에이전트를 실행할 수 있는 사람은 누구나 이 앱들을 팀 계정으로 사용합니다.",
+      "manage_link": "설정 → 연결된 앱에서 계정 관리",
+      "save_failed_toast": "저장하지 못했습니다. 다시 시도하세요"
     }
   },
   "char_counter": {

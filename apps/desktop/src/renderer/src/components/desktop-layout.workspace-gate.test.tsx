@@ -115,6 +115,9 @@ vi.mock("@multica/views/search", () => ({
 vi.mock("@multica/views/chat", () => ({
   FloatingChat: () => <div data-testid="floating-chat" />,
 }));
+vi.mock("@multica/views/star-prompt", () => ({
+  StarPrompt: () => <div data-testid="star-prompt" />,
+}));
 
 vi.mock("./tab-bar", () => ({ TabBar: () => null }));
 vi.mock("./window-overlay", () => ({ WindowOverlay: () => null }));
@@ -168,6 +171,7 @@ describe("DesktopShell workspace gating", () => {
     expect(queryByTestId("global-shortcuts")).not.toBeNull();
     expect(queryByTestId("modal-registry")).not.toBeNull();
     expect(queryByTestId("floating-chat")).not.toBeNull();
+    expect(queryByTestId("star-prompt")).not.toBeNull();
     expect(queryByRole("status", { name: /loading workspace/i })).toBeNull();
   });
 

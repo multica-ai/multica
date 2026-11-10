@@ -11,7 +11,7 @@
  * Run: node scripts/check-ui-radius-tokens.mjs
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -158,4 +158,4 @@ function main() {
   console.log(`UI radius tokens clean (${files.length} source files checked).`);
 }
 
-if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) main();
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) main();
