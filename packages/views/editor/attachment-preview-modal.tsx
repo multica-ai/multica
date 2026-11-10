@@ -51,6 +51,7 @@ import {
   Monitor,
   PanelRight,
   RotateCw,
+  Shapes,
   Smartphone,
   Tablet,
   WrapText,
@@ -124,6 +125,7 @@ import {
   type HtmlPreviewLocation,
 } from "./hooks/use-html-preview-location";
 import { CodeBlockStatic } from "./code-block-static";
+import { DrawioStage, useDrawioViewerUrl } from "./drawio-preview";
 import { TablePreview } from "./table-preview";
 import { StructuredTree } from "./structured-tree";
 import {
@@ -690,6 +692,7 @@ const KIND_ICONS: Record<PreviewKind, IconComponent> = {
   html: FileCode,
   table: FileSpreadsheet,
   structured: FileCode,
+  drawio: Shapes,
   text: FileCode,
 };
 
@@ -805,6 +808,10 @@ function PreviewPanel({
   const toggleWrap = () => setWrapChoice(!wrap);
   const [htmlViewport, setHtmlViewport] = useState<HtmlViewport>("fill");
   const [htmlSource, setHtmlSource] = useState(false);
+  // A diagram's XML, one toggle away; the only view while the preview is off.
+  const drawioViewerUrl = useDrawioViewerUrl();
+  const [drawioSourceChoice, setDrawioSourceChoice] = useState(false);
+  const drawioSource = drawioSourceChoice || !drawioViewerUrl;
   // An HTML file's address: shown in the top bar, loaded by the stage. Held
   // here, per file, so it survives the source view, which unmounts the frame.
   const htmlLocation = useHtmlPreviewLocation(
@@ -825,6 +832,8 @@ function PreviewPanel({
     wrap,
     htmlViewport,
     htmlSource,
+    drawioSource,
+    drawioViewerUrl,
     structuredView,
     structuredParse,
     renderHtmlFrame,
@@ -1065,6 +1074,20 @@ function PreviewPanel({
                 <Code className="size-4" />
               </ChromeButton>
               {wrapButton(htmlSource)}
+              <ChromeDivider />
+            </>
+          )}
+          {kind === "drawio" && (
+            <>
+              <ChromeButton
+                label={t(($) => $.attachment.view_source)}
+                pressed={drawioSource}
+                disabled={!drawioViewerUrl}
+                onClick={() => setDrawioSourceChoice((shown) => !shown)}
+              >
+                <Code className="size-4" />
+              </ChromeButton>
+              {wrapButton(drawioSource)}
               <ChromeDivider />
             </>
           )}
@@ -1637,6 +1660,9 @@ interface StageView {
   wrap: boolean;
   htmlViewport: HtmlViewport;
   htmlSource: boolean;
+  drawioSource: boolean;
+  /** The draw.io viewer to embed; null while the preview is off. */
+  drawioViewerUrl: string | null;
   structuredView: StructuredView;
   /** The `structured` kind's parse, once its body has loaded. */
   structuredParse: ReturnType<typeof parseStructured> | null;
@@ -1649,6 +1675,7 @@ const TEXT_BACKED_KINDS: ReadonlySet<PreviewKind> = new Set<PreviewKind>([
   "html",
   "table",
   "structured",
+  "drawio",
   "text",
 ]);
 
@@ -1789,6 +1816,34 @@ function PreviewContent({
                   location: view.htmlLocation,
                 })}
               </HtmlViewportFrame>
+            )
+          }
+        />
+      );
+    case "drawio":
+      return (
+        <TextBackedPreview
+          attachmentId={state.attachmentId!}
+          workspaceId={state.workspaceId}
+          onDownload={onDownload}
+          downloading={downloading}
+          render={(text) =>
+            view.drawioSource || !view.drawioViewerUrl ? (
+              code(text, "xml")
+            ) : (
+              <DrawioStage
+                key={state.attachmentId}
+                xml={text}
+                title={state.filename}
+                viewerUrl={view.drawioViewerUrl}
+                renderError={(message) => (
+                  <UnsupportedFallback
+                    message={message}
+                    onDownload={onDownload}
+                    downloading={downloading}
+                  />
+                )}
+              />
             )
           }
         />

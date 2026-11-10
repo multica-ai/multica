@@ -103,9 +103,12 @@ export function splitFenceInfo(info: string | null | undefined): {
 /**
  * Languages whose block renders in place — a preview in the shared dynamic
  * block frame — instead of as highlighted code (MUL-7649, MUL-9760).
+ * ```drawio embeds a third-party viewer, so it renders in place only while the
+ * deployment has one configured (#6321). The NodeView decides that; the key
+ * handling below reads what it rendered.
  */
-export function isDynamicBlockLanguage(language: unknown): language is "html" | "mermaid" {
-  return language === "html" || language === "mermaid";
+export function isDynamicBlockLanguage(language: unknown): language is "html" | "mermaid" | "drawio" {
+  return language === "html" || language === "mermaid" || language === "drawio";
 }
 
 /**
@@ -116,9 +119,20 @@ export const OPEN_BLOCK_SOURCE_META = "multica:openBlockSource";
 
 /** Whether `node` at `pos` is a dynamic block currently showing its preview. */
 function isPreviewedBlock(editor: Editor, typeName: string, node: PMNode | null | undefined, pos: number): boolean {
+  return isRenderedDynamicBlock(editor, typeName, node, pos, '[data-dynamic-block-view="preview"]');
+}
+
+/** Whether `node` at `pos` is drawn as a dynamic block, matching `selector` inside. */
+function isRenderedDynamicBlock(
+  editor: Editor,
+  typeName: string,
+  node: PMNode | null | undefined,
+  pos: number,
+  selector = "[data-dynamic-block]",
+): boolean {
   if (!node || node.type.name !== typeName || !isDynamicBlockLanguage(node.attrs.language)) return false;
   const dom = editor.view.nodeDOM(pos);
-  return dom instanceof HTMLElement && !!dom.querySelector('[data-dynamic-block-view="preview"]');
+  return dom instanceof HTMLElement && !!dom.querySelector(selector);
 }
 
 /**
@@ -215,8 +229,7 @@ export const CodeBlockExtension = CodeBlockLowlight.extend({
         if (
           editor.isEditable &&
           selection instanceof NodeSelection &&
-          selection.node.type.name === this.name &&
-          isDynamicBlockLanguage(selection.node.attrs.language)
+          isRenderedDynamicBlock(editor, this.name, selection.node, selection.from)
         ) {
           const pos = selection.from;
           return editor.commands.command(({ tr }) => {

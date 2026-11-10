@@ -30,6 +30,13 @@ vi.mock("../mermaid-diagram", async (importOriginal) => ({
   MermaidDiagram: ({ chart }: { chart: string }) => <div data-testid="diagram">{chart}</div>,
 }));
 
+// The viewer is a third-party page; the embed is prepared without the network.
+vi.mock("../utils/drawio", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../utils/drawio")>()),
+  prepareDrawioEmbed: async () => ({ ok: true, src: "https://viewer.example.test/#R" }),
+}));
+
+import { configStore } from "@multica/core/config";
 import { createEditorExtensions } from ".";
 
 function TestEditor({ content, onEditor }: { content: JSONContent[]; onEditor: (editor: Editor) => void }) {
@@ -117,6 +124,7 @@ afterEach(() => {
   cleanup();
   restoreDialog();
   embedScheme.current = "light";
+  configStore.setState({ drawioViewerUrl: "" });
   document.documentElement.classList.remove("dark");
   vi.restoreAllMocks();
 });
@@ -342,6 +350,56 @@ describe("CodeBlockView — ```html in the editor", () => {
       document.documentElement.classList.add("dark");
     });
     await waitFor(() => expect(frame().getAttribute("srcdoc")).toContain("color-scheme:dark"));
+  });
+});
+
+describe("CodeBlockView — ```drawio in the editor", () => {
+  const xml = "<mxfile><diagram/></mxfile>";
+
+  it("draws the dynamic block over a hidden source when a viewer is configured", async () => {
+    configStore.setState({ drawioViewerUrl: "https://viewer.example.test" });
+    const editor = await mount(codeBlock("drawio", xml, 'title="Topology"'));
+    expect(document.querySelector('[data-dynamic-block="drawio"]')).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Topology" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Preview" }).getAttribute("aria-selected")).toBe("true");
+    expect(sourceRegion().querySelector("pre code")?.textContent).toBe(xml);
+    expect(sourceRegion().hidden).toBe(true);
+
+    // The editor's key handling treats it as a previewed block too.
+    await select(editor, BLOCK_POS + 3);
+    expect(editor.state.selection).toBeInstanceOf(NodeSelection);
+    await press(editor, "Enter");
+    expect(screen.getByRole("tab", { name: "Source" }).getAttribute("aria-selected")).toBe("true");
+    expect(editor.state.selection.from).toBe(BLOCK_POS + 1);
+  });
+
+  it("stays plain, editable XML when the deployment has no viewer", async () => {
+    const editor = await mount(codeBlock("drawio", xml));
+    expect(document.querySelector("[data-dynamic-block]")).toBeNull();
+    expect(screen.getByRole("button", { name: "Copy code" })).toBeTruthy();
+    await select(editor, BLOCK_POS + 3);
+    expect(editor.state.selection).toBeInstanceOf(TextSelection);
+
+    // Enter on the selected block keeps the editor's own behaviour: a new
+    // paragraph after it, not a caret pushed into the block.
+    await act(async () => {
+      editor.commands.setNodeSelection(BLOCK_POS);
+    });
+    await press(editor, "Enter");
+    expect(blocks(editor)).toEqual([
+      "paragraph:before",
+      `codeBlock:${xml}`,
+      "paragraph:",
+      "paragraph:after",
+    ]);
+  });
+
+  it("upgrades an open block once the viewer config arrives", async () => {
+    await mount(codeBlock("drawio", xml));
+    expect(document.querySelector("[data-dynamic-block]")).toBeNull();
+    act(() => configStore.setState({ drawioViewerUrl: "https://viewer.example.test" }));
+    await waitFor(() => expect(document.querySelector('[data-dynamic-block="drawio"]')).not.toBeNull());
+    expect(sourceRegion().querySelector("pre code")?.textContent).toBe(xml);
   });
 });
 
