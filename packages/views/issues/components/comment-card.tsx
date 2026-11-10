@@ -1114,6 +1114,8 @@ function CommentCardImpl({
           of its own. */}
       {!isDeletedComment(reply) && (
         <div
+          data-mc="comment-reply"
+          data-author-type={reply.actor_type}
           id={managedAnchor ? undefined : `comment-${reply.id}`}
           className={cn(
             "border-t border-border/50 transition-colors duration-700",
@@ -1201,7 +1203,7 @@ function CommentCardImpl({
     // overflow-clip (not -hidden) clips the rounded corners WITHOUT creating a
     // scroll container, so the sticky collapse affordances below resolve to the
     // timeline's scroll parent instead of this card. See PR #3623.
-    <Card ref={annotation.cardRef} {...annotation.captureProps} className="!py-0 !gap-0 overflow-clip transition-colors duration-700">
+    <Card data-mc="comment" data-author-type={entry.actor_type} ref={annotation.cardRef} {...annotation.captureProps} className="!py-0 !gap-0 overflow-clip transition-colors duration-700">
       {annotation.popup}
       {onCollapseResolved && (
         <button

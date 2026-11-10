@@ -27,6 +27,8 @@
     "./icons": "./icons/index.ts",
     "./i18n-types": "./types/i18next.ts",
     "./styles/tokens.css": "./styles/tokens.css",
+    "./styles/theme-variables.css": "./styles/theme-variables.css",
+    "./styles/appearance.css": "./styles/appearance.css",
     "./styles/base.css": "./styles/base.css"
   },
   "dependencies": {

@@ -157,12 +157,6 @@
     "toast_saved": "更改已儲存"
   },
   "preferences": {
-    "theme": {
-      "title": "主題",
-      "light": "淺色",
-      "dark": "深色",
-      "system": "跟隨系統"
-    },
     "language": {
       "title": "語言",
       "english": "English",
@@ -194,13 +188,111 @@
     },
     "comments_title": "評論與聊天",
     "region_title": "語言與地區",
-    "appearance_title": "外觀",
     "issue_fields_title": "建立任務時顯示的欄位",
     "issue_fields": {
       "field": "欄位",
       "quick": "AI 代理建立",
       "manual": "手動建立",
       "unsupported": "AI 代理建立時不支援此欄位"
+    }
+  },
+  "appearance": {
+    "reset": "恢復預設",
+    "color": {
+      "title": "顏色"
+    },
+    "mode": {
+      "title": "模式",
+      "light": "淺色",
+      "dark": "深色",
+      "system": "跟隨系統"
+    },
+    "theme": {
+      "title": "主題",
+      "description": "全域的顏色、邊框、陰影和圓角。",
+      "default": "預設",
+      "pop": "普普"
+    },
+    "theme_options": {
+      "title": "主題選項",
+      "description": "由 {{name}} 提供。",
+      "reset": "恢復主題預設"
+    },
+    "ui_text": {
+      "title": "介面文字",
+      "description": "選單、按鈕、列表、側欄和標題。"
+    },
+    "latin_font": {
+      "title": "西文字體"
+    },
+    "ui_font": {
+      "inter": "預設",
+      "system": "系統",
+      "serif": "襯線",
+      "mono": "等寬"
+    },
+    "cjk_font": {
+      "title": "中文字體",
+      "description": "漢字字形；日文、韓文跟著這裡走。",
+      "sans": "黑體",
+      "serif": "宋體",
+      "kai": "楷體",
+      "built_in": "常用",
+      "local": "本機字體",
+      "load_local": "顯示本機字體…",
+      "loading": "正在尋找字體…",
+      "none": "這台裝置上沒有含漢字的字體。",
+      "load_failed": "無法讀取本機字體。",
+      "sample": "永和九年，歲在癸丑"
+    },
+    "follow_ui": "跟隨介面",
+    "theme_font": "主題字體",
+    "font_size": {
+      "title": "字級",
+      "description": "只放大文字，間距和版面不變。",
+      "value": "{{size}} px",
+      "default": "{{size}} px · 預設"
+    },
+    "content_text": {
+      "title": "內容文字",
+      "description": "任務描述、留言、對話和文件裡的正文。",
+      "sample": "描述和留言需要整段閱讀，可以換成更適合閱讀的字體；列表和按鈕仍然保持緊湊。"
+    },
+    "code_font": {
+      "title": "程式碼字體",
+      "description": "程式碼區塊、行內程式碼和日誌。",
+      "geist": "預設",
+      "jetbrains": "連字",
+      "system": "系統等寬"
+    },
+    "content_size": {
+      "title": "字級",
+      "description": "只改內容文字，介面不變。",
+      "follow": "跟隨介面（{{size}} px）"
+    },
+    "content_leading": {
+      "title": "行高",
+      "compact": "緊湊",
+      "default": "標準",
+      "relaxed": "寬鬆"
+    },
+    "layout": {
+      "title": "版面與輔助功能"
+    },
+    "density": {
+      "title": "資訊密度",
+      "description": "任務清單和搜尋結果的列高。",
+      "compact": "緊湊",
+      "default": "標準",
+      "comfortable": "寬鬆"
+    },
+    "reduce_motion": {
+      "title": "減少動態效果",
+      "description": "關閉動畫和轉場。關閉時仍遵循系統設定。"
+    },
+    "high_contrast": {
+      "title": "提高對比",
+      "description": "次要文字更深，邊框更明顯。"
     }
   },
   "shortcuts": {
@@ -394,6 +486,7 @@
     "tabs": {
       "profile": "個人資料",
       "preferences": "偏好設定",
+      "appearance": "外觀",
       "shortcuts": "快捷鍵",
       "issue": "任務",
       "notifications": "通知",

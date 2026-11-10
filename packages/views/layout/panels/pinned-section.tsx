@@ -31,7 +31,7 @@ import { IssueActionsContextMenu } from "../../issues/actions";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
-import { PANEL_ROW_CLASS, PanelList, PanelSection, isPathWithin, panelRowStateClass } from "../panel-nav";
+import { PANEL_ROW_CLASS, PanelList, PanelSection, isPathWithin, panelRowAnchor, panelRowStateClass } from "../panel-nav";
 import { useDragClickGuard } from "../use-drag-click-guard";
 import {
   ISSUE_ROW_LINK_CLASS,
@@ -230,6 +230,7 @@ function SortablePinItem({
 
   const row = (
     <div
+      {...panelRowAnchor(active)}
       className={cn(
         PANEL_ROW_CLASS,
         panelRowStateClass(active),
