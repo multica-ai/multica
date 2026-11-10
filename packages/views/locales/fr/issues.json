@@ -1740,7 +1740,6 @@
       "brief_header": "Les consignes de workflow reçues par cette exécution"
     },
     "detail": {
-      "follows_project": "(selon le projet)",
       "card_title": "{{workflow}} · selon {{project}}"
     },
     "list_separator": ", ",

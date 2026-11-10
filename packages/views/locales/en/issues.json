@@ -1740,7 +1740,6 @@
       "brief_header": "The workflow brief this run received"
     },
     "detail": {
-      "follows_project": "(from project)",
       "card_title": "{{workflow}} · from {{project}}"
     },
     "list_separator": ", ",
