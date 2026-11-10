@@ -10,8 +10,8 @@ import { CliInstallInstructions, OnboardingFlow } from "@multica/views/onboardin
 
 /**
  * Creating a workspace runs the onboarding flow, entered at the workspace
- * step. A second workspace needs everything the first one needed — a runtime
- * connected to it, and its own Mika — so the only honest difference is that
+ * step. A second workspace needs everything the first one needed — a computer
+ * connected to it, and its own agent — so the only honest difference is that
  * this member has already met the product. Running one flow is what keeps the
  * two paths from drifting apart.
  *
@@ -46,11 +46,7 @@ export default function Page() {
         mode="new_workspace"
         onCancel={onCancel}
         onComplete={(ws, destination) => {
-          if (ws && destination?.kind === "chat") {
-            router.push(
-              paths.workspace(ws.slug).chatSession(destination.sessionId),
-            );
-          } else if (ws && destination?.kind === "issue") {
+          if (ws && destination) {
             router.push(
               paths.workspace(ws.slug).issueDetail(destination.issueId),
             );

@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import type { RuntimeModel } from "@multica/core/types";
+import type { RuntimeModel, RuntimeModelThinkingLevel } from "@multica/core/types";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
 import { ObjectProperty } from "../../../layout/object-page";
 import { SettingsRow } from "../../../settings/components/settings-layout";
@@ -115,6 +115,33 @@ export function ThinkingSettingField({
       />
     </SettingsRow>
   );
+}
+
+/** Thinking levels the (runtime, model) pair advertises, for surfaces that lay
+ *  out their own picker. */
+export function useThinkingLevels({
+  runtimeId,
+  runtimeOnline,
+  provider,
+  model,
+  workspaceSlug,
+}: {
+  runtimeId: string | null;
+  runtimeOnline: boolean;
+  provider: string;
+  model: string;
+  /** Target workspace when rendered before a workspace route is active. */
+  workspaceSlug?: string;
+}): { levels: RuntimeModelThinkingLevel[]; allowClear: boolean } {
+  const modelsQuery = useQuery(
+    runtimeModelsOptions(runtimeOnline ? runtimeId : null, workspaceSlug),
+  );
+  const models = modelsQuery.data?.models ?? [];
+  const levels = pickModelEntry(models, model, provider)?.thinking?.supported_levels ?? [];
+  return {
+    levels,
+    allowClear: levels.length === 0 || !thinkingLevelRequiredForProvider(provider),
+  };
 }
 
 function pickModelEntry(

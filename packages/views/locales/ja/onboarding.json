@@ -1,49 +1,4 @@
 {
-  "step_nav": {
-    "wordmark": "Multica",
-    "label": "オンボーディングの手順",
-    "about_you": {
-      "label": "あなたについて"
-    },
-    "workspace": {
-      "label": "ワークスペース"
-    },
-    "runtime": {
-      "label": "Mika を知る"
-    }
-  },
-  "welcome": {
-    "wordmark": "Multica へようこそ",
-    "headline_line1": "あなたの AI チームメイトを、",
-    "headline_line2": "ひとつの",
-    "headline_emphasis": "ワークスペースに。",
-    "lede": "同僚に仕事を任せるようにタスクを割り当てるだけ。エージェントが引き受け、ステータスを更新し、完了したらコメントします。",
-    "lede_web": "デスクトップ版にはランタイムが同梱されており、何もインストールする必要はありません。ご自身の CLI を接続するには、ウェブで続けてください。",
-    "download_desktop": "デスクトップ版をダウンロード",
-    "continue_on_web": "ウェブで続ける",
-    "start_exploring": "探索を始める",
-    "skip_existing": "以前にやったことがあります",
-    "illustration": {
-      "card1_actor_name": "あなた",
-      "card1_actor_initial": "N",
-      "card1_body_prefix": " 短いローンチ投稿の下書きをお願いできますか? ",
-      "card1_body_suffix": " のインタビュー結果を参考にしてください。",
-      "card1_mention_content": "@コンテンツエージェント",
-      "card1_mention_research": "@リサーチエージェント",
-      "card2_actor_name": "コンテンツエージェント",
-      "card2_body": "了解です。Research の引用をまとめ、「節約できた時間」の切り口で下書きを作成中です…",
-      "card3_actor_name": "リサーチエージェント",
-      "card3_body": "今週のユーザーインタビューをまとめました — 12 件の通話、4 つの繰り返し出たテーマ、3 つの引用候補。",
-      "card3_timestamp": "15 分前",
-      "card4_actor_name": "レビューエージェント",
-      "card4_body": "月曜の下書きをレビューし、トーンについて 4 件のメモを残しました。新しい下書きを待機中です。",
-      "card5_actor_name": "コーディングエージェント",
-      "card5_body_prefix": "エクスポート機能をリリースしました ",
-      "card5_body_suffix": " さんが指摘した点も対応済みです。プレビューリンクは PR にあります。",
-      "card5_mention_you": "@あなた",
-      "card5_timestamp": "たった今"
-    }
-  },
   "common": {
     "back": "戻る",
     "continue": "続ける",
@@ -59,9 +14,6 @@
     "save_failed_toast": "保存できませんでした"
   },
   "questions": {
-    "about_you": {
-      "question": "あなたについて少し教えてください。"
-    },
     "source": {
       "question": "Multica をどこで知りましたか?",
       "friends_colleagues": "友人または同僚",
@@ -78,32 +30,6 @@
       "other": "その他",
       "other_placeholder": "例: よく聴くポッドキャスト",
       "social_github": "GitHub"
-    },
-    "role": {
-      "question": "あなたに最も近いのはどれですか?",
-      "engineer": "エンジニア / 開発者",
-      "product": "プロダクトマネージャー",
-      "designer": "デザイナー",
-      "founder": "創業者 / 経営層",
-      "marketing": "マーケティング / グロース",
-      "writer": "ライター / コンテンツ",
-      "research": "リサーチャー / アナリスト",
-      "ops": "オペレーション / プロジェクト管理",
-      "student": "学生 / 個人利用",
-      "other": "その他",
-      "other_placeholder": "例: 教師、サポートリード"
-    },
-    "use_case": {
-      "question": "Multica を何に使いたいですか?",
-      "ship_code": "AI エージェントとコードをリリース",
-      "manage_team": "チームのタスクを管理",
-      "personal_tasks": "自分のタスクを整理",
-      "plan_research": "計画、ブレインストーミング、リサーチ",
-      "write_publish": "執筆、編集、公開",
-      "automate_ops": "運用とワークフローの自動化",
-      "evaluate": "とりあえず試してみる",
-      "other": "その他",
-      "other_placeholder": "例: スタディグループの運営"
     }
   },
   "step_question": {
@@ -167,68 +93,143 @@
     "creation_disabled_headline_resume": "{{name}} で続けましょう。",
     "creation_disabled_lede_resume": "このインスタンスではワークスペースの作成が無効になっているため、既存のワークスペースへ続けて移動します。"
   },
-  "step_runtime": {
-    "scanning_headline": "このコンピュータを接続中…",
-    "scanning_lede_prefix": "エージェントは、あなたがすでに持っている AI コーディングツールを通じて作業します — たとえば ",
-    "scanning_lede_suffix": " など。このコンピュータにインストール済みのものを確認しています。",
-    "found_headline": "Mika はどこで動かしますか？",
-    "runtime_count_other": "エージェントランタイム {{count}} 個",
-    "status_all_online": "すべてオンライン",
-    "status_none_online": "オンラインなし",
-    "status_n_online": "{{count}} 個オンライン",
-    "empty_headline": "このコンピュータではまだエージェントランタイムが見つかりません。",
-    "empty_lede_prefix": "エージェントランタイムとは、私たちが接続する AI コーディングツールです — たとえば ",
-    "empty_lede_suffix": " など。1 つインストールして更新するか、下から進む方法を選んでください。",
-    "empty_skip_title": "今はスキップ",
-    "empty_skip_subtitle": "ランタイムに接続するまでエージェントは実行できません。",
-    "empty_skip_action": "スキップ",
-    "empty_waitlist_title": "クラウドコンピュータを使う",
-    "empty_waitlist_subtitle": "クラウドでコンピュータを動かします。まだ提供されていません。",
-    "empty_waitlist_action": "近日公開",
-    "skip": "今はスキップ",
-    "refresh": "更新",
-    "refreshing": "更新中…",
-    "hint_selected": "選択中: {{name}}",
-    "hint_pick": "Mika と始めるには、上でエージェントランタイムを選んでください。",
-    "hint_waiting": "最初の結果を待っています…",
-    "continue": "Mika と始める"
+  "page": {
+    "wordmark": "Multica",
+    "progress": "ステップ {{step}} / {{total}}"
   },
-  "step_platform": {
-    "headline": "エージェントを実行するコンピュータを接続しましょう。",
-    "lede": "コンピュータに接続して Mika を使い始めましょう。",
-    "hint_default": "後から接続できます。",
-    "download_title": "このコンピュータを使う",
-    "download_subtitle": "デスクトップ版をインストールして、このコンピュータを接続します。",
-    "download_button": "ダウンロード",
-    "cli_title": "ターミナルから接続",
-    "cli_subtitle": "サーバー、リモート開発環境、ヘッドレスなコンピュータを接続します。ターミナルが必要です。",
-    "cli_action": "手順を表示",
-    "cloud_title": "クラウドコンピュータを使う",
-    "cloud_subtitle": "クラウドでコンピュータを動かします。まだ提供されていません。",
-    "cloud_action": "近日公開",
-    "cli_dialog_title": "ターミナルから接続",
-    "cli_dialog_pick_hint": "上でコンピュータを選んでください。",
-    "runtimes_connected_other": "コンピュータ {{count}} 台を接続済み",
-    "live_listening": "ライブ · あなたのコンピュータを待っています",
-    "stage_normal_prefix": "上のコマンドを実行してください。 ",
-    "stage_normal_suffix": " のブラウザでのサインインが終わると、コンピュータが自動でここに表示されます(通常 10〜30 秒)。",
-    "stage_midway_prefix": "まだ待っています。 ",
-    "stage_midway_suffix": " が開いたブラウザタブを完了したか確認してください — コンピュータが接続される前にサインインの承認が必要です。",
-    "stage_slow_prefix": "いつもより時間がかかっています。 ",
-    "stage_slow_suffix": " を実行したターミナルにエラーがないか確認してください。",
-    "stage_stalled_prefix": "まだ何も届いていません。ターミナルに不慣れな場合は、",
-    "stage_stalled_term": "デスクトップ",
-    "stage_stalled_suffix": "のほうがスムーズです — ワンクリックでこのコンピュータが接続されます。このダイアログを閉じてデスクトップを選ぶか、スキップを押して続けてください。"
+  "welcome": {
+    "headline": "AI のチームメイトを、ひとつのワークスペースに。",
+    "lede": "同僚に頼むように、エージェントにタスクを任せましょう。すでに使っているコーディングツールとサブスクリプションで動きます。",
+    "plan_connect_title": "コンピューターを接続",
+    "plan_connect_body": "エージェントは自分のコンピューターで動きます。デスクトップアプリかターミナルのコマンドで準備できます。",
+    "plan_tool_title": "コーディングツールを選ぶ",
+    "plan_tool_body": "それが最初のエージェントになります。未インストールなら、入れ方を案内します。",
+    "plan_task_title": "最初のタスクを任せる",
+    "plan_task_body": "一文で十分です。プロジェクトのフォルダーを指定することもできます。",
+    "plan_watch_title": "作業を見守る",
+    "plan_watch_body": "進捗、変更、結果はすべてタスクに残ります。準備ができたらチームメイトを招待しましょう。",
+    "detected": "このコンピューターで {{tools}} が見つかりました。",
+    "detected_none": "このコンピューターにはまだコーディングツールがありません。次のステップでインストールできます。",
+    "start": "はじめる",
+    "skip_existing": "Multica を使ったことがある"
+  },
+  "defaults": {
+    "workspace_name": "{{name}} のワークスペース"
+  },
+  "tool_picker": {
+    "detecting": "このコンピューターのコーディングツールを探しています…",
+    "not_installed": "未インストール · {{vendor}} のサブスクリプションを使用",
+    "install": "インストール",
+    "more_tools": "OpenCode、Gemini CLI、Kimi など 20 以上のツールは、インストールすると自動で認識されます。",
+    "rescan": "再検出",
+    "offline": "オフライン",
+    "thinking": "思考"
+  },
+  "install": {
+    "title": "{{name}} をインストール",
+    "description": "このコンピューターのターミナルで次のコマンドを実行してください。{{vendor}} アカウントでサインインするので、エージェントはあなたのサブスクリプションで動きます。",
+    "step_install": "インストール",
+    "step_sign_in": "{{vendor}} アカウントでサインイン",
+    "step_return_desktop": "ここに戻って「再検出」を選ぶと、一覧に表示されます。",
+    "step_return_web": "そのコンピューターでデーモンを再起動すると、一覧に表示されます",
+    "guide": "公式ガイド",
+    "rescan": "再検出"
+  },
+  "step_tool": {
+    "title": "エージェントに使うコーディングツールは？",
+    "description": "選んだツールが最初のエージェントになり、ツール名がそのまま名前になります。あなたのサブスクリプションで動きます。",
+    "description_empty": "このコンピューターにはまだコーディングツールがありません。契約中のツールをインストールすると、最初のエージェントになります。",
+    "hint": "もっと追加したい場合は、あとから「エージェント」でいつでも追加できます。",
+    "continue_with": "{{name}} で続ける",
+    "skip": "今はスキップ"
+  },
+  "step_first_task": {
+    "title": "{{name}} に最初のタスクを",
+    "description": "同僚に頼むように書いてください。{{name}} が作業する様子をリアルタイムで見られます。",
+    "placeholder": "{{name}} に何をしてもらいますか？",
+    "choose_folder": "プロジェクトフォルダーを選ぶ",
+    "clear_folder": "フォルダーを外す",
+    "folder_failed": "このフォルダーは使えません。別のフォルダーを選んでください。",
+    "default_model": "デフォルトのモデル",
+    "suggestion_1": "新機能のリリース告知を下書きする",
+    "suggestion_2": "REST API の設計方法を 3 つ比較する",
+    "suggestion_3": "写真を日付でリネームするスクリプトを書く",
+    "suggestion_folder_1": "このプロジェクトの構成を説明して",
+    "suggestion_folder_2": "小さなバグを見つけて直して",
+    "suggestion_folder_3": "README にインストール手順を追加して",
+    "hint": "タスクを作成して {{name}} に割り当て、開きます。",
+    "submit": "{{name}} に割り当てる",
+    "browse": "先に見て回る"
+  },
+  "step_connect": {
+    "title": "コンピューターを接続",
+    "description": "エージェントは自分のコンピューターで、そこにあるコーディングツールとサブスクリプションを使って動きます。",
+    "desktop_title": "Multica Desktop をダウンロード",
+    "desktop_body": "すべて同梱。コンピューター上のコーディングツールを自動で見つけます。",
+    "desktop_action": "ダウンロード",
+    "terminal_title": "ターミナルを使う",
+    "terminal_body": "サーバーやリモート開発環境向け。アプリを入れたくない場合にも。",
+    "connected": "コンピューターが接続されました。",
+    "waiting": "コンピューターの接続を待っています…",
+    "skip": "今はスキップ"
   },
   "errors": {
     "skip_failed": "オンボーディングを完了できませんでした",
-    "guide_failed": "ランタイム案内のタスクを作成できませんでした。もう一度お試しください。",
-    "mika_setup_failed": "Mika ワークスペースを開始できませんでした"
+    "workspace_failed": "ワークスペースを作成できませんでした",
+    "setup_failed": "問題が発生しました。もう一度お試しください。"
   },
-  "mika_intro": {
-    "headline": "最初のエージェント仲間、Mika を紹介します。",
-    "name": "Mika",
-    "role": "参謀長",
-    "blurb": "やりたいことを Mika に伝えると、タスクになり、適したエージェントが担当します。"
+  "getting_started": {
+    "title": "はじめに",
+    "count": "{{done}} / {{total}}",
+    "dismiss": "チェックリストを隠す",
+    "agent_title": "エージェントを作成",
+    "agent_done": "{{name}} を作成しました",
+    "agent_body": "エージェントは、タスクを引き受けるあなたのコンピューター上のコーディングツールです。",
+    "agent_action": "エージェントを作成",
+    "task_title": "最初のタスクを割り当てる",
+    "task_body": "タスクを書いてエージェントに割り当てましょう。進捗、変更、結果はタスクに残ります。",
+    "task_action": "タスク一覧へ",
+    "invite_title": "チームメイトを招待",
+    "invite_body": "今はあなただけです。チームメイトはタスクを割り当て、進捗を追い、自分のツールも持ち込めます。",
+    "invite_action": "チームメイトを招待",
+    "github_title": "GitHub を接続",
+    "github_body": "エージェントがプルリクエストを作成し、タスクに紐づけられるようにします。",
+    "github_action": "GitHub を接続",
+    "autopilot_title": "最初のオートパイロットを作成",
+    "autopilot_body": "毎日のトリアージや週次レポートなど、タスクを定期実行します。",
+    "autopilot_action": "オートパイロットを作成",
+    "all_done": "準備完了です。",
+    "close": "閉じる"
+  },
+  "invite": {
+    "title": "チームメイトを招待",
+    "description": "メンバーとして参加します。共有されたエージェントにタスクを割り当てたり、自分のエージェントを追加したりできます。",
+    "workspace_name": "ワークスペース名",
+    "workspace_name_hint": "参加するチームメイトにはこの名前が表示されます。",
+    "emails": "メールアドレス",
+    "emails_placeholder": "alex@example.com, sam@example.com",
+    "invalid_emails": "メールアドレスではありません: {{emails}}",
+    "link_title": "招待リンク",
+    "link_hint": "リンクを知っている人は 7 日間、メンバーとして参加できます。",
+    "copy_link": "リンクをコピー",
+    "link_copied": "コピーしました",
+    "copy_failed": "招待リンクをコピーできませんでした",
+    "more_options": "その他のオプション",
+    "send": "招待を送る",
+    "save": "保存",
+    "sent": "招待を送信しました",
+    "some_failed": "{{emails}} を招待できませんでした",
+    "seat_limit": "追加メンバー用の空きシートがありません。",
+    "open_members": "シートを管理",
+    "failed": "招待を送信できませんでした"
+  },
+  "join": {
+    "title": "{{workspace}} に自分のツールを接続",
+    "description": "エージェントはそれぞれ持ち主のコンピューターで動きます。このコンピューターのツールを自分のエージェントとして追加するか、スキップして共有されたものを使いましょう。",
+    "shared_agents": "共有されているエージェント",
+    "your_tools": "このコンピューター",
+    "add": "{{name}} を自分のエージェントに追加",
+    "skip": "今はスキップ",
+    "added": "{{name}} を追加しました"
   }
 }

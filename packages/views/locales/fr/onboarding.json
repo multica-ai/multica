@@ -1,49 +1,4 @@
 {
-  "step_nav": {
-    "wordmark": "Multica",
-    "label": "Étapes de prise en main",
-    "about_you": {
-      "label": "À propos de vous"
-    },
-    "workspace": {
-      "label": "Espace de travail"
-    },
-    "runtime": {
-      "label": "Rencontrez Mika"
-    }
-  },
-  "welcome": {
-    "wordmark": "Bienvenue sur Multica",
-    "headline_line1": "Vos coéquipiers IA,",
-    "headline_line2": "dans",
-    "headline_emphasis": "un seul espace de travail.",
-    "lede": "Confiez-leur du travail comme à un collègue — ils s'en saisissent, mettent à jour le statut et commentent une fois terminé.",
-    "lede_web": "L'application de bureau embarque le runtime — rien à installer. Continuez sur le web pour connecter votre propre CLI.",
-    "download_desktop": "Télécharger l'application de bureau",
-    "continue_on_web": "Continuer sur le web",
-    "start_exploring": "Commencer l'exploration",
-    "skip_existing": "Je l'ai déjà fait",
-    "illustration": {
-      "card1_actor_name": "Vous",
-      "card1_actor_initial": "N",
-      "card1_body_prefix": " peut-il rédiger un court billet de lancement ? À partir des conclusions d'entretiens de ",
-      "card1_body_suffix": ".",
-      "card1_mention_content": "@Content Agent",
-      "card1_mention_research": "@Research Agent",
-      "card2_actor_name": "Content Agent",
-      "card2_body": "Je m'en occupe. Je reprends les citations de Research et je rédige autour de l'angle « temps gagné »…",
-      "card3_actor_name": "Research Agent",
-      "card3_body": "Entretiens utilisateurs de la semaine résumés — 12 appels, 4 thèmes récurrents, 3 citations à mettre en avant.",
-      "card3_timestamp": "il y a 15 min",
-      "card4_actor_name": "Review Agent",
-      "card4_body": "Brouillon de lundi relu — 4 remarques sur le ton. J'attends le suivant.",
-      "card5_actor_name": "Coding Agent",
-      "card5_body_prefix": "Fonctionnalité d'export livrée, celle que ",
-      "card5_body_suffix": " avait signalée. Lien d'aperçu dans la PR.",
-      "card5_mention_you": "@vous",
-      "card5_timestamp": "à l'instant"
-    }
-  },
   "common": {
     "back": "Retour",
     "continue": "Continuer",
@@ -59,9 +14,6 @@
     "save_failed_toast": "Échec de l'enregistrement"
   },
   "questions": {
-    "about_you": {
-      "question": "Parlez-nous un peu de vous."
-    },
     "source": {
       "question": "Comment avez-vous connu Multica ?",
       "friends_colleagues": "Amis ou collègues",
@@ -78,32 +30,6 @@
       "dont_remember": "Je ne m'en souviens pas",
       "other": "Autre",
       "other_placeholder": "ex. un podcast que j'écoute"
-    },
-    "role": {
-      "question": "Qu'est-ce qui vous décrit le mieux ?",
-      "engineer": "Ingénieur / développeur",
-      "product": "Chef de produit",
-      "designer": "Designer",
-      "founder": "Fondateur / dirigeant",
-      "marketing": "Marketing / croissance",
-      "writer": "Rédacteur / contenu",
-      "research": "Chercheur / analyste",
-      "ops": "Opérations / gestion de projet",
-      "student": "Étudiant / usage personnel",
-      "other": "Autre",
-      "other_placeholder": "ex. enseignant, responsable support"
-    },
-    "use_case": {
-      "question": "Pour quoi voulez-vous utiliser Multica ?",
-      "ship_code": "Livrer du code avec des agents IA",
-      "manage_team": "Gérer les tâches de mon équipe",
-      "personal_tasks": "Organiser mes propres tâches",
-      "plan_research": "Planifier, réfléchir, faire des recherches",
-      "write_publish": "Écrire, réviser, publier",
-      "automate_ops": "Automatiser les opérations et les processus",
-      "evaluate": "Je découvre simplement",
-      "other": "Autre",
-      "other_placeholder": "ex. coordination d'un groupe d'étude"
     }
   },
   "step_question": {
@@ -167,70 +93,143 @@
     "creation_disabled_headline_resume": "Continuez avec {{name}}.",
     "creation_disabled_lede_resume": "La création d'espaces de travail est désactivée sur cette instance : vous continuerez donc dans votre espace existant."
   },
-  "step_runtime": {
-    "scanning_headline": "Connexion de cet ordinateur…",
-    "scanning_lede_prefix": "Votre agent passe par un outil de codage IA que vous possédez déjà — comme ",
-    "scanning_lede_suffix": ", et d'autres. Nous vérifions lesquels sont installés sur cet ordinateur.",
-    "found_headline": "Où Mika doit-il s'exécuter ?",
-    "runtime_count_one": "{{count}} runtime d'agent",
-    "runtime_count_other": "{{count}} runtimes d'agent",
-    "status_all_online": "tous en ligne",
-    "status_none_online": "aucun en ligne",
-    "status_n_online": "{{count}} en ligne",
-    "empty_headline": "Aucun runtime d'agent trouvé sur cet ordinateur pour l'instant.",
-    "empty_lede_prefix": "Un runtime d'agent est un outil de codage IA auquel nous nous connectons — comme ",
-    "empty_lede_suffix": ". Installez-en un et actualisez, ou choisissez une option ci-dessous.",
-    "empty_skip_title": "Passer pour l'instant",
-    "empty_skip_subtitle": "Les agents ne peuvent pas travailler sans runtime connecté.",
-    "empty_skip_action": "Ignorer",
-    "empty_waitlist_title": "Utiliser un ordinateur cloud",
-    "empty_waitlist_subtitle": "Nous ferons tourner un ordinateur pour vous dans le cloud. Pas encore actif.",
-    "empty_waitlist_action": "Bientôt disponible",
-    "skip": "Passer pour l'instant",
-    "refresh": "Actualiser",
-    "refreshing": "Actualisation…",
-    "hint_selected": "Sélectionné : {{name}}",
-    "hint_pick": "Choisissez un runtime d'agent ci-dessus pour commencer avec Mika.",
-    "hint_waiting": "En attente du premier résultat…",
-    "continue": "Commencer avec Mika"
+  "page": {
+    "wordmark": "Multica",
+    "progress": "Étape {{step}} sur {{total}}"
   },
-  "step_platform": {
-    "headline": "Connectez un ordinateur pour exécuter votre agent.",
-    "lede": "Connectez un ordinateur pour que Mika puisse travailler.",
-    "hint_default": "Vous pouvez vous connecter plus tard.",
-    "download_title": "Utiliser cet ordinateur",
-    "download_subtitle": "Installez Multica Desktop pour connecter cet ordinateur.",
-    "download_button": "Télécharger",
-    "cli_title": "Connecter depuis le terminal",
-    "cli_subtitle": "Connectez un serveur, une machine de développement distante, ou tout ordinateur sans interface graphique. Terminal requis.",
-    "cli_action": "Afficher les étapes",
-    "cloud_title": "Utiliser un ordinateur cloud",
-    "cloud_subtitle": "Nous ferons tourner un ordinateur pour vous dans le cloud. Pas encore actif.",
-    "cloud_action": "Bientôt disponible",
-    "cli_dialog_title": "Connecter depuis le terminal",
-    "cli_dialog_pick_hint": "Choisissez un ordinateur ci-dessus.",
-    "runtimes_connected_one": "{{count}} ordinateur connecté",
-    "runtimes_connected_other": "{{count}} ordinateurs connectés",
-    "live_listening": "En direct · En attente de votre ordinateur",
-    "stage_normal_prefix": "Exécutez la commande ci-dessus. Dès que ",
-    "stage_normal_suffix": " aura terminé la connexion via le navigateur, votre ordinateur apparaîtra ici automatiquement (généralement en 10 à 30 secondes).",
-    "stage_midway_prefix": "Toujours à l'écoute. Vérifiez que vous avez bien terminé dans l'onglet de navigateur ouvert par ",
-    "stage_midway_suffix": " — votre approbation y est nécessaire avant que votre ordinateur puisse se connecter.",
-    "stage_slow_prefix": "Cela prend plus de temps que d'habitude. Vérifiez le terminal où vous avez lancé ",
-    "stage_slow_suffix": " pour d'éventuelles erreurs.",
-    "stage_stalled_prefix": "Rien ne remonte pour l'instant. Si le terminal ne vous met pas à l'aise, ",
-    "stage_stalled_term": "l'application de bureau",
-    "stage_stalled_suffix": " est la voie la plus simple — un clic et cet ordinateur est connecté. Fermez cette fenêtre et choisissez l'application de bureau, ou cliquez sur Ignorer pour continuer."
+  "welcome": {
+    "headline": "Vos coéquipiers IA, dans un seul espace de travail.",
+    "lede": "Confiez des tâches aux agents comme à un collègue. Ils utilisent les outils de code et les abonnements que vous avez déjà.",
+    "plan_connect_title": "Connectez un ordinateur",
+    "plan_connect_body": "Les agents tournent sur un ordinateur à vous : l'application de bureau ou une commande de terminal s'en charge.",
+    "plan_tool_title": "Choisissez un outil de code",
+    "plan_tool_body": "Il devient votre premier agent. Pas encore installé ? On vous montre comment faire.",
+    "plan_task_title": "Confiez-lui une première tâche",
+    "plan_task_body": "Une phrase suffit, éventuellement avec un dossier de projet.",
+    "plan_watch_title": "Regardez-le travailler",
+    "plan_watch_body": "Progression, modifications et résultats restent sur la tâche. Invitez votre équipe quand vous voulez.",
+    "detected": "{{tools}} trouvé sur cet ordinateur.",
+    "detected_none": "Aucun outil de code trouvé sur cet ordinateur pour l'instant. Vous pourrez en installer un à l'étape suivante.",
+    "start": "Commencer",
+    "skip_existing": "J'ai déjà utilisé Multica"
+  },
+  "defaults": {
+    "workspace_name": "Espace de {{name}}"
+  },
+  "tool_picker": {
+    "detecting": "Recherche des outils de code sur cet ordinateur…",
+    "not_installed": "Non installé · utilise votre abonnement {{vendor}}",
+    "install": "Installer",
+    "more_tools": "OpenCode, Gemini CLI, Kimi et plus de 20 autres outils sont détectés automatiquement une fois installés.",
+    "rescan": "Vérifier à nouveau",
+    "offline": "Hors ligne",
+    "thinking": "Réflexion"
+  },
+  "install": {
+    "title": "Installer {{name}}",
+    "description": "Lancez ces commandes dans un terminal sur cet ordinateur. L'outil se connecte avec votre compte {{vendor}} : votre agent utilise votre propre abonnement.",
+    "step_install": "Installez",
+    "step_sign_in": "Connectez-vous avec votre compte {{vendor}}",
+    "step_return_desktop": "Revenez ici et choisissez Vérifier à nouveau : il apparaît dans la liste.",
+    "step_return_web": "Redémarrez le daemon sur cet ordinateur : il apparaît alors dans la liste",
+    "guide": "Guide officiel",
+    "rescan": "Vérifier à nouveau"
+  },
+  "step_tool": {
+    "title": "Quel outil de code votre agent doit-il utiliser ?",
+    "description": "Il devient votre premier agent, du nom de l'outil, et utilise votre propre abonnement.",
+    "description_empty": "Aucun outil de code sur cet ordinateur pour l'instant. Installez-en un auquel vous êtes abonné : il deviendra votre premier agent.",
+    "hint": "Envie d'en ajouter ? Ajoutez des agents à tout moment depuis Agents.",
+    "continue_with": "Continuer avec {{name}}",
+    "skip": "Passer pour l'instant"
+  },
+  "step_first_task": {
+    "title": "Confiez une première tâche à {{name}}",
+    "description": "Formulez-la comme pour un collègue. Vous verrez {{name}} y travailler en direct.",
+    "placeholder": "Que doit faire {{name}} ?",
+    "choose_folder": "Choisir un dossier de projet",
+    "clear_folder": "Retirer le dossier",
+    "folder_failed": "Ce dossier ne peut pas être utilisé. Choisissez-en un autre.",
+    "default_model": "Modèle par défaut",
+    "suggestion_1": "Rédige l'annonce de lancement d'une nouvelle fonctionnalité",
+    "suggestion_2": "Compare trois façons de structurer une API REST",
+    "suggestion_3": "Écris un script qui renomme des photos par date",
+    "suggestion_folder_1": "Explique-moi comment ce projet est structuré",
+    "suggestion_folder_2": "Trouve et corrige un petit bug",
+    "suggestion_folder_3": "Ajoute les étapes d'installation au README",
+    "hint": "Crée la tâche, l'assigne à {{name}} et l'ouvre.",
+    "submit": "Assigner à {{name}}",
+    "browse": "D'abord faire le tour"
+  },
+  "step_connect": {
+    "title": "Connectez un ordinateur",
+    "description": "Les agents tournent sur un ordinateur à vous, avec les outils de code et abonnements qui s'y trouvent déjà.",
+    "desktop_title": "Télécharger Multica Desktop",
+    "desktop_body": "Tout est inclus. Elle trouve seule les outils de code de votre ordinateur.",
+    "desktop_action": "Télécharger",
+    "terminal_title": "Utiliser le terminal",
+    "terminal_body": "Pour les serveurs et machines distantes, ou si vous préférez ne pas installer l'application.",
+    "connected": "Ordinateur connecté.",
+    "waiting": "En attente d'un ordinateur…",
+    "skip": "Passer pour l'instant"
   },
   "errors": {
-    "skip_failed": "Échec de la finalisation de la prise en main",
-    "guide_failed": "Le guide de runtime n'a pas été créé. Veuillez réessayer.",
-    "mika_setup_failed": "Impossible de démarrer votre espace de travail Mika"
+    "skip_failed": "Impossible de terminer la prise en main",
+    "workspace_failed": "Impossible de créer votre espace de travail",
+    "setup_failed": "Un problème est survenu. Veuillez réessayer."
   },
-  "mika_intro": {
-    "headline": "Rencontrez Mika, votre premier coéquipier agent.",
-    "name": "Mika",
-    "role": "Chef de cabinet",
-    "blurb": "Dites à Mika ce que vous voulez faire. Cela devient une tâche, avec le bon agent dessus."
+  "getting_started": {
+    "title": "Premiers pas",
+    "count": "{{done}} / {{total}}",
+    "dismiss": "Masquer la liste",
+    "agent_title": "Créer un agent",
+    "agent_done": "{{name}} créé",
+    "agent_body": "Un agent est un outil de code sur votre ordinateur qui prend des tâches.",
+    "agent_action": "Créer un agent",
+    "task_title": "Assigner votre première tâche",
+    "task_body": "Écrivez une tâche et assignez-la à un agent. Progression, modifications et résultats restent sur la tâche.",
+    "task_action": "Aller aux tâches",
+    "invite_title": "Inviter des coéquipiers",
+    "invite_body": "Vous êtes seul ici. Vos coéquipiers pourront assigner des tâches, suivre l'avancement et apporter leurs propres outils.",
+    "invite_action": "Inviter",
+    "github_title": "Connecter GitHub",
+    "github_body": "Laissez les agents ouvrir des pull requests et les lier aux tâches.",
+    "github_action": "Connecter GitHub",
+    "autopilot_title": "Créer votre premier pilote automatique",
+    "autopilot_body": "Lancez une tâche selon un planning : un tri quotidien, un rapport hebdomadaire.",
+    "autopilot_action": "Créer un pilote automatique",
+    "all_done": "Tout est prêt.",
+    "close": "Fermer"
+  },
+  "invite": {
+    "title": "Inviter des coéquipiers",
+    "description": "Ils rejoignent en tant que membres : ils peuvent assigner des tâches aux agents partagés avec eux et ajouter les leurs.",
+    "workspace_name": "Nom de l'espace de travail",
+    "workspace_name_hint": "Vos coéquipiers verront ce nom en rejoignant.",
+    "emails": "Adresses e-mail",
+    "emails_placeholder": "alex@example.com, sam@example.com",
+    "invalid_emails": "Adresse e-mail invalide : {{emails}}",
+    "link_title": "Lien d'invitation",
+    "link_hint": "Toute personne ayant le lien peut rejoindre en tant que membre pendant 7 jours.",
+    "copy_link": "Copier le lien",
+    "link_copied": "Copié",
+    "copy_failed": "Impossible de copier le lien",
+    "more_options": "Plus d'options",
+    "send": "Envoyer les invitations",
+    "save": "Enregistrer",
+    "sent": "Invitations envoyées",
+    "some_failed": "Impossible d'inviter {{emails}}",
+    "seat_limit": "Plus de siège libre pour un autre membre.",
+    "open_members": "Gérer les sièges",
+    "failed": "Impossible d'envoyer les invitations"
+  },
+  "join": {
+    "title": "Apportez vos outils dans {{workspace}}",
+    "description": "Chaque agent tourne sur l'ordinateur de son propriétaire. Ajoutez un outil de celui-ci comme votre propre agent, ou passez et utilisez ceux partagés avec vous.",
+    "shared_agents": "Partagés avec vous",
+    "your_tools": "Sur cet ordinateur",
+    "add": "Ajouter {{name}} comme mon agent",
+    "skip": "Passer pour l'instant",
+    "added": "{{name}} ajouté"
   }
 }

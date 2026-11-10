@@ -24,6 +24,7 @@ export {
   type ThemeFolderWriteResult,
 } from "./theme-folder";
 export {
+  restartLocalDaemon,
   useLocalDaemonStatus,
   type LocalDaemonStatus,
 } from "./use-local-daemon-status";

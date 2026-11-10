@@ -1,49 +1,4 @@
 {
-  "step_nav": {
-    "wordmark": "Multica",
-    "label": "Onboarding steps",
-    "about_you": {
-      "label": "About you"
-    },
-    "workspace": {
-      "label": "Workspace"
-    },
-    "runtime": {
-      "label": "Meet Mika"
-    }
-  },
-  "welcome": {
-    "wordmark": "Welcome to Multica",
-    "headline_line1": "Your AI teammates,",
-    "headline_line2": "in",
-    "headline_emphasis": "one workspace.",
-    "lede": "Assign them work like you'd assign a colleague — they pick it up, update status, and comment when done.",
-    "lede_web": "Desktop bundles the runtime — nothing to install. Continue on web to connect your own CLI.",
-    "download_desktop": "Download Desktop",
-    "continue_on_web": "Continue on web",
-    "start_exploring": "Start exploring",
-    "skip_existing": "I've done this before",
-    "illustration": {
-      "card1_actor_name": "You",
-      "card1_actor_initial": "N",
-      "card1_body_prefix": " can you draft a short launch post? Pull from ",
-      "card1_body_suffix": "'s interview findings.",
-      "card1_mention_content": "@Content Agent",
-      "card1_mention_research": "@Research Agent",
-      "card2_actor_name": "Content Agent",
-      "card2_body": "On it. Pulling Research's quotes, drafting around the \"time saved\" angle…",
-      "card3_actor_name": "Research Agent",
-      "card3_body": "This week's user interviews summarized — 12 calls, 4 recurring themes, 3 pull-quotes.",
-      "card3_timestamp": "15 min ago",
-      "card4_actor_name": "Review Agent",
-      "card4_body": "Reviewed Monday's draft — left 4 notes on tone. Standing by for the new one.",
-      "card5_actor_name": "Coding Agent",
-      "card5_body_prefix": "Shipped the export feature ",
-      "card5_body_suffix": " flagged. Preview link in the PR.",
-      "card5_mention_you": "@you",
-      "card5_timestamp": "just now"
-    }
-  },
   "common": {
     "back": "Back",
     "continue": "Continue",
@@ -59,9 +14,6 @@
     "save_failed_toast": "Failed to save"
   },
   "questions": {
-    "about_you": {
-      "question": "Tell us a bit about you."
-    },
     "source": {
       "question": "How did you hear about Multica?",
       "friends_colleagues": "Friends or colleagues",
@@ -78,32 +30,6 @@
       "dont_remember": "Don't remember",
       "other": "Other",
       "other_placeholder": "e.g. a podcast I listen to"
-    },
-    "role": {
-      "question": "Which best describes you?",
-      "engineer": "Engineer / developer",
-      "product": "Product manager",
-      "designer": "Designer",
-      "founder": "Founder / exec",
-      "marketing": "Marketing / growth",
-      "writer": "Writer / content",
-      "research": "Researcher / analyst",
-      "ops": "Operations / project mgmt",
-      "student": "Student / personal use",
-      "other": "Other",
-      "other_placeholder": "e.g. teacher, support lead"
-    },
-    "use_case": {
-      "question": "What do you want to use Multica for?",
-      "ship_code": "Ship code with AI agents",
-      "manage_team": "Manage tasks for my team",
-      "personal_tasks": "Organize my own tasks",
-      "plan_research": "Plan, brainstorm, research",
-      "write_publish": "Write, edit, publish",
-      "automate_ops": "Automate ops & workflows",
-      "evaluate": "Just exploring",
-      "other": "Other",
-      "other_placeholder": "e.g. study group coordination"
     }
   },
   "step_question": {
@@ -167,70 +93,143 @@
     "creation_disabled_headline_resume": "Continue with {{name}}.",
     "creation_disabled_lede_resume": "Workspace creation is disabled on this instance, so you'll continue into your existing workspace."
   },
-  "step_runtime": {
-    "scanning_headline": "Connecting this computer…",
-    "scanning_lede_prefix": "Your agent works through an AI coding tool you already have — like ",
-    "scanning_lede_suffix": ", and others. We're checking this computer for ones you've installed.",
-    "found_headline": "Where should Mika run?",
-    "runtime_count_one": "{{count}} agent runtime",
-    "runtime_count_other": "{{count}} agent runtimes",
-    "status_all_online": "all online",
-    "status_none_online": "none online",
-    "status_n_online": "{{count}} online",
-    "empty_headline": "No agent runtime found on this computer yet.",
-    "empty_lede_prefix": "An agent runtime is an AI coding tool we connect to — like ",
-    "empty_lede_suffix": ". Install one and refresh, or pick a path below.",
-    "empty_skip_title": "Skip for now",
-    "empty_skip_subtitle": "Agents can't run until a runtime is connected.",
-    "empty_skip_action": "Skip",
-    "empty_waitlist_title": "Use a cloud computer",
-    "empty_waitlist_subtitle": "We'll run a computer for you in the cloud. Not live yet.",
-    "empty_waitlist_action": "Coming soon",
-    "skip": "Skip for now",
-    "refresh": "Refresh",
-    "refreshing": "Refreshing…",
-    "hint_selected": "Selected: {{name}}",
-    "hint_pick": "Pick an agent runtime above to start with Mika.",
-    "hint_waiting": "Waiting for the first result…",
-    "continue": "Start with Mika"
+  "page": {
+    "wordmark": "Multica",
+    "progress": "Step {{step}} of {{total}}"
   },
-  "step_platform": {
-    "headline": "Connect a computer to run your agent.",
-    "lede": "Connect a computer so Mika can start working.",
-    "hint_default": "You can connect later.",
-    "download_title": "Use this computer",
-    "download_subtitle": "Install Desktop to connect this computer.",
-    "download_button": "Download",
-    "cli_title": "Connect from the terminal",
-    "cli_subtitle": "Connect a server, remote dev box, or any headless computer. Terminal required.",
-    "cli_action": "Show steps",
-    "cloud_title": "Use a cloud computer",
-    "cloud_subtitle": "We'll run a computer for you in the cloud. Not live yet.",
-    "cloud_action": "Coming soon",
-    "cli_dialog_title": "Connect from the terminal",
-    "cli_dialog_pick_hint": "Pick a computer above.",
-    "runtimes_connected_one": "{{count}} computer connected",
-    "runtimes_connected_other": "{{count}} computers connected",
-    "live_listening": "Live · Waiting for your computer",
-    "stage_normal_prefix": "Run the command above. As soon as ",
-    "stage_normal_suffix": " finishes browser sign-in, your computer will appear here automatically (usually 10–30 seconds).",
-    "stage_midway_prefix": "Still listening. Make sure you finished the browser tab that ",
-    "stage_midway_suffix": " opened — it needs you to approve sign-in before your computer can connect.",
-    "stage_slow_prefix": "Taking longer than usual. Check the terminal where you ran ",
-    "stage_slow_suffix": " for errors.",
-    "stage_stalled_prefix": "Nothing coming through yet. If you're not comfortable with the terminal, ",
-    "stage_stalled_term": "Desktop",
-    "stage_stalled_suffix": " is the smoother path — one click and this computer is connected. Close this dialog and pick Desktop, or hit Skip to continue."
+  "welcome": {
+    "headline": "Your AI teammates, in one workspace.",
+    "lede": "Hand tasks to agents the way you'd hand them to a colleague. They run on the coding tools and subscriptions you already have.",
+    "plan_connect_title": "Connect a computer",
+    "plan_connect_body": "Agents run on a computer you own — the desktop app or a terminal command sets it up.",
+    "plan_tool_title": "Pick a coding tool",
+    "plan_tool_body": "It becomes your first agent. Not installed yet? You'll see how to install it.",
+    "plan_task_title": "Give it a first task",
+    "plan_task_body": "One sentence is enough, optionally pointed at a project folder.",
+    "plan_watch_title": "Watch it work",
+    "plan_watch_body": "Progress, changes and results all stay on the task. Invite teammates whenever you're ready.",
+    "detected": "Found {{tools}} on this computer.",
+    "detected_none": "No coding tools found on this computer yet. You can install one in the next step.",
+    "start": "Start",
+    "skip_existing": "I've used Multica before"
+  },
+  "defaults": {
+    "workspace_name": "{{name}}'s workspace"
+  },
+  "tool_picker": {
+    "detecting": "Looking for coding tools on this computer…",
+    "not_installed": "Not installed · uses your {{vendor}} subscription",
+    "install": "Install",
+    "more_tools": "OpenCode, Gemini CLI, Kimi and 20+ other tools are picked up automatically once installed.",
+    "rescan": "Check again",
+    "offline": "Offline",
+    "thinking": "Thinking"
+  },
+  "install": {
+    "title": "Install {{name}}",
+    "description": "Run these in a terminal on this computer. It signs in with your {{vendor}} account, so your agent works on your own subscription.",
+    "step_install": "Install",
+    "step_sign_in": "Sign in with your {{vendor}} account",
+    "step_return_desktop": "Come back and choose Check again — it shows up in the list.",
+    "step_return_web": "Restart the daemon on that computer — it then shows up in the list",
+    "guide": "Official guide",
+    "rescan": "Check again"
+  },
+  "step_tool": {
+    "title": "Which coding tool should your agent use?",
+    "description": "It becomes your first agent, named after the tool, and works on your own subscription.",
+    "description_empty": "There's no coding tool on this computer yet. Install one you already pay for — it becomes your first agent.",
+    "hint": "Want more? Add agents any time from Agents.",
+    "continue_with": "Continue with {{name}}",
+    "skip": "Skip for now"
+  },
+  "step_first_task": {
+    "title": "Give {{name}} its first task",
+    "description": "Write it the way you'd ask a teammate. You'll watch {{name}} work on it as it happens.",
+    "placeholder": "What should {{name}} do?",
+    "choose_folder": "Choose a project folder",
+    "clear_folder": "Remove folder",
+    "folder_failed": "That folder can't be used. Pick another one.",
+    "default_model": "Default model",
+    "suggestion_1": "Draft a launch announcement for a new feature",
+    "suggestion_2": "Compare three ways to structure a REST API",
+    "suggestion_3": "Write a script that renames photos by date",
+    "suggestion_folder_1": "Walk me through how this project is structured",
+    "suggestion_folder_2": "Find and fix one small bug",
+    "suggestion_folder_3": "Add install steps to the README",
+    "hint": "Creates the task, assigns it to {{name}}, and opens it.",
+    "submit": "Assign to {{name}}",
+    "browse": "Look around first"
+  },
+  "step_connect": {
+    "title": "Connect a computer",
+    "description": "Agents run on a computer you own, using the coding tools and subscriptions already on it.",
+    "desktop_title": "Download Multica Desktop",
+    "desktop_body": "Everything included. It finds the coding tools on your computer by itself.",
+    "desktop_action": "Download",
+    "terminal_title": "Use the terminal",
+    "terminal_body": "For servers and remote dev boxes, or if you'd rather not install the app.",
+    "connected": "Computer connected.",
+    "waiting": "Waiting for a computer to connect…",
+    "skip": "Skip for now"
   },
   "errors": {
     "skip_failed": "Failed to finish onboarding",
-    "guide_failed": "The runtime guide didn't get created. Please try again.",
-    "mika_setup_failed": "Couldn't start your Mika workspace"
+    "workspace_failed": "Couldn't create your workspace",
+    "setup_failed": "Something went wrong. Please try again."
   },
-  "mika_intro": {
-    "headline": "Meet Mika, your first agent teammate.",
-    "name": "Mika",
-    "role": "Chief of Staff",
-    "blurb": "Tell Mika what you want done. It becomes an issue, with the right agent on it."
+  "getting_started": {
+    "title": "Get started",
+    "count": "{{done}} / {{total}}",
+    "dismiss": "Hide checklist",
+    "agent_title": "Create an agent",
+    "agent_done": "Created {{name}}",
+    "agent_body": "An agent is a coding tool on your computer that takes tasks.",
+    "agent_action": "Create agent",
+    "task_title": "Assign your first task",
+    "task_body": "Write a task and assign it to an agent. Its progress, changes and results stay on the task.",
+    "task_action": "Go to issues",
+    "invite_title": "Invite teammates",
+    "invite_body": "It's just you here. Teammates can assign tasks, follow progress, and bring their own tools.",
+    "invite_action": "Invite teammates",
+    "github_title": "Connect GitHub",
+    "github_body": "Let agents open pull requests and link them to tasks.",
+    "github_action": "Connect GitHub",
+    "autopilot_title": "Create your first autopilot",
+    "autopilot_body": "Run a task on a schedule — a daily triage, a weekly report.",
+    "autopilot_action": "Create autopilot",
+    "all_done": "You're all set.",
+    "close": "Close"
+  },
+  "invite": {
+    "title": "Invite teammates",
+    "description": "They join as members: they can assign tasks to agents shared with them and add agents of their own.",
+    "workspace_name": "Workspace name",
+    "workspace_name_hint": "Teammates see this name when they join.",
+    "emails": "Email addresses",
+    "emails_placeholder": "alex@example.com, sam@example.com",
+    "invalid_emails": "Not an email address: {{emails}}",
+    "link_title": "Invite link",
+    "link_hint": "Anyone with the link can join as a member for 7 days.",
+    "copy_link": "Copy link",
+    "link_copied": "Copied",
+    "copy_failed": "Couldn't copy the invite link",
+    "more_options": "More options",
+    "send": "Send invites",
+    "save": "Save",
+    "sent": "Invitations sent",
+    "some_failed": "Couldn't invite {{emails}}",
+    "seat_limit": "There's no free seat for another member.",
+    "open_members": "Manage seats",
+    "failed": "Couldn't send invitations"
+  },
+  "join": {
+    "title": "Bring your tools to {{workspace}}",
+    "description": "Each agent runs on its owner's computer. Add a coding tool from this one as your own agent, or skip and use the ones shared with you.",
+    "shared_agents": "Shared with you",
+    "your_tools": "On this computer",
+    "add": "Add {{name}} as my agent",
+    "skip": "Skip for now",
+    "added": "{{name}} added"
   }
 }

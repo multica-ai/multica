@@ -8,6 +8,11 @@ export interface LocalDaemonStatus {
   daemonId: string | null;
   deviceName: string | null;
   running: boolean;
+  /** The daemon is booting or installing its CLI, so the runtimes it will
+   *  register have not had a chance to appear yet. */
+  starting: boolean;
+  /** Provider slugs of the agent CLIs the daemon found on this machine. */
+  agents: string[];
 }
 
 interface DaemonStatusLike {
@@ -21,11 +26,13 @@ interface DaemonStatusLike {
     | "auth_expired";
   daemonId?: string;
   deviceName?: string;
+  agents?: string[];
 }
 
 interface DaemonAPILike {
   getStatus?: () => Promise<DaemonStatusLike>;
   onStatusChange?: (cb: (s: DaemonStatusLike) => void) => () => void;
+  restart?: () => Promise<{ success: boolean; error?: string }>;
 }
 
 function readDaemonAPI(): DaemonAPILike | undefined {
@@ -34,11 +41,15 @@ function readDaemonAPI(): DaemonAPILike | undefined {
 }
 
 function toStatus(s: DaemonStatusLike | undefined): LocalDaemonStatus {
-  if (!s) return { daemonId: null, deviceName: null, running: false };
+  if (!s) {
+    return { daemonId: null, deviceName: null, running: false, starting: false, agents: [] };
+  }
   return {
     daemonId: s.daemonId ?? null,
     deviceName: s.deviceName ?? null,
     running: s.state === "running",
+    starting: s.state === "starting" || s.state === "installing_cli",
+    agents: Array.isArray(s.agents) ? s.agents : [],
   };
 }
 
@@ -54,11 +65,7 @@ function toStatus(s: DaemonStatusLike | undefined): LocalDaemonStatus {
  * "no daemon" state while waiting for the first push from `onStatusChange`.
  */
 export function useLocalDaemonStatus(): LocalDaemonStatus {
-  const [status, setStatus] = useState<LocalDaemonStatus>(() => ({
-    daemonId: null,
-    deviceName: null,
-    running: false,
-  }));
+  const [status, setStatus] = useState<LocalDaemonStatus>(() => toStatus(undefined));
 
   useEffect(() => {
     const api = readDaemonAPI();
@@ -81,4 +88,16 @@ export function useLocalDaemonStatus(): LocalDaemonStatus {
   }, []);
 
   return status;
+}
+
+/**
+ * Restarts the desktop's bundled daemon so it scans PATH again — its agent
+ * CLI probe runs once at boot, so a tool installed afterwards stays invisible
+ * until then. Resolves false on web, where there is no bundled daemon.
+ */
+export async function restartLocalDaemon(): Promise<boolean> {
+  const api = readDaemonAPI();
+  if (!api?.restart) return false;
+  const result = await api.restart();
+  return result.success;
 }

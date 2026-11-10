@@ -53,71 +53,15 @@ test("onboarding — structural blocks match the column width on every step", as
 }) => {
   const api = new TestApiClient();
   await api.login(`widths-${Date.now()}@localhost`, "Width Guard");
-  const token = api.getToken();
 
-  await page.addInitScript((t) => localStorage.setItem("multica_token", t), token);
+  await page.addInitScript((t) => localStorage.setItem("multica_token", t), api.getToken());
   await page.goto("/onboarding", { waitUntil: "domcontentloaded" });
-  await waitForPageText(page, "Continue on web");
-  await page.getByRole("button", { name: "Continue on web" }).click();
+  await waitForPageText(page, "Your AI teammates, in one workspace.");
+  await expectFullWidthBlocks(page, "welcome");
 
-  await page.getByText("Tell us a bit about you.").waitFor();
-  await expectFullWidthBlocks(page, "about you");
-
-  await page.getByRole("radio", { name: /Engineer \/ developer/i }).click();
-  await page.getByRole("checkbox", { name: /Ship code with AI agents/i }).click();
-  await page.getByRole("button", { name: "Continue" }).click();
-
-  await page.getByRole("heading", { name: /Name your workspace/i }).waitFor();
-  await expectFullWidthBlocks(page, "workspace");
-
-  await page.getByRole("textbox").first().fill(`Width Guard ${Date.now()}`);
-  await page.getByRole("button", { name: /^Create /i }).click();
-
+  await page.getByRole("button", { name: "Start" }).click();
   await page
-    .getByRole("heading", { name: /Connect a computer/i })
+    .getByRole("heading", { name: "Connect a computer" })
     .waitFor({ timeout: 20000 });
-  await expectFullWidthBlocks(page, "runtime");
-});
-
-// The rail is meant to persist across steps. It did not: every step rendered
-// its own <StepShell>, and since each step is a different component type React
-// tore the shell down and rebuilt it on each transition — remounting the rail,
-// restarting its canvas, and replaying the shell's opacity-0 fade. That
-// full-window re-fade was the visible "flash" on every step change.
-test("onboarding — the shell survives step changes instead of re-mounting", async ({
-  page,
-}) => {
-  const api = new TestApiClient();
-  await api.login(`shell-${Date.now()}@localhost`, "Shell Guard");
-
-  await page.addInitScript(
-    (t) => localStorage.setItem("multica_token", t),
-    api.getToken(),
-  );
-  await page.goto("/onboarding", { waitUntil: "domcontentloaded" });
-  await waitForPageText(page, "Continue on web");
-  await page.getByRole("button", { name: "Continue on web" }).click();
-  await page.getByText("Tell us a bit about you.").waitFor();
-
-  // Tag the live nodes. A remount replaces the elements and drops the marks.
-  await page.evaluate(() => {
-    document.querySelector("aside")?.setAttribute("data-persist-probe", "1");
-    document.querySelector("main")?.setAttribute("data-persist-probe", "1");
-  });
-
-  await page.getByRole("radio", { name: /Engineer \/ developer/i }).click();
-  await page.getByRole("checkbox", { name: /Ship code with AI agents/i }).click();
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("heading", { name: /Name your workspace/i }).waitFor();
-
-  await expect(
-    page.locator("aside[data-persist-probe]"),
-    "the rail remounted on a step change",
-  ).toHaveCount(1);
-  await expect(
-    page.locator("main[data-persist-probe]"),
-    "the content pane remounted on a step change",
-  ).toHaveCount(1);
-  // One DotSphere canvas, not one per visited step.
-  await expect(page.locator("canvas")).toHaveCount(1);
+  await expectFullWidthBlocks(page, "connect");
 });

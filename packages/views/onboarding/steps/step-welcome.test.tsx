@@ -1,29 +1,44 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithI18n } from "../../test/i18n";
 import { StepWelcome } from "./step-welcome";
 
-// The welcome illustration's mock cards carry issue statuses, and the status
-// label used to come from `STATUS_CONFIG.label` — the server's English seed —
-// while every other string on the screen went through `useT` (MUL-6850). A
-// non-English member met the product on a line that read half in each
-// language. These assert against the REAL locale bundles, so a regression that
-// re-introduces the English seed fails here rather than in a screenshot.
-describe("StepWelcome status labels", () => {
-  it("renders the built-in status labels in English", () => {
-    renderWithI18n(<StepWelcome onNext={vi.fn()} />);
+describe("StepWelcome", () => {
+  it("names the coding tools the desktop daemon found", () => {
+    renderWithI18n(
+      <StepWelcome onStart={vi.fn()} detectedProviders={["claude", "codex"]} />,
+    );
 
-    expect(screen.getByText("In Progress")).toBeInTheDocument();
-    expect(screen.getByText("In Review")).toBeInTheDocument();
-    expect(screen.getAllByText("Done")).toHaveLength(2);
+    expect(
+      screen.getByText("Found Claude Code and Codex on this computer."),
+    ).toBeInTheDocument();
   });
 
-  it("localizes them rather than rendering the English seed", () => {
-    renderWithI18n(<StepWelcome onNext={vi.fn()} />, { locale: "zh-Hans" });
+  it("says when nothing was found, so the next step's install rows are expected", () => {
+    renderWithI18n(<StepWelcome onStart={vi.fn()} detectedProviders={[]} />);
 
-    expect(screen.getByText("进行中")).toBeInTheDocument();
-    expect(screen.getByText("审核中")).toBeInTheDocument();
-    expect(screen.getAllByText("已完成")).toHaveLength(2);
-    expect(screen.queryByText("In Progress")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/No coding tools found on this computer yet/),
+    ).toBeInTheDocument();
+  });
+
+  it("does not talk about this computer on web", () => {
+    renderWithI18n(<StepWelcome onStart={vi.fn()} isWeb />);
+
+    expect(screen.queryByText(/on this computer/)).not.toBeInTheDocument();
+    expect(screen.getByText("Connect a computer")).toBeInTheDocument();
+  });
+
+  it("offers the existing-user skip only when given one", async () => {
+    const onSkip = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = renderWithI18n(<StepWelcome onStart={vi.fn()} />);
+    expect(
+      screen.queryByRole("button", { name: "I've used Multica before" }),
+    ).not.toBeInTheDocument();
+
+    rerender(<StepWelcome onStart={vi.fn()} onSkip={onSkip} />);
+    await userEvent.click(screen.getByRole("button", { name: "I've used Multica before" }));
+    expect(onSkip).toHaveBeenCalledOnce();
   });
 });

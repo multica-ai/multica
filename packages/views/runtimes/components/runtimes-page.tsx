@@ -26,7 +26,6 @@ import {
   memberNeedsMikaSetup,
   useBootstrapMika,
 } from "@multica/core/onboarding";
-import { MIKA_PLACEHOLDER_EMOJI } from "../../onboarding/components/mika-intro";
 import {
   useRequiredWorkspaceSlug,
   useWorkspacePaths,
@@ -101,6 +100,11 @@ import {
   useHealthLabel,
 } from "./shared";
 import { useT, useTimeAgo } from "../../i18n";
+
+/** Mirrors `mikaAgentAvatarURL` in server/internal/handler/mika_agent.go.
+ *  Placeholder until Mika has real artwork — these two must move together or
+ *  this page shows one face and the created agent another. */
+const MIKA_PLACEHOLDER_EMOJI = "🦄";
 
 export interface RuntimesPageProps {
   /** Desktop-only daemon id used to identify this device. */
