@@ -89,6 +89,10 @@ const (
 	// nothing is pending — the trigger is answered by accepting the issue out of
 	// Triage, not by waiting.
 	ReasonIssueInTriage ReasonCode = "issue_in_triage"
+	// ReasonProjectAccessBlocked: the issue is in a private project that the
+	// run's member or the agent's owner cannot access (MUL-8472). The caller
+	// already sees the issue, so the code reveals nothing new about it.
+	ReasonProjectAccessBlocked ReasonCode = "project_access_blocked"
 	// ReasonQuotaExceeded is a policy-neutral refusal for an exhausted
 	// Cloud-provided autopilot interval.
 	ReasonQuotaExceeded ReasonCode = "quota_exceeded"
