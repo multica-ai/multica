@@ -32,6 +32,8 @@ export const TEXT_PREVIEW_EXTENSIONS: ReadonlySet<string> = new Set([
   "jsonl",
   "ndjson",
   "xml",
+  "drawio",
+  "dio",
   "yml",
   "yaml",
   "toml",

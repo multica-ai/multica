@@ -126,6 +126,8 @@ When `S3_BUCKET` is unset, Multica uses local disk.
 | Variable | Default | Description |
 |---|---|---|
 | `MULTICA_MAX_PREVIEW_SIZE` | `2MiB` | Maximum body size for online text/HTML previews, up to `16MiB`. Accepts positive integer bytes or `KB`/`KiB`, `MB`/`MiB` (binary units). Valid values above `16MiB` are clamped to `16MiB`; invalid values use the default. Larger limits can slow browser previews, especially syntax highlighting and Markdown rendering. Restart the API after changing it. Upload and download limits are unchanged. |
+| `DRAWIO_VIEWER_URL` | `https://viewer.diagrams.net` | draw.io viewer that renders ```` ```drawio ```` blocks and `.drawio` / `.dio` attachments in a sandboxed iframe. Point it at a self-hosted `jgraph/drawio` on its own origin (not the Multica app origin) to keep diagrams inside your network. Must be an absolute `http`/`https` URL without query or fragment; an invalid value turns the preview off. If a reverse proxy sets a Content-Security-Policy, allow this origin in `frame-src` and `connect-src`. |
+| `DRAWIO_PREVIEW_DISABLED` | `false` | Set to `true` to turn the embedded draw.io preview off. Diagrams then show as XML source, and attachments stay downloadable. |
 
 ### S3 or compatible storage
 

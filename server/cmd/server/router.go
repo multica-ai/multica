@@ -153,6 +153,20 @@ func appURLFromEnv() string {
 	return strings.TrimRight(strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN")), "/")
 }
 
+// drawioViewerURLFromEnv resolves the draw.io viewer advertised in /api/config.
+// An invalid DRAWIO_VIEWER_URL turns the preview off with one warning instead
+// of failing startup: diagrams then show as XML, which is always safe.
+func drawioViewerURLFromEnv() string {
+	viewerURL, err := handler.ResolveDrawioViewerURL(
+		os.Getenv("DRAWIO_VIEWER_URL"),
+		os.Getenv("DRAWIO_PREVIEW_DISABLED") == "true",
+	)
+	if err != nil {
+		slog.Warn("draw.io preview disabled: invalid DRAWIO_VIEWER_URL", "error", err)
+	}
+	return viewerURL
+}
+
 // pluginActionBaseURL resolves the versioned public base a hook handler calls
 // back into. Managed deployments give the Plugin API its own hostname through
 // MULTICA_PLUGIN_API_URL; self-hosted and local deployments can leave it empty
@@ -437,6 +451,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		DisableWorkspaceCreation:       os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
 		WorkspaceCreationAllowedEmails: splitAndTrim(os.Getenv("WORKSPACE_CREATION_ALLOWED_EMAILS")),
 		VCSIntegrationEnabled:          os.Getenv("MULTICA_VCS_INTEGRATION_ENABLED") == "true",
+		DrawioViewerURL:                drawioViewerURLFromEnv(),
 		PublicURL:                      strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
 		AppURL:                         appURLFromEnv(),
 		TrustedProxies:                 parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
