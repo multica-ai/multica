@@ -765,6 +765,8 @@
       "send_with_body": "Will send with the draft text.",
       "confirm_add": "Add annotation",
       "save": "Save annotation",
+      "confirm_add_short": "Add",
+      "save_short": "Save",
       "add_comment": "Add to comment",
       "add": "Add to reply",
       "note_label": "Comment",

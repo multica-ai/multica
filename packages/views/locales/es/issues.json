@@ -748,6 +748,8 @@
       "send_with_body": "Se enviará con el texto del borrador.",
       "confirm_add": "Añadir anotación",
       "save": "Guardar anotación",
+      "confirm_add_short": "Añadir",
+      "save_short": "Guardar",
       "add_comment": "Añadir al comentario",
       "add": "Añadir a la respuesta",
       "note_label": "Comentario",
