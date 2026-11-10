@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "Mở trong Desktop"
+  },
+  "desktop": {
+    "link_other_instance": "Ứng dụng desktop đang kết nối tới một phiên bản Multica khác.",
+    "link_workspace_unavailable": "Không gian làm việc này không dùng được trong ứng dụng desktop."
+  },
   "inline_run": {
     "label": "Lần chạy của {{name}}",
     "stop": "Dừng",
@@ -38,10 +45,17 @@
   "working_filter_error": {
     "title": "Không thể tải các công việc có agent đang làm việc"
   },
+  "unread_filter_error": {
+    "title": "Không tải được các công việc chưa đọc của bạn"
+  },
   "status_catalog_error": {
     "title": "Không thể tải danh sách trạng thái",
     "hint": "Công việc chỉ hiển thị sau khi danh sách trạng thái tải xong.",
     "retry": "Thử lại"
+  },
+  "relation_filter_error": {
+    "title": "Không tải được bộ lọc \"Quan hệ với tôi\"",
+    "hint": "Các công việc lọc theo \"Tôi theo dõi\" hay \"Công việc của các agent của tôi\" chưa hiện được cho tới khi subscription và agent của bạn tải xong."
   },
   "source_context": {
     "create_action": "Tạo công việc con từ đây",
@@ -117,10 +131,10 @@
     "breadcrumb_title": "Công việc",
     "breadcrumb_workspace_fallback": "Không gian làm việc",
     "empty_title": "Chưa có công việc nào",
-    "move_failed": "Di chuyển công việc thất bại",
     "empty_description": "Một công việc là một phần việc cụ thể cho một thành viên hoặc một agent. Giao nó cho một agent và nó sẽ bắt đầu trên runtime của bạn.",
     "break_down_with_chat": "Tách nhỏ bằng trò chuyện",
-    "break_down_prompt": "Tôi muốn hoàn thành việc sau. Hãy hỏi tôi những gì bạn cần biết, rồi tách nó thành các công việc trong không gian làm việc này:\n\n"
+    "break_down_prompt": "Tôi muốn hoàn thành việc sau. Hãy hỏi tôi những gì bạn cần biết, rồi tách nó thành các công việc trong không gian làm việc này:\n\n",
+    "move_failed": "Di chuyển công việc thất bại"
   },
   "status": {
     "backlog": "Tồn đọng",
@@ -158,6 +172,7 @@
   },
   "filters": {
     "tooltip": "Lọc",
+    "active_section": "Đang bật",
     "placeholder": "Lọc...",
     "search_status": "Tìm kiếm trạng thái...",
     "no_results": "Không có kết quả",
@@ -174,6 +189,20 @@
     "section_project": "Dự án",
     "section_project_status": "Trạng thái dự án",
     "section_label": "Nhãn",
+    "section_relation": "Quan hệ với tôi",
+    "relation_assigned": "Được giao cho tôi",
+    "relation_created": "Do tôi tạo",
+    "relation_my_agents": "Công việc của các agent của tôi",
+    "relation_subscribed": "Tôi theo dõi",
+    "section_agent_status": "Trạng thái agent",
+    "agent_status_running": "Đang chạy",
+    "section_read_state": "Trạng thái đọc",
+    "read_state_unread": "Chưa đọc",
+    "operator_label": "Khớp",
+    "operator_is": "là",
+    "operator_is_not": "không phải là",
+    "modified_hint": "Đã đổi so với chế độ xem đã lưu",
+    "unsaved_changes_other": "{{count}} thay đổi chưa lưu",
     "section_date": "Ngày",
     "date_field": "Trường",
     "date_field_created": "Ngày tạo",
@@ -198,18 +227,6 @@
     "in_view": "Đã có trong chế độ xem này",
     "chip_edit": "Chỉnh sửa",
     "chip_save_as": "Lưu thành",
-    "active_section": "Đang bật",
-    "section_relation": "Quan hệ với tôi",
-    "relation_assigned": "Được giao cho tôi",
-    "relation_created": "Do tôi tạo",
-    "relation_my_agents": "Giao cho các agent của tôi",
-    "section_agent_status": "Trạng thái agent",
-    "agent_status_running": "Đang chạy",
-    "operator_label": "Khớp",
-    "operator_is": "là",
-    "operator_is_not": "không phải là",
-    "modified_hint": "Đã đổi so với chế độ xem đã lưu",
-    "unsaved_changes_other": "{{count}} thay đổi chưa lưu",
     "section_due_date": "Ngày đến hạn",
     "due_overdue": "Quá hạn",
     "due_today": "Hạn hôm nay",
@@ -255,10 +272,7 @@
     "advanced_group_match_trailing": "trong số này",
     "advanced_group_hint": "Các điều kiện trong nhóm này được nối bằng “{{word}}”",
     "advanced_add_to_group": "Thêm vào nhóm",
-    "advanced_turn_into_group": "Chuyển thành nhóm",
-    "relation_subscribed": "Tôi theo dõi",
-    "section_read_state": "Trạng thái đọc",
-    "read_state_unread": "Chưa đọc"
+    "advanced_turn_into_group": "Chuyển thành nhóm"
   },
   "display": {
     "tooltip": "Cài đặt hiển thị",
@@ -268,6 +282,7 @@
     "card_properties_section": "Thuộc tính thẻ",
     "columns_section": "Các cột",
     "columns_locked_by_filter": "Xóa bộ lọc trạng thái để hiện hoặc ẩn cột.",
+    "columns_shown": "Đã hiện {{count}}",
     "ascending_title": "Tăng dần",
     "descending_title": "Giảm dần",
     "newest_first": "Mới nhất trước",
@@ -301,7 +316,6 @@
     "card_labels": "Nhãn",
     "card_child_progress": "Tiến độ công việc con",
     "show_sub_issues": "Hiện công việc con",
-    "columns_shown": "Đã hiện {{count}}",
     "layout_options": "Tùy chọn {{layout}}"
   },
   "view": {
@@ -443,7 +457,18 @@
     "close": "Đóng xem trước"
   },
   "detail": {
+    "metadata_close": "Đóng siêu dữ liệu",
+    "metadata_copy": "Sao chép siêu dữ liệu",
+    "metadata_view": "Xem siêu dữ liệu",
+    "metadata_expand": "Mở rộng hộp thoại",
+    "metadata_restore": "Khôi phục kích thước hộp thoại",
+    "metadata_copy_failed": "Không sao chép được siêu dữ liệu",
+    "metadata_description": "Dữ liệu dạng khóa-giá trị do agent và các tích hợp ghi lại để phối hợp workflow.",
+    "section_load_failed_retry": "Không tải được. Thử lại",
     "not_found": "Công việc này không tồn tại hoặc đã bị xóa khỏi không gian làm việc này.",
+    "load_failed": "Không tải được công việc.",
+    "load_retry": "Thử lại",
+    "not_found_title": "Không tìm thấy công việc",
     "breadcrumb_project_unknown": "Dự án không xác định",
     "back": "Quay lại",
     "title_placeholder": "Tiêu đề công việc",
@@ -461,6 +486,17 @@
     "section_pull_requests": "Pull request",
     "section_metadata": "Siêu dữ liệu",
     "section_details": "Chi tiết",
+    "sidebar_settings": {
+      "open": "Tùy chỉnh thanh bên",
+      "title": "Thanh bên",
+      "reset": "Đặt lại",
+      "footer": "Kéo để sắp xếp lại. Áp dụng cho mọi công việc.",
+      "always_shown": "Luôn hiển thị",
+      "empty": "Không có mục nào trên công việc này",
+      "customize": "Tùy chỉnh",
+      "drag_handle": "Sắp xếp lại {{section}}",
+      "hidden_count_other": "{{count}} mục đã ẩn"
+    },
     "section_quick_actions": "Thao tác nhanh",
     "quick_actions_more": "Hiện thêm {{count}}",
     "quick_action_runs_as": "Chạy dưới danh nghĩa {{name}}",
@@ -511,6 +547,8 @@
     "unsubscribe": "Hủy đăng ký theo dõi",
     "delegated_subscription_badge": "Đang theo dõi qua agent",
     "delegated_subscription_hint": "Agent của bạn đã tạo công việc này thay mặt bạn, nên bạn được đăng ký theo dõi nó. Bạn sẽ nhận thông báo khi nó cần duyệt, hoàn thành hoặc bị tắc.",
+    "project_subscription_badge": "Qua dự án",
+    "project_subscription_hint": "Bạn đang theo dõi mọi công việc trong dự án này. Hủy theo dõi tại đây chỉ dừng thông báo cho công việc này.",
     "unsubscribe_this": "Hủy theo dõi công việc này",
     "unsubscribe_subtree": "Hủy theo dõi công việc này và các công việc con của nó",
     "unsubscribe_subtree_failed": "Không thể hủy theo dõi các công việc con. Hãy thử lại.",
@@ -525,6 +563,9 @@
     "archive_tooltip": "Lưu trữ",
     "pin_tooltip": "Ghim vào thanh bên",
     "unpin_tooltip": "Bỏ ghim khỏi thanh bên",
+    "quick_jump_label": "Điều hướng nhanh",
+    "description_nav_label": "Mô tả công việc",
+    "sub_issues_nav_progress": "Đã hoàn thành {{done}}/{{total}}",
     "thread_nav_label": "Đi tới luồng bình luận",
     "thread_nav_resolved_label": "{{title}} (đã giải quyết)",
     "thread_nav_reply_label": "{{author}}: {{title}}",
@@ -547,25 +588,12 @@
     "project_directory_path_copied_with_branch": "Đã sao chép đường dẫn thư mục dự án — công việc đang ở nhánh {{branch}}",
     "workdir_path_copy_failed": "Sao chép đường dẫn workdir thất bại",
     "workdir_path_unavailable": "Chưa có workdir cục bộ — công việc chưa được agent cục bộ chạy",
-    "pull_requests_empty_title": "Không có pull request nào được liên kết.",
-    "metadata_close": "Đóng siêu dữ liệu",
-    "metadata_copy": "Sao chép siêu dữ liệu",
-    "metadata_view": "Xem siêu dữ liệu",
-    "metadata_expand": "Mở rộng hộp thoại",
-    "metadata_restore": "Khôi phục kích thước hộp thoại",
-    "metadata_copy_failed": "Không sao chép được siêu dữ liệu",
-    "metadata_description": "Dữ liệu dạng khóa-giá trị do agent và các tích hợp ghi lại để phối hợp workflow.",
-    "section_load_failed_retry": "Không tải được. Thử lại",
-    "quick_jump_label": "Điều hướng nhanh",
-    "description_nav_label": "Mô tả công việc",
-    "sub_issues_nav_progress": "Đã hoàn thành {{done}}/{{total}}",
-    "not_found_title": "Không tìm thấy công việc",
-    "load_failed": "Không tải được công việc.",
-    "load_retry": "Thử lại"
+    "pull_requests_empty_title": "Không có pull request nào được liên kết."
   },
   "timeline": {
     "loading": "Đang tải...",
-    "jump_to_latest": "Nhảy tới mới nhất"
+    "jump_to_latest": "Nhảy tới mới nhất",
+    "new_comments_other": "{{count}} bình luận mới"
   },
   "activity": {
     "created": "đã tạo công việc này",
@@ -603,6 +631,7 @@
     "pr_auto_complete_disabled": "đã đặt công việc này giữ nguyên trạng thái khi PR hợp nhất",
     "pr_auto_complete_enabled": "đã đặt công việc này đổi trạng thái khi PR hợp nhất trở lại",
     "wakeup_created": "đã thêm một wakeup: {{condition}} · đánh thức {{agent}}",
+    "wakeup_created_scheduled": "đã thêm một wakeup cho {{agent}}: {{condition}}",
     "wakeup_triggered": "{{condition}} · đã đánh thức {{agent}}",
     "wakeup_triggered_merged": "{{condition}} · đã tham gia lần chạy đang chờ của {{agent}}",
     "wakeup_triggered_acknowledged": "{{condition}} · {{agent}} tự thực hiện việc này; không đánh thức lại",
@@ -620,7 +649,9 @@
     "wakeup_checkin_coalesced_other": "{{count}} lần kiểm tra âm thầm · mới nhất: {{note}}",
     "wakeup_chip_created_by": "Wakeup của {{name}}",
     "wakeup_chip_system": "Quy tắc hệ thống",
-    "wakeup_created_scheduled": "đã thêm một wakeup cho {{agent}}: {{condition}}"
+    "environment_stopped": "đã dừng môi trường {{name}}",
+    "environment_restarted": "đã khởi động lại môi trường {{name}}",
+    "environment_started": "đã khởi động môi trường {{name}}"
   },
   "comment": {
     "add_reaction": "Thêm biểu cảm",
@@ -720,10 +751,17 @@
     "restart_failed": "Không thể dừng lần chạy hiện tại. Tin nhắn của bạn chưa được gửi."
   },
   "reply": {
+    "recipients_changed": "Đã đổi đối tượng trả lời. Hãy kiểm tra lại người nhận trước khi gửi lại.",
     "placeholder": "Viết câu trả lời...",
     "annotations": {
+      "send_all": "Gửi tất cả",
+      "send_with_annotations_and_body": "Sẽ gửi kèm chú thích đã lưu ({{count}}) và bản nháp.",
+      "send_with_annotations": "Sẽ gửi kèm chú thích đã lưu ({{count}}).",
+      "send_with_body": "Sẽ gửi kèm bản nháp.",
       "confirm_add": "Thêm chú thích",
       "save": "Lưu chú thích",
+      "confirm_add_short": "Thêm",
+      "save_short": "Lưu",
       "add_comment": "Thêm vào bình luận",
       "add": "Thêm vào câu trả lời",
       "note_label": "Bình luận",
@@ -746,21 +784,21 @@
     "hover_header_queued_other": "{{count}} agent đang trong hàng đợi",
     "status_running": "Đang làm việc",
     "status_queued": "Đang trong hàng đợi",
+    "unread_completed": "{{agent}} đã hoàn thành · {{time}}",
+    "unread_failed": "Lần chạy của {{agent}} thất bại · {{time}}",
+    "unread_manual": "Đã đánh dấu chưa đọc",
     "empty_hover": "Hiện không có agent nào đang làm việc",
     "unknown_hover": "Agent đang làm việc: chưa tải",
     "filter_active_label": "Đang xem các công việc có agent đang làm việc",
     "tasks_count_other": "{{count}} lần chạy",
     "chip_agents_working_other": "{{count}} agent đang làm việc",
     "issues_count_other": "{{count}} công việc",
-    "chip_agents_working_unknown": "Agent đang làm việc: —",
-    "unread_completed": "{{agent}} đã hoàn thành · {{time}}",
-    "unread_failed": "Lần chạy của {{agent}} thất bại · {{time}}",
-    "unread_manual": "Đã đánh dấu chưa đọc"
+    "chip_agents_working_unknown": "Agent đang làm việc: —"
   },
   "filtered_empty": {
     "title": "Không có công việc nào khớp với các bộ lọc này",
-    "clear_button": "Xóa bộ lọc",
-    "unread_title": "Không có công việc chưa đọc"
+    "unread_title": "Không có công việc chưa đọc",
+    "clear_button": "Xóa bộ lọc"
   },
   "agent_live": {
     "is_working": "{{name}} đang làm việc",
@@ -775,6 +813,11 @@
     "cancel_failed": "Hủy lần chạy thất bại"
   },
   "execution_log": {
+    "latest": "Mới nhất",
+    "include_children": "Gồm cả công việc con",
+    "loading": "Đang tải các lượt chạy…",
+    "load_failed_retry": "Không tải được các lượt chạy. Thử lại",
+    "empty": "Không có lượt chạy nào trong phạm vi này.",
     "section": "Nhật ký thực thi",
     "cancel_task_tooltip": "Hủy lần chạy",
     "cancel_task_aria": "Hủy lần chạy",
@@ -874,6 +917,7 @@
     "col_tokens": "Token",
     "col_cost": "Chi phí",
     "tokens_count": "{{tokens}} token",
+    "credits_count": "{{credits}} credit {{provider}}",
     "details_toggle": "Chi tiết lượt chạy",
     "detail_breakdown": "Phân tích chi phí",
     "detail_total": "Tổng",
@@ -882,8 +926,7 @@
     "detail_cache": "Trúng bộ nhớ đệm",
     "cache_hit_value": "{{percent}} · tiết kiệm {{amount}}",
     "detail_time": "Thời gian",
-    "detail_branch": "Nhánh",
-    "credits_count": "{{credits}} credit {{provider}}"
+    "detail_branch": "Nhánh"
   },
   "terminate_dialog": {
     "title": "Dừng lần chạy này?",
@@ -893,6 +936,7 @@
     "confirm": "Dừng lần chạy"
   },
   "batch": {
+    "delete_restricted": "Bạn chỉ xóa được công việc do bạn tạo hoặc do các agent của bạn tạo. Chủ sở hữu và quản trị viên không gian làm việc xóa được mọi công việc.",
     "selected": "Đã chọn {{count}}",
     "status": "Trạng thái",
     "priority": "Độ ưu tiên",
@@ -905,8 +949,7 @@
     "delete_failed": "Xóa công việc thất bại",
     "delete_dialog_title_other": "Xóa {{count}} công việc?",
     "delete_dialog_desc_other": "Hành động này không thể hoàn tác. Nó sẽ xóa vĩnh viễn các công việc đã chọn và mọi dữ liệu liên quan.",
-    "cancel": "Hủy",
-    "delete_restricted": "Bạn chỉ xóa được công việc do bạn tạo hoặc do các agent của bạn tạo. Chủ sở hữu và quản trị viên không gian làm việc xóa được mọi công việc."
+    "cancel": "Hủy"
   },
   "card": {
     "update_failed": "Cập nhật công việc thất bại",
@@ -930,10 +973,17 @@
     "unassigned": "Chưa giao",
     "open_in_new_tab": "Mở trong tab mới",
     "pin_to_sidebar": "Ghim vào thanh bên",
+    "locate_in_sidebar": "Hiện trong thanh bên",
     "unpin_from_sidebar": "Bỏ ghim khỏi thanh bên",
+    "restore_to_inbox": "Khôi phục về hộp thư",
+    "mark_read": "Đánh dấu đã đọc",
+    "mark_unread": "Đánh dấu chưa đọc",
     "copy_link": "Sao chép liên kết",
     "copy_workdir_path": "Sao chép đường dẫn workdir cục bộ",
     "copy_project_directory_path": "Sao chép đường dẫn thư mục dự án",
+    "copy_identifier": "Sao chép định danh",
+    "identifier_copied": "Đã sao chép {{identifier}}",
+    "stop_agent_run": "Dừng lần chạy của {{name}}",
     "relations": "Quan hệ",
     "create_sub_issue": "Tạo công việc con",
     "set_parent_issue": "Đặt công việc cha...",
@@ -941,13 +991,7 @@
     "remove_parent_issue_success": "Đã xóa công việc cha",
     "add_sub_issue": "Thêm công việc con...",
     "delete_issue": "Xóa công việc",
-    "mark_duplicate": "Đánh dấu trùng lặp...",
-    "mark_read": "Đánh dấu đã đọc",
-    "mark_unread": "Đánh dấu chưa đọc",
-    "copy_identifier": "Sao chép định danh",
-    "identifier_copied": "Đã sao chép {{identifier}}",
-    "stop_agent_run": "Dừng lần chạy của {{name}}",
-    "restore_to_inbox": "Khôi phục về hộp thư"
+    "mark_duplicate": "Đánh dấu trùng lặp..."
   },
   "pickers": {
     "custom_property": {
@@ -1043,10 +1087,8 @@
     "variant_my_any": "Bất kỳ quan hệ nào",
     "variant_my_assigned": "Được giao cho tôi",
     "variant_my_created": "Do tôi tạo",
-    "variant_my_involved": "Liên quan"
+    "variant_my_involved": "Công việc của các agent của tôi"
   },
-  "view_selector": {},
-  "view_bar": {},
   "plugins": {
     "panels": "Plugin",
     "surface_failed": "{{name}} không thể tải giao diện của nó.",
@@ -1291,14 +1333,14 @@
       "other_done": "hoàn thành",
       "other_ended": "hoàn thành hoặc bị hủy",
       "other_in_review": "chuyển sang Đang duyệt",
+      "other_blocked": "chuyển sang Bị chặn",
       "max_fires": "Tối đa",
       "max_fires_times_other": "{{count}} lần",
       "missing_value": "Hãy chọn một giá trị.",
       "missing_issue": "Hãy chọn một công việc.",
       "checked": "Đã chọn",
       "unchecked": "Chưa chọn",
-      "assignee_comment_hint": "{{name}} là người được giao và đã chạy khi một thành viên bình luận. Quy tắc này tham gia lần chạy đó thay vì bắt đầu lần chạy khác; chỉ thêm nó để đưa thêm hướng dẫn cho lần chạy đó.",
-      "other_blocked": "chuyển sang Bị chặn"
+      "assignee_comment_hint": "{{name}} là người được giao và đã chạy khi một thành viên bình luận. Quy tắc này tham gia lần chạy đó thay vì bắt đầu lần chạy khác; chỉ thêm nó để đưa thêm hướng dẫn cho lần chạy đó."
     },
     "system": {
       "badge": "Hệ thống",
@@ -1322,15 +1364,16 @@
       "enable": "Bật cho công việc này",
       "toggle": "Đánh thức người được giao khi công việc con hoàn thành",
       "save_error": "Không thể lưu quy tắc hệ thống.",
-      "default_on": "Mặc định bật trong không gian làm việc này. Thay đổi mặc định tại Cài đặt → Wakeup.",
-      "default_off": "Mặc định tắt trong không gian làm việc này. Thay đổi mặc định tại Cài đặt → Wakeup.",
+      "default_on": "Mặc định bật trong không gian làm việc này.",
+      "default_off": "Mặc định tắt trong không gian làm việc này.",
       "notify_member": "Thông báo cho {{name}} trong hộp thư đến của họ",
       "instruction": "Việc cần làm khi được đánh thức",
       "instruction_edit": "Chỉnh sửa hướng dẫn",
       "instruction_default": "Chưa đặt trên công việc này; dùng mặc định:",
       "instruction_placeholder": "Để trống để dùng mặc định",
       "instruction_invalid": "Giữ hướng dẫn trong giới hạn 4.000 byte.",
-      "paused": "Đã tạm dừng: {{reason}}"
+      "paused": "Đã tạm dừng: {{reason}}",
+      "default_change": "Thay đổi mặc định"
     },
     "cond": {
       "status": "Khi công việc này chuyển sang {{status}}",
@@ -1345,12 +1388,12 @@
       "other_done": "Khi {{issue}} hoàn thành",
       "other_ended": "Khi {{issue}} hoàn thành hoặc bị hủy",
       "other_in_review": "Khi {{issue}} chuyển sang Đang duyệt",
+      "other_blocked": "Khi {{issue}} chuyển sang Bị chặn",
       "another_issue": "một công việc khác",
       "unknown_label": "một nhãn đã bị xóa",
       "unknown_property": "một thuộc tính đã bị xóa",
       "checked": "đã chọn",
-      "unchecked": "chưa chọn",
-      "other_blocked": "Khi {{issue}} chuyển sang Bị chặn"
+      "unchecked": "chưa chọn"
     },
     "wait": {
       "reply_from": "Đang chờ {{name}} trả lời",
@@ -1369,11 +1412,11 @@
       "other_done": "Đang chờ {{issue}}",
       "other_ended": "Đang chờ {{issue}} kết thúc",
       "other_in_review": "Đang chờ {{issue}} chuyển sang duyệt",
+      "other_blocked": "Đang chờ {{issue}} chuyển sang Bị chặn",
       "time": "{{time}} · đánh thức {{agent}}",
       "header": "{{agent}}: {{what}}",
       "paused": "Wakeup đã tạm dừng",
-      "open": "Hiện wakeup",
-      "other_blocked": "Đang chờ {{issue}} chuyển sang Bị chặn"
+      "open": "Hiện wakeup"
     },
     "paused": {
       "max_fires": "Đã dừng sau khi đạt {{count}} lần chạy",
@@ -1446,6 +1489,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "Hiện trong bình luận",
     "locate_description": "Hiện trong mô tả",
+    "copy_link": "Sao chép liên kết tới phiên bản mới nhất",
+    "not_found": "Không có sản phẩm bàn giao tên “{{name}}” trong công việc này",
+    "link_load_failed": "Không thể tải các sản phẩm bàn giao của công việc này để mở “{{name}}”. Hãy tải lại để thử lại.",
     "version_label": "Phiên bản {{version}} / {{total}}",
     "version_of": "v{{version}} / {{total}}",
     "info_source": "Nguồn",
@@ -1503,13 +1549,13 @@
       "statuses_other": "{{count}} trạng thái",
       "handoffs_other": "{{count}} bước bàn giao",
       "no_handoffs": "Không có bàn giao",
-      "new_blank": "Quy trình trống",
-      "from_template": "Từ mẫu có sẵn",
       "usage_default_other": "{{count}} dự án + công việc không dự án",
       "usage_default_none": "Công việc không thuộc dự án",
       "filter_projects": "Lọc dự án",
       "no_matching_projects": "Không có dự án phù hợp",
-      "default_covers_no_project": "Cũng áp dụng cho công việc không thuộc dự án"
+      "default_covers_no_project": "Cũng áp dụng cho công việc không thuộc dự án",
+      "new_blank": "Quy trình trống",
+      "from_template": "Từ mẫu có sẵn"
     },
     "editor": {
       "create_title": "Quy trình mới",
@@ -1645,7 +1691,6 @@
       "brief_header": "Bản tóm tắt quy trình mà lượt chạy này nhận được"
     },
     "detail": {
-      "follows_project": "(từ dự án)",
       "card_title": "{{workflow}} · từ {{project}}"
     },
     "list_separator": ", ",
@@ -1685,15 +1730,12 @@
       "name_placeholder": "Tên trạng thái",
       "add": "Thêm"
     },
-    "menu": {
-      "view_flow": "Xem toàn bộ luồng",
-      "switch": "Đổi quy trình"
-    },
     "flow": {
       "title": "Quy trình {{workflow}}",
       "scope_own": "Chỉ dự án này dùng quy trình này.",
       "no_handoff_here": "Không bàn giao",
-      "scope_shared_other": "{{count}} dự án dùng quy trình này. Các bàn giao của nó áp dụng cho mọi dự án đang dùng nó."
+      "scope_shared_other": "{{count}} dự án dùng quy trình này. Các bàn giao của nó áp dụng cho mọi dự án đang dùng nó.",
+      "switch": "Chuyển quy trình"
     },
     "templates": {
       "delivery": {
@@ -1763,6 +1805,9 @@
     "save_as_new": "Lưu thành chế độ xem mới",
     "save_as_new_hint": "Giữ nguyên “{{name}}”",
     "save_as_view": "Lưu thành chế độ xem",
+    "save_view": "Lưu chế độ xem",
+    "add_filter": "Thêm bộ lọc",
+    "setup_hint": "Chưa có điều kiện nào, nên chế độ xem này hiện mọi công việc",
     "set_by_view": "Đặt bởi chế độ xem này",
     "new_issue": "Công việc mới",
     "unavailable": "Chế độ xem này không còn khả dụng",
@@ -1788,16 +1833,133 @@
       "row_actions": "Hành động cho {{name}}",
       "empty_title": "Chưa có chế độ xem đã lưu nào",
       "empty_description": "Thiết lập bộ lọc và tùy chọn hiển thị trong danh sách công việc, rồi lưu chúng thành một chế độ xem."
+    }
+  },
+  "app_calls": {
+    "section_title": "Ứng dụng",
+    "chips_label": "Ứng dụng dùng trong lượt chạy này",
+    "calls_count_other": "{{count}} cuộc gọi",
+    "more": "+{{count}} thêm",
+    "scope": {
+      "team": "Tài khoản nhóm",
+      "personal": "Tài khoản cá nhân"
     },
-    "save_view": "Lưu chế độ xem",
-    "add_filter": "Thêm bộ lọc",
-    "setup_hint": "Chưa có điều kiện nào, nên chế độ xem này hiện mọi công việc"
+    "outcome": {
+      "ok": "Đã chạy",
+      "error": "Thất bại",
+      "blocked": "Đã chặn",
+      "pending": "Đang chờ",
+      "approved": "Đã duyệt",
+      "rejected": "Đã từ chối",
+      "rate_limited": "Vượt giới hạn tần suất"
+    }
   },
-  "unread_filter_error": {
-    "title": "Không tải được các công việc chưa đọc của bạn"
-  },
-  "relation_filter_error": {
-    "title": "Không tải được bộ lọc \"Quan hệ với tôi\"",
-    "hint": "Các công việc lọc theo \"Tôi theo dõi\" hay \"Giao cho các agent của tôi\" chưa hiện được cho tới khi subscription và agent của bạn tải xong."
+  "environments": {
+    "section_title": "Môi trường",
+    "running_count_other": "{{count}} đang chạy",
+    "this_machine": "Máy này",
+    "unknown_machine": "Máy không xác định",
+    "state": {
+      "starting": "Đang khởi động",
+      "running": "Đang chạy",
+      "exited": "Đã thoát",
+      "stopped": "Đã dừng",
+      "unreachable": "Không phản hồi",
+      "stopping": "Đang dừng",
+      "preparing": "Đang chuẩn bị"
+    },
+    "expires_in_minutes_other": "Hết hạn sau {{count}} phút",
+    "expires_in_hours_other": "Hết hạn sau {{count}} giờ",
+    "expires_in_days_other": "Hết hạn sau {{count}} ngày",
+    "started_ago": "Bắt đầu {{time}}",
+    "ended_ago": "Kết thúc {{time}}",
+    "last_seen": "Thấy lần cuối {{time}}",
+    "ended_count_other": "{{count}} đã kết thúc",
+    "detected_hint": "Phát hiện đang lắng nghe trong thư mục của một lần chạy thuộc công việc này",
+    "remote_hint": "Chạy trên {{machine}}. URL localhost chỉ mở được trên máy đó.",
+    "localhost_hint": "URL localhost chỉ mở được trên máy đang chạy nó.",
+    "open": "Mở",
+    "copy_url": "Sao chép URL",
+    "copied": "Đã sao chép URL",
+    "copy_failed": "Không thể sao chép URL",
+    "offline": "Ngoại tuyến",
+    "machine_offline": "{{machine}} đang ngoại tuyến",
+    "more_actions": "Thêm hành động",
+    "view_logs": "Xem nhật ký",
+    "restart": "Khởi động lại",
+    "stop": "Dừng",
+    "stop_confirm_item": "Dừng…",
+    "run_first": "lượt chạy đầu tiên",
+    "run_nth_other": "lượt chạy {{count}}",
+    "someone": "Ai đó",
+    "started_by": "Khởi động bởi {{name}}",
+    "restarted_by": "Khởi động lại bởi {{name}}",
+    "started_by_agent_in_run": "Khởi động bởi {{name}} trong {{run}}",
+    "stopped_by": "Dừng bởi {{name}}",
+    "stopped_on_expiry": "Đã dừng khi hết hạn",
+    "exited_ago": "Đã thoát {{time}}",
+    "exit_code": "Mã thoát {{code}}",
+    "detected_label": "Dịch vụ đã phát hiện · {{name}}",
+    "detected_no_logs": "Dịch vụ này không được khởi động từ cấu hình môi trường nên không có nhật ký và không thể khởi động lại.",
+    "offline_hint": "Khả dụng khi máy này trực tuyến trở lại.",
+    "outdated_hint": "Cập nhật Multica trên máy này để quản lý từ đây.",
+    "no_permission_hint": "Chỉ thành viên được dùng máy này mới có thể dừng hoặc khởi động lại nó.",
+    "waiting_machine": "Đang chờ máy",
+    "waiting_ready": "Đang chờ nó sẵn sàng",
+    "no_response": "Không phản hồi",
+    "action_failed": {
+      "stop": "Không dừng được",
+      "restart": "Không khởi động lại được",
+      "start": "Không khởi động được"
+    },
+    "stop_confirm_title": "Dừng {{name}}?",
+    "stop_confirm_body": "Dịch vụ này ({{process}}) được phát hiện, không khởi động từ cấu hình môi trường. Một khi đã dừng thì không thể khởi động lại tại đây; cần một agent khởi động lại nó.",
+    "cancel": "Hủy",
+    "preparing_title": "{{name}} đang chuẩn bị môi trường",
+    "preparing_hint": "Nó sẽ hiện tại đây khi bắt đầu chạy",
+    "start_menu": {
+      "trigger": "Khởi động một môi trường",
+      "note": "Khởi động từ cấu hình môi trường của dự án, dùng code từ lượt chạy mới nhất trên máy này.",
+      "no_permission": "Chỉ thành viên được dùng một máy mới có thể khởi động môi trường trên máy đó.",
+      "nothing_to_start": "Công việc này chưa chạy lần nào, hoặc code từ các lượt chạy trước đã bị dọn sạch, nên không có gì để khởi động trực tiếp.",
+      "ask_agent": "Nhờ {{name}} khởi động",
+      "ask_any_agent": "Nhờ một agent khởi động",
+      "new_run": "Lượt chạy mới",
+      "preparing": "Đang chuẩn bị",
+      "ask_agent_hint": "{{name}} sẽ chuẩn bị sẵn code của công việc này rồi khởi động môi trường. Nếu dự án không có cấu hình môi trường, agent sẽ tự tìm cách khởi động.",
+      "ask_any_agent_hint": "Agent sẽ chuẩn bị sẵn code của công việc này rồi khởi động môi trường. Nếu dự án không có cấu hình môi trường, agent sẽ tự tìm cách khởi động.",
+      "ask_failed": "Không nhờ được agent",
+      "agent_instruction": "Khởi động môi trường: chuẩn bị sẵn code của công việc này, rồi chạy `multica env start` cho các môi trường mà dự án khai báo; nếu dự án không khai báo môi trường nào, tự tìm cách khởi động. Giữ cho nó chạy và trả lời kèm địa chỉ của nó."
+    },
+    "log": {
+      "title": "{{name}} · Nhật ký",
+      "filter": "Lọc nhật ký",
+      "wrap": "Ngắt dòng",
+      "follow": "Theo dõi mới nhất",
+      "copy": "Sao chép",
+      "copied": "Đã sao chép nhật ký",
+      "copy_failed": "Không sao chép được nhật ký",
+      "refresh": "Làm mới",
+      "footer_other": "Đang hiện {{count}} dòng cuối · cập nhật {{time}}",
+      "loading": "Đang đọc nhật ký…",
+      "empty": "Chưa có đầu ra",
+      "no_match": "Không có dòng khớp",
+      "no_response": "Máy không phản hồi",
+      "failed": "Không đọc được nhật ký: {{error}}",
+      "offline_excerpt": "Máy này đang ngoại tuyến. Đây là những dòng cuối nó in ra trước khi thoát.",
+      "offline_empty": "Nhật ký khả dụng khi máy này trực tuyến trở lại.",
+      "exit_divider": "Đã thoát lúc {{time}}",
+      "exit_divider_code": "Đã thoát lúc {{time}} · mã thoát {{code}}",
+      "stopped_divider": "Đã dừng lúc {{time}}"
+    },
+    "app_desktop_hint": "Một ứng dụng desktop. Chuyển sang cửa sổ của nó từ Multica Desktop trên máy đang chạy nó.",
+    "app_remote_hint": "Chạy trên {{machine}}. Chuyển sang cửa sổ của nó từ Multica Desktop trên máy đó.",
+    "focus": "Chuyển sang cửa sổ",
+    "focus_gone": "{{name}} không còn chạy nữa",
+    "focus_unsupported": "Daemon của máy này chưa chuyển được sang cửa sổ ứng dụng. Cập nhật Multica rồi thử lại.",
+    "focus_unavailable": "Daemon cục bộ không chạy",
+    "focus_failed": "Không chuyển được sang {{name}}",
+    "retry": "Thử lại",
+    "dismiss": "Bỏ qua"
   }
 }

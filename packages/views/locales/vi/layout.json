@@ -26,8 +26,8 @@
     "runtime": "Runtime",
     "attachment": "Tệp đính kèm",
     "create_agent": "Tạo Agent",
-    "unknown": "Trang không xác định",
-    "my_agents": "Việc của các agent của tôi"
+    "my_agents": "Việc của các agent của tôi",
+    "unknown": "Trang không xác định"
   },
   "help": {
     "trigger": "Trợ giúp",
@@ -35,8 +35,32 @@
     "docs": "Tài liệu",
     "changelog": "Nhật ký thay đổi",
     "discord": "Discord",
+    "star_on_github": "Gắn sao trên GitHub",
     "feedback": "Phản hồi",
     "server_version": "Phiên bản máy chủ {{version}}"
+  },
+  "whats_new": {
+    "trigger": "Có gì mới",
+    "panel": {
+      "title": "Có gì mới",
+      "close": "Đóng",
+      "new": "Mới",
+      "release_notes": "Ghi chú phát hành v{{version}}",
+      "full_changelog": "Toàn bộ changelog"
+    },
+    "action": {
+      "try": "Thử",
+      "open": "Mở",
+      "learn_more": "Tìm hiểu thêm"
+    }
+  },
+  "star_prompt": {
+    "title_other": "{{agent}} đã hoàn thành {{count}} công việc",
+    "body": "Nếu Multica hữu ích với bạn, một sao trên GitHub sẽ giúp các nhóm khác tìm thấy nó.",
+    "star": "Gắn sao",
+    "star_label": "Gắn sao cho Multica trên GitHub",
+    "later": "Để sau",
+    "close": "Đóng"
   },
   "workspace_loader": {
     "loading_workspace": "Đang tải không gian làm việc…",
@@ -54,15 +78,11 @@
     "workspaces_label": "Không gian làm việc",
     "create_workspace": "Tạo không gian làm việc",
     "pending_invitations_label": "Lời mời đang chờ",
-    "invitation_workspace_fallback": "Không gian làm việc",
-    "invitation_join": "Tham gia",
-    "invitation_decline": "Từ chối",
     "log_out": "Đăng xuất",
     "new_issue": "Công việc mới",
     "pinned_label": "Đã ghim",
     "show_more_pins": "Hiển thị thêm {{count}}…",
-    "show_fewer_pins": "Hiển thị ít hơn",
-    "discord_card": {}
+    "show_fewer_pins": "Hiển thị ít hơn"
   },
   "spaces": {
     "work": "Công việc",
@@ -77,19 +97,23 @@
     "chat": "Trò chuyện",
     "autopilots": "Auto",
     "switch_workspace": "Chuyển không gian làm việc",
-    "invitation_from": "{{name}} đã mời bạn",
+    "pin_workspace": "Ghim không gian làm việc",
+    "unpin_workspace": "Bỏ ghim không gian làm việc",
     "open_in_new_window": "Mở trong cửa sổ mới",
     "open_in_new_window_click": "Nhấp",
     "open_in_other_window": "Đã mở trong cửa sổ khác",
     "in_other_window": "Cửa sổ khác",
-    "all_workspaces_open": "Mọi không gian làm việc đã được mở trong cửa sổ",
-    "pin_workspace": "Ghim không gian làm việc",
-    "unpin_workspace": "Bỏ ghim không gian làm việc"
+    "all_workspaces_open": "Mọi không gian làm việc đã được mở trong cửa sổ"
+  },
+  "bottom_bar": {
+    "label": "Thanh trạng thái",
+    "working_other": "{{count}} agent đang làm việc"
   },
   "panels": {
     "work": {
       "my_agents": "Việc của các agent của tôi",
       "all_issues": "Tất cả công việc",
+      "unread": "Chưa đọc",
       "views": "Chế độ xem",
       "new_project": "Dự án mới",
       "new_issue_in_project": "Công việc mới trong {{name}}",
@@ -97,6 +121,7 @@
       "project_issues": "Công việc trong {{name}}",
       "project_issues_empty": "Không có công việc",
       "project_issues_error": "Không tải được công việc",
+      "project_issues_retry": "Thử lại",
       "project_issues_settings": "Công việc trong dự án",
       "settings_status": "Trạng thái",
       "settings_assignee": "Người được giao",
@@ -104,6 +129,7 @@
       "assignee_me": "Tôi",
       "assignee_my_agents": "Các agent của tôi",
       "assignee_me_and_my_agents": "Tôi và các agent của tôi",
+      "assignee_projects_only": "Chỉ áp dụng cho các công việc liệt kê trong Dự án",
       "reset": "Đặt lại",
       "load_more": "Tải thêm",
       "show_less": "Hiện ít hơn",
@@ -121,25 +147,26 @@
       "view_actions": "Hành động cho {{name}}",
       "view_copy_link": "Sao chép liên kết",
       "view_remove": "Xóa khỏi thanh bên",
+      "view_edit": "Sửa chế độ xem",
       "view_rename": "Đổi tên",
       "view_duplicate": "Nhân bản",
-      "view_delete": "Xóa chế độ xem",
-      "unread": "Chưa đọc",
-      "project_issues_retry": "Thử lại"
+      "view_delete": "Xóa chế độ xem"
     },
     "team": {
       "new_agent": "Agent mới",
       "needs_attention": "Cần chú ý",
       "stuck_other": "{{count}} tác vụ đang chờ runtime ngoại tuyến",
       "working_now": "Đang làm việc",
+      "show_more_agents": "Hiện thêm {{count}}…",
+      "show_fewer_agents": "Hiện ít hơn",
       "running_tasks_other": "{{count}} tác vụ đang chạy",
       "all_agents": "Tất cả agent",
       "my_agents": "Agent của tôi",
       "squads_and_members": "Squad và thành viên",
       "members_other": "{{count}} thành viên",
       "resources": "Tài nguyên",
-      "invite_member": "Mời thành viên",
-      "runtimes_online_other": "{{count}} đang trực tuyến"
+      "runtimes_online_other": "{{count}} đang trực tuyến",
+      "invite_member": "Mời thành viên"
     },
     "autopilots": {
       "all": "Tất cả autopilot",
@@ -156,6 +183,8 @@
       "dark": "Tối",
       "system": "Hệ thống"
     },
+    "mode": "Chế độ",
+    "appearance_settings": "Cài đặt giao diện",
     "language": "Ngôn ngữ",
     "shortcuts": "Phím tắt"
   },
@@ -182,21 +211,6 @@
   "object_page": {
     "toggle_panel": "Bật/tắt thanh bên phải",
     "properties": "Thuộc tính"
-  },
-  "whats_new": {
-    "trigger": "Có gì mới",
-    "panel": {
-      "title": "Có gì mới",
-      "close": "Đóng",
-      "new": "Mới",
-      "release_notes": "Ghi chú phát hành v{{version}}",
-      "full_changelog": "Toàn bộ changelog"
-    },
-    "action": {
-      "try": "Thử",
-      "open": "Mở",
-      "learn_more": "Tìm hiểu thêm"
-    }
   },
   "feature_intro": {
     "read_docs": "Đọc docs",
