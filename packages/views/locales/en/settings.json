@@ -828,6 +828,21 @@
     "title": "Inbox Notifications",
     "description": "Muted events remain visible on the issue.",
     "toast_failed": "Failed to update notification settings",
+    "inbox_mode": {
+      "title": "Inbox mode",
+      "note": "Applies to new notifications only and doesn't change your subscriptions.",
+      "all": "All",
+      "focused": "Focused"
+    },
+    "focused": {
+      "reply_group": "Needs my reply",
+      "agent_group": "Agent updates",
+      "focused_assigned": "I'm assigned to an issue",
+      "focused_blocked": "My issue moves to Blocked",
+      "focused_mentioned": "I'm mentioned in a comment",
+      "focused_thread_reply": "Someone replies in my thread",
+      "focused_agent_activity": "An agent replies on my issue"
+    },
     "groups": {
       "assignments": {
         "label": "Assignments",

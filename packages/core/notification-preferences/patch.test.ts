@@ -83,4 +83,60 @@ describe("notification preference patches", () => {
       ),
     ).toEqual({});
   });
+  it("diffs inbox mode and focused keys against their own defaults", () => {
+    expect(
+      deriveNotificationPreferencePatch(
+        { comments: "muted" },
+        { comments: "muted", inbox_mode: "focused" },
+      ),
+    ).toEqual({ inbox_mode: "focused" });
+
+    expect(
+      deriveNotificationPreferencePatch(
+        { inbox_mode: "focused" },
+        { inbox_mode: "focused", focused_blocked: "off" },
+      ),
+    ).toEqual({ focused_blocked: "off" });
+
+    expect(
+      deriveNotificationPreferencePatch(
+        { inbox_mode: "focused", focused_blocked: "off" },
+        {},
+      ),
+    ).toEqual({ inbox_mode: "all", focused_blocked: "on" });
+  });
+
+  it("keeps inbox mode and focused defaults sparse when applied", () => {
+    expect(
+      applyNotificationPreferencePatch(
+        { comments: "muted", focused_mentioned: "off" },
+        { inbox_mode: "focused", focused_mentioned: "on" },
+      ),
+    ).toEqual({ comments: "muted", inbox_mode: "focused" });
+
+    expect(
+      applyNotificationPreferencePatch(
+        { inbox_mode: "focused" },
+        { inbox_mode: "all", focused_assigned: "off" },
+      ),
+    ).toEqual({ focused_assigned: "off" });
+  });
+
+  it("rolls back a focused key to its previous value", () => {
+    expect(
+      rollbackNotificationPreferencePatch(
+        { inbox_mode: "focused", focused_blocked: "off" },
+        { focused_blocked: "off" },
+        { inbox_mode: "focused" },
+      ),
+    ).toEqual({ inbox_mode: "focused" });
+
+    expect(
+      rollbackNotificationPreferencePatch(
+        { inbox_mode: "focused" },
+        { inbox_mode: "focused" },
+        { focused_thread_reply: "off" },
+      ),
+    ).toEqual({});
+  });
 });

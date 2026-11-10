@@ -819,6 +819,21 @@
     "title": "收件箱通知",
     "description": "关闭通知后，仍可在任务中查看相关动态。",
     "toast_failed": "更新通知设置失败",
+    "inbox_mode": {
+      "title": "收件箱模式",
+      "note": "仅对新通知生效，不会更改你的订阅。",
+      "all": "全部",
+      "focused": "仅重要"
+    },
+    "focused": {
+      "reply_group": "需要我回复",
+      "agent_group": "智能体动态",
+      "focused_assigned": "我被分配了任务",
+      "focused_blocked": "我的任务变为已阻塞",
+      "focused_mentioned": "有人在评论中提及我",
+      "focused_thread_reply": "有人回复了我的讨论串",
+      "focused_agent_activity": "智能体在我的任务中回复"
+    },
     "groups": {
       "assignments": {
         "label": "分配",

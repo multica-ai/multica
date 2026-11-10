@@ -828,6 +828,21 @@
     "title": "Notificaciones de la bandeja",
     "description": "Los eventos silenciados siguen visibles en la tarea.",
     "toast_failed": "Error al actualizar la configuración de notificaciones",
+    "inbox_mode": {
+      "title": "Modo de la bandeja",
+      "note": "Solo se aplica a las notificaciones nuevas y no cambia tus suscripciones.",
+      "all": "Todas",
+      "focused": "Lo importante"
+    },
+    "focused": {
+      "reply_group": "Requiere mi respuesta",
+      "agent_group": "Novedades de agentes",
+      "focused_assigned": "Me asignan una tarea",
+      "focused_blocked": "Mi tarea pasa a Bloqueado",
+      "focused_mentioned": "Me mencionan en un comentario",
+      "focused_thread_reply": "Responden en mi hilo",
+      "focused_agent_activity": "Un agente responde en mi tarea"
+    },
     "groups": {
       "assignments": {
         "label": "Asignaciones",

@@ -449,6 +449,19 @@ export class TestApiClient {
     return res.json();
   }
 
+  /** Reads the current workspace's notification preferences, or merges `patch` into them. */
+  async notificationPreferences(patch?: Record<string, string>): Promise<Record<string, string>> {
+    const res = await this.authedFetch(
+      "/api/notification-preferences",
+      patch ? { method: "PATCH", body: JSON.stringify({ preferences: patch }) } : undefined,
+    );
+    if (!res.ok) {
+      throw new Error(`notification preferences failed: ${res.status} ${await res.text()}`);
+    }
+    const body = (await res.json()) as { preferences?: Record<string, string> };
+    return body.preferences ?? {};
+  }
+
   /** Clean up all issues created during this test. */
   async cleanup() {
     if (this.seededIssueIds.length > 0 && this.workspaceId) {

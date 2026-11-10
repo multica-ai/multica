@@ -16,6 +16,12 @@ const NOTIFICATION_GROUPS = [
   "agent_activity",
 ] as const;
 
+// Focused-mode filters; their rows render only while the inbox is Focused.
+const FOCUSED_NOTIFICATION_GROUPS = [
+  { group: "reply_group", keys: ["focused_assigned", "focused_blocked", "focused_mentioned", "focused_thread_reply"] },
+  { group: "agent_group", keys: ["focused_agent_activity"] },
+] as const;
+
 export interface SettingsSearchPage {
   value: string;
   label: string;
@@ -175,6 +181,20 @@ export function useSettingsSearchIndex(
         title: t(($) => $.preferences.issue_fields_title),
         description: t(($) => $.issue.description),
       },
+      {
+        tab: "notifications",
+        anchor: "inbox-mode",
+        title: t(($) => $.notifications.inbox_mode.title),
+        description: `${t(($) => $.notifications.inbox_mode.all)} · ${t(($) => $.notifications.inbox_mode.focused)}`,
+      },
+      ...FOCUSED_NOTIFICATION_GROUPS.flatMap(({ group, keys }) =>
+        keys.map((key) => ({
+          tab: "notifications",
+          anchor: key,
+          title: t(($) => $.notifications.focused[key]),
+          description: t(($) => $.notifications.focused[group]),
+        })),
+      ),
       ...NOTIFICATION_GROUPS.map((group) => ({
         tab: "notifications",
         anchor: group,

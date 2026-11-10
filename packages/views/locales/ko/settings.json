@@ -819,6 +819,21 @@
     "title": "인박스 알림",
     "description": "알림을 꺼도 태스크에서 관련 활동을 볼 수 있습니다.",
     "toast_failed": "알림 설정을 업데이트하지 못했습니다",
+    "inbox_mode": {
+      "title": "인박스 모드",
+      "note": "새 알림에만 적용되며 팔로우 상태는 바뀌지 않습니다.",
+      "all": "전체",
+      "focused": "중요한 것만"
+    },
+    "focused": {
+      "reply_group": "내 응답이 필요함",
+      "agent_group": "에이전트 업데이트",
+      "focused_assigned": "태스크에 할당됨",
+      "focused_blocked": "내 태스크가 막힘 상태로 바뀜",
+      "focused_mentioned": "댓글에서 멘션됨",
+      "focused_thread_reply": "내 스레드에 답글이 달림",
+      "focused_agent_activity": "에이전트가 내 태스크에 답함"
+    },
     "groups": {
       "assignments": {
         "label": "할당",

@@ -819,6 +819,21 @@
     "title": "インボックス通知",
     "description": "通知をオフにしても、タスク上で履歴を確認できます。",
     "toast_failed": "通知設定を更新できませんでした",
+    "inbox_mode": {
+      "title": "インボックスのモード",
+      "note": "新しい通知にのみ適用され、フォロー状況は変わりません。",
+      "all": "すべて",
+      "focused": "重要のみ"
+    },
+    "focused": {
+      "reply_group": "自分の対応が必要",
+      "agent_group": "エージェントの更新",
+      "focused_assigned": "タスクの担当者に割り当てられた",
+      "focused_blocked": "自分のタスクがブロック中になった",
+      "focused_mentioned": "コメントでメンションされた",
+      "focused_thread_reply": "自分のスレッドに返信があった",
+      "focused_agent_activity": "エージェントが自分のタスクで返信した"
+    },
     "groups": {
       "assignments": {
         "label": "担当の割り当て",

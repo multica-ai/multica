@@ -11,7 +11,25 @@ export type NotificationGroupKey =
 
 export type NotificationGroupValue = "all" | "muted";
 
-export type NotificationPreferences = Partial<Record<NotificationGroupKey, NotificationGroupValue>>;
+export type InboxMode = "all" | "focused";
+
+export type FocusedNotificationKey =
+  | "focused_assigned"
+  | "focused_blocked"
+  | "focused_mentioned"
+  | "focused_thread_reply"
+  | "focused_agent_activity";
+
+export type FocusedNotificationValue = "on" | "off";
+
+export type NotificationPreferences = Partial<
+  Record<NotificationGroupKey, NotificationGroupValue> &
+    Record<FocusedNotificationKey, FocusedNotificationValue> & {
+      inbox_mode: InboxMode;
+    }
+>;
+
+export type NotificationPreferenceKey = keyof NotificationPreferences;
 
 export interface NotificationPreferenceResponse {
   workspace_id: string;
