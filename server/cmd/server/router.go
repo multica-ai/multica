@@ -2170,6 +2170,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
+					r.Get("/deliverables", h.ListIssueDeliverables)
 					r.Get("/children", h.ListChildIssues)
 					r.Get("/duplicates", h.ListIssueDuplicates)
 					r.Get("/labels", h.ListLabelsForIssue)

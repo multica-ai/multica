@@ -316,6 +316,7 @@ vi.mock("../../projects/components/project-picker", () => ({
 
 // Mock api
 const mockApiObj = vi.hoisted(() => ({
+  getBaseUrl: () => "",
   getIssue: vi.fn(),
   listTimeline: vi.fn().mockResolvedValue([]),
   listComments: vi.fn().mockResolvedValue([]),
@@ -344,6 +345,7 @@ const mockApiObj = vi.hoisted(() => ({
   addIssueReaction: vi.fn(),
   removeIssueReaction: vi.fn(),
   listAttachments: vi.fn().mockResolvedValue([]),
+  listIssueDeliverables: vi.fn().mockResolvedValue([]),
   addCommentReaction: vi.fn(),
   removeCommentReaction: vi.fn(),
   listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
@@ -470,10 +472,8 @@ vi.mock("@multica/core/issues/stores", async () => ({
 }));
 
 // Mock react-virtuoso: jsdom has no real layout, so the real Virtuoso would
-// compute a 0-height viewport and render nothing. The mock renders every item
-// inline so id="comment-..." nodes are always present in the DOM — this
-// matches the production cold-path where `initialItemCount` force-mounts
-// items[0..targetIdx], giving the deep-link effect a real target node.
+// compute a 0-height viewport and render nothing. Most tests render every item;
+// the windowed regression requires index navigation to mount an offscreen row.
 //
 // scrollIntoViewSpy: the deep-link effect no longer calls native
 // scrollIntoView (it drives the timeline container's scrollTop directly to
@@ -484,27 +484,86 @@ vi.mock("@multica/core/issues/stores", async () => ({
 // layout.
 const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
 const scrollToIndexSpy = vi.hoisted(() => vi.fn());
+const scrollIntoViewIndexSpy = vi.hoisted(() => vi.fn());
+const mockVirtualWindow = vi.hoisted(() => ({
+  enabled: false, delayedViewport: false, lateScrollReset: false, offscreenViewport: false, pendingSizeCorrection: false, holdAtIndex: false,
+  targetId: "", targetHeight: 100, scrollParent: null as HTMLElement | null,
+}));
 
 vi.mock("react-virtuoso", () => ({
   Virtuoso: forwardRef(function MockVirtuoso(
-    { data, itemContent, computeItemKey }: {
+    { data, itemContent, computeItemKey, customScrollParent, totalListHeightChanged }: {
       data: unknown[];
       itemContent: (i: number, item: unknown) => unknown;
       computeItemKey: (i: number, item: unknown) => React.Key;
+      customScrollParent?: HTMLElement;
+      totalListHeightChanged?: (height: number) => void;
     },
     ref: any,
   ) {
+    const [windowStart, setWindowStart] = useState(0);
+    const correctionTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+    useEffect(() => {
+      if (!mockVirtualWindow.holdAtIndex || !customScrollParent) return;
+      correctionTimer.current = setInterval(() => { customScrollParent.scrollTop = 0; }, 10);
+      return () => { if (correctionTimer.current) clearInterval(correctionTimer.current); };
+    }, [customScrollParent]);
+    const viewportMeasured = useRef(!mockVirtualWindow.delayedViewport && !mockVirtualWindow.offscreenViewport);
+    useEffect(() => {
+      const measured = () => {
+        viewportMeasured.current = true;
+        totalListHeightChanged?.(1000);
+      };
+      if (mockVirtualWindow.offscreenViewport && customScrollParent) {
+        const list = document.querySelector('[data-testid="virtuoso-mock"]')?.parentElement;
+        if (list) list.getBoundingClientRect = () => new DOMRect(0, 1000 - customScrollParent.scrollTop, 400, 100);
+        const timer = window.setInterval(() => {
+          if (customScrollParent.scrollTop > 0) { window.clearInterval(timer); measured(); }
+        }, 10);
+        return () => window.clearInterval(timer);
+      }
+      if (!mockVirtualWindow.delayedViewport) { measured(); return; }
+      const timer = window.setTimeout(measured, 100);
+      return () => window.clearTimeout(timer);
+    }, [totalListHeightChanged, customScrollParent]);
+    useEffect(() => {
+      if ((!mockVirtualWindow.lateScrollReset && !mockVirtualWindow.holdAtIndex) || !customScrollParent) return;
+      mockVirtualWindow.scrollParent = customScrollParent;
+      Object.defineProperty(customScrollParent, "clientHeight", { configurable: true, value: 200 });
+      customScrollParent.getBoundingClientRect = () => new DOMRect(0, 0, 400, 200);
+      const target = document.getElementById(`comment-${mockVirtualWindow.targetId}`);
+      if (target) {
+        target.getBoundingClientRect = () => new DOMRect(0, 250 - customScrollParent.scrollTop, 400, mockVirtualWindow.targetHeight);
+        const row = target.closest<HTMLElement>("[data-item-index]");
+        if (row) row.getBoundingClientRect = () => new DOMRect(0, -customScrollParent.scrollTop, 400, 500);
+      }
+    }, [customScrollParent, windowStart, data]);
+    const jump = (location: { index: number; offset?: number; done?: () => void }) => {
+      if (location.offset !== undefined && customScrollParent && mockVirtualWindow.holdAtIndex) {
+        if (correctionTimer.current) clearInterval(correctionTimer.current);
+        customScrollParent.scrollTop = location.offset;
+      }
+      if (mockVirtualWindow.enabled && viewportMeasured.current) setWindowStart(Math.max(0, location.index - 2));
+      if (mockVirtualWindow.lateScrollReset && customScrollParent) {
+        window.setTimeout(() => { customScrollParent.scrollTop = location.offset ?? 0; location.done?.(); }, 80);
+      } else if (!mockVirtualWindow.pendingSizeCorrection && !mockVirtualWindow.holdAtIndex) location.done?.();
+    };
     useImperativeHandle(ref, () => ({
-      // Real Virtuoso ref methods are not exercised by tests in this file
-      // since the deep-link cold-path drives the container's scrollTop on the
-      // real DOM node, not Virtuoso's imperative API.
-      scrollIntoView: vi.fn(),
-      scrollToIndex: scrollToIndexSpy,
+      scrollIntoView: (location: { index: number; done?: () => void }) => {
+        scrollIntoViewIndexSpy(location);
+        jump(location);
+      },
+      scrollToIndex: (location: { index: number }) => {
+        scrollToIndexSpy(location);
+        jump(location);
+      },
     }));
+    const start = mockVirtualWindow.enabled ? windowStart : 0;
+    const visible = mockVirtualWindow.enabled ? data.slice(start, start + 8) : data;
     return (
       <div data-testid="virtuoso-mock">
-        {data.map((item, i) => (
-          <div key={computeItemKey(i, item)}>{itemContent(i, item) as React.ReactElement}</div>
+        {visible.map((item, i) => (
+          <div key={computeItemKey(start + i, item)} data-item-index={start + i}>{itemContent(start + i, item) as React.ReactElement}</div>
         ))}
       </div>
     );
@@ -514,6 +573,16 @@ vi.mock("react-virtuoso", () => ({
 // jsdom's HTMLElement.prototype.scrollIntoView is a no-op stub; replace it
 // with a spy so the deep-link effect's call can be observed.
 beforeEach(() => {
+  mockVirtualWindow.enabled = false;
+  mockVirtualWindow.pendingSizeCorrection = false;
+  mockVirtualWindow.holdAtIndex = false;
+  mockVirtualWindow.delayedViewport = false;
+  mockVirtualWindow.offscreenViewport = false;
+  mockVirtualWindow.lateScrollReset = false;
+  mockVirtualWindow.targetId = "";
+  mockVirtualWindow.targetHeight = 100;
+  mockVirtualWindow.scrollParent = null;
+  scrollIntoViewIndexSpy.mockClear();
   scrollIntoViewSpy.mockClear();
   scrollToIndexSpy.mockClear();
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
@@ -736,6 +805,8 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listPins.mockResolvedValue([]);
     // /timeline returns the entries flat in chronological order (oldest first).
     mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
+    mockApiObj.listIssueDeliverables.mockResolvedValue([]);
+    mockApiObj.listComments.mockResolvedValue([]);
     mockApiObj.listIssueReactions.mockResolvedValue([]);
     mockApiObj.listIssueSubscribers.mockResolvedValue([]);
     mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
@@ -812,6 +883,75 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByRole("button", { name: "report.md, version 2" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "View all 1 deliverable" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "brief.pdf" })).toBeNull();
+  });
+
+  it("keeps images from comments outside the loaded history in deliverables", async () => {
+    const image: Attachment = { id: "historical-chart", workspace_id: "ws-1", issue_id: "issue-1", comment_id: "older-comment",
+      chat_session_id: null, chat_message_id: null, uploader_type: "agent", uploader_id: "agent-1",
+      filename: "historical-chart.png", content_type: "image/png", size_bytes: 100,
+      url: "/chart.png", download_url: "/chart.png", markdown_url: "/chart.png", created_at: "2026-01-01T00:00:00Z" };
+    mockApiObj.listTimeline.mockResolvedValue([]);
+    mockApiObj.listIssueDeliverables.mockResolvedValue([{ id: "older-comment", type: "comment", actor_type: "agent",
+      actor_id: "agent-1", created_at: image.created_at, attachments: [image] }]);
+    const root = {
+      id: "older-root", issue_id: "issue-1", author_type: "agent", author_id: "agent-1",
+      content: "Historical image discussion", type: "comment", parent_id: null,
+      created_at: image.created_at, updated_at: image.created_at, reactions: [], attachments: [],
+      resolved_at: null, resolved_by_type: null, resolved_by_id: null,
+    };
+    mockApiObj.listComments.mockResolvedValue([root, {
+      ...root, id: "older-comment", parent_id: root.id,
+      content: "Historical chart explanation", attachments: [image],
+    }]);
+    renderIssueDetail();
+    expect(await screen.findByRole("button", { name: "historical-chart.png" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View all 1 deliverable" }));
+    expect(await screen.findByTitle("historical-chart.png")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show in comments" })).toBeInTheDocument();
+    expect(mockApiObj.listComments).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Show in comments" }));
+    await waitFor(() => expect(hasHighlightedCommentBackground(
+      document.getElementById("comment-older-comment"),
+    )).toBe(true));
+    expect(mockApiObj.listComments).toHaveBeenCalledWith("issue-1", { thread: "older-comment" });
+    expect(screen.getByText("Historical chart explanation")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /deliverables$/ })).toBeNull();
+  });
+
+  it.each([100, 1200])("keeps a %i-pixel deliverable reply visible while the virtual list corrects its size", async (height) => {
+    mockVirtualWindow.enabled = true;
+    mockVirtualWindow.holdAtIndex = true;
+    mockVirtualWindow.targetId = "image-reply";
+    mockVirtualWindow.targetHeight = height;
+    const history = Array.from({ length: 120 }, (_, index) => ({
+      ...mockTimeline[0]!, id: `history-${index}`, parent_id: null, source_task_id: undefined,
+      content: `Historical comment ${index}`,
+      created_at: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+    }));
+    const root = history[115]!;
+    const image: Attachment = { id: "deep-image", workspace_id: "ws-1", issue_id: "issue-1",
+      comment_id: "image-reply", chat_session_id: null, chat_message_id: null,
+      uploader_type: "agent", uploader_id: "agent-1", filename: "deep-image.png",
+      content_type: "image/png", size_bytes: 100, url: "/image.png", download_url: "/image.png",
+      markdown_url: "/image.png", created_at: root.created_at };
+    mockApiObj.listTimeline.mockResolvedValue([...history, {
+      ...root, id: "image-reply", parent_id: root.id, content: "Deep image explanation", attachments: [image],
+    }]);
+    mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    renderIssueDetail();
+    fireEvent.click(await screen.findByRole("button", { name: "View all 1 deliverable" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show in comments" }));
+    await waitFor(() => expect(hasHighlightedCommentBackground(
+      document.getElementById("comment-image-reply"),
+    )).toBe(true));
+    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 150)); });
+    expect(mockVirtualWindow.scrollParent?.scrollTop).toBe(height === 100 ? 200 : 234);
+    expect(document.querySelectorAll('[id^="comment-history-"]').length).toBeLessThanOrEqual(8);
+    expect(mockApiObj.listComments).not.toHaveBeenCalled();
+    const jumps = scrollIntoViewIndexSpy.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "View all 1 deliverable" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show in comments" }));
+    await waitFor(() => expect(scrollIntoViewIndexSpy.mock.calls.length).toBeGreaterThan(jumps));
   });
 
   it("opens source-context creation from both a root comment and a reply", async () => {
@@ -2485,7 +2625,86 @@ describe("IssueDetail (shared)", () => {
     expect(screen.queryByText(/Show \d+ more activit/i)).not.toBeInTheDocument();
   });
 
+  it("does not mount offscreen reply bodies in a long discussion", async () => {
+    vi.stubGlobal("IntersectionObserver", class {
+      observe() {} unobserve() {} disconnect() {}
+    });
+    const root = { ...mockTimeline[0]!, id: "long-thread-root", parent_id: null, content: "Long discussion root" };
+    const replies = Array.from({ length: 200 }, (_, index) => ({
+      ...root, id: `offscreen-reply-${index}`, parent_id: root.id, content: `Offscreen body ${index}`,
+    }));
+    mockApiObj.listTimeline.mockResolvedValue([root, ...replies]);
+    mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    try {
+      renderIssueDetail();
+      await screen.findByText("Long discussion root");
+      expect(document.getElementById("comment-offscreen-reply-199")).not.toBeNull();
+      expect(screen.queryByText("Offscreen body 199")).toBeNull();
+      expect(readonlyContentRenders.filter((body) => body.startsWith("Offscreen body"))).toHaveLength(0);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   describe("highlightCommentId scroll-to-comment", () => {
+    it.each([
+      { kind: "root", delayedViewport: false, lateScrollReset: false },
+      { kind: "reply", delayedViewport: false, lateScrollReset: false },
+      { kind: "root", delayedViewport: true, lateScrollReset: false },
+      { kind: "reply", delayedViewport: false, lateScrollReset: true },
+      { kind: "reply", delayedViewport: false, lateScrollReset: false, offscreenViewport: true },
+      { kind: "reply", delayedViewport: false, lateScrollReset: false, pendingSizeCorrection: true },
+      { kind: "reply", delayedViewport: false, lateScrollReset: false, holdAtIndex: true },
+    ])("keeps long history virtualized for a $kind (late viewport: $delayedViewport, late scroll: $lateScrollReset, below fold: $offscreenViewport)", async ({ kind, delayedViewport, lateScrollReset, offscreenViewport, pendingSizeCorrection, holdAtIndex }) => {
+      mockVirtualWindow.holdAtIndex = !!holdAtIndex;
+      mockVirtualWindow.pendingSizeCorrection = !!pendingSizeCorrection;
+      mockVirtualWindow.enabled = true;
+      mockVirtualWindow.delayedViewport = delayedViewport;
+      mockVirtualWindow.offscreenViewport = !!offscreenViewport;
+      mockVirtualWindow.lateScrollReset = lateScrollReset;
+      const history = Array.from({ length: 120 }, (_, index) => ({
+        ...mockTimeline[0]!,
+        id: `history-${index}`,
+        parent_id: null,
+        source_task_id: undefined,
+        content: `Historical comment ${index}`,
+        created_at: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+      }));
+      const root = history[115]!;
+      const target = kind === "root" ? root : {
+        ...root,
+        id: "deep-reply",
+        parent_id: root.id,
+        content: "Offscreen reply target",
+      };
+      mockVirtualWindow.targetId = target.id;
+      mockApiObj.listTimeline.mockResolvedValue(kind === "root" ? history : [...history, target]);
+      mockApiObj.listTasksByIssue.mockResolvedValue([]);
+      renderIssueDetailWithHighlight(target.id);
+
+      await waitFor(() => expect(hasHighlightedCommentBackground(
+        document.getElementById(`comment-${target.id}`),
+      )).toBe(true));
+      if (lateScrollReset || holdAtIndex) {
+        await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 150)); });
+        expect(mockVirtualWindow.scrollParent?.scrollTop).toBe(200);
+      }
+      expect(screen.queryByTestId("virtuoso-mock")).not.toBeNull();
+      expect(document.querySelectorAll('[id^="comment-history-"]').length).toBeLessThanOrEqual(8);
+      expect(document.getElementById("comment-history-0")).toBeNull();
+      expect(scrollIntoViewIndexSpy).toHaveBeenCalledWith(expect.objectContaining({ index: 115 }));
+    });
+
+    it("waits for run grouping before consuming the comment landing", async () => {
+      let finishTasks!: (tasks: AgentTask[]) => void;
+      mockApiObj.listTasksByIssue.mockReturnValue(new Promise<AgentTask[]>((resolve) => { finishTasks = resolve; }));
+      renderIssueDetailWithHighlight("comment-2");
+      await waitFor(() => expect(document.getElementById("comment-comment-2")).not.toBeNull());
+      await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 60)); });
+      const landedBeforeGrouping = hasHighlightedCommentBackground(document.getElementById("comment-comment-2"));
+      await act(async () => { finishTasks([]); });
+      await waitFor(() => expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-2"))).toBe(true));
+      expect(landedBeforeGrouping).toBe(false);
+    });
+
     it("folds an assignment reply with its resolved parent and unfolds that thread for a notification", async () => {
       const run: AgentTask = { id: "ba2e8d1c-7f9b-4e2a-9c1d-123456789abc", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
         kind: "direct", status: "completed", priority: 0, created_at: "2026-01-16T00:00:00Z", started_at: null, dispatched_at: null,
@@ -2559,10 +2778,7 @@ describe("IssueDetail (shared)", () => {
     it("scrolls to the highlighted comment after both issue and timeline finish loading", async () => {
       renderIssueDetailWithHighlight("comment-2");
 
-      // Wait for the comment row to mount. With initialItemCount in
-      // production, items[0..targetIdx] are force-mounted on first commit;
-      // the mock unconditionally inline-renders every item, so this just
-      // waits for the regular render pass.
+      // Wait for the requested row to mount before checking its highlight.
       await waitFor(() => {
         expect(
           document.getElementById("comment-comment-2"),

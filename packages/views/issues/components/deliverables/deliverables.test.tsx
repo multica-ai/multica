@@ -212,6 +212,25 @@ describe("DeliverablesOverview", () => {
     return { onClose, onLocate };
   }
 
+  it("shows every uploaded image version as a separate selectable thumbnail", () => {
+    const older = { ...SHOT, id: "shot-old", created_at: "2026-09-19T10:00:00Z" };
+    const files = collectDeliverableFiles([comment("older-comment", [older]), ...TIMELINE]);
+    renderOverview({ files });
+    expect(screen.getAllByTitle("settings.png")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: /^Images\s*2$/ }));
+    expect(screen.getAllByTitle("settings.png")).toHaveLength(2);
+    fireEvent.click(screen.getAllByTitle("settings.png")[0]!);
+    expect(openAtMock).toHaveBeenCalledWith("shot-old");
+  });
+
+  it("offers a jump for every known posting comment", () => {
+    const { onLocate } = renderOverview();
+    const buttons = screen.getAllByRole("button", { name: "Show in comments" });
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[0]!);
+    expect(onLocate).toHaveBeenCalledWith({ kind: "comment", commentId: "c-1" });
+  });
+
   it("counts exactly what the sidebar counts", () => {
     renderOverview();
     const dialog = screen.getByRole("dialog", { name: "MUL-7588 deliverables" });

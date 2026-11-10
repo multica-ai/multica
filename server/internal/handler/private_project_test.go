@@ -202,22 +202,25 @@ func TestPrivateProjectSubtreeRunsAreRedacted(t *testing.T) {
 	agentID := dbfx.Agent(t, f.marker+" subtree agent", testRuntimeID, testutil.Cols{"owner_id": f.insider})
 	taskID := dbfx.Task(t, agentID, testutil.Cols{
 		"issue_id": f.secretIssue, "runtime_id": testRuntimeID, "status": "completed",
-		"result": testutil.Raw(`'{"output":"private subtree result"}'::jsonb`),
+		"result":       testutil.Raw(`'{"output":"private subtree result","comment":"private inline result"}'::jsonb`),
+		"handoff_note": "private handoff",
 	})
-	for _, userID := range []string{f.outsider, f.insider, testUserID} {
-		req := withURLParam(asUser(newRequest(http.MethodGet, "/api/issues/"+f.publicIssue+"/task-runs?scope=subtree", nil), userID), "id", f.publicIssue)
-		var runs []AgentTaskResponse
-		testutil.Call(t, testHandler.ListTasksByIssue, req).Want(http.StatusOK).JSON(&runs)
-		if len(runs) != 1 || runs[0].ID != taskID {
-			t.Fatalf("subtree runs = %+v, want descendant run %s", runs, taskID)
-		}
-		run := runs[0]
-		if userID == f.outsider {
-			if !run.Restricted || run.IssueID != "" || run.IssueTitle != "" || run.IssueIdentifier != "" || run.Result != nil {
-				t.Fatalf("private descendant run exposed to outsider: %+v", run)
+	for _, view := range []string{"", "&view=timeline"} {
+		for _, userID := range []string{f.outsider, f.insider, testUserID} {
+			req := withURLParam(asUser(newRequest(http.MethodGet, "/api/issues/"+f.publicIssue+"/task-runs?scope=subtree"+view, nil), userID), "id", f.publicIssue)
+			var runs []AgentTaskResponse
+			testutil.Call(t, testHandler.ListTasksByIssue, req).Want(http.StatusOK).JSON(&runs)
+			if len(runs) != 1 || runs[0].ID != taskID {
+				t.Fatalf("subtree runs = %+v, want descendant run %s", runs, taskID)
 			}
-		} else if run.Restricted || run.IssueID != f.secretIssue || run.IssueTitle == "" || run.Result == nil {
-			t.Fatalf("authorized viewer lost descendant run content: %+v", run)
+			run := runs[0]
+			if userID == f.outsider {
+				if !run.Restricted || run.IssueID != "" || run.IssueTitle != "" || run.IssueIdentifier != "" || run.Result != nil || run.HandoffNote != "" {
+					t.Fatalf("private descendant run exposed to outsider: %+v", run)
+				}
+			} else if run.Restricted || run.IssueID != f.secretIssue || run.IssueTitle == "" || run.Result == nil {
+				t.Fatalf("authorized viewer lost descendant run content: %+v", run)
+			}
 		}
 	}
 }
