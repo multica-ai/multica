@@ -10,10 +10,13 @@ Appearance → Theme options**. Themes never run JavaScript.
 > API. They may change without notice until it is declared stable; check
 > this page when a theme stops looking right after an update.
 
-Install a theme from the community theme store with **Settings → Appearance
-→ Browse**, or with **Import theme**, from a `.zip` of the folder or from the
+**Settings → Appearance → Manage** lists every theme: the built-in ones, the
+ones on the device, and the community theme store. Install a theme from the
+store there, or with **Import theme**, from a `.zip` of the folder or from the
 folder itself. Themes are saved on the device, like every other Appearance
-setting, and **Remove theme** deletes one and goes back to Default.
+setting; **Remove** on a theme's card deletes it, and goes back to Default
+when it was in use. **Check for updates** looks for new releases of the
+themes installed from the store.
 
 The built-in themes compile to exactly this format and live in
 `packages/core/appearance/built-in-themes.ts`: Pop shows options and CSS,
@@ -264,8 +267,7 @@ back on.
 ## Writing a theme
 
 Start from a built-in theme: pick it in **Settings → Appearance**, then
-choose **Duplicate “…” as a new theme** from the **⋯** menu next to
-**Import theme**. The
+choose **Duplicate “…” as a new theme** from the **Import theme** menu. The
 copy gets its own id (`pop-copy`, `pop-copy-2`, …), a manifest with the
 theme's options, and a `theme.css` with one declaration per line. Importing
 the copy unchanged looks exactly like the original.
@@ -338,8 +340,8 @@ fails keeps the previous one listed. The app only installs the exact
 sanitizer as an imported theme.
 
 A self-hosted server reads the official registry by default.
-`MULTICA_THEME_STORE=off` turns the store off: no **Browse** entry, and the
-server makes no registry requests. `MULTICA_THEME_REGISTRY_URL` points it at
+`MULTICA_THEME_STORE=off` turns the store off: **Manage** lists only the
+themes on the device, and the server makes no registry requests. `MULTICA_THEME_REGISTRY_URL` points it at
 another registry's `index.json`.
 
 ## Variable reference

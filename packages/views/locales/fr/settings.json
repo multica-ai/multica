@@ -246,14 +246,19 @@
       "beta_note": "Les thèmes personnalisés sont en bêta. Les variables et le manifeste qu’un thème utilise peuvent changer, et le thème devra peut-être être mis à jour."
     },
     "store": {
-      "button": "Parcourir",
-      "title": "Boutique de thèmes",
-      "description": "Des thèmes créés par la communauté. Chaque version est vérifiée automatiquement avant d’apparaître ici.",
-      "search": "Rechercher par nom ou auteur",
+      "manage": "Gérer",
+      "title": "Thèmes",
+      "description": "Les thèmes intégrés, ceux que vous avez installés et ceux créés par la communauté.",
+      "description_local": "Les thèmes intégrés et ceux que vous avez installés.",
+      "search": "Rechercher des thèmes",
+      "installed_only": "Afficher uniquement les thèmes installés",
+      "showing_one": "{{count}} thème affiché",
+      "showing_other": "{{count}} thèmes affichés",
+      "installed": "Installé",
       "loading": "Chargement des thèmes",
       "error": "Impossible de charger la boutique de thèmes. Réessayez dans un instant.",
       "retry": "Réessayer",
-      "empty": "Aucun thème n’est encore proposé.",
+      "none_installed": "Aucun thème n’est encore installé.",
       "no_results": "Aucun thème ne correspond à « {{query}} ».",
       "by": "par {{author}}",
       "source": "{{repo}} sur GitHub",
@@ -271,8 +276,20 @@
       "install_failed": "Impossible d’installer « {{name}} »",
       "warning": "Un thème peut modifier le style de toutes les pages, y compris les boîtes de dialogue et les avertissements. Les thèmes de la boutique sont vérifiés automatiquement, mais ils sont créés par la communauté."
     },
+    "updates": {
+      "title": "Thèmes de la boutique",
+      "description_one": "Vous avez {{count}} thème de la boutique.",
+      "description_other": "Vous avez {{count}} thèmes de la boutique.",
+      "check": "Rechercher des mises à jour",
+      "checking": "Recherche…",
+      "up_to_date": "Vos thèmes de la boutique sont à jour.",
+      "update_all": "Tout mettre à jour ({{count}})"
+    },
+    "own": {
+      "title": "Créer le vôtre",
+      "description": "Importez un thème au format .zip ou depuis un dossier, ou partez d’une copie du thème actuel."
+    },
     "tools": {
-      "label": "Autres actions de thème",
       "duplicate": "Dupliquer « {{name}} » en nouveau thème",
       "open_folder": "Ouvrir le dossier des thèmes",
       "guide": "Créer un thème",

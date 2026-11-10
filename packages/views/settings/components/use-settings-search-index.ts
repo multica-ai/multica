@@ -61,6 +61,12 @@ export function useSettingsSearchIndex(
       },
       {
         tab: "appearance",
+        anchor: "theme-import",
+        title: t(($) => $.appearance.own.title),
+        description: t(($) => $.appearance.own.description),
+      },
+      {
+        tab: "appearance",
         anchor: "ui-text",
         title: t(($) => $.appearance.ui_text.title),
         description: t(($) => $.appearance.ui_text.description),

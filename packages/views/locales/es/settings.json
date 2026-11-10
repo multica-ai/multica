@@ -228,14 +228,19 @@
       "beta_note": "Los temas personalizados están en beta. Las variables y el manifiesto que usa un tema pueden cambiar, y puede que haya que actualizarlo."
     },
     "store": {
-      "button": "Explorar",
-      "title": "Tienda de temas",
-      "description": "Temas creados por la comunidad. Cada versión se revisa automáticamente antes de aparecer aquí.",
-      "search": "Buscar por nombre o autor",
+      "manage": "Gestionar",
+      "title": "Temas",
+      "description": "Temas integrados, los que has instalado y temas creados por la comunidad.",
+      "description_local": "Temas integrados y los que has instalado.",
+      "search": "Buscar temas",
+      "installed_only": "Mostrar solo instalados",
+      "showing_one": "Mostrando {{count}} tema",
+      "showing_other": "Mostrando {{count}} temas",
+      "installed": "Instalado",
       "loading": "Cargando temas",
       "error": "No se pudo cargar la tienda de temas. Inténtalo de nuevo en un momento.",
       "retry": "Reintentar",
-      "empty": "Todavía no hay temas.",
+      "none_installed": "Aún no hay temas instalados.",
       "no_results": "Ningún tema coincide con «{{query}}».",
       "by": "de {{author}}",
       "source": "{{repo}} en GitHub",
@@ -253,8 +258,20 @@
       "install_failed": "No se pudo instalar «{{name}}»",
       "warning": "Un tema puede cambiar el estilo de todas las páginas, incluidos los diálogos y las advertencias. Los temas de la tienda se revisan automáticamente, pero los crea la comunidad."
     },
+    "updates": {
+      "title": "Temas de la tienda",
+      "description_one": "Tienes {{count}} tema de la tienda.",
+      "description_other": "Tienes {{count}} temas de la tienda.",
+      "check": "Buscar actualizaciones",
+      "checking": "Buscando…",
+      "up_to_date": "Tus temas de la tienda están actualizados.",
+      "update_all": "Actualizar todo ({{count}})"
+    },
+    "own": {
+      "title": "Crea el tuyo",
+      "description": "Importa un tema como .zip o carpeta, o empieza con una copia del actual."
+    },
     "tools": {
-      "label": "Más acciones de tema",
       "duplicate": "Duplicar «{{name}}» como tema nuevo",
       "open_folder": "Abrir carpeta de temas",
       "guide": "Cómo crear un tema",

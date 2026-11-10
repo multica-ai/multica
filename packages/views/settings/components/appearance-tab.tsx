@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   BookOpen,
+  ChevronDown,
   Copy,
-  Ellipsis,
   FileArchive,
   FolderInput,
   FolderOpen,
@@ -14,7 +15,6 @@ import {
   Moon,
   RotateCcw,
   Sun,
-  Trash2,
   TriangleAlert,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
@@ -33,9 +33,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
@@ -97,11 +95,14 @@ import {
   type ThemedColor,
   type UiFont,
 } from "@multica/core/appearance";
+import { storeThemeState, storeThemesOptions } from "@multica/core/appearance/theme-store";
+import { useConfigStore } from "@multica/core/config";
 import { useLocale, useT } from "../../i18n";
 import { SegmentedToggle } from "../../common/segmented-toggle";
 import { openExternal } from "../../platform/open-external";
 import { themeFolderAPI } from "../../platform/theme-folder";
-import { ThemeStoreButton } from "./theme-store-dialog";
+import { ThemesButton, useStoreThemeInstall } from "./themes-dialog";
+import { ThemeSwatch, useAppliedMode, useThemeLabel, type PreviewMode } from "./theme-swatch";
 import {
   SettingsCard,
   SettingsRow,
@@ -109,7 +110,6 @@ import {
   SettingsTab,
 } from "./settings-layout";
 
-type PreviewMode = "light" | "dark";
 type ModeChoice = PreviewMode | "system";
 
 const UI_FONT_NAME: Record<UiFont, string> = {
@@ -179,21 +179,6 @@ export function AppearanceTab() {
   );
 }
 
-function useAppliedMode(): PreviewMode {
-  const { resolvedTheme } = useTheme();
-  return resolvedTheme === "dark" ? "dark" : "light";
-}
-
-function useThemeLabel() {
-  const { t } = useT("settings");
-  return (theme: Theme) =>
-    theme.id === "default"
-      ? t(($) => $.appearance.theme.default)
-      : theme.id === "pop"
-        ? t(($) => $.appearance.theme.pop)
-        : theme.name;
-}
-
 function ColorSection() {
   const { t } = useT("settings");
   const { theme: mode, setTheme: setMode } = useTheme();
@@ -202,7 +187,6 @@ function ColorSection() {
   const set = useAppearanceStore((s) => s.set);
   const installed = useInstalledThemesStore((s) => s.themes);
   const folders = useInstalledThemesStore((s) => s.folders);
-  const uninstall = useInstalledThemesStore((s) => s.uninstall);
   const folderProblems = useThemeFolderStatus((s) => s.problems);
   const safeMode = useThemeSafeMode();
   const themeLabelFor = useThemeLabel();
@@ -212,8 +196,6 @@ function ColorSection() {
   const imported = installed.filter((manifest) => !(manifest.id in folders));
   const fromFolder = installed.filter((manifest) => manifest.id in folders);
   const selected = [...BUILT_IN_THEMES, ...installed].find((manifest) => manifest.id === theme);
-  const selectedInstalled = imported.find((manifest) => manifest.id === theme);
-  const importer = useThemeImport();
   const items = [...BUILT_IN_THEMES, ...installed].map((manifest) => ({
     value: manifest.id,
     label: themeLabelFor(manifest),
@@ -292,19 +274,11 @@ function ColorSection() {
                 ) : null}
               </SelectContent>
             </Select>
-            <ThemeStoreButton />
-            <ThemeToolsMenu
-              theme={activeTheme({ theme }, safeMode.active)}
-              importer={importer}
-              removable={selectedInstalled}
-              onRemove={(removed) => {
-                set({ theme: "default" });
-                uninstall(removed.id);
-              }}
-            />
-            {importer.element}
+            <ThemesButton />
           </div>
         </SettingsRow>
+        <StoreThemesRow />
+        <OwnThemeRow theme={activeTheme({ theme }, safeMode.active)} />
         {folderProblems.length > 0 ? (
           <div role="status" className="space-y-1.5 px-4 py-3 text-caption">
             <div className="flex items-center gap-2">
@@ -485,25 +459,73 @@ function downloadFile(data: Uint8Array<ArrayBuffer>, name: string, type: string)
 }
 
 /**
- * Everything else about themes: import one, duplicate the active theme as a
- * starting point, on Desktop open the themes folder, and remove the selected
- * installed theme. On Desktop the copy is written into the themes folder,
- * applied, and edits to it apply as they are saved; on web it downloads as a
- * .zip to edit and import.
+ * Themes installed from the store, and their updates. The store is only
+ * asked when this is clicked or the Manage window has been opened, and not
+ * at all when the server does not serve it.
  */
-function ThemeToolsMenu({
-  theme,
-  importer,
-  removable,
-  onRemove,
-}: {
-  theme: Theme;
-  importer: ThemeImport;
-  removable: Theme | undefined;
-  onRemove: (theme: Theme) => void;
-}) {
+function StoreThemesRow() {
+  const { t } = useT("settings");
+  const enabled = useConfigStore((s) => s.themeStoreEnabled);
+  const themes = useInstalledThemesStore((s) => s.themes);
+  const fromStore = useInstalledThemesStore((s) => s.fromStore);
+  const listing = useQuery(storeThemesOptions(false));
+  const install = useStoreThemeInstall();
+  const [updating, setUpdating] = useState(false);
+  const count = themes.filter((theme) => theme.id in fromStore).length;
+  if (!enabled || count === 0) return null;
+  const updates = (listing.data ?? []).filter((theme) => storeThemeState(theme, { themes, fromStore }) === "update");
+
+  const check = async () => {
+    const result = await listing.refetch();
+    if (result.isError || !result.data) {
+      toast.error(t(($) => $.appearance.store.error));
+      return;
+    }
+    const current = useInstalledThemesStore.getState();
+    if (!result.data.some((theme) => storeThemeState(theme, current) === "update")) {
+      toast.success(t(($) => $.appearance.updates.up_to_date));
+    }
+  };
+  const updateAll = async () => {
+    setUpdating(true);
+    try {
+      for (const theme of updates) await install(theme);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  return (
+    <SettingsRow
+      label={t(($) => $.appearance.updates.title)}
+      description={t(($) => $.appearance.updates.description, { count })}
+      anchor="theme-updates"
+    >
+      {updates.length > 0 ? (
+        <Button size="sm" disabled={updating} onClick={() => void updateAll()}>
+          {updating
+            ? t(($) => $.appearance.store.installing)
+            : t(($) => $.appearance.updates.update_all, { count: updates.length })}
+        </Button>
+      ) : (
+        <Button variant="outline" size="sm" disabled={listing.isFetching} onClick={() => void check()}>
+          {listing.isFetching ? t(($) => $.appearance.updates.checking) : t(($) => $.appearance.updates.check)}
+        </Button>
+      )}
+    </SettingsRow>
+  );
+}
+
+/**
+ * Making a theme: import one, or duplicate the active theme as a starting
+ * point. On Desktop the copy is written into the themes folder, applied, and
+ * edits to it apply as they are saved; on web it downloads as a .zip to edit
+ * and import.
+ */
+function OwnThemeRow({ theme }: { theme: Theme }) {
   const { t } = useT("settings");
   const themeLabelFor = useThemeLabel();
+  const importer = useThemeImport();
   const install = useInstalledThemesStore((s) => s.install);
   const set = useAppearanceStore((s) => s.set);
   const folder = themeFolderAPI();
@@ -539,56 +561,63 @@ function ThemeToolsMenu({
   };
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={<Button variant="ghost" size="icon-sm" className="text-muted-foreground" />}
-        aria-label={t(($) => $.appearance.tools.label)}
-        title={t(($) => $.appearance.tools.label)}
-      >
-        <Ellipsis />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-56">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel className="flex items-center gap-2">
-            {t(($) => $.appearance.import.button)}
-            <Badge variant="secondary">{t(($) => $.appearance.import.beta)}</Badge>
-          </DropdownMenuLabel>
-          <DropdownMenuItem onClick={importer.chooseZip}>
-            <FileArchive />
-            {t(($) => $.appearance.import.from_zip)}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={importer.chooseFolder}>
-            <FolderInput />
-            {t(($) => $.appearance.import.from_folder)}
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => void duplicate()}>
-          <Copy />
-          {t(($) => $.appearance.tools.duplicate, { name: themeLabelFor(theme) })}
-        </DropdownMenuItem>
-        {folder ? (
-          <DropdownMenuItem onClick={() => void folder.openThemeFolder()}>
-            <FolderOpen />
-            {t(($) => $.appearance.tools.open_folder)}
-          </DropdownMenuItem>
-        ) : null}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => openExternal(THEME_GUIDE_URL)}>
+    <SettingsRow
+      label={
+        <span className="flex items-center gap-2">
+          {t(($) => $.appearance.own.title)}
+          <Badge variant="secondary">{t(($) => $.appearance.import.beta)}</Badge>
+        </span>
+      }
+      description={t(($) => $.appearance.own.description)}
+      anchor="theme-import"
+    >
+      <div className="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="text-muted-foreground"
+          onClick={() => openExternal(THEME_GUIDE_URL)}
+          aria-label={t(($) => $.appearance.tools.guide)}
+          title={t(($) => $.appearance.tools.guide)}
+        >
           <BookOpen />
-          {t(($) => $.appearance.tools.guide)}
-        </DropdownMenuItem>
-        {removable ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onClick={() => onRemove(removable)}>
-              <Trash2 />
-              {t(($) => $.appearance.theme.remove, { name: removable.name })}
-            </DropdownMenuItem>
-          </>
+        </Button>
+        {folder ? (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground"
+            onClick={() => void folder.openThemeFolder()}
+            aria-label={t(($) => $.appearance.tools.open_folder)}
+            title={t(($) => $.appearance.tools.open_folder)}
+          >
+            <FolderOpen />
+          </Button>
         ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
+            {t(($) => $.appearance.import.button)}
+            <ChevronDown data-icon="inline-end" className="text-muted-foreground" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-56">
+            <DropdownMenuItem onClick={importer.chooseZip}>
+              <FileArchive />
+              {t(($) => $.appearance.import.from_zip)}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={importer.chooseFolder}>
+              <FolderInput />
+              {t(($) => $.appearance.import.from_folder)}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => void duplicate()}>
+              <Copy />
+              {t(($) => $.appearance.tools.duplicate, { name: themeLabelFor(theme) })}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {importer.element}
+      </div>
+    </SettingsRow>
   );
 }
 
@@ -1274,79 +1303,5 @@ function LayoutSection() {
         </SettingsRow>
       </SettingsCard>
     </SettingsSection>
-  );
-}
-
-type SwatchTokens = Record<"app-shell" | "page-canvas" | "surface-border" | "foreground" | "brand", string>;
-
-/**
- * The tokens a theme swatch needs, as tokens.css sets them for the default
- * theme. A theme only overrides some of them, so swatches start from these.
- */
-const THEME_SWATCH_BASE: Record<PreviewMode, SwatchTokens> = {
-  light: {
-    "app-shell": "oklch(0.964 0.001 286)",
-    "page-canvas": "oklch(0.988 0 0)",
-    "surface-border": "oklch(0.92 0.004 286)",
-    foreground: "oklch(0.141 0.005 286)",
-    brand: "oklch(0.561 0.194 256.4)",
-  },
-  dark: {
-    "app-shell": "oklch(0.155 0.005 286)",
-    "page-canvas": "oklch(0.18 0.005 286)",
-    "surface-border": "oklch(0.3 0.006 286)",
-    foreground: "oklch(0.985 0 0)",
-    brand: "oklch(0.65 0.16 255)",
-  },
-};
-
-const swatchCache = new WeakMap<Theme, ReturnType<typeof themeModeVariables>>();
-
-/**
- * Resolves `var()` references a swatch can know without the theme applied:
- * the theme's own variables for the mode and its colour options' defaults.
- */
-function resolveSwatchValue(value: string, theme: Theme, variables: Record<string, string>, mode: PreviewMode, depth = 0): string {
-  return value.replace(/var\(--([a-z0-9-]+)\)/g, (reference, name: string) => {
-    const option = theme.options?.find((o) => o.id === name);
-    if (option?.type === "color") return option.default[mode];
-    const own = variables[name];
-    return own && depth < 4 ? resolveSwatchValue(own, theme, variables, mode, depth + 1) : reference;
-  });
-}
-
-function swatchTokens(theme: Theme, mode: PreviewMode): SwatchTokens {
-  let variables = swatchCache.get(theme);
-  if (!variables) {
-    variables = themeModeVariables(theme.css);
-    swatchCache.set(theme, variables);
-  }
-  const tokens = { ...THEME_SWATCH_BASE[mode] };
-  for (const name of Object.keys(tokens) as (keyof SwatchTokens)[]) {
-    const own = variables[mode][name];
-    if (own) tokens[name] = resolveSwatchValue(own, theme, variables[mode], mode);
-  }
-  return tokens;
-}
-
-/** A theme in miniature: its frame, page, ink and brand colour. */
-function ThemeSwatch({ theme, mode }: { theme: Theme; mode: PreviewMode }) {
-  const tokens = swatchTokens(theme, mode);
-  return (
-    <span
-      aria-hidden="true"
-      data-theme-swatch={theme.id}
-      data-swatch-mode={mode}
-      className="flex h-4 w-6 shrink-0 items-end overflow-hidden rounded-xs p-[2px] ring-1 ring-foreground/10"
-      style={{ background: tokens["app-shell"] }}
-    >
-      <span
-        className="flex size-full flex-col justify-center gap-[2px] rounded-[calc(var(--radius-xs)/2)] px-[2px]"
-        style={{ background: tokens["page-canvas"], boxShadow: `inset 0 0 0 0.5px ${tokens["surface-border"]}` }}
-      >
-        <span className="h-[2px] w-3/5 rounded-full" style={{ background: tokens.foreground }} />
-        <span className="h-[2px] w-2/5 rounded-full" style={{ background: tokens.brand }} />
-      </span>
-    </span>
   );
 }

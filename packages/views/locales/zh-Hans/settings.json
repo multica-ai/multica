@@ -242,14 +242,18 @@
       "beta_note": "自定义主题处于 Beta 阶段。主题用到的变量和清单可能会变，主题可能需要更新。"
     },
     "store": {
-      "button": "浏览",
-      "title": "主题商店",
-      "description": "社区制作的主题。每个版本在上架前都会经过自动检查。",
-      "search": "按名称或作者搜索",
+      "manage": "管理",
+      "title": "主题",
+      "description": "内置主题、你安装的主题，以及社区制作的主题。",
+      "description_local": "内置主题和你安装的主题。",
+      "search": "搜索主题",
+      "installed_only": "只看已安装",
+      "showing_other": "共 {{count}} 个主题",
+      "installed": "已安装",
       "loading": "正在加载主题",
       "error": "无法加载主题商店，请稍后重试。",
       "retry": "重试",
-      "empty": "还没有上架的主题。",
+      "none_installed": "还没有安装任何主题。",
       "no_results": "没有与“{{query}}”匹配的主题。",
       "by": "作者：{{author}}",
       "source": "在 GitHub 上查看 {{repo}}",
@@ -267,8 +271,19 @@
       "install_failed": "无法安装“{{name}}”",
       "warning": "主题可以改变每个页面的样式，包括对话框和警告。商店主题会经过自动检查，但均由社区制作。"
     },
+    "updates": {
+      "title": "商店主题",
+      "description_other": "你从商店安装了 {{count}} 个主题。",
+      "check": "检查更新",
+      "checking": "正在检查…",
+      "up_to_date": "商店主题都是最新版本。",
+      "update_all": "全部更新（{{count}}）"
+    },
+    "own": {
+      "title": "制作自己的主题",
+      "description": "从 .zip 或文件夹导入主题，或从当前主题的副本开始。"
+    },
     "tools": {
-      "label": "更多主题操作",
       "duplicate": "复制「{{name}}」为新主题",
       "open_folder": "打开主题文件夹",
       "guide": "如何制作主题",

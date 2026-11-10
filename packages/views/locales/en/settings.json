@@ -246,14 +246,19 @@
       "beta_note": "Custom themes are in beta. The variables and manifest a theme uses may change, and a theme may need updating."
     },
     "store": {
-      "button": "Browse",
-      "title": "Theme store",
-      "description": "Themes made by the community. Every release is checked automatically before it is listed here.",
-      "search": "Search by name or author",
+      "manage": "Manage",
+      "title": "Themes",
+      "description": "Built-in themes, the ones you installed, and themes made by the community.",
+      "description_local": "Built-in themes and the ones you installed.",
+      "search": "Search themes",
+      "installed_only": "Show installed only",
+      "showing_one": "Showing {{count}} theme",
+      "showing_other": "Showing {{count}} themes",
+      "installed": "Installed",
       "loading": "Loading themes",
       "error": "Couldn't load the theme store. Try again in a moment.",
       "retry": "Try again",
-      "empty": "No themes are listed yet.",
+      "none_installed": "No themes are installed yet.",
       "no_results": "No themes match “{{query}}”.",
       "by": "by {{author}}",
       "source": "{{repo}} on GitHub",
@@ -271,8 +276,20 @@
       "install_failed": "Couldn't install “{{name}}”",
       "warning": "Themes can restyle every page, including dialogs and warnings. Store themes are checked automatically, but they are made by the community."
     },
+    "updates": {
+      "title": "Store themes",
+      "description_one": "You have {{count}} theme from the store.",
+      "description_other": "You have {{count}} themes from the store.",
+      "check": "Check for updates",
+      "checking": "Checking…",
+      "up_to_date": "Your store themes are up to date.",
+      "update_all": "Update all ({{count}})"
+    },
+    "own": {
+      "title": "Make your own",
+      "description": "Import a theme as a .zip or folder, or start from a copy of the current one."
+    },
     "tools": {
-      "label": "More theme actions",
       "duplicate": "Duplicate “{{name}}” as a new theme",
       "open_folder": "Open themes folder",
       "guide": "How to make a theme",
