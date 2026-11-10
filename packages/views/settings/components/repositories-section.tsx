@@ -453,7 +453,7 @@ export function RepositoriesSection() {
                   )}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <TruncatedTooltip content={repository.url}>
+                  <TruncatedTooltip content={repository.url} focusable>
                     <p className="truncate font-mono text-label">
                       {repository.url}
                     </p>

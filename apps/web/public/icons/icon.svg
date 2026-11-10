@@ -3,5 +3,5 @@
     Full-bleed source for the generated home-screen icons (apple-touch-icon.png,
     icon-maskable-512.png). Full-bleed because both surfaces mask the artwork
     themselves: iOS rounds the corners, Android crops to the launcher shape.
-    Geometry is packages/ui/lib/multica-brand.ts (ICON_M_PATH, iconMTransform).
-  --><defs><clipPath id="c"><rect width="100" height="100"/></clipPath></defs><rect width="100" height="100" fill="#0b0b0c"/><g clip-path="url(#c)"><path fill="#ffffff" transform="translate(-4.72 22) scale(0.96)" d="M0 85.25V34A34 34 0 0 1 68 34V85.25H46V34A12 12 0 0 0 22 34V85.25ZM46 85.25V34A34 34 0 0 1 114 34V85.25H92V34A12 12 0 0 0 68 34V85.25Z"/></g></svg>
+    Geometry is packages/ui/lib/multica-brand.ts (starPath, iconStar).
+  --><rect width="100" height="100" fill="#0b0b0c"/><path fill="#ffffff" transform="translate(20 20) scale(0.6)" d="M45 50L45 0.251A50 50 0 0 1 55 0.251L55 50ZM46.464 46.464L81.643 11.286A50 50 0 0 1 88.714 18.357L53.536 53.536ZM50 45L99.749 45A50 50 0 0 1 99.749 55L50 55ZM53.536 46.464L88.714 81.643A50 50 0 0 1 81.643 88.714L46.464 53.536ZM55 50L55 99.749A50 50 0 0 1 45 99.749L45 50ZM53.536 53.536L18.357 88.714A50 50 0 0 1 11.286 81.643L46.464 46.464ZM50 55L0.251 55A50 50 0 0 1 0.251 45L50 45ZM46.464 53.536L11.286 18.357A50 50 0 0 1 18.357 11.286L53.536 46.464Z"/></svg>

@@ -12,7 +12,7 @@ import { beforeAll, describe, expect, it } from "vitest";
  *
  * This lives in apps/web because it tests the COMPILED STYLESHEET, not React
  * behaviour: `globals.css` is the app's artifact, and the `dark` variant is
- * defined there (`@custom-variant dark (&:is(.dark *))`) — that definition is
+ * defined there (`@custom-variant dark (&:is(.dark *):where(...))`) — that definition is
  * what decides the outcome below. It follows the same pattern as
  * font-fallback-order.test.ts, which also asserts on the app's CSS.
  *
@@ -45,6 +45,8 @@ interface ElementState {
   hover?: boolean;
   active?: boolean;
   expanded?: boolean;
+  /** Inside the light-only marketing site (`.landing-light`). */
+  landing?: boolean;
 }
 
 const repoRoot = resolve(process.cwd(), "../..");
@@ -81,12 +83,15 @@ async function compileStylesheet(entry: string): Promise<FlatRule[]> {
   return rules;
 }
 
+// The `dark` variant skips the marketing site; `:where()` adds no specificity.
+const LIGHT_ONLY = ":where(:not(.landing-light, .landing-light *))";
+
 /** Selector specificity's `b` column — classes, attributes, pseudo-classes.
  *  `:is()` contributes its most specific argument. Nothing here reaches for
  *  ids or elements, so the other two columns are always 0. */
 function specificity(selector: string): number {
   let count = 0;
-  const withoutIs = selector.replace(/:is\(([^()]*)\)/g, (_, inner: string) => {
+  const withoutIs = selector.replace(LIGHT_ONLY, "").replace(/:is\(([^()]*)\)/g, (_, inner: string) => {
     count += Math.max(
       ...inner.split(",").map((part) => (part.match(/\.[^.\s>+~:[]+/g) ?? []).length),
     );
@@ -112,11 +117,12 @@ function matches(selector: string, classes: string[], state: ElementState) {
   if (!classes.includes(cls)) return false;
   const rest = selector.slice(m[0].length);
   if (rest.includes(":is(.dark *)") && !state.dark) return false;
+  if (rest.includes(LIGHT_ONLY) && state.landing) return false;
   if (rest.includes(":hover") && !state.hover) return false;
   if (rest.includes(":active") && !state.active) return false;
   if (rest.includes('[aria-expanded="true"]') && !state.expanded) return false;
   // Ignore any rule whose selector we do not model, rather than guessing.
-  const unmodelled = rest.replace(
+  const unmodelled = rest.replace(LIGHT_ONLY, "").replace(
     /:is\(\.dark \*\)|:hover|:active|\[aria-expanded="true"\]/g,
     "",
   );
@@ -214,6 +220,13 @@ describe("brand Button variants resolve to brand colour in the real stylesheet",
       );
       expect(bg(brandSubtle, { dark: true, expanded: true })).toBe(
         "dark:aria-expanded:bg-brand/18",
+      );
+    });
+
+    it("stays on the light notches inside the light-only marketing site", () => {
+      expect(bg(brandSubtle, { dark: true, landing: true })).toBe("bg-brand/7");
+      expect(bg(brandSubtle, { dark: true, landing: true, hover: true })).toBe(
+        "hover:bg-brand/12",
       );
     });
   });

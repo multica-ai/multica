@@ -2,11 +2,13 @@
 WITH inserted AS (
   INSERT INTO attachment (
     id, workspace_id, issue_id, comment_id, chat_session_id, task_id, source_context_id,
-    uploader_type, uploader_id, filename, url, content_type, size_bytes
+    uploader_type, uploader_id, filename, url, content_type, size_bytes,
+    width, height
   )
   VALUES (
     $1, $2, sqlc.narg(issue_id), sqlc.narg(comment_id), sqlc.narg(chat_session_id), sqlc.narg(task_id), sqlc.narg(source_context_id),
-    $3, $4, $5, $6, $7, $8
+    $3, $4, $5, $6, $7, $8,
+    sqlc.narg(width), sqlc.narg(height)
   )
   RETURNING *
 ), bumped_issue AS (
@@ -93,11 +95,18 @@ RETURNING url;
 
 -- name: LinkAttachmentsToComment :exec
 UPDATE attachment
-SET comment_id = $1
-WHERE issue_id = $2
+SET comment_id = sqlc.arg(comment_id),
+    issue_id = sqlc.arg(issue_id)
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND (issue_id = sqlc.arg(issue_id) OR (
+    issue_id IS NULL
+    AND chat_session_id IS NULL
+    AND chat_message_id IS NULL
+    AND task_id IS NULL
+  ))
   AND comment_id IS NULL
   AND source_context_id IS NULL
-  AND id = ANY($3::uuid[]);
+  AND id = ANY(sqlc.arg(attachment_ids)::uuid[]);
 
 -- name: ReplaceCommentAttachments :execrows
 UPDATE attachment
@@ -195,6 +204,22 @@ WHERE workspace_id = sqlc.arg(workspace_id)
 ORDER BY id
 FOR UPDATE;
 
+-- name: LockUnboundAttachmentsForCommentLink :many
+-- Like issue updates, comment creation locks ownerless uploads before the
+-- issue row. Once it takes the issue, it locks existing issue children below.
+-- This keeps both upload adoption and owner-first deletion in the same order.
+SELECT id FROM attachment
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND issue_id IS NULL
+  AND comment_id IS NULL
+  AND chat_session_id IS NULL
+  AND chat_message_id IS NULL
+  AND task_id IS NULL
+  AND source_context_id IS NULL
+  AND id = ANY(sqlc.arg(attachment_ids)::uuid[])
+ORDER BY id
+FOR UPDATE;
+
 -- name: LockAttachmentsForCommentLink :many
 -- CreateComment binds attachments in the transaction that created the comment,
 -- after the CreateComment statement has taken the issue row: issue -> comment
@@ -202,6 +227,7 @@ FOR UPDATE;
 -- requested set under that lock and returns the ids still eligible, so the
 -- caller can refuse before the comment is committed when a requested
 -- attachment was deleted while the issue lock was contended.
+-- Ownerless uploads are already pinned by LockUnboundAttachmentsForCommentLink.
 SELECT id FROM attachment
 WHERE workspace_id = sqlc.arg(workspace_id)
   AND issue_id = sqlc.arg(issue_id)

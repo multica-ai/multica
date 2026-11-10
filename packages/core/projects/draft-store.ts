@@ -1,4 +1,4 @@
-import type { ProjectStatus, ProjectPriority } from "../types";
+import type { ProjectStatus, ProjectPriority, ProjectVisibility } from "../types";
 import { createDraftStore } from "../drafts/create-draft-store";
 
 interface ProjectDraft {
@@ -12,6 +12,8 @@ interface ProjectDraft {
   // Calendar days ("YYYY-MM-DD"); empty/undefined means unset.
   startDate?: string;
   dueDate?: string;
+  visibility?: ProjectVisibility;
+  memberIds?: string[];
 }
 
 const EMPTY_DRAFT: ProjectDraft = {
@@ -24,6 +26,8 @@ const EMPTY_DRAFT: ProjectDraft = {
   icon: undefined,
   startDate: undefined,
   dueDate: undefined,
+  visibility: "workspace",
+  memberIds: [],
 };
 
 export const useProjectDraftStore = createDraftStore<ProjectDraft>({

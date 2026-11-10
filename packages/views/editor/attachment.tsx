@@ -29,18 +29,24 @@
 
 import {
   Download,
+  Loader2,
   Link as LinkIcon,
   Maximize2,
   Trash2,
 } from "@multica/ui/icons";
-import type { ReactNode } from "react";
+import { useCallback, useState, type CSSProperties, type ReactNode } from "react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
-import { attachmentIdFromStorageURL } from "@multica/core/types/attachment-url";
+import {
+  attachmentDownloadPath,
+  attachmentIdFromDownloadURL,
+  attachmentIdFromLocalUploadURL,
+  attachmentIdFromStorageURL,
+} from "@multica/core/types/attachment-url";
 import { useT } from "../i18n";
 import { DeferredTooltip } from "../common/deferred-tooltip";
 import { useAttachmentDownloadResolver } from "./attachment-download-context";
@@ -52,7 +58,9 @@ import {
 } from "./hooks/use-inline-media-url";
 import { useDownloadAttachment } from "./use-download-attachment";
 import { AttachmentCard, AttachmentFileCard } from "./attachment-card";
+import { useAttachmentDownloadState } from "./hooks/use-attachment-download-state";
 import { canOpenPreview, getPreviewKind, type PreviewKind } from "./utils/preview";
+import { imageDimensions } from "./utils/image-metadata";
 import "./styles/attachment.css";
 
 // Public API
@@ -121,6 +129,17 @@ interface Normalized {
   height?: number;
 }
 
+function recordImageFields(
+  record: AttachmentRecord | undefined,
+): Pick<Normalized, "width" | "height"> {
+  if (!record) return {};
+  const dims = imageDimensions(record);
+  return {
+    width: dims?.width,
+    height: dims?.height,
+  };
+}
+
 function normalize(
   input: AttachmentInput,
   resolve: (url: string) => AttachmentRecord | undefined,
@@ -137,9 +156,12 @@ function normalize(
       attachmentId: input.attachment.id,
       record: input.attachment,
       uploading: false,
+      ...recordImageFields(input.attachment),
     };
   }
   const record = input.url ? resolve(input.url) : undefined;
+  const fromRecord = recordImageFields(record);
+  const ownSize = input.width !== undefined || input.height !== undefined;
   return {
     filename: input.filename || record?.filename || "",
     contentType: input.contentType || record?.content_type || "",
@@ -170,8 +192,8 @@ function normalize(
     attachmentId: record?.id,
     record,
     uploading: !!input.uploading,
-    width: input.width,
-    height: input.height,
+    width: ownSize ? input.width : fromRecord.width,
+    height: ownSize ? input.height : fromRecord.height,
   };
 }
 
@@ -211,8 +233,8 @@ function absolutizeMediaURL(rawUrl: string): string {
 // for rendering but must not replace durable Markdown references.
 //
 // Use known public/CDN URLs directly only when cdn_signed is false; unsigned URLs
-// on a private CDN fail even when the domain matches. Local /uploads paths remain
-// valid after origin normalization. Otherwise prefer the server's markdown_url,
+// on a private CDN fail even when the domain matches. Historical local uploads
+// use the authenticated API. Otherwise prefer the server's markdown_url,
 // then legacy storage URLs, then the original input.
 function pickInlineMediaURL(
   record: AttachmentRecord,
@@ -227,17 +249,11 @@ function pickInlineMediaURL(
   ) {
     return dl;
   }
+  if (attachmentIdFromLocalUploadURL(record.url)) return attachmentDownloadPath(record.id);
   if (!cdnSigned && storageURLMatchesCdnDomain(record.url, cdnDomain)) return record.url;
-  if (isSiteRelativeLocalUploadURL(record.url)) return record.url;
   if (record.markdown_url) return record.markdown_url;
   if (record.url) return record.url;
   return fallback;
-}
-
-function isSiteRelativeLocalUploadURL(rawURL: string): boolean {
-  if (!rawURL || !rawURL.startsWith("/")) return false;
-  const path = rawURL.split(/[?#]/, 1)[0] ?? "";
-  return path === "/uploads" || path.startsWith("/uploads/");
 }
 
 function storageURLMatchesCdnDomain(rawURL: string, cdnDomain: string): boolean {
@@ -336,7 +352,7 @@ export function Attachment({
     if (mediaUrl) {
       preview.tryOpen({
         kind: "url",
-        url: mediaUrl,
+        url: isObjectURL(mediaUrl) ? state.url : mediaUrl,
         filename: state.filename,
         // This dispatcher has already decided what the slot is — from the
         // call site's `forceKind`, or from a content-type the modal's
@@ -354,12 +370,14 @@ export function Attachment({
     // its attachment id, so re-sign it instead of opening the bare URL,
     // which a signed CDN rejects outside the app.
     const attachmentId =
-      state.attachmentId ?? attachmentIdFromStorageURL(shareUrl, cdnDomain);
+      state.attachmentId ??
+      attachmentIdFromDownloadURL(shareUrl) ??
+      attachmentIdFromLocalUploadURL(shareUrl) ??
+      attachmentIdFromStorageURL(shareUrl, cdnDomain);
     if (attachmentId) {
-      download(attachmentId);
-      return;
+      return download(attachmentId);
     }
-    if (shareUrl) openByUrl(shareUrl);
+    if (shareUrl) return openByUrl(shareUrl);
   };
 
   if (kind === "image") {
@@ -445,7 +463,7 @@ interface ImageAttachmentViewProps {
   editable?: boolean;
   selected?: boolean;
   onView: () => void;
-  onDownload: () => void;
+  onDownload: () => void | Promise<unknown>;
   onDelete?: () => void;
   className?: string;
 }
@@ -465,6 +483,7 @@ function ImageAttachmentView({
   className,
 }: ImageAttachmentViewProps) {
   const { t } = useT("editor");
+  const { downloading, handleDownload } = useAttachmentDownloadState(onDownload);
 
   const handleCopyLink = async () => {
     if (await copyText(linkUrl)) {
@@ -481,6 +500,24 @@ function ImageAttachmentView({
   // cursor: zoom-in }` keys off this same flag for the cursor affordance.
   const clickable = !editable && !uploading;
 
+  // An image that has not loaded has no size of its own (the figure shrinks
+  // to it), so its box is reserved up front: from its pixel size when known,
+  // otherwise as a fixed-ratio placeholder. Once anything has painted the box
+  // follows the image.
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const loaded = !!src && loadedSrc === src;
+  const imgRef = useCallback((img: HTMLImageElement | null) => {
+    if (img?.complete && img.naturalWidth > 0) setLoadedSrc(src);
+  }, [src]);
+  const sized = !!width && !!height;
+  const pending = !loaded && !sized && !uploading;
+  const sizeStyle = sized
+    ? ({
+        "--image-width": `${width}px`,
+        "--image-aspect": `${width! / height!}`,
+      } as CSSProperties)
+    : undefined;
+
   // DOM mirrors the original ReadonlyImage (span-only chain so it stays
   // valid HTML5 when rendered inside a markdown <p>). In editor surfaces
   // the NodeViewWrapper still emits its own outer .image-node div around
@@ -494,20 +531,30 @@ function ImageAttachmentView({
           className,
         )}
         data-clickable={clickable || undefined}
+        data-sized={sized || undefined}
+        data-pending={pending || undefined}
+        style={sizeStyle}
         contentEditable={false}
         onClick={clickable ? onView : undefined}
       >
         <img
+          ref={imgRef}
           src={src || undefined}
           alt={alt}
           width={width}
           height={height}
+          loading="lazy"
+          decoding="async"
+          data-loaded={loaded || undefined}
           className={cn("image-content", uploading && "image-uploading")}
           draggable={false}
+          onLoad={() => setLoadedSrc(src)}
+          onError={() => setLoadedSrc(src)}
         />
         {!uploading && src && (
           <span
             className="image-toolbar"
+            style={downloading ? { opacity: 1 } : undefined}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
@@ -522,8 +569,18 @@ function ImageAttachmentView({
             <DeferredTooltip
               content={t(($) => $.image.download)}
               trigger={
-                <button type="button" onClick={onDownload} aria-label={t(($) => $.image.download)}>
-                  <Download className="size-3.5" />
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  disabled={downloading}
+                  aria-busy={downloading}
+                  aria-label={t(($) => $.image.download)}
+                >
+                  {downloading ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Download className="size-3.5" />
+                  )}
                 </button>
               }
             />

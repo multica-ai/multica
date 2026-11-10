@@ -126,13 +126,13 @@ describe("project lifecycle browse integration", () => {
     renderWithI18n(page());
     const row = screen.getByText("Project planned").closest('[role="row"]')!;
     await userEvent.click(within(row as HTMLElement).getByRole("checkbox", { checked: false }));
-    expect(screen.getByText("1 selected")).toBeVisible();
+    await waitFor(() => expect(screen.getByText("1 selected")).toBeVisible());
     await chooseStatus("planned", "Planned", "Completed");
     await waitFor(() => expect(screen.queryByText("Project planned")).toBeNull());
-    expect(screen.queryByText("1 selected")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
     await act(async () => reject(new Error("denied")));
     await waitFor(() => expect(screen.getByText("Project planned")).toBeVisible());
-    expect(screen.queryByText("1 selected")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
   });
 
   it("projects realtime cache changes and clears hidden selections on lifecycle, filters and workspace changes", async () => {
@@ -148,20 +148,20 @@ describe("project lifecycle browse integration", () => {
       }));
     });
     await waitFor(() => expect(screen.queryByText("Project planned")).toBeNull());
-    expect(screen.queryByText("1 selected")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
     await scope("All projects 5");
     await select();
     await act(async () => useProjectViewStore.getState().toggleFilter("priorities", "urgent"));
     expect(screen.getByText("No projects match")).toBeVisible();
     await act(async () => useProjectViewStore.getState().clearFilters());
-    expect(screen.queryByText("1 selected")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
     await select();
     qc.setQueryData(projectKeys.list("ws-2"), { projects: server, total: 5 });
     context.wsId = "ws-2";
     await act(async () => setCurrentWorkspace("beta", "ws-2"));
     view.rerender(page());
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Active projects");
-    expect(screen.queryByText("1 selected")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
   });
 
   it("closes pending batch deletion when a selected project is hidden and does not revive it", async () => {
@@ -178,7 +178,7 @@ describe("project lifecycle browse integration", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await scope("Closed projects 3");
     expect(screen.getByText("Project planned")).toBeVisible();
-    expect(screen.queryByText("1 selected")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
@@ -259,7 +259,7 @@ describe("project lifecycle browse integration", () => {
       ...old!, projects: old!.projects.map((p) => p.id === "planned" ? { ...p, status: "completed" } : p),
     })));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(screen.getByText("1 selected")).toBeVisible();
+    await waitFor(() => expect(screen.getByText("1 selected")).toBeVisible());
     await userEvent.click(screen.getByRole("button", { name: "Delete" }));
     await act(async () => qc.setQueryData(["workspaces", "ws-1", "members"], [{ user_id: "user-1", role: "member", name: "Fixture Admin" }]));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -269,7 +269,36 @@ describe("project lifecycle browse integration", () => {
     await userEvent.click(screen.getByRole("button", { name: "Delete" }));
     await act(async () => useProjectViewStore.getState().setViewMode("comfortable"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(screen.queryByText("1 selected")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("1 selected")).toBeNull());
   });
+
+  it.each(["project data", "sort order", "columns"])(
+    "cancels pending batch deletion when %s changes without hiding the selection",
+    async (change) => {
+      renderWithI18n(page());
+      const row = screen.getByText("Project planned").closest('[role="row"]')!;
+      await userEvent.click(within(row as HTMLElement).getByRole("checkbox", { checked: false }));
+      await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+      expect(screen.getByRole("dialog")).toBeVisible();
+
+      await act(async () => {
+        if (change === "project data") {
+          qc.setQueryData<ListProjectsResponse>(projectKeys.list("ws-1"), (old) => ({
+            ...old!,
+            projects: old!.projects.map((project) => project.id === "planned"
+              ? { ...project, title: "Updated plan" } : project),
+          }));
+        } else if (change === "sort order") {
+          useProjectViewStore.getState().setSortDirection("asc");
+        } else {
+          useProjectViewStore.getState().toggleColumn("lead");
+        }
+      });
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      await waitFor(() => expect(screen.getByText("1 selected")).toBeVisible());
+      expect(within(screen.getByRole("toolbar")).getByRole("button", { name: "Delete" })).toBeEnabled();
+    },
+  );
 
 });

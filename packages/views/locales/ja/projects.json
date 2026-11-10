@@ -11,6 +11,7 @@
     "view_table": "テーブル",
     "view_cards": "カード",
     "row_menu": "プロジェクトの操作",
+    "rename": "名前を変更",
     "pin": "サイドバーにピン留め",
     "unpin": "ピン留め解除",
     "delete": "削除",
@@ -62,6 +63,7 @@
     "pin_tooltip": "サイドバーに固定",
     "unpin_tooltip": "サイドバーの固定を解除",
     "sidebar_tooltip": "右サイドバーの開閉",
+    "rename_action": "プロジェクト名を変更",
     "copy_link": "リンクをコピー",
     "delete_action": "プロジェクトを削除",
     "section_properties": "プロパティ",
@@ -153,6 +155,7 @@
     "ref_default_tooltip": "ブランチ未設定 — タスクはその時点のリポジトリのデフォルトブランチを使用します。"
   },
   "delete_dialog": {
+    "offline_error": "オフラインです。接続を回復してから、もう一度削除してください。",
     "title": "プロジェクトを削除",
     "description": "プロジェクトが削除されます。タスクは削除されませんが、リンクが解除されます。",
     "confirm": "削除",
@@ -203,6 +206,27 @@
       "issue_pricing": "料金ページの比較表",
       "issue_blog": "ブログ一覧のページ送り"
     }
+  },
+  "access": {
+    "label": "アクセス権",
+    "title": "{{title}}のアクセス権",
+    "description": "プロジェクトとそのタスク、コメント、添付ファイルの閲覧範囲を設定します。",
+    "workspace": "ワークスペース全体",
+    "private": "プロジェクトメンバーのみ",
+    "members_count": "プロジェクトメンバー · {{count}}",
+    "add": "ワークスペースメンバーを追加",
+    "search": "名前またはメールで検索...",
+    "no_members": "該当するメンバーはいません",
+    "no_selected": "メンバーはいません",
+    "admin_notice": "ワークスペースの owner と admin は常にアクセスできます。",
+    "you": "あなた",
+    "remove": "{{name}}を削除",
+    "failed": "アクセス権を保存できませんでした。",
+    "load_failed": "メンバーを読み込めませんでした。",
+    "publish_title": "ワークスペース全体に公開しますか？",
+    "publish_description": "すべてのワークスペースメンバーがこのプロジェクトとタスク、コメント、添付ファイルを閲覧できるようになります。",
+    "done": "完了",
+    "retry": "再試行"
   },
   "lifecycle": {
     "empty": {

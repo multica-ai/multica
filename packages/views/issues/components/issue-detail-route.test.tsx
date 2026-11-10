@@ -3,6 +3,7 @@ import { render, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { setApiInstance } from "@multica/core/api";
+import { ApiError } from "@multica/core/api/client";
 import type { ApiClient } from "@multica/core/api/client";
 import { NavigationProvider } from "../../navigation";
 import type { NavigationAdapter } from "../../navigation";
@@ -102,6 +103,36 @@ describe("useCanonicalIssueUrl", () => {
     );
     expect(replace).toHaveBeenCalledWith("/acme/issues/TRS-134#comment-comment-7");
   });
+
+  it("keeps a deliverable link's tail while canonicalizing a UUID", () => {
+    renderHook(
+      () => useCanonicalIssueUrl(
+        "cb240efb-154c-42a8-ae92-42b02676feca",
+        "TRS-134",
+        "",
+        "调研 报告.html",
+      ),
+      { wrapper },
+    );
+    expect(replace).toHaveBeenCalledWith(
+      "/acme/issues/TRS-134/deliverables/%E8%B0%83%E7%A0%94%20%E6%8A%A5%E5%91%8A.html",
+    );
+  });
+
+  it("leaves a canonical deliverable link alone", () => {
+    renderHook(() => useCanonicalIssueUrl("TRS-134", "TRS-134", "", "report.html"), { wrapper });
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  // The deliverable argument is optional: every existing caller passes the
+  // hash alone, and its comment deep link must come out exactly as before.
+  it("still keeps only the comment hash when no deliverable is named", () => {
+    renderHook(
+      () => useCanonicalIssueUrl("trs-134", "TRS-134", "#comment-c1", undefined),
+      { wrapper },
+    );
+    expect(replace).toHaveBeenCalledWith("/acme/issues/TRS-134#comment-c1");
+  });
 });
 
 describe("parseCommentHighlightHash", () => {
@@ -127,7 +158,7 @@ describe("IssueDetailRoute with an identifier that names no issue", () => {
     expect(vi.isMockFunction(IssueDetail)).toBe(false);
     replace.mockClear();
     push.mockClear();
-    const getIssue = vi.fn().mockRejectedValue(new Error("issue not found"));
+    const getIssue = vi.fn().mockRejectedValue(new ApiError("issue not found", 404, "Not Found"));
     setApiInstance({ getIssue } as unknown as ApiClient);
     const qc = new QueryClient({
       defaultOptions: { queries: { staleTime: Infinity, retry: false } },

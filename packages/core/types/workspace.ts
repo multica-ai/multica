@@ -17,6 +17,7 @@ export interface Workspace {
   avatar_url: string | null;
   created_at: string;
   updated_at: string;
+  pinned_at?: string | null;
 }
 
 /**
@@ -83,6 +84,13 @@ export interface User {
    * so the client must not auto-open the card (it would reappear forever).
    */
   whats_new_seen_version?: string | null;
+  /**
+   * "Star us on GitHub" prompt bookkeeping. An undefined count means the
+   * server predates it, so the client must never show the prompt.
+   */
+  star_prompt_shown_count?: number;
+  star_prompt_last_shown_at?: string | null;
+  star_prompt_starred_at?: string | null;
   created_at: string;
   updated_at: string;
 }

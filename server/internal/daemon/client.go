@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -489,7 +490,8 @@ func (c *Client) StartTask(ctx context.Context, task Task, capabilities ...strin
 			return fmt.Errorf("%w: task start exceeds %d bytes", errInvalidResponseBody, maxStartTaskResponseBytes)
 		}
 		var response struct {
-			SupplementCapability string `json:"supplement_capability"`
+			SupplementCapability     string `json:"supplement_capability"`
+			ProcessCleanupCapability string `json:"process_cleanup_capability"`
 		}
 		// Empty acknowledgements start the task without negotiating supplements.
 		// Invalid JSON fails without retrying; transport read failures can retry.
@@ -499,6 +501,9 @@ func (c *Client) StartTask(ctx context.Context, task Task, capabilities ...strin
 			}
 		}
 		negotiated = response.SupplementCapability == protocol.DaemonCapabilityTaskSupplementV1
+		if slices.Contains(capabilities, protocol.DaemonCapabilityMuseAppProcessCleanupV1) && response.ProcessCleanupCapability != protocol.DaemonCapabilityMuseAppProcessCleanupV1 {
+			return fmt.Errorf("%w: Muse app requires server support for remote execution cleanup; upgrade the Multica server before using this runtime", errInvalidResponseBody)
+		}
 		return nil
 	}
 	path := fmt.Sprintf("/api/daemon/tasks/%s/start", task.ID)
@@ -672,6 +677,31 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 // (task_id, provider, model), so snapshots cannot accumulate; the flag is what
 // keeps the server's additive metrics counter and per-run log on the terminal
 // report, where they would otherwise bill each flush against the last.
+// TaskEnvironmentReport is one entry of a task's environment snapshot.
+type TaskEnvironmentReport struct {
+	Key       string     `json:"key"`
+	Source    string     `json:"source"`
+	Name      string     `json:"name"`
+	Label     string     `json:"label"`
+	URL       string     `json:"url"`
+	Port      int        `json:"port"`
+	State     string     `json:"state"`
+	Detail    string     `json:"detail"`
+	StartedAt time.Time  `json:"started_at"`
+	ExpiresAt *time.Time `json:"expires_at"`
+}
+
+// ReportTaskEnvironments replaces the task's environment snapshot; whatever
+// it leaves out the server records as stopped.
+func (c *Client) ReportTaskEnvironments(ctx context.Context, taskID string, envs []TaskEnvironmentReport) error {
+	if envs == nil {
+		envs = []TaskEnvironmentReport{}
+	}
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/environments", taskID), map[string]any{
+		"environments": envs,
+	}, nil)
+}
+
 func (c *Client) ReportTaskUsageSnapshot(ctx context.Context, taskID string, usage []TaskUsageEntry) error {
 	if len(usage) == 0 {
 		return nil

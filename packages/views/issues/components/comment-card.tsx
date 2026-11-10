@@ -37,6 +37,7 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { api, dispatchReasonCode, errorCode } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import { CommentTriggerChips } from "./comment-trigger-chips";
+import { AppCallChips } from "./app-call-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import { useRecipientActions } from "../hooks/use-recipient-actions";
 import { SteerBadge, SteerReceipts } from "./steer-receipts";
@@ -911,6 +912,9 @@ function CommentRow({
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
           <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3">
             <SteerReceipts issueId={issueId} entry={entry} />
+            {entry.actor_type === "agent" && entry.source_task_id && (
+              <AppCallChips issueId={issueId} taskId={entry.source_task_id} />
+            )}
           </div>
           {retryableAgentFailureComment(entry) && (
             <TaskCommentRetryButton
@@ -1041,14 +1045,22 @@ function CommentCardImpl({
   const replyTarget = useCommentDraftStore((s) => s.drafts[`reply:${issueId}:${entry.id}`]?.replyTarget);
   const replyTargetId = replyTarget?.commentId ?? entry.id;
   // A deleted target's tombstone is as gone as a removed row.
-  const replyTargetMissing = !!replyTarget && replyTargetId !== entry.id
-    && !replies.some((r) => r.id === replyTargetId && !isDeletedComment(r));
+  const isReplyTargetMissing = (id: string) => id !== entry.id
+    && !replies.some((r) => r.id === id && !isDeletedComment(r));
+  const replyTargetMissing = !!replyTarget && isReplyTargetMissing(replyTargetId);
+  // A reply here goes into the running turn of a run that belongs to this
+  // thread by default; another thread's turn is only reached by choice.
+  const steerThreadRunByDefault = useCallback(
+    (task: AgentTask) => runs.some((run) => run.task.id === task.id),
+    [runs],
+  );
   const annotation = useCommentAnnotations({
+    issueId,
     draftKey: `reply:${issueId}:${entry.id}`,
-    sources: [entry, ...replies].filter((e) => e.type === "comment")
+    sources: [entry, ...replies].filter((e) => e.type === "comment" && !isDeletedComment(e))
       .map((e) => ({ id: e.id, name: e.actor_name || getActorName(e.actor_type, e.actor_id), revision: e.revision })),
     enabled: !!currentUserId,
-    onAdded: () => { if (replyFolded) onResolvedExpandChange?.(entry.id, true); },
+    onOpen: () => { if (replyFolded) onResolvedExpandChange?.(entry.id, true); },
   });
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
@@ -1065,12 +1077,6 @@ function CommentCardImpl({
   const canEditEntry = receipts.length === 0 && (isOwn || (canModerate && entry.actor_type === "member"));
   const canDeleteEntry = !receipts.some(isSupplementInFlight) && (isOwn || canModerate);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  // A reply here goes into the running turn of a run that belongs to this
-  // thread by default; another thread's turn is only reached by choice.
-  const steerThreadRunByDefault = useCallback(
-    (task: AgentTask) => runs.some((run) => run.task.id === task.id),
-    [runs],
-  );
 
   const allNestedReplies = replies;
   // What the thread shows. Tombstones are excluded from display and counts but
@@ -1104,6 +1110,8 @@ function CommentCardImpl({
           of its own. */}
       {!isDeletedComment(reply) && (
         <div
+          data-mc="comment-reply"
+          data-author-type={reply.actor_type}
           id={`comment-${reply.id}`}
           className={cn(
             "border-t border-border/50 transition-colors duration-700",
@@ -1179,7 +1187,7 @@ function CommentCardImpl({
     // overflow-clip (not -hidden) clips the rounded corners WITHOUT creating a
     // scroll container, so the sticky collapse affordances below resolve to the
     // timeline's scroll parent instead of this card. See PR #3623.
-    <Card ref={annotation.cardRef} {...annotation.captureProps} className="!py-0 !gap-0 overflow-clip transition-colors duration-700">
+    <Card data-mc="comment" data-author-type={entry.actor_type} ref={annotation.cardRef} {...annotation.captureProps} className="!py-0 !gap-0 overflow-clip transition-colors duration-700">
       {annotation.popup}
       {onCollapseResolved && (
         <button
@@ -1461,6 +1469,9 @@ function CommentCardImpl({
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />
                 <div className="pl-8 max-md:pl-0">
                   <SteerReceipts issueId={issueId} entry={entry} />
+                  {entry.actor_type === "agent" && entry.source_task_id && (
+                    <AppCallChips issueId={issueId} taskId={entry.source_task_id} />
+                  )}
                 </div>
                 {retryableAgentFailureComment(entry) && (
                   <TaskCommentRetryButton
@@ -1526,6 +1537,7 @@ function CommentCardImpl({
                   issueId={issueId}
                   parentId={replyTargetId}
                   targetMissing={replyTargetMissing}
+                  annotationComposer={annotation.composer}
                   placeholder={t(($) => $.reply.placeholder)}
                   size="sm"
                   avatarType="member"
@@ -1533,7 +1545,12 @@ function CommentCardImpl({
                   draftKey={`reply:${issueId}:${entry.id}`}
                   onEditAnnotation={(id) => annotation.editAnnotation(id, true)}
                   steerByDefault={steerThreadRunByDefault}
-                  onSubmit={(content, attachmentIds, suppressAgentIds, steerTaskIds) => replyTargetMissing ? Promise.resolve(false) : onReply(replyTargetId, content, attachmentIds, suppressAgentIds, steerTaskIds)}
+                  onSubmit={(content, attachmentIds, suppressAgentIds, steerTaskIds) => {
+                    // The popup can save the first annotation and submit in the same event.
+                    const targetId = useCommentDraftStore.getState().drafts[`reply:${issueId}:${entry.id}`]?.replyTarget?.commentId ?? entry.id;
+                    return isReplyTargetMissing(targetId) ? Promise.resolve(false)
+                      : onReply(targetId, content, attachmentIds, suppressAgentIds, steerTaskIds);
+                  }}
                   onAccepted={onReplyAccepted}
                 />
               </div>

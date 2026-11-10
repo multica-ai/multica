@@ -11,6 +11,7 @@
     "view_table": "表格",
     "view_cards": "卡片",
     "row_menu": "项目操作",
+    "rename": "重命名",
     "pin": "固定到侧边栏",
     "unpin": "取消钉选",
     "delete": "删除",
@@ -62,6 +63,7 @@
     "pin_tooltip": "固定到侧边栏",
     "unpin_tooltip": "从侧边栏取消固定",
     "sidebar_tooltip": "切换右侧边栏",
+    "rename_action": "重命名项目",
     "copy_link": "复制链接",
     "delete_action": "删除项目",
     "section_properties": "属性",
@@ -153,6 +155,7 @@
     "ref_default_tooltip": "未设置分支 —— 任务使用仓库当时的默认分支。"
   },
   "delete_dialog": {
+    "offline_error": "当前处于离线状态，请联网后重试删除。",
     "title": "删除项目",
     "description": "将删除这个项目。任务不会被删除，只会从项目中解除关联。",
     "confirm": "删除",
@@ -203,6 +206,27 @@
       "issue_pricing": "定价页对比表",
       "issue_blog": "博客列表分页"
     }
+  },
+  "access": {
+    "label": "访问权限",
+    "title": "{{title}}的访问权限",
+    "description": "控制谁能查看项目及其中的任务、评论和附件。",
+    "workspace": "整个工作区",
+    "private": "仅项目成员",
+    "members_count": "项目成员 · {{count}}",
+    "add": "添加工作区成员",
+    "search": "搜索姓名或邮箱...",
+    "no_members": "没有匹配的成员",
+    "no_selected": "暂无项目成员",
+    "admin_notice": "工作区 owner 和 admin 始终可以访问。",
+    "you": "你",
+    "remove": "移除{{name}}",
+    "failed": "无法保存访问权限。",
+    "load_failed": "无法加载项目成员。",
+    "publish_title": "将项目设为整个工作区可见？",
+    "publish_description": "工作区所有成员都将能查看这个项目及其中的任务、评论和附件。",
+    "done": "完成",
+    "retry": "重试"
   },
   "lifecycle": {
     "empty": {

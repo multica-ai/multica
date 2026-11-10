@@ -35,6 +35,7 @@
     "docs": "Documentación",
     "changelog": "Registro de cambios",
     "discord": "Discord",
+    "star_on_github": "Dar una estrella en GitHub",
     "feedback": "Comentarios",
     "server_version": "Versión del servidor {{version}}"
   },
@@ -78,6 +79,15 @@
       "learn_more": "Más información"
     }
   },
+  "star_prompt": {
+    "title_one": "{{agent}} ha completado {{count}} tarea",
+    "title_other": "{{agent}} ha completado {{count}} tareas",
+    "body": "Si Multica te resulta útil, una estrella en GitHub ayuda a que otros equipos lo descubran.",
+    "star": "Star",
+    "star_label": "Dar una Star a Multica en GitHub",
+    "later": "Ahora no",
+    "close": "Cerrar"
+  },
   "spaces": {
     "work": "Trabajo",
     "team": "Equipo"
@@ -85,13 +95,15 @@
   "rail": {
     "label": "Navegación de la app",
     "sheet_description": "Cambia de sección y de espacio de trabajo.",
-    "inbox": "Bandeja de entrada",
+    "inbox": "Bandeja",
     "work": "Trabajo",
     "team": "Equipo",
     "chat": "Chat",
     "autopilots": "Auto",
     "switch_workspace": "Cambiar de espacio de trabajo",
     "invitation_from": "{{name}} te ha invitado",
+    "pin_workspace": "Fijar espacio de trabajo",
+    "unpin_workspace": "Desfijar espacio de trabajo",
     "open_in_new_window": "Abrir en una ventana nueva",
     "open_in_new_window_click": "Clic",
     "open_in_other_window": "Ya está abierto en otra ventana",
@@ -136,6 +148,7 @@
       "view_actions": "Acciones de {{name}}",
       "view_copy_link": "Copiar enlace",
       "view_remove": "Quitar de la barra lateral",
+      "view_edit": "Editar vista",
       "view_rename": "Renombrar",
       "view_duplicate": "Duplicar",
       "view_delete": "Eliminar vista"
@@ -146,6 +159,8 @@
       "stuck_one": "{{count}} ejecución esperando un runtime desconectado",
       "stuck_other": "{{count}} ejecuciones esperando un runtime desconectado",
       "working_now": "Trabajando ahora",
+      "show_more_agents": "Mostrar {{count}} más…",
+      "show_fewer_agents": "Mostrar menos",
       "running_tasks_one": "{{count}} ejecución en curso",
       "running_tasks_other": "{{count}} ejecuciones en curso",
       "all_agents": "Todos los agentes",

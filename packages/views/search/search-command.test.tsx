@@ -3,7 +3,11 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
-import { useCommandBarContextStore, type CommandBarContext } from "@multica/core/command-bar";
+import {
+  useCommandBarContextStore,
+  useSearchStore,
+  type CommandBarContext,
+} from "@multica/core/command-bar";
 import { inboxUnreadSummaryOptions } from "@multica/core/inbox/queries";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
@@ -19,7 +23,6 @@ import { RESOURCES } from "../locales";
 import enLayout from "../locales/en/layout.json";
 import zhHansProjects from "../locales/zh-Hans/projects.json";
 import { SearchCommand } from "./search-command";
-import { useSearchStore } from "./search-store";
 
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog([]),
@@ -1044,6 +1047,42 @@ describe("SearchCommand", () => {
       fireEvent.keyDown(input(), { key: "Enter", shiftKey: true });
 
       await waitFor(() => expect(renderedValues()).not.toContain("delegate:submit"));
+      expect(api("quickCreateIssue")).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { isComposing: true, keyCode: 13 },
+      { isComposing: false, keyCode: 229 },
+    ])("preserves delegation during IME Shift+Enter ($isComposing, $keyCode)", async (ime) => {
+      const user = userEvent.setup();
+      const prompt = "fix the Safari login callback 500";
+      renderSearch();
+      await user.type(input(), prompt);
+      await waitFor(() => expect(selectedValue()).toBe("delegate:submit"));
+
+      fireEvent.compositionStart(input());
+      const event = new KeyboardEvent("keydown", {
+        key: "Enter",
+        shiftKey: true,
+        ...ime,
+        bubbles: true,
+        cancelable: true,
+      });
+      fireEvent(input(), event);
+
+      expect.soft(event.defaultPrevented).toBe(false);
+      expect.soft(renderedValues()).toContain("delegate:submit");
+      expect(input()).toHaveValue(prompt);
+      expect(useSearchStore.getState().open).toBe(true);
+      expect(api("quickCreateIssue")).not.toHaveBeenCalled();
+      expect(mockOpenModal).not.toHaveBeenCalled();
+      expect(mockPush).not.toHaveBeenCalled();
+
+      fireEvent.compositionEnd(input());
+      fireEvent.keyDown(input(), { key: "Enter", shiftKey: true });
+      await waitFor(() => expect(renderedValues()).not.toContain("delegate:submit"));
+      expect(input()).toHaveValue(prompt);
+      expect(useSearchStore.getState().open).toBe(true);
       expect(api("quickCreateIssue")).not.toHaveBeenCalled();
     });
 

@@ -140,7 +140,8 @@
     "local_pick_failed": "No se ha podido abrir el selector de directorios.",
     "local_invalid_dir": "Este directorio no se puede usar. Elige otro.",
     "local_hint": "Los agentes en otras máquinas no verán esta ruta: fallarán al arrancar. Usa repos para trabajo compartido.",
-    "repos_ref_default": "Rama por defecto"
+    "repos_ref_default": "Rama por defecto",
+    "repos_remove_aria": "Quitar {{repo}}"
   },
   "create_issue": {
     "sr_manual": "Nueva tarea",
@@ -268,10 +269,27 @@
     "toast_renamed": "Tarea renombrada",
     "toast_failed": "No se ha podido renombrar la tarea"
   },
+  "rename_project": {
+    "title": "Renombrar proyecto",
+    "placeholder": "Título del proyecto",
+    "submit": "Guardar",
+    "title_required": "Escribe un título",
+    "offline_error": "Estás sin conexión. Vuelve a conectarte e intenta renombrar de nuevo.",
+    "toast_renamed": "Proyecto renombrado",
+    "toast_failed": "No se ha podido renombrar el proyecto"
+  },
   "add_project_issue": {
     "title": "Añadir tarea existente",
     "description": "Busca una tarea para moverla a este proyecto",
     "toast_success": "{{identifier}} movida al proyecto",
     "toast_failed": "No se ha podido mover la tarea"
+  },
+  "copy_parent_fields": {
+    "trigger": "Copiar campos de la tarea principal",
+    "title": "Copiar campos de la tarea principal",
+    "description": "Desde {{identifier}}. Sustituye una vez los valores seleccionados; los cambios posteriores no se sincronizan.",
+    "apply": "Copiar {{count}} campos",
+    "no_labels": "Sin etiquetas",
+    "manual_only": "Las etiquetas, la fecha de inicio y las propiedades personalizadas solo se aplican a la creación manual."
   }
 }

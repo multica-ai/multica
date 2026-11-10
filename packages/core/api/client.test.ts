@@ -158,6 +158,25 @@ describe("ApiClient edit guards", () => {
     expect(parsedLegacy.issues[0]).not.toHaveProperty("revision");
     await expect(client.listIssues()).resolves.toEqual({ issues: [], total: 0 });
   });
+
+  it("sends status category filters so custom statuses count with their phase", async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(JSON.stringify({ issues: [], total: 0 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await client.listIssues({ status_categories: ["done", "closed"] });
+    await client.listIssues({ status_category: "started" });
+
+    const query = (call: number) => new URL(fetchMock.mock.calls[call]![0]).searchParams;
+    expect(query(0).get("status_categories")).toBe("done,closed");
+    expect(query(1).get("status_category")).toBe("started");
+  });
 });
 
 describe("ApiClient pull-request response schema", () => {
@@ -267,6 +286,64 @@ describe("ApiClient pull-request response schema", () => {
     expect(result.auto_complete).toBeNull();
     expect(result.pull_requests).toHaveLength(1);
     expect(result.pull_requests[0]?.link_source).toBeUndefined();
+  });
+});
+
+describe("ApiClient issue environments response schema", () => {
+  const validEnvironment = {
+    id: "env-1",
+    issue_id: "issue-1",
+    task_id: "task-1",
+    runtime_id: "rt-1",
+    agent_id: "agent-1",
+    source: "config",
+    name: "web",
+    label: "Web app",
+    url: "http://localhost:41000",
+    port: 41000,
+    state: "running",
+    detail: "",
+    started_at: "2026-11-10T09:00:00Z",
+    expires_at: "2026-11-11T09:00:00Z",
+    last_seen_at: "2026-11-10T09:05:00Z",
+    ended_at: null,
+  };
+
+  function stubEnvironments(body: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+  }
+
+  it("parses a valid environment list", async () => {
+    stubEnvironments({ environments: [validEnvironment] });
+    const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
+    expect(result.environments).toEqual([validEnvironment]);
+  });
+
+  it("drops a malformed environment and keeps the rest", async () => {
+    stubEnvironments({ environments: [{ ...validEnvironment, id: 7 }, { ...validEnvironment, id: "env-2" }] });
+    const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
+    expect(result.environments.map((env) => env.id)).toEqual(["env-2"]);
+  });
+
+  it("reads an unknown state from a newer server as unreachable", async () => {
+    stubEnvironments({ environments: [{ ...validEnvironment, state: "hibernating", source: "remote" }] });
+    const result = await new ApiClient("https://api.example.test").listIssueEnvironments("issue-1");
+    expect(result.environments[0]).toMatchObject({ state: "unreachable", source: "detected" });
+  });
+
+  it("falls back to an empty list when the body is not a list", async () => {
+    stubEnvironments({ environments: "nope" });
+    await expect(
+      new ApiClient("https://api.example.test").listIssueEnvironments("issue-1"),
+    ).resolves.toEqual({ environments: [] });
   });
 });
 
@@ -959,6 +1036,21 @@ describe("ApiClient Inbox response schemas", () => {
 });
 
 describe("ApiClient", () => {
+  it("requests recursive issue history and tolerates malformed issue labels", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([
+      { id: "child-run", issue_id: "child", issue_identifier: "MUL-2", issue_title: "Child", usage: [{ model: "test", input_tokens: 10 }] },
+      { id: "deep-run", issue_id: "grandchild", issue_identifier: 42, issue_title: { malformed: true } },
+    ]), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    const tasks = await client.listTasksByIssue("parent", true);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/issues/parent/task-runs?scope=subtree");
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0]).toMatchObject({ issue_id: "child", issue_identifier: "MUL-2", issue_title: "Child" });
+    expect(tasks[0]?.usage?.[0]?.input_tokens).toBe(10);
+    expect(tasks[1]?.issue_identifier).toBeUndefined();
+    expect(tasks[1]?.issue_title).toBeUndefined();
+  });
   it("preserves HTTP status on failed requests", async () => {
     vi.stubGlobal(
       "fetch",
@@ -1671,6 +1763,26 @@ describe("ApiClient", () => {
       // surface a user-facing error instead of opening `undefined`.
       expect(att.id).toBe("");
       expect(att.download_url).toBe("");
+    });
+  });
+
+  describe("attachment dimensions", () => {
+    it.each([
+      [{ width: 3200, height: 2000 }, [3200, 2000]],
+      [{ width: "wide", height: -1 }, [undefined, undefined]],
+      [{ width: null, height: 0.5 }, [undefined, undefined]],
+      [{}, [undefined, undefined]],
+    ])("preserves the attachment with optional metadata %j", async (metadata, expected) => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          id: "att-1", filename: "shot.png", url: "/uploads/shot.png",
+          download_url: "/uploads/shot.png", ...metadata,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )));
+      const att = await new ApiClient("https://api.example.test").getAttachment("att-1");
+      expect(att.id).toBe("att-1");
+      expect([att.width, att.height]).toEqual(expected);
     });
   });
 
@@ -2773,6 +2885,26 @@ describe("ApiClient workspace MCP servers", () => {
 });
 
 describe("importSkillArchive", () => {
+  it("pins archive upload and CSRF retry headers to the original workspace", async () => {
+    setCurrentWorkspace("workspace-a", "ws-1");
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => {
+        setCurrentWorkspace("workspace-b", "ws-2");
+        return new Response(JSON.stringify({ error: "CSRF validation failed" }), { status: 403 });
+      })
+      .mockResolvedValueOnce(new Response(JSON.stringify({ status: "created", skill: { id: "alpha", workspace_id: "ws-1", name: "alpha" } }), { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const result = await new ApiClient("https://api.example.test").importSkillArchive(
+        new File(["zip"], "alpha.skill"), "fail", { workspaceSlug: "workspace-a" },
+      );
+      expect(result.workspace_id).toBe("ws-1");
+      expect(fetchMock.mock.calls.map((call) => call[1].headers["X-Workspace-Slug"])).toEqual(["workspace-a", "workspace-a"]);
+    } finally {
+      setCurrentWorkspace(null, null);
+    }
+  });
+
   it("POSTs multipart form data without a JSON content-type", async () => {
     const skill = {
       id: "skill-1",
@@ -3227,6 +3359,19 @@ describe("ApiClient shared credential across windows", () => {
     await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
 
     expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it("ignores a late 401 if a bearer session started after the request", async () => {
+    const onUnauthorized = vi.fn();
+    const client = new ApiClient("https://api.example.test", { onUnauthorized });
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      client.setToken("signed-in");
+      return jsonResponse({ error: "unauthorized" }, 401);
+    }));
+
+    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(client.getToken()).toBe("signed-in");
   });
 
   // ...but a genuine expiry still ends the session: nothing replaced the

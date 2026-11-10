@@ -1,7 +1,8 @@
 "use client";
 
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { AnimatePresence, motion, useIsPresent, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
 import { ChevronDown, ChevronUp, Maximize2, X } from "@multica/ui/icons";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import {
@@ -22,6 +23,7 @@ import {
 import { isImeComposing } from "@multica/core/utils";
 import { AppLink } from "../../navigation";
 import { PAGE_GUTTER } from "../../layout/page-header";
+import { WindowTitleBarProvider } from "../../platform/window-title-bar";
 import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useT } from "../../i18n";
 import { IssueDetail } from "./issue-detail";
@@ -140,7 +142,7 @@ const IssuePeekPanel = memo(function IssuePeekPanel({ issueId }: { issueId: stri
   // False while the exit animation plays: the closing panel no longer takes
   // clicks or keys, so the board is usable the moment the peek is dismissed.
   const isPresent = useIsPresent();
-  const reduceMotion = useReducedMotion() ?? false;
+  const reduceMotion = useReducedMotion();
 
   return (
     <motion.aside
@@ -153,6 +155,10 @@ const IssuePeekPanel = memo(function IssuePeekPanel({ issueId }: { issueId: stri
         // Stops above the chat launcher, which owns the dashboard's
         // bottom-right corner — the panel's composer would sit under it.
         "above-chat-launcher",
+        // Floats over the top of the page, which may be the window's drag
+        // region (the Desktop issue window); without this, its header's
+        // controls would move the window instead of taking the click.
+        "[-webkit-app-region:no-drag]",
         !isPresent && "pointer-events-none",
       )}
       // Slides in from the edge it is anchored to; the exit is shorter and
@@ -170,31 +176,33 @@ const IssuePeekPanel = memo(function IssuePeekPanel({ issueId }: { issueId: stri
       }}
     >
       {isPresent && <IssuePeekFollow issueId={issueId} panelRef={panelRef} />}
-      <ErrorBoundary
-        resetKeys={[issueId]}
-        // The default fallback is a bare message card; here it would be a
-        // panel with no way to close it but Esc.
-        fallback={({ error }) => (
-          <div className="flex flex-1 min-h-0 flex-col">
-            <div className={cn("flex h-12 shrink-0 items-center justify-end gap-1 border-b", PAGE_GUTTER)}>
-              <IssuePeekTrailingActions issueId={issueId} />
+      <WindowTitleBarProvider value={null}>
+        <ErrorBoundary
+          resetKeys={[issueId]}
+          // The default fallback is a bare message card; here it would be a
+          // panel with no way to close it but Esc.
+          fallback={({ error }) => (
+            <div className="flex flex-1 min-h-0 flex-col">
+              <div className={cn("flex h-12 shrink-0 items-center justify-end gap-1 border-b", PAGE_GUTTER)}>
+                <IssuePeekTrailingActions issueId={issueId} />
+              </div>
+              <div className="flex flex-1 min-h-0 items-center justify-center px-4 text-center text-body text-muted-foreground">
+                {error.message}
+              </div>
             </div>
-            <div className="flex flex-1 min-h-0 items-center justify-center px-4 text-center text-body text-muted-foreground">
-              {error.message}
-            </div>
-          </div>
-        )}
-      >
-        <IssueDetail
-          key={issueId}
-          issueId={issueId}
-          variant="peek"
-          defaultSidebarOpen={false}
-          leadingAction={<IssuePeekNav />}
-          trailingActions={<IssuePeekTrailingActions issueId={issueId} />}
-          onDelete={actions.close}
-        />
-      </ErrorBoundary>
+          )}
+        >
+          <IssueDetail
+            key={issueId}
+            issueId={issueId}
+            variant="peek"
+            defaultSidebarOpen={false}
+            leadingAction={<IssuePeekNav />}
+            trailingActions={<IssuePeekTrailingActions issueId={issueId} />}
+            onDelete={actions.close}
+          />
+        </ErrorBoundary>
+      </WindowTitleBarProvider>
     </motion.aside>
   );
 });
@@ -209,7 +217,7 @@ function IssuePeekFollow({
 }) {
   const actions = useIssuePeekActions()!;
   const position = useIssuePeekPosition();
-  const reduceMotion = useReducedMotion() ?? false;
+  const reduceMotion = useReducedMotion();
 
   // Read through a ref so the listener is bound once, not on every step.
   const positionRef = useRef(position);

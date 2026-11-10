@@ -75,6 +75,98 @@ func clearDaemonEnvSignals(t *testing.T) {
 	t.Setenv("MULTICA_TASK_ID", "")
 	t.Setenv("MULTICA_DAEMON_PORT", "")
 	t.Setenv(cli.TaskConfigRootEnv, "")
+	t.Setenv(devEnvNameEnv, "")
+}
+
+// requireLiveTaskMarkerRefusals asserts every refusal path names the marker,
+// says it is not a leftover, and never offers to remove it.
+func requireLiveTaskMarkerRefusals(t *testing.T, markerPath, owner string) {
+	t.Helper()
+	if got := leftoverDaemonTaskMarkerPath(); got != "" {
+		t.Fatalf("leftoverDaemonTaskMarkerPath() = %q; want \"\" for a live task's marker", got)
+	}
+	for name, refuse := range refusalPaths() {
+		err := refuse()
+		if err == nil {
+			t.Fatalf("%s: got nil error; want the refusal to stay in place", name)
+		}
+		msg := err.Error()
+		for _, want := range []string{markerPath, owner, "not a leftover, do not remove it"} {
+			if !strings.Contains(msg, want) {
+				t.Fatalf("%s error should contain %q; got %q", name, want, msg)
+			}
+		}
+		if strings.Contains(msg, "likely a leftover") || strings.Contains(msg, "remove it and retry") {
+			t.Fatalf("%s must not tell a live task to remove its marker; got %q", name, msg)
+		}
+	}
+	if _, statErr := os.Stat(markerPath); statErr != nil {
+		t.Fatalf("marker must survive: %v", statErr)
+	}
+}
+
+// TestLiveTaskMarkerUnderWorkspacesRootNotReportedAsLeftover is the MUL-8857
+// regression test. A managed task workdir sits under the workspaces root, and a
+// process that lost the task's identity there is the task's own — a sandbox, or
+// a tool that strips MULTICA_* on purpose. Telling it to remove the marker turns
+// off its own guard, and would not even lift the refusal: the root marker above
+// still refuses.
+func TestLiveTaskMarkerUnderWorkspacesRootNotReportedAsLeftover(t *testing.T) {
+	root := t.TempDir()
+	rootMarker := filepath.Join(root, execenv.TaskContextMarkerRelPath)
+	workDir := filepath.Join(root, "ws", "task", "workdir")
+	markerPath := filepath.Join(workDir, execenv.TaskContextMarkerRelPath)
+	for path, body := range map[string]string{rootMarker: workspacesRootMarker(), markerPath: issueTaskMarker()} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nested := filepath.Join(workDir, "repo", "server")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(nested)
+	clearDaemonEnvSignals(t)
+	t.Setenv("MULTICA_TOKEN", "")
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
+
+	requireLiveTaskMarkerRefusals(t, markerPath, "daemon workspaces root "+root)
+}
+
+// TestLiveTaskMarkerUnderDevEnvNotReportedAsLeftover covers a task whose marker
+// is not under a workspaces root — a local_directory run — calling the CLI
+// through dev-env, which strips the task's identity from everything it runs.
+// Only a registered environment counts: a stray export must not hide a real
+// leftover.
+func TestLiveTaskMarkerUnderDevEnvNotReportedAsLeftover(t *testing.T) {
+	setup := func(t *testing.T) string {
+		markerPath := seedDaemonTaskMarker(t)
+		clearDaemonEnvSignals(t)
+		t.Setenv("MULTICA_TOKEN", "")
+		t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
+		t.Setenv(devEnvHomeEnv, t.TempDir())
+		writeDevEnvManifest(t, "probe", "NAME=probe\nBACKEND_PORT=18081\nPROFILE=dev-probe\n")
+		return markerPath
+	}
+
+	t.Run("registered environment", func(t *testing.T) {
+		markerPath := setup(t)
+		t.Setenv(devEnvNameEnv, "probe")
+		requireLiveTaskMarkerRefusals(t, markerPath, `dev-env environment "probe"`)
+	})
+
+	for _, name := range []string{"unregistered", "../envs/probe"} {
+		t.Run("unregistered "+name, func(t *testing.T) {
+			markerPath := setup(t)
+			t.Setenv(devEnvNameEnv, name)
+			if got := leftoverDaemonTaskMarkerPath(); got != markerPath {
+				t.Fatalf("leftoverDaemonTaskMarkerPath() = %q; want the leftover %q", got, markerPath)
+			}
+		})
+	}
 }
 
 // TestLeftoverMarkerReportedIdenticallyOnEveryRefusalPath is the regression test

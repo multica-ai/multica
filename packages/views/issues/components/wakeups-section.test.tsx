@@ -421,6 +421,23 @@ describe("v2 sidebar", () => {
     await waitFor(() => expect(updateSystem).toHaveBeenCalledWith({ rule: "child_done", enabled: false, instruction: "" }));
   });
 
+  it("folds a turned-off system rule into history and turns it back on from there", async () => {
+    empty = true;
+    systemRules = [{
+      id: "rule", revision: 1, default_instruction: "Advance the next stage.", customized: true, paused_reason: null,
+      rule: "child_done", workspace_default: true, enabled: false, instruction: "", staged: false, stage: null, total: 2, remaining: 1,
+      waiting: ["MUL-2"], target: { type: "agent", id: "a", name: "Emacs" }, blocked: "",
+    }];
+    renderWithI18n(<WakeupsSection issueId="issue" />);
+    expect(screen.getByRole("button", { name: "Wakeups" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /When all sub-issues finish/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Wakeup history · 1" }));
+    const row = screen.getByRole("button", { name: /When all sub-issues finish/ });
+    expect(row).toHaveTextContent("Turned off for this issue");
+    fireEvent.click(screen.getAllByRole("switch", { name: "Wake the assignee when sub-issues finish" })[0]!);
+    await waitFor(() => expect(updateSystem).toHaveBeenCalledWith({ rule: "child_done", enabled: true, instruction: "" }));
+  });
+
   it("says a member assignee is notified instead of woken", () => {
     systemRules = [{
       id: "rule", revision: 1, default_instruction: "Advance the next stage.", customized: false, paused_reason: null,

@@ -275,7 +275,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | `MULTICA_GC_TTL` | `24h` | 任务进入 `done` 或 `closed` 分类、或聊天会话归档后，再过多久删除对应运行目录 |
 | `MULTICA_GC_COMPLETED_TASK_TTL` | Multica Cloud `14d`；自托管 `0` | 任务运行完成多久后删除整个目录，不论任务是否关闭；`0` 表示关闭。不作用于项目本地目录上的运行 |
 | `MULTICA_GC_ORPHAN_TTL` | `72h` | 找不到归属的目录多久没有改动后删除 |
-| `MULTICA_GC_ARTIFACT_TTL` | `12h` | 运行完成多久后删除可再生成的内容（下一行的目录和守护进程为 Codex 准备的缓存）；`0` 表示不删 |
+| `MULTICA_GC_ARTIFACT_TTL` | `12h` | 从运行结束到守护进程清理可重新生成内容的时间。下一行的目录名规则适用于未关闭的任务，以及使用托管工作目录的未归档聊天。守护进程管理的 Codex 缓存也适用相同时长。设为 `0` 可保留这些缓存 |
 | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` | 按目录名匹配的可再生成内容，逗号分隔。设置后**替换**默认列表，要保留默认项就一并写上；含 `/` 或 `\` 的项会被忽略 |
 | `MULTICA_GC_REPO_TTL` | `30d` | 不再被引用、也没有 worktree 的裸仓库缓存，多久没有检出后删除；`0` 表示不删 |
 | `MULTICA_GC_REPO_MAINTENANCE_ENABLED` | `true` | 删掉过期的智能体分支后，是否对仓库缓存运行 `git reflog expire` 和 `git gc`；设为 `false` 只关掉这一步 |
@@ -385,6 +385,8 @@ multica config show
 | `ws_claim_poll_interval` | `3m` | 健康 WebSocket 下 claim 安全轮询的上限，与 `poll_interval` 独立配置；Daemon 会应用向下抖动 |
 | `heartbeat_interval` | `15s` | 心跳间隔 |
 | `agent_timeout` | 不限制 | 单次执行的绝对时限 |
+| `agent_idle_watchdog` | `2h` | 没有工具执行时的静默上限；`0s` 关闭守护进程的整套 watchdog，`agent_tool_watchdog` 也随之失效 |
+| `agent_tool_watchdog` | 同 `agent_idle_watchdog` | 工具执行期间的静默上限；`0s` 表示守护进程的 watchdog 不会因工具静默而停止执行，此时执行只受 `agent_timeout` 限制，而它默认不限制 |
 | `codex_semantic_inactivity_timeout` | 派生 | Codex 语义静默阈值。未设置时取 idle 与 tool watchdog 预算中较大的那个；tool 预算为 `0` 时回落到 idle 预算；只有整套 watchdog 关闭时才保留 Codex 自己的 `10m` |
 | `codex_handshake_timeout` | `30s`；`thread/start`、`thread/resume`：`60s` | Codex app-server 启动握手上限；显式设置后会统一覆盖两类预算 |
 | `disable_auto_update` | 跟随环境 | `true` 关闭自动更新；`false` 清除本地覆盖，回到环境变量或默认 |
@@ -393,7 +395,7 @@ multica config show
 
 几条取值规则：
 
-- duration 类键接受正的 Go duration（如 `10s`、`2h`），`0s` 和负值会被拒绝。唯一例外是 `agent_timeout`：`0s` 合法，表示明确关闭执行时限。
+- duration 类键接受正的 Go duration（如 `10s`、`2h`），负值一律拒绝。只有 `agent_timeout`、`agent_idle_watchdog`、`agent_tool_watchdog` 还接受 `0s`：`agent_timeout` 设为 `0s` 表示明确关闭执行时限，两个 watchdog 键设为 `0s` 关闭什么见上表。
 - 传空字符串清除已持久化的值，回到环境变量或内置默认，例如 `multica config set poll_interval ""`。
 - `max_concurrent_tasks` 要求非负整数。
 - 相对的 `workspaces_root` 值在保存时会转换为绝对路径。

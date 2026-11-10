@@ -1,12 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { createAuthStore, registerAuthStore } from "@multica/core/auth";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
-import type { AgentRuntime } from "@multica/core/types";
+import type { Agent, AgentRuntime, AgentTask } from "@multica/core/types";
+import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import {
   agentListOptions,
   memberListOptions,
@@ -17,6 +18,11 @@ import {
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { renderWithI18n } from "../../test/i18n";
 import { TeamPanel } from "./team-panel";
+
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/api")>()),
+  api: { getIssue: vi.fn(() => new Promise(() => {})), getBaseUrl: () => "http://localhost" },
+}));
 
 const WS = "ws-test";
 const NOW = Date.parse("2026-11-04T08:00:00Z");
@@ -54,6 +60,8 @@ function runtime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
 let qc: QueryClient;
 
 beforeEach(() => {
+  vi.mocked(api.getIssue).mockClear();
+  useSidebarTreeStore.setState({ workingCollapsed: false, needsAttentionCollapsed: false });
   vi.spyOn(Date, "now").mockReturnValue(NOW);
   registerAuthStore(
     createAuthStore({
@@ -95,7 +103,7 @@ afterEach(() => {
 
 function renderPanel(runtimes: AgentRuntime[]) {
   qc.setQueryData(runtimeListOptions(WS).queryKey, runtimes);
-  renderWithI18n(
+  return renderWithI18n(
     <QueryClientProvider client={qc}>
       <WorkspaceSlugProvider slug="acme">
         <NavigationProvider value={adapter}>
@@ -105,6 +113,108 @@ function renderPanel(runtimes: AgentRuntime[]) {
     </QueryClientProvider>,
   );
 }
+
+function seedAgents(count: number, status: "running" | "queued" = "running") {
+  const agents: Agent[] = Array.from({ length: count }, (_, index) => ({
+    id: `${status}-${index}`,
+    name: `${status} agent ${index + 1}`,
+    workspace_id: WS,
+    runtime_id: status === "running" ? "rt-online" : "rt-offline",
+    description: "",
+    instructions: "",
+    avatar_url: null,
+    runtime_mode: "local",
+    runtime_config: {},
+    custom_args: [],
+    visibility: "workspace",
+    permission_mode: "public_to",
+    invocation_targets: [],
+    status: "idle",
+    max_concurrent_tasks: 6,
+    model: "",
+    owner_id: null,
+    skills: [],
+    created_at: new Date(NOW).toISOString(),
+    updated_at: new Date(NOW).toISOString(),
+    archived_at: null,
+    archived_by: null,
+  }));
+  const tasks: AgentTask[] = agents.map((agent) => ({
+    id: `task-${agent.id}`,
+    agent_id: agent.id,
+    runtime_id: agent.runtime_id,
+    issue_id: `issue-${agent.id}`,
+    status,
+    priority: 0,
+    dispatched_at: null,
+    started_at: status === "running" ? new Date(NOW).toISOString() : null,
+    completed_at: null,
+    result: null,
+    error: null,
+    created_at: new Date(NOW).toISOString(),
+  }));
+  qc.setQueryData<Agent[]>(agentListOptions(WS).queryKey, (current = []) => [...current, ...agents]);
+  qc.setQueryData<AgentTask[]>(agentTaskSnapshotOptions(WS).queryKey, (current = []) => [...current, ...tasks]);
+}
+
+describe("TeamPanel agent previews", () => {
+  it("previews five of 100 working agents, retaining the total and only fetching visible issue labels", async () => {
+    const getIssue = vi.mocked(api.getIssue);
+    seedAgents(100);
+    renderPanel([runtime()]);
+
+    const working = within(screen.getByRole("region", { name: "Working now" }));
+    expect(working.getByText("100")).toBeInTheDocument();
+    expect(working.getAllByRole("link")).toHaveLength(5);
+    expect(working.queryByText("running agent 6")).not.toBeInTheDocument();
+    await waitFor(() => expect(getIssue).toHaveBeenCalledTimes(5));
+    expect(screen.getByRole("link", { name: /^All agents/ })).toBeInTheDocument();
+
+    fireEvent.click(working.getByRole("button", { name: "Show 95 more…" }));
+    expect(working.getAllByRole("link")).toHaveLength(100);
+    expect(working.getByRole("button", { name: "Show fewer" })).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.click(working.getByRole("button", { name: "Show fewer" }));
+    expect(working.getAllByRole("link")).toHaveLength(5);
+  });
+
+  it("previews and collapses each status independently, retaining collapse state on remount", () => {
+    seedAgents(7);
+    seedAgents(8, "queued");
+    const runtimes = [runtime(), runtime({ id: "rt-offline", status: "offline" })];
+    const panel = renderPanel(runtimes);
+    const working = within(screen.getByRole("region", { name: "Working now" }));
+    const attention = within(screen.getByRole("region", { name: "Needs attention" }));
+
+    expect(working.getAllByRole("link")).toHaveLength(5);
+    expect(attention.getAllByRole("link")).toHaveLength(5);
+    fireEvent.click(attention.getByRole("button", { name: "Show 3 more…" }));
+    expect(attention.getAllByRole("link")).toHaveLength(8);
+    expect(working.getAllByRole("link")).toHaveLength(5);
+
+    fireEvent.click(working.getByRole("button", { name: "Working now" }));
+    expect(working.queryAllByRole("link")).toHaveLength(0);
+    expect(working.getByText("7")).toBeInTheDocument();
+    expect(attention.getAllByRole("link")).toHaveLength(8);
+    fireEvent.click(attention.getByRole("button", { name: "Needs attention" }));
+    panel.unmount();
+    renderPanel(runtimes);
+    expect(screen.getByRole("button", { name: "Working now" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "Needs attention" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("running agent 1")).not.toBeInTheDocument();
+    expect(screen.queryByText("queued agent 1")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Working now" }));
+    expect(within(screen.getByRole("region", { name: "Working now" })).getAllByRole("link")).toHaveLength(5);
+  });
+
+  it("omits preview controls for lists at the limit and hides empty sections", () => {
+    seedAgents(5);
+    renderPanel([runtime()]);
+    expect(screen.queryByRole("region", { name: "Needs attention" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Show/ })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Working now" })).getAllByRole("link")).toHaveLength(5);
+  });
+});
 
 describe("TeamPanel runtime badge", () => {
   it("shows a green online machine count without a total or duplicate providers", () => {
