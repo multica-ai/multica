@@ -42,6 +42,13 @@ func groupAlive(pgid int) bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
+func signalProcess(pid int, sig syscall.Signal) error {
+	if pid <= 0 {
+		return errors.New("invalid process")
+	}
+	return syscall.Kill(pid, sig)
+}
+
 func processGroup(pid int) int {
 	pgid, err := syscall.Getpgid(pid)
 	if err != nil {

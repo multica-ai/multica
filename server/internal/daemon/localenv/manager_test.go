@@ -97,6 +97,11 @@ func TestManagerStartsSupervisesAndStops(t *testing.T) {
 	if env.State != StateRunning || env.Label != "Web app" || env.URL != fmt.Sprintf("http://localhost:%d", env.Port) {
 		t.Fatalf("started environment = %+v", env)
 	}
+	// The repository is named as DiscoverDeclared names it, so the sidebar
+	// can match the two.
+	if want := filepath.Base(task.RootDir); env.Repo != want {
+		t.Fatalf("Repo = %q, want %q", env.Repo, want)
+	}
 	if env.ExpiresAt == nil || env.ExpiresAt.Sub(env.StartedAt) != DefaultTTL {
 		t.Fatalf("ExpiresAt = %v, want start + %s", env.ExpiresAt, DefaultTTL)
 	}

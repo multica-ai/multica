@@ -187,6 +187,9 @@ import type {
   PluginConfigRequest,
   IssuePullRequestsResponse,
   IssueEnvironmentsResponse,
+  IssueEnvironmentAction,
+  IssueEnvironmentCommand,
+  StartIssueEnvironmentRequest,
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
@@ -495,6 +498,7 @@ import {
   IssuePullRequestsResponseSchema,
   EMPTY_ISSUE_ENVIRONMENTS_RESPONSE,
   IssueEnvironmentsResponseSchema,
+  IssueEnvironmentCommandSchema,
   ResourceLabelsResponseSchema,
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
@@ -5280,6 +5284,42 @@ export class ApiClient {
       EMPTY_ISSUE_ENVIRONMENTS_RESPONSE,
       { endpoint: "GET /api/issues/:id/environments" },
     );
+  }
+
+  /** Ask the environment's machine to stop it. Resolves once queued. */
+  async stopIssueEnvironment(issueId: string, environmentId: string): Promise<IssueEnvironmentCommand> {
+    return this.issueEnvironmentCommand(`/api/issues/${issueId}/environments/${environmentId}/stop`, "stop", { method: "POST" });
+  }
+
+  /** Ask the environment's machine to start it again from the same code. */
+  async restartIssueEnvironment(issueId: string, environmentId: string): Promise<IssueEnvironmentCommand> {
+    return this.issueEnvironmentCommand(`/api/issues/${issueId}/environments/${environmentId}/restart`, "restart", { method: "POST" });
+  }
+
+  /** Ask the environment's machine for the end of its log; poll the command for it. */
+  async readIssueEnvironmentLogs(issueId: string, environmentId: string): Promise<IssueEnvironmentCommand> {
+    return this.issueEnvironmentCommand(`/api/issues/${issueId}/environments/${environmentId}/logs`, "logs", { method: "POST" });
+  }
+
+  /** Start an environment the latest run on a machine declared. */
+  async startIssueEnvironment(issueId: string, body: StartIssueEnvironmentRequest): Promise<IssueEnvironmentCommand> {
+    return this.issueEnvironmentCommand(`/api/issues/${issueId}/environments/start`, "start", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async getIssueEnvironmentCommand(issueId: string, commandId: string): Promise<IssueEnvironmentCommand> {
+    return this.issueEnvironmentCommand(`/api/issues/${issueId}/environment-commands/${commandId}`, "logs");
+  }
+
+  private async issueEnvironmentCommand(path: string, action: IssueEnvironmentAction, init?: RequestInit): Promise<IssueEnvironmentCommand> {
+    const raw = await this.fetch<unknown>(path, init);
+    const fallback: IssueEnvironmentCommand = {
+      id: "", action, status: "failed", error: "", environment_id: null, runtime_id: "", task_id: null, repo: "", name: "",
+      actor_type: "member", actor_id: null, created_at: new Date().toISOString(), completed_at: null, output: null,
+    };
+    return parseWithFallback(raw, IssueEnvironmentCommandSchema, fallback, { endpoint: `${init?.method ?? "GET"} ${path.replace(/[0-9a-f-]{36}/g, ":id")}` });
   }
 
   /** Link a PR the workspace already mirrors, by pasted URL or by id (undo). */

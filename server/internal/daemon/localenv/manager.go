@@ -40,7 +40,8 @@ const (
 	outputFile = "output.log"
 
 	// An ended environment stays in the snapshot long enough to be reported
-	// as ended, then only its log is kept.
+	// as ended. Its record stays on disk with its log, so it can still be
+	// restarted or read from the sidebar.
 	endedRetention = time.Hour
 	logRetention   = 7 * 24 * time.Hour
 	readyTimeout   = 10 * time.Minute
@@ -54,6 +55,13 @@ var ErrUnsupported = errors.New("local environments are not supported on this pl
 // ErrNotFound means no live environment of that name belongs to the task.
 var ErrNotFound = errors.New("no running environment with that name")
 
+// ErrUnknown means this daemon has no record of the environment, or no
+// longer keeps it.
+var ErrUnknown = errors.New("this machine no longer has a record of the environment")
+
+// ErrGone means the code an environment ran from has been cleaned up.
+var ErrGone = errors.New("the code this environment ran from has been cleaned up")
+
 // Task identifies who asks for an environment. RootDir is the task's own
 // directory; an environment can only be started from inside it.
 type Task struct {
@@ -65,11 +73,14 @@ type Task struct {
 
 // Environment is one environment as the daemon reports and the CLI prints it.
 type Environment struct {
-	Key       string     `json:"key"`
-	TaskID    string     `json:"task_id"`
-	IssueID   string     `json:"issue_id"`
-	Source    string     `json:"source"`
-	Kind      string     `json:"kind,omitempty"`
+	Key     string `json:"key"`
+	TaskID  string `json:"task_id"`
+	IssueID string `json:"issue_id"`
+	Source  string `json:"source"`
+	Kind    string `json:"kind,omitempty"`
+	// Repo names the checkout a declared environment runs from, as
+	// DiscoverDeclared does, so two repositories can declare the same name.
+	Repo      string     `json:"repo,omitempty"`
 	Name      string     `json:"name"`
 	Label     string     `json:"label"`
 	URL       string     `json:"url"`
@@ -79,12 +90,15 @@ type Environment struct {
 	StartedAt time.Time  `json:"started_at"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	LogPath   string     `json:"log_path,omitempty"`
+	// Excerpt is the last lines a crashed environment printed, so the
+	// sidebar can say why it crashed; the server redacts it before storing.
+	Excerpt string `json:"excerpt,omitempty"`
 	// Dir is the directory the environment runs from, kept local so GC can
 	// leave it in place; it is never reported.
 	Dir  string `json:"-"`
 	pgid int
-	// pid and bundle name a detected app's process for Focus; like Dir they
-	// never leave this machine.
+	// pid names a detected environment's process, for Stop and Focus; bundle
+	// names a detected app for Focus. Like Dir they never leave this machine.
 	pid    int
 	bundle string
 }
@@ -106,6 +120,7 @@ type record struct {
 	Path        string     `json:"path"`
 	State       string     `json:"state"`
 	Detail      string     `json:"detail"`
+	Excerpt     string     `json:"excerpt,omitempty"`
 	StartedAt   time.Time  `json:"started_at"`
 	ExpiresAt   time.Time  `json:"expires_at"`
 	EndedAt     *time.Time `json:"ended_at,omitempty"`
@@ -171,6 +186,9 @@ func (m *Manager) Load() error {
 		}
 		var rec record
 		if err := json.Unmarshal(data, &rec); err != nil || rec.ID != d.Name() {
+			continue
+		}
+		if rec.EndedAt != nil && m.now().Sub(*rec.EndedAt) > endedRetention {
 			continue
 		}
 		m.envs[rec.ID] = &entry{rec: rec}
@@ -353,7 +371,6 @@ func (m *Manager) Tick() {
 			m.endLocked(e, StateExited, "")
 		case !e.live() && now.Sub(*e.rec.EndedAt) > endedRetention:
 			delete(m.envs, id)
-			os.Remove(filepath.Join(m.dir, id, stateFile))
 		}
 	}
 	sweepLogs := now.Sub(m.lastLogSwep) > time.Hour
@@ -529,6 +546,9 @@ func (m *Manager) endLocked(e *entry, state, detail string) {
 	e.rec.State = state
 	e.rec.Detail = detail
 	e.rec.EndedAt = &now
+	if state == StateExited {
+		e.rec.Excerpt = logExcerpt(filepath.Join(m.dir, e.rec.ID, outputFile))
+	}
 	m.persistLocked(e)
 	if heir := m.heirLocked(e); heir != nil {
 		heir.rec.Adopted = append(heir.rec.Adopted, e.rec.PID)
@@ -573,8 +593,8 @@ func (m *Manager) viewLocked(e *entry) Environment {
 	rec := e.rec
 	view := Environment{
 		Key: "config:" + rec.ID, TaskID: rec.TaskID, IssueID: rec.IssueID,
-		Source: SourceConfig, Kind: KindServer, Name: rec.Name, Label: rec.Label, URL: rec.URL, Port: rec.Port,
-		State: rec.State, Detail: rec.Detail, StartedAt: rec.StartedAt,
+		Source: SourceConfig, Kind: KindServer, Repo: filepath.Base(rec.RepoRoot), Name: rec.Name, Label: rec.Label, URL: rec.URL, Port: rec.Port,
+		State: rec.State, Detail: rec.Detail, Excerpt: rec.Excerpt, StartedAt: rec.StartedAt,
 		LogPath: filepath.Join(m.dir, rec.ID, outputFile), Dir: rec.RepoRoot, pgid: rec.PID,
 	}
 	if e.live() {
