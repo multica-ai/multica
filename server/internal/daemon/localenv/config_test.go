@@ -97,3 +97,19 @@ func TestFindConfigWalksUpToTheBoundary(t *testing.T) {
 		t.Fatal("FindConfig accepted a directory outside the task")
 	}
 }
+
+// The repository's own environments file is what agents working on Multica
+// start, so a typo in it should fail here rather than in an agent's run.
+func TestRepositoryConfigParses(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "..", filepath.FromSlash(ConfigPath)))
+	if err != nil {
+		t.Fatalf("read %s: %v", ConfigPath, err)
+	}
+	cfg, err := ParseConfig(data)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	if _, ok := cfg.Environments["web"]; !ok {
+		t.Fatalf("no web environment; declared: %v", cfg.Names())
+	}
+}

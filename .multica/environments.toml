@@ -1,0 +1,14 @@
+# Environments an agent can start for an issue with `multica env start <name>`.
+# The daemon supervises them, lists them in the issue sidebar and stops them at
+# their TTL. Format: CLI_AND_DAEMON.md → Local Environments.
+#
+# Each one is this checkout's `make up` environment (scripts/dev-env.sh), which
+# keeps owning the ports, database and CLI profile. scripts/agent-environment.sh
+# connects it to the daemon: it answers on $MULTICA_PORT with a redirect to the
+# web app, and `stop` runs `make destroy`.
+
+[environments.web]
+label = "Web app"
+start = "bash scripts/agent-environment.sh start api,web"
+stop = "bash scripts/agent-environment.sh stop"
+ttl = "24h"

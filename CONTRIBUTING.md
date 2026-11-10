@@ -624,6 +624,22 @@ Two constraints are enforced rather than documented:
   Desktop exactly that way, so an agent can run `make up C=api,web,daemon` and
   test a real agent run. `make destroy` stops the daemon and removes its profile.
 
+### An environment that outlives the agent's run
+
+When a reviewer should open the web app after the run ends, an agent inside a
+Multica task starts the environment this repository declares in
+`.multica/environments.toml`:
+
+```bash
+multica env start web          # make up C=api,web, supervised by the daemon
+multica env stop web           # make destroy
+```
+
+The daemon lists it in the issue sidebar and stops it after 24 hours. Its URL,
+`http://localhost:$MULTICA_PORT`, redirects to the web app on the port
+`make up` allocated, and `make status` and `make env-exec` work as usual. See
+[Local Environments](CLI_AND_DAEMON.md#local-environments) for the file format.
+
 ### Web with realistic content
 
 Every `make up`, whatever components it starts, signs `dev@localhost` in,
