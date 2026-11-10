@@ -240,15 +240,28 @@ describe("traceEventDetail", () => {
     expect(detail.lines).toEqual([{ kind: "remove", text: "gone" }]);
   });
 
-  it("falls back to pretty JSON for a tool call that is not an edit", () => {
+  it("reads a command tool's input as the command, keyed off shape not tool name", () => {
+    expect(
+      traceEventDetail({ type: "tool_use", tool: "Bash", input: { command: "ls -la" } }),
+    ).toEqual({ kind: "command", command: "ls -la", params: null });
+    expect(
+      traceEventDetail({
+        type: "tool_use",
+        tool: "exec_command",
+        input: { cmd: "git status", workdir: "/repo" },
+      }),
+    ).toEqual({ kind: "command", command: "git status", params: '{\n  "workdir": "/repo"\n}' });
+  });
+
+  it("falls back to pretty JSON for a tool call that is not an edit or a command", () => {
     const detail = traceEventDetail({
       type: "tool_use",
-      tool: "Bash",
-      input: { command: "ls -la" },
+      tool: "Grep",
+      input: { pattern: "TODO", command: "" },
     });
     expect(detail.kind).toBe("text");
     if (detail.kind !== "text") return;
-    expect(detail.text).toBe('{\n  "command": "ls -la"\n}');
+    expect(detail.text).toBe('{\n  "pattern": "TODO",\n  "command": ""\n}');
   });
 
   it("unwraps a tool result so it reads as the terminal output it was", () => {

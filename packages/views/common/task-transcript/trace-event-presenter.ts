@@ -237,6 +237,11 @@ export type TraceEventDetail =
   | { kind: "diff"; path: string; lines: TraceDiffLine[] }
   | { kind: "file"; path: string; text: string; lineCount: number }
   | { kind: "patch"; files: TracePatchFile[]; truncated: boolean }
+  /**
+   * A shell command, verbatim. Any other arguments (description, timeout…)
+   * stay as JSON under it, so nothing the input carried is hidden.
+   */
+  | { kind: "command"; command: string; params: string | null }
   | { kind: "text"; text: string };
 
 /** Body of one file inside a multi-file patch. */
@@ -513,6 +518,20 @@ function readFileMutation(input: Record<string, unknown>): FileMutation | null {
 }
 
 /**
+ * A command tool's input. Keyed on shape like the summary: `command` (Claude,
+ * most providers) or `cmd` (Codex `exec_command`), as a non-empty string.
+ */
+function readCommand(input: Record<string, unknown>): TraceEventDetail | null {
+  const key = typeof input.command === "string" ? "command" : typeof input.cmd === "string" ? "cmd" : null;
+  if (key === null) return null;
+  const command = input[key] as string;
+  if (command.trim().length === 0) return null;
+  const rest = Object.entries(input).filter(([k]) => k !== key);
+  const params = rest.length > 0 ? JSON.stringify(Object.fromEntries(rest), null, 2) : null;
+  return { kind: "command", command, params };
+}
+
+/**
  * Structured body for the expanded row. Edits become a diff so a reviewer sees
  * what changed rather than two escaped string literals; results are unwrapped;
  * every other tool call falls back to pretty JSON.
@@ -541,6 +560,8 @@ export function traceEventDetail(event: TraceEvent): TraceEventDetail {
           lineCount: toLines(mutation.content).length,
         };
       }
+      const command = readCommand(event.input);
+      if (command !== null) return command;
       return { kind: "text", text: JSON.stringify(event.input, null, 2) };
     }
     case "tool_result":
