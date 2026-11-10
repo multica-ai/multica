@@ -109,6 +109,10 @@ type record struct {
 	StartedAt   time.Time  `json:"started_at"`
 	ExpiresAt   time.Time  `json:"expires_at"`
 	EndedAt     *time.Time `json:"ended_at,omitempty"`
+	// Adopted lists the sessions of environments of the same checkout that
+	// ended while this one ran. What is left of them, such as an API both
+	// used, is still in use and still declared.
+	Adopted []int `json:"adopted,omitempty"`
 }
 
 type entry struct {
@@ -169,12 +173,17 @@ func (m *Manager) Load() error {
 		if err := json.Unmarshal(data, &rec); err != nil || rec.ID != d.Name() {
 			continue
 		}
-		e := &entry{rec: rec}
-		if e.live() && !groupAlive(rec.PID) {
+		m.envs[rec.ID] = &entry{rec: rec}
+	}
+	// Every record is loaded before any is ended, so a dead environment's
+	// sessions can pass to a live one of the same checkout.
+	for _, e := range m.envs {
+		if e.live() && !groupAlive(e.rec.PID) {
 			m.endLocked(e, StateExited, "stopped while the daemon was not running")
 		}
-		m.envs[rec.ID] = e
-		if e.live() && rec.State == StateStarting {
+	}
+	for _, e := range m.envs {
+		if e.live() && e.rec.State == StateStarting {
 			go m.probe(e)
 		}
 	}
@@ -370,8 +379,13 @@ func (m *Manager) Owner(pid int) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, e := range m.envs {
-		if e.live() && e.rec.PID > 0 && (e.rec.PID == pgid || e.rec.PID == sid) {
-			return "config:" + e.rec.ID
+		if !e.live() {
+			continue
+		}
+		for _, leader := range append([]int{e.rec.PID}, e.rec.Adopted...) {
+			if leader > 0 && (leader == pgid || leader == sid) {
+				return "config:" + e.rec.ID
+			}
 		}
 	}
 	return ""
@@ -516,6 +530,27 @@ func (m *Manager) endLocked(e *entry, state, detail string) {
 	e.rec.Detail = detail
 	e.rec.EndedAt = &now
 	m.persistLocked(e)
+	if heir := m.heirLocked(e); heir != nil {
+		heir.rec.Adopted = append(heir.rec.Adopted, e.rec.PID)
+		heir.rec.Adopted = append(heir.rec.Adopted, e.rec.Adopted...)
+		m.persistLocked(heir)
+	}
+}
+
+// heirLocked picks the live environment that takes over an ended one's
+// sessions: the earliest started from the same checkout, for the same owner.
+func (m *Manager) heirLocked(ended *entry) *entry {
+	owner := Task{TaskID: ended.rec.TaskID, IssueID: ended.rec.IssueID, WorkspaceID: ended.rec.WorkspaceID}
+	var heir *entry
+	for _, e := range m.envs {
+		if e == ended || !e.live() || e.rec.RepoRoot != ended.rec.RepoRoot || !sameOwner(e.rec, owner) {
+			continue
+		}
+		if heir == nil || e.rec.StartedAt.Before(heir.rec.StartedAt) {
+			heir = e
+		}
+	}
+	return heir
 }
 
 func (m *Manager) persistLocked(e *entry) {

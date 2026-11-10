@@ -645,7 +645,8 @@ The daemon lists each one in the issue sidebar and stops it after 24 hours.
 
 Both are this checkout's `make up` environment, so they share one API and
 database, and `make status` and `make env-exec` work as usual. Stopping one
-leaves the other running; stopping the last one runs `make destroy`. See
+leaves the other running; stopping the last one, or the last one's app going
+away, runs `make destroy`. See
 [Local Environments](CLI_AND_DAEMON.md#local-environments) for the file format.
 
 ### Web with realistic content

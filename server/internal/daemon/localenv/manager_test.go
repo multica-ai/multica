@@ -322,3 +322,72 @@ start = "LOCALENV_PID_FILE='%s' %s"
 		t.Fatalf("Owner after stop = %q, want none: a stopped environment owns nothing", got)
 	}
 }
+
+func TestManagerPassesASharedServerToTheEnvironmentStillUsingIt(t *testing.T) {
+	for _, first := range []string{"api", "web"} {
+		t.Run("stop "+first+" first", func(t *testing.T) {
+			root := t.TempDir()
+			pidFile := filepath.Join(t.TempDir(), "server.pid")
+			// api detaches a server the way `make up` detaches the API that
+			// both environments of a checkout use.
+			writeConfig(t, root, fmt.Sprintf(`
+[environments.api]
+start = "LOCALENV_PID_FILE='%s' %s"
+
+[environments.web]
+start = "%s"
+`, pidFile, helperCommand("detach"), helperCommand("serve")))
+			dir := t.TempDir()
+			m := NewManager(dir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			task := Task{TaskID: "task-1", IssueID: "issue-1", WorkspaceID: "ws-1", RootDir: root}
+			keys := map[string]string{}
+			for _, name := range []string{"api", "web"} {
+				env, err := m.Start(task, root, name, os.Getenv("PATH"))
+				if err != nil {
+					t.Fatalf("Start %s: %v", name, err)
+				}
+				if ready := waitReady(t, m, env.Key); ready.State != StateRunning {
+					t.Fatalf("%s = %+v, want running", name, ready)
+				}
+				keys[name] = env.Key
+			}
+			data, err := os.ReadFile(pidFile)
+			if err != nil {
+				t.Fatalf("read the detached server's pid: %v", err)
+			}
+			server, _ := strconv.Atoi(string(data))
+			t.Cleanup(func() {
+				m.Stop(task, "api")
+				m.Stop(task, "web")
+				syscall.Kill(server, syscall.SIGKILL)
+			})
+
+			second := map[string]string{"api": "web", "web": "api"}[first]
+			if _, err := m.Stop(task, first); err != nil {
+				t.Fatalf("Stop %s: %v", first, err)
+			}
+			if !groupAlive(processGroup(server)) {
+				t.Fatal("the shared server stopped with the first environment; the test proves nothing")
+			}
+			if got := m.Owner(server); got != keys[second] {
+				t.Fatalf("Owner(shared server) after stopping %s = %q, want %s, which still runs", first, got, second)
+			}
+
+			// The ownership survives a daemon restart.
+			restarted := NewManager(dir, m.logger)
+			if err := restarted.Load(); err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got := restarted.Owner(server); got != keys[second] {
+				t.Fatalf("after a restart Owner(shared server) = %q, want %s", got, keys[second])
+			}
+
+			if _, err := m.Stop(task, second); err != nil {
+				t.Fatalf("Stop %s: %v", second, err)
+			}
+			if got := m.Owner(server); got != "" {
+				t.Fatalf("Owner after both stopped = %q, want none", got)
+			}
+		})
+	}
+}
