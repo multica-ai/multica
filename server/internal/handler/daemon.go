@@ -29,6 +29,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -92,6 +93,18 @@ func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Re
 		h.MembershipCache.Set(r.Context(), userID, workspaceID)
 	}
 	return ok
+}
+
+// daemonHiddenProjects is requestHiddenProjects for daemon routes (MUL-8472).
+// A daemon token sees every project: a shared runtime runs private-project
+// tasks its owner cannot see, holds their workdirs, and must keep reading
+// their lifecycle, or GC treats a live workdir as an orphan. A member's own
+// credential on these routes is bounded by the member, as on any other route.
+func (h *Handler) daemonHiddenProjects(w http.ResponseWriter, r *http.Request, workspaceID string) (projectaccess.Hidden, bool) {
+	if middleware.DaemonWorkspaceIDFromContext(r.Context()) != "" {
+		return projectaccess.Hidden{}, true
+	}
+	return h.requestHiddenProjects(w, r, workspaceID)
 }
 
 // daemonRuntimeBindingAllowed is the runtime-level half of daemon
@@ -6813,6 +6826,28 @@ func (h *Handler) BatchIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 			rows[uuidToString(row.ID)] = row
 		}
 	}
+	if len(rows) > 0 {
+		hidden, ok := h.daemonHiddenProjects(w, r, workspaceID)
+		if !ok {
+			return
+		}
+		if !hidden.Empty() {
+			foundIDs := make([]pgtype.UUID, 0, len(rows))
+			for _, row := range rows {
+				foundIDs = append(foundIDs, row.ID)
+			}
+			projects, err := h.Queries.ListIssueProjectIDs(r.Context(), foundIDs)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+				return
+			}
+			for _, p := range projects {
+				if !hidden.CanSeeProject(p.ProjectID) {
+					delete(rows, uuidToString(p.ID))
+				}
+			}
+		}
+	}
 
 	// ONE resolver for the whole batch, not a point lookup per row. The
 	// package-level helpers issue a GetIssueStatusEntryByKey for every custom
@@ -6858,6 +6893,21 @@ func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(issue.WorkspaceID)) {
 		return
+	}
+	hidden, ok := h.daemonHiddenProjects(w, r, uuidToString(issue.WorkspaceID))
+	if !ok {
+		return
+	}
+	if !hidden.Empty() {
+		projectID, err := h.Queries.GetIssueProjectID(r.Context(), issueUUID)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && !hidden.CanSeeProject(projectID)) {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+			return
+		}
 	}
 	// Same reasoning as BatchIssueGCCheck: normalize server-side so the
 	// daemon's terminal-status test stays correct. (MUL-6243)

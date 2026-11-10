@@ -107,11 +107,33 @@ func (a *dbPrivateProjectAudience) Audience(ctx context.Context, e events.Event)
 	if len(ws.projects) == 0 {
 		return nil, false, nil
 	}
-	projectID, err := a.eventProjectID(ctx, e)
+	// A pin is one member's own, and only their sessions refetch on it; its
+	// item id may name a private project or issue.
+	if strings.HasPrefix(e.Type, "pin:") {
+		if e.ActorType != "member" || e.ActorID == "" {
+			return nil, true, nil
+		}
+		return []string{e.ActorID}, true, nil
+	}
+	projectIDs, err := a.eventProjectIDs(ctx, e)
 	if err != nil {
 		return nil, false, err
 	}
-	members, private := ws.projects[projectID]
+	// An event about several issues (a pull request linked to more than one)
+	// reaches only members of every private project among them.
+	var members []string
+	private := false
+	for _, projectID := range projectIDs {
+		projectMembers, ok := ws.projects[projectID]
+		if !ok {
+			continue
+		}
+		if !private {
+			members, private = projectMembers, true
+			continue
+		}
+		members = intersect(members, projectMembers)
+	}
 	if !private {
 		return nil, false, nil
 	}
@@ -127,6 +149,20 @@ func (a *dbPrivateProjectAudience) Audience(ctx context.Context, e events.Event)
 		}
 	}
 	return out, true, nil
+}
+
+func intersect(a, b []string) []string {
+	in := make(map[string]struct{}, len(b))
+	for _, id := range b {
+		in[id] = struct{}{}
+	}
+	out := a[:0:0]
+	for _, id := range a {
+		if _, ok := in[id]; ok {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func (a *dbPrivateProjectAudience) workspace(ctx context.Context, workspaceID string) (workspaceAudience, error) {
@@ -168,27 +204,27 @@ func (a *dbPrivateProjectAudience) workspace(ctx context.Context, workspaceID st
 	return loaded, nil
 }
 
-// eventProjectID resolves the project an event is about, or "" when it is
-// about none. It reads the payload's own references first and only falls back
-// to the database for a bare issue, comment or task id.
-func (a *dbPrivateProjectAudience) eventProjectID(ctx context.Context, e events.Event) (string, error) {
+// eventProjectIDs resolves the projects an event is about, or none. It reads
+// the payload's own references first and only falls back to the database for
+// a bare issue, comment or task id, or the issues a pull request is linked to.
+func (a *dbPrivateProjectAudience) eventProjectIDs(ctx context.Context, e events.Event) ([]string, error) {
 	refs := extractEventRefs(e.Type, e.Payload)
 	if refs.projectKnown {
-		return refs.projectID, nil
+		return []string{refs.projectID}, nil
 	}
-	lookup := func(id string, get func(context.Context, pgtype.UUID) (pgtype.UUID, error)) (string, error) {
+	lookup := func(id string, get func(context.Context, pgtype.UUID) (pgtype.UUID, error)) ([]string, error) {
 		uid, err := util.ParseUUID(id)
 		if err != nil {
-			return "", nil
+			return nil, nil
 		}
 		projectID, err := get(ctx, uid)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", nil
+			return nil, nil
 		}
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		return util.UUIDToString(projectID), nil
+		return []string{util.UUIDToString(projectID)}, nil
 	}
 	if refs.issueID != "" {
 		return lookup(refs.issueID, a.q.GetIssueProjectID)
@@ -196,24 +232,35 @@ func (a *dbPrivateProjectAudience) eventProjectID(ctx context.Context, e events.
 	if refs.commentID != "" {
 		return lookup(refs.commentID, a.q.GetCommentIssueProjectID)
 	}
+	if len(refs.linkedIssueIDs) > 0 {
+		var out []string
+		for _, id := range refs.linkedIssueIDs {
+			projects, err := lookup(id, a.q.GetIssueProjectID)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, projects...)
+		}
+		return out, nil
+	}
 	if e.TaskID != "" && e.ChatSessionID == "" {
 		taskUUID, err := util.ParseUUID(e.TaskID)
 		if err != nil {
-			return "", nil
+			return nil, nil
 		}
 		task, err := a.q.GetAgentTask(ctx, taskUUID)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", nil
+			return nil, nil
 		}
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		if !task.IssueID.Valid {
-			return "", nil
+			return nil, nil
 		}
 		return lookup(util.UUIDToString(task.IssueID), a.q.GetIssueProjectID)
 	}
-	return "", nil
+	return nil, nil
 }
 
 type eventRefs struct {
@@ -223,6 +270,8 @@ type eventRefs struct {
 	projectID    string
 	issueID      string
 	commentID    string
+	// linkedIssueIDs are the issues a pull_request:updated event names.
+	linkedIssueIDs []string
 }
 
 // extractEventRefs reads project / issue / comment references from an event
@@ -267,7 +316,8 @@ func extractEventRefs(eventType string, payload any) eventRefs {
 			}
 		}
 	}
-	if id, ok := str(top, "project_id"); ok && id != "" && (isProjectEvent || eventType == protocol.EventProjectMembersChanged) {
+	// A deleted issue states its project, since its row is gone by now.
+	if id, ok := str(top, "project_id"); ok && id != "" && (isProjectEvent || eventType == protocol.EventProjectMembersChanged || eventType == protocol.EventIssueDeleted) {
 		return eventRefs{projectKnown: true, projectID: id}
 	}
 	if issue := object("issue"); issue != nil {
@@ -295,6 +345,11 @@ func extractEventRefs(eventType string, payload any) eventRefs {
 	if refs.issueID == "" && refs.commentID == "" {
 		if id, ok := str(top, "comment_id"); ok {
 			refs.commentID = id
+		}
+	}
+	if refs.issueID == "" && refs.commentID == "" {
+		if v, ok := top["linked_issue_ids"]; ok {
+			_ = json.Unmarshal(v, &refs.linkedIssueIDs)
 		}
 	}
 	return refs
