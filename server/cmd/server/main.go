@@ -131,6 +131,34 @@ func validateRealtimeRelayMode(mode string, clusterMode bool) error {
 	return nil
 }
 
+// requireSharedRealtimeRelay refuses to start more than one backend replica
+// without a shared Redis relay. Each replica would otherwise publish into its
+// own in-memory hub, so a client connected to one replica misses events
+// produced by the others. A single replica keeps the in-memory fallback. The
+// error names the configuration problem and never includes the Redis URL.
+func requireSharedRealtimeRelay(replicas int, redisURL string, clusterMode bool) error {
+	if replicas <= 1 {
+		return nil
+	}
+	if strings.TrimSpace(redisURL) == "" {
+		return fmt.Errorf("shared realtime relay is not configured: MULTICA_BACKEND_REPLICAS=%d requires REDIS_URL so replicas deliver each other's events", replicas)
+	}
+	if _, err := database.NewRedisOptions(database.RedisConfig{URL: redisURL, ClusterMode: clusterMode}); err != nil {
+		return fmt.Errorf("shared realtime relay configuration is invalid: MULTICA_BACKEND_REPLICAS=%d requires a usable REDIS_URL (%v)", replicas, redisConfigError(err))
+	}
+	return nil
+}
+
+// redisConfigError keeps a Redis parse failure from repeating the URL,
+// which can carry a password, in the startup diagnostic.
+func redisConfigError(err error) error {
+	const prefix = "parse redis URL: "
+	if msg := err.Error(); strings.HasPrefix(msg, prefix) {
+		return fmt.Errorf("%s", prefix+"rejected")
+	}
+	return err
+}
+
 func envPositiveInt(name string, def int) int {
 	raw := os.Getenv(name)
 	if raw == "" {
@@ -497,6 +525,10 @@ func main() {
 	}()
 	sharedRedisURL := strings.TrimSpace(os.Getenv("REDIS_URL"))
 	redisClusterMode := envBool("REDIS_CLUSTER_MODE", false)
+	if err := requireSharedRealtimeRelay(envPositiveInt("MULTICA_BACKEND_REPLICAS", 1), sharedRedisURL, redisClusterMode); err != nil {
+		slog.Error("realtime: refusing to start without a shared relay", "error", err)
+		os.Exit(1)
+	}
 	// Main parses shared options instead of using database.NewRedisClient so it
 	// can create separate role-specific pools. Request-path clients must also
 	// survive a transient startup outage; relay and lease components own their
