@@ -32,6 +32,12 @@ describe("getPreviewKind", () => {
     ["text/html", "page", "html"],
     ["application/octet-stream", "page.html", "html"],
 
+    // draw.io — sniffers report XML or nothing, so the extension decides
+    ["application/xml", "architecture.drawio", "drawio"],
+    ["text/xml", "flow.dio", "drawio"],
+    ["application/octet-stream", "ARCH.DRAWIO", "drawio"],
+    ["application/xml", "plain.xml", "text"],
+
     // Code / config — fallback to text after sniffer guesses "text/plain"
     ["text/plain", "main.go", "text"],
     ["application/octet-stream", "main.go", "text"],
@@ -157,7 +163,7 @@ describe("extensionToLanguage", () => {
 });
 
 describe("generated text preview whitelist", () => {
-  const TEXT_BACKED = new Set<PreviewKind>(["markdown", "html", "table", "structured", "text"]);
+  const TEXT_BACKED = new Set<PreviewKind>(["markdown", "html", "table", "structured", "drawio", "text"]);
 
   function expectTextBacked(contentType: string, filename: string) {
     const kind = getPreviewKind(contentType, filename);
@@ -218,6 +224,8 @@ describe("text preview whitelist removals", () => {
     ["ndjson", "structured"],
     ["yaml", "structured"],
     ["yml", "structured"],
+    ["drawio", "drawio"],
+    ["dio", "drawio"],
     ["go", "text"],
   ])("hides .%s previews when the extension is removed", (extension, kind) => {
     const filename = `source.${extension}`;

@@ -2,7 +2,7 @@
 
 /**
  * DynamicBlock — the frame shared by every fence that renders in place
- * (MUL-7649): ```html previews and ```mermaid diagrams.
+ * (MUL-7649): ```html previews, ```mermaid diagrams and ```drawio diagrams.
  *
  * A dynamic block is part of the message body. That is what separates it from
  * an attachment, which is a file and shows as a card that opens the viewer. So
@@ -33,6 +33,7 @@ import {
   Copy,
   Maximize2,
   RotateCw,
+  Shapes,
   TriangleAlert,
   Workflow,
 } from "@multica/ui/icons";
@@ -45,7 +46,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
 import { CodeBlockStatic } from "./code-block-static";
 
-export type DynamicBlockKind = "html" | "mermaid";
+export type DynamicBlockKind = "html" | "mermaid" | "drawio";
 
 /** Content taller than this is collapsed until the reader asks for all of it. */
 export const DYNAMIC_BLOCK_COLLAPSE_AT_PX = 480;
@@ -58,17 +59,20 @@ export const DYNAMIC_BLOCK_CHROME_PX = 38;
 const KIND_LABEL: Record<DynamicBlockKind, string> = {
   html: "HTML",
   mermaid: "Mermaid",
+  drawio: "draw.io",
 };
 
 const KIND_ICON: Record<DynamicBlockKind, typeof AppWindow> = {
   html: AppWindow,
   mermaid: Workflow,
+  drawio: Shapes,
 };
 
 // Highlighting language for the source view. Mermaid has no lowlight grammar.
 const SOURCE_LANGUAGE: Record<DynamicBlockKind, string | undefined> = {
   html: "xml",
   mermaid: undefined,
+  drawio: "xml",
 };
 
 export interface DynamicBlockError {
@@ -436,7 +440,9 @@ function DynamicBlockErrorPanel({
         <div className="font-semibold">
           {kind === "html"
             ? t(($) => $.dynamic_block.error_html)
-            : t(($) => $.dynamic_block.error_mermaid)}
+            : kind === "drawio"
+              ? t(($) => $.drawio.error)
+              : t(($) => $.dynamic_block.error_mermaid)}
         </div>
         {/* The parser or script message is the only clue about what to fix. */}
         {detail && (

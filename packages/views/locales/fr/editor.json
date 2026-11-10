@@ -140,6 +140,13 @@
     "view_source": "Voir la source",
     "copy_error": "Copier l’erreur"
   },
+  "drawio": {
+    "title": "Diagramme draw.io",
+    "error": "Impossible d'afficher ce diagramme draw.io",
+    "invalid": "Ce n'est pas un XML draw.io valide.",
+    "too_large": "Ce diagramme est trop volumineux pour être prévisualisé ici.",
+    "unreachable": "Impossible de joindre la visionneuse draw.io sur {{origin}}."
+  },
   "file_card": {
     "uploading": "Envoi de {{filename}}"
   },

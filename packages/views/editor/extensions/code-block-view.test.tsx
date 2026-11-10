@@ -41,6 +41,14 @@ vi.mock("../mermaid-diagram", () => ({
   MermaidDiagram: () => null,
 }));
 
+const drawioState = vi.hoisted(() => ({ viewerUrl: null as string | null }));
+vi.mock("../drawio-preview", () => ({
+  useDrawioViewerUrl: () => drawioState.viewerUrl,
+  DrawioEditorPreview: ({ xml }: { xml: string }) => (
+    <div data-testid="drawio-preview">{xml}</div>
+  ),
+}));
+
 vi.mock("../../i18n", () => ({
   useT: () => ({
     t: (sel: (s: Record<string, Record<string, string>>) => string) =>
@@ -267,5 +275,52 @@ describe("CodeBlockView — html language toggle", () => {
     expect(frame.getAttribute("srcdoc")).toContain("<p>latest</p>");
     expect(document.querySelector("iframe")).toBe(frame);
     expect(screen.getByTestId("nvc")).toBe(editorContent);
+  });
+});
+
+describe("CodeBlockView — drawio language", () => {
+  const xml = "<mxfile><diagram/></mxfile>";
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    drawioState.viewerUrl = null;
+  });
+
+  it("previews the diagram with the source one toggle away when a viewer is configured", () => {
+    drawioState.viewerUrl = "https://viewer.example.test";
+    render(<CodeBlockView {...makeProps("drawio", xml)} />);
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+    expect(screen.getByTestId("drawio-preview").textContent).toBe(xml);
+    const pre = screen.getByTestId("nvc").closest("pre")!;
+    expect(pre.className).toContain("sr-only");
+
+    fireEvent.click(screen.getByRole("button", { name: "Show source" }));
+    expect(screen.queryByTestId("drawio-preview")).toBeNull();
+    expect(pre.className).not.toContain("sr-only");
+  });
+
+  it("opens a new, empty block on its source so there is something to type into", () => {
+    drawioState.viewerUrl = "https://viewer.example.test";
+    render(<CodeBlockView {...makeProps("drawio", "")} />);
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+    expect(screen.getByTestId("nvc").closest("pre")!.className).not.toContain("sr-only");
+    expect(screen.getByRole("button", { name: "Show preview" })).toBeTruthy();
+  });
+
+  it("stays plain XML with no toggle when the deployment has no viewer", () => {
+    render(<CodeBlockView {...makeProps("drawio", xml)} />);
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+    expect(screen.queryByTestId("drawio-preview")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show source" })).toBeNull();
+    expect(screen.getByTestId("nvc").closest("pre")!.className).not.toContain("sr-only");
   });
 });

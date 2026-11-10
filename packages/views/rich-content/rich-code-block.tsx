@@ -41,6 +41,11 @@ import {
   HTML_BLOCK_DEFAULT_RESERVED_PX,
   reservedHtmlBlockHeightPx,
 } from "../editor/html-block-preview";
+import {
+  DrawioBlock,
+  DRAWIO_BLOCK_RESERVED_PX,
+  useDrawioViewerUrl,
+} from "../editor/drawio-preview";
 import { highlightCode } from "../editor/syntax-highlight";
 import { LazyRichBlock } from "./lazy-rich-block";
 
@@ -48,12 +53,12 @@ import { LazyRichBlock } from "./lazy-rich-block";
  * Languages that may become a rich block. Anything else — including unknown
  * and absent languages — renders as static highlighted code.
  */
-export type RichFenceLanguage = "mermaid" | "html";
+export type RichFenceLanguage = "mermaid" | "html" | "drawio";
 
 export function isRichFenceLanguage(
   language: string | undefined,
 ): language is RichFenceLanguage {
-  return language === "mermaid" || language === "html";
+  return language === "mermaid" || language === "html" || language === "drawio";
 }
 
 /**
@@ -73,6 +78,7 @@ export function shouldUpgradeFence(
 // memo additionally keeps it from re-rendering.
 const MemoMermaidBlock = memo(MermaidBlock);
 const MemoHtmlBlockPreview = memo(HtmlBlockPreview);
+const MemoDrawioBlock = memo(DrawioBlock);
 
 /**
  * Static lowlight-highlighted `<code>`, matching the editable Tiptap code
@@ -175,10 +181,13 @@ export function CodeBlockShell({
  * The rich leaf for an upgraded fence. Only reached when shouldUpgradeFence()
  * returned true, so the fence is known-closed here.
  *
- * Both leaves are expensive to instantiate (async Mermaid render / sandboxed
+ * Every leaf is expensive to instantiate (async Mermaid render / sandboxed
  * iframe), so each is wrapped in the near-viewport lazy shell. The reserved
  * height comes from the leaf itself, so the shell holds the same space the
  * mounted block will occupy.
+ *
+ * ```drawio embeds a third-party viewer, so it upgrades only while the
+ * deployment has one configured; otherwise it stays highlighted XML.
  */
 export function RichFenceBlock({
   language,
@@ -191,10 +200,20 @@ export function RichFenceBlock({
   title?: string | null;
 }) {
   const reservedHeightPx = useReservedHeightPx(language, body);
+  const drawioViewerUrl = useDrawioViewerUrl();
+  if (language === "drawio" && !drawioViewerUrl) {
+    return (
+      <CodeBlockShell language={language} code={body}>
+        <StaticCodeBody language="xml" body={body} />
+      </CodeBlockShell>
+    );
+  }
   return (
     <LazyRichBlock reservedHeightPx={reservedHeightPx} sourceKey={body}>
       {language === "mermaid" ? (
         <MemoMermaidBlock chart={body} title={title} />
+      ) : language === "drawio" ? (
+        <MemoDrawioBlock xml={body} title={title} viewerUrl={drawioViewerUrl!} />
       ) : (
         <MemoHtmlBlockPreview html={body} title={title} />
       )}
@@ -205,11 +224,13 @@ export function RichFenceBlock({
 const DEFAULT_RESERVED_PX: Record<RichFenceLanguage, number> = {
   mermaid: MERMAID_BLOCK_DEFAULT_RESERVED_PX,
   html: HTML_BLOCK_DEFAULT_RESERVED_PX,
+  drawio: DRAWIO_BLOCK_RESERVED_PX,
 };
 
 const cachedReservedPx: Record<RichFenceLanguage, (body: string) => number> = {
   mermaid: reservedMermaidBlockHeightPx,
   html: reservedHtmlBlockHeightPx,
+  drawio: () => DRAWIO_BLOCK_RESERVED_PX,
 };
 
 /**
