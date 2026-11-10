@@ -1397,13 +1397,28 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
   const locale = useLocale();
   const timeAgo = useTimeAgo();
   const id = issueId;
+  const [deliverableJump, setDeliverableJump] = useState<{
+    issueId: string;
+    linkedCommentId: string | undefined;
+    linkedRequestToken: number | undefined;
+    commentId: string;
+    token: number;
+  } | null>(null);
+  const activeDeliverableJump = deliverableJump?.issueId === id &&
+    deliverableJump.linkedCommentId === linkedCommentId &&
+    deliverableJump.linkedRequestToken === linkedRequestToken ? deliverableJump : null;
+  const highlightCommentId = activeDeliverableJump?.commentId ?? linkedCommentId;
+  const highlightRequestToken = activeDeliverableJump?.token ?? linkedRequestToken;
+  useEffect(() => {
+    setDeliverableJump(null);
+  }, [id, linkedCommentId, linkedRequestToken]);
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
   const openModal = useModalStore((state) => state.open);
@@ -1721,7 +1736,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     timeline, loading: timelineLoading,
     submitComment, submitReply,
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
-  } = useIssueTimeline(id, user?.id);
+  } = useIssueTimeline(id, user?.id, activeDeliverableJump?.commentId);
 
   const { data: commentTasks, isLoading: commentTasksLoading } = useQuery(issueTasksOptions(id));
   const enteringRunIds = useNewRunIds(id, commentTasks);
@@ -2417,13 +2432,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // switch back or an in-tab return). The restored scroll offset is the
     // state the user left, and the jump must not fight it. A fresh selection
     // clears the entry, so this only ever suppresses a *repeat* landing.
-    if (consumedHighlightRef.current === highlightCommentId) {
+    if (!activeDeliverableJump && consumedHighlightRef.current === highlightCommentId) {
       didHighlightRef.current = highlightCommentId;
       return;
     }
 
-    const rootId = highlightRootId;
-    if (rootId && rootId !== highlightCommentId) {
+    const rootId = highlightRootId ?? highlightCommentId;
+    const collapse = useCommentCollapseStore.getState();
+    if (collapse.isCollapsed(id, rootId)) collapse.toggle(id, rootId);
+    if (rootId) {
       // Root resolved → the whole thread is a folded bar.
       const rootItem = items[targetIdx];
       if (rootItem?.kind === "resolved-bar" || (rootItem?.kind === "run" && rootItem.entry?.resolved_at && !expandedResolved.has(rootId))) {
@@ -2482,7 +2499,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       cancel();
       if (fade !== undefined) clearTimeout(fade);
     };
-  }, [highlightCommentId, highlightRequestToken, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, isFlatTimeline, measuredTimelineId, timelineLoading, commentTasksLoading]);
+  }, [highlightCommentId, highlightRequestToken, activeDeliverableJump, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, isFlatTimeline, measuredTimelineId, timelineLoading, commentTasksLoading]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const descriptionEditingRef = useRef(false);
@@ -2553,11 +2570,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     () => mergeDeliverableSources(deliverableInventory, timeline),
     [deliverableInventory, timeline],
   );
-  const loadedCommentIds = useMemo(
-    () => new Set(timeline.filter((entry) => entry.type === "comment").map((entry) => entry.id)),
-    [timeline],
-  );
-  const canLocateComment = useCallback((commentId: string) => loadedCommentIds.has(commentId), [loadedCommentIds]);
   const previewSequence = useMemo(() => {
     const blocks: ImageSequenceBlock[] = [
       {
@@ -2587,51 +2599,29 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [deliverableSources],
   );
 
-  // "Show in comments" from the viewer and the overview. A reply goes through
-  // the quick-jump rail's path, which already undoes everything that hides one
-  // (the reader's collapse, a resolution folding the thread) and waits for the
-  // reply to mount. A root is visible unless its own thread is collapsed or
-  // folded into a resolved bar: open that, then jump once the open thread has
-  // rendered, so the flash lands on the comment and not on the bar.
-  const [locateRootRequest, setLocateRootRequest] = useState<string | null>(null);
+  // File origins use the deep-link landing path: load missing thread context,
+  // unfold it and wait for virtual rows and their measured heights to settle.
   const locateOrigin = useCallback(
     (origin: DeliverableOrigin) => {
       if (origin.kind === "description") {
         scrollContainerEl?.scrollTo({ top: 0, behavior: "smooth" });
         return;
       }
-      const { commentId } = origin;
-      if (replyToRoot.has(commentId)) {
-        jumpToReply(commentId);
-        return;
-      }
-      const rootItem = items.find((it) => it.id === commentId);
-      const root = rootItem && rootItem.kind !== "activity-group" ? rootItem.entry : undefined;
-      if (!root) return;
-      const collapse = useCommentCollapseStore.getState();
-      if (collapse.isCollapsed(id, commentId)) collapse.toggle(id, commentId);
-      if (
-        !expandedResolved.has(commentId) &&
-        deriveThreadResolution(root, timelineView.threadReplies.get(commentId) ?? EMPTY_REPLIES)
-          .kind === "root"
-      ) {
-        toggleResolvedExpand(commentId, true);
-      }
-      setLocateRootRequest(commentId);
+      setDeliverableJump((previous) => ({
+        issueId: id,
+        linkedCommentId,
+        linkedRequestToken,
+        commentId: origin.commentId,
+        token: Math.max(previous?.token ?? 0, linkedRequestToken ?? 0) + 1,
+      }));
     },
-    [scrollContainerEl, replyToRoot, jumpToReply, items, id, expandedResolved, timelineView.threadReplies, toggleResolvedExpand],
+    [scrollContainerEl, id, linkedCommentId, linkedRequestToken],
   );
-  useEffect(() => {
-    if (!locateRootRequest) return;
-    setLocateRootRequest(null);
-    jumpToThread(locateRootRequest);
-  }, [locateRootRequest, jumpToThread]);
 
   const describeDeliverable = useDeliverableDetails({
     files: deliverableFiles,
     commentById,
     onLocate: locateOrigin,
-    canLocateComment,
   });
   // The overview remembers the file the viewer was showing, so `G` can go
   // back to it.
@@ -4146,7 +4136,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         files={deliverableFiles}
         commentById={commentById}
         onLocate={locateOrigin}
-        canLocateComment={canLocateComment}
       />
     </PreviewSequenceProvider>
   );

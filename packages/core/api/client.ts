@@ -1699,8 +1699,9 @@ export class ApiClient {
     });
   }
 
-  async listComments(issueId: string): Promise<Comment[]> {
-    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/comments`);
+  async listComments(issueId: string, options?: { thread: string }): Promise<Comment[]> {
+    const query = options ? `?${new URLSearchParams({ thread: options.thread })}` : "";
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/comments${query}`);
     return parseWithFallback(raw, CommentsListSchema, [], {
       endpoint: "GET /api/issues/:id/comments",
     });

@@ -171,6 +171,8 @@ export const issueKeys = {
   /** Full-issue timeline (single TanStack Query, no cursor). */
   timeline: (issueId: string) =>
     [...issueKeys.timelineAll(), issueId] as const,
+  commentThread: (issueId: string, commentId: string) =>
+    [...issueKeys.timeline(issueId), "thread", commentId] as const,
   /** Prefix across all issues — WS task lifecycle events invalidate here so
    *  an open composer's trigger preview refreshes when an agent's queue
    *  state changes (the dedup guard makes the answer queue-dependent). */
@@ -684,6 +686,19 @@ export function issueTimelineOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.timeline(issueId),
     queryFn: () => api.listTimeline(issueId),
+  });
+}
+
+export function issueCommentThreadOptions(issueId: string, commentId: string) {
+  return queryOptions({
+    queryKey: issueKeys.commentThread(issueId, commentId),
+    queryFn: async () => {
+      const comments = await api.listComments(issueId, { thread: commentId });
+      if (!comments.some((comment) => comment.id === commentId)) {
+        throw new Error("Comment not found in thread");
+      }
+      return comments;
+    },
   });
 }
 

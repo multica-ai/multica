@@ -200,9 +200,12 @@ describe("DeliverablesOverview", () => {
     expect(openAtMock).toHaveBeenCalledWith("shot-old");
   });
 
-  it("does not offer a dead jump to comments outside the loaded history", () => {
-    renderOverview({ canLocateComment: () => false });
-    expect(screen.queryByRole("button", { name: "Show in comments" })).toBeNull();
+  it("offers a jump for every known posting comment", () => {
+    const { onLocate } = renderOverview();
+    const buttons = screen.getAllByRole("button", { name: "Show in comments" });
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[0]!);
+    expect(onLocate).toHaveBeenCalledWith({ kind: "comment", commentId: "c-1" });
   });
 
   it("counts exactly what the sidebar counts", () => {

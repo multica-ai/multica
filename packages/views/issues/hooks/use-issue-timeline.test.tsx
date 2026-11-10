@@ -48,6 +48,10 @@ vi.mock("@multica/core/issues/mutations", () => ({
 }));
 
 vi.mock("@multica/core/issues/queries", () => ({
+  issueCommentThreadOptions: (id: string, commentId: string) => ({
+    queryKey: ["issues", "timeline", id, "thread", commentId],
+    queryFn: () => Promise.resolve([]),
+  }),
   issueTimelineOptions: (id: string) => ({
     queryKey: ["issues", "timeline", id],
     queryFn: () => Promise.resolve([]),
@@ -77,9 +81,9 @@ vi.mock("@tanstack/react-query", async () => {
   );
   return {
     ...actual,
-    useQuery: () => ({
-      data: queryState.data,
-      isLoading: queryState.isLoading,
+    useQuery: (options: { queryKey: string[] }) => ({
+      data: options.queryKey.includes("thread") ? undefined : queryState.data,
+      isLoading: options.queryKey.includes("thread") ? false : queryState.isLoading,
     }),
     useQueryClient: () => ({
       invalidateQueries: vi.fn(() => {

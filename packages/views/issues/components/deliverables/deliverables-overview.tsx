@@ -59,7 +59,6 @@ export function DeliverablesOverview({
   files,
   commentById,
   onLocate,
-  canLocateComment,
   returnKey,
 }: {
   open: boolean;
@@ -68,7 +67,6 @@ export function DeliverablesOverview({
   files: ReadonlyArray<DeliverableFile>;
   commentById: ReadonlyMap<string, TimelineEntry>;
   onLocate: (origin: DeliverableOrigin) => void;
-  canLocateComment?: (commentId: string) => boolean;
   /** The file the viewer was showing when it opened this; `G` goes back to it. */
   returnKey: string | null;
 }) {
@@ -116,7 +114,6 @@ export function DeliverablesOverview({
             identifier={identifier}
             files={files}
             commentById={commentById}
-            canLocateComment={canLocateComment}
             onClose={onClose}
             onOpenFile={(file) => {
               onClose();
@@ -141,7 +138,6 @@ function OverviewBody({
   onClose,
   onOpenFile,
   onLocate,
-  canLocateComment,
 }: {
   identifier: string;
   files: ReadonlyArray<DeliverableFile>;
@@ -149,7 +145,6 @@ function OverviewBody({
   onClose: () => void;
   onOpenFile: (file: DeliverableFile) => void;
   onLocate: (origin: DeliverableOrigin) => void;
-  canLocateComment?: (commentId: string) => boolean;
 }) {
   const { t } = useT("issues");
   const files = useMemo(() => displayDeliverableFiles(groupedFiles), [groupedFiles]);
@@ -268,7 +263,7 @@ function OverviewBody({
                 group={group}
                 onOpenFile={onOpenFile}
                 onLocate={
-                  group.comment && canLocateComment?.(group.commentId) !== false
+                  group.comment
                     ? () => onLocate({ kind: "comment", commentId: group.commentId })
                     : undefined
                 }

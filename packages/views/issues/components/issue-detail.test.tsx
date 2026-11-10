@@ -803,6 +803,7 @@ describe("IssueDetail (shared)", () => {
     // /timeline returns the entries flat in chronological order (oldest first).
     mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
     mockApiObj.listIssueDeliverables.mockResolvedValue([]);
+    mockApiObj.listComments.mockResolvedValue([]);
     mockApiObj.listIssueReactions.mockResolvedValue([]);
     mockApiObj.listIssueSubscribers.mockResolvedValue([]);
     mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
@@ -889,10 +890,64 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listTimeline.mockResolvedValue([]);
     mockApiObj.listIssueDeliverables.mockResolvedValue([{ id: "older-comment", type: "comment", actor_type: "agent",
       actor_id: "agent-1", created_at: image.created_at, attachments: [image] }]);
+    const root = {
+      id: "older-root", issue_id: "issue-1", author_type: "agent", author_id: "agent-1",
+      content: "Historical image discussion", type: "comment", parent_id: null,
+      created_at: image.created_at, updated_at: image.created_at, reactions: [], attachments: [],
+      resolved_at: null, resolved_by_type: null, resolved_by_id: null,
+    };
+    mockApiObj.listComments.mockResolvedValue([root, {
+      ...root, id: "older-comment", parent_id: root.id,
+      content: "Historical chart explanation", attachments: [image],
+    }]);
     renderIssueDetail();
     expect(await screen.findByRole("button", { name: "historical-chart.png" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "View all 1 deliverable" }));
     expect(await screen.findByTitle("historical-chart.png")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show in comments" })).toBeInTheDocument();
+    expect(mockApiObj.listComments).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Show in comments" }));
+    await waitFor(() => expect(hasHighlightedCommentBackground(
+      document.getElementById("comment-older-comment"),
+    )).toBe(true));
+    expect(mockApiObj.listComments).toHaveBeenCalledWith("issue-1", { thread: "older-comment" });
+    expect(screen.getByText("Historical chart explanation")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /deliverables$/ })).toBeNull();
+  });
+
+  it("keeps a deliverable reply centered while the outer virtual list corrects its size", async () => {
+    mockVirtualWindow.enabled = true;
+    mockVirtualWindow.holdAtIndex = true;
+    mockVirtualWindow.targetId = "image-reply";
+    const history = Array.from({ length: 120 }, (_, index) => ({
+      ...mockTimeline[0]!, id: `history-${index}`, parent_id: null, source_task_id: undefined,
+      content: `Historical comment ${index}`,
+      created_at: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+    }));
+    const root = history[115]!;
+    const image: Attachment = { id: "deep-image", workspace_id: "ws-1", issue_id: "issue-1",
+      comment_id: "image-reply", chat_session_id: null, chat_message_id: null,
+      uploader_type: "agent", uploader_id: "agent-1", filename: "deep-image.png",
+      content_type: "image/png", size_bytes: 100, url: "/image.png", download_url: "/image.png",
+      markdown_url: "/image.png", created_at: root.created_at };
+    mockApiObj.listTimeline.mockResolvedValue([...history, {
+      ...root, id: "image-reply", parent_id: root.id, content: "Deep image explanation", attachments: [image],
+    }]);
+    mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    renderIssueDetail();
+    fireEvent.click(await screen.findByRole("button", { name: "View all 1 deliverable" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show in comments" }));
+    await waitFor(() => expect(hasHighlightedCommentBackground(
+      document.getElementById("comment-image-reply"),
+    )).toBe(true));
+    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 150)); });
+    expect(mockVirtualWindow.scrollParent?.scrollTop).toBe(200);
+    expect(document.querySelectorAll('[id^="comment-history-"]').length).toBeLessThanOrEqual(8);
+    expect(mockApiObj.listComments).not.toHaveBeenCalled();
+    const jumps = scrollIntoViewIndexSpy.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "View all 1 deliverable" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show in comments" }));
+    await waitFor(() => expect(scrollIntoViewIndexSpy.mock.calls.length).toBeGreaterThan(jumps));
   });
 
   it("opens source-context creation from both a root comment and a reply", async () => {

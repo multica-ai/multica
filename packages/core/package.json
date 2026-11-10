@@ -47,6 +47,7 @@
     "./issues/wakeups": "./issues/wakeups.ts",
     "./issues/mutations": "./issues/mutations.ts",
     "./issues/timeline-sort": "./issues/timeline-sort.ts",
+    "./issues/comment-thread": "./issues/comment-thread.ts",
     "./issues/comment-deletion": "./issues/comment-deletion.ts",
     "./issues/comment-trigger-outcomes": "./issues/comment-trigger-outcomes.ts",
     "./issues/run-steering": "./issues/run-steering.ts",

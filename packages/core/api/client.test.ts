@@ -3336,6 +3336,14 @@ describe("ApiClient shared credential across windows", () => {
 });
 
 describe("ApiClient complete issue deliverables", () => {
+  it("loads a posting comment's thread and validates the comment response", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ invalid: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    expect(await client.listComments("issue", { thread: "historical/comment" })).toEqual([]);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.example.test/api/issues/issue/comments?thread=historical%2Fcomment");
+  });
+
   it("loads lightweight origins independently of timeline and tolerates malformed responses", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify([{ id:"old",type:"comment",actor_type:"agent",actor_id:"a",created_at:"2026-01-01T00:00:00Z",attachments:[] }]),{status:200}))
       .mockResolvedValueOnce(new Response(JSON.stringify({invalid:true}),{status:200}));
