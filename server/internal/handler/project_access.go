@@ -265,6 +265,25 @@ func (h *Handler) requireChatProjectVisible(w http.ResponseWriter, r *http.Reque
 	return true
 }
 
+// chatRunProjectID is the chat session project whose context a claimed chat
+// run may carry: none once the session's creator, the run's human or the
+// agent's owner can no longer see it. The session keeps its project_id, so
+// the context comes back if access does.
+func (h *Handler) chatRunProjectID(ctx context.Context, cs db.ChatSession, task db.AgentTaskQueue, agentOwnerID pgtype.UUID) (pgtype.UUID, error) {
+	if !cs.ProjectID.Valid {
+		return cs.ProjectID, nil
+	}
+	principals := append(projectaccess.RunPrincipals(task, agentOwnerID), cs.CreatorID)
+	hidden, err := projectaccess.ForPrincipals(ctx, h.Queries, cs.WorkspaceID, principals...)
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	if !hidden.CanSeeProject(cs.ProjectID) {
+		return pgtype.UUID{}, nil
+	}
+	return cs.ProjectID, nil
+}
+
 // hiddenProjectPredicate is the dynamic-SQL twin of the sqlc
 // hidden_project_ids filter: rows outside any project always pass.
 func hiddenProjectPredicate(column, param string) string {
