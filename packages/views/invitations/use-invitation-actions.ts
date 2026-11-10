@@ -23,16 +23,21 @@ export function useInvitationActions() {
       await api.acceptInvitation(invitation.id);
       // The accept transaction already sets onboarded_at; this records the
       // completion path and brings the local user out of the
-      // un-onboarded state before guards look at it. The user has joined by
-      // now, so neither step may stop the workspace list refresh below.
+      // un-onboarded state before guards look at it. Losing the completion
+      // path is fine, but the local user must be onboarded before entering
+      // the workspace or its layout bounces back to onboarding.
       if (!hasOnboarded) {
-        await api
-          .markOnboardingComplete({
-            completion_path: "invite_accept",
-            workspace_id: invitation.workspace_id,
-          })
-          .catch(() => {});
-        await useAuthStore.getState().refreshMe().catch(() => {});
+        const { setUser, refreshMe } = useAuthStore.getState();
+        try {
+          setUser(
+            await api.markOnboardingComplete({
+              completion_path: "invite_accept",
+              workspace_id: invitation.workspace_id,
+            }),
+          );
+        } catch {
+          await refreshMe();
+        }
       }
       // staleTime: 0 forces a real fetch — the joined workspace has to be in
       // the list before its slug can be resolved.

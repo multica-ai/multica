@@ -10,24 +10,33 @@ const {
   navigate,
   logout,
   refreshMe,
+  setUser,
   acceptInvitation,
   declineInvitation,
   getInvitation,
   markOnboardingComplete,
   listMyInvitations,
   listWorkspaces,
-} = vi.hoisted(() => ({
-  auth: { user: null as { onboarded_at: string | null } | null },
-  navigate: vi.fn(),
-  logout: vi.fn(),
-  refreshMe: vi.fn(),
-  acceptInvitation: vi.fn(),
-  declineInvitation: vi.fn(),
-  getInvitation: vi.fn(),
-  markOnboardingComplete: vi.fn(),
-  listMyInvitations: vi.fn(),
-  listWorkspaces: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const auth = { user: null as { onboarded_at: string | null } | null };
+  return {
+    auth,
+    navigate: vi.fn(),
+    logout: vi.fn(),
+    refreshMe: vi.fn(),
+    setUser: vi.fn((user: { onboarded_at: string | null }) => {
+      auth.user = user;
+    }),
+    acceptInvitation: vi.fn(),
+    declineInvitation: vi.fn(),
+    getInvitation: vi.fn(),
+    markOnboardingComplete: vi.fn(),
+    listMyInvitations: vi.fn(),
+    listWorkspaces: vi.fn(),
+  };
+});
+
+const ONBOARDED = { onboarded_at: "2026-11-10T00:00:00Z" };
 
 // Mocked at the context module rather than the barrel so <AppLink> stays the
 // real component and its click contract is what the test exercises.
@@ -46,11 +55,11 @@ vi.mock("../platform", () => ({
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: Object.assign(
     (selector?: (s: unknown) => unknown) => {
-      const state = { user: auth.user, refreshMe };
+      const state = { user: auth.user, refreshMe, setUser };
       return selector ? selector(state) : state;
     },
     {
-      getState: () => ({ user: auth.user, refreshMe }),
+      getState: () => ({ user: auth.user, refreshMe, setUser }),
     },
   ),
 }));
@@ -121,10 +130,12 @@ describe("InvitationsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     auth.user = { onboarded_at: null };
-    refreshMe.mockResolvedValue(undefined);
+    refreshMe.mockImplementation(async () => {
+      auth.user = ONBOARDED;
+    });
     acceptInvitation.mockResolvedValue({});
     declineInvitation.mockResolvedValue(undefined);
-    markOnboardingComplete.mockResolvedValue({});
+    markOnboardingComplete.mockResolvedValue(ONBOARDED);
     listWorkspaces.mockResolvedValue([]);
   });
 
@@ -160,13 +171,29 @@ describe("InvitationsPage", () => {
         completion_path: "invite_accept",
         workspace_id: "ws-2",
       });
-      expect(refreshMe).toHaveBeenCalled();
       expect(navigate).toHaveBeenCalledWith("/beta/issues");
     });
     expect(acceptInvitation).toHaveBeenCalledTimes(1);
+    expect(auth.user?.onboarded_at).toBe(ONBOARDED.onboarded_at);
   });
 
-  it("still enters the joined workspace when recording onboarding fails", async () => {
+  // The workspace layout sends an un-onboarded local user back to onboarding,
+  // so the store must hold the onboarded user before navigating.
+  it("onboards the local user from the mark response, without a separate refresh", async () => {
+    listMyInvitations.mockResolvedValue([mkInvite("inv-1", "ws-1", "Acme")]);
+    listWorkspaces.mockResolvedValue([mkWs("ws-1", "acme")]);
+    refreshMe.mockRejectedValue(new Error("network"));
+    renderPage();
+    await waitFor(() => screen.getByText("Acme"));
+
+    fireEvent.click(within(row("Acme")).getByRole("button", { name: "Join" }));
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/acme/issues"));
+    expect(auth.user?.onboarded_at).toBe(ONBOARDED.onboarded_at);
+    expect(refreshMe).not.toHaveBeenCalled();
+  });
+
+  it("falls back to refreshing the user when recording onboarding fails", async () => {
     listMyInvitations.mockResolvedValue([mkInvite("inv-1", "ws-1", "Acme")]);
     listWorkspaces.mockResolvedValue([mkWs("ws-1", "acme")]);
     markOnboardingComplete.mockRejectedValue(new Error("boom"));
@@ -177,6 +204,7 @@ describe("InvitationsPage", () => {
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("/acme/issues"));
     expect(refreshMe).toHaveBeenCalled();
+    expect(auth.user?.onboarded_at).toBe(ONBOARDED.onboarded_at);
     expect(screen.queryByText("boom")).toBeNull();
   });
 
