@@ -253,6 +253,7 @@
       "empty": "아직 등록된 테마가 없습니다.",
       "no_results": "“{{query}}”와 일치하는 테마가 없습니다.",
       "by": "작성자: {{author}}",
+      "source": "GitHub에서 {{repo}} 보기",
       "no_preview": "미리보기 없음",
       "screenshot_alt": "{{mode}} 모드의 {{name}}",
       "install": "설치",

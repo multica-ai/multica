@@ -264,6 +264,7 @@
       "empty": "Тем пока нет.",
       "no_results": "Нет тем по запросу «{{query}}».",
       "by": "автор: {{author}}",
+      "source": "{{repo}} на GitHub",
       "no_preview": "Нет превью",
       "screenshot_alt": "{{name}}, режим «{{mode}}»",
       "install": "Установить",

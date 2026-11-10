@@ -92,9 +92,9 @@ function ThemeStore() {
       </DialogHeader>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         {themes.isPending ? (
-          <div className="grid gap-4 sm:grid-cols-2" aria-label={t(($) => $.appearance.store.loading)}>
-            {[0, 1].map((i) => (
-              <Skeleton key={i} className="aspect-[16/13] rounded-lg" />
+          <div className="grid gap-3 sm:grid-cols-3" aria-label={t(($) => $.appearance.store.loading)}>
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} className="aspect-[16/14] rounded-lg" />
             ))}
           </div>
         ) : themes.isError ? (
@@ -111,7 +111,7 @@ function ThemeStore() {
               : t(($) => $.appearance.store.empty)}
           </p>
         ) : (
-          <ul className="grid gap-4 sm:grid-cols-2">
+          <ul className="grid gap-3 sm:grid-cols-3">
             {shown.map((theme) => (
               <li key={theme.id}>
                 <StoreThemeCard theme={theme} />
@@ -190,11 +190,11 @@ function StoreThemeCard({ theme }: { theme: StoreTheme }) {
       <div className="relative">
         <Screenshot theme={theme} mode={mode} />
         {supported.length > 1 ? (
-          <div className="absolute right-2 bottom-2 rounded-md bg-surface-raised/90 shadow-sm backdrop-blur">
+          <div className="absolute right-1.5 bottom-1.5 rounded-md bg-surface-raised/90 shadow-sm backdrop-blur">
             <SegmentedToggle<StoreThemeMode>
               value={mode}
               onChange={setMode}
-              buttonClassName="px-2 py-0.5 text-caption"
+              buttonClassName="px-1.5 py-0 text-caption"
               options={supported.map(
                 (m) => [m, m === "light" ? t(($) => $.appearance.mode.light) : t(($) => $.appearance.mode.dark)] as const,
               )}
@@ -202,48 +202,46 @@ function StoreThemeCard({ theme }: { theme: StoreTheme }) {
           </div>
         ) : null}
       </div>
-      <div className="flex flex-1 flex-col gap-1 px-3.5 pt-3 pb-3.5">
-        <div className="flex min-w-0 items-baseline gap-2">
+      <div className="flex flex-1 flex-col gap-0.5 px-3 pt-2 pb-2.5">
+        <div className="flex min-w-0 items-center gap-1.5">
           <h3 className="truncate text-label font-medium">{theme.name}</h3>
           <span className="shrink-0 text-caption text-muted-foreground">{theme.version}</span>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="-mr-1.5 ml-auto text-muted-foreground"
+            onClick={() => openExternal(`https://github.com/${theme.repo}`)}
+            title={theme.repo}
+            aria-label={t(($) => $.appearance.store.source, { repo: theme.repo })}
+          >
+            <ExternalLink />
+          </Button>
         </div>
         <p className="truncate text-caption text-muted-foreground">
           {t(($) => $.appearance.store.by, { author: theme.author })}
         </p>
-        {theme.description ? <p className="line-clamp-2 text-caption">{theme.description}</p> : null}
-        <div className="mt-auto flex items-center gap-2 pt-3">
-          <Button
-            variant="ghost"
-            size="xs"
-            className="-ml-2 min-w-0 shrink text-muted-foreground"
-            onClick={() => openExternal(`https://github.com/${theme.repo}`)}
-            title={theme.repo}
-          >
-            <ExternalLink />
-            <span className="truncate">{theme.repo}</span>
-          </Button>
-          <span className="ml-auto flex shrink-0 items-center gap-1.5">
-            {state === "installed" || state === "update" ? (
-              <Button variant="ghost" size="xs" disabled={busy} onClick={remove}>
-                {t(($) => $.appearance.store.remove)}
-              </Button>
-            ) : null}
-            {state === "available" ? (
-              <Button size="xs" disabled={busy} onClick={() => void get()}>
-                {busy ? t(($) => $.appearance.store.installing) : t(($) => $.appearance.store.install)}
-              </Button>
-            ) : state === "update" ? (
-              <Button size="xs" disabled={busy} onClick={() => void get()}>
-                {busy ? t(($) => $.appearance.store.installing) : t(($) => $.appearance.store.update, { version: theme.version })}
-              </Button>
-            ) : state === "installed" ? (
-              <Button variant="outline" size="xs" disabled={inUse} onClick={() => set({ theme: theme.id })}>
-                {inUse ? t(($) => $.appearance.store.in_use) : t(($) => $.appearance.store.use)}
-              </Button>
-            ) : (
-              <span className="text-caption text-muted-foreground">{t(($) => $.appearance.store.taken)}</span>
-            )}
-          </span>
+        {theme.description ? <p className="line-clamp-2 text-caption text-muted-foreground">{theme.description}</p> : null}
+        <div className="mt-auto flex items-center justify-end gap-1.5 pt-2">
+          {state === "installed" || state === "update" ? (
+            <Button variant="ghost" size="xs" disabled={busy} onClick={remove}>
+              {t(($) => $.appearance.store.remove)}
+            </Button>
+          ) : null}
+          {state === "available" ? (
+            <Button size="xs" disabled={busy} onClick={() => void get()}>
+              {busy ? t(($) => $.appearance.store.installing) : t(($) => $.appearance.store.install)}
+            </Button>
+          ) : state === "update" ? (
+            <Button size="xs" disabled={busy} onClick={() => void get()}>
+              {busy ? t(($) => $.appearance.store.installing) : t(($) => $.appearance.store.update, { version: theme.version })}
+            </Button>
+          ) : state === "installed" ? (
+            <Button variant="outline" size="xs" disabled={inUse} onClick={() => set({ theme: theme.id })}>
+              {inUse ? t(($) => $.appearance.store.in_use) : t(($) => $.appearance.store.use)}
+            </Button>
+          ) : (
+            <span className="text-caption text-muted-foreground">{t(($) => $.appearance.store.taken)}</span>
+          )}
         </div>
       </div>
     </article>

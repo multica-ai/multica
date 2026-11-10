@@ -253,6 +253,7 @@
       "empty": "尚未有上架的主題。",
       "no_results": "沒有符合「{{query}}」的主題。",
       "by": "作者：{{author}}",
+      "source": "在 GitHub 上查看 {{repo}}",
       "no_preview": "暫無預覽",
       "screenshot_alt": "{{name}}（{{mode}}模式）",
       "install": "安裝",

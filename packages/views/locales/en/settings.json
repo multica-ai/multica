@@ -257,6 +257,7 @@
       "empty": "No themes are listed yet.",
       "no_results": "No themes match “{{query}}”.",
       "by": "by {{author}}",
+      "source": "{{repo}} on GitHub",
       "no_preview": "No preview",
       "screenshot_alt": "{{name}} in {{mode}} mode",
       "install": "Install",

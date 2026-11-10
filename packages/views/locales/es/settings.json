@@ -239,6 +239,7 @@
       "empty": "Todavía no hay temas.",
       "no_results": "Ningún tema coincide con «{{query}}».",
       "by": "de {{author}}",
+      "source": "{{repo}} en GitHub",
       "no_preview": "Sin vista previa",
       "screenshot_alt": "{{name}} en modo {{mode}}",
       "install": "Instalar",

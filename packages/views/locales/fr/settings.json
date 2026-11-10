@@ -257,6 +257,7 @@
       "empty": "Aucun thème n’est encore proposé.",
       "no_results": "Aucun thème ne correspond à « {{query}} ».",
       "by": "par {{author}}",
+      "source": "{{repo}} sur GitHub",
       "no_preview": "Pas d’aperçu",
       "screenshot_alt": "{{name}} en mode {{mode}}",
       "install": "Installer",
