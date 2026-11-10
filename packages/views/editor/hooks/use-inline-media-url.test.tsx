@@ -71,12 +71,28 @@ describe("short-lived streamed attachment capabilities", () => {
     expect(hook.result.current.pending).toBe(false);
   });
 
-  it("uses a stable authenticated PDF URL on same-origin web", () => {
+  it("uses a stable authenticated PDF URL on same-origin web only for proxy storage", async () => {
     getBaseUrl.mockReturnValue("");
+    getAttachment.mockResolvedValue({ download_url: capability(Math.floor(Date.now() / 1000) + 60) });
     const { wrapper } = setup();
     const hook = renderHook(() => useFreshStreamedMediaURL(id, stable, true, true), { wrapper });
+    await waitFor(() => expect(hook.result.current.pending).toBe(false));
     expect(hook.result.current.url).toBe(stable);
-    expect(getAttachment).not.toHaveBeenCalled();
+    expect(getAttachment).toHaveBeenCalledWith(id);
+    expect(getAttachmentBlob).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["S3 presign", "https://storage.example.test/manual.pdf?X-Amz-Signature=fresh"],
+    ["CloudFront", "https://cdn.example.test/manual.pdf?Signature=fresh&Key-Pair-Id=test"],
+  ])("uses the fresh inline URL for same-origin web PDFs with %s", async (_mode, inlineURL) => {
+    getBaseUrl.mockReturnValue("");
+    getAttachment.mockResolvedValue({ download_url: inlineURL, attachment_download_url: `${inlineURL}&response-content-disposition=attachment` });
+    const { wrapper } = setup();
+    const hook = renderHook(() => useFreshStreamedMediaURL(id, stable, true, true), { wrapper });
+    await waitFor(() => expect(hook.result.current.url).toBe(inlineURL));
+    expect(hook.result.current.pending).toBe(false);
+    expect(getAttachment).toHaveBeenCalledWith(id);
     expect(getAttachmentBlob).not.toHaveBeenCalled();
   });
 

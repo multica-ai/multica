@@ -36,6 +36,7 @@ test("cross-origin local PDF keeps its reading position past capability TTL", as
   test.setTimeout(120000);
   const local = (url: string) => ["localhost", "127.0.0.1", "[::1]"].includes(new URL(url).hostname);
   test.skip(!local(baseURL!) || !local(apiBase) || !!process.env.S3_BUCKET, "Isolated LocalStorage fixtures only");
+  test.skip(new URL(baseURL!).origin === new URL(apiBase).origin, "Cross-origin PDF path only");
   const api = await createTestApi();
   try {
     const slug = await loginAsDefault(page);
@@ -76,3 +77,62 @@ test("cross-origin local PDF keeps its reading position past capability TTL", as
     await testInfo.attach("pdf-page-two-after-65s", { body: after, contentType: "image/png" });
   } finally { await api.cleanup(); }
 });
+
+for (const [mode, inlineURL] of [
+  ["presign", "https://storage.example.test/reading.pdf?X-Amz-Signature=fresh"],
+  ["CloudFront", "https://cdn.example.test/reading.pdf?Signature=fresh&Key-Pair-Id=test"],
+] as const) {
+  test(`same-origin ${mode} PDF opens inline instead of downloading`, async ({ page, baseURL }, testInfo) => {
+    const local = (url: string) => ["localhost", "127.0.0.1", "[::1]"].includes(new URL(url).hostname);
+    test.skip(!local(baseURL!) || !local(apiBase) || !!process.env.S3_BUCKET, "Isolated LocalStorage fixtures only");
+    test.skip(new URL(baseURL!).origin !== new URL(apiBase).origin, "Run with a same-origin Web API base");
+    const api = await createTestApi();
+    try {
+      const slug = await loginAsDefault(page);
+      const issue = await api.createIssue(`Same-origin ${mode} PDF preview`);
+      const pdf = twoPagePDF();
+      const form = new FormData();
+      form.append("file", new Blob([pdf], { type: "application/pdf" }), "reading.pdf");
+      form.append("issue_id", issue.id);
+      const uploaded = await fetch(`${apiBase}/api/upload-file`, {
+        method: "POST", headers: { Authorization: `Bearer ${api.getToken()}`, "X-Workspace-Slug": slug }, body: form,
+      });
+      expect(uploaded.status).toBe(200);
+      const att = await uploaded.json();
+      let forcedDownloads = 0;
+      const downloads: string[] = [];
+      page.on("download", (download) => downloads.push(download.suggestedFilename()));
+      // Model the production storage contracts without AWS credentials: metadata
+      // offers an inline signature, while the durable download route forces save.
+      await page.route(`${apiBase}/api/attachments/${att.id}`, (route) => route.fulfill({
+        json: { ...att, download_url: inlineURL, attachment_download_url: `${inlineURL}&response-content-disposition=attachment` },
+      }));
+      await page.route(`${apiBase}/api/attachments/${att.id}/download`, (route) => {
+        forcedDownloads++;
+        return route.fulfill({ status: 302, headers: { Location: `${inlineURL}&response-content-disposition=attachment` } });
+      });
+      await page.route(`${inlineURL}&response-content-disposition=attachment`, (route) => route.fulfill({
+        contentType: "application/pdf", headers: { "Content-Disposition": "attachment; filename=reading.pdf" }, body: pdf,
+      }));
+      await page.route(inlineURL, (route) => route.fulfill({
+        contentType: "application/pdf", headers: { "Content-Disposition": "inline; filename=reading.pdf" }, body: pdf,
+      }));
+      await page.goto(`/${slug}/attachments/${att.id}/preview`);
+      await expect(page.locator('iframe[title="reading.pdf"]')).toHaveAttribute("src", inlineURL);
+      let viewerFrame: Frame | undefined;
+      await expect.poll(async () => {
+        for (const child of page.frames()) {
+          if (await child.locator("pdf-viewer").count()) { viewerFrame = child; return true; }
+        }
+        return false;
+      }).toBe(true);
+      const pageNumber = viewerFrame!.getByRole("textbox", { name: "Page number" });
+      await pageNumber.fill("2");
+      await pageNumber.press("Enter");
+      await expect(pageNumber).toHaveValue("2");
+      expect(forcedDownloads).toBe(0);
+      expect(downloads).toEqual([]);
+      await page.screenshot({ path: testInfo.outputPath(`same-origin-${mode}-pdf.png`) });
+    } finally { await api.cleanup(); }
+  });
+}

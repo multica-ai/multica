@@ -182,11 +182,10 @@ export function useFreshStreamedMediaURL(
   const id = attachmentId ?? attachmentIdFromDownloadURL(pickedUrl);
   const active = enabled && !!id && !!pickedUrl;
   const stablePDFURL = id ? absolutizeAPIPath(attachmentDownloadPath(id)) : "";
-  const sameOriginPDF = active && pdf && isSameOriginHTTPURL(stablePDFURL);
   const { data: fresh, error, isError, refetch } = useQuery({
     queryKey: ["attachment-stream-resign", id],
     queryFn: () => api.getAttachment(id as string),
-    enabled: active && !sameOriginPDF,
+    enabled: active,
     staleTime: Infinity,
     gcTime: 0,
     retry: retryAttachmentPreview,
@@ -198,6 +197,9 @@ export function useFreshStreamedMediaURL(
 
   const dl = fresh?.download_url ?? "";
   const expiresAt = capabilityExpiresAt(dl);
+  // The authenticated route redirects to forced downloads for presign/CDN
+  // storage. Use it for PDFs only after metadata confirms inline proxying.
+  const sameOriginPDF = active && pdf && expiresAt !== undefined && isSameOriginHTTPURL(stablePDFURL);
   const proxyPDF = active && pdf && !sameOriginPDF && expiresAt !== undefined;
   const pdfBytes = useQuery({
     queryKey: ["attachment-preview-pdf", id],

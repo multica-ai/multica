@@ -286,8 +286,9 @@ describe("AttachmentPreviewModal — dispatch", () => {
     expect(img?.getAttribute("src")).toBe(url);
   });
 
-  it("renders a same-origin PDF through the stable authenticated URL", async () => {
+  it("renders a same-origin proxy PDF through the stable authenticated URL", async () => {
     const att = makeAttachment({ filename: "manual.pdf", content_type: "application/pdf" });
+    getAttachmentMock.mockResolvedValueOnce({ ...att, download_url: `/api/attachments/${att.id}/signed-download?exp=${Math.floor(Date.now() / 1000) + 60}&sig=fresh` });
     render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
     await waitFor(() => {
       expect(document.querySelector("iframe")?.getAttribute("src")).toBe(`/api/attachments/${att.id}/download`);
@@ -727,8 +728,8 @@ describe("AttachmentPreviewModal — streamed media (MUL-8892)", () => {
     });
   });
 
-  it("signs a PDF afresh too", async () => {
-    getBaseUrlMock.mockReturnValue("https://api.example.test");
+  it.each(["", "https://api.example.test"])("signs a PDF afresh with API base '%s'", async (base) => {
+    getBaseUrlMock.mockReturnValue(base);
     getAttachmentMock.mockResolvedValueOnce(
       makeAttachment({ download_url: "https://cdn.example.test/manual.pdf?Signature=fresh" }),
     );
