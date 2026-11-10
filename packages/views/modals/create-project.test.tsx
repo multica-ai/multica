@@ -44,10 +44,15 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "workspace-1",
 }));
 
-vi.mock("@multica/core/auth", () => ({
-  useAuthStore: (selector: (state: { user: { id: string } }) => unknown) =>
-    selector({ user: { id: "user-1" } }),
-}));
+vi.mock("@multica/core/auth", () => {
+  const state = { user: { id: "user-1" } };
+  return {
+    useAuthStore: Object.assign(
+      (selector: (s: typeof state) => unknown) => selector(state),
+      { getState: () => state },
+    ),
+  };
+});
 
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({
