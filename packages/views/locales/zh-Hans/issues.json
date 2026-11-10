@@ -743,6 +743,8 @@
       "send_with_body": "将连同下方正文一起发送",
       "confirm_add": "添加批注",
       "save": "保存批注",
+      "confirm_add_short": "添加",
+      "save_short": "保存",
       "add_comment": "加入评论",
       "add": "加入回复",
       "note_label": "批注",

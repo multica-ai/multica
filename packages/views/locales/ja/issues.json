@@ -743,6 +743,8 @@
       "send_with_body": "下書きの本文もまとめて送信します。",
       "confirm_add": "注釈を追加",
       "save": "注釈を保存",
+      "confirm_add_short": "追加",
+      "save_short": "保存",
       "add_comment": "コメントに追加",
       "add": "返信に追加",
       "note_label": "コメント",

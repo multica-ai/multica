@@ -743,6 +743,8 @@
       "send_with_body": "초안 본문과 함께 보냅니다.",
       "confirm_add": "주석 추가",
       "save": "주석 저장",
+      "confirm_add_short": "추가",
+      "save_short": "저장",
       "add_comment": "댓글에 추가",
       "add": "답글에 추가",
       "note_label": "코멘트",

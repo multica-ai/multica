@@ -765,6 +765,8 @@
       "send_with_body": "Sera envoyé avec le texte du brouillon.",
       "confirm_add": "Ajouter une annotation",
       "save": "Enregistrer l'annotation",
+      "confirm_add_short": "Ajouter",
+      "save_short": "Enregistrer",
       "add_comment": "Ajouter au commentaire",
       "add": "Ajouter à la réponse",
       "note_label": "Commenter",
