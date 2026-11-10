@@ -70,14 +70,6 @@
       "offline": "離線"
     }
   },
-  "mika_setup": {
-    "title": "執行時已準備好，和 Mika 開始。",
-    "description": "讓 Mika 幫你安排任務和協調 AI 代理。",
-    "action": "和 Mika 開始",
-    "failed": "無法啟動 Mika",
-    "dialog_title": "讓 Mika 在哪臺機器上執行？",
-    "cancel": "取消"
-  },
   "machine": {
     "search_placeholder": "搜尋機器...",
     "filters": {

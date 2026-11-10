@@ -70,14 +70,6 @@
       "offline": "Не в сети"
     }
   },
-  "mika_setup": {
-    "title": "Среда выполнения готова. Начните с Mika.",
-    "description": "Позвольте Mika организовывать работу и координировать агентов.",
-    "action": "Начать с Mika",
-    "failed": "Не удалось запустить Mika",
-    "dialog_title": "Где должен работать Mika?",
-    "cancel": "Отмена"
-  },
   "machine": {
     "search_placeholder": "Поиск машин…",
     "filters": {

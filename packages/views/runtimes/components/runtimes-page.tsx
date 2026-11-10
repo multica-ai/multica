@@ -19,19 +19,10 @@ import {
   SquareTerminal,
 } from "@multica/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import {
-  memberNeedsMikaSetup,
-  useBootstrapMika,
-} from "@multica/core/onboarding";
-import {
-  useRequiredWorkspaceSlug,
-  useWorkspacePaths,
-} from "@multica/core/paths";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { runtimeProfileListOptions } from "@multica/core/runtimes";
 import {
   runtimeListOptions,
@@ -42,17 +33,10 @@ import {
   agentListOptions,
   memberListOptions,
 } from "@multica/core/workspace/queries";
-import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
+import type { MemberWithUser } from "@multica/core/types";
 import type { QoderConnection } from "@multica/core/runtimes/qoder";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@multica/ui/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -62,10 +46,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import {
-  MikaRuntimeChoice,
-  type MikaRuntimeSelection,
-} from "./mika-runtime-choice";
 import {
   CollectionCreateButton,
   CollectionNoMatches,
@@ -82,7 +62,6 @@ import {
 } from "../../layout/collection-list";
 import { cn } from "@multica/ui/lib/utils";
 import { useNavigation } from "../../navigation";
-import { getMikaOnboarding, pickContentLang } from "../../onboarding/templates";
 import { qoderOptions } from "@multica/core/runtimes/qoder";
 import { QODER_RUNTIME_LOCATOR } from "./qoder-detail-page";
 import { RemoteRuntimeDialog } from "./remote-runtime-dialog";
@@ -100,11 +79,6 @@ import {
   useHealthLabel,
 } from "./shared";
 import { useT, useTimeAgo } from "../../i18n";
-
-/** Mirrors `mikaAgentAvatarURL` in server/internal/handler/mika_agent.go.
- *  Placeholder until Mika has real artwork — these two must move together or
- *  this page shows one face and the created agent another. */
-const MIKA_PLACEHOLDER_EMOJI = "🦄";
 
 export interface RuntimesPageProps {
   /** Desktop-only daemon id used to identify this device. */
@@ -201,17 +175,11 @@ export function RuntimesPage({
   const { data: runtimeProfiles = [], isLoading: profilesLoading } = useQuery(
     runtimeProfileListOptions(wsId),
   );
-  const { data: agents = [], isLoading: agentsLoading } = useQuery(
+  const { data: agents = [] } = useQuery(
     agentListOptions(wsId),
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
-  // The Mika entrypoint is per member, not per workspace: the agent alone does
-  // not say whether *this* member's conversation was ever opened and kicked
-  // off. See memberNeedsMikaSetup.
-  const { data: chatSessions = [], isLoading: chatSessionsLoading } = useQuery(
-    chatSessionsOptions(wsId),
-  );
 
   const handleDaemonEvent = useCallback(() => {
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
@@ -542,19 +510,6 @@ export function RuntimesPage({
             }
           />
           <div className="flex flex-col gap-6 px-6 pt-6 pb-16 empty:hidden">
-            {!agentsLoading &&
-              !chatSessionsLoading &&
-              memberNeedsMikaSetup(agents, chatSessions) &&
-              runtimes.some((runtime) => runtime.provider !== "qoder_cloud") && (
-                <MikaSetupCard
-                  workspaceId={wsId}
-                  runtimes={runtimes.filter(
-                    (runtime) => runtime.provider !== "qoder_cloud",
-                  )}
-                  runtimesLoading={runtimesLoading}
-                  currentUserId={currentUserId ?? null}
-                />
-              )}
             {orphanProfileRuntimes.length > 0 && (
               <OrphanRuntimeProfiles
                 runtimes={orphanProfileRuntimes}
@@ -904,131 +859,6 @@ function RuntimeStatusCell({
     case "action":
       return null;
   }
-}
-
-/**
- * Entry point for creating Mika once a runtime exists.
- *
- * The action opens a picker rather than provisioning straight away. It used to
- * take `runtimes.find(online) ?? runtimes[0]` and create Mika on it silently —
- * but one machine commonly exposes every agent CLI it has installed (nine, on
- * the box this was reported from), so "the first online one" is arbitrary and
- * could well be a CLI the member never intended to run their Chief of Staff
- * on. Onboarding already makes this an explicit choice; this is the same
- * decision reached from a different entry point, so it asks the same way and
- * reuses the same two controls.
- */
-function MikaSetupCard({
-  workspaceId,
-  runtimes,
-  runtimesLoading,
-  currentUserId,
-}: {
-  workspaceId: string;
-  runtimes: AgentRuntime[];
-  runtimesLoading?: boolean;
-  currentUserId: string | null;
-}) {
-  const { t, i18n } = useT("runtimes");
-  const navigation = useNavigation();
-  const paths = useWorkspacePaths();
-  const wsSlug = useRequiredWorkspaceSlug();
-  const bootstrapMika = useBootstrapMika(workspaceId);
-
-  const [open, setOpen] = useState(false);
-  // Seeded with the old heuristic so the dialog opens on a sensible default;
-  // the point is that it is now visible and changeable, not that it is unset.
-  const defaultRuntimeId =
-    runtimes.find((runtime) => runtime.status === "online")?.id ??
-    runtimes[0]?.id ??
-    "";
-  const [choice, setChoice] = useState<MikaRuntimeSelection | null>(null);
-
-  const value: MikaRuntimeSelection = choice ?? {
-    runtimeId: defaultRuntimeId,
-    model: "",
-  };
-  const runtimeId = value.runtimeId;
-
-  const handleStart = async () => {
-    if (!runtimeId || bootstrapMika.isPending) return;
-    const lang = pickContentLang(i18n.language);
-    try {
-      const result = await bootstrapMika.mutateAsync({
-        workspaceSlug: wsSlug,
-        runtimeId,
-        model: value.model || undefined,
-        ...getMikaOnboarding(lang),
-      });
-      setOpen(false);
-      navigation.push(paths.chatSession(result.chatSession.id));
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : t(($) => $.mika_setup.failed),
-      );
-    }
-  };
-
-  return (
-    <>
-      <div className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:flex-row sm:items-center">
-        <span
-          role="img"
-          aria-label={t(($) => $.mika_setup.title)}
-          className="flex size-10 shrink-0 select-none items-center justify-center rounded-full bg-muted text-title-lg leading-none"
-        >
-          {MIKA_PLACEHOLDER_EMOJI}
-        </span>
-        <div className="min-w-0 flex-1">
-          <h2 className="text-body font-semibold">
-            {t(($) => $.mika_setup.title)}
-          </h2>
-          <p className="mt-1 text-body leading-relaxed text-muted-foreground">
-            {t(($) => $.mika_setup.description)}
-          </p>
-        </div>
-        <Button className="shrink-0" onClick={() => setOpen(true)}>
-          {t(($) => $.mika_setup.action)}
-        </Button>
-      </div>
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-[480px]">
-          <DialogHeader>
-            <DialogTitle>{t(($) => $.mika_setup.dialog_title)}</DialogTitle>
-          </DialogHeader>
-
-          <MikaRuntimeChoice
-            runtimes={runtimes}
-            runtimesLoading={runtimesLoading}
-            currentUserId={currentUserId}
-            value={value}
-            onChange={setChoice}
-            disabled={bootstrapMika.isPending}
-          />
-
-          <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setOpen(false)}
-              disabled={bootstrapMika.isPending}
-            >
-              {t(($) => $.mika_setup.cancel)}
-            </Button>
-            <Button
-              onClick={handleStart}
-              disabled={!runtimeId || bootstrapMika.isPending}
-            >
-              {bootstrapMika.isPending && (
-                <Loader2 aria-hidden className="size-4 animate-spin" />
-              )}
-              {t(($) => $.mika_setup.action)}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
 }
 
 function OrphanRuntimeProfiles({

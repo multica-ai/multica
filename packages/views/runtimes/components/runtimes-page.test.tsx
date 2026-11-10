@@ -5,7 +5,6 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { runtimeProfileListOptions } from "@multica/core/runtimes";
 import { qoderOptions, type QoderConnection } from "@multica/core/runtimes/qoder";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
@@ -33,13 +32,8 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     runtimeDetail: (id: string) => `/runtimes/${id}`,
   }),
-  useRequiredWorkspaceSlug: () => "workspace-test",
 }));
 vi.mock("@multica/core/realtime", () => ({ useWSEvent: () => {} }));
-vi.mock("@multica/core/onboarding", () => ({
-  memberNeedsMikaSetup: () => false,
-  useBootstrapMika: () => ({ isPending: false, mutateAsync: vi.fn() }),
-}));
 vi.mock("../../navigation", () => ({
   AppLink: ({ href, children, ...props }: { href: string; children: ReactNode }) => (
     <a href={href} {...props}>
@@ -119,7 +113,6 @@ function renderPage({
   qc.setQueryData(agentListOptions(WS).queryKey, []);
   qc.setQueryData(memberListOptions(WS).queryKey, []);
   qc.setQueryData(agentTaskSnapshotOptions(WS).queryKey, []);
-  qc.setQueryData(chatSessionsOptions(WS).queryKey, []);
   qc.setQueryData(qoderOptions(WS).queryKey, connection);
   return render(
     <QueryClientProvider client={qc}>

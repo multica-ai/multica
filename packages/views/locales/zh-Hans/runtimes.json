@@ -70,14 +70,6 @@
       "offline": "离线"
     }
   },
-  "mika_setup": {
-    "title": "运行时已准备好，和 Mika 开始。",
-    "description": "让 Mika 帮你安排任务和协调智能体。",
-    "action": "和 Mika 开始",
-    "failed": "无法启动 Mika",
-    "dialog_title": "让 Mika 在哪台机器上运行？",
-    "cancel": "取消"
-  },
   "machine": {
     "search_placeholder": "搜索机器...",
     "filters": {
