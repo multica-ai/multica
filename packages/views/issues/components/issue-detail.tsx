@@ -133,6 +133,12 @@ import {
 } from "./deliverables/deliverable-details";
 import { collectDeliverableFiles } from "@multica/core/attachments/deliverables";
 import { AttachmentVersionsProvider } from "./deliverables/attachment-versions";
+import {
+  OpenDeliverableOnLoad,
+  useCopyDeliverableLink,
+  useDeliverableLinkSession,
+  useFreshTimelineRead,
+} from "./deliverables/deliverable-link";
 import { useQuery } from "@tanstack/react-query";
 import { useIssueReadState } from "@multica/core/issues/read-state";
 import { useAuthStore } from "@multica/core/auth";
@@ -1207,6 +1213,17 @@ interface IssueDetailProps {
   readsInbox?: boolean;
   /** The route already completed the authoritative detail read this mount. */
   skipInitialRefetch?: boolean;
+  /**
+   * Route only: the file name of a `/deliverables/<name>` link. Opens the
+   * newest upload of that deliverable once the timeline has loaded.
+   */
+  openDeliverable?: string;
+  /**
+   * Route only: the deliverable link has been dealt with (the viewer it
+   * opened closed, or the file is missing); the route puts the plain issue
+   * address back.
+   */
+  onDeliverableLinkDone?: () => void;
 }
 
 /**
@@ -1400,7 +1417,7 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, highlightAppRequestId, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, highlightAppRequestId, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -1647,11 +1664,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const descriptionSourceId = `description:${id}`;
   const descriptionAnnotations = useCommentAnnotations({
     issueId: id,
-    reply: {
-      onSubmit: (_sourceId, content, suppressAgentIds, steerTaskIds) => submitComment(content, undefined, suppressAgentIds, steerTaskIds),
-      onAccepted: (commentId) => scrollToTimelineBottom(commentId),
-      steerByDefault: (task) => !task.trigger_comment_id,
-    },
     draftKey: `new:${id}`,
     sources: [{ id: descriptionSourceId, name: "Description", revision: issue?.revision }],
     enabled: !!user && !!issue,
@@ -1721,7 +1733,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   // Custom hooks — encapsulate timeline, reactions, subscribers
   const {
-    timeline, loading: timelineLoading,
+    timeline, loading: timelineLoading, dataUpdatedAt: timelineUpdatedAt,
     submitComment, submitReply,
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id);
@@ -2615,11 +2627,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     jumpToThread(locateRootRequest);
   }, [locateRootRequest, jumpToThread]);
 
+  // Identifier form, like the issue's own copy link: a pasted link should say
+  // which issue it points at.
+  const copyDeliverableLink = useCopyDeliverableLink(issue?.identifier ?? id);
   const describeDeliverable = useDeliverableDetails({
     files: deliverableFiles,
     commentById,
     onLocate: locateOrigin,
+    onCopyLink: copyDeliverableLink,
   });
+  const deliverableLinkRead = useFreshTimelineRead(id, openDeliverable, timelineUpdatedAt);
+  // A `/deliverables/<name>` link that opened the viewer gives the address
+  // back once the reader is done with the file, through the viewer and the
+  // overview alike. Viewer sessions the reader opens themselves leave the
+  // address alone.
+  const deliverableLink = useDeliverableLinkSession(onDeliverableLinkDone);
+  const onDeliverableLinkDoneStable = useCallback(() => {
+    onDeliverableLinkDone?.();
+  }, [onDeliverableLinkDone]);
   // The overview remembers the file the viewer was showing, so `G` can go
   // back to it.
   const [overview, setOverview] = useState<{ open: boolean; returnKey: string | null }>({
@@ -2630,14 +2655,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     setOverview({ open: false, returnKey: null });
   }, [id]);
   const openOverview = useCallback(() => setOverview({ open: true, returnKey: null }), []);
+  const { onOverviewOpenedFromViewer, onOverviewClosed } = deliverableLink;
   const openOverviewFromViewer = useCallback(
-    (key: string) => setOverview({ open: true, returnKey: key }),
-    [],
+    (key: string) => {
+      onOverviewOpenedFromViewer();
+      setOverview({ open: true, returnKey: key });
+    },
+    [onOverviewOpenedFromViewer],
   );
-  const closeOverview = useCallback(
-    () => setOverview((current) => ({ ...current, open: false })),
-    [],
-  );
+  const closeOverview = useCallback(() => {
+    setOverview((current) => ({ ...current, open: false }));
+    onOverviewClosed();
+  }, [onOverviewClosed]);
 
   const handleDescriptionUpload = useCallback(
     async (file: File) => {
@@ -3166,7 +3195,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
       {/* Deliverables — the files this issue's comments delivered. Hidden
           while there are none. */}
-      <DeliverablesSection files={deliverableFiles} onOpenOverview={openOverview} />
+      <DeliverablesSection
+        files={deliverableFiles}
+        onOpenOverview={openOverview}
+        onCopyLink={copyDeliverableLink}
+      />
 
       {/* Apps the issue's runs used. Hidden until one makes a call. */}
       <IssueAppsSection issueId={id} />
@@ -4071,6 +4104,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               key={id}
               issueId={id}
               onSubmit={submitComment}
+              annotationComposer={descriptionAnnotations.composer}
               onAccepted={scrollToTimelineBottom}
               onEditAnnotation={(annotationId) => descriptionAnnotations.editAnnotation(annotationId, true)}
             />
@@ -4123,8 +4157,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       items={previewSequence}
       describeItem={describeDeliverable}
       onOpenOverview={openOverviewFromViewer}
+      onOpened={deliverableLink.onViewerOpened}
+      onClosed={deliverableLink.onViewerClosed}
     >
       <AttachmentVersionsProvider files={deliverableFiles}>{layout}</AttachmentVersionsProvider>
+      {openDeliverable && (
+        <OpenDeliverableOnLoad
+          name={openDeliverable}
+          files={deliverableFiles}
+          read={deliverableLinkRead}
+          onOpenedInViewer={deliverableLink.onOpenedInViewer}
+          onDone={onDeliverableLinkDoneStable}
+        />
+      )}
       <DeliverablesOverview
         open={overview.open}
         onClose={closeOverview}
@@ -4133,6 +4178,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         files={deliverableFiles}
         commentById={commentById}
         onLocate={locateOrigin}
+        onCopyLink={copyDeliverableLink}
       />
     </PreviewSequenceProvider>
   );

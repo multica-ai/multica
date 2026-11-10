@@ -8,11 +8,16 @@
 // JSX. When the Button is the `render` element of a trigger, the trigger's own
 // props and children reach the button too, so they count as well.
 //
+// A native `<button>` has no size to go by, so it is checked only when all of
+// its content is icons imported from @multica/ui/icons, possibly chosen by a
+// conditional. Any other child could render text, so the button is left alone.
+//
 // Registered by the shared React config, so every package that extends it
 // gets the rule without repeating it.
 
 const NAME_ATTRIBUTES = new Set(["aria-label", "aria-labelledby"]);
 const SR_ONLY = /(^|\s)sr-only(\s|$)/;
+const ICONS_MODULE = "@multica/ui/icons";
 
 function attributeName(attr) {
   return attr.type === "JSXAttribute" && attr.name.type === "JSXIdentifier"
@@ -98,10 +103,71 @@ function isNamed(element) {
   return !!host && (namesItself(host.openingElement) || host.children.some(mayRenderText));
 }
 
+function importedIcons(program) {
+  const names = new Set();
+  const namespaces = new Set();
+  for (const statement of program.body) {
+    if (statement.type !== "ImportDeclaration" || statement.source.value !== ICONS_MODULE) continue;
+    for (const specifier of statement.specifiers) {
+      (specifier.type === "ImportNamespaceSpecifier" ? namespaces : names).add(specifier.local.name);
+    }
+  }
+  return { names, namespaces };
+}
+
+function isIcon(opening, icons) {
+  const { name } = opening;
+  if (name.type === "JSXIdentifier") return icons.names.has(name.name);
+  return (
+    name.type === "JSXMemberExpression" &&
+    name.object.type === "JSXIdentifier" &&
+    icons.namespaces.has(name.object.name)
+  );
+}
+
+// "icon" when the content shows only icons, "empty" when it shows nothing,
+// "other" when it may show anything else.
+function iconContent(nodes, icons) {
+  const kinds = nodes.map((node) => contentKind(node, icons));
+  if (kinds.includes("other")) return "other";
+  return kinds.includes("icon") ? "icon" : "empty";
+}
+
+function contentKind(node, icons) {
+  switch (node.type) {
+    case "JSXText":
+      return /\S/.test(node.value) ? "other" : "empty";
+    case "JSXElement":
+      return isIcon(node.openingElement, icons) ? "icon" : "other";
+    case "JSXFragment":
+      return iconContent(node.children, icons);
+    case "JSXExpressionContainer":
+      return contentKind(node.expression, icons);
+    case "JSXEmptyExpression":
+      return "empty";
+    case "ConditionalExpression":
+      return iconContent([node.consequent, node.alternate], icons);
+    case "LogicalExpression":
+      return iconContent(node.operator === "&&" ? [node.right] : [node.left, node.right], icons);
+    case "Literal":
+      return node.value === null || typeof node.value === "boolean" || node.value === "" ? "empty" : "other";
+    case "Identifier":
+      return node.name === "undefined" ? "empty" : "other";
+    default:
+      return "other";
+  }
+}
+
+function isIconOnlyNativeButton(element, icons) {
+  const host = renderHost(element);
+  const content = host ? [...element.children, ...host.children] : element.children;
+  return iconContent(content, icons) === "icon";
+}
+
 const iconButtonName = {
   meta: {
     type: "problem",
-    docs: { description: "Require an accessible name on icon-size Buttons." },
+    docs: { description: "Require an accessible name on icon-size Buttons and icon-only native buttons." },
     schema: [],
     messages: {
       unnamed:
@@ -109,11 +175,20 @@ const iconButtonName = {
     },
   },
   create(context) {
+    let icons = { names: new Set(), namespaces: new Set() };
     return {
+      Program(program) {
+        icons = importedIcons(program);
+      },
       JSXElement(node) {
         const opening = node.openingElement;
-        if (opening.name.type !== "JSXIdentifier" || opening.name.name !== "Button") return;
-        if (!isIconSize(opening) || isNamed(node)) return;
+        if (opening.name.type !== "JSXIdentifier") return;
+        if (opening.name.name === "Button") {
+          if (!isIconSize(opening)) return;
+        } else if (opening.name.name !== "button" || !isIconOnlyNativeButton(node, icons)) {
+          return;
+        }
+        if (isNamed(node)) return;
         context.report({ node: opening, messageId: "unnamed" });
       },
     };

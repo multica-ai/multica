@@ -5,6 +5,7 @@ import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { projectKeys } from "@multica/core/projects/queries";
+import { useModalStore } from "@multica/core/modals";
 import userEvent from "@testing-library/user-event";
 import type { Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -281,6 +282,21 @@ beforeEach(() => {
 afterEach(() => {
   onlineManager.setOnline(true);
   qc.clear();
+  useModalStore.getState().close();
+});
+
+describe("ProjectDetail rename", () => {
+  it("opens the rename dialog with the current name from the header menu", async () => {
+    const user = userEvent.setup();
+    renderProjectDetail();
+
+    await user.click(screen.getByRole("button", { name: "Rename project" }));
+
+    expect(useModalStore.getState()).toMatchObject({
+      modal: "project-rename",
+      data: { projectId: "project-1", title: "Launch Plan" },
+    });
+  });
 });
 
 describe("ProjectDetail lead permissions", () => {

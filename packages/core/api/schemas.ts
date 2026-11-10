@@ -918,6 +918,8 @@ export interface AppConfigResponse {
   daemon_app_url?: string;
   daemon_setup_target?: "cloud" | "self_host" | "unknown";
   workspace_creation_disabled?: boolean;
+  /** DISABLE_STAR_PROMPT on the server. Absent means the prompt is allowed. */
+  star_prompt_disabled?: boolean;
   /** Whether this deployment offers the self-hosted Git provider integration
    * (self-host only; off on the managed cloud). Absent/false hides the whole
    * Settings → Integrations "Git providers" section. */
@@ -1205,6 +1207,7 @@ export const AppConfigSchema = z.object({
   daemon_app_url: OptionalStringSchema,
   daemon_setup_target: z.enum(["cloud", "self_host", "unknown"]).optional().catch("unknown"),
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
+  star_prompt_disabled: BooleanWithDefaultSchema(false).optional(),
   vcs_integration_available: BooleanWithDefaultSchema(false).optional(),
   feature_flags: FeatureFlagsSchema,
   local_worktree_supported: BooleanWithDefaultSchema(false),
@@ -1224,6 +1227,7 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   daemon_app_url: "",
   daemon_setup_target: "unknown",
   workspace_creation_disabled: false,
+  star_prompt_disabled: false,
   vcs_integration_available: false,
   // Fail closed: an unreadable config must not look like a server that
   // validates execution_mode.
@@ -2781,6 +2785,10 @@ export const UserSchema = z.object({
   // No default: absence is the "server cannot track" signal. A malformed
   // value degrades to that state instead of discarding the whole user.
   whats_new_seen_version: z.string().nullable().optional().catch(undefined),
+  // Same "absent means unsupported" contract as above.
+  star_prompt_shown_count: z.number().int().nonnegative().optional().catch(undefined),
+  star_prompt_last_shown_at: z.string().nullable().optional().catch(undefined),
+  star_prompt_starred_at: z.string().nullable().optional().catch(undefined),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();
@@ -4110,6 +4118,7 @@ const AppConnectionSchema = z.object({
   connected_by: appNullableString,
   connected_at: z.string().default(""),
   last_used_at: appNullableString,
+  actions_blocked: z.boolean().default(false).catch(false),
 }).loose();
 
 const AgentAppSchema = z.object({

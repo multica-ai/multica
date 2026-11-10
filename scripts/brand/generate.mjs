@@ -76,10 +76,19 @@ try {
     await png(join(iconset, `icon_${name}.png`), [S, S], macOS(S));
   }
 
+  // OG card: the wordmark and headline beside a team of thin stars, one per
+  // teammate. The lit one is the newest to join.
+  const TEAM = { cols: 3, rows: 4, size: 96, gap: 36, right: 76, lit: 7 };
+  const pitch = TEAM.size + TEAM.gap;
+  const teamLeft = 1200 - TEAM.right - (TEAM.cols * pitch - TEAM.gap);
+  const teamTop = (630 - (TEAM.rows * pitch - TEAM.gap)) / 2;
+  const thinStar = starPath(STAR_GRAPHIC_STROKE);
+  const team = Array.from({ length: TEAM.cols * TEAM.rows }, (_, i) =>
+    `<svg viewBox="0 0 100 100" style="position:absolute;width:${TEAM.size}px;height:${TEAM.size}px;left:${teamLeft + (i % TEAM.cols) * pitch}px;top:${teamTop + Math.floor(i / TEAM.cols) * pitch}px"><path fill="${i === TEAM.lit ? PAPER : "#2c2c30"}" d="${thinStar}"/></svg>`).join("");
   await png(repo("apps/web/app/opengraph-image.png"), [1200, 630], `<div style="position:relative;width:1200px;height:630px;background:${INK};overflow:hidden;font-family:Inter">
-  <svg viewBox="0 0 100 100" style="position:absolute;width:780px;height:780px;right:-250px;bottom:-90px"><path fill="#1f1f22" d="${starPath(STAR_GRAPHIC_STROKE)}"/></svg>
-  <div style="position:absolute;left:64px;top:98px;height:52px">${wordmark(PAPER, ` height="52"`)}</div>
-  <div style="position:absolute;left:64px;bottom:76px;color:#fff;font:600 66px/1.12 Inter;letter-spacing:-.02em">People and agents,<br>working as one team.</div></div>`, { alpha: false });
+  ${team}
+  <div style="position:absolute;left:64px;top:72px;height:52px">${wordmark(PAPER, ` height="52"`)}</div>
+  <div style="position:absolute;left:64px;bottom:70px;color:#fff;font:600 60px/1.12 Inter;letter-spacing:-.02em;white-space:nowrap">People and agents,<br>working as one team.</div></div>`, { alpha: false });
   await page.close();
 
   // README hero: the write-on from MulticaWordmark (timings in multica-wordmark.tsx,

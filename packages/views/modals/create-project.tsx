@@ -507,6 +507,11 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                     type="button"
                     onClick={() => setIsExpanded(!isExpanded)}
                     className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                    aria-label={
+                      isExpanded
+                        ? t(($) => $.common.collapse_tooltip)
+                        : t(($) => $.common.expand_tooltip)
+                    }
                   >
                     {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
                   </button>
@@ -525,6 +530,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                     type="button"
                     onClick={onClose}
                     className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                    aria-label={t(($) => $.common.close)}
                   >
                     <XIcon className="size-4" />
                   </button>
@@ -948,6 +954,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                                 if (editingRefFor === url) setEditingRefFor(null);
                               }}
                               className="shrink-0 text-muted-foreground hover:text-foreground"
+                              aria-label={t(($) => $.create_project.repos_remove_aria, {
+                                repo: githubShortLabel(url),
+                              })}
                             >
                               <XIcon className="size-3" />
                             </button>

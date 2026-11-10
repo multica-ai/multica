@@ -1,46 +1,25 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
-import type {
-  AppAccountScope,
-  AppActionClass,
-  AppActionPolicy,
-  AppCatalogMode,
-  UpdateAgentAppsRequest,
-} from "../types";
+import type { AppAccountScope, AppActionClass, UpdateAgentAppsRequest } from "../types";
 import { workspaceKeys } from "../workspace/queries";
 import { connectedAppsKeys } from "./queries";
 
-export function useUpdateAppSettings() {
+/** Explicitly replaces saved restrictions; never runs automatically on load. */
+export function useRestoreAppAccess() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: (body: { catalog_mode: AppCatalogMode; allowed_toolkits?: string[] }) =>
-      api.updateAppSettings(body),
-    onSettled: () => qc.invalidateQueries({ queryKey: connectedAppsKeys.all(wsId) }),
-  });
-}
-
-export function useUpdateAppRules(slug: string, scope: AppAccountScope) {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  return useMutation({
-    mutationFn: (rules: { action_class: AppActionClass; policy: AppActionPolicy }[]) =>
-      api.updateAppRules(slug, scope, rules),
-    onSuccess: (data) => {
-      if (data) qc.setQueryData(connectedAppsKeys.rules(wsId, slug, scope), data.rules);
-      else void qc.invalidateQueries({ queryKey: connectedAppsKeys.rules(wsId, slug, scope) });
+    mutationFn: async (target: { slug: string; scope: AppAccountScope } | { catalog: true }) => {
+      if ("catalog" in target) {
+        await api.updateAppSettings({ catalog_mode: "all", allowed_toolkits: [] });
+      } else {
+        await api.updateAppRules(target.slug, target.scope,
+          (["read", "write", "send", "delete", "share"] as AppActionClass[])
+            .map((action_class) => ({ action_class, policy: "allow" })));
+      }
     },
-  });
-}
-
-export function useUpdateAppToolClass(slug: string) {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  return useMutation({
-    mutationFn: ({ tool, actionClass }: { tool: string; actionClass: AppActionClass | null }) =>
-      api.updateAppToolClass(slug, tool, actionClass),
-    onSettled: () => qc.invalidateQueries({ queryKey: connectedAppsKeys.tools(wsId, slug) }),
+    onSettled: () => qc.invalidateQueries({ queryKey: connectedAppsKeys.all(wsId) }),
   });
 }
 

@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "在桌面端打开"
+  },
+  "desktop": {
+    "link_other_instance": "桌面端连接的是另一个 Multica 实例。",
+    "link_workspace_unavailable": "此工作区在桌面端不可用。"
+  },
   "inline_run": {
     "label": "{{name}} 的运行",
     "stop": "停止",
@@ -727,16 +734,17 @@
     "restart_failed": "没能停止当前运行，消息还没有发送。"
   },
   "reply": {
+    "recipients_changed": "回复目标已变化。请重新确认接收者后再发送。",
     "placeholder": "回复...",
     "annotations": {
-      "direct_reply": "回复",
-      "direct_comment": "发表评论",
-      "direct_target_deleted": "回复目标已删除。请先复制意见，再选择其他评论。",
-      "copy_note": "复制意见",
-      "note_copied": "意见已复制",
-      "note_copy_failed": "复制失败，请选中意见文字手动复制。",
+      "send_all": "全部发送",
+      "send_with_annotations_and_body": "将连同下方 {{count}} 条批注和正文一起发送",
+      "send_with_annotations": "将连同下方 {{count}} 条批注一起发送",
+      "send_with_body": "将连同下方正文一起发送",
       "confirm_add": "添加批注",
       "save": "保存批注",
+      "confirm_add_short": "添加",
+      "save_short": "保存",
       "add_comment": "加入评论",
       "add": "加入回复",
       "note_label": "批注",
@@ -1463,6 +1471,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "定位到评论",
     "locate_description": "定位到描述",
+    "copy_link": "复制最新版链接",
+    "not_found": "这个任务里没有名为“{{name}}”的产物",
+    "link_load_failed": "没能加载这个任务的产物，打不开“{{name}}”。刷新页面重试。",
     "version_label": "第 {{version}} 版，共 {{total}} 版",
     "version_of": "v{{version}}（共 {{total}} 版）",
     "info_source": "来源",
@@ -1662,7 +1673,6 @@
       "brief_header": "这次运行收到的工作流说明"
     },
     "detail": {
-      "follows_project": "（跟随项目）",
       "card_title": "「{{workflow}}」· 跟随项目「{{project}}」"
     },
     "list_separator": "、",

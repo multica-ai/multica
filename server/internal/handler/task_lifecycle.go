@@ -18,7 +18,8 @@ import (
 // it owns. It atomically fails any dispatched/running tasks the server still
 // believes belong to that runtime — those are the tasks the previous daemon
 // process was running when it died — and triggers MaybeRetryFailedTask for
-// each so the user sees a fresh attempt instead of a permanently stuck row.
+// each so retry-safe work gets a fresh attempt. Started Muse executions retain
+// a cleanup fence because their workers can survive the daemon process.
 //
 // This is the targeted fix for "issue stuck at in_progress when daemon
 // restarts mid-task": the runtime heartbeat sweeper takes up to 75s + the

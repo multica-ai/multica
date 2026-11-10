@@ -30,6 +30,7 @@ import { DiagnosticRouteReporter } from "./platform/diagnostic-route-reporter";
 import { flushFreezeBreadcrumb } from "./freeze-flush";
 import { DesktopAuthSessionBridge } from "./platform/auth-session-bridge";
 import { WorkspaceWindowBridge } from "./platform/workspace-window-bridge";
+import { IssueDeepLinkBridge } from "./platform/issue-deep-link-bridge";
 import {
   launchWorkspaceSlug,
   otherWindowWorkspaces,
@@ -485,6 +486,7 @@ export default function App() {
           <DesktopAuthSessionBridge />
           {windowContext.kind === "main" && <DiagnosticRouteReporter />}
           {windowContext.kind === "main" && <WorkspaceWindowBridge />}
+          {windowContext.kind === "main" && <IssueDeepLinkBridge />}
           {windowContext.kind === "main" && (
             <DesktopClientUsageReporter
               apiUrl={runtimeConfigResult.config.apiUrl}

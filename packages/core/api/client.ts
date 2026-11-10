@@ -929,9 +929,14 @@ export class ApiClient {
    * (MUL-7028). Comparing against the credential in use now is what tells the
    * two apart: a genuinely expired session still has the same token stored,
    * so the real case is unaffected.
+   *
+   * "Replaced" includes going from no credential to one. A flow that was
+   * already running at logout can still send a bearer-less request, and its
+   * 401 may land after the user has signed in again (#10190). Cookie mode is
+   * null on both sides, so its expiries still end the session.
    */
   private handleUnauthorized(credentialUsed: string | null) {
-    if (credentialUsed !== null && this.getToken() !== credentialUsed) {
+    if (this.getToken() !== credentialUsed) {
       this.logger.info("ignoring 401 for a credential that has since been replaced");
       return;
     }
@@ -1156,6 +1161,21 @@ export class ApiClient {
     });
   }
 
+  /** Rejects with 409 when the server decides the prompt is not due. */
+  async claimStarPromptShowing(): Promise<User> {
+    const raw = await this.fetch<unknown>("/api/me/star-prompt/claim", { method: "POST" });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "POST /api/me/star-prompt/claim",
+    });
+  }
+
+  async markStarPromptStarred(): Promise<User> {
+    const raw = await this.fetch<unknown>("/api/me/star-prompt/starred", { method: "POST" });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "POST /api/me/star-prompt/starred",
+    });
+  }
+
   async updateMe(data: UpdateMeRequest): Promise<User> {
     const raw = await this.fetch<unknown>("/api/me", {
       method: "PATCH",
@@ -1175,6 +1195,8 @@ export class ApiClient {
     if (params?.q?.trim()) search.set("q", params.q.trim());
     if (params?.status) search.set("status", params.status);
     if (params?.statuses?.length) search.set("statuses", params.statuses.join(","));
+    if (params?.status_category) search.set("status_category", params.status_category);
+    if (params?.status_categories?.length) search.set("status_categories", params.status_categories.join(","));
     if (params?.priority) search.set("priority", params.priority);
     if (params?.priorities?.length) search.set("priorities", params.priorities.join(","));
     if (params?.assignee_id) search.set("assignee_id", params.assignee_id);

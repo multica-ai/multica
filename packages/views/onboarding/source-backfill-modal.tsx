@@ -22,6 +22,7 @@ import {
   type Source,
 } from "@multica/core/onboarding";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { useSessionPromptStore } from "@multica/core/session-prompt";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -124,6 +125,10 @@ export function SourceBackfillModal() {
     }, 700);
     return () => window.clearTimeout(timer);
   }, [user, shouldPrompt]);
+
+  useEffect(() => {
+    if (open) useSessionPromptStore.getState().markPrompted();
+  }, [open]);
 
   return (
     <Dialog
