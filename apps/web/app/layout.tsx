@@ -61,22 +61,16 @@ const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
   preload: false,
 });
-// Editorial serif used for onboarding headlines. Italic support for h1 em
-// accents (e.g. "...on one shared board."). Only loaded on routes that
-// render the font; layout-shift-prevention handled by next/font's synthetic
-// fallback metrics, same as Inter.
+// Editorial serif used for onboarding headlines and the Appearance "Serif"
+// font. Italic support for h1 em accents (e.g. "...on one shared board.").
+// Only loaded on routes that render the font; layout-shift-prevention handled
+// by next/font's synthetic fallback metrics, same as Inter. No `fallback`:
+// next/font writes it into the variable, and the stacks built on it in
+// ./globals.css differ in whether they may end with a generic family.
 const sourceSerif = Source_Serif_4({
   subsets: ["latin"],
   style: ["normal", "italic"],
-  variable: "--font-serif",
-  fallback: [
-    "ui-serif",
-    "Iowan Old Style",
-    "Apple Garamond",
-    "Baskerville",
-    "Times New Roman",
-    "serif",
-  ],
+  variable: "--font-source-serif",
 });
 
 export const viewport: Viewport = {

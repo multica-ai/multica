@@ -34,10 +34,15 @@
     "Noto Sans CJK KR", sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Consolas,
     monospace;
+  --font-serif: var(--font-source-serif), ui-serif, "Iowan Old Style", "Apple Garamond",
+    Baskerville, "Times New Roman", serif;
   /* Latin-only faces the Appearance settings can pick, over the next/font
-     families from app/layout.tsx. Desktop defines the same names. */
+     families from app/layout.tsx. Desktop defines the same names. The CJK
+     font follows them, so they name families only: a generic family would
+     match Han first. */
   --font-ui-inter: var(--font-inter);
-  --font-ui-serif: var(--font-serif);
+  --font-ui-serif: var(--font-source-serif), "Iowan Old Style", "Apple Garamond",
+    Baskerville, "Times New Roman";
   --font-ui-mono: var(--font-geist-mono);
   --font-code-jetbrains: var(--font-jetbrains-mono);
 }
