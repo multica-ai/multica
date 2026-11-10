@@ -820,22 +820,25 @@
       "queued_prefix": "En cola {{when}}"
     },
     "connected_apps": {
-      "subtitle": "Aplicaciones que puede usar este agente con la cuenta del equipo o la de quien inicia la ejecución.",
       "loading": "Cargando aplicaciones…",
       "load_failed": "No se pudieron cargar las aplicaciones de este agente.",
-      "empty": "Aún no hay aplicaciones.",
-      "add_placeholder": "Añadir una aplicación…",
-      "account": "Cuenta",
+      "empty": "No hay apps conectadas disponibles.",
       "level": "Nivel",
-      "remove": "Eliminar {{app}}",
       "team_connected": "Cuenta del equipo conectada",
       "team_missing": "Cuenta del equipo sin conectar",
       "personal_connected": "Tu cuenta está conectada",
       "personal_missing": "No has conectado esta aplicación",
       "team_admin_only": "Solo los administradores del espacio de trabajo pueden dar a un agente acceso a una cuenta del equipo.",
-      "team_shared_warning": "Cualquier persona que pueda ejecutar este agente usará la cuenta del equipo en estas aplicaciones.",
+      "team_shared_warning": "Cualquiera que pueda ejecutar este agente podrá usar esta cuenta de equipo a través de él.",
       "manage_link": "Gestionar cuentas en Ajustes → Aplicaciones conectadas",
-      "save_failed_toast": "No se pudo guardar. Inténtalo de nuevo"
+      "save_failed_toast": "No se pudo guardar. Inténtalo de nuevo",
+      "team_help": "Cuenta compartida del espacio de trabajo, conectada por administradores.",
+      "personal_help": "Cada ejecución usa la cuenta de quien la inicia. Cada persona debe conectar su propia cuenta.",
+      "available_accounts": "Disponible: {{accounts}}",
+      "enable": "Activar {{app}}",
+      "account_for": "Cuenta de {{app}}",
+      "connect_hint": "¿No encuentras la app que necesitas? Conecta una cuenta en Ajustes.",
+      "available_personal": "Tu cuenta"
     }
   },
   "char_counter": {

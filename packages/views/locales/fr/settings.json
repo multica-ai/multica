@@ -1485,7 +1485,6 @@
   },
   "connected_apps": {
     "description": "Les comptes que vos agents utilisent pour accéder aux apps externes. Les actions autorisées sont exécutées immédiatement.",
-    "add_app": "Ajouter une app",
     "loading": "Chargement des apps…",
     "load_failed": "Impossible de charger les apps.",
     "team_title": "Comptes d'équipe",
@@ -1516,17 +1515,18 @@
     "toast_disconnected": "Déconnecté",
     "toast_failed": "Une erreur est survenue. Veuillez réessayer.",
     "add": {
-      "title": "Ajouter une app",
-      "description": "Connectez un compte pour l'équipe ou pour vous. Les agents qui l'utilisent se choisissent sur la page Apps de chaque agent.",
       "search": "Rechercher une app…",
       "empty": "Aucune app ne correspond.",
       "curated": "Sélection",
       "recommended_team": "Souvent un compte d'équipe",
       "recommended_personal": "Souvent un compte personnel",
-      "connect_team": "Connecter pour l'équipe",
+      "connect_team": "Connecter un compte d’équipe",
       "connect_personal": "Connecter mon compte",
       "connecting": "Connexion…",
-      "connected": "Connecté"
+      "connected": "Connecté",
+      "connect": "Connecter",
+      "team_description": "Connectez un compte partagé de l’espace de travail. Autorisez son utilisation sur la page Apps de chaque agent.",
+      "personal_description": "Connectez votre compte personnel. Les apps utilisant le compte de la personne qui déclenche l’exécution l’utilisent lorsque vous lancez une exécution."
     },
     "disconnect_team": {
       "title": "Déconnecter le compte {{app}} de l'équipe ?",

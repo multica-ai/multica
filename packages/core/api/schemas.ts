@@ -58,6 +58,7 @@ import type {
   GroupedIssuesResponse,
   GitHubConnectResponse,
   IssuePullRequestsResponse,
+  IssueEnvironmentsResponse,
   InboxItem,
   InboxWorkspaceUnread,
   IssueUnread,
@@ -463,6 +464,44 @@ export const IssuePullRequestsResponseSchema = z.object({
 export const EMPTY_ISSUE_PULL_REQUESTS_RESPONSE: IssuePullRequestsResponse = {
   pull_requests: [],
   auto_complete: null,
+};
+
+// One malformed environment drops out of the list instead of taking the
+// whole section with it; an unknown state from a newer server reads as
+// unreachable, which offers no Open action.
+export const IssueEnvironmentSchema = z.object({
+  id: z.string(),
+  issue_id: z.string(),
+  task_id: z.string(),
+  runtime_id: z.string().nullable().optional().default(null),
+  agent_id: z.string().nullable().optional().default(null),
+  source: z.enum(["config", "detected"]).catch("detected"),
+  name: z.string(),
+  label: z.string().optional().default(""),
+  url: z.string().optional().default(""),
+  port: z.number().nullable().optional().default(null),
+  state: z.enum(["starting", "running", "exited", "stopped", "unreachable"]).catch("unreachable"),
+  detail: z.string().optional().default(""),
+  started_at: z.string(),
+  expires_at: z.string().nullable().optional().default(null),
+  last_seen_at: z.string(),
+  ended_at: z.string().nullable().optional().default(null),
+}).loose();
+
+export const IssueEnvironmentsResponseSchema = z.object({
+  environments: z
+    .array(z.unknown())
+    .default([])
+    .transform((items) =>
+      items.flatMap((item) => {
+        const parsed = IssueEnvironmentSchema.safeParse(item);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    ),
+}).loose();
+
+export const EMPTY_ISSUE_ENVIRONMENTS_RESPONSE: IssueEnvironmentsResponse = {
+  environments: [],
 };
 
 // Label responses are consumed by settings tables and resource pickers. Keep

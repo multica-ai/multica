@@ -659,22 +659,25 @@
       "queued_prefix": "{{when}} に待機開始"
     },
     "connected_apps": {
-      "subtitle": "このエージェントが使えるアプリです。チームアカウントか、実行を起動した人のアカウントとして動作します。",
       "loading": "アプリを読み込み中…",
       "load_failed": "このエージェントのアプリを読み込めませんでした。",
-      "empty": "アプリはまだありません。",
-      "add_placeholder": "アプリを追加…",
-      "account": "アカウント",
+      "empty": "接続済みのアプリはありません。",
       "level": "レベル",
-      "remove": "{{app}} を削除",
       "team_connected": "チームアカウント接続済み",
       "team_missing": "チームアカウント未接続",
       "personal_connected": "あなたのアカウントは接続済み",
       "personal_missing": "このアプリはまだ接続していません",
       "team_admin_only": "エージェントにチームアカウントを付与できるのはワークスペース管理者のみです。",
-      "team_shared_warning": "このエージェントを実行できる人は誰でも、これらのアプリをチームアカウントとして使います。",
+      "team_shared_warning": "このエージェントを実行できる人は、このチームアカウントを通じて操作できます。",
       "manage_link": "設定 → 接続済みアプリ でアカウントを管理",
-      "save_failed_toast": "保存できませんでした。もう一度お試しください"
+      "save_failed_toast": "保存できませんでした。もう一度お試しください",
+      "team_help": "管理者が接続する、ワークスペース共有のアカウントです。",
+      "personal_help": "実行を開始した人のアカウントを使います。各自で接続する必要があります。",
+      "available_accounts": "利用可能：{{accounts}}",
+      "enable": "{{app}} を有効にする",
+      "account_for": "{{app}} のアカウント",
+      "connect_hint": "必要なアプリがない場合は、設定からアカウントを接続してください。",
+      "available_personal": "自分のアカウント"
     }
   },
   "char_counter": {

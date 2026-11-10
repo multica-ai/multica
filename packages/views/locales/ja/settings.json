@@ -1474,7 +1474,6 @@
   },
   "connected_apps": {
     "description": "エージェントが外部アプリを操作するアカウントです。許可された操作はすぐに実行されます。",
-    "add_app": "アプリを追加",
     "loading": "アプリを読み込み中…",
     "load_failed": "アプリを読み込めませんでした。",
     "team_title": "チームアカウント",
@@ -1504,17 +1503,18 @@
     "toast_disconnected": "接続を解除しました",
     "toast_failed": "問題が発生しました。もう一度お試しください。",
     "add": {
-      "title": "アプリを追加",
-      "description": "チームまたは自分用にアカウントを接続します。どのエージェントが使うかは各エージェントの「アプリ」ページで設定します。",
       "search": "アプリを検索…",
       "empty": "一致するアプリはありません。",
       "curated": "厳選",
       "recommended_team": "通常はチームアカウント",
       "recommended_personal": "通常は個人アカウント",
-      "connect_team": "チーム用に接続",
+      "connect_team": "チームアカウントを接続",
       "connect_personal": "自分のアカウントを接続",
       "connecting": "接続中…",
-      "connected": "接続済み"
+      "connected": "接続済み",
+      "connect": "接続",
+      "team_description": "ワークスペース共有のアカウントを接続します。利用するエージェントは、各エージェントの「アプリ」で設定します。",
+      "personal_description": "自分のアカウントを接続します。「実行者のアカウント」に設定されたアプリは、自分が実行を開始するときにこのアカウントを使います。"
     },
     "disconnect_team": {
       "title": "チームの {{app}} アカウントの接続を解除しますか？",

@@ -188,6 +188,7 @@ import type {
   PluginInstallRequest,
   PluginConfigRequest,
   IssuePullRequestsResponse,
+  IssueEnvironmentsResponse,
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
@@ -493,6 +494,8 @@ import {
   EMPTY_ISSUE_PROPERTIES_RESPONSE,
   EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
   IssuePullRequestsResponseSchema,
+  EMPTY_ISSUE_ENVIRONMENTS_RESPONSE,
+  IssueEnvironmentsResponseSchema,
   ResourceLabelsResponseSchema,
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
@@ -5250,6 +5253,17 @@ export class ApiClient {
       IssuePullRequestsResponseSchema,
       EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
       { endpoint: "GET /api/issues/:id/pull-requests" },
+    );
+  }
+
+  /** Environments the issue's runs started, live ones plus recently ended. */
+  async listIssueEnvironments(issueId: string): Promise<IssueEnvironmentsResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/environments`);
+    return parseWithFallback(
+      raw,
+      IssueEnvironmentsResponseSchema,
+      EMPTY_ISSUE_ENVIRONMENTS_RESPONSE,
+      { endpoint: "GET /api/issues/:id/environments" },
     );
   }
 
