@@ -29,6 +29,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 
 	"golang.org/x/sync/singleflight"
 )
@@ -291,7 +292,7 @@ func validTheme(t Theme) (Theme, bool) {
 	t.Author = strings.TrimSpace(t.Author)
 	t.Description = strings.TrimSpace(t.Description)
 	if !themeID.MatchString(t.ID) || !repoName.MatchString(t.Repo) ||
-		t.Name == "" || len(t.Name) > 60 || t.Author == "" || len(t.Author) > 60 || len(t.Description) > 300 ||
+		t.Name == "" || textLength(t.Name) > 60 || t.Author == "" || textLength(t.Author) > 60 || textLength(t.Description) > 300 ||
 		!versionText.MatchString(t.Version) || !versionText.MatchString(t.Tag) ||
 		!sha256Hex.MatchString(t.Package.SHA256) || t.Package.Size <= 0 || t.Package.Size > MaxPackageBytes {
 		return Theme{}, false
@@ -321,6 +322,12 @@ func validTheme(t Theme) (Theme, bool) {
 	}
 	t.Screenshots = shots
 	return t, true
+}
+
+// textLength counts UTF-16 code units, as the registry's checks do with
+// JavaScript's String length, so a limit means the same on both sides.
+func textLength(s string) int {
+	return len(utf16.Encode([]rune(s)))
 }
 
 func (s *Store) get(ctx context.Context, u *url.URL, limit int64) ([]byte, error) {

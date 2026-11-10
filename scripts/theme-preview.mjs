@@ -32,7 +32,7 @@ function parseArgs(argv) {
 }
 
 async function compileCss() {
-  const require = createRequire(join(repoRoot, "apps/web/package.json"));
+  const require = createRequire(join(repoRoot, "package.json"));
   const postcss = require("postcss");
   const tailwind = require("@tailwindcss/postcss");
   const from = join(repoRoot, "scripts/theme-preview/fixture.css");

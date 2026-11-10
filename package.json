@@ -63,10 +63,12 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
+    "@tailwindcss/postcss": "catalog:",
     "@types/node": "catalog:",
     "@types/pg": "^8.20.0",
     "knip": "^6.32.2",
     "pg": "^8.20.0",
+    "postcss": "catalog:",
     "turbo": "^2.5.4",
     "typescript": "catalog:"
   }

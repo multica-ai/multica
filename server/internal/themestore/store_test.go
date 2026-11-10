@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -222,6 +223,48 @@ func TestValidThemeRejectsMalformedEntries(t *testing.T) {
 		if _, ok := validTheme(theme); ok {
 			t.Errorf("%s: malformed entry accepted", name)
 		}
+	}
+}
+
+func TestValidThemeCountsCharactersNotBytes(t *testing.T) {
+	r := newRegistry(t)
+	raw, _ := json.Marshal(r.entry("https://registry.test"))
+	var theme Theme
+	_ = json.Unmarshal(raw, &theme)
+
+	theme.Name = strings.Repeat("亚麻", 30)
+	theme.Author = strings.Repeat("作者", 30)
+	theme.Description = strings.Repeat("温暖纸色与柔和的文字。", 27)
+	if _, ok := validTheme(theme); !ok {
+		t.Fatal("a 60-character Chinese name and author and a 297-character description must be valid")
+	}
+
+	theme.Description = strings.Repeat("温暖纸色与柔和的文字。", 28)
+	if _, ok := validTheme(theme); ok {
+		t.Fatal("a 308-character description must be rejected")
+	}
+
+	theme.Description = ""
+	theme.Name = strings.Repeat("🎨", 31)
+	if _, ok := validTheme(theme); ok {
+		t.Fatal("31 emoji are 62 UTF-16 code units, over the registry's 60")
+	}
+}
+
+func TestThemesKeepsChineseEntries(t *testing.T) {
+	r := newRegistry(t)
+	index := r.index
+	r.index = func(base string) any {
+		v := index(base).(map[string]any)
+		entry := v["themes"].([]any)[0].(map[string]any)
+		entry["name"] = "亚麻"
+		entry["description"] = strings.Repeat("温暖纸色与柔和的文字。", 10)
+		return v
+	}
+	now := time.Unix(0, 0)
+	themes, err := newStore(t, r, &now).Themes(context.Background())
+	if err != nil || len(themes) != 1 || themes[0].Name != "亚麻" {
+		t.Fatalf("Themes = %+v, %v", themes, err)
 	}
 }
 
