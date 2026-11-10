@@ -35,6 +35,7 @@
     "docs": "文件",
     "changelog": "更新日誌",
     "discord": "Discord",
+    "star_on_github": "在 GitHub 上 Star",
     "feedback": "反饋",
     "server_version": "伺服器版本 {{version}}"
   },
@@ -52,6 +53,14 @@
       "open": "前往",
       "learn_more": "了解更多"
     }
+  },
+  "star_prompt": {
+    "title_other": "{{agent}} 已經完成了 {{count}} 個任務",
+    "body": "如果 Multica 幫上了忙，在 GitHub 上按個 Star，能讓更多團隊發現它。",
+    "star": "Star",
+    "star_label": "在 GitHub 上給 Multica 按 Star",
+    "later": "以後再說",
+    "close": "關閉"
   },
   "workspace_loader": {
     "loading_workspace": "正在載入工作區...",
@@ -137,6 +146,7 @@
       "view_actions": "{{name}} 的操作",
       "view_copy_link": "複製連結",
       "view_remove": "從側欄移除",
+      "view_edit": "編輯檢視",
       "view_rename": "重新命名",
       "view_duplicate": "建立副本",
       "view_delete": "刪除檢視"

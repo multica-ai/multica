@@ -195,8 +195,8 @@ func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
 	b.WriteString("\nUse the listed MCP server when the task asks to read or act in one of these apps.\n")
 	if gateway != "" {
 		fmt.Fprintf(&b, "On `%s`, find tools with `apps_search_tools`, read the schema with `apps_get_tool`, then call `apps_run_tool`. "+
-			"When `apps_run_tool` answers `submitted`, the call waits for a person's confirmation: end your turn — you are resumed with the outcome. "+
-			"Never retry a submitted call or work around a blocked one. For a `not connected` account, call `apps_request_connection` and end your turn.\n", gateway)
+			"Allowed calls run immediately and return their result. Never work around a blocked call. "+
+			"For a `not connected` account, call `apps_request_connection` and end your turn.\n", gateway)
 	}
 	b.WriteString("\n")
 	return b.String()
@@ -215,9 +215,7 @@ func gatewayAppDetail(app runtimeapps.ConnectedApp) string {
 	switch app.Level {
 	case "read":
 		parts = append(parts, "read only")
-	case "confirm_writes":
-		parts = append(parts, "writes need confirmation")
-	case "write":
+	case "write", "confirm_writes":
 		parts = append(parts, "can write")
 	}
 	if app.AccountStatus == "not_connected" {

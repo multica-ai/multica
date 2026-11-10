@@ -1466,6 +1466,15 @@ type Project struct {
 	WorkflowID  pgtype.UUID        `json:"workflow_id"`
 	CreatorType pgtype.Text        `json:"creator_type"`
 	CreatorID   pgtype.UUID        `json:"creator_id"`
+	Visibility  string             `json:"visibility"`
+}
+
+type ProjectMember struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	AddedBy     pgtype.UUID        `json:"added_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type ProjectResource struct {
@@ -1763,8 +1772,11 @@ type User struct {
 	Language                pgtype.Text        `json:"language"`
 	ProfileDescription      string             `json:"profile_description"`
 	// User-preferred IANA timezone for report rendering (Viewing tz). NULL means "use the browser-detected tz at render time". Affects dashboards, charts, and any "today" label shown to this user. Does not affect data materialisation — all rollups remain in UTC.
-	Timezone            pgtype.Text `json:"timezone"`
-	WhatsNewSeenVersion pgtype.Text `json:"whats_new_seen_version"`
+	Timezone              pgtype.Text        `json:"timezone"`
+	WhatsNewSeenVersion   pgtype.Text        `json:"whats_new_seen_version"`
+	StarPromptShownCount  int32              `json:"star_prompt_shown_count"`
+	StarPromptLastShownAt pgtype.Timestamptz `json:"star_prompt_last_shown_at"`
+	StarPromptStarredAt   pgtype.Timestamptz `json:"star_prompt_starred_at"`
 }
 
 type UserComposioConnection struct {

@@ -78,6 +78,10 @@ type Config struct {
 	// invitation only. The public /api/config endpoint mirrors this flag so
 	// the UI can hide every "Create workspace" affordance — see #3433.
 	DisableWorkspaceCreation bool
+	// DisableStarPrompt turns off the "Star us on GitHub" prompt for every
+	// user of the deployment: /api/config tells clients not to show it, and
+	// claiming a showing is refused. The Help menu link is unaffected.
+	DisableStarPrompt bool
 	// WorkspaceCreationAllowedEmails, when non-empty, restricts
 	// POST /api/workspaces to callers whose account email matches one of
 	// the entries (case-insensitive). Empty means every signed-in user may
@@ -1097,6 +1101,9 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 	// silently returns false for non-identifier strings, falling through to
 	// the UUID path below.
 	if issue, ok := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID); ok {
+		if !h.requireProjectVisible(w, r, workspaceID, issue.ProjectID, http.StatusNotFound, "issue not found") {
+			return db.Issue{}, false
+		}
 		return issue, true
 	}
 
@@ -1118,6 +1125,11 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "issue not found")
+		return db.Issue{}, false
+	}
+	// MUL-8472: an issue in a private project the caller cannot see does not
+	// exist for them, on every route that loads it through here.
+	if !h.requireProjectVisible(w, r, workspaceID, issue.ProjectID, http.StatusNotFound, "issue not found") {
 		return db.Issue{}, false
 	}
 	return issue, true

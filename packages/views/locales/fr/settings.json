@@ -1449,7 +1449,7 @@
     "title": "Donner des outils aux agents",
     "current": "Cette page",
     "mcp": "Ajoutés par les administrateurs, partagés dans l'espace de travail puis attribués agent par agent.",
-    "apps": "Comptes d'équipe ou personnels connectés via Multica, attribués à chaque agent avec un compte et un niveau de permission.",
+    "apps": "Des comptes d'équipe ou personnels connectés via Multica et ajoutés à chaque agent.",
     "plugins": "Paquets installés pouvant ajouter des outils, des hooks planifiés et du stockage, chacun avec ses propres autorisations."
   },
   "weixin": {
@@ -1484,7 +1484,7 @@
     "retry": "Réessayer"
   },
   "connected_apps": {
-    "description": "Les comptes par lesquels vos agents agissent. Chaque appel passe par Multica, qui applique vos règles et demande avant d'envoyer, supprimer ou partager.",
+    "description": "Les comptes que vos agents utilisent pour accéder aux apps externes. Les actions autorisées sont exécutées immédiatement.",
     "add_app": "Ajouter une app",
     "loading": "Chargement des apps…",
     "load_failed": "Impossible de charger les apps.",
@@ -1654,6 +1654,19 @@
       "row_label": "Apps autorisées",
       "row_description_one": "{{count}} app autorisée",
       "row_description_other": "{{count}} apps autorisées"
+    },
+    "saved_access": {
+      "account": "Des restrictions enregistrées bloquent encore certaines actions de ce compte.",
+      "agent": "Cette app conserve un ancien accès en lecture seule.",
+      "catalog": "Une liste enregistrée masque les autres apps.",
+      "allow_actions": "Autoriser toutes les actions",
+      "open_catalog": "Afficher toutes les apps",
+      "account_confirm": "Les agents utilisant ce compte pourront lire, écrire, envoyer, supprimer et partager. Les restrictions enregistrées seront remplacées.",
+      "agent_confirm": "Cet agent pourra lire, écrire, envoyer, supprimer et partager via cette app, dans les limites du compte.",
+      "catalog_confirm": "Toutes les apps connectables seront disponibles dans l’espace de travail. Les connexions et les attributions existantes seront conservées.",
+      "cancel": "Annuler",
+      "admin_required": "Un administrateur peut rétablir l’accès.",
+      "account_link": "Ce compte conserve des restrictions. Rétablissez l’accès dans les apps connectées."
     }
   }
 }

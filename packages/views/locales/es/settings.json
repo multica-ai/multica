@@ -1418,7 +1418,7 @@
     }
   },
   "mcp_sources": {
-    "apps": "Cuentas del equipo o personales conectadas mediante Multica, asignadas a cada agente con una cuenta y un nivel de permisos.",
+    "apps": "Cuentas del equipo o personales conectadas a través de Multica y añadidas a cada agente.",
     "current": "Esta página",
     "mcp": "Añadidas por administradores y compartidas en todo el espacio de trabajo, y luego asignadas por agente.",
     "plugins": "Paquetes instalados que pueden añadir herramientas, ganchos programados y almacenamiento, cada uno con sus propios permisos.",
@@ -1484,7 +1484,7 @@
     "retry": "Reintentar"
   },
   "connected_apps": {
-    "description": "Cuentas que usan tus agentes. Cada llamada pasa por Multica, que aplica tus reglas y pide confirmación antes de enviar, eliminar o compartir.",
+    "description": "Cuentas que usan tus agentes para acceder a aplicaciones externas. Las acciones permitidas se ejecutan de inmediato.",
     "add_app": "Añadir aplicación",
     "loading": "Cargando aplicaciones…",
     "load_failed": "No se pudieron cargar las aplicaciones.",
@@ -1654,6 +1654,19 @@
       "row_label": "Aplicaciones permitidas",
       "row_description_one": "{{count}} aplicación permitida",
       "row_description_other": "{{count}} aplicaciones permitidas"
+    },
+    "saved_access": {
+      "account": "Las restricciones guardadas aún bloquean algunas acciones de esta cuenta.",
+      "agent": "Esta app conserva un acceso anterior de solo lectura.",
+      "catalog": "Una lista guardada oculta otras apps.",
+      "allow_actions": "Permitir todas las acciones",
+      "open_catalog": "Mostrar todas las apps",
+      "account_confirm": "Los agentes que usen esta cuenta podrán leer, escribir, enviar, eliminar y compartir. Se reemplazarán las restricciones guardadas.",
+      "agent_confirm": "Este agente podrá leer, escribir, enviar, eliminar y compartir mediante esta app, dentro de los límites de la cuenta.",
+      "catalog_confirm": "Todas las apps conectables estarán disponibles en el espacio de trabajo. Se conservarán las conexiones y asignaciones existentes.",
+      "cancel": "Cancelar",
+      "admin_required": "Un administrador puede restablecer el acceso.",
+      "account_link": "Esta cuenta conserva restricciones. Restablece el acceso en Apps conectadas."
     }
   }
 }

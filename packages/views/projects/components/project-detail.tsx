@@ -3,19 +3,22 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, FileQuestion, Link2, PanelRight, Pin, PinOff, Trash2, UserMinus } from "@multica/ui/icons";
+import { Check, ChevronRight, FileQuestion, Link2, PanelRight, Pencil, Pin, PinOff, Trash2, UserMinus } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
+import { useConfigStore } from "@multica/core/config";
 import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
+import { canChangeProjectLead } from "@multica/core/projects/access";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import { useUpdateProject, useDeleteProject, ProjectDeletionOfflineError } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
+import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssuesScope } from "@multica/core/issues/stores";
@@ -31,6 +34,7 @@ import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
+import { ProjectAccessControl } from "./project-access";
 import { ProjectWorkflowControl } from "../../workflows/project-workflow-row";
 import { ProjectWorkflowMenuHost } from "../../workflows/project-workflow-menu";
 import { IssueSurface } from "../../issues/surface/issue-surface";
@@ -120,6 +124,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const userId = useAuthStore((s) => s.user?.id);
+  const privateProjectsEnabled = useConfigStore((s) => s.featureFlags.private_projects_v1 === true);
   const deleteProject = useDeleteProject();
   const deleted = deleteProject.isSuccess && deleteProject.variables === projectId;
   const { data: project, isLoading } = useQuery({
@@ -158,6 +163,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   });
   const isPinned = pinnedItems.some((p) => p.item_type === "project" && p.item_id === projectId);
   const role = members.find((m) => m.user_id === userId)?.role ?? null;
+  const canManageAccess = !!project && canChangeProjectLead(project, userId, role);
   const canDelete = !!project && canDeleteProject(project, userId ?? null, role, agents);
   const createPin = useCreatePin();
   const deletePinMut = useDeletePin();
@@ -375,9 +381,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </DropdownMenuContent>
             </DropdownMenu>
           </PropRow>
+          {(privateProjectsEnabled || project.visibility === "private") && <PropRow label={t(($) => $.access.label)}>
+            <ProjectAccessControl project={project} />
+          </PropRow>}
           <PropRow label={t(($) => $.table.lead)}>
-            <Popover open={leadOpen} onOpenChange={(v) => { setLeadOpen(v); if (!v) setLeadFilter(""); }}>
+            <Popover open={leadOpen && canManageAccess} onOpenChange={(v) => { setLeadOpen(v); if (!v) setLeadFilter(""); }}>
               <PopoverTrigger
+                disabled={!canManageAccess}
                 render={
                   <button type="button" className="inline-flex items-center gap-1.5 text-caption hover:text-foreground transition-colors">
                     {project.lead_type && project.lead_id ? (
@@ -533,6 +543,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                     base={{ kind: "project", project }}
                     baseMenu={
                       <>
+                        <DropdownMenuItem
+                          onClick={() =>
+                            useModalStore
+                              .getState()
+                              .open("project-rename", { projectId: project.id, title: project.title })
+                          }
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          {t(($) => $.detail.rename_action)}
+                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => {
                           void copyText(router.getShareableUrl(currentPath(router))).then((ok) => {
                             if (ok) toast.success(t(($) => $.detail.toast_link_copied));

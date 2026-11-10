@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "Открыть в приложении"
+  },
+  "desktop": {
+    "link_other_instance": "Приложение подключено к другому экземпляру Multica.",
+    "link_workspace_unavailable": "Это рабочее пространство недоступно в приложении."
+  },
   "inline_run": {
     "label": "Запуск {{name}}",
     "stop": "Остановить",
@@ -801,6 +808,8 @@
       "send_with_body": "Будет отправлен и текст черновика.",
       "confirm_add": "Добавить аннотацию",
       "save": "Сохранить аннотацию",
+      "confirm_add_short": "Добавить",
+      "save_short": "Сохранить",
       "add_comment": "Добавить к комментарию",
       "add": "Добавить к ответу",
       "note_label": "Комментарий",
@@ -1612,6 +1621,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "Показать в комментариях",
     "locate_description": "Показать в описании",
+    "copy_link": "Скопировать ссылку на последнюю версию",
+    "not_found": "В этой задаче нет результата с именем «{{name}}»",
+    "link_load_failed": "Не удалось загрузить результаты задачи, чтобы открыть «{{name}}». Обновите страницу, чтобы попробовать снова.",
     "version_label": "Версия {{version}} из {{total}}",
     "version_of": "v{{version}} из {{total}}",
     "info_source": "Источник",
@@ -1861,7 +1873,6 @@
       "brief_header": "Задание рабочего процесса, переданное этому запуску"
     },
     "detail": {
-      "follows_project": "(из проекта)",
       "card_title": "{{workflow}} · из {{project}}"
     },
     "list_separator": ", ",

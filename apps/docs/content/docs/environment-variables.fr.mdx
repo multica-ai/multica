@@ -383,6 +383,8 @@ Clés prises en charge :
 | `ws_claim_poll_interval` | `3m` | Borne supérieure des interrogations de sécurité de la prise en charge via WebSocket lorsque celle-ci est saine, indépendante de `poll_interval` ; le daemon applique une gigue uniquement à la baisse |
 | `heartbeat_interval` | `15s` | Intervalle des signaux de vie (heartbeat) |
 | `agent_timeout` | illimité | Durée maximale absolue par exécution |
+| `agent_idle_watchdog` | `2h` | Durée maximale de silence lorsqu'aucun appel d'outil n'est en cours ; `0s` désactive entièrement le watchdog du daemon, y compris `agent_tool_watchdog` |
+| `agent_tool_watchdog` | identique à `agent_idle_watchdog` | Durée maximale de silence pendant un appel d'outil ; avec `0s`, le watchdog du daemon n'arrête jamais une exécution à cause d'un appel d'outil silencieux, et l'exécution n'est plus bornée que par `agent_timeout`, illimité par défaut |
 | `codex_semantic_inactivity_timeout` | dérivée | Seuil de silence sémantique de Codex. Si rien n'est défini, il prend le plus grand des budgets des watchdogs d'inactivité et d'outil ; un budget d'outil de `0` se rabat sur le budget d'inactivité, et ce n'est que lorsque l'ensemble des watchdogs est désactivé que Codex conserve son propre `10m` |
 | `codex_handshake_timeout` | `30s` ; `thread/start`, `thread/resume` : `60s` | Plafonds de la poignée de main au démarrage du Codex app-server. Une valeur explicite remplace globalement les deux budgets |
 | `disable_auto_update` | suit l'environnement | `true` désactive la mise à jour automatique ; `false` efface la surcharge locale et revient à la variable d'environnement ou à la valeur par défaut |
@@ -391,7 +393,7 @@ Clés prises en charge :
 
 Quelques règles concernant les valeurs :
 
-- Les clés de durée acceptent des durées Go positives (comme `10s`, `2h`) ; `0s` et les valeurs négatives sont refusées. La seule exception est `agent_timeout` : `0s` est valide et désactive explicitement la limite de durée des exécutions.
+- Les clés de durée acceptent des durées Go positives (comme `10s`, `2h`) ; les valeurs négatives sont toujours refusées. Seules `agent_timeout`, `agent_idle_watchdog` et `agent_tool_watchdog` acceptent aussi `0s` : pour `agent_timeout`, cela désactive explicitement la limite de durée des exécutions ; pour les deux clés de watchdog, le tableau indique ce que `0s` désactive.
 - Passer une chaîne vide efface une valeur persistée et revient à la variable d'environnement ou à la valeur par défaut intégrée, par exemple `multica config set poll_interval ""`.
 - `max_concurrent_tasks` exige un entier positif ou nul.
 - Les valeurs relatives de `workspaces_root` sont converties en chemins absolus lors de l'enregistrement.

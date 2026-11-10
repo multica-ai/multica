@@ -56,21 +56,21 @@ func TestWeixinOriginMigrationsUpDownAndCatalog(t *testing.T) {
 
 	assertWeixinOriginRejected(t, ctx, conn.Conn(), "00000000-0000-4000-8000-000000000001")
 
-	applyMigrationFile(t, ctx, conn.Conn(), "631_issue_origin_weixin_chat.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "635_issue_origin_weixin_chat.up.sql")
 	assertWeixinOriginConstraint(t, ctx, conn.Conn(), false, true)
 	if _, err := conn.Exec(ctx, `INSERT INTO issue (id, origin_type) VALUES ($1, 'weixin_chat')`, "00000000-0000-4000-8000-000000000002"); err != nil {
 		t.Fatalf("insert weixin_chat after widening constraint: %v", err)
 	}
 
-	applyMigrationFile(t, ctx, conn.Conn(), "632_issue_origin_weixin_chat_validate.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "636_issue_origin_weixin_chat_validate.up.sql")
 	assertWeixinOriginConstraint(t, ctx, conn.Conn(), true, true)
 
-	applyMigrationFile(t, ctx, conn.Conn(), "632_issue_origin_weixin_chat_validate.down.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "636_issue_origin_weixin_chat_validate.down.sql")
 	assertWeixinOriginConstraint(t, ctx, conn.Conn(), false, true)
 	if _, err := conn.Exec(ctx, `DELETE FROM issue WHERE origin_type = 'weixin_chat'`); err != nil {
 		t.Fatalf("remove Weixin row before narrowing rollback: %v", err)
 	}
-	applyMigrationFile(t, ctx, conn.Conn(), "631_issue_origin_weixin_chat.down.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "635_issue_origin_weixin_chat.down.sql")
 	assertWeixinOriginConstraint(t, ctx, conn.Conn(), true, false)
 	assertWeixinOriginRejected(t, ctx, conn.Conn(), "00000000-0000-4000-8000-000000000003")
 }

@@ -116,6 +116,7 @@ import type {
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
+  ListProjectMembersResponse,
   ProjectResource,
   CreateProjectResourceRequest,
   UpdateProjectResourceRequest,
@@ -367,6 +368,7 @@ import {
   RuntimeUsageListSchema,
   SearchIssuesResponseSchema,
   ProjectSchema,
+  ListProjectMembersResponseSchema,
   ListProjectsResponseSchema,
   EMPTY_PROJECT,
   EMPTY_LIST_PROJECTS_RESPONSE,
@@ -929,9 +931,14 @@ export class ApiClient {
    * (MUL-7028). Comparing against the credential in use now is what tells the
    * two apart: a genuinely expired session still has the same token stored,
    * so the real case is unaffected.
+   *
+   * "Replaced" includes going from no credential to one. A flow that was
+   * already running at logout can still send a bearer-less request, and its
+   * 401 may land after the user has signed in again (#10190). Cookie mode is
+   * null on both sides, so its expiries still end the session.
    */
   private handleUnauthorized(credentialUsed: string | null) {
-    if (credentialUsed !== null && this.getToken() !== credentialUsed) {
+    if (this.getToken() !== credentialUsed) {
       this.logger.info("ignoring 401 for a credential that has since been replaced");
       return;
     }
@@ -1156,6 +1163,21 @@ export class ApiClient {
     });
   }
 
+  /** Rejects with 409 when the server decides the prompt is not due. */
+  async claimStarPromptShowing(): Promise<User> {
+    const raw = await this.fetch<unknown>("/api/me/star-prompt/claim", { method: "POST" });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "POST /api/me/star-prompt/claim",
+    });
+  }
+
+  async markStarPromptStarred(): Promise<User> {
+    const raw = await this.fetch<unknown>("/api/me/star-prompt/starred", { method: "POST" });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "POST /api/me/star-prompt/starred",
+    });
+  }
+
   async updateMe(data: UpdateMeRequest): Promise<User> {
     const raw = await this.fetch<unknown>("/api/me", {
       method: "PATCH",
@@ -1175,6 +1197,8 @@ export class ApiClient {
     if (params?.q?.trim()) search.set("q", params.q.trim());
     if (params?.status) search.set("status", params.status);
     if (params?.statuses?.length) search.set("statuses", params.statuses.join(","));
+    if (params?.status_category) search.set("status_category", params.status_category);
+    if (params?.status_categories?.length) search.set("status_categories", params.status_categories.join(","));
     if (params?.priority) search.set("priority", params.priority);
     if (params?.priorities?.length) search.set("priorities", params.priorities.join(","));
     if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
@@ -4275,6 +4299,9 @@ export class ApiClient {
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {
+    if (data.visibility === "private" && configStore.getState().featureFlags.private_projects_v1 !== true) {
+      throw new Error("Private projects are not enabled on this server.");
+    }
     const raw = await this.fetch<unknown>("/api/projects", {
       method: "POST",
       body: JSON.stringify(data),
@@ -4292,6 +4319,26 @@ export class ApiClient {
 
   async deleteProject(id: string): Promise<void> {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  async getProjectMembers(id: string): Promise<ListProjectMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/members`);
+    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0 }, {
+      endpoint: "GET /api/projects/:id/members",
+    });
+  }
+
+  async addProjectMembers(id: string, userIds: string[]): Promise<ListProjectMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/members`, {
+      method: "POST", body: JSON.stringify({ user_ids: userIds }),
+    });
+    return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0 }, {
+      endpoint: "POST /api/projects/:id/members",
+    });
+  }
+
+  async removeProjectMember(id: string, userId: string): Promise<void> {
+    await this.fetch(`/api/projects/${id}/members/${userId}`, { method: "DELETE" });
   }
 
   // Project resources
