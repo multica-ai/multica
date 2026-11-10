@@ -30,6 +30,14 @@ func computeNextRun(cronExpr, timezone string) (time.Time, error) {
 	return service.ComputeNextRun(cronExpr, timezone)
 }
 
+// nextRunTimestamp maps a computed next run onto the nullable next_run_at
+// column. A cron that parses but never fires ("0 0 30 2 *") is saveable, and
+// the cron library reports "no next occurrence" as the zero time: that is
+// stored as NULL, not as a next run in year 0001.
+func nextRunTimestamp(t time.Time) pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: t, Valid: !t.IsZero()}
+}
+
 // ── Response types ──────────────────────────────────────────────────────────
 
 type AutopilotResponse struct {
@@ -1622,7 +1630,7 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		nextRunAt = pgtype.Timestamptz{Time: t, Valid: true}
+		nextRunAt = nextRunTimestamp(t)
 	case "webhook":
 		// Mint the token BEFORE the INSERT so the row never exists in a
 		// half-written kind=webhook + webhook_token=NULL state. If the
@@ -1985,7 +1993,7 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		params.NextRunAt = pgtype.Timestamptz{Time: t, Valid: true}
+		params.NextRunAt = nextRunTimestamp(t)
 	}
 
 	userID := uuidToString(actor.UserID)
