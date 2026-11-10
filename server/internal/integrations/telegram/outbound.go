@@ -52,6 +52,11 @@ type Outbound struct {
 	now                func() time.Time
 	wait               func(context.Context, time.Duration) error
 
+	// flushCtx is the worker context from Start. Deferred pushes of held-back
+	// stream text run on it; nil until Start, and then nothing is deferred.
+	// Protected by mu.
+	flushCtx context.Context
+
 	terminalMu               sync.Mutex
 	terminalSessions         map[string]*terminalSession
 	terminalReady            []string
@@ -115,6 +120,9 @@ type streamState struct {
 	lastFrameAt time.Time
 	accumulated string
 	schedule    *chatSchedule
+	// flushArmed is set while a deferred push is waiting for the chat's next
+	// edit slot, so held-back text arms one timer, not one per frame.
+	flushArmed bool
 }
 
 // chatSchedule serializes Telegram delivery and owns rate-limit state shared
@@ -311,6 +319,9 @@ func (o *Outbound) Register(bus *events.Bus) {
 // Telegram rate limits and network latency must never delay realtime fanout.
 func (o *Outbound) Start(ctx context.Context) {
 	o.workerOnce.Do(func() {
+		o.mu.Lock()
+		o.flushCtx = ctx
+		o.mu.Unlock()
 		o.workerWG.Add(2)
 		go o.runStreamSweeper(ctx)
 		o.terminalWorkerWG.Add(terminalWorkerCount)
@@ -371,6 +382,25 @@ func (o *Outbound) handleTaskMessage(e events.Event) {
 		turn = resolved
 	}
 
+	o.advanceStream(ctx, target, turn, payload.Content)
+}
+
+// advanceStream adds content to the task's streamed reply and pushes the
+// result to Telegram. Empty content is the deferred flush: it pushes what a
+// held-back frame left behind and never opens a stream.
+func (o *Outbound) advanceStream(ctx context.Context, target *replyTarget, turn replyTurn, content string) {
+	// Keep the text before asking for the turn. The deferred flush holds the
+	// turn while it talks to Telegram, and a frame that arrives meanwhile must
+	// not leave a hole in what the next push shows.
+	o.mu.Lock()
+	st := o.streams[target.streamKey]
+	if st != nil && content != "" {
+		st.accumulated += content
+		st.lastFrameAt = o.now()
+		content = ""
+	}
+	o.mu.Unlock()
+
 	// Hold the turn for as long as this frame is talking to Telegram. A frame
 	// that checked the state and then sent would still race the final answer
 	// taking over mid-request — that gap is what put a second copy of the
@@ -385,12 +415,16 @@ func (o *Outbound) handleTaskMessage(e events.Event) {
 		// reach into this process to tidy up. Release the local stream and its
 		// chat-scheduler reference here, or they are held for good and the
 		// schedule table eventually refuses new chats.
-		o.clearStream(e)
+		o.clearStreamKey(target.streamKey)
 		return
 	}
 	if status != deliveryAcquired {
 		// Another path owns the turn right now. A stream frame is decoration —
-		// the answer still lands — so it steps aside.
+		// the answer still lands — so it steps aside. Text it has already kept
+		// is pushed once the turn is free again.
+		if st != nil {
+			o.deferFlush(target, st, o.now().Add(deliveryBusyRetry))
+		}
 		return
 	}
 	defer o.releaseDelivery(ctx, lease)
@@ -400,8 +434,12 @@ func (o *Outbound) handleTaskMessage(e events.Event) {
 	}
 
 	o.mu.Lock()
-	st, exists = o.streams[target.streamKey]
+	st, exists := o.streams[target.streamKey]
 	if !exists {
+		if content == "" {
+			o.mu.Unlock()
+			return
+		}
 		schedule := o.retainChatLocked(target.botKey, target.chatID)
 		if schedule == nil {
 			o.mu.Unlock()
@@ -409,11 +447,10 @@ func (o *Outbound) handleTaskMessage(e events.Event) {
 		}
 		st = &streamState{
 			chatID: target.chatID, threadID: target.threadID, replyTo: target.replyTo,
-			turn: turn, schedule: schedule,
+			turn: turn, schedule: schedule, lastFrameAt: o.now(),
 		}
 		o.streams[target.streamKey] = st
 	}
-	st.lastFrameAt = o.now()
 	// A reply this process did not start — the placeholder came from another
 	// replica, or from the attempt this automatic retry inherited — still
 	// edits that message instead of opening a second one. Its text is whatever
@@ -421,25 +458,66 @@ func (o *Outbound) handleTaskMessage(e events.Event) {
 	if msgID := lease.messageID(); msgID != 0 {
 		st.messageID = msgID
 	}
-	st.accumulated += payload.Content
+	st.accumulated += content
 	snapshot := st.accumulated
 	msgID := st.messageID
 	o.mu.Unlock()
 
-	o.pushPartial(ctx, target, st, lease, msgID, snapshot)
+	if retryAt := o.pushPartial(ctx, target, st, lease, msgID, snapshot); !retryAt.IsZero() {
+		o.deferFlush(target, st, retryAt)
+	}
+}
+
+// deferFlush arms one push for text a frame could not send yet. Without it
+// the text waits for the next frame, and an agent that writes a sentence and
+// then works in tools for minutes sends none: the chat shows the first word
+// until the final answer.
+//
+// It needs the worker context from Start, so the timer ends with the process.
+func (o *Outbound) deferFlush(target *replyTarget, st *streamState, at time.Time) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.flushCtx == nil || st.flushArmed || o.streams[target.streamKey] != st {
+		return
+	}
+	st.flushArmed = true
+	time.AfterFunc(max(at.Sub(o.now()), 0), func() { o.flushStream(target, st) })
+}
+
+// flushStream is the deferred push. The stream may be gone by now — finished,
+// cancelled, or taken over by the final answer — and then there is nothing to
+// do.
+func (o *Outbound) flushStream(target *replyTarget, st *streamState) {
+	o.mu.Lock()
+	st.flushArmed = false
+	live := o.streams[target.streamKey] == st
+	turn := st.turn
+	flushCtx := o.flushCtx
+	o.mu.Unlock()
+	if !live || flushCtx.Err() != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(flushCtx, 10*time.Second)
+	defer cancel()
+	o.advanceStream(ctx, target, turn, "")
 }
 
 // pushPartial sends the placeholder on the first flush and edits it after. It
 // runs under the turn's lease, so the final answer cannot take the reply over
 // between the decision made here and the call that acts on it.
-func (o *Outbound) pushPartial(ctx context.Context, target *replyTarget, st *streamState, lease *deliveryLease, msgID int64, snapshot string) {
+//
+// A non-zero result is when the chat can next take an edit: the snapshot was
+// held back, and the caller arranges for it to be pushed then.
+func (o *Outbound) pushPartial(ctx context.Context, target *replyTarget, st *streamState, lease *deliveryLease, msgID int64, snapshot string) time.Time {
 	if !st.schedule.mu.TryLock() {
-		return
+		// A request to this chat is in flight, so its next slot is one
+		// interval away.
+		return o.now().Add(editInterval)
 	}
 	defer st.schedule.mu.Unlock()
 	now := o.now()
-	if o.terminalAvailableAt(st.schedule, target.botKey, now).After(now) {
-		return
+	if available := o.terminalAvailableAt(st.schedule, target.botKey, now); available.After(now) {
+		return available
 	}
 
 	api := newBotAPI(o.apiBase, target.botToken, o.client)
@@ -452,7 +530,7 @@ func (o *Outbound) pushPartial(ctx context.Context, target *replyTarget, st *str
 	o.mu.Lock()
 	if o.streams[target.streamKey] != st {
 		o.mu.Unlock()
-		return
+		return time.Time{}
 	}
 	msgID = st.messageID
 	o.mu.Unlock()
@@ -463,7 +541,7 @@ func (o *Outbound) pushPartial(ctx context.Context, target *replyTarget, st *str
 		// lease, and an edit made afterwards overwrites whatever the process
 		// that took over has already published as the final answer.
 		if !o.renewDelivery(ctx, lease) {
-			return
+			return time.Time{}
 		}
 		ctx, cancel := o.callContext(ctx)
 		defer cancel()
@@ -474,18 +552,17 @@ func (o *Outbound) pushPartial(ctx context.Context, target *replyTarget, st *str
 			ParseMode: "HTML",
 		})
 		if err != nil && !isNotModified(err) {
-			o.noteEditFailure(st.schedule, err)
-			return
+			return o.noteEditFailure(st.schedule, err)
 		}
 		st.schedule.lastEdit = o.now()
-		return
+		return time.Time{}
 	}
 
 	// Exactly one placeholder per turn, published before the call goes out so
 	// that any other process reads "a send is outstanding" rather than
 	// "nothing has been sent".
 	if !o.claimSend(ctx, lease) {
-		return
+		return time.Time{}
 	}
 	ctx, cancel := o.callContext(ctx)
 	defer cancel()
@@ -502,25 +579,28 @@ func (o *Outbound) pushPartial(ctx context.Context, target *replyTarget, st *str
 	})
 	if o.recordSend(ctx, lease, true, m.MessageID, 0, err) != deliveryAccepted {
 		if err != nil {
-			o.noteEditFailure(st.schedule, err)
+			return o.noteEditFailure(st.schedule, err)
 		}
-		return
+		return time.Time{}
 	}
 	st.schedule.lastEdit = o.now()
 	o.mu.Lock()
 	st.messageID = m.MessageID
 	o.mu.Unlock()
+	return time.Time{}
 }
 
-// noteEditFailure applies the 429-mandated backoff to the stream; other
-// failures are logged and the stream simply stops editing (the final content
-// still lands via EventChatDone).
-func (o *Outbound) noteEditFailure(schedule *chatSchedule, err error) {
+// noteEditFailure applies the 429-mandated backoff to the stream and returns
+// when it ends; other failures are logged and the stream simply stops editing
+// (the final content still lands via EventChatDone).
+func (o *Outbound) noteEditFailure(schedule *chatSchedule, err error) time.Time {
 	if wait, ok := retryAfter(err); ok {
-		schedule.setBackoffTill(o.now().Add(wait))
-		return
+		till := o.now().Add(wait)
+		schedule.setBackoffTill(till)
+		return till
 	}
 	o.logger.Warn("telegram outbound: stream edit failed", "error", err)
+	return time.Time{}
 }
 
 // enqueueTerminalReply only appends to a bounded keyed FIFO. events.Bus is synchronous;
@@ -1214,7 +1294,10 @@ func (o *Outbound) clearStream(e events.Event) {
 	if !ok {
 		return
 	}
-	key := util.UUIDToString(taskID)
+	o.clearStreamKey(util.UUIDToString(taskID))
+}
+
+func (o *Outbound) clearStreamKey(key string) {
 	o.mu.Lock()
 	st := o.streams[key]
 	delete(o.streams, key)
