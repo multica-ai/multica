@@ -19,6 +19,12 @@ vi.mock("@tanstack/react-query", () => ({
 
 const createProjectMock = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "p1" }));
 
+// The access picker needs the signed-in creator when deriving draft members.
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector: (state: { user: { id: string } }) => unknown) =>
+    selector({ user: { id: "user-1" } }),
+}));
+
 vi.mock("@multica/core/projects/mutations", () => ({
   useCreateProject: () => ({ mutateAsync: createProjectMock }),
 }));
