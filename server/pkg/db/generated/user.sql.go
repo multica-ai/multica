@@ -20,7 +20,7 @@ WHERE id = $2
     whats_new_seen_version IS NULL
     OR string_to_array(whats_new_seen_version, '.')::int[] < string_to_array($1::text, '.')::int[]
   )
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until
 `
 
 type AdvanceWhatsNewSeenVersionParams struct {
@@ -52,14 +52,14 @@ func (q *Queries) AdvanceWhatsNewSeenVersion(ctx context.Context, arg AdvanceWha
 		&i.ProfileDescription,
 		&i.Timezone,
 		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
 		&i.TotpSecretEncrypted,
 		&i.TotpEnabledAt,
 		&i.TotpLastUsedStep,
 		&i.TotpFailedAttempts,
 		&i.TotpLockedUntil,
-		&i.StarPromptShownCount,
-		&i.StarPromptLastShownAt,
-		&i.StarPromptStarredAt,
 	)
 	return i, err
 }
@@ -73,7 +73,7 @@ WHERE id = $1
   AND star_prompt_shown_count < $2::int
   AND created_at <= $3::timestamptz
   AND (star_prompt_last_shown_at IS NULL OR star_prompt_last_shown_at <= $4::timestamptz)
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until
 `
 
 type ClaimStarPromptShowingParams struct {
@@ -111,14 +111,14 @@ func (q *Queries) ClaimStarPromptShowing(ctx context.Context, arg ClaimStarPromp
 		&i.ProfileDescription,
 		&i.Timezone,
 		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
 		&i.TotpSecretEncrypted,
 		&i.TotpEnabledAt,
 		&i.TotpLastUsedStep,
 		&i.TotpFailedAttempts,
 		&i.TotpLockedUntil,
-		&i.StarPromptShownCount,
-		&i.StarPromptLastShownAt,
-		&i.StarPromptStarredAt,
 	)
 	return i, err
 }
@@ -126,7 +126,7 @@ func (q *Queries) ClaimStarPromptShowing(ctx context.Context, arg ClaimStarPromp
 const createUser = `-- name: CreateUser :one
 INSERT INTO "user" (name, email, avatar_url)
 VALUES ($1, $2, $3)
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until
 `
 
 type CreateUserParams struct {
@@ -154,20 +154,20 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.ProfileDescription,
 		&i.Timezone,
 		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
 		&i.TotpSecretEncrypted,
 		&i.TotpEnabledAt,
 		&i.TotpLastUsedStep,
 		&i.TotpFailedAttempts,
 		&i.TotpLockedUntil,
-		&i.StarPromptShownCount,
-		&i.StarPromptLastShownAt,
-		&i.StarPromptStarredAt,
 	)
 	return i, err
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at FROM "user"
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until FROM "user"
 WHERE id = $1
 `
 
@@ -190,20 +190,20 @@ func (q *Queries) GetUser(ctx context.Context, id pgtype.UUID) (User, error) {
 		&i.ProfileDescription,
 		&i.Timezone,
 		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
 		&i.TotpSecretEncrypted,
 		&i.TotpEnabledAt,
 		&i.TotpLastUsedStep,
 		&i.TotpFailedAttempts,
 		&i.TotpLockedUntil,
-		&i.StarPromptShownCount,
-		&i.StarPromptLastShownAt,
-		&i.StarPromptStarredAt,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at FROM "user"
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until FROM "user"
 WHERE email = $1
 `
 
@@ -226,14 +226,14 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.ProfileDescription,
 		&i.Timezone,
 		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
 		&i.TotpSecretEncrypted,
 		&i.TotpEnabledAt,
 		&i.TotpLastUsedStep,
 		&i.TotpFailedAttempts,
 		&i.TotpLockedUntil,
-		&i.StarPromptShownCount,
-		&i.StarPromptLastShownAt,
-		&i.StarPromptStarredAt,
 	)
 	return i, err
 }
@@ -284,7 +284,7 @@ UPDATE "user" SET
     cloud_waitlist_reason = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until
 `
 
 type JoinCloudWaitlistParams struct {
@@ -315,14 +315,14 @@ func (q *Queries) JoinCloudWaitlist(ctx context.Context, arg JoinCloudWaitlistPa
 		&i.ProfileDescription,
 		&i.Timezone,
 		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
 		&i.TotpSecretEncrypted,
 		&i.TotpEnabledAt,
 		&i.TotpLastUsedStep,
 		&i.TotpFailedAttempts,
 		&i.TotpLockedUntil,
-		&i.StarPromptShownCount,
-		&i.StarPromptLastShownAt,
-		&i.StarPromptStarredAt,
 	)
 	return i, err
 }
@@ -331,7 +331,7 @@ const markStarPromptStarred = `-- name: MarkStarPromptStarred :one
 UPDATE "user" SET
     star_prompt_starred_at = COALESCE(star_prompt_starred_at, now())
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until
 `
 
 // Keeps the first click time; repeating the call is a no-op.
@@ -354,14 +354,14 @@ func (q *Queries) MarkStarPromptStarred(ctx context.Context, id pgtype.UUID) (Us
 		&i.ProfileDescription,
 		&i.Timezone,
 		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
 		&i.TotpSecretEncrypted,
 		&i.TotpEnabledAt,
 		&i.TotpLastUsedStep,
 		&i.TotpFailedAttempts,
 		&i.TotpLockedUntil,
-		&i.StarPromptShownCount,
-		&i.StarPromptLastShownAt,
-		&i.StarPromptStarredAt,
 	)
 	return i, err
 }
@@ -371,7 +371,7 @@ UPDATE "user" SET
     onboarded_at = COALESCE(onboarded_at, now()),
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until
 `
 
 func (q *Queries) MarkUserOnboarded(ctx context.Context, id pgtype.UUID) (User, error) {
@@ -393,14 +393,14 @@ func (q *Queries) MarkUserOnboarded(ctx context.Context, id pgtype.UUID) (User, 
 		&i.ProfileDescription,
 		&i.Timezone,
 		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
 		&i.TotpSecretEncrypted,
 		&i.TotpEnabledAt,
 		&i.TotpLastUsedStep,
 		&i.TotpFailedAttempts,
 		&i.TotpLockedUntil,
-		&i.StarPromptShownCount,
-		&i.StarPromptLastShownAt,
-		&i.StarPromptStarredAt,
 	)
 	return i, err
 }
@@ -410,7 +410,7 @@ UPDATE "user" SET
     onboarding_questionnaire = COALESCE($1, onboarding_questionnaire),
     updated_at = now()
 WHERE id = $2
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until
 `
 
 type PatchUserOnboardingParams struct {
@@ -441,14 +441,14 @@ func (q *Queries) PatchUserOnboarding(ctx context.Context, arg PatchUserOnboardi
 		&i.ProfileDescription,
 		&i.Timezone,
 		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
 		&i.TotpSecretEncrypted,
 		&i.TotpEnabledAt,
 		&i.TotpLastUsedStep,
 		&i.TotpFailedAttempts,
 		&i.TotpLockedUntil,
-		&i.StarPromptShownCount,
-		&i.StarPromptLastShownAt,
-		&i.StarPromptStarredAt,
 	)
 	return i, err
 }
@@ -466,7 +466,7 @@ UPDATE "user" SET
     END,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at, totp_secret_encrypted, totp_enabled_at, totp_last_used_step, totp_failed_attempts, totp_locked_until
 `
 
 type UpdateUserParams struct {
@@ -516,14 +516,14 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.ProfileDescription,
 		&i.Timezone,
 		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
 		&i.TotpSecretEncrypted,
 		&i.TotpEnabledAt,
 		&i.TotpLastUsedStep,
 		&i.TotpFailedAttempts,
 		&i.TotpLockedUntil,
-		&i.StarPromptShownCount,
-		&i.StarPromptLastShownAt,
-		&i.StarPromptStarredAt,
 	)
 	return i, err
 }

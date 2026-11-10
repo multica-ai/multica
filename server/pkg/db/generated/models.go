@@ -1803,14 +1803,14 @@ type User struct {
 	// User-preferred IANA timezone for report rendering (Viewing tz). NULL means "use the browser-detected tz at render time". Affects dashboards, charts, and any "today" label shown to this user. Does not affect data materialisation — all rollups remain in UTC.
 	Timezone              pgtype.Text        `json:"timezone"`
 	WhatsNewSeenVersion   pgtype.Text        `json:"whats_new_seen_version"`
+	StarPromptShownCount  int32              `json:"star_prompt_shown_count"`
+	StarPromptLastShownAt pgtype.Timestamptz `json:"star_prompt_last_shown_at"`
+	StarPromptStarredAt   pgtype.Timestamptz `json:"star_prompt_starred_at"`
 	TotpSecretEncrypted   []byte             `json:"totp_secret_encrypted"`
 	TotpEnabledAt         pgtype.Timestamptz `json:"totp_enabled_at"`
 	TotpLastUsedStep      pgtype.Int8        `json:"totp_last_used_step"`
 	TotpFailedAttempts    int32              `json:"totp_failed_attempts"`
 	TotpLockedUntil       pgtype.Timestamptz `json:"totp_locked_until"`
-	StarPromptShownCount  int32              `json:"star_prompt_shown_count"`
-	StarPromptLastShownAt pgtype.Timestamptz `json:"star_prompt_last_shown_at"`
-	StarPromptStarredAt   pgtype.Timestamptz `json:"star_prompt_starred_at"`
 }
 
 type UserComposioConnection struct {
