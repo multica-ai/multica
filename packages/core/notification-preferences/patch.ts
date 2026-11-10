@@ -1,36 +1,29 @@
-import type { NotificationPreferences } from "../types";
+import type {
+  NotificationGroupKey,
+  NotificationGroupValue,
+  NotificationPreferences,
+} from "../types";
 
-type PreferenceKey = keyof NotificationPreferences;
+const NOTIFICATION_GROUP_KEYS: readonly NotificationGroupKey[] = [
+  "assignments",
+  "status_changes",
+  "comments",
+  "mentions",
+  "updates",
+  "agent_activity",
+  "system_notifications",
+];
 
-/** Each key's value when absent. The cache keeps defaults absent. */
-const DEFAULTS: { [K in PreferenceKey]-?: NonNullable<NotificationPreferences[K]> } = {
-  assignments: "all",
-  status_changes: "all",
-  comments: "all",
-  mentions: "all",
-  updates: "all",
-  agent_activity: "all",
-  system_notifications: "all",
-  auto_archive: "off",
-};
-
-const PREFERENCE_KEYS = Object.keys(DEFAULTS) as PreferenceKey[];
-
-function preferenceValue(preferences: NotificationPreferences, key: PreferenceKey): string {
-  return preferences[key] ?? DEFAULTS[key];
-}
-
-function setValue(preferences: NotificationPreferences, key: PreferenceKey, value: string) {
-  if (value === DEFAULTS[key]) {
-    delete preferences[key];
-  } else {
-    (preferences as Record<PreferenceKey, string>)[key] = value;
-  }
+function preferenceValue(
+  preferences: NotificationPreferences,
+  key: NotificationGroupKey,
+): NotificationGroupValue {
+  return preferences[key] ?? "all";
 }
 
 /**
  * Convert the full preference object produced by the settings UI into the
- * smallest atomic patch. Missing keys mean the key's default value.
+ * smallest atomic patch. Missing keys mean the default value ("all").
  */
 export function deriveNotificationPreferencePatch(
   previous: NotificationPreferences,
@@ -38,27 +31,31 @@ export function deriveNotificationPreferencePatch(
 ): NotificationPreferences {
   const patch: NotificationPreferences = {};
 
-  for (const key of PREFERENCE_KEYS) {
+  for (const key of NOTIFICATION_GROUP_KEYS) {
     const previousValue = preferenceValue(previous, key);
     const nextValue = preferenceValue(next, key);
     if (previousValue !== nextValue) {
-      (patch as Record<PreferenceKey, string>)[key] = nextValue;
+      patch[key] = nextValue;
     }
   }
 
   return patch;
 }
 
-/** Apply a preference patch while keeping default values sparse. */
+/** Apply a preference patch while keeping default "all" values sparse. */
 export function applyNotificationPreferencePatch(
   current: NotificationPreferences,
   patch: NotificationPreferences,
 ): NotificationPreferences {
   const next = { ...current };
 
-  for (const key of PREFERENCE_KEYS) {
+  for (const key of NOTIFICATION_GROUP_KEYS) {
     const value = patch[key];
-    if (value !== undefined) setValue(next, key, value);
+    if (value === "muted") {
+      next[key] = value;
+    } else if (value === "all") {
+      delete next[key];
+    }
   }
 
   return next;
@@ -75,7 +72,7 @@ export function rollbackNotificationPreferencePatch(
 ): NotificationPreferences {
   const next = { ...current };
 
-  for (const key of PREFERENCE_KEYS) {
+  for (const key of NOTIFICATION_GROUP_KEYS) {
     const patchedValue = patch[key];
     if (
       patchedValue === undefined ||
@@ -84,7 +81,12 @@ export function rollbackNotificationPreferencePatch(
       continue;
     }
 
-    setValue(next, key, preferenceValue(previous, key));
+    const previousValue = preferenceValue(previous, key);
+    if (previousValue === "all") {
+      delete next[key];
+    } else {
+      next[key] = previousValue;
+    }
   }
 
   return next;

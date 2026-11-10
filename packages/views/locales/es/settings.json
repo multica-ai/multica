@@ -665,11 +665,6 @@
         "description": "Cuando falla una ejecución de agente"
       }
     },
-    "auto_archive": {
-      "title": "Archivado",
-      "label": "Archivar al actuar",
-      "description": "Responder, cambiar el estado o reasignar saca la tarea de tu bandeja de entrada. Si está desactivado, se queda hasta que la archives."
-    },
     "system": {
       "title": "Notificaciones del sistema",
       "label": "Mostrar notificaciones del sistema"

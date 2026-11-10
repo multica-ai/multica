@@ -678,11 +678,6 @@
         "description": "智能体运行失败时"
       }
     },
-    "auto_archive": {
-      "title": "归档",
-      "label": "操作后自动归档",
-      "description": "你回复、改状态或改负责人后，任务自动移出收件箱。关闭时，任务会留在收件箱，直到你手动归档。"
-    },
     "system": {
       "title": "系统通知",
       "label": "Multica 在后台时显示系统通知"

@@ -56,20 +56,6 @@ export function NotificationsTab() {
   };
 
   const systemEnabled = preferences.system_notifications !== "muted";
-  const autoArchive = preferences.auto_archive === "on";
-
-  const handleAutoArchive = (enabled: boolean) => {
-    const updated: NotificationPreferences = { ...preferences, auto_archive: "on" };
-    if (!enabled) delete updated.auto_archive;
-    mutation.mutate(updated, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.notifications.toast_failed),
-        ),
-    });
-  };
 
   return (
     <SettingsTab title={t(($) => $.page.tabs.notifications)} scope="workspace-only">
@@ -96,22 +82,6 @@ export function NotificationsTab() {
                 </SettingsRow>
               );
             })}
-        </SettingsCard>
-      </SettingsSection>
-
-      <SettingsSection title={t(($) => $.notifications.auto_archive.title)}>
-        <SettingsCard>
-          <SettingsRow
-            anchor="auto-archive"
-            label={t(($) => $.notifications.auto_archive.label)}
-            description={t(($) => $.notifications.auto_archive.description)}
-          >
-            <Switch
-              checked={autoArchive}
-              aria-label={t(($) => $.notifications.auto_archive.label)}
-              onCheckedChange={handleAutoArchive}
-            />
-          </SettingsRow>
         </SettingsCard>
       </SettingsSection>
 

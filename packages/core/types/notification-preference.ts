@@ -9,15 +9,7 @@ export type NotificationGroupKey =
 
 export type NotificationGroupValue = "all" | "muted";
 
-/**
- * "on": replying, changing the status or reassigning archives the member's
- * Inbox rows on that issue. Absent or "off", they archive rows themselves.
- */
-export type AutoArchiveValue = "on" | "off";
-
-export type NotificationPreferences = Partial<Record<NotificationGroupKey, NotificationGroupValue>> & {
-  auto_archive?: AutoArchiveValue;
-};
+export type NotificationPreferences = Partial<Record<NotificationGroupKey, NotificationGroupValue>>;
 
 export interface NotificationPreferenceResponse {
   workspace_id: string;
