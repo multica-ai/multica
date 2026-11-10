@@ -36,6 +36,19 @@ func TestIssueTableRowsNegationAndRelations(t *testing.T) {
 	unassignedByOther := issue("unassigned", testutil.Cols{
 		"status": "in_progress", "creator_id": otherUser,
 	})
+	ledByMyAgent := dbfx.Squad(t, fmt.Sprintf("negate my squad %d", suffix), myAgent)
+	withMe := dbfx.Squad(t, fmt.Sprintf("negate squad with me %d", suffix), otherAgent)
+	dbfx.SquadMember(t, withMe, "member", testUserID)
+	notMine := dbfx.Squad(t, fmt.Sprintf("negate their squad %d", suffix), otherAgent)
+	mySquad := issue("my agent's squad", testutil.Cols{
+		"assignee_type": "squad", "assignee_id": ledByMyAgent, "creator_id": otherUser,
+	})
+	squadWithMe := issue("squad with me", testutil.Cols{
+		"assignee_type": "squad", "assignee_id": withMe, "creator_id": otherUser,
+	})
+	theirSquad := issue("their squad", testutil.Cols{
+		"assignee_type": "squad", "assignee_id": notMine, "creator_id": otherUser,
+	})
 
 	subscribe := func(issueID, userType, userID string) {
 		dbfx.InsertNoID(t, "issue_subscriber", testutil.Cols{
@@ -50,6 +63,7 @@ func TestIssueTableRowsNegationAndRelations(t *testing.T) {
 
 	fixture := map[string]struct{}{
 		assignedToMe: {}, mineByAgent: {}, theirAgent: {}, unassignedByOther: {},
+		mySquad: {}, squadWithMe: {}, theirSquad: {},
 	}
 	rows := func(filters issueTableFiltersRequest) []string {
 		t.Helper()
@@ -85,39 +99,42 @@ func TestIssueTableRowsNegationAndRelations(t *testing.T) {
 
 	assertRows("status is not done",
 		issueTableFiltersRequest{Statuses: []string{"done"}, Negate: []string{"statuses"}},
-		mineByAgent, theirAgent, unassignedByOther)
+		mineByAgent, theirAgent, unassignedByOther, mySquad, squadWithMe, theirSquad)
 	// The unassigned row has no assignee to compare: "is not" keeps it.
 	assertRows("assignee is not me keeps unassigned rows",
 		issueTableFiltersRequest{
 			Assignees: []issueTableActorRef{{Type: "member", ID: testUserID}},
 			Negate:    []string{"assignees"},
 		},
-		mineByAgent, theirAgent, unassignedByOther)
+		mineByAgent, theirAgent, unassignedByOther, mySquad, squadWithMe, theirSquad)
 	assertRows("assignee is not 'no assignee'",
 		issueTableFiltersRequest{IncludeNoAssignee: true, Negate: []string{"assignees"}},
-		assignedToMe, mineByAgent, theirAgent)
+		assignedToMe, mineByAgent, theirAgent, mySquad, squadWithMe, theirSquad)
 	assertRows("project is not P keeps projectless rows",
 		issueTableFiltersRequest{ProjectIDs: []string{project}, Negate: []string{"project_ids"}},
-		mineByAgent, unassignedByOther)
+		mineByAgent, unassignedByOther, mySquad, squadWithMe, theirSquad)
 	assertRows("negating a dimension without values changes nothing",
 		issueTableFiltersRequest{Negate: []string{"label_ids", "priorities"}},
-		assignedToMe, mineByAgent, theirAgent, unassignedByOther)
+		assignedToMe, mineByAgent, theirAgent, unassignedByOther, mySquad, squadWithMe, theirSquad)
 
 	assertRows("relation assigned",
 		issueTableFiltersRequest{Relations: []string{"assigned"}},
 		assignedToMe)
-	assertRows("relation my agents excludes other people's agents",
+	assertRows("relation my agents matches the involved scope: my agents and my squads",
 		issueTableFiltersRequest{Relations: []string{"my_agents"}},
-		mineByAgent)
+		mineByAgent, mySquad, squadWithMe)
 	assertRows("relations OR within the dimension",
 		issueTableFiltersRequest{Relations: []string{"assigned", "my_agents"}},
-		assignedToMe, mineByAgent)
+		assignedToMe, mineByAgent, mySquad, squadWithMe)
+	assertRows("relation is not my agents",
+		issueTableFiltersRequest{Relations: []string{"my_agents"}, Negate: []string{"relations"}},
+		assignedToMe, theirAgent, unassignedByOther, theirSquad)
 	assertRows("relation subscribed matches only my member subscriptions",
 		issueTableFiltersRequest{Relations: []string{"subscribed"}},
 		assignedToMe, theirAgent)
 	assertRows("relation is not subscribed",
 		issueTableFiltersRequest{Relations: []string{"subscribed"}, Negate: []string{"relations"}},
-		mineByAgent, unassignedByOther)
+		mineByAgent, unassignedByOther, mySquad, squadWithMe, theirSquad)
 	subscribedNotMine := issueTableFilterNode{Match: "all", Children: []issueTableFilterNode{
 		{Field: "relations", Values: rawValues("subscribed")},
 		{Field: "relations", Negate: true, Values: rawValues("assigned", "my_agents")},
@@ -127,7 +144,7 @@ func TestIssueTableRowsNegationAndRelations(t *testing.T) {
 		theirAgent)
 	assertRows("relation is not created by me",
 		issueTableFiltersRequest{Relations: []string{"created"}, Negate: []string{"relations"}},
-		mineByAgent, theirAgent, unassignedByOther)
+		mineByAgent, theirAgent, unassignedByOther, mySquad, squadWithMe, theirSquad)
 	assertRows("negation is per dimension and ANDs with the rest",
 		issueTableFiltersRequest{
 			Relations: []string{"assigned"},

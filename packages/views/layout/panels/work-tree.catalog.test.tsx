@@ -54,7 +54,7 @@ const TODO_STATUS = {
 
 const PROJECT = { id: "p1", title: "Desktop", status: "in_progress", issue_count: 4, done_count: 1 } as Project;
 
-let listIssues: ReturnType<typeof vi.fn>;
+let listIssueTableRows: ReturnType<typeof vi.fn>;
 let listIssueStatuses: ReturnType<typeof vi.fn>;
 
 function renderSection() {
@@ -79,10 +79,10 @@ function renderSection() {
 }
 
 beforeEach(() => {
-  listIssues = vi.fn(async () => ({ issues: [], total: 0 }));
+  listIssueTableRows = vi.fn(async () => ({ rows: [], total: 0, next_cursor: null }));
   listIssueStatuses = vi.fn(async () => ({ statuses: [TODO_STATUS], categories: [], total: 1 }));
   setApiInstance({
-    listIssues,
+    listIssueTableRows,
     listIssueStatuses,
     getIssueViewPreference: vi.fn(() => new Promise(() => {})),
   } as unknown as ApiClient);
@@ -97,11 +97,13 @@ describe("ProjectsSection project row", () => {
 
     const retry = await screen.findByRole("button", { name: "Retry" });
     expect(screen.getByText("Couldn't load issues")).toBeInTheDocument();
-    expect(listIssues).not.toHaveBeenCalled();
+    expect(listIssueTableRows).not.toHaveBeenCalled();
 
     fireEvent.click(retry);
 
     await screen.findByText("No issues");
-    expect(listIssues).toHaveBeenCalledWith(expect.objectContaining({ project_id: "p1" }));
+    expect(listIssueTableRows).toHaveBeenCalledWith(
+      expect.objectContaining({ query: expect.objectContaining({ scope: { kind: "project", project_id: "p1" } }) }),
+    );
   });
 });

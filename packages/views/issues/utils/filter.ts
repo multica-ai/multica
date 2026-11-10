@@ -400,6 +400,9 @@ function issueMatchesRelation(
     case "created":
       return issue.creator_type === "member" && issue.creator_id === context.userId;
     case "my_agents":
+      // Squads count when the viewer or one of their agents is in them; only
+      // the server knows squad membership.
+      if (issue.assignee_type === "squad") return undefined;
       if (!context.myAgentIds) return undefined;
       return (
         issue.assignee_type === "agent" &&

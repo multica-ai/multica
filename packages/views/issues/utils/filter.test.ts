@@ -829,6 +829,19 @@ describe("relation filters", () => {
     ).toEqual(["2", "3", "4"]);
   });
 
+  it("leaves squad issues under my_agents to the server, either way round", () => {
+    const withSquad = [...issues, makeIssue({ id: "squad", assignee_type: "squad", assignee_id: "s-1" })];
+    const squadIds = (filters: Partial<IssueFilters>) =>
+      filterIssues(withSquad, { ...NO_FILTER, relationContext, ...filters }).map((i) => i.id);
+    expect(squadIds({ relationFilters: ["my_agents"] })).toEqual(["2", "squad"]);
+    expect(squadIds({ relationFilters: ["my_agents"], negatedFilters: ["relation"] })).toEqual([
+      "1",
+      "3",
+      "4",
+      "squad",
+    ]);
+  });
+
   it("answers subscribed without the viewer's agents, leaving only my_agents open", () => {
     const subscriptionsOnly = { userId: "u-1", subscribedIssueIds: new Set(["3"]) };
     expect(ids({ relationContext: subscriptionsOnly, relationFilters: ["subscribed"] })).toEqual(["3"]);

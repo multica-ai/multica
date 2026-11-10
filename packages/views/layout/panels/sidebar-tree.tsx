@@ -17,7 +17,7 @@ import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-st
 import { issueUnreadTarget, useIssueUnread } from "@multica/core/issues/unread";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
-import type { AgentTask, Issue, IssueUnread, ListIssuesParams } from "@multica/core/types";
+import type { AgentTask, Issue, IssueUnread } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { StatusIcon } from "../../issues/components/status-icon";
@@ -176,7 +176,9 @@ export function issueRowMenuOpenClass(active: boolean) {
   return active ? undefined : "data-popup-open:bg-surface-hover data-popup-open:text-foreground";
 }
 
-const EMPTY_PARAMS: ListIssuesParams = {};
+const EMPTY_PARAMS: SidebarIssuesRequest = {
+  table: { scope: { kind: "workspace" }, filters: {}, sort: { field: "position", direction: "asc" } },
+};
 const EMPTY_ISSUES: Issue[] = [];
 
 /**
