@@ -486,7 +486,7 @@ const scrollToIndexSpy = vi.hoisted(() => vi.fn());
 const scrollIntoViewIndexSpy = vi.hoisted(() => vi.fn());
 const mockVirtualWindow = vi.hoisted(() => ({
   enabled: false, delayedViewport: false, lateScrollReset: false, offscreenViewport: false, pendingSizeCorrection: false, holdAtIndex: false,
-  targetId: "", scrollParent: null as HTMLElement | null,
+  targetId: "", targetHeight: 100, scrollParent: null as HTMLElement | null,
 }));
 
 vi.mock("react-virtuoso", () => ({
@@ -532,7 +532,7 @@ vi.mock("react-virtuoso", () => ({
       customScrollParent.getBoundingClientRect = () => new DOMRect(0, 0, 400, 200);
       const target = document.getElementById(`comment-${mockVirtualWindow.targetId}`);
       if (target) {
-        target.getBoundingClientRect = () => new DOMRect(0, 250 - customScrollParent.scrollTop, 400, 100);
+        target.getBoundingClientRect = () => new DOMRect(0, 250 - customScrollParent.scrollTop, 400, mockVirtualWindow.targetHeight);
         const row = target.closest<HTMLElement>("[data-item-index]");
         if (row) row.getBoundingClientRect = () => new DOMRect(0, -customScrollParent.scrollTop, 400, 500);
       }
@@ -579,6 +579,7 @@ beforeEach(() => {
   mockVirtualWindow.offscreenViewport = false;
   mockVirtualWindow.lateScrollReset = false;
   mockVirtualWindow.targetId = "";
+  mockVirtualWindow.targetHeight = 100;
   mockVirtualWindow.scrollParent = null;
   scrollIntoViewIndexSpy.mockClear();
   scrollIntoViewSpy.mockClear();
@@ -915,10 +916,11 @@ describe("IssueDetail (shared)", () => {
     expect(screen.queryByRole("dialog", { name: /deliverables$/ })).toBeNull();
   });
 
-  it("keeps a deliverable reply centered while the outer virtual list corrects its size", async () => {
+  it.each([100, 1200])("keeps a %i-pixel deliverable reply visible while the virtual list corrects its size", async (height) => {
     mockVirtualWindow.enabled = true;
     mockVirtualWindow.holdAtIndex = true;
     mockVirtualWindow.targetId = "image-reply";
+    mockVirtualWindow.targetHeight = height;
     const history = Array.from({ length: 120 }, (_, index) => ({
       ...mockTimeline[0]!, id: `history-${index}`, parent_id: null, source_task_id: undefined,
       content: `Historical comment ${index}`,
@@ -941,7 +943,7 @@ describe("IssueDetail (shared)", () => {
       document.getElementById("comment-image-reply"),
     )).toBe(true));
     await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 150)); });
-    expect(mockVirtualWindow.scrollParent?.scrollTop).toBe(200);
+    expect(mockVirtualWindow.scrollParent?.scrollTop).toBe(height === 100 ? 200 : 234);
     expect(document.querySelectorAll('[id^="comment-history-"]').length).toBeLessThanOrEqual(8);
     expect(mockApiObj.listComments).not.toHaveBeenCalled();
     const jumps = scrollIntoViewIndexSpy.mock.calls.length;

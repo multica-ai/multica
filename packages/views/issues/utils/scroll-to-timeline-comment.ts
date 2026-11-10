@@ -8,7 +8,7 @@ export function scrollToTimelineComment({
   virtualizer: VirtuosoHandle | null;
   index: number;
   commentId: string;
-  /** Comment top relative to the viewport; omitted for centered deep links. */
+  /** Comment top relative to the viewport; omitted to center comments that fit. */
   offset?: number;
   onMounted?: () => void;
   onComplete?: () => void;
@@ -22,9 +22,13 @@ export function scrollToTimelineComment({
   const alignTarget = (el: HTMLElement, reveal = false) => {
     const c = container.getBoundingClientRect();
     const e = el.getBoundingClientRect();
-    // A tall reply must first enter the observer's range, even when the saved
-    // position lies thousands of pixels below its still-unmeasured top.
-    const viewportOffset = reveal || offset === undefined ? (container.clientHeight - e.height) / 2 : offset;
+    const thread = el.closest<HTMLElement>("[data-item-index]") ?? el.parentElement?.closest<HTMLElement>('[id^="comment-"]');
+    const stickyBar = thread?.querySelector<HTMLElement>("[data-thread-sticky-bar]");
+    const headerHeight = stickyBar && !el.contains(stickyBar) ? stickyBar.offsetHeight : 0;
+    // Keep a tall comment's beginning visible below its enclosing sticky bar.
+    // Centering its full height would put its header above the viewport.
+    const centeredOffset = Math.max(16 + headerHeight, (container.clientHeight - e.height) / 2);
+    const viewportOffset = reveal || offset === undefined ? centeredOffset : offset;
     const target = Math.max(0, container.scrollTop + e.top - c.top - viewportOffset);
     const row = virtualizer ? el.closest<HTMLElement>("[data-item-index]") : null;
     if (row) {
