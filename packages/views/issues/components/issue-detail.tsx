@@ -4010,6 +4010,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       increaseViewportBy={{ top: 800, bottom: 800 }}
                       totalListHeightChanged={handleTimelineHeightChange}
                       computeItemKey={(_i, item) => `${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}
+                      // Also load-bearing for long threads: keepThreadRowAnchored
+                      // corrects after Virtuoso's resize handling in the same frame.
                       skipAnimationFrameInResizeObserver
                       // followOutput intentionally NOT set. Virtuoso treats
                       // it as a sticky "is at bottom" flag and resets

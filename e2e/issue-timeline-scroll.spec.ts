@@ -94,3 +94,91 @@ test("Inbox restores the current reply after leaving a virtualized long thread",
     await api.cleanup();
   }
 });
+
+// Scroll the timeline up in fixed steps and record how far a visible reply
+// moved beyond the step itself. Anything but ~0 is content jumping under the
+// reader: an offscreen reply above the viewport swapped its placeholder
+// height for its real one without the scroll position following it.
+async function scrollUpShifts(page: Page, steps: number, delta = 150) {
+  const shifts: number[] = [];
+  for (let i = 0; i < steps; i++) {
+    const shift = await page.evaluate(async (d) => {
+      const container = document.querySelector<HTMLElement>('[data-tab-scroll-root^="main:"]')!;
+      const c = container.getBoundingClientRect();
+      // The first comment whose top edge is on screen. Its own resize cannot
+      // move its top, so only layout changes above it show up as a shift.
+      const ref = [...container.querySelectorAll<HTMLElement>('[id^="comment-"]')]
+        .find((el) => { const r = el.getBoundingClientRect(); return r.top > c.top + 80 && r.top < c.bottom - 80; });
+      if (!ref) return null;
+      const before = ref.getBoundingClientRect().top;
+      const scrollBefore = container.scrollTop;
+      container.scrollTop = scrollBefore - d;
+      const applied = scrollBefore - container.scrollTop;
+      for (let f = 0; f < 10; f++) await new Promise((r) => requestAnimationFrame(r));
+      await new Promise((r) => setTimeout(r, 60));
+      return ref.isConnected ? ref.getBoundingClientRect().top - before - applied : null;
+    }, delta);
+    if (shift !== null) shifts.push(Math.round(shift));
+  }
+  return shifts;
+}
+
+test("scrolling up a virtualized long thread keeps the reading position steady", async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const api = await createTestApi();
+  try {
+    const slug = await loginAsDefault(page);
+    const title = "Long-thread upward scroll stability";
+    // Two shapes that trip Virtuoso's own compensation differently: one-line
+    // replies ending the timeline, and mixed heights followed by more comments.
+    // Both are mostly far shorter than an unmeasured row's estimate.
+    const seedThread = async (issueTitle: string, mixed: boolean) => {
+      const issue = await api.createIssue(issueTitle, { description: "Short description." });
+      for (let i = 0; i < 5; i++) await api.createComment(issue.id, `Outer comment ${i}`);
+      const root = await api.createComment(issue.id, "Long discussion root");
+      let targetId = "";
+      for (let i = 0; i < 120; i++) {
+        const body = mixed && i % 17 === 0
+          ? Array.from({ length: 12 }, (_, j) => `Paragraph ${j}. ${"Long reply content. ".repeat(6)}`).join("\n\n")
+          : `Reply ${i}. Short answer.`;
+        const reply = await api.createComment(issue.id, i === 100 ? "Notification reply 100" : body, root.id);
+        if (i === 100) targetId = reply.id;
+      }
+      if (mixed) for (let i = 0; i < 4; i++) await api.createComment(issue.id, `After thread ${i}`);
+      return { issue, targetId };
+    };
+    const short = await seedThread(title, false);
+    const mixed = await seedThread("Long-thread mixed heights", true);
+    const targetId = short.targetId;
+    await api.seedCommentNotification(short.issue.id, targetId, title);
+
+    // 1. Land on a reply deep in the thread from Inbox, then read upward.
+    await page.goto(`/${slug}/inbox`);
+    await page.getByText(title, { exact: true }).first().click();
+    await expect(page.locator(`#comment-${targetId}`)).toBeVisible();
+    await expect.poll(() => readingPosition(page, targetId).then((p) => p?.mounted && p.visible)).toBe(true);
+    await page.waitForTimeout(1000);
+    const fromInbox = await scrollUpShifts(page, 40);
+    expect(fromInbox.length).toBeGreaterThan(30);
+    expect.soft(fromInbox.filter((s) => Math.abs(s) > 2), `Inbox landing shifts: ${fromInbox}`).toEqual([]);
+
+    // 2. Open the issue normally, go to the end of the discussion, read upward.
+    await page.goto(`/${slug}/issues/${mixed.issue.id}`);
+    await expect(page.getByText("Long discussion root")).toBeVisible();
+    const toEnd = () => page.evaluate(() => {
+      const c = document.querySelector<HTMLElement>('[data-tab-scroll-root^="main:"]')!;
+      c.scrollTop = c.scrollHeight;
+    });
+    await toEnd();
+    await page.waitForTimeout(800);
+    await toEnd();
+    await page.waitForTimeout(800);
+    const fromEnd = await scrollUpShifts(page, 40);
+    expect(fromEnd.length).toBeGreaterThan(30);
+    expect.soft(fromEnd.filter((s) => Math.abs(s) > 2), `End-of-thread shifts: ${fromEnd}`).toEqual([]);
+    expect(await page.locator('[data-virtual-thread-mounted="true"]').count()).toBeLessThan(60);
+  } finally {
+    await api.cleanup();
+  }
+});

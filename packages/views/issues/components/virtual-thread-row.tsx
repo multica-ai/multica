@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { keepThreadRowAnchored } from "../utils/keep-thread-rows-anchored";
 
 /** Keep anchors addressable without parsing every offscreen Markdown reply. */
 export function VirtualThreadRow({ id, taskId, scrollParent, children }: {
@@ -31,6 +32,14 @@ export function VirtualThreadRow({ id, taskId, scrollParent, children }: {
     observer.observe(node);
     return () => observer.disconnect();
   }, [scrollParent]);
+
+  // The placeholder's height becomes the real one in this commit. Keep the
+  // content below a row above the viewport from moving (see the helper).
+  useLayoutEffect(() => {
+    const node = ref.current;
+    if (!node || !visible || !scrollParent) return;
+    keepThreadRowAnchored(scrollParent, node, height.current);
+  }, [visible, scrollParent]);
 
   useEffect(() => {
     const node = ref.current;
