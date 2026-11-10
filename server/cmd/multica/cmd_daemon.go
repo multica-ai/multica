@@ -167,7 +167,7 @@ type daemonRuntimeProbe struct {
 }
 
 func runDaemonProbeRuntimes(cmd *cobra.Command, _ []string) error {
-	if err := requireHumanLocalCommand("daemon probe-runtimes"); err != nil {
+	if err := requireHumanLocalDaemonCommand(cmd, "daemon probe-runtimes"); err != nil {
 		return err
 	}
 	cfg, err := daemon.LoadConfig(daemon.Overrides{
@@ -553,7 +553,7 @@ func requireDaemonAuth(profile string) error {
 }
 
 func runDaemonStart(cmd *cobra.Command, _ []string) error {
-	if err := requireHumanLocalCommand("daemon start"); err != nil {
+	if err := requireHumanLocalDaemonCommand(cmd, "daemon start"); err != nil {
 		return err
 	}
 	foreground, _ := cmd.Flags().GetBool("foreground")
@@ -721,50 +721,18 @@ func runDaemonBackgroundUnlocked(cmd *cobra.Command) error {
 		fmt.Fprintf(os.Stderr, "Warning: could not write PID file: %v\n", err)
 	}
 
-	// Poll the health endpoint until the daemon reports ready ("running") or we
-	// time out. The daemon binds the health port almost immediately but reports
-	// status:"starting" until preflight finishes (PAT renew + initial workspace
-	// sync, which exec's every configured agent for version detection and can
-	// take ~20s on a cold cache). Wait long enough to cover that so a healthy
-	// cold start is not misreported as a failure.
-	const startupTimeout = 45 * time.Second
-	deadline := time.Now().Add(startupTimeout)
-	started := false
-	lastStatus := ""
-	for time.Now().Before(deadline) {
-		select {
-		case waitErr := <-waitCh:
-			return daemonStartupFailureError(daemonStartupLogs{
-				logPath:      logPath,
-				logOffset:    logOffset,
-				errLogPath:   errLogPath,
-				errLogOffset: errLogOffset,
-			}, waitErr, profile, resolveDaemonServerURL(cmd, profile))
-		case <-time.After(500 * time.Millisecond):
-		}
-		// The child publishes the port only after it has bound the listener.
-		// Ignore a stale record from a previous daemon, even if its port works.
-		record, ok := readDaemonPortRecord(profile)
-		if !ok || record.PID != pid {
-			continue
-		}
-		hctx, hcancel := context.WithTimeout(context.Background(), 2*time.Second)
-		health = checkDaemonHealthOnPort(hctx, record.Port)
-		hcancel()
-		lastStatus, _ = health["status"].(string)
-		if lastStatus == "running" && health["profile"] == profile && health["pid"] == float64(pid) {
-			started = true
-			break
-		}
+	started, err := waitForDaemonStartup(waitCh, pid, profile, 45*time.Second, daemonStartupLogs{
+		logPath:      logPath,
+		logOffset:    logOffset,
+		errLogPath:   errLogPath,
+		errLogOffset: errLogOffset,
+	}, resolveDaemonServerURL(cmd, profile))
+	if err != nil {
+		return err
 	}
 	if !started {
 		if ctx := cmd.Context(); ctx != nil && ctx.Value(daemonTransitionOwnerKey{}) != nil {
 			return fmt.Errorf("replacement service readiness is not confirmed; it may still be starting; inspect daemon status and logs at %s before retrying", logPath)
-		}
-		if lastStatus == "starting" {
-			fmt.Fprintf(os.Stderr, "Daemon is still starting after %s (agent detection / workspace sync is taking longer than expected). Check logs:\n  %s\n", startupTimeout, logPath)
-		} else {
-			fmt.Fprintf(os.Stderr, "Daemon may not have started successfully. Check logs:\n  %s\n  %s (crash output)\n", logPath, errLogPath)
 		}
 		return nil
 	}
@@ -776,6 +744,49 @@ func runDaemonBackgroundUnlocked(cmd *cobra.Command) error {
 	}
 	fmt.Fprintf(os.Stderr, "Logs: %s\n", logPath)
 	return nil
+}
+
+func waitForDaemonStartup(waitCh <-chan error, pid int, profile string, startupTimeout time.Duration, logs daemonStartupLogs, serverURL string) (bool, error) {
+	// Poll the health endpoint until the daemon reports ready ("running") or we
+	// time out. The daemon binds the health port almost immediately but reports
+	// status:"starting" until preflight finishes (PAT renew + initial workspace
+	// sync, which exec's every configured agent for version detection and can
+	// take ~20s on a cold cache). Wait long enough to cover that so a healthy
+	// cold start is not misreported as a failure.
+	deadline := time.Now().Add(startupTimeout)
+	lastStatus := ""
+	for time.Now().Before(deadline) {
+		select {
+		case waitErr := <-waitCh:
+			return false, daemonStartupFailureError(logs, waitErr, profile, serverURL)
+		case <-time.After(500 * time.Millisecond):
+		}
+		// The child publishes the port only after it has bound the listener.
+		// Ignore a stale record from a previous daemon, even if its port works.
+		record, ok := readDaemonPortRecord(profile)
+		if !ok || record.PID != pid {
+			continue
+		}
+		hctx, hcancel := context.WithTimeout(context.Background(), 2*time.Second)
+		health := checkDaemonHealthOnPort(hctx, record.Port)
+		hcancel()
+		// Only this child's responses can establish readiness or earn the
+		// slow-start grace period. Keep the last verified status if a later
+		// probe fails or the port answers for a different daemon.
+		if health["profile"] != profile || health["pid"] != float64(pid) {
+			continue
+		}
+		lastStatus, _ = health["status"].(string)
+		if lastStatus == "running" {
+			return true, nil
+		}
+	}
+	if lastStatus == "starting" {
+		fmt.Fprintf(os.Stderr, "Daemon is still starting after %s (agent detection / workspace sync is taking longer than expected). Check logs:\n  %s\n", startupTimeout, logs.logPath)
+		return false, nil
+	}
+
+	return false, fmt.Errorf("daemon startup timed out after %s without a matching health response. Check logs:\n  %s\n  %s (crash output)", startupTimeout, logs.logPath, logs.errLogPath)
 }
 
 // resolveDaemonServerURL resolves the server URL the daemon will talk to,
@@ -1492,7 +1503,7 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 // --- daemon stop ---
 
 func runDaemonStop(cmd *cobra.Command, _ []string) error {
-	if err := requireHumanLocalCommand("daemon stop"); err != nil {
+	if err := requireHumanLocalDaemonCommand(cmd, "daemon stop"); err != nil {
 		return err
 	}
 	operation, err := acquireBackendOperation(cmd)
@@ -1645,8 +1656,8 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	}
 	output, _ := cmd.Flags().GetString("output")
 
-	// Safe to list profiles here: daemonStatusHealthPort already rejected an
-	// explicit --profile inside a daemon-managed task.
+	// Safe to list profiles here: daemonStatusHealthPort already rejected every
+	// explicit --profile inside a daemon-managed task except a dev-env one.
 	if err := requireKnownProfile(profile); err != nil {
 		var unknown *unknownProfileError
 		if output == "json" && errors.As(err, &unknown) {
@@ -1684,9 +1695,10 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	// possible — and the task's profile is necessarily empty (--profile is
 	// rejected) while the host may run a named one, which would make every
 	// named-profile host look like a conflict and break the standing contract
-	// that `daemon status` in a task reports on the daemon hosting it.
+	// that `daemon status` in a task reports on the daemon hosting it. A dev-env
+	// profile's port is profile-derived like any other, so it keeps the check.
 	var conflict *daemonProfileMismatchError
-	if daemonAlive(health) && !inDaemonTaskIdentityContext() {
+	if daemonAlive(health) && (!inDaemonTaskIdentityContext() || devEnvOwnsDaemonProfile(cmd)) {
 		errors.As(daemonIdentityMismatch(health, profile, healthPort), &conflict)
 	}
 
@@ -1729,10 +1741,11 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 // whatever profile name the caller passes, so deriving the port there would let
 // a task report on a daemon that is not the one hosting it — and for a task
 // hosted by a named-profile daemon it would silently probe the default daemon
-// instead. A missing port fails closed rather than guessing.
+// instead. A missing port fails closed rather than guessing. The one exception
+// is a dev-env profile, which names a daemon the task started itself.
 func daemonStatusHealthPort(cmd *cobra.Command) (int, error) {
 	profile := resolveProfile(cmd)
-	if !inDaemonTaskIdentityContext() {
+	if !inDaemonTaskIdentityContext() || devEnvOwnsDaemonProfile(cmd) {
 		return resolveHealthPort(profile), nil
 	}
 	if profile != "" {

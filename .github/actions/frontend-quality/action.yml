@@ -15,6 +15,12 @@ runs:
         node --test scripts/check-ui-radius-tokens.test.mjs
         node scripts/check-ui-radius-tokens.mjs
 
+    - name: Check shared dependencies use the pnpm catalog
+      shell: bash
+      run: |
+        node --test scripts/check-dependency-catalog.test.mjs
+        node scripts/check-dependency-catalog.mjs
+
     # Keep existing knip findings advisory in either caller.
     - name: Check for dead code and phantom dependencies (knip)
       continue-on-error: true

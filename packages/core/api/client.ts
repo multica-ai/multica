@@ -3,7 +3,7 @@ import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
 import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema } from "./schemas";
-import type { ArchivedInboxFilters } from "../inbox/filter-store";
+import { archivedInboxQuery, type ArchivedInboxFilters } from "../inbox/filters";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import { parseQoderConnection, parseQoderCatalog, type QoderInput } from "../runtimes/qoder-schema";
 import { configStore } from "../config";
@@ -198,6 +198,21 @@ import type {
   ComposioToolkit,
   ComposioConnection,
   ComposioConnectInitResponse,
+  AppsOverview,
+  AppCatalogResponse,
+  AppRule,
+  AppTool,
+  AppToolCall,
+  IssueAppCall,
+  AppRequestList,
+  TeamAppImpact,
+  AppRequest,
+  AgentApp,
+  AppAccountScope,
+  AppActionClass,
+  AppActionPolicy,
+  AppCatalogMode,
+  UpdateAgentAppsRequest,
   SlackInstallation,
   ListSlackInstallationsResponse,
   RegisterSlackBYORequest,
@@ -422,6 +437,21 @@ import {
   InboxUnreadSummarySchema,
   EMPTY_INBOX_UNREAD_SUMMARY,
   IssueUnreadPageSchema,
+  AgentAppsResponseSchema,
+  AppActivityResponseSchema,
+  AppCatalogResponseSchema,
+  AppConnectInitSchema,
+  AppRequestListSchema,
+  AppRequestSchema,
+  AppRulesResponseSchema,
+  AppSettingsResponseSchema,
+  AppToolsResponseSchema,
+  AppsOverviewSchema,
+  EMPTY_APP_CATALOG,
+  EMPTY_APPS_OVERVIEW,
+  EMPTY_TEAM_APP_IMPACT,
+  IssueAppCallsResponseSchema,
+  TeamAppImpactSchema,
   EMPTY_ISSUE_UNREAD_PAGE,
   SubscribedIssueIdsSchema,
   IssueInboxReadSchema,
@@ -1124,6 +1154,21 @@ export class ApiClient {
     });
   }
 
+  /** Rejects with 409 when the server decides the prompt is not due. */
+  async claimStarPromptShowing(): Promise<User> {
+    const raw = await this.fetch<unknown>("/api/me/star-prompt/claim", { method: "POST" });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "POST /api/me/star-prompt/claim",
+    });
+  }
+
+  async markStarPromptStarred(): Promise<User> {
+    const raw = await this.fetch<unknown>("/api/me/star-prompt/starred", { method: "POST" });
+    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
+      endpoint: "POST /api/me/star-prompt/starred",
+    });
+  }
+
   async updateMe(data: UpdateMeRequest): Promise<User> {
     const raw = await this.fetch<unknown>("/api/me", {
       method: "PATCH",
@@ -1143,6 +1188,8 @@ export class ApiClient {
     if (params?.q?.trim()) search.set("q", params.q.trim());
     if (params?.status) search.set("status", params.status);
     if (params?.statuses?.length) search.set("statuses", params.statuses.join(","));
+    if (params?.status_category) search.set("status_category", params.status_category);
+    if (params?.status_categories?.length) search.set("status_categories", params.status_categories.join(","));
     if (params?.priority) search.set("priority", params.priority);
     if (params?.priorities?.length) search.set("priorities", params.priorities.join(","));
     if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
@@ -3024,12 +3071,7 @@ export class ApiClient {
   }
 
   private archivedInboxParams(filters: ArchivedInboxFilters): URLSearchParams {
-    const params = new URLSearchParams();
-    if (filters.statuses.length) params.set("statuses", [...filters.statuses].sort().join(","));
-    if (filters.priorities.length) params.set("priorities", [...filters.priorities].sort().join(","));
-    if (filters.actors.length) params.set("actors", [...filters.actors].sort().join(","));
-    if (filters.unreadOnly) params.set("unread_only", "true");
-    return params;
+    return new URLSearchParams(archivedInboxQuery(filters));
   }
 
   async listArchivedInboxPage(filters: ArchivedInboxFilters, options: {
@@ -5332,6 +5374,143 @@ export class ApiClient {
     await this.fetch(`/api/integrations/composio/connections/${connectionId}`, {
       method: "DELETE",
     });
+  }
+
+  // Connected Apps (MUL-8516). Workspace-scoped: team accounts belong to the
+  // workspace, personal accounts to the caller.
+
+  async getAppsOverview(): Promise<AppsOverview> {
+    const raw = await this.fetch<unknown>(`/api/apps`);
+    return parseWithFallback(raw, AppsOverviewSchema, EMPTY_APPS_OVERVIEW, { endpoint: "GET /api/apps" });
+  }
+
+  /** The workspace's catalog; `view: "all"` (admins) lists every app with
+   * whether the catalog allows it. */
+  async listAppCatalog(view?: "all"): Promise<AppCatalogResponse> {
+    const raw = await this.fetch<unknown>(`/api/apps/catalog${view ? `?view=${view}` : ""}`);
+    return parseWithFallback(raw, AppCatalogResponseSchema, EMPTY_APP_CATALOG, { endpoint: "GET /api/apps/catalog" });
+  }
+
+  /** Starts connecting an account; the browser is sent to the returned URL
+   * and comes back to `returnTo` (an app path) when given. */
+  async connectApp(scope: AppAccountScope, toolkitSlug: string, returnTo?: string): Promise<ComposioConnectInitResponse> {
+    const raw = await this.fetch<unknown>(`/api/apps/${scope}/connect`, {
+      method: "POST",
+      body: JSON.stringify({ toolkit_slug: toolkitSlug, ...(returnTo ? { return_to: returnTo } : {}) }),
+    });
+    const endpoint = `POST /api/apps/${scope}/connect`;
+    const parsed = parseWithFallback<ComposioConnectInitResponse | null>(raw, AppConnectInitSchema, null, { endpoint });
+    if (!parsed) throw new Error(`Malformed response from ${endpoint}`);
+    return parsed;
+  }
+
+  async disconnectTeamApp(connectionId: string): Promise<void> {
+    await this.fetch(`/api/apps/team/connections/${connectionId}`, { method: "DELETE" });
+  }
+
+  async getTeamAppImpact(toolkitSlug: string): Promise<TeamAppImpact> {
+    const raw = await this.fetch<unknown>(`/api/apps/team/impact?toolkit_slug=${encodeURIComponent(toolkitSlug)}`);
+    return parseWithFallback(raw, TeamAppImpactSchema, EMPTY_TEAM_APP_IMPACT, { endpoint: "GET /api/apps/team/impact" });
+  }
+
+  // Write responses parse to null when malformed; callers refetch instead of
+  // caching a guess.
+
+  async updateAppSettings(body: {
+    catalog_mode: AppCatalogMode;
+    allowed_toolkits?: string[];
+  }): Promise<{ catalog_mode: AppCatalogMode; allowed_toolkits: string[] } | null> {
+    const raw = await this.fetch<unknown>(`/api/apps/settings`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+    return parseWithFallback(raw, AppSettingsResponseSchema, null, { endpoint: "PUT /api/apps/settings" });
+  }
+
+  async listAppTools(toolkitSlug: string): Promise<{ tools: AppTool[] }> {
+    const raw = await this.fetch<unknown>(`/api/apps/tools?toolkit_slug=${encodeURIComponent(toolkitSlug)}`);
+    return parseWithFallback(raw, AppToolsResponseSchema, { tools: [] }, { endpoint: "GET /api/apps/tools" });
+  }
+
+  /** Corrects one tool's class; `null` restores the automatic class. */
+  async updateAppToolClass(toolkitSlug: string, toolSlug: string, actionClass: AppActionClass | null): Promise<void> {
+    await this.fetch(`/api/apps/tools/class`, {
+      method: "PUT",
+      body: JSON.stringify({ toolkit_slug: toolkitSlug, tool_slug: toolSlug, action_class: actionClass ?? "" }),
+    });
+  }
+
+  async listIssueAppCalls(issueId: string): Promise<{ calls: IssueAppCall[] }> {
+    const raw = await this.fetch<unknown>(`/api/app-calls?issue_id=${encodeURIComponent(issueId)}`);
+    return parseWithFallback(raw, IssueAppCallsResponseSchema, { calls: [] }, { endpoint: "GET /api/app-calls" });
+  }
+
+  async getAppRules(toolkitSlug: string, scope: AppAccountScope): Promise<{ rules: AppRule[] }> {
+    const raw = await this.fetch<unknown>(`/api/apps/rules?toolkit_slug=${encodeURIComponent(toolkitSlug)}&scope=${scope}`);
+    return parseWithFallback(raw, AppRulesResponseSchema, { rules: [] }, { endpoint: "GET /api/apps/rules" });
+  }
+
+  async updateAppRules(
+    toolkitSlug: string,
+    scope: AppAccountScope,
+    rules: { action_class: AppActionClass; policy: AppActionPolicy }[],
+  ): Promise<{ rules: AppRule[] } | null> {
+    const raw = await this.fetch<unknown>(`/api/apps/rules?toolkit_slug=${encodeURIComponent(toolkitSlug)}&scope=${scope}`, {
+      method: "PUT",
+      body: JSON.stringify({ rules }),
+    });
+    return parseWithFallback(raw, AppRulesResponseSchema, null, { endpoint: "PUT /api/apps/rules" });
+  }
+
+  async listAppActivity(toolkitSlug: string, scope: AppAccountScope): Promise<{ calls: AppToolCall[] }> {
+    const raw = await this.fetch<unknown>(`/api/apps/activity?toolkit_slug=${encodeURIComponent(toolkitSlug)}&scope=${scope}`);
+    return parseWithFallback(raw, AppActivityResponseSchema, { calls: [] }, { endpoint: "GET /api/apps/activity" });
+  }
+
+  async listAgentApps(agentId: string): Promise<{ apps: AgentApp[] }> {
+    const raw = await this.fetch<unknown>(`/api/agents/${agentId}/apps`);
+    return parseWithFallback(raw, AgentAppsResponseSchema, { apps: [] }, { endpoint: "GET /api/agents/:id/apps" });
+  }
+
+  async updateAgentApps(agentId: string, body: UpdateAgentAppsRequest): Promise<{ apps: AgentApp[] } | null> {
+    const raw = await this.fetch<unknown>(`/api/agents/${agentId}/apps`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+    return parseWithFallback(raw, AgentAppsResponseSchema, null, { endpoint: "PUT /api/agents/:id/apps" });
+  }
+
+  /** Requests of an issue, of a chat, or (neither given) the caller's
+   * pending ones. The first page holds every pending request and the newest
+   * decided ones; `before` (a `next_before`) pages back through history. */
+  async listAppRequests(
+    params: { issueId?: string; chatSessionId?: string; before?: string } = {},
+  ): Promise<AppRequestList> {
+    const qs = new URLSearchParams();
+    if (params.issueId) qs.set("issue_id", params.issueId);
+    if (params.chatSessionId) qs.set("chat_session_id", params.chatSessionId);
+    if (params.before) qs.set("before", params.before);
+    const query = qs.toString();
+    const raw = await this.fetch<unknown>(`/api/app-requests${query ? `?${query}` : ""}`);
+    return parseWithFallback(raw, AppRequestListSchema, { requests: [], next_before: null }, {
+      endpoint: "GET /api/app-requests",
+    });
+  }
+
+  async approveAppRequest(requestId: string, args?: Record<string, unknown>): Promise<AppRequest | null> {
+    const raw = await this.fetch<unknown>(`/api/app-requests/${requestId}/approve`, {
+      method: "POST",
+      body: JSON.stringify(args ? { arguments: args } : {}),
+    });
+    return parseWithFallback(raw, AppRequestSchema, null, { endpoint: "POST /api/app-requests/:id/approve" });
+  }
+
+  async rejectAppRequest(requestId: string, reason?: string): Promise<AppRequest | null> {
+    const raw = await this.fetch<unknown>(`/api/app-requests/${requestId}/reject`, {
+      method: "POST",
+      body: JSON.stringify(reason ? { reason } : {}),
+    });
+    return parseWithFallback(raw, AppRequestSchema, null, { endpoint: "POST /api/app-requests/:id/reject" });
   }
 
   // Slack integration (MUL-3666)

@@ -1102,7 +1102,7 @@ function RunDetails({ id, run, reason }: { id: string; run: TimelineRun; reason:
         {run.task.branch_name && (
           <>
             <dt className="text-muted-foreground">{t(($) => $.runs_timeline.detail_branch)}</dt>
-            <TruncatedTooltip content={run.task.branch_name}>
+            <TruncatedTooltip content={run.task.branch_name} focusable>
               <dd className="min-w-0 truncate font-mono text-micro">
                 {run.task.branch_name}
               </dd>

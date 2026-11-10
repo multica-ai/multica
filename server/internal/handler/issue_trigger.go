@@ -90,7 +90,7 @@ func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger 
 		// member actor is threaded; otherwise attribution falls back to the chain.
 		_, _ = h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID))
 	case "squad":
-		h.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, actorType, actorID, handoffNote)
+		h.enqueueSquadLeaderTask(ctx, issue, actorType, actorID, handoffNote, trigger.WorkflowHandoff)
 	}
 }
 

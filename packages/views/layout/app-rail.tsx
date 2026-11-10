@@ -270,12 +270,16 @@ export function AppRail({
     },
   };
 
+  // The 34px workspace tile is centred on the card's 48px header band, so it
+  // shares a centre line with the column and page titles: the card starts
+  // 8px down, plus (48 - 34) / 2. Desktop's card starts below its title bar,
+  // so it passes its own top inset with the same 7px.
   return (
     <nav
       aria-label={t(($) => $.rail.label)}
       data-slot="app-rail"
       className={cn(
-        "flex h-full w-14 shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden pt-3 pb-2.5 [scrollbar-width:none]",
+        "flex h-full w-14 shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden pt-[15px] pb-2.5 [scrollbar-width:none]",
         className,
       )}
     >
