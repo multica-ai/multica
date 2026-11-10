@@ -14,6 +14,13 @@
     "default": "Demander à Multica"
   },
   "bar": {
+    "history": "Historique des discussions",
+    "history_group": {
+      "today": "Aujourd'hui",
+      "week": "7 derniers jours",
+      "older": "Plus anciennes"
+    },
+    "close_chip": "Fermer {{title}}",
     "all_chats": "Toutes les discussions",
     "more_one": "{{count}} autre discussion",
     "more_other": "{{count}} autres discussions"

@@ -16,6 +16,13 @@
     "unread_many": "{{count}} непрочитанных чатов"
   },
   "bar": {
+    "history": "История чатов",
+    "history_group": {
+      "today": "Сегодня",
+      "week": "Последние 7 дней",
+      "older": "Ранее"
+    },
+    "close_chip": "Закрыть {{title}}",
     "all_chats": "Все чаты",
     "more_one": "Ещё {{count}} чат",
     "more_few": "Ещё {{count}} чата",

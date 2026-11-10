@@ -471,7 +471,10 @@
   },
   "chat": {
     "floating_label": "Fenêtre de discussion flottante",
-    "floating_hint": "Afficher le bouton de chat flottant sur chaque page."
+    "floating_hint": "Afficher le bouton de chat flottant sur chaque page.",
+    "ask_agent_label": "Agent de Demander à Multica",
+    "ask_agent_hint": "L'agent avec lequel démarre une nouvelle discussion depuis la barre du bas, dans cet espace de travail.",
+    "ask_agent_last_used": "Dernier utilisé"
   },
   "issue": {
     "opening": {

@@ -13,6 +13,13 @@
     "default": "Multica に質問"
   },
   "bar": {
+    "history": "チャット履歴",
+    "history_group": {
+      "today": "今日",
+      "week": "過去 7 日間",
+      "older": "それ以前"
+    },
+    "close_chip": "{{title}} を閉じる",
     "all_chats": "すべてのチャット",
     "more_other": "他 {{count}} 件のチャット"
   },

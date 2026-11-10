@@ -13,6 +13,13 @@
     "default": "Multica에 묻기"
   },
   "bar": {
+    "history": "채팅 기록",
+    "history_group": {
+      "today": "오늘",
+      "week": "지난 7일",
+      "older": "이전"
+    },
+    "close_chip": "{{title}} 닫기",
     "all_chats": "모든 채팅",
     "more_other": "채팅 {{count}}개 더 보기"
   },

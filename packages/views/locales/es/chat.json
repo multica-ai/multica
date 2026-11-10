@@ -14,6 +14,13 @@
     "default": "Pregunta a Multica"
   },
   "bar": {
+    "history": "Historial de chats",
+    "history_group": {
+      "today": "Hoy",
+      "week": "Últimos 7 días",
+      "older": "Anteriores"
+    },
+    "close_chip": "Cerrar {{title}}",
     "all_chats": "Todos los chats",
     "more_one": "{{count}} chat más",
     "more_other": "{{count}} chats más"

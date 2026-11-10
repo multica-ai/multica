@@ -85,6 +85,7 @@ import { useChatResize } from "./use-chat-resize";
 import { useVisualViewportKeyboard } from "./use-visual-viewport-keyboard";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { CHAT_WINDOW_INSET, useChatWindowAnchor } from "./use-chat-window-anchor";
+import { useFormatTimeAgo } from "./use-format-time-ago";
 import {
   hasInFlightPendingTask,
   isStillOnComposeTarget,
@@ -94,7 +95,7 @@ import {
 import { useChatProjectContextSupport } from "./use-chat-project-context-support";
 import { createLogger } from "@multica/core/logger";
 import type { Agent, Attachment, ChatMessage, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
-import { useLocale, useT } from "../../i18n";
+import { useT } from "../../i18n";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
@@ -1636,23 +1637,4 @@ function SessionDropdown({
       </Popover>
     </>
   );
-}
-
-function useFormatTimeAgo(): (dateStr: string) => string {
-  const { t } = useT("chat");
-  const locale = useLocale();
-  return (dateStr: string) => {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    if (diffMins < 1) return t(($) => $.session_history.time.just_now);
-    if (diffMins < 60) return t(($) => $.session_history.time.minutes, { count: diffMins });
-    if (diffHours < 24) return t(($) => $.session_history.time.hours, { count: diffHours });
-    if (diffDays < 7) return t(($) => $.session_history.time.days, { count: diffDays });
-    return date.toLocaleDateString(locale);
-  };
 }

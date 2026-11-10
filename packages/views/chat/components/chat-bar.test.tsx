@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chatSessionsOptions, pendingChatTasksOptions } from "@multica/core/chat/queries";
 import type { ChatSession } from "@multica/core/types";
@@ -14,10 +14,15 @@ const h = vi.hoisted(() => ({
     isOpen: false,
     activeSessionId: null as string | null,
     selectedAgentId: "agent-1" as string | null,
+    quickChatAgentId: null as string | null,
+    chatBarKept: [] as string[],
+    chatBarDismissed: {} as Record<string, string>,
     setOpen: vi.fn(),
-    toggle: vi.fn(),
     setActiveSession: vi.fn(),
     setSelectedAgentId: vi.fn(),
+    setSelectedProjectId: vi.fn(),
+    keepChatInBar: vi.fn(),
+    dismissChatFromBar: vi.fn(),
   },
 }));
 
@@ -90,6 +95,9 @@ beforeEach(() => {
   h.chat.isOpen = false;
   h.chat.activeSessionId = null;
   h.chat.selectedAgentId = "agent-1";
+  h.chat.quickChatAgentId = null;
+  h.chat.chatBarKept = [];
+  h.chat.chatBarDismissed = {};
 });
 
 describe("ChatBar", () => {
@@ -108,6 +116,7 @@ describe("ChatBar", () => {
 
     expect(h.chat.setSelectedAgentId).toHaveBeenCalledWith("agent-2");
     expect(h.chat.setActiveSession).toHaveBeenCalledWith("Billing progress");
+    expect(h.chat.keepChatInBar).toHaveBeenCalledWith("Billing progress");
     expect(h.chat.setOpen).toHaveBeenCalledWith(true);
   });
 
@@ -139,29 +148,112 @@ describe("ChatBar", () => {
     expect(h.chat.setActiveSession).not.toHaveBeenCalled();
   });
 
-  it("keeps a chip for the open chat even when it is neither running nor unread", () => {
+  it("keeps the chip of a chat opened here once it is read and closed", () => {
+    h.chat.chatBarKept = ["Read and done"];
+    renderBar(SESSIONS);
+
+    expect(screen.getByRole("button", { name: "Read and done" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("gives whatever chat the window shows a chip", () => {
     h.chat.isOpen = true;
     h.chat.activeSessionId = "Read and done";
     renderBar(SESSIONS);
 
     expect(screen.getByRole("button", { name: "Read and done" })).toHaveAttribute("aria-pressed", "true");
+    expect(h.chat.keepChatInBar).toHaveBeenCalledWith("Read and done");
   });
 
-  it("presses Ask Multica while the window is open on a chat with no chip yet", () => {
+  it("closes a chip, and the window with it when it is open on that chat", () => {
+    h.chat.isOpen = true;
+    h.chat.activeSessionId = "Weekly report";
+    renderBar(SESSIONS);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Weekly report" }));
+
+    expect(h.chat.setOpen).toHaveBeenCalledWith(false);
+    expect(h.chat.dismissChatFromBar).toHaveBeenCalledWith("Weekly report", SESSIONS[2]!.updated_at);
+  });
+
+  it("closes another chat's chip without touching the window", () => {
+    h.chat.isOpen = true;
+    h.chat.activeSessionId = "Weekly report";
+    renderBar(SESSIONS, [SESSIONS[1]!.id]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Billing progress" }));
+
+    expect(h.chat.setOpen).not.toHaveBeenCalled();
+    expect(h.chat.dismissChatFromBar).toHaveBeenCalledWith("Billing progress", SESSIONS[1]!.updated_at);
+  });
+
+  it("starts a new chat from Ask Multica, leaving the open chat behind", () => {
+    h.chat.isOpen = true;
+    h.chat.activeSessionId = "Weekly report";
+    renderBar(SESSIONS);
+
+    const ask = screen.getByRole("button", { name: "Ask Multica" });
+    expect(ask).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(ask);
+
+    expect(h.chat.setActiveSession).toHaveBeenCalledWith(null);
+    expect(h.chat.setSelectedProjectId).toHaveBeenCalledWith(null);
+    expect(h.chat.setOpen).toHaveBeenCalledWith(true);
+    expect(h.chat.setSelectedAgentId).not.toHaveBeenCalled();
+  });
+
+  it("starts the new chat with the agent set in Settings", () => {
+    h.chat.quickChatAgentId = "agent-9";
+    renderBar(SESSIONS);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask Multica" }));
+
+    expect(h.chat.setSelectedAgentId).toHaveBeenCalledWith("agent-9");
+    expect(h.chat.setActiveSession).toHaveBeenCalledWith(null);
+  });
+
+  it("closes the window from Ask Multica while it shows the new chat", () => {
     h.chat.isOpen = true;
     h.chat.activeSessionId = null;
     renderBar(SESSIONS);
 
     const ask = screen.getByRole("button", { name: "Ask Multica" });
     expect(ask).toHaveAttribute("aria-pressed", "true");
-
     fireEvent.click(ask);
-    expect(h.chat.toggle).toHaveBeenCalledTimes(1);
+
+    expect(h.chat.setOpen).toHaveBeenCalledWith(false);
+    expect(h.chat.setActiveSession).not.toHaveBeenCalled();
   });
 
-  it("links to every chat", () => {
-    renderBar([]);
+  it("opens a chat from the history, grouped by when it last moved", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 10, 11, 20) });
+    try {
+      renderBar([
+        session("From today", 1, { updated_at: new Date(2026, 10, 11, 9).toISOString() }),
+        session("From this week", 2, { updated_at: new Date(2026, 10, 8, 9).toISOString() }),
+        session("From long ago", 3, { updated_at: new Date(2026, 6, 1, 9).toISOString() }),
+        session("Archived", 4, { status: "archived" }),
+      ]);
 
-    expect(screen.getByRole("link", { name: "All chats" })).toHaveAttribute("href", "/acme/chat");
+      fireEvent.click(screen.getByRole("button", { name: "Chat history" }));
+
+      const today = await screen.findByRole("group", { name: "Today" });
+      expect(within(today).getByRole("button", { name: /From today/ })).toBeInTheDocument();
+      expect(
+        within(screen.getByRole("group", { name: "Last 7 days" })).getByRole("button", { name: /From this week/ }),
+      ).toBeInTheDocument();
+      expect(
+        within(screen.getByRole("group", { name: "Older" })).getByRole("button", { name: /From long ago/ }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Archived/ })).not.toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "All chats" })).toHaveAttribute("href", "/acme/chat");
+
+      fireEvent.click(screen.getByRole("button", { name: /From this week/ }));
+
+      expect(h.chat.keepChatInBar).toHaveBeenCalledWith("From this week");
+      expect(h.chat.setActiveSession).toHaveBeenCalledWith("From this week");
+      expect(h.chat.setOpen).toHaveBeenCalledWith(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

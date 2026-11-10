@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatSession } from "@multica/core/types";
-import { selectChatBarSessions } from "./chat-bar-sessions";
+import { chatActivity, selectChatBarSessions } from "./chat-bar-sessions";
 
 function session(id: string, minute: number, overrides: Partial<ChatSession> = {}): ChatSession {
   const at = new Date(Date.UTC(2026, 10, 11, 8, minute)).toISOString();
@@ -20,9 +20,22 @@ function session(id: string, minute: number, overrides: Partial<ChatSession> = {
 
 const ids = (items: { session: ChatSession }[]) => items.map((item) => item.session.id);
 
+function select(
+  input: Partial<Parameters<typeof selectChatBarSessions>[0]> & { sessions: ChatSession[] },
+) {
+  return selectChatBarSessions({
+    runningSessionIds: new Set(),
+    openSessionId: null,
+    kept: [],
+    dismissed: {},
+    maxVisible: 4,
+    ...input,
+  });
+}
+
 describe("selectChatBarSessions", () => {
   it("keeps only chats that are running, unread or open", () => {
-    const { visible, overflow } = selectChatBarSessions({
+    const { visible, overflow } = select({
       sessions: [
         session("idle", 1),
         session("running", 2),
@@ -43,8 +56,43 @@ describe("selectChatBarSessions", () => {
     expect(overflow).toEqual([]);
   });
 
+  it("keeps the chip of a chat that was opened here, after it is read and closed", () => {
+    const { visible } = select({
+      sessions: [session("opened", 1), session("never-opened", 2)],
+      kept: ["opened"],
+    });
+
+    expect(ids(visible)).toEqual(["opened"]);
+  });
+
+  it("hides a closed chip until its chat moves again", () => {
+    const quiet = session("closed", 1, { has_unread: true });
+    const moved = session("moved", 2, {
+      has_unread: true,
+      last_message: { created_at: new Date(Date.UTC(2026, 10, 11, 9)).toISOString() } as ChatSession["last_message"],
+    });
+    const { visible } = select({
+      sessions: [quiet, moved],
+      kept: ["closed"],
+      dismissed: { closed: chatActivity(quiet), moved: moved.updated_at },
+    });
+
+    expect(ids(visible)).toEqual(["moved"]);
+  });
+
+  it("shows the open chat even when its chip was closed", () => {
+    const closed = session("closed", 1);
+    const { visible } = select({
+      sessions: [closed],
+      openSessionId: "closed",
+      dismissed: { closed: chatActivity(closed) },
+    });
+
+    expect(ids(visible)).toEqual(["closed"]);
+  });
+
   it("leaves archived chats out even when they are unread or running", () => {
-    const { visible } = selectChatBarSessions({
+    const { visible } = select({
       sessions: [
         session("archived-unread", 1, { status: "archived", has_unread: true }),
         session("archived-running", 2, { status: "archived" }),
@@ -58,7 +106,7 @@ describe("selectChatBarSessions", () => {
   });
 
   it("orders by creation, so a newer message does not reorder the chips", () => {
-    const { visible } = selectChatBarSessions({
+    const { visible } = select({
       sessions: [
         session("older", 1, {
           has_unread: true,
@@ -75,7 +123,7 @@ describe("selectChatBarSessions", () => {
   });
 
   it("puts what does not fit into the overflow", () => {
-    const { visible, overflow } = selectChatBarSessions({
+    const { visible, overflow } = select({
       sessions: [1, 2, 3, 4].map((n) => session(`s${n}`, n, { has_unread: true })),
       runningSessionIds: new Set(),
       openSessionId: null,
@@ -87,7 +135,7 @@ describe("selectChatBarSessions", () => {
   });
 
   it("brings the open chat out of the overflow, because the window opens above its chip", () => {
-    const { visible, overflow } = selectChatBarSessions({
+    const { visible, overflow } = select({
       sessions: [1, 2, 3, 4].map((n) => session(`s${n}`, n, { has_unread: true })),
       runningSessionIds: new Set(),
       openSessionId: "s1",
@@ -99,7 +147,7 @@ describe("selectChatBarSessions", () => {
   });
 
   it("always has room for one chip", () => {
-    const { visible } = selectChatBarSessions({
+    const { visible } = select({
       sessions: [session("only", 1, { has_unread: true })],
       runningSessionIds: new Set(),
       openSessionId: null,

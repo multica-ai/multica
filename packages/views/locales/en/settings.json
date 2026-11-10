@@ -471,7 +471,10 @@
   },
   "chat": {
     "floating_label": "Floating chat window",
-    "floating_hint": "Show the floating chat button on every page."
+    "floating_hint": "Show the floating chat button on every page.",
+    "ask_agent_label": "Ask Multica agent",
+    "ask_agent_hint": "The agent a new chat from the bottom bar starts with, in this workspace.",
+    "ask_agent_last_used": "Last used"
   },
   "issue": {
     "opening": {

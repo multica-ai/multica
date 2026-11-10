@@ -13,6 +13,13 @@
     "default": "问 Multica"
   },
   "bar": {
+    "history": "对话历史",
+    "history_group": {
+      "today": "今天",
+      "week": "过去 7 天",
+      "older": "更早"
+    },
+    "close_chip": "关闭 {{title}}",
     "all_chats": "全部对话",
     "more_other": "另外 {{count}} 个对话"
   },
