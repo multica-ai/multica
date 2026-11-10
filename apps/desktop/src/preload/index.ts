@@ -306,6 +306,14 @@ const desktopAPI = {
   /** Listen for Cmd/Ctrl+Shift+N new-window requests. */
   onNewWindowShortcut: (callback: () => void) =>
     subscribeToMainRendererChannel(NEW_WINDOW_SHORTCUT_CHANNEL, () => callback()),
+  /** Read / write / test the HTTP proxy URL stored in desktop.json. */
+  proxy: {
+    get: (): Promise<string | null> => ipcRenderer.invoke("proxy:get"),
+    set: (url: string | null): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke("proxy:set", url),
+    test: (url: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke("proxy:test", url),
+  },
 };
 
 type DaemonReauthResult =

@@ -1,5 +1,5 @@
 import { app } from "electron";
-import { readFile } from "fs/promises";
+import { readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import {
   DEFAULT_RUNTIME_CONFIG,
@@ -58,3 +58,32 @@ function errorMessage(err: unknown): string {
 }
 
 export type { RuntimeConfig, RuntimeConfigResult };
+
+/**
+ * Merge a partial update into the existing desktop.json and write it back.
+ * Returns the updated config on success, or an error result.
+ */
+export async function updateDesktopConfig(
+  patch: Partial<RuntimeConfig>,
+  configPath?: string,
+): Promise<RuntimeConfigResult> {
+  const path = configPath ?? desktopConfigPath();
+  let current: RuntimeConfig;
+  try {
+    const raw = await readFile(path, "utf-8");
+    current = parseRuntimeConfig(raw);
+  } catch (err) {
+    if (isMissingFileError(err)) {
+      current = { ...DEFAULT_RUNTIME_CONFIG };
+    } else {
+      return { ok: false, error: { message: errorMessage(err) } };
+    }
+  }
+  const merged: RuntimeConfig = { ...current, ...patch };
+  try {
+    await writeFile(path, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+  } catch (err) {
+    return { ok: false, error: { message: errorMessage(err) } };
+  }
+  return { ok: true, config: merged };
+}

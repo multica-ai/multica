@@ -1217,7 +1217,8 @@
   },
   "desktop": {
     "tabs": {
-      "updates": "更新"
+      "updates": "更新",
+      "network": "网络"
     },
     "tab_bar": {
       "pin": "固定标签页",
@@ -1311,6 +1312,21 @@
       "reconnect_failed": "无法重新连接守护进程",
       "try_again_moment": "请稍后重试。",
       "try_again": "请重试。"
+    },
+    "network": {
+      "title": "网络",
+      "proxy_title": "HTTP 代理",
+      "proxy_description": "将所有网络流量通过 HTTP 代理路由。在某些拦截非 GET 方法的企业网络中需要此设置。",
+      "proxy_placeholder": "http://proxy.example.com:8080",
+      "proxy_saved": "代理设置已保存",
+      "proxy_save_failed": "保存代理设置失败",
+      "test_button": "测试连接",
+      "testing": "测试中…",
+      "test_success": "代理连接成功",
+      "test_failed": "代理连接失败",
+      "save_button": "保存",
+      "restart_notice_title": "需要重启",
+      "restart_notice": "重启应用以使代理设置完全生效。在重启前，已有的 WebSocket 连接不受影响。"
     }
   },
   "members": {

@@ -960,7 +960,8 @@
   },
   "desktop": {
     "tabs": {
-      "updates": "업데이트"
+      "updates": "업데이트",
+      "network": "네트워크"
     },
     "tab_bar": {
       "pin": "탭 고정",
@@ -1054,6 +1055,21 @@
       "reconnect_failed": "데몬에 다시 연결하지 못했습니다",
       "try_again_moment": "잠시 후 다시 시도하세요.",
       "try_again": "다시 시도하세요."
+    },
+    "network": {
+      "title": "네트워크",
+      "proxy_title": "HTTP 프록시",
+      "proxy_description": "모든 네트워크 트래픽을 HTTP 프록시를 통해 라우팅합니다. GET이 아닌 메서드를 차단하는 기업 네트워크에서 필요합니다.",
+      "proxy_placeholder": "http://proxy.example.com:8080",
+      "proxy_saved": "프록시 설정이 저장되었습니다",
+      "proxy_save_failed": "프록시 설정 저장에 실패했습니다",
+      "test_button": "연결 테스트",
+      "testing": "테스트 중…",
+      "test_success": "프록시 연결 성공",
+      "test_failed": "프록시 연결 실패",
+      "save_button": "저장",
+      "restart_notice_title": "재시작 필요",
+      "restart_notice": "프록시 변경 사항을 완전히 적용하려면 앱을 재시작하세요. 재시작 전 기존 WebSocket 연결에는 영향을 주지 않습니다."
     }
   },
   "members": {

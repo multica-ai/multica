@@ -1223,7 +1223,8 @@
   },
   "desktop": {
     "tabs": {
-      "updates": "Mises à jour"
+      "updates": "Mises à jour",
+      "network": "Réseau"
     },
     "tab_bar": {
       "pin": "Épingler l'onglet",
@@ -1321,6 +1322,21 @@
       "reconnect_failed": "Impossible de reconnecter le démon",
       "try_again_moment": "Veuillez réessayer dans un instant.",
       "try_again": "Veuillez réessayer."
+    },
+    "network": {
+      "title": "Réseau",
+      "proxy_title": "Proxy HTTP",
+      "proxy_description": "Acheminer tout le trafic réseau via un proxy HTTP. Nécessaire dans certains réseaux d'entreprise qui bloquent les méthodes non-GET.",
+      "proxy_placeholder": "http://proxy.example.com:8080",
+      "proxy_saved": "Paramètres de proxy enregistrés",
+      "proxy_save_failed": "Échec de l'enregistrement des paramètres de proxy",
+      "test_button": "Tester la connexion",
+      "testing": "Test en cours…",
+      "test_success": "Connexion proxy réussie",
+      "test_failed": "Échec de la connexion proxy",
+      "save_button": "Enregistrer",
+      "restart_notice_title": "Redémarrage requis",
+      "restart_notice": "Redémarrez l'application pour que les modifications de proxy prennent pleinement effet. Les connexions WebSocket existantes ne sont pas affectées avant le redémarrage."
     }
   },
   "members": {

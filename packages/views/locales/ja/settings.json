@@ -1217,7 +1217,8 @@
   },
   "desktop": {
     "tabs": {
-      "updates": "アップデート"
+      "updates": "アップデート",
+      "network": "ネットワーク"
     },
     "tab_bar": {
       "pin": "タブをピン留め",
@@ -1311,6 +1312,21 @@
       "reconnect_failed": "デーモンに再接続できませんでした",
       "try_again_moment": "しばらくしてからもう一度お試しください。",
       "try_again": "もう一度お試しください。"
+    },
+    "network": {
+      "title": "ネットワーク",
+      "proxy_title": "HTTP プロキシ",
+      "proxy_description": "すべてのネットワークトラフィックを HTTP プロキシ経由でルーティングします。GET 以外のメソッドをブロックする企業ネットワークで必要です。",
+      "proxy_placeholder": "http://proxy.example.com:8080",
+      "proxy_saved": "プロキシ設定を保存しました",
+      "proxy_save_failed": "プロキシ設定の保存に失敗しました",
+      "test_button": "接続テスト",
+      "testing": "テスト中…",
+      "test_success": "プロキシ接続成功",
+      "test_failed": "プロキシ接続失敗",
+      "save_button": "保存",
+      "restart_notice_title": "再起動が必要",
+      "restart_notice": "プロキシ変更を完全に適用するにはアプリを再起動してください。再起動前の WebSocket 接続には影響しません。"
     }
   },
   "members": {

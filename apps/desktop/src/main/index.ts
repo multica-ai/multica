@@ -7,6 +7,7 @@ import {
   nativeImage,
   Notification,
   screen,
+  session,
 } from "electron";
 import { homedir } from "os";
 import { join } from "path";
@@ -28,7 +29,9 @@ import { installNavigationGestures } from "./navigation-gestures";
 import { installNavigationGuard } from "./navigation-guard";
 import { createRendererWebPreferences } from "./renderer-web-preferences";
 import { getAppVersion } from "./app-version";
-import { loadRuntimeConfig } from "./runtime-config-loader";
+import { loadRuntimeConfig, updateDesktopConfig } from "./runtime-config-loader";
+import { setProxyUrl, getProxyUrl } from "./proxy-fetch";
+import { normalizeProxyUrl } from "../shared/runtime-config";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import {
   RENDERER_ROUTE_CONTEXT_CHANNEL,
@@ -788,6 +791,22 @@ if (!gotTheLock) {
       },
     });
 
+    // Apply proxy from runtime config (desktop.json `proxyUrl`).
+    // session.setProxy must be called after app.whenReady() — we are
+    // inside the ready handler so that constraint is satisfied.
+    if (runtimeConfigResult.ok && runtimeConfigResult.config.proxyUrl) {
+      const proxy = runtimeConfigResult.config.proxyUrl;
+      setProxyUrl(proxy);
+      const bypassRules = "localhost,127.0.0.1,::1,<local>";
+      session.defaultSession.setProxy({ proxyRules: proxy, proxyBypassRules: bypassRules });
+      // Propagate to Go daemon process via environment.
+      process.env.HTTP_PROXY = proxy;
+      process.env.HTTPS_PROXY = proxy;
+      process.env.NO_PROXY = process.env.NO_PROXY
+        ? `${process.env.NO_PROXY},localhost,127.0.0.1,::1`
+        : "localhost,127.0.0.1,::1";
+    }
+
     electronApp.setAppUserModelId(
       is.dev ? "ai.multica.desktop.dev" : "ai.multica.desktop",
     );
@@ -872,6 +891,61 @@ if (!gotTheLock) {
     // blocking error and must not silently fall back to the cloud defaults.
     ipcMain.on("runtime-config:get", (event) => {
       event.returnValue = runtimeConfigResult;
+    });
+
+    // Proxy IPC — read/write/test the desktop.json `proxyUrl` field.
+    ipcMain.handle("proxy:get", () => getProxyUrl());
+
+    ipcMain.handle("proxy:set", async (_event, url: string | null) => {
+      let normalized: string | undefined;
+      if (url) {
+        try {
+          normalized = normalizeProxyUrl(url);
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+      const patch = normalized ? { proxyUrl: normalized } : {};
+      // Remove proxyUrl key when clearing: spread won't delete it, so handle
+      // the delete case explicitly via a separate write path.
+      if (!normalized) {
+        // Write desktop.json without proxyUrl.
+        const result = await updateDesktopConfig({ proxyUrl: undefined } as Partial<import("../shared/runtime-config").RuntimeConfig>);
+        if (!result.ok) return result;
+      } else {
+        const result = await updateDesktopConfig(patch);
+        if (!result.ok) return result;
+      }
+      // Hot-update in-memory proxy and Chromium session.
+      setProxyUrl(normalized ?? null);
+      if (normalized) {
+        const bypassRules = "localhost,127.0.0.1,::1,<local>";
+        session.defaultSession.setProxy({ proxyRules: normalized, proxyBypassRules: bypassRules });
+        process.env.HTTP_PROXY = normalized;
+        process.env.HTTPS_PROXY = normalized;
+        if (!process.env.NO_PROXY) {
+          process.env.NO_PROXY = "localhost,127.0.0.1,::1";
+        }
+      } else {
+        session.defaultSession.setProxy({});
+        delete process.env.HTTP_PROXY;
+        delete process.env.HTTPS_PROXY;
+      }
+      return { ok: true };
+    });
+
+    ipcMain.handle("proxy:test", async (_event, url: string) => {
+      try {
+        const { ProxyAgent, fetch: undiciFetch } = await import("undici");
+        const agent = new ProxyAgent(url);
+        const res = await undiciFetch("https://api.multica.ai/health", {
+          dispatcher: agent,
+          signal: AbortSignal.timeout(10_000),
+        } as Parameters<typeof undiciFetch>[1]);
+        return { ok: res.ok };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
     });
 
     ipcMain.on(RENDERER_ROUTE_CONTEXT_CHANNEL, (event, context: unknown) => {

@@ -1205,7 +1205,8 @@
   },
   "desktop": {
     "tabs": {
-      "updates": "Actualizaciones"
+      "updates": "Actualizaciones",
+      "network": "Red"
     },
     "tab_bar": {
       "pin": "Fijar pestaña",
@@ -1303,6 +1304,21 @@
       "reconnect_failed": "No se ha podido reconectar el daemon",
       "try_again_moment": "Inténtalo de nuevo en un momento.",
       "try_again": "Inténtalo de nuevo."
+    },
+    "network": {
+      "title": "Red",
+      "proxy_title": "Proxy HTTP",
+      "proxy_description": "Enrutar todo el tráfico de red a través de un proxy HTTP. Necesario en algunas redes corporativas que bloquean métodos que no sean GET.",
+      "proxy_placeholder": "http://proxy.example.com:8080",
+      "proxy_saved": "Configuración de proxy guardada",
+      "proxy_save_failed": "Error al guardar la configuración de proxy",
+      "test_button": "Probar conexión",
+      "testing": "Probando…",
+      "test_success": "Conexión proxy exitosa",
+      "test_failed": "Error en la conexión proxy",
+      "save_button": "Guardar",
+      "restart_notice_title": "Reinicio requerido",
+      "restart_notice": "Reinicia la aplicación para que los cambios de proxy surtan efecto completo. Las conexiones WebSocket existentes no se ven afectadas hasta el reinicio."
     }
   },
   "members": {

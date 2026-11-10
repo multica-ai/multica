@@ -1217,7 +1217,8 @@
   },
   "desktop": {
     "tabs": {
-      "updates": "更新"
+      "updates": "更新",
+      "network": "網路"
     },
     "tab_bar": {
       "pin": "固定標籤頁",
@@ -1311,6 +1312,21 @@
       "reconnect_failed": "無法重新連線守護程序",
       "try_again_moment": "請稍後重試。",
       "try_again": "請重試。"
+    },
+    "network": {
+      "title": "網路",
+      "proxy_title": "HTTP 代理",
+      "proxy_description": "將所有網路流量透過 HTTP 代理路由。在某些攔截非 GET 方法的企業網路中需要此設定。",
+      "proxy_placeholder": "http://proxy.example.com:8080",
+      "proxy_saved": "代理設定已儲存",
+      "proxy_save_failed": "儲存代理設定失敗",
+      "test_button": "測試連線",
+      "testing": "測試中…",
+      "test_success": "代理連線成功",
+      "test_failed": "代理連線失敗",
+      "save_button": "儲存",
+      "restart_notice_title": "需要重新啟動",
+      "restart_notice": "重新啟動應用程式以使代理設定完全生效。在重新啟動前，已有的 WebSocket 連線不受影響。"
     }
   },
   "members": {
