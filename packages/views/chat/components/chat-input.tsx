@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { LocateFixed, TriangleAlert, X } from "@multica/ui/icons";
+import { Scan, TriangleAlert, X } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
@@ -762,7 +762,7 @@ export function ChatInput({
               data-slot="chat-page-context"
               className="inline-flex h-6 min-w-0 max-w-full items-center gap-1.5 rounded-md bg-surface-raised pr-0.5 pl-2 text-caption ring-1 ring-surface-border"
             >
-              <LocateFixed aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+              <Scan aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
               <span className="shrink-0 font-medium text-foreground">{attachedPage.label}</span>
               {attachedPage.type === "issue" && attachedPage.description && (
                 <span className="min-w-0 truncate text-muted-foreground">{attachedPage.description}</span>
@@ -869,7 +869,7 @@ export function ChatInput({
               shortcut={<ShortcutKeycaps shortcut={PAGE_CONTEXT_SHORTCUT} decorative />}
               className="text-muted-foreground aria-pressed:bg-accent aria-pressed:text-foreground"
             >
-              <LocateFixed />
+              <Scan />
             </IconButton>
           )}
           <SubmitButton
