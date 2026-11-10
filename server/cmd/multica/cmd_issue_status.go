@@ -53,6 +53,9 @@ This edits the catalog. To change an issue's CURRENT status, use
 'multica issue status <issue-id> <status>'. Mutations require workspace
 owner/admin; reading is open to every member.
 
+References accept a key, ID, or name. Names prefer active statuses;
+ambiguous names require a key or ID.
+
 Icon values are presentation-only: dotted, circle, half, three_quarters,
 check, slash, cross. Empty keeps the category default.`,
 }
@@ -150,7 +153,8 @@ func fetchIssueStatuses(ctx context.Context, client *cli.APIClient, includeArchi
 
 // resolveIssueStatusRef matches an id, a key, or a name. Key wins over name
 // because the key is what agent instructions and workflows reference; the
-// API path uses the id.
+// API path uses the id. Names prefer active statuses, since an archived name
+// can be reused, and must identify a single status within the preferred set.
 func resolveIssueStatusRef(statuses []issueStatusDTO, ref string) (issueStatusDTO, error) {
 	trimmed := strings.TrimSpace(ref)
 	for _, s := range statuses {
@@ -163,10 +167,30 @@ func resolveIssueStatusRef(statuses []issueStatusDTO, ref string) (issueStatusDT
 			return s, nil
 		}
 	}
+	var active, archived []issueStatusDTO
 	for _, s := range statuses {
-		if strings.EqualFold(s.Name, trimmed) {
-			return s, nil
+		if !strings.EqualFold(s.Name, trimmed) {
+			continue
 		}
+		if s.ArchivedAt == nil {
+			active = append(active, s)
+		} else {
+			archived = append(archived, s)
+		}
+	}
+	matches := active
+	if len(matches) == 0 {
+		matches = archived
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		keys := make([]string, 0, len(matches))
+		for _, s := range matches {
+			keys = append(keys, s.Key)
+		}
+		return issueStatusDTO{}, fmt.Errorf("status name %q is ambiguous; use a key or ID: %s", ref, strings.Join(keys, ", "))
 	}
 	available := make([]string, 0, len(statuses))
 	for _, s := range statuses {

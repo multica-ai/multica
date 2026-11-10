@@ -18,6 +18,7 @@ type issueStatusTestServer struct {
 	statuses []issueStatusDTO
 	posts    []map[string]any
 	patches  []map[string]any
+	patchIDs []string
 	deletes  []string
 }
 
@@ -61,6 +62,7 @@ func newIssueStatusTestServer(t *testing.T) *issueStatusTestServer {
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			s.patches = append(s.patches, body)
+			s.patchIDs = append(s.patchIDs, id)
 			updated := issueStatusDTO{}
 			for _, status := range s.statuses {
 				if status.ID == id {
@@ -113,6 +115,104 @@ func issueStatusTestCmd() *cobra.Command {
 	cmd.Flags().Float64("position", 0, "")
 	cmd.Flags().Bool("include-archived", false, "")
 	return cmd
+}
+
+func TestIssueStatusResolveRef(t *testing.T) {
+	archived := issueStatusDTO{ID: "status-old", Key: "old_spec", Name: "Spec review", ArchivedAt: ptrString("2026-11-01T00:00:00Z")}
+	active := issueStatusDTO{ID: "status-current", Key: "spec_review", Name: "Spec review"}
+	otherArchived := issueStatusDTO{ID: "status-older", Key: "older_spec", Name: "SPEC REVIEW", ArchivedAt: archived.ArchivedAt}
+	otherActive := issueStatusDTO{ID: "status-other", Key: "other_spec", Name: "SPEC REVIEW"}
+	for _, tt := range []struct {
+		name     string
+		statuses []issueStatusDTO
+		ref      string
+		wantID   string
+		wantKeys []string
+	}{
+		{name: "archived before active", statuses: []issueStatusDTO{archived, active}, ref: "Spec review", wantID: active.ID},
+		{name: "active before archived", statuses: []issueStatusDTO{active, archived}, ref: "Spec review", wantID: active.ID},
+		{name: "trimmed case insensitive name", statuses: []issueStatusDTO{archived, active}, ref: "  SPEC REVIEW  ", wantID: active.ID},
+		{name: "single archived name", statuses: []issueStatusDTO{archived}, ref: "Spec review", wantID: archived.ID},
+		{name: "archived ID", statuses: []issueStatusDTO{active, archived}, ref: archived.ID, wantID: archived.ID},
+		{name: "archived key", statuses: []issueStatusDTO{active, archived}, ref: "OLD_SPEC", wantID: archived.ID},
+		{name: "ID before name", statuses: []issueStatusDTO{{ID: "name-match", Name: archived.ID}, archived}, ref: archived.ID, wantID: archived.ID},
+		{name: "key before name", statuses: []issueStatusDTO{{ID: "name-match", Name: archived.Key}, archived}, ref: archived.Key, wantID: archived.ID},
+		{name: "multiple archived names", statuses: []issueStatusDTO{archived, otherArchived}, ref: "Spec review", wantKeys: []string{archived.Key, otherArchived.Key}},
+		{name: "multiple active names", statuses: []issueStatusDTO{archived, active, otherActive}, ref: "Spec review", wantKeys: []string{active.Key, otherActive.Key}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveIssueStatusRef(tt.statuses, tt.ref)
+			if len(tt.wantKeys) > 0 {
+				if err == nil {
+					t.Fatalf("resolved ambiguous name to %q; want an error", got.ID)
+				}
+				for _, text := range append(tt.wantKeys, "ambiguous", "key", "ID") {
+					if !strings.Contains(err.Error(), text) {
+						t.Errorf("error %q should contain %q", err, text)
+					}
+				}
+				return
+			}
+			if err != nil || got.ID != tt.wantID {
+				t.Fatalf("resolve %q = %q, %v; want %q", tt.ref, got.ID, err, tt.wantID)
+			}
+		})
+	}
+}
+
+func TestIssueStatusMutationsByRecreatedName(t *testing.T) {
+	for _, operation := range []struct {
+		name string
+		run  func(*cobra.Command, []string) error
+	}{
+		{name: "update", run: runIssueStatusUpdate},
+		{name: "archive", run: runIssueStatusArchive},
+	} {
+		t.Run(operation.name, func(t *testing.T) {
+			api := newIssueStatusTestServer(t)
+			api.statuses = []issueStatusDTO{
+				{ID: "status-retired", Key: "spec_review", Name: "Spec review", ArchivedAt: ptrString("2026-11-01T00:00:00Z")},
+				{ID: "status-current", Key: "spec_review_2", Name: "Spec review"},
+			}
+			cmd := issueStatusTestCmd()
+			_ = cmd.Flags().Set("output", "json")
+			_ = cmd.Flags().Set("icon", "three_quarters")
+			out, err := captureStdout(t, func() error { return operation.run(cmd, []string{"Spec review"}) })
+			if err != nil {
+				t.Fatalf("%s: %v", operation.name, err)
+			}
+			var got issueStatusDTO
+			if err := json.Unmarshal([]byte(out), &got); err != nil {
+				t.Fatalf("unmarshal: %v\n%s", err, out)
+			}
+			if got.ID != "status-current" {
+				t.Fatalf("%s selected %q, want status-current", operation.name, got.ID)
+			}
+			ids := api.patchIDs
+			if operation.name == "archive" {
+				ids = api.deletes
+			}
+			if len(ids) != 1 || ids[0] != "status-current" {
+				t.Fatalf("%s targeted %v, want only status-current", operation.name, ids)
+			}
+		})
+		t.Run(operation.name+" rejects ambiguous name", func(t *testing.T) {
+			api := newIssueStatusTestServer(t)
+			api.statuses = []issueStatusDTO{
+				{ID: "status-retired", Key: "spec_review", Name: "Spec review", ArchivedAt: ptrString("2026-11-01T00:00:00Z")},
+				{ID: "status-retired-again", Key: "spec_review_2", Name: "Spec review", ArchivedAt: ptrString("2026-11-02T00:00:00Z")},
+			}
+			cmd := issueStatusTestCmd()
+			_ = cmd.Flags().Set("icon", "three_quarters")
+			_, err := captureStdout(t, func() error { return operation.run(cmd, []string{"Spec review"}) })
+			if err == nil || !strings.Contains(err.Error(), "ambiguous") {
+				t.Fatalf("%s error = %v, want ambiguous name", operation.name, err)
+			}
+			if len(api.patches) != 0 || len(api.deletes) != 0 {
+				t.Fatalf("ambiguous name caused mutations: patches=%v, deletes=%v", api.patches, api.deletes)
+			}
+		})
+	}
 }
 
 func TestIssueStatusUpdateByKeySendsIcon(t *testing.T) {
