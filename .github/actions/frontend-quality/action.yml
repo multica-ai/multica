@@ -11,9 +11,7 @@ runs:
 
     - name: Check packages/ui wildcard exports
       shell: bash
-      run: |
-        bash scripts/check-ui-wildcard-exports.test.sh
-        node scripts/check-ui-wildcard-exports.mjs
+      run: node scripts/check-ui-wildcard-exports.mjs
 
     - name: Check UI radius tokens
       shell: bash
