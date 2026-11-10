@@ -11,28 +11,33 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// validNotifGroups is the set of notification preference group keys that the
-// API accepts. Keys not in this set are rejected. `system_notifications` is
-// not an inbox event group — it's a delivery-channel toggle controlling
-// whether native OS notification banners fire — but it shares the same
-// preferences map so a single endpoint covers all user notification
-// preferences.
-var validNotifGroups = map[string]bool{
-	"assignments":          true,
-	"status_changes":       true,
-	"comments":             true,
-	"chat_replies":         true,
-	"mentions":             true,
-	"updates":              true,
-	"agent_activity":       true,
-	"new_issues":           true,
-	"system_notifications": true,
-}
+// notifGroupValues is the value set shared by every mute group key.
+var notifGroupValues = map[string]bool{"all": true, "muted": true}
 
-// validNotifValues is the set of allowed preference values per group.
-var validNotifValues = map[string]bool{
-	"all":   true,
-	"muted": true,
+// focusedRuleValues is the value set of each focused-inbox rule toggle.
+var focusedRuleValues = map[string]bool{"on": true, "off": true}
+
+// validNotifPreferences maps every accepted preference key to its allowed
+// values; keys outside it are rejected. `system_notifications` is not an inbox
+// event group — it is a delivery-channel toggle for native OS banners — but it
+// shares this map so one endpoint covers all user notification preferences.
+var validNotifPreferences = map[string]map[string]bool{
+	"assignments":          notifGroupValues,
+	"status_changes":       notifGroupValues,
+	"comments":             notifGroupValues,
+	"chat_replies":         notifGroupValues,
+	"mentions":             notifGroupValues,
+	"updates":              notifGroupValues,
+	"agent_activity":       notifGroupValues,
+	"new_issues":           notifGroupValues,
+	"system_notifications": notifGroupValues,
+
+	"inbox_mode":             {"all": true, "focused": true},
+	"focused_assigned":       focusedRuleValues,
+	"focused_blocked":        focusedRuleValues,
+	"focused_mentioned":      focusedRuleValues,
+	"focused_thread_reply":   focusedRuleValues,
+	"focused_agent_activity": focusedRuleValues,
 }
 
 func (h *Handler) GetNotificationPreferences(w http.ResponseWriter, r *http.Request) {
@@ -87,11 +92,12 @@ func decodeNotificationPreferenceRequest(w http.ResponseWriter, r *http.Request)
 	}
 
 	for k, v := range req.Preferences {
-		if !validNotifGroups[k] {
+		values, ok := validNotifPreferences[k]
+		if !ok {
 			writeError(w, http.StatusBadRequest, "invalid preference group: "+k)
 			return nil, false
 		}
-		if !validNotifValues[v] {
+		if !values[v] {
 			writeError(w, http.StatusBadRequest, "invalid preference value: "+v)
 			return nil, false
 		}

@@ -1,0 +1,3 @@
+ALTER TABLE notification_preference DROP CONSTRAINT IF EXISTS notification_preference_focused_rules_valid;
+ALTER TABLE notification_preference DROP CONSTRAINT IF EXISTS notification_preference_inbox_mode_valid;
+ALTER TABLE notification_preference DROP CONSTRAINT IF EXISTS notification_preference_values_are_strings;
