@@ -734,7 +734,7 @@
       "add_failed_toast": "No se ha podido añadir la skill"
     },
     "integrations": {
-      "members_note": "Solo los propietarios y administradores del espacio de trabajo pueden gestionar esta conexión. Puedes ver los bots conectados en Ajustes → Integraciones."
+      "members_note": "Consulta y gestiona los canales de mensajería en la página del agente."
     },
     "activity": {
       "status": {

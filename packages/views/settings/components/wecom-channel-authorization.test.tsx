@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
@@ -37,7 +43,9 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 vi.mock("@multica/core/wecom", () => ({
-  wecomKeys: { installations: (wsId: string) => ["wecom", "installations", wsId] },
+  wecomKeys: {
+    installations: (wsId: string) => ["wecom", "installations", wsId],
+  },
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -45,7 +53,9 @@ vi.mock("@multica/core/api", () => ({
   ApiError: FakeApiError,
   // Same contract as the real helper: the body's `code`, when there is one.
   errorCode: (e: unknown) =>
-    e instanceof FakeApiError ? (e.body as { code?: string } | undefined)?.code : undefined,
+    e instanceof FakeApiError
+      ? (e.body as { code?: string } | undefined)?.code
+      : undefined,
 }));
 
 vi.mock("sonner", () => ({
@@ -55,10 +65,12 @@ vi.mock("sonner", () => ({
 // react-qr-code renders an <svg> that jsdom does not need; a stub keeps the
 // assertion on "the QR is showing" rather than on its pixels.
 vi.mock("react-qr-code", () => ({
-  QRCode: ({ value }: { value: string }) => <div data-testid="qr" data-value={value} />,
+  QRCode: ({ value }: { value: string }) => (
+    <div data-testid="qr" data-value={value} />
+  ),
 }));
 
-import { WecomScanInstallDialog } from "./wecom-scan-install-dialog";
+import { WecomChannelAuthorization } from "./wecom-channel-authorization";
 
 const TEST_RESOURCES = { en: { common: enCommon, settings: enSettings } };
 
@@ -71,7 +83,11 @@ async function renderDialog(onClose = vi.fn()) {
   await act(async () => {
     render(
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
-        <WecomScanInstallDialog wsId="workspace-1" agentId="agent-1" onClose={onClose} />
+        <WecomChannelAuthorization
+          wsId="workspace-1"
+          agentId="agent-1"
+          onClose={onClose}
+        />
       </I18nProvider>,
     );
   });
@@ -87,13 +103,16 @@ beforeEach(() => {
   // jsdom has no crypto.randomUUID in every environment version.
   if (!globalThis.crypto?.randomUUID) {
     Object.defineProperty(globalThis, "crypto", {
-      value: { ...globalThis.crypto, randomUUID: () => "11111111-1111-1111-1111-111111111111" },
+      value: {
+        ...globalThis.crypto,
+        randomUUID: () => "11111111-1111-1111-1111-111111111111",
+      },
       configurable: true,
     });
   }
 });
 
-describe("WecomScanInstallDialog", () => {
+describe("WecomChannelAuthorization", () => {
   it("shows the preparing state before the QR exists, then renders it", async () => {
     mockBegin.mockResolvedValue({
       session_id: "session-1",
@@ -119,7 +138,9 @@ describe("WecomScanInstallDialog", () => {
     await advanceTime(1000);
     const qr = screen.getByTestId("qr");
     expect(qr.getAttribute("data-value")).toContain("scode=abc");
-    expect(screen.getByTestId("wecom-scan-expiry").textContent).toContain("240");
+    expect(screen.getByTestId("wecom-scan-expiry").textContent).toContain(
+      "240",
+    );
   });
 
   it("invalidates the installations cache and closes on success", async () => {
@@ -188,7 +209,9 @@ describe("WecomScanInstallDialog", () => {
     await advanceTime(1000);
 
     const err = screen.getByTestId("wecom-scan-error");
-    expect(err.textContent).toContain(enSettings.wecom.scan_error_internal_error);
+    expect(err.textContent).toContain(
+      enSettings.wecom.scan_error_internal_error,
+    );
   });
 
   // The two ways a scanned bot fails to bind need different actions from the
@@ -223,7 +246,9 @@ describe("WecomScanInstallDialog", () => {
       status: "creating",
       poll_interval_seconds: 1,
     });
-    mockStatus.mockRejectedValue(new FakeApiError(404, "install session not found"));
+    mockStatus.mockRejectedValue(
+      new FakeApiError(404, "install session not found"),
+    );
 
     await renderDialog();
     await advanceTime(1000);
@@ -233,12 +258,16 @@ describe("WecomScanInstallDialog", () => {
   });
 
   it("surfaces a 503 begin as the unconfigured reason", async () => {
-    mockBegin.mockRejectedValue(new FakeApiError(503, "wecom scan install not enabled"));
+    mockBegin.mockRejectedValue(
+      new FakeApiError(503, "wecom scan install not enabled"),
+    );
 
     await renderDialog();
 
     const err = screen.getByTestId("wecom-scan-error");
-    expect(err.textContent).toContain(enSettings.wecom.scan_error_integration_unconfigured);
+    expect(err.textContent).toContain(
+      enSettings.wecom.scan_error_integration_unconfigured,
+    );
     // Nothing to poll when begin never produced a session.
     expect(mockStatus).not.toHaveBeenCalled();
   });
@@ -278,22 +307,35 @@ describe("WecomScanInstallDialog", () => {
   it.each([
     [409, "wecom_agent_already_connected", "scan_error_already_connected"],
     [429, "wecom_scan_install_rate_limited", "scan_error_rate_limited"],
-    [503, "wecom_scan_install_unavailable", "scan_error_integration_unconfigured"],
-  ] as const)("shows a %i %s begin refusal as %s", async (status, code, key) => {
-    const sentence = "the server's own English sentence";
-    mockBegin.mockRejectedValue(new FakeApiError(status, sentence, { error: sentence, code }));
+    [
+      503,
+      "wecom_scan_install_unavailable",
+      "scan_error_integration_unconfigured",
+    ],
+  ] as const)(
+    "shows a %i %s begin refusal as %s",
+    async (status, code, key) => {
+      const sentence = "the server's own English sentence";
+      mockBegin.mockRejectedValue(
+        new FakeApiError(status, sentence, { error: sentence, code }),
+      );
 
-    await renderDialog();
+      await renderDialog();
 
-    const err = screen.getByTestId("wecom-scan-error");
-    expect(err.textContent).toBe(enSettings.wecom[key]);
-    expect(screen.queryByText(sentence, { exact: false })).toBeNull();
-    expect(mockStatus).not.toHaveBeenCalled();
-  });
+      const err = screen.getByTestId("wecom-scan-error");
+      expect(err.textContent).toBe(enSettings.wecom[key]);
+      expect(screen.queryByText(sentence, { exact: false })).toBeNull();
+      expect(mockStatus).not.toHaveBeenCalled();
+    },
+  );
 
   it("reports a malformed begin response as an error instead of polling forever", async () => {
     // parseWithFallback degrades an unparseable body to an empty session id.
-    mockBegin.mockResolvedValue({ session_id: "", status: "error", poll_interval_seconds: 1 });
+    mockBegin.mockResolvedValue({
+      session_id: "",
+      status: "error",
+      poll_interval_seconds: 1,
+    });
 
     await renderDialog();
 
@@ -309,7 +351,8 @@ describe("WecomScanInstallDialog", () => {
     const realCrypto = globalThis.crypto;
     // A non-secure context keeps getRandomValues and loses randomUUID.
     vi.stubGlobal("crypto", {
-      getRandomValues: (b: Uint8Array<ArrayBuffer>) => realCrypto.getRandomValues(b),
+      getRandomValues: (b: Uint8Array<ArrayBuffer>) =>
+        realCrypto.getRandomValues(b),
     });
     try {
       mockBegin.mockResolvedValue({
