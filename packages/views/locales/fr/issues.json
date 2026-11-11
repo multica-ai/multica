@@ -492,6 +492,18 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "Métadonnées",
     "section_details": "Détails",
+    "sidebar_settings": {
+      "open": "Personnaliser la barre latérale",
+      "title": "Barre latérale",
+      "reset": "Réinitialiser",
+      "footer": "Faites glisser pour réordonner. S'applique à toutes les tâches.",
+      "always_shown": "Toujours affiché",
+      "empty": "Rien sur cette tâche",
+      "customize": "Personnaliser",
+      "drag_handle": "Réordonner {{section}}",
+      "hidden_count_one": "{{count}} section masquée",
+      "hidden_count_other": "{{count}} sections masquées"
+    },
     "section_quick_actions": "Actions rapides",
     "quick_actions_more": "Afficher {{count}} de plus",
     "quick_action_runs_as": "S'exécute en tant que {{name}}",
@@ -543,6 +555,8 @@
     "unsubscribe": "Se désabonner",
     "delegated_subscription_badge": "Suivi via un agent",
     "delegated_subscription_hint": "Votre agent a créé cette tâche en votre nom : vous y êtes donc abonné. Vous serez notifié lorsqu'elle demandera une relecture, se terminera ou se bloquera.",
+    "project_subscription_badge": "Suivi via le projet",
+    "project_subscription_hint": "Vous êtes abonné à toutes les tâches de ce projet. Vous désabonner ici arrête uniquement les notifications de cette tâche.",
     "unsubscribe_this": "Se désabonner de cette tâche",
     "unsubscribe_subtree": "Se désabonner de cette tâche et de ses sous-tâches",
     "unsubscribe_subtree_failed": "Impossible de se désabonner des sous-tâches. Veuillez réessayer.",
@@ -758,7 +772,10 @@
     "recipient_count_other": "{{count}} agents recevront ce message",
     "steer_attachment_notice": "Seul du texte peut rejoindre une exécution en cours : un message avec des fichiers sera traité après.",
     "restart_send": "Arrêter et envoyer",
-    "restart_failed": "Impossible d'arrêter l'exécution en cours. Votre message n'a pas été envoyé."
+    "restart_failed": "Impossible d'arrêter l'exécution en cours. Votre message n'a pas été envoyé.",
+    "reply_action": "Répondre",
+    "actions_label": "Actions du commentaire",
+    "create_issue_from_selection": "Créer une sous-tâche à partir de la sélection"
   },
   "reply": {
     "recipients_changed": "La cible de la réponse a changé. Vérifiez les destinataires avant de réessayer.",
@@ -982,7 +999,12 @@
     "delete_dialog_title_other": "Supprimer {{count}} tâches ?",
     "delete_dialog_desc_one": "Cette action est irréversible. La tâche sélectionnée et toutes ses données associées seront définitivement supprimées.",
     "delete_dialog_desc_other": "Cette action est irréversible. Les tâches sélectionnées et toutes leurs données associées seront définitivement supprimées.",
-    "cancel": "Annuler"
+    "cancel": "Annuler",
+    "copy_links": "Copier les liens",
+    "links_copied_one": "{{count}} lien copié",
+    "links_copied_other": "{{count}} liens copiés",
+    "delete_count_one": "Supprimer {{count}} tâche",
+    "delete_count_other": "Supprimer {{count}} tâches"
   },
   "card": {
     "update_failed": "Échec de la mise à jour de la tâche",
@@ -1019,12 +1041,14 @@
     "stop_agent_run": "Arrêter l’exécution de {{name}}",
     "relations": "Relations",
     "create_sub_issue": "Créer une sous-tâche",
+    "quick_actions": "Actions rapides",
     "set_parent_issue": "Définir la tâche parente...",
     "remove_parent_issue": "Retirer la tâche parente",
     "remove_parent_issue_success": "Tâche parente retirée",
     "add_sub_issue": "Ajouter une sous-tâche...",
     "delete_issue": "Supprimer la tâche",
-    "mark_duplicate": "Marquer comme doublon..."
+    "mark_duplicate": "Marquer comme doublon...",
+    "open_in_new_window": "Ouvrir dans une nouvelle fenêtre"
   },
   "pickers": {
     "custom_property": {
@@ -1400,15 +1424,16 @@
       "enable": "Activé pour cette tâche",
       "toggle": "Réveiller le responsable à la fin des sous-tâches",
       "save_error": "Impossible d’enregistrer la règle système.",
-      "default_on": "Activé par défaut dans cet espace. Modifiez la valeur par défaut dans Paramètres → Réveils.",
-      "default_off": "Désactivé par défaut dans cet espace. Modifiez la valeur par défaut dans Paramètres → Réveils.",
+      "default_on": "Activé par défaut dans cet espace.",
+      "default_off": "Désactivé par défaut dans cet espace.",
       "notify_member": "Notifier {{name}} dans sa boîte de réception",
       "instruction": "Que faire au réveil",
       "instruction_edit": "Modifier l’instruction",
       "instruction_default": "Non définie sur cette tâche ; instruction par défaut :",
       "instruction_placeholder": "Laisser vide pour l’instruction par défaut",
       "instruction_invalid": "Limitez l’instruction à 4 000 octets.",
-      "paused": "En pause : {{reason}}"
+      "paused": "En pause : {{reason}}",
+      "default_change": "Modifier la valeur par défaut"
     },
     "cond": {
       "status": "Quand cette tâche passe à {{status}}",

@@ -486,6 +486,17 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "메타데이터",
     "section_details": "세부 정보",
+    "sidebar_settings": {
+      "open": "사이드바 사용자 지정",
+      "title": "사이드바",
+      "reset": "초기화",
+      "footer": "드래그해 순서를 바꿉니다. 모든 태스크에 적용됩니다.",
+      "always_shown": "항상 표시",
+      "empty": "이 태스크에는 없음",
+      "customize": "사용자 지정",
+      "drag_handle": "{{section}} 순서 변경",
+      "hidden_count_other": "섹션 {{count}}개 숨김"
+    },
     "section_quick_actions": "퀵 액션",
     "quick_actions_more": "{{count}}개 더 보기",
     "quick_action_runs_as": "{{name}}이(가) 실행합니다",
@@ -536,6 +547,8 @@
     "unsubscribe": "구독 해제",
     "delegated_subscription_badge": "에이전트를 통해 구독 중",
     "delegated_subscription_hint": "에이전트가 회원님을 대신해 이 태스크를 만들었기 때문에 구독 중입니다. 검토 필요, 완료, 차단 시 알림을 받습니다.",
+    "project_subscription_badge": "프로젝트를 통해 구독 중",
+    "project_subscription_hint": "이 프로젝트의 모든 태스크를 구독 중입니다. 여기서 구독을 해제하면 이 태스크의 알림만 중지됩니다.",
     "unsubscribe_this": "이 태스크 구독 해제",
     "unsubscribe_subtree": "이 태스크와 하위 태스크 구독 해제",
     "unsubscribe_subtree_failed": "하위 태스크 구독 해제에 실패했습니다. 다시 시도해 주세요.",
@@ -735,7 +748,10 @@
     "recipient_count_other": "에이전트 {{count}}개가 받습니다",
     "steer_attachment_notice": "실행 중에는 텍스트만 추가할 수 있어, 파일이 있는 메시지는 이번 실행 후에 처리됩니다.",
     "restart_send": "중지하고 보내기",
-    "restart_failed": "현재 실행을 중지하지 못했습니다. 메시지는 보내지 않았습니다."
+    "restart_failed": "현재 실행을 중지하지 못했습니다. 메시지는 보내지 않았습니다.",
+    "reply_action": "답글 달기",
+    "actions_label": "댓글 작업",
+    "create_issue_from_selection": "선택한 내용으로 하위 태스크 만들기"
   },
   "reply": {
     "recipients_changed": "답글 대상이 변경되었습니다. 받는 사람을 확인한 뒤 다시 보내 주세요.",
@@ -936,7 +952,10 @@
     "delete_failed": "태스크를 삭제하지 못했습니다",
     "delete_dialog_title_other": "태스크 {{count}}개를 삭제할까요?",
     "delete_dialog_desc_other": "이 작업은 되돌릴 수 없습니다. 선택한 태스크와 관련 데이터가 영구 삭제됩니다.",
-    "cancel": "취소"
+    "cancel": "취소",
+    "copy_links": "링크 복사",
+    "links_copied_other": "링크 {{count}}개를 복사했습니다",
+    "delete_count_other": "태스크 {{count}}개 삭제"
   },
   "card": {
     "update_failed": "태스크를 업데이트하지 못했습니다",
@@ -973,12 +992,14 @@
     "stop_agent_run": "{{name}} 실행 중지",
     "relations": "관계",
     "create_sub_issue": "하위 태스크 만들기",
+    "quick_actions": "퀵 액션",
     "set_parent_issue": "상위 태스크 설정...",
     "remove_parent_issue": "상위 태스크 제거",
     "remove_parent_issue_success": "상위 태스크를 제거했습니다",
     "add_sub_issue": "하위 태스크 추가...",
     "delete_issue": "태스크 삭제",
-    "mark_duplicate": "중복으로 표시..."
+    "mark_duplicate": "중복으로 표시...",
+    "open_in_new_window": "새 창에서 열기"
   },
   "pickers": {
     "custom_property": {
@@ -1351,15 +1372,16 @@
       "enable": "이 태스크에서 사용",
       "toggle": "하위 태스크 완료 시 담당자 깨우기",
       "save_error": "시스템 규칙을 저장할 수 없습니다.",
-      "default_on": "워크스페이스 기본값은 켜짐입니다. 기본값은 설정 → 깨우기에서 바꿀 수 있습니다.",
-      "default_off": "워크스페이스 기본값은 꺼짐입니다. 기본값은 설정 → 깨우기에서 바꿀 수 있습니다.",
+      "default_on": "워크스페이스 기본값은 켜짐입니다.",
+      "default_off": "워크스페이스 기본값은 꺼짐입니다.",
       "notify_member": "받은편지함으로 {{name}}에게 알림",
       "instruction": "깨운 뒤 할 일",
       "instruction_edit": "지시 편집",
       "instruction_default": "이 태스크에는 설정되지 않아 기본 지시를 사용합니다:",
       "instruction_placeholder": "비워 두면 기본 지시를 사용합니다",
       "instruction_invalid": "지시는 4,000바이트 이내로 입력하세요.",
-      "paused": "일시 중지됨: {{reason}}"
+      "paused": "일시 중지됨: {{reason}}",
+      "default_change": "기본값 변경"
     },
     "cond": {
       "status": "상태가 {{status}}(으)로 바뀌면",

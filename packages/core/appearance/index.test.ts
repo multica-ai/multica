@@ -154,6 +154,7 @@ describe("appearanceStylesheet", () => {
     expect(appearanceThemeAttributes(pop, prefs)).toEqual({
       "data-theme": "pop",
       "data-theme-option-signal": "sky",
+      "data-theme-option-frame": "paper",
       "data-theme-option-offset-shadow": "on",
       "data-theme-option-status-blocks": null,
       "data-theme-option-outlined-chips": "on",

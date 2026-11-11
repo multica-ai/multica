@@ -47,6 +47,48 @@ test("passes a good theme and fails a bad one, with every problem listed", (t) =
   assert.match(messages, /--muted-foreground is below 4\.5:1 on .*--surface \(\d\.\d\d:1\)/);
 });
 
+test("fails a theme on an option value other than the default", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "theme-check-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const screens = theme(dir, "screens", {
+    manifest: {
+      options: [
+        { id: "screen", type: "select", label: "Screen", default: "prompt", choices: [
+          { value: "prompt", label: "Prompt" },
+          { value: "amber", label: "Amber" },
+        ] },
+      ],
+    },
+    css: ':root[data-theme-option-screen="amber"].theme-dark { --muted-foreground: #5a3e00; }\n',
+  });
+
+  const text = run(screens);
+  assert.equal(text.status, 1, text.stdout + text.stderr);
+  assert.match(text.stdout, /Contrast, dark mode \(Screen = Amber\): --muted-foreground is below 4\.5:1/);
+  assert.match(text.stdout, /pairs checked at the default options and 1 other option value, \d+ below WCAG AA\. Lowest: --muted-foreground on .*, dark \(Screen = Amber\)/);
+
+  const [report] = JSON.parse(run(screens, "--json").stdout);
+  const failing = report.contrast.filter((c) => c.ratio < c.required);
+  assert.ok(failing.length > 0);
+  assert.ok(failing.every((c) => c.variant?.option === "screen" && c.variant.value === "amber"));
+});
+
+test("writes a --json report larger than a pipe buffer in full", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "theme-check-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const choices = Array.from({ length: 8 }, (_, i) => ({ value: `s${i}`, label: `Screen ${i}` }));
+  const screens = theme(dir, "screens", {
+    manifest: { options: [{ id: "screen", type: "select", label: "Screen", default: "s0", choices }] },
+    css: ".theme-light { --radius: 0.25rem; }\n",
+  });
+
+  const result = run(screens, "--json");
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stdout.length > 65536, `the report is only ${result.stdout.length} bytes`);
+  const [report] = JSON.parse(result.stdout);
+  assert.equal(report.ok, true);
+});
+
 test("explains a path that is not a theme", () => {
   const result = run(join(tmpdir(), "no-such-theme-folder"));
   assert.equal(result.status, 1);

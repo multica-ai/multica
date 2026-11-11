@@ -544,7 +544,7 @@ var validIssueSortColumns = []string{
 var validIssueFields = []string{
 	"id", "workspace_id", "number", "identifier", "title", "description",
 	"status", "status_category", "status_name", "priority", "assignee_type",
-	"assignee_id", "creator_type", "creator_id", "parent_issue_id",
+	"assignee_id", "creator_type", "creator_id", "requester_id", "parent_issue_id",
 	"duplicate_of", "project_id", "position", "stage", "start_date", "due_date", "created_at",
 	"updated_at", "revision", "last_activity_at", "metadata", "properties",
 	"labels",
@@ -680,7 +680,7 @@ func init() {
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
-	issueCreateCmd.Flags().StringArray("attachment", nil, "File path to attach (one literal path per flag; repeat --attachment for multiple files). Each file is uploaded and its markdown reference is appended to the description, which is what makes it render on the issue page")
+	issueCreateCmd.Flags().StringArray("attachment", nil, "File path to attach (one literal path per flag; repeat --attachment for multiple files). Each file is uploaded and its markdown reference is appended to the description, which is what makes it render on the issue page. To place it inline instead, reference the same path in the description (e.g. ![shot](./a.png)); that link is rewritten to the uploaded file")
 	issueCreateCmd.Flags().StringSlice("attachment-id", nil, "Existing attachment UUID(s) to bind to the created issue (can be specified multiple times)")
 	issueCreateCmd.Flags().StringArray("property", nil, `Set a custom property atomically with creation as "Name=Value" (repeatable, one distinct property per flag). Multi-value properties use comma-separated values; multi_text/multi_url also accept JSON arrays (required for commas in entries or values starting with "["). Property and option/member names are case-insensitive; UUIDs are accepted. Filter-only __none__, >=, <=, and != forms are rejected.`)
 
@@ -690,7 +690,7 @@ func init() {
 	issueUpdateCmd.Flags().Bool("description-stdin", false, "Read new description from stdin (preserves multi-line content verbatim)")
 	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
 	issueUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file / --attachment to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")
-	issueUpdateCmd.Flags().StringArray("attachment", nil, "Local file path to attach (one literal path per flag; repeat --attachment for multiple files); references are appended to the end of the description")
+	issueUpdateCmd.Flags().StringArray("attachment", nil, "Local file path to attach (one literal path per flag; repeat --attachment for multiple files); references are appended to the end of the description, except where the description already links the same path (e.g. ![shot](./a.png)), which is rewritten to the uploaded file in place")
 	issueUpdateCmd.Flags().String("status", "", "New status")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().String("pr-auto-complete", "", "Change status when linked PRs merge: on or off (on takes effect at the next PR event)")
@@ -763,7 +763,7 @@ func init() {
 	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
 	issueCommentAddCmd.Flags().Bool("allow-external-file", false, "Allow --content-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID to reply under. A comment-triggered agent run must reply under its trigger comment; omitting --parent to post a top-level comment is rejected")
-	issueCommentAddCmd.Flags().StringArray("attachment", nil, "File path to attach (one literal path per flag; repeat --attachment for multiple files). Non-image files, HTML included, show as file cards that open in the viewer; to render a chart inside the comment, put a ```html or ```mermaid block in the content instead")
+	issueCommentAddCmd.Flags().StringArray("attachment", nil, "File path to attach (one literal path per flag; repeat --attachment for multiple files). To show an image at a specific spot, reference the same path in the content (e.g. ![shot](./a.png)); that link is rewritten to the uploaded file before posting. Non-image files, HTML included, show as file cards that open in the viewer; to render a chart inside the comment, put a ```html or ```mermaid block in the content instead")
 	issueCommentAddCmd.Flags().StringSlice("steer", nil, "Run ID (full UUID or short prefix) whose in-progress turn should receive this comment instead of a follow-up run (repeatable)")
 	issueCommentAddCmd.Flags().Bool("steer-active", false, "Add this comment to the running turn of every agent on this issue you may steer, and of any other recipient that is running")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
@@ -1594,8 +1594,8 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	if hasDesc {
-		if err := guardLocalPathLinks(desc, "issue description",
-			"Deliver the file itself with `multica issue create --attachment <path>` (repeatable) and drop the link."); err != nil {
+		if err := guardLocalPathLinks(previewAttachmentLinks(desc, attachments), "issue description",
+			"Deliver the file itself with `multica issue create --attachment <path>` (repeatable); a link or image whose target is that same path is rewritten to the uploaded file and renders in place. Otherwise drop the link."); err != nil {
 			return err
 		}
 	}
@@ -1692,6 +1692,7 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		attachmentIDs = appendUniqueStrings(attachmentIDs, result.ID)
 		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
+	desc = applyAttachmentLinks(os.Stderr, desc, "issue description", pending, uploaded)
 	desc = appendAttachmentReferences(desc, uploaded)
 	if hasDesc || len(uploaded) > 0 {
 		body["description"] = desc
@@ -1837,8 +1838,8 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := guardLocalPathLinks(desc, "issue description",
-			"Attach the file with `multica issue update <issue-id> --attachment <path>` and drop the local-path link."); err != nil {
+		if err := guardLocalPathLinks(previewAttachmentLinks(desc, attachmentPaths), "issue description",
+			"Attach the file with `multica issue update <issue-id> --attachment <path>`; a link or image whose target is that same path is rewritten to the uploaded file and renders in place. Otherwise drop the local-path link."); err != nil {
 			return err
 		}
 		body["description"] = desc
@@ -1946,6 +1947,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
 	if len(attachmentRefs) > 0 {
+		desc = applyAttachmentLinks(os.Stderr, desc, "issue description", pending, attachmentRefs)
 		body["description"] = appendAttachmentReferences(desc, attachmentRefs)
 		body["attachment_ids"] = attachmentIDs
 	}
@@ -2655,8 +2657,12 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	if !hasContent {
 		return fmt.Errorf("--content, --content-stdin, or --content-file is required")
 	}
-	if err := guardLocalPathLinks(content, "comment body",
-		"Deliver the file itself with `multica issue comment add <issue-id> --attachment <path>` (repeatable) and drop the link."); err != nil {
+	attachments, err := issueAttachmentPaths(cmd)
+	if err != nil {
+		return err
+	}
+	if err := guardLocalPathLinks(previewAttachmentLinks(content, attachments), "comment body",
+		"Deliver the file itself with `multica issue comment add <issue-id> --attachment <path>` (repeatable); a link or image whose target is that same path is rewritten to the uploaded file and renders in place. Otherwise drop the link."); err != nil {
 		return err
 	}
 
@@ -2667,10 +2673,6 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 
 	// Use a longer timeout when attachments are present (file uploads can be slow).
 	timeout := cli.APITimeout()
-	attachments, err := issueAttachmentPaths(cmd)
-	if err != nil {
-		return err
-	}
 	steerInputs, _ := cmd.Flags().GetStringSlice("steer")
 	steerActive, _ := cmd.Flags().GetBool("steer-active")
 	if (len(steerInputs) > 0 || steerActive) && len(attachments) > 0 {
@@ -2704,15 +2706,18 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	var attachmentIDs []string
+	uploaded := make([]cli.AttachmentResponse, 0, len(pending))
 	for _, att := range pending {
 		// Comment attachments are linked by the comment request; upload them unbound first.
-		id, uploadErr := client.UploadFile(ctx, att.data, att.path, "")
+		result, uploadErr := client.UploadIssueAttachment(ctx, att.data, att.path, "")
 		if uploadErr != nil {
 			return fmt.Errorf("upload attachment %s: %w", att.path, uploadErr)
 		}
-		attachmentIDs = append(attachmentIDs, id)
+		attachmentIDs = append(attachmentIDs, result.ID)
+		uploaded = append(uploaded, result)
 		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
+	content = applyAttachmentLinks(os.Stderr, content, "comment body", pending, uploaded)
 
 	body := map[string]any{"content": content}
 	if len(steerTargets) > 0 {

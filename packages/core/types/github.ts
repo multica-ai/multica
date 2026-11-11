@@ -172,6 +172,7 @@ export interface ListGitHubInstallationsResponse {
 }
 
 export interface GitHubConnectResponse {
+  connection_id?: string;
   /** The GitHub App install URL the browser should open. Empty when `configured` is false. */
   url?: string;
   configured: boolean;
@@ -189,6 +190,7 @@ export interface GitHubRepository {
 }
 
 export interface ListGitHubRepositoriesResponse {
+  repository_selection?: "all" | "selected" | "unknown";
   repositories: GitHubRepository[];
   total_count: number;
   next_page: number | null;

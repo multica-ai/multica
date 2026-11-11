@@ -402,7 +402,8 @@ function issueMatchesRelation(
     case "assigned":
       return issue.assignee_type === "member" && issue.assignee_id === context.userId;
     case "created":
-      return issue.creator_type === "member" && issue.creator_id === context.userId;
+      if (issue.creator_type === "member") return issue.creator_id === context.userId;
+      return issue.requester_id === undefined ? undefined : issue.requester_id === context.userId;
     case "my_agents": {
       const ids =
         issue.assignee_type === "agent"

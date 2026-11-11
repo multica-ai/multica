@@ -74,6 +74,7 @@
   "types": {
     "issue_assigned": "已分配",
     "issue_subscribed": "已訂閱",
+    "issue_created": "新任務",
     "unassigned": "已取消分配",
     "assignee_changed": "分配人已更改",
     "status_changed": "狀態已更改",

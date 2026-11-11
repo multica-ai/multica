@@ -97,9 +97,7 @@
     "section_labels": "Labels",
     "filter_search_placeholder": "Filter...",
     "no_labels": "No labels yet",
-    "no_results": "No results",
-    "manage_labels": "Manage labels...",
-    "manage_labels_title": "Skill labels"
+    "no_results": "No results"
   },
   "detail": {
     "read_only": "Read-only",

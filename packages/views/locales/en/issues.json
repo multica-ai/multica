@@ -492,6 +492,18 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "Metadata",
     "section_details": "Details",
+    "sidebar_settings": {
+      "open": "Customize sidebar",
+      "title": "Sidebar",
+      "reset": "Reset",
+      "footer": "Drag to reorder. Applies to every issue.",
+      "always_shown": "Always shown",
+      "empty": "None on this issue",
+      "customize": "Customize",
+      "drag_handle": "Reorder {{section}}",
+      "hidden_count_one": "{{count}} section hidden",
+      "hidden_count_other": "{{count}} sections hidden"
+    },
     "section_quick_actions": "Quick Actions",
     "quick_actions_more": "Show {{count}} more",
     "quick_action_runs_as": "Runs as {{name}}",
@@ -543,6 +555,8 @@
     "unsubscribe": "Unsubscribe",
     "delegated_subscription_badge": "Watching via agent",
     "delegated_subscription_hint": "Your agent created this issue on your behalf, so you're subscribed to it. You'll get notified when it needs review, finishes, or gets stuck.",
+    "project_subscription_badge": "Via project",
+    "project_subscription_hint": "You're subscribed to every issue in this project. Unsubscribing here stops notifications for this issue only.",
     "unsubscribe_this": "Unsubscribe from this issue",
     "unsubscribe_subtree": "Unsubscribe from this issue and its sub-issues",
     "unsubscribe_subtree_failed": "Could not unsubscribe from the sub-issues. Please try again.",
@@ -758,7 +772,10 @@
     "recipient_count_other": "{{count}} agents will receive this",
     "steer_attachment_notice": "Only text can join a running run, so a message with files is handled after it.",
     "restart_send": "Stop and send",
-    "restart_failed": "Couldn't stop the current run. Your message wasn't sent."
+    "restart_failed": "Couldn't stop the current run. Your message wasn't sent.",
+    "reply_action": "Reply",
+    "actions_label": "Comment actions",
+    "create_issue_from_selection": "Create sub-issue from selection"
   },
   "reply": {
     "recipients_changed": "Reply target changed. Review the recipients before sending again.",
@@ -982,7 +999,12 @@
     "delete_dialog_title_other": "Delete {{count}} issues?",
     "delete_dialog_desc_one": "This action cannot be undone. This will permanently delete the selected issue and all associated data.",
     "delete_dialog_desc_other": "This action cannot be undone. This will permanently delete the selected issues and all associated data.",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "copy_links": "Copy links",
+    "links_copied_one": "Copied {{count}} link",
+    "links_copied_other": "Copied {{count}} links",
+    "delete_count_one": "Delete {{count}} issue",
+    "delete_count_other": "Delete {{count}} issues"
   },
   "card": {
     "update_failed": "Failed to update issue",
@@ -1019,12 +1041,14 @@
     "stop_agent_run": "Stop {{name}}’s run",
     "relations": "Relations",
     "create_sub_issue": "Create sub-issue",
+    "quick_actions": "Quick actions",
     "set_parent_issue": "Set parent issue...",
     "remove_parent_issue": "Remove parent issue",
     "remove_parent_issue_success": "Removed parent issue",
     "add_sub_issue": "Add sub-issue...",
     "delete_issue": "Delete issue",
-    "mark_duplicate": "Mark as duplicate..."
+    "mark_duplicate": "Mark as duplicate...",
+    "open_in_new_window": "Open in new window"
   },
   "pickers": {
     "custom_property": {
@@ -1400,15 +1424,16 @@
       "enable": "On for this issue",
       "toggle": "Wake the assignee when sub-issues finish",
       "save_error": "Could not save the system rule.",
-      "default_on": "On by default in this workspace. Change the default in Settings → Wakeups.",
-      "default_off": "Off by default in this workspace. Change the default in Settings → Wakeups.",
+      "default_on": "On by default in this workspace.",
+      "default_off": "Off by default in this workspace.",
       "notify_member": "Notify {{name}} in their inbox",
       "instruction": "What to do when woken",
       "instruction_edit": "Edit instruction",
       "instruction_default": "Not set on this issue; uses the default:",
       "instruction_placeholder": "Leave empty to use the default",
       "instruction_invalid": "Keep the instruction within 4,000 bytes.",
-      "paused": "Paused: {{reason}}"
+      "paused": "Paused: {{reason}}",
+      "default_change": "Change the default"
     },
     "cond": {
       "status": "When this issue moves to {{status}}",
