@@ -107,6 +107,49 @@ func (q *Queries) GetPersonalAccessTokenByHash(ctx context.Context, tokenHash st
 	return i, err
 }
 
+const getPersonalAccessTokenByHashWithKind = `-- name: GetPersonalAccessTokenByHashWithKind :one
+SELECT p.id, p.user_id, p.name, p.token_hash, p.token_prefix, p.expires_at, p.last_used_at, p.revoked, p.created_at, u.kind AS user_kind
+FROM personal_access_token p
+JOIN "user" u ON u.id = p.user_id
+WHERE p.token_hash = $1
+  AND p.revoked = FALSE
+  AND (p.expires_at IS NULL OR p.expires_at > now())
+`
+
+type GetPersonalAccessTokenByHashWithKindRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	Name        string             `json:"name"`
+	TokenHash   string             `json:"token_hash"`
+	TokenPrefix string             `json:"token_prefix"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
+	Revoked     bool               `json:"revoked"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UserKind    string             `json:"user_kind"`
+}
+
+// Same row as GetPersonalAccessTokenByHash plus the owner's user.kind so the
+// auth middlewares can stamp an authoritative actor source for service
+// accounts without a second query.
+func (q *Queries) GetPersonalAccessTokenByHashWithKind(ctx context.Context, tokenHash string) (GetPersonalAccessTokenByHashWithKindRow, error) {
+	row := q.db.QueryRow(ctx, getPersonalAccessTokenByHashWithKind, tokenHash)
+	var i GetPersonalAccessTokenByHashWithKindRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.TokenHash,
+		&i.TokenPrefix,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+		&i.Revoked,
+		&i.CreatedAt,
+		&i.UserKind,
+	)
+	return i, err
+}
+
 const listPersonalAccessTokensByUser = `-- name: ListPersonalAccessTokensByUser :many
 SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at FROM personal_access_token
 WHERE user_id = $1

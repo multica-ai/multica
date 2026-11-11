@@ -9,6 +9,17 @@ WHERE token_hash = $1
   AND revoked = FALSE
   AND (expires_at IS NULL OR expires_at > now());
 
+-- name: GetPersonalAccessTokenByHashWithKind :one
+-- Same row as GetPersonalAccessTokenByHash plus the owner's user.kind so the
+-- auth middlewares can stamp an authoritative actor source for service
+-- accounts without a second query.
+SELECT p.*, u.kind AS user_kind
+FROM personal_access_token p
+JOIN "user" u ON u.id = p.user_id
+WHERE p.token_hash = $1
+  AND p.revoked = FALSE
+  AND (p.expires_at IS NULL OR p.expires_at > now());
+
 -- name: ListPersonalAccessTokensByUser :many
 SELECT * FROM personal_access_token
 WHERE user_id = $1
