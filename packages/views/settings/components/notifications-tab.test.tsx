@@ -16,10 +16,19 @@ vi.mock("./browser-notification-setting", () => ({ BrowserNotificationSetting: (
 afterEach(cleanup);
 
 describe("notification setting hierarchy", () => {
-  it.each([false, true])("separates Chat events from system delivery (master muted: %s)", (muted) => {
+  it.each([
+    { systemMuted: false, chatMuted: false },
+    { systemMuted: false, chatMuted: true },
+    { systemMuted: true, chatMuted: false },
+    { systemMuted: true, chatMuted: true },
+  ])("nests chat replies under system notifications: %j", ({ systemMuted, chatMuted }) => {
     const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
     qc.setQueryData(notificationPreferenceKeys.all("ws-a"), {
-      workspace_id: "ws-a", preferences: muted ? { system_notifications: "muted" } : {},
+      workspace_id: "ws-a",
+      preferences: {
+        ...(systemMuted ? { system_notifications: "muted" } : {}),
+        ...(chatMuted ? { chat_replies: "muted" } : {}),
+      },
     });
     render(
       <QueryClientProvider client={qc}>
@@ -28,20 +37,20 @@ describe("notification setting hierarchy", () => {
         </I18nProvider>
       </QueryClientProvider>,
     );
-    const chat = screen.getByRole("region", { name: "Chat" });
+    expect(screen.queryByRole("region", { name: "Chat" })).toBeNull();
     const system = screen.getByRole("region", { name: "System Notifications" });
-    const replies = within(chat).getByRole("switch", { name: "Agent replies" });
-    expect(replies).toBeChecked();
-    if (muted) {
-      expect(replies).toHaveAttribute("aria-disabled", "true");
-      expect(within(chat).getByText("Enable system notifications first.")).toBeVisible();
+    if (systemMuted) {
+      expect(within(system).queryByRole("switch", { name: "Include chat replies" })).toBeNull();
+      expect(within(system).getAllByRole("switch")).toHaveLength(1);
     } else {
-      expect(replies).not.toHaveAttribute("aria-disabled");
-      expect(within(chat).queryByText("Enable system notifications first.")).toBeNull();
+      const replies = within(system).getByRole("switch", { name: "Include chat replies" });
+      if (chatMuted) expect(replies).not.toBeChecked();
+      else expect(replies).toBeChecked();
+      expect(within(system).getAllByRole("switch")).toHaveLength(2);
     }
-    expect(within(chat).getByText("Unread badges in Chat always stay on.")).toBeVisible();
-    expect(within(system).getAllByRole("switch")).toHaveLength(1);
-    expect(within(system).getByText("Applies to Inbox notifications and chat replies.")).toBeVisible();
+    expect(within(system).queryByText("When an agent finishes replying in a chat.")).toBeNull();
+    expect(within(system).queryByText("Enable system notifications first.")).toBeNull();
+    expect(within(system).queryByText("Applies to Inbox notifications and chat replies.")).toBeNull();
     qc.clear();
   });
 });

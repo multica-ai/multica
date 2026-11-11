@@ -849,14 +849,12 @@
         "description": "智能体运行失败时"
       },
       "chat_replies": {
-        "label": "智能体回复",
-        "description": "智能体在聊天中完成回复时通知。"
+        "label": "包含聊天回复"
       }
     },
     "system": {
       "title": "系统通知",
-      "label": "Multica 在后台时显示系统通知",
-      "description": "适用于收件箱通知和聊天回复。"
+      "label": "Multica 在后台时显示系统通知"
     },
     "browser": {
       "label": "浏览器通知",
@@ -865,11 +863,6 @@
       "granted": "当前浏览器可以弹出通知横幅。",
       "denied": "已被浏览器拦截。请在浏览器设置中为本站点开启通知权限。",
       "enabled_badge": "已启用"
-    },
-    "chat": {
-      "title": "聊天",
-      "description": "聊天未读数始终显示，不受此开关影响。",
-      "requires_system": "请先开启系统通知。"
     }
   },
   "tokens": {

@@ -858,14 +858,12 @@
         "description": "When an agent run fails"
       },
       "chat_replies": {
-        "label": "Agent replies",
-        "description": "When an agent finishes replying in a chat."
+        "label": "Include chat replies"
       }
     },
     "system": {
       "title": "System Notifications",
-      "label": "Show system notifications when Multica is in the background",
-      "description": "Applies to Inbox notifications and chat replies."
+      "label": "Show system notifications when Multica is in the background"
     },
     "browser": {
       "label": "Browser notifications",
@@ -874,11 +872,6 @@
       "granted": "This browser can show notification banners.",
       "denied": "Blocked by your browser. Enable notifications for this site in your browser settings.",
       "enabled_badge": "Enabled"
-    },
-    "chat": {
-      "title": "Chat",
-      "description": "Unread badges in Chat always stay on.",
-      "requires_system": "Enable system notifications first."
     }
   },
   "tokens": {

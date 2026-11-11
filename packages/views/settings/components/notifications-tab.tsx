@@ -87,34 +87,13 @@ export function NotificationsTab() {
       </SettingsSection>
 
       <SettingsSection
-        title={t(($) => $.notifications.chat.title)}
-        description={t(($) => $.notifications.chat.description)}
-        anchor="chat"
+        title={t(($) => $.notifications.system.title)}
+        anchor={systemEnabled ? undefined : "chat_replies"}
       >
-        <SettingsCard>
-          <SettingsRow
-            anchor="chat_replies"
-            label={t(($) => $.notifications.groups.chat_replies.label)}
-            description={systemEnabled
-              ? t(($) => $.notifications.groups.chat_replies.description)
-              : t(($) => $.notifications.chat.requires_system)}
-          >
-            <Switch
-              checked={preferences.chat_replies !== "muted"}
-              disabled={!systemEnabled}
-              aria-label={t(($) => $.notifications.groups.chat_replies.label)}
-              onCheckedChange={(checked) => handleToggle("chat_replies", checked)}
-            />
-          </SettingsRow>
-        </SettingsCard>
-      </SettingsSection>
-
-      <SettingsSection title={t(($) => $.notifications.system.title)}>
         <SettingsCard>
           <SettingsRow
             anchor="system"
             label={t(($) => $.notifications.system.label)}
-            description={t(($) => $.notifications.system.description)}
           >
             <Switch
               checked={systemEnabled}
@@ -122,6 +101,19 @@ export function NotificationsTab() {
               onCheckedChange={(checked) => handleToggle("system_notifications", checked)}
             />
           </SettingsRow>
+          {systemEnabled && (
+            <SettingsRow
+              anchor="chat_replies"
+              className="pl-8"
+              label={t(($) => $.notifications.groups.chat_replies.label)}
+            >
+              <Switch
+                checked={preferences.chat_replies !== "muted"}
+                aria-label={t(($) => $.notifications.groups.chat_replies.label)}
+                onCheckedChange={(checked) => handleToggle("chat_replies", checked)}
+              />
+            </SettingsRow>
+          )}
         </SettingsCard>
 
         {/* Web-only: the browser permission banners require. Renders nothing on

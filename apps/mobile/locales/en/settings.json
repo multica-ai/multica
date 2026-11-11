@@ -82,11 +82,6 @@
     "inbox_notifications": "Inbox notifications",
     "system": "System",
     "system_notifications": "System notifications",
-    "system_description": "Applies to Inbox notifications and chat replies.",
-    "chat_replies": "Agent replies",
-    "chat_replies_description": "When an agent finishes replying in a chat.",
-    "chat": "Chat",
-    "chat_description": "Unread badges in Chat always stay on.",
-    "chat_requires_system": "Enable system notifications first."
+    "chat_replies": "Include chat replies"
   }
 }

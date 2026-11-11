@@ -858,14 +858,12 @@
         "description": "Lorsqu'une exécution d'agent échoue"
       },
       "chat_replies": {
-        "label": "Réponses des agents",
-        "description": "Lorsqu’un agent termine sa réponse dans un chat."
+        "label": "Inclure les réponses du chat"
       }
     },
     "system": {
       "title": "Notifications système",
-      "label": "Afficher les notifications système lorsque Multica est en arrière-plan",
-      "description": "S’applique aux notifications de la boîte de réception et aux réponses du chat."
+      "label": "Afficher les notifications système lorsque Multica est en arrière-plan"
     },
     "browser": {
       "label": "Notifications du navigateur",
@@ -874,11 +872,6 @@
       "granted": "Ce navigateur peut afficher des bannières de notification.",
       "denied": "Bloqué par votre navigateur. Activez les notifications pour ce site dans ses réglages.",
       "enabled_badge": "Activé"
-    },
-    "chat": {
-      "title": "Chat",
-      "description": "Les indicateurs de messages non lus du chat restent toujours visibles.",
-      "requires_system": "Activez d’abord les notifications système."
     }
   },
   "tokens": {

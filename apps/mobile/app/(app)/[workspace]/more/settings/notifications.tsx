@@ -137,35 +137,11 @@ export default function NotificationsSettingsScreen() {
         })}
       </Section>
 
-      <Section
-        title={t("groups.chat")}
-        description={t("groups.chat_description")}
-      >
-        <View className="flex-row items-center px-4 py-3 gap-3">
-          <View className="flex-1">
-            <Text className="text-base font-medium text-foreground">
-              {t("groups.chat_replies")}
-            </Text>
-            <Text className="text-xs text-muted-foreground mt-0.5">
-              {systemEnabled ? t("groups.chat_replies_description") : t("groups.chat_requires_system")}
-            </Text>
-          </View>
-          <Switch
-            checked={preferences.chat_replies !== "muted"}
-            disabled={!systemEnabled}
-            onCheckedChange={(checked) => onToggle("chat_replies", checked)}
-          />
-        </View>
-      </Section>
-
       <Section title={t("groups.system")}>
         <View className="flex-row items-center px-4 py-3 gap-3">
           <View className="flex-1">
             <Text className="text-base font-medium text-foreground">
               {t("groups.system_notifications")}
-            </Text>
-            <Text className="text-xs text-muted-foreground mt-0.5">
-              {t("groups.system_description")}
             </Text>
           </View>
           <Switch
@@ -173,6 +149,22 @@ export default function NotificationsSettingsScreen() {
             onCheckedChange={(checked) => onToggle("system_notifications", checked)}
           />
         </View>
+        {systemEnabled && (
+          <>
+            <Separator />
+            <View className="flex-row items-center pl-8 pr-4 py-3 gap-3">
+              <View className="flex-1">
+                <Text className="text-base font-medium text-foreground">
+                  {t("groups.chat_replies")}
+                </Text>
+              </View>
+              <Switch
+                checked={preferences.chat_replies !== "muted"}
+                onCheckedChange={(checked) => onToggle("chat_replies", checked)}
+              />
+            </View>
+          </>
+        )}
       </Section>
     </ScrollView>
   );

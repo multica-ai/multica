@@ -82,12 +82,7 @@
     "inbox_notifications": "收件箱通知",
     "system": "系統",
     "system_notifications": "系統通知",
-    "system_description": "適用於收件匣通知和聊天回覆。",
-    "chat_replies": "AI 代理回覆",
-    "chat_replies_description": "AI 代理在聊天中完成回覆時通知。",
-    "chat": "聊天",
-    "chat_description": "聊天未讀數一律顯示，不受此開關影響。",
-    "chat_requires_system": "請先開啟系統通知。"
+    "chat_replies": "包含聊天回覆"
   },
   "groups.assignments_description": "任務分配給我或取消分配給我時。",
   "groups.mentions_description": "有人用 @ 提到你時，包括 @all 和 @squad。"

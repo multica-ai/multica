@@ -82,12 +82,7 @@
     "inbox_notifications": "收件箱通知",
     "system": "系统",
     "system_notifications": "系统通知",
-    "system_description": "适用于收件箱通知和聊天回复。",
-    "chat_replies": "智能体回复",
-    "chat_replies_description": "智能体在聊天中完成回复时通知。",
-    "chat": "聊天",
-    "chat_description": "聊天未读数始终显示，不受此开关影响。",
-    "chat_requires_system": "请先开启系统通知。"
+    "chat_replies": "包含聊天回复"
   },
   "groups.assignments_description": "任务分配给我或取消分配给我时。",
   "groups.mentions_description": "有人用 @ 提到你时，包括 @all 和 @squad。"
