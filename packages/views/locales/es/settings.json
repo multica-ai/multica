@@ -845,6 +845,10 @@
         "label": "Prioridad y fecha de entrega",
         "description": "Cuando cambian la prioridad o la fecha de entrega de tareas que sigues"
       },
+      "new_issues": {
+        "label": "Tareas nuevas",
+        "description": "Cuando se crea una tarea en un proyecto al que estás suscrito"
+      },
       "agent_activity": {
         "label": "Actividad de agentes",
         "description": "Cuando falla una ejecución de agente"

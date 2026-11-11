@@ -555,6 +555,8 @@
     "unsubscribe": "Se désabonner",
     "delegated_subscription_badge": "Suivi via un agent",
     "delegated_subscription_hint": "Votre agent a créé cette tâche en votre nom : vous y êtes donc abonné. Vous serez notifié lorsqu'elle demandera une relecture, se terminera ou se bloquera.",
+    "project_subscription_badge": "Suivi via le projet",
+    "project_subscription_hint": "Vous êtes abonné à toutes les tâches de ce projet. Vous désabonner ici arrête uniquement les notifications de cette tâche.",
     "unsubscribe_this": "Se désabonner de cette tâche",
     "unsubscribe_subtree": "Se désabonner de cette tâche et de ses sous-tâches",
     "unsubscribe_subtree_failed": "Impossible de se désabonner des sous-tâches. Veuillez réessayer.",

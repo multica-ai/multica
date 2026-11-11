@@ -376,6 +376,7 @@ import {
   SearchIssuesResponseSchema,
   ProjectSchema,
   ListProjectMembersResponseSchema,
+  ProjectSubscriptionSchema,
   ListProjectsResponseSchema,
   EMPTY_PROJECT,
   EMPTY_LIST_PROJECTS_RESPONSE,
@@ -4388,6 +4389,25 @@ export class ApiClient {
     return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0 }, {
       endpoint: "GET /api/projects/:id/members",
     });
+  }
+
+  async getProjectSubscription(id: string): Promise<boolean> {
+    return this.parseProjectSubscription(
+      await this.fetch<unknown>(`/api/projects/${id}/subscription`),
+      "GET /api/projects/:id/subscription",
+    );
+  }
+
+  async setProjectSubscription(id: string, subscribed: boolean): Promise<boolean> {
+    const method = subscribed ? "PUT" : "DELETE";
+    return this.parseProjectSubscription(
+      await this.fetch<unknown>(`/api/projects/${id}/subscription`, { method }),
+      `${method} /api/projects/:id/subscription`,
+    );
+  }
+
+  private parseProjectSubscription(raw: unknown, endpoint: string): boolean {
+    return parseWithFallback(raw, ProjectSubscriptionSchema, { subscribed: false }, { endpoint }).subscribed;
   }
 
   async addProjectMembers(id: string, userIds: string[]): Promise<ListProjectMembersResponse> {

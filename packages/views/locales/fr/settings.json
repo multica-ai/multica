@@ -845,6 +845,10 @@
         "label": "Priorité et date d'échéance",
         "description": "Quand la priorité ou la date d'échéance change sur les tâches que vous suivez"
       },
+      "new_issues": {
+        "label": "Nouvelles tâches",
+        "description": "Quand une tâche est créée dans un projet auquel vous êtes abonné"
+      },
       "agent_activity": {
         "label": "Activité des agents",
         "description": "Lorsqu'une exécution d'agent échoue"
