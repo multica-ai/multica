@@ -789,6 +789,26 @@ describe("ChatInput page context", () => {
     rerender(element({ pageContext: { ...page, id: "issue-2", label: "MUL-2" } }));
     expect(pageChip()).toBeNull();
   });
+
+  it.each([
+    ["another page", { ...page, id: "issue-2", label: "MUL-2" }],
+    ["a page with no context", null],
+  ])("does not send the page after leaving it for %s and coming back", async (_, away) => {
+    const onSend = vi.fn<ChatInputOnSend>(() => true);
+    const { rerender } = renderInput({ onSend, pageContext: page });
+    fireEvent.keyDown(screen.getByTestId("editor"), { key: "Tab" });
+    expect(pageChip()).not.toBeNull();
+
+    rerender(element({ onSend, pageContext: away }));
+    rerender(element({ onSend, pageContext: page }));
+    expect(pageChip()).toBeNull();
+    expect(screen.getByRole("button", { name: "Add this page as context" })).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "A new question" } });
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]![0]).toBe("A new question");
+  });
 });
 
 describe("ChatInput project context", () => {

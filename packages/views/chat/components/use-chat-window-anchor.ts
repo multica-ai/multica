@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 /** The window's inset from its container, and its resting place with no anchor. */
 export const CHAT_WINDOW_INSET = 8;
@@ -21,14 +21,26 @@ const ANCHOR_TRIGGER_SELECTOR = "[data-chat-anchor], [data-chat-anchor-trigger]"
  * The window is placed when it opens, when the bar opens another chat in it,
  * and when its container resizes; after that it follows its control if the
  * bar's chips reflow. It stays put otherwise: a chip appearing for the chat
- * just started, or the window being dragged wider, must not move it under the
- * person typing in it.
+ * just started must not move it under the person typing in it.
+ *
+ * `width` is the width the window is sized to, not the one it is animating
+ * through. A new size (expand, restore) places the window again. While
+ * `isResizing`, the dragged edge has to stay under the pointer, so the right
+ * edge holds and the window is only kept inside the container.
  */
 export function useChatWindowAnchor(
   windowRef: React.RefObject<HTMLElement | null>,
   isOpen: boolean,
+  width: number,
+  isResizing = false,
 ): number {
   const [right, setRight] = useState(CHAT_WINDOW_INSET);
+  const widthRef = useRef(width);
+  widthRef.current = width;
+  const isResizingRef = useRef(isResizing);
+  isResizingRef.current = isResizing;
+  const placedRightRef = useRef(CHAT_WINDOW_INSET);
+  const measureRef = useRef<(() => void) | null>(null);
 
   useLayoutEffect(() => {
     if (!isOpen) return;
@@ -46,18 +58,21 @@ export function useChatWindowAnchor(
       placedAt = anchor?.dataset.chatAnchor ?? null;
       // No bar, or a bar that is not laid out (display: none).
       if (!anchorBox || anchorBox.width === 0) {
+        placedRightRef.current = CHAT_WINDOW_INSET;
         setRight(CHAT_WINDOW_INSET);
         return;
       }
       const box = container.getBoundingClientRect();
-      const width = win.offsetWidth;
+      const width = widthRef.current;
       const left = Math.min(
         Math.max(anchorBox.left, box.left + CHAT_WINDOW_INSET),
         box.right - CHAT_WINDOW_INSET - width,
       );
-      setRight(Math.max(CHAT_WINDOW_INSET, Math.round(box.right - left - width)));
+      placedRightRef.current = Math.max(CHAT_WINDOW_INSET, Math.round(box.right - left - width));
+      setRight(placedRightRef.current);
     };
 
+    measureRef.current = measure;
     measure();
 
     // The click handler's state update has not rendered yet when this runs,
@@ -72,6 +87,7 @@ export function useChatWindowAnchor(
 
     if (typeof ResizeObserver === "undefined") {
       return () => {
+        measureRef.current = null;
         cancelAnimationFrame(frame);
         document.removeEventListener("click", onClick);
       };
@@ -87,12 +103,25 @@ export function useChatWindowAnchor(
     if (bar) barObserver.observe(bar);
 
     return () => {
+      measureRef.current = null;
       cancelAnimationFrame(frame);
       document.removeEventListener("click", onClick);
       observer.disconnect();
       barObserver.disconnect();
     };
   }, [windowRef, isOpen]);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    if (!isResizingRef.current) {
+      measureRef.current?.();
+      return;
+    }
+    const container = windowRef.current?.parentElement;
+    if (!container) return;
+    const room = Math.round(container.getBoundingClientRect().width) - CHAT_WINDOW_INSET - width;
+    setRight(Math.max(CHAT_WINDOW_INSET, Math.min(placedRightRef.current, room)));
+  }, [windowRef, isOpen, width]);
 
   return right;
 }

@@ -256,10 +256,15 @@ export function ChatInput({
   const appliedConversationStarterIdRef = useRef<number | null>(null);
   const editorKey = editorKeyOverride ?? CHAT_COMPOSER_EDITOR_KEY;
 
-  // Keyed by the page, so leaving the page drops it without an effect, and
-  // coming back does not bring it back.
+  // Leaving the page drops what was attached to it, so coming back later
+  // starts without it.
   const pageContextKey = pageContext ? `${pageContext.type}:${pageContext.id}` : null;
   const [attachedPageKey, setAttachedPageKey] = useState<string | null>(null);
+  const [shownPageKey, setShownPageKey] = useState(pageContextKey);
+  if (shownPageKey !== pageContextKey) {
+    setShownPageKey(pageContextKey);
+    setAttachedPageKey(null);
+  }
   const attachedPage = pageContext && attachedPageKey === pageContextKey ? pageContext : null;
   const togglePageContext = () =>
     setAttachedPageKey((current) => (current === pageContextKey ? null : pageContextKey));
