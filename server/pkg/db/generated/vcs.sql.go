@@ -343,6 +343,61 @@ func (q *Queries) ListIssueIDsForVCSPullRequest(ctx context.Context, pullRequest
 	return items, nil
 }
 
+const listIssueVCSPullRequestSummaries = `-- name: ListIssueVCSPullRequestSummaries :many
+SELECT
+    ipr.issue_id,
+    pr.id, pr.provider, pr.repo_owner, pr.repo_name, pr.pr_number, pr.title,
+    pr.state, pr.html_url, pr.pr_created_at
+FROM vcs_pull_request pr
+JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE pr.workspace_id = $1
+`
+
+type ListIssueVCSPullRequestSummariesRow struct {
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	ID          pgtype.UUID        `json:"id"`
+	Provider    string             `json:"provider"`
+	RepoOwner   string             `json:"repo_owner"`
+	RepoName    string             `json:"repo_name"`
+	PrNumber    int32              `json:"pr_number"`
+	Title       string             `json:"title"`
+	State       string             `json:"state"`
+	HtmlUrl     string             `json:"html_url"`
+	PrCreatedAt pgtype.Timestamptz `json:"pr_created_at"`
+}
+
+// Self-hosted provider twin of ListIssuePullRequestSummaries.
+func (q *Queries) ListIssueVCSPullRequestSummaries(ctx context.Context, workspaceID pgtype.UUID) ([]ListIssueVCSPullRequestSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listIssueVCSPullRequestSummaries, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueVCSPullRequestSummariesRow{}
+	for rows.Next() {
+		var i ListIssueVCSPullRequestSummariesRow
+		if err := rows.Scan(
+			&i.IssueID,
+			&i.ID,
+			&i.Provider,
+			&i.RepoOwner,
+			&i.RepoName,
+			&i.PrNumber,
+			&i.Title,
+			&i.State,
+			&i.HtmlUrl,
+			&i.PrCreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVCSConnectionsByWorkspace = `-- name: ListVCSConnectionsByWorkspace :many
 
 SELECT id, workspace_id, provider, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at FROM vcs_connection

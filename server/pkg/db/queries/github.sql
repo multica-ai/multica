@@ -194,6 +194,18 @@ LEFT JOIN checks c ON c.pr_id = pr.id
 WHERE ipr.issue_id = sqlc.arg('issue_id')
 ORDER BY pr.pr_created_at DESC;
 
+-- name: ListIssuePullRequestSummaries :many
+-- Every issue -> PR link in the workspace, carrying only what an issue card or
+-- row needs to render a PR chip (no CI/merge snapshot). Backs the workspace
+-- wide "Pull requests" display option on board / list / table views.
+SELECT
+    ipr.issue_id,
+    pr.id, pr.repo_owner, pr.repo_name, pr.pr_number, pr.title, pr.state,
+    pr.html_url, pr.pr_created_at
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE pr.workspace_id = sqlc.arg('workspace_id');
+
 -- name: GetIssueReviewHeadSha :one
 -- Returns the head SHA of the commit currently "under review" for an issue:
 -- the most-recently-updated linked PR that still has an open/draft state and a

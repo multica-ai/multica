@@ -533,6 +533,61 @@ func (q *Queries) ListIssueIDsForPullRequest(ctx context.Context, pullRequestID 
 	return items, nil
 }
 
+const listIssuePullRequestSummaries = `-- name: ListIssuePullRequestSummaries :many
+SELECT
+    ipr.issue_id,
+    pr.id, pr.repo_owner, pr.repo_name, pr.pr_number, pr.title, pr.state,
+    pr.html_url, pr.pr_created_at
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE pr.workspace_id = $1
+`
+
+type ListIssuePullRequestSummariesRow struct {
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	ID          pgtype.UUID        `json:"id"`
+	RepoOwner   string             `json:"repo_owner"`
+	RepoName    string             `json:"repo_name"`
+	PrNumber    int32              `json:"pr_number"`
+	Title       string             `json:"title"`
+	State       string             `json:"state"`
+	HtmlUrl     string             `json:"html_url"`
+	PrCreatedAt pgtype.Timestamptz `json:"pr_created_at"`
+}
+
+// Every issue -> PR link in the workspace, carrying only what an issue card or
+// row needs to render a PR chip (no CI/merge snapshot). Backs the workspace
+// wide "Pull requests" display option on board / list / table views.
+func (q *Queries) ListIssuePullRequestSummaries(ctx context.Context, workspaceID pgtype.UUID) ([]ListIssuePullRequestSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listIssuePullRequestSummaries, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssuePullRequestSummariesRow{}
+	for rows.Next() {
+		var i ListIssuePullRequestSummariesRow
+		if err := rows.Scan(
+			&i.IssueID,
+			&i.ID,
+			&i.RepoOwner,
+			&i.RepoName,
+			&i.PrNumber,
+			&i.Title,
+			&i.State,
+			&i.HtmlUrl,
+			&i.PrCreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPullRequestsByIssue = `-- name: ListPullRequestsByIssue :many
 WITH issue_prs AS (
     SELECT pr.id, pr.snapshot_head_sha

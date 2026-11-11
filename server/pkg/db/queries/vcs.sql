@@ -137,6 +137,16 @@ LEFT JOIN checks c ON c.pr_id = pr.id
 WHERE ipr.issue_id = sqlc.arg('issue_id')
 ORDER BY pr.pr_created_at DESC;
 
+-- name: ListIssueVCSPullRequestSummaries :many
+-- Self-hosted provider twin of ListIssuePullRequestSummaries.
+SELECT
+    ipr.issue_id,
+    pr.id, pr.provider, pr.repo_owner, pr.repo_name, pr.pr_number, pr.title,
+    pr.state, pr.html_url, pr.pr_created_at
+FROM vcs_pull_request pr
+JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE pr.workspace_id = sqlc.arg('workspace_id');
+
 -- =====================
 -- VCS commit status (CI)
 -- =====================
