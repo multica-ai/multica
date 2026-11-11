@@ -15,6 +15,7 @@ SELECT i.*,
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR iss.project_id IS NULL OR NOT (iss.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
 ORDER BY i.created_at DESC;
 
 -- name: ListArchivedInboxItems :many
@@ -49,6 +50,12 @@ WITH eligible_archived AS MATERIALIZED (
       AND i.recipient_type = $2
       AND i.recipient_id = $3
       AND i.archived = true
+      -- MUL-8472: private projects the caller cannot see.
+      AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
+          SELECT 1 FROM issue hidden_issue
+          WHERE hidden_issue.id = i.issue_id
+            AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
+      ))
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1
           FROM inbox_item active
@@ -115,10 +122,27 @@ INSERT INTO inbox_item (
     actor_type, actor_id, details, id
 )
 SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
-WHERE ($2::text = 'member' AND EXISTS (
+WHERE (($2::text = 'member' AND EXISTS (
     SELECT 1 FROM member WHERE workspace_id = $1 AND user_id = $3
 )) OR ($2::text = 'agent' AND EXISTS (
     SELECT 1 FROM agent WHERE workspace_id = $1 AND id = $3
+)))
+-- MUL-8472: a member outside a private project gets no notification about its
+-- issues. Owners/admins and project members do.
+AND NOT ($2::text = 'member' AND EXISTS (
+    SELECT 1 FROM issue private_issue
+    JOIN project private_project ON private_project.id = private_issue.project_id
+    WHERE private_issue.id = $6
+      AND private_project.visibility = 'private'
+      AND NOT EXISTS (
+          SELECT 1 FROM project_member pm
+          WHERE pm.project_id = private_project.id AND pm.user_id = $3
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM member manager
+          WHERE manager.workspace_id = $1 AND manager.user_id = $3
+            AND manager.role IN ('owner', 'admin')
+      )
 ))
 RETURNING *;
 
@@ -191,8 +215,18 @@ WHERE workspace_id = $1 AND issue_id = $2 AND type = $3 AND archived = false
 RETURNING recipient_type, recipient_id;
 
 -- name: CountUnreadInbox :one
-SELECT count(*) FROM inbox_item
-WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read = false AND archived = false;
+SELECT count(*) FROM inbox_item i
+WHERE i.workspace_id = sqlc.arg('workspace_id')
+  AND i.recipient_type = sqlc.arg('recipient_type')
+  AND i.recipient_id = sqlc.arg('recipient_id')
+  AND i.read = false
+  AND i.archived = false
+  -- MUL-8472: private projects the caller cannot see.
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
+      SELECT 1 FROM issue hidden_issue
+      WHERE hidden_issue.id = i.issue_id
+        AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
+  ));
 
 -- name: CountUnreadInboxByWorkspace :many
 -- Per-workspace unread inbox counts for a recipient member, matching the
@@ -215,6 +249,18 @@ FROM (
     WHERE i.recipient_type = 'member'
       AND i.recipient_id = $1
       AND i.archived = false
+      -- MUL-8472: issues in private projects the recipient is outside of
+      -- (neither a project member nor a workspace owner/admin) do not count.
+      AND NOT (m.role NOT IN ('owner', 'admin') AND EXISTS (
+          SELECT 1 FROM issue private_issue
+          JOIN project private_project ON private_project.id = private_issue.project_id
+          WHERE private_issue.id = i.issue_id
+            AND private_project.visibility = 'private'
+            AND NOT EXISTS (
+                SELECT 1 FROM project_member pm
+                WHERE pm.project_id = private_project.id AND pm.user_id = i.recipient_id
+            )
+      ))
     ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
 ) newest
 WHERE newest.read = false

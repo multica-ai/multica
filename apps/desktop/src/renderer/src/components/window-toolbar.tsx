@@ -253,6 +253,7 @@ export function WindowToolbar() {
   return (
     <div
       data-slot="window-toolbar"
+      data-mc="window-toolbar"
       className="fixed left-0 top-0 z-30 flex h-10 shrink-0 items-center pr-3"
       style={
         {

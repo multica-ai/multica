@@ -17,6 +17,7 @@ import { issueStatusKeys } from "../issue-statuses/queries";
 import { issueWorkflowKeys } from "../issue-workflows/queries";
 import { issueViewKeys } from "../issue-views/queries";
 import { issueViewPrefKeys } from "../issue-views/preferences";
+import { useGitHubConnectionStore } from "../github/connection-store";
 import {
   markWorkspaceDeletePending,
   unmarkWorkspaceDeletePending,
@@ -82,6 +83,25 @@ describe("useRealtimeSync — ws instance change", () => {
     qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     stores = createStores();
     invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+  });
+
+  it("receives a GitHub handoff without a settings-page subscriber and removes its listener on teardown", () => {
+    const ws = createMockWs();
+    const unsubscribe = vi.fn();
+    vi.mocked(ws.on).mockImplementation((event) =>
+      event === "github_installation:created" ? unsubscribe : () => {},
+    );
+    const { unmount } = renderHook(() => useRealtimeSync(ws, stores), {
+      wrapper: createWrapper(qc),
+    });
+    const handler = vi.mocked(ws.on).mock.calls.find(([name]) => name === "github_installation:created")?.[1];
+    expect(handler).toBeDefined();
+    useGitHubConnectionStore.getState().begin("ws-1", "own-connection");
+    act(() => handler!({ installation: { id: "install-1", workspace_id: "ws-1" }, connection_id: "own-connection" }));
+    expect(useGitHubConnectionStore.getState().connection?.installationID).toBe("install-1");
+    unmount();
+    expect(unsubscribe).toHaveBeenCalled();
+    useGitHubConnectionStore.getState().reset();
   });
 
   it("skips invalidation on first non-null ws instance", () => {
@@ -588,6 +608,8 @@ describe("useRealtimeSync — comment folded into a queued run", () => {
     renderHook(() => useRealtimeSync(ws, createStores()), { wrapper: createWrapper(qc) });
     const onAny = vi.mocked(ws.onAny).mock.calls[0]![0];
     qc.setQueryData(issueKeys.tasks("issue-1"), []);
+    qc.setQueryData(issueKeys.tasks("unrelated-issue"), []);
+    qc.setQueryData(issueKeys.subtreeTasks("parent"), []);
 
     onAny({
       type: "task:coalesced",
@@ -596,6 +618,8 @@ describe("useRealtimeSync — comment folded into a queued run", () => {
     await vi.advanceTimersByTimeAsync(1_000);
 
     expect(qc.getQueryState(issueKeys.tasks("issue-1"))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(issueKeys.tasks("unrelated-issue"))?.isInvalidated).toBe(false);
+    expect(qc.getQueryState(issueKeys.subtreeTasks("parent"))?.isInvalidated).toBe(true);
   });
 });
 
@@ -675,7 +699,7 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
     // A saved view's sidebar preview filters on working_only server-side.
     affected.push(issueKeys.sidebar("ws-1", "view:v1", { table: { ...spec, filters: { working_only: true } } }, 5));
     untouched.push(issueKeys.sidebar("ws-1", "view:v2", { table: spec }, 5));
-    untouched.push(issueKeys.sidebar("ws-1", "project:p1", { project_id: "p1" }, 5));
+    untouched.push(issueKeys.sidebar("ws-1", "project:p1", { table: { ...spec, scope: { kind: "project", project_id: "p1" } } }, 5));
     for (const key of [...untouched, ...affected]) qc.setQueryData(key, []);
     emit("task:completed");
     await vi.advanceTimersByTimeAsync(1_000);
@@ -910,5 +934,31 @@ describe("useRealtimeSync — member:removed", () => {
     expect(forgetLocalSearchIndex).toHaveBeenCalledWith("ws-1");
     // Let the relocate lookup settle before the test tears down.
     await waitFor(() => expect(qc.getQueryData(workspaceKeys.list())).toEqual([]));
+  });
+});
+
+describe("deliverable inventory freshness", () => {
+  it.each(["comment:created", "comment:updated", "comment:deleted"])("refreshes only the affected issue on %s", (event) => {
+    const qc = new QueryClient({ defaultOptions: {queries:{retry:false,staleTime:Infinity}} });
+    const ws=createMockWs();
+    renderHook(()=>useRealtimeSync(ws,createStores()),{wrapper:createWrapper(qc)});
+    qc.setQueryData(issueKeys.attachments("affected"),[]);
+    qc.setQueryData(issueKeys.attachments("unrelated"),[]);
+    const listener=vi.mocked(ws.on).mock.calls.find(([name])=>name===event)?.[1];
+    act(()=>listener?.({comment:{issue_id:"affected"},issue_id:"affected"} as never));
+    expect(qc.getQueryState(issueKeys.attachments("affected"))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(issueKeys.attachments("unrelated"))?.isInvalidated).toBe(false);
+    qc.clear();
+  });
+
+  it.each(["activity:created", "reaction:added", "reaction:removed", "comment:resolved"])("leaves the file inventory alone on %s", (event) => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, createStores()), { wrapper: createWrapper(qc) });
+    qc.setQueryData(issueKeys.attachments("affected"), []);
+    const listener = vi.mocked(ws.on).mock.calls.find(([name]) => name === event)?.[1];
+    act(() => listener?.({ comment: { issue_id: "affected" }, issue_id: "affected" } as never));
+    expect(qc.getQueryState(issueKeys.attachments("affected"))?.isInvalidated).toBe(false);
+    qc.clear();
   });
 });

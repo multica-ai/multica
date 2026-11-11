@@ -397,6 +397,10 @@ type TaskCancellationActor struct {
 }
 
 type AgentTaskResponse struct {
+	// Restricted marks a run on an issue in a private project the caller
+	// cannot see (MUL-8472): only identity, status, timing and usage remain.
+	Restricted bool `json:"restricted,omitempty"`
+
 	StartClaimSupported      bool                   `json:"start_claim_supported,omitempty"`
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
@@ -630,6 +634,10 @@ type AgentTaskResponse struct {
 	// owning user; the daemon must not fall back to its own credential. See
 	// MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
+
+	// ChatFeishuSource is the Feishu ids of the message this task answers,
+	// from its frozen delivery. Absent for other surfaces.
+	ChatFeishuSource *protocol.FeishuSource `json:"chat_feishu_source,omitempty"`
 }
 
 // TaskAttribution is the wire shape of a run's accountable-human provenance
@@ -3042,6 +3050,11 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.hydrateTaskSupplementMetadata(r.Context(), r, agent.WorkspaceID, tasks, resp)
+	if err := h.redactHiddenProjectTasks(r, workspaceID, tasks, resp); err != nil {
+		slog.Warn("list agent tasks: resolve project access failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to list agent tasks")
+		return
+	}
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 	if includeUsage {
 		if err := h.hydrateAgentTaskUsage(r.Context(), agent.ID, taskIDs, resp); err != nil {
@@ -3194,18 +3207,44 @@ func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Issues in private projects the caller cannot see (MUL-8472) are left
+	// out of issue_ids; the agent and its running count stay, as on the
+	// redacted run list.
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	var issueIDs []pgtype.UUID
+	for _, row := range rows {
+		issueIDs = append(issueIDs, row.IssueIds...)
+	}
+	hiddenIssues, err := h.hiddenIssueIDs(r, hidden, issueIDs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+		return
+	}
+
 	resp := make([]WorkspaceWorkingAgent, 0, len(rows))
 	for _, row := range rows {
 		agentID := uuidToString(row.ID)
 		if _, ok := allowed[agentID]; !ok {
 			continue
 		}
+		visibleIssues := row.IssueIds
+		if len(hiddenIssues) > 0 {
+			visibleIssues = make([]pgtype.UUID, 0, len(row.IssueIds))
+			for _, id := range row.IssueIds {
+				if _, hide := hiddenIssues[id]; !hide {
+					visibleIssues = append(visibleIssues, id)
+				}
+			}
+		}
 		resp = append(resp, WorkspaceWorkingAgent{
 			ID:               agentID,
 			Name:             row.Name,
 			AvatarURL:        h.resolveAvatarURLPtr(textToPtr(row.AvatarUrl)),
 			RunningTaskCount: row.RunningTaskCount,
-			IssueIDs:         uuidStringsOrEmpty(row.IssueIds),
+			IssueIDs:         uuidStringsOrEmpty(visibleIssues),
 		})
 	}
 
@@ -3340,6 +3379,11 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 	}
 	if err := h.redactForeignChatTaskContent(r.Context(), requestUserID(r), kept, resp); err != nil {
 		slog.Warn("agent task snapshot: resolve chat owners failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to list agent task snapshot")
+		return
+	}
+	if err := h.redactHiddenProjectTasks(r, workspaceID, kept, resp); err != nil {
+		slog.Warn("agent task snapshot: resolve project access failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to list agent task snapshot")
 		return
 	}

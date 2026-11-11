@@ -265,6 +265,18 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		result.ReadyChats = append(result.ReadyChats, readyChats...)
 	}
 
+	// No FK cascade (repo rule): a departing member leaves every private
+	// project in the workspace and stops watching every project.
+	if err := qtx.DeleteProjectMembersByUser(ctx, db.DeleteProjectMembersByUserParams{
+		WorkspaceID: workspaceID, UserID: userID,
+	}); err != nil {
+		return empty, err
+	}
+	if err := qtx.DeleteProjectSubscribersByUser(ctx, db.DeleteProjectSubscribersByUserParams{
+		WorkspaceID: workspaceID, UserID: userID,
+	}); err != nil {
+		return empty, err
+	}
 	if err := qtx.DeleteMember(ctx, memberID); err != nil {
 		return empty, err
 	}

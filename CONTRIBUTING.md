@@ -613,10 +613,43 @@ Two constraints are enforced rather than documented:
   execution-environment helper for every task; `go run` deletes that binary when
   the launcher exits, so the daemon would register, heartbeat, and then fail
   every task with `fork/exec …/go-build…/exe/multica: no such file or directory`.
-- **`daemon start` is refused under a daemon-managed task.** A checkout below a
-  `.multica/daemon_task_context.json` marker cannot start a second daemon
-  competing for its own work, so `make up C=daemon` stops with that explanation
-  before spending a login on it. Use `C=api,web` there.
+- **Under a daemon-managed task, only the environment's own daemon starts.** A
+  checkout below a `.multica/daemon_task_context.json` marker is an agent's
+  workdir, and the CLI refuses `daemon start`, `stop` and `status` there so a
+  task never operates your own daemon or profile. It makes one exception: an
+  explicit `--profile` that the dev-env registry assigns to an environment (its
+  CLI profile, or the `desktop-localhost-<backend port>` profile its Desktop
+  signs in), pointed at that environment's API, from a process the task's
+  `MULTICA_*` identity was stripped from. `make up` launches the daemon and
+  Desktop exactly that way, so an agent can run `make up C=api,web,daemon` and
+  test a real agent run. `make destroy` stops the daemon and removes its profile.
+
+### An environment that outlives the agent's run
+
+When a reviewer should open the app after the run ends, an agent inside a
+Multica task starts an environment this repository declares in
+`.multica/environments.toml`:
+
+```bash
+multica env start web          # make up C=api,web
+multica env start desktop      # make up C=desktop ARGS=--cdp
+multica env stop web
+```
+
+The daemon lists each one in the issue sidebar and stops it after 24 hours.
+
+- `web` has the URL `http://localhost:$MULTICA_PORT`, which redirects to the web
+  app on the port `make up` allocated.
+- `desktop` has no URL. The sidebar shows it as an app, and Desktop on the same
+  machine brings its window forward.
+
+Both are this checkout's `make up` environment, so they share one API and
+database, and `make status` and `make env-exec` work as usual. Stopping one
+leaves the other running; stopping the last one, or the last one's app going
+away, runs `make destroy`. A component started with a plain `make up` counts
+as in use too, and an environment that existed before `multica env start` is
+left in place, with its own owner and TTL. See
+[Local Environments](CLI_AND_DAEMON.md#local-environments) for the file format.
 
 ### Web with realistic content
 

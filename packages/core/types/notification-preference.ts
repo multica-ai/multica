@@ -4,6 +4,7 @@ export type NotificationGroupKey =
   | "comments"
   | "mentions"
   | "updates"
+  | "new_issues"
   | "agent_activity"
   | "system_notifications";
 

@@ -165,7 +165,7 @@ type daemonRuntimeProbe struct {
 }
 
 func runDaemonProbeRuntimes(cmd *cobra.Command, _ []string) error {
-	if err := requireHumanLocalCommand("daemon probe-runtimes"); err != nil {
+	if err := requireHumanLocalDaemonCommand(cmd, "daemon probe-runtimes"); err != nil {
 		return err
 	}
 	cfg, err := daemon.LoadConfig(daemon.Overrides{
@@ -551,7 +551,7 @@ func requireDaemonAuth(profile string) error {
 }
 
 func runDaemonStart(cmd *cobra.Command, _ []string) error {
-	if err := requireHumanLocalCommand("daemon start"); err != nil {
+	if err := requireHumanLocalDaemonCommand(cmd, "daemon start"); err != nil {
 		return err
 	}
 	foreground, _ := cmd.Flags().GetBool("foreground")
@@ -1388,7 +1388,7 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 // --- daemon stop ---
 
 func runDaemonStop(cmd *cobra.Command, _ []string) error {
-	if err := requireHumanLocalCommand("daemon stop"); err != nil {
+	if err := requireHumanLocalDaemonCommand(cmd, "daemon stop"); err != nil {
 		return err
 	}
 	profile := resolveProfile(cmd)
@@ -1495,8 +1495,8 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	}
 	output, _ := cmd.Flags().GetString("output")
 
-	// Safe to list profiles here: daemonStatusHealthPort already rejected an
-	// explicit --profile inside a daemon-managed task.
+	// Safe to list profiles here: daemonStatusHealthPort already rejected every
+	// explicit --profile inside a daemon-managed task except a dev-env one.
 	if err := requireKnownProfile(profile); err != nil {
 		var unknown *unknownProfileError
 		if output == "json" && errors.As(err, &unknown) {
@@ -1525,9 +1525,10 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	// possible — and the task's profile is necessarily empty (--profile is
 	// rejected) while the host may run a named one, which would make every
 	// named-profile host look like a conflict and break the standing contract
-	// that `daemon status` in a task reports on the daemon hosting it.
+	// that `daemon status` in a task reports on the daemon hosting it. A dev-env
+	// profile's port is profile-derived like any other, so it keeps the check.
 	var conflict *daemonProfileMismatchError
-	if daemonAlive(health) && !inDaemonTaskIdentityContext() {
+	if daemonAlive(health) && (!inDaemonTaskIdentityContext() || devEnvOwnsDaemonProfile(cmd)) {
 		errors.As(daemonIdentityMismatch(health, profile, healthPort), &conflict)
 	}
 
@@ -1570,10 +1571,11 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 // whatever profile name the caller passes, so deriving the port there would let
 // a task report on a daemon that is not the one hosting it — and for a task
 // hosted by a named-profile daemon it would silently probe the default daemon
-// instead. A missing port fails closed rather than guessing.
+// instead. A missing port fails closed rather than guessing. The one exception
+// is a dev-env profile, which names a daemon the task started itself.
 func daemonStatusHealthPort(cmd *cobra.Command) (int, error) {
 	profile := resolveProfile(cmd)
-	if !inDaemonTaskIdentityContext() {
+	if !inDaemonTaskIdentityContext() || devEnvOwnsDaemonProfile(cmd) {
 		return resolveHealthPort(profile), nil
 	}
 	if profile != "" {

@@ -63,6 +63,8 @@ Message the Bot directly. Consecutive messages stay in the same Multica conversa
 
 Add the Bot to the group first, then `@Bot` and describe what you need. The Bot only responds to messages that explicitly @-mention it, and each run includes the group's most recent messages as context.
 
+In both direct messages and group chats, each run's prompt also lists the Feishu ids of the message it answers: `chat_id`, `chat_type`, `message_id`, the topic's `thread_id` when the message is in a topic, and the sender's `open_id`. These are Feishu ids, not Multica ids, so an agent with its own Feishu access can look up the original message or conversation. The `open_id` is specific to the connected Bot's app. Ids Multica did not record are left out.
+
 ### Create an issue
 
 Send:
@@ -104,7 +106,7 @@ Restart the API server, then connect the Bot from the agent's **Integrations** p
 
 ## Troubleshooting
 
-Workspace owners and admins can expand **Last text/card send observation** for an active Bot in **Settings → Channels → Feishu**. It records the most recently completed ordinary chat-reply API call for the current binding, including a fallback call when one occurs. A confirmed request is not proof of delivery, reading, attachment delivery, or current connectivity. Missing evidence means no saved observation, not that the Bot has never sent a reply. Rebinding clears it. Failed task notices, account-binding messages, attachments and typing reactions are outside this observation.
+Workspace owners and admins can expand **Last text/card send observation** for an active Bot in the agent's **Messaging** section. Follow the agent link from **Settings → Messaging** to reach it. It records the most recently completed ordinary chat-reply API call for the current binding, including a fallback call when one occurs. A confirmed request is not proof of delivery, reading, attachment delivery, or current connectivity. Missing evidence means no saved observation, not that the Bot has never sent a reply. Rebinding clears it. Failed task notices, account-binding messages, attachments and typing reactions are outside this observation.
 
 Known API refusals show a targeted check for group membership, bot capability, app availability or reply permissions. A missing message ID, timeout, “message is being sent” response or unclassified error stays uncertain: check the original conversation before sending again. Opening this section only reads the saved observation; it does not send a test message, execute an agent, change permissions or retry a reply.
 

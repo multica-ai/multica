@@ -54,6 +54,14 @@ describe("isImageAttachment", () => {
 describe("matchAttachmentByURL", () => {
   const a = attachment({ id: UUID_A });
 
+  it("matches historical local URLs after the backend aliases the storage URL", () => {
+    const local = attachment({ id: UUID_A, url: `/api/attachments/${UUID_A}/download` });
+    const url = `/uploads/workspaces/${UUID_B}/${UUID_A}.png`;
+    expect(matchAttachmentByURL(url, [local])).toBe(local);
+    expect(selectStandaloneAttachments(`![](${url})`, [local])).toEqual([]);
+    expect(collectImageSequence([{ content: `![](${url})`, attachments: [local] }])).toHaveLength(1);
+  });
+
   it("matches the stable download path regardless of host and query", () => {
     expect(
       matchAttachmentByURL(
@@ -214,6 +222,23 @@ describe("collectImageSequence", () => {
       "https://cdn/raw.png",
       `/api/attachments/${UUID_A}/download`,
     ]);
+  });
+
+  it.each([
+    ["named reference", '<img src="/a.png?a=1&amp;b=2" alt="A &amp; B">', "/a.png?a=1&b=2", "A & B"],
+    ["numeric reference", "<img alt='A' src='/a&#46;png'>", "/a.png", "A"],
+    ["unquoted value", "<IMG SRC=/a&amp;b.png ALT=A/>", "/a&b.png", "A/"],
+    ["legacy reference before =", '<img src="/a.png?x=1&copy=2" alt="A">', "/a.png?x=1&copy=2", "A"],
+    ["src-like text in another attribute", '<img alt="no src=/b.png" src="/a.png">', "/a.png", "no src=/b.png"],
+    ["repeated attribute", '<img src="/a.png" src="/b.png" alt="A">', "/a.png", "A"],
+  ])("reads <img> attributes as the HTML parser does: %s", (_name, html, url, filename) => {
+    expect(collectImageSequence([{ content: html }]).map(({ key, filename }) => ({ key, filename })))
+      .toEqual([{ key: url, filename }]);
+  });
+
+  it("skips <img> tags with no src or no closing bracket", () => {
+    const content = '<img alt="none">\n\n<img src="/open.png';
+    expect(collectImageSequence([{ content }])).toEqual([]);
   });
 
   it.each([

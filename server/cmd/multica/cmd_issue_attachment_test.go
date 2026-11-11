@@ -29,6 +29,9 @@ func TestIssueAttachmentArgvProcess(t *testing.T) {
 	if separator < 0 {
 		t.Fatal("missing CLI argv")
 	}
+	// The argv names fixture files relative to the directory the parent ran
+	// this process in.
+	t.Chdir(testLaunchDir)
 	// TestMain clears task credentials before tests run. Set only synthetic
 	// credentials here, after that isolation, and let TestMain clean up normally.
 	t.Setenv("MULTICA_SERVER_URL", os.Getenv("MULTICA_TEST_ATTACHMENT_SERVER"))

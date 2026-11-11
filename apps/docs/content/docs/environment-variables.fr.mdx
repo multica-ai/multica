@@ -190,6 +190,7 @@ Les limites de débit d'authentification nécessitent `REDIS_URL` ; sans cette v
 | Lark | `MULTICA_LARK_SECRET_KEY` | Clé de chiffrement des identifiants de 32 octets, encodée en Base64 |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | Clé de chiffrement des jetons de 32 octets, encodée en Base64 |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | Clé de chiffrement du jeton du bot de 32 octets, encodée en Base64 |
+| Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | Étapes d'outils affichées dans la réponse diffusée : `auto` (par défaut : détails en conversation privée, type de travail dans les groupes), `off`, `summary` ou `detail` |
 | Composio | `COMPOSIO_API_KEY` | Active les connexions d'outils Composio |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | URL de l'API de rappel ; peut se rabattre sur `MULTICA_PUBLIC_URL` |
 | Composio | `COMPOSIO_STATE_SECRET` | Secret de signature de l'état OAuth ; peut être dérivé de `JWT_SECRET` |
@@ -199,6 +200,8 @@ Les limites de débit d'authentification nécessitent `REDIS_URL` ; sans cette v
 | Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | Origine navigateur dédiée, sans cookies, routée vers ce backend ; doit différer des origines de l'application et de l'API, et préserver `Host` |
 | Plugins | `MULTICA_PLUGIN_API_URL` | URL de base complète et versionnée de la Plugin Public API, comme `https://plugin-api.example.com/v1` ; se rabat sur `MULTICA_PUBLIC_URL` + `/v1` |
 | Plugins | `MULTICA_PLUGIN_DIR` | Répertoire absolu facultatif utilisé pour publier des bundles de plugins locaux pendant le développement |
+| Boutique de thèmes | `MULTICA_THEME_STORE` | Activée par défaut, elle lit le registre officiel [multica-themes](https://github.com/multica-ai/multica-themes) ; `off` désactive la boutique de thèmes communautaires et toute requête au registre |
+| Boutique de thèmes | `MULTICA_THEME_REGISTRY_URL` | L'`index.json` d'un autre registre, par exemple un fork de l'officiel ; voir [Thèmes et apparence](/themes#auto-hébergement) |
 
 Sans `GITHUB_APP_ID` et la clé privée, les PR sont toujours liées, reflétées et changent normalement le statut de la tâche lors du merge, mais les cartes n'affichent ni statut CI ni possibilité de fusion, et l'entrée de dépôt « Choisir depuis GitHub » est désactivée.
 
@@ -382,6 +385,8 @@ Clés prises en charge :
 | `ws_claim_poll_interval` | `3m` | Borne supérieure des interrogations de sécurité de la prise en charge via WebSocket lorsque celle-ci est saine, indépendante de `poll_interval` ; le daemon applique une gigue uniquement à la baisse |
 | `heartbeat_interval` | `15s` | Intervalle des signaux de vie (heartbeat) |
 | `agent_timeout` | illimité | Durée maximale absolue par exécution |
+| `agent_idle_watchdog` | `2h` | Durée maximale de silence lorsqu'aucun appel d'outil n'est en cours ; `0s` désactive entièrement le watchdog du daemon, y compris `agent_tool_watchdog` |
+| `agent_tool_watchdog` | identique à `agent_idle_watchdog` | Durée maximale de silence pendant un appel d'outil ; avec `0s`, le watchdog du daemon n'arrête jamais une exécution à cause d'un appel d'outil silencieux, et l'exécution n'est plus bornée que par `agent_timeout`, illimité par défaut |
 | `codex_semantic_inactivity_timeout` | dérivée | Seuil de silence sémantique de Codex. Si rien n'est défini, il prend le plus grand des budgets des watchdogs d'inactivité et d'outil ; un budget d'outil de `0` se rabat sur le budget d'inactivité, et ce n'est que lorsque l'ensemble des watchdogs est désactivé que Codex conserve son propre `10m` |
 | `codex_handshake_timeout` | `30s` ; `thread/start`, `thread/resume` : `60s` | Plafonds de la poignée de main au démarrage du Codex app-server. Une valeur explicite remplace globalement les deux budgets |
 | `disable_auto_update` | suit l'environnement | `true` désactive la mise à jour automatique ; `false` efface la surcharge locale et revient à la variable d'environnement ou à la valeur par défaut |
@@ -390,7 +395,7 @@ Clés prises en charge :
 
 Quelques règles concernant les valeurs :
 
-- Les clés de durée acceptent des durées Go positives (comme `10s`, `2h`) ; `0s` et les valeurs négatives sont refusées. La seule exception est `agent_timeout` : `0s` est valide et désactive explicitement la limite de durée des exécutions.
+- Les clés de durée acceptent des durées Go positives (comme `10s`, `2h`) ; les valeurs négatives sont toujours refusées. Seules `agent_timeout`, `agent_idle_watchdog` et `agent_tool_watchdog` acceptent aussi `0s` : pour `agent_timeout`, cela désactive explicitement la limite de durée des exécutions ; pour les deux clés de watchdog, le tableau indique ce que `0s` désactive.
 - Passer une chaîne vide efface une valeur persistée et revient à la variable d'environnement ou à la valeur par défaut intégrée, par exemple `multica config set poll_interval ""`.
 - `max_concurrent_tasks` exige un entier positif ou nul.
 - Les valeurs relatives de `workspaces_root` sont converties en chemins absolus lors de l'enregistrement.

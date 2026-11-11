@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createChatStore, registerChatStore, useChatStore } from "@multica/core/chat";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
@@ -40,7 +40,6 @@ vi.mock("@multica/core/hooks", async (importOriginal) => ({
 vi.mock("@multica/core/agents", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/agents")>()),
   useAgentPresenceDetail: () => "loading",
-  useCustomizeConversationStartersHref: () => null,
   useWorkspaceAgentAvailability: () => "loading",
 }));
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
@@ -109,12 +108,13 @@ beforeEach(() => {
 });
 
 describe("ChatWindow header buttons", () => {
-  it("names the new chat, expand and minimize buttons after their tooltips", () => {
+  it("names the new chat, expand, minimize and close buttons after their tooltips", () => {
     renderWindow();
 
     expect(screen.getByRole("button", { name: enChat.window.new_chat_tooltip })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: enChat.window.expand_tooltip })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: enChat.window.minimize_tooltip })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: enChat.window.close_tooltip })).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: enChat.window.restore_tooltip }),
     ).not.toBeInTheDocument();
@@ -137,5 +137,33 @@ describe("ChatWindow header buttons", () => {
     renderWindow();
 
     expect(screen.getByRole("button", { name: enChat.window.restore_tooltip })).toBeInTheDocument();
+  });
+});
+
+describe("ChatWindow minimize and close", () => {
+  beforeEach(() => {
+    act(() => {
+      useChatStore.setState({ chatBarKept: [session.id], chatBarDismissed: {} });
+    });
+  });
+
+  it("minimize hides the window and keeps the chat's chip", () => {
+    renderWindow();
+
+    fireEvent.click(screen.getByRole("button", { name: enChat.window.minimize_tooltip }));
+
+    expect(useChatStore.getState().isOpen).toBe(false);
+    expect(useChatStore.getState().chatBarKept).toEqual([session.id]);
+  });
+
+  it("close hides the window and closes the chat's chip", () => {
+    renderWindow();
+
+    fireEvent.click(screen.getByRole("button", { name: enChat.window.close_tooltip }));
+
+    const state = useChatStore.getState();
+    expect(state.isOpen).toBe(false);
+    expect(state.chatBarKept).toEqual([]);
+    expect(state.chatBarDismissed).toEqual({ [session.id]: session.updated_at });
   });
 });

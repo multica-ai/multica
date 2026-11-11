@@ -51,13 +51,24 @@ After the agent replies, it sometimes offers **Follow-up questions** below the r
 
 ## Chat from any page
 
-You don't have to leave the page you're on to chat. Workspace pages have a round chat button in the bottom-right corner (its tooltip reads "Ask Multica"), which opens a floating chat window. The window and the **Chat** page share the same conversations, so you can pick up a chat from either one.
+You don't have to leave the page you're on to chat. Workspace pages can open a chat in a floating window. The window and the **Chat** page share the same conversations, so you can pick up a chat from either one.
+
+In a wide window, quick chat sits at the right end of the status bar along the bottom of the app:
+
+- **Ask Multica** starts a new chat.
+- A chat gets a chip in the bar while the agent is working on it, while it has a reply you haven't read, and once you've opened it in the floating window. A spinner on the chip means the agent is replying, and a colored dot means an unread reply; hover the chip to see the chat's title and state. Click a chip to open that chat, and click it again to close the window. Chips that don't fit go into a **+N** menu.
+- To close a chip, hover it and click **×**. It comes back when the chat gets a new message or when you open the chat again.
+- **Chat history**, the last button in the bar, lists your recent chats with the same running and unread marks. Pick one to open it, or click **All chats** to go to the **Chat** page.
+- The window opens above the button or chip you clicked.
+
+A narrow window has no status bar. Instead, a round chat button in the bottom-right corner opens the window. The button pulses gently while an agent is replying, and its tooltip says when a chat is running or has unread replies.
 
 - Press `⌘J` (`Ctrl+J` on Windows and Linux) to open or close the floating window; opening it puts the cursor in the message input. The key works while you're typing in that input, too. You can rebind it under **Settings → Shortcuts**; see [Search, shortcuts, and preferences](/shortcuts).
-- Drag the window's edges to resize it, or expand or minimize it. While an agent is replying, the closed chat button pulses gently.
-- The **Chat** page itself doesn't show the button, and `⌘J` does nothing there: the page already shows the same conversation.
+- Press `⇧⌘J` (`Ctrl+Shift+J` on Windows and Linux) to start a new chat instead, the same as **Ask Multica**; `⌘J` reopens the chat you had open last. Press it again on the new chat to close the window.
+- Drag the window's edges to resize it, or expand or minimize it.
+- On the **Chat** page itself, quick chat doesn't appear in the status bar and the round button doesn't show. Neither `⌘J` nor `⇧⌘J` does anything there: the page already shows the same conversation.
 
-If you don't want the floating window, turn off **Floating chat window** under **Settings → Preferences → Comments & chat**. Chat is then reachable only from the sidebar. The switch applies to the current device only.
+If you don't want the floating window, turn off **Floating chat window** under **Settings → Preferences → Comments & chat**. Quick chat then leaves the status bar, the round button no longer appears, and Chat is reachable only from the sidebar. The switch applies to the current device only.
 
 ## Chat vs. issues
 

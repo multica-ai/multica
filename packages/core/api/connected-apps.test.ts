@@ -49,10 +49,23 @@ describe("Connected Apps API parsing", () => {
     const overview = await client.getAppsOverview();
     expect(overview.catalog_mode).toBe("custom");
     expect(overview.personal[0]?.connected_by).toBeNull();
+    expect(overview.personal[0]?.actions_blocked).toBe(false);
     expect(overview.agent_apps[0]?.level).toBe("write");
 
     ({ client } = respondWith({ team: "nope" }));
     expect(await client.getAppsOverview()).toEqual(EMPTY_APPS_OVERVIEW);
+  });
+
+  it("reads saved account restrictions and tolerates malformed optional flags", async () => {
+    const { client } = respondWith({
+      catalog_mode: "all", team: [], agent_apps: [],
+      personal: [
+        { id: "c1", toolkit_slug: "gmail", actions_blocked: true },
+        { id: "c2", toolkit_slug: "notion", actions_blocked: "yes" },
+      ],
+    });
+    const overview = await client.getAppsOverview();
+    expect(overview.personal.map((c) => c.actions_blocked)).toEqual([true, false]);
   });
 
   it("maps enum values this client does not know to the cautious ones", async () => {

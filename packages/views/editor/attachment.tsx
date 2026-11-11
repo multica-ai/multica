@@ -29,6 +29,7 @@
 
 import {
   Download,
+  Eye,
   Loader2,
   Link as LinkIcon,
   Maximize2,
@@ -41,9 +42,15 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
-import { attachmentIdFromStorageURL } from "@multica/core/types/attachment-url";
+import {
+  attachmentDownloadPath,
+  attachmentIdFromDownloadURL,
+  attachmentIdFromLocalUploadURL,
+  attachmentIdFromStorageURL,
+} from "@multica/core/types/attachment-url";
 import { useT } from "../i18n";
 import { DeferredTooltip } from "../common/deferred-tooltip";
+import { useContextMenuScope } from "../common/context-menu-scope";
 import { useAttachmentDownloadResolver } from "./attachment-download-context";
 import { useAttachmentPreview } from "./attachment-preview-modal";
 import { usePreviewSequence } from "./preview-sequence-context";
@@ -228,8 +235,8 @@ function absolutizeMediaURL(rawUrl: string): string {
 // for rendering but must not replace durable Markdown references.
 //
 // Use known public/CDN URLs directly only when cdn_signed is false; unsigned URLs
-// on a private CDN fail even when the domain matches. Local /uploads paths remain
-// valid after origin normalization. Otherwise prefer the server's markdown_url,
+// on a private CDN fail even when the domain matches. Historical local uploads
+// use the authenticated API. Otherwise prefer the server's markdown_url,
 // then legacy storage URLs, then the original input.
 function pickInlineMediaURL(
   record: AttachmentRecord,
@@ -244,17 +251,11 @@ function pickInlineMediaURL(
   ) {
     return dl;
   }
+  if (attachmentIdFromLocalUploadURL(record.url)) return attachmentDownloadPath(record.id);
   if (!cdnSigned && storageURLMatchesCdnDomain(record.url, cdnDomain)) return record.url;
-  if (isSiteRelativeLocalUploadURL(record.url)) return record.url;
   if (record.markdown_url) return record.markdown_url;
   if (record.url) return record.url;
   return fallback;
-}
-
-function isSiteRelativeLocalUploadURL(rawURL: string): boolean {
-  if (!rawURL || !rawURL.startsWith("/")) return false;
-  const path = rawURL.split(/[?#]/, 1)[0] ?? "";
-  return path === "/uploads" || path.startsWith("/uploads/");
 }
 
 function storageURLMatchesCdnDomain(rawURL: string, cdnDomain: string): boolean {
@@ -298,6 +299,8 @@ export function Attachment({
   badge,
   className,
 }: AttachmentProps) {
+  const { t } = useT("editor");
+  const copyLink = useCopyAttachmentLink();
   const { resolveAttachment, openByUrl } = useAttachmentDownloadResolver();
   const cdnDomain = useConfigStore((s) => s.cdnDomain);
   const cdnSigned = useConfigStore((s) => s.cdnSigned);
@@ -329,8 +332,8 @@ export function Attachment({
   const shareUrl = isObjectURL(mediaUrl) ? state.url : mediaUrl;
 
   // Identity this attachment has in the surrounding surface's sequence: the
-  // attachment id once the URL resolves to a record, otherwise the URL exactly
-  // as written in the body — the same pair `collectAttachmentSequence` keys on.
+  // attachment id once the URL resolves to a record, otherwise the URL as the
+  // renderer received it — the same pair `collectAttachmentSequence` keys on.
   const sequenceKey =
     state.attachmentId ?? (attachment.kind === "url" ? attachment.url : "");
 
@@ -353,7 +356,7 @@ export function Attachment({
     if (mediaUrl) {
       preview.tryOpen({
         kind: "url",
-        url: mediaUrl,
+        url: isObjectURL(mediaUrl) ? state.url : mediaUrl,
         filename: state.filename,
         // This dispatcher has already decided what the slot is — from the
         // call site's `forceKind`, or from a content-type the modal's
@@ -371,12 +374,47 @@ export function Attachment({
     // its attachment id, so re-sign it instead of opening the bare URL,
     // which a signed CDN rejects outside the app.
     const attachmentId =
-      state.attachmentId ?? attachmentIdFromStorageURL(shareUrl, cdnDomain);
+      state.attachmentId ??
+      attachmentIdFromDownloadURL(shareUrl) ??
+      attachmentIdFromLocalUploadURL(shareUrl) ??
+      attachmentIdFromStorageURL(shareUrl, cdnDomain);
     if (attachmentId) {
       return download(attachmentId);
     }
     if (shareUrl) return openByUrl(shareUrl);
   };
+
+  const canPreview =
+    kind === "image"
+      ? !!mediaUrl
+      : !!shareUrl && canOpenPreview(kind, !!state.attachmentId);
+  const canDownload = !!shareUrl || !!state.attachmentId;
+  // Read-only content offers these on right-click too; an editor keeps its
+  // edit menu.
+  const scopeRef = useContextMenuScope(() => {
+    if (editable || state.uploading) return null;
+    const contentActions = [
+      canPreview && {
+        key: "preview",
+        icon: <Eye className="size-3.5" />,
+        label: t(($) => $.attachment.preview),
+        onSelect: openPreview,
+      },
+      canDownload && {
+        key: "download",
+        icon: <Download className="size-3.5" />,
+        label: t(($) => $.image.download),
+        onSelect: () => void handleDownload(),
+      },
+      shareUrl && {
+        key: "copy-link",
+        icon: <LinkIcon className="size-3.5" />,
+        label: t(($) => $.image.copy_link),
+        onSelect: () => void copyLink(shareUrl),
+      },
+    ].filter((item) => !!item);
+    return { contentActions };
+  }, { content: !editable });
 
   if (kind === "image") {
     return (
@@ -393,6 +431,7 @@ export function Attachment({
           onView={openPreview}
           onDownload={handleDownload}
           onDelete={onDelete}
+          scopeRef={scopeRef}
           className={cn(layout === "card" && "image-standalone", className)}
         />
         {preview.modal}
@@ -408,8 +447,9 @@ export function Attachment({
           contentType={state.contentType}
           sizeBytes={state.record?.size_bytes}
           // Same gate as the row's Eye button: text kinds need the record.
-          canPreview={!!shareUrl && canOpenPreview(kind, !!state.attachmentId)}
-          canDownload={!!shareUrl || !!state.attachmentId}
+          canPreview={canPreview}
+          canDownload={canDownload}
+          scopeRef={scopeRef}
           uploading={state.uploading}
           badge={badge}
           onPreview={openPreview}
@@ -432,10 +472,22 @@ export function Attachment({
         onPreview={openPreview}
         onDownload={handleDownload}
         onDelete={editable ? onDelete : undefined}
+        scopeRef={scopeRef}
       />
       {preview.modal}
     </>
   );
+}
+
+function useCopyAttachmentLink() {
+  const { t } = useT("editor");
+  return async (url: string) => {
+    if (await copyText(url)) {
+      toast.success(t(($) => $.image.link_copied));
+    } else {
+      toast.error(t(($) => $.image.copy_link_failed));
+    }
+  };
 }
 
 // ImageAttachmentView — inline image with hover toolbar
@@ -463,6 +515,8 @@ interface ImageAttachmentViewProps {
   onView: () => void;
   onDownload: () => void | Promise<unknown>;
   onDelete?: () => void;
+  /** Registers the image with the right-click menu. */
+  scopeRef?: (element: HTMLElement | null) => void;
   className?: string;
 }
 
@@ -478,18 +532,13 @@ function ImageAttachmentView({
   onView,
   onDownload,
   onDelete,
+  scopeRef,
   className,
 }: ImageAttachmentViewProps) {
   const { t } = useT("editor");
   const { downloading, handleDownload } = useAttachmentDownloadState(onDownload);
-
-  const handleCopyLink = async () => {
-    if (await copyText(linkUrl)) {
-      toast.success(t(($) => $.image.link_copied));
-    } else {
-      toast.error(t(($) => $.image.copy_link_failed));
-    }
-  };
+  const copyLink = useCopyAttachmentLink();
+  const handleCopyLink = () => copyLink(linkUrl);
 
   // Click on figure opens the preview only in non-editor / non-uploading
   // surfaces — inside the editor we let ProseMirror own the click for
@@ -521,7 +570,7 @@ function ImageAttachmentView({
   // the NodeViewWrapper still emits its own outer .image-node div around
   // this — the duplicate `image-node` class is harmless.
   return (
-    <span className="image-node">
+    <span ref={scopeRef} className="image-node">
       <span
         className={cn(
           "image-figure",

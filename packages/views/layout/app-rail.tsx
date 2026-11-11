@@ -13,13 +13,16 @@ import {
 import { restrictToFirstScrollableAncestor, restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Settings, Users, type IconComponent } from "@multica/ui/icons";
+import { CheckCheck, ExternalLink, Link2, RotateCcw, Settings, Users, type IconComponent } from "@multica/ui/icons";
+import { toast } from "sonner";
 import { useChatStore } from "@multica/core/chat";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useInboxUnreadCount } from "@multica/core/inbox/queries";
+import { useMarkAllInboxRead } from "@multica/core/inbox/mutations";
 import { resolveRailOrder, useRailOrderStore } from "@multica/core/navigation";
 import {
+  RAIL_SPACES,
   useCurrentWorkspace,
   useWorkspacePaths,
   type AppSpaceId,
@@ -29,9 +32,17 @@ import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { CappedNumberFlow } from "@multica/ui/components/ui/number-flow";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { useAppForeground } from "../common/use-app-foreground";
+import { useRowMenu } from "../common/point-menu";
 import { useT } from "../i18n";
-import { AppLink, useNavigation } from "../navigation";
+import { AppLink, useIntentNavigate, useNavigation } from "../navigation";
 import { AccountMenu } from "./account-menu";
 import { useAppShell } from "./app-shell-context";
 import { NewIssueButton, SearchButton } from "./global-actions";
@@ -149,6 +160,9 @@ function RailSpaceLink({
   badge?: RailBadge;
 }) {
   const peekHandlers = usePeekHandlers(space, true);
+  // Desktop only: in a browser the link keeps the browser's own link menu.
+  const { openInNewTab } = useNavigation();
+  const rowMenu = useRowMenu();
   const link = (
     <AppLink
       href={href}
@@ -156,27 +170,101 @@ function RailSpaceLink({
       newTabTitle={fullLabel}
       draggable={false}
       aria-current={active ? "page" : undefined}
+      onContextMenu={openInNewTab ? rowMenu.openAtPointer : undefined}
       {...peekHandlers}
-      className="group relative flex size-12 flex-col items-center justify-center gap-1 rounded-xl text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-sidebar-accent aria-[current=page]:font-medium aria-[current=page]:text-sidebar-accent-foreground"
+      className="group relative flex size-12 flex-col items-center justify-center gap-1 rounded-rail-item text-rail-item transition-colors outline-none hover:bg-rail-item-hover hover:text-rail-item-active-foreground focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-rail-item-active aria-[current=page]:font-medium aria-[current=page]:text-rail-item-active-foreground"
     >
       <Icon className="size-5" />
       <span className="max-w-full truncate px-0.5 text-micro leading-[14px]">{label}</span>
       {badge && <RailBadgeMark badge={badge} />}
     </AppLink>
   );
+  // The menu portals out of the sortable item, but its React events still
+  // bubble through it; a press inside the menu must not start a drag.
+  const menu = rowMenu.menu.point && (
+    <span className="contents" onPointerDown={(event) => event.stopPropagation()}>
+      <RailSpaceMenu space={space} href={href} title={fullLabel} unread={badge?.kind === "count" ? badge.value : 0} state={rowMenu} />
+    </span>
+  );
   // A label the same as the full name still needs the tooltip whenever a
   // locale's text doesn't fit the 48px item.
   if (label === fullLabel) {
     return (
-      <TruncatedTooltip content={fullLabel} side="right">
-        {link}
-      </TruncatedTooltip>
+      <>
+        <TruncatedTooltip content={fullLabel} side="right">
+          {link}
+        </TruncatedTooltip>
+        {menu}
+      </>
     );
   }
   return (
-    <TooltipHint label={fullLabel} side="right">
-      {link}
-    </TooltipHint>
+    <>
+      <TooltipHint label={fullLabel} side="right">
+        {link}
+      </TooltipHint>
+      {menu}
+    </>
+  );
+}
+
+/** A rail space's right-click menu. */
+function RailSpaceMenu({
+  space,
+  href,
+  title,
+  unread,
+  state,
+}: {
+  space: RailSpaceId;
+  href: string;
+  title: string;
+  unread: number;
+  state: ReturnType<typeof useRowMenu>;
+}) {
+  const { t } = useT("layout");
+  const { t: tCommon } = useT("common");
+  const { getShareableUrl } = useNavigation();
+  const intentNavigate = useIntentNavigate();
+  const copyLink = async () => {
+    if (await copyText(getShareableUrl(href))) toast.success(t(($) => $.rail.link_copied));
+  };
+  const markAllRead = useMarkAllInboxRead();
+  const customOrder = useRailOrderStore((s) => s.order !== null);
+  const setOrder = useRailOrderStore((s) => s.setOrder);
+  return (
+    <DropdownMenu open={state.menu.open} onOpenChange={state.onOpenChange}>
+      <DropdownMenuContent align="start" anchor={state.anchor} className="w-auto min-w-44">
+        <DropdownMenuItem onClick={() => intentNavigate(href, "foreground-tab", title)}>
+          <ExternalLink />
+          {tCommon(($) => $.navigation.open_in_new_tab)}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void copyLink()}>
+          <Link2 />
+          {t(($) => $.rail.copy_link)}
+        </DropdownMenuItem>
+        {space === "inbox" && unread > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() =>
+                markAllRead.mutate(undefined, {
+                  onError: () => toast.error(t(($) => $.rail.mark_all_read_failed)),
+                })
+              }
+            >
+              <CheckCheck />
+              {t(($) => $.rail.mark_all_read)}
+            </DropdownMenuItem>
+          </>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem disabled={!customOrder} onClick={() => setOrder(RAIL_SPACES)}>
+          <RotateCcw />
+          {t(($) => $.rail.reset_order)}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -278,6 +366,7 @@ export function AppRail({
     <nav
       aria-label={t(($) => $.rail.label)}
       data-slot="app-rail"
+      data-mc="app-rail"
       className={cn(
         "flex h-full w-14 shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden pt-[15px] pb-2.5 [scrollbar-width:none]",
         className,

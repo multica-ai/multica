@@ -116,7 +116,7 @@ func (b *Bridge) prepare(ctx context.Context, t *claimedTask) (*run, error) {
 	}
 	if len(r.Resources) == 0 && len(t.Repos) == 1 {
 		if resource, err := repositoryResource(Repository{URL: t.Repos[0].URL}); err == nil {
-			if _, err := b.sessionResources([]map[string]any{resource}); err == nil {
+			if _, _, _, err := b.sessionResources(ctx, []map[string]any{resource}); err == nil {
 				r.Resources = append(r.Resources, resource)
 			}
 		}
