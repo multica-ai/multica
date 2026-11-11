@@ -388,6 +388,10 @@ vi.mock("@multica/core/issues/stores", async () => ({
   ...(await vi.importActual<
     typeof import("@multica/core/issues/stores/sub-issues-collapse-store")
   >("@multica/core/issues/stores/sub-issues-collapse-store")),
+  // Real store, in-memory: the sidebar reads its section order and visibility.
+  ...(await vi.importActual<
+    typeof import("@multica/core/issues/stores/issue-sidebar-sections-store")
+  >("@multica/core/issues/stores/issue-sidebar-sections-store")),
   useRecentIssuesStore: Object.assign(
     (selector?: any) => {
       const state = { byWorkspace: {}, recordVisit: mockRecordVisit, pruneWorkspaces: vi.fn() };

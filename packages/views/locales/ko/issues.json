@@ -486,6 +486,17 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "메타데이터",
     "section_details": "세부 정보",
+    "sidebar_settings": {
+      "open": "사이드바 사용자 지정",
+      "title": "사이드바",
+      "reset": "초기화",
+      "footer": "드래그해 순서를 바꿉니다. 모든 이슈에 적용됩니다.",
+      "always_shown": "항상 표시",
+      "empty": "이 이슈에는 없음",
+      "customize": "사용자 지정",
+      "drag_handle": "{{section}} 순서 변경",
+      "hidden_count_other": "섹션 {{count}}개 숨김"
+    },
     "section_quick_actions": "퀵 액션",
     "quick_actions_more": "{{count}}개 더 보기",
     "quick_action_runs_as": "{{name}}이(가) 실행합니다",

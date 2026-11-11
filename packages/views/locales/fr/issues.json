@@ -492,6 +492,18 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "Métadonnées",
     "section_details": "Détails",
+    "sidebar_settings": {
+      "open": "Personnaliser la barre latérale",
+      "title": "Barre latérale",
+      "reset": "Réinitialiser",
+      "footer": "Faites glisser pour réordonner. S'applique à toutes les tâches.",
+      "always_shown": "Toujours affiché",
+      "empty": "Rien sur cette tâche",
+      "customize": "Personnaliser",
+      "drag_handle": "Réordonner {{section}}",
+      "hidden_count_one": "{{count}} section masquée",
+      "hidden_count_other": "{{count}} sections masquées"
+    },
     "section_quick_actions": "Actions rapides",
     "quick_actions_more": "Afficher {{count}} de plus",
     "quick_action_runs_as": "S'exécute en tant que {{name}}",

@@ -486,6 +486,17 @@
     "section_pull_requests": "Pull Request",
     "section_metadata": "元数据",
     "section_details": "详情",
+    "sidebar_settings": {
+      "open": "自定义侧边栏",
+      "title": "侧边栏",
+      "reset": "恢复默认",
+      "footer": "拖动调整顺序。所有任务共用这套设置。",
+      "always_shown": "始终显示",
+      "empty": "本任务暂无",
+      "customize": "自定义",
+      "drag_handle": "调整{{section}}的位置",
+      "hidden_count_other": "已隐藏 {{count}} 个区块"
+    },
     "section_quick_actions": "快捷操作",
     "quick_actions_more": "显示其余 {{count}} 条",
     "quick_action_runs_as": "由 {{name}} 执行",

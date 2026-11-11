@@ -492,6 +492,18 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "Metadata",
     "section_details": "Details",
+    "sidebar_settings": {
+      "open": "Customize sidebar",
+      "title": "Sidebar",
+      "reset": "Reset",
+      "footer": "Drag to reorder. Applies to every issue.",
+      "always_shown": "Always shown",
+      "empty": "None on this issue",
+      "customize": "Customize",
+      "drag_handle": "Reorder {{section}}",
+      "hidden_count_one": "{{count}} section hidden",
+      "hidden_count_other": "{{count}} sections hidden"
+    },
     "section_quick_actions": "Quick Actions",
     "quick_actions_more": "Show {{count}} more",
     "quick_action_runs_as": "Runs as {{name}}",

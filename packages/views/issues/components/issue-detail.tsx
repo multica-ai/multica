@@ -124,6 +124,8 @@ import { PluginPanelSection } from "../../plugins";
 import { PullRequestsSection } from "./pull-requests-section";
 import { IssueEnvironmentsSection } from "./issue-environments-section";
 import { useGitHubSettings } from "@multica/core/github";
+import { useFeatureEnabled } from "@multica/core/config";
+import { PLUGINS_V1_FLAG } from "@multica/core/feature-flags";
 import { DeliverablesSection } from "./deliverables/deliverables-section";
 import { IssueAppsSection } from "./issue-apps-section";
 import { DeliverablesOverview } from "./deliverables/deliverables-overview";
@@ -168,6 +170,8 @@ import {
   SUB_ISSUE_ROW_PROPERTY_KEYS,
   type SubIssueRowProperties,
   type SubIssueRowPropertyKey,
+  ISSUE_SIDEBAR_SECTIONS,
+  type IssueSidebarSection,
 } from "@multica/core/issues/stores";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import {
@@ -198,7 +202,8 @@ import { useShowInSidebar } from "../../layout/panels/show-in-sidebar";
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { MetadataSection } from "./metadata-section";
-import { IssueSidebarSectionHeader, IssueSidebarStack, IssueSidebarPropertyGrid } from "./issue-sidebar-section";
+import { IssueSidebarSectionHeader, IssueSidebarPropertyGrid } from "./issue-sidebar-section";
+import { IssueSidebarSections } from "./issue-sidebar-settings";
 import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
 import { useIssueTimelineAnchor } from "../hooks/use-issue-timeline-anchor";
@@ -1377,6 +1382,7 @@ export function IssueLoadError({
 // Loading skeleton
 
 const ISSUE_DETAIL_LAYOUT_ID = "multica_issue_detail_layout";
+const REVEALED_WAKEUPS: readonly IssueSidebarSection[] = ["wakeups"];
 
 /**
  * Exported so `IssueDetailRoute` can show the identical frame while it resolves
@@ -1535,6 +1541,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const githubSettings = useGitHubSettings();
+  const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
 
   // Per-issue, per-session set of optional properties currently visible in
   // the sidebar Properties section. Seeded on issue switch with whichever
@@ -2890,8 +2897,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [beginDesktopSidebarToggle, isMobile, sidebarRef]);
 
   // The header's wakeup chip opens the sidebar and brings the Wakeups section
-  // into view with focus on its heading.
+  // into view with focus on its heading, showing it on this issue even when
+  // the reader hid it from the sidebar.
+  const [revealedWakeupsFor, setRevealedWakeupsFor] = useState<string | null>(null);
   const openWakeups = useCallback(() => {
+    setRevealedWakeupsFor(id);
     if (!sidebarOpen) handleToggleSidebar();
     window.requestAnimationFrame(() => {
       const heading = document.getElementById(`issue-wakeups-${id}`);
@@ -3091,9 +3101,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     </div>
   );
 
-  const sidebarContent = (
-    <IssueSidebarStack>
-      {/* Properties */}
+  const sidebarSections: Record<IssueSidebarSection, ReactNode> = {
+    properties: (
       <div>
         <IssueSidebarSectionHeader title={t(($) => $.detail.section_properties)} open={propertiesOpen} onOpenChange={setPropertiesOpen}  />
         {propertiesOpen && <IssueSidebarPropertyGrid>
@@ -3206,22 +3215,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {addPropertyRow}
         </IssueSidebarPropertyGrid>}
       </div>
-
-      <QuickActionsSection issueId={issue.id} />
-
+    ),
+    quick_actions: <QuickActionsSection issueId={issue.id} />,
+    wakeups: (
       <WakeupsSection
         issueId={issue.id}
         closed={["done", "closed"].includes(resolveStatusCategory(issue.status))}
         defaultAgentId={issue.assignee_type === "agent" ? (issue.assignee_id ?? undefined) : undefined}
       />
-
-      <PluginPanelSection issueId={issue.id} />
-
-      {/* Parent issue — standalone section, only when the issue has a
-          parent. Setting a parent is reachable via the issue actions menu;
-          this card surfaces an existing parent without occupying sidebar
-          space for issues that don't have one. */}
-      {parentIssue && (
+    ),
+    plugins: <PluginPanelSection issueId={issue.id} />,
+    // Parent issue — standalone section, only when the issue has a
+    // parent. Setting a parent is reachable via the issue actions menu;
+    // this card surfaces an existing parent without occupying sidebar
+    // space for issues that don't have one.
+    parent: parentIssue && (
         <div>
           <IssueSidebarSectionHeader title={t(($) => $.detail.section_parent_issue)} open={parentIssueOpen} onOpenChange={setParentIssueOpen}
             actions={<IconButton size="icon-xs" label={t(($) => $.actions.remove_parent_issue)} onClick={() => actions.removeParent()}><Unlink /></IconButton>} />
@@ -3245,43 +3253,39 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
           </div>}
         </div>
-      )}
-
-      <IssueDuplicatesSection issueId={issue.id} />
-
-      {/* Pull requests — hidden when the workspace disables the PR sidebar
-          (or the GitHub master switch is off). Backend data is kept either
-          way so re-enabling restores the section instantly. */}
-      {githubSettings.prSidebar && (
-        <PullRequestsSection
-          issueId={id}
-          identifier={issue.identifier}
-          open={pullRequestsOpen}
-          onOpenChange={setPullRequestsOpen}
-        />
-      )}
-
-      {/* Environments the issue's runs left running, and the "+" that starts one. */}
-      <IssueEnvironmentsSection issueId={id} assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} />
-
-      {/* Deliverables — the files this issue's comments delivered. Hidden
-          while there are none. */}
+    ),
+    duplicates: <IssueDuplicatesSection issueId={issue.id} />,
+    // Pull requests — unavailable when the workspace disables the PR sidebar
+    // (or the GitHub master switch is off). Backend data is kept either
+    // way so re-enabling restores the section instantly.
+    pull_requests: (
+      <PullRequestsSection
+        issueId={id}
+        identifier={issue.identifier}
+        open={pullRequestsOpen}
+        onOpenChange={setPullRequestsOpen}
+      />
+    ),
+    // Environments the issue's runs left running, and the "+" that starts one.
+    environments: <IssueEnvironmentsSection issueId={id} assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} />,
+    // Deliverables — the files this issue's comments delivered. Hidden
+    // while there are none.
+    deliverables: (
       <DeliverablesSection
         files={deliverableFiles}
         onOpenOverview={openOverview}
         onCopyLink={copyDeliverableLink}
       />
-
-      {/* Apps the issue's runs used. Hidden until one makes a call. */}
-      <IssueAppsSection issueId={id} />
-
-      {/* Execution summary owns its query, realtime updates and disclosure. */}
-      <ExecutionLogSection key={id} issueId={id} identifier={issue.identifier} issueTitle={issue.title} hasChildren={childIssues.length > 0} />
-
-      {/* Details — creator and timestamps. Sits below the execution log
-          because it is the least-read block in the sidebar: the values
-          never change once the issue exists, while the log above it is
-          what people actually come here to check. */}
+    ),
+    // Apps the issue's runs used. Hidden until one makes a call.
+    apps: <IssueAppsSection issueId={id} />,
+    // Execution summary owns its query, realtime updates and disclosure.
+    execution_log: <ExecutionLogSection key={id} issueId={id} identifier={issue.identifier} issueTitle={issue.title} hasChildren={childIssues.length > 0} />,
+    // Details — creator and timestamps. Defaults to below the execution
+    // log because it is the least-read block in the sidebar: the values
+    // never change once the issue exists, while the log above it is
+    // what people actually come here to check.
+    details: (
       <div>
         <IssueSidebarSectionHeader title={t(($) => $.detail.section_details)} open={detailsOpen} onOpenChange={setDetailsOpen} />
         {detailsOpen && <IssueSidebarPropertyGrid>
@@ -3297,9 +3301,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </PropRow>
         </IssueSidebarPropertyGrid>}
       </div>
+    ),
+    metadata: <MetadataSection metadata={issue.metadata ?? {}} />,
+  };
 
-      <MetadataSection metadata={issue.metadata ?? {}} />
-    </IssueSidebarStack>
+  const sidebarContent = (
+    <IssueSidebarSections
+      sections={sidebarSections}
+      available={ISSUE_SIDEBAR_SECTIONS.filter(
+        (section) => (section !== "pull_requests" || githubSettings.prSidebar) && (section !== "plugins" || pluginsEnabled),
+      )}
+      revealed={revealedWakeupsFor === id ? REVEALED_WAKEUPS : undefined}
+    />
   );
 
   // Shared row renderer for both timeline render modes (flat / virtualized).
