@@ -178,7 +178,7 @@ Tout ce qui charge une ressource est refusé, car le CSS peut lire le contenu de
 - utilise une variable non publique, sauf si c'est un id d'option ou si le thème la lit lui-même avec `var()` ;
 - définit des variables ailleurs que sur `.theme-light` et `.theme-dark` sans sélecteur descendant, ce qui empêche le sélecteur de thème de relire ses couleurs ;
 - nomme une famille générique (`sans-serif`, `serif`, …) ou un mot-clé `ui-*` dans une pile de polices, ce qui écraserait la police CJK choisie ;
-- n'atteint pas le contraste WCAG AA dans un des modes : `--foreground` et `--muted-foreground` demandent 4,5:1 sur chaque surface, `--brand` 4,5:1 sur les surfaces de lecture, le libellé du bouton principal 4,5:1 sur le bouton, et `--faint-foreground` 3:1.
+- n'atteint pas le contraste WCAG AA dans un des modes : `--foreground` et `--muted-foreground` demandent 4,5:1 sur chaque surface, `--brand` 4,5:1 sur les surfaces de lecture, le libellé du bouton principal 4,5:1 sur le bouton, et `--faint-foreground` 3:1. Le texte des infobulles demande 4,5:1 sur `--tooltip`, et celui d'une puce d'affichage enfoncée 4,5:1 sur son fond. Les infobulles utilisent toujours le texte du mode sombre : définissez `--tooltip-foreground` pour le changer. Une puce enfoncée prend `--input` comme fond, sauf si vous définissez `--display-chip-pressed-background`.
 
 ## Vérifier et prévisualiser
 

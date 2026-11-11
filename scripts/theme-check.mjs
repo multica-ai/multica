@@ -59,7 +59,7 @@ if (json) {
       const failing = contrast.filter((c) => c.ratio < c.required).length;
       const lowest = [...contrast].sort((a, b) => a.ratio / a.required - b.ratio / b.required)[0];
       const values = new Set(contrast.filter((c) => c.variant).map((c) => c.variant.label)).size;
-      const where = [lowest.mode, ...(lowest.area === "frame" ? ["frame"] : [])].join(" ");
+      const where = [lowest.mode, ...(lowest.area === "page" ? [] : [lowest.area])].join(" ");
       console.log(
         `  contrast  ${contrast.length} pairs checked at the default options${values > 0 ? ` and ${values} other option value${values === 1 ? "" : "s"}` : ""}, ${failing} below WCAG AA. Lowest: ${lowest.foreground} on ${lowest.background}, ${where}${lowest.variant ? ` (${lowest.variant.label})` : ""}, ${lowest.ratio.toFixed(2)}:1 (needs ${lowest.required}:1)`,
       );

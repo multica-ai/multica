@@ -1,7 +1,7 @@
 import type { ArchiveFile } from "./theme-archive";
 import { parseTheme, readThemeFiles, type ThemePackageInput } from "./theme-package";
 import { THEME_VARIABLE_NAMES } from "./theme-variables";
-import { contrastRatio, paintOver, resolveColor, type BasePalette } from "./theme-contrast";
+import { contrastRatio, paintOver, resolveColor, type BasePalette, type Rgba } from "./theme-contrast";
 import {
   THEME_OPTION_ATTR_PREFIX,
   localizedText,
@@ -38,8 +38,11 @@ export interface ContrastVariant {
 
 export interface ContrastCheck {
   mode: "light" | "dark";
-  /** Where the pair is painted: the page, or the frame (rail, toolbar, tabs). */
-  area: "page" | "frame";
+  /**
+   * Where the pair is painted: the page, the frame (rail, toolbar, tabs),
+   * a tooltip, or a pressed chip in a display popover.
+   */
+  area: "page" | "frame" | "tooltip" | "display chip";
   foreground: string;
   background: string;
   ratio: number;
@@ -93,6 +96,21 @@ const GENERIC_FAMILY =
   /^(?:serif|sans-serif|monospace|cursive|fantasy|system-ui|math|emoji|fangsong|ui-[a-z-]+)$/i;
 const LATIN_STACKS = new Set(["font-ui", "font-content-latin"]);
 const FRAME_ANCHOR = /data-mc="(?:app-rail|window-toolbar|tab-bar|bottom-bar)"/;
+const SLOT = /^\[data-slot=(["']?)([\w-]+)\1\]$/;
+/** Slots portalled to <body> whose own variables the check follows. */
+type Slot = "tooltip-content" | "popover-content";
+const SLOTS: readonly Slot[] = ["tooltip-content", "popover-content"];
+
+/** How to fix a pair the theme reaches only through a default. */
+function contrastHint({ area, foreground, background }: ContrastCheck): string {
+  if (area === "tooltip" && foreground === "--foreground") {
+    return " Tooltip text is the app's dark-mode --foreground in both modes; set --tooltip-foreground to choose it.";
+  }
+  if (area === "display chip" && background === "--input") {
+    return " Pressed chips fill with --input, the input border colour; set --display-chip-pressed-background to colour them on their own.";
+  }
+  return "";
+}
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -173,6 +191,14 @@ function splitSelectors(prelude: string): string[] {
  * follows, then a frame anchor below it. Empty for any other selector.
  */
 function frameModes(selector: string, attributes: ReadonlyMap<string, string>): Mode[] {
+  const i = firstCombinator(selector);
+  if (i < 0 || !FRAME_ANCHOR.test(selector.slice(i))) return [];
+  const head = rootSelector(selector.slice(0, i), attributes);
+  return head && head !== "inactive" ? head.modes : [];
+}
+
+/** Where the first descendant combinator outside brackets and quotes is, or -1. */
+function firstCombinator(selector: string): number {
   let depth = 0;
   let quote = "";
   for (let i = 0; i < selector.length; i += 1) {
@@ -182,13 +208,34 @@ function frameModes(selector: string, attributes: ReadonlyMap<string, string>): 
     } else if (c === '"' || c === "'") quote = c;
     else if (c === "(" || c === "[") depth += 1;
     else if (c === ")" || c === "]") depth = Math.max(0, depth - 1);
-    else if (/\s/.test(c) && depth === 0) {
-      if (!FRAME_ANCHOR.test(selector.slice(i))) return [];
-      const head = rootSelector(selector.slice(0, i), attributes);
-      return head && head !== "inactive" ? head.modes : [];
-    }
+    else if (/\s/.test(c) && depth === 0) return i;
   }
-  return [];
+  return -1;
+}
+
+/**
+ * The slots a rule sets variables on, in which modes, and how specific it
+ * is: `[data-slot="x"]`, alone or in an `:is()` / `:where()` list, either
+ * bare or below a selector on <html> that `rootSelector` follows.
+ * `"inactive"` when that selector does not match; null for any other.
+ */
+function slotSelector(
+  selector: string,
+  attributes: ReadonlyMap<string, string>,
+): { modes: Mode[]; slots: Slot[]; specificity: number } | "inactive" | null {
+  const i = firstCombinator(selector);
+  const head = i < 0 ? null : rootSelector(selector.slice(0, i), attributes);
+  if (i >= 0 && !head) return null;
+  const target = (i < 0 ? selector : selector.slice(i)).trim();
+  const list = /^:(is|where)\(([\s\S]*)\)$/.exec(target);
+  const args = list ? splitSelectors(list[2]!) : [target];
+  const slots = args.map((s) => SLOT.exec(s)?.[2]).filter((s): s is Slot => SLOTS.includes(s as Slot));
+  if (slots.length === 0) return null;
+  if (head === "inactive") return "inactive";
+  // `:is()` counts as its most specific argument and `:where()` as nothing;
+  // the arguments here are attribute selectors, as specific as a class.
+  const own = list?.[1] === "where" ? 0 : Math.max(...args.map((s) => (s.match(/\[|\.|:(?!:)/g)?.length ?? 0) * 10));
+  return { modes: head ? head.modes : ["light", "dark"], slots, specificity: (head ? head.specificity : 0) + own };
 }
 
 /** A palette that records which variables a contrast check read. */
@@ -203,6 +250,42 @@ class ReadTracker extends Map<string, string> {
     return super.get(name);
   }
 }
+
+/**
+ * The variables of an element below <html>, as the browser computes them:
+ * its own declarations, resolved on the element, and everything else
+ * inherited with the value already computed on <html>.
+ */
+class ScopePalette extends ReadTracker {
+  private readonly parent: Map<string, string>;
+  constructor(read: Set<string>, parent: Map<string, string>, own: Iterable<readonly [string, string]>) {
+    super(read, own);
+    this.parent = parent;
+  }
+  override get(name: string) {
+    if (super.has(name)) return super.get(name);
+    if (!this.parent.has(name)) return undefined;
+    const inherited = resolveColor(this.parent, name);
+    if (!("color" in inherited)) return this.parent.get(name);
+    const { r, g, b, a } = inherited.color;
+    return `rgb(${r} ${g} ${b} / ${a})`;
+  }
+  override has(name: string) {
+    return super.has(name) || this.parent.has(name);
+  }
+}
+
+/** Declarations by name, the most specific winning and, at equal specificity, the later one. */
+type Cascade = Map<string, { value: string; specificity: number }>;
+
+function cascadeSet(cascade: Cascade, entries: Iterable<readonly [string, string]>, specificity: number) {
+  for (const [name, value] of entries) {
+    const current = cascade.get(name);
+    if (!current || specificity >= current.specificity) cascade.set(name, { value, specificity });
+  }
+}
+
+const cascadeValues = (cascade: Cascade) => [...cascade].map(([name, { value }]) => [name, value] as const);
 
 /** Rules that hold declarations, top-level or nested, enough to find variables. */
 function rules(css: string): Rule[] {
@@ -343,6 +426,18 @@ function measureContrast(
     dark: new Map([...base.dark].map(([name, value]) => [name, { value, specificity: 10 }])),
   };
   const frame = { light: [] as [string, string][], dark: [] as [string, string][] };
+  // What the theme declares on each slot, per mode. The tooltip starts from
+  // `.dark` in tokens.css, which the theme's CSS follows at equal specificity.
+  const slotted = (seed: Iterable<readonly [string, string]>) => {
+    const out = { light: new Map() as Cascade, dark: new Map() as Cascade };
+    cascadeSet(out.light, seed, 10);
+    cascadeSet(out.dark, seed, 10);
+    return out;
+  };
+  const slots: Record<Slot, Record<Mode, Cascade>> = {
+    "tooltip-content": slotted(base.darkScope),
+    "popover-content": slotted([]),
+  };
   const unmodelled = new Map<string, string>();
   const attributes = new Map<string, string>();
   for (const [name, value] of Object.entries(theme ? themeOptionAttributes(theme, chosen) : {})) {
@@ -352,14 +447,13 @@ function measureContrast(
     for (const selector of rule.selectors) {
       const target = rule.nested ? null : rootSelector(selector, attributes);
       if (target === "inactive") continue;
+      const slot = rule.nested || target ? null : slotSelector(selector, attributes);
+      if (slot === "inactive") continue;
       if (target) {
-        for (const m of target.modes) {
-          for (const [name, value] of declarations(rule.body)) {
-            const current = cascade[m].get(name);
-            if (!current || target.specificity >= current.specificity) {
-              cascade[m].set(name, { value, specificity: target.specificity });
-            }
-          }
+        for (const m of target.modes) cascadeSet(cascade[m], declarations(rule.body), target.specificity);
+      } else if (slot) {
+        for (const s of slot.slots) {
+          for (const m of slot.modes) cascadeSet(slots[s][m], declarations(rule.body), slot.specificity);
         }
       } else if (!/[\s>+~]/.test(selector)) {
         // Sets variables on <html> or <body> in a way the check does not follow.
@@ -381,16 +475,15 @@ function measureContrast(
 
   for (const m of ["light", "dark"] as const) {
     // Option values are written after the theme as `:root.theme-<mode>`, so they win.
-    const palette = new ReadTracker(read, [
-      ...[...cascade[m]].map(([name, { value }]) => [name, value] as const),
-      ...Object.entries(options[m]),
-    ]);
+    const palette = new ReadTracker(read, [...cascadeValues(cascade[m]), ...Object.entries(options[m])]);
     const measure = (
       area: ContrastCheck["area"],
       p: Map<string, string>,
       foreground: string,
       backgrounds: readonly string[],
       required: number,
+      /** Where the backgrounds are resolved, when not where the text is; and what a translucent one sits on. */
+      { surface = p, under }: { surface?: Map<string, string>; under?: string } = {},
     ) => {
       const fg = resolveColor(p, foreground);
       if ("unresolved" in fg) {
@@ -398,16 +491,21 @@ function measureContrast(
         return;
       }
       for (const background of backgrounds) {
-        const bg = resolveColor(p, background);
+        const bg = resolveColor(surface, background);
         if ("unresolved" in bg) {
           unresolved.add(`${m}: ${bg.unresolved}`);
           continue;
         }
-        if (bg.color.a < 1) {
+        let fill: Rgba = bg.color;
+        if (fill.a < 1 && under) {
+          const floor = resolveColor(surface, under);
+          if ("color" in floor && floor.color.a === 1) fill = paintOver(fill, floor.color);
+        }
+        if (fill.a < 1) {
           unresolved.add(`${m}: ${background} is translucent, so its contrast depends on what is underneath`);
           continue;
         }
-        const ratio = contrastRatio(fg.color, bg.color);
+        const ratio = contrastRatio(fg.color, fill);
         results.push({
           mode: m,
           area,
@@ -463,6 +561,21 @@ function measureContrast(
         TEXT,
       );
     }
+
+    // The tooltip is a `.dark` scope in both modes: its text takes the app's
+    // dark tokens, and the theme's values only through rules on the tooltip or
+    // --tooltip-foreground. Its fill is resolved outside, in the page's mode.
+    const tooltip = new ScopePalette(read, palette, cascadeValues(slots["tooltip-content"][m]));
+    const tipText = tooltip.has("--tooltip-foreground") ? "--tooltip-foreground" : "--foreground";
+    measure("tooltip", tooltip, tipText, ["--tooltip"], TEXT, { surface: palette });
+
+    // Display chips sit in popovers; pressed, they fill with
+    // --display-chip-pressed-background, which defaults to --input (translucent
+    // in dark mode, over the popover's --surface-raised).
+    const popover = new ScopePalette(read, palette, cascadeValues(slots["popover-content"][m]));
+    const chipText = popover.has("--display-chip-pressed-color") ? "--display-chip-pressed-color" : "--foreground";
+    const chipFill = popover.has("--display-chip-pressed-background") ? "--display-chip-pressed-background" : "--input";
+    measure("display chip", popover, chipText, [chipFill], TEXT, { under: "--surface-raised" });
   }
 
   for (const [name, where] of unmodelled) {
@@ -485,10 +598,10 @@ function reportFailing(checks: readonly ContrastCheck[], issues: ThemeCheckIssue
     const { mode: m, area, foreground, required, variant } = group[0]!;
     const surfaces = group.map((c) => `${c.background} (${c.ratio.toFixed(2)}:1)`);
     const list = surfaces.length > 1 ? `${surfaces.slice(0, -1).join(", ")} and ${surfaces.at(-1)}` : surfaces[0];
-    const where = [...(area === "frame" ? ["frame"] : []), ...(variant ? [variant.label] : [])];
+    const where = [...(area === "page" ? [] : [area]), ...(variant ? [variant.label] : [])];
     issues.push({
       level: "error",
-      message: `Contrast, ${m} mode${where.length > 0 ? ` (${where.join(", ")})` : ""}: ${foreground} is below ${required}:1 on ${list}.`,
+      message: `Contrast, ${m} mode${where.length > 0 ? ` (${where.join(", ")})` : ""}: ${foreground} is below ${required}:1 on ${list}.${contrastHint(group[0]!)}`,
     });
   }
 }

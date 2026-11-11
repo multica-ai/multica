@@ -167,10 +167,16 @@ export function readDeclarations(css: string, selector: string): Map<string, str
 export interface BasePalette {
   light: Palette;
   dark: Palette;
+  /**
+   * What `.dark` declares, alone. An element with the `dark` class, such as
+   * the tooltip, resets these to the app's dark values in either mode.
+   */
+  darkScope: Palette;
 }
 
 /** Reads the base palette from packages/ui/styles/tokens.css. */
 export function basePaletteFromTokens(tokensCss: string): BasePalette {
   const light = readDeclarations(tokensCss, ":root");
-  return { light, dark: new Map([...light, ...readDeclarations(tokensCss, ".dark")]) };
+  const darkScope = readDeclarations(tokensCss, ".dark");
+  return { light, dark: new Map([...light, ...darkScope]), darkScope };
 }

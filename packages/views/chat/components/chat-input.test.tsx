@@ -763,7 +763,7 @@ describe("ChatInput page context", () => {
     fireEvent.click(sendButton());
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     expect(onSend.mock.calls[0]![0]).toBe("[MUL-1](mention://issue/issue-1)\n\nwhy is this slow?");
-    expect(pageChip()).toBeNull();
+    await waitFor(() => expect(pageChip()).toBeNull());
   });
 
   it("leaves Tab alone when the editor already used it, or it came from outside the editor", () => {
