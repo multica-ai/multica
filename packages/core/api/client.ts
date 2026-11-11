@@ -190,6 +190,7 @@ import type {
   IssueEnvironmentAction,
   IssueEnvironmentCommand,
   StartIssueEnvironmentRequest,
+  IssuePullRequestSummariesResponse,
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
@@ -505,6 +506,8 @@ import {
   EMPTY_ISSUE_ENVIRONMENTS_RESPONSE,
   IssueEnvironmentsResponseSchema,
   IssueEnvironmentCommandSchema,
+  EMPTY_ISSUE_PULL_REQUEST_SUMMARIES_RESPONSE,
+  IssuePullRequestSummariesResponseSchema,
   ResourceLabelsResponseSchema,
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
@@ -5386,6 +5389,17 @@ export class ApiClient {
       actor_type: "member", actor_id: null, created_at: new Date().toISOString(), completed_at: null, output: null,
     };
     return parseWithFallback(raw, IssueEnvironmentCommandSchema, fallback, { endpoint: `${init?.method ?? "GET"} ${path.replace(/[0-9a-f-]{36}/g, ":id")}` });
+  }
+
+  /** Every linked PR in the workspace, for PR chips on issue cards and rows. */
+  async listIssuePullRequestSummaries(): Promise<IssuePullRequestSummariesResponse> {
+    const raw = await this.fetch<unknown>("/api/issues/pull-requests");
+    return parseWithFallback(
+      raw,
+      IssuePullRequestSummariesResponseSchema,
+      EMPTY_ISSUE_PULL_REQUEST_SUMMARIES_RESPONSE,
+      { endpoint: "GET /api/issues/pull-requests" },
+    );
   }
 
   /** Link a PR the workspace already mirrors, by pasted URL or by id (undo). */
