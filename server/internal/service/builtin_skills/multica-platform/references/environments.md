@@ -26,9 +26,19 @@ multica env stop <name>
 These need the run's `MULTICA_DAEMON_PORT` and `MULTICA_TOKEN`, so they work
 only inside a run. Run `start` from inside the checkout: it looks for
 `.multica/environments.toml` in the current directory and its parents, up to
-the run's directory. Starting a name that is already running on this issue
-returns the running one. Environments belong to the issue, so a later run can
+the run's directory. Environments belong to the issue, so a later run can
 list and stop what an earlier run started.
+
+`start` reuses a running environment only when the issue, the machine, the
+name and the checkout all match. From a different checkout, the same name
+starts a second instance on its own ports, not the service an earlier run
+started; run `multica env list --output json` first and use the running one's
+URL when that is what you need. With several instances under one name,
+`multica env stop <name>` stops one of them, whichever it finds first.
+
+Each environment's processes stop with it, even when another environment
+talks to them. Put servers that must keep running together, such as a web app
+and its API, in one environment (see the recipes).
 
 `start` fails, and prints the last lines of the log, when the start command
 exits before it is ready. When it is still not ready after 10 minutes, `start`

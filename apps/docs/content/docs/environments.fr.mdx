@@ -172,16 +172,16 @@ Sans `-d`, `up` reste au premier plan. Les conteneurs appartiennent à Docker, p
 </Tab>
 </Tabs>
 
-Pour déclarer plusieurs environnements, ajoutez d'autres tables dans le même fichier. Des environnements démarrés depuis le même checkout peuvent partager un serveur, par exemple une API : quand celui qui l'a lancé se termine, le serveur passe à un autre qui tourne encore.
+Pour déclarer plusieurs environnements, ajoutez d'autres tables dans le même fichier. Les processus d'un environnement s'arrêtent avec lui, même quand un autre environnement du même checkout les utilise. Les serveurs qui doivent continuer de tourner ensemble, comme une application web et son API, vont dans un seul environnement, comme dans l'exemple Web + API.
 
 ## Démarrer et arrêter avec le CLI [#cli]
 
 | Commande | Effet |
 |---|---|
-| `multica env start <name>` | Démarre l'environnement à partir du `.multica/environments.toml` trouvé dans le répertoire courant ou un parent. Attend qu'il soit prêt, puis affiche son URL. S'il tourne déjà sur cette tâche, le renvoie tel quel. |
+| `multica env start <name>` | Démarre l'environnement à partir du `.multica/environments.toml` trouvé dans le répertoire courant ou un parent. Attend qu'il soit prêt, puis affiche son URL. Si cette tâche a déjà un environnement de ce nom en cours depuis le même checkout, le renvoie tel quel. |
 | `multica env start <name> --wait=false` | Rend la main dès qu'il a démarré. |
 | `multica env list` | Liste les environnements de cette tâche sur cet appareil, avec leur état, leur URL et le chemin de leur journal. |
-| `multica env stop <name>` | Exécute la commande `stop` s'il y en a une, puis envoie `SIGTERM` aux processus restants, et `SIGKILL` 10 secondes plus tard. |
+| `multica env stop <name>` | Arrête l'environnement en cours de ce nom pour cette tâche sur cet appareil : exécute la commande `stop` s'il y en a une, puis envoie `SIGTERM` aux processus restants, et `SIGKILL` 10 secondes plus tard. Si plusieurs tournent sous ce nom, il en arrête un ; pour en arrêter un en particulier, utilisez la barre latérale. |
 
 Les trois acceptent `--output json`. `multica environment` est la forme longue de `multica env`.
 
@@ -191,7 +191,7 @@ Ces commandes utilisent l'identifiant de la tâche en cours : elles **ne fonctio
 
 Si la commande de démarrage se termine avant d'être prête, `multica env start` échoue et affiche les dernières lignes de son journal. Si elle ne répond toujours pas après 10 minutes, la commande rend la main, l'environnement reste en **Démarrage** et la raison (par exemple « not answering at http://localhost:41000 ») est affichée avec lui.
 
-Les environnements appartiennent à la tâche, pas à une exécution : une exécution ultérieure sur la même tâche peut lister et arrêter ce qu'une précédente a démarré, et démarrer à nouveau un environnement en cours le renvoie au lieu d'en lancer une seconde copie.
+Les environnements appartiennent à la tâche, pas à une exécution : une exécution ultérieure sur la même tâche peut lister et arrêter ce qu'une précédente a démarré. Démarrer de nouveau un nom ne réutilise l'environnement en cours que s'il tourne depuis le même checkout sur cet appareil. Une exécution avec un autre checkout démarre une seconde instance sous le même nom, sur ses propres ports : vérifiez `multica env list` avant d'en démarrer une.
 
 ## Gérer les environnements dans la barre latérale [#sidebar]
 

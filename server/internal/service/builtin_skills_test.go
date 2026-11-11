@@ -694,6 +694,9 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"`docker compose up -d`",
 				// ttl is a Go duration; the day unit fails to parse.
 				"`7d` is rejected",
+				// Reuse is keyed on the checkout as well as the name, so a run
+				// with its own checkout gets a second instance, not the old one.
+				"the name and the checkout all match",
 			},
 		},
 		{
