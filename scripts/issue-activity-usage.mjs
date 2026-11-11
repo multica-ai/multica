@@ -139,6 +139,7 @@ export async function readRollout(path, run) {
 export async function buildReport(issue, usage, runs, rolloutPaths = new Map()) {
   const buckets = Object.fromEntries(activities.map((activity) => [activity, zero()]));
   const reports = [], seen = new Set();
+  const unverifiedZeros = new Set();
   let runTotal = zero(), measuredRuns = 0;
   for (const run of runs) {
     if (seen.has(run.id)) throw new Error(`Duplicate run ${run.id}`);
@@ -158,7 +159,9 @@ export async function buildReport(issue, usage, runs, rolloutPaths = new Map()) 
       report.tokens = add(report.tokens, tokens);
       const observed = row.provider === "codex" ? rollout?.models[row.model] : null;
       const matched = observed && equal(observed, tokens) && rollout.warnings.length === 0;
-      report.models.push({ provider: row.provider, model: row.model, tokens, observed_tokens: observed ?? null, reconciliation: matched ? "matched" : observed ? "mismatch" : "no_call_usage" });
+      const unverifiedZeroCounters = matched ? [] : fields.filter((field) => tokens[field] === 0);
+      unverifiedZeroCounters.forEach((field) => unverifiedZeros.add(field));
+      report.models.push({ provider: row.provider, model: row.model, tokens, observed_tokens: observed ?? null, unverified_zero_counters: unverifiedZeroCounters, reconciliation: matched ? "matched" : observed ? "mismatch" : "no_call_usage" });
       if (matched) {
         for (const call of rollout.calls.filter((call) => call.model === row.model)) {
           buckets[call.activity] = add(buckets[call.activity], call.tokens);
@@ -180,11 +183,11 @@ export async function buildReport(issue, usage, runs, rolloutPaths = new Map()) 
   return {
     issue: { id: issue.id, identifier: issue.identifier }, generated_at: new Date().toISOString(),
     scope: "this_issue_only; all attempts/statuses; excludes child issues and direct-room chat runs",
-    token_basis: "provider_reported; disjoint uncached input, output (includes reasoning), cache read, cache write; not billing cost",
+    token_basis: "stored_normalized_provider_usage; disjoint uncached input, output (includes reasoning), cache read, cache write; not billing cost",
     attribution: "tool_rules_v1_estimate; mixed/dynamic/no-tool responses are unclassified; no proportional allocation",
-    source_totals: source, run_totals: measuredRuns ? runTotal : missing(),
+    source_totals: source, run_totals: measuredRuns ? runTotal : missing(), unverified_zero_counters: [...unverifiedZeros],
     reconciliation: { source_vs_runs: reported ? matched ? "matched" : "mismatch" : "unreported", activities_vs_runs: measuredRuns ? equal(allocated, runTotal) ? "matched" : "mismatch" : "unreported" },
-    coverage: { reported_runs: measuredRuns, unreported_terminal_runs: usage.unreported_task_count ?? null, active_runs: runs.filter((run) => !terminal.has(run.status)).length, lower_bound: (usage.unreported_task_count ?? 0) > 0 || runs.some((run) => !terminal.has(run.status)) },
+    coverage: { reported_runs: measuredRuns, unreported_terminal_runs: usage.unreported_task_count ?? null, active_runs: runs.filter((run) => !terminal.has(run.status)).length, lower_bound: unverifiedZeros.size > 0 || (usage.unreported_task_count ?? 0) > 0 || runs.some((run) => !terminal.has(run.status)) },
     activities: activities.map((activity) => ({ activity, attribution: activity === "other_unclassified" ? "unclassified" : "rule_estimate", tokens: measuredRuns ? buckets[activity] : missing(), share_percent: denominator > 0 ? 100 * sum(buckets[activity]) / denominator : null })),
     runs: reports.sort((a, b) => sum(b.tokens) - sum(a.tokens)),
   };
@@ -193,12 +196,14 @@ export async function buildReport(issue, usage, runs, rolloutPaths = new Map()) 
 export function renderTable(report) {
   const labels = ["개발", "계획", "에이전트 소통", "CI 확인", "기타/분류 불가"];
   const format = (value) => value === null ? "미보고" : value.toLocaleString("en-US");
+  const counter = (value, field, uncertain) => value === 0 && uncertain && report.unverified_zero_counters.includes(field) ? "미확인(저장0)" : format(value);
   const lines = [`${report.issue.identifier} · 해당 이슈만 · 활동은 규칙 추정`, "활동\t입력(캐시 제외)\t출력\t캐시 읽기\t캐시 쓰기\t비중"];
-  report.activities.forEach((row, i) => lines.push([labels[i], ...fields.map((field) => format(row.tokens[field])), row.share_percent === null ? "—" : `${row.share_percent.toFixed(2)}%`].join("\t")));
-  lines.push(`원천 합계\t${fields.map((field) => format(report.source_totals[field])).join("\t")}`);
+  report.activities.forEach((row, i) => lines.push([labels[i], ...fields.map((field) => counter(row.tokens[field], field, row.activity === "other_unclassified")), row.share_percent === null ? "—" : `${row.share_percent.toFixed(2)}%`].join("\t")));
+  lines.push(`원천 저장 합계\t${fields.map((field) => counter(report.source_totals[field], field, true)).join("\t")}`);
   lines.push(`대조: 원천/실행 ${report.reconciliation.source_vs_runs}, 활동/실행 ${report.reconciliation.activities_vs_runs}`);
   lines.push(`미보고 종료 실행 ${format(report.coverage.unreported_terminal_runs)}, 실행/대기 ${report.coverage.active_runs}${report.coverage.lower_bound ? "; 합계는 현재까지 보고된 하한" : ""}`);
   lines.push("비중 분모: 보고된 입력+출력+캐시 읽기+쓰기. 비용 비중이 아님. 혼합 호출·기록 없음은 분류 불가.");
+  if (report.unverified_zero_counters.length) lines.push("미확인(저장0): 공급자 누락/미지원이 원천에서 0으로 정규화됐는지 확인할 호출 근거가 없음.");
   lines.push("큰 사용 실행 (상위 5개):");
   for (const run of report.runs.slice(0, 5)) lines.push(`${run.run_id}\t${run.status}\t${run.coverage === "reported" ? format(sum(run.tokens)) : "미보고"}\t${run.models.map((row) => `${row.model}:${row.reconciliation}`).join(", ")}`);
   return lines.join("\n");

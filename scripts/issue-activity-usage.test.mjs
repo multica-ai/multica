@@ -98,6 +98,15 @@ test("missing local logs and other providers preserve reported totals as unclass
   assert.equal(report.runs[0].models[0].reconciliation, "no_call_usage");
 });
 
+test("stored zeros without call-level evidence are unverified, not proof of no token usage", async () => {
+  const value = tokens(100, 0, 20, 0);
+  const report = await buildReport(issue, summary(value), [run([{ provider: "claude", model: "model-1", ...value }])]);
+  assert.deepEqual(report.unverified_zero_counters, ["output_tokens", "cache_write_tokens"]);
+  assert.equal(report.source_totals.output_tokens, 0);
+  assert.equal(report.coverage.lower_bound, true);
+  assert.match(renderTable(report), /미확인\(저장0\)/);
+});
+
 test("a rollout mismatch stays unclassified and a source mismatch has no percentage", async (t) => {
   const path = fixture(t, [tool(), snapshot(raw(150))]);
   const report = await buildReport(issue, summary(tokens(80)), [run()], new Map([["run-1", path]]));

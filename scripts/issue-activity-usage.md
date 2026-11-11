@@ -58,7 +58,11 @@ tool arguments. Local paths and run IDs remain in the JSON report.
   tokens reported by Multica. They are **not cost percentages**. A zero attributed
   bucket means no tokens were assigned by these rules, not proof no such activity
   occurred. Runs without usage are `null`/`미보고`, and active or unreported runs
-  make the issue total a lower bound. A reported zero remains a genuine zero.
+  make the issue total a lower bound. Without matching call-level evidence,
+  stored zeros appear as `미확인(저장0)`: an upstream fallback can normalize a
+  missing/unsupported counter to zero (for example Claude fallback output).
+  JSON preserves stored counters for reconciliation and lists these separately
+  in `unverified_zero_counters`. Only a matching explicit counter verifies zero.
   Missing prices and `uncosted_*` counters must not be interpreted as free usage.
 
 The table shows the five largest reported runs. JSON includes per-model
