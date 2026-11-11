@@ -207,8 +207,6 @@ export const issueKeys = {
    *  click time. */
   attachments: (issueId: string) =>
     [...issueKeys.attachmentsAll(), issueId] as const,
-  deliverables: (issueId: string) =>
-    [...issueKeys.attachments(issueId), "deliverables"] as const,
   /** Prefix for reconnects and task events without an issue scope. */
   tasksAll: () => ["issues", "tasks"] as const,
   /** Per-issue task list (issue-detail Execution log section). */
@@ -236,6 +234,7 @@ export type MyIssuesFilter = Pick<
   | "assignee_ids"
   | "assignee_types"
   | "creator_id"
+  | "created_by_user_id"
   | "project_id"
   | "involves_user_id"
 >;
@@ -742,10 +741,3 @@ export function issueAttachmentsOptions(issueId: string) {
   });
 }
 
-/** Complete attachment inventory; independent of the bounded discussion feed. */
-export function issueDeliverablesOptions(issueId: string) {
-  return queryOptions({
-    queryKey: issueKeys.deliverables(issueId),
-    queryFn: () => api.listIssueDeliverables(issueId),
-  });
-}

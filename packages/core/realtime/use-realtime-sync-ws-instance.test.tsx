@@ -922,12 +922,23 @@ describe("deliverable inventory freshness", () => {
     const qc = new QueryClient({ defaultOptions: {queries:{retry:false,staleTime:Infinity}} });
     const ws=createMockWs();
     renderHook(()=>useRealtimeSync(ws,createStores()),{wrapper:createWrapper(qc)});
-    qc.setQueryData(issueKeys.deliverables("affected"),[]);
-    qc.setQueryData(issueKeys.deliverables("unrelated"),[]);
+    qc.setQueryData(issueKeys.attachments("affected"),[]);
+    qc.setQueryData(issueKeys.attachments("unrelated"),[]);
     const listener=vi.mocked(ws.on).mock.calls.find(([name])=>name===event)?.[1];
     act(()=>listener?.({comment:{issue_id:"affected"},issue_id:"affected"} as never));
-    expect(qc.getQueryState(issueKeys.deliverables("affected"))?.isInvalidated).toBe(true);
-    expect(qc.getQueryState(issueKeys.deliverables("unrelated"))?.isInvalidated).toBe(false);
+    expect(qc.getQueryState(issueKeys.attachments("affected"))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(issueKeys.attachments("unrelated"))?.isInvalidated).toBe(false);
+    qc.clear();
+  });
+
+  it.each(["activity:created", "reaction:added", "reaction:removed", "comment:resolved"])("leaves the file inventory alone on %s", (event) => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, createStores()), { wrapper: createWrapper(qc) });
+    qc.setQueryData(issueKeys.attachments("affected"), []);
+    const listener = vi.mocked(ws.on).mock.calls.find(([name]) => name === event)?.[1];
+    act(() => listener?.({ comment: { issue_id: "affected" }, issue_id: "affected" } as never));
+    expect(qc.getQueryState(issueKeys.attachments("affected"))?.isInvalidated).toBe(false);
     qc.clear();
   });
 });

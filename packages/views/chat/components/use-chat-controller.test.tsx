@@ -129,7 +129,6 @@ vi.mock("@multica/core/agents", () => ({
   isAgentRuntimeBound: (agent: { runtime_id: string; runtime_bound?: boolean }) =>
     agent.runtime_bound !== false && agent.runtime_id.length > 0,
   useAgentPresenceDetail: () => ({ availability: "online" }),
-  useCustomizeConversationStartersHref: () => null,
   useWorkspaceAgentAvailability: () => "available",
 }));
 vi.mock("@multica/core/hooks/use-file-upload", () => ({

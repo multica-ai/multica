@@ -211,6 +211,7 @@ export interface Issue {
   assignee_id: string | null;
   creator_type: IssueAssigneeType;
   creator_id: string;
+  requester_id?: string | null;
   parent_issue_id: string | null;
   /**
    * The original this issue duplicates (MUL-7349): present only while the

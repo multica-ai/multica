@@ -1300,6 +1300,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// as WeCom above).
 			var telegramMedia engine.MediaResolver
 			telegramOutbound := telegram.NewOutbound(queries, box.Open, "", nil, slog.Default())
+			// How much of a run's tool calls the streamed reply shows: auto
+			// (default), off, summary or detail.
+			progressMode, known := telegram.ParseProgressMode(os.Getenv("MULTICA_TELEGRAM_TOOL_PROGRESS"))
+			if !known {
+				slog.Warn("telegram: unknown MULTICA_TELEGRAM_TOOL_PROGRESS; using auto",
+					"value", os.Getenv("MULTICA_TELEGRAM_TOOL_PROGRESS"))
+			}
+			telegramOutbound.SetProgressMode(progressMode)
 			if store != nil {
 				telegramMedia = telegram.NewMediaResolver(box.Open, store, engine.NewDBMediaIntentLedger(queries), "", nil, slog.Default())
 				telegramOutbound.EnableFileDelivery(store)
@@ -2211,7 +2219,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
-					r.Get("/deliverables", h.ListIssueDeliverables)
 					r.Get("/children", h.ListChildIssues)
 					r.Get("/duplicates", h.ListIssueDuplicates)
 					r.Get("/labels", h.ListLabelsForIssue)

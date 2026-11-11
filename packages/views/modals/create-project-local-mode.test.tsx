@@ -20,6 +20,14 @@ let pickedIsGitRepo: boolean | undefined = true;
 
 const createProjectMock = vi.fn().mockResolvedValue({ id: "p1", slug: "p1" });
 
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: Object.assign(
+    (selector: (state: { user: { id: string } }) => unknown) =>
+      selector({ user: { id: "user-1" } }),
+    { getState: () => ({ user: { id: "user-1" } }) },
+  ),
+}));
+
 // jsdom has no IntersectionObserver; the modal's scroll affordances construct
 // one, and the resulting rejection aborts the submit handler mid-flight.
 class NoopIntersectionObserver {

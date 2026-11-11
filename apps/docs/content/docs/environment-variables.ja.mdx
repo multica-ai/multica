@@ -191,6 +191,7 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64 エンコードされた 32 バイトの token 暗号化キー |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64 エンコードされた 32 バイトの Bot token 暗号化キー |
 | WeChat | `MULTICA_WEIXIN_SECRET_KEY` | WeChat の認証情報と QR 状態を暗号化する Base64 エンコードの 32 バイトキー |
+| Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | ストリーミング返信に表示するツールのステップ。`auto`（既定。DM では詳細、グループでは作業の種類のみ）、`off`、`summary`、`detail` |
 | Composio | `COMPOSIO_API_KEY` | Composio ツール接続を有効化 |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | コールバック API アドレス。`MULTICA_PUBLIC_URL` にフォールバック可能 |
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state の署名シークレット。`JWT_SECRET` から派生可能 |

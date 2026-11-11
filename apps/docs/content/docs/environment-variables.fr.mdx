@@ -191,6 +191,7 @@ Les limites de débit d'authentification nécessitent `REDIS_URL` ; sans cette v
 | Slack | `MULTICA_SLACK_SECRET_KEY` | Clé de chiffrement des jetons de 32 octets, encodée en Base64 |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | Clé de chiffrement du jeton du bot de 32 octets, encodée en Base64 |
 | WeChat | `MULTICA_WEIXIN_SECRET_KEY` | Clé de 32 octets encodée en Base64 pour chiffrer les identifiants WeChat et l’état du QR code |
+| Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | Étapes d'outils affichées dans la réponse diffusée : `auto` (par défaut : détails en conversation privée, type de travail dans les groupes), `off`, `summary` ou `detail` |
 | Composio | `COMPOSIO_API_KEY` | Active les connexions d'outils Composio |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | URL de l'API de rappel ; peut se rabattre sur `MULTICA_PUBLIC_URL` |
 | Composio | `COMPOSIO_STATE_SECRET` | Secret de signature de l'état OAuth ; peut être dérivé de `JWT_SECRET` |

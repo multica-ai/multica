@@ -132,7 +132,7 @@ import {
   useDeliverableDetails,
   type DeliverableOrigin,
 } from "./deliverables/deliverable-details";
-import { collectDeliverableFiles, mergeDeliverableSources } from "@multica/core/attachments/deliverables";
+import { collectDeliverableFiles, deliverableInventoryFromAttachments, mergeDeliverableSources } from "@multica/core/attachments/deliverables";
 import { AttachmentVersionsProvider } from "./deliverables/attachment-versions";
 import {
   OpenDeliverableOnLoad,
@@ -152,7 +152,7 @@ import {
 import { useRecentContextStore } from "@multica/core/chat";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useModalStore } from "@multica/core/modals";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions, issueDeliverablesOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
@@ -1376,6 +1376,8 @@ export function IssueLoadError({
 
 // Loading skeleton
 
+const ISSUE_DETAIL_LAYOUT_ID = "multica_issue_detail_layout";
+
 /**
  * Exported so `IssueDetailRoute` can show the identical frame while it resolves
  * an identifier URL to its issue — the two waits are indistinguishable to the
@@ -1385,7 +1387,11 @@ export function IssueDetailSkeleton({
   leading,
   trailing,
   sidebar = true,
-}: { leading?: ReactNode; trailing?: ReactNode; sidebar?: boolean } = {}) {
+  layoutId = ISSUE_DETAIL_LAYOUT_ID,
+}: { leading?: ReactNode; trailing?: ReactNode; sidebar?: boolean; layoutId?: string } = {}) {
+  const { defaultLayout } = useDefaultLayout({ id: layoutId });
+  const sidebarOpen = sidebar && getAnimatedRightSidebarInitialOpen(true, defaultLayout);
+
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       {/* The way back is real from the first frame, not once the issue lands:
@@ -1427,7 +1433,7 @@ export function IssueDetailSkeleton({
             </div>
           </div>
         </div>
-        {sidebar && (
+        {sidebarOpen && (
           <div className="hidden md:block w-80 border-l p-4 space-y-5">
             {Array.from({ length: 4 }).map((_, i) => (
               <div key={i} className="flex items-center gap-2">
@@ -1451,7 +1457,7 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightAppRequestId, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightAppRequestId, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -2357,11 +2363,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // editor's click-time fresh-sign download: NodeViews match
   // `src`/`href` against this list to resolve an attachment id before
   // calling `/api/attachments/{id}`.
+  // The same list is the issue's complete file inventory: it labels each
+  // comment file with its comment, independent of the bounded timeline.
   const { data: issueAttachments } = useQuery(issueAttachmentsOptions(id));
-  const { data: deliverableInventory = EMPTY_REPLIES, error: deliverablesError } = useQuery(issueDeliverablesOptions(id));
-  useEffect(() => {
-    if (deliverablesError) toast.error(deliverablesError.message);
-  }, [deliverablesError]);
+  const deliverableInventory = useMemo(
+    () => deliverableInventoryFromAttachments(issueAttachments ?? []),
+    [issueAttachments],
+  );
 
   // Sub-issue queries
   const parentIssueId = issue?.parent_issue_id;
@@ -2935,7 +2943,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   if (loading) {
     // The host's trailing controls hold the peek's only close button, so the
     // waiting and missing states carry them too.
-    return <IssueDetailSkeleton leading={leadingAction} trailing={trailingActions} sidebar={!isPeek} />;
+    return <IssueDetailSkeleton leading={leadingAction} trailing={trailingActions} sidebar={!isPeek && desktopSidebarOpen} layoutId={layoutId} />;
   }
 
   if (!issue) {

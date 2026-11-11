@@ -1162,6 +1162,24 @@ export const AttachmentResponseSchema = z.object({
   ...AttachmentImageFields,
 }).loose();
 
+// The issue file inventory uses comment origins for grouping and sorting.
+// Malformed optional origins must not discard otherwise usable attachments.
+export const AttachmentListSchema = z.array(AttachmentResponseSchema.extend({
+  workspace_id: z.string(),
+  issue_id: z.string().nullable().default(null),
+  comment_id: z.string().nullable().default(null),
+  chat_session_id: z.string().nullable().default(null),
+  chat_message_id: z.string().nullable().default(null),
+  uploader_type: z.string(),
+  uploader_id: z.string(),
+  content_type: z.string(),
+  size_bytes: z.number(),
+  created_at: z.string(),
+  comment_author_type: z.string().optional().catch(undefined),
+  comment_author_id: z.string().optional().catch(undefined),
+  comment_created_at: z.iso.datetime({ offset: true }).optional().catch(undefined),
+})).default([]);
+
 export const EMPTY_ATTACHMENT: Attachment = {
   id: "",
   workspace_id: "",
@@ -1598,6 +1616,7 @@ export const IssueSchema = z.object({
   assignee_id: z.string().nullable(),
   creator_type: z.string(),
   creator_id: z.string(),
+  requester_id: z.string().nullable().optional().catch(undefined),
   parent_issue_id: z.string().nullable(),
   // Additive pointer (MUL-7349); same disproportionate-failure reasoning as
   // status_name above, and older backends do not send it at all.
