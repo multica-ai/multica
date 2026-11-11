@@ -18,6 +18,10 @@ const SEARCH_INDEX_EVENTS: WSEventType[] = [
   "project:created",
   "project:updated",
   "project:deleted",
+  "chat:message",
+  "chat:session_created",
+  "chat:session_updated",
+  "chat:session_deleted",
 ];
 
 /**

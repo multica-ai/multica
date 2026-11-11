@@ -1401,7 +1401,8 @@
       "pinned_name": "{{title}}（已固定）",
       "copy_link": "複製連結",
       "link_copied": "已複製連結",
-      "close_right": "關閉右側標籤頁"
+      "close_right": "關閉右側標籤頁",
+      "attention": "有更新"
     },
     "updates": {
       "title": "更新",

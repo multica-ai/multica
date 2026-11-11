@@ -1401,7 +1401,8 @@
       "pinned_name": "{{title}}（ピン留め）",
       "copy_link": "リンクをコピー",
       "link_copied": "リンクをコピーしました",
-      "close_right": "右側のタブを閉じる"
+      "close_right": "右側のタブを閉じる",
+      "attention": "更新あり"
     },
     "updates": {
       "title": "アップデート",

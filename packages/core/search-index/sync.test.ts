@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryIndexStore, SEARCH_INDEX_SCHEMA_VERSION } from "./store";
 import { IndexFetchError, WorkspaceIndex, type WorkspaceIndexOptions } from "./sync";
-import { FakeServer, commentRecord, issueRecord } from "./testing";
+import { FakeServer, chatMessageRecord, chatSessionRecord, commentRecord, issueRecord } from "./testing";
 
 let clock = 1_000_000;
 const indexes: WorkspaceIndex[] = [];
@@ -78,13 +78,13 @@ describe("WorkspaceIndex", () => {
     // Fail the second page.
     const originalSnapshot = server.snapshot.bind(server);
     let pages = 0;
-    server.snapshot = async (after, limit) => {
+    server.snapshot = async (after, afterMessageId, limit) => {
       pages += 1;
       if (pages === 2) throw new Error("network down");
-      return originalSnapshot(after, limit);
+      return originalSnapshot(after, afterMessageId, limit);
     };
     await started(index);
-    expect(store.meta?.bootstrap).toEqual({ cursor: "c5", afterNumber: 2 });
+    expect(store.meta?.bootstrap).toEqual({ cursor: "c5", afterNumber: 2, afterMessageId: "" });
     expect(index.isServing()).toBe(false);
 
     await index.sync();
@@ -225,5 +225,36 @@ describe("WorkspaceIndex", () => {
     expect(index.currentState).toBe("too_large");
     expect(server.calls.filter((c) => c === "snapshot")).toHaveLength(1);
     expect(store.issues.size).toBe(0);
+  });
+});
+
+describe("WorkspaceIndex chat messages", () => {
+  it("bootstraps chat text, serves message searches, and follows chat changes", async () => {
+    const server = new FakeServer();
+    server.apply({ kind: "issue", record: issueRecord(1, "Alpha issue") });
+    server.apply({ kind: "session", record: chatSessionRecord("s1", "Deploy chat") });
+    server.apply({ kind: "session", record: chatSessionRecord("s2", "Doomed chat") });
+    server.apply({ kind: "message", record: chatMessageRecord("m1", "s1", "deploy the api", "2026-01-01T00:00:01Z") });
+    server.apply({ kind: "message", record: chatMessageRecord("m2", "s1", "api is live", "2026-01-01T00:00:02Z") });
+    server.apply({ kind: "message", record: chatMessageRecord("m3", "s2", "delete me with the session", "2026-01-01T00:00:03Z") });
+    const { index, store } = makeIndex(server);
+    await started(index);
+
+    const result = await index.searchMessages({ q: "api" });
+    expect(result?.messages.map((m) => m.id)).toEqual(["m2", "m1"]);
+    expect(result?.messages[0]).toMatchObject({
+      match_source: "content",
+      session: { id: "s1", title: "Deploy chat" },
+    });
+
+    server.apply({ kind: "message", record: chatMessageRecord("m4", "s1", "api docs added", "2026-01-01T00:00:04Z") });
+    server.apply({ kind: "delete-message", id: "m1" });
+    server.apply({ kind: "delete-session", id: "s2" });
+    await index.sync();
+
+    expect((await index.searchMessages({ q: "api" }))?.messages.map((m) => m.id)).toEqual(["m4", "m2"]);
+    expect((await index.searchMessages({ q: "session" }))?.messages).toEqual([]);
+    expect(store.messages.size).toBe(2);
+    expect(store.sessions.size).toBe(1);
   });
 });
