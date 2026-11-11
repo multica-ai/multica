@@ -486,6 +486,17 @@
     "section_pull_requests": "Pull Request",
     "section_metadata": "後設資料",
     "section_details": "詳情",
+    "sidebar_settings": {
+      "open": "自訂側邊欄",
+      "title": "側邊欄",
+      "reset": "恢復預設",
+      "footer": "拖動調整順序。所有任務共用這套設定。",
+      "always_shown": "始終顯示",
+      "empty": "本任務暫無",
+      "customize": "自訂",
+      "drag_handle": "調整{{section}}的位置",
+      "hidden_count_other": "已隱藏 {{count}} 個區塊"
+    },
     "section_quick_actions": "快捷操作",
     "quick_actions_more": "顯示其餘 {{count}} 條",
     "quick_action_runs_as": "由 {{name}} 執行",
