@@ -228,9 +228,10 @@ func rewriteAttachmentLinks(body string, paths, urls []string) (string, []attach
 }
 
 // locateLinkDestination returns the byte offset of a link's destination,
-// searching from the link's start for the first unclaimed occurrence that
-// directly follows the `](` closing its label. The parser does not record the
-// destination's own position, and the same text may also appear in the label.
+// searching from the link's start for the first unclaimed occurrence that is a
+// whole destination directly after the `](` closing a label. The parser does
+// not record the destination's own position, and the same text may also
+// appear in the label or as a prefix of a nested link's destination.
 func locateLinkDestination(source []byte, from int, dest []byte, claimed map[int]bool, codeSpans []text.Segment) int {
 	for from < len(source) {
 		i := bytes.Index(source[from:], dest)
@@ -238,7 +239,7 @@ func locateLinkDestination(source []byte, from int, dest []byte, claimed map[int
 			return -1
 		}
 		start := from + i
-		if !claimed[start] && !insideSegments(start, codeSpans) && followsLinkOpen(source, start) {
+		if !claimed[start] && !insideSegments(start, codeSpans) && isWholeLinkDestination(source, start, start+len(dest)) {
 			return start
 		}
 		from = start + 1
@@ -246,15 +247,28 @@ func locateLinkDestination(source []byte, from int, dest []byte, claimed map[int
 	return -1
 }
 
-func followsLinkOpen(source []byte, start int) bool {
+// isWholeLinkDestination reports whether source[start:stop] is an entire
+// inline link destination: opened by `](` (optionally `<`), and closed by the
+// matching `>` or by the whitespace / `)` that ends a bare destination.
+func isWholeLinkDestination(source []byte, start, stop int) bool {
 	j := start - 1
-	if j >= 0 && source[j] == '<' {
+	angle := j >= 0 && source[j] == '<'
+	if angle {
 		j--
+		if stop >= len(source) || source[stop] != '>' {
+			return false
+		}
+	} else if stop < len(source) && !isLinkSpace(source[stop]) && source[stop] != ')' {
+		return false
 	}
-	for j >= 0 && (source[j] == ' ' || source[j] == '\t' || source[j] == '\n' || source[j] == '\r') {
+	for j >= 0 && isLinkSpace(source[j]) {
 		j--
 	}
 	return j >= 1 && source[j] == '(' && source[j-1] == ']'
+}
+
+func isLinkSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
 func insideSegments(pos int, segments []text.Segment) bool {

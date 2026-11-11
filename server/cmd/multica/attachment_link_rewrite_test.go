@@ -90,6 +90,18 @@ func TestRewriteAttachmentLinks(t *testing.T) {
 			want:  "[![](" + rewriteURL + ")](" + rewriteURL + ")",
 		},
 		{
+			name:  "nested destination sharing the attachment path as a prefix is untouched",
+			paths: []string{"a.png"},
+			body:  "[![preview](./a.png.thumb.png)](./a.png)",
+			want:  "[![preview](./a.png.thumb.png)](" + rewriteURL + ")",
+		},
+		{
+			name:  "nested angle destination sharing a prefix is untouched",
+			paths: []string{"a.png"},
+			body:  "[![preview](<./a.png thumb.png>)](<./a.png>)",
+			want:  "[![preview](<./a.png thumb.png>)](<" + rewriteURL + ">)",
+		},
+		{
 			name:  "code span is untouched",
 			paths: []string{"a.png"},
 			body:  "write `![](./a.png)` like this: ![](./a.png)",
