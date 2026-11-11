@@ -1,5 +1,6 @@
 export {
   collectDeliverableFiles,
+  deliverableInventoryFromAttachments,
   deliverableKey,
   findDeliverableVersion,
   type DeliverableFile,

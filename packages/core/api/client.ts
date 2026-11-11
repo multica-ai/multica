@@ -287,6 +287,7 @@ import {
   AgentTaskListSchema,
   AgentTaskPageSchema,
   AgentActivityBucketListSchema,
+  AttachmentListSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
   ChatDraftRestoresResponseSchema,
@@ -1754,13 +1755,6 @@ export class ApiClient {
   }
 
   // Comments
-  async listIssueDeliverables(issueId: string): Promise<TimelineEntry[]> {
-    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/deliverables`);
-    return parseWithFallback(raw, TimelineEntriesSchema, [], {
-      endpoint: "GET /api/issues/:id/deliverables",
-    });
-  }
-
   async listComments(issueId: string, options?: { thread: string }): Promise<Comment[]> {
     const query = options ? `?${new URLSearchParams({ thread: options.thread })}` : "";
     const raw = await this.fetch<unknown>(`/api/issues/${issueId}/comments${query}`);
@@ -4217,7 +4211,10 @@ export class ApiClient {
   }
 
   async listAttachments(issueId: string): Promise<Attachment[]> {
-    return this.fetch(`/api/issues/${issueId}/attachments`);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/attachments`);
+    return parseWithFallback<Attachment[]>(raw, AttachmentListSchema, [], {
+      endpoint: "GET /api/issues/:id/attachments",
+    });
   }
 
   // Fetches a fresh attachment metadata record. The server re-signs
