@@ -230,8 +230,10 @@ export function DiffDetailSurface({ lines, path }: { lines: TraceDiffLine[]; pat
 }
 
 /**
- * A command tool's input: the command itself in a code block, styled like a
- * code block in a comment, with any remaining arguments as plain JSON below.
+ * A command tool's input: the command verbatim, line by line, with any
+ * remaining arguments as JSON under it. Laid flat like every other body in the
+ * inspector, so an input reads with the same weight as its result; the command
+ * takes the foreground colour and the arguments stay muted.
  */
 export function CommandDetailSurface({
   command,
@@ -242,8 +244,8 @@ export function CommandDetailSurface({
 }) {
   return (
     <div>
-      <ToolDetailSurface text={command} language="bash" block />
-      {params && <ToolDetailSurface text={params} />}
+      <ToolDetailSurface text={command} emphasis className={params ? "pb-1.5" : undefined} />
+      {params && <ToolDetailSurface text={params} className="pt-0" />}
     </div>
   );
 }
@@ -251,13 +253,18 @@ export function CommandDetailSurface({
 export function ToolDetailSurface({
   text,
   language,
-  block = false,
+  emphasis = false,
+  className,
   note,
 }: {
   text: string;
   language?: string;
-  /** Code-block chrome (muted panel, foreground text) instead of a bare body. */
-  block?: boolean;
+  /**
+   * Foreground text that wraps at spaces, for a command a reviewer reads as
+   * prose. Other bodies stay muted and may break anywhere (long JSON tokens).
+   */
+  emphasis?: boolean;
+  className?: string;
   /**
    * A remark about the body, shown at its end once the whole body is on
    * screen. Withheld while the fade is up: a note that answers "was that all
@@ -269,16 +276,17 @@ export function ToolDetailSurface({
   const [showAll, setShowAll] = useState(false);
   const isLong = text.length > 1600 || text.split("\n").length > 14;
   const revealed = !isLong || showAll;
-  // Only file bodies and commands carry a language; output and JSON stay plain.
+  // Only file bodies carry a language; commands, output and JSON stay plain.
   const html = useMemo(() => (language ? highlightBlock(text, language) : null), [text, language]);
 
   return (
-    <div className={cn("relative", block && "mx-3 mt-2 mb-1 rounded-md bg-muted")}>
+    <div className="relative">
       <pre
         className={cn(
-          "transcript-code font-mono text-micro whitespace-pre-wrap break-all",
-          block ? "px-3 py-2 text-foreground" : "p-3 text-muted-foreground",
+          "transcript-code p-3 font-mono text-micro whitespace-pre-wrap",
+          emphasis ? "text-foreground wrap-anywhere" : "text-muted-foreground break-all",
           isLong && !showAll && "max-h-52 overflow-hidden",
+          className,
         )}
       >
         {html === null ? (
@@ -290,12 +298,7 @@ export function ToolDetailSurface({
         )}
       </pre>
       {isLong && !showAll && (
-        <div
-          className={cn(
-            "absolute inset-x-0 bottom-0 flex h-12 items-end justify-center rounded-b-md bg-gradient-to-b from-transparent",
-            block ? "to-muted" : "to-background",
-          )}
-        >
+        <div className="absolute inset-x-0 bottom-0 flex h-12 items-end justify-center rounded-b-md bg-gradient-to-b from-transparent to-background">
           <button
             type="button"
             onClick={() => setShowAll(true)}

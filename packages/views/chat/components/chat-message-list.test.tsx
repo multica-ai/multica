@@ -527,7 +527,7 @@ describe("ChatMessageList tool rows (#8835 regression)", () => {
 });
 
 describe("ChatMessageList command tool rows", () => {
-  it("shows a command in a code block, not as escaped JSON", async () => {
+  it("shows a command line by line, not as escaped JSON", async () => {
     const qc = new QueryClient();
     qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
       taskMsg(0, "tool_use", {
@@ -550,14 +550,16 @@ describe("ChatMessageList command tool rows", () => {
 
     fireEvent.click(await screen.findByText("Bash"));
 
-    // Bash highlighting splits the command into token spans, so match the
-    // block's whole text rather than a single text node.
-    const block = Array.from(document.querySelectorAll("pre")).find(
-      (pre) => pre.textContent === "pnpm test\npnpm lint",
+    // Match the raw text: the default matcher collapses the newline that this
+    // test is about.
+    const command = Array.from(document.querySelectorAll("pre > div")).find(
+      (line) => line.textContent === "pnpm test\npnpm lint",
     );
-    expect(block?.parentElement).toHaveClass("bg-muted");
+    expect(command).toHaveClass("text-foreground");
+    // Same capped, scrolling box as the panel's other inputs and results.
+    expect(command?.parentElement).toHaveClass("max-h-32", "overflow-auto");
     expect(screen.queryByText(/"command":/)).not.toBeInTheDocument();
-    expect(screen.getByText(/"description": "Run checks"/, { selector: "pre" })).toBeInTheDocument();
+    expect(command?.nextElementSibling?.textContent).toContain('"description": "Run checks"');
   });
 });
 

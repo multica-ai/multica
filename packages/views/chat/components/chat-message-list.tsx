@@ -45,7 +45,6 @@ import type {
 import type { ChatTimelineItem } from "@multica/core/chat";
 import { buildTimeline } from "../../common/task-transcript";
 import { readCommandInput, traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
-import { CommandDetailSurface } from "../../common/task-transcript/detail-surfaces";
 import { OnboardingStarterCards } from "./onboarding-starter-cards";
 import { TaskStatusPill } from "./task-status-pill";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
@@ -1349,11 +1348,13 @@ function ToolCallRow({ item }: { item: ChatTimelineItem }) {
       {hasInput && (
         <CollapsibleContent>
           {command ? (
-            // The surface insets its code block by 12px; this lines the block
-            // and the params under it up with the 18px chevron gutter.
-            <div className="-mr-3 ml-1.5">
-              <CommandDetailSurface command={command.command} params={command.params} />
-            </div>
+            // Same capped box as every other input and result in the panel, so a
+            // long script scrolls in place instead of stretching the chat. The
+            // command reads in the foreground colour, its arguments stay muted.
+            <pre className="ml-[18px] mt-0.5 max-h-32 overflow-auto rounded-xs bg-muted/50 p-2 text-caption text-muted-foreground whitespace-pre-wrap wrap-anywhere">
+              <div className="text-foreground">{command.command}</div>
+              {command.params && <div className="mt-1.5">{command.params}</div>}
+            </pre>
           ) : (
             <pre className="ml-[18px] mt-0.5 max-h-32 overflow-auto rounded-xs bg-muted/50 p-2 text-caption text-muted-foreground whitespace-pre-wrap break-all">
               {JSON.stringify(item.input, null, 2)}

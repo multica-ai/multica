@@ -248,8 +248,7 @@ afterEach(() => {
   cleanup();
 });
 
-// Highlighting splits a code block into token spans, so match the block's
-// whole text rather than a single text node.
+// Match a body's raw text: the default matcher collapses newlines.
 function codeBlock(text: string) {
   return Array.from(document.querySelectorAll("pre")).find((pre) => pre.textContent === text);
 }
@@ -410,7 +409,7 @@ describe("AgentTranscriptDialog", () => {
     expect(codeBlock("pnpm test")).toBeDefined();
   });
 
-  it("shows a command in a code block with its other arguments as JSON below", () => {
+  it("shows a command line by line with its other arguments as JSON below", () => {
     renderDialog([
       {
         seq: 1,
@@ -422,7 +421,7 @@ describe("AgentTranscriptDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Bash/ }));
 
-    expect(codeBlock("pnpm test\npnpm lint")?.parentElement).toHaveClass("bg-muted");
+    expect(codeBlock("pnpm test\npnpm lint")).toHaveClass("text-foreground");
     expect(screen.queryByText(/"command":/)).not.toBeInTheDocument();
     expect(screen.getByText(/"description": "Run checks"/, { selector: "pre" })).toBeInTheDocument();
   });
