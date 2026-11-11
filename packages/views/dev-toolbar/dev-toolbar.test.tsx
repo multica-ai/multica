@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ApiClient } from "@multica/core/api/client";
+import { resetDevRecorder } from "@multica/core/diagnostics";
 import { setCurrentWorkspace } from "@multica/core/platform";
-import { DevToolbar } from "./dev-toolbar";
+import { DevToolbar, type DevToolbarProps } from "./dev-toolbar";
 
 const mocks = vi.hoisted(() => ({
   wsStatus: "connected" as string,
   listMembers: vi.fn(),
+  createIssue: vi.fn(),
+  uploadFile: vi.fn(),
 }));
 
 vi.mock("@multica/core/realtime", () => ({
@@ -24,16 +28,26 @@ vi.mock("@multica/core/auth", () => {
 });
 
 vi.mock("@multica/core/api", () => ({
-  api: { listMembers: mocks.listMembers },
+  api: {
+    listMembers: mocks.listMembers,
+    createIssue: mocks.createIssue,
+    uploadFile: mocks.uploadFile,
+  },
 }));
 
-function renderToolbar() {
+function renderToolbar(props: Partial<DevToolbarProps> = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <DevToolbar build="web" apiUrl="http://localhost:18080" route="/acme/issues" />
+      <DevToolbar
+        build="web"
+        apiUrl="http://localhost:18080"
+        route="/acme/issues"
+        openPath={() => {}}
+        {...props}
+      />
     </QueryClientProvider>,
   );
 }
@@ -45,9 +59,13 @@ describe("DevToolbar", () => {
       { user_id: "user-1", role: "admin" },
       { user_id: "user-2", role: "owner" },
     ]);
+    mocks.createIssue.mockReset().mockResolvedValue({ id: "issue-9", identifier: "ACME-9" });
+    mocks.uploadFile.mockReset().mockResolvedValue({ id: "att-1", markdown_url: "https://files.test/shot.png" });
   });
 
   afterEach(() => {
+    resetDevRecorder();
+    vi.unstubAllGlobals();
     setCurrentWorkspace(null, null);
   });
 
@@ -87,5 +105,60 @@ describe("DevToolbar", () => {
     fireEvent.click(screen.getByTestId("dev-toolbar-restore"));
     expect(screen.getByTestId("dev-toolbar")).toBeInTheDocument();
     expect(reservesSpace()).toBe(true);
+  });
+
+  it("counts a failed API request and shows it with its request ID", async () => {
+    renderToolbar();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "version conflict" }), {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    await expect(new ApiClient("http://localhost:18080").listMembers("ws-1")).rejects.toThrow();
+
+    await waitFor(() => expect(screen.getByTestId("dev-toolbar-net")).toHaveTextContent("· 1 failed"));
+    fireEvent.click(screen.getByTestId("dev-toolbar-net"));
+    fireEvent.click(await screen.findByText("/api/workspaces/ws-1/members"));
+    expect(screen.getByText("version conflict")).toBeInTheDocument();
+    expect(screen.getByText(/^X-Request-ID /)).toBeInTheDocument();
+  });
+
+  it("counts console errors and lists them with the route they happened on", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    renderToolbar();
+    console.error(new Error("Cannot read properties of undefined"));
+
+    await waitFor(() => expect(screen.getByTestId("dev-toolbar-errors")).toHaveTextContent("Errors1"));
+    fireEvent.click(screen.getByTestId("dev-toolbar-errors"));
+    expect(await screen.findByText("Error: Cannot read properties of undefined")).toBeInTheDocument();
+  });
+
+  it("files a bug report with a screenshot into the current workspace", async () => {
+    setCurrentWorkspace("acme", "ws-1");
+    const openPath = vi.fn();
+    const capture = vi.fn().mockResolvedValue(new Blob(["png"], { type: "image/png" }));
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:shot", revokeObjectURL: () => {} }));
+    renderToolbar({ openPath, screenshot: { capture, automatic: true } });
+
+    fireEvent.click(screen.getByTestId("dev-toolbar-report"));
+    const title = await screen.findByTestId("dev-toolbar-report-title");
+    expect(capture).toHaveBeenCalledOnce();
+    fireEvent.change(title, { target: { value: "Board drops a card" } });
+    fireEvent.click(screen.getByTestId("dev-toolbar-report-create"));
+
+    await screen.findByText("Created ACME-9");
+    expect(mocks.uploadFile).toHaveBeenCalledOnce();
+    const [request, slug] = mocks.createIssue.mock.calls[0]!;
+    expect(slug).toBe("acme");
+    expect(request).toMatchObject({ title: "Board drops a card", attachment_ids: ["att-1"] });
+    expect(request.description).toContain("![Screenshot](https://files.test/shot.png)");
+    expect(request.description).toContain("- Route: `/acme/issues`");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(openPath).toHaveBeenCalledWith("/acme/issues/issue-9");
   });
 });

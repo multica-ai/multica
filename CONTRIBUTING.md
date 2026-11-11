@@ -602,6 +602,10 @@ VITE_DEV_TOOLBAR=1 make up          # or: VITE_DEV_TOOLBAR=1 pnpm dev:web / pnpm
 
 To keep it on, add the line to the env file `make` loads (`.env` / `.env.worktree`), or to `apps/web/.env.local` / `apps/desktop/.env.development.local` for a direct `pnpm dev:*`. The minimize button at its right end collapses it to a small handle.
 
+Each reading opens the last five minutes behind it, kept in memory in that tab only: the heap curve and Query cache size (Mem), route changes and their timings (Nav), long tasks and the route they hit (Jank), every API request with its status, `X-Request-ID`, body and a copyable curl (Net), WebSocket state changes (Sync), and console errors, uncaught exceptions and unhandled rejections (Errors).
+
+**Report bug** files an issue in the current workspace on the backend you are connected to, with a screenshot, the route trail, errors and failed requests attached. **Copy as Markdown** takes the same report anywhere else. Desktop captures the window silently; Web asks the browser to share the tab when you press **Take**.
+
 ## How Database Creation Works
 
 Database creation is automatic.

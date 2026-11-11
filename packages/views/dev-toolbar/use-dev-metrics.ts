@@ -1,55 +1,45 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { blockedRatio, JANK_WINDOW_MS, navDuration, type TimeSpan } from "./metrics";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  getDevRecording,
+  installDevRecorder,
+  recordDevNavigationDuration,
+  recordDevRoute,
+  recordDevSyncStatus,
+  subscribeDevRecording,
+  type DevRecording,
+} from "@multica/core/diagnostics";
+import { blockedRatio, JANK_WINDOW_MS, navDuration } from "./metrics";
 
-const SAMPLE_INTERVAL_MS = 1_000;
-
-interface ChromiumMemory {
-  usedJSHeapSize: number;
+/** Start the recorder and feed it what only the platform knows: route and sync. */
+export function useDevRecorder(route: string, sync: string): DevRecording {
+  useEffect(() => installDevRecorder(), []);
+  useEffect(() => recordDevRoute(route), [route]);
+  useEffect(() => recordDevSyncStatus(sync), [sync]);
+  return useSyncExternalStore(subscribeDevRecording, getDevRecording, getDevRecording);
 }
 
-function readHeapBytes(): number | null {
-  const memory = (performance as Performance & { memory?: ChromiumMemory }).memory;
-  return memory ? memory.usedJSHeapSize : null;
-}
-
-/** JS heap in use; null on engines without `performance.memory` (non-Chromium). */
-export function useHeapBytes(): number | null {
-  const [bytes, setBytes] = useState<number | null>(null);
+/** Wall clock, re-read every `intervalMs` so trailing windows keep moving. */
+export function useNow(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    setBytes(readHeapBytes());
-    const timer = setInterval(() => setBytes(readHeapBytes()), SAMPLE_INTERVAL_MS * 2);
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
     return () => clearInterval(timer);
-  }, []);
-  return bytes;
+  }, [intervalMs]);
+  return now;
 }
 
 /** Share of the last 10s spent in long tasks; null where `longtask` is unsupported. */
-export function useMainThreadBlocked(): number | null {
-  const [ratio, setRatio] = useState<number | null>(null);
-  useEffect(() => {
-    if (!PerformanceObserver.supportedEntryTypes?.includes("longtask")) return;
-    let tasks: TimeSpan[] = [];
-    const observer = new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) {
-        tasks.push({ start: entry.startTime, end: entry.startTime + entry.duration });
-      }
-    });
-    observer.observe({ type: "longtask" });
-    const sample = () => {
-      const now = performance.now();
-      tasks = tasks.filter((task) => task.end > now - JANK_WINDOW_MS);
-      setRatio(blockedRatio(tasks, now));
-    };
-    sample();
-    const timer = setInterval(sample, SAMPLE_INTERVAL_MS);
-    return () => {
-      observer.disconnect();
-      clearInterval(timer);
-    };
-  }, []);
-  return ratio;
+export function useMainThreadBlocked(recording: DevRecording, now: number): number | null {
+  const [supported] = useState(
+    () => typeof PerformanceObserver !== "undefined" && Boolean(PerformanceObserver.supportedEntryTypes?.includes("longtask")),
+  );
+  if (!supported) return null;
+  const tasks = recording.longTasks
+    .filter((task) => task.at + task.durationMs > now - JANK_WINDOW_MS)
+    .map((task) => ({ start: task.at, end: task.at + task.durationMs }));
+  return blockedRatio(tasks, now);
 }
 
 /**
@@ -80,7 +70,9 @@ export function useNavDuration(route: string): number | null {
     lastInputAt.current = null;
     const frame = requestAnimationFrame(() => {
       const elapsed = navDuration(inputAt, performance.now());
-      if (elapsed !== null) setDuration(elapsed);
+      if (elapsed === null) return;
+      setDuration(elapsed);
+      recordDevNavigationDuration(route, elapsed);
     });
     return () => cancelAnimationFrame(frame);
   }, [route]);

@@ -64,6 +64,8 @@ interface DesktopAPI {
   downloadURL: (url: string) => Promise<void>;
   /** Hide macOS traffic lights for full-screen modals; restore when false. */
   setImmersiveMode: (immersive: boolean) => Promise<void>;
+  /** PNG of this window. Dev builds only; rejects in packaged builds. */
+  captureWindowForDev: () => Promise<Uint8Array<ArrayBuffer>>;
   /** Show a native OS notification for an inbox item or chat reply. */
   showNotification: (payload: {
     slug: string;

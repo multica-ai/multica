@@ -1,13 +1,18 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
+import type { DevRequest } from "@multica/core/diagnostics";
 import {
   apiHost,
   blockedRatio,
+  curlCommand,
+  firstStackFrame,
   formatBytes,
   jankTone,
   memoryTone,
   navDuration,
   navTone,
+  percentile,
+  requestFailed,
 } from "./metrics";
 
 const MB = 1024 * 1024;
@@ -78,5 +83,65 @@ describe("apiHost", () => {
     expect(apiHost("http://localhost:18080")).toBe("localhost:18080");
     expect(apiHost("https://api.multica.ai/")).toBe("api.multica.ai");
     expect(apiHost("same-origin")).toBe("same-origin");
+  });
+});
+
+function request(overrides: Partial<DevRequest>): DevRequest {
+  return {
+    requestId: "rid-1",
+    method: "GET",
+    path: "/api/issues",
+    body: null,
+    startedAt: 0,
+    durationMs: 40,
+    status: 200,
+    error: null,
+    ...overrides,
+  };
+}
+
+describe("requestFailed", () => {
+  it("fails error statuses and lost responses, but not in-flight or cancelled requests", () => {
+    expect(requestFailed(request({ status: 500 }))).toBe(true);
+    expect(requestFailed(request({ status: null, error: "TypeError: Failed to fetch" }))).toBe(true);
+    expect(requestFailed(request({ status: 204 }))).toBe(false);
+    expect(requestFailed(request({ status: null, durationMs: null }))).toBe(false);
+    expect(requestFailed(request({ status: null, error: "aborted" }))).toBe(false);
+  });
+});
+
+describe("percentile", () => {
+  it("uses the nearest rank", () => {
+    const values = Array.from({ length: 20 }, (_, i) => i + 1);
+    expect(percentile(values, 95)).toBe(19);
+    expect(percentile(values, 50)).toBe(10);
+    expect(percentile([7], 95)).toBe(7);
+    expect(percentile([], 95)).toBeNull();
+  });
+});
+
+describe("curlCommand", () => {
+  it("replays the request without embedding a credential", () => {
+    const command = curlCommand(
+      "http://localhost:18080/",
+      request({ method: "POST", body: `{"title":"it's"}` }),
+      "acme",
+    );
+    expect(command).toBe(
+      [
+        "curl -X POST 'http://localhost:18080/api/issues'",
+        `-H "Authorization: Bearer $MULTICA_TOKEN"`,
+        "-H 'X-Workspace-Slug: acme'",
+        "-H 'Content-Type: application/json'",
+        `--data '{"title":"it'\\''s"}'`,
+      ].join(" \\\n  "),
+    );
+  });
+});
+
+describe("firstStackFrame", () => {
+  it("skips the message line", () => {
+    expect(firstStackFrame("Error: boom\n    at save (issue.tsx:12:3)\n    at run")).toBe("at save (issue.tsx:12:3)");
+    expect(firstStackFrame(null)).toBeNull();
   });
 });

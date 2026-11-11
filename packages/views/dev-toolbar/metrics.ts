@@ -1,3 +1,5 @@
+import type { DevRequest } from "@multica/core/diagnostics";
+
 export type MetricTone = "normal" | "warn" | "bad";
 
 export interface TimeSpan {
@@ -70,4 +72,64 @@ export function apiHost(url: string): string {
   } catch {
     return url;
   }
+}
+
+/** Ended with an error status or no response. A request we cancelled did not fail. */
+export function requestFailed(request: DevRequest): boolean {
+  if (request.durationMs === null) return false;
+  if (request.status === null) return request.error !== "aborted";
+  return request.status >= 400;
+}
+
+/** Nearest-rank percentile; null for no values. */
+export function percentile(values: readonly number[], p: number): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const rank = Math.ceil((p / 100) * sorted.length);
+  return sorted[Math.min(sorted.length, Math.max(1, rank)) - 1]!;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * The request as a curl command. The token stays a shell variable so the
+ * command can be pasted into an issue without leaking a credential.
+ */
+export function curlCommand(apiUrl: string, request: DevRequest, workspaceSlug: string | null): string {
+  const parts = [`curl -X ${request.method} ${shellQuote(`${apiUrl.replace(/\/$/, "")}${request.path}`)}`];
+  parts.push(`-H "Authorization: Bearer $MULTICA_TOKEN"`);
+  if (workspaceSlug) parts.push(`-H ${shellQuote(`X-Workspace-Slug: ${workspaceSlug}`)}`);
+  if (request.body !== null) {
+    parts.push(`-H 'Content-Type: application/json'`);
+    parts.push(`--data ${shellQuote(request.body)}`);
+  }
+  return parts.join(" \\\n  ");
+}
+
+/** The first `at …` line of a stack, which is usually where to look. */
+export function firstStackFrame(stack: string | null): string | null {
+  if (!stack) return null;
+  const frame = stack.split("\n").find((line) => /^\s*at\s/.test(line));
+  return frame ? frame.trim() : null;
+}
+
+/** Wall-clock `HH:MM:SS`, which lines up with the server's logs. */
+export function formatClock(at: number): string {
+  return new Date(at).toTimeString().slice(0, 8);
+}
+
+/** `2026-11-12 03:30:30 UTC+08:00`: local, like the trail, but unambiguous. */
+export function formatTimestamp(at: number): string {
+  const date = new Date(at);
+  const pad = (n: number) => String(Math.abs(n)).padStart(2, "0");
+  const offset = -date.getTimezoneOffset();
+  const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  const zone = `UTC${offset < 0 ? "-" : "+"}${pad(Math.trunc(offset / 60))}:${pad(offset % 60)}`;
+  return `${day} ${formatClock(at)} ${zone}`;
+}
+
+export function formatDuration(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
