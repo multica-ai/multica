@@ -2,6 +2,8 @@ package handler
 
 import (
 	"net/http"
+
+	"github.com/multica-ai/multica/server/internal/middleware"
 )
 
 // RequireHumanActor rejects machine credentials on human-only route groups.
@@ -31,9 +33,37 @@ func isMachineCredentialActor(r *http.Request) bool {
 	// client-supplied value before stamping its own, so a recognized value here
 	// is authoritative.
 	switch r.Header.Get("X-Actor-Source") {
-	case "task_token", "cloud_pat":
+	case "task_token", "cloud_pat", middleware.ActorSourceServiceAccount:
 		return true
 	default:
 		return false
 	}
+}
+
+// RequireUserAccount rejects service accounts on user-account routes.
+//
+// Service accounts (user.kind='service') are machine identities that belong to
+// exactly one workspace. Unlike task tokens and cloud PATs — which represent a
+// machine acting for its human owner — they should never reach the routes that
+// bootstrap a human's presence in the system: minting their own credentials,
+// accepting invitations, joining via share links, or creating workspaces. Their
+// access comes entirely from the membership created alongside them.
+//
+// The Auth middleware stamps X-Actor-Source: service_account on mul_ PATs
+// issued to service users (both PAT cache hit and miss paths), so this check is
+// authoritative the same way RequireHumanActor's is. JWT sessions cannot exist
+// for service accounts: VerifyCode refuses kind='service' rows, so the only
+// credential is the PAT, which is always stamped.
+//
+// Attach this middleware only to account-level scopes. Workspace-scoped
+// authorization (membership) is unchanged — a service account acts as a member
+// of its one workspace through the ordinary member path.
+func RequireUserAccount(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Actor-Source") == middleware.ActorSourceServiceAccount {
+			writeError(w, http.StatusForbidden, "this endpoint is not available to service accounts")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

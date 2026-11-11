@@ -263,11 +263,14 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			if strings.HasPrefix(tokenString, "mul_") {
 				hash := auth.HashToken(tokenString)
 
-				if userID, ok := patCache.Get(r.Context(), hash); ok {
-					if rejectTemporarilyDisabledUser(w, r, userID, "", DaemonAuthPathPAT) {
+				if patAuth, ok := patCache.Get(r.Context(), hash); ok {
+					if rejectTemporarilyDisabledUser(w, r, patAuth.UserID, "", DaemonAuthPathPAT) {
 						return
 					}
-					r.Header.Set("X-User-ID", userID)
+					r.Header.Set("X-User-ID", patAuth.UserID)
+					if patAuth.IsService {
+						r.Header.Set("X-Actor-Source", ActorSourceServiceAccount)
+					}
 					ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathPAT)
 					next.ServeHTTP(w, r.WithContext(ctx))
 					return
@@ -277,7 +280,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 					writeError(w, http.StatusUnauthorized, "invalid token")
 					return
 				}
-				pat, err := queries.GetPersonalAccessTokenByHash(r.Context(), hash)
+				pat, err := queries.GetPersonalAccessTokenByHashWithKind(r.Context(), hash)
 				if err != nil {
 					slog.Warn("daemon_auth: invalid PAT", "path", r.URL.Path, "error", err)
 					writeError(w, http.StatusUnauthorized, "invalid token")
@@ -285,16 +288,23 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				}
 
 				userID := uuidToString(pat.UserID)
+				patAuth := auth.PATAuth{
+					UserID:    userID,
+					IsService: pat.UserKind == auth.ServiceUserKind,
+				}
 				if rejectTemporarilyDisabledUser(w, r, userID, "", DaemonAuthPathPAT) {
 					return
 				}
 				r.Header.Set("X-User-ID", userID)
+				if patAuth.IsService {
+					r.Header.Set("X-Actor-Source", ActorSourceServiceAccount)
+				}
 
 				var expiresAt time.Time
 				if pat.ExpiresAt.Valid {
 					expiresAt = pat.ExpiresAt.Time
 				}
-				patCache.Set(r.Context(), hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
+				patCache.Set(r.Context(), hash, patAuth, auth.TTLForExpiry(time.Now(), expiresAt))
 
 				// Cache miss = first request in this TTL window. Refresh
 				// last_used_at; subsequent hits skip the write entirely.
