@@ -138,7 +138,8 @@ or an Actions `GITHUB_TOKEN`. Verify the actual agent/CI credential. Contributor
 without upstream push access can use a public fork as described below, upload
 through the PR editor in GitHub's web interface, or ask a maintainer in the PR
 to upload their files. Opening a fork PR alone does not grant upload permission
-on the upstream repo. This helper targets GitHub.com, not GitHub Enterprise Server.
+on the upstream repo. `scripts/pr-shots` targets GitHub.com, not GitHub
+Enterprise Server.
 
 Supported files are PNG, JPEG, GIF, WebP, SVG, MP4, MOV, and WebM. Images are
 limited to 10 MB; video limits are 10 MB on Free plans and 100 MB on paid plans.
