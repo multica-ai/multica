@@ -78,7 +78,7 @@ export function ChatBarHistory({
         side="top"
         sideOffset={8}
         aria-label={label}
-        className="max-h-[min(28rem,var(--available-height))] w-80 gap-0 overflow-hidden p-1 ring-foreground/15"
+        className="max-h-[min(28rem,var(--available-height))] w-80 gap-0 overflow-hidden p-1"
       >
         <div className="shrink-0 px-2 py-1.5 text-caption font-medium text-muted-foreground">
           {label}
