@@ -199,7 +199,8 @@
     "edit_description_title": "Editar descripción",
     "description_placeholder": "¿Qué hace este agente?",
     "cancel": "Cancelar",
-    "qoder_execution_note": "El modelo, las herramientas y las skills se configuran en el agente desde Qoder Cloud Agents."
+    "qoder_execution_note": "El modelo, las herramientas y las skills se configuran en el agente desde Qoder Cloud Agents.",
+    "claude_execution_note": "El modelo, las herramientas y las skills se definen en el agente de Claude."
   },
   "overview": {
     "attention_title": "Ejecuciones que requieren atención",
@@ -274,7 +275,8 @@
     "discard_dialog_description": "Hay cambios sin guardar en esta pestaña. Si sales ahora, se descartarán.",
     "discard_keep": "Seguir editando",
     "discard_confirm": "Descartar cambios",
-    "qoder_agent": "Qoder Cloud Agents"
+    "qoder_agent": "Qoder Cloud Agents",
+    "claude_agent": "Agente de Claude"
   },
   "creation_studio": {
     "title": "Crear un agente",
