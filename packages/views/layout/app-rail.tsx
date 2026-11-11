@@ -15,7 +15,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 import { Settings, Users, type IconComponent } from "@multica/ui/icons";
 import { useChatStore } from "@multica/core/chat";
-import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { chatSessionSummaryOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useInboxUnreadCount } from "@multica/core/inbox/queries";
 import { resolveRailOrder, useRailOrderStore } from "@multica/core/navigation";
@@ -58,8 +58,8 @@ function useRailBadges(): Partial<Record<RailSpaceId, RailBadge>> {
   const { pathname } = useNavigation();
   const inboxUnread = useInboxUnreadCount(wsId);
 
-  const { data: chatSessions = [] } = useQuery({
-    ...chatSessionsOptions(wsId ?? ""),
+  const { data: chatSummary } = useQuery({
+    ...chatSessionSummaryOptions(wsId ?? ""),
     enabled: !!wsId,
   });
   // The session the user is reading right now must not count: its row shows 0
@@ -76,8 +76,11 @@ function useRailBadges(): Partial<Record<RailSpaceId, RailBadge>> {
       ? activeChatSessionId
       : null;
   const chatUnread = useMemo(
-    () => countUnreadChatMessages(chatSessions, viewedChatSessionId),
-    [chatSessions, viewedChatSessionId],
+    () => countUnreadChatMessages(
+      Object.entries(chatSummary?.unread_by_session ?? {}).map(([id, unread_count]) => ({ id, unread_count })),
+      viewedChatSessionId,
+    ),
+    [chatSummary, viewedChatSessionId],
   );
 
   const { stuck } = useTeamAgentStatus(wsId);

@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { patchChatSessionPages } from "./session-cache";
 import { useWorkspaceId } from "../hooks";
 import { chatKeys, sortChatSessions, QUICK_ACTIONS_PENDING_TIMEOUT_MS } from "./queries";
 import { createLogger } from "../logger";
@@ -150,11 +151,12 @@ export function useMarkChatSessionRead() {
         old?.map((s) => (s.id === sessionId ? { ...s, has_unread: false, unread_count: 0 } : s));
       qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), clear);
 
-      return { prevSessions };
+      return { prevSessions, rollbackPages: patchChatSessionPages(qc, wsId, sessionId, { has_unread: false, unread_count: 0 }) };
     },
     onError: (err, sessionId, ctx) => {
       logger.error("markChatSessionRead.error.rollback", { sessionId, err });
       if (ctx?.prevSessions) qc.setQueryData(chatKeys.sessions(wsId), ctx.prevSessions);
+      ctx?.rollbackPages();
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
@@ -189,11 +191,12 @@ export function useUpdateChatSession() {
         old?.map((s) => (s.id === sessionId ? { ...s, title } : s));
       qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), patch);
 
-      return { prevSessions };
+      return { prevSessions, rollbackPages: patchChatSessionPages(qc, wsId, sessionId, { title }) };
     },
     onError: (err, vars, ctx) => {
       logger.error("updateChatSession.error.rollback", { sessionId: vars.sessionId, err });
       if (ctx?.prevSessions) qc.setQueryData(chatKeys.sessions(wsId), ctx.prevSessions);
+      ctx?.rollbackPages();
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
@@ -225,7 +228,7 @@ export function useSetChatSessionProject() {
         );
       qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), patch);
 
-      return { prevSessions };
+      return { prevSessions, rollbackPages: patchChatSessionPages(qc, wsId, sessionId, { project_id: projectId }) };
     },
     onError: (err, vars, ctx) => {
       logger.error("setChatSessionProject.error.rollback", {
@@ -233,6 +236,7 @@ export function useSetChatSessionProject() {
         err,
       });
       if (ctx?.prevSessions) qc.setQueryData(chatKeys.sessions(wsId), ctx.prevSessions);
+      ctx?.rollbackPages();
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
@@ -265,11 +269,12 @@ export function useSetChatSessionPinned() {
         sortChatSessions(old.map((s) => (s.id === sessionId ? { ...s, pinned } : s)));
       qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), patch);
 
-      return { prevSessions };
+      return { prevSessions, rollbackPages: patchChatSessionPages(qc, wsId, sessionId, { pinned }) };
     },
     onError: (err, vars, ctx) => {
       logger.error("setChatSessionPinned.error.rollback", { sessionId: vars.sessionId, err });
       if (ctx?.prevSessions) qc.setQueryData(chatKeys.sessions(wsId), ctx.prevSessions);
+      ctx?.rollbackPages();
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
@@ -324,11 +329,12 @@ export function useSetChatSessionArchived() {
         );
       qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), patch);
 
-      return { prevSessions };
+      return { prevSessions, rollbackPages: patchChatSessionPages(qc, wsId, sessionId, { status: archived ? "archived" : "active", ...(archived ? { has_unread: false, unread_count: 0 } : {}) }) };
     },
     onError: (err, vars, ctx) => {
       logger.error("setChatSessionArchived.error.rollback", { sessionId: vars.sessionId, err });
       if (ctx?.prevSessions) qc.setQueryData(chatKeys.sessions(wsId), ctx.prevSessions);
+      ctx?.rollbackPages();
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });

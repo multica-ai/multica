@@ -77,6 +77,7 @@ const h = vi.hoisted(() => {
     agents: [] as Agent[],
     projects: [] as Project[],
     pendingTask: null as ChatPendingTask | null,
+    sessionPageEnabled: undefined as boolean | undefined,
     messagesQueryEnabled: undefined as boolean | undefined,
     draftRestores: null as
       | { restores: { id: string; chat_session_id: string; content: string }[] }
@@ -174,16 +175,20 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
         return { data: [{ user_id: "user-1", role: "admin" }] };
       }
       if (key.includes("runtimes")) return { data: [] };
+      if (key.includes("summary")) return { data: { unread_by_session: Object.fromEntries(h.sessions.filter((s) => s.has_unread).map((s) => [s.id, Math.max(1, s.unread_count ?? 1)])) } };
+      if (key.includes("detail")) return { data: h.sessions.find((s) => s.id === key.at(-1)) ?? null, isSuccess: true };
       if (key.includes("sessions")) return { data: h.sessions, isSuccess: true };
       if (key.includes("projects")) return { data: h.projects, isSuccess: true };
       if (key.includes("pending-task")) return { data: h.pendingTask };
       if (key.includes("draft-restores")) return { data: h.draftRestores };
       return { data: null };
     },
-    useInfiniteQuery: (options: { enabled?: boolean }) => {
-      h.messagesQueryEnabled = options.enabled;
+    useInfiniteQuery: (options: { queryKey?: unknown[]; enabled?: boolean }) => {
+      const sessionPage = options.queryKey?.includes("pages");
+      if (sessionPage) h.sessionPageEnabled = options.enabled;
+      else h.messagesQueryEnabled = options.enabled;
       return {
-        data: undefined,
+        data: sessionPage ? { pages: [{ sessions: h.sessions }] } : undefined,
         isLoading: false,
         fetchNextPage: vi.fn(),
         hasNextPage: false,
@@ -567,9 +572,11 @@ describe("useChatController message loading", () => {
       ({ isActive }) => useChatController({ isActive }),
       { initialProps: { isActive: false } },
     );
+    expect(h.sessionPageEnabled).toBe(false);
     expect(h.messagesQueryEnabled).toBe(false);
 
     rerender({ isActive: true });
+    expect(h.sessionPageEnabled).toBe(true);
     expect(h.messagesQueryEnabled).toBe(true);
   });
 });

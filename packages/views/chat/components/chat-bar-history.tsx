@@ -1,9 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { recentChatBarSessionsOptions } from "@multica/core/chat/queries";
 import { History, Loader2 } from "@multica/ui/icons";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { ChatSession } from "@multica/core/types";
+import { Button } from "@multica/ui/components/ui/button";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import { cn } from "@multica/ui/lib/utils";
@@ -47,22 +50,23 @@ export function groupChatHistory(
  * window is placed above the chip that chat gets.
  */
 export function ChatBarHistory({
-  sessions,
+  wsId,
   runningSessionIds,
   onSelect,
 }: {
-  sessions: ChatSession[];
+  wsId: string;
   runningSessionIds: ReadonlySet<string>;
   onSelect: (session: ChatSession) => void;
 }) {
   const { t } = useT("chat");
   const p = useWorkspacePaths();
   const [open, setOpen] = useState(false);
+  const recent = useQuery({ ...recentChatBarSessionsOptions(wsId), enabled: open });
   const formatTimeAgo = useFormatTimeAgo();
   // Grouped when the popover opens: "today" is read off the clock then.
   const groups = useMemo(
-    () => (open ? groupChatHistory(sessions, new Date()) : []),
-    [open, sessions],
+    () => (open ? groupChatHistory(recent.data?.sessions ?? [], new Date()) : []),
+    [open, recent.data],
   );
   const label = t(($) => $.bar.history);
 
@@ -84,7 +88,14 @@ export function ChatBarHistory({
           {label}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {groups.length === 0 && (
+          {recent.isError && (
+            <div role="alert" className="px-2 py-1.5 text-caption text-muted-foreground">
+              {t(($) => $.list.load_failed)}
+              <Button size="xs" variant="ghost" onClick={() => void recent.refetch()}>{t(($) => $.list.retry)}</Button>
+            </div>
+          )}
+          {recent.isLoading && <div role="status" className="px-2 py-1.5 text-caption text-muted-foreground">{t(($) => $.list.loading)}</div>}
+          {recent.isSuccess && groups.length === 0 && (
             <div className="px-2 py-1.5 text-caption text-muted-foreground">
               {t(($) => $.window.no_previous)}
             </div>

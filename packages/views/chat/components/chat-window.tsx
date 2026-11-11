@@ -1,5 +1,7 @@
 "use client";
 
+import type { ChatSessionList } from "@multica/core/chat/use-session-list";
+import { ChatSessionListStatus } from "./chat-session-list-status";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
@@ -66,7 +68,7 @@ import { CHAT_WINDOW_INSET, useChatWindowAnchor } from "./use-chat-window-anchor
 import { useFormatTimeAgo } from "./use-format-time-ago";
 import { useChatController } from "./use-chat-controller";
 import { createLogger } from "@multica/core/logger";
-import type { Agent, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
+import type { Agent, ChatSession, ChatSessionsPage, PendingChatTasksResponse } from "@multica/core/types";
 import { useT } from "../../i18n";
 
 const uiLogger = createLogger("chat.ui");
@@ -83,6 +85,7 @@ export function ChatWindow() {
   // gates everything that assumes the user is looking: this window stays
   // MOUNTED when closed (it is only hidden, see isVisible below).
   const c = useChatController({ isActive: isOpen });
+  const queryClient = useQueryClient();
   const { wsId, activeSessionId, currentSession, activeAgent, pendingTask, pendingTaskId } = c;
   const { data: quickActionsPending = null } = useQuery(
     chatQuickActionsPendingOptions(activeSessionId ?? ""),
@@ -142,8 +145,15 @@ export function ChatWindow() {
       pendingTaskId,
     });
     setOpen(false);
-    if (currentSession) dismissChatFromBar(currentSession.id, chatActivity(currentSession));
-  }, [activeSessionId, pendingTaskId, currentSession, setOpen, dismissChatFromBar]);
+    if (currentSession) {
+      // A detail response has no last-message preview. Use the activity shown
+      // on the chip so closing an off-page chat dismisses that exact activity.
+      const barPages = queryClient.getQueriesData<ChatSessionsPage>({ queryKey: [...chatKeys.barSessions(wsId), "chips"] });
+      const row = c.sessions.find((s) => s.id === currentSession.id)
+        ?? barPages.flatMap(([, page]) => page?.sessions ?? []).find((s) => s.id === currentSession.id);
+      dismissChatFromBar(currentSession.id, chatActivity(row ?? currentSession));
+    }
+  }, [activeSessionId, pendingTaskId, currentSession, c.sessions, queryClient, wsId, setOpen, dismissChatFromBar]);
 
   const handleArchiveSession = (session: ChatSession) => {
     c.advanceSelectionAfterArchive(session);
@@ -274,6 +284,9 @@ export function ChatWindow() {
           </Tooltip>
           <SessionDropdown
             sessions={c.sessions}
+            currentSession={currentSession}
+            sessionList={c.sessionList}
+            unreadBySession={c.unreadBySession}
             // Use the full agent list (incl. archived) so historical
             // sessions can still resolve their avatar.
             agents={c.agents}
@@ -616,12 +629,18 @@ interface SessionRowAction extends RowActionItem {
  */
 function SessionDropdown({
   sessions,
+  currentSession,
+  sessionList,
+  unreadBySession,
   agents,
   activeSessionId,
   onSelectSession,
   onArchiveSession,
 }: {
   sessions: ChatSession[];
+  currentSession: ChatSession | null;
+  sessionList: ChatSessionList;
+  unreadBySession: Record<string, number> | undefined;
   agents: Agent[];
   activeSessionId: string | null;
   onSelectSession: (session: ChatSession) => void;
@@ -630,9 +649,8 @@ function SessionDropdown({
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
-  const activeSession = sessions.find((s) => s.id === activeSessionId);
-  const title = activeSession?.title?.trim() || t(($) => $.window.untitled);
-  const triggerAgent = activeSession ? agentById.get(activeSession.agent_id) ?? null : null;
+  const title = currentSession?.title?.trim() || t(($) => $.window.untitled);
+  const triggerAgent = currentSession ? agentById.get(currentSession.agent_id) ?? null : null;
 
   // The old soft-archive feature was removed. Pre-existing rows with
   // status='archived' are legacy dead data and are excluded from history.
@@ -715,12 +733,8 @@ function SessionDropdown({
   // - inside the trigger: the current chat's own live state
   // - beside the trigger: aggregate activity from other chats
   const currentSessionRunning = activeSessionId ? inFlightSessionIds.has(activeSessionId) : false;
-  const otherRunningCount = sessions.filter(
-    (s) => s.id !== activeSessionId && inFlightSessionIds.has(s.id),
-  ).length;
-  const otherUnreadCount = sessions.filter(
-    (s) => s.id !== activeSessionId && s.has_unread,
-  ).length;
+  const otherRunningCount = Array.from(inFlightSessionIds).filter((id) => id !== activeSessionId).length;
+  const otherUnreadCount = Object.keys(unreadBySession ?? {}).filter((id) => id !== activeSessionId).length;
 
   // Archive (not hard-delete) is the reversible, one-click default here — the
   // same safety model as ChatThreadList. The floating window offers NO
@@ -1030,7 +1044,7 @@ function SessionDropdown({
         >
           {historySessions.length === 0 ? (
             <div className="px-2 py-1.5 text-caption text-muted-foreground">
-              {t(($) => $.window.no_previous)}
+              {sessionList.isSuccess && t(($) => $.window.no_previous)}
             </div>
           ) : (
             <div role="group" aria-label={t(($) => $.window.history_group)}>
@@ -1041,10 +1055,14 @@ function SessionDropdown({
                 sessions={historySessions}
                 renderRow={renderRow}
                 estimatedRowHeight={44}
-                maxHeight={320}
+                maxHeight={280}
+                endReached={() => {
+                  if (sessionList.hasNextPage && !sessionList.isFetching && !sessionList.isError) void sessionList.fetchNextPage();
+                }}
               />
             </div>
           )}
+          <ChatSessionListStatus query={sessionList} />
         </PopoverContent>
       </Popover>
     </>

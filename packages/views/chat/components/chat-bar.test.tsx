@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { chatSessionsOptions, pendingChatTasksOptions } from "@multica/core/chat/queries";
+import { chatBarChipQueries, chatSessionSummaryOptions, pendingChatTasksOptions, recentChatBarSessionsOptions } from "@multica/core/chat/queries";
 import type { ChatSession } from "@multica/core/types";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { renderWithI18n } from "../../test/i18n";
@@ -70,7 +70,17 @@ function renderBar(sessions: ChatSession[], running: string[] = []) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
-  qc.setQueryData(chatSessionsOptions(WS).queryKey, sessions);
+  const unread = sessions.filter((s) => s.has_unread).map((s) => s.id);
+  qc.setQueryData(chatSessionSummaryOptions(WS).queryKey, {
+    active_count: sessions.length, archived_count: 0,
+    unread_by_session: Object.fromEntries(unread.map((id) => [id, 1])),
+  });
+  const chipIds = [...running, ...unread, ...h.chat.chatBarKept];
+  if (h.chat.isOpen && h.chat.activeSessionId) chipIds.push(h.chat.activeSessionId);
+  for (const query of chatBarChipQueries(WS, chipIds)) {
+    qc.setQueryData(query.queryKey, { sessions: sessions.filter((s) => chipIds.includes(s.id)), has_more: false, next_cursor: null });
+  }
+  qc.setQueryData(recentChatBarSessionsOptions(WS).queryKey, { sessions, has_more: false, next_cursor: null });
   qc.setQueryData(pendingChatTasksOptions(WS).queryKey, {
     tasks: running.map((id) => ({ task_id: `task-${id}`, status: "running", chat_session_id: id })),
   });

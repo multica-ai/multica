@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { Loader2, X } from "@multica/ui/icons";
 import { useChatStore } from "@multica/core/chat";
-import { chatSessionsOptions, pendingChatTasksOptions } from "@multica/core/chat/queries";
+import { chatBarChipQueries, chatSessionSummaryOptions, pendingChatTasksOptions } from "@multica/core/chat/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { ChatSession } from "@multica/core/types";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -22,7 +22,6 @@ import { BOTTOM_BAR_ITEM_CLASS } from "../../layout/bottom-bar-styles";
 import { ChatBarHistory } from "./chat-bar-history";
 import { chatActivity, selectChatBarSessions, type ChatBarSession } from "./chat-bar-sessions";
 
-const EMPTY_SESSIONS: ChatSession[] = [];
 const STAR = starPath(STAR_STROKE);
 
 /** The star from the Multica mark, in the text colour. */
@@ -104,7 +103,7 @@ export function ChatBar() {
   const rootRef = useRef<HTMLDivElement>(null);
   const maxVisible = useMaxChips(rootRef);
 
-  const { data: sessions = EMPTY_SESSIONS } = useQuery(chatSessionsOptions(wsId));
+  const { data: summary } = useQuery(chatSessionSummaryOptions(wsId));
   // Per-chat running state needs the task list, not the boolean the launcher
   // reads. It is refetched on task lifecycle events only, never per message.
   const { data: pending } = useQuery(pendingChatTasksOptions(wsId));
@@ -120,11 +119,16 @@ export function ChatBar() {
     if (openSessionId) keepChatInBar(openSessionId);
   }, [openSessionId, keepChatInBar]);
 
-  const { visible, overflow } = useMemo(
-    () =>
-      selectChatBarSessions({ sessions, runningSessionIds, openSessionId, kept, dismissed, maxVisible }),
-    [sessions, runningSessionIds, openSessionId, kept, dismissed, maxVisible],
-  );
+  const chips = useQueries({
+    queries: chatBarChipQueries(wsId, [
+      ...kept, ...runningSessionIds, ...Object.keys(summary?.unread_by_session ?? {}),
+      ...(openSessionId ? [openSessionId] : []),
+    ]),
+  });
+  const { visible, overflow } = selectChatBarSessions({
+    sessions: chips.flatMap((chip) => chip.data?.sessions ?? []),
+    runningSessionIds, openSessionId, kept, dismissed, maxVisible,
+  });
   const openOnChip = visible.some((item) => item.open);
   const askPressed = isOpen && !openOnChip;
 
@@ -236,7 +240,7 @@ export function ChatBar() {
           {askLabel}
         </button>
       </TooltipHint>
-      <ChatBarHistory sessions={sessions} runningSessionIds={runningSessionIds} onSelect={openSession} />
+      <ChatBarHistory wsId={wsId} runningSessionIds={runningSessionIds} onSelect={openSession} />
     </div>
   );
 }

@@ -78,6 +78,7 @@
     "./notification-preferences/patch": "./notification-preferences/patch.ts",
     "./chat": "./chat/index.ts",
     "./chat/queries": "./chat/queries.ts",
+    "./chat/use-session-list": "./chat/use-session-list.ts",
     "./chat/mutations": "./chat/mutations.ts",
     "./chat/pending": "./chat/pending.ts",
     "./chat/session-list": "./chat/session-list.ts",

@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createChatStore, registerChatStore, useChatStore } from "@multica/core/chat";
-import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { chatBarChipQueries, chatSessionOptions } from "@multica/core/chat/queries";
 import type { ChatSession } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
@@ -88,9 +88,14 @@ const session: ChatSession = {
   updated_at: "2026-11-01T00:00:00Z",
 };
 
-function renderWindow() {
+function renderWindow(chip?: ChatSession) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  qc.setQueryData(chatSessionsOptions("ws-1").queryKey, [session]);
+  qc.setQueryData(chatSessionOptions("ws-1", session.id).queryKey, session);
+  if (chip) {
+    qc.setQueryData(chatBarChipQueries("ws-1", [chip.id])[0]!.queryKey, {
+      sessions: [chip], next_cursor: null, has_more: false,
+    });
+  }
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
@@ -156,14 +161,15 @@ describe("ChatWindow minimize and close", () => {
     expect(useChatStore.getState().chatBarKept).toEqual([session.id]);
   });
 
-  it("close hides the window and closes the chat's chip", () => {
-    renderWindow();
+  it("dismisses an off-page chip at its last message even when only the detail is selected", () => {
+    const lastMessageAt = "2026-10-31T01:00:00Z";
+    renderWindow({ ...session, last_message: { content: "Hello", role: "assistant", created_at: lastMessageAt } });
 
     fireEvent.click(screen.getByRole("button", { name: enChat.window.close_tooltip }));
 
     const state = useChatStore.getState();
     expect(state.isOpen).toBe(false);
     expect(state.chatBarKept).toEqual([]);
-    expect(state.chatBarDismissed).toEqual({ [session.id]: session.updated_at });
+    expect(state.chatBarDismissed).toEqual({ [session.id]: lastMessageAt });
   });
 });

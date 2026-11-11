@@ -24,7 +24,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { runtimeDisplayName } from "@multica/core/runtimes";
-import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { chatSessionOptions } from "@multica/core/chat/queries";
 import {
   inboxListOptions,
   archivedInboxPagesOptions,
@@ -143,7 +143,7 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Ta
   const members = useQuery({ ...memberListOptions(wsId), enabled: false }).data;
   const squads = useQuery({ ...squadListOptions(wsId), enabled: false }).data;
   const runtimes = useQuery({ ...runtimeListOptions(wsId), enabled: false }).data;
-  const sessions = useQuery({ ...chatSessionsOptions(wsId), enabled: false }).data;
+  const chatSession = useQuery({ ...chatSessionOptions(wsId, subject.kind === "chat" ? subject.sessionId ?? "" : ""), enabled: false }).data;
 
   const data: TabEntityData = {};
   switch (subject.kind) {
@@ -188,7 +188,7 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Ta
     }
     case "chat":
       if (subject.sessionId) {
-        const s = sessions?.find((x) => x.id === subject.sessionId);
+        const s = chatSession;
         if (s) data.chatSessionTitle = s.title?.trim() || chatT(($) => $.window.untitled);
       }
       break;

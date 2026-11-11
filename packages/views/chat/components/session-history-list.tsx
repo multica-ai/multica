@@ -18,12 +18,14 @@ export function SessionHistoryList({
   footer,
   maxHeight,
   estimatedRowHeight = 56,
+  endReached,
 }: {
   sessions: ChatSession[];
   renderRow: (session: ChatSession) => ReactNode;
   footer?: ReactNode;
   maxHeight?: number;
   estimatedRowHeight?: number;
+  endReached?: () => void;
 }) {
   return (
     <Virtuoso
@@ -33,6 +35,7 @@ export function SessionHistoryList({
           : Math.min(maxHeight, sessions.length * estimatedRowHeight),
       }}
       data={sessions}
+      endReached={endReached}
       defaultItemHeight={estimatedRowHeight}
       increaseViewportBy={200}
       computeItemKey={(_, session) => session.id}
