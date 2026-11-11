@@ -322,8 +322,6 @@ does not clear those blocks or establish that earlier background processes exite
 
 ### Local Environments
 
-This section describes the current `main` branch. Desktop-app focus, shared-server deduplication, sidebar start/stop/restart, and sidebar log access were added after `v0.8.2`; they require compatible server, client, and daemon builds and are not included in that release.
-
 The issue sidebar's **Environments** section lists the servers and desktop apps associated with an issue's runs, grouped by the machine they run on. A localhost URL opens only on that machine. The daemon reports environments in two ways:
 
 - **Detected.** On macOS and Linux, any process listening on a TCP port whose working directory is inside a run's directory shows up. It has to be seen on two scans in a row, about 30 seconds apart, so short-lived test servers stay out. The agent CLIs themselves are ignored, and so are servers in a project's own local directory, which the user started.
