@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net/http"
+	"slices"
 	"sort"
 	"time"
 
@@ -95,4 +97,29 @@ func decodeManagedMcpSnapshot(task db.AgentTaskQueue) *[]ManagedMcpSource {
 	}
 	result := sortedManagedMcpSources(sources)
 	return &result
+}
+
+// Issue views expose run summaries independently of agent navigation. Apply
+// the existing private-agent view gate to configuration metadata on those rows.
+func (h *Handler) redactPrivateAgentMcpSources(r *http.Request, workspaceID string, responses []AgentTaskResponse) {
+	if !slices.ContainsFunc(responses, func(response AgentTaskResponse) bool { return response.ManagedMcpSources != nil }) {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	if actorType == "agent" {
+		return
+	}
+	member, err := h.getWorkspaceMember(r.Context(), actorID, workspaceID)
+	if err == nil && roleAllowed(member.Role, "owner", "admin") {
+		return
+	}
+	var allowed map[string]struct{}
+	if err == nil {
+		allowed, _ = h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	}
+	for i := range responses {
+		if _, visible := allowed[responses[i].AgentID]; !visible {
+			responses[i].ManagedMcpSources = nil
+		}
+	}
 }

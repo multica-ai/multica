@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
@@ -395,5 +396,34 @@ func TestManagedMcpClaimFullShadowHistoryAfterEdits(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].ManagedMcpSources == nil || !reflect.DeepEqual(*runs[0].ManagedMcpSources, []ManagedMcpSource{{Name: "shared", Source: "task"}}) {
 		t.Fatalf("three-layer history changed after edits")
+	}
+}
+
+func TestManagedMcpIssueViewsHidePrivateAgentSources(t *testing.T) {
+	runtimeID := setupWorkspaceMcpClaimFixture(t, context.Background(), "private issue history", `{"mcpServers":{"PRIVATE_AGENT_SOURCE_CANARY":{}}}`)
+	claimed := claimMcpHistoryForTest(t, testHandler, runtimeID)
+	member := dbfx.User(t, "Private source bystander", "mcp-private-source-bystander@example.test")
+	dbfx.Member(t, testWorkspaceID, member, "member")
+	for _, endpoint := range []struct {
+		name string
+		call http.HandlerFunc
+	}{
+		{"history", testHandler.ListTasksByIssue},
+		{"active", testHandler.GetActiveTaskForIssue},
+	} {
+		t.Run(endpoint.name, func(t *testing.T) {
+			for _, viewer := range []string{testUserID, member} {
+				req := withURLParam(newRequestAs(viewer, "GET", "/api/issues/"+claimed.IssueID+"/task-runs", nil), "id", claimed.IssueID)
+				w := httptest.NewRecorder()
+				endpoint.call(w, req)
+				if w.Code != 200 {
+					t.Fatalf("ordinary issue run read=%d", w.Code)
+				}
+				visible := strings.Contains(w.Body.String(), "PRIVATE_AGENT_SOURCE_CANARY")
+				if visible != (viewer == testUserID) {
+					t.Fatalf("private configuration source visibility=%v for viewer=%s", visible, viewer)
+				}
+			}
+		})
 	}
 }

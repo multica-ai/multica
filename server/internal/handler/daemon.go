@@ -6263,6 +6263,7 @@ func (h *Handler) GetActiveTaskForIssue(w http.ResponseWriter, r *http.Request) 
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)
 	}
+	h.redactPrivateAgentMcpSources(r, workspaceID, resp)
 	// Same issue-facing attribution surface as ListTasksByIssue — hydrate names.
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 
@@ -6301,7 +6302,9 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("task cancelled by user", "task_id", taskID, "issue_id", uuidToString(task.IssueID))
-	resp := taskToResponse(*task, workspaceID)
+	responses := []AgentTaskResponse{taskToResponse(*task, workspaceID)}
+	h.redactPrivateAgentMcpSources(r, workspaceID, responses)
+	resp := responses[0]
 	// Keep this issue-scoped surface consistent with the list endpoints so a
 	// cancelled row keeps its resolved "on behalf of" name in the UI.
 	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.Attribution})
@@ -6490,6 +6493,7 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 			resp[i].IssueTitle = label.title
 		}
 	}
+	h.redactPrivateAgentMcpSources(r, workspaceID, resp)
 	h.hydrateTaskSupplementMetadata(r.Context(), r, issue.WorkspaceID, tasks, resp)
 	// Execution-log rows render the "on behalf of <member>" badge, so this
 	// issue-facing surface must resolve initiator/originator names (departed-safe,
