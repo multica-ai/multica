@@ -156,6 +156,32 @@ if (process.platform !== "win32") {
 const PROTOCOL = "multica";
 const devLog = is.dev ? createBestEffortDevLog() : undefined;
 
+// Build Chromium proxyBypassRules from user-configured noProxy.
+// Always includes localhost variants and <local> (intranet wildcard).
+function buildChromiumBypassRules(noProxy: string | null): string {
+  const base = "localhost,127.0.0.1,::1,<local>";
+  if (!noProxy) return base;
+  const extra = noProxy
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(",");
+  return extra ? `${base},${extra}` : base;
+}
+
+// Build NO_PROXY env var for Go daemon / Node.js child processes.
+// Always includes localhost variants; appends user-configured hosts.
+function buildNoProxyEnv(noProxy: string | null): string {
+  const base = "localhost,127.0.0.1,::1";
+  if (!noProxy) return base;
+  const extra = noProxy
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(",");
+  return extra ? `${base},${extra}` : base;
+}
+
 // Where the main process parks a freeze/crash breadcrumb until the next
 // renderer boot flushes it to telemetry. Lives in userData so it survives a
 // force-quit. Resolved lazily — app.getPath is only valid after `ready`.
@@ -796,15 +822,14 @@ if (!gotTheLock) {
     // inside the ready handler so that constraint is satisfied.
     if (runtimeConfigResult.ok && runtimeConfigResult.config.proxyUrl) {
       const proxy = runtimeConfigResult.config.proxyUrl;
+      const noProxy = runtimeConfigResult.config.noProxy ?? null;
       setProxyUrl(proxy);
-      const bypassRules = "localhost,127.0.0.1,::1,<local>";
+      const bypassRules = buildChromiumBypassRules(noProxy);
       session.defaultSession.setProxy({ proxyRules: proxy, proxyBypassRules: bypassRules });
       // Propagate to Go daemon process via environment.
       process.env.HTTP_PROXY = proxy;
       process.env.HTTPS_PROXY = proxy;
-      process.env.NO_PROXY = process.env.NO_PROXY
-        ? `${process.env.NO_PROXY},localhost,127.0.0.1,::1`
-        : "localhost,127.0.0.1,::1";
+      process.env.NO_PROXY = buildNoProxyEnv(noProxy);
     }
 
     electronApp.setAppUserModelId(
@@ -894,9 +919,14 @@ if (!gotTheLock) {
     });
 
     // Proxy IPC — read/write/test the desktop.json `proxyUrl` field.
-    ipcMain.handle("proxy:get", () => getProxyUrl());
+    ipcMain.handle("proxy:get", () => ({
+      proxyUrl: getProxyUrl(),
+      noProxy: runtimeConfigResult.ok
+        ? (runtimeConfigResult.config.noProxy ?? null)
+        : null,
+    }));
 
-    ipcMain.handle("proxy:set", async (_event, url: string | null) => {
+    ipcMain.handle("proxy:set", async (_event, url: string | null, noProxy: string | null) => {
       let normalized: string | undefined;
       if (url) {
         try {
@@ -905,31 +935,30 @@ if (!gotTheLock) {
           return { ok: false, error: err instanceof Error ? err.message : String(err) };
         }
       }
-      const patch = normalized ? { proxyUrl: normalized } : {};
-      // Remove proxyUrl key when clearing: spread won't delete it, so handle
-      // the delete case explicitly via a separate write path.
-      if (!normalized) {
-        // Write desktop.json without proxyUrl.
-        const result = await updateDesktopConfig({ proxyUrl: undefined } as Partial<import("../shared/runtime-config").RuntimeConfig>);
-        if (!result.ok) return result;
+      const trimmedNoProxy = noProxy?.trim() || null;
+      const patch: Partial<import("../shared/runtime-config").RuntimeConfig> = normalized
+        ? { proxyUrl: normalized }
+        : { proxyUrl: undefined };
+      if (trimmedNoProxy) {
+        patch.noProxy = trimmedNoProxy;
       } else {
-        const result = await updateDesktopConfig(patch);
-        if (!result.ok) return result;
+        patch.noProxy = undefined;
       }
+      const result = await updateDesktopConfig(patch);
+      if (!result.ok) return result;
       // Hot-update in-memory proxy and Chromium session.
       setProxyUrl(normalized ?? null);
       if (normalized) {
-        const bypassRules = "localhost,127.0.0.1,::1,<local>";
+        const bypassRules = buildChromiumBypassRules(trimmedNoProxy);
         session.defaultSession.setProxy({ proxyRules: normalized, proxyBypassRules: bypassRules });
         process.env.HTTP_PROXY = normalized;
         process.env.HTTPS_PROXY = normalized;
-        if (!process.env.NO_PROXY) {
-          process.env.NO_PROXY = "localhost,127.0.0.1,::1";
-        }
+        process.env.NO_PROXY = buildNoProxyEnv(trimmedNoProxy);
       } else {
         session.defaultSession.setProxy({});
         delete process.env.HTTP_PROXY;
         delete process.env.HTTPS_PROXY;
+        delete process.env.NO_PROXY;
       }
       return { ok: true };
     });

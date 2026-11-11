@@ -15,14 +15,18 @@ type TestState =
 export function NetworkSettingsTab() {
   const { t } = useT("settings");
   const [proxyUrl, setProxyUrl] = useState("");
+  const [noProxy, setNoProxy] = useState("");
   const [saving, setSaving] = useState(false);
   const [testState, setTestState] = useState<TestState>({ status: "idle" });
 
-  // Load current proxy URL from main process on mount.
+  // Load current proxy settings from main process on mount.
   useEffect(() => {
     let mounted = true;
-    void window.desktopAPI.proxy.get().then((url) => {
-      if (mounted) setProxyUrl(url ?? "");
+    void window.desktopAPI.proxy.get().then((cfg) => {
+      if (mounted) {
+        setProxyUrl(cfg.proxyUrl ?? "");
+        setNoProxy(cfg.noProxy ?? "");
+      }
     });
     return () => {
       mounted = false;
@@ -32,8 +36,12 @@ export function NetworkSettingsTab() {
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      const trimmed = proxyUrl.trim();
-      const result = await window.desktopAPI.proxy.set(trimmed || null);
+      const trimmedUrl = proxyUrl.trim();
+      const trimmedNoProxy = noProxy.trim();
+      const result = await window.desktopAPI.proxy.set(
+        trimmedUrl || null,
+        trimmedNoProxy || null,
+      );
       if (!result.ok) {
         toast.error(result.error ?? t(($) => $.desktop.network.proxy_save_failed));
         return;
@@ -46,7 +54,7 @@ export function NetworkSettingsTab() {
     } finally {
       setSaving(false);
     }
-  }, [proxyUrl, t]);
+  }, [proxyUrl, noProxy, t]);
 
   const handleTest = useCallback(async () => {
     const trimmed = proxyUrl.trim();
@@ -78,6 +86,18 @@ export function NetworkSettingsTab() {
             value={proxyUrl}
             onChange={(e) => setProxyUrl(e.target.value)}
             placeholder={t(($) => $.desktop.network.proxy_placeholder)}
+            disabled={saving}
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          label={t(($) => $.desktop.network.no_proxy_title)}
+          description={t(($) => $.desktop.network.no_proxy_description)}
+        >
+          <Input
+            value={noProxy}
+            onChange={(e) => setNoProxy(e.target.value)}
+            placeholder={t(($) => $.desktop.network.no_proxy_placeholder)}
             disabled={saving}
           />
         </SettingsRow>

@@ -11,6 +11,13 @@ export interface RuntimeConfig {
    * methods. See MUL-PROXY.
    */
   proxyUrl?: string;
+  /**
+   * Optional comma-separated list of hosts/domains that bypass the proxy
+   * (e.g. "internal.corp,.corp.local,myhost"). Maps to NO_PROXY env var
+   * for the Go daemon and Chromium proxyBypassRules. localhost/127.0.0.1
+   * are always appended automatically.
+   */
+  noProxy?: string;
 }
 
 export interface RuntimeConfigError {
@@ -40,6 +47,7 @@ export interface RuntimeConfigEnv {
   wsUrl?: string;
   appUrl?: string;
   proxyUrl?: string;
+  noProxy?: string;
 }
 
 export function runtimeConfigFromDevEnv(env: RuntimeConfigEnv): RuntimeConfig {
@@ -57,6 +65,7 @@ export function runtimeConfigFromDevEnv(env: RuntimeConfigEnv): RuntimeConfig {
       ? normalizeHttpUrl(env.appUrl, "VITE_APP_URL")
       : deriveDevAppUrl(apiUrl),
     ...(env.proxyUrl ? { proxyUrl: normalizeProxyUrl(env.proxyUrl) } : {}),
+    ...(env.noProxy ? { noProxy: env.noProxy } : {}),
   };
 }
 
@@ -83,6 +92,7 @@ export function parseRuntimeConfig(raw: string): RuntimeConfig {
   const appUrl = optionalString(obj.appUrl, "appUrl");
   const wsUrl = optionalString(obj.wsUrl, "wsUrl");
   const proxyUrl = optionalString(obj.proxyUrl, "proxyUrl");
+  const noProxy = optionalString(obj.noProxy, "noProxy");
 
   const normalizedApiUrl = normalizeHttpUrl(apiUrl, "apiUrl");
   return {
@@ -91,6 +101,7 @@ export function parseRuntimeConfig(raw: string): RuntimeConfig {
     wsUrl: wsUrl ? normalizeWsUrl(wsUrl, "wsUrl") : deriveWsUrl(normalizedApiUrl),
     appUrl: appUrl ? normalizeHttpUrl(appUrl, "appUrl") : deriveAppUrl(normalizedApiUrl),
     ...(proxyUrl ? { proxyUrl: normalizeProxyUrl(proxyUrl) } : {}),
+    ...(noProxy ? { noProxy } : {}),
   };
 }
 
