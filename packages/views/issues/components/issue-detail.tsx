@@ -4143,11 +4143,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return withPreview(
       <div className="flex flex-1 min-h-0">
         {detailContent}
-        <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-          <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto [scrollbar-gutter:stable] px-2 py-4">
-            {sidebarContent}
-          </SheetContent>
-        </Sheet>
+        {mobileSidebarOpen && (
+          <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+            <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto [scrollbar-gutter:stable] px-2 py-4">
+              {sidebarContent}
+            </SheetContent>
+          </Sheet>
+        )}
       </div>,
     );
   }
