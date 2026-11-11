@@ -16,13 +16,15 @@
 import { ProxyAgent, fetch as undiciFetch } from "undici";
 
 let currentProxy: string | null = null;
+let currentNoProxy: string[] = [];
 
 /**
  * Set or clear the HTTP proxy URL used by `proxyFetch`.
  * Pass `null` to disable proxying.
  */
-export function setProxyUrl(url: string | null): void {
+export function setProxyUrl(url: string | null, noProxy: string | null = null): void {
   currentProxy = url;
+  currentNoProxy = parseNoProxy(noProxy);
 }
 
 /**
@@ -33,17 +35,24 @@ export function getProxyUrl(): string | null {
 }
 
 /**
+ * Return the currently configured noProxy list as a comma-separated string.
+ */
+export function getNoProxy(): string | null {
+  return currentNoProxy.length > 0 ? currentNoProxy.join(",") : null;
+}
+
+/**
  * Proxy-aware fetch for the Electron main process.
  *
- * When a proxy is configured AND the target URL is not a loopback
- * address, the request is routed through a ProxyAgent. Otherwise
- * native fetch is used directly.
+ * When a proxy is configured AND the target URL is not explicitly bypassed,
+ * the request is routed through a ProxyAgent. Otherwise native fetch is used
+ * directly.
  */
 export function proxyFetch(
   url: string | URL,
   init?: RequestInit,
 ): Promise<Response> {
-  if (currentProxy && !isLoopback(url)) {
+  if (currentProxy && !shouldBypassProxy(url)) {
     const agent = new ProxyAgent(currentProxy);
     // undici's RequestInit accepts `dispatcher`; cast to satisfy the
     // global RequestInit type which does not declare it.
@@ -55,6 +64,41 @@ export function proxyFetch(
   return fetch(url, init);
 }
 
+export function shouldBypassProxy(url: string | URL): boolean {
+  if (!currentProxy) return false;
+  try {
+    const parsed = typeof url === "string" ? new URL(url) : url;
+    const host = parsed.hostname.toLowerCase();
+    if (isLoopbackHost(host)) return true;
+    return currentNoProxy.some((entry) => matchesNoProxyHost(host, entry));
+  } catch {
+    return false;
+  }
+}
+
+function parseNoProxy(value: string | null): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isLoopbackHost(host: string): boolean {
+  return (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host === "[::1]"
+  );
+}
+
+function matchesNoProxyHost(host: string, entry: string): boolean {
+  const normalized = entry.replace(/^\./, "");
+  if (!normalized || normalized === "*") return false;
+  if (host === normalized) return true;
+  return host.endsWith(`.${normalized}`);
+}
+
 /**
  * True when `url` targets a loopback address (localhost / 127.x / ::1).
  * These requests must never traverse a proxy.
@@ -62,13 +106,7 @@ export function proxyFetch(
 function isLoopback(url: string | URL): boolean {
   try {
     const parsed = typeof url === "string" ? new URL(url) : url;
-    const host = parsed.hostname;
-    return (
-      host === "localhost" ||
-      host === "127.0.0.1" ||
-      host === "::1" ||
-      host === "[::1]"
-    );
+    return isLoopbackHost(parsed.hostname.toLowerCase());
   } catch {
     return false;
   }

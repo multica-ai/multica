@@ -30,8 +30,8 @@ import { installNavigationGuard } from "./navigation-guard";
 import { createRendererWebPreferences } from "./renderer-web-preferences";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig, updateDesktopConfig } from "./runtime-config-loader";
-import { setProxyUrl, getProxyUrl } from "./proxy-fetch";
-import { normalizeProxyUrl } from "../shared/runtime-config";
+import { setProxyUrl, getProxyUrl, getNoProxy } from "./proxy-fetch";
+import { apiHealthUrl, normalizeProxyUrl } from "../shared/runtime-config";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import {
   RENDERER_ROUTE_CONTEXT_CHANNEL,
@@ -820,10 +820,11 @@ if (!gotTheLock) {
     // Apply proxy from runtime config (desktop.json `proxyUrl`).
     // session.setProxy must be called after app.whenReady() — we are
     // inside the ready handler so that constraint is satisfied.
-    if (runtimeConfigResult.ok && runtimeConfigResult.config.proxyUrl) {
-      const proxy = runtimeConfigResult.config.proxyUrl;
-      const noProxy = runtimeConfigResult.config.noProxy ?? null;
-      setProxyUrl(proxy);
+    const config = runtimeConfigResult.ok ? runtimeConfigResult.config : null;
+    const proxy = config?.proxyUrl ?? null;
+    const noProxy = config?.noProxy ?? null;
+    setProxyUrl(proxy, noProxy);
+    if (proxy) {
       const bypassRules = buildChromiumBypassRules(noProxy);
       session.defaultSession.setProxy({ proxyRules: proxy, proxyBypassRules: bypassRules });
       // Propagate to Go daemon process via environment.
@@ -921,9 +922,7 @@ if (!gotTheLock) {
     // Proxy IPC — read/write/test the desktop.json `proxyUrl` field.
     ipcMain.handle("proxy:get", () => ({
       proxyUrl: getProxyUrl(),
-      noProxy: runtimeConfigResult.ok
-        ? (runtimeConfigResult.config.noProxy ?? null)
-        : null,
+      noProxy: getNoProxy(),
     }));
 
     ipcMain.handle("proxy:set", async (_event, url: string | null, noProxy: string | null) => {
@@ -946,8 +945,9 @@ if (!gotTheLock) {
       }
       const result = await updateDesktopConfig(patch);
       if (!result.ok) return result;
+      runtimeConfigResult = result;
       // Hot-update in-memory proxy and Chromium session.
-      setProxyUrl(normalized ?? null);
+      setProxyUrl(normalized ?? null, trimmedNoProxy);
       if (normalized) {
         const bypassRules = buildChromiumBypassRules(trimmedNoProxy);
         session.defaultSession.setProxy({ proxyRules: normalized, proxyBypassRules: bypassRules });
@@ -967,7 +967,10 @@ if (!gotTheLock) {
       try {
         const { ProxyAgent, fetch: undiciFetch } = await import("undici");
         const agent = new ProxyAgent(url);
-        const res = await undiciFetch("https://api.multica.ai/health", {
+        const healthUrl = apiHealthUrl(
+          runtimeConfigResult.ok ? runtimeConfigResult.config.apiUrl : "https://api.multica.ai",
+        );
+        const res = await undiciFetch(healthUrl, {
           dispatcher: agent,
           signal: AbortSignal.timeout(10_000),
         } as Parameters<typeof undiciFetch>[1]);

@@ -116,6 +116,14 @@ export function deriveWsUrl(apiUrl: string): string {
   return trimTrailingSlash(url.toString());
 }
 
+export function apiHealthUrl(apiUrl: string): string {
+  const url = new URL(apiUrl);
+  url.pathname = joinPath(url.pathname, "/health");
+  url.search = "";
+  url.hash = "";
+  return trimTrailingSlash(url.toString());
+}
+
 // Convention: api hosts are exposed at `api.<web-host>` (api.multica.ai →
 // multica.ai, api.test.multica.ai → test.multica.ai). Strip the leading
 // `api.` label so a single `apiUrl` configuration produces the right
