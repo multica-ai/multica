@@ -35,6 +35,7 @@ import {
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
+import { refetchChatSessionsAfterCommit } from "@multica/core/chat/session-list";
 import {
   enqueuePendingChatTask,
   hideQueuedChatMessages,
@@ -604,6 +605,10 @@ export function useChatController(opts?: { isActive?: boolean }) {
         supports_queue: result.supports_queue,
         queued: result.queued,
       });
+      // This send just committed the new session's server-derived title.
+      if (sessionId !== activeSessionId) {
+        void refetchChatSessionsAfterCommit(qc, chatKeys.sessions(wsId));
+      }
       // Cache primed → publish the new active session, but only if the user
       // hasn't navigated away mid-send. See isStillOnComposeTarget. commitInput
       // clears the sent draft, and scrubs the shared editor only when the user
@@ -637,12 +642,6 @@ export function useChatController(opts?: { isActive?: boolean }) {
       }
       qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
       qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
-      // The create's own list refetch can read the row before this send
-      // committed its title, and a chat:session_updated patch is a no-op
-      // until the row is cached.
-      if (sessionId !== activeSessionId) {
-        qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
-      }
       return true;
     },
     [

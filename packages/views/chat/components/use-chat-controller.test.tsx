@@ -409,6 +409,7 @@ describe("useChatController project context", () => {
     h.sessions = [];
     h.agents = [agentA];
     h.queryClient.invalidateQueries.mockClear();
+    h.queryClient.cancelQueries.mockClear();
     vi.mocked(api.sendChatMessage).mockResolvedValue({
       message_id: "message-1",
       task_id: "task-1",
@@ -423,9 +424,16 @@ describe("useChatController project context", () => {
     expect(h.createSessionMutate).toHaveBeenCalledWith(
       expect.not.objectContaining({ title: expect.anything() }),
     );
-    expect(h.queryClient.invalidateQueries).toHaveBeenCalledWith({
-      queryKey: chatKeys.sessions("ws-1"),
-    });
+    const sessionsKey = { queryKey: chatKeys.sessions("ws-1") };
+    expect(h.queryClient.cancelQueries).toHaveBeenCalledWith(sessionsKey);
+    expect(h.queryClient.invalidateQueries).toHaveBeenCalledWith(sessionsKey);
+    const cancelOrder = h.queryClient.cancelQueries.mock.invocationCallOrder[0]!;
+    const refetchOrder = h.queryClient.invalidateQueries.mock.calls.findIndex(
+      ([arg]) => JSON.stringify(arg) === JSON.stringify(sessionsKey),
+    );
+    expect(cancelOrder).toBeLessThan(
+      h.queryClient.invalidateQueries.mock.invocationCallOrder[refetchOrder]!,
+    );
   });
 
   it("does not inherit the current session project when starting a new chat", () => {

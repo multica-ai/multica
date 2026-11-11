@@ -49,6 +49,7 @@ import {
   hideQueuedChatMessages,
   removePendingChatTask,
 } from "@multica/core/chat/pending";
+import { refetchChatSessionsAfterCommit } from "@multica/core/chat/session-list";
 import { canAssignAgentToIssue } from "@multica/core/permissions/rules";
 import { api } from "@/data/api";
 import { useAuthStore } from "@/data/auth-store";
@@ -388,11 +389,9 @@ export default function ChatTab() {
           queued: result.queued,
         });
         qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-        // The create's own list refetch can read the row before this send
-        // committed its title, and a chat:session_updated patch is a no-op
-        // until the row is cached.
+        // This send just committed the new session's server-derived title.
         if (isNewSession) {
-          qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+          void refetchChatSessionsAfterCommit(qc, chatKeys.sessions(wsId));
         }
         if (options.clearDraft !== false) {
           clearDraft(sessionId);
