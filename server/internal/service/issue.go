@@ -89,6 +89,8 @@ type IssueCreateParams struct {
 	// used by the standalone PUT path, then inserts the complete bag atomically.
 	Properties     map[pgtype.UUID]json.RawMessage
 	AllowDuplicate bool
+	// PRAutoCompleteDisabled is persisted before the issue becomes visible.
+	PRAutoCompleteDisabled bool
 	// Stage groups this issue into an ordered barrier group under its parent
 	// (NULL = unstaged). See issue_wakeup_system.go for the staged-barrier wake.
 	Stage pgtype.Int4
@@ -209,7 +211,48 @@ type IssueCreateResult struct {
 	DuplicateIssue *db.Issue
 }
 
-// Create runs the full issue-creation pipeline atomically end-to-end:
+// Create is the entry point every creator shares. It runs the pipeline below and
+// reacts to exactly one failure: a collision on uq_issue_workspace_number, which
+// proves workspace.issue_counter trails MAX(issue.number). On that collision it
+// heals the counter and runs the whole transaction again, once.
+//
+// A healthy create is byte-identical to before this existed — the allocation
+// query is untouched and nothing extra is read on the way through. The collision
+// is the signal: AllocateIssueNumber bumps the counter inside the same
+// transaction as the INSERT, so the unique violation rolls the increment back
+// too and every later create in that workspace retries the same taken number
+// forever. Moving the counter first is what makes the second attempt land on a
+// free number, and healIssueCounterAfterCollision logs the before and after so a
+// healed workspace leaves a trace instead of a silent numbering gap.
+//
+// The retry is the whole transaction, not a savepoint around the INSERT: a
+// savepoint has to be established before the statement that might fail, so every
+// successful create would pay for it too.
+func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts IssueCreateOpts) (IssueCreateResult, error) {
+	res, err := s.createOnce(ctx, p, opts)
+	if err == nil {
+		return res, nil
+	}
+	if !healIssueCounterAfterCollision(ctx, s.Queries, p.WorkspaceID, err) {
+		// Pass the result through: callers read fields alongside some of these
+		// errors, e.g. DuplicateIssue with ErrActiveDuplicate.
+		return res, err
+	}
+	res, err = s.createOnce(ctx, p, opts)
+	if err != nil {
+		var collision *IssueNumberCollisionError
+		if errors.As(err, &collision) {
+			slog.Error("issue number still collides after counter repair",
+				"workspace_id", util.UUIDToString(p.WorkspaceID),
+				"allocated", collision.Allocated,
+				"constraint", collision.Constraint)
+		}
+		return res, err
+	}
+	return res, nil
+}
+
+// createOnce runs the full issue-creation pipeline atomically end-to-end:
 //
 //  1. Begin transaction.
 //  2. Resolve & validate parent / project belong to the same workspace.
@@ -232,7 +275,7 @@ type IssueCreateResult struct {
 // MCP/API-key callers — shares the same workspace boundary semantics.
 // Caller-owned validation is limited to transport-shaped checks: title
 // required, RFC3339 date format, assignee pair sanity.
-func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts IssueCreateOpts) (IssueCreateResult, error) {
+func (s *IssueService) createOnce(ctx context.Context, p IssueCreateParams, opts IssueCreateOpts) (IssueCreateResult, error) {
 	issueCountPolicy := ResolveIssueCountPolicy(ctx, s.Entitlements, p.WorkspaceID)
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
@@ -376,27 +419,37 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	var issue db.Issue
 	var assignedTask db.AgentTaskQueue
 	if p.OriginType.Valid {
+		var requester pgtype.UUID
+		if p.CreatorType == "agent" && p.OriginID.Valid && (p.OriginType.String == "quick_create" || p.OriginType.String == "agent_create") {
+			requester, err = qtx.ResolveIssueRequester(ctx, db.ResolveIssueRequesterParams{
+				OriginID: p.OriginID, CreatorID: p.CreatorID, WorkspaceID: p.WorkspaceID, OriginType: p.OriginType.String,
+			})
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return IssueCreateResult{}, fmt.Errorf("resolve issue requester: %w", err)
+			}
+		}
 		issue, err = qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
-			ID:            dbid.NewV7(),
-			WorkspaceID:   p.WorkspaceID,
-			Title:         p.Title,
-			Description:   p.Description,
-			Status:        p.Status,
-			Priority:      p.Priority,
-			AssigneeType:  p.AssigneeType,
-			AssigneeID:    p.AssigneeID,
-			CreatorType:   p.CreatorType,
-			CreatorID:     p.CreatorID,
-			ParentIssueID: p.ParentIssueID,
-			Position:      newPosition,
-			StartDate:     p.StartDate,
-			DueDate:       p.DueDate,
-			Number:        issueNumber,
-			ProjectID:     projectID,
-			OriginType:    p.OriginType,
-			OriginID:      p.OriginID,
-			Stage:         p.Stage,
-			Properties:    properties,
+			ID:              dbid.NewV7(),
+			WorkspaceID:     p.WorkspaceID,
+			Title:           p.Title,
+			Description:     p.Description,
+			Status:          p.Status,
+			Priority:        p.Priority,
+			AssigneeType:    p.AssigneeType,
+			AssigneeID:      p.AssigneeID,
+			CreatorType:     p.CreatorType,
+			CreatorID:       p.CreatorID,
+			ParentIssueID:   p.ParentIssueID,
+			Position:        newPosition,
+			StartDate:       p.StartDate,
+			DueDate:         p.DueDate,
+			Number:          issueNumber,
+			ProjectID:       projectID,
+			OriginType:      p.OriginType,
+			OriginID:        p.OriginID,
+			RequesterUserID: requester,
+			Stage:           p.Stage,
+			Properties:      properties,
 		})
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{
@@ -425,7 +478,19 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		if errors.As(err, &pgErr) && pgErr.ConstraintName == "issue_properties_size_limit" {
 			return IssueCreateResult{}, ErrIssuePropertiesTooLarge
 		}
-		return IssueCreateResult{}, fmt.Errorf("create issue: %w", err)
+		// Typed before it is returned so both halves can act on it: Create decides
+		// whether to heal and retry, and the transport reports a board-integrity
+		// problem instead of a generic create failure.
+		return IssueCreateResult{}, classifyIssueNumberCollision(fmt.Errorf("create issue: %w", err), issueNumber)
+	}
+
+	if p.PRAutoCompleteDisabled {
+		if err := qtx.SetIssuePRAutoCompleteDisabled(ctx, db.SetIssuePRAutoCompleteDisabledParams{
+			IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, AutoCompleteDisabled: true,
+			UpdatedByType: pgtype.Text{String: p.CreatorType, Valid: true}, UpdatedByID: p.CreatorID,
+		}); err != nil {
+			return IssueCreateResult{}, fmt.Errorf("set issue PR auto-complete: %w", err)
+		}
 	}
 
 	if p.SourceContext != nil {

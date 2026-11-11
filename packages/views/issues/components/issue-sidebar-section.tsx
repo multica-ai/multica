@@ -5,7 +5,13 @@ import { ChevronRight } from "@multica/ui/icons";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 
-/** Shared disclosure header; actions stay outside the disclosure button. */
+/**
+ * Shared disclosure header; actions stay outside the disclosure button.
+ *
+ * Inset like a `PropRow` (`px-2` around an 8px hit-area padding) so the title
+ * starts on the same edge as the labels and rows of every section body under
+ * it. The padding is 7px because `Button` adds a 1px transparent border.
+ */
 export function IssueSidebarSectionHeader({
   title, open, onOpenChange, count, actions, status, id, collapsible = true,
 }: {
@@ -19,7 +25,7 @@ export function IssueSidebarSectionHeader({
   id?: string;
 }) {
   return (
-    <div className="mb-1 flex min-w-0 items-center gap-1">
+    <div className="mb-1 flex min-w-0 items-center gap-1 px-2">
       {collapsible ? <Button
         id={id}
         type="button"
@@ -27,7 +33,7 @@ export function IssueSidebarSectionHeader({
         size="sm"
         aria-expanded={open}
         onClick={() => onOpenChange(!open)}
-        className={cn("min-w-0 flex-1 shrink justify-start font-medium aria-expanded:bg-transparent active:not-aria-[haspopup]:translate-y-0", !open && "text-muted-foreground")}
+        className={cn("min-w-0 flex-1 shrink justify-start px-[7px] font-medium aria-expanded:bg-transparent active:not-aria-[haspopup]:translate-y-0", !open && "text-muted-foreground")}
       >
         <span className="truncate">{title}</span>
         <ChevronRight aria-hidden="true" className={cn("!size-3 shrink-0 text-faint-foreground transition-transform motion-reduce:transition-none", open && "rotate-90")} />
@@ -38,7 +44,7 @@ export function IssueSidebarSectionHeader({
           </>
         )}
       </Button> : (
-        <div id={id} className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "min-w-0 flex-1 shrink justify-start font-medium hover:bg-transparent dark:hover:bg-transparent")}>
+        <div id={id} className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "min-w-0 flex-1 shrink justify-start px-[7px] font-medium hover:bg-transparent dark:hover:bg-transparent")}>
           <span className="truncate">{title}</span>
         </div>
       )}

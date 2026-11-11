@@ -29,6 +29,15 @@
     "toast_renamed": "タスク名を変更しました",
     "toast_failed": "タスク名を変更できませんでした"
   },
+  "rename_project": {
+    "title": "プロジェクト名を変更",
+    "placeholder": "プロジェクトのタイトル",
+    "submit": "保存",
+    "title_required": "タイトルを入力してください",
+    "offline_error": "オフラインです。接続を回復してから、もう一度名前を変更してください。",
+    "toast_renamed": "プロジェクト名を変更しました",
+    "toast_failed": "プロジェクト名を変更できませんでした"
+  },
   "feedback": {
     "title": "フィードバック",
     "placeholder": "使用感、見つけたバグ、追加してほしい機能などをお聞かせください…",
@@ -154,7 +163,8 @@
     "local_pick_failed": "ディレクトリ選択画面を開けませんでした。",
     "local_invalid_dir": "このディレクトリは使用できません。別のものを選択してください。",
     "local_hint": "他のマシンのエージェントはこのパスを参照できず、起動に失敗します。共有作業にはリポジトリを使用してください。",
-    "repos_ref_default": "デフォルトブランチ"
+    "repos_ref_default": "デフォルトブランチ",
+    "repos_remove_aria": "{{repo}} を削除"
   },
   "create_issue": {
     "sr_manual": "新規タスク",
@@ -271,5 +281,13 @@
     "toast_failed": "重複としてマークできませんでした",
     "error_target_is_duplicate": "{{identifier}} 自体が重複です。元のタスクを選択してください",
     "error_has_duplicates": "他のタスクがこのタスクの重複としてマークされています。先にそのマークを解除してください"
+  },
+  "copy_parent_fields": {
+    "trigger": "親タスクのフィールドをコピー",
+    "title": "親タスクのフィールドをコピー",
+    "description": "{{identifier}} から選択した値を一度だけ上書きします。以降の変更は同期されません。",
+    "apply": "{{count}} 項目をコピー",
+    "no_labels": "ラベルなし",
+    "manual_only": "ラベル、開始日、カスタムプロパティは手動作成にのみ適用されます。"
   }
 }

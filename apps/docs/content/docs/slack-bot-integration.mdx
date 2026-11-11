@@ -144,6 +144,10 @@ Run `/invite @your-bot` to add the Bot to the channel first, then send `@your-bo
 
 The Bot only responds to channel messages that explicitly @-mention it. When it runs, it reads the thread's recent context within the scopes its permissions allow.
 
+Agents can use `multica chat thread [<thread_id>] --output json` to read a thread in the current channel. The JSON includes the Slack `channel_id` when available, plus optional `channel_name` and `permalink` fields. An explicit thread ID selects that thread's source, while each task's prompt identifies its own triggering message or thread. A DM without a thread has no `thread_id`; its history response omits the permalink when there is no specific message to link.
+
+Channel names require the corresponding Slack conversation read permission, which the default manifest does not request. Permalinks come from Slack and may be unavailable if access is denied, a message was deleted, or Slack times out or rate limits the request. Missing metadata is omitted without preventing history reads or task execution; no additional permissions or reinstall are required.
+
 ### Send files
 
 Attach files to a DM, or to a channel message that @-mentions the Bot. They reach the agent as attachments and are handled together with the message.

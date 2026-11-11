@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useCanonicalIssue } from "@multica/core/issues/canonical-id";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "../../navigation";
-import { IssueDetail, IssueDetailSkeleton, IssueNotFound } from "./issue-detail";
+import { IssueDetail, IssueDetailSkeleton, IssueNotFound, IssueLoadError } from "./issue-detail";
 import { IssuePeekHost } from "./issue-peek";
 
 interface IssueDetailRouteProps {
@@ -16,6 +16,11 @@ interface IssueDetailRouteProps {
    */
   routeId: string;
   onDelete?: () => void;
+  /**
+   * The decoded file name of a `/{ws}/issues/{segment}/deliverables/{name}`
+   * link: open the newest version of that deliverable.
+   */
+  deliverable?: string;
 }
 
 /**
@@ -29,10 +34,15 @@ export function useCanonicalIssueUrl(
   routeId: string,
   identifier: string | undefined,
   hash = "",
+  deliverable?: string,
 ) {
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
-  const canonicalHref = identifier ? `${paths.issueDetail(identifier)}${hash}` : null;
+  // A deliverable link keeps its `/deliverables/{name}` tail: dropping it
+  // would turn the address into a plain issue link while the file is open.
+  const canonicalHref = identifier
+    ? `${deliverable ? paths.issueDeliverable(identifier, deliverable) : paths.issueDetail(identifier)}${hash}`
+    : null;
   // `useWorkspacePaths()` and the navigation adapter are both rebuilt on
   // render, so this ref — not the dependency array — is what guarantees the
   // replace runs once per target instead of on every commit.
@@ -68,14 +78,33 @@ function useCommentHighlightHash(): { hash: string; commentId?: string } {
  *    the route and only the route — the inbox renders `IssueDetail` in a side
  *    panel, where replacing the URL would navigate the user out of the inbox.
  */
-export function IssueDetailRoute({ routeId, onDelete }: IssueDetailRouteProps) {
+export function IssueDetailRoute({ routeId, onDelete, deliverable }: IssueDetailRouteProps) {
   const wsId = useWorkspaceId();
-  const { canonicalId, issue, isResolving, notFound } = useCanonicalIssue(wsId, routeId);
+  const {
+    canonicalId, issue, isResolving, notFound, loadFailed, isRetrying, retry, hasLoaded,
+  } = useCanonicalIssue(wsId, routeId);
   const highlight = useCommentHighlightHash();
+  const paths = useWorkspacePaths();
+  const navigation = useNavigation();
 
-  useCanonicalIssueUrl(routeId, issue?.identifier, highlight.hash);
+  useCanonicalIssueUrl(routeId, issue?.identifier, highlight.hash, deliverable);
 
-  if (isResolving) return <IssueDetailSkeleton />;
+  // Once the link has opened its file and the viewer has closed (or the file
+  // is missing), the address becomes the plain issue page. A replace: Back
+  // should leave the issue, not re-open the file.
+  const issueRef = issue?.identifier ?? routeId;
+  const latestNav = useRef({ paths, navigation });
+  latestNav.current = { paths, navigation };
+  const onDeliverableLinkDone = useCallback(() => {
+    const { paths, navigation } = latestNav.current;
+    navigation.replace(paths.issueDetail(issueRef));
+  }, [issueRef]);
+
+  if (loadFailed) {
+    return <IssueLoadError showBackLink={!onDelete} onRetry={retry} isRetrying={isRetrying} />;
+  }
+
+  if (isResolving || (!issue && !notFound)) return <IssueDetailSkeleton />;
 
   // Render not-found here rather than handing the unresolved segment down.
   // `IssueDetail` would mount a second observer on the query that just failed,
@@ -90,8 +119,11 @@ export function IssueDetailRoute({ routeId, onDelete }: IssueDetailRouteProps) {
     <IssuePeekHost key={canonicalId}>
       <IssueDetail
         issueId={canonicalId}
+        skipInitialRefetch={hasLoaded}
         onDelete={onDelete}
         highlightCommentId={highlight.commentId}
+        openDeliverable={deliverable}
+        onDeliverableLinkDone={deliverable ? onDeliverableLinkDone : undefined}
       />
     </IssuePeekHost>
   );

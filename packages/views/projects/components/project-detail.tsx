@@ -3,17 +3,21 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, FileQuestion, Link2, PanelRight, Pin, PinOff, Trash2, UserMinus } from "@multica/ui/icons";
+import { Check, ChevronRight, FileQuestion, Link2, PanelRight, Pencil, Pin, PinOff, Trash2, UserMinus } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
+import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
+import { canChangeProjectLead } from "@multica/core/projects/access";
 import { projectDetailOptions } from "@multica/core/projects/queries";
-import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
+import { Spinner } from "@multica/ui/components/ui/spinner";
+import { useUpdateProject, useDeleteProject, ProjectDeletionOfflineError } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
+import { useModalStore } from "@multica/core/modals";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssuesScope } from "@multica/core/issues/stores";
@@ -29,8 +33,9 @@ import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
+import { ProjectAccessControl } from "./project-access";
 import { ProjectWorkflowControl } from "../../workflows/project-workflow-row";
-import { ProjectWorkflowMenuHost } from "../../workflows/project-workflow-menu";
+import { ProjectWorkflowMenuItem, ProjectWorkflowSheet } from "../../workflows/project-workflow-sheet";
 import { IssueSurface } from "../../issues/surface/issue-surface";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
@@ -99,11 +104,11 @@ function PropRow({
 }
 
 // The project's workflow (MUL-7420).
-function ProjectWorkflowPropRow({ project }: { project: Project }) {
+function ProjectWorkflowPropRow({ project, onOpen }: { project: Project; onOpen: () => void }) {
   const { t } = useT("issues");
   return (
     <PropRow label={t(($) => $.workflows.project.label)}>
-      <ProjectWorkflowControl project={project} />
+      <ProjectWorkflowControl project={project} onOpen={onOpen} />
     </PropRow>
   );
 }
@@ -118,7 +123,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const userId = useAuthStore((s) => s.user?.id);
-  const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
+  const deleteProject = useDeleteProject();
+  const deleted = deleteProject.isSuccess && deleteProject.variables === projectId;
+  const { data: project, isLoading } = useQuery({
+    ...projectDetailOptions(wsId, projectId),
+    enabled: !deleted,
+  });
   useRegisterCommandBarContext(
     useMemo(() => (project ? { kind: "project", project } : null), [project]),
   );
@@ -144,17 +154,15 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { getActorName } = useActorName();
   const updateProject = useUpdateProject();
-  const deleteProject = useDeleteProject();
+  const deleting = deleteProject.isPending;
   const { data: pinnedItems = [] } = useQuery({
     ...pinListOptions(wsId, userId ?? ""),
     enabled: !!userId,
   });
   const isPinned = pinnedItems.some((p) => p.item_type === "project" && p.item_id === projectId);
-  const isWorkspaceAdmin = useMemo(() => {
-    if (!userId) return false;
-    const me = members.find((m) => m.user_id === userId);
-    return me?.role === "owner" || me?.role === "admin";
-  }, [members, userId]);
+  const role = members.find((m) => m.user_id === userId)?.role ?? null;
+  const canManageAccess = !!project && canChangeProjectLead(project, userId, role);
+  const canDelete = !!project && canDeleteProject(project, userId ?? null, role, agents);
   const createPin = useCreatePin();
   const deletePinMut = useDeletePin();
   const descEditorRef = useRef<ContentEditorRef>(null);
@@ -188,6 +196,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   } = useAnimatedRightSidebarState(desktopSidebarInitialOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const sidebarOpen = isMobile ? mobileSidebarOpen : desktopSidebarOpen;
+  const [workflowSheetOpen, setWorkflowSheetOpen] = useState(false);
+  // The flow panel is its own modal sheet; it can't stack over the mobile sidebar sheet.
+  const openWorkflowSheet = useCallback(() => {
+    setMobileSidebarOpen(false);
+    setWorkflowSheetOpen(true);
+  }, []);
 
   useEffect(() => {
     if (isMobile) {
@@ -229,16 +243,23 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   );
 
   const handleDelete = useCallback(() => {
-    if (!project) return;
+    if (!project || deleteProject.isPending) return;
     deleteProject.mutate(project.id, {
       onSuccess: () => {
+        setDeleteDialogOpen(false);
         toast.success(t(($) => $.detail.toast_project_deleted));
         router.push(wsPaths.projects());
       },
+      onError: (err) =>
+        toast.error(
+          err instanceof ProjectDeletionOfflineError
+            ? t(($) => $.delete_dialog.offline_error)
+            : err instanceof Error ? err.message : String(err),
+        ),
     });
   }, [project, deleteProject, router, wsPaths, t]);
 
-  if (isLoading) {
+  if (isLoading || deleted) {
     return (
       <div className="mx-auto w-full max-w-4xl px-8 py-10 space-y-4">
         <Skeleton className="h-5 w-32" />
@@ -364,9 +385,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </DropdownMenuContent>
             </DropdownMenu>
           </PropRow>
+          {<PropRow label={t(($) => $.access.label)}>
+            <ProjectAccessControl project={project} />
+          </PropRow>}
           <PropRow label={t(($) => $.table.lead)}>
-            <Popover open={leadOpen} onOpenChange={(v) => { setLeadOpen(v); if (!v) setLeadFilter(""); }}>
+            <Popover open={leadOpen && canManageAccess} onOpenChange={(v) => { setLeadOpen(v); if (!v) setLeadFilter(""); }}>
               <PopoverTrigger
+                disabled={!canManageAccess}
                 render={
                   <button type="button" className="inline-flex items-center gap-1.5 text-caption hover:text-foreground transition-colors">
                     {project.lead_type && project.lead_id ? (
@@ -444,7 +469,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <PropRow label={t(($) => $.detail.prop_due_date)}>
             <ProjectDueDatePicker dueDate={project.due_date} onUpdate={handleUpdateField} />
           </PropRow>
-          <ProjectWorkflowPropRow project={project} />
+          <ProjectWorkflowPropRow project={project} onOpen={openWorkflowSheet} />
         </div>}
       </div>
 
@@ -515,72 +540,75 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             scope={issueScope}
             modes={["board", "list", "table", "swimlane", "gantt"]}
             renderHeader={({ controller }) => (
-              <ProjectWorkflowMenuHost project={project}>
-                {(workflowSubmenu) => (
-                  <IssueViewHeader
-                    controller={controller}
-                    base={{ kind: "project", project }}
-                    baseMenu={
+              <IssueViewHeader
+                controller={controller}
+                base={{ kind: "project", project }}
+                baseMenu={
+                  <>
+                    <DropdownMenuItem
+                      onClick={() =>
+                        useModalStore
+                          .getState()
+                          .open("project-rename", { projectId: project.id, title: project.title })
+                      }
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      {t(($) => $.detail.rename_action)}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => {
+                      void copyText(router.getShareableUrl(currentPath(router))).then((ok) => {
+                        if (ok) toast.success(t(($) => $.detail.toast_link_copied));
+                      });
+                    }}>
+                      <Link2 className="h-3.5 w-3.5" />
+                      {t(($) => $.detail.copy_link)}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => {
+                      if (isPinned) {
+                        deletePinMut.mutate({ itemType: "project", itemId: projectId });
+                      } else {
+                        createPin.mutate({ item_type: "project", item_id: projectId });
+                      }
+                    }}>
+                      {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+                      {isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
+                    </DropdownMenuItem>
+                    <ProjectWorkflowMenuItem project={project} onOpen={() => setWorkflowSheetOpen(true)} />
+                    {canDelete && (
                       <>
-                        <DropdownMenuItem onClick={() => {
-                          void copyText(router.getShareableUrl(currentPath(router))).then((ok) => {
-                            if (ok) toast.success(t(($) => $.detail.toast_link_copied));
-                          });
-                        }}>
-                          <Link2 className="h-3.5 w-3.5" />
-                          {t(($) => $.detail.copy_link)}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          variant="destructive"
+                          disabled={deleting}
+                          aria-busy={deleting}
+                          onClick={() => setDeleteDialogOpen(true)}
+                        >
+                          {deleting ? <Spinner className="size-3.5" aria-hidden="true" /> : <Trash2 className="h-3.5 w-3.5" />}
+                          {t(($) => $.detail.delete_action)}
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => {
-                          if (isPinned) {
-                            deletePinMut.mutate({ itemType: "project", itemId: projectId });
-                          } else {
-                            createPin.mutate({ item_type: "project", item_id: projectId });
-                          }
-                        }}>
-                          {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-                          {isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
-                        </DropdownMenuItem>
-                        {workflowSubmenu && (
-                          <>
-                            <DropdownMenuSeparator />
-                            {workflowSubmenu}
-                          </>
-                        )}
-                        {isWorkspaceAdmin && (
-                          <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              variant="destructive"
-                              onClick={() => setDeleteDialogOpen(true)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              {t(($) => $.detail.delete_action)}
-                            </DropdownMenuItem>
-                          </>
-                        )}
                       </>
-                    }
-                    trailing={
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <Button
-                              variant={sidebarOpen ? "secondary" : "ghost"}
-                              size="icon-sm"
-                              className={sidebarOpen ? "" : "text-muted-foreground"}
-                              aria-label={t(($) => $.detail.sidebar_tooltip)}
-                              onClick={handleToggleSidebar}
-                            >
-                              <PanelRight />
-                            </Button>
-                          }
-                        />
-                        <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
-                      </Tooltip>
-                    }
-                  />
-                )}
-              </ProjectWorkflowMenuHost>
+                    )}
+                  </>
+                }
+                trailing={
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          variant={sidebarOpen ? "secondary" : "ghost"}
+                          size="icon-sm"
+                          className={sidebarOpen ? "" : "text-muted-foreground"}
+                          aria-label={t(($) => $.detail.sidebar_tooltip)}
+                          onClick={handleToggleSidebar}
+                        >
+                          <PanelRight />
+                        </Button>
+                      }
+                    />
+                    <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
+                  </Tooltip>
+                }
+              />
             )}
           />
           </div>
@@ -613,9 +641,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         )}
       </ResizablePanelGroup>
 
+      <ProjectWorkflowSheet project={project} open={workflowSheetOpen} onOpenChange={setWorkflowSheetOpen} />
+
       {/* Delete confirmation */}
-      {isWorkspaceAdmin && (
-        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+      {canDelete && (
+        <AlertDialog
+          open={deleteDialogOpen}
+          onOpenChange={(open) => {
+            if (!deleting) setDeleteDialogOpen(open);
+          }}
+        >
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>{t(($) => $.delete_dialog.title)}</AlertDialogTitle>
@@ -624,8 +659,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>{t(($) => $.delete_dialog.cancel)}</AlertDialogCancel>
-              <AlertDialogAction onClick={handleDelete} className="bg-destructive text-white hover:bg-destructive/90">
+              <AlertDialogCancel disabled={deleting}>
+                {t(($) => $.delete_dialog.cancel)}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={deleting}
+                aria-busy={deleting}
+                onClick={handleDelete}
+                className="bg-destructive text-white hover:bg-destructive/90"
+              >
+                {deleting && <Spinner className="size-3.5" aria-hidden="true" />}
                 {t(($) => $.delete_dialog.confirm)}
               </AlertDialogAction>
             </AlertDialogFooter>

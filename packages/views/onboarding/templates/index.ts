@@ -19,11 +19,11 @@ const CONTENT_LANG_BY_LOCALE: Record<SupportedLocale, ContentLang> = {
   "zh-Hant": "zh",
   ko: "ko",
   ja: "ja",
-  // Mika's onboarding content has no French or Spanish variant yet, so
-  // those users read the English copy rather than an untranslated
-  // placeholder.
+  // Mika's onboarding content has no French, Spanish or Russian variant yet.
+  // Those users read the English copy rather than an untranslated placeholder.
   fr: "en",
   es: "en",
+  ru: "en",
 };
 
 /**

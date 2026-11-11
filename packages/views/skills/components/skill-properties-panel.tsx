@@ -243,13 +243,6 @@ export function SkillPropertiesPanel({
             onChange={onDescriptionChange}
           />
         </ObjectProperty>
-        <ObjectProperty label={t(($) => $.detail.overview.labels)}>
-          <ResourceLabelPicker
-            resourceType="skill"
-            resourceId={skill.id}
-            canEdit={canEdit}
-          />
-        </ObjectProperty>
         <ObjectProperty label={t(($) => $.table.source)}>
           <SourceValue origin={origin} runtime={originRuntime} />
         </ObjectProperty>
@@ -299,6 +292,13 @@ export function SkillPropertiesPanel({
         </ObjectProperty>
         <ObjectProperty label={t(($) => $.detail.sections.files)}>
           {t(($) => $.detail.header.files, { count: totalFileCount(skill) })}
+        </ObjectProperty>
+        <ObjectProperty label={t(($) => $.detail.overview.labels)}>
+          <ResourceLabelPicker
+            resourceType="skill"
+            resourceId={skill.id}
+            canEdit={canEdit}
+          />
         </ObjectProperty>
       </ObjectPanelSection>
 

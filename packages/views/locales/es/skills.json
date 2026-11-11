@@ -254,15 +254,9 @@
     }
   },
   "create": {
-    "back": "Volver",
-    "back_aria": "Volver al selector de método",
     "close": "Cerrar",
     "close_aria": "Cerrar",
     "method": {
-      "chooser": {
-        "title": "Skill nueva",
-        "desc": "Elige cómo añadir una skill a este espacio de trabajo."
-      },
       "manual": {
         "title": "Crear manualmente",
         "desc": "Parte de un SKILL.md en blanco."
@@ -309,7 +303,19 @@
       "cancel": "Cancelar",
       "import": "Importar",
       "importing": "Importando…",
-      "toast_imported": "Skill importada"
+      "toast_imported": "Skill importada",
+      "select_all": "Seleccionar todo",
+      "import_count": "Importar {{count}}",
+      "done": "Listo",
+      "stop": "Detener tras el elemento actual",
+      "unreadable": "No se ha podido leer esta skill. Vuelve a elegir la carpeta.",
+      "uncertain": "El resultado es incierto. Actualiza la lista de skills y compruébala antes de reintentar. Si ya existe el mismo nombre, la importación seguirá bloqueada; revísala en la lista.",
+      "check_results": "Comprobar resultados",
+      "retry_ready": "No aparece en la lista actualizada. Puedes reintentar esta importación.",
+      "uncertain_manual": "El resultado es incierto y no se conoce el nombre de la skill del archivo. Revisa la lista de skills manualmente antes de volver a importar este archivo.",
+      "check_failed": "No se ha podido verificar la lista de skills. Las importaciones con resultados inciertos siguen bloqueadas. Vuelve a comprobarlo o revisa la lista manualmente.",
+      "workspace_changed": "Ha cambiado el espacio de trabajo. Se han detenido las importaciones pendientes. Cierra este diálogo y ábrelo de nuevo en el espacio de trabajo correcto.",
+      "summary": "Importadas: {{success}} · Fallidas o sin confirmar: {{failed}}"
     },
     "url": {
       "url_label": "URL de la skill",

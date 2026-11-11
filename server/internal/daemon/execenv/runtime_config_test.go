@@ -24,8 +24,9 @@ import (
 // built without it deliberately carries no pointer at all.
 func platformSkillFixture() SkillContextForEnv {
 	return SkillContextForEnv{
-		Name:    "multica-platform",
-		Content: "---\nname: multica-platform\n---\n\nbody",
+		Name:        "multica-platform",
+		BuiltinName: "multica-platform",
+		Content:     "---\nname: multica-platform\n---\n\nbody",
 	}
 }
 
@@ -876,6 +877,24 @@ func TestConnectedAppsBlockLivesOutsideBrief(t *testing.T) {
 	}
 }
 
+func TestConnectedAppsBlockRunsDirectly(t *testing.T) {
+	t.Parallel()
+	for _, level := range []string{"write", "confirm_writes"} {
+		block := BuildConnectedAppsBlock([]runtimeapps.ConnectedApp{{
+			Provider: "multica", ServerName: "multica_apps", ToolkitSlug: "gmail",
+			AccountScope: "personal", Level: level, AccountStatus: "not_connected",
+		}})
+		for _, want := range []string{"can write", "Allowed calls run immediately", "apps_request_connection", "not connected"} {
+			if !strings.Contains(block, want) {
+				t.Errorf("level %s: missing %q in %s", level, want, block)
+			}
+		}
+		if strings.Contains(block, "confirmation") || strings.Contains(block, "submitted") {
+			t.Errorf("level %s: retired approval instructions in %s", level, block)
+		}
+	}
+}
+
 func TestConnectedAppsHeadingSkippedWhenEmpty(t *testing.T) {
 	t.Parallel()
 	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"})
@@ -1087,6 +1106,7 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
+		{"museapp", "AGENTS.md"},
 		{"muse", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
 	}
@@ -1480,6 +1500,7 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
+		{"museapp", "AGENTS.md"},
 		{"muse", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
 	}
@@ -2410,7 +2431,7 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 	t.Parallel()
 
 	skill := func(name string) SkillContextForEnv {
-		return SkillContextForEnv{Name: name, Content: "---\nname: " + name + "\n---\n\nbody"}
+		return SkillContextForEnv{Name: name, BuiltinName: name, Content: "---\nname: " + name + "\n---\n\nbody"}
 	}
 
 	cases := []struct {
@@ -2480,14 +2501,11 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 // gives an agent one name to guess instead of eight. This line is what pays
 // that back, so it must appear whenever the skill does — an agent that cannot
 // find the platform contracts is strictly worse off than before the merge.
-//
-// Naming is by bare name, on the stated assumption that no workspace skill
-// shares a built-in's name (see builtinSlug).
 func TestBriefPointsAtThePlatformSkill(t *testing.T) {
 	t.Parallel()
 
 	skill := func(name string) SkillContextForEnv {
-		return SkillContextForEnv{Name: name, Content: "---\nname: " + name + "\n---\n\nbody"}
+		return SkillContextForEnv{Name: name, BuiltinName: name, Content: "---\nname: " + name + "\n---\n\nbody"}
 	}
 
 	cases := []struct {

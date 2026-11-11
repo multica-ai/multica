@@ -7,14 +7,14 @@ import { useSetChatSessionArchived } from "@multica/core/chat/mutations";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
+  effectiveInboxFilters,
   filterInboxItems,
-  inboxFiltersForPrioritySupport,
+  inboxIssueFieldsSupport,
   inboxPriorityFilterSupport,
   useInboxFilters,
 } from "@multica/core/inbox/filter-store";
 import { useArchiveInbox } from "@multica/core/inbox/mutations";
 import {
-  deduplicateInboxItems,
   inboxListOptions,
   useInboxUnreadCount,
 } from "@multica/core/inbox/queries";
@@ -48,9 +48,12 @@ export function InboxPeek() {
   const archive = useArchiveInbox();
 
   const items = useMemo(() => {
-    const effective = inboxFiltersForPrioritySupport(filters, inboxPriorityFilterSupport(rawItems));
-    return filterInboxItems(deduplicateInboxItems(rawItems), effective, {
-      activeIssueIds: effective.idleOnly ? new Set(activityByIssueId.keys()) : undefined,
+    const effective = effectiveInboxFilters(filters, {
+      priority: inboxPriorityFilterSupport(rawItems),
+      issueFields: inboxIssueFieldsSupport(rawItems),
+    });
+    return filterInboxItems(rawItems.filter((item) => !item.archived), effective, {
+      activeIssueIds: effective.agent ? new Set(activityByIssueId.keys()) : undefined,
     });
   }, [rawItems, filters, activityByIssueId]);
 

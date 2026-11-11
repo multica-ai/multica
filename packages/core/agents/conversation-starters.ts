@@ -1,4 +1,4 @@
-import type { Agent, AgentConversationStarter } from "../types";
+import type { AgentConversationStarter } from "../types";
 
 /**
  * Resolve what a new chat with this agent actually shows.
@@ -21,28 +21,4 @@ export function selectConversationStarters(
   return complete.length > 0
     ? { starters: complete, isFallback: false }
     : { starters: fallback, isFallback: true };
-}
-
-/**
- * Whether this viewer should be offered a way to edit the agent's conversation
- * starters from the chat empty state they render in.
- *
- * Three independent reasons to stay silent, each of which would otherwise
- * produce a link that lies:
- *
- *  - no agent, or an archived one: its conversations are read-only, so
- *    editing its starters changes nothing anyone will see,
- *  - a backend that does not persist conversation starters: General settings
- *    render no editor there, so the link lands somewhere that cannot honour
- *    it,
- *  - a viewer who cannot edit the agent: a reader would arrive at a page they
- *    have no write access to.
- */
-export function canCustomizeConversationStarters(
-  agent: Pick<Agent, "archived_at"> | null,
-  opts: { conversationStartersSupported: boolean; canEditAgent: boolean },
-): boolean {
-  if (!agent || agent.archived_at) return false;
-  if (!opts.conversationStartersSupported) return false;
-  return opts.canEditAgent;
 }

@@ -2,8 +2,8 @@
 
 import { IssueSidebarSectionHeader } from "../issue-sidebar-section";
 
-import { useState } from "react";
-import { LayoutGrid } from "@multica/ui/icons";
+import { useMemo, useState } from "react";
+import { LayoutGrid, Link2 } from "@multica/ui/icons";
 import type { DeliverableFile } from "@multica/core/attachments/deliverables";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -13,6 +13,7 @@ import { fileIcon } from "../../../editor/utils/file-icon";
 import { getPreviewKind } from "../../../editor/utils/preview";
 import { DeliverableThumbnail } from "./deliverable-thumbnail";
 import { useOpenAttachment } from "./use-open-attachment";
+import { displayDeliverableFiles, displayedVersion } from "./deliverable-kind";
 import { VersionBadge } from "./version-badge";
 
 // The sidebar is a summary, not the list: the newest few of each, and the
@@ -28,13 +29,17 @@ const RECENT_FILES = 4;
  * until a comment delivers a file.
  */
 export function DeliverablesSection({
-  files,
+  files: groupedFiles,
   onOpenOverview,
+  onCopyLink,
 }: {
   files: ReadonlyArray<DeliverableFile>;
   onOpenOverview: () => void;
+  /** Copies a deliverable's latest-version link, by file name. */
+  onCopyLink?: (filename: string) => void;
 }) {
   const { t } = useT("issues");
+  const files = useMemo(() => displayDeliverableFiles(groupedFiles), [groupedFiles]);
   const [open, setOpen] = useState(true);
   const { open: openAttachment, modal } = useOpenAttachment();
 
@@ -81,6 +86,7 @@ export function DeliverablesSection({
               key={file.key}
               file={file}
               onOpen={() => openAttachment(file.latest)}
+              onCopyLink={onCopyLink ? () => onCopyLink(file.latest.filename) : undefined}
             />
           ))}
 
@@ -97,29 +103,57 @@ function versionedName(file: DeliverableFile, t: IssuesT): string {
   return file.versions.length > 1
     ? t(($) => $.deliverables.name_with_version, {
         name: file.latest.filename,
-        version: file.versions.length,
+        version: displayedVersion(file),
       })
     : file.latest.filename;
 }
 
-function FileRow({ file, onOpen }: { file: DeliverableFile; onOpen: () => void }) {
+function FileRow({
+  file,
+  onOpen,
+  onCopyLink,
+}: {
+  file: DeliverableFile;
+  onOpen: () => void;
+  onCopyLink?: () => void;
+}) {
   const { t } = useT("issues");
   const { latest } = file;
   const Icon = fileIcon(latest.content_type, latest.filename);
+  // The copy button is a sibling of the row button, not inside it: a button
+  // can't contain another. It shows on hover and on keyboard focus.
   return (
-    <button
-      type="button"
-      className="group flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-caption transition-colors hover:bg-accent/50"
-      title={latest.filename}
-      aria-label={versionedName(file, t)}
-      onClick={onOpen}
-    >
-      <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 truncate">{latest.filename}</span>
-      {file.versions.length > 1 && <VersionBadge version={file.versions.length} />}
-      <span className="ml-auto shrink-0 pl-2 text-micro tabular-nums text-muted-foreground">
-        {latest.size_bytes > 0 ? formatBytes(latest.size_bytes) : null}
-      </span>
-    </button>
+    <div className="group relative flex items-center rounded-md transition-colors hover:bg-accent/50">
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left text-caption"
+        title={latest.filename}
+        aria-label={versionedName(file, t)}
+        onClick={onOpen}
+      >
+        <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 truncate">{latest.filename}</span>
+        {file.versions.length > 1 && <VersionBadge version={displayedVersion(file)} />}
+        <span
+          className={
+            onCopyLink
+              ? "ml-auto shrink-0 pl-2 text-micro tabular-nums text-muted-foreground group-hover:invisible group-focus-within:invisible"
+              : "ml-auto shrink-0 pl-2 text-micro tabular-nums text-muted-foreground"
+          }
+        >
+          {latest.size_bytes > 0 ? formatBytes(latest.size_bytes) : null}
+        </span>
+      </button>
+      {onCopyLink && (
+        <IconButton
+          size="icon-xs"
+          label={t(($) => $.deliverables.copy_link)}
+          className="absolute right-1 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+          onClick={onCopyLink}
+        >
+          <Link2 />
+        </IconButton>
+      )}
+    </div>
   );
 }

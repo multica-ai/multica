@@ -12,7 +12,20 @@
     "unread_other": "未読のチャット {{count}}件",
     "default": "Multica に質問"
   },
+  "bar": {
+    "history": "チャット履歴",
+    "history_group": {
+      "today": "今日",
+      "week": "過去 7 日間",
+      "older": "それ以前"
+    },
+    "close_chip": "{{title}} を閉じる",
+    "all_chats": "すべてのチャット",
+    "more_other": "他 {{count}} 件のチャット"
+  },
   "input": {
+    "page_context_add": "このページをコンテキストに追加",
+    "page_context_remove": "ページのコンテキストを削除",
     "placeholder_no_agent": "チャットを始めるにはエージェントを作成してください",
     "placeholder_archived": "このセッションはアーカイブされています",
     "placeholder_archived_agent": "このエージェントはアーカイブされています",
@@ -50,6 +63,8 @@
     "action_failed_toast": "キュー内のメッセージを更新できませんでした"
   },
   "message_list": {
+    "jump_to_latest": "最新に移動",
+    "new_reply": "新しい返信",
     "show_details": "詳細を表示",
     "replied_in": "{{elapsed}}で返信",
     "failed_after": "{{elapsed}}後に失敗",
@@ -168,7 +183,6 @@
       "label": "アクションを提案",
       "prompt": "私のワークスペースについて知っていることを踏まえ、最初に役立つアクションを提案してください。"
     },
-    "customize": "開始例をカスタマイズ",
     "uploading": "アップロードが完了してから開始例を使用してください。",
     "draft_in_progress": "開始例を使う前に、下書きを送信するか消去してください。"
   },
@@ -234,8 +248,6 @@
     "no_response_preview": "テキスト返信なし",
     "quick_agents": "よく使う Agent",
     "add": "追加",
-    "add_agent": "よく使う Agent を追加",
-    "unpin_agent": "よく使うから外す",
     "waiting": "返信待ち",
     "pin": "ピン留め",
     "unpin": "ピン留めを解除",

@@ -189,10 +189,16 @@ const labelsByLocale: Record<string, ContextMenuLabels> = {
     copyImage: "Copiar imagen",
     addToDictionary: "Añadir al diccionario",
   },
+  ru: {
+    openLink: "Открыть ссылку в браузере",
+    copyLinkAddress: "Копировать адрес ссылки",
+    copyImage: "Копировать изображение",
+    addToDictionary: "Добавить в словарь",
+  },
 };
 
-// pickLabels resolves the OS-preferred language to one of the five
-// locales we ship copy for. We say "Open Link in Browser" rather than
+// pickLabels resolves the OS-preferred language to one of the locales we
+// ship copy for. We say "Open Link in Browser" rather than
 // "Open Link in New Window" because the link is opened via
 // shell.openExternal — it lands in the user's default browser, not in
 // another Multica window — so the wording matches what actually
@@ -209,5 +215,6 @@ function pickLabels(): ContextMenuLabels {
   if (preferred.startsWith("ja")) return labelsByLocale.ja;
   if (preferred.startsWith("ko")) return labelsByLocale.ko;
   if (preferred.startsWith("es")) return labelsByLocale.es;
+  if (preferred.startsWith("ru")) return labelsByLocale.ru;
   return labelsByLocale.en;
 }

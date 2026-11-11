@@ -1,0 +1,234 @@
+---
+title: Créer un thème
+description: Le format des thèmes Multica — manifeste, variables CSS, options et ancres —, comment écrire et vérifier un thème, et comment le publier dans la boutique de thèmes.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+Un thème Multica est un dossier avec un `manifest.json` et un `theme.css`, plus les polices et images utilisées par le CSS. Le CSS définit des variables publiques pour les modes clair et sombre et peut restyler un ensemble d'ancres stables ; le manifeste nomme le thème et peut déclarer des options que l'on règle dans **Paramètres → Apparence**. Un thème n'exécute jamais de JavaScript.
+
+<Callout type="warn">
+  Le format des thèmes est une API bêta. Variables, ancres et manifeste peuvent changer jusqu'à ce qu'il soit déclaré stable. La liste complète et générée des variables et des ancres se trouve dans [`docs/theming.md`](https://github.com/multica-ai/multica/blob/main/docs/theming.md) ; cette page explique comment elles s'articulent.
+</Callout>
+
+## Démarrage rapide
+
+<Steps>
+<Step>
+
+### Partir d'une copie
+
+Dans **Paramètres → Apparence**, choisissez le thème le plus proche de ce que vous voulez, puis **Créer le vôtre → Importer un thème → Dupliquer « … » en nouveau thème**. La copie reçoit son propre id (`pop-copy`, `pop-copy-2`, …), les options de l'original et un `theme.css` avec une déclaration par ligne. Sans modification, elle est identique à l'original.
+
+</Step>
+<Step>
+
+### La modifier
+
+- **L'application de bureau** écrit la copie dans son dossier des thèmes et l'ouvre. Modifiez `theme.css` dans n'importe quel éditeur : chaque fenêtre ouverte applique une modification enregistrée en une seconde environ.
+- **Le web** télécharge la copie en `.zip`. Décompressez-la, modifiez-la, puis importez de nouveau le dossier avec **Importer un thème → Dossier du thème**. Le même `id` remplace la copie installée et conserve les valeurs de ses options.
+
+</Step>
+<Step>
+
+### La vérifier
+
+Avant de la partager, lancez les vérifications depuis un clone du [dépôt Multica](https://github.com/multica-ai/multica) (voir [Vérifier et prévisualiser](#vérifier-et-prévisualiser)).
+
+</Step>
+</Steps>
+
+## Le dossier
+
+```text
+paper/
+├── manifest.json
+├── theme.css
+└── fonts/
+    └── serif.woff2
+```
+
+Le dossier peut être à la racine d'un `.zip` ou en être le seul dossier. Les fichiers autres que les polices (`woff2`, `woff`, `ttf`, `otf`) et les images (`png`, `jpg`, `webp`, `gif`, `avif`, `svg`) sont ignorés. Un thème fait au plus 1 Mo.
+
+### manifest.json
+
+```json
+{
+  "apiVersion": 1,
+  "id": "paper",
+  "name": "Paper",
+  "author": "Someone",
+  "version": "1.2.0",
+  "description": "Warm paper, serif reading text.",
+  "options": [
+    { "id": "page", "type": "heading", "label": "Page" },
+    { "id": "paper-color", "type": "color", "label": "Paper", "default": { "light": "#f6efdf", "dark": "#1d1b16" } },
+    { "id": "hyphens", "type": "toggle", "label": "Hyphenate", "default": true }
+  ]
+}
+```
+
+| Champ | Règles |
+|---|---|
+| `apiVersion` | Doit valoir `1`. |
+| `id` | 1 à 40 caractères parmi `a-z`, `0-9` et `-`. Les id intégrés (`default`, `pop`, `github`, `blueprint`, `notion`) sont réservés. Importer un thème dont l'id est déjà installé le remplace. |
+| `name` | Obligatoire, 40 caractères au plus. |
+| `author`, `version`, `description` | Facultatifs ; affichés à l'installation. La boutique exige `version`. |
+| `options` | 24 au plus ; voir [Options](#options). |
+
+### theme.css
+
+```css
+@font-face {
+  font-family: "Paper Serif";
+  src: url(fonts/serif.woff2);
+}
+
+.theme-light {
+  --page-canvas: var(--paper-color);
+  --brand: #8b4513;
+  --font-content-latin: "Paper Serif", Georgia;
+  --h1-style: italic;
+}
+
+.theme-dark {
+  --page-canvas: var(--paper-color);
+}
+
+:root[data-theme-option-hyphens] [data-mc="content"] p {
+  hyphens: auto;
+}
+```
+
+Définissez les variables sur `.theme-light` et `.theme-dark`, posées sur `<html>`. Le CSS du thème est chargé après les styles de l'app : à spécificité égale, le thème l'emporte. Gardez des sélecteurs aussi simples et évitez `!important`.
+
+Les choix de la personne sur la page Apparence restent prioritaires : Augmenter le contraste remplace les couleurs atténuées et de bordure, et toute police autre que celle par défaut remplace les variables de police. La couleur appartient au thème seul ; pour laisser choisir une couleur, déclarez une option.
+
+## Variables
+
+Les variables sont organisées en couches :
+
+- **Fondations** — couleurs, surfaces, ombres, `--radius`, échelle de texte et polices — sur lesquelles tout le reste repose. Changer `--surface` ou `--radius` déplace chaque composant qui les utilise.
+- **Composants et produit** — menus, boutons, lignes de navigation, lignes de tâches, tableau, couleurs de statut — qui reprennent par défaut une fondation. En définir une ne change que ce composant : `--menu-radius: 0` rend les menus carrés et rien d'autre.
+- **Contenu de l'éditeur** — titres, listes, tableaux, citations, liens, code et couleurs de syntaxe — qui style les descriptions de tâches, commentaires, discussions et documents.
+
+L'app ne déclare jamais une variable de composant ; les composants la lisent avec leur valeur par défaut en repli. On peut donc la définir sur n'importe quel ancêtre, pas seulement sur `.theme-light` :
+
+```css
+.theme-light [data-mc="chat-window"] {
+  --code-block-background: transparent;
+}
+```
+
+La [référence des variables](https://github.com/multica-ai/multica/blob/main/docs/theming.md#variable-reference) liste chaque variable avec ses valeurs par défaut claire et sombre.
+
+## Options
+
+Les options s'affichent sous **Options du thème** sur la page Apparence tant que le thème est utilisé. `toggle` et `select` posent un attribut sur `<html>` ; les autres types définissent toujours la variable `--<id>` sur `<html>` — la valeur choisie ou celle par défaut —, que `theme.css` lit avec un simple `var(--<id>)`.
+
+| Type | Champs | Résultat |
+|---|---|---|
+| `heading` | — | Ouvre un groupe ; sa `description` s'affiche dessous. |
+| `toggle` | `default` : `true` ou `false` | `data-theme-option-<id>="on"` si activé, absent sinon. |
+| `select` | `choices` : `[{ "value", "label", "swatch"? }]`, `default` | `data-theme-option-<id>="<value>"`. Avec un `swatch` sur chaque choix, les choix s'affichent en pastilles de couleur. |
+| `color` | `default` : une couleur hexadécimale, ou `{ "light", "dark" }` | `--<id>` : une couleur hexadécimale par mode. |
+| `number` | `default`, et en option `min`, `max`, `step`, `unit` | `--<id>` : le nombre suivi de `unit` (`px`, `rem`, `%`, …). |
+| `slider` | comme `number`, avec `min` et `max` obligatoires | comme `number`. |
+| `text` | `default` : une valeur CSS | `--<id>` : la valeur saisie, si elle est sûre. |
+| `font` | `default` : une pile de polices | `--<id>` : une pile de polices. |
+| `variable-select` | `choices` : `[{ "value", "label" }]` avec des valeurs CSS, `default` | `--<id>` : la valeur choisie. |
+
+Les id d'option font 1 à 48 caractères parmi `a-z`, `0-9` et `-`, et commencent par une lettre. `label`, `description` et les libellés des choix sont une chaîne ou un objet indexé par langue (`en`, `zh-Hans`, `zh-Hant`, `ja`, `ko`, `es`, `fr`) ; l'anglais sert de repli.
+
+```json
+{ "id": "page-width", "type": "slider", "label": "Page width", "default": 46, "min": 30, "max": 60, "step": 2, "unit": "rem" }
+```
+
+```css
+[data-mc="content"] { max-width: var(--page-width); }
+```
+
+## Sélecteurs
+
+Ciblez les ancres, les slots et les attributs d'état — pas les noms de classes ni la structure du DOM, qui changent sans préavis. Ancres, slots et attributs d'état restent stables jusqu'au prochain `apiVersion`.
+
+- **Les ancres** sont des attributs `data-mc` sur les parties principales de l'app : `app-rail`, `sidebar`, `nav-item`, `page`, `issue-row`, `board-card`, `content` (texte riche), `comment`, `chat-window`, `inbox-item`, etc. Beaucoup portent un état, comme `data-status` et `data-priority` sur une ligne de tâche.
+- **Les slots** sont les attributs `data-slot` des composants d'interface : `button` (avec `data-variant` et `data-size`), `input`, `dialog-content`, `dropdown-menu-item`, entre autres.
+- **L'état sur `<html>`** : `.theme-light` / `.theme-dark`, `.is-desktop` / `.is-web`, `.mod-macos` / `.mod-windows` / `.mod-linux`, `.is-focused`, `.is-sidebar-collapsed`, `[data-theme="<id>"]` et les `[data-theme-option-<id>]` du thème.
+
+```css
+.mod-macos.is-desktop:not(.is-focused) [data-mc="app-rail"] { opacity: 0.7; }
+.theme-dark [data-mc="issue-row"][data-priority="urgent"] { box-shadow: inset 2px 0 var(--priority-urgent); }
+```
+
+La [référence des sélecteurs](https://github.com/multica-ai/multica/blob/main/docs/theming.md#selectors) liste chaque ancre, ses attributs et chaque slot.
+
+## Ce que le CSS ne peut pas faire
+
+Tout ce qui charge une ressource est refusé, car le CSS peut lire le contenu de la page avec des sélecteurs d'attributs et l'envoyer dans une requête :
+
+- `url()` ne peut désigner qu'un fichier du dossier du thème (`url(fonts/serif.woff2)`) ou un fragment (`url(#filter)`). Il est réécrit en URL `data:` du fichier.
+- `@import`, `image()`, `image-set()`, `cross-fade()`, `element()`, `src()` et `expression()` sont refusés, ainsi que `behavior` et `-moz-binding`.
+
+Échappements, casse et commentaires ne contournent pas la vérification : elle lit le CSS comme un navigateur. Quand un thème échoue, rien n'est installé et chaque problème est listé avec sa ligne dans `theme.css`.
+
+`pnpm theme:check` fait aussi échouer un thème qui :
+
+- utilise une variable non publique, sauf si c'est un id d'option ou si le thème la lit lui-même avec `var()` ;
+- définit des variables ailleurs que sur `.theme-light` et `.theme-dark` sans sélecteur descendant, ce qui empêche le sélecteur de thème de relire ses couleurs ;
+- nomme une famille générique (`sans-serif`, `serif`, …) ou un mot-clé `ui-*` dans une pile de polices, ce qui écraserait la police CJK choisie ;
+- n'atteint pas le contraste WCAG AA dans un des modes : `--foreground` et `--muted-foreground` demandent 4,5:1 sur chaque surface, `--brand` 4,5:1 sur les surfaces de lecture, le libellé du bouton principal 4,5:1 sur le bouton, et `--faint-foreground` 3:1.
+
+## Vérifier et prévisualiser
+
+Depuis un clone du [dépôt Multica](https://github.com/multica-ai/multica) :
+
+```bash
+pnpm theme:check path/to/paper          # un dossier
+pnpm theme:check paper.zip --json       # un zip, en JSON pour la CI
+pnpm theme:preview path/to/paper --out preview   # preview/light.png et preview/dark.png
+```
+
+`theme:check` signale les erreurs de manifeste, le CSS bloqué, les variables non publiques, les familles de polices génériques et le contraste dans les deux modes, chacun avec sa ligne dans `theme.css`, et se termine avec le code 1 en cas d'erreur. Les avertissements, comme une couleur qu'il ne sait pas résoudre, ne le font pas échouer.
+
+`theme:preview` produit les captures que montre la boutique : une liste de tâches à côté d'une tâche ouverte, construite avec les styles de l'app, avec le thème à ses options par défaut.
+
+Si un thème masque ou casse une partie de l'interface pendant que vous travaillez dessus, ouvrez l'app avec `?theme=default`, ou maintenez **Maj** juste après le chargement ; voir [Quand un thème casse quelque chose](/themes#quand-un-thème-casse-quelque-chose).
+
+## Publier dans la boutique
+
+La boutique de thèmes liste les thèmes du registre [multica-ai/multica-themes](https://github.com/multica-ai/multica-themes). Son [guide de contribution](https://github.com/multica-ai/multica-themes/blob/main/CONTRIBUTING.md) donne les détails ; en bref :
+
+<Steps>
+<Step>
+
+### Donner au thème son propre dépôt
+
+Gardez le thème dans un dépôt GitHub public. [multica-ai/multica-theme-sample](https://github.com/multica-ai/multica-theme-sample) est un modèle avec un workflow de publication.
+
+</Step>
+<Step>
+
+### Publier une release
+
+Étiquetez la release avec la `version` du manifeste (`1.0.0` ou `v1.0.0`) et joignez-y le thème compressé sous le nom `theme.zip`.
+
+</Step>
+<Step>
+
+### L'ajouter au registre
+
+Ouvrez une pull request qui ajoute le thème à `themes.json` dans le registre. La pull request lance `theme:check` et `theme:preview` sur la release et commente le résultat ; un mainteneur la fusionne une fois qu'elle passe.
+
+</Step>
+</Steps>
+
+Les nouvelles releases arrivent dans la boutique en une heure environ, après avoir passé les mêmes vérifications ; les personnes qui ont installé le thème voient alors une mise à jour. Une release qui échoue laisse la précédente en place. L'app n'installe que le `theme.zip` exact qui a passé les vérifications, et le lit avec le même analyseur et les mêmes vérifications CSS qu'un thème importé.
+
+Chaque carte de la boutique indique combien de fois le thème a été téléchargé depuis ce serveur Multica. Chaque installation et chaque mise à jour comptent une fois, et les thèmes pas encore installés sont classés du plus téléchargé au moins téléchargé.
+
+## Étapes suivantes
+
+- [Thèmes et apparence](/themes) — installer, mettre à jour et supprimer des thèmes.
+- [`docs/theming.md`](https://github.com/multica-ai/multica/blob/main/docs/theming.md) — la référence générée des variables et des sélecteurs.

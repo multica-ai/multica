@@ -34,7 +34,7 @@ function DiagnosticsRow({
   return (
     <div className="grid grid-cols-[140px_minmax(0,1fr)] items-baseline gap-3 py-1.5">
       <span className="text-caption text-muted-foreground">{label}</span>
-      <TruncatedTooltip content={typeof value === "string" ? value : undefined}>
+      <TruncatedTooltip content={typeof value === "string" ? value : undefined} focusable>
         <span
           className={cn(
             "min-w-0 truncate text-body",

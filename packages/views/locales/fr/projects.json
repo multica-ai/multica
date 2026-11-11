@@ -11,6 +11,7 @@
     "view_table": "Grille",
     "view_cards": "Cartes",
     "row_menu": "Actions du projet",
+    "rename": "Renommer",
     "pin": "Épingler à la barre latérale",
     "unpin": "Détacher",
     "delete": "Supprimer",
@@ -62,6 +63,7 @@
     "pin_tooltip": "Épingler à la barre latérale",
     "unpin_tooltip": "Détacher de la barre latérale",
     "sidebar_tooltip": "Afficher ou masquer la barre latérale droite",
+    "rename_action": "Renommer le projet",
     "copy_link": "Copier le lien",
     "delete_action": "Supprimer le projet",
     "section_properties": "Propriétés",
@@ -153,6 +155,7 @@
     "ref_default_tooltip": "Aucune branche définie — les tâches utilisent la branche par défaut du dépôt au moment voulu."
   },
   "delete_dialog": {
+    "offline_error": "Vous êtes hors ligne. Reconnectez-vous, puis réessayez la suppression.",
     "title": "Supprimer le projet",
     "description": "Le projet sera supprimé. Les tâches ne seront pas supprimées, mais elles seront détachées.",
     "confirm": "Supprimer",
@@ -203,5 +206,26 @@
       "issue_pricing": "Tableau comparatif des tarifs",
       "issue_blog": "Paginer la liste du blog"
     }
+  },
+  "access": {
+    "label": "Accès",
+    "title": "Accès à {{title}}",
+    "description": "Définit qui peut voir ce projet, ses tâches, commentaires et pièces jointes.",
+    "workspace": "Tout l’espace de travail",
+    "private": "Membres du projet uniquement",
+    "members_count": "Membres du projet · {{count}}",
+    "add": "Ajouter un membre",
+    "search": "Rechercher un nom ou un e-mail...",
+    "no_members": "Aucun membre correspondant",
+    "no_selected": "Aucun membre du projet",
+    "admin_notice": "Les owner et admin de l’espace de travail ont toujours accès.",
+    "you": "Vous",
+    "remove": "Retirer {{name}}",
+    "failed": "Impossible d’enregistrer les accès.",
+    "load_failed": "Impossible de charger les membres.",
+    "publish_title": "Rendre ce projet visible à tout l’espace de travail ?",
+    "publish_description": "Tous les membres pourront voir ce projet, ses tâches, commentaires et pièces jointes.",
+    "done": "Terminé",
+    "retry": "Réessayer"
   }
 }

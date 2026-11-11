@@ -132,6 +132,22 @@ export function routeContentLinkPath(
   store.openTab(path, "", { activate: disposition === "foreground-tab" });
 }
 
+/** A desktop deep link explicitly targets its URL, including a new comment. */
+export function routeIssueDeepLinkPath(path: string): void {
+  const store = useTabStore.getState();
+  const slug = workspaceSlugForPath(path);
+  if (!slug) return;
+  if (slug !== store.activeWorkspaceSlug) {
+    if (handOffToWorkspaceWindow(slug, path, { navigate: true })) return;
+    store.switchWorkspace(slug, path);
+  } else {
+    store.openTab(path, "", { activate: true });
+  }
+  // Ordinary opens restore a reused tab's view. A deep link must also apply
+  // this address after deduplication, through the session's history flow.
+  useTabStore.getState().navigateActiveSession(path);
+}
+
 /**
  * Intercept pushes originating in a pinned tab and force them into a new
  * tab. Returns `true` if the navigation was redirected (caller should NOT

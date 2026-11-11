@@ -163,6 +163,12 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Issue" },
           },
           {
+            // The issue, opened on the newest version of one deliverable.
+            path: "issues/:id/deliverables/:name",
+            element: <IssueDetailPage />,
+            handle: { title: "Issue" },
+          },
+          {
             path: "projects",
             element: <ProjectsPage />,
             handle: { title: "Projects" },
