@@ -526,6 +526,12 @@ discovery unchanged. An explicit empty object writes an empty server set for
 this plugin; it does **not** disable other workspace or global MCP servers.
 The daemon never edits `~/.gemini/config/mcp_config.json` and does not promise
 hermetic isolation from Antigravity's independently configured global plugins.
+Antigravity also persists user-level tool metadata under
+`~/.gemini/antigravity-cli/mcp/` and state under
+`~/.gemini/antigravity-cli/brain/`. Tasks running as the same OS user may read
+prior tool names, descriptions and parameter schemas from this state, even
+without connecting to those servers. Independent generated configurations are
+not an OS-user security boundary; Multica does not clear these user-owned caches.
 
 The reserved `multica` plugin directory must not already exist, even if empty;
 rename a user-owned plugin using that name before starting a managed task.
@@ -560,7 +566,11 @@ The opt-in dual-transport fixture runs `Prepare`, launches the Antigravity
 backend in its generated task directory, and verifies server-side initialize,
 tools/list and tools/call audits (including tool name, arguments, response and
 HTTP session headers). Each task probe has an independent timeout; failed or
-timed-out launches fail the test. It also checks a separately prepared task,
+timed-out launches fail the test. For a separately prepared task with no MCP
+configuration, isolation assertions require absent managed plugin/config files
+and unchanged HTTP request counts and stdio audit bytes. Model descriptions of
+available tools are diagnostic only: cached definitions can be mistaken for live
+tools. This checks fixture access, not hermetic OS-user isolation. It also checks
 managed config retention, `Reuse` replacement/removal and explicit environment
 cleanup. It does not exercise the daemon's complete task orchestration,
 local-worktree finalization or scheduled GC; those still need acceptance evidence.
@@ -573,7 +583,9 @@ MULTICA_RUN_REAL_AGENT_SMOKE=1 go test -tags=agentintegration -p 1 \
   -run '^TestAntigravityLiveDualTrackE2E$'
 ```
 
-This requires `agy`, `python3` and `git` on PATH, uses the CLI's default model,
+This requires `agy`, `python3` and `git` on PATH. Set
+`MULTICA_ANTIGRAVITY_MODEL` to an available model if the CLI default is unavailable
+or quota-limited; otherwise the probe uses the CLI's default model. The test
 and logs the exact checkout SHA, CLI version, task directory and synthetic MCP
 audit records. Keep the checkout clean when collecting evidence for a commit.
 Without both the build tag and opt-in, this test never resolves or executes

@@ -1,10 +1,12 @@
 package execenv
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -55,6 +57,13 @@ func validateAntigravityMCPAudit(events []antigravityMCPEvent, session, name str
 	return nil
 }
 
+func validateAntigravityIsolationAudit(beforeHTTP, afterHTTP int, beforeStdio, afterStdio []byte) error {
+	if beforeHTTP != afterHTTP || !bytes.Equal(beforeStdio, afterStdio) {
+		return fmt.Errorf("isolated task accessed the first task's MCP fixture")
+	}
+	return nil
+}
+
 func runAntigravityProbe(ctx context.Context, executable, workDir, prompt string, prefix ...string) (string, error) {
 	backend, err := agent.New("antigravity", agent.Config{
 		ExecutablePath: executable, LaunchPrefix: prefix,
@@ -63,7 +72,7 @@ func runAntigravityProbe(ctx context.Context, executable, workDir, prompt string
 	if err != nil {
 		return "", err
 	}
-	session, err := backend.Execute(ctx, prompt, agent.ExecOptions{Cwd: workDir, Timeout: 60 * time.Second})
+	session, err := backend.Execute(ctx, prompt, agent.ExecOptions{Cwd: workDir, Model: os.Getenv("MULTICA_ANTIGRAVITY_MODEL"), Timeout: 60 * time.Second})
 	if err != nil {
 		return "", err
 	}

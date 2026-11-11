@@ -9,6 +9,27 @@ import (
 	"time"
 )
 
+func TestAntigravityIsolationAudit(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		httpCount   int
+		stdio       string
+		wantFailure bool
+	}{
+		{"no fixture traffic", 4, "original\n", false},
+		{"HTTP discovery", 5, "original\n", true},
+		{"stdio discovery", 4, "original\nnew request\n", true},
+		{"rewritten audit with same line count", 4, "modified\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateAntigravityIsolationAudit(4, tc.httpCount, []byte("original\n"), []byte(tc.stdio))
+			if (err != nil) != tc.wantFailure {
+				t.Fatalf("audit error = %v, want failure %t", err, tc.wantFailure)
+			}
+		})
+	}
+}
+
 func TestAntigravityMCPAudit(t *testing.T) {
 	valid := []antigravityMCPEvent{
 		{Method: "initialize"},

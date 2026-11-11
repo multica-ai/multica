@@ -210,6 +210,10 @@ for line in sys.stdin:
 		}
 	}
 
+	stdioData, err := os.ReadFile(stdioAuditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	params.TaskID, params.McpConfig = "isolated", nil
 	isolated, err := Prepare(params, testLogger())
 	if err != nil {
@@ -220,15 +224,23 @@ for line in sys.stdin:
 			t.Error(err)
 		}
 	})
+	for _, path := range []string{
+		filepath.Join(isolated.WorkDir, ".agents", "plugins", "multica"),
+		filepath.Join(isolated.WorkDir, "mcp_config.json"),
+	} {
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("isolated task must not contain managed MCP config %s: %v", path, err)
+		}
+	}
 	isolationCtx, isolationCancel := context.WithTimeout(context.Background(), 60*time.Second)
 	isolatedOutput, isolationErr := runAntigravityProbe(isolationCtx, agyPath, isolated.WorkDir, "List available MCP tools named calc_square or calc_cube. If neither is available, reply exactly NONE. Do not read other task directories.")
 	isolationCancel()
 	if isolationErr != nil {
 		t.Fatalf("isolated task launch: %v", isolationErr)
 	}
-	if strings.TrimSpace(isolatedOutput) != "NONE" {
-		t.Fatal("isolated task did not explicitly confirm absence of fixture tools")
-	}
+	// The CLI can recall user-level cached tool metadata without connecting to
+	// either fixture. Model prose is diagnostic, not evidence of MCP access.
+	t.Logf("isolated task model response (diagnostic only): %q", isolatedOutput)
 	mu.Lock()
 	requestCount := len(httpEvents)
 	mu.Unlock()
@@ -236,8 +248,8 @@ for line in sys.stdin:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if requestCount != len(firstHTTPEvents) || len(strings.Split(strings.TrimSpace(string(stdioAfterIsolation)), "\n")) != len(stdioEvents) {
-		t.Fatal("isolated task accessed the first task's MCP fixture")
+	if err := validateAntigravityIsolationAudit(len(firstHTTPEvents), requestCount, stdioData, stdioAfterIsolation); err != nil {
+		t.Fatal(err)
 	}
 
 	env.ReleaseLock()
