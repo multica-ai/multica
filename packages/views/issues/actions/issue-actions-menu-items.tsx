@@ -27,9 +27,11 @@ import {
   Trash2,
   Unlink,
   UserMinus,
+  Zap,
 } from "@multica/ui/icons";
 import { useIssueDeletion } from "@multica/core/issues/use-issue-deletion";
 import type { AgentTask, Issue } from "@multica/core/types";
+import { quickActionListOptions } from "@multica/core/quick-actions";
 import { resolveWorkdirCopyTarget } from "@multica/core/issues";
 import { todayDateOnly, addDaysDateOnly, formatDateOnly } from "@multica/core/issues/date";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
@@ -50,6 +52,7 @@ import { StatusIcon } from "../components/status-icon";
 import { PriorityIcon } from "../components/priority-icon";
 import { selectIssueTasks } from "../surface/activity";
 import { AssigneePickerPanel } from "../components/pickers";
+import { useQuickActionRunner } from "../hooks/use-quick-action-runner";
 import { copyText } from "@multica/ui/lib/clipboard";
 import {
   contextPrimitives,
@@ -220,6 +223,7 @@ export function IssueActionsMenuItems({
             <Plus className="h-3.5 w-3.5" />
             {t(($) => $.actions.create_sub_issue)}
           </P.Item>
+          <QuickActionsSub issueId={issue.id} primitives={P} />
 
           <P.Separator />
         </>
@@ -553,6 +557,42 @@ function AssigneeName({ issue }: { issue: Issue }) {
   const { getActorName } = useActorName();
   if (!issue.assignee_type || !issue.assignee_id) return <>{t(($) => $.actions.unassigned)}</>;
   return <>{getActorName(issue.assignee_type, issue.assignee_id)}</>;
+}
+
+/** The workspace's quick actions, run against this issue on pick — the same
+ *  catalog the issue sidebar and the command palette offer. Renders nothing
+ *  when the workspace has none. */
+function QuickActionsSub({ issueId, primitives: P }: { issueId: string; primitives: MenuPrimitives }) {
+  const { t } = useT("issues");
+  const wsId = useWorkspaceId();
+  const { data } = useQuery(quickActionListOptions(wsId));
+  const quickActions = useMemo(
+    () => (data ?? []).filter((action) => action.status === "active"),
+    [data],
+  );
+  const run = useQuickActionRunner(issueId);
+  if (quickActions.length === 0) return null;
+  return (
+    <P.Sub>
+      <P.SubTrigger>
+        <Zap className="h-3.5 w-3.5" />
+        {t(($) => $.actions.quick_actions)}
+      </P.SubTrigger>
+      <P.SubContent className="max-w-80">
+        {quickActions.map((action) => (
+          <P.Item key={action.id} onClick={() => run(action)}>
+            <Zap className="h-3.5 w-3.5" />
+            <span className="min-w-0 flex-1 truncate">{action.name}</span>
+            {action.target_name && (
+              <span className="max-w-28 truncate pl-3 text-caption text-muted-foreground">
+                {action.target_name}
+              </span>
+            )}
+          </P.Item>
+        ))}
+      </P.SubContent>
+    </P.Sub>
+  );
 }
 
 const NO_TASKS: AgentTask[] = [];

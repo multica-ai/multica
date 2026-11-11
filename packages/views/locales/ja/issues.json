@@ -992,6 +992,7 @@
     "stop_agent_run": "{{name}} の実行を停止",
     "relations": "関係",
     "create_sub_issue": "サブタスクを作成",
+    "quick_actions": "クイックアクション",
     "set_parent_issue": "親タスクを設定...",
     "remove_parent_issue": "親タスクを解除",
     "remove_parent_issue_success": "親タスクを解除しました",

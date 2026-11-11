@@ -1041,6 +1041,7 @@
     "stop_agent_run": "Arrêter l’exécution de {{name}}",
     "relations": "Relations",
     "create_sub_issue": "Créer une sous-tâche",
+    "quick_actions": "Actions rapides",
     "set_parent_issue": "Définir la tâche parente...",
     "remove_parent_issue": "Retirer la tâche parente",
     "remove_parent_issue_success": "Tâche parente retirée",

@@ -1041,6 +1041,7 @@
     "stop_agent_run": "Stop {{name}}’s run",
     "relations": "Relations",
     "create_sub_issue": "Create sub-issue",
+    "quick_actions": "Quick actions",
     "set_parent_issue": "Set parent issue...",
     "remove_parent_issue": "Remove parent issue",
     "remove_parent_issue_success": "Removed parent issue",
