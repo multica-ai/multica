@@ -1400,15 +1400,16 @@
       "enable": "Activé pour cette tâche",
       "toggle": "Réveiller le responsable à la fin des sous-tâches",
       "save_error": "Impossible d’enregistrer la règle système.",
-      "default_on": "Activé par défaut dans cet espace. Modifiez la valeur par défaut dans Paramètres → Réveils.",
-      "default_off": "Désactivé par défaut dans cet espace. Modifiez la valeur par défaut dans Paramètres → Réveils.",
+      "default_on": "Activé par défaut dans cet espace.",
+      "default_off": "Désactivé par défaut dans cet espace.",
       "notify_member": "Notifier {{name}} dans sa boîte de réception",
       "instruction": "Que faire au réveil",
       "instruction_edit": "Modifier l’instruction",
       "instruction_default": "Non définie sur cette tâche ; instruction par défaut :",
       "instruction_placeholder": "Laisser vide pour l’instruction par défaut",
       "instruction_invalid": "Limitez l’instruction à 4 000 octets.",
-      "paused": "En pause : {{reason}}"
+      "paused": "En pause : {{reason}}",
+      "default_change": "Modifier la valeur par défaut"
     },
     "cond": {
       "status": "Quand cette tâche passe à {{status}}",

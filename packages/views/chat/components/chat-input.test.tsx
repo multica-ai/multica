@@ -731,6 +731,86 @@ describe("ChatInput @ context wiring", () => {
   });
 });
 
+describe("ChatInput page context", () => {
+  const page = {
+    id: "issue-1", label: "MUL-1", description: "Fix [the] cache", type: "issue" as const, group: "current" as const,
+  };
+  const sendButton = () => screen.getByRole("button", { name: /^Send/ });
+  const pageChip = () => document.querySelector('[data-slot="chat-page-context"]');
+
+  beforeEach(() => {
+    (useChatStore.getState() as unknown as { activeSessionId: string | null }).activeSessionId = "session-1";
+  });
+
+  it("offers nothing off an issue or project page", () => {
+    renderInput({ pageContext: null });
+    expect(screen.queryByRole("button", { name: "Add this page as context" })).not.toBeInTheDocument();
+  });
+
+  it("Tab in the editor attaches the page and sends it ahead of the message, once", async () => {
+    const onSend = vi.fn<ChatInputOnSend>((_content, _ids, commitInput) => {
+      commitInput();
+      return true;
+    });
+    renderInput({ onSend, pageContext: page });
+    const editor = screen.getByTestId("editor");
+
+    expect(fireEvent.keyDown(editor, { key: "Tab" })).toBe(false);
+    expect(pageChip()).toHaveTextContent("MUL-1Fix [the] cache");
+    expect(screen.getByRole("button", { name: "Add this page as context" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.change(editor, { target: { value: "why is this slow?" } });
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]![0]).toBe("[MUL-1](mention://issue/issue-1)\n\nwhy is this slow?");
+    expect(pageChip()).toBeNull();
+  });
+
+  it("leaves Tab alone when the editor already used it, or it came from outside the editor", () => {
+    renderInput({ pageContext: page });
+    const editor = screen.getByTestId("editor");
+
+    editor.addEventListener("keydown", (event) => event.preventDefault(), { once: true });
+    fireEvent.keyDown(editor, { key: "Tab" });
+    fireEvent.keyDown(editor, { key: "Tab", shiftKey: true });
+    expect(fireEvent.keyDown(screen.getByRole("button", { name: "Add this page as context" }), { key: "Tab" })).toBe(true);
+    expect(pageChip()).toBeNull();
+  });
+
+  it("toggles from the button and drops the page when the page changes", () => {
+    const { rerender } = renderInput({ pageContext: page });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add this page as context" }));
+    expect(pageChip()).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remove page context" }));
+    expect(pageChip()).toBeNull();
+
+    fireEvent.keyDown(screen.getByTestId("editor"), { key: "Tab" });
+    rerender(element({ pageContext: { ...page, id: "issue-2", label: "MUL-2" } }));
+    expect(pageChip()).toBeNull();
+  });
+
+  it.each([
+    ["another page", { ...page, id: "issue-2", label: "MUL-2" }],
+    ["a page with no context", null],
+  ])("does not send the page after leaving it for %s and coming back", async (_, away) => {
+    const onSend = vi.fn<ChatInputOnSend>(() => true);
+    const { rerender } = renderInput({ onSend, pageContext: page });
+    fireEvent.keyDown(screen.getByTestId("editor"), { key: "Tab" });
+    expect(pageChip()).not.toBeNull();
+
+    rerender(element({ onSend, pageContext: away }));
+    rerender(element({ onSend, pageContext: page }));
+    expect(pageChip()).toBeNull();
+    expect(screen.getByRole("button", { name: "Add this page as context" })).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "A new question" } });
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]![0]).toBe("A new question");
+  });
+});
+
 describe("ChatInput project context", () => {
   type ChatProject = NonNullable<
     React.ComponentProps<typeof ChatInput>["projects"]

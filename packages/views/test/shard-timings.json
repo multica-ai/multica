@@ -541,7 +541,6 @@
     "settings/components/slack-tab.test.tsx": 1021,
     "settings/components/telegram-tab.test.tsx": 1665,
     "settings/components/use-auto-save.test.tsx": 1422,
-    "settings/components/wakeups-tab.test.tsx": 1457,
     "settings/components/wecom-scan-install-dialog.test.tsx": 1040,
     "settings/components/wecom-tab.test.tsx": 2500,
     "settings/components/workspace-tab.test.tsx": 1389,

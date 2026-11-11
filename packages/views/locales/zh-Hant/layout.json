@@ -109,6 +109,10 @@
     "in_other_window": "其他視窗",
     "all_workspaces_open": "所有工作區都已在視窗中開啟"
   },
+  "bottom_bar": {
+    "label": "狀態列",
+    "working_other": "{{count}} 個 AI 代理正在工作"
+  },
   "panels": {
     "work": {
       "my_agents": "我的 AI 代理在做",

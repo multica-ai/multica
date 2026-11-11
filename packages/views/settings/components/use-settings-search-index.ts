@@ -61,6 +61,12 @@ export function useSettingsSearchIndex(
       },
       {
         tab: "appearance",
+        anchor: "theme-import",
+        title: t(($) => $.appearance.own.title),
+        description: t(($) => $.appearance.own.description),
+      },
+      {
+        tab: "appearance",
         anchor: "ui-text",
         title: t(($) => $.appearance.ui_text.title),
         description: t(($) => $.appearance.ui_text.description),
@@ -217,12 +223,6 @@ export function useSettingsSearchIndex(
       { tab: "workspace", anchor: "delete", title: t(($) => $.workspace.delete_title) },
       { tab: "members", anchor: "invitations", title: t(($) => $.members.pending_label) },
       { tab: "members", anchor: "links", title: t(($) => $.members.share_links_label) },
-      {
-        tab: "wakeups",
-        anchor: "child-done",
-        title: t(($) => $.wakeups.child_done_title),
-        description: t(($) => $.wakeups.child_done_description),
-      },
       {
         tab: "labels",
         title: t(($) => $.page.tabs.labels),

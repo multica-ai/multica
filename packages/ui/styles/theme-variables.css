@@ -28,6 +28,7 @@
     --radius-board-card: var(--board-card-radius, var(--radius));
 
     --color-page-border: var(--page-border-color, var(--surface-border));
+    --color-floating-border: var(--floating-border-color, color-mix(in oklab, var(--surface-border), var(--foreground) 6%));
     --color-menu-item-hover: var(--menu-item-hover-background, var(--accent));
     --color-menu-item-hover-foreground: var(--menu-item-hover-color, var(--accent-foreground));
     --color-nav-item: var(--nav-item-color, var(--muted-foreground));

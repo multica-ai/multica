@@ -109,6 +109,10 @@
     "in_other_window": "其他窗口",
     "all_workspaces_open": "所有工作区都已在窗口中打开"
   },
+  "bottom_bar": {
+    "label": "状态栏",
+    "working_other": "{{count}} 个智能体正在工作"
+  },
   "panels": {
     "work": {
       "my_agents": "我的智能体在做",

@@ -110,6 +110,11 @@
     "in_other_window": "Autre fenêtre",
     "all_workspaces_open": "Chaque espace de travail est déjà ouvert dans une fenêtre"
   },
+  "bottom_bar": {
+    "label": "Barre d'état",
+    "working_one": "{{count}} agent au travail",
+    "working_other": "{{count}} agents au travail"
+  },
   "panels": {
     "work": {
       "my_agents": "Travail de mes agents",

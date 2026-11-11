@@ -1351,15 +1351,16 @@
       "enable": "このタスクで有効",
       "toggle": "サブタスク完了時に担当者を起こす",
       "save_error": "システムルールを保存できませんでした。",
-      "default_on": "ワークスペースでは既定でオン。既定値は「設定 → ウェイクアップ」で変更できます。",
-      "default_off": "ワークスペースでは既定でオフ。既定値は「設定 → ウェイクアップ」で変更できます。",
+      "default_on": "ワークスペースでは既定でオン。",
+      "default_off": "ワークスペースでは既定でオフ。",
       "notify_member": "{{name}} に受信トレイで通知",
       "instruction": "起きたあとにすること",
       "instruction_edit": "指示を編集",
       "instruction_default": "このタスクでは未設定のため、既定の指示を使います：",
       "instruction_placeholder": "空欄のままなら既定の指示を使います",
       "instruction_invalid": "指示は 4,000 バイト以内にしてください。",
-      "paused": "一時停止中：{{reason}}"
+      "paused": "一時停止中：{{reason}}",
+      "default_change": "既定値を変更"
     },
     "cond": {
       "status": "ステータスが{{status}}になったとき",

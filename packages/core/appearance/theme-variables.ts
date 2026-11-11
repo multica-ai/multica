@@ -75,7 +75,7 @@ function section(name: ThemeVariableSection, entries: readonly Entry[]): ThemeVa
 }
 
 const COLORS: Entry[] = [
-  ["app-shell", "The frame around the page: rail, desktop toolbar and tab bar."],
+  ["app-shell", "The frame around the page: rail, bottom bar, desktop toolbar and tab bar."],
   ["page-canvas", "The page that lists, boards and conversations sit on."],
   ["surface", "Bounded content groups: cards, board cards, panels."],
   ["surface-foreground", "Text on a surface."],
@@ -209,6 +209,7 @@ const CONTROLS: Entry[] = [
   ["menu-item-hover-background", "Highlighted menu item.", "var(--accent)"],
   ["menu-item-hover-color", "Text of the highlighted menu item.", "var(--accent-foreground)"],
   ["popover-radius", "Popovers.", "var(--radius)"],
+  ["floating-border-color", "Hairline around layers that float over the page without a backdrop: menus, popovers, select lists and floating panels.", "color-mix(in oklab, var(--surface-border), var(--foreground) 6%)"],
   ["dialog-radius", "Dialogs and alert dialogs.", "calc(var(--radius) * 1.5)"],
   ["tooltip-radius", "Tooltips.", "var(--radius)"],
   ["avatar-radius", "Avatars. Set a length for square avatars.", "calc(infinity * 1px)"],

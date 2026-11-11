@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import type { IssueWakeup, SystemWakeup } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { WakeupsSection } from "./wakeups-section";
@@ -20,10 +21,15 @@ let viewTZ = "UTC";
 vi.mock("./wakeup-condition-names", () => ({
   useConditionNames: () => ({ status: (key: string) => key, label: () => undefined, property: () => undefined, actor: (_type: string, id: string) => id }),
 }));
-const settingsPush = vi.hoisted(() => vi.fn());
-vi.mock("../../navigation", () => ({ useNavigation: () => ({ push: settingsPush }) }));
+vi.mock("../../navigation", () => ({
+  AppLink: ({ href, children, ...props }: { href: string; children: ReactNode }) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  ),
+}));
 vi.mock("@multica/core/paths", () => ({
-  useWorkspacePaths: () => ({ settings: () => "/acme/settings" }),
+  useWorkspacePaths: () => ({ autopilots: () => "/acme/autopilots" }),
   useCurrentWorkspace: () => ({ id: "ws" }),
 }));
 vi.mock("@multica/core/issues", () => ({
@@ -457,6 +463,7 @@ describe("v2 sidebar", () => {
     renderWithI18n(<WakeupsSection issueId="issue" />);
     fireEvent.click(screen.getByRole("button", { name: /When all sub-issues finish/ }));
     expect(await screen.findByText("Advance the next stage.")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Change the default" })).toHaveAttribute("href", "/acme/autopilots?tab=wakeups");
     fireEvent.click(screen.getByRole("button", { name: "Edit instruction" }));
     const input = screen.getByLabelText("What to do when woken");
     expect(input).toHaveAttribute("placeholder", "Advance the next stage.");

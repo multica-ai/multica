@@ -1314,15 +1314,16 @@
       "enable": "Activada para esta tarea",
       "toggle": "Activar al asignado cuando terminen las subtareas",
       "save_error": "No se ha podido guardar la regla del sistema.",
-      "default_on": "Activada por defecto en este espacio de trabajo. Cambia el valor por defecto en Ajustes > Activaciones.",
-      "default_off": "Desactivada por defecto en este espacio de trabajo. Cambia el valor por defecto en Ajustes > Activaciones.",
+      "default_on": "Activada por defecto en este espacio de trabajo.",
+      "default_off": "Desactivada por defecto en este espacio de trabajo.",
       "notify_member": "Notificar a {{name}} en su bandeja de entrada",
       "instruction": "Qué hacer al activarse",
       "instruction_edit": "Editar instrucción",
       "instruction_default": "Sin definir en esta tarea; usa el valor por defecto:",
       "instruction_placeholder": "Déjalo vacío para usar el valor por defecto",
       "instruction_invalid": "Mantén la instrucción dentro de 4.000 bytes.",
-      "paused": "Pausada: {{reason}}"
+      "paused": "Pausada: {{reason}}",
+      "default_change": "Cambiar el valor por defecto"
     },
     "cond": {
       "status": "Cuando esta tarea pasa a {{status}}",

@@ -86,6 +86,13 @@
     "pin_workspace": "Закрепить рабочее пространство",
     "unpin_workspace": "Открепить рабочее пространство"
   },
+  "bottom_bar": {
+    "label": "Строка состояния",
+    "working_one": "{{count}} агент работает",
+    "working_few": "{{count}} агента работают",
+    "working_many": "{{count}} агентов работают",
+    "working_other": "{{count}} агента работают"
+  },
   "panels": {
     "work": {
       "my_agents": "Работа моих агентов",

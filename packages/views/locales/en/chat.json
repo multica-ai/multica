@@ -13,7 +13,21 @@
     "unread_other": "{{count}} unread chats",
     "default": "Ask Multica"
   },
+  "bar": {
+    "history": "Chat history",
+    "history_group": {
+      "today": "Today",
+      "week": "Last 7 days",
+      "older": "Older"
+    },
+    "close_chip": "Close {{title}}",
+    "all_chats": "All chats",
+    "more_one": "{{count}} more chat",
+    "more_other": "{{count}} more chats"
+  },
   "input": {
+    "page_context_add": "Add this page as context",
+    "page_context_remove": "Remove page context",
     "placeholder_no_agent": "Create an agent to start chatting",
     "placeholder_archived": "This session is archived",
     "placeholder_archived_agent": "This agent has been archived",

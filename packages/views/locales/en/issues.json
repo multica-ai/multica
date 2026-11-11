@@ -1400,15 +1400,16 @@
       "enable": "On for this issue",
       "toggle": "Wake the assignee when sub-issues finish",
       "save_error": "Could not save the system rule.",
-      "default_on": "On by default in this workspace. Change the default in Settings → Wakeups.",
-      "default_off": "Off by default in this workspace. Change the default in Settings → Wakeups.",
+      "default_on": "On by default in this workspace.",
+      "default_off": "Off by default in this workspace.",
       "notify_member": "Notify {{name}} in their inbox",
       "instruction": "What to do when woken",
       "instruction_edit": "Edit instruction",
       "instruction_default": "Not set on this issue; uses the default:",
       "instruction_placeholder": "Leave empty to use the default",
       "instruction_invalid": "Keep the instruction within 4,000 bytes.",
-      "paused": "Paused: {{reason}}"
+      "paused": "Paused: {{reason}}",
+      "default_change": "Change the default"
     },
     "cond": {
       "status": "When this issue moves to {{status}}",
