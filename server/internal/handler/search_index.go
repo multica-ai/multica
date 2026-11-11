@@ -269,6 +269,9 @@ func (h *Handler) runSearchIndexRead(ctx context.Context, fn func(q *db.Queries)
 }
 
 func (h *Handler) writeSearchIndexError(w http.ResponseWriter, r *http.Request, op string, err error) {
+	if writeQueryCancellation(w, r, err) {
+		return
+	}
 	if isSearchStatementTimeout(err) {
 		writeError(w, http.StatusServiceUnavailable, "search index read timed out; please retry")
 		return
@@ -286,6 +289,9 @@ func (h *Handler) GetSearchIndexManifest(w http.ResponseWriter, r *http.Request)
 	}
 	release, ok := acquireSearchIndexBootstrapSlot(r.Context())
 	if !ok {
+		if writeRequestCancellation(w, r, r.Context().Err()) {
+			return
+		}
 		writeSearchIndexBusy(w)
 		return
 	}
@@ -298,6 +304,9 @@ func (h *Handler) GetSearchIndexManifest(w http.ResponseWriter, r *http.Request)
 	})
 	if err != nil {
 		h.writeSearchIndexError(w, r, "manifest", err)
+		return
+	}
+	if writeQueryCancellation(w, r, r.Context().Err()) {
 		return
 	}
 	writeJSON(w, http.StatusOK, SearchIndexManifestResponse{
@@ -337,6 +346,9 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 	}
 	release, ok := acquireSearchIndexBootstrapSlot(ctx)
 	if !ok {
+		if writeRequestCancellation(w, r, r.Context().Err()) {
+			return
+		}
 		writeSearchIndexBusy(w)
 		return
 	}
@@ -409,6 +421,9 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 		}
 		resp.Comments = append(resp.Comments, searchIndexComment(c.ID, c.IssueID, c.Content, c.CreatedAt))
 	}
+	if writeQueryCancellation(w, r, r.Context().Err()) {
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -427,6 +442,9 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		Limit  int    `json:"limit"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, searchIndexCursorMaxBytes+1024)).Decode(&req); err != nil {
+		if writeRequestCancellation(w, r, err) {
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -606,6 +624,9 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		})
 	} else {
 		resp.Cursor = encodeSearchIndexCursor(searchIndexCursor{Since: target})
+	}
+	if writeQueryCancellation(w, r, r.Context().Err()) {
+		return
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
