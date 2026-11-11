@@ -37,7 +37,7 @@ import { useCreateIssue } from "@multica/core/issues/mutations";
 import { useT } from "../i18n";
 import { createShortcutChord, type ShortcutChord } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
-import { contextMenuOrigin } from "../common/context-menu-origin";
+import { contextMenuOrigin } from "@multica/ui/lib/context-menu-origin";
 import { Toggle, toggleVariants } from "@multica/ui/components/ui/toggle";
 import { Separator } from "@multica/ui/components/ui/separator";
 import {

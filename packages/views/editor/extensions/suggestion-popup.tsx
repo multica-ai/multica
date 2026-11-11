@@ -5,7 +5,7 @@ import { autoUpdate, computePosition, flip, offset, shift, size } from "@floatin
 import { ReactRenderer } from "@tiptap/react";
 import { exitSuggestion, type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
 import type { PluginKey } from "@tiptap/pm/state";
-import { contextMenuOrigin } from "../../common/context-menu-origin";
+import { contextMenuOrigin } from "@multica/ui/lib/context-menu-origin";
 
 interface SuggestionPopupRenderOptions<
   TItem,
