@@ -24,6 +24,7 @@ var validNotifGroups = map[string]bool{
 	"mentions":             true,
 	"updates":              true,
 	"agent_activity":       true,
+	"new_issues":           true,
 	"system_notifications": true,
 	"email_notifications":  true, // delivery-channel toggle: missing/all → send, muted → suppress
 }

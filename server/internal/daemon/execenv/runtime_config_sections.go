@@ -280,6 +280,10 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-file <path> | --content-stdin] [--parent <comment-id>] [--attachment <path>]` — post a comment. Agent-authored bodies MUST use `--content-file` with a file inside your working directory; full flags: `multica issue comment add --help`.\n")
 	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>] [--fresh]` — repository checkout on a dedicated branch; re-running it keeps a checkout that has uncommitted or unpushed work, or is already on this task's branch, and only fetches; a clean, fully pushed checkout on another branch starts over on a new branch. `--fresh` discards uncommitted and untracked files for a new branch; commits stay on the old branch, so push any you still need first.\n\n")
 	b.WriteString("Commits use the user's configured Git identity; keep it unless asked. For a requested override in a managed checkout use `git config --worktree user.name` / `user.email` — plain or `--local` config can leak into a shared cache; never change the global identity.\n\n")
+	// refs/stash belongs to the shared repository cache, not to a worktree, so
+	// every agent checkout of one repo pushes and pops the same list (MUL-8989:
+	// a `git stash pop` applied another agent's edits).
+	b.WriteString(sharedStashRule)
 	// Squad maintenance is squad-leader surface: an agent that leads no squad
 	// has no squad to change roles in, so this shipped to every run as dead
 	// weight (MUL-5442). IsSquadLeader is a PER-TASK role (the daemon derives
@@ -292,6 +296,10 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 		b.WriteString("- `multica squad member set-role <squad-id> --member-id <id> --member-type <agent|member> --role <role> [--output json]` — change role in place (use this instead of remove+add).\n\n")
 	}
 }
+
+// sharedStashRule keeps agents off the stash list in managed checkouts and
+// names the two ways to set changes aside that stay inside one checkout.
+const sharedStashRule = "Managed checkouts of one repo share a single `git stash` list, so `git stash pop` can apply another agent's changes: never use `git stash` / `git stash pop` there. To set changes aside, make a temporary commit, or keep the SHA from `git stash create` and restore it with `git stash apply <sha>`.\n\n"
 
 // duplicateOfCommandLine teaches the duplicate mark (MUL-7821). Without it
 // agents cancel duplicates with a plain status change plus a comment, which
@@ -546,7 +554,7 @@ func writeInstructionPrecedence(b *strings.Builder) {
 	b.WriteString("## Instruction Precedence\n\n")
 	b.WriteString("Agent Identity instructions have priority over the issue workflow below. ")
 	b.WriteString("If a workflow step conflicts with Agent Identity, skip the conflicting action and continue with the remaining compatible steps. ")
-	b.WriteString("Never treat this runtime workflow as permission to change issue status, investigate, implement, create issues, update issues, delegate, or otherwise act beyond your Agent Identity.\n\n")
+	b.WriteString("The workflow never widens what your Agent Identity allows: when it forbids changing issue status, investigating, implementing, creating issues, updating issues, delegating, or any other action, skip that action.\n\n")
 }
 
 // SessionContinuityNotice variants describe missing provider working memory.
@@ -788,7 +796,7 @@ func writeSkills(b *strings.Builder, provider string, ctx TaskContextForEnv) {
 	// what keeps that consolidation from costing recall, and it must therefore
 	// name the skill that actually holds those contracts.
 	if platformSlug != "" {
-		b.WriteString("For a Multica platform action this brief does not fully cover — issue and PR contracts, mentions, agents, squads, autopilots, projects, runtimes, skill import — load the `" + platformSlug + "` skill and open the reference(s) its routing table names for the domains your task touches.\n\n")
+		b.WriteString("For a Multica platform action this brief does not fully cover — issue and PR contracts, mentions, agents, squads, autopilots, projects, runtimes, local environments, skill import — load the `" + platformSlug + "` skill and open the reference(s) its routing table names for the domains your task touches.\n\n")
 	}
 }
 
@@ -814,7 +822,7 @@ func writeTraecliSkills(b *strings.Builder, skills []SkillContextForEnv) {
 	}
 	b.WriteString("\n")
 	if platformSlug != "" {
-		b.WriteString("For a Multica platform action this brief does not fully cover — issue and PR contracts, mentions, agents, squads, autopilots, projects, runtimes, skill import — read `" + skillPath(platformSlug) + "` and open the reference(s) its routing table names for the domains your task touches.\n\n")
+		b.WriteString("For a Multica platform action this brief does not fully cover — issue and PR contracts, mentions, agents, squads, autopilots, projects, runtimes, local environments, skill import — read `" + skillPath(platformSlug) + "` and open the reference(s) its routing table names for the domains your task touches.\n\n")
 	}
 }
 
@@ -944,7 +952,7 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 		} else {
 			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output or run logs — only comments on the issue.\n\n")
 		}
-		b.WriteString("**Post exactly ONE comment per run — your final result, before this turn exits.** Do NOT post progress updates or plans along the way. Only a scheduled wakeup check whose `[WAKEUP]` block offers `multica issue wakeup checkin` may check in instead of commenting, when it found nothing that needs a reply.\n\n")
+		b.WriteString("**Post only your final result, before this turn exits — one comment, or one reply per thread when the per-turn message lists several threads.** Do NOT post progress updates or plans along the way. Only a scheduled wakeup check whose `[WAKEUP]` block offers `multica issue wakeup checkin` may check in instead of commenting, when it found nothing that needs a reply.\n\n")
 		b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n\n")
 		b.WriteString("**Delivering files here:** pass `--attachment <path>` to `multica issue comment add` (repeatable) — the only way a screenshot or artifact reaches the reader.\n")
 		writeInlineBlocksPolicy(b)

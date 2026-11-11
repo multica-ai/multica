@@ -23,6 +23,7 @@
     "./lib/data-table": "./lib/data-table.ts",
     "./lib/code-style": "./lib/code-style.ts",
     "./lib/clipboard": "./lib/clipboard.ts",
+    "./lib/context-menu-origin": "./lib/context-menu-origin.ts",
     "./lib/motion": "./lib/motion.ts",
     "./lib/multica-brand": "./lib/multica-brand.ts",
     "./icons": "./icons/index.ts",

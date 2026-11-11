@@ -3,7 +3,6 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setApiInstance, type ApiClient } from "@multica/core/api";
-import { configStore } from "@multica/core/config";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { useSessionPromptStore } from "@multica/core/session-prompt";
 import {
@@ -128,7 +127,6 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
-  configStore.getState().setStarPromptDisabled(false);
 });
 
 describe("StarPrompt", () => {
@@ -220,14 +218,6 @@ describe("StarPrompt", () => {
 
     expect(listIssues).not.toHaveBeenCalled();
     expect(claimStarPromptShowing).not.toHaveBeenCalled();
-  });
-
-  it("does nothing when the deployment turns it off", async () => {
-    configStore.getState().setStarPromptDisabled(true);
-    renderPrompt();
-    await agentFinishesIssue();
-
-    expect(listIssues).not.toHaveBeenCalled();
   });
 });
 

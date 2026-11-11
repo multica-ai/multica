@@ -17,6 +17,7 @@ import { api } from "@multica/core/api";
 import type { AppAccountScope, AppCatalogEntry, AppsOverview } from "@multica/core/types";
 import { ComposioToolkitLogo } from "../../common/composio-toolkit-logo";
 import { useT } from "../../i18n";
+import { isDesktopShell, openExternal } from "../../platform";
 
 /**
  * The add-app dialog: every app the workspace allows, curated ones first.
@@ -67,7 +68,10 @@ export function AddAppDialog({
     setConnecting(app.slug);
     try {
       const { redirect_url } = await api.connectApp(scope, app.slug);
-      window.location.href = redirect_url;
+      openExternal(redirect_url, { webTarget: "same-tab" });
+      // The web tab leaves for the hosted flow. Desktop opens it in the system
+      // browser and stays here, so the row must become clickable again.
+      if (isDesktopShell()) setConnecting(null);
     } catch (e) {
       toast.error(e instanceof Error && e.message ? e.message : t(($) => $.connected_apps.toast_failed));
       setConnecting(null);

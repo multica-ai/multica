@@ -35,9 +35,6 @@ type AppConfig struct {
 	// from the JSON when false to keep responses identical to the
 	// previous shape for the common managed-cloud case (#3433).
 	WorkspaceCreationDisabled bool `json:"workspace_creation_disabled,omitempty"`
-	// StarPromptDisabled mirrors DISABLE_STAR_PROMPT so clients skip the
-	// "Star us on GitHub" prompt. Omitted when false.
-	StarPromptDisabled bool `json:"star_prompt_disabled,omitempty"`
 	// Public daemon setup config consumed by the web app at runtime so
 	// self-hosted instances can show `multica setup self-host` commands
 	// with the operator's own domains instead of Multica Cloud defaults.
@@ -55,6 +52,12 @@ type AppConfig struct {
 	// false so the managed-cloud response keeps its previous shape; the UI
 	// defaults absent to false (hidden).
 	VCSIntegrationAvailable bool `json:"vcs_integration_available,omitempty"`
+
+	// ThemeStoreEnabled tells the app it can browse and install community
+	// themes through /api/theme-store. Self-hosted operators turn it off with
+	// MULTICA_THEME_STORE=off. Omitted when off, and older servers omit it
+	// too, so the app shows no Browse entry and makes no store requests.
+	ThemeStoreEnabled bool `json:"theme_store_enabled,omitempty"`
 
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
@@ -145,7 +148,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
 	config.DaemonSetupTarget = "self_host"
 	config.VCSIntegrationAvailable = h.cfg.VCSIntegrationEnabled
-	config.StarPromptDisabled = h.cfg.DisableStarPrompt
+	config.ThemeStoreEnabled = h.ThemeStore != nil
 	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
 	// Only surface the build version on self-hosted deployments. The managed
 	// cloud is continuously deployed and its users can't choose the build, so

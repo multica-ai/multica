@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
@@ -47,6 +47,7 @@ import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
   DropdownMenu,
@@ -86,6 +87,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { ContentEditor } from "../../editor/content-editor";
+import { TitleEditor } from "../../editor/title-editor";
 import { ReadonlyContent } from "../../editor/readonly-content";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { useStatusLabel } from "../../issues/utils/status-label";
@@ -169,14 +171,23 @@ export function SquadDetailPage() {
 
   const [showAddMember, setShowAddMember] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
+  // TitleEditor takes its text at mount, so remounting is how a rejected or
+  // emptied name goes back to the saved one.
+  const [nameResetToken, setNameResetToken] = useState(0);
+  // TitleEditor blurs on Escape like it does on Enter; this marks that blur as
+  // a discard so Escape cancels here the same way it does for the description.
+  const discardNameRef = useRef(false);
 
   const updateSquadMut = useMutation({
     mutationFn: (data: { name?: string; description?: string; instructions?: string; avatar_url?: string; leader_id?: string }) => api.updateSquad(squadId, data),
-    onSuccess: () => {
+    onSuccess: (updated) => {
+      queryClient.setQueryData([...workspaceKeys.squads(wsId), squadId], updated);
       refetchSquad();
       refetchMembers();
       queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
     },
+    onError: (err) =>
+      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.update_failed)),
   });
 
   const addMemberMut = useMutation({
@@ -297,6 +308,19 @@ export function SquadDetailPage() {
     });
   };
 
+  const resetName = () => setNameResetToken((n) => n + 1);
+  const saveName = (next: string) => {
+    const discard = discardNameRef.current;
+    discardNameRef.current = false;
+    const trimmed = next.trim();
+    if (trimmed === squad.name) return;
+    if (!trimmed || discard) {
+      resetName();
+      return;
+    }
+    updateSquadMut.mutate({ name: trimmed }, { onError: resetName });
+  };
+
   return (
     <ObjectPage
       layoutId={layoutId}
@@ -380,10 +404,19 @@ export function SquadDetailPage() {
           }
           title={
             canManage ? (
-              <SquadNameEditor
-                value={squad.name}
-                onSave={async (next) => { await updateSquadMut.mutateAsync({ name: next.trim() }); }}
-              />
+              <div
+                onKeyDownCapture={(e) => {
+                  if (e.key === "Escape" && !isImeComposing(e)) discardNameRef.current = true;
+                }}
+              >
+                <TitleEditor
+                  key={`name-${squad.id}-${nameResetToken}`}
+                  defaultValue={squad.name}
+                  placeholder={t(($) => $.name_editor.placeholder)}
+                  className={INLINE_FIELD}
+                  onBlur={saveName}
+                />
+              </div>
             ) : (
               squad.name
             )
@@ -391,8 +424,9 @@ export function SquadDetailPage() {
           description={
             canManage ? (
               <SquadDescriptionEditor
+                key={squad.id}
                 value={squad.description ?? ""}
-                onSave={async (next) => { await updateSquadMut.mutateAsync({ description: next }); }}
+                onSave={(next) => updateSquadMut.mutateAsync({ description: next })}
               />
             ) : (
               squad.description || undefined
@@ -976,136 +1010,7 @@ function SquadProperties({
   );
 }
 
-// Inline name editor — reveals a Pencil affordance on hover, opens a small
-// popover with a single-line input. Mirrors the NameAndDescription editor
-// in the agent inspector.
-function SquadNameEditor({
-  value,
-  onSave,
-}: {
-  value: string;
-  onSave: (next: string) => Promise<void>;
-}) {
-  const { t } = useT("squads");
-  return (
-    <InlineEditPopover
-      value={value}
-      onSave={onSave}
-      title={t(($) => $.name_editor.title)}
-      placeholder={t(($) => $.name_editor.placeholder)}
-      validate={(v) =>
-        v.trim().length > 0 ? null : t(($) => $.name_editor.required)
-      }
-    >
-      {(triggerProps) => (
-        <button
-          type="button"
-          {...triggerProps}
-          className="group -mx-1 inline-flex items-center gap-1.5 self-start rounded-xs px-1 text-left text-title font-semibold leading-tight transition-colors hover:bg-accent/50"
-        >
-          <span>{value}</span>
-          <Pencil className="h-3.5 w-3.5 shrink-0 text-transparent transition-colors group-hover:text-muted-foreground" />
-        </button>
-      )}
-    </InlineEditPopover>
-  );
-}
-
-function InlineEditPopover({
-  value,
-  onSave,
-  title,
-  placeholder,
-  validate,
-  children,
-}: {
-  value: string;
-  onSave: (next: string) => Promise<void>;
-  title: string;
-  placeholder?: string;
-  validate?: (v: string) => string | null;
-  children: (triggerProps: { onClick: (e: React.MouseEvent) => void }) => ReactNode;
-}) {
-  const { t } = useT("squads");
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (open) {
-      setDraft(value);
-      setError(null);
-    }
-  }, [open, value]);
-
-  const commit = async () => {
-    const err = validate?.(draft) ?? null;
-    if (err) {
-      setError(err);
-      return;
-    }
-    if (draft === value) {
-      setOpen(false);
-      return;
-    }
-    setSaving(true);
-    try {
-      await onSave(draft);
-      setOpen(false);
-      toast.success(t(($) => $.name_editor.saved));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.name_editor.save_failed));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={children({ onClick: () => setOpen(true) }) as React.ReactElement}
-      />
-      <PopoverContent align="start" className="w-72 p-3">
-        <div className="space-y-2">
-          <p className="text-caption font-medium">{title}</p>
-          <Input
-            autoFocus
-            value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              if (error) setError(null);
-            }}
-            placeholder={placeholder}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                setOpen(false);
-                return;
-              }
-              if (isImeComposing(e)) return;
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void commit();
-              }
-            }}
-            className="h-8"
-          />
-          {error && <p className="text-caption text-destructive">{error}</p>}
-          <div className="flex items-center justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={saving}>
-              {t(($) => $.name_editor.cancel)}
-            </Button>
-            <Button size="sm" onClick={() => void commit()} disabled={saving || draft === value}>
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t(($) => $.name_editor.save)}
-            </Button>
-          </div>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-// Two-step add-member dialog (mirrors CreateAgentDialog's compact layout):
+// Two-step add-member dialog:
 // 1) pick a target — Members + Agents in one searchable popover, each row
 //    with an avatar so visual recognition matches the issue assignee picker;
 // 2) optionally describe the role they'll play in this squad. Description
@@ -1322,107 +1227,94 @@ function RoleEditor({ value, onSave }: { value: string; onSave: (next: string) =
   );
 }
 
-// Click-to-edit description editor for the identity block. Mirrors
-// agent-detail-inspector's DescriptionEditor: opens a modal with a textarea
-// (enough room for multi-paragraph descriptions); the inline trigger shows
-// the current value (or a placeholder) with a hover-revealed Pencil.
+// Name and description read as plain text and share one hover/focus wash, so
+// clicking either doesn't shift the layout around it.
+const INLINE_FIELD = "rounded-sm px-1 transition-colors hover:bg-accent/50 focus:bg-accent/50";
+
+// Click-to-edit description for the identity block. Same rules as the name:
+// blur or the send shortcut saves, Escape discards. The saved text stays on
+// screen while the request is in flight instead of flashing the old value, and
+// a failed save keeps its text so reopening the editor picks it up to retry.
 function SquadDescriptionEditor({
   value,
   onSave,
 }: {
   value: string;
-  onSave: (next: string) => Promise<void>;
+  onSave: (next: string) => Promise<unknown>;
 }) {
   const { t } = useT("squads");
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="group -mx-1 inline-flex max-w-full items-start gap-1.5 rounded-sm px-1 text-left transition-colors hover:bg-accent/50"
-      >
-        {value ? (
-          <span className="line-clamp-2 text-muted-foreground">{value}</span>
-        ) : (
-          <span className="italic text-muted-foreground">{t(($) => $.description_dialog.placeholder_empty)}</span>
-        )}
-        <Pencil className="mt-1 h-3 w-3 shrink-0 text-transparent transition-colors group-hover:text-muted-foreground" />
-      </button>
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [pending, setPending] = useState<string | null>(null);
+  const [unsaved, setUnsaved] = useState<string | null>(null);
+  const discardRef = useRef(false);
+  const shown = pending ?? value;
+  const placeholder = t(($) => $.description_editor.placeholder);
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-lg">
-          {open && (
-            <SquadDescriptionEditorBody
-              initialValue={value}
-              onSave={onSave}
-              onClose={() => setOpen(false)}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
-function SquadDescriptionEditorBody({
-  initialValue,
-  onSave,
-  onClose,
-}: {
-  initialValue: string;
-  onSave: (next: string) => Promise<void>;
-  onClose: () => void;
-}) {
-  const { t } = useT("squads");
-  const [draft, setDraft] = useState(initialValue);
-  const [saving, setSaving] = useState(false);
-  const savingRef = useRef(false);
-  const dirty = draft !== initialValue;
-
-  const commit = async () => {
-    if (savingRef.current) return;
-    if (!dirty) { onClose(); return; }
-    savingRef.current = true;
-    setSaving(true);
-    try {
-      await onSave(draft);
-      onClose();
-    } catch {
-      // toast handled by parent's mutation
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
-    }
+  const startEditing = () => {
+    discardRef.current = false;
+    setDraft(unsaved ?? shown);
+    setEditing(true);
   };
 
-  return (
-    <>
-      <DialogHeader>
-        <DialogTitle>{t(($) => $.description_dialog.title)}</DialogTitle>
-      </DialogHeader>
-      <textarea
+  const finish = () => {
+    setEditing(false);
+    if (discardRef.current || draft === shown) {
+      setUnsaved(null);
+      return;
+    }
+    const next = draft;
+    setPending(next);
+    onSave(next)
+      .then(
+        () => setUnsaved(null),
+        // toast handled by the mutation
+        () => setUnsaved(next),
+      )
+      .finally(() => setPending(null));
+  };
+
+  if (editing) {
+    return (
+      <Textarea
         autoFocus
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        placeholder={t(($) => $.description_dialog.responsibility_placeholder)}
-        rows={6}
+        onFocus={(e) => {
+          const end = e.currentTarget.value.length;
+          e.currentTarget.setSelectionRange(end, end);
+        }}
+        onBlur={finish}
         onKeyDown={(e) => {
-          if (e.key === "Escape") { onClose(); return; }
+          if (e.key === "Escape") {
+            discardRef.current = true;
+            e.currentTarget.blur();
+            return;
+          }
           if (e.defaultPrevented || e.repeat || isImeComposing(e)) return;
           if (shortcutMatchesEvent(getShortcut("send"), e.nativeEvent)) {
             e.preventDefault();
-            void commit();
+            e.currentTarget.blur();
           }
         }}
-        className="w-full resize-none rounded-md border bg-transparent px-3 py-2 text-body outline-none focus-visible:border-input"
+        aria-label={placeholder}
+        placeholder={placeholder}
+        rows={1}
+        className={cn(
+          INLINE_FIELD,
+          "block min-h-0 resize-none rounded-sm border-0 py-0 text-body text-foreground focus-visible:ring-0 md:text-body dark:bg-accent/50",
+        )}
       />
-      <DialogFooter>
-        <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>{t(($) => $.description_dialog.cancel)}</Button>
-        <Button size="sm" onClick={() => void commit()} disabled={saving || !dirty}>
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t(($) => $.description_dialog.save)}
-        </Button>
-      </DialogFooter>
-    </>
+    );
+  }
+
+  return (
+    <button type="button" onClick={startEditing} className={cn(INLINE_FIELD, "inline-flex max-w-full text-left")}>
+      {shown ? (
+        <span className="line-clamp-2">{shown}</span>
+      ) : (
+        <span className="italic">{t(($) => $.description_editor.empty)}</span>
+      )}
+    </button>
   );
 }

@@ -396,6 +396,15 @@ describe("reply annotations", () => {
     expect(useCommentDraftStore.getState().addAnnotation("edit:issue:comment", annotation)).toBeUndefined();
   });
 
+  it("keeps chat annotation drafts without text or a reply target", () => {
+    const store = useCommentDraftStore.getState();
+    expect(store.addAnnotation("chat:session-1", { ...annotation, sourceCommentId: "message-1" })).toBe("a");
+    expect(store.getAnnotations("chat:session-1")[0]?.sourceCommentId).toBe("message-1");
+    expect(useCommentDraftStore.getState().drafts["chat:session-1"]?.replyTarget).toBeUndefined();
+    store.removeAnnotation("chat:session-1", "a");
+    expect(useCommentDraftStore.getState().drafts["chat:session-1"]).toBeUndefined();
+  });
+
   it("reopens duplicate ranges, bounds collection, and changes identity only on actual edits", () => {
     const store = useCommentDraftStore.getState();
     expect(store.addAnnotation(key, annotation)).toBe("a");

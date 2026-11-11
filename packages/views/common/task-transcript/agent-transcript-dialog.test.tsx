@@ -248,6 +248,11 @@ afterEach(() => {
   cleanup();
 });
 
+// Match a body's raw text: the default matcher collapses newlines.
+function codeBlock(text: string) {
+  return Array.from(document.querySelectorAll("pre")).find((pre) => pre.textContent === text);
+}
+
 describe("AgentTranscriptDialog", () => {
   it.each([
     { type: "text", label: "Agent", icon: ".icon-bot" },
@@ -397,11 +402,28 @@ describe("AgentTranscriptDialog", () => {
     // The report is the narrative and renders whole; a tool call is a line
     // whose body waits in the inspector. This inversion is the redesign.
     expect(screen.getByTestId("rich-content")).toHaveTextContent("Agent hidden detail");
-    expect(screen.queryByText(/"command": "pnpm test"/)).not.toBeInTheDocument();
+    expect(codeBlock("pnpm test")).toBeUndefined();
 
     fireEvent.click(screen.getByRole("button", { name: /pnpm test/ }));
 
-    expect(screen.getByText(/"command": "pnpm test"/)).toBeInTheDocument();
+    expect(codeBlock("pnpm test")).toBeDefined();
+  });
+
+  it("shows a command line by line with its other arguments as JSON below", () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Bash",
+        input: { command: "pnpm test\npnpm lint", description: "Run checks" },
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Bash/ }));
+
+    expect(codeBlock("pnpm test\npnpm lint")).toHaveClass("text-foreground");
+    expect(screen.queryByText(/"command":/)).not.toBeInTheDocument();
+    expect(screen.getByText(/"description": "Run checks"/, { selector: "pre" })).toBeInTheDocument();
   });
 
   // Regression, #7125: a run of short prose steps under a long agent name put

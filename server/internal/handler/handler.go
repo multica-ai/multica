@@ -41,6 +41,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
+	"github.com/multica-ai/multica/server/internal/themestore"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -77,10 +78,6 @@ type Config struct {
 	// invitation only. The public /api/config endpoint mirrors this flag so
 	// the UI can hide every "Create workspace" affordance — see #3433.
 	DisableWorkspaceCreation bool
-	// DisableStarPrompt turns off the "Star us on GitHub" prompt for every
-	// user of the deployment: /api/config tells clients not to show it, and
-	// claiming a showing is refused. The Help menu link is unaffected.
-	DisableStarPrompt bool
 	// WorkspaceCreationAllowedEmails, when non-empty, restricts
 	// POST /api/workspaces to callers whose account email matches one of
 	// the entries (case-insensitive). Empty means every signed-in user may
@@ -249,6 +246,9 @@ type Handler struct {
 	LocalSkillListStore   LocalSkillListStore
 	LocalSkillImportStore LocalSkillImportStore
 	FeatureFlags          *featureflag.Service
+	// ThemeStore serves the community theme registry. Nil when the operator
+	// turned the store off: its routes return 404 and /api/config omits it.
+	ThemeStore *themestore.Store
 	// IssueStatusCatalog reads the workspace status catalog. Defaults to
 	// Queries; a test can substitute a counting wrapper to assert HOW MANY
 	// catalog reads a request performs, which is the only property that

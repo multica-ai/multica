@@ -886,6 +886,54 @@ func (q *Queries) ListCommentAncestorPath(ctx context.Context, arg ListCommentAn
 	return items, nil
 }
 
+const listCommentOriginsForIssue = `-- name: ListCommentOriginsForIssue :many
+SELECT id, author_type, author_id, created_at FROM comment
+WHERE id = ANY($1::uuid[])
+  AND issue_id = $2
+  AND workspace_id = $3
+  AND deleted_at IS NULL
+`
+
+type ListCommentOriginsForIssueParams struct {
+	Ids         []pgtype.UUID `json:"ids"`
+	IssueID     pgtype.UUID   `json:"issue_id"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+}
+
+type ListCommentOriginsForIssueRow struct {
+	ID         pgtype.UUID        `json:"id"`
+	AuthorType string             `json:"author_type"`
+	AuthorID   pgtype.UUID        `json:"author_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+// Author and time of the live comments in @ids, without their bodies: the
+// issue attachment list labels each file with the comment that delivered it.
+func (q *Queries) ListCommentOriginsForIssue(ctx context.Context, arg ListCommentOriginsForIssueParams) ([]ListCommentOriginsForIssueRow, error) {
+	rows, err := q.db.Query(ctx, listCommentOriginsForIssue, arg.Ids, arg.IssueID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCommentOriginsForIssueRow{}
+	for rows.Next() {
+		var i ListCommentOriginsForIssueRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCommentThreadHistory = `-- name: ListCommentThreadHistory :many
 WITH RECURSIVE thread_history AS (
   SELECT root.id, root.issue_id, root.author_type, root.author_id, root.content, root.type, root.created_at, root.updated_at, root.parent_id, root.workspace_id, root.resolved_at, root.resolved_by_type, root.resolved_by_id, root.source_task_id, root.quick_action_id, root.via_plugin_id, root.revision, root.recovery_settled_at, root.deleted_at, root.suppressed_agent_ids
