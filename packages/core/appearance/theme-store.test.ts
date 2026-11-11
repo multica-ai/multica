@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
+import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
 import { StoreThemeListSchema, type StoreTheme } from "../api/schemas";
 import { INSTALLED_THEMES_STORAGE_KEY, useInstalledThemesStore } from "./installed-themes";
 import { writeZip } from "./theme-archive";
 import { parseTheme } from "./theme-package";
-import { readStoreTheme, storeThemeState } from "./theme-store";
+import { readStoreTheme, storeThemeScreenshotOptions, storeThemeState } from "./theme-store";
 
-vi.mock("../api", () => ({ api: { getStoreThemePackage: vi.fn() } }));
+vi.mock("../api", () => ({ api: { getStoreThemePackage: vi.fn(), getStoreThemeScreenshot: vi.fn() } }));
 
 const encoder = new TextEncoder();
 const manifest = (id: string, version: string) => ({ apiVersion: 1, id, name: "Ink", author: "Someone", version });
@@ -44,6 +45,33 @@ describe("StoreThemeListSchema", () => {
       ["ink", 12],
       ["sand", 0],
     ]);
+  });
+});
+
+describe("storeThemeScreenshotOptions", () => {
+  it("fetches a screenshot once per revision, so a re-render of the same release is fetched again", async () => {
+    const old = new Blob(["old"]);
+    const fresh = new Blob(["fresh"]);
+    vi.mocked(api.getStoreThemeScreenshot).mockReset().mockResolvedValueOnce(old).mockResolvedValueOnce(fresh);
+    const client = new QueryClient();
+    const before = entry({ screenshot_revisions: { light: "aaaaaaaaaaaa" } });
+    expect(await client.fetchQuery(storeThemeScreenshotOptions(before, "light"))).toBe(old);
+    expect(await client.fetchQuery(storeThemeScreenshotOptions(before, "light"))).toBe(old);
+
+    const after = entry({ screenshot_revisions: { light: "bbbbbbbbbbbb" } });
+    expect(await client.fetchQuery(storeThemeScreenshotOptions(after, "light"))).toBe(fresh);
+    expect(api.getStoreThemeScreenshot).toHaveBeenCalledTimes(2);
+    expect(api.getStoreThemeScreenshot).toHaveBeenLastCalledWith("ink", "light", "bbbbbbbbbbbb", expect.anything());
+  });
+
+  it("reads revisions per mode and ignores malformed ones", () => {
+    const parsed = StoreThemeListSchema.parse({
+      themes: [
+        entry({ screenshot_revisions: { light: "aaaaaaaaaaaa" } }),
+        { ...entry({ id: "sand" }), screenshot_revisions: "nope" },
+      ],
+    });
+    expect(parsed.themes.map((t) => t.screenshot_revisions)).toEqual([{ light: "aaaaaaaaaaaa" }, undefined]);
   });
 });
 

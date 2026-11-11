@@ -825,6 +825,57 @@ func TestPrivateProjectWakeupListsSkipOutsiders(t *testing.T) {
 	}
 }
 
+// A run on a private project's issue is listed as restricted to members
+// outside the project, id included. Stopping it by that id must need the same
+// access as reading it.
+func TestPrivateProjectRunCancelNeedsVisibility(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	var agentID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = 'Handler Test Agent'`, testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load seeded agent: %v", err)
+	}
+	queuedRun := func() string {
+		return dbfx.Task(t, agentID, testutil.Cols{"issue_id": f.secretIssue, "runtime_id": testRuntimeID})
+	}
+
+	taskID := queuedRun()
+	rec := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(rec, cancelTaskByUserRequest(t, f.outsider, taskID))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("outsider cancel = %d, want 404", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), f.secretIssue) {
+		t.Errorf("outsider cancel response names the private issue: %s", rec.Body.String())
+	}
+	if got := taskStatus(t, taskID); got != "queued" {
+		t.Errorf("run after outsider cancel = %q, want queued", got)
+	}
+
+	for i, tc := range []struct {
+		name   string
+		userID string
+	}{
+		{"project member", f.insider},
+		{"workspace owner outside the member list", testUserID},
+	} {
+		// An issue holds one pending run per agent, so the first case stops
+		// the run the outsider could not.
+		if i > 0 {
+			taskID = queuedRun()
+		}
+		rec := httptest.NewRecorder()
+		testHandler.CancelTaskByUser(rec, cancelTaskByUserRequest(t, tc.userID, taskID))
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: cancel = %d, want 200: %s", tc.name, rec.Code, rec.Body.String())
+		}
+		if got := taskStatus(t, taskID); got != "cancelled" {
+			t.Errorf("%s: run after cancel = %q, want cancelled", tc.name, got)
+		}
+	}
+}
+
 // Sub-issue progress is read for every parent in one call, not through an
 // issue, so its counts have to leave out sub-issues in a project the caller
 // cannot see.

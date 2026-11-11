@@ -546,6 +546,8 @@ export function ChatInput({
       const pendingFlush = editorRef.current?.flushPendingUpdate?.();
       if (pendingFlush != null) commitDraft(editorDraftKeyRef.current, pendingFlush);
       const draftValueAtSend = useChatStore.getState().inputDrafts[keyAtSend];
+      // Context is for the message it went with; the next one starts without.
+      const pageKeyAtSend = attachedPage ? attachedPageKey : null;
       let committed = false;
       const commitInput = (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => {
         if (committed) return;
@@ -586,6 +588,11 @@ export function ChatInput({
           const store = useCommentDraftStore.getState();
           for (const id of sentAnnotationIds) store.removeAnnotation(annotationKeyAtSend, id);
         }
+        // The page is in the sent message too, and in any restore of it — a
+        // cancel-before-task restore that kept the chip would send it twice.
+        if (pageKeyAtSend) {
+          setAttachedPageKey((current) => (current === pageKeyAtSend ? null : current));
+        }
       };
       logger.info("input.send", {
         contentLength: content.length,
@@ -608,8 +615,6 @@ export function ChatInput({
       // retry. Only a commit — here or by the owner — clears it.
       if (accepted === false) return false;
       if (!committed) commitInput();
-      // Context is for the message it went with; the next one starts without.
-      if (attachedPage) setAttachedPageKey(null);
       return true;
     },
   });

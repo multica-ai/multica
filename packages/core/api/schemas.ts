@@ -1379,6 +1379,11 @@ export interface StoreTheme {
   size: number;
   /** Modes the registry rendered a screenshot for. */
   screenshots: StoreThemeMode[];
+  /**
+   * Each mode's current screenshot. The registry re-renders screenshots
+   * without a new release; absent from servers that predate this.
+   */
+  screenshot_revisions?: Partial<Record<StoreThemeMode, string>>;
   updated_at?: string;
   /** Installs and updates served by this server, all users together. */
   downloads: number;
@@ -1400,6 +1405,10 @@ const StoreThemeSchema = z
     version: z.string(),
     size: z.number(),
     screenshots: StoreThemeModesSchema,
+    screenshot_revisions: z
+      .object({ light: z.string().optional(), dark: z.string().optional() })
+      .optional()
+      .catch(undefined),
     updated_at: OptionalStringSchema,
     downloads: z.number().catch(0).default(0),
   })
@@ -1803,6 +1812,12 @@ export const ProjectMemberSchema = z.object({
 export const ListProjectMembersResponseSchema = z.object({
   members: z.array(ProjectMemberSchema),
   total: z.number(),
+}).loose();
+
+// The viewer's own project subscription (`/api/projects/:id/subscription`).
+// Anything but an explicit `true` reads as not subscribed.
+export const ProjectSubscriptionSchema = z.object({
+  subscribed: z.boolean().catch(false),
 }).loose();
 
 const SearchProjectResultSchema = ProjectSchema.extend({

@@ -76,6 +76,7 @@
   "types": {
     "issue_assigned": "Asignada",
     "issue_subscribed": "Suscrito",
+    "issue_created": "Nueva tarea",
     "unassigned": "Desasignada",
     "assignee_changed": "Asignado cambiado",
     "status_changed": "Estado cambiado",

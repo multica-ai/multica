@@ -169,6 +169,12 @@
       "after_run": "本轮结束后开始",
       "hint": "只决定默认选项，每条消息发送前仍可单独修改。"
     },
+    "comment_images": {
+      "title": "评论中的图片",
+      "thumbnails": "缩略图",
+      "full": "原尺寸",
+      "hint": "缩略图让长讨论更紧凑，点击图片可查看原图。"
+    },
     "comments_title": "评论与聊天",
     "region_title": "语言与地区",
     "issue_fields_title": "创建任务时显示的字段",
@@ -829,6 +835,10 @@
       "updates": {
         "label": "优先级与截止日期",
         "description": "你订阅的任务优先级或截止日期变更时"
+      },
+      "new_issues": {
+        "label": "新任务",
+        "description": "你订阅的项目中有新任务创建时"
       },
       "agent_activity": {
         "label": "智能体活动",

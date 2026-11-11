@@ -144,6 +144,7 @@
     "restore_tooltip": "복원",
     "expand_tooltip": "펼치기",
     "minimize_tooltip": "최소화",
+    "close_tooltip": "닫기",
     "another_running": "다른 채팅이 실행 중입니다",
     "another_unread": "다른 채팅에 읽지 않은 답변이 있습니다",
     "running": "실행 중",

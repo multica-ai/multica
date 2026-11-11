@@ -2,7 +2,8 @@
 /**
  * Checks theme folders or .zip files the way the app and the theme store do:
  * the manifest, the CSS sanitizer, public variables, Latin font stacks and
- * WCAG contrast against the app's own palette (packages/ui/styles/tokens.css).
+ * WCAG contrast against the app's own palette (packages/ui/styles/tokens.css),
+ * at the default options and at each other `select` and `toggle` value.
  * The checks live in packages/core/appearance/theme-check.ts.
  *
  * Run: pnpm theme:check <theme folder or .zip>... [--json]
@@ -57,8 +58,10 @@ if (json) {
     if (contrast.length > 0) {
       const failing = contrast.filter((c) => c.ratio < c.required).length;
       const lowest = [...contrast].sort((a, b) => a.ratio / a.required - b.ratio / b.required)[0];
+      const values = new Set(contrast.filter((c) => c.variant).map((c) => c.variant.label)).size;
+      const where = [lowest.mode, ...(lowest.area === "page" ? [] : [lowest.area])].join(" ");
       console.log(
-        `  contrast  ${contrast.length} pairs checked, ${failing} below WCAG AA. Lowest: ${lowest.foreground} on ${lowest.background}, ${lowest.mode}${lowest.area === "frame" ? " frame" : ""}, ${lowest.ratio.toFixed(2)}:1 (needs ${lowest.required}:1)`,
+        `  contrast  ${contrast.length} pairs checked at the default options${values > 0 ? ` and ${values} other option value${values === 1 ? "" : "s"}` : ""}, ${failing} below WCAG AA. Lowest: ${lowest.foreground} on ${lowest.background}, ${where}${lowest.variant ? ` (${lowest.variant.label})` : ""}, ${lowest.ratio.toFixed(2)}:1 (needs ${lowest.required}:1)`,
       );
     }
   }
@@ -67,4 +70,6 @@ if (json) {
   console.log(`\n${errors === 0 ? "Passed" : "Failed"}: ${errors} error${errors === 1 ? "" : "s"}, ${warnings} warning${warnings === 1 ? "" : "s"}.`);
 }
 
-process.exit(reports.every((report) => report.ok) ? 0 : 1);
+// Not process.exit(): it drops stdout still queued for a pipe, which cuts a
+// --json report off at 64 KB.
+process.exitCode = reports.every((report) => report.ok) ? 0 : 1;

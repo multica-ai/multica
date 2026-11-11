@@ -170,6 +170,12 @@
       "after_run": "Empezar tras esta ejecución",
       "hint": "Solo establece el valor predeterminado. Puedes cambiarlo para cualquier mensaje antes de enviarlo."
     },
+    "comment_images": {
+      "title": "Imágenes en comentarios",
+      "thumbnails": "Miniaturas",
+      "full": "Tamaño completo",
+      "hint": "Las miniaturas acortan los hilos largos; haz clic en una imagen para verla a tamaño completo."
+    },
     "comments_title": "Comentarios",
     "issue_fields": {
       "field": "Campo",
@@ -838,6 +844,10 @@
       "updates": {
         "label": "Prioridad y fecha de entrega",
         "description": "Cuando cambian la prioridad o la fecha de entrega de tareas que sigues"
+      },
+      "new_issues": {
+        "label": "Tareas nuevas",
+        "description": "Cuando se crea una tarea en un proyecto al que estás suscrito"
       },
       "agent_activity": {
         "label": "Actividad de agentes",

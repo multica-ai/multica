@@ -79,7 +79,7 @@ describe("settings location", () => {
     expect(
       settingsHref(
         "/acme/settings",
-        new URLSearchParams("tab=preferences&section=chat&keep=1"),
+        new URLSearchParams("tab=preferences&section=chat&scope=skill&keep=1"),
         "channels",
         { integration: "slack" },
       ),

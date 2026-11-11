@@ -12,6 +12,7 @@ const NOTIFICATION_GROUPS = [
   "comments",
   "mentions",
   "updates",
+  "new_issues",
   "agent_activity",
 ] as const;
 
@@ -140,6 +141,12 @@ export function useSettingsSearchIndex(
         anchor: "running-agent-reply",
         title: t(($) => $.preferences.running_agent_reply.title),
         description: t(($) => $.preferences.running_agent_reply.hint),
+      },
+      {
+        tab: "preferences",
+        anchor: "comment-images",
+        title: t(($) => $.preferences.comment_images.title),
+        description: t(($) => $.preferences.comment_images.hint),
       },
       {
         tab: "preferences",

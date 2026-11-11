@@ -102,6 +102,7 @@ export function settingsHref(
   params.set("tab", tab);
   params.delete("section");
   params.delete("integration");
+  params.delete("scope");
   if (detail.section) params.set("section", detail.section);
   if (detail.integration) params.set("integration", detail.integration);
   return `${pathname}?${params.toString()}`;

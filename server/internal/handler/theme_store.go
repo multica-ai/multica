@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -24,7 +26,11 @@ type ThemeStoreTheme struct {
 	Version     string   `json:"version"`
 	Size        int64    `json:"size"`
 	Screenshots []string `json:"screenshots"`
-	UpdatedAt   string   `json:"updated_at,omitempty"`
+	// ScreenshotRevisions names each mode's current screenshot without its
+	// registry path. The registry can re-render a screenshot without a new
+	// release, so the app caches a screenshot by revision, not by version.
+	ScreenshotRevisions map[string]string `json:"screenshot_revisions"`
+	UpdatedAt           string            `json:"updated_at,omitempty"`
 	// Downloads counts installs and updates served by this server.
 	Downloads int64 `json:"downloads"`
 }
@@ -60,23 +66,27 @@ func (h *Handler) ListStoreThemes(w http.ResponseWriter, r *http.Request) {
 	out := make([]ThemeStoreTheme, 0, len(themes))
 	for _, t := range themes {
 		shots := []string{}
+		revisions := map[string]string{}
 		for _, mode := range themestore.Modes {
-			if _, ok := t.Screenshots[mode]; ok {
+			if file, ok := t.Screenshots[mode]; ok {
 				shots = append(shots, mode)
+				sum := sha256.Sum256([]byte(file))
+				revisions[mode] = hex.EncodeToString(sum[:6])
 			}
 		}
 		out = append(out, ThemeStoreTheme{
-			ID:          t.ID,
-			Name:        t.Name,
-			Author:      t.Author,
-			Repo:        t.Repo,
-			Description: t.Description,
-			Modes:       t.Modes,
-			Version:     t.Version,
-			Size:        t.Package.Size,
-			Screenshots: shots,
-			UpdatedAt:   t.UpdatedAt,
-			Downloads:   downloads[t.ID],
+			ID:                  t.ID,
+			Name:                t.Name,
+			Author:              t.Author,
+			Repo:                t.Repo,
+			Description:         t.Description,
+			Modes:               t.Modes,
+			Version:             t.Version,
+			Size:                t.Package.Size,
+			Screenshots:         shots,
+			ScreenshotRevisions: revisions,
+			UpdatedAt:           t.UpdatedAt,
+			Downloads:           downloads[t.ID],
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"themes": out})
