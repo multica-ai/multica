@@ -40,7 +40,21 @@ func TestDroidHelperProcess(t *testing.T) {
 		}
 	}
 	fmt.Print(os.Getenv("DROID_STREAM"))
+	if streamFile := os.Getenv("DROID_STREAM_FILE"); streamFile != "" {
+		stream, err := os.ReadFile(streamFile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		_, _ = os.Stdout.Write(stream)
+	}
 	fmt.Fprint(os.Stderr, os.Getenv("DROID_STDERR"))
+	if os.Getenv("DROID_HANG_AFTER_STREAM") == "1" {
+		fmt.Println(`{"type":"system","subtype":"init","session_id":"awaiting-exit"}`)
+		for {
+			time.Sleep(time.Hour)
+		}
+	}
 	if os.Getenv("DROID_FAIL") == "1" {
 		os.Exit(1)
 	}
@@ -161,6 +175,7 @@ func TestDroidFailurePaths(t *testing.T) {
 	for _, tc := range []struct{ name, stream, stderr, fail, want string }{
 		{"missing completion", `{"type":"message","role":"assistant","text":"partial"}`, "", "", "without terminal result"},
 		{"execution error", "{\"type\":\"error\",\"message\":\"Permission rejected\"}\n{\"type\":\"completion\",\"finalText\":\"partial\"}\n", "", "", "Permission rejected"},
+		{"error after completion", "{\"type\":\"completion\",\"finalText\":\"partial\"}\n{\"type\":\"error\",\"message\":\"Permission rejected\"}\n", "", "", "Permission rejected"},
 		{"authentication", `{"type":"error","source":"cli","message":"Authentication failed. Set FACTORY_API_KEY"}`, "", "1", "Authentication failed"},
 		{"crash", `{"type":"completion","finalText":"partial"}`, "Process crashed", "1", "Process crashed"},
 		{"invalid protocol", "not json\n", "", "", "without terminal result"},
@@ -176,6 +191,53 @@ func TestDroidFailurePaths(t *testing.T) {
 				t.Fatalf("result = %+v", r)
 			}
 		})
+	}
+}
+
+func TestDroidCompletionRequiresProcessExit(t *testing.T) {
+	backend := newFakeDroid(t, map[string]string{
+		"DROID_STREAM":            "{\"type\":\"completion\",\"finalText\":\"premature\"}\n",
+		"DROID_HANG_AFTER_STREAM": "1",
+	}, io.Discard)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	session, err := backend.Execute(ctx, "task", ExecOptions{Timeout: 10 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-session.Messages: // Emitted after completion: the parser has read both.
+	case <-time.After(5 * time.Second):
+		t.Fatal("fake Droid did not reach completion")
+	}
+	if session.TerminalObserved() {
+		t.Error("completion became authoritative before the process exited")
+	}
+	cancel()
+	_, result := collectDroid(t, session)
+	if result.Status != "aborted" || result.Output != "" || session.TerminalObserved() {
+		t.Fatalf("completion without a clean process exit was accepted: %+v", result)
+	}
+}
+
+func TestDroidDrainsLargeFinalOutput(t *testing.T) {
+	final := strings.Repeat("final 中文\n", 100000)
+	event, err := json.Marshal(map[string]string{"type": "completion", "finalText": final})
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamFile := filepath.Join(t.TempDir(), "stream.jsonl")
+	if err := os.WriteFile(streamFile, event, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backend := newFakeDroid(t, map[string]string{"DROID_STREAM_FILE": streamFile}, io.Discard)
+	session, err := backend.Execute(context.Background(), "task", ExecOptions{Timeout: 10 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, result := collectDroid(t, session)
+	if result.Status != "completed" || result.Output != final || !session.TerminalObserved() {
+		t.Fatalf("final output truncated or misclassified: status=%s bytes=%d error=%s", result.Status, len(result.Output), result.Error)
 	}
 }
 

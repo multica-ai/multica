@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -89,7 +90,6 @@ func (b *droidBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	runtimeCmd.Prefix = FilterLaunchPrefix("droid", normalizeDroidArgs(runtimeCmd.Prefix), b.cfg.Logger)
 	cmd := runtimeCmd.exec(runCtx, args...)
 	hideAgentWindow(cmd)
-	cmd.WaitDelay = 2 * time.Second
 	cmd.Dir = opts.Cwd
 	cmd.Env = buildEnv(b.cfg.Env)
 	// Stdin avoids OS command-line size/quoting limits and keeps prompts out of
@@ -97,60 +97,159 @@ func (b *droidBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	if opts.SystemPrompt != "" {
 		prompt = opts.SystemPrompt + "\n\n---\n\n" + prompt
 	}
-	cmd.Stdin = strings.NewReader(prompt)
 	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args, trustAgentCommandPositional(0, "exec")))
 	// Keep raw stderr out of daemon logs. Publish only a scrubbed diagnostic
-	// after Wait, which also joins the stderr copier before reading the tail.
+	// after draining the private, bounded tail.
 	stderr := newStderrTail(io.Discard, agentStderrTailBytes)
-	cmd.Stderr = stderr
-	stdout, err := cmd.StdoutPipe()
+	// Own the output pipes: Wait must observe the direct child's exit even
+	// when a descendant retains a writer, and must not close unread stdout.
+	stdout, outW, err := os.Pipe()
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("droid stdout pipe: %w", err)
 	}
+	errR, errW, err := os.Pipe()
+	if err != nil {
+		cancel()
+		_ = stdout.Close()
+		_ = outW.Close()
+		return nil, fmt.Errorf("droid stderr pipe: %w", err)
+	}
+	cmd.Stdout, cmd.Stderr = outW, errW
+	inR, stdin, err := os.Pipe()
+	if err != nil {
+		cancel()
+		_ = stdout.Close()
+		_ = outW.Close()
+		_ = errR.Close()
+		_ = errW.Close()
+		return nil, fmt.Errorf("droid stdin pipe: %w", err)
+	}
+	cmd.Stdin = inR
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		_ = stdout.Close()
+		_ = outW.Close()
+		_ = errR.Close()
+		_ = errW.Close()
+		_ = inR.Close()
+		_ = stdin.Close()
 		return nil, fmt.Errorf("start droid: %w", err)
 	}
+	_ = outW.Close()
+	_ = errW.Close()
+	_ = inR.Close()
 	if opts.MaxTurns > 0 {
 		b.cfg.Logger.Warn("droid does not support max_turns; use the task timeout to bound execution")
 	}
 	scrub := droidOutputScrubber(b.cfg.Env)
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
-	go func() {
-		<-runCtx.Done()
-		_ = stdout.Close()
-	}()
+	var terminalObserved atomic.Bool
+	waitCh := make(chan error, 1)
+	go func(done chan<- error) { done <- cmd.Wait() }(waitCh)
+	inputCh := make(chan error, 1)
+	go func(done chan<- error) {
+		_, err := io.WriteString(stdin, prompt)
+		_ = stdin.Close()
+		done <- err
+	}(inputCh)
+	stderrDone := make(chan struct{})
+	go func(done chan<- struct{}) {
+		_, _ = io.Copy(stderr, errR)
+		close(done)
+	}(stderrDone)
+	reads := make(chan droidStreamRead, 16)
+	stopReads := make(chan struct{})
+	go readDroidStream(stdout, scrub, reads, stopReads)
 	go func() {
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
 		started := time.Now()
 		state := droidStreamState{model: opts.Model}
-		scanner := newAgentStreamScanner(stdout)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
-				continue
+		var scanErr, exitErr, inputErr, runErr error
+		ctxDone := runCtx.Done()
+		var drain *time.Timer
+		var drainC <-chan time.Time
+		defer func() {
+			if drain != nil {
+				drain.Stop()
 			}
-			var event droidStreamEvent
-			if json.Unmarshal([]byte(scrub(line)), &event) != nil {
-				continue
+		}()
+		setDrainDeadline := func() {
+			if drain == nil {
+				drain = time.NewTimer(droidStreamDrainGrace)
+			} else {
+				drain.Reset(droidStreamDrainGrace)
 			}
-			handleDroidEvent(event, msgCh, &state)
+			drainC = drain.C
 		}
-		scanErr := scanner.Err()
-		if scanErr != nil {
-			// A protocol read failure must also stop the producer, which may
-			// otherwise remain blocked writing an oversized event forever.
-			cancel()
+		cleaning := false
+		beginCleanup := func() {
+			if cleaning {
+				return
+			}
+			cleaning = true
+			// Preserve the outcome established before bounded cleanup. A later
+			// task deadline cannot erase a verified completion and process exit.
+			runErr = runCtx.Err()
+			ctxDone = nil
+			if waitCh == nil && (state.sawCompletion || state.failed) && runErr == nil {
+				terminalObserved.Store(true)
+			}
+			signalProcessGroup(cmd, syscall.SIGKILL)
+			_ = stdin.Close()
+			setDrainDeadline()
 		}
-		exitErr := cmd.Wait()
-		// Wait ends CommandContext's watcher. Explicitly stop remaining tools
-		// even when Droid exits normally and they have closed their streams.
-		signalProcessGroup(cmd, syscall.SIGKILL)
+		for waitCh != nil || reads != nil || stderrDone != nil || inputCh != nil {
+			select {
+			case item := <-reads:
+				if item.done {
+					reads, scanErr = nil, item.err
+					if scanErr != nil {
+						// Stop a producer blocked writing an oversized frame, without
+						// classifying our internal cancellation as a user abort.
+						beginCleanup()
+						cancel()
+					}
+				} else {
+					handleDroidEvent(item.event, msgCh, &state)
+				}
+			case exitErr = <-waitCh:
+				waitCh = nil
+				// A launch wrapper can exit before its descendant finishes the
+				// protocol. Allow trailing output, bounded even without a timeout.
+				if !cleaning {
+					setDrainDeadline()
+				}
+			case inputErr = <-inputCh:
+				inputCh = nil
+			case <-stderrDone:
+				stderrDone = nil
+			case <-ctxDone:
+				beginCleanup()
+			case <-drainC:
+				if cleaning {
+					b.cfg.Logger.Warn("droid cleanup did not settle before drain deadline", "pid", cmd.Process.Pid)
+					if waitCh != nil {
+						exitErr = fmt.Errorf("process did not exit during cleanup")
+					}
+					// The pipe closes and stopReads below bound readers even
+					// when a writer escaped the owned process tree.
+					waitCh, reads, stderrDone, inputCh = nil, nil, nil, nil
+				} else {
+					beginCleanup()
+				}
+			}
+			if waitCh == nil && (state.sawCompletion || reads == nil) {
+				beginCleanup()
+			}
+		}
+		close(stopReads)
+		_ = stdout.Close()
+		_ = errR.Close()
+		_ = stdin.Close()
 		releaseProcessGroup(cmd)
 		terminal := streamTerminalState{
 			sawResult: state.sawCompletion, finalResultText: state.finalText,
@@ -159,13 +258,12 @@ func (b *droidBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		if state.failed {
 			terminal.finalResultText = state.errorText
 		}
-		runErr := runCtx.Err()
-		// A scanner failure cancelled the process for cleanup, not because
-		// the user cancelled the task.
-		if scanErr != nil && runErr == context.Canceled && ctx.Err() == nil {
-			runErr = nil
+		// An authoritative terminal response means Droid consumed enough input
+		// to answer; otherwise retain input transport failures as diagnostics.
+		if state.sawCompletion || state.failed {
+			inputErr = nil
 		}
-		status, output, errText := finalizeStreamResult("droid", opts.Timeout, runErr, nil, exitErr, state.sessionID, terminal, "")
+		status, output, errText := finalizeStreamResult("droid", opts.Timeout, runErr, inputErr, exitErr, state.sessionID, terminal, "")
 		if errText != "" {
 			errText = sanitizeAgentDiagnostic(scrub(withAgentStderr(errText, "droid", stderr.Tail())))
 		}
@@ -190,7 +288,35 @@ func (b *droidBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			SessionID: sessionID,
 		}
 	}()
-	return &Session{Messages: msgCh, Result: resCh}, nil
+	return &Session{Messages: msgCh, Result: resCh, TerminalObserved: terminalObserved.Load}, nil
+}
+
+const droidStreamDrainGrace = 2 * time.Second
+
+type droidStreamRead struct {
+	event droidStreamEvent
+	done  bool
+	err   error
+}
+
+func readDroidStream(stdout io.Reader, scrub func(string) string, reads chan<- droidStreamRead, stop <-chan struct{}) {
+	scanner := newAgentStreamScanner(stdout)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		var event droidStreamEvent
+		if line == "" || json.Unmarshal([]byte(scrub(line)), &event) != nil {
+			continue
+		}
+		select {
+		case reads <- droidStreamRead{event: event}:
+		case <-stop:
+			return
+		}
+	}
+	select {
+	case reads <- droidStreamRead{done: true, err: scanner.Err()}:
+	case <-stop:
+	}
 }
 
 type droidStreamEvent struct {
