@@ -186,6 +186,7 @@ var notifTypeToGroup = map[string]string{
 	"task_failed":        "agent_activity",
 	"agent_blocked":      "agent_activity",
 	"agent_completed":    "agent_activity",
+	"issue_created":      "new_issues",
 }
 
 // isNotifMuted returns true if the given notification type is muted for a user
@@ -417,19 +418,19 @@ func notifyProjectSubscribers(
 	body string,
 	details []byte,
 ) {
-	subscriberIDs, err := queries.ListProjectSubscribersForIssue(ctx, parseUUID(issueID))
+	subscribers, err := queries.ListProjectSubscribersForIssue(ctx, parseUUID(issueID))
 	if err != nil {
 		slog.Error("failed to list project subscribers for notification",
 			"issue_id", issueID, "error", err)
 		return
 	}
-	if len(subscriberIDs) == 0 {
+	if len(subscribers) == 0 {
 		return
 	}
 
-	recipients := make([]string, 0, len(subscriberIDs))
-	for _, id := range subscriberIDs {
-		subID := util.UUIDToString(id)
+	recipients := make([]string, 0, len(subscribers))
+	for _, sub := range subscribers {
+		subID := util.UUIDToString(sub.UserID)
 		if subID == e.ActorID || exclude[subID] {
 			continue
 		}

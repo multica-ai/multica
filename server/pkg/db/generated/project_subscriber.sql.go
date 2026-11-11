@@ -90,11 +90,21 @@ WITH RECURSIVE ancestors(node_id, parent_id, depth) AS (
     UNION ALL
     SELECT i.id, i.parent_issue_id, a.depth + 1 FROM issue i JOIN ancestors a ON i.id = a.parent_id
 )
-SELECT ps.user_id
+SELECT ps.user_id, ps.created_at
 FROM issue target
+JOIN project p ON p.id = target.project_id AND p.workspace_id = target.workspace_id
 JOIN project_subscriber ps
-  ON ps.project_id = target.project_id AND ps.workspace_id = target.workspace_id
+  ON ps.project_id = p.id AND ps.workspace_id = p.workspace_id
+JOIN member m ON m.workspace_id = ps.workspace_id AND m.user_id = ps.user_id
 WHERE target.id = $1
+  AND (
+      p.visibility <> 'private'
+      OR m.role IN ('owner', 'admin')
+      OR EXISTS (
+          SELECT 1 FROM project_member pm
+          WHERE pm.project_id = p.id AND pm.user_id = ps.user_id
+      )
+  )
   AND NOT EXISTS (
       SELECT 1
       FROM issue_subscriber s
@@ -106,24 +116,30 @@ WHERE target.id = $1
 ORDER BY ps.created_at, ps.user_id
 `
 
-// Members watching the project this issue belongs to. A member who left this
-// issue, or a tree containing it (the same opt-out rule as HasAncestorOptOut),
-// is not brought back through the project: leaving an issue is the narrower,
-// more recent intent. Private-project visibility is enforced by
-// CreateInboxItem, not here.
-func (q *Queries) ListProjectSubscribersForIssue(ctx context.Context, issueID pgtype.UUID) ([]pgtype.UUID, error) {
+type ListProjectSubscribersForIssueRow struct {
+	UserID    pgtype.UUID        `json:"user_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+// Members whose project subscription currently covers this issue: still in
+// the workspace, able to see the project, and not opted out of this issue or
+// of a tree containing it (the same rule as HasAncestorOptOut). Leaving an
+// issue is the narrower, more recent intent, so the project never brings the
+// member back. Both notification fanout and the issue's effective subscriber
+// list read this, so the two cannot disagree.
+func (q *Queries) ListProjectSubscribersForIssue(ctx context.Context, issueID pgtype.UUID) ([]ListProjectSubscribersForIssueRow, error) {
 	rows, err := q.db.Query(ctx, listProjectSubscribersForIssue, issueID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []pgtype.UUID{}
+	items := []ListProjectSubscribersForIssueRow{}
 	for rows.Next() {
-		var user_id pgtype.UUID
-		if err := rows.Scan(&user_id); err != nil {
+		var i ListProjectSubscribersForIssueRow
+		if err := rows.Scan(&i.UserID, &i.CreatedAt); err != nil {
 			return nil, err
 		}
-		items = append(items, user_id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
