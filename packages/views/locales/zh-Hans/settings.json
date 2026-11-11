@@ -1499,8 +1499,8 @@
       "test_success": "代理连接成功",
       "test_failed": "代理连接失败",
       "save_button": "保存",
-      "restart_notice_title": "需要重启",
-      "restart_notice": "重启应用以使代理设置完全生效。在重启前，已有的 WebSocket 连接不受影响。"
+      "restart_notice_title": "应用修改",
+      "restart_notice": "保存时会弹出原生确认对话框，确认后重启正在运行的本地守护进程。现有 WebSocket 连接可能需要重启应用。当前运行可能中断，远程守护进程不受影响。"
     }
   },
   "members": {

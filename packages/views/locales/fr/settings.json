@@ -1513,8 +1513,8 @@
       "test_success": "Connexion proxy réussie",
       "test_failed": "Échec de la connexion proxy",
       "save_button": "Enregistrer",
-      "restart_notice_title": "Redémarrage requis",
-      "restart_notice": "Redémarrez l'application pour que les modifications de proxy prennent pleinement effet. Les connexions WebSocket existantes ne sont pas affectées avant le redémarrage."
+      "restart_notice_title": "Application des modifications",
+      "restart_notice": "L’enregistrement demande confirmation dans une boîte de dialogue native, puis redémarre le daemon local en cours. Les connexions WebSocket existantes peuvent nécessiter un redémarrage de l’application. Les exécutions actives peuvent être interrompues. Les daemons distants ne sont pas affectés."
     }
   },
   "members": {

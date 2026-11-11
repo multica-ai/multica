@@ -164,7 +164,7 @@ interface DesktopAPI {
     set: (
       url: string | null,
       noProxy: string | null,
-    ) => Promise<{ ok: boolean; error?: string }>;
+    ) => Promise<{ ok: boolean; error?: string; cancelled?: boolean }>;
     test: (url: string) => Promise<{ ok: boolean; error?: string }>;
   };
 }

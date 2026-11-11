@@ -1149,6 +1149,16 @@ async function restartDaemon(): Promise<{ success: boolean; error?: string }> {
   return startDaemon();
 }
 
+export function restartDaemonForProxyChange(): Promise<{ success: boolean; error?: string }> {
+  return lifecycleOperations.runForeground(async () => {
+    const active = await ensureActiveProfile();
+    if (!active) return { success: true };
+    const health = await fetchProfileHealth(active);
+    if (!daemonStatusAlive(health?.status)) return { success: true };
+    return restartDaemon();
+  });
+}
+
 async function daemonPidIsConfirmedAbsent(profile: string): Promise<boolean> {
   try {
     const raw = await readFile(profilePidPath(profile), "utf-8");

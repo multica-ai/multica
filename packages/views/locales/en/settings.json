@@ -1513,8 +1513,8 @@
       "test_success": "Proxy connection successful",
       "test_failed": "Proxy connection failed",
       "save_button": "Save",
-      "restart_notice_title": "Restart required",
-      "restart_notice": "Restart the app for proxy changes to take full effect. Existing WebSocket connections are not affected until restart."
+      "restart_notice_title": "Applying changes",
+      "restart_notice": "Saving asks for confirmation in a native dialog, then restarts the running local daemon. Existing WebSocket connections may require an app restart. Active runs may be interrupted. Remote daemons are not affected."
     }
   },
   "members": {

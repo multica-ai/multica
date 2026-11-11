@@ -43,9 +43,13 @@ export function NetworkSettingsTab() {
         trimmedNoProxy || null,
       );
       if (!result.ok) {
+        if (result.cancelled) return;
         toast.error(result.error ?? t(($) => $.desktop.network.proxy_save_failed));
         return;
       }
+      const saved = await window.desktopAPI.proxy.get();
+      setProxyUrl(saved.proxyUrl ?? "");
+      setNoProxy(saved.noProxy ?? "");
       toast.success(t(($) => $.desktop.network.proxy_saved), {
         id: "proxy-saved",
       });
@@ -83,6 +87,9 @@ export function NetworkSettingsTab() {
           description={t(($) => $.desktop.network.proxy_description)}
         >
           <Input
+            type="password"
+            autoComplete="off"
+            aria-label={t(($) => $.desktop.network.proxy_title)}
             value={proxyUrl}
             onChange={(e) => setProxyUrl(e.target.value)}
             placeholder={t(($) => $.desktop.network.proxy_placeholder)}

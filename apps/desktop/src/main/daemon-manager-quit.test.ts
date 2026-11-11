@@ -98,6 +98,26 @@ describe("desktop quit uses the CLI lifecycle", () => {
   });
   afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
+  it("restarts the running local daemon for a proxy change through the lifecycle gate", async () => {
+    await setup();
+    const manager = await import("./daemon-manager");
+    const result = manager.restartDaemonForProxyChange();
+    await vi.waitFor(() => expect(context.finishStop).toBeTypeOf("function"));
+    expect(context.exec.mock.calls.some((call) => call[1][1] === "start")).toBe(false);
+    context.health.mockResolvedValue(null);
+    context.finishStop!();
+    await expect(result).resolves.toEqual({ success: true });
+    expect(context.exec.mock.calls.some((call) => call[1][1] === "start")).toBe(true);
+  });
+
+  it("does not start a stopped daemon when proxy settings change", async () => {
+    await setup();
+    context.health.mockResolvedValue(null);
+    const manager = await import("./daemon-manager");
+    await expect(manager.restartDaemonForProxyChange()).resolves.toEqual({ success: true });
+    expect(context.exec).not.toHaveBeenCalled();
+  });
+
   it("leaves an already prevented quit to the Windows updater", async () => {
     await setup();
     const event = { defaultPrevented: true, preventDefault: vi.fn() };

@@ -1499,8 +1499,8 @@
       "test_success": "プロキシ接続成功",
       "test_failed": "プロキシ接続失敗",
       "save_button": "保存",
-      "restart_notice_title": "再起動が必要",
-      "restart_notice": "プロキシ変更を完全に適用するにはアプリを再起動してください。再起動前の WebSocket 接続には影響しません。"
+      "restart_notice_title": "変更の適用",
+      "restart_notice": "保存時にネイティブダイアログで確認を求めた後、稼働中のローカルデーモンを再起動します。既存の WebSocket 接続にはアプリの再起動が必要な場合があります。進行中の実行が中断される場合があります。リモートデーモンには影響しません。"
     }
   },
   "members": {

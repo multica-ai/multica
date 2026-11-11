@@ -339,7 +339,7 @@ const desktopAPI = {
     set: (
       url: string | null,
       noProxy: string | null,
-    ): Promise<{ ok: boolean; error?: string }> =>
+    ): Promise<{ ok: boolean; error?: string; cancelled?: boolean }> =>
       ipcRenderer.invoke("proxy:set", url, noProxy),
     test: (url: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke("proxy:test", url),

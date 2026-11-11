@@ -1499,8 +1499,8 @@
       "test_success": "代理連線成功",
       "test_failed": "代理連線失敗",
       "save_button": "儲存",
-      "restart_notice_title": "需要重新啟動",
-      "restart_notice": "重新啟動應用程式以使代理設定完全生效。在重新啟動前，已有的 WebSocket 連線不受影響。"
+      "restart_notice_title": "套用變更",
+      "restart_notice": "儲存時會顯示原生確認對話框，確認後重新啟動正在執行的本機守護程序。現有 WebSocket 連線可能需要重新啟動應用程式。目前的執行可能中斷，遠端守護程序不受影響。"
     }
   },
   "members": {

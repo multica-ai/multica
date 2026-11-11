@@ -1513,8 +1513,8 @@
       "test_success": "Conexión proxy exitosa",
       "test_failed": "Error en la conexión proxy",
       "save_button": "Guardar",
-      "restart_notice_title": "Reinicio requerido",
-      "restart_notice": "Reinicia la aplicación para que los cambios de proxy surtan efecto completo. Las conexiones WebSocket existentes no se ven afectadas hasta el reinicio."
+      "restart_notice_title": "Aplicación de cambios",
+      "restart_notice": "Al guardar, se pide confirmación en un diálogo nativo y luego se reinicia el daemon local en ejecución. Las conexiones WebSocket existentes pueden requerir reiniciar la aplicación. Las ejecuciones activas pueden interrumpirse. Los daemons remotos no se ven afectados."
     }
   },
   "members": {
