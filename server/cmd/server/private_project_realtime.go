@@ -39,8 +39,7 @@ type audienceQuerier interface {
 	GetIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	GetCommentIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
-	GetAutopilotRun(ctx context.Context, id pgtype.UUID) (db.AutopilotRun, error)
-	GetAutopilot(ctx context.Context, id pgtype.UUID) (db.Autopilot, error)
+	projectaccess.TaskQuerier
 }
 
 // dbPrivateProjectAudience caches each workspace's private projects and their
@@ -54,6 +53,17 @@ type dbPrivateProjectAudience struct {
 
 	mu         sync.Mutex
 	workspaces map[string]workspaceAudience
+	tasks      map[taskAudienceKey]taskProjects
+}
+
+type taskAudienceKey struct {
+	workspaceID string
+	taskID      string
+}
+
+type taskProjects struct {
+	loadedAt   time.Time
+	projectIDs []string
 }
 
 type workspaceAudience struct {
@@ -66,10 +76,12 @@ type workspaceAudience struct {
 const (
 	audienceTTL            = 2 * time.Second
 	audienceResolveTimeout = 2 * time.Second
+	maxTaskProjectCache    = 4096
 )
 
 func newPrivateProjectAudience(q audienceQuerier) *dbPrivateProjectAudience {
-	return &dbPrivateProjectAudience{q: q, ttl: audienceTTL, now: time.Now, workspaces: map[string]workspaceAudience{}}
+	return &dbPrivateProjectAudience{q: q, ttl: audienceTTL, now: time.Now,
+		workspaces: map[string]workspaceAudience{}, tasks: map[taskAudienceKey]taskProjects{}}
 }
 
 // audienceInvalidatingEvents change who may see a private project.
@@ -95,7 +107,11 @@ var workspaceVisibleTaskEvents = map[string]bool{
 }
 
 func (a *dbPrivateProjectAudience) Audience(ctx context.Context, e events.Event) ([]string, bool, error) {
-	if e.WorkspaceID == "" || workspaceVisibleTaskEvents[e.Type] {
+	if e.WorkspaceID == "" {
+		return nil, false, nil
+	}
+	a.invalidateTaskProjects(e)
+	if workspaceVisibleTaskEvents[e.Type] {
 		return nil, false, nil
 	}
 	if audienceInvalidatingEvent(e.Type) {
@@ -228,32 +244,67 @@ func (a *dbPrivateProjectAudience) eventProjectIDs(ctx context.Context, e events
 		return lookup(refs.commentID, a.q.GetCommentIssueProjectID)
 	}
 	if e.TaskID != "" && e.ChatSessionID == "" {
-		taskUUID, err := util.ParseUUID(e.TaskID)
-		if err != nil {
-			return nil, nil
-		}
-		task, err := a.q.GetAgentTask(ctx, taskUUID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		// Issue-less runs (autopilot, quick-create) resolve through the same
-		// chain the run's HTTP routes use.
-		projects, err := projectaccess.TaskProjects(ctx, a.q, task)
-		if err != nil {
-			return nil, err
-		}
-		out := make([]string, 0, len(projects))
-		for _, p := range projects {
-			if p.Valid {
-				out = append(out, util.UUIDToString(p))
-			}
-		}
-		return out, nil
+		return a.taskProjectIDs(ctx, e)
 	}
 	return nil, nil
+}
+
+// Cache only project references; membership is always taken from workspace().
+// The short TTL also bounds staleness on replicas that did not handle a move.
+func (a *dbPrivateProjectAudience) taskProjectIDs(ctx context.Context, e events.Event) ([]string, error) {
+	key := taskAudienceKey{workspaceID: e.WorkspaceID, taskID: e.TaskID}
+	a.mu.Lock()
+	cached, ok := a.tasks[key]
+	a.mu.Unlock()
+	if ok && a.now().Sub(cached.loadedAt) < a.ttl {
+		return cached.projectIDs, nil
+	}
+	taskUUID, err := util.ParseUUID(e.TaskID)
+	if err != nil {
+		return nil, nil
+	}
+	task, err := a.q.GetAgentTask(ctx, taskUUID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	projects, err := projectaccess.TaskProjects(ctx, a.q, task)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(projects))
+	for _, id := range projects {
+		ids = append(ids, util.UUIDToString(id))
+	}
+	a.mu.Lock()
+	// Bound memory even when completed runs never emit another event here.
+	if len(a.tasks) >= maxTaskProjectCache {
+		clear(a.tasks)
+	}
+	a.tasks[key] = taskProjects{loadedAt: a.now(), projectIDs: ids}
+	a.mu.Unlock()
+	return ids, nil
+}
+
+func (a *dbPrivateProjectAudience) invalidateTaskProjects(e events.Event) {
+	if strings.HasPrefix(e.Type, "issue:") || strings.HasPrefix(e.Type, "autopilot:") || audienceInvalidatingEvent(e.Type) {
+		a.mu.Lock()
+		for key := range a.tasks {
+			if key.workspaceID == e.WorkspaceID {
+				delete(a.tasks, key)
+			}
+		}
+		a.mu.Unlock()
+		return
+	}
+	switch e.Type {
+	case protocol.EventTaskQueued, protocol.EventTaskCompleted, protocol.EventTaskFailed, protocol.EventTaskCancelled:
+		a.mu.Lock()
+		delete(a.tasks, taskAudienceKey{workspaceID: e.WorkspaceID, taskID: e.TaskID})
+		a.mu.Unlock()
+	}
 }
 
 type eventRefs struct {

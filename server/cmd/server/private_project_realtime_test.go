@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -97,18 +98,25 @@ func (fakeAudienceQuerier) GetAgentTask(_ context.Context, id pgtype.UUID) (db.A
 	return db.AgentTaskQueue{}, pgx.ErrNoRows
 }
 
-func (fakeAudienceQuerier) GetAutopilotRun(_ context.Context, id pgtype.UUID) (db.AutopilotRun, error) {
-	if util.UUIDToString(id) == ppAutopilotRun {
-		return db.AutopilotRun{ID: id, AutopilotID: ppUUID(ppAutopilot)}, nil
+func (f fakeAudienceQuerier) ListIssueProjectIDs(ctx context.Context, ids []pgtype.UUID) ([]db.ListIssueProjectIDsRow, error) {
+	var rows []db.ListIssueProjectIDsRow
+	for _, id := range ids {
+		projectID, err := f.GetIssueProjectID(ctx, id)
+		if err == nil {
+			rows = append(rows, db.ListIssueProjectIDsRow{ID: id, ProjectID: projectID})
+		}
 	}
-	return db.AutopilotRun{}, pgx.ErrNoRows
+	return rows, nil
 }
 
-func (fakeAudienceQuerier) GetAutopilot(_ context.Context, id pgtype.UUID) (db.Autopilot, error) {
-	if util.UUIDToString(id) == ppAutopilot {
-		return db.Autopilot{ID: id, ProjectID: ppUUID(ppPrivate)}, nil
+func (fakeAudienceQuerier) ListAutopilotRunProjectIDs(_ context.Context, ids []pgtype.UUID) ([]db.ListAutopilotRunProjectIDsRow, error) {
+	var rows []db.ListAutopilotRunProjectIDsRow
+	for _, id := range ids {
+		if id == ppUUID(ppAutopilotRun) {
+			rows = append(rows, db.ListAutopilotRunProjectIDsRow{ID: id, ProjectID: ppUUID(ppPrivate)})
+		}
 	}
-	return db.Autopilot{}, pgx.ErrNoRows
+	return rows, nil
 }
 
 func privateAudienceScopes(fb *fakeBroadcaster) []string {
@@ -220,5 +228,109 @@ func TestRegisterListeners_RunAcrossPrivateProjectsReachesOnlyTheirCommonAudienc
 	want := []string{realtime.WorkspaceMemberScopeID(ppWorkspace, ppAdmin)}
 	if got := privateAudienceScopes(fb); len(fb.workspaceCalls) != 0 || len(got) != 1 || got[0] != want[0] {
 		t.Fatalf("workspace=%d scoped=%v, want only %v: a member of one project must not read a run that also reads the other", len(fb.workspaceCalls), got, want)
+	}
+}
+
+type countingTaskAudienceQuerier struct {
+	fakeAudienceQuerier
+	taskCalls, projectCalls int
+	projectID               pgtype.UUID
+	memberID                pgtype.UUID
+	failProjects            bool
+}
+
+func (q *countingTaskAudienceQuerier) GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
+	q.taskCalls++
+	return q.fakeAudienceQuerier.GetAgentTask(ctx, id)
+}
+
+func (q *countingTaskAudienceQuerier) ListAutopilotRunProjectIDs(_ context.Context, ids []pgtype.UUID) ([]db.ListAutopilotRunProjectIDsRow, error) {
+	q.projectCalls++
+	if q.failProjects {
+		return nil, errors.New("db down")
+	}
+	return []db.ListAutopilotRunProjectIDsRow{{ID: ids[0], ProjectID: q.projectID}}, nil
+}
+
+func (q *countingTaskAudienceQuerier) ListPrivateProjectAudience(ctx context.Context, ws pgtype.UUID) ([]db.ListPrivateProjectAudienceRow, error) {
+	rows, err := q.fakeAudienceQuerier.ListPrivateProjectAudience(ctx, ws)
+	rows[0].UserID = q.memberID
+	return rows, err
+}
+
+func TestPrivateProjectTaskAudienceCachesProjectLookups(t *testing.T) {
+	q := &countingTaskAudienceQuerier{projectID: ppUUID(ppPrivate), memberID: ppUUID(ppMember)}
+	a := newPrivateProjectAudience(q)
+	e := events.Event{Type: protocol.EventTaskMessage, WorkspaceID: ppWorkspace, TaskID: ppAutopilotTask}
+	for range 200 {
+		members, private, err := a.Audience(context.Background(), e)
+		if err != nil || !private || len(members) != 2 {
+			t.Fatalf("audience = %v, %v, %v", members, private, err)
+		}
+	}
+	if q.taskCalls != 1 || q.projectCalls != 1 {
+		t.Fatalf("200 messages did %d task and %d project lookups, want one each", q.taskCalls, q.projectCalls)
+	}
+}
+
+func TestPrivateProjectTaskAudienceInvalidatesCachedProjects(t *testing.T) {
+	for _, eventType := range []string{
+		protocol.EventIssueUpdated, protocol.EventAutopilotUpdated, protocol.EventProjectUpdated,
+		protocol.EventTaskCompleted, protocol.EventTaskFailed, protocol.EventTaskCancelled,
+	} {
+		t.Run(eventType, func(t *testing.T) {
+			q := &countingTaskAudienceQuerier{projectID: ppUUID(ppPrivate), memberID: ppUUID(ppMember)}
+			a := newPrivateProjectAudience(q)
+			e := events.Event{Type: protocol.EventTaskMessage, WorkspaceID: ppWorkspace, TaskID: ppAutopilotTask}
+			if _, _, err := a.Audience(context.Background(), e); err != nil {
+				t.Fatal(err)
+			}
+			q.projectID = ppUUID(ppPrivate2)
+			if _, _, err := a.Audience(context.Background(), events.Event{Type: eventType, WorkspaceID: ppWorkspace, TaskID: ppAutopilotTask}); err != nil {
+				t.Fatal(err)
+			}
+			members, private, err := a.Audience(context.Background(), e)
+			if err != nil || !private || len(members) != 2 || members[1] != ppOther {
+				t.Fatalf("moved run audience = %v, %v, %v; want admin and new project's member", members, private, err)
+			}
+		})
+	}
+}
+
+func TestPrivateProjectTaskCacheDoesNotCacheMembership(t *testing.T) {
+	q := &countingTaskAudienceQuerier{projectID: ppUUID(ppPrivate), memberID: ppUUID(ppMember)}
+	a := newPrivateProjectAudience(q)
+	e := events.Event{Type: protocol.EventTaskMessage, WorkspaceID: ppWorkspace, TaskID: ppAutopilotTask}
+	if _, _, err := a.Audience(context.Background(), e); err != nil {
+		t.Fatal(err)
+	}
+	q.memberID = pgtype.UUID{}
+	if _, _, err := a.Audience(context.Background(), events.Event{Type: protocol.EventProjectMembersChanged, WorkspaceID: ppWorkspace}); err != nil {
+		t.Fatal(err)
+	}
+	members, private, err := a.Audience(context.Background(), e)
+	if err != nil || !private || len(members) != 1 || members[0] != ppAdmin {
+		t.Fatalf("revoked member still receives run: %v, %v, %v", members, private, err)
+	}
+}
+
+func TestPrivateProjectTaskCacheExpiresAndRetriesFailures(t *testing.T) {
+	q := &countingTaskAudienceQuerier{projectID: ppUUID(ppPrivate), memberID: ppUUID(ppMember), failProjects: true}
+	a := newPrivateProjectAudience(q)
+	now := time.Now()
+	a.now = func() time.Time { return now }
+	e := events.Event{Type: protocol.EventTaskMessage, WorkspaceID: ppWorkspace, TaskID: ppAutopilotTask}
+	if _, _, err := a.Audience(context.Background(), e); err == nil {
+		t.Fatal("project lookup failure must drop the event")
+	}
+	q.failProjects = false
+	if _, private, err := a.Audience(context.Background(), e); err != nil || !private {
+		t.Fatalf("retry = %v, %v", private, err)
+	}
+	q.projectID = ppUUID(ppPrivate2)
+	now = now.Add(a.ttl)
+	members, private, err := a.Audience(context.Background(), e)
+	if err != nil || !private || len(members) != 2 || members[1] != ppOther {
+		t.Fatalf("expired cache audience = %v, %v, %v", members, private, err)
 	}
 }

@@ -189,3 +189,50 @@ func TestPrivateProjectWorkingIssuesHiddenFromAggregates(t *testing.T) {
 		t.Errorf("insider squad member issues = %+v, want the private issue", visible.ActiveIssues)
 	}
 }
+
+func TestPrivateProjectQuickCreateHistoryRequiresTargetAndParent(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	targetProject := dbfx.Project(t, f.marker+" target", testutil.Cols{"visibility": "private"})
+	addProjectMemberRow(t, targetProject, f.outsider)
+	contextJSON, err := json.Marshal(map[string]string{
+		"type": "quick_create", "project_id": targetProject, "parent_issue_id": f.secretIssue,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tasks := []db.AgentTaskQueue{
+		{ID: parseUUID(f.publicIssue), Context: contextJSON},
+		{ID: parseUUID(f.secretIssue), IssueID: parseUUID(f.publicIssue)},
+	}
+	for _, tc := range []struct {
+		name, userID string
+		restricted   bool
+	}{
+		{"target only", f.outsider, true},
+		{"parent only", f.insider, true},
+		{"workspace owner", testUserID, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := []AgentTaskResponse{{ID: "quick-create", Result: "private output"}, {ID: "public-issue", Result: "public output"}}
+			req := asUser(newRequest(http.MethodGet, "/api/agents/tasks", nil), tc.userID)
+			if err := testHandler.redactHiddenProjectTasks(req, testWorkspaceID, tasks, resp); err != nil {
+				t.Fatal(err)
+			}
+			if resp[0].ID != "quick-create" || resp[0].Restricted != tc.restricted || (tc.restricted && resp[0].Result != nil) {
+				t.Fatalf("quick-create history = %+v, want restricted=%v", resp[0], tc.restricted)
+			}
+			if resp[1].ID != "public-issue" || resp[1].Restricted || resp[1].Result != "public output" {
+				t.Fatalf("public run changed: %+v", resp[1])
+			}
+		})
+	}
+	addProjectMemberRow(t, f.projectID, f.outsider)
+	resp := []AgentTaskResponse{{ID: "quick-create", Result: "private output"}, {ID: "public-issue"}}
+	req := asUser(newRequest(http.MethodGet, "/api/agents/tasks", nil), f.outsider)
+	if err := testHandler.redactHiddenProjectTasks(req, testWorkspaceID, tasks, resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp[0].Restricted || resp[0].Result != "private output" {
+		t.Fatalf("member of both projects cannot see output: %+v", resp[0])
+	}
+}

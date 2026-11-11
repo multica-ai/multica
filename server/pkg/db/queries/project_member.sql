@@ -101,3 +101,9 @@ ON CONFLICT (entity_type, entity_id) DO UPDATE
 -- Issue -> project for run-history redaction; issues outside a project are
 -- returned with a NULL project_id.
 SELECT id, project_id FROM issue WHERE id = ANY(sqlc.arg('ids')::uuid[]);
+
+-- name: ListAutopilotRunProjectIDs :many
+SELECT r.id, a.project_id
+FROM autopilot_run r
+JOIN autopilot a ON a.id = r.autopilot_id
+WHERE r.id = ANY(sqlc.arg('ids')::uuid[]);

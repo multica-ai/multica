@@ -23,41 +23,12 @@ func (h *Handler) redactHiddenProjectTasks(r *http.Request, workspaceID string, 
 	if hidden.Empty() {
 		return nil
 	}
-	seen := map[pgtype.UUID]struct{}{}
-	var issueIDs []pgtype.UUID
-	for _, t := range tasks {
-		if !t.IssueID.Valid {
-			continue
-		}
-		if _, ok := seen[t.IssueID]; ok {
-			continue
-		}
-		seen[t.IssueID] = struct{}{}
-		issueIDs = append(issueIDs, t.IssueID)
+	projects, err := projectaccess.TasksProjects(r.Context(), h.Queries, tasks)
+	if err != nil {
+		return err
 	}
-	projectOf := map[pgtype.UUID]pgtype.UUID{}
-	if len(issueIDs) > 0 {
-		rows, err := h.Queries.ListIssueProjectIDs(r.Context(), issueIDs)
-		if err != nil {
-			return err
-		}
-		for _, row := range rows {
-			projectOf[row.ID] = row.ProjectID
-		}
-	}
-	for i, t := range tasks {
-		if t.IssueID.Valid {
-			if !hidden.CanSeeProject(projectOf[t.IssueID]) {
-				resp[i] = restrictedTaskResponse(resp[i])
-			}
-			continue
-		}
-		// Issue-less runs are rare in a list; resolve them one by one.
-		projects, err := projectaccess.TaskProjects(r.Context(), h.Queries, t)
-		if err != nil {
-			return err
-		}
-		if !hidden.CanSeeProjects(projects) {
+	for i := range tasks {
+		if !hidden.CanSeeProjects(projects[i]) {
 			resp[i] = restrictedTaskResponse(resp[i])
 		}
 	}
