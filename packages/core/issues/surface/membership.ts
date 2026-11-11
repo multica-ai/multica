@@ -115,6 +115,13 @@ export function issueMatchesListFilter(
       return false;
     }
   }
+  if (filter.created_by_user_id !== undefined) {
+    if (issue.creator_type === "member") {
+      if (issue.creator_id === undefined) unknown = true;
+      else if (issue.creator_id !== filter.created_by_user_id) return false;
+    } else if (issue.creator_type === undefined || issue.requester_id === undefined) unknown = true;
+    else if (issue.requester_id !== filter.created_by_user_id) return false;
+  }
   if (filter.creator_id !== undefined) {
     if (issue.creator_id === undefined) unknown = true;
     else if (issue.creator_id !== filter.creator_id) return false;

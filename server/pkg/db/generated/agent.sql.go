@@ -6760,8 +6760,8 @@ WHERE a.workspace_id = $1
           )
           OR (
             $3::text IN ('created', 'any')
-            AND i.creator_type = 'member'
-            AND i.creator_id = $4::uuid
+            AND ((i.creator_type = 'member' AND i.creator_id = $4::uuid)
+                 OR i.requester_user_id = $4::uuid)
           )
           OR (
             $3::text IN ('involved', 'any')
