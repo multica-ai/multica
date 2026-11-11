@@ -308,6 +308,14 @@ families in font stacks and WCAG contrast in both modes, each with its line
 in `theme.css`, and exits with status 1 when there is an error. Warnings,
 such as a colour it cannot resolve, do not fail the check.
 
+Contrast is measured with every option at its default, then once for each
+other value of a `select` and the other state of a `toggle`, one option at a
+time with the rest at their defaults. Options are not combined. A failure
+names the value it comes from, for example
+`Contrast, dark mode (Screen = Amber): …`. Options that set a variable
+(`color`, `variable-select`, `number`, `slider`, `text`, `font`) are measured
+at their defaults only, so check the other values you offer yourself.
+
 To see the theme the way the theme store shows it:
 
 ```sh

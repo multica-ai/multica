@@ -1,13 +1,15 @@
 import type { ArchiveFile } from "./theme-archive";
 import { parseTheme, readThemeFiles, type ThemePackageInput } from "./theme-package";
 import { THEME_VARIABLE_NAMES } from "./theme-variables";
-import { contrastRatio, resolveColor, type BasePalette } from "./theme-contrast";
+import { contrastRatio, paintOver, resolveColor, type BasePalette } from "./theme-contrast";
 import {
   THEME_OPTION_ATTR_PREFIX,
+  localizedText,
   themeOptionAttributes,
   themeOptionVariables,
   type Theme,
   type ThemeManifest,
+  type ThemeOptionValues,
 } from "./themes";
 
 /**
@@ -15,13 +17,23 @@ import {
  * registry checks. On top of what import enforces (the manifest and the CSS
  * sanitizer), it reports what import lets through but a theme should not
  * do: set variables that are not public, name generic families in Latin
- * font stacks, or paint text without enough contrast. It reads the theme
- * with its default options.
+ * font stacks, or paint text without enough contrast. Contrast is measured
+ * with the options at their defaults, then once per other value of each
+ * `select` and `toggle` with the rest at their defaults.
  */
 
 export interface ThemeCheckIssue {
   level: "error" | "warning";
   message: string;
+}
+
+/** One option set to a value other than its default. */
+export interface ContrastVariant {
+  option: string;
+  /** The choice's value, or `on` / `off` for a toggle. */
+  value: string;
+  /** For messages: `Screen = MS-DOS Editor`. */
+  label: string;
 }
 
 export interface ContrastCheck {
@@ -32,6 +44,8 @@ export interface ContrastCheck {
   background: string;
   ratio: number;
   required: number;
+  /** Set when one option was off its default for this measurement. */
+  variant?: ContrastVariant;
 }
 
 export interface ThemeCheckReport {
@@ -63,6 +77,7 @@ const BACKGROUNDS = [
   "--sidebar-accent",
 ];
 const READING_SURFACES = ["--background", "--page-canvas", "--surface", "--surface-raised"];
+/** Frame surfaces under the text tones. --sidebar-accent carries --sidebar-accent-foreground only. */
 const FRAME_BACKGROUNDS = [
   "--app-shell",
   "--background",
@@ -72,7 +87,6 @@ const FRAME_BACKGROUNDS = [
   "--surface-hover",
   "--surface-selected",
   "--muted",
-  "--sidebar-accent",
 ];
 
 const GENERIC_FAMILY =
@@ -101,9 +115,8 @@ type Mode = "light" | "dark";
 /**
  * Where a selector on <html> applies and how specific it is, for the
  * selectors the contrast check follows: `:root` or `html`, the mode
- * classes, and the theme's option attributes, read at their defaults.
- * `"inactive"` when the default options do not match; `null` for any
- * other selector.
+ * classes, and the theme's option attributes as given. `"inactive"` when
+ * those attributes do not match; `null` for any other selector.
  */
 function rootSelector(
   selector: string,
@@ -153,6 +166,29 @@ function splitSelectors(prelude: string): string[] {
   }
   out.push(prelude.slice(start).trim());
   return out;
+}
+
+/**
+ * The modes a frame rule applies in: a selector on <html> that `rootSelector`
+ * follows, then a frame anchor below it. Empty for any other selector.
+ */
+function frameModes(selector: string, attributes: ReadonlyMap<string, string>): Mode[] {
+  let depth = 0;
+  let quote = "";
+  for (let i = 0; i < selector.length; i += 1) {
+    const c = selector[i]!;
+    if (quote) {
+      if (c === quote) quote = "";
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === "(" || c === "[") depth += 1;
+    else if (c === ")" || c === "]") depth = Math.max(0, depth - 1);
+    else if (/\s/.test(c) && depth === 0) {
+      if (!FRAME_ANCHOR.test(selector.slice(i))) return [];
+      const head = rootSelector(selector.slice(0, i), attributes);
+      return head && head !== "inactive" ? head.modes : [];
+    }
+  }
+  return [];
 }
 
 /** A palette that records which variables a contrast check read. */
@@ -262,16 +298,44 @@ function checkFonts(css: string, manifest: unknown, issues: ThemeCheckIssue[]) {
 }
 
 /**
- * Contrast with the options at their defaults, through the same helpers the
- * app uses to apply them. Without a parsed theme there are no options to apply.
+ * Every option value the contrast check tries besides the defaults: each
+ * other choice of a `select` and the other state of a `toggle`, one option
+ * at a time. Variable options (`color`, `variable-select` and the rest) stay
+ * at their defaults.
  */
-function checkContrast(
-  css: string,
+function optionVariants(theme: ThemeManifest | undefined): { chosen: ThemeOptionValues; variant: ContrastVariant }[] {
+  const out: { chosen: ThemeOptionValues; variant: ContrastVariant }[] = [];
+  for (const option of theme?.options ?? []) {
+    const label = localizedText(option.label, "en");
+    if (option.type === "select") {
+      for (const choice of option.choices) {
+        if (choice.value === option.default) continue;
+        out.push({
+          chosen: { [option.id]: choice.value },
+          variant: { option: option.id, value: choice.value, label: `${label} = ${localizedText(choice.label, "en")}` },
+        });
+      }
+    } else if (option.type === "toggle") {
+      const value = option.default ? "off" : "on";
+      out.push({ chosen: { [option.id]: !option.default }, variant: { option: option.id, value, label: `${label} = ${value}` } });
+    }
+  }
+  return out;
+}
+
+/**
+ * Contrast with the options as chosen (the rest at their defaults), through
+ * the same helpers the app uses to apply them. Without a parsed theme there
+ * are no options to apply.
+ */
+function measureContrast(
+  clean: string,
+  parsed: readonly Rule[],
   theme: ThemeManifest | undefined,
+  chosen: ThemeOptionValues | undefined,
   base: BasePalette,
-  issues: ThemeCheckIssue[],
-): ContrastCheck[] {
-  const clean = stripComments(css);
+  variant: ContrastVariant | undefined,
+): { results: ContrastCheck[]; unresolved: Set<string> } {
   // The cascade on <html>, per mode: the base tokens (`:root` and `.dark`),
   // then the theme's root and mode rules by specificity and order.
   const cascade = {
@@ -281,10 +345,10 @@ function checkContrast(
   const frame = { light: [] as [string, string][], dark: [] as [string, string][] };
   const unmodelled = new Map<string, string>();
   const attributes = new Map<string, string>();
-  for (const [name, value] of Object.entries(theme ? themeOptionAttributes(theme, undefined) : {})) {
+  for (const [name, value] of Object.entries(theme ? themeOptionAttributes(theme, chosen) : {})) {
     if (value !== null) attributes.set(name.slice(THEME_OPTION_ATTR_PREFIX.length), value);
   }
-  for (const rule of rules(clean)) {
+  for (const rule of parsed) {
     for (const selector of rule.selectors) {
       const target = rule.nested ? null : rootSelector(selector, attributes);
       if (target === "inactive") continue;
@@ -306,11 +370,11 @@ function checkContrast(
         }
       }
     }
-    const joined = rule.selectors.join(", ");
-    const frameMode = /^(?::root|html)?\.theme-(light|dark)\s/.exec(joined)?.[1] as "light" | "dark" | undefined;
-    if (!rule.nested && frameMode && FRAME_ANCHOR.test(joined)) frame[frameMode].push(...declarations(rule.body));
+    if (rule.nested) continue;
+    const modes = new Set(rule.selectors.flatMap((selector) => frameModes(selector, attributes)));
+    for (const m of modes) frame[m].push(...declarations(rule.body));
   }
-  const options = theme ? themeOptionVariables(theme, undefined) : { light: {}, dark: {} };
+  const options = theme ? themeOptionVariables(theme, chosen) : { light: {}, dark: {} };
   const results: ContrastCheck[] = [];
   const unresolved = new Set<string>();
   const read = new Set<string>();
@@ -344,7 +408,15 @@ function checkContrast(
           continue;
         }
         const ratio = contrastRatio(fg.color, bg.color);
-        results.push({ mode: m, area, foreground, background, ratio: Math.round(ratio * 100) / 100, required });
+        results.push({
+          mode: m,
+          area,
+          foreground,
+          background,
+          ratio: Math.round(ratio * 100) / 100,
+          required,
+          ...(variant ? { variant } : {}),
+        });
       }
     };
     const hasFrame = frame[m].length > 0;
@@ -359,34 +431,83 @@ function checkContrast(
     }
     if (hasFrame) {
       const framePalette = new ReadTracker(read, [...palette, ...frame[m]]);
-      for (const tone of ["--foreground", "--muted-foreground", "--sidebar-accent-foreground"]) {
+      for (const tone of ["--foreground", "--muted-foreground"]) {
         measure("frame", framePalette, tone, FRAME_BACKGROUNDS, TEXT);
       }
       measure("frame", framePalette, "--faint-foreground", FRAME_BACKGROUNDS, NON_TEXT);
+      // Rail items paint --sidebar-accent-foreground when active and on hover,
+      // where the app's hover is --sidebar-accent at 60% over the shell.
+      const accent = resolveColor(framePalette, "--sidebar-accent");
+      const shell = resolveColor(framePalette, "--app-shell");
+      const accentSurfaces = ["--sidebar-accent"];
+      if (framePalette.has("--rail-item-hover-background")) accentSurfaces.push("--rail-item-hover-background");
+      else if ("color" in accent && "color" in shell && shell.color.a === 1) {
+        const { r, g, b } = paintOver({ ...accent.color, a: accent.color.a * 0.6 }, shell.color);
+        framePalette.set("--rail-item-hover-background", `rgb(${r} ${g} ${b})`);
+        accentSurfaces.push("--rail-item-hover-background");
+      }
+      measure("frame", framePalette, "--sidebar-accent-foreground", accentSurfaces, TEXT);
     }
   }
 
   for (const [name, where] of unmodelled) {
     if (read.has(name)) unresolved.add(`${where}, which the check does not follow`);
   }
+  return { results, unresolved };
+}
 
+const pairKey = (c: ContrastCheck) => `${c.mode} ${c.area} ${c.foreground} ${c.background}`;
+
+/** One error per mode, area and colour, listing the surfaces it fails on. */
+function reportFailing(checks: readonly ContrastCheck[], issues: ThemeCheckIssue[]) {
   const failing = new Map<string, ContrastCheck[]>();
-  for (const check of results) {
+  for (const check of checks) {
     if (check.ratio >= check.required) continue;
     const key = `${check.mode} ${check.area} ${check.foreground}`;
     failing.set(key, [...(failing.get(key) ?? []), check]);
   }
-  for (const checks of failing.values()) {
-    const { mode: m, area, foreground, required } = checks[0]!;
-    const surfaces = checks.map((c) => `${c.background} (${c.ratio.toFixed(2)}:1)`);
+  for (const group of failing.values()) {
+    const { mode: m, area, foreground, required, variant } = group[0]!;
+    const surfaces = group.map((c) => `${c.background} (${c.ratio.toFixed(2)}:1)`);
     const list = surfaces.length > 1 ? `${surfaces.slice(0, -1).join(", ")} and ${surfaces.at(-1)}` : surfaces[0];
+    const where = [...(area === "frame" ? ["frame"] : []), ...(variant ? [variant.label] : [])];
     issues.push({
       level: "error",
-      message: `Contrast, ${m} mode${area === "frame" ? " (frame)" : ""}: ${foreground} is below ${required}:1 on ${list}.`,
+      message: `Contrast, ${m} mode${where.length > 0 ? ` (${where.join(", ")})` : ""}: ${foreground} is below ${required}:1 on ${list}.`,
     });
   }
-  for (const reason of unresolved) {
+}
+
+/**
+ * Contrast at the default options, then once per other option value. An
+ * option value reports only what does not already fail at the defaults.
+ */
+function checkContrast(
+  css: string,
+  theme: ThemeManifest | undefined,
+  base: BasePalette,
+  issues: ThemeCheckIssue[],
+): ContrastCheck[] {
+  const clean = stripComments(css);
+  const parsed = rules(clean);
+  const defaults = measureContrast(clean, parsed, theme, undefined, base, undefined);
+  reportFailing(defaults.results, issues);
+  const failingByDefault = new Set(defaults.results.filter((c) => c.ratio < c.required).map(pairKey));
+  const results = [...defaults.results];
+  const unresolvedWith = new Map<string, string[]>();
+  for (const { chosen, variant } of optionVariants(theme)) {
+    const run = measureContrast(clean, parsed, theme, chosen, base, variant);
+    results.push(...run.results);
+    reportFailing(run.results.filter((c) => !failingByDefault.has(pairKey(c))), issues);
+    for (const reason of run.unresolved) {
+      if (!defaults.unresolved.has(reason)) unresolvedWith.set(reason, [...(unresolvedWith.get(reason) ?? []), variant.label]);
+    }
+  }
+  for (const reason of defaults.unresolved) {
     issues.push({ level: "warning", message: `Contrast not checked, ${reason}.` });
+  }
+  for (const [reason, labels] of unresolvedWith) {
+    issues.push({ level: "warning", message: `Contrast not checked (${labels.join(", ")}), ${reason}.` });
   }
   return results;
 }
