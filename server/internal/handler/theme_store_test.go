@@ -104,6 +104,9 @@ func TestThemeStoreRoutes(t *testing.T) {
 	if len(list.Themes) != 1 || list.Themes[0].Version != "1.0.0" || strings.Join(list.Themes[0].Screenshots, ",") != "light" || list.Themes[0].Downloads != 0 {
 		t.Fatalf("list = %+v", list.Themes)
 	}
+	if revisions := list.Themes[0].ScreenshotRevisions; len(revisions) != 1 || len(revisions["light"]) != 12 {
+		t.Fatalf("screenshot revisions = %v, want one for light", revisions)
+	}
 	if strings.Contains(w.Body.String(), "registry.test") || strings.Contains(w.Body.String(), "shots/") {
 		t.Fatalf("download URLs and screenshot paths must stay on the server: %s", w.Body.String())
 	}

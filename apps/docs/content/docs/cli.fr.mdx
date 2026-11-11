@@ -271,6 +271,17 @@ La suppression d'un runtime auquel des agents actifs sont encore liés est refus
 
 Consultez [Daemon et runtimes](/daemon-runtimes) pour son fonctionnement et les profils personnalisés.
 
+## Environnements [#environments]
+
+```bash
+multica env start web
+multica env start web --wait=false
+multica env list
+multica env stop web
+```
+
+`multica env` (forme longue `multica environment`) démarre les environnements qu'un dépôt déclare dans `.multica/environments.toml`. Le daemon les supervise : ils continuent de tourner après la fin de l'exécution, apparaissent dans la barre latérale de la tâche et s'arrêtent à la fin de leur TTL. `start` attend que l'environnement réponde et affiche son URL. Ces commandes utilisent l'identifiant de la tâche en cours : elles ne fonctionnent que pendant l'exécution d'un agent ; depuis votre propre ordinateur, utilisez la barre latérale de la tâche. Voir [Environnements](/environments) pour le format du fichier et des exemples.
+
 ## Projets, espaces de travail et automatisations
 
 ```bash
@@ -304,6 +315,7 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Europ
 | `workspace` | Créer, consulter et changer d'espace de travail, et inviter des membres |
 | `repo` | Gérer les dépôts de l'espace de travail et les extraire localement |
 | `daemon`, `runtime` | Démarrer et arrêter le daemon local ; consulter et gérer les runtimes |
+| `env` | Démarrer, arrêter et lister les environnements déclarés par un dépôt (pendant l'exécution d'un agent uniquement) |
 | `attachment` | Envoyer ou télécharger des pièces jointes |
 | `user profile` | Consulter ou mettre à jour le profil de l'utilisateur actuel |
 | `auth`, `login`, `setup` | Se connecter, vérifier l'état de l'authentification et initialiser une connexion |
@@ -431,6 +443,7 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | `runtime` | `list/usage/activity/update/rename/delete` | Consulter et gérer les runtimes | `usage` : `--days` (90 par défaut, 365 au maximum) ; `update` : `--target-version` (obligatoire), `--wait` ; `delete` : `--cascade` (dissocie les agents liés, préserve leurs données et annule leurs exécutions) |
 | | `profile list/create/update/delete` | Gérer les profils de runtime personnalisés | `create` : `--display-name`, `--command-name` (tous deux obligatoires), `--runtime-type` (ou l'ancien `--protocol-family`), `--description` ; `update` : `--enabled` |
 | | `profile set-path/unset-path <profile-id>` | Fixer le chemin d'un exécutable local (local uniquement, jamais envoyé au serveur) | |
+| `env` | `start <name>` / `stop <name>` / `list` | Démarrer, arrêter ou lister les environnements déclarés de cette tâche ; uniquement pendant l'exécution d'un agent. Voir [Environnements](/environments) | `start` : `--wait` (`true` par défaut) ; toutes : `--output` (`table` ou `json`) |
 
 ### Additional
 

@@ -133,6 +133,7 @@ describe("theme check", () => {
       ]) {
         expect(errors(css, { options })).toEqual([
           expect.stringMatching(/^Contrast, light mode \(Ink = Pale\): --foreground is below 4\.5:1 on .*--page-canvas \(1\.0\d:1\)/),
+          expect.stringMatching(/^Contrast, light mode \(display chip, Ink = Pale\): --foreground is below 4\.5:1 on --input/),
         ]);
       }
       const report = check(':root[data-theme-option-ink="soft"].theme-light { --muted-foreground: #bbbbbb; }', { options });
@@ -270,6 +271,72 @@ describe("theme check", () => {
     expect(found.some((m) => /light mode \(frame\): --foreground is below 4\.5:1 on --app-shell/.test(m))).toBe(true);
   });
 
+  it("measures tooltips with the dark-mode text they always use", () => {
+    const pale = ".theme-light { --tooltip: #f4f4f4; }";
+    expect(errors(pale)).toEqual([
+      expect.stringMatching(/^Contrast, light mode \(tooltip\): --foreground is below 4\.5:1 on --tooltip \(1\.\d\d:1\)\. .*--tooltip-foreground/),
+    ]);
+    // MS-DOS 1.0.0: a grey tooltip under the app's near-white dark-mode text.
+    expect(errors(".theme-dark { --tooltip: #aaaaaa; }")).toEqual([
+      expect.stringMatching(/^Contrast, dark mode \(tooltip\): --foreground is below 4\.5:1 on --tooltip/),
+    ]);
+    expect(check(`${pale}\n.theme-light { --tooltip-foreground: #111111; }`)).toMatchObject({ ok: true, issues: [] });
+    expect(check(`${pale}\n.theme-light [data-slot="tooltip-content"] { --foreground: #111111; }`)).toMatchObject({
+      ok: true,
+      issues: [],
+    });
+    const tip = check(`${pale}\n[data-slot='tooltip-content'] { --tooltip-foreground: #111111; }`).contrast.filter(
+      (c) => c.area === "tooltip",
+    );
+    expect(tip.map((c) => [c.mode, c.foreground, c.background])).toEqual([
+      ["light", "--tooltip-foreground", "--tooltip"],
+      ["dark", "--tooltip-foreground", "--tooltip"],
+    ]);
+  });
+
+  it("measures pressed display chips in the popover they sit in", () => {
+    expect(errors(".theme-light { --input: #111111; }")).toEqual([
+      expect.stringMatching(
+        /^Contrast, light mode \(display chip\): --foreground is below 4\.5:1 on --input \(1\.\d\d:1\)\. .*--display-chip-pressed-background/,
+      ),
+    ]);
+    expect(errors('.theme-dark [data-slot="popover-content"] { --input: oklch(0.985 0 0); }')).toEqual([
+      expect.stringMatching(/^Contrast, dark mode \(display chip\): --foreground is below 4\.5:1 on --input \(1\.00:1\)/),
+    ]);
+    const split = ".theme-light { --input: #111111; --display-chip-pressed-background: #e6e6e6; }";
+    expect(check(split)).toMatchObject({ ok: true, issues: [] });
+    expect(errors(`${split}\n.theme-light { --display-chip-pressed-color: #ffffff; }`)).toEqual([
+      expect.stringMatching(/^Contrast, light mode \(display chip\): --display-chip-pressed-color is below 4\.5:1 on --display-chip-pressed-background/),
+    ]);
+    // A variable set on <html> is inherited as computed there, not re-read in the popover.
+    expect(
+      errors(
+        [
+          ".theme-light { --display-chip-pressed-color: var(--foreground); --display-chip-pressed-background: #111111; }",
+          '.theme-light [data-slot="popover-content"] { --foreground: #ffffff; }',
+        ].join("\n"),
+      ),
+    ).toEqual([expect.stringMatching(/^Contrast, light mode \(display chip\): --display-chip-pressed-color is below 4\.5:1 .*\(1\.\d\d:1\)/)]);
+    // The more specific slot rule wins over a later, less specific one.
+    expect(
+      errors(
+        [
+          '.theme-light [data-slot="popover-content"] { --display-chip-pressed-background: #ffffff; --display-chip-pressed-color: #ffffff; }',
+          '[data-slot="popover-content"] { --display-chip-pressed-background: #111111; --display-chip-pressed-color: #ffffff; }',
+        ].join("\n"),
+      ),
+    ).toEqual([expect.stringMatching(/^Contrast, light mode \(display chip\): .*\(1\.00:1\)/)]);
+    // Slot rules follow option attributes like rules on <html>.
+    const options = [{ id: "ink", type: "select", label: "Ink", default: "dark", choices: [{ value: "dark", label: "Dark" }, { value: "pale", label: "Pale" }] }];
+    expect(errors(':root[data-theme-option-ink="pale"] [data-slot="popover-content"] { --input: #111111; }', { options })).toEqual([
+      expect.stringMatching(/^Contrast, light mode \(display chip, Ink = Pale\): --foreground is below 4\.5:1 on --input/),
+    ]);
+    // Dark mode's default --input is translucent; it is measured over the popover.
+    const chips = check("").contrast.filter((c) => c.area === "display chip");
+    expect(chips.map((c) => c.mode)).toEqual(["light", "dark"]);
+    expect(chips.every((c) => c.ratio >= c.required)).toBe(true);
+  });
+
   describe("rail items", () => {
     const rail = (declarations: string) => `.theme-light [data-mc="app-rail"] { ${declarations} }`;
     const fills = "--rail-item-hover-background: #000000; --rail-item-active-background: #000000;";
@@ -309,6 +376,34 @@ describe("theme check", () => {
       expect(errors(ink("#333333"), { options })).toEqual([
         expect.stringMatching(/^Contrast, light mode \(frame, Frame = Ink\): --rail-item-active-color is below 4\.5:1/),
       ]);
+    });
+
+    describe("without frame rules", () => {
+      // MS-DOS 1.2.0, light: white on a blue active item, but the default hover is a pale --sidebar-accent wash.
+      const dos = ".theme-light { --rail-item-active-background: #0000aa; --rail-item-active-color: #ffffff; }";
+
+      it("measures the rail on the page's colours", () => {
+        expect(errors(dos)).toEqual([
+          expect.stringMatching(/^Contrast, light mode: --rail-item-active-color is below 4\.5:1 on --rail-item-hover-background \(1\.\d\d:1\)\.$/),
+        ]);
+        expect(check(`${dos}\n.theme-light { --rail-item-hover-background: #0000aa; }`)).toMatchObject({ ok: true, issues: [] });
+        const rail = check(dos).contrast.filter((c) => c.mode === "light" && c.foreground === "--rail-item-active-color");
+        expect(rail.map((c) => [c.area, c.background])).toEqual([
+          ["page", "--rail-item-active-background"],
+          ["page", "--rail-item-hover-background"],
+        ]);
+      });
+
+      it("falls back to --sidebar-accent-foreground on --sidebar-accent", () => {
+        expect(errors(".theme-dark { --sidebar-accent-foreground: #333333; }")).toEqual([
+          expect.stringMatching(
+            /^Contrast, dark mode: --sidebar-accent-foreground is below 4\.5:1 on --sidebar-accent \(1\.\d\d:1\) and --rail-item-hover-background \(1\.\d\d:1\)\.$/,
+          ),
+        ]);
+        expect(errors(".theme-light { --rail-item-color: #dddddd; }")).toEqual([
+          expect.stringMatching(/^Contrast, light mode: --rail-item-color is below 4\.5:1 on --app-shell/),
+        ]);
+      });
     });
   });
 

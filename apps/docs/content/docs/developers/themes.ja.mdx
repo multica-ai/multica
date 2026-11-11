@@ -178,7 +178,7 @@ paper/
 - 公開されていない変数を使っている（オプションの id か、テーマ自身が `var()` で読む変数を除く）。
 - `.theme-light` と `.theme-dark` 以外の場所で、子孫セレクタなしに変数を設定している。テーマピッカーがテーマの色を読み取れなくなります。
 - フォントスタックに汎用ファミリー（`sans-serif`、`serif` …）や `ui-*` キーワードがある。本人が選んだ CJK フォントが効かなくなります。
-- どちらかのモードで WCAG AA のコントラストを満たさない：`--foreground` と `--muted-foreground` はすべてのサーフェスで 4.5:1、`--brand` は読むためのサーフェスで 4.5:1、プライマリボタンのラベルはボタン上で 4.5:1、`--faint-foreground` は 3:1 が必要です。
+- どちらかのモードで WCAG AA のコントラストを満たさない：`--foreground` と `--muted-foreground` はすべてのサーフェスで 4.5:1、`--brand` は読むためのサーフェスで 4.5:1、プライマリボタンのラベルはボタン上で 4.5:1、`--faint-foreground` は 3:1 が必要です。ツールチップの文字は `--tooltip` 上で 4.5:1、押された表示設定チップの文字はその塗りの上で 4.5:1 が必要です。ツールチップは常にダークモードの文字色を使うため、変えるには `--tooltip-foreground` を設定します。押されたチップは `--display-chip-pressed-background` を設定しない限り `--input` で塗られます。
 
 ## チェックとプレビュー
 
@@ -219,7 +219,7 @@ pnpm theme:preview path/to/paper --out preview   # preview/light.png と preview
 
 ### レジストリに追加する
 
-レジストリの `themes.json` にテーマを追加する pull request を作ります。pull request はリリースに対して `theme:check` と `theme:preview` を実行して結果をコメントし、通過したらメンテナーがマージします。
+レジストリに `themes/<id>.json` というファイルを追加する pull request を作ります。ファイル名は manifest の `id` です。テーマごとにファイルが分かれているので、別々のテーマの pull request は競合しません。pull request はリリースに対して `theme:check` と `theme:preview` を実行して結果をコメントし、通過したらメンテナーがマージします。
 
 </Step>
 </Steps>

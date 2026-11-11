@@ -169,6 +169,12 @@
       "after_run": "이번 실행 후 시작",
       "hint": "기본값만 정합니다. 보내기 전에 메시지마다 바꿀 수 있습니다."
     },
+    "comment_images": {
+      "title": "댓글 속 이미지",
+      "thumbnails": "썸네일",
+      "full": "원본 크기",
+      "hint": "썸네일로 보면 긴 스레드도 짧게 유지됩니다. 이미지를 클릭하면 원본 크기로 볼 수 있습니다."
+    },
     "comments_title": "댓글 및 채팅",
     "region_title": "언어 및 지역",
     "issue_fields_title": "태스크 생성 시 표시할 필드",
@@ -829,6 +835,10 @@
       "updates": {
         "label": "우선순위 및 마감일",
         "description": "팔로우 중인 태스크의 우선순위나 마감일이 바뀔 때"
+      },
+      "new_issues": {
+        "label": "새 태스크",
+        "description": "구독 중인 프로젝트에 태스크가 생성될 때"
       },
       "agent_activity": {
         "label": "에이전트 활동",

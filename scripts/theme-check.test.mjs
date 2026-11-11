@@ -73,6 +73,22 @@ test("fails a theme on an option value other than the default", (t) => {
   assert.ok(failing.every((c) => c.variant?.option === "screen" && c.variant.value === "amber"));
 });
 
+test("writes a --json report larger than a pipe buffer in full", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "theme-check-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const choices = Array.from({ length: 8 }, (_, i) => ({ value: `s${i}`, label: `Screen ${i}` }));
+  const screens = theme(dir, "screens", {
+    manifest: { options: [{ id: "screen", type: "select", label: "Screen", default: "s0", choices }] },
+    css: ".theme-light { --radius: 0.25rem; }\n",
+  });
+
+  const result = run(screens, "--json");
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stdout.length > 65536, `the report is only ${result.stdout.length} bytes`);
+  const [report] = JSON.parse(result.stdout);
+  assert.equal(report.ok, true);
+});
+
 test("explains a path that is not a theme", () => {
   const result = run(join(tmpdir(), "no-such-theme-folder"));
   assert.equal(result.status, 1);

@@ -37,6 +37,7 @@
     "daemon-runtimes",
     "install-agent-runtime",
     "providers",
+    "environments",
     "---자동화---",
     "autopilots",
     "issue-wakeups",

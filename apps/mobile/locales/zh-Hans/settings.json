@@ -75,6 +75,8 @@
     "mentions_description": "有人用 @ 提到你时，包括 @all 和 @squad。",
     "updates": "任务更新",
     "updates_description": "标题、描述、标签、优先级或截止日期变更时。",
+    "new_issues": "新任务",
+    "new_issues_description": "你订阅的项目中有新任务创建时。",
     "agent_activity": "智能体动态",
     "agent_activity_description": "智能体运行失败时。",
     "inbox_notifications": "收件箱通知",

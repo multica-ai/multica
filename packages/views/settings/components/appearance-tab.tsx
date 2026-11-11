@@ -103,7 +103,7 @@ import { docsLocalePrefix } from "../../common/docs-locale";
 import { openExternal } from "../../platform/open-external";
 import { themeFolderAPI } from "../../platform/theme-folder";
 import { ThemesButton, useStoreThemeInstall } from "./themes-dialog";
-import { ThemeSwatch, useAppliedMode, useThemeLabel, type PreviewMode } from "./theme-swatch";
+import { ThemeSwatch, useAppliedMode, useColorThemes, useThemeLabel, type PreviewMode } from "./theme-swatch";
 import {
   SettingsCard,
   SettingsRow,
@@ -196,8 +196,8 @@ function ColorSection() {
   const themeLabel = t(($) => $.appearance.theme.title);
   const imported = installed.filter((manifest) => !(manifest.id in folders));
   const fromFolder = installed.filter((manifest) => manifest.id in folders);
-  const selected = [...BUILT_IN_THEMES, ...installed].find((manifest) => manifest.id === theme);
-  const items = [...BUILT_IN_THEMES, ...installed].map((manifest) => ({
+  const { themes, selected } = useColorThemes();
+  const items = themes.map((manifest) => ({
     value: manifest.id,
     label: themeLabelFor(manifest),
   }));
@@ -235,19 +235,17 @@ function ColorSection() {
           <div className="flex items-center gap-2">
             <Select
               items={items}
-              value={selected ? theme : "default"}
+              value={selected.id}
               onValueChange={(next) => {
                 if (next) set({ theme: next });
               }}
             >
               <SelectTrigger size="sm" className="w-48" aria-label={themeLabel}>
                 <SelectValue>
-                  {selected ? (
-                    <span className="flex min-w-0 items-center gap-2">
-                      <ThemeSwatch theme={selected} mode={appliedMode} />
-                      <span className="truncate">{themeLabelFor(selected)}</span>
-                    </span>
-                  ) : null}
+                  <span className="flex min-w-0 items-center gap-2">
+                    <ThemeSwatch theme={selected} mode={appliedMode} />
+                    <span className="truncate">{themeLabelFor(selected)}</span>
+                  </span>
                 </SelectValue>
               </SelectTrigger>
               <SelectContent align="end" className="min-w-64">

@@ -378,6 +378,7 @@ import {
   SearchIssuesResponseSchema,
   ProjectSchema,
   ListProjectMembersResponseSchema,
+  ProjectSubscriptionSchema,
   ListProjectsResponseSchema,
   EMPTY_PROJECT,
   EMPTY_LIST_PROJECTS_RESPONSE,
@@ -3253,9 +3254,17 @@ export class ApiClient {
 
   // Fetched as bytes rather than linked: Desktop authenticates with a bearer
   // token that an <img> request would not carry.
-  async getStoreThemeScreenshot(id: string, mode: StoreThemeMode, signal?: AbortSignal): Promise<Blob> {
+  // The revision only keeps the browser's HTTP cache from answering for an
+  // older screenshot; the server ignores it.
+  async getStoreThemeScreenshot(
+    id: string,
+    mode: StoreThemeMode,
+    revision?: string,
+    signal?: AbortSignal,
+  ): Promise<Blob> {
+    const query = revision ? `?revision=${encodeURIComponent(revision)}` : "";
     const res = await this.fetchRaw(
-      `/api/theme-store/themes/${encodeURIComponent(id)}/screenshots/${mode}`,
+      `/api/theme-store/themes/${encodeURIComponent(id)}/screenshots/${mode}${query}`,
       { signal },
     );
     return res.blob();
@@ -4382,6 +4391,25 @@ export class ApiClient {
     return parseWithFallback(raw, ListProjectMembersResponseSchema, { members: [], total: 0 }, {
       endpoint: "GET /api/projects/:id/members",
     });
+  }
+
+  async getProjectSubscription(id: string): Promise<boolean> {
+    return this.parseProjectSubscription(
+      await this.fetch<unknown>(`/api/projects/${id}/subscription`),
+      "GET /api/projects/:id/subscription",
+    );
+  }
+
+  async setProjectSubscription(id: string, subscribed: boolean): Promise<boolean> {
+    const method = subscribed ? "PUT" : "DELETE";
+    return this.parseProjectSubscription(
+      await this.fetch<unknown>(`/api/projects/${id}/subscription`, { method }),
+      `${method} /api/projects/:id/subscription`,
+    );
+  }
+
+  private parseProjectSubscription(raw: unknown, endpoint: string): boolean {
+    return parseWithFallback(raw, ProjectSubscriptionSchema, { subscribed: false }, { endpoint }).subscribed;
   }
 
   async addProjectMembers(id: string, userIds: string[]): Promise<ListProjectMembersResponse> {

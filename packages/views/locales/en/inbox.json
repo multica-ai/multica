@@ -76,6 +76,7 @@
   "types": {
     "issue_assigned": "Assigned",
     "issue_subscribed": "Subscribed",
+    "issue_created": "New issue",
     "unassigned": "Unassigned",
     "assignee_changed": "Assignee changed",
     "status_changed": "Status changed",

@@ -170,6 +170,12 @@
       "after_run": "Start after this run",
       "hint": "Sets the default only. You can still change it for any message before sending."
     },
+    "comment_images": {
+      "title": "Images in comments",
+      "thumbnails": "Thumbnails",
+      "full": "Full size",
+      "hint": "Thumbnails keep long threads short; click an image to see it full size."
+    },
     "comments_title": "Comments & chat",
     "region_title": "Language & region",
     "issue_fields_title": "Fields shown when creating issues",
@@ -838,6 +844,10 @@
       "updates": {
         "label": "Priority & Due date",
         "description": "When priority or due date changes on issues you follow"
+      },
+      "new_issues": {
+        "label": "New issues",
+        "description": "When an issue is created in a project you subscribe to"
       },
       "agent_activity": {
         "label": "Agent activity",

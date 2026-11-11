@@ -42,6 +42,8 @@ async function compileCss() {
     @import "../../packages/ui/styles/theme-variables.css";
     @import "../../packages/ui/styles/appearance.css";
     @import "../../packages/ui/styles/base.css";
+    @import "../../packages/views/editor/styles/prose.css";
+    @import "../../packages/views/editor/styles/code.css";
     @custom-variant dark (&:is(.dark *));
     @source "./fixture.html";
     :root {

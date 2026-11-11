@@ -170,6 +170,12 @@
       "after_run": "Démarrer après cette exécution",
       "hint": "Définit seulement le choix par défaut. Vous pouvez le modifier pour chaque message avant l'envoi."
     },
+    "comment_images": {
+      "title": "Images dans les commentaires",
+      "thumbnails": "Miniatures",
+      "full": "Taille réelle",
+      "hint": "Les miniatures raccourcissent les longs fils ; cliquez sur une image pour l’afficher en taille réelle."
+    },
     "comments_title": "Commentaires et discussion",
     "region_title": "Langue et région",
     "issue_fields_title": "Champs affichés à la création de tâches",
@@ -838,6 +844,10 @@
       "updates": {
         "label": "Priorité et date d'échéance",
         "description": "Quand la priorité ou la date d'échéance change sur les tâches que vous suivez"
+      },
+      "new_issues": {
+        "label": "Nouvelles tâches",
+        "description": "Quand une tâche est créée dans un projet auquel vous êtes abonné"
       },
       "agent_activity": {
         "label": "Activité des agents",
