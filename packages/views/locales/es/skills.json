@@ -97,9 +97,7 @@
     "section_labels": "Etiquetas",
     "filter_search_placeholder": "Filtrar...",
     "no_labels": "Todavía no hay etiquetas",
-    "no_results": "Sin resultados",
-    "manage_labels": "Gestionar etiquetas...",
-    "manage_labels_title": "Etiquetas de skills"
+    "no_results": "Sin resultados"
   },
   "detail": {
     "read_only": "Solo lectura",

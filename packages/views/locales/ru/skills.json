@@ -111,9 +111,7 @@
     "section_labels": "Метки",
     "filter_search_placeholder": "Фильтр...",
     "no_labels": "Пока нет меток",
-    "no_results": "Ничего не найдено",
-    "manage_labels": "Управление метками...",
-    "manage_labels_title": "Метки навыков"
+    "no_results": "Ничего не найдено"
   },
   "detail": {
     "read_only": "Только для чтения",

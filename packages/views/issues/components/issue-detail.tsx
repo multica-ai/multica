@@ -1702,6 +1702,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     });
   }, []);
   const didHighlightRef = useRef<string | null>(null);
+  // Highlight whose landing was cancelled after its anchor mounted but before
+  // it finished aligning; the landing effect resumes it.
+  const interruptedLandingRef = useRef<string | null>(null);
   // Last seen highlightRequestToken; a bump re-arms didHighlightRef so the
   // landing effect below replays on an already-mounted detail.
   const lastHighlightRequestTokenRef = useRef(highlightRequestToken);
@@ -2160,10 +2163,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Flash the landed comment the same way inbox deep-links do, so the eye has
   // an anchor after the instant jump. (Folded resolved bars don't take the
   // highlight prop — the scroll itself is the feedback there.)
-  const flashJumpTarget = useCallback((commentId: string) => {
+  const flashJumpTarget = useCallback((commentId: string, duration = 2000) => {
     setHighlightedId(commentId);
     if (jumpFlashTimerRef.current !== null) window.clearTimeout(jumpFlashTimerRef.current);
-    jumpFlashTimerRef.current = window.setTimeout(() => setHighlightedId(null), 2000);
+    jumpFlashTimerRef.current = window.setTimeout(() => setHighlightedId(null), duration);
   }, []);
   // Jump to a mounted comment: any row in flat mode, or a reply inside a
   // rendered thread. Drive the container's scrollTop directly — never native
@@ -2516,12 +2519,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       lastHighlightRequestTokenRef.current = highlightRequestToken;
       didHighlightRef.current = null;
     }
-    if (didHighlightRef.current === highlightCommentId) return;
+    // A landing this effect's cleanup cut short resumes (see the cleanup).
+    const resuming = interruptedLandingRef.current === highlightCommentId;
+    if (!resuming && didHighlightRef.current === highlightCommentId) return;
     // The deep link already landed before this mount (memento entry — a tab
     // switch back or an in-tab return). The restored scroll offset is the
     // state the user left, and the jump must not fight it. A fresh selection
     // clears the entry, so this only ever suppresses a *repeat* landing.
-    if (!activeDeliverableJump && consumedHighlightRef.current === highlightCommentId) {
+    if (!resuming && !activeDeliverableJump && consumedHighlightRef.current === highlightCommentId) {
       didHighlightRef.current = highlightCommentId;
       return;
     }
@@ -2573,22 +2578,33 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       }
     }
 
-    let fade: number | undefined;
+    interruptedLandingRef.current = null;
+    let completed = false;
     const cancel = scrollToTimelineComment({
       container, virtualizer: isFlatTimeline ? null : virtuosoRef.current,
       index: targetIdx, commentId: landingId,
       onMounted: () => {
         didHighlightRef.current = highlightCommentId;
         writeViewState(issueHighlightMementoKey(id), highlightCommentId);
-        setHighlightedId(landingId);
-        fade = window.setTimeout(() => setHighlightedId(null), 2500);
+        // Timer owned outside this effect, so a re-run cannot leave the
+        // highlight on.
+        flashJumpTarget(landingId, 2500);
       },
+      onComplete: () => { completed = true; },
     });
     return () => {
       cancel();
-      if (fade !== undefined) clearTimeout(fade);
+      // A commit while the landing is still aligning (a realtime comment, a
+      // run refresh, the refetch of a cached timeline) re-runs this effect and
+      // cancels the loop here. Once the anchor has mounted, the guards above
+      // count the landing as done, so mark it for the re-run to resume;
+      // otherwise the viewport stays wherever the loop stopped, often the top
+      // of the issue (MUL-9068).
+      if (!completed && didHighlightRef.current === highlightCommentId) {
+        interruptedLandingRef.current = highlightCommentId;
+      }
     };
-  }, [highlightCommentId, highlightRequestToken, activeDeliverableJump, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, isFlatTimeline, measuredTimelineId, timelineLoading, commentTasksLoading]);
+  }, [highlightCommentId, highlightRequestToken, activeDeliverableJump, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, isFlatTimeline, measuredTimelineId, timelineLoading, commentTasksLoading, flashJumpTarget]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const descriptionEditingRef = useRef(false);

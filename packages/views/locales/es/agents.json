@@ -282,13 +282,8 @@
     "duplicate_title": "Duplicar {{name}}",
     "step_ai": "Crear conversando",
     "modes": {
-      "template": {
-        "title": "Usar una plantilla",
-        "description": "Parte de instrucciones y skills seleccionadas, y adapta cada detalle a tu espacio de trabajo."
-      },
       "ai": {
-        "title": "Crear con IA",
-        "description": "Crea una configuración editable conversando."
+        "title": "Crear con IA"
       }
     },
     "sections": {
@@ -316,10 +311,6 @@
       }
     },
     "builder": {
-      "setup_title": "Elige un runtime para Agent Builder",
-      "setup_description": "Este runtime alimenta la configuración y es el predeterminado para el nuevo agente.",
-      "start": "Iniciar conversación",
-      "connect_runtime": "Conectar un runtime",
       "start_failed": "No se ha podido iniciar Agent Builder.",
       "send_failed": "No se ha podido enviar tu mensaje.",
       "stop_failed": "No se ha podido detener la generación actual.",
