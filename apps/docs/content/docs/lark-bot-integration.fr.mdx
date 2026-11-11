@@ -63,6 +63,8 @@ C'est cette association qui permet à Multica de savoir de quel membre de l'espa
 
 Ajoutez d'abord le bot au groupe, puis mentionnez-le avec `@Bot` et décrivez votre besoin. Le bot ne répond qu'aux messages qui le @mentionnent explicitement, et chaque exécution reçoit les derniers messages du groupe comme contexte.
 
+En message direct comme en groupe, le prompt de chaque exécution indique aussi les identifiants Feishu du message auquel il répond : `chat_id`, `chat_type`, `message_id`, le `thread_id` du sujet lorsque le message se trouve dans un sujet, et l'`open_id` de l'expéditeur. Ce sont des identifiants Feishu, pas Multica : un agent disposant de son propre accès à Feishu peut s'en servir pour retrouver le message ou la conversation d'origine. L'`open_id` n'est valable que dans l'application du bot connecté. Les identifiants que Multica n'a pas enregistrés sont omis.
+
 ### Créer une tâche
 
 Envoyez :

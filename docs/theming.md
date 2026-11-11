@@ -10,10 +10,13 @@ Appearance → Theme options**. Themes never run JavaScript.
 > API. They may change without notice until it is declared stable; check
 > this page when a theme stops looking right after an update.
 
-Install a theme with **Settings → Appearance → Import theme**, from a `.zip`
-of the folder or from the folder itself. Themes are saved on the device, like
-every other Appearance setting, and **Remove theme** deletes one and goes
-back to Default.
+**Settings → Appearance → Manage** lists the themes installed on the device
+and the community theme store; the built-in themes are in the theme picker. Install a theme from the
+store there, or with **Import theme**, from a `.zip` of the folder or from the
+folder itself. Themes are saved on the device, like every other Appearance
+setting; **Remove** on a theme's card deletes it, and goes back to Default
+when it was in use. **Check for updates** looks for new releases of the
+themes installed from the store.
 
 The built-in themes compile to exactly this format and live in
 `packages/core/appearance/built-in-themes.ts`: Pop shows options and CSS,
@@ -171,6 +174,7 @@ those change without notice. Anchors, slots and hooks stay until the next
 | `[data-mc="page"]` | The rounded canvas that holds the current page. |
 | `[data-mc="window-toolbar"]` | Desktop only: the toolbar above the rail. |
 | `[data-mc="tab-bar"]` | Desktop only: the tab strip above the page. |
+| `[data-mc="bottom-bar"]` | The status bar under the page, on windows wide enough to show it. |
 | `[data-mc="issue-group-header"]` | A status group header in issue lists; `data-status` is the status key (`backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`, or a custom key). |
 | `[data-mc="issue-row"]` | One issue in a list; `data-status`, `data-priority` (`urgent`, `high`, `medium`, `low`, `none`) and `data-assignee-type` (`member`, `agent`, `squad` or `none`). |
 | `[data-mc="board-column"]` | One column on a board. |
@@ -246,8 +250,8 @@ that breaks them:
 - Keep text readable in both modes (WCAG AA): `--foreground` and
   `--muted-foreground` need 4.5:1 on every surface, `--brand` 4.5:1 on the
   reading surfaces, the primary button label 4.5:1 on the button, and
-  `--faint-foreground` 3:1. A frame (rules on the rail, window toolbar or
-  tab bar) is checked against its own colours. The check follows `:root`,
+  `--faint-foreground` 3:1. A frame (rules on the rail, window toolbar,
+  tab bar or bottom bar) is checked against its own colours. The check follows `:root`,
   `html`, the mode classes and option attributes the way the browser does,
   with every option at its default; when a colour it measures is also set
   somewhere else, such as inside `@media` or on `body`, it says so instead
@@ -264,16 +268,15 @@ back on.
 ## Writing a theme
 
 Start from a built-in theme: pick it in **Settings → Appearance**, then
-choose **Duplicate “…” as a new theme** from the **⋯** menu next to
-**Import theme**. The
+choose **Duplicate “…” as a new theme** from the **Import theme** menu. The
 copy gets its own id (`pop-copy`, `pop-copy-2`, …), a manifest with the
 theme's options, and a `theme.css` with one declaration per line. Importing
 the copy unchanged looks exactly like the original.
 
 ### On Desktop: the themes folder
 
-Desktop keeps a `themes` folder in its user data folder. **Open themes
-folder** in the same menu shows it. Every folder (or `.zip`) in it is
+Desktop keeps a `themes` folder in its user data folder. The **Open themes
+folder** button next to **Import theme** shows it. Every folder (or `.zip`) in it is
 installed when the app starts and listed under **Themes folder** in the
 picker. Save a file in it and every open window picks the change up within
 about a second, so edit `theme.css` in any editor and watch the app.
@@ -305,6 +308,87 @@ families in font stacks and WCAG contrast in both modes, each with its line
 in `theme.css`, and exits with status 1 when there is an error. Warnings,
 such as a colour it cannot resolve, do not fail the check.
 
+Contrast is measured with every option at its default, then once for each
+other value of a `select` and the other state of a `toggle`, one option at a
+time with the rest at their defaults. Options are not combined. A failure
+names the value it comes from, for example
+`Contrast, dark mode (Screen = Amber): …`. Options that set a variable
+(`color`, `variable-select`, `number`, `slider`, `text`, `font`) are measured
+at their defaults only, so check the other values you offer yourself.
+
+Rail items are measured the way the rail paints them: `--rail-item-color`
+on `--app-shell` at rest, and `--rail-item-active-color` on
+`--rail-item-active-background` (the current space) and on
+`--rail-item-hover-background`, each with the fallback in the
+[reference](#variable-reference) when it is not set. The default hover fill
+is `--sidebar-accent` at 60% over `--app-shell`, and it is measured that way.
+When a mode has frame rules, the rail takes the frame's colours and a failure
+reads `Contrast, dark mode (frame): …`; without them it takes the page's
+colours and reads `Contrast, light mode: …`, like the other page pairs.
+
+Contrast covers the page, the frame, and two places a theme reaches only
+indirectly:
+
+- **Tooltips** are always drawn with dark-mode text: the tooltip is a
+  `.dark` scope, so its `--foreground` is the app's dark value in both
+  modes, not the theme's `.theme-dark` one. The text is measured on
+  `--tooltip` in each mode. Set `--tooltip-foreground` to choose it.
+- **Pressed display chips** (the on/off chips in the Display and sidebar
+  settings popovers) fill with `--input`, the input border colour, and use
+  `--foreground`. They are measured inside the popover, with the rules a
+  theme sets on `[data-slot="popover-content"]`. Set
+  `--display-chip-pressed-background` and `--display-chip-pressed-color` to
+  colour them apart from input borders.
+
+Rules on a slot are applied by specificity, then order, as the browser
+does. A variable set on `<html>` reaches the slot with the value it has
+there: `--display-chip-pressed-color: var(--foreground)` on `.theme-light`
+keeps the page's `--foreground`, even if the popover sets its own.
+
+To see the theme the way the theme store shows it:
+
+```sh
+pnpm theme:preview path/to/paper --out preview   # preview/light.png and preview/dark.png
+```
+
+It renders a fixture page (an issue list next to an open issue) built from
+the app's own styles and anchors, with the theme applied at its option
+defaults.
+
+## Publishing to the theme store
+
+The theme store (beta) lists themes from
+[multica-ai/multica-themes](https://github.com/multica-ai/multica-themes).
+Its [contributing guide](https://github.com/multica-ai/multica-themes/blob/main/CONTRIBUTING.md)
+has the details; in short:
+
+1. Keep the theme in its own GitHub repository.
+   [multica-ai/multica-theme-sample](https://github.com/multica-ai/multica-theme-sample)
+   is a starting point with a release workflow.
+2. Publish a release tagged with the manifest's `version` (`1.0.0` or
+   `v1.0.0`) and attach the zipped theme as `theme.zip`.
+3. Add a file `themes/<id>.json`, named by the manifest's `id`, to the
+   registry with a pull request. Each theme has its own file, so pull
+   requests for different themes don't conflict. The pull request runs
+   `theme:check` and `theme:preview` on the release and comments with the
+   result; a maintainer merges once it passes.
+
+New releases reach the store within about an hour, after they pass the same
+checks; people who installed the theme then see **Update**. A release that
+fails keeps the previous one listed. The app only installs the exact
+`theme.zip` the checks passed, and reads it with the same parser and CSS
+sanitizer as an imported theme.
+
+Each store card shows how many times the theme was downloaded from the
+Multica server it lists on: every install and every update counts once.
+Themes not yet installed are listed most downloaded first. A self-hosted
+server counts its own downloads.
+
+A self-hosted server reads the official registry by default.
+`MULTICA_THEME_STORE=off` turns the store off: **Manage** lists only the
+themes on the device, and the server makes no registry requests. `MULTICA_THEME_REGISTRY_URL` points it at
+another registry's `index.json`.
+
 ## Variable reference
 
 Generated from `packages/core/appearance/theme-variables.ts`. Where light
@@ -316,7 +400,7 @@ and dark differ, both defaults are given.
 
 | Variable | Default (light / dark) | Use |
 | --- | --- | --- |
-| `--app-shell` | `oklch(0.964435 0.001327 286.375)` / `oklch(0.155 0.005 285.823)` | The frame around the page: rail, desktop toolbar and tab bar. |
+| `--app-shell` | `oklch(0.964435 0.001327 286.375)` / `oklch(0.155 0.005 285.823)` | The frame around the page: rail, bottom bar, desktop toolbar and tab bar. |
 | `--page-canvas` | `oklch(0.988087 0 0)` / `oklch(0.18 0.005 285.823)` | The page that lists, boards and conversations sit on. |
 | `--surface` | `oklch(1 0 0)` / `oklch(0.21 0.006 285.885)` | Bounded content groups: cards, board cards, panels. |
 | `--surface-foreground` | `oklch(0.141 0.005 285.823)` / `oklch(0.985 0 0)` | Text on a surface. |
@@ -341,7 +425,7 @@ and dark differ, both defaults are given.
 | `--accent` | `oklch(0.967 0.001 286.375)` / `oklch(0.274 0.006 286.033)` | Hover fill in menus and lists. |
 | `--accent-foreground` | `oklch(0.21 0.006 285.885)` / `oklch(0.985 0 0)` | Text on accent. |
 | `--border` | `oklch(0.945 0.003 286.32)` / `oklch(1 0 0 / 6%)` | Dividers and table borders. |
-| `--input` | `oklch(0.92 0.004 286.32)` / `oklch(1 0 0 / 15%)` | Input borders. |
+| `--input` | `oklch(0.92 0.004 286.32)` / `oklch(1 0 0 / 15%)` | Input borders, and pressed display chips unless `display-chip-pressed-background` is set. |
 | `--ring` | `oklch(0.705 0.015 286.067)` / `oklch(0.552 0.016 285.938)` | Focus ring. |
 | `--sidebar` | `oklch(0.964435 0.001327 286.375)` / `oklch(0.21 0.006 285.885)` | Sidebar background (shadcn sidebar). |
 | `--sidebar-foreground` | `oklch(0.141 0.005 285.823)` / `oklch(0.985 0 0)` | Sidebar text. |
@@ -398,6 +482,7 @@ and dark differ, both defaults are given.
 | `--floating-shadow` | `0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08)` / `0 20px 48px rgb(0 0 0 / 0.46), 0 4px 12px rgb(0 0 0 / 0.28)` | Dialogs and sheets. |
 | `--menu-shadow` | `0 8px 24px rgb(15 23 42 / 0.08), 0 2px 6px rgb(15 23 42 / 0.05)` / `0 10px 28px rgb(0 0 0 / 0.3), 0 2px 8px rgb(0 0 0 / 0.18)` | Menus, selects and popovers. |
 | `--tooltip` | `oklch(0.21 0.006 285.885)` / `oklch(0.3 0.006 286.033)` | Tooltip fill (dark in both modes). |
+| `--tooltip-foreground` | `var(--foreground)` | Tooltip text. Unset, it is the app's dark-mode `--foreground` in both modes, whatever the theme sets on `.theme-dark`. |
 | `--tooltip-shadow` | `0 4px 12px rgb(15 23 42 / 0.16), 0 1px 3px rgb(15 23 42 / 0.12)` / `0 0 0 1px oklch(1 0 0 / 10%), 0 8px 24px rgb(0 0 0 / 0.4)` | Tooltip shadow. |
 | `--icon-stroke-width` | `2` | Stroke width of line icons. |
 
@@ -457,7 +542,10 @@ and dark differ, both defaults are given.
 | `--menu-item-radius` | `calc(var(--radius) * 0.75)` | Items inside a menu. |
 | `--menu-item-hover-background` | `var(--accent)` | Highlighted menu item. |
 | `--menu-item-hover-color` | `var(--accent-foreground)` | Text of the highlighted menu item. |
+| `--display-chip-pressed-background` | `var(--input)` | Fill of a pressed on/off chip in the Display and sidebar settings popovers. |
+| `--display-chip-pressed-color` | `var(--foreground)` | Text of a pressed display chip. |
 | `--popover-radius` | `var(--radius)` | Popovers. |
+| `--floating-border-color` | `color-mix(in oklab, var(--surface-border), var(--foreground) 6%)` | Hairline around layers that float over the page without a backdrop: menus, popovers, select lists and floating panels. |
 | `--dialog-radius` | `calc(var(--radius) * 1.5)` | Dialogs and alert dialogs. |
 | `--tooltip-radius` | `var(--radius)` | Tooltips. |
 | `--avatar-radius` | `calc(infinity * 1px)` | Avatars. Set a length for square avatars. |

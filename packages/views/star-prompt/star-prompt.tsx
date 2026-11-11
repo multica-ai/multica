@@ -131,7 +131,7 @@ export function StarPrompt() {
       aria-live="polite"
       data-slot="star-prompt"
       className={cn(
-        "absolute right-[var(--chat-launcher-inset)] z-50 w-[min(23.75rem,calc(100%-2*var(--chat-launcher-inset)))] rounded-xl bg-surface-raised p-4 pb-3 text-popover-foreground shadow-[var(--floating-shadow)] ring-1 ring-surface-border",
+        "absolute right-[var(--chat-launcher-inset)] z-50 w-[min(23.75rem,calc(100%-2*var(--chat-launcher-inset)))] rounded-xl bg-surface-raised p-4 pb-3 text-popover-foreground shadow-[var(--floating-shadow)] ring-1 ring-floating-border",
         "animate-in fade-in-0 slide-in-from-bottom-2 duration-200 motion-reduce:animate-none",
         launcherVisible ? "above-chat-launcher" : "bottom-[var(--chat-launcher-inset)]",
       )}

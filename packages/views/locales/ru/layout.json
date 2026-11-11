@@ -55,9 +55,6 @@
     "workspaces_label": "Рабочие пространства",
     "create_workspace": "Создать рабочее пространство",
     "pending_invitations_label": "Ожидающие приглашения",
-    "invitation_workspace_fallback": "Рабочее пространство",
-    "invitation_join": "Присоединиться",
-    "invitation_decline": "Отклонить",
     "log_out": "Выйти",
     "new_issue": "Новая задача",
     "pinned_label": "Закреплённые",
@@ -77,14 +74,31 @@
     "chat": "Чат",
     "autopilots": "Авто",
     "switch_workspace": "Сменить рабочее пространство",
-    "invitation_from": "Вас приглашает {{name}}",
     "open_in_new_window": "Открыть в новом окне",
     "open_in_new_window_click": "Нажмите",
     "open_in_other_window": "Уже открыто в другом окне",
     "in_other_window": "Другое окно",
     "all_workspaces_open": "Все рабочие пространства уже открыты в окнах",
     "pin_workspace": "Закрепить рабочее пространство",
-    "unpin_workspace": "Открепить рабочее пространство"
+    "unpin_workspace": "Открепить рабочее пространство",
+    "copy_link": "Копировать ссылку",
+    "link_copied": "Ссылка скопирована",
+    "workspace_settings": "Настройки рабочего пространства",
+    "mark_all_read": "Отметить все как прочитанные",
+    "mark_all_read_failed": "Не удалось отметить все как прочитанные",
+    "reset_order": "Вернуть порядок по умолчанию",
+    "copy_workspace_link": "Копировать ссылку на рабочее пространство",
+    "workspace_meta_one": "{{slug}} · {{count}} участник",
+    "workspace_meta_few": "{{slug}} · {{count}} участника",
+    "workspace_meta_many": "{{slug}} · {{count}} участников",
+    "workspace_meta_other": "{{slug}} · {{count}} участника"
+  },
+  "bottom_bar": {
+    "label": "Строка состояния",
+    "working_one": "{{count}} агент работает",
+    "working_few": "{{count}} агента работают",
+    "working_many": "{{count}} агентов работают",
+    "working_other": "{{count}} агента работают"
   },
   "panels": {
     "work": {
@@ -105,6 +119,7 @@
       "assignee_me": "Я",
       "assignee_my_agents": "Мои агенты",
       "assignee_me_and_my_agents": "Я и мои агенты",
+      "assignee_projects_only": "Действует только на задачи в разделе «Проекты»",
       "reset": "Сбросить",
       "load_more": "Загрузить ещё",
       "show_less": "Показать меньше",
@@ -129,7 +144,8 @@
       "all_projects_few": "Всего {{count}} проекта",
       "all_projects_many": "Всего {{count}} проектов",
       "project_issues_retry": "Повторить",
-      "unread": "Непрочитанные"
+      "unread": "Непрочитанные",
+      "new_issue_here": "Новая задача в этом проекте"
     },
     "team": {
       "new_agent": "Новый агент",
@@ -157,7 +173,8 @@
       "runtimes_online_many": "В сети: {{count}}",
       "runtimes_online_other": "В сети: {{count}}",
       "show_fewer_agents": "Показать меньше",
-      "show_more_agents": "Ещё {{count}}…"
+      "show_more_agents": "Ещё {{count}}…",
+      "open_issue": "Открыть {{identifier}}"
     },
     "autopilots": {
       "all": "Все автопилоты",
@@ -174,6 +191,8 @@
       "dark": "Тёмная",
       "system": "Системная"
     },
+    "mode": "Режим",
+    "appearance_settings": "Настройки внешнего вида",
     "language": "Язык",
     "shortcuts": "Сочетания клавиш"
   },
@@ -241,5 +260,19 @@
     "star_label": "Поставить звезду Multica на GitHub",
     "later": "Не сейчас",
     "close": "Закрыть"
+  },
+  "context_menu": {
+    "cut": "Вырезать",
+    "copy": "Копировать",
+    "paste": "Вставить",
+    "select_all": "Выделить всё",
+    "add_to_dictionary": "Добавить в словарь",
+    "open_link": "Открыть ссылку в браузере",
+    "copy_link_address": "Копировать адрес ссылки",
+    "copy_image": "Копировать изображение",
+    "copy_code": "Копировать код",
+    "copy_table": "Копировать таблицу",
+    "copied": "Скопировано",
+    "copy_failed": "Не удалось скопировать"
   }
 }

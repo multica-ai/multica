@@ -1007,6 +1007,22 @@ describe("bulk tab closing", () => {
     expect(group.tabs.map((tab) => tab.id)).toEqual([issuesId, projectsId]);
     expect(group.activeTabId).toBe(issuesId);
   });
+
+  it("closes only the unpinned tabs to the right of the target", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const projectsId = store.addTab("/acme/projects", "Projects");
+    const agentsId = store.addTab("/acme/agents", "Agents");
+    store.addTab("/acme/settings", "Settings");
+    store.setActiveTab(agentsId);
+
+    store.closeTabsToRight(projectsId);
+
+    const group = useTabStore.getState().byWorkspace.acme;
+    expect(group.tabs.map((tab) => tab.id)).toEqual([issuesId, projectsId]);
+    expect(group.activeTabId).toBe(projectsId);
+  });
 });
 
 describe("closeTab activation order (MUL-5665)", () => {

@@ -81,7 +81,7 @@ import {
 } from "@multica/core/runtimes";
 import { useConfigStore } from "@multica/core/config";
 import type { LocalDirectoryExecutionMode } from "@multica/core/types";
-import { LocalDirectoryModeOptions } from "../projects/components/local-directory-mode-dialog";
+import { LocalDirectoryModeOptions } from "../projects/components/local-directory-mode-options";
 
 /**
  * Builds the resource_ref for a local directory attached during project
@@ -1029,7 +1029,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                                 size="sm"
                                 variant="ghost"
                                 // Sized to its (short) label so the wider
-                                // "Change directory…" beside it fits whole.
+                                // "Change folder..." beside it fits whole.
                                 className="h-6 shrink-0 text-caption"
                               >
                                 {effectiveLocalMode === "worktree" ? (

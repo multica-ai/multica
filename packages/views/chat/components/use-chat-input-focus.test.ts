@@ -56,6 +56,21 @@ describe("useChatInputFocus", () => {
     expect(result.current.focusRequest).toBe(2);
   });
 
+  it("requests focus for each new Ask Multica chat, even in a window already open", () => {
+    // Mounting with an earlier bump must not count as a new one.
+    const { result, rerender } = renderHook(
+      ({ request }: { request: number }) => useChatInputFocus(true, undefined, request),
+      { initialProps: { request: 3 } },
+    );
+    expect(result.current.focusRequest).toBe(0);
+
+    rerender({ request: 4 });
+    expect(result.current.focusRequest).toBe(1);
+
+    rerender({ request: 4 });
+    expect(result.current.focusRequest).toBe(1);
+  });
+
   it("releases the hidden composer's focus when the window closes", () => {
     const { root, editor } = makeWindow();
     const windowRef = { current: root };

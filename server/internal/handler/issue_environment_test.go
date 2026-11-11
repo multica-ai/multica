@@ -82,6 +82,23 @@ func TestReportTaskEnvironments_SnapshotLifecycle(t *testing.T) {
 	}
 }
 
+func TestReportTaskEnvironments_Kinds(t *testing.T) {
+	issueID, taskID := issueEnvironmentFixture(t)
+	app := map[string]any{"key": "detected:app", "source": "detected", "kind": "app", "name": "Multica Canary", "state": "running", "detail": "DevTools on localhost:9724"}
+	future := map[string]any{"key": "detected:new", "source": "detected", "kind": "tunnel", "name": "future", "url": "http://localhost:4000", "port": 4000, "state": "running"}
+
+	reportEnvironments(t, taskID, webEnvironment("running"), app, future).Want(http.StatusOK)
+	envs := listEnvironments(t, issueID)
+	if got := envs["Multica Canary"]; got.Kind != "app" || got.LocalKey != "detected:app" || got.URL != "" || got.Port != nil {
+		t.Fatalf("app environment = %+v", got)
+	}
+	// A daemon older than kinds sends none; one newer may send a kind this
+	// server does not know. Both read back as a server.
+	if envs["web"].Kind != "server" || envs["future"].Kind != "server" {
+		t.Fatalf("kinds = web %q, future %q; want server for both", envs["web"].Kind, envs["future"].Kind)
+	}
+}
+
 func TestReportTaskEnvironments_RestartReopensRow(t *testing.T) {
 	issueID, taskID := issueEnvironmentFixture(t)
 	reportEnvironments(t, taskID, webEnvironment("running")).Want(http.StatusOK)

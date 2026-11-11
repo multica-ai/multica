@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/imagemetadata"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -94,9 +95,16 @@ type AttachmentResponse struct {
 	// previous site-relative `/api/attachments/<id>/download` link only
 	// resolved when the document origin proxied /api to the API host.
 	MarkdownURL string `json:"markdown_url"`
-	ContentType string `json:"content_type"`
-	SizeBytes   int64  `json:"size_bytes"`
-	CreatedAt   string `json:"created_at"`
+	// Comment origin, set only by the issue attachment list: who posted the
+	// comment this file belongs to, and when. Absent for description files and
+	// for a comment that is gone. Lets the issue's file inventory label every
+	// historical file without loading the comments that carry it.
+	CommentAuthorType *string `json:"comment_author_type,omitempty"`
+	CommentAuthorID   *string `json:"comment_author_id,omitempty"`
+	CommentCreatedAt  *string `json:"comment_created_at,omitempty"`
+	ContentType       string  `json:"content_type"`
+	SizeBytes         int64   `json:"size_bytes"`
+	CreatedAt         string  `json:"created_at"`
 	// Displayed image dimensions, absent for non-images and older uploads.
 	Width  *int32 `json:"width,omitempty"`
 	Height *int32 `json:"height,omitempty"`
@@ -572,6 +580,9 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		}
 		link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
 		if err != nil {
+			if writeUploadCancellation(w, r, err) {
+				return
+			}
 			slog.Error("file upload failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "upload failed")
 			return
@@ -599,6 +610,11 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		if err != nil {
+			if writeUploadCancellation(w, r, err) {
+				// The record write may have committed. Deleting uploaded bytes
+				// could leave a committed attachment pointing at a missing object.
+				return
+			}
 			slog.Error("failed to create attachment record", "error", err)
 			// S3 upload succeeded but DB record failed — still return the link
 			// so the file is usable. Log the error for investigation.
@@ -637,6 +653,9 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	// No workspace context (e.g. avatar upload) — upload directly.
 	link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
 	if err != nil {
+		if writeUploadCancellation(w, r, err) {
+			return
+		}
 		slog.Error("file upload failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "upload failed")
 		return
@@ -667,12 +686,50 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	origins, err := h.attachmentCommentOrigins(r.Context(), issue, attachments)
+	if err != nil {
+		slog.Error("failed to load attachment comment origins", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list attachments")
+		return
+	}
+
 	mode := attachmentURLModeFromRequest(r)
 	resp := make([]AttachmentResponse, len(attachments))
 	for i, a := range attachments {
 		resp[i] = h.attachmentToResponse(a, mode)
+		if origin, ok := origins[a.CommentID]; ok {
+			authorType, authorID, createdAt := origin.AuthorType, uuidToString(origin.AuthorID), timestampToString(origin.CreatedAt)
+			resp[i].CommentAuthorType, resp[i].CommentAuthorID, resp[i].CommentCreatedAt = &authorType, &authorID, &createdAt
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// attachmentCommentOrigins loads, in one query, the author and time of each
+// live comment the attachments belong to, scoped to the issue and workspace.
+func (h *Handler) attachmentCommentOrigins(ctx context.Context, issue db.Issue, attachments []db.Attachment) (map[pgtype.UUID]db.ListCommentOriginsForIssueRow, error) {
+	ids := make([]pgtype.UUID, 0)
+	seen := make(map[pgtype.UUID]bool)
+	for _, a := range attachments {
+		if a.CommentID.Valid && !seen[a.CommentID] {
+			seen[a.CommentID] = true
+			ids = append(ids, a.CommentID)
+		}
+	}
+	origins := make(map[pgtype.UUID]db.ListCommentOriginsForIssueRow, len(ids))
+	if len(ids) == 0 {
+		return origins, nil
+	}
+	rows, err := h.Queries.ListCommentOriginsForIssue(ctx, db.ListCommentOriginsForIssueParams{
+		Ids: ids, IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		origins[row.ID] = row
+	}
+	return origins, nil
 }
 
 // GetAttachmentByID — GET /api/attachments/{id}
@@ -1570,4 +1627,12 @@ func (h *Handler) deleteS3Objects(ctx context.Context, urls []string) {
 		keys[i] = h.Storage.KeyFromURL(u)
 	}
 	h.Storage.DeleteKeys(ctx, keys)
+}
+
+func writeUploadCancellation(w http.ResponseWriter, r *http.Request, err error) bool {
+	if !errors.Is(r.Context().Err(), context.Canceled) || !errors.Is(err, context.Canceled) {
+		return false
+	}
+	w.WriteHeader(middleware.StatusClientClosedRequest)
+	return true
 }

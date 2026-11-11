@@ -6,6 +6,7 @@ import {
   deliverableKey,
   findDeliverableByName,
   findDeliverableVersion,
+  deliverableInventoryFromAttachments,
   mergeDeliverableSources,
 } from "./deliverables";
 
@@ -170,5 +171,22 @@ describe("findDeliverableByName", () => {
     expect(findDeliverableByName(files, "missing.html")).toBeUndefined();
     expect(findDeliverableByName(files, "")).toBeUndefined();
     expect(findDeliverableByName(files, "   ")).toBeUndefined();
+  });
+});
+
+describe("deliverableInventoryFromAttachments", () => {
+  it("groups comment files under their comment's origin and skips files without one", () => {
+    const origin = { comment_author_type: "agent", comment_author_id: "agent-1", comment_created_at: "2026-01-01T00:00:00Z" };
+    const inventory = deliverableInventoryFromAttachments([
+      attachment({ id: "a", comment_id: "c1", filename: "chart.png", ...origin }),
+      attachment({ id: "b", comment_id: "c1", filename: "chart.png", ...origin }),
+      attachment({ id: "description", comment_id: null, filename: "spec.png" }),
+      attachment({ id: "old-server", comment_id: "c2", filename: "log.txt" }),
+    ]);
+    expect(inventory).toEqual([expect.objectContaining({
+      type: "comment", id: "c1", actor_type: "agent", actor_id: "agent-1", created_at: origin.comment_created_at,
+    })]);
+    expect(inventory[0]?.attachments?.map((a) => a.id)).toEqual(["a", "b"]);
+    expect(collectDeliverableFiles(inventory)[0]?.versions).toHaveLength(2);
   });
 });

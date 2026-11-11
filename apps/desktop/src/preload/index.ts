@@ -21,6 +21,13 @@ import {
 } from "../shared/issue-window";
 import { AUTH_SESSION_STATE_CHANNEL } from "../shared/auth-session";
 import {
+  CONTEXT_MENU_COMMAND_CHANNEL,
+  CONTEXT_MENU_REQUEST_CHANNEL,
+  isContextMenuRequest,
+  type ContextMenuCommand,
+  type ContextMenuRequest,
+} from "../shared/context-menu";
+import {
   THEME_FOLDER_CHANGED_CHANNEL,
   THEME_FOLDER_OPEN_CHANNEL,
   THEME_FOLDER_READ_CHANNEL,
@@ -223,6 +230,19 @@ const desktopAPI = {
       ipcRenderer.removeListener(NAVIGATION_GESTURE_CHANNEL, handler);
     };
   },
+  /** Listen for right-clicks the page left unhandled, to draw their menu. */
+  onContextMenu: (callback: (request: ContextMenuRequest) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, request: unknown) => {
+      if (isContextMenuRequest(request)) callback(request);
+    };
+    ipcRenderer.on(CONTEXT_MENU_REQUEST_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(CONTEXT_MENU_REQUEST_CHANNEL, handler);
+    };
+  },
+  /** Run the item picked in that menu. */
+  runContextMenuCommand: (command: ContextMenuCommand) =>
+    ipcRenderer.send(CONTEXT_MENU_COMMAND_CHANNEL, command),
   /** Report the renderer's memory-router path for recovery diagnostics. */
   setRendererRouteContext: (context: RendererRouteContextInput) =>
     ipcRenderer.send(RENDERER_ROUTE_CONTEXT_CHANNEL, context),
@@ -339,6 +359,10 @@ type DaemonReauthResult =
   | { ok: false; reason: "session_invalid" }
   | { ok: false; reason: "transient"; message: string };
 
+type FocusEnvironmentResult =
+  | { ok: true }
+  | { ok: false; reason: "gone" | "unsupported" | "unavailable" | "failed"; error?: string };
+
 const daemonAPI = {
   start: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("daemon:start"),
@@ -352,6 +376,8 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:probe-runtimes"),
   getHostName: (): Promise<string> =>
     ipcRenderer.invoke("daemon:get-host-name"),
+  focusEnvironment: (key: string): Promise<FocusEnvironmentResult> =>
+    ipcRenderer.invoke("daemon:focus-environment", key),
   onStatusChange: (callback: (status: DaemonStatus) => void) => {
     const handler = (_: unknown, status: DaemonStatus) => callback(status);
     ipcRenderer.on("daemon:status", handler);

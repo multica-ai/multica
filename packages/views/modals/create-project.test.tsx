@@ -10,6 +10,14 @@ const apiRepoUrl = "https://github.com/multica-ai/api";
 const apiRepoDescription = "API and daemon runtime";
 const webRepoUrl = "https://github.com/multica-ai/web";
 
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: Object.assign(
+    (selector: (state: { user: { id: string } }) => unknown) =>
+      selector({ user: { id: "user-1" } }),
+    { getState: () => ({ user: { id: "user-1" } }) },
+  ),
+}));
+
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: [] }),
   // The modal now reads the runtime list to gate worktree mode, and
