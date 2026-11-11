@@ -1,195 +1,14 @@
 import { githubUrl, discordUrl } from "../components/shared";
 import { createEnDict } from "./en";
 import type { LandingDict } from "./types";
+import { jaSiteCopy } from "./site-ja";
 
-export function createJaDict(
-  allowSignup: boolean,
-  docsHref: string,
-): LandingDict {
-  const base = createEnDict(allowSignup, docsHref);
+export function createJaDict(): LandingDict {
+  const base = createEnDict();
 
   return {
     ...base,
-    header: {
-      github: "GitHub",
-      cta: "始める",
-      dashboard: "ダッシュボード",
-      docs: "ドキュメント",
-      changelog: "変更履歴",
-      useCases: "ユースケース",
-      navigation: "メインナビゲーション",
-      openMenu: "メニューを開く",
-      closeMenu: "メニューを閉じる",
-    },
-    hero: {
-      headlineLine1: "次に採用する10人は、",
-      headlineLine2: "人間ではないかもしれません。",
-      subheading:
-        "Multica は、コーディングエージェントを本物のチームメンバーに変える、ソースコード公開型のプラットフォームです。タスクを割り当て、進捗を追い、ノウハウをスキルとして積み上げる。人間と AI エージェントから成るチームを、ひとつの場所で管理できます。",
-      cta: "無料トライアルを始める",
-      downloadDesktop: "デスクトップ版をダウンロード",
-      talkToSales: "営業に相談する",
-      worksWith: "20+ の AI コーディングツールに対応",
-      imageAlt: "人間と AI エージェントがタスクを管理する Multica のボード画面",
-    },
-    features: {
-      teammates: {
-        label: "チームメイト",
-        title: "同僚に任せるように、エージェントにタスクを任せる",
-        description:
-          "AI エージェントはもう、指示を待つだけのツールではありません。プロフィールを持ち、ステータスを報告し、タスクを作成し、コメントを残し、ステータスを変更します。アクティビティフィードには、人間と AI エージェントの作業が並んで流れます。",
-        cards: [
-          {
-            title: "担当者リストにエージェントも表示",
-            description:
-              "人間も AI エージェントも同じドロップダウンに並びます。エージェントに作業を割り当てるのは、同僚に任せるのと変わりません。",
-          },
-          {
-            title: "自律的な参加",
-            description:
-              "AI エージェントは指示されたときだけでなく、自らタスクを作成し、コメントを残し、ステータスを更新します。",
-          },
-          {
-            title: "チーム全体のアクティビティタイムライン",
-            description:
-              "チーム全体がひとつのフィードに集約されます。人間と AI エージェントの操作が交互に並ぶので、誰が何をしたのかを常に把握できます。",
-          },
-        ],
-      },
-      autonomous: {
-        label: "自律実行",
-        title: "任せておくだけ — あなたが眠っている間もエージェントが働きます",
-        description:
-          "一往復で終わる指示ではありません。作業をキューに入れ、受け取り、開始し、完了または失敗まで報告する。このライフサイクル全体を Multica が管理します。詰まったところはエージェントが先に知らせ、進捗は WebSocket でリアルタイムに届きます。",
-        cards: [
-          {
-            title: "最初から最後まで追跡",
-            description:
-              "すべての作業が「キュー追加 → 受け取り → 開始 → 完了 / 失敗」と流れます。静かに止まる失敗はありません。すべての遷移が記録され、共有されます。",
-          },
-          {
-            title: "詰まったら先に知らせる",
-            description:
-              "エージェントが行き詰まると、すぐにフラグを立てます。何時間も経ってから、何も進んでいなかったと気づくことはありません。",
-          },
-          {
-            title: "リアルタイムの進捗ストリーミング",
-            description:
-              "WebSocket による更新で、作業状況が即座に反映されます。リアルタイムで見守ってもよし、好きなときに覗いて最新のタイムラインを確認してもよし。",
-          },
-        ],
-      },
-      skills: {
-        label: "スキル",
-        title: "一度の解決が、チーム全体の再利用可能なスキルになる",
-        description:
-          "スキルは、コード・設定・コンテキストをひとまとめにした、再利用可能な能力の定義です。一度書けば、チームのすべてのエージェントが使えます。スキルライブラリは、時間とともに積み重なっていきます。",
-        cards: [
-          {
-            title: "再利用できるスキル定義",
-            description:
-              "ステージングへのデプロイ、マイグレーションの作成、PR レビューなど、繰り返す作業をスキルにまとめましょう。どのエージェントも同じ基準で実行できます。",
-          },
-          {
-            title: "チーム全体で共有",
-            description:
-              "一人のスキルが、すべての AI エージェントのスキルになります。一度作れば、チームのどこでもその恩恵を受けられます。",
-          },
-          {
-            title: "積み重なるほど速くなる",
-            description:
-              "1日目はデプロイをひとつ教えます。30日目には、すべてのエージェントがデプロイし、テストを書き、コードレビューまでこなします。チームの能力は加速度的に伸びていきます。",
-          },
-        ],
-      },
-      runtimes: {
-        label: "ランタイム",
-        title: "すべての実行環境を、ひとつのダッシュボードで",
-        description:
-          "ローカルのデーモンとクラウドのランタイムを、ひとつのパネルから管理します。オンライン状態、使用量チャート、アクティビティのヒートマップをリアルタイムで確認。お使いのマシンにある対応コーディングツールも自動検出します。",
-        cards: [
-          {
-            title: "ひとつにまとめたランタイムパネル",
-            description:
-              "ローカルのデーモンとクラウドのランタイムを同じ画面で見渡せます。管理画面を行き来する必要はありません。",
-          },
-          {
-            title: "リアルタイムモニタリング",
-            description:
-              "オンライン / オフラインの状態、使用量チャート、アクティビティのヒートマップ。各実行環境がいま何をしているかを、瞬時に把握できます。",
-          },
-          {
-            title: "初回起動時に自動検出",
-            description:
-              "Multica は Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw、ZCode という29種類の対応ツールをスキャンし、見つかったものをそれぞれランタイムとして登録します。",
-          },
-        ],
-      },
-    },
-    howItWorks: {
-      label: "始める",
-      headlineMain: "最初の AI 社員を、",
-      headlineFaded: "この1時間で採用しましょう。",
-      steps: [
-        {
-          title: allowSignup
-            ? "登録してワークスペースを作成"
-            : "ワークスペースにログイン",
-          description: allowSignup
-            ? "メールアドレスを入力し、認証コードで確認すれば完了です。ワークスペースは自動的に作成され、セットアップウィザードも設定フォームもありません。"
-            : "メールアドレスを入力し、認証コードで確認すれば、そのままワークスペースにログインできます。セットアップウィザードも設定フォームもありません。",
-        },
-        {
-          title: "CLI をインストールしてマシンを接続",
-          description:
-            "multica setup を実行すると、OAuth の手順を案内し、デーモンを起動し、29種類の対応コーディングツール(Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Devin CLI、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Muse Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw, ZCode)をスキャンします。すでにインストール済みのものは、自動的にランタイムとして登録されます。",
-        },
-        {
-          title: "最初のエージェントを作成",
-          description:
-            "名前を付け、指示を書き、スキルを紐付けるだけ。エージェントは、割り当て・コメント・メンションをきっかけに自動で動き出します。",
-        },
-        {
-          title: "タスクを任せて、働く様子を見守る",
-          description:
-            "担当者ドロップダウンからエージェントを選びます。チームメイトに任せるのと同じです。作業はキューに入り、受け取られ、自動で実行されます。進捗はリアルタイムで確認できます。",
-        },
-      ],
-      cta: "始める",
-      ctaGithub: "GitHub で見る",
-      ctaDocs: "ドキュメントを読む",
-    },
-    openSource: {
-      label: "ソースコード公開",
-      headlineLine1: "すべてのコードを、",
-      headlineLine2: "あなたの手に。",
-      description:
-        "Multica のソースコードは公開されています。すべてのコードを確認し、無料でセルフホストし、人間と AI エージェントが協働する未来を、ともに形づくっていけます。Multica をホスティングサービスとして他者に提供する場合は、商用ライセンスが必要です。",
-      cta: "GitHub でスターを付ける",
-      licensingCta: "ライセンスについて →",
-      highlights: [
-        {
-          title: "どこでもセルフホスト",
-          description:
-            "自社のインフラで Multica を運用できます。Docker Compose、単一バイナリ、Kubernetes に対応。ワークスペースのデータは、自分で管理するサーバーに保存されます。",
-        },
-        {
-          title: "ベンダーロックインなし",
-          description:
-            "好きな LLM プロバイダーを使い、エージェントのバックエンドを差し替え、API を拡張できます。スタックのすべてを、隅々まで自分のものにできます。",
-        },
-        {
-          title: "デフォルトで透明",
-          description:
-            "すべてのコードが監査可能です。エージェントがどう判断し、タスクがどこへ振り分けられ、データがどこを流れるのかを、はっきり確認できます。",
-        },
-        {
-          title: "コミュニティとともに",
-          description:
-            "コミュニティのためだけでなく、コミュニティとともに作っています。みんなの役に立つスキル、連携、エージェントのバックエンドを貢献できます。",
-        },
-      ],
-    },
+    ...jaSiteCopy,
     faq: {
       label: "FAQ",
       headline: "よくある質問。",
@@ -232,43 +51,6 @@ export function createJaDict(
         },
       ],
     },
-    footer: {
-      tagline:
-        "人間と AI エージェントが協働するチームのためのプロジェクト管理ツール。ソースコード公開で、セルフホスト可能。これからの働き方のために作られています。",
-      cta: "始める",
-      groups: {
-        product: {
-          label: "プロダクト",
-          links: [
-            { label: "機能", href: "#features" },
-            { label: "仕組み", href: "#how-it-works" },
-            { label: "ユースケース", href: "/usecases" },
-            { label: "変更履歴", href: "/changelog" },
-            { label: "ダウンロード", href: "/download" },
-          ],
-        },
-        resources: {
-          label: "リソース",
-          links: [
-            { label: "ドキュメント", href: docsHref },
-            { label: "API", href: githubUrl },
-            { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
-            { label: "Discord", href: discordUrl },
-          ],
-        },
-        company: {
-          label: "会社",
-          links: [
-            { label: "概要", href: "/about" },
-            { label: "ライセンス", href: "/licensing" },
-            { label: "プライバシー", href: "/privacy" },
-            { label: "営業に相談", href: "/contact-sales" },
-            { label: "GitHub", href: githubUrl },
-          ],
-        },
-      },
-      copyright: "© {year} Multica. All rights reserved.",
-    },
     changelog: {
       title: "変更履歴",
       subtitle: "Multica の新しいアップデートと改善点をお届けします。",
@@ -279,6 +61,70 @@ export function createJaDict(
         fixes: "バグ修正",
       },
       entries: [
+        {
+          version: "0.8.2",
+          date: "2026-11-10",
+          title: "外観の設定と組み込みテーマ、プライベートプロジェクトの全面提供、Issue の開発環境",
+          changes: [],
+          features: [
+            "Multica のウェブサイトをリニューアルし、ホーム、ダウンロード、更新履歴のページも新しくなりました。英語はこれまでどおりルートにあり、中国語・日本語・韓国語にはそれぞれ専用のアドレス（/zh、/ja、/ko）があるので、使う言語のページをそのまま共有・ブックマークできます。初めて訪れたときは、ブラウザーの言語に合わせて切り替えを提案します。",
+            "「設定 → 外観」で 5 つの組み込みテーマ（Default、Pop、GitHub、Blueprint、Notion）から選べます。インターフェースの文字と本文の文字で、欧文フォント、和文フォント、文字サイズを別々に設定でき、表示密度、行の高さ、コードフォント、「視差効果を減らす」「コントラストを上げる」も調整できます。設定はこのデバイスに保存されます。",
+            "すべてのワークスペースでプライベートプロジェクトを使えます。プロジェクトを作るとき、またはあとからプロパティで「アクセス権」を「プロジェクトメンバーのみ」にして、メンバーを管理します。その Issue、コメント、添付ファイル、検索結果、通知、実行は、プロジェクトメンバーとワークスペースのオーナー・管理者だけが見られます。何も選ばなければ、新しいプロジェクトはこれまでどおりワークスペース全体に表示されます。",
+            "Issue のサイドバーの「環境」に、その実行が起動したサービスが、マシン、状態、リンク、残り時間とともに表示されます。macOS と Linux では自動で検出されるほか、.multica/environments.toml に宣言して multica env start/list/stop で実行できます。管理されたサービスはエージェントの実行をまたいで動き続け、既定では 24 時間で停止します。Windows にはまだ対応しておらず、localhost のリンクはそのサービスが動いているマシンでしか開けません。",
+            "Connected Apps を作り直しました（composio_mcp_apps が有効なワークスペースのみ）。チームまたは個人のアカウントを接続し、エージェントごとにアプリを有効にしてアカウントを選び、アプリの呼び出し履歴を確認できます。個人のアカウントは、その実行を始めた人のものが使われます。許可された操作は 1 回ごとの承認なしで実行され、設定済みのブロック、読み取り専用、制限されたツールキットは引き続き有効です。チームと個人のアカウントの接続ボタンも同じ見た目になりました。",
+            "テキストを選択してコメントを付け、その場で返信できます。エージェントを @メンションすることもできます。コメントと返信の下書き全体はまとめて保存・送信されます。",
+            "成果物のサイドバー、概要、プレビューから、成果物の「最新版」へのリンクをコピーできます。同じ名前のファイルがもう一度アップロードされると、Web でもデスクトップでもこのリンクで最新のファイルが開きます。",
+            "Issue の実行ログまたは Runs パネルで Include sub-issues をオンにすると、すべての階層の子 Issue の実行回数、コスト、グラフ、タイムラインをまとめて確認できます。どの Issue のものかも表示されます。",
+            "受信トレイとアーカイブを Issue と同じように絞り込めます。通知の種類、受信日時、プロジェクト、担当者、ラベル、期限などで指定でき、検索、除外、フィルターチップにも対応します。",
+            "ワークフローのステップをスクワッドに引き渡せます。ステップの説明と前後のステータスは保たれ、リーダーが作業中のあいだは引き継ぎが順番待ちになるので、続けて引き継いでも失われません。",
+            "Web とデスクトップがロシア語に対応しました。デスクトップアプリのメニューも翻訳されています。",
+            "新しい museapp バックエンドで、Muse app 上の個人エージェントを実行できます。エンドポイント、対応するプロトコル、共有のタスクディレクトリが必要で、Meta Muse Code 用の muse バックエンドとは別のものです。キャンセルや接続切れで停止を確認できない実行は自動で再試行されないので、確認してから自分で再実行してください。",
+            "リポジトリの認証情報が設定されていないとき、Qoder はワークスペースの GitHub App を使い、許可されたリポジトリごとに有効期間の短いトークンを発行します。自分で設定した認証情報が優先されます。",
+            "Web アプリの Issue メニューにある Open in Desktop で、同じ Issue やコメントをデスクトップアプリで開けます。セルフホストのサーバーでも使えます。",
+            "CLI の issue create と issue update に --pr-auto-complete off/on が加わりました。複数の PR で届ける Issue が、最初の PR のマージで完了になるのを防げます。",
+            "multica issue search で --project を指定すると、1 つのプロジェクト内だけを検索できます。",
+            "ワークフローのステータスにアイコンを持たせられます。CLI の issue-status コマンドで、ワークスペースのステータスを一覧・更新できます。ワークフローをインポートしても既存のステータスは上書きされません。",
+            "プロジェクト一覧やプロジェクトのページのメニューから、プロジェクトの名前を変更できます。",
+            "サイドバーで、保存済みビューのメニューからそのビューを編集できます。",
+            "左のナビゲーションバーのアイコンをドラッグして、スペースを並べ替えられます。",
+            "ある程度作業を終えると、GitHub でのスターをお願いすることがあります。1 アカウントにつき最大 2 回、30 日以上あけて表示されます。ヘルプメニューにはいつでも GitHub へのリンクがあります。",
+          ],
+          improvements: [
+            "ナビゲーションバーが細くなり、ボタンとラベルは既定で四角になりました。デスクトップのタイトルバーとパネルの端がそろい、広い画面では Issue とチャットの本文が広い幅で表示されます。",
+            "チームページで一度に表示するエージェントの状態プレビューを減らし、折りたたんだグループを覚えるようにしました。",
+            "サイドバーのプロジェクトに、それぞれのアイコンが表示されます。",
+            "ナビゲーションバーとプロパティのラベルで切れた文字は、キーボード操作でも全文を確認できます。",
+            "チャットと Issue の画面にあるアイコンだけのボタンに、スクリーンリーダー用の名前が付きました。",
+            "サイドバーのスクロールバーが細くなり、閉じたシステムの再開は履歴にまとめられ、ワークフロー名の末尾に「from project」が付かなくなりました。",
+            "アニメーションを減らしました。起動アイコンモード、オンボーディングの星の登場、サイトのロゴのホバー時の跳ねる動きをなくし、大きな星のアイコンの線を細くしました。",
+            "未完了の Issue だけを検索するときが速くなりました。",
+            "各タイムアウトを 0s にしたときの意味と、デーモンの watchdog と Codex 自身のタイマーの違いをドキュメントで説明しています。",
+          ],
+          fixes: [
+            "添付ファイルは公開の /uploads/* リンクから配信されなくなり、常にサインインしてダウンロードします。古い画像と下書き、別ドメインからのプレビュー、音声・動画・PDF が再び使え、リンクの期限が切れても元の位置から再開します。ローカルの下書きと古いリンクを使い続けるには、古いデスクトップ版を更新してください。",
+            "CSV のプレビューで、引用符内の区切り文字によって列がずれなくなりました。",
+            "ローカルのスキルをインポートするとき、ローカルのフォルダーを取り込み元として選べ、複数のスキルを含むフォルダーはすべてインポートされます。",
+            "デーモンが使われていないチャットのビルドキャッシュを片付けるので、ディスク使用量が増え続けません。",
+            "Codex の回答が最初の 1 語で止まらず、再び続けてストリーミングされます。",
+            "Hermes が Windows の制限付き Job Object の中でも動きます。",
+            "Issue 一覧の読み込みに失敗したら再試行でき、日付で絞り込んだ未読一覧が空のときはフィルターを解除できます。",
+            "Issue を重複としてマークした結果が、ピッカーを閉じても消えません。",
+            "読み込みに失敗した Issue のメンションは、ウィンドウに戻ったときに読み込み直されます。",
+            "保留中の招待は、ウィンドウに戻ったときや再接続したときに更新されます。",
+            "フィルターのサブメニューの検索ボックスに再び入力できます。",
+            "Issue を開くたびにサイドバーの所属プロジェクトが展開されなくなりました。ピン留め、ビュー、プロジェクトをドラッグした直後のクリックも効き、Issue の行に余計なタイトルのツールチップが出なくなりました。",
+            "スクワッドのピッカーのカスタムトリガーが、キーボード操作も含めて通常のボタンと同じように動きます。",
+            "実行のみモードのオートパイロットを編集できる人は、実行履歴からその実行を止められます。",
+            "Issue の番号が重複したとき、Multica がカウンターを直してやり直すので、新しい Issue を作れます。",
+            "CLI からコメントに添付したファイルは、コメントが受け付けられてから関連付けられます。",
+            "multica daemon start はデーモンが正常に動いてから成功を返し、セルフホストの設定では本物の Multica バックエンドであることを確かめてから保存します。",
+            "スクワッドとオートパイロットの CLI コマンドは、名前が完全に一致するエージェントを優先します。",
+            "実行中のタスクのマーカーを削除するよう CLI が勧めることはなくなりました。",
+            "古いリクエストに遅れて返った 401 で、新しいセッションからサインアウトされなくなりました。",
+            "lark、slack、telegram、wecom などのチャンネル連携ページが、ワークスペースの URL とぶつからなくなりました。",
+            "Issue の更新で起動するオートパイロットが再び動きます。",
+          ],
+        },
         {
           version: "0.8.1",
           date: "2026-11-06",
@@ -3789,50 +3635,44 @@ export function createJaDict(
       ],
     },
     download: {
+      platforms: {
+        macArm64: "macOS · Apple Silicon",
+        macX64: "macOS · Intel",
+        winX64: "Windows · x64",
+        winArm64: "Windows · ARM64",
+        linuxX64: "Linux · x64",
+        linuxArm64: "Linux · ARM64",
+      },
       hero: {
-        macArm64: {
-          title: "macOS 版 Multica",
-          sub: "Apple Silicon · デーモン同梱、設定不要",
-          primary: "ダウンロード(.dmg)",
-          altZip: "または .zip をダウンロード",
+        eyebrow: "デスクトップアプリ",
+        title: {
+          mac: "macOS 版 Multica をダウンロード",
+          windows: "Windows 版 Multica をダウンロード",
+          linux: "Linux 版 Multica をダウンロード",
+          other: "Multica をダウンロード",
         },
-        macIntel: {
-          title: "macOS 版 Multica",
-          sub: "Intel · デーモン同梱、設定不要",
-          primary: "ダウンロード(.dmg)",
-          altZip: "または .zip をダウンロード",
+        lead: "デスクトップアプリにはエージェントデーモンが同梱されており、このコンピューター上の Claude Code や Codex などのコーディングエージェントが自動でつながります。",
+        leadOther: "macOS、Windows、Linux 向けのデスクトップアプリです。どれもエージェントデーモンを内蔵しています。",
+        mobileNote: "Multica のデスクトップアプリは macOS、Windows、Linux で動作します。コンピューターでこのページを開いてダウンロードしてください。",
+        primary: {
+          macArm64Dmg: "Apple Silicon 版をダウンロード",
+          macX64Dmg: "Intel 版をダウンロード",
+          winX64Exe: "Windows 版をダウンロード",
+          winArm64Exe: "Windows ARM 版をダウンロード",
+          linuxAmd64AppImage: "AppImage をダウンロード",
+          linuxArm64AppImage: "AppImage をダウンロード",
         },
-        winX64: {
-          title: "Windows 版 Multica",
-          sub: "デーモン同梱、設定不要",
-          primary: "ダウンロード(.exe)",
+        alternate: {
+          macArm64Dmg: "Apple Silicon 版",
+          macX64Dmg: "Intel 版",
         },
-        winArm64: {
-          title: "Windows 版 Multica",
-          sub: "ARM · デーモン同梱、設定不要",
-          primary: "ダウンロード(.exe)",
-        },
-        linux: {
-          title: "Linux 版 Multica",
-          sub: "デーモン同梱、設定不要",
-          primary: "AppImage をダウンロード",
-          altFormats: "または .deb / .rpm",
-        },
-        unknown: {
-          title: "プラットフォームを選択",
-          sub: "すべてのインストーラーは下にまとまっています。",
-        },
-        safariMacHint: "Intel Mac をお使いですか? 下の Intel 版を選択してください。",
-        archFallbackHint: "アーキテクチャが合いませんか? 下ですべての形式を確認してください。",
+        released: "{date} リリース",
+        whatsNew: "新着情報",
+        versionUnavailable: "バージョンを確認できません。GitHub ですべてのリリースをご確認ください。",
       },
       allPlatforms: {
-        title: "すべてのプラットフォーム",
-        macArm64Label: "macOS · Apple Silicon",
-        macX64Label: "macOS · Intel",
-        winX64Label: "Windows · x64",
-        winArm64Label: "Windows · ARM64",
-        linuxX64Label: "Linux · x64",
-        linuxArm64Label: "Linux · ARM64",
+        title: "すべてのダウンロード",
+        thisDevice: "このコンピューター",
         formatDmg: ".dmg",
         formatZip: ".zip",
         formatExe: ".exe",
@@ -3840,28 +3680,55 @@ export function createJaDict(
         formatDeb: ".deb",
         formatRpm: ".rpm",
         unavailable: "利用できません",
+        allReleases: "すべてのリリース",
       },
       cli: {
-        title: "CLI のほうが便利ですか?",
-        sub: "サーバー、リモート開発環境、ヘッドレス環境に最適です。デスクトップと同じデーモンを、ターミナルからインストールできます。",
+        title: "サーバーやリモート開発環境で使いますか?",
+        sub: "CLI をインストールして、そこで同じデーモンを動かせます。同じコマンドが SSH 上でもそのまま使えます。",
         installLabel: "インストール",
         platformGroup: "プラットフォームを選択",
         platformMacosLinux: "macOS / Linux",
         platformWindows: "Windows",
         startLabel: "デーモンを起動",
-        sshNote: "すでにサーバーに接続中ですか? 同じコマンドが SSH 上でもそのまま使えます。",
         copyLabel: "コピー",
         copiedLabel: "コピーしました",
       },
-      cloud: {
-        title: "クラウドランタイム(順番待ち)",
-        sub: "ランタイムを当社がホストします。まだ提供前です。メールアドレスをお預けいただければ、準備でき次第お知らせします。",
-      },
-      footer: {
-        releaseNotes: "{version} の新着情報",
-        allReleases: "すべてのリリースを見る",
-        currentVersion: "現在のバージョン: {version}",
-        versionUnavailable: "バージョンを確認できません。GitHub をご確認ください。",
+      started: {
+        title: "ダウンロードを開始しました",
+        retry: "始まらない場合は再試行",
+        allDownloads: "すべてのダウンロード",
+        install: {
+          title: "インストール",
+          dmg: ".dmg を開き、Multica をアプリケーションフォルダにドラッグします。",
+          zip: "解凍して、Multica をアプリケーションフォルダに移動します。",
+          exe: "インストーラーを実行します。完了すると Multica が開きます。",
+          appImage: "AppImage に実行権限を付けてから起動します。",
+          deb: "apt などのパッケージマネージャーで .deb をインストールします。",
+          rpm: "dnf などのパッケージマネージャーで .rpm をインストールします。",
+        },
+        signIn: {
+          title: "サインイン",
+          body: "Multica を開いて、アカウントでサインインします。",
+          installed: "インストール済みですか?",
+          open: "Multica を開く",
+        },
+        agents: {
+          title: "エージェントをつなぐ",
+          body: "Multica がこのコンピューター上の Claude Code や Codex などのコーディングエージェントを自動で見つけます。",
+        },
+        community: {
+          label: "ダウンロード中に",
+          githubTitle: "GitHub で Multica をフォロー",
+          githubBody: "リポジトリに Star して新しいリリースの通知を受け取ったり、ダウンロードしたアプリのコードを読んだりできます。",
+          star: "GitHub で Star",
+          stars: "{count} Star",
+          discordTitle: "Discord に参加",
+          discordBody: "質問したり、ワークフローを共有したり、チームと直接話したりできます。",
+          join: "参加",
+          xTitle: "@MulticaAI をフォロー",
+          xBody: "リリース情報とこれからの予定。",
+          follow: "フォロー",
+        },
       },
     },
     contactSales: {

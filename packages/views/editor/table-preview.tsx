@@ -245,30 +245,30 @@ export function SortHeader({
 }) {
   const Icon = sorted === "asc" ? ArrowUp : sorted === "desc" ? ArrowDown : ArrowUpDown;
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className={cn(
-        // The table header's spreadsheet casing is for labels the app wrote;
-        // these are the file's own column names and show as written.
-        "group/sort flex w-full min-w-0 items-center gap-1 rounded-sm normal-case tracking-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        numeric && "flex-row-reverse",
-      )}
-    >
-      <TruncatedTooltip content={title}>
+    <TruncatedTooltip content={title}>
+      <button
+        type="button"
+        onClick={onToggle}
+        className={cn(
+          // The table header's spreadsheet casing is for labels the app wrote;
+          // these are the file's own column names and show as written.
+          "group/sort flex w-full min-w-0 items-center gap-1 rounded-sm normal-case tracking-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          numeric && "flex-row-reverse",
+        )}
+      >
         <span className="truncate font-medium">
           {title}
         </span>
-      </TruncatedTooltip>
-      <Icon
-        aria-hidden
-        className={cn(
-          "size-3.5 shrink-0",
-          sorted
-            ? "text-foreground"
-            : "text-muted-foreground opacity-0 transition-opacity group-hover/sort:opacity-100 group-focus-visible/sort:opacity-100",
-        )}
-      />
-    </button>
+        <Icon
+          aria-hidden
+          className={cn(
+            "size-3.5 shrink-0",
+            sorted
+              ? "text-foreground"
+              : "text-muted-foreground opacity-0 transition-opacity group-hover/sort:opacity-100 group-focus-visible/sort:opacity-100",
+          )}
+        />
+      </button>
+    </TruncatedTooltip>
   );
 }

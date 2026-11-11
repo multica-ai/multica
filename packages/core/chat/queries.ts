@@ -33,6 +33,7 @@ export const chatKeys = {
   /** Shared invalidation prefix for the legacy list, pages, and summary. */
   sessions: (wsId: string) => [...chatKeys.all(wsId), "sessions"] as const,
   sessionPages: (wsId: string, status?: "active" | "archived") => [...chatKeys.sessions(wsId), "pages", ...(status ? [status] : [])] as const,
+  barSessions: (wsId: string) => [...chatKeys.sessions(wsId), "bar"] as const,
   sessionSummary: (wsId: string) => [...chatKeys.sessions(wsId), "summary"] as const,
   session: (wsId: string, id: string) => [...chatKeys.sessions(wsId), "detail", id] as const,
   messagesAll: () => ["chat", "messages"] as const,
@@ -88,6 +89,31 @@ export function chatSessionPagesOptions(wsId: string, status: "active" | "archiv
     queryFn: ({ pageParam }) => api.listChatSessionsPage({ status, cursor: pageParam }, { workspaceId: wsId }),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.has_more ? lastPage.next_cursor ?? undefined : undefined,
+    staleTime: Infinity,
+  });
+}
+
+// The bottom bar needs active chips even when their chats are off the first
+// history page. Keep these bounded lookups under the collection invalidation
+// prefix, separate from the infinite history cache.
+export function chatBarChipQueries(wsId: string, sessionIds: Iterable<string>) {
+  const ids = Array.from(new Set(sessionIds)).sort();
+  const batches = [];
+  for (let offset = 0; offset < ids.length; offset += 50) {
+    const batch = ids.slice(offset, offset + 50);
+    batches.push(queryOptions({
+      queryKey: [...chatKeys.barSessions(wsId), "chips", batch],
+      queryFn: () => api.listChatSessionsPage({ status: "active", ids: batch }, { workspaceId: wsId }),
+      staleTime: Infinity,
+    }));
+  }
+  return batches;
+}
+
+export function recentChatBarSessionsOptions(wsId: string) {
+  return queryOptions({
+    queryKey: [...chatKeys.barSessions(wsId), "recent"],
+    queryFn: () => api.listChatSessionsPage({ status: "active", order: "activity", limit: 30 }, { workspaceId: wsId }),
     staleTime: Infinity,
   });
 }

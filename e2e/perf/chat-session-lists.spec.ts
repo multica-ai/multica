@@ -101,8 +101,9 @@ async function setup(page: Page, baseURL: string, withArchive: boolean, size = c
     if (!url.pathname.startsWith("/api/")) return route.continue();
     // This fixture intentionally supplies all rows in one page to stress
     // rendering. chat-session-pagination.spec.ts owns bounded-page behavior.
+    const ids = url.searchParams.get("ids")?.split(",");
     const body = url.pathname === "/api/chat/sessions/page"
-      ? { sessions: rows.filter((row) => row.status === (url.searchParams.get("status") ?? "active")), has_more: false, next_cursor: null }
+      ? { sessions: rows.filter((row) => row.status === (url.searchParams.get("status") ?? "active") && (!ids || ids.includes(row.id))), has_more: false, next_cursor: null }
       : url.pathname === "/api/chat/sessions/summary"
         ? { active_count: size, archived_count: withArchive ? size : 0, unread_by_session: {} }
         : responseFor(url.pathname, rows);
@@ -173,7 +174,7 @@ test("floating chat history scrolls to an offscreen session", async ({ page, bas
   await page.addInitScript(() => localStorage.setItem("multica:chat:isOpen", "true"));
   await page.goto("/perf/inbox");
   const started = Date.now();
-  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await page.getByRole("button", { name: "New chat", exact: true }).and(page.locator('[data-slot="popover-trigger"]')).click();
   const history = page.getByRole("group", { name: "Chat history" });
   await expect(history).toBeVisible();
   await record(page, "dropdown", started, history.getByText(/^Session \d{4}$/));
@@ -183,7 +184,8 @@ test("floating chat history scrolls to an offscreen session", async ({ page, bas
   await expect(last).toBeVisible();
   await last.click();
   await expect(history).not.toBeVisible();
-  await expect(page.getByRole("button", { name: "Session 1999", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Session 1999", exact: true })
+    .and(page.locator('[data-slot="popover-trigger"]'))).toBeVisible();
   expect(state.errors).toEqual([]);
   expect(state.unexpected).toEqual([]);
 });
@@ -206,7 +208,7 @@ for (const size of [0, 1]) {
     const state = await setup(page, baseURL!, false, size);
     await page.addInitScript(() => localStorage.setItem("multica:chat:isOpen", "true"));
     await page.goto("/perf/inbox");
-    await page.getByRole("button", { name: "New chat", exact: true }).click();
+    await page.getByRole("button", { name: "New chat", exact: true }).and(page.locator('[data-slot="popover-trigger"]')).click();
     if (size === 0) {
       await expect(page.getByText("No previous chats", { exact: true })).toBeVisible();
     } else {

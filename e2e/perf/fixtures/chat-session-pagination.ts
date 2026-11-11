@@ -58,10 +58,12 @@ export async function setupSessionPagination(page: Page, baseURL: string, option
         if (failFirstPage) { failFirstPage = false; return route.fulfill({ status: 400, json: { error: "Synthetic one-time failure" } }); }
         const status = url.searchParams.get("status") ?? "active";
         const offset = Number(url.searchParams.get("cursor") ?? 0);
-        const filtered = rows.filter((row) => row.status === status);
-        const sessions = filtered.slice(offset, offset + 50).map((row) => ({ ...row, last_message: { ...row.last_message, content: row.last_message.content.slice(0, 256) } }));
-        const hasMore = offset + 50 < filtered.length;
-        body = { sessions, has_more: hasMore, next_cursor: hasMore ? String(offset + 50) : null };
+        const limit = Number(url.searchParams.get("limit") ?? 50);
+        const ids = url.searchParams.get("ids")?.split(",");
+        const filtered = rows.filter((row) => row.status === status && (!ids || ids.includes(row.id)));
+        const sessions = filtered.slice(offset, offset + limit).map((row) => ({ ...row, last_message: { ...row.last_message, content: row.last_message.content.slice(0, 256) } }));
+        const hasMore = offset + limit < filtered.length;
+        body = { sessions, has_more: hasMore, next_cursor: hasMore ? String(offset + limit) : null };
         break;
       }
       case "/api/chat/sessions/summary": body = {

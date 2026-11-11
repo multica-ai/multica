@@ -59,8 +59,9 @@ func (q *Queries) ListChatSessionSummary(ctx context.Context, arg ListChatSessio
 }
 
 const listChatSessionsPage = `-- name: ListChatSessionsPage :many
-WITH page AS MATERIALIZED (
-    SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.last_read_at, cs.is_agent_intro, cs.pinned_at, cs.project_id, cs.explicitly_created_at, COALESCE(cs.pinned_at, '1970-01-01'::timestamptz) AS sort_pin,
+WITH candidates AS NOT MATERIALIZED (
+    SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.last_read_at, cs.is_agent_intro, cs.pinned_at, cs.project_id, cs.explicitly_created_at, COALESCE(CASE WHEN NOT $1::boolean THEN cs.pinned_at END,
+                          '1970-01-01'::timestamptz)::timestamptz AS sort_pin,
            COALESCE(activity.created_at, cs.updated_at) AS sort_activity
     FROM chat_session cs
     LEFT JOIN LATERAL (
@@ -68,17 +69,19 @@ WITH page AS MATERIALIZED (
         WHERE m.chat_session_id = cs.id AND m.message_kind != 'channel_command'
         ORDER BY m.created_at DESC LIMIT 1
     ) activity ON true
-    WHERE cs.workspace_id = $1
-      AND cs.creator_id = $2
-      AND cs.agent_id = ANY($3::uuid[])
-      AND cs.status = $4
+    WHERE cs.workspace_id = $2
+      AND cs.creator_id = $3
+      AND cs.agent_id = ANY($4::uuid[])
+      AND cs.status = $5
+      AND ($6::uuid[] IS NULL OR cs.id = ANY($6::uuid[]))
       AND (cs.explicitly_created_at IS NOT NULL OR activity.created_at IS NOT NULL)
-      AND (NOT $5::boolean OR
-           (COALESCE(cs.pinned_at, '1970-01-01'::timestamptz),
-            COALESCE(activity.created_at, cs.updated_at), cs.id) <
-           ($6::timestamptz, $7::timestamptz, $8::uuid))
-    ORDER BY sort_pin DESC, sort_activity DESC, cs.id DESC
-    LIMIT $9
+), page AS MATERIALIZED (
+    SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, last_read_at, is_agent_intro, pinned_at, project_id, explicitly_created_at, sort_pin, sort_activity FROM candidates
+    WHERE NOT $7::boolean OR
+           (sort_pin, sort_activity, id) <
+           ($8::timestamptz, $9::timestamptz, $10::uuid)
+    ORDER BY sort_pin DESC, sort_activity DESC, id DESC
+    LIMIT $11
 )
 SELECT page.id, page.workspace_id, page.agent_id, page.creator_id, page.title, page.session_id, page.work_dir, page.status, page.created_at, page.updated_at, page.unread_since, page.runtime_id, page.last_read_at, page.is_agent_intro, page.pinned_at, page.project_id, page.explicitly_created_at, page.sort_pin, page.sort_activity,
        CASE WHEN page.status = 'archived' THEN 0 ELSE
@@ -100,10 +103,12 @@ ORDER BY page.sort_pin DESC, page.sort_activity DESC, page.id DESC
 `
 
 type ListChatSessionsPageParams struct {
+	ActivityOrder  bool               `json:"activity_order"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
 	CreatorID      pgtype.UUID        `json:"creator_id"`
 	AgentIds       []pgtype.UUID      `json:"agent_ids"`
 	Status         string             `json:"status"`
+	SessionIds     []pgtype.UUID      `json:"session_ids"`
 	HasCursor      bool               `json:"has_cursor"`
 	CursorPin      pgtype.Timestamptz `json:"cursor_pin"`
 	CursorActivity pgtype.Timestamptz `json:"cursor_activity"`
@@ -143,10 +148,12 @@ type ListChatSessionsPageRow struct {
 // counts. Only the bounded page needs a message preview.
 func (q *Queries) ListChatSessionsPage(ctx context.Context, arg ListChatSessionsPageParams) ([]ListChatSessionsPageRow, error) {
 	rows, err := q.db.Query(ctx, listChatSessionsPage,
+		arg.ActivityOrder,
 		arg.WorkspaceID,
 		arg.CreatorID,
 		arg.AgentIds,
 		arg.Status,
+		arg.SessionIds,
 		arg.HasCursor,
 		arg.CursorPin,
 		arg.CursorActivity,

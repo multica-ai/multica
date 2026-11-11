@@ -15,11 +15,24 @@
     "status": "상태",
     "priority": "우선순위",
     "from": "보낸 사람",
-    "unread_only": "읽지 않음만",
-    "no_agents_working": "작업 중인 에이전트 없음",
     "notification_count_other": "알림 {{count}}개",
     "clear": "필터 지우기",
-    "empty": "필터와 일치하는 알림이 없습니다"
+    "empty": "필터와 일치하는 알림이 없습니다",
+    "section_notification": "알림",
+    "section_issue": "태스크",
+    "type": "알림 유형",
+    "received": "받은 시간",
+    "type_mention": "멘션",
+    "type_comment": "댓글 및 반응",
+    "type_assign": "할당 및 구독",
+    "type_review": "리뷰 요청",
+    "type_change": "태스크 변경",
+    "type_run": "에이전트 실행",
+    "type_system": "시스템",
+    "received_today": "오늘",
+    "received_last_7_days": "최근 7일",
+    "received_last_30_days": "최근 30일",
+    "agent_idle": "유휴"
   },
   "context_menu": {
     "mark_read": "읽음으로 표시",
@@ -61,6 +74,7 @@
   "types": {
     "issue_assigned": "할당됨",
     "issue_subscribed": "구독됨",
+    "issue_created": "새 태스크",
     "unassigned": "할당 해제됨",
     "assignee_changed": "담당자 변경됨",
     "status_changed": "상태 변경됨",
@@ -80,7 +94,11 @@
     "quick_create_unconfirmed": "에이전트 생성 결과 미확인",
     "autopilot_paused": "자동화 일시 중지됨",
     "children_done": "하위 태스크가 모두 끝났습니다",
-    "autopilot_quota_exceeded": "자동화 실행 한도 도달"
+    "autopilot_quota_exceeded": "자동화 실행 한도 도달",
+    "app_action_requested": "확인 필요",
+    "app_action_reminder": "확인 곧 만료",
+    "app_connect_requested": "앱 연결 요청",
+    "app_action_result": "앱 작업 결과"
   },
   "labels": {
     "set_status_to": "상태 변경:",

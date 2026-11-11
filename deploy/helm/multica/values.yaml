@@ -160,6 +160,12 @@ backend:
     # MULTICA_VCS_SECRET_KEY through existingSecret before connections work.
     # Set false to hide and reject the integration for this deployment.
     vcsIntegrationEnabled: true
+    # Community theme store (Settings → Appearance → Browse, beta). "off"
+    # hides it and stops every registry request; registryUrl points it at
+    # another registry's index.json. Empty keeps the official registry.
+    themeStore:
+      mode: ""
+      registryUrl: ""
     # Managed multica-cloud connection. Empty keeps self-hosting independent.
     # Fleet, Billing, entitlement policy and strict seat capacity share it.
     cloud:
@@ -192,7 +198,7 @@ frontend:
   replicas: 1
   config:
     # Backend origin used by the frontend runtime proxy for /v1, /api, /auth,
-    # /uploads, and /ws. Empty defaults to this release's backend Service.
+    # /health, and /ws. Empty defaults to this release's backend Service.
     remoteApiUrl: ""
     # Optional docs origin used by the frontend runtime proxy for /docs.
     docsUrl: ""

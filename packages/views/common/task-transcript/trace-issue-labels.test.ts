@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import { collectTraceIssueIds, replaceTraceIssueIds } from "./trace-issue-labels";
 import { traceEventCopyText, traceEventDetail, traceToolArgSummary } from "./trace-event-presenter";

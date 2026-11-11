@@ -460,11 +460,15 @@ function FilteredEmptyState() {
   const { t } = useT("issues");
   const clearFilters = useViewStore((s) => s.clearFilters);
   const resetFiltersTo = useViewStore((s) => s.resetFiltersTo);
+  const setDateFilter = useViewStore((s) => s.setDateFilter);
   // Inside a saved view "clear" returns to the view's own conditions — the
   // baseline is not clearable from here (only the edit dialog changes it).
   const baseline = useViewBaseline();
   const handleClear = baseline
-    ? () => resetFiltersTo(baseline.raw)
+    ? () => {
+        resetFiltersTo(baseline.raw);
+        setDateFilter(null);
+      }
     : clearFilters;
   const baselineQuery = useMemo(
     () => (baseline ? issueViewSeedDefinition({ query: { ...baseline.raw }, display: {} }).query : null),
@@ -472,7 +476,9 @@ function FilteredEmptyState() {
   );
   // Only the view's own conditions are on, so there is nothing to clear.
   const atBaseline = useViewStore(
-    (s) => !!baselineQuery && sameFilterMeaning(baselineQuery, issueViewDefinitionFromState(s).query),
+    // Date intervals are user filters, but intentionally live outside the
+    // saved-view definition and its baseline snapshot.
+    (s) => !s.dateFilter && !!baselineQuery && sameFilterMeaning(baselineQuery, issueViewDefinitionFromState(s).query),
   );
 
   return (

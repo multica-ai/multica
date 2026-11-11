@@ -67,6 +67,9 @@ func TestOwningLeaderInWorkflowMovesOnlyByWorkflowCommands(t *testing.T) {
 		for _, want := range []string{
 			// The ownership grant and its standing wrap-up authorization survive.
 			"Own the parent issue status — through its project workflow.",
+			"Delegate only the current step's work",
+			"pass its instructions and constraints to members",
+			"confirm the current step's goal is met",
 			"run that block's Step done command",
 			"do it even when no comment asked you to",
 			// Dispatch is not delivery, in workflow terms, in both halves.

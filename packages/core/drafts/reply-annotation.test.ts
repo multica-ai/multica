@@ -1,12 +1,31 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { parseMentions } from "../issues/comment-trigger-outcomes";
-import { composeAnnotatedReply, hasReplyIntent, locateReplyAnnotation, normalizeReplyAnnotations, type ReplyAnnotation } from "./reply-annotation";
+import { composeAnnotatedReply, composeSelectionReply, hasReplyIntent, locateReplyAnnotation, normalizeReplyAnnotations, type ReplyAnnotation } from "./reply-annotation";
 
 const annotation: ReplyAnnotation = {
   id: "a", sourceCommentId: "source", sourceActorName: "Emacs", quote: "first\nsecond",
   start: 0, prefix: "", suffix: "", note: "Please revise.",
 };
+
+describe("composeSelectionReply", () => {
+  it("keeps captured mentions inert and the new instruction's mention active", () => {
+    const mention = "[@Agent](mention://agent/11111111-1111-1111-1111-111111111111)";
+    const result = composeSelectionReply({ ...annotation, quote: mention }, `${mention} Please revise.`);
+    expect(result).toContain(`\n\n${mention} Please revise.`);
+    expect(result.split("\n\n")[0]).not.toContain("mention://");
+  });
+
+  it.each(["/note", "/NOTE"])('keeps %s before the quote so it cannot invoke an agent', (command) => {
+    expect(composeSelectionReply(annotation, `${command} Keep this note.`)).toBe(`${command}\n\n> first\n> second\n\nKeep this note.`);
+    expect(composeSelectionReply(annotation, command)).toBe("");
+  });
+
+  it("requires an instruction and does not interpret /notes as a command", () => {
+    expect(composeSelectionReply(annotation, "  ")).toBe("");
+    expect(composeSelectionReply(annotation, "/notes are ordinary text")).toBe("> first\n> second\n\n/notes are ordinary text");
+  });
+});
 
 describe("annotated reply serialization", () => {
   it("puts annotations before the overall reply with a section divider", () => {

@@ -19,7 +19,7 @@ import (
 )
 
 func TestParseChatSessionPage(t *testing.T) {
-	for _, query := range []string{"status=all", "limit=0", "limit=101", "limit=bad", "cursor=bad", "cursor=" + strings.Repeat("a", 1025)} {
+	for _, query := range []string{"status=all", "limit=0", "limit=101", "limit=bad", "order=wrong", "ids=", "ids=no-uuid", "limit=1&ids=a,b", "ids=a&cursor=x", "cursor=bad", "cursor=" + strings.Repeat("a", 1025)} {
 		t.Run(query[:min(len(query), 40)], func(t *testing.T) {
 			if _, err := parseChatSessionPage(httptest.NewRequest("GET", "/?"+query, nil)); err == nil {
 				t.Fatal("accepted invalid page parameters")
@@ -106,12 +106,42 @@ func TestChatSessionsPage_BoundedPreviewsAndStableCursor(t *testing.T) {
 	}
 }
 
+func TestChatSessionsPage_QuickChatLookups(t *testing.T) {
+	agent := dbfx.Agent(t, "Quick chat", "")
+	at := time.Now().UTC()
+	old := dbfx.ChatSession(t, agent, testutil.Cols{"updated_at": at.Add(-time.Hour), "pinned_at": at, "explicitly_created_at": at})
+	recent := dbfx.ChatSession(t, agent, testutil.Cols{"updated_at": at, "explicitly_created_at": at})
+	archived := dbfx.ChatSession(t, agent, testutil.Cols{"status": "archived", "explicitly_created_at": at})
+	read := func(query string) ChatSessionsPageResponse {
+		t.Helper()
+		var page ChatSessionsPageResponse
+		testutil.Call(t, testHandler.ListChatSessionsPage, withChatTestWorkspaceCtx(t, newRequest("GET", "/api/chat/sessions/page?"+query, nil))).Want(http.StatusOK).JSON(&page)
+		return page
+	}
+	first := read("limit=1&order=activity")
+	if len(first.Sessions) != 1 || first.Sessions[0].ID != recent || first.NextCursor == nil {
+		t.Fatalf("recent history: %+v", first)
+	}
+	next := read("limit=1&order=activity&cursor=" + url.QueryEscape(*first.NextCursor))
+	if len(next.Sessions) != 1 || next.Sessions[0].ID != old {
+		t.Fatalf("recent history cursor: %+v", next)
+	}
+	if _, err := parseChatSessionPage(httptest.NewRequest("GET", "/?cursor="+url.QueryEscape(*first.NextCursor), nil)); err == nil {
+		t.Fatal("accepted an activity cursor for pin order")
+	}
+	chips := read("ids=" + old + "," + archived)
+	if len(chips.Sessions) != 1 || chips.Sessions[0].ID != old || chips.HasMore {
+		t.Fatalf("exact active chips: %+v", chips)
+	}
+}
+
 func TestChatSessionsPage_VisibilityBeforeLimit(t *testing.T) {
 	privateAgent, owner, member := privateAgentTestFixture(t)
 	publicAgent := dbfx.Agent(t, "Visible pagination demo", "", testutil.Cols{"owner_id": member})
 	at := time.Now().UTC()
+	var privateID string
 	for range 3 {
-		dbfx.ChatSession(t, privateAgent, testutil.Cols{"creator_id": member, "explicitly_created_at": at, "updated_at": at})
+		privateID = dbfx.ChatSession(t, privateAgent, testutil.Cols{"creator_id": member, "explicitly_created_at": at, "updated_at": at})
 	}
 	visible := dbfx.ChatSession(t, publicAgent, testutil.Cols{"creator_id": member, "explicitly_created_at": at, "updated_at": at.Add(-time.Hour)})
 	dbfx.ChatSession(t, publicAgent, testutil.Cols{"creator_id": owner, "explicitly_created_at": at})
@@ -128,6 +158,10 @@ func TestChatSessionsPage_VisibilityBeforeLimit(t *testing.T) {
 	testutil.Call(t, testHandler.ListChatSessionsPage, request("/api/chat/sessions/page?limit=1")).Want(http.StatusOK).JSON(&page)
 	if len(page.Sessions) != 1 || page.Sessions[0].ID != visible || page.HasMore {
 		t.Fatalf("visibility was applied after LIMIT: %+v", page)
+	}
+	testutil.Call(t, testHandler.ListChatSessionsPage, request("/api/chat/sessions/page?ids="+privateID+","+visible)).Want(http.StatusOK).JSON(&page)
+	if len(page.Sessions) != 1 || page.Sessions[0].ID != visible {
+		t.Fatalf("chip lookup exposed a private session: %+v", page)
 	}
 	var summary ChatSessionSummaryResponse
 	testutil.Call(t, testHandler.GetChatSessionSummary, request("/api/chat/sessions/summary")).Want(http.StatusOK).JSON(&summary)

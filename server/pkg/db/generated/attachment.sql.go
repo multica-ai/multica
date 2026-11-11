@@ -564,21 +564,34 @@ func (q *Queries) LinkAttachmentsToChatMessage(ctx context.Context, arg LinkAtta
 
 const linkAttachmentsToComment = `-- name: LinkAttachmentsToComment :exec
 UPDATE attachment
-SET comment_id = $1
-WHERE issue_id = $2
+SET comment_id = $1,
+    issue_id = $2
+WHERE workspace_id = $3
+  AND (issue_id = $2 OR (
+    issue_id IS NULL
+    AND chat_session_id IS NULL
+    AND chat_message_id IS NULL
+    AND task_id IS NULL
+  ))
   AND comment_id IS NULL
   AND source_context_id IS NULL
-  AND id = ANY($3::uuid[])
+  AND id = ANY($4::uuid[])
 `
 
 type LinkAttachmentsToCommentParams struct {
-	CommentID pgtype.UUID   `json:"comment_id"`
-	IssueID   pgtype.UUID   `json:"issue_id"`
-	Column3   []pgtype.UUID `json:"column_3"`
+	CommentID     pgtype.UUID   `json:"comment_id"`
+	IssueID       pgtype.UUID   `json:"issue_id"`
+	WorkspaceID   pgtype.UUID   `json:"workspace_id"`
+	AttachmentIds []pgtype.UUID `json:"attachment_ids"`
 }
 
 func (q *Queries) LinkAttachmentsToComment(ctx context.Context, arg LinkAttachmentsToCommentParams) error {
-	_, err := q.db.Exec(ctx, linkAttachmentsToComment, arg.CommentID, arg.IssueID, arg.Column3)
+	_, err := q.db.Exec(ctx, linkAttachmentsToComment,
+		arg.CommentID,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.AttachmentIds,
+	)
 	return err
 }
 
@@ -1224,6 +1237,7 @@ type LockAttachmentsForCommentLinkParams struct {
 // requested set under that lock and returns the ids still eligible, so the
 // caller can refuse before the comment is committed when a requested
 // attachment was deleted while the issue lock was contended.
+// Ownerless uploads are already pinned by LockUnboundAttachmentsForCommentLink.
 func (q *Queries) LockAttachmentsForCommentLink(ctx context.Context, arg LockAttachmentsForCommentLinkParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, lockAttachmentsForCommentLink, arg.WorkspaceID, arg.IssueID, arg.AttachmentIds)
 	if err != nil {
@@ -1267,6 +1281,48 @@ type LockAttachmentsForIssueLinkParams struct {
 // LockAttachmentsForCommentLink.
 func (q *Queries) LockAttachmentsForIssueLink(ctx context.Context, arg LockAttachmentsForIssueLinkParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, lockAttachmentsForIssueLink, arg.WorkspaceID, arg.AttachmentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockUnboundAttachmentsForCommentLink = `-- name: LockUnboundAttachmentsForCommentLink :many
+SELECT id FROM attachment
+WHERE workspace_id = $1
+  AND issue_id IS NULL
+  AND comment_id IS NULL
+  AND chat_session_id IS NULL
+  AND chat_message_id IS NULL
+  AND task_id IS NULL
+  AND source_context_id IS NULL
+  AND id = ANY($2::uuid[])
+ORDER BY id
+FOR UPDATE
+`
+
+type LockUnboundAttachmentsForCommentLinkParams struct {
+	WorkspaceID   pgtype.UUID   `json:"workspace_id"`
+	AttachmentIds []pgtype.UUID `json:"attachment_ids"`
+}
+
+// Like issue updates, comment creation locks ownerless uploads before the
+// issue row. Once it takes the issue, it locks existing issue children below.
+// This keeps both upload adoption and owner-first deletion in the same order.
+func (q *Queries) LockUnboundAttachmentsForCommentLink(ctx context.Context, arg LockUnboundAttachmentsForCommentLinkParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, lockUnboundAttachmentsForCommentLink, arg.WorkspaceID, arg.AttachmentIds)
 	if err != nil {
 		return nil, err
 	}

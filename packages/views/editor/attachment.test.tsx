@@ -313,11 +313,11 @@ describe("Attachment — image dispatch", () => {
     );
   });
 
-  it("prefers a local disk /uploads URL over API markdown in split-origin self-host", () => {
+  it("authenticates local disk images in split-origin self-host", async () => {
     getBaseUrlMock.mockReturnValue("https://api.example.test");
     const id = "11111111-2222-3333-4444-555555555555";
     const markdownUrl = `https://api.example.test/api/attachments/${id}/download`;
-    const mediaUrl = "https://api.example.test/uploads/workspaces/ws-1/shot.png";
+    const mediaUrl = OBJECT_URL;
     const att = makeRecord({
       id,
       url: "/uploads/workspaces/ws-1/shot.png",
@@ -325,6 +325,8 @@ describe("Attachment — image dispatch", () => {
       download_url: `/api/attachments/${id}/download`,
     });
     resolverState.attachments = [att];
+    getAttachmentMock.mockResolvedValue({ ...att, download_url: `/api/attachments/${id}/signed-download?exp=1&sig=short` });
+    getAttachmentBlobMock.mockResolvedValue(new Blob(["image"], { type: "image/png" }));
 
     renderWithQuery(
       <Attachment
@@ -337,7 +339,8 @@ describe("Attachment — image dispatch", () => {
       />,
     );
 
-    expect(document.querySelector("img")?.getAttribute("src")).toBe(mediaUrl);
+    await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe(mediaUrl));
+    expect(getAttachmentBlobMock).toHaveBeenCalledWith(id);
 
     fireEvent.click(screen.getByRole("button", { name: "View" }));
 
@@ -345,6 +348,19 @@ describe("Attachment — image dispatch", () => {
       img.getAttribute("src"),
     );
     expect(imageSrcs).toEqual([mediaUrl, mediaUrl]);
+  });
+
+  it.each(["draft", "historical body"])("authenticates a local %s without a current attachment list", async (source) => {
+    const id = "11111111-2222-3333-4444-555555555555";
+    const raw = `/uploads/workspaces/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/${id}.png`;
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    configStore.setState({ cdnDomain: "api.example.test", cdnSigned: false });
+    const att = makeRecord({ id, url: raw, markdown_url: "", download_url: "" });
+    getAttachmentMock.mockResolvedValue({ ...att, download_url: `/api/attachments/${id}/signed-download?exp=1&sig=short` });
+    getAttachmentBlobMock.mockResolvedValue(new Blob(["image"], { type: "image/png" }));
+    renderWithQuery(<Attachment attachment={source === "draft" ? { kind: "record", attachment: att } : { kind: "url", url: `https://old-host.test${raw}`, filename: "shot.png", forceKind: "image" }} />);
+    await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe(OBJECT_URL));
+    expect(getAttachmentBlobMock).toHaveBeenCalledWith(id);
   });
 
   it("opens preview with the same resolved media URL when a reopened draft record has no download_url", () => {

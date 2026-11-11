@@ -77,6 +77,8 @@ const h = vi.hoisted(() => {
     agents: [] as Agent[],
     projects: [] as Project[],
     pendingTask: null as ChatPendingTask | null,
+    sessionPageEnabled: undefined as boolean | undefined,
+    messagesQueryEnabled: undefined as boolean | undefined,
     draftRestores: null as
       | { restores: { id: string; chat_session_id: string; content: string }[] }
       | null,
@@ -129,7 +131,6 @@ vi.mock("@multica/core/agents", () => ({
   isAgentRuntimeBound: (agent: { runtime_id: string; runtime_bound?: boolean }) =>
     agent.runtime_bound !== false && agent.runtime_id.length > 0,
   useAgentPresenceDetail: () => ({ availability: "online" }),
-  useCustomizeConversationStartersHref: () => null,
   useWorkspaceAgentAvailability: () => "available",
 }));
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
@@ -182,13 +183,18 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
       if (key.includes("draft-restores")) return { data: h.draftRestores };
       return { data: null };
     },
-    useInfiniteQuery: (options: { queryKey?: unknown[] }) => ({
-      data: options.queryKey?.includes("sessions") ? { pages: [{ sessions: h.sessions }] } : undefined,
-      isLoading: false,
-      fetchNextPage: vi.fn(),
-      hasNextPage: false,
-      isFetchingNextPage: false,
-    }),
+    useInfiniteQuery: (options: { queryKey?: unknown[]; enabled?: boolean }) => {
+      const sessionPage = options.queryKey?.includes("pages");
+      if (sessionPage) h.sessionPageEnabled = options.enabled;
+      else h.messagesQueryEnabled = options.enabled;
+      return {
+        data: sessionPage ? { pages: [{ sessions: h.sessions }] } : undefined,
+        isLoading: false,
+        fetchNextPage: vi.fn(),
+        hasNextPage: false,
+        isFetchingNextPage: false,
+      };
+    },
     useQueryClient: () => h.queryClient,
   };
 });
@@ -465,6 +471,79 @@ describe("useChatController project context", () => {
 
     expect(h.store.setSelectedProjectId).not.toHaveBeenCalled();
     expect(h.store.setActiveSession).toHaveBeenCalledWith(projectSession.id);
+  });
+
+  it("ignores picking the agent that is already active", () => {
+    h.store.activeSessionId = null;
+    h.store.selectedAgentId = agentA.id;
+    h.sessions = [];
+    h.agents = [agentA, agentB];
+
+    const { result } = renderHook(() => useChatController());
+    h.store.setActiveSession.mockClear();
+    h.store.setSelectedAgentId.mockClear();
+
+    act(() => result.current.handleSelectAgent(agentA));
+
+    expect(h.store.setSelectedAgentId).not.toHaveBeenCalled();
+    expect(h.store.setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps the draft project when switching agent before the first send", () => {
+    h.store.activeSessionId = null;
+    h.store.selectedAgentId = agentA.id;
+    h.store.selectedProjectId = project.id;
+    h.sessions = [];
+    h.agents = [agentA, agentB];
+    h.projects = [project];
+
+    const { result } = renderHook(() => useChatController());
+    h.store.setSelectedProjectId.mockClear();
+
+    act(() => result.current.handleSelectAgent(agentB));
+
+    expect(h.store.setSelectedAgentId).toHaveBeenCalledWith(agentB.id);
+    expect(h.store.setSelectedProjectId).toHaveBeenCalledWith(project.id);
+    expect(h.store.setActiveSession).toHaveBeenCalledWith(null);
+  });
+
+  it("drops the open session's project when switching agent away from it", () => {
+    const projectSession = makeSession({
+      id: "project-session",
+      agent_id: "agent-a",
+      project_id: project.id,
+    });
+    h.store.activeSessionId = projectSession.id;
+    h.sessions = [projectSession];
+    h.agents = [agentA, agentB];
+    h.projects = [project];
+
+    const { result } = renderHook(() => useChatController());
+    h.store.setSelectedProjectId.mockClear();
+
+    act(() => result.current.handleSelectAgent(agentB));
+
+    expect(h.store.setSelectedAgentId).toHaveBeenCalledWith(agentB.id);
+    expect(h.store.setSelectedProjectId).toHaveBeenCalledWith(null);
+    expect(h.store.setActiveSession).toHaveBeenCalledWith(null);
+  });
+});
+
+describe("useChatController message loading", () => {
+  it("does not load the open session's messages while its surface is hidden", () => {
+    h.store.activeSessionId = "session-1";
+    h.sessions = [makeSession({ id: "session-1", agent_id: "agent-a" })];
+
+    const { rerender } = renderHook(
+      ({ isActive }) => useChatController({ isActive }),
+      { initialProps: { isActive: false } },
+    );
+    expect(h.sessionPageEnabled).toBe(false);
+    expect(h.messagesQueryEnabled).toBe(false);
+
+    rerender({ isActive: true });
+    expect(h.sessionPageEnabled).toBe(true);
+    expect(h.messagesQueryEnabled).toBe(true);
   });
 });
 

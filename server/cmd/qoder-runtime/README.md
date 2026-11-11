@@ -84,6 +84,22 @@ wide fallback credential is used. This is the standalone bridge's configuration;
 managed connections set repository tokens in the web and desktop apps instead
 (see below).
 
+
+Managed connections fall back to the workspace's GitHub App integration when a
+repository has no hand-entered token: the server mints a 1-hour installation
+token scoped to that single repository (`contents` and `pull_requests` write,
+`metadata` read) and injects it the same way. This needs the GitHub App (and
+each existing installation) to carry those write permissions; an installation
+that never approved them fails the run with a message naming the missing
+permissions instead of a generic missing-credential error. Repositories under a
+connected GitHub account then need no manual token, while anything outside the
+installation (and any workspace without one) still requires an explicit token.
+The rotating token never breaks session reuse — follow-ups fingerprint the
+installation binding (`github_app:<installation_id>`) — and losing coverage
+fails the next run's credential re-check before a session is reused. Runs
+longer than the token's lifetime get a fresh token pushed into the live
+session about 45 minutes after each issuance.
+
 A project may bind one HTTPS GitHub repository and an optional branch ref.
 Without one, the agent's default repository (`runtime_config.repository`) is
 mounted, and failing that the workspace's only repository when a credential is

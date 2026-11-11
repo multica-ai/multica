@@ -132,7 +132,7 @@ export function useGlobalCommands(contexts: readonly CommandBarContext[]): Palet
         id: "theme",
         label: t(($) => $.commands.change_theme),
         icon: Palette,
-        keywords: ["theme", "appearance", "dark", "light", "system", "mode", "主题", "深色", "浅色"],
+        keywords: ["theme", "appearance", "dark", "light", "system", "mode", "color", "colour", "主题", "深色", "浅色", "配色"],
         page: { type: "theme" },
       },
       {

@@ -515,7 +515,11 @@ export function ChatThreadList({
   if (historySessions.length === 0) {
     return (
       <div className="flex h-full min-h-0 flex-col">
-        {sessionList.isSuccess && <div className="px-2 py-1.5 text-caption text-muted-foreground">{t(($) => $.window.no_previous)}</div>}
+        {sessionList.isSuccess && (
+          <div className="px-3 py-1.5 text-caption text-muted-foreground">
+            {t(($) => $.window.no_previous)}
+          </div>
+        )}
         <ChatSessionListStatus query={sessionList} />
         {archivedEntry}
       </div>

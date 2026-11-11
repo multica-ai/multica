@@ -1,8 +1,9 @@
 -- name: ListChatSessionsPage :many
 -- Apply visibility and the cursor before fetching message bodies or unread
 -- counts. Only the bounded page needs a message preview.
-WITH page AS MATERIALIZED (
-    SELECT cs.*, COALESCE(cs.pinned_at, '1970-01-01'::timestamptz) AS sort_pin,
+WITH candidates AS NOT MATERIALIZED (
+    SELECT cs.*, COALESCE(CASE WHEN NOT sqlc.arg(activity_order)::boolean THEN cs.pinned_at END,
+                          '1970-01-01'::timestamptz)::timestamptz AS sort_pin,
            COALESCE(activity.created_at, cs.updated_at) AS sort_activity
     FROM chat_session cs
     LEFT JOIN LATERAL (
@@ -14,12 +15,14 @@ WITH page AS MATERIALIZED (
       AND cs.creator_id = sqlc.arg(creator_id)
       AND cs.agent_id = ANY(sqlc.arg(agent_ids)::uuid[])
       AND cs.status = sqlc.arg(status)
+      AND (sqlc.narg(session_ids)::uuid[] IS NULL OR cs.id = ANY(sqlc.narg(session_ids)::uuid[]))
       AND (cs.explicitly_created_at IS NOT NULL OR activity.created_at IS NOT NULL)
-      AND (NOT sqlc.arg(has_cursor)::boolean OR
-           (COALESCE(cs.pinned_at, '1970-01-01'::timestamptz),
-            COALESCE(activity.created_at, cs.updated_at), cs.id) <
-           (sqlc.arg(cursor_pin)::timestamptz, sqlc.arg(cursor_activity)::timestamptz, sqlc.arg(cursor_id)::uuid))
-    ORDER BY sort_pin DESC, sort_activity DESC, cs.id DESC
+), page AS MATERIALIZED (
+    SELECT * FROM candidates
+    WHERE NOT sqlc.arg(has_cursor)::boolean OR
+           (sort_pin, sort_activity, id) <
+           (sqlc.arg(cursor_pin)::timestamptz, sqlc.arg(cursor_activity)::timestamptz, sqlc.arg(cursor_id)::uuid)
+    ORDER BY sort_pin DESC, sort_activity DESC, id DESC
     LIMIT sqlc.arg(page_limit)
 )
 SELECT page.*,

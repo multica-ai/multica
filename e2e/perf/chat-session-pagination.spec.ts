@@ -10,14 +10,14 @@ for (const surface of ["history", "archive", "floating"] as const) {
     if (surface === "floating") await page.addInitScript(() => localStorage.setItem("multica:chat:isOpen", "true"));
     const started = Date.now();
     await page.goto(surface === "floating" ? "/perf/inbox" : "/perf/chat");
-    if (surface === "floating") await page.getByRole("button", { name: "New chat", exact: true }).click();
+    if (surface === "floating") await page.getByRole("button", { name: "New chat", exact: true }).and(page.locator('[data-slot="popover-trigger"]')).click();
     await expect(page.getByText("Session 0000", { exact: true })).toBeVisible();
     const firstReady = Date.now() - started;
     const initialRequests = [...fixture.requests];
     if (!baseline) {
       expect(initialRequests.some((r) => r.path === "/api/chat/sessions?status=all")).toBe(false);
       expect(initialRequests.filter((r) => r.path.includes("status=archived"))).toHaveLength(0);
-      expect(initialRequests.find((r) => r.path.includes("/page?"))?.rows).toBe(50);
+      expect(initialRequests.find((r) => r.path.includes("/page?") && !new URLSearchParams(r.path.split("?")[1]).has("ids"))?.rows).toBe(50);
     }
     await page.screenshot({ path: test.info().outputPath("initial.png") });
     if (surface === "archive") {
@@ -54,6 +54,24 @@ test("an empty active page still offers the archive", async ({ page, baseURL }) 
   await page.goto("/perf/chat");
   await page.getByRole("button", { name: /Archived.*1/ }).click();
   await expect(page.getByText("Archived 0000", { exact: true })).toBeVisible();
+  expect(fixture.errors).toEqual([]);
+  expect(fixture.unexpected).toEqual([]);
+});
+
+
+test("closed quick chat loads chips without fetching history until opened", async ({ page, baseURL }) => {
+  test.skip(baseline, "quick-chat pagination regression");
+  const fixture = await setupSessionPagination(page, baseURL!);
+  await page.goto("/perf/inbox");
+  await expect(page.getByRole("button", { name: "Session 0499, Unread" })).toBeVisible();
+  const historyPages = () => fixture.requests.filter(({ path }) =>
+    path.startsWith("/api/chat/sessions/page?") && !new URLSearchParams(path.split("?")[1]).has("ids"));
+  expect(historyPages()).toHaveLength(0);
+  await page.getByRole("button", { name: "Chat history", exact: true }).click();
+  await expect(page.getByRole("button", { name: /Session 0000/ })).toBeVisible();
+  expect(historyPages()).toHaveLength(1);
+  expect(historyPages()[0]?.rows).toBe(30);
+  expect(fixture.requests.some(({ path }) => path.includes("status=all") || path.includes("status=archived"))).toBe(false);
   expect(fixture.errors).toEqual([]);
   expect(fixture.unexpected).toEqual([]);
 });

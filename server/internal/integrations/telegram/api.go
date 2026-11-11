@@ -419,6 +419,15 @@ func (a *botAPI) EditMessageText(ctx context.Context, p editMessageTextParams) e
 	return a.call(ctx, "editMessageText", p, nil)
 }
 
+// DeleteMessage removes a message the bot sent. A bot may delete its own
+// messages for 48 hours.
+func (a *botAPI) DeleteMessage(ctx context.Context, chatID, messageID int64) error {
+	return a.call(ctx, "deleteMessage", struct {
+		ChatID    int64 `json:"chat_id"`
+		MessageID int64 `json:"message_id"`
+	}{ChatID: chatID, MessageID: messageID}, nil)
+}
+
 // SendChatAction shows the native "typing…" indicator for ~5s in the same
 // forum topic as the triggering message, when applicable.
 func (a *botAPI) SendChatAction(ctx context.Context, chatID, messageThreadID int64) error {

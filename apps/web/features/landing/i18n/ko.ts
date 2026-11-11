@@ -1,195 +1,14 @@
 import { githubUrl, discordUrl } from "../components/shared";
 import { createEnDict } from "./en";
 import type { LandingDict } from "./types";
+import { koSiteCopy } from "./site-ko";
 
-export function createKoDict(
-  allowSignup: boolean,
-  docsHref: string,
-): LandingDict {
-  const base = createEnDict(allowSignup, docsHref);
+export function createKoDict(): LandingDict {
+  const base = createEnDict();
 
   return {
     ...base,
-    header: {
-      github: "GitHub",
-      cta: "시작하기",
-      dashboard: "대시보드",
-      docs: "문서",
-      changelog: "변경 로그",
-      useCases: "사용 사례",
-      navigation: "주요 메뉴",
-      openMenu: "메뉴 열기",
-      closeMenu: "메뉴 닫기",
-    },
-    hero: {
-      headlineLine1: "다음에 합류할 10명은",
-      headlineLine2: "사람이 아닐지도 모릅니다.",
-      subheading:
-        "Multica는 코딩 AI 에이전트를 진짜 팀원으로 만들어 주는 소스 공개 플랫폼입니다. 태스크를 맡기고, 진행 상황을 따라가고, 반복되는 노하우를 스킬로 쌓아 두세요. 사람과 AI 에이전트로 이루어진 팀을 한곳에서 관리할 수 있습니다.",
-      cta: "무료로 시작하기",
-      downloadDesktop: "데스크톱 다운로드",
-      talkToSales: "영업팀에 문의",
-      worksWith: "20개 이상의 AI 코딩 도구 지원",
-      imageAlt: "사람과 AI 에이전트가 함께 태스크를 관리하는 Multica 보드 화면",
-    },
-    features: {
-      teammates: {
-        label: "팀원",
-        title: "동료에게 일을 맡기듯, AI 에이전트에게 태스크를 맡기세요",
-        description:
-          "AI 에이전트는 더 이상 프롬프트를 기다리는 도구가 아닙니다. 자기 프로필이 있고, 진행 상황을 보고하고, 태스크를 만들고, 댓글을 달고, 상태를 바꿉니다. 활동 피드에는 사람과 AI 에이전트의 작업이 나란히 흐릅니다.",
-        cards: [
-          {
-            title: "담당자 목록에 함께 표시",
-            description:
-              "사람과 AI 에이전트가 같은 담당자 목록에 나타납니다. 동료를 고르듯 에이전트를 고르면, 곧바로 작업이 시작됩니다.",
-          },
-          {
-            title: "스스로 남기는 작업 기록",
-            description:
-              "AI 에이전트는 요청을 처리하는 동안 직접 댓글을 남기고 상태를 갱신합니다. 필요하면 새 태스크를 열어 다음 작업까지 이어 줍니다.",
-          },
-          {
-            title: "팀 전체가 보는 타임라인",
-            description:
-              "사람과 AI 에이전트의 활동이 하나의 피드에 차곡차곡 쌓입니다. 누가 무엇을, 어디까지 했는지 따로 물어볼 필요가 없습니다.",
-          },
-        ],
-      },
-      autonomous: {
-        label: "자율 실행",
-        title: "맡겨 두기만 하세요 — 에이전트가 알아서 끝까지 해냅니다",
-        description:
-          "한 번 답하고 끝나는 프롬프트 도구가 아닙니다. 작업을 대기열에 넣고, 가져오고, 실행하고, 완료 또는 실패까지 보고하는 흐름 전체를 Multica가 관리합니다. 막힌 부분은 에이전트가 먼저 알려 주고, 진행 상황은 실시간으로 올라옵니다.",
-        cards: [
-          {
-            title: "처음부터 끝까지 추적",
-            description:
-              "대기, 수락, 실행, 완료, 실패까지 모든 단계가 기록됩니다. 조용히 멈춰 버린 작업을 뒤늦게 발견하는 일이 줄어듭니다.",
-          },
-          {
-            title: "막히면 먼저 알려 주는 에이전트",
-            description:
-              "에이전트가 더 진행하기 어렵다고 판단하면 바로 신호를 보냅니다. 몇 시간 뒤에야 진척이 없었다는 걸 알게 되는 일은 없습니다.",
-          },
-          {
-            title: "실시간 진행 상황",
-            description:
-              "WebSocket 기반 업데이트로 작업 상황이 즉시 반영됩니다. 실시간으로 지켜봐도 좋고, 나중에 들어와 최신 타임라인만 훑어 봐도 좋습니다.",
-          },
-        ],
-      },
-      skills: {
-        label: "스킬",
-        title: "한 번 해결한 일은 팀의 스킬로 남습니다",
-        description:
-          "스킬은 코드, 설정, 맥락을 한데 묶은 재사용 가능한 작업 방식입니다. 한 번 정리해 두면 팀의 모든 AI 에이전트가 같은 방식으로 실행할 수 있고, 팀의 노하우는 시간이 흐를수록 차곡차곡 쌓입니다.",
-        cards: [
-          {
-            title: "반복 작업을 스킬로 정리",
-            description:
-              "스테이징 배포, 마이그레이션 작성, PR 리뷰처럼 자주 반복되는 일을 스킬로 만들어 두세요. 어떤 에이전트든 같은 기준으로 실행할 수 있습니다.",
-          },
-          {
-            title: "팀 전체와 공유",
-            description:
-              "한 사람이 만든 스킬을 모든 AI 에이전트가 사용할 수 있습니다. 개인의 시행착오가 곧 팀 전체의 일하는 방식이 됩니다.",
-          },
-          {
-            title: "쌓일수록 빨라지는 팀",
-            description:
-              "처음에는 배포 하나를 맡깁니다. 시간이 지나면 에이전트가 배포하고, 테스트도 작성하고, 리뷰까지 거듭니다. 팀이 일하는 속도가 점점 더 빨라집니다.",
-          },
-        ],
-      },
-      runtimes: {
-        label: "런타임",
-        title: "실행 환경을 한곳에서 관리하세요",
-        description:
-          "로컬 데몬과 클라우드 런타임을 한 화면에서 관리합니다. 온라인 상태, 사용량, 활동 패턴을 한눈에 보고, 내 컴퓨터에 설치된 지원 코딩 도구를 자동으로 찾아 등록합니다.",
-        cards: [
-          {
-            title: "하나로 모은 런타임 패널",
-            description:
-              "로컬 데몬과 클라우드 런타임을 같은 화면에서 살펴봅니다. 실행 환경마다 다른 관리 페이지를 열 필요가 없습니다.",
-          },
-          {
-            title: "실시간 모니터링",
-            description:
-              "온라인/오프라인 상태, 사용량 차트, 활동 히트맵으로 각 실행 환경이 지금 어떻게 쓰이고 있는지 바로 확인할 수 있습니다.",
-          },
-          {
-            title: "처음 실행할 때 자동 등록",
-            description:
-              "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Devin CLI, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw, ZCode 등 29개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
-          },
-        ],
-      },
-    },
-    howItWorks: {
-      label: "시작하기",
-      headlineMain: "첫 AI 팀원을",
-      headlineFaded: "한 시간 안에 합류시키세요.",
-      steps: [
-        {
-          title: allowSignup
-            ? "가입하고 워크스페이스 만들기"
-            : "워크스페이스에 로그인하기",
-          description: allowSignup
-            ? "이메일을 입력하고 인증 코드를 확인하면 바로 시작할 수 있습니다. 워크스페이스는 자동으로 만들어지며, 별도의 설정 과정도 없습니다."
-            : "이메일을 입력하고 인증 코드를 확인하면 바로 워크스페이스에 들어갈 수 있습니다. 별도의 설정 과정도 없습니다.",
-        },
-        {
-          title: "CLI 설치하고 내 컴퓨터 연결하기",
-          description:
-            "`multica setup`을 실행하면 로그인, 데몬 실행, 지원 코딩 도구 스캔까지 차례대로 안내합니다. 이미 설치된 도구는 자동으로 런타임에 등록됩니다.",
-        },
-        {
-          title: "첫 에이전트 만들기",
-          description:
-            "이름을 정하고 지침을 작성한 뒤 필요한 스킬을 연결하세요. 태스크를 배정하거나 댓글에서 멘션하면 에이전트가 곧바로 움직입니다.",
-        },
-        {
-          title: "태스크를 맡기고 작업을 지켜보기",
-          description:
-            "담당자 목록에서 동료를 고르듯 에이전트를 선택하세요. 작업은 대기열에 들어가고, 에이전트가 받아서 실행합니다. 진행 상황은 실시간으로 확인할 수 있습니다.",
-        },
-      ],
-      cta: "시작하기",
-      ctaGithub: "GitHub에서 보기",
-      ctaDocs: "문서 읽기",
-    },
-    openSource: {
-      label: "소스 공개",
-      headlineLine1: "모든 코드를,",
-      headlineLine2: "여러분의 방식대로.",
-      description:
-        "Multica의 소스 코드는 공개되어 있습니다. 코드를 직접 들여다보고, 무료로 셀프 호스팅하고, 사람과 AI 에이전트가 함께 일하는 방식을 같이 만들어 갈 수 있습니다. Multica를 다른 사람에게 호스팅 서비스로 제공하려면 상용 라이선스가 필요합니다.",
-      cta: "GitHub에서 스타 누르기",
-      licensingCta: "라이선스 안내 →",
-      highlights: [
-        {
-          title: "어디서든 셀프 호스팅",
-          description:
-            "자체 인프라에서 Multica를 직접 운영하세요. Docker Compose, 단일 바이너리, Kubernetes를 지원하며, 워크스페이스 데이터는 여러분이 관리하는 서버에 저장됩니다.",
-        },
-        {
-          title: "벤더 종속 없음",
-          description:
-            "원하는 LLM 제공자를 쓰고, 에이전트 백엔드를 바꾸고, API를 확장하세요. 스택 전체를 직접 손에 쥘 수 있습니다.",
-        },
-        {
-          title: "투명한 구조",
-          description:
-            "모든 코드를 열어 볼 수 있습니다. 에이전트가 어떻게 동작하는지, 작업이 어디로 전달되는지, 데이터가 어디를 거치는지 직접 확인할 수 있습니다.",
-        },
-        {
-          title: "커뮤니티와 함께",
-          description:
-            "커뮤니티를 위해 만드는 데서 그치지 않고, 커뮤니티와 함께 만듭니다. 누구에게나 도움이 되는 스킬, 연동, 에이전트 백엔드를 직접 기여할 수 있습니다.",
-        },
-      ],
-    },
+    ...koSiteCopy,
     faq: {
       label: "FAQ",
       headline: "자주 묻는 질문.",
@@ -231,43 +50,6 @@ export function createKoDict(
         },
       ],
     },
-    footer: {
-      tagline:
-        "사람과 AI 에이전트가 함께 일하는 팀을 위한 프로젝트 관리 도구. 소스 코드가 공개되어 있으며, 원하는 곳에 직접 호스팅할 수 있습니다.",
-      cta: "시작하기",
-      groups: {
-        product: {
-          label: "제품",
-          links: [
-            { label: "기능", href: "#features" },
-            { label: "작동 방식", href: "#how-it-works" },
-            { label: "사용 사례", href: "/usecases" },
-            { label: "변경 로그", href: "/changelog" },
-            { label: "다운로드", href: "/download" },
-          ],
-        },
-        resources: {
-          label: "리소스",
-          links: [
-            { label: "문서", href: docsHref },
-            { label: "API", href: githubUrl },
-            { label: "X (Twitter)", href: "https://x.com/MulticaAI" },
-            { label: "Discord", href: discordUrl },
-          ],
-        },
-        company: {
-          label: "회사",
-          links: [
-            { label: "소개", href: "/about" },
-            { label: "라이선스", href: "/licensing" },
-            { label: "개인정보 처리방침", href: "/privacy" },
-            { label: "영업팀 문의", href: "/contact-sales" },
-            { label: "GitHub", href: githubUrl },
-          ],
-        },
-      },
-      copyright: "© {year} Multica. All rights reserved.",
-    },
     changelog: {
       title: "변경 로그",
       subtitle: "Multica의 새로운 업데이트와 개선 사항입니다.",
@@ -278,6 +60,70 @@ export function createKoDict(
         fixes: "버그 수정",
       },
       entries: [
+        {
+          version: "0.8.2",
+          date: "2026-11-10",
+          title: "모양 설정과 기본 제공 테마, 비공개 프로젝트 전면 제공, Issue 개발 환경",
+          changes: [],
+          features: [
+            "Multica 웹사이트가 새로워졌고, 홈, 다운로드, 변경 기록 페이지도 새 디자인으로 바뀌었습니다. 영어는 계속 루트 경로에 있고, 중국어·일본어·한국어는 각자의 주소(/zh, /ja, /ko)가 있어 원하는 언어의 페이지를 바로 공유하거나 북마크할 수 있습니다. 처음 방문하면 브라우저 언어에 맞춰 언어 전환을 제안합니다.",
+            "'설정 → 모양'에서 기본 제공 테마 5가지(Default, Pop, GitHub, Blueprint, Notion) 중 하나를 고를 수 있습니다. 인터페이스 글자와 본문 글자에 라틴 글꼴, CJK 글꼴, 글자 크기를 따로 정하고, 밀도, 줄 간격, 코드 글꼴, 동작 줄이기, 대비 높이기도 조절할 수 있습니다. 설정은 이 기기에 저장됩니다.",
+            "모든 워크스페이스에서 비공개 프로젝트를 쓸 수 있습니다. 프로젝트를 만들 때나 나중에 속성에서 '접근 권한'을 '프로젝트 멤버만'으로 정하고 멤버를 관리하세요. 그 프로젝트의 Issue, 댓글, 첨부 파일, 검색 결과, 알림, 실행 기록은 프로젝트 멤버와 워크스페이스 소유자·관리자만 볼 수 있습니다. 따로 고르지 않으면 새 프로젝트는 지금처럼 워크스페이스 전체에 보입니다.",
+            "Issue 사이드바의 '환경'에 그 Issue의 실행이 시작한 서비스가 머신, 상태, 링크, 남은 시간과 함께 표시됩니다. macOS와 Linux에서는 자동으로 감지되고, .multica/environments.toml에 선언한 뒤 multica env start/list/stop으로 실행할 수도 있습니다. 관리되는 서비스는 에이전트 실행 사이에도 계속 돌아가며 기본적으로 24시간 뒤에 멈춥니다. Windows는 아직 지원하지 않으며, localhost 링크는 서비스가 실행 중인 머신에서만 열립니다.",
+            "Connected Apps를 새로 만들었습니다(composio_mcp_apps가 켜진 워크스페이스만). 팀 또는 개인 계정을 연결하고, 에이전트별로 앱을 켜고 계정을 고르며, 앱 호출 기록을 볼 수 있습니다. 개인 계정은 그 실행을 시작한 사람의 계정을 씁니다. 허용된 작업은 호출마다 승인받지 않고 바로 실행되며, 설정해 둔 차단, 읽기 전용, 제한된 도구 모음은 그대로 적용됩니다. 팀 계정과 개인 계정의 연결 버튼 모양도 같아졌습니다.",
+            "텍스트를 선택해 댓글을 달고 그 자리에서 답글을 쓸 수 있으며, 에이전트를 @멘션할 수도 있습니다. 댓글과 답글 초안 전체가 함께 저장되고 함께 전송됩니다.",
+            "산출물 사이드바, 개요, 미리보기에서 산출물의 '최신 버전' 링크를 복사할 수 있습니다. 같은 이름의 파일이 다시 업로드되면 웹과 데스크톱에서 이 링크로 가장 최근 파일이 열립니다.",
+            "Issue의 실행 로그나 Runs 패널에서 Include sub-issues를 켜면, 모든 단계의 하위 Issue 실행 횟수, 비용, 차트, 타임라인을 한 번에 볼 수 있고 각 항목에 해당 Issue가 표시됩니다.",
+            "받은 항목과 보관함을 Issue처럼 필터링할 수 있습니다. 알림 종류, 받은 시간, 프로젝트, 담당자, 라벨, 마감일 등으로 거르고, 검색, 제외, 필터 칩도 쓸 수 있습니다.",
+            "워크플로 단계를 스쿼드에 넘길 수 있습니다. 단계 설명과 앞뒤 상태가 유지되고, 리더가 바쁠 때는 인계가 차례를 기다리므로 연달아 넘겨도 사라지지 않습니다.",
+            "웹과 데스크톱에서 러시아어를 지원합니다. 데스크톱 앱 메뉴도 번역됐습니다.",
+            "새 museapp 백엔드로 Muse app에서 개인 에이전트를 실행할 수 있습니다. 엔드포인트, 호환 프로토콜, 공유 태스크 디렉터리가 필요하며, Meta Muse Code용 muse 백엔드와는 다릅니다. 취소되거나 연결이 끊긴 실행이 멈췄는지 확인할 수 없으면 자동으로 다시 시도하지 않으니, 확인한 뒤 직접 다시 실행하세요.",
+            "저장소 자격 증명이 설정되지 않았으면 Qoder가 워크스페이스의 GitHub App을 써서, 권한이 있는 저장소마다 짧은 기간만 유효한 토큰을 발급합니다. 직접 설정한 자격 증명이 우선합니다.",
+            "웹 앱 Issue 메뉴의 Open in Desktop으로 같은 Issue나 댓글을 데스크톱 앱에서 열 수 있습니다. 셀프 호스팅 서버에서도 됩니다.",
+            "CLI의 issue create와 issue update에 --pr-auto-complete off/on이 추가됐습니다. 여러 PR로 전달하는 Issue가 첫 PR이 병합될 때 완료되지 않게 할 수 있습니다.",
+            "multica issue search에서 --project로 한 프로젝트 안에서만 검색할 수 있습니다.",
+            "워크플로 상태에 아이콘을 넣을 수 있고, CLI의 issue-status 명령으로 워크스페이스 상태를 나열하고 수정할 수 있습니다. 워크플로를 가져와도 기존 상태는 덮어쓰지 않습니다.",
+            "프로젝트 목록이나 프로젝트 페이지의 메뉴에서 프로젝트 이름을 바꿀 수 있습니다.",
+            "사이드바에서 저장된 보기의 메뉴로 그 보기를 바로 편집할 수 있습니다.",
+            "왼쪽 탐색 바의 아이콘을 끌어서 공간 순서를 바꿀 수 있습니다.",
+            "작업을 어느 정도 마치면 GitHub 별표를 요청할 수 있습니다. 계정마다 최대 두 번, 최소 30일 간격으로 표시됩니다. 도움말 메뉴에는 항상 GitHub 링크가 있습니다.",
+          ],
+          improvements: [
+            "탐색 바가 좁아지고 버튼과 라벨은 기본적으로 사각형이 됐습니다. 데스크톱 제목 표시줄과 패널 가장자리가 맞춰지고, 넓은 화면에서는 Issue와 채팅 본문이 더 넓은 폭으로 표시됩니다.",
+            "팀 페이지에 한 번에 보이는 에이전트 상태 미리보기를 줄이고, 접은 그룹을 기억합니다.",
+            "사이드바의 프로젝트에 각자의 아이콘이 표시됩니다.",
+            "탐색 바와 속성 라벨에서 잘린 글자를 키보드로도 전부 볼 수 있습니다.",
+            "채팅과 Issue 화면의 아이콘만 있는 버튼에 스크린 리더용 이름이 붙었습니다.",
+            "사이드바 스크롤바가 얇아지고, 닫힌 시스템 깨우기는 기록으로 옮겨지며, 워크플로 이름 끝에 'from project'가 붙지 않습니다.",
+            "애니메이션을 줄였습니다. 시작 아이콘 모드, 온보딩의 별 등장 효과, 사이트 로고의 호버 튀는 효과를 없애고 큰 별 아이콘의 선을 가늘게 했습니다.",
+            "완료되지 않은 Issue만 검색할 때 더 빨라졌습니다.",
+            "문서에서 각 타임아웃을 0s로 두었을 때의 의미와, 데몬 watchdog과 Codex 자체 타이머의 차이를 설명합니다.",
+          ],
+          fixes: [
+            "첨부 파일은 더 이상 공개 /uploads/* 링크로 제공되지 않고, 항상 로그인한 상태로 내려받습니다. 예전 이미지와 초안, 다른 도메인의 미리보기, 오디오·동영상·PDF가 다시 작동하고, 링크가 만료돼도 보던 위치에서 이어집니다. 로컬 초안과 예전 링크를 계속 쓰려면 이전 데스크톱 버전을 업데이트하세요.",
+            "CSV 미리보기에서 따옴표 안의 구분자 때문에 열이 어긋나지 않습니다.",
+            "로컬 스킬을 가져올 때 로컬 폴더를 출처로 고를 수 있고, 스킬이 여러 개 든 폴더는 모두 가져옵니다.",
+            "데몬이 쓰지 않는 채팅의 빌드 캐시를 정리해 디스크 사용량이 계속 늘지 않습니다.",
+            "Codex 답변이 첫 단어에서 멈추지 않고 다시 이어서 스트리밍됩니다.",
+            "Hermes가 Windows의 제한된 Job Object 안에서도 실행됩니다.",
+            "Issue 목록을 불러오지 못하면 다시 시도할 수 있고, 날짜로 필터링한 읽지 않음 목록이 비어 있으면 필터를 지울 수 있습니다.",
+            "Issue를 중복으로 표시한 결과가 선택기를 닫아도 사라지지 않습니다.",
+            "불러오지 못한 Issue 멘션은 창으로 돌아오면 다시 불러옵니다.",
+            "대기 중인 초대는 창으로 돌아오거나 다시 연결되면 새로 고쳐집니다.",
+            "필터 하위 메뉴의 검색 상자에 다시 입력할 수 있습니다.",
+            "Issue를 열 때마다 사이드바에서 해당 프로젝트가 펼쳐지지 않습니다. 고정 항목, 보기, 프로젝트를 끈 직후의 클릭도 먹히고, Issue 행에 불필요한 제목 툴팁이 나오지 않습니다.",
+            "스쿼드 선택기의 사용자 지정 트리거가 키보드를 포함해 일반 버튼처럼 동작합니다.",
+            "실행 전용 오토파일럿을 편집할 수 있으면 실행 기록에서 그 실행을 멈출 수 있습니다.",
+            "Issue 번호가 겹치면 Multica가 카운터를 고치고 다시 시도하므로 새 Issue를 만들 수 있습니다.",
+            "CLI로 댓글에 첨부한 파일은 댓글이 받아들여진 뒤에 연결됩니다.",
+            "multica daemon start는 데몬이 정상 상태가 된 뒤에만 성공을 알리고, 셀프 호스팅 설정은 서버가 실제 Multica 백엔드인지 확인한 다음 저장합니다.",
+            "스쿼드와 오토파일럿 CLI 명령은 이름이 정확히 같은 에이전트를 우선합니다.",
+            "CLI가 아직 실행 중인 태스크의 마커를 지우라고 권하지 않습니다.",
+            "예전 요청에 늦게 돌아온 401 때문에 새 세션에서 로그아웃되지 않습니다.",
+            "lark, slack, telegram, wecom 등 채널 연결 페이지가 워크스페이스 URL과 겹치지 않습니다.",
+            "Issue 업데이트로 시작되는 오토파일럿이 다시 실행됩니다.",
+          ],
+        },
         {
           version: "0.8.1",
           date: "2026-11-06",
@@ -3810,50 +3656,44 @@ export function createKoDict(
       ],
     },
     download: {
+      platforms: {
+        macArm64: "macOS · Apple Silicon",
+        macX64: "macOS · Intel",
+        winX64: "Windows · x64",
+        winArm64: "Windows · ARM64",
+        linuxX64: "Linux · x64",
+        linuxArm64: "Linux · ARM64",
+      },
       hero: {
-        macArm64: {
-          title: "macOS용 Multica",
-          sub: "Apple Silicon · 데몬 포함, 별도 설정 없음",
-          primary: "다운로드(.dmg)",
-          altZip: "또는 .zip 다운로드",
+        eyebrow: "데스크톱 앱",
+        title: {
+          mac: "macOS용 Multica 다운로드",
+          windows: "Windows용 Multica 다운로드",
+          linux: "Linux용 Multica 다운로드",
+          other: "Multica 다운로드",
         },
-        macIntel: {
-          title: "macOS용 Multica",
-          sub: "Intel · 데몬 포함, 별도 설정 없음",
-          primary: "다운로드(.dmg)",
-          altZip: "또는 .zip 다운로드",
+        lead: "데스크톱 앱에는 에이전트 데몬이 포함되어 있어, 이 컴퓨터의 Claude Code, Codex 등 코딩 에이전트가 자동으로 연결됩니다.",
+        leadOther: "macOS, Windows, Linux용 데스크톱 앱이며, 모두 에이전트 데몬이 내장되어 있습니다.",
+        mobileNote: "Multica 데스크톱 앱은 macOS, Windows, Linux에서 실행됩니다. 컴퓨터에서 이 페이지를 열어 다운로드하세요.",
+        primary: {
+          macArm64Dmg: "Apple Silicon용 다운로드",
+          macX64Dmg: "Intel용 다운로드",
+          winX64Exe: "Windows용 다운로드",
+          winArm64Exe: "Windows ARM용 다운로드",
+          linuxAmd64AppImage: "AppImage 다운로드",
+          linuxArm64AppImage: "AppImage 다운로드",
         },
-        winX64: {
-          title: "Windows용 Multica",
-          sub: "데몬 포함, 별도 설정 없음",
-          primary: "다운로드(.exe)",
+        alternate: {
+          macArm64Dmg: "Apple Silicon Mac",
+          macX64Dmg: "Intel Mac",
         },
-        winArm64: {
-          title: "Windows용 Multica",
-          sub: "ARM · 데몬 포함, 별도 설정 없음",
-          primary: "다운로드(.exe)",
-        },
-        linux: {
-          title: "Linux용 Multica",
-          sub: "데몬 포함, 별도 설정 없음",
-          primary: "AppImage 다운로드",
-          altFormats: "또는 .deb / .rpm",
-        },
-        unknown: {
-          title: "플랫폼 선택",
-          sub: "모든 설치 파일은 아래에 정리되어 있습니다.",
-        },
-        safariMacHint: "Intel Mac을 사용 중인가요? 아래에서 Intel 버전을 선택하세요.",
-        archFallbackHint: "아키텍처가 맞지 않나요? 아래에서 모든 형식을 확인하세요.",
+        released: "{date} 출시",
+        whatsNew: "새로운 내용",
+        versionUnavailable: "버전을 확인할 수 없습니다. GitHub에서 모든 릴리스를 확인하세요.",
       },
       allPlatforms: {
-        title: "모든 플랫폼",
-        macArm64Label: "macOS · Apple Silicon",
-        macX64Label: "macOS · Intel",
-        winX64Label: "Windows · x64",
-        winArm64Label: "Windows · ARM64",
-        linuxX64Label: "Linux · x64",
-        linuxArm64Label: "Linux · ARM64",
+        title: "모든 다운로드",
+        thisDevice: "이 컴퓨터",
         formatDmg: ".dmg",
         formatZip: ".zip",
         formatExe: ".exe",
@@ -3861,28 +3701,55 @@ export function createKoDict(
         formatDeb: ".deb",
         formatRpm: ".rpm",
         unavailable: "사용할 수 없음",
+        allReleases: "모든 릴리스",
       },
       cli: {
-        title: "CLI가 더 편하신가요?",
-        sub: "서버, 원격 개발 환경, headless 환경에 적합합니다. 데스크톱과 동일한 데몬을 터미널에서 바로 설치할 수 있습니다.",
+        title: "서버나 원격 개발 환경에서 사용하시나요?",
+        sub: "CLI를 설치해 그곳에서 같은 데몬을 실행하세요. SSH에서도 같은 명령을 그대로 사용할 수 있습니다.",
         installLabel: "설치",
         platformGroup: "플랫폼 선택",
         platformMacosLinux: "macOS / Linux",
         platformWindows: "Windows",
         startLabel: "데몬 시작",
-        sshNote: "이미 서버에 접속해 있나요? 같은 명령을 SSH에서도 그대로 사용할 수 있습니다.",
         copyLabel: "복사",
         copiedLabel: "복사했습니다",
       },
-      cloud: {
-        title: "클라우드 런타임 (대기자 명단)",
-        sub: "Multica가 런타임을 직접 호스팅해 드립니다. 아직 정식 출시 전입니다. 이메일을 남겨 주시면 준비되는 대로 알려드릴게요.",
-      },
-      footer: {
-        releaseNotes: "{version}의 새로운 내용",
-        allReleases: "모든 릴리스 보기",
-        currentVersion: "현재 버전: {version}",
-        versionUnavailable: "버전을 확인할 수 없습니다. GitHub를 확인하세요.",
+      started: {
+        title: "다운로드가 시작되었습니다",
+        retry: "시작되지 않았나요? 다시 시도",
+        allDownloads: "모든 다운로드",
+        install: {
+          title: "설치",
+          dmg: ".dmg를 열고 Multica를 응용 프로그램 폴더로 드래그하세요.",
+          zip: "압축을 풀고 Multica를 응용 프로그램 폴더로 옮기세요.",
+          exe: "설치 프로그램을 실행하세요. 완료되면 Multica가 열립니다.",
+          appImage: "AppImage에 실행 권한을 준 다음 실행하세요.",
+          deb: "apt 또는 사용 중인 패키지 관리자로 .deb를 설치하세요.",
+          rpm: "dnf 또는 사용 중인 패키지 관리자로 .rpm을 설치하세요.",
+        },
+        signIn: {
+          title: "로그인",
+          body: "Multica를 열고 계정으로 로그인하세요.",
+          installed: "이미 설치했나요?",
+          open: "Multica 열기",
+        },
+        agents: {
+          title: "에이전트 연결",
+          body: "Multica가 이 컴퓨터의 Claude Code, Codex 등 코딩 에이전트를 자동으로 찾습니다.",
+        },
+        community: {
+          label: "다운로드하는 동안",
+          githubTitle: "GitHub에서 Multica 팔로우하기",
+          githubBody: "저장소에 Star를 눌러 새 릴리스 소식을 받아 보거나, 방금 다운로드한 앱의 코드를 살펴보세요.",
+          star: "GitHub에서 Star",
+          stars: "Star {count}개",
+          discordTitle: "Discord 참여하기",
+          discordBody: "질문하고, 워크플로를 공유하고, 팀과 직접 이야기하세요.",
+          join: "참여",
+          xTitle: "@MulticaAI 팔로우",
+          xBody: "릴리스 소식과 앞으로의 계획.",
+          follow: "팔로우",
+        },
       },
     },
     contactSales: {

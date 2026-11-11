@@ -16,13 +16,19 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useT } from "../../i18n";
 
 const logger = createLogger("chat.ui");
 
+/**
+ * The floating launcher. From `md` up the bottom bar carries quick chat, so
+ * this is the launcher for narrow windows only.
+ */
 export function ChatFab() {
   const { t } = useT("chat");
+  const isMobile = useIsMobile();
   const wsId = useWorkspaceId();
   const isOpen = useChatStore((s) => s.isOpen);
   const toggle = useChatStore((s) => s.toggle);
@@ -30,17 +36,18 @@ export function ChatFab() {
   // the tooltip carries the current binding (Settings → Shortcuts can rebind or
   // clear it, hence the null case).
   const shortcut = useShortcut("toggleChat");
-  const { data: summary } = useQuery(chatSessionSummaryOptions(wsId));
-  // FAB only needs a boolean "is anything running", and only while the window
-  // is closed (when open, ChatWindow owns the detailed pending query). Gating
-  // on `enabled: !isOpen` keeps the minimised button off the per-message
-  // aggregate hot path entirely (MUL-4159).
+  const visible = isMobile && !isOpen;
+  const { data: summary } = useQuery({ ...chatSessionSummaryOptions(wsId), enabled: visible });
+  // FAB only needs a boolean "is anything running", and only while it shows
+  // and the window is closed (when open, ChatWindow owns the detailed pending
+  // query). Gating on `enabled` keeps the minimised button off the
+  // per-message aggregate hot path entirely (MUL-4159).
   const { data: hasPending } = useQuery({
     ...hasPendingChatTasksOptions(wsId),
-    enabled: !isOpen,
+    enabled: visible,
   });
 
-  if (isOpen) return null;
+  if (!visible) return null;
 
   const unreadSessionCount = Object.keys(summary?.unread_by_session ?? {}).length;
   const isRunning = hasPending?.has_pending ?? false;

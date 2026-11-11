@@ -15,11 +15,24 @@
     "status": "状态",
     "priority": "优先级",
     "from": "来自",
-    "unread_only": "只看未读",
-    "no_agents_working": "没有智能体在工作",
     "notification_count_other": "{{count}} 条通知",
     "clear": "清除筛选",
-    "empty": "没有符合筛选条件的通知"
+    "empty": "没有符合筛选条件的通知",
+    "section_notification": "通知",
+    "section_issue": "任务",
+    "type": "通知类型",
+    "received": "收到时间",
+    "type_mention": "提及我",
+    "type_comment": "评论与回应",
+    "type_assign": "分配与订阅",
+    "type_review": "审查请求",
+    "type_change": "任务变更",
+    "type_run": "智能体运行",
+    "type_system": "系统",
+    "received_today": "今天",
+    "received_last_7_days": "最近 7 天",
+    "received_last_30_days": "最近 30 天",
+    "agent_idle": "空闲"
   },
   "context_menu": {
     "mark_read": "标为已读",
@@ -61,6 +74,7 @@
   "types": {
     "issue_assigned": "已分配",
     "issue_subscribed": "已订阅",
+    "issue_created": "新任务",
     "unassigned": "已取消分配",
     "assignee_changed": "分配人已更改",
     "status_changed": "状态已更改",
@@ -80,7 +94,11 @@
     "quick_create_unconfirmed": "通过智能体创建结果未确认",
     "autopilot_paused": "自动化已暂停",
     "children_done": "子任务已全部结束",
-    "autopilot_quota_exceeded": "自动化执行次数已用完"
+    "autopilot_quota_exceeded": "自动化执行次数已用完",
+    "app_action_requested": "等待你确认",
+    "app_action_reminder": "确认即将过期",
+    "app_connect_requested": "请连接应用",
+    "app_action_result": "应用操作结果"
   },
   "labels": {
     "set_status_to": "状态设为",

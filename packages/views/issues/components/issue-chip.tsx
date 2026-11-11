@@ -1,5 +1,6 @@
 "use client";
 
+import { ApiError } from "@multica/core/api";
 import { issueStatusCategory } from "@multica/core/issues";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import type { ReactNode } from "react";
@@ -67,6 +68,10 @@ export function IssueChip({
   const { data: detailIssue } = useQuery({
     ...issueDetailOptions(wsId, issueId),
     enabled: !listIssue,
+    // Recover transient failures on focus without repeatedly fetching missing
+    // issues. Hydrated queries stay fresh until invalidated (staleTime: Infinity).
+    refetchOnWindowFocus: (query) =>
+      !(query.state.error instanceof ApiError && query.state.error.status === 404),
   });
 
   const issue = listIssue ?? detailIssue;

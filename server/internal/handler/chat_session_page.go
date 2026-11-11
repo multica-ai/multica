@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -14,10 +15,11 @@ import (
 )
 
 type chatSessionPageCursor struct {
-	Pin      time.Time `json:"pin"`
-	Activity time.Time `json:"activity"`
-	ID       string    `json:"id"`
-	Status   string    `json:"status"`
+	Pin           time.Time `json:"pin"`
+	Activity      time.Time `json:"activity"`
+	ID            string    `json:"id"`
+	Status        string    `json:"status"`
+	ActivityOrder bool      `json:"activity_order,omitempty"`
 }
 
 type ChatSessionsPageResponse struct {
@@ -47,13 +49,33 @@ func parseChatSessionPage(r *http.Request) (db.ListChatSessionsPageParams, error
 		}
 		p.PageLimit = int32(n + 1)
 	}
+	switch r.URL.Query().Get("order") {
+	case "":
+	case "activity":
+		p.ActivityOrder = true
+	default:
+		return p, fmt.Errorf("unknown session order")
+	}
+	if r.URL.Query().Has("ids") {
+		ids := strings.Split(r.URL.Query().Get("ids"), ",")
+		if len(ids) >= int(p.PageLimit) || r.URL.Query().Has("cursor") {
+			return p, fmt.Errorf("session IDs must fit on a single page")
+		}
+		for _, rawID := range ids {
+			id, err := util.ParseUUID(rawID)
+			if err != nil {
+				return p, fmt.Errorf("invalid session ID")
+			}
+			p.SessionIds = append(p.SessionIds, id)
+		}
+	}
 	if raw := r.URL.Query().Get("cursor"); raw != "" {
 		if len(raw) > 1024 {
 			return p, fmt.Errorf("invalid cursor")
 		}
 		data, err := base64.RawURLEncoding.DecodeString(raw)
 		var cursor chatSessionPageCursor
-		if err != nil || json.Unmarshal(data, &cursor) != nil || cursor.Pin.IsZero() || cursor.Activity.IsZero() || cursor.Status != p.Status {
+		if err != nil || json.Unmarshal(data, &cursor) != nil || cursor.Pin.IsZero() || cursor.Activity.IsZero() || cursor.Status != p.Status || cursor.ActivityOrder != p.ActivityOrder {
 			return p, fmt.Errorf("invalid cursor")
 		}
 		id, err := util.ParseUUID(cursor.ID)
@@ -124,7 +146,7 @@ func (h *Handler) ListChatSessionsPage(w http.ResponseWriter, r *http.Request) {
 	}
 	if response.HasMore {
 		last := rows[len(rows)-1]
-		data, err := json.Marshal(chatSessionPageCursor{Pin: last.SortPin.Time, Activity: last.SortActivity.Time, ID: uuidToString(last.ID), Status: p.Status})
+		data, err := json.Marshal(chatSessionPageCursor{Pin: last.SortPin.Time, Activity: last.SortActivity.Time, ID: uuidToString(last.ID), Status: p.Status, ActivityOrder: p.ActivityOrder})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to encode cursor")
 			return

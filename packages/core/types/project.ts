@@ -3,10 +3,26 @@ export type ProjectStatus = "planned" | "in_progress" | "paused" | "completed" |
 
 export type ProjectPriority = "urgent" | "high" | "medium" | "low" | "none";
 
+export type ProjectVisibility = "workspace" | "private";
+
+export interface ProjectMember {
+  project_id: string;
+  user_id: string;
+  name: string;
+  email: string;
+  avatar_url: string | null;
+}
+
+export interface ListProjectMembersResponse {
+  members: ProjectMember[];
+  total: number;
+}
+
 export interface Project {
   id: string;
   workspace_id: string;
   title: string;
+  visibility?: ProjectVisibility;
   description: string | null;
   icon: string | null;
   status: ProjectStatus;
@@ -34,6 +50,8 @@ export interface Project {
 
 export interface CreateProjectRequest {
   title: string;
+  visibility?: ProjectVisibility;
+  member_ids?: string[];
   description?: string;
   icon?: string;
   status?: ProjectStatus;
@@ -51,6 +69,8 @@ export interface CreateProjectRequest {
 
 export interface UpdateProjectRequest {
   title?: string;
+  visibility?: ProjectVisibility;
+  member_ids?: string[];
   description?: string | null;
   icon?: string | null;
   status?: ProjectStatus;

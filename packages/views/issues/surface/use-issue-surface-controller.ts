@@ -58,7 +58,7 @@ import {
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useAuthStore } from "@multica/core/auth";
-import { agentListOptions } from "@multica/core/workspace/queries";
+import { agentListOptions, involvedSquadIdsOptions } from "@multica/core/workspace/queries";
 import { subscribedIssueIdsOptions } from "@multica/core/issues/subscribed";
 import { useShallow } from "zustand/react/shallow";
 import type { IssueFilters, IssueRelationContext } from "../utils/filter";
@@ -340,6 +340,11 @@ export function useIssueSurfaceController({
     enabled: usesMyAgents,
   });
   const agents = agentsQuery.data;
+  const involvedSquadIdsQuery = useQuery({
+    ...involvedSquadIdsOptions(wsId),
+    enabled: usesMyAgents,
+  });
+  const involvedSquadIds = involvedSquadIdsQuery.data;
   const subscribedIssueIdsQuery = useQuery({
     ...subscribedIssueIdsOptions(wsId),
     enabled: usesSubscribed,
@@ -347,6 +352,7 @@ export function useIssueSurfaceController({
   const subscribedIssueIds = subscribedIssueIdsQuery.data;
   const relationSources = [
     usesMyAgents && agentsQuery,
+    usesMyAgents && involvedSquadIdsQuery,
     usesSubscribed && subscribedIssueIdsQuery,
   ];
   const relationContext = useMemo<IssueRelationContext | undefined>(() => {
@@ -360,11 +366,12 @@ export function useIssueSurfaceController({
             ),
           }
         : {}),
+      ...(usesMyAgents && involvedSquadIds ? { mySquadIds: new Set(involvedSquadIds) } : {}),
       ...(usesSubscribed && subscribedIssueIds
         ? { subscribedIssueIds: new Set(subscribedIssueIds) }
         : {}),
     };
-  }, [agents, subscribedIssueIds, userId, usesMyAgents, usesSubscribed]);
+  }, [agents, involvedSquadIds, subscribedIssueIds, userId, usesMyAgents, usesSubscribed]);
 
   const allowedModes = useMemo(() => new Set<IssueSurfaceMode>(modes), [modes]);
   const fallbackMode = modes[0] ?? "list";

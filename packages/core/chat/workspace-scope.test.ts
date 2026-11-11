@@ -5,6 +5,8 @@ import { api, ApiClient, setApiInstance } from "../api";
 import { setCurrentWorkspace } from "../platform/workspace-storage";
 import type { ChatSession } from "../types/chat";
 import {
+  chatBarChipQueries,
+  recentChatBarSessionsOptions,
   chatKeys,
   chatPinnedAgentsOptions,
   chatSessionPagesOptions,
@@ -148,6 +150,8 @@ describe("chat collection workspace ownership", () => {
     fetch: () => Promise<unknown>;
   }> = [
     { name: "sessions", path: "/api/chat/sessions", fetch: () => queryClient.fetchQuery(chatSessionsOptions(workspaceA)) },
+    { name: "quick-chat chips", path: "/api/chat/sessions/page", fetch: () => queryClient.fetchQuery(chatBarChipQueries(workspaceA, ["session"])[0]!) },
+    { name: "recent quick chats", path: "/api/chat/sessions/page", fetch: () => queryClient.fetchQuery(recentChatBarSessionsOptions(workspaceA)) },
     { name: "pinned agents", path: "/api/chat/pinned-agents", fetch: () => queryClient.fetchQuery(chatPinnedAgentsOptions(workspaceA)) },
     { name: "pending tasks", path: "/api/chat/pending-tasks", fetch: () => queryClient.fetchQuery(pendingChatTasksOptions(workspaceA)) },
     { name: "pending indicator", path: "/api/chat/pending-tasks/has-any", fetch: () => queryClient.fetchQuery(hasPendingChatTasksOptions(workspaceA)) },

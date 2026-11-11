@@ -16,12 +16,25 @@
     "status": "Statut",
     "priority": "Priorité",
     "from": "De",
-    "unread_only": "Non lues uniquement",
-    "no_agents_working": "Aucun agent au travail",
     "notification_count_one": "{{count}} notification",
     "notification_count_other": "{{count}} notifications",
     "clear": "Effacer les filtres",
-    "empty": "Aucune notification ne correspond à vos filtres"
+    "empty": "Aucune notification ne correspond à vos filtres",
+    "section_notification": "Notification",
+    "section_issue": "Tâche",
+    "type": "Type",
+    "received": "Reçue",
+    "type_mention": "Mentions",
+    "type_comment": "Commentaires et réactions",
+    "type_assign": "Assignations et abonnements",
+    "type_review": "Demandes de relecture",
+    "type_change": "Modifications de la tâche",
+    "type_run": "Exécutions d'agents",
+    "type_system": "Système",
+    "received_today": "Aujourd'hui",
+    "received_last_7_days": "7 derniers jours",
+    "received_last_30_days": "30 derniers jours",
+    "agent_idle": "Inactif"
   },
   "context_menu": {
     "mark_read": "Marquer comme lu",
@@ -63,6 +76,7 @@
   "types": {
     "issue_assigned": "Assigné",
     "issue_subscribed": "Abonné",
+    "issue_created": "Nouvelle tâche",
     "unassigned": "Désassigné",
     "assignee_changed": "Assignation modifiée",
     "status_changed": "Statut modifié",
@@ -82,7 +96,11 @@
     "quick_create_unconfirmed": "Création avec un agent non confirmée",
     "autopilot_paused": "Automatisation en pause",
     "children_done": "Sous-tâches terminées",
-    "autopilot_quota_exceeded": "Limite d'exécutions d'automatisation atteinte"
+    "autopilot_quota_exceeded": "Limite d'exécutions d'automatisation atteinte",
+    "app_action_requested": "Confirmation requise",
+    "app_action_reminder": "Confirmation bientôt expirée",
+    "app_connect_requested": "Connecter une app",
+    "app_action_result": "Résultat d'action d'app"
   },
   "labels": {
     "set_status_to": "Statut défini sur",

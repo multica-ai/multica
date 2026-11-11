@@ -16,7 +16,7 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({
   useIssueDraftStore: (selector: (s: { hasDraft: () => boolean }) => unknown) =>
     selector({ hasDraft: () => state.hasDraft }),
 }));
-vi.mock("../search/search-store", () => ({
+vi.mock("@multica/core/command-bar", () => ({
   useSearchStore: { getState: () => ({ setOpen: setSearchOpen }) },
 }));
 vi.mock("@multica/core/shortcuts", () => ({ useShortcut: () => null }));

@@ -5,7 +5,16 @@
  * minimal monochrome outlines so they inherit currentColor.
  */
 
+import type { DesktopOS } from "../../utils/download-target";
+
 type IconProps = React.SVGProps<SVGSVGElement> & { size?: number };
+
+export function OSIcon({ os, ...props }: IconProps & { os: DesktopOS }) {
+  const Icon = os === "mac" ? AppleIcon : os === "windows" ? WindowsIcon : LinuxIcon;
+  return <Icon {...props} />;
+}
+
+export const OS_NAMES: Record<DesktopOS, string> = { mac: "macOS", windows: "Windows", linux: "Linux" };
 
 export function AppleIcon({ size = 18, ...props }: IconProps) {
   return (
