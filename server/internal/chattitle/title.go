@@ -15,10 +15,10 @@ var (
 	titleSpace    = regexp.MustCompile(`[[:space:]]+`)
 )
 
-// Derive mirrors the existing first-party deterministic title policy for
-// channel-created Chats. Go slices valid Unicode code points rather than UTF-16
-// code units, while preserving the same first-line, Markdown, whitespace, and
-// 30-character single-ellipsis behavior.
+// Derive is the single deterministic title policy for a Chat's first message,
+// shared by first-party clients (which create sessions untitled) and channels:
+// first non-empty line, Markdown stripped, whitespace collapsed, capped at 30
+// code points with a single ellipsis.
 func Derive(body string) string {
 	line := ""
 	for _, candidate := range strings.Split(body, "\n") {
