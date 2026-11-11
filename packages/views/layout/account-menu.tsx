@@ -55,11 +55,15 @@ const THEMES = [
   { value: "system", icon: Monitor },
 ] as const;
 
-function SubmenuLabel({ label, value }: { label: string; value?: string }) {
+function SubmenuLabel({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
     <>
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {value && <span className="shrink-0 text-caption text-muted-foreground">{value}</span>}
+      <span className="shrink-0">{label}</span>
+      {value && (
+        <span className="ml-auto flex min-w-0 justify-end text-caption text-muted-foreground">
+          {typeof value === "string" ? <span className="truncate">{value}</span> : value}
+        </span>
+      )}
     </>
   );
 }
@@ -130,14 +134,23 @@ export function AccountMenu() {
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
               <Palette />
-              <SubmenuLabel label={t(($) => $.account.theme)} value={themeLabel(selectedTheme)} />
+              <SubmenuLabel
+                label={t(($) => $.account.theme)}
+                value={
+                  <>
+                    <span className="shrink-0">{t(($) => $.account.themes[modeValue])}</span>
+                    <span aria-hidden="true" className="shrink-0 px-1">·</span>
+                    <span className="truncate">{themeLabel(selectedTheme)}</span>
+                  </>
+                }
+              />
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="w-56">
               <DropdownMenuGroup>
                 <DropdownMenuLabel>{t(($) => $.account.mode)}</DropdownMenuLabel>
                 <DropdownMenuRadioGroup value={modeValue} onValueChange={(next) => setMode(next as string)}>
                   {THEMES.map(({ value, icon: Icon }) => (
-                    <DropdownMenuRadioItem key={value} value={value} closeOnClick={false}>
+                    <DropdownMenuRadioItem key={value} value={value}>
                       <Icon />
                       {t(($) => $.account.themes[value])}
                     </DropdownMenuRadioItem>

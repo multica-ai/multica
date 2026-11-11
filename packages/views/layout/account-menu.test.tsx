@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_APPEARANCE, useAppearanceStore } from "@multica/core/appearance";
+import { DEFAULT_APPEARANCE, useAppearanceStore, useInstalledThemesStore } from "@multica/core/appearance";
 import { renderWithI18n } from "../test/i18n";
 import { AccountMenu } from "./account-menu";
 
@@ -55,6 +55,7 @@ function openThemeMenu() {
 beforeEach(() => {
   theme.current = "light";
   useAppearanceStore.setState(DEFAULT_APPEARANCE);
+  useInstalledThemesStore.setState({ themes: [], folders: {}, fromStore: {} });
 });
 
 afterEach(() => {
@@ -62,12 +63,29 @@ afterEach(() => {
 });
 
 describe("AccountMenu theme submenu", () => {
-  it("shows the active colour theme on the Theme row", () => {
+  it("shows the mode and the active colour theme on the Theme row", () => {
+    theme.current = "dark";
     useAppearanceStore.setState({ theme: "github" });
     renderWithI18n(<AccountMenu />);
     fireEvent.click(screen.getByRole("button", { name: "Account" }));
 
-    expect(screen.getByRole("menuitem", { name: /Theme/ })).toHaveTextContent("GitHub");
+    expect(screen.getByRole("menuitem", { name: /Theme/ })).toHaveTextContent("Dark·GitHub");
+  });
+
+  it("truncates a long installed theme name instead of the row label", () => {
+    const name = "A very long community theme name, forty!";
+    useInstalledThemesStore.setState({
+      themes: [{ apiVersion: 1, id: "long", name, css: "" }],
+      folders: {},
+      fromStore: {},
+    });
+    useAppearanceStore.setState({ theme: "long" });
+    renderWithI18n(<AccountMenu />);
+    fireEvent.click(screen.getByRole("button", { name: "Account" }));
+
+    const row = screen.getByRole("menuitem", { name: /Theme/ });
+    expect(within(row).getByText("Theme")).toHaveClass("shrink-0");
+    expect(within(row).getByText(name)).toHaveClass("truncate");
   });
 
   it("switches the colour theme and keeps the menu open to compare", async () => {
@@ -81,7 +99,7 @@ describe("AccountMenu theme submenu", () => {
     expect(screen.getByRole("menuitemradio", { name: "Pop" })).toHaveAttribute("aria-checked", "true");
   });
 
-  it("still switches between light, dark and system", async () => {
+  it("switches between light, dark and system and closes like before", async () => {
     openThemeMenu();
 
     const mode = (await screen.findByText("Mode")).closest("[role=group]") as HTMLElement;
@@ -89,6 +107,7 @@ describe("AccountMenu theme submenu", () => {
     fireEvent.click(within(mode).getByRole("menuitemradio", { name: "Dark" }));
 
     expect(theme.setTheme).toHaveBeenCalledWith("dark");
+    await waitFor(() => expect(screen.queryByRole("menuitemradio", { name: "Pop" })).not.toBeInTheDocument());
   });
 
   it("links to the appearance settings", async () => {
