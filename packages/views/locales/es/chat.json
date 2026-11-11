@@ -174,7 +174,6 @@
       "label": "Recomienda una acción",
       "prompt": "Revisa lo que sabes de mi espacio de trabajo y recomiéndame una primera acción útil."
     },
-    "customize": "Personalizar inicios",
     "uploading": "Espera a que terminen las subidas antes de usar una sugerencia.",
     "draft_in_progress": "Envía o borra tu borrador antes de usar una sugerencia."
   },
