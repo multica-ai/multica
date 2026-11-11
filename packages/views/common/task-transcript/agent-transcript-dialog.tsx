@@ -330,6 +330,10 @@ export function AgentTranscriptDialog({
   const formatSpend = useFormatSpend();
   const locale = useLocale();
   const formatText = useTraceIssueLabels(useWorkspaceId(), task.issue_id, items, open);
+  const managedMcpSources = task.managed_mcp_sources?.toSorted((a, b) =>
+    a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+  );
+  const awaitingClaim = task.status === "queued" || task.status === "deferred";
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => new Set());
   const [query, setQuery] = useState("");
@@ -1110,6 +1114,32 @@ export function AgentTranscriptDialog({
             onSeek={handleSeek}
           />
         )}
+
+        <details className="shrink-0 border-b px-4 py-2 text-caption">
+          <summary className="cursor-pointer font-medium focus-visible:outline-2 focus-visible:outline-ring">
+            {t(($) => $.transcript.managed_mcp_sources.title)}
+          </summary>
+          <div className="mt-2 max-h-40 overflow-y-auto" aria-live="polite">
+            {managedMcpSources === undefined ? (
+              <p className="text-muted-foreground">
+                {awaitingClaim
+                  ? t(($) => $.transcript.managed_mcp_sources.pending)
+                  : t(($) => $.transcript.managed_mcp_sources.unavailable)}
+              </p>
+            ) : managedMcpSources.length === 0 ? (
+              <p className="text-muted-foreground">{t(($) => $.transcript.managed_mcp_sources.empty)}</p>
+            ) : (
+              <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1">
+                {managedMcpSources.map((server) => (
+                  <div key={server.name} className="contents">
+                    <dt className="break-all font-mono">{server.name}</dt>
+                    <dd className="text-muted-foreground">{t(($) => $.transcript.managed_mcp_sources[server.source])}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </div>
+        </details>
 
         {/* ── Optional header slot (e.g. webhook payload preview) ── */}
         {headerSlot && (

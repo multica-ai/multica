@@ -2503,6 +2503,21 @@ func (h *Handler) finalizeClaimDelivery(
 		// its current owner as the task-token identity rather than the stale
 		// claim-time snapshot captured by the caller.
 		tokenParams.UserID = locked.OwnerID
+		var sources *[]ManagedMcpSource
+		if response != nil {
+			sources = response.ManagedMcpSources
+		}
+		// Persist provenance inside the same transaction as this claim's token.
+		snapshot, err := encodeManagedMcpSnapshot(*task, sources)
+		if err != nil {
+			return err
+		}
+		if _, err := qtx.SetTaskManagedMcpSnapshot(ctx, db.SetTaskManagedMcpSnapshotParams{
+			TaskID: task.ID, RuntimeID: task.RuntimeID, Attempt: task.Attempt,
+			DispatchedAt: task.DispatchedAt, ManagedMcpSnapshot: snapshot,
+		}); err != nil {
+			return fmt.Errorf("record managed MCP claim sources: %w", err)
+		}
 		return nil
 	}
 
@@ -2980,6 +2995,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if agent.McpConfig != nil {
 		mcpConfig = json.RawMessage(agent.McpConfig)
 	}
+	sources, sourcesErr := managedMcpConfigSources(mcpConfig, "agent")
 	// Fold in the workspace MCP servers this agent has been explicitly
 	// given (GH #6062). Only bound AND enabled servers are read, so a
 	// workspace library entry nobody added reaches nothing. Read on every
@@ -3000,6 +3016,19 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
 		} else {
 			mcpConfig = resolved
+			sources, sourcesErr = managedMcpConfigSources(resolved, "workspace")
+			if sourcesErr == nil && hasManagedJSON(agent.McpConfig) {
+				_, ownNames, parseErr := parseMcpDocument(agent.McpConfig)
+				if parseErr != nil {
+					sourcesErr = parseErr
+				} else {
+					for name := range ownNames {
+						if _, exists := sources[name]; exists {
+							sources[name] = "agent"
+						}
+					}
+				}
+			}
 		}
 	}
 	// Layer the per-task overlay (set at enqueue from the initiator
@@ -3022,8 +3051,38 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		if merged, err := mergeMCPOverlay(mcpConfig, overlay); err != nil {
 			slog.Warn("daemon claim: merge runtime_mcp_overlay failed; falling back to agent mcp_config", "task_id", uuidToString(task.ID), "error", err)
 		} else {
+			// Preserve the merger's canonical-only overlay semantics when a
+			// base document exists, including legacy fallback in the final map.
+			overlaySources, overlayErr := managedMcpConfigSources(overlay, "task")
+			if hasManagedJSON(mcpConfig) {
+				var document map[string]json.RawMessage
+				if err := json.Unmarshal(overlay, &document); err != nil {
+					overlayErr = err
+				} else {
+					canonical, err := unmarshalServerMap(document["mcpServers"])
+					overlayErr = err
+					overlaySources = make(map[string]string, len(canonical))
+					for name := range canonical {
+						overlaySources[name] = "task"
+					}
+				}
+			}
+			finalSources, finalErr := managedMcpConfigSources(merged, "agent")
+			for name := range finalSources {
+				if source, ok := sources[name]; ok {
+					finalSources[name] = source
+				}
+				if source, ok := overlaySources[name]; ok {
+					finalSources[name] = source
+				}
+			}
+			sources, sourcesErr = finalSources, errors.Join(sourcesErr, overlayErr, finalErr)
 			mcpConfig = merged
 		}
+	}
+	if sourcesErr == nil {
+		captured := sortedManagedMcpSources(sources)
+		resp.ManagedMcpSources = &captured
 	}
 	// runtime_config is stored as JSONB and may legitimately be the
 	// empty object `{}` for agents that haven't opted into any

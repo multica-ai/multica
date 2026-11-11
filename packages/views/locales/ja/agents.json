@@ -727,6 +727,15 @@
     "failed_indicator": "失敗"
   },
   "transcript": {
+    "managed_mcp_sources": {
+      "title": "管理対象 MCP の設定元",
+      "unavailable": "この実行の設定元の履歴は利用できません",
+      "empty": "タスク取得時に管理対象 MCP サーバーはありませんでした",
+      "pending": "タスク取得時に設定元が記録されます",
+      "workspace": "ワークスペースの割り当て",
+      "agent": "エージェント設定",
+      "task": "タスクの上書き設定"
+    },
     "dialog_title": "エージェント実行トランスクリプト",
     "status_running": "実行中",
     "status_completed": "完了",

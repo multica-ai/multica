@@ -2301,6 +2301,10 @@ const TaskUsageSchema = z.object({
 }).loose();
 
 export const AgentTaskSchema = z.object({
+  managed_mcp_sources: z.array(z.object({
+    name: z.string().min(1),
+    source: z.enum(["workspace", "agent", "task"]),
+  }).strict()).optional().catch(undefined),
   wakeup_id: z.string().optional().catch(undefined),
   cancelled_by_comment_change: z.boolean().optional().catch(undefined),
   cancelled_by: TaskCancellationActorSchema.optional().catch(undefined),

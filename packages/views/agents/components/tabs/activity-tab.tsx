@@ -435,7 +435,7 @@ function RecentWorkSection({
       )}
       {transcript && (
         <TranscriptButton
-          task={transcript.task}
+          task={tasks.find((task) => task.id === transcript.task.id) ?? transcript.task}
           agentName={agent.name}
           items={transcript.items}
           renderButton={false}
