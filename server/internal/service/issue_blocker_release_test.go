@@ -90,8 +90,7 @@ func TestIssueBlockerAcknowledgementFailureRollsBackAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	failure := errors.New("reject blocker acknowledgement")
-	tasks := *s.Tasks
-	tasks.TxStarter = &failNamedExecTxStarter{pool: f.Pool, queryName: "AcknowledgeIssueBlockerRelease", err: failure}
+	tasks := NewTaskService(f.q, &failNamedExecTxStarter{pool: f.Pool, queryName: "AcknowledgeIssueBlockerRelease", err: failure}, s.Tasks.Hub, s.Tasks.Bus)
 	if _, err := tasks.EnqueueTaskForIssue(ctx, current); !errors.Is(err, failure) {
 		t.Fatalf("admission error = %v, want acknowledgement failure", err)
 	}
