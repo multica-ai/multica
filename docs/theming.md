@@ -326,7 +326,7 @@ When a mode has frame rules, the rail takes the frame's colours and a failure
 reads `Contrast, dark mode (frame): …`; without them it takes the page's
 colours and reads `Contrast, light mode: …`, like the other page pairs.
 
-Contrast covers the page, the frame, and two places a theme reaches only
+Contrast covers the page, the frame, and three places a theme reaches only
 indirectly:
 
 - **Tooltips** are always drawn with dark-mode text: the tooltip is a
@@ -339,6 +339,15 @@ indirectly:
   theme sets on `[data-slot="popover-content"]`. Set
   `--display-chip-pressed-background` and `--display-chip-pressed-color` to
   colour them apart from input borders.
+- **Switches** show on and off by the colour of their track, so the track
+  of a switch that is on needs 3:1 against the track of one that is off
+  (WCAG 1.4.11). Unset, they fill with `--primary` and `--input`; dark mode
+  paints `--input` at 80%, and a translucent track is measured over
+  `--background`. A theme that sets `--primary` and `--input` close together
+  fails here: set `--switch-checked-background` and
+  `--switch-unchecked-background`. The thumbs and outline have their own
+  variables too (`--switch-checked-thumb`, `--switch-unchecked-thumb`,
+  `--switch-border-color`).
 
 Rules on a slot are applied by specificity, then order, as the browser
 does. A variable set on `<html>` reaches the slot with the value it has
@@ -415,7 +424,7 @@ and dark differ, both defaults are given.
 | `--card-foreground` | `oklch(0.141 0.005 285.823)` / `oklch(0.985 0 0)` | Text on a card. |
 | `--popover` | `var(--surface-raised)` | Shadcn alias; follows `surface-raised` unless set. |
 | `--popover-foreground` | `oklch(0.141 0.005 285.823)` / `oklch(0.985 0 0)` | Text in menus and popovers. |
-| `--primary` | `oklch(0.21 0.006 285.885)` / `oklch(0.92 0.004 286.32)` | Primary buttons and strong marks; also used as text. |
+| `--primary` | `oklch(0.21 0.006 285.885)` / `oklch(0.92 0.004 286.32)` | Primary buttons and strong marks; also used as text. Fills switches that are on unless `switch-checked-background` is set. |
 | `--primary-foreground` | `oklch(0.985 0 0)` / `oklch(0.21 0.006 285.885)` | Text on primary. |
 | `--secondary` | `oklch(0.967 0.001 286.375)` / `oklch(0.274 0.006 286.033)` | Secondary buttons. |
 | `--secondary-foreground` | `oklch(0.21 0.006 285.885)` / `oklch(0.985 0 0)` | Text on secondary. |
@@ -425,7 +434,7 @@ and dark differ, both defaults are given.
 | `--accent` | `oklch(0.967 0.001 286.375)` / `oklch(0.274 0.006 286.033)` | Hover fill in menus and lists. |
 | `--accent-foreground` | `oklch(0.21 0.006 285.885)` / `oklch(0.985 0 0)` | Text on accent. |
 | `--border` | `oklch(0.945 0.003 286.32)` / `oklch(1 0 0 / 6%)` | Dividers and table borders. |
-| `--input` | `oklch(0.92 0.004 286.32)` / `oklch(1 0 0 / 15%)` | Input borders, and pressed display chips unless `display-chip-pressed-background` is set. |
+| `--input` | `oklch(0.92 0.004 286.32)` / `oklch(1 0 0 / 15%)` | Input borders. Also fills pressed display chips and switches that are off, unless `display-chip-pressed-background` and `switch-unchecked-background` are set. |
 | `--ring` | `oklch(0.705 0.015 286.067)` / `oklch(0.552 0.016 285.938)` | Focus ring. |
 | `--sidebar` | `oklch(0.964435 0.001327 286.375)` / `oklch(0.21 0.006 285.885)` | Sidebar background (shadcn sidebar). |
 | `--sidebar-foreground` | `oklch(0.141 0.005 285.823)` / `oklch(0.985 0 0)` | Sidebar text. |
@@ -544,6 +553,11 @@ and dark differ, both defaults are given.
 | `--menu-item-hover-color` | `var(--accent-foreground)` | Text of the highlighted menu item. |
 | `--display-chip-pressed-background` | `var(--input)` | Fill of a pressed on/off chip in the Display and sidebar settings popovers. |
 | `--display-chip-pressed-color` | `var(--foreground)` | Text of a pressed display chip. |
+| `--switch-checked-background` | `var(--primary)` | Track of a switch that is on. Needs 3:1 against `switch-unchecked-background`. |
+| `--switch-unchecked-background` | `var(--input)` / `color-mix(in oklab, var(--input) 80%, transparent)` | Track of a switch that is off. |
+| `--switch-checked-thumb` | `var(--background)` / `var(--primary-foreground)` | Thumb of a switch that is on. |
+| `--switch-unchecked-thumb` | `var(--background)` / `var(--foreground)` | Thumb of a switch that is off. |
+| `--switch-border-color` | `transparent` | Outline of a switch, on or off. |
 | `--popover-radius` | `var(--radius)` | Popovers. |
 | `--floating-border-color` | `color-mix(in oklab, var(--surface-border), var(--foreground) 6%)` | Hairline around layers that float over the page without a backdrop: menus, popovers, select lists and floating panels. |
 | `--dialog-radius` | `calc(var(--radius) * 1.5)` | Dialogs and alert dialogs. |
