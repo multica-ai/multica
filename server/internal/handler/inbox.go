@@ -325,6 +325,9 @@ func (h *Handler) DeleteInboxItem(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.requireIssueIDVisible(w, r, uuidToString(item.WorkspaceID), item.IssueID, http.StatusNotFound, "inbox item not found") {
+		return
+	}
 	count, err := h.Queries.DeleteInboxGroup(r.Context(), db.DeleteInboxGroupParams{
 		ID:          item.ID,
 		WorkspaceID: item.WorkspaceID,

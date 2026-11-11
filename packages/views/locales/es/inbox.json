@@ -144,6 +144,7 @@
     "title": "¿Eliminar notificación?",
     "description": "Esta notificación se eliminará permanentemente. Las tareas y ejecuciones relacionadas se conservarán.",
     "issue_description": "Las notificaciones de esta tarea en esta vista se eliminarán permanentemente. La tarea y sus ejecuciones se conservarán.",
-    "cancel": "Cancelar"
+    "cancel": "Cancelar",
+    "active_issue_description": "Las notificaciones activas de esta tarea se eliminarán permanentemente. Las notificaciones archivadas anteriormente se conservarán y volverán a aparecer en Archivadas. La tarea y sus ejecuciones se conservarán."
   }
 }

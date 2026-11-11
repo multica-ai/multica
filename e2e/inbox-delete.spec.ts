@@ -78,3 +78,64 @@ test("delete a failed inbox entry with confirmation, retry, and cross-session re
     await api.deleteWorkspace();
   }
 });
+
+test("deleting active issue notifications restores archived history with explicit confirmation", async ({ page, context }, testInfo) => {
+  test.setTimeout(120000);
+  const api = new TestApiClient();
+  const run = `${Date.now()}-${process.pid}`;
+  const login = await api.login(`inbox-history-${run}@localhost`, "Inbox history test");
+  const workspace = await api.ensureWorkspace("Inbox history", `inbox-history-${run}`);
+  await api.markUserOnboarded();
+  const issue = await api.createIssue("Issue with archived history");
+  const db = new pg.Client(process.env.DATABASE_URL);
+  await db.connect();
+  try {
+    const history = await db.query(
+      `INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, issue_id, type, title, archived, created_at)
+       VALUES ($1, 'member', $2, $3, 'task_failed', 'Issue with archived history', true, now() - interval '1 day') RETURNING id`,
+      [workspace.id, login.user.id, issue.id],
+    );
+    const active = await db.query(
+      `INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, issue_id, type, title)
+       VALUES ($1, 'member', $2, $3, 'task_failed', 'Issue with archived history') RETURNING id`,
+      [workspace.id, login.user.id, issue.id],
+    );
+    await context.addInitScript((token) => {
+      localStorage.setItem("multica_token", token!);
+      localStorage.setItem("multica:chat:isOpen", "false");
+    }, api.getToken());
+    await page.setViewportSize({ width: 1280, height: 850 });
+    await page.goto(`/${workspace.slug}/inbox`, { waitUntil: "domcontentloaded" });
+    const row = page.locator('[data-mc="inbox-item"]').filter({ hasText: "Issue with archived history" });
+    await expect(row).toBeVisible({ timeout: 60000 });
+    await row.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Delete", exact: true }).click();
+    const dialog = page.getByRole("alertdialog", { name: "Delete notification?" });
+    await expect(dialog).toContainText("Previously archived notifications remain and will be visible again in Archived.");
+    await expect(dialog).toHaveCSS("opacity", "1");
+    await expect(page.getByRole("menuitem", { name: "Delete", exact: true })).not.toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("inbox-delete-history-warning.png") });
+    await dialog.getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(row).toHaveCount(0);
+    expect((await db.query("SELECT id FROM inbox_item WHERE id = $1", [active.rows[0].id])).rowCount).toBe(0);
+    expect((await db.query("SELECT id FROM inbox_item WHERE id = $1", [history.rows[0].id])).rowCount).toBe(1);
+
+    await page.getByRole("button", { name: "Inbox", exact: true }).click();
+    await page.getByRole("menuitemradio", { name: "Archived", exact: true }).click();
+    await expect(row).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("inbox-delete-retained-archive.png") });
+    await row.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Delete", exact: true }).click();
+    await expect(dialog).not.toContainText("Previously archived notifications");
+    await dialog.getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(row).toHaveCount(0);
+    expect((await db.query("SELECT id FROM inbox_item WHERE id = $1", [history.rows[0].id])).rowCount).toBe(0);
+    expect((await db.query("SELECT id FROM issue WHERE id = $1", [issue.id])).rowCount).toBe(1);
+  } finally {
+    await db.end();
+    await api.cleanup();
+    await api.deleteWorkspace();
+  }
+});

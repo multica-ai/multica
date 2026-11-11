@@ -144,6 +144,7 @@
     "title": "Supprimer la notification ?",
     "description": "Cette notification sera supprimée définitivement. Les tâches et exécutions associées seront conservées.",
     "issue_description": "Les notifications de cette tâche dans cette vue seront supprimées définitivement. La tâche et ses exécutions seront conservées.",
-    "cancel": "Annuler"
+    "cancel": "Annuler",
+    "active_issue_description": "Les notifications actives de cette tâche seront supprimées définitivement. Les notifications précédemment archivées seront conservées et réapparaîtront dans les archives. La tâche et ses exécutions seront conservées."
   }
 }

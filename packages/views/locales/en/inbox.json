@@ -144,6 +144,7 @@
     "title": "Delete notification?",
     "description": "This permanently deletes this notification. Related issues and runs are kept.",
     "issue_description": "This permanently deletes the notifications for this issue in this view. The issue and its runs are kept.",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "active_issue_description": "This permanently deletes the active notifications for this issue. Previously archived notifications remain and will be visible again in Archived. The issue and its runs are kept."
   }
 }

@@ -63,11 +63,23 @@ func TestDeleteInboxItem(t *testing.T) {
 	remove(foreign, ws, http.StatusNotFound)
 	remove("not-a-uuid", ws, http.StatusBadRequest)
 	remove(uuid.NewString(), ws, http.StatusNotFound)
+	listArchived := func() []InboxItemResponse {
+		var items []InboxItemResponse
+		testutil.Call(t, inboxWorkspaceHandler(testHandler.ListArchivedInbox),
+			inboxRequest(http.MethodGet, "/api/inbox/archived", ws)).Want(http.StatusOK).JSON(&items)
+		return items
+	}
+	if items := listArchived(); len(items) != 0 {
+		t.Fatalf("issue with active notifications appeared in archive: %+v", items)
+	}
 	if count := remove(target, ws, http.StatusOK); count != 2 {
 		t.Fatalf("deleted %d notifications, want 2", count)
 	}
 	if published != 1 {
 		t.Fatalf("deletion events = %d, want 1", published)
+	}
+	if items := listArchived(); len(items) != 1 || items[0].ID != history {
+		t.Fatalf("archived history should reappear after deleting active notifications: %+v", items)
 	}
 	for _, id := range []string{target, sibling} {
 		if n := dbfx.Count(t, "SELECT count(*) FROM inbox_item WHERE id = $1", id); n != 0 {
@@ -94,5 +106,49 @@ func TestDeleteInboxItem(t *testing.T) {
 	}
 	if count := remove(history, ws, http.StatusOK); count != 1 {
 		t.Errorf("archived delete count = %d", count)
+	}
+}
+
+func TestDeleteInboxItemPrivateProjectAfterRevocation(t *testing.T) {
+	for _, archived := range []bool{false, true} {
+		name := "active"
+		if archived {
+			name = "archived"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newPrivateProjectFixture(t)
+			id := dbfx.Insert(t, "inbox_item", testutil.Cols{
+				"workspace_id": testWorkspaceID, "recipient_type": "member", "recipient_id": f.insider,
+				"type": "mentioned", "severity": "info", "title": "Private notification",
+				"issue_id": f.secretIssue, "archived": archived,
+			})
+			removeProjectMemberAsOwner(t, f, f.insider)
+			published := 0
+			testHandler.Bus.Subscribe(protocol.EventInboxDeleted, func(e events.Event) {
+				if e.Payload.(map[string]any)["item_id"] == id {
+					published++
+				}
+			})
+			remove := func(itemID string, want int) *testutil.Response {
+				return testutil.Call(t, inboxWorkspaceHandler(testHandler.DeleteInboxItem),
+					withURLParam(asUser(inboxRequest(http.MethodDelete, "/api/inbox/"+itemID, testWorkspaceID), f.insider), "id", itemID)).Want(want)
+			}
+			hiddenBody := remove(id, http.StatusNotFound).Text()
+			missingBody := remove(uuid.NewString(), http.StatusNotFound).Text()
+			if hiddenBody != missingBody {
+				t.Fatalf("hidden notification differs from a missing one: %s vs %s", hiddenBody, missingBody)
+			}
+			if n := dbfx.Count(t, "SELECT count(*) FROM inbox_item WHERE id = $1", id); n != 1 {
+				t.Error("hidden notification was deleted")
+			}
+			if published != 0 {
+				t.Error("hidden notification deletion published an event")
+			}
+			addProjectMemberRow(t, f.projectID, f.insider)
+			remove(id, http.StatusOK)
+			if n := dbfx.Count(t, "SELECT count(*) FROM inbox_item WHERE id = $1", id); n != 0 {
+				t.Error("project member could not delete their notification")
+			}
+		})
 	}
 }

@@ -814,6 +814,7 @@ export function InboxPage() {
         <InboxDeleteDialog
           key={deleteTarget.id}
           item={deleteTarget}
+          view={view}
           onClose={() => setDeleteTarget(null)}
           onDeleted={(id) => {
             advanceSelectionPast(id, selectionItems);
