@@ -318,3 +318,24 @@ describe("ChatThreadList row keyboard semantics", () => {
     expect(onSelectSession).not.toHaveBeenCalled();
   });
 });
+
+describe("ChatThreadList right-click menu", () => {
+  beforeEach(() => {
+    archiveMutate.mockClear();
+  });
+
+  it("opens the row's actions at the cursor and acts on that row", async () => {
+    const { onArchive, onSelectSession } = renderList("s1");
+
+    fireEvent.contextMenu(screen.getByText("Chat s2"), { clientX: 30, clientY: 90 });
+    const menu = await screen.findByRole("menu");
+    expect(
+      Array.from(menu.querySelectorAll('[role="menuitem"]'), (el) => el.textContent?.trim()),
+    ).toEqual([enChat.list.pin, ARCHIVE_LABEL]);
+
+    fireEvent.click(screen.getByRole("menuitem", { name: ARCHIVE_LABEL }));
+    expect(onArchive).toHaveBeenCalledTimes(1);
+    expect(onArchive.mock.calls[0]![0]).toMatchObject({ id: "s2" });
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
+});

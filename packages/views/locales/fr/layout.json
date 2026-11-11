@@ -104,7 +104,10 @@
     "open_in_new_window_click": "Clic",
     "open_in_other_window": "Déjà ouvert dans une autre fenêtre",
     "in_other_window": "Autre fenêtre",
-    "all_workspaces_open": "Chaque espace de travail est déjà ouvert dans une fenêtre"
+    "all_workspaces_open": "Chaque espace de travail est déjà ouvert dans une fenêtre",
+    "copy_link": "Copier le lien",
+    "link_copied": "Lien copié",
+    "workspace_settings": "Paramètres de l’espace de travail"
   },
   "bottom_bar": {
     "label": "Barre d'état",
@@ -153,7 +156,8 @@
       "view_edit": "Modifier la vue",
       "view_rename": "Renommer",
       "view_duplicate": "Dupliquer",
-      "view_delete": "Supprimer la vue"
+      "view_delete": "Supprimer la vue",
+      "new_issue_here": "Nouvelle tâche dans ce projet"
     },
     "team": {
       "new_agent": "Nouvel agent",
@@ -229,5 +233,15 @@
     "go_to_slide": "Aller à la diapositive {{index}}",
     "previous": "Précédent",
     "next": "Suivant"
+  },
+  "context_menu": {
+    "cut": "Couper",
+    "copy": "Copier",
+    "paste": "Coller",
+    "select_all": "Tout sélectionner",
+    "add_to_dictionary": "Ajouter au dictionnaire",
+    "open_link": "Ouvrir le lien dans le navigateur",
+    "copy_link_address": "Copier l’adresse du lien",
+    "copy_image": "Copier l’image"
   }
 }

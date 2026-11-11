@@ -162,3 +162,33 @@ describe("CommentCard — actions menu layout", () => {
     expect(await openMenuLayout(0)).toEqual(["Copy", "Copy link", "Create sub-issue from here"]);
   });
 });
+
+describe("CommentCard — right-click", () => {
+  function menuItems(menu: HTMLElement) {
+    return Array.from(menu.querySelectorAll('[role="menuitem"]'), (el) => el.textContent?.trim() ?? "");
+  }
+
+  it("opens the same menu as the ⋯ button at the cursor", async () => {
+    renderThread(comment("root", null), []);
+
+    fireEvent.contextMenu(screen.getByText("body root"), { clientX: 40, clientY: 60 });
+    const menu = await screen.findByRole("menu");
+    expect(menuItems(menu)).toEqual([
+      "Edit",
+      "Resolve thread",
+      "Copy",
+      "Copy link",
+      "Create sub-issue from here",
+      "Delete",
+    ]);
+  });
+
+  it("leaves a right-click something inside already handled", () => {
+    renderThread(comment("root", null), []);
+
+    const body = screen.getByText("body root");
+    body.addEventListener("contextmenu", (event) => event.preventDefault());
+    fireEvent.contextMenu(body);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+});

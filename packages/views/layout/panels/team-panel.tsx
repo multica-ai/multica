@@ -17,6 +17,9 @@ import { memberListOptions, skillListOptions, squadListOptions } from "@multica/
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import type { Agent, AgentTask } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
+import { AgentRowActions } from "../../agents/components/agent-row-actions";
+import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
+import { CollectionRowContext } from "../collection-list/row-context";
 import { availabilityConfig } from "../../agents/presence";
 import { useT } from "../../i18n";
 import { buildRuntimeMachines, runtimeMachineCounts } from "../../runtimes/components/runtime-machines";
@@ -111,29 +114,81 @@ function useRunningIssueLabel(wsId: string, task: AgentTask | undefined) {
   return issue ? `${issue.identifier} ${issue.title}` : null;
 }
 
-function WorkingAgentRow({
+/**
+ * An agent's row in the status sections. Right-click opens the agents page's
+ * row menu at the cursor; it mounts on the first right-click, so idle rows
+ * hold no menu.
+ */
+function AgentPanelLink({
   agent,
   detail,
-  task,
-  wsId,
   active,
+  description,
+  canManage,
 }: {
   agent: Agent;
   detail: AgentPresenceDetail | undefined;
-  task: AgentTask | undefined;
-  wsId: string;
   active: boolean;
+  description: ReactNode;
+  canManage: boolean;
 }) {
-  const { t } = useT("layout");
   const p = useWorkspacePaths();
-  const issueLabel = useRunningIssueLabel(wsId, task);
-  const running = detail?.runningCount ?? 0;
+  const rowMenu = useRowMenu();
+  const rowMenuContext = useMemo(
+    () => ({ menu: rowMenu.menu, setMenu: rowMenu.setMenu }),
+    [rowMenu.menu, rowMenu.setMenu],
+  );
   return (
     <PanelLink
       href={p.agentDetail(agent.id)}
       label={agent.name}
       active={active}
       icon={<AgentAvatar agent={agent} detail={detail} />}
+      description={description}
+      onContextMenu={(event) => {
+        if (shouldOpenRowMenu(event)) rowMenu.openAtPointer(event);
+      }}
+      menu={
+        rowMenu.menu.point && (
+          <CollectionRowContext.Provider value={rowMenuContext}>
+            <AgentRowActions
+              agent={agent}
+              presence={detail}
+              canManage={canManage}
+              duplicateHref={`${p.newAgentManual()}?duplicate=${encodeURIComponent(agent.id)}`}
+              triggerHidden
+            />
+          </CollectionRowContext.Provider>
+        )
+      }
+    />
+  );
+}
+
+function WorkingAgentRow({
+  agent,
+  detail,
+  task,
+  wsId,
+  active,
+  canManage,
+}: {
+  agent: Agent;
+  detail: AgentPresenceDetail | undefined;
+  task: AgentTask | undefined;
+  wsId: string;
+  active: boolean;
+  canManage: boolean;
+}) {
+  const { t } = useT("layout");
+  const issueLabel = useRunningIssueLabel(wsId, task);
+  const running = detail?.runningCount ?? 0;
+  return (
+    <AgentPanelLink
+      agent={agent}
+      detail={detail}
+      active={active}
+      canManage={canManage}
       description={
         running > 1 || !issueLabel ? t(($) => $.panels.team.running_tasks, { count: running }) : issueLabel
       }
@@ -181,7 +236,9 @@ export function TeamPanel() {
 
   const mineCount = userId ? agents.filter((agent) => agent.owner_id === userId).length : 0;
   const myRole = members.find((member) => member.user_id === userId)?.role;
-  const canInvite = myRole === "owner" || myRole === "admin";
+  const isAdmin = myRole === "owner" || myRole === "admin";
+  const canInvite = isAdmin;
+  const canManageAgent = (agent: Agent) => isAdmin || (!!userId && agent.owner_id === userId);
   const onAgents = pathname === p.agents();
   // Member pages live under /members/:id; the list itself is a Settings tab.
   const membersRoot = p.memberDetail("").replace(/\/$/, "");
@@ -220,12 +277,12 @@ export function TeamPanel() {
             renderAgent={(agent) => {
               const href = p.agentDetail(agent.id);
               return (
-                <PanelLink
+                <AgentPanelLink
                   key={agent.id}
-                  href={href}
-                  label={agent.name}
+                  agent={agent}
+                  detail={byAgent.get(agent.id)}
                   active={isPathWithin(pathname, href)}
-                  icon={<AgentAvatar agent={agent} detail={byAgent.get(agent.id)} />}
+                  canManage={canManageAgent(agent)}
                   description={
                     <span className="text-warning">
                       {t(($) => $.panels.team.stuck, { count: byAgent.get(agent.id)?.queuedCount ?? 0 })}
@@ -252,6 +309,7 @@ export function TeamPanel() {
                 task={runningTaskByAgent.get(agent.id)}
                 wsId={wsId}
                 active={isPathWithin(pathname, p.agentDetail(agent.id))}
+                canManage={canManageAgent(agent)}
               />
             )}
           />

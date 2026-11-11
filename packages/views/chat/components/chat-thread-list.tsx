@@ -31,9 +31,11 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import {
   RowActionsMenu,
+  RowActionsPointMenu,
   handleRowActivationKey,
   type RowActionItem,
 } from "../../common/row-actions-menu";
+import { CLOSED_ROW_MENU, shouldOpenRowMenu, type RowMenuState } from "../../common/point-menu";
 import { resolveClickIntent, useOptionalNavigation } from "../../navigation";
 import { createLogger } from "@multica/core/logger";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
@@ -136,6 +138,12 @@ export function ChatThreadList({
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [confirmingStopId, setConfirmingStopId] = useState<string | null>(null);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
+  // One right-click menu for every row; it keeps the session it opened on
+  // through its close animation.
+  const [contextMenu, setContextMenu] = useState<RowMenuState & { sessionId: string | null }>({
+    ...CLOSED_ROW_MENU,
+    sessionId: null,
+  });
   const deleteSession = useDeleteChatSession();
   const setPinned = useSetChatSessionPinned();
   const setArchived = useSetChatSessionArchived();
@@ -205,6 +213,58 @@ export function ChatThreadList({
     });
   };
 
+  // One list drives every action surface — the compact menu without hover,
+  // the hover strip with it, and the right-click menu — so they cannot drift.
+  // The archived view is the only place hard-delete lives; the history view
+  // offers the reversible archive instead.
+  const rowActionsFor = (session: ChatSession): RowActionItem[] =>
+    view === "archived"
+      ? [
+          {
+            key: "unarchive",
+            icon: <ArchiveRestore className="size-3.5" />,
+            label: t(($) => $.list.unarchive),
+            onSelect: () =>
+              setArchived.mutate({ sessionId: session.id, archived: false }),
+          },
+          {
+            key: "delete",
+            icon: <Trash2 className="size-3.5" />,
+            label: t(($) => $.session_history.row_delete_aria),
+            danger: true,
+            onSelect: () => setConfirmingDeleteId(session.id),
+          },
+        ]
+      : [
+          {
+            key: "pin",
+            icon: session.pinned ? (
+              <PinOff className="size-3.5" />
+            ) : (
+              <Pin className="size-3.5 -rotate-45" />
+            ),
+            label: session.pinned
+              ? t(($) => $.list.unpin)
+              : t(($) => $.list.pin),
+            onSelect: () =>
+              setPinned.mutate({ sessionId: session.id, pinned: !session.pinned }),
+          },
+          pendingTaskBySessionId.has(session.id)
+            ? {
+                key: "stop",
+                icon: <Square className="size-3 fill-current" />,
+                label: t(($) => $.session_history.row_stop_aria),
+                danger: true,
+                onSelect: () => setConfirmingStopId(session.id),
+              }
+            : {
+                key: "archive",
+                icon: <Archive className="size-3.5" />,
+                label: t(($) => $.list.archive),
+                onSelect: () => onArchive(session),
+              },
+        ];
+
   const renderRow = (session: ChatSession) => {
     const isCurrent = session.id === activeSessionId;
     const agent = agentById.get(session.agent_id) ?? null;
@@ -267,57 +327,7 @@ export function ChatThreadList({
       previewNode = <span className="block truncate text-muted-foreground">{t(($) => $.list.no_messages)}</span>;
     }
 
-    // One list drives both action surfaces — the compact menu without hover
-    // and the hover strip with it — so they cannot drift. The archived view
-    // is the only place hard-delete lives; the history view offers the
-    // reversible archive instead.
-    const rowActions: RowActionItem[] =
-      view === "archived"
-        ? [
-            {
-              key: "unarchive",
-              icon: <ArchiveRestore className="size-3.5" />,
-              label: t(($) => $.list.unarchive),
-              onSelect: () =>
-                setArchived.mutate({ sessionId: session.id, archived: false }),
-            },
-            {
-              key: "delete",
-              icon: <Trash2 className="size-3.5" />,
-              label: t(($) => $.session_history.row_delete_aria),
-              danger: true,
-              onSelect: () => setConfirmingDeleteId(session.id),
-            },
-          ]
-        : [
-            {
-              key: "pin",
-              icon: session.pinned ? (
-                <PinOff className="size-3.5" />
-              ) : (
-                <Pin className="size-3.5 -rotate-45" />
-              ),
-              label: session.pinned
-                ? t(($) => $.list.unpin)
-                : t(($) => $.list.pin),
-              onSelect: () =>
-                setPinned.mutate({ sessionId: session.id, pinned: !session.pinned }),
-            },
-            isRunning
-              ? {
-                  key: "stop",
-                  icon: <Square className="size-3 fill-current" />,
-                  label: t(($) => $.session_history.row_stop_aria),
-                  danger: true,
-                  onSelect: () => setConfirmingStopId(session.id),
-                }
-              : {
-                  key: "archive",
-                  icon: <Archive className="size-3.5" />,
-                  label: t(($) => $.list.archive),
-                  onSelect: () => onArchive(session),
-                },
-          ];
+    const rowActions = rowActionsFor(session);
 
     return (
       <div
@@ -358,6 +368,11 @@ export function ChatThreadList({
         onKeyDown={(e) => {
           if (isConfirmingAction) return;
           handleRowActivationKey(e, () => onSelectSession(session));
+        }}
+        onContextMenu={(e) => {
+          if (isConfirmingAction || !shouldOpenRowMenu(e)) return;
+          e.preventDefault();
+          setContextMenu({ open: true, point: { x: e.clientX, y: e.clientY }, sessionId: session.id });
         }}
         className={cn(
           // Fixed height so nothing (hover actions, confirm prompts) can change
@@ -479,6 +494,19 @@ export function ChatThreadList({
     );
   };
 
+  const contextMenuSession = contextMenu.sessionId
+    ? sessions.find((s) => s.id === contextMenu.sessionId)
+    : undefined;
+  const rowContextMenu = (
+    <RowActionsPointMenu
+      menu={contextMenuSession ? contextMenu : CLOSED_ROW_MENU}
+      onOpenChange={(open) => {
+        if (!open) setContextMenu((current) => ({ ...current, open: false }));
+      }}
+      groups={contextMenuSession ? [rowActionsFor(contextMenuSession)] : []}
+    />
+  );
+
   // Archived view: a back header, then the archived rows. Delete lives only
   // here (via each row's hover actions).
   if (view === "archived") {
@@ -498,6 +526,7 @@ export function ChatThreadList({
         <div className="min-h-0 flex-1">
           <SessionHistoryList sessions={archivedSessions} renderRow={renderRow} />
         </div>
+        {rowContextMenu}
       </div>
     );
   }
@@ -530,11 +559,14 @@ export function ChatThreadList({
   }
 
   return (
-    <SessionHistoryList
-      sessions={historySessions}
-      renderRow={renderRow}
-      footer={archivedEntry}
-    />
+    <>
+      <SessionHistoryList
+        sessions={historySessions}
+        renderRow={renderRow}
+        footer={archivedEntry}
+      />
+      {rowContextMenu}
+    </>
   );
 }
 

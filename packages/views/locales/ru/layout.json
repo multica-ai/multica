@@ -80,7 +80,10 @@
     "in_other_window": "Другое окно",
     "all_workspaces_open": "Все рабочие пространства уже открыты в окнах",
     "pin_workspace": "Закрепить рабочее пространство",
-    "unpin_workspace": "Открепить рабочее пространство"
+    "unpin_workspace": "Открепить рабочее пространство",
+    "copy_link": "Копировать ссылку",
+    "link_copied": "Ссылка скопирована",
+    "workspace_settings": "Настройки рабочего пространства"
   },
   "bottom_bar": {
     "label": "Строка состояния",
@@ -133,7 +136,8 @@
       "all_projects_few": "Всего {{count}} проекта",
       "all_projects_many": "Всего {{count}} проектов",
       "project_issues_retry": "Повторить",
-      "unread": "Непрочитанные"
+      "unread": "Непрочитанные",
+      "new_issue_here": "Новая задача в этом проекте"
     },
     "team": {
       "new_agent": "Новый агент",
@@ -247,5 +251,15 @@
     "star_label": "Поставить звезду Multica на GitHub",
     "later": "Не сейчас",
     "close": "Закрыть"
+  },
+  "context_menu": {
+    "cut": "Вырезать",
+    "copy": "Копировать",
+    "paste": "Вставить",
+    "select_all": "Выделить всё",
+    "add_to_dictionary": "Добавить в словарь",
+    "open_link": "Открыть ссылку в браузере",
+    "copy_link_address": "Копировать адрес ссылки",
+    "copy_image": "Копировать изображение"
   }
 }

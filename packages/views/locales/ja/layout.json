@@ -103,7 +103,10 @@
     "open_in_new_window_click": "クリック",
     "open_in_other_window": "別のウィンドウで開いています",
     "in_other_window": "別ウィンドウ",
-    "all_workspaces_open": "すべてのワークスペースがすでにウィンドウで開いています"
+    "all_workspaces_open": "すべてのワークスペースがすでにウィンドウで開いています",
+    "copy_link": "リンクをコピー",
+    "link_copied": "リンクをコピーしました",
+    "workspace_settings": "ワークスペース設定"
   },
   "bottom_bar": {
     "label": "ステータスバー",
@@ -150,7 +153,8 @@
       "view_edit": "ビューを編集",
       "view_rename": "名前を変更",
       "view_duplicate": "複製",
-      "view_delete": "ビューを削除"
+      "view_delete": "ビューを削除",
+      "new_issue_here": "このプロジェクトに新規タスク"
     },
     "team": {
       "new_agent": "新規エージェント",
@@ -220,5 +224,15 @@
     "go_to_slide": "{{index}} 枚目に移動",
     "previous": "前へ",
     "next": "次へ"
+  },
+  "context_menu": {
+    "cut": "切り取り",
+    "copy": "コピー",
+    "paste": "貼り付け",
+    "select_all": "すべて選択",
+    "add_to_dictionary": "辞書に追加",
+    "open_link": "ブラウザでリンクを開く",
+    "copy_link_address": "リンクのアドレスをコピー",
+    "copy_image": "画像をコピー"
   }
 }

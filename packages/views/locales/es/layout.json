@@ -104,7 +104,10 @@
     "open_in_new_window_click": "Clic",
     "open_in_other_window": "Ya está abierto en otra ventana",
     "in_other_window": "Otra ventana",
-    "all_workspaces_open": "Todos los espacios de trabajo ya están abiertos en una ventana"
+    "all_workspaces_open": "Todos los espacios de trabajo ya están abiertos en una ventana",
+    "copy_link": "Copiar enlace",
+    "link_copied": "Enlace copiado",
+    "workspace_settings": "Ajustes del espacio de trabajo"
   },
   "bottom_bar": {
     "label": "Barra de estado",
@@ -153,7 +156,8 @@
       "view_edit": "Editar vista",
       "view_rename": "Renombrar",
       "view_duplicate": "Duplicar",
-      "view_delete": "Eliminar vista"
+      "view_delete": "Eliminar vista",
+      "new_issue_here": "Nueva tarea en este proyecto"
     },
     "team": {
       "new_agent": "Nuevo agente",
@@ -229,5 +233,15 @@
     "go_to_slide": "Ir a la diapositiva {{index}}",
     "previous": "Anterior",
     "next": "Siguiente"
+  },
+  "context_menu": {
+    "cut": "Cortar",
+    "copy": "Copiar",
+    "paste": "Pegar",
+    "select_all": "Seleccionar todo",
+    "add_to_dictionary": "Añadir al diccionario",
+    "open_link": "Abrir enlace en el navegador",
+    "copy_link_address": "Copiar dirección del enlace",
+    "copy_image": "Copiar imagen"
   }
 }

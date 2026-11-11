@@ -103,7 +103,10 @@
     "open_in_new_window_click": "点击",
     "open_in_other_window": "已在其他窗口打开",
     "in_other_window": "其他窗口",
-    "all_workspaces_open": "所有工作区都已在窗口中打开"
+    "all_workspaces_open": "所有工作区都已在窗口中打开",
+    "copy_link": "复制链接",
+    "link_copied": "链接已复制",
+    "workspace_settings": "工作区设置"
   },
   "bottom_bar": {
     "label": "状态栏",
@@ -150,7 +153,8 @@
       "view_edit": "编辑视图",
       "view_rename": "重命名",
       "view_duplicate": "创建副本",
-      "view_delete": "删除视图"
+      "view_delete": "删除视图",
+      "new_issue_here": "在此项目中新建任务"
     },
     "team": {
       "new_agent": "新建智能体",
@@ -220,5 +224,15 @@
     "go_to_slide": "转到第 {{index}} 张",
     "previous": "上一张",
     "next": "下一张"
+  },
+  "context_menu": {
+    "cut": "剪切",
+    "copy": "复制",
+    "paste": "粘贴",
+    "select_all": "全选",
+    "add_to_dictionary": "添加到词典",
+    "open_link": "在浏览器中打开链接",
+    "copy_link_address": "复制链接地址",
+    "copy_image": "复制图片"
   }
 }

@@ -24,6 +24,7 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { shouldOpenRowMenu, useRowMenu } from "../../common/point-menu";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-picker";
@@ -679,6 +680,9 @@ function CommentRow({
   const canEditEntry = receipts.length === 0 && (isOwn || (canModerate && entry.actor_type === "member"));
   const canDeleteEntry = !receipts.some(isSupplementInFlight) && (isOwn || canModerate);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Right-click on the comment opens its ⋯ menu at the cursor; links, images
+  // and selected text inside it keep their own menu.
+  const rowMenu = useRowMenu();
 
   const reactions = entry.reactions ?? [];
 
@@ -690,7 +694,14 @@ function CommentRow({
   if (isDeletedComment(entry)) return null;
 
   return (
-    <div data-comment-block className="pb-3">
+    <div
+      data-comment-block
+      className="pb-3"
+      onContextMenu={(e) => {
+        if (edit.editing || !shouldOpenRowMenu(e, { deferToContent: true })) return;
+        rowMenu.openAtPointer(e);
+      }}
+    >
       {/* Header pins to the timeline's scroll parent within this reply's own
           row box, so a LONG reply keeps its
           author + actions visible while you scroll its body, then releases once
@@ -746,7 +757,7 @@ function CommentRow({
             align="end"
             className={buttonVariants({ variant: "ghost", size: "icon-sm", className: commentActionClassName })}
           />}
-          <DropdownMenu>
+          <DropdownMenu open={rowMenu.menu.open} onOpenChange={rowMenu.onOpenChange}>
             <DeferredTooltip
               content={t(($) => $.comment.more_actions)}
               trigger={
@@ -764,7 +775,10 @@ function CommentRow({
                 />
               }
             />
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent
+              align={rowMenu.menu.point ? "start" : "end"}
+              anchor={rowMenu.anchor}
+            >
               {/* Groups: act on it (edit, resolve), take it elsewhere, then delete alone. */}
               {canEditEntry && (
                 <DropdownMenuItem onClick={edit.startEdit}>
@@ -1082,6 +1096,7 @@ function CommentCardImpl({
   const canEditEntry = receipts.length === 0 && (isOwn || (canModerate && entry.actor_type === "member"));
   const canDeleteEntry = !receipts.some(isSupplementInFlight) && (isOwn || canModerate);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const rowMenu = useRowMenu();
 
   const allNestedReplies = replies;
   // What the thread shows. Tombstones are excluded from display and counts but
@@ -1224,7 +1239,16 @@ function CommentCardImpl({
             That is what keeps exactly one header pinned at a time: without this
             wrapper the header's containing block is the whole thread and it
             stays stuck behind every reply. */}
-        <div data-comment-block className={cn("transition-colors duration-700", isHighlighted && highlightedCommentBackgroundClass)}>
+        <div
+          data-comment-block
+          className={cn("transition-colors duration-700", isHighlighted && highlightedCommentBackgroundClass)}
+          // Same right-click as a reply's; only while the thread is open, since
+          // the menu lives in the open header.
+          onContextMenu={(e) => {
+            if (!open || deleted || edit.editing || !shouldOpenRowMenu(e, { deferToContent: true })) return;
+            rowMenu.openAtPointer(e);
+          }}
+        >
           {/* Keep the author aligned with replies; thread controls sit on the right. */}
           <StickyHeaderShell
             sticky={stickyHeader}
@@ -1309,7 +1333,7 @@ function CommentCardImpl({
                     align="end"
                     className={buttonVariants({ variant: "ghost", size: "icon-sm", className: commentActionClassName })}
                   />}
-                  <DropdownMenu>
+                  <DropdownMenu open={rowMenu.menu.open} onOpenChange={rowMenu.onOpenChange}>
                     <DeferredTooltip
                       content={t(($) => $.comment.more_actions)}
                       trigger={
@@ -1327,7 +1351,10 @@ function CommentCardImpl({
                         />
                       }
                     />
-                    <DropdownMenuContent align="end">
+                    <DropdownMenuContent
+                      align={rowMenu.menu.point ? "start" : "end"}
+                      anchor={rowMenu.anchor}
+                    >
                       {/* Groups: act on it (edit, resolve), take it elsewhere, then delete alone. */}
                       {canEditEntry && (
                         <DropdownMenuItem onClick={edit.startEdit}>
