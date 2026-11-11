@@ -419,6 +419,10 @@
         "label": "Toggle chat window",
         "description": "Open or close the floating chat window. Opening it focuses the message input."
       },
+      "newChat": {
+        "label": "Ask Multica",
+        "description": "Start a new chat in the floating chat window."
+      },
       "findInIssue": {
         "label": "Find in issue",
         "description": "Search within the open issue detail."
