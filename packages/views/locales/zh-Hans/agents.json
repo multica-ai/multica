@@ -64,14 +64,6 @@
     "search_runtime_filtered": "\"{{machine}}\"上没有匹配\"{{query}}\"的智能体。",
     "runtime_filtered": "\"{{machine}}\"上还没有智能体。"
   },
-  "runtime_filter": {
-    "all": "全部运行时",
-    "section_local": "本地",
-    "section_remote": "远程",
-    "section_cloud": "云端",
-    "agent_count_other": "{{count}} 个智能体",
-    "empty": "还没有机器"
-  },
   "columns": {
     "agent": "智能体",
     "status": "状态",
@@ -199,7 +191,6 @@
     "rename_required": "名称必填",
     "edit_description_title": "编辑描述",
     "description_placeholder": "这个智能体做什么？",
-    "save": "保存",
     "cancel": "取消"
   },
   "overview": {
@@ -222,12 +213,7 @@
     "edit_access_aria": "访问权限：{{value}}。更改访问权限",
     "all_settings": "全部设置"
   },
-  "skill_attach": {
-    "trigger_aria": "附加工作区 skill",
-    "trigger_label": "附加"
-  },
   "pickers": {
-    "concurrency_tooltip": "并发 · 最多 {{value}} 次并行运行",
     "concurrency_range": "最大并行运行数（{{min}}–{{max}}）",
     "runtime_none": "无运行时",
     "runtime_tooltip": "运行时 · {{name}} · {{status}}",
@@ -448,23 +434,17 @@
     }
   },
   "create_dialog": {
-    "title_create": "创建智能体",
-    "title_duplicate": "复制智能体",
-    "description_duplicate": "基于\"{{name}}\"创建一个新智能体。指令、环境变量和 skill 会一并复制。",
     "name_label": "名称",
     "name_placeholder": "例如：深度研究智能体",
     "description_label": "描述",
     "description_placeholder": "这个智能体做什么？",
-    "visibility_label": "可见性",
     "access": {
-      "label": "访问权限",
       "private_title": "私有",
       "private_desc": "只有你可以运行该智能体",
       "public_title": "公开",
       "public_desc": "选择谁可以运行该智能体",
       "public_workspace_option": "工作区内所有人",
       "public_members_group": "指定成员",
-      "public_members_empty": "没有可选择的工作区成员",
       "public_targets_empty_hint": "至少勾选下方一项——否则该智能体仍为私有。"
     },
     "runtime_label": "运行时",
@@ -479,17 +459,10 @@
     "runtime_no_results": "没有匹配的机器",
     "runtime_group_online": "{{online}}/{{total}} 在线",
     "duplicate_copy_suffix": "（副本）",
-    "create": "创建",
-    "creating": "创建中...",
-    "cancel": "取消",
-    "create_failed_toast": "创建智能体失败",
     "skill_attach_failed_toast": "智能体已创建，但 skill 关联失败：{{error}}",
     "squad_join_failed_toast": "智能体\"{{name}}\"已创建，但加入小队失败：{{error}}。你可以在 Members 标签里手动添加。",
     "instructions": {
       "label": "指令",
-      "placeholder_blank": "点击撰写指令…",
-      "placeholder_duplicate": "点击查看或编辑复制的指令",
-      "collapse": "收起",
       "editor_placeholder": "写下这个智能体该做什么、关注什么、要避开什么…"
     },
     "skills_section": {

@@ -679,7 +679,7 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
     // A saved view's sidebar preview filters on working_only server-side.
     affected.push(issueKeys.sidebar("ws-1", "view:v1", { table: { ...spec, filters: { working_only: true } } }, 5));
     untouched.push(issueKeys.sidebar("ws-1", "view:v2", { table: spec }, 5));
-    untouched.push(issueKeys.sidebar("ws-1", "project:p1", { project_id: "p1" }, 5));
+    untouched.push(issueKeys.sidebar("ws-1", "project:p1", { table: { ...spec, scope: { kind: "project", project_id: "p1" } } }, 5));
     for (const key of [...untouched, ...affected]) qc.setQueryData(key, []);
     emit("task:completed");
     await vi.advanceTimersByTimeAsync(1_000);
@@ -922,12 +922,23 @@ describe("deliverable inventory freshness", () => {
     const qc = new QueryClient({ defaultOptions: {queries:{retry:false,staleTime:Infinity}} });
     const ws=createMockWs();
     renderHook(()=>useRealtimeSync(ws,createStores()),{wrapper:createWrapper(qc)});
-    qc.setQueryData(issueKeys.deliverables("affected"),[]);
-    qc.setQueryData(issueKeys.deliverables("unrelated"),[]);
+    qc.setQueryData(issueKeys.attachments("affected"),[]);
+    qc.setQueryData(issueKeys.attachments("unrelated"),[]);
     const listener=vi.mocked(ws.on).mock.calls.find(([name])=>name===event)?.[1];
     act(()=>listener?.({comment:{issue_id:"affected"},issue_id:"affected"} as never));
-    expect(qc.getQueryState(issueKeys.deliverables("affected"))?.isInvalidated).toBe(true);
-    expect(qc.getQueryState(issueKeys.deliverables("unrelated"))?.isInvalidated).toBe(false);
+    expect(qc.getQueryState(issueKeys.attachments("affected"))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(issueKeys.attachments("unrelated"))?.isInvalidated).toBe(false);
+    qc.clear();
+  });
+
+  it.each(["activity:created", "reaction:added", "reaction:removed", "comment:resolved"])("leaves the file inventory alone on %s", (event) => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, createStores()), { wrapper: createWrapper(qc) });
+    qc.setQueryData(issueKeys.attachments("affected"), []);
+    const listener = vi.mocked(ws.on).mock.calls.find(([name]) => name === event)?.[1];
+    act(() => listener?.({ comment: { issue_id: "affected" }, issue_id: "affected" } as never));
+    expect(qc.getQueryState(issueKeys.attachments("affected"))?.isInvalidated).toBe(false);
     qc.clear();
   });
 });

@@ -247,15 +247,16 @@ export function AttachmentList({
     );
   };
 
-  // Every image shows at its full size, one under another, so it reads
-  // without opening (MUL-7736). Every other file — HTML too: an uploaded file
-  // is a deliverable to open, not part of the text — is a card in a grid, not
-  // a full-width row each.
+  // Images stack at full size so they read without opening (MUL-7736), or —
+  // under the timeline's "thumbnails" image preference — sit in a row of
+  // thumbnails (editor/styles/attachment.css, MUL-9037). Every other file —
+  // HTML too: an uploaded file is a deliverable to open, not part of the
+  // text — is a card in a grid, not a full-width row each.
   return (
     <AttachmentDownloadProvider attachments={attachments}>
       <div className={cn("flex flex-col gap-2", className)}>
         {images.length > 0 && (
-          <div className="flex flex-col items-start gap-2">{images.map(render)}</div>
+          <div data-comment-image-list className="flex flex-col items-start gap-2">{images.map(render)}</div>
         )}
         {files.length > 0 && (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(min(15rem,100%),1fr))] gap-2">

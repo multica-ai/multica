@@ -20,6 +20,14 @@ let pickedIsGitRepo: boolean | undefined = true;
 
 const createProjectMock = vi.fn().mockResolvedValue({ id: "p1", slug: "p1" });
 
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: Object.assign(
+    (selector: (state: { user: { id: string } }) => unknown) =>
+      selector({ user: { id: "user-1" } }),
+    { getState: () => ({ user: { id: "user-1" } }) },
+  ),
+}));
+
 // jsdom has no IntersectionObserver; the modal's scroll affordances construct
 // one, and the resulting rejection aborts the submit handler mid-flight.
 class NoopIntersectionObserver {
@@ -149,7 +157,7 @@ vi.mock("../projects/components/project-due-date-picker", () => ({
   ProjectDueDatePicker: () => <button type="button">Due date</button>,
 }));
 
-// Desktop-only surface: without these the Local directory tab never renders.
+// Desktop-only surface: without these the Local folder tab never renders.
 vi.mock("../platform/local-directory", () => ({
   isDesktopShell: () => true,
   pickDirectory: () =>
@@ -186,8 +194,8 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 import { CreateProjectModal, buildLocalDirectoryResourceRef } from "./create-project";
 
 async function pickLocalDirectory(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: /Local directory/i }));
-  await user.click(screen.getByRole("button", { name: /Choose directory/i }));
+  await user.click(screen.getByRole("button", { name: /Local folder/i }));
+  await user.click(screen.getByRole("button", { name: /Choose folder/i }));
   await waitFor(() => expect(screen.getByText("/Users/dev/work/game-client")).toBeInTheDocument());
 }
 
@@ -211,7 +219,7 @@ describe("CreateProjectModal — local directory execution mode", () => {
     await pickLocalDirectory(user);
 
     expect(screen.getByRole("button", { name: /^Parallel$/i })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /Run in parallel, isolated/i })).toHaveAttribute(
+    expect(screen.getByRole("radio", { name: /Run in parallel/i })).toHaveAttribute(
       "aria-checked",
       "true",
     );
@@ -254,7 +262,7 @@ describe("CreateProjectModal — local directory execution mode", () => {
 
     expect(screen.getByRole("button", { name: /^Direct$/i })).toBeInTheDocument();
     // Still selectable — unknown is permissive about what the user MAY choose.
-    expect(screen.getByRole("radio", { name: /Run in parallel, isolated/i })).not.toBeDisabled();
+    expect(screen.getByRole("radio", { name: /Run in parallel/i })).not.toBeDisabled();
   });
 
   // The preselection is a starting point, not a correction: once the user says
@@ -264,11 +272,11 @@ describe("CreateProjectModal — local directory execution mode", () => {
     renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
 
     await pickLocalDirectory(user);
-    await user.click(screen.getByRole("radio", { name: /Edit this folder directly/i }));
+    await user.click(screen.getByRole("radio", { name: /Edit directly/i }));
     expect(screen.getByRole("button", { name: /^Direct$/i })).toBeInTheDocument();
 
     // Re-pick (the mocked picker returns the same git repo).
-    await user.click(screen.getByRole("button", { name: /Change directory/i }));
+    await user.click(screen.getByRole("button", { name: /Change folder/i }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /^Direct$/i })).toBeInTheDocument(),
     );
@@ -285,7 +293,7 @@ describe("CreateProjectModal — local directory execution mode", () => {
     // The compact button uses the short label; the picker carries the full
     // title. A git repo preselects parallel, so that is the label here.
     expect(screen.getByRole("button", { name: /^Parallel$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Change directory/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Change folder/i })).toBeInTheDocument();
   });
 
   it("still offers parallel mode when the machine has not advertised", async () => {
@@ -295,7 +303,7 @@ describe("CreateProjectModal — local directory execution mode", () => {
 
     await pickLocalDirectory(user);
 
-    expect(screen.getByRole("radio", { name: /Run in parallel, isolated/i })).not.toBeDisabled();
+    expect(screen.getByRole("radio", { name: /Run in parallel/i })).not.toBeDisabled();
   });
 
   // The version skew this whole issue is about: newest Desktop, newest daemon,
@@ -309,7 +317,7 @@ describe("CreateProjectModal — local directory execution mode", () => {
 
     await pickLocalDirectory(user);
 
-    expect(screen.getByRole("radio", { name: /Run in parallel, isolated/i })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: /Run in parallel/i })).toBeDisabled();
     expect(screen.getByText(/Multica server is too old/i)).toBeInTheDocument();
     // And it must not have been preselected either — that would submit a mode
     // the server would silently downgrade.
@@ -323,7 +331,7 @@ describe("CreateProjectModal — local directory execution mode", () => {
 
     await pickLocalDirectory(user);
 
-    expect(screen.getByRole("radio", { name: /Run in parallel, isolated/i })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: /Run in parallel/i })).toBeDisabled();
     expect(screen.getByText(/not a git repository/i)).toBeInTheDocument();
   });
 });

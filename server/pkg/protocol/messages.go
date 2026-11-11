@@ -186,6 +186,10 @@ const (
 	PendingWorkKindModelList        = "model_list"
 	PendingWorkKindLocalSkills      = "local_skills"
 	PendingWorkKindLocalSkillImport = "local_skill_import"
+	// PendingWorkKindEnvironmentCommand asks a daemon that supports it to claim
+	// its queued environment commands instead of heartbeating. Older daemons
+	// heartbeat as for any kind, which claims nothing.
+	PendingWorkKindEnvironmentCommand = "environment_command"
 )
 
 // PendingWorkPayload is sent from server to daemon as a wakeup hint when a

@@ -133,6 +133,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"squad":                              workspaceDelete,
 	"squad_member":                       workspaceDelete,
 	"sys_cron_executions":                workspaceDeleteKeep,
+	"theme_store_download":               workspaceDeleteKeep, // per registry theme, not workspace-owned
 	"task_message":                       workspaceDelete,
 	"task_supplement":                    workspaceDelete,
 	"task_supplement_capability":         workspaceDelete,
@@ -155,6 +156,8 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"app_action_request":                 workspaceDelete,
 	"app_tool_call":                      workspaceDelete,
 	"issue_environment":                  workspaceDelete,
+	"issue_environment_command":          workspaceDelete,
+	"issue_environment_config":           workspaceDelete,
 	"workspace_app_setting":              workspaceDelete,
 	"app_tool_class_override":            workspaceDelete,
 	"workspace":                          workspaceDelete,

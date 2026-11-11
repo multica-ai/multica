@@ -74,6 +74,56 @@ const OPEN_KEY = "multica:chat:isOpen";
  * be turned off from the Settings → Chat tab.
  */
 const FLOATING_KEY = "multica:chat:floatingChatEnabled";
+/**
+ * The agent Ask Multica starts a new chat with, per workspace. Missing key =
+ * no preference: a new chat goes to the agent last chatted with.
+ */
+const QUICK_CHAT_AGENT_KEY = "multica:chat:quickChatAgentId";
+/**
+ * The chats kept as chips in the bottom bar, per workspace:
+ * `{ kept: sessionId[], dismissed: { [sessionId]: activity } }`.
+ *
+ * `kept` is every chat opened in the quick-chat window and not closed from the
+ * bar since, newest first. `dismissed` records the chat's last activity at the
+ * moment its chip was closed, so the chip stays away until the chat moves
+ * again; without it, closing the chip of an unread chat would do nothing.
+ */
+const CHAT_BAR_KEY = "multica:chat:bar";
+/** Chips are a working set, not a history: the oldest fall off. */
+const CHAT_BAR_MAX_KEPT = 12;
+const CHAT_BAR_MAX_DISMISSED = 50;
+
+interface ChatBarSlots {
+  kept: string[];
+  dismissed: Record<string, string>;
+}
+
+function readChatBar(storage: StorageAdapter, key: string): ChatBarSlots {
+  const empty: ChatBarSlots = { kept: [], dismissed: {} };
+  const raw = storage.getItem(key);
+  if (!raw) return empty;
+  try {
+    const parsed = JSON.parse(raw) as { kept?: unknown; dismissed?: unknown };
+    if (typeof parsed !== "object" || parsed === null) return empty;
+    const kept = Array.isArray(parsed.kept)
+      ? parsed.kept.filter((id): id is string => typeof id === "string")
+      : [];
+    const dismissed: Record<string, string> = {};
+    if (typeof parsed.dismissed === "object" && parsed.dismissed !== null) {
+      for (const [id, activity] of Object.entries(parsed.dismissed)) {
+        if (typeof activity === "string") dismissed[id] = activity;
+      }
+    }
+    return { kept, dismissed };
+  } catch {
+    return empty;
+  }
+}
+
+function writeChatBar(storage: StorageAdapter, key: string, slots: ChatBarSlots) {
+  if (slots.kept.length === 0 && Object.keys(slots.dismissed).length === 0) storage.removeItem(key);
+  else storage.setItem(key, JSON.stringify(slots));
+}
 
 function readDrafts(storage: StorageAdapter, key: string): Record<string, string> {
   const raw = storage.getItem(key);
@@ -309,6 +359,12 @@ export interface ChatState {
   /** Project context for the next session. Existing sessions remain bound to
    *  their server-persisted project_id. */
   selectedProjectId: string | null;
+  /** Settings preference: the agent Ask Multica starts a new chat with. */
+  quickChatAgentId: string | null;
+  /** Chats kept as chips in the bottom bar, newest first. */
+  chatBarKept: string[];
+  /** Chips closed from the bar: sessionId → the chat's activity at that moment. */
+  chatBarDismissed: Record<string, string>;
   /** Drafts per session: sessionId (or DRAFT_NEW_SESSION) → markdown text. */
   inputDrafts: Record<string, string>;
   /** Attachment rows referenced by each input draft. */
@@ -328,6 +384,11 @@ export interface ChatState {
   setActiveSession: (id: string | null) => void;
   setSelectedAgentId: (id: string) => void;
   setSelectedProjectId: (id: string | null) => void;
+  setQuickChatAgentId: (id: string | null) => void;
+  /** Give a chat a chip in the bottom bar. No-op when it already has one. */
+  keepChatInBar: (sessionId: string) => void;
+  /** Close a chat's chip until the chat moves past `activity`. */
+  dismissChatFromBar: (sessionId: string, activity: string) => void;
   /** sessionId accepts a real session UUID or DRAFT_NEW_SESSION. */
   setInputDraft: (sessionId: string, draft: string) => void;
   /** Append a markdown fragment to a draft slot's text (upload write-back). */
@@ -388,12 +449,17 @@ export function createChatStore(options: ChatStoreOptions) {
     initialAgentId,
   );
 
+  const initialChatBar = readChatBar(storage, wsKey(CHAT_BAR_KEY));
+
   const store = create<ChatState>((set, get) => ({
     isOpen: initialIsOpen,
     floatingChatEnabled: initialFloatingEnabled,
     activeSessionId: storage.getItem(wsKey(SESSION_STORAGE_KEY)),
     selectedAgentId: initialAgentId,
     selectedProjectId: storage.getItem(wsKey(PROJECT_STORAGE_KEY)),
+    quickChatAgentId: storage.getItem(wsKey(QUICK_CHAT_AGENT_KEY)),
+    chatBarKept: initialChatBar.kept,
+    chatBarDismissed: initialChatBar.dismissed,
     inputDrafts: initialDraftSlots.inputDrafts,
     inputDraftAttachments: initialDraftSlots.inputDraftAttachments,
     appliedDraftRestoreIds: readAppliedRestores(storage, wsKey(APPLIED_RESTORES_KEY)),
@@ -439,6 +505,36 @@ export function createChatStore(options: ChatStoreOptions) {
       if (id) storage.setItem(wsKey(PROJECT_STORAGE_KEY), id);
       else storage.removeItem(wsKey(PROJECT_STORAGE_KEY));
       set({ selectedProjectId: id });
+    },
+    setQuickChatAgentId: (id) => {
+      logger.info("setQuickChatAgentId", { from: get().quickChatAgentId, to: id });
+      if (id) storage.setItem(wsKey(QUICK_CHAT_AGENT_KEY), id);
+      else storage.removeItem(wsKey(QUICK_CHAT_AGENT_KEY));
+      set({ quickChatAgentId: id });
+    },
+    keepChatInBar: (sessionId) => {
+      const { chatBarKept, chatBarDismissed } = get();
+      const wasDismissed = sessionId in chatBarDismissed;
+      if (chatBarKept.includes(sessionId) && !wasDismissed) return;
+      const kept = [sessionId, ...chatBarKept.filter((id) => id !== sessionId)].slice(
+        0,
+        CHAT_BAR_MAX_KEPT,
+      );
+      const dismissed = { ...chatBarDismissed };
+      delete dismissed[sessionId];
+      writeChatBar(storage, wsKey(CHAT_BAR_KEY), { kept, dismissed });
+      set({ chatBarKept: kept, chatBarDismissed: dismissed });
+    },
+    dismissChatFromBar: (sessionId, activity) => {
+      const { chatBarKept, chatBarDismissed } = get();
+      const kept = chatBarKept.filter((id) => id !== sessionId);
+      // Re-insert so the entry is the newest, then drop the oldest over the cap.
+      const rest = Object.entries(chatBarDismissed).filter(([id]) => id !== sessionId);
+      const dismissed = Object.fromEntries(
+        [...rest, [sessionId, activity] as const].slice(-CHAT_BAR_MAX_DISMISSED),
+      );
+      writeChatBar(storage, wsKey(CHAT_BAR_KEY), { kept, dismissed });
+      set({ chatBarKept: kept, chatBarDismissed: dismissed });
     },
     // Append-only until the server confirms. There is deliberately no capacity
     // cap: every entry in here is an UNconfirmed consume, and evicting one
@@ -651,6 +747,7 @@ export function createChatStore(options: ChatStoreOptions) {
     const nextSession = storage.getItem(wsKey(SESSION_STORAGE_KEY));
     const nextAgent = storage.getItem(wsKey(AGENT_STORAGE_KEY));
     const nextProject = storage.getItem(wsKey(PROJECT_STORAGE_KEY));
+    const nextChatBar = readChatBar(storage, wsKey(CHAT_BAR_KEY));
     // Drafts are namespaced per workspace, so the workspace being switched TO
     // has its own legacy slots to fold — migrate against that workspace's own
     // persisted agent, not the one we are leaving.
@@ -674,6 +771,9 @@ export function createChatStore(options: ChatStoreOptions) {
       activeSessionId: nextSession,
       selectedAgentId: nextAgent,
       selectedProjectId: nextProject,
+      quickChatAgentId: storage.getItem(wsKey(QUICK_CHAT_AGENT_KEY)),
+      chatBarKept: nextChatBar.kept,
+      chatBarDismissed: nextChatBar.dismissed,
       inputDrafts: nextDrafts,
       inputDraftAttachments: nextDraftAttachments,
       appliedDraftRestoreIds: readAppliedRestores(storage, wsKey(APPLIED_RESTORES_KEY)),

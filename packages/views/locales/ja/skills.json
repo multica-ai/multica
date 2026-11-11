@@ -243,15 +243,9 @@
     }
   },
   "create": {
-    "back": "戻る",
-    "back_aria": "方式の選択に戻る",
     "close": "閉じる",
     "close_aria": "閉じる",
     "method": {
-      "chooser": {
-        "title": "新規スキル",
-        "desc": "スキルを追加する方法を選択してください。"
-      },
       "manual": {
         "title": "手動で作成",
         "desc": "空の SKILL.md から作成します。"

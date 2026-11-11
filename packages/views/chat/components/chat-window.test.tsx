@@ -40,7 +40,6 @@ vi.mock("@multica/core/hooks", async (importOriginal) => ({
 vi.mock("@multica/core/agents", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/agents")>()),
   useAgentPresenceDetail: () => "loading",
-  useCustomizeConversationStartersHref: () => null,
   useWorkspaceAgentAvailability: () => "loading",
 }));
 vi.mock("@multica/ui/hooks/use-mobile", () => ({

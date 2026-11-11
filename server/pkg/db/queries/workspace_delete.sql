@@ -511,6 +511,12 @@ deleted_app_tool_calls AS (
 deleted_issue_environments AS (
     DELETE FROM issue_environment WHERE workspace_id = $1
 ),
+deleted_issue_environment_commands AS (
+    DELETE FROM issue_environment_command WHERE workspace_id = $1
+),
+deleted_issue_environment_configs AS (
+    DELETE FROM issue_environment_config WHERE workspace_id = $1
+),
 deleted_workspace_app_settings AS (
     DELETE FROM workspace_app_setting WHERE workspace_id = $1
 ),

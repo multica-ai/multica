@@ -254,15 +254,9 @@
     }
   },
   "create": {
-    "back": "Volver",
-    "back_aria": "Volver al selector de método",
     "close": "Cerrar",
     "close_aria": "Cerrar",
     "method": {
-      "chooser": {
-        "title": "Skill nueva",
-        "desc": "Elige cómo añadir una skill a este espacio de trabajo."
-      },
       "manual": {
         "title": "Crear manualmente",
         "desc": "Parte de un SKILL.md en blanco."

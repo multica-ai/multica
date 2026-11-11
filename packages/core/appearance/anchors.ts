@@ -13,6 +13,7 @@ export const THEME_ANCHORS = {
   page: "The rounded canvas that holds the current page.",
   "window-toolbar": "Desktop only: the toolbar above the rail with history buttons.",
   "tab-bar": "Desktop only: the tab strip above the page.",
+  "bottom-bar": "The status bar under the page, on windows wide enough to show it.",
   "issue-group-header": "A status group header in issue lists; `data-status` is the status key.",
   "issue-row":
     "One issue in a list; `data-status`, `data-priority` and `data-assignee-type` (member, agent, squad or none).",

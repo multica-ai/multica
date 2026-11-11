@@ -1011,7 +1011,7 @@ export function DingTalkAgentBindButton({
 
           {/* Inline footer instead of <DialogFooter>: its -mx-4/-mb-4 offsets
               assume the default p-4 DialogContent; with p-0 they push the bar
-              outside the dialog (same workaround as CreateAgentDialog). */}
+              outside the dialog. */}
           <div className="flex items-center justify-end gap-2 border-t bg-background px-5 py-3">
             <Button variant="ghost" onClick={closeDialog} disabled={submitting}>
               {t(($) => $.dingtalk.byo_cancel)}

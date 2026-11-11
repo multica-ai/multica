@@ -138,14 +138,14 @@ function luminance({ r, g, b }: Rgba): number {
 }
 
 /** `top` painted over an opaque `bottom`. */
-function over(top: Rgba, bottom: Rgba): Rgba {
+export function paintOver(top: Rgba, bottom: Rgba): Rgba {
   const mix = (t: number, b: number) => Math.round(t * top.a + b * (1 - top.a));
   return { r: mix(top.r, bottom.r), g: mix(top.g, bottom.g), b: mix(top.b, bottom.b), a: 1 };
 }
 
 /** The WCAG ratio of a foreground on an opaque background. */
 export function contrastRatio(foreground: Rgba, background: Rgba): number {
-  const a = luminance(over(foreground, background));
+  const a = luminance(paintOver(foreground, background));
   const b = luminance(background);
   const [lighter, darker] = a > b ? [a, b] : [b, a];
   return (lighter + 0.05) / (darker + 0.05);

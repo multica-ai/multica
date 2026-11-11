@@ -65,15 +65,6 @@
     "search_runtime_filtered": "No agents on \"{{machine}}\" match \"{{query}}\".",
     "runtime_filtered": "No agents on \"{{machine}}\"."
   },
-  "runtime_filter": {
-    "all": "All runtimes",
-    "section_local": "Local",
-    "section_remote": "Remote",
-    "section_cloud": "Cloud",
-    "agent_count_one": "{{count}} agent",
-    "agent_count_other": "{{count}} agents",
-    "empty": "No machines yet"
-  },
   "columns": {
     "agent": "Agent",
     "status": "Status",
@@ -208,7 +199,6 @@
     "rename_required": "Name is required",
     "edit_description_title": "Edit description",
     "description_placeholder": "What does this agent do?",
-    "save": "Save",
     "cancel": "Cancel"
   },
   "overview": {
@@ -234,12 +224,7 @@
     "edit_access_aria": "Access: {{value}}. Change access",
     "all_settings": "All settings"
   },
-  "skill_attach": {
-    "trigger_aria": "Attach a workspace skill",
-    "trigger_label": "Attach"
-  },
   "pickers": {
-    "concurrency_tooltip": "Concurrency · {{value}} max concurrent runs",
     "concurrency_range": "Max concurrent runs ({{min}}–{{max}})",
     "runtime_none": "No runtime",
     "runtime_tooltip": "Runtime · {{name}} · {{status}}",
@@ -463,23 +448,17 @@
     }
   },
   "create_dialog": {
-    "title_create": "Create Agent",
-    "title_duplicate": "Duplicate Agent",
-    "description_duplicate": "Create a new agent based on \"{{name}}\". Instructions, env, and skills are copied for you.",
     "name_label": "Name",
     "name_placeholder": "e.g. Deep Research Agent",
     "description_label": "Description",
     "description_placeholder": "What does this agent do?",
-    "visibility_label": "Visibility",
     "access": {
-      "label": "Access",
       "private_title": "Private",
       "private_desc": "Only you can run this agent",
       "public_title": "Public",
       "public_desc": "Choose who can run this agent",
       "public_workspace_option": "Everyone in this workspace",
       "public_members_group": "Specific people",
-      "public_members_empty": "No workspace members to choose from",
       "public_targets_empty_hint": "Pick at least one option below — otherwise the agent stays private."
     },
     "runtime_label": "Runtime",
@@ -494,17 +473,10 @@
     "runtime_no_results": "No matching machines",
     "runtime_group_online": "{{online}}/{{total}} online",
     "duplicate_copy_suffix": " (Copy)",
-    "create": "Create",
-    "creating": "Creating...",
-    "cancel": "Cancel",
-    "create_failed_toast": "Failed to create agent",
     "skill_attach_failed_toast": "Agent created, but failed to attach skills: {{error}}",
     "squad_join_failed_toast": "Agent \"{{name}}\" was created but couldn't join the squad: {{error}}. You can add it manually from Members.",
     "instructions": {
       "label": "Instructions",
-      "placeholder_blank": "Click to write instructions…",
-      "placeholder_duplicate": "Click to view or edit the duplicated instructions",
-      "collapse": "Collapse",
       "editor_placeholder": "Write what this agent should do, what to focus on, what to avoid…"
     },
     "skills_section": {

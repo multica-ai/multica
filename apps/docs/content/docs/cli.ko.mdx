@@ -271,6 +271,17 @@ multica runtime profile create --display-name "사내 Claude 래퍼" \
 
 실행 메커니즘과 사용자 지정 profile은 [데몬과 런타임](/daemon-runtimes)을 참고하세요.
 
+## 환경 [#environments]
+
+```bash
+multica env start web
+multica env start web --wait=false
+multica env list
+multica env stop web
+```
+
+`multica env`(긴 형태 `multica environment`)는 저장소가 `.multica/environments.toml`에 선언한 환경을 시작합니다. 환경은 데몬이 관리하므로 실행이 끝나도 계속 실행되고, 태스크 사이드바에 표시되며, TTL이 끝나면 중지됩니다. `start`는 환경이 응답할 때까지 기다린 뒤 URL을 출력합니다. 이 명령들은 실행 중인 태스크의 자격 증명을 쓰므로 에이전트의 실행 안에서만 동작합니다. 직접 쓰는 컴퓨터에서는 태스크 사이드바를 사용하세요. 파일 형식과 예시는 [환경](/environments)을 참고하세요.
+
 ## 프로젝트, 워크스페이스, 오토파일럿
 
 ```bash
@@ -304,6 +315,7 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 | `workspace` | 워크스페이스 생성, 확인, 전환 및 멤버 초대 |
 | `repo` | 워크스페이스 저장소 관리 및 로컬 checkout |
 | `daemon`, `runtime` | 로컬 데몬 시작 및 중지, 런타임 확인 및 관리 |
+| `env` | 저장소가 선언한 환경 시작, 중지, 나열(에이전트의 실행 안에서만) |
 | `attachment` | 첨부 파일 업로드 또는 다운로드 |
 | `user profile` | 현재 사용자 profile 확인 또는 업데이트 |
 | `auth`, `login`, `setup` | 로그인, 인증 상태 확인, 연결 초기화 |
@@ -423,6 +435,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | `runtime` | `list/usage/activity/update/rename/delete` | 런타임 확인 및 관리 | `usage`: `--days`(기본값 90, 최대 365). `update`: `--target-version`(필수), `--wait`. `delete`: `--cascade`(연결된 에이전트의 런타임을 해제하고 데이터를 보존하며 실행 취소) |
 | | `profile list/create/update/delete` | 사용자 지정 런타임 profile 관리 | `create`: `--display-name`, `--command-name`(모두 필수), `--runtime-type`(또는 예전 `--protocol-family`), `--description`. `update`: `--enabled` |
 | | `profile set-path/unset-path <profile-id>` | 로컬 실행 파일 경로 고정(로컬에만 적용되고 서버에 업로드되지 않음) | |
+| `env` | `start <name>` / `stop <name>` / `list` | 이 태스크의 선언된 환경을 시작, 중지, 나열. 에이전트의 실행 안에서만 사용할 수 있습니다. [환경](/environments) 참고 | `start`: `--wait`(기본값 `true`). 모두: `--output`(`table` 또는 `json`) |
 
 ### Additional
 

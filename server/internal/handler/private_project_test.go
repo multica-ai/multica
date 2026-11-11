@@ -824,3 +824,102 @@ func TestPrivateProjectWakeupListsSkipOutsiders(t *testing.T) {
 		}
 	}
 }
+
+// A run on a private project's issue is listed as restricted to members
+// outside the project, id included. Stopping it by that id must need the same
+// access as reading it.
+func TestPrivateProjectRunCancelNeedsVisibility(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	var agentID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = 'Handler Test Agent'`, testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load seeded agent: %v", err)
+	}
+	queuedRun := func() string {
+		return dbfx.Task(t, agentID, testutil.Cols{"issue_id": f.secretIssue, "runtime_id": testRuntimeID})
+	}
+
+	taskID := queuedRun()
+	rec := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(rec, cancelTaskByUserRequest(t, f.outsider, taskID))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("outsider cancel = %d, want 404", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), f.secretIssue) {
+		t.Errorf("outsider cancel response names the private issue: %s", rec.Body.String())
+	}
+	if got := taskStatus(t, taskID); got != "queued" {
+		t.Errorf("run after outsider cancel = %q, want queued", got)
+	}
+
+	for i, tc := range []struct {
+		name   string
+		userID string
+	}{
+		{"project member", f.insider},
+		{"workspace owner outside the member list", testUserID},
+	} {
+		// An issue holds one pending run per agent, so the first case stops
+		// the run the outsider could not.
+		if i > 0 {
+			taskID = queuedRun()
+		}
+		rec := httptest.NewRecorder()
+		testHandler.CancelTaskByUser(rec, cancelTaskByUserRequest(t, tc.userID, taskID))
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: cancel = %d, want 200: %s", tc.name, rec.Code, rec.Body.String())
+		}
+		if got := taskStatus(t, taskID); got != "cancelled" {
+			t.Errorf("%s: run after cancel = %q, want cancelled", tc.name, got)
+		}
+	}
+}
+
+// Sub-issue progress is read for every parent in one call, not through an
+// issue, so its counts have to leave out sub-issues in a project the caller
+// cannot see.
+func TestPrivateProjectChildProgressSkipsHiddenSubIssues(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	dbfx.Issue(t, f.marker+" public child", testutil.Cols{"parent_issue_id": f.publicIssue})
+	dbfx.Issue(t, f.marker+" secret child", testutil.Cols{"project_id": f.projectID, "parent_issue_id": f.publicIssue, "status": "done"})
+	secretOnlyParent := dbfx.Issue(t, f.marker+" parent of one secret child")
+	dbfx.Issue(t, f.marker+" lone secret child", testutil.Cols{"project_id": f.projectID, "parent_issue_id": secretOnlyParent})
+
+	type counts struct{ Total, Done int64 }
+	progress := func(userID string) map[string]counts {
+		t.Helper()
+		var body struct {
+			Progress []struct {
+				ParentIssueID string `json:"parent_issue_id"`
+				Total         int64  `json:"total"`
+				Done          int64  `json:"done"`
+			} `json:"progress"`
+		}
+		req := asUser(newRequest(http.MethodGet, "/api/issues/child-progress", nil), userID)
+		testutil.Call(t, testHandler.ChildIssueProgress, req).Want(http.StatusOK).JSON(&body)
+		out := map[string]counts{}
+		for _, p := range body.Progress {
+			out[p.ParentIssueID] = counts{p.Total, p.Done}
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name       string
+		userID     string
+		mixed      counts
+		secretOnly counts
+	}{
+		{"project member", f.insider, counts{2, 1}, counts{1, 0}},
+		{"workspace owner outside the member list", testUserID, counts{2, 1}, counts{1, 0}},
+		{"workspace member outside the project", f.outsider, counts{1, 0}, counts{}},
+	} {
+		got := progress(tc.userID)
+		if got[f.publicIssue] != tc.mixed {
+			t.Errorf("%s: parent with a public and a secret sub-issue = %+v, want %+v", tc.name, got[f.publicIssue], tc.mixed)
+		}
+		if got[secretOnlyParent] != tc.secretOnly {
+			t.Errorf("%s: parent with only a secret sub-issue = %+v, want %+v", tc.name, got[secretOnlyParent], tc.secretOnly)
+		}
+	}
+}

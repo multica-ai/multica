@@ -268,6 +268,17 @@ multica runtime profile create --display-name "內部 Claude 封裝" \
 
 執行機制和自定義 profile 見[守護程序與執行時](/daemon-runtimes)。
 
+## 環境 [#environments]
+
+```bash
+multica env start web
+multica env start web --wait=false
+multica env list
+multica env stop web
+```
+
+`multica env`（完整寫法 `multica environment`）啟動倉庫在 `.multica/environments.toml` 裡宣告的環境。環境由守護程序託管，執行結束後繼續執行，顯示在任務側欄裡，TTL 到期時停止。`start` 會等環境能回應後印出它的 URL。這些命令使用目前執行的憑據，所以只能在 AI 代理的執行中使用；在你自己的電腦上請用任務側欄。檔案格式和範例見[環境](/environments)。
+
 ## 專案、工作區和自動化
 
 ```bash
@@ -303,6 +314,7 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 | `workspace` | 建立、檢視、切換工作區和邀請成員 |
 | `repo` | 管理工作區倉庫，並把倉庫檢出到本機 |
 | `daemon`、`runtime` | 啟停本機守護程序，檢視和管理執行時 |
+| `env` | 啟動、停止和列出倉庫宣告的環境（只能在 AI 代理的執行中使用） |
 | `attachment` | 上傳或下載附件 |
 | `user profile` | 檢視或更新當前使用者資料 |
 | `auth`、`login`、`setup` | 登入、檢視認證狀態和初始化連線 |
@@ -432,6 +444,7 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | `runtime` | `list/usage/activity/update/rename/delete` | 檢視和管理執行時 | `usage`：`--days`（預設 90，最多 365）；`update`：`--target-version`（必填）、`--wait`；`delete`：`--cascade`（解綁繫結的 AI 代理、保留其資料並取消其執行） |
 | | `profile list/create/update/delete` | 管理自定義執行時 profile | `create`：`--display-name`、`--command-name`（均必填）、`--runtime-type`（或舊的 `--protocol-family`）、`--description`；`update`：`--enabled` |
 | | `profile set-path/unset-path <profile-id>` | 固定本機可執行檔案路徑（僅本地生效，不上傳伺服器） | |
+| `env` | `start <name>` / `stop <name>` / `list` | 啟動、停止或列出這條任務的宣告式環境；只能在 AI 代理的執行中使用。見[環境](/environments) | `start`：`--wait`（預設 `true`）；全部：`--output`（`table` 或 `json`） |
 
 ### Additional
 
