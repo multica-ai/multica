@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { FolderMinus, Monitor, Moon, SquarePen, Sun } from "@multica/ui/icons";
 import { Command as CommandPrimitive } from "cmdk";
+import { useAppearanceStore } from "@multica/core/appearance";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueDetailOptions } from "@multica/core/issues/queries";
@@ -18,6 +19,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { runConfirmIntent } from "../../issues/actions/run-confirm-gate";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useProjectStatusLabels } from "../../projects/components/labels";
+import { ThemeSwatch, useAppliedMode, useColorThemes, useThemeLabel } from "../../settings/components/theme-swatch";
 import { useT } from "../../i18n";
 import { HighlightText } from "../highlight-text";
 import { scoreRow, scoreText } from "../matching";
@@ -30,35 +32,69 @@ type ThemeValue = "light" | "dark" | "system";
 
 export function ThemePage({ query }: { query: string }) {
   const { t } = useT("search");
+  const { t: tLayout } = useT("layout");
   const palette = usePalette();
-  const { theme, setTheme } = useTheme();
+  const { theme: mode, setTheme: setMode } = useTheme();
+  const appliedMode = useAppliedMode();
+  const setAppearance = useAppearanceStore((s) => s.set);
+  const { themes, selected } = useColorThemes();
+  const themeLabel = useThemeLabel();
+  const currentMode = mode ?? "system";
   const q = query.trim().toLowerCase();
-  const options: { value: ThemeValue; label: string; icon: typeof Sun; keywords: string[] }[] = [
+  const modes: { value: ThemeValue; label: string; icon: typeof Sun; keywords: string[] }[] = [
     { value: "light", label: t(($) => $.theme.light), icon: Sun, keywords: ["light", "bright", "浅色"] },
     { value: "dark", label: t(($) => $.theme.dark), icon: Moon, keywords: ["dark", "night", "深色"] },
     { value: "system", label: t(($) => $.theme.system), icon: Monitor, keywords: ["system", "auto", "系统"] },
   ];
-  const visible = q ? options.filter((o) => scoreRow(o.label, o.keywords, q) > 0) : options;
+  const visibleModes = q ? modes.filter((o) => scoreRow(o.label, o.keywords, q) > 0) : modes;
+  const visibleThemes = q
+    ? themes.filter((manifest) => scoreRow(themeLabel(manifest), [manifest.id, manifest.name], q) > 0)
+    : themes;
   return (
-    <PaletteGroup heading={t(($) => $.pages.theme)}>
-      {visible.map((option) => (
-        <CommandPrimitive.Item
-          key={option.value}
-          value={`theme:${option.value}`}
-          onSelect={() => {
-            palette.close();
-            setTheme(option.value);
-          }}
-          className={ROW_CLASS}
-        >
-          <option.icon className={ROW_ICON_CLASS} />
-          <span className="min-w-0 flex-1 truncate">
-            <HighlightText text={option.label} query={query} />
-          </span>
-          {theme === option.value && <RowCheck label={t(($) => $.commands.current_theme_aria)} />}
-        </CommandPrimitive.Item>
-      ))}
-    </PaletteGroup>
+    <>
+      {visibleModes.length > 0 && (
+        <PaletteGroup heading={tLayout(($) => $.account.mode)}>
+          {visibleModes.map((option) => (
+            <CommandPrimitive.Item
+              key={option.value}
+              value={`theme:${option.value}`}
+              onSelect={() => {
+                palette.close();
+                setMode(option.value);
+              }}
+              className={ROW_CLASS}
+            >
+              <option.icon className={ROW_ICON_CLASS} />
+              <span className="min-w-0 flex-1 truncate">
+                <HighlightText text={option.label} query={query} />
+              </span>
+              {currentMode === option.value && <RowCheck label={t(($) => $.commands.current_mode_aria)} />}
+            </CommandPrimitive.Item>
+          ))}
+        </PaletteGroup>
+      )}
+      {visibleThemes.length > 0 && (
+        <PaletteGroup heading={tLayout(($) => $.account.theme)}>
+          {visibleThemes.map((manifest) => (
+            <CommandPrimitive.Item
+              key={manifest.id}
+              value={`color-theme:${manifest.id}`}
+              onSelect={() => {
+                palette.close();
+                setAppearance({ theme: manifest.id });
+              }}
+              className={ROW_CLASS}
+            >
+              <ThemeSwatch theme={manifest} mode={appliedMode} />
+              <span className="min-w-0 flex-1 truncate">
+                <HighlightText text={themeLabel(manifest)} query={query} />
+              </span>
+              {selected.id === manifest.id && <RowCheck label={t(($) => $.commands.current_theme_aria)} />}
+            </CommandPrimitive.Item>
+          ))}
+        </PaletteGroup>
+      )}
+    </>
   );
 }
 
