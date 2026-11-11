@@ -270,6 +270,48 @@ describe("theme check", () => {
     expect(found.some((m) => /light mode \(frame\): --foreground is below 4\.5:1 on --app-shell/.test(m))).toBe(true);
   });
 
+  describe("rail items", () => {
+    const rail = (declarations: string) => `.theme-light [data-mc="app-rail"] { ${declarations} }`;
+    const fills = "--rail-item-hover-background: #000000; --rail-item-active-background: #000000;";
+
+    it("pairs the rail's own colours, as the rail paints them", () => {
+      expect(check(rail(`${fills} --rail-item-active-color: #ffffff;`)).issues).toEqual([]);
+    });
+
+    it("fails rail colours without enough contrast", () => {
+      expect(errors(rail(`${fills} --rail-item-active-color: #333333;`))).toEqual([
+        expect.stringMatching(
+          /^Contrast, light mode \(frame\): --rail-item-active-color is below 4\.5:1 on --rail-item-active-background \(1\.\d\d:1\) and --rail-item-hover-background \(1\.\d\d:1\)\.$/,
+        ),
+      ]);
+      // Without its own colour, the rail falls back to --sidebar-accent-foreground on the rail fills.
+      expect(errors(rail(fills))).toEqual([
+        expect.stringMatching(/^Contrast, light mode \(frame\): --sidebar-accent-foreground is below 4\.5:1 on --rail-item-active-background/),
+      ]);
+      expect(errors(rail("--rail-item-color: #dddddd;"))).toEqual([
+        expect.stringMatching(/^Contrast, light mode \(frame\): --rail-item-color is below 4\.5:1 on --app-shell/),
+      ]);
+    });
+
+    it("keeps --sidebar-accent-foreground on --sidebar-accent for the other frame controls", () => {
+      expect(errors(rail(`${fills} --rail-item-active-color: #ffffff; --sidebar-accent: #000000;`))).toEqual([
+        expect.stringMatching(/^Contrast, light mode \(frame\): --sidebar-accent-foreground is below 4\.5:1 on --sidebar-accent \(1\.\d\d:1\)\.$/),
+      ]);
+    });
+
+    it("measures rail colours behind a non-default option value", () => {
+      const options = [
+        { id: "frame", type: "select", label: "Frame", default: "paper", choices: [{ value: "paper", label: "Paper" }, { value: "ink", label: "Ink" }] },
+      ];
+      const ink = (color: string) =>
+        `:root.theme-light[data-theme-option-frame="ink"] [data-mc="app-rail"] { ${fills} --rail-item-active-color: ${color}; }`;
+      expect(check(ink("#ffffff"), { options }).issues).toEqual([]);
+      expect(errors(ink("#333333"), { options })).toEqual([
+        expect.stringMatching(/^Contrast, light mode \(frame, Frame = Ink\): --rail-item-active-color is below 4\.5:1/),
+      ]);
+    });
+  });
+
   it("warns instead of guessing when a colour cannot be read", () => {
     const report = check(".theme-light { --muted-foreground: color-mix(in oklab, red, blue); }");
     expect(report.ok).toBe(true);

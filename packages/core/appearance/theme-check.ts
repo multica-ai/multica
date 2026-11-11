@@ -77,7 +77,7 @@ const BACKGROUNDS = [
   "--sidebar-accent",
 ];
 const READING_SURFACES = ["--background", "--page-canvas", "--surface", "--surface-raised"];
-/** Frame surfaces under the text tones. --sidebar-accent carries --sidebar-accent-foreground only. */
+/** Frame surfaces under the text tones. --sidebar-accent and the rail item fills carry their own text colours. */
 const FRAME_BACKGROUNDS = [
   "--app-shell",
   "--background",
@@ -435,18 +435,33 @@ function measureContrast(
         measure("frame", framePalette, tone, FRAME_BACKGROUNDS, TEXT);
       }
       measure("frame", framePalette, "--faint-foreground", FRAME_BACKGROUNDS, NON_TEXT);
-      // Rail items paint --sidebar-accent-foreground when active and on hover,
-      // where the app's hover is --sidebar-accent at 60% over the shell.
-      const accent = resolveColor(framePalette, "--sidebar-accent");
-      const shell = resolveColor(framePalette, "--app-shell");
-      const accentSurfaces = ["--sidebar-accent"];
-      if (framePalette.has("--rail-item-hover-background")) accentSurfaces.push("--rail-item-hover-background");
-      else if ("color" in accent && "color" in shell && shell.color.a === 1) {
-        const { r, g, b } = paintOver({ ...accent.color, a: accent.color.a * 0.6 }, shell.color);
-        framePalette.set("--rail-item-hover-background", `rgb(${r} ${g} ${b})`);
-        accentSurfaces.push("--rail-item-hover-background");
+      // Toolbar and layout buttons paint --sidebar-accent-foreground on --sidebar-accent on hover.
+      measure("frame", framePalette, "--sidebar-accent-foreground", ["--sidebar-accent"], TEXT);
+      // Rail items read their own variables, with the fallbacks in theme-variables.css:
+      // the label on the shell at rest, and the active colour on the active and hover fills.
+      if (framePalette.has("--rail-item-color")) measure("frame", framePalette, "--rail-item-color", ["--app-shell"], TEXT);
+      const railText = framePalette.has("--rail-item-active-color") ? "--rail-item-active-color" : "--sidebar-accent-foreground";
+      const railSurfaces = [
+        framePalette.has("--rail-item-active-background") ? "--rail-item-active-background" : "--sidebar-accent",
+      ];
+      if (framePalette.has("--rail-item-hover-background")) railSurfaces.push("--rail-item-hover-background");
+      else {
+        // The default hover is --sidebar-accent at 60% over the shell.
+        const accent = resolveColor(framePalette, "--sidebar-accent");
+        const shell = resolveColor(framePalette, "--app-shell");
+        if ("color" in accent && "color" in shell && shell.color.a === 1) {
+          const { r, g, b } = paintOver({ ...accent.color, a: accent.color.a * 0.6 }, shell.color);
+          framePalette.set("--rail-item-hover-background", `rgb(${r} ${g} ${b})`);
+          railSurfaces.push("--rail-item-hover-background");
+        }
       }
-      measure("frame", framePalette, "--sidebar-accent-foreground", accentSurfaces, TEXT);
+      measure(
+        "frame",
+        framePalette,
+        railText,
+        railSurfaces.filter((surface) => railText !== "--sidebar-accent-foreground" || surface !== "--sidebar-accent"),
+        TEXT,
+      );
     }
   }
 
