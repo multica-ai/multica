@@ -1902,6 +1902,30 @@ describe("ChatInput add to current run", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("preserves page context and exposes retry for an ambiguous instruction", async () => {
+    const onAddToRun = vi.fn(async (content: string) => {
+      useChatRunDraftStore.getState().setDraft({ attempts: [
+        { id: "request", session: "chat", task: "original", content },
+      ] });
+      throw new Error("response lost");
+    });
+    useChatStore.getState().activeSessionId = "chat";
+    renderInput({
+      isRunning: true, allowSubmitWhileRunning: true, onAddToRun,
+      pageContext: { id: "issue-1", label: "MUL-1", type: "issue", group: "current" },
+    });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "check this" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add this page as context" }));
+    fireEvent.click(screen.getByRole("button", { name: enChat.input.add_to_run }));
+    await waitFor(() => expect(onAddToRun).toHaveBeenCalledWith(
+      "[MUL-1](mention://issue/issue-1)\n\ncheck this",
+    ));
+    await waitFor(() => expect(screen.getByRole("button", { name: enChat.input.retry_run })).toBeEnabled());
+    expect(screen.getByTestId("editor")).toHaveValue("check this");
+    fireEvent.click(screen.getByRole("button", { name: enChat.input.new_run_instruction }));
+    expect(useChatRunDraftStore.getState().draft.attempts).toEqual([]);
+  });
+
   it("keeps the draft when the exact run rejects guidance", async () => {
     const onAddToRun = vi.fn().mockRejectedValue(new Error("turn ended"));
     renderInput({ isRunning: true, allowSubmitWhileRunning: true, onAddToRun });

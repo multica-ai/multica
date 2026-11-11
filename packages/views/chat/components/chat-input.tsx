@@ -235,9 +235,6 @@ export function ChatInput({
   const draftKey = draftKeyOverride ?? activeSessionId ?? DRAFT_NEW_SESSION;
   // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
-  const retryDraft = useChatRunDraftStore((s) => s.draft.attempts.find(
-    (a) => a.session === draftKey && a.content === inputDraft.trim(),
-  ));
   const storeUploads = useChatStore(
     (s) => s.inputDraftAttachments[draftKey] ?? EMPTY_UPLOADS,
   );
@@ -273,6 +270,13 @@ export function ChatInput({
     setAttachedPageKey(null);
   }
   const attachedPage = pageContext && attachedPageKey === pageContextKey ? pageContext : null;
+  const withPageContext = (content: string) => attachedPage
+    ? `[${escapeMarkdownLabel(attachedPage.label)}](mention://${attachedPage.type}/${attachedPage.id})\n\n${content}`
+    : content;
+  const retryContent = withPageContext(composeAnnotatedReply(inputDraft, annotations));
+  const retryDraft = useChatRunDraftStore((s) => s.draft.attempts.find(
+    (a) => a.session === draftKey && a.content === retryContent,
+  ));
   const togglePageContext = () =>
     setAttachedPageKey((current) => (current === pageContextKey ? null : pageContextKey));
 
@@ -608,9 +612,7 @@ export function ChatInput({
       });
       // The page goes ahead of the message as a mention, which is how chat
       // already hands the agent an issue or project to read.
-      const sent = attachedPage
-        ? `[${escapeMarkdownLabel(attachedPage.label)}](mention://${attachedPage.type}/${attachedPage.id})\n\n${content}`
-        : content;
+      const sent = withPageContext(content);
       if (addToRunRef.current) {
         if (!onAddToRun || draftAttachments.length > 0) return false;
         try {
