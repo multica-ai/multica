@@ -613,7 +613,7 @@ function GithubRefChip({ resource }: { resource: GithubResource }) {
           }
         />
       </TooltipHint>
-      <PopoverContent align="start" className="w-72 space-y-3 p-3">
+      <PopoverContent align="start" className="w-72 gap-3 p-3">
         <GithubRefField
           value={draft}
           onChange={setDraft}
@@ -898,7 +898,7 @@ function ExecutionModeChip({
           }
         />
       </TooltipHint>
-      <PopoverContent align="start" className="w-80 space-y-2 p-2">
+      <PopoverContent align="start" className="w-80 gap-2 p-2">
         {/* The path is already saved, so there is nothing to re-validate from
             the browser; unknown git status keeps the option available and the
             daemon has the final say. */}
