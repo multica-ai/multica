@@ -82,7 +82,7 @@
     "inbox_notifications": "收件箱通知",
     "system": "系統",
     "system_notifications": "系統通知",
-    "system_description": "帳號變更、安全提醒和產品更新。"
+    "chat_replies": "包含聊天回覆"
   },
   "groups.assignments_description": "任務分配給我或取消分配給我時。",
   "groups.mentions_description": "有人用 @ 提到你時，包括 @all 和 @squad。"
