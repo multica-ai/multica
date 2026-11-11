@@ -2286,6 +2286,9 @@ export function TableView({
           cell: IssueTableBodyCell,
         };
         if (config.width !== undefined) definition.size = config.width;
+        // Room for three "#123" chips before the overflow count; the 150px
+        // default clips the second repo-prefixed chip mid-number.
+        else if (config.key === "pull_requests") definition.size = 200;
         return definition;
       }),
       {
