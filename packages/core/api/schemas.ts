@@ -3783,6 +3783,7 @@ export const WecomInstallationSchema = z.object({
   workspace_id: z.string().default(""),
   agent_id: z.string().default(""),
   bot_id: z.string().default(""),
+  bot_name: z.string().optional(),
   installer_user_id: z.string().default(""),
   status: z.string().default("revoked"),
 }).loose();

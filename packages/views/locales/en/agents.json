@@ -752,7 +752,7 @@
       "add_failed_toast": "Failed to add skill"
     },
     "integrations": {
-      "members_note": "Only workspace owners and admins can manage this connection. You can view connected bots in Settings → Integrations."
+      "members_note": "View and manage messaging channels on the agent page."
     },
     "activity": {
       "status": {

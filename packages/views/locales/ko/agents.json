@@ -592,7 +592,7 @@
       "add_failed_toast": "스킬을 추가하지 못했습니다"
     },
     "integrations": {
-      "members_note": "이 연결을 관리할 수 있는 사람은 워크스페이스 소유자와 관리자뿐입니다. 연결된 봇은 설정 → 연동에서 확인할 수 있습니다."
+      "members_note": "에이전트 페이지에서 메시지 채널을 확인하고 관리하세요."
     },
     "activity": {
       "status": {

@@ -733,7 +733,7 @@
       "add_failed_toast": "新增 skill 失敗"
     },
     "integrations": {
-      "members_note": "只有工作區的所有者和管理員可以管理此連線。你可以在\"設定 → 整合\"中檢視已連線的 Bot。"
+      "members_note": "在 AI 代理首頁查看和管理訊息管道。"
     },
     "activity": {
       "status": {

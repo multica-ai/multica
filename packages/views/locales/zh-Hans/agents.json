@@ -733,7 +733,7 @@
       "add_failed_toast": "添加 skill 失败"
     },
     "integrations": {
-      "members_note": "只有工作区的所有者和管理员可以管理此连接。你可以在\"设置 → 集成\"中查看已连接的 Bot。"
+      "members_note": "在智能体主页查看和管理消息渠道。"
     },
     "activity": {
       "status": {
