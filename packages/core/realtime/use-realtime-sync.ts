@@ -11,7 +11,7 @@ import { clearWorkspaceStorage } from "../platform/storage-cleanup";
 import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
-import { isSidebarTableRequest, type SidebarIssuesRequest } from "../issues/sidebar-list";
+import type { SidebarIssuesRequest } from "../issues/sidebar-list";
 import { refreshIssueUnread } from "../issues/unread";
 import { refreshSubscribedIssues, subscribedIssueKeys } from "../issues/subscribed";
 import { projectKeys } from "../projects/queries";
@@ -743,7 +743,7 @@ async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promis
       queryKey: issueKeys.sidebarAll(wsId),
       predicate: ({ queryKey }) => {
         const request = queryKey[4] as SidebarIssuesRequest | undefined;
-        return !!request && isSidebarTableRequest(request) && request.table.filters.working_only === true;
+        return request?.table.filters.working_only === true;
       },
     },
   ];
@@ -1029,15 +1029,6 @@ export function useRealtimeSync(
         // catches every agent's list — the per-agent detail key sits
         // under agentTasks/<wsId>/<agentId>.
         qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
-        // Per-issue task list (issue-detail Execution log). Prefix match
-        // across all issues — keeps the contract "any task: event makes
-        // every list-of-tasks query stale" so cache stays fresh even
-        // when the relevant component isn't currently mounted.
-        qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
-        // Per-issue token usage card (issue-detail right rail). Same
-        // shape as the tasks invalidation above — any task lifecycle
-        // event shifts the aggregated usage numbers.
-        qc.invalidateQueries({ queryKey: ["issues", "usage"] });
         // Squad members-status reads the same task lifecycle to flip
         // working ↔ idle for each agent member.
         invalidateSquadMemberStatusQueries(qc, wsId);
@@ -1128,6 +1119,17 @@ export function useRealtimeSync(
     const unsubAny = ws.onAny((msg) => {
       if (specificEvents.has(msg.type)) return;
       const prefix = msg.type.split(":")[0] ?? "";
+      if (prefix === "task" && msg.type !== "task:progress") {
+        const payload = msg.payload as { issue_id?: unknown };
+        const issueId = typeof payload?.issue_id === "string" && payload.issue_id ? payload.issue_id : null;
+        // Debounce per issue so simultaneous runs cannot erase each other's refresh.
+        debouncedRefresh(`issue-task:${issueId ?? "all"}`, () => {
+          qc.invalidateQueries({ queryKey: issueId ? issueKeys.tasks(issueId) : issueKeys.tasksAll() });
+          // Events don't carry the ancestor chain needed to scope subtree projections.
+          if (issueId) qc.invalidateQueries({ queryKey: issueKeys.tasksAll(), predicate: (q) => q.queryKey[3] === "subtree" });
+          qc.invalidateQueries({ queryKey: issueId ? issueKeys.usage(issueId) : issueKeys.usageAll() });
+        });
+      }
       if (prefix === "agent" || (prefix === "task" && msg.type !== "task:progress")) {
         const wsId = getCurrentWsId();
         if (wsId) scheduleWorkingAgentRefresh(wsId);
@@ -1286,11 +1288,18 @@ export function useRealtimeSync(
         refetchType: "none",
       });
     };
+    // The issue attachment list is the complete file inventory, labelled with
+    // each file's comment. Only comment writes bind, rebind or delete comment
+    // files; activity, reactions and resolutions leave it as it is.
+    const invalidateCommentFiles = (issueId: string) => {
+      qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
+    };
 
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment, issue_revision: issueRevision } = p as CommentCreatedPayload;
       if (!comment?.issue_id) return;
       invalidateTimeline(comment.issue_id);
+      invalidateCommentFiles(comment.issue_id);
       // A new comment bumps the parent issue's updated_at server-side
       // (MUL-5009), so any open board/list sorted by "Updated date" has
       // drifted. Refetch just those keys to re-sort the commented card into
@@ -1315,6 +1324,7 @@ export function useRealtimeSync(
       const { comment, issue_revision } = p as CommentUpdatedPayload;
       if (!comment?.issue_id) return;
       invalidateTimeline(comment.issue_id);
+      invalidateCommentFiles(comment.issue_id);
       const wsId = getCurrentWsId();
       if (wsId) {
         invalidateLastActivitySortedIssueLists(qc, wsId);
@@ -1330,6 +1340,7 @@ export function useRealtimeSync(
       const { issue_id, issue_revision } = p as CommentDeletedPayload;
       if (!issue_id) return;
       invalidateTimeline(issue_id);
+      invalidateCommentFiles(issue_id);
       const wsId = getCurrentWsId();
       if (wsId) {
         invalidateLastActivitySortedIssueLists(qc, wsId);
@@ -1422,6 +1433,7 @@ export function useRealtimeSync(
         hasOnboardedRef.current,
       );
       if (typeof window !== "undefined") {
+        // eslint-disable-next-line no-restricted-syntax -- in-app path, not an external URL; core has no router to hand it to
         window.location.assign(target);
       }
     };

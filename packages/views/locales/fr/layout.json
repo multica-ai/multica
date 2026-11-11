@@ -79,9 +79,6 @@
     "workspaces_label": "Espaces de travail",
     "create_workspace": "Créer un espace de travail",
     "pending_invitations_label": "Invitations en attente",
-    "invitation_workspace_fallback": "Espace de travail",
-    "invitation_join": "Rejoindre",
-    "invitation_decline": "Refuser",
     "log_out": "Se déconnecter",
     "new_issue": "Nouvelle tâche",
     "pinned_label": "Épinglés",
@@ -101,7 +98,6 @@
     "chat": "Chat",
     "autopilots": "Auto",
     "switch_workspace": "Changer d'espace de travail",
-    "invitation_from": "{{name}} vous a invité",
     "pin_workspace": "Épingler l’espace de travail",
     "unpin_workspace": "Désépingler l’espace de travail",
     "open_in_new_window": "Ouvrir dans une nouvelle fenêtre",
@@ -109,6 +105,11 @@
     "open_in_other_window": "Déjà ouvert dans une autre fenêtre",
     "in_other_window": "Autre fenêtre",
     "all_workspaces_open": "Chaque espace de travail est déjà ouvert dans une fenêtre"
+  },
+  "bottom_bar": {
+    "label": "Barre d'état",
+    "working_one": "{{count}} agent au travail",
+    "working_other": "{{count}} agents au travail"
   },
   "panels": {
     "work": {
@@ -131,6 +132,7 @@
       "assignee_me": "Moi",
       "assignee_my_agents": "Mes agents",
       "assignee_me_and_my_agents": "Moi et mes agents",
+      "assignee_projects_only": "S'applique uniquement aux tâches affichées sous Projets",
       "reset": "Réinitialiser",
       "load_more": "Afficher plus",
       "show_less": "Afficher moins",
@@ -188,6 +190,8 @@
       "dark": "Sombre",
       "system": "Système"
     },
+    "mode": "Mode",
+    "appearance_settings": "Paramètres d’apparence",
     "language": "Langue",
     "shortcuts": "Raccourcis clavier"
   },

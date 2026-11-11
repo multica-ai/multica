@@ -7,6 +7,7 @@ import type { DraftUpload } from "@multica/core/drafts";
 import enCommon from "../../locales/en/common.json";
 import enChat from "../../locales/en/chat.json";
 import enEditor from "../../locales/en/editor.json";
+import enIssues from "../../locales/en/issues.json";
 
 // Uploads flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2). Tests drive uploads by
@@ -54,7 +55,7 @@ function makeUpload(overrides: Partial<UploadResult> & { id: string; link: strin
   };
 }
 
-const TEST_RESOURCES = { en: { common: enCommon, chat: enChat, editor: enEditor } };
+const TEST_RESOURCES = { en: { common: enCommon, chat: enChat, editor: enEditor, issues: enIssues } };
 
 // Track drop-zone callbacks so the test can simulate a real drop.
 const dropHandlers = vi.hoisted(() => ({
@@ -248,6 +249,8 @@ vi.mock("@multica/core/chat", () => {
 
 import { ChatInput } from "./chat-input";
 import { useChatStore } from "@multica/core/chat";
+import { useCommentDraftStore } from "@multica/core/issues/stores";
+import { composeAnnotatedReply } from "@multica/core/drafts/reply-annotation";
 
 type ChatInputOnSend = React.ComponentProps<typeof ChatInput>["onSend"];
 type ChatInputCommit = Parameters<ChatInputOnSend>[2];
@@ -381,6 +384,68 @@ function element(props: Partial<React.ComponentProps<typeof ChatInput>>) {
     </I18nProvider>
   );
 }
+
+describe("ChatInput annotations", () => {
+  const key = "chat:session-1" as const;
+  const annotation = {
+    id: "ann-1", sourceCommentId: "msg-1", sourceActorName: "Multica",
+    quote: "Use the cache.", note: "Why not the DB?", start: 0, prefix: "", suffix: "",
+  };
+  const slot = { draftKey: key, composer: undefined, editAnnotation: () => true };
+  function lastButton() {
+    const buttons = screen.getAllByRole("button");
+    return buttons[buttons.length - 1]!;
+  }
+
+  beforeEach(() => {
+    (useChatStore.getState() as unknown as { activeSessionId: string | null }).activeSessionId = "session-1";
+    useCommentDraftStore.setState({ drafts: {} });
+    useCommentDraftStore.getState().addAnnotation(key, annotation);
+  });
+
+  it("sends saved annotations on their own, then drops the sent ones", async () => {
+    const onSend = vi.fn<ChatInputOnSend>((_content, _ids, commitInput) => {
+      commitInput();
+      return true;
+    });
+    renderInput({ onSend, annotations: slot });
+
+    expect(screen.getByRole("button", { name: "1 annotation" })).toBeInTheDocument();
+    await waitFor(() => expect(lastButton()).not.toBeDisabled());
+    fireEvent.click(lastButton());
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]![0]).toBe(composeAnnotatedReply("", [annotation]));
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toEqual([]);
+    expect(screen.queryByRole("button", { name: "1 annotation" })).not.toBeInTheDocument();
+  });
+
+  it("quotes annotations ahead of the typed text and keeps them when the send is rejected", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(() => false);
+    renderInput({ onSend, annotations: slot });
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "Also check retries" } });
+    fireEvent.click(lastButton());
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    const sent = onSend.mock.calls[0]![0];
+    expect(sent).toBe(composeAnnotatedReply("Also check retries", [annotation]));
+    expect(sent.startsWith("> Use the cache")).toBe(true);
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(1);
+  });
+
+  it("leaves sends untouched without an annotation slot", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(() => true);
+    renderInput({ onSend });
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "plain" } });
+    fireEvent.click(lastButton());
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]![0]).toBe("plain");
+    expect(useCommentDraftStore.getState().getAnnotations(key)).toHaveLength(1);
+  });
+});
 
 // MUL-4864: an uncreated chat has ONE draft per workspace. `selectedAgentId`
 // picks where the first send goes; it does not own the draft. Switching agent
@@ -663,6 +728,134 @@ describe("ChatInput @ context wiring", () => {
 
     expect(editorProps.last?.mentionMode).toBe("context");
     expect(editorProps.last?.mentionContextItems).toBe(contextItems);
+  });
+});
+
+describe("ChatInput page context", () => {
+  const page = {
+    id: "issue-1", label: "MUL-1", description: "Fix [the] cache", type: "issue" as const, group: "current" as const,
+  };
+  const sendButton = () => screen.getByRole("button", { name: /^Send/ });
+  const pageChip = () => document.querySelector('[data-slot="chat-page-context"]');
+
+  beforeEach(() => {
+    (useChatStore.getState() as unknown as { activeSessionId: string | null }).activeSessionId = "session-1";
+  });
+
+  it("offers nothing off an issue or project page", () => {
+    renderInput({ pageContext: null });
+    expect(screen.queryByRole("button", { name: "Add this page as context" })).not.toBeInTheDocument();
+  });
+
+  it("Tab in the editor attaches the page and sends it ahead of the message, once", async () => {
+    const onSend = vi.fn<ChatInputOnSend>((_content, _ids, commitInput) => {
+      commitInput();
+      return true;
+    });
+    renderInput({ onSend, pageContext: page });
+    const editor = screen.getByTestId("editor");
+
+    expect(fireEvent.keyDown(editor, { key: "Tab" })).toBe(false);
+    expect(pageChip()).toHaveTextContent("MUL-1Fix [the] cache");
+    expect(screen.getByRole("button", { name: "Add this page as context" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.change(editor, { target: { value: "why is this slow?" } });
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]![0]).toBe("[MUL-1](mention://issue/issue-1)\n\nwhy is this slow?");
+    expect(pageChip()).toBeNull();
+  });
+
+  // The chip clears in the same commit that scrubs the editor, not once the
+  // owner's promise settles: the owner commits before its own follow-up work.
+  it("drops the page when the owner commits, while the send is still pending", async () => {
+    let finishSend!: (accepted: boolean) => void;
+    const onSend = vi.fn<ChatInputOnSend>((_content, _ids, commitInput) => {
+      commitInput();
+      return new Promise<boolean>((resolve) => { finishSend = resolve; });
+    });
+    renderInput({ onSend, pageContext: page });
+    fireEvent.keyDown(screen.getByTestId("editor"), { key: "Tab" });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "why is this slow?" } });
+
+    fireEvent.click(sendButton());
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(pageChip()).toBeNull();
+
+    await act(async () => finishSend(true));
+    expect(pageChip()).toBeNull();
+  });
+
+  // Stop before the task starts: the owner commits, cancels, restores the sent
+  // text (mention included) and reports false. A chip left behind would put the
+  // page in front of that restored text a second time.
+  it("keeps the page off after a committed send the owner then cancels", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async (_content, _ids, commitInput) => {
+      commitInput();
+      return false;
+    });
+    renderInput({ onSend, pageContext: page });
+    fireEvent.keyDown(screen.getByTestId("editor"), { key: "Tab" });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "why is this slow?" } });
+
+    await act(async () => fireEvent.click(sendButton()));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(pageChip()).toBeNull();
+  });
+
+  it("keeps the page for a retry when the owner rejects without committing", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async () => false);
+    renderInput({ onSend, pageContext: page });
+    fireEvent.keyDown(screen.getByTestId("editor"), { key: "Tab" });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "why is this slow?" } });
+
+    await act(async () => fireEvent.click(sendButton()));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(pageChip()).toHaveTextContent("MUL-1");
+  });
+
+  it("leaves Tab alone when the editor already used it, or it came from outside the editor", () => {
+    renderInput({ pageContext: page });
+    const editor = screen.getByTestId("editor");
+
+    editor.addEventListener("keydown", (event) => event.preventDefault(), { once: true });
+    fireEvent.keyDown(editor, { key: "Tab" });
+    fireEvent.keyDown(editor, { key: "Tab", shiftKey: true });
+    expect(fireEvent.keyDown(screen.getByRole("button", { name: "Add this page as context" }), { key: "Tab" })).toBe(true);
+    expect(pageChip()).toBeNull();
+  });
+
+  it("toggles from the button and drops the page when the page changes", () => {
+    const { rerender } = renderInput({ pageContext: page });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add this page as context" }));
+    expect(pageChip()).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remove page context" }));
+    expect(pageChip()).toBeNull();
+
+    fireEvent.keyDown(screen.getByTestId("editor"), { key: "Tab" });
+    rerender(element({ pageContext: { ...page, id: "issue-2", label: "MUL-2" } }));
+    expect(pageChip()).toBeNull();
+  });
+
+  it.each([
+    ["another page", { ...page, id: "issue-2", label: "MUL-2" }],
+    ["a page with no context", null],
+  ])("does not send the page after leaving it for %s and coming back", async (_, away) => {
+    const onSend = vi.fn<ChatInputOnSend>(() => true);
+    const { rerender } = renderInput({ onSend, pageContext: page });
+    fireEvent.keyDown(screen.getByTestId("editor"), { key: "Tab" });
+    expect(pageChip()).not.toBeNull();
+
+    rerender(element({ onSend, pageContext: away }));
+    rerender(element({ onSend, pageContext: page }));
+    expect(pageChip()).toBeNull();
+    expect(screen.getByRole("button", { name: "Add this page as context" })).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "A new question" } });
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]![0]).toBe("A new question");
   });
 });
 

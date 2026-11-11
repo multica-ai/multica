@@ -311,7 +311,7 @@ export function createZhDict(): LandingDict {
           "在项目列表或项目页面的菜单里可以直接重命名项目。",
           "在侧栏里可以从已保存视图的菜单直接编辑它。",
           "拖动左侧导航栏里的图标即可调整空间顺序。",
-          "完成一些工作后，Multica 可能会邀请你在 GitHub 上点 Star，每个账号最多两次、间隔至少 30 天。帮助菜单里始终有 GitHub 链接。自部署可以设置 DISABLE_STAR_PROMPT=true 关闭这个提示。",
+          "完成一些工作后，Multica 可能会邀请你在 GitHub 上点 Star，每个账号最多两次、间隔至少 30 天。帮助菜单里始终有 GitHub 链接。",
         ],
         improvements: [
           "导航栏变窄，按钮和标签默认为矩形，桌面端标题栏和面板边缘对齐；宽屏下 Issue 和聊天使用更宽的阅读区域。",

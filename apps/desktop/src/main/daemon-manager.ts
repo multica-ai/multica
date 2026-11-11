@@ -59,6 +59,7 @@ import {
   type AuthProbeResult,
 } from "./daemon-auth-probe";
 import { daemonSpawnEnv } from "./daemon-spawn-env";
+import { focusEnvironmentAt, type FocusEnvironmentResult } from "./environment-focus";
 
 const POLL_INTERVAL_MS = 5_000;
 const PREFS_PATH = join(homedir(), ".multica", "desktop_prefs.json");
@@ -227,6 +228,21 @@ async function fetchProfileHealth(
   return probeProfileHealth(active.name, (port) =>
     fetchHealthAtPort(port, timeoutMs),
   );
+}
+
+/** Brings forward a desktop app this profile's daemon detected. */
+async function focusEnvironment(key: unknown): Promise<FocusEnvironmentResult> {
+  if (typeof key !== "string" || key === "" || key.length > 128) {
+    return { ok: false, reason: "failed", error: "invalid environment key" };
+  }
+  const active = await ensureActiveProfile();
+  if (!active) return { ok: false, reason: "unavailable" };
+  const health = await probeProfileHealth(active.name, async (port) => {
+    const payload = await fetchHealthAtPort(port);
+    return payload ? { ...payload, port } : null;
+  });
+  if (!health || health.status !== "running") return { ok: false, reason: "unavailable" };
+  return focusEnvironmentAt(health.port, key);
 }
 
 /**
@@ -1486,6 +1502,7 @@ export function setupDaemonManager(
   });
   ipcMain.handle("daemon:get-status", () => fetchHealth());
   ipcMain.handle("daemon:probe-runtimes", () => probeLocalRuntimes());
+  ipcMain.handle("daemon:focus-environment", (_e, key: unknown) => focusEnvironment(key));
   // The host's OS name, available regardless of daemon state. The Runtimes
   // page uses it as a fallback identity for "this machine" when no
   // app-managed daemon is reporting a device name (e.g. the daemon runs

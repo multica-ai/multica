@@ -12,6 +12,7 @@ const NOTIFICATION_GROUPS = [
   "comments",
   "mentions",
   "updates",
+  "new_issues",
   "agent_activity",
 ] as const;
 
@@ -58,6 +59,12 @@ export function useSettingsSearchIndex(
         anchor: "theme",
         title: t(($) => $.appearance.theme.title),
         description: t(($) => $.appearance.theme.description),
+      },
+      {
+        tab: "appearance",
+        anchor: "theme-import",
+        title: t(($) => $.appearance.own.title),
+        description: t(($) => $.appearance.own.description),
       },
       {
         tab: "appearance",
@@ -134,6 +141,12 @@ export function useSettingsSearchIndex(
         anchor: "running-agent-reply",
         title: t(($) => $.preferences.running_agent_reply.title),
         description: t(($) => $.preferences.running_agent_reply.hint),
+      },
+      {
+        tab: "preferences",
+        anchor: "comment-images",
+        title: t(($) => $.preferences.comment_images.title),
+        description: t(($) => $.preferences.comment_images.hint),
       },
       {
         tab: "preferences",
@@ -217,12 +230,6 @@ export function useSettingsSearchIndex(
       { tab: "workspace", anchor: "delete", title: t(($) => $.workspace.delete_title) },
       { tab: "members", anchor: "invitations", title: t(($) => $.members.pending_label) },
       { tab: "members", anchor: "links", title: t(($) => $.members.share_links_label) },
-      {
-        tab: "wakeups",
-        anchor: "child-done",
-        title: t(($) => $.wakeups.child_done_title),
-        description: t(($) => $.wakeups.child_done_description),
-      },
       {
         tab: "labels",
         title: t(($) => $.page.tabs.labels),

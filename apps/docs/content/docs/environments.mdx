@@ -1,0 +1,248 @@
+---
+title: Environments
+description: See the dev servers and apps an issue's runs start, and declare them in .multica/environments.toml so members can start, stop, and read them from the issue sidebar.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+
+When an agent works on a web app, the result is often something to open: a dev server, a preview, a desktop app. The **Environments** section of the issue sidebar lists what the issue's runs have running, grouped by the machine they run on, with a link to open each one.
+
+An environment gets there in one of two ways:
+
+| | Detected | Declared |
+|---|---|---|
+| Where it comes from | The daemon finds a server listening inside a run's directory | The repository describes it in `.multica/environments.toml`, and an agent starts it with `multica env start` |
+| Setup | None | Add the file to the repository |
+| After the run ends | Keeps running as long as the process does | Supervised by the daemon until it is stopped or its TTL runs out |
+| From the sidebar | Open, copy the URL, stop | Open, copy the URL, start, stop, restart, view logs |
+
+Detection makes the section useful with no setup. Declaring is what makes an environment repeatable: every run starts it the same way, on its own ports, with a log you can read from the sidebar.
+
+## Detected servers [#detected]
+
+On macOS and Linux, the daemon looks for processes listening on a TCP port about every 30 seconds. A process shows up in the sidebar when:
+
+- its working directory is inside the directory of one of the issue's runs, and
+- it was found on two scans in a row, so test servers that live for a moment stay out.
+
+These are left out:
+
+- the AI coding tools themselves and the `multica` CLI;
+- servers running from a project's own [local directory](/project-resources), which are yours rather than a run's;
+- servers that already belong to a declared environment, which are listed once, under that environment;
+- servers from runs that are not on an issue, such as chat sessions.
+
+A desktop app (for example an Electron app) is listed once as an app instead of as a list of ports. It has no URL; from Multica Desktop on the same machine, **Switch to window** brings it forward. Its remote-debugging ports are not offered as links.
+
+A detected server keeps showing after its run ends, for as long as it keeps listening. Members can stop it from the sidebar, but the daemon does not know how it was started, so it has no log and cannot be restarted. To get those, declare it.
+
+## Declare environments [#declare]
+
+Add `.multica/environments.toml` at the repository root and commit it on the branch your runs check out. The sidebar only finds the file at the root of a checkout, or one directory below it, and skips a file with errors; `multica env start` reports what is wrong. Each `[environments.<name>]` table is one environment:
+
+```toml
+[environments.web]
+label = "Web app"
+start = "npm ci && npx vite --port $MULTICA_PORT --strictPort"
+ttl = "24h"
+```
+
+An agent then starts it from inside its checkout:
+
+```bash
+multica env start web
+```
+
+The command waits until the environment answers, then prints its URL. The environment shows in the sidebar, keeps running after the run ends, and stops when its TTL runs out.
+
+### Fields [#fields]
+
+| Field | Required | Default | Meaning |
+|---|---|---|---|
+| `start` | Yes | | Shell command that starts the environment. It runs with `/bin/sh -c` from the directory that holds `.multica/`. |
+| `label` | No | The name | Name shown in the sidebar. |
+| `url` | No | `http://localhost:$MULTICA_PORT` | Where members open it. Set `url = ""` for something with no page, such as a worker or a desktop app. |
+| `ready` | No | Same as `url` | Address checked until it answers with any status below 500 (a 404 counts). With no `ready` and no `url`, the environment counts as running as soon as `start` launches. |
+| `stop` | No | | Command run before the daemon signals the processes. Use it when `start` creates something its processes don't own, such as containers. |
+| `ttl` | No | `24h` | How long it runs before it is stopped, from `1m` to `168h`. Use `s`, `m`, or `h`; `7d` is not accepted. |
+
+The environment's name is the part after `environments.`: lowercase letters, digits, `-`, and `_`, at most 40 characters, starting with a letter or digit.
+
+### Ports and variables [#ports]
+
+Each environment gets ten free ports of its own, `MULTICA_PORT` through `MULTICA_PORT+9`. Two runs on the same machine, or two issues, never collide, so never hard-code a port.
+
+`start` and `stop` see these variables:
+
+| Variable | Value |
+|---|---|
+| `MULTICA_PORT` | The first port of the block, for example `41000` |
+| `MULTICA_ENVIRONMENT` | The environment's name |
+| `PATH` | The `PATH` of the agent that ran `multica env start`, so the repository's toolchain resolves. A start from the sidebar reuses the last one an agent used for that environment on the issue. |
+
+They also inherit the daemon's environment, except its `MULTICA_*` variables, credentials included: an environment cannot act as the run. In `url` and `ready`, only `$MULTICA_PORT` (or `${MULTICA_PORT}`) is substituted. To use a second port, compute it in the shell, for example `API_PORT=$((MULTICA_PORT + 1))`.
+
+### Keep `start` in the foreground [#foreground]
+
+`start` runs as the leader of a new process group. The environment lives as long as any process in that group does, and stopping it signals the whole group. So:
+
+- Keep the main server in the foreground. Background helpers started with `&` are fine; they stay in the group.
+- Don't detach work to something outside the group, such as `docker compose up -d`, a system service, or `setsid`. The environment would end as **Exited** at once, and stopping it would not reach that work. Run such tools in the foreground and add a `stop` command.
+- A run's checkout starts without dependencies installed. Install them in `start`; the ten minutes the daemon waits for readiness include that time.
+
+## Examples [#examples]
+
+Each example is a complete `.multica/environments.toml`. Swap `npm ci` for your package manager's install command (`pnpm install --frozen-lockfile`, `yarn install --immutable`) to match the repository.
+
+<Tabs items={["Next.js", "Vite", "Go API", "Web + API", "docker compose"]}>
+<Tab value="Next.js">
+
+```toml
+[environments.web]
+label = "Web app"
+start = "npm ci && npx next dev --port $MULTICA_PORT"
+ttl = "24h"
+```
+
+</Tab>
+<Tab value="Vite">
+
+```toml
+[environments.web]
+label = "Web app"
+start = "npm ci && npx vite --port $MULTICA_PORT --strictPort"
+ttl = "24h"
+```
+
+`--strictPort` makes Vite fail instead of quietly moving to another port, which would leave the sidebar link pointing at nothing.
+
+</Tab>
+<Tab value="Go API">
+
+```toml
+[environments.api]
+label = "API"
+start = "PORT=$MULTICA_PORT go run ./cmd/server"
+ready = "http://localhost:$MULTICA_PORT/healthz"
+ttl = "8h"
+```
+
+This assumes the server reads its port from `PORT` and serves a health check at `/healthz`; adjust both to your code.
+
+</Tab>
+<Tab value="Web + API">
+
+```toml
+[environments.app]
+label = "Web + API"
+start = """
+API_PORT=$((MULTICA_PORT + 1))
+(cd api && PORT=$API_PORT go run .) &
+cd web && npm ci && VITE_API_URL=http://localhost:$API_PORT npx vite --port $MULTICA_PORT --strictPort
+"""
+ttl = "24h"
+```
+
+The API runs in the background on the second port of the block and the web app in the foreground on the first. Stopping the environment stops both.
+
+</Tab>
+<Tab value="docker compose">
+
+```toml
+[environments.stack]
+label = "Full stack"
+start = "docker compose -p env-$MULTICA_PORT up --build"
+stop = "docker compose -p env-$MULTICA_PORT down"
+ttl = "8h"
+```
+
+In `compose.yaml`, publish the web service on the environment's port:
+
+```yaml
+services:
+  web:
+    build: .
+    ports:
+      - "${MULTICA_PORT:-3000}:3000"
+```
+
+`up` stays in the foreground without `-d`. The containers belong to Docker, not to the environment's processes, so `stop` takes them down. `-p env-$MULTICA_PORT` gives every environment its own Compose project, so parallel runs don't share containers.
+
+</Tab>
+</Tabs>
+
+To declare more than one environment, add more tables to the same file. Each environment's processes stop with it, even when another environment from the same checkout talks to them. Servers that must keep running together, such as a web app and its API, belong in one environment, as in the Web + API example.
+
+## Start and stop from the CLI [#cli]
+
+| Command | What it does |
+|---|---|
+| `multica env start <name>` | Starts the environment from the `.multica/environments.toml` found in the current directory or a parent. Waits until it is ready, then prints its URL. If this issue already has one with that name running from the same checkout, returns it unchanged. |
+| `multica env start <name> --wait=false` | Returns as soon as it has started. |
+| `multica env list` | Lists this issue's environments on this machine, with their state, URL, and log path. |
+| `multica env stop <name>` | Stops this issue's running environment with that name on this machine: runs the `stop` command if there is one, then sends `SIGTERM` to the remaining processes, and `SIGKILL` after 10 seconds. If several are running under that name, it stops one of them; to stop a particular one, use the sidebar. |
+
+All three accept `--output json`. `multica environment` is the long form of `multica env`.
+
+<Callout type="info">
+These commands use the running task's credential, so they **only work inside an agent run**. Running them in your own terminal fails with `MULTICA_DAEMON_PORT not set`. To start or stop an environment yourself, use the sidebar.
+</Callout>
+
+If the start command exits before it is ready, `multica env start` fails and prints the last lines of its log. If it is still not answering after 10 minutes, the command returns, the environment stays **Starting**, and the reason (such as "not answering at http://localhost:41000") is shown with it.
+
+Environments belong to the issue, not to a single run: a later run on the same issue can list and stop what an earlier one started. Starting a name again reuses the running environment only when it runs from the same checkout on this machine. A run with a different checkout starts a second instance under the same name, on its own ports, so check `multica env list` before starting one.
+
+## Manage environments in the sidebar [#sidebar]
+
+Each environment shows its state, when it started or ended, when it expires, and who started it. **Open** opens its URL and **Copy URL** copies it. Environments that ended are folded under "N ended".
+
+- **Start**: click **+** next to **Environments**. The menu lists the environments the latest run on each machine declared, and starts the one you pick in that run's code. If the issue has not run yet or that code has been cleaned up, it offers to ask an agent instead: the agent gets the code ready and runs `multica env start`, or works out how to start the project if it declares nothing.
+- **Stop, restart, view logs**: open an environment's **More actions** menu. **Restart** reads the declaration in the checkout again, so the checkout and its `.multica/environments.toml` must still exist. A detected server offers only **Stop**, after a confirmation.
+
+Starting, stopping, and restarting require a workspace member who can access the issue and use that machine's runtime (see [Daemon and runtimes](/daemon-runtimes)). The machine must be online, and its Multica must be recent enough to support environment controls; otherwise the buttons explain what is missing. Reading logs only requires access to the issue.
+
+### Logs [#logs]
+
+**View logs** shows the last 500 lines of a declared environment's output, up to 256 KiB. While the environment runs, the view follows new output about every five seconds; you can pause following, refresh, filter, wrap lines, and copy.
+
+When an environment crashes, its last two lines of output are saved with it, so the sidebar can show why it exited even after the machine goes offline. A fresh read needs the machine online.
+
+The complete log stays on the machine, under `<workspaces root>/.environments/v1/`, and is kept for seven days after the environment ends. `multica env start` and `multica env list` print its path.
+
+<Callout type="warning">
+Anyone with access to the issue can read an environment's logs. Multica redacts recognizable secrets from the lines it uploads and deletes log reads after ten minutes, but don't rely on that: keep credentials out of your servers' output.
+</Callout>
+
+## States [#states]
+
+| State | Meaning |
+|---|---|
+| Starting | Started; waiting for its `ready` address to answer. |
+| Running | Ready, or listening (for a detected server). |
+| Exited | Its processes ended on their own, for example after a crash. The exit code and last lines of output are shown. |
+| Stopped | Stopped by an agent, a member, or its TTL ("Stopped when it expired"). |
+| Not responding | The machine running it has not reported it for three minutes: the daemon stopped, or the machine is asleep or offline. It shows its real state again once the daemon reports in. |
+
+While the daemon is down, it does not supervise anything; environments whose processes are still alive are picked up again when it restarts. A run directory with a running environment is not removed by the daemon's workspace cleanup until the environment stops.
+
+## Let an agent write the file [#agent]
+
+Agents know the format: Multica's built-in platform skill, which every agent receives, documents `.multica/environments.toml` and how to verify one. Ask in an issue, for example:
+
+> Add a `.multica/environments.toml` so this repository's web app can be started with `multica env start`. Start it once to check it works, then open a PR.
+
+The agent reads how the project starts, writes the file with ports taken from `MULTICA_PORT`, starts the environment to confirm it answers, and ships the file like any other change. Once it is merged, every later run can start the environment, and so can members from the sidebar.
+
+## Known limitations [#limitations]
+
+- **macOS and Linux only.** On Windows, servers are not detected and `multica env start` reports that environments are not supported yet.
+- **A localhost URL opens only on the machine running it.** When the environment runs on another machine, such as a build server or a teammate's computer, the sidebar says so; open it on that machine, or forward the port yourself.
+- **Daemon restarts under systemd.** On Linux with [start at login](/daemon-runtimes#autostart), restarting or updating the daemon also stops its declared environments. Start them again afterwards.
+- **One machine per environment.** An environment runs where the run that started it ran; it does not move with the issue.
+
+## Next steps
+
+- [Daemon and runtimes](/daemon-runtimes) — the daemon that detects and supervises environments.
+- [Using the CLI](/cli#environments) — the `multica env` commands among the rest of the CLI.
+- [Runs](/tasks) — where a run's directory comes from.

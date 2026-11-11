@@ -138,6 +138,38 @@ func (q *Queries) GetIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype
 	return project_id, err
 }
 
+const listAutopilotRunProjectIDs = `-- name: ListAutopilotRunProjectIDs :many
+SELECT r.id, a.project_id
+FROM autopilot_run r
+JOIN autopilot a ON a.id = r.autopilot_id
+WHERE r.id = ANY($1::uuid[])
+`
+
+type ListAutopilotRunProjectIDsRow struct {
+	ID        pgtype.UUID `json:"id"`
+	ProjectID pgtype.UUID `json:"project_id"`
+}
+
+func (q *Queries) ListAutopilotRunProjectIDs(ctx context.Context, ids []pgtype.UUID) ([]ListAutopilotRunProjectIDsRow, error) {
+	rows, err := q.db.Query(ctx, listAutopilotRunProjectIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAutopilotRunProjectIDsRow{}
+	for rows.Next() {
+		var i ListAutopilotRunProjectIDsRow
+		if err := rows.Scan(&i.ID, &i.ProjectID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listHiddenProjectIDsForUser = `-- name: ListHiddenProjectIDsForUser :many
 SELECT p.id FROM project p
 WHERE p.workspace_id = $1

@@ -468,7 +468,7 @@ describe("IssueActionsDropdown", () => {
 
     fireEvent.click(screen.getByTestId("trigger"));
     await waitFor(() => {
-      expect(listTasksByIssueMock).toHaveBeenCalledWith("issue-1");
+      expect(listTasksByIssueMock).toHaveBeenCalledWith("issue-1", false, { view: "timeline" });
     });
     fireEvent.click(await screen.findByText("Copy local workdir path"));
 

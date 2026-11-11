@@ -190,6 +190,7 @@ Les limites de débit d'authentification nécessitent `REDIS_URL` ; sans cette v
 | Lark | `MULTICA_LARK_SECRET_KEY` | Clé de chiffrement des identifiants de 32 octets, encodée en Base64 |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | Clé de chiffrement des jetons de 32 octets, encodée en Base64 |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | Clé de chiffrement du jeton du bot de 32 octets, encodée en Base64 |
+| Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | Étapes d'outils affichées dans la réponse diffusée : `auto` (par défaut : détails en conversation privée, type de travail dans les groupes), `off`, `summary` ou `detail` |
 | Composio | `COMPOSIO_API_KEY` | Active les connexions d'outils Composio |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | URL de l'API de rappel ; peut se rabattre sur `MULTICA_PUBLIC_URL` |
 | Composio | `COMPOSIO_STATE_SECRET` | Secret de signature de l'état OAuth ; peut être dérivé de `JWT_SECRET` |
@@ -199,6 +200,8 @@ Les limites de débit d'authentification nécessitent `REDIS_URL` ; sans cette v
 | Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | Origine navigateur dédiée, sans cookies, routée vers ce backend ; doit différer des origines de l'application et de l'API, et préserver `Host` |
 | Plugins | `MULTICA_PLUGIN_API_URL` | URL de base complète et versionnée de la Plugin Public API, comme `https://plugin-api.example.com/v1` ; se rabat sur `MULTICA_PUBLIC_URL` + `/v1` |
 | Plugins | `MULTICA_PLUGIN_DIR` | Répertoire absolu facultatif utilisé pour publier des bundles de plugins locaux pendant le développement |
+| Boutique de thèmes | `MULTICA_THEME_STORE` | Activée par défaut, elle lit le registre officiel [multica-themes](https://github.com/multica-ai/multica-themes) ; `off` désactive la boutique de thèmes communautaires et toute requête au registre |
+| Boutique de thèmes | `MULTICA_THEME_REGISTRY_URL` | L'`index.json` d'un autre registre, par exemple un fork de l'officiel ; voir [Thèmes et apparence](/themes#auto-hébergement) |
 
 Sans `GITHUB_APP_ID` et la clé privée, les PR sont toujours liées, reflétées et changent normalement le statut de la tâche lors du merge, mais les cartes n'affichent ni statut CI ni possibilité de fusion, et l'entrée de dépôt « Choisir depuis GitHub » est désactivée.
 

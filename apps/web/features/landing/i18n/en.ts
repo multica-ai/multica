@@ -326,7 +326,7 @@ export function createEnDict(): LandingDict {
           "Rename a project from its menu in the project list or on the project page.",
           "Edit a saved view from its menu in the sidebar.",
           "Drag the icons in the left navigation bar to reorder spaces.",
-          "After you finish some work, Multica may ask you to star it on GitHub, at most twice per account and at least 30 days apart. The Help menu always has a GitHub link. Self-hosted deployments can turn the prompt off with DISABLE_STAR_PROMPT=true.",
+          "After you finish some work, Multica may ask you to star it on GitHub, at most twice per account and at least 30 days apart. The Help menu always has a GitHub link.",
         ],
         improvements: [
           "The navigation bar is narrower, buttons and labels are rectangular by default, the desktop title bar and panel edges line up, and on wide screens Issues and chat use a wider reading column.",

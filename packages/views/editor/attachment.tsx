@@ -328,8 +328,8 @@ export function Attachment({
   const shareUrl = isObjectURL(mediaUrl) ? state.url : mediaUrl;
 
   // Identity this attachment has in the surrounding surface's sequence: the
-  // attachment id once the URL resolves to a record, otherwise the URL exactly
-  // as written in the body — the same pair `collectAttachmentSequence` keys on.
+  // attachment id once the URL resolves to a record, otherwise the URL as the
+  // renderer received it — the same pair `collectAttachmentSequence` keys on.
   const sequenceKey =
     state.attachmentId ?? (attachment.kind === "url" ? attachment.url : "");
 

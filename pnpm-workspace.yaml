@@ -26,6 +26,7 @@ catalog:
   class-variance-authority: ^0.7.1
   clsx: ^2.1.1
   cmdk: ^1.1.1
+  entities: ^6.0.1
   eslint-plugin-i18next: ^6.1.4
   fumadocs-core: ^16.17.8
   fumadocs-mdx: ^15.4.10

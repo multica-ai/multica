@@ -36,6 +36,7 @@ import { useCommentUploads } from "./use-comment-uploads";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { api, dispatchReasonCode, errorCode } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
+import { VirtualThreadRow } from "./virtual-thread-row";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { AppCallChips } from "./app-call-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
@@ -113,6 +114,7 @@ function StickyHeaderShell({
 
 interface CommentCardProps {
   issueId: string;
+  replyScrollParent?: HTMLElement | null;
   runs?: CommentRun[];
   runViewState?: InlineCommentRunState;
   enteringRunIds?: ReadonlySet<string>;
@@ -245,15 +247,16 @@ export function AttachmentList({
     );
   };
 
-  // Every image shows at its full size, one under another, so it reads
-  // without opening (MUL-7736). Every other file — HTML too: an uploaded file
-  // is a deliverable to open, not part of the text — is a card in a grid, not
-  // a full-width row each.
+  // Images stack at full size so they read without opening (MUL-7736), or —
+  // under the timeline's "thumbnails" image preference — sit in a row of
+  // thumbnails (editor/styles/attachment.css, MUL-9037). Every other file —
+  // HTML too: an uploaded file is a deliverable to open, not part of the
+  // text — is a card in a grid, not a full-width row each.
   return (
     <AttachmentDownloadProvider attachments={attachments}>
       <div className={cn("flex flex-col gap-2", className)}>
         {images.length > 0 && (
-          <div className="flex flex-col items-start gap-2">{images.map(render)}</div>
+          <div data-comment-image-list className="flex flex-col items-start gap-2">{images.map(render)}</div>
         )}
         {files.length > 0 && (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(min(15rem,100%),1fr))] gap-2">
@@ -956,8 +959,9 @@ function ReplyToQuote({ entry, onJump }: { entry: TimelineEntry; onJump?: (comme
 }
 
 /** A run without a persisted reply still belongs to the agent, never its trigger author. */
-export function AgentRunComment({ run, standalone = false, commentProps, entering = false, replyTo, highlightedId }: {
+export function AgentRunComment({ run, standalone = false, commentProps, entering = false, replyTo, highlightedId, managedAnchor = false }: {
   run: CommentRun;
+  managedAnchor?: boolean;
   standalone?: boolean;
   entering?: boolean;
   commentProps?: CommentCardProps;
@@ -987,7 +991,7 @@ export function AgentRunComment({ run, standalone = false, commentProps, enterin
   return (
     <div ref={motionRef} data-run-slot-id={run.task.id}
       data-run-comment-id={!reply ? run.task.id : undefined}
-      id={!standalone ? `comment-${slotEntry?.id ?? run.task.id}` : undefined}
+      id={!standalone && !managedAnchor ? `comment-${slotEntry?.id ?? run.task.id}` : undefined}
       className={cn("transition-colors duration-700", standalone ? !reply && "rounded-xl border" : "border-t border-border/50", !reply && "py-1.5",
         highlighted ? highlightedCommentBackgroundClass : standalone && !reply && "bg-card")}>
       {commentProps && reply ? standalone ? (
@@ -1017,6 +1021,7 @@ export function AgentRunComment({ run, standalone = false, commentProps, enterin
 
 function CommentCardImpl({
   issueId,
+  replyScrollParent,
   runs = EMPTY_COMMENT_RUNS,
   runViewState,
   enteringRunIds,
@@ -1094,17 +1099,17 @@ function CommentCardImpl({
 
   // A run slot renders the run's latest comment, or its activity until it
   // posts one.
-  const renderThreadRow = (row: TimelineEntry | ThreadRunSlot) => "run" in row ? (
-    <AgentRunComment key={row.run.task.id} run={row.run} entering={enteringRunIds?.has(row.run.task.id)}
+  const renderThreadRow = (row: TimelineEntry | ThreadRunSlot, managedAnchor = false) => "run" in row ? (
+    <AgentRunComment key={row.run.task.id} run={row.run} managedAnchor={managedAnchor} entering={enteringRunIds?.has(row.run.task.id)}
       highlightedId={highlightedCommentId}
       replyTo={row.replyTo && <ReplyToQuote entry={row.replyTo} onJump={onJumpToComment} />}
       commentProps={row.reply ? {
         issueId, entry: row.reply, replies: [], currentUserId, canModerate, onReply, onEdit, onDelete,
         onToggleReaction, onCreateSubIssue, onResolveToggle, onCopyLink, highlightedCommentId, enteringRunIds,
       } : undefined} />
-  ) : renderReply(row);
+  ) : renderReply(row, managedAnchor);
 
-  const renderReply = (reply: TimelineEntry) => (
+  const renderReply = (reply: TimelineEntry, managedAnchor: boolean) => (
     <Fragment key={reply.id}>
       {/* A tombstone keeps its place in the thread but contributes no row
           of its own. */}
@@ -1112,7 +1117,7 @@ function CommentCardImpl({
         <div
           data-mc="comment-reply"
           data-author-type={reply.actor_type}
-          id={`comment-${reply.id}`}
+          id={managedAnchor ? undefined : `comment-${reply.id}`}
           className={cn(
             "border-t border-border/50 transition-colors duration-700",
             highlightedCommentId === reply.id && highlightedCommentBackgroundClass,
@@ -1169,6 +1174,18 @@ function CommentCardImpl({
     ? orderThreadWithRuns(entry, resolutionReply ? [resolutionReply] : [], runs.filter((run) => !run.hasReply
       && (run.anchorCommentId === entry.id || run.anchorCommentId === replyResolutionId)))
     : orderThreadWithRuns(entry, allNestedReplies, runs);
+
+  const renderRows = () => threadRows.map((row) => {
+    if (!replyScrollParent || threadRows.length < 30) return renderThreadRow(row);
+    if (!("run" in row) && isDeletedComment(row)) return null;
+    const anchorId = "run" in row
+      ? (row.reply && !isDeletedComment(row.reply) ? row.reply.id : row.run.task.id)
+      : row.id;
+    return <VirtualThreadRow key={anchorId} id={`comment-${anchorId}`}
+      taskId={"run" in row ? row.run.task.id : undefined} scrollParent={replyScrollParent}>
+      {() => renderThreadRow(row, true)}
+    </VirtualThreadRow>;
+  });
 
   // Pin the root comment's header to the timeline's scroll parent while the
   // thread is open, so a LONG root comment keeps its author + actions visible
@@ -1511,7 +1528,7 @@ function CommentCardImpl({
                   />
                 </div>
               )}
-              {threadRows.map(renderThreadRow)}
+              {renderRows()}
             </>
           ) : (
             <>
@@ -1529,7 +1546,7 @@ function CommentCardImpl({
                 </button>
               )}
               {/* Replies — chronological; the resolution keeps its place with a badge */}
-              {threadRows.map(renderThreadRow)}
+              {renderRows()}
 
               {/* Reply input */}
               <div className="border-t border-border/50 px-4 max-md:px-3 py-2.5">
