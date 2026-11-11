@@ -11,7 +11,7 @@ import { clearWorkspaceStorage } from "../platform/storage-cleanup";
 import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
-import { isSidebarTableRequest, type SidebarIssuesRequest } from "../issues/sidebar-list";
+import type { SidebarIssuesRequest } from "../issues/sidebar-list";
 import { refreshIssueUnread } from "../issues/unread";
 import { refreshSubscribedIssues, subscribedIssueKeys } from "../issues/subscribed";
 import { projectKeys } from "../projects/queries";
@@ -744,7 +744,7 @@ async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promis
       queryKey: issueKeys.sidebarAll(wsId),
       predicate: ({ queryKey }) => {
         const request = queryKey[4] as SidebarIssuesRequest | undefined;
-        return !!request && isSidebarTableRequest(request) && request.table.filters.working_only === true;
+        return request?.table.filters.working_only === true;
       },
     },
   ];
@@ -1430,6 +1430,7 @@ export function useRealtimeSync(
         hasOnboardedRef.current,
       );
       if (typeof window !== "undefined") {
+        // eslint-disable-next-line no-restricted-syntax -- in-app path, not an external URL; core has no router to hand it to
         window.location.assign(target);
       }
     };

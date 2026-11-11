@@ -14,7 +14,9 @@
  *      turns it into HTML, which mobile can't render natively. Rewriting
  *      to a normal link with a 📎 emoji makes it a tappable link that
  *      `Linking.openURL` opens in the system viewer (Safari for PDFs,
- *      QuickLook for docs, share sheet for arbitrary files).
+ *      QuickLook for docs, share sheet for arbitrary files). An image card
+ *      becomes `![name](url)` instead, as web renders it inline, so it is
+ *      tappable and part of the screen's lightbox sequence.
  *
  * NOTE: Web's preprocess also has a third pass that detects bare CDN
  * URLs as legacy file links. We skip that because mobile doesn't bootstrap
@@ -22,6 +24,12 @@
  * hyperlinks — same tap behavior, just no 📎 prefix. Acceptable degradation.
  */
 import { preprocessMentionShortcodes } from "@multica/core/markdown";
+import {
+  isImageAttachment,
+  matchAttachmentByURL,
+} from "@multica/core/attachments/image-sequence";
+import type { Attachment } from "@multica/core/types";
+import { fromMarkdown } from "mdast-util-from-markdown";
 
 // File-card line matcher, kept in sync with web's parser in
 // `packages/ui/markdown/file-cards.ts` (NEW_FILE_CARD_RE + FILE_CARD_URL_PATTERN):
@@ -57,13 +65,36 @@ function escapeLinkLabel(name: string): string {
   return name.replace(/([\\[\]])/g, "\\$1");
 }
 
-function preprocessFileCards(input: string): string {
+// Same candidate `collectImageSequence` builds for an inline file card, so the
+// lightbox counts exactly the cards this renders as images. Core only reads
+// cards whose URL has no whitespace.
+function isImageFileCard(
+  name: string,
+  url: string,
+  attachments: readonly Attachment[] | undefined,
+): boolean {
+  if (/\s/.test(url)) return false;
+  const record = matchAttachmentByURL(url, attachments);
+  return isImageAttachment(record?.content_type ?? "", record?.filename || name || url);
+}
+
+// An angle-bracket destination with every metacharacter escaped decodes back
+// to the card's raw URL, which is what the sequence matches against.
+function imageDestination(url: string): string {
+  return `<${url.replace(/[\\<>&]/g, "\\$&")}>`;
+}
+
+function preprocessFileCards(input: string, attachments: readonly Attachment[] | undefined): string {
   return input
     .split("\n")
     .map((line) => {
       const m = line.trim().match(FILE_LINE_RE);
       if (!m) return line;
-      const label = escapeLinkLabel(unescapeFileLabel(m[1]!));
+      const name = unescapeFileLabel(m[1]!);
+      const label = escapeLinkLabel(name);
+      if (isImageFileCard(name, m[2]!, attachments)) {
+        return `![${label}](${imageDestination(m[2]!)})`;
+      }
       return `[📎 ${label}](${m[2]})`;
     })
     .join("\n");
@@ -94,6 +125,68 @@ function preprocessTaskListStrikethrough(input: string): string {
   });
 }
 
+// CommonMark raw-HTML attribute, kept in sync with web's `findHtmlTagRanges`
+// in `packages/ui/markdown/linkify.ts`. Unquoted values exclude whitespace, so
+// attribute boundaries are unambiguous and matching stays linear.
+const HTML_ATTRIBUTE = String.raw`\s+[A-Za-z_:][\w.:-]*(?:\s*=\s*(?:[^\s"'=<>\x60]+|'[^']*'|"[^"]*"))?`;
+const HTML_ATTRIBUTE_RE =
+  /\s+([A-Za-z_:][\w.:-]*)(?:\s*=\s*(?:([^\s"'=<>\x60]+)|'([^']*)'|"([^"]*)"))?/g;
+const HTML_RE = new RegExp(
+  [
+    String.raw`<!--[\s\S]*?-->`,
+    String.raw`<br\s*\/?>`,
+    String.raw`<img(?:${HTML_ATTRIBUTE})*\s*\/?>`,
+    // Angle-bracket URL destinations are not HTML tags. Closing tags have
+    // no attributes, so </chart v2.png> must also survive for the lexer.
+    String.raw`<(?:\/[a-z][a-z\d:-]*\s*|[a-z][a-z\d:-]*(?:\s[^>]*|\/?))>`,
+  ].join("|"),
+  "gi",
+);
+
+function htmlImageToMarkdown(tag: string): string {
+  const attrs = new Map<string, string>();
+  for (const m of tag.matchAll(HTML_ATTRIBUTE_RE)) {
+    const name = m[1]!.toLowerCase();
+    if (!attrs.has(name)) attrs.set(name, m[2] ?? m[3] ?? m[4] ?? "");
+  }
+  const src = attrs.get("src")?.trim() ?? "";
+  if (!/^https?:\/\/[^\s<>]+$/i.test(src)) return "";
+  const alt = (attrs.get("alt") ?? "").replace(/\s+/g, " ").trim();
+  // A bare destination breaks on unbalanced parens; the angle form doesn't.
+  const destination = /[()]/.test(src) ? `<${src}>` : src;
+  return `![${escapeLinkLabel(alt)}](${destination})`;
+}
+
+function stripHtmlOutsideCode(input: string): string {
+  return input.replace(HTML_RE, (tag) => {
+    if (tag.startsWith("<!--")) return "";
+    if (/^<br[\s/>]/i.test(tag)) return "  \n";
+    if (/^<img[\s/>]/i.test(tag)) return htmlImageToMarkdown(tag);
+    return "";
+  });
+}
+
+// Code ranges come from the same CommonMark parser split-markdown uses, so a
+// backtick inside raw HTML or an HTML block is not mistaken for a code span.
+function findCodeRanges(input: string): [number, number][] {
+  if (!/`|~{3}| {4}|\t/.test(input)) return [];
+  const tree = fromMarkdown(input);
+  type Node = typeof tree | (typeof tree.children)[number];
+  const pending: Node[] = [tree];
+  const ranges: [number, number][] = [];
+  while (pending.length) {
+    const node = pending.pop()!;
+    if (node.type === "code" || node.type === "inlineCode") {
+      const start = node.position?.start.offset;
+      const end = node.position?.end.offset;
+      if (start !== undefined && end !== undefined) ranges.push([start, end]);
+    } else if ("children" in node) {
+      for (const child of node.children) pending.push(child);
+    }
+  }
+  return ranges.sort((a, b) => a[0] - b[0]);
+}
+
 /**
  * Strip embedded HTML before marked sees it. Mobile cannot do what web does
  * (rehype-raw + sanitize → render real <br> / <sub> / <details>) — RN has
@@ -104,26 +197,36 @@ function preprocessTaskListStrikethrough(input: string): string {
  *     the canonical CommonMark hard-break syntax). md4c respects it as a
  *     hard line break inside a paragraph; bare `\n` would be treated as a
  *     space (CommonMark default), losing intentional `<br>` semantics.
+ *   - `<img src="http(s)://…" alt="…">` → `![alt](src)`, so agent- and
+ *     GitHub-authored images render like Markdown images. Any other `src`
+ *     (missing, relative, `data:`, `javascript:`) is dropped.
  *   - HTML comments `<!-- ... -->` → removed entirely.
  *   - Every other tag → strip the tag, keep the inner text. So
  *     `<sub>2</sub>` becomes `2`. Loses formatting but keeps content; far
  *     better than showing raw HTML.
  *
- * Does not parse — pure regex. Cannot handle nested tags with attributes
- * containing `>`, but those don't appear in our editor output.
+ * Code spans and code blocks are left literal. Does not parse HTML — pure
+ * regex. Cannot handle nested tags with attributes containing `>`, but those
+ * don't appear in our editor output.
  */
-function stripHtml(input: string): string {
-  return input
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<br\s*\/?>/gi, "  \n")
-    // Angle-bracket URL destinations are not HTML tags. Closing tags have
-    // no attributes, so </chart v2.png> must also survive for the lexer.
-    .replace(/<(?:\/[a-z][a-z\d:-]*\s*|[a-z][a-z\d:-]*(?:\s[^>]*|\/?))>/gi, "");
+export function stripHtml(input: string): string {
+  if (!input.includes("<")) return input;
+  let out = "";
+  let cursor = 0;
+  for (const [start, end] of findCodeRanges(input)) {
+    if (start < cursor) continue;
+    out += stripHtmlOutsideCode(input.slice(cursor, start)) + input.slice(start, end);
+    cursor = end;
+  }
+  return out + stripHtmlOutsideCode(input.slice(cursor));
 }
 
-export function preprocessMobileMarkdown(input: string): string {
+export function preprocessMobileMarkdown(
+  input: string,
+  attachments?: readonly Attachment[],
+): string {
   if (!input) return "";
   return preprocessTaskListStrikethrough(
-    preprocessFileCards(preprocessMentionShortcodes(stripHtml(input))),
+    preprocessFileCards(preprocessMentionShortcodes(stripHtml(input)), attachments),
   );
 }

@@ -236,10 +236,18 @@ export type {
   GitHubConnectResponse,
 } from "./github";
 export type {
+  DeclaredEnvironment,
   IssueEnvironment,
+  IssueEnvironmentAction,
+  IssueEnvironmentActionRecord,
+  IssueEnvironmentActionStatus,
+  IssueEnvironmentCommand,
+  IssueEnvironmentConfig,
   IssueEnvironmentSource,
+  IssueEnvironmentKind,
   IssueEnvironmentState,
   IssueEnvironmentsResponse,
+  StartIssueEnvironmentRequest,
 } from "./environment";
 export type {
   VCSProvider,

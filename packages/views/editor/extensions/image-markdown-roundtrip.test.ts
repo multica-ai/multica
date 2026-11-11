@@ -3,6 +3,7 @@ import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "@tiptap/markdown";
 import { ImageExtension } from "./index";
+import { preprocessMarkdown } from "../utils/preprocess";
 
 const IMAGE_URL = "https://cdn.example.com/screen.png";
 const IMAGE_MD = `![screen](${IMAGE_URL})`;
@@ -84,5 +85,19 @@ describe("ImageExtension markdown round-trip", () => {
       `<img src="${IMAGE_URL}" alt="screen"><p>after</p>`,
     );
     expect(findParagraphTexts(reparsed)).toEqual(["after"]);
+  });
+
+  it("keeps the src of an HTML <img> through preprocessing and save", () => {
+    const editor = makeEditor();
+    const input = `Text\n\n<img src="${IMAGE_URL}" width="400" />\n\nEnd`;
+    editor.commands.setContent(preprocessMarkdown(input, { cdnDomain: "" }), {
+      contentType: "markdown",
+    });
+
+    const image = editor.getJSON().content?.find((n) => n.type === "image");
+    expect(image?.attrs).toMatchObject({ src: IMAGE_URL, width: 400 });
+    expect(editor.getMarkdown().trimEnd()).toBe(
+      `Text\n\n![](${IMAGE_URL})\n\nEnd`,
+    );
   });
 });

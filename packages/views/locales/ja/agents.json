@@ -191,7 +191,6 @@
     "rename_required": "名前は必須です",
     "edit_description_title": "説明を編集",
     "description_placeholder": "このエージェントは何をしますか？",
-    "save": "保存",
     "cancel": "キャンセル"
   },
   "overview": {
@@ -214,12 +213,7 @@
     "edit_access_aria": "アクセス: {{value}}。アクセスを変更",
     "all_settings": "すべての設定"
   },
-  "skill_attach": {
-    "trigger_aria": "ワークスペースのスキルを追加",
-    "trigger_label": "追加"
-  },
   "pickers": {
-    "concurrency_tooltip": "同時実行数 · 最大 {{value}} 件",
     "concurrency_range": "最大同時実行数（{{min}}–{{max}}）",
     "runtime_none": "ランタイムなし",
     "runtime_tooltip": "ランタイム · {{name}} · {{status}}",
@@ -290,23 +284,17 @@
     "discard_confirm": "変更を破棄"
   },
   "create_dialog": {
-    "title_create": "エージェントを作成",
-    "title_duplicate": "エージェントを複製",
-    "description_duplicate": "\"{{name}}\" を基に新しいエージェントを作成します。指示、環境変数、スキルがコピーされます。",
     "name_label": "名前",
     "name_placeholder": "例: ディープリサーチエージェント",
     "description_label": "説明",
     "description_placeholder": "このエージェントは何をしますか？",
-    "visibility_label": "公開範囲",
     "access": {
-      "label": "アクセス",
       "private_title": "プライベート",
       "private_desc": "このエージェントを実行できるのはあなただけです",
       "public_title": "公開",
       "public_desc": "このエージェントを実行できる人を選択します",
       "public_workspace_option": "ワークスペース全員",
       "public_members_group": "特定のメンバー",
-      "public_members_empty": "選択できるワークスペースメンバーがいません",
       "public_targets_empty_hint": "以下から少なくとも1つを選択してください。そうでないとエージェントはプライベートのままになります。"
     },
     "runtime_label": "ランタイム",
@@ -321,17 +309,10 @@
     "runtime_no_results": "一致するマシンがありません",
     "runtime_group_online": "{{online}}/{{total}} オンライン",
     "duplicate_copy_suffix": " (コピー)",
-    "create": "作成",
-    "creating": "作成中...",
-    "cancel": "キャンセル",
-    "create_failed_toast": "エージェントを作成できませんでした",
     "skill_attach_failed_toast": "エージェントは作成されましたが、スキルを追加できませんでした: {{error}}",
     "squad_join_failed_toast": "エージェント \"{{name}}\" は作成されましたが、スクワッドに参加できませんでした: {{error}}。メンバーから手動で追加できます。",
     "instructions": {
       "label": "指示",
-      "placeholder_blank": "クリックして指示を作成...",
-      "placeholder_duplicate": "クリックして複製された指示を表示または編集",
-      "collapse": "折りたたむ",
       "editor_placeholder": "このエージェントが何をすべきか、何に集中すべきか、何を避けるべきかを記述してください..."
     },
     "skills_section": {
@@ -873,14 +854,6 @@
       "manual": "ユーザーがキャンセルしました",
       "user_cancelled": "ユーザーがキャンセルしました"
     }
-  },
-  "runtime_filter": {
-    "all": "すべてのランタイム",
-    "section_local": "ローカル",
-    "section_remote": "リモート",
-    "section_cloud": "クラウド",
-    "agent_count_other": "エージェント {{count}} 件",
-    "empty": "まだマシンがありません"
   },
   "last_active": {
     "today": "今日",
