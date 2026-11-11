@@ -96,18 +96,19 @@ func normalizeIssuePrefix(raw string) (string, bool) {
 const issuePrefixFormatError = "issue prefix must be 1-10 uppercase letters or digits"
 
 type WorkspaceResponse struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Slug        string  `json:"slug"`
-	Description *string `json:"description"`
-	Context     *string `json:"context"`
-	Settings    any     `json:"settings"`
-	Repos       any     `json:"repos"`
-	IssuePrefix string  `json:"issue_prefix"`
-	AvatarURL   *string `json:"avatar_url"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
-	PinnedAt    *string `json:"pinned_at,omitempty"`
+	ID                string  `json:"id"`
+	Name              string  `json:"name"`
+	Slug              string  `json:"slug"`
+	Description       *string `json:"description"`
+	Context           *string `json:"context"`
+	Settings          any     `json:"settings"`
+	Repos             any     `json:"repos"`
+	IssuePrefix       string  `json:"issue_prefix"`
+	AvatarURL         *string `json:"avatar_url"`
+	CreatedAt         string  `json:"created_at"`
+	UpdatedAt         string  `json:"updated_at"`
+	PinnedAt          *string `json:"pinned_at,omitempty"`
+	WorkspacePosition *int32  `json:"workspace_position,omitempty"`
 }
 
 func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
@@ -179,6 +180,10 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 			IssueCounter: ws.IssueCounter, AvatarUrl: ws.AvatarUrl,
 			AttributionFailClosed: ws.AttributionFailClosed,
 		})
+		if ws.WorkspacePosition.Valid {
+			position := ws.WorkspacePosition.Int32
+			resp[i].WorkspacePosition = &position
+		}
 		if ws.PinnedAt.Valid {
 			pinnedAt := timestampToString(ws.PinnedAt)
 			resp[i].PinnedAt = &pinnedAt

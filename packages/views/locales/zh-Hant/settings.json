@@ -140,6 +140,16 @@
     "toast_saved": "更改已儲存"
   },
   "preferences": {
+    "workspaces": {
+      "title": "工作區",
+      "hint": "在群組內拖曳排序，釘選或取消釘選可切換群組。",
+      "pinned": "已釘選",
+      "other": "其他工作區",
+      "drag_handle": "調整 {{name}} 的順序",
+      "save_failed": "無法儲存工作區偏好，請重新整理後再試。",
+      "loading": "正在載入工作區...",
+      "load_failed": "無法載入工作區。"
+    },
     "language": {
       "title": "語言",
       "english": "English",

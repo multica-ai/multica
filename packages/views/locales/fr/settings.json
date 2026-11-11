@@ -141,6 +141,16 @@
     "toast_saved": "Modifications enregistrées"
   },
   "preferences": {
+    "workspaces": {
+      "title": "Espaces de travail",
+      "hint": "Faites glisser les éléments au sein de chaque groupe. Épinglez-les ou détachez-les pour changer de groupe.",
+      "pinned": "Épinglés",
+      "other": "Autres espaces de travail",
+      "drag_handle": "Réorganiser {{name}}",
+      "save_failed": "Impossible d’enregistrer les préférences. Rechargez la page et réessayez.",
+      "loading": "Chargement des espaces de travail...",
+      "load_failed": "Impossible de charger les espaces de travail."
+    },
     "language": {
       "title": "Langue",
       "english": "English",

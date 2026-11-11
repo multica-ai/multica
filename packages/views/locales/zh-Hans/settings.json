@@ -140,6 +140,16 @@
     "toast_saved": "更改已保存"
   },
   "preferences": {
+    "workspaces": {
+      "title": "工作区",
+      "hint": "在组内拖动排序，置顶或取消置顶可切换分组。",
+      "pinned": "已置顶",
+      "other": "其他工作区",
+      "drag_handle": "调整 {{name}} 的顺序",
+      "save_failed": "无法保存工作区偏好，请刷新后重试。",
+      "loading": "正在加载工作区...",
+      "load_failed": "无法加载工作区。"
+    },
     "language": {
       "title": "语言",
       "english": "English",

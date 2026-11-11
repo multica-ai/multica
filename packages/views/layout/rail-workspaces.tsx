@@ -20,6 +20,7 @@ import {
   myInvitationListOptions,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
+import { sortWorkspaces } from "@multica/core/workspace/sort-workspaces";
 import { useSetWorkspacePinned } from "@multica/core/workspace/mutations";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import {
@@ -137,7 +138,8 @@ export function RailWorkspaces() {
   const workspace = useCurrentWorkspace();
   const wsId = workspace?.id;
   const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
-  const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
+  const { data: workspaceList = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
+  const workspaces = useMemo(() => sortWorkspaces(workspaceList), [workspaceList]);
   const { data: invitations = EMPTY_INVITATIONS } = useQuery(myInvitationListOptions());
   // One cross-workspace cache entry; gated on an active workspace since the
   // endpoint resolves through the workspace-member middleware.

@@ -15,6 +15,7 @@ import {
   useDeleteWorkspace,
   useLeaveWorkspace,
   useSetWorkspacePinned,
+  useSetWorkspaceOrder,
   useUpdateWorkspaceMcpServer,
 } from "./mutations";
 
@@ -387,6 +388,27 @@ describe("useLeaveWorkspace", () => {
       await result.current.mutateAsync("ws-3");
     });
     expect(forgetLocalSearchIndex).toHaveBeenCalledWith("ws-3");
+  });
+});
+
+describe("useSetWorkspaceOrder", () => {
+  it("updates the shared cache after success and preserves it on failure", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const setWorkspaceOrder = vi.fn().mockResolvedValue(undefined);
+    setApiInstance({ setWorkspaceOrder } as unknown as ApiClient);
+    const rows = [makeWorkspace("one", "one"), makeWorkspace("two", "two")];
+    qc.setQueryData(workspaceKeys.list(), rows);
+    const { result } = renderHook(() => useSetWorkspaceOrder(), { wrapper: createWrapper(qc) });
+    await act(async () => { await result.current.mutateAsync(["two", "one"]); });
+    expect(setWorkspaceOrder).toHaveBeenCalledWith(["two", "one"]);
+    const saved = qc.getQueryData<Workspace[]>(workspaceKeys.list());
+    expect(saved?.map((ws) => [ws.id, ws.workspace_position])).toEqual([["two", 0], ["one", 1]]);
+    setWorkspaceOrder.mockRejectedValueOnce(new Error("save failed"));
+    await act(async () => {
+      await expect(result.current.mutateAsync(["one", "two"])).rejects.toThrow("save failed");
+    });
+    expect(qc.getQueryData(workspaceKeys.list())).toEqual(saved);
+    qc.clear();
   });
 });
 

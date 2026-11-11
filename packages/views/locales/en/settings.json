@@ -141,6 +141,16 @@
     "toast_saved": "Changes saved"
   },
   "preferences": {
+    "workspaces": {
+      "title": "Workspaces",
+      "hint": "Drag within each group to reorder. Use pins to move between groups.",
+      "pinned": "Pinned",
+      "other": "Other workspaces",
+      "drag_handle": "Reorder {{name}}",
+      "save_failed": "Could not save workspace preferences. Reload and try again.",
+      "loading": "Loading workspaces...",
+      "load_failed": "Could not load workspaces."
+    },
     "language": {
       "title": "Language",
       "english": "English",

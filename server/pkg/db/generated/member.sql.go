@@ -14,7 +14,7 @@ import (
 const createMember = `-- name: CreateMember :one
 INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, $3)
-RETURNING id, workspace_id, user_id, role, created_at, pinned_at
+RETURNING id, workspace_id, user_id, role, created_at, pinned_at, workspace_position
 `
 
 type CreateMemberParams struct {
@@ -33,6 +33,7 @@ func (q *Queries) CreateMember(ctx context.Context, arg CreateMemberParams) (Mem
 		&i.Role,
 		&i.CreatedAt,
 		&i.PinnedAt,
+		&i.WorkspacePosition,
 	)
 	return i, err
 }
@@ -47,7 +48,7 @@ func (q *Queries) DeleteMember(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getMember = `-- name: GetMember :one
-SELECT id, workspace_id, user_id, role, created_at, pinned_at FROM member
+SELECT id, workspace_id, user_id, role, created_at, pinned_at, workspace_position FROM member
 WHERE id = $1
 `
 
@@ -61,12 +62,13 @@ func (q *Queries) GetMember(ctx context.Context, id pgtype.UUID) (Member, error)
 		&i.Role,
 		&i.CreatedAt,
 		&i.PinnedAt,
+		&i.WorkspacePosition,
 	)
 	return i, err
 }
 
 const getMemberByUserAndWorkspace = `-- name: GetMemberByUserAndWorkspace :one
-SELECT id, workspace_id, user_id, role, created_at, pinned_at FROM member
+SELECT id, workspace_id, user_id, role, created_at, pinned_at, workspace_position FROM member
 WHERE user_id = $1 AND workspace_id = $2
 `
 
@@ -85,6 +87,7 @@ func (q *Queries) GetMemberByUserAndWorkspace(ctx context.Context, arg GetMember
 		&i.Role,
 		&i.CreatedAt,
 		&i.PinnedAt,
+		&i.WorkspacePosition,
 	)
 	return i, err
 }
@@ -130,7 +133,7 @@ func (q *Queries) GetRealtimeMemberships(ctx context.Context, arg GetRealtimeMem
 }
 
 const listMembers = `-- name: ListMembers :many
-SELECT id, workspace_id, user_id, role, created_at, pinned_at FROM member
+SELECT id, workspace_id, user_id, role, created_at, pinned_at, workspace_position FROM member
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -151,6 +154,7 @@ func (q *Queries) ListMembers(ctx context.Context, workspaceID pgtype.UUID) ([]M
 			&i.Role,
 			&i.CreatedAt,
 			&i.PinnedAt,
+			&i.WorkspacePosition,
 		); err != nil {
 			return nil, err
 		}
@@ -240,7 +244,7 @@ func (q *Queries) ListWorkspaceManagerUserIDs(ctx context.Context, workspaceID p
 const updateMemberRole = `-- name: UpdateMemberRole :one
 UPDATE member SET role = $2
 WHERE id = $1
-RETURNING id, workspace_id, user_id, role, created_at, pinned_at
+RETURNING id, workspace_id, user_id, role, created_at, pinned_at, workspace_position
 `
 
 type UpdateMemberRoleParams struct {
@@ -258,6 +262,7 @@ func (q *Queries) UpdateMemberRole(ctx context.Context, arg UpdateMemberRolePara
 		&i.Role,
 		&i.CreatedAt,
 		&i.PinnedAt,
+		&i.WorkspacePosition,
 	)
 	return i, err
 }

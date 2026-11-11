@@ -48,6 +48,7 @@ import { browserTimezone, timezoneOptions } from "../../common/timezone-select";
 import { useLanguageSwitch } from "../../common/use-language-switch";
 import { SegmentedToggle } from "../../common/segmented-toggle";
 import { useT } from "../../i18n";
+import { WorkspaceOrderSection } from "./workspace-order-section";
 import { QuickChatAgentRow } from "./quick-chat-agent-row";
 import {
   SettingsCard,
@@ -78,6 +79,8 @@ export function PreferencesTab() {
           <TimezoneRow />
         </SettingsCard>
       </SettingsSection>
+
+      <WorkspaceOrderSection />
 
       <SettingsSection
         title={t(($) => $.preferences.comments_title)}
