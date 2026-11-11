@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type ReactElement, type ReactNode } from "react";
+import { useRef, useState, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
 import {
   DndContext,
   KeyboardSensor,
@@ -36,6 +36,17 @@ import { IssueSidebarStack } from "./issue-sidebar-section";
 
 const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToParentElement];
 
+/**
+ * Keyboard reordering listens for arrow keys on the document, but a Base UI
+ * dialog (the mobile sidebar sheet) stops them from leaving it. Pass this as
+ * the dialog popup's onKeyDown to let them through while a row is held.
+ */
+export function letSidebarSettingsDragKeysThrough(event: KeyboardEvent & { preventBaseUIHandler: () => void }) {
+  if (event.target instanceof Element && event.target.closest('[data-sidebar-settings-handle][aria-pressed="true"]')) {
+    event.preventBaseUIHandler();
+  }
+}
+
 export function useIssueSidebarSectionLabels(): Record<IssueSidebarSection, string> {
   const { t } = useT("issues");
   return {
@@ -64,11 +75,16 @@ export function IssueSidebarSections({
   sections,
   available,
   revealed = [],
+  onRevealEnd,
 }: {
   sections: Record<IssueSidebarSection, ReactNode>;
   available: readonly IssueSidebarSection[];
-  /** Hidden sections to show anyway, such as the one a header chip jumped to. */
+  /**
+   * Hidden sections to show anyway, such as the one a header chip jumped to.
+   * Switching one of them in settings ends its reveal, so the switch wins.
+   */
   revealed?: readonly IssueSidebarSection[];
+  onRevealEnd?: (section: IssueSidebarSection) => void;
 }) {
   const { t } = useT("issues");
   const order = useIssueSidebarSectionsStore(selectIssueSidebarOrder);
@@ -78,6 +94,9 @@ export function IssueSidebarSections({
   const isShown = (id: IssueSidebarSection) => !hidden.includes(id) || revealed.includes(id);
   const visible = order.filter((id) => available.includes(id) && isShown(id));
   const hiddenCount = available.filter((id) => !isShown(id)).length;
+  const onShownChange = (id: IssueSidebarSection) => {
+    if (revealed.includes(id)) onRevealEnd?.(id);
+  };
   const getEmptySections = () =>
     new Set(
       visible.filter(
@@ -90,6 +109,7 @@ export function IssueSidebarSections({
       <IssueSidebarSettings
         available={available}
         getEmptySections={getEmptySections}
+        onShownChange={onShownChange}
         trigger={
           <IconButton
             variant="ghost"
@@ -113,6 +133,7 @@ export function IssueSidebarSections({
             <IssueSidebarSettings
               available={available}
               getEmptySections={getEmptySections}
+              onShownChange={onShownChange}
               side="top"
               align="start"
               trigger={
@@ -142,6 +163,7 @@ export function IssueSidebarSettings({
   available,
   trigger,
   getEmptySections,
+  onShownChange,
   side = "bottom",
   align = "end",
 }: {
@@ -150,6 +172,7 @@ export function IssueSidebarSettings({
   trigger: ReactElement;
   /** Shown sections with nothing to render on this issue, read when the popover opens. */
   getEmptySections?: () => ReadonlySet<IssueSidebarSection>;
+  onShownChange?: (section: IssueSidebarSection, shown: boolean) => void;
   side?: "top" | "bottom";
   align?: "start" | "end";
 }) {
@@ -179,8 +202,8 @@ export function IssueSidebarSettings({
   return (
     <Popover onOpenChange={(open) => open && setEmpty(getEmptySections?.() ?? new Set())}>
       <PopoverTrigger render={trigger} />
-      <PopoverContent side={side} align={align} className="w-72 gap-0 p-1">
-        <div className="flex items-center gap-2 py-1 pr-1 pl-2">
+      <PopoverContent side={side} align={align} className="max-h-(--available-height) w-72 gap-0 overflow-hidden p-1">
+        <div className="flex shrink-0 items-center gap-2 py-1 pr-1 pl-2">
           <span className="flex-1 text-label font-medium">{t(($) => $.detail.sidebar_settings.title)}</span>
           <button
             type="button"
@@ -194,7 +217,7 @@ export function IssueSidebarSettings({
         </div>
         <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={DRAG_MODIFIERS} onDragEnd={onDragEnd}>
           <SortableContext items={order} strategy={verticalListSortingStrategy}>
-            <ul className="relative flex flex-col">
+            <ul className="relative flex min-h-0 flex-col overflow-y-auto">
               {order.map((id) => {
                 const locked = ISSUE_SIDEBAR_ALWAYS_SHOWN.includes(id);
                 const shown = !hidden.includes(id);
@@ -211,14 +234,17 @@ export function IssueSidebarSettings({
                     note={note}
                     shown={shown}
                     locked={locked}
-                    onShownChange={(next) => setHidden(id, !next)}
+                    onShownChange={(next) => {
+                      setHidden(id, !next);
+                      onShownChange?.(id, next);
+                    }}
                   />
                 );
               })}
             </ul>
           </SortableContext>
         </DndContext>
-        <p className="-mx-1 mt-1 border-t px-3 pt-2 pb-1.5 text-micro text-muted-foreground">
+        <p className="-mx-1 mt-1 shrink-0 border-t px-3 pt-2 pb-1.5 text-micro text-muted-foreground">
           {t(($) => $.detail.sidebar_settings.footer)}
         </p>
       </PopoverContent>
@@ -248,7 +274,7 @@ function SectionRow({
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn(
-        "flex h-8 items-center gap-1.5 rounded-md pr-2 pl-1 text-label",
+        "flex h-8 shrink-0 items-center gap-1.5 rounded-md pr-2 pl-1 text-label",
         isDragging ? "relative z-10 bg-popover shadow-[var(--menu-shadow)] ring-1 ring-surface-border" : "hover:bg-accent/50",
       )}
     >
@@ -257,6 +283,7 @@ function SectionRow({
         type="button"
         {...attributes}
         {...listeners}
+        data-sidebar-settings-handle=""
         aria-label={t(($) => $.detail.sidebar_settings.drag_handle, { section: label })}
         className="flex size-5 shrink-0 cursor-grab touch-none items-center justify-center rounded-sm text-faint-foreground outline-none hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
       >

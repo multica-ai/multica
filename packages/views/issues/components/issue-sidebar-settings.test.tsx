@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
 import {
   ISSUE_SIDEBAR_SECTIONS,
@@ -8,7 +8,7 @@ import {
 } from "@multica/core/issues/stores";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
-import { IssueSidebarSections } from "./issue-sidebar-settings";
+import { IssueSidebarSections, letSidebarSettingsDragKeysThrough } from "./issue-sidebar-settings";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
@@ -86,5 +86,25 @@ describe("IssueSidebarSections", () => {
     fireEvent.click(screen.getByRole("button", { name: /1 section hidden/ }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("switch", { name: "Metadata" })).not.toBeChecked();
+  });
+});
+
+describe("letSidebarSettingsDragKeysThrough", () => {
+  const keyDownOn = (target: EventTarget) => {
+    const preventBaseUIHandler = vi.fn();
+    letSidebarSettingsDragKeysThrough({ target, preventBaseUIHandler } as unknown as Parameters<
+      typeof letSidebarSettingsDragKeysThrough
+    >[0]);
+    return preventBaseUIHandler;
+  };
+
+  it("lets keys out of the dialog only while a settings row is held", () => {
+    const handle = document.createElement("button");
+    handle.setAttribute("data-sidebar-settings-handle", "");
+    expect(keyDownOn(handle)).not.toHaveBeenCalled();
+
+    handle.setAttribute("aria-pressed", "true");
+    expect(keyDownOn(handle)).toHaveBeenCalledOnce();
+    expect(keyDownOn(document.createElement("button"))).not.toHaveBeenCalled();
   });
 });

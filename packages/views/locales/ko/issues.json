@@ -490,9 +490,9 @@
       "open": "사이드바 사용자 지정",
       "title": "사이드바",
       "reset": "초기화",
-      "footer": "드래그해 순서를 바꿉니다. 모든 이슈에 적용됩니다.",
+      "footer": "드래그해 순서를 바꿉니다. 모든 태스크에 적용됩니다.",
       "always_shown": "항상 표시",
-      "empty": "이 이슈에는 없음",
+      "empty": "이 태스크에는 없음",
       "customize": "사용자 지정",
       "drag_handle": "{{section}} 순서 변경",
       "hidden_count_other": "섹션 {{count}}개 숨김"
