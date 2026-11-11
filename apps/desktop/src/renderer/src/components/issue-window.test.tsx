@@ -47,7 +47,18 @@ vi.mock("@multica/views/layout", () => ({
 }));
 
 vi.mock("@multica/views/platform", () => ({
-  DragStrip: () => null,
+  DragStrip: () => <div data-testid="drag-strip" />,
+  WindowTitleBarProvider: ({
+    value,
+    children,
+  }: {
+    value: { leadingInset: number } | null;
+    children: React.ReactNode;
+  }) => (
+    <div data-testid="title-bar-scope" data-leading-inset={value?.leadingInset ?? ""}>
+      {children}
+    </div>
+  ),
 }));
 
 vi.mock("../pages/issue-detail-page", () => ({
@@ -120,5 +131,24 @@ describe("IssueWindow", () => {
     fireEvent.click(retry);
     expect(state.refetch).toHaveBeenCalledOnce();
     expect(screen.queryByTestId("workspace-loading")).toBeNull();
+  });
+
+  it("lets the issue header be the title bar instead of stacking a drag strip over it", async () => {
+    state.ready = true;
+    state.workspaces = [{ id: "ws-1", slug: "acme" }];
+
+    render(<IssueWindow context={context} />);
+
+    expect(await screen.findByTestId("issue-detail")).toBeInTheDocument();
+    expect(screen.queryByTestId("drag-strip")).toBeNull();
+    expect(screen.getByTestId("title-bar-scope")).toHaveAttribute("data-leading-inset", "88");
+  });
+
+  it("keeps the drag strip for states that have no page header", async () => {
+    render(<IssueWindow context={context} />);
+
+    expect(await screen.findByTestId("workspace-loading")).toBeInTheDocument();
+    expect(screen.getByTestId("drag-strip")).toBeInTheDocument();
+    expect(screen.getByTestId("title-bar-scope")).toHaveAttribute("data-leading-inset", "");
   });
 });

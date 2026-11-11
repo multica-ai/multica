@@ -140,6 +140,8 @@ An issue belongs to at most one [project](/projects); the project provides share
 
 Larger work can be split into sub-issues: the parent issue keeps the overall goal while sub-issues progress independently. Parent and child statuses do not affect each other.
 
+Creating a sub-issue from a parent prefills its project and, when set, its assignee. In manual create, **Copy parent fields** lets you choose priority, labels, dates, or individual custom properties to copy. Only the selected values replace your form values, once; later parent changes do not sync. The child keeps its own description and status. Labels, start date, and custom properties stay in the manual draft when switching to Create with agent.
+
 Sub-issues can be given a **stage** to advance in batches — 1, 2, 3. When every sub-issue in the earliest unfinished stage reaches `done` or `cancelled`, the parent issue receives a "sub-issues completed" notification; when the parent's assignee is an agent, it wakes up and decides whether to start the next stage. Sub-issues without a stage count as one batch and notify once when they all finish. The system triggers this wakeup; see [Issue wakeups](/issue-wakeups) for its rules and the other kinds of wakeup.
 
 ## Views and display settings [#switch-views]

@@ -244,6 +244,7 @@ export const RotateCcw = /* @__PURE__ */ createIcon("RotateCcw", glyph.RotateCcw
 export const RotateCw = /* @__PURE__ */ createIcon("RotateCw", glyph.RotateCw);
 export const Rows3 = /* @__PURE__ */ createIcon("Rows3", glyph.Rows3);
 export const Save = /* @__PURE__ */ createIcon("Save", glyph.Save);
+export const Scan = /* @__PURE__ */ createIcon("Scan", glyph.Scan);
 export const ScrollText = /* @__PURE__ */ createIcon("ScrollText", glyph.ScrollText);
 export const Search = /* @__PURE__ */ createIcon("Search", glyph.Search);
 export const SearchIcon = /* @__PURE__ */ createIcon("SearchIcon", glyph.Search);

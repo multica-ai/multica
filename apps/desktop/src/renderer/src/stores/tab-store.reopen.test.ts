@@ -112,16 +112,44 @@ describe("renderer-local closed destinations", () => {
     expect(useTabStore.getState().activeWorkspaceSlug).toBeNull();
   });
 
-  it("bounds Close Others history and preserves MRU survivors", () => {
+  it.each(["closeOtherTabs", "closeTabsToRight"] as const)("bounds %s history and preserves MRU survivors", (action) => {
     const store = useTabStore.getState();
     const keeper = active();
     for (let index = 0; index < 25; index++) store.addTab(`/acme/issues/${index}`, `${index}`);
-    store.closeOtherTabs(keeper.id);
+    store[action](keeper.id);
     expect(useTabStore.getState().closedTabsByWorkspace.acme).toHaveLength(20);
     expect(active().id).toBe(keeper.id);
     expect(useTabStore.getState().byWorkspace.acme.recentTabIds).toEqual([]);
     store.reopenClosedTab();
     expect(active().title).toBe("0");
+  });
+
+  it("records Close Right in the owning workspace and leaves no-op calls untouched", () => {
+    const store = useTabStore.getState();
+    const keeper = active();
+    store.addTab("/acme/projects?sort=asc#board", "Projects");
+    store.addTab("/acme/agents", "Agents");
+    store.switchWorkspace("other");
+    const snapshots: number[] = [];
+    const unsubscribe = useTabStore.subscribe((state) => {
+      snapshots.push(state.closedTabsByWorkspace.acme.length);
+    });
+    store.closeTabsToRight(keeper.id);
+    unsubscribe();
+    expect(snapshots).toEqual([2]);
+    expect(active().url).toBe("/other/issues");
+    store.reopenClosedTab();
+    expect(active().url).toBe("/other/issues");
+    const unchanged = useTabStore.getState();
+    store.closeTabsToRight("missing");
+    store.closeTabsToRight(keeper.id);
+    expect(useTabStore.getState()).toBe(unchanged);
+    store.switchWorkspace("acme");
+    store.reopenClosedTab();
+    expect(active().url).toBe("/acme/projects?sort=asc#board");
+    store.reopenClosedTab();
+    expect(active().url).toBe("/acme/agents");
+    expect(useTabStore.getState().closedTabsByWorkspace.acme).toEqual([]);
   });
 
   it("prunes closed-only stale keys even with unchanged live groups, then clears all workspaces on reset", () => {

@@ -215,6 +215,8 @@ interface TabStore {
   closeTab: (tabId: string, options?: CloseTabOptions) => void;
   /** Close every other unpinned tab in the target tab's workspace. */
   closeOtherTabs: (tabId: string) => void;
+  /** Close the unpinned tabs after the target tab in its workspace. */
+  closeTabsToRight: (tabId: string) => void;
   /**
    * Activate a tab. Finds it across all workspaces. Sets both the owning
    * workspace as active and that group's activeTabId; needed for any code
@@ -721,13 +723,15 @@ function findTabLocation(
 
 function buildCloseOtherTabsResult(
   byWorkspace: Record<string, WorkspaceTabGroup>,
+  closedTabsByWorkspace: Record<string, ClosedTabDestination[]>,
   tabId: string,
-): Record<string, WorkspaceTabGroup> | null {
+  scope: "others" | "right" = "others",
+): Pick<TabStore, "byWorkspace" | "closedTabsByWorkspace"> | null {
   const hit = findTabLocation(byWorkspace, tabId);
   if (!hit) return null;
-  const { slug, group } = hit;
+  const { slug, group, index } = hit;
   const closingTabs = group.tabs.filter(
-    (tab) => !tab.pinned && tab.id !== tabId,
+    (tab, i) => !tab.pinned && tab.id !== tabId && (scope === "others" || i > index),
   );
   if (closingTabs.length === 0) return null;
 
@@ -736,10 +740,25 @@ function buildCloseOtherTabsResult(
   const nextActiveTabId = closingIds.has(group.activeTabId)
     ? tabId
     : group.activeTabId;
+  // LIFO recovery reconstructs a bulk close from left to right.
+  const removed = group.tabs
+    .flatMap((tab, index) => {
+      const closed = closingIds.has(tab.id)
+        ? closedDestination(tab, index, slug)
+        : null;
+      return closed ? [closed] : [];
+    })
+    .reverse();
 
   return {
-    ...byWorkspace,
-    [slug]: reconcileGroup(group, nextTabs, nextActiveTabId),
+    byWorkspace: {
+      ...byWorkspace,
+      [slug]: reconcileGroup(group, nextTabs, nextActiveTabId),
+    },
+    closedTabsByWorkspace: {
+      ...closedTabsByWorkspace,
+      [slug]: [...(closedTabsByWorkspace[slug] ?? []), ...removed].slice(-CLOSED_TAB_LIMIT),
+    },
   };
 }
 
@@ -1006,26 +1025,9 @@ export const useTabStore = create<TabStore>()(
 
       closeOtherTabs(tabId) {
         const { byWorkspace, closedTabsByWorkspace } = get();
-        const next = buildCloseOtherTabsResult(byWorkspace, tabId);
+        const next = buildCloseOtherTabsResult(byWorkspace, closedTabsByWorkspace, tabId);
         if (!next) return;
-        const { slug, group } = findTabLocation(byWorkspace, tabId)!;
-        const survivors = new Set(next[slug].tabs.map((tab) => tab.id));
-        // LIFO recovery reconstructs a bulk close from left to right.
-        const removed = group.tabs
-          .flatMap((tab, index) => {
-            const closed = survivors.has(tab.id)
-              ? null
-              : closedDestination(tab, index, slug);
-            return closed ? [closed] : [];
-          })
-          .reverse();
-        set({
-          byWorkspace: next,
-          closedTabsByWorkspace: {
-            ...closedTabsByWorkspace,
-            [slug]: [...(closedTabsByWorkspace[slug] ?? []), ...removed].slice(-CLOSED_TAB_LIMIT),
-          },
-        });
+        set(next);
       },
 
       reopenClosedTab() {
@@ -1073,6 +1075,13 @@ export const useTabStore = create<TabStore>()(
           },
           closedTabsByWorkspace: nextClosed,
         });
+      },
+
+      closeTabsToRight(tabId) {
+        const { byWorkspace, closedTabsByWorkspace } = get();
+        const next = buildCloseOtherTabsResult(byWorkspace, closedTabsByWorkspace, tabId, "right");
+        if (!next) return;
+        set(next);
       },
 
       setActiveTab(tabId) {

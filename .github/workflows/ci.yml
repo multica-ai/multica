@@ -40,8 +40,11 @@ jobs:
         with:
           node-version: 22
 
-      - name: Test CI selection and gates
-        run: node --test scripts/ci-scope.test.mjs scripts/check-image-budget.test.mjs
+      # Path selection must be proven before it skips anything. Every other
+      # scripts/**/*.test.mjs suite runs through `pnpm test:scripts` in the
+      # frontend-quality action.
+      - name: Test CI selection
+        run: node --test scripts/ci-scope.test.mjs
 
       - name: Filter paths
         id: filter
@@ -72,7 +75,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "~1.27.3"
+          go-version: "~1.27.4"
           check-latest: true
           cache-dependency-path: server/go.sum
 
@@ -217,6 +220,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Report runner CPU
+        run: |
+          nproc
+          lscpu
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
@@ -350,7 +358,7 @@ jobs:
         with:
           # Keep the security floor even when the setup-go manifest lags;
           # continue accepting newer patches within Go 1.27.
-          go-version: "~1.27.3"
+          go-version: "~1.27.4"
           check-latest: true
           cache: false
 
@@ -450,7 +458,7 @@ jobs:
         id: go
         uses: actions/setup-go@v5
         with:
-          go-version: "~1.27.3"
+          go-version: "~1.27.4"
           check-latest: true
           cache: false
 
@@ -490,7 +498,7 @@ jobs:
         with:
           # Keep the security floor even when the setup-go manifest lags;
           # continue accepting newer patches within Go 1.27.
-          go-version: "~1.27.3"
+          go-version: "~1.27.4"
           check-latest: true
           cache-dependency-path: server/go.sum
 
@@ -529,7 +537,7 @@ jobs:
         with:
           # Keep the security floor even when the setup-go manifest lags;
           # continue accepting newer patches within Go 1.27.
-          go-version: "~1.27.3"
+          go-version: "~1.27.4"
           check-latest: true
           cache-dependency-path: server/go.sum
 
@@ -601,6 +609,10 @@ jobs:
         # inherited stdout neither keeps Result blocked nor survives cleanup.
         # -v makes RUN/PASS evidence explicit in CI logs.
         run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree|TestCodeArtsWindowsCancellationTerminatesDescendants)$' -count=1 -timeout=5m
+
+      - name: Test Windows Hermes gateway ownership and reservation
+        working-directory: server
+        run: go test ./pkg/agent -v -run '^(TestHermesGatewayWindowsCleanupOwnsDescendants|TestHermesGatewayReservation)$' -count=1 -timeout=5m
 
       - name: Test bounded CLI output collection on Windows
         working-directory: server
@@ -801,7 +813,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with:
-          go-version: "~1.27.3"
+          go-version: "~1.27.4"
           check-latest: true
           cache-dependency-path: server/go.sum
       - name: Verify Cursor background lifecycle and watchdog races
@@ -904,6 +916,9 @@ jobs:
 
       - name: Test development environment registry
         run: bash scripts/dev-env.test.sh
+
+      - name: Test agent environment lifecycle
+        run: bash scripts/agent-environment.test.sh
 
       - name: Test UI performance comparison runner
         run: bash scripts/perf-compare.test.sh

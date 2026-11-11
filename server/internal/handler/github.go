@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -27,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/qoderruntime"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -35,11 +37,7 @@ import (
 // point App-authenticated calls at an httptest server without touching GitHub.
 var githubAPIBase = "https://api.github.com"
 
-const (
-	githubReturnToGitHub       = "github"
-	githubReturnToRepositories = "repositories"
-	githubAPIResponseLimit     = 4 << 20
-)
+const githubAPIResponseLimit = 4 << 20
 
 // ── Response shapes ─────────────────────────────────────────────────────────
 
@@ -142,8 +140,9 @@ type GitHubPullRequestResponse struct {
 }
 
 type GitHubConnectResponse struct {
-	URL        string `json:"url"`
-	Configured bool   `json:"configured"`
+	ConnectionID string `json:"connection_id,omitempty"`
+	URL          string `json:"url"`
+	Configured   bool   `json:"configured"`
 }
 
 type GitHubRepositoryResponse struct {
@@ -158,9 +157,10 @@ type GitHubRepositoryResponse struct {
 }
 
 type GitHubRepositoriesResponse struct {
-	Repositories []GitHubRepositoryResponse `json:"repositories"`
-	TotalCount   int64                      `json:"total_count"`
-	NextPage     *int                       `json:"next_page"`
+	RepositorySelection string                     `json:"repository_selection,omitempty"`
+	Repositories        []GitHubRepositoryResponse `json:"repositories"`
+	TotalCount          int64                      `json:"total_count"`
+	NextPage            *int                       `json:"next_page"`
 }
 
 func githubInstallationToResponse(i db.GithubInstallation) GitHubInstallationResponse {
@@ -387,38 +387,35 @@ func isGitHubRepositoryBrowseConfigured() bool {
 // install flow so the setup callback can recover the workspace without
 // trusting query params alone. Format: "<workspaceID>.<nonce>.<sigHex>".
 func signState(workspaceID string) (string, error) {
-	return signStateForReturn(workspaceID, githubReturnToGitHub)
+	return signGitHubState(workspaceID, false)
 }
 
-func signStateForReturn(workspaceID, returnTo string) (string, error) {
+func signGitHubState(workspaceID string, desktop bool) (string, error) {
 	secret := githubWebhookSecret()
 	if secret == "" {
 		return "", errors.New("github integration is not configured")
-	}
-	if !isAllowedGitHubReturnTo(returnTo) {
-		return "", errors.New("invalid github return target")
 	}
 	nonceBytes := make([]byte, 12)
 	if _, err := rand.Read(nonceBytes); err != nil {
 		return "", err
 	}
 	nonce := hex.EncodeToString(nonceBytes)
-	payload := workspaceID + "." + nonce
-	if returnTo != githubReturnToGitHub {
-		payload = workspaceID + "." + returnTo + "." + nonce
+	// Keep the three-part format readable by installed clients and older servers.
+	if desktop {
+		nonce = "desktop-" + nonce
 	}
+	payload := workspaceID + "." + nonce
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(payload))
-	sig := hex.EncodeToString(mac.Sum(nil))
-	return payload + "." + sig, nil
+	return payload + "." + hex.EncodeToString(mac.Sum(nil)), nil
 }
 
 func verifyState(token string) (string, bool) {
-	workspaceID, _, ok := verifyStateWithReturn(token)
+	workspaceID, _, ok := verifyGitHubState(token)
 	return workspaceID, ok
 }
 
-func verifyStateWithReturn(token string) (workspaceID, returnTo string, ok bool) {
+func verifyGitHubState(token string) (workspaceID, connectionID string, ok bool) {
 	secret := githubWebhookSecret()
 	if secret == "" {
 		return "", "", false
@@ -427,36 +424,21 @@ func verifyStateWithReturn(token string) (workspaceID, returnTo string, ok bool)
 	if len(parts) != 3 && len(parts) != 4 {
 		return "", "", false
 	}
-	workspaceID = parts[0]
-	returnTo = githubReturnToGitHub
-	nonceIndex := 1
-	if len(parts) == 4 {
-		returnTo = parts[1]
-		nonceIndex = 2
-		if !isAllowedGitHubReturnTo(returnTo) {
-			return "", "", false
-		}
-	}
-	sig := parts[nonceIndex+1]
-	payload := strings.Join(parts[:nonceIndex+1], ".")
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(payload))
-	expected := hex.EncodeToString(mac.Sum(nil))
-	if !hmac.Equal([]byte(expected), []byte(sig)) {
+	// Accept in-flight links from before the Code settings page was unified.
+	if len(parts) == 4 && parts[1] != "github" && parts[1] != "repositories" {
 		return "", "", false
 	}
-	return workspaceID, returnTo, true
-}
-
-func isAllowedGitHubReturnTo(returnTo string) bool {
-	return returnTo == githubReturnToGitHub || returnTo == githubReturnToRepositories
-}
-
-func githubSettingsURL(frontend, returnTo string) string {
-	if !isAllowedGitHubReturnTo(returnTo) {
-		returnTo = githubReturnToGitHub
+	payload := strings.Join(parts[:len(parts)-1], ".")
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	if !hmac.Equal([]byte(hex.EncodeToString(mac.Sum(nil))), []byte(parts[len(parts)-1])) {
+		return "", "", false
 	}
-	return strings.TrimRight(frontend, "/") + "/settings?tab=" + url.QueryEscape(returnTo)
+	return parts[0], parts[len(parts)-2], true
+}
+
+func githubSettingsURL(frontend string) string {
+	return strings.TrimRight(frontend, "/") + "/settings?tab=code"
 }
 
 // GitHubConnect (GET /api/workspaces/{id}/github/connect) returns the URL the
@@ -471,16 +453,8 @@ func (h *Handler) GitHubConnect(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, GitHubConnectResponse{Configured: false})
 		return
 	}
-	returnTo := strings.TrimSpace(r.URL.Query().Get("return_to"))
-	if returnTo == "" {
-		returnTo = githubReturnToGitHub
-	}
-	if !isAllowedGitHubReturnTo(returnTo) {
-		writeError(w, http.StatusBadRequest, "invalid return target")
-		return
-	}
 	slug := githubAppSlug()
-	state, err := signStateForReturn(workspaceID, returnTo)
+	state, err := signGitHubState(workspaceID, r.URL.Query().Get("desktop") == "1")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to sign state")
 		return
@@ -490,17 +464,13 @@ func (h *Handler) GitHubConnect(w http.ResponseWriter, r *http.Request) {
 		url.PathEscape(slug),
 		url.QueryEscape(state),
 	)
-	writeJSON(w, http.StatusOK, GitHubConnectResponse{URL: installURL, Configured: true})
+	writeJSON(w, http.StatusOK, GitHubConnectResponse{URL: installURL, Configured: true, ConnectionID: strings.Split(state, ".")[1]})
 }
 
 // GitHubSetupCallback (GET /api/github/setup) handles the redirect GitHub
 // sends after a user installs (or re-authorizes) the App. We expect
 // ?installation_id=<id>&state=<signed token>. We persist the installation
-// row (workspace ↔ installation_id mapping), then bounce the user back to
-// the new Settings → GitHub tab in the web app (RFC MUL-2414 §4.1). The
-// previous destination was the catch-all Settings page, which after the
-// GitHub-tab split would land users on the default profile tab instead of
-// the place that shows the connection they just completed.
+// row (workspace ↔ installation_id mapping), then returns to Code settings.
 func (h *Handler) GitHubSetupCallback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	installationIDStr := q.Get("installation_id")
@@ -509,18 +479,17 @@ func (h *Handler) GitHubSetupCallback(w http.ResponseWriter, r *http.Request) {
 	if frontend == "" {
 		frontend = "http://localhost:3000"
 	}
-	settingsURL := githubSettingsURL(frontend, githubReturnToGitHub)
+	settingsURL := githubSettingsURL(frontend)
 
 	if state == "" {
 		http.Redirect(w, r, settingsURL+"&github_error=missing_params", http.StatusFound)
 		return
 	}
-	workspaceID, returnTo, ok := verifyStateWithReturn(state)
+	workspaceID, connectionID, ok := verifyGitHubState(state)
 	if !ok {
 		http.Redirect(w, r, settingsURL+"&github_error=invalid_state", http.StatusFound)
 		return
 	}
-	settingsURL = githubSettingsURL(frontend, returnTo)
 	if installationIDStr == "" {
 		http.Redirect(w, r, settingsURL+"&github_error=missing_params", http.StatusFound)
 		return
@@ -535,6 +504,12 @@ func (h *Handler) GitHubSetupCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, settingsURL+"&github_error=bad_workspace", http.StatusFound)
 		return
 	}
+	workspace, err := h.Queries.GetWorkspace(r.Context(), wsUUID)
+	if err != nil {
+		http.Redirect(w, r, settingsURL+"&github_error=bad_workspace", http.StatusFound)
+		return
+	}
+	settingsURL = strings.TrimRight(frontend, "/") + "/" + url.PathEscape(workspace.Slug) + "/settings?tab=code"
 	// Resolve the installation against GitHub's API to capture display info.
 	// If the App auth is not configured we still create the row with the
 	// minimum we know; webhook events will refresh it as soon as one fires.
@@ -571,9 +546,15 @@ func (h *Handler) GitHubSetupCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.publish(protocol.EventGitHubInstallationCreated, workspaceID, "system", "", map[string]any{
-		"installation": githubInstallationToBroadcast(inst),
+		"installation":  githubInstallationToBroadcast(inst),
+		"connection_id": connectionID,
 	})
-	http.Redirect(w, r, settingsURL+"&github_connected=1", http.StatusFound)
+	if strings.HasPrefix(connectionID, "desktop-") {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, `<!doctype html><html lang="en"><meta charset="utf-8"><title>GitHub connected</title><body><h1>GitHub connected</h1><p>Return to Multica to confirm your repositories. You can close this tab.</p></body></html>`)
+		return
+	}
+	http.Redirect(w, r, settingsURL+"&github_connected=1&github_installation="+url.QueryEscape(uuidToString(inst.ID)), http.StatusFound)
 }
 
 func (h *Handler) consumePendingGitHubInstallation(ctx context.Context, inst db.GithubInstallation) (db.GithubInstallation, error) {
@@ -855,7 +836,8 @@ func fetchGitHubInstallationRepositories(
 		return GitHubRepositoriesResponse{}, fmt.Errorf("create installation token: github status %d", tokenResp.StatusCode)
 	}
 	var tokenBody struct {
-		Token string `json:"token"`
+		Token               string `json:"token"`
+		RepositorySelection string `json:"repository_selection"`
 	}
 	if err := json.NewDecoder(io.LimitReader(tokenResp.Body, githubAPIResponseLimit)).Decode(&tokenBody); err != nil {
 		return GitHubRepositoriesResponse{}, fmt.Errorf("decode installation token: %w", err)
@@ -902,8 +884,9 @@ func fetchGitHubInstallationRepositories(
 		return GitHubRepositoriesResponse{}, fmt.Errorf("decode installation repositories: %w", err)
 	}
 	out := GitHubRepositoriesResponse{
-		Repositories: make([]GitHubRepositoryResponse, 0, len(body.Repositories)),
-		TotalCount:   body.TotalCount,
+		RepositorySelection: tokenBody.RepositorySelection,
+		Repositories:        make([]GitHubRepositoryResponse, 0, len(body.Repositories)),
+		TotalCount:          body.TotalCount,
 	}
 	for _, repository := range body.Repositories {
 		out.Repositories = append(out.Repositories, GitHubRepositoryResponse(repository))
@@ -936,6 +919,131 @@ func revokeGitHubInstallationToken(client *http.Client, token string) {
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, githubAPIResponseLimit))
+}
+
+// ── Qoder repository credentials from the workspace GitHub App ─────────────
+
+// issueQoderRepositoryToken mints a short-lived installation token bound to
+// one repository through a GitHub App installation the workspace connected.
+// It backs the Qoder bridge's credential fallback: repositories covered by
+// the installation need no hand-entered PAT. The caller must supply lowercase
+// owner/repo of the canonical repository URL; a token that comes back scoped
+// to anything else is refused. qoderruntime.ErrGitHubAppNotCovered reports
+// that no bound installation authorizes the repository.
+func (h *Handler) issueQoderRepositoryToken(ctx context.Context, workspaceID, owner, repo string) (string, int64, error) {
+	ws, err := parseStrictUUID(workspaceID)
+	if err != nil {
+		return "", 0, qoderruntime.ErrGitHubAppNotCovered
+	}
+	appJWT, err := signGitHubAppJWT(time.Now())
+	if err != nil {
+		return "", 0, fmt.Errorf("sign GitHub App JWT: %w", err)
+	}
+	if appJWT == "" {
+		return "", 0, qoderruntime.ErrGitHubAppNotCovered
+	}
+	installations, err := h.Queries.ListGitHubInstallationsByWorkspace(ctx, ws)
+	if err != nil {
+		return "", 0, fmt.Errorf("list workspace GitHub installations: %w", err)
+	}
+	for _, installation := range installations {
+		if !strings.EqualFold(installation.AccountLogin, owner) {
+			continue
+		}
+		token, err := createRepositoryInstallationToken(ctx, appJWT, installation.InstallationID, owner, repo)
+		if err == nil {
+			return token, installation.InstallationID, nil
+		}
+		if errors.Is(err, errGitHubRepositoryNotCovered) {
+			continue
+		}
+		if errors.Is(err, errGitHubAppPermissionsNotGranted) {
+			return "", 0, qoderruntime.ErrGitHubAppPermissions
+		}
+		return "", 0, err
+	}
+	return "", 0, qoderruntime.ErrGitHubAppNotCovered
+}
+
+// errGitHubRepositoryNotCovered marks a 4xx refusal from the access-token
+// endpoint: the installation exists but does not include the repository (for
+// example a selected-repositories installation or a revoked grant).
+var errGitHubRepositoryNotCovered = errors.New("github app installation does not include the repository")
+
+// errGitHubAppPermissionsNotGranted marks GitHub's 422 reply when the token
+// request asks for permissions the installation never granted. That is an
+// operator-actionable configuration gap, not a missing repository.
+var errGitHubAppPermissionsNotGranted = errors.New("github app installation has not granted the requested permissions")
+
+// createRepositoryInstallationToken creates a 1-hour installation access
+// token locked to a single repository with the minimum permissions remote
+// work needs (clone, push branches, open pull requests). The request names
+// the repository explicitly, and the response must confirm exactly that
+// repository; anything wider is discarded.
+func createRepositoryInstallationToken(ctx context.Context, appJWT string, installationID int64, owner, repo string) (string, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	endpoint := fmt.Sprintf("%s/app/installations/%d/access_tokens", strings.TrimRight(githubAPIBase, "/"), installationID)
+	// The repository list is explicit and singular: GitHub refuses a name the
+	// installation cannot access, so the grant can never widen past one repo.
+	body, err := json.Marshal(map[string]any{
+		"repositories": []string{repo},
+		"permissions":  map[string]string{"contents": "write", "pull_requests": "write", "metadata": "read"},
+	})
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	setGitHubAPIHeaders(req, appJWT)
+	req.Header.Set("Content-Type", "application/json")
+	res, err := client.Do(req)
+	if err != nil {
+		// The wrapped *url.Error embeds the endpoint (and with it the
+		// admin-only installation id); keep that out of member-visible
+		// task failures and log it instead.
+		slog.WarnContext(ctx, "github: create repository installation token request failed", "error", err)
+		return "", errors.New("cannot reach GitHub to create a repository installation token")
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusCreated {
+		raw, _ := io.ReadAll(io.LimitReader(res.Body, 16<<10))
+		if res.StatusCode >= 400 && res.StatusCode < 500 && res.StatusCode != 408 && res.StatusCode != 429 {
+			// A 422 naming ungranted permissions is a configuration gap the
+			// workspace admin can fix; anything else means the installation
+			// does not cover this repository.
+			var refusal struct {
+				Message string `json:"message"`
+			}
+			if json.Unmarshal(raw, &refusal) == nil && strings.Contains(strings.ToLower(refusal.Message), "permissions requested are not granted") {
+				return "", errGitHubAppPermissionsNotGranted
+			}
+			return "", errGitHubRepositoryNotCovered
+		}
+		return "", fmt.Errorf("create repository installation token: github status %d", res.StatusCode)
+	}
+	var payload struct {
+		Token        string `json:"token"`
+		Repositories []struct {
+			Name  string `json:"name"`
+			Owner struct {
+				Login string `json:"login"`
+			} `json:"owner"`
+		} `json:"repositories"`
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, githubAPIResponseLimit)).Decode(&payload); err != nil {
+		return "", fmt.Errorf("decode repository installation token: %w", err)
+	}
+	if payload.Token == "" {
+		return "", errors.New("github returned an empty repository installation token")
+	}
+	// The token must be scoped to exactly the requested repository; a wider
+	// or different scope is a boundary violation and is never handed out.
+	if len(payload.Repositories) != 1 || !strings.EqualFold(payload.Repositories[0].Name, repo) || !strings.EqualFold(payload.Repositories[0].Owner.Login, owner) {
+		return "", fmt.Errorf("repository installation token scope mismatch for %s/%s", owner, repo)
+	}
+	return payload.Token, nil
 }
 
 func (h *Handler) DeleteGitHubInstallation(w http.ResponseWriter, r *http.Request) {

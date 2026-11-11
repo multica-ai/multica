@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
-import { useInboxFilterStore, type InboxFilters } from "@multica/core/inbox/filter-store";
+import { EMPTY_INBOX_FILTERS, filterInboxItems, useInboxFilterStore, type InboxFilters } from "@multica/core/inbox/filter-store";
 import { archivedInboxLookupOptions, inboxKeys } from "@multica/core/inbox/queries";
 import { onInboxIssueDeleted, patchInboxIssueProjection } from "@multica/core/inbox/ws-updaters";
 import type { ArchivedInboxPage } from "@multica/core/types/inbox";
@@ -202,6 +202,51 @@ it.each(["click", "url"])("keeps the archived row and detail mounted through ref
   fireEvent.click(screen.getByText("inbox-b"));
   await waitFor(() => expect(screen.getByTestId("detail")).toHaveTextContent("issue-b"));
   expect(screen.queryByText("inbox-a")).not.toBeInTheDocument();
+});
+
+it("keeps an older archived notification open through auto-read when the lookup carries its type filter", async () => {
+  searchParams = new URLSearchParams("view=archived");
+  useInboxFilterStore.getState().toggleFilterValue("workspace-1", "type", "mention");
+  const gate = deferred<void>();
+  let rows = [
+    item({ id: "newer-change", type: "status_changed", archived: true, read: false, issue_label_ids: [] }),
+    item({ id: "older-mention", type: "mentioned", archived: true, issue_label_ids: [], created_at: "2026-06-15T07:00:00Z" }),
+  ];
+  const listArchivedInboxPage = vi.fn(async (filters: InboxFilters) =>
+    page(filterInboxItems(rows, { ...EMPTY_INBOX_FILTERS, ...filters })));
+  const markInboxRead = vi.fn(async (id: string) => {
+    rows = rows.map((row) => row.id === id ? { ...row, read: true } : row);
+    await gate.promise;
+    return rows.find((row) => row.id === id)!;
+  });
+  setApiInstance({ listArchivedInboxPage, markInboxRead, getInboxUnreadSummary: async () => [] } as unknown as ApiClient);
+  renderPage();
+  fireEvent.click(await screen.findByText("older-mention"));
+  expect(await screen.findByTestId("detail")).toHaveTextContent("issue-a");
+  await waitFor(() => expect(markInboxRead).toHaveBeenCalledWith("older-mention"));
+  await act(async () => gate.resolve());
+  await waitFor(() => expect(listArchivedInboxPage.mock.calls.length).toBeGreaterThanOrEqual(3));
+  await waitFor(() => expect(qc.isFetching()).toBe(0));
+  expect(replace).not.toHaveBeenCalledWith("/acme/inbox?view=archived");
+  expect(screen.getByTestId("detail")).toHaveTextContent("issue-a");
+});
+
+it("asks the lookup with the view's filters except unread, and clears a filtered-out deep link instead of redirecting", async () => {
+  searchParams = new URLSearchParams("view=archived&issue=issue-a");
+  useInboxFilterStore.getState().toggleFilterValue("workspace-1", "type", "mention");
+  const rows = [item({ id: "comment-only", archived: true, issue_label_ids: [] })];
+  const listArchivedInboxPage = vi.fn(async (filters: InboxFilters, options: { groupId?: string }) => {
+    const matches = filterInboxItems(rows, { ...EMPTY_INBOX_FILTERS, ...filters });
+    return page(options.groupId ? matches.filter((row) => row.issue_id === options.groupId) : matches);
+  });
+  setApiInstance({ listArchivedInboxPage, getInboxUnreadSummary: async () => [] } as unknown as ApiClient);
+  renderPage();
+
+  await waitFor(() => expect(replace).toHaveBeenLastCalledWith("/acme/inbox?view=archived"));
+  const lookups = listArchivedInboxPage.mock.calls.filter(([, options]) => options.groupId === "issue-a");
+  expect(lookups[0]![0]).toMatchObject({ types: ["mention"], unreadOnly: false });
+  expect(lookups.at(-1)![0]).toMatchObject({ types: [], unreadOnly: false });
+  expect(replace).not.toHaveBeenCalledWith(expect.stringContaining("/issues/"));
 });
 
 it("keeps reading through lookup failure and clears a confirmed missing notification", async () => {

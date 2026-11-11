@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -162,7 +163,7 @@ func TestBuildSearchQuery_CandidateFirstParity(t *testing.T) {
 			legacyArgs[len(legacyArgs)-1] = tt.offset
 
 			candidateQuery, candidateArgs := buildSearchQuery(
-				tt.phrase, append([]string(nil), terms...), tt.queryNum, tt.hasNum, tt.includeClosed, tt.terminalKeys,
+				tt.phrase, append([]string(nil), terms...), tt.queryNum, tt.hasNum, tt.includeClosed, tt.terminalKeys, pgtype.UUID{},
 			)
 			candidateArgs[3] = testWorkspaceID
 			candidateArgs[len(candidateArgs)-2] = tt.limit
@@ -256,7 +257,7 @@ func runBuiltSearchForParity(t *testing.T, phrase string, includeClosed bool, te
 	t.Helper()
 	terms := splitSearchTerms(phrase)
 	queryNum, hasNum := parseQueryNumber(phrase)
-	query, args := buildSearchQuery(phrase, terms, queryNum, hasNum, includeClosed, terminalKeys)
+	query, args := buildSearchQuery(phrase, terms, queryNum, hasNum, includeClosed, terminalKeys, pgtype.UUID{})
 	args[3] = testWorkspaceID
 	args[len(args)-2] = limit
 	args[len(args)-1] = offset
@@ -302,6 +303,7 @@ func runSearchForParity(t *testing.T, label, query string, args []any) []searchP
 			&sr.issue.AssigneeID,
 			&sr.issue.CreatorType,
 			&sr.issue.CreatorID,
+			&sr.issue.RequesterUserID,
 			&sr.issue.ParentIssueID,
 			&sr.issue.AcceptanceCriteria,
 			&sr.issue.ContextRefs,
@@ -574,7 +576,7 @@ func buildLegacySearchQueryForParity(phrase string, terms []string, queryNum int
 	offsetParam := nextArg(nil) // placeholder
 
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
-		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
+		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.requester_user_id,
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
 		i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id,
 		i.revision, i.duplicate_of_issue_id,

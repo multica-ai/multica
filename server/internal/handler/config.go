@@ -8,6 +8,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/storage"
 )
 
 type AppConfig struct {
@@ -16,8 +17,8 @@ type AppConfig struct {
 	// use it only to recognize links belonging to this deployment.
 	AttachmentPublicURL string `json:"attachment_public_url,omitempty"`
 	// CdnSigned tells clients that the CDN domain above serves PRIVATE
-	// content through time-bounded signed URLs (CloudFront signing is
-	// enabled). When true, a raw storage URL on the CDN domain is NOT
+	// content through authenticated downloads or time-bounded signed URLs.
+	// When true, a raw storage URL on the CDN domain is NOT
 	// publicly fetchable — renderers must not pick it as a native
 	// <img>/<video> source and should fall back to the per-attachment
 	// API endpoint or a freshly signed download_url instead (MUL-3254).
@@ -51,6 +52,12 @@ type AppConfig struct {
 	// false so the managed-cloud response keeps its previous shape; the UI
 	// defaults absent to false (hidden).
 	VCSIntegrationAvailable bool `json:"vcs_integration_available,omitempty"`
+
+	// ThemeStoreEnabled tells the app it can browse and install community
+	// themes through /api/theme-store. Self-hosted operators turn it off with
+	// MULTICA_THEME_STORE=off. Omitted when off, and older servers omit it
+	// too, so the app shows no Browse entry and makes no store requests.
+	ThemeStoreEnabled bool `json:"theme_store_enabled,omitempty"`
 
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
@@ -129,9 +136,13 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	config.AttachmentPublicURL = h.cfg.PublicURL
 	config.CdnSigned = h.CFSigner != nil
+	if _, local := h.Storage.(*storage.LocalStorage); local {
+		config.CdnSigned = true
+	}
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
 	config.DaemonSetupTarget = "self_host"
 	config.VCSIntegrationAvailable = h.cfg.VCSIntegrationEnabled
+	config.ThemeStoreEnabled = h.ThemeStore != nil
 	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
 	// Only surface the build version on self-hosted deployments. The managed
 	// cloud is continuously deployed and its users can't choose the build, so

@@ -175,7 +175,7 @@ CLI を検出します。Web から接続する場合や別のマシンを追加
 ## ランタイム
 
 Multica はモデルを同梱していません。インストールと認証を済ませたエージェント CLI をそのまま動かします。
-現在 26 種類に対応しており、プロバイダーの切り替えは移行作業ではなく、ドロップダウンで選び直すだけです。
+現在 29 種類に対応しており、プロバイダーの切り替えは移行作業ではなく、ドロップダウンで選び直すだけです。
 
 | プロバイダー | CLI | プロバイダー | CLI |
 | --- | --- | --- | --- |
@@ -192,6 +192,7 @@ Multica はモデルを同梱していません。インストールと認証を
 | DeepSeek Harness | `dsh` | Oh-My-Pi | `omp` |
 | MiniMax Code | `mcode` | Dim | `dim` |
 | Huawei Cloud CodeArts | `codearts` | ZeroClaw | `zeroclaw` |
+| Muse Code | `muse` | Devin CLI | `devin` |
 | ZCode | `zcode` / ZCode Desktop | | |
 
 インストールと認証の方法：[AI コーディングツールをインストールする](https://multica.ai/docs/ja/install-agent-runtime) ·

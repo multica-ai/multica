@@ -212,7 +212,7 @@ function ForkPrimary({ onClick }: { onClick: () => void }) {
       </div>
       <span
         aria-hidden
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-background/10 px-4 py-2 text-label font-medium transition-colors group-hover:bg-background/20"
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-background/10 px-4 py-2 text-label font-medium transition-colors group-hover:bg-background/20"
       >
         {t(($) => $.step_platform.download_button)}
         <ArrowRight className="h-3.5 w-3.5" />

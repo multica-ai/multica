@@ -1,4 +1,5 @@
 import ReactDOM from "react-dom/client";
+import { installUserTimingCap } from "@multica/core/diagnostics";
 import App from "./App";
 import { AppCrashBoundary } from "./components/app-crash-boundary";
 import { launchWorkspaceSlug } from "./platform/workspace-windows";
@@ -27,6 +28,9 @@ import "@fontsource-variable/source-serif-4/wght-italic.css";
 // markdown (600 -> 700). One variable file covers 100-900 and closes the whole
 // class instead of chasing weights one at a time.
 import "@fontsource-variable/geist-mono";
+// Optional code font from the Appearance settings; the browser only loads the
+// face once something renders with it.
+import "@fontsource-variable/jetbrains-mono";
 import "./globals.css";
 
 // react-grab: dev-only element inspector. Hold ⌘C (Mac) / Ctrl+C and click any
@@ -42,6 +46,10 @@ if (import.meta.env.DEV && import.meta.env.VITE_REACT_GRAB) {
   grab.crossOrigin = "anonymous";
   document.head.appendChild(grab);
 }
+
+// React's development build never clears its render measures; see
+// installUserTimingCap.
+if (import.meta.env.DEV) installUserTimingCap();
 
 // A window opened for a workspace starts on it rather than on whichever
 // workspace was last active in any window.

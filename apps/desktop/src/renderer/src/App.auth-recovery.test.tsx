@@ -169,7 +169,9 @@ beforeEach(() => {
       getLastFreeze: vi.fn(),
       onAuthToken: () => () => {},
       onCloseActiveTab: (callback: () => void) => { callbacks.closeTab = callback; return () => { callbacks.closeTab = undefined; }; },
+      onContextMenu: () => () => {},
       onInviteOpen: () => () => {},
+      onIssueOpen: () => () => {},
       onSystemLocaleChanged: () => () => {},
       reportAuthSession: vi.fn(),
       runtimeConfig: {

@@ -22,6 +22,7 @@
   },
   "commands": {
     "current_theme_aria": "Tema actual",
+    "current_mode_aria": "Modo actual",
     "new_issue": "Nueva tarea",
     "new_project": "Nuevo proyecto",
     "copy_issue_link": "Copiar enlace de la tarea",
@@ -128,7 +129,6 @@
     "project": "Proyecto",
     "parent": "Tarea principal",
     "quick_actions": "Acciones rápidas",
-    "theme": "Tema",
     "project_status": "Estado del proyecto",
     "no_project": "Sin proyecto",
     "current": "Actual"
@@ -139,14 +139,8 @@
     "system": "Sistema"
   },
   "delegate": {
-    "heading": "Encargar a un agente",
-    "create_and_assign": "Nueva tarea y asignar a {{name}}",
-    "squad": "Squad",
-    "context_aria": "Creada con",
-    "parent": "Bajo {{identifier}}",
-    "pick_crumb": "Elegir",
-    "pick_another": "Encargar a otro agente o squad...",
-    "detected": "Instrucción"
+    "row": "Encargar a un agente: «{{prompt}}»",
+    "hint": "Creación rápida"
   },
   "best": {
     "assign": "Asignar {{subject}} a {{name}}",
@@ -165,8 +159,6 @@
     "navigate": "Navegar",
     "select": "Selección",
     "open_in_new_tab": "Abrir en una pestaña nueva",
-    "delegate": "Crear y encargar a {{name}}",
-    "search_instead": "Buscar como palabras clave",
     "back": "Atrás",
     "prefix_commands": "Comandos",
     "prefix_issues": "Tareas",

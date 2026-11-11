@@ -12,12 +12,14 @@
  */
 
 import type { ReactNode } from "react";
+import { cn } from "@multica/ui/lib/utils";
 import { Download, Eye, FileText, Loader2, Trash2 } from "@multica/ui/icons";
 import { useT } from "../i18n";
 import { DeferredTooltip } from "../common/deferred-tooltip";
 import { formatBytes } from "../common/format-bytes";
 import { fileIcon } from "./utils/file-icon";
 import { canOpenPreview, fileTypeLabel, getPreviewKind } from "./utils/preview";
+import { useAttachmentDownloadState } from "./hooks/use-attachment-download-state";
 
 interface AttachmentCardChromeProps {
   filename: string;
@@ -26,7 +28,7 @@ interface AttachmentCardChromeProps {
   canDownload: boolean;
   canDelete?: boolean;
   onPreview: () => void;
-  onDownload: () => void;
+  onDownload: () => void | Promise<unknown>;
   onDelete?: () => void;
 }
 
@@ -41,6 +43,7 @@ function AttachmentCardChrome({
   onDelete,
 }: AttachmentCardChromeProps) {
   const { t } = useT("editor");
+  const { downloading, handleDownload } = useAttachmentDownloadState(onDownload);
   return (
     <div
       className="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted"
@@ -85,13 +88,19 @@ function AttachmentCardChrome({
               type="button"
               className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
               aria-label={t(($) => $.image.download)}
+              disabled={downloading}
+              aria-busy={downloading}
               onMouseDown={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                onDownload();
+                handleDownload();
               }}
             >
-              <Download className="size-3.5" />
+              {downloading ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Download className="size-3.5" />
+              )}
             </button>
           }
         />
@@ -137,9 +146,11 @@ export interface AttachmentCardProps {
   /** Pressed when the Eye button is clicked. */
   onPreview: () => void;
   /** Pressed when the Download button is clicked. */
-  onDownload: () => void;
+  onDownload: () => void | Promise<unknown>;
   /** Optional remove button, used by editable comment/file-card surfaces. */
   onDelete?: () => void;
+  /** Registers the card with the right-click menu. */
+  scopeRef?: (element: HTMLElement | null) => void;
 }
 
 export function AttachmentCard({
@@ -151,6 +162,7 @@ export function AttachmentCard({
   onPreview,
   onDownload,
   onDelete,
+  scopeRef,
 }: AttachmentCardProps) {
   const kind = filename ? getPreviewKind(contentType, filename) : null;
   // Without an attachmentId only the URL-renderable kinds open — otherwise
@@ -158,7 +170,7 @@ export function AttachmentCard({
   const canPreview = !!href && canOpenPreview(kind, !!attachmentId);
 
   return (
-    <div className="my-1">
+    <div ref={scopeRef} className="my-1">
       <AttachmentCardChrome
         filename={filename}
         uploading={uploading}
@@ -184,8 +196,10 @@ export interface AttachmentFileCardProps {
   /** Rendered after the filename, e.g. a version badge. */
   badge?: ReactNode;
   onPreview: () => void;
-  onDownload: () => void;
+  onDownload: () => void | Promise<unknown>;
   onDelete?: () => void;
+  /** Registers the card with the right-click menu. */
+  scopeRef?: (element: HTMLElement | null) => void;
 }
 
 /**
@@ -204,16 +218,18 @@ export function AttachmentFileCard({
   onPreview,
   onDownload,
   onDelete,
+  scopeRef,
 }: AttachmentFileCardProps) {
   const { t } = useT("editor");
+  const { downloading, handleDownload } = useAttachmentDownloadState(onDownload);
   const Icon = fileIcon(contentType, filename);
   const meta = [fileTypeLabel(filename), sizeBytes > 0 ? formatBytes(sizeBytes) : ""]
     .filter(Boolean)
     .join(" · ");
-  const open = canPreview ? onPreview : canDownload ? onDownload : undefined;
+  const open = canPreview ? onPreview : canDownload ? handleDownload : undefined;
 
   return (
-    <div className="group/file-card relative flex min-w-0 items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/50">
+    <div ref={scopeRef} className="group/file-card relative flex min-w-0 items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/50">
       {/* The card's click target, under the content so text stays
           selectable-looking but every click lands here; the action buttons
           sit above it. */}
@@ -224,6 +240,7 @@ export function AttachmentFileCard({
           title={filename}
           aria-label={filename}
           onClick={open}
+          disabled={!canPreview && downloading}
         />
       )}
       <span className="pointer-events-none flex size-10 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
@@ -247,7 +264,10 @@ export function AttachmentFileCard({
         )}
       </span>
       {!uploading && (canDownload || onDelete) && (
-        <span className="relative flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/file-card:opacity-100 group-focus-within/file-card:opacity-100 [@media(hover:none)]:opacity-100">
+        <span className={cn(
+          "relative flex shrink-0 items-center gap-0.5 transition-opacity group-hover/file-card:opacity-100 group-focus-within/file-card:opacity-100 [@media(hover:none)]:opacity-100",
+          downloading ? "opacity-100" : "opacity-0",
+        )}>
           {canDownload && (
             <DeferredTooltip
               content={t(($) => $.image.download)}
@@ -256,9 +276,15 @@ export function AttachmentFileCard({
                   type="button"
                   className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                   aria-label={t(($) => $.image.download)}
-                  onClick={onDownload}
+                  disabled={downloading}
+                  aria-busy={downloading}
+                  onClick={handleDownload}
                 >
-                  <Download className="size-4" />
+                  {downloading ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Download className="size-4" />
+                  )}
                 </button>
               }
             />

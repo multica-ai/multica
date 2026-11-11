@@ -765,7 +765,7 @@ function StepCard({
               <span className="shrink-0">{t(($) => $.workflows.editor.card_hand_to)}</span>
               {actor && <ActorAvatar actorType={actor.type} actorId={actor.id} size="xs" profileLink={false} />}
               <span className="min-w-0 truncate text-foreground">{actor ? getActorName(actor.type, actor.id) : who}</span>
-              {handoff?.handler.type === "agent" && nextLabel && (
+              {(handoff?.handler.type === "agent" || handoff?.handler.type === "squad") && nextLabel && (
                 <span className="shrink-0 truncate">· {t(($) => $.workflows.editor.card_then, { status: nextLabel })}</span>
               )}
             </>

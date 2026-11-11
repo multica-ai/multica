@@ -18,8 +18,25 @@ func testLogger() *slog.Logger {
 	return slog.Default()
 }
 
+// clearGitConfigEnv unsets env-scoped git config inherited from the host
+// (daemon-managed tasks start with GIT_CONFIG_COUNT already set) and restores
+// it when the test ends.
+func clearGitConfigEnv(t *testing.T) {
+	t.Helper()
+	for _, kv := range os.Environ() {
+		key, _, _ := strings.Cut(kv, "=")
+		if key == "GIT_CONFIG_COUNT" ||
+			strings.HasPrefix(key, "GIT_CONFIG_KEY_") ||
+			strings.HasPrefix(key, "GIT_CONFIG_VALUE_") {
+			t.Setenv(key, "")
+			os.Unsetenv(key)
+		}
+	}
+}
+
 func TestGitEnv(t *testing.T) {
-	t.Parallel()
+	// Not parallel: clearGitConfigEnv mutates process-wide env.
+	clearGitConfigEnv(t)
 	env := gitEnv()
 
 	// Must contain GIT_TERMINAL_PROMPT=0.
@@ -71,6 +88,9 @@ func TestGitEnv(t *testing.T) {
 			}
 		}
 		return false
+	}
+	if !envHas(env, "GIT_CONFIG_COUNT=1") {
+		t.Error("gitEnv() must include GIT_CONFIG_COUNT=1 (no pre-existing config)")
 	}
 	if !envHas(env, "GIT_CONFIG_KEY_0=safe.directory") {
 		t.Error("gitEnv() must include GIT_CONFIG_KEY_0=safe.directory (no pre-existing config)")

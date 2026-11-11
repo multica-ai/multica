@@ -4,5 +4,4 @@
 export { ChooseRuntimePage } from "./choose-runtime-page";
 export { AgentCreatedPage } from "./agent-created-page";
 export { ManualCreateAgentPage } from "./manual-create-agent-page";
-export { AiCreateAgentPage } from "./ai-create-agent-page";
 export { AiBuilderSessionPage } from "./ai-builder-session-page";

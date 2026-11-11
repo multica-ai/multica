@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Cropper, { type Area, type Point } from "react-easy-crop";
 import { Loader2, Minus, Plus, RotateCw } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
@@ -62,6 +62,9 @@ export function AvatarCropDialog({
     null,
   );
   const [loadError, setLoadError] = useState(false);
+  const [encoding, setEncoding] = useState(false);
+  const encodingRef = useRef(false);
+  const pending = busy || encoding;
 
   // One object URL per picked file, alive for the dialog's lifetime; reset the
   // transform so a new pick starts centered and unrotated.
@@ -90,9 +93,15 @@ export function AvatarCropDialog({
   };
 
   const handleConfirm = async () => {
-    if (!objectUrl || !croppedAreaPixels || !file) return;
-    const { type, quality } = pickOutputType();
+    if (
+      busy || encodingRef.current || loadError ||
+      !objectUrl || !croppedAreaPixels || !file
+    ) return;
+    // Guard re-entry before React has rendered the disabled controls.
+    encodingRef.current = true;
+    setEncoding(true);
     try {
+      const { type, quality } = pickOutputType();
       const blob = await getCroppedAvatarBlob(objectUrl, croppedAreaPixels, rotation, {
         output: AVATAR_OUTPUT_SIZE,
         type,
@@ -104,21 +113,25 @@ export function AvatarCropDialog({
       onCropped(blobToAvatarFile(blob, file.name, type));
     } catch {
       setLoadError(true);
+    } finally {
+      encodingRef.current = false;
+      setEncoding(false);
     }
   };
 
-  const disabled = busy || !objectUrl || loadError || !croppedAreaPixels;
+  const handleOpenChange = (next: boolean) => {
+    if (busy || encodingRef.current) return;
+    onOpenChange(next);
+  };
+
+  const disabled = pending || !objectUrl || loadError || !croppedAreaPixels;
 
   return (
     <Dialog
       open={open}
-      onOpenChange={(next) => {
-        // Never let a close slip through while an upload is committing.
-        if (busy) return;
-        onOpenChange(next);
-      }}
+      onOpenChange={handleOpenChange}
     >
-      <DialogContent showCloseButton={!busy} className="sm:max-w-md">
+      <DialogContent showCloseButton={!pending} className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{t(($) => $.avatar_crop.title)}</DialogTitle>
         </DialogHeader>
@@ -136,9 +149,18 @@ export function AvatarCropDialog({
                 maxZoom={MAX_ZOOM}
                 cropShape="round"
                 showGrid={false}
-                onCropChange={setCrop}
-                onZoomChange={setZoom}
-                onRotationChange={setRotation}
+                style={{
+                  containerStyle: { pointerEvents: pending ? "none" : undefined },
+                }}
+                onCropChange={(next) => {
+                  if (!pending) setCrop(next);
+                }}
+                onZoomChange={(next) => {
+                  if (!pending) setZoom(next);
+                }}
+                onRotationChange={(next) => {
+                  if (!pending) setRotation(next);
+                }}
                 onCropComplete={(_: Area, areaPixels: Area) =>
                   setCroppedAreaPixels(areaPixels)
                 }
@@ -147,9 +169,9 @@ export function AvatarCropDialog({
                 <button
                   type="button"
                   onClick={() => setRotation((r) => (r + 90) % 360)}
-                  disabled={busy}
+                  disabled={pending}
                   aria-label={t(($) => $.avatar_crop.rotate)}
-                  className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-background/90 text-foreground shadow-sm transition-colors hover:bg-background disabled:opacity-50"
+                  className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-lg bg-background/90 text-foreground shadow-sm transition-colors hover:bg-background disabled:opacity-50"
                 >
                   <RotateCw className="h-4 w-4" />
                 </button>
@@ -202,26 +224,22 @@ export function AvatarCropDialog({
         </div>
 
         <div className="flex items-center justify-between">
-          <Button variant="ghost" onClick={resetTransform} disabled={busy}>
+          <Button variant="ghost" onClick={resetTransform} disabled={pending}>
             {t(($) => $.avatar_crop.reset)}
           </Button>
           <div className="flex gap-2">
             <Button
               variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={busy}
+              onClick={() => handleOpenChange(false)}
+              disabled={pending}
             >
               {t(($) => $.avatar_crop.cancel)}
             </Button>
-            <Button onClick={handleConfirm} disabled={disabled}>
-              {busy ? (
-                <>
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  {t(($) => $.avatar_crop.uploading)}
-                </>
-              ) : (
-                t(($) => $.avatar_crop.apply)
-              )}
+            <Button onClick={handleConfirm} disabled={disabled} aria-busy={pending}>
+              {pending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {busy
+                ? t(($) => $.avatar_crop.uploading)
+                : t(($) => $.avatar_crop.apply)}
             </Button>
           </div>
         </div>

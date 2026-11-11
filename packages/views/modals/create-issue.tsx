@@ -101,6 +101,7 @@ import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
 import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
+import { CopyParentFields } from "./copy-parent-fields";
 
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
 // DialogContent + everything inside; the surrounding `<Dialog>` is owned by
@@ -295,6 +296,7 @@ export function ManualCreatePanel({
     }
     return draft.manual.assigneeId;
   });
+  const [assigneeCleared, setAssigneeCleared] = useState(data?.manual_assignee_cleared === true);
   const [startDate, setStartDate] = useState<string | null>(draft.manual.startDate);
   const [dueDate, setDueDate] = useState<string | null>(
     (data?.due_date as string | undefined) ?? draft.shared.dueDate,
@@ -408,6 +410,7 @@ export function ManualCreatePanel({
   const updatePriority = (v: IssuePriority) => { setPriority(v); setShared({ priority: v }); };
   const updateAssignee = (type?: IssueAssigneeType, id?: string) => {
     setAssigneeType(type); setAssigneeId(id);
+    setAssigneeCleared(!id);
     setManual({ assigneeType: type, assigneeId: id });
   };
   const updateProject = (id?: string) => { setProjectId(id); setShared({ projectId: id }); };
@@ -866,6 +869,7 @@ export function ManualCreatePanel({
     // project) that was never written through a picker, so a plain flip would
     // otherwise drop it.
     setShared({ projectId, priority, dueDate });
+    setManual({ assigneeType, assigneeId });
     const existingPrompt = draft.agent.prompt;
     if (!existingPrompt.trim()) {
       const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
@@ -892,6 +896,7 @@ export function ManualCreatePanel({
     const carry: Record<string, unknown> = {};
     if (parentIssueId) carry.parent_issue_id = parentIssueId;
     if (carryParentIdentifier) carry.parent_issue_identifier = carryParentIdentifier;
+    if (assigneeCleared) carry.manual_assignee_cleared = true;
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
   };
 
@@ -957,13 +962,31 @@ export function ManualCreatePanel({
             <DialogTitle className="sr-only">{t(($) => $.create_issue.sr_manual)}</DialogTitle>
 
             {/* Header */}
-            <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
+            <div className="flex flex-wrap items-center justify-between gap-y-1 px-5 pt-3 pb-2 shrink-0">
               <div className="flex items-center gap-1.5 text-caption">
                 <span className="text-muted-foreground">{workspaceName}</span>
                 <ChevronRight className="size-3 text-faint-foreground" />
                 <span className="font-medium">{t(($) => $.create_issue.manual_breadcrumb)}</span>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="ml-auto flex min-w-0 items-center gap-1">
+                {parentIssue && (
+                  <CopyParentFields
+                    key={parentIssue.id}
+                    parent={parentIssue}
+                    properties={workspaceProperties}
+                    disabled={submitBusy}
+                    onCopy={(copy) => {
+                      if (copy.priority !== undefined) updatePriority(copy.priority);
+                      if (copy.label_ids !== undefined) updateLabelIds(copy.label_ids);
+                      if (copy.start_date !== undefined) updateStartDate(copy.start_date);
+                      if (copy.due_date !== undefined) updateDueDate(copy.due_date);
+                      if (copy.properties) {
+                        setPropertyValues((current) => ({ ...current, ...copy.properties }));
+                        setManual({ propertyValues: { ...useIssueDraftStore.getState().draft.manual.propertyValues, ...copy.properties } });
+                      }
+                    }}
+                  />
+                )}
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1195,7 +1218,7 @@ export function ManualCreatePanel({
                       data-property-error={propertyErrorId === property.id || undefined}
                       className={cn(
                         propertyErrorId === property.id &&
-                          "rounded-full ring-2 ring-destructive",
+                          "rounded-md ring-2 ring-destructive",
                       )}
                     >
                       <CustomPropertyValueInput
@@ -1229,7 +1252,7 @@ export function ManualCreatePanel({
               {parentIssueId && parentIssueLocked ? (
                 <span
                   data-testid="manual-sub-issue-chip"
-                  className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-caption text-muted-foreground"
+                  className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-caption text-muted-foreground"
                 >
                   {t(($) => $.create_issue.subissue_of, {
                     identifier: parentIssue?.identifier
@@ -1238,11 +1261,11 @@ export function ManualCreatePanel({
                   })}
                 </span>
               ) : parentIssueId && parentIssue ? (
-                <div className="inline-flex items-center rounded-full border text-caption transition-colors hover:bg-accent/60">
+                <div className="inline-flex items-center rounded-md border text-caption transition-colors hover:bg-accent/60">
                   <button
                     type="button"
                     onClick={() => setParentPickerOpen(true)}
-                    className="flex items-center gap-1.5 py-1 pl-2.5 cursor-pointer"
+                    className="flex items-center gap-1.5 py-1 pl-2 cursor-pointer"
                   >
                     <ArrowUp className="size-3 text-muted-foreground" />
                     <span>
@@ -1267,9 +1290,9 @@ export function ManualCreatePanel({
               {childIssues.map((c) => (
                 <div
                   key={c.id}
-                  className="inline-flex items-center rounded-full border text-caption transition-colors hover:bg-accent/60"
+                  className="inline-flex items-center rounded-md border text-caption transition-colors hover:bg-accent/60"
                 >
-                  <div className="flex items-center gap-1.5 py-1 pl-2.5">
+                  <div className="flex items-center gap-1.5 py-1 pl-2">
                     <ArrowDown className="size-3 text-muted-foreground" />
                     <span>{t(($) => $.create_issue.subissue_chip, { identifier: c.identifier })}</span>
                   </div>

@@ -158,6 +158,29 @@ describe("DeliverablesSection", () => {
     expect(downloadMock).toHaveBeenCalledWith("zip");
   });
 
+  it("copies a file's latest-version link from its row, without opening it", () => {
+    const onCopyLink = vi.fn();
+    renderWithI18n(
+      withQuery(
+        <DeliverablesSection files={FILES} onOpenOverview={vi.fn()} onCopyLink={onCopyLink} />,
+      ),
+    );
+    const buttons = screen.getAllByRole("button", { name: "Copy link to latest version" });
+    // One per file row; the image thumbnails above have none.
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[0]!);
+    expect(onCopyLink).toHaveBeenCalledWith("latency.csv");
+    expect(openAtMock).not.toHaveBeenCalled();
+    // The row itself still opens the file.
+    fireEvent.click(screen.getByRole("button", { name: "report.md, version 2" }));
+    expect(openAtMock).toHaveBeenCalledWith("report-2");
+  });
+
+  it("shows no copy button without a link to copy", () => {
+    renderSection(FILES);
+    expect(screen.queryByRole("button", { name: "Copy link to latest version" })).toBeNull();
+  });
+
   it("opens the overview from view all", () => {
     const onOpenOverview = vi.fn();
     renderSection(FILES, onOpenOverview);
@@ -188,6 +211,25 @@ describe("DeliverablesOverview", () => {
     );
     return { onClose, onLocate };
   }
+
+  it("shows every uploaded image version as a separate selectable thumbnail", () => {
+    const older = { ...SHOT, id: "shot-old", created_at: "2026-09-19T10:00:00Z" };
+    const files = collectDeliverableFiles([comment("older-comment", [older]), ...TIMELINE]);
+    renderOverview({ files });
+    expect(screen.getAllByTitle("settings.png")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: /^Images\s*2$/ }));
+    expect(screen.getAllByTitle("settings.png")).toHaveLength(2);
+    fireEvent.click(screen.getAllByTitle("settings.png")[0]!);
+    expect(openAtMock).toHaveBeenCalledWith("shot-old");
+  });
+
+  it("offers a jump for every known posting comment", () => {
+    const { onLocate } = renderOverview();
+    const buttons = screen.getAllByRole("button", { name: "Show in comments" });
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[0]!);
+    expect(onLocate).toHaveBeenCalledWith({ kind: "comment", commentId: "c-1" });
+  });
 
   it("counts exactly what the sidebar counts", () => {
     renderOverview();
@@ -221,6 +263,19 @@ describe("DeliverablesOverview", () => {
     fireEvent.click(within(secondGroup!).getByRole("button", { name: "Show in comments" }));
     expect(onClose).toHaveBeenCalledTimes(2);
     expect(onLocate).toHaveBeenCalledWith({ kind: "comment", commentId: "c-2" });
+  });
+
+  it("copies a tile's latest-version link without opening it", () => {
+    const onCopyLink = vi.fn();
+    const { onClose } = renderOverview({ onCopyLink });
+    const dialog = screen.getByRole("dialog", { name: "MUL-7588 deliverables" });
+    const buttons = within(dialog).getAllByRole("button", { name: "Copy link to latest version" });
+    expect(buttons).toHaveLength(3);
+    // Groups are in page order: the screenshot comes first.
+    fireEvent.click(buttons[0]!);
+    expect(onCopyLink).toHaveBeenCalledWith("settings.png");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(openAtMock).not.toHaveBeenCalled();
   });
 
   it("goes back to the viewer's file with G, and closes with Escape", () => {
@@ -301,5 +356,43 @@ describe("useDeliverableDetails", () => {
     locateFromTopBar?.();
     const located = `locate:${JSON.stringify({ kind: "comment", commentId: "c-2" })}`;
     expect(calls).toEqual(["close", located, "close", located]);
+  });
+  it("offers the latest-version link for a deliverable, by file name", () => {
+    const onCopyLink = vi.fn();
+    let copyLink: { label: string; onSelect: () => void } | undefined;
+    function Harness() {
+      const describe = useDeliverableDetails({
+        files: FILES,
+        commentById: new Map(TIMELINE.map((entry) => [entry.id, entry])),
+        onLocate: vi.fn(),
+        onCopyLink,
+      });
+      // An older version: the link still names the file, so it opens the newest.
+      const item = { key: "report-1", url: REPORT_V1.url, filename: REPORT_V1.filename, attachment: REPORT_V1, imageByConstruction: false, blockId: "c-1" };
+      copyLink = describe(item, { items: [item], goTo: () => true, close: vi.fn() }).copyLink;
+      return null;
+    }
+    renderWithI18n(withQuery(<Harness />));
+    expect(copyLink?.label).toBe("Copy link to latest version");
+    copyLink?.onSelect();
+    expect(onCopyLink).toHaveBeenCalledWith("report.md");
+  });
+
+  it("offers no link for a file that is not a deliverable", () => {
+    let copyLink: unknown = "unset";
+    function Harness() {
+      const describe = useDeliverableDetails({
+        files: FILES,
+        commentById: new Map(),
+        onLocate: vi.fn(),
+        onCopyLink: vi.fn(),
+      });
+      const brief = attachment({ id: "brief", filename: "brief.pdf", comment_id: null });
+      const item = { key: "brief", url: brief.url, filename: brief.filename, attachment: brief, imageByConstruction: false, blockId: "description" };
+      copyLink = describe(item, { items: [item], goTo: () => true, close: vi.fn() }).copyLink;
+      return null;
+    }
+    renderWithI18n(withQuery(<Harness />));
+    expect(copyLink).toBeUndefined();
   });
 });

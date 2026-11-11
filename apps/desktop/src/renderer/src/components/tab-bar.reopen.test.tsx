@@ -5,6 +5,7 @@ import { configureShortcutPlatform } from "@multica/core/shortcuts";
 import { RESOURCES } from "@multica/views/locales";
 import { getActiveTab, useTabStore } from "@/stores/tab-store";
 import { useNavigationInputBindings } from "@/hooks/use-tab-history";
+import { DesktopNavigationProvider } from "@/platform/navigation";
 import { TabBar } from "./tab-bar";
 
 // Presentation data is a query-cache concern. Keep the real strip, menu,
@@ -16,7 +17,11 @@ vi.mock("@multica/views/layout", () => ({
 
 function Shell() {
   useNavigationInputBindings();
-  return <I18nProvider locale="en" resources={RESOURCES}><TabBar /></I18nProvider>;
+  return (
+    <I18nProvider locale="en" resources={RESOURCES}>
+      <DesktopNavigationProvider><TabBar /></DesktopNavigationProvider>
+    </I18nProvider>
+  );
 }
 
 beforeEach(() => {
@@ -28,9 +33,13 @@ beforeEach(() => {
   useTabStore.getState().reset();
   useTabStore.getState().switchWorkspace("acme");
   configureShortcutPlatform("macos");
-  Object.assign(window, { desktopAPI: { windowContext: { kind: "main" } } });
+  vi.stubGlobal("desktopAPI", {
+    runtimeConfig: { ok: true, config: { appUrl: "https://fixture.invalid" } },
+    windowContext: { kind: "main" },
+    openIssueWindow: vi.fn(),
+  });
 });
-afterEach(() => { cleanup(); configureShortcutPlatform(null); });
+afterEach(() => { cleanup(); configureShortcutPlatform(null); vi.unstubAllGlobals(); });
 
 function seed() {
   const store = useTabStore.getState();
@@ -102,5 +111,59 @@ describe("closed destinations through the real tab strip", () => {
     fireEvent.keyDown(window, { key: "T", metaKey: true, shiftKey: true });
     expect(useTabStore.getState().byWorkspace.acme.tabs.map((t) => t.title)).toEqual(["Issues", "Projects", "Agents", "Settings"]);
     expect(useTabStore.getState().byWorkspace.acme.tabs[0]).toMatchObject({ id: pinned.id, pinned: true });
+  });
+
+  it("Close Right keeps pinned tabs and restores destinations left to right through the menu", async () => {
+    const store = useTabStore.getState();
+    const issues = store.byWorkspace.acme.tabs[0];
+    store.togglePin(issues.id);
+    const projects = store.addTab("/acme/projects", "Projects");
+    store.togglePin(projects);
+    store.addTab("/acme/agents", "Agents");
+    const settings = store.addTab("/acme/settings", "Settings");
+    store.setActiveTab(projects);
+    store.setActiveTab(settings);
+    render(<Shell />);
+
+    fireEvent.click(within(await menuOn("Issues (pinned)")).getByRole("menuitem", { name: "Close tabs to the right" }));
+    let group = useTabStore.getState().byWorkspace.acme;
+    expect(group.tabs.map((tab) => tab.id)).toEqual([issues.id, projects]);
+    expect(group.activeTabId).toBe(issues.id);
+    expect(group.recentTabIds).toEqual([projects]);
+
+    fireEvent.click(within(await menuOn("Issues (pinned)")).getByRole("menuitem", { name: /Reopen closed tab/i }));
+    expect(getActiveTab(useTabStore.getState())?.title).toBe("Agents");
+    fireEvent.click(within(await menuOn("Agents")).getByRole("menuitem", { name: /Reopen closed tab/i }));
+    group = useTabStore.getState().byWorkspace.acme;
+    expect(group.tabs.map((tab) => tab.title)).toEqual(["Issues", "Projects", "Agents", "Settings"]);
+    expect(group.tabs.map((tab) => tab.pinned)).toEqual([true, true, false, false]);
+    expect(group.recentTabIds).toEqual([group.tabs[2].id, issues.id, projects]);
+    expect(within(await menuOn("Settings")).getByRole("menuitem", { name: /Reopen closed tab/i })).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("keeps the current menu order, shareable Copy link, pin and issue-window actions", async () => {
+    seed();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", Object.create(navigator, {
+      clipboard: { value: { writeText } },
+    }));
+    render(<Shell />);
+    let menu = await menuOn("Example issue");
+    const labels = [
+      "Open as new window", "Pin tab", "Copy link", "Close tab", "Close other tabs",
+      "Close tabs to the right", "Reopen closed tab",
+    ];
+    const items = within(menu).getAllByRole("menuitem");
+    expect(items).toHaveLength(labels.length);
+    items.forEach((item, index) => expect(item).toHaveAccessibleName(labels[index]));
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Copy link" }));
+    expect(writeText).toHaveBeenCalledExactlyOnceWith("https://fixture.invalid/acme/issues/ABC?filter=mine#comment-42");
+    menu = await menuOn("Example issue");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Open as new window" }));
+    expect(window.desktopAPI.openIssueWindow).toHaveBeenCalledExactlyOnceWith({
+      path: "/acme/issues/ABC?filter=mine#comment-42", title: "Example issue",
+    });
+    fireEvent.click(within(await menuOn("Example issue")).getByRole("menuitem", { name: "Pin tab" }));
+    expect(useTabStore.getState().byWorkspace.acme.tabs.find((tab) => tab.title === "Example issue")?.pinned).toBe(true);
   });
 });

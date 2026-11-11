@@ -24,6 +24,7 @@ import {
   useIssueViewRenameStore,
   type IssueViewRenameSurface,
 } from "@multica/core/issue-views/rename-store";
+import { useIssueViewEditStore } from "@multica/core/issue-views/edit-store";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 
@@ -57,6 +58,7 @@ export function useIssueViewActions() {
   const deleteView = useDeleteIssueView(wsId);
   const setActive = useActiveIssueViewStore((s) => s.setActive);
   const startRename = useIssueViewRenameStore((s) => s.start);
+  const startEdit = useIssueViewEditStore((s) => s.start);
   const { star } = sidebar;
 
   const open = useCallback(
@@ -126,6 +128,14 @@ export function useIssueViewActions() {
     sidebar,
     canManage: useCallback((view: IssueView) => canManageIssueView(view, userId ?? null, role), [role, userId]),
     open,
+    /** Opens the view with its filter menu open, where its conditions are edited. */
+    edit: useCallback(
+      (view: IssueView) => {
+        open(view);
+        startEdit(view.id);
+      },
+      [open, startEdit],
+    ),
     create,
     duplicate: useCallback(
       (view: IssueView, renameIn: IssueViewRenameSurface) =>

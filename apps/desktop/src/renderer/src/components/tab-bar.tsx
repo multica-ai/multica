@@ -6,8 +6,12 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { motion, useReducedMotion } from "motion/react";
-import { X, Plus, Pin, PinOff, ListX, AppWindow } from "@multica/ui/icons";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
+import { toast } from "sonner";
+import { X, Plus, Pin, PinOff, ListX, ListEnd, AppWindow, Link2 } from "@multica/ui/icons";
+import { copyText } from "@multica/ui/lib/clipboard";
+import { useNavigation } from "@multica/views/navigation";
 import {
   DndContext,
   PointerSensor,
@@ -136,6 +140,7 @@ function SortableTabItem({
   isActive,
   isOnly,
   canCloseOthers,
+  canCloseRight,
   isNew,
   shouldReduceMotion,
 }: {
@@ -148,6 +153,7 @@ function SortableTabItem({
    */
   isOnly: boolean;
   canCloseOthers: boolean;
+  canCloseRight: boolean;
   isNew: boolean;
   shouldReduceMotion: boolean;
 }) {
@@ -158,6 +164,8 @@ function SortableTabItem({
   const reopenClosedTab = useTabStore((s) => s.reopenClosedTab);
   const canReopen = useTabStore((s) => !!s.activeWorkspaceSlug &&
     (s.closedTabsByWorkspace[s.activeWorkspaceSlug]?.length ?? 0) > 0);
+  const closeTabsToRight = useTabStore((s) => s.closeTabsToRight);
+  const { getShareableUrl } = useNavigation();
   const togglePin = useTabStore((s) => s.togglePin);
   const updateTab = useTabStore((s) => s.updateTab);
   const issueWindowPath = parseIssueWindowPath(tab.url);
@@ -166,7 +174,7 @@ function SortableTabItem({
   // query cache — a resource's own icon/status/avatar and its real title,
   // updated as the cache updates. `tab.title` is only a persisted first-frame
   // fallback. See @multica/views useTabPresentation.
-  const { visual, title } = useTabPresentation(tab.url, tab.title);
+  const { visual, title, titleResolved } = useTabPresentation(tab.url, tab.title, { fetch: true });
   const pinLabel = tab.pinned
     ? t(($) => $.desktop.tab_bar.unpin)
     : t(($) => $.desktop.tab_bar.pin);
@@ -177,15 +185,15 @@ function SortableTabItem({
     ? t(($) => $.desktop.tab_bar.pinned_name, { title })
     : title;
 
-  // Persist the active tab's resolved title so it survives as the next
+  // Persist each tab's resolved title so it survives as the next
   // session's first-frame fallback. The tab strip itself always renders the
   // live resolved `title`; `tab.title` is just the persisted seed. This
   // replaces the old document.title → MutationObserver → tab.title path (the OS
   // window title stays page-driven via useDocumentTitle).
   useEffect(() => {
-    if (!isActive) return;
+    if (!titleResolved) return;
     if (tab.title !== title) updateTab(tab.id, { title });
-  }, [isActive, title, tab.id, tab.title, updateTab]);
+  }, [titleResolved, title, tab.id, tab.title, updateTab]);
 
   const {
     attributes,
@@ -224,6 +232,12 @@ function SortableTabItem({
 
   const stopDragOnAction = (e: React.PointerEvent) => {
     e.stopPropagation();
+  };
+
+  const handleCopyLink = () => {
+    void copyText(getShareableUrl(tab.url)).then((ok) => {
+      if (ok) toast.success(t(($) => $.desktop.tab_bar.link_copied));
+    });
   };
 
   const handleOpenAsWindow = () => {
@@ -364,6 +378,10 @@ function SortableTabItem({
                 </>
               )}
             </ContextMenuItem>
+            <ContextMenuItem onClick={handleCopyLink}>
+              <Link2 />
+              {t(($) => $.desktop.tab_bar.copy_link)}
+            </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem
               variant="destructive"
@@ -380,6 +398,14 @@ function SortableTabItem({
             >
               <ListX />
               {closeOthersLabel}
+            </ContextMenuItem>
+            <ContextMenuItem
+              variant="destructive"
+              disabled={!canCloseRight}
+              onClick={() => closeTabsToRight(tab.id)}
+            >
+              <ListEnd />
+              {t(($) => $.desktop.tab_bar.close_right)}
             </ContextMenuItem>
             <ContextMenuSeparator />
             <ContextMenuItem disabled={!canReopen} onClick={reopenClosedTab}>
@@ -501,7 +527,7 @@ export function TabBar() {
   const group = useActiveGroup();
   const moveTab = useTabStore((s) => s.moveTab);
   const activeWorkspaceSlug = useTabStore((s) => s.activeWorkspaceSlug);
-  const shouldReduceMotion = useReducedMotion() ?? false;
+  const shouldReduceMotion = useReducedMotion();
   const tabScrollRef = useRef<HTMLDivElement>(null);
   const previousTabsRef = useRef<TabSnapshot | null>(null);
   const tabFadeStyle = useScrollFade(
@@ -616,6 +642,9 @@ export function TabBar() {
                     isOnly={tabs.length === 1}
                     canCloseOthers={tabs.some(
                       (candidate) => candidate.id !== tab.id && !candidate.pinned,
+                    )}
+                    canCloseRight={tabs.some(
+                      (candidate, i) => i > index && !candidate.pinned,
                     )}
                     isNew={addedTabIdSet.has(tab.id)}
                     shouldReduceMotion={shouldReduceMotion}
