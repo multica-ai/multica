@@ -316,6 +316,16 @@ names the value it comes from, for example
 (`color`, `variable-select`, `number`, `slider`, `text`, `font`) are measured
 at their defaults only, so check the other values you offer yourself.
 
+Rail items are measured the way the rail paints them: `--rail-item-color`
+on `--app-shell` at rest, and `--rail-item-active-color` on
+`--rail-item-active-background` (the current space) and on
+`--rail-item-hover-background`, each with the fallback in the
+[reference](#variable-reference) when it is not set. The default hover fill
+is `--sidebar-accent` at 60% over `--app-shell`, and it is measured that way.
+When a mode has frame rules, the rail takes the frame's colours and a failure
+reads `Contrast, dark mode (frame): …`; without them it takes the page's
+colours and reads `Contrast, light mode: …`, like the other page pairs.
+
 Contrast covers the page, the frame, and two places a theme reaches only
 indirectly:
 

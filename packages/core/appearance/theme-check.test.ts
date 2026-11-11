@@ -377,6 +377,34 @@ describe("theme check", () => {
         expect.stringMatching(/^Contrast, light mode \(frame, Frame = Ink\): --rail-item-active-color is below 4\.5:1/),
       ]);
     });
+
+    describe("without frame rules", () => {
+      // MS-DOS 1.2.0, light: white on a blue active item, but the default hover is a pale --sidebar-accent wash.
+      const dos = ".theme-light { --rail-item-active-background: #0000aa; --rail-item-active-color: #ffffff; }";
+
+      it("measures the rail on the page's colours", () => {
+        expect(errors(dos)).toEqual([
+          expect.stringMatching(/^Contrast, light mode: --rail-item-active-color is below 4\.5:1 on --rail-item-hover-background \(1\.\d\d:1\)\.$/),
+        ]);
+        expect(check(`${dos}\n.theme-light { --rail-item-hover-background: #0000aa; }`)).toMatchObject({ ok: true, issues: [] });
+        const rail = check(dos).contrast.filter((c) => c.mode === "light" && c.foreground === "--rail-item-active-color");
+        expect(rail.map((c) => [c.area, c.background])).toEqual([
+          ["page", "--rail-item-active-background"],
+          ["page", "--rail-item-hover-background"],
+        ]);
+      });
+
+      it("falls back to --sidebar-accent-foreground on --sidebar-accent", () => {
+        expect(errors(".theme-dark { --sidebar-accent-foreground: #333333; }")).toEqual([
+          expect.stringMatching(
+            /^Contrast, dark mode: --sidebar-accent-foreground is below 4\.5:1 on --sidebar-accent \(1\.\d\d:1\) and --rail-item-hover-background \(1\.\d\d:1\)\.$/,
+          ),
+        ]);
+        expect(errors(".theme-light { --rail-item-color: #dddddd; }")).toEqual([
+          expect.stringMatching(/^Contrast, light mode: --rail-item-color is below 4\.5:1 on --app-shell/),
+        ]);
+      });
+    });
   });
 
   it("warns instead of guessing when a colour cannot be read", () => {
