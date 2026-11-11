@@ -93,6 +93,7 @@ type Outbound struct {
 type outboundQueries interface {
 	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
+	ListTaskReplyFragments(ctx context.Context, taskID pgtype.UUID) ([]db.ListTaskReplyFragmentsRow, error)
 	// ListAttachmentsByChatMessage is the files the agent bound to its reply,
 	// read by the attachment hop (outbound_media.go).
 	ListAttachmentsByChatMessage(ctx context.Context, arg db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error)
@@ -140,9 +141,6 @@ type streamState struct {
 	// lastPushed is the body the chat shows, so a push that would change
 	// nothing is not sent.
 	lastPushed string
-	// stepsShown is whether that body carries the steps, which a run that
-	// ends without an answer has to take off again.
-	stepsShown bool
 	// ended is set when the run is over and the stream is released, for a
 	// request that was with Telegram at that moment.
 	ended bool
@@ -192,11 +190,11 @@ type terminalReply struct {
 	fallbackFreshSend bool
 	plainTextFallback bool
 	plainTextEdit     bool
-	kind            terminalKind
-	settleReason    string
-	turn            replyTurn
-	turnResolved    bool
-	lease           *deliveryLease
+	kind              terminalKind
+	settleReason      string
+	turn              replyTurn
+	turnResolved      bool
+	lease             *deliveryLease
 	// remnant is the steps a turn that ends without an answer left on screen.
 	remnant         *streamRemnant
 	acquireAttempts int
@@ -550,7 +548,6 @@ func (o *Outbound) advanceStream(ctx context.Context, target *replyTarget, turn 
 	}
 	st.absorb(frame, now)
 	body := st.render(now)
-	showsSteps := len(st.steps.lines) > 0
 	unchanged := st.messageID != 0 && body == st.lastPushed
 	o.mu.Unlock()
 
@@ -563,7 +560,6 @@ func (o *Outbound) advanceStream(ctx context.Context, target *replyTarget, turn 
 	pushed, retryAt := o.pushPartial(ctx, target, st, lease, body)
 	if pushed {
 		o.mu.Lock()
-		st.stepsShown = showsSteps
 		var remnant *streamRemnant
 		if st.ended {
 			// The run was cancelled while this request was with Telegram, so
@@ -668,7 +664,6 @@ func (o *Outbound) pushPartial(ctx context.Context, target *replyTarget, st *str
 		return false, available
 	}
 
-	api := newBotAPI(o.apiBase, target.botToken, o.client)
 	o.mu.Lock()
 	if o.streams[target.streamKey] != st {
 		o.mu.Unlock()
@@ -676,6 +671,18 @@ func (o *Outbound) pushPartial(ctx context.Context, target *replyTarget, st *str
 	}
 	msgID := st.messageID
 	o.mu.Unlock()
+	// Routing is immutable, but installation status and credentials are not.
+	// Revalidate at the actual send slot, including deferred/heartbeat pushes.
+	token, err := o.activeBotToken(ctx, target.installationID)
+	if err != nil {
+		o.logger.WarnContext(ctx, "telegram outbound: cannot revalidate stream installation", "error", err)
+		return false, time.Time{}
+	}
+	if token == "" {
+		o.clearStreamKey(target.streamKey)
+		return false, time.Time{}
+	}
+	api := newBotAPI(o.apiBase, token, o.client)
 
 	if msgID != 0 {
 		// Re-prove the turn immediately before the edit. Acquiring it and then
@@ -1068,9 +1075,6 @@ func (o *Outbound) initializeTerminalReply(ctx context.Context, reply *terminalR
 			return terminalRequestResult{done: true}
 		}
 		o.clearStream(reply.event)
-		if outcome == closedNow {
-			o.tidyRemnant(ctx, reply.remnant)
-		}
 		if outcome == closedNow && reply.settleReason == "empty_reply" {
 			// The agent may have said nothing and bound a file instead; the
 			// files are then the whole reply. Only the call that ended the
@@ -1078,6 +1082,14 @@ func (o *Outbound) initializeTerminalReply(ctx context.Context, reply *terminalR
 			// automatic retry has superseded, finds the turn closed already.
 			o.deliverAttachments(ctx, reply)
 		}
+		remnant, err := o.recoverStreamRemnant(ctx, target, reply.turn, reply.settleReason, reply.remnant)
+		if err != nil {
+			if retryAt, ok := o.retryDeliveryAcquire(reply, maxDeliveryClaimErrorAttempts); ok {
+				return terminalRequestResult{retryAt: retryAt}
+			}
+			return terminalRequestResult{done: true, err: err}
+		}
+		o.tidyRemnant(ctx, remnant)
 		return terminalRequestResult{done: true}
 	}
 
@@ -1762,34 +1774,44 @@ func (o *Outbound) resolveTarget(ctx context.Context, e events.Event, _ bool) (*
 		return nil, nil
 	}
 	binding := telegramBindingFromTaskDelivery(delivery)
-	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
-		ID:          binding.InstallationID,
-		ChannelType: string(TypeTelegram),
-	})
+	token, err := o.activeBotToken(ctx, binding.InstallationID)
 	if err != nil {
-		return nil, fmt.Errorf("load telegram installation: %w", err)
+		return nil, err
 	}
-	if inst.Status != "active" {
+	if token == "" {
 		return nil, nil // revoked between trigger and reply
-	}
-	creds, err := decodeCredentials(inst.Config, o.decrypt)
-	if err != nil {
-		return nil, fmt.Errorf("decode telegram credentials: %w", err)
 	}
 	chatID, threadID, replyTo := outboundTarget(binding)
 	return &replyTarget{
 		streamKey:      util.UUIDToString(taskID),
-		botKey:         util.UUIDToString(inst.ID),
+		botKey:         util.UUIDToString(binding.InstallationID),
 		chatID:         chatID,
 		threadID:       threadID,
 		replyTo:        replyTo,
-		botToken:       creds.BotToken,
+		botToken:       token,
 		private:        delivery.ChatType == string(channel.ChatTypeP2P),
 		taskID:         taskID,
 		bindingID:      delivery.BindingID,
-		installationID: inst.ID,
+		installationID: binding.InstallationID,
 		channelChatID:  delivery.ChannelChatID,
 	}, nil
+}
+
+func (o *Outbound) activeBotToken(ctx context.Context, installationID pgtype.UUID) (string, error) {
+	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
+		ID: installationID, ChannelType: string(TypeTelegram),
+	})
+	if err != nil {
+		return "", fmt.Errorf("load telegram installation: %w", err)
+	}
+	if inst.Status != "active" {
+		return "", nil
+	}
+	creds, err := decodeCredentials(inst.Config, o.decrypt)
+	if err != nil {
+		return "", fmt.Errorf("decode telegram credentials: %w", err)
+	}
+	return creds.BotToken, nil
 }
 
 func telegramBindingFromTaskDelivery(delivery db.ChannelTaskDelivery) db.ChannelChatSessionBinding {

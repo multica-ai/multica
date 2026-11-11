@@ -3,12 +3,15 @@ package telegram
 import (
 	"context"
 	"errors"
+	"fmt"
 	"html"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
@@ -371,9 +374,9 @@ func (o *Outbound) handleTaskProgress(e events.Event) {
 // streamRemnant is what a stream left in the chat when its run ended without
 // an answer to replace it.
 type streamRemnant struct {
-	chatID    int64
-	messageID int64
-	botToken  string
+	chatID         int64
+	messageID      int64
+	installationID pgtype.UUID
 	// body is the message without its steps; empty when steps were all it had.
 	body string
 }
@@ -399,20 +402,52 @@ func (o *Outbound) takeStream(e events.Event) *streamRemnant {
 	return remnant
 }
 
-// remnantLocked reports what the chat still shows of st's steps, and takes
-// them off st. It goes by what was last sent, not by the list in memory: text
-// waiting for the chat's next edit has emptied the list while the chat still
-// shows it. The caller holds o.mu.
+// remnantLocked keeps the accumulated prose without steps, including text
+// waiting for its edit slot. The caller holds o.mu.
 func (o *Outbound) remnantLocked(st *streamState) *streamRemnant {
-	if st.messageID == 0 || !st.stepsShown || st.target == nil {
+	if st.messageID == 0 || st.target == nil {
 		return nil
 	}
 	st.steps.lines = nil
-	st.stepsShown = false
 	return &streamRemnant{
-		chatID: st.chatID, messageID: st.messageID, botToken: st.target.botToken,
+		chatID: st.chatID, messageID: st.messageID, installationID: st.target.installationID,
 		body: st.render(o.now()),
 	}
+}
+
+// recoverStreamRemnant uses the shared delivery and persisted transcript when
+// the closing replica never saw the stream. The settled reason/depth check also
+// prevents a late cancellation from replacing a final answer or a newer retry.
+func (o *Outbound) recoverStreamRemnant(ctx context.Context, target *replyTarget, turn replyTurn, reason string, local *streamRemnant) (*streamRemnant, error) {
+	row, err := o.q.GetChannelReplyDelivery(ctx, turn.id)
+	if err != nil {
+		return nil, fmt.Errorf("load telegram reply for cleanup: %w", err)
+	}
+	messageID := (&deliveryLease{row: row}).messageID()
+	if row.Phase != deliveryPhaseSettled || row.SettledReason != reason ||
+		turn.depth < row.AttemptDepth || row.ChunksSent != 0 || messageID == 0 {
+		return nil, nil
+	}
+	fragments, err := o.q.ListTaskReplyFragments(ctx, row.TaskID)
+	if err != nil {
+		return nil, fmt.Errorf("load telegram reply text for cleanup: %w", err)
+	}
+	if len(fragments) == 0 && local != nil && local.messageID == messageID {
+		return local, nil
+	}
+	var text streamState
+	for _, fragment := range fragments {
+		if fragment.Type == "text" {
+			text.absorb(streamFrame{text: fragment.Content}, o.now())
+		} else if o.progress != ProgressOff {
+			text.absorb(streamFrame{step: &stepLine{}}, o.now())
+		}
+	}
+	text.steps.lines = nil
+	return &streamRemnant{
+		chatID: target.chatID, messageID: messageID, installationID: target.installationID,
+		body: text.render(o.now()),
+	}, nil
 }
 
 // tidyRemnant takes the steps off a message whose run is over: the text stays
@@ -422,10 +457,14 @@ func (o *Outbound) tidyRemnant(ctx context.Context, remnant *streamRemnant) {
 	if remnant == nil {
 		return
 	}
-	api := newBotAPI(o.apiBase, remnant.botToken, o.client)
 	call := func() error {
 		ctx, cancel := o.callContext(ctx)
 		defer cancel()
+		token, err := o.activeBotToken(ctx, remnant.installationID)
+		if err != nil || token == "" {
+			return err
+		}
+		api := newBotAPI(o.apiBase, token, o.client)
 		if remnant.body == "" {
 			return api.DeleteMessage(ctx, remnant.chatID, remnant.messageID)
 		}
