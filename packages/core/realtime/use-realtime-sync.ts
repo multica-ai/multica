@@ -62,6 +62,7 @@ import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import { isWorkspaceDeletePending } from "../workspace/pending-delete";
 import {
   showSystemNotification,
+  systemNotificationSuppressedByFocus,
   type SystemNotificationPayload,
 } from "../platform/system-notification";
 import type { Workspace } from "../types/workspace";
@@ -585,7 +586,7 @@ export async function handleInboxNew(
   // the user is already looking at Multica, the inbox sidebar's unread
   // styling is enough — no need to interrupt with a banner. `desktopAPI`
   // is injected by the preload script; its absence (web app) skips silently.
-  if (typeof document !== "undefined" && document.hasFocus()) return;
+  if (systemNotificationSuppressedByFocus()) return;
   // Resolve the source workspace's slug once: it pins BOTH the mute check
   // and the deep link to the workspace the inbox item BELONGS to, never the
   // currently active one. Reading `getCurrentSlug()` here was the source of
@@ -644,7 +645,7 @@ export function createChatReplyNotifier(
     if (!payload.workspace_id || !messageId || !payload.chat_session_id || !userId || seen.has(messageId)) return;
     seen.add(messageId);
     if (seen.size > 1_000) seen.delete(seen.values().next().value!);
-    if (typeof document !== "undefined" && document.hasFocus()) return;
+    if (systemNotificationSuppressedByFocus()) return;
 
     const slug = await resolveInboxSourceSlug(qc, payload.workspace_id);
     if (!slug) return;
@@ -654,7 +655,7 @@ export function createChatReplyNotifier(
     } catch {
       // Match the existing default-on system-notification behavior.
     }
-    if (getUserId() !== userId || (typeof document !== "undefined" && document.hasFocus())) return;
+    if (getUserId() !== userId || systemNotificationSuppressedByFocus()) return;
     showSystemNotification({
       slug,
       itemId: `chat:${messageId}`,
