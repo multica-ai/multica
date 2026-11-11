@@ -73,4 +73,58 @@ describe("notification preference patches", () => {
       ),
     ).toEqual({});
   });
+
+  it("derives Google Chat webhook changes independently of mute groups", () => {
+    expect(
+      deriveNotificationPreferencePatch(
+        { comments: "muted" },
+        {
+          comments: "muted",
+          google_chat_webhook:
+            "https://chat.googleapis.com/v1/spaces/AAAA/messages?key=k&token=t",
+        },
+      ),
+    ).toEqual({
+      google_chat_webhook:
+        "https://chat.googleapis.com/v1/spaces/AAAA/messages?key=k&token=t",
+    });
+
+    expect(
+      deriveNotificationPreferencePatch(
+        { google_chat_webhook: "https://chat.googleapis.com/••••" },
+        {},
+      ),
+    ).toEqual({ google_chat_webhook: "" });
+  });
+
+  it("never places a raw Google Chat webhook in the optimistic cache", () => {
+    const raw =
+      "https://chat.googleapis.com/v1/spaces/AAAA/messages?key=k&token=t";
+    const applied = applyNotificationPreferencePatch({}, {
+      google_chat_webhook: raw,
+    });
+
+    expect(applied.google_chat_webhook).toBe("••••");
+    expect(JSON.stringify(applied)).not.toContain("token=t");
+    expect(
+      rollbackNotificationPreferencePatch(
+        applied,
+        { google_chat_webhook: raw },
+        {},
+      ),
+    ).toEqual({});
+  });
+
+  it("keeps a later Google Chat credential change when an earlier write fails", () => {
+    expect(
+      rollbackNotificationPreferencePatch(
+        {},
+        {
+          google_chat_webhook:
+            "https://chat.googleapis.com/v1/spaces/AAAA/messages?key=k&token=t",
+        },
+        { google_chat_webhook: "https://chat.googleapis.com/old-mask" },
+      ),
+    ).toEqual({});
+  });
 });

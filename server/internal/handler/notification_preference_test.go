@@ -3,11 +3,14 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -174,5 +177,179 @@ func TestPatchNotificationPreferencesRejectsUnknownGroups(t *testing.T) {
 	)
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+type fakeGoogleChatSender struct {
+	calls      int
+	webhookURL string
+	text       string
+	err        error
+}
+
+func (s *fakeGoogleChatSender) Send(_ context.Context, webhookURL, text string) error {
+	s.calls++
+	s.webhookURL = webhookURL
+	s.text = text
+	return s.err
+}
+
+const handlerGoogleChatWebhook = "https://chat.googleapis.com/v1/spaces/AAAA_123/messages?key=test-key&token=test-token"
+
+func resetNotificationPreference(t *testing.T) {
+	t.Helper()
+	dbfx.Exec(t, `
+		DELETE FROM notification_preference
+		WHERE workspace_id = $1 AND user_id = $2
+	`, testWorkspaceID, testUserID)
+	dbfx.Cleanup(t, `
+		DELETE FROM notification_preference
+		WHERE workspace_id = $1 AND user_id = $2
+	`, testWorkspaceID, testUserID)
+}
+
+func TestGoogleChatWebhookIsConfirmedMaskedAndPreserved(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	resetNotificationPreference(t)
+
+	sender := &fakeGoogleChatSender{}
+	previousSender := testHandler.GoogleChatSender
+	testHandler.GoogleChatSender = sender
+	t.Cleanup(func() { testHandler.GoogleChatSender = previousSender })
+
+	var response struct {
+		Preferences map[string]string `json:"preferences"`
+	}
+	testutil.Call(
+		t,
+		testHandler.PatchNotificationPreferences,
+		notificationPreferenceRequest(t, http.MethodPatch, map[string]string{
+			"google_chat_webhook": handlerGoogleChatWebhook,
+		}),
+	).Want(http.StatusOK).JSON(&response)
+
+	masked := response.Preferences["google_chat_webhook"]
+	if masked == "" ||
+		strings.Contains(masked, "test-key") ||
+		strings.Contains(masked, "test-token") {
+		t.Fatalf("response did not mask webhook: %q", masked)
+	}
+	if sender.calls != 1 || sender.webhookURL != handlerGoogleChatWebhook {
+		t.Fatalf("confirmation calls=%d url=%q", sender.calls, sender.webhookURL)
+	}
+	if !strings.Contains(sender.text, "Handler Tests") {
+		t.Fatalf("confirmation text = %q", sender.text)
+	}
+
+	var stored []byte
+	dbfx.QueryRow(t, `
+		SELECT preferences
+		FROM notification_preference
+		WHERE workspace_id = $1 AND user_id = $2
+	`, testWorkspaceID, testUserID).Scan(&stored)
+	var storedPreferences map[string]string
+	if err := json.Unmarshal(stored, &storedPreferences); err != nil {
+		t.Fatalf("decode stored preferences: %v", err)
+	}
+	if storedPreferences["google_chat_webhook"] != handlerGoogleChatWebhook {
+		t.Fatalf("stored webhook = %q", storedPreferences["google_chat_webhook"])
+	}
+
+	response.Preferences = nil
+	testutil.Call(
+		t,
+		testHandler.PatchNotificationPreferences,
+		notificationPreferenceRequest(t, http.MethodPatch, map[string]string{
+			"google_chat_webhook": masked,
+		}),
+	).Want(http.StatusOK).JSON(&response)
+	if sender.calls != 1 {
+		t.Fatalf("masked echo sent another confirmation: calls=%d", sender.calls)
+	}
+
+	response.Preferences = nil
+	testutil.Call(
+		t,
+		testHandler.UpdateNotificationPreferences,
+		notificationPreferenceRequest(t, http.MethodPut, map[string]string{
+			"comments": "muted",
+		}),
+	).Want(http.StatusOK).JSON(&response)
+	if response.Preferences["google_chat_webhook"] != masked {
+		t.Fatalf("replace-all PUT dropped or changed webhook: %#v", response.Preferences)
+	}
+
+	response.Preferences = nil
+	testutil.Call(
+		t,
+		testHandler.GetNotificationPreferences,
+		notificationPreferenceRequest(t, http.MethodGet, map[string]string{}),
+	).Want(http.StatusOK).JSON(&response)
+	if response.Preferences["google_chat_webhook"] != masked {
+		t.Fatalf("GET returned unmasked webhook: %#v", response.Preferences)
+	}
+
+	response.Preferences = nil
+	testutil.Call(
+		t,
+		testHandler.PatchNotificationPreferences,
+		notificationPreferenceRequest(t, http.MethodPatch, map[string]string{
+			"google_chat_webhook": "",
+		}),
+	).Want(http.StatusOK).JSON(&response)
+	if response.Preferences["google_chat_webhook"] != "" {
+		t.Fatalf("clear response = %#v", response.Preferences)
+	}
+	if sender.calls != 1 {
+		t.Fatalf("clear sent a confirmation: calls=%d", sender.calls)
+	}
+}
+
+func TestGoogleChatWebhookRejectsInvalidOrUnreachableValuesWithoutStoring(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	tests := []struct {
+		name    string
+		webhook string
+		sendErr error
+	}{
+		{
+			name:    "invalid host",
+			webhook: "https://example.com/v1/spaces/AAAA/messages?key=k&token=t",
+		},
+		{
+			name:    "confirmation fails",
+			webhook: handlerGoogleChatWebhook,
+			sendErr: errors.New("connection refused"),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			resetNotificationPreference(t)
+			sender := &fakeGoogleChatSender{err: test.sendErr}
+			previousSender := testHandler.GoogleChatSender
+			testHandler.GoogleChatSender = sender
+			t.Cleanup(func() { testHandler.GoogleChatSender = previousSender })
+
+			testutil.Call(
+				t,
+				testHandler.PatchNotificationPreferences,
+				notificationPreferenceRequest(t, http.MethodPatch, map[string]string{
+					"google_chat_webhook": test.webhook,
+				}),
+			).Want(http.StatusBadRequest)
+
+			if got := dbfx.Count(t, `
+				SELECT count(*)
+				FROM notification_preference
+				WHERE workspace_id = $1 AND user_id = $2
+			`, testWorkspaceID, testUserID); got != 0 {
+				t.Fatalf("stored preference rows = %d, want 0", got)
+			}
+		})
 	}
 }

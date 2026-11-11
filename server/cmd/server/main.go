@@ -975,6 +975,16 @@ func main() {
 			}
 			drainCancel()
 		},
+		FlushNotificationDelivery: func() {
+			if h.NotificationDelivery == nil {
+				return
+			}
+			flushCtx, flushCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if !h.NotificationDelivery.Close(flushCtx) {
+				slog.Warn("notification delivery: flush deadline reached; pending items were dropped")
+			}
+			flushCancel()
+		},
 		StopMetricsServer: func() {
 			if metricsServer == nil {
 				return

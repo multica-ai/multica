@@ -76,6 +76,12 @@ import { InboxDemo } from "@/components/demos/inbox-demo";
 
 關閉某一類後，相關變化仍然儲存在任務中，只是不再建立收件箱通知。表情回應、快速建立結果和自動化暫停等少數型別不受這六組控制，始終投遞。系統通知和瀏覽器通知控制的是桌面橫幅，不會改變收件箱本身。
 
+### 將通知傳送到 Google Chat
+
+在 **設定 → 通知 → 應用程式外通知** 中，可以新增 Google Chat 空間的傳入 Webhook。請按 **Google Chat 空間 → 應用程式和整合 → Webhook → 新增 Webhook → 複製 URL** 操作，然後將 URL 貼到 Multica。
+
+Multica 會在儲存 Webhook 前傳送確認訊息。儲存的 URL 會在設定和 API 回應中隱藏敏感部分；新的收件箱條目會附上對應任務的連結。
+
 ## 接下來
 
 - [評論](/comments) — 瞭解回覆、提及和討論執行緒。

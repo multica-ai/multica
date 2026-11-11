@@ -76,6 +76,12 @@ Open **Settings → Notifications** to toggle each group separately:
 
 Turning a group off doesn't stop the changes from being recorded on the issue — it only stops the inbox notifications. A few types, such as reactions, quick-create results, and autopilot pauses, sit outside these six groups and are always delivered. System and browser notifications control desktop banners and don't change the inbox itself.
 
+### Send notifications to Google Chat
+
+In **Settings → Notifications → Out-of-app delivery**, add an incoming webhook for a Google Chat space. In Google Chat, open the space's **Apps & integrations → Webhooks**, add a webhook, and copy its URL into Multica.
+
+Multica posts a confirmation before saving the webhook. The saved URL is masked in settings and API responses, and new inbox items are sent with a link to the corresponding issue.
+
 ## Next steps
 
 - [Comments](/comments) — replies, mentions, and discussion threads.

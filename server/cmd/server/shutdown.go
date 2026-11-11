@@ -56,6 +56,10 @@ type shutdownSequence struct {
 	// outbound replies, now that no supervisor is delivering inbound events.
 	DrainChannelRouter func()
 
+	// FlushNotificationDelivery sends any in-memory inbox batches after every
+	// source of new channel work has stopped, while DB and network clients live.
+	FlushNotificationDelivery func()
+
 	StopMetricsServer func()
 	StopProfiling     func()
 }
@@ -73,6 +77,7 @@ func (s shutdownSequence) run() {
 		s.JoinTelegram,
 		s.JoinChannelSupervisor,
 		s.DrainChannelRouter,
+		s.FlushNotificationDelivery,
 		s.StopMetricsServer,
 		s.StopProfiling,
 	} {
