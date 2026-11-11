@@ -858,21 +858,27 @@
         "description": "Cuando falla una ejecución de agente"
       },
       "chat_replies": {
-        "label": "Respuestas de chat",
+        "label": "Respuestas de agentes",
         "description": "Cuando un agente termina de responder en un chat."
       }
     },
     "system": {
       "title": "Notificaciones del sistema",
-      "label": "Mostrar notificaciones del sistema"
+      "label": "Mostrar notificaciones del sistema",
+      "description": "Se aplica a las notificaciones de la bandeja de entrada y a las respuestas del chat."
     },
     "browser": {
       "label": "Notificaciones del navegador",
-      "hint": "Permite que este navegador muestre avisos de notificación para nuevos elementos de la bandeja.",
+      "hint": "Permite que este navegador muestre avisos para las notificaciones de la bandeja de entrada y las respuestas del chat.",
       "enable": "Activar",
       "granted": "Este navegador puede mostrar avisos de notificación.",
       "denied": "Bloqueado por tu navegador. Activa las notificaciones para este sitio en la configuración del navegador.",
       "enabled_badge": "Activado"
+    },
+    "chat": {
+      "title": "Chat",
+      "description": "Los indicadores de mensajes sin leer del chat siempre se muestran.",
+      "requires_system": "Activa primero las notificaciones del sistema."
     }
   },
   "tokens": {

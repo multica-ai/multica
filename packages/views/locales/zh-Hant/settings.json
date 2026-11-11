@@ -849,21 +849,27 @@
         "description": "AI 代理執行失敗時"
       },
       "chat_replies": {
-        "label": "聊天回覆",
+        "label": "AI 代理回覆",
         "description": "AI 代理在聊天中完成回覆時通知。"
       }
     },
     "system": {
       "title": "系統通知",
-      "label": "Multica 在背景時顯示系統通知"
+      "label": "Multica 在背景時顯示系統通知",
+      "description": "適用於收件匣通知和聊天回覆。"
     },
     "browser": {
       "label": "瀏覽器通知",
-      "hint": "允許當前瀏覽器為新的收件箱條目彈出通知橫幅。",
+      "hint": "允許此瀏覽器為收件匣通知和聊天回覆顯示橫幅。",
       "enable": "啟用",
       "granted": "當前瀏覽器可以彈出通知橫幅。",
       "denied": "已被瀏覽器攔截。請在瀏覽器設定中為本站點開啟通知權限。",
       "enabled_badge": "已啟用"
+    },
+    "chat": {
+      "title": "聊天",
+      "description": "聊天未讀數一律顯示，不受此開關影響。",
+      "requires_system": "請先開啟系統通知。"
     }
   },
   "tokens": {

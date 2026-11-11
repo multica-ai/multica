@@ -87,29 +87,39 @@ export function NotificationsTab() {
       </SettingsSection>
 
       <SettingsSection
-        title={t(($) => $.notifications.system.title)}
+        title={t(($) => $.notifications.chat.title)}
+        description={t(($) => $.notifications.chat.description)}
+        anchor="chat"
       >
         <SettingsCard>
           <SettingsRow
-            anchor="system"
-            label={t(($) => $.notifications.system.label)}
-          >
-              <Switch
-                checked={systemEnabled}
-                aria-label={t(($) => $.notifications.system.label)}
-                onCheckedChange={(checked) => handleToggle("system_notifications", checked)}
-              />
-          </SettingsRow>
-          <SettingsRow
             anchor="chat_replies"
             label={t(($) => $.notifications.groups.chat_replies.label)}
-            description={t(($) => $.notifications.groups.chat_replies.description)}
+            description={systemEnabled
+              ? t(($) => $.notifications.groups.chat_replies.description)
+              : t(($) => $.notifications.chat.requires_system)}
           >
             <Switch
               checked={preferences.chat_replies !== "muted"}
               disabled={!systemEnabled}
               aria-label={t(($) => $.notifications.groups.chat_replies.label)}
               onCheckedChange={(checked) => handleToggle("chat_replies", checked)}
+            />
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection title={t(($) => $.notifications.system.title)}>
+        <SettingsCard>
+          <SettingsRow
+            anchor="system"
+            label={t(($) => $.notifications.system.label)}
+            description={t(($) => $.notifications.system.description)}
+          >
+            <Switch
+              checked={systemEnabled}
+              aria-label={t(($) => $.notifications.system.label)}
+              onCheckedChange={(checked) => handleToggle("system_notifications", checked)}
             />
           </SettingsRow>
         </SettingsCard>
