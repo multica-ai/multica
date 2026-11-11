@@ -58,6 +58,30 @@ func readZcodeConfig(path string, into any) error {
 	return json.Unmarshal(data, into)
 }
 
+// zcodeDataBaseDir returns the directory whose .zcode/v2 holds ZCode's data.
+// An explicit ZCODE_DATA_BASE_DIR wins. Otherwise a data storage path chosen in
+// ZCode Desktop is read from setting.json, which Desktop always keeps under
+// the home directory; the CLI itself never reads it. A missing or unusable
+// setting falls back to the home directory, as Desktop does.
+func zcodeDataBaseDir(env []string) (string, error) {
+	if base := zcodeEnvValue(env, "ZCODE_DATA_BASE_DIR"); base != "" {
+		return base, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	var setting struct {
+		DataBaseDir string `json:"dataBaseDir"`
+	}
+	if readZcodeConfig(filepath.Join(home, ".zcode", "v2", "setting.json"), &setting) == nil {
+		if dir := strings.TrimSpace(setting.DataBaseDir); dir != "" {
+			return dir, nil
+		}
+	}
+	return home, nil
+}
+
 // prepareZcodeRuntimeEnv adapts Desktop's enabled API-key connections into a
 // private, process-owned native provider repository snapshot under the process
 // temp dir (multica-zcode-providers-*). It reads Desktop's enabled connections
@@ -67,29 +91,22 @@ func readZcodeConfig(path string, into any) error {
 // crash leftovers do not linger.
 func prepareZcodeRuntimeEnv(executable string, env []string) ([]string, func(), error) {
 	noop := func() {}
+	script := resolveZcodeScript(executable)
 	if zcodeEnvValue(env, zcodePersonalConfigEnv) != "" {
-		return zcodeRuntimeEnv(executable, env), noop, nil
+		return zcodeRuntimeEnv(script, env), noop, nil
 	}
-	builtin := filepath.Join(filepath.Dir(executable), "..", "config", "provider", "zcode-builtin.json")
-	if !isNodeScriptPath(executable) {
+	if zcodeBuiltinProviderConfig(script) == "" {
 		return env, noop, nil
 	}
-	if info, err := os.Stat(builtin); err != nil || !info.Mode().IsRegular() {
-		return env, noop, nil
-	}
-	base := zcodeEnvValue(env, "ZCODE_DATA_BASE_DIR")
-	if base == "" {
-		var err error
-		base, err = os.UserHomeDir()
-		if err != nil {
-			return nil, noop, err
-		}
+	base, err := zcodeDataBaseDir(env)
+	if err != nil {
+		return nil, noop, err
 	}
 	root := filepath.Join(base, ".zcode", "v2")
 	var desktop struct {
 		Providers map[string]zcodeDesktopProvider `json:"provider"`
 	}
-	err := readZcodeConfig(filepath.Join(root, "config.json"), &desktop)
+	err = readZcodeConfig(filepath.Join(root, "config.json"), &desktop)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, noop, fmt.Errorf("read ZCode Desktop connections: %w", err)
 	}
@@ -198,7 +215,7 @@ func prepareZcodeRuntimeEnv(executable string, env []string) ([]string, func(), 
 		cleanup()
 		return nil, noop, err
 	}
-	env = zcodeRuntimeEnv(executable, env)
+	env = zcodeRuntimeEnv(script, env)
 	return append(env, zcodePersonalConfigEnv+"="+file), cleanup, nil
 }
 
