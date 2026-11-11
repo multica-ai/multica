@@ -8,9 +8,10 @@
  * set from the active locale. */
 @custom-variant cjk (&:is(:lang(zh), :lang(ja), :lang(ko)));
 
-/* The chat launcher overlays the dashboard's bottom-right corner on every
- * workspace page, so anything that runs to that corner has to stop short of
- * it. Named rather than spelled out at each site: the intent is legible, every
+/* Below `md` the chat launcher overlays the dashboard's bottom-right corner on
+ * every workspace page, so anything that runs to that corner has to stop short
+ * of it. From `md` up quick chat is in the bottom bar and the clearance is
+ * zero. Named rather than spelled out at each site: the intent is legible, every
  * site that yields to the launcher is findable by these classes, and the
  * distance stays derived from the launcher's own geometry.
  *

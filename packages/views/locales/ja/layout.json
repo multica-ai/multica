@@ -109,6 +109,10 @@
     "in_other_window": "別ウィンドウ",
     "all_workspaces_open": "すべてのワークスペースがすでにウィンドウで開いています"
   },
+  "bottom_bar": {
+    "label": "ステータスバー",
+    "working_other": "{{count}} 体のエージェントが作業中"
+  },
   "panels": {
     "work": {
       "my_agents": "マイエージェントの作業",

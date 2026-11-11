@@ -109,6 +109,10 @@
     "in_other_window": "다른 창",
     "all_workspaces_open": "모든 워크스페이스가 이미 창에 열려 있습니다"
   },
+  "bottom_bar": {
+    "label": "상태 표시줄",
+    "working_other": "에이전트 {{count}}개 작업 중"
+  },
   "panels": {
     "work": {
       "my_agents": "내 에이전트의 작업",

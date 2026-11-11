@@ -12,7 +12,20 @@
     "unread_other": "{{count}} 条未读对话",
     "default": "问 Multica"
   },
+  "bar": {
+    "history": "对话历史",
+    "history_group": {
+      "today": "今天",
+      "week": "过去 7 天",
+      "older": "更早"
+    },
+    "close_chip": "关闭 {{title}}",
+    "all_chats": "全部对话",
+    "more_other": "另外 {{count}} 个对话"
+  },
   "input": {
+    "page_context_add": "将当前页面添加为上下文",
+    "page_context_remove": "移除页面上下文",
     "placeholder_no_agent": "创建一个智能体后才能开始对话",
     "placeholder_archived": "此会话已归档",
     "placeholder_archived_agent": "该智能体已归档",
