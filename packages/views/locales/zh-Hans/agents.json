@@ -530,6 +530,7 @@
       "bulk_placeholder": "API_KEY=值\nBASE_URL=https://example.com",
       "bulk_plaintext_notice": "批量编辑时，值以明文显示。",
       "bulk_unsupported_toast": "\"{{key}}\" 的值无法用文本表示，请用逐条编辑修改",
+      "bulk_invalid_key_toast": "批量编辑只支持 API_KEY 这类变量名，请用逐条编辑修改 \"{{key}}\"",
       "parse_error_malformed": "第 {{line}} 行不是 KEY=value 格式",
       "parse_error_duplicate": "第 {{line}} 行的 key \"{{key}}\" 重复",
       "paste_invalid_toast": "无法解析粘贴的环境变量",
