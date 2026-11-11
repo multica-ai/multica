@@ -200,6 +200,8 @@ Les limites de débit d'authentification nécessitent `REDIS_URL` ; sans cette v
 | Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | Origine navigateur dédiée, sans cookies, routée vers ce backend ; doit différer des origines de l'application et de l'API, et préserver `Host` |
 | Plugins | `MULTICA_PLUGIN_API_URL` | URL de base complète et versionnée de la Plugin Public API, comme `https://plugin-api.example.com/v1` ; se rabat sur `MULTICA_PUBLIC_URL` + `/v1` |
 | Plugins | `MULTICA_PLUGIN_DIR` | Répertoire absolu facultatif utilisé pour publier des bundles de plugins locaux pendant le développement |
+| Boutique de thèmes | `MULTICA_THEME_STORE` | Activée par défaut, elle lit le registre officiel [multica-themes](https://github.com/multica-ai/multica-themes) ; `off` désactive la boutique de thèmes communautaires et toute requête au registre |
+| Boutique de thèmes | `MULTICA_THEME_REGISTRY_URL` | L'`index.json` d'un autre registre, par exemple un fork de l'officiel ; voir [Thèmes et apparence](/themes#auto-hébergement) |
 
 Sans `GITHUB_APP_ID` et la clé privée, les PR sont toujours liées, reflétées et changent normalement le statut de la tâche lors du merge, mais les cartes n'affichent ni statut CI ni possibilité de fusion, et l'entrée de dépôt « Choisir depuis GitHub » est désactivée.
 

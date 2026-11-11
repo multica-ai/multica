@@ -9,51 +9,12 @@
  * Exits 1 when any theme has an error.
  */
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { register } from "node:module";
-import { basename, join, relative, resolve, sep } from "node:path";
-import { pathToFileURL } from "node:url";
+import { readFileSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
+import { appearance, readTheme, repoRoot } from "./theme-files.mjs";
 
-// The core sources import each other without extensions; resolve them to .ts
-// so Node's type stripping can run them as they are.
-register(
-  "data:text/javascript," +
-    encodeURIComponent(`
-      export async function resolve(specifier, context, next) {
-        try {
-          return await next(specifier, context);
-        } catch (error) {
-          if (!specifier.startsWith(".") || !context.parentURL?.endsWith(".ts")) throw error;
-          return next(specifier + ".ts", context);
-        }
-      }
-    `),
-);
-
-const repoRoot = resolve(import.meta.dirname, "..");
-const core = (file) => pathToFileURL(join(repoRoot, "packages/core/appearance", file)).href;
-const { checkThemeFiles } = await import(core("theme-check.ts"));
-const { basePaletteFromTokens } = await import(core("theme-contrast.ts"));
-const { readZip } = await import(core("theme-archive.ts"));
-const { THEME_PACKAGE_MAX_BYTES } = await import(core("theme-package.ts"));
-
-const SKIPPED = new Set(["node_modules", ".git"]);
-
-function readFolder(root, dir = root, files = []) {
-  for (const entry of readdirSync(dir)) {
-    if (SKIPPED.has(entry) || entry.startsWith(".")) continue;
-    const path = join(dir, entry);
-    if (statSync(path).isDirectory()) readFolder(root, path, files);
-    else files.push({ path: relative(root, path).split(sep).join("/"), data: new Uint8Array(readFileSync(path)) });
-  }
-  return files;
-}
-
-async function readTheme(path) {
-  if (statSync(path).isDirectory()) return { files: readFolder(path) };
-  const archive = await readZip(new Uint8Array(readFileSync(path)), THEME_PACKAGE_MAX_BYTES);
-  return archive.ok ? { files: archive.files } : { error: archive.error };
-}
+const { checkThemeFiles } = await appearance("theme-check.ts");
+const { basePaletteFromTokens } = await appearance("theme-contrast.ts");
 
 const args = process.argv.slice(2);
 const json = args.includes("--json");

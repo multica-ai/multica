@@ -344,6 +344,10 @@ import {
   EMPTY_WEBHOOK_DELIVERY,
   AppConfigSchema,
   type AppConfigResponse,
+  StoreThemeListSchema,
+  EMPTY_STORE_THEME_LIST,
+  type StoreTheme,
+  type StoreThemeMode,
   type RefreshSessionResponse,
   RefreshSessionResponseSchema,
   EMPTY_REFRESH_SESSION_RESPONSE,
@@ -3229,6 +3233,30 @@ export class ApiClient {
     return parseWithFallback<AppConfigResponse>(raw, AppConfigSchema, EMPTY_APP_CONFIG, {
       endpoint: "GET /api/config",
     });
+  }
+
+  // Theme store
+  async listStoreThemes(): Promise<StoreTheme[]> {
+    const raw = await this.fetch<unknown>("/api/theme-store/themes");
+    return parseWithFallback(raw, StoreThemeListSchema, EMPTY_STORE_THEME_LIST, {
+      endpoint: "GET /api/theme-store/themes",
+    }).themes as StoreTheme[];
+  }
+
+  /** The theme's checked theme.zip, for the same reader as an imported theme. */
+  async getStoreThemePackage(id: string): Promise<Uint8Array> {
+    const res = await this.fetchRaw(`/api/theme-store/themes/${encodeURIComponent(id)}/package`);
+    return new Uint8Array(await res.arrayBuffer());
+  }
+
+  // Fetched as bytes rather than linked: Desktop authenticates with a bearer
+  // token that an <img> request would not carry.
+  async getStoreThemeScreenshot(id: string, mode: StoreThemeMode, signal?: AbortSignal): Promise<Blob> {
+    const res = await this.fetchRaw(
+      `/api/theme-store/themes/${encodeURIComponent(id)}/screenshots/${mode}`,
+      { signal },
+    );
+    return res.blob();
   }
 
   // Workspaces

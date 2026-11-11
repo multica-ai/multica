@@ -10,10 +10,13 @@ Appearance → Theme options**. Themes never run JavaScript.
 > API. They may change without notice until it is declared stable; check
 > this page when a theme stops looking right after an update.
 
-Install a theme with **Settings → Appearance → Import theme**, from a `.zip`
-of the folder or from the folder itself. Themes are saved on the device, like
-every other Appearance setting, and **Remove theme** deletes one and goes
-back to Default.
+**Settings → Appearance → Manage** lists the themes installed on the device
+and the community theme store; the built-in themes are in the theme picker. Install a theme from the
+store there, or with **Import theme**, from a `.zip` of the folder or from the
+folder itself. Themes are saved on the device, like every other Appearance
+setting; **Remove** on a theme's card deletes it, and goes back to Default
+when it was in use. **Check for updates** looks for new releases of the
+themes installed from the store.
 
 The built-in themes compile to exactly this format and live in
 `packages/core/appearance/built-in-themes.ts`: Pop shows options and CSS,
@@ -265,16 +268,15 @@ back on.
 ## Writing a theme
 
 Start from a built-in theme: pick it in **Settings → Appearance**, then
-choose **Duplicate “…” as a new theme** from the **⋯** menu next to
-**Import theme**. The
+choose **Duplicate “…” as a new theme** from the **Import theme** menu. The
 copy gets its own id (`pop-copy`, `pop-copy-2`, …), a manifest with the
 theme's options, and a `theme.css` with one declaration per line. Importing
 the copy unchanged looks exactly like the original.
 
 ### On Desktop: the themes folder
 
-Desktop keeps a `themes` folder in its user data folder. **Open themes
-folder** in the same menu shows it. Every folder (or `.zip`) in it is
+Desktop keeps a `themes` folder in its user data folder. The **Open themes
+folder** button next to **Import theme** shows it. Every folder (or `.zip`) in it is
 installed when the app starts and listed under **Themes folder** in the
 picker. Save a file in it and every open window picks the change up within
 about a second, so edit `theme.css` in any editor and watch the app.
@@ -305,6 +307,48 @@ It reports manifest errors, blocked CSS, non-public variables, generic
 families in font stacks and WCAG contrast in both modes, each with its line
 in `theme.css`, and exits with status 1 when there is an error. Warnings,
 such as a colour it cannot resolve, do not fail the check.
+
+To see the theme the way the theme store shows it:
+
+```sh
+pnpm theme:preview path/to/paper --out preview   # preview/light.png and preview/dark.png
+```
+
+It renders a fixture page (an issue list next to an open issue) built from
+the app's own styles and anchors, with the theme applied at its option
+defaults.
+
+## Publishing to the theme store
+
+The theme store (beta) lists themes from
+[multica-ai/multica-themes](https://github.com/multica-ai/multica-themes).
+Its [contributing guide](https://github.com/multica-ai/multica-themes/blob/main/CONTRIBUTING.md)
+has the details; in short:
+
+1. Keep the theme in its own GitHub repository.
+   [multica-ai/multica-theme-sample](https://github.com/multica-ai/multica-theme-sample)
+   is a starting point with a release workflow.
+2. Publish a release tagged with the manifest's `version` (`1.0.0` or
+   `v1.0.0`) and attach the zipped theme as `theme.zip`.
+3. Add the theme to `themes.json` in the registry with a pull request. The
+   pull request runs `theme:check` and `theme:preview` on the release and
+   comments with the result; a maintainer merges once it passes.
+
+New releases reach the store within about an hour, after they pass the same
+checks; people who installed the theme then see **Update**. A release that
+fails keeps the previous one listed. The app only installs the exact
+`theme.zip` the checks passed, and reads it with the same parser and CSS
+sanitizer as an imported theme.
+
+Each store card shows how many times the theme was downloaded from the
+Multica server it lists on: every install and every update counts once.
+Themes not yet installed are listed most downloaded first. A self-hosted
+server counts its own downloads.
+
+A self-hosted server reads the official registry by default.
+`MULTICA_THEME_STORE=off` turns the store off: **Manage** lists only the
+themes on the device, and the server makes no registry requests. `MULTICA_THEME_REGISTRY_URL` points it at
+another registry's `index.json`.
 
 ## Variable reference
 

@@ -1,0 +1,111 @@
+---
+title: Themes and appearance
+description: Pick light or dark mode and a theme, install community themes from the theme store, keep them up to date, import your own, and get back to the default when a theme breaks something.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+**Settings → Appearance** controls how Multica looks on this device: the mode, the theme, text and layout. Every change applies at once.
+
+<Callout type="info">
+  Themes and the theme store are in beta. A theme that looks right today may need an update from its author after a Multica release.
+</Callout>
+
+## Mode and theme
+
+**Mode** is Light, Dark, or System (follows your operating system). You can also type "theme" in the search box (`⌘K`) to switch it.
+
+**Theme** sets the colors, borders, shadows, and corners across the app. Multica comes with Default, Pop, GitHub, Blueprint, and Notion; pick one from the dropdown. **Manage**, next to it, is where you install, update, and remove other themes. A theme supports light mode, dark mode, or both, and follows the mode you picked.
+
+Some themes come with options, such as an accent color or a page width. They show up under **Theme options** while that theme is in use; **Reset options** puts them back to the theme's defaults.
+
+The rest of the page is independent of the theme:
+
+| Group | What it sets |
+|---|---|
+| **Interface text** | Font and size for menus, buttons, lists, the sidebar, and headings. |
+| **Content text** | Font, size, and line height for issue descriptions, comments, chat, and documents, plus the code font. |
+| **Layout and accessibility** | Row density in lists, Reduce motion, and Increase contrast. |
+
+When you pick a font other than the default, or turn on Increase contrast, your choice wins over the theme's. A theme sets the colors; to change a color it doesn't offer as an option, pick another theme or [make your own](/developers/themes).
+
+## The theme store
+
+**Manage** opens one window with the themes you installed and the community theme store. The built-in themes aren't listed there; they are always in the dropdown. Search by name or author, and turn on **Show installed only** to hide what you don't have.
+
+Each store theme has a card with a screenshot (switch between its light and dark screenshot in the corner), its author, a description, how many times it has been downloaded, and a link to its GitHub repository. Themes you haven't installed are listed most downloaded first.
+
+<Steps>
+<Step>
+
+### Install
+
+Click **Install** on a card. The theme is downloaded, checked, saved on this device, and put in use.
+
+</Step>
+<Step>
+
+### Switch
+
+Click **Use** on an installed theme, or pick any theme from the dropdown. The theme in use is marked **In use**.
+
+</Step>
+<Step>
+
+### Remove
+
+Click **Remove** on an installed theme. If it was in use, Multica goes back to Default.
+
+</Step>
+</Steps>
+
+Store themes are written by the community and checked automatically before they are listed: they cannot run code, load anything from the internet, or use files outside the theme. A theme can still restyle every page, including dialogs and warnings.
+
+The download count includes every install and every update, from everyone who uses the same Multica server.
+
+## Updates
+
+Once you have installed a store theme, the Appearance page shows a **Store themes** row. Click **Check for updates** to look for new releases, then **Update all**, or update one theme from its card with **Update to …**. An update keeps the theme's option values and leaves your current theme as it is.
+
+Themes are never updated without you asking.
+
+## Import a theme
+
+A theme you got as a file, or one you made, is installed from **Make your own → Import theme**:
+
+- **Theme file (.zip)** installs a zipped theme.
+- **Theme folder** installs an unzipped one.
+
+Multica shows the theme's name, author, and version before installing it. Only install themes from people you trust. Importing a theme with the same id as an installed one replaces it.
+
+To start a theme of your own, see [Make a theme](/developers/themes).
+
+## When a theme breaks something
+
+A theme can hide or break part of the interface. To get back to Default, either:
+
+- open Multica with `?theme=default` at the end of the address, or
+- hold **Shift** for a moment right after the page loads. In the desktop app, reload with `⌘R` (`Ctrl+R` on Windows and Linux) and then hold **Shift**.
+
+The theme is paused until you close the window. The Appearance page shows a notice with **Use my theme** to turn it back on; from there you can also pick another theme or remove the broken one.
+
+## Where it is stored
+
+Mode, theme, theme options, and installed themes are saved on this device and are not synced to your account. Each browser and each desktop app has its own. They are the same in every workspace on that device.
+
+## Self-hosting
+
+A self-hosted server lists the official registry, [multica-ai/multica-themes](https://github.com/multica-ai/multica-themes), by default. The server fetches themes and screenshots from GitHub and caches them, so the app downloads them from your server. Download counts are kept per server.
+
+| Variable | Effect |
+|---|---|
+| `MULTICA_THEME_STORE` | `off` turns the store off. **Manage** then lists only the themes installed on each device, and appears once one is installed; the server makes no registry requests. |
+| `MULTICA_THEME_REGISTRY_URL` | Points the store at another registry's `index.json`, for example a fork of the official one. |
+
+See [Environment variables](/environment-variables) for the rest of the server configuration.
+
+## Next steps
+
+- [Make a theme](/developers/themes) — the theme format, checks, and publishing to the store.
+- [Search, shortcuts, and preferences](/shortcuts) — the other personal settings.

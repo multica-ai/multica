@@ -1043,6 +1043,10 @@ export interface AppConfigResponse {
    * DELETE /api/comments/{id}/keep-replies. Older servers deleted the replies
    * too, so absent must be treated as false (#8296). */
   comment_delete_keep_replies_supported?: boolean;
+  /** Whether this server serves the community theme store under
+   * /api/theme-store. Off when the operator turned it off, and absent on older
+   * servers, so the app shows no Browse entry and makes no store requests. */
+  theme_store_enabled?: boolean;
   server_version?: string;
 }
 
@@ -1331,6 +1335,7 @@ export const AppConfigSchema = z.object({
   agent_conversation_starters_supported: BooleanWithDefaultSchema(false),
   issue_create_properties_supported: BooleanWithDefaultSchema(false),
   comment_delete_keep_replies_supported: BooleanWithDefaultSchema(false),
+  theme_store_enabled: BooleanWithDefaultSchema(false),
   server_version: OptionalStringSchema,
 }).loose();
 
@@ -1354,8 +1359,61 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   issue_create_properties_supported: false,
   // Fail closed: old servers delete a comment's replies with it.
   comment_delete_keep_replies_supported: false,
+  theme_store_enabled: false,
   feature_flags: {},
 };
+
+export type StoreThemeMode = "light" | "dark";
+
+/** A theme of the community registry, as /api/theme-store lists it. */
+export interface StoreTheme {
+  id: string;
+  name: string;
+  author: string;
+  /** The author's GitHub repository, `owner/name`. */
+  repo: string;
+  description?: string;
+  modes: StoreThemeMode[];
+  /** The release the registry checked; installs always get this one. */
+  version: string;
+  size: number;
+  /** Modes the registry rendered a screenshot for. */
+  screenshots: StoreThemeMode[];
+  updated_at?: string;
+  /** Installs and updates served by this server, all users together. */
+  downloads: number;
+}
+
+const StoreThemeModesSchema = z.preprocess(
+  (value) => (Array.isArray(value) ? value.filter((m) => m === "light" || m === "dark") : []),
+  z.array(z.enum(["light", "dark"])),
+);
+
+const StoreThemeSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    author: z.string(),
+    repo: z.string(),
+    description: OptionalStringSchema,
+    modes: StoreThemeModesSchema,
+    version: z.string(),
+    size: z.number(),
+    screenshots: StoreThemeModesSchema,
+    updated_at: OptionalStringSchema,
+    downloads: z.number().catch(0).default(0),
+  })
+  .loose();
+
+/** One malformed entry drops that theme, not the whole list. */
+export const StoreThemeListSchema = z.object({
+  themes: z.preprocess(
+    (value) => (Array.isArray(value) ? value.filter((item) => StoreThemeSchema.safeParse(item).success) : []),
+    z.array(StoreThemeSchema),
+  ),
+});
+
+export const EMPTY_STORE_THEME_LIST: { themes: StoreTheme[] } = { themes: [] };
 
 // Preference keys may grow over time, so keep both the key and value spaces
 // forward-compatible while still rejecting non-string persisted data.

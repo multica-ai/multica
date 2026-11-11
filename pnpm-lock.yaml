@@ -212,6 +212,9 @@ importers:
       '@playwright/test':
         specifier: ^1.58.2
         version: 1.58.2
+      '@tailwindcss/postcss':
+        specifier: 'catalog:'
+        version: 4.2.2
       '@types/node':
         specifier: 'catalog:'
         version: 25.5.0
@@ -224,6 +227,9 @@ importers:
       pg:
         specifier: ^8.20.0
         version: 8.20.0
+      postcss:
+        specifier: 8.5.26
+        version: 8.5.26
       turbo:
         specifier: ^2.5.4
         version: 2.9.5

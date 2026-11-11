@@ -200,6 +200,8 @@ The auth rate limits require `REDIS_URL`; without it, the startup log notes that
 | Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | Dedicated cookie-free browser origin routed to this backend; must differ from app/API origins and preserve `Host` |
 | Plugins | `MULTICA_PLUGIN_API_URL` | Complete versioned Plugin Public API base URL, such as `https://plugin-api.example.com/v1`; falls back to `MULTICA_PUBLIC_URL` + `/v1` |
 | Plugins | `MULTICA_PLUGIN_DIR` | Optional absolute directory used to publish local plugin bundles during development |
+| Theme store | `MULTICA_THEME_STORE` | On by default, reading the official [multica-themes](https://github.com/multica-ai/multica-themes) registry; `off` turns the community theme store off and stops every registry request |
+| Theme store | `MULTICA_THEME_REGISTRY_URL` | Another registry's `index.json`, such as a fork of the official one; see [Themes and appearance](/themes#self-hosting) |
 
 Without `GITHUB_APP_ID` and the private key, PRs still link, mirror, and move issues on merge normally, but cards show no CI or mergeability status, and the "pick from GitHub" repository entry is disabled.
 

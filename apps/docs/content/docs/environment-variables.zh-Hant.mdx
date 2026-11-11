@@ -196,6 +196,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | 外掛 | `MULTICA_PLUGIN_SURFACE_ORIGIN` | 路由到後端的獨立無 Cookie 瀏覽器 origin；必須不同於 app/API origin，並保留 `Host` |
 | 外掛 | `MULTICA_PLUGIN_API_URL` | 帶版本的外掛 Public API 完整 Base URL，例如 `https://plugin-api.example.com/v1`；未設定時使用 `MULTICA_PUBLIC_URL` + `/v1` |
 | 外掛 | `MULTICA_PLUGIN_DIR` | 開發時用於釋出本地外掛包的可選絕對目錄 |
+| 主題商店 | `MULTICA_THEME_STORE` | 預設開啟，讀取官方 [multica-themes](https://github.com/multica-ai/multica-themes) 倉庫；設為 `off` 關閉社群主題商店，伺服器不再請求倉庫 |
+| 主題商店 | `MULTICA_THEME_REGISTRY_URL` | 改用其他倉庫的 `index.json`，例如官方倉庫的 fork；見 [主題與外觀](/themes#自託管) |
 
 不配置 `GITHUB_APP_ID` 和私鑰時，PR 仍會正常關聯、映象，並在合併後改狀態，但卡片上不顯示 CI 與可合併狀態，"從 GitHub 選擇"倉庫入口也會禁用。
 
