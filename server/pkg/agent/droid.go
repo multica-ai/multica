@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -147,6 +148,9 @@ func (b *droidBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			cancel()
 		}
 		exitErr := cmd.Wait()
+		// Wait ends CommandContext's watcher. Explicitly stop remaining tools
+		// even when Droid exits normally and they have closed their streams.
+		signalProcessGroup(cmd, syscall.SIGKILL)
 		releaseProcessGroup(cmd)
 		terminal := streamTerminalState{
 			sawResult: state.sawCompletion, finalResultText: state.finalText,

@@ -10,12 +10,18 @@ import (
 )
 
 func TestDroidTerminatesOwnedProcessTree(t *testing.T) {
-	for _, timeout := range []bool{false, true} {
-		t.Run(map[bool]string{false: "cancel", true: "timeout"}[timeout], func(t *testing.T) {
+	for _, stage := range []string{"cancel", "timeout", "completed", "failed"} {
+		t.Run(stage, func(t *testing.T) {
 			dir := t.TempDir()
 			pidFile := filepath.Join(dir, "pids")
 			path := filepath.Join(dir, "droid")
-			writeTestExecutable(t, path, []byte("#!/bin/sh\nsleep 300 &\nprintf '%s %s\\n' \"$$\" \"$!\" > \"$DROID_PIDS\"\nwait\n"))
+			script := "#!/bin/sh\nsleep 300 >/dev/null 2>&1 &\nprintf '%s %s\\n' \"$$\" \"$!\" > \"$DROID_PIDS\"\n"
+			if stage == "completed" {
+				script += "printf '%s\\n' '{\"type\":\"completion\",\"finalText\":\"Done\"}'\n"
+			} else if stage != "failed" {
+				script += "wait\n"
+			}
+			writeTestExecutable(t, path, []byte(script))
 			backend, err := New("droid", Config{ExecutablePath: path, Env: map[string]string{"DROID_PIDS": pidFile}})
 			if err != nil {
 				t.Fatal(err)
@@ -24,16 +30,18 @@ func TestDroidTerminatesOwnedProcessTree(t *testing.T) {
 			defer cancel()
 			opts := ExecOptions{Timeout: 15 * time.Second}
 			want := "aborted"
-			if timeout {
+			if stage == "timeout" {
 				opts.Timeout = 5 * time.Second
 				want = "timeout"
+			} else if stage == "completed" || stage == "failed" {
+				want = stage
 			}
 			session, err := backend.Execute(ctx, "task", opts)
 			if err != nil {
 				t.Fatal(err)
 			}
 			pids := waitForPids(t, pidFile)
-			if !timeout {
+			if stage == "cancel" {
 				cancel()
 			}
 			_, result := collectDroid(t, session)
