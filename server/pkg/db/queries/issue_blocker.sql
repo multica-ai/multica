@@ -27,3 +27,21 @@ ON CONFLICT DO NOTHING;
 
 -- name: RemoveIssueBlocker :exec
 DELETE FROM issue_blocker WHERE workspace_id = sqlc.arg('workspace_id') AND issue_id = sqlc.arg('issue_id') AND blocker_issue_id = sqlc.arg('blocker_issue_id');
+
+-- name: AcknowledgeIssueBlockerRelease :exec
+-- Ordinary admission and dependency dispatch consume the same ready state.
+-- Run in the transaction that inserted the task, before notifying its runtime.
+WITH acknowledged AS (
+ UPDATE issue_wakeup w
+ SET condition_state='ready',next_fire_at=NULL,last_task_id=t.id,updated_at=clock_timestamp()
+ FROM agent_task_queue t JOIN issue i ON i.id=t.issue_id
+ WHERE t.id=sqlc.arg('task_id') AND w.issue_id=i.id AND w.workspace_id=i.workspace_id
+ AND w.system_rule='blockers_done' AND w.enabled
+ AND i.status<>'backlog' AND i.triage_state IS NULL
+ AND ((i.assignee_type='agent' AND i.assignee_id=t.agent_id)
+   OR (i.assignee_type='squad' AND i.assignee_id=t.squad_id AND t.is_leader_task))
+ AND NOT issue_has_open_blockers(i.workspace_id,i.id)
+ RETURNING w.id,w.revision
+)
+UPDATE issue_wakeup_receipt r SET processed_at=clock_timestamp(),task_id=sqlc.arg('task_id')
+FROM acknowledged a WHERE r.wakeup_id=a.id AND r.revision=a.revision AND r.processed_at IS NULL;

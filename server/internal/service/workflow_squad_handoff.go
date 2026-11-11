@@ -42,7 +42,10 @@ func (s *TaskService) createWorkflowSquadHandoffTask(ctx context.Context, issue 
 			return err
 		}
 		task, err = q.CreateAgentTask(ctx, params)
-		return err
+		if err != nil {
+			return err
+		}
+		return q.AcknowledgeIssueBlockerRelease(ctx, task.ID)
 	})
 	return task, err
 }

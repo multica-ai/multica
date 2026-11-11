@@ -11,6 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acknowledgeIssueBlockerRelease = `-- name: AcknowledgeIssueBlockerRelease :exec
+WITH acknowledged AS (
+ UPDATE issue_wakeup w
+ SET condition_state='ready',next_fire_at=NULL,last_task_id=t.id,updated_at=clock_timestamp()
+ FROM agent_task_queue t JOIN issue i ON i.id=t.issue_id
+ WHERE t.id=$1 AND w.issue_id=i.id AND w.workspace_id=i.workspace_id
+ AND w.system_rule='blockers_done' AND w.enabled
+ AND i.status<>'backlog' AND i.triage_state IS NULL
+ AND ((i.assignee_type='agent' AND i.assignee_id=t.agent_id)
+   OR (i.assignee_type='squad' AND i.assignee_id=t.squad_id AND t.is_leader_task))
+ AND NOT issue_has_open_blockers(i.workspace_id,i.id)
+ RETURNING w.id,w.revision
+)
+UPDATE issue_wakeup_receipt r SET processed_at=clock_timestamp(),task_id=$1
+FROM acknowledged a WHERE r.wakeup_id=a.id AND r.revision=a.revision AND r.processed_at IS NULL
+`
+
+// Ordinary admission and dependency dispatch consume the same ready state.
+// Run in the transaction that inserted the task, before notifying its runtime.
+func (q *Queries) AcknowledgeIssueBlockerRelease(ctx context.Context, taskID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, acknowledgeIssueBlockerRelease, taskID)
+	return err
+}
+
 const addIssueBlocker = `-- name: AddIssueBlocker :exec
 INSERT INTO issue_blocker(workspace_id,issue_id,blocker_issue_id,created_by_type,created_by_id)
 VALUES($1,$2,$3,$4,$5)
