@@ -75,6 +75,16 @@ In scripts, take the token from a secret manager or a protected environment vari
 
 If a token may have leaked, revoke it immediately under **Settings → API Token**. Once revoked, the PAT can never be used again, and any other machines and scripts that saved it lose access too.
 
+## Service accounts
+
+A service account is a machine identity: an account that belongs to exactly one workspace and is operated by infrastructure rather than a person — a daemon, a CI runner, or a bot. Workspace admins create it and mint its credential, so nothing about the machine's access rides on a personal account.
+
+```bash
+multica service-account create --name "ci-runner" <workspace>
+```
+
+The raw credential is printed once. Mint replacement credentials with `multica service-account token mint` and revoke individual credentials with `multica service-account token revoke`. A service account cannot sign in with a verification code and cannot mint its own tokens; workspace admins do that.
+
 ## Temporary tokens for agent runs
 
 When the daemon claims a run, the server creates a temporary token for that run, prefixed with `mat_`. It is bound to the current user, workspace, agent, and run, is valid for at most 24 hours, and is cleaned up when the run ends.
