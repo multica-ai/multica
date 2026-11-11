@@ -29,12 +29,13 @@ const ZOOM_MAX = 4.5;
  * Window shortcut outcomes tell the caller whether to continue, preventDefault,
  * or dispatch a renderer action. Prevent handled input from also firing the menu
  * accelerator. Handle zoom here for consistent keyboard-layout behavior.
- * close-tab, open-settings, and select-tab actions route to the main window.
+ * open-settings, select-tab, and new-window actions route to a main window.
  */
 export type ShortcutResult =
   | boolean
   | "close-tab"
   | "open-settings"
+  | "new-window"
   | { action: "select-tab"; key: TabSelectionShortcutKey };
 
 export function handleAppShortcut(
@@ -107,6 +108,13 @@ export function handleAppShortcut(
     // Holding the chord must not queue one request per repeat.
     if (input.isAutoRepeat) return true;
     return "open-settings";
+  }
+
+  // Cmd/Ctrl + Shift + N → open another workspace in a new window. The
+  // renderer owns the workspace list, so main only forwards the request.
+  if (input.key.toLowerCase() === "n" && input.shift) {
+    if (input.isAutoRepeat) return true;
+    return "new-window";
   }
 
   // Cmd/Ctrl + W → close active tab (or window if last tab).

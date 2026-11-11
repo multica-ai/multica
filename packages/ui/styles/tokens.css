@@ -37,6 +37,8 @@
     --color-priority-high: var(--priority-high);
     --color-brand: var(--brand);
     --color-brand-foreground: var(--brand-foreground);
+    --color-multica-ink: var(--multica-ink);
+    --color-multica-paper: var(--multica-paper);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
     --color-faint-foreground: var(--faint-foreground);
@@ -88,41 +90,44 @@
  * block needs to override it.
  *
  * Landing-page display type (rem/clamp, 2.2-6.4rem) is marketing typography on
- * a separate ramp and stays out of this scale on purpose. */
+ * a separate ramp and stays out of this scale on purpose.
+ *
+ * --font-scale is the Appearance font size (unset = 1). It multiplies sizes and
+ * line-heights only, so a larger size never changes spacing or layout. */
 @theme {
     /* counters, badges, timestamps, overline labels */
-    --text-micro: 11px;
-    --text-micro--line-height: 15px;
+    --text-micro: calc(11px * var(--font-scale, 1));
+    --text-micro--line-height: calc(15px * var(--font-scale, 1));
     /* chips, shortcut hints, tooltips, helper text under a field, issue
        identifiers — was text-xs. Not for text people read in place:
        that is label. */
-    --text-caption: 12px;
-    --text-caption--line-height: 16px;
+    --text-caption: calc(12px * var(--font-scale, 1));
+    --text-caption--line-height: calc(16px * var(--font-scale, 1));
     /* text read in place beside body copy: activity entries, comment
        timestamps, property panel rows, table headers, metadata rows */
-    --text-label: 13px;
-    --text-label--line-height: 18px;
+    --text-label: calc(13px * var(--font-scale, 1));
+    --text-label--line-height: calc(18px * var(--font-scale, 1));
     /* UI body, the workhorse — was text-sm */
-    --text-body: 14px;
-    --text-body--line-height: 20px;
+    --text-body: calc(14px * var(--font-scale, 1));
+    --text-body--line-height: calc(20px * var(--font-scale, 1));
     /* roomier body: dialog copy, onboarding prose */
-    --text-body-lg: 15px;
-    --text-body-lg--line-height: 22px;
+    --text-body-lg: calc(15px * var(--font-scale, 1));
+    --text-body-lg--line-height: calc(22px * var(--font-scale, 1));
     /* small headings — was text-base */
-    --text-title-sm: 16px;
-    --text-title-sm--line-height: 24px;
+    --text-title-sm: calc(16px * var(--font-scale, 1));
+    --text-title-sm--line-height: calc(24px * var(--font-scale, 1));
     /* section headings — was text-lg */
-    --text-title: 18px;
-    --text-title--line-height: 28px;
+    --text-title: calc(18px * var(--font-scale, 1));
+    --text-title--line-height: calc(28px * var(--font-scale, 1));
     /* card and dialog titles — was text-xl */
-    --text-title-lg: 20px;
-    --text-title-lg--line-height: 28px;
+    --text-title-lg: calc(20px * var(--font-scale, 1));
+    --text-title-lg--line-height: calc(28px * var(--font-scale, 1));
     /* page titles — was text-2xl */
-    --text-display-sm: 24px;
-    --text-display-sm--line-height: 32px;
+    --text-display-sm: calc(24px * var(--font-scale, 1));
+    --text-display-sm--line-height: calc(32px * var(--font-scale, 1));
     /* hero numbers and empty-state headlines — was text-3xl (30px) */
-    --text-display: 36px;
-    --text-display--line-height: 40px;
+    --text-display: calc(36px * var(--font-scale, 1));
+    --text-display--line-height: calc(40px * var(--font-scale, 1));
 }
 
 :root {
@@ -131,6 +136,11 @@
     --dialog-exit-duration: 100ms;
     --dialog-enter-easing: ease;
     --dialog-exit-easing: ease;
+    /* Nav panel collapse, shared by the space panel and list columns. The
+       first frame also pays for the toggle's render and the page relayout, so
+       the curve starts soft instead of jumping. */
+    --nav-panel-duration: 220ms;
+    --nav-panel-easing: ease;
 
     color-scheme: light;
     /* Button geometry. Text and icon-only buttons share the height ladder.
@@ -162,9 +172,9 @@
     --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03);
     --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
 
-    /* The chat launcher is an overlay pinned to the dashboard's bottom-right
-       corner on every workspace page, so that corner is not available to page
-       content. Its geometry lives here rather than in the button so that the
+    /* Below `md` the chat launcher is an overlay pinned to the dashboard's
+       bottom-right corner on every workspace page, so that corner is not
+       available to page content. Its geometry lives here rather than in the button so that the
        clearance is derived from it: anything reaching that corner — a footer's
        action buttons, a floating toolbar — reserves --chat-launcher-clearance
        and stays correct if the launcher ever moves or changes size. */
@@ -242,6 +252,11 @@
     --sidebar-ring: oklch(0.705 0.015 286.067);
     --brand: oklch(0.56079497 0.19449888 256.41258418);
     --brand-foreground: oklch(0.985 0 0);
+    /* The logo's only two colours (brand guidelines v3.1). Pure black and
+       white in both themes: the logo never takes a grey, a tint, or the UI
+       accent, so there is no dark-mode override for these. */
+    --multica-ink: #0b0b0c;
+    --multica-paper: #ffffff;
     --success: oklch(0.55 0.16 145);
     --warning: oklch(0.75 0.16 85);
     --info: oklch(0.55 0.18 250);
@@ -256,6 +271,14 @@
     --find-match: oklch(0.92 0.15 100);
     --find-match-active: oklch(0.82 0.17 62);
     --find-match-foreground: oklch(0.22 0.03 92);
+}
+
+/* From `md` up quick chat lives in the bottom bar, outside the page card, and
+   the corner is free again. */
+@media (min-width: 48rem) {
+    :root {
+        --chat-launcher-clearance: 0px;
+    }
 }
 
 .dark {

@@ -8,6 +8,8 @@ const (
 	EventIssueDeleted            = "issue:deleted"
 	EventIssueMetadataChanged    = "issue_metadata:changed"
 	EventIssueAttachmentsChanged = "issue_attachments:changed"
+	// Personal: one member's unread mark on an issue changed (MUL-8438).
+	EventIssueUnreadChanged = "issue_unread:changed"
 
 	// Comment events
 	EventCommentCreated       = "comment:created"
@@ -27,7 +29,7 @@ const (
 	EventAgentRestored = "agent:restored"
 
 	// Task events (server <-> daemon).
-	// Each event maps to a status transition on agent_task_queue. Front-end
+	// Events describe task lifecycle or recorded usage changes. Front-end
 	// subscribes by `task:` prefix and invalidates the workspace task
 	// snapshot, so the granularity here is "what does the user want to see
 	// change" — not "every internal status flip".
@@ -37,6 +39,7 @@ const (
 	EventTaskRunning               = "task:running"                 // dispatched → running (daemon started)
 	EventTaskWaitingLocalDirectory = "task:waiting_local_directory" // dispatched → waiting_local_directory (daemon parked on a busy local_directory path)
 	EventTaskProgress              = "task:progress"
+	EventTaskUsage                 = "task:usage"
 	EventTaskCompleted             = "task:completed" // running → completed
 	EventTaskFailed                = "task:failed"    // running → failed
 	EventTaskMessage               = "task:message"
@@ -99,6 +102,10 @@ const (
 	EventProjectResourceUpdated = "project_resource:updated"
 	EventProjectResourceDeleted = "project_resource:deleted"
 
+	// EventProjectMembersChanged carries {project_id}: a private project's
+	// member list changed (MUL-8472).
+	EventProjectMembersChanged = "project:members_changed"
+
 	// Label events
 	EventLabelCreated       = "label:created"
 	EventLabelUpdated       = "label:updated"
@@ -125,6 +132,15 @@ const (
 	// way — re-read it. A project switching workflows publishes
 	// project:updated instead.
 	EventIssueWorkflowChanged = "issue_workflow:changed"
+
+	// Saved issue views. One event for create, edit and delete: every client
+	// answers by re-reading the views it can see. A view that is private on
+	// both sides of the write reaches its owner only.
+	EventIssueViewChanged = "issue_view:changed"
+
+	// A member's own view and sidebar preferences. Always private to that
+	// member: it exists so their other devices follow along.
+	EventIssueViewPreferenceChanged = "issue_view_preference:changed"
 
 	// Pin events
 	EventPinCreated   = "pin:created"
@@ -180,6 +196,10 @@ const (
 	EventPullRequestLinked         = "pull_request:linked"
 	EventPullRequestUpdated        = "pull_request:updated"
 	EventPullRequestUnlinked       = "pull_request:unlinked"
+
+	// An issue's local environments changed: one started, stopped, changed
+	// state, or its daemon stopped reporting it.
+	EventEnvironmentChanged = "environment:changed"
 
 	// VCS integration events (Forgejo / Gitea / GitLab)
 	EventVCSConnectionCreated = "vcs_connection:created"

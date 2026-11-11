@@ -10,7 +10,6 @@ import {
   useAttachResourceLabel,
   useDetachResourceLabel,
 } from "@multica/core/labels";
-import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   Popover,
@@ -45,13 +44,13 @@ export function ResourceLabelPicker({
   );
 
   const content = selected.length > 0 ? (
-    <div className="flex flex-wrap justify-start gap-1 sm:justify-end">
+    <div className="flex min-w-0 flex-wrap gap-1">
       {selected.map((label) => (
         <LabelChip key={label.id} label={label} />
       ))}
     </div>
   ) : (
-    <span className="text-body text-muted-foreground">{t(($) => $.resource_picker.empty)}</span>
+    <span className="text-muted-foreground">{t(($) => $.resource_picker.empty)}</span>
   );
 
   if (!canEdit) return content;
@@ -66,21 +65,20 @@ export function ResourceLabelPicker({
     >
       <PopoverTrigger
         render={
-          <Button
+          <button
             type="button"
-            variant="outline"
-            className="h-auto min-h-9 w-full justify-start px-2.5 py-1.5 sm:justify-end"
+            className="flex min-w-0 flex-1 items-center gap-1.5 py-1 rounded-sm text-left text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
           >
             {selected.length > 0 ? content : (
               <>
-                <Tag className="size-3.5 text-muted-foreground" />
-                {t(($) => $.resource_picker.add)}
+                <Tag className="size-3.5 shrink-0" aria-hidden="true" />
+                <span className="truncate">{t(($) => $.resource_picker.add)}</span>
               </>
             )}
-          </Button>
+          </button>
         }
       />
-      <PopoverContent align="end" className="w-72 p-2">
+      <PopoverContent align="start" className="w-72 p-2">
         <div className="relative mb-2">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input

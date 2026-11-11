@@ -1,19 +1,22 @@
 {
   "page": {
     "title": "Agents",
-    "learn_more": "En savoir plus →",
     "new_agent": "Nouvel agent",
-    "search_placeholder": "Rechercher des agents…",
+    "search": "Rechercher des agents",
     "show_archived": "Afficher les archivés ({{count}}) →",
     "of_total": "{{visible}} sur {{total}}",
     "list_load_failed": "Impossible de charger les agents",
     "list_load_failed_default": "Une erreur est survenue lors de la récupération de la liste des agents.",
-    "try_again": "Réessayer"
+    "try_again": "Réessayer",
+    "scope_title": {
+      "mine": "Mes agents",
+      "all": "Tous les agents",
+      "archived": "Agents archivés"
+    }
   },
   "scope": {
     "mine": "Les miens",
-    "all": "Tous",
-    "archived": "Archivés"
+    "all": "Tous"
   },
   "sort": {
     "label_recent": "Activité récente",
@@ -43,27 +46,24 @@
     "title": "Agents archivés"
   },
   "empty": {
-    "title": "Aucun agent pour l'instant",
-    "description": "Créez un agent, puis assignez-lui des tâches."
+    "setup": {
+      "label": "Étapes de configuration",
+      "runtime": "Connecter un runtime",
+      "agent": "Créer un agent",
+      "issue": "Lui assigner une tâche",
+      "done": "(fait)",
+      "connect_runtime": "Connecter"
+    }
   },
   "no_matches": {
     "title": "Aucune correspondance",
-    "search_archived": "Aucun agent archivé ne correspond à « {{query}} ».",
-    "no_archived": "Aucun agent archivé pour l'instant.",
     "search_active": "Aucun agent ne correspond à « {{query}} ».",
     "search_active_filtered": "Aucun agent ne correspond à « {{query}} » dans ce filtre.",
+    "no_archived": "Aucun agent archivé pour l'instant.",
+    "search_archived": "Aucun agent archivé ne correspond à « {{query}} ».",
     "no_filter_match": "Aucun agent ne correspond à ce filtre.",
     "search_runtime_filtered": "Aucun agent sur « {{machine}} » ne correspond à « {{query}} ».",
     "runtime_filtered": "Aucun agent sur « {{machine}} »."
-  },
-  "runtime_filter": {
-    "all": "Tous les runtimes",
-    "section_local": "Local",
-    "section_remote": "Distant",
-    "section_cloud": "Cloud",
-    "agent_count_one": "{{count}} agent",
-    "agent_count_other": "{{count}} agents",
-    "empty": "Aucune machine pour l'instant"
   },
   "columns": {
     "agent": "Agent",
@@ -136,7 +136,6 @@
     "archive_dialog_confirm": "Archiver"
   },
   "detail": {
-    "back_to_agents": "Agents",
     "back_to_agents_full": "Retour aux agents",
     "not_found_title": "Agent introuvable",
     "not_found_default": "Cet agent a peut-être été archivé ou supprimé.",
@@ -165,7 +164,11 @@
     "runtime_required_toast": "Associez un runtime avant d'exécuter cet agent.",
     "assign_work": "Assigner du travail",
     "more_actions_aria": "Actions de l'agent",
-    "updated": "Mis à jour {{when}}"
+    "settings": "Paramètres",
+    "copy_link": "Copier le lien",
+    "copy_id": "Copier l'ID de l'agent",
+    "link_copied_toast": "Lien copié",
+    "id_copied_toast": "ID de l'agent copié"
   },
   "inspector": {
     "section_profile": "Profil",
@@ -175,7 +178,6 @@
     "section_properties": "Propriétés",
     "section_details": "Détails",
     "section_details_hint": "Informations de propriété et de cycle de vie, en lecture seule.",
-    "section_skills": "Skills",
     "section_integrations": "Intégrations",
     "prop_runtime": "Runtime",
     "prop_model": "Modèle",
@@ -186,7 +188,6 @@
     "prop_owner": "Propriétaire",
     "prop_created": "Création",
     "prop_updated": "Mise à jour",
-    "no_description_placeholder": "Aucune description",
     "avatar_label": "Avatar",
     "name_label": "Nom",
     "description_label": "Description",
@@ -198,22 +199,32 @@
     "rename_required": "Le nom est obligatoire",
     "edit_description_title": "Modifier la description",
     "description_placeholder": "Que fait cet agent ?",
-    "save": "Enregistrer",
     "cancel": "Annuler"
   },
   "overview": {
-    "agent_context": "Agent",
-    "access": "Accès",
     "attention_title": "Des exécutions demandent votre attention",
     "attention_queued_one": "{{count}} exécution est en attente car le runtime est indisponible.",
     "attention_queued_other": "{{count}} exécutions sont en attente car le runtime est indisponible."
   },
-  "skill_attach": {
-    "trigger_aria": "Rattacher un skill de l'espace de travail",
-    "trigger_label": "Rattacher"
+  "sections": {
+    "runs_count_one": "{{count}} exécution",
+    "runs_count_other": "{{count}} exécutions",
+    "recent_this_week_one": "{{count}} cette semaine",
+    "recent_this_week_other": "{{count}} cette semaine",
+    "view_all": "Tout afficher",
+    "open": "Ouvrir",
+    "edit": "Modifier",
+    "add": "Ajouter",
+    "manage": "Gérer",
+    "instructions_empty": "Aucune instruction pour l'instant."
+  },
+  "panel": {
+    "status": "Statut",
+    "runs_7d": "Exécutions (7 j)",
+    "edit_access_aria": "Accès : {{value}}. Modifier l'accès",
+    "all_settings": "Tous les paramètres"
   },
   "pickers": {
-    "concurrency_tooltip": "Concurrence · {{value}} exécutions simultanées au maximum",
     "concurrency_range": "Exécutions simultanées maximales ({{min}}–{{max}})",
     "runtime_none": "Aucun runtime",
     "runtime_tooltip": "Runtime · {{name}} · {{status}}",
@@ -261,13 +272,11 @@
     "clear_full": "Effacer la sélection (utiliser la valeur par défaut du fournisseur)"
   },
   "tabs": {
-    "overview": "Vue d'ensemble",
     "work": "Travail",
     "capabilities": "Capacités",
     "settings": "Paramètres",
     "general": "Général",
     "access": "Accès",
-    "page_navigation_aria": "Page de l'agent",
     "section_navigation_aria": "Section de l'agent",
     "activity": "Activité",
     "tasks": "Exécutions",
@@ -276,7 +285,7 @@
     "environment": "Environnement",
     "custom_args": "Arguments personnalisés",
     "mcp_config": "MCP",
-    "composio_mcp": "Applications MCP",
+    "composio_mcp": "Apps",
     "integrations": "Intégrations",
     "runtime_config": "Routage",
     "qoder_agent": "Qoder Cloud Agents",
@@ -289,7 +298,6 @@
     "title": "Créer un agent",
     "squad_title": "Créer un agent pour ce squad",
     "duplicate_title": "Dupliquer {{name}}",
-    "back": "Revenir en arrière",
     "step_ai": "Construire par la conversation",
     "modes": {
       "template": {
@@ -337,6 +345,7 @@
       "switch_runtime_failed": "Impossible de changer de runtime. La conversation se poursuit sur le précédent.",
       "switch_runtime_pending": "Arrêtez la réponse en cours pour changer de runtime.",
       "switch_runtime_success": "Runtime changé. Votre brouillon est conservé et la conversation se poursuit sur le nouveau runtime avec une session de modèle neuve.",
+      "conversation_tab": "Conversation",
       "chat_title": "Agent Builder",
       "runtime_online": "Runtime en ligne",
       "runtime_offline": "Runtime hors ligne",
@@ -373,7 +382,8 @@
       "runtime": "Choisir le runtime",
       "configure": "Configurer",
       "done": "Terminé",
-      "aria": "Étapes de création de l'agent"
+      "aria": "Étapes de création de l'agent",
+      "progress": "Étape {{current}} sur {{total}}"
     },
     "configure_title": "Configurer l'agent",
     "ask_ai": "Laisser l'IA rédiger",
@@ -438,23 +448,17 @@
     }
   },
   "create_dialog": {
-    "title_create": "Créer un agent",
-    "title_duplicate": "Dupliquer l'agent",
-    "description_duplicate": "Créez un agent à partir de « {{name}} ». Les instructions, l'environnement et les skills sont copiés pour vous.",
     "name_label": "Nom",
     "name_placeholder": "ex. Agent de recherche approfondie",
     "description_label": "Description",
     "description_placeholder": "Que fait cet agent ?",
-    "visibility_label": "Visibilité",
     "access": {
-      "label": "Accès",
       "private_title": "Privé",
       "private_desc": "Vous seul pouvez exécuter cet agent",
       "public_title": "Public",
       "public_desc": "Choisissez qui peut exécuter cet agent",
       "public_workspace_option": "Tout le monde dans cet espace de travail",
       "public_members_group": "Personnes précises",
-      "public_members_empty": "Aucun membre de l'espace de travail à choisir",
       "public_targets_empty_hint": "Choisissez au moins une option ci-dessous — sinon l'agent reste privé."
     },
     "runtime_label": "Runtime",
@@ -469,17 +473,10 @@
     "runtime_no_results": "Aucune machine correspondante",
     "runtime_group_online": "{{online}}/{{total}} en ligne",
     "duplicate_copy_suffix": " (copie)",
-    "create": "Créer",
-    "creating": "Création...",
-    "cancel": "Annuler",
-    "create_failed_toast": "Échec de la création de l'agent",
     "skill_attach_failed_toast": "Agent créé, mais échec du rattachement des skills : {{error}}",
     "squad_join_failed_toast": "L'agent « {{name}} » a été créé mais n'a pas pu rejoindre le squad : {{error}}. Vous pouvez l'ajouter manuellement depuis Membres.",
     "instructions": {
       "label": "Instructions",
-      "placeholder_blank": "Cliquez pour rédiger les instructions…",
-      "placeholder_duplicate": "Cliquez pour consulter ou modifier les instructions dupliquées",
-      "collapse": "Replier",
       "editor_placeholder": "Indiquez ce que cet agent doit faire, sur quoi se concentrer, ce qu'il faut éviter…"
     },
     "skills_section": {
@@ -697,21 +694,6 @@
       "redacted_hint": "Seul le propriétaire de l'agent ou un administrateur de l'espace de travail peut lire cette configuration.",
       "dialog_json_help": "Modifiez la configuration complète du serveur en JSON."
     },
-    "composio_mcp": {
-      "subtitle": "Cochez une boîte à outils pour permettre à cet agent de la monter comme serveur MCP — mais uniquement lorsque c'est vous (son créateur) qui avez déclenché l'exécution, directement ou via une chaîne de sous-agents.",
-      "loading": "Chargement de vos connexions…",
-      "load_failed": "Impossible de charger vos applications connectées. Réessayez dans un instant.",
-      "empty_title": "Aucune application connectée pour l'instant",
-      "empty_link_to_settings": "Connectez-en un dans Paramètres → Intégrations",
-      "connected": "Connecté",
-      "toggle_aria": "Autoriser {{toolkit}} pour cet agent",
-      "saving": "Enregistrement…",
-      "save_failed_toast": "Impossible d'enregistrer — veuillez réessayer",
-      "redacted_title": "Configuré — masqué pour vous",
-      "redacted_hint": "Seul le créateur de l'agent peut voir ou modifier les applications qu'il peut utiliser.",
-      "shared_warning": "Cet agent est partagé. Les personnes qui peuvent l'exécuter pourront utiliser les applications Composio que vous activez ici. Passez en Privé ou restreignez la liste d'accès si ces applications exposent des données sensibles.",
-      "workspace_warning": "Public pour l'espace de travail : tout membre de l'espace de travail peut utiliser ces applications Composio via cet agent."
-    },
     "runtime_config": {
       "mode_label": "Mode de routage",
       "mode_local": "Local",
@@ -793,13 +775,6 @@
       "section_now": "Maintenant",
       "section_last_30d": "30 derniers jours",
       "section_recent": "Travaux récents",
-      "subtitle_no_active": "Aucun travail en cours",
-      "subtitle_active_one": "{{count}} exécution active",
-      "subtitle_active_other": "{{count}} exécutions actives",
-      "subtitle_performance": "Performance",
-      "subtitle_no_recent": "Rien de terminé pour l'instant",
-      "subtitle_recent_progress": "{{shown}} exécutions sur {{total}}",
-      "subtitle_recent_latest": "{{count}} exécutions les plus récentes",
       "empty_now": "Cet agent n'exécute rien pour l'instant.",
       "empty_30d": "Aucune tâche terminée ces 30 derniers jours.",
       "empty_recent": "Cet agent n'a encore rien terminé.",
@@ -811,9 +786,7 @@
       "success_hint": "Exécutions terminées divisées par la somme des exécutions terminées et en échec. Les exécutions annulées sont exclues.",
       "success_unavailable": "Aucune exécution terminée ou en échec sur cette période : aucun taux de réussite à afficher.",
       "cancelled_count": "{{count}} annulées",
-      "avg_duration": "moy. {{value}}",
       "avg_duration_label": "durée moyenne",
-      "failed_count": "{{count}} en échec",
       "failed_label": "en échec",
       "source_issue": "Tâche",
       "source_chat": "Discussion",
@@ -835,6 +808,27 @@
       "started_prefix": "Démarrée {{when}}",
       "dispatched_prefix": "Envoyée {{when}}",
       "queued_prefix": "Mise en file d'attente {{when}}"
+    },
+    "connected_apps": {
+      "loading": "Chargement des apps…",
+      "load_failed": "Impossible de charger les apps de cet agent.",
+      "empty": "Aucune app connectée disponible.",
+      "level": "Niveau",
+      "team_connected": "Compte d'équipe connecté",
+      "team_missing": "Compte d'équipe non connecté",
+      "personal_connected": "Votre compte est connecté",
+      "personal_missing": "Vous n'avez pas connecté cette app",
+      "team_admin_only": "Seuls les admins de l'espace peuvent donner un compte d'équipe à un agent.",
+      "team_shared_warning": "Toute personne pouvant exécuter cet agent peut utiliser ce compte d’équipe par son intermédiaire.",
+      "manage_link": "Gérer les comptes dans Paramètres → Applications connectées",
+      "save_failed_toast": "Échec de l'enregistrement, veuillez réessayer",
+      "team_help": "Compte partagé de l’espace de travail, connecté par les administrateurs.",
+      "personal_help": "Chaque exécution utilise le compte de la personne qui la déclenche. Chacun doit connecter son compte.",
+      "available_accounts": "Disponible : {{accounts}}",
+      "enable": "Activer {{app}}",
+      "account_for": "Compte pour {{app}}",
+      "connect_hint": "Vous ne trouvez pas l’app souhaitée ? Connectez un compte dans les paramètres.",
+      "available_personal": "Votre compte"
     }
   },
   "char_counter": {
@@ -1042,25 +1036,35 @@
     "none": "Aucune activité (30 j)"
   },
   "toolbar": {
-    "result_count_title": "Agents correspondants / agents dans la portée",
-    "filter_label": "Filtrer",
-    "filter_active_count_one": "{{count}} filtre",
-    "filter_active_count_other": "{{count}} filtres",
-    "clear_filters": "Effacer les filtres",
     "section_availability": "Disponibilité",
     "section_access": "Accès",
     "section_runtime": "Runtime",
-    "display": "Affichage",
-    "sort_by": "Trier par",
-    "direction_asc": "Croissant",
-    "direction_desc": "Décroissant",
-    "section_columns": "Colonnes",
     "section_owner": "Propriétaire",
     "section_model": "Modèle"
   },
-  "actions": {
-    "selected_one": "{{count}} sélectionné",
-    "selected_other": "{{count}} sélectionnés",
-    "clear_selection": "Effacer la sélection"
+  "actions": {},
+  "intro": {
+    "title": "Recrutez votre premier coéquipier IA",
+    "description": "Les agents prennent des tâches comme un membre de l'équipe : ils travaillent sur votre runtime avec Claude Code, Codex et d'autres outils, puis livrent dans les commentaires.",
+    "slides": {
+      "describe": {
+        "title": "Décrivez son rôle en une phrase",
+        "description": "Décrivez la mission, choisissez un runtime et un modèle, puis créez-le. Modifiez ses instructions ou ajoutez des skills quand vous voulez."
+      },
+      "assign": {
+        "title": "Confiez-lui du travail comme à un collègue",
+        "description": "Choisissez-le comme responsable de n'importe quelle tâche. Il s'y met tout seul, sans surveillance."
+      },
+      "deliver": {
+        "title": "Suivez son travail, recevez le résultat en commentaire",
+        "description": "Chaque étape est visible pendant l'exécution. Une fois terminé, il publie le résultat et la PR sur la tâche."
+      }
+    },
+    "art": {
+      "prompt": "Relire les PR frontend en priorité pour l'accessibilité et les performances, et publier les conclusions en commentaire de PR.",
+      "issue_title": "Mise en page de la page tarifs cassée sur mobile",
+      "comment": "Corrigé : sous 375px, les cartes tarifs passent sur une colonne. PR ouverte, tests au vert.",
+      "step_read": "Lecture de {{file}}"
+    }
   }
 }

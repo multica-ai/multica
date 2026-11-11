@@ -1,4 +1,11 @@
 {
+  "web": {
+    "open_in_desktop": "在桌面端打开"
+  },
+  "desktop": {
+    "link_other_instance": "桌面端连接的是另一个 Multica 实例。",
+    "link_workspace_unavailable": "此工作区在桌面端不可用。"
+  },
   "inline_run": {
     "label": "{{name}} 的运行",
     "stop": "停止",
@@ -38,10 +45,17 @@
   "working_filter_error": {
     "title": "无法加载智能体正在处理的任务"
   },
+  "unread_filter_error": {
+    "title": "无法加载未读任务"
+  },
   "status_catalog_error": {
     "title": "状态列表加载失败",
     "hint": "加载状态后才能显示任务。",
     "retry": "重试"
+  },
+  "relation_filter_error": {
+    "title": "“与我的关系”筛选加载失败",
+    "hint": "加载订阅和智能体后才能显示按“我订阅的”或“我的智能体在做”筛选的任务。"
   },
   "source_context": {
     "create_action": "从这条评论创建子任务",
@@ -117,6 +131,9 @@
     "breadcrumb_title": "任务",
     "breadcrumb_workspace_fallback": "工作区",
     "empty_title": "还没有任务",
+    "empty_description": "任务是交给成员或智能体的一件具体工作。分配给智能体后，它会在你的运行时上自己开始。",
+    "break_down_with_chat": "用聊天拆解需求",
+    "break_down_prompt": "我想完成下面这件事。先问清楚你需要了解的，然后在这个工作区里把它拆成任务：\n\n",
     "move_failed": "移动任务失败"
   },
   "status": {
@@ -155,6 +172,7 @@
   },
   "filters": {
     "tooltip": "筛选",
+    "active_section": "已启用",
     "placeholder": "筛选...",
     "search_status": "搜索状态...",
     "no_results": "无结果",
@@ -171,6 +189,20 @@
     "section_project": "项目",
     "section_project_status": "项目状态",
     "section_label": "标签",
+    "section_relation": "与我的关系",
+    "relation_assigned": "分配给我的",
+    "relation_created": "我创建的",
+    "relation_my_agents": "我的智能体在做",
+    "relation_subscribed": "我订阅的",
+    "section_agent_status": "智能体状态",
+    "agent_status_running": "运行中",
+    "section_read_state": "阅读状态",
+    "read_state_unread": "未读",
+    "operator_label": "关系",
+    "operator_is": "是",
+    "operator_is_not": "不是",
+    "modified_hint": "相对视图有改动",
+    "unsaved_changes_other": "{{count}} 处未保存的改动",
     "section_date": "日期",
     "date_field": "字段",
     "date_field_created": "创建时间",
@@ -194,7 +226,53 @@
     "active_count_other": "{{count}} 个筛选",
     "in_view": "已包含在视图中",
     "chip_edit": "编辑",
-    "chip_save_as": "另存"
+    "chip_save_as": "另存",
+    "section_due_date": "截止日期",
+    "due_overdue": "已逾期",
+    "due_today": "今天截止",
+    "due_this_week": "本周截止",
+    "due_next_7_days": "7 天内截止",
+    "due_none": "无截止日期",
+    "search_placeholder": "按字段或值筛选…",
+    "search_fields": "字段",
+    "search_values": "值",
+    "advanced_switch": "切换到高级筛选",
+    "advanced_title": "高级筛选",
+    "advanced_match_leading": "满足",
+    "advanced_match_trailing": "条件",
+    "match_all": "全部",
+    "match_any": "任一",
+    "advanced_where": "当",
+    "advanced_and": "且",
+    "advanced_or": "或",
+    "advanced_add_condition": "添加条件",
+    "advanced_add_group": "添加条件组",
+    "advanced_unknown_property": "已删除的属性",
+    "advanced_values_placeholder": "选择值…",
+    "advanced_field_label": "字段",
+    "advanced_values_label": "值",
+    "advanced_actions": "条件操作",
+    "advanced_duplicate": "复制",
+    "advanced_delete": "删除",
+    "advanced_delete_group": "删除条件组",
+    "advanced_to_simple": "切回简单筛选",
+    "advanced_to_simple_blocked": "含条件组、“任一”或重复字段，简单筛选表达不了",
+    "advanced_clear": "清除全部",
+    "advanced_empty": "还没有条件，添加一条开始筛选。",
+    "advanced_conditions_other": "{{count}} 个条件",
+    "operator_has_any": "包含任一",
+    "operator_has_none": "都不包含",
+    "operator_contains": "包含",
+    "operator_not_contains": "不包含",
+    "operator_before": "早于",
+    "operator_after": "晚于",
+    "operator_empty": "为空",
+    "operator_not_empty": "不为空",
+    "advanced_group_match_leading": "满足组内",
+    "advanced_group_match_trailing": "条件",
+    "advanced_group_hint": "组内条件之间用「{{word}}」连接",
+    "advanced_add_to_group": "添加到条件组",
+    "advanced_turn_into_group": "转为条件组"
   },
   "display": {
     "tooltip": "显示设置",
@@ -204,6 +282,7 @@
     "card_properties_section": "卡片属性",
     "columns_section": "列",
     "columns_locked_by_filter": "清除状态筛选后才能显示或隐藏列。",
+    "columns_shown": "显示 {{count}} 列",
     "ascending_title": "升序",
     "descending_title": "降序",
     "newest_first": "最新优先",
@@ -236,7 +315,8 @@
     "card_project": "项目",
     "card_labels": "标签",
     "card_child_progress": "子任务进度",
-    "show_sub_issues": "显示子任务"
+    "show_sub_issues": "显示子任务",
+    "layout_options": "{{layout}}选项"
   },
   "view": {
     "tooltip_board": "看板视图",
@@ -346,7 +426,7 @@
       }
     },
     "search_placeholder": "搜索任务...",
-    "search_empty": "没有匹配的任务。"
+    "search_empty": "没有匹配的任务"
   },
   "list": {
     "empty_status": "无任务",
@@ -384,9 +464,11 @@
     "metadata_restore": "恢复弹窗大小",
     "metadata_copy_failed": "复制元数据失败",
     "metadata_description": "智能体和集成记录的键值数据，用于衔接工作流程。",
-
     "section_load_failed_retry": "加载失败，点击重试",
     "not_found": "这个任务不存在或已在该工作区被删除。",
+    "load_failed": "无法加载任务。",
+    "load_retry": "重试",
+    "not_found_title": "未找到该任务",
     "breadcrumb_project_unknown": "未知项目",
     "back": "返回",
     "title_placeholder": "任务标题",
@@ -404,6 +486,17 @@
     "section_pull_requests": "Pull Request",
     "section_metadata": "元数据",
     "section_details": "详情",
+    "sidebar_settings": {
+      "open": "自定义侧边栏",
+      "title": "侧边栏",
+      "reset": "恢复默认",
+      "footer": "拖动调整顺序。所有任务共用这套设置。",
+      "always_shown": "始终显示",
+      "empty": "本任务暂无",
+      "customize": "自定义",
+      "drag_handle": "调整{{section}}的位置",
+      "hidden_count_other": "已隐藏 {{count}} 个区块"
+    },
     "section_quick_actions": "快捷操作",
     "quick_actions_more": "显示其余 {{count}} 条",
     "quick_action_runs_as": "由 {{name}} 执行",
@@ -464,7 +557,6 @@
     "agents_group": "智能体",
     "mark_done_tooltip": "标记为已完成",
     "archive_tooltip": "归档",
-    "restore_to_inbox_tooltip": "恢复到收件箱",
     "pin_tooltip": "固定到侧边栏",
     "unpin_tooltip": "从侧边栏取消固定",
     "quick_jump_label": "快捷跳转",
@@ -498,7 +590,8 @@
   },
   "timeline": {
     "loading": "加载中…",
-    "jump_to_latest": "跳到最新"
+    "jump_to_latest": "跳到最新",
+    "new_comments_other": "{{count}} 条新评论"
   },
   "activity": {
     "created": "创建了这个任务",
@@ -553,7 +646,10 @@
     "wakeup_checkin": "静默检查：{{note}}",
     "wakeup_checkin_coalesced_other": "静默检查 {{count}} 次 · 最近一次：{{note}}",
     "wakeup_chip_created_by": "{{name}} 创建",
-    "wakeup_chip_system": "系统规则"
+    "wakeup_chip_system": "系统规则",
+    "environment_stopped": "停止了环境 {{name}}",
+    "environment_restarted": "重启了环境 {{name}}",
+    "environment_started": "启动了环境 {{name}}"
   },
   "comment": {
     "add_reaction": "添加表情回应",
@@ -653,10 +749,17 @@
     "restart_failed": "没能停止当前运行，消息还没有发送。"
   },
   "reply": {
+    "recipients_changed": "回复目标已变化。请重新确认接收者后再发送。",
     "placeholder": "回复...",
     "annotations": {
+      "send_all": "全部发送",
+      "send_with_annotations_and_body": "将连同下方 {{count}} 条批注和正文一起发送",
+      "send_with_annotations": "将连同下方 {{count}} 条批注一起发送",
+      "send_with_body": "将连同下方正文一起发送",
       "confirm_add": "添加批注",
       "save": "保存批注",
+      "confirm_add_short": "添加",
+      "save_short": "保存",
       "add_comment": "加入评论",
       "add": "加入回复",
       "note_label": "批注",
@@ -679,6 +782,9 @@
     "hover_header_queued_other": "{{count}} 个智能体排队中",
     "status_running": "正在工作",
     "status_queued": "排队中",
+    "unread_completed": "{{agent}} 已完成运行 · {{time}}",
+    "unread_failed": "{{agent}} 运行失败 · {{time}}",
+    "unread_manual": "已标为未读",
     "empty_hover": "当前没有智能体在工作",
     "unknown_hover": "工作中的智能体：尚未加载",
     "filter_active_label": "正在查看有智能体在工作的任务",
@@ -689,6 +795,7 @@
   },
   "filtered_empty": {
     "title": "没有符合筛选条件的任务",
+    "unread_title": "没有未读任务",
     "clear_button": "清除筛选"
   },
   "agent_live": {
@@ -704,6 +811,11 @@
     "cancel_failed": "取消运行失败"
   },
   "execution_log": {
+    "latest": "最近",
+    "include_children": "包含子任务",
+    "loading": "正在加载运行记录...",
+    "load_failed_retry": "无法加载运行记录，点击重试",
+    "empty": "此范围内暂无运行记录。",
     "section": "执行日志",
     "cancel_task_tooltip": "取消运行",
     "cancel_task_aria": "取消运行",
@@ -803,6 +915,7 @@
     "col_tokens": "Token",
     "col_cost": "费用",
     "tokens_count": "{{tokens}} Token",
+    "credits_count": "{{credits}} {{provider}} 积分",
     "details_toggle": "运行详情",
     "detail_breakdown": "费用明细",
     "detail_total": "合计",
@@ -821,6 +934,7 @@
     "confirm": "停止运行"
   },
   "batch": {
+    "delete_restricted": "你可以删除本人或本人拥有的智能体创建的任务。工作区 owner 和 admin 可以删除任意任务。",
     "selected": "已选择 {{count}} 个",
     "status": "状态",
     "priority": "优先级",
@@ -833,7 +947,6 @@
     "delete_failed": "删除任务失败",
     "delete_dialog_title_other": "删除 {{count}} 个任务？",
     "delete_dialog_desc_other": "此操作无法撤销，所选任务及其全部关联数据都会被永久删除。",
-    "delete_dialog_warning": "任何工作区成员都可以删除任务。",
     "cancel": "取消"
   },
   "card": {
@@ -858,10 +971,17 @@
     "unassigned": "未分配",
     "open_in_new_tab": "在新标签页打开",
     "pin_to_sidebar": "固定到侧边栏",
+    "locate_in_sidebar": "在侧边栏中定位",
     "unpin_from_sidebar": "从侧边栏取消固定",
+    "restore_to_inbox": "恢复到收件箱",
+    "mark_read": "标为已读",
+    "mark_unread": "标为未读",
     "copy_link": "复制链接",
     "copy_workdir_path": "复制本地 workdir 路径",
     "copy_project_directory_path": "复制项目目录路径",
+    "copy_identifier": "复制标识符",
+    "identifier_copied": "已复制 {{identifier}}",
+    "stop_agent_run": "停止 {{name}} 的运行",
     "relations": "关系",
     "create_sub_issue": "创建子任务",
     "set_parent_issue": "设置父任务...",
@@ -957,38 +1077,6 @@
     "row_todo_hint": "启动智能体"
   },
   "save_view": {
-    "title": "保存为视图",
-    "hint_workspace": "基于工作区全部任务创建",
-    "hint_my_any": "基于「我的任务 · 全部」创建",
-    "hint_my_assigned": "基于「我的任务 · 分配给我」创建",
-    "hint_my_created": "基于「我的任务 · 我创建的」创建",
-    "hint_my_involved": "基于「我的任务 · 我参与的」创建",
-    "hint_project": "基于项目「{{title}}」创建，仅在该项目页面可用",
-    "hint_project_agents": "基于项目「{{title}}」中智能体负责的任务创建，仅在该项目页面可用",
-    "hint_project_members": "基于项目「{{title}}」中成员负责的任务创建，仅在该项目页面可用",
-    "my_private_note": "我的任务视图仅自己可见",
-    "name_label": "名称",
-    "visibility_label": "可见性",
-    "visibility_private": "仅自己可见",
-    "visibility_workspace": "工作区成员可见",
-    "filters_label": "筛选",
-    "custom_property": "自定义属性",
-    "create": "创建视图",
-    "layout_label": "布局",
-    "display_defaults": "默认显示",
-    "default_hint": "成员首次打开此视图时的显示方式，之后各自可调",
-    "add_filter": "添加筛选",
-    "name_placeholder": "例如：需要 Review",
-    "cancel": "取消",
-    "name_required": "请输入视图名称",
-    "toast_created": "视图已创建",
-    "toast_failed": "创建视图失败",
-    "edit_title": "编辑视图",
-    "update": "保存修改",
-    "toast_updated": "视图已更新",
-    "toast_conflict": "视图已被他人修改，请重新打开后再试",
-    "hint_workspace_members": "基于工作区中成员负责的任务创建",
-    "hint_workspace_agents": "基于工作区中智能体负责的任务创建",
     "scope_label_workspace": "负责人类型",
     "scope_label_my": "与我的关系",
     "variant_all": "不限负责人",
@@ -997,37 +1085,7 @@
     "variant_my_any": "任何相关",
     "variant_my_assigned": "分配给我",
     "variant_my_created": "我创建的",
-    "variant_my_involved": "我参与的"
-  },
-  "view_selector": {
-    "trigger": "视图",
-    "empty": "还没有保存的视图",
-    "private_group": "私有",
-    "shared_group": "工作区共享",
-    "exit": "退出视图",
-    "unavailable": "该视图已不可用",
-    "edit": "编辑视图"
-  },
-  "view_bar": {
-    "menu_label": "视图",
-    "menu_new": "新增视图",
-    "builtin_tag": "内置",
-    "drag_handle": "拖拽排序",
-    "delete": "删除",
-    "delete_title": "删除视图？",
-    "delete_description": "「{{name}}」将对所有可见成员删除",
-    "toast_deleted": "视图已删除",
-    "context_edit": "编辑视图",
-    "context_pin": "固定到侧栏",
-    "context_unpin": "从侧栏取消固定",
-    "row_menu": "更多操作",
-    "row_hide": "在栏中隐藏",
-    "row_show": "在栏中显示",
-    "menu_manage": "管理视图",
-    "manage_title": "管理视图",
-    "manage_hint": "排序与显隐只影响你自己",
-    "visible_toggle": "在视图栏显示",
-    "more_label": "更多视图"
+    "variant_my_involved": "我的智能体在做"
   },
   "plugins": {
     "panels": "Plugins",
@@ -1304,15 +1362,16 @@
       "enable": "在此任务上启用",
       "toggle": "子任务结束时唤醒负责人",
       "save_error": "无法保存系统规则。",
-      "default_on": "工作区默认开启，可在「设置 → 唤醒」中修改默认值。",
-      "default_off": "工作区默认关闭，可在「设置 → 唤醒」中修改默认值。",
+      "default_on": "工作区默认开启。",
+      "default_off": "工作区默认关闭。",
       "notify_member": "通过收件箱通知 {{name}}",
       "instruction": "唤醒后要做什么",
       "instruction_edit": "编辑指令",
       "instruction_default": "此任务未设置，使用默认指令：",
       "instruction_placeholder": "留空则使用默认指令",
       "instruction_invalid": "指令最多 4,000 字节。",
-      "paused": "已暂停：{{reason}}"
+      "paused": "已暂停：{{reason}}",
+      "default_change": "修改默认值"
     },
     "cond": {
       "status": "当状态变为{{status}}时",
@@ -1428,6 +1487,9 @@
     "version_short": "v{{version}}",
     "locate_comment": "定位到评论",
     "locate_description": "定位到描述",
+    "copy_link": "复制最新版链接",
+    "not_found": "这个任务里没有名为“{{name}}”的产物",
+    "link_load_failed": "没能加载这个任务的产物，打不开“{{name}}”。刷新页面重试。",
     "version_label": "第 {{version}} 版，共 {{total}} 版",
     "version_of": "v{{version}}（共 {{total}} 版）",
     "info_source": "来源",
@@ -1590,8 +1652,6 @@
       "picker_more": "在「设置 → 工作流」里可以新建更多工作流。"
     },
     "picker": {
-      "header": "{{workflow}} · 跟随项目「{{project}}」",
-      "header_no_project": "{{workflow}} 状态 · 无项目",
       "footer": "只显示这个任务所在工作流里的状态。右侧是进入该状态时的处理人。"
     },
     "confirm": {
@@ -1629,7 +1689,6 @@
       "brief_header": "这次运行收到的工作流说明"
     },
     "detail": {
-      "follows_project": "（跟随项目）",
       "card_title": "「{{workflow}}」· 跟随项目「{{project}}」"
     },
     "list_separator": "、",
@@ -1669,15 +1728,12 @@
       "name_placeholder": "状态名称",
       "add": "添加"
     },
-    "menu": {
-      "view_flow": "查看完整流程",
-      "switch": "切换工作流"
-    },
     "flow": {
       "title": "「{{workflow}}」工作流",
       "scope_own": "只有这个项目使用这个工作流。",
       "no_handoff_here": "不交接",
-      "scope_shared_other": "{{count}} 个项目使用这个工作流，它的交接对这些项目都生效。"
+      "scope_shared_other": "{{count}} 个项目使用这个工作流，它的交接对这些项目都生效。",
+      "switch": "切换工作流"
     },
     "templates": {
       "delivery": {
@@ -1709,5 +1765,199 @@
   },
   "hover_card": {
     "created_updated": "创建于 {{created}} · 更新于 {{updated}}"
+  },
+  "views": {
+    "builtin": {
+      "my_issues": "我的任务",
+      "my_agents": "我的智能体在做",
+      "all_issues": "全部任务",
+      "unread": "未读"
+    },
+    "untitled": "未命名视图",
+    "copy_name": "{{name}}（副本）",
+    "rename": "重命名",
+    "duplicate": "创建副本",
+    "copy_link": "复制链接",
+    "link_copied": "链接已复制",
+    "visible_to": "可见范围",
+    "only_me": "仅自己",
+    "workspace_members": "工作区成员",
+    "add_to_sidebar": "添加到侧栏",
+    "remove_from_sidebar": "从侧栏移除",
+    "back_to": "返回{{name}}",
+    "delete": "删除视图",
+    "delete_title": "删除视图？",
+    "delete_description": "「{{name}}」将被删除，此操作无法撤销。",
+    "delete_description_shared": "「{{name}}」已共享给工作区，删除后所有人都将无法使用。",
+    "cancel": "取消",
+    "toast_deleted": "视图已删除",
+    "toast_delete_failed": "删除视图失败",
+    "filter": "筛选",
+    "filter_count_other": "{{count}} 个筛选",
+    "reset": "重置",
+    "save": "保存",
+    "save_options": "更多保存选项",
+    "save_to": "保存到「{{name}}」",
+    "save_to_hint_shared": "为工作区所有人更新此视图",
+    "save_to_hint_private": "更新你的视图",
+    "save_as_new": "另存为新视图",
+    "save_as_new_hint": "「{{name}}」保持不变",
+    "save_as_view": "保存为视图",
+    "save_view": "保存视图",
+    "add_filter": "添加筛选",
+    "setup_hint": "这个视图还没有条件，目前显示全部任务",
+    "set_by_view": "由此视图设定",
+    "new_issue": "新建任务",
+    "unavailable": "此视图已不可用",
+    "toast_saved": "视图已保存",
+    "toast_conflict": "视图已被他人修改，请刷新后重试",
+    "toast_create_failed": "创建视图失败",
+    "toast_save_failed": "保存视图失败",
+    "directory": {
+      "new_view": "新建视图",
+      "scope_all": "全部视图",
+      "scope_builtin": "内置",
+      "scope_mine": "我创建的",
+      "scope_shared": "已共享",
+      "col_name": "名称",
+      "col_location": "位置",
+      "col_filters": "筛选",
+      "col_visibility": "可见范围",
+      "col_owner": "所有者",
+      "owner_builtin": "内置",
+      "location_project": "项目",
+      "star": "将{{name}}添加到侧栏",
+      "unstar": "将{{name}}从侧栏移除",
+      "row_actions": "{{name}} 的操作",
+      "empty_title": "还没有保存的视图",
+      "empty_description": "在任务列表里调好筛选和显示方式，然后另存为视图。"
+    }
+  },
+  "app_calls": {
+    "section_title": "应用",
+    "chips_label": "本次运行用到的应用",
+    "calls_count_other": "{{count}} 次调用",
+    "more": "还有 {{count}} 个",
+    "scope": {
+      "team": "团队账号",
+      "personal": "个人账号"
+    },
+    "outcome": {
+      "ok": "已执行",
+      "error": "失败",
+      "blocked": "已拦截",
+      "pending": "等待确认",
+      "approved": "已批准",
+      "rejected": "已拒绝",
+      "rate_limited": "已限流"
+    }
+  },
+  "environments": {
+    "section_title": "环境",
+    "running_count_other": "{{count}} 个运行中",
+    "this_machine": "本机",
+    "unknown_machine": "未知设备",
+    "state": {
+      "starting": "启动中",
+      "running": "运行中",
+      "exited": "已退出",
+      "stopped": "已停止",
+      "unreachable": "无响应",
+      "stopping": "停止中",
+      "preparing": "准备中"
+    },
+    "expires_in_minutes_other": "{{count}} 分钟后过期",
+    "expires_in_hours_other": "{{count}} 小时后过期",
+    "expires_in_days_other": "{{count}} 天后过期",
+    "started_ago": "{{time}}启动",
+    "ended_ago": "{{time}}结束",
+    "last_seen": "{{time}}最后响应",
+    "ended_count_other": "{{count}} 个已结束",
+    "detected_hint": "在这个任务某次运行的目录中发现的服务",
+    "remote_hint": "运行在 {{machine}} 上，localhost 地址只能在那台机器上打开。",
+    "localhost_hint": "localhost 地址只能在运行它的那台机器上打开。",
+    "open": "打开",
+    "copy_url": "复制地址",
+    "copied": "已复制地址",
+    "copy_failed": "无法复制地址",
+    "offline": "离线",
+    "machine_offline": "{{machine}} 已离线",
+    "more_actions": "更多操作",
+    "view_logs": "查看日志",
+    "restart": "重启",
+    "stop": "停止",
+    "stop_confirm_item": "停止…",
+    "run_first": "首次运行",
+    "run_nth_other": "第 {{count}} 次运行",
+    "someone": "有人",
+    "started_by": "由 {{name}} 启动",
+    "restarted_by": "由 {{name}} 重启",
+    "started_by_agent_in_run": "由 {{name}} 在「{{run}}」中启动",
+    "stopped_by": "由 {{name}} 停止",
+    "stopped_on_expiry": "到期自动停止",
+    "exited_ago": "{{time}}退出",
+    "exit_code": "退出码 {{code}}",
+    "detected_label": "自动识别的服务 · {{name}}",
+    "detected_no_logs": "这个服务不是按环境配置启动的，所以看不到日志，也不能重启。",
+    "offline_hint": "这台机器重新上线后才能操作。",
+    "outdated_hint": "这台机器上的 Multica 更新后，才能在这里操作。",
+    "no_permission_hint": "只有能使用这台机器的成员可以停止或重启。",
+    "waiting_machine": "等待机器响应",
+    "waiting_ready": "等待服务就绪",
+    "no_response": "没有响应",
+    "action_failed": {
+      "stop": "停止失败",
+      "restart": "重启失败",
+      "start": "启动失败"
+    },
+    "stop_confirm_title": "停止 {{name}}？",
+    "stop_confirm_body": "这个服务（{{process}}）是自动识别的，不是按环境配置启动的。停止后不能在这里重启，需要让智能体重新启动它。",
+    "cancel": "取消",
+    "preparing_title": "{{name}} 正在准备环境",
+    "preparing_hint": "启动后会显示在这里",
+    "start_menu": {
+      "trigger": "启动环境",
+      "note": "按项目里的环境配置启动，使用这台机器上最近一次运行的代码。",
+      "no_permission": "只有能使用这台机器的成员可以在上面启动环境。",
+      "nothing_to_start": "这个任务还没运行过，或者之前运行的代码已被清理，没有可以直接启动的环境。",
+      "ask_agent": "让 {{name}} 启动",
+      "ask_any_agent": "让智能体启动",
+      "new_run": "新建运行",
+      "preparing": "准备中",
+      "ask_agent_hint": "{{name}} 会准备好这个任务的代码，再启动环境。项目里没有环境配置时，它会自己判断怎么启动。",
+      "ask_any_agent_hint": "智能体会准备好这个任务的代码，再启动环境。项目里没有环境配置时，它会自己判断怎么启动。",
+      "ask_failed": "没能交给智能体",
+      "agent_instruction": "启动环境：先准备好这个任务的代码，再用 `multica env start` 启动项目里配置的环境；项目里没有环境配置时，自己判断怎么启动。让服务保持运行，并回复访问地址。"
+    },
+    "log": {
+      "title": "{{name}} · 日志",
+      "filter": "筛选日志",
+      "wrap": "自动换行",
+      "follow": "跟随最新",
+      "copy": "复制",
+      "copied": "已复制日志",
+      "copy_failed": "无法复制日志",
+      "refresh": "刷新",
+      "footer_other": "显示最近 {{count}} 行 · {{time}} 更新",
+      "loading": "正在读取日志…",
+      "empty": "还没有输出",
+      "no_match": "没有匹配的行",
+      "no_response": "机器没有响应",
+      "failed": "没能读取日志：{{error}}",
+      "offline_excerpt": "这台机器已离线，下面是它退出前最后输出的内容。",
+      "offline_empty": "这台机器重新上线后才能查看日志。",
+      "exit_divider": "{{time}} 退出",
+      "exit_divider_code": "{{time}} 退出 · 退出码 {{code}}",
+      "stopped_divider": "{{time}} 停止"
+    },
+    "app_desktop_hint": "桌面 App。在运行它的那台机器上，用 Multica Desktop 切到它的窗口。",
+    "app_remote_hint": "运行在 {{machine}} 上。在那台机器上用 Multica Desktop 切到它的窗口。",
+    "focus": "切到窗口",
+    "focus_gone": "{{name}} 已经不在运行",
+    "focus_unsupported": "这台机器的 daemon 暂时不能切换 App 窗口。更新 Multica 后再试。",
+    "focus_unavailable": "本机 daemon 没有运行",
+    "focus_failed": "无法切到 {{name}}",
+    "retry": "重试",
+    "dismiss": "忽略"
   }
 }

@@ -36,6 +36,40 @@ function makeAttachment(id: string): Attachment {
   };
 }
 
+describe("Ask chat intent", () => {
+  it("starts atomically while retaining personal choices, draft and attachments", () => {
+    const storage = memStorage();
+    const store = createChatStore({ storage });
+    const state = store.getState();
+    state.setSelectedAgentId("last");
+    state.setQuickChatAgentId("personal");
+    state.setActiveSession("previous");
+    state.setSelectedProjectId("project");
+    state.setInputDraft(DRAFT_NEW_SESSION, "draft");
+    state.addInputDraftAttachment(DRAFT_NEW_SESSION, makeAttachment("upload"));
+    const updates: unknown[] = [];
+    const unsubscribe = store.subscribe((next) => updates.push(next));
+    state.startAskChat();
+    unsubscribe();
+    expect(updates).toHaveLength(1);
+    expect(store.getState()).toMatchObject({
+      isOpen: true, newChatSource: "ask", activeSessionId: null,
+      selectedProjectId: null, selectedAgentId: "last", quickChatAgentId: "personal",
+      inputDrafts: { [DRAFT_NEW_SESSION]: "draft" },
+    });
+    expect(store.getState().inputDraftAttachments[DRAFT_NEW_SESSION]).toHaveLength(1);
+    state.setOpen(false);
+    state.toggle();
+    expect(store.getState().newChatSource).toBe("ask");
+    state.setSelectedAgentId("manual");
+    expect(store.getState().newChatSource).toBeNull();
+    state.startAskChat();
+    state.setActiveSession("session");
+    expect(store.getState().newChatSource).toBeNull();
+    expect(createChatStore({ storage }).getState().newChatSource).toBeNull();
+  });
+});
+
 // The pre-MUL-4864 scheme kept one new-chat draft per agent, in `__new__:<id>`
 // slots. Those slots have no timestamp, so on upgrade only one can survive:
 // the one for the agent the workspace has selected — the draft the user would
@@ -257,6 +291,72 @@ describe("chat store — floating window preference", () => {
     store.getState().setFloatingChatEnabled(true);
     expect(store.getState().floatingChatEnabled).toBe(true);
     expect(storage.getItem("multica:chat:floatingChatEnabled")).toBe("true");
+  });
+});
+
+describe("chat store — bottom bar chips", () => {
+  const BAR_KEY = "multica:chat:bar";
+
+  it("keeps opened chats newest first, once each, and across a reload", () => {
+    const storage = memStorage();
+    const store = createChatStore({ storage });
+
+    store.getState().keepChatInBar("a");
+    store.getState().keepChatInBar("b");
+    store.getState().keepChatInBar("a");
+
+    expect(store.getState().chatBarKept).toEqual(["b", "a"]);
+    expect(createChatStore({ storage }).getState().chatBarKept).toEqual(["b", "a"]);
+  });
+
+  it("closes a chip with the chat's activity, and forgets that when it is opened again", () => {
+    const storage = memStorage();
+    const store = createChatStore({ storage });
+    store.getState().keepChatInBar("a");
+
+    store.getState().dismissChatFromBar("a", "2026-11-11T08:00:00Z");
+    expect(store.getState().chatBarKept).toEqual([]);
+    expect(store.getState().chatBarDismissed).toEqual({ a: "2026-11-11T08:00:00Z" });
+    expect(createChatStore({ storage }).getState().chatBarDismissed).toEqual({
+      a: "2026-11-11T08:00:00Z",
+    });
+
+    store.getState().keepChatInBar("a");
+    expect(store.getState().chatBarKept).toEqual(["a"]);
+    expect(store.getState().chatBarDismissed).toEqual({});
+  });
+
+  it("drops the oldest chips over the cap", () => {
+    const store = createChatStore({ storage: memStorage() });
+    for (let i = 0; i < 14; i++) store.getState().keepChatInBar(`s${i}`);
+
+    const kept = store.getState().chatBarKept;
+    expect(kept).toHaveLength(12);
+    expect(kept[0]).toBe("s13");
+    expect(kept).not.toContain("s0");
+  });
+
+  it("reads a malformed blob as empty", () => {
+    const storage = memStorage();
+    storage.setItem(BAR_KEY, JSON.stringify({ kept: "nope", dismissed: [1] }));
+    const state = createChatStore({ storage }).getState();
+
+    expect(state.chatBarKept).toEqual([]);
+    expect(state.chatBarDismissed).toEqual({});
+  });
+});
+
+describe("chat store — Ask Multica agent", () => {
+  it("has no preference by default, and persists one until it is cleared", () => {
+    const storage = memStorage();
+    const store = createChatStore({ storage });
+    expect(store.getState().quickChatAgentId).toBeNull();
+
+    store.getState().setQuickChatAgentId("agent-1");
+    expect(createChatStore({ storage }).getState().quickChatAgentId).toBe("agent-1");
+
+    store.getState().setQuickChatAgentId(null);
+    expect(createChatStore({ storage }).getState().quickChatAgentId).toBeNull();
   });
 });
 

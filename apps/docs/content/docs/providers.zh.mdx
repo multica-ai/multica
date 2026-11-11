@@ -49,6 +49,7 @@ Multica 不替代你在用的 AI 编程工具：运行时调用电脑上已经�
 | Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | ✓ | — |
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
+| ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
 "Multica 管理 MCP"指可以在智能体配置中填写 MCP server，由 Multica 在执行前传给对应工具。这一列只说明 Multica 能否代为配置，不说明工具自身有没有别的 MCP 配置方式。
 
@@ -65,6 +66,8 @@ Devin 优先读取 `WINDSURF_API_KEY`，否则使用 `devin auth login` 保存�
 创建智能体时，模型列表来自对应的运行时。有的工具给出固定的模型名称，有的按本机配置、登录账号和订阅权益返回可用模型。
 
 不选择模型时，Multica 使用该工具的默认设置。列表为空时，先确认运行时在线并且工具已经登录，再刷新模型列表。
+
+使用 Kiro CLI 时，创建和设置智能体页面中的**思考**选项来自所选模型支持的 effort 档位，选择会应用到新建和恢复的会话。不选择时沿用 Kiro 自身的 effort 设置。模型或 CLI 版本未返回 effort 选项时，不显示该选择器。
 
 QwenPaw、MiniMax Code 和 ZeroClaw 例外：它们不接受在 Multica 侧选择的模型，选择框不可用，显示为"由运行时管理"，模型要在工具自身的配置里选。它们的模型列表为空是正常的，不表示运行时离线。
 
@@ -113,3 +116,9 @@ Codex、Hermes 和 OpenClaw 的处理稍有不同：
 - [创建和配置智能体](/agents-create) — 模型与思考强度设置。
 - [安装 AI 编程工具](/install-agent-runtime) — 安装与检测步骤。
 - [守护进程与运行时](/daemon-runtimes) — 运行时注册与并发。
+
+## ZCode
+
+ZCode 使用原生 NDJSON `app-server` 协议，支持会话创建、续接、取消、模型发现、思考强度和 MCP。任务通过 yolo 模式执行，无需等待交互式工具审批。每个模型的思考档位来自运行时目录，创建智能体时会保留对应默认值。
+
+macOS 可自动发现 ZCode Desktop 内置的 Node 入口；需要本机已安装 Node.js。运行时读取桌面端已启用的 API-key/Coding Plan 连接，为当前进程生成独占临时配置，退出后删除，原配置不变。Start Plan 登录身份令牌不作为 API key 导入，目前不支持这条账号鉴权路径。若模型列表为空，请先在桌面端配置一个可用的 API 连接。

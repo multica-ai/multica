@@ -11,10 +11,112 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const advanceWhatsNewSeenVersion = `-- name: AdvanceWhatsNewSeenVersion :one
+UPDATE "user" SET
+    whats_new_seen_version = $1::text,
+    updated_at = now()
+WHERE id = $2
+  AND (
+    whats_new_seen_version IS NULL
+    OR string_to_array(whats_new_seen_version, '.')::int[] < string_to_array($1::text, '.')::int[]
+  )
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at
+`
+
+type AdvanceWhatsNewSeenVersionParams struct {
+	Version string      `json:"version"`
+	ID      pgtype.UUID `json:"id"`
+}
+
+// Only moves forward: an older client reporting an older release must not
+// resurface highlights a newer client already dismissed. Both sides are
+// validated MAJOR.MINOR.PATCH strings, so the int[] casts cannot fail and
+// compare numerically (0.7.10 > 0.7.9). No row comes back when the stored
+// version is already at or past the requested one.
+func (q *Queries) AdvanceWhatsNewSeenVersion(ctx context.Context, arg AdvanceWhatsNewSeenVersionParams) (User, error) {
+	row := q.db.QueryRow(ctx, advanceWhatsNewSeenVersion, arg.Version, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OnboardedAt,
+		&i.OnboardingQuestionnaire,
+		&i.CloudWaitlistEmail,
+		&i.CloudWaitlistReason,
+		&i.StarterContentState,
+		&i.Language,
+		&i.ProfileDescription,
+		&i.Timezone,
+		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
+	)
+	return i, err
+}
+
+const claimStarPromptShowing = `-- name: ClaimStarPromptShowing :one
+UPDATE "user" SET
+    star_prompt_shown_count = star_prompt_shown_count + 1,
+    star_prompt_last_shown_at = now()
+WHERE id = $1
+  AND star_prompt_starred_at IS NULL
+  AND star_prompt_shown_count < $2::int
+  AND created_at <= $3::timestamptz
+  AND (star_prompt_last_shown_at IS NULL OR star_prompt_last_shown_at <= $4::timestamptz)
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at
+`
+
+type ClaimStarPromptShowingParams struct {
+	ID            pgtype.UUID        `json:"id"`
+	MaxShowings   int32              `json:"max_showings"`
+	CreatedBefore pgtype.Timestamptz `json:"created_before"`
+	ShownBefore   pgtype.Timestamptz `json:"shown_before"`
+}
+
+// Grants one showing of the star prompt, atomically, so two tabs or devices
+// reacting to the same moment cannot both show it. No row comes back when the
+// user already starred, used up the showings, is inside the cooldown, or has
+// an account newer than the cutoff.
+func (q *Queries) ClaimStarPromptShowing(ctx context.Context, arg ClaimStarPromptShowingParams) (User, error) {
+	row := q.db.QueryRow(ctx, claimStarPromptShowing,
+		arg.ID,
+		arg.MaxShowings,
+		arg.CreatedBefore,
+		arg.ShownBefore,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OnboardedAt,
+		&i.OnboardingQuestionnaire,
+		&i.CloudWaitlistEmail,
+		&i.CloudWaitlistReason,
+		&i.StarterContentState,
+		&i.Language,
+		&i.ProfileDescription,
+		&i.Timezone,
+		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO "user" (name, email, avatar_url)
 VALUES ($1, $2, $3)
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at
 `
 
 type CreateUserParams struct {
@@ -41,12 +143,16 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
 	)
 	return i, err
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone FROM "user"
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at FROM "user"
 WHERE id = $1
 `
 
@@ -68,12 +174,16 @@ func (q *Queries) GetUser(ctx context.Context, id pgtype.UUID) (User, error) {
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone FROM "user"
+SELECT id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at FROM "user"
 WHERE email = $1
 `
 
@@ -95,6 +205,10 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
 	)
 	return i, err
 }
@@ -145,7 +259,7 @@ UPDATE "user" SET
     cloud_waitlist_reason = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at
 `
 
 type JoinCloudWaitlistParams struct {
@@ -175,6 +289,44 @@ func (q *Queries) JoinCloudWaitlist(ctx context.Context, arg JoinCloudWaitlistPa
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
+	)
+	return i, err
+}
+
+const markStarPromptStarred = `-- name: MarkStarPromptStarred :one
+UPDATE "user" SET
+    star_prompt_starred_at = COALESCE(star_prompt_starred_at, now())
+WHERE id = $1
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at
+`
+
+// Keeps the first click time; repeating the call is a no-op.
+func (q *Queries) MarkStarPromptStarred(ctx context.Context, id pgtype.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, markStarPromptStarred, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OnboardedAt,
+		&i.OnboardingQuestionnaire,
+		&i.CloudWaitlistEmail,
+		&i.CloudWaitlistReason,
+		&i.StarterContentState,
+		&i.Language,
+		&i.ProfileDescription,
+		&i.Timezone,
+		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
 	)
 	return i, err
 }
@@ -184,7 +336,7 @@ UPDATE "user" SET
     onboarded_at = COALESCE(onboarded_at, now()),
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at
 `
 
 func (q *Queries) MarkUserOnboarded(ctx context.Context, id pgtype.UUID) (User, error) {
@@ -205,6 +357,10 @@ func (q *Queries) MarkUserOnboarded(ctx context.Context, id pgtype.UUID) (User, 
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
 	)
 	return i, err
 }
@@ -214,7 +370,7 @@ UPDATE "user" SET
     onboarding_questionnaire = COALESCE($1, onboarding_questionnaire),
     updated_at = now()
 WHERE id = $2
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at
 `
 
 type PatchUserOnboardingParams struct {
@@ -244,6 +400,10 @@ func (q *Queries) PatchUserOnboarding(ctx context.Context, arg PatchUserOnboardi
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
 	)
 	return i, err
 }
@@ -261,7 +421,7 @@ UPDATE "user" SET
     END,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
+RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone, whats_new_seen_version, star_prompt_shown_count, star_prompt_last_shown_at, star_prompt_starred_at
 `
 
 type UpdateUserParams struct {
@@ -310,6 +470,10 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.Language,
 		&i.ProfileDescription,
 		&i.Timezone,
+		&i.WhatsNewSeenVersion,
+		&i.StarPromptShownCount,
+		&i.StarPromptLastShownAt,
+		&i.StarPromptStarredAt,
 	)
 	return i, err
 }

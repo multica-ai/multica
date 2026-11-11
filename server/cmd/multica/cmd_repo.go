@@ -436,19 +436,25 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 }
 
 // repoCheckoutResult is the daemon's /repo/checkout response. Daemons older
-// than MUL-7284 never keep an existing checkout and omit Kept and the counts.
+// than MUL-7284 never keep an existing checkout and omit Kept and the counts;
+// older daemons also omit FetchError and only log a failed fetch.
 type repoCheckoutResult struct {
 	Path             string `json:"path"`
 	BranchName       string `json:"branch_name"`
 	Kept             string `json:"kept"`
 	UncommittedFiles int    `json:"uncommitted_files"`
 	UnpushedCommits  int    `json:"unpushed_commits"`
+	FetchError       string `json:"fetch_error"`
 }
 
 // repoCheckoutSummary says what the checkout did. A kept checkout has to read
 // differently from a new branch off the default branch, or the agent works on
 // as if the checkout were fresh and loses track of what it holds.
 func repoCheckoutSummary(repoURL string, result repoCheckoutResult) string {
+	return repoCheckoutOutcome(repoURL, result) + repoCheckoutFetchWarning(result)
+}
+
+func repoCheckoutOutcome(repoURL string, result repoCheckoutResult) string {
 	if result.Kept == "" {
 		return fmt.Sprintf("Checked out %s → %s (branch: %s)", repoURL, result.Path, result.BranchName)
 	}
@@ -459,13 +465,30 @@ func repoCheckoutSummary(repoURL string, result repoCheckoutResult) string {
 	if result.Kept == "task_branch" {
 		branch += ", this task's branch"
 	}
-	return fmt.Sprintf("Kept the existing checkout of %s at %s (branch: %s; %d uncommitted file%s, %d unpushed commit%s): "+
-		"nothing was reset, cleaned, or switched; only remote refs were fetched.\n"+
+	untouched := "nothing was reset, cleaned, or switched; only remote refs were fetched."
+	if result.FetchError != "" {
+		// The fetch warning that follows says the remote refs were not updated.
+		untouched = "nothing was reset, cleaned, or switched."
+	}
+	return fmt.Sprintf("Kept the existing checkout of %s at %s (branch: %s; %d uncommitted file%s, %d unpushed commit%s): %s\n"+
 		"To discard its uncommitted changes and untracked files and start over on a new branch from the latest default branch (or --ref), "+
 		"re-run with --fresh; commits stay on the old branch, but push any you still need first.",
 		repoURL, result.Path, branch,
 		result.UncommittedFiles, pluralS(result.UncommittedFiles),
-		result.UnpushedCommits, pluralS(result.UnpushedCommits))
+		result.UnpushedCommits, pluralS(result.UnpushedCommits),
+		untouched)
+}
+
+// repoCheckoutFetchWarning flags a checkout made from the daemon's cached copy
+// because fetching the remote failed. Without it the checkout reads as current
+// while its branches may be behind the remote.
+func repoCheckoutFetchWarning(result repoCheckoutResult) string {
+	if result.FetchError == "" {
+		return ""
+	}
+	return "\nWarning: fetching the remote failed, so this checkout comes from the cached copy and may be behind the remote. " +
+		"Compare its commit with the remote before relying on it.\n" +
+		"Fetch error: " + result.FetchError
 }
 
 func repoCheckoutRetryDelay(value string, now time.Time) time.Duration {

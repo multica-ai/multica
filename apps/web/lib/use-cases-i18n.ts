@@ -62,6 +62,16 @@ export const useCaseText: Record<SupportedLocale, UseCaseText> = {
     cardReadMore: "続きを読む →",
     tableOfContents: "このページの内容",
   },
+  es: {
+    indexTitle: "Casos de uso",
+    indexSubtitle:
+      "Descubre cómo los equipos organizan a personas y agentes con Multica.",
+    indexMetadataTitle: "Casos de uso",
+    indexMetadataDescription:
+      "Descubre cómo los equipos hacen trabajar juntas a personas y agentes con Multica.",
+    cardReadMore: "Leer →",
+    tableOfContents: "En esta página",
+  },
   fr: {
     indexTitle: "Cas d'usage",
     indexSubtitle:
@@ -71,5 +81,15 @@ export const useCaseText: Record<SupportedLocale, UseCaseText> = {
       "Découvrez comment les équipes font travailler humains et agents ensemble avec Multica.",
     cardReadMore: "Lire →",
     tableOfContents: "Sur cette page",
+  },
+  ru: {
+    indexTitle: "Сценарии использования",
+    indexSubtitle:
+      "Посмотрите, как команды объединяют людей и агентов в Multica.",
+    indexMetadataTitle: "Сценарии использования",
+    indexMetadataDescription:
+      "Посмотрите, как команды заставляют людей и агентов работать вместе в Multica.",
+    cardReadMore: "Читать →",
+    tableOfContents: "На этой странице",
   },
 };

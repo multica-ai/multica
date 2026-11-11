@@ -542,8 +542,11 @@ func TestFinalizeKeepsWorktreeWhenCommitFails(t *testing.T) {
 	writeFile(t, filepath.Join(wt.Path, "agent-output.txt"), "irreplaceable work\n")
 
 	// Force every commit in this worktree to fail the way a signing setup the
-	// daemon can't satisfy would.
+	// daemon can't satisfy would. Pin the format: gpg.program is only used for
+	// openpgp, so a host whose global config signs with ssh or x509 would
+	// otherwise sign this commit with its real key and the commit would succeed.
 	gitRun(t, wt.Path, "config", "commit.gpgSign", "true")
+	gitRun(t, wt.Path, "config", "gpg.format", "openpgp")
 	gitRun(t, wt.Path, "config", "gpg.program", filepath.Join(repo, "definitely-not-a-real-gpg"))
 
 	outcome, err := wt.Finalize(worktreeTestLogger())
@@ -2346,9 +2349,9 @@ func TestIsolatedPrepareCarriesTheStateFinalizeNeeds(t *testing.T) {
 	}
 	// The proofs Finalize makes all hang off state that crosses as JSON —
 	// createdBranch among them, without which a read-only turn keeps its branch.
-	if !wt.tracksState || wt.userState == "" || wt.owner != testBranchOwner || !wt.createdBranch {
-		t.Fatalf("state lost crossing the helper boundary: tracksState=%v userState=%q owner=%+v createdBranch=%v",
-			wt.tracksState, wt.userState, wt.owner, wt.createdBranch)
+	if !wt.tracksState || wt.userState == "" || wt.owner != testBranchOwner || !wt.createdBranch || wt.taskID != turnOneTask {
+		t.Fatalf("state lost crossing the helper boundary: tracksState=%v userState=%q owner=%+v createdBranch=%v taskID=%q",
+			wt.tracksState, wt.userState, wt.owner, wt.createdBranch, wt.taskID)
 	}
 
 	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "work from turn one\n")

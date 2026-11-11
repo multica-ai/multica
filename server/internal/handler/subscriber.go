@@ -54,6 +54,33 @@ func (h *Handler) ListIssueSubscribers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// ListSubscribedIssueIDs returns the ids of every issue in the workspace the
+// caller subscribes to, so clients can evaluate the "subscribed" relation on
+// rows they filter themselves.
+func (h *Handler) ListSubscribedIssueIDs(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, ctxWorkspaceID(r.Context()), "workspace id")
+	if !ok {
+		return
+	}
+	ids, err := h.Queries.ListSubscribedIssueIDs(r.Context(), db.ListSubscribedIssueIDsParams{
+		WorkspaceID: wsUUID,
+		UserID:      parseUUID(userID),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list subscribed issues")
+		return
+	}
+	issueIDs := make([]string, len(ids))
+	for i, id := range ids {
+		issueIDs[i] = uuidToString(id)
+	}
+	writeJSON(w, http.StatusOK, map[string][]string{"issue_ids": issueIDs})
+}
+
 // SubscribeToIssue subscribes a user to an issue with reason "manual".
 // If request body contains user_id, subscribes that user; otherwise subscribes the caller.
 func (h *Handler) SubscribeToIssue(w http.ResponseWriter, r *http.Request) {

@@ -1,19 +1,22 @@
 {
   "page": {
     "title": "エージェント",
-    "learn_more": "詳細はこちら →",
     "new_agent": "新規エージェント",
-    "search_placeholder": "エージェントを検索...",
+    "search": "エージェントを検索",
     "show_archived": "アーカイブ済みを表示 ({{count}}) →",
     "of_total": "{{total}} 件中 {{visible}} 件",
     "list_load_failed": "エージェントを読み込めませんでした",
     "list_load_failed_default": "エージェント一覧の取得中に問題が発生しました。",
-    "try_again": "再試行"
+    "try_again": "再試行",
+    "scope_title": {
+      "mine": "自分のエージェント",
+      "all": "すべてのエージェント",
+      "archived": "アーカイブ済みのエージェント"
+    }
   },
   "scope": {
     "mine": "自分のもの",
-    "all": "すべて",
-    "archived": "アーカイブ済み"
+    "all": "すべて"
   },
   "sort": {
     "label_recent": "最近のアクティビティ",
@@ -42,15 +45,21 @@
     "title": "アーカイブ済みエージェント"
   },
   "empty": {
-    "title": "まだエージェントがいません",
-    "description": "エージェントを作成してタスクを割り当てましょう。"
+    "setup": {
+      "label": "セットアップ手順",
+      "runtime": "ランタイムを接続する",
+      "agent": "エージェントを作成する",
+      "issue": "タスクを割り当てる",
+      "done": "（完了）",
+      "connect_runtime": "接続"
+    }
   },
   "no_matches": {
     "title": "一致する結果なし",
-    "search_archived": "\"{{query}}\" に一致するアーカイブ済みエージェントがありません。",
-    "no_archived": "まだアーカイブ済みのエージェントはありません。",
     "search_active": "\"{{query}}\" に一致するエージェントがありません。",
     "search_active_filtered": "このフィルターで \"{{query}}\" に一致するエージェントがありません。",
+    "no_archived": "まだアーカイブ済みのエージェントはありません。",
+    "search_archived": "\"{{query}}\" に一致するアーカイブ済みエージェントがありません。",
     "no_filter_match": "このフィルターに一致するエージェントがありません。",
     "search_runtime_filtered": "\"{{machine}}\" 上に \"{{query}}\" に一致するエージェントがありません。",
     "runtime_filtered": "\"{{machine}}\" 上にエージェントがありません。"
@@ -119,7 +128,6 @@
     "archive_dialog_confirm": "アーカイブ"
   },
   "detail": {
-    "back_to_agents": "エージェント",
     "back_to_agents_full": "エージェントに戻る",
     "not_found_title": "エージェントが見つかりません",
     "not_found_default": "このエージェントはアーカイブまたは削除された可能性があります。",
@@ -148,7 +156,11 @@
     "runtime_required_toast": "このエージェントを実行する前にランタイムを設定してください。",
     "assign_work": "作業を割り当てる",
     "more_actions_aria": "エージェントの操作",
-    "updated": "{{when}}に更新"
+    "settings": "設定",
+    "copy_link": "リンクをコピー",
+    "copy_id": "エージェント ID をコピー",
+    "link_copied_toast": "リンクをコピーしました",
+    "id_copied_toast": "エージェント ID をコピーしました"
   },
   "inspector": {
     "section_profile": "プロフィール",
@@ -158,7 +170,6 @@
     "section_properties": "プロパティ",
     "section_details": "詳細",
     "section_details_hint": "所有者とライフサイクルに関する読み取り専用情報です。",
-    "section_skills": "スキル",
     "section_integrations": "連携",
     "prop_runtime": "ランタイム",
     "prop_model": "モデル",
@@ -169,7 +180,6 @@
     "prop_owner": "オーナー",
     "prop_created": "作成日",
     "prop_updated": "更新日",
-    "no_description_placeholder": "説明なし",
     "avatar_label": "アバター",
     "name_label": "名前",
     "description_label": "説明",
@@ -181,21 +191,29 @@
     "rename_required": "名前は必須です",
     "edit_description_title": "説明を編集",
     "description_placeholder": "このエージェントは何をしますか？",
-    "save": "保存",
     "cancel": "キャンセル"
   },
   "overview": {
-    "agent_context": "エージェント",
-    "access": "アクセス",
     "attention_title": "対応が必要な実行",
     "attention_queued_other": "ランタイムが利用できないため、{{count}}件の実行が待機中です。"
   },
-  "skill_attach": {
-    "trigger_aria": "ワークスペースのスキルを追加",
-    "trigger_label": "追加"
+  "sections": {
+    "runs_count_other": "{{count}} 件の実行",
+    "recent_this_week_other": "今週 {{count}} 件",
+    "view_all": "すべて表示",
+    "open": "開く",
+    "edit": "編集",
+    "add": "追加",
+    "manage": "管理",
+    "instructions_empty": "まだ指示はありません。"
+  },
+  "panel": {
+    "status": "ステータス",
+    "runs_7d": "実行 (7日)",
+    "edit_access_aria": "アクセス: {{value}}。アクセスを変更",
+    "all_settings": "すべての設定"
   },
   "pickers": {
-    "concurrency_tooltip": "同時実行数 · 最大 {{value}} 件",
     "concurrency_range": "最大同時実行数（{{min}}–{{max}}）",
     "runtime_none": "ランタイムなし",
     "runtime_tooltip": "ランタイム · {{name}} · {{status}}",
@@ -243,13 +261,11 @@
     "clear_full": "選択をクリア（プロバイダーのデフォルトを使用）"
   },
   "tabs": {
-    "overview": "概要",
     "work": "作業",
     "capabilities": "機能",
     "settings": "設定",
     "general": "一般",
     "access": "アクセス",
-    "page_navigation_aria": "エージェントページ",
     "section_navigation_aria": "エージェントセクション",
     "activity": "アクティビティ",
     "tasks": "実行",
@@ -258,7 +274,7 @@
     "environment": "環境",
     "custom_args": "カスタム引数",
     "mcp_config": "MCP",
-    "composio_mcp": "MCP アプリ",
+    "composio_mcp": "アプリ",
     "integrations": "連携",
     "runtime_config": "ルーティング",
     "qoder_agent": "Qoder Cloud Agents",
@@ -268,23 +284,17 @@
     "discard_confirm": "変更を破棄"
   },
   "create_dialog": {
-    "title_create": "エージェントを作成",
-    "title_duplicate": "エージェントを複製",
-    "description_duplicate": "\"{{name}}\" を基に新しいエージェントを作成します。指示、環境変数、スキルがコピーされます。",
     "name_label": "名前",
     "name_placeholder": "例: ディープリサーチエージェント",
     "description_label": "説明",
     "description_placeholder": "このエージェントは何をしますか？",
-    "visibility_label": "公開範囲",
     "access": {
-      "label": "アクセス",
       "private_title": "プライベート",
       "private_desc": "このエージェントを実行できるのはあなただけです",
       "public_title": "公開",
       "public_desc": "このエージェントを実行できる人を選択します",
       "public_workspace_option": "ワークスペース全員",
       "public_members_group": "特定のメンバー",
-      "public_members_empty": "選択できるワークスペースメンバーがいません",
       "public_targets_empty_hint": "以下から少なくとも1つを選択してください。そうでないとエージェントはプライベートのままになります。"
     },
     "runtime_label": "ランタイム",
@@ -299,17 +309,10 @@
     "runtime_no_results": "一致するマシンがありません",
     "runtime_group_online": "{{online}}/{{total}} オンライン",
     "duplicate_copy_suffix": " (コピー)",
-    "create": "作成",
-    "creating": "作成中...",
-    "cancel": "キャンセル",
-    "create_failed_toast": "エージェントを作成できませんでした",
     "skill_attach_failed_toast": "エージェントは作成されましたが、スキルを追加できませんでした: {{error}}",
     "squad_join_failed_toast": "エージェント \"{{name}}\" は作成されましたが、スクワッドに参加できませんでした: {{error}}。メンバーから手動で追加できます。",
     "instructions": {
       "label": "指示",
-      "placeholder_blank": "クリックして指示を作成...",
-      "placeholder_duplicate": "クリックして複製された指示を表示または編集",
-      "collapse": "折りたたむ",
       "editor_placeholder": "このエージェントが何をすべきか、何に集中すべきか、何を避けるべきかを記述してください..."
     },
     "skills_section": {
@@ -523,21 +526,6 @@
       "redacted_hint": "この config を読み取れるのは、エージェントのオーナーまたはワークスペースの admin のみです。",
       "dialog_json_help": "サーバー設定全体を JSON で編集します。"
     },
-    "composio_mcp": {
-      "subtitle": "ツールキットにチェックを入れると、あなた（この agent の作成者）が直接または下位 agent のチェーン経由でこの agent をトリガーしたときに限り、MCP サーバーとしてマウントされます。",
-      "loading": "接続を読み込み中…",
-      "load_failed": "接続済みアプリを読み込めませんでした。しばらくしてから再試行してください。",
-      "empty_title": "接続済みのアプリがありません",
-      "empty_link_to_settings": "設定 → 連携 で接続する",
-      "connected": "接続済み",
-      "toggle_aria": "この agent に {{toolkit}} を許可",
-      "saving": "保存中…",
-      "save_failed_toast": "保存できませんでした。もう一度お試しください",
-      "redacted_title": "設定済み — あなたには非表示",
-      "redacted_hint": "この agent が使用できるアプリを閲覧・変更できるのは作成者のみです。",
-      "shared_warning": "このエージェントは共有されています。このエージェントを実行できる人は、ここで有効化した Composio アプリを利用できます。これらのアプリが機微なデータを扱う場合は、Private にするかアクセス範囲を絞ってください。",
-      "workspace_warning": "ワークスペースに公開：ワークスペースの全メンバーがこのエージェントを通じてこれらの Composio アプリを利用できます。"
-    },
     "runtime_config": {
       "mode_label": "ルーティングモード",
       "mode_local": "Local",
@@ -618,12 +606,6 @@
       "section_now": "現在",
       "section_last_30d": "過去30日",
       "section_recent": "最近の作業",
-      "subtitle_no_active": "アクティブな作業なし",
-      "subtitle_active_other": "アクティブな実行 {{count}} 件",
-      "subtitle_performance": "パフォーマンス",
-      "subtitle_no_recent": "まだ完了した実行はありません",
-      "subtitle_recent_progress": "{{total}} 回の実行中 {{shown}} 回",
-      "subtitle_recent_latest": "最新 {{count}} 回の実行",
       "empty_now": "このエージェントは現在何も実行していません。",
       "empty_30d": "過去30日間に完了した作業はありません。",
       "empty_recent": "このエージェントはまだ何も完了していません。",
@@ -634,9 +616,7 @@
       "success_hint": "完了した実行数を、完了と失敗の実行数の合計で割った割合です。キャンセルした実行は含みません。",
       "success_unavailable": "この期間に完了または失敗した実行がないため、成功率を計算できません。",
       "cancelled_count": "{{count}} 件キャンセル",
-      "avg_duration": "平均 {{value}}",
       "avg_duration_label": "平均時間",
-      "failed_count": "{{count}} 回失敗",
       "failed_label": "失敗",
       "source_issue": "タスク",
       "source_chat": "チャット",
@@ -658,6 +638,27 @@
       "started_prefix": "{{when}} に開始",
       "dispatched_prefix": "{{when}} にディスパッチ",
       "queued_prefix": "{{when}} に待機開始"
+    },
+    "connected_apps": {
+      "loading": "アプリを読み込み中…",
+      "load_failed": "このエージェントのアプリを読み込めませんでした。",
+      "empty": "接続済みのアプリはありません。",
+      "level": "レベル",
+      "team_connected": "チームアカウント接続済み",
+      "team_missing": "チームアカウント未接続",
+      "personal_connected": "あなたのアカウントは接続済み",
+      "personal_missing": "このアプリはまだ接続していません",
+      "team_admin_only": "エージェントにチームアカウントを付与できるのはワークスペース管理者のみです。",
+      "team_shared_warning": "このエージェントを実行できる人は、このチームアカウントを通じて操作できます。",
+      "manage_link": "設定 → 接続済みアプリ でアカウントを管理",
+      "save_failed_toast": "保存できませんでした。もう一度お試しください",
+      "team_help": "管理者が接続する、ワークスペース共有のアカウントです。",
+      "personal_help": "実行を開始した人のアカウントを使います。各自で接続する必要があります。",
+      "available_accounts": "利用可能：{{accounts}}",
+      "enable": "{{app}} を有効にする",
+      "account_for": "{{app}} のアカウント",
+      "connect_hint": "必要なアプリがない場合は、設定からアカウントを接続してください。",
+      "available_personal": "自分のアカウント"
     }
   },
   "char_counter": {
@@ -854,32 +855,15 @@
       "user_cancelled": "ユーザーがキャンセルしました"
     }
   },
-  "runtime_filter": {
-    "all": "すべてのランタイム",
-    "section_local": "ローカル",
-    "section_remote": "リモート",
-    "section_cloud": "クラウド",
-    "agent_count_other": "エージェント {{count}} 件",
-    "empty": "まだマシンがありません"
-  },
   "last_active": {
     "today": "今日",
     "days_ago_other": "{{count}} 日前",
     "none": "30 日間アクティビティなし"
   },
   "toolbar": {
-    "result_count_title": "該当エージェント / スコープ内全体",
-    "filter_label": "フィルター",
-    "filter_active_count_other": "{{count}} 件のフィルター",
-    "clear_filters": "フィルターをクリア",
     "section_availability": "可用性",
     "section_access": "アクセス",
     "section_runtime": "ランタイム",
-    "display": "表示",
-    "sort_by": "並び替え",
-    "direction_asc": "昇順",
-    "direction_desc": "降順",
-    "section_columns": "列",
     "section_owner": "オーナー",
     "section_model": "モデル"
   },
@@ -887,7 +871,6 @@
     "title": "エージェントを作成",
     "squad_title": "このスクワッド用のエージェントを作成",
     "duplicate_title": "{{name}} を複製",
-    "back": "戻る",
     "step_ai": "会話で作成",
     "modes": {
       "template": {
@@ -935,6 +918,7 @@
       "switch_runtime_failed": "ランタイムを切り替えられませんでした。会話は引き続き元のランタイムで実行されています。",
       "switch_runtime_pending": "現在の返信を停止するとランタイムを切り替えられます。",
       "switch_runtime_success": "ランタイムを切り替えました。下書き設定はそのまま残り、以降の会話は新しいランタイムで新しいモデルセッションとして続きます。",
+      "conversation_tab": "会話",
       "chat_title": "Agent Builder",
       "runtime_online": "ランタイムはオンライン",
       "runtime_offline": "ランタイムはオフライン",
@@ -971,7 +955,8 @@
       "runtime": "ランタイムを選択",
       "configure": "設定",
       "done": "完了",
-      "aria": "エージェント作成の手順"
+      "aria": "エージェント作成の手順",
+      "progress": "ステップ {{current}}/{{total}}"
     },
     "configure_title": "エージェントを設定",
     "ask_ai": "AI に書いてもらう",
@@ -1032,8 +1017,29 @@
       "next": "次へ"
     }
   },
-  "actions": {
-    "selected_other": "{{count}} 件選択中",
-    "clear_selection": "選択を解除"
+  "actions": {},
+  "intro": {
+    "title": "最初の AI チームメイトを迎える",
+    "description": "エージェントはチームメンバーと同じようにタスクを引き受けます。ランタイム上で Claude Code や Codex などを使って作業し、終わったらコメントで成果を渡します。",
+    "slides": {
+      "describe": {
+        "title": "やることを一文で伝える",
+        "description": "役割を書き、ランタイムとモデルを選べば作成できます。指示の変更や skill の追加はいつでもできます。"
+      },
+      "assign": {
+        "title": "同僚と同じように任せる",
+        "description": "どのタスクでも担当者に選ぶだけ。自分で作業を始めるので、見張る必要はありません。"
+      },
+      "deliver": {
+        "title": "作業を見守り、コメントで受け取る",
+        "description": "実行の様子はリアルタイムで見えます。完了すると、結果と PR をタスクのコメントで渡します。"
+      }
+    },
+    "art": {
+      "prompt": "フロントエンドの PR をレビューし、アクセシビリティとパフォーマンスを重点的に見て、結論を PR コメントに書く。",
+      "issue_title": "料金ページのモバイル表示が崩れる",
+      "comment": "修正しました。375px 以下では料金カードを 1 列にしています。PR を作成し、テストも通っています。",
+      "step_read": "{{file}} を読む"
+    }
   }
 }

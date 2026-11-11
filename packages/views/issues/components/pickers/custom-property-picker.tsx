@@ -14,7 +14,7 @@ import {
   dateOnlyToLocalDate,
   formatDateOnly,
 } from "@multica/core/issues/date";
-import { Calendar } from "@multica/ui/components/ui/calendar";
+import { LazyCalendar } from "@multica/ui/components/ui/lazy-calendar";
 import {
   Popover,
   PopoverTrigger,
@@ -335,7 +335,7 @@ export function CustomPropertyValueInput({
               </span>
               <Check className={`h-3.5 w-3.5 shrink-0 text-muted-foreground ${date ? "invisible" : ""}`} />
             </button>
-            <Calendar
+            <LazyCalendar
               mode="single"
               selected={date}
               onSelect={(d: Date | undefined) => {
@@ -381,6 +381,7 @@ export function CustomPropertyValueInput({
     default:
       return (
         <TextishPropertyEditor
+          key={property.id}
           property={property}
           value={value}
           open={open}
@@ -418,11 +419,18 @@ function TextishPropertyEditor({
   triggerRender?: React.ReactElement<Record<string, unknown>>;
 }) {
   const { t } = useT("issues");
-  const [draft, setDraft] = useState("");
+  const saved = value === undefined ? "" : String(value);
+  const [session, setSession] = useState({ open, baseline: saved, draft: saved });
 
-  useEffect(() => {
-    if (open) setDraft(value === undefined ? "" : String(value));
-  }, [open, value]);
+  // Adopt live values only while clean. Keep the adopted baseline even if a
+  // remote value happens to match the draft, so later updates cannot erase it.
+  if (
+    session.open !== open ||
+    (open && session.draft === session.baseline && session.baseline !== saved)
+  ) {
+    setSession({ open, baseline: saved, draft: saved });
+  }
+  const draft = session.draft;
 
   const placeholder =
     property.type === "url"
@@ -474,7 +482,10 @@ function TextishPropertyEditor({
             step={property.type === "number" ? "any" : undefined}
             inputMode={property.type === "number" ? "decimal" : undefined}
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              const draft = event.target.value;
+              setSession((current) => ({ ...current, draft }));
+            }}
             placeholder={placeholder}
             className="h-8"
           />

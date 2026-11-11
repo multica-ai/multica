@@ -1,5 +1,6 @@
 import { afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
+import "@multica/vitest-setup/web-storage";
 
 // jsdom ships neither class. use-scroll-fade observes both.
 const roInstances: ResizeObserverStub[] = [];

@@ -29,6 +29,15 @@
     "toast_renamed": "Tâche renommée",
     "toast_failed": "Échec du renommage de la tâche"
   },
+  "rename_project": {
+    "title": "Renommer le projet",
+    "placeholder": "Titre du projet",
+    "submit": "Enregistrer",
+    "title_required": "Saisissez un titre",
+    "offline_error": "Vous êtes hors ligne. Reconnectez-vous, puis réessayez de renommer le projet.",
+    "toast_renamed": "Projet renommé",
+    "toast_failed": "Échec du renommage du projet"
+  },
   "feedback": {
     "title": "Faire un retour",
     "placeholder": "Parlez-nous de votre expérience, des bugs rencontrés ou des fonctionnalités que vous aimeriez voir…",
@@ -60,6 +69,12 @@
     "description": "Recherchez une tâche à ajouter comme sous-tâche",
     "toast_failed": "Échec de l'ajout de la sous-tâche",
     "toast_success": "{{identifier}} ajoutée comme sous-tâche"
+  },
+  "add_project_issue": {
+    "title": "Ajouter une tâche existante",
+    "description": "Recherchez une tâche à déplacer dans ce projet",
+    "toast_success": "{{identifier}} a été déplacée dans le projet",
+    "toast_failed": "Impossible de déplacer la tâche"
   },
   "run_confirm": {
     "title_assign": "Confirmer l'assignation ?",
@@ -129,28 +144,29 @@
     "repos_pill": "Dépôts",
     "repos_pill_count_one": "{{count}} dépôt",
     "repos_pill_count_other": "{{count}} dépôts",
-    "repos_heading": "Rattacher des dépôts GitHub à ce projet",
-    "repos_empty": "Aucun dépôt au niveau de l'espace de travail. Collez une URL ci-dessous pour en rattacher un ponctuellement.",
+    "repos_heading": "Ajouter des dépôts GitHub à ce projet",
+    "repos_empty": "Aucun dépôt dans l'espace de travail. Collez une URL ci-dessous pour en ajouter un.",
     "repos_search_placeholder": "Rechercher des dépôts...",
     "repos_search_empty": "Aucun dépôt ne correspond à votre recherche.",
     "repos_url_placeholder": "https://github.com/owner/repo ou git@github.com:owner/repo.git",
     "repos_add": "Ajouter",
     "repos_selected": "Sélectionnés",
-    "source_pill_local": "Répertoire local",
+    "source_pill_local": "Dossier local",
     "source_tab_repos": "Dépôts GitHub",
-    "source_tab_local": "Répertoire local",
-    "local_heading": "Utiliser un répertoire de travail local sur cette machine",
+    "source_tab_local": "Dossier local",
+    "local_heading": "Utiliser un dossier de cet ordinateur",
     "local_on_device": "Rattaché à {{device}}",
     "local_this_machine": "cette machine",
-    "local_daemon_offline": "Daemon hors ligne — démarrez-le pour rattacher un répertoire local.",
-    "local_pick": "Choisir un répertoire…",
-    "local_picking": "Ouverture du sélecteur…",
-    "local_change": "Changer de répertoire…",
+    "local_daemon_offline": "Daemon arrêté. Démarrez-le pour choisir un dossier.",
+    "local_pick": "Choisir un dossier...",
+    "local_picking": "Ouverture du sélecteur...",
+    "local_change": "Changer de dossier...",
     "local_clear": "Effacer",
-    "local_pick_failed": "Impossible d'ouvrir le sélecteur de répertoire.",
-    "local_invalid_dir": "Ce répertoire ne peut pas être utilisé. Choisissez-en un autre.",
-    "local_hint": "Les agents des autres machines ne verront pas ce chemin — ils ne pourront pas démarrer. Utilisez des dépôts pour le travail partagé.",
-    "repos_ref_default": "Branche par défaut"
+    "local_pick_failed": "Impossible d'ouvrir le sélecteur de dossier.",
+    "local_invalid_dir": "Ce dossier ne peut pas être utilisé. Choisissez-en un autre.",
+    "local_hint": "Les agents d'autres ordinateurs n'ont pas accès à ce dossier et ne démarreront pas. Utilisez des dépôts pour le travail partagé.",
+    "repos_ref_default": "Branche par défaut",
+    "repos_remove_aria": "Retirer {{repo}}"
   },
   "create_issue": {
     "sr_manual": "Nouvelle tâche",
@@ -252,6 +268,7 @@
       "sent_label": "Envoyé",
       "sent_count": "{{count}} envoyé",
       "version_blocked_tooltip": "Le CLI du daemon doit être ≥ {{min}}",
+      "qoder_attachments_unsupported": "Qoder Cloud Agents ne peut pas lire les pièces jointes. Retirez-les ou choisissez un autre agent.",
       "toast_sent": "Envoyé à l'agent — vous recevrez une notification dans votre boîte de réception une fois terminé",
       "error_agent_unavailable_fallback": "L'agent est indisponible. Choisissez-en un autre.",
       "error_daemon_version": "Le CLI du daemon de cet agent ({{current}}) est inférieur au minimum requis {{min}}. Mettez le daemon à jour pour utiliser la création avec un agent.",
@@ -266,5 +283,13 @@
     "toast_failed": "Échec du marquage comme doublon",
     "error_target_is_duplicate": "{{identifier}} est elle-même un doublon. Choisissez plutôt sa tâche d'origine.",
     "error_has_duplicates": "D'autres tâches sont marquées comme doublons de celle-ci. Retirez d'abord ces marques."
+  },
+  "copy_parent_fields": {
+    "trigger": "Copier les champs du parent",
+    "title": "Copier les champs du parent",
+    "description": "Depuis {{identifier}}. Remplace une fois les valeurs sélectionnées ; les modifications ultérieures ne sont pas synchronisées.",
+    "apply": "Copier {{count}} champs",
+    "no_labels": "Aucune étiquette",
+    "manual_only": "Les étiquettes, la date de début et les propriétés personnalisées ne concernent que la création manuelle."
   }
 }

@@ -1,9 +1,7 @@
 {
   "page": {
     "title": "Runtimes",
-    "learn_more": "En savoir plus →",
     "connect_remote": "Ajouter une machine",
-    "search_placeholder": "Rechercher…",
     "scope_mine": "Les miens",
     "scope_all": "Tous",
     "live": "En direct",
@@ -25,7 +23,7 @@
       "title": "Démarrage du runtime local…",
       "hint": "Connexion à l’espace de travail..."
     },
-    "add": "Ajouter",
+    "add": "Ajouter un runtime",
     "add_menu": {
       "machines": "Machines",
       "this_computer": "Cet ordinateur",
@@ -67,7 +65,7 @@
       "no_matches": "Aucune machine ni aucun service cloud ne correspond"
     },
     "filters": {
-      "all": "Tous",
+      "all": "Tous les runtimes",
       "online": "En ligne",
       "offline": "Hors ligne"
     }
@@ -93,8 +91,7 @@
     "this_machine": "Cet appareil",
     "local_badge": "Local · cette machine",
     "pending_custom_runtimes": "Runtimes personnalisés en attente",
-    "runtime_count_one": "{{count}} runtime",
-    "runtime_count_other": "{{count}} runtimes",
+    "daemon_title": "Daemon",
     "busy_count_one": "{{count}} occupé",
     "busy_count_other": "{{count}} occupés",
     "no_matches_title": "Aucune machine",
@@ -162,16 +159,16 @@
     "fact_owner": "Propriétaire",
     "fact_device": "Appareil",
     "fact_runtime": "Runtime",
-    "technical_details": "Détails techniques",
     "fact_daemon_cli": "CLI du daemon",
-    "fact_daemon_id": "Identifiant du daemon",
-    "serving_title": "Au service de",
-    "serving_count_one": "{{count}} agent",
-    "serving_count_other": "{{count}} agents",
+    "fact_daemon_id": "ID du daemon",
+    "usage_title": "Consommation",
     "no_agents": "Aucun agent n'est encore associé à ce runtime.",
-    "diagnostics_title": "Diagnostics",
     "diagnostics_cli": "CLI",
     "diagnostics_visibility": "Visibilité",
+    "concurrency_title": "Concurrence",
+    "concurrency_none": "Aucune limite",
+    "concurrency_hint": "Nombre maximal d'exécutions simultanées pour tous les agents de ce runtime ({{min}}–{{max}}). Laissez vide pour ne pas limiter.",
+    "toast_concurrency_failed": "Échec de la mise à jour de la limite de concurrence",
     "visibility_label": {
       "private": "Privé",
       "public": "Public",
@@ -480,7 +477,6 @@
   },
   "usage": {
     "period_label": "Période",
-    "dimension_label": "Dimension",
     "kpi_cost_label": "Coût · {{days}} j",
     "kpi_cost_delta": "{{sign}}{{pct}} % vs préc.",
     "kpi_cache_label": "Économies de cache · {{days}} j",
@@ -488,8 +484,6 @@
     "kpi_tokens_label": "Tokens · {{days}} j",
     "kpi_tokens_hint": "entrée {{input}} · sortie {{output}}",
     "when_title": "Quand ce runtime a dépensé",
-    "when_tab_daily": "Quotidien",
-    "when_tab_weekly": "Hebdomadaire",
     "when_tab_heatmap": "Carte de chaleur",
     "daily_metric_cost": "Coût",
     "daily_metric_tokens": "Tokens",
@@ -525,6 +519,7 @@
     "cost_by_title_model": "Coût par modèle",
     "cost_by_tab_agent": "Par agent",
     "cost_by_tab_model": "Par modèle",
+    "cost_by_label": "Regrouper par",
     "cost_by_caption_agent_one": "{{count}} agent sur ce runtime",
     "cost_by_caption_agent_other": "{{count}} agents sur ce runtime",
     "cost_by_caption_model_one": "{{count}} modèle utilisé",
@@ -674,6 +669,30 @@
       "working": "Déconnexion…",
       "cancel": "Annuler",
       "done": "Qoder déconnecté"
+    }
+  },
+  "intro": {
+    "title": "Donnez à vos agents un ordinateur pour travailler",
+    "description": "Un runtime, c'est là où les agents exécutent vraiment leurs tâches : votre ordinateur, un serveur ou un service cloud.",
+    "slides": {
+      "local": {
+        "title": "Cet ordinateur se connecte tout seul",
+        "description": "Téléchargez l'app de bureau et connectez-vous : Claude Code, Codex et les autres CLI de cet ordinateur apparaissent d'eux-mêmes."
+      },
+      "remote": {
+        "title": "Une autre machine, deux commandes",
+        "description": "Installez la CLI sur un serveur ou un autre ordinateur, puis lancez multica setup pour le connecter."
+      },
+      "cloud": {
+        "title": "Ou un nœud cloud",
+        "description": "Pas envie de gérer des machines ? Créez un nœud cloud hébergé par Multica."
+      }
+    },
+    "art": {
+      "this_computer": "Cet ordinateur · Bureau",
+      "detected": "Harness détectés",
+      "run_there": "À lancer sur cette machine",
+      "connected": "{{name}} connecté à Multica"
     }
   }
 }

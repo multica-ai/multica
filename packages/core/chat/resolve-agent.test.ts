@@ -28,6 +28,20 @@ describe("chat agent resolution", () => {
     expect(resolveChatAgent({ ...input, explicitAgentId: "pending" })).toBeNull();
     expect(resolveChatAgent({ ...input, explicitAgentId: personal.id, agentsSettled: false })).toBeNull();
   });
+  it("uses the Ask preference then workspace default then first, ignoring the last chat selection", () => {
+    const ask = { ...input, isAskChat: true, selectedAgentId: personal.id };
+    expect(resolveChatAgent({ ...ask, quickChatAgentId: first.id })).toBe(first);
+    expect(resolveChatAgent(ask)).toBe(workspace);
+    expect(resolveChatAgent({ ...ask, quickChatAgentId: "revoked" })).toBe(workspace);
+    expect(resolveChatAgent({ ...ask, defaultAgentId: "revoked" })).toBe(first);
+    expect(resolveChatAgent({ ...ask, availableAgents: [] })).toBeNull();
+  });
+  it("waits for workspace fallback while retaining a valid personal choice", () => {
+    const ask = { ...input, isAskChat: true, workspaceSettled: false };
+    expect(resolveChatAgent(ask)).toBeNull();
+    expect(resolveChatAgent({ ...ask, quickChatAgentId: personal.id })).toBe(personal);
+    expect(resolveChatAgent({ ...ask, isAskChat: false, selectedAgentId: personal.id })).toBe(personal);
+  });
   it("does not infer authorization from loading or failed agents/member queries", () => {
     expect(resolveChatAgent({ ...input, selectedAgentId: personal.id, agentsSettled: false })).toBeNull();
   });

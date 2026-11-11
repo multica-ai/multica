@@ -222,4 +222,35 @@ describe("useRowLink", () => {
     expect(push).not.toHaveBeenCalled();
     expect(openInNewTab).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["desktop", { openInNewTab: vi.fn() }],
+    ["web", {}],
+  ])("runs onNavigateInPlace before each in-place push only, shift included, on %s", (_platform, overrides) => {
+    const order: string[] = [];
+    const adapter = makeAdapter({ push: vi.fn(() => order.push("push")), ...overrides });
+    vi.spyOn(window, "open").mockReturnValue(null);
+
+    function InPlaceProbe() {
+      const rowLink = useRowLink();
+      return (
+        <div role="row" {...rowLink("/acme/projects/p1", undefined, () => order.push("inPlace"))}>
+          row
+        </div>
+      );
+    }
+    render(
+      <NavigationProvider value={adapter}>
+        <InPlaceProbe />
+      </NavigationProvider>,
+    );
+
+    const row = screen.getByRole("row");
+    fireEvent.click(row);
+    fireEvent.click(row, { shiftKey: true });
+    fireEvent.click(row, { metaKey: true });
+    fireEvent(row, new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 }));
+
+    expect(order).toEqual(["inPlace", "push", "inPlace", "push"]);
+  });
 });

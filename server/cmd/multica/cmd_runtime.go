@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/multica-ai/multica/server/internal/agentconfig"
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
@@ -57,6 +59,16 @@ var runtimeRenameCmd = &cobra.Command{
 	RunE: runRuntimeRename,
 }
 
+var runtimeConcurrencyCmd = &cobra.Command{
+	Use:   "concurrency <runtime-id> <limit|none>",
+	Short: "Set or clear a runtime-wide concurrency limit",
+	Long: "Limit how many runs may be in progress at once across every agent bound to this runtime.\n\n" +
+		"Each agent's own limit still applies; this caps their combined work, e.g. when several " +
+		"agents share one local GPU. Pass \"none\" to remove the limit.",
+	Args: exactArgs(2),
+	RunE: runRuntimeConcurrency,
+}
+
 var runtimeDeleteCmd = &cobra.Command{
 	Use:   "delete <runtime-id>",
 	Short: "Delete a runtime from the workspace",
@@ -74,6 +86,7 @@ func init() {
 	runtimeCmd.AddCommand(runtimeActivityCmd)
 	runtimeCmd.AddCommand(runtimeUpdateCmd)
 	runtimeCmd.AddCommand(runtimeRenameCmd)
+	runtimeCmd.AddCommand(runtimeConcurrencyCmd)
 	runtimeCmd.AddCommand(runtimeDeleteCmd)
 
 	// runtime list
@@ -94,6 +107,9 @@ func init() {
 	// runtime rename
 	runtimeRenameCmd.Flags().Bool("machine", false, "Apply the name to every runtime on the same machine")
 	runtimeRenameCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// runtime concurrency
+	runtimeConcurrencyCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// runtime delete
 	runtimeDeleteCmd.Flags().Bool("cascade", false, "Unbind active agents from the runtime, cancel their runs, then delete the runtime")
@@ -289,6 +305,51 @@ func runRuntimeRename(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Custom name cleared; runtime is now %q.\n", strVal(rt, "name"))
 	} else {
 		fmt.Fprintf(os.Stderr, "Runtime renamed to %q.\n", strVal(rt, "custom_name"))
+	}
+	return nil
+}
+
+// parseRuntimeConcurrencyArg maps the CLI argument onto the PATCH value:
+// "none" clears the limit (JSON null), otherwise an integer in the agent
+// limit range.
+func parseRuntimeConcurrencyArg(arg string) (any, error) {
+	if strings.EqualFold(strings.TrimSpace(arg), "none") {
+		return nil, nil
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(arg))
+	if err != nil || n < int(agentconfig.MinMaxConcurrentTasks) || n > int(agentconfig.MaxMaxConcurrentTasks) {
+		return nil, fmt.Errorf("limit must be \"none\" or an integer between %d and %d", agentconfig.MinMaxConcurrentTasks, agentconfig.MaxMaxConcurrentTasks)
+	}
+	return n, nil
+}
+
+func runRuntimeConcurrency(cmd *cobra.Command, args []string) error {
+	limit, err := parseRuntimeConcurrencyArg(args[1])
+	if err != nil {
+		return err
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var rt map[string]any
+	body := map[string]any{"max_concurrent_tasks": limit}
+	if err := client.PatchJSON(ctx, "/api/runtimes/"+args[0], body, &rt); err != nil {
+		return fmt.Errorf("set runtime concurrency: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, rt)
+	}
+	if limit == nil {
+		fmt.Fprintln(os.Stderr, "Runtime concurrency limit removed.")
+	} else {
+		fmt.Fprintf(os.Stderr, "Runtime concurrency limit set to %d.\n", limit)
 	}
 	return nil
 }

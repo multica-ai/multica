@@ -22,19 +22,73 @@ type devinModelOption struct {
 }
 
 func devinSessionModel(raw json.RawMessage) devinModelOption {
-	var response struct {
-		ConfigOptions []json.RawMessage `json:"configOptions"`
-	}
-	if json.Unmarshal(raw, &response) == nil {
-		for _, rawOption := range response.ConfigOptions {
-			var option devinModelOption
-			if json.Unmarshal(rawOption, &option) == nil && (option.Category == "model" || option.ID == "model") {
-				return option
-			}
-		}
+	if option, err := devinSessionModelOption(raw); err == nil {
+		return option
 	}
 	// Older CLI builds expose the same selected-model fact in models.
 	return devinModelOption{CurrentValue: extractACPCurrentModelID(raw)}
+}
+
+func devinSessionModelOption(raw json.RawMessage) (devinModelOption, error) {
+	var response struct {
+		ConfigOptions []json.RawMessage `json:"configOptions"`
+	}
+	if json.Unmarshal(raw, &response) != nil {
+		return devinModelOption{}, fmt.Errorf("unrecognized Devin model catalog: malformed configOptions")
+	}
+	for _, rawOption := range response.ConfigOptions {
+		var header struct {
+			ID       string `json:"id"`
+			Category string `json:"category"`
+		}
+		if json.Unmarshal(rawOption, &header) != nil {
+			continue
+		}
+		if header.Category != "model" && header.ID != "model" {
+			continue
+		}
+		var option devinModelOption
+		if json.Unmarshal(rawOption, &option) != nil {
+			return devinModelOption{}, fmt.Errorf("unrecognized Devin model catalog: malformed model option")
+		}
+		return option, nil
+	}
+	return devinModelOption{}, fmt.Errorf("unrecognized Devin model catalog: missing model config option")
+}
+
+func parseDevinSessionModels(raw json.RawMessage) ([]Model, error) {
+	option, err := devinSessionModelOption(raw)
+	if err != nil {
+		return nil, err
+	}
+	if option.ID == "" {
+		return nil, fmt.Errorf("unrecognized Devin model catalog: missing model option id")
+	}
+	models := make([]Model, 0, len(option.Options))
+	seen := make(map[string]bool)
+	var collect func([]devinModelChoice) error
+	collect = func(choices []devinModelChoice) error {
+		for _, choice := range choices {
+			if choice.Options != nil {
+				if err := collect(choice.Options); err != nil {
+					return err
+				}
+				continue
+			}
+			if strings.TrimSpace(choice.Value) == "" {
+				return fmt.Errorf("unrecognized Devin model catalog: model choice has no value")
+			}
+			if !seen[choice.Value] {
+				seen[choice.Value] = true
+				models = append(models, acpModelEntry(choice.Value, choice.Name, option.CurrentValue))
+			}
+		}
+		return nil
+	}
+	if err := collect(option.Options); err != nil {
+		return nil, err
+	}
+	return models, nil
 }
 
 func devinModelAvailable(choices []devinModelChoice, value string) bool {
@@ -134,7 +188,7 @@ func confirmDevinModel(ctx context.Context, request acpRequestFn, sessionID, req
 		if len(values) == 0 && catalog != nil {
 			data, err := catalog(ctx)
 			if err != nil {
-				return "", fmt.Errorf("resolve Devin model %q: %w; choose a canonical model ID", requested, err)
+				return "", fmt.Errorf("resolve Devin model %q: %w; choose a model ID from the model picker", requested, err)
 			}
 			values, err = devinCatalogModelValues(data, requested)
 			if err != nil {

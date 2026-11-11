@@ -41,6 +41,15 @@ describe("paths.workspace(slug)", () => {
   it("URL-encodes special characters in ids", () => {
     expect(ws.issueDetail("id with space")).toBe("/acme/issues/id%20with%20space");
   });
+
+  it("builds a deliverable link with the filename as one encoded segment", () => {
+    expect(ws.issueDeliverable("MUL-1", "report.html")).toBe(
+      "/acme/issues/MUL-1/deliverables/report.html",
+    );
+    expect(ws.issueDeliverable("MUL-1", "Q3 调研/报告 #2?.html")).toBe(
+      "/acme/issues/MUL-1/deliverables/Q3%20%E8%B0%83%E7%A0%94%2F%E6%8A%A5%E5%91%8A%20%232%3F.html",
+    );
+  });
 });
 
 describe("paths (global)", () => {

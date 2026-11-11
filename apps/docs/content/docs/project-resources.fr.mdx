@@ -121,7 +121,7 @@ Une branche par tâche plutôt qu'une par exécution : `agent/<agent>/<issue>` (
 
 `<agent>` vient du nom de l'agent : mis en minuscules, tout ce qui n'est pas a–z ou 0–9 (lettres accentuées comprises) devient `-`, sur 30 caractères au plus. Un nom sans lettre latine ni chiffre devient `agent`. Ainsi, Assistant ops qui traite OPS-21 obtient `agent/assistant-ops/ops-21`, et un agent nommé 运营助手 obtient `agent/agent/ops-21`. `<issue>` est l'identifiant de la tâche en minuscules.
 
-Une exécution qui a échoué en cours de route indique tout de même sa branche, car elle y a déjà commité ce que l'agent avait produit.
+Une exécution qui a échoué en cours de route indique tout de même sa branche : les commits de l'agent s'y trouvent, et ce qu'il a laissé non commité est conservé comme décrit dans [Rien n'est perdu en silence](#nothing-is-silently-lost).
 
 </Accordion>
 <Accordion title="Une suite reprend là où la dernière exécution s'est arrêtée" id="follow-ups-continue-the-branch">
@@ -156,9 +156,16 @@ Une exécution qui n'a pas pu enregistrer sa branche, par exemple parce qu'elle 
 </Accordion>
 <Accordion title="Rien n'est perdu en silence" id="nothing-is-silently-lost">
 
-Tout ce que l'agent laisse non commité est commité sur cette branche avant la suppression du worktree, y compris lorsque l'exécution échoue en cours de route.
+Rien de ce que l'agent laisse non commité n'est supprimé avec le worktree, y compris lorsque l'exécution échoue en cours de route. Sa destination dépend de ce que l'agent a fait pendant l'exécution :
 
-Dans le rare cas où ce commit lui-même est impossible, par exemple un dépôt avec `commit.gpgSign` et aucune clé de signature disponible pour le runtime, le worktree est délibérément conservé, l'exécution est signalée comme échouée, et `git worktree list` dans votre dépôt indique le répertoire qui contient le travail.
+- **L'agent n'a fait aucun commit :** tout ce qu'il a laissé et qui n'est pas ignoré par git est commité sur la branche. Les hooks de commit de votre dépôt ne s'exécutent pas pour ce commit.
+- **L'agent a fait ses propres commits :** seuls ces commits sont livrés. Ce qu'il a laissé non commité (fichiers générés, fichiers temporaires, modifications non commitées) est enregistré sous une ref cachée, `refs/multica/leftovers/<branch>/<task>`, et n'atteint pas la branche. Cette règle est indiquée à l'agent au début de chaque exécution : un agent qui commite décide donc de ce qui est livré.
+
+Exception : une exécution qui commence par terminer une fusion avec vos modifications locales (voir [les conflits](#conflicts-are-resolved-by-the-agent)) commite tout ce qu'elle laisse, car ces modifications non commitées contiennent les vôtres.
+
+Pour voir ce qu'une exécution a enregistré, listez les refs avec `git for-each-ref refs/multica/leftovers` et inspectez-en une avec `git show --stat <ref>`. `git restore --source=<ref> -- <path>` remet un fichier dans votre copie de travail.
+
+Dans le rare cas où ce commit ou cet enregistrement lui-même est impossible, par exemple un dépôt avec `commit.gpgSign` et aucune clé de signature disponible pour le runtime, le worktree est délibérément conservé, l'exécution est signalée comme échouée, et `git worktree list` dans votre dépôt indique le répertoire qui contient le travail.
 
 </Accordion>
 <Accordion title="Une exécution qui ne change rien ne laisse aucune trace" id="no-changes-leave-nothing">
@@ -168,7 +175,7 @@ Sa branche est supprimée plutôt que laissée comme entrée vide dans `git bran
 </Accordion>
 <Accordion title="Les branches et refs cachées qui restent dans votre dépôt" id="what-stays-in-your-repo">
 
-Le worktree se trouve dans le répertoire de travail du runtime et il est récupéré selon [le calendrier de nettoyage habituel](/daemon-runtimes#cleanup). Deux éléments persistent dans votre dépôt : la branche, et une ref cachée par branche sous `refs/multica/local-state/`, qui enregistre à qui elle appartient et l'état de votre répertoire lors de sa dernière reprise.
+Le worktree se trouve dans le répertoire de travail du runtime et il est récupéré selon [le calendrier de nettoyage habituel](/daemon-runtimes#cleanup). Ce qui persiste dans votre dépôt : la branche ; une ref cachée par branche sous `refs/multica/local-state/`, qui enregistre à qui elle appartient et l'état de votre répertoire lors de sa dernière reprise ; et une ref cachée sous `refs/multica/leftovers/` pour chaque exécution qui a laissé des modifications non commitées après avoir fait ses propres commits.
 
 Les refs cachées n'apparaissent jamais dans `git branch` ; listez-les avec `git for-each-ref refs/multica`. Multica supprime chacune d'elles avec sa branche, et élimine celles dont vous avez vous-même supprimé la branche la prochaine fois qu'une exécution démarre sur ce dépôt. Vous pouvez aussi toutes les supprimer d'un coup avec `git for-each-ref --format='%(refname)' refs/multica | xargs -n1 git update-ref -d`.
 

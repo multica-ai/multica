@@ -92,7 +92,6 @@ function renderList(selectedKey: string, onSelect = vi.fn()) {
       selectedKey={selectedKey}
       onSelect={onSelect}
       onAction={vi.fn()}
-      onOpenArchived={vi.fn()}
     />,
   );
   // The scroll container owns the key handler; it is the row's closest
@@ -203,16 +202,9 @@ describe("InboxList keyboard navigation", () => {
 
 
 describe("InboxList archive pagination", () => {
-  it("keeps a count-free archive entry available with an empty inbox", () => {
-    const onOpenArchived = vi.fn();
-    render(<InboxList items={[]} view="inbox" selectedKey="" onSelect={vi.fn()} onAction={vi.fn()} onOpenArchived={onOpenArchived} />);
-    fireEvent.click(screen.getByRole("button", { name: "Archived" }));
-    expect(onOpenArchived).toHaveBeenCalledOnce();
-  });
-
   it("loads at the end, suppresses automatic retries, and provides a retry button", () => {
     const onLoadMore = vi.fn();
-    const props = { items, view: "archived" as const, selectedKey: "", onSelect: vi.fn(), onAction: vi.fn(), onOpenArchived: vi.fn(), onLoadMore };
+    const props = { items, view: "archived" as const, selectedKey: "", onSelect: vi.fn(), onAction: vi.fn(), onLoadMore };
     const { rerender } = render(<InboxList {...props} />);
     fireEvent.click(screen.getByRole("button", { name: "Reach list end" }));
     expect(onLoadMore).toHaveBeenCalledOnce();
@@ -227,7 +219,7 @@ describe("InboxList archive pagination", () => {
 
   it("loads the next page when restored rows drain the loaded window", () => {
     const onLoadMore = vi.fn();
-    render(<InboxList items={[]} view="archived" selectedKey="" onSelect={vi.fn()} onAction={vi.fn()} onOpenArchived={vi.fn()} onLoadMore={onLoadMore} />);
+    render(<InboxList items={[]} view="archived" selectedKey="" onSelect={vi.fn()} onAction={vi.fn()} onLoadMore={onLoadMore} />);
     expect(onLoadMore).toHaveBeenCalledOnce();
     expect(screen.queryByText("No archived notifications")).toBeNull();
   });

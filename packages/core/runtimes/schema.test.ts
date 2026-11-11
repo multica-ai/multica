@@ -16,3 +16,20 @@ describe("runtime sharing response contract", () => {
     expect(parseWithFallback({ id: 123 }, AgentRuntimeSchema, EMPTY_RUNTIME, { endpoint: "test" })).toEqual(EMPTY_RUNTIME);
   });
 });
+
+describe("runtime concurrency cap response contract", () => {
+  it("preserves a cap from a new server", () => {
+    expect(AgentRuntimeSchema.parse({ id: "r", workspace_id: "w", max_concurrent_tasks: 2 }).max_concurrent_tasks).toBe(2);
+  });
+  it("treats an older server that omits the field as no cap", () => {
+    expect(AgentRuntimeSchema.parse({ id: "r", workspace_id: "w" }).max_concurrent_tasks).toBeNull();
+  });
+  it("keeps an explicit null as no cap", () => {
+    expect(AgentRuntimeSchema.parse({ id: "r", workspace_id: "w", max_concurrent_tasks: null }).max_concurrent_tasks).toBeNull();
+  });
+  it.each(["2", 1.5, true, {}, [1]])("degrades a malformed cap to no cap without dropping the runtime: %j", (max_concurrent_tasks) => {
+    const parsed = AgentRuntimeSchema.parse({ id: "r", workspace_id: "w", name: "Claude", max_concurrent_tasks });
+    expect(parsed.max_concurrent_tasks).toBeNull();
+    expect(parsed.name).toBe("Claude");
+  });
+});

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -250,6 +251,11 @@ func (h *Handler) createIssueStatusEntry(ctx context.Context, workspaceID pgtype
 	entry, badRequest, err := createIssueStatusEntryLocked(ctx, qtx, workspaceID, publicCategory, arg)
 	if badRequest != "" || err != nil {
 		return db.IssueStatus{}, badRequest, err
+	}
+	// A status created inside a workflow's editor goes through
+	// createIssueStatusEntryLocked alone and stays out of Default.
+	if err := issueworkflow.AddToDefault(ctx, qtx, workspaceID, entry.Key); err != nil {
+		return db.IssueStatus{}, "", err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return db.IssueStatus{}, "", err

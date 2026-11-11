@@ -37,6 +37,17 @@ html[lang|="ja"] {
     "Noto Sans CJK KR", sans-serif;
 }
 
+/* Traditional Chinese: the default stack is Simplified-first, which hands
+   zh-Hant readers Simplified glyph shapes for every ideograph the two share a
+   code point for. Promote the Traditional families only for those docs
+   (`<html lang="zh-Hant">`). Mirrors the `zh-TW` rule in apps/web/app/globals.css. */
+html[lang="zh-Hant"] {
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang TC", "Microsoft JhengHei", "Noto Sans CJK TC", "PingFang SC",
+    "Microsoft YaHei", "Noto Sans CJK SC", "Apple SD Gothic Neo", "Malgun Gothic",
+    "Noto Sans CJK KR", sans-serif;
+}
+
 /* ---------------------------------------------------------------------------
  * Multica Docs — editorial visual identity (v2)
  *

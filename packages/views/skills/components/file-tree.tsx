@@ -208,7 +208,7 @@ function TreeNodeItem({
         className={cn(
           "flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md pr-2.5 text-left text-caption transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           isSelected
-            ? "font-medium text-surface-selected-foreground"
+            ? "text-surface-selected-foreground"
             : "text-muted-foreground group-hover/row:text-foreground",
         )}
         style={{ paddingLeft: `${depth * 12 + 10}px` }}

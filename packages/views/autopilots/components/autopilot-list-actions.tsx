@@ -4,11 +4,9 @@ import { useState } from "react";
 import {
   ExternalLink,
   Loader2,
-  MoreHorizontal,
   Pause,
   Play,
   Trash2,
-  X,
 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import type { Autopilot } from "@multica/core/types";
@@ -18,7 +16,6 @@ import {
 } from "@multica/core/autopilots";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
-import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import {
   Dialog,
   DialogContent,
@@ -28,15 +25,15 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useT } from "../../i18n";
 import { useIntentNavigate } from "../../navigation";
-import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip";
+import {
+  CollectionBatchBar,
+  CollectionRowMenu,
+} from "../../layout/collection-list";
 
 // Delete dialog — single row (kebab) and batch share one implementation.
 
@@ -135,10 +132,7 @@ function useSetStatus() {
   };
 }
 
-// Row kebab — the row is a plain `<div>` whose whole-row navigation is a mouse
-// `onClick` (see `useRowLink`), not an ancestor `<a>`. The wrapper span stops
-// click propagation so opening this menu never navigates the row — just
-// stopPropagation, no preventDefault (same pattern as the skills list).
+// Row menu — the ⋯ button and right-click share these items.
 
 export function AutopilotRowActions({ row }: { row: Autopilot }) {
   const { t } = useT("autopilots");
@@ -156,69 +150,48 @@ export function AutopilotRowActions({ row }: { row: Autopilot }) {
   if (row.can_write === false) return null;
 
   return (
-    <span
-      onClick={(e) => e.stopPropagation()}
-      className="flex items-center"
-    >
-      <DropdownMenu>
-        <DeferredTooltip
-          content={t(($) => $.actions.row_menu)}
-          trigger={
-            <DropdownMenuTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label={t(($) => $.actions.row_menu)}
-                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
-                >
-                  <MoreHorizontal className="size-4" />
-                </button>
-              }
-            />
+    <>
+      <CollectionRowMenu label={t(($) => $.actions.row_menu)}>
+        <DropdownMenuItem
+          onClick={() =>
+            intentNavigate(
+              wsPaths.autopilotDetail(row.id),
+              "foreground-tab",
+              row.title,
+            )
           }
-        />
-        <DropdownMenuContent align="end" className="w-48">
-          <DropdownMenuItem
-            onClick={() =>
-              intentNavigate(
-                wsPaths.autopilotDetail(row.id),
-                "foreground-tab",
-                row.title,
-              )
-            }
-          >
-            <ExternalLink className="size-3.5" />
-            {tCommon(($) => $.navigation.open_in_new_tab)}
+        >
+          <ExternalLink className="size-3.5" />
+          {tCommon(($) => $.navigation.open_in_new_tab)}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {row.status === "active" && (
+          <DropdownMenuItem onClick={() => setStatus([row], "paused")}>
+            <Pause className="size-3.5" />
+            {t(($) => $.actions.pause)}
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          {row.status === "active" && (
-            <DropdownMenuItem onClick={() => setStatus([row], "paused")}>
-              <Pause className="size-3.5" />
-              {t(($) => $.actions.pause)}
-            </DropdownMenuItem>
-          )}
-          {row.status === "paused" && (
-            <DropdownMenuItem onClick={() => setStatus([row], "active")}>
-              <Play className="size-3.5" />
-              {t(($) => $.actions.resume)}
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            variant="destructive"
-            onClick={() => setDeleteOpen(true)}
-          >
-            <Trash2 className="size-3.5" />
-            {t(($) => $.actions.delete)}
+        )}
+        {row.status === "paused" && (
+          <DropdownMenuItem onClick={() => setStatus([row], "active")}>
+            <Play className="size-3.5" />
+            {t(($) => $.actions.resume)}
           </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          variant="destructive"
+          onClick={() => setDeleteOpen(true)}
+        >
+          <Trash2 className="size-3.5" />
+          {t(($) => $.actions.delete)}
+        </DropdownMenuItem>
+      </CollectionRowMenu>
       <DeleteAutopilotsDialog
         rows={[row]}
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
       />
-    </span>
+    </>
   );
 }
 
@@ -235,32 +208,12 @@ export function AutopilotBatchToolbar({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const setStatus = useSetStatus();
 
-  if (rows.length === 0) return null;
-
   const anyActive = rows.some((r) => r.status === "active");
   const anyPaused = rows.some((r) => r.status === "paused");
 
   return (
     <>
-      {/* Anchored to the page root (relative), NOT the viewport — see the
-          skills batch toolbar for the rationale. */}
-      <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg max-md:above-chat-launcher">
-        <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
-          <span className="text-body font-medium">
-            {t(($) => $.actions.selected, { count: rows.length })}
-          </span>
-          <TooltipHint label={t(($) => $.actions.clear_selection)}>
-            <button
-              type="button"
-              aria-label={t(($) => $.actions.clear_selection)}
-              onClick={onClear}
-              className="rounded-xs p-0.5 transition-colors hover:bg-accent"
-            >
-              <X className="size-3.5 text-muted-foreground" />
-            </button>
-          </TooltipHint>
-        </div>
-
+      <CollectionBatchBar count={rows.length} onClear={onClear}>
         {anyActive && (
           <Button
             variant="ghost"
@@ -290,7 +243,7 @@ export function AutopilotBatchToolbar({
           <Trash2 className="mr-1 size-3.5" />
           {t(($) => $.actions.delete)}
         </Button>
-      </div>
+      </CollectionBatchBar>
 
       <DeleteAutopilotsDialog
         rows={rows}

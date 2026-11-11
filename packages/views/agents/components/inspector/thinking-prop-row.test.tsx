@@ -152,6 +152,31 @@ describe("ThinkingPropRow", () => {
     cleanup();
   });
 
+  it("offers Kiro's discovered effort levels and saves the selected token", async () => {
+    mockInitiateListModels.mockResolvedValue(listResult([{
+      id: "claude-opus-4.7",
+      label: "claude-opus-4.7",
+      default: true,
+      thinking: {
+        supported_levels: [
+          { value: "low", label: "Low" },
+          { value: "xhigh", label: "Xhigh" },
+          { value: "max", label: "Max" },
+        ],
+        default_level: "xhigh",
+      },
+    }]));
+    const { onChange } = renderRow({
+      provider: "kiro",
+      model: "claude-opus-4.7",
+    });
+
+    await screen.findByText("Thinking");
+    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(await screen.findByText("Max"));
+    expect(onChange).toHaveBeenCalledWith("max");
+  });
+
   it("offers discovered OpenCode variants and emits the native token for saving", async () => {
     mockInitiateListModels.mockResolvedValue(listResult([{
       id: "opencode-go/deepseek-v4.1-flash",
@@ -233,6 +258,15 @@ describe("ThinkingPropRow", () => {
     const clearButton = await screen.findByRole("button", { name: "Follow CLI config" });
     fireEvent.click(clearButton);
 
+    expect(onChange).toHaveBeenCalledWith("");
+  });
+
+  it("lets a ZCode model without reasoning metadata clear an old level", async () => {
+    mockInitiateListModels.mockResolvedValue(listResult([NO_THINKING_MODEL]));
+    const { onChange } = renderRow({ provider: "zcode", model: NO_THINKING_MODEL.id, value: "max" });
+    await screen.findByText("max");
+    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(await screen.findByRole("button", { name: "Follow CLI config" }));
     expect(onChange).toHaveBeenCalledWith("");
   });
 

@@ -2,8 +2,10 @@
 import { describe, expect, it } from "vitest";
 import type { IssueWorkflow, IssueWorkflowStep } from "../types";
 import {
+  issueStatusWorkflow,
   projectMoveMayHandOff,
   resolveProjectWorkflow,
+  sharedWorkflowStatusKeys,
   stepHandsOff,
   statusAcceptsHandoff,
   workflowAllowsStatus,
@@ -64,10 +66,36 @@ describe("project workflow resolution (MUL-7420)", () => {
   });
 });
 
+describe("issue status workflow (MUL-8250)", () => {
+  const projects = [
+    { id: "p-content", workflow_id: "wf-content" },
+    { id: "p-default", workflow_id: null },
+  ];
+
+  it("uses Default outside a project and the project's workflow inside one", () => {
+    const workflows = [defaultWorkflow, content];
+    expect(issueStatusWorkflow(workflows, projects, { project_id: null })?.id).toBe("wf-default");
+    expect(issueStatusWorkflow(workflows, projects, { project_id: "p-content" })?.id).toBe("wf-content");
+    expect(issueStatusWorkflow(workflows, projects, { project_id: "p-default" })?.id).toBe("wf-default");
+    expect(issueStatusWorkflow(workflows, undefined, { project_id: "p-content" })).toBeNull();
+    expect(issueStatusWorkflow(undefined, projects, { project_id: null })).toBeNull();
+  });
+
+  it("limits a batch to the statuses every issue's workflow lists, Default included", () => {
+    const workflows = [defaultWorkflow, content];
+    const outside = sharedWorkflowStatusKeys(workflows, projects, [{ project_id: null }]);
+    expect(outside && [...outside]).toEqual(["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"]);
+    const mixed = sharedWorkflowStatusKeys(workflows, projects, [{ project_id: null }, { project_id: "p-content" }]);
+    expect(mixed && [...mixed]).toEqual(["backlog", "todo", "blocked", "done", "cancelled"]);
+    expect(sharedWorkflowStatusKeys(undefined, projects, [{ project_id: null }])).toBeNull();
+  });
+});
+
 describe("workflow helpers (MUL-7420)", () => {
-  it("allows any status under Default and only listed ones under a named workflow", () => {
+  it("allows only the statuses a workflow lists, Default included", () => {
     expect(workflowAllowsStatus(null, "drafting")).toBe(true);
-    expect(workflowAllowsStatus(defaultWorkflow, "drafting")).toBe(true);
+    expect(workflowAllowsStatus(defaultWorkflow, "drafting")).toBe(false);
+    expect(workflowAllowsStatus(defaultWorkflow, "in_review")).toBe(true);
     expect(workflowAllowsStatus(content, "drafting")).toBe(true);
     expect(workflowAllowsStatus(content, "in_progress")).toBe(false);
   });
@@ -109,5 +137,11 @@ describe("projectMoveMayHandOff", () => {
 
   it("never asks without a workflow", () => {
     expect(projectMoveMayHandOff(null, "todo")).toBe(false);
+  });
+
+  it("keeps the issue's status on a move into Default, listed or not", () => {
+    const reviewing = { ...defaultWorkflow, steps: defaultWorkflow.steps.map((s) => (s.status_key === "in_review" ? lead : s)) };
+    expect(projectMoveMayHandOff(reviewing, "drafting")).toBe(false);
+    expect(projectMoveMayHandOff(reviewing, "in_review")).toBe(true);
   });
 });

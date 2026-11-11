@@ -18,7 +18,7 @@ import (
 )
 
 // piBackend implements Backend by spawning the Pi CLI in non-interactive
-// JSON mode (`pi -p --mode json --session <path>`) and parsing its event
+// JSON mode (or RPC mode for negotiated steering) and parsing its event
 // stream on stdout.
 //
 // It also backs the "omp" (oh-my-pi) provider — omp is a separate CLI
@@ -39,6 +39,8 @@ type piBackend struct {
 	// changing concurrent executions through package-global state.
 	turnErrorGrace time.Duration
 	terminateGrace time.Duration
+	// Tests inject unsupported kernels per backend without changing global state.
+	cleanupPreflight func() error
 }
 
 var (
@@ -372,7 +374,15 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	if err != nil {
 		return nil, fmt.Errorf("%s executable not found at %q: %w", label, execName, err)
 	}
+	checkCleanup := b.cleanupPreflight
+	if checkCleanup == nil {
+		checkCleanup = checkPiCleanupSupport
+	}
+	if err := checkCleanup(); err != nil {
+		return nil, fmt.Errorf("%s process cleanup unavailable before start: %w", label, err)
+	}
 
+	rpcMode := label == "pi" && opts.EnableTaskSupplement
 	timeout := opts.Timeout
 
 	// The persisted JSONL path is our opaque session identifier. OMP's
@@ -463,7 +473,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		cancel()
 		return nil, fmt.Errorf("%s stdout pipe: %w", label, err)
 	}
-	// Pi reads piped stdin to EOF as its initial prompt in print/JSON mode.
+	// Print/JSON mode reads its initial prompt to EOF; RPC uses JSONL commands.
 	// Keeping user-controlled text off argv prevents the npm PowerShell shim
 	// from re-tokenising embedded quotes into CLI flags on Windows (#6457).
 	// The explicit close remains part of the #2188 contract too: under systemd,
@@ -475,6 +485,10 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		cancelProcess()
 		cancel()
 		return nil, fmt.Errorf("%s stdin pipe: %w", label, err)
+	}
+	var supplements *piSupplementSession
+	if rpcMode {
+		supplements = newPiSupplementSession(stdin)
 	}
 	var closeStdinOnce sync.Once
 	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
@@ -535,11 +549,20 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 	// Write concurrently with stdout consumption. A large prompt can fill the
 	// stdin pipe while the child fills stdout; serialising those operations can
-	// deadlock both processes. Closing stdin signals the end of Pi's prompt.
+	// deadlock both processes. RPC keeps stdin open until agent_settled; print
+	// mode closes it to signal the end of the initial prompt.
 	writeErrCh := make(chan error, 1)
 	go func() {
-		_, err := io.WriteString(stdin, prompt)
-		closeStdin()
+		var err error
+		if rpcMode {
+			err = supplements.write(processCtx, map[string]string{"id": "initial-prompt", "type": "prompt", "message": prompt})
+		} else {
+			_, err = io.WriteString(stdin, prompt)
+			closeStdin()
+		}
+		if err != nil {
+			cancelProcess()
+		}
 		writeErrCh <- err
 	}()
 
@@ -565,6 +588,9 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 	releaseExtension = nil
 	go func() {
+		if rpcMode {
+			defer supplements.stop()
+		}
 		defer removePiMcpExtension(extensionPath)
 		defer func() { releasePiSessionFileLock(sessionLock) }()
 		defer cancelProcess()
@@ -592,10 +618,36 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			if err := json.Unmarshal([]byte(line), &evt); err != nil {
 				continue
 			}
+			if rpcMode {
+				if response := piExtensionDialogResponse([]byte(line)); response != nil {
+					// A dialog can arrive while the initial prompt is still being
+					// written. Keep stdout draining independently of stdin writes.
+					go func() {
+						if err := supplements.write(processCtx, response); err != nil {
+							cancelProcess()
+						}
+					}()
+				}
+				if err := supplements.observe([]byte(line)); err != nil {
+					finalStatus = "failed"
+					finalError = err.Error()
+					supplements.stop()
+					closeStdin()
+				}
+			}
+			if rpcMode && supplements.isSettled() {
+				supplements.stop()
+				closeStdin()
+			}
 			turnErrors.observeEvent(evt.Type)
 			cleanup.observe(evt.Type)
 
 			switch evt.Type {
+			case "agent_settled":
+				if rpcMode && evt.Aborted && finalStatus == "completed" {
+					finalStatus = "aborted"
+					finalError = "pi execution aborted"
+				}
 			case "agent_start":
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
 
@@ -713,6 +765,10 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			}
 		}
 		scanErr := scanner.Err()
+		if rpcMode && scanErr == nil && !supplements.isSettled() && processCtx.Err() == nil && finalStatus == "completed" {
+			finalStatus = "failed"
+			finalError = "pi RPC exited before agent_settled"
+		}
 		if errors.Is(scanErr, os.ErrDeadlineExceeded) {
 			select {
 			case <-cleanup.exited:
@@ -868,12 +924,17 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		}
 	}()
 
-	return &Session{
+	session := &Session{
 		CleanupRequired:  true,
 		Messages:         msgCh,
 		Result:           resCh,
 		TerminalObserved: turnErrors.terminalObserved,
-	}, nil
+	}
+	if rpcMode {
+		session.Supplement = supplements.send
+		session.SupplementReady = supplements.ready
+	}
+	return session, nil
 }
 
 func piSessionBusyResult(label, sessionPath string) *Session {
@@ -954,7 +1015,8 @@ func (w *piStderrWatcher) resumeRefused() bool {
 // (e.g. `message`, `result`) are held as json.RawMessage and decoded on
 // demand by the switch arms.
 type piStreamEvent struct {
-	Type string `json:"type"`
+	Type    string `json:"type"`
+	Aborted bool   `json:"aborted,omitempty"`
 
 	// message_update
 	AssistantMessageEvent *piAssistantMessageEvent `json:"assistantMessageEvent,omitempty"`
@@ -1060,7 +1122,7 @@ func decodePiResult(raw json.RawMessage) string {
 var piBlockedArgs = map[string]blockedArgMode{
 	"-p":         blockedStandalone, // non-interactive mode
 	"--print":    blockedStandalone, // alias for -p
-	"--mode":     blockedWithValue,  // "json" event stream protocol
+	"--mode":     blockedWithValue,  // JSON/RPC event stream protocol
 	"--session":  blockedWithValue,  // daemon manages the session path
 	"--thinking": blockedWithValue,  // owned by agent.thinking_level
 }
@@ -1123,23 +1185,28 @@ var piCustomArgModes = map[string]blockedArgMode{
 	"--offline":              blockedStandalone,
 }
 
-// buildPiArgs assembles the argv for a one-shot Pi invocation.
+// buildPiArgs assembles the argv for a Pi task invocation.
 //
 // Flags:
 //
 //	-p                          non-interactive mode (prompt arrives on stdin)
 //	--mode json                 emit one JSON event per line on stdout
+//	--mode rpc                  use RPC instead when task supplements are enabled
 //	--session <path>            session log file (created upfront, reused on resume)
 //	--model <selector>          model selector, passed through verbatim
 //	--thinking <level>          per-agent reasoning level override
 //
-// The prompt is deliberately absent from argv. Pi reads a non-TTY stdin in
-// print/JSON mode; using that supported path prevents Windows PowerShell's npm
-// shim from re-tokenising prompt content into options.
+// The prompt is deliberately absent from argv. It arrives on stdin as text
+// in print/JSON mode or a prompt command in RPC mode, preventing Windows
+// PowerShell's npm shim from re-tokenising prompt content into options.
 func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []string {
-	args := []string{
-		"-p",
-		"--mode", "json",
+	return buildPiArgsFor("pi", sessionPath, opts, logger)
+}
+
+func buildPiArgsFor(label, sessionPath string, opts ExecOptions, logger *slog.Logger) []string {
+	args := []string{"-p", "--mode", "json"}
+	if opts.EnableTaskSupplement {
+		args = []string{"--mode", "rpc"}
 	}
 	if sessionPath != "" {
 		args = append(args, "--session", sessionPath)
@@ -1159,6 +1226,14 @@ func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []st
 	}
 	if opts.ThinkingLevel != "" {
 		args = append(args, "--thinking", opts.ThinkingLevel)
+	}
+	// Explicitly load only this dispatch's managed skill files. Scanning the
+	// project directory would also opt user-owned skills into untrusted runs.
+	// OMP retains its native .omp/skills discovery.
+	if label == "pi" {
+		for _, path := range opts.PiSkillPaths {
+			args = append(args, "--skill", path)
+		}
 	}
 	// Note: we intentionally do NOT pass --tools here. Omitting it lets
 	// Pi use its full tool registry, including user-installed extension

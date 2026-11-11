@@ -2,8 +2,13 @@ import { act, type ReactNode } from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { DEFAULT_APPEARANCE, useAppearanceStore, useInstalledThemesStore } from "@multica/core/appearance";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
-import { useCommandBarContextStore, type CommandBarContext } from "@multica/core/command-bar";
+import {
+  useCommandBarContextStore,
+  useSearchStore,
+  type CommandBarContext,
+} from "@multica/core/command-bar";
 import { inboxUnreadSummaryOptions } from "@multica/core/inbox/queries";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
@@ -19,7 +24,6 @@ import { RESOURCES } from "../locales";
 import enLayout from "../locales/en/layout.json";
 import zhHansProjects from "../locales/zh-Hans/projects.json";
 import { SearchCommand } from "./search-command";
-import { useSearchStore } from "./search-store";
 
 vi.mock("@multica/core/issue-statuses/hooks", () => ({
   useIssueStatuses: () => buildIssueStatusCatalog([]),
@@ -374,6 +378,8 @@ describe("SearchCommand", () => {
     mockToast.warning.mockReset();
     mockSetTheme.mockReset();
     mockTheme.current = "system";
+    useAppearanceStore.setState(DEFAULT_APPEARANCE);
+    useInstalledThemesStore.setState({ themes: [], folders: {}, fromStore: {} });
     mockCommentCollapseAll.mockReset();
     mockCommentExpandAll.mockReset();
     mockResolvedCollapseAll.mockReset();
@@ -510,7 +516,7 @@ describe("SearchCommand", () => {
       expect(useSearchStore.getState().open).toBe(false);
     });
 
-    it("changes theme through a submenu that marks the current theme", async () => {
+    it("changes the mode through a submenu that marks the current mode and theme", async () => {
       const user = userEvent.setup();
       mockTheme.current = "dark";
       renderSearch();
@@ -518,12 +524,78 @@ describe("SearchCommand", () => {
       await user.click(await rowText("Change theme..."));
 
       expect(within(screen.getByRole("navigation", { name: "Current menu" })).getByText("Change theme")).toBeInTheDocument();
-      expect(renderedValues()).toEqual(["theme:light", "theme:dark", "theme:system"]);
-      expect(screen.getByLabelText("Current theme")).toBeInTheDocument();
+      expect(renderedHeadings()).toEqual(["Mode", "Theme"]);
+      expect(renderedValues()).toEqual([
+        "theme:light",
+        "theme:dark",
+        "theme:system",
+        "color-theme:default",
+        "color-theme:pop",
+        "color-theme:github",
+        "color-theme:blueprint",
+        "color-theme:notion",
+      ]);
+      expect(screen.getByLabelText("Current mode").closest("[cmdk-item]")).toHaveAttribute("data-value", "theme:dark");
+      expect(screen.getByLabelText("Current theme").closest("[cmdk-item]")).toHaveAttribute(
+        "data-value",
+        "color-theme:default",
+      );
 
       await user.click(screen.getByText("Light"));
       expect(mockSetTheme).toHaveBeenCalledWith("light");
       expect(useSearchStore.getState().open).toBe(false);
+    });
+
+    it("switches the colour theme from the theme submenu", async () => {
+      const user = userEvent.setup();
+      useAppearanceStore.setState({ theme: "github" });
+      renderSearch();
+      await user.type(input(), "主题");
+      await user.click(await rowText("Change theme..."));
+
+      expect(screen.getByLabelText("Current theme").closest("[cmdk-item]")).toHaveAttribute(
+        "data-value",
+        "color-theme:github",
+      );
+      await user.click(screen.getByText("Pop"));
+
+      expect(useAppearanceStore.getState().theme).toBe("pop");
+      expect(mockSetTheme).not.toHaveBeenCalled();
+      expect(useSearchStore.getState().open).toBe(false);
+    });
+
+    it("finds installed themes by id and truncates a long name", async () => {
+      const user = userEvent.setup();
+      const name = "A very long community theme name, forty!";
+      useInstalledThemesStore.setState({
+        themes: [{ apiVersion: 1, id: "solarized", name, css: "" }],
+        folders: {},
+        fromStore: {},
+      });
+      renderSearch();
+      await user.type(input(), "theme");
+      await user.click(await rowText("Change theme..."));
+      await user.type(screen.getByPlaceholderText("Filter..."), "solar");
+
+      expect(renderedHeadings()).toEqual(["Theme"]);
+      expect(renderedValues()).toEqual(["color-theme:solarized"]);
+      expect(await rowText(name)).toHaveClass("min-w-0", "flex-1", "truncate");
+
+      await user.keyboard("{Enter}");
+      expect(useAppearanceStore.getState().theme).toBe("solarized");
+    });
+
+    it("marks Default when the chosen theme is no longer installed", async () => {
+      const user = userEvent.setup();
+      useAppearanceStore.setState({ theme: "uninstalled" });
+      renderSearch();
+      await user.type(input(), "theme");
+      await user.click(await rowText("Change theme..."));
+
+      expect(screen.getByLabelText("Current theme").closest("[cmdk-item]")).toHaveAttribute(
+        "data-value",
+        "color-theme:default",
+      );
     });
 
     it("Backspace on an empty submenu input returns to the root", async () => {
@@ -724,6 +796,23 @@ describe("SearchCommand", () => {
       fireEvent.click(await rowText("Acme Corp"));
 
       expect(mockPush).toHaveBeenCalledWith("/acme-hq/issues");
+    });
+  });
+
+  describe("current agent", () => {
+    it("opens the agent's settings when 'settings' is typed", async () => {
+      const user = userEvent.setup();
+      const agent = makeAgent("agent-lambda", "Lambda");
+      seed(agentListOptions("ws-test"), [agent]);
+      registerContext({ kind: "agent", agent } as CommandBarContext);
+      renderSearch();
+      await user.type(input(), "settings");
+
+      await waitFor(() =>
+        expect(renderedValues()).toContain("command:context-agent:agent-settings"),
+      );
+      await user.click(await rowText("Open agent settings"));
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/agents/agent-lambda?view=general");
     });
   });
 
@@ -970,73 +1059,69 @@ describe("SearchCommand", () => {
   });
 
   describe("hand to agent", () => {
-    beforeEach(() => {
-      seed(agentListOptions("ws-test"), [
-        makeAgent("agent-lambda", "Lambda"),
-        makeAgent("agent-sigma", "Sigma"),
-      ]);
-      api("quickCreateIssue").mockResolvedValue({ task_id: "task-1" });
-    });
+    const prompt = "fix the Safari login callback 500";
+    const handRow = () =>
+      document.querySelector<HTMLElement>('[cmdk-item=""][data-value="hand-to-agent"]');
 
-    it("turns an instruction naming an agent into a quick-create for it", async () => {
+    it("ends the results with a fixed row and leaves Enter on the top result", async () => {
       const user = userEvent.setup();
-      const prompt = "让 Lambda 修一下 Safari 登录回调的 500";
+      api("searchIssues").mockResolvedValue({
+        issues: [{ ...makeIssue({ id: "issue-812", identifier: "MUL-812", title: prompt }), match_source: "title" }],
+        total: 1,
+      });
       renderSearch();
       await user.type(input(), prompt);
 
-      await waitFor(() => expect(renderedValues()[0]).toBe("delegate:submit"));
-      expect(await rowText("New issue and assign to Lambda")).toBeInTheDocument();
+      await waitFor(() => expect(selectedValue()).toBe("issue-812"), { timeout: 2000 });
+      expect(renderedValues().at(-1)).toBe("hand-to-agent");
+      expect(handRow()).toHaveTextContent(`Hand to agent: “${prompt}”`);
       fireEvent.keyDown(input(), { key: "Enter" });
 
-      await waitFor(() =>
-        expect(api("quickCreateIssue")).toHaveBeenCalledWith({
-          agent_id: "agent-lambda",
-          prompt,
-          project_id: undefined,
-          parent_issue_id: undefined,
-        }),
-      );
-      expect(mockToast.success).toHaveBeenCalled();
-      expect(useSearchStore.getState().open).toBe(false);
-    });
-
-    it("attaches the open issue as parent", async () => {
-      const user = userEvent.setup();
-      const parent = makeIssue({ id: "issue-9", identifier: "MUL-9" });
-      registerContext({ kind: "issue", issue: parent });
-      renderSearch();
-      await user.type(input(), "ask Sigma to write the release notes");
-
-      await waitFor(() => expect(renderedValues()[0]).toBe("delegate:submit"));
-      expect(screen.getByText("Under MUL-9")).toBeInTheDocument();
-      fireEvent.keyDown(input(), { key: "Enter" });
-
-      await waitFor(() =>
-        expect(api("quickCreateIssue")).toHaveBeenCalledWith(
-          expect.objectContaining({ agent_id: "agent-sigma", parent_issue_id: "issue-9" }),
-        ),
-      );
-    });
-
-    it("Shift+Enter falls back to a keyword search", async () => {
-      const user = userEvent.setup();
-      renderSearch();
-      await user.type(input(), "fix the Safari login callback 500");
-      await waitFor(() => expect(renderedValues()[0]).toBe("delegate:submit"));
-
-      fireEvent.keyDown(input(), { key: "Enter", shiftKey: true });
-
-      await waitFor(() => expect(renderedValues()).not.toContain("delegate:submit"));
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-812");
+      expect(mockOpenModal).not.toHaveBeenCalled();
       expect(api("quickCreateIssue")).not.toHaveBeenCalled();
     });
 
-    it("does not read a plain keyword as an instruction", async () => {
+    it("opens quick create prefilled with the input, project and open issue", async () => {
+      const user = userEvent.setup();
+      const parent = makeIssue({ id: "issue-9", identifier: "MUL-9", project_id: "proj-1" });
+      registerContext({ kind: "issue", issue: parent });
+      renderSearch();
+      await user.type(input(), "让 Lambda 写一下发布说明");
+
+      await waitFor(() => expect(handRow()).not.toHaveAttribute("data-disabled", "true"), { timeout: 2000 });
+      fireEvent.click(handRow()!);
+
+      expect(mockOpenModal).toHaveBeenCalledWith("quick-create-issue", {
+        prompt: "让 Lambda 写一下发布说明",
+        project_id: "proj-1",
+        parent_issue_id: "issue-9",
+        parent_issue_identifier: "MUL-9",
+      });
+      expect(useSearchStore.getState().open).toBe(false);
+      expect(api("quickCreateIssue")).not.toHaveBeenCalled();
+    });
+
+    it("is what Enter opens when nothing matches", async () => {
       const user = userEvent.setup();
       renderSearch();
-      await user.type(input(), "login");
+      await user.type(input(), prompt);
 
-      await waitFor(() => expect(api("searchIssues")).toHaveBeenCalled(), { timeout: 2000 });
-      expect(renderedValues()).not.toContain("delegate:submit");
+      await waitFor(() => expect(selectedValue()).toBe("hand-to-agent"), { timeout: 2000 });
+      expect(screen.getByText("No results found.")).toBeInTheDocument();
+      fireEvent.keyDown(input(), { key: "Enter" });
+
+      expect(mockOpenModal).toHaveBeenCalledWith("quick-create-issue", { prompt });
+      expect(api("quickCreateIssue")).not.toHaveBeenCalled();
+    });
+
+    it("is not offered in a scoped search", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), ">theme");
+
+      await waitFor(() => expect(renderedValues()).toContain("command:theme"));
+      expect(handRow()).toBeNull();
     });
   });
 
@@ -1159,6 +1244,7 @@ describe("SearchCommand", () => {
       fireEvent.keyDown(input(), { key: "Enter" });
 
       expect(mockPush).not.toHaveBeenCalled();
+      expect(mockOpenModal).not.toHaveBeenCalled();
       expect(useSearchStore.getState().open).toBe(true);
     });
 

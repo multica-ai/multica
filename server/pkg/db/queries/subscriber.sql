@@ -234,6 +234,17 @@ SELECT * FROM issue_subscriber
 WHERE issue_id = $1 AND unsubscribed_at IS NULL
 ORDER BY created_at;
 
+-- name: ListSubscribedIssueIDs :many
+-- Every issue in the workspace the member actively subscribes to; opt-out
+-- tombstones do not count.
+SELECT s.issue_id
+FROM issue_subscriber s
+JOIN issue i ON i.id = s.issue_id
+WHERE i.workspace_id = sqlc.arg(workspace_id)
+  AND s.user_type = 'member'
+  AND s.user_id = sqlc.arg(user_id)
+  AND s.unsubscribed_at IS NULL;
+
 -- name: IsIssueSubscriber :one
 SELECT EXISTS(
     SELECT 1 FROM issue_subscriber

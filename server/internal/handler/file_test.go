@@ -15,14 +15,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/attachmentpreview"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -1005,7 +1004,7 @@ func TestDownloadAttachment_BareNavigationServesMemberWithoutWorkspaceHeaders(t 
 // IDOR boundary: a stray attachment ID belonging to a workspace the
 // requester is NOT a member of must return 404, not 200 (would leak
 // bytes) and not 403 (would confirm the ID exists). Mirrors
-// ServeLocalUpload's deny shape.
+// the non-existent attachment response.
 func TestDownloadAttachment_BareNavigationDeniesNonMemberWith404(t *testing.T) {
 	if testPool == nil {
 		t.Skip("test database not available")
@@ -1642,13 +1641,62 @@ func TestGetAttachmentContent_TooLarge(t *testing.T) {
 	defer func() { testHandler.Storage = origStorage }()
 
 	// One byte over the limit. Allocate ASCII so io.ReadAll has work to do.
-	big := bytes.Repeat([]byte("a"), maxPreviewTextSize+1)
+	big := bytes.Repeat([]byte("a"), int(attachmentpreview.DefaultMaxSizeBytes)+1)
 	id := seedPreviewAttachment(t, store, "huge-key.txt", "huge.txt", "text/plain", big)
 
 	req, w := newPreviewRequest(t, id, testWorkspaceID)
 	testHandler.GetAttachmentContent(w, req)
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetAttachmentContent_ConfiguredLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		limit        int64
+		size         int
+		recordedSize int64
+		status       int
+	}{
+		{"default exact", 0, 2 << 20, 2 << 20, http.StatusOK},
+		{"default over", 0, (2 << 20) + 1, (2 << 20) + 1, http.StatusRequestEntityTooLarge},
+		{"larger HTML", 8 << 20, 3 << 20, 3 << 20, http.StatusOK},
+		{"custom exact", 8 << 20, 8 << 20, 8 << 20, http.StatusOK},
+		{"custom over", 8 << 20, (8 << 20) + 1, (8 << 20) + 1, http.StatusRequestEntityTooLarge},
+		{"smaller exact", 1024, 1024, 1024, http.StatusOK},
+		{"underreported body", 1024, 1025, 1, http.StatusRequestEntityTooLarge},
+		{"oversized metadata", 1024, 1, 1025, http.StatusRequestEntityTooLarge},
+		{"maximum exact", 16 << 20, 16 << 20, 16 << 20, http.StatusOK},
+		{"clamped maximum exact", 32 << 20, 16 << 20, 16 << 20, http.StatusOK},
+		{"clamped maximum over", 32 << 20, (16 << 20) + 1, 1, http.StatusRequestEntityTooLarge},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &mockStorage{}
+			h := *testHandler
+			h.Storage = store
+			h.cfg.MaxPreviewSizeBytes = tc.limit
+			body := bytes.Repeat([]byte("a"), tc.size)
+			copy(body, "<!doctype html><h1>Preview size test</h1>")
+			id := seedPreviewAttachment(t, store, "configured-preview.html", "preview.html", "text/html", body)
+			if _, err := testPool.Exec(context.Background(), "UPDATE attachment SET size_bytes = $1 WHERE id = $2", tc.recordedSize, id); err != nil {
+				t.Fatal(err)
+			}
+			req, w := newPreviewRequest(t, id, testWorkspaceID)
+			h.GetAttachmentContent(w, req)
+			if w.Code != tc.status {
+				t.Fatalf("status = %d, want %d", w.Code, tc.status)
+			}
+			if tc.status == http.StatusOK {
+				if !bytes.Equal(w.Body.Bytes(), body) {
+					t.Fatal("preview did not preserve the complete body")
+				}
+				if w.Header().Get("Content-Type") != "text/plain; charset=utf-8" || w.Header().Get("X-Original-Content-Type") != "text/html" {
+					t.Fatal("HTML preview content-type isolation changed")
+				}
+				requireAttachmentPreviewCSP(t, w.Header())
+			}
+		})
 	}
 }
 
@@ -1736,7 +1784,7 @@ func TestIsTextPreviewable(t *testing.T) {
 // Matrix:
 //
 //   - public CDN durable URL ............... reuse a.Url verbatim
-//   - LocalStorage with PublicURL set ....... reuse a.Url (already absolute)
+//   - LocalStorage with PublicURL set ....... absolute API endpoint
 //   - CloudFront-signed mode ................ never reuse a.Url (raw S3),
 //                                              prefer absolute API endpoint
 //   - LocalStorage relative + PublicURL set . prefix to absolute API endpoint
@@ -1954,65 +2002,5 @@ func TestIsDurablePublicURL(t *testing.T) {
 				t.Errorf("isDurablePublicURL(%q) = %v, want %v", tc.url, got, tc.want)
 			}
 		})
-	}
-}
-
-// TestServeLocalUpload_RelaxesFrameAncestorsForPreview covers the self-hosted
-// local-disk case where document previews (PDF/HTML) are fetched straight from
-// the public /uploads/* static route. That route inherits the global
-// "frame-ancestors 'none'" CSP from the middleware, which blocks iframe
-// previews; ServeLocalUpload must overwrite it with the same relaxed preview
-// policy the /api/attachments download endpoint uses. See MUL-3821 / #4477.
-func TestServeLocalUpload_RelaxesFrameAncestorsForPreview(t *testing.T) {
-	dir := t.TempDir()
-	key := "workspaces/ws-1/preview.pdf"
-	full := filepath.Join(dir, filepath.FromSlash(key))
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	const body = "%PDF-1.7 local-disk preview"
-	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	t.Setenv("LOCAL_UPLOAD_DIR", dir)
-	t.Setenv("LOCAL_UPLOAD_BASE_URL", "")
-	local := storage.NewLocalStorageFromEnv()
-	if local == nil {
-		t.Fatal("NewLocalStorageFromEnv returned nil")
-	}
-
-	h := &Handler{
-		Storage: local,
-		cfg:     Config{AttachmentFrameAncestors: []string{"https://app.example.test"}},
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/uploads/"+key, nil)
-	w := httptest.NewRecorder()
-	// Simulate the global CSP middleware having already stamped the strict
-	// policy on the response before the static route runs.
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
-
-	h.ServeLocalUpload(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%q", w.Code, w.Body.String())
-	}
-	if got := w.Body.String(); got != body {
-		t.Fatalf("body = %q, want %q", got, body)
-	}
-	requireAttachmentPreviewCSP(t, w.Header(), "https://app.example.test")
-}
-
-// TestServeLocalUpload_NonLocalStorage404 guards the defensive branch: the
-// /uploads/* route is only registered under local storage, but the handler
-// must not serve anything when the backing store is not local disk.
-func TestServeLocalUpload_NonLocalStorage404(t *testing.T) {
-	h := &Handler{Storage: &mockStorage{}}
-	req := httptest.NewRequest(http.MethodGet, "/uploads/workspaces/ws-1/x.png", nil)
-	w := httptest.NewRecorder()
-	h.ServeLocalUpload(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", w.Code)
 	}
 }

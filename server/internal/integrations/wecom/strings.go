@@ -94,6 +94,10 @@ func deploymentLocale() Locale {
 	return DefaultLocale
 }
 
+// DeploymentLocale exposes the room/default notice language to bridges that
+// append their own system copy to a reply before it reaches this adapter.
+func DeploymentLocale() Locale { return deploymentLocale() }
+
 // resolveLocale maps a user's profile language onto a supported Locale. The
 // profile validates to en / zh-Hans / ko / ja (handler/auth.go), and there are
 // two packs: Chinese for zh*, English for everyone who chose anything else —
@@ -152,6 +156,15 @@ type copyPack struct {
 	// It names no one and carries no token, so it is safe in front of an
 	// audience of unknown size.
 	BindingSentPrivately string
+
+	// MessageMeFirst is what the ROOM sees when WeCom refused a private reply
+	// to a member because they have never written to the bot in their 1:1
+	// (replier.go, errcodeUserMustMessageFirst). Both the binding link and an
+	// invoke refusal end there, so it asks them to open that chat and promises
+	// the reply will be waiting: the next message they send there is handled
+	// like any other. Like BindingSentPrivately it names no one and carries no
+	// token, and it does not say what the reply is about.
+	MessageMeFirst string
 
 	// IssueCreatedPrefix leads the /issue confirmation; IssueTitleSeparator
 	// joins the identifier to the title when there is one.
@@ -386,6 +399,7 @@ var copyPacks = map[Locale]copyPack{
 		BindingPromptSuffix:  "\n（链接 15 分钟内有效）",
 		BindingPending:       "👋 绑定链接刚才已经发给你了，就在上方，请直接点击完成绑定。",
 		BindingSentPrivately: "👋 已把绑定链接私发给你，请在与我的单聊里点击完成绑定。",
+		MessageMeFirst:       "👋 请先私信我一句，我在那里回复你。",
 
 		IssueCreatedPrefix:   "✅ 已创建 ",
 		IssueTitleSeparator:  " — ",
@@ -463,6 +477,7 @@ var copyPacks = map[Locale]copyPack{
 		BindingPromptSuffix:  "\n(the link is good for 15 minutes)",
 		BindingPending:       "👋 I already sent you a link — it is just above, tap it to finish linking.",
 		BindingSentPrivately: "👋 I've sent the link to your direct chat with me — tap it there to finish linking.",
+		MessageMeFirst:       "👋 Send me a direct message first, and I'll reply there.",
 
 		IssueCreatedPrefix:   "✅ Created ",
 		IssueTitleSeparator:  " — ",

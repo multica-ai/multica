@@ -20,7 +20,7 @@ func applyRepairSteps(t *testing.T, wt *LocalWorktree, problem *DeliveryProblem)
 // requireRepairable asserts CheckDelivery predicts the refusal Finalize would
 // make, then repairs it and checks Finalize records the delivery with the
 // agent's files intact.
-func requireRepairable(t *testing.T, repo string, wt *LocalWorktree, wantReason string, wantFiles map[string]string) {
+func requireRepairable(t *testing.T, repo string, wt *LocalWorktree, wantReason string, wantFiles map[string]string) LocalWorktreeOutcome {
 	t.Helper()
 	problem := wt.CheckDelivery()
 	if problem == nil {
@@ -50,6 +50,7 @@ func requireRepairable(t *testing.T, repo string, wt *LocalWorktree, wantReason 
 			t.Errorf("%s on the branch = %q, want %q", name, got, strings.TrimSpace(want))
 		}
 	}
+	return outcome
 }
 
 // #9404 shape one: the agent squashes its commits and drops the empty baseline
@@ -86,7 +87,10 @@ func TestCheckDeliveryRepairsWorkCommittedOffTheBranch(t *testing.T) {
 }
 
 // The common #8541 shape: the agent checked out a feature branch for its PR.
-// Its own commits there extend the task branch; only HEAD is elsewhere.
+// Its own commits there extend the task branch; only HEAD is elsewhere. What
+// it left uncommitted stays off the branch, exactly as it would have on the
+// task branch itself (#9788): the repair delivers the commits, and Finalize
+// saves the leftover edit aside.
 func TestCheckDeliveryRepairsWorkOnAFeatureBranch(t *testing.T) {
 	t.Parallel()
 	repo := newTestRepo(t)
@@ -99,10 +103,136 @@ func TestCheckDeliveryRepairsWorkOnAFeatureBranch(t *testing.T) {
 	// And some leftovers it never committed.
 	writeFile(t, filepath.Join(wt.WorkDir, "tracked.txt"), "edited\n")
 
-	requireRepairable(t, repo, wt, "HEAD is not on branch", map[string]string{
+	problem := wt.CheckDelivery()
+	if problem == nil || !problem.CommittedOnly {
+		t.Fatalf("CheckDelivery = %+v, want a repair that delivers only the agent's commits", problem)
+	}
+	outcome := requireRepairable(t, repo, wt, "did not deliver onto its own branch", map[string]string{
 		"agent.txt":   "feature",
-		"tracked.txt": "edited",
+		"tracked.txt": "original",
 	})
+	requireLeftovers(t, repo, outcome, wt.Branch, map[string]string{"tracked.txt": "edited"})
+}
+
+// #9404 shape one again, with leftovers: the agent committed, squashed past
+// the baseline, and also left a generated file behind. The repair restores the
+// ancestry and delivers the squashed commit's content, and the generated file
+// is saved aside instead of riding along in the repair commit.
+func TestCheckDeliveryRepairOfASquashKeepsLeftoversOffTheBranch(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	wt := prepareTurn(t, repo, "MUL-9404", turnOneTask)
+
+	writeFile(t, filepath.Join(wt.WorkDir, "agent.txt"), "turn one\n")
+	gitRun(t, wt.Path, "add", "-A")
+	gitRun(t, wt.Path, "commit", "-m", "work")
+	gitRun(t, wt.Path, "reset", "--soft", wt.BaseCommit+"^")
+	gitRun(t, wt.Path, "commit", "-m", "squashed")
+	writeFile(t, filepath.Join(wt.WorkDir, "artifacts", "render.bin"), "generated\n")
+	// Staged is not committed: it stays a leftover too.
+	gitRun(t, wt.Path, "add", "artifacts/render.bin")
+
+	outcome := requireRepairable(t, repo, wt, "no longer contains", map[string]string{"agent.txt": "turn one"})
+	if _, err := gitTry(t, repo, "cat-file", "-e", wt.Branch+":artifacts/render.bin"); err == nil {
+		t.Error("the generated file the agent never committed reached the branch through the repair")
+	}
+	requireLeftovers(t, repo, outcome, wt.Branch, map[string]string{"artifacts/render.bin": "generated"})
+}
+
+// #9870 review: the committed-only repair loads Tip's tree into the index to
+// commit it, which discards the agent's index. Anything only the index made
+// visible to `git add -A` — a file staged past the ignore rules with `git add
+// -f`, or registered with `git add -N -f` — then turned back into an ignored
+// untracked file, Finalize found nothing to save, and the file was deleted
+// with the worktree. The repair's last step now stages exactly what Finalize
+// would have saved without the repair, so for every shape of leftover the
+// saved ref is the same whether or not the turn needed repairing.
+func TestCheckDeliveryRepairSavesTheSameLeftoversAsNoRepair(t *testing.T) {
+	t.Parallel()
+	shapes := map[string]func(t *testing.T, dir string){
+		"forced add of an ignored file": func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, "fixtures", "sample.bin"), "staged past the ignore rule\n")
+			gitRun(t, dir, "add", "-f", "fixtures/sample.bin")
+		},
+		"intent to add an ignored file": func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, "fixtures", "sample.bin"), "registered past the ignore rule\n")
+			gitRun(t, dir, "add", "-N", "-f", "fixtures/sample.bin")
+		},
+		"intent to add a file": func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, "notes.txt"), "registered\n")
+			gitRun(t, dir, "add", "-N", "notes.txt")
+		},
+		"staged file": func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, "notes.txt"), "staged\n")
+			gitRun(t, dir, "add", "notes.txt")
+		},
+		"partly staged edit": func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, "tracked.txt"), "staged version\n")
+			gitRun(t, dir, "add", "tracked.txt")
+			writeFile(t, filepath.Join(dir, "tracked.txt"), "newer version on disk\n")
+		},
+		"unstaged edit, untracked file and deletions": func(t *testing.T, dir string) {
+			writeFile(t, filepath.Join(dir, "tracked.txt"), "edited\n")
+			writeFile(t, filepath.Join(dir, "scratch.log"), "untracked\n")
+			gitRun(t, dir, "rm", "-q", "keep.txt")
+			if err := os.Remove(filepath.Join(dir, ".gitignore")); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, leaveBehind := range shapes {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			turn := func(t *testing.T, repair bool) (string, LocalWorktreeOutcome, *LocalWorktree) {
+				t.Helper()
+				repo := newTestRepo(t)
+				writeFile(t, filepath.Join(repo, ".gitignore"), "fixtures/*.bin\n")
+				gitRun(t, repo, "add", ".gitignore")
+				gitRun(t, repo, "commit", "-m", "ignore generated fixtures")
+				wt := prepareTurn(t, repo, "MUL-9404", turnOneTask)
+				if repair {
+					gitRun(t, wt.Path, "checkout", "--quiet", "-b", "feature/x")
+				}
+				writeFile(t, filepath.Join(wt.WorkDir, "doc.md"), "delivered documentation\n")
+				gitRun(t, wt.Path, "add", "doc.md")
+				gitRun(t, wt.Path, "commit", "-m", "docs")
+				leaveBehind(t, wt.WorkDir)
+				if repair {
+					problem := wt.CheckDelivery()
+					if problem == nil || !problem.CommittedOnly || problem.LeftoverTree == "" {
+						t.Fatalf("CheckDelivery = %+v, want a committed-only repair carrying the leftovers", problem)
+					}
+					applyRepairSteps(t, wt, problem)
+					if again := wt.CheckDelivery(); again != nil {
+						t.Fatalf("the repair steps did not fix the delivery: %s", again.Reason)
+					}
+				} else if problem := wt.CheckDelivery(); problem != nil {
+					t.Fatalf("a turn on its own branch was sent to repair: %s", problem.Reason)
+				}
+				outcome := finalizeOK(t, wt)
+				if outcome.LeftoverRef == "" {
+					t.Fatal("no leftovers saved")
+				}
+				if files := gitRun(t, repo, "diff", "--name-only", wt.BaseCommit, wt.Branch); files != "doc.md" {
+					t.Errorf("the branch gained %q, want just the committed doc.md", files)
+				}
+				if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+					t.Errorf("worktree still present after Finalize: %v", err)
+				}
+				return repo, outcome, wt
+			}
+			plainRepo, plain, _ := turn(t, false)
+			repairedRepo, repaired, _ := turn(t, true)
+			// Both repos hold the same content, so equal leftovers are equal
+			// tree ids.
+			want := gitRun(t, plainRepo, "rev-parse", plain.LeftoverRef+"^{tree}")
+			if got := gitRun(t, repairedRepo, "rev-parse", repaired.LeftoverRef+"^{tree}"); got != want {
+				t.Errorf("leftovers after the repair differ from leftovers without it:\nwithout repair:\n%s\nafter repair:\n%s",
+					gitRun(t, plainRepo, "show", "--stat", "--format=", plain.LeftoverRef),
+					gitRun(t, repairedRepo, "show", "--stat", "--format=", repaired.LeftoverRef))
+			}
+		})
+	}
 }
 
 // Uncommitted changes on a detached HEAD would be auto-committed onto the

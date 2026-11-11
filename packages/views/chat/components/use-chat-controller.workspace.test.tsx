@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createChatStore, registerChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import type { Agent, Attachment, Workspace, ChatSession, Project, StorageAdapter } from "@multica/core/types";
+import { NavigationProvider } from "../../navigation";
 import { ChatWindow } from "./chat-window";
 import { useChatController } from "./use-chat-controller";
 
@@ -29,7 +30,6 @@ vi.mock("@multica/core/auth", () => ({
 vi.mock("@multica/core/agents", () => ({
   isAgentRuntimeBound: () => true,
   useAgentPresenceDetail: () => ({ availability: "online" }),
-  useCustomizeConversationStartersHref: () => null,
   useWorkspaceAgentAvailability: () => "available",
 }));
 vi.mock("../../common/use-app-foreground", () => ({
@@ -96,7 +96,10 @@ describe("useChatController workspace rehydration", () => {
   const targetProject = { id: "target-project", workspace_id: "ws-target" } as Project;
 
   function wrapper({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+    return <QueryClientProvider client={queryClient}><NavigationProvider value={{
+      pathname: "/source/issues", searchParams: new URLSearchParams(), hash: "",
+      push: vi.fn(), replace: vi.fn(), back: vi.fn(), getShareableUrl: (path) => path,
+    }}>{children}</NavigationProvider></QueryClientProvider>;
   }
 
   beforeEach(async () => {

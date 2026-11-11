@@ -84,8 +84,10 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+const workspaceRef = vi.hoisted(() => ({ current: "ws-1" }));
+afterEach(() => { workspaceRef.current = "ws-1"; });
 vi.mock("@multica/core/platform", () => ({
-  getCurrentWsId: () => "ws-1",
+  getCurrentWsId: () => workspaceRef.current,
 }));
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: (sel: (s: { user: { id: string } }) => unknown) =>
@@ -130,7 +132,6 @@ vi.mock("@multica/core/agents", () => ({
   isAgentRuntimeBound: (agent: { runtime_id: string; runtime_bound?: boolean }) =>
     agent.runtime_bound !== false && agent.runtime_id.length > 0,
   useAgentPresenceDetail: () => ({ availability: "online" }),
-  useCustomizeConversationStartersHref: () => null,
   useWorkspaceAgentAvailability: () => "available",
 }));
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
@@ -1172,6 +1173,26 @@ describe("useChatController.handleSend — compose target tracking", () => {
     expect(commitInput).toHaveBeenCalledWith(
       expect.objectContaining({ clearEditor: false, extraDraftKeys: ["new-session"] }),
     );
+    expect(h.store.setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps a delayed session creation inside its source workspace", async () => {
+    const { commitInput, send } = sendFrom(null, () => { workspaceRef.current = "ws-2"; });
+    await send();
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+    expect(commitInput).not.toHaveBeenCalled();
+    expect(h.store.setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("leaves the destination draft and selection intact when a send acknowledgement arrives after switching workspace", async () => {
+    vi.mocked(api.sendChatMessage).mockImplementationOnce(async () => {
+      workspaceRef.current = "ws-2";
+      return { message_id: "msg-1", task_id: "task-1", created_at: new Date(0).toISOString() };
+    });
+    const { commitInput, send } = sendFrom(null);
+    await send();
+    expect(api.sendChatMessage).toHaveBeenCalledOnce();
+    expect(commitInput).not.toHaveBeenCalled();
     expect(h.store.setActiveSession).not.toHaveBeenCalled();
   });
 

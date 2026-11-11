@@ -14,6 +14,7 @@ import {
   Pin,
   PinOff,
   Play,
+  Settings2,
   SquarePen,
   UserPlus,
 } from "@multica/ui/icons";
@@ -178,6 +179,14 @@ export function useAgentCommandGroup(context: ContextOf<"agent"> | null): Palett
           if (pinned) unpinAgent.mutate(agent.id);
           else pinAgent.mutate(agent.id);
         },
+      },
+      {
+        id: "agent-settings",
+        label: t(($) => $.agent.settings),
+        icon: Settings2,
+        keywords: ["settings", "configure", "model", "runtime", "设置", "配置"],
+        run: () => navigation.push(`${p.agentDetail(agent.id)}?view=general`),
+        primary: true,
       },
     ];
     return {

@@ -1,0 +1,343 @@
+---
+title: 故障排查
+description: 排查連線、執行、實時更新、郵件和自託管服務中的常見問題。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
+
+先確認問題發生在哪一層：Multica 服務、守護程序、執行時，還是 AI 程式設計工具。下面幾條命令通常足以找到第一條有效錯誤：
+
+<Tabs items={["所有安裝方式", "自託管服務"]}>
+<Tab value="所有安裝方式">
+
+```bash
+multica version
+multica auth status
+multica daemon status --output json
+multica daemon logs --lines 100
+```
+
+</Tab>
+<Tab value="自託管服務">
+
+```bash
+curl -i https://api.example.com/health
+curl -i https://api.example.com/readyz
+```
+
+</Tab>
+</Tabs>
+
+`/health` 只說明 API 程序正在響應；`/readyz` 還會檢查資料庫和 migration。反饋問題時附上報錯、相關日誌、CLI 版本和作業系統，提交前刪掉令牌、信箱等敏感資訊。
+
+## 連線與登入
+
+<Accordions>
+<Accordion title="守護程序連線失敗" id="daemon-fails-to-connect" value="daemon-fails-to-connect">
+
+先執行：
+
+```bash
+multica auth status
+multica daemon status --output json
+multica daemon logs --lines 100
+```
+
+常見原因包括：
+
+- CLI 尚未登入，或本機儲存的令牌已經失效；
+- 守護程序連線了錯誤的 Multica 服務；
+- 執行電腦無法訪問 API，或 DNS、TLS、防火牆攔截了連線；
+- 當前帳號已經不在目標工作區中；
+- 本機沒有安裝任何受支援的 AI 程式設計工具，守護程序因此無法啟動。
+
+重新登入並重啟守護程序：
+
+```bash
+multica login
+multica daemon restart
+```
+
+自託管部署還需要從**執行電腦**請求 API 的 `/health`。在伺服器本機測試，看不出執行電腦這一側的 DNS、TLS 或防火牆問題。需要修改地址時，重新執行 `multica setup self-host`，或檢查當前 profile 的 `server_url`：
+
+```bash
+multica config show
+```
+
+</Accordion>
+<Accordion title={<><code>multica setup</code> 報告伺服器不可達</>} id="multica-setup-reports-the-server-is-not-reachable" value="multica-setup-reports-the-server-is-not-reachable">
+
+CLI 的可達性探測會 GET `<server-url>/health` 並要求 200。backend 提供這個路徑。新版 web 前端會把 `/health` 轉發給 backend，舊版不會。反向代理如果把所有流量都轉給舊版 frontend，就會返回 404，CLI 因此判斷服務不可用，而服務其實是健康的。
+
+在代理裡把 `/health` 顯式轉給 backend（8080 埠），對所有版本都適用，[自託管快速上手](/self-host-quickstart#remote-access)裡的兩個 Caddy 示例都包含這條。確認方法：
+
+```bash
+curl -fsS <server-url>/health
+```
+
+</Accordion>
+<Accordion title={<><code>multica login</code> 報告 TLS 握手超時</>} id="multica-login-fails-with-a-tls-handshake-timeout" value="multica-login-fails-with-a-tls-handshake-timeout">
+
+`multica login` 能開啟瀏覽器、網頁登入也能完成，但 CLI 仍以 "Sign-in did not complete" 或 "TLS 握手超時" 失敗。`multica --debug login` 在 `POST /api/tokens` 上顯示 `net/http: TLS handshake timeout`，而同一臺機器上的 `curl.exe -I https://api.multica.ai` 或瀏覽器都能正常連線。
+
+TCP 連線已建立，但 TLS 握手始終沒有完成。Go 客戶端（包括 Multica CLI 和守護程序）預設在 TLS ClientHello 中攜帶後量子金鑰交換，報文約 1.5 KB，會拆成兩個包傳送。部分安全軟體、VPN、路由器和防火牆會丟棄這種握手；curl 的 ClientHello 小得多，所以能透過。
+
+先關閉後量子金鑰交換重試，確認是否為此原因：
+
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
+
+```bash
+GODEBUG=tlsmlkem=0 multica --debug login
+```
+
+</Tab>
+<Tab value="Windows">
+
+```powershell
+$env:GODEBUG = 'tlsmlkem=0'
+multica --debug login
+```
+
+</Tab>
+</Tabs>
+
+如果這樣能成功，請為執行 CLI 和守護程序的使用者永久設定 `GODEBUG=tlsmlkem=0`（Windows 上執行 `[Environment]::SetEnvironmentVariable('GODEBUG', 'tlsmlkem=0', 'User')` 後重新開啟終端），然後重啟守護程序或桌面應用。調高 `MULTICA_HTTP_TIMEOUT` 無效，它不控制握手。根本的解決辦法在網路側：升級或重新配置丟棄分包 TLS 握手的裝置或軟體。
+
+</Accordion>
+</Accordions>
+
+## 執行與 AI 程式設計工具
+
+<Accordions>
+<Accordion title="任務未開始執行" id="issue-does-not-start-executing" value="issue-does-not-start-executing">
+
+開啟任務的**執行日誌**，先看執行的當前狀態和等待原因。
+
+<Tabs items={["queued", "waiting_local_directory"]}>
+<Tab value="queued">
+
+`queued` 表示執行還在等待執行時領取。依次檢查：
+
+1. AI 代理繫結的執行時是否線上；
+2. 執行時是否檢測到了該 AI 代理配置的 AI 程式設計工具；
+3. AI 代理是否還有可用併發額度；
+4. 守護程序是否還有全域性執行容量。
+
+AI 代理預設最多同時執行 6 次執行，單個守護程序預設最多同時執行 20 次。達到上限時，新執行會留在佇列中，等已有執行結束後再開始。執行時離線時，執行也會繼續排隊。只有該執行時心跳缺席超過重連寬限期、且該執行自己也已等滿這麼久，執行才會失敗。所以排在忙碌執行時後面的長佇列不會因為等得久而被判失敗，指派給已經離線的機器時，也還有完整的一個寬限期可以把它喚醒。
+
+```bash
+multica daemon status --output json
+multica agent get <agent-id>
+multica issue runs <issue-id>
+```
+
+如果執行時列表缺少預期工具，先在同一個系統帳號和 `PATH` 中確認工具可以執行並且已經登入，再執行 `multica daemon restart`。
+
+</Tab>
+<Tab value="waiting_local_directory">
+
+這表示另一條在途執行正在使用同一個本地目錄。Multica 會等待目錄鎖釋放，避免兩個 AI 代理同時修改同一份檔案。
+
+這種等待只存在於目錄的 `in_place`（"原地"）模式。如果這個目錄是 git 倉庫，把資源切到 `worktree`（"並行"）就沒有佇列了：每次執行拿到自己的 worktree，並以分支形式交回結果，誰都不用等誰。見[專案資源](/project-resources#執行如何共享這個目錄)。
+
+否則通常只需等前一次執行結束。若前一次已經卡住，可以從它的執行日誌中停止，也可以為當前 AI 代理選擇其他本地目錄。這個目錄互斥由守護程序在記憶體中維護，不寫磁碟鎖檔案。懷疑鎖狀態異常時，執行 `multica daemon restart` 即可釋放，沒有需要手動刪除的檔案。
+
+</Tab>
+</Tabs>
+
+</Accordion>
+<Accordion title="AI 程式設計工具啟動失敗" id="ai-coding-tool-fails-to-start" value="ai-coding-tool-fails-to-start">
+
+守護程序線上不代表工具本身可用。開啟這次執行的詳細記錄，重點檢查：
+
+- 工具是否已經完成登入；
+- API key、額度或模型權限是否可用；
+- AI 代理選擇的模型和思考級別是否被該工具支援；
+- 本地工作目錄是否存在並且可寫；
+- AI 代理的自定義引數或環境變數是否有效。
+
+先在執行電腦的終端中直接執行同一款工具。工具自身也無法開始時，先修復工具登入或配置，再從執行日誌重試執行。
+
+</Accordion>
+<Accordion title="升級 CLI 後 macOS 上的執行卡住" id="runs-hang-on-macos-after-a-cli-upgrade" value="runs-hang-on-macos-after-a-cli-upgrade">
+
+透過 Homebrew 安裝的 `multica` CLI 升級後（無論是 `brew upgrade`、`multica update`、**執行時**頁面上的**更新**，還是守護程序自動更新），讀取 `~/Desktop`、`~/Documents`、`~/Downloads`、iCloud 雲盤或其他受保護資料夾的執行可能停滯：AI 代理程序不佔用 CPU，執行既不結束也不失敗。
+
+這種情況出現在 macOS 把隱私權限（TCC）記在守護程序本身名下時，由 launchd 啟動的守護程序（例如 LaunchAgent）就是如此：等待中的彈窗顯示的是 `multica`，AI 代理啟動的所有工具都沿用守護程序的授權。Homebrew 版 CLI 沒有使用固定身份簽名，macOS 只能把授權繫結到這一次構建及其解析後的路徑，例如 `/opt/homebrew/Cellar/multica/<version>/bin/multica`。升級後，macOS 把新二進位制當作另一個應用，重新請求授權。在有人處理之前，檔案訪問會一直阻塞，守護程序也無法感知有授權彈窗在等待。
+
+恢復訪問：
+
+1. 在這臺 Mac 上找到等待中的"想要訪問"彈窗，點選**允許**，卡住的執行會繼續。
+2. 無人值守的 Mac 請給新二進位制授予完全磁碟訪問權限。用 `realpath "$(command -v multica)"` 列印路徑，然後在**系統設定 → 隱私與安全性 → 完全磁碟訪問權限**中刪除舊的 `multica` 條目並新增該路徑（在檔案選擇器中按 ⌘⇧G 貼上路徑）。
+3. 按啟動守護程序時的方式重啟它：`multica daemon restart`；LaunchAgent 則用 `launchctl kickstart -k gui/$(id -u)/<label>`。
+
+每次升級 CLI 後都需要重複這些步驟。只有連線 Multica Cloud 的守護程序預設開啟自動更新；用 `--no-auto-update` 啟動守護程序後，只在你手動升級時更新。[桌面應用](/desktop-app)內建的 CLI 使用 Developer ID 簽名，授權在升級後依然有效。
+
+</Accordion>
+<Accordion title="使用 Hermes CLI 之後，Hermes 執行會重新安裝依賴" id="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli" value="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli">
+
+如果你在 Hermes CLI（或 Hermes 桌面應用）和 Multica 的 Hermes 執行之間來回切換，每次切換都可能讓啟動多花 30–60 秒，因為 Hermes 要重建共享的 Python 依賴環境。每次重建還會在磁碟上多留一代環境，直到 Hermes 自己清理。
+
+原因是你自己的 Hermes home 把 `memory.provider` 設成了帶 Python 依賴的外掛。每次 Multica 執行都使用獨立的 Hermes home，共享你已安裝的依賴，並關閉外部 memory provider，讓記憶不在執行之間共享。Hermes 根據當前 home 的外掛判斷需要哪些依賴，所以你的 home 和執行的 home 意見不一致，各自把對方的安裝視為過期。上游在 [NousResearch/hermes-agent#137726](https://github.com/NousResearch/hermes-agent/issues/137726) 追蹤這個行為。
+
+要確認的話，在[守護程序日誌](#日誌位置)裡找 `hermes is reinstalling its dependency environment before this task starts`。後續的 `hermes dependency reinstall finished` 記錄會在 `startup_delay_ms` 裡報告 Hermes 從啟動到就緒花了多久，包含重新安裝的時間。
+
+在 Hermes 上游修好之前，可以在你自己的 Hermes `config.yaml` 裡設定 `memory.provider: ""` 來避免重建，這也會讓 CLI 關閉那個 memory 外掛。否則，每次切換後都會有一次性的延遲。
+
+</Accordion>
+</Accordions>
+
+## Web 應用與自託管服務
+
+<Accordions>
+<Accordion title="實時更新失效" id="realtime-updates-stop-working" value="realtime-updates-stop-working">
+
+執行仍能執行、但評論和狀態不能實時出現，通常是 WebSocket 沒有連通。
+
+在瀏覽器開發者工具的 **Network → WS** 中檢視 `/ws` 連線。自託管部署重點檢查：
+
+- `FRONTEND_ORIGIN` 是否和瀏覽器實際開啟的地址一致；
+- HTTPS 頁面是否透過 `wss://` 連線；
+- 反向代理是否轉發 WebSocket 的 Upgrade 請求；
+- 瀏覽器登入是否已經過期。
+
+直接用 `curl` 訪問 `/ws` 返回 HTTP 400 是正常現象：該端點要求帶 workspace 相關的查詢引數，裸握手在進入 WebSocket 升級之前就會被拒。所以 backend 日誌裡出現 400/401 記錄，只能說明普通 HTTP 路由已經到達 backend，並不能證明代理保留了 WebSocket `Upgrade` 頭。要驗證真正的連線，請開啟瀏覽器開發者工具的 Network → WS 面板（或用支援 WebSocket 的客戶端），看是否出現 `101` 握手。
+
+自託管部署還要注意，daemon 的長連線撥的是 `/api/daemon/ws`（不是 `/ws`），同樣要直通後端。這裡握手失敗時 daemon 會靜默回退到輪詢，表現是 backend 日誌裡該路徑反覆出現 `status=400`。
+
+容器只在建立時讀取 `.env`，修改後需要重新建立：
+
+```bash
+docker compose -f docker-compose.selfhost.yml up -d
+```
+
+完整的反向代理示例見[自託管快速上手](/self-host-quickstart#remote-access)。
+
+</Accordion>
+<Accordion title="驗證碼與邀請郵件未送達" id="verification-code-and-invitation-emails-not-delivered" value="verification-code-and-invitation-emails-not-delivered">
+
+先檢視 backend 啟動日誌。日誌會說明當前使用 `SMTP relay`、`Resend API` 還是 `DEV mode`：
+
+```bash
+docker compose -f docker-compose.selfhost.yml logs backend \
+  | grep "EmailService:"
+```
+
+- **DEV mode**：郵件不會發出，驗證碼和邀請連結只寫入 backend 日誌；
+- **Resend**：確認 API key 有效，且發件地址的網域已經驗證；
+- **SMTP**：確認主機、埠、憑據和發件地址，並從錯誤日誌判斷失敗發生在連線、TLS、認證還是投遞階段。
+
+`SMTP_HOST` 和 Resend 同時配置時，Multica 會優先使用 SMTP。配置方式見[登入與註冊](/auth-setup#信箱驗證碼)。
+
+<Callout type="warning">
+生產環境不要依賴日誌中的驗證碼，也不要啟用固定本地測試驗證碼。
+</Callout>
+
+</Accordion>
+<Accordion title="附件上傳或下載失敗" id="attachment-uploads-or-downloads-fail" value="attachment-uploads-or-downloads-fail">
+
+先檢查 backend 日誌和響應狀態碼。常見原因是：
+
+- 反向代理限制了請求體大小；
+- 本地上傳目錄不可寫或沒有掛載持久化卷；
+- S3 bucket、region、endpoint 或憑據不匹配；
+- 下載地址經過代理後使用了錯誤的公開網域或協議。
+
+使用 Docker Compose 時，預設的 `backend_uploads` volume 儲存本地附件。重建容器不會刪除它，但 `docker compose down -v` 會刪除資料卷。S3 相關配置見[環境變數](/environment-variables#附件儲存)。
+
+</Accordion>
+<Accordion title="用量（Usage）為 0" id="usage-shows-zero" value="usage-shows-zero">
+
+Usage 頁面讀取按小時彙總的資料，不直接讀取每次執行的原始用量。先確認原始資料和彙總表：
+
+```sql
+SELECT count(*) FROM task_usage;
+SELECT count(*) FROM task_usage_hourly;
+
+SELECT plan_time, status, error_code, error_msg
+FROM sys_cron_executions
+WHERE job_name = 'rollup_task_usage_hourly'
+ORDER BY plan_time DESC
+LIMIT 20;
+```
+
+如果 `task_usage` 有資料、彙總表為空，並且排程記錄顯示失敗，先確認 migration 已經全部應用；升級被 migration 103 拒絕執行的情況見[升級時 migration 103 拒絕執行](#migration-103-blocks-an-upgrade)。也可以手動執行一次彙總，區分是 SQL 問題還是排程問題：
+
+```sql
+SELECT rollup_task_usage_hourly();
+```
+
+手動執行後數字正常，說明彙總函式可用，問題在 backend 的定時排程。手動 SQL 只補一次彙總，不會恢復排程。按小時彙總由 backend 內建排程執行，不需要自行配置 pg_cron。
+
+</Accordion>
+<Accordion title="升級時 migration 103 拒絕執行" id="migration-103-blocks-an-upgrade" value="migration-103-blocks-an-upgrade">
+
+正常升級不需要為 103 做任何事：`migrate up` 在應用它之前會自動回填歷史用量資料，空庫直接透過，有歷史資料的例項按月補齊後繼續。
+
+如果 backend 啟動仍報 `refusing to drop legacy daily rollups`，說明自動回填沒有完成（例如回填中途失敗，或沒有透過 `migrate up` 而是直接應用了 SQL）。此時手動執行回填命令，完成後重啟 backend：
+
+```bash
+cd server
+DATABASE_URL='postgres://...' go run ./cmd/backfill_task_usage_hourly
+```
+
+常用 flag：`--dry-run` 只預覽不寫入；`--sleep-between-slices` 在切片之間加間隔，降低對繁忙例項的讀壓。命令按月切片、冪等，中斷後可以直接重跑。它持有 advisory lock，與服務端的定時彙總互斥，不會產生重複或不一致的彙總資料。完成後重啟 backend，用 `/readyz` 確認 `migrations` 為 `ok`。
+
+</Accordion>
+<Accordion title="埠佔用" id="port-already-in-use" value="port-already-in-use">
+
+本地常用埠包括 API 的 `8080`、Web 的 `3000` 和守護程序健康檢查埠。先找出佔用者：
+
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
+
+```bash
+lsof -nP -iTCP:8080 -sTCP:LISTEN
+```
+
+</Tab>
+<Tab value="Windows">
+
+```bash
+netstat -ano | findstr :8080
+```
+
+</Tab>
+</Tabs>
+
+如果它是另一個 Multica checkout，先在那個目錄執行 `make stop`。否則正常停止佔用埠的程式，或修改當前服務埠。公網 80/443 由 Caddy、Nginx 等反向代理監聽。
+
+</Accordion>
+</Accordions>
+
+## 日誌位置
+
+| 元件 | 檢視方式 |
+| --- | --- |
+| 後臺守護程序 | `multica daemon logs --lines 100` |
+| 實時跟隨守護程序日誌 | `multica daemon logs --follow` |
+| 預設 profile 的日誌檔案 | `~/.multica/daemon.log` |
+| 預設 profile 的啟動或崩潰日誌 | `~/.multica/daemon.err.log` |
+| 命名 profile | `~/.multica/profiles/<name>/` 下的對應日誌 |
+| Docker backend | `docker compose -f docker-compose.selfhost.yml logs -f backend` |
+| 瀏覽器 | 開發者工具中的 Console 和 Network |
+
+哪個檔案是當前活躍的日誌，取決於守護程序啟動時使用的 profile。早前守護程序留下的舊日誌也能正常開啟，很容易看錯檔案。所以不要憑猜測開啟檔案：`multica daemon logs` 會在輸出日誌內容前先列印它解析到的絕對路徑。讀命名 profile 的日誌時加上 `--profile <name>`。
+
+需要直接觀察守護程序啟動過程時，可以改為前臺執行：
+
+```bash
+multica daemon stop
+multica daemon start --foreground
+```
+
+仍然無法定位時，到 [GitHub Issues](https://github.com/multica-ai/multica/issues) 搜尋已有問題，或提交新的 issue。
+
+## 接下來
+
+- [守護程序與執行時](/daemon-runtimes) — 執行時註冊與線上狀態機制。
+- [執行](/tasks) — 狀態、超時與失敗原因參考。
+- [環境變數](/environment-variables) — 自託管配置的完整參考。

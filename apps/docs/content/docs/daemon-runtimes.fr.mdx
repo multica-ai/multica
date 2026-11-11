@@ -147,6 +147,8 @@ Chaque exécution a un répertoire sous la racine des espaces de travail (par d�
 
 Tant que la tâche reste ouverte, 12 heures après la fin d'une exécution, seul le contenu régénérable est supprimé : les répertoires `node_modules`, `.next` et `.turbo`, ainsi que le cache que le daemon prépare pour Codex. Le reste est conservé. Un daemon connecté à Multica Cloud supprime aussi le répertoire entier 14 jours après la fin de l'exécution, que la tâche soit fermée ou non ; les daemons auto-hébergés ne le font pas par défaut.
 
+Pour un chat non archivé qui utilise un répertoire de travail géré par Multica, le daemon applique le même nettoyage du contenu régénérable, par défaut 12 heures après la fin de la dernière exécution. Le daemon mémorise le nettoyage réussi et évite les parcours répétés pour cette exécution. Une exécution ultérieure devient éligible après le même délai. Si le chat s'exécute directement dans le répertoire local d'un projet, ce nettoyage se limite au cache `codex-home/.sandbox-bin` du daemon dans le répertoire de suivi de l'exécution.
+
 Une exécution sur le répertoire local d'un projet travaille dans votre propre répertoire, auquel le daemon ne touche jamais. Le répertoire de suivi que Multica crée pour cette exécution (journaux, etc.) est conservé lui aussi ; seuls les caches régénérables qu'il contient sont nettoyés.
 
 ### Cache de dépôts partagé
@@ -294,7 +296,7 @@ Sur la page Qoder Cloud Agents, les administrateurs peuvent modifier la connexio
 
 Au-delà de la limite de simultanéité, les exécutions attendent dans la file. Une relance sur le même ticket reprend la session Qoder précédente de l'agent si elle est inactive. Un agent peut définir un dépôt par défaut, utilisé quand le projet du ticket n'en a pas. L'agent est invité à pousser une branche nommée d'après l'identifiant du ticket et à préfixer le titre de la pull request avec cet identifiant, afin que la pull request soit liée au ticket.
 
-Cette première version prend en charge l'exécution des tickets, le suivi de progression, l'annulation et la reprise à partir d'un journal d'exécution persistant. Le chat interactif, les répertoires locaux, les pièces jointes et la création d'agents Qoder Cloud Agents distants depuis Multica ne sont pas pris en charge. La page Runtimes sépare les runtimes distants des ordinateurs connectés.
+Cette première version prend en charge l'exécution des tickets, le chat, le suivi de progression, l'annulation et la reprise à partir d'un journal d'exécution persistant. Les fichiers et images joints aux tickets et aux messages de chat sont transmis à la session, PDF et documents Office compris, jusqu'à 5 Mo par fichier ; les fichiers plus volumineux ne le sont pas, et l'agent est informé de leur existence. Les répertoires locaux et la création d'agents Qoder Cloud Agents distants depuis Multica ne sont pas pris en charge. La page Runtimes sépare les runtimes distants des ordinateurs connectés. Dans le chat, les fichiers que l’agent livre avec DeliverArtifacts, jusqu’à 10 Mo chacun, sont joints à sa réponse.
 
 Pour le déploiement du pont autonome et ses limites opérationnelles, consultez le [README du runtime Qoder](https://github.com/multica-ai/multica/blob/main/server/cmd/qoder-runtime/README.md).
 

@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/internal/themestore"
 )
 
 func TestGetConfigReportsCdnSignedMode(t *testing.T) {
@@ -48,6 +50,13 @@ func TestGetConfigReportsCdnSignedMode(t *testing.T) {
 	}
 	if cfg.CdnDomain != "cdn.example.com" {
 		t.Fatalf("cdn_domain: want cdn.example.com alongside cdn_signed, got %q", cfg.CdnDomain)
+	}
+	t.Setenv("LOCAL_UPLOAD_DIR", t.TempDir())
+	t.Setenv("LOCAL_UPLOAD_BASE_URL", "https://local.example.test")
+	testHandler.CFSigner = nil
+	testHandler.Storage = storage.NewLocalStorageFromEnv()
+	if cfg := fetch(); !cfg.CdnSigned || cfg.CdnDomain != "local.example.test" {
+		t.Fatalf("local storage must declare private downloads even with a base URL: %+v", cfg)
 	}
 }
 
@@ -652,5 +661,34 @@ func TestGetConfigDeclaresCommentDeleteKeepsReplies(t *testing.T) {
 	}
 	if raw["comment_delete_keep_replies_supported"] != true {
 		t.Fatalf("comment_delete_keep_replies_supported = %v, want true", raw["comment_delete_keep_replies_supported"])
+	}
+}
+
+func TestGetConfigReportsTheThemeStore(t *testing.T) {
+	orig := testHandler.ThemeStore
+	t.Cleanup(func() { testHandler.ThemeStore = orig })
+
+	fetch := func() map[string]json.RawMessage {
+		t.Helper()
+		w := httptest.NewRecorder()
+		testHandler.GetConfig(w, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+		var cfg map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+			t.Fatalf("decode config: %v", err)
+		}
+		return cfg
+	}
+
+	testHandler.ThemeStore = nil
+	if _, ok := fetch()["theme_store_enabled"]; ok {
+		t.Fatal("theme_store_enabled must be omitted when the store is off")
+	}
+	store, err := themestore.New(themestore.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	testHandler.ThemeStore = store
+	if raw := fetch()["theme_store_enabled"]; string(raw) != "true" {
+		t.Fatalf("theme_store_enabled: want true, got %s", raw)
 	}
 }

@@ -1,0 +1,241 @@
+---
+title: 專案資源
+description: 為專案關聯 GitHub 倉庫或本地目錄，讓後續執行獲得穩定的工作上下文。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
+import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
+
+[專案](/projects)資源告訴 AI 代理這組工作會用到哪些程式碼，以及在哪裡執行。資源會持續關聯在專案上，不必在每條任務中重複貼上倉庫地址或本地路徑。
+
+目前支援兩種資源：
+
+| 資源 | 適用場景 | 執行位置 |
+|---|---|---|
+| **GitHub 倉庫** | 團隊共享的程式碼庫，希望由執行時管理 checkout | 執行時管理的工作目錄 |
+| **本地目錄** | 已經存在的 checkout、很大的倉庫，或需要直接檢視本地改動 | 指定電腦上的原目錄 |
+
+## 資源進入執行的方式
+
+當 AI 代理處理專案內的任務時，Multica 會把專案名稱、專案描述和資源列表加入執行上下文，並在工作目錄中寫入 `.multica/project/resources.json`。
+
+工作區關聯的倉庫列表始終包含在執行上下文中。專案關聯的倉庫在此基礎上指明這組工作使用的程式碼和預設 ref。
+
+本地目錄只對繫結它的守護程序有效。本次執行所在的守護程序有匹配的本地目錄時，AI 代理直接進入該目錄工作；其他電腦仍使用專案中的 GitHub 倉庫或工作區倉庫。
+
+## 新增 GitHub 倉庫
+
+開啟專案，在 **資源** 中選擇"新增資源"。可以選擇已關聯到工作區的倉庫，也可以貼上 Git URL。工作區倉庫在 **設定 → 程式碼** 中維護；連線 GitHub 後，可在同一頁面透過 **從 GitHub 選擇** 匯入 App 已授權的倉庫。
+
+倉庫不限於 GitHub：任何執行時能訪問的 Git URL 都可以作為倉庫資源。自部署的 Multica 還可以在 **設定 → 程式碼** 連線自託管的 Forgejo、Gitea 或 GitLab，見[自託管 Git 程式碼託管](/vcs-integration)。
+
+建立專案時，也可以直接在 **Repos** 中選擇倉庫。一個專案可以關聯多個 GitHub 倉庫。
+
+資源中的 `ref` 可以指定後續 checkout 預設使用的分支、tag 或 commit。`default_branch_hint` 只向 AI 代理提供預設分支提示，不會強制切換分支。
+
+## 新增本地目錄
+
+新增本地目錄的介面只在 Desktop 中提供，因為瀏覽器不能選擇電腦上的資料夾。
+
+<Callout type="warning">
+**這是特殊情況下的選項，不要因為方便就選它。** `local_directory` 是給那些"不得不這麼開發"的人準備的，典型是一個 checkout 就幾十 GB 的遊戲專案，不可能每來一次執行就重新 clone 一份。
+
+如果你的目錄只是一個能正常 clone 的普通 git 倉庫，請用 `github_repo`：它預設走 worktree 模式，同一個倉庫上的執行可以同時進行，數量不受限制。`local_directory` 預設同一時間只進行一次執行；如果這個目錄本身是 git 倉庫，可以主動開啟 worktree 模式恢復併發（見[執行如何共享這個目錄](#執行如何共享這個目錄)）。拿不準時，先對照頁首的兩種資源。
+</Callout>
+
+<Steps>
+<Step>
+
+確認 Desktop 的本地守護程序線上。
+
+</Step>
+<Step>
+
+開啟專案的 **資源**，或者建立專案對話方塊裡的 **本地目錄** 標籤頁。專案還沒建出來時，也能在這裡做同樣的選擇。
+
+</Step>
+<Step>
+
+選擇"新增本地目錄"，再選擇要使用的資料夾。
+
+</Step>
+<Step>
+
+選擇執行如何使用它：**原地** 還是 **並行**，區別見[執行如何共享這個目錄](#執行如何共享這個目錄)。如果這個資料夾是 git 倉庫、並且那臺機器上的執行時能做隔離，Desktop 會預選 **並行**，否則預選 **原地**。當場可以改，之後也可以在 **資源** 裡點目錄旁邊的鉛筆圖示改。
+
+</Step>
+</Steps>
+
+預選只作用於你此刻正在關聯的目錄。之前關聯好的目錄仍然保持儲存時的模式，已有配置不會在你不知情時被切換。
+
+目錄必須是絕對路徑，已經存在，並且當前守護程序可以讀取和寫入。以下路徑會被拒絕：系統根目錄和磁碟機代號根（`/`、`C:\`）、使用者主目錄本身及各主目錄的上級（如 `/Users`、`/home`、`/root`），以及 `/etc`、`/var`、`/tmp`、`/usr`、`/opt` 等系統目錄。如果所選路徑是符號連結，會先解析為真實路徑再按同樣的規則校驗一次，序列鎖也按真實路徑生效。
+
+每個專案在同一臺守護程序上最多關聯一個本地目錄。團隊中的不同電腦可以分別為同一個專案關聯各自的目錄。
+
+<Callout type="warning">
+在預設的 `in_place` 模式下，本地目錄不是隔離環境：AI 代理會直接看到並修改當前分支和未提交的檔案，Multica 也不會自動切換分支、stash、commit、push 或建立 PR。worktree 模式不一樣，見下面的[執行如何共享這個目錄](#執行如何共享這個目錄)。
+</Callout>
+
+<span id="task-如何共享這個目錄" />
+<span id="任務如何共享這個目錄" />
+
+## 執行如何共享這個目錄
+
+本地目錄有兩種執行模式，按資源逐個設定。在資源面板裡可以直接切換，CLI 用 `--execution-mode`。Desktop 裡這兩種模式顯示為 **原地** 和 **並行**；API、CLI 和本頁其餘部分都使用識別符號。
+
+<LocalDirModeDemo />
+
+<Tabs items={["in_place（原地，預設）", "worktree（並行）"]}>
+<Tab value="in_place（原地，預設）" id="in-place">
+
+AI 代理直接在你的目錄裡工作，同一時間只進行一次執行。兩次執行使用同一個真實目錄時，後到的執行進入 `waiting_local_directory`，等前一次釋放目錄後繼續。兩個路徑經不同符號連結指向同一目錄時，同樣序列。
+
+等待不會修改目錄。等待中的執行可以取消，否則會一直等到目錄可用。
+
+普通的非 git 目錄只能用這種模式：worktree 模式只面向 git 倉庫。
+
+</Tab>
+<Tab value="worktree（並行）" id="worktree">
+
+每次執行拿到你倉庫的一個獨立 [git worktree](https://git-scm.com/docs/git-worktree)，建在執行時自己的工作區目錄裡。同一目錄上的執行併發執行，誰都不用排隊，也都不會寫你的工作副本。
+
+這個目錄必須是至少有一次提交的 git 倉庫；不滿足時執行會明確報錯，不會悄悄退回序列。
+
+那臺機器上的執行時也必須實現了該模式。執行時在連線時會宣告這項能力，Multica 只看這個宣告，不看版本號：一個開發構建完全可能帶著看起來足夠新的版本號，卻沒有對應的實現。這個宣告會被檢查兩次。儲存資源時，只要那臺機器的執行時沒有宣告該能力，儲存就會被拒絕，並提示去升級那臺機器上的 App；每次執行被真正領取時，還會按領取它的執行時再檢查一次，所以資源儲存之後才降級的機器，其執行會被帶原因取消，不會悄悄在原目錄裡跑掉。選擇 `worktree` 就是在要求隔離，Multica 不會拿"直接改你的工作副本"來兜底。
+
+AI 代理看到什麼、你拿回什麼：
+
+<Accordions type="multiple">
+<Accordion title="AI 代理從你眼前的狀態開始，不是從 HEAD 開始" id="starts-from-your-working-state">
+
+你未提交的改動和未追蹤的檔案會被回放進 worktree，所以它不會去 review 一份你已經不用的程式碼。你自己的工作副本、暫存區和 stash 列表都不會被動到。
+
+如果這個狀態無法忠實還原，包括未追蹤內容超出回放上限（2000 個檔案 / 200 MiB），執行會直接失敗，不會從一棵你認不出來的樹開始。通常的解決辦法是把還沒被忽略的構建產物加進 gitignore 或清理掉。
+
+</Accordion>
+<Accordion title="結果是你倉庫裡的一個分支" id="result-is-a-branch">
+
+分支按任務而不是按每次執行來分：`agent/<agent>/<issue>`（chat 則是 `agent/<agent>/chat-<session>`）。本次執行的**詳情**面板裡會顯示分支名（可直接複製），也可以用 `git branch` 找到它。用 `git log` / `git diff` review，然後自己決定 merge 還是 cherry-pick，Multica 不會替你合併。
+
+`<agent>` 由 AI 代理名字得來：轉成小寫後只保留英文字母和數字，其餘字元換成 `-`，最長 30 個字元；名字裡沒有英文字母和數字時寫作 `agent`。所以"運營助手"處理 OPS-21 時，分支是 `agent/agent/ops-21`。`<issue>` 是小寫的任務編號。
+
+中途失敗的執行同樣會報告它的分支：AI 代理的提交都在上面，沒提交的部分按[不會靜默丟東西](#nothing-is-silently-lost)裡的方式保留。
+
+</Accordion>
+<Accordion title="後續對話接著上一輪繼續" id="follow-ups-continue-the-branch">
+
+同一個任務的下一條評論會重新 check out 這個分支，AI 代理站在自己剛交付的成果上繼續做，不會從 `HEAD` 重新開始、把上一輪的改動落在另一個分支上。只有你在上一輪之後改動的部分會被重放上去，其餘部分分支裡已經有了。把分支 merge 掉之後，下一輪又會從你的 `HEAD` 重新開始。
+
+同一個任務上有兩次執行重疊時，後一個會從前一個的成果分叉到 `agent/<agent>/<issue>-<task>`，因為 git 規定一個分支只能有一棵 worktree。
+
+</Accordion>
+<Accordion title="提交到本地 HEAD 的改動和未提交的改動分開處理" id="committed-head-changes-stay-separate">
+
+兩輪之間在本地做的 pull 或提交不會重放到任務分支上，需要時把這些提交明確 merge 進去。上一輪記下了未提交的改動時，要在新的 `HEAD` 上比較這些改動，需要 Git 2.40 或更高版本。
+
+這些舊改動和新的已提交基線衝突時，執行時會記一條警告，只對受影響的路徑改用當前 `HEAD`；其他草稿照常增量比較。所以把其中一份草稿完成並提交，不會阻塞之後的執行，也不會把你沒動過的草稿再次拿去和 AI 代理的成果比較。你當前的改動和 AI 代理的成果之間若有衝突，仍然交給 AI 代理解決。
+
+</Accordion>
+<Accordion title="你的改動和 AI 代理的成果衝突時，由 AI 代理來解決" id="conflicts-are-resolved-by-the-agent">
+
+如果你重寫了 AI 代理也重寫過的那幾行，git 無法判斷誰對，這一輪就會在一棵帶衝突的 worktree 上啟動，並被要求先把 merge 做完（在那棵 worktree 裡 `git status` 會列出未合併的檔案）。
+
+只要還有檔案沒合完，這一輪就什麼都不交付：執行失敗、worktree 保留，下一輪會再次把同樣的改動送上來，你的修改不會被悄悄丟掉。
+
+</Accordion>
+<Accordion title="只有 Multica 自己的分支才會被續接" id="only-multica-branches-resume">
+
+是否續接由歸屬記錄決定，跟分支名無關：記錄裡既寫了屬於哪個會話，也寫了這條分支當時停在哪個 commit。你自己建的、恰好叫 `agent/<agent>/<issue>` 的分支永遠不會被 check out、被追加提交，也不會被當成上一輪的成果讀取；已經不包含記錄中那個 commit 的分支同樣如此。所以把 Multica 的分支刪掉再自己建一條同名的，或者把它 force-move 到別的歷史上，都是安全的，執行會改用 `agent/<agent>/<issue>-<id>`。在已交付的分支上繼續提交則是正常用法，續接照常，你的提交下一輪就在那裡。
+
+每條分支還會以一個屬於自己的 baseline commit 開頭，標記第一輪開始時的目錄狀態。後續正是靠這個 commit 辨認這條分支，`git diff <baseline>..<branch>` 也恰好就是 AI 代理做的改動。
+
+如果某一輪沒能記錄它的分支，比如中途失敗、記錄寫不進去，或者把 worktree reset 到了"把你的改動帶進分支的那個 commit"之前，這一輪會報失敗並保留 worktree，後續幾輪會另起一條分支，不去續接一條無法證明歸屬的分支。
+
+</Accordion>
+<Accordion title="不會靜默丟東西" id="nothing-is-silently-lost">
+
+AI 代理留下的未提交改動不會隨 worktree 一起刪除，執行中途失敗時同樣如此。它們去哪裡，取決於 AI 代理這次執行有沒有自己提交：
+
+- **AI 代理沒有提交過：** 所有沒被 gitignore 的檔案都會提交到分支上。這次提交不會執行倉庫的提交鉤子。
+- **AI 代理自己提交過：** 只交付它的提交。沒提交的部分（生成的產物、臨時檔案、沒提交的修改）存到隱藏 ref `refs/multica/leftovers/<branch>/<task>` 下，不進分支。每次執行開始時都會把這條規則告訴 AI 代理，所以自己提交的 AI 代理決定交付哪些內容。
+
+例外：一開始要先和你的本地改動完成 merge 的執行（見[衝突處理](#conflicts-are-resolved-by-the-agent)）會提交它留下的全部內容，因為這些未提交的改動裡有你的修改。
+
+想看某次執行存下了什麼，用 `git for-each-ref refs/multica/leftovers` 列出這些 ref，再用 `git show --stat <ref>` 檢視。`git restore --source=<ref> -- <path>` 可以把某個檔案取回到你的工作目錄。
+
+極少數情況下連這次提交或儲存都做不了，例如倉庫開了 `commit.gpgSign` 而執行時拿不到簽名金鑰。這時 worktree 會被刻意保留，執行標記為失敗，在你倉庫裡執行 `git worktree list` 就能看到存放這些改動的目錄。
+
+</Accordion>
+<Accordion title="沒有產生改動的執行不留下任何東西" id="no-changes-leave-nothing">
+
+它的分支會被刪除，不會作為一個空條目留在 `git branch` 裡；但如果這是承載了之前幾輪成果的任務分支，它一定會保留。
+
+</Accordion>
+<Accordion title="留在你倉庫裡的分支和隱藏 ref" id="what-stays-in-your-repo">
+
+worktree 位於執行時的工作區目錄內，會按[正常的清理週期](/daemon-runtimes#cleanup)回收。留在你倉庫裡的有：分支；每條分支對應的一個隱藏 ref（在 `refs/multica/local-state/` 下），記錄這條分支歸誰所有、以及上次續接時你目錄裡的內容；以及 AI 代理自己提交後又留下未提交改動的每次執行，各對應一個隱藏 ref（在 `refs/multica/leftovers/` 下）。
+
+隱藏 ref 不會出現在 `git branch` 裡，可以用 `git for-each-ref refs/multica` 檢視。Multica 刪除分支時會一併刪掉它；你自己刪掉的分支所對應的 ref，會在下一次該倉庫上有執行開始時被清理。也可以用 `git for-each-ref --format='%(refname)' refs/multica | xargs -n1 git update-ref -d` 一次性清掉。
+
+</Accordion>
+</Accordions>
+
+<Callout type="warn">
+**自託管運維注意：** 該模式的隔離由服務端強制（儲存資源時檢查一次，執行時每次領取執行時再檢查一次），所以無論何時降級執行時都會被攔住。唯一攔不住的組合是：把服務端回滾到本功能之前的版本，同時還連著沒有實現該模式的執行時。舊服務端沒有這道門禁，而這樣的執行時會忽略 `execution_mode`、直接在原目錄裡執行。只要還存在 `worktree` 資源，就不要把服務端回滾到本版本之前，除非那些機器上的執行時全部升級到位。
+</Callout>
+
+</Tab>
+</Tabs>
+
+## 執行期間寫入的內容
+
+除了 AI 代理產生的程式碼改動，執行時還可能在目錄中寫入當前 AI 程式設計工具所需的說明檔案，以及 `.multica/project/resources.json`。不希望它們進入版本控制時，加入 `.gitignore` 即可。
+
+Multica 清理執行環境時不會刪除關聯的本地目錄。AI 代理對該目錄的改動，與你在終端中直接執行 AI 程式設計工具的改動性質相同，需要同樣的審查。
+
+## 使用 CLI 管理資源
+
+```bash
+# 建立專案時關聯倉庫
+multica project create \
+ --title "Agent UX" \
+ --repo https://github.com/multica-ai/multica
+
+# 檢視和新增資源
+multica project resource list <project-id>
+multica project resource add <project-id> \
+ --type github_repo \
+ --url https://github.com/multica-ai/multica \
+ --ref main
+
+# 關聯指定守護程序上的本地目錄
+multica project resource add <project-id> \
+ --type local_directory \
+ --local-path /absolute/path/to/repo \
+ --daemon-id <daemon-id>
+
+# 關聯一個本地 git 倉庫，並讓每次執行在各自的 worktree 中併發執行
+multica project resource add <project-id> \
+ --type local_directory \
+ --local-path /absolute/path/to/repo \
+ --daemon-id <daemon-id> \
+ --execution-mode worktree
+
+# 為已有的本地目錄切換模式
+multica project resource update <project-id> <resource-id> --execution-mode worktree
+multica project resource update <project-id> <resource-id> --execution-mode in_place
+
+# 移除資源
+multica project resource remove <project-id> <resource-id>
+```
+
+資源變更會影響之後建立的執行，不會改寫已經結束的執行記錄。
+
+## 接下來
+
+- [專案](/projects) — 瞭解專案上下文、進度和負責人。
+- [守護程序與執行時](/daemon-runtimes) — 瞭解執行由哪臺電腦領取。
+- [執行](/tasks) — 檢視 `waiting_local_directory` 等執行狀態。

@@ -540,7 +540,7 @@ func TestFetchFromSkillsSh_TreeTotalByteCapFailsFast(t *testing.T) {
 	}
 }
 
-// A skill under the raised 256-file cap imports its full supporting-file set
+// A skill under the file-count cap imports its full supporting-file set
 // from the tree via concurrent downloads, in a stable path order regardless of
 // completion timing.
 func TestFetchFromSkillsSh_TreeEnumerationImportsManyFiles(t *testing.T) {

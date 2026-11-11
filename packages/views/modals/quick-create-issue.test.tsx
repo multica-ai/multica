@@ -500,16 +500,41 @@ function renderPanel(props: React.ComponentProps<typeof AgentCreatePanel>) {
 }
 
 describe("AgentCreatePanel", () => {
-  it("does not select Qoder agents or their squads for issue creation", () => {
+  it("does not replace an explicitly cleared manual assignee with the filing agent", async () => {
+    const user = userEvent.setup();
+    renderPanel({ onClose: vi.fn(), onSwitchMode: vi.fn(), isExpanded: false, setIsExpanded: vi.fn(), data: { manual_assignee_cleared: true } });
+    await user.click(screen.getByRole("button", { name: /Switch to Manual/i }));
+    expect(mockIssueDraftStore.draft.manual.assigneeId).toBeUndefined();
+    expect(mockSetManual.mock.calls.some(([patch]) => "assigneeId" in patch)).toBe(false);
+  });
+
+  it("selects Qoder agents without the daemon CLI version gate", () => {
     mockRuntimesData.list = [{ id: "runtime-1", provider: "qoder_cloud", metadata: {} }];
     mockQuickCreateStore.lastActorType = "agent";
     mockQuickCreateStore.lastActorId = "agent-1";
     mockSquadsData.list = [{ id: "squad-1", name: "Cloud Squad", leader_id: "agent-1", archived_at: null }];
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
-    expect(screen.getByRole("button", { name: /^Create$/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Create$/i })).toBeEnabled();
     expect(screen.queryByText(/daemon.*version/i)).not.toBeInTheDocument();
-    expect(screen.queryByText("Bohan")).not.toBeInTheDocument();
-    expect(screen.queryByText("Cloud Squad")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Bohan").length).toBeGreaterThan(0);
+    expect(screen.getByText("Cloud Squad")).toBeInTheDocument();
+  });
+
+  it("blocks Qoder agents when the prompt references an attachment", () => {
+    mockRuntimesData.list = [{ id: "runtime-1", provider: "qoder_cloud", metadata: {} }];
+    mockQuickCreateStore.lastActorType = "agent";
+    mockQuickCreateStore.lastActorId = "agent-1";
+    const attachmentId = "019ec09d-6222-722b-bdfa-427b105d80be";
+    mockIssueDraftStore.draft.agent.prompt = `See ![shot](/api/attachments/${attachmentId}/download)`;
+    mockIssueDraftStore.draft.shared.attachments = [{
+      clientUploadId: attachmentId,
+      status: "uploaded",
+      filename: "shot.png",
+      attachment: { id: attachmentId, url: "https://cdn.example/shot.png", filename: "shot.png" },
+    } as never];
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    expect(screen.getByRole("button", { name: /^Create$/i })).toBeDisabled();
+    expect(screen.getByText(/can't read attachments/i)).toBeInTheDocument();
   });
 
   beforeEach(() => {
@@ -570,6 +595,22 @@ describe("AgentCreatePanel", () => {
         'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
       ),
     ).toHaveValue("Persisted draft prompt");
+  });
+
+  it("prefers a prompt handed in by the opener over the draft and saves it to the draft", () => {
+    renderPanel({
+      onClose: vi.fn(),
+      isExpanded: false,
+      setIsExpanded: vi.fn(),
+      data: { prompt: "fix the Safari login callback 500" },
+    });
+
+    expect(
+      screen.getByPlaceholderText(
+        'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      ),
+    ).toHaveValue("fix the Safari login callback 500");
+    expect(mockIssueDraftStore.draft.agent.prompt).toBe("fix the Safari login callback 500");
   });
 
   it("restores unfinished actor, project, priority, and due-date selections after remount", async () => {

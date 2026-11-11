@@ -353,12 +353,14 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 	// autopilot", never as "Core model".
 	triggerWords := map[string]string{
 		"references/issues.md":       "issue",
+		"references/sub-issues.md":   "sub-issue",
 		"references/mentions.md":     "mention",
 		"references/agents.md":       "agent",
 		"references/squads.md":       "squad",
 		"references/autopilots.md":   "autopilot",
 		"references/projects.md":     "project",
 		"references/runtimes.md":     "runtime",
+		"references/environments.md": "local environment",
 		"references/skill-import.md": "skill import",
 	}
 
@@ -425,12 +427,14 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Do not read them all",
 				// The router's whole job: name every domain and its file.
 				"references/issues.md",
+				"references/sub-issues.md",
 				"references/mentions.md",
 				"references/agents.md",
 				"references/squads.md",
 				"references/autopilots.md",
 				"references/projects.md",
 				"references/runtimes.md",
+				"references/environments.md",
 				"references/skill-import.md",
 				// Invariants deduplicated out of the eight merged bodies. Each
 				// was repeated in most of them; the router is now their only
@@ -473,20 +477,16 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"redelivered once the receiving side is fixed",
 				"include the PR URL when a PR exists",
 				"Closes MUL-123",
-				"--status backlog",
 				// The link table is the only sanctioned source of PR state,
 				// and the guard against stale data survives MUL-6966 without
 				// naming the key it used to name: `issue get` still returns
 				// whatever an older run left on the issue, but a warning that
 				// spells out a metadata key teaches the key.
 				"stale values left on the issue by an earlier run",
-				// MUL-5442: the brief's Sub-issue Creation section is a
-				// one-line map pointing here. These anchors are the demoted
-				// playbook — if they leave, the brief pointer dangles.
-				"todo starts work now, backlog parks it",
-				"`--stage <N>`",
-				"wakes the parent assignee when a stage",
-				"multica issue status <child-id> todo",
+				// MUL-8441 moved the sub-issue playbook out. Daemons released
+				// before the move still point their brief here for it, so the
+				// signpost must name where it went.
+				"references/sub-issues.md",
 				// MUL-6966 phase 1 retired the metadata write discipline
 				// along with the brief section that pointed here. What the
 				// bans were protecting still needs a home, so the
@@ -541,6 +541,26 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Start from the trigger, not from memory",
 				"multica issue comment list <issue-id> --thread <trigger-comment-id>",
 				"multica issue comment add <issue-id> --parent <trigger-comment-id>",
+			},
+		},
+		{
+			file: "references/sub-issues.md",
+			want: []string{
+				// MUL-5442: the brief's Sub-issue Creation section is a
+				// one-line map pointing here. These anchors are the demoted
+				// playbook — if they leave, the brief pointer dangles.
+				"todo starts work now, backlog parks it",
+				"--status backlog",
+				"`--stage <N>`",
+				"wakes the parent assignee when a stage",
+				"multica issue status <child-id> todo",
+				// MUL-8441: the brief's split rule is the short form of this
+				// section; the child-side half depends on the [Parent issue]
+				// block the daemon renders.
+				"Before splitting: one issue, one PR",
+				"Slice by user-visible behavior, never by layer",
+				"A PR that is large to review is not a reason to split",
+				"`[Parent issue]` block",
 			},
 		},
 		{
@@ -659,6 +679,24 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// metadata; every other runtime gets a linked worktree.
 				"Linux and Windows Codex",
 				"task-local Git metadata",
+			},
+		},
+		{
+			file: "references/environments.md",
+			want: []string{
+				".multica/environments.toml",
+				"multica env start <name>",
+				// The port block is what keeps parallel runs from colliding;
+				// an agent that hard-codes a port breaks the second run.
+				"`MULTICA_PORT` through `MULTICA_PORT+9`",
+				// A detaching start command ends the environment at once and
+				// leaves its work unreachable by stop.
+				"`docker compose up -d`",
+				// ttl is a Go duration; the day unit fails to parse.
+				"`7d` is rejected",
+				// Reuse is keyed on the checkout as well as the name, so a run
+				// with its own checkout gets a second instance, not the old one.
+				"the name and the checkout all match",
 			},
 		},
 		{

@@ -56,13 +56,10 @@ export default function Inbox() {
   const archiveCompleted = useArchiveCompletedInbox();
 
   const onPressItem = useCallback((item: InboxItem) => {
-    if (!item.read) {
-      // Optimistic read flip lives in useMarkInboxRead.onMutate — fires
-      // setQueryData synchronously before the cancelQueries await, so the
-      // row is already styled "read" by the time iOS captures the source
-      // snapshot for the native stack push transition.
-      markRead.mutate(item.id);
-    }
+    // Read on every opening: a read row can hide older unread notifications.
+    // The mutation patches synchronously before iOS captures the source
+    // snapshot for the native stack push transition.
+    markRead.mutate(item.id);
     const target = getInboxNavigationTarget(item, wsSlug, String(Date.now()));
     if (target) router.push(target);
   }, [markRead, wsSlug]);

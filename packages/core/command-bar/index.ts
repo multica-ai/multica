@@ -11,3 +11,4 @@ export {
   type RecentVisitEntry,
   type RecentVisitType,
 } from "./recent-store";
+export { useSearchStore } from "./search-store";

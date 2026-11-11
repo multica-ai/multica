@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { hasCompleteAssetSet, parseReleaseAssets } from "./parse-release-assets";
+import { hasCompleteAssetSet, parseReleaseAssetSizes, parseReleaseAssets } from "./parse-release-assets";
 
 function asset(name: string) {
   return {
@@ -68,5 +68,18 @@ describe("hasCompleteAssetSet", () => {
 
   it("rejects an empty asset set", () => {
     expect(hasCompleteAssetSet({})).toBe(false);
+  });
+});
+
+describe("parseReleaseAssetSizes", () => {
+  it("keys sizes like the asset map and skips auxiliary files", () => {
+    const sizes = parseReleaseAssetSizes([
+      { ...asset("multica-desktop-0.8.1-mac-arm64.dmg"), size: 248_000_000 },
+      { ...asset("multica-desktop-0.8.1-linux-x86_64.AppImage"), size: 249_000_000 },
+      { ...asset("multica-desktop-0.8.1-mac-arm64.dmg.blockmap"), size: 260_000 },
+      asset("multica-desktop-0.8.1-windows-x64.exe"),
+    ]);
+
+    expect(sizes).toEqual({ macArm64Dmg: 248_000_000, linuxAmd64AppImage: 249_000_000 });
   });
 });

@@ -1,6 +1,7 @@
 export {
   paths,
   isGlobalPath,
+  isMyAgentsSearch,
   AGENT_FOCUS_CONVERSATION_STARTERS,
 } from "./paths";
 export type { WorkspacePaths } from "./paths";
@@ -17,6 +18,8 @@ export type {
   WorkspacePageKey,
   WorkspacePage,
 } from "./route-icons";
+export { RAIL_SPACES, spaceForPath } from "./spaces";
+export type { AppSpaceId, RailSpaceId } from "./spaces";
 export {
   parseTabSubject,
   tabSubjectKey,

@@ -7,10 +7,7 @@ import {
   type PointerEventHandler,
 } from "react";
 import { ArrowLeft, ArrowRight } from "@multica/ui/icons";
-import {
-  SidebarTrigger,
-  useSidebar,
-} from "@multica/ui/components/ui/sidebar";
+import { SidebarTrigger } from "@multica/ui/components/ui/sidebar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,6 +23,7 @@ import {
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import {
   ResourceLeadingVisual,
+  useAppShell,
   useTabPresentation,
 } from "@multica/views/layout";
 import { ActionShortcutKeycaps } from "@multica/views/common/shortcut-keycaps";
@@ -35,10 +33,10 @@ import { browsingHistoryKeyForUrl } from "@/stores/tab-store";
 
 // Controls sit left-aligned just past the macOS traffic lights, which end
 // around x=76 with trafficLightPosition { x: 16 }. The clearance covers that
-// inset plus Back, Forward and the sidebar toggle (3 × 28px, 2 × 8px gaps) and
-// a 12px trailing pad, and matches the sidebar's minimum width so the
-// controls always fit inside the expanded sidebar column.
-const TRAFFIC_LIGHT_CLEARANCE = 88;
+// inset plus Back, Forward and the panel toggle (3 × 28px, 2 × 8px gaps) and
+// a 12px trailing pad. It spans the rail and the start of the tab bar, which
+// pads itself past it.
+export const TRAFFIC_LIGHT_CLEARANCE = 88;
 export const WINDOW_TOOLBAR_CLEARANCE = 200;
 const LONG_PRESS_DURATION_MS = 500;
 const LONG_PRESS_MOVE_TOLERANCE_PX = 8;
@@ -163,27 +161,23 @@ function HistoryMenuItem({
   const { visual, title } = useTabPresentation(url, fallbackTitle);
 
   return (
-    <DropdownMenuItem
-      className="h-8 min-w-0 gap-2 px-2"
-      onClick={onSelect}
-    >
-      <ResourceLeadingVisual visual={visual} />
-      <TruncatedTooltip content={title}>
+    <TruncatedTooltip content={title}>
+      <DropdownMenuItem
+        className="h-8 min-w-0 gap-2 px-2"
+        onClick={onSelect}
+      >
+        <ResourceLeadingVisual visual={visual} />
         <span className="min-w-0 flex-1 truncate">
           {title}
         </span>
-      </TruncatedTooltip>
-    </DropdownMenuItem>
+      </DropdownMenuItem>
+    </TruncatedTooltip>
   );
 }
 
 export function WindowToolbar() {
   const { t } = useT("layout");
-  const { state: sidebarState, isCompact } = useSidebar();
-  const sidebarHidden = sidebarState === "collapsed" || isCompact;
-  const toolbarWidth: React.CSSProperties["width"] = sidebarHidden
-    ? WINDOW_TOOLBAR_CLEARANCE
-    : `max(var(--sidebar-live-width, var(--sidebar-width)), ${WINDOW_TOOLBAR_CLEARANCE}px)`;
+  const shell = useAppShell();
   const {
     canGoBack,
     canGoForward,
@@ -259,12 +253,12 @@ export function WindowToolbar() {
   return (
     <div
       data-slot="window-toolbar"
-      data-sidebar-resize-consumer
+      data-mc="window-toolbar"
       className="fixed left-0 top-0 z-30 flex h-10 shrink-0 items-center pr-3"
       style={
         {
           WebkitAppRegion: "drag",
-          width: toolbarWidth,
+          width: WINDOW_TOOLBAR_CLEARANCE,
           paddingLeft: TRAFFIC_LIGHT_CLEARANCE,
         } as React.CSSProperties
       }
@@ -367,6 +361,14 @@ export function WindowToolbar() {
         <SidebarTrigger
           className="size-7 text-faint-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           shortcut={<ActionShortcutKeycaps action="toggleSidebar" />}
+          onClick={
+            shell
+              ? (event) => {
+                  event.preventDefault();
+                  shell.toggleNav();
+                }
+              : undefined
+          }
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
         />
       </div>

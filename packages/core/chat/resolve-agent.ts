@@ -18,6 +18,9 @@ export function resolveChatAgent(input: {
   explicitAgentId?: string | null;
   selectedAgentId: string | null;
   defaultAgentId: string | null;
+  quickChatAgentId?: string | null;
+  isAskChat?: boolean;
+  workspaceSettled?: boolean;
 }): Agent | null {
   if (input.sessionId) {
     return input.agents.find((agent) => agent.id === input.sessionAgentId) ?? null;
@@ -26,8 +29,11 @@ export function resolveChatAgent(input: {
   if (input.explicitAgentId) {
     return input.availableAgents.find((agent) => agent.id === input.explicitAgentId) ?? null;
   }
-  return input.availableAgents.find((agent) => agent.id === input.selectedAgentId)
-    ?? input.availableAgents.find((agent) => agent.id === input.defaultAgentId && isAgentRuntimeBound(agent))
+  const preferredId = input.isAskChat ? input.quickChatAgentId : input.selectedAgentId;
+  const preferred = input.availableAgents.find((agent) => agent.id === preferredId);
+  if (preferred) return preferred;
+  if (input.workspaceSettled === false) return null;
+  return input.availableAgents.find((agent) => agent.id === input.defaultAgentId && isAgentRuntimeBound(agent))
     ?? input.availableAgents[0]
     ?? null;
 }

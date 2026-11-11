@@ -18,8 +18,42 @@ func legacyReceiptFixture(t *testing.T) (*pgxpool.Pool, *testutil.Fixture) {
 	if os.Getenv("DATABASE_URL") == "" {
 		t.Skip("explicit disposable DATABASE_URL required")
 	}
-	pool := channelScopeTestDB(t)
+	// The backfill intentionally scans every workspace. A workspace fixture
+	// on the shared test DB would also pick up other packages' active rows.
+	pool := testutil.IsolatedDB(t, os.Getenv("DATABASE_URL"))
 	return pool, testutil.New(pool, uuid.NewString(), uuid.NewString())
+}
+
+func TestLegacyReceiptBackfillIsolatedFromSharedDatabase(t *testing.T) {
+	if os.Getenv("DATABASE_URL") == "" {
+		t.Skip("explicit disposable DATABASE_URL required")
+	}
+	shared, err := pgxpool.New(context.Background(), os.Getenv("DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(shared.Close)
+	outside := testutil.New(shared, uuid.NewString(), uuid.NewString())
+	installed := time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC)
+	id := receiptInstallation(t, outside, "active", "feishu", installed, map[string]any{"app_id": "cli_" + uuid.NewString()})
+	receiptHistory(t, outside, id, "feishu", installed)
+	before := receiptConfig(t, shared, id)
+
+	pool, fx := legacyReceiptFixture(t)
+	local := receiptInstallation(t, fx, "active", "feishu", installed, map[string]any{"app_id": "cli_" + uuid.NewString()})
+	receiptHistory(t, fx, local, "feishu", installed)
+	n, err := db.New(pool).BackfillLegacyFeishuInboundReceipts(context.Background(), 100)
+	if err != nil || n != 1 {
+		t.Fatalf("updated=%d want 1 err=%v", n, err)
+	}
+	if receiptConfig(t, pool, local)["first_message_received_at"] == nil {
+		t.Fatal("local history was not backfilled")
+	}
+	beforeJSON, _ := json.Marshal(before)
+	afterJSON, _ := json.Marshal(receiptConfig(t, shared, id))
+	if string(beforeJSON) != string(afterJSON) {
+		t.Fatalf("backfill changed shared database fixture: %s want %s", afterJSON, beforeJSON)
+	}
 }
 
 func receiptInstallation(t *testing.T, fx *testutil.Fixture, status, channel string, installed time.Time, config map[string]any) string {

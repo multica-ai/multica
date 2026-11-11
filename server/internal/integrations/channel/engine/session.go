@@ -1127,11 +1127,13 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 		if !linked[media.id] || media.ref.InlinePlaceholder == "" {
 			continue
 		}
-		replacements = append(replacements, inlineMediaReplacement{
-			placeholder: media.ref.InlinePlaceholder,
-			index:       media.ref.InlineIndex,
-			markdown:    inlineMediaMarkdown(media.ref, media.id),
-		})
+		for index := media.ref.InlineIndex; index < media.ref.InlineIndex+max(1, media.ref.InlineCount); index++ {
+			replacements = append(replacements, inlineMediaReplacement{
+				placeholder: media.ref.InlinePlaceholder,
+				index:       index,
+				markdown:    inlineMediaMarkdown(media.ref, media.id),
+			})
+		}
 	}
 	if body, changed := composeInlineMediaBody(in.Body, replacements); changed {
 		rows, err := qtx.UpdateChatMessageContentForChannelMedia(ctx, db.UpdateChatMessageContentForChannelMediaParams{

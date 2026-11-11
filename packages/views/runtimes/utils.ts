@@ -166,6 +166,34 @@ export function formatUsd(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
+export function formatCredits(n: number): string {
+  if (n >= 1000) return formatTokens(n);
+  if (n >= 100) return n.toFixed(0);
+  return String(Number(n.toFixed(2)));
+}
+
+/**
+ * A run's spend for display. Credits have no USD rate, so a credit-billed run
+ * shows its credits and a mix shows both; `creditsLabel` supplies the
+ * translated unit and provider name. Different providers' credits cannot
+ * be added together or combined with Multica's own billing credits.
+ */
+export function formatSpend(
+  usage: Pick<TaskUsageSummary, "cost" | "credits">,
+  creditsLabel: (credits: string, provider: string) => string,
+): string {
+  const parts = usage.cost > 0 || usage.credits.size === 0 ? [formatUsd(usage.cost)] : [];
+  for (const [provider, credits] of usage.credits) {
+    parts.push(creditsLabel(formatCredits(credits), provider));
+  }
+  return parts.join(" + ");
+}
+
+/** False for usage billed only in credits, whose token count is not reported. */
+export function hasTokenFigure(usage: Pick<TaskUsageSummary, "tokens" | "credits">): boolean {
+  return usage.tokens > 0 || usage.credits.size === 0;
+}
+
 // Cost estimation
 
 // Pricing per million tokens (USD). Sources, each authoritative for the
@@ -825,6 +853,7 @@ export type Priceable = Pick<
 > & {
   provider?: string;
   cost_usd_ticks?: number;
+  credits_micros?: number;
   uncosted_input_tokens?: number;
   uncosted_output_tokens?: number;
   uncosted_cache_read_tokens?: number;
@@ -976,6 +1005,8 @@ export interface TaskUsageSummary {
   cacheWrite: number;
   /** Distinct models this run touched, in first-seen order. Usually one. */
   models: string[];
+  /** Credits grouped by provider, since their credit units are not interchangeable. */
+  credits: ReadonlyMap<string, number>;
 }
 
 /**
@@ -996,10 +1027,11 @@ export function summarizeTaskUsage(
   if (!usage || usage.length === 0) return null;
 
   const models: string[] = [];
+  const credits = new Map<string, number>();
   const summary: TaskUsageSummary = {
     tokens: 0, cost: 0, cacheSavings: 0,
     input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
-    models,
+    models, credits,
   };
 
   for (const slice of usage) {
@@ -1010,6 +1042,10 @@ export function summarizeTaskUsage(
     summary.cost += estimateCost(slice);
     summary.cacheSavings += estimateCacheSavings(slice);
     if (slice.model && !models.includes(slice.model)) models.push(slice.model);
+    if (slice.credits_micros != null) {
+      const provider = slice.provider || "unknown";
+      credits.set(provider, (credits.get(provider) ?? 0) + slice.credits_micros / 1e6);
+    }
   }
   summary.tokens =
     summary.input + summary.output + summary.cacheRead + summary.cacheWrite;

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/data/api";
 import { appConfigOptions } from "@/data/queries/billing";
 import { issueKeys } from "@/data/queries/issue-keys";
-import { useCancelTask, useDeleteComment } from "./issues";
+import { useCancelTask, useDeleteComment, useDeleteIssue } from "./issues";
 
 const state = vi.hoisted(() => ({
   qc: undefined as unknown as QueryClient,
@@ -43,6 +43,7 @@ vi.mock("@/data/api", () => ({
   api: {
     deleteComment: vi.fn(async () => undefined),
     cancelTaskById: vi.fn(async () => undefined),
+    deleteIssue: vi.fn(async () => undefined),
   },
 }));
 
@@ -238,5 +239,61 @@ describe("useCancelTask", () => {
       expect(state.qc.getQueryData(key)).toEqual([otherRun]);
       expect(state.qc.getQueryState(key)?.isInvalidated).toBe(false);
     }
+  });
+});
+
+describe("useDeleteIssue", () => {
+  const listKey = issueKeys.list(wsId);
+  const assignedKey = issueKeys.myList(wsId, "assigned", { assignee_id: "user-1" });
+  const createdKey = issueKeys.myList(wsId, "created", { creator_id: "user-1" });
+  const detailKey = issueKeys.detail(wsId, issueId);
+  const issue = { id: issueId, title: "Keep until deleted" } as Issue;
+  const other = { id: "issue-2" } as Issue;
+
+  beforeEach(() => {
+    state.qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    vi.mocked(api.deleteIssue).mockReset();
+    for (const key of [listKey, assignedKey, createdKey]) {
+      state.qc.setQueryData<Issue[]>(key, [issue, other]);
+    }
+    state.qc.setQueryData(detailKey, issue);
+    state.qc.setQueryData(timelineKey, [comment("comment-1")]);
+    state.qc.setQueryData(issueKeys.activeTasks(wsId, issueId), [{ id: "run-1" }]);
+    state.qc.setQueryData(issueKeys.tasks(wsId, issueId), [{ id: "run-1" }]);
+    state.qc.setQueryData(issueKeys.list("other-workspace"), [issue]);
+  });
+
+  it("keeps lists and details while pending, then clears them only after success", async () => {
+    let resolveDelete!: () => void;
+    vi.mocked(api.deleteIssue).mockReturnValueOnce(new Promise<void>((resolve) => { resolveDelete = resolve; }));
+    const pending = useDeleteIssue().mutateAsync(issueId);
+    await vi.waitFor(() => expect(api.deleteIssue).toHaveBeenCalledWith(issueId));
+    for (const key of [listKey, assignedKey, createdKey]) {
+      expect(state.qc.getQueryData(key)).toEqual([issue, other]);
+    }
+    expect(state.qc.getQueryData(detailKey)).toEqual(issue);
+    resolveDelete();
+    await pending;
+    for (const key of [listKey, assignedKey, createdKey]) {
+      expect(state.qc.getQueryData(key)).toEqual([other]);
+    }
+    for (const key of [detailKey, timelineKey, issueKeys.activeTasks(wsId, issueId), issueKeys.tasks(wsId, issueId)]) {
+      expect(state.qc.getQueryState(key)).toBeUndefined();
+    }
+    expect(state.qc.getQueryData(issueKeys.list("other-workspace"))).toEqual([issue]);
+  });
+
+  it.each([403, 500])("keeps all issue caches intact when deletion fails with %s", async (status) => {
+    const error = Object.assign(new Error("Delete rejected"), { status });
+    vi.mocked(api.deleteIssue).mockRejectedValueOnce(error);
+    await expect(useDeleteIssue().mutateAsync(issueId)).rejects.toBe(error);
+    for (const key of [listKey, assignedKey, createdKey]) {
+      expect(state.qc.getQueryData(key)).toEqual([issue, other]);
+      expect(state.qc.getQueryState(key)?.isInvalidated).toBe(false);
+    }
+    expect(state.qc.getQueryData(detailKey)).toEqual(issue);
+    expect(state.qc.getQueryData(timelineKey)).toEqual([comment("comment-1")]);
+    expect(state.qc.getQueryData(issueKeys.activeTasks(wsId, issueId))).toEqual([{ id: "run-1" }]);
+    expect(state.qc.getQueryData(issueKeys.tasks(wsId, issueId))).toEqual([{ id: "run-1" }]);
   });
 });

@@ -31,6 +31,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
+import { ObjectSectionEmpty } from "../../../layout/object-page";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   Dialog,
@@ -166,9 +167,9 @@ export function SkillsTab({
         }
       >
         {agent.skills.length === 0 ? (
-          <EmptyState
-            icon={<SkillIcon className="h-6 w-6" />}
-            title={t(($) => $.tab_body.skills.empty_title)}
+          <ObjectSectionEmpty
+            icon={SkillIcon}
+            description={t(($) => $.tab_body.skills.empty_title)}
           />
         ) : (
           <ul className="divide-y rounded-lg border bg-surface-raised/40">
@@ -400,16 +401,6 @@ function CapabilitySection({
       </div>
       {children}
     </section>
-  );
-}
-
-function EmptyState({ icon, title, hint }: { icon: React.ReactNode; title: string; hint?: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-10 text-muted-foreground">
-      <span className="opacity-50">{icon}</span>
-      <p className="mt-3 text-body">{title}</p>
-      {hint && <p className="mt-1 max-w-sm text-center text-caption">{hint}</p>}
-    </div>
   );
 }
 

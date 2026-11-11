@@ -20,17 +20,36 @@ import {
   type IssueWindowRequest,
 } from "../shared/issue-window";
 import { AUTH_SESSION_STATE_CHANNEL } from "../shared/auth-session";
+import {
+  THEME_FOLDER_CHANGED_CHANNEL,
+  THEME_FOLDER_OPEN_CHANNEL,
+  THEME_FOLDER_READ_CHANNEL,
+  THEME_FOLDER_WRITE_CHANNEL,
+  type ThemeFolderFile,
+  type ThemeFolderSnapshot,
+  type ThemeFolderWriteResult,
+} from "../shared/theme-folder";
 import type {
   DaemonStatus,
   LocalRuntimeProbe,
 } from "../shared/daemon-types";
 import {
   MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
+  NEW_WINDOW_SHORTCUT_CHANNEL,
   parseTabSelectionShortcutKey,
   TAB_SELECTION_SHORTCUT_CHANNEL,
+  WORKSPACE_OPEN_PATH_CHANNEL,
   type MainRendererMessageChannel,
   type TabSelectionShortcutKey,
 } from "../shared/main-renderer-messages";
+import {
+  FOCUS_WORKSPACE_WINDOW_CHANNEL,
+  OPEN_WORKSPACE_WINDOW_CHANNEL,
+  OTHER_WINDOW_WORKSPACES_CHANNEL,
+  WINDOW_WORKSPACE_REPORT_CHANNEL,
+  type WorkspacePathOptions,
+  type WorkspacePathRequest,
+} from "../shared/workspace-window";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
 // can pass it into CoreProvider during the initial render — the alternative
@@ -147,6 +166,8 @@ const desktopAPI = {
   /** Listen for invitation IDs delivered via deep link */
   onInviteOpen: (callback: (invitationId: string) => void) =>
     subscribeToMainRendererChannel("invite:open", callback),
+  onIssueOpen: (callback: (url: string) => void) =>
+    subscribeToMainRendererChannel("issue:open", callback),
   /** Open a URL in the default browser */
   openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
   /** Download a file by URL through Electron's native download system.
@@ -211,6 +232,23 @@ const desktopAPI = {
   /** Validate that a path is an existing readable+writable directory. */
   validateLocalDirectory: (path: string) =>
     ipcRenderer.invoke("local-directory:validate", path),
+  /** Read every theme in the themes folder, and start watching it. */
+  readThemeFolder: (): Promise<ThemeFolderSnapshot> =>
+    ipcRenderer.invoke(THEME_FOLDER_READ_CHANNEL),
+  /** Called once a change in the themes folder settles. Returns an unsubscribe fn. */
+  onThemeFolderChange: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on(THEME_FOLDER_CHANGED_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(THEME_FOLDER_CHANGED_CHANNEL, handler);
+    };
+  },
+  /** Open the themes folder, or one theme's folder in it, in the file manager. */
+  openThemeFolder: (name?: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke(THEME_FOLDER_OPEN_CHANNEL, name),
+  /** Create a theme folder from files; never replaces an existing one. */
+  writeThemeFolder: (name: string, files: ThemeFolderFile[]): Promise<ThemeFolderWriteResult> =>
+    ipcRenderer.invoke(THEME_FOLDER_WRITE_CHANNEL, name, files),
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  The renderer should close the active tab; if it was the last tab,
    *  call `closeWindow()` to dismiss the window. Returns an unsubscribe fn. */
@@ -243,12 +281,67 @@ const desktopAPI = {
   /** Open a validated issue-detail route in a dedicated native window. */
   openIssueWindow: (request: IssueWindowRequest) =>
     ipcRenderer.invoke("window:open-issue", request),
+  /** Tell main which workspace this main window shows (null while none). */
+  reportWindowWorkspace: (workspaceSlug: string | null) =>
+    ipcRenderer.send(WINDOW_WORKSPACE_REPORT_CHANNEL, workspaceSlug),
+  /** Workspaces shown by the other main windows. Sync so routing decisions
+   *  inside click handlers can consult it. */
+  getOtherWindowWorkspaces: (): string[] => {
+    try {
+      const slugs: unknown = ipcRenderer.sendSync(OTHER_WINDOW_WORKSPACES_CHANNEL);
+      return Array.isArray(slugs)
+        ? slugs.filter((slug): slug is string => typeof slug === "string")
+        : [];
+    } catch {
+      return [];
+    }
+  },
+  /** Hand a workspace (and optionally a path inside it) to the other main
+   *  window that shows it. Returns false when no other window does. */
+  focusWorkspaceWindow: (
+    workspaceSlug: string,
+    path?: string,
+    options?: WorkspacePathOptions,
+  ): boolean => {
+    try {
+      return (
+        ipcRenderer.sendSync(FOCUS_WORKSPACE_WINDOW_CHANNEL, {
+          workspaceSlug,
+          ...(path === undefined ? {} : { path }),
+          navigate: options?.navigate === true,
+        }) === true
+      );
+    } catch {
+      return false;
+    }
+  },
+  /** Open a workspace in its own main window, or focus the one showing it. */
+  openWorkspaceWindow: (workspaceSlug: string) =>
+    ipcRenderer.invoke(OPEN_WORKSPACE_WINDOW_CHANNEL, workspaceSlug),
+  /** Listen for workspace paths routed here from another window. */
+  onOpenWorkspacePath: (callback: (request: WorkspacePathRequest) => void) =>
+    subscribeToMainRendererChannel<unknown>(
+      WORKSPACE_OPEN_PATH_CHANNEL,
+      (payload) => {
+        const request = payload as Partial<WorkspacePathRequest> | null;
+        if (typeof request?.path === "string") {
+          callback({ path: request.path, navigate: request.navigate === true });
+        }
+      },
+    ),
+  /** Listen for Cmd/Ctrl+Shift+N new-window requests. */
+  onNewWindowShortcut: (callback: () => void) =>
+    subscribeToMainRendererChannel(NEW_WINDOW_SHORTCUT_CHANNEL, () => callback()),
 };
 
 type DaemonReauthResult =
   | { ok: true }
   | { ok: false; reason: "session_invalid" }
   | { ok: false; reason: "transient"; message: string };
+
+type FocusEnvironmentResult =
+  | { ok: true }
+  | { ok: false; reason: "gone" | "unsupported" | "unavailable" | "failed"; error?: string };
 
 const daemonAPI = {
   start: (): Promise<{ success: boolean; error?: string }> =>
@@ -263,6 +356,8 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:probe-runtimes"),
   getHostName: (): Promise<string> =>
     ipcRenderer.invoke("daemon:get-host-name"),
+  focusEnvironment: (key: string): Promise<FocusEnvironmentResult> =>
+    ipcRenderer.invoke("daemon:focus-environment", key),
   onStatusChange: (callback: (status: DaemonStatus) => void) => {
     const handler = (_: unknown, status: DaemonStatus) => callback(status);
     ipcRenderer.on("daemon:status", handler);

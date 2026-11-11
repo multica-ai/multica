@@ -1,6 +1,7 @@
 "use client";
 
 import type { KeyboardEvent } from "react";
+import { isImeComposing } from "@multica/core/utils";
 import { ChevronDown, ChevronUp, Search, X } from "@multica/ui/icons";
 import { Input } from "@multica/ui/components/ui/input";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -44,6 +45,7 @@ export function FindBar({
   const noMatches = matchCount === 0;
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (isImeComposing(e)) return;
     if (e.key === "Enter") {
       e.preventDefault();
       if (e.shiftKey) goPrev();

@@ -10,6 +10,7 @@ func TestTaskSupplementVersionGate(t *testing.T) {
 		provider, version string
 		want              bool
 	}{
+		{"pi", "1.4.0", true}, {"pi", "1.3.9", false}, {"pi", "", false}, {"omp", "1.4.0", false},
 		{"codex", "codex-cli 0.100.0", true}, {"codex", "0.99.0", false},
 		{"claude", "2.1.110 (Claude Code)", true}, {"claude", "2.1.109", false},
 		{"grok", "1.0.14", true}, {"grok", "1.0.13", false}, {"grok", "0.2.120", false},

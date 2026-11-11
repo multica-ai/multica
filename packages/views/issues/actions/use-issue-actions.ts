@@ -1,5 +1,6 @@
 "use client";
 
+import { subIssueCreateDefaults } from "@multica/core/issues";
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -26,6 +27,7 @@ export interface UseIssueActionsResult {
     options?: IssueSurfaceMutationOptions,
   ) => void;
   openInNewTab: () => void;
+  openInDesktop?: () => void;
   togglePin: () => void;
   copyLink: () => Promise<void>;
   copyCommentLink: (commentId: string) => Promise<void>;
@@ -150,6 +152,15 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     );
   }, [issueId, issueIdentifier, navigation, paths]);
 
+  const openInDesktop = useCallback(() => {
+    if (!issueId) return;
+    const path = paths.issueDetail(issueIdentifier || issueId);
+    const isCurrentIssue =
+      navigation.pathname === path ||
+      navigation.pathname === paths.issueDetail(issueId);
+    navigation.openInDesktop?.(path + (isCurrentIssue ? navigation.hash : ""));
+  }, [issueId, issueIdentifier, navigation, paths]);
+
   const togglePin = useCallback(() => {
     if (!issueId) return;
     if (isPinned) {
@@ -194,21 +205,13 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
 
   const openCreateSubIssue = useCallback(() => {
     if (!issueId) return;
-    openModal("create-issue", {
-      parent_issue_id: issueId,
-      parent_issue_identifier: issueIdentifier,
-      ...(issueProjectId ? { project_id: issueProjectId } : {}),
-      // Inherit the parent's assignee (member/agent/squad) so a sub-issue
-      // created from the "Add sub-issue" entry starts with the same owner
-      // (discussion #1728). The modal keys off whether these fields are
-      // present, not their value, so a seed overrides the sticky last-used
-      // assignee it would otherwise fall back to, while omitting both for
-      // an unassigned parent leaves that fallback intact. Seed the two
-      // together — assignee_type is meaningless without assignee_id.
-      ...(issueAssigneeType && issueAssigneeId
-        ? { assignee_type: issueAssigneeType, assignee_id: issueAssigneeId }
-        : {}),
-    });
+    openModal("create-issue", subIssueCreateDefaults({
+      id: issueId,
+      identifier: issueIdentifier,
+      project_id: issueProjectId,
+      assignee_type: issueAssigneeType,
+      assignee_id: issueAssigneeId,
+    }));
   }, [
     openModal,
     issueId,
@@ -306,6 +309,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     isPinned,
     updateField,
     openInNewTab,
+    openInDesktop: navigation.openInDesktop ? openInDesktop : undefined,
     togglePin,
     copyLink,
     copyCommentLink,

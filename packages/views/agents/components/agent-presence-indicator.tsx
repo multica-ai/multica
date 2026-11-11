@@ -13,6 +13,9 @@ interface PresenceIndicatorProps {
   detail: AgentPresenceDetail | null | undefined;
   // Compact = dot only, no label / no workload chip. Used in dense rows.
   compact?: boolean;
+  // Drops the running / queued counts, for surfaces that list the runs
+  // themselves next to the label.
+  hideCounts?: boolean;
 }
 
 /**
@@ -33,6 +36,7 @@ interface PresenceIndicatorProps {
 export function AgentPresenceIndicator({
   detail,
   compact,
+  hideCounts,
 }: PresenceIndicatorProps) {
   const { t } = useT("agents");
   if (!detail) {
@@ -49,7 +53,9 @@ export function AgentPresenceIndicator({
   const workloadLabel = t(($) => $.workload[detail.workload]);
   const isWorking = detail.workload === "working";
   const isQueued = detail.workload === "queued";
-  const showQueueBadge = isWorking && detail.queuedCount > 0;
+  const showWorkingCount = !hideCounts && isWorking;
+  const showQueuedCount = !hideCounts && isQueued;
+  const showQueueBadge = showWorkingCount && detail.queuedCount > 0;
   // Queued's amber comes from workloadConfig as the *severe* tone — meant
   // for "stuck on offline runtime", which is the dominant cause. But on a
   // healthy runtime, queued is just a brief race between enqueue and the
@@ -94,7 +100,7 @@ export function AgentPresenceIndicator({
         >
           {workloadLabel}
         </span>
-        {isWorking && (
+        {showWorkingCount && (
           <span className="font-mono text-caption tabular-nums text-muted-foreground">
             {detail.runningCount} / {detail.capacity}
           </span>
@@ -107,7 +113,7 @@ export function AgentPresenceIndicator({
         {/* Queued (no running) — show the queued count directly, since
             there's no running/capacity ratio to anchor on. Honestly
             surfaces "stuck" on offline runtimes. */}
-        {isQueued && (
+        {showQueuedCount && (
           <span className="font-mono text-caption tabular-nums text-muted-foreground">
             {detail.queuedCount}
           </span>

@@ -6,7 +6,7 @@ import { composioToolkitsOptions } from "@multica/core/composio";
 import { useFeatureEnabled } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useT } from "../../i18n";
-import { ComposioTab } from "./composio-tab";
+import { AppsSettings } from "./apps-settings";
 import { SettingsTab } from "./settings-layout";
 
 /**
@@ -25,17 +25,14 @@ export function useComposioAvailable(): boolean {
 }
 
 /**
- * App connections belong to the signed-in account, not the workspace: the
- * user authorizes their own Gmail or Notion and enables it on agents they own.
+ * Connected apps belong to the workspace: team accounts are shared and
+ * admin-managed, personal accounts are each member's own (MUL-8516).
  */
 export function ConnectedAppsTab() {
   const { t } = useT("settings");
   return (
-    <SettingsTab
-      title={t(($) => $.page.tabs.apps)}
-      scope="account"
-    >
-      <ComposioTab />
+    <SettingsTab title={t(($) => $.page.tabs.apps)} scope="workspace">
+      <AppsSettings />
     </SettingsTab>
   );
 }

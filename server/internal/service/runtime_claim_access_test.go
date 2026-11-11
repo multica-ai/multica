@@ -266,6 +266,79 @@ func TestClaimTaskRejectsMismatchedAgentRuntime(t *testing.T) {
 	}
 }
 
+// A runtime switch must leave the agent's pending work claimable. Before the
+// re-stamp, a queued row on the old runtime matched neither daemon: the old one
+// fails the agent-binding fence, the new one fails the task-runtime filter.
+func TestRuntimeSwitchKeepsPendingTasksClaimable(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRuntimeClaimAccessFixture(t, "public", true, true, "queued")
+	q := db.New(fixture.pool)
+	oldRuntimeID := fixture.runtimeID
+
+	var workspaceID, ownerID pgtype.UUID
+	if err := fixture.pool.QueryRow(ctx,
+		`SELECT workspace_id, owner_id FROM agent WHERE id = $1`, fixture.agentID,
+	).Scan(&workspaceID, &ownerID); err != nil {
+		t.Fatalf("read agent: %v", err)
+	}
+	fx := testutil.New(fixture.pool, util.UUIDToString(workspaceID), util.UUIDToString(ownerID))
+	newRuntimeID := util.MustParseUUID(fx.Runtime(t, "switched-runtime", testutil.Cols{"visibility": "public"}))
+	agentID := util.UUIDToString(fixture.agentID)
+	deferredID := fx.Task(t, agentID, testutil.Cols{
+		"runtime_id": util.UUIDToString(oldRuntimeID), "issue_id": fx.Issue(t, "deferred work"), "status": "deferred",
+	})
+	runningID := fx.Task(t, agentID, testutil.Cols{
+		"runtime_id": util.UUIDToString(oldRuntimeID), "issue_id": fx.Issue(t, "running work"), "status": "running",
+		"dispatched_at": testutil.Raw("now()"), "started_at": testutil.Raw("now()"),
+	})
+
+	tx, err := fixture.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	qtx := q.WithTx(tx)
+	if _, err := qtx.GetAgentForUpdate(ctx, fixture.agentID); err != nil {
+		t.Fatalf("lock agent: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE agent SET runtime_id = $2 WHERE id = $1`, fixture.agentID, newRuntimeID); err != nil {
+		t.Fatalf("rebind agent: %v", err)
+	}
+	reassignment, err := qtx.ReassignPendingAgentTasksToRuntime(ctx, db.ReassignPendingAgentTasksToRuntimeParams{
+		AgentID: fixture.agentID, NewRuntimeID: newRuntimeID,
+	})
+	if err != nil {
+		t.Fatalf("reassign: %v", err)
+	}
+	if !reassignment.FenceOk || reassignment.ReassignedTasks != 2 {
+		t.Fatalf("reassignment = %+v, want fence ok and 2 rows (queued + deferred)", reassignment)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	svc := NewTaskService(q, fixture.pool, nil, events.New())
+	if claimed, err := svc.claimTask(ctx, fixture.agentID, oldRuntimeID, claimScope{claimPath: claimPathRuntime}); err != nil || claimed != nil {
+		t.Fatalf("old runtime claim = %+v, %v; want nothing", claimed, err)
+	}
+	claimed, err := svc.claimTask(ctx, fixture.agentID, newRuntimeID, claimScope{claimPath: claimPathRuntime})
+	if err != nil {
+		t.Fatalf("new runtime claim: %v", err)
+	}
+	if claimed == nil || util.UUIDToString(claimed.ID) != fixture.taskID {
+		t.Fatalf("new runtime claimed %+v, want queued task %s", claimed, fixture.taskID)
+	}
+
+	for id, want := range map[string]pgtype.UUID{deferredID: newRuntimeID, runningID: oldRuntimeID} {
+		var got pgtype.UUID
+		if err := fixture.pool.QueryRow(ctx, `SELECT runtime_id FROM agent_task_queue WHERE id = $1`, id).Scan(&got); err != nil {
+			t.Fatalf("read task %s: %v", id, err)
+		}
+		if got != want {
+			t.Errorf("task %s runtime = %s, want %s", id, util.UUIDToString(got), util.UUIDToString(want))
+		}
+	}
+}
+
 func TestClaimTaskForRuntimeKeepsOwnerlessPrivateAgentClaimable(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRuntimeClaimAccessFixture(t, "private", true, true, "queued")

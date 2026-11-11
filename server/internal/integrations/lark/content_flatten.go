@@ -152,6 +152,10 @@ type larkPostSpan struct {
 // Media spans degrade to the same bracketed placeholders flattenContent
 // uses.
 func flattenPostContent(raw string) string {
+	return flattenPostContentWithMedia(raw, nil)
+}
+
+func flattenPostContentWithMedia(raw string, mediaMarker func(larkMediaResource) string) string {
 	if raw == "" {
 		return ""
 	}
@@ -171,14 +175,20 @@ func flattenPostContent(raw string) string {
 		write(doc.Title)
 	}
 	for _, para := range doc.Content {
-		write(flattenPostParagraph(para))
+		write(flattenPostParagraphWithMedia(para, mediaMarker))
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func flattenPostParagraph(spans []larkPostSpan) string {
+func flattenPostParagraphWithMedia(spans []larkPostSpan, mediaMarker func(larkMediaResource) string) string {
 	parts := make([]string, 0, len(spans))
 	for _, s := range spans {
+		if mediaMarker != nil {
+			if res, ok := postSpanMediaResource(s, ""); ok {
+				parts = append(parts, mediaMarker(res))
+				continue
+			}
+		}
 		switch s.Tag {
 		case "text", "code_block":
 			if s.Text != "" {
@@ -205,7 +215,11 @@ func flattenPostParagraph(spans []larkPostSpan) string {
 				parts = append(parts, "@"+s.UserName)
 			}
 		case "img":
-			parts = append(parts, "[Image]")
+			if mediaMarker != nil {
+				parts = append(parts, "[Image: unavailable]")
+			} else {
+				parts = append(parts, "[Image]")
+			}
 		case "file":
 			if s.IsFolder || s.FileKey == "" {
 				continue
@@ -216,7 +230,11 @@ func flattenPostParagraph(spans []larkPostSpan) string {
 				parts = append(parts, "[File]")
 			}
 		case "media":
-			parts = append(parts, "[Video]")
+			if mediaMarker != nil {
+				parts = append(parts, "[Video: unavailable]")
+			} else {
+				parts = append(parts, "[Video]")
+			}
 		case "emotion":
 			// emoji_type is an enum key (e.g. "SMILE"), not display
 			// text — skip it rather than leak the key.

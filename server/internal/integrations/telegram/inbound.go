@@ -150,6 +150,9 @@ func inboundFromUpdateWithContext(u Update, botID int64, botUsername string, rec
 	addressed := chatType == channel.ChatTypeP2P || mentioned || repliedToBot
 
 	cleaned := normalizeText(text, botUsername)
+	if chatType == channel.ChatTypeP2P {
+		cleaned = normalizePrivateText(text, botUsername)
+	}
 	commandText := cleaned
 	forceFresh := false
 	startChat := false
@@ -340,6 +343,25 @@ func normalizeText(text, botUsername string) string {
 		cleaned = removeBotMentions(cleaned, botUsername)
 	}
 	return strings.TrimSpace(cleaned)
+}
+
+// Private messages already address the bot. Only a leading slash command's
+// routing suffix is transport syntax; mentions in the body are user content.
+func normalizePrivateText(text, botUsername string) string {
+	trimmed := strings.TrimLeft(text, " \t\r\n")
+	if !strings.HasPrefix(trimmed, "/") || botUsername == "" {
+		return text
+	}
+	end := strings.IndexAny(trimmed, " \t\r\n")
+	if end < 0 {
+		end = len(trimmed)
+	}
+	command := trimmed[:end]
+	if at := strings.LastIndexByte(command, '@'); at >= 0 && strings.EqualFold(command[at+1:], botUsername) {
+		start := len(text) - len(trimmed)
+		return text[:start+at] + trimmed[end:]
+	}
+	return text
 }
 
 // enrichWithQuotedMessage prepends the one message the sender explicitly

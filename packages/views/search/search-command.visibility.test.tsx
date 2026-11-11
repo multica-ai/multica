@@ -1,13 +1,13 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { QueryClientProvider, focusManager } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { useSearchStore } from "@multica/core/command-bar";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 import { useInboxUnreadCount } from "@multica/core/inbox/queries";
 import { onInboxSummaryInvalidate } from "@multica/core/inbox/ws-updaters";
 import { createQueryClient } from "@multica/core/query-client";
 import { SearchCommand } from "./search-command";
-import { useSearchStore } from "./search-store";
 import enSearch from "../locales/en/search.json";
 import enLayout from "../locales/en/layout.json";
 import enProjects from "../locales/en/projects.json";

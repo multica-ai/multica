@@ -134,6 +134,9 @@
     "issue_actions": "Issue actions"
   },
   "delete": {
+    "failed_title": "Could not delete issue",
+    "permission_denied": "You don't have permission to delete this issue.",
+    "failed": "The issue could not be deleted. Please try again.",
     "title": "Delete issue?",
     "message": "{{identifier}} and its comments, reactions, and attachments will be permanently deleted. This cannot be undone."
   },

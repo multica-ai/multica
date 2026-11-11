@@ -1,4 +1,16 @@
-import type { ActorFilterValue, FilterSnapshot } from "../issues/stores/view-store";
+import type {
+  ActorFilterValue,
+  FilterSnapshot,
+  IssueRelationFilter,
+  NegatableFilterDimension,
+} from "../issues/stores/view-store";
+import {
+  DUE_DATE_FILTERS,
+  ISSUE_RELATION_FILTERS,
+  NEGATABLE_FILTER_DIMENSIONS,
+  type DueDateFilter,
+} from "../issues/stores/view-store";
+import { countAdvancedConditions, sanitizeAdvancedFilter } from "../issues/stores/filter-tree";
 import type { IssuePriority, IssueStatus, ProjectStatus, PropertyFilterValue } from "../types";
 import { isKnownPropertyFilterOp, isPropertyOperatorFilter, propertyFilterValueKey } from "../types";
 import { PRIORITY_DISPLAY_ORDER } from "../issues/config";
@@ -24,6 +36,12 @@ export interface IssueViewBaseline {
   includeNoProject: boolean;
   projectStatus: Set<string>;
   label: Set<string>;
+  relation: Set<string>;
+  dueDate: Set<string>;
+  /** Dimensions the view saved as "is not". */
+  negated: Set<NegatableFilterDimension>;
+  agentRunning: boolean;
+  unread: boolean;
   /** Property definition id → fixed member keys (`propertyFilterValueKey`). */
   property: Map<string, Set<string>>;
   /** Enum-sanitized snapshot, safe to hand straight to `resetFiltersTo`. */
@@ -86,8 +104,29 @@ export function baselineFromQuery(query: Record<string, unknown>): IssueViewBase
     (s): s is ProjectStatus => (PROJECT_STATUS_ORDER as readonly string[]).includes(s),
   );
   const labelFilters = stringArray(query.labelFilters);
+  const relationFilters = stringArray(query.relationFilters).filter(
+    (r): r is IssueRelationFilter => (ISSUE_RELATION_FILTERS as readonly string[]).includes(r),
+  );
+  const dueDateFilters = [
+    ...new Set(
+      stringArray(query.dueDateFilters).filter((d): d is DueDateFilter =>
+        (DUE_DATE_FILTERS as readonly string[]).includes(d),
+      ),
+    ),
+  ];
+  const advancedFilter = sanitizeAdvancedFilter(query.advancedFilter);
+  const negatedFilters = [
+    ...new Set(
+      stringArray(query.negatedFilters).filter(
+        (d): d is NegatableFilterDimension =>
+          (NEGATABLE_FILTER_DIMENSIONS as readonly string[]).includes(d),
+      ),
+    ),
+  ];
   const includeNoAssignee = query.includeNoAssignee === true;
   const includeNoProject = query.includeNoProject === true;
+  const agentRunningFilter = query.agentRunningFilter === true;
+  const unreadFilter = query.unreadFilter === true;
 
   const propertyFilters: Record<string, PropertyFilterValue[]> = {};
   const property = new Map<string, Set<string>>();
@@ -113,6 +152,11 @@ export function baselineFromQuery(query: Record<string, unknown>): IssueViewBase
     includeNoProject,
     projectStatus: new Set(projectStatusFilters),
     label: new Set(labelFilters),
+    relation: new Set(relationFilters),
+    dueDate: new Set(dueDateFilters),
+    negated: new Set(negatedFilters),
+    agentRunning: agentRunningFilter,
+    unread: unreadFilter,
     property,
     raw: {
       statusFilters,
@@ -124,7 +168,35 @@ export function baselineFromQuery(query: Record<string, unknown>): IssueViewBase
       includeNoProject,
       projectStatusFilters,
       labelFilters,
+      relationFilters,
+      dueDateFilters,
+      negatedFilters,
       propertyFilters,
+      advancedFilter,
+      agentRunningFilter,
+      unreadFilter,
     },
   };
+}
+
+/** How many filter dimensions a saved query constrains, for summaries. */
+export function issueViewFilterCount(query: Record<string, unknown>): number {
+  const { raw } = baselineFromQuery(query);
+  return (
+    [
+      raw.statusFilters.length,
+      raw.priorityFilters.length,
+      raw.assigneeFilters.length || raw.includeNoAssignee,
+      raw.creatorFilters.length,
+      raw.projectFilters.length || raw.includeNoProject,
+      raw.projectStatusFilters.length,
+      raw.labelFilters.length,
+      raw.relationFilters.length,
+      raw.dueDateFilters.length,
+      raw.agentRunningFilter,
+      raw.unreadFilter,
+    ].filter(Boolean).length +
+    Object.keys(raw.propertyFilters).length +
+    countAdvancedConditions(raw.advancedFilter)
+  );
 }

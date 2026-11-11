@@ -17,7 +17,6 @@ import { api, dispatchReasonCode } from "@multica/core/api";
 import {
   isAgentRuntimeBound as hasAgentRuntime,
   useAgentPresenceDetail,
-  useCustomizeConversationStartersHref,
   useWorkspaceAgentAvailability,
 } from "@multica/core/agents";
 import {
@@ -209,6 +208,8 @@ export function useChatController(opts?: { isActive?: boolean; intentSessionId?:
   const wsId = useWorkspaceId();
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
+  const quickChatAgentId = useChatStore((s) => s.quickChatAgentId);
+  const newChatSource = useChatStore((s) => s.newChatSource);
   const selectedProjectId = useChatStore((s) => s.selectedProjectId);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
@@ -329,7 +330,7 @@ export function useChatController(opts?: { isActive?: boolean; intentSessionId?:
   const setSessionProject = useSetChatSessionProject();
   const setArchived = useSetChatSessionArchived();
 
-  const { data: workspaces = [], isSuccess: workspacesLoaded } = useQuery(workspaceListOptions());
+  const { data: workspaces = [], isSuccess: workspacesLoaded, isError: workspacesError } = useQuery(workspaceListOptions());
   const workspace = workspaces.find((item) => item.id === wsId);
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
@@ -357,9 +358,10 @@ export function useChatController(opts?: { isActive?: boolean; intentSessionId?:
     : null;
   const isAgentArchived = !!sessionAgent?.archived_at;
 
-  const resolutionSessionId = activeSessionId ?? opts?.intentSessionId ?? null;
+  const resolutionSessionId = opts?.intentSessionId ?? activeSessionId;
+  const pendingIntent = !!opts?.intentAgentId || (!!opts?.intentSessionId && opts.intentSessionId !== activeSessionId);
   const resolutionSession = sessions.find((session) => session.id === resolutionSessionId);
-  const activeAgent = resolveChatAgent({
+  const activeAgent = pendingIntent ? null : resolveChatAgent({
     agents,
     availableAgents,
     agentsSettled: agentsLoaded && membersLoaded,
@@ -367,6 +369,9 @@ export function useChatController(opts?: { isActive?: boolean; intentSessionId?:
     sessionAgentId: resolutionSession?.agent_id ?? null,
     explicitAgentId: opts?.intentAgentId,
     selectedAgentId,
+    quickChatAgentId,
+    isAskChat: newChatSource === "ask",
+    workspaceSettled: workspacesLoaded || workspacesError,
     defaultAgentId: workspacesLoaded ? workspaceDefaultChatAgentId(workspace?.settings) : null,
   });
   const isAgentRuntimeBound = !!activeAgent && hasAgentRuntime(activeAgent);
@@ -379,18 +384,10 @@ export function useChatController(opts?: { isActive?: boolean; intentSessionId?:
   // composer goes read-only up front instead of after the user types
   // (MUL-6380). Same rule the server enforces, via the shared predicate.
   const isAgentAccessRevoked =
-    !!activeAgent && !canAssignAgent(activeAgent, user?.id, memberRole);
-
-  // "Customize" under the starter buttons in the empty state — the only place
-  // that admits those buttons are configuration. Resolved here so the full
-  // page and the floating window cannot disagree about who sees it.
-  const customizeConversationStartersHref = useCustomizeConversationStartersHref(
-    activeAgent,
-    wsId,
-  );
+    agentsSettled && !!activeAgent && !canAssignAgent(activeAgent, user?.id, memberRole);
 
   const agentAvailability = useWorkspaceAgentAvailability();
-  const noAgent = agentAvailability === "none";
+  const noAgent = agentsLoaded && membersLoaded && agentAvailability === "none";
 
   const projectContextSupport = useChatProjectContextSupport(wsId, activeAgent);
 
@@ -504,8 +501,8 @@ export function useChatController(opts?: { isActive?: boolean; intentSessionId?:
       commitInput?: (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => void,
       draftAttachments: Attachment[] = [],
     ): Promise<boolean> => {
-      if (!activeAgent) {
-        apiLogger.warn("sendChatMessage skipped: no active agent");
+      if (getCurrentWsId() !== wsId || !agentsLoaded || !membersLoaded || !activeAgent) {
+        apiLogger.warn("sendChatMessage skipped: target is unavailable");
         return false;
       }
       // Read-only conversation: the agent is retired and can no longer pick up
@@ -570,8 +567,8 @@ export function useChatController(opts?: { isActive?: boolean; intentSessionId?:
         );
         return false;
       }
-      if (!sessionId) {
-        apiLogger.warn("sendChatMessage aborted: ensureSession returned null");
+      if (!sessionId || getCurrentWsId() !== wsId) {
+        apiLogger.warn("sendChatMessage aborted: compose workspace changed or session unavailable");
         return false;
       }
 
@@ -641,6 +638,9 @@ export function useChatController(opts?: { isActive?: boolean; intentSessionId?:
       // hasn't navigated away mid-send. See isStillOnComposeTarget. commitInput
       // clears the sent draft, and scrubs the shared editor only when the user
       // is still on the session they sent from.
+      // Acknowledgements can arrive after workspace rehydration. Retain the
+      // source draft instead of clearing the destination workspace's slot.
+      if (getCurrentWsId() !== wsId) return false;
       const live = useChatStore.getState();
       const stillOnSourceSession = isStillOnComposeTarget(live.activeSessionId, activeSessionId);
       if (stillOnSourceSession) {
@@ -673,6 +673,9 @@ export function useChatController(opts?: { isActive?: boolean; intentSessionId?:
       return true;
     },
     [
+      wsId,
+      agentsLoaded,
+      membersLoaded,
       activeSessionId,
       activeAgent,
       isAgentArchived,
@@ -858,7 +861,6 @@ export function useChatController(opts?: { isActive?: boolean; intentSessionId?:
     isAgentAccessRevoked,
     isAgentRuntimeBound,
     activeAgent,
-    customizeConversationStartersHref,
     noAgent,
     availability,
     // messages
