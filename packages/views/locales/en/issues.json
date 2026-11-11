@@ -543,6 +543,8 @@
     "unsubscribe": "Unsubscribe",
     "delegated_subscription_badge": "Watching via agent",
     "delegated_subscription_hint": "Your agent created this issue on your behalf, so you're subscribed to it. You'll get notified when it needs review, finishes, or gets stuck.",
+    "project_subscription_badge": "Via project",
+    "project_subscription_hint": "You're subscribed to every issue in this project. Unsubscribing here stops notifications for this issue only.",
     "unsubscribe_this": "Unsubscribe from this issue",
     "unsubscribe_subtree": "Unsubscribe from this issue and its sub-issues",
     "unsubscribe_subtree_failed": "Could not unsubscribe from the sub-issues. Please try again.",

@@ -111,6 +111,9 @@ export function useSetProjectSubscription() {
       api.setProjectSubscription(id, subscribed),
     onSuccess: (subscribed, { id }) => {
       qc.setQueryData(projectKeys.subscription(wsId, id), subscribed);
+      // Issue subscriber lists include project subscribers, so any open issue
+      // of this project may have just gained or lost the caller.
+      qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
     },
   });
 }

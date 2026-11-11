@@ -830,6 +830,10 @@
         "label": "優先度と期限",
         "description": "フォロー中のタスクの優先度や期限が変わったとき"
       },
+      "new_issues": {
+        "label": "新しいタスク",
+        "description": "購読中のプロジェクトでタスクが作成されたとき"
+      },
       "agent_activity": {
         "label": "エージェントのアクティビティ",
         "description": "エージェントの実行が失敗したとき"

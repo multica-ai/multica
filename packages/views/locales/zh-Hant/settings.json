@@ -830,6 +830,10 @@
         "label": "優先順序與截止日期",
         "description": "你訂閱的任務優先順序或截止日期變更時"
       },
+      "new_issues": {
+        "label": "新任務",
+        "description": "你訂閱的專案中有新任務建立時"
+      },
       "agent_activity": {
         "label": "AI 代理活動",
         "description": "AI 代理執行失敗時"

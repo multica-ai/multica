@@ -830,6 +830,10 @@
         "label": "优先级与截止日期",
         "description": "你订阅的任务优先级或截止日期变更时"
       },
+      "new_issues": {
+        "label": "新任务",
+        "description": "你订阅的项目中有新任务创建时"
+      },
       "agent_activity": {
         "label": "智能体活动",
         "description": "智能体运行失败时"

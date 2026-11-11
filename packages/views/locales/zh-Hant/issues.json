@@ -536,6 +536,8 @@
     "unsubscribe": "取消訂閱",
     "delegated_subscription_badge": "由 AI 代理代你關注",
     "delegated_subscription_hint": "你的 AI 代理代你建立了這個任務，因此你在關注它。待評審、完成或受阻時會通知你。",
+    "project_subscription_badge": "透過專案訂閱",
+    "project_subscription_hint": "你訂閱了這個專案的全部任務。在這裡取消訂閱只會停止這個任務的通知。",
     "unsubscribe_this": "取消訂閱此任務",
     "unsubscribe_subtree": "取消訂閱此任務及其子任務",
     "unsubscribe_subtree_failed": "取消訂閱子任務失敗，請重試。",

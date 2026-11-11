@@ -839,6 +839,10 @@
         "label": "Priority & Due date",
         "description": "When priority or due date changes on issues you follow"
       },
+      "new_issues": {
+        "label": "New issues",
+        "description": "When an issue is created in a project you subscribe to"
+      },
       "agent_activity": {
         "label": "Agent activity",
         "description": "When an agent run fails"

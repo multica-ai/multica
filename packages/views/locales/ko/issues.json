@@ -536,6 +536,8 @@
     "unsubscribe": "구독 해제",
     "delegated_subscription_badge": "에이전트를 통해 구독 중",
     "delegated_subscription_hint": "에이전트가 회원님을 대신해 이 태스크를 만들었기 때문에 구독 중입니다. 검토 필요, 완료, 차단 시 알림을 받습니다.",
+    "project_subscription_badge": "프로젝트를 통해 구독 중",
+    "project_subscription_hint": "이 프로젝트의 모든 태스크를 구독 중입니다. 여기서 구독을 해제하면 이 태스크의 알림만 중지됩니다.",
     "unsubscribe_this": "이 태스크 구독 해제",
     "unsubscribe_subtree": "이 태스크와 하위 태스크 구독 해제",
     "unsubscribe_subtree_failed": "하위 태스크 구독 해제에 실패했습니다. 다시 시도해 주세요.",
